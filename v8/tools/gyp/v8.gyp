@@ -38,7 +38,7 @@
             }, {
               'toolsets': ['target'],
             }],
-            ['v8_use_snapshot=="true"', {
+            ['v8_use_snapshot=="true" and v8_target_arch!="mipsel"', {
               'dependencies': ['v8_snapshot'],
             },
             {
@@ -561,7 +561,7 @@
                 '../../src/ia32/stub-cache-ia32.cc',
               ],
             }],
-            ['v8_target_arch=="mips"', {
+            ['v8_target_arch=="mipsel"', {
               'sources': [
                 '../../src/mips/assembler-mips.cc',
                 '../../src/mips/assembler-mips.h',
