@@ -5,7 +5,12 @@
 # found in the LICENSE file.
 
 export ANDROID_EABI_TOOLCHAIN=$ANDROID_BUILD_TOP/prebuilts/gcc/linux-x86/arm/arm-linux-androideabi-4.6/bin
-export ANDROID_TOOLCHAIN=$ANDROID_EABI_TOOLCHAIN
+
+# MIPS on mips-master
+export ANDROID_MIPS_TOOLCHAIN=$ANDROID_BUILD_TOP/prebuilts/gcc/linux-x86/mips/mipsel-linux-android-4.6/bin
+
+# plind, make this conditional
+export ANDROID_TOOLCHAIN=$ANDROID_MIPS_TOOLCHAIN
 
 # Sets up environment for building Chromium for Android.
 if [ -z "$ANDROID_BUILD_TOP" -o -z "$ANDROID_TOOLCHAIN" -o \
@@ -166,6 +171,10 @@ case "${TARGET_PRODUCT}" in
   "full")
     DEFINES+=" target_arch=arm"
     DEFINES+=" arm_neon=0 armv7=0 arm_thumb=1 arm_fpu=vfp"
+    ;;
+  "full_mips")
+    DEFINES+=" target_arch=mipsel"
+    DEFINES+=""
     ;;
   *x86*)
     # TODO(tedbo): The ia32 build fails on ffmpeg, so we disable it here.

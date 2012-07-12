@@ -845,7 +845,7 @@
         ],
       }],
 
-      ['os_posix==1 and chromeos==0 and target_arch!="arm"', {
+      ['os_posix==1 and chromeos==0 and target_arch!="arm" and target_arch!="mipsel"', {
         'use_cups%': 1,
       }, {
         'use_cups%': 0,
@@ -2182,7 +2182,8 @@
             'ldflags': [
               '-nostdlib',
               '-Wl,--no-undefined',
-              '-Wl,--icf=safe',  # Enable identical code folding to reduce size
+	      # plind, remove the icf flag for mips .... unconditionally now, fix this later...........
+              #'-Wl,--icf=safe',  # Enable identical code folding to reduce size
               # Don't export symbols from statically linked libraries.
               '-Wl,--exclude-libs=ALL',
             ],
@@ -2238,6 +2239,11 @@
                   ['target_arch=="ia32"', {
                     'ldflags': [
                       '-L<(android_ndk_root)/sources/cxx-stl/stlport/libs/x86',
+                    ],
+                  }],
+                  ['target_arch=="mipsel"', {
+                    'ldflags': [
+                      '-L<(android_ndk_root)/sources/cxx-stl/stlport/libs/mips',
                     ],
                   }],
                 ],
