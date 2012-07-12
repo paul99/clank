@@ -1,0 +1,14 @@
+/* Don't apply tablet styles to TVDPI devices */
+@media only screen and (-webkit-min-device-pixel-ratio: 1.35),
+       only screen and (-webkit-max-device-pixel-ratio: 1.30) {
+  body[device="tablet"] .favicon-cell {
+    height: 120px;
+    width: 98px;
+    padding-left: 36px;
+    padding-right: 36px;
+  }
+  body[device="tablet"] #bookmarks_title_wrapper .title-crumb {
+    margin: 0 25px;
+  }
+}
+
