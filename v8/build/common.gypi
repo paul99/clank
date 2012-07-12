@@ -80,7 +80,7 @@
     # it's handled in build/standalone.gypi.
     'want_separate_host_toolset%': 1,
 
-    'v8_use_snapshot%': 'true',
+    'v8_use_snapshot%': 'false',
     'host_os%': '<(OS)',
     'v8_use_liveobjectlist%': 'false',
     'werror%': '-Werror',
@@ -159,7 +159,7 @@
               'V8_TARGET_ARCH_IA32',
             ],
           }],
-          ['v8_target_arch=="mips"', {
+          ['v8_target_arch=="mipsel"', {
             'defines': [
               'V8_TARGET_ARCH_MIPS',
             ],
