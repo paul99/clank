@@ -385,6 +385,11 @@
             'base/cpu_features_arm.cc',
           ],
         }],
+        [ 'target_arch == "mipsel"', {
+          'sources': [
+            'base/cpu_features_mips.cc',
+          ],
+        }],
       ],
       'sources': [
         'base/cpu_features.h',
@@ -408,6 +413,11 @@
         [ 'target_arch == "arm"', {
           'dependencies': [
             'yuv_convert_simd_arm',
+          ],
+        }],
+        [ 'target_arch == "mipsel"', {
+          'dependencies': [
+            'yuv_convert_simd_mips',
           ],
         }],
       ],
@@ -532,6 +542,23 @@
     },
     {
       'target_name': 'yuv_convert_simd_arm',
+      'type': 'static_library',
+      'include_dirs': [
+        '..',
+      ],
+      'sources': [
+        'base/simd/convert_rgb_to_yuv_c.cc',
+        'base/simd/convert_rgb_to_yuv.h',
+        'base/simd/convert_yuv_to_rgb_c.cc',
+        'base/simd/convert_yuv_to_rgb.h',
+        'base/simd/filter_yuv.h',
+        'base/simd/filter_yuv_c.cc',
+        'base/simd/yuv_to_rgb_table.cc',
+        'base/simd/yuv_to_rgb_table.h',
+      ],
+    },
+    {
+      'target_name': 'yuv_convert_simd_mips',
       'type': 'static_library',
       'include_dirs': [
         '..',
@@ -782,7 +809,7 @@
         },
       ],
     }],
-    ['OS == "linux" and target_arch != "arm"', {
+    ['OS == "linux" and target_arch != "arm" and target_arch != "mipsel"', {
       'targets': [
         {
           'target_name': 'tile_render_bench',

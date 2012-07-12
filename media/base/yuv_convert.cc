@@ -445,6 +445,9 @@ void ConvertRGB32ToYUV(const uint8* rgbframe,
     // For ARM processors, always use C version.
     // TODO(hclam): Implement a NEON version.
     convert_proc = &ConvertRGB32ToYUV_C;
+#elif defined(ARCH_CPU_MIPS_FAMILY)
+    // For MIPS processors, always use C version.
+    convert_proc = &ConvertRGB32ToYUV_C;
 #else
     // TODO(hclam): Switch to SSSE3 version when the cyan problem is solved.
     // See: crbug.com/100462
@@ -469,6 +472,9 @@ void ConvertRGB24ToYUV(const uint8* rgbframe,
                        int ystride,
                        int uvstride) {
 #if defined(ARCH_CPU_ARM_FAMILY)
+  ConvertRGB24ToYUV_C(rgbframe, yplane, uplane, vplane, width, height,
+                      rgbstride, ystride, uvstride);
+#elif defined(ARCH_CPU_MIPS_FAMILY)
   ConvertRGB24ToYUV_C(rgbframe, yplane, uplane, vplane, width, height,
                       rgbstride, ystride, uvstride);
 #else
