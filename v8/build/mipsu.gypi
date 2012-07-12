@@ -28,6 +28,6 @@
 {
   'variables': {
     'target_arch': 'ia32',
-    'v8_target_arch': 'mips',
+    'v8_target_arch': 'mipsel',
   },
 }
