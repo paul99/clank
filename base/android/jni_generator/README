@@ -1,0 +1,7 @@
+This directory contains tools (with tests) for generating JNI bindings.
+golden_sample_for_tests_jni.h is a golden file, checked in so that the
+tests can ensure the generator is working properly.
+
+sample_for_tests.cc and JavaSampleForTests.java are samples that are
+used to test the generator end-to-end and compile the generated code
+in a native executable.
