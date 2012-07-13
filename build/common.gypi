@@ -704,7 +704,8 @@
         'variables': {
           'variables': {
             'android_ndk_root%': '<!(/bin/echo -n $ANDROID_NDK_ROOT)',
-            'android_target_arch%': 'arm',  # target_arch in android terms.
+	    # plind HACK ... this was hard-coded arm, see what happens here.............................................
+            'android_target_arch%': 'mips',  # target_arch in android terms.
             # Switch between different build types, currently only '0' is
             # supported.
             'android_build_type%': 0,
