@@ -2205,9 +2205,8 @@
             ],
             'include_dirs': [
                # TODO(jscholler): Needed for dependency on utils/Functor.h
-	       # plind: utils/Functor.h moved from frameworks/base to frameworks/native.
                '<(android_src)/system/core/include',
-               '<(android_src)/frameworks/native/include',
+               '<(android_src)/frameworks/base/include',
             ],
             'conditions': [
               ['android_build_type==0', {
