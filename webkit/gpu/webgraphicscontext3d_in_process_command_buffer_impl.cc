@@ -44,9 +44,7 @@
 #if defined(OS_ANDROID)
 // Since we are using the system GL headers on Android, we also need the
 // following header for CHROMIUM/ANGLE extension token definitions.
-
-// plind HACK - causes symbol re-definitions, omit this file.
-// #include "gpu/command_buffer/service/gl_utils.h"
+#include "gpu/command_buffer/service/gl_utils.h"
 #endif
 
 using gpu::Buffer;
