@@ -141,8 +141,8 @@ void ProgramManager::ProgramInfo::Update() {
     GLenum type = 0;
     glGetActiveUniform(
         service_id_, ii, max_len, &length, &size, &type, name_buffer.get());
-    DCHECK(max_len == 0 || length < max_len);
-    DCHECK(length == 0 || name_buffer[length] == '\0');
+    // DCHECK(max_len == 0 || length < max_len);
+    // DCHECK(length == 0 || name_buffer[length] == '\0');
     // TODO(gman): Should we check for error?
     if (!IsInvalidPrefix(name_buffer.get(), length)) {
       GLint location =  glGetUniformLocation(service_id_, name_buffer.get());
