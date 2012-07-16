@@ -123,8 +123,14 @@ inline double ReadReal(const SerializeObject* obj) {
   const void* tmp = NULL;
   int length = 0;
   ReadData(obj, &tmp, &length);
-  if (tmp && length > 0 && length >= static_cast<int>(sizeof(0.0)))
-    return *static_cast<const double*>(tmp);
+  if (tmp && length > 0 && length >= static_cast<int>(sizeof(0.0))) {
+    // The original pointer de-reference exposes double alignment problems on
+    // mips. TODO(plind): implement more optimal copy; make this arch-specific.
+    // return *static_cast<const double*>(tmp);
+    double value;
+    memcpy(&value, tmp, sizeof(double));
+    return value;
+  }
   else
     return 0.0;
 }
