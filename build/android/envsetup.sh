@@ -25,7 +25,7 @@ host_os=$(uname -s | sed -e 's/Linux/linux/;s/Darwin/mac/')
 export TOP="$ANDROID_BUILD_TOP"
 
 # We export "ANDROID_NDK_ROOT" for building Chromium for Android by NDK.
-export ANDROID_NDK_ROOT=${ANDROID_BUILD_TOP}/prebuilts/ndk/android-ndk-r8
+export ANDROID_NDK_ROOT=${ANDROID_BUILD_TOP}/prebuilts/ndk/android-ndk-r8b
 
 # Find the root of the clank sources. The first try assumes that clank is
 # embedded inside an Android checkout. The second assumes that the android
@@ -154,7 +154,7 @@ ORDER_DEFINES="order_text_section=./orderfiles/orderfile.out"
 # "full"'s TARGET_ARCH_VARIANT is "armv5te". So it needs to match the settings
 # in Android's armv5te.mk.
 case "${TARGET_PRODUCT}" in
-  "passion"|"soju"|"sojua"|"sojus"|"yakju"|"mysid")
+  "passion"|"soju"|"sojua"|"sojus"|"yakju"|"mysid"|"full_grouper"|"grouper")
     DEFINES+=" target_arch=arm"
     DEFINES+=" arm_neon=1 armv7=1 arm_thumb=1"
     DEFINES+=" ${ORDER_DEFINES}"
