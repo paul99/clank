@@ -6,8 +6,12 @@
 
 export ANDROID_EABI_TOOLCHAIN=$ANDROID_BUILD_TOP/prebuilts/gcc/linux-x86/arm/arm-linux-androideabi-4.6/bin
 
-# MIPS on mips-master
-export ANDROID_MIPS_TOOLCHAIN=$ANDROID_BUILD_TOP/prebuilts/gcc/linux-x86/mips/mipsel-linux-android-4.6/bin
+# MIPS on ics
+# WARNING: There is a build error when compiling Chrome/Clank in ICS with its included toolchain, 4.5.2.
+# You MUST use a 4.6 toolchain, which can be done by supplying an absolute path to the 4.6 toolchain in a
+# JB or mips-master, or aosp-master repo. Please fix the toolchain path below for your system.
+export ANDROID_MIPS_TOOLCHAIN=/path/to/jelly-bean/prebuilts/gcc/linux-x86/mips/mipsel-linux-android-4.6/bin
+
 
 # plind, make this conditional
 export ANDROID_TOOLCHAIN=$ANDROID_MIPS_TOOLCHAIN
@@ -30,7 +34,7 @@ host_os=$(uname -s | sed -e 's/Linux/linux/;s/Darwin/mac/')
 export TOP="$ANDROID_BUILD_TOP"
 
 # We export "ANDROID_NDK_ROOT" for building Chromium for Android by NDK.
-export ANDROID_NDK_ROOT=${ANDROID_BUILD_TOP}/prebuilt/ndk/android-ndk-r8
+export ANDROID_NDK_ROOT=${ANDROID_BUILD_TOP}/prebuilt/ndk/android-ndk-r8b
 
 # Find the root of the clank sources. The first try assumes that clank is
 # embedded inside an Android checkout. The second assumes that the android
