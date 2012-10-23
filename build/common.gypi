@@ -143,6 +143,9 @@
       # Set Neon compilation flags (only meaningful if armv7==1).
       'arm_neon%': 1,
 
+      # Default arch variant for MIPS.
+      'mips_arch_variant%': 'mips32r2',
+
       # The system root for cross-compiles. Default: none.
       'sysroot%': '',
 
@@ -418,6 +421,7 @@
     'python_ver%': '<(python_ver)',
     'armv7%': '<(armv7)',
     'arm_neon%': '<(arm_neon)',
+    'mips_arch_variant%': '<(mips_arch_variant)',
     'sysroot%': '<(sysroot)',
     'system_libdir%': '<(system_libdir)',
     'disable_sse2%': '<(disable_sse2)',
@@ -1942,6 +1946,20 @@
                         ],
                       }],
                     ],
+                  }],
+                ],
+              }],
+            ],
+          }],
+          ['target_arch=="mipsel"', {
+            'target_conditions': [
+              ['_toolset=="target"', {
+                'conditions': [
+                  ['mips_arch_variant=="mips32r2"', {
+                    'defines': ['_MIPS_ARCH_MIPS32R2',],
+                    'cflags': ['-mips32r2', '-Wa,-mips32r2'],
+                  }, {
+                    'cflags': ['-mips32', '-Wa,-mips32'],
                   }],
                 ],
               }],
