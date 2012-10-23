@@ -763,7 +763,7 @@
           }, {
             'linux_breakpad%': 0,
              # On Android, turn on assertions on non-official release builds.
-            'release_assertions%': 1,
+            'release_assertions%': 0,
           }],
         ],
         # Enable to use system sqlite.
