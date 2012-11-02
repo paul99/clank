@@ -450,7 +450,8 @@ const LogSeverity LOG_0 = LOG_ERROR;
 // uses OFFICIAL_BUILD and other platforms use the branding flag when NDEBUG is
 // defined.
 #if ( defined(OS_WIN) && defined(OFFICIAL_BUILD)) || \
-    (!defined(OS_WIN) && defined(NDEBUG) && defined(GOOGLE_CHROME_BUILD))
+    (!defined(OS_WIN) && defined(NDEBUG))
+// plind, hacked the line above to make a non-debug build for testing.
 #define LOGGING_IS_OFFICIAL_BUILD 1
 #else
 #define LOGGING_IS_OFFICIAL_BUILD 0
