@@ -54,6 +54,8 @@ const char kPnaclArch[] =
     "x86-64";
 #elif defined(ARCH_CPU_ARMEL)
     "arm";
+#elif defined(ARCH_CPU_MIPSEL)
+    "mips32";
 #else
 #error "Unknown Architecture in Pnacl Component Installer."
 #endif
