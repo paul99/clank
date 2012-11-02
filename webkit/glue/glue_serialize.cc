@@ -123,8 +123,17 @@ inline double ReadReal(const SerializeObject* obj) {
   const void* tmp = NULL;
   int length = 0;
   ReadData(obj, &tmp, &length);
-  if (tmp && length > 0 && length >= static_cast<int>(sizeof(0.0)))
+  if (tmp && length > 0 && length >= static_cast<int>(sizeof(0.0))) {
+#if defined(__MIPSEL__)
+    // Doubles must be 8-byte aligned for mips, which is not guaranteed
+    // here. Double was packed into pickle with memcpy, unpack same way.
+    double value;
+    memcpy(&value, tmp, sizeof(double));
+    return value;
+#else // All non-MIPS arch.
     return *static_cast<const double*>(tmp);
+#endif
+  }
   else
     return 0.0;
 }
