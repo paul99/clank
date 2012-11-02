@@ -115,6 +115,14 @@ BASE_EXPORT void CompleteLazyInstance(subtle::AtomicWord* state,
 
 }  // namespace internal
 
+// Allow preservation of object alignment in the lazy instance when using GCC.
+// __alignof__ is only defined for GCC > 4.2.
+#if defined(__GNUC__) && (__GNUC__ > 4 || (__GNUC__ == 4 && __GNUC_MINOR__ > 2))
+#define LAZY_ALIGN(T) __attribute__((aligned(__alignof__(T))))
+#else
+#define LAZY_ALIGN(T)
+#endif
+
 template <typename Type, typename Traits = DefaultLazyInstanceTraits<Type> >
 class LazyInstance {
  public:
@@ -187,7 +195,8 @@ class LazyInstance {
   // of |private_buf_| on 64 bit architectures. (This member must be first to
   // allow the syntax used in LAZY_INSTANCE_INITIALIZER to work correctly.)
   subtle::AtomicWord private_instance_;
-  int8 private_buf_[sizeof(Type)];  // Preallocated space for the Type instance.
+  // Preallocated space for the Type instance, preserving alignment of Type.
+  int8 private_buf_[sizeof(Type)]  LAZY_ALIGN(Type);
 
  private:
   Type* instance() {
@@ -204,6 +213,8 @@ class LazyInstance {
     subtle::Release_Store(&me->private_instance_, 0);
   }
 };
+
+#undef LAZY_ALIGN
 
 }  // namespace base
 
