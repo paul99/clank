@@ -333,6 +333,8 @@ const FilePath::StringType NaClIrtName() {
   // That may need to be based on the actual nexe rather than a static
   // choice, which would require substantial refactoring.
   return NACL_IRT_FILE_NAME("arm");
+#elif defined(ARCH_CPU_MIPSEL)
+  return NACL_IRT_FILE_NAME("mips32");
 #else
 #error Add support for your architecture to NaCl IRT file selection
 #endif
