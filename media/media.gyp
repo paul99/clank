@@ -385,6 +385,11 @@
             'base/cpu_features_arm.cc',
           ],
         }],
+        [ 'target_arch == "mipsel"', {
+          'sources': [
+            'base/cpu_features_mips.cc',
+          ],
+        }],
       ],
       'sources': [
         'base/cpu_features.h',
@@ -405,9 +410,9 @@
             'yuv_convert_simd_x86',
           ],
         }],
-        [ 'target_arch == "arm"', {
+        [ 'target_arch == "arm" or target_arch == "mipsel"', {
           'dependencies': [
-            'yuv_convert_simd_arm',
+            'yuv_convert_simd_c',
           ],
         }],
       ],
@@ -531,7 +536,7 @@
       ],
     },
     {
-      'target_name': 'yuv_convert_simd_arm',
+      'target_name': 'yuv_convert_simd_c',
       'type': 'static_library',
       'include_dirs': [
         '..',
@@ -782,7 +787,7 @@
         },
       ],
     }],
-    ['OS == "linux" and target_arch != "arm"', {
+    ['OS == "linux" and target_arch != "arm" and target_arch != "mipsel"', {
       'targets': [
         {
           'target_name': 'tile_render_bench',
