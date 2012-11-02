@@ -44,7 +44,11 @@
 #if defined(OS_ANDROID)
 // Since we are using the system GL headers on Android, we also need the
 // following header for CHROMIUM/ANGLE extension token definitions.
-#include "gpu/command_buffer/service/gl_utils.h"
+
+// TODO(plind) - Understand the purpose for below include file, which
+// causes lots of symbol re-defintiion errors (with -Werror). It's clear
+// that it was added intentionally, but breaks build for ARM & MIPS for me.
+// #include "gpu/command_buffer/service/gl_utils.h"
 #endif
 
 using gpu::Buffer;
