@@ -2205,7 +2205,7 @@
             'include_dirs': [
                # TODO(jscholler): Needed for dependency on utils/Functor.h
                '<(android_src)/system/core/include',
-               '<(android_src)/frameworks/base/include',
+               '<(android_src)/frameworks/native/include',
             ],
             'conditions': [
               ['android_build_type==0', {
