@@ -25,7 +25,7 @@ host_os=$(uname -s | sed -e 's/Linux/linux/;s/Darwin/mac/')
 export TOP="$ANDROID_BUILD_TOP"
 
 # We export "ANDROID_NDK_ROOT" for building Chromium for Android by NDK.
-export ANDROID_NDK_ROOT=${ANDROID_BUILD_TOP}/prebuilt/ndk/android-ndk-r8
+export ANDROID_NDK_ROOT=${ANDROID_BUILD_TOP}/prebuilts/ndk/8
 
 # Find the root of the clank sources. The first try assumes that clank is
 # embedded inside an Android checkout. The second assumes that the android
