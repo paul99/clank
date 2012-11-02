@@ -24,6 +24,11 @@ const void* const* StackTrace::Addresses(size_t* count) const {
   return NULL;
 }
 
+// MIPS does not have SIGSTKFLT, use SIGSEGV to get similar behavior.
+#ifdef __MIPSEL__
+#define SIGSTKFLT SIGSEGV
+#endif
+
 // Sends fake SIGSTKFLT signals to let the Android linker and debuggerd dump
 // stack. See inlined comments and Android bionic/linker/debugger.c and
 // system/core/debuggerd/debuggerd.c for details.
