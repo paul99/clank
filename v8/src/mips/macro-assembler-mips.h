@@ -844,11 +844,6 @@ class MacroAssembler: public Assembler {
   void DebugBreak();
 #endif
 
-  void InitializeRootRegister() {
-    ExternalReference roots_address =
-        ExternalReference::roots_address(isolate());
-    li(kRootRegister, Operand(roots_address));
-  }
 
   // -------------------------------------------------------------------------
   // Exception handling.
