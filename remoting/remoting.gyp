@@ -42,6 +42,11 @@
         'host_plugin_extension': 'arm.so',
         'host_plugin_prefix': 'lib',
       }],
+      ['os_posix == 1 and OS != "mac" and target_arch == "mipsel"', {
+        # linux mips
+        'host_plugin_extension': 'mipsel.so',
+        'host_plugin_prefix': 'lib',
+      }],
       ['OS=="win"', {
         'host_plugin_extension': 'dll',
         'host_plugin_prefix': '',
