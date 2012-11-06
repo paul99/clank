@@ -143,6 +143,9 @@
       # Set Neon compilation flags (only meaningful if armv7==1).
       'arm_neon%': 1,
 
+      # Default arch variant for MIPS.
+      'mips_arch_variant%': 'mips32r1',
+
       # The system root for cross-compiles. Default: none.
       'sysroot%': '',
 
@@ -421,6 +424,7 @@
     'python_ver%': '<(python_ver)',
     'armv7%': '<(armv7)',
     'arm_neon%': '<(arm_neon)',
+    'mips_arch_variant%': '<(mips_arch_variant)',
     'sysroot%': '<(sysroot)',
     'system_libdir%': '<(system_libdir)',
     'disable_sse2%': '<(disable_sse2)',
@@ -718,8 +722,10 @@
               ['target_arch == "ia32"', {
                 'android_target_arch': 'x86',
               }],
+              ['target_arch == "mipsel"', {
+                'android_target_arch': 'mips',
+              }],
             ],
-
             # Switch between different build types, currently only '0' is
             # supported.
             'android_build_type%': 0,
@@ -2006,6 +2012,20 @@
               }],
             ],
           }],
+          ['target_arch=="mipsel"', {
+            'target_conditions': [
+              ['_toolset=="target"', {
+                'conditions': [
+                  ['mips_arch_variant=="mips32r2"', {
+                    'defines': ['_MIPS_ARCH_MIPS32R2',],
+                    'cflags': ['-mips32r2', '-Wa,-mips32r2'],
+                  }, {
+                    'cflags': ['-mips32', '-Wa,-mips32'],
+                  }],
+                ],
+              }],
+            ],
+          }],
           ['linux_fpic==1', {
             'cflags': [
               '-fPIC',
@@ -2238,7 +2258,9 @@
             'ldflags': [
               '-nostdlib',
               '-Wl,--no-undefined',
-	      '-Wl,--icf=safe',  # Enable identical code folding to reduce size.
+	      # TODO(plind), remove icf flag unconditionally for now, make it
+	      # arch-dependent later. (this gold flag unsupported in mips ld).
+              #'-Wl,--icf=safe',  # Enable identical code folding to reduce size
               # Don't export symbols from statically linked libraries.
               '-Wl,--exclude-libs=ALL',
             ],
@@ -2306,6 +2328,11 @@
                   ['target_arch=="ia32"', {
                     'ldflags': [
                       '-L<(android_ndk_root)/sources/cxx-stl/stlport/libs/x86',
+                    ],
+                  }],
+                  ['target_arch=="mipsel"', {
+                    'ldflags': [
+                      '-L<(android_ndk_root)/sources/cxx-stl/stlport/libs/mips',
                     ],
                   }],
                 ],
