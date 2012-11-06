@@ -168,6 +168,10 @@ case "${TARGET_PRODUCT}" in
     DEFINES+=" target_arch=arm"
     DEFINES+=" arm_neon=0 armv7=0 arm_thumb=1 arm_fpu=vfp"
     ;;
+  "full_mips")
+    DEFINES+=" target_arch=mipsel"
+    DEFINES+=""
+    ;;
   *x86*)
     ANDROID_TARGET_ARCH=x86
     # TODO(tedbo): The ia32 build fails on ffmpeg, so we disable it here.
