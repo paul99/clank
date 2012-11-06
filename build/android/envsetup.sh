@@ -4,8 +4,7 @@
 # Use of this source code is governed by a BSD-style license that can be
 # found in the LICENSE file.
 
-export ANDROID_EABI_TOOLCHAIN=$ANDROID_BUILD_TOP/prebuilts/gcc/linux-x86/arm/arm-linux-androideabi-4.6/bin
-export ANDROID_TOOLCHAIN=$ANDROID_EABI_TOOLCHAIN
+# Inherit ANDROID_TOOLCHAIN from env, after TOP level: . build/envsetup; lunch
 
 # Sets up environment for building Chromium for Android.
 if [ -z "$ANDROID_BUILD_TOP" -o -z "$ANDROID_TOOLCHAIN" -o \
@@ -166,6 +165,10 @@ case "${TARGET_PRODUCT}" in
   "full")
     DEFINES+=" target_arch=arm"
     DEFINES+=" arm_neon=0 armv7=0 arm_thumb=1 arm_fpu=vfp"
+    ;;
+  "full_mips")
+    DEFINES+=" target_arch=mipsel"
+    DEFINES+=""
     ;;
   *x86*)
     # TODO(tedbo): The ia32 build fails on ffmpeg, so we disable it here.
