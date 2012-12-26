@@ -1924,6 +1924,10 @@
                     # The following flags are derived from what Android uses
                     # by default when building for arm.
                     'cflags': [ '-Wno-psabi', ],
+                    'cflags_cc': [
+                      '-Wno-c++0x-compat',
+                      '-Wno-error=attributes',
+                    ],
                     'conditions': [
                       ['arm_thumb == 1', {
                         # Android toolchain doesn't support -mimplicit-it=thumb
@@ -1960,6 +1964,10 @@
                   }, {
                     'cflags': ['-mips32', '-Wa,-mips32'],
                   }],
+                ],
+                'cflags_cc': [
+                  '-Wno-c++0x-compat',
+                  '-Wno-error=attributes',
                 ],
               }],
             ],
