@@ -1977,6 +1977,7 @@
                       # This started with the JRN10C roll. We should remove
                       # this flag once we know why the warning suddenly shows.
                       '-Wno-c++0x-compat',
+                      '-Wno-error=attributes',
                     ],
                     # Android now supports .relro sections properly.
                     # NOTE: While these flags enable the generation of .relro
@@ -2022,6 +2023,11 @@
                   }, {
                     'cflags': ['-mips32', '-Wa,-mips32'],
                   }],
+                ],
+                'cflags_cc': [
+                  '-Wno-c++0x-compat',
+                  '-Wno-error=attributes',
+                  '-Wno-error=delete-non-virtual-dtor',
                 ],
               }],
             ],
