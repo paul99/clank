@@ -46,6 +46,7 @@
               # TODO(torne): Might need to remove the temporary hacks to reduce
               # binsize.
               'ANDROID_BINSIZE_HACK',
+              'CHROME_SYMBOLS_LOCATION="<(chrome_symbols_location)"'
             ],
             'include_dirs': [
               # TODO(michaelbai): Needed for dependency on
@@ -66,4 +67,3 @@
     }],
   ],
 }
-

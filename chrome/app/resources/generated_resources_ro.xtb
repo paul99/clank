@@ -8,6 +8,12 @@
 <translation id="8130276680150879341">Deconectaţi reţeaua privată</translation>
 <translation id="1058418043520174283"><ph name="INDEX"/> din <ph name="COUNT"/></translation>
 <translation id="4480627574828695486">Deconectaţi acest cont...</translation>
+<translation id="2516632596252643567">&lt;p&gt;
+          Accesaţi chiar aici filele pe care le-aţi deschis pe computer.
+          &lt;/p&gt;
+          &lt;p&gt;
+          Deschideţi browserul Chrome pe computer, accesaţi meniul şi selectaţi „Conectaţi-vă la Chrome...”
+          &lt;/p&gt;</translation>
 <translation id="7040807039050164757">Doresc &amp;verificarea ortografiei în acest câmp</translation>
 <translation id="778579833039460630">Nu s-au primit date</translation>
 <translation id="8791923223854254330">Gestionaţi programele asociate...</translation>
@@ -1498,7 +1504,6 @@ a vă proteja confidenţialitatea.</translation>
 <translation id="6342069812937806050">Tocmai s-a finalizat</translation>
 <translation id="5605716740717446121">Cartela SIM va fi dezactivată definitiv dacă nu veţi putea introduce cheia corectă de deblocare a codului PIN. Încercări rămase: <ph name="TRIES_COUNT"/></translation>
 <translation id="8836712291807476944"><ph name="SAVED_BYTES"/>/<ph name="TOTAL_BYTES"/> (de) octeţi, întreruptă</translation>
-<translation id="3661943501691646627">&lt;p&gt; Accesaţi chiar aici filele pe care le-aţi deschis pe computer. &lt;/p&gt; &lt;p&gt; Deschideţi browserul Chrome pe computer, accesaţi meniul şi selectaţi „Conectaţi-vă la Chrome...” &lt;/p&gt; &lt;p&gt; Este destul de uimitor. &lt;/p&gt;</translation>
 <translation id="5502500733115278303">Importate din Firefox</translation>
 <translation id="569109051430110155">Detectare automată</translation>
 <translation id="4408599188496843485">&amp;Ajutor</translation>
@@ -2811,7 +2816,7 @@ directoare selectate</translation>
 <translation id="6503256918647795660">Tastatură franceză elveţiană</translation>
 <translation id="2498826285048723189">Extensia „<ph name="EXTENSION_NAME"/>” a fost eliminată în mod automat.</translation>
 <translation id="6175314957787328458">GUID domeniu Microsoft</translation>
-<translation id="8179976553408161302">Enter (Introduceți)</translation>
+<translation id="8179976553408161302">Intrați</translation>
 <translation id="691321796646552019">Încetează!</translation>
 <translation id="8261506727792406068">Ştergeţi</translation>
 <translation id="7800518121066352902">Rotiţi în sens &amp;invers acelor de ceasornic</translation>
@@ -3149,6 +3154,7 @@ directoare selectate</translation>
 <translation id="8241707690549784388">Pagina pe care o căutați a utilizat informațiile pe care le-ați introdus. Întoarcerea la acea pagină ar putea duce la repetarea oricărei acțiuni pe care ați realizat-o. Doriți să continuați?</translation>
 <translation id="5359419173856026110">Afişează rata de redare curentă a unei pagini, în cadre pe secundă, atunci când accelerarea hardware este activă.</translation>
 <translation id="4104163789986725820">E&amp;xportați...</translation>
+<translation id="5143814737375740231">Chrome pentru Android nu acceptă acest plugin.</translation>
 <translation id="2113479184312716848">Deschideţi &amp;fişierul...</translation>
 <translation id="3314617171364900239">Căutările de actualizări au eşuat în mod repetat pentru extensia „<ph name="EXTENSION_NAME"/>”.</translation>
 <translation id="4850458635498951714">Adăugaţi un dispozitiv</translation>

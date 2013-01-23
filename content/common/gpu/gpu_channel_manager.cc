@@ -140,6 +140,10 @@ void GpuChannelManager::SetNativeWindow(
       GpuSurfaceTracker::Get()->LookupSurfaceForRenderer(
           renderer_id, view_or_surface_id) : view_or_surface_id;
   if (iter != gpu_channels_.end()) {
+    if (!surface_id) {
+      LOG(WARNING) << "GpuChannelManager:SetNativeWindow can't find surface";
+      return;
+    }
     scoped_refptr<GpuChannel> channel = iter->second;
     channel->SetNativeWindow(surface_id, native_window);
   } else {

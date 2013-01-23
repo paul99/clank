@@ -8,6 +8,12 @@
 <translation id="8130276680150879341">Odspoji privatnu mrežu</translation>
 <translation id="1058418043520174283"><ph name="INDEX"/> od <ph name="COUNT"/></translation>
 <translation id="4480627574828695486">Odvoji ovaj račun...</translation>
+<translation id="2516632596252643567">&lt;p&gt;
+          Upravo ovdje pristupite otvorenim karticama na računalu.
+          &lt;/p&gt;
+          &lt;p&gt;
+          Samo otvorite Chrome na svojem računalu, posjetite izbornik i odaberite &quot;Prijava na Chrome...&quot;
+          &lt;/p&gt;</translation>
 <translation id="7040807039050164757">&amp;Provjeri pravopis u ovom polju</translation>
 <translation id="778579833039460630">Nema primljenih podataka</translation>
 <translation id="8791923223854254330">Upravljanje rukovateljima...</translation>
@@ -1446,7 +1452,6 @@
 <translation id="6342069812937806050">Samo sad</translation>
 <translation id="5605716740717446121">Vaša SIM kartica bit će trajno onemogućena ako ne možete unijeti točan ključ za otključavanje PIN-a. Preostalih pokušaja: <ph name="TRIES_COUNT"/></translation>
 <translation id="8836712291807476944"><ph name="SAVED_BYTES"/> / <ph name="TOTAL_BYTES"/> bajtova, s prekidom</translation>
-<translation id="3661943501691646627">&lt;p&gt; Upravo ovdje pristupite otvorenim karticama na računalu. &lt;/p&gt; &lt;p&gt; Na računalu samo otvorite Chrome, idite do izbornika alata i odaberite &quot;Prijava u Chrome...&quot; &lt;/p&gt; &lt;p&gt;Prilično nevjerojatno. &lt;/p&gt;</translation>
 <translation id="5502500733115278303">Uvezeno iz Firefoxa</translation>
 <translation id="569109051430110155">Automatsko otkrivanje</translation>
 <translation id="4408599188496843485">P&amp;omoć</translation>
@@ -1906,7 +1911,7 @@
 <translation id="8871696467337989339">Koristite nepodržanu oznaku naredbenog retka: <ph name="BAD_FLAG"/>. Ugrožena je stabilnost i sigurnost.</translation>
 <translation id="4767443964295394154">Lokacija za preuzimanje</translation>
 <translation id="5031870354684148875">O Google Prevoditelju</translation>
-<translation id="720658115504386855">Slova nisu osjetljiva na veličinu</translation>
+<translation id="720658115504386855">Ne razlikuje velika i mala slova</translation>
 <translation id="8263744495942430914">Stranica <ph name="FULLSCREEN_ORIGIN"/> onemogućila je pokazivač miša.</translation>
 <translation id="2454247629720664989">Ključna riječ</translation>
 <translation id="3950820424414687140">Prijava</translation>
@@ -3077,6 +3082,7 @@
 <translation id="8241707690549784388">Stranica koju ste tražili koristila je podatke koje ste unijeli. Vraćanje na tu stranicu može dovesti do ponavljanja poduzete radnje. Želite li nastaviti?</translation>
 <translation id="5359419173856026110">Pokazuje stvarnu frekvenciju okvira, u okvirima u sekundi, kada je hardversko ubrzanje aktivno.</translation>
 <translation id="4104163789986725820">I&amp;zvoz...</translation>
+<translation id="5143814737375740231">Chrome za Android ne podržava ovaj dodatak.</translation>
 <translation id="2113479184312716848">Open &amp;File... (Otvori datoteku...)</translation>
 <translation id="3314617171364900239">Provjere ažuriranja za proširenje &quot;<ph name="EXTENSION_NAME"/>&quot; u više su navrata bile neuspješne.</translation>
 <translation id="4850458635498951714">Dodavanje uređaja</translation>

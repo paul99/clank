@@ -14,6 +14,7 @@
 #include "clank/native/framework/chrome/chrome_native_preferences.h"
 #include "clank/native/framework/chrome/glui_functor_renderer.h"
 #include "clank/native/framework/chrome/google_auto_login.h"
+#include "clank/native/framework/chrome/google_location_settings_helper.h"
 #include "clank/native/framework/chrome/gpu_profiler.h"
 #include "clank/native/framework/chrome/infobar_android.h"
 #include "clank/native/framework/chrome/instant_tab.h"
@@ -38,6 +39,7 @@ static RegistrationMethod kRegistrationMethods[] = {
     { "ChromeTabModel", RegisterTabModel },
     { "GLUIRender", RegisterGLUIFunctorRenderer },
     { "GoogleAutoLogin", RegisterGoogleAutoLogin },
+    { "GoogleLocationSettingsHelper", RegisterGoogleLocationSettingsHelper },
     { "GpuProfiler", RegisterGpuProfiler },
     { "InfoBarContainer", RegisterInfoBarContainer },
     { "InstantTab", RegisterInstantTab },

@@ -1321,7 +1321,7 @@ const char kNTPMostVisitedPinnedURLs[] = "ntp.pinned_urls";
 const char kNTPPromoResourceCache[] = "ntp.promo_resource_cache";
 
 // Last time of update of promo_resource_cache.
-const char kNTPPromoResourceCacheUpdate[] = "ntp.promo_resource_cache_update";
+const char kNtpPromoResourceCacheUpdate[] = "ntp.promo_resource_cache_update";
 
 // Is user logged into G+ (used for G+ extension promo).
 const char kNTPPromoIsLoggedInToPlus[] = "ntp.promo_is_logged_in_to_plus";
@@ -1350,44 +1350,53 @@ const char kNTPCustomLogoStart[] = "ntp.alt_logo_start";
 const char kNTPCustomLogoEnd[] = "ntp.alt_logo_end";
 
 // The promo resource service version number.
-const char kNTPPromoVersion[] = "ntp.promo_version";
+const char kNtpPromoVersion[] = "ntp.promo_version";
 
 // The last locale the promo was fetched for.
-const char kNTPPromoLocale[] = "ntp.promo_locale";
+const char kNtpPromoLocale[] = "ntp.promo_locale";
 
 // Whether promo should be shown to Dev builds, Beta and Dev, or all builds.
-const char kNTPPromoBuild[] = "ntp.promo_build";
+const char kNtpPromoBuild[] = "ntp.promo_build";
 
 // True if user has explicitly closed the promo line.
-const char kNTPPromoClosed[] = "ntp.promo_closed";
+const char kNtpPromoClosed[] = "ntp.promo_closed";
 
 // Users are randomly divided into 100 groups in order to slowly roll out
 // special promos.
-const char kNTPPromoGroup[] = "ntp.promo_group";
+const char kNtpPromoGroup[] = "ntp.promo_group";
+
+// Number of promo groups (buckets).
+const char kNtpPromoNumGroups[] = "ntp.promo_num_groups";
+
+// Initial segment of the groups to show the promo to.
+const char kNtpPromoInitialSegment[] = "ntp.promo_initial_segment";
+
+// Number of additional segments to show this promo to every time slice.
+const char kNtpPromoIncrement[] = "ntp.promo_increment";
 
 // Amount of time each promo group should be shown a promo that is being slowly
-// rolled out, in hours.
-const char kNTPPromoGroupTimeSlice[] = "ntp.promo_group_timeslice";
+// rolled out, in seconds.
+const char kNtpPromoGroupTimeSlice[] = "ntp.promo_group_timeslice";
 
 // Number of groups to roll out this promo to.
-const char kNTPPromoGroupMax[] = "ntp.promo_group_max";
+const char kNtpPromoGroupMax[] = "ntp.promo_group_max";
 
 // Number of views of this promo.
-const char kNTPPromoViews[] = "ntp.promo_views";
+const char kNtpPromoViews[] = "ntp.promo_views";
 
 // Max number of views of this promo.
-const char kNTPPromoViewsMax[] = "ntp.promo_views_max";
+const char kNtpPromoViewsMax[] = "ntp.promo_views_max";
 
 // Target platform for this promo.
-const char kNTPPromoPlatform[] = "ntp.promo_platform";
+const char kNtpPromoPlatform[] = "ntp.promo_platform";
 
 // Promo line from server.
-const char kNTPPromoLine[] = "ntp.promo_line";
+const char kNtpPromoLine[] = "ntp.promo_line";
 
 // Dates between which the NTP should show a promotional line downloaded
 // from the promo server.
-const char kNTPPromoStart[] = "ntp.promo_start";
-const char kNTPPromoEnd[] = "ntp.promo_end";
+const char kNtpPromoStart[] = "ntp.promo_start";
+const char kNtpPromoEnd[] = "ntp.promo_end";
 
 // A randomly generated group created to control the number of users we show the
 // sync promo to on the NTP.
@@ -1395,6 +1404,12 @@ const char kNTPSignInPromoGroup[] = "ntp.sign_in_promo.group";
 
 // The maximum allowable group that can be shown the sync promotion on the NTP.
 const char kNTPSignInPromoGroupMax[] = "ntp.sign_in_promo.group_max";
+
+// True if this promo should only be shown to G+ users.
+const char kNtpPromoGplusRequired[] = "ntp.gplus_required";
+
+// True if a desktop sync session was found for this user.
+const char kNtpPromoDesktopSessionFound[] = "ntp.promo_desktop_session_found";
 
 // Boolean indicating whether the web store is active for the current locale.
 const char kNTPWebStoreEnabled[] = "ntp.webstore_enabled";

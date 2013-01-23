@@ -8,6 +8,7 @@ import os
 import sys
 
 from base_test_runner import BaseTestRunner
+import constants
 import debug_info
 import legacy_browser_run_perftest
 import run_tests_helper
@@ -281,25 +282,9 @@ class SingleTestRunner(BaseTestRunner):
     self.test_package.tool.CopyFiles()
     test_data = self.GetDataFilesForTestSuite()
     if test_data and not self.fast_and_loose:
-      # Due to the large size of certain test data, we use sdcard to store the
-      # test data and create symbolic links to map them to data/local/tmp/.
       links = []
       for data in test_data:
-        self.CopyTestData([data], '/sdcard/')
-        link_name = os.path.dirname(data)
-        if not link_name:
-          raise Exception('Test resource should be under a dir.')
-        else:
-          link_name = link_name.split('/')[0]
-        assert link_name
-        if link_name not in links:
-          mapped_device_path = '/data/local/tmp/' + link_name
-          # Unlink the mapped_device_path at first in case it was mapped to
-          # a wrong path. Add option '-r' becuase the old path could be a dir.
-          self.adb.RunShellCommand('rm -r %s' %  mapped_device_path)
-          self.adb.RunShellCommand(
-              'ln -s /sdcard/%s %s' % (link_name, mapped_device_path))
-          links += [link_name]
+        self.CopyTestData([data], constants.TEST_DATA_DIR)
 
   def RunTestsWithFilter(self):
     """Runs a tests via a small, temporary shell script."""

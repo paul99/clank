@@ -21,7 +21,7 @@ def RunCmd(args, cwd=None):
   return p.wait()
 
 
-def GetCmdOutput(args, cwd=None):
+def GetCmdOutput(args, cwd=None, shell=False):
   """Open a subprocess to execute a program and returns its output.
 
   Args:
@@ -32,7 +32,7 @@ def GetCmdOutput(args, cwd=None):
   """
   logging.info(str(args) + ' ' + (cwd or ''))
   p = subprocess.Popen(args=args, cwd=cwd, stdout=subprocess.PIPE,
-                       stderr=subprocess.PIPE)
+                       stderr=subprocess.PIPE, shell=shell)
   stdout, stderr = p.communicate()
   if stderr:
     logging.critical(stderr)

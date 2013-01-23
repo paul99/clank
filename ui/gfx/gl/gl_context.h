@@ -66,6 +66,7 @@ class GL_EXPORT GLContext : public base::RefCounted<GLContext> {
       GpuPreference gpu_preference);
 
   static bool LosesAllContextsOnContextLost();
+  static bool LosesRendererOnContextLost();
 
   static bool SupportsDualGpus();
 

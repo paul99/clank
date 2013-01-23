@@ -19,6 +19,7 @@
 #include "content/browser/site_instance_impl.h"
 #include "content/common/content_export.h"
 #include "content/public/browser/notification_observer.h"
+#include "content/public/common/page_transition_types.h"
 #include "content/public/common/stop_find_action.h"
 #include "content/public/common/window_container_type.h"
 #include "net/base/load_states.h"
@@ -527,6 +528,12 @@ class CONTENT_EXPORT RenderViewHost : public RenderWidgetHost {
     return session_storage_namespace_.get();
   }
 
+  MediaPlayerDelegateAndroid* media_player_delegate() {
+    return media_player_delegate_;
+  }
+
+  virtual void WasCrashedForReload() const OVERRIDE;
+
   // NOTE: Do not add functions that just send an IPC message that are called in
   // one or two places.  Have the caller send the IPC message directly.
 
@@ -598,6 +605,7 @@ class CONTENT_EXPORT RenderViewHost : public RenderWidgetHost {
   void OnMsgShouldIgnoreNavigation(const GURL& url,
                                    const content::Referrer& referrer,
                                    WindowOpenDisposition disposition,
+                                   content::PageTransition transition_type,
                                    int64 source_frame_id,
                                    bool* result);
 #endif
@@ -749,8 +757,8 @@ class CONTENT_EXPORT RenderViewHost : public RenderWidgetHost {
   bool unload_ack_is_for_cross_site_transition_;
 
 #if defined(OS_ANDROID)
-  // A media player delegate object for handling fullscreen video
-  scoped_ptr<MediaPlayerDelegateAndroid> media_player_delegate_;
+  // A media player delegate object for handling video IPCs
+  MediaPlayerDelegateAndroid* media_player_delegate_;
 #endif
 
   bool are_javascript_messages_suppressed_;

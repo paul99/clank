@@ -82,6 +82,8 @@ bool GpuCommandBufferStub::OnMessageReceived(const IPC::Message& message) {
       command_buffer_->SetParseError(gpu::error::kLostContext);
       if (gfx::GLContext::LosesAllContextsOnContextLost())
         channel_->LoseAllContexts();
+      if (gfx::GLContext::LosesRendererOnContextLost())
+        LoseRenderer();
       return false;
     }
   }
@@ -328,10 +330,12 @@ void GpuCommandBufferStub::OnSetParent(int32 parent_route_id,
 void GpuCommandBufferStub::OnGetState(IPC::Message* reply_message) {
   if (command_buffer_.get()) {
     gpu::CommandBuffer::State state = command_buffer_->GetState();
-    if (state.error == gpu::error::kLostContext &&
-        gfx::GLContext::LosesAllContextsOnContextLost())
-      channel_->LoseAllContexts();
-
+    if (state.error == gpu::error::kLostContext) {
+      if (gfx::GLContext::LosesAllContextsOnContextLost())
+        channel_->LoseAllContexts();
+      if (gfx::GLContext::LosesRendererOnContextLost())
+        LoseRenderer();
+    }
     GpuCommandBufferMsg_GetState::WriteReplyParams(reply_message, state);
   } else {
     DLOG(ERROR) << "no command_buffer.";
@@ -354,9 +358,12 @@ void GpuCommandBufferStub::OnGetStateFast(IPC::Message* reply_message) {
   TRACE_EVENT0("gpu", "GpuCommandBufferStub::OnGetStateFast");
   DCHECK(command_buffer_.get());
   gpu::CommandBuffer::State state = command_buffer_->GetState();
-  if (state.error == gpu::error::kLostContext &&
-      gfx::GLContext::LosesAllContextsOnContextLost())
-    channel_->LoseAllContexts();
+  if (state.error == gpu::error::kLostContext) {
+    if (gfx::GLContext::LosesAllContextsOnContextLost())
+      channel_->LoseAllContexts();
+    if (gfx::GLContext::LosesRendererOnContextLost())
+      LoseRenderer();
+  }
 
   GpuCommandBufferMsg_GetStateFast::WriteReplyParams(reply_message, state);
   Send(reply_message);
@@ -500,14 +507,21 @@ void GpuCommandBufferStub::DeleteAllStreamTextures() {
 #endif  // defined(OS_ANDROID)
 void GpuCommandBufferStub::ReportState() {
   gpu::CommandBuffer::State state = command_buffer_->GetState();
-  if (state.error == gpu::error::kLostContext &&
-      gfx::GLContext::LosesAllContextsOnContextLost()) {
-    channel_->LoseAllContexts();
+  if (state.error == gpu::error::kLostContext) {
+    if (gfx::GLContext::LosesAllContextsOnContextLost())
+      channel_->LoseAllContexts();
+    if (gfx::GLContext::LosesRendererOnContextLost())
+      LoseRenderer();
   } else {
     IPC::Message* msg = new GpuCommandBufferMsg_UpdateState(route_id_, state);
     msg->set_unblock(true);
     Send(msg);
   }
+}
+
+void GpuCommandBufferStub::LoseRenderer() {
+  channel_->gpu_channel_manager()->Send(new GpuHostMsg_LoseRenderer(
+      surface_id_));
 }
 
 void GpuCommandBufferStub::OnCreateVideoDecoder(

@@ -12,64 +12,60 @@ class MediaPlayerListener implements
     MediaPlayer.OnBufferingUpdateListener,
     MediaPlayer.OnSeekCompleteListener,
     MediaPlayer.OnVideoSizeChangedListener,
-    MediaPlayer.OnErrorListener,
-    MediaPlayer.OnInfoListener {
+    MediaPlayer.OnErrorListener {
     // Used to determine the class instance to dispatch the native call to.
-    private int mNativeMediaPlayerBridge = 0;
+    private int mNativeMediaPlayerListener = 0;
 
-    /* Do not change these values without updating their counterparts
-     * in include/media/mediaplayer.h!
-     * TODO(tedbo): These should be shared with ChromeVideoView.java
-     */
-    private static final int MEDIA_NOP = 0; // interface test message
-    private static final int MEDIA_PREPARED = 1;
-    private static final int MEDIA_PLAYBACK_COMPLETE = 2;
-    private static final int MEDIA_BUFFERING_UPDATE = 3;
-    private static final int MEDIA_SEEK_COMPLETE = 4;
-    private static final int MEDIA_SET_VIDEO_SIZE = 5;
-    private static final int MEDIA_ERROR = 100;
-    private static final int MEDIA_INFO = 200;
-
-    MediaPlayerListener(int nativeMediaPlayerBridge) {
-        mNativeMediaPlayerBridge = nativeMediaPlayerBridge;
-    }
-
-    @Override
-    public boolean onInfo(MediaPlayer mp, int what, int extra) {
-        nativeNotify(mNativeMediaPlayerBridge, MEDIA_INFO, what, extra);
-        return true;
+    MediaPlayerListener(int nativeMediaPlayerListener) {
+        mNativeMediaPlayerListener = nativeMediaPlayerListener;
     }
 
     @Override
     public boolean onError(MediaPlayer mp, int what, int extra) {
-        nativeNotify(mNativeMediaPlayerBridge, MEDIA_ERROR, what, extra);
+        nativeOnMediaError(mNativeMediaPlayerListener, what);
         return true;
     }
 
     @Override
     public void onVideoSizeChanged(MediaPlayer mp, int width, int height) {
-        nativeNotify(mNativeMediaPlayerBridge, MEDIA_SET_VIDEO_SIZE, width, height);
+        nativeOnVideoSizeChanged(mNativeMediaPlayerListener, width, height);
      }
 
     @Override
     public void onSeekComplete(MediaPlayer mp) {
-        nativeNotify(mNativeMediaPlayerBridge, MEDIA_SEEK_COMPLETE, 0, 0);
+        nativeOnSeekComplete(mNativeMediaPlayerListener);
      }
 
     @Override
     public void onBufferingUpdate(MediaPlayer mp, int percent) {
-        nativeNotify(mNativeMediaPlayerBridge, MEDIA_BUFFERING_UPDATE, percent, 0);
+        nativeOnBufferingUpdate(mNativeMediaPlayerListener, percent);
      }
 
     @Override
     public void onCompletion(MediaPlayer mp) {
-        nativeNotify(mNativeMediaPlayerBridge, MEDIA_PLAYBACK_COMPLETE, 0, 0);
+        nativeOnPlaybackComplete(mNativeMediaPlayerListener);
      }
 
     @Override
     public void onPrepared(MediaPlayer mp) {
-        nativeNotify(mNativeMediaPlayerBridge, MEDIA_PREPARED, 0, 0);
+        nativeOnMediaPrepared(mNativeMediaPlayerListener);
     }
 
-    private native void nativeNotify(int mediaPlayerBridge, int msg, int ext1, int ext2);
+    private native void nativeOnMediaError(
+            int nativeMediaPlayerListener,
+            int errorType);
+
+    private native void nativeOnVideoSizeChanged(
+            int nativeMediaPlayerListener,
+            int width, int height);
+
+    private native void nativeOnBufferingUpdate(
+            int nativeMediaPlayerListener,
+            int percent);
+
+    private native void nativeOnMediaPrepared(int nativeMediaPlayerListener);
+
+    private native void nativeOnPlaybackComplete(int nativeMediaPlayerListener);
+
+    private native void nativeOnSeekComplete(int nativeMediaPlayerListener);
 }

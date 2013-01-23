@@ -482,6 +482,10 @@ class CONTENT_EXPORT RenderWidgetHost : public IPC::Channel::Listener,
   static void AcknowledgeSwapBuffers(int32 route_id, int gpu_host_id);
   static void AcknowledgePostSubBuffer(int32 route_id, int gpu_host_id);
 
+  // Request the page to be reloaded after the renderer was crashed
+  // intentionally.
+  virtual void WasCrashedForReload() const {}
+
  protected:
   // Internal implementation of the public Forward*Event() methods.
   void ForwardInputEvent(const WebKit::WebInputEvent& input_event,
@@ -616,8 +620,6 @@ class CONTENT_EXPORT RenderWidgetHost : public IPC::Channel::Listener,
   void OnMsgUnlockMouse();
 
 #if defined(OS_POSIX) || defined(USE_AURA)
-  void OnMsgGetScreenInfo(gfx::NativeViewId view,
-                          WebKit::WebScreenInfo* results);
   void OnMsgGetWindowRect(gfx::NativeViewId window_id, gfx::Rect* results);
   void OnMsgGetRootWindowRect(gfx::NativeViewId window_id, gfx::Rect* results);
 #endif

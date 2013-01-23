@@ -8,6 +8,12 @@
 <translation id="8130276680150879341">Disconnetti rete privata</translation>
 <translation id="1058418043520174283"><ph name="INDEX"/> di <ph name="COUNT"/></translation>
 <translation id="4480627574828695486">Disconnetti questo account...</translation>
+<translation id="2516632596252643567">&lt;p&gt;
+          Accedi alle schede che hai aperto sul computer direttamente qui.
+          &lt;/p&gt;
+          &lt;p&gt;
+          Apri Chrome sul computer, apri il menu e seleziona &quot;Accedi a Chrome...&quot;
+          &lt;/p&gt;</translation>
 <translation id="7040807039050164757">&amp;Verifica l'ortografia in questo campo</translation>
 <translation id="778579833039460630">Nessun dato ricevuto</translation>
 <translation id="8791923223854254330">Gestisci gestori...</translation>
@@ -1449,7 +1455,6 @@
 <translation id="6342069812937806050">In questo momento</translation>
 <translation id="5605716740717446121">La scheda SIM verrà definitivamente disabilitata se non sei in grado di inserire il codice di sblocco PIN corretto. Tentativi rimasti: <ph name="TRIES_COUNT"/>.</translation>
 <translation id="8836712291807476944"><ph name="SAVED_BYTES"/>/<ph name="TOTAL_BYTES"/> byte, interrotto</translation>
-<translation id="3661943501691646627">&lt;p&gt;Accedi alle schede che hai aperto sul computer direttamente qui. &lt;/p&gt; &lt;p&gt; Apri Chrome sul computer, apri il menu e seleziona &quot;Accedi a Chrome...&quot;. &lt;/p&gt; &lt;p&gt; È fantastico. &lt;/p&gt;</translation>
 <translation id="5502500733115278303">Importati da Firefox</translation>
 <translation id="569109051430110155">Rileva automaticamente</translation>
 <translation id="4408599188496843485">G&amp;uida</translation>
@@ -3071,6 +3076,7 @@
 <translation id="8241707690549784388">La pagina a cui stai tentando di accedere utilizzava informazioni inserite da te. Tornando a quella pagina, è possibile che eventuali azioni che hai eseguito vengano ripetute. Continuare?</translation>
 <translation id="5359419173856026110">Mostra la frequenza fotogrammi effettiva di una pagina, in fotogrammi al secondo, quando l'accelerazione hardware è attiva.</translation>
 <translation id="4104163789986725820">E&amp;sporta...</translation>
+<translation id="5143814737375740231">Chrome per Android non supporta questo plug-in.</translation>
 <translation id="2113479184312716848">Apri &amp;file...</translation>
 <translation id="3314617171364900239">Ripetuti controlli della disponibilità di aggiornamenti non riusciti per l'estensione &quot;<ph name="EXTENSION_NAME"/>&quot;.</translation>
 <translation id="4850458635498951714">Aggiungi un dispositivo</translation>

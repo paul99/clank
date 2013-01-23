@@ -42,15 +42,12 @@
 #include "client/linux/android_ucontext.h"
 #endif
 #include "client/linux/crash_generation/crash_generation_client.h"
+#include "client/linux/handler/minidump_descriptor.h"
 #include "client/linux/minidump_writer/minidump_writer.h"
 #include "google_breakpad/common/minidump_format.h"
 #include "processor/scoped_ptr.h"
 
-struct sigaction;
-
 namespace google_breakpad {
-
-class ExceptionHandler;
 
 // ExceptionHandler
 //
@@ -71,7 +68,7 @@ class ExceptionHandler;
 // use different minidump callbacks for different call sites.
 //
 // In either case, a callback function is called when a minidump is written,
-// which receives the unqiue id of the minidump.  The caller can use this
+// which receives the unique id of the minidump.  The caller can use this
 // id to collect and write additional application state, and to launch an
 // external crash-reporting application.
 //
@@ -81,7 +78,7 @@ class ExceptionHandler {
  public:
   // A callback function to run before Breakpad performs any substantial
   // processing of an exception.  A FilterCallback is called before writing
-  // a minidump.  context is the parameter supplied by the user as
+  // a minidump.  |context| is the parameter supplied by the user as
   // callback_context when the handler was created.
   //
   // If a FilterCallback returns true, Breakpad will continue processing,
@@ -106,7 +103,7 @@ class ExceptionHandler {
   // should normally return the value of |succeeded|, or when they wish to
   // not report an exception of handled, false.  Callbacks will rarely want to
   // return true directly (unless |succeeded| is true).
-  typedef bool (*MinidumpCallback)(const char *dump_path,
+  typedef bool (*MinidumpCallback)(const MinidumpDescriptor& descriptor,
                                    const char *minidump_id,
                                    void *context,
                                    bool succeeded);
@@ -133,6 +130,14 @@ class ExceptionHandler {
                    void *callback_context,
                    bool install_handler);
 
+  // Same as above, but provides a writable file descriptor instead of a path
+  // where to write the minidump.
+  ExceptionHandler(int minidump_fd,
+                   FilterCallback filter,
+                   MinidumpCallback callback,
+                   void *callback_context,
+                   bool install_handler);
+
   // Creates a new ExceptionHandler instance that can attempt to
   // perform out-of-process dump generation if server_fd is valid. If
   // server_fd is invalid, in-process dump generation will be
@@ -150,8 +155,8 @@ class ExceptionHandler {
   std::string dump_path() const { return dump_path_; }
   void set_dump_path(const std::string &dump_path) {
     dump_path_ = dump_path;
-    dump_path_c_ = dump_path_.c_str();
     UpdateNextID();
+    minidump_descriptor_ = MinidumpDescriptor(next_minidump_path_c_);
   }
 
   void set_crash_handler(HandlerCallback callback) {
@@ -195,10 +200,13 @@ class ExceptionHandler {
                       size_t file_offset);
 
  private:
+  // Save the old signal handlers and install new ones.
+  static bool InstallHandlersLocked();
+  // Restore the old signal handlers.
+  static void RestoreHandlersLocked();
+
   void Init(const std::string &dump_path,
             const int server_fd);
-  bool InstallHandlers();
-  void UninstallHandlers();
   void PreresolveSymbols();
   bool GenerateDump(CrashContext *context);
   void SendContinueSignalToChild();
@@ -224,9 +232,16 @@ class ExceptionHandler {
   // Pointers to C-string representations of the above. These are set
   // when the above are set so we can avoid calling c_str during
   // an exception.
-  const char* dump_path_c_;
   const char* next_minidump_path_c_;
   const char* next_minidump_id_c_;
+
+  MinidumpDescriptor minidump_descriptor_;
+
+  // Duplicate of the file descriptor used to write the minidump.
+  // Used in the case where a FD is used (as opposed to a path).
+  // This is needed as generating the minidump closes the FD, and we might
+  // still want to write to the minidump extra-information.
+  int minidump_fd_duplicate_;
 
   const bool handler_installed_;
   void* signal_stack;  // the handler stack.
@@ -237,11 +252,7 @@ class ExceptionHandler {
   // registered in this stack.
   static std::vector<ExceptionHandler*> *handler_stack_;
   // The index of the handler that should handle the next exception.
-  static unsigned handler_stack_index_;
   static pthread_mutex_t handler_stack_mutex_;
-
-  // A vector of the old signal handlers.
-  std::vector<std::pair<int, struct sigaction *> > old_handlers_;
 
   // We need to explicitly enable ptrace of parent processes on some
   // kernels, but we need to know the PID of the cloned process before we

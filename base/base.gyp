@@ -446,7 +446,7 @@
           ],
           'include_dirs': [
             '<(android_src)/frameworks/base/include',
-            '<(android_src)/dalvik/libnativehelper/include', # Needed by AndroidRuntime.h
+            '<(android_src)/libnativehelper/include', # Needed by AndroidRuntime.h
             '<(SHARED_INTERMEDIATE_DIR)/base',
           ],
           'ldflags': [ # Huge hack to put a shlib before static libs

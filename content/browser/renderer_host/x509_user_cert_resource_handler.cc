@@ -27,7 +27,8 @@ X509UserCertResourceHandler::X509UserCertResourceHandler(
       read_buffer_(NULL),
       resource_buffer_(NULL),
       render_process_host_id_(render_process_host_id),
-      render_view_id_(render_view_id) {
+      render_view_id_(render_view_id),
+      is_pkcs12_(false) {
 }
 
 bool X509UserCertResourceHandler::OnUploadProgress(int request_id,
@@ -48,7 +49,16 @@ bool X509UserCertResourceHandler::OnRequestRedirected(
 bool X509UserCertResourceHandler::OnResponseStarted(
     int request_id,
     content::ResourceResponse* resp) {
+#if defined(OS_ANDROID)
+  if (resp->mime_type == "application/x-pkcs12") {
+    is_pkcs12_ = true;
+    return true;
+  }
+  return (resp->mime_type == "application/x-x509-user-cert" ||
+          resp->mime_type == "application/x-x509-ca-cert");
+#else
   return (resp->mime_type == "application/x-x509-user-cert");
+#endif  // OS_ANDROID
 }
 
 bool X509UserCertResourceHandler::OnWillStart(int request_id,
@@ -101,6 +111,13 @@ bool X509UserCertResourceHandler::OnResponseCompleted(
     return false;
 
   AssembleResource();
+#if defined(OS_ANDROID)
+  if (resource_buffer_ && content_length_ > 0) {
+    std::string cert_data(resource_buffer_->data(), content_length_);
+    content::GetContentClient()->browser()->AddNewCertificateAndroid(
+        request_, cert_data, is_pkcs12_);
+  }
+#else
   scoped_refptr<net::X509Certificate> cert;
   if (resource_buffer_) {
       cert = net::X509Certificate::CreateFromBytes(resource_buffer_->data(),
@@ -108,6 +125,7 @@ bool X509UserCertResourceHandler::OnResponseCompleted(
   }
   content::GetContentClient()->browser()->AddNewCertificate(
       request_, cert, render_process_host_id_, render_view_id_);
+#endif
   return true;
 }
 

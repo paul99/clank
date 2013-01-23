@@ -44,6 +44,8 @@
 #include <sys/types.h>
 #if !defined(__ANDROID__)
 #include <sys/user.h>
+#elif defined(__i386__)
+#include<linux/user.h>
 #endif
 
 #include "common/memory.h"
@@ -95,11 +97,21 @@ struct ThreadInfo {
 
 #if defined(__i386) || defined(__x86_64)
   user_regs_struct regs;
+// Android NDK has different names for user_fpregs_struct and
+// user_fpxregs_struct
+#if defined(__ANDROID__)
+  user_i387_struct fpregs;
+#else
   user_fpregs_struct fpregs;
+#endif
   static const unsigned kNumDebugRegisters = 8;
   debugreg_t dregs[8];
 #if defined(__i386)
+#if defined(__ANDROID__)
+  user_fxsr_struct fpxregs;
+#else
   user_fpxregs_struct fpxregs;
+#endif
 #endif  // defined(__i386)
 
 #elif defined(__ARM_EABI__)

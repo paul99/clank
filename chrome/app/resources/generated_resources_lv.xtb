@@ -8,6 +8,12 @@
 <translation id="8130276680150879341">Atvienot no privāta tīkla</translation>
 <translation id="1058418043520174283"><ph name="INDEX"/> no <ph name="COUNT"/></translation>
 <translation id="4480627574828695486">Atvienot šo kontu...</translation>
+<translation id="2516632596252643567">&lt;p&gt;
+          Tieši šeit piekļūstiet cilnēm, kas atvērtas datorā.
+          &lt;/p&gt;
+          &lt;p&gt;
+          Vienkārši atveriet pārlūkprogrammu Chrome savā datorā, atveriet izvēlni un atlasiet Pierakstīties pakalpojumā Chrome...
+          &lt;/p&gt;</translation>
 <translation id="7040807039050164757">Pārbaudī&amp;t pareizrakstību šajā laukā</translation>
 <translation id="778579833039460630">Dati nav saņemti</translation>
 <translation id="8791923223854254330">Pārvaldīt apdarinātājus...</translation>
@@ -1506,7 +1512,6 @@ Publiskais eksponents (<ph name="PUBLIC_EXPONENT_NUM_BITS"/> biti):
 <translation id="6342069812937806050">Tikko</translation>
 <translation id="5605716740717446121">Jūsu SIM karte tiks atslēgta, ja nevarēsit ievadīt pareizu PIN atguves atslēgu. Atlikušie mēģinājumi: <ph name="TRIES_COUNT"/></translation>
 <translation id="8836712291807476944"><ph name="SAVED_BYTES"/> / <ph name="TOTAL_BYTES"/> baiti, pārtraukts</translation>
-<translation id="3661943501691646627">&lt;p&gt; Tieši šeit piekļūstiet cilnēm, kas atvērtas datorā. &lt;/p&gt; &lt;p&gt; Vienkārši atveriet pārlūku Chrome savā datorā, atveriet izvēlni un atlasiet Pierakstīties pakalpojumā Chrome... &lt;/p&gt; &lt;p&gt; Tas ir lieliski! &lt;/p&gt;</translation>
 <translation id="5502500733115278303">Importēts no Firefox</translation>
 <translation id="569109051430110155">Automātiska noteikšana</translation>
 <translation id="4408599188496843485">P&amp;alīdzība</translation>
@@ -3159,6 +3164,7 @@ Lai tās atceltu, nospiediet Ctrl+Alt+Z.</translation>
 <translation id="8241707690549784388">Lapa, ko meklējāt, izmantoja jūsu ievadīto informāciju. Atgriešanās lapā var radīt jebkuras jūsu darbības atkārtojumu. Vai vēlaties turpināt?</translation>
 <translation id="5359419173856026110">Rāda lapas faktisko kadru ātrumu sekundē, ja ir aktivizēts aparatūras paātrinājums.</translation>
 <translation id="4104163789986725820">E&amp;ksportēt...</translation>
+<translation id="5143814737375740231">Pārlūkprogramma Chrome Android ierīcēm neatbalsta šo spraudni.</translation>
 <translation id="2113479184312716848">Atvērt failu...</translation>
 <translation id="3314617171364900239">Paplašinājuma <ph name="EXTENSION_NAME"/> atjauninājumu pārbaudes atkārtoti nav izdevušās.</translation>
 <translation id="4850458635498951714">Pievienot ierīci</translation>

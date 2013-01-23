@@ -2477,7 +2477,6 @@
             'browser/ui/webui/print_preview_ui_html_source_unittest.cc',
             'browser/ui/webui/print_preview_ui_unittest.cc',
             'browser/ui/webui/theme_source_unittest.cc',
-            'browser/web_resource/promo_resource_service_unittest.cc',
             'common/multi_process_lock_unittest.cc',
             # Compile errors with STL / gmock.
             'browser/themes/browser_theme_pack_unittest.cc',

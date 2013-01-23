@@ -233,6 +233,10 @@ void CrashHandlerHostLinux::OnFileCanReadWithoutBlocking(int fd) {
     return;
   }
 
+#if defined(OS_ANDROID)
+  // All supported Android versions (ICS and later) are Linux 3.0.1 or later,
+  // so the workaround below isn't needed.
+#else
   // Kernel bug workaround (broken in 2.6.30 and 2.6.32, working in 2.6.38).
   // The kernel doesn't translate PIDs in SCM_CREDENTIALS across PID
   // namespaces. Thus |crashing_pid| might be garbage from our point of view.
@@ -244,6 +248,7 @@ void CrashHandlerHostLinux::OnFileCanReadWithoutBlocking(int fd) {
   // calling sendmsg(). We can thus not reliably look for with with
   // FindProcessHoldingSocket(). But by necessity, it has to keep the
   // partner_fd open until the crashdump is complete.
+
   ino_t inode_number;
   if (!base::FileDescriptorGetInode(&inode_number, partner_fd)) {
     LOG(WARNING) << "Failed to get inode number for passed socket";
@@ -262,6 +267,7 @@ void CrashHandlerHostLinux::OnFileCanReadWithoutBlocking(int fd) {
   }
 
   crashing_pid = actual_crashing_pid;
+#endif
 
   // The crashing TID set inside the compromised context via
   // sys_gettid() in ExceptionHandler::HandleSignal might be wrong (if
@@ -358,7 +364,9 @@ void CrashHandlerHostLinux::WriteDumpFile(BreakpadInfo* info,
                          dumps_path.value().c_str(),
                          process_type_.c_str(),
                          rand);
-  if (!google_breakpad::WriteMinidump(minidump_filename.c_str(),
+  google_breakpad::MinidumpDescriptor minidump_descriptor(
+      minidump_filename.c_str());
+  if (!google_breakpad::WriteMinidump(minidump_descriptor,
                                       crashing_pid, crash_context,
                                       kCrashContextSize)) {
     LOG(ERROR) << "Failed to write crash dump for pid " << crashing_pid;

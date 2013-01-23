@@ -16,6 +16,8 @@ enum {
 
 #if defined(OS_ANDROID)
   kAndroidPropertyDescriptor = kPrimaryIPCChannel + 3,
+  kAndroidChromePakDescriptor = kPrimaryIPCChannel + 4,
+  kAndroidLocalePakDescriptor = kPrimaryIPCChannel + 5,
 #endif
 
 };

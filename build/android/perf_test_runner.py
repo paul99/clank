@@ -168,6 +168,28 @@ class PerfTestRunner(BaseTestRunner):
         CHROME_PACKAGE, CHROME_ACTIVITY, CHROME_CONSOLE_FORMAT_RE,
         url, expected_results, trace_tag=trace_tag, timeout=timeout) != None
 
+  def RunChromePerfTestResults(self, url, expected_results, trace_tag='', timeout=30):
+    """Runs a JavaScript based performance test on Chrome.
+
+    Same as RunChromePerfTest, except that this returns a list of results
+    in case of success, or None on failure.
+
+    Args:
+      url: The URL of the JavaScript performance test. The caller is responsible
+          for ensuring this URL is accessible on the phone (either by copying
+          locally or starting an HTTP server + forwarder).
+      expected_results: A list of tuple of (log_marker, chart_name, trace_name,
+          units).
+      trace_tag: An optional tag string to append to all trace_names.
+      timeout: The browser is killed after this many seconds of inactivity.
+
+    Returns:
+      True if the test ran successfully.
+    """
+    return self._RunPerfTest(
+        CHROME_PACKAGE, CHROME_ACTIVITY, CHROME_CONSOLE_FORMAT_RE,
+        url, expected_results, trace_tag=trace_tag, timeout=timeout)
+
   def RunChromeUrlCyclerPerfTest(self, urls, expected_results, trace_tag='',
                                  timeout=30):
     """Runs a page loading performance test on Chrome.
@@ -550,7 +572,17 @@ class PerfTestRunner(BaseTestRunner):
         m = self.WaitForLogMatchOrPackageCrash(result_re, browser_package, url)
         if not m:
           return None
-        result = m.group(1).split(',')
+        # For certain tests, the result is a list enclosed in braces, as in:
+        #  '{3.134553, 40389443}'; remove these if we find them before
+        # splitting, otherwise we'll get an error when converting result[0]
+        # to a float below. Same for angle brackets which also happen.
+        result = m.group(1)
+        if len(result) > 2:
+          if result[0] == '{' and result[-1] == '}':
+            result = result[1:-1]
+          elif result[0] == '[' and result[-1] == ']':
+            result = result[1:-1]
+        result = result.split(',')
         results.append(float(result[0]))
         if log_marker == SURFACE_FPS_MONITOR_START:
           surface_before = self.adb.GetSurfaceStats()

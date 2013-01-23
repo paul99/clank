@@ -310,6 +310,7 @@ class CONTENT_EXPORT RenderViewHostDelegate : public IPC::Channel::Listener {
       const GURL& url,
       const content::Referrer& referrer,
       WindowOpenDisposition disposition,
+      content::PageTransition transition_type,
       int64 source_frame_id);
 #endif
 
@@ -426,6 +427,10 @@ class CONTENT_EXPORT RenderViewHostDelegate : public IPC::Channel::Listener {
 
   // Notification that the view has lost the mouse lock.
   virtual void LostMouseLock() {}
+
+  // The renderer was crashed intentionally. This requests a reload after the
+  // crash was properly handled.
+  virtual void WasCrashedForReload() {}
 
  protected:
   virtual ~RenderViewHostDelegate() {}

@@ -8,6 +8,12 @@
 <translation id="8130276680150879341">Kilépés privát hálózatról</translation>
 <translation id="1058418043520174283"><ph name="COUNT"/>/<ph name="INDEX"/></translation>
 <translation id="4480627574828695486">Kilépés e fiókból...</translation>
+<translation id="2516632596252643567">&lt;p&gt;
+          Itt is hozzáférhet a számítógépen megnyitott lapokhoz.
+          &lt;/p&gt;
+          &lt;p&gt;
+          Ehhez elég elindítani a Chrome-ot a számítógépen, kiválasztani a menüt, majd a &quot;Bejelentkezés a Chrome-ba...&quot; lehetőséget.
+          &lt;/p&gt;</translation>
 <translation id="7040807039050164757">&amp;Helyesírás ellenőrzése ebben a mezőben</translation>
 <translation id="778579833039460630">Nincsenek fogadott adatok</translation>
 <translation id="8791923223854254330">Kezelők szerkesztése...</translation>
@@ -37,7 +43,7 @@
 <translation id="1526811905352917883">A kapcsolódást újból megkíséreltük SSL 3.0 protokoll használatával. Ez általában azt jelenti, hogy a szerver túl régi szoftvert használ, és más biztonsági problémák is előfordulhatnak.</translation>
 <translation id="1497897566809397301">Helyi adatok mentésének engedélyezése (javasolt)</translation>
 <translation id="3275778913554317645">Megnyitás ablakként</translation>
-<translation id="4553117311324416101">A Google véleménye szerint kártékony szoftverek kerülhetnek számítógépére, ha folytatja. Ha ezt a webhelyet mér korábban is felkereste, vagy megbízik a webhelyben, elképzelhető, hogy csak nemrég hackertámadás érte. Nem javasoljuk, hogy folytassa. Próbálja újra holnap, vagy menjen máshová.</translation>
+<translation id="4553117311324416101">A Google véleménye szerint kártékony szoftverek kerülhetnek számítógépére, ha folytatja. Ha ezt a webhelyet már korábban is felkereste, vagy megbízik a webhelyben, elképzelhető, hogy csak nemrég hackertámadás érte. Nem javasoljuk, hogy folytassa. Próbálja újra holnap, vagy menjen máshová.</translation>
 <translation id="509988127256758334">Mi&amp;t keres:</translation>
 <translation id="1420684932347524586">Ajjaj! Nem sikerült a véletlenszerű RSA privát kulcs generálása.</translation>
 <translation id="7323509342138776962">Utolsó szinkronizálás</translation>
@@ -1468,7 +1474,6 @@ adatok szinkronizálása az Ön Google Fiókjával folyamatban van.</translation
 <translation id="6342069812937806050">Éppen most</translation>
 <translation id="5605716740717446121">A SIM-kártya állandó jelleggel tiltásra kerül, ha nem tudja megadni a helyes PIN-feloldó kulcsot. Fennmaradó próbálkozások száma: <ph name="TRIES_COUNT"/></translation>
 <translation id="8836712291807476944"><ph name="TOTAL_BYTES"/>/<ph name="SAVED_BYTES"/> bájt, Megszakítva</translation>
-<translation id="3661943501691646627">&lt;p&gt; Itt is hozzáférhet a számítógépen megnyitott lapokhoz. &lt;/p&gt; &lt;p&gt; Ehhez elég elindítani a Chrome böngészőt a számítógépen, kiválasztani a menüt, majd a &quot;Bejelentkezés: Chrome...&quot; lehetőséget. &lt;/p&gt; &lt;p&gt; Ez nagyszerű. &lt;/p&gt;</translation>
 <translation id="5502500733115278303">A Firefox alkalmazásból importálva</translation>
 <translation id="569109051430110155">Automatikus felismerés</translation>
 <translation id="4408599188496843485">&amp;Súgó</translation>
@@ -2777,7 +2782,7 @@ adatok szinkronizálása az Ön Google Fiókjával folyamatban van.</translation
 <translation id="6503256918647795660">Svájci francia billentyűzet</translation>
 <translation id="2498826285048723189">A(z) &quot;<ph name="EXTENSION_NAME"/>&quot; bővítményt a rendszer automatikusan eltávolította.</translation>
 <translation id="6175314957787328458">Microsoft Domain GUID</translation>
-<translation id="8179976553408161302">Enter</translation>
+<translation id="8179976553408161302">Belépés</translation>
 <translation id="691321796646552019">Kikapcsolás</translation>
 <translation id="8261506727792406068">Törlés</translation>
 <translation id="7800518121066352902">Forgatás &amp;balra</translation>
@@ -3107,6 +3112,7 @@ adatok szinkronizálása az Ön Google Fiókjával folyamatban van.</translation
 <translation id="8241707690549784388">A keresett oldal a megadott információt használta. Ha visszatér arra az oldalra, akkor lehet, hogy az egyszer már megtett mozdulatok ismétlésre kerülnek. Mégis továbblép?</translation>
 <translation id="5359419173856026110">Megmutatja egy oldal aktuális képváltási frekvenciáját képkocka per másodpercben, amikor a hardveres gyorsítás aktív.</translation>
 <translation id="4104163789986725820">E&amp;xportálás...</translation>
+<translation id="5143814737375740231">A Chrome Androidra nem támogatja ezt a plug-int.</translation>
 <translation id="2113479184312716848">&amp;Fájl megnyitása...</translation>
 <translation id="3314617171364900239">A(z) &quot;<ph name="EXTENSION_NAME"/>&quot; bővítmény frissítésének ellenőrzése többször sem sikerült.</translation>
 <translation id="4850458635498951714">Eszköz hozzáadása</translation>

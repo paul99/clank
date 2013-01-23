@@ -44,6 +44,7 @@ bool RenderViewHostDelegate::ShouldIgnoreNavigation(
     const GURL& url,
     const content::Referrer& referrer,
     WindowOpenDisposition disposition,
+    content::PageTransition transition_type,
     int64 source_frame_id) {
   return false;
 }

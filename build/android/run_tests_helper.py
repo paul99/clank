@@ -17,6 +17,7 @@ import sys
 import traceback
 
 import cmd_helper
+import constants
 
 
 CHROME_PACKAGE = 'com.google.android.apps.chrome'
@@ -28,9 +29,7 @@ MUSIC_ACTIVITY = 'com.android.music.activitymanagement.TopLevelActivity'
 LEGACY_BROWSER_PACKAGE = 'com.google.android.browser'
 LEGACY_BROWSER_ACTIVITY = 'com.android.browser.BrowserActivity'
 
-# TODO(michaelbai): Move constant definitions like below to a common file.
-FORWARDER_PATH = '/data/local/tmp/forwarder'
-FAKE_DNS_PATH = '/data/local/tmp/fake_dns'
+FORWARDER_PATH = constants.TEST_EXECUTABLE_DIR + '/forwarder'
 
 CHROME_DIR = os.path.abspath(os.path.join(sys.path[0], '..', '..'))
 
@@ -189,22 +188,6 @@ def ForwardDevicePorts(adb, ports, host_name='127.0.0.1'):
   return subprocess.Popen(
       ['adb', '-s', adb._adb.GetSerialNumber(),
        'shell', '%s -D %s' % (FORWARDER_PATH, ' '.join(forward_string))])
-
-
-def StartFakeDns(adb):
-  """Starts the fake_dns server that replies all name queries 127.0.0.1.
-
-  Args:
-    adb: Instance of AndroidCommands for talking to the device.
-
-  Returns:
-    subprocess instance connected to the fake_dns process on the device.
-  """
-  adb.PushIfNeeded(
-      os.path.join(CHROME_DIR, 'out', 'Release', 'fake_dns'), FAKE_DNS_PATH)
-  return subprocess.Popen(
-      ['adb', '-s', adb._adb.GetSerialNumber(),
-       'shell', '%s -D' % FAKE_DNS_PATH])
 
 
 def IsHostPortUsed(host_port):

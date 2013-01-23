@@ -400,6 +400,10 @@ class GLES2DecoderTestBase : public testing::Test {
   GLuint client_vertex_shader_id_;
   GLuint client_fragment_shader_id_;
 
+#if defined(OS_ANDROID)
+  bool buffer_was_deleted_;
+#endif
+
   uint32 shared_memory_id_;
   uint32 shared_memory_offset_;
   void* shared_memory_address_;

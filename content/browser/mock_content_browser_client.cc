@@ -322,6 +322,16 @@ void MockContentBrowserClient::CreateAutoLogin(
     int web_contents_id,
     const std::string& header_value) {
 }
+
+int MockContentBrowserClient::CreateMinidumpFile() {
+  return -1;
+}
+
+void MockContentBrowserClient::AddNewCertificateAndroid(
+    net::URLRequest* request,
+    const std::string& cert_data,
+    bool isPKCS12) {
+}
 #endif
 
 }  // namespace content

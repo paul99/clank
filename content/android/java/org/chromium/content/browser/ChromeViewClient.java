@@ -284,4 +284,18 @@ public class ChromeViewClient {
     public void addShortcutToBookmark(String url, String title, Bitmap favicon, int rValue,
             int gValue, int bValue) {
     }
+
+     /**
+     * Called when the user participating in Chrome promotion wants to send herself an email.
+     */
+    public void promoSendEmail(String email, String subj, String body, String inv) {
+    }
+
+    /**
+     * Called when the renderer was intentionally crashed and the tab should be auto-reloaded
+     * when we are notified of the crash.
+     */
+    @CalledByNative
+    public void wasCrashedForReload() {
+    }
 }

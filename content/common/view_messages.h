@@ -443,6 +443,11 @@ IPC_STRUCT_BEGIN(ViewHostMsg_TextInputState_Params)
 
   // Bounding rect for the current caret or selection
   IPC_STRUCT_MEMBER(gfx::Rect, caret_rect)
+
+  // The time that the text input state update was requested by the browser.
+  // Should be a null Time if the update was not in response to a request from
+  // the browser.
+  IPC_STRUCT_MEMBER(base::Time, request_time)
 IPC_STRUCT_END()
 #endif
 IPC_STRUCT_BEGIN(ViewHostMsg_CreateWorker_Params)
@@ -724,6 +729,9 @@ IPC_STRUCT_BEGIN(ViewMsg_New_Params)
   // existing navigation that might be loaded in the view.  Page IDs are unique
   // to a view and are only updated by the renderer after this initial value.
   IPC_STRUCT_MEMBER(int32, next_page_id)
+
+  // The properties of the screen associated with the view.
+  IPC_STRUCT_MEMBER(WebKit::WebScreenInfo, screen_info)
 IPC_STRUCT_END()
 
 // Messages sent from the browser to the renderer.
@@ -908,6 +916,9 @@ IPC_MESSAGE_ROUTED3(ViewMsg_SetComposingRegion,
 IPC_MESSAGE_ROUTED2(ViewMsg_DeleteSurroundingText,
                     int /* before */,
                     int /* after */)
+
+IPC_MESSAGE_ROUTED1(ViewMsg_RequestTextInputStateUpdate,
+                    base::Time /* request_time */)
 #endif
 
 // Reply in response to ViewHostMsg_ShowView or ViewHostMsg_ShowWidget.
@@ -980,6 +991,10 @@ IPC_MESSAGE_ROUTED0(ViewMsg_UpdateRect_ACK)
 // 2. An optional boolean value indicating if a RawKeyDown event is associated
 //    to a keyboard shortcut of the browser.
 IPC_MESSAGE_ROUTED0(ViewMsg_HandleInputEvent)
+
+// Tells the render view that a pinch to zoom gesture was done being processed.
+// This is an m18 only change.
+IPC_MESSAGE_ROUTED0(ViewMsg_PinchEndProcessed)
 
 IPC_MESSAGE_ROUTED2(ViewMsg_DidVSync,
                     int64 /* frameBeginTimeUSec */,
@@ -1886,10 +1901,11 @@ IPC_MESSAGE_ROUTED4(ViewHostMsg_OpenURL,
 #if defined(OS_ANDROID)
 // Lets the browser instruct the renderer to ignore a specific navigation
 // request.
-IPC_SYNC_MESSAGE_ROUTED4_1(ViewHostMsg_ShouldIgnoreNavigation,
+IPC_SYNC_MESSAGE_ROUTED5_1(ViewHostMsg_ShouldIgnoreNavigation,
                            GURL /* in - url */,
                            content::Referrer /* in - referrer */,
                            WindowOpenDisposition /* in - disposition */,
+                           content::PageTransition /* in - transition type */,
                            int64 /* in - frame id */,
                            bool /* out - result */)
 #endif
@@ -1960,13 +1976,6 @@ IPC_SYNC_MESSAGE_CONTROL1_3(ViewHostMsg_LoadFont,
                            base::SharedMemoryHandle /* font data */,
                            uint32 /* font id */)
 #endif
-
-// Returns WebScreenInfo corresponding to the view.
-// TODO(shess): Provide a mapping from reply_msg->routing_id() to
-// HWND so that we can eliminate the NativeViewId parameter.
-IPC_SYNC_MESSAGE_ROUTED1_1(ViewHostMsg_GetScreenInfo,
-                           gfx::NativeViewId /* view */,
-                           WebKit::WebScreenInfo /* results */)
 
 // Send the tooltip text for the current mouse position to the browser.
 IPC_MESSAGE_ROUTED2(ViewHostMsg_SetTooltipText,
@@ -2274,41 +2283,75 @@ IPC_MESSAGE_ROUTED2(ViewMsg_SelectPopupMenuItems,
 IPC_MESSAGE_ROUTED1(ViewHostMsg_StartContentIntent,
                     GURL /* content URL */)
 
+
 // Mediaplayer related messages ----------------------------------------------
-
-// Notification messages from the mediaplayer.
-IPC_MESSAGE_ROUTED3(ViewHostMsg_MediaPlayerNotifications,
-                    int /* msg type */,
-                    int /* ext1 */,
-                    int /* ext2 */)
-
-IPC_MESSAGE_ROUTED1(ViewHostMsg_CurrentTime,
-                    float /* current time */)
-
-IPC_MESSAGE_ROUTED1(ViewHostMsg_GetCookie,
-                    std::string /* url */)
-
-IPC_MESSAGE_ROUTED2(ViewHostMsg_CreateVideoSurface,
-                    int /* player_id */,
-                    webkit_glue::MediaMetadataAndroid /* media metadata */)
-
-IPC_MESSAGE_ROUTED1(ViewHostMsg_UpdateMetadata,
-                    webkit_glue::MediaMetadataAndroid /* media metadata */)
-
-IPC_MESSAGE_ROUTED0(ViewHostMsg_DestroyFullscreenView)
-
-IPC_MESSAGE_ROUTED0(ViewMsg_FullscreenVideoPlay)
-
-IPC_MESSAGE_ROUTED1(ViewMsg_FullscreenVideoSeek,
-                    float /* seconds */)
-
-IPC_MESSAGE_ROUTED1(ViewMsg_GetCookie_ACK,
-                    std::string /* cookie */)
-
-IPC_MESSAGE_ROUTED0(ViewMsg_FullscreenVideoPause)
-
 IPC_MESSAGE_ROUTED1(ViewMsg_ExitFullscreen,
-                    bool /* release_media_player */)
+                    int /* player_id */)
+
+IPC_MESSAGE_ROUTED1(ViewMsg_FullscreenVideoPlay,
+                    int /* player_id */)
+
+IPC_MESSAGE_ROUTED1(ViewMsg_FullscreenVideoPause,
+                    int /* player_id */)
+
+IPC_MESSAGE_ROUTED2(ViewMsg_MediaBufferingUpdate,
+                    int /* player_id */,
+                    int /* percent */)
+
+IPC_MESSAGE_ROUTED2(ViewMsg_MediaError,
+                    int /* player_id */,
+                    int /* error */)
+
+IPC_MESSAGE_ROUTED1(ViewMsg_MediaPlaybackCompleted,
+                    int /* player_id */)
+
+IPC_MESSAGE_ROUTED2(ViewMsg_MediaPrepared,
+                    int /* player_id */,
+                    float /* duration */)
+
+IPC_MESSAGE_ROUTED2(ViewMsg_MediaSeekCompleted,
+                    int /* player_id */,
+                    int /* msec */)
+
+IPC_MESSAGE_ROUTED3(ViewMsg_MediaVideoSizeChanged,
+                    int /* player_id */,
+                    int /* width */,
+                    int /* height */)
+
+IPC_MESSAGE_ROUTED1(ViewMsg_MediaVideoSurfaceReleased,
+                    int /* player_id */)
+
+IPC_MESSAGE_ROUTED2(ViewMsg_MediaTimeUpdate,
+                    int /* player_id */,
+                    int /* msec */)
+
+IPC_MESSAGE_ROUTED1(ViewHostMsg_DestroyMediaPlayer,
+                    int /* player_id */)
+
+IPC_MESSAGE_ROUTED1(ViewHostMsg_EnterFullscreen,
+                    int /* player_id */)
+
+IPC_MESSAGE_ROUTED1(ViewHostMsg_LeaveFullscreen,
+                    int /* player_id */)
+
+IPC_MESSAGE_ROUTED3(ViewHostMsg_MediaPlayerLoad,
+                    int /* player_id */,
+                    std::string /* url */,
+                    std::string /* first_party_for_cookies */)
+
+IPC_MESSAGE_ROUTED1(ViewHostMsg_MediaPlayerPause,
+                    int /* player_id */)
+
+IPC_MESSAGE_ROUTED1(ViewHostMsg_MediaPlayerRelease,
+                    int /* player_id */)
+
+IPC_MESSAGE_ROUTED2(ViewHostMsg_MediaPlayerSeek,
+                    int /* player_id */,
+                    int /* msec */)
+
+IPC_MESSAGE_ROUTED1(ViewHostMsg_MediaPlayerStart,
+                    int /* player_id */)
+
 #endif
 
 // Notifies the browser of an event occurring in the media pipeline.

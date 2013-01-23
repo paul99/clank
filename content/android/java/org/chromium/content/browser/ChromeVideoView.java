@@ -7,8 +7,6 @@ package org.chromium.content.browser;
 import android.app.AlertDialog;
 import android.content.Context;
 import android.content.DialogInterface;
-import android.os.Handler;
-import android.os.Message;
 import android.os.RemoteException;
 import android.util.Log;
 import android.view.Gravity;
@@ -22,8 +20,6 @@ import android.view.ViewGroup;
 import android.widget.FrameLayout;
 import android.widget.MediaController;
 import android.widget.MediaController.MediaPlayerControl;
-
-import java.lang.ref.WeakReference;
 
 import org.chromium.base.CalledByNative;
 
@@ -69,44 +65,10 @@ public class ChromeVideoView extends ChromeFullscreenView implements MediaPlayer
     // all possible internal states
     private static final int STATE_ERROR              = -1;
     private static final int STATE_IDLE               = 0;
-    private static final int STATE_PREPARING          = 1;
-    private static final int STATE_PREPARED           = 2;
-    private static final int STATE_PLAYING            = 3;
-    private static final int STATE_PAUSED             = 4;
-    private static final int STATE_PLAYBACK_COMPLETED = 5;
+    private static final int STATE_PLAYING            = 1;
+    private static final int STATE_PAUSED             = 2;
+    private static final int STATE_PLAYBACK_COMPLETED = 3;
 
-    private final Handler mEventHandler = new Handler() {
-        @Override
-        public void handleMessage(Message msg) {
-            switch(msg.what) {
-            case MEDIA_PREPARED:
-                // We should not reach here as the mediaplayer is already
-                // prepared in the renderer process
-                return;
-            case MEDIA_PLAYBACK_COMPLETE:
-                onCompletion();
-                return;
-            case MEDIA_BUFFERING_UPDATE:
-                onBufferingUpdate(msg.arg1);
-                return;
-            case MEDIA_SEEK_COMPLETE:
-                return;
-            case MEDIA_SET_VIDEO_SIZE:
-                onVideoSizeChanged(msg.arg1, msg.arg2);
-                return;
-            case MEDIA_ERROR:
-                onError(msg.arg1, msg.arg2);
-                return;
-            case MEDIA_INFO:
-                return;
-            case MEDIA_NOP: // interface test message - ignore
-                break;
-            default:
-                Log.e(TAG, "Unknown message type " + msg.what);
-                return;
-            }
-        }
-    };
     private SurfaceHolder mSurfaceHolder = null;
     private int mVideoWidth;
     private int mVideoHeight;
@@ -116,12 +78,10 @@ public class ChromeVideoView extends ChromeFullscreenView implements MediaPlayer
     private boolean mCanPause;
     private boolean mCanSeekBack;
     private boolean mCanSeekForward;
-    private boolean mHasMediaMetadata = false;
 
     // Native pointer to C++ ChromeVideoView object which will be set by nativeInit()
     private int mNativeChromeVideoView = 0;
 
-    // webkit should have prepared the media
     private int mCurrentState = STATE_IDLE;
 
     // Strings for displaying media player errors
@@ -156,6 +116,14 @@ public class ChromeVideoView extends ChromeFullscreenView implements MediaPlayer
         }
     }
 
+    private Runnable mExitFullscreenRunnable = new Runnable() {
+        @Override
+        public void run() {
+            exitFullScreen();
+        }
+    };
+
+
     public ChromeVideoView(Context context) {
         super(context);
     }
@@ -164,11 +132,6 @@ public class ChromeVideoView extends ChromeFullscreenView implements MediaPlayer
         super(context);
 
         mNativeChromeVideoView = nativeChromeVideoView;
-        /*
-         * Passing a weak reference of this object to native for callbacks
-         */
-        nativeInit(mNativeChromeVideoView, new WeakReference<ChromeVideoView>(this));
-
         mCurrentBufferPercentage = 0;
         mVideoSurfaceView = new VideoSurfaceView(context);
         mCurrentState = isPlaying() ? STATE_PLAYING : STATE_PAUSED;
@@ -190,8 +153,17 @@ public class ChromeVideoView extends ChromeFullscreenView implements MediaPlayer
         mVideoSurfaceView.requestFocus();
     }
 
+    public void removeMediaController() {
+        if (mMediaController != null) {
+            mMediaController.setEnabled(false);
+            mMediaController.hide();
+            mMediaController = null;
+        }
+    }
+
     @Override
     void removeFullscreenView() {
+        removeMediaController();
         this.removeView(mVideoSurfaceView);
         mVideoSurfaceView = null;
     }
@@ -210,7 +182,6 @@ public class ChromeVideoView extends ChromeFullscreenView implements MediaPlayer
         mCanPause = canPause;
         mCanSeekBack = canSeekBack;
         mCanSeekForward = canSeekForward;
-        mHasMediaMetadata = true;
 
         if (mMediaController != null) {
             mMediaController.setEnabled(true);
@@ -224,12 +195,6 @@ public class ChromeVideoView extends ChromeFullscreenView implements MediaPlayer
         if (mVideoWidth != 0 && mVideoHeight != 0) {
             // This will trigger the onMeasure to get the display size right.
             mVideoSurfaceView.getHolder().setFixedSize(mVideoWidth, mVideoHeight);
-        }
-    }
-
-    public void destroyNativeView() {
-        if (mNativeChromeVideoView != 0) {
-            mNativeChromeVideoView = 0;
         }
     }
 
@@ -250,7 +215,6 @@ public class ChromeVideoView extends ChromeFullscreenView implements MediaPlayer
                 // ensure the controller will get repositioned later
                 mMediaController.hide();
             }
-            mMediaController.show();
         }
     }
 
@@ -265,12 +229,10 @@ public class ChromeVideoView extends ChromeFullscreenView implements MediaPlayer
         mSurfaceHolder = null;
         if (mNativeChromeVideoView != 0) {
             nativeExitFullscreen(mNativeChromeVideoView, true);
-            destroyNativeView();
+            mNativeChromeVideoView = 0;
+            post(mExitFullscreenRunnable);
         }
-        if (mMediaController != null) {
-            mMediaController.hide();
-            mMediaController = null;
-        }
+        removeMediaController();
     }
 
     public void setMediaController(MediaController controller) {
@@ -285,7 +247,7 @@ public class ChromeVideoView extends ChromeFullscreenView implements MediaPlayer
         if (mMediaController != null) {
             mMediaController.setMediaPlayer(this);
             mMediaController.setAnchorView(mVideoSurfaceView);
-            mMediaController.setEnabled(mHasMediaMetadata);
+            mMediaController.setEnabled(true);
         }
     }
 
@@ -297,45 +259,19 @@ public class ChromeVideoView extends ChromeFullscreenView implements MediaPlayer
             }
             mCurrentBufferPercentage = 0;
             if (mNativeChromeVideoView != 0) {
-                int renderHandle = nativeGetRenderHandle(mNativeChromeVideoView);
-                if (renderHandle == 0) {
-                    nativeSetSurface(mNativeChromeVideoView,
-                            mSurfaceHolder.getSurface(),
-                            nativeGetRouteId(mNativeChromeVideoView),
-                            nativeGetPlayerId(mNativeChromeVideoView));
-                    return;
-                }
-                ISandboxedProcessService service =
-                    SandboxedProcessLauncher.getSandboxedService(renderHandle);
-                if (service == null) {
-                    Log.e(TAG, "Unable to get SandboxedProcessService from pid.");
-                    return;
-                }
-                try {
-                    service.setSurface(
-                            SET_VIDEO_SURFACE_TEXTURE,
-                            mSurfaceHolder.getSurface(),
-                            nativeGetRouteId(mNativeChromeVideoView),
-                            nativeGetPlayerId(mNativeChromeVideoView));
-                } catch (RemoteException e) {
-                    Log.e(TAG, "Unable to call setSurfaceTexture: " + e);
-                    return;
-                }
+                // Passing the surface to the media player created by native code.
+                // This surface is owned by surfaceHolder, so don't call release()
+                // on it.
+                nativeSetSurface(mNativeChromeVideoView,
+                        mSurfaceHolder.getSurface());
             }
             requestLayout();
             invalidate();
             setMediaController(new MediaController(getChromeActivity()));
-
-            if (mMediaController != null) {
-                mMediaController.show();
-            }
         }
     }
 
-    private Handler getEventHandler() {
-        return mEventHandler;
-    }
-
+    @CalledByNative
     private void onVideoSizeChanged(int width, int height) {
         mVideoWidth = width;
         mVideoHeight = height;
@@ -344,19 +280,22 @@ public class ChromeVideoView extends ChromeFullscreenView implements MediaPlayer
         }
     }
 
+    @CalledByNative
     private void onBufferingUpdate(int percent) {
         mCurrentBufferPercentage = percent;
     }
 
-    private void onCompletion() {
+    @CalledByNative
+    private void onPlaybackComplete() {
         mCurrentState = STATE_PLAYBACK_COMPLETED;
         if (mMediaController != null) {
             mMediaController.hide();
         }
     }
 
-    private void onError(int framework_err, int impl_err) {
-        Log.d(TAG, "Error: " + framework_err + "," + impl_err);
+    @CalledByNative
+    private void onError(int framework_err) {
+        Log.d(TAG, "Error: " + framework_err);
         if (mCurrentState == STATE_ERROR || mCurrentState == STATE_PLAYBACK_COMPLETED) {
             return;
         }
@@ -391,7 +330,7 @@ public class ChromeVideoView extends ChromeFullscreenView implements MediaPlayer
                     public void onClick(DialogInterface dialog, int whichButton) {
                         /* Inform that the video is over.
                          */
-                        onCompletion();
+                        onPlaybackComplete();
                     }
                 })
                 .setCancelable(false)
@@ -456,7 +395,7 @@ public class ChromeVideoView extends ChromeFullscreenView implements MediaPlayer
         } else if (keyCode == KeyEvent.KEYCODE_BACK && event.getAction() == KeyEvent.ACTION_UP) {
             if (mNativeChromeVideoView != 0) {
                 nativeExitFullscreen(mNativeChromeVideoView, false);
-                destroyNativeView();
+                destroyFullscreenView();
             }
             return true;
         } else if (keyCode == KeyEvent.KEYCODE_MENU || keyCode == KeyEvent.KEYCODE_SEARCH) {
@@ -466,8 +405,11 @@ public class ChromeVideoView extends ChromeFullscreenView implements MediaPlayer
     }
 
     @CalledByNative
-    public static void destroyFullscreenView() {
-        exitFullScreen();
+    public void destroyFullscreenView() {
+        if (mNativeChromeVideoView != 0) {
+            mNativeChromeVideoView = 0;
+            exitFullScreen();
+        }
     }
 
     private void toggleMediaControlsVisiblity() {
@@ -480,31 +422,7 @@ public class ChromeVideoView extends ChromeFullscreenView implements MediaPlayer
 
     private boolean isInPlaybackState() {
         return (mCurrentState != STATE_ERROR &&
-                mCurrentState != STATE_IDLE &&
-                mCurrentState != STATE_PREPARING);
-    }
-
-    /**
-     * Called from native code when an interesting event happens. This method
-     * just uses the EventHandler system to post the event back to the java
-     * thread. We use a weak reference to the original ChromeVideoView object
-     * so that the object can be garbage collected by JVM while the native
-     * code is unaffected by this.
-     *
-     */
-    @CalledByNative
-    private static void postEventFromNative(Object chromeVideoViewRef,
-            int what, int arg1, int arg2) {
-        ChromeVideoView videoView =
-            (ChromeVideoView)((WeakReference)chromeVideoViewRef).get();
-        if (videoView == null) {
-            return;
-        }
-        if (null != videoView.getEventHandler()) {
-            Message m = videoView.getEventHandler().obtainMessage(
-                    what, arg1, arg2);
-            videoView.getEventHandler().sendMessage(m);
-        }
+                mCurrentState != STATE_IDLE);
     }
 
     public void start() {
@@ -593,14 +511,10 @@ public class ChromeVideoView extends ChromeFullscreenView implements MediaPlayer
     private native void nativeUpdateMediaMetadata(int nativeChromeVideoView);
     private native int nativeGetVideoWidth(int nativeChromeVideoView);
     private native int nativeGetVideoHeight(int nativeChromeVideoView);
-    private native int nativeGetPlayerId(int nativeChromeVideoView);
-    private native int nativeGetRouteId(int nativeChromeVideoView);
-    private native int nativeGetRenderHandle(int nativeChromeVideoView);
-    private native void nativeInit(int nativeChromeVideoView, Object chromeVideoView);
     private native boolean nativeIsPlaying(int nativeChromeVideoView);
     private native void nativePause(int nativeChromeVideoView);
     private native void nativePlay(int nativeChromeVideoView);
     private native void nativeSeekTo(int nativeChromeVideoView, int msec);
     private native void nativeSetSurface(int nativeChromeVideoView,
-            Surface surface, int routeId, int playerId);
+            Surface surface);
 }

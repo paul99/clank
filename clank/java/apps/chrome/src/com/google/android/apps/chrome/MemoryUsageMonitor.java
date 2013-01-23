@@ -193,8 +193,8 @@ class MemoryUsageMonitor {
             }
         }
 
-        final int foregroundPid = normalModel.getCurrentTab() != null ?
-                normalModel.getCurrentTab().getRenderProcessPid() : -1;
+        final Tab foregroundTab = normalModel.getCurrentTab();
+        final int foregroundPid = foregroundTab != null ? foregroundTab.getRenderProcessPid() : -1;
         final HashMap<Integer, Integer> memoryUsageByRenderer = new HashMap<Integer, Integer>();
         for (int i = 0; i < tabsToSave.size(); i++) {
             Tab tab = tabsToSave.get(i);
@@ -245,9 +245,16 @@ class MemoryUsageMonitor {
         int lastPidPrivateMemorySizeKb = -1;
         int freedSoFarKb = 0;
         int tabIndex = 0;
+        int foregroundTabId = foregroundTab != null ? foregroundTab.getId() : Tab.INVALID_TAB_ID;
+        int foregroundTabParentId = foregroundTab != null ?
+                foregroundTab.getParentId() : Tab.INVALID_TAB_ID;
         for (; tabIndex < tabsToSave.size(); tabIndex++) {
             Tab tab = tabsToSave.get(tabIndex);
             int pid = tab.getRenderProcessPid();
+            // Don't close parent or child of the current tab.
+            if (tab.getParentId() == foregroundTabId || tab.getId() == foregroundTabParentId) {
+                continue;
+            }
             // Tabs are grouped by process.
             if (pid != lastPid) {
                 if (lastPid != -1) {

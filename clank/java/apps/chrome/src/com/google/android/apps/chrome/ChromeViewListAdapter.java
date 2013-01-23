@@ -21,14 +21,13 @@ import android.os.Looper;
 import android.os.Message;
 import android.preference.PreferenceActivity;
 import android.text.TextUtils;
-import android.util.Log;
 import android.view.View;
 import android.view.ViewGroup;
 import android.widget.BaseAdapter;
 
 import com.google.android.apps.chrome.ChromeNotificationCenter.ChromeNotificationHandler;
-import com.google.android.apps.chrome.preferences.ClearBrowsingDataDialogFragment;
 import com.google.android.apps.chrome.preferences.PreferenceHeaders;
+import com.google.android.apps.chrome.preferences.PrivacyPreferences;
 import com.google.android.apps.chrome.services.GoogleServicesNotificationController;
 import com.google.android.apps.chrome.snapshot.SnapshotArchiveManager;
 import com.google.android.apps.chrome.snapshot.SnapshotViewableState;
@@ -37,20 +36,15 @@ import com.google.android.apps.chrome.thumbnail.ThumbnailCache;
 import com.google.android.apps.chrome.utilities.MathUtils;
 import com.google.android.apps.chrome.utilities.URLUtilities;
 import com.google.android.apps.chrome.widgetcontroller.fullscreen.Fullscreen;
+import com.google.common.annotations.VisibleForTesting;
 
 import org.chromium.base.AccessedByNative;
 import org.chromium.base.CalledByNative;
 import org.chromium.content.browser.ChromeView;
 import org.chromium.content.browser.TraceEvent;
 
-import com.google.common.annotations.VisibleForTesting;
-
 import java.util.ArrayList;
-import java.util.Collections;
-import java.util.Comparator;
-import java.util.HashMap;
 import java.util.List;
-import java.util.Map;
 import java.util.concurrent.atomic.AtomicBoolean;
 
 /**
@@ -127,6 +121,9 @@ public class ChromeViewListAdapter extends BaseAdapter implements TabModel, TabM
     private long mNtpCacheCreateDelayMs = NTP_CACHE_CREATE_DELAY_MS;
 
     @VisibleForTesting
+    public static boolean sAllowCreateCachedNtp = true;
+
+    @VisibleForTesting
     public static interface ClearBrowsingDataActivityStarter {
         public void startActivity();
     }
@@ -170,7 +167,10 @@ public class ChromeViewListAdapter extends BaseAdapter implements TabModel, TabM
                     intent.setFlags(Intent.FLAG_ACTIVITY_REORDER_TO_FRONT |
                             Intent.FLAG_ACTIVITY_SINGLE_TOP | Intent.FLAG_ACTIVITY_NEW_TASK);
                     intent.putExtra(PreferenceActivity.EXTRA_SHOW_FRAGMENT,
-                            ClearBrowsingDataDialogFragment.class.getName());
+                            PrivacyPreferences.class.getName());
+                    Bundle arguments = new Bundle();
+                    arguments.putBoolean(PrivacyPreferences.SHOW_CLEAR_BROWSING_DATA_EXTRA, true);
+                    intent.putExtra(PreferenceActivity.EXTRA_SHOW_FRAGMENT_ARGUMENTS, arguments);
                     mActivity.startActivity(intent);
                 }
             };
@@ -821,11 +821,7 @@ public class ChromeViewListAdapter extends BaseAdapter implements TabModel, TabM
             if (tab != null
                     && tab.getView() != null
                     && tab.getView().getVisibility() == View.VISIBLE) {
-                // Phone need 2 steps to get the tab to a thumbnail:
-                // - This is super fast on phone.
-                mThumbnailCache.cacheTabThumbnail(tab);
-                // - This is a no-op on tablet.
-                mThumbnailCache.moveViewTextureToCache(tab.getId());
+                mThumbnailCache.cacheTabThumbnail(tab, true);
             }
         }
 
@@ -838,6 +834,8 @@ public class ChromeViewListAdapter extends BaseAdapter implements TabModel, TabM
         }
 
         private void createCachedNtp() {
+            if (!sAllowCreateCachedNtp) return;
+
             if (mCachedNtpTab != null ||
                     mPreloadWebViewContainer == null ||
                     mThumbnailCache.isTextureCached(NTP_TAB_ID, false, true)) {
@@ -878,6 +876,8 @@ public class ChromeViewListAdapter extends BaseAdapter implements TabModel, TabM
         }
 
         private void createDelayedCacheNtp(int selectedTabId) {
+            if (!sAllowCreateCachedNtp) return;
+
             // For memory reasons, don't create a cached NTP tab for incognito, since
             // otherwise we would always have 2 cached NTPs.
             if (isIncognito() || mThumbnailCache.isTextureCached(NTP_TAB_ID, false, true)) {

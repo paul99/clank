@@ -8,6 +8,12 @@
 <translation id="8130276680150879341">ยกเลิกการเชื่อมต่อเครือข่ายส่วนบุคคล</translation>
 <translation id="1058418043520174283"><ph name="INDEX"/> จาก <ph name="COUNT"/></translation>
 <translation id="4480627574828695486">ยกเลิกการเชื่อมต่อบัญชีนี้...</translation>
+<translation id="2516632596252643567">&lt;p&gt;
+          เข้าถึงแท็บที่คุณได้เปิดไว้ในคอมพิวเตอร์ได้ที่นี่
+          &lt;/p&gt;
+          &lt;p&gt;
+          เพียงเปิด Chrome บนคอมพิวเตอร์ของคุณ ไปที่เมนู แล้วเลือก &quot;ลงชื่อเข้าใช้ Chrome...&quot;
+          &lt;/p&gt;</translation>
 <translation id="7040807039050164757">&amp;ตรวจสอบตัวสะกดในฟิลด์นี้</translation>
 <translation id="778579833039460630">ไม่ได้รับข้อมูล</translation>
 <translation id="8791923223854254330">จัดการตัวจัดการ...</translation>
@@ -1438,7 +1444,6 @@
 <translation id="6342069812937806050">เพิ่งเสร็จ</translation>
 <translation id="5605716740717446121">ซิมการ์ดของคุณจะถูกปิดใช้งานอย่างถาวรหากคุณไม่สามารถป้อนคีย์การปลดล็อก PIN ที่ถูกต้องได้ จำนวนครั้งที่เหลือ: <ph name="TRIES_COUNT"/></translation>
 <translation id="8836712291807476944"><ph name="SAVED_BYTES"/> / <ph name="TOTAL_BYTES"/> ไบต์ ขัดข้อง</translation>
-<translation id="3661943501691646627">&lt;p&gt;เข้าถึงแท็บที่คุณได้เปิดไว้ในคอมพิวเตอร์ได้ที่นี่&lt;/p&gt; &lt;p&gt;เพียงเปิด Chrome บนคอมพิวเตอร์ของคุณ ไปที่เมนู แล้วเลือก &quot;ลงชื่อเข้าใช้ Chrome...&quot;&lt;/p&gt; &lt;p&gt;สุดยอดมาก&lt;/p&gt;</translation>
 <translation id="5502500733115278303">นำเข้าจาก Firefox</translation>
 <translation id="569109051430110155">ตรวจหาอัตโนมัติ</translation>
 <translation id="4408599188496843485">ความ&amp;ช่วยเหลือ</translation>
@@ -1803,7 +1808,7 @@
 <translation id="59659456909144943">การแจ้งเตือน: <ph name="NOTIFICATION_NAME"/></translation>
 <translation id="6731320427842222405">การดำเนินการนี้อาจใช้เวลาสองถึงสามนาที</translation>
 <translation id="4806525999832945986">จัดการโดย <ph name="DOMAIN"/> (<ph name="STATUS"/>)</translation>
-<translation id="940573721483482582">ลองปิดใช้งานการคาดการณ์เครือข่ายโดยทำตามขั้นตอนต่อไปนี้: ไปที่ <ph name="BEGIN_BOLD"/>เมนูไขควง &gt; <ph name="SETTINGS_TITLE"/> &gt; <ph name="ADVANCED_TITLE"/> <ph name="END_BOLD"/> แล้วยกเลิกการเลือก &quot;<ph name="NO_PREFETCH_DESCRIPTION"/>&quot; หากยังไม่สามารถแก้ปัญหาได้ เราขอแนะนำให้เลือกตัวเลือกนี้อีกครั้งเพื่อประสิทธิภาพที่ดียิ่งขึ้น</translation>
+<translation id="940573721483482582">ลองปิดใช้งานการคาดการณ์เครือข่ายโดยทำตามขั้นตอนต่อไปนี้: ไปที่ <ph name="BEGIN_BOLD"/>เมนูประแจ &gt; <ph name="SETTINGS_TITLE"/> &gt; <ph name="ADVANCED_TITLE"/> <ph name="END_BOLD"/> แล้วยกเลิกการเลือก &quot;<ph name="NO_PREFETCH_DESCRIPTION"/>&quot; หากยังไม่สามารถแก้ปัญหาได้ เราขอแนะนำให้เลือกตัวเลือกนี้อีกครั้งเพื่อประสิทธิภาพที่ดียิ่งขึ้น</translation>
 <translation id="7503191893372251637">ประเภทใบรับรองของ Netscape </translation>
 <translation id="2894654529758326923">ข้อมูล</translation>
 <translation id="4135450933899346655">ใบรับรองของคุณ</translation>
@@ -1817,7 +1822,7 @@
 <translation id="7886758531743562066">เว็บไซต์ที่ <ph name="HOST_NAME"/> มีองค์ประกอบจากเว็บไซต์ที่มีมัลแวร์ ซึ่งเป็นซอฟต์แวร์ที่สามารถทำลายคอมพิวเตอร์ของคุณหรืออาจดำเนินการแทนคุณโดยไม่ได้รับอนุญาต เพียงแค่การเข้าชมเว็บไซต์ที่มีมัลแวร์ก็สามารถทำให้คอมพิวเตอร์ของคุณเป็นอันตรายได้</translation>
 <translation id="7538227655922918841">อนุญาตคุกกี้จากหลายไซต์สำหรับเซสชันเท่านั้น</translation>
 <translation id="2385700042425247848">ชื่อบริการ:</translation>
-<translation id="3128628928070793746">ไปที่ <ph name="BEGIN_BOLD"/>เมนูไขควง &gt; <ph name="SETTINGS_TITLE"/> &gt; <ph name="ADVANCED_TITLE"/> &gt; <ph name="PROXIES_TITLE"/> <ph name="END_BOLD"/> และตรวจสอบให้แน่ใจว่าการกำหนดค่าของคุณถูกตั้งค่าเป็น &quot;ไม่มีพร็อกซี&quot; หรือ &quot;โดยตรง&quot;</translation>
+<translation id="3128628928070793746">ไปที่ <ph name="BEGIN_BOLD"/>เมนูประแจ &gt; <ph name="SETTINGS_TITLE"/> &gt; <ph name="ADVANCED_TITLE"/> &gt; <ph name="PROXIES_TITLE"/> <ph name="END_BOLD"/> และตรวจสอบให้แน่ใจว่าการกำหนดค่าของคุณนั้นตั้งไว้เป็น &quot;ไม่มีพร็อกซี&quot; หรือ &quot;โดยตรง&quot;</translation>
 <translation id="7751005832163144684">พิมพ์หน้าทดสอบ</translation>
 <translation id="3895762689235141867">ไฟล์เสียง $1</translation>
 <translation id="2208158072373999562">การเก็บถาวรแบบ Zip</translation>
@@ -3043,6 +3048,7 @@
 <translation id="8241707690549784388">หน้าที่คุณกำลังมองหาใช้ข้อมูลที่คุณได้ป้อนไว้แล้ว การกลับไปสู่หน้านั้นอาจทำให้คุณต้องทำซ้ำการดำเนินการใดๆ ที่คุณทำแล้ว คุณต้องการดำเนินการต่อหรือไม่</translation>
 <translation id="5359419173856026110">แสดงจำนวนเฟรมจริงในหนึ่งวินาทีของหน้าเว็บ เมื่อใช้งานการเร่งความเร็วของฮาร์ดแวร์</translation>
 <translation id="4104163789986725820">ส่ง&amp;ออก</translation>
+<translation id="5143814737375740231">Chrome สำหรับแอนดรอยด์ไม่สนับสนุนปลั๊กอินนี้</translation>
 <translation id="2113479184312716848">เปิดไ&amp;ฟล์...</translation>
 <translation id="3314617171364900239">การตรวจสอบการอัปเดตของส่วนขยาย &quot;<ph name="EXTENSION_NAME"/>&quot; ล้มเหลวหลายครั้ง</translation>
 <translation id="4850458635498951714">เพิ่มอุปกรณ์</translation>
@@ -3090,7 +3096,7 @@
 <translation id="7077176974744385057">คำแนะนำเพิ่มเติม</translation>
 <translation id="2024918351532495204">อุปกรณ์ของคุณออฟไลน์อยู่</translation>
 <translation id="6040143037577758943">ปิด</translation>
-<translation id="5607923769356613853">ไปที่ <ph name="BEGIN_BOLD"/>เมนูไขควง &gt; <ph name="SETTINGS_TITLE"/> &gt; <ph name="ADVANCED_TITLE"/> &gt; <ph name="PROXIES_TITLE"/> &gt; การตั้งค่า LAN<ph name="END_BOLD"/> และยกเลิกการเลือกช่องทำเครื่องหมาย &quot;ใช้พร็อกซีเซิร์ฟเวอร์สำหรับ LAN ของคุณ&quot;</translation>
+<translation id="5607923769356613853">ไปที่ <ph name="BEGIN_BOLD"/>เมนูประแจ &gt; <ph name="SETTINGS_TITLE"/> &gt; <ph name="ADVANCED_TITLE"/> &gt; <ph name="PROXIES_TITLE"/> &gt; การตั้งค่า LAN<ph name="END_BOLD"/> และยกเลิกการเลือกช่องทำเครื่องหมาย &quot;ใช้พร็อกซีเซิร์ฟเวอร์สำหรับ LAN ของคุณ&quot;</translation>
 <translation id="7522312030875244365">โหลดค้นหาทันใจไว้ล่วงหน้า</translation>
 <translation id="5787146423283493983">ข้อตกลงเกี่ยวกับคีย์</translation>
 <translation id="1101671447232096497"><ph name="NUMBER_MANY"/> นาทีที่ผ่านมา</translation>

@@ -11,6 +11,7 @@
 #include "chrome/browser/ui/webui/ntp/context_menu_handler.h"
 #include "chrome/browser/ui/webui/ntp/foreign_session_handler.h"
 #include "content/browser/tab_contents/tab_contents.h"
+#include "chrome/browser/ui/webui/ntp/mobile_ntp_promo_handler.h"
 
 using content::WebContents;
 
@@ -22,6 +23,7 @@ MobileNewTabUI::MobileNewTabUI(content::WebUI* web_ui) : NewTabUI(web_ui) {
   web_ui->AddMessageHandler((new browser_sync::ForeignSessionHandler()));
   web_ui->AddMessageHandler((new ContextMenuHandler()));
   web_ui->AddMessageHandler((new FaviconBgColorHandler(profile)));
+  web_ui->AddMessageHandler((new MobileNtpPromoHandler()));
 
   if (profile->IsOffTheRecord()) {
     profile->GetChromeURLDataManager()->AddDataSource(

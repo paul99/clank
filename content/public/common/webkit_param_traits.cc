@@ -362,33 +362,24 @@ void ParamTraits<webkit_glue::MediaMetadataAndroid>::Write(
   WriteParam(m, p.duration());
   WriteParam(m, p.current_time());
   WriteParam(m, p.paused());
-  WriteParam(m, p.can_pause());
-  WriteParam(m, p.can_seek_forward());
-  WriteParam(m, p.can_seek_backward());
 }
 
 bool ParamTraits<webkit_glue::MediaMetadataAndroid>::Read(
     const Message* m, void** iter, param_type* r) {
   int width, height;
   float duration, current_time;
-  bool paused, can_pause, can_seek_forward, can_seek_backward;
+  bool paused;
   if (!ReadParam(m, iter, &width) ||
       !ReadParam(m, iter, &height) ||
       !ReadParam(m, iter, &duration) ||
       !ReadParam(m, iter, &current_time) ||
-      !ReadParam(m, iter, &paused) ||
-      !ReadParam(m, iter, &can_pause) ||
-      !ReadParam(m, iter, &can_seek_forward) ||
-      !ReadParam(m, iter, &can_seek_backward))
+      !ReadParam(m, iter, &paused))
     return false;
   r->set_width(width);
   r->set_height(height);
   r->set_duration(duration);
   r->set_current_time(current_time);
   r->set_paused(paused);
-  r->set_can_pause(can_pause);
-  r->set_can_seek_forward(can_seek_forward);
-  r->set_can_seek_backward(can_seek_backward);
   return true;
 }
 
@@ -404,12 +395,6 @@ void ParamTraits<webkit_glue::MediaMetadataAndroid>::Log(
   LogParam(p.current_time(), l);
   l->append(",");
   LogParam(p.paused(), l);
-  l->append(",");
-  LogParam(p.can_pause(), l);
-  l->append(",");
-  LogParam(p.can_seek_forward(), l);
-  l->append(",");
-  LogParam(p.can_seek_backward(), l);
   l->append(")");
 }
 #endif

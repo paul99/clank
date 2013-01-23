@@ -24,7 +24,12 @@ class SandboxedProcessService extends Service {
         "com.google.android.apps.chrome.extra.sandbox_command_line";
     // Note the FD may only be passed in the connection bundle.
     public static final String EXTRA_IPC_FD = "com.google.android.apps.chrome.extra.sandbox_ipcFd";
-    public static final String EXTRA_CRASH_FD = "com.google.android.apps.chrome.extra.sandbox_crashFd";
+    public static final String EXTRA_MINIDUMP_FD =
+        "com.google.android.apps.chrome.extra.sandbox_minidumpFd";
+    public static final String EXTRA_CHROME_PAK_FD =
+        "com.google.android.apps.chrome.extra.sandbox_chromePakFd";
+    public static final String EXTRA_LOCALE_PAK_FD =
+        "com.google.android.apps.chrome.extra.sandbox_localePakFd";
 
     private static final String MAIN_THREAD_NAME = "SandboxedProcessMain";
     private static final String TAG = "SandboxedProcessService";
@@ -35,7 +40,9 @@ class SandboxedProcessService extends Service {
     // Parameters received via IPC, only accessed while holding the mSandboxMainThread monitor.
     private String[] mCommandLineParams;
     private ParcelFileDescriptor mIPCFd;
-    private ParcelFileDescriptor mCrashFd;
+    private ParcelFileDescriptor mMinidumpFd;
+    private ParcelFileDescriptor mChromePakFd;
+    private ParcelFileDescriptor mLocalePakFd;
 
     private static Context sContext = null;
     private boolean mLibraryInitialized = false;
@@ -55,9 +62,11 @@ class SandboxedProcessService extends Service {
                 // We must have received the command line by now
                 assert mCommandLineParams != null;
                 mIPCFd = args.getParcelable(EXTRA_IPC_FD);
-                // mCrashFd may be null if native crash reporting is disabled.
-                if (args.containsKey(EXTRA_CRASH_FD)) {
-                    mCrashFd = args.getParcelable(EXTRA_CRASH_FD);
+                mChromePakFd = args.getParcelable(EXTRA_CHROME_PAK_FD);
+                mLocalePakFd = args.getParcelable(EXTRA_LOCALE_PAK_FD);
+                // mMinidumpFd may be null if native crash reporting is disabled.
+                if (args.containsKey(EXTRA_MINIDUMP_FD)) {
+                    mMinidumpFd = args.getParcelable(EXTRA_MINIDUMP_FD);
                 }
                 mSandboxMainThread.notifyAll();
             }
@@ -98,9 +107,10 @@ class SandboxedProcessService extends Service {
                             mSandboxMainThread.wait();
                         }
                     }
-                    int crashFd = (mCrashFd == null) ? -1 : mCrashFd.detachFd();
+                    int minidumpFd = (mMinidumpFd == null) ? -1 : mMinidumpFd.detachFd();
                     nativeSandboxedProcessMain(
-                            SandboxedProcessService.this, mIPCFd.detachFd(), crashFd);
+                            SandboxedProcessService.this, mIPCFd.detachFd(), minidumpFd,
+                            mChromePakFd.detachFd(), mLocalePakFd.detachFd());
                 } catch (InterruptedException e) {
                     Log.w(TAG, MAIN_THREAD_NAME + " startup failed: " + e);
                 }
@@ -199,10 +209,11 @@ class SandboxedProcessService extends Service {
 
      *
      * @param ipcFd File descriptor to use for ipc.
-     * @param crashFd File descriptor for signaling crashes.
+     * @param minidumpFd File descriptor where minidumps can be written.
      */
     private static native void nativeSandboxedProcessMain(
-        SandboxedProcessService service, int ipcFd, int crashFd);
+            SandboxedProcessService service, int ipcFd, int minidumpFd, int chromePakFd,
+            int localePakFd);
 
     /**
      * Force the sandboxed process to exit.

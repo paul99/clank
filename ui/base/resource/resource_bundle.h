@@ -21,6 +21,8 @@
 #include "base/gtest_prod_util.h"
 #include "base/memory/ref_counted_memory.h"
 #include "base/memory/scoped_ptr.h"
+#include "base/memory/scoped_vector.h"
+#include "base/platform_file.h"
 #include "base/string16.h"
 #include "base/string_piece.h"
 #include "ui/base/ui_export.h"
@@ -82,6 +84,10 @@ class UI_EXPORT ResourceBundle {
   // defined by the Cocoa UI (ie-NSBundle does the langange work).
   static std::string InitSharedInstanceWithLocale(
       const std::string& pref_locale);
+
+  // Initialize the ResourceBundle using given file.
+  static void InitSharedInstanceWithPaks(base::PlatformFile locale_file,
+                                         base::PlatformFile chrome_file);
 
   // Initialize the ResourceBundle using given data pack path for testing.
   static void InitSharedInstanceWithPakFile(const FilePath& path);
@@ -155,6 +161,12 @@ class UI_EXPORT ResourceBundle {
   // system have changed, for example, when the locale has changed.
   void ReloadFonts();
 
+  // Returns the full pathname of the locale file to load.  May return an empty
+  // string if no locale data files are found.
+  // Used on Android to load the local file in the browser process and pass it
+  // to the sandboxed renderer process.
+  static FilePath GetLocaleFilePath(const std::string& app_locale);
+
   // Overrides the path to the pak file from which the locale resources will be
   // loaded. Pass an empty path to undo.
   void OverrideLocalePakForTest(const FilePath& pak_path);
@@ -202,15 +214,16 @@ class UI_EXPORT ResourceBundle {
   class LoadedDataPack {
    public:
     explicit LoadedDataPack(const FilePath& path);
+    explicit LoadedDataPack(base::PlatformFile file);
     ~LoadedDataPack();
     bool GetStringPiece(int resource_id, base::StringPiece* data) const;
     RefCountedStaticMemory* GetStaticMemory(int resource_id) const;
 
    private:
-    void Load();
+    void LoadFromPath(const FilePath& path);
+    void LoadFromFile(base::PlatformFile file);
 
     scoped_ptr<DataPack> data_pack_;
-    FilePath path_;
 
     DISALLOW_COPY_AND_ASSIGN(LoadedDataPack);
   };
@@ -256,10 +269,6 @@ class UI_EXPORT ResourceBundle {
 
   static FilePath GetLargeIconResourcesFilePath();
 #endif
-
-  // Returns the full pathname of the locale file to load.  May return an empty
-  // string if no locale data files are found.
-  static FilePath GetLocaleFilePath(const std::string& app_locale);
 
   // Returns a handle to bytes from the resource |module|, without doing any
   // processing or interpretation of the resource. Returns whether we

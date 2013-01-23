@@ -360,6 +360,23 @@ public class LocationBar extends FrameLayout implements OnClickListener,
             return !TextUtils.equals(previousText, getEditableText());
         }
 
+        /**
+         * Autocompletes the text on the url bar and selects the text that was not entered by the
+         * user. Using append() instead of setText() to preserve the soft-keyboard layout.
+         * @param userText user The text entered by the user.
+         * @param inlineAutocompleteText The suggested autocompletion for the user's text.
+         */
+        public void setAutocompleteText(String userText, String inlineAutocompleteText) {
+            mLocationBar.mAutocompleteIndex = userText.length();
+            if (TextUtils.equals(getText(), userText + inlineAutocompleteText)) return;
+            mLocationBar.mIgnoreURLBarModification = true;
+            append(inlineAutocompleteText);
+            mLocationBar.mSpanList.clear();
+            mLocationBar.updateSnapshotLabelVisibility();
+            setSelection(mLocationBar.mAutocompleteIndex, getText().length());
+            mLocationBar.mIgnoreURLBarModification = false;
+        }
+
         private void scrollToTLD() {
             Editable url = getText();
             if (url == null || url.length() < 1) return;
@@ -647,14 +664,12 @@ public class LocationBar extends FrameLayout implements OnClickListener,
         mNavigationButtonType = NavigationButtonType.GLOBE;
 
         mSecurityButton = (ImageButton) findViewById(R.id.security_button);
-        mSecurityButton.setOnClickListener(this);
         mSecurityIconType = SecurityLevel.NONE;
 
         mSnapshotPrefixLabel = (TextView) findViewById(R.id.snapshot_prefix_label);
         assert mSnapshotPrefixLabel != null : "Missing snapshot prefix view.";
 
         mDeleteButton = (ImageButton) findViewById(R.id.delete_button);
-        mDeleteButton.setOnClickListener(this);
 
         mUrlBar = (UrlBar) findViewById(R.id.url_bar);
         mUrlBar.setHint(R.string.type_to_search);
@@ -675,7 +690,6 @@ public class LocationBar extends FrameLayout implements OnClickListener,
         mSuggestionListAdapter = new OmniboxPopupAdapter(getContext(), this, mSuggestionItems);
 
         mMicButton = (ImageButton) findViewById(R.id.mic_button);
-        mMicButton.setOnClickListener(this);
 
         mUiHandler = new Handler();
     }
@@ -733,6 +747,10 @@ public class LocationBar extends FrameLayout implements OnClickListener,
     @Override
     public void onNativeLibraryReady() {
         mNativeLocationBar = nativeInit();
+
+        mSecurityButton.setOnClickListener(this);
+        mMicButton.setOnClickListener(this);
+        mDeleteButton.setOnClickListener(this);
 
         mUrlBar.setOnKeyListener(new OnKeyListener() {
             @Override
@@ -972,7 +990,7 @@ public class LocationBar extends FrameLayout implements OnClickListener,
         for (Runnable deferredRunnable : mDeferredNativeRunnables) {
             post(deferredRunnable);
         }
-        mDeferredNativeRunnables = null;
+        mDeferredNativeRunnables.clear();
     }
 
     /**
@@ -1588,7 +1606,7 @@ public class LocationBar extends FrameLayout implements OnClickListener,
     public void setSearchQuery(final String query) {
         if (TextUtils.isEmpty(query)) return;
 
-        if (mNativeLocationBar <= 0) {
+        if (mNativeLocationBar == 0) {
             mDeferredNativeRunnables.add(new Runnable() {
                 @Override
                 public void run() {
@@ -1734,10 +1752,7 @@ public class LocationBar extends FrameLayout implements OnClickListener,
             // suggestions are displayed first.
             postDelayed(mInstantTrigger, OMNIBOX_SUGGESTION_START_DELAY_MS);
             if (!"".equals(inlineAutocompleteText)) {
-                mAutocompleteIndex = userText.length();
-                String newText = userText + inlineAutocompleteText;
-                setUrlBarText(newText, false);
-                mUrlBar.setSelection(mAutocompleteIndex, mUrlBar.getText().length());
+                mUrlBar.setAutocompleteText(userText, inlineAutocompleteText);
             }
         }
 

@@ -31,9 +31,9 @@
 RenderWidgetHostViewAndroid::RenderWidgetHostViewAndroid(
     RenderWidgetHost* widget_host, const base::WeakPtr<ChromeView>& chrome_view)
     : host_(widget_host),
-      // ChromeView represents the Java View. If it is 0, it means that it is
-      // not attached to the View system yet, so we treat it as hidden.
-      is_hidden_(!chrome_view),
+      // In m18, we only support TextureView version. is_hidden_ will be reset when the
+      // SurfaceTexture is attached.
+      is_hidden_(true),
       chrome_view_(chrome_view),
       ime_adapter_android_(ALLOW_THIS_IN_INITIALIZER_LIST(this)),
       scroll_active_(false),
@@ -197,7 +197,8 @@ void RenderWidgetHostViewAndroid::ImeUpdateTextInputState(
       static_cast<int>(params.type), params.caret_rect,
       params.value, params.selection_start, params.selection_end,
       params.composition_start, params.composition_end,
-      false /* show_ime_if_needed */);
+      false /* show_ime_if_needed */,
+      params.request_time);
 }
 
 int RenderWidgetHostViewAndroid::GetNativeImeAdapter() {
@@ -314,7 +315,7 @@ void RenderWidgetHostViewAndroid::ProcessTouchEndAck(
       static_cast<int>(params.type), params.caret_rect,
       params.value, params.selection_start, params.selection_end,
       params.composition_start, params.composition_end,
-      true /* show_ime_if_needed */);
+      true /* show_ime_if_needed */, params.request_time);
 }
 
 void RenderWidgetHostViewAndroid::MultipleTargetsTouched(const gfx::Rect& rect,

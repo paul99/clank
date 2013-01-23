@@ -542,6 +542,7 @@ public final class ChromeNativePreferences {
     }
 
     public void setAllowLocationEnabled(boolean allow) {
+        if (allow == mAllowLocationEnabled) return;
         mAllowLocationEnabled = allow;
         nativeSetAllowLocationEnabled(allow);
     }

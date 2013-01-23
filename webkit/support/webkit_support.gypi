@@ -86,7 +86,7 @@
           ],
           'include_dirs': [
             '<(android_src)/frameworks/base/include',
-            '<(android_src)/dalvik/libnativehelper/include', # Needed by AndroidRuntime.h
+            '<(android_src)/libnativehelper/include', # Needed by AndroidRuntime.h
             '<(SHARED_INTERMEDIATE_DIR)/content',
           ],
           'sources': [
@@ -96,8 +96,6 @@
             '<(DEPTH)/content/browser/android/media_player_bridge.h',
             '<(DEPTH)/content/browser/android/media_player_listener.cc',
             '<(DEPTH)/content/browser/android/media_player_listener.h',
-            '<(DEPTH)/content/browser/android/network_info.cc',
-            '<(DEPTH)/content/browser/android/network_info.h',
             '<(DEPTH)/content/browser/android/surface_texture_bridge.cc',
             '<(DEPTH)/content/browser/android/surface_texture_bridge.h',
             '<(DEPTH)/content/browser/android/surface_texture_listener.cc',

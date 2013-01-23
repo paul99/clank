@@ -8,6 +8,7 @@
 #include <jni.h>
 
 #include "base/process.h"
+#include "content/browser/android/surface_texture_bridge.h"
 
 class SurfaceTexturePeer {
  public:
@@ -24,11 +25,12 @@ class SurfaceTexturePeer {
 
   // Establish the producer end for the given surface texture in another
   // process.
-  virtual void EstablishSurfaceTexturePeer(base::ProcessHandle pid,
-                                           SurfaceTextureTarget type,
-                                           jobject j_surface_texture,
-                                           int primary_id,
-                                           int secondary_id) = 0;
+  virtual void EstablishSurfaceTexturePeer(
+      base::ProcessHandle pid,
+      SurfaceTextureTarget type,
+      scoped_refptr<SurfaceTextureBridge> surface_texture,
+      int primary_id,
+      int secondary_id) = 0;
 
  protected:
   SurfaceTexturePeer();

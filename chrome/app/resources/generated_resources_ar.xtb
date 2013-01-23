@@ -8,6 +8,12 @@
 <translation id="8130276680150879341">فصل الشبكة الخاصة</translation>
 <translation id="1058418043520174283"><ph name="INDEX"/> من <ph name="COUNT"/></translation>
 <translation id="4480627574828695486">فصل هذا الحساب...</translation>
+<translation id="2516632596252643567">&lt;p&gt;
+          يمكنك الدخول إلى علامات التبويب التي فتحتها على جهاز الكمبيوتر، مباشرةً من هنا.
+          &lt;/p&gt;
+          &lt;p&gt;
+          لن يلزمك سوى فتح Chrome على جهاز الكمبيوتر، والانتقال إلى القائمة وتحديد &quot;تسجيل الدخول إلى Chrome...&quot;
+          &lt;/p&gt;</translation>
 <translation id="7040807039050164757">التحقق من التد&amp;قيق الإملائي في هذا الحقل</translation>
 <translation id="778579833039460630">لم يتم تلقي أي بيانات</translation>
 <translation id="8791923223854254330">معالجات الإدارة...</translation>
@@ -256,7 +262,7 @@
 <translation id="427208986916971462">يتم ضغط هذا الاتصال باستخدام <ph name="COMPRESSION"/>.</translation>
 <translation id="7548856833046333824">الليمون</translation>
 <translation id="8876215549894133151">التنسيق:</translation>
-<translation id="5234764350956374838">رفض</translation>
+<translation id="5234764350956374838">تجاهل</translation>
 <translation id="40027638859996362">نقل كلمة</translation>
 <translation id="5463275305984126951">فهرس المجلد <ph name="LOCATION"/></translation>
 <translation id="5154917547274118687">الذاكرة</translation>
@@ -1489,15 +1495,6 @@
 <translation id="6342069812937806050">الآن</translation>
 <translation id="5605716740717446121">سيتم تعطيل بطاقة SIM نهائيًا إذا لم تتمكن من إدخال مفتاح إلغاء تأمين رقم التعريف الشخصي الصحيح. عدد المحاولات المتبقية: <ph name="TRIES_COUNT"/></translation>
 <translation id="8836712291807476944"><ph name="SAVED_BYTES"/> / <ph name="TOTAL_BYTES"/> بايت، تمت المقاطعة</translation>
-<translation id="3661943501691646627">&lt;p&gt;
-          يمكنك الدخول إلى علامات التبويب التي فتحتها على جهاز الكمبيوتر، مباشرةً من هنا.
-          &lt;/p&gt;
-          &lt;p&gt;
-          افتح فقط Chrome على الكمبيوتر، وانتقل إلى القائمة، وحدد &quot;تسجيل الدخول إلى Chrome...&quot;
-          &lt;/p&gt;
-          &lt;p&gt;
-          إنها ميزة رائعة حقًا.
-          &lt;/p&gt;</translation>
 <translation id="5502500733115278303">تمّ الاستيراد من متصفّح فايرفوكس</translation>
 <translation id="569109051430110155">الكشف التلقائيّ</translation>
 <translation id="4408599188496843485">م&amp;ساعدة</translation>
@@ -3130,6 +3127,7 @@
 <translation id="8241707690549784388">استخدمت الصفحة التي تبحث عنها المعلومات التي أدخلتها وقد يؤدّي الرجوع إليها  إلى تكرار  جميع الإجراءات السابقة. هل تريد المتابعة؟</translation>
 <translation id="5359419173856026110">لعرض معدل الإطارات الفعلي للصفحة، من خلال عدد الإطارات في الثانية، عندما يكون تسارع الجهاز نشطًا.</translation>
 <translation id="4104163789986725820">ت&amp;صدير...</translation>
+<translation id="5143814737375740231">لا يتوافق Chrome لنظام Android مع هذا المكون الإضافي.</translation>
 <translation id="2113479184312716848">فتح &amp;ملف...</translation>
 <translation id="3314617171364900239">أخفقت عمليات التحقق من التحديث بشكل متكرر مع الإضافة &quot;<ph name="EXTENSION_NAME"/>&quot;.</translation>
 <translation id="4850458635498951714">إضافة جهاز</translation>

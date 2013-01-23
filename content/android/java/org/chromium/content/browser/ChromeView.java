@@ -30,17 +30,17 @@ import android.os.AsyncTask;
 import android.os.Build;
 import android.os.Bundle;
 import android.os.Handler;
+import android.os.Looper;
 import android.os.ResultReceiver;
 import android.os.SystemClock;
-import android.text.StaticLayout;
 import android.text.Layout.Alignment;
+import android.text.StaticLayout;
 import android.text.TextPaint;
 import android.util.AttributeSet;
 import android.util.Log;
 import android.util.Pair;
 import android.view.ActionMode;
 import android.view.ContextMenu;
-import android.view.GestureDetector;
 import android.view.Gravity;
 import android.view.InputDevice;
 import android.view.KeyEvent;
@@ -58,18 +58,16 @@ import android.view.WindowManager;
 import android.view.accessibility.AccessibilityEvent;
 import android.view.accessibility.AccessibilityManager;
 import android.view.accessibility.AccessibilityNodeInfo;
-import android.view.animation.AnimationUtils;
 import android.view.inputmethod.EditorInfo;
 import android.view.inputmethod.InputConnection;
 import android.view.inputmethod.InputMethodManager;
 import android.widget.FrameLayout;
-import android.widget.OverScroller;
-
 
 import org.chromium.base.AccessedByNative;
 import org.chromium.base.CalledByNative;
 import org.chromium.content.browser.legacy.DownloadListener;
 import org.chromium.content.browser.legacy.PluginList;
+import org.chromium.content.browser.third_party.GestureDetector;
 
 import java.lang.reflect.InvocationTargetException;
 import java.lang.reflect.Method;
@@ -183,8 +181,6 @@ public class ChromeView extends FrameLayout implements
         ATTACHEDINNATIVE,
     }
 
-    // The native ID for the compositing surface. Needed when detaching the surface.
-    private int mSurfaceID = 0;
     // While waiting for the native surface destroyed, onDetachedFromWindow will
     // temporarily remove the mTextureView from the system hierarchy.
     private boolean mWaitForNativeSurfaceDestroy = false;
@@ -214,7 +210,7 @@ public class ChromeView extends FrameLayout implements
     private Rect mTileRect;
 
     private GestureDetectorProxy mGestureDetectorProxy;
-    private ScaleGestureDetector mMultiTouchDetector;
+    private ScaleGestureDetector mScaleGestureDetector;
     boolean mIgnoreScaleGestureDetectorEvents = false;
 
     // Currently ChromeView's scrolling is handled by the native side. We keep a cached copy of the
@@ -259,14 +255,32 @@ public class ChromeView extends FrameLayout implements
     // Whether any pinch zoom event has been sent to native.
     private boolean mPinchEventSent;
 
-    // Queue of motion events. If the integer value is EVENT_FORWARDED_TO_NATIVE, it means
-    // that the event has been offered to the native side but not yet acknowledged. If the
+    // Queue of pending motion events. If the offeredToNative() value is EVENT_FORWARDED_TO_NATIVE,
+    // it means that the event has been offered to the native side but not yet acknowledged. If the
     // value is EVENT_NOT_FORWARDED_TO_NATIVE, it means the touch event has not been offered
     // to the native side and can be immediately processed. If the value is
     // EVENT_CONVERTED_TO_CANCEL, it means the native side sent a touch cancel event instead
     // of this event.
-    private final Deque<Pair<MotionEvent, Integer>> mPendingMotionEvents =
-        new ArrayDeque<Pair<MotionEvent, Integer>>();
+    private final Deque<PendingMotionEvent> mPendingMotionEvents =
+        new ArrayDeque<PendingMotionEvent>();
+
+    // Give up on WebKit handling of touch events when this timeout expires.
+    private static final long WEBKIT_TIMEOUT_MILLIS = 200;
+
+    // The timeout time for the most recent pending events.
+    private long mWebKitTimeoutTime;
+
+    // number of pending touch acks we should ignore.
+    private int mPendingTouchAcksToIgnore = 0;
+
+    // Disable the WebKit timeout strategy if webkit is handling the touch events.
+    private boolean mDisableWebKitTimeout = false;
+
+    // WebKit timeout handler.
+    private WebKitTimeoutRunnable mWebKitTimeoutRunnable = new WebKitTimeoutRunnable();
+
+    // Skip sending the touch events to native.
+    private boolean mSkipSendToNative = false;
 
     // Has WebKit told us the current page requires touch events.
     private boolean mNeedTouchEvents = false;
@@ -296,7 +310,6 @@ public class ChromeView extends FrameLayout implements
 
     // Only valid when focused on a text / password field.
     private final ImeAdapter mImeAdapter;
-    private ImeAdapter.AdapterInputConnection mInputConnection;
 
     private SelectionHandleController mSelectionHandleController;
     // These offsets in document space with page scale normalized to 1.0.
@@ -331,12 +344,11 @@ public class ChromeView extends FrameLayout implements
     private long mProfileFPSCount;
     private long mProfileFPSLastTime;
 
-    // Used for showing a temporary bitmap while the actual texture is being drawn.
-    private ArrayList<SurfaceTextureUpdatedListener> mSurfaceTextureUpdatedListeners =
-            new ArrayList<SurfaceTextureUpdatedListener>();
+    private final Handler mHandler = new Handler(Looper.getMainLooper());
 
-    // Displayed in the placeholder view when created or resized.
-    private Bitmap mPrimeBitmap;
+    // Used for showing a temporary bitmap while the actual texture is being drawn.
+    private final ArrayList<SurfaceTextureUpdatedListener> mSurfaceTextureUpdatedListeners =
+            new ArrayList<SurfaceTextureUpdatedListener>();
 
     // Whether a physical keyboard is connected.
     private boolean mKeyboardConnected;
@@ -351,13 +363,54 @@ public class ChromeView extends FrameLayout implements
      */
     public static interface SurfaceTextureUpdatedListener {
         /**
-         * Called when the SurfaceTexture of the TextureView held in this ChromeView has been
-         * updated.
+         * Called when the {@link SurfaceTexture} of the {@link TextureView} held in this
+         * ChromeView has been updated.
          *
          * @param view The ChromeView that was updated.
          */
         public void onSurfaceTextureUpdated(ChromeView view);
+
+        /**
+         * Called when the SurfaceTexture owned by a {@link ExternalSurfaceTextureOwner} has an
+         * available frame. This is not triggering if the {@link SurfaceTexture} is owned by
+         * the {@link TextureView}.
+         * This is a good place to trigger {@link SurfaceTexture#updateTexImage()} then
+         * call {@link #onExternalSurfaceTextureUpdated()}.
+         */
+        public void onFrameAvailable(ChromeView view);
     }
+
+    /** The SurfaceTexture currently being wired to the native producer. */
+    private SurfaceTexture mSurfaceTextureWiredToProducer;
+
+    /**
+    * Allow an external object to own and display the {@link SurfaceTexture} instead of the
+    * {@link TextureView}. The TextureView is still used to create the {@link SurfaceTexture}.
+    */
+    public static interface ExternalSurfaceTextureOwner {
+        /**
+        * Callback called when the {@link TextureView} issue a new {@link SurfaceTexture} bound
+        * to the Producer.
+        * @param surfaceTexture The new {@link SurfaceTexture}. It may be null when the
+        *                       {@link SurfaceTexture} is not fed by the producer anymore.
+        * @param isReady        Whether or not {@code surfaceTexture} is ready to be drawn.  If
+        *                       {@code false}, expect a call to
+        *                       {@link ExternalSurfaceTextureOwner#onSurfaceTextureIsReady()} when
+        *                       {@code surfaceTexture} has a valid frame from the Producer.
+        */
+        public void onNewSurfaceTexture(SurfaceTexture surfaceTexture, boolean isReady);
+
+        /**
+         * Callback called when the {@link SurfaceTexture} has had a valid frame from the Producer.
+         */
+        public void onSurfaceTextureIsReady();
+    }
+
+    /**
+    * The {@link ExternalSurfaceTextureOwner}, When set, it will hi-jack the
+    * {@link SurfaceTexture} from the {@link TextureView}.
+    */
+    private ExternalSurfaceTextureOwner mExternalSurfaceTextureOwner;
 
     /*
      * Here is the snap align logic:
@@ -394,7 +447,7 @@ public class ChromeView extends FrameLayout implements
     private float mAverageAngle;
     private boolean mSeenFirstScroll;
 
-    private AccessibilityInjector mAccessibilityInjector;
+    private final AccessibilityInjector mAccessibilityInjector;
     private AccessibilityManager mAccessibilityManager;
 
     // Temporary notification to tell onSizeChanged to focus a form element,
@@ -424,14 +477,6 @@ public class ChromeView extends FrameLayout implements
      * Cap on the maximum number of renderer processes that can be requested.
      */
     public static final int MAX_RENDERERS_LIMIT = BrowserProcessMain.MAX_RENDERERS_LIMIT;
-
-    /**
-     * Called early in Chrome startup, before the chromeview library has even loaded,
-     * to allow asynchronous initialization tasks to be performed.
-     */
-    public static void preNativeInit(Context context) {
-        SandboxedProcessLauncher.warmUp(context);
-    }
 
     /**
      * Enable multi-process ChromeView. This should be called by the application before constructing
@@ -468,6 +513,13 @@ public class ChromeView extends FrameLayout implements
     private RectF mLastPressRect;
 
     private AutofillWindow mAutofillWindow;
+
+    // Whether the renderer was crashed intentionally and we should auto-reload the page.
+    private boolean mReloadOnCrash = false;
+
+    public void setReloadOnCrash(boolean reload) {
+        mReloadOnCrash = reload;
+    }
 
     public static void registerSadTabResourceId(int id) {
         gSadTabResourceId = id;
@@ -781,15 +833,11 @@ public class ChromeView extends FrameLayout implements
     }
 
     public Bitmap getBitmap(int width, int height) {
-        return getBitmap(width, height, Bitmap.Config.ARGB_8888);
+        return getBitmap(width, height, Bitmap.Config.ARGB_8888, true);
     }
 
     public Bitmap getBitmap(int width, int height, boolean drawTextureViewOverlay) {
         return getBitmap(width, height, Bitmap.Config.ARGB_8888, drawTextureViewOverlay);
-    }
-
-    public Bitmap getBitmap(int width, int height, Bitmap.Config config) {
-        return getBitmap(width, height, config, true);
     }
 
     public Bitmap getBitmap(int width, int height, Bitmap.Config config,
@@ -803,6 +851,10 @@ public class ChromeView extends FrameLayout implements
             }
 
             Bitmap b = Bitmap.createBitmap(width, height, config);
+            // getBitmap may fail and cannot be predicted or checked. Setting the initial color
+            // to the background color is the least disturbing in case of failure.
+            // Note: eraseColor is fast (30x cheaper than getBitmap)
+            b.eraseColor(getBackgroundColor());
             mTextureView.getBitmap(b);
             if (drawTextureViewOverlay) {
                 drawTextureViewOverlay(b);
@@ -818,6 +870,33 @@ public class ChromeView extends FrameLayout implements
         }
     }
 
+    /**
+     * Generates a bitmap of the content that is performance optimized based on capture time.
+     *
+     * <p>
+     * To have a consistent capture time across devices, we will scale down the captured bitmap
+     * where necessary to reduce the time to generate the bitmap.
+     *
+     * @param width The width of the content to be captured.
+     * @param height The height of the content to be captured.
+     * @param drawTextureViewOverlay Whether to draw overlaid Android views on top of the generated
+     *                               bitmap.
+     * @return A pair of the generated bitmap, and the scale that needs to be applied to return the
+     *         bitmap to it's original size (i.e. if the bitmap is scaled down 50%, this
+     *         will be 2).
+     */
+    public Pair<Bitmap, Float> getScaledPerformanceOptimizedBitmap(
+            int width, int height, boolean drawTextureViewOverlay) {
+        float scale = 1f;
+        // On tablets, always scale down to MDPI for performance reasons.
+        // TODO(tedchoc): Share this with Chrome on Android's check.
+        if (getContext().getResources().getConfiguration().smallestScreenWidthDp >= 600) {
+            scale = getContext().getResources().getDisplayMetrics().density;
+        }
+        return Pair.create(
+                getBitmap((int) (width / scale), (int) (height / scale), drawTextureViewOverlay),
+                scale);
+    }
 
     /**
      * @return Whether the ChomeView is covered by an overlay that is more than half
@@ -1339,7 +1418,7 @@ public class ChromeView extends FrameLayout implements
                     }
                     if (mLogFPS || mProfileFPS) logFps();
                 }
-            } else {
+            } else if (!mReloadOnCrash) {
                 mPopupZoomer.hide(false);
                 canvas.drawARGB(0xFF, 0x2E, 0x3F, 0x51);
                 Bitmap sadTabImg = getSadTabBitmap();
@@ -1414,47 +1493,48 @@ public class ChromeView extends FrameLayout implements
             }
         }
 
+        setAccessibilityState(false);
+
         // We expect onDetachedFromWindow() to traverse children first, in which case
         // the TextureView (if any) should already have given up its SurfaceTexture.
-        assert(mTextureView == null || !mTextureView.isAvailable());
-        if (mTextureView != null && mWaitForNativeSurfaceDestroy) {
-            // This avoids creating a new SurfaceTexture, while we have not freed the
-            // the last one. Once the GL thread has detached the surface and we released it,
-            // we will readd the TextureView.
-            removeView(mTextureView);
+        if (mWaitForNativeSurfaceDestroy || mSurfaceTextureWiredToProducer != null) {
+            // If mWaitForNativeSurfaceDestroy is true, we will temporarily remove the TextureView
+            // to avoid creating a new SurfaceTexture, while we have not freed the the last one.
+            // (It gets readded once the GL thread has detached the surface.)
+            // But if the SurfaceTexture is not owned by the TextureView, make sure things
+            // get cleaned up regardless.
+            removeTextureViewAndDetachProducer();
         }
-        setAccessibilityState(false);
     }
 
     private void prepareTextureViewResize(int oldWidth, int oldHeight) {
         assert(mTextureView != null);
         assert(mTextureViewStatus == TextureViewStatus.READY);
+        if (mPlaceholderView.isActive()) return;
         TraceEvent.begin();
         // Grab a placeholder bitmap to display while the renderer is being resized.
-        if (!mPlaceholderView.isActive()) {
-            Bitmap bitmap = null;
-            if (oldWidth > 0 && oldHeight > 0) {
-                try {
-                    // Don't draw the overlay views (false parameter below). Infobars would be shown
-                    // twice (the real one and the one on the bitmap).
-                    bitmap = getBitmap(oldWidth, oldHeight, false);
-                } catch (OutOfMemoryError ex) {
-                    Log.w(TAG, "OutOfMemoryError thrown when trying to grab bitmap for resize.");
-                    // Fail gracefully if we're out of memory.  We don't actually need this bitmap
-                    // to resize.
-                    bitmap = null;
-                }
+        Bitmap bitmap = null;
+        if (oldWidth > 0 && oldHeight > 0) {
+            try {
+                // Don't draw the overlay views (false parameter below). Infobars would be shown
+                // twice (the real one and the one on the bitmap).
+                bitmap = getScaledPerformanceOptimizedBitmap(oldWidth, oldHeight, false).first;
+            } catch (OutOfMemoryError ex) {
+                Log.w(TAG, "OutOfMemoryError thrown when trying to grab bitmap for resize.");
+                // Fail gracefully if we're out of memory.  We don't actually need this bitmap
+                // to resize.
+                bitmap = null;
             }
-            // FIXME: During an orientation change getBitmap() fails silently and gives back an
-            // empty bitmap. Detect this by checking for a transparent black pixel in the lower left
-            // corner (OpenGL origin). Valid web content should never have a transparent root layer.
-            if (bitmap != null && bitmap.getPixel(0, bitmap.getHeight() - 1) != 0) {
-                mPlaceholderView.setBitmap(bitmap, oldWidth, oldHeight);
-            } else {
-                mPlaceholderView.resetBitmap();
-            }
-            mPlaceholderView.show();
         }
+        // FIXME: During an orientation change getBitmap() fails silently and gives back an
+        // empty bitmap. Detect this by checking for a transparent black pixel in the lower left
+        // corner (OpenGL origin). Valid web content should never have a transparent root layer.
+        if (bitmap != null && bitmap.getPixel(0, bitmap.getHeight() - 1) != 0) {
+            mPlaceholderView.setBitmap(bitmap, oldWidth, oldHeight);
+        } else {
+            mPlaceholderView.resetBitmap();
+        }
+        mPlaceholderView.show();
         TraceEvent.end();
     }
 
@@ -1490,17 +1570,17 @@ public class ChromeView extends FrameLayout implements
     @CalledByNative
     private void onNativeWindowDetached() {
         if (mTextureView == null) return;
-        mTextureViewStatus = TextureViewStatus.INITIALIZING;
+        assert(mTextureViewStatus == TextureViewStatus.INITIALIZING);
     }
 
     @CalledByNative
     private void onCompositorResized(long timestamp, int width, int height) {
         TraceEvent.instant("CompositorResized");
+        mCompositorWidth = width;
+        mCompositorHeight = height;
         if (mTextureView == null || mTextureViewStatus == TextureViewStatus.READY) {
             return;
         }
-        mCompositorWidth = width;
-        mCompositorHeight = height;
         // This function may be called during initialization and we do actually want to call
         // updateTextureViewStatus only after a proper resize.
         if (mTextureViewStatus == TextureViewStatus.RESIZING) {
@@ -1545,6 +1625,9 @@ public class ChromeView extends FrameLayout implements
                     mPlaceholderView.hideLater();
                 }
                 mTextureViewStatus = TextureViewStatus.READY;
+                if (mExternalSurfaceTextureOwner != null) {
+                    mExternalSurfaceTextureOwner.onSurfaceTextureIsReady();
+                }
                 break;
             default:
                 Log.e(TAG, "TextureViewStatus " + mTextureViewStatus + " not handled");
@@ -1577,11 +1660,20 @@ public class ChromeView extends FrameLayout implements
         // If the TextureView is in use, the renderer size change will be triggered in
         // onSurfaceTextureSizeChanged instead. This is to ensure the SurfaceTexture is resized
         // before the renderer is notified.
-        if (mTextureView != null && mTextureViewStatus == TextureViewStatus.READY &&
+
+        boolean externalSurfaceTextureOwner = mExternalSurfaceTextureOwner != null &&
+                mSurfaceTextureWiredToProducer != null;
+
+        if (!externalSurfaceTextureOwner && mTextureView != null &&
+                mTextureViewStatus == TextureViewStatus.READY &&
                 (mTextureView.getMeasuredWidth() != mTextureView.getWidth() ||
                 mTextureView.getMeasuredHeight() != mTextureView.getHeight())) {
             prepareTextureViewResize(ow, oh);
         } else if (mNativeChromeView != 0) {
+            if (externalSurfaceTextureOwner) {
+                SurfaceTextureSwapConsumer.setDefaultBufferSize(
+                        mSurfaceTextureWiredToProducer, w, h);
+            }
             nativeSetSize(mNativeChromeView, w, h);
             updateAfterSizeChanged();
         }
@@ -1660,14 +1752,13 @@ public class ChromeView extends FrameLayout implements
     @Override
     public InputConnection onCreateInputConnection(EditorInfo outAttrs) {
         if (!mImeAdapter.hasTextInputType()) {
-            // Although the input connection is null, the EditorInfo is still used by the
-            // InputMethodService. Need to make sure the IME doesn't enter fullscreen mode.
+            // Although onCheckIsTextEditor will return false in this case, the EditorInfo
+            // is still used by the InputMethodService. Need to make sure the IME doesn't
+            // enter fullscreen mode.
             outAttrs.imeOptions = EditorInfo.IME_FLAG_NO_FULLSCREEN;
-            return null;
         }
-        mInputConnection = ImeAdapter.AdapterInputConnection.getInstance(this, mImeAdapter,
+        return ImeAdapter.AdapterInputConnection.getInstance(this, mImeAdapter,
                 outAttrs);
-        return mInputConnection;
     }
 
     @Override
@@ -1741,7 +1832,20 @@ public class ChromeView extends FrameLayout implements
             endFling();
         }
 
+        if (event.getAction() == MotionEvent.ACTION_DOWN) {
+            // A new gesture has started, clear all the flags for draining the queue or
+            // disabling the timeout. If the pending queue has entries, we cannot clear
+            // mDisableWebKitTimeout as the ACTION_UP event could be in the queue.
+            // ConsumeTouchEvents() will help us clear mDisableWebKitTimeout when it encounters
+            // that ACTION_UP.
+            if (mPendingMotionEvents.isEmpty() && mDisableWebKitTimeout)
+                mDisableWebKitTimeout = false;
+            if (mSkipSendToNative)
+                mSkipSendToNative = false;
+        }
+
         undoScrollFocusedEditableNodeIntoViewIfNeeded(false);
+
         if (offerTouchEventToNative(event)) {
             // offerTouchEventToNative returns true to indicate the event was sent
             // to the render process. If it is not subsequently handled, it will
@@ -2009,10 +2113,21 @@ public class ChromeView extends FrameLayout implements
         }
     }
 
+    private class WebKitTimeoutRunnable implements Runnable {
+        @Override
+        public void run() {
+            // WebKit is busy handling sth and the touch event we sent don't result in any acks.
+            // drain all the touch events for the current gesture, and increase the number of
+            // acks to ignore.
+            consumePendingTouchEvents(false, true);
+            mPendingTouchAcksToIgnore++;
+        }
+    }
+
     private boolean offerTouchEventToNative(MotionEvent event) {
         mGestureDetectorProxy.onOfferTouchEventToNative(event);
 
-        if (!mNeedTouchEvents) {
+        if (!mNeedTouchEvents || mSkipSendToNative) {
             return false;
         }
 
@@ -2024,17 +2139,17 @@ public class ChromeView extends FrameLayout implements
             // Avoid flooding the renderer process with move events: if the previous pending
             // command is also a move (common case), skip sending this event to the webkit
             // side and collapse it into the pending event.
-            Pair<MotionEvent, Integer> previousEvent = mPendingMotionEvents.peekLast();
-            if (previousEvent != null && previousEvent.second == EVENT_FORWARDED_TO_NATIVE
-                    && previousEvent.first.getActionMasked() == MotionEvent.ACTION_MOVE
-                    && previousEvent.first.getPointerCount() == event.getPointerCount()) {
+            PendingMotionEvent previousEvent = mPendingMotionEvents.peekLast();
+            if (previousEvent != null && previousEvent.offeredToNative() == EVENT_FORWARDED_TO_NATIVE
+                    && previousEvent.event().getActionMasked() == MotionEvent.ACTION_MOVE
+                    && previousEvent.event().getPointerCount() == event.getPointerCount()) {
                 MotionEvent.PointerCoords[] coords =
                     new MotionEvent.PointerCoords[event.getPointerCount()];
                 for (int i = 0; i < coords.length; ++i) {
                     coords[i] = new MotionEvent.PointerCoords();
                     event.getPointerCoords(i, coords[i]);
                 }
-                previousEvent.first.addBatch(event.getEventTime(), coords, event.getMetaState());
+                previousEvent.event().addBatch(event.getEventTime(), coords, event.getMetaState());
                 return true;
             }
         }
@@ -2046,14 +2161,133 @@ public class ChromeView extends FrameLayout implements
             mNativeChromeView != 0) {
             int forwarded = nativeTouchEvent(mNativeChromeView, type, event.getEventTime(), pts);
             if (forwarded != EVENT_NOT_FORWARDED_TO_NATIVE || !mPendingMotionEvents.isEmpty()) {
+                // If the event is converted to a touch cancel, make it timeout immediately so that
+                // we will handle it as soon as we encounter it in the pending queue.
+                long timeoutTime = SystemClock.uptimeMillis();
+                if (forwarded == EVENT_FORWARDED_TO_NATIVE)
+                    timeoutTime = timeoutTime + WEBKIT_TIMEOUT_MILLIS;
                 // Copy the event, as the original may get mutated after this method returns.
-                mPendingMotionEvents.add(Pair.create(MotionEvent.obtain(event), forwarded));
-                // TODO(joth): If needed, start a watchdog timer to pump mPendingMotionEvents
-                // in the case of the WebKit renderer / JS being unresponsive.
+                PendingMotionEvent pendingEvent = new PendingMotionEvent(MotionEvent.obtain(event),
+                        timeoutTime, forwarded);
+                // If mDisableWebKitTimeout is true, the webkit is interested in processing the
+                // current gesture. As a result, don't fire the timer. The timer will be fired after
+                // we encounter an ACTION_UP.
+                if (mPendingMotionEvents.isEmpty() && !mDisableWebKitTimeout) {
+                    mWebKitTimeoutTime = pendingEvent.timeoutTime();
+                    mHandler.postAtTime(mWebKitTimeoutRunnable, mWebKitTimeoutTime);
+                }
+                mPendingMotionEvents.add(pendingEvent);
                 return true;
             }
         }
         return false;
+    }
+
+
+    private void consumePendingTouchEvents(boolean handled, boolean timeout) {
+        if (mPendingMotionEvents.isEmpty()) {
+            Log.w(TAG, "consumePendingTouchEvent with Empty pending list!");
+            return;
+        }
+        TraceEvent.begin();
+        PendingMotionEvent event = mPendingMotionEvents.removeFirst();
+        if (!handled || event.offeredToNative() == EVENT_CONVERTED_TO_CANCEL) {
+            if (!processTouchEvent(event.event())) {
+                // TODO(joth): If the Java side gesture handler also fails to consume
+                // this deferred event, should it be bubbled up to the parent view?
+                Log.w(TAG, "Unhandled deferred touch event");
+            }
+        } else {
+            mDisableWebKitTimeout = true;
+            // Need to pass the touch event to ScaleGestureDetector so that its internal
+            // state won't go wrong. But instruct the listener to do nothing as the
+            // renderer already handles the touch event.
+            mIgnoreScaleGestureDetectorEvents = true;
+            try {
+                mScaleGestureDetector.onTouchEvent(event.event());
+            } catch (Exception e) {
+                Log.e(TAG, "ScaleGestureDetector got into a bad state!");
+                assert(false);
+            }
+        }
+
+        // Clean up the timer.
+        if (mWebKitTimeoutTime == event.timeoutTime())
+            mHandler.removeCallbacks(mWebKitTimeoutRunnable);
+
+        boolean withinSameTouchSequence = (event.event().getAction() != MotionEvent.ACTION_UP);
+
+        // If timeout is true, we need to drain the pending queue until we reach an
+        // ACTION_UP event.
+        boolean continueToDrain = timeout && withinSameTouchSequence;
+
+        // Record the current mDisableWebKitTimeout value to check whether WebKit is handling the current
+        // touch sequence.
+        boolean touchHandledByWebKit = mDisableWebKitTimeout;
+
+        // We need to disable the timeout until we reach an ACTION_UP event.
+        mDisableWebKitTimeout = mDisableWebKitTimeout && withinSameTouchSequence;
+
+        // We may have pending events that could cancel the timers:
+        // For instance, if we received an UP before the DOWN completed
+        // its roundtrip (so it didn't cancel the timer during onTouchEvent()).
+        mGestureDetectorProxy.cancelLongPressIfNeeded(mPendingMotionEvents.iterator());
+
+        // Now process all events that are either:
+        // 1. in the queue but not sent to the native.
+        // 2. or we are in a draining mode and we still haven't encountered the ACTION_UP event.
+        PendingMotionEvent nextEvent = mPendingMotionEvents.peekFirst();
+        while (nextEvent != null && (nextEvent.offeredToNative() == EVENT_NOT_FORWARDED_TO_NATIVE
+                || continueToDrain)) {
+            withinSameTouchSequence = (nextEvent.event().getAction() != MotionEvent.ACTION_UP);
+            continueToDrain = continueToDrain && withinSameTouchSequence;
+            mDisableWebKitTimeout = mDisableWebKitTimeout && withinSameTouchSequence;
+            processTouchEvent(nextEvent.event());
+            mPendingMotionEvents.removeFirst();
+            nextEvent.event().recycle();
+            // In draining mode, if a event is sent to the native, we need to ignore its ack.
+            if (nextEvent.offeredToNative() != EVENT_NOT_FORWARDED_TO_NATIVE)
+                mPendingTouchAcksToIgnore++;
+            nextEvent = mPendingMotionEvents.peekFirst();
+        }
+
+        if (nextEvent != null && !mDisableWebKitTimeout) {
+            mWebKitTimeoutTime = nextEvent.timeoutTime();
+            // Fire another timer for the next task.
+            if (touchHandledByWebKit && nextEvent.event().getAction() == MotionEvent.ACTION_DOWN
+                    && nextEvent.offeredToNative() == EVENT_FORWARDED_TO_NATIVE) {
+                // A new touch sequence could be queued up while WebKit is processing the
+                // previous one. In this case, the new sequence could have already missed
+                // its timeout. To handle this, we give the ACTION_DOWN another 200 ms to
+                // wait for the ack. If WebKit handles the touch down, we will proceed to
+                // handle the whole sequence. Otherwise, the rest of the sequence will
+                // timeout as usual.
+                mHandler.postAtTime(mWebKitTimeoutRunnable,
+                        SystemClock.uptimeMillis() + WEBKIT_TIMEOUT_MILLIS);
+            } else {
+                mHandler.postAtTime(mWebKitTimeoutRunnable, mWebKitTimeoutTime);
+            }
+        }
+
+        if (nextEvent == null && continueToDrain) {
+            // We could reach here while we are still in the middle of a gesture event.
+            // Stop sending all the touch events to native until next ACTION_UP.
+            // And send a touch cancel to the WebKit to cancel the current touch event.
+            assert(!mSkipSendToNative);
+            mSkipSendToNative = true;
+            if (mNativeChromeView != 0) {
+                MotionEvent ev = event.event();
+                ev.setAction(MotionEvent.ACTION_CANCEL);
+                TouchPoint[] pts = new TouchPoint[ev.getPointerCount()];
+                int type = TouchPoint.createTouchPoints(ev, pts);
+                int forwarded = nativeTouchEvent(mNativeChromeView, type, ev.getEventTime(), pts);
+                // If the event is forwarded to WebKit, just ignore the ack.
+                if (forwarded != EVENT_NOT_FORWARDED_TO_NATIVE)
+                    mPendingTouchAcksToIgnore++;
+            }
+        }
+        event.event().recycle();
+        TraceEvent.end();
     }
 
     private boolean processTouchEvent(MotionEvent event) {
@@ -2067,8 +2301,7 @@ public class ChromeView extends FrameLayout implements
         // "Last finger raised" could be an end to movement.  However,
         // give the mSimpleTouchDetector a chance to continue
         // scrolling with a fling.
-        if ((event.getAction() == MotionEvent.ACTION_UP) &&
-            (event.getPointerCount() == 1)) {
+        if ((event.getAction() == MotionEvent.ACTION_UP)) {
             if (mNativeScrolling) {
                 possiblyEndMovement = true;
             }
@@ -2082,13 +2315,9 @@ public class ChromeView extends FrameLayout implements
             handled |= mGestureDetectorProxy.onTouchEvent(event);
         }
 
-        // TODO: Need to deal with multi-touch transition
-        // Pass all touches (single or multiple) to ScaleGestureDetector, because it needs a
-        // consistent event stream to operate properly.  It won't take any action with fewer than
-        // two touch pointers, but it needs to update internal bookkeeping state.
         mIgnoreScaleGestureDetectorEvents = false;
         try {
-            handled |= mMultiTouchDetector.onTouchEvent(event);
+            handled |= mScaleGestureDetector.onTouchEvent(event);
         } catch (Exception e) {
             Log.e(TAG, "ScaleGestureDetector got into a bad state!");
             assert(false);
@@ -2107,11 +2336,11 @@ public class ChromeView extends FrameLayout implements
     private void onTabCrash(int pid) {
         getChromeViewClient().onTabCrash(pid);
         // Remove the attached TextureView as the tab is crashed.
-        if (mTextureView != null) {
-            removeView(mTextureView);
+        if (!mReloadOnCrash && mTextureView != null) {
+            removeTextureViewAndDetachProducer();
             mTextureView = null;
         }
-        if (mPlaceholderView != null) {
+        if (!mReloadOnCrash && mPlaceholderView != null) {
             removeView(mPlaceholderView);
             mPlaceholderView = null;
         }
@@ -2222,13 +2451,30 @@ public class ChromeView extends FrameLayout implements
         mWebViewLegacy = new WebViewLegacy(this);
         // As it checks the CommandLine, it needs to be called after nativeInit()
         mLogFPS = CommandLine.getInstance().hasSwitch(CommandLine.LOG_FPS);
+
         // We should set this constant based on the GPU performance. As it doesn't exist in the
-        // framework yet, we use the memory class as an indicator.
-        // There is no magic behind this. For the current generation hardwares, we can scroll
-        // 1~3 rows per 100ms. This just tries to match it.
+        // framework yet, we use the memory class as an indicator. Here are some good values that
+        // we determined via manual experimentation:
+        //
+        // Device            Screen size        Memory class   Tiles per 100ms
+        // ================= ================== ============== =====================
+        // Nexus S            480 x  800         128            9 (3 rows portrait)
+        // Galaxy Nexus       720 x 1280         256           12 (3 rows portrait)
+        // Nexus 7           1280 x  800         384           18 (3 rows landscape)
+        // M tablet          2560 x 1600         512           44 (4 rows landscape)
+        //
+        // Here is a spreadsheet with the data, plus a curve fit: http://goto/max_num_upload_tiles
+        // That gives us tiles-per-100ms of 8, 13, 22, 37 for the devices listed above.
+        // Not too bad, and it should behave reasonably sensibly for unknown devices.
+        // If you want to tweak these constants, please update the spreadsheet appropriately.
+        //
+        // The curve is y = b * m^x, with coefficients as follows:
+        double b = 4.70009671080384;
+        double m = 1.00404437546897;
         int memoryClass = ((ActivityManager) context.getSystemService(Context.ACTIVITY_SERVICE))
                 .getLargeMemoryClass();
-        MAX_NUM_UPLOAD_TILES = memoryClass / 32 + 4;
+        MAX_NUM_UPLOAD_TILES = (int) Math.round(b * Math.pow(m, memoryClass));
+
         mKeyboardConnected = getResources().getConfiguration().keyboard
                 != Configuration.KEYBOARD_NOKEYS;
         initVSync(context);
@@ -2480,8 +2726,8 @@ public class ChromeView extends FrameLayout implements
                         if (!mSeenFirstScroll) {
                             mAverageAngle = calculateDragAngle(distanceX, distanceY);
                             // Initial scroll event
-                            if (mMultiTouchDetector == null
-                                    || !mMultiTouchDetector.isInProgress()) {
+                            if (mScaleGestureDetector == null
+                                    || !mScaleGestureDetector.isInProgress()) {
                                 // if it starts nearly horizontal or vertical, enforce it
                                 if (mAverageAngle < HSLOPE_TO_START_SNAP) {
                                     mSnapScrollMode = SNAP_HORIZ;
@@ -2507,8 +2753,8 @@ public class ChromeView extends FrameLayout implements
                                     mSnapScrollMode = SNAP_NONE;
                                 }
                             } else {
-                                if (mMultiTouchDetector == null
-                                        || !mMultiTouchDetector.isInProgress()) {
+                                if (mScaleGestureDetector == null
+                                        || !mScaleGestureDetector.isInProgress()) {
                                     if (mAverageAngle < HSLOPE_TO_START_SNAP) {
                                         mSnapScrollMode = SNAP_HORIZ;
                                         mAverageAngle = (mAverageAngle + ANGLE_HORIZ) / 2;
@@ -2600,16 +2846,24 @@ public class ChromeView extends FrameLayout implements
                         // want to trigger the tap event at UP. So we override
                         // onSingleTapUp() in this case. This assumes singleTapUp
                         // gets always called before singleTapConfirmed.
-                        if (!mIgnoreSingleTap && !mGestureDetectorProxy.isInLongPress() &&
-                                (e.getEventTime() - e.getDownTime() > DOUBLE_TAP_TIMEOUT)) {
-                            float x = e.getX();
-                            float y = e.getY();
-                            if (mNativeChromeView != 0) {
-                                nativeSingleTap(mNativeChromeView, (int) x, (int) y, true);
+                        if (!mIgnoreSingleTap && !mGestureDetectorProxy.isInLongPress()) {
+                            if (e.getEventTime() - e.getDownTime() > DOUBLE_TAP_TIMEOUT) {
+                                float x = e.getX();
+                                float y = e.getY();
+                                if (mNativeChromeView != 0) {
+                                    nativeSingleTap(mNativeChromeView, (int) x, (int) y, true);
+                                    mIgnoreSingleTap = true;
+                                }
+                                setClickXAndY((int) x, (int) y);
+                                return true;
+                            } else if (mNativeMinimumScale == mNativeMaximumScale) {
+                                // If page is not user scalable, we don't need to wait
+                                // for double tap timeout.
+                                float x = e.getX();
+                                float y = e.getY();
+                                handleTapOrPress(x, y, false);
                                 mIgnoreSingleTap = true;
                             }
-                            setClickXAndY((int) x, (int) y);
-                            return true;
                         }
                         return false;
                     }
@@ -2638,7 +2892,7 @@ public class ChromeView extends FrameLayout implements
 
                     @Override
                     public void onLongPress(MotionEvent e) {
-                        if (mMultiTouchDetector == null || !mMultiTouchDetector.isInProgress()) {
+                        if (mScaleGestureDetector == null || !mScaleGestureDetector.isInProgress()) {
                             float x = e.getX();
                             float y = e.getY();
                             handleTapOrPress(x, y, true);
@@ -2667,7 +2921,7 @@ public class ChromeView extends FrameLayout implements
             mGestureDetectorProxy = new GestureDetectorProxy(
                 context, new GestureDetector(context, listener), listener);
 
-            mMultiTouchDetector = new ScaleGestureDetector(
+            mScaleGestureDetector = new ScaleGestureDetector(
                 context, new ScaleGestureDetector.OnScaleGestureListener() {
 
                     @Override
@@ -2703,6 +2957,8 @@ public class ChromeView extends FrameLayout implements
                         // that pinchBy() is called without any pinchBegin().
                         // To solve this problem, we call pinchBegin() here if it is never called.
                         if (!mPinchEventSent) {
+                            startNativeScrolling((int) detector.getFocusX(),
+                                    (int) detector.getFocusY());
                             pinchBegin();
                             mPinchEventSent = true;
                         }
@@ -3002,6 +3258,11 @@ public class ChromeView extends FrameLayout implements
         }
 
         Handler handler = getHandler();
+        if (handler == null) {
+            mDeferredUndoHideHandleRunnableScheduled = false;
+            return;
+        }
+
         if (mDeferredUndoHideHandleRunnableScheduled) {
             mDeferredUndoHideHandleRunnableScheduled = false;
             handler.removeCallbacks(mDeferredUndoHideHandleRunnable);
@@ -3201,27 +3462,28 @@ public class ChromeView extends FrameLayout implements
     private void imeUpdateAdapter(int nativeImeAdapterAndroid, int textInputType,
             int cursorX, int cursorY, int cursorBottom, int cursorRight,
             String text, int selectionStart, int selectionEnd,
-            int compositionStart, int compositionEnd, boolean showImeIfNeeded) {
+            int compositionStart, int compositionEnd, boolean showImeIfNeeded,
+            long requestTime) {
         TraceEvent.begin();
 
         // Non-breaking spaces can cause the IME to get confused. Replace with normal spaces.
         text = text.replace('\u00A0', ' ');
 
         mSelectionEditable = (textInputType != ImeAdapter.sTextInputTypeNone);
-        if (!mKeyboardConnected || ImeAdapter.isDialogInputType(textInputType)) {
-            mImeAdapter.attachAndShowIfNeeded(nativeImeAdapterAndroid, textInputType,
-                    text, showImeIfNeeded);
+        if (mActionMode != null) mActionMode.invalidate();
+
+        mImeAdapter.attachAndShowIfNeeded(nativeImeAdapterAndroid, textInputType,
+                text, showImeIfNeeded);
+
+        // In WebKit if there's a composition then the selection may be the
+        // same as the composition, whereas Android IMEs expect the selection to be
+        // just a caret at the end of the composition.
+        if (selectionStart == compositionStart && selectionEnd == compositionEnd) {
+            selectionStart = selectionEnd;
         }
-        if (mInputConnection != null) {
-            // In WebKit if there's a composition then the selection will usually be the
-            // same as the composition, whereas Android IMEs expect the selection to be
-            // just a caret at the end of the composition.
-            if (selectionStart == compositionStart && selectionEnd == compositionEnd) {
-                selectionStart = selectionEnd;
-            }
-            mInputConnection.setEditableText(text, selectionStart, selectionEnd,
-                    compositionStart, compositionEnd);
-        }
+        mImeAdapter.setEditableText(text, selectionStart, selectionEnd,
+                compositionStart, compositionEnd, requestTime);
+
         InputMethodManager manager = (InputMethodManager)
                 getContext().getSystemService(Context.INPUT_METHOD_SERVICE);
         if (manager.isWatchingCursor(this)) {
@@ -3265,46 +3527,14 @@ public class ChromeView extends FrameLayout implements
     @SuppressWarnings("unused")
     @CalledByNative
     private void confirmTouchEvent(boolean handled) {
-        if (mPendingMotionEvents.isEmpty()) {
-            Log.w(TAG, "confirmTouchEvent with Empty pending list!");
+        if (mPendingTouchAcksToIgnore > 0) {
+            // Webkit finished processing the touch event, but the touch event has
+            // already be consumed by gesture detector.
+            mPendingTouchAcksToIgnore--;
             return;
         }
-        TraceEvent.begin();
-        Pair<MotionEvent, Integer> event = mPendingMotionEvents.removeFirst();
-        if (!handled || event.second == EVENT_CONVERTED_TO_CANCEL) {
-            if (!processTouchEvent(event.first)) {
-                // TODO(joth): If the Java side gesture handler also fails to consume
-                // this deferred event, should it be bubbled up to the parent view?
-                Log.w(TAG, "Unhandled deferred touch event");
-            }
-        } else {
-            // Need to pass the touch event to ScaleGestureDetector so that its internal
-            // state won't go wrong. But instruct the listener to do nothing as the
-            // renderer already handles the touch event.
-            mIgnoreScaleGestureDetectorEvents = true;
-            try {
-                mMultiTouchDetector.onTouchEvent(event.first);
-            } catch (Exception e) {
-                Log.e(TAG, "ScaleGestureDetector got into a bad state!");
-                assert(false);
-            }
-        }
 
-        // Now process all events that are in the queue but not sent to the native.
-        Pair<MotionEvent, Integer> nextEvent = mPendingMotionEvents.peekFirst();
-        while (nextEvent != null && nextEvent.second == EVENT_NOT_FORWARDED_TO_NATIVE) {
-            processTouchEvent(nextEvent.first);
-            mPendingMotionEvents.removeFirst();
-            nextEvent.first.recycle();
-            nextEvent = mPendingMotionEvents.peekFirst();
-        }
-
-        // We may have pending events that could cancel the timers:
-        // For instance, if we received an UP before the DOWN completed
-        // its roundtrip (so it didn't cancel the timer during onTouchEvent()).
-        mGestureDetectorProxy.cancelLongPressIfNeeded(mPendingMotionEvents.iterator());
-        event.first.recycle();
-        TraceEvent.end();
+        consumePendingTouchEvents(handled, false);
     }
 
     @SuppressWarnings("unused")
@@ -3315,8 +3545,13 @@ public class ChromeView extends FrameLayout implements
         // call this method to set mNeedTouchEvents to false. We use this as
         // an indicator to clear the pending motion events so that events from
         // the previous page will not be carried over to the new page.
-        if (!mNeedTouchEvents)
+        if (!mNeedTouchEvents) {
             mPendingMotionEvents.clear();
+            mHandler.removeCallbacks(mWebKitTimeoutRunnable);
+            mPendingTouchAcksToIgnore = 0;
+            mDisableWebKitTimeout = false;
+            mSkipSendToNative = false;
+        }
     }
 
     @SuppressWarnings("unused")
@@ -3449,12 +3684,152 @@ public class ChromeView extends FrameLayout implements
         getChromeViewClient().showSelectFileDialog(dialog);
     }
 
+
+    private void addTextureView() {
+        if (mTextureView != null && indexOfChild(mTextureView) == -1) {
+            addView(mTextureView, 0, new FrameLayout.LayoutParams(
+                    ViewGroup.LayoutParams.WRAP_CONTENT,
+                    ViewGroup.LayoutParams.WRAP_CONTENT));
+        }
+    }
+
+    private void removeTextureView() {
+        if (mTextureView != null) {
+            removeView(mTextureView);
+        }
+    }
+
+    private void removeTextureViewAndDetachProducer() {
+        ExternalSurfaceTextureOwner externalOwner = mExternalSurfaceTextureOwner;
+        if (externalOwner != null) {
+            externalOwner.onNewSurfaceTexture(null, false);
+            // Setting the External to null to force the release of the SurfaceTexture.
+            mExternalSurfaceTextureOwner = null;
+        }
+        // This avoids creating a new SurfaceTexture, while we have not freed the
+        // the last one. Once the GL thread has detached the surface and we released it,
+        // we will re-add the TextureView.
+        if (mTextureView != null && indexOfChild(mTextureView) != -1) {
+            removeView(mTextureView);
+        } else if (mTextureView != null && mSurfaceTextureWiredToProducer != null) {
+            // In case the ChromeView is detached from the Window we still need to release the
+            // producer. As the TextureView does not own the SurfaceTexture the producer need to
+            // be detached manually.
+            TextureView.SurfaceTextureListener listener = mTextureView.getSurfaceTextureListener();
+            listener.onSurfaceTextureDestroyed(mSurfaceTextureWiredToProducer);
+        }
+        mExternalSurfaceTextureOwner = externalOwner;
+    }
+
+    /**
+    * Set an {@link ExternalSurfaceTextureOwner} that will take ownership of the TextureView's
+    * {@link SurfaceTexture}.
+    * Be sure to call {@link #onExternalSurfaceTextureUpdated()} when the {@link SurfaceTexture}
+    * get updated with {@link SurfaceTexture#updateTexImage()}.
+    * @return Whether the {@link ExternalSurfaceTextureOwner} has been updated as intended.
+    */
+    public boolean setExternalSurfaceTextureOwner(ExternalSurfaceTextureOwner owner) {
+        if (!SurfaceTextureSwapConsumer.isSupported()) return false;
+        if (mExternalSurfaceTextureOwner == owner) return true;
+        if (mExternalSurfaceTextureOwner != null) {
+            mExternalSurfaceTextureOwner.onNewSurfaceTexture(null, false);
+        }
+        mExternalSurfaceTextureOwner = owner;
+
+        // If there is no TextureView yet, then the owner may be notified later when the
+        // SurfaceTexture get created.
+        if (mTextureView == null) return true;
+
+        // Taking the SurfaceTexture from the TextureView
+        if (owner != null) {
+            if (indexOfChild(mTextureView) == -1) {
+                owner.onNewSurfaceTexture(mSurfaceTextureWiredToProducer, isReady());
+            } else {
+                // removeView will eventually call owner.onNewSurfaceTexture
+                removeTextureView();
+            }
+        // Giving back the SurfaceTexture to the TextureView
+        } else {
+            if (mSurfaceTextureWiredToProducer != null) {
+                mSurfaceTextureWiredToProducer.setOnFrameAvailableListener(null);
+                SurfaceTextureSwapConsumer.setSurfaceTexture(
+                        mTextureView, mSurfaceTextureWiredToProducer);
+            }
+            addTextureView();
+        }
+        return true;
+    }
+
+    /**
+     * To be called by the {@link ExternalSurfaceTextureOwner} after the {@link SurfaceTexture}
+     * get updated with {@link SurfaceTexture#updateTexImage()}.
+     */
+    public void onExternalSurfaceTextureUpdated() {
+        assert ThreadUtils.runningOnUiThread() : "This must run on the UI thread";
+        if (mExternalSurfaceTextureOwner != null && mSurfaceTextureWiredToProducer != null) {
+            onProducerFrameUpdated(mSurfaceTextureWiredToProducer);
+        }
+    }
+
+    private final Runnable mProducerFrameAvailableRunnable = new Runnable() {
+        @Override
+        public void run() {
+            assert ThreadUtils.runningOnUiThread() : "This must run on the UI thread";
+            if (mSurfaceTextureUpdatedListeners != null) {
+                final int listenerSize = mSurfaceTextureUpdatedListeners.size();
+                for (int i = 0; i < listenerSize; ++i) {
+                    mSurfaceTextureUpdatedListeners.get(i).onFrameAvailable(ChromeView.this);
+                }
+            }
+        }
+    };
+
+    private void onProducerFrameUpdated(SurfaceTexture surfaceTexture) {
+        TraceEvent.instant("onSurfaceTextureUpdated");
+
+        // TODO(dtrainor, jrg): We may have unmatched end calls; fix to match?
+        // perf(dtrainor): Please don't rename or remove.
+        PerfTraceEvent.end("TabStrip:TabSelected");
+
+        // perf(dtrainor): Please don't rename or remove.
+        PerfTraceEvent.end("TabStrip:TabClosed");
+        mCompositorFrameTimestamp = surfaceTexture.getTimestamp();
+
+        boolean previousReadyStatus = isReady();
+
+        updateTextureViewStatus();
+        updateVSync();
+
+        if (mSurfaceTextureUpdatedListeners != null) {
+            final int listenerSize = mSurfaceTextureUpdatedListeners.size();
+            for (int i = 0; i < listenerSize; ++i) {
+                mSurfaceTextureUpdatedListeners.get(i).onSurfaceTextureUpdated(ChromeView.this);
+            }
+        }
+
+        if (mLogFPS || mProfileFPS) logFps();
+
+        if (TraceEvent.enabled()) {
+            getHandler().postAtFrontOfQueue(new Runnable() {
+                @Override
+                public void run() {
+                    bufferSwapped();
+                } });
+        }
+
+        // Since we are triple-buffered our SwapBuffers ACK is sent now after we
+        // dequeued the new frame, since that essentially means a new buffer is
+        // available to the producer to render into.
+        if (mNativeChromeView != 0)
+            nativeAcknowledgeSwapBuffers(mNativeChromeView);
+    }
+
     @CalledByNative
     private void activateHardwareAcceleration(boolean activated, final int pid, final int type,
             final int primaryID, final int secondaryID) {
         if (!activated) {
             if (mTextureView != null) {
-                removeView(mTextureView);
+                removeTextureViewAndDetachProducer();
                 removeView(mPlaceholderView);
                 mTextureView = null;
                 mPlaceholderView = null;
@@ -3465,7 +3840,7 @@ public class ChromeView extends FrameLayout implements
         TraceEvent.begin();
         if (mTextureView != null) {
             Log.w("ChromeView", "We should have only one attached TextureView. Hmm...");
-            removeView(mTextureView);
+            removeTextureViewAndDetachProducer();
             mTextureViewStatus = TextureViewStatus.INITIALIZING;
         }
         if (mPlaceholderView != null) {
@@ -3476,10 +3851,18 @@ public class ChromeView extends FrameLayout implements
         mTextureView = new TextureView(getContext());
 
         TextureView.SurfaceTextureListener listener = new TextureView.SurfaceTextureListener() {
+            private int mSurfaceID = 0;
 
             @Override
             public void onSurfaceTextureAvailable(SurfaceTexture surfaceTexture,
                     int width, int height) {
+                // TODO(jscholler): remove this ugly test once the onSurfaceTextureAvailable()
+                // callback is not called after SetSurfaceTexture
+                if (mSurfaceTextureWiredToProducer != null) {
+                    assert mSurfaceID != 0;
+                    return;
+                }
+                mSurfaceTextureWiredToProducer = surfaceTexture;
                 Surface surface = new Surface(surfaceTexture);
                 // pid == 0 means the current process is the target process.
                 if (pid == 0) {
@@ -3494,16 +3877,55 @@ public class ChromeView extends FrameLayout implements
                     surface.release();
                 }
                 mSurfaceID = nativeGetSurfaceID(secondaryID, primaryID);
+
+                // In case the externalSurfaceTexture owner is set it steals the SurfaceTexture.
+                if (mExternalSurfaceTextureOwner != null) {
+                    mHandler.postAtFrontOfQueue(new Runnable() {
+                        @Override
+                        public void run() {
+                            removeTextureView();
+                        }
+                    });
+                }
             }
 
             @Override
             public void onSurfaceTextureSizeChanged(SurfaceTexture surface, int width,
                     int height) {
-                beginTextureViewResize(getWidth(), getHeight());
+                if (width != mCompositorWidth || height != mCompositorHeight) {
+                    beginTextureViewResize(getWidth(), getHeight());
+                }
             }
 
             @Override
             public boolean onSurfaceTextureDestroyed(final SurfaceTexture surfaceTexture) {
+                if (mExternalSurfaceTextureOwner != null) {
+                    surfaceTexture.setOnFrameAvailableListener(
+                            new SurfaceTexture.OnFrameAvailableListener() {
+                                @Override
+                                public void onFrameAvailable(SurfaceTexture surfaceTexture) {
+                                    // Make sure the event is propagated from the UI thread.
+                                    if (ThreadUtils.runningOnUiThread()) {
+                                        mProducerFrameAvailableRunnable.run();
+                                    } else {
+                                        mHandler.postAtFrontOfQueue(mProducerFrameAvailableRunnable);
+                                    }
+                                }
+                            });
+                    mExternalSurfaceTextureOwner.onNewSurfaceTexture(surfaceTexture, isReady());
+                    return false;
+                }
+
+                // This will kill the current rendering GL surface.  So we should clear the cached
+                // compositor width and height.
+                mCompositorWidth = 0;
+                mCompositorHeight = 0;
+
+                assert surfaceTexture == mSurfaceTextureWiredToProducer :
+                    "unexpected SurfaceTexture destroyed";
+                mSurfaceTextureWiredToProducer = null;
+
+                if (mSurfaceID == 0 || surfaceTexture == null) return false;
                 // TODO(sievers): Do this more properly after crbug.com/119006.
                 // Right now the problem is that routing back a reply through IPC is flaky for the
                 // purpose of releasing the surface, because the view can go away at any time.
@@ -3526,10 +3948,7 @@ public class ChromeView extends FrameLayout implements
                             mWaitForNativeSurfaceDestroy = false;
                             // We removed the TextureView to avoid creating another SurfaceTexture
                             // while were detaching the previous one.
-                            if (mTextureView != null && indexOfChild(mTextureView) == -1)
-                                addView(mTextureView, 0, new FrameLayout.LayoutParams(
-                                    ViewGroup.LayoutParams.WRAP_CONTENT,
-                                    ViewGroup.LayoutParams.WRAP_CONTENT));
+                            addTextureView();
                         }
                     }.execute();
                 } else {
@@ -3542,13 +3961,12 @@ public class ChromeView extends FrameLayout implements
                             finalSurfaceTexture.release();
                         }
                     }, 2000);
-                    if (mTextureView != null && indexOfChild(mTextureView) == -1)
-                        addView(mTextureView, 0, new FrameLayout.LayoutParams(
-                                ViewGroup.LayoutParams.WRAP_CONTENT,
-                                ViewGroup.LayoutParams.WRAP_CONTENT));
-                    mTextureViewStatus = TextureViewStatus.INITIALIZING;
+                    addTextureView();
                 }
-                mPlaceholderView.show();
+                mTextureViewStatus = TextureViewStatus.INITIALIZING;
+                if (mPlaceholderView != null) {
+                    mPlaceholderView.show();
+                }
 
                 mSurfaceID = 0;
                 return false;
@@ -3556,64 +3974,21 @@ public class ChromeView extends FrameLayout implements
 
             @Override
             public void onSurfaceTextureUpdated(SurfaceTexture surfaceTexture) {
-                TraceEvent.instant("onSurfaceTextureUpdated");
-
-                // TODO(dtrainor, jrg): We may have unmatched end calls; fix to match?
-                // perf(dtrainor): Please don't rename or remove.
-                PerfTraceEvent.end("TabStrip:TabSelected");
-
-                // perf(dtrainor): Please don't rename or remove.
-                PerfTraceEvent.end("TabStrip:TabClosed");
-                mCompositorFrameTimestamp = surfaceTexture.getTimestamp();
-
-                updateTextureViewStatus();
-                updateVSync();
-
-                if (mSurfaceTextureUpdatedListeners != null) {
-                    final int listenerSize = mSurfaceTextureUpdatedListeners.size();
-                    for (int i = 0; i < listenerSize; ++i) {
-                        mSurfaceTextureUpdatedListeners.get(i).onSurfaceTextureUpdated(
-                                ChromeView.this);
-                    }
-                }
-
-                if (mLogFPS || mProfileFPS) logFps();
-
-                if (TraceEvent.enabled()) {
-                    getHandler().postAtFrontOfQueue(new Runnable() {
-                        @Override
-                        public void run() {
-                            bufferSwapped();
-                        } });
-                }
-
-                // Since we are triple-buffered our SwapBuffers ACK is sent now after we
-                // dequeued the new frame, since that essentially means a new buffer is
-                // available to the producer to render into.
-                if (mNativeChromeView != 0)
-                    nativeAcknowledgeSwapBuffers(mNativeChromeView);
+                onProducerFrameUpdated(surfaceTexture);
             }
         };
+
         mTextureView.setSurfaceTextureListener(listener);
         // Make TextureView not focusable so that all the events goes to ChromeView.
         mTextureView.setFocusable(false);
         mTextureView.setFocusableInTouchMode(false);
-        // TODO change to absolute layout
-        addView(mTextureView, 0, new FrameLayout.LayoutParams(
-                ViewGroup.LayoutParams.WRAP_CONTENT,
-                ViewGroup.LayoutParams.WRAP_CONTENT));
+        addTextureView();
 
         // Add the PlaceHolderView on top so it can obscure possibly invalid content in the
         // TextureView. The view is shown until the first frame from the renderer after a resize.
         // As framework doesn't support requestLayout (which is called by addView) inside layout,
         // we need to add it first and adjust visibility later.
         mPlaceholderView = new PlaceholderView(getContext(), this);
-        if (mPrimeBitmap != null) {
-            mPlaceholderView.setBitmap(mPrimeBitmap, mPrimeBitmap.getWidth(),
-                    mPrimeBitmap.getHeight());
-            mPrimeBitmap = null;
-        }
-
         addView(mPlaceholderView);
 
         TraceEvent.end();
@@ -3623,21 +3998,6 @@ public class ChromeView extends FrameLayout implements
     // trace event.
     private void bufferSwapped() {
         TraceEvent.instant("bufferSwapped");
-    }
-
-    /**
-     * In order to make sure we don't show white when we have a bitmap containing the previously
-     * drawn frame of this ChromeView before it was hidden, we want to show the bitmap while we
-     * render the content and then swap them out, so the user perceived latency is shorter.  In
-     * software rendering mode we can just prime the backing store at the native level.  However
-     * for hardware rendering mode we have to show an ImageView in front of the TextureView, but
-     * behind the NTP Toolbar View.
-     *
-     * @param bitmap The bitmap to show while this ChromeView is rendering content.
-     * @hide
-     */
-    public void usePrimeBitmap(Bitmap bitmap) {
-        mPrimeBitmap = bitmap;
     }
 
     /**
@@ -3675,14 +4035,9 @@ public class ChromeView extends FrameLayout implements
     /**
      * Called (from native) when page loading begins.
      */
-    @SuppressWarnings("unused")
-    @CalledByNative
-    private void didStartLoading() {
-        hidePopupDialog();
-    }
-
     @CalledByNative
     private void onPageStarted() {
+        hidePopupDialog();
         mAccessibilityInjector.onPageLoadStarted();
     }
 
@@ -3825,7 +4180,13 @@ public class ChromeView extends FrameLayout implements
      * content could allow an attacker to manipulate the host application in
      * unintended ways, executing Java code with the permissions of the host
      * application. Use extreme care when using this method in a WebView which
-     * could contain untrusted content.
+     * could contain untrusted content. To combat this, try setting
+     * {@code allowInheritedMethods} to {@code false} so that no super methods
+     * will be allowed to be called.  This protects JavaScript from potentially
+     * accessing dangerous methods like {@link Object#getClass()} or
+     * {@link Class#getClassLoader()}.  As an additional security measure, try to
+     * make sure none of your allowed methods allow JavaScript to get access to a
+     * raw {@link Object} class.
      * <li> JavaScript interacts with Java object on a private, background
      * thread of the WebView. Care is therefore required to maintain thread
      * safety.</li>
@@ -3833,10 +4194,12 @@ public class ChromeView extends FrameLayout implements
      * @param object The Java object to inject into the WebView's JavaScript
      *               context. Null values are ignored.
      * @param name The name used to expose the instance in JavaScript.
+     * @param allowInheritedMethods Whether or not to allow inherited methods to be called in
+     *                              JavaScript.
      */
-    public void addJavascriptInterface(Object object, String name) {
+    public void addJavascriptInterface(Object object, String name, boolean allowInheritedMethods) {
         if (mNativeChromeView != 0 && object != null) {
-            nativeAddJavascriptInterface(mNativeChromeView, object, name);
+            nativeAddJavascriptInterface(mNativeChromeView, object, name, allowInheritedMethods);
         }
     }
 
@@ -3859,6 +4222,15 @@ public class ChromeView extends FrameLayout implements
         getChromeViewClient().addShortcutToBookmark(url, title, favicon, rValue, gValue, bValue);
 
     }
+
+    /**
+     * Called when the mobile promo action asks to send an email.
+     */
+    @CalledByNative
+    private void promoSendEmail(String email, String subj, String body, String inv) {
+        getChromeViewClient().promoSendEmail(email, subj, body, inv);
+    }
+
 
     // The following methods are implemented at native side.
 
@@ -4022,7 +4394,7 @@ public class ChromeView extends FrameLayout implements
     private native void nativeOnHide(int nativeChromeView, boolean requestByActivity);
 
     private native void nativeAddJavascriptInterface(int nativeChromeView, Object object,
-                                                     String name);
+                                                     String name, boolean allowInheritedMethods);
     private native void nativeRemoveJavascriptInterface(int nativeChromeView, String name);
 
     private native int nativeGetNativeImeAdapter(int nativeChromeView);
@@ -4433,7 +4805,9 @@ public class ChromeView extends FrameLayout implements
      * @hide
      */
     public boolean isAvailable() {
-        return mTextureView != null && mTextureView.isAvailable();
+        return mTextureView != null &&
+                mExternalSurfaceTextureOwner == null &&
+                mTextureView.isAvailable();
     }
 
     /**

@@ -57,7 +57,9 @@
 #include "content/browser/device_orientation/device_orientation_android.h"
 #include "content/browser/geolocation/android_location_api_adapter.h"
 #include "content/browser/in_process_webkit/webkit_thread.h"
+#include "content/browser/media/media_player_delegate_android.h"
 #include "content/browser/notification_service_impl.h"
+#include "content/browser/renderer_host/render_view_host.h"
 #include "content/gpu/gpu_process.h"
 #include "content/public/browser/plugin_service.h"
 #include "content/public/browser/render_process_host.h"
@@ -82,31 +84,81 @@
 
 using base::android::CheckException;
 using base::android::ConvertJavaStringToUTF8;
+using base::android::GetClass;
+using base::android::GetMethodID;
 using base::android::ScopedJavaLocalRef;
 using content::BrowserThread;
+using content::RenderProcessHost;
 
 namespace {
 
+void SetSurfaceTexturePeer(
+    base::ProcessHandle pid,
+    int primary_id,
+    int secondary_id,
+    scoped_refptr<SurfaceTextureBridge> surface_texture) {
+  int renderer_id = 0;
+  RenderProcessHost::iterator it = RenderProcessHost::AllHostsIterator();
+  while (!it.IsAtEnd()) {
+    if (it.GetCurrentValue()->GetHandle() == pid) {
+      renderer_id = it.GetCurrentValue()->GetID();
+      break;
+    }
+    it.Advance();
+  }
+
+  JNIEnv* env = base::android::AttachCurrentThread();
+  DCHECK(env);
+  if (renderer_id) {
+    RenderViewHost* host = RenderViewHost::FromID(renderer_id, primary_id);
+    if (host) {
+      MediaPlayerBridge* player = host->media_player_delegate()->GetPlayer(
+          secondary_id);
+      if (player && !player->fullscreen()) {
+        player->SetVideoSurfaceTexture(
+            surface_texture->j_surface_texture().obj());
+        return;
+      }
+    }
+  }
+
+  LOG(INFO) << "Cannot pass surface texture to any MediaPlayerBridge with pid:"
+            << pid <<", routing ID: " << primary_id << ", player ID:"
+            << secondary_id;
+}
+
 class SurfaceTexturePeerBrowserImpl : public SurfaceTexturePeer {
  public:
-  SurfaceTexturePeerBrowserImpl() {
+  SurfaceTexturePeerBrowserImpl(bool in_renderer_process)
+      : in_renderer_process_(in_renderer_process) {
   }
 
   virtual ~SurfaceTexturePeerBrowserImpl() {
   }
 
-  virtual void EstablishSurfaceTexturePeer(base::ProcessHandle pid,
-                                           SurfaceTextureTarget type,
-                                           jobject j_surface_texture,
-                                           int primary_id,
-                                           int secondary_id) {
+  virtual void EstablishSurfaceTexturePeer(
+      base::ProcessHandle pid,
+      SurfaceTextureTarget type,
+      scoped_refptr<SurfaceTextureBridge> surface_texture,
+      int primary_id,
+      int secondary_id) {
+    if (!surface_texture)
+      return;
+
     JNIEnv* env = base::android::AttachCurrentThread();
     DCHECK(env);
-    Java_BrowserProcessMain_establishSurfaceTexturePeer(env, pid, type,
-        j_surface_texture, primary_id, secondary_id);
+    if (in_renderer_process_) {
+      Java_BrowserProcessMain_establishSurfaceTexturePeer(env, pid, type,
+          surface_texture->j_surface_texture().obj(), primary_id, secondary_id);
+    } else {
+      BrowserThread::PostTask(BrowserThread::UI, FROM_HERE,
+          base::Bind(&SetSurfaceTexturePeer, pid, primary_id, secondary_id,
+              surface_texture));
+    }
   }
 
  private:
+  bool in_renderer_process_;
   DISALLOW_COPY_AND_ASSIGN(SurfaceTexturePeerBrowserImpl);
 };
 
@@ -348,6 +400,12 @@ void ChromeViewBrowserMain(
     setenv("GCOV_PREFIX", gcov_prefix_strip.c_str(), 1);
   }
 
+  if (parsed_command_line.HasSwitch(switches::kMediaPlayerInRenderProcess)) {
+    SurfaceTexturePeer::InitInstance(new SurfaceTexturePeerBrowserImpl(true));
+  } else {
+    SurfaceTexturePeer::InitInstance(new SurfaceTexturePeerBrowserImpl(false));
+  }
+
   // Register internal Chrome schemes so they'll be parsed correctly. This must
   // happen before we process any URLs with the affected schemes, and must be
   // done in all processes that work with these URLs (i.e. including renderers).
@@ -521,7 +579,6 @@ static void InitBrowserProcess(JNIEnv* env, jclass /* clazz */,
 #if defined (USE_LINUX_BREAKPAD)
   InitCrashReporter();
 #endif
-  SurfaceTexturePeer::InitInstance(new SurfaceTexturePeerBrowserImpl());
   device_orientation::DeviceOrientationAndroid::Init(env);
   webkit_glue::InitUserAgent(GetUserAgentOSInfo(), GetUserAgentMobile(),
       GetUserAgentChromeVersionInfo());

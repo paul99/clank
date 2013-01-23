@@ -17,6 +17,8 @@
 #include "base/file_util.h"
 #include "base/logging.h"
 #include "base/memory/scoped_ptr.h"
+#include "base/path_service.h"
+#include "base/platform_file.h"
 #include "content/browser/android/sandboxed_process_launcher.h"
 #include "content/public/browser/browser_thread.h"
 #include "content/public/browser/content_browser_client.h"
@@ -37,7 +39,8 @@ class ChildProcessLauncher::Context
         client_thread_id_(BrowserThread::UI),
         termination_status_(base::TERMINATION_STATUS_NORMAL_TERMINATION),
         exit_code_(content::RESULT_CODE_NORMAL_EXIT),
-        terminate_child_on_shutdown_(true) {
+        terminate_child_on_shutdown_(true),
+        starting_(true) {
   }
 
   void Launch(
@@ -47,13 +50,66 @@ class ChildProcessLauncher::Context
       Client* client) {
     client_ = client;
     CHECK(BrowserThread::GetCurrentThreadIdentifier(&client_thread_id_));
+    BrowserThread::PostTask(
+        BrowserThread::PROCESS_LAUNCHER, FROM_HERE,
+        base::Bind(
+            &Context::OpenPakFiles,
+            make_scoped_refptr(this),
+            environ,
+            ipcfd,
+            cmd_line,
+            client_thread_id_));
+  }
+
+  void OpenPakFiles(const base::environment_vector& environ,
+                    int ipcfd,
+                    CommandLine* cmd_line,
+                    BrowserThread::ID client_thread_id) {
+    CHECK(BrowserThread::CurrentlyOn(BrowserThread::PROCESS_LAUNCHER));
+
+    // Load the chrome.pak file.
+    FilePath data_path;
+    PathService::Get(base::DIR_ANDROID_APP_DATA, &data_path);
+    DCHECK(!data_path.empty());
+    data_path = data_path.AppendASCII("paks").AppendASCII("chrome.pak");
+    int flags = base::PLATFORM_FILE_OPEN | base::PLATFORM_FILE_READ;
+    base::PlatformFile chrome_pak_fd =
+        base::CreatePlatformFile(data_path, flags, NULL, NULL);
+    if (chrome_pak_fd == base::kInvalidPlatformFileValue)
+      NOTREACHED() << "Failed to open " << data_path.value();
+
+    // Load the local pak file.
+    const std::string locale =
+        content::GetContentClient()->browser()->GetApplicationLocale();
+    // Ideally we would call ResourceBundle::GetLocaleFilePath() to get the
+    // locale pak file path, but it would be a dependency violation to access
+    // ui/resources.
+    FilePath locale_pak_path;
+    PathService::Get(base::DIR_ANDROID_APP_DATA, &locale_pak_path);
+    locale_pak_path = locale_pak_path.Append(FILE_PATH_LITERAL("paks"));
+    locale_pak_path = locale_pak_path.AppendASCII(locale + ".pak");
+    base::PlatformFile locale_pak_fd =
+        base::CreatePlatformFile(locale_pak_path, flags, NULL, NULL);
+    if (locale_pak_fd == base::kInvalidPlatformFileValue)
+      NOTREACHED() << "Failed to open " << locale_pak_path.value();
+
+#if defined(USE_LINUX_BREAKPAD)
+    minidump_fd_ = content::GetContentClient()->browser()->CreateMinidumpFile();
+    if (minidump_fd_ == base::kInvalidPlatformFileValue) {
+      LOG(ERROR) << "Failed to create file for minidump, crash reporting will be "
+          "disabled for this process.";
+    }
+#else
+    minidump_fd_ = base::kInvalidPlatformFileValue;
+#endif
+
+
     // On Android it's safe to call through to Context.bindService from any
-    // thread, so we don't impose any additional restrictions here. Happily it's
-    // also better performing to do this directly on the client (e.g. UI) thread
-    // than introduce additional thread bouncing here; see http://b/5035061.
+    // thread, so we don't bounce to the UI thread here.
     // (But note the current java-side implementation does actually do a
     // thread switch to call bindService(), see http://b/5694925.)
-    LaunchInternal(environ, ipcfd, cmd_line);
+    LaunchInternal(environ, ipcfd, minidump_fd_, chrome_pak_fd, locale_pak_fd,
+                   cmd_line, client_thread_id);
   }
 
   void ResetClient() {
@@ -68,57 +124,55 @@ class ChildProcessLauncher::Context
   }
 
   // SandboxedProcessClient
-  virtual void OnSandboxedProcessStarted(base::ProcessHandle handle) {
-    // Only invoke the client callback synchronously if we're already on the
-    // correct thread and the pending connection exists (i.e. we're not still
-    // inside the synchronous call into StartSandboxedProcess).
-    if (BrowserThread::CurrentlyOn(client_thread_id_) &&
-        pending_connection_.obj()) {
+  virtual void OnSandboxedProcessStarted(BrowserThread::ID client_thread_id,
+                                         base::ProcessHandle handle) {
+    if (BrowserThread::CurrentlyOn(client_thread_id)) {
+      // This is always invoked on the UI thread which is commonly the
+      // |client_thread_id| so we can shortcut one PostTask.
       Notify(handle);
     } else {
       BrowserThread::PostTask(
-          client_thread_id_, FROM_HERE,
+          client_thread_id, FROM_HERE,
           base::Bind(
               &ChildProcessLauncher::Context::Notify,
-              this,
+              make_scoped_refptr(this),
               handle));
     }
   }
+
+  int minidump_fd() const { return minidump_fd_; }
 
  private:
   friend class base::RefCountedThreadSafe<ChildProcessLauncher::Context>;
   friend class ChildProcessLauncher;
 
   virtual ~Context() {
-    if (pending_connection_.obj()) {
-      file_util::ScopedFD ipcfd_closer(&ipcfd_);
-      content::browser::android::CancelStartSandboxedProcess(
-          pending_connection_);
-      pending_connection_.Reset();
-    }
     Terminate();
   }
 
   void LaunchInternal(
       const base::environment_vector& env,
       int ipcfd,
-      CommandLine* cmd_line) {
-    int crashfd =
-        content::GetContentClient()->browser()->GetCrashSignalFD(*cmd_line);
-
+      int minidump_fd,
+      int chrome_pak_fd,
+      int locale_pak_fd,
+      CommandLine* cmd_line,
+      BrowserThread::ID client_thread_id) {
     scoped_ptr<CommandLine> cmd_line_deleter(cmd_line);
     // We need to close the client end of the IPC channel to reliably detect
     // child termination. We will close this fd after we create the child
     // process.
     ipcfd_ = ipcfd;
-    pending_connection_.Reset(content::browser::android::StartSandboxedProcess(
-        cmd_line->argv(), ipcfd, crashfd, this));
+    content::browser::android::StartSandboxedProcess(
+        cmd_line->argv(), ipcfd, minidump_fd, chrome_pak_fd, locale_pak_fd,
+        base::Bind(&ChildProcessLauncher::Context::OnSandboxedProcessStarted,
+            make_scoped_refptr(this), client_thread_id));
   }
 
   void Notify(base::ProcessHandle handle) {
     // Setup the ipcfd closer.
     file_util::ScopedFD ipcfd_closer(&ipcfd_);
-    pending_connection_.Reset();
+    starting_ = false;
     process_.set_handle(handle);
     if (client_) {
       client_->OnProcessLaunched();
@@ -143,9 +197,10 @@ class ChildProcessLauncher::Context
     process_.set_handle(base::kNullProcessHandle);
   }
 
-  void SetProcessBackgrounded(bool background) {
-    DCHECK(!pending_connection_.obj());
-    process_.SetProcessBackgrounded(background);
+  static void SetProcessBackgrounded(base::ProcessHandle handle,
+                                     bool background) {
+    base::Process process(handle);
+    process.SetProcessBackgrounded(background);
   }
 
   Client* client_;
@@ -157,12 +212,11 @@ class ChildProcessLauncher::Context
   // shutdown. Default behavior is to terminate the child.
   bool terminate_child_on_shutdown_;
 
-  // |pending_connection_| is used as an opaque handle, only valid while the
-  // new child process is being started. Like other members, it is only modified
-  // on the client thread.
-  base::android::ScopedJavaGlobalRef<jobject> pending_connection_;
+  int minidump_fd_;
+
   // The fd to close after creating the process.
   int ipcfd_;
+  bool starting_;
 };
 
 
@@ -181,7 +235,7 @@ ChildProcessLauncher::~ChildProcessLauncher() {
 }
 
 bool ChildProcessLauncher::IsStarting() {
-  return context_->pending_connection_.obj();
+  return context_->starting_;
 }
 
 base::ProcessHandle ChildProcessLauncher::GetHandle() {
@@ -221,7 +275,7 @@ void ChildProcessLauncher::SetProcessBackgrounded(bool background) {
       BrowserThread::PROCESS_LAUNCHER, FROM_HERE,
       base::Bind(
           &ChildProcessLauncher::Context::SetProcessBackgrounded,
-          context_.get(),
+          GetHandle(),
           background));
 }
 
@@ -229,4 +283,8 @@ void ChildProcessLauncher::SetTerminateChildOnShutdown(
   bool terminate_on_shutdown) {
   if (context_)
     context_->set_terminate_child_on_shutdown(terminate_on_shutdown);
+}
+
+int ChildProcessLauncher::GetMinidumpFD() {
+  return context_->minidump_fd();
 }

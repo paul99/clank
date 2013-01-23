@@ -8,6 +8,12 @@
 <translation id="8130276680150879341">Koble fra privat nettverk</translation>
 <translation id="1058418043520174283"><ph name="INDEX"/> av <ph name="COUNT"/></translation>
 <translation id="4480627574828695486">Koble fra denne kontoen</translation>
+<translation id="2516632596252643567">&lt;p&gt;
+          Bruk fanene du har åpne på datamaskinen din her.
+          &lt;/p&gt;
+          &lt;p&gt;
+          Du bare åpner Chrome på datamaskinen, går til menyen, og velger «Logg deg på Chrome».
+          &lt;/p&gt;</translation>
 <translation id="7040807039050164757">&amp;Kontroller stavingen i dette feltet</translation>
 <translation id="778579833039460630">Ingen data mottatt</translation>
 <translation id="8791923223854254330">Administrer behandlere</translation>
@@ -168,7 +174,7 @@
 <translation id="2610260699262139870">Fa&amp;ktisk størrelse</translation>
 <translation id="4535734014498033861">Tilkobling til mellomtjener mislyktes.</translation>
 <translation id="558170650521898289">Verifisering av maskinvaredriver for Microsoft Windows</translation>
-<translation id="98515147261107953">Landskap</translation>
+<translation id="98515147261107953">Liggende</translation>
 <translation id="7283017298745748614">Her er det ingenting å se. Åpne noen andre faner i Chrome på de andre enheten dine og bruk dem her.</translation>
 <translation id="8974161578568356045">Automatisk sporing</translation>
 <translation id="1818606096021558659">Side</translation>
@@ -401,8 +407,7 @@
 <translation id="479280082949089240">Denne siden har lagret informasjonskapsler på datamaskinen</translation>
 <translation id="4198861010405014042">Delt tilgang</translation>
 <translation id="6204930791202015665">Vis...</translation>
-<translation id="2996517907915747146"><ph name="PRODUCT_NAME"/>
-          kan ikke vise nettsiden. Dette skyldes at den mobile enheten din ikke er tilkoblet Internett.</translation>
+<translation id="2996517907915747146"><ph name="PRODUCT_NAME"/>-feil: Nettsiden kan ikke vises fordi enheten din ikke har nettilkobling.</translation>
 <translation id="5941343993301164315">Logg deg på <ph name="TOKEN_NAME"/>.</translation>
 <translation id="1916935104118658523">Skjul dette programtillegget</translation>
 <translation id="1046059554679513793">Dette navnet er allerede i bruk!</translation>
@@ -483,7 +488,7 @@
 <translation id="1995173078718234136">Skanner innhold ...</translation>
 <translation id="5979681173469464041">Fokus på neste panel</translation>
 <translation id="4735819417216076266">Inndatastil med bruk av mellomromstast</translation>
-<translation id="220138918934036434">Skjul-knappen</translation>
+<translation id="220138918934036434">Skjul knappen</translation>
 <translation id="5374359983950678924">Endre bilde</translation>
 <translation id="2859738163554174612">Tilby aldri å logge meg på</translation>
 <translation id="5158548125608505876">Ikke synkroniser passordene mine</translation>
@@ -1513,15 +1518,6 @@ annet sertifikat, kan du prøve å bruke dette. Ellers kan du forsøke å
 <translation id="6342069812937806050">Akkurat nå</translation>
 <translation id="5605716740717446121">SIM-kortet ditt blir permanent deaktivert hvis du ikke angir riktig opplåsingskode. Antall gjenværende forsøk: <ph name="TRIES_COUNT"/></translation>
 <translation id="8836712291807476944"><ph name="SAVED_BYTES"/> / <ph name="TOTAL_BYTES"/> byte, avbrutt</translation>
-<translation id="3661943501691646627">&lt;p&gt;
-          Få tilgang til fanene du har åpnet på datamaskinen din, akkurat her.
-          &lt;/p&gt;
-          &lt;p&gt;
-          Du bare åpner Chrome på datamaskinen, går til menyen, og velger «Logg på Chrome».
-          &lt;/p&gt;
-          &lt;p&gt;
-          Det er skikkelig kult.
-          &lt;/p&gt;</translation>
 <translation id="5502500733115278303">Importert fra Firefox</translation>
 <translation id="569109051430110155">Automatisk sporing</translation>
 <translation id="4408599188496843485">H&amp;jelp</translation>
@@ -1893,7 +1889,7 @@ annet sertifikat, kan du prøve å bruke dette. Ellers kan du forsøke å
 <translation id="3166547286524371413">Adresse:</translation>
 <translation id="4522570452068850558">Detaljer</translation>
 <translation id="1091767800771861448">Trykk på ESC for å hoppe over denne (bare uoffisielle delversjoner).</translation>
-<translation id="59659456909144943">Varsling: <ph name="NOTIFICATION_NAME"/></translation>
+<translation id="59659456909144943">Varsel: <ph name="NOTIFICATION_NAME"/></translation>
 <translation id="6731320427842222405">Dette kan ta noen minutter</translation>
 <translation id="4806525999832945986">Drives av <ph name="DOMAIN"/> (<ph name="STATUS"/>)</translation>
 <translation id="940573721483482582">Prøv å deaktivere nettverksforutsigelse ved å følge denne fremgangsmåten: Gå til <ph name="BEGIN_BOLD"/>skiftenøkkelmenyen &gt; <ph name="SETTINGS_TITLE"/> &gt; <ph name="ADVANCED_TITLE"/><ph name="END_BOLD"/> og fjern avmerkingen for «<ph name="NO_PREFETCH_DESCRIPTION"/>». Hvis dette ikke løser problemet, anbefaler vi at du velger dette alternativet på nytt, for å øke ytelsen.</translation>
@@ -2498,7 +2494,7 @@ annet sertifikat, kan du prøve å bruke dette. Ellers kan du forsøke å
 <translation id="2371076942591664043">Åpne når ne&amp;dlastingen er ferdig</translation>
 <translation id="3920504717067627103">Administratorinnstillinger for sertifikater</translation>
 <translation id="155865706765934889">Styreflate</translation>
-<translation id="3308134619352333507">Skjul-knappen</translation>
+<translation id="3308134619352333507">Skjul knappen</translation>
 <translation id="7701040980221191251">Ingen</translation>
 <translation id="2299271837233608948">Få bokmerkene, loggen og innstillingene dine på alle enhetene du eier.</translation>
 <translation id="5917011688104426363">Fokuser adressefelt i søkemodus</translation>
@@ -3175,9 +3171,10 @@ Trykk Ctrl + Alt + Z  for å avbryte.</translation>
 <translation id="3298789223962368867">Ugyldig nettadresse angitt.</translation>
 <translation id="2202898655984161076">Det oppstod et problem med oppføring av skrivere. Enkelte av skriverne dine er ikke registrert på <ph name="CLOUD_PRINT_NAME"/>.</translation>
 <translation id="6154697846084421647">Pålogget</translation>
-<translation id="8241707690549784388">Siden du ser etter, brukte informasjon som du angav. Hvis du går tilbake til denne siden, kan det føre til at handlinger som er utført, blir gjentatt. Vil du fortsette?</translation>
+<translation id="8241707690549784388">Siden du ser etter, brukte informasjon som du anga. Hvis du går tilbake til denne siden, kan det føre til at handlinger som er utført, blir gjentatt. Vil du fortsette?</translation>
 <translation id="5359419173856026110">Viser reell rammefrekvens for en side, i rammer per sekund, når maskinvareakselerasjon er aktiv.</translation>
 <translation id="4104163789986725820">E&amp;ksportér</translation>
+<translation id="5143814737375740231">Chrome for Android støtter ikke dette programtillegget.</translation>
 <translation id="2113479184312716848">Åpne &amp;fil ...</translation>
 <translation id="3314617171364900239">Søk etter oppdateringer har mislyktes flere ganger for utvidelsen «<ph name="EXTENSION_NAME"/>».</translation>
 <translation id="4850458635498951714">Legg til en enhet</translation>
@@ -3753,7 +3750,7 @@ Trykk Ctrl + Alt + Z  for å avbryte.</translation>
 <translation id="3679848754951088761"><ph name="SOURCE_ORIGIN"/></translation>
 <translation id="6920989436227028121">Åpne som vanlig fane</translation>
 <translation id="4057041477816018958"><ph name="SPEED"/> – <ph name="RECEIVED_AMOUNT"/></translation>
-<translation id="2050339315714019657">Portrett</translation>
+<translation id="2050339315714019657">Stående</translation>
 <translation id="6978839998405419496"><ph name="NUMBER_ZERO"/> days ago</translation>
 <translation id="8612060185862193661">Aktiver MediaStream.</translation>
 <translation id="5112577000029535889">&amp;Utviklerverktøy</translation>

@@ -34,16 +34,17 @@ public class GLUIFunctorRenderer {
     }
 
     private static final String TAG = "GLUIFunctorRenderer";
-    private static final boolean debuggingOnScreenPerformance = false;
-    private static final boolean debuggingPrintPerformance = false;
 
     // Magic key
     private static final int GL_TEXTURE_EXTERNAL_OES = 0x8D65;
     private static final int BYTES_PER_PIXEL = 4;
 
-    private GLRenderer mRenderer;
+    private final GLRenderer mRenderer;
     private int mFrameBufferWidth = 0;
     private int mFrameBufferHeight = 0;
+
+    // Performance Monitoring
+    private final GLUIPerformanceMonitor mPerformanceMonitor = new GLUIPerformanceMonitor();
 
     // JNI c++ pointer
     private int mNativeGLUIFunctorRenderer = 0;
@@ -53,25 +54,10 @@ public class GLUIFunctorRenderer {
     private Method mCallDrawGLFunction;
     private Object[] mDrawFunctor;
 
-    // On screen performance meter
-    private long mStartDraw;
-    private long mEndDraw;
-    private long mLastEndDraw;
-    private float mDrawMin;
-    private float mDrawMax;
-    private float mDrawAvg;
-    private float mFrameMin;
-    private float mFrameMax;
-    private float mFrameAvg;
-    private final static int mFrameCount = 100;
-    private int mCurrentFrame = 0;
-    private float[] mDraws = new float[mFrameCount];
-    private float[] mFrames = new float[mFrameCount];
-
     // Temporary frame buffer handles and memory
-    private int[] mFBOHandle = new int[1];
-    private int[] mTextureHandle = new int[1];
-    private int[] mDepthHandle = new int[1];
+    private final int[] mFBOHandle = new int[1];
+    private final int[] mTextureHandle = new int[1];
+    private final int[] mDepthHandle = new int[1];
     private boolean mOffscreenBufferDirty = true;
 
     private Listener mListener;
@@ -101,7 +87,7 @@ public class GLUIFunctorRenderer {
     public void attach() {
         mNativeGLUIFunctorRenderer = nativeInit();
         mDrawFunctor = new Object[] {
-                new Integer(nativeGetDrawFunction(mNativeGLUIFunctorRenderer))
+                Integer.valueOf(nativeGetDrawFunction(mNativeGLUIFunctorRenderer))
         };
     }
 
@@ -120,15 +106,7 @@ public class GLUIFunctorRenderer {
     public void init(int width, int height) {
         mRenderer.onSurfaceChanged(width, height);
 
-        mDrawMin = 1000;
-        mDrawMax = 0;
-        mDrawAvg = 0;
-        mFrameMin = 1000;
-        mFrameMax = 0;
-        mFrameAvg = 0;
-        mStartDraw = System.nanoTime();
-        mEndDraw = System.nanoTime();
-        mLastEndDraw = mEndDraw;
+        mPerformanceMonitor.init();
     }
 
     /**
@@ -383,99 +361,7 @@ public class GLUIFunctorRenderer {
         mRenderer.drawQuad(0, mRenderer.getHeight(), mRenderer.getWidth(), -mRenderer.getHeight());
     }
 
-    private void printDebugPerformance() {
-        mFrames[mCurrentFrame % mFrameCount] = (float) ((mEndDraw - mLastEndDraw) / 1000000.0);
-        mDraws[mCurrentFrame % mFrameCount] = (float) ((mEndDraw - mStartDraw) / 1000000.0);
-        mCurrentFrame++;
-        if (mCurrentFrame % mFrameCount == 0) {
-            float minFrame = Float.MAX_VALUE;
-            float maxFrame = 0;
-            float avgFrame = 0;
-            float minDraw = Float.MAX_VALUE;
-            float maxDraw = 0;
-            float avgDraw = 0;
-            for (int i = 0; i < mFrameCount; i++) {
-                minFrame = Math.min(minFrame, mFrames[i]);
-                maxFrame = Math.max(maxFrame, mFrames[i]);
-                avgFrame += mFrames[i];
-                minDraw = Math.min(minDraw, mDraws[i]);
-                maxDraw = Math.max(maxDraw, mDraws[i]);
-                avgDraw += mDraws[i];
-            }
-            avgFrame /= mFrameCount;
-            avgDraw /= mFrameCount;
-            minFrame = Math.round(minFrame * 100.0f) / 100.0f;
-            maxFrame = Math.round(maxFrame * 100.0f) / 100.0f;
-            avgFrame = Math.round(avgFrame * 100.0f) / 100.0f;
-            minDraw = Math.round(minDraw * 100.0f) / 100.0f;
-            maxDraw = Math.round(maxDraw * 100.0f) / 100.0f;
-            avgDraw = Math.round(avgDraw * 100.0f) / 100.0f;
-            Log.w(TAG, "--- Draw  " + avgDraw + " ms ( " + minDraw + " - " + maxDraw + " )");
-            Log.w(TAG, "### Frame " + avgFrame + " ms ( " + minFrame + " - " + maxFrame + " )");
-        }
-    }
 
-    private void drawDebugPerformance() {
-        float drawTime = (float) ((mEndDraw - mStartDraw) / 1000000.0);
-        mDrawMin = Math.min(drawTime, mDrawMin);
-        mDrawMax = Math.max(drawTime, mDrawMax);
-        mDrawMin = mDrawMin * 0.99f + mDrawMax * 0.01f;
-        mDrawMax = mDrawMax * 0.99f + mDrawMin * 0.01f;
-        mDrawAvg = mDrawAvg * 0.9f + drawTime * 0.1f;
-
-        final int msCount = 60;
-        final float margin = 20;
-        final float meterHeight = 15;
-
-        float frameTime = (float) ((mEndDraw - mLastEndDraw) / 1000000.0);
-        if (frameTime < 2 * msCount) {
-            mFrameMin = Math.min(frameTime, mFrameMin);
-            mFrameMax = Math.max(frameTime, mFrameMax);
-            mFrameMin = mFrameMin * 0.99f + mFrameMax * 0.01f;
-            mFrameMax = mFrameMax * 0.99f + mFrameMin * 0.01f;
-            mFrameAvg = mFrameAvg * 0.9f + frameTime * 0.1f;
-        }
-
-        float msX = (mRenderer.getWidth() - 2 * margin) / msCount;
-
-        // Ensures the average does not take too long to come back on screen.
-        mFrameMin = Math.min(mFrameMin, msCount * 1.2f);
-        mFrameMax = Math.min(mFrameMax, msCount * 1.2f);
-        mDrawMin = Math.min(mDrawMin, msCount * 1.2f);
-        mDrawMax = Math.min(mDrawMax, msCount * 1.2f);
-
-        // Draw the white background
-        mRenderer.useColorProgram(1.f, 1.f, 1.f, 0.5f);
-        mRenderer.drawQuad(0, 0, mRenderer.getWidth(), margin * 2 + 30);
-
-        // Draw the units
-        mRenderer.useColorProgram(0.f, 0.f, 0.f, 0.5f);
-        for (int i = 0; i <= msCount; i++) {
-            if (i % 10 == 0) {
-                mRenderer.drawQuad(margin + i * msX, margin, 3, 30);
-            } else if (i % 5 == 0) {
-                mRenderer.drawQuad(margin + i * msX, margin, 2, 20);
-            } else {
-                mRenderer.drawQuad(margin + i * msX, margin, 1, 10);
-            }
-        }
-
-        // Draw the CPU draw time bar
-        mRenderer.useColorProgram(0.f, 1.f, 0.f, 0.5f);
-        mRenderer.drawQuad(margin, margin + meterHeight / 3,
-                mDrawAvg * msX, meterHeight / 3);
-        mRenderer.drawQuad(margin + mDrawMin * msX, margin,
-                (mDrawMax - mDrawMin) * msX, meterHeight);
-
-        // Draw full frame time bar
-        mRenderer.useColorProgram(1.f, 0.f, 0.f, 0.5f);
-        mRenderer.drawQuad(margin, margin + meterHeight + meterHeight / 3,
-                mFrameAvg * msX, meterHeight / 3);
-        mRenderer.drawQuad(margin + mFrameMin * msX, margin + meterHeight,
-                (mFrameMax - mFrameMin) * msX, meterHeight);
-
-        mRenderer.flushDeferredDraw();
-    }
 
     @CalledByNative
     public void onPreDrawCheck() {
@@ -510,18 +396,14 @@ public class GLUIFunctorRenderer {
             }
         }
 
-        mStartDraw = System.nanoTime();
+        mPerformanceMonitor.startDraw();
 
         if (mOffscreenBufferDirty || !GLRenderer.useDepthOptimization()) {
             mOffscreenBufferDirty = false;
             mRenderer.onDrawFrame();
         }
 
-        mLastEndDraw = mEndDraw;
-        mEndDraw = System.nanoTime();
-
-        if (debuggingOnScreenPerformance) drawDebugPerformance();
-        if (debuggingPrintPerformance) printDebugPerformance();
+        mPerformanceMonitor.stopDraw(mRenderer);
 
         if (GLRenderer.useDepthOptimization()) flattenOffscreenBuffer();
 

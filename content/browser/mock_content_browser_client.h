@@ -161,6 +161,13 @@ class MockContentBrowserClient : public ContentBrowserClient {
   virtual void CreateAutoLogin(int render_process_id,
                                int web_contents_id,
                                const std::string& header_value) OVERRIDE;
+
+  virtual int CreateMinidumpFile() OVERRIDE;
+
+  virtual void AddNewCertificateAndroid(
+      net::URLRequest* request,
+      const std::string& cert_data,
+      bool isPKCS12) OVERRIDE;
 #endif
 
  private:

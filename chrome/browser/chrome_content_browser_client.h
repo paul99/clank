@@ -12,6 +12,11 @@
 #include "base/compiler_specific.h"
 #include "content/public/browser/content_browser_client.h"
 
+#if defined(OS_ANDROID)
+#include "base/memory/scoped_ptr.h"
+#include "chrome/browser/android/crash_dump_manager.h"
+#endif
+
 namespace chrome {
 
 class ChromeContentBrowserClient : public content::ContentBrowserClient {
@@ -159,10 +164,22 @@ class ChromeContentBrowserClient : public content::ContentBrowserClient {
   virtual void CreateAutoLogin(int render_process_id,
                                int web_contents_id,
                                const std::string& header_value) OVERRIDE;
+  virtual int CreateMinidumpFile() OVERRIDE;
+
+  virtual void AddNewCertificateAndroid(
+      net::URLRequest* request,
+      const std::string& cert_data,
+      bool isPKCS12) OVERRIDE;
 #endif
  private:
   // Set of origins that can use TCP/UDP private APIs from NaCl.
   std::set<std::string> allowed_socket_origins_;
+
+#if defined(OS_ANDROID)
+  void InitCrashDumpManager();
+
+  scoped_ptr<CrashDumpManager> crash_dump_manager_;
+#endif
 
   DISALLOW_COPY_AND_ASSIGN(ChromeContentBrowserClient);
 };

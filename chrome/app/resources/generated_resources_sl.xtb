@@ -8,6 +8,11 @@
 <translation id="8130276680150879341">Prekini povezavo z zasebnim omrežjem</translation>
 <translation id="1058418043520174283"><ph name="INDEX"/> od <ph name="COUNT"/></translation>
 <translation id="4480627574828695486">Prekini povezavo s tem računom ...</translation>
+<translation id="2516632596252643567">&lt;p&gt;
+          Do zavihkov, odprtih v računalniku, lahko dostopate tukaj.
+          &lt;/p&gt;
+          &lt;p&gt;
+          V računalniku odprite Google Chrome, pojdite na meni in izberite »Prijava v Chrome ...«          &lt;/p&gt;</translation>
 <translation id="7040807039050164757">&amp;Preveri črkovanje v tem polju</translation>
 <translation id="778579833039460630">Prejeti niso bili nobeni podatki</translation>
 <translation id="8791923223854254330">Upravljanje rutin za obravnavo ...</translation>
@@ -1456,7 +1461,6 @@ Javni eksponent (<ph name="PUBLIC_EXPONENT_NUM_BITS"/> bitov):
 <translation id="6342069812937806050">Pravkar</translation>
 <translation id="5605716740717446121">Kartica SIM bo trajno onemogočena, če ne boste vnesli pravilne kode PUK za odklepanje kode PIN. Poskusov na voljo: <ph name="TRIES_COUNT"/></translation>
 <translation id="8836712291807476944"><ph name="SAVED_BYTES"/>/<ph name="TOTAL_BYTES"/> bajtov, prekinjeno</translation>
-<translation id="3661943501691646627">&lt;p&gt; Do zavihkov, ki jih imate odprte v računalniku, lahko dostopate tukaj. &lt;/p&gt; &lt;p&gt; V računalniku odprite Google Chrome, odprite meni in izberite »Prijava v Chrome ...« &lt;/p&gt; &lt;p&gt; Res je super. &lt;/p&gt;</translation>
 <translation id="5502500733115278303">Uvoženo iz brskalnika Firefox</translation>
 <translation id="569109051430110155">Samodejno zaznavanje</translation>
 <translation id="4408599188496843485">&amp;Pomoč</translation>
@@ -3075,6 +3079,7 @@ baterije: napolnjena</translation>
 <translation id="8241707690549784388">Stran, ki jo iščete, je uporabila informacije, ki ste jih vnesli. Z vrnitvijo na to stran se bodo morda ponovila vsa vaša dejanja, ki ste jih opravili. Ali želite nadaljevati?</translation>
 <translation id="5359419173856026110">Pokaže dejansko hitrost prikazovanja sličic na strani (v sličicah na sekundo), ko je aktivna strojna oprema za pospeševanje.</translation>
 <translation id="4104163789986725820">I&amp;zvozi ...</translation>
+<translation id="5143814737375740231">Chrome za Android ne podpira tega vtičnika.</translation>
 <translation id="2113479184312716848">Odpri &amp;datoteko ...</translation>
 <translation id="3314617171364900239">Preverjanje posodobitev za razširitev »<ph name="EXTENSION_NAME"/>« ni uspelo kljub številnim poskusom.</translation>
 <translation id="4850458635498951714">Dodaj napravo</translation>

@@ -8,6 +8,12 @@
 <translation id="8130276680150879341">Verbindung zu privatem Netzwerk trennen</translation>
 <translation id="1058418043520174283"><ph name="INDEX"/> von <ph name="COUNT"/></translation>
 <translation id="4480627574828695486">Verbindung zu diesem Konto unterbrechen...</translation>
+<translation id="2516632596252643567">&lt;p&gt;
+          Greifen Sie hier auf die Tabs zu, die Sie auf Ihrem Computer geöffnet haben.
+          &lt;/p&gt;
+          &lt;p&gt;
+          Öffnen Sie dazu Chrome auf Ihrem Computer und wählen Sie im Schraubenschlüssel-Menü &quot;In Chrome anmelden...&quot; aus.
+          &lt;/p&gt;</translation>
 <translation id="7040807039050164757">&amp;Rechtschreibung in diesem Feld prüfen</translation>
 <translation id="778579833039460630">Keine Daten empfangen</translation>
 <translation id="8791923223854254330">Handler verwalten...</translation>
@@ -16,7 +22,7 @@
 <translation id="1993980234811669445">$1-Videodatei</translation>
 <translation id="2709516037105925701">AutoFill</translation>
 <translation id="3916445069167113093">Dateien dieses Typs können Schäden an Ihrem Computer verursachen. Möchten Sie <ph name="FILE_NAME"/> trotzdem behalten?</translation>
-<translation id="3162291187491210183">Hiermit wird der Omnibox-Verlauf in den Synchronisierungseinstellungen aktiviert. Dadurch kann der Verlauf der von Ihnen eingegebenen URLs mit anderen Clients synchronisiert und für die automatische Vervollständigung in der Omnibox verwendet werden.</translation>
+<translation id="3162291187491210183">Omnibox-Verlauf in den Synchronisierungseinstellungen aktivieren. Dadurch kann der Verlauf der von Ihnen eingegebenen URLs mit anderen Clients synchronisiert und für die automatische Vervollständigung in der Omnibox verwendet werden.</translation>
 <translation id="250599269244456932">Automatisch ausführen (empfohlen)</translation>
 <translation id="3581034179710640788">Das Sicherheitszertifikat der Website ist abgelaufen!</translation>
 <translation id="2825758591930162672">Öffentlicher Schlüssel des Antragstellers</translation>
@@ -36,7 +42,7 @@
 <translation id="4940047036413029306">Anführungszeichen</translation>
 <translation id="1526811905352917883">Das Herstellen der Verbindung musste mit SSL 3.0 wiederholt werden. Dies deutet in der Regel darauf hin, dass auf dem Server sehr alte Software verwendet wird und andere Sicherheitsprobleme bestehen können.</translation>
 <translation id="1497897566809397301">Speicherung lokaler Daten zulassen (empfohlen)</translation>
-<translation id="3275778913554317645">Als Fenster öffnen</translation>
+<translation id="3275778913554317645">In neuem Fenster öffnen</translation>
 <translation id="4553117311324416101">Google hat schädliche Software gefunden, die möglicherweise auf Ihrem Computer installiert wird, wenn Sie fortfahren. Wenn Sie diese Website bereits in der Vergangenheit besucht haben oder dieser Website vertrauen, ist es möglich, dass sie vor Kurzem von einem Hacker manipuliert wurde. Sie sollten daher nicht fortfahren und den Vorgang vielleicht morgen wiederholen oder eine andere Website aufrufen.</translation>
 <translation id="509988127256758334">Suche&amp;n nach:</translation>
 <translation id="1420684932347524586">Der per Zufallsauswahl generierte private RSA-Schlüssel konnte nicht erstellt werden.</translation>
@@ -149,7 +155,7 @@
 <translation id="42981349822642051">Maximieren</translation>
 <translation id="4013794286379809233">Anmelden</translation>
 <translation id="1587966997152302992">Sucheinstellung ändern</translation>
-<translation id="6699225977171020919">Hiermit können Sie nach einem Neustart oder Absturz den Sitzungsstatus umfassender wiederherstellen, zum Beispiel Sitzungscookies.</translation>
+<translation id="6699225977171020919">Sitzungsstatus nach einem Neustart oder Absturz umfassender wiederherstellen, z. B. mithilfe von Sitzungscookies.</translation>
 <translation id="7693221960936265065">Gesamter Zeitraum</translation>
 <translation id="1763138995382273070">Interaktive HTML5-Gültigkeitsüberprüfung für Formulare deaktivieren</translation>
 <translation id="4920887663447894854">Die folgenden Websites dürfen Ihren Standort auf dieser Seite nicht verfolgen:</translation>
@@ -161,7 +167,7 @@
 <translation id="2551191967044410069">Geostandortausnahmen</translation>
 <translation id="8806101649440495124">Ordner entfernen</translation>
 <translation id="3011284594919057757">Über Flash</translation>
-<translation id="7377169924702866686">Die Feststelltaste ist aktiviert.</translation>
+<translation id="7377169924702866686">Feststelltaste An</translation>
 <translation id="4969785127455456148">Album</translation>
 <translation id="8178665534778830238">Content:</translation>
 <translation id="153384433402665971">Das <ph name="PLUGIN_NAME"/>-Plug-in ist veraltet und wurde blockiert.</translation>
@@ -283,7 +289,7 @@
 <translation id="5667293444945855280">Malware</translation>
 <translation id="8707481173455612936">Offizielle Webseite für Audioquelle</translation>
 <translation id="6831043979455480757">Übersetzen</translation>
-<translation id="2856203831666278378">Die Serverantwort enthält doppelte Überschriften. Dieses Problem tritt im Allgemeinen bei falschen Website- oder Proxy-Einstellungen auf. Nur der Website- oder Proxy-Administrator kann das Problem beheben.</translation>
+<translation id="2856203831666278378">Die Serverantwort enthält doppelte Header. Dieses Problem tritt im Allgemeinen bei falschen Website- oder Proxy-Einstellungen auf. Nur der Website- oder Proxy-Administrator kann das Problem beheben.</translation>
 <translation id="3587482841069643663">Alle</translation>
 <translation id="6698381487523150993">Erstellt:</translation>
 <translation id="4684748086689879921">Import überspringen</translation>
@@ -299,7 +305,7 @@
 <translation id="1528372117901087631">Internetverbindung</translation>
 <translation id="1788636309517085411">Standardeinstellung verwenden</translation>
 <translation id="1661867754829461514">PIN fehlt</translation>
-<translation id="1542110527570996986">Hiermit blenden Sie die Startseiten-Schaltfläche für &lt;b&gt;<ph name="HOME_PAGE_URL"/>&lt;/ b&gt; ein.</translation>
+<translation id="1542110527570996986">Startseiten-Schaltfläche für &lt;b&gt;<ph name="HOME_PAGE_URL"/>&lt;/ b&gt; einblenden.</translation>
 <translation id="8589311641140863898">Experimentelle Erweiterungs-APIs</translation>
 <translation id="869891660844655955">Ablaufdatum</translation>
 <translation id="2178614541317717477">Kompromittierung der Zertifizierungsstelle</translation>
@@ -488,7 +494,7 @@ nicht auf unsichere Verbindungen zurück.</translation>
 <translation id="5374359983950678924">Bild ändern</translation>
 <translation id="2859738163554174612">Anmeldung nie anbieten</translation>
 <translation id="5158548125608505876">Passwörter nicht synchronisieren</translation>
-<translation id="3303888410359696136">Hiermit werden die MediaStream-, GetUserMedia- und PeerConnection-APIs für die WebRTC-Funktion aktiviert. Weitere Informationen finden Sie unter webrtc.org.</translation>
+<translation id="3303888410359696136">MediaStream-, GetUserMedia- und PeerConnection-APIs für die WebRTC-Funktion aktivieren. Weitere Informationen finden Sie unter webrtc.org.</translation>
 <translation id="3717485073527618485">Fragen, wenn eine Website versucht, den Mauszeiger zu deaktivieren (empfohlen)</translation>
 <translation id="6974306300279582256">Benachrichtigungen von <ph name="SITE"/> aktivieren</translation>
 <translation id="492914099844938733">Inkompatibilitäten anzeigen</translation>
@@ -796,7 +802,7 @@ nicht auf unsichere Verbindungen zurück.</translation>
 <translation id="6771079623344431310">Verbindung zum Proxy-Server kann nicht hergestellt werden.</translation>
 <translation id="6973656660372572881">Sowohl feste Proxy-Server als auch eine PAC-Skript-URL sind festgelegt.</translation>
 <translation id="409980434320521454">Synchronisierung fehlgeschlagen</translation>
-<translation id="192144045824434199">Hiermit werden Fenster mit Steuerfeldern aktiviert, die außerhalb des Browser-Frames geöffnet werden. Ist diese Funktion deaktiviert, wird anstelle eines Steuerfelds ein Pop-up-Fenster geöffnet. Für die Entwickler- und Canary-Version sind Steuerfelder standardmäßig aktiviert.</translation>
+<translation id="192144045824434199">Fenster mit Steuerfeldern, die außerhalb des Browser-Frames geöffnet werden, aktivieren. Ist diese Funktion deaktiviert, wird anstelle eines Steuerfelds ein Pop-up-Fenster geöffnet. Für die Entwickler- und Canary-Version sind Steuerfelder standardmäßig aktiviert.</translation>
 <translation id="1368725949478140659">Trotzdem laden</translation>
 <translation id="2200129049109201305">Synchronisierung verschlüsselter Daten überspringen?</translation>
 <translation id="1426410128494586442">Ja</translation>
@@ -1025,7 +1031,7 @@ nicht auf unsichere Verbindungen zurück.</translation>
 <translation id="1375321115329958930">Gespeicherte Passwörter</translation>
 <translation id="3341703758641437857">Zugriff auf Datei-URLs erlauben</translation>
 <translation id="5702898740348134351">Suchmaschin&amp;en bearbeiten...</translation>
-<translation id="8545211332741562162">Hiermit können Webseiten experimentelle JavaScript-Funktionen nutzen.</translation>
+<translation id="8545211332741562162">Webseiten können experimentelle JavaScript-Funktionen nutzen.</translation>
 <translation id="734303607351427494">Suchmaschinen verwalten...</translation>
 <translation id="8326478304147373412">PKCS #7, Zertifikatkette</translation>
 <translation id="3242765319725186192">Vorinstallierter Schlüssel:</translation>
@@ -1129,7 +1135,7 @@ nicht auf unsichere Verbindungen zurück.</translation>
 <translation id="3612070600336666959">Deaktivieren</translation>
 <translation id="3759461132968374835">Es liegen keine kürzlich gemeldeten Abstürze vor. Abstürze, die bei deaktivierter Absturzberichtsfunktion aufgetreten sind, werden hier nicht angezeigt.</translation>
 <translation id="1516602185768225813">Zuletzt geöffnete Seiten erneut öffnen</translation>
-<translation id="189210018541388520">Vollbildmodus öffnen</translation>
+<translation id="189210018541388520">In Vollbildmodus öffnen</translation>
 <translation id="8795668016723474529">Kreditkarte hinzufügen</translation>
 <translation id="5860033963881614850">Aus</translation>
 <translation id="3956882961292411849">Informationen zum Datenplan werden geladen. Bitte warten...</translation>
@@ -1455,10 +1461,10 @@ nicht auf unsichere Verbindungen zurück.</translation>
 <translation id="2727712005121231835">Originalgröße</translation>
 <translation id="1377600615067678409">Jetzt überspringen</translation>
 <translation id="8887733174653581061">Immer im Vordergrund</translation>
-<translation id="1715795001372061093">Hiermit werden durchscheinende Fensterrahmen aktiviert.</translation>
+<translation id="1715795001372061093">Durchscheinende Fensterrahmen aktivieren.</translation>
 <translation id="5581211282705227543">Es sind keine Plug-ins installiert.</translation>
 <translation id="3330206034087160972">Präsentationsmodus beenden</translation>
-<translation id="2794807514431851269">Melden Sie sich automatisch in all Ihren Google-Diensten an, zum Beispiel Google Mail.</translation>
+<translation id="2794807514431851269">Melden Sie sich automatisch in all Ihren Google-Diensten an, zum Beispiel Gmail.</translation>
 <translation id="6920653475274831310">Die Webseite unter <ph name="URL"/> hat          zu viele Umleitungen erzeugt. Das Löschen Ihrer Cookies für diese Website oder das Zulassen von Drittanbieter-Cookies könnte das Problem möglicherweise beheben. Sollte
           dies nicht der Fall sein, liegt eventuell ein Serverkonfigurationsfehler und kein Problem mit Ihrem
           Computer vor.</translation>
@@ -1489,7 +1495,6 @@ nicht auf unsichere Verbindungen zurück.</translation>
 <translation id="6342069812937806050">Abgeschlossen</translation>
 <translation id="5605716740717446121">Ihre SIM-Karte wird dauerhaft deaktiviert, wenn Sie den korrekten PIN-Entsperrschlüssel nicht eingeben. Verbleibende Versuche: <ph name="TRIES_COUNT"/></translation>
 <translation id="8836712291807476944"><ph name="SAVED_BYTES"/> / <ph name="TOTAL_BYTES"/> Bytes, Speichern unterbrochen</translation>
-<translation id="3661943501691646627">&lt;p&gt; Greifen Sie hier auf die Tabs zu, die Sie auf Ihrem Computer geöffnet haben. &lt;/p&gt; &lt;p&gt; Öffnen Sie dazu Chrome auf Ihrem Computer und wählen Sie im Schraubenschlüssel-Menü &quot;In Chrome anmelden...&quot;.&lt;/p&gt; &lt;p&gt; Ganz einfach! &lt;/p&gt;</translation>
 <translation id="5502500733115278303">Aus Firefox importiert</translation>
 <translation id="569109051430110155">Automatisch erkennen</translation>
 <translation id="4408599188496843485">&amp;Hilfe</translation>
@@ -1511,7 +1516,7 @@ nicht auf unsichere Verbindungen zurück.</translation>
 <translation id="4212108296677106246">Möchten Sie &quot;<ph name="CERTIFICATE_NAME"/>&quot; als Zertifizierungsstelle vertrauen?</translation>
 <translation id="4320833726226688924">In diesem Fall ist das an Ihren Browser übermittelte Serverzertifikat oder CA-Zwischenzertifikat mit einem schwachen Signaturalgorithmus, zum Beispiel RSA-MD2, signiert. Aktuelle Forschungen haben ergeben, dass der Signaturalgorithmus schwächer ist als bisher angenommen. Er wird daher von vertrauenswürdigen Websites nur noch selten verwendet. Bei diesem Zertifikat könnte es sich um eine Fälschung handeln.</translation>
 <translation id="2861941300086904918">Sicherheitsmanager für native Clients</translation>
-<translation id="5581700288664681403"><ph name="CLOUD_PRINT_NAME"/> wird geladen.</translation>
+<translation id="5581700288664681403"><ph name="CLOUD_PRINT_NAME"/> wird geladen...</translation>
 <translation id="6991443949605114807">&lt;p&gt;Bei der Ausführung von <ph name="PRODUCT_NAME"/> in einer unterstützten Desktop-Umgebung werden die Proxy-Einstellungen des Systems verwendet. Allerdings wird entweder Ihr System nicht unterstützt oder Ihre Systemkonfiguration konnte nicht gestartet werden.&lt;/p&gt;
 
         &lt;p&gt;Sie können die Konfiguration dennoch über die Befehlszeile vornehmen. Weitere Informationen zu Markierungen und Umgebungsvariablen finden Sie unter &lt;code&gt;man <ph name="PRODUCT_BINARY_NAME"/>&lt;/code&gt;.&lt;/p&gt;</translation>
@@ -1893,7 +1898,7 @@ nicht auf unsichere Verbindungen zurück.</translation>
 <translation id="567760371929988174">Eingabe&amp;methoden</translation>
 <translation id="10614374240317010">Nie speichern für...</translation>
 <translation id="5116300307302421503">Datei kann nicht geparst werden.</translation>
-<translation id="1907054602291213374">Hiermit wird in Bezug auf das Ranking von automatischen Vervollständigungen in der Omnibox eine aggressivere Vorgehensweise beim Ranking von Treffern aus dem URL-Verlauf verfolgt.</translation>
+<translation id="1907054602291213374">Beim Ranking von automatischen Vervollständigungen in der Omnibox Treffer aus dem URL-Verlauf bevorzugen.</translation>
 <translation id="2745080116229976798">Microsoft - Qualifizierte Unterordnung</translation>
 <translation id="8474378002946546633">Benachrichtigungen zulassen</translation>
 <translation id="6374830905869502056">Codiert von</translation>
@@ -1955,7 +1960,7 @@ nicht auf unsichere Verbindungen zurück.</translation>
 <translation id="2025186561304664664">Proxy ist auf automatische Konfiguration eingestellt.</translation>
 <translation id="782590969421016895">Aktuelle Seiten verwenden</translation>
 <translation id="8485586426668436450">Diese Seite ist absichtlich leer.</translation>
-<translation id="6521850982405273806">Einen Fehler melden</translation>
+<translation id="6521850982405273806">Fehler melden</translation>
 <translation id="736515969993332243">Suche nach Netzwerken läuft...</translation>
 <translation id="7806513705704909664">AutoFill aktivieren, um Webformulare mit nur einem Klick ausfüllen zu können</translation>
 <translation id="7846634333498149051">Tastatur</translation>
@@ -2002,7 +2007,7 @@ nicht auf unsichere Verbindungen zurück.</translation>
 <translation id="3007574127824276972">Als <ph name="USER_NAME"/> in <ph name="PRODUCT_NAME"/> angemeldet</translation>
 <translation id="6840155730904976091"><ph name="PRODUCT_NAME"/> verwendet die System-Proxy-Einstellungen Ihres Mobilgeräts, um eine Verbindung mit dem Netzwerk herzustellen.</translation>
 <translation id="2541913031883863396">Trotzdem fortfahren</translation>
-<translation id="6884284539803678768">Hiermit werden Dialogfeldrahmen im Google-Stil aktiviert.</translation>
+<translation id="6884284539803678768">Dialogfeldrahmen im Google-Stil aktivieren.</translation>
 <translation id="3018094406922859308">Plug-in wird heruntergeladen...</translation>
 <translation id="2367499218636570208">Vorname</translation>
 <translation id="4436689501885286563">Cookies und andere Websitedaten beim Abmelden löschen</translation>
@@ -2099,7 +2104,7 @@ nicht auf unsichere Verbindungen zurück.</translation>
 <translation id="1715941336038158809">Ungültiger Nutzername oder ungültiges Passwort</translation>
 <translation id="1901303067676059328">&amp;Alles auswählen</translation>
 <translation id="674375294223700098">Fehler wegen unbekanntem Serverzertifikat</translation>
-<translation id="7780428956635859355">Einen gespeicherten Screenshot senden</translation>
+<translation id="7780428956635859355">Gespeicherten Screenshot senden</translation>
 <translation id="2850961597638370327">Ausgestellt für: <ph name="NAME"/></translation>
 <translation id="2168039046890040389">Nach oben</translation>
 <translation id="1767519210550978135">Hsu</translation>
@@ -2132,7 +2137,7 @@ nicht auf unsichere Verbindungen zurück.</translation>
 <translation id="6144890426075165477"><ph name="PRODUCT_NAME"/> ist momentan nicht Ihr Standardbrowser.</translation>
 <translation id="823241703361685511">Tarif</translation>
 <translation id="4068506536726151626">Diese Seite enthält Elemente von folgenden Websites, die Ihren Standort verfolgen:</translation>
-<translation id="7786140118277433387">Hiermit blenden Sie die Startseiten-Schaltfläche für die &lt;b&gt;&quot;Neuer Tab&quot;-Seite&lt;/b&gt; ein.</translation>
+<translation id="7786140118277433387">Startseiten-Schaltfläche für die &lt;b&gt;&quot;Neuer Tab&quot;-Seite&lt;/b&gt; einblenden.</translation>
 <translation id="4220128509585149162">Abstürze</translation>
 <translation id="8798099450830957504">Standard</translation>
 <translation id="5989320800837274978">Weder feste Proxy-Server noch eine PAC-Skript-URL sind festgelegt.</translation>
@@ -2407,7 +2412,7 @@ nicht auf unsichere Verbindungen zurück.</translation>
 <translation id="421577943854572179">auf einer anderen Website eingebettet</translation>
 <translation id="580886651983547002"><ph name="PRODUCT_NAME"/>
         kann die Website nicht erreichen. Dies wird üblicherweise durch Netzwerkprobleme verursacht, kann jedoch auch das Ergebnis einer falsch konfigurierten Firewall bzw. eines falsch konfigurierten Proxy-Servers sein.</translation>
-<translation id="4228259645864383432"><ph name="BEGIN_LINK"/>Weitere Erweiterungen herunterladen<ph name="END_LINK"/></translation>
+<translation id="4228259645864383432"><ph name="BEGIN_LINK"/>Mehr Erweiterungen herunterladen<ph name="END_LINK"/></translation>
 <translation id="5445557969380904478">Über Spracherkennung</translation>
 <translation id="3093473105505681231">Einstellungen für Sprachen und Rechtschreibprüfung...</translation>
 <translation id="152482086482215392"><ph name="NUMBER_ONE"/> Sekunde übrig</translation>
@@ -2914,7 +2919,7 @@ nicht auf unsichere Verbindungen zurück.</translation>
 <translation id="5438430601586617544">(Entpackt)</translation>
 <translation id="6460601847208524483">Nächste Übereinstimmung suchen</translation>
 <translation id="8433186206711564395">Netzwerkeinstellungen</translation>
-<translation id="5130284816644138873">Hiermit werden Suchmaschinen in den Synchronisierungseinstellungen aktiviert. Dadurch können Ihre benutzerdefinierten Suchmaschinen mit anderen Clients synchronisiert werden.</translation>
+<translation id="5130284816644138873">Suchmaschinen in den Synchronisierungseinstellungen aktivieren. Dadurch können Ihre benutzerdefinierten Suchmaschinen mit anderen Clients synchronisiert werden.</translation>
 <translation id="8146177459103116374">Wenn Sie bereits auf diesem Gerät registriert sind, können Sie sich <ph name="LINK2_START"/>als vorhandener Nutzer anmelden<ph name="LINK2_END"/>.</translation>
 <translation id="4856478137399998590">Ihr mobiler Datendienst ist aktiviert und einsatzbereit.</translation>
 <translation id="1676388805288306495">Standardschriftart/-sprache für Webseiten ändern</translation>
@@ -3099,7 +3104,7 @@ nicht auf unsichere Verbindungen zurück.</translation>
 <translation id="2665717534925640469">Diese Seite wird nun im Vollbildmodus angezeigt und hat den Mauszeiger deaktiviert.</translation>
 <translation id="3414952576877147120">Größe:</translation>
 <translation id="9098468523912235228">Vor <ph name="NUMBER_DEFAULT"/> Sekunden</translation>
-<translation id="7009102566764819240">Die folgende Liste führt alle gefährlichen Elemente der Seite auf. Klicken Sie auf den Diagnoselink, um weitere Informationen zum Malware-Thread eines bestimmten Elements zu erhalten. Falls Sie sicher sind, dass eine Ressource fälschlicherweise als Phishing-Ressource gemeldet wurde, klicken Sie auf den Link &quot;Einen Fehler melden&quot;.</translation>
+<translation id="7009102566764819240">Die folgende Liste führt alle gefährlichen Elemente der Seite auf. Klicken Sie auf den Diagnoselink, um weitere Informationen zum Malware-Thread eines bestimmten Elements zu erhalten. Falls Sie sicher sind, dass eine Ressource fälschlicherweise als Phishing-Ressource gemeldet wurde, klicken Sie auf &quot;Fehler melden&quot;.</translation>
 <translation id="3592260987370335752">&amp;Weitere Informationen</translation>
 <translation id="4923417429809017348">Diese Seite wurde von einer unbekannten Sprache in <ph name="LANGUAGE_LANGUAGE"/> übersetzt.</translation>
 <translation id="3631337165634322335">Die unten genannten Ausnahmen gelten nur für die aktuelle anonyme Sitzung.</translation>
@@ -3134,6 +3139,7 @@ nicht auf unsichere Verbindungen zurück.</translation>
 <translation id="8241707690549784388">Die gesuchte Seite hat die von Ihnen eingegebenen Informationen verwendet bzw. verarbeitet. Wenn Sie zu dieser Seite zurückgehen, wird möglicherweise eine bereits ausgeführte Aktion wiederholt. Möchten Sie fortfahren?</translation>
 <translation id="5359419173856026110">Zeigt die tatsächliche Bildrate einer Seite in Bildern pro Sekunde bei aktiver Hardwarebeschleunigung an</translation>
 <translation id="4104163789986725820">E&amp;xportieren...</translation>
+<translation id="5143814737375740231">Chrome für Android bietet keine Unterstützung für dieses Plug-in.</translation>
 <translation id="2113479184312716848">&amp;Datei öffnen...</translation>
 <translation id="3314617171364900239">Die Überprüfung auf Updates ist für die Erweiterung &quot;<ph name="EXTENSION_NAME"/>&quot; wiederholt fehlgeschlagen.</translation>
 <translation id="4850458635498951714">Gerät hinzufügen</translation>
@@ -3337,7 +3343,7 @@ nicht auf unsichere Verbindungen zurück.</translation>
 <translation id="340485819826776184">Vervollständigung von Suchanfragen und URLs bei der Eingabe in die Adressleiste verwenden</translation>
 <translation id="4207762215349123040">Das Plug-in <ph name="PEPPER_PLUGIN_NAME"/> auf <ph name="PEPPER_PLUGIN_DOMAIN"/> möchte auf Ihr Mobilgerät zugreifen.</translation>
 <translation id="2907063150691494337">Sobald Sie ein Lesezeichen auf einem Gerät hinzufügen, ist es sofort auf all Ihren Geräten verfügbar.</translation>
-<translation id="6318501022818228039">Hiermit werden App-Benachrichtigungen in den Synchronisierungseinstellungen deaktiviert. Dadurch wird die Synchronisierung von an Ihre Apps gesendeten Benachrichtigungen mit anderen Clients deaktiviert.</translation>
+<translation id="6318501022818228039">App-Benachrichtigungen in den Synchronisierungseinstellungen deaktivieren. Dadurch wird die Synchronisierung von an Ihre Apps gesendeten Benachrichtigungen mit anderen Clients deaktiviert.</translation>
 <translation id="4074900173531346617">Zertifikat für E-Mail-Signaturen</translation>
 <translation id="6165508094623778733">Mehr Informationen</translation>
 <translation id="8584344723284138472">Ermöglicht die Synchronisierung der Favicons geöffneter Tabs als Teil der Synchronisierung geöffneter Tabs</translation>
@@ -3489,7 +3495,7 @@ nicht auf unsichere Verbindungen zurück.</translation>
 <translation id="5308689395849655368">Die Absturzberichtsfunktion ist deaktiviert.</translation>
 <translation id="8372369524088641025">Ungültiger WEP-Schlüssel</translation>
 <translation id="8689341121182997459">Läuft ab:</translation>
-<translation id="4701497436386167014">Hiermit können Sie durch das Ziehen von Tabs ein neues Browser-Fenster erstellen.</translation>
+<translation id="4701497436386167014">Neues Browser-Fenster durch Ziehen von Tabs erstellen.</translation>
 <translation id="899403249577094719">Basis-URL für Netscape-Zertifikate</translation>
 <translation id="2737363922397526254">Minimieren...</translation>
 <translation id="8605428685123651449">SQLite-Speicher</translation>
@@ -3592,7 +3598,7 @@ nicht auf unsichere Verbindungen zurück.</translation>
 <translation id="1981905533439890161">Neue App bestätigen</translation>
 <translation id="2785530881066938471">Datei &quot;<ph name="RELATIVE_PATH"/>&quot; konnte nicht für das Content-Skript geladen werden. Sie ist nicht UTF-8-codiert.</translation>
 <translation id="3807747707162121253">Abbre&amp;chen</translation>
-<translation id="6155817405098385604">Hiermit wird nicht auf ein 3D-Software-Raster zurückgegriffen, falls der Grafikprozessor nicht verwendet werden kann.</translation>
+<translation id="6155817405098385604">Nicht auf ein 3D-Software-Raster zurückgreifen, falls der Grafikprozessor nicht verwendet werden kann.</translation>
 <translation id="1857773308960574102">Die Datei scheint schädlich zu sein.</translation>
 <translation id="3306897190788753224">Personalisierte Umwandlung, verlaufsbasierte Vorschläge und Nutzerwörterbuch vorübergehend deaktivieren</translation>
 <translation id="8941882480823041320">Vorheriges Wort</translation>
@@ -3636,7 +3642,7 @@ nicht auf unsichere Verbindungen zurück.</translation>
 <translation id="3488065109653206955">Teilweise aktiviert</translation>
 <translation id="1481244281142949601">Sie haben ausreichend trainiert.</translation>
 <translation id="4849517651082200438">Nicht installieren</translation>
-<translation id="1086565554294716241">Hiermit werden eingegebene URLs in den Synchronisierungseinstellungen aktiviert. Dadurch kann der Verlauf der von Ihnen eingegebenen URLs mit anderen Clients synchronisiert und für die automatische Vervollständigung in der Omnibox verwendet werden.</translation>
+<translation id="1086565554294716241">Eingegebene URLs in den Synchronisierungseinstellungen aktivieren. Dadurch kann der Verlauf der von Ihnen eingegebenen URLs mit anderen Clients synchronisiert und für die automatische Vervollständigung in der Omnibox verwendet werden.</translation>
 <translation id="6349678711452810642">Als Standard festlegen</translation>
 <translation id="6263284346895336537">Nicht kritisch</translation>
 <translation id="6409731863280057959">Pop-ups</translation>
@@ -3693,7 +3699,7 @@ nicht auf unsichere Verbindungen zurück.</translation>
 <translation id="894868077413883288">In Downloads suchen</translation>
 <translation id="1918141783557917887">&amp;Kleiner</translation>
 <translation id="6996550240668667907">Tastatur-Overlay anzeigen</translation>
-<translation id="8700025712071592022">Hiermit werden geöffnete Tabs in den Synchronisierungseinstellungen aktiviert. Dadurch können Ihre geöffneten Tabs mit anderen Clients synchronisiert werden.</translation>
+<translation id="8700025712071592022">Geöffnete Tabs in den Synchronisierungseinstellungen aktivieren. Dadurch können Ihre geöffneten Tabs mit anderen Clients synchronisiert werden.</translation>
 <translation id="4065006016613364460">Bild-URL k&amp;opieren</translation>
 <translation id="6965382102122355670">OK</translation>
 <translation id="421182450098841253">&amp;Lesezeichenleiste anzeigen</translation>
@@ -3736,7 +3742,7 @@ nicht auf unsichere Verbindungen zurück.</translation>
 <translation id="335985608243443814">Durchsuchen...</translation>
 <translation id="7802488492289385605">Google Japanese Input (für US-Dvorak-Tastatur)</translation>
 <translation id="3876481682997626897">Nicht übereinstimmende Signaturen</translation>
-<translation id="910083018063317242">Hiermit wird das Pre-Rendering von Vervollständigungen aus der Omnibox ermöglicht und geeignete Netzwerkaktionen wie z. B. Pre-Rendering, Instant oder DNS-Vorverbindung antizipiert, indem für jedes Omnibox-Ergebnis ein Wahrscheinlichkeitswert berechnet wird.</translation>
+<translation id="910083018063317242">Pre-Rendering von Vervollständigungen aus der Omnibox ermöglichen und geeignete Netzwerkaktionen wie z. B. Pre-Rendering, Instant oder DNS-Vorverbindung antizipieren, indem für jedes Omnibox-Ergebnis ein Wahrscheinlichkeitswert berechnet wird.</translation>
 <translation id="7452120598248906474">Schriftart mit fester Breite</translation>
 <translation id="3129687551880844787">Sitzungsspeicher</translation>
 <translation id="8892992092192084762">Design &quot;<ph name="THEME_NAME"/>&quot; installiert</translation>
@@ -3796,7 +3802,7 @@ nicht auf unsichere Verbindungen zurück.</translation>
 <translation id="445923051607553918">WLAN-Netzwerk verwenden</translation>
 <translation id="100242374795662595">Unbekanntes Gerät</translation>
 <translation id="9087725134750123268">Cookies und andere Websitedaten löschen</translation>
-<translation id="756631359159530168">Hiermit wird die kachelweise Bildschirmaktualisierung für Seiteninhalte aktiviert, wenn die Compositing-Funktion aktiviert ist.</translation>
+<translation id="756631359159530168">Kachelweise Bildschirmaktualisierung für Seiteninhalte aktivieren, wenn die Compositing-Funktion aktiviert ist.</translation>
 <translation id="3349155901412833452">Kandidatenliste mit den Tasten &quot;,&quot; und &quot;.&quot; paginieren</translation>
 <translation id="3981681824736556685">Wenn Sie einen Proxy-Server verwenden, überprüfen Sie die Proxy-Einstellungen oder wenden Sie sich an Ihren Netzwerkadministrator, um zu gewährleisten, dass der Proxy-Server funktioniert. Falls Sie keinen Proxy-Server verwenden möchten, passen Sie Ihre Proxy-Einstellungen an: <ph name="PLATFORM_TEXT"/>.</translation>
 <translation id="5394671634302672639">Sucheinstellungen festlegen...</translation>

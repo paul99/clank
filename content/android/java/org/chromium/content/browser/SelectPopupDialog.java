@@ -97,13 +97,13 @@ class SelectPopupDialog {
             b.setPositiveButton(android.R.string.ok, new DialogInterface.OnClickListener() {
                 @Override
                 public void onClick(DialogInterface dialog, int which) {
-                    mChromeView.selectPopupMenuItems(getSelectedIndices(listView));
+                    notifyChromeViewItemsSelected(getSelectedIndices(listView));
                 }});
             b.setNegativeButton(android.R.string.cancel,
                     new DialogInterface.OnClickListener() {
                 @Override
                 public void onClick(DialogInterface dialog, int which) {
-                    mChromeView.selectPopupMenuItems(null);
+                    notifyChromeViewPopupCanceled();
             }});
         }
         mListBoxPopup = b.create();
@@ -123,8 +123,7 @@ class SelectPopupDialog {
                 @Override
                 public void onItemClick(AdapterView<?> parent, View v,
                         int position, long id) {
-                    mChromeView.selectPopupMenuItems(getSelectedIndices(listView));
-                    mListBoxPopup.dismiss();
+                    notifyChromeViewItemsSelected(getSelectedIndices(listView));
                 }
             });
             if (selected.length > 0) {
@@ -135,14 +134,7 @@ class SelectPopupDialog {
         mListBoxPopup.setOnCancelListener(new DialogInterface.OnCancelListener() {
             @Override
             public void onCancel(DialogInterface dialog) {
-                mChromeView.selectPopupMenuItems(null);
-            }
-        });
-        mListBoxPopup.setOnDismissListener(new DialogInterface.OnDismissListener() {
-            @Override
-            public void onDismiss(DialogInterface dialog) {
-                mListBoxPopup = null;
-                sShownDialog = null;
+                notifyChromeViewPopupCanceled();
             }
         });
     }
@@ -164,6 +156,18 @@ class SelectPopupDialog {
         return indices;
     }
 
+    private void notifyChromeViewPopupCanceled() {
+        notifyChromeViewItemsSelected(null);
+    }
+
+    private void notifyChromeViewItemsSelected(int[] selectedIndices) {
+        mChromeView.selectPopupMenuItems(selectedIndices);
+        mChromeView = null;
+        mListBoxPopup.dismiss();
+        mListBoxPopup = null;
+        sShownDialog = null;
+    }
+
     public static void show(ChromeView chromeView, String[] items, int[] enabled,
             boolean multiple, int[] selectedIndices) {
         // Hide the popup currently showing if any.  This could happen if the user pressed a select
@@ -183,7 +187,7 @@ class SelectPopupDialog {
     public static void hide(ChromeView chromeView) {
         if (sShownDialog != null &&
                 (chromeView == null || sShownDialog.mChromeView == chromeView)) {
-            sShownDialog.mListBoxPopup.dismiss();
+            sShownDialog.mListBoxPopup.cancel();
         }
     }
 

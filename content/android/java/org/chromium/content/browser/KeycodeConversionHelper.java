@@ -30,6 +30,8 @@ class KeycodeConversionHelper {
         switch (keyCode) {
             case KeyEvent.KEYCODE_DEL:
                 return 0x08;
+            case KeyEvent.KEYCODE_FORWARD_DEL:
+                return 0x2E;
             case KeyEvent.KEYCODE_TAB:
                 return 0x09;
             case KeyEvent.KEYCODE_CLEAR:

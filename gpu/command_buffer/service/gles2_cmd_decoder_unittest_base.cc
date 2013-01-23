@@ -44,7 +44,11 @@ GLES2DecoderTestBase::GLES2DecoderTestBase()
       client_texture_id_(106),
       client_element_buffer_id_(107),
       client_vertex_shader_id_(121),
-      client_fragment_shader_id_(122) {
+      client_fragment_shader_id_(122),
+#if defined(OS_ANDROID)
+      buffer_was_deleted_(false)
+#endif
+  {
   memset(immediate_buffer_, 0xEE, sizeof(immediate_buffer_));
 }
 
@@ -232,7 +236,11 @@ void GLES2DecoderTestBase::TearDown() {
   // All Tests should have read all their GLErrors before getting here.
   EXPECT_EQ(GL_NO_ERROR, GetGLError());
   EXPECT_CALL(*gl_, DeleteBuffersARB(1, _))
+#if defined(OS_ANDROID)
+      .Times(4 - static_cast<int>(buffer_was_deleted_))
+#else
       .Times(2)
+#endif
       .RetiresOnSaturation();
   decoder_->Destroy();
   decoder_.reset();
@@ -493,6 +501,9 @@ void GLES2DecoderTestBase::DoDeleteBuffer(
   cmd.Init(1, shared_memory_id_, shared_memory_offset_);
   memcpy(shared_memory_address_, &client_id, sizeof(client_id));
   EXPECT_EQ(error::kNoError, ExecuteCmd(cmd));
+#if defined(OS_ANDROID)
+  buffer_was_deleted_ = true;
+#endif
 }
 
 void GLES2DecoderTestBase::SetupExpectationsForApplyingDirtyState(

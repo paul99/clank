@@ -646,7 +646,11 @@ class GLES2DecoderImpl : public base::SupportsWeakPtr<GLES2DecoderImpl>,
 
   // TODO(gman): Cache these pointers?
   BufferManager* buffer_manager() {
+#if defined(OS_ANDROID)
+    return buffer_manager_.get();
+#else
     return group_->buffer_manager();
+#endif
   }
 
   RenderbufferManager* renderbuffer_manager() {
@@ -1343,6 +1347,9 @@ class GLES2DecoderImpl : public base::SupportsWeakPtr<GLES2DecoderImpl>,
 
   // The ContextGroup for this decoder uses to track resources.
   ContextGroup::Ref group_;
+#if defined(OS_ANDROID)
+  scoped_ptr<BufferManager> buffer_manager_;
+#endif
 
   // A parent decoder can access this decoders saved offscreen frame buffer.
   // The parent pointer is reset if the parent is destroyed.
@@ -1983,6 +1990,10 @@ bool GLES2DecoderImpl::Initialize(
   CHECK_GL_ERROR();
   disallowed_features_ = disallowed_features;
 
+#if defined(OS_ANDROID)
+  buffer_manager_.reset(new BufferManager);
+#endif
+
   vertex_attrib_manager_.reset(new VertexAttribManager());
   vertex_attrib_manager_->Initialize(group_->max_vertex_attribs());
 
@@ -2343,8 +2354,6 @@ void GLES2DecoderImpl::DeleteBuffersHelper(
       if (bound_element_array_buffer_ == buffer) {
         bound_element_array_buffer_ = NULL;
       }
-      GLuint service_id = buffer->service_id();
-      glDeleteBuffersARB(1, &service_id);
       RemoveBufferInfo(client_ids[ii]);
     }
   }
@@ -2767,6 +2776,13 @@ void GLES2DecoderImpl::Destroy() {
     group_->Destroy(have_context);
     group_ = NULL;
   }
+
+#if defined(OS_ANDROID)
+  if (buffer_manager_.get()) {
+    buffer_manager_->Destroy(have_context);
+    buffer_manager_.reset(NULL);
+  }
+#endif
 
   if (context_.get()) {
     context_->ReleaseCurrent(NULL);
@@ -6944,7 +6960,12 @@ void GLES2DecoderImpl::DoTexSubImage2D(
   DCHECK(ok);
   if (xoffset != 0 || yoffset != 0 ||
       width != tex_width || height != tex_height) {
-    if (!texture_manager()->ClearTextureLevel(this, info, target, level)) {
+    // Since partial tile updates are disabled, we can skip clearing the region
+    // outside sub-tile uploads to avoid jank. This is only done for offscreen
+    // contexts so that it does not affect accelerated canvas.
+    if (!surface_->IsOffscreen())
+      texture_manager()->SetLevelCleared(info, target, level);
+    else if (!texture_manager()->ClearTextureLevel(this, info, target, level)) {
       SetGLError(GL_OUT_OF_MEMORY, "glTexSubImage2D: dimensions too big");
       return;
     }
@@ -7393,6 +7414,7 @@ error::Error GLES2DecoderImpl::HandleSwapBuffers(
     uint32 immediate_data_size, const gles2::SwapBuffers& c) {
   bool is_offscreen = !!offscreen_target_frame_buffer_.get();
   if (!is_offscreen && surface_->DeferSwapBuffers()) {
+    glFlush();
     return error::kDeferCommandUntilSwapBuffersAck;
   }
   int this_frame_number = frame_number_++;
@@ -7995,6 +8017,7 @@ void GLES2DecoderImpl::DoTexStorage2DEXT(
   GLenum internal_format,
   GLsizei width,
   GLsizei height) {
+  TRACE_EVENT0("gpu", "GLES2DecoderImpl::DoTexStorage2DEXT");
   if (!texture_manager()->ValidForTarget(target, 0, width, height, 1) ||
       TextureManager::ComputeMipMapCount(width, height, 1) < levels) {
     SetGLError(GL_INVALID_VALUE, "glTexStorage2DEXT: dimensions out of range");

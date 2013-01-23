@@ -47,6 +47,7 @@
 #include "chrome/common/net/gaia/google_service_auth_error.h"
 #include "chrome/common/render_messages.h"
 #include "chrome/common/url_constants.h"
+#include "content/browser/android/user_agent.h"
 #include "content/browser/gpu/gpu_process_host_ui_shim.h"
 #include "content/browser/renderer_host/render_view_host.h"
 #include "content/browser/sensors/sensors_provider.h"
@@ -1036,6 +1037,9 @@ std::string AboutVersionStrings(DictionaryValue* localized_strings,
   localized_strings->SetString("platform",
                                l10n_util::GetStringUTF16(IDS_PLATFORM_LABEL));
   localized_strings->SetString("os_type", version_info.OSType());
+#if defined(OS_ANDROID)
+  localized_strings->SetString("os_version", GetUserAgentOSInfo());
+#endif
   localized_strings->SetString("webkit_version",
                                webkit_glue::GetWebKitVersion());
   localized_strings->SetString("js_engine", "V8");

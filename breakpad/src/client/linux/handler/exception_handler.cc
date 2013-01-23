@@ -114,17 +114,43 @@ static int tgkill(pid_t tgid, pid_t tid, int sig) {
 
 namespace google_breakpad {
 
+namespace {
 // The list of signals which we consider to be crashes. The default action for
 // all these signals must be Core (see man 7 signal) because we rethrow the
 // signal after handling it and expect that it'll be fatal.
 static const int kExceptionSignals[] = {
-  SIGSEGV, SIGABRT, SIGFPE, SIGILL, SIGBUS, -1
+  SIGSEGV, SIGABRT, SIGFPE, SIGILL, SIGBUS
 };
+const int kNumHandledSignals = sizeof(kExceptionSignals) / sizeof(kExceptionSignals[0]);
+struct sigaction old_handlers[kNumHandledSignals] = {0};
+bool handlers_installed = false;
+
+// Create an alternative stack to run the signal handlers on. This is done since
+// the signal might have been caused by a stack overflow.
+bool CreateAlternateStack() {
+  // SIGSTKSZ may be too small to prevent the signal handlers from overrunning
+  // the alternative stack, use this instead.
+  static const unsigned kSigStackSize = std::max(8192, SIGSTKSZ);
+
+  stack_t stack;
+  // Only set an alternative stack if there isn't already one, or if the current
+  // one is too small.
+  if (sys_sigaltstack(NULL, &stack) == -1 || !stack.ss_sp ||
+      stack.ss_size < kSigStackSize) {
+    memset(&stack, 0, sizeof(stack));
+    stack.ss_sp = malloc(kSigStackSize);
+    stack.ss_size = kSigStackSize;
+
+    if (sys_sigaltstack(&stack, NULL) == -1)
+      return false;
+  }
+}
+
+}  // namespace
 
 // We can stack multiple exception handlers. In that case, this is the global
 // which holds the stack.
 std::vector<ExceptionHandler*>* ExceptionHandler::handler_stack_ = NULL;
-unsigned ExceptionHandler::handler_stack_index_ = 0;
 pthread_mutex_t ExceptionHandler::handler_stack_mutex_ =
     PTHREAD_MUTEX_INITIALIZER;
 
@@ -137,9 +163,27 @@ ExceptionHandler::ExceptionHandler(const std::string &dump_path,
   : filter_(filter),
     callback_(callback),
     callback_context_(callback_context),
+    minidump_descriptor_(dump_path.c_str()),
     handler_installed_(install_handler)
 {
   Init(dump_path, -1);
+}
+
+ExceptionHandler::ExceptionHandler(const int minidump_fd,
+                                   FilterCallback filter,
+                                   MinidumpCallback callback,
+                                   void *callback_context,
+                                   bool install_handler)
+  : filter_(filter),
+    callback_(callback),
+    callback_context_(callback_context),
+    minidump_descriptor_(minidump_fd),
+    handler_installed_(install_handler) {
+  Init(std::string(), -1);
+
+  // The next call is needed to set next_minidump_id_c_ that is passed to the
+  // callback.
+  UpdateNextID();
 }
 
 ExceptionHandler::ExceptionHandler(const std::string &dump_path,
@@ -151,6 +195,7 @@ ExceptionHandler::ExceptionHandler(const std::string &dump_path,
   : filter_(filter),
     callback_(callback),
     callback_context_(callback_context),
+    minidump_descriptor_(dump_path.c_str()),
     handler_installed_(install_handler)
 {
   Init(dump_path, server_fd);
@@ -158,7 +203,14 @@ ExceptionHandler::ExceptionHandler(const std::string &dump_path,
 
 // Runs before crashing: normal context.
 ExceptionHandler::~ExceptionHandler() {
-  UninstallHandlers();
+  pthread_mutex_lock(&handler_stack_mutex_);
+  std::vector<ExceptionHandler*>::iterator handler =
+      std::find(handler_stack_->begin(), handler_stack_->end(), this);
+  handler_stack_->erase(handler);
+  if (handler_stack_->empty()) {
+    RestoreHandlersLocked();
+  }
+  pthread_mutex_unlock(&handler_stack_mutex_);
 }
 
 void ExceptionHandler::Init(const std::string &dump_path,
@@ -166,74 +218,71 @@ void ExceptionHandler::Init(const std::string &dump_path,
 {
   crash_handler_ = NULL;
   if (0 <= server_fd)
-    crash_generation_client_
-      .reset(CrashGenerationClient::TryCreate(server_fd));
+    crash_generation_client_.reset(CrashGenerationClient::TryCreate(server_fd));
 
-  if (handler_installed_)
-    InstallHandlers();
-
-  if (!IsOutOfProcess())
+  if (!IsOutOfProcess() && !dump_path.empty())
     set_dump_path(dump_path);
 
+  if (minidump_descriptor_.IsFD()) {
+    minidump_fd_duplicate_ = dup(minidump_descriptor_.fd());
+  }  else {
+    minidump_fd_duplicate_ = 0;
+  }
   pthread_mutex_lock(&handler_stack_mutex_);
   if (handler_stack_ == NULL)
     handler_stack_ = new std::vector<ExceptionHandler *>;
   handler_stack_->push_back(this);
+  if (handler_installed_) {
+    CreateAlternateStack();
+    InstallHandlersLocked();
+  }
   pthread_mutex_unlock(&handler_stack_mutex_);
 }
 
 // Runs before crashing: normal context.
-bool ExceptionHandler::InstallHandlers() {
-  // We run the signal handlers on an alternative stack because we might have
-  // crashed because of a stack overflow.
-
-  // We use this value rather than SIGSTKSZ because we would end up overrunning
-  // such a small stack.
-  static const unsigned kSigStackSize = 8192;
-
-  signal_stack = malloc(kSigStackSize);
-  stack_t stack;
-  memset(&stack, 0, sizeof(stack));
-  stack.ss_sp = signal_stack;
-  stack.ss_size = kSigStackSize;
-
-  if (sys_sigaltstack(&stack, NULL) == -1)
+bool ExceptionHandler::InstallHandlersLocked() {
+  if (handlers_installed)
     return false;
+
+  // Fail if unable to store all the old handlers.
+  for (unsigned i = 0; i < kNumHandledSignals; ++i) {
+    if (sigaction(kExceptionSignals[i], NULL, &old_handlers[i]) == -1)
+      return false;
+  }
 
   struct sigaction sa;
   memset(&sa, 0, sizeof(sa));
   sigemptyset(&sa.sa_mask);
 
-  // mask all exception signals when we're handling one of them.
-  for (unsigned i = 0; kExceptionSignals[i] != -1; ++i)
+  // Mask all exception signals when we're handling one of them.
+  for (unsigned i = 0; i < kNumHandledSignals; ++i)
     sigaddset(&sa.sa_mask, kExceptionSignals[i]);
 
   sa.sa_sigaction = SignalHandler;
   sa.sa_flags = SA_ONSTACK | SA_SIGINFO;
 
-  for (unsigned i = 0; kExceptionSignals[i] != -1; ++i) {
-    struct sigaction* old = new struct sigaction;
-    if (sigaction(kExceptionSignals[i], &sa, old) == -1)
-      return false;
-    old_handlers_.push_back(std::make_pair(kExceptionSignals[i], old));
+  for (unsigned i = 0; i < kNumHandledSignals; ++i) {
+    if (sigaction(kExceptionSignals[i], &sa, NULL) == -1) {
+      // At this point it is impractical to back out changes, and so failure to
+      // install a signal is intentionally ignored.
+    }
   }
+  handlers_installed = true;
   return true;
 }
 
-// Runs before crashing: normal context.
-void ExceptionHandler::UninstallHandlers() {
-  for (unsigned i = 0; i < old_handlers_.size(); ++i) {
-    struct sigaction *action =
-        reinterpret_cast<struct sigaction*>(old_handlers_[i].second);
-    sigaction(old_handlers_[i].first, action, NULL);
-    delete action;
+// This function runs in a compromised context: see the top of the file.
+// Runs on the crashing thread.
+void ExceptionHandler::RestoreHandlersLocked() {
+  if (!handlers_installed)
+    return;
+
+  for (unsigned i = 0; i < kNumHandledSignals; ++i) {
+    if (sigaction(kExceptionSignals[i], &old_handlers[i], NULL) == -1) {
+      signal(kExceptionSignals[i], SIG_DFL);
+    }
   }
-  pthread_mutex_lock(&handler_stack_mutex_);
-  std::vector<ExceptionHandler*>::iterator handler =
-      std::find(handler_stack_->begin(), handler_stack_->end(), this);
-  handler_stack_->erase(handler);
-  pthread_mutex_unlock(&handler_stack_mutex_);
-  old_handlers_.clear();
+  handlers_installed = false;
 }
 
 // Runs before crashing: normal context.
@@ -244,9 +293,13 @@ void ExceptionHandler::UpdateNextID() {
     next_minidump_id_ = guid_str;
     next_minidump_id_c_ = next_minidump_id_.c_str();
 
+    // When using a file descriptor, we don't deal with names.
+    if (minidump_descriptor_.IsFD())
+      return;
+
     char minidump_path[PATH_MAX];
     snprintf(minidump_path, sizeof(minidump_path), "%s/%s.dmp",
-             dump_path_c_,
+             minidump_descriptor_.path(),
              guid_str);
 
     next_minidump_path_ = minidump_path;
@@ -262,21 +315,57 @@ void ExceptionHandler::UpdateNextID() {
 // Runs on the crashing thread.
 // static
 void ExceptionHandler::SignalHandler(int sig, siginfo_t* info, void* uc) {
-  // All the exception signals are blocked at this point.
-  pthread_mutex_lock(&handler_stack_mutex_);
+  // A misbehaving library may have saved this handler and restored it using
+  // signal instead of sigaction. In that case, the info and uc arguments that
+  // are passed to this handler are junk. If that happened, the current signal
+  // handler (i.e. this one) will not have the SA_SIGINFO flag set. If that is
+  // the case, then reinstall this signal handler with the correct flags and
+  // return. Then, sig will become unmasked and retriggered. This signal handler
+  // will be called again, this time with valid info and uc arguments.
+  struct sigaction this_handler;
+  if (sigaction(sig, NULL, &this_handler) == -1) {
+    __android_log_write(ANDROID_LOG_WARN, "google-breakpad",
+                        "Getting handler failed, assuming valid flags.");
+  } else if (!(this_handler.sa_flags & SA_SIGINFO)){
+    __android_log_write(ANDROID_LOG_WARN, "google-breakpad",
+                        "Signal handler does not have SIG_INFO flag."
+                        "Re-installing signal handler.");
+    struct sigaction sa;
+    memset(&sa, 0, sizeof(sa));
+    sigemptyset(&sa.sa_mask);
 
-  if (!handler_stack_->size()) {
-    pthread_mutex_unlock(&handler_stack_mutex_);
+    // Mask all exception signals when we're handling one of them.
+    for (unsigned i = 0; i < kNumHandledSignals; ++i)
+      sigaddset(&sa.sa_mask, kExceptionSignals[i]);
+
+    sa.sa_sigaction = SignalHandler;
+    sa.sa_flags = SA_ONSTACK | SA_SIGINFO;
+    if (sigaction(sig, &sa, NULL) == -1) {
+      // If reinstallation of this signal handler failed, set the handler to the
+      // default so that this signal handler does not repeatedly get called
+      // without the SA_SIGINFO flag set.
+      signal(sig, SIG_DFL);
+    }
     return;
   }
 
-  for (int i = handler_stack_->size() - 1; i >= 0; --i) {
-    if ((*handler_stack_)[i]->HandleSignal(sig, info, uc)) {
-      // successfully handled: We are in an invalid state since an exception
-      // signal has been delivered. We don't call the exit handlers because
-      // they could end up corrupting on-disk state.
-      break;
-    }
+  // All the exception signals are blocked at this point.
+  pthread_mutex_lock(&handler_stack_mutex_);
+
+  bool handled = false;
+  for (int i = handler_stack_->size() - 1; !handled && i >= 0; --i) {
+    handled = (*handler_stack_)[i]->HandleSignal(sig, info, uc);
+  }
+
+  // Upon returning fromt this signal handler, sig will become unmasked and then
+  // it will be retriggered. If one of the ExceptionHandlers handled it
+  // successfully, restore the default handler. Otherwise, restore the
+  // previously installed handler. Then, when the signal is retriggered, it will
+  // be delivered to the appropriate handler.
+  if (handled) {
+    signal(sig, SIG_DFL);
+  } else {
+    RestoreHandlersLocked();
   }
 
   pthread_mutex_unlock(&handler_stack_mutex_);
@@ -296,17 +385,11 @@ void ExceptionHandler::SignalHandler(int sig, siginfo_t* info, void* uc) {
     // No need to reissue the signal. It will automatically trigger again,
     // when we return from the signal handler.
   }
-
-  // As soon as we return from the signal handler, our signal will become
-  // unmasked. At that time, we will  get terminated with the same signal that
-  // was triggered originally. This allows our parent to know that we crashed.
-  // The default action for all the signals which we catch is Core, so
-  // this is the end of us.
-  signal(sig, SIG_DFL);
 }
 
 struct ThreadArgument {
   pid_t pid;  // the crashing process
+  const MinidumpDescriptor* minidump_descriptor;
   ExceptionHandler* handler;
   const void* context;  // a CrashContext structure
   size_t context_size;
@@ -376,6 +459,7 @@ bool ExceptionHandler::GenerateDump(CrashContext *context) {
 
   ThreadArgument thread_arg;
   thread_arg.handler = this;
+  thread_arg.minidump_descriptor = &minidump_descriptor_;
   thread_arg.pid = getpid();
   thread_arg.context = context;
   thread_arg.context_size = sizeof(*context);
@@ -399,7 +483,10 @@ bool ExceptionHandler::GenerateDump(CrashContext *context) {
     sys_write(2, "\n", 1);
 #endif
   }
-#if defined(__ANDROID__)
+// clone is not available in Android NDK for x86.
+// We have to fallback to using sys_clone.
+// TODO(shashishekhar): Need to verify if a SIGILL is propogated for x86 also.
+#if defined(__ANDROID__) && !defined(__i386__)
   // If sys_clone is used on Android, then a SIGILL will be propogated after the
   // successful conclusion of ThreadEntry.
   const pid_t child = clone(
@@ -437,10 +524,15 @@ bool ExceptionHandler::GenerateDump(CrashContext *context) {
   }
 
   bool success = r != -1 && (WIFEXITED(status) && (WEXITSTATUS(status) == 0));
-  if (callback_)
-    success = callback_(dump_path_c_, next_minidump_id_c_,
+  if (callback_) {
+    if (minidump_descriptor_.IsFD()) {
+      // The generation of the minidump closes the FD. Make sure we provide a
+      // valid one.
+      minidump_descriptor_.set_fd(minidump_fd_duplicate_);
+    }
+    success = callback_(minidump_descriptor_, next_minidump_id_c_,
                         callback_context_, success);
-
+  }
   return success;
 }
 
@@ -487,7 +579,7 @@ void ExceptionHandler::WaitForContinueSignal() {
 // Runs on the cloned process.
 bool ExceptionHandler::DoDump(pid_t crashing_process, const void* context,
                               size_t context_size) {
-  return google_breakpad::WriteMinidump(next_minidump_path_c_,
+  return google_breakpad::WriteMinidump(minidump_descriptor_,
                                         crashing_process,
                                         context,
                                         context_size,
@@ -503,7 +595,9 @@ bool ExceptionHandler::WriteMinidump(const std::string &dump_path,
 }
 
 bool ExceptionHandler::WriteMinidump() {
-#if !defined(__ARM_EABI__)
+  // Android NDK does not have support for getcontext.
+  // For now disable this for Android.
+#if !( defined(__ARM_EABI__) || defined(__ANDROID__) )
   // Allow ourselves to be dumped.
   sys_prctl(PR_SET_DUMPABLE, 1);
 

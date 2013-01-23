@@ -8,6 +8,12 @@
 <translation id="8130276680150879341">Disconnect private network</translation>
 <translation id="1058418043520174283"><ph name="INDEX"/> of <ph name="COUNT"/></translation>
 <translation id="4480627574828695486">Disconnect this account...</translation>
+<translation id="2516632596252643567">&lt;p&gt;
+          Access the tabs you have open on your computer, right here.
+          &lt;/p&gt;
+          &lt;p&gt;
+          Just open Chrome on your computer, go to the menu, and select &quot;Sign In to Chrome...&quot;
+          &lt;/p&gt;</translation>
 <translation id="7040807039050164757">&amp;Check Spelling in This Field</translation>
 <translation id="778579833039460630">No data received</translation>
 <translation id="8791923223854254330">Manage Handlers...</translation>
@@ -374,7 +380,7 @@ form signature: <ph name="FORM_SIGNATURE"/>
 experiment id: &quot;<ph name="EXPERIMENT_ID"/>&quot;</translation>
 <translation id="8656768832129462377">Do not check</translation>
 <translation id="715487527529576698">Initial Chinese mode is Simplified Chinese</translation>
-<translation id="6896830120821965585">Enables a background service that connects the Google Cloud Print service to any printers installed on this computer. Once this lab has been enabled, you can turn the Google Cloud Print Connector on by logging in with your Google account in the Under the Hood section of Settings.</translation>
+<translation id="6896830120821965585">Enables a background service that connects the Google Cloud Print service to any printers installed on this computer. Once this lab has been enabled, you can turn the Google Cloud Print Connector on by logging in with your Google account in the Under the Bonnet section of Settings.</translation>
 <translation id="1674989413181946727">Computer-wide SSL settings:</translation>
 <translation id="1531285811424589182">Certificate delete error</translation>
 <translation id="8703575177326907206">Your connection to <ph name="DOMAIN"/> is not encrypted.</translation>
@@ -1491,7 +1497,6 @@ Public Exponent (<ph name="PUBLIC_EXPONENT_NUM_BITS"/> bits):
 <translation id="6342069812937806050">Just now</translation>
 <translation id="5605716740717446121">Your SIM card will be permanently disabled if you cannot enter the correct PIN Unlocking Key. Tries left: <ph name="TRIES_COUNT"/></translation>
 <translation id="8836712291807476944"><ph name="SAVED_BYTES"/> / <ph name="TOTAL_BYTES"/> bytes, Interrupted</translation>
-<translation id="3661943501691646627">&lt;p&gt; Access the tabs that you have open on your computer, right here. &lt;/p&gt; &lt;p&gt; Just open Chrome on your computer, go to the menu and select &quot;Sign In to Chrome...&quot; &lt;/p&gt; &lt;p&gt; It's pretty amazing. &lt;/p&gt;</translation>
 <translation id="5502500733115278303">Imported From Firefox</translation>
 <translation id="569109051430110155">Auto detect</translation>
 <translation id="4408599188496843485">H&amp;elp</translation>
@@ -3129,6 +3134,7 @@ Press Ctrl+Alt+Z to cancel.</translation>
 <translation id="8241707690549784388">The page that you're looking for used information that you entered. Returning to that page might cause any action that you took to be repeated. Do you want to continue?</translation>
 <translation id="5359419173856026110">Shows a page's actual frame rate, in frames per second, when hardware acceleration is active.</translation>
 <translation id="4104163789986725820">E&amp;xport...</translation>
+<translation id="5143814737375740231">Chrome for Android does not support this plug-in.</translation>
 <translation id="2113479184312716848">Open &amp;File...</translation>
 <translation id="3314617171364900239">Update checks have repeatedly failed for the extension &quot;<ph name="EXTENSION_NAME"/>.&quot;</translation>
 <translation id="4850458635498951714">Add a device</translation>

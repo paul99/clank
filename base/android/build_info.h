@@ -7,6 +7,7 @@
 
 #include <jni.h>
 #include <string>
+#include "base/synchronization/lock.h"
 
 namespace base {
 namespace android {
@@ -36,12 +37,15 @@ class BuildInfo {
   const char* android_build_fp;
   const char* package_version_code;
   const char* package_version_name;
+  const int sdk_version_int;
   const char* java_exception_info;
+
 
   void set_java_exception_info(std::string info);
 
  private:
   static BuildInfo* instance_;
+  static base::Lock lock_;
 
   BuildInfo(
       const char* device,
@@ -50,7 +54,8 @@ class BuildInfo {
       const char* android_build_id,
       const char* android_build_fp,
       const char* package_version_code,
-      const char* package_version_name);
+      const char* package_version_name,
+      const int sdk_version_int);
 
 };
 

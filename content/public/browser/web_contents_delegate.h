@@ -418,6 +418,8 @@ class CONTENT_EXPORT WebContentsDelegate {
   // Notification that the page has lost the mouse lock.
   virtual void LostMouseLock() {}
 
+  virtual void WasCrashedForReload() {}
+
  protected:
   virtual ~WebContentsDelegate();
 

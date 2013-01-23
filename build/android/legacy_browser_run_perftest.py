@@ -10,6 +10,7 @@ TODO(tonyg): Run these with CPU frequency scaling disabled.
 
 import sys
 
+import constants
 from perf_test_runner import PerfTestRunner
 
 
@@ -26,7 +27,7 @@ def GetRunner(device):
         'chrome/test/data/v8_benchmark/',
         'chrome/test/perf/sunspider_uitest.js',
         'chrome/test/perf/v8_benchmark_uitest.js',
-        ], '/data/local/tmp/')
+        ], constants.TEST_DATA_DIR)
   return runner
 
 
@@ -38,4 +39,4 @@ def RunHttpPageCyclerBenchmark(device, test_name, timeout=600):
   """
   GetRunner(device).RunLegacyBrowserPerfTest(
       'http://localhost:8000/%s/start.html?auto=1' % test_name,
-      [('times', 't', 'ms')], trace_tag='_legacy_browser', timeout=timeout)
+      [('times', 'times', 't', 'ms')], trace_tag='_legacy_browser', timeout=timeout)

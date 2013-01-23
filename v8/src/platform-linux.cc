@@ -989,6 +989,25 @@ typedef struct ucontext {
   __sigset_t uc_sigmask;
 } ucontext_t;
 
+#elif !defined(__GLIBC__) && defined(__i386__)
+// x86 version for Android.
+struct sigcontext {
+  uint32_t gregs[19];
+  void* fpregs;
+  uint32_t oldmask;
+  uint32_t cr2;
+};
+
+typedef uint32_t __sigset_t;
+typedef struct sigcontext mcontext_t;
+typedef struct ucontext {
+  uint32_t uc_flags;
+  struct ucontext* uc_link;
+  stack_t uc_stack;
+  mcontext_t uc_mcontext;
+  __sigset_t uc_sigmask;
+} ucontext_t;
+enum { REG_EBP = 6, REG_ESP = 7, REG_EIP = 14 };
 #endif
 
 

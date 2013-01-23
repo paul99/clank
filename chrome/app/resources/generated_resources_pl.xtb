@@ -8,6 +8,12 @@
 <translation id="8130276680150879341">Odłącz sieć prywatną</translation>
 <translation id="1058418043520174283"><ph name="INDEX"/> z <ph name="COUNT"/></translation>
 <translation id="4480627574828695486">Odłącz to konto</translation>
+<translation id="2516632596252643567">&lt;p&gt;
+          Możesz korzystać z kart otwartych na komputerze bezpośrednio tutaj.
+          &lt;/p&gt;
+          &lt;p&gt;
+          Po prostu uruchom Chrome na komputerze, otwórz menu klucza i kliknij „Zaloguj się w Chrome...”
+          &lt;/p&gt;</translation>
 <translation id="7040807039050164757">&amp;Sprawdź pisownię w tym polu</translation>
 <translation id="778579833039460630">Brak odebranych danych</translation>
 <translation id="8791923223854254330">Zarządzaj modułami obsługi</translation>
@@ -122,7 +128,7 @@
 <translation id="1800124151523561876">Nie wykryto mowy.</translation>
 <translation id="7814266509351532385">Zmień domyślną wyszukiwarkę</translation>
 <translation id="5376169624176189338">Kliknij, aby przejść wstecz. Przytrzymaj, aby wyświetlić historię</translation>
-<translation id="6310545596129886942">Pozostało: <ph name="NUMBER_FEW"/> sek</translation>
+<translation id="6310545596129886942"><ph name="NUMBER_FEW"/> sek</translation>
 <translation id="9181716872983600413">Unicode</translation>
 <translation id="1383861834909034572">Otwieranie po ukończeniu</translation>
 <translation id="2492538245231809938">Typ danych do szyfrowania</translation>
@@ -196,7 +202,7 @@
 <translation id="5255315797444241226">Wprowadzone hasło jest nieprawidłowe.</translation>
 <translation id="762917759028004464">Aktualnie domyślną przeglądarką jest <ph name="BROWSER_NAME"/>.</translation>
 <translation id="8289982954746764694">Włącz znacznik &lt;track&gt; (jeszcze nie w pełni działający) dla podpisów, napisów, rozdziałów i opisów dźwiękowych w znacznikach &lt;video&gt;.</translation>
-<translation id="9213479837033539041">Pozostało: <ph name="NUMBER_MANY"/> sek</translation>
+<translation id="9213479837033539041"><ph name="NUMBER_MANY"/> sek</translation>
 <translation id="560442828508350263">Nie można przenieść elementu „$1”: $2</translation>
 <translation id="7298195798382681320">Zalecane</translation>
 <translation id="300544934591011246">Poprzednie hasło</translation>
@@ -220,7 +226,7 @@
 <translation id="5494920125229734069">Wybierz wszystko</translation>
 <translation id="2857834222104759979">Plik manifestu jest nieprawidłowy.</translation>
 <translation id="7931071620596053769">Następujące strony nie odpowiadają. Możesz zaczekać, aż strony zaczną odpowiadać, lub zamknąć je.</translation>
-<translation id="1209866192426315618">Pozostało: <ph name="NUMBER_DEFAULT"/> min</translation>
+<translation id="1209866192426315618"><ph name="NUMBER_DEFAULT"/> min</translation>
 <translation id="7938958445268990899">Certyfikat serwera nie jest jeszcze ważny.</translation>
 <translation id="4569998400745857585">Menu zawierające ukryte rozszerzenia</translation>
 <translation id="4081383687659939437">Zapisz informacje</translation>
@@ -468,7 +474,7 @@
 <translation id="2845382757467349449">Zawsze pokazuj pasek zakładek</translation>
 <translation id="3053013834507634016">Użycie klucza certyfikatu</translation>
 <translation id="4487088045714738411">Klawiatura belgijska</translation>
-<translation id="7511635910912978956">Pozostało: <ph name="NUMBER_FEW"/> godz</translation>
+<translation id="7511635910912978956"><ph name="NUMBER_FEW"/> godz</translation>
 <translation id="2152580633399033274">Pokazuj wszystkie grafiki (zalecane)</translation>
 <translation id="2934952234745269935">Etykieta woluminu</translation>
 <translation id="6272247697534482847">Wyłącz synchronizację pionową w procesorze GPU</translation>
@@ -689,7 +695,7 @@
 <translation id="4667176955651319626">Zablokuj pliki cookie i dane z witryn innych firm</translation>
 <translation id="6686490380836145850">Zamknij karty po prawej</translation>
 <translation id="5608669887400696928"><ph name="NUMBER_DEFAULT"/> godz.</translation>
-<translation id="2624449429763181457">Przytrzymaj Control, Alt lub Shift, aby wyświetlić skróty klawiaturowe z danym klawiszem.</translation>
+<translation id="2624449429763181457">Przytrzymaj Control, Alt lub Shift, aby wyświetlić skróty klawiszowe z danym klawiszem.</translation>
 <translation id="6645984541666123347">Pokazuje w obszarze stanu ilość wolnej pamięci. Kliknij menu, aby uzyskać więcej informacji o pamięci systemowej.</translation>
 <translation id="8064674922032549317">Wyłącz łącznik <ph name="CLOUD_PRINT_NAME"/></translation>
 <translation id="3936877246852975078">Wysyłanie żądań do serwera zostało tymczasowo wstrzymane.</translation>
@@ -799,7 +805,7 @@
 <translation id="6513615899227776181">Wtyczka: <ph name="PLUGIN_NAME"/></translation>
 <translation id="6198252989419008588">Zmień kod PIN</translation>
 <translation id="5749483996735055937">Wystąpił problem podczas kopiowania obrazu odzyskiwania na urządzenie.</translation>
-<translation id="3520476450377425184">Pozostało dni: <ph name="NUMBER_MANY"/></translation>
+<translation id="3520476450377425184"><ph name="NUMBER_MANY"/> dni</translation>
 <translation id="7643817847124207232">Połączenie internetowe zostało utracone.</translation>
 <translation id="932327136139879170">Strona główna</translation>
 <translation id="2560794850818211873">K&amp;opiuj adres URL filmu wideo</translation>
@@ -810,7 +816,7 @@
 <translation id="3619051884944784882">&amp;Zakończ proces</translation>
 <translation id="121201262018556460">Próbujesz wejść na <ph name="DOMAIN"/>, ale serwer przedstawił certyfikat ze słabym kluczem. Intruz mógł uzyskać klucz prywatny, a serwer może nie być tym, którego oczekujesz (możliwe, że komunikujesz się z intruzem).</translation>
 <translation id="5553089923092577885">Odwzorowania zasad certyfikatu</translation>
-<translation id="5600907569873192868">Pozostało: <ph name="NUMBER_MANY"/> min</translation>
+<translation id="5600907569873192868"><ph name="NUMBER_MANY"/> min</translation>
 <translation id="1519704592140256923">Wybierz pozycję</translation>
 <translation id="1275018677838892971">Witryna pod adresem <ph name="HOST_NAME"/> zawiera elementy z witryn zgłoszonych jako wyłudzające informacje. Witryny tego typu wyłudzają od użytkowników dane osobowe lub informacje finansowe, często podszywając się pod zaufane instytucje, na przykład banki.</translation>
 <translation id="6166101525540035714">Gdy korzystasz z Chrome, zastosowanie mają <ph name="BEGIN_LINK1"/>Warunki korzystania z usługi<ph name="END_LINK1"/> Chrome i <ph name="BEGIN_LINK2"/>Informacje na temat ochrony prywatności<ph name="END_LINK2"/>.</translation>
@@ -820,13 +826,13 @@
 <translation id="7518003948725431193">Nie znaleziono strony internetowej pod adresem <ph name="URL"/></translation>
 <translation id="745602119385594863">Nowa wyszukiwarka:</translation>
 <translation id="7484645889979462775">Nigdy dla tej witryny</translation>
-<translation id="8666066831007952346">Pozostało dni: <ph name="NUMBER_TWO"/></translation>
+<translation id="8666066831007952346"><ph name="NUMBER_TWO"/> dni</translation>
 <translation id="9086455579313502267">Nie można uzyskać dostępu do sieci</translation>
 <translation id="2772936498786524345">Dyskretny</translation>
 <translation id="5595485650161345191">Edytuj adres</translation>
 <translation id="2694026874607847549">Pliki cookie (1)</translation>
 <translation id="4393664266930911253">Włącz te funkcje</translation>
-<translation id="6390842777729054533">Pozostało: <ph name="NUMBER_ZERO"/> sek</translation>
+<translation id="6390842777729054533"><ph name="NUMBER_ZERO"/> sek</translation>
 <translation id="3909791450649380159">Wy&amp;tnij</translation>
 <translation id="2955913368246107853">Zamknij pasek wyszukiwania</translation>
 <translation id="8864170386249720785">Ogólne ustawienia SSL:</translation>
@@ -992,7 +998,7 @@
 <translation id="2280486287150724112">Prawy margines</translation>
 <translation id="7632380866023782514">W prawym górnym rogu</translation>
 <translation id="4693789964669838452">Klatki/s</translation>
-<translation id="4925520021222027859">Wprowadź hasło dotyczące aplikacji:</translation>
+<translation id="4925520021222027859">Wpisz hasło wygenerowane dla tej aplikacji:</translation>
 <translation id="3494768541638400973">japoński – Google (dla klawiatury japońskiej)</translation>
 <translation id="4679639996443646335">Według informacji Google kontynuowanie grozi zainstalowaniem na urządzeniu przenośnym złośliwego oprogramowania. Jeśli strona już była odwiedzana lub jest zaufana, być może niedawno włamał się na nią haker. W tej chwili odradzamy kontynuowanie – możesz spróbować ponownie jutro lub otworzyć inną stronę.</translation>
 <translation id="7223775956298141902">Ech... nie masz żadnych rozszerzeń :-(</translation>
@@ -1383,7 +1389,7 @@
 <translation id="2084978867795361905">MS-IME</translation>
 <translation id="7227669995306390694"><ph name="NETWORK"/> – brak usługi transmisji danych</translation>
 <translation id="3481915276125965083">Następujące wyskakujące okienka na tej stronie zostały zablokowane:</translation>
-<translation id="7163503212501929773">Pozostało: <ph name="NUMBER_MANY"/> godz</translation>
+<translation id="7163503212501929773"><ph name="NUMBER_MANY"/> godz</translation>
 <translation id="7705276765467986571">Nie można wczytać modelu zakładek.</translation>
 <translation id="750413812607578381">Należy ponownie uruchomić <ph name="PRODUCT_NAME"/> teraz.</translation>
 <translation id="8034305971714560781">Jeśli odłączysz swoje konto Google od <ph name="PRODUCT_NAME"/>, zmiany wprowadzone na tym urządzeniu przenośnym nie będą już synchronizowane z kontem Google. Dane już zapisane na koncie Google pozostaną tam, dopóki nie usuniesz ich w <ph name="BEGIN_LINK"/>Panelu Google<ph name="END_LINK"/>.</translation>
@@ -1487,7 +1493,6 @@
 <translation id="6342069812937806050">Przed momentem</translation>
 <translation id="5605716740717446121">Jeśli nie wprowadzisz prawidłowego klucza odblokowania kodu PIN, Twoja karta SIM zostanie trwale zablokowana. Pozostało prób: <ph name="TRIES_COUNT"/></translation>
 <translation id="8836712291807476944"><ph name="SAVED_BYTES"/>/<ph name="TOTAL_BYTES"/> bajtów, przerwano</translation>
-<translation id="3661943501691646627">&lt;p&gt; Możesz bezpośrednio tutaj korzystać z kart otwartych na komputerze. &lt;/p&gt; &lt;p&gt; Po prostu uruchom Chrome na komputerze, otwórz menu klucza i kliknij „Zaloguj się do Chrome...”. &lt;/p&gt; &lt;p&gt; To działa naprawdę nieźle! &lt;/p&gt;</translation>
 <translation id="5502500733115278303">Importowane z Firefoxa</translation>
 <translation id="569109051430110155">Wykrywaj automatycznie</translation>
 <translation id="4408599188496843485">Pomo&amp;c</translation>
@@ -1657,7 +1662,7 @@
 <translation id="1493892686965953381">Oczekiwanie na <ph name="LOAD_STATE_PARAMETER"/>...</translation>
 <translation id="6449085810994685586">&amp;Sprawdź pisownię w tym polu</translation>
 <translation id="3621320549246006887">Jest to eksperymentalny schemat, w którym certyfikaty HTTPS mogą być uwierzytelniane lub odrzucane przez rekordy DNS (zabezpieczone przez DNSSEC). Jeśli widzisz ten komunikat, oznacza to, że przy użyciu opcji wiersza poleceń zostały włączone funkcje eksperymentalne. Możesz usunąć te opcje wiersza poleceń, aby zignorować ten błąd.</translation>
-<translation id="50960180632766478">Pozostało: <ph name="NUMBER_FEW"/> min</translation>
+<translation id="50960180632766478"><ph name="NUMBER_FEW"/> min</translation>
 <translation id="3174168572213147020">Wyspa</translation>
 <translation id="748138892655239008">Podstawowe ograniczenia certyfikatu</translation>
 <translation id="457386861538956877">Więcej</translation>
@@ -1942,7 +1947,7 @@
 <translation id="7366909168761621528">Dane przeglądarki</translation>
 <translation id="1047726139967079566">Dodaj stronę do zakładek...</translation>
 <translation id="9020142588544155172">Serwer odrzucił połączenie.</translation>
-<translation id="2544782972264605588">Pozostało: <ph name="NUMBER_DEFAULT"/> sek</translation>
+<translation id="2544782972264605588"><ph name="NUMBER_DEFAULT"/> sek</translation>
 <translation id="1800987794509850828">Broker wtyczek: <ph name="PLUGIN_NAME"/></translation>
 <translation id="8871696467337989339">Użyto nieobsługiwanej flagi wiersza polecenia: <ph name="BAD_FLAG"/>. Ma to negatywny wpływ na stabilność i zabezpieczenia.</translation>
 <translation id="4767443964295394154">Lokalizacja pobierania</translation>
@@ -2015,7 +2020,7 @@
 <translation id="4436689501885286563">Usuń pliki cookie i inne dane stron, gdy się wyloguję</translation>
 <translation id="4278390842282768270">Dopuszczone</translation>
 <translation id="2074527029802029717">Odepnij kartę</translation>
-<translation id="1533897085022183721">Mniej niż <ph name="MINUTES"/>.</translation>
+<translation id="1533897085022183721">Zostało <ph name="MINUTES"/>.</translation>
 <translation id="7503821294401948377">Nie można wczytać ikony „<ph name="ICON"/>” dla czynności wykonywanej w przeglądarce.</translation>
 <translation id="8403381103556738778">Strona zawiera niezabezpieczoną treść.</translation>
 <translation id="1954982207163873487">Pokaż menu klucza</translation>
@@ -2085,7 +2090,7 @@
 <translation id="2851981350712094353">Łącznik Cloud Print</translation>
 <translation id="8443621894987748190">Wybierz zdjęcie dla konta</translation>
 <translation id="10122177803156699">Pokaż mi</translation>
-<translation id="5260878308685146029">Pozostało: <ph name="NUMBER_TWO"/> min</translation>
+<translation id="5260878308685146029"><ph name="NUMBER_TWO"/> min</translation>
 <translation id="2192505247865591433">Z:</translation>
 <translation id="4634771451598206121">Zaloguj się ponownie</translation>
 <translation id="7143207342074048698">Łączenie</translation>
@@ -2401,7 +2406,7 @@
 <translation id="2453021845418314664">Zaawansowane ustawienia synchronizacji</translation>
 <translation id="2192782719025820983">Szukaj dodatkowych drukarek</translation>
 <translation id="5458214261780477893">Dvorak</translation>
-<translation id="1164369517022005061">Pozostało: <ph name="NUMBER_DEFAULT"/> godz</translation>
+<translation id="1164369517022005061"><ph name="NUMBER_DEFAULT"/> godz</translation>
 <translation id="5943260032016910017">Wyjątki plików cookie i danych witryn</translation>
 <translation id="2214283295778284209">Witryna <ph name="SITE"/> jest niedostępna</translation>
 <translation id="8755376271068075440">&amp;Większy</translation>
@@ -3106,7 +3111,7 @@
 <translation id="4923417429809017348">Ta strona została przetłumaczona z nieznanego języka na język <ph name="LANGUAGE_LANGUAGE"/></translation>
 <translation id="3631337165634322335">Poniższe wyjątki odnoszą się wyłącznie do bieżącej sesji incognito.</translation>
 <translation id="676327646545845024">Nigdy nie pokazuj ponownie okna dialogowego dla linków tego typu.</translation>
-<translation id="494645311413743213">Pozostało: <ph name="NUMBER_TWO"/> sek</translation>
+<translation id="494645311413743213"><ph name="NUMBER_TWO"/> sek</translation>
 <translation id="1485146213770915382">Do adresu URL możesz dodać wybrane słowa wyszukiwania poprzedzone parametrem <ph name="SEARCH_TERMS_LITERAL"/>.</translation>
 <translation id="4839303808932127586">Za&amp;pisz film wideo jako...</translation>
 <translation id="5626134646977739690">Nazwa:</translation>
@@ -3136,6 +3141,7 @@
 <translation id="8241707690549784388">Strona, na której wyszukiwane są wprowadzone przez Ciebie informacje. Powrót do tej strony może spowodować konieczność powtórzenia wykonanych czynności. Czy chcesz kontynuować?</translation>
 <translation id="5359419173856026110">Pokazuje rzeczywistą liczbę klatek na sekundę na stronie po włączeniu wspomagania sprzętowego.</translation>
 <translation id="4104163789986725820">E&amp;ksportuj</translation>
+<translation id="5143814737375740231">Chrome na Androida nie obsługuje tej wtyczki.</translation>
 <translation id="2113479184312716848">&amp;Otwórz plik</translation>
 <translation id="3314617171364900239">Sprawdzanie dostępności aktualizacji rozszerzenia „<ph name="EXTENSION_NAME"/>” wielokrotnie zakończyło się niepowodzeniem.</translation>
 <translation id="4850458635498951714">Dodaj urządzenie</translation>
@@ -3367,7 +3373,7 @@
 <translation id="9046895021617826162">Łączenie nie powiodło się</translation>
 <translation id="4061733942661196912">W przypadku włączenia tej funkcji odwiedzenie strony logowania na konto Google spowoduje wyświetlenie paska informacyjnego umożliwiającego łatwe zalogowanie się przy użyciu konta Google połączonego z profilem. Niezależnie od ustawienia tej opcji automatyczne logowanie jest zawsze wyłączone, gdy profil nie jest połączony z kontem.</translation>
 <translation id="1492188167929010410">Identyfikator awarii: <ph name="CRASH_ID"/></translation>
-<translation id="1963692530539281474">Pozostało dni: <ph name="NUMBER_DEFAULT"/></translation>
+<translation id="1963692530539281474"><ph name="NUMBER_DEFAULT"/></translation>
 <translation id="4470270245053809099">Wystawiony przez: <ph name="NAME"/></translation>
 <translation id="6268747994388690914">Importuj zakładki z pliku HTML...</translation>
 <translation id="5365539031341696497">tajski (klawiatura kesmanee)</translation>
@@ -3459,7 +3465,7 @@
 <translation id="8007030362289124303">Bateria rozładowana</translation>
 <translation id="4513946894732546136">Twoja opinia</translation>
 <translation id="1135328998467923690">Pakiet jest nieprawidłowy: „<ph name="ERROR_CODE"/>”.</translation>
-<translation id="5906719743126878045">Pozostało: <ph name="NUMBER_TWO"/> godz</translation>
+<translation id="5906719743126878045"><ph name="NUMBER_TWO"/> godz</translation>
 <translation id="1753682364559456262">Zarządzaj blokowaniem grafik...</translation>
 <translation id="6550675742724504774">Opcje</translation>
 <translation id="8959208747503200525"><ph name="NUMBER_TWO"/> hours ago</translation>
@@ -3542,7 +3548,7 @@
 <translation id="6902055721023340732">Adres URL automatycznej konfiguracji</translation>
 <translation id="4268574628540273656">Adres URL:</translation>
 <translation id="7481312909269577407">Przekaż dalej</translation>
-<translation id="3759876923365568382">Pozostało dni: <ph name="NUMBER_FEW"/></translation>
+<translation id="3759876923365568382"><ph name="NUMBER_FEW"/> dni</translation>
 <translation id="295228163843771014">Wybrano opcję braku synchronizacji haseł. Jeśli później zmienisz zdanie, możesz zawsze zmodyfikować ustawienia synchronizacji.</translation>
 <translation id="2478277127709346535">Aktywuj okno 7</translation>
 <translation id="5972826969634861500">Uruchom przeglądarkę <ph name="PRODUCT_NAME"/></translation>

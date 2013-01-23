@@ -188,6 +188,8 @@ extern const char kGraphicsMode[];
 // Not actual flags, just values: for example, --graphics-mode=compositor
 extern const char kGraphicsModeValueBasic[];
 extern const char kGraphicsModeValueCompositor[];
+extern const char kMediaPlayerInRenderProcess[];
+extern const char kDisableMediaHistoryLogging[];
 extern const char kRendererProcessLimit[];
 extern const char kTraceStartup[];
 extern const char kFontBoostingVersion[];

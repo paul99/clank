@@ -279,6 +279,9 @@ IPC_MESSAGE_CONTROL1(GpuHostMsg_AcceleratedSurfacePostSubBuffer,
 IPC_MESSAGE_CONTROL1(GpuHostMsg_AcceleratedSurfaceRelease,
                      GpuHostMsg_AcceleratedSurfaceRelease_Params)
 
+IPC_MESSAGE_CONTROL1(GpuHostMsg_LoseRenderer,
+                     int32 /* surface_id */)
+
 #if defined(OS_ANDROID)
 // This message is sent from the GPU process to the browser to notify that the
 // native window is attached or detached in the GPU.

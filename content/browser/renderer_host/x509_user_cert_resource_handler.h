@@ -84,7 +84,8 @@ class X509UserCertResourceHandler : public ResourceHandler {
   int render_process_host_id_;
   // The id of the |RenderView| which started the download.
   int render_view_id_;
-
+  // true iff the response is a PKCS12 keychain.
+  bool is_pkcs12_;
   DISALLOW_COPY_AND_ASSIGN(X509UserCertResourceHandler);
 };
 

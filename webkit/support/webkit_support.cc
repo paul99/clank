@@ -53,8 +53,9 @@
 #include "webkit/gpu/webgraphicscontext3d_in_process_impl.h"
 #include "webkit/gpu/webgraphicscontext3d_in_process_command_buffer_impl.h"
 #if defined(OS_ANDROID)
+#include "webkit/media/media_player_bridge_manager_impl.h"
+#include "webkit/media/webmediaplayer_in_process_android.h"
 #include "webkit/media/webmediaplayer_manager_android.h"
-#include "webkit/media/webmediaplayer_android.h"
 #else
 #include "webkit/media/webmediaplayer_impl.h"
 #endif
@@ -256,7 +257,7 @@ static TestEnvironment* test_environment;
 // file-over-http bridge.
 DEFINE_STATIC_GLOBAL(FilePath, mock_current_directory);
 DEFINE_STATIC_GLOBAL(scoped_ptr<webkit_glue::WebMediaPlayerManagerAndroid>, media_player_manager);
-
+DEFINE_STATIC_GLOBAL(scoped_ptr<webkit_glue::MediaPlayerBridgeManagerImpl>, media_bridge_manager);
 #endif
 
 static void SetUpTestEnvironmentImpl(bool unit_test_mode) {
@@ -293,10 +294,8 @@ static void SetUpTestEnvironmentImpl(bool unit_test_mode) {
   }
 #if defined(OS_ANDROID)
   android::ProcessState::self()->startThreadPool();
-
-  media_player_manager.reset(new webkit_glue::WebMediaPlayerManagerAndroid(
-      NULL, 0));
-  media_player_manager->SetActivePlayerLimit(8);
+  media_bridge_manager.reset(new webkit_glue::MediaPlayerBridgeManagerImpl(8));
+  media_player_manager.reset(new webkit_glue::WebMediaPlayerManagerAndroid());
 #endif
 
   webkit_glue::SetUserAgent(webkit_glue::BuildUserAgentFromProduct(
@@ -357,12 +356,14 @@ WebKit::WebMediaPlayer* CreateMediaPlayer(
     WebMediaPlayerClient* client,
     webkit_media::MediaStreamClient* media_stream_client) {
 #if defined(OS_ANDROID)
-  scoped_ptr<webkit_glue::WebMediaPlayerAndroid> result(
-      new webkit_glue::WebMediaPlayerAndroid(
+  scoped_ptr<webkit_glue::WebMediaPlayerInProcessAndroid> result(
+      new webkit_glue::WebMediaPlayerInProcessAndroid(
           frame,
           client,
           GetWebKitPlatformSupport()->cookieJar(),
-          media_player_manager.get(), NULL));
+          media_player_manager.get(),
+          media_bridge_manager.get(),
+          NULL, true, 0));
   return result.release();
 #else
   scoped_ptr<media::MessageLoopFactory> message_loop_factory(

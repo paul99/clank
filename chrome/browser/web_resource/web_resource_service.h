@@ -12,6 +12,8 @@
 #include "base/memory/scoped_ptr.h"
 #include "base/memory/weak_ptr.h"
 #include "content/public/common/url_fetcher_delegate.h"
+#include "chrome/browser/web_resource/json_asynchronous_unpacker.h"
+#include "googleurl/src/gurl.h"
 
 class PrefService;
 class ResourceDispatcherHost;
@@ -23,11 +25,12 @@ class DictionaryValue;
 // A WebResourceService fetches JSON data from a web server and periodically
 // refreshes it.
 class WebResourceService
-    : public base::RefCountedThreadSafe<WebResourceService>,
-      public content::URLFetcherDelegate {
+    : public content::URLFetcherDelegate,
+      public JSONAsynchronousUnpackerDelegate,
+      public base::RefCountedThreadSafe<WebResourceService> {
  public:
   WebResourceService(PrefService* prefs,
-                     const char* web_resource_server,
+                     const GURL& web_resource_server,
                      bool apply_locale_to_url_,
                      const char* last_update_time_pref_name,
                      int start_fetch_delay_ms,
@@ -38,9 +41,14 @@ class WebResourceService
   // Then begin updating resources.
   void StartAfterDelay();
 
+  // JSONAsynchronousUnpackerDelegate methods.
+  virtual void OnUnpackFinished(const DictionaryValue& parsed_json) OVERRIDE;
+  virtual void OnUnpackError(const std::string& error_message) OVERRIDE;
+
  protected:
   virtual ~WebResourceService();
 
+  // For the subclasses to process the result of a fetch.
   virtual void Unpack(const base::DictionaryValue& parsed_json) = 0;
 
   PrefService* prefs_;
@@ -68,13 +76,17 @@ class WebResourceService
   // The tool that fetches the url data from the server.
   scoped_ptr<content::URLFetcher> url_fetcher_;
 
+  // The tool that parses and transforms the json data. Weak reference as it
+  // deletes itself once the unpack is done.
+  JSONAsynchronousUnpacker* json_unpacker_;
+
   // True if we are currently fetching or unpacking data. If we are asked to
   // start a fetch when we are still fetching resource data, schedule another
   // one in |cache_update_delay_ms_| time, and silently exit.
   bool in_fetch_;
 
   // URL that hosts the web resource.
-  const char* web_resource_server_;
+  GURL web_resource_server_;
 
   // Indicates whether we should append locale to the web resource server URL.
   bool apply_locale_to_url_;

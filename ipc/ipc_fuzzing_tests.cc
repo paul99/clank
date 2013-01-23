@@ -15,6 +15,11 @@
 #include "testing/gtest/include/gtest/gtest.h"
 #include "testing/multiprocess_func_list.h"
 
+#if defined(OS_POSIX)
+#include "base/global_descriptors_posix.h"
+#include "ipc/ipc_descriptors.h"
+#endif
+
 // IPC messages for testing ---------------------------------------------------
 
 #define IPC_MESSAGE_IMPL
@@ -247,6 +252,10 @@ class FuzzerClientListener : public SimpleListener {
 // Runs the fuzzing server child mode. Returns when the preset number
 // of messages have been received.
 MULTIPROCESS_TEST_MAIN(RunFuzzServer) {
+#if defined(OS_POSIX)
+  base::GlobalDescriptors::GetInstance()->Set(kPrimaryIPCChannel,
+      kPrimaryIPCChannel + base::GlobalDescriptors::kBaseDescriptor);
+#endif
   MessageLoopForIO main_message_loop;
   FuzzerServerListener listener;
   IPC::Channel chan(kFuzzerChannel, IPC::Channel::MODE_CLIENT, &listener);

@@ -8,6 +8,12 @@
 <translation id="8130276680150879341">Αποσύνδεση ιδιωτικού δικτύου</translation>
 <translation id="1058418043520174283"><ph name="INDEX"/> από <ph name="COUNT"/></translation>
 <translation id="4480627574828695486">Αποσύνδεση αυτού του λογαριασμού...</translation>
+<translation id="2516632596252643567">&lt;p&gt;
+         Αποκτήστε πρόσβαση στις καρτέλες που έχετε ανοίξει στον υπολογιστή σας, από εδώ.
+          &lt;/p&gt;
+          &lt;p&gt;
+          Απλώς ανοίξτε το Chrome στον υπολογιστή σας, μεταβείτε στο μενού και επιλέξτε &quot;Σύνδεση στο Chrome...&quot;
+          &lt;/p&gt;</translation>
 <translation id="7040807039050164757">&amp;Ορθογραφικός Έλεγχος σε Αυτό το Πεδίο</translation>
 <translation id="778579833039460630">Δεν έχουν ληφθεί δεδομένα</translation>
 <translation id="8791923223854254330">Διαχείριση προγραμμάτων χειρισμού...</translation>
@@ -1509,15 +1515,6 @@
 <translation id="6342069812937806050">Πριν λίγο</translation>
 <translation id="5605716740717446121">Η κάρτα σας SIM θα απενεργοποιηθεί προσωρινά αν δεν καταφέρετε να πληκτρολογήσετε το σωστό κλειδί ξεκλειδώματος PIN. Προσπάθειες που απομένουν: <ph name="TRIES_COUNT"/></translation>
 <translation id="8836712291807476944"><ph name="SAVED_BYTES"/> / <ph name="TOTAL_BYTES"/> bytes, έγινε διακοπή</translation>
-<translation id="3661943501691646627">&lt;p&gt;
-          Αποκτήστε πρόσβαση στις καρτέλες που έχετε ανοίξει στον υπολογιστή σας, από εδώ.
-          &lt;/p&gt;
-          &lt;p&gt;
-          Απλώς ανοίξτε το Chrome στον υπολογιστή σας, μεταβείτε στο μενού και επιλέξτε &quot;Σύνδεση στο Chrome...&quot;
-          &lt;/p&gt;
-          &lt;p&gt;
-          Είναι πραγματικά καταπληκτικό.
-          &lt;/p&gt;</translation>
 <translation id="5502500733115278303">Εισαγωγή από το Firefox</translation>
 <translation id="569109051430110155">Αυτόματος εντοπισμός</translation>
 <translation id="4408599188496843485">Β&amp;οήθεια</translation>
@@ -2826,7 +2823,7 @@
 <translation id="6503256918647795660">Πληκτρολόγιο με γαλλικούς χαρακτήρες (Ελβετίας)</translation>
 <translation id="2498826285048723189">Η επέκταση &quot;<ph name="EXTENSION_NAME"/>&quot; καταργήθηκε αυτόματα.</translation>
 <translation id="6175314957787328458">Microsoft Domain GUID</translation>
-<translation id="8179976553408161302">Enter</translation>
+<translation id="8179976553408161302">Είσοδος</translation>
 <translation id="691321796646552019">Να σταματήσει!</translation>
 <translation id="8261506727792406068">Διαγραφή</translation>
 <translation id="7800518121066352902">Περιστροφή προς τα &amp;αριστερά</translation>
@@ -3163,6 +3160,7 @@
 <translation id="8241707690549784388">Στη σελίδα που αναζητάτε χρησιμοποποιήθηκαν πληροφορίες που καταχωρίσατε. Αν επιστρέψετε σε αυτή τη σελίδα ίσως επαναληφθούν ενέργειες που εκτελέσατε. Θέλετε να συνεχίσετε;</translation>
 <translation id="5359419173856026110">Εμφανίζει τον πραγματικό ρυθμό καρέ μιας σελίδας, σε καρέ ανά δευτερόλεπτο, όταν η επιτάχυνση υλικού είναι ενεργή.</translation>
 <translation id="4104163789986725820">Ε&amp;ξαγωγή...</translation>
+<translation id="5143814737375740231">Το Chrome για Android δεν υποστηρίζει αυτήν την προσθήκη.</translation>
 <translation id="2113479184312716848">Άνοιγμα αρχείου...</translation>
 <translation id="3314617171364900239">Οι έλεγχοι ενημέρωσης έχουν αποτύχει επανειλημμένα για την επέκταση &quot;<ph name="EXTENSION_NAME"/>.''</translation>
 <translation id="4850458635498951714">Προσθήκη συσκευής</translation>

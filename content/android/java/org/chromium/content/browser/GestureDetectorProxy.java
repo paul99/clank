@@ -7,11 +7,11 @@ package org.chromium.content.browser;
 import android.content.Context;
 import android.os.Handler;
 import android.os.Message;
-import android.view.GestureDetector;
 import android.view.ViewConfiguration;
-import android.view.GestureDetector.OnGestureListener;
 import android.view.MotionEvent;
-import android.util.Pair;
+
+import org.chromium.content.browser.third_party.GestureDetector;
+import org.chromium.content.browser.third_party.GestureDetector.OnGestureListener;
 
 import java.util.Iterator;
 
@@ -122,12 +122,14 @@ class GestureDetectorProxy {
     }
 
     // Given a stream of pending events, cancel the LONG_PRESS timer if appropriate.
-    void cancelLongPressIfNeeded(Iterator<Pair<MotionEvent, Integer>> pendingEvents) {
+    void cancelLongPressIfNeeded(Iterator<PendingMotionEvent> pendingEvents) {
         if (mCurrentDownEvent == null)
+            return;
+        if (!mHandler.hasMessages(LONG_PRESS))
             return;
         long currentDownTime = mCurrentDownEvent.getDownTime();
         while (pendingEvents.hasNext()) {
-            MotionEvent pending = pendingEvents.next().first;
+            MotionEvent pending = pendingEvents.next().event();
             if (pending.getDownTime() != currentDownTime) {
                 break;
             }

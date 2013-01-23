@@ -118,6 +118,13 @@ class WebMediaPlayerManagerAndroid;
 #endif
 }
 
+#if defined(OS_ANDROID)
+namespace media {
+class MediaPlayerBridgeManager;
+class WebMediaPlayerProxyImplAndroid;
+}
+#endif
+
 namespace WebKit {
 class WebApplicationCacheHost;
 class WebApplicationCacheHostClient;
@@ -202,7 +209,8 @@ class RenderViewImpl : public RenderWidget,
       int64 session_storage_namespace_id,
       const string16& frame_name,
       const std::string& user_agent_override,
-      int32 next_page_id);
+      int32 next_page_id,
+      const WebKit::WebScreenInfo& screen_info);
 
   // Returns the RenderViewImpl containing the given WebView.
   CONTENT_EXPORT static RenderViewImpl* FromWebView(WebKit::WebView* webview);
@@ -385,6 +393,7 @@ class RenderViewImpl : public RenderWidget,
   virtual bool isSmartInsertDeleteEnabled();
   virtual bool isSelectTrailingWhitespaceEnabled();
   virtual void didChangeSelection(bool is_selection_empty);
+  virtual void didChangeFormState(const WebKit::WebNode&);
   virtual void didExecuteCommand(const WebKit::WebString& command_name);
   virtual bool handleCurrentKeyboardEvent();
   virtual bool runFileChooser(
@@ -751,7 +760,8 @@ class RenderViewImpl : public RenderWidget,
                  int64 session_storage_namespace_id,
                  const string16& frame_name,
                  const std::string& user_agent_override,
-                 int32 next_page_id);
+                 int32 next_page_id,
+                 const WebKit::WebScreenInfo& screen_info);
 
   // Do not delete directly.  This class is reference counted.
   virtual ~RenderViewImpl();
@@ -882,6 +892,7 @@ class RenderViewImpl : public RenderWidget,
   CONTENT_EXPORT void OnNavigate(const ViewMsg_Navigate_Params& params);
   void OnPaste();
   void OnPasteAndMatchStyle();
+  void OnPinchEndProcessed();
 #if defined(OS_MACOSX)
   void OnPluginImeCompositionCompleted(const string16& text, int plugin_id);
 #endif
@@ -1411,7 +1422,9 @@ class RenderViewImpl : public RenderWidget,
   // Keeps the active match selection for blocking find next request.
   gfx::Rect blocking_find_all_active_match_selection_;
 
+  media::WebMediaPlayerProxyImplAndroid* media_player_proxy_;
   scoped_ptr<webkit_glue::WebMediaPlayerManagerAndroid> media_player_manager_;
+  scoped_ptr<media::MediaPlayerBridgeManager> media_bridge_manager_;
 
   // not to queue another update if one is scheduled
   bool update_frame_info_scheduled_;
@@ -1430,6 +1443,8 @@ class RenderViewImpl : public RenderWidget,
   // Main-thread context for video GL resource allocation.
   scoped_ptr<WebKit::WebGraphicsContext3D> resource_context_;
 #endif
+
+  bool double_tap_zoom_in_effect_;
 
   // Mouse Lock dispatcher attached to this view.
   MouseLockDispatcher* mouse_lock_dispatcher_;
@@ -1487,10 +1502,6 @@ class RenderViewImpl : public RenderWidget,
   // All the registered observers.  We expect this list to be small, so vector
   // is fine.
   ObserverList<content::RenderViewObserver> observers_;
-
-  // Used to inform didChangeSelection() when it is called in the context
-  // of handling a ViewMsg_SelectRange IPC.
-  bool handling_select_range_;
 
   // Wraps the |webwidget_| as a MouseLockDispatcher::LockTarget interface.
   scoped_ptr<MouseLockDispatcher::LockTarget> webwidget_mouse_lock_target_;

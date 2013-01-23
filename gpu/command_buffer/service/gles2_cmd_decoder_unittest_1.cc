@@ -238,4 +238,3 @@ void GLES2DecoderTestBase::SpecializedSetup<GetVertexAttribfv, 0>(bool valid) {
 
 }  // namespace gles2
 }  // namespace gpu
-

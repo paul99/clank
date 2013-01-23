@@ -125,6 +125,9 @@ void UserActionRateCounter::GenerateRateHistograms() {
   UMA_USER_ACTION_RATE_COUNTS("UserActionRate.MobileNTPSwitchToBookmarks");
   UMA_USER_ACTION_RATE_COUNTS("UserActionRate.MobileNTPSwitchToMostVisited");
   UMA_USER_ACTION_RATE_COUNTS("UserActionRate.MobileNTPSwitchToOpenTabs");
+  UMA_USER_ACTION_RATE_COUNTS("UserActionRate.MobileNTPBookmark");
+  UMA_USER_ACTION_RATE_COUNTS("UserActionRate.MobileNTPMostVisited");
+  UMA_USER_ACTION_RATE_COUNTS("UserActionRate.MobileNTPForeignSession");
 
   UMA_USER_ACTION_RATE_COUNTS("UserActionRate.MobileNewTabOpened");
   UMA_USER_ACTION_RATE_COUNTS("UserActionRate.MobileOmniboxSearch");

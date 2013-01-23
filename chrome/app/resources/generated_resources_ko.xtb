@@ -8,6 +8,12 @@
 <translation id="8130276680150879341">사설 네트워크 연결 해제</translation>
 <translation id="1058418043520174283"><ph name="INDEX"/>/<ph name="COUNT"/></translation>
 <translation id="4480627574828695486">계정 연결 해제...</translation>
+<translation id="2516632596252643567">&lt;p&gt;
+          여기에서 곧바로 컴퓨터에서 열어 둔 탭에 액세스할 수 있습니다.
+          &lt;/p&gt;
+          &lt;p&gt;
+          컴퓨터에서 Chrome을 열고 메뉴로 이동하여 'Chrome에 로그인...'을 선택하기만 하면 됩니다.
+          &lt;/p&gt;</translation>
 <translation id="7040807039050164757">이 입력란에서 맞춤법 검사(&amp;C)</translation>
 <translation id="778579833039460630">수신된 데이터 없음</translation>
 <translation id="8791923223854254330">핸들러 관리...</translation>
@@ -111,7 +117,7 @@
 <translation id="8677212948402625567">모두 접기...</translation>
 <translation id="7600965453749440009"><ph name="LANGUAGE"/> 번역 안함</translation>
 <translation id="3208703785962634733">미확인</translation>
-<translation id="620329680124578183">로드하지 마세요(권장).</translation>
+<translation id="620329680124578183">로드하지 않음(권장)</translation>
 <translation id="9074739597929991885">블루투스</translation>
 <translation id="2653266418988778031">인증 기관(CA) 인증서를 삭제하면 브라우저가 해당 CA에서 발급된 인증서를 더 이상 신뢰하지 않습니다.</translation>
 <translation id="5341849548509163798"><ph name="NUMBER_MANY"/>시간 전</translation>
@@ -201,7 +207,7 @@
 <translation id="7298195798382681320">권장</translation>
 <translation id="300544934591011246">이전 비밀번호</translation>
 <translation id="6015796118275082299">연도</translation>
-<translation id="8106242143503688092">로드하지 마세요(권장).</translation>
+<translation id="8106242143503688092">로드하지 않음(권장)</translation>
 <translation id="4058922952496707368">'<ph name="SUBKEY"/>' 키: <ph name="ERROR"/></translation>
 <translation id="5078796286268621944">잘못된 PIN</translation>
 <translation id="989988560359834682">주소 수정</translation>
@@ -1438,7 +1444,7 @@
 <translation id="1727750358045737585">CAPS LOCK이 켜져 있습니다.
 취소하려면 검색 키를 누르세요.</translation>
 <translation id="3058212636943679650">컴퓨터의 운영체제를 복구해야 하는 경우, 복구 SD 카드 또는 USB 메모리가 필요합니다.</translation>
-<translation id="7252661675567922360">로드하지 마세요.</translation>
+<translation id="7252661675567922360">로드하지 않음</translation>
 <translation id="2815382244540487333">다음 쿠키가 차단됨:</translation>
 <translation id="8882395288517865445">내 주소록 카드의 주소 포함</translation>
 <translation id="374530189620960299">이 사이트의 보안 인증서는 신뢰할 수 없습니다.</translation>
@@ -1529,15 +1535,6 @@ Public Exponent(<ph name="PUBLIC_EXPONENT_NUM_BITS"/>비트):
 <translation id="6342069812937806050">완료됨</translation>
 <translation id="5605716740717446121">정확한 PIN 잠금해제 키를 입력하지 않으면 SIM 카드가 영구적으로 사용중지됩니다. 남은 횟수: <ph name="TRIES_COUNT"/></translation>
 <translation id="8836712291807476944"><ph name="SAVED_BYTES"/>/<ph name="TOTAL_BYTES"/>바이트, 중단됨</translation>
-<translation id="3661943501691646627">&lt;p&gt;
-          여기에서 곧바로 컴퓨터에서 열어 둔 탭에 액세스할 수 있습니다.
-          &lt;/p&gt;
-          &lt;p&gt;
-          컴퓨터에서 Chrome을 열고 메뉴로 이동하여 'Chrome에 로그인...'을 선택하기만 하면 됩니다.
-          &lt;/p&gt;
-          &lt;p&gt;
-          정말 멋진 기능이죠?
-          &lt;/p&gt;</translation>
 <translation id="5502500733115278303">Firefox에서 가져온 북마크</translation>
 <translation id="569109051430110155">자동 선택</translation>
 <translation id="4408599188496843485">도움말(&amp;E)</translation>
@@ -2555,7 +2552,7 @@ Public Exponent(<ph name="PUBLIC_EXPONENT_NUM_BITS"/>비트):
 <translation id="2148999191776934271">충전 완료까지
 <ph name="HOUR"/>:<ph name="MINUTE"/> 남음</translation>
 <translation id="907841381057066561">압축하는 동안 임시 zip 파일을 만들지 못했습니다.</translation>
-<translation id="1466701440372079818">로드하지 마세요.</translation>
+<translation id="1466701440372079818">로드하지 않음</translation>
 <translation id="1064912851688322329">Google 계정 연결 해제</translation>
 <translation id="1294298200424241932">신뢰 설정 수정:</translation>
 <translation id="331915893283195714">모든 사이트에서 마우스 커서를 사용 중지하도록 허용</translation>
@@ -3192,6 +3189,7 @@ Public Exponent(<ph name="PUBLIC_EXPONENT_NUM_BITS"/>비트):
 <translation id="8241707690549784388">찾고 있는 페이지에서 사용자가 입력한 정보를 사용했습니다. 해당 페이지로 돌아가면 기존 작업을 반복할 수 있습니다. 계속하시겠습니까?</translation>
 <translation id="5359419173856026110">하드웨어 가속을 사용 중인 경우 페이지의 실제 프레임 속도를 초당 프레임으로 표시합니다.</translation>
 <translation id="4104163789986725820">내보내기(&amp;X)...</translation>
+<translation id="5143814737375740231">Android용 Chrome은 이 플러그인을 지원하지 않습니다.</translation>
 <translation id="2113479184312716848">파일 열기(&amp;F)...</translation>
 <translation id="3314617171364900239">확장 프로그램 '<ph name="EXTENSION_NAME"/>'에 대한 업데이트 확인을 계속 실패했습니다.</translation>
 <translation id="4850458635498951714">기기 추가</translation>

@@ -35,7 +35,6 @@
 #include "chrome/common/chrome_constants.h"
 #include "content/browser/android/device_info.h"
 #include "content/public/common/find_match_rect_android.h"
-#include "content/renderer/media/fullscreen_video_proxy_impl_android.h"
 #endif
 #include "content/common/appcache/appcache_dispatcher.h"
 #include "content/common/clipboard_messages.h"
@@ -197,11 +196,6 @@
 #include "webkit/glue/webdropdata.h"
 #include "webkit/glue/webkit_constants.h"
 #include "webkit/glue/webkit_glue.h"
-#if defined(OS_ANDROID)
-#include "webkit/media/webmediaplayer_android.h"
-#include "webkit/media/webmediaplayer_manager_android.h"
-#else
-#endif
 #include "webkit/glue/weburlloader_impl.h"
 #include "webkit/gpu/webgraphicscontext3d_in_process_impl.h"
 #include "webkit/media/webmediaplayer_impl.h"
@@ -210,6 +204,14 @@
 #include "webkit/plugins/npapi/webplugin_delegate_impl.h"
 #include "webkit/plugins/npapi/webplugin_impl.h"
 #include "webkit/plugins/ppapi/ppapi_webplugin_impl.h"
+
+#if defined(OS_ANDROID)
+#include "content/renderer/media/webmediaplayer_proxy_impl_android.h"
+#include "webkit/media/media_player_bridge_manager_impl.h"
+#include "webkit/media/webmediaplayer_impl_android.h"
+#include "webkit/media/webmediaplayer_in_process_android.h"
+#include "webkit/media/webmediaplayer_manager_android.h"
+#endif
 
 #if defined(OS_WIN)
 // TODO(port): these files are currently Windows only because they concern:
@@ -480,8 +482,9 @@ RenderViewImpl::RenderViewImpl(
     int64 session_storage_namespace_id,
     const string16& frame_name,
     const std::string& user_agent_override,
-    int32 next_page_id)
-    : RenderWidget(WebKit::WebPopupTypeNone),
+    int32 next_page_id,
+    const WebKit::WebScreenInfo& screen_info)
+    : RenderWidget(WebKit::WebPopupTypeNone, screen_info),
       webkit_preferences_(webkit_prefs),
       send_content_state_immediately_(false),
       enabled_bindings_(0),
@@ -516,12 +519,13 @@ RenderViewImpl::RenderViewImpl(
       blocking_find_all_pending_reply_message_(NULL),
       blocking_find_all_active_match_ordinal_(-1),
       blocking_find_all_active_match_selection_(),
+      media_player_proxy_(NULL),
       update_frame_info_scheduled_(false),
       selection_is_editable_(false),
 #endif
+      double_tap_zoom_in_effect_(false),
       mouse_lock_dispatcher_(NULL),
       session_storage_namespace_id_(session_storage_namespace_id),
-      handling_select_range_(false),
 #if defined(OS_WIN)
       focused_plugin_id_(-1),
 #endif
@@ -582,10 +586,7 @@ RenderViewImpl::RenderViewImpl(
 
 #if defined(OS_ANDROID)
   media_player_manager_.reset(
-      new webkit_glue::WebMediaPlayerManagerAndroid(
-          new media::FullscreenVideoProxyImplAndroid(
-              static_cast<RenderWidget*>(this), routing_id_),
-          routing_id_));
+      new webkit_glue::WebMediaPlayerManagerAndroid());
   touch_candidates_info_.reset(
        new WebKit::WebTouchCandidatesInfo);
 #endif
@@ -594,6 +595,12 @@ RenderViewImpl::RenderViewImpl(
   // Take a reference on behalf of the RenderThread.  This will be balanced
   // when we receive ViewMsg_ClosePage.
   AddRef();
+
+#if defined(OS_ANDROID)
+  // In m18, RenderWidget starts as hidden. But we can't tell RenderThread until
+  // it is added.
+  RenderThread::Get()->WidgetHidden();
+#endif
 
   // If this is a popup, we must wait for the CreatingNew_ACK message before
   // completing initialization.  Otherwise, we can finish it now.
@@ -730,7 +737,8 @@ RenderViewImpl* RenderViewImpl::Create(
     int64 session_storage_namespace_id,
     const string16& frame_name,
     const std::string& user_agent_override,
-    int32 next_page_id) {
+    int32 next_page_id,
+    const WebKit::WebScreenInfo& screen_info) {
   DCHECK(routing_id != MSG_ROUTING_NONE);
   return new RenderViewImpl(
       parent_hwnd,
@@ -743,7 +751,8 @@ RenderViewImpl* RenderViewImpl::Create(
       session_storage_namespace_id,
       frame_name,
       user_agent_override,
-      next_page_id);  // adds reference
+      next_page_id,
+      screen_info);  // adds reference
 }
 
 WebKit::WebPeerConnectionHandler* RenderViewImpl::CreatePeerConnectionHandler(
@@ -757,7 +766,7 @@ WebKit::WebPeerConnectionHandler* RenderViewImpl::CreatePeerConnectionHandler(
 
 #if defined(OS_ANDROID)
 void RenderViewImpl::SetVideoSurface(jobject j_surface, int player_id) {
-  media_player_manager_->SetVideoSurface(j_surface, player_id);
+  media_player_manager_->GetMediaPlayer(player_id)->SetVideoSurface(j_surface);
 }
 #endif
 
@@ -926,6 +935,7 @@ bool RenderViewImpl::OnMessageReceived(const IPC::Message& message) {
                         OnSetEditCommandsForNextKeyEvent)
     IPC_MESSAGE_HANDLER(ViewMsg_CustomContextMenuAction,
                         OnCustomContextMenuAction)
+    IPC_MESSAGE_HANDLER(ViewMsg_PinchEndProcessed, OnPinchEndProcessed)
 #if defined(OS_ANDROID)
     IPC_MESSAGE_HANDLER(ViewMsg_ShowPressState, OnShowPressState)
     IPC_MESSAGE_HANDLER(ViewMsg_SingleTap, OnSingleTap)
@@ -1274,9 +1284,7 @@ void RenderViewImpl::OnSelectRange(const gfx::Point& start,
   if (!webview())
     return;
 
-  handling_select_range_ = true;
   webview()->focusedFrame()->selectRange(start, end);
-  handling_select_range_ = false;
 #if defined(OS_ANDROID)
   Send(new ViewHostMsg_SelectRange_ACK(routing_id_));
 #endif
@@ -1796,7 +1804,8 @@ WebView* RenderViewImpl::createView(
       cloned_session_storage_namespace_id,
       frame_name,
       "",
-      1);
+      1,
+      screen_info_);
   view->opened_by_user_gesture_ = params.user_gesture;
 
   // Record whether the creator frame is trying to suppress the opener field.
@@ -1816,7 +1825,8 @@ WebView* RenderViewImpl::createView(
 }
 
 WebWidget* RenderViewImpl::createPopupMenu(WebKit::WebPopupType popup_type) {
-  RenderWidget* widget = RenderWidget::Create(routing_id_, popup_type);
+  RenderWidget* widget =
+      RenderWidget::Create(routing_id_, popup_type, screen_info_);
   return widget->webwidget();
 }
 
@@ -2029,18 +2039,19 @@ void RenderViewImpl::didChangeSelection(bool is_empty_selection) {
   bool has_text_input_type =
       webview()->textInputType() != WebKit::WebTextInputTypeNone;
   if (has_text_input_type || selection_is_editable_) {
-    UpdateTextInputState();
+    UpdateTextInputState(base::Time());
   }
   selection_is_editable_ = has_text_input_type;
 
   SendUpdateFrameInfo();
   UpdateSelectionBounds();
 #endif
-  if (!handling_input_event_ && !handling_select_range_)
-      return;
-  handling_select_range_ = false;
-
   SyncSelectionIfRequired();
+}
+
+void RenderViewImpl::didChangeFormState(const WebNode& node) {
+  if (node.focused())
+    UpdateTextInputState(base::Time());
 }
 
 void RenderViewImpl::didExecuteCommand(const WebString& command_name) {
@@ -2492,19 +2503,42 @@ WebMediaPlayer* RenderViewImpl::createMediaPlayer(
     // Create a main-thread context for resource allocation.
     resource_context_.reset(new WebGraphicsContext3DCommandBufferImpl());
     WebKit::WebGraphicsContext3D::Attributes attributes;
+    attributes.antialias = false;
     attributes.shareResources = true;
+    attributes.depth = false;
+    attributes.stencil = false;
     if (!resource_context_->initialize(
         attributes, NULL, false))
       return NULL;
   }
-  scoped_ptr<webkit_glue::WebMediaPlayerAndroid> player(
-      new webkit_glue::WebMediaPlayerAndroid(
-          frame,
-          client,
-          cookieJar(frame),
-          media_player_manager_.get(),
-          resource_context_.get()));
-  return player.release();
+  const CommandLine* cmd_line = CommandLine::ForCurrentProcess();
+  if (cmd_line->HasSwitch(switches::kMediaPlayerInRenderProcess)) {
+    if (!media_bridge_manager_.get()) {
+      media_bridge_manager_.reset(
+          new webkit_glue::MediaPlayerBridgeManagerImpl(1));
+    }
+    return new webkit_glue::WebMediaPlayerInProcessAndroid(
+        frame,
+        client,
+        cookieJar(frame),
+        media_player_manager_.get(),
+        media_bridge_manager_.get(),
+        resource_context_.get(),
+        cmd_line->HasSwitch(switches::kDisableMediaHistoryLogging),
+        routing_id_);
+  } else {
+    if (!media_player_proxy_) {
+      media_player_proxy_ = new media::WebMediaPlayerProxyImplAndroid(
+          this, media_player_manager_.get());
+    }
+    return new webkit_glue::WebMediaPlayerImplAndroid(
+        frame,
+        client,
+        media_player_manager_.get(),
+        media_player_proxy_,
+        resource_context_.get(),
+        routing_id_);
+  }
 #else
   media::MessageLoopFactory* message_loop_factory =
       new media::MessageLoopFactoryImpl();
@@ -2631,6 +2665,9 @@ WebNavigationPolicy RenderViewImpl::decidePolicyForNavigation(
   // the browser_handles_top_level_requests preference with it.
   if (IsNonLocalTopLevelNavigation(url, frame, type)) {
     bool ignore_navigation;
+    NavigationState* navigation_state = DocumentState::FromDataSource(
+        frame->provisionalDataSource())->navigation_state();
+
     Referrer referrer(
         GURL(request.httpHeaderField(WebString::fromUTF8("Referer"))),
         getReferrerPolicyFromRequest(request));
@@ -2639,6 +2676,7 @@ WebNavigationPolicy RenderViewImpl::decidePolicyForNavigation(
         url,
         referrer,
         NavigationPolicyToDisposition(default_policy),
+        navigation_state->transition_type(),
         frame->identifier(),
         &ignore_navigation));
     if (ignore_navigation)
@@ -3167,6 +3205,9 @@ void RenderViewImpl::didCommitProvisionalLoad(WebFrame* frame,
 
   if (document_state->commit_load_time().is_null())
     document_state->set_commit_load_time(Time::Now());
+
+  if (frame == webview()->mainFrame())
+    double_tap_zoom_in_effect_ = false;
 
   if (is_new_navigation) {
     // When we perform a new navigation, we need to update the last committed
@@ -5187,6 +5228,10 @@ void RenderViewImpl::DidHandleTouchEvent(const WebTouchEvent& event) {
   FOR_EACH_OBSERVER(RenderViewObserver, observers_, DidHandleTouchEvent(event));
 }
 
+void RenderViewImpl::OnPinchEndProcessed() {
+    double_tap_zoom_in_effect_ = false;
+}
+
 void RenderViewImpl::OnWasHidden() {
   RenderWidget::OnWasHidden();
 
@@ -5271,12 +5316,12 @@ void RenderViewImpl::OnSetFocus(bool enable) {
 }
 
 void RenderViewImpl::PpapiPluginFocusChanged() {
-  UpdateTextInputState();
+  UpdateTextInputState(base::Time());
   UpdateSelectionBounds();
 }
 
 void RenderViewImpl::PpapiPluginTextInputTypeChanged() {
-  UpdateTextInputState();
+  UpdateTextInputState(base::Time());
 }
 
 void RenderViewImpl::PpapiPluginCaretPositionChanged() {
@@ -5830,9 +5875,11 @@ void RenderViewImpl::ProcessTouchAsMouseEvent(int rx, int ry,
   // We need to resetInputMethod here to commit any existing composition, but
   // that may cause a scroll. So, store the scroll offset, and scroll back.
   gfx::Point scroll_offset = GetScrollOffset();
+  ++num_composition_changes_in_flight_;
   resetInputMethod();
+  --num_composition_changes_in_flight_;
   ScrollTo(scroll_offset.x(), scroll_offset.y());
-
+  send_text_input_state_ = false;
   handling_input_event_ = true;
   // Now translate a touch event to MOUSE_MOVE, MOUSE_DOWN and MOUSE_UP
   WebMouseEvent mouse_move_event = WebInputEventFactory::mouseEvent(
@@ -5852,6 +5899,7 @@ void RenderViewImpl::ProcessTouchAsMouseEvent(int rx, int ry,
       button);
   webwidget_->handleInputEvent(mouse_up_event);
   handling_input_event_ = false;
+  send_text_input_state_ = true;
 
   // On Android, we don't set input_method_is_active_. Instead we update text
   // input state after a tap or long press: the soft keyboard will then only
@@ -5941,14 +5989,6 @@ void RenderViewImpl::OnSingleTap(int x, int y, bool check_multiple_targets) {
 void RenderViewImpl::OnLongPress(int x, int y, bool check_multiple_targets) {
 #if defined(OS_ANDROID)
   ++content_request_id_;
-  ContentDetector::Result content = FindContentAroundPosition(x, y, true);
-  if (content.valid) {
-    handling_select_range_ = true;
-    webview()->focusedFrame()->selectRange(content.range);
-    handling_select_range_ = false;
-    // Returning here to prevent the normal event handler undoing this.
-    return;
-  }
 #endif
 
   if (!check_multiple_targets || !HandleMultipleTouchTargets(x, y))
@@ -6113,17 +6153,22 @@ void RenderViewImpl::ZoomTo(int rx, int ry, bool is_double_tap) {
 
   float animate_ms = is_double_tap ? 250 : 0;
   if (is_double_tap) {
-    if (rect.isEmpty() || scale_unchanged) {
+    if (rect.isEmpty() || scale_unchanged || double_tap_zoom_in_effect_) {
+      double_tap_zoom_in_effect_ = false;
       // Zoom out to overview mode.
       if (overview_scale != 0.0f)
         SendZoomMessageWithWebkitOffset(gfx::Point(rx, ry), overview_scale,
                                         animate_ms, true);
       return;
+    } else {
+      double_tap_zoom_in_effect_ = true;
     }
   } else if (rect.isEmpty()) {
     // Keep current scale (no need to scroll as x,y will normally already
     // be visible). TODO(johnme): Revisit this if it isn't always true.
     return;
+  } else {
+    double_tap_zoom_in_effect_ = false;
   }
 
   // TODO(johnme): If this is being called from OnZoomToActiveFindResult,
@@ -6225,19 +6270,27 @@ void RenderViewImpl::OnSetComposingRegion(int start, int end,
     return;
   send_text_input_state_ = false;
   ++num_composition_changes_in_flight_;
-  // Clear the existing composition (by committing any existing composing text).
-  webview()->confirmComposition("");
+  WebKit::WebTextInputInfo info;
   if (end > start) {
     // WebCore's Editor does not provide a way to set a composition without
     // inserting the composing text. So, we select, then save and then delete
     // the required composing text, then reinsert it as a new composition.
+    info = webview()->textInputInfo();
+    webview()->confirmComposition("");
     webview()->setEditableSelectionOffsets(start, end);
     WebString text = webview()->focusedFrame()->selectionAsText();
     webview()->focusedFrame()->executeCommand(WebString::fromUTF8("Delete"));
     OnImeSetComposition(text, underlines, 0, text.length());
+
+    // Set the selection back to what it was.
+    webview()->setEditableSelectionOffsets(info.selectionStart,
+                                           info.selectionEnd);
+  } else {
+    // Clear the existing composition.
+    webview()->confirmComposition("");
   }
   --num_composition_changes_in_flight_;
-  didChangeSelection(start == end);
+  didChangeSelection(info.selectionStart == info.selectionEnd);
   send_text_input_state_ = true;
 }
 

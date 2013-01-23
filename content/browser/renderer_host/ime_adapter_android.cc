@@ -100,7 +100,8 @@ bool ImeAdapterAndroid::SendKeyEvent(JNIEnv* env, jobject,
   return true;
 }
 
-void ImeAdapterAndroid::SetComposingText(JNIEnv* env, jobject, jstring text) {
+void ImeAdapterAndroid::SetComposingText(JNIEnv* env, jobject, jstring text,
+                                         int new_cursor_pos) {
   RenderWidgetHost* rwh = rwhva_->GetRenderWidgetHost();
   if (!rwh)
     return;
@@ -110,7 +111,14 @@ void ImeAdapterAndroid::SetComposingText(JNIEnv* env, jobject, jstring text) {
   underlines.push_back(
       WebKit::WebCompositionUnderline(0, text16.length(), SK_ColorBLACK,
                                       false));
-  rwh->ImeSetComposition(text16, underlines, 0, text16.length());
+  // new_cursor_position is as described in the Android API for
+  // InputConnection#setComposingText, whereas the parameters for
+  // ImeSetComposition are relative to the start of the composition.
+  if (new_cursor_pos > 0)
+    new_cursor_pos = text16.length() + new_cursor_pos - 1;
+
+  rwh->ImeSetComposition(text16, underlines, new_cursor_pos, new_cursor_pos);
+
 }
 
 
@@ -220,4 +228,16 @@ void ImeAdapterAndroid::Paste(JNIEnv* env, jobject) {
     return;
 
   rwh->Send(new ViewMsg_Paste(rwh->routing_id()));
+}
+
+void ImeAdapterAndroid::RequestTextInputStateUpdate(JNIEnv* env,
+                                                    jobject,
+                                                    jlong request_time) {
+  RenderWidgetHost* rwh = rwhva_->GetRenderWidgetHost();
+  if (!rwh)
+    return;
+  base::Time time = base::Time::UnixEpoch() +
+      base::TimeDelta::FromMilliseconds(request_time);
+
+  rwh->Send(new ViewMsg_RequestTextInputStateUpdate(rwh->routing_id(), time));
 }

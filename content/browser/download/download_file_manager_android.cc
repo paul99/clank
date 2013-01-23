@@ -129,11 +129,20 @@ void DownloadFileManagerAndroid::QueryURLRequest(
 
     CancelDownloadRequest(info.child_id, info.request_id);
   } else {
-    // All other downloads are handled directly
-    BrowserThread::PostTask(
-        BrowserThread::UI, FROM_HERE,
-        base::Bind(&DownloadFileManagerAndroid::GetPostDownloadOptions, this,
-            info));
+    // Ignore download urls with file scheme. A file scheme means that the file
+    // is already present on the device, we do not want to redownload the file.
+    // This also prevents us from inadvertendly downloading files accessible by
+    // chrome to the sdcard.
+    if (request_url.SchemeIs(chrome::kFileScheme)) {
+      VLOG(2) << "Ignoring local file download: " << request_url;
+      CancelDownloadRequest(info.child_id, info.request_id);
+    } else {
+      // All other downloads are handled directly
+      BrowserThread::PostTask(
+          BrowserThread::UI, FROM_HERE,
+          base::Bind(&DownloadFileManagerAndroid::GetPostDownloadOptions, this,
+                     info));
+    }
   }
 }
 

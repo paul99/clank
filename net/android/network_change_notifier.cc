@@ -15,11 +15,15 @@ NetworkChangeNotifierAndroid::NetworkChangeNotifierAndroid()
 
 NetworkChangeNotifierAndroid::~NetworkChangeNotifierAndroid() {}
 
-void NetworkChangeNotifierAndroid::SetConnectivityOnline(const bool is_online) {
-  const bool should_send_notification = !is_connectivity_state_known_ ||
-      is_online_ != is_online;
-  is_connectivity_state_known_ = true;
-  is_online_ = is_online;
+void NetworkChangeNotifierAndroid::SetConnectivityOnline(bool is_online) {
+  bool should_send_notification;
+  {
+    base::AutoLock auto_lock(lock_);
+    should_send_notification = !is_connectivity_state_known_ ||
+        is_online_ != is_online;
+    is_connectivity_state_known_ = true;
+    is_online_ = is_online;
+  }
   if (should_send_notification) {
     VLOG(1) << "Got connectivity change: online? " << is_online;
     NotifyObserversOfOnlineStateChange();
@@ -27,6 +31,7 @@ void NetworkChangeNotifierAndroid::SetConnectivityOnline(const bool is_online) {
 }
 
 bool NetworkChangeNotifierAndroid::IsCurrentlyOffline() const {
+  base::AutoLock auto_lock(lock_);
   return !is_online_;
 }
 

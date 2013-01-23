@@ -3,15 +3,13 @@
 # found in the LICENSE file.
 
 {
-  'target_defaults': {
-    'cflags': ['-fno-builtin-sin', '-fno-builtin-cos', '-ffreestanding'],
-  },
   'targets': [
     {
       'target_name': 'skia',
       'type': '<(component)',
       'variables': {
         'optimize': 'max',
+        'arm_neon_optional%': 0,
       },
       'sources': [
         #'../third_party/skia/src/animator/SkAnimate.h',
@@ -596,6 +594,7 @@
         '../third_party/skia/include/core/SkUnPreMultiply.h',
         '../third_party/skia/include/core/SkUnitMapper.h',
         '../third_party/skia/include/core/SkUtils.h',
+        '../third_party/skia/include/core/SkUtilsArm.h',
         '../third_party/skia/include/core/SkWriter32.h',
         '../third_party/skia/include/core/SkXfermode.h',
 
@@ -860,11 +859,13 @@
           ],
         }],
         [ 'armv7 == 1 and arm_neon == 1', {
-          'cflags!': [
-            '-mthumb',  # Skia neon does not support thumb mode.
-          ],
           'defines': [
             '__ARM_HAVE_NEON',
+          ],
+        }],
+        [ 'armv7 == 1 and arm_neon_optional == 1', {
+          'defines': [
+            '__ARM_HAVE_OPTIONAL_NEON_SUPPORT',
           ],
         }],
         [ 'target_arch == "arm"', {
@@ -1124,6 +1125,7 @@
       'type': 'static_library',
       'variables': {
         'optimize': 'max',
+        'arm_neon_optional%': 0,
       },
       'include_dirs': [
         '..',
@@ -1172,7 +1174,12 @@
                 # See #86592.
                 '-Wa,-mimplicit-it=always',
               ],
-           }],
+            }],
+            [ 'armv7 == 1 and (arm_neon == 1 or arm_neon_optional == 1)', {
+              'dependencies': [
+                'skia_opts_neon',
+              ],
+            }],
           ],
           # The assembly uses the frame pointer register (r7 in Thumb/r11 in
           # ARM), the compiler doesn't like that. Explicitly remove the
@@ -1197,15 +1204,9 @@
             '../third_party/skia/src/opts/opts_check_arm.cpp',
           ],
         }],
-        [ 'armv7 == 1 and arm_neon == 0', {
+        [ 'armv7 == 1 and (arm_neon == 0 or arm_neon_optional == 1)', {
           'sources': [
             '../third_party/skia/src/opts/memset.arm.S',
-        ],
-        }],
-        [ 'armv7 == 1 and arm_neon == 1', {
-          'sources': [
-            '../third_party/skia/src/opts/memset16_neon.S',
-            '../third_party/skia/src/opts/memset32_neon.S',
         ],
         }],
         [ 'target_arch == "arm" and armv7 != 1', {
@@ -1216,6 +1217,68 @@
           ],
           'sources!': [
             '../third_party/skia/src/opts/SkBlitRow_opts_arm.cpp',
+          ],
+        }],
+      ],
+    },
+    # For ARM, we support running a single binary on both NEON and non-NEON
+    # capable devices. This is done by probing CPU features at runtime, and
+    # selecting the right code path appropriately. All neon code must be
+    # compiled with -mfpu=neon. Unfortunately, this flag also affects
+    # scalar code, so we need a separate target to build it.
+    {
+      'target_name': 'skia_opts_neon',
+      'type': 'static_library',
+      'variables': {
+        'optimize': 'max',
+        'arm_neon_optional%': 0,
+      },
+      'include_dirs': [
+        '..',
+        'config',
+        '../third_party/skia/include/config',
+        '../third_party/skia/include/core',
+        '../third_party/skia/src/core',
+        '../third_party/skia/src/opts',
+      ],
+      'cflags!': [
+        '-mthumb',  # Skia neon does not support thumb mode.
+        '-mfpu=vfp',
+        '-mfpu=vfpv3',
+        '-mfpu=vfpv3-d16',
+        # Compiler flag -finstrument-functions causes link errors for
+        # symbols defined in .S files (memset32_neon and memset16_neon).
+        # Instrumentation is used by order_profiling flag to profile clank
+        # startup.  By excluding the flag, the instrumented clank links
+        # succesfully (i.e. symbols are found by the linker), but the code
+        # in the sources below will not be profiled.
+        '-finstrument-functions',
+        '-fno-omit-frame-pointer',
+      ],
+      'cflags': [
+        '-mfpu=neon',
+        '-fomit-frame-pointer',
+        '-O2',
+      ],
+      'sources': [
+        '../third_party/skia/src/core/SkBitmapProcState_matrixProcs_neon.cpp',
+        '../third_party/skia/src/core/SkBitmapProcState_matrix_clamp_neon.h',
+        '../third_party/skia/src/core/SkBitmapProcState_matrix_repeat_neon.h',
+        '../third_party/skia/src/core/SkUtilsArm.cpp',
+        '../third_party/skia/src/opts/memset16_neon.S',
+        '../third_party/skia/src/opts/memset32_neon.S',
+        '../third_party/skia/src/opts/SkBlitRow_opts_arm_neon.cpp',
+        '../third_party/skia/src/opts/SkBitmapProcState_opts_arm_neon.cpp',
+      ],
+      'conditions': [
+        [ 'arm_neon == 1', {
+          'defines': [
+            '__ARM_HAVE_NEON',
+          ],
+        }],
+        [ 'arm_neon_optional == 1', {
+          'defines': [
+            '__ARM_HAVE_OPTIONAL_NEON_SUPPORT',
           ],
         }],
       ],

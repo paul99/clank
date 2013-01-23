@@ -263,7 +263,13 @@ bool BufferedResourceHandler::CompleteResponseStarted(int request_id) {
 
   // Check if this is an X.509 certificate, if yes, let it be handled
   // by X509UserCertResourceHandler.
+#if defined(OS_ANDROID)
+  if (mime_type == "application/x-x509-user-cert" ||
+      mime_type == "application/x-x509-ca-cert" ||
+      mime_type == "application/x-pkcs12") {
+#else
   if (mime_type == "application/x-x509-user-cert") {
+#endif
     // This is entirely similar to how DownloadThrottlingResourceHandler
     // works except we are doing it for an X.509 client certificates.
 

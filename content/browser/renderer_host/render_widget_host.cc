@@ -240,7 +240,6 @@ bool RenderWidgetHost::OnMessageReceived(const IPC::Message &msg) {
     IPC_MESSAGE_HANDLER(ViewHostMsg_LockMouse, OnMsgLockMouse)
     IPC_MESSAGE_HANDLER(ViewHostMsg_UnlockMouse, OnMsgUnlockMouse)
 #if defined(OS_POSIX) || defined(USE_AURA)
-    IPC_MESSAGE_HANDLER(ViewHostMsg_GetScreenInfo, OnMsgGetScreenInfo)
     IPC_MESSAGE_HANDLER(ViewHostMsg_GetWindowRect, OnMsgGetWindowRect)
     IPC_MESSAGE_HANDLER(ViewHostMsg_GetRootWindowRect, OnMsgGetRootWindowRect)
 #endif
@@ -1196,6 +1195,9 @@ void RenderWidgetHost::OnMsgInputEventAck(WebInputEvent::Type event_type,
     ProcessTouchAck(processed);
   }
 
+  if (type == WebInputEvent::GesturePinchEnd && processed)
+    Send(new ViewMsg_PinchEndProcessed(routing_id()));
+
 #if defined(OS_ANDROID)
   // On Android, if a touch event is not consumed by the JavaScript app it must be bubbled back up
   // and re-offered to the Java side for default handling.
@@ -1350,14 +1352,6 @@ void RenderWidgetHost::OnMsgUnlockMouse() {
 }
 
 #if defined(OS_POSIX) || defined(USE_AURA)
-void RenderWidgetHost::OnMsgGetScreenInfo(gfx::NativeViewId window_id,
-                                          WebKit::WebScreenInfo* results) {
-  if (view_)
-    view_->GetScreenInfo(results);
-  else
-    RenderWidgetHostView::GetDefaultScreenInfo(results);
-}
-
 void RenderWidgetHost::OnMsgGetWindowRect(gfx::NativeViewId window_id,
                                           gfx::Rect* results) {
   if (view_)

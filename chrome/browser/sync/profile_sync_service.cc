@@ -733,6 +733,11 @@ void ProfileSyncService::OnExperimentsChanged(
     about_flags::SetExperimentEnabled(g_browser_process->local_state(),
                                       "sync-tab-favicons",
                                       true);
+#if defined(OS_ANDROID)
+    // Android does not support about:flags and experiments, so we need to force
+    // setting the experiments as command line switches.
+    CommandLine::ForCurrentProcess()->AppendSwitch(switches::kSyncTabFavicons);
+#endif
   }
 
   current_experiments = experiments;

@@ -119,7 +119,6 @@ class GeolocationInfoBarQueueController : content::NotificationObserver {
   PendingInfoBarRequests pending_infobar_requests_;
 };
 
-
 // GeolocationConfirmInfoBarDelegate ------------------------------------------
 
 namespace {
@@ -214,11 +213,30 @@ string16 GeolocationConfirmInfoBarDelegate::GetMessageText() const {
 
 string16 GeolocationConfirmInfoBarDelegate::GetButtonLabel(
     InfoBarButton button) const {
-  return l10n_util::GetStringUTF16((button == BUTTON_OK) ?
-      IDS_GEOLOCATION_ALLOW_BUTTON : IDS_GEOLOCATION_DENY_BUTTON);
+  string16 button_ok_text;
+#if defined(OS_ANDROID)
+  button_ok_text = UTF8ToUTF16(geolocation::GetButtonOKTextFromGoogleAppsLocationSetting());
+#else
+  button_ok_text = l10n_util::GetStringUTF16(IDS_GEOLOCATION_ALLOW_BUTTON);
+#endif
+  if (button == BUTTON_OK) {
+    return button_ok_text;
+  }
+  return l10n_util::GetStringUTF16(IDS_GEOLOCATION_DENY_BUTTON);
 }
 
 bool GeolocationConfirmInfoBarDelegate::Accept() {
+#if defined(OS_ANDROID)
+  // Accept button text could be either 'Allow' or 'Google Location Settings'.
+  // If 'Allow' we follow the regular flow.
+  // If 'Google Location Settings', we need to open the system Google Location
+  // Settings activity.
+  if (UTF8ToUTF16(geolocation::GetButtonOKTextFromGoogleAppsLocationSetting()) !=
+      l10n_util::GetStringUTF16(IDS_GEOLOCATION_ALLOW_BUTTON)) {
+    geolocation::ShowGoogleLocationSettings();
+    return true;
+  }
+#endif
   controller_->OnPermissionSet(render_process_id_, render_view_id_, bridge_id_,
       requesting_frame_url_, owner()->web_contents()->GetURL(), true);
   return true;
@@ -252,7 +270,6 @@ bool GeolocationConfirmInfoBarDelegate::LinkClicked(
   owner()->web_contents()->OpenURL(params);
   return false;  // Do not dismiss the info bar.
 }
-
 }  // namespace
 
 
@@ -671,16 +688,31 @@ void ChromeGeolocationPermissionContext::RequestGeolocationPermission(
           embedder,
           CONTENT_SETTINGS_TYPE_GEOLOCATION,
           std::string());
-  if (content_setting == CONTENT_SETTING_BLOCK) {
-    NotifyPermissionSet(render_process_id, render_view_id, bridge_id,
-                        requesting_frame, callback, false);
-  } else if (content_setting == CONTENT_SETTING_ALLOW) {
-    NotifyPermissionSet(render_process_id, render_view_id, bridge_id,
-                        requesting_frame, callback, true);
-  } else {  // setting == ask. Prompt the user.
-    geolocation_infobar_queue_controller_->CreateInfoBarRequest(
-        render_process_id, render_view_id, bridge_id, requesting_frame,
-        embedder, callback);
+  switch(content_setting) {
+    case CONTENT_SETTING_BLOCK :
+      NotifyPermissionSet(render_process_id, render_view_id, bridge_id,
+                          requesting_frame, callback, false);
+      break;
+    case CONTENT_SETTING_ALLOW :
+#if defined(OS_ANDROID)
+      // If google apps location setting is turned off then we ignore
+      // the 'allow' website setting for this site and instead show
+      // the infobar to go back to the 'settings' to turn it back on.
+      if (!geolocation::isGoogleAppsLocationSettingEnabled()) {
+        geolocation_infobar_queue_controller_->CreateInfoBarRequest(
+            render_process_id, render_view_id, bridge_id, requesting_frame,
+            embedder, callback);
+        break;
+      }
+#endif
+      NotifyPermissionSet(render_process_id, render_view_id, bridge_id,
+                          requesting_frame, callback, true);
+      break;
+    default :
+      // setting == ask. Prompt the user.
+      geolocation_infobar_queue_controller_->CreateInfoBarRequest(
+          render_process_id, render_view_id, bridge_id, requesting_frame,
+          embedder, callback);
   }
 }
 

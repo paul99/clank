@@ -1134,7 +1134,7 @@ SpdyDataFrame* SpdyFramer::CreateDataFrame(SpdyStreamId stream_id,
 // The following compression setting are based on Brian Olson's analysis. See
 // https://groups.google.com/group/spdy-dev/browse_thread/thread/dfaf498542fac792
 // for more details.
-static const int kCompressorLevel = 9;
+static const int kCompressorLevel = 0;
 static const int kCompressorWindowSizeInBits = 11;
 static const int kCompressorMemLevel = 1;
 

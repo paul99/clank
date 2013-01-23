@@ -65,7 +65,6 @@ bool SwappedOutMessages::CanHandleWhileSwappedOut(
     // on sync message.
     case ViewHostMsg_GetRootWindowRect::ID:
     case ViewHostMsg_GetWindowRect::ID:
-    case ViewHostMsg_GetScreenInfo::ID:
     // Sends an ACK.
     case ViewHostMsg_RequestMove::ID:
     // Sends an ACK.

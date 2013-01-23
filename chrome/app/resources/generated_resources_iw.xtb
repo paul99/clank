@@ -8,6 +8,12 @@
 <translation id="8130276680150879341">נתק רשת פרטית</translation>
 <translation id="1058418043520174283"><ph name="INDEX"/> מתוך <ph name="COUNT"/></translation>
 <translation id="4480627574828695486">נתק חשבון זה...</translation>
+<translation id="2516632596252643567">&lt;p&gt;
+          גש לכרטיסיות הפתוחות במחשב, ישירות מכאן.
+          &lt;/p&gt;
+          &lt;p&gt;
+          פשוט פתח את Chrome במחשב, עבור לתפריט ובחר &quot;היכנס ל-Chrome...&quot;
+          &lt;/p&gt;</translation>
 <translation id="7040807039050164757">&amp;בדוק איות בשדה זה</translation>
 <translation id="778579833039460630">לא התקבלו נתונים</translation>
 <translation id="8791923223854254330">נהל מטפלים...</translation>
@@ -1464,15 +1470,6 @@
 <translation id="6342069812937806050">זה עתה</translation>
 <translation id="5605716740717446121">כרטיס ה-SIM שלך יושבת לצמיתות אם לא תוכל להזין את מפתח ביטול הנעילה הנכון של ה-PIN. ניסיונות שנותרו: <ph name="TRIES_COUNT"/></translation>
 <translation id="8836712291807476944"><ph name="SAVED_BYTES"/> / <ph name="TOTAL_BYTES"/> בתים, עם הפסקה</translation>
-<translation id="3661943501691646627">&lt;p&gt;
-          גש לכרטיסיות הפתוחות במחשב, ישירות מכאן.
-          &lt;/p&gt;
-          &lt;p&gt;
-          פשוט פתח את Chrome במחשב, עבור לתפריט ובחר &quot;היכנס ל-Chrome...&quot;
-          &lt;/p&gt;
-          &lt;p&gt;
-          זה די מגניב.
-          &lt;/p&gt;</translation>
 <translation id="5502500733115278303">מיובא מ-Firefox</translation>
 <translation id="569109051430110155">איתור אוטומטי</translation>
 <translation id="4408599188496843485">ע&amp;זרה</translation>
@@ -3117,6 +3114,7 @@
 <translation id="8241707690549784388">הדף שאתה מחפש השתמש במידע שהזנת. החזרה לדף זה עלולה לגרום לכפילות בפעולות שביצעת. האם ברצונך להמשיך?</translation>
 <translation id="5359419173856026110">מציג את קצב הפריימים בפועל של הדף, ביחידות של פריימים לשנייה, כאשר האצת החומרה פועלת.</translation>
 <translation id="4104163789986725820">יי&amp;צא...</translation>
+<translation id="5143814737375740231">Chrome עבור Android אינו תומך בפלאגין זה.</translation>
 <translation id="2113479184312716848">פתח &amp;קובץ...</translation>
 <translation id="3314617171364900239">בדיקות עדכון נכשלו שוב ושוב עבור התוסף &quot;<ph name="EXTENSION_NAME"/>&quot;.</translation>
 <translation id="4850458635498951714">הוסף מכשיר</translation>
@@ -3477,7 +3475,7 @@ Del</translation>
 <translation id="8997135628821231"><ph name="ISSUED_BY"/> ‏[<ph name="ISSUED_TO"/>] ‏(<ph name="DEVICE"/>)</translation>
 <translation id="4197700912384709145"><ph name="NUMBER_ZERO"/> שניות</translation>
 <translation id="3414856743105198592">פרמוט המדיה הנשלפת יגרום למחיקת כל הנתונים. האם ברצונך להמשיך?</translation>
-<translation id="2158448795143567596">מאפשר לאלמנטים של בד ציור להשתמש בגרפיקה של תלת-ממד באמצעות ממשק API של WebGL.</translation>
+<translation id="2158448795143567596">מאפשר לאלמנטים של בד ציור להשתמש בגרפיקה של תלת ממד באמצעות ממשק API של WebGL.</translation>
 <translation id="1702534956030472451">מערב אירופאית</translation>
 <translation id="794676567536738329">אשר הרשאות</translation>
 <translation id="6636709850131805001">מצב לא מזוהה</translation>

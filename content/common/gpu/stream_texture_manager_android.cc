@@ -127,7 +127,7 @@ void StreamTextureManagerAndroid::EstablishStreamTexture(
     SurfaceTexturePeer::GetInstance()->EstablishSurfaceTexturePeer(
         process,
         type,
-        stream_texture->bridge()->j_surface_texture().obj(),
+        stream_texture->bridge(),
         primary_id,
         secondary_id);
   }

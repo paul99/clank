@@ -11,9 +11,6 @@ MediaMetadataAndroid::MediaMetadataAndroid()
       height_(0),
       duration_(0.0f),
       current_time_(0.0f),
-      can_pause_(false),
-      can_seek_forward_(false),
-      can_seek_backward_(false),
       paused_(false) {
 }
 
@@ -21,17 +18,11 @@ MediaMetadataAndroid::MediaMetadataAndroid(int width,
                                            int height,
                                            float duration,
                                            float current_time,
-                                           bool paused,
-                                           bool can_pause,
-                                           bool can_seek_forward,
-                                           bool can_seek_backward)
+                                           bool paused)
   : width_(width),
     height_(height),
     duration_(duration),
     current_time_(current_time),
-    can_pause_(can_pause),
-    can_seek_forward_(can_seek_forward),
-    can_seek_backward_(can_seek_backward),
     paused_(paused) {
 }
 

@@ -137,11 +137,13 @@ void DownloadController::NewGetDownload(DownloadInfoAndroid info) {
       ConvertUTF8ToJavaString(env, info.mime_type);
   ScopedJavaLocalRef<jstring> jcookie =
       ConvertUTF8ToJavaString(env, info.cookie);
+  ScopedJavaLocalRef<jstring> jreferer = ConvertUTF8ToJavaString(
+      env, info.referrer_url.is_valid() ? info.referrer_url.spec() : "");
 
   Java_DownloadController_newHttpGetDownload(env,
     java_object()->Controller(env).obj(), view, jurl.obj(), juser_agent.obj(),
     jcontent_disposition.obj(), jmime_type.obj(), jcookie.obj(),
-    info.total_bytes);
+    jreferer.obj(), info.total_bytes);
 }
 
 void DownloadController::NewPostDownload(

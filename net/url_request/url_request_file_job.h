@@ -29,7 +29,7 @@ class NET_EXPORT URLRequestFileJob : public URLRequestJob {
 
   static URLRequest::ProtocolFactory Factory;
 
-#if defined(OS_CHROMEOS)
+#if defined(OS_CHROMEOS) || defined(OS_ANDROID)
   static bool AccessDisabled(const FilePath& file_path);
 #endif
 

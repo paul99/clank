@@ -6,6 +6,7 @@
 
 #include "base/command_line.h"
 #include "base/file_util.h"
+#include "base/global_descriptors_posix.h"
 #include "base/logging.h"
 #include "base/metrics/histogram.h"
 #include "base/path_service.h"
@@ -14,6 +15,7 @@
 #include "base/synchronization/lock.h"
 #include "base/utf_string_conversions.h"
 #include "build/build_config.h"
+#include "content/common/chrome_descriptors.h"
 #include "third_party/skia/include/core/SkBitmap.h"
 #include "ui/base/l10n/l10n_util.h"
 #include "ui/base/resource/data_pack.h"
@@ -56,6 +58,22 @@ std::string ResourceBundle::InitSharedInstanceWithLocale(
 
   g_shared_instance_->LoadCommonResources();
   return g_shared_instance_->LoadLocaleResources(pref_locale);
+}
+
+void ResourceBundle::InitSharedInstanceWithPaks(base::PlatformFile locale_pak,
+                                                base::PlatformFile chrome_pak) {
+  DCHECK(g_shared_instance_ == NULL) << "ResourceBundle initialized twice";
+  g_shared_instance_ = new ResourceBundle();
+
+  scoped_ptr<DataPack> datapack(new DataPack);
+  if (!datapack->LoadFromFile(locale_pak))
+    return;
+  g_shared_instance_->locale_resources_data_.reset(datapack.release());
+
+  datapack.reset(new DataPack);
+  if (!datapack->LoadFromFile(chrome_pak))
+    return;
+  g_shared_instance_->resources_data_ = datapack.release();
 }
 
 // static
@@ -397,21 +415,34 @@ gfx::Image* ResourceBundle::GetEmptyImage() {
 
 // LoadedDataPack -------------------------------------------------------------
 
-ResourceBundle::LoadedDataPack::LoadedDataPack(const FilePath& path)
-    : path_(path) {
+ResourceBundle::LoadedDataPack::LoadedDataPack(const FilePath& path) {
   // Always preload the data packs so we can maintain constness.
-  Load();
+  LoadFromPath(path);
+}
+
+ResourceBundle::LoadedDataPack::LoadedDataPack(base::PlatformFile file) {
+  // Always preload the data packs so we can maintain constness.
+  LoadFromFile(file);
 }
 
 ResourceBundle::LoadedDataPack::~LoadedDataPack() {
 }
 
-void ResourceBundle::LoadedDataPack::Load() {
+void ResourceBundle::LoadedDataPack::LoadFromPath(const FilePath& path) {
   DCHECK(!data_pack_.get());
   data_pack_.reset(new ui::DataPack);
-  bool success = data_pack_->Load(path_);
-  LOG_IF(ERROR, !success) << "Failed to load " << path_.value()
+  bool success = data_pack_->Load(path);
+  LOG_IF(ERROR, !success) << "Failed to load " << path.value()
       << "\nSome features may not be available.";
+  if (!success)
+    data_pack_.reset();
+}
+
+void ResourceBundle::LoadedDataPack::LoadFromFile(base::PlatformFile file) {
+  DCHECK(!data_pack_.get());
+  data_pack_.reset(new ui::DataPack);
+  bool success = data_pack_->LoadFromFile(file);
+  LOG_IF(ERROR, !success) << "Failed to load pak from file " << file;
   if (!success)
     data_pack_.reset();
 }

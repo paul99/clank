@@ -76,7 +76,22 @@ bool DataPack::Load(const FilePath& path) {
     mmap_.reset();
     return false;
   }
+  return LoadImpl();
+}
 
+bool DataPack::LoadFromFile(base::PlatformFile file) {
+  mmap_.reset(new file_util::MemoryMappedFile);
+  if (!mmap_->Initialize(file)) {
+    DLOG(ERROR) << "Failed to mmap datapack";
+    UMA_HISTOGRAM_ENUMERATION("DataPack.LoadFromFile", INIT_FAILED,
+                              LOAD_ERRORS_COUNT);
+    mmap_.reset();
+    return false;
+  }
+  return LoadImpl();
+}
+
+bool DataPack::LoadImpl() {
   // Sanity check the header of the file.
   if (kHeaderLength > mmap_->length()) {
     DLOG(ERROR) << "Data pack file corruption: incomplete file header.";

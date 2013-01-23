@@ -691,6 +691,7 @@ void RenderProcessHostImpl::PropagateBrowserCommandLineToRenderer(
     switches::kEnableThreadedCompositing,
 #if defined(OS_ANDROID)
     switches::kEnableVideo,
+    switches::kMediaPlayerInRenderProcess,
 #endif
     switches::kEnableVideoFullscreen,
     switches::kEnableVideoTrack,
@@ -749,6 +750,9 @@ void RenderProcessHostImpl::PropagateBrowserCommandLineToRenderer(
   if (GetBrowserContext()->IsOffTheRecord() &&
       !browser_cmd.HasSwitch(switches::kDisableDatabases)) {
     renderer_cmd->AppendSwitch(switches::kDisableDatabases);
+#if defined(OS_ANDROID)
+    renderer_cmd->AppendSwitch(switches::kDisableMediaHistoryLogging);
+#endif
   }
 }
 
@@ -1294,6 +1298,7 @@ void RenderProcessHostImpl::OnProcessLaunched() {
   if (deleting_soon_)
     return;
 
+  int minidump_fd = base::kInvalidPlatformFileValue;
   if (child_process_launcher_.get()) {
     if (!child_process_launcher_->GetHandle()) {
       OnChannelError();
@@ -1301,6 +1306,10 @@ void RenderProcessHostImpl::OnProcessLaunched() {
     }
 
     child_process_launcher_->SetProcessBackgrounded(backgrounded_);
+
+#if defined(OS_ANDROID)
+    minidump_fd = child_process_launcher_->GetMinidumpFD();
+#endif
   }
 
   // NOTE: This needs to be before sending queued messages because
@@ -1313,7 +1322,7 @@ void RenderProcessHostImpl::OnProcessLaunched() {
   content::NotificationService::current()->Notify(
       content::NOTIFICATION_RENDERER_PROCESS_CREATED,
       content::Source<RenderProcessHost>(this),
-      content::NotificationService::NoDetails());
+      content::Details<int>(&minidump_fd));
 
   while (!queued_messages_.empty()) {
     Send(queued_messages_.front());

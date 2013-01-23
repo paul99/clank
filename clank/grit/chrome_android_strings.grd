@@ -14,17 +14,11 @@
       <message name="IDS_NTP_OPEN_TABS" desc="Alternative text for other devices button [CHAR-LIMIT=20]">
         Open tabs
       </message>
-      <message name="IDS_NTP_SYNCED_TABS" desc="Alternative text for open tabs button [CHAR-LIMIT=20]">
-        Synced tabs
-      </message>
       <message name="IDS_NTP_INCOGNITO" desc="Text for incognito button [CHAR-LIMIT=20]">
         Incognito
       </message>
       <message name="IDS_BOOKMARKS" desc="Tab label denoted user specified bookmarks (i.e. webpages that the user would like to return to later). [CHAR-LIMIT=16]">
         Bookmarks
-      </message>
-      <message name="IDS_OPEN" desc="Menu item for displaying the previous web page. [CHAR-LIMIT=10]">
-        Open
       </message>
       <message name="IDS_BACK" desc="Menu item for displaying the previous web page. [CHAR-LIMIT=10]">
         Back
@@ -53,9 +47,6 @@
       <message name="IDS_CLOSETAB" desc="Menu item for closing/exiting the current tab. [CHAR-LIMIT=12]">
         Close tab
       </message>
-      <message name="IDS_SAVE_PAGE_AS" desc="Menu item for saving the current page. [CHAR-LIMIT=24]">
-        Save page
-      </message>
       <message name="IDS_FIND_IN_PAGE" desc="Menu item allowing users to find text within a web page. [CHAR-LIMIT=24]">
         Find in page...
       </message>
@@ -65,26 +56,14 @@
       <message name="IDS_TYPE_TO_SEARCH" desc="Prompt to enter text into the text field that will either perform web searches or navigate to a URL. [CHAR-LIMIT=64]">
         Search or type URL
       </message>
-      <message name="IDS_ALL_BOOKMARKS" desc="Menu item for navigating to bookmarks page. [CHAR-LIMIT=32]">
-        All bookmarks
-      </message>
       <message name="IDS_IMPORT_BOOKMARKS" desc="Menu item for importing bookmarks. [CHAR-LIMIT=32]">
         Import bookmarks
       </message>
       <message name="IDS_BOOKMARK_THIS_PAGE" desc="Menu item for adding a new bookmark. [CHAR-LIMIT=32]">
         Add to bookmarks...
       </message>
-      <message name="IDS_EDIT_BOOKMARK_MENU" desc="Menu item for editing an existing bookmark. [CHAR-LIMIT=32]">
-        Edit Bookmark
-      </message>
       <message name="IDS_SHOW_HISTORY" desc="Menu item for accesing the history. [CHAR-LIMIT=32]">
         History
-      </message>
-      <message name="IDS_PRINT" desc="Menu item for printing. [CHAR-LIMIT=32]">
-        Print
-      </message>
-      <message name="IDS_PRINT_ELLIPSES" desc="Menu item for printing, with ellipses. [CHAR-LIMIT=32]">
-        Print...
       </message>
       <message name="IDS_ENABLE_REMOTE_DEBUGGING" desc="Menu item for remote debugging with Chrome Developer Tools. [CHAR-LIMIT=32]">
         Enable USB Web debugging
@@ -155,9 +134,6 @@
       <message name="IDS_BOOKMARK_FOLDER_TREE_ERROR" desc="Error shown when loading the bookmark folder hierarchy fails. [CHAR-LIMIT=45]">
         Error loading folders
       </message>
-      <message name="IDS_BOOKMARKS_WIDGET_NAME" desc="Name of the bookmarks (scrollable) widget. [CHAR-LIMIT=32]">
-        Bookmarks
-      </message>
       <message name="IDS_BOOKMARK_SHORTCUT_NAME" desc="Name of the bookmark shortcut. [CHAR-LIMIT=32]">
         Bookmark
       </message>
@@ -206,19 +182,8 @@
       <message name="IDS_SHARE_PAGE" desc="Menu item for sharing the current page. [CHAR-LIMIT=24]">
         Share...
       </message>
-      <message name="IDS_INVALID_OS_VERSION" desc="Error message shown when Chrome is installed on a device with an unsupported OS version. [CHAR-LIMIT=NONE]">
-        Chrome is not supported for your version of Android.
-
-Version 4.0 (Ice Cream Sandwich) is the minimal supported version.
-      </message>
       <message name="IDS_OS_VERSION_MISSING_FEATURES" desc="Error message shown when Chrome fails to run due to an incomplete version of Android. [CHAR-LIMIT=NONE]">
         Critical functionality required to run Chrome is missing; either your Chrome installation is incomplete, or not compatible with this version of Android.
-      </message>
-      <message name="IDS_ERROR_PROCEED_ANYWAY" desc="Button message for when an Invalid OS was detected and we allow the users to proceed at their own risk. [CHAR-LIMIT=20]">
-        Proceed Anyway
-      </message>
-      <message name="IDS_ERROR_QUIT" desc="Button message for when an Invalid OS was detected and the user wants to quit. [CHAR-LIMIT=16]">
-        Quit
       </message>
       <message name="IDS_SYNC_DATA_TYPES" desc="Preference category name for customization of synced data types. [CHAR-LIMT=28]">
         Data types
@@ -240,9 +205,6 @@ Version 4.0 (Ice Cream Sandwich) is the minimal supported version.
       </message>
       <message name="IDS_RESET_SYNC" desc="Title for link to Google Dashboard [CHAR-LIMT=18]">
         Reset sync
-      </message>
-      <message name="IDS_MANAGE_SYNC_DATA" desc="Message to show under the |reset_sync| title [CHAR-LIMT=40]">
-        Manage sync data on Google Dashboard
       </message>
       <message name="IDS_SYNC_ANDROID_MASTER_SYNC_DISABLED" desc="Message to show when Android master sync flag is disabled [CHAR-LIMT=80]">
         Android system sync disabled. Please re-enable and try again.
@@ -277,29 +239,11 @@ Version 4.0 (Ice Cream Sandwich) is the minimal supported version.
       <message name="IDS_SIGN_IN_GOOGLE_ACCOUNT" desc="Google Account preference title in signed-in prefs when signed in [CHAR-LIMIT=20]">
         Google Account
       </message>
-      <message name="IDS_SIGN_IN_CHOOSE_GOOGLE_ACCOUNT" desc="Google Account preference title in signed-in prefs when not signed in, but there exists Google Accounts [CHAR-LIMIT=25]">
-        Choose a Google Account
-      </message>
-      <message name="IDS_SIGN_IN_SELECT_GOOGLE_ACCOUNT" desc="Google Account preference title in signed-in prefs when not signed in, but there exists Google Accounts [CHAR-LIMIT=25]">
-        Select a Google Account
-      </message>
-      <message name="IDS_SIGN_IN_NO_EXISTING_GOOGLE_ACCOUNT" desc="Google Account preference title in signed-in prefs when not signed in, but there exists Google Accounts, but there are no Google Accounts on the device [CHAR-LIMIT=25]">
-        Add a Google Account
-      </message>
       <message name="IDS_SIGN_IN_SERVICES" desc="Services preference header in signed-in prefs [CHAR-LIMIT=20]">
         Services
       </message>
       <message name="IDS_SIGN_IN_SYNC" desc="Sync preference title in signed-in prefs [CHAR-LIMIT=20]">
         Sync
-      </message>
-      <message name="IDS_SIGN_IN_SYNC_ALT1" desc="Title of sync settings in signed-in prefs (alternative 1) [CHAR-LIMIT=20]">
-        Advanced sync
-      </message>
-      <message name="IDS_SIGN_IN_SYNC_ALT2" desc="Title of sync settings in signed-in prefs (alternative 2) [CHAR-LIMIT=32]">
-        Advanced sync settings
-      </message>
-      <message name="IDS_SIGN_IN_SYNC_DESCRIPTION" desc="Sync preference summary in signed-in prefs [CHAR-LIMIT=60]">
-        Bookmarks, history and other settings
       </message>
       <message name="IDS_SIGN_IN_SEND_TO_DEVICE" desc="Chrome to Mobile preference title in signed-in prefs [CHAR-LIMIT=20]">
         Chrome to Mobile
@@ -346,12 +290,6 @@ Version 4.0 (Ice Cream Sandwich) is the minimal supported version.
       <message name="IDS_ACQUIRING_AUTH_TOKEN" desc="Message indicating that the auth token is being acquired">
         Acquiring auth token
       </message>
-      <message name="IDS_SYNC_SIGN_IN_OR_SIGN_UP" desc="Prompt user to sign in to Chrome or to create a Google Account first if needed. [CHAR-LIMIT=200]">
-        Sign in to Chrome with your Google Account. New to Google? <ph name="CREATE_ACCOUNT">%s<ex>Create an account.</ex></ph>
-      </message>
-      <message name="IDS_SYNC_CREATE_ACCOUNT" desc="Prompt user to create an account in order to use sync. [CHAR-LIMIT=50]">
-        Create an account.
-      </message>
       <message name="IDS_SYNC_CUSTOM_PASSPHRASE" desc="Prompt user to create a custom sync password. [CHAR-LIMIT=200]">
         Only someone with your passphrase can read your encrypted data. This passphrase is not sent to or stored by Google. If you forget your passphrase, you will need to reset sync.
       </message>
@@ -366,9 +304,6 @@ Version 4.0 (Ice Cream Sandwich) is the minimal supported version.
       </message>
       <message name="IDS_SYNC_ENTER_GOOGLE_PASSPHRASE" desc="Prompt user to enter their custom sync password. [CHAR-LIMIT=150]">
         Sign in with your Google Account:
-      </message>
-      <message name="IDS_SYNC_ENTER_GOOGLE_PASSPHRASE_LONG" desc="Inform the user that their data is already encrypted with a Google Account password, but not their current password. [CHAR-LIMIT=150]">
-        You already have data encrypted with a different version of your Google Account password. Please enter it below.
       </message>
       <message name="IDS_SYNC_ENTER_GOOGLE_PASSPHRASE_HINT" desc="Hint for the password field when user is to type in a Google Account password. [CHAR-LIMIT=30]">
         Password
@@ -394,29 +329,14 @@ Version 4.0 (Ice Cream Sandwich) is the minimal supported version.
       <message name="IDS_SYNC_ERROR_GA" desc="Sync error string for when the needs to update the sign in details [CHAR-LIMIT=80]">
         Please update your sign in details.
       </message>
-      <message name="IDS_SYNC_ERROR_PASSPHRASE" desc="Sync error string for when the needs to update the sync passphrase. [CHAR-LIMIT=80]">
-        Please update your sync passphrase.
-      </message>
       <message name="IDS_SYNC_ERROR_CONNECTION" desc="Sync error string for network connection. [CHAR-LIMIT=80]">
         Could not connect to the sync server.
       </message>
       <message name="IDS_SYNC_ERROR_DOMAIN" desc="Sync error string for domain not supported. [CHAR-LIMIT=80]">
         Sync is not available for your domain.
       </message>
-      <message name="IDS_SYNC_ERROR_PASSWORD_INCORRECT" desc="Sync error string for when the user enters an incorrect password. [CHAR-LIMIT=80]">
-        The password you entered is incorrect.
-      </message>
-      <message name="IDS_SYNC_ERROR_ASP_ERROR" desc="Sync error string for when user entered an application specific password instead of a Google Account password. [CHAR-LIMIT=80]">
-        Enter your Google Account password first, not an application specific password.
-      </message>
       <message name="IDS_SYNC_ERROR_SERVICE_UNAVAILABLE" desc="Sync error string for service unavailable. [CHAR-LIMIT=80]">
         The service is not available; try again later.
-      </message>
-      <message name="IDS_SYNC_ERROR_SERVICE_UNAVAILABLE_AUTO_RETRY" desc="Sync error string for service unavailable, but Chrome will try again later. [CHAR-LIMIT=80]">
-        The service is not available; waiting to retry.
-      </message>
-      <message name="IDS_SYNC_ERROR_SERVICE_UNAVAILABLE_NO_RETRY" desc="Sync error string for service unavailable. [CHAR-LIMIT=80]">
-        The service is not available.
       </message>
       <message name="IDS_PAGE_INFO_MORE_INFO" desc="Link to show more info on what the page info items mean [CHAR-LIMIT=64]">
         What do these mean?
@@ -505,9 +425,6 @@ Version 4.0 (Ice Cream Sandwich) is the minimal supported version.
       <message name="IDS_SEND_FEEDBACK" desc="Title of menu item to send feedback or report a bug [CHAR-LIMIT=24]">
         Report an issue
       </message>
-      <message name="IDS_SEND_FEEDBACK_ALT" desc="Title of menu item to send feedback or report a bug (alternative) [CHAR-LIMIT=24]">
-        Send feedback
-      </message>
       <message name="IDS_URL_TITLE" desc="Label for url text box [CHAR-LIMIT=12]">
         Url
       </message>
@@ -541,14 +458,8 @@ Version 4.0 (Ice Cream Sandwich) is the minimal supported version.
       <message name="IDS_CONTEXTMENU_SAVE_IMAGE" desc="Context sensitive menu item for saving the selected image. [CHAR-LIMIT=24]">
         Save image
       </message>
-      <message name="IDS_CONTEXTMENU_SAVE_LINK_AS_TEXT" desc="Context sensitive menu item for saving the target of a link with control over how and where it will be saved [CHAR-LIMIT=24]">
-        Save link as
-      </message>
       <message name="IDS_CONTEXTMENU_SAVE_LINK" desc="Context sensitive menu item for saving the target of a link [CHAR-LIMIT=24]">
         Save link
-      </message>
-      <message name="IDS_CONTEXTMENU_DOWNLOAD_LINK" desc="Context sensitive menu item for saving the target of a link (alternative) [CHAR-LIMIT=24]">
-        Download link
       </message>
       <message name="IDS_CONTEXTMENU_OPEN_IMAGE" desc="Context sensitive menu item for opening/viewing the selected image. [CHAR-LIMIT=24]">
         Open image
@@ -558,9 +469,6 @@ Version 4.0 (Ice Cream Sandwich) is the minimal supported version.
       </message>
       <message name="IDS_EXTERNAL_APP_LEAVE_INCOGNITO_WARNING" desc="Alert dialog text warning that user that incognito mode does not continue into external apps. [CHAR-LIMIT=120]">
         Leaving incognito mode if this link is opened in an external application. Continue?
-      </message>
-      <message name="IDS_EXTERNAL_APP_LEAVE_INCOGNITO_WARNING_ALT1" desc="Alert dialog text warning that user that incognito mode does not continue into external apps. (alternative) [CHAR-LIMIT=90]">
-        You will exit incognito mode to open this link. Continue?
       </message>
       <message name="IDS_EXTERNAL_APP_LEAVE_INCOGNITO_WARNING_TITLE" desc="Title for incognito external intent. [CHAR-LIMIT=24]">
         Warning
@@ -598,20 +506,11 @@ Version 4.0 (Ice Cream Sandwich) is the minimal supported version.
       <message name="IDS_CATEGORY_BANDWIDTH" desc='Title of "Bandwidth" preferences screen. [CHAR-LIMIT=24]'>
         Bandwidth management
       </message>
-      <message name="IDS_CATEGORY_FORMS" desc='Title of "Forms" preferences screen. [CHAR-LIMIT=24]'>
-        Forms
-      </message>
       <message name="IDS_CATEGORY_SYNC_SETTINGS" desc='Title of "Sync Settings" preferences screen. [CHAR-LIMIT=24]'>
         Sign in to Chrome
       </message>
-      <message name="IDS_CATEGORY_SYNC_SETTINGS_AFTER_SIGN_IN" desc='Title of "Sync Settings" preferences screen after sign-in. [CHAR-LIMIT=24]'>
-        Signed in to Chrome
-      </message>
       <message name="IDS_CATEGORY_CONTENT_SETTINGS" desc='Title of "Content Settings" preferences screen. [CHAR-LIMIT=24]'>
         Content settings
-      </message>
-      <message name="IDS_CATEGORY_UNDER_THE_HOOD" desc='Title of "Under The Hood" preferences screen. [CHAR-LIMIT=24]'>
-        Under the Hood
       </message>
       <message name="IDS_CATEGORY_ADVANCED" desc='Title of "Advanced" category [CHAR-LIMIT=20]'>
         Advanced
@@ -622,14 +521,8 @@ Version 4.0 (Ice Cream Sandwich) is the minimal supported version.
       <message name="IDS_CATEGORY_DEV_TOOLS" desc='Title for dev tools preference in "Under The Hood" preferences screen. [CHAR-LIMIT=24]'>
         Developer tools
       </message>
-      <message name="IDS_CATEGORY_LANGUAGE" desc='Title for language preference in "Under The Hood" preferences screen. [CHAR-LIMIT=24]'>
-        Language
-      </message>
       <message name="IDS_CATEGORY_ABOUT_CHROME" desc='Title for about chrome in "Under The Hood" preferences screen. [CHAR-LIMIT=24]'>
         About Chrome
-      </message>
-      <message name="IDS_CATEGORY_AUTOFILL_SETTINGS" desc="Title of preference item which opens a PreferenceScreen for editing profiles. [CHAR-LIMIT=48]">
-        Manage Autofill Settings
       </message>
       <message name="IDS_CATEGORY_MANAGE_SAVED_PASSWORDS" desc="Title of preference item which opens a PreferenceScreen for editing saved passwords. [CHAR-LIMIT=48]">
         Save passwords
@@ -649,17 +542,11 @@ Version 4.0 (Ice Cream Sandwich) is the minimal supported version.
       <message name="IDS_PASSWORD_PREF_EDITOR_TITLE" desc='Title of the "edit a name/password" screen. [CHAR-LIMIT=64]'>
         Edit Saved Name/Password or Exception
       </message>
-      <message name="IDS_HOME_PAGE_TITLE" desc="Title of the home page preference. [CHAR-LIMIT=24]">
-        Home Page
-      </message>
       <message name="IDS_CATEGORY_WEBSITE_SETTINGS" desc='Title of the "Website Settings" screen. [CHAR-LIMIT=24]'>
         Website settings
       </message>
       <message name="IDS_CATEGORY_WEBSITE_SETTINGS_SUBTITLE" desc='Sub-title of the "Website Settings" screen. [CHAR-LIMIT=48]'>
         Advanced settings for individual websites
-      </message>
-      <message name="IDS_ON_STARTUP_TITLE" desc="Title of the on startup preference. [CHAR-LIMIT=24]">
-        On Startup
       </message>
       <message name="IDS_PREF_USE_CURRENT" desc="Button in home page preference for using current url [CHAR-LIMIT=24]">
         Use Current
@@ -667,20 +554,8 @@ Version 4.0 (Ice Cream Sandwich) is the minimal supported version.
       <message name="IDS_PREF_USE_DEFAULT" desc="Button in home page preference for using default url [CHAR-LIMIT=24]">
         Use Default
       </message>
-      <message name="IDS_AUTOFILL_TITLE" desc="Title for the Autofill preference [CHAR-LIMIT=20]">
-        Autofill
-      </message>
       <message name="IDS_AUTOFILL_TITLE_LONG" desc="Title for the Autofill preference (long version that needs no summary). [CHAR-LIMIT=20]">
         Autofill forms
-      </message>
-      <message name="IDS_AUTOFILL_SUMMARY" desc="Summary text for the Autofill preference (long version that needs no summary). [CHAR-LIMIT=40]">
-        Fill out web forms in a single click
-      </message>
-      <message name="IDS_CREATE_AUTOFILL_PROFILE_TITLE" desc="Title of the Create Profile preference (for autofill). [CHAR-LIMIT=64]">
-        Create profile
-      </message>
-      <message name="IDS_CREATE_AUTOFILL_PROFILE_SUMMARY" desc="Summary text for the Create Profile preference (for autofill). [CHAR-LIMIT=64]">
-        Create a profile for form autofill
       </message>
       <message name="IDS_AUTOFILL_PROFILES_TITLE" desc='Preference category name in "Manage Autofill Settings". [CHAR-LIMIT=24]'>
         Autofill profiles
@@ -696,9 +571,6 @@ Version 4.0 (Ice Cream Sandwich) is the minimal supported version.
       </message>
       <message name="IDS_AUTOFILL_DELETE" desc='Button on the bottom of "Edit/Create Profile" page. [CHAR-LIMIT=12]'>
         Delete
-      </message>
-      <message name="IDS_AUTOFILL_DELETE_PROFILE_MESSAGE" desc="Message on the confirm dialog when deleting a profile. [CHAR-LIMIT=64]">
-        Really delete this profile?
       </message>
       <message name="IDS_SAVED_PASSWORDS_TITLE" desc='Preference category name in "Manage Saved Passwords". [CHAR-LIMIT=24]'>
         Saved Passwords
@@ -720,9 +592,6 @@ Version 4.0 (Ice Cream Sandwich) is the minimal supported version.
       </message>
       <message name="IDS_CLEAR_BROWSING_DATA_TITLE" desc="Title for Clear Browsing Data preference [CHAR-LIMIT=24]">
         Clear browsing data
-      </message>
-      <message name="IDS_CLEAR_BROWSING_DATA_SUMMARY" desc="Summary text for Clear Browsing Data preference [CHAR-LIMIT=64]">
-        All browsing data will be deleted
       </message>
       <message name="IDS_CLEAR_CACHE_TITLE" desc="Title for Clear Cache in Clear Browsing Data preference [CHAR-LIMIT=24]">
         Clear the cache
@@ -751,14 +620,11 @@ Version 4.0 (Ice Cream Sandwich) is the minimal supported version.
       <message name="IDS_ACCEPT_COOKIES_SUMMARY" desc="Summary text for Accept Cookies preference [CHAR-LIMIT=64]">
         Allow sites to save and read cookie data
       </message>
-      <message name="IDS_SAVE_PASSWORDS_TITLE" desc="Title for Remember passwords preference [CHAR-LIMIT=24]">
-        Remember passwords
-      </message>
-      <message name="IDS_SAVE_PASSWORDS_SUMMARY" desc="Summary text for Remember passwords preference [CHAR-LIMIT=64]">
-        Save usernames and passwords for websites
-      </message>
       <message name="IDS_ENABLE_LOCATION_TITLE" desc="Title for Enable location preference [CHAR-LIMIT=24]">
         Enable location
+      </message>
+      <message name="IDS_ENABLE_LOCATION_TITLE_ALT1" desc="Title for Enable location preference alternative 1 [CHAR-LIMIT=32]">
+        Google location settings
       </message>
       <message name="IDS_ENABLE_LOCATION_SUMMARY" desc="Summary text for Enable location preference [CHAR-LIMIT=64]">
         Allow sites to request access to your location
@@ -769,23 +635,11 @@ Version 4.0 (Ice Cream Sandwich) is the minimal supported version.
       <message name="IDS_ENABLE_JAVASCRIPT_SUMMARY" desc="Summary text for Enable Javascript preference [CHAR-LIMIT=64]">
         Allow sites to run JavaScript
       </message>
-      <message name="IDS_ENABLE_ON_DEMAND_ZOOM_TITLE" desc="Title for Enable on-demand zoom preference [CHAR-LIMIT=24]">
-        Enable link preview
-      </message>
-      <message name="IDS_ENABLE_ON_DEMAND_ZOOM_SUMMARY" desc="Summary text for Enable on-demand zoom preference [CHAR-LIMIT=64]">
-        Magnify links when it is unclear which link you pressed
-      </message>
       <message name="IDS_SEARCH_ENGINE_TITLE" desc="Title for Search Engine preference [CHAR-LIMIT=24]">
         Search engine
       </message>
-      <message name="IDS_SEARCH_ENGINE_SUMMARY" desc="Summary Text for Search Engine preference [CHAR-LIMIT=64]">
-        Select a Search Engine
-      </message>
       <message name="IDS_CRASH_DUMP_UPLOAD_TITLE" desc="Title for crash upload upload preference [CHAR-LIMIT=64]">
         Usage and crash reports
-      </message>
-      <message name="IDS_CRASH_DUMP_UPLOAD_SUMMARY" desc="Title for crash upload upload preference [CHAR-LIMIT=None]">
-        Help make Chrome better by allowing crash information to be uploaded to Google
       </message>
       <message name="IDS_CRASH_DUMP_NEVER_UPLOAD" desc="Optional value for crash uploading preference [CHAR-LIMIT=32]">
         Never send
@@ -796,38 +650,14 @@ Version 4.0 (Ice Cream Sandwich) is the minimal supported version.
       <message name="IDS_CRASH_DUMP_ONLY_WITH_WIFI" desc="Optional value for crash uploading preference [CHAR-LIMIT=32]">
         Only send on Wi-Fi
       </message>
-      <message name="IDS_FONT_SIZE_TITLE" desc="Title for Font Size preference [CHAR-LIMIT=24]">
-        Font size
-      </message>
-      <message name="IDS_FONT_SIZE_SUMMARY" desc="Summary for Font Size preference [CHAR-LIMIT=24]">
-        Change font size
-      </message>
       <message name="IDS_PREFETCH_BANDWIDTH_TITLE" desc="Title for Bandwidth preference [CHAR-LIMIT=64]">
         Preload webpages
-      </message>
-      <message name="IDS_PREFETCH_BANDWIDTH_SUMMARY" desc="Summary text for Bandwidth preference [CHAR-LIMIT=None]">
-        Preload high-confidence search results in the background
-      </message>
-      <message name="IDS_ENABLE_SYNC" desc="Title for enabling syncing web pages to the mobile device [CHAR-LIMIT=24]">
-        Enable sync
-      </message>
-      <message name="IDS_ENABLE_CHROME_TO_MOBILE" desc="Title for enabling sending web pages to the mobile device [CHAR-LIMIT=64]">
-        Enable Chrome to Mobile
-      </message>
-      <message name="IDS_HARDWARE_ACCELERATION_TITLE" desc="Title for Hardware Acceleration preference [CHAR-LIMIT=24]">
-        Hardware Acceleration
-      </message>
-      <message name="IDS_HARDWARE_ACCELERATION_SUMMARY" desc="Summary text for Hardware Acceleration preference">
-        Changes won't take effect until Chrome is restarted
       </message>
       <message name="IDS_ENABLE_TILT_SCROLL" desc="Title for Tilt Scroll Enabling preference [CHAR-LIMIT=24]">
         Enable Tilt Scrolling
       </message>
       <message name="IDS_ENABLE_TILT_SCROLL_SUMMARY" desc="Summary text for enabling tilt scrolling [CHAR_LIMIT=None]">
         Allow scrolling of the stack view by flinging the device. Changes won't take effect until Chrome is restarted.
-      </message>
-      <message name="IDS_AUTOFILL_PROFILE_EDITOR_HEADING" desc="Heading for the AutoFill profile editor to tell the user what AutoFill does and why they should fill out the profile. [CHAR-LIMIT=None]">
-        Enter the data you want to auto-fill in web fields when you touch them
       </message>
       <message name="IDS_AUTOFILL_PROFILE_EDITOR_NAME" desc="String for the user's full name in the AutoFill profile editor. [CHAR-LIMIT=32]">
         Full name
@@ -877,9 +707,6 @@ Version 4.0 (Ice Cream Sandwich) is the minimal supported version.
       <message name="IDS_PROFILER_ERROR_TOAST" desc="Toast notifying the user that we failed to start profiler">
         Failed to start profiler
       </message>
-      <message name="IDS_EXIT_FULLSCREEN" desc="Menu item to exit fullscreen mode. [CHAR-LIMIT=24]">
-        Exit Fullscreen
-      </message>
       <message name="IDS_AUTOFILL_CREDIT_CARD_EDITOR_NAME" desc="String for the user's card name in the AutoFill credit card editor. [CHAR-LIMIT=32]">
         Name on card:
       </message>
@@ -892,20 +719,8 @@ Version 4.0 (Ice Cream Sandwich) is the minimal supported version.
       <message name="IDS_AUTOFILL_CREDIT_CARD_EDITOR_YEAR_SPINNER_PROMPT" desc="String for the user's card exp year in the AutoFill credit card editor. [CHAR-LIMIT=32]">
         Expiration year:
       </message>
-      <message name="IDS_AUTO_LOGIN_INFOBAR_MESSAGE" desc="Text to display in the auto-login infobar. [CHAR-LIMIT=64]">
-        Automatic sign-in is available
-      </message>
-      <message name="IDS_AUTO_LOGIN_INFOBAR_LOGIN_BUTTON_TEXT" desc='Button text for "Login" in the infobar. [CHAR-LIMIT=12]'>
-        Login
-      </message>
-      <message name="IDS_AUTO_LOGIN_INFOBAR_CANCEL_BUTTON_TEXT" desc='Button text for "Cancel" in the x-auto-login infobar. [CHAR-LIMIT=12]'>
-        Cancel
-      </message>
       <message name="IDS_AUTO_LOGIN_FAILED" desc="Message to display when x-auto-login fails. [CHAR-LIMIT=64]">
         Automatic login failed
-      </message>
-      <message name="IDS_MESSAGE_INFOBAR_OK_TEXT" desc="OK button in the message infobar. [CHAR-LIMIT=16]">
-        OK
       </message>
       <message name="IDS_POPUPS_BLOCKED_INFOBAR_TEXT" desc="Pop-up Blocking Title [CHAR-LIMIT=32]">
         Pop-ups blocked (<ph name="POP_UP_COUNT">%s<ex>3</ex></ph>)
@@ -921,9 +736,6 @@ Version 4.0 (Ice Cream Sandwich) is the minimal supported version.
       </message>
       <message name="IDS_SNAPSHOT_DOWNLOAD_FAILED_INFOBAR" desc="Text to display in the snapshot download failed infobar. [CHAR-LIMIT=64]">
         Offline copy failed to download
-      </message>
-      <message name="IDS_SNAPSHOT_OPEN_FAILED_INFOBAR" desc="Text to display in the snapshot open failed infobar. [CHAR-LIMIT=64]">
-        Offline copy failed to open
       </message>
       <message name="IDS_UPDATE_AVAILABLE_INFOBAR" desc="Text to display when a new update is detected. [CHAR-LIMIT=64]">
         A new version of Chrome is available
@@ -949,41 +761,8 @@ Version 4.0 (Ice Cream Sandwich) is the minimal supported version.
       <message name="IDS_SNAPSHOT_ERROR_OPENING_MIME_TYPE" desc="A message to popup when we are unable to find anyone handling a given download. The %s refers to the MIME-type [CHAR-LIMIT=64]">
         Unable to open document of type <ph name="MIME_TYPE">%s<ex>text/html</ex></ph>
       </message>
-      <message name="IDS_SNAPSHOT_VISIBLE_URL_1" desc="The text displayed in the location bar when a snapshot has been loaded. The %s refers to the original URL the snapshot is of [CHAR-LIMIT=16]">
-        Copy of <ph name="SNAPSHOT_URL">%s<ex>google.com</ex></ph>
-      </message>
       <message name="IDS_SNAPSHOT_VISIBLE_URL_2" desc="The text displayed in the location bar when a snapshot has been loaded. This is displayed inside an icon. [CHAR-LIMIT=16]">
         Copy of:
-      </message>
-      <message name="IDS_SNAPSHOT_VISIBLE_URL_3" desc="The text displayed in the location bar when a snapshot has been loaded. This is displayed inside an icon. [CHAR-LIMIT=16]">
-        Copy of
-      </message>
-      <message name="IDS_SNAPSHOT_VISIBLE_URL_4" desc="The text displayed in the location bar when a snapshot has been loaded. This is displayed inside an icon. [CHAR-LIMIT=16]">
-        Copy
-      </message>
-      <message name="IDS_SNAPSHOT_VISIBLE_URL_5" desc="The text displayed in the location bar when a snapshot has been loaded. The %s refers to the original URL the snapshot is of [CHAR-LIMIT=32]">
-        Offline copy of <ph name="SNAPSHOT_URL">%s<ex>google.com</ex></ph>
-      </message>
-      <message name="IDS_SNAPSHOT_VISIBLE_URL_6" desc="The text displayed in the location bar when a snapshot has been loaded. This is displayed inside an icon. [CHAR-LIMIT=16]">
-        Offline copy of:
-      </message>
-      <message name="IDS_SNAPSHOT_VISIBLE_URL_7" desc="The text displayed in the location bar when a snapshot has been loaded. This is displayed inside an icon. [CHAR-LIMIT=16]">
-        Offline copy of
-      </message>
-      <message name="IDS_SNAPSHOT_VISIBLE_URL_8" desc="The text displayed in the location bar when a snapshot has been loaded. This is displayed inside an icon. [CHAR-LIMIT=16]">
-        Offline copy
-      </message>
-      <message name="IDS_SNAPSHOT_VISIBLE_URL_9" desc="The text displayed in the location bar when a snapshot has been loaded. The %s refers to the original URL the snapshot is of [CHAR-LIMIT=32]">
-        Saved copy of <ph name="SNAPSHOT_URL">%s<ex>google.com</ex></ph>
-      </message>
-      <message name="IDS_SNAPSHOT_VISIBLE_URL_10" desc="The text displayed in the location bar when a snapshot has been loaded. This is displayed inside an icon. [CHAR-LIMIT=16]">
-        Saved copy of:
-      </message>
-      <message name="IDS_SNAPSHOT_VISIBLE_URL_11" desc="The text displayed in the location bar when a snapshot has been loaded. This is displayed inside an icon. [CHAR-LIMIT=16]">
-        Saved copy of
-      </message>
-      <message name="IDS_SNAPSHOT_VISIBLE_URL_12" desc="The text displayed in the location bar when a snapshot has been loaded. This is displayed inside an icon. [CHAR-LIMIT=16]">
-        Saved copy
       </message>
       <message name="IDS_SNAPSHOT_EXTERNAL_STORAGE_UNABLE_TO_CREATE_FOLDER" desc="The error to display when trying to save an Chrome to Mobile document and the media is present and writable, but we are unable to create a directory for the offline copy. [CHAR-LIMIT=80]">
         Unable to create folder for storing Chrome to Mobile document.
@@ -1021,62 +800,20 @@ Version 4.0 (Ice Cream Sandwich) is the minimal supported version.
       <message name="IDS_SNAPSHOT_EXTERNAL_STORAGE_GENERIC_ERROR" desc="The error to display when trying to save an Chrome to Mobile document and the media is unavailable [CHAR-LIMIT=150]">
         Chrome to Mobile document can not be %s since external storage is unavailable.
       </message>
-      <message name="IDS_SNAPSHOT_CANNOT_BE_OPENED" desc="The error to display when a Chrome to Mobile document cannot be opened. [CHAR-LIMIT=70]">
-        Chrome to Mobile document cannot be opened. <ph name="ERROR_EXPLANATION">%s<ex>External storage is unavailable.</ex></ph>
-      </message>
-      <message name="IDS_SNAPSHOT_CANNOT_BE_DOWNLOADED" desc="The error to display when a Chrome to Mobile document cannot be downloaded. [CHAR-LIMIT=70]">
-        Chrome to Mobile document cannot be downloaded. <ph name="ERROR_EXPLANATION">%s<ex>External storage is unavailable.</ex></ph>
-      </message>
-      <message name="IDS_SNAPSHOT_EXTERNAL_STORAGE_READ_ONLY_ALT" desc="The error to display when trying to open or download a Chrome to Mobile document and the media is present and mounted with read only access. [CHAR-LIMIT=100]">
-        Your external storage is in read only mode.
-      </message>
-      <message name="IDS_SNAPSHOT_EXTERNAL_STORAGE_BAD_REMOVAL_ALT" desc="The error to display when trying to save a Chrome to Mobile document and the media was removed before it was unmounted. [CHAR-LIMIT=100]">
-        Your external storage was removed before it was unmounted.
-      </message>
-      <message name="IDS_SNAPSHOT_EXTERNAL_STORAGE_CHECKING_ALT" desc="The error to display when trying to save a Chrome to Mobile document and the media is present and being disk-checked [CHAR-LIMIT=100]">
-        Your external storage is currently being disk-checked.
-      </message>
-      <message name="IDS_SNAPSHOT_EXTERNAL_STORAGE_NOFS_ALT" desc="The error to display when trying to save a Chrome to Mobile document and the media is present but is blank or is using an unsupported filesystem [CHAR-LIMIT=100]">
-        Your external storage is using an unsupported filesystem.
-      </message>
-      <message name="IDS_SNAPSHOT_EXTERNAL_STORAGE_REMOVED_ALT" desc="The error to display when trying to save a Chrome to Mobile document and the media is not present. [CHAR-LIMIT=100]">
-        Your external storage is not present.
-      </message>
-      <message name="IDS_SNAPSHOT_EXTERNAL_STORAGE_SHARED_ALT" desc="The error to display when trying to save a Chrome to Mobile document and the media is present not mounted, and shared via USB mass storage. [CHAR-LIMIT=100]">
-        Your external storage is currently shared as a USB mass storage device.
-      </message>
-      <message name="IDS_SNAPSHOT_EXTERNAL_STORAGE_UNMOUNTABLE_ALT" desc="The error to display when trying to save a Chrome to Mobile document and the media is present but cannot be mounted. [CHAR-LIMIT=100]">
-        Your external storage cannot be mounted.
-      </message>
-      <message name="IDS_SNAPSHOT_EXTERNAL_STORAGE_UNMOUNTED_ALT" desc="The error to display when trying to save a Chrome to Mobile document and the media is present but not mounted. [CHAR-LIMIT=100]">
-        Your external storage is not mounted.
-      </message>
-      <message name="IDS_SNAPSHOT_EXTERNAL_STORAGE_GENERIC_ERROR_ALT" desc="The error to display when trying to save a Chrome to Mobile document and the media is unavailable [CHAR-LIMIT=100]">
-        External storage is unavailable.
-      </message>
       <message name="IDS_BLOCK_POPUPS_TITLE" desc="Title for Block pop-ups preference [CHAR-LIMIT=48]">
         Block pop-ups
       </message>
       <message name="IDS_BLOCK_POPUPS_SUMMARY" desc="Summary text for Block pop-ups preference [CHAR-LIMIT=64]">
         Block pop-ups from all sites
       </message>
-      <message name="IDS_CATEGORY_MANAGE_POPUP_EXCEPTIONS" desc="Title of preference item which opens a PreferenceScreen for editing popup exceptions. [CHAR-LIMIT=48]">
-        Manage Popup Exceptions
-      </message>
       <message name="IDS_POPUP_EXCEPTIONS_TITLE" desc="Title for Pop-up exceptions [CHAR-LIMIT=48]">
         Pop-up Exceptions
-      </message>
-      <message name="IDS_CATEGORY_ADD_POPUP_EXCEPTIONS" desc="Title of preference item which opens a PreferenceScreen for adding new popup exceptions. [CHAR-LIMIT=48]">
-        Add Popup Exceptions
       </message>
       <message name="IDS_ADD_POPUP_EXCEPTIONS_TITLE" desc="Title of dialog for adding pop-up exceptions. [CHAR-LIMIT=48]">
         Add Popup Exception
       </message>
       <message name="IDS_ALLOW_EXCEPTION_BUTTON" desc="Button to add an allow popup exception [CHAR-LIMIT=24]">
         Allow
-      </message>
-      <message name="IDS_BLOCK_EXCEPTION_BUTTON" desc="Button to add an block popup exception [CHAR-LIMIT=24]">
-        Block
       </message>
       <message name="IDS_SAVE_EXCEPTION_BUTTON" desc="Button to save an edited popup exception [CHAR-LIMIT=24]">
         Save
@@ -1104,9 +841,6 @@ Version 4.0 (Ice Cream Sandwich) is the minimal supported version.
       </message>
       <message name="IDS_WEBSTORAGE_CLEAR_DATA_DIALOG_CANCEL_BUTTON" desc="Button cancelling site data cleanup [CHAR-LIMIT=16]">
         Cancel
-      </message>
-      <message name="IDS_WEBSITE_SETTINGS_CLEAR_ALL" desc="Label for the menu item in the website settings activity used to clear data stored by all websites [CHAR-LIMIT=16]">
-        Clear all
       </message>
       <message name="IDS_WEBSITE_SETTINGS_EMBEDDED_IN" desc="String used to indicate the embedder origin of a site [CHAR-LIMIT=16]">
         Embedded in <ph name="WEBSITE_URL">%s<ex>google.com</ex></ph>
@@ -1138,45 +872,6 @@ Version 4.0 (Ice Cream Sandwich) is the minimal supported version.
       <message name="IDS_POPUP_SETTINGS_PAGE_SUMMARY_NOT_ALLOWED" desc="Not allowed Summary of the setting to remove exception [CHAR-LIMIT=64]">
         This site blocks popups
       </message>
-      <message name="IDS_BUG_FEATURE_BUG" desc="[CHAR-LIMIT=24]">
-        Bug
-      </message>
-      <message name="IDS_FEATURE_REQUEST_FEATURE_BUG" desc="[CHAR-LIMIT=24]">
-        Feature Request
-      </message>
-      <message name="IDS_PERFORMANCE_FEATURE_BUG" desc="[CHAR-LIMIT=24]">
-        Performance
-      </message>
-      <message name="IDS_OPEN_HOME_PAGE" desc="A option to open the home page when the app is launched. [CHAR-LIMIT=64]">
-        Open the home page
-      </message>
-      <message name="IDS_OPEN_LAST_PAGES" desc="A option to ropen previously opened pages when the app is launched. [CHAR-LIMIT=64]">
-        Reopen the pages that were open last
-      </message>
-      <message name="IDS_GOOGLE_SEARCH_ENGINE_NAME" desc="Option to use Google as the default search engine. [CHAR-LIMIT=16]">
-        Google
-      </message>
-      <message name="IDS_YAHOO_SEARCH_ENGINE_NAME" desc="Option to use Yahoo as the default search engine. [CHAR-LIMIT=16]">
-        Yahoo!
-      </message>
-      <message name="IDS_BING_SEARCH_ENGINE_NAME" desc="Option to use Bing as the default search engine. [CHAR-LIMIT=16]">
-        Bing
-      </message>
-      <message name="IDS_VERY_SMALL_FONT_SIZE" desc="Option to set the default font size to very small. This is the smallest of 5 options. [CHAR-LIMIT=16]">
-        Very Small
-      </message>
-      <message name="IDS_SMALL_FONT_SIZE" desc="Option to set the default font size to small. This is the second smallest of five options. [CHAR-LIMIT=16]">
-        Small
-      </message>
-      <message name="IDS_MEDIUM_FONT_SIZE" desc="Option to set the default font size to medium. This is the middle value of 5 options. [CHAR-LIMIT=16]">
-        Medium
-      </message>
-      <message name="IDS_LARGE_FONT_SIZE" desc="Option to set the default font size to large. This is the second largest value of 5 options. [CHAR-LIMIT=16]">
-        Large
-      </message>
-      <message name="IDS_VERY_LARGE_FONT_SIZE" desc="Option to set the default font size to very large. This is the largest value of 5 options. [CHAR-LIMIT=16]">
-        Very Large
-      </message>
       <message name="IDS_NEVER_PREFETCH_BANDWIDTH_ENTRY" desc="Option to always disable the prefetching of web pages. [CHAR-LIMIT=16]">
         Never
       </message>
@@ -1204,17 +899,8 @@ Version 4.0 (Ice Cream Sandwich) is the minimal supported version.
       <message name="IDS_FRE_ACCEPT_CONTINUE" desc="Text for first page accept and continue button [CHAR-LIMIT=20]">
         Accept and Continue
       </message>
-      <message name="IDS_FRE_SIGN_IN_TEXT" desc="Text for second page sign in button [CHAR-LIMIT=20]">
-        Sign In
-      </message>
       <message name="IDS_FRE_SKIP_TEXT" desc="Text for second page skip button [CHAR-LIMIT=20]">
         No thanks
-      </message>
-      <message name="IDS_FRE_SKIP_TEXT_ALT1" desc="Alternative text #1 for second page skip button [CHAR-LIMIT=20]">
-        Skip
-      </message>
-      <message name="IDS_FRE_SKIP_TEXT_ALT2" desc="Alternative text #2 for second page skip button [CHAR-LIMIT=20]">
-        Skip for now
       </message>
       <message name="IDS_FRE_ADD_ACCOUNT" desc="Text for adding another Google account">
         Add account
@@ -1235,35 +921,13 @@ Your bookmarks, history, and other settings are being synced to your Google Acco
       <message name="IDS_FRE_SIGNED_TEXT_PART1" desc="Text for signed in page part 1">
         Sign in complete!
       </message>
-      <message name="IDS_FRE_SIGNED_TEXT_PART2" desc="Text for signed in page part 2">
-        Your bookmarks, history, and other settings are being synced to your Google Account
-      </message>
-      <message name="IDS_FRE_SIGNED_TEXT_ALT1" desc="Alternative text for signed in page">
-        You're now signed in to Chrome!
-
-Your bookmarks, history, and other settings are being synced to your Google Account
-      </message>
-      <message name="IDS_FRE_CHROME_FEATURES" desc="Chrome features">
-        Back up and sync your bookmarks, history and other settings to your Google Account
-
-Access tabs you have open on your computer
-      </message>
       <message name="IDS_FRE_CHROME_FEATURES_ALT1" desc="Alternative text for Chrome features">
         Set up Chrome with your Google Account
 
 Get your bookmarks, history, and settings on all your devices
       </message>
-      <message name="IDS_FRE_CHROME_FEATURES_PART1" desc="Text for Chrome features part 1">
-        Set up Chrome with your Google Account
-      </message>
-      <message name="IDS_FRE_CHROME_FEATURES_PART2" desc="Text for Chrome features part 2">
-        Get your bookmarks, history, and settings on all your devices
-      </message>
       <message name="IDS_FRE_CHROME_FEATURES_PART1_ALT1" desc="Text for Chrome features part 1 alternative">
         Sign in to Chrome to bring your open tabs, bookmarks and omnibox data from your computer to your phone or tablet.
-      </message>
-      <message name="IDS_FRE_CHROME_FEATURES_PART2_ALT1" desc="Text for Chrome features part 2 alternative">
-        That way, you have your Chrome, on all of your devices.
       </message>
       <message name="IDS_FRE_CHROME_FEATURES_PART2_ALT2" desc="Text for Chrome features part 2 alternative 2">
         Your Chrome, on all of your devices.
@@ -1271,65 +935,20 @@ Get your bookmarks, history, and settings on all your devices
       <message name="IDS_FRE_NO_ACCOUNTS" desc="Text for spinner when there is no google accounts [CHAR-LIMIT=40]">
         Sign in to your Google Account!
       </message>
-      <message name="IDS_FRE_SIGNIN_CHROME" desc="Text for prompting signing in to Chrome [CHAR-LIMIT=20]">
-        Sign in to Chrome
-      </message>
       <message name="IDS_FRE_WELCOME_PAGE_SEARCH" desc="Welcome page search bubble [CHAR-LIMIT=30]">
         Search the web directly
       </message>
       <message name="IDS_FRE_WELCOME_PAGE_TABS" desc="Welcome page tabs bubble [CHAR-LIMIT=30]">
         Switch between open tabs
       </message>
-      <message name="IDS_FRE_WELCOME_PAGE_SWIPE_ALT1" desc="Welcome page swipe bubble alternative 1 [CHAR-LIMIT=40]">
-        Drag to change tabs
-      </message>
-      <message name="IDS_FRE_WELCOME_PAGE_SWIPE_ALT2" desc="Welcome page swipe bubble alternative 2 [CHAR-LIMIT=40]">
-        Swipe to change tabs
-      </message>
-      <message name="IDS_FRE_WELCOME_PAGE_SWIPE_ALT3" desc="Welcome page swipe bubble alternative 3 [CHAR-LIMIT=40]">
-        Swipe between tabs
-      </message>
-      <message name="IDS_FRE_WELCOME_PAGE_SWIPE_ALT4" desc="Welcome page swipe bubble alternative 4 [CHAR-LIMIT=40]">
-        Swipe to switch between open tabs
-      </message>
-      <message name="IDS_FRE_WELCOME_PAGE_SWIPE_ALT5" desc="Welcome page swipe bubble alternative 5 [CHAR-LIMIT=40]">
-        Swipe to switch between tabs
-      </message>
-      <message name="IDS_FRE_WELCOME_PAGE_SWIPE_ALT6" desc="Welcome page swipe bubble alternative 6 [CHAR-LIMIT=40]">
-        Swipe to switch tabs
-      </message>
-      <message name="IDS_FRE_WELCOME_PAGE_SWIPE_ALT7" desc="Welcome page swipe bubble alternative 7 [CHAR-LIMIT=40]">
-        Drag to switch tabs
-      </message>
-      <message name="IDS_FRE_WELCOME_PAGE_SWIPE_ALT8" desc="Welcome page swipe bubble alternative 8 [CHAR-LIMIT=40]">
-        Drag from edge to switch tabs
-      </message>
-      <message name="IDS_FRE_WELCOME_PAGE_LEARN" desc="Welcome page text for learn more [CHAR-LIMIT=20]">
-        Learn more
-      </message>
       <message name="IDS_FRE_SYNC_PROMO_AFTER_FRE_PART1" desc="Sync Promo text after we complete FRE part 1">
         You're now signed in to Chrome.
-      </message>
-      <message name="IDS_FRE_SYNC_PROMO_AFTER_FRE_PART2_ALT1" desc="Sync Promo text after we complete FRE part 2 alternative 1">
-        Your bookmarks, history and other settings are being synced with your Google Account.
       </message>
       <message name="IDS_FRE_SYNC_PROMO_AFTER_FRE_PART2_ALT2" desc="Sync Promo text after we complete FRE part 2 alternative 2">
         Your open tabs, bookmarks and omnibox data are being synced with your Google Account.
       </message>
-      <message name="IDS_FRE_SYNC_PROMO_AFTER_FRE_PART2_ALT3" desc="Sync Promo text after we complete FRE part 2 alternative 3">
-        Your open tabs, bookmarks and omnibox data from your computer are being synced.
-      </message>
-      <message name="IDS_FRE_SYNC_PROMO_AFTER_FRE_PART2_ALT4" desc="Sync Promo text after we complete FRE part 2 alternative 4">
-        Your open tabs, bookmarks and omnibox data from your computer are being synced with your Google Account.
-      </message>
-      <message name="IDS_FRE_SYNC_LINK_AFTER_FRE_CUSTOMIZE" desc="Sync Promo button text after we complete fre alternative 1">
-        Customize
-      </message>
       <message name="IDS_FRE_SYNC_LINK_AFTER_FRE_SETTINGS" desc="Sync Promo button text after we complete fre alternative 2">
         Settings
-      </message>
-      <message name="IDS_FRE_SYNC_LINK_AFTER_FRE_EDIT" desc="Sync Promo button text after we complete fre alternative 3">
-        Edit
       </message>
       <message name="IDS_CURRENT_SEARCH_ENGINE" desc="Summary for current search engine. [CHAR-LIMIT=32]">
         Currently selected search engine
@@ -1351,9 +970,6 @@ Get your bookmarks, history, and settings on all your devices
       </message>
       <message name="IDS_NETWORK_PREDICTIONS_SUMMARY" desc="Summary for Network action predictions. [CHAR-LIMIT=64]">
         Improve page load performance
-      </message>
-      <message name="IDS_LEARN_PRIVACY_FEATURES_TITLE" desc="Title for Learn more about Chrome's privacy features [CHAR-LIMIT=85]">
-        Learn more about Chrome's privacy features
       </message>
       <message name="IDS_CLEAR_DATA_CANCEL" desc="Button on the bottom of Clear Browsing Data page. [CHAR-LIMIT=12]">
         Cancel
@@ -1379,9 +995,6 @@ Get your bookmarks, history, and settings on all your devices
       <message name="IDS_JAVASCRIPT_VERSION_TITLE" desc="Title for javascript version [CHAR-LIMIT=32]">
         JavaScript version
       </message>
-      <message name="IDS_FLASH_VERSION_TITLE" desc="Title for abobe flash version [CHAR-LIMIT=32]">
-        Adobe Flash version
-      </message>
       <message name="IDS_EXECUTABLE_PATH_TITLE" desc="Title for executable path [CHAR-LIMIT=32]">
         Executable path
       </message>
@@ -1399,9 +1012,6 @@ Get your bookmarks, history, and settings on all your devices
       </message>
       <message name="IDS_TERMS_OF_SERVICE_URL" desc="URL for terms of service">
         chrome://terms
-      </message>
-      <message name="IDS_SYNC_BEFORE_SIGN_IN_SUMMARY" desc="Summary for sync setting before sign in. [CHAR-LIMIT=150]">
-        Back up and sync your bookmarks, history, and other settings to your Google Account
       </message>
       <message name="IDS_NO_SAVED_WEBSITE_SETTINGS" desc="Text to display when there are no saved webiste settings. [CHAR-LIMIT=64]">
         You have no saved website settings.
@@ -1427,86 +1037,17 @@ Get your bookmarks, history, and settings on all your devices
       <message name="IDS_NFC_BEAM_ERROR_BAD_URL" desc="Android Beam error - the current tab has an invalid url [CHAR-LIMIT=40]">
         Can't beam current tab
       </message>
-      <message name="IDS_FONT_SIZE_PREVIEW_TEXT" desc="Preview text for font-size slider. [CHAR-LIMIT=100]">
-        Move the slider until you can read this text comfortably.
-      </message>
-      <message name="IDS_FONT_SIZE_PREVIEW_TEXT_ALT1" desc="Preview text for font-size slider (alternative 1). [CHAR-LIMIT=100]">
-        Drag the slider until you can read this text comfortably.
-      </message>
-      <message name="IDS_FONT_SIZE_PREVIEW_TEXT_ALT2" desc="Preview text for font-size slider (alternative 2). [CHAR-LIMIT=65]">
-        Drag the slider until you can read comfortably.
-      </message>
-      <message name="IDS_FONT_SIZE_PREVIEW_TEXT_ALT3" desc="Preview text for font-size slider (alternative 3). [CHAR-LIMIT=65]">
-        Drag slider until you can read text comfortably.
-      </message>
       <message name="IDS_FONT_SIZE_PREVIEW_TEXT_ALT4" desc="Preview text for font-size slider (alternative 4). [CHAR-LIMIT=150]">
         Drag the slider until you can read this comfortably. Text should look at least this big after double-tapping on a paragraph.
-      </message>
-      <message name="IDS_INVERTED_RENDERING" desc="Title for menu option to invert screen rendering. [CHAR-LIMIT=40]">
-        Inverted screen rendering
-      </message>
-      <message name="IDS_INVERTED_RENDERING_ALT1" desc="Title for menu option to invert screen rendering (alternative 1). [CHAR-LIMIT=32]">
-        Inverted rendering
-      </message>
-      <message name="IDS_INVERTED_RENDERING_ALT2" desc="Title for menu option to invert screen rendering (alternative 2). [CHAR-LIMIT=64]">
-        Black becomes white and vice versa
       </message>
       <message name="IDS_FONT_SIZE_ALT1" desc="Title for font size preference (alternative 1). [CHAR-LIMIT=24]">
         Text scaling
       </message>
-      <message name="IDS_FONT_SIZE_ALT2" desc="Title for font size preference (alternative 2). [CHAR-LIMIT=24]">
-        Text size
-      </message>
-      <message name="IDS_PAGE_SCALING" desc="Title for option to scale the entire page, as opposed to just the text. [CHAR-LIMIT=24]">
-        Page scaling
-      </message>
       <message name="IDS_FONT_SIZE_PREVIEW" desc="Button label to preview new font size settings. [CHAR-LIMIT=24]">
         Preview
       </message>
-      <message name="IDS_TAB_SWITCHER_BUTTON" desc="Alternative text for button to enter tab switcher mode. [CHAR-LIMIT=24]">
-        Change tabs
-      </message>
-      <message name="IDS_TAB_SWITCHER_BUTTON_ALT1" desc="Alternative text for button to enter tab switcher mode (alternative 1). [CHAR-LIMIT=24]">
-        Switcher
-      </message>
-      <message name="IDS_TAB_SWITCHER_BUTTON_ALT2" desc="Alternative text for button to enter tab switcher mode (alternative 2). [CHAR-LIMIT=24]">
-        Switch tabs
-      </message>
-      <message name="IDS_MANAGE_SEARCH_ENGINES" desc="Title for menu option to add, remove, and set default search engines. [CHAR-LIMIT=32]">
-        Manage search engines
-      </message>
-      <message name="IDS_DEFAULT_SEARCH_ENGINE" desc="Label for default search engine. [CHAR-LIMIT=32]">
-        Default search engine
-      </message>
-      <message name="IDS_CHOOSE_SEARCH_ENGINE" desc="Title for menu option to select a default search engine. [CHAR-LIMIT=32]">
-        Choose search engine
-      </message>
       <message name="IDS_SEARCH_ENGINE_NAME_AND_DOMAIN" desc="Label for a search engine, that includes its name and its domain, e.g. Google (google.co.uk). [CHAR-LIMIT=32]">
         <ph name="SEARCH_ENGINE_NAME">%1$s<ex>Google</ex></ph> (<ph name="SEARCH_ENGINE_DOMAIN">%2$s<ex>google.co.uk</ex></ph>)
-      </message>
-      <message name="IDS_SEARCH_ENGINE_CHANGED" desc="Message for infobar to alert user that the search engine has changed. [CHAR-LIMIT=64]">
-        Search engine changed to: <ph name="SEARCH_ENGINE">%s<ex>Google</ex></ph>
-      </message>
-      <message name="IDS_SEARCH_ENGINE_CHANGED_ALT1" desc="Message for infobar to alert user that the search engine has changed (alternative 1). [CHAR-LIMIT=64]">
-        Now searching using: <ph name="SEARCH_ENGINE">%s<ex>Google</ex></ph>
-      </message>
-      <message name="IDS_RESET_SEARCH_ENGINE" desc="Button label to restore default search engine. [CHAR-LIMIT=32]">
-        Reset search engine
-      </message>
-      <message name="IDS_RESET_SEARCH_ENGINE_ALT1" desc="Button label to restore default search engine (alternative 1). [CHAR-LIMIT=48]">
-        Restore default search engine
-      </message>
-      <message name="IDS_RESET_SEARCH_ENGINE_ALT2" desc="Button label to restore default search engine (alternative 2). [CHAR-LIMIT=24]">
-        Reset to: <ph name="SEARCH_ENGINE">%s<ex>Google</ex></ph>
-      </message>
-      <message name="IDS_SEARCH_ENGINE_DOMAIN_WILL_CHANGE" desc="Message to alert user that the domain for their default search engine will change based on the user's location. [CHAR-LIMIT=80]">
-        Domain will change to match your location
-      </message>
-      <message name="IDS_SEARCH_ENGINE_DOMAIN_SHOULD_CHANGE" desc="Checkbox label to select if the search engine's domain should change based on the user's location. [CHAR-LIMIT=80]">
-        Change Google domain to match my location
-      </message>
-      <message name="IDS_ALWAYS_USE_DOMAIN" desc="Label for the user to select a domain (e.g. .com or .fr) to always use, regardless of their location. [CHAR-LIMIT=24]">
-        Always use: <ph name="SEARCH_ENGINE_DOMAIN">%s<ex>google.co.uk</ex></ph>
       </message>
       <message name="IDS_CONTENT_PROVIDER_SEARCH_DESCRIPTION" desc="Description for Chrome's entry in QSB's list of search suggestion providers [CHAR-LIMIT=32]">
         Bookmarks and web history
@@ -1697,86 +1238,11 @@ Get your bookmarks, history, and settings on all your devices
       <message name="IDS_ACCESSIBILITY_HTTP_AUTH_PASSWORD_INPUT" desc="Content description for the http authentication popup password input field. [CHAR-LIMIT=NONE]">
         Password
       </message>
-      <message name="IDS_ACCESSIBILITY_TAB_SWITCHER_SWIPE_TIP" desc="Content description for the tan switcher side swiping start motion. [CHAR-LIMIT=NONE]">
-        Started side swiping
-      </message>
-      <message name="IDS_ACCESSIBILITY_TAB_SWITCHER_SWIPE_TIP_2" desc="Content description for the tab switcher side swiping start motion. [CHAR-LIMIT=NONE]">
-        Swiped from the edge
-      </message>
-      <message name="IDS_ACCESSIBILITY_TAB_SWITCHER_SWIPE_FINISHED" desc="Content description for the tab switcher side swiping release/selection. [CHAR-LIMIT=NONE]">
-        <ph name="TAB_TITLE">%s<ex>Welcome to Facebook</ex></ph> selected
-      </message>
-      <message name="IDS_ACCESSIBILITY_TAB_SWITCHER_TAB" desc="Content description for the tab switcher tab. [CHAR-LIMIT=NONE]">
-        <ph name="TAB_TITLE">%s<ex>Welcome to Facebook</ex></ph>, tab
-      </message>
-      <message name="IDS_ACCESSIBILITY_TAB_SWITCHER_SWIPE_TO_DISMISS_START" desc="Content description for the tab switcher swipe to dismiss start motion. [CHAR-LIMIT=NONE]">
-        Starting to dismiss
-      </message>
-      <message name="IDS_ACCESSIBILITY_TAB_SWITCHER_SWIPE_TO_DISMISS_START_2" desc="Content description for the tab switcher swipe to dismiss start motion. [CHAR-LIMIT=NONE]">
-        Starting to dismiss <ph name="TAB_TITLE">%s<ex>Welcome to Facebook</ex></ph>
-      </message>
-      <message name="IDS_ACCESSIBILITY_TAB_SWITCHER_SWIPE_TO_DISMISS_FINISHED" desc="Content description for the tab switcher swipe to dismiss finished motion. [CHAR-LIMIT=NONE]">
-        <ph name="TAB_TITLE">%s<ex>Welcome to Facebook</ex></ph> dismissed
-      </message>
-      <message name="IDS_ACCESSIBILITY_TAB_SWITCHER_SWIPE_TO_DISMISS_CANCELLED" desc="Content description for the tab switcher swipe to dismiss finished motion. [CHAR-LIMIT=NONE]">
-        Dismiss cancelled
-      </message>
-      <message name="IDS_ACCESSIBILITY_TAB_SWITCHER_CLOSE_TAB" desc="Content description for the tab switcher close tab button. [CHAR-LIMIT=NONE]">
-        Close tab
-      </message>
-      <message name="IDS_ACCESSIBILITY_TAB_SWITCHER_CLOSE_TAB_2" desc="Content description for the tab switcher close tab button. [CHAR-LIMIT=NONE]">
-        Close <ph name="TAB_TITLE">%s<ex>Welcome to Facebook</ex></ph>
-      </message>
-      <message name="IDS_ACCESSIBILITY_TAB_SWITCHER_CLOSE_TAB_FINISHED" desc="Content description for the tab switcher tab closed action. [CHAR-LIMIT=NONE]">
-        Tab closed
-      </message>
-      <message name="IDS_ACCESSIBILITY_TAB_SWITCHER_CLOSE_TAB_FINISHED_2" desc="Content description for the tab switcher tab closed action. [CHAR-LIMIT=NONE]">
-        <ph name="TAB_TITLE">%s<ex>Welcome to Facebook</ex></ph> closed
-      </message>
       <message name="IDS_ACCESSIBILITY_TAB_SWITCHER_STANDARD_STACK" desc="Content description for the standard stack selection 'button'. [CHAR-LIMIT=NONE]">
         Standard tabs
       </message>
-      <message name="IDS_ACCESSIBILITY_TAB_SWITCHER_STANDARD_STACK_2" desc="Content description for the standard stack selection 'button'. [CHAR-LIMIT=NONE]">
-        Non incognito tabs
-      </message>
       <message name="IDS_ACCESSIBILITY_TAB_SWITCHER_INCOGNITO_STACK" desc="Content description for the incognito stack selection 'button'. [CHAR-LIMIT=NONE]">
         Incognito tabs
-      </message>
-      <message name="IDS_ACCESSIBILITY_TAB_SWITCHER_STANDARD_STACK_SWITCHED" desc="Content description for the standard stack selection complete action. [CHAR-LIMIT=NONE]">
-        Switched to standard tabs
-      </message>
-      <message name="IDS_ACCESSIBILITY_TAB_SWITCHER_STANDARD_STACK_SWITCHED_2" desc="Content description for the standard stack selection complete action. [CHAR-LIMIT=NONE]">
-        Switched to non incognito tabs
-      </message>
-      <message name="IDS_ACCESSIBILITY_TAB_SWITCHER_INCOGNITO_STACK_SWITCHED" desc="Content description for the incognito stack selection complete action. [CHAR-LIMIT=NONE]">
-        Switched to incognito tabs
-      </message>
-      <message name="IDS_ACCESSIBILITY_TAB_SWITCHER_GREY_TAB" desc="Content description for the grey tab reloading action. [CHAR-LIMIT=NONE]">
-        Reloading tab
-      </message>
-      <message name="IDS_ACCESSIBILITY_TAB_SWITCHER_GREY_TAB_2" desc="Content description for the grey tab reloading action. [CHAR-LIMIT=NONE]">
-        Reloading <ph name="TAB_TITLE">%s<ex>Welcome to Facebook</ex></ph>
-      </message>
-      <message name="IDS_ACCESSIBILITY_TAB_SWITCHER_STANDARD_OPENED_IN_BG" desc="Content description for the standard tab opened in the background action. [CHAR-LIMIT=NONE]">
-        Tab opened in the background
-      </message>
-      <message name="IDS_ACCESSIBILITY_TAB_SWITCHER_INCOGNITO_OPENED_IN_BG" desc="Content description for the incognito tab opened in the background action. [CHAR-LIMIT=NONE]">
-        Incognito tab opened in the background
-      </message>
-      <message name="IDS_ACCESSIBILITY_TAB_SWITCHER_CLOSED_CHILD_TAB" desc="Content description for the child tab closed and returning to parent tab action. [CHAR-LIMIT=NONE]">
-        Returning to previous tab
-      </message>
-      <message name="IDS_ACCESSIBILITY_TAB_SWITCHER_CLOSED_CHILD_TAB_2" desc="Content description for the child tab closed and returning to parent tab action. [CHAR-LIMIT=NONE]">
-        Returning to parent tab
-      </message>
-      <message name="IDS_ACCESSIBILITY_TAB_SWITCHER_CLOSED_CHILD_TAB_3" desc="Content description for the child tab closed and returning to parent tab action. [CHAR-LIMIT=NONE]">
-        Returning to <ph name="TAB_TITLE">%s<ex>Welcome to Facebook</ex></ph>
-      </message>
-      <message name="IDS_ACCESSIBILITY_TAB_SWITCHER_END_OF_STACK_REACHED" desc="Content description for the side swiping end of stack reached action. [CHAR-LIMIT=NONE]">
-        Last tab reached
-      </message>
-      <message name="IDS_ACCESSIBILITY_TAB_SWITCHER_END_OF_STACK_REACHED_2" desc="Content description for the side swiping beginning of stack reached action. [CHAR-LIMIT=NONE]">
-        First tab reached
       </message>
       <message name="IDS_FORCE_ENABLE_ZOOM_TITLE" desc="Force enable zoom option title. [CHAR-LIMIT=65]">
         Force enable zoom

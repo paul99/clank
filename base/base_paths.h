@@ -42,6 +42,7 @@ enum BasePathKey {
 #endif
 #if defined(OS_ANDROID)
   DIR_ANDROID_APP_DATA,  // Directory where to put android app's data.
+  DIR_ANDROID_EXTERNAL_STORAGE,  // Android external storage directory.
 #endif
 
   PATH_END

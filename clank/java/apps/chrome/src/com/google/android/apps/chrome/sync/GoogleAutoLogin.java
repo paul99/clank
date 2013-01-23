@@ -12,6 +12,7 @@ import android.net.http.AndroidHttpClient;
 import android.util.Log;
 
 import com.google.android.apps.chrome.AccountManagerHelper;
+import com.google.android.apps.chrome.sync.Debug;
 
 import org.apache.http.HttpEntity;
 import org.apache.http.HttpResponse;
@@ -28,7 +29,7 @@ import org.apache.http.util.EntityUtils;
 public class GoogleAutoLogin implements Runnable {
 
     private static final String TAG = GoogleAutoLogin.class.getName();
-
+    private static final boolean DEBUG = Debug.DEBUG;
     private static final Uri ISSUE_AUTH_TOKEN_URL = Uri.parse(
             "https://www.google.com/accounts/IssueAuthToken?service=gaia&Session=false");
 
@@ -127,13 +128,17 @@ public class GoogleAutoLogin implements Runnable {
 
             int status = response.getStatusLine().getStatusCode();
             if (status != HttpStatus.SC_OK) {
-                Log.d(TAG, "LOGIN_FAIL: Bad status from auth url "
-                      + status + ": "
-                      + response.getStatusLine().getReasonPhrase());
+                if (DEBUG) {
+                    Log.d(TAG, "LOGIN_FAIL: Bad status from auth url "
+                          + status + ": "
+                          + response.getStatusLine().getReasonPhrase());
+                }
                 if (status == HttpStatus.SC_FORBIDDEN) {
                     // This seems to occur relatively often. Retrying usually
                     // works.
-                    Log.d(TAG, "LOGIN_FAIL: Invalidating tokens...");
+                    if (DEBUG) {
+                        Log.d(TAG, "LOGIN_FAIL: Invalidating tokens...");
+                    }
                     retry();
                     return;
                 }
@@ -142,14 +147,20 @@ public class GoogleAutoLogin implements Runnable {
 
             HttpEntity entity = response.getEntity();
             if (entity == null) {
-                Log.d(TAG, "LOGIN_FAIL: Null entity in response");
+                if (DEBUG) {
+                    Log.d(TAG, "LOGIN_FAIL: Null entity in response");
+                }
                 return;
             }
             result = EntityUtils.toString(entity, "UTF-8");
-            Log.d(TAG, "LOGIN_SUCCESS");
+            if (DEBUG) {
+                Log.d(TAG, "LOGIN_SUCCESS");
+            }
 
         } catch (Exception e) {
-            Log.d(TAG, "LOGIN_FAIL: Exception acquiring uber token " + e);
+            if (DEBUG) {
+                Log.d(TAG, "LOGIN_FAIL: Exception acquiring uber token " + e);
+            }
             request.abort();
             return;
         } finally {

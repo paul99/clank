@@ -1,0 +1,35 @@
+*************************************************************************
+*************************************************************************
+******                                                              *****
+******    W A R N I N G :   D O   N O T   U P S T R E A M ! !       *****
+******                                                              *****
+*************************************************************************
+*************************************************************************
+
+This directory contains a copy of $NDK/platforms/android-9/arch-arm where
+all link-time system libraries (e.g. libc.so / libm.so) have been compiled
+with a GCC 4.6 + binutils 2.21 toolchain.
+
+This is to ensure that they do not contain invalid global symbol definitions
+for __exidx_start / __exidx_end, two auto-generated ARM-specific symbols that
+normally should always be *local* to a shared library.
+
+Unfortunately, until binutil 2.21, these symbols were defined as *global*,
+which created issues for code generated with GCC 4.6 which actually links
+against them: the final binaries would include a *reference* to the symbols.
+
+After JellyBean, the Android platform build switched to an updated toolchain.
+As a consequence, the real system libc.so / libm.so / ... libraries do not
+have a symbol *definition* for __exidx_start / __exidx_end anymore.
+
+Trying to load libchromeview.so on these systems fails at dlopen() time
+because the dynamic linker can't resolve the definitions.
+
+When using this special sysroot, the generated libchromeview.so will
+not contain any reference to these magic symbols, and will load properly
+on these systems.
+
+More information available at http://b/issue?id=6314858
+
+DO NOT UPSTREAM: This should be solved in the future with a newer NDK release.
+

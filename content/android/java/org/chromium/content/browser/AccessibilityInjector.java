@@ -16,12 +16,14 @@ import android.view.accessibility.AccessibilityNodeInfo;
 
 import org.apache.http.NameValuePair;
 import org.apache.http.client.utils.URLEncodedUtils;
+import org.chromium.content.browser.CommandLine;
 import org.json.JSONException;
 import org.json.JSONObject;
 
 import java.lang.reflect.Field;
 import java.net.URI;
 import java.net.URISyntaxException;
+import java.util.HashMap;
 import java.util.Iterator;
 import java.util.List;
 import java.util.concurrent.atomic.AtomicInteger;
@@ -34,7 +36,7 @@ class AccessibilityInjector {
     private ChromeView mChromeView;
 
     // The Java objects that are exposed to JavaScript
-    private TextToSpeech mTextToSpeech;
+    private TextToSpeechWrapper mTextToSpeech;
     private VibratorWrapper mVibrator;
     private CallbackHandler mCallback;
 
@@ -46,6 +48,8 @@ class AccessibilityInjector {
     private boolean mInjectedScriptEnabled;
     private boolean mScriptInjected;
 
+    private final String mAccessibilityScreenReaderUrl;
+
     // constants for determining script injection strategy
     private static final int ACCESSIBILITY_SCRIPT_INJECTION_UNDEFINED = -1;
     private static final int ACCESSIBILITY_SCRIPT_INJECTION_OPTED_OUT = 0;
@@ -55,8 +59,8 @@ class AccessibilityInjector {
     private static final String ALIAS_TRAVERSAL_JS_INTERFACE = "accessibilityTraversal";
 
     // Template for JavaScript that injects a screen-reader.
-    private static final String ACCESSIBILITY_SCREEN_READER_URL =
-            "https://ssl.gstatic.com/accessibility/javascript/android/clankvox.js";
+    private static final String DEFAULT_ACCESSIBILITY_SCREEN_READER_URL =
+            "https://ssl.gstatic.com/accessibility/javascript/android/chromeandroidvox.js";
 
     private static final String ACCESSIBILITY_SCREEN_READER_JAVASCRIPT_TEMPLATE =
             "(function() {" +
@@ -84,6 +88,9 @@ class AccessibilityInjector {
      */
     public AccessibilityInjector(ChromeView chromeView) {
         mChromeView = chromeView;
+
+        mAccessibilityScreenReaderUrl = CommandLine.getInstance().getSwitchValue(
+                CommandLine.ACCESSIBILITY_JAVASCRIPT_URL, DEFAULT_ACCESSIBILITY_SCREEN_READER_URL);
     }
 
     /**
@@ -138,20 +145,21 @@ class AccessibilityInjector {
             if (context != null) {
                 // Enabled, we should try to add if we have to.
                 if (mTextToSpeech == null) {
-                    mTextToSpeech = new TextToSpeech(context, null, null);
+                    mTextToSpeech = new TextToSpeechWrapper(context);
                     mChromeView.addJavascriptInterface(mTextToSpeech,
-                            ALIAS_ACCESSIBILITY_JS_INTERFACE);
+                            ALIAS_ACCESSIBILITY_JS_INTERFACE, false);
                 }
 
                 if (mVibrator == null) {
                     mVibrator = new VibratorWrapper(context);
                     mChromeView.addJavascriptInterface(mVibrator,
-                            ALIAS_ACCESSIBILITY_JS_INTERFACE_2);
+                            ALIAS_ACCESSIBILITY_JS_INTERFACE_2, false);
                 }
 
                 if (mCallback == null) {
                     mCallback = new CallbackHandler(ALIAS_TRAVERSAL_JS_INTERFACE);
-                    mChromeView.addJavascriptInterface(mCallback, ALIAS_TRAVERSAL_JS_INTERFACE);
+                    mChromeView.addJavascriptInterface(
+                            mCallback, ALIAS_TRAVERSAL_JS_INTERFACE, false);
                 }
             }
         } else {
@@ -159,7 +167,7 @@ class AccessibilityInjector {
             if (mTextToSpeech != null) {
                 mChromeView.removeJavascriptInterface(ALIAS_ACCESSIBILITY_JS_INTERFACE);
                 mTextToSpeech.stop();
-                mTextToSpeech.shutdown();
+                mTextToSpeech.shutdownInternal();
                 mTextToSpeech = null;
             }
 
@@ -310,7 +318,7 @@ class AccessibilityInjector {
 
     private String getScreenReaderInjectingJs() {
         return String.format(ACCESSIBILITY_SCREEN_READER_JAVASCRIPT_TEMPLATE,
-                ACCESSIBILITY_SCREEN_READER_URL);
+                mAccessibilityScreenReaderUrl);
     }
 
     private AccessibilityManager getAccessibilityManager() {
@@ -371,6 +379,8 @@ class AccessibilityInjector {
     /**
      * Used to protect how long JavaScript can vibrate for.  This isn't a good comprehensive
      * protection, just used to cover mistakes and protect against long vibrate durations/repeats.
+     *
+     * Also only exposes methods we *want* to expose, no others for the class.
      */
     private static class VibratorWrapper {
         private static final long MAX_VIBRATE_DURATION_MS = 5000;
@@ -406,6 +416,37 @@ class AccessibilityInjector {
         @SuppressWarnings("unused")
         public void cancel() {
             mVibrator.cancel();
+        }
+    }
+
+    /**
+     * Used to protect the TextToSpeech class, only exposing the methods we want to expose.
+     */
+    private static class TextToSpeechWrapper {
+        private TextToSpeech mTextToSpeech;
+
+        public TextToSpeechWrapper(Context context) {
+            mTextToSpeech = new TextToSpeech(context, null, null);
+        }
+
+        @SuppressWarnings("unused")
+        public boolean isSpeaking() {
+            return mTextToSpeech.isSpeaking();
+        }
+
+        @SuppressWarnings("unused")
+        public int speak(String text, int queueMode, HashMap<String, String> params) {
+            return mTextToSpeech.speak(text, queueMode, params);
+        }
+
+        @SuppressWarnings("unused")
+        public int stop() {
+            return mTextToSpeech.stop();
+        }
+
+        @SuppressWarnings("unused")
+        protected void shutdownInternal() {
+            mTextToSpeech.shutdown();
         }
     }
 

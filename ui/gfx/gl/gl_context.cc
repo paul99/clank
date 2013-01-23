@@ -72,7 +72,11 @@ bool GLContext::LosesAllContextsOnContextLost() {
     case kGLImplementationDesktopGL:
       return false;
     case kGLImplementationEGLGLES2:
+#if defined(OS_ANDROID)
+      return false;
+#else
       return true;
+#endif
     case kGLImplementationOSMesaGL:
     case kGLImplementationAppleGL:
       return false;
@@ -82,6 +86,14 @@ bool GLContext::LosesAllContextsOnContextLost() {
       NOTREACHED();
       return true;
   }
+}
+
+bool GLContext::LosesRendererOnContextLost() {
+#if defined(OS_ANDROID)
+  return true;
+#else
+  return false;
+#endif
 }
 
 GLContext* GLContext::GetCurrent() {

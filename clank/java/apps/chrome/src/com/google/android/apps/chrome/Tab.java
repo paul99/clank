@@ -6,8 +6,9 @@ package com.google.android.apps.chrome;
 
 import static com.google.android.apps.chrome.ChromeNotificationCenter.broadcastNotification;
 
+import android.accounts.Account;
+import android.accounts.AccountManager;
 import android.app.Activity;
-import android.app.Application;
 import android.content.Context;
 import android.content.Intent;
 import android.graphics.Bitmap;
@@ -20,9 +21,12 @@ import android.net.Uri;
 import android.os.AsyncTask;
 import android.os.Bundle;
 import android.os.Handler;
+import android.text.Html;
 import android.text.TextUtils;
 import android.util.DisplayMetrics;
 import android.util.Log;
+import android.util.Pair;
+import android.util.Patterns;
 import android.view.KeyEvent;
 import android.view.TextureView;
 import android.view.View;
@@ -30,6 +34,7 @@ import android.view.View;
 import com.google.android.apps.chrome.NewTabPageUtil.NTPSection;
 import com.google.android.apps.chrome.TabModel.TabLaunchType;
 import com.google.android.apps.chrome.crash.MinidumpPreparationService;
+import com.google.android.apps.chrome.glui.ThreadCheck;
 import com.google.android.apps.chrome.infobar.InfoBar;
 import com.google.android.apps.chrome.infobar.InfoBarContainer;
 import com.google.android.apps.chrome.infobar.InfoBarDismissedListener;
@@ -41,20 +46,21 @@ import com.google.android.apps.chrome.infobar.SnapshotDownloadingInfobar;
 import com.google.android.apps.chrome.snapshot.SnapshotArchiveManager;
 import com.google.android.apps.chrome.snapshot.SnapshotDocument;
 import com.google.android.apps.chrome.snapshot.SnapshotViewableState;
+import com.google.android.apps.chrome.thumbnail.ThumbnailBitmap;
 import com.google.android.apps.chrome.uma.UmaSessionStats;
 import com.google.android.apps.chrome.utilities.MathUtils;
 import com.google.android.apps.chrome.utilities.StreamUtils;
 import com.google.android.apps.chrome.utilities.URLUtilities;
+import com.google.common.annotations.VisibleForTesting;
 
 import org.chromium.base.AccessedByNative;
 import org.chromium.base.CalledByNative;
+import org.chromium.content.browser.ActivityStatus;
 import org.chromium.content.browser.ChromeHttpAuthHandler;
 import org.chromium.content.browser.ChromeView;
 import org.chromium.content.browser.ChromeViewClient;
 import org.chromium.content.browser.SelectFileDialog;
 import org.chromium.content.browser.TraceEvent;
-
-import com.google.common.annotations.VisibleForTesting;
 
 import java.io.BufferedInputStream;
 import java.io.DataInputStream;
@@ -70,11 +76,13 @@ import java.security.InvalidKeyException;
 import java.security.Key;
 import java.security.NoSuchAlgorithmException;
 import java.security.SecureRandom;
+import java.util.HashSet;
 import java.util.List;
 import java.util.Set;
 import java.util.concurrent.Callable;
 import java.util.concurrent.ExecutionException;
 import java.util.concurrent.FutureTask;
+import java.util.regex.Pattern;
 
 import javax.crypto.Cipher;
 import javax.crypto.CipherInputStream;
@@ -203,8 +211,8 @@ public class Tab implements PopupBlockedInfoBarListener, TabThumbnailProvider {
     private boolean mParentIsIncognito;
 
     /**
-     * If this tab has crashed while being a background tab (e.g. it could be
-     * killed due to low memory conditions) we will reload it on the next show.
+     * If this tab has crashed while being a background tab or while the app was paused,
+     * we will reload it on the next show or when the app is resumed.
      */
     private boolean mTabCrashedInBackground;
 
@@ -252,6 +260,9 @@ public class Tab implements PopupBlockedInfoBarListener, TabThumbnailProvider {
     private Activity mActivity;
 
     private Handler mHandler;
+
+    // Whether the renderer was crashed intentionally and we should auto-reload the page.
+    private boolean mReloadOnCrash = false;
 
     private Runnable mThumbnailRunnable = new Runnable() {
         @Override
@@ -472,8 +483,23 @@ public class Tab implements PopupBlockedInfoBarListener, TabThumbnailProvider {
 
             @Override
             public void onTabCrash(int pid) {
-                if (mIsHidden)
+                mChromeView.setReloadOnCrash(false);
+                if (mIsHidden || ActivityStatus.getInstance().isPaused()) {
+                    // Either a hidden tab crashed or an active tab crashed while
+                    // chrome is in background.
                     mTabCrashedInBackground = true;
+                    mReloadOnCrash = false;
+                } else if (mReloadOnCrash) {
+                    mReloadOnCrash = false;
+                    if (!getUrl().isEmpty()) {
+                        reload();
+                        return;
+                    } else if (!mUrl.isEmpty()) {
+                        // The URL might not have been committed yet, but might already be available here.
+                        loadUrl(mUrl);
+                        return;
+                    }
+                }
                 NewTabPageToolbar toolBar =
                         NewTabPageToolbar.findOrCreateIfNeeded(Tab.this, mActivity, getUrl());
                 if (toolBar != null)
@@ -485,6 +511,12 @@ public class Tab implements PopupBlockedInfoBarListener, TabThumbnailProvider {
                 // data will be the same for all of them it is innocuous.
                 handleTabCrash(pid);
                 notifyTabCrashed();
+            }
+
+            @Override
+            public void wasCrashedForReload() {
+                mReloadOnCrash = true;
+                mChromeView.setReloadOnCrash(true);
             }
 
             @Override
@@ -663,6 +695,37 @@ public class Tab implements PopupBlockedInfoBarListener, TabThumbnailProvider {
                 mActivity.sendBroadcast(ChromeBrowserProvider.getShortcutToBookmark(url, title,
                         favicon, rValue, gValue, bValue, mActivity));
             }
+
+            @Override
+            public void promoSendEmail(String email, String subj, String body, String inv) {
+                Set<String> possibleEmails = new HashSet<String>();
+
+                if (!TextUtils.isEmpty(email)) {
+                    possibleEmails.add(email);
+                } else {
+                    Pattern emailPattern = Patterns.EMAIL_ADDRESS;
+                    Account[] accounts = AccountManager.get(mContext).getAccounts();
+                    for (Account account : accounts) {
+                        if (emailPattern.matcher(account.name).matches()) {
+                            possibleEmails.add(account.name);
+                       }
+                    }
+                }
+
+                Intent send = new Intent(Intent.ACTION_SEND);
+                send.setType("message/rfc822");
+                if (possibleEmails.size() != 0) {
+                    send.putExtra(Intent.EXTRA_EMAIL,
+                            possibleEmails.toArray(new String[possibleEmails.size()]));
+                }
+                send.putExtra(Intent.EXTRA_SUBJECT, subj);
+                send.putExtra(Intent.EXTRA_TEXT, Html.fromHtml(body));
+                try {
+                    mActivity.startActivity(Intent.createChooser(send, inv));
+                } catch (android.content.ActivityNotFoundException ex) {
+                    // If no app handles it, do nothing.
+                }
+            }
         };
         initChromeView(activity, nativeWebContents);
         finishInit(activity);
@@ -742,7 +805,7 @@ public class Tab implements PopupBlockedInfoBarListener, TabThumbnailProvider {
         mInfoBarContainer.instantCommited(this, previousInfoBars);
         mTitle = mChromeView.getTitle();
         finishInit(mChromeView.getContext());
-        showInternal(null);
+        showInternal();
         notifyPageTitleChanged();
         notifyTabPrefetchCommitted();
         if (tab.didReceivePageFinished()) {
@@ -944,6 +1007,7 @@ public class Tab implements PopupBlockedInfoBarListener, TabThumbnailProvider {
         NewTabPageToolbar toolbar = NewTabPageToolbar.
                 findOrCreateIfNeeded(this, mActivity, getUrl());
         if (toolbar != null) toolbar.onActivityResume();
+        reloadTabIfNecessary();
     }
 
 
@@ -1014,7 +1078,7 @@ public class Tab implements PopupBlockedInfoBarListener, TabThumbnailProvider {
         if (w == 0 || h == 0)
             return null;
         try {
-            return mChromeView.getBitmap(w, h, Bitmap.Config.RGB_565);
+            return mChromeView.getBitmap();
         } catch (OutOfMemoryError e) {
             Log.w(TAG, "OutOfMemoryError thrown while trying to fetch a tab bitmap.", e);
             ChromeNotificationCenter.broadcastImmediateNotification(
@@ -1024,10 +1088,15 @@ public class Tab implements PopupBlockedInfoBarListener, TabThumbnailProvider {
     }
 
     @Override
-    public Bitmap getBitmap() {
+    public ThumbnailBitmap getBitmap() {
+        TraceEvent.begin("Tab.getBitmap");
         Bitmap b = null;
+        float scale = 1f;
         try {
-            b = mChromeView.getBitmap();
+            Pair<Bitmap, Float> scaledBitmapData = mChromeView.getScaledPerformanceOptimizedBitmap(
+                    mChromeView.getWidth(), mChromeView.getHeight(), true);
+            b = scaledBitmapData.first;
+            scale = scaledBitmapData.second;
         } catch (OutOfMemoryError e) {
             Log.w(TAG, "OutOfMemoryError thrown while trying to fetch a tab bitmap.", e);
             ChromeNotificationCenter.broadcastImmediateNotification(
@@ -1040,7 +1109,8 @@ public class Tab implements PopupBlockedInfoBarListener, TabThumbnailProvider {
                 updateHistoryThumbnail(b);
             }
         }
-        return b;
+        TraceEvent.end("Tab.getBitmap");
+        return b == null ? null : new ThumbnailBitmap(b, scale);
     }
 
     private boolean canUpdateHistoryThumbnail() {
@@ -1114,25 +1184,11 @@ public class Tab implements PopupBlockedInfoBarListener, TabThumbnailProvider {
         }
         DisplayMetrics dm = new DisplayMetrics();
         activity.getWindowManager().getDefaultDisplay().getMetrics(dm);
-        switch (dm.densityDpi) {
-            case DisplayMetrics.DENSITY_TV:
-                w = w * 4 / 3;
-                h = h * 4 / 3;
-                break;
-            case DisplayMetrics.DENSITY_HIGH:
-                w = w * 3 / 2;
-                h = h * 3 / 2;
-                break;
-            case DisplayMetrics.DENSITY_XHIGH:
-                w = w * 2;
-                h = h * 2;
-        }
-        mThumbnailWidth = w;
-        mThumbnailHeight = h;
-    }
-
-    void show(Activity activity) {
-        show(activity, null);
+        // Adjust the thumbnail size based on the device density.  For example on a XHDPI device,
+        // the density will be ~2.0, which double the size of the thumbnail to prevent fuzzy images
+        // on the NTP.
+        mThumbnailWidth = (int) (w * dm.density);
+        mThumbnailHeight = (int) (h * dm.density);
     }
 
     /**
@@ -1141,28 +1197,21 @@ public class Tab implements PopupBlockedInfoBarListener, TabThumbnailProvider {
      *
      * @param bitmap the thumbnail image to prime the new tab with. Can be null.
      */
-    void show(Activity activity, Bitmap primeBitmap) {
+    void show(Activity activity) {
         TraceEvent.begin();
         if (mChromeView == null) {
             restoreState(activity);
         }
         mSavedState = null;
-        showInternal(primeBitmap);
+        showInternal();
         TraceEvent.end();
     }
 
-    /**
-     * @param bitmap the thumbnail image to prime the new tab with. Can be null.
-     */
-    private void showInternal(Bitmap primeBitmap) {
+    private void showInternal() {
         mIsHidden = false;
 
-        if (mTabCrashedInBackground) {
-            reload();
-            mTabCrashedInBackground = false;
-        }
+        reloadTabIfNecessary();
 
-        mChromeView.usePrimeBitmap(primeBitmap);
         mLastShownTimestamp = System.currentTimeMillis();
         mChromeView.onShow();
         // If the page is still loading, notify of load progress so the progress
@@ -1170,8 +1219,14 @@ public class Tab implements PopupBlockedInfoBarListener, TabThumbnailProvider {
         // away (otherwise it would not show until the renderer notifies of new
         // progress being
         // made).
-        if (getProgress() < 100 && !isShowingInterstitialPage())
-            notifyLoadProgress();
+        if (getProgress() < 100 && !isShowingInterstitialPage()) notifyLoadProgress();
+    }
+
+    private void reloadTabIfNecessary() {
+        if (mTabCrashedInBackground) {
+            reload();
+            mTabCrashedInBackground = false;
+        }
     }
 
     LocationBar getLocationBar(final Activity activity) {
@@ -1996,7 +2051,7 @@ public class Tab implements PopupBlockedInfoBarListener, TabThumbnailProvider {
                         SnapshotArchiveManager.getSnapshotViewableState(result) ==
                         SnapshotViewableState.READY) {
                     SnapshotArchiveManager.openDownloadedFileAsNewTaskActivity(
-                            result, mActivity, false);
+                            result, mActivity);
                 }
             }
         }.execute();
@@ -2027,5 +2082,27 @@ public class Tab implements PopupBlockedInfoBarListener, TabThumbnailProvider {
      */
     public int getBackgroundColor() {
         return getView() != null ? getView().getBackgroundColor() : Color.WHITE;
+    }
+
+    @Override
+    public boolean setSurfaceTextureOwner(ChromeView.ExternalSurfaceTextureOwner owner) {
+        assert ThreadCheck.ui() : "UI thread expected";
+        ChromeView view = getView();
+        if (view != null) return view.setExternalSurfaceTextureOwner(owner);
+        return false;
+    }
+
+    private final Runnable mOnSurfaceTextureUpdated = new Runnable() {
+        @Override
+        public void run() {
+            assert ThreadCheck.ui() : "UI thread expected";
+            ChromeView view = getView();
+            if (view != null) view.onExternalSurfaceTextureUpdated();
+        }
+    };
+
+    @Override
+    public void onSurfaceTextureUpdated() {
+        mHandler.postAtFrontOfQueue(mOnSurfaceTextureUpdated);
     }
 }

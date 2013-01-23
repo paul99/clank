@@ -55,24 +55,27 @@ struct MappingEntry {
 typedef std::pair<struct MappingInfo, u_int8_t[sizeof(MDGUID)]> MappingEntry;
 #endif
 
+struct MinidumpDescriptor;
+
 // A list of <MappingInfo, GUID>
 typedef std::list<MappingEntry> MappingList;
 
 // Write a minidump to the filesystem. This function does not malloc nor use
 // libc functions which may. Thus, it can be used in contexts where the state
 // of the heap may be corrupt.
-//   filename: the filename to write to. This is opened O_EXCL and fails if
-//     open fails.
+//   descriptor: a descriptor containing either a filename to write to
+//     (this is opened O_EXCL and fails if open fails), or an opened file
+//     descriptor.
 //   crashing_process: the pid of the crashing process. This must be trusted.
 //   blob: a blob of data from the crashing process. See exception_handler.h
 //   blob_size: the length of |blob|, in bytes
 //
 // Returns true iff successful.
-bool WriteMinidump(const char* filename, pid_t crashing_process,
+bool WriteMinidump(const MinidumpDescriptor& descriptor, pid_t crashing_process,
                    const void* blob, size_t blob_size);
 
 // This overload also allows passing a list of known mappings.
-bool WriteMinidump(const char* filename, pid_t crashing_process,
+bool WriteMinidump(const MinidumpDescriptor& descriptor, pid_t crashing_process,
                    const void* blob, size_t blob_size,
                    const MappingList& mappings);
 

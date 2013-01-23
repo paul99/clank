@@ -8,6 +8,12 @@
 <translation id="8130276680150879341">I-disconnect ang pribadong network</translation>
 <translation id="1058418043520174283"><ph name="INDEX"/> ng <ph name="COUNT"/></translation>
 <translation id="4480627574828695486">I-disconnect ang account na ito...</translation>
+<translation id="2516632596252643567">&lt;p&gt;
+         I-access ang mga tab na bukas sa iyong computer, dito mismo.
+          &lt;/p&gt;
+          &lt;p&gt;
+          Buksan lamang ang Chrome sa iyong computer, pumunta sa menu, at piliin ang &quot;Mag-sign In sa Chrome...&quot;
+          &lt;/p&gt;</translation>
 <translation id="7040807039050164757">&amp;Suriin ang Spelling ng Field na Ito</translation>
 <translation id="778579833039460630">Walang data na natanggap</translation>
 <translation id="8791923223854254330">Pamahalaan ang Mga Handler...</translation>
@@ -1509,7 +1515,6 @@ Pampublikong Exponent (<ph name="PUBLIC_EXPONENT_NUM_BITS"/> (na) bit):
 <translation id="6342069812937806050">Ngayon lang</translation>
 <translation id="5605716740717446121">Permanente nang hindi pagaganahin ang iyong SIM card kung hindi mo maipapasok ang tamang PIN Unlocking Key. Mga natitirang pagsubok: <ph name="TRIES_COUNT"/></translation>
 <translation id="8836712291807476944"><ph name="SAVED_BYTES"/> / <ph name="TOTAL_BYTES"/> (na) mga byte, Naantala</translation>
-<translation id="3661943501691646627">&lt;p&gt; I-access ang mga tab na bukas sa iyong computer, dito mismo. &lt;/p&gt; &lt;p&gt; Buksan lamang ang Chrome sa iyong computer, pumunta sa menu, at piliin ang &quot;Mag-sign In sa Chrome...&quot; &lt;/p&gt; &lt;p&gt; Kahanga-hanga ito. &lt;/p&gt;</translation>
 <translation id="5502500733115278303">Nai-import Mula sa Firefox</translation>
 <translation id="569109051430110155">Awtomatikong nakita</translation>
 <translation id="4408599188496843485">T&amp;ulong</translation>
@@ -3166,6 +3171,7 @@ Pindutin ang Ctrl+Alt+Z upang kanselahin.</translation>
 <translation id="8241707690549784388">Ang pahina na hinahanap mo para sa paggamit ng impormasyon na ipinasok mo. Ang pagbalik sa pahinang iyon maaaring magsanhi ng anumang aksyon na akalo mo ay naulit. Nais mo bang ipagpatuloy?</translation>
 <translation id="5359419173856026110">Nagpapakita ng aktwal na frame rate ng isang pahina, sa mga frame sa bawat segundo, kapag aktibo ang pagpapabilis ng hardware.</translation>
 <translation id="4104163789986725820">I-e&amp;xport...</translation>
+<translation id="5143814737375740231">Hindi sinusuportahan ng Chrome para sa Android ang plug-in na ito.</translation>
 <translation id="2113479184312716848">Buksan ang &amp;File...</translation>
 <translation id="3314617171364900239">Paulit-ulit na nabigo para sa extension na &quot;<ph name="EXTENSION_NAME"/>&quot; ang mga pagsusuri para sa update.</translation>
 <translation id="4850458635498951714">Magdagdag ng device</translation>

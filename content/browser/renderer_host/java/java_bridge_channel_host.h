@@ -8,7 +8,12 @@
 
 #include "content/common/np_channel_base.h"
 
-class JavaBridgeChannelHost : public NPChannelBase {
+// Extras for Channel leaking work-around
+#include "content/public/browser/notification_observer.h"
+#include "content/public/browser/notification_registrar.h"
+
+class JavaBridgeChannelHost : public NPChannelBase,
+                              public content::NotificationObserver {
  public:
   static JavaBridgeChannelHost* GetJavaBridgeChannelHost(
       int renderer_id,
@@ -27,14 +32,21 @@ class JavaBridgeChannelHost : public NPChannelBase {
                     bool create_pipe_now,
                     base::WaitableEvent* shutdown_event) OVERRIDE;
 
+  virtual void Observe(int type,
+                       const content::NotificationSource& source,
+                       const content::NotificationDetails& details);
+
+  void RegisterForNotification();
+  content::NotificationRegistrar registrar_;
+
  protected:
   // NPChannelBase override:
   virtual bool OnControlMessageReceived(const IPC::Message& message) OVERRIDE;
 
  private:
-  JavaBridgeChannelHost() {}
+  JavaBridgeChannelHost();
   friend class base::RefCountedThreadSafe<JavaBridgeChannelHost>;
-  virtual ~JavaBridgeChannelHost() {}
+  virtual ~JavaBridgeChannelHost();
 
   static NPChannelBase* ClassFactory() {
     return new JavaBridgeChannelHost();

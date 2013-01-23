@@ -20,8 +20,10 @@
 #include "net/url_request/url_request_file_job.h"
 
 #include "base/bind.h"
+#include "base/base_paths.h"
 #include "base/compiler_specific.h"
 #include "base/message_loop.h"
+#include "base/path_service.h"
 #include "base/platform_file.h"
 #include "base/string_util.h"
 #include "base/synchronization/lock.h"
@@ -97,7 +99,7 @@ URLRequestJob* URLRequestFileJob::Factory(URLRequest* request,
   FilePath file_path;
   const bool is_file = FileURLToFilePath(request->url(), &file_path);
 
-#if defined(OS_CHROMEOS)
+#if defined(OS_CHROMEOS) || defined(OS_ANDROID)
   // Check file access.
   if (AccessDisabled(file_path))
     return new URLRequestErrorJob(request, ERR_ACCESS_DENIED);
@@ -119,14 +121,19 @@ URLRequestJob* URLRequestFileJob::Factory(URLRequest* request,
   return new URLRequestFileJob(request, file_path);
 }
 
-#if defined(OS_CHROMEOS)
+#if defined(OS_CHROMEOS) || defined(OS_ANDROID)
 static const char* const kLocalAccessWhiteList[] = {
+#if defined(OS_CHROMEOS)
   "/home/chronos/user/Downloads",
   "/media",
   "/opt/oem",
   "/usr/share/chromeos-assets",
   "/tmp",
   "/var/log",
+#else
+  "/sdcard",
+  "/mnt/sdcard",
+#endif
 };
 
 // static
@@ -143,9 +150,18 @@ bool URLRequestFileJob::AccessDisabled(const FilePath& file_path) {
       return false;
     }
   }
+
+#if defined(OS_ANDROID)
+  FilePath external_storage_path;
+  PathService::Get(base::DIR_ANDROID_EXTERNAL_STORAGE, &external_storage_path);
+  if (external_storage_path.IsParent(file_path)) {
+    return false;
+  }
+#endif
+
   return true;
 }
-#endif  // OS_CHROMEOS
+#endif  // defined(OS_CHROMEOS) || defined(OS_ANDROID)
 
 void URLRequestFileJob::Start() {
   DCHECK(!async_resolver_);

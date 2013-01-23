@@ -41,12 +41,6 @@
 #include "ui/gfx/gl/gl_surface.h"
 #include "webkit/glue/gl_bindings_skia_cmd_buffer.h"
 
-#if defined(OS_ANDROID)
-// Since we are using the system GL headers on Android, we also need the
-// following header for CHROMIUM/ANGLE extension token definitions.
-#include "gpu/command_buffer/service/gl_utils.h"
-#endif
-
 using gpu::Buffer;
 using gpu::CommandBuffer;
 using gpu::CommandBufferService;

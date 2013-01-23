@@ -11,8 +11,6 @@
 #include "base/basictypes.h"
 #include "base/memory/ref_counted.h"
 #include "base/memory/scoped_ptr.h"
-#include "base/timer.h"
-#include "content/browser/media/media_player_listener_android.h"
 
 class MediaPlayerDelegateAndroid;
 
@@ -25,15 +23,11 @@ class ChromeVideoView {
   explicit ChromeVideoView();
   ~ChromeVideoView();
 
-  void Init(JNIEnv*, jobject obj, jobject weak_this);
   int GetVideoWidth(JNIEnv*, jobject obj) const;
   int GetVideoHeight(JNIEnv*, jobject obj) const;
   int GetDuration(JNIEnv*, jobject obj) const;
-  int GetPlayerId(JNIEnv*, jobject obj) const;
-  int GetRouteId(JNIEnv*, jobject obj) const;
   void UpdateMediaMetadata(JNIEnv*, jobject obj);
   int GetCurrentPosition(JNIEnv*, jobject obj) const;
-  int GetRenderHandle(JNIEnv*, jobject obj) const;
   void Play(JNIEnv*, jobject obj);
   void PrepareAsync();
   void Pause(JNIEnv*, jobject obj);
@@ -43,27 +37,20 @@ class ChromeVideoView {
   void ExitFullscreen(JNIEnv*, jobject, jboolean release_media_player);
   void CreateFullscreenView(MediaPlayerDelegateAndroid* player);
   void DestroyFullscreenView();
-  void SetSurface(JNIEnv*, jobject obj, jobject surface,
-                  jint route_id, jint player_id);
+  void SetSurface(JNIEnv*, jobject obj, jobject surface);
   void UpdateMediaMetadata();
 
- private:
-  // In some certain cases if the renderer crashes, the ExitFullscreen message
-  // will never acknowledged by the renderer. We have to destroy the fullscreen
-  // view in this case to prevent the ChromeFlashView from sitting on top of the
-  // screen.
-  void OnTimeout();
+  void OnPlaybackComplete();
+  void OnBufferingUpdate(int percent);
+  void OnVideoSizeChanged(int width, int height);
+  void OnError(int error_type);
 
+ private:
   webkit_glue::MediaMetadataAndroid* GetMediaMetadata();
 
-  MediaPlayerDelegateAndroid* player_;
-  scoped_ptr<MediaPlayerListenerAndroid> listener_;
+  MediaPlayerDelegateAndroid* delegate_;
 
   base::android::ScopedJavaGlobalRef<jobject> j_chrome_video_view_;
-
-  // A timer to keep track of when the acknowledgement of exitfullscreen
-  // message times out.
-  base::OneShotTimer<ChromeVideoView> timeout_;
 
   DISALLOW_COPY_AND_ASSIGN(ChromeVideoView);
 };

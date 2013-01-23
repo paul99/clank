@@ -299,6 +299,10 @@ static const char* const supported_non_image_types[] = {
   "application/atom+xml",
   "application/json",
   "application/x-x509-user-cert",
+#if defined(OS_ANDROID)
+  "application/x-x509-ca-cert",
+  "application/x-pkcs12",
+#endif
   "multipart/related",  // For MHTML support.
   "multipart/x-mixed-replace"
   // Note: ADDING a new type here will probably render it AS HTML. This can

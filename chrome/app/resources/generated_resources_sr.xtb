@@ -8,6 +8,12 @@
 <translation id="8130276680150879341">Прекини везу са приватном мрежом</translation>
 <translation id="1058418043520174283"><ph name="INDEX"/> од <ph name="COUNT"/></translation>
 <translation id="4480627574828695486">Прекини везу са овим налогом...</translation>
+<translation id="2516632596252643567">&lt;p&gt;
+          Овде приступајте картицама које сте отворили на рачунару.
+          &lt;/p&gt;
+          &lt;p&gt;
+          Само отворите Chrome на рачунару, идите на мени и изаберите „Пријави ме на Chrome...“
+          &lt;/p&gt;</translation>
 <translation id="7040807039050164757">&amp;Провери правопис у овом пољу</translation>
 <translation id="778579833039460630">Нема примљених података</translation>
 <translation id="8791923223854254330">Управљај руковаоцима...</translation>
@@ -1494,15 +1500,6 @@
 <translation id="6342069812937806050">Малопре</translation>
 <translation id="5605716740717446121">Ваша SIM картица ће бити трајно онемогућена уколико не унесете исправну шифру за откључавање PIN-а. Број преосталих покушаја: <ph name="TRIES_COUNT"/></translation>
 <translation id="8836712291807476944"><ph name="SAVED_BYTES"/>/<ph name="TOTAL_BYTES"/> бајт(ов)а, прекинуто</translation>
-<translation id="3661943501691646627">&lt;p&gt;
-          Приступајте картицама које сте отворили на рачунару овде.
-          &lt;/p&gt;
-          &lt;p&gt;
-          Само отворите Chrome на рачунару, идите на мени и изаберите „Пријави ме на Chrome...“
-          &lt;/p&gt;
-          &lt;p&gt;
-          Стварно је сјајно.
-          &lt;/p&gt;</translation>
 <translation id="5502500733115278303">Увезено из Firefox прегледача</translation>
 <translation id="569109051430110155">Аутоматски откриј</translation>
 <translation id="4408599188496843485">П&amp;омоћ</translation>
@@ -2830,7 +2827,7 @@
 <translation id="6503256918647795660">Језик тастатуре: француски (Швајцарска)</translation>
 <translation id="2498826285048723189">Додатак „<ph name="EXTENSION_NAME"/>“ је аутоматски уклоњен.</translation>
 <translation id="6175314957787328458">GUID Microsoft домена</translation>
-<translation id="8179976553408161302">Enter</translation>
+<translation id="8179976553408161302">Унеси</translation>
 <translation id="691321796646552019">Престани!</translation>
 <translation id="8261506727792406068">Избриши</translation>
 <translation id="7800518121066352902">Окрени у с&amp;меру супротном од казаљке на сату</translation>
@@ -3175,6 +3172,7 @@
 <translation id="8241707690549784388">Страница коју тражите користила је информације које сте унели. Повратак на ту страницу може да проузрокује потребну понављања радњи које сте извршили. Желите ли да наставите?</translation>
 <translation id="5359419173856026110">Приказује стварну брзину у кадровима за страницу, као број кадрова у секунди, када је хардверско убрзање активно.</translation>
 <translation id="4104163789986725820">И&amp;звези...</translation>
+<translation id="5143814737375740231">Chrome за Android не подржава ову додатну компоненту.</translation>
 <translation id="2113479184312716848">Open &amp;File... (Отвори датотеку)</translation>
 <translation id="3314617171364900239">Провере ажурирања су више пута биле неуспешне за додатак „<ph name="EXTENSION_NAME"/>“.</translation>
 <translation id="4850458635498951714">Додај уређај</translation>

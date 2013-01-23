@@ -6,12 +6,24 @@
 #define CHROME_BROWSER_GEOLOCATION_CHROME_GEOLOCATION_PERMISSION_CONTEXT_H_
 #pragma once
 
+#include <string>
+
 #include "base/memory/scoped_ptr.h"
 #include "content/public/browser/geolocation_permission_context.h"
 
 class GeolocationInfoBarQueueController;
 class PrefService;
 class Profile;
+
+namespace geolocation {
+
+#if defined(OS_ANDROID)
+  extern const std::string GetButtonOKTextFromGoogleAppsLocationSetting();
+  extern const void ShowGoogleLocationSettings();
+  extern const bool isGoogleAppsLocationSettingEnabled();
+#endif
+
+} // namespace geolocation
 
 // Chrome specific implementation of GeolocationPermissionContext; manages
 // Geolocation permissions flow, and delegates UI handling via

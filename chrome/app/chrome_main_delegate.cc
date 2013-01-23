@@ -80,6 +80,11 @@
 #include "chrome/browser/chromeos/boot_times_loader.h"
 #endif
 
+#if defined(OS_ANDROID)
+#include "base/global_descriptors_posix.h"
+#include "content/common/chrome_descriptors.h"
+#endif
+
 #if defined(TOOLKIT_USES_GTK)
 #include <gdk/gdk.h>
 #include <glib.h>
@@ -638,8 +643,23 @@ void ChromeMainDelegate::PreSandboxStartup() {
     // this value could be passed in a different way.
     const std::string locale =
         command_line.GetSwitchValueASCII(switches::kLang);
+#if defined(OS_ANDROID)
+    // The renderer sandboxing make it that we can't access any files even that
+    // early. So we access our local pak file directly from a file descriptor
+    // passed during process creation.
+    int locale_pak_fd = base::GlobalDescriptors::GetInstance()->MaybeGet(
+        kAndroidLocalePakDescriptor);
+    CHECK(locale_pak_fd != -1);
+    int chrome_pak_fd = base::GlobalDescriptors::GetInstance()->MaybeGet(
+        kAndroidChromePakDescriptor);
+    CHECK(chrome_pak_fd != -1);
+    ResourceBundle::InitSharedInstanceWithPaks(locale_pak_fd, chrome_pak_fd);
+
+    const std::string loaded_locale = locale;
+#else
     const std::string loaded_locale =
         ResourceBundle::InitSharedInstanceWithLocale(locale);
+#endif
     CHECK(!loaded_locale.empty()) << "Locale could not be found for " <<
         locale;
 

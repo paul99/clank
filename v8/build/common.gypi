@@ -224,7 +224,7 @@
         },
       }],
       ['OS=="linux" or OS=="freebsd" or OS=="openbsd" or OS=="solaris" \
-         or OS=="netbsd"', {
+         or OS=="netbsd" or OS=="android"', {
         'conditions': [
           [ 'target_arch=="ia32"', {
             'cflags': [ '-m32' ],

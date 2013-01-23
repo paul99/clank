@@ -14,6 +14,7 @@
 
 #include "base/basictypes.h"
 #include "base/memory/scoped_ptr.h"
+#include "base/platform_file.h"
 #include "base/string_piece.h"
 #include "ui/base/ui_export.h"
 
@@ -51,6 +52,9 @@ class UI_EXPORT DataPack {
   // for localization strings.
   RefCountedStaticMemory* GetStaticMemory(uint16 resource_id) const;
 
+  // Loads a pack file from |file|, returning false on error.
+  bool LoadFromFile(base::PlatformFile file);
+
   // Writes a pack file containing |resources| to |path|. If there are any
   // text resources to be written, their encoding must already agree to the
   // |textEncodingType| specified. If no text resources are present, please
@@ -63,6 +67,9 @@ class UI_EXPORT DataPack {
   TextEncodingType GetTextEncodingType() const { return text_encoding_type_; }
 
  private:
+  // Does the actual loading of a pack file. Called by Load and LoadFromFile.
+  bool LoadImpl();
+
   // The memory-mapped data.
   scoped_ptr<file_util::MemoryMappedFile> mmap_;
 

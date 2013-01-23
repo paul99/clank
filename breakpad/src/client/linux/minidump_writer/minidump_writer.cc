@@ -43,6 +43,7 @@
 //     a canonical instance in the LinuxDumper object. We use the placement
 //     new form to allocate objects and we don't delete them.
 
+#include "client/linux/handler/minidump_descriptor.h"
 #include "client/linux/minidump_writer/minidump_writer.h"
 #include "client/minidump_file_writer-inl.h"
 
@@ -119,12 +120,23 @@ static void CPUFillFromThreadInfo(MDRawContextX86 *out,
   // format.
   out->dr6 = info.dregs[6];
   out->dr7 = info.dregs[7];
-
+// Android NDK has a different user_regs_struct.
+// Instead of using a uint32_t for xgs,xfs etc NDK defines
+// two consecutive short registers. E.g. uint32_t xgs in NDK is two
+// separate consecutive shorts gs and _gs. Since both these
+// fields are consecutive we can do a simple assign by dereferencing
+// the first field.
+#if !defined(__ANDROID__)
   out->gs = info.regs.xgs;
   out->fs = info.regs.xfs;
   out->es = info.regs.xes;
   out->ds = info.regs.xds;
-
+#else
+  out->gs = *((uint32_t *)&(info.regs.gs));
+  out->fs = *((uint32_t *)&(info.regs.fs));
+  out->es = *((uint32_t *)&(info.regs.es));
+  out->ds = *((uint32_t *)&(info.regs.ds));
+#endif
   out->edi = info.regs.edi;
   out->esi = info.regs.esi;
   out->ebx = info.regs.ebx;
@@ -134,10 +146,15 @@ static void CPUFillFromThreadInfo(MDRawContextX86 *out,
 
   out->ebp = info.regs.ebp;
   out->eip = info.regs.eip;
-  out->cs = info.regs.xcs;
   out->eflags = info.regs.eflags;
   out->esp = info.regs.esp;
+#if !defined(__ANDROID__)
+  out->cs = info.regs.xcs;
   out->ss = info.regs.xss;
+#else
+  out->cs = *((uint32_t *)&(info.regs.cs));
+  out->ss = *((uint32_t *)&(info.regs.ss));
+#endif
 
   out->float_save.control_word = info.fpregs.cwd;
   out->float_save.status_word = info.fpregs.swd;
@@ -373,13 +390,13 @@ namespace google_breakpad {
 
 class MinidumpWriter {
  public:
-  MinidumpWriter(const char* filename,
+  MinidumpWriter(const MinidumpDescriptor& descriptor,
                  const ExceptionHandler::CrashContext* context,
                  const MappingList& mappings,
                  LinuxDumper* dumper)
-      : filename_(filename),
+      : descriptor_(descriptor),
         ucontext_(context ? &context->context : NULL),
-#if !defined(__ARM_EABI__)
+#if !defined(__ARM_EABI__) || !defined(__ANDROID__)
         float_state_(context ? &context->float_state : NULL),
 #else
         // TODO: fix this after fixing ExceptionHandler
@@ -391,8 +408,15 @@ class MinidumpWriter {
   }
 
   bool Init() {
-    return dumper_->Init() && minidump_writer_.Open(filename_) &&
-           dumper_->ThreadsSuspend();
+    if (!dumper_->Init())
+      return false;
+
+    if (descriptor_.IsFD())
+      minidump_writer_.set_file(descriptor_.fd());
+    else if (!minidump_writer_.Open(descriptor_.path()))
+      return false;
+
+    return dumper_->ThreadsSuspend();
   }
 
   ~MinidumpWriter() {
@@ -1304,7 +1328,7 @@ class MinidumpWriter {
     return WriteFile(result, buf);
   }
 
-  const char* const filename_;  // output filename
+  const MinidumpDescriptor& descriptor_;  // Contains the file where to write.
   const struct ucontext* const ucontext_;  // also from the signal handler
   const struct _libc_fpstate* const float_state_;  // ditto
   LinuxDumper* dumper_;
@@ -1318,13 +1342,14 @@ class MinidumpWriter {
   const MappingList& mapping_list_;
 };
 
-bool WriteMinidump(const char* filename, pid_t crashing_process,
+bool WriteMinidump(const MinidumpDescriptor& descriptor, pid_t crashing_process,
                    const void* blob, size_t blob_size) {
   MappingList m;
-  return WriteMinidump(filename, crashing_process, blob, blob_size, m);
+  return WriteMinidump(descriptor, crashing_process, blob, blob_size, m);
 }
 
-bool WriteMinidump(const char* filename, pid_t crashing_process,
+bool WriteMinidump(const MinidumpDescriptor& descriptor,
+                   pid_t crashing_process,
                    const void* blob, size_t blob_size,
                    const MappingList& mappings) {
   if (blob_size != sizeof(ExceptionHandler::CrashContext))
@@ -1337,7 +1362,7 @@ bool WriteMinidump(const char* filename, pid_t crashing_process,
       reinterpret_cast<uintptr_t>(context->siginfo.si_addr));
   dumper.set_crash_signal(context->siginfo.si_signo);
   dumper.set_crash_thread(context->tid);
-  MinidumpWriter writer(filename, context, mappings, &dumper);
+  MinidumpWriter writer(descriptor, context, mappings, &dumper);
   if (!writer.Init())
     return false;
 
@@ -1349,7 +1374,7 @@ bool WriteMinidumpFromCore(const char* filename,
                            const char* procfs_override) {
   MappingList mappings;
   LinuxCoreDumper dumper(0, core_path, procfs_override);
-  MinidumpWriter writer(filename, NULL, mappings, &dumper);
+  MinidumpWriter writer(MinidumpDescriptor(filename), NULL, mappings, &dumper);
   if (!writer.Init())
     return false;
   return writer.Dump();

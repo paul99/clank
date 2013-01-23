@@ -69,6 +69,11 @@ public:
   // Return true on success, or false on failure
   bool Open(const char *path);
 
+  // Sets the file descriptor |fd| as the destination of the minidump data.
+  // Can be used as an alternative to Open() when a file descriptor is
+  // available.
+  void set_file(const int file) { file_ = file; }
+
   // Close the current file
   // Return true on success, or false on failure
   bool Close();

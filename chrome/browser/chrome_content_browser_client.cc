@@ -138,9 +138,10 @@
 
 #if defined(OS_ANDROID)
 #include "base/string_number_conversions.h"
+#include "chrome/browser/android/crash_dump_manager.h"
 #include "chrome/browser/speech/speech_input_manager_android.h"
 #include "chrome/browser/ui/login/auto_login.h"
-#include "webkit/media/webmediaplayer_android.h"
+#include "net/android/network_library.h"
 #endif
 
 #if defined(USE_NSS)
@@ -402,10 +403,6 @@ void ChromeContentBrowserClient::RenderProcessHostCreated(
   host->Send(new ChromeViewMsg_SetIsIncognitoProcess(
       profile->IsOffTheRecord()));
 
-#if defined(OS_ANDROID)
-  webkit_glue::WebMediaPlayerAndroid::initIncognito(profile->IsOffTheRecord());
-#endif
-
 #if !defined(ANDROID_BINSIZE_HACK)
   // Clank doesn't have extensions.
   SendExtensionWebRequestStatusToHost(host);
@@ -414,6 +411,10 @@ void ChromeContentBrowserClient::RenderProcessHostCreated(
   RendererContentSettingRules rules;
   GetRendererContentSettingRules(profile->GetHostContentSettingsMap(), &rules);
   host->Send(new ChromeViewMsg_SetContentSettingRules(rules));
+
+#if defined(OS_ANDROID)
+  InitCrashDumpManager();
+#endif
 }
 
 content::WebUIControllerFactory*
@@ -1048,6 +1049,16 @@ void ChromeContentBrowserClient::AddNewCertificate(
   new SSLAddCertHandler(request, cert, render_process_id, render_view_id);
 }
 
+#if defined(OS_ANDROID)
+void ChromeContentBrowserClient::AddNewCertificateAndroid(
+    net::URLRequest* request,
+    const std::string& cert_data,
+    bool isPKCS12) {
+  net::android::AddCertificate(reinterpret_cast<const uint8*>(cert_data.c_str()),
+                               cert_data.length(), isPKCS12);
+}
+#endif
+
 void ChromeContentBrowserClient::RequestDesktopNotificationPermission(
     const GURL& source_origin,
     int callback_context,
@@ -1593,6 +1604,16 @@ void ChromeContentBrowserClient::CreateAutoLogin(
     int web_contents_id,
     const std::string& header_value) {
   auto_login::CreateAutoLogin(render_process_id, web_contents_id, header_value);
+}
+
+int ChromeContentBrowserClient::CreateMinidumpFile() {
+  return crash_dump_manager_->CreateMinidumpFile();
+}
+
+void ChromeContentBrowserClient::InitCrashDumpManager() {
+  if (crash_dump_manager_.get())
+    return;
+  crash_dump_manager_.reset(new CrashDumpManager());
 }
 #endif
 

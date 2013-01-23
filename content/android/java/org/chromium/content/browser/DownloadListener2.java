@@ -17,7 +17,7 @@ public interface DownloadListener2 {
      * @param contentLength The file size reported by the server
      */
     public abstract void requestHttpGetDownload(String url, String userAgent,
-            String contentDisposition, String mimetype, String cookie,
+            String contentDisposition, String mimetype, String cookie, String referer,
             long contentLength);
 
     /**

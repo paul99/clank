@@ -8,6 +8,12 @@
 <translation id="8130276680150879341">Ngắt kết nối mạng riêng</translation>
 <translation id="1058418043520174283"><ph name="INDEX"/> trong tổng số <ph name="COUNT"/></translation>
 <translation id="4480627574828695486">Ngắt kết nối tài khoản này...</translation>
+<translation id="2516632596252643567">&lt;p&gt;
+          Truy cập các tab bạn đã mở trên máy tính của bạn, ngay tại đây.
+          &lt;/p&gt;
+          &lt;p&gt;
+          Chỉ cần mở Chrome trên máy tính của bạn, đi tới trình đơn và chọn &quot;Đăng nhập vào Chrome...&quot;
+          &lt;/p&gt;</translation>
 <translation id="7040807039050164757">Kiểm tra &amp;Chính tả trong Trường Này</translation>
 <translation id="778579833039460630">Không nhận được dữ liệu nào</translation>
 <translation id="8791923223854254330">Quản lý trình xử lý ...</translation>
@@ -1531,15 +1537,6 @@ Số mũ công khai (<ph name="PUBLIC_EXPONENT_NUM_BITS"/> bit):
 <translation id="6342069812937806050">Vừa mới</translation>
 <translation id="5605716740717446121">Thẻ SIM của bạn sẽ bị vô hiệu hóa vĩnh viễn nếu bạn không thể nhập chính xác Khóa mở mã PIN. Số lần thử còn lại: <ph name="TRIES_COUNT"/></translation>
 <translation id="8836712291807476944"><ph name="SAVED_BYTES"/> / <ph name="TOTAL_BYTES"/> byte, Bị gián đoạn</translation>
-<translation id="3661943501691646627">&lt;p&gt;
-          Truy cập các tab bạn mở trên máy tính của mình, ngay tại đây.
-          &lt;/p&gt;
-          &lt;p&gt;
-          Chỉ cần mở Chrome trên máy tính của bạn, đi tới trình đơn và chọn &quot;Đăng nhập vào Chrome...&quot;
-          &lt;/p&gt;
-          &lt;p&gt;
-          Bạn sẽ thấy rất tuyệt.
-          &lt;/p&gt;</translation>
 <translation id="5502500733115278303">Nhập Từ Firefox</translation>
 <translation id="569109051430110155">Tự động phát hiện</translation>
 <translation id="4408599188496843485">T&amp;rợ giúp</translation>
@@ -3218,6 +3215,7 @@ Nhấn Ctrl+Alt+Z để hủy.</translation>
 <translation id="8241707690549784388">Trang mà bạn đang tìm sử dụng thông tin bạn đã nhập vào. Việc quay lại trang đó có thể lặp lại bất kỳ tác vụ nào bạn đã thực hiện. Bạn có muốn tiếp tục không?</translation>
 <translation id="5359419173856026110">Hiển thị tỷ lệ khung hình thực tế, theo trong khung hình trên giây của một trang, khi tăng tốc phần cứng hoạt động.</translation>
 <translation id="4104163789986725820">X&amp;uất...</translation>
+<translation id="5143814737375740231">Chrome dành cho Android không hỗ trợ plugin này.</translation>
 <translation id="2113479184312716848">Mở &amp;tệp...</translation>
 <translation id="3314617171364900239">Các lần kiểm tra cập nhật liên tục không thành công đối với tiện ích mở rộng &quot;<ph name="EXTENSION_NAME"/>&quot;.</translation>
 <translation id="4850458635498951714">Thêm thiết bị</translation>

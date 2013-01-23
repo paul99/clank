@@ -59,12 +59,14 @@
           <div class="center_empty_content" i18n-values=".innerHTML:syncEnableSync"></div>
         </div>
         <div class="center_empty_container" id="sync_promo" style="display: none;">
-          <div class="center_empty_content" i18n-values=".innerHTML:syncPromo"></div>
+          <div id="promo_message_on_sync_promo_legacy" class="center_empty_content" i18n-values=".innerHTML:syncPromo"></div>
+          <div id="promo_message_on_sync_promo_received" class="center_empty_content" style="display: none;"></div>
         </div>
         <div class="center_empty_container" id="sync_loading" style="display: none;">
           <div class="center_empty_content" i18n-values=".innerHTML:syncLoading"></div>
         </div>
         <div class="page-list" id="open_tabs_list" style="display: none;"></div>
+        <div class="page-list" id="promo_vc_list" style="display: none;"></div>
         <div class="page-list" id="snapshots_list" style="display: none;"></div>
       </div>
       <div class="main-section" id="bookmarks_container">
@@ -88,6 +90,7 @@
           </div>
           <div class="page-list" id="recently_closed_list"></div>
         </div>
+        <div id="promo_message_on_most_visited" class="promo-message" style="display: none;"></div>
       </div>
       <div class="main-section" id="incognito_container">
         <div class="content">

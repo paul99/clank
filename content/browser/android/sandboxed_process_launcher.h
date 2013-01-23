@@ -7,33 +7,33 @@
 
 #include <jni.h>
 
-#include "base/android/scoped_java_ref.h"
 #include "base/command_line.h"
 #include "base/process.h"
+#include "content/public/browser/browser_thread.h"
 
 namespace content {
 namespace browser {
 namespace android {
 
+typedef base::Callback<void(base::ProcessHandle)> StartSandboxedProcessCallback;
+
 class SandboxedProcessClient {
  public:
   // Called back when the process was created with the process pid, or 0
   // if the process could not be created.
-  virtual void OnSandboxedProcessStarted(base::ProcessHandle handle) = 0;
+  virtual void OnSandboxedProcessStarted(
+      BrowserThread::ID client_thread_id, base::ProcessHandle handle) = 0;
 };
 
 // Starts a process as a sandboxed process spawned by the Android
 // ActivityManager.
-// The connection object returned may be used with a subsequent call to
-// CancelStartSandboxedProcess()
-base::android::ScopedJavaLocalRef<jobject> StartSandboxedProcess(
+void StartSandboxedProcess(
     const CommandLine::StringVector& argv,
     int ipc_fd,
     int crash_fd,
-    SandboxedProcessClient* client);
-
-void CancelStartSandboxedProcess(
-    const base::android::JavaRef<jobject>& connection);
+    int chrome_pak_fd,
+    int locale_pak_fd,
+    const StartSandboxedProcessCallback& callback);
 
 // Stops a sandboxed process based on the handle returned form
 // StartSandboxedProcess.

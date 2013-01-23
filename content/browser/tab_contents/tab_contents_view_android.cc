@@ -7,6 +7,7 @@
 #include "base/logging.h"
 #include "content/public/browser/notification_observer.h"
 #include "content/browser/android/chrome_view.h"
+#include "content/browser/media/media_player_delegate_android.h"
 #include "content/browser/renderer_host/render_view_host.h"
 #include "content/browser/renderer_host/render_widget_host.h"
 #include "content/browser/renderer_host/render_widget_host_view_android.h"
@@ -86,6 +87,10 @@ void TabContentsViewAndroid::SetPageTitle(const string16& title) {
 void TabContentsViewAndroid::OnTabCrashed(base::TerminationStatus status,
                                           int error_code,
                                           const base::ProcessHandle handle) {
+  RenderViewHost* rvh = web_contents_->GetRenderViewHost();
+  if (rvh && rvh->media_player_delegate())
+    rvh->media_player_delegate()->CleanUpAllPlayers();
+
   if (chrome_view_)
     chrome_view_->OnTabCrashed(handle);
 }

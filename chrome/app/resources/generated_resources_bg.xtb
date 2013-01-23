@@ -8,6 +8,12 @@
 <translation id="8130276680150879341">Изключване от частната мрежа</translation>
 <translation id="1058418043520174283"><ph name="INDEX"/> от <ph name="COUNT"/></translation>
 <translation id="4480627574828695486">Прекъсване на връзката за този профил...</translation>
+<translation id="2516632596252643567">&lt;p&gt;
+Осъществявайте оттук достъп до разделите, които сте отворили на компютъра си.
+&lt;/p&gt;
+&lt;p&gt;
+Трябва само да отворите Chrome на компютъра си, след това менюто и да изберете „Вход в Chrome...“
+&lt;/p&gt;</translation>
 <translation id="7040807039050164757">&amp;Проверка на правописа в това поле</translation>
 <translation id="778579833039460630">Няма получени данни</translation>
 <translation id="8791923223854254330">Управление на манипулаторите...</translation>
@@ -1449,15 +1455,6 @@
 <translation id="6342069812937806050">Току-що</translation>
 <translation id="5605716740717446121">SIM картата ви ще бъде деактивирана за постоянно, ако не успеете да въведете правилния ключ за отключване на ПИН. Оставащи опити: <ph name="TRIES_COUNT"/></translation>
 <translation id="8836712291807476944"><ph name="SAVED_BYTES"/> / <ph name="TOTAL_BYTES"/> байта, прекъснато</translation>
-<translation id="3661943501691646627">&lt;p&gt;
-          Осъществявайте оттук достъп до разделите, които сте отворили на компютъра си.
-          &lt;/p&gt;
-          &lt;p&gt;
-          Трябва само да отворите Chrome на компютъра си, след това менюто и да изберете „Вход в Chrome...“
-          &lt;/p&gt;
-          &lt;p&gt;
-          Страхотно е.
-          &lt;/p&gt;</translation>
 <translation id="5502500733115278303">Импортирани от Firefox</translation>
 <translation id="569109051430110155">Автоматично откриване</translation>
 <translation id="4408599188496843485">Помо&amp;щ</translation>
@@ -2742,7 +2739,7 @@
 <translation id="6503256918647795660">Швейцарска (френски) клавиатура</translation>
 <translation id="2498826285048723189">Разширението „<ph name="EXTENSION_NAME"/>“ бе премахнато автоматично.</translation>
 <translation id="6175314957787328458">GUID на домейн от Microsoft</translation>
-<translation id="8179976553408161302">Enter</translation>
+<translation id="8179976553408161302">Влизане</translation>
 <translation id="691321796646552019">Деактивиране!</translation>
 <translation id="8261506727792406068">Изтриване</translation>
 <translation id="7800518121066352902">Завъртане о&amp;братно на часовниковата стрелка</translation>
@@ -3072,6 +3069,7 @@
 <translation id="8241707690549784388">Страницата, която търсите, използва въведената от вас информация. Ако се върнете на тази страница, действията, които вече сте изпълнили, може да бъдат повторени. Искате ли да продължите?</translation>
 <translation id="5359419173856026110">Показва действителния брой кадри в секунда на страницата, когато хардуерното ускорение е активно.</translation>
 <translation id="4104163789986725820">Екс&amp;портиране...</translation>
+<translation id="5143814737375740231">Chrome за Android не поддържа тази приставка.</translation>
 <translation id="2113479184312716848">&amp;Отваряне на файл...</translation>
 <translation id="3314617171364900239">Проверките за актуализации многократно не бяха успешни за разширението „<ph name="EXTENSION_NAME"/>“.</translation>
 <translation id="4850458635498951714">Добавяне на устройство</translation>

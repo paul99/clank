@@ -16,10 +16,7 @@ class MediaMetadataAndroid {
                        int height,
                        float duration,
                        float current_time,
-                       bool paused_,
-                       bool can_pause,
-                       bool can_seek_forward,
-                       bool can_seek_backward);
+                       bool paused_);
   virtual ~MediaMetadataAndroid();
 
   int width() const { return width_; }
@@ -27,9 +24,6 @@ class MediaMetadataAndroid {
   float duration() const { return duration_; }
   float current_time() const { return current_time_; }
   bool paused() const {return paused_; }
-  bool can_pause() const { return can_pause_; }
-  bool can_seek_forward() const { return can_seek_forward_; }
-  bool can_seek_backward() const { return can_seek_backward_; }
 
   void set_width(int width) { width_ = width; }
   void set_height(int height) { height_ = height; }
@@ -38,22 +32,12 @@ class MediaMetadataAndroid {
   void set_paused(bool paused) {
     paused_ = paused;
   }
-  void set_can_pause(bool can_pause) { can_pause_ = can_pause; }
-  void set_can_seek_forward(bool can_seek_forward) {
-    can_seek_forward_ = can_seek_forward;
-  }
-  void set_can_seek_backward(bool can_seek_backward) {
-    can_seek_backward_ = can_seek_backward;
-  }
 
 private:
   int width_;
   int height_;
   float duration_;
   float current_time_;
-  bool can_pause_;
-  bool can_seek_forward_;
-  bool can_seek_backward_;
   bool paused_;
 };
 

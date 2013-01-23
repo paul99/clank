@@ -8,6 +8,12 @@
 <translation id="8130276680150879341">Desconectar red privada</translation>
 <translation id="1058418043520174283"><ph name="INDEX"/> de <ph name="COUNT"/></translation>
 <translation id="4480627574828695486">Desconectar esta cuenta...</translation>
+<translation id="2516632596252643567">&lt;p&gt;
+          Accede a las pestañas que abriste en tu computadora desde aquí.
+          &lt;/p&gt;
+          &lt;p&gt;
+          Abre Chrome en tu computadora, ve a Menú y selecciona &quot;Acceder a Chrome...&quot;.
+          &lt;/p&gt;</translation>
 <translation id="7040807039050164757">&amp;Controlar la ortografía en este campo</translation>
 <translation id="778579833039460630">No se ha recibido ningún dato.</translation>
 <translation id="8791923223854254330">Administrar controladores...</translation>
@@ -195,7 +201,7 @@
 <translation id="3947342612479843523">Administrador de espacio de trabajo</translation>
 <translation id="5255315797444241226">La frase de contraseña que ingresaste es incorrecta.</translation>
 <translation id="762917759028004464">El navegador predeterminado es <ph name="BROWSER_NAME"/>.</translation>
-<translation id="8289982954746764694">Habilitar el elemento de pista (aún no completamente funcional) para los títulos, subtítulos, capítulos y descripciones de audio de los elementos de vídeo.</translation>
+<translation id="8289982954746764694">Habilitar el elemento de pista (aún no completamente funcional) para los títulos, subtítulos, capítulos y descripciones de audio de los elementos de video.</translation>
 <translation id="9213479837033539041">Faltan <ph name="NUMBER_MANY"/> segundos</translation>
 <translation id="560442828508350263">No se puede mover &quot;$1&quot;: $2</translation>
 <translation id="7298195798382681320">Recomendada</translation>
@@ -1425,7 +1431,6 @@
 <translation id="6342069812937806050">Ahora</translation>
 <translation id="5605716740717446121">Tu tarjeta SIM quedará inhabilitada de forma permanente si no ingresas el PIN de desbloqueo correcto. Te quedan <ph name="TRIES_COUNT"/> intentos.</translation>
 <translation id="8836712291807476944"><ph name="SAVED_BYTES"/> / <ph name="TOTAL_BYTES"/> bytes, interrumpido</translation>
-<translation id="3661943501691646627">&lt;p&gt; Accede a las pestañas que abriste en tu computadora aquí mismo. &lt;/p&gt; &lt;p&gt; Abre Chrome en tu computadora, ve a menú y selecciona &quot;Acceder a Chrome...&quot; &lt;/p&gt; &lt;p&gt;Es realmente increíble. &lt;/p&gt;</translation>
 <translation id="5502500733115278303">Importado desde Firefox</translation>
 <translation id="569109051430110155">Detección automática</translation>
 <translation id="4408599188496843485">A&amp;yuda</translation>
@@ -2087,7 +2092,7 @@
 <translation id="892464165639979917">Configuración de idiomas y del corrector ortográfico...</translation>
 <translation id="5645845270586517071">Error de seguridad</translation>
 <translation id="2912905526406334195"><ph name="HOST"/> desea usar tu micrófono.</translation>
-<translation id="2805756323405976993">Google Apps</translation>
+<translation id="2805756323405976993">Aplicaciones</translation>
 <translation id="3651020361689274926">El recurso solicitado ya no existe y no hay una dirección de reenvío. Se espera que sea una condición permanente.</translation>
 <translation id="2989786307324390836">Certificado binario único con codificación DER</translation>
 <translation id="3827774300009121996">&amp;Pantalla completa</translation>
@@ -3036,6 +3041,7 @@
 <translation id="8241707690549784388">La página que buscas ha utilizado la información que has especificado. Volver a la página podría provocar la repetición de alguna acción. ¿Deseas continuar?</translation>
 <translation id="5359419173856026110">Muestra la tasa de fotogramas real de una página, en fotogramas por segundo, cuando la aceleración de hardware está activa.</translation>
 <translation id="4104163789986725820">E&amp;xportar...</translation>
+<translation id="5143814737375740231">Chrome para Android no admite este complemento.</translation>
 <translation id="2113479184312716848">Abrir &amp;archivo...</translation>
 <translation id="3314617171364900239">Las comprobaciones de actualizaciones de la extensión &quot;<ph name="EXTENSION_NAME"/>&quot; han fallado reiteradamente.</translation>
 <translation id="4850458635498951714">Agregar un dispositivo</translation>

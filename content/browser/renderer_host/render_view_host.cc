@@ -172,23 +172,11 @@ RenderViewHost::RenderViewHost(SiteInstance* instance,
       content::NotificationService::NoDetails());
 
 #if defined(OS_ANDROID)
-  media_player_delegate_.reset(
-      new MediaPlayerDelegateAndroid(this));
+  media_player_delegate_ = new MediaPlayerDelegateAndroid(this);
 #endif
 }
 
 RenderViewHost::~RenderViewHost() {
-#if defined(OS_ANDROID)
-  // Need to tear down media_player_delegate_ before RVH observer destruction.
-  // This is safe to do even though MediaPlayerDelegate is a
-  // RenderViewHostObserver with a pointer to this, because the destructor for
-  // RenderViewHostObserver will remove it from the observers_ list and
-  // RenderViewHostDestruction called below will first set its render_view_host_
-  // (i.e. this) to null before deleting (see ~RenderViewHostObserver() and
-  // RenderViewHostDestruction() in render_view_host_observer.cc).
-  media_player_delegate_.reset();
-#endif
-
   FOR_EACH_OBSERVER(
       content::RenderViewHostObserver, observers_, RenderViewHostDestruction());
 
@@ -245,6 +233,7 @@ bool RenderViewHost::CreateRenderView(const string16& frame_name,
   params.frame_name = frame_name;
   params.user_agent_override = ua_override;
   params.next_page_id = next_page_id;
+  RenderWidgetHostView::GetDefaultScreenInfo(&params.screen_info);
   Send(new ViewMsg_New(params));
 
   // If it's enabled, tell the renderer to set up the Javascript bindings for
@@ -1171,13 +1160,15 @@ void RenderViewHost::OnMsgShouldIgnoreNavigation(
     const GURL& url,
     const content::Referrer& referrer,
     WindowOpenDisposition disposition,
+    content::PageTransition transition_type,
     int64 source_frame_id,
     bool* result) {
   GURL validated_url(url);
   FilterURL(ChildProcessSecurityPolicy::GetInstance(),
             process()->GetID(), false, &validated_url);
   *result = delegate_->ShouldIgnoreNavigation(validated_url, referrer,
-                                              disposition, source_frame_id);
+                                              disposition, transition_type,
+                                              source_frame_id);
 }
 #endif
 
@@ -1617,6 +1608,10 @@ void RenderViewHost::NotifyMoveOrResizeStarted() {
 
 void RenderViewHost::StopFinding(content::StopFindAction action) {
   Send(new ViewMsg_StopFinding(routing_id(), action));
+}
+
+void RenderViewHost::WasCrashedForReload() const {
+  delegate_->WasCrashedForReload();
 }
 
 void RenderViewHost::OnAccessibilityNotifications(

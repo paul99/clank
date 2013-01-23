@@ -177,12 +177,12 @@ class DownloadController {
     @CalledByNative
     public void newHttpGetDownload(ChromeView view, String url,
             String userAgent, String contentDisposition, String mimetype,
-            String cookie, long contentLength) {
+            String cookie, String referer, long contentLength) {
         DownloadListener2 listener2 = listener2FromView(view);
 
         if (listener2 != null) {
             listener2.requestHttpGetDownload(url, userAgent,
-                    contentDisposition, mimetype, cookie, contentLength);
+                    contentDisposition, mimetype, cookie, referer, contentLength);
             return;
         }
 

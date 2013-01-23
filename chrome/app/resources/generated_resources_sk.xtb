@@ -8,6 +8,12 @@
 <translation id="8130276680150879341">Odpojiť od súkromnej siete</translation>
 <translation id="1058418043520174283"><ph name="INDEX"/> z <ph name="COUNT"/></translation>
 <translation id="4480627574828695486">Odpojiť tento účet...</translation>
+<translation id="2516632596252643567">&lt;p&gt;
+          Tu môžete pristupovať ku kartám, ktoré máte otvorené na počítači.
+          &lt;/p&gt;
+          &lt;p&gt;
+          Stačí, keď na počítači otvoríte prehliadač Chrome, prejdete na ponuku a vyberiete možnosť Prihlásiť sa do prehliadača Chrome...
+          &lt;/p&gt;</translation>
 <translation id="7040807039050164757">&amp;Skontrolovať pravopis v tomto poli</translation>
 <translation id="778579833039460630">Neboli prijaté žiadne údaje</translation>
 <translation id="8791923223854254330">Správa obslužných nástrojov...</translation>
@@ -1514,15 +1520,6 @@ Keďže sa výsledky vyhľadávania vyžadujú už počas zadávania dopytu, vá
 <translation id="6342069812937806050">Práve teraz</translation>
 <translation id="5605716740717446121">Ak nezadáte správny kľuč na odomknutie kódu PIN, bude vaša karta SIM natrvalo zakázaná. Počet zostávajúcich pokusov: <ph name="TRIES_COUNT"/></translation>
 <translation id="8836712291807476944"><ph name="SAVED_BYTES"/> / <ph name="TOTAL_BYTES"/> bajtov, Prerušené</translation>
-<translation id="3661943501691646627">&lt;p&gt;
-          Priamo tu môžete pristupovať ku kartám otvoreným v počítači.
-          &lt;/p&gt;
-          &lt;p&gt;
-          Stačí, keď v počítači otvoríte prehliadač Chrome, prejdete na ponuku a vyberiete možnosť „Prihlásiť sa do prehliadača Chrome...&quot;
-          &lt;/p&gt;
-          &lt;p&gt;
-          Je to dosť dobré.
-          &lt;/p&gt;</translation>
 <translation id="5502500733115278303">Importované z prehliadača Firefox</translation>
 <translation id="569109051430110155">Zistiť automaticky</translation>
 <translation id="4408599188496843485">P&amp;omocník</translation>
@@ -3184,6 +3181,7 @@ Ak ich chcete zrušiť, stlačte kombináciu klávesov Ctrl+Alt+Z.</translation>
 <translation id="8241707690549784388">Vami hľadaná stránka použila informácie, ktoré ste zadali. Návrat na túto stránku môže spôsobiť zopakovanie akcie, ktorú ste vykonali. Chcete pokračovať?</translation>
 <translation id="5359419173856026110">Zobrazí aktuálnu snímkovú frekvenciu v snímkach za sekundu (ak je povolená hardvérová akcelerácia).</translation>
 <translation id="4104163789986725820">E&amp;xportovať...</translation>
+<translation id="5143814737375740231">Chrome pre Android tento doplnok nepodporuje.</translation>
 <translation id="2113479184312716848">Otvoriť &amp;súbor...</translation>
 <translation id="3314617171364900239">Kontroly aktualizácií rozšírenia „<ph name="EXTENSION_NAME"/>“ opakovane zlyhali.</translation>
 <translation id="4850458635498951714">Pridať zariadenie</translation>

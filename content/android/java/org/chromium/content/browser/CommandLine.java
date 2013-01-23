@@ -4,6 +4,7 @@
 
 package org.chromium.content.browser;
 
+import android.text.TextUtils;
 import android.util.Log;
 
 import java.io.File;
@@ -109,6 +110,9 @@ public abstract class CommandLine {
     // Default country code to be used for search engine localization.
     public static final String DEFAULT_COUNTRY_CODE_AT_INSTALL = "default-country-code";
 
+    // Change the url of the JavaScript that gets injected when accessibility mode is enabled.
+    public static final String ACCESSIBILITY_JAVASCRIPT_URL = "accessibility-js-url";
+
     // Mirrors of switches defined in native code.  It is up to you,
     // the developer, to keep these strings in sync with
     // base/base_switches.h, or content/public/common/content_switches.h, or
@@ -128,6 +132,13 @@ public abstract class CommandLine {
 
     // Sets the max number of render processes to use.
     public static final String RENDER_PROCESS_LIMIT = "renderer-process-limit";
+
+    // Enable the use of the GLUISurfaceView instead of GLUIFunctorView if the Android system
+    // supports it.
+    // TODO(jscholler): This should be removed eventually, this is only while the SurfaceView
+    // implementation is in development.
+    public static final String ENABLE_SURFACE_VIEW = "enable-surface-view";
+    public static final String DISABLE_SURFACE_VIEW = "disable-surface-view";
 
     // Enable to swap the overview mode between different implementation.
     // TODO(jscholler): This should be removed eventually, as it is only used for development and
@@ -154,6 +165,18 @@ public abstract class CommandLine {
      * @return switch value, or null if the switch is not set or set to empty.
      */
     public abstract String getSwitchValue(String switchString);
+
+    /**
+     * Return the value associated with the given switch, or {@code defaultValue} if the switch
+     * was not specified.
+     * @param switchString The switch key to lookup. It should NOT start with '--' !
+     * @param defaultValue The default value to return if the switch isn't set.
+     * @return Switch value, or {@code defaultValue} if the switch is not set or set to empty.
+     */
+    public String getSwitchValue(String switchString, String defaultValue) {
+        String value = getSwitchValue(switchString);
+        return TextUtils.isEmpty(value) ? defaultValue : value;
+    }
 
     /**
      * Append a switch to the command line.  There is no guarantee

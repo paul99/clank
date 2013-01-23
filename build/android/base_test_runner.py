@@ -4,6 +4,7 @@
 # found in the LICENSE file.
 
 import contextlib
+import fake_dns
 import httplib
 import logging
 import os
@@ -11,6 +12,7 @@ import tempfile
 import time
 
 import android_commands
+import constants
 from chrome_test_server_spawner import SpawningServer
 from flag_changer import FlagChanger
 import lighttpd_server
@@ -19,7 +21,7 @@ import run_tests_helper
 
 # A file on device to store ports of net test server. The format of the file is
 # test-spawner-server-port:test-server-port
-NET_TEST_SERVER_PORT_INFO_FILE = '/data/local/tmp/net-test-server-ports'
+NET_TEST_SERVER_PORT_INFO_FILE = constants.TEST_DATA_DIR + '/net-test-server-ports'
 
 
 class BaseTestRunner(object):
@@ -42,8 +44,7 @@ class BaseTestRunner(object):
     # AndroidCommands.PushIfNeeded failed, or a test which may compare timestamp
     # got from http head and local time could be failed.
     self.adb.SynchronizeDateTime()
-    self._fake_dns = None
-    self._original_dns = None
+    self._fake_dns = fake_dns.FakeDns(self.adb)
     self._http_server = None
     self._forwarder = None
     self._forwarder_device_port = 8000
@@ -79,7 +80,7 @@ class BaseTestRunner(object):
 
   def SetUp(self):
     """Called before tests run."""
-    pass
+    self._fake_dns.SetUp()
 
   def RunTests(self):
     """Runs the tests. Need to be overridden."""
@@ -87,6 +88,7 @@ class BaseTestRunner(object):
 
   def TearDown(self):
     """Called when tests finish running."""
+    self._fake_dns.TearDown()
     self.ShutdownHelperToolsForTestSuite()
 
   def CopyTestData(self, test_data_paths, dest_dir):
@@ -119,8 +121,6 @@ class BaseTestRunner(object):
                    self._http_server.port)
     else:
       logging.critical('Failed to start http server')
-    # Root access needed to make the forwarder executable work.
-    self.adb.EnableAdbRoot()
     self.StartForwarderForHttpServer()
 
   def StartForwarder(self, port_pairs):
@@ -155,17 +155,7 @@ class BaseTestRunner(object):
       self.StartForwarderForHttpServer()
 
   def ConfigureFakeDns(self):
-    """Configures the system to point to a DNS server that replies 127.0.0.1.
-
-    This can be used in combination with the forwarder to forward all web
-    traffic to a replay server.
-
-    The TearDown() method will perform all cleanup.
-    """
-    self._fake_dns = run_tests_helper.StartFakeDns(self.adb)
-    self._original_dns = self.adb.RunShellCommand('getprop net.dns1')[0]
-    self.adb.RunShellCommand('setprop net.dns1 127.0.0.1')
-    time.sleep(2)  # Time for server to start and the setprop to take effect.
+    pass
 
   def ShutdownHelperToolsForTestSuite(self):
     """Shuts down the server and the forwarder."""
@@ -180,12 +170,6 @@ class BaseTestRunner(object):
         self._forwarder.kill()
       if self._spawner_forwarder:
         self._spawner_forwarder.kill()
-    if self._fake_dns:
-      if not self._original_dns or self._original_dns == '127.0.0.1':
-        logging.warning('Bad original DNS, falling back to Google DNS.')
-        self._original_dns = '8.8.8.8'
-      self.adb.RunShellCommand('setprop net.dns1 %s' % self._original_dns)
-      self._fake_dns.kill()
     if self._http_server:
       self._http_server.ShutdownHttpServer()
     if self._spawning_server:

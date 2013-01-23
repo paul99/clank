@@ -109,7 +109,6 @@ WebKit::WebStreamTextureProxy* StreamTextureProxyFactoryImpl::CreateProxy(
   DCHECK(channel_.get());
   StreamTextureHost* host = new StreamTextureHost(channel_.get());
   if (host->Initialize(stream_id, gfx::Size(width, height))) {
-    ReestablishPeer(stream_id);
     return new StreamTextureProxyImpl(host);
   }
 

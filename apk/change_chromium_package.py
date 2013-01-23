@@ -60,6 +60,12 @@ def ChangePackage(new_package, app_name, base_path):
   # Since these replacements both occur twice, we need to set count=2.
   ReplaceFileContents(app_manifest, replacements, current_package, new_package, 2)
 
+  # Current Android AOSP (4.0.9.99.999) doesn't support isolated processes.
+  replacements = [
+    (r' android:isolatedProcess="[^\"]*"', '')
+  ]
+  ReplaceFileContents(app_manifest, replacements, current_package, new_package, 6)
+
   sync_adapter = os.path.join(base_path, 'res/xml/syncadapter.xml')
   replacements = [
     (r'android:contentAuthority="[^\"]*"',

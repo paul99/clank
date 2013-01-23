@@ -29,8 +29,6 @@ using base::android::ConvertUTF8ToJavaString;
 using base::android::ScopedJavaGlobalRef;
 using base::android::ScopedJavaLocalRef;
 
-void*   __dso_handle = (void*) &__dso_handle;
-
 namespace {
 
 // Override resource context for reading resource and asset files. Used for

@@ -51,8 +51,8 @@ class StreamTextureManagerAndroid : public gpu::StreamTextureManager {
     virtual ~StreamTextureAndroid();
 
     virtual void Update() OVERRIDE;
-    SurfaceTextureBridge* bridge()
-        { return surface_texture_.get(); }
+    scoped_refptr<SurfaceTextureBridge> bridge()
+        { return surface_texture_; }
 
     void OnFrameAvailable(int route_id);
 
@@ -67,7 +67,7 @@ class StreamTextureManagerAndroid : public gpu::StreamTextureManager {
 
    private:
     DISALLOW_COPY_AND_ASSIGN(StreamTextureAndroid);
-    scoped_ptr<SurfaceTextureBridge> surface_texture_;
+    scoped_refptr<SurfaceTextureBridge> surface_texture_;
     float current_matrix_[16];
     bool has_updated_;
     MatrixChangedCB matrix_callback_;

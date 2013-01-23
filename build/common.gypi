@@ -227,6 +227,9 @@
       # plugins to make call of the main thread.
       'enable_pepper_threading%': 0,
 
+      # Enables support for promo resource service.
+      'enable_promo_resource_service%': 1,
+
       # XInput2 multitouch support is disabled by default (use_xi2_mt=0).
       # Setting to non-zero value enables XI2 MT. When XI2 MT is enabled,
       # the input value also defines the required XI2 minor minimum version.
@@ -439,6 +442,7 @@
     'enable_web_intents%': '<(enable_web_intents)',
     'enable_web_intents_tag%': '<(enable_web_intents_tag)',
     'enable_plugin_installation%': '<(enable_plugin_installation)',
+    'enable_promo_resource_service%': '<(enable_promo_resource_service)',
     'use_canvas_skia_skia%': '<(use_canvas_skia_skia)',
     # Whether to build for Wayland display server
     'use_wayland%': 0,
@@ -705,12 +709,23 @@
           'variables': {
             'android_ndk_root%': '<!(/bin/echo -n $ANDROID_NDK_ROOT)',
             'android_target_arch%': 'arm',  # target_arch in android terms.
+            # Android uses x86 instead of ia32 for their target_arch
+            # designation.
+            # TODO(wistoch): Adjust the target_arch naming scheme to avoid
+            # confusion.
+            # http://crbug.com/125329
+            'conditions': [
+              ['target_arch == "ia32"', {
+                'android_target_arch': 'x86',
+              }],
+            ],
+
             # Switch between different build types, currently only '0' is
             # supported.
             'android_build_type%': 0,
           },
           'android_ndk_root%': '<(android_ndk_root)',
-          'android_ndk_sysroot': '<(android_ndk_root)/platforms/android-9/arch-<(android_target_arch)',
+          'android_ndk_sysroot%': '<(android_ndk_root)/platforms/android-9/arch-<(android_target_arch)',
           'android_build_type%': '<(android_build_type)',
         },
         'android_ndk_root%': '<(android_ndk_root)',
@@ -726,6 +741,12 @@
         'configuration_policy%': 0,
         'input_speech%': 0,
         'java_bridge%': 1,
+
+        # Always shows promotions.
+        'enable_promo_resource_service%': 1,
+
+        # Set to 1 once we have a notification system for Android.
+        # http://crbug.com/115320
         'notifications%': 0,
         'p2p_apis%' : 0,
 
@@ -844,7 +865,7 @@
         ],
       }],
 
-      ['os_posix==1 and chromeos==0 and target_arch!="arm"', {
+      ['os_posix==1 and chromeos==0 and OS!="android"', {
         'use_cups%': 1,
       }, {
         'use_cups%': 0,
@@ -1274,6 +1295,9 @@
       ['enable_plugin_installation==1', {
         'defines': ['ENABLE_PLUGIN_INSTALLATION=1'],
       }],
+      ['enable_promo_resource_service==1', {
+        'defines': ['ENABLE_PROMO_RESOURCE_SERVICE=1'],
+      }],
     ],  # conditions for 'target_defaults'
     'target_conditions': [
       ['enable_wexit_time_destructors==1', {
@@ -1691,7 +1715,7 @@
             'target_conditions' : [
               ['_toolset=="target"', {
                 'conditions': [
-                  ['OS=="android" and debug_optimize==0', {
+                  ['OS=="android" and debug_optimize==0 and target_arch=="arm"', {
                     'cflags': [
                       '-mlong-calls',  # Needed when compiling with -O0
                     ],
@@ -1862,12 +1886,21 @@
                   '-m32',
                 ],
               }],
+              ['OS=="android"', {
+                'cflags_cc': [
+                  # TODO(beverloo): WebKit warns about using the "nullptr"
+                  # identifier in NullPtr.h, which actually is valid usage.
+                  # This started with the JRN10C roll. We should remove
+                  # this flag once we know why the warning suddenly shows.
+                  '-Wno-c++0x-compat',
+                ],
+              }],
               # Install packages have started cropping up with
               # different headers between the 32-bit and 64-bit
               # versions, so we have to shadow those differences off
               # and make sure a 32-bit-on-64-bit build picks up the
               # right files.
-              ['host_arch!="ia32" and OS != "android"', {
+              ['OS != "android" and host_arch!="ia32"', {
                 'include_dirs+': [
                   '/usr/include32',
                 ],
@@ -1910,6 +1943,8 @@
                           # Clang does not support the following options.
                           '-mthumb-interwork',
                           '-finline-limit=64',
+                          '-fno-tree-sra',
+                          '-Wno-psabi',
                         ],
                       }, {
                         'cflags': [ '-mfloat-abi=softfp', ],
@@ -1917,9 +1952,34 @@
                     ],
                   }],
                   ['OS=="android"', {
-                    # The following flags are derived from what Android uses
-                    # by default when building for arm.
-                    'cflags': [ '-Wno-psabi', ],
+                    # Most of the following flags are derived from what Android
+                    # uses by default when building for arm, reference for which
+                    # can be found in the following file in the Android NDK:
+                    # toolchains/arm-linux-androideabi-4.4.3/setup.mk
+                    'cflags': [
+                      # The tree-sra optimization (scalar replacement for
+                      # aggregates enabling subsequent optimizations) leads to
+                      # invalid code generation when using the Android NDK's
+                      # compiler (r5-r7). This can be verified using
+                      # TestWebKitAPI's WTF.Checked_int8_t test.
+                      '-fno-tree-sra',
+                      '-Wno-psabi',
+                    ],
+                    'cflags_cc': [
+                      # TODO(beverloo): WebKit warns about using the "nullptr"
+                      # identifier in NullPtr.h, which actually is valid usage.
+                      # This started with the JRN10C roll. We should remove
+                      # this flag once we know why the warning suddenly shows.
+                      '-Wno-c++0x-compat',
+                    ],
+                    # Android now supports .relro sections properly.
+                    # NOTE: While these flags enable the generation of .relro
+                    # sections, the generated libraries can still be loaded on
+                    # older Android platform versions.
+                    'ldflags': [
+                        '-Wl,-z,relro',
+                        '-Wl,-z,now',
+                    ],
                     'conditions': [
                       ['arm_thumb == 1', {
                         # Android toolchain doesn't support -mimplicit-it=thumb
@@ -2163,9 +2223,6 @@
               '-finline-limit=64',
               '-Wa,--noexecstack',
               '<@(release_extra_cflags)',
-              # Note: This include is in cflags to ensure that it comes after
-              # all of the includes.
-              '-I<(android_ndk_include)',
             ],
             'defines': [
               'ANDROID',
@@ -2181,7 +2238,7 @@
             'ldflags': [
               '-nostdlib',
               '-Wl,--no-undefined',
-              '-Wl,--icf=safe',  # Enable identical code folding to reduce size
+	      '-Wl,--icf=safe',  # Enable identical code folding to reduce size.
               # Don't export symbols from statically linked libraries.
               '-Wl,--exclude-libs=ALL',
             ],
@@ -2205,12 +2262,24 @@
             'include_dirs': [
                # TODO(jscholler): Needed for dependency on utils/Functor.h
                '<(android_src)/system/core/include',
-               '<(android_src)/frameworks/base/include',
+               '<(android_src)/frameworks/native/include',
             ],
             'conditions': [
               ['android_build_type==0', {
+                'cflags': [
+                  '--sysroot=<(android_ndk_sysroot)',
+                ],
                 'ldflags': [
                   '--sysroot=<(android_ndk_sysroot)',
+                ],
+              }],
+              ['target_arch == "ia32"', {
+                'ldflags': [
+                  # TODO(navabi): x86 builds will use the gold linker.  This allows
+                  # use of --icf=safe flag to enable identical code folding. Need to
+                  # determine what linker we use for arm (and if use gold, how as
+                  # this linker option is not above in the ldflags).
+                  '-Bbuild/android/arm-linux-androideabi-gold.1.10/',
                 ],
               }],
               # NOTE: The stlport header include paths below are specified in
@@ -2272,9 +2341,16 @@
                   '<(android_ndk_lib)/crtend_android.o',
                 ],
               }],
-              ['_type=="shared_library"', {
+              ['_type=="shared_library" or _type=="loadable_module"', {
                 'ldflags': [
                   '-Wl,-shared,-Bsymbolic',
+                  # crtbegin_so.o should be the last item in ldflags.
+                  '<(android_ndk_lib)/crtbegin_so.o',
+                ],
+                'libraries': [
+                  # crtend_so.o needs to be the last item in libraries.
+                  # Do not add any libraries after this!
+                  '<(android_ndk_lib)/crtend_so.o',
                 ],
               }],
             ],

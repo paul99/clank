@@ -21,6 +21,9 @@ std::string GetDataDirectory();
 // cache dir.
 std::string GetCacheDirectory();
 
+// Return the absolute path to the external storage directory.
+std::string GetExternalStorageDirectory();
+
 bool RegisterPathUtils(JNIEnv* env);
 
 }  // namespace android

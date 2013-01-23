@@ -8,6 +8,12 @@
 <translation id="8130276680150879341">Від’єднатися від приватної мережі</translation>
 <translation id="1058418043520174283"><ph name="INDEX"/> з <ph name="COUNT"/></translation>
 <translation id="4480627574828695486">Від’єднати цей обліковий запис...</translation>
+<translation id="2516632596252643567">&lt;p&gt;
+          Отримайте доступ до відкритих на комп’ютері вкладок безпосередньо тут.
+          &lt;/p&gt;
+          &lt;p&gt;
+          Просто відкрийте Chrome на комп’ютері, перейдіть у меню та виберіть &quot;Увійти в Chrome...&quot;
+          &lt;/p&gt;</translation>
 <translation id="7040807039050164757">&amp;Перевірити правопис у цьому полі</translation>
 <translation id="778579833039460630">Дані не отримано</translation>
 <translation id="8791923223854254330">Керувати обробниками ...</translation>
@@ -1424,7 +1430,6 @@
 <translation id="6342069812937806050">Лише зараз</translation>
 <translation id="5605716740717446121">Вашу SIM-карту буде вимкнено назавжди, якщо ви не зможете ввести правильний ключ для розблокування PIN-коду. Залишилося спроб: <ph name="TRIES_COUNT"/></translation>
 <translation id="8836712291807476944"><ph name="SAVED_BYTES"/> / <ph name="TOTAL_BYTES"/> байт, перервано</translation>
-<translation id="3661943501691646627">&lt;p&gt; Отримайте доступ до відкритих на комп’ютері вкладок прямо тут. &lt;/p&gt; &lt;p&gt; Просто відкрийте Chrome на комп’ютері, перейдіть у меню та виберіть &quot;Увійти в Chrome...&quot; &lt;/p&gt; &lt;p&gt; Це неймовірно! &lt;/p&gt;</translation>
 <translation id="5502500733115278303">Імпортовано із Firefox</translation>
 <translation id="569109051430110155">Автом. визначення</translation>
 <translation id="4408599188496843485">Д&amp;овідка</translation>
@@ -2693,7 +2698,7 @@
 <translation id="6503256918647795660">Швейцарська (французька) розкладка</translation>
 <translation id="2498826285048723189">Розширення &quot;<ph name="EXTENSION_NAME"/>&quot; автоматично видалено.</translation>
 <translation id="6175314957787328458">GUID домену Microsoft</translation>
-<translation id="8179976553408161302">Enter</translation>
+<translation id="8179976553408161302">Увійти</translation>
 <translation id="691321796646552019">Відключити!</translation>
 <translation id="8261506727792406068">Видалити</translation>
 <translation id="7800518121066352902">Повернути п&amp;роти годинникової стрілки</translation>
@@ -3017,6 +3022,7 @@
 <translation id="8241707690549784388">Сторінка, яку ви шукаєте, використовувала інформацію, введену вами. Повернення до такої сторінки може призвести до повторення ваших попередніх дій. Ви дійсно бажаєте продовжити?</translation>
 <translation id="5359419173856026110">Показує фактичну частоту кадрів сторінки (у кадрах на секунду), коли апаратне прискорення ввімкнено.</translation>
 <translation id="4104163789986725820">Е&amp;кспортувати...</translation>
+<translation id="5143814737375740231">Chrome для Android не підтримує цей плагін.</translation>
 <translation id="2113479184312716848">Відкрити &amp;файл...</translation>
 <translation id="3314617171364900239">Повторна помилка під час перевірки наявності оновлень для розширення &quot;<ph name="EXTENSION_NAME"/>&quot;.</translation>
 <translation id="4850458635498951714">Додати пристрій</translation>

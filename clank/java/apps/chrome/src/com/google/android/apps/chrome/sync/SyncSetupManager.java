@@ -22,6 +22,7 @@ import com.google.android.apps.chrome.snapshot.IntentServiceWithWakeLock;
 import com.google.android.apps.chrome.snapshot.SnapshotArchiveManager;
 import com.google.android.apps.chrome.snapshot.SnapshotListenerManager;
 import com.google.android.apps.chrome.snapshot.SnapshotSettings;
+import com.google.android.apps.chrome.sync.Debug;
 
 import org.chromium.content.browser.ActivityStatus;
 import org.chromium.base.CalledByNative;
@@ -52,6 +53,9 @@ public class SyncSetupManager {
     }
 
     private static final String TAG = "SyncSetupManager";
+
+    // Set to 'true' to enable debug messages.
+    private static final boolean DEBUG = Debug.DEBUG;
 
     static final String AUTH_TOKEN_TYPE_SYNC = "chromiumsync";
 
@@ -169,7 +173,9 @@ public class SyncSetupManager {
     public void signOut() {
         // Disable all enabled features
         Account currentlySignedInUser = mSyncStatusHelper.getSignedInUser();
-        Log.d(TAG, "Signing user out of Chrome: " + currentlySignedInUser);
+        if (DEBUG) {
+          Log.d(TAG, "Signing user out of Chrome: " + currentlySignedInUser);
+        }
         SyncStates.SyncStatesBuilder states = SyncStates.create();
         if (mSyncStatusHelper.isSyncEnabled(currentlySignedInUser)) {
             states.sync(false);
@@ -198,22 +204,26 @@ public class SyncSetupManager {
     }
 
     private boolean isStateChangeValid(Account account, SyncStates states) {
-        StringBuilder sb = new StringBuilder();
-        if (states.hasSync()) {
-            sb.append("sync = ").append(states.isSyncEnabled());
+        if (DEBUG) {
+          StringBuilder sb = new StringBuilder();
+          if (states.hasSync()) {
+              sb.append("sync = ").append(states.isSyncEnabled());
+          }
+          if (states.hasWantedSyncState()) {
+              sb.append(", wantedSyncState = ").append(states.isWantedSyncStateEnabled());
+          }
+          if (states.hasSendToDevice()) {
+              sb.append(", sendToDevice = ").append(states.isSendToDeviceEnabled());
+          }
+          if (states.hasAutoLoginSet()) {
+              sb.append(", autoLogin = ").append(states.isAutoLoginEnabled());
+          }
+          Log.d(TAG, "setState: " + sb.toString());
         }
-        if (states.hasWantedSyncState()) {
-            sb.append(", wantedSyncState = ").append(states.isWantedSyncStateEnabled());
-        }
-        if (states.hasSendToDevice()) {
-            sb.append(", sendToDevice = ").append(states.isSendToDeviceEnabled());
-        }
-        if (states.hasAutoLoginSet()) {
-            sb.append(", autoLogin = ").append(states.isAutoLoginEnabled());
-        }
-        Log.d(TAG, "setState: " + sb.toString());
         if (account == null) {
-            Log.d(TAG, "No account supplied. Not changing states");
+            if (DEBUG) {
+              Log.d(TAG, "No account supplied. Not changing states");
+            }
             return false;
         }
         return true;
@@ -282,18 +292,24 @@ public class SyncSetupManager {
         storeSyncStatePreferences(account, states);
         if (states.isSyncEnabled()) {
             if (mSyncStatusHelper.isMasterSyncAutomaticallyEnabled()) {
-                Log.d(TAG, "Enabling sync");
+                if (DEBUG) {
+                  Log.d(TAG, "Enabling sync");
+                }
                 ChromeSyncInvalidationListener.startChromeSyncInvalidationListener(mContext);
                 nativeEnableSync(mNativeSyncSetupManager);
                 mSyncStatusHelper.enableAndroidSync(account);
             } else {
-                Log.d(TAG, "Unable to enable sync, since master sync is disabled. "
-                        + "Displaying error notification.");
+                if (DEBUG) {
+                  Log.d(TAG, "Unable to enable sync, since master sync is disabled. "
+                             + "Displaying error notification.");
+                }
                 mGoogleServicesNotificationController.
                         displayAndroidMasterSyncDisabledNotification();
             }
         } else {
-            Log.d(TAG, "Disabling sync");
+            if (DEBUG) {
+              Log.d(TAG, "Disabling sync");
+            }
             ChromeSyncInvalidationListener.stopChromeSyncInvalidationListener(mContext);
             nativeDisableSync(mNativeSyncSetupManager);
             mSyncStatusHelper.disableAndroidSync(account);
@@ -304,16 +320,20 @@ public class SyncSetupManager {
     private void storeSyncStatePreferences(Account account, SyncStates states) {
         boolean wantedSyncState = states.hasWantedSyncState() ?
                 states.isWantedSyncStateEnabled() : states.isSyncEnabled();
-        // Log.d(TAG, "Setting wanted sync state to " + wantedSyncState +
-        //    (states.hasWantedSyncState() ? " (from Android settings)" : ""));
+        if (DEBUG) {
+          Log.d(TAG, "Setting wanted sync state to " + wantedSyncState +
+                (states.hasWantedSyncState() ? " (from Android settings)" : ""));
+        }
 
         SharedPreferences.Editor editor =
                 PreferenceManager.getDefaultSharedPreferences(mContext).edit();
         editor.putBoolean(SYNC_WANTED_STATE_PREFS_KEY, wantedSyncState);
 
         if (states.hasMasterSyncState()) {
-            // Log.d(TAG, "Setting previous master sync state to " +
-            //        states.isMasterSyncStateEnabled());
+            if (DEBUG) {
+              Log.d(TAG, "Setting previous master sync state to " +
+                    states.isMasterSyncStateEnabled());
+            }
             editor.putBoolean(SYNC_PREVIOUS_MASTER_STATE_PREFS_KEY,
                     states.isMasterSyncStateEnabled());
         }
@@ -322,7 +342,7 @@ public class SyncSetupManager {
 
     private void setSendToDeviceState(boolean desiredPrintState) {
         if (SnapshotSettings.isEnabled(mContext) != desiredPrintState) {
-            Intent intent = SnapshotArchiveManager.createInitializeIntent(mContext,
+            Intent intent = SnapshotArchiveManager.createSetEnabledIntent(mContext,
                     desiredPrintState);
             IntentServiceWithWakeLock.startServiceWithWakeLock(mContext, intent);
         }
@@ -362,7 +382,9 @@ public class SyncSetupManager {
      */
     @CalledByNative
     public void getNewAuthToken(final String username, final String invalidAuthToken) {
-        Log.d(TAG, "Handling request for auth token from sync engine");
+        if (DEBUG) {
+          Log.d(TAG, "Handling request for auth token from sync engine");
+        }
         if (username == null) {
             Log.e(TAG, "username is null");
             return;
@@ -389,10 +411,14 @@ public class SyncSetupManager {
             public void onPostExecute(String authToken) {
                 if (authToken == null) {
                     // TODO(sync): Need to hook LOGIN_ACCOUNTS_CHANGED_ACTION (http://b/5354713).
-                    Log.d(TAG, "Auth token for sync was null.");
+                    if (DEBUG) {
+                      Log.d(TAG, "Auth token for sync was null.");
+                    }
                 } else {
                     if (mNativeSyncSetupManager != 0) {
-                        Log.d(TAG, "Successfully retrieved sync auth token.");
+                        if (DEBUG) {
+                          Log.d(TAG, "Successfully retrieved sync auth token.");
+                        }
                         nativeTokenAvailable(mNativeSyncSetupManager, username, authToken);
                     } else {
                         Log.e(TAG, "Native sync setup manager not valid.");

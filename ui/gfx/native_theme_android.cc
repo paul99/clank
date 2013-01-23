@@ -14,6 +14,7 @@
 #include "ui/gfx/color_utils.h"
 #include "ui/gfx/rect.h"
 #include "ui/gfx/size.h"
+#include "ui/gfx/skia_util.h"
 
 namespace gfx {
 
@@ -36,6 +37,34 @@ static const SkColor kSliderThumbLightGrey = SkColorSetRGB(0xf4, 0xf2, 0xef);
 static const SkColor kSliderThumbDarkGrey = SkColorSetRGB(0xea, 0xe5, 0xe0);
 static const SkColor kSliderThumbBorderDarkGrey =
     SkColorSetRGB(0x9d, 0x96, 0x8e);
+
+static const SkColor kCheckboxTinyColor = SK_ColorGRAY;
+static const SkColor kCheckboxShadowColor = SkColorSetARGB(0x15, 0, 0, 0);
+static const SkColor kCheckboxShadowHoveredColor =
+    SkColorSetARGB(0x1F, 0, 0, 0);
+static const SkColor kCheckboxGradientColors[] = {
+    SkColorSetRGB(0xed, 0xed, 0xed),
+    SkColorSetRGB(0xde, 0xde, 0xde) };
+static const SkColor kCheckboxGradientPressedColors[] = {
+    SkColorSetRGB(0xe7, 0xe7, 0xe7),
+    SkColorSetRGB(0xd7, 0xd7, 0xd7) };
+static const SkColor kCheckboxGradientHoveredColors[] = {
+    SkColorSetRGB(0xf0, 0xf0, 0xf0),
+    SkColorSetRGB(0xe0, 0xe0, 0xe0) };
+static const SkColor kCheckboxGradientDisabledColors[] = {
+    SkColorSetARGB(0xB3, 0xed, 0xed, 0xed),
+    SkColorSetARGB(0xB3, 0xed, 0xed, 0xed) };
+static const SkColor kCheckboxBorderColor = SkColorSetARGB(0x40, 0, 0, 0);
+static const SkColor kCheckboxBorderHoveredColor =
+    SkColorSetARGB(0x4D, 0, 0, 0);
+static const SkColor kCheckboxBorderDisabledColor =
+    SkColorSetARGB(0x30, 0, 0, 0);
+static const SkColor kCheckboxStrokeColor = SkColorSetARGB(0xB3, 0, 0, 0);
+static const SkColor kCheckboxStrokeDisabledColor =
+    SkColorSetARGB(0x86, 0, 0, 0);
+static const SkColor kRadioDotColor = SkColorSetRGB(0x66, 0x66, 0x66);
+static const SkColor kRadioDotDisabledColor =
+    SkColorSetARGB(0xC0, 0x66, 0x66, 0x66);
 
 // Get lightness adjusted color.
 static SkColor BrightenColor(const color_utils::HSL& hsl,
@@ -261,50 +290,155 @@ void NativeThemeAndroid::PaintArrowButton(SkCanvas* canvas,
   canvas->drawPath(path, paint);
 }
 
+// Draws the common elements of checkboxes and radio buttons.
+// Returns the rectangle within which any additional decorations should be
+// drawn, or empty if none.
+SkRect NativeThemeAndroid::PaintCheckboxRadioCommon(
+    SkCanvas* canvas,
+    State state,
+    const gfx::Rect& rect,
+    const SkScalar borderRadius) const {
+
+  SkRect skrect = gfx::RectToSkRect(rect);
+
+  // Use the largest square that fits inside the provided rectangle.
+  // No other browser seems to support non-square widget, so accidentally
+  // having non-square sizes is common (eg. amazon and webkit dev tools).
+  if (skrect.width() != skrect.height()) {
+    SkScalar size = SkMinScalar(skrect.width(), skrect.height());
+    skrect.inset((skrect.width() - size) / 2, (skrect.height() - size) / 2);
+  }
+
+  // If the rectangle is too small then paint only a rectangle.  We don't want
+  // to have to worry about '- 1' and '+ 1' calculations below having overflow
+  // or underflow.
+  if (skrect.width() <= 2) {
+    SkPaint paint;
+    paint.setColor(kCheckboxTinyColor);
+    paint.setStyle(SkPaint::kFill_Style);
+    canvas->drawRect(skrect, paint);
+    // Too small to draw anything more.
+    return SkRect::MakeEmpty();
+  }
+
+  // Make room for the drop shadow.
+  skrect.iset(skrect.left(), skrect.top(),
+              skrect.right() - 1, skrect.bottom() - 1);
+
+  // Draw the drop shadow below the widget.
+  if (state != PRESSED) {
+    SkPaint paint;
+    paint.setAntiAlias(true);
+    SkRect shadowRect = skrect;
+    shadowRect.offset(0, 1);
+    if (state == HOVERED)
+      paint.setColor(kCheckboxShadowHoveredColor);
+    else
+      paint.setColor(kCheckboxShadowColor);
+    paint.setStyle(SkPaint::kFill_Style);
+    canvas->drawRoundRect(shadowRect, borderRadius, borderRadius, paint);
+  }
+
+  // Draw the gradient-filled rectangle
+  SkPoint gradient_bounds[3];
+  gradient_bounds[0].set(skrect.left(), skrect.top());
+  gradient_bounds[1].set(skrect.left(), skrect.top() + skrect.height() * 0.38);
+  gradient_bounds[2].set(skrect.left(), skrect.bottom());
+  const SkColor* startEndColors;
+  if (state == PRESSED)
+    startEndColors = kCheckboxGradientPressedColors;
+  else if (state == HOVERED)
+    startEndColors = kCheckboxGradientHoveredColors;
+  else if (state == DISABLED)
+    startEndColors = kCheckboxGradientDisabledColors;
+  else /* kNormal */
+    startEndColors = kCheckboxGradientColors;
+  SkColor colors[3] = {startEndColors[0], startEndColors[0], startEndColors[1]};
+  SkShader* shader = SkGradientShader::CreateLinear(
+      gradient_bounds, colors, NULL, 3, SkShader::kClamp_TileMode, NULL);
+  SkPaint paint;
+  paint.setAntiAlias(true);
+  paint.setShader(shader);
+  shader->unref();
+  paint.setStyle(SkPaint::kFill_Style);
+  canvas->drawRoundRect(skrect, borderRadius, borderRadius, paint);
+  paint.setShader(NULL);
+
+  // Draw the border.
+  if (state == HOVERED)
+    paint.setColor(kCheckboxBorderHoveredColor);
+  else if (state == DISABLED)
+    paint.setColor(kCheckboxBorderDisabledColor);
+  else
+    paint.setColor(kCheckboxBorderColor);
+  paint.setStyle(SkPaint::kStroke_Style);
+  paint.setStrokeWidth(SkIntToScalar(1));
+  skrect.inset(SkFloatToScalar(.5f), SkFloatToScalar(.5f));
+  canvas->drawRoundRect(skrect, borderRadius, borderRadius, paint);
+
+  // Return the rectangle excluding the drop shadow for drawing any additional
+  // decorations.
+  return skrect;
+}
+
 void NativeThemeAndroid::PaintCheckbox(SkCanvas* canvas,
                                        State state,
                                        const gfx::Rect& rect,
                                        const ButtonExtraParams& button) {
-  ResourceBundle& rb = ResourceBundle::GetSharedInstance();
-  SkBitmap* image = NULL;
-  if (button.indeterminate) {
-    image = state == DISABLED ?
-        rb.GetBitmapNamed(IDR_CHECKBOX_DISABLED_INDETERMINATE) :
-        rb.GetBitmapNamed(IDR_CHECKBOX_INDETERMINATE);
-  } else if (button.checked) {
-    image = state == DISABLED ?
-        rb.GetBitmapNamed(IDR_CHECKBOX_DISABLED_ON) :
-        rb.GetBitmapNamed(IDR_CHECKBOX_ON);
-  } else {
-    image = state == DISABLED ?
-        rb.GetBitmapNamed(IDR_CHECKBOX_DISABLED_OFF) :
-        rb.GetBitmapNamed(IDR_CHECKBOX_OFF);
+  SkRect skrect = PaintCheckboxRadioCommon(canvas, state, rect,
+                                           SkIntToScalar(2));
+  if (!skrect.isEmpty()) {
+    // Draw the checkmark / dash.
+    SkPaint paint;
+    paint.setAntiAlias(true);
+    paint.setStyle(SkPaint::kStroke_Style);
+    if (state == DISABLED)
+      paint.setColor(kCheckboxStrokeDisabledColor);
+    else
+      paint.setColor(kCheckboxStrokeColor);
+    if (button.indeterminate) {
+      SkPath dash;
+      dash.moveTo(skrect.left() + skrect.width() * 0.16,
+                  (skrect.top() + skrect.bottom()) / 2);
+      dash.rLineTo(skrect.width() * 0.68, 0);
+      paint.setStrokeWidth(SkFloatToScalar(skrect.height() * 0.08));
+      canvas->drawPath(dash, paint);
+    } else if (button.checked) {
+      SkPath check;
+      check.moveTo(skrect.left() + skrect.width() * 0.2,
+                   skrect.top() + skrect.height() * 0.5);
+      check.rLineTo(skrect.width() * 0.2, skrect.height() * 0.2);
+      paint.setStrokeWidth(SkFloatToScalar(skrect.height() * 0.23));
+      check.lineTo(skrect.right() - skrect.width() * 0.2,
+                   skrect.top() + skrect.height() * 0.2);
+      canvas->drawPath(check, paint);
+    }
   }
-
-  gfx::Rect bounds = rect.Center(gfx::Size(image->width(), image->height()));
-  DrawBitmapInt(canvas, *image, 0, 0, image->width(), image->height(),
-      bounds.x(), bounds.y(), bounds.width(), bounds.height());
 }
 
 void NativeThemeAndroid::PaintRadio(SkCanvas* canvas,
                                     State state,
                                     const gfx::Rect& rect,
                                     const ButtonExtraParams& button) {
-  ResourceBundle& rb = ResourceBundle::GetSharedInstance();
-  SkBitmap* image = NULL;
-  if (state == DISABLED) {
-    image = button.checked ?
-        rb.GetBitmapNamed(IDR_RADIO_DISABLED_ON) :
-        rb.GetBitmapNamed(IDR_RADIO_DISABLED_OFF);
-  } else {
-    image = button.checked ?
-        rb.GetBitmapNamed(IDR_RADIO_ON) :
-        rb.GetBitmapNamed(IDR_RADIO_OFF);
+  // Most of a radio button is the same as a checkbox, except the the rounded
+  // square is a circle (i.e. border radius >= 100%).
+  const SkScalar radius = SkFloatToScalar(
+      static_cast<float>(std::max(rect.width(), rect.height())) / 2);
+  SkRect skrect = PaintCheckboxRadioCommon(canvas, state, rect, radius);
+  if (!skrect.isEmpty() && button.checked) {
+    // Draw the dot.
+    SkPaint paint;
+    paint.setAntiAlias(true);
+    paint.setStyle(SkPaint::kFill_Style);
+    if (state == DISABLED)
+      paint.setColor(kRadioDotDisabledColor);
+    else
+      paint.setColor(kRadioDotColor);
+    skrect.inset(skrect.width() * 0.25, skrect.height() * 0.25);
+    // Use drawRoundedRect instead of drawOval to be completely consistent
+    // with the border in PaintCheckboxRadioNewCommon.
+    canvas->drawRoundRect(skrect, radius, radius, paint);
   }
-
-  gfx::Rect bounds = rect.Center(gfx::Size(image->width(), image->height()));
-  DrawBitmapInt(canvas, *image, 0, 0, image->width(), image->height(),
-      bounds.x(), bounds.y(), bounds.width(), bounds.height());
 }
 
 void NativeThemeAndroid::PaintButton(SkCanvas* canvas,

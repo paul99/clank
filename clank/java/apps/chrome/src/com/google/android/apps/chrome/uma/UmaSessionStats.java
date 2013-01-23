@@ -140,14 +140,11 @@ public class UmaSessionStats {
      */
     @CalledByNative
     public static boolean mayUploadOnCurrentConnection(Context context) {
-        String defaultStr = context.getString(R.string.crash_dump_never_upload_value);
-
         String alwaysUpStr = context.getString(R.string.crash_dump_always_upload_value);
         String wifiUpStr = context.getString(R.string.crash_dump_only_with_wifi_value);
 
-        // Default to never uploading to avoid uploading when we shouldn't.
-        String crashUploadCondition = PreferenceManager.getDefaultSharedPreferences(context)
-            .getString(ChromePreferenceManager.PREF_CRASH_DUMP_UPLOAD, defaultStr);
+        String crashUploadCondition =
+                ChromePreferenceManager.getInstance(context).getPrefCrashDumpUploadPreference();
 
         // Avoid uploading stats if we're not allowed to.
         ConnectivityManager connManager =
@@ -169,9 +166,8 @@ public class UmaSessionStats {
     public void updateMetricsServiceState(Context context) {
         String neverUpStr = context.getString(R.string.crash_dump_never_upload_value);
 
-        // Default to never uploading to avoid logging when we shouldn't be.
-        String crashUploadCondition = PreferenceManager.getDefaultSharedPreferences(context)
-            .getString(ChromePreferenceManager.PREF_CRASH_DUMP_UPLOAD, neverUpStr);
+        String crashUploadCondition =
+                ChromePreferenceManager.getInstance(context).getPrefCrashDumpUploadPreference();
         boolean mayRecordStats = !crashUploadCondition.equals(neverUpStr);
 
         // Re-start the MetricsService with the given parameters.

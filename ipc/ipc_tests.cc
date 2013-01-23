@@ -31,6 +31,11 @@
 #include "ipc/ipc_switches.h"
 #include "testing/multiprocess_func_list.h"
 
+#if defined(OS_POSIX)
+#include "base/global_descriptors_posix.h"
+#include "ipc/ipc_descriptors.h"
+#endif
+
 // Define to enable IPC performance testing instead of the regular unit tests
 // #define PERFORMANCE_TEST
 
@@ -396,6 +401,10 @@ TEST_F(IPCChannelTest, SendMessageInChannelConnected) {
 }
 
 MULTIPROCESS_TEST_MAIN(RunTestClient) {
+#if defined(OS_POSIX)
+  base::GlobalDescriptors::GetInstance()->Set(kPrimaryIPCChannel,
+      kPrimaryIPCChannel + base::GlobalDescriptors::kBaseDescriptor);
+#endif
   MessageLoopForIO main_message_loop;
   MyChannelListener channel_listener;
 
@@ -565,6 +574,10 @@ TEST_F(IPCChannelTest, Performance) {
 
 // This message loop bounces all messages back to the sender
 MULTIPROCESS_TEST_MAIN(RunReflector) {
+#if defined(OS_POSIX)
+  base::GlobalDescriptors::GetInstance()->Set(kPrimaryIPCChannel,
+      kPrimaryIPCChannel + base::GlobalDescriptors::kBaseDescriptor);
+#endif
   MessageLoopForIO main_message_loop;
   IPC::Channel chan(kReflectorChannel, IPC::Channel::MODE_CLIENT, NULL);
   ChannelReflectorListener channel_reflector_listener(&chan);

@@ -82,7 +82,8 @@ class CONTENT_EXPORT RenderWidget
   // Creates a new RenderWidget.  The opener_id is the routing ID of the
   // RenderView that this widget lives inside.
   static RenderWidget* Create(int32 opener_id,
-                              WebKit::WebPopupType popup_type);
+                              WebKit::WebPopupType popup_type,
+                              const WebKit::WebScreenInfo& screen_info);
 
   // Creates a WebWidget based on the popup type.
   static WebKit::WebWidget* CreateWebWidget(RenderWidget* render_widget);
@@ -163,7 +164,8 @@ class CONTENT_EXPORT RenderWidget
   // For unit tests.
   friend class RenderWidgetTest;
 
-  explicit RenderWidget(WebKit::WebPopupType popup_type);
+  explicit RenderWidget(WebKit::WebPopupType popup_type,
+                        const WebKit::WebScreenInfo& screen_info);
   virtual ~RenderWidget();
 
   // Initializes this view with the given opener.  CompleteInit must be called
@@ -221,6 +223,7 @@ class CONTENT_EXPORT RenderWidget
   void OnCreateVideoAck(int32 video_id);
   void OnUpdateVideoAck(int32 video_id);
   void OnRequestMoveAck();
+  void OnRequestTextInputStateUpdate(const base::Time& request_time);
   void OnHandleInputEvent(const IPC::Message& message);
   void OnMouseCaptureLost();
   virtual void OnSetFocus(bool enable);
@@ -300,7 +303,9 @@ class CONTENT_EXPORT RenderWidget
 
   // Checks if the text input state and compose inline mode have been changed.
   // If they are changed, the new value will be sent to the browser process.
-  void UpdateTextInputState();
+  // |request_time| should be a null Time unless the update was requested by
+  // the browser using ViewMsg_RequestTextInputStateUpdate.
+  void UpdateTextInputState(const base::Time& request_time);
 
   // Checks if the selection bounds have been changed. If they are changed,
   // the new value will be sent to the browser process.
@@ -522,6 +527,9 @@ class CONTENT_EXPORT RenderWidget
   // queue. Note: some SwapBuffers may not correspond to an update, in which
   // case NULL is added to the queue.
   std::deque<ViewHostMsg_UpdateRect*> updates_pending_swap_;
+
+  // Properties of the screen hosting this RenderWidget instance.
+  WebKit::WebScreenInfo screen_info_;
 
   DISALLOW_COPY_AND_ASSIGN(RenderWidget);
 };

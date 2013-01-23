@@ -1163,8 +1163,7 @@ bool AndroidProviderBackend::SyncOnFaviconChanged() {
     return false;
   }
   // Populate all favicons
-  sql::Statement statement (thumbnail_db_->db_.GetCachedStatement(
-      SQL_FROM_HERE,
+  sql::Statement statement (thumbnail_db_->db_.GetCachedStatement(SQL_FROM_HERE,
       "SELECT icon_mapping.page_url, favicons.id "
           "FROM (icon_mapping LEFT JOIN favicons ON ("
               "icon_mapping.icon_id = favicons.id)) "
@@ -1178,10 +1177,9 @@ bool AndroidProviderBackend::SyncOnFaviconChanged() {
   while(statement.Step()) {
     GURL url(statement.ColumnString(0));
     URLID url_id = history_db_->GetRowForURL(url, NULL);
-    if (url_id == 0) {
-      LOG(ERROR) << "Can not find favicon's page url";
+    if (url_id == 0)
       continue;
-    }
+
     sql::Statement update_statement(db_->GetCachedStatement(SQL_FROM_HERE,
         "UPDATE android_urls SET favicon_id = ? WHERE url_id = ? "));
     if (!update_statement) {

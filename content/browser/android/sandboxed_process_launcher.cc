@@ -12,41 +12,45 @@
 using base::android::AttachCurrentThread;
 using base::android::ToJavaArrayOfStrings;
 using base::android::ScopedJavaLocalRef;
+using content::BrowserThread;
+using content::browser::android::StartSandboxedProcessCallback;
 
 static void OnSandboxedProcessStarted(JNIEnv*,
                                       jclass,
-                                      jint client_context,
-                                      jint pid) {
-    reinterpret_cast<content::browser::android::SandboxedProcessClient*>(
-        client_context)->OnSandboxedProcessStarted(pid);
+                                      jint jcallback,
+                                      jint handle) {
+  StartSandboxedProcessCallback* callback =
+      reinterpret_cast<StartSandboxedProcessCallback*>(jcallback);
+  if (handle)
+    callback->Run(static_cast<base::ProcessHandle>(handle));
+  delete callback;
 }
 
 namespace content {
 namespace browser {
 namespace android {
 
-ScopedJavaLocalRef<jobject> StartSandboxedProcess(
+void StartSandboxedProcess(
     const CommandLine::StringVector& argv,
     int ipc_fd,
-    int crash_fd,
-    SandboxedProcessClient* client) {
+    int minidump_fd,
+    int chrome_pak_fd,
+    int locale_pak_fd,
+    const StartSandboxedProcessCallback& callback) {
   JNIEnv* env = AttachCurrentThread();
   DCHECK(env);
 
   // Create the Command line String[]
   ScopedJavaLocalRef<jobjectArray> j_argv = ToJavaArrayOfStrings(env, argv);
 
-  return Java_SandboxedProcessLauncher_start(env,
+  Java_SandboxedProcessLauncher_start(env,
           base::android::GetApplicationContext(),
           static_cast<jobjectArray>(j_argv.obj()),
           static_cast<jint>(ipc_fd),
-          static_cast<jint>(crash_fd),
-          reinterpret_cast<jint>(client));
-}
-
-void CancelStartSandboxedProcess(
-    const base::android::JavaRef<jobject>& connection) {
-  Java_SandboxedProcessLauncher_cancelStart(connection.env(), connection.obj());
+          static_cast<jint>(minidump_fd),
+          static_cast<jint>(chrome_pak_fd),
+          static_cast<jint>(locale_pak_fd),
+          reinterpret_cast<jint>(new StartSandboxedProcessCallback(callback)));
 }
 
 void StopSandboxedProcess(base::ProcessHandle handle) {

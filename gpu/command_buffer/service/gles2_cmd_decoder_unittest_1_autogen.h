@@ -36,6 +36,7 @@ TEST_F(GLES2DecoderTest1, BindBufferValidArgs) {
 }
 
 TEST_F(GLES2DecoderTest1, BindBufferValidArgsNewId) {
+#if !defined(OS_ANDROID)
   EXPECT_CALL(*gl_, BindBuffer(GL_ARRAY_BUFFER, kNewServiceId));
   EXPECT_CALL(*gl_, GenBuffersARB(1, _))
      .WillOnce(SetArgumentPointee<1>(kNewServiceId));
@@ -45,6 +46,7 @@ TEST_F(GLES2DecoderTest1, BindBufferValidArgsNewId) {
   EXPECT_EQ(error::kNoError, ExecuteCmd(cmd));
   EXPECT_EQ(GL_NO_ERROR, GetGLError());
   EXPECT_TRUE(GetBufferInfo(kNewClientId) != NULL);
+#endif
 }
 
 TEST_F(GLES2DecoderTest1, BindBufferInvalidArgs0_0) {
@@ -424,6 +426,7 @@ TEST_F(GLES2DecoderTest1, CullFaceValidArgs) {
 }
 
 TEST_F(GLES2DecoderTest1, DeleteBuffersValidArgs) {
+#if !defined(OS_ANDROID)
   EXPECT_CALL(
       *gl_,
       DeleteBuffersARB(1, Pointee(kServiceBufferId)))
@@ -436,6 +439,7 @@ TEST_F(GLES2DecoderTest1, DeleteBuffersValidArgs) {
   EXPECT_EQ(GL_NO_ERROR, GetGLError());
   EXPECT_TRUE(
       GetBufferInfo(client_buffer_id_) == NULL);
+#endif
 }
 
 TEST_F(GLES2DecoderTest1, DeleteBuffersInvalidArgs) {
@@ -447,6 +451,7 @@ TEST_F(GLES2DecoderTest1, DeleteBuffersInvalidArgs) {
 }
 
 TEST_F(GLES2DecoderTest1, DeleteBuffersImmediateValidArgs) {
+#if !defined(OS_ANDROID)
   EXPECT_CALL(
       *gl_,
       DeleteBuffersARB(1, Pointee(kServiceBufferId)))
@@ -459,6 +464,7 @@ TEST_F(GLES2DecoderTest1, DeleteBuffersImmediateValidArgs) {
   EXPECT_EQ(GL_NO_ERROR, GetGLError());
   EXPECT_TRUE(
       GetBufferInfo(client_buffer_id_) == NULL);
+#endif
 }
 
 TEST_F(GLES2DecoderTest1, DeleteBuffersImmediateInvalidArgs) {
@@ -855,6 +861,7 @@ TEST_F(GLES2DecoderTest1, FrontFaceValidArgs) {
 }
 
 TEST_F(GLES2DecoderTest1, GenBuffersValidArgs) {
+#if !defined(OS_ANDROID)
   EXPECT_CALL(*gl_, GenBuffersARB(1, _))
       .WillOnce(SetArgumentPointee<1>(kNewServiceId));
   GetSharedMemoryAs<GLuint*>()[0] = kNewClientId;
@@ -864,6 +871,7 @@ TEST_F(GLES2DecoderTest1, GenBuffersValidArgs) {
   EXPECT_EQ(error::kNoError, ExecuteCmd(cmd));
   EXPECT_EQ(GL_NO_ERROR, GetGLError());
   EXPECT_TRUE(GetBufferInfo(kNewClientId) != NULL);
+#endif
 }
 
 TEST_F(GLES2DecoderTest1, GenBuffersInvalidArgs) {
@@ -876,6 +884,7 @@ TEST_F(GLES2DecoderTest1, GenBuffersInvalidArgs) {
 }
 
 TEST_F(GLES2DecoderTest1, GenBuffersImmediateValidArgs) {
+#if !defined(OS_ANDROID)
   EXPECT_CALL(*gl_, GenBuffersARB(1, _))
       .WillOnce(SetArgumentPointee<1>(kNewServiceId));
   GenBuffersImmediate* cmd = GetImmediateAs<GenBuffersImmediate>();
@@ -886,6 +895,7 @@ TEST_F(GLES2DecoderTest1, GenBuffersImmediateValidArgs) {
             ExecuteImmediateCmd(*cmd, sizeof(temp)));
   EXPECT_EQ(GL_NO_ERROR, GetGLError());
   EXPECT_TRUE(GetBufferInfo(kNewClientId) != NULL);
+#endif
 }
 
 TEST_F(GLES2DecoderTest1, GenBuffersImmediateInvalidArgs) {
@@ -1809,4 +1819,3 @@ TEST_F(GLES2DecoderTest1, GetVertexAttribfvInvalidArgs2_1) {
   EXPECT_EQ(0u, result->size);
 }
 #endif  // GPU_COMMAND_BUFFER_SERVICE_GLES2_CMD_DECODER_UNITTEST_1_AUTOGEN_H_
-

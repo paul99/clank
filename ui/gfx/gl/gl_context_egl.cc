@@ -34,6 +34,10 @@ std::string GLContextEGL::GetExtensions() {
 
 GLContextEGL::GLContextEGL(GLShareGroup* share_group)
     : GLContext(share_group),
+#if defined(OS_ANDROID)
+      pending_swap_interval_(-1),
+      force_finish_when_switch_context_(false),
+#endif
       context_(NULL),
       display_(NULL),
       config_(NULL) {
@@ -47,6 +51,17 @@ bool GLContextEGL::Initialize(
     GLSurface* compatible_surface, GpuPreference gpu_preference) {
   DCHECK(compatible_surface);
   DCHECK(!context_);
+
+#if defined(OS_ANDROID)
+  const char* vendor_str = reinterpret_cast<const char*>(
+      glGetString(GL_VENDOR));
+  const char* renderer_str = reinterpret_cast<const char*>(
+      glGetString(GL_RENDERER));
+  if (vendor_str && !strcmp(vendor_str, "ARM") && renderer_str
+      && !strcmp(renderer_str, "Mali-T604")) {
+    force_finish_when_switch_context_ = true;
+  }
+#endif
 
   static const EGLint kContextAttributes[] = {
     EGL_CONTEXT_CLIENT_VERSION, 2,
@@ -87,11 +102,20 @@ bool GLContextEGL::MakeCurrent(GLSurface* surface) {
   if (IsCurrent(surface))
       return true;
 
+#if defined(OS_ANDROID)
+  // Temporary workaround to address the new mali driver bug. crbug.com/154715
+  // When switching context from offscreen to onscreen, we force a glFinish to
+  // work around the synchronization bug.
+  if (force_finish_when_switch_context_ && eglGetCurrentContext() != NULL
+      && !surface->IsOffscreen())
+    glFinish();
+#endif
+
   if (!eglMakeCurrent(display_,
                       surface->GetHandle(),
                       surface->GetHandle(),
                       context_)) {
-    VLOG(1) << "eglMakeCurrent failed with error "
+    VLOG(0) << "eglMakeCurrent failed with error "
             << GetLastEGLErrorString();
     return false;
   }
@@ -101,6 +125,12 @@ bool GLContextEGL::MakeCurrent(GLSurface* surface) {
     ReleaseCurrent(surface);
     return false;
   }
+
+#if defined(OS_ANDROID)
+  if (pending_swap_interval_ != -1 &&
+      eglSwapInterval(display_, pending_swap_interval_))
+    pending_swap_interval_ = -1;
+#endif
 
   if (!surface->OnMakeCurrent(this)) {
     LOG(ERROR) << "Could not make current.";
@@ -148,9 +178,16 @@ void* GLContextEGL::GetHandle() {
 
 void GLContextEGL::SetSwapInterval(int interval) {
   DCHECK(IsCurrent(NULL));
+#if defined(OS_ANDROID)
+  pending_swap_interval_ = -1;
+#endif
   if (!eglSwapInterval(display_, interval)) {
+#if defined(OS_ANDROID)
+    pending_swap_interval_ = interval;
+#else
     LOG(ERROR) << "eglSwapInterval failed with error "
                << GetLastEGLErrorString();
+#endif
   }
 }
 

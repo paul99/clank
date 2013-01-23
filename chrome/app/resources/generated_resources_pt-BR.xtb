@@ -8,6 +8,12 @@
 <translation id="8130276680150879341">Desconectar rede privada</translation>
 <translation id="1058418043520174283"><ph name="INDEX"/> de <ph name="COUNT"/></translation>
 <translation id="4480627574828695486">Desconectar esta conta...</translation>
+<translation id="2516632596252643567">&lt;p&gt;
+         Acesse aqui as guias abertas em seu computador.
+          &lt;/p&gt;
+          &lt;p&gt;
+          Basta abrir o Google Chrome em seu computador, ir para o menu e selecionar &quot;Fazer login no Google Chrome...&quot;
+          &lt;/p&gt;</translation>
 <translation id="7040807039050164757">&amp;Verificar a ortografia neste campo</translation>
 <translation id="778579833039460630">Nenhum dado foi recebido</translation>
 <translation id="8791923223854254330">Gerenciar manipuladores...</translation>
@@ -1428,7 +1434,6 @@
 <translation id="6342069812937806050">Neste instante</translation>
 <translation id="5605716740717446121">Seu cartão SIM será desativado permanentemente se você não informar a chave correta para desbloqueio de PIN. Tentativas restantes: <ph name="TRIES_COUNT"/></translation>
 <translation id="8836712291807476944"><ph name="SAVED_BYTES"/>/<ph name="TOTAL_BYTES"/> bytes, interrompido</translation>
-<translation id="3661943501691646627">&lt;p&gt; Acesse aqui as guias abertas em seu computador. &lt;/p&gt; &lt;p&gt; Abra o Google Chrome em seu computador, vá para o menu e selecione &quot;Fazer login em Chrome...&quot; &lt;/p&gt; &lt;p&gt; É incrível. &lt;/p&gt;</translation>
 <translation id="5502500733115278303">Importado do Firefox</translation>
 <translation id="569109051430110155">Detecção automática</translation>
 <translation id="4408599188496843485">A&amp;juda</translation>
@@ -1821,7 +1826,7 @@
 <translation id="7814458197256864873">Co&amp;piar</translation>
 <translation id="8186706823560132848">Software</translation>
 <translation id="4692623383562244444">Mecanismos de pesquisa</translation>
-<translation id="567760371929988174">Inserir &amp;métodos</translation>
+<translation id="567760371929988174">Métodos de entrada</translation>
 <translation id="10614374240317010">Nunca salvo</translation>
 <translation id="5116300307302421503">Não foi possível analisar o arquivo.</translation>
 <translation id="1907054602291213374">Na classificação do preenchimento automático da omnibox, ser mais agressivo na classificação das correspondências vindas do provedor HistoryURL.</translation>
@@ -3035,6 +3040,7 @@
 <translation id="8241707690549784388">A página que você está procurando usou as informações inseridas. Voltar à essa página poderá fazer com que todas as ações realizadas antes sejam repetidas. Deseja continuar?</translation>
 <translation id="5359419173856026110">Mostra a taxa de frames real de uma página, em frames por segundo, quando a aceleração de hardware estiver ativa.</translation>
 <translation id="4104163789986725820">E&amp;xportar...</translation>
+<translation id="5143814737375740231">O Google Chrome para Android não tem suporte para este plug-in.</translation>
 <translation id="2113479184312716848">Abrir &amp;arquivo...</translation>
 <translation id="3314617171364900239">As verificações de atualização da extensão &quot;<ph name="EXTENSION_NAME"/>&quot; falharam diversas vezes.</translation>
 <translation id="4850458635498951714">Adicionar um dispositivo</translation>
@@ -3194,7 +3200,7 @@
 <translation id="7737525395960596244">Ajude a melhorar o preenchimento automático: com esta opção habilitada, o Chrome ocasionalmente solicitará o envio de comentários adicionais para a equipe.</translation>
 <translation id="3936390757709632190">&amp;Abrir áudio em uma nova guia</translation>
 <translation id="3955607296752942438">Ativar a API Media Source nos elementos <ph name="VIDEO_HTML"/>.</translation>
-<translation id="7297622089831776169">Inserir &amp;métodos</translation>
+<translation id="7297622089831776169">Métodos de entrada</translation>
 <translation id="6644283850729428850">Esta política foi encerrada.</translation>
 <translation id="1152775729948968688">No entanto, esta página inclui outros recursos que não são seguros. Esses recursos podem ser visualizados por outros enquanto navegam e podem ser modificados por um invasor para alterar o comportamento da página.</translation>
 <translation id="604124094241169006">Automático</translation>

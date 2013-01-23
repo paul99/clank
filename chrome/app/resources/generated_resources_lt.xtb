@@ -8,6 +8,12 @@
 <translation id="8130276680150879341">Atsijungti nuo privačiojo tinklo</translation>
 <translation id="1058418043520174283"><ph name="INDEX"/> iš <ph name="COUNT"/></translation>
 <translation id="4480627574828695486">Atjungti šią paskyrą...</translation>
+<translation id="2516632596252643567">&lt;p&gt;
+          Čia pasiekite skirtukus, kuriuos atidarėte kompiuteryje.
+          &lt;/p&gt;
+          &lt;p&gt;
+          Tiesiog atidarykite „Chrome“ kompiuteryje, eikite į meniu ir pasirinkite „Prisijungti prie „Chrome“...“
+          &lt;/p&gt;</translation>
 <translation id="7040807039050164757">&amp;Patikrinkite rašybą šiame lauke</translation>
 <translation id="778579833039460630">Negauta jokių duomenų</translation>
 <translation id="8791923223854254330">Valdyti apdorojimo programas...</translation>
@@ -1516,15 +1522,6 @@ Viešoji skaičiaus eilė (bitų: <ph name="PUBLIC_EXPONENT_NUM_BITS"/>):
 <translation id="6342069812937806050">Ką tik</translation>
 <translation id="5605716740717446121">Jei nepavyks įvesti teisingo PIN kodo atrakinimo rakto, SIM kortelė bus visam laikui neleidžiama. Liko bandymų: <ph name="TRIES_COUNT"/></translation>
 <translation id="8836712291807476944"><ph name="SAVED_BYTES"/> / <ph name="TOTAL_BYTES"/> bait., nutraukta</translation>
-<translation id="3661943501691646627">&lt;p&gt;
-          Čia pasiekite skirtukus, kuriuos atidarėte kompiuteryje.
-          &lt;/p&gt;
-          &lt;p&gt;
-          Atidarykite „Chrome“ kompiuteryje, eikite į veržliarakčio meniu ir pasirinkite „Prisijungti prie „Chrome“...“
-          &lt;/p&gt;
-          &lt;p&gt;
-          Tai nuostabu.
-          &lt;/p&gt;</translation>
 <translation id="5502500733115278303">Importuota iš „Firefox“</translation>
 <translation id="569109051430110155">Automatinis atpažinimas</translation>
 <translation id="4408599188496843485">P&amp;agalba</translation>
@@ -3178,6 +3175,7 @@ Jei norite atšaukti, paspauskite „Ctrl“ + „Alt“ + Z.</translation>
 <translation id="8241707690549784388">Jūsų ieškomas puslapis ieškojo informacijos, kurią įvedėte. Grįžus į tą puslapį bet kokie jūsų atliekami veiksmai gali būti kartojami. Ar norite tęsti?</translation>
 <translation id="5359419173856026110">Rodo faktinę puslapio kadrų spartą kadrais per sekundę, kai aparatinės įrangos spartinimas yra aktyvus.</translation>
 <translation id="4104163789986725820">Eksportuoti...</translation>
+<translation id="5143814737375740231">„Chrome“, skirta „Android“, nepalaiko šio papildinio.</translation>
 <translation id="2113479184312716848">Atidaryti &amp;failą...</translation>
 <translation id="3314617171364900239">Kelis kartus nepavyko patikrinti, ar yra plėtinio „<ph name="EXTENSION_NAME"/>“ naujinių.</translation>
 <translation id="4850458635498951714">Pridėti įrenginį</translation>

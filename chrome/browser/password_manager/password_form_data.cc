@@ -76,12 +76,13 @@ bool ContainsSamePasswordFormsPtr(
     const std::vector<PasswordForm*>& second) {
   if (first.size() != second.size())
     return false;
-  SetOfForms expectations(first.begin(), first.end());
+  std::vector<const webkit::forms::PasswordForm*> expectations(
+      first.begin(), first.end());
   for (unsigned int i = 0; i < second.size(); ++i) {
     const PasswordForm* actual = second[i];
     bool found_match = false;
-    for (SetOfForms::iterator it = expectations.begin();
-         it != expectations.end(); ++it) {
+    for (std::vector<const webkit::forms::PasswordForm*>::iterator it =
+        expectations.begin(); it != expectations.end(); ++it) {
       const PasswordForm* expected = *it;
       if (*expected == *actual) {
         found_match = true;

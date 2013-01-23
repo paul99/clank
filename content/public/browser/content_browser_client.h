@@ -363,6 +363,17 @@ class ContentBrowserClient {
   virtual void CreateAutoLogin(int render_process_id,
                                int web_contents_id,
                                const std::string& header_value) = 0;
+
+  // Creates a file descriptor that should be used for crasher minidumps.
+  virtual int CreateMinidumpFile() = 0;
+
+  // Adds a downloaded client cert. This sends the certificate to the
+  // Android CertInstaller, which will do all verifications. |isPKCS12|
+  // shall be true iff the data corresponds to a PKCS12 certificate chain.
+  virtual void AddNewCertificateAndroid(
+      net::URLRequest* request,
+      const std::string& cert_data,
+      bool isPKCS12) = 0;
 #endif
 };
 

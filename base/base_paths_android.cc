@@ -42,15 +42,17 @@ bool PathProviderAndroid(int key, FilePath* result) {
       return true;
     }
     case base::DIR_SOURCE_ROOT:
-      // This const is only used for tests. Files in this directory are pushed
-      // to the device via test script.
-      *result = FilePath(FILE_PATH_LITERAL("/data/local/tmp/"));
+      // This const is only used for tests.
+      *result = FilePath(base::android::GetExternalStorageDirectory());
       return true;
     case base::DIR_CACHE:
       *result = FilePath(base::android::GetCacheDirectory());
       return true;
     case base::DIR_ANDROID_APP_DATA:
       *result = FilePath(base::android::GetDataDirectory());
+      return true;
+    case base::DIR_ANDROID_EXTERNAL_STORAGE:
+      *result = FilePath(base::android::GetExternalStorageDirectory());
       return true;
     default:
       // Note: the path system expects this function to override the default

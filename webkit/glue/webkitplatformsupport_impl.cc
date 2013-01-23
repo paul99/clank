@@ -390,6 +390,7 @@ const DataResource kDataResources[] = {
   { "missingImage", IDR_BROKENIMAGE },
 #if defined(OS_ANDROID)
   { "mediaFullscreen", IDR_MEDIA_FULL_SCREEN_BUTTON },
+  { "mediaplayerOverlayPlay", IDR_MEDIAPLAYER_OVERLAY_PLAY_BUTTON },
 #endif
   { "mediaPause", IDR_MEDIA_PAUSE_BUTTON },
   { "mediaPlay", IDR_MEDIA_PLAY_BUTTON },
@@ -704,6 +705,16 @@ size_t WebKitPlatformSupportImpl::highUsageDeltaMB() {
   // internal data structures that are released on GC and reallocated during JS
   // execution (about 8MB). Otherwise, it will cause too aggressive GCs.
   return base::SysInfo::DalvikHeapSizeMB() / 8;
+}
+
+size_t WebKitPlatformSupportImpl::maxTextureMemoryUsageMB() {
+  // Maximum memory usage for textures on this device. The dalvik heap
+  // size roughly represents the total memory on the device. This is
+  // capped at 300MB for now.
+  // Galaxy Nexus: 256mb (1GB ram)
+  // Nexus 7: 256mb (1GB ram)
+  // Nexus 10: 768MB (2GB ram)
+  return std::min(300, base::SysInfo::DalvikHeapSizeMB() / 2);
 }
 #endif
 

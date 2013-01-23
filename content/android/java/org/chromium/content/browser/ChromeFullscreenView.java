@@ -36,7 +36,7 @@ public class ChromeFullscreenView extends FrameLayout {
 
     @Override
     public boolean onTouchEvent(MotionEvent ev) {
-        return false;
+        return true;
     }
 
     @Override
@@ -77,8 +77,10 @@ public class ChromeFullscreenView extends FrameLayout {
 
         mFullscreenView = fullscreenView;
 
-        mContentContainer.setVisibility(View.GONE);
-        mControlContainer.setVisibility(View.GONE);
+        // TODO(qinmin): Hiding the content container will sometimes deadlock the
+        // render thread. Need to figure this out.
+        // mContentContainer.setVisibility(View.GONE);
+        // mControlContainer.setVisibility(View.GONE);
 
         mChromeActivity.getWindow().setFlags(
                 WindowManager.LayoutParams.FLAG_FULLSCREEN,
@@ -107,8 +109,10 @@ public class ChromeFullscreenView extends FrameLayout {
             mRootLayout.removeView(mFullscreenView);
         }
 
-        mContentContainer.setVisibility(View.VISIBLE);
-        mControlContainer.setVisibility(View.VISIBLE);
+        // TODO(qinmin): Uncomment this when we figure out why hiding the content container
+        // will deadlock the render thread.
+        // mContentContainer.setVisibility(View.VISIBLE);
+        // mControlContainer.setVisibility(View.VISIBLE);
 
         mFullscreenView = null;
     }

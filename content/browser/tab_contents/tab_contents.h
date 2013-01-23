@@ -283,6 +283,7 @@ class CONTENT_EXPORT TabContents
   bool ShouldIgnoreNavigation(const GURL& url,
                               const content::Referrer& referrer,
                               WindowOpenDisposition disposition,
+                              content::PageTransition transition_type,
                               int64 source_frame_id) OVERRIDE;
 #endif
   virtual void RequestTransferURL(
@@ -336,6 +337,7 @@ class CONTENT_EXPORT TabContents
                        const base::ListValue& args) OVERRIDE;
   virtual void RequestToLockMouse() OVERRIDE;
   virtual void LostMouseLock() OVERRIDE;
+  virtual void WasCrashedForReload() OVERRIDE;
 
   // RenderViewHostManager::Delegate -------------------------------------------
 

@@ -9,6 +9,7 @@
 #include "base/debug/trace_event.h"
 #include "base/id_map.h"
 #include "base/lazy_instance.h"
+#include "base/metrics/histogram.h"
 #include "base/process_util.h"
 #include "content/browser/gpu/gpu_data_manager.h"
 #include "content/browser/gpu/gpu_process_host.h"
@@ -17,9 +18,13 @@
 #include "content/browser/renderer_host/render_view_host.h"
 #include "content/browser/renderer_host/render_widget_host_view.h"
 #include "content/common/gpu/gpu_messages.h"
+#include "content/gpu/gpu_info_collector.h"
 #include "content/public/browser/browser_thread.h"
+#include "content/public/browser/user_metrics.h"
+#include "content/public/common/result_codes.h"
 
 #if defined(OS_ANDROID)
+#include "content/browser/android/sandboxed_process_launcher.h"
 #include "content/common/view_messages.h"
 #endif
 
@@ -92,6 +97,31 @@ RenderWidgetHostView* GetRenderWidgetHostViewFromSurfaceID(int surface_id) {
   RenderWidgetHost* host = static_cast<RenderWidgetHost*>(
       process->GetListenerByID(render_widget_id));
   return host ? host->view() : NULL;
+}
+
+std::string GetGPUSignature() {
+  content::GPUInfo gpu_info;
+  if (!gpu_info_collector::CollectGraphicsInfo(&gpu_info))
+    return "<Failed to retrieve GPU info>";
+
+  std::string signature("GPU GL_VENDOR=");
+  signature += gpu_info.gl_vendor;
+  signature += " GL_RENDERER=";
+  signature += gpu_info.gl_renderer;
+
+  return signature;
+}
+
+int Compute6BitHash(const std::string& str) {
+  // Based on java.lang.String.hashCode().
+  if (str.empty())
+    return 0;
+
+  int h = 0;
+  for (std::string::const_iterator i = str.begin(); i != str.end(); ++i)
+    h = 31 * h + *i;
+
+  return h & 0x3F;
 }
 
 }  // namespace
@@ -212,6 +242,8 @@ bool GpuProcessHostUIShim::OnControlMessageReceived(
     IPC_MESSAGE_HANDLER(GpuHostMsg_NotifyCompositorResize,
                         OnNotifyCompositorResize)
 #endif
+
+    IPC_MESSAGE_HANDLER(GpuHostMsg_LoseRenderer, OnLoseRenderer)
     IPC_MESSAGE_UNHANDLED_ERROR()
   IPC_END_MESSAGE_MAP()
 
@@ -411,3 +443,38 @@ void GpuProcessHostUIShim::OnNotifyCompositorResize(
   }
 }
 #endif
+
+void GpuProcessHostUIShim::OnLoseRenderer(int32 surface_id) {
+  int render_process_id = 0;
+  int render_widget_id = 0;
+  if (!GpuSurfaceTracker::Get()->GetRenderWidgetIDForSurface(
+        surface_id, &render_process_id, &render_widget_id))
+    return;
+
+  content::RenderProcessHost* process =
+      content::RenderProcessHost::FromID(render_process_id);
+  if (!process)
+    return;
+
+#if defined(OS_ANDROID)
+  // On JellyBean we cannot use KillProcess() to kill the renderer from here
+  // due to UID isolation. However, unbinding the service works as the renderer
+  // calls stopSelf() during initialization which takes effect when we unbind.
+  content::browser::android::StopSandboxedProcess(process->GetHandle());
+#else
+  base::KillProcess(process->GetHandle(), content::RESULT_CODE_KILLED, false);
+#endif
+
+  content::RenderProcessHost::listeners_iterator it =
+      process->ListenersIterator();
+
+  for (; !it.IsAtEnd(); it.Advance()) {
+    const RenderWidgetHost* host =
+        static_cast<const RenderWidgetHost*>(it.GetCurrentValue());
+    if (host->view() && host->view()->IsShowing())
+      host->WasCrashedForReload();
+  }
+
+  int gpu_signature = Compute6BitHash(GetGPUSignature());
+  UMA_HISTOGRAM_ENUMERATION("MobileGPUKilledRenderer", gpu_signature, 64);
+}

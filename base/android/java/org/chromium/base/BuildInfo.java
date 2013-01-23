@@ -43,6 +43,14 @@ public class BuildInfo {
   }
 
   /**
+   * @return The SDK version number used by the app.
+   */
+  @CalledByNative
+  public static int getSDKVersion() {
+    return Build.VERSION.SDK_INT;
+  }
+
+  /**
    * @return The build fingerprint for the current Android install.  The value is truncated to a
    *         128 characters as this is used for crash and UMA reporting, which should avoid huge
    *         strings.

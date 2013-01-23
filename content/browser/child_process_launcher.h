@@ -65,6 +65,10 @@ class CONTENT_EXPORT ChildProcessLauncher {
   // shutdown.
   void SetTerminateChildOnShutdown(bool terminate_on_shutdown);
 
+#if defined(OS_ANDROID)
+  int GetMinidumpFD();
+#endif
+
  private:
   class Context;
 

@@ -4,6 +4,7 @@
 
 #include "base/os_compat_android.h"
 
+#include <math.h>
 #include <time64.h>
 
 #include "base/stringprintf.h"
@@ -28,5 +29,56 @@ time_t timegm(struct tm* const t) {
     return -1;
   return result;
 }
+
+// The following is only needed when building with GCC 4.6 or higher
+// (i.e. not with Android GCC 4.4.3, nor with Clang).
+//
+// GCC is now capable of optimizing successive calls to sin() and cos() into
+// a single call to sincos(). This means that source code that looks like:
+//
+//     double c, s;
+//     c = cos(angle);
+//     s = sin(angle);
+//
+// Will generate machine code that looks like:
+//
+//     double c, s;
+//     sincos(angle, &s, &c);
+//
+// Unfortunately, sincos() and friends are not part of the Android libm.so
+// library provided by the NDK for API level 9. When the optimization kicks
+// in, it makes the final build fail with a puzzling message (puzzling
+// because 'sincos' doesn't appear anywhere in the sources!).
+//
+// To solve this, we provide our own implementation of the sincos() function
+// and related friends. Note that we must also explicitely tell GCC to disable
+// optimizations when generating these. Otherwise, the generated machine code
+// for each function would simply end up calling itself, resulting in a
+// runtime crash due to stack overflow.
+//
+#if defined(__GNUC__) && !defined(__clang__)
+
+// For the record, Clang does not support the 'optimize' attribute.
+// In the unlikely event that it begins performing this optimization too,
+// we'll have to find a different way to achieve this. NOTE: Tested with O1
+// which still performs the optimization.
+//
+#define GCC_NO_OPTIMIZE  __attribute__((optimize("O0")))
+
+GCC_NO_OPTIMIZE
+void sincos(double angle, double* s, double *c)
+{
+  *c = cos(angle);
+  *s = sin(angle);
+}
+
+GCC_NO_OPTIMIZE
+void sincosf(float angle, float* s, float* c)
+{
+  *c = cosf(angle);
+  *s = sinf(angle);
+}
+
+#endif // __GNUC__ && !__clang__
 
 }  // extern "C"

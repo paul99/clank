@@ -8,6 +8,12 @@
 <translation id="8130276680150879341">Verbinding met privénetwerk verbreken</translation>
 <translation id="1058418043520174283"><ph name="INDEX"/> van <ph name="COUNT"/></translation>
 <translation id="4480627574828695486">Dit account ontkoppelen...</translation>
+<translation id="2516632596252643567">&lt;p&gt;
+          Bekijk hier de tabbladen die u op uw computer heeft geopend.
+          &lt;/p&gt;
+          &lt;p&gt;
+          Open Chrome op uw computer, ga naar het menu en selecteer 'Aanmelden bij Chrome'.
+          &lt;/p&gt;</translation>
 <translation id="7040807039050164757">Spelling in dit veld &amp;controleren</translation>
 <translation id="778579833039460630">Geen gegevens ontvangen</translation>
 <translation id="8791923223854254330">Handlers beheren...</translation>
@@ -146,7 +152,7 @@
         heeft u problemen met uw internetverbinding.</translation>
 <translation id="7624154074265342755">Draadloze netwerken</translation>
 <translation id="3315158641124845231">Verberg <ph name="PRODUCT_NAME"/></translation>
-<translation id="7766807826975222231">Een rondleiding doen</translation>
+<translation id="7766807826975222231">Rondleiding</translation>
 <translation id="1993139350008738849">App-meldingen</translation>
 <translation id="3496213124478423963">Kleiner</translation>
 <translation id="2296019197782308739">EAP-methode:</translation>
@@ -849,7 +855,7 @@ Resterende tijd berekenen</translation>
 <translation id="3909791450649380159">&amp;Knippen</translation>
 <translation id="2955913368246107853">Zoekbalk sluiten</translation>
 <translation id="8864170386249720785">SSL-instellingen voor hele mobiele apparaat:</translation>
-<translation id="3914942725612686145">U bent nu aangemeld bij Chrome. Uw geopende tabbladen, bladwijzers en omnibox-gegevens worden gesynchroniseerd met uw Google-account.</translation>
+<translation id="3914942725612686145">U bent nu aangemeld bij Chrome. Uw geopende tabbladen, bladwijzers en omniboxgegevens worden gesynchroniseerd met uw Google-account.</translation>
 <translation id="5642508497713047">CRL-ondertekenaar</translation>
 <translation id="813082847718468539">Sitegegevens bekijken</translation>
 <translation id="3122464029669770682">CPU</translation>
@@ -1529,15 +1535,6 @@ Openbare exponent (<ph name="PUBLIC_EXPONENT_NUM_BITS"/> bits):
 <translation id="6342069812937806050">Zojuist</translation>
 <translation id="5605716740717446121">Uw simkaart wordt permanent uitgeschakeld als u geen correcte ontgrendelingscode voor uw pin kunt invoeren. Resterende pogingen: <ph name="TRIES_COUNT"/></translation>
 <translation id="8836712291807476944"><ph name="SAVED_BYTES"/>/<ph name="TOTAL_BYTES"/> bytes, onderbroken</translation>
-<translation id="3661943501691646627">&lt;p&gt;
-          Bekijk hier de tabbladen die u op uw computer heeft geopend.
-          &lt;/p&gt;
-          &lt;p&gt;
-          Open Chrome op uw computer, ga naar het menu en selecteer 'Aanmelden bij Chrome'.
-          &lt;/p&gt;
-          &lt;p&gt;
-          Superhandig, nietwaar?
-          &lt;/p&gt;</translation>
 <translation id="5502500733115278303">Geïmporteerd uit Firefox</translation>
 <translation id="569109051430110155">Automatisch detecteren</translation>
 <translation id="4408599188496843485">H&amp;elp</translation>
@@ -3227,8 +3224,9 @@ Druk op Ctrl+Alt+Z om te annuleren.</translation>
 <translation id="2202898655984161076">Er is een probleem opgetreden met het genereren van het printeroverzicht. Sommige van uw printers zijn mogelijk niet geregistreerd voor <ph name="CLOUD_PRINT_NAME"/>.</translation>
 <translation id="6154697846084421647">Momenteel aangemeld</translation>
 <translation id="8241707690549784388">De pagina die u zoekt, heeft informatie gebruikt die u heeft opgegeven Als u terugkeert naar deze pagina, worden acties die u heeft uitgevoerd, mogelijk herhaald. Wilt u doorgaan?</translation>
-<translation id="5359419173856026110">Toont de werkelijke framesnelheid van een pagina (in frames per seconde) wanneer hardwareacceleratie actief is.</translation>
+<translation id="5359419173856026110">Toont de werkelijke framesnelheid van een pagina (in frames per seconde) wanneer hardwareversnelling actief is.</translation>
 <translation id="4104163789986725820">E&amp;xporteren...</translation>
+<translation id="5143814737375740231">Chrome voor Android biedt geen ondersteuning voor deze plug-in.</translation>
 <translation id="2113479184312716848">Bestand &amp;openen...</translation>
 <translation id="3314617171364900239">Het controleren op updates is herhaaldelijk mislukt voor de extensie '<ph name="EXTENSION_NAME"/>'.</translation>
 <translation id="4850458635498951714">Een apparaat toevoegen</translation>

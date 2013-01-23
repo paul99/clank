@@ -66,6 +66,17 @@ bool StoreKeyPair(const uint8* public_key,
   return ret;
 }
 
+bool AddCertificate(const uint8* cert, size_t cert_len, bool isPKCS12) {
+  JNIEnv* env = AttachCurrentThread();
+  ScopedJavaLocalRef<jbyteArray> cert_array =
+      ToJavaByteArray(env, cert, cert_len);
+  jboolean ret = Java_AndroidNetworkLibrary_storeCertificate(env,
+      GetApplicationContext(), cert_array.obj(), isPKCS12);
+  LOG_IF(WARNING, !ret) <<
+      "Call to Java_AndroidNetworkLibrary_addCertificate failed";
+  return ret;
+}
+
 bool GetMimeTypeFromExtension(const std::string& extension,
                               std::string* result) {
   JNIEnv* env = AttachCurrentThread();

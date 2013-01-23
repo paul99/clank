@@ -5,6 +5,7 @@
 package org.chromium.base;
 
 import android.content.Context;
+import android.os.Environment;
 
 import java.io.File;
 
@@ -28,4 +29,13 @@ class PathUtils {
     public static String getCacheDirectory(Context appContext) {
         return appContext.getCacheDir().getPath();
     }
+
+    /**
+     * @return the external storage directory.
+     */
+    @CalledByNative
+    public static String getExternalStorageDirectory() {
+        return Environment.getExternalStorageDirectory().getAbsolutePath();
+    }
+
 }

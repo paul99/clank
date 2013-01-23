@@ -9,7 +9,11 @@
 #include "base/basictypes.h"
 
 extern void InitCrashReporter();
+#if defined(OS_ANDROID)
+extern void InitNonBrowserCrashReporter(int minidump_fd);
+#else
 extern void InitNonBrowserCrashReporter();
+#endif
 bool IsCrashReporterEnabled();
 
 static const size_t kMaxActiveURLSize = 1024;
@@ -17,6 +21,7 @@ static const size_t kGuidSize = 32;  // 128 bits = 32 chars in hex.
 static const size_t kDistroSize = 128;
 
 struct BreakpadInfo {
+  int fd;
   const char* filename;
   unsigned filename_length;
   const char* process_type;

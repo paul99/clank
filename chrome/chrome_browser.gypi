@@ -98,6 +98,8 @@
         'browser/android/browser_list_android.cc',
         'browser/android/constrained_window_android.cc',
         'browser/android/constrained_window_android.h',
+        'browser/android/crash_dump_manager.cc',
+        'browser/android/crash_dump_manager.h',
         'browser/android/device_utils.cc',
         'browser/android/device_utils.h',
         'browser/android/extension_infobar_android.cc',
@@ -4239,6 +4241,8 @@
         'browser/visitedlink/visitedlink_master.h',
         'browser/web_applications/web_app.cc',
         'browser/web_applications/web_app.h',
+        'browser/web_resource/json_asynchronous_unpacker.cc',
+        'browser/web_resource/json_asynchronous_unpacker.h',
         'browser/web_resource/notification_promo.cc',
         'browser/web_resource/notification_promo.h',
         'browser/web_resource/promo_resource_service.cc',
@@ -4704,8 +4708,12 @@
             'browser/ui/webui/ntp/context_menu_handler.cc',
             'browser/ui/webui/ntp/context_menu_handler.h',
             'browser/ui/webui/ntp/menu_item_info.h',
+            'browser/ui/webui/ntp/mobile_ntp_promo_handler.cc',
+            'browser/ui/webui/ntp/mobile_ntp_promo_handler.h',
             'browser/ui/webui/ntp/on_context_menu_item_selected_callback.cc',
             'browser/ui/webui/ntp/on_context_menu_item_selected_callback.h',
+            'browser/web_resource/json_asynchronous_unpacker_mobile.cc',
+            'browser/web_resource/notification_promo_mobile_ntp.cc',
           ],
           'sources!': [
             'browser/autocomplete/autocomplete_edit.cc',
@@ -4786,6 +4794,7 @@
             'browser/ui/webui/sync_setup_handler.cc',
             'browser/ui/webui/theme_source.cc',
             'browser/ui/sad_tab_observer.cc',
+            'browser/web_resource/json_asynchronous_unpacker.cc',
           ],
           'sources/': [
             ['exclude', '^browser/background/'],
@@ -4815,7 +4824,6 @@
             ['exclude', '^browser/ui/webui/options/'],
             ['exclude', '^browser/ui/webui/options2/'],
             ['exclude', '^browser/ui/webui/sync_promo/'],
-            ['exclude', '^browser/web_resource/promo_resource_service'],
           ],
           'conditions': [
             ['not use_system_sqlite', {

@@ -235,6 +235,54 @@ var isIncognito = false;
  */
 var replacedInitialState = false;
 
+/**
+ * Stores number of most visited pages.
+ * @type {number}
+ */
+var numberOfMostVisitedPages = 0;
+
+/**
+ * Whether there are any recently closed tabs.
+ * @type {boolean}
+ */
+var hasRecentlyClosedTabs = false;
+
+/**
+ * Whether promo is not allowed or not (external to NTP).
+ * @type {boolean}
+ */
+var promoIsAllowed = false;
+
+/**
+ * Whether promo should be shown on Most Visited page (externally set).
+ * @type {boolean}
+ */
+var promoIsAllowedOnMostVisited = false;
+
+/**
+ * Whether promo should be shown on Open Tabs page (externally set).
+ * @type {boolean}
+ */
+var promoIsAllowedOnOpenTabs = false;
+
+/**
+ * Whether promo should show a virtual computer on Open Tabs (externally set).
+ * @type {boolean}
+ */
+var promoIsAllowedAsVirtualComputer = false;
+
+/**
+ * Promo-injected title of a virtual computer on an open tabs pane.
+ * @type {string}
+ */
+var promoInjectedComputerTitleText = '';
+
+/**
+ * Promo-injected last synced text of a virtual computer on an open tabs pane.
+ * @type {string}
+ */
+var promoInjectedComputerLastSyncedText = '';
+
 function setIncognitoMode(incognito) {
   isIncognito = incognito;
 }
@@ -252,6 +300,7 @@ var SectionType = {
   FOREIGN_SESSION: 5,
   FOREIGN_SESSION_HEADER: 6,
   SNAPSHOTS: 7,
+  PROMO_VC_SESSION_HEADER: 8,
   UNKNOWN: 100,
 };
 
@@ -276,6 +325,8 @@ var ContextMenuItemIds = {
   RECENTLY_CLOSED_REMOVE: 22,
 
   FOREIGN_SESSIONS_REMOVE: 30,
+
+  PROMO_VC_SESSION_REMOVE: 40,
 };
 
 /**
@@ -313,6 +364,12 @@ var syncState = SyncState.INITIAL;
  * @type {?boolean}
  */
 var syncEnabled = undefined;
+
+/**
+ * The current most visited data being displayed.
+ * @type {Array.<Object>}
+ */
+var mostVisitedData_ = [];
 
 /**
  * The current bookmark data being displayed. Keep a reference to this data in
@@ -425,9 +482,14 @@ function init() {
     initializeTitleScroller(titleScrollers[i]);
   }
 
+  // Initialize virtual computers for the sync promo.
+  createPromoVirtualComputers();
+
   chrome.send('getMostVisited');
   chrome.send('getRecentlyClosedTabs');
   chrome.send('getForeignSessions');
+  chrome.send('getPromotions');
+
   setCurrentBookmarkFolderData(
       localStorage.getItem(DEFAULT_BOOKMARK_FOLDER_KEY));
 
@@ -619,6 +681,7 @@ function makeMostVisitedItem(item, opt_clickCallback) {
   title.className = 'title';
   title.textContent = item.title;
   var spacerImg = createElement('img', 'title-spacer');
+  spacerImg.alt = '';
   title.insertBefore(spacerImg, title.firstChild);
   thumbnailCell.appendChild(title);
 
@@ -626,7 +689,7 @@ function makeMostVisitedItem(item, opt_clickCallback) {
   thumbnailContainer.appendChild(shade);
   addActiveTouchListener(shade, 'thumbnail-cell-shade-active');
 
-  wrapClickHandler(thumbnailContainer, item, opt_clickCallback);
+  wrapClickHandler(thumbnailCell, item, opt_clickCallback);
 
   thumbnailCell.setAttribute(CONTEXT_MENU_URL_KEY, item.url);
   thumbnailCell.contextMenuItem = item;
@@ -832,11 +895,15 @@ function makeForeignSessionListEntry(item, opt_clickCallback) {
 
   var title = createDiv('session-name');
   title.textContent = item.title;
+  if (item.titleId)
+    title.id = item.titleId;
   sessionInnerDiv.appendChild(title);
 
   var lastSynced = createDiv('session-last-synced');
   lastSynced.textContent =
       templateData.opentabslastsynced + ': ' + item.userVisibleTimestamp;
+  if (item.userVisibleTimestampId)
+    lastSynced.id = item.userVisibleTimestampId;
   sessionInnerDiv.appendChild(lastSynced);
 
   sessionOuterDiv.addEventListener('click', function(evt) {
@@ -847,21 +914,46 @@ function makeForeignSessionListEntry(item, opt_clickCallback) {
   return sessionOuterDiv;
 }
 
+/**
+ * Saves the number of most visited pages and updates promo visibility.
+ * @param {number} n Number of most visited pages.
+ */
+function setNumberOfMostVisitedPages(n) {
+  numberOfMostVisitedPages = n;
+  setPromoVisibility();
+}
+
+/**
+ * Saves the recently closed tabs flag and updates promo visibility.
+ * @param {boolean} anyTabs Whether there are any recently closed tabs.
+ */
+function setHasRecentlyClosedTabs(anyTabs) {
+  hasRecentlyClosedTabs = anyTabs;
+  setPromoVisibility();
+}
+
 function setMostVisitedPages(data, firstRun, hasBlacklistedUrls) {
+  setNumberOfMostVisitedPages(data.length);
   // limit the number of most visited items to display
   if (isPhone() && data.length > 6) {
     data.splice(6, data.length - 6);
   } else if (isTablet() && data.length > 8) {
     data.splice(8, data.length - 8);
   }
-    var clickFunction = function(item) {
-      // TODO(jgreenwald): update extraction tool
-      chrome.send('metricsHandler:recordAction', ['MobileNTPMostVisited']);
-      window.location = item.url;
-    };
-    populateData(findList('most_visited'), SectionType.MOST_VISITED, data,
-        makeMostVisitedItem, clickFunction);
+
+  if (equals(data, mostVisitedData_))
+    return;
+
+  var clickFunction = function(item) {
+    // TODO(jgreenwald): update extraction tool
+    chrome.send('metricsHandler:recordAction', ['MobileNTPMostVisited']);
+    window.location = item.url;
+  };
+  populateData(findList('most_visited'), SectionType.MOST_VISITED, data,
+      makeMostVisitedItem, clickFunction);
   computeDynamicLayout();
+
+  mostVisitedData_ = data;
 }
 
 function recentlyClosedTabs(data) {
@@ -869,8 +961,10 @@ function recentlyClosedTabs(data) {
   if (!data || data.length == 0) {
     // hide the recently closed section if it is empty.
     container.style.display = 'none';
+    setHasRecentlyClosedTabs(false);
   } else {
     container.style.display = 'block';
+    setHasRecentlyClosedTabs(true);
     var decoratorFunc = isPhone() ? makeListEntryItem :
         makeRecentlyClosedTabletItem;
     populateData(findList('recently_closed'), SectionType.RECENTLY_CLOSED, data,
@@ -924,6 +1018,133 @@ function bookmarks(data) {
 
   // update the shadows on the  breadcrumb bar
   computeDynamicLayout();
+}
+
+/**
+ * Checks if promo is allowed and MostVisited requirements are satisfied.
+ * @return {boolean} Whether the promo should be shown on most_visited.
+ */
+function shouldPromoBeShownOnMostVisited() {
+  return promoIsAllowed && promoIsAllowedOnMostVisited &&
+      (numberOfMostVisitedPages >= 2) &&
+      (!hasRecentlyClosedTabs);
+}
+
+/**
+ * Checks if promo is allowed and OpenTabs requirements are satisfied.
+ * @return {boolean} Whether the promo should be shown on open_tabs.
+ */
+function shouldPromoBeShownOnOpenTabs() {
+  var snapshotsCount =
+      currentSnapshots == null ? 0 : currentSnapshots.length;
+  var sessionsCount = currentSessions == null ? 0 : currentSessions.length;
+  return promoIsAllowed && promoIsAllowedOnOpenTabs &&
+      (snapshotsCount + sessionsCount != 0);
+}
+
+/**
+ * Checks if promo is allowed and SyncPromo requirements are satisfied.
+ * @return {boolean} Whether the promo should be shown on sync_promo.
+ */
+function shouldPromoBeShownOnSync() {
+  var snapshotsCount =
+      currentSnapshots == null ? 0 : currentSnapshots.length;
+  var sessionsCount = currentSessions == null ? 0 : currentSessions.length;
+  return promoIsAllowed && promoIsAllowedOnOpenTabs &&
+      (snapshotsCount + sessionsCount == 0);
+}
+
+/**
+ * Records a promo impression on a given section if necessary.
+ * @param {string} section Active section name to check.
+ */
+function promoUpdateImpressions(section) {
+  if (section == 'most_visited' && shouldPromoBeShownOnMostVisited())
+    chrome.send('recordImpression', ['most_visited']);
+  else if (section == 'open_tabs' && shouldPromoBeShownOnOpenTabs())
+    chrome.send('recordImpression', ['open_tabs']);
+  else if (section == 'open_tabs' && shouldPromoBeShownOnSync())
+    chrome.send('recordImpression', ['sync_promo']);
+}
+
+/**
+ * Sets the visibility on all promo-related items as necessary.
+ */
+function setPromoVisibility() {
+  var mostVisitedEl = document.getElementById('promo_message_on_most_visited');
+  var openTabsVCEl = document.getElementById('promo_vc_list');
+  var syncPromoLegacyEl =
+      document.getElementById('promo_message_on_sync_promo_legacy');
+  var syncPromoReceivedEl =
+      document.getElementById('promo_message_on_sync_promo_received');
+  mostVisitedEl.style.display =
+      shouldPromoBeShownOnMostVisited() ? 'block' : 'none';
+  syncPromoReceivedEl.style.display =
+      shouldPromoBeShownOnSync() ? 'block' : 'none';
+  syncPromoLegacyEl.style.display =
+      shouldPromoBeShownOnSync() ? 'none' : 'block';
+  openTabsVCEl.style.display =
+      (shouldPromoBeShownOnOpenTabs() && promoIsAllowedAsVirtualComputer) ?
+          'block' : 'none';
+}
+
+/**
+ * Called from native.
+ * Sets the text for all promo-related items, updates
+ * promo-send-email-target items to send email on click and
+ * updates the visibility of items.
+ * @param {Object} promotions Dictionary used to fill-in the text.
+ */
+function setPromotions(promotions) {
+  var mostVisitedEl = document.getElementById('promo_message_on_most_visited');
+  var openTabsEl = document.getElementById('promo_message_on_open_tabs');
+  var syncPromoReceivedEl =
+      document.getElementById('promo_message_on_sync_promo_received');
+
+  promoIsAllowed = promotions['promoIsAllowed'] === true;
+  promoIsAllowedOnMostVisited =
+       promotions['promoIsAllowedOnMostVisited'] === true;
+  promoIsAllowedOnOpenTabs = promotions['promoIsAllowedOnOpenTabs'] === true;
+  promoIsAllowedAsVirtualComputer =
+      promotions['promoIsAllowedAsVC'] === true;
+  promoInjectedComputerTitleText = promotions['promoVCTitle'];
+  promoInjectedComputerLastSyncedText = promotions['promoVCLastSynced'];
+
+  mostVisitedEl.innerHTML = promotions['promoMessage'];
+  if (openTabsEl)
+    openTabsEl.innerHTML = promotions['promoMessage'];
+  if (promotions['promoMessageLong'])
+    syncPromoReceivedEl.innerHTML = promotions['promoMessageLong'];
+
+  var openTabsVCTitleEl = document.getElementById('promo_vc_title');
+  if (openTabsVCTitleEl)
+    openTabsVCTitleEl.textContent = promoInjectedComputerTitleText;
+  var openTabsVCLastSyncEl = document.getElementById('promo_vc_lastsync');
+  if (openTabsVCLastSyncEl)
+    openTabsVCLastSyncEl.textContent = promoInjectedComputerLastSyncedText;
+
+  if (promoIsAllowed) {
+    var promoButtonEls =
+        document.getElementsByClassName('promo-button');
+    for (var i = 0, len = promoButtonEls.length; i < len; i++) {
+      promoButtonEls[i].href = "javascript:void(0)";
+      promoButtonEls[i].onclick = executePromoAction;
+      addActiveTouchListener(promoButtonEls[i], 'promo-button-active');
+    }
+  }
+  setPromoVisibility();
+}
+
+/**
+ * On-click handler for promo email targets.
+ * Performs the promo action "send email".
+ * @param {Object} evt User interface event that triggered the action.
+ */
+function executePromoAction(evt) {
+  if (evt.preventDefault)
+    evt.preventDefault();
+  evt.returnValue = false;
+  chrome.send('promoActionTriggered');
 }
 
 /**
@@ -986,8 +1207,12 @@ function onCustomMenuSelected(itemId) {
           }
       break;
 
+    case ContextMenuItemIds.PROMO_VC_SESSION_REMOVE:
+      chrome.send('promoDisabled');
+      break;
+
     default:
-      log.error("Unknown context menu selected id=" + itemId);
+      console.error("Unknown context menu selected id=" + itemId);
       break;
   }
 }
@@ -1210,6 +1435,7 @@ function setSyncEnabled(enabled) {
     } else {
       localStorage.removeItem(SYNC_ENABLED_KEY);
     }
+    setPromoVisibility();
 
     if (bookmarkData) {
       // Bookmark data can now be displayed (or needs to be refiltered)
@@ -1289,6 +1515,7 @@ function updateSyncEmptyState(timeout) {
     openTabsList.style.display = sessionsCount == 0 ? 'none' : 'block';
     snapshotsList.style.display = snapshotsCount == 0 ? 'none' : 'block';
   }
+  setPromoVisibility();
 }
 
 /**
@@ -1398,6 +1625,38 @@ function createExpandoFunction(expando, element) {
       expando.className = 'expando open';
     }
   }
+}
+
+/**
+ * Initializes the promo_vc_list div to look like a foreign session
+ * with a desktop.
+ */
+function createPromoVirtualComputers() {
+  var list = findList('promo_vc');
+  list.innerHTML = '';
+  var sessionEl = createDiv();
+  list.appendChild(sessionEl);
+  var sessionHeader = createDiv('session-header');
+  sessionEl.appendChild(sessionHeader);
+  var sessionChildren = createDiv('session-children-container');
+  var promoMessage = createDiv('promo-message');
+  promoMessage.id = 'promo_message_on_open_tabs';
+  sessionChildren.appendChild(promoMessage);
+  sessionEl.appendChild(sessionChildren);
+  var expando = createDiv();
+  var expandoFunction = createExpandoFunction(expando, sessionChildren);
+
+  var headerList = [{
+    "title": promoInjectedComputerTitleText,
+    "titleId": "promo_vc_title",
+    "userVisibleTimestamp": promoInjectedComputerLastSyncedText,
+    "userVisibleTimestampId": "promo_vc_lastsync",
+    "iconStyle": 'laptop'
+  }];
+
+  populateData(sessionHeader, SectionType.PROMO_VC_SESSION_HEADER, headerList,
+      makeForeignSessionListEntry, expandoFunction);
+  sessionHeader.appendChild(expando);
 }
 
 /**
@@ -1583,6 +1842,8 @@ function getSectionTypeString(section) {
       return 'recently_closed';
     case SectionType.SYNCED_DEVICES:
       return 'synced_devices';
+    case SectionType.PROMO_VC_SESSION_HEADER:
+      return 'promo_vc_session_header';
     case SectionType.UNKNOWN:
     default:
       return 'unknown';
@@ -1801,6 +2062,7 @@ function scrollToPane(paneIndex) {
     updatePaneOnHash();
   }
   computeDynamicLayout();
+  promoUpdateImpressions(sectionPrefixes[paneIndex]);
   return true;
 }
 
@@ -2142,6 +2404,31 @@ function updateMostVisitedHeight() {
 /////////////////////////////////////////////////////////////////////////////
 
 /**
+ * A best effort approach for checking simple data object equality.
+ * @param {?} val1 The first value to check equality for.
+ * @param {?} val2 The second value to check equality for.
+ * @return {boolean} Whether the two objects are equal(ish).
+ */
+function equals(val1, val2) {
+  if (typeof val1 != 'object' || typeof val2 != 'object')
+    return val1 === val2;
+
+  // Object and array equality checks.
+  var keyCountVal1 = 0;
+  for (var key in val1) {
+    if (!(key in val2) || !equals(val1[key], val2[key]))
+      return false;
+    keyCountVal1++;
+  }
+  var keyCountVal2 = 0;
+  for (var key in val2)
+    keyCountVal2++;
+  if (keyCountVal1 != keyCountVal2)
+    return false;
+  return true;
+}
+
+/**
  * Determine if the page should be formatted for tablets.
  * @return {boolean} true if the device is a tablet, false otherwise.
  */
@@ -2412,6 +2699,10 @@ window.addEventListener('contextmenu', function (evt) {
   } else if (section == SectionType.FOREIGN_SESSION_HEADER) {
     chrome.send('showContextMenu', [
         [ContextMenuItemIds.FOREIGN_SESSIONS_REMOVE, templateData.elementremove]
+    ]);
+  } else if (section == SectionType.PROMO_VC_SESSION_HEADER) {
+    chrome.send('showContextMenu', [
+        [ContextMenuItemIds.PROMO_VC_SESSION_REMOVE, templateData.elementremove]
     ]);
   }
   return false;

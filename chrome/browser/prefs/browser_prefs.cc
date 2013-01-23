@@ -95,6 +95,10 @@
 #include "chrome/browser/extensions/default_apps.h"
 #endif
 
+#if defined(OS_ANDROID)
+#include "chrome/browser/ui/webui/ntp/mobile_ntp_promo_handler.h"
+#endif
+
 namespace browser {
 
 void RegisterLocalState(PrefService* local_state) {
@@ -208,6 +212,9 @@ void RegisterUserPrefs(PrefService* user_prefs) {
 #endif
   extensions::ComponentLoader::RegisterUserPrefs(user_prefs);
   geolocation::RegisterUserPrefs(user_prefs);
+#if defined(OS_ANDROID)
+  MobileNtpPromoHandler::RegisterUserPrefs(user_prefs);
+#endif
 }
 
 void MigrateBrowserPrefs(PrefService* user_prefs, PrefService* local_state) {

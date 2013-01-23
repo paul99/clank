@@ -8,7 +8,7 @@
 
 #include "base/basictypes.h"
 #include "base/compiler_specific.h"
-#include "base/memory/scoped_ptr.h"
+#include "base/synchronization/lock.h"
 #include "net/base/network_change_notifier.h"
 
 namespace net {
@@ -19,14 +19,15 @@ class NetworkChangeNotifierAndroid : public net::NetworkChangeNotifier {
   NetworkChangeNotifierAndroid();
   virtual ~NetworkChangeNotifierAndroid();
 
-  void SetConnectivityOnline(const bool is_online);
+  void SetConnectivityOnline(bool is_online);
 
  private:
-  bool is_connectivity_state_known_;
-  bool is_online_;
-
   // NetworkChangeNotifier:
   virtual bool IsCurrentlyOffline() const OVERRIDE;
+
+  mutable base::Lock lock_;  // Protects the state below.
+  bool is_connectivity_state_known_;
+  bool is_online_;
 
   DISALLOW_COPY_AND_ASSIGN(NetworkChangeNotifierAndroid);
 };

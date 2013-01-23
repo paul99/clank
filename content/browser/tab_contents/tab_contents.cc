@@ -819,6 +819,11 @@ void TabContents::LostMouseLock() {
     delegate_->LostMouseLock();
 }
 
+void TabContents::WasCrashedForReload() {
+  if (delegate_)
+    delegate_->WasCrashedForReload();
+}
+
 void TabContents::UpdatePreferredSize(const gfx::Size& pref_size) {
   preferred_size_ = pref_size;
   if (delegate_)
@@ -2059,14 +2064,17 @@ bool TabContents::ShouldIgnoreNavigation(
       const GURL& url,
       const content::Referrer& referrer,
       WindowOpenDisposition disposition,
+      content::PageTransition transition_type,
       int64 source_frame_id) {
   if (!delegate_)
     return false;
-  content::PageTransition transition_type = content::PAGE_TRANSITION_LINK;
-  NavigationEntry* active_navigation_entry = controller_.GetActiveEntry();
-  if (active_navigation_entry) {
-    transition_type = active_navigation_entry->GetTransitionType();
+  NavigationEntry* entry = controller_.GetLastCommittedEntry();
+  if (entry && entry->GetURL().SchemeIs(chrome::kChromeUIScheme) &&
+      (url.SchemeIs(chrome::kHttpScheme) ||
+          url.SchemeIs(chrome::kHttpsScheme))) {
+    return false;
   }
+
   return delegate_->ShouldIgnoreNavigation(this, url, referrer, disposition,
                                            transition_type);
 }

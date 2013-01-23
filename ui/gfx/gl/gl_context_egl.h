@@ -37,6 +37,11 @@ class GLContextEGL : public GLContext {
   virtual std::string GetExtensions() OVERRIDE;
 
  private:
+#if defined(OS_ANDROID)
+  int pending_swap_interval_;
+  // M18 only, a tmp hack to address the new mali driver bug.
+  bool force_finish_when_switch_context_;
+#endif
   EGLContext context_;
   EGLDisplay display_;
   EGLConfig config_;

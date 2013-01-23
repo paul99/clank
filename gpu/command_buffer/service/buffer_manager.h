@@ -58,7 +58,7 @@ class BufferManager {
     const void* GetRange(GLintptr offset, GLsizeiptr size) const;
 
     bool IsDeleted() const {
-      return service_id_ == 0;
+      return deleted_;
     }
 
     bool IsValid() const {
@@ -114,7 +114,7 @@ class BufferManager {
     }
 
     void MarkAsDeleted() {
-      service_id_ = 0;
+      deleted_ = true;
     }
 
     void SetInfo(GLsizeiptr size, GLenum usage, bool shadow);
@@ -124,6 +124,9 @@ class BufferManager {
 
     // The manager that owns this BufferInfo.
     BufferManager* manager_;
+
+    // True if deleted.
+    bool deleted_;
 
     // Service side buffer id.
     GLuint service_id_;
@@ -182,6 +185,7 @@ class BufferManager {
  private:
   void UpdateMemRepresented();
 
+  void StartTracking(BufferInfo* info);
   void StopTracking(BufferInfo* info);
 
   // Info for each buffer in the system.
@@ -193,6 +197,12 @@ class BufferManager {
 
   size_t mem_represented_;
   size_t last_reported_mem_represented_;
+
+  // Counts the number of BufferInfo allocated with 'this' as its manager.
+  // Allows to check no BufferInfo will outlive this.
+  unsigned int buffer_info_count_;
+
+  bool have_context_;
 
   DISALLOW_COPY_AND_ASSIGN(BufferManager);
 };

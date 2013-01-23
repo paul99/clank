@@ -66,6 +66,7 @@ class WEBKIT_GLUE_EXPORT WebKitPlatformSupportImpl :
   virtual size_t lowMemoryUsageMB();
   virtual size_t highMemoryUsageMB();
   virtual size_t highUsageDeltaMB();
+  virtual size_t maxTextureMemoryUsageMB();
 #endif
   virtual WebKit::WebURLLoader* createURLLoader();
   virtual WebKit::WebSocketStreamHandle* createSocketStreamHandle();

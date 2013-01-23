@@ -112,6 +112,8 @@ class GpuProcessHostUIShim
                                 uint64 timestamp, gfx::Size size);
 #endif
 
+  void OnLoseRenderer(int32 surface_id);
+
   // The serial number of the GpuProcessHost / GpuProcessHostUIShim pair.
   int host_id_;
 };

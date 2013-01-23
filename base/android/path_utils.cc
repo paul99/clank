@@ -27,6 +27,13 @@ std::string GetCacheDirectory() {
   return ConvertJavaStringToUTF8(path);
 }
 
+std::string GetExternalStorageDirectory() {
+  JNIEnv* env = AttachCurrentThread();
+  ScopedJavaLocalRef<jstring> path =
+      Java_PathUtils_getExternalStorageDirectory(env);
+  return ConvertJavaStringToUTF8(path);
+}
+
 bool RegisterPathUtils(JNIEnv* env) {
   return RegisterNativesImpl(env);
 }

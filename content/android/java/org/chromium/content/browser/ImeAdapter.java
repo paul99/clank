@@ -161,6 +161,8 @@ class ImeAdapter {
     private ViewEmbedder mViewEmbedder;
     private AlertDialog mDialog;
     private Handler mHandler;
+    private final Editable mEditable;
+    private long mLastActionTime;
 
     private class DelayedDismissInput implements Runnable {
         private int mNativeImeAdapter;
@@ -209,6 +211,8 @@ class ImeAdapter {
         mInsertionHandleController = insertionHandleController;
         mViewEmbedder = embedder;
         mHandler = new Handler();
+        mEditable = Editable.Factory.getInstance().newEditable("");
+        Selection.setSelection(mEditable, 0);
     }
 
     boolean isFor(int nativeImeAdapter, int textInputType) {
@@ -526,9 +530,7 @@ class ImeAdapter {
     @SuppressWarnings("unused")
     @CalledByNative
     private void cancelComposition() {
-        if (mInputConnection != null) {
-            mInputConnection.cancelComposition();
-        }
+        getInputMethodManager().restartInput(mViewEmbedder.getAttachedView());
     }
 
     private boolean checkCompositionQueueAndCallNative(String text, int newCursorPosition,
@@ -557,7 +559,7 @@ class ImeAdapter {
             if (isCommit) {
                 nativeCommitText(mNativeImeAdapterAndroid, text);
             } else {
-                nativeSetComposingText(mNativeImeAdapterAndroid, text);
+                nativeSetComposingText(mNativeImeAdapterAndroid, text, newCursorPosition);
             }
         }
         nativeSendSyntheticKeyEvent(mNativeImeAdapterAndroid, sEventTypeKeyUp,
@@ -617,7 +619,7 @@ class ImeAdapter {
     }
 
     boolean isActive() {
-        return mInputConnection != null && mInputConnection.isActive();
+        return getInputMethodManager().isActive();
     }
 
     private boolean sendSyntheticKeyEvent(
@@ -694,16 +696,109 @@ class ImeAdapter {
         return true;
     }
 
+    boolean requestTextInputStateUpdate() {
+        if (mNativeImeAdapterAndroid == 0) {
+            return false;
+        }
+        nativeRequestTextInputStateUpdate(mNativeImeAdapterAndroid,
+            System.currentTimeMillis());
+        return true;
+    }
+
+    /**
+     * Updates the ImeAdapter's internal representation of the text
+     * being edited and its selection and composition properties. The resulting
+     * Editable is accessible through the getEditable() method of AdapterInputConnection.
+     * If the text has not changed, this also calls updateSelection on the InputMethodManager.
+     * @param text The String contents of the field being edited
+     * @param selectionStart The character offset of the selection start, or the caret
+     * position if there is no selection
+     * @param selectionEnd The character offset of the selection end, or the caret
+     * position if there is no selection
+     * @param compositionStart The character offset of the composition start, or -1
+     * if there is no composition
+     * @param compositionEnd The character offset of the composition end, or -1
+     * if there is no selection
+     */
+    void setEditableText(String text, int selectionStart, int selectionEnd,
+            int compositionStart, int compositionEnd, long requestTime) {
+
+        // If this update was a result of a request (i.e. a call to requestTextInputStateUpdate())
+        // that originated before the last action that could have changed the state, ignore
+        // this update.
+        if (requestTime != 0 && requestTime < mLastActionTime) {
+            return;
+        }
+
+        int prevSelectionStart = Selection.getSelectionStart(mEditable);
+        int prevSelectionEnd = Selection.getSelectionEnd(mEditable);
+        int prevEditableLength = mEditable.length();
+        int prevCompositionStart = BaseInputConnection.getComposingSpanStart(mEditable);
+        int prevCompositionEnd = BaseInputConnection.getComposingSpanEnd(mEditable);
+        String prevText = mEditable.toString();
+
+        selectionStart = Math.min(selectionStart, text.length());
+        selectionEnd = Math.min(selectionEnd, text.length());
+        compositionStart = Math.min(compositionStart, text.length());
+        compositionEnd = Math.min(compositionEnd, text.length());
+
+        boolean textUnchanged = prevText.equals(text);
+
+        if (textUnchanged
+                && prevSelectionStart == selectionStart && prevSelectionEnd == selectionEnd
+                && prevCompositionStart == compositionStart
+                && prevCompositionEnd == compositionEnd) {
+            // Nothing has changed; don't need to do anything
+            return;
+        }
+
+        // When a programmatic change has been made to the editable field, both the start
+        // and end positions for the composition will equal zero. In this case we cancel the
+        // active composition in the editor as this no longer is relevant.
+        if (textUnchanged && compositionStart == 0 && compositionEnd == 0) {
+            cancelComposition();
+        }
+
+        if (!textUnchanged) {
+            mEditable.replace(0, mEditable.length(), text);
+        }
+        Selection.setSelection(mEditable, selectionStart, selectionEnd);
+
+        if (mInputConnection != null) {
+            mInputConnection.setInternalComposingRegion(compositionStart, compositionEnd);
+        }
+
+        if (textUnchanged || prevText.equals("")) {
+            // updateSelection should be called when a manual selection change occurs.
+            // Should not be called if text is being entered else issues can occur
+            // e.g. backspace to undo autocorrection will not work with the default OSK.
+            getInputMethodManager().updateSelection(mViewEmbedder.getAttachedView(),
+                    selectionStart, selectionEnd, compositionStart, compositionEnd);
+        }
+    }
+
+    private Editable getEditable() {
+        return mEditable;
+    }
+
+    private InputMethodManager getInputMethodManager() {
+        return (InputMethodManager) mViewEmbedder.getAttachedView().getContext()
+                .getSystemService(Context.INPUT_METHOD_SERVICE);
+    }
+
+    private void updateLastActionTime() {
+        mLastActionTime = System.currentTimeMillis();
+    }
+
     // This InputConnection is created by ChromeView.onCreateInputConnection.
     // It then adapts android's IME to chrome's RenderWidgetHostView using the
     // native ImeAdapterAndroid via the outer class ImeAdapter.
     static public class AdapterInputConnection extends BaseInputConnection {
         private View mInternalView;
         private ImeAdapter mImeAdapter;
-        private Editable mEditable;
         private boolean mSingleLine;
-        private int numBatchEdits;
-        private boolean shouldUpdateImeSelection;
+        private int mNumBatchEdits;
+        private boolean mShouldUpdateImeSelection;
 
         // Factory function.
         static public AdapterInputConnection getInstance(View view, ImeAdapter imeAdapter,
@@ -711,96 +806,41 @@ class ImeAdapter {
             return new AdapterInputConnection(view, imeAdapter, outAttrs);
         }
 
-        /**
-         * Updates the AdapterInputConnection's internal representation of the text
-         * being edited and its selection and composition properties. The resulting
-         * Editable is accessible through the getEditable() method.
-         * If the text has not changed, this also calls updateSelection on the InputMethodManager.
-         * @param text The String contents of the field being edited
-         * @param selectionStart The character offset of the selection start, or the caret
-         * position if there is no selection
-         * @param selectionEnd The character offset of the selection end, or the caret
-         * position if there is no selection
-         * @param compositionStart The character offset of the composition start, or -1
-         * if there is no composition
-         * @param compositionEnd The character offset of the composition end, or -1
-         * if there is no selection
-         */
-        public void setEditableText(String text, int selectionStart, int selectionEnd,
-                int compositionStart, int compositionEnd) {
-
-            if (mEditable == null) {
-                mEditable = Editable.Factory.getInstance().newEditable(text);
-            }
-
-            int prevSelectionStart = Selection.getSelectionStart(mEditable);
-            int prevSelectionEnd = Selection.getSelectionEnd(mEditable);
-            int prevEditableLength = mEditable.length();
-            int prevCompositionStart = getComposingSpanStart(mEditable);
-            int prevCompositionEnd = getComposingSpanEnd(mEditable);
-
-            selectionStart = Math.min(selectionStart, text.length());
-            selectionEnd = Math.min(selectionEnd, text.length());
-            compositionStart = Math.min(compositionStart, text.length());
-            compositionEnd = Math.min(compositionEnd, text.length());
-
-            if (mEditable.toString().equals(text)) {
-                if (prevSelectionStart == selectionStart && prevSelectionEnd == selectionEnd
-                        && prevCompositionStart == compositionStart
-                        && prevCompositionEnd == compositionEnd) {
-                    // Nothing has changed; don't need to do anything
-                    return;
-                }
-
-                Selection.setSelection(mEditable, selectionStart, selectionEnd);
-
-                // updateSelection should be called when a manual selection change occurs.
-                // Should not be called if text is being entered else issues can occur
-                // e.g. backspace to undo autocorrection will not work with the default OSK.
-                getInputMethodManager().updateSelection(mInternalView,
-                        selectionStart, selectionEnd, compositionStart, compositionEnd);
-            } else {
-                // When a programmatic change has been made to the editable field, both the start
-                // and end positions for the composition will equal zero. In this case we cancel the
-                // active composition in the editor as this no longer is relevant.
-                if (compositionStart == 0 && compositionEnd == 0) {
-                    cancelComposition();
-                }
-
-                mEditable.replace(0, mEditable.length(), text);
-                Selection.setSelection(mEditable, selectionStart, selectionEnd);
-            }
-        }
-
         @Override
         public Editable getEditable() {
-            if (mEditable == null) {
-                mEditable = Editable.Factory.getInstance().newEditable("");
-                Selection.setSelection(mEditable, 0);
-            }
-            return mEditable;
+            return mImeAdapter.getEditable();
         }
 
         @Override
         public boolean setComposingText(CharSequence text, int newCursorPosition) {
+            mImeAdapter.updateLastActionTime();
+            if (!mImeAdapter.checkCompositionQueueAndCallNative(text.toString(),
+                    newCursorPosition, false)) {
+                return false;
+            }
             super.setComposingText(text, newCursorPosition);
-            return mImeAdapter.checkCompositionQueueAndCallNative(text.toString(),
-                    newCursorPosition, false);
+            mShouldUpdateImeSelection = true;
+            return true;
         }
 
         @Override
         public boolean commitText(CharSequence text, int newCursorPosition) {
+            mImeAdapter.updateLastActionTime();
+            if (!mImeAdapter.checkCompositionQueueAndCallNative(text.toString(),
+                    newCursorPosition, text.length() > 0)) {
+                return false;
+            }
             super.commitText(text, newCursorPosition);
-            shouldUpdateImeSelection = true;
-            return mImeAdapter.checkCompositionQueueAndCallNative(text.toString(),
-                    newCursorPosition, true);
+            mShouldUpdateImeSelection = true;
+            return true;
         }
 
         @Override
         public boolean performEditorAction(int actionCode) {
+            mImeAdapter.updateLastActionTime();
             switch (actionCode) {
                 case EditorInfo.IME_ACTION_NEXT:
-                    cancelComposition();
+                    mImeAdapter.cancelComposition();
                     // Send TAB key event
                     long timeStampSeconds = System.currentTimeMillis() / 1000;
                     mImeAdapter.sendSyntheticKeyEvent(
@@ -817,6 +857,7 @@ class ImeAdapter {
 
         @Override
         public boolean performContextMenuAction(int id) {
+            mImeAdapter.updateLastActionTime();
             switch (id) {
                 case android.R.id.selectAll:
                     return mImeAdapter.selectAll();
@@ -834,13 +875,14 @@ class ImeAdapter {
         @Override
         public ExtractedText getExtractedText(ExtractedTextRequest request, int flags) {
             ExtractedText et = new ExtractedText();
-            if (mEditable == null) {
+            Editable editable = getEditable();
+            if (editable == null) {
                 et.text = "";
             } else {
-                et.text = mEditable.toString();
-                et.partialEndOffset = mEditable.length();
-                et.selectionStart = Selection.getSelectionStart(mEditable);
-                et.selectionEnd = Selection.getSelectionEnd(mEditable);
+                et.text = editable.toString();
+                et.partialEndOffset = editable.length();
+                et.selectionStart = Selection.getSelectionStart(editable);
+                et.selectionEnd = Selection.getSelectionEnd(editable);
             }
             et.flags = mSingleLine ? ExtractedText.FLAG_SINGLE_LINE : 0;
             return et;
@@ -848,23 +890,23 @@ class ImeAdapter {
 
         @Override
         public boolean deleteSurroundingText(int leftLength, int rightLength) {
-            if (!super.deleteSurroundingText(leftLength, rightLength)) {
-                return false;
-            }
-            shouldUpdateImeSelection = true;
-            return mImeAdapter.deleteSurroundingText(leftLength, rightLength);
+            if (getEditable() == null) return false;
+            mImeAdapter.updateLastActionTime();
+            if (!mImeAdapter.deleteSurroundingText(leftLength, rightLength)) return false;
+            super.deleteSurroundingText(leftLength, rightLength);
+            mShouldUpdateImeSelection = true;
+            return true;
         }
 
         @Override
         public boolean sendKeyEvent(KeyEvent event) {
+            mImeAdapter.updateLastActionTime();
             mImeAdapter.mSelectionHandleController.hideAndDisallowAutomaticShowing();
             mImeAdapter.mInsertionHandleController.hideAndDisallowAutomaticShowing();
 
             // If this is a key-up, and backspace/del or if the key has a character representation,
             // need to update the underlying Editable (i.e. the local representation of the text
             // being edited).
-            // Note that setEditableText will still be called asynchronously as usual, but
-            // it'll be a no-op as the internal state will be already updated.
             if (event.getAction() == KeyEvent.ACTION_UP) {
                 if (event.getKeyCode() == KeyEvent.KEYCODE_DEL) {
                     super.deleteSurroundingText(1, 0);
@@ -886,76 +928,75 @@ class ImeAdapter {
                     }
                 }
             }
-
+            mShouldUpdateImeSelection = true;
             return super.sendKeyEvent(event);
         }
 
         @Override
         public boolean finishComposingText() {
-            if (mEditable == null
-                    || (getComposingSpanStart(mEditable) == getComposingSpanEnd(mEditable))) {
+            mImeAdapter.updateLastActionTime();
+            Editable editable = getEditable();
+            if (editable == null
+                    || (getComposingSpanStart(editable) == getComposingSpanEnd(editable))) {
                 return true;
             }
+            if (!mImeAdapter.checkCompositionQueueAndCallNative("", 0, true)) return false;
             super.finishComposingText();
-            return commitText("", 0);
+            return true;
         }
 
         @Override
         public boolean setSelection(int start, int end) {
+            mImeAdapter.updateLastActionTime();
             if (start < 0 || end < 0) return true;
+            if (!mImeAdapter.setEditableSelectionOffsets(start, end)) return false;
             super.setSelection(start, end);
-            return mImeAdapter.setEditableSelectionOffsets(start, end);
-        }
-
-        /**
-         * Informs the InputMethodManager and InputMethodSession (i.e. the IME) that there
-         * is no longer a current composition. Note this differs from finishComposingText, which
-         * is called by the IME when it wants to end a composition.
-         */
-        void cancelComposition() {
-            getInputMethodManager().restartInput(mInternalView);
+            mShouldUpdateImeSelection = true;
+            return true;
         }
 
         @Override
         public boolean setComposingRegion(int start, int end) {
+            mImeAdapter.updateLastActionTime();
             int a = Math.min(start, end);
             int b = Math.max(start, end);
+            if (!mImeAdapter.setComposingRegion(a, b)) return false;
             super.setComposingRegion(a, b);
-            return mImeAdapter.setComposingRegion(a, b);
-        }
-
-        boolean isActive() {
-            return getInputMethodManager().isActive();
-        }
-
-        private InputMethodManager getInputMethodManager() {
-            return (InputMethodManager) mInternalView.getContext()
-                    .getSystemService(Context.INPUT_METHOD_SERVICE);
+            return true;
         }
 
         private void updateImeSelection() {
-            if (mEditable != null) {
-                getInputMethodManager().updateSelection(mInternalView,
-                        Selection.getSelectionStart(mEditable),
-                        Selection.getSelectionEnd(mEditable),
-                        getComposingSpanStart(mEditable),
-                        getComposingSpanStart(mEditable));
+            Editable editable = getEditable();
+            if (editable != null) {
+                mImeAdapter.getInputMethodManager().updateSelection(mInternalView,
+                        Selection.getSelectionStart(editable),
+                        Selection.getSelectionEnd(editable),
+                        getComposingSpanStart(editable),
+                        getComposingSpanEnd(editable));
             }
         }
 
         @Override
         public boolean beginBatchEdit() {
-            ++numBatchEdits;
+            mImeAdapter.updateLastActionTime();
+            ++mNumBatchEdits;
             return false;
         }
 
         @Override
         public boolean endBatchEdit() {
-            if (--numBatchEdits == 0 && shouldUpdateImeSelection) {
-                updateImeSelection();
-                shouldUpdateImeSelection = false;
+            if (--mNumBatchEdits == 0) {
+                if (mShouldUpdateImeSelection) {
+                    updateImeSelection();
+                    mShouldUpdateImeSelection = false;
+                }
+                mImeAdapter.requestTextInputStateUpdate();
             }
             return false;
+        }
+
+        void setInternalComposingRegion(int start, int end) {
+            super.setComposingRegion(start, end);
         }
 
         private AdapterInputConnection(View view, ImeAdapter imeAdapter, EditorInfo outAttrs) {
@@ -1018,7 +1059,8 @@ class ImeAdapter {
             int action, int modifiers, long eventTime, int keyCode, boolean isSystemKey,
             int unicodeChar);
 
-    private native void nativeSetComposingText(int nativeImeAdapterAndroid, String text);
+    private native void nativeSetComposingText(int nativeImeAdapterAndroid, String text,
+        int newCursorPosition);
 
     private native void nativeCommitText(int nativeImeAdapterAndroid, String text);
 
@@ -1041,4 +1083,7 @@ class ImeAdapter {
     private native void nativeCut(int nativeImeAdapterAndroid);
     private native void nativeCopy(int nativeImeAdapterAndroid);
     private native void nativePaste(int nativeImeAdapterAndroid);
+
+    private native void nativeRequestTextInputStateUpdate(int nativeImeAdapterAndroid,
+        long requestTime);
 }

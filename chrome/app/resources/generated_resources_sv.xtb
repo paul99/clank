@@ -8,6 +8,12 @@
 <translation id="8130276680150879341">Koppla bort privat nätverk</translation>
 <translation id="1058418043520174283"><ph name="INDEX"/> av <ph name="COUNT"/></translation>
 <translation id="4480627574828695486">Koppla bort kontot ...</translation>
+<translation id="2516632596252643567">&lt;p&gt;
+          Använd flikar som du öppnar på datorn även här.
+          &lt;/p&gt;
+          &lt;p&gt;
+          Du behöver bara öppna Chrome på datorn, öppna menyn och välja Logga in i Chrome ...
+          &lt;/p&gt;</translation>
 <translation id="7040807039050164757">&amp;Kontrollera stavning i det här fältet</translation>
 <translation id="778579833039460630">Inga data har tagits emot</translation>
 <translation id="8791923223854254330">Hantera hanterare</translation>
@@ -1509,15 +1515,6 @@ Offentlig exponent (<ph name="PUBLIC_EXPONENT_NUM_BITS"/> bitar):
 <translation id="6342069812937806050">Alldeles nyss</translation>
 <translation id="5605716740717446121">SIM-kortet inaktiveras permanent om du inte anger rätt PIN-upplåsningsnyckel. Antal försök kvar: <ph name="TRIES_COUNT"/></translation>
 <translation id="8836712291807476944"><ph name="SAVED_BYTES"/> / <ph name="TOTAL_BYTES"/> byte, Avbrutet</translation>
-<translation id="3661943501691646627">&lt;p&gt;
-          Använd flikarna du har öppna på datorn även här.
-          &lt;/p&gt;
-          &lt;p&gt;
-          Du behöver bara öppna Chrome på datorn, klicka på skiftnyckelmenyn och välja &quot;Logga in i Chrome ...&quot;
-          &lt;/p&gt;
-          &lt;p&gt;
-          Det är rätt häftigt.
-          &lt;/p&gt;</translation>
 <translation id="5502500733115278303">Importerat från Firefox</translation>
 <translation id="569109051430110155">Upptäck automatiskt</translation>
 <translation id="4408599188496843485">H&amp;jälp</translation>
@@ -3185,6 +3182,7 @@ Tryck på Ctrl + Alt + Z om du vill avbryta.</translation>
 <translation id="8241707690549784388">Önskad sida använder information som du har angett. Om du återgår till sidan kan eventuella åtgärder på sidan upprepas. Vill du fortsätta?</translation>
 <translation id="5359419173856026110">Visar en sidas faktiska bildhastighet, angett i bildrutor per sekund, när maskinvaruacceleration har aktiverats.</translation>
 <translation id="4104163789986725820">E&amp;xportera...</translation>
+<translation id="5143814737375740231">Chrome för Android stöder inte detta plugin.</translation>
 <translation id="2113479184312716848">Öppna fil...</translation>
 <translation id="3314617171364900239">Sökningen efter uppdateringar till tillägget <ph name="EXTENSION_NAME"/> misslyckades.</translation>
 <translation id="4850458635498951714">Lägg till en enhet</translation>

@@ -17,6 +17,7 @@ namespace base {
 namespace android {
 
 BuildInfo* BuildInfo::instance_ = NULL;
+Lock BuildInfo::lock_;
 
 BuildInfo::BuildInfo(
     const char* device,
@@ -25,7 +26,8 @@ BuildInfo::BuildInfo(
     const char* android_build_id,
     const char* android_build_fp,
     const char* package_version_code,
-    const char* package_version_name)
+    const char* package_version_name,
+    const int sdk_version_int)
     : device(device),
       model(model),
       brand(brand),
@@ -33,10 +35,12 @@ BuildInfo::BuildInfo(
       android_build_fp(android_build_fp),
       package_version_code(package_version_code),
       package_version_name(package_version_name),
+      sdk_version_int(sdk_version_int),
       java_exception_info(NULL) {
 }
 
 BuildInfo* const BuildInfo::GetInstance() {
+  base::AutoLock scoped_lock(lock_);
   if (!instance_) {
     JNIEnv* env = AttachCurrentThread();
     jobject app_context = GetApplicationContext();
@@ -76,6 +80,9 @@ BuildInfo* const BuildInfo::GetInstance() {
     const char* package_version_name =
         strdup(package_version_name_str.c_str());
 
+    const int sdk_version_int =
+        static_cast<int>(Java_BuildInfo_getSDKVersion(env));
+
     instance_ = new BuildInfo(
         device,
         model,
@@ -83,7 +90,8 @@ BuildInfo* const BuildInfo::GetInstance() {
         android_build_id,
         android_build_fp,
         package_version_code,
-        package_version_name);
+        package_version_name,
+        sdk_version_int);
 
     LOG(INFO) << "BuildInfo instance initialized with"
               << " device=" << instance_->device

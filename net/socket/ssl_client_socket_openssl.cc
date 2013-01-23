@@ -469,9 +469,7 @@ bool SSLClientSocketOpenSSL::Init() {
   options.ConfigureFlag(SSL_OP_NO_TLSv1, !ssl_config_.tls1_enabled);
 
 #if defined(SSL_OP_NO_COMPRESSION)
-  // If TLS was disabled also disable compression, to provide maximum site
-  // compatibility in the case of protocol fallback. See http://crbug.com/31628
-  options.ConfigureFlag(SSL_OP_NO_COMPRESSION, !ssl_config_.tls1_enabled);
+  options.ConfigureFlag(SSL_OP_NO_COMPRESSION, true);
 #endif
 
   // TODO(joth): Set this conditionally, see http://crbug.com/55410

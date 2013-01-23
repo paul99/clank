@@ -72,6 +72,82 @@ typedef struct ucontext {
   __sigset_t uc_sigmask;
 } ucontext_t;
 
+#elif !defined(__GLIBC__) && defined(__i386__)
+// definition for sigcontext and ucontext are from v8/src/platform-linux.cc
+// Although NDK defines sigcontext but the definition does not work
+// with breakpad.
+
+// x86 version for Android.
+struct sigcontext {
+  uint32_t gregs[19];
+  void* fpregs;
+  uint32_t oldmask;
+  uint32_t cr2;
+};
+
+typedef uint32_t __sigset_t;
+typedef struct sigcontext mcontext_t;
+typedef struct ucontext {
+  uint32_t uc_flags;
+  struct ucontext* uc_link;
+  stack_t uc_stack;
+  mcontext_t uc_mcontext;
+  __sigset_t uc_sigmask;
+} ucontext_t;
+
+// the following i386 definitions are from standard linux header
+//  /usr/include/sys/ucontext.h
+/* Type for general register.  */
+typedef uint32_t greg_t;
+/* Number of general registers.  */
+#define NGREG 19
+
+/* Container for all general registers.  */
+typedef greg_t gregset_t[NGREG];
+
+enum
+{
+  REG_GS = 0,
+  REG_FS,
+  REG_ES,
+  REG_DS,
+  REG_EDI,
+  REG_ESI,
+  REG_EBP,
+  REG_ESP,
+  REG_EBX,
+  REG_EDX,
+  REG_ECX,
+  REG_EAX,
+  REG_TRAPNO,
+  REG_ERR,
+  REG_EIP,
+  REG_CS,
+  REG_EFL,
+  REG_UESP,
+  REG_SS
+};
+
+/* Definitions taken from the kernel headers.  */
+struct _libc_fpreg
+{
+  unsigned short int significand[4];
+  unsigned short int exponent;
+};
+
+struct _libc_fpstate
+{
+  unsigned long int cw;
+  unsigned long int sw;
+  unsigned long int tag;
+  unsigned long int ipoff;
+  unsigned long int cssel;
+  unsigned long int dataoff;
+  unsigned long int datasel;
+  struct _libc_fpreg _st[8];
+  unsigned long int status;
+};
+
 #endif
 
 #endif  // GOOGLE_BREAKPAD_CLIENT_LINUX_ANDROID_UCONTEXT_H_

@@ -32,6 +32,7 @@
 #include "chrome/common/pref_names.h"
 #include "chrome/common/content_settings.h"
 #include "chrome/common/content_settings_pattern.h"
+#include "content/browser/android/user_agent.h"
 #include "content/public/browser/notification_details.h"
 #include "content/public/browser/notification_observer.h"
 #include "content/public/browser/notification_registrar.h"
@@ -165,6 +166,7 @@ const char kGoogleChromeVersion[] = "google_chrome_version";
 const char kApplicationVersion[] = "application_version";
 const char kWebkitVersion[] = "webkit_version";
 const char kJavaScriptVersion[] = "javascript_version";
+const char kOSVersion[] = "os_version";
 
 const char kSearchEngineId[] = "searchEngineId";
 const char kSearchEngineShortName[] = "searchEngineShortName";
@@ -1265,32 +1267,23 @@ static void SetRemoteDebuggingEnabled(JNIEnv* env, jobject obj, jboolean enabled
 // From browser_about_handler.cc
 static jobject GetAboutVersionStrings(JNIEnv* env, jobject obj) {
   chrome::VersionInfo version_info;
-  std::string browser_version = version_info.Version();
-  std::string version_modifier =
-      chrome::VersionInfo::GetVersionStringModifier();
-  if (!version_modifier.empty())
-    browser_version += " " + version_modifier;
-
-#if !defined(GOOGLE_CHROME_BUILD)
-  browser_version += " (";
-  browser_version += version_info.LastChange();
-  browser_version += ")";
-#endif
 
   std::string js_version(v8::V8::GetVersion());
   std::string js_engine = "V8";
 
   std::string application;
+  std::string os_version = version_info.OSType();
 #if defined(OS_ANDROID)
   application = AboutAndroidApp::GetAppLabel();
   application += " " + AboutAndroidApp::GetAppVersionName();
+  os_version += " " + GetUserAgentOSInfo();
 #endif
 
   std::map<std::string, string16> version_map;
-  version_map[kGoogleChromeVersion] = UTF8ToUTF16(browser_version);
   version_map[kApplicationVersion] = UTF8ToUTF16(application);
   version_map[kWebkitVersion] = UTF8ToUTF16(webkit_glue::GetWebKitVersion());
   version_map[kJavaScriptVersion] = UTF8ToUTF16(js_engine + " " + js_version);
+  version_map[kOSVersion] = UTF8ToUTF16(os_version);
 
   // OK to release, returning to Java.
   return ConvertProfileMapToJavaMap(env, version_map).Release();

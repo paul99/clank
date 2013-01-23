@@ -8,6 +8,12 @@
 <translation id="8130276680150879341">Afbryd forbindelsen til privat netværk</translation>
 <translation id="1058418043520174283"><ph name="INDEX"/> af <ph name="COUNT"/></translation>
 <translation id="4480627574828695486">Deaktiver denne konto...</translation>
+<translation id="2516632596252643567">&lt;p&gt;
+          Få adgang til de faner, som er åbne på din computer, lige her.
+          &lt;/p&gt;
+          &lt;p&gt;
+          Åbn blot Chrome på din computer, gå til menuen, og vælg &quot;Log ind på Chrome...&quot;
+          &lt;/p&gt;</translation>
 <translation id="7040807039050164757">&amp;Stavekontroller dette felt</translation>
 <translation id="778579833039460630">Ingen data modtaget</translation>
 <translation id="8791923223854254330">Administrer håndtering...</translation>
@@ -1467,15 +1473,6 @@ Offentlig eksponent (<ph name="PUBLIC_EXPONENT_NUM_BITS"/> bit):
 <translation id="6342069812937806050">Lige nu</translation>
 <translation id="5605716740717446121">Dit SIM-kort deaktiveres permanent, hvis du ikke kan angive den korrekte nøgle til oplåsning af PIN-kode. Forsøg tilbage: <ph name="TRIES_COUNT"/></translation>
 <translation id="8836712291807476944"><ph name="SAVED_BYTES"/> / <ph name="TOTAL_BYTES"/> bytes, afbrudt</translation>
-<translation id="3661943501691646627">&lt;p&gt;
-          Få adgang til de faner, som er åbne på din computer, lige her.
-          &lt;/p&gt;
-          &lt;p&gt;
-          Åbn blot Chrome på din computer, gå til menuen, og vælg &quot;Log ind på Chrome...&quot;
-          &lt;/p&gt;
-          &lt;p&gt;
-          Det er ret fedt.
-          &lt;/p&gt;</translation>
 <translation id="5502500733115278303">Importeret fra Firefox</translation>
 <translation id="569109051430110155">Find automatisk</translation>
 <translation id="4408599188496843485">H&amp;jælp</translation>
@@ -3087,6 +3084,7 @@ Offentlig eksponent (<ph name="PUBLIC_EXPONENT_NUM_BITS"/> bit):
 <translation id="8241707690549784388">Siden, du søger, benyttede oplysninger, du har indtastet. Vender du tilbage til denne side kan det betyde, at enhver handling, du har foretaget, skal gentages. Vil du fortsætte?</translation>
 <translation id="5359419173856026110">Viser en sides faktiske billedhastighed i billeder per sekund, når acceleration af hardware er aktiveret.</translation>
 <translation id="4104163789986725820">E&amp;ksporter...</translation>
+<translation id="5143814737375740231">Chrome til Android understøtter ikke dette plugin.</translation>
 <translation id="2113479184312716848">Åbn &amp;fil...</translation>
 <translation id="3314617171364900239">Der er flere gange søgt efter opdateringer til udvidelsen &quot;<ph name="EXTENSION_NAME"/>&quot; uden held.</translation>
 <translation id="4850458635498951714">Tilføj en enhed</translation>

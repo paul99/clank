@@ -71,7 +71,8 @@ using WebKit::WebVector;
 using WebKit::WebWidget;
 using content::RenderThread;
 
-RenderWidget::RenderWidget(WebKit::WebPopupType popup_type)
+RenderWidget::RenderWidget(WebKit::WebPopupType popup_type,
+                           const WebKit::WebScreenInfo& screen_info)
     : routing_id_(MSG_ROUTING_NONE),
       surface_id_(0),
       webwidget_(NULL),
@@ -84,7 +85,13 @@ RenderWidget::RenderWidget(WebKit::WebPopupType popup_type)
       using_asynchronous_swapbuffers_(false),
       num_swapbuffers_complete_pending_(0),
       did_show_(false),
+#if defined(OS_ANDROID)
+      // In m18, we only support TextureView version. RenderWidget starts as
+      // hidden until SurfaceTexture is attached.
+      is_hidden_(true),
+#else
       is_hidden_(false),
+#endif
       is_fullscreen_(false),
       needs_repainting_on_restore_(false),
       has_focus_(false),
@@ -104,7 +111,8 @@ RenderWidget::RenderWidget(WebKit::WebPopupType popup_type)
       is_accelerated_compositing_active_(false),
       animation_update_pending_(false),
       animation_task_posted_(false),
-      invalidation_task_posted_(false) {
+      invalidation_task_posted_(false),
+      screen_info_(screen_info) {
   RenderProcess::current()->AddRefProcess();
   DCHECK(RenderThread::Get());
   has_disable_gpu_vsync_switch_ = CommandLine::ForCurrentProcess()->HasSwitch(
@@ -125,9 +133,10 @@ RenderWidget::~RenderWidget() {
 
 // static
 RenderWidget* RenderWidget::Create(int32 opener_id,
-                                   WebKit::WebPopupType popup_type) {
+                                   WebKit::WebPopupType popup_type,
+                                   const WebKit::WebScreenInfo& screen_info) {
   DCHECK(opener_id != MSG_ROUTING_NONE);
-  scoped_refptr<RenderWidget> widget(new RenderWidget(popup_type));
+  scoped_refptr<RenderWidget> widget(new RenderWidget(popup_type, screen_info));
   widget->Init(opener_id);  // adds reference
   return widget;
 }
@@ -169,6 +178,11 @@ void RenderWidget::DoInit(int32 opener_id,
     // Take a reference on behalf of the RenderThread.  This will be balanced
     // when we receive ViewMsg_Close.
     AddRef();
+#if defined(OS_ANDROID)
+    // In m18, RenderWidget starts as hidden. But we can't tell RenderThread
+    // until it is added.
+    RenderThread::Get()->WidgetHidden();
+#endif
   } else {
     DCHECK(false);
   }
@@ -220,6 +234,8 @@ bool RenderWidget::OnMessageReceived(const IPC::Message& message) {
     IPC_MESSAGE_HANDLER(ViewMsg_Repaint, OnMsgRepaint)
     IPC_MESSAGE_HANDLER(ViewMsg_SetTextDirection, OnSetTextDirection)
     IPC_MESSAGE_HANDLER(ViewMsg_Move_ACK, OnRequestMoveAck)
+    IPC_MESSAGE_HANDLER(ViewMsg_RequestTextInputStateUpdate,
+                        OnRequestTextInputStateUpdate)
     IPC_MESSAGE_UNHANDLED(handled = false)
   IPC_END_MESSAGE_MAP()
   return handled;
@@ -588,11 +604,15 @@ void RenderWidget::SendTouchEndAck() {
   p.selection_end = text_input_info.selectionEnd;
   p.composition_start = text_input_info.compositionStart;
   p.composition_end = text_input_info.compositionEnd;
+  p.request_time = base::Time();
   GetSelectionBounds(&p.caret_rect, &p.caret_rect);
 
   IPC::Message* touch_ack =
       new ViewHostMsg_HandleTouchEnd_ACK(routing_id_, p);
   Send(touch_ack);
+
+  text_input_info_ = text_input_info;
+  text_input_type_ = p.type;
 }
 #endif
 
@@ -832,7 +852,7 @@ void RenderWidget::DoDeferredUpdate() {
   // The following two can result in further layout and possibly
   // enable GPU acceleration so they need to be called before any painting
   // is done.
-  UpdateTextInputState();
+  UpdateTextInputState(base::Time());
   UpdateSelectionBounds();
 
   // Suppress painting if nothing is dirty.  This has to be done after updating
@@ -1220,9 +1240,14 @@ WebRect RenderWidget::windowRect() {
   if (pending_window_rect_count_)
     return pending_window_rect_;
 
+#if defined(OS_ANDROID)
+  // This is a short-circuit of the original sync RPC call.
+  return gfx::Rect(0, 0, size_.width(), size_.height());
+#else
   gfx::Rect rect;
   Send(new ViewHostMsg_GetWindowRect(routing_id_, host_window_, &rect));
   return rect;
+#endif
 }
 
 void RenderWidget::setToolTipText(const WebKit::WebString& text,
@@ -1254,9 +1279,14 @@ WebRect RenderWidget::rootWindowRect() {
     return pending_window_rect_;
   }
 
+#if defined(OS_ANDROID)
+  // This is a short-circuit of the original sync RPC call.
+  return gfx::Rect(0, 0, size_.width(), size_.height());
+#else
   gfx::Rect rect;
   Send(new ViewHostMsg_GetRootWindowRect(routing_id_, host_window_, &rect));
   return rect;
+#endif
 }
 
 WebRect RenderWidget::windowResizerRect() {
@@ -1516,7 +1546,12 @@ void RenderWidget::set_next_paint_is_repaint_ack() {
   next_paint_flags_ |= ViewHostMsg_UpdateRect_Flags::IS_REPAINT_ACK;
 }
 
-void RenderWidget::UpdateTextInputState() {
+void RenderWidget::OnRequestTextInputStateUpdate(
+      const base::Time& request_time) {
+  UpdateTextInputState(request_time);
+}
+
+void RenderWidget::UpdateTextInputState(const base::Time& request_time) {
   if (!input_method_is_active_)
     return;
 
@@ -1534,7 +1569,7 @@ void RenderWidget::UpdateTextInputState() {
   }
 #else
   // Don't send text input state to browser if IME has already made the change.
-  if (!send_text_input_state_)
+  if (!send_text_input_state_ || num_composition_changes_in_flight_ > 0)
     return;
 
   WebKit::WebTextInputInfo new_info;
@@ -1547,7 +1582,8 @@ void RenderWidget::UpdateTextInputState() {
 
   // Only sends text input info and caret bounds to the browser process if they
   // are changed.
-  if (text_input_info_ != new_info || caret_bounds_ != new_caret_bounds) {
+  if (!request_time.is_null() ||
+      text_input_info_ != new_info || caret_bounds_ != new_caret_bounds) {
     ViewHostMsg_TextInputState_Params p;
     p.type = RenderWidget::WebKitToUiTextInputType(new_info.type);
     p.value = new_info.value.utf8();
@@ -1556,10 +1592,12 @@ void RenderWidget::UpdateTextInputState() {
     p.composition_start = new_info.compositionStart;
     p.composition_end = new_info.compositionEnd;
     p.caret_rect = new_caret_bounds;
+    p.request_time = request_time;
     Send(new ViewHostMsg_TextInputStateChanged(routing_id(), p));
 
     text_input_info_ = new_info;
     text_input_type_ = p.type;
+    caret_bounds_ = new_caret_bounds;
   }
 #endif
 }
@@ -1661,31 +1699,7 @@ bool RenderWidget::CanComposeInline() {
 }
 
 WebScreenInfo RenderWidget::screenInfo() {
-  WebScreenInfo results;
-#if defined(OS_ANDROID)
-  if (!Send(new ViewHostMsg_GetScreenInfo(routing_id_,
-          host_window_, &results))) {
-    // if the message is not sent, set the "results" to some reasonable default.
-    // this will avoid the assert when a RenderWidget is swapped out.
-    results.horizontalDPI = 160;
-    results.verticalDPI = 160;
-    results.depth = 32;
-    results.depthPerComponent = 8;
-  }
-#else
-  if (host_window_)
-    Send(new ViewHostMsg_GetScreenInfo(routing_id_, host_window_, &results));
-  else {
-    DLOG(WARNING) << "Unable to retrieve screen information, no host window";
-#if defined(USE_AURA)
-    // TODO(backer): Remove this a temporary workaround for crbug.com/111929
-    // once we get a proper fix.
-    results.availableRect.width = 1;
-    results.availableRect.height = 1;
-#endif
-  }
-#endif  // defined(OS_ANDROID)
-  return results;
+  return screen_info_;
 }
 
 void RenderWidget::resetInputMethod() {

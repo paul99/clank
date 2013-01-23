@@ -31,6 +31,7 @@
 #include "webkit/media/simple_data_source.h"
 #include "webkit/media/webmediaplayer_delegate.h"
 #include "webkit/media/webmediaplayer_proxy.h"
+#include "webkit/media/webmediaplayer_util.h"
 #include "webkit/media/webvideoframe_impl.h"
 
 using WebKit::WebCanvas;
@@ -69,25 +70,6 @@ const int kPlayerExtraMemory = 1024 * 1024;
 // the norms, we think 1/16x to 16x is a safe and useful range for now.
 const float kMinRate = 0.0625f;
 const float kMaxRate = 16.0f;
-
-// Platform independent method for converting and rounding floating point
-// seconds to an int64 timestamp.
-//
-// Refer to https://bugs.webkit.org/show_bug.cgi?id=52697 for details.
-base::TimeDelta ConvertSecondsToTimestamp(float seconds) {
-  float microseconds = seconds * base::Time::kMicrosecondsPerSecond;
-  float integer = ceilf(microseconds);
-  float difference = integer - microseconds;
-
-  // Round down if difference is large enough.
-  if ((microseconds > 0 && difference > 0.5f) ||
-      (microseconds <= 0 && difference >= 0.5f)) {
-    integer -= 1.0f;
-  }
-
-  // Now we can safely cast to int64 microseconds.
-  return base::TimeDelta::FromMicroseconds(static_cast<int64>(integer));
-}
 
 }  // namespace
 

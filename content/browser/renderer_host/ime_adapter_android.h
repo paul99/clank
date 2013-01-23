@@ -43,7 +43,7 @@ class ImeAdapterAndroid {
                              long timestamp_seconds,
                              int native_key_code,
                              int unicode_char);
-  void SetComposingText(JNIEnv*, jobject, jstring text);
+  void SetComposingText(JNIEnv*, jobject, jstring text, int new_cursor_pos);
   void CommitText(JNIEnv*, jobject, jstring text);
   void AttachImeAdapter(JNIEnv*, jobject java_object);
   void ReplaceText(JNIEnv*, jobject, jstring text);
@@ -56,6 +56,7 @@ class ImeAdapterAndroid {
   void Cut(JNIEnv*, jobject);
   void Copy(JNIEnv*, jobject);
   void Paste(JNIEnv*, jobject);
+  void RequestTextInputStateUpdate(JNIEnv*, jobject, jlong request_time);
 
   // Called from native -> java
   void CancelComposition();

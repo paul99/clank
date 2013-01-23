@@ -2,10 +2,6 @@
 # Use of this source code is governed by a BSD-style license that can be
 # found in the LICENSE file.
 {
-  'target_defaults': {
-    'cflags!': [ '-Werror' ],
-    'cflags': [ '-Wno-error' ],
-  },
   'variables': {
     'chromium_code': 1,
   },
@@ -60,6 +56,8 @@
         'chrome/glui_functor_renderer.h',
         'chrome/google_auto_login.cc',
         'chrome/google_auto_login.h',
+        'chrome/google_location_settings_helper.cc',
+        'chrome/google_location_settings_helper.h',
         'chrome/gpu_profiler.cc',
         'chrome/gpu_profiler.h',
         'chrome/infobar_android.cc',
@@ -113,8 +111,6 @@
         '../../../content/browser/android/touch_point.h',
         '../../../content/browser/android/trace_event_binding.cc',
         '../../../content/browser/android/trace_event_binding.h',
-        '../../../content/browser/android/user_agent.cc',
-        '../../../content/browser/android/user_agent.h',
         '../../../content/browser/android/v8_startup_data_mapper.cc',
         '../../../content/browser/android/v8_startup_data_mapper.h',
         'third_party/etc1.cc',
@@ -196,6 +192,21 @@
             '<@(_outputs)',
           ],
         },
+        {
+          'action_name': 'clank_enable_stack_libchromeview_stable',
+          'inputs': [
+            '<(SHARED_LIB_DIR)/libchromeview.so',
+          ],
+          'outputs': [
+            '<(android_product_out)/symbols/data/data/com.android.chrome/lib/libchromeview.so',
+          ],
+          'action': [
+            'ln',
+            '-sf',
+            '../../../../system/lib/libchromeview.so',
+            '<@(_outputs)',
+          ],
+        },
       ]
     },
     {
@@ -205,7 +216,6 @@
         '../../../chrome/chrome_resources.gyp:packed_resources',
         '../../../chrome/chrome_resources.gyp:packed_extra_resources',
         'clank_native',
-        'clank_pepflash',
       ],
       # TOOD(benm): Once gyp bug 255 is fixed, (see
       # http://code.google.com/p/gyp/issues/detail?id=255), we can collapse
@@ -719,64 +729,6 @@
           'action': [
             '<(DEPTH)/clank/build/clank_mmm',
             'clank/java/apps/chrome',
-          ],
-        },
-      ],
-    },
-    {
-      'target_name': 'clank_pepflash',
-      'type': 'none',
-      'copies': [
-        {
-          'destination': '<(android_product_out)/symbols/system/lib/',
-          'files': [
-            '../../java/apps/pepflash/ext/libpepflashplayer.so',
-          ],
-        },
-      ],
-      'actions': [
-        {
-          'action_name': 'clank_install_pepflash',
-          'inputs': [
-            '../../java/apps/pepflash/ext/libpepflashplayer.so',
-          ],
-          'outputs': [
-            '<(android_product_out)/obj/lib/libpepflashplayer.so',
-          ],
-          'action': [
-            '<!(/bin/echo -n $STRIP)',
-            '-Sx',
-            '<@(_inputs)',
-            '-o',
-            '<@(_outputs)',
-          ],
-        },
-        {
-          'action_name': 'clank_enable_stack_libpepflash',
-          'inputs': [
-            '../../java/apps/pepflash/ext/libpepflashplayer.so',
-          ],
-          'outputs': [
-            '<(android_product_out)/symbols/data/data/com.adobe.pepflashplayer/lib/libpepflashplayer.so',
-          ],
-          'action': [
-            'ln',
-            '-sf',
-            '../../../../system/lib/libpepflashplayer.so',
-            '<@(_outputs)',
-          ],
-        },
-        {
-          'action_name': 'pepper_pepflash_generate_apk',
-          'inputs': [
-            '<(android_product_out)/obj/lib/libpepflashplayer.so',
-          ],
-          'outputs': [
-            '<(android_product_out)/data/app/pepflashplayer.apk',
-          ],
-          'action': [
-            '<(DEPTH)/clank/build/clank_mmm',
-            'clank/java/apps/pepflash',
           ],
         },
       ],

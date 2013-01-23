@@ -497,12 +497,17 @@ ChromeWebUIControllerFactory::~ChromeWebUIControllerFactory() {
 
 RefCountedMemory* ChromeWebUIControllerFactory::GetFaviconResourceBytes(
     const GURL& page_url) const {
-#if !defined(ANDROID_BINSIZE_HACK)  // Bookmarks are part of NTP on Android.
   // The bookmark manager is a chrome extension, so we have to check for it
   // before we check for extension scheme.
-  if (page_url.host() == extension_misc::kBookmarkManagerId)
+  if (page_url.host() == extension_misc::kBookmarkManagerId) {
+#if !defined(ANDROID_BINSIZE_HACK)  // Bookmarks are part of NTP on Android.
     return BookmarksUI::GetFaviconResourceBytes();
+#else
+    // The bookmark manager could be bookmarked, in which case return right
+    // away so we don't hit the NOTREACHED that's coming next.
+    return NULL;
 #endif
+  }
 
   // The extension scheme is handled in GetFaviconForURL.
   if (page_url.SchemeIs(chrome::kExtensionScheme)) {

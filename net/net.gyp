@@ -39,6 +39,7 @@
         'net_resources',
       ],
       'sources': [
+        'android/cookies_retriever.h',
         'android/network_change_notifier_factory.cc',
         'android/network_change_notifier_factory.h',
         'android/network_change_notifier.cc',

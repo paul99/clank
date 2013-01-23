@@ -8,6 +8,12 @@
 <translation id="8130276680150879341">中斷私人網路連線</translation>
 <translation id="1058418043520174283">第 <ph name="INDEX"/> 個，共 <ph name="COUNT"/> 個</translation>
 <translation id="4480627574828695486">中斷這個帳戶的連線...</translation>
+<translation id="2516632596252643567">&lt;p&gt;
+          您可以在這裡使用您在電腦上開啟的所有分頁。
+          &lt;/p&gt;
+          &lt;p&gt;
+          只需在電腦上開啟 Chrome，前往選單，然後選取 [登入 Chrome...] 即可。
+          &lt;/p&gt;</translation>
 <translation id="7040807039050164757">檢查此欄位的拼字(&amp;C)</translation>
 <translation id="778579833039460630">沒有收到資料</translation>
 <translation id="8791923223854254330">管理處理常式...</translation>
@@ -589,7 +595,7 @@
 <translation id="469553822757430352">無效的應用程式專用密碼。</translation>
 <translation id="2493021387995458222">一次選取一字</translation>
 <translation id="5279600392753459966">全部封鎖</translation>
-<translation id="6846298663435243399">載入中...</translation>
+<translation id="6846298663435243399">載入中…</translation>
 <translation id="5723508132121499792">沒有執行中的背景應用程式</translation>
 <translation id="7392915005464253525">重新開啟已關閉視窗(&amp;E)</translation>
 <translation id="7376443945512294291">為開啟的分頁啟用同步處理功能</translation>
@@ -827,7 +833,7 @@
 <translation id="8995097277324405020">未登入</translation>
 <translation id="4052120076834320548">最小</translation>
 <translation id="6623138136890659562">在 [網路] 選單中顯示私人網路，用以啟用 VPN 連線。</translation>
-<translation id="8969837897925075737">正在驗證系統更新...</translation>
+<translation id="8969837897925075737">正在驗證系統更新…</translation>
 <translation id="4045024958826158406">清除記憶體</translation>
 <translation id="3393716657345709557">在快取中找不到您所要求的項目。</translation>
 <translation id="7191454237977785534">另存新檔</translation>
@@ -1104,7 +1110,7 @@
 <translation id="189210018541388520">開啟全螢幕</translation>
 <translation id="8795668016723474529">新增信用卡</translation>
 <translation id="5860033963881614850">關閉</translation>
-<translation id="3956882961292411849">正在載入行動數據方案資訊，請稍候...</translation>
+<translation id="3956882961292411849">正在載入行動數據方案資訊，請稍候…</translation>
 <translation id="689050928053557380">購買數據方案...</translation>
 <translation id="4235618124995926194">包含這封電子郵件：</translation>
 <translation id="4874539263382920044">標題必須包含至少 1 個字元</translation>
@@ -1140,7 +1146,7 @@
 <translation id="7473891865547856676">不用了，謝謝</translation>
 <translation id="49896407730300355">逆時針旋轉(&amp;O)</translation>
 <translation id="5166184058188456766">繼續使用 <ph name="PREV_HOMEPAGE"/></translation>
-<translation id="4366553784388256545">正在註冊裝置，請稍候...</translation>
+<translation id="4366553784388256545">正在註冊裝置，請稍候…</translation>
 <translation id="5745056705311424885">偵測到 USB 隨身碟</translation>
 <translation id="7651319298187296870">需要使用者憑證才能登入。</translation>
 <translation id="626568068055008686">密碼不正確或檔案已毀損。</translation>
@@ -1260,7 +1266,7 @@
 <translation id="39964277676607559">無法載入內容指令碼的 javascript「<ph name="RELATIVE_PATH"/>」。</translation>
 <translation id="7447215573579476012">您的網路連線已中斷，因此系統無法存取位於 <ph name="HOST_NAME"/> 的應用程式。網路連線恢復後，網頁即會載入。<ph name="LINE_BREAK"/></translation>
 <translation id="4284105660453474798">您確定要刪除「$1」嗎？</translation>
-<translation id="4378551569595875038">連線中...</translation>
+<translation id="4378551569595875038">連線中…</translation>
 <translation id="7029809446516969842">密碼</translation>
 <translation id="8053278772142718589">PKCS #12 檔案</translation>
 <translation id="6662016084451426657">同步功能發生錯誤：請與管理員聯絡，要求啟用同步處理功能。</translation>
@@ -1279,7 +1285,7 @@
 <translation id="1335588927966684346">公用程式：</translation>
 <translation id="7857823885309308051">這可能要花 1 分鐘的時間...</translation>
 <translation id="662870454757950142">密碼格式不正確。</translation>
-<translation id="370665806235115550">載入中...</translation>
+<translation id="370665806235115550">載入中…</translation>
 <translation id="2580924999637585241">總計：<ph name="NUMBER_OF_SHEETS"/> 張，<ph name="SHEETS_LABEL"/></translation>
 <translation id="4899063388368595117">請連上網際網路，完成 Chromebook 設定程序。</translation>
 <translation id="254416073296957292">語言設定(&amp;L)...</translation>
@@ -1456,7 +1462,6 @@
 <translation id="6342069812937806050">剛剛完成</translation>
 <translation id="5605716740717446121">如果您無法輸入正確的 PIN 解鎖金鑰，則會永久停用 SIM 卡。您剩下 <ph name="TRIES_COUNT"/> 次嘗試的機會</translation>
 <translation id="8836712291807476944"><ph name="SAVED_BYTES"/> 位元組 / <ph name="TOTAL_BYTES"/> 位元組，已中斷</translation>
-<translation id="3661943501691646627">&lt;p&gt;您可在這裡使用您在電腦上開啟的所有分頁。&lt;/p&gt; &lt;p&gt;只需在電腦上開啟 Chrome，前往選單，然後選取 [登入 Chrome...] 即可。&lt;/p&gt; &lt;p&gt;這個功能真的很棒哦！&lt;/p&gt;</translation>
 <translation id="5502500733115278303">從 Firefox 匯入的書籤</translation>
 <translation id="569109051430110155">自動偵測</translation>
 <translation id="4408599188496843485">說明(&amp;E)</translation>
@@ -1629,7 +1634,7 @@
 <translation id="50960180632766478">剩下 <ph name="NUMBER_FEW"/> 分鐘</translation>
 <translation id="3174168572213147020">島</translation>
 <translation id="748138892655239008">憑證基本限制</translation>
-<translation id="457386861538956877">更多...</translation>
+<translation id="457386861538956877">更多…</translation>
 <translation id="1950295184970569138">* Google 個人資料相片 (載入中)</translation>
 <translation id="8063491445163840780">啟用分頁 4</translation>
 <translation id="2322193970951063277">頁首及頁尾</translation>
@@ -1878,7 +1883,7 @@
 <translation id="6312403991423642364">不明的網路錯誤</translation>
 <translation id="751377616343077236">憑證名稱</translation>
 <translation id="7154108546743862496">更多資訊</translation>
-<translation id="8637688295594795546">可安裝系統更新，正在準備下載...</translation>
+<translation id="8637688295594795546">可安裝系統更新，正在準備下載…</translation>
 <translation id="6560243383948812749">繼續使用 <ph name="PREV_ENGINE"/></translation>
 <translation id="3898394061528036117">您要使用哪個服務？</translation>
 <translation id="5148652308299789060">停用 3D 軟體點陣圖轉換器</translation>
@@ -2403,7 +2408,7 @@
 <translation id="8813873272012220470">啟用背景檢查，以在偵測到不相容的軟體 (例如：造成瀏覽器當機的第三方模組) 時顯示警告。</translation>
 <translation id="3660234220361471169">不受信任</translation>
 <translation id="5020734739305654865">以您的下列帳戶登入：</translation>
-<translation id="2679385451463308372">使用系統對話方塊列印...</translation>
+<translation id="2679385451463308372">使用系統對話方塊列印…</translation>
 <translation id="7871467315479343122">協助改善自動填入功能。</translation>
 <translation id="899457468947881820">通訊協定處理常式</translation>
 <translation id="7414887922320653780">剩下 <ph name="NUMBER_ONE"/> 小時</translation>
@@ -2987,7 +2992,7 @@
 <translation id="8562413501751825163">在載入前關閉 Firefox</translation>
 <translation id="2448046586580826824">安全型 HTTP Proxy</translation>
 <translation id="4032534284272647190">瀏覽 <ph name="URL"/> 遭到拒絕。</translation>
-<translation id="4928569512886388887">正在完成系統更新...</translation>
+<translation id="4928569512886388887">正在完成系統更新…</translation>
 <translation id="3129173833825111527">左邊界</translation>
 <translation id="4309420042698375243"><ph name="NUM_KILOBYTES"/> K (<ph name="NUM_KILOBYTES_LIVE"/> K 作用中)</translation>
 <translation id="5554573843028719904">其他 Wi-Fi 網路...</translation>
@@ -3082,6 +3087,7 @@
 <translation id="8241707690549784388">您尋找的網頁使用了您輸入的資料。返回該頁會重複您剛才的行動。您確定要繼續嗎？</translation>
 <translation id="5359419173856026110">硬體加速功能啟用時，顯示頁面的實際畫面播放速率 (每秒影格數)。</translation>
 <translation id="4104163789986725820">匯出(&amp;X)...</translation>
+<translation id="5143814737375740231">Chrome for Android 不支援這個外掛程式。</translation>
 <translation id="2113479184312716848">開啟檔案(&amp;F)...</translation>
 <translation id="3314617171364900239">檢查「<ph name="EXTENSION_NAME"/>」擴充功能更新時多次失敗，無法進行。</translation>
 <translation id="4850458635498951714">新增裝置</translation>
@@ -3268,7 +3274,7 @@
 <translation id="1902576642799138955">有效期間</translation>
 <translation id="2634682188025601075">我瞭解造訪這個網站可能會損害我的行動裝置。</translation>
 <translation id="4910021444507283344">WebGL</translation>
-<translation id="7988324688042446538">桌面版書籤</translation>
+<translation id="7988324688042446538">電腦版書籤</translation>
 <translation id="6692173217867674490">通關密語有誤</translation>
 <translation id="5550431144454300634">自動修正輸入錯誤</translation>
 <translation id="3308006649705061278">機構單位 (OU)</translation>
@@ -3357,7 +3363,7 @@
 <translation id="5679399270800798467">「<ph name="PRODUCT_NAME"/>」的「<ph name="EXTENSION_NAME"/>」擴充功能目前正在錄製語音辨識的語音。</translation>
 <translation id="8615618338313291042">無痕模式應用程式：<ph name="APP_NAME"/></translation>
 <translation id="978146274692397928">初始標點符號寬度為全形</translation>
-<translation id="106701514854093668">桌面版書籤</translation>
+<translation id="106701514854093668">電腦版書籤</translation>
 <translation id="8155798677707647270">安裝新版本...</translation>
 <translation id="2304783958703511257">進階設定</translation>
 <translation id="6886871292305414135">在新分頁中開啟連結(&amp;T)</translation>

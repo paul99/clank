@@ -10,16 +10,19 @@ import android.content.Intent;
 import android.content.ServiceConnection;
 import android.os.AsyncTask;
 import android.os.Bundle;
+import android.os.Handler;
 import android.os.IBinder;
 import android.os.Looper;
 import android.os.ParcelFileDescriptor;
+import android.os.RemoteException;
 import android.util.Log;
 
+import java.io.IOException;
 import java.util.concurrent.atomic.AtomicBoolean;
 
 import org.chromium.base.CalledByNative;
 
-class SandboxedProcessConnection {
+class SandboxedProcessConnection implements ServiceConnection {
     interface DeathCallback {
         void onSandboxedProcessDied(int pid);
     }
@@ -43,99 +46,33 @@ class SandboxedProcessConnection {
     private static class ConnectionParams {
         final String[] mCommandLine;
         final int mIpcFd;
-        final int mCrashFd;
+        final int mMinidumpFd;
+        final int mChromePakFd;
+        final int mLocalePakFd;
         final ISandboxedProcessCallback mCallback;
         final Runnable mOnConnectionCallback;
 
         ConnectionParams(
                 String[] commandLine,
                 int ipcFd,
-                int crashFd,
+                int minidumpFd,
+                int chromePakFd,
+                int localePakFd,
                 ISandboxedProcessCallback callback,
                 Runnable onConnectionCallback) {
             mCommandLine = commandLine;
             mIpcFd = ipcFd;
-            mCrashFd = crashFd;
+            mMinidumpFd = minidumpFd;
+            mChromePakFd = chromePakFd;
+            mLocalePakFd = localePakFd;
             mCallback = callback;
             mOnConnectionCallback = onConnectionCallback;
-        }
-    };
-
-    // Implement the ServiceConnection as an inner class, so it can stem the service
-    // callbacks when cancelled or unbound.
-    class AsyncBoundServiceConnection extends AsyncTask<Intent, Void, Boolean>
-            implements ServiceConnection {
-        private boolean mIsDestroyed = false;
-        private AtomicBoolean mIsBound = new AtomicBoolean(false);
-
-        // AsyncTask
-        @Override
-        protected Boolean doInBackground(Intent... intents) {
-            boolean isBound = mContext.bindService(intents[0], this, Context.BIND_AUTO_CREATE);
-            mIsBound.set(isBound);
-            return isBound;
-        }
-
-        @Override
-        protected void onPostExecute(Boolean boundOK) {
-            synchronized (SandboxedProcessConnection.this) {
-                if (!boundOK && !mIsDestroyed) {
-                    SandboxedProcessConnection.this.onBindFailed();
-                }
-                // else: bind will complete asynchronously with a callback to onServiceConnected().
-            }
-        }
-
-        @Override
-        protected void onCancelled(Boolean boundOK) {
-            // According to {@link AsyncTask#onCancelled(Object)}, the Object can be null.
-            if (boundOK != null && boundOK) {
-                unBindIfAble();
-            }
-        }
-
-        /**
-         * Unbinds this connection if it hasn't already been unbound. There's a guard to check that
-         * we haven't already been unbound because the Browser process cancelling a connection can
-         * race with something else (Android?) cancelling the connection.
-         */
-        private void unBindIfAble() {
-            if (mIsBound.getAndSet(false)) {
-                mContext.unbindService(this);
-            }
-        }
-
-        // ServiceConnection
-        @Override
-        public void onServiceConnected(ComponentName name, IBinder service) {
-            synchronized (SandboxedProcessConnection.this) {
-                if (!mIsDestroyed) {
-                    SandboxedProcessConnection.this.onServiceConnected(name, service);
-                }
-            }
-        }
-
-        @Override
-        public void onServiceDisconnected(ComponentName name) {
-            synchronized (SandboxedProcessConnection.this) {
-                if (!mIsDestroyed) {
-                    SandboxedProcessConnection.this.onServiceDisconnected(name);
-                }
-            }
-        }
-
-        public void destroy() {
-            assert Thread.holdsLock(SandboxedProcessConnection.this);
-            if (!cancel(false)) {
-                unBindIfAble();
-            }
-            mIsDestroyed = true;
         }
     }
 
     // This is only valid while the connection is being established.
     private ConnectionParams mConnectionParams;
-    private AsyncBoundServiceConnection mServiceConnection;
+    private boolean mIsBound;
 
     SandboxedProcessConnection(Context context, int number,
             SandboxedProcessConnection.DeathCallback deathCallback) {
@@ -164,19 +101,18 @@ class SandboxedProcessConnection {
      */
     synchronized void bind(String[] commandLine) {
         TraceEvent.begin();
+        assert !ThreadUtils.runningOnUiThread();
         final Intent intent = new Intent(
                 "org.chromium.content.browser.ISandboxedProcessService" + mServiceNumber);
         intent.setPackage(mContext.getPackageName());
         if (commandLine != null) {
             intent.putExtra(SandboxedProcessService.EXTRA_COMMAND_LINE, commandLine);
         }
-        // TODO(joth): By the docs, AsyncTasks should only be created on the UI thread, but
-        // bind() currently 'may' be called on any thread. In practice it's only ever called
-        // from UI, but it's not guaranteed. See http://b/5694925.
-        assert Looper.getMainLooper() == Looper.myLooper();
-        // On completion this will call back to onServiceConnected().
-        mServiceConnection = new AsyncBoundServiceConnection();
-        mServiceConnection.executeOnExecutor(AsyncTask.THREAD_POOL_EXECUTOR, intent);
+
+        mIsBound = mContext.bindService(intent, this, Context.BIND_AUTO_CREATE);
+        if (!mIsBound) {
+            onBindFailed();
+        }
         TraceEvent.end();
     }
 
@@ -185,20 +121,22 @@ class SandboxedProcessConnection {
      * This establishes the parameters that were not already supplied in bind.
      * @param commandLine (Optional) will be ignored if the command line was already sent in bind()
      * @param ipcFd The file descriptor that will be used by the sandbox process for IPC.
-     * @param crashFd (Optional) file descriptor that will be used for crash dumps.
+     * @param minidumpFd (Optional) file descriptor that will be used for crash dumps.
      * @param callback Used for status updates regarding this process connection.
      * @param onConnectionCallback will be run when the connection is setup and ready to use.
      */
     synchronized void setupConnection(
             String[] commandLine,
             int ipcFd,
-            int crashFd,
+            int minidumpFd,
+            int chromePakFd,
+            int localePakFd,
             ISandboxedProcessCallback callback,
             Runnable onConnectionCallback) {
         TraceEvent.begin();
         assert mConnectionParams == null;
-        mConnectionParams = new ConnectionParams(commandLine, ipcFd, crashFd, callback,
-                onConnectionCallback);
+        mConnectionParams = new ConnectionParams(commandLine, ipcFd, minidumpFd, chromePakFd,
+                localePakFd, callback, onConnectionCallback);
         if (mServiceConnectComplete) {
             doConnectionSetup();
         }
@@ -209,9 +147,9 @@ class SandboxedProcessConnection {
      * Unbind the ISandboxedProcessService. It is safe to call this multiple times.
      */
     synchronized void unbind() {
-        if (mServiceConnection != null) {
-            mServiceConnection.destroy();
-            mServiceConnection = null;
+        if (mIsBound) {
+            mContext.unbindService(this);
+            mIsBound = false;
         }
         if (mService != null) {
             if (mHighPriorityConnection != null) {
@@ -225,8 +163,8 @@ class SandboxedProcessConnection {
     }
 
     // Called on the main thread to notify that the service is connected.
-    private void onServiceConnected(ComponentName className, IBinder service) {
-        assert Thread.holdsLock(this);
+    @Override
+    public void onServiceConnected(ComponentName className, IBinder service) {
         TraceEvent.begin();
         mServiceConnectComplete = true;
         mService = ISandboxedProcessService.Stub.asInterface(service);
@@ -238,7 +176,6 @@ class SandboxedProcessConnection {
 
     // Called on the main thread to notify that the bindService() call failed (returned false).
     private void onBindFailed() {
-        assert Thread.holdsLock(this);
         mServiceConnectComplete = true;
         if (mConnectionParams != null) {
             doConnectionSetup();
@@ -258,30 +195,78 @@ class SandboxedProcessConnection {
         if (onConnectionCallback == null) {
             unbind();
         } else if (mService != null) {
-            try {
-                ParcelFileDescriptor ipcFdParcel =
-                    ParcelFileDescriptor.fromFd(mConnectionParams.mIpcFd);
+            ParcelFileDescriptor ipcFdParcel = null;
+            ParcelFileDescriptor chromePakFdParcel = null;
+            ParcelFileDescriptor localePakFdParcel = null;
+            ParcelFileDescriptor minidumpFdParcel = null;
+
+            // We create all Parcels even if some FDs are invalid to make sure all valid FDs get
+            // closed.
+            if (mConnectionParams.mIpcFd != -1) {
+                // The IPC FD is owned by the native ChildProcessLauncher::Context(), so we use
+                // fromFD (instead of adoptFD) which duplicates the FD.
+                try {
+                    ipcFdParcel = ParcelFileDescriptor.fromFd(mConnectionParams.mIpcFd);
+                } catch (IOException ioe) {
+                    Log.e(TAG, "Failed to start a new renderer process, invalid IPC FD provided.",
+                          ioe);
+                }
+            }
+
+            if (mConnectionParams.mChromePakFd != -1) {
+                chromePakFdParcel = ParcelFileDescriptor.adoptFd(mConnectionParams.mChromePakFd);
+            }
+
+            if (mConnectionParams.mLocalePakFd != -1) {
+                localePakFdParcel = ParcelFileDescriptor.adoptFd(mConnectionParams.mLocalePakFd);
+            }
+
+            if (mConnectionParams.mMinidumpFd != -1) {
+                // The minidump FD is owned by the browser process and closed when the render
+                // process terminates.
+                try {
+                    minidumpFdParcel = ParcelFileDescriptor.fromFd(mConnectionParams.mMinidumpFd);
+                }  catch (IOException ioe) {
+                    Log.e(TAG, "Failed to create parcel from minidump FD. Crash reporting will "
+                            + "be disabled.", ioe);
+                }
+            } else {
+                Log.w(TAG, "No minidump FD provided, native crash reporting is disabled.");
+            }
+
+            if (ipcFdParcel != null && chromePakFdParcel != null && localePakFdParcel != null) {
                 Bundle bundle = new Bundle();
                 bundle.putStringArray(SandboxedProcessService.EXTRA_COMMAND_LINE,
-                        mConnectionParams.mCommandLine);
+                                      mConnectionParams.mCommandLine);
                 bundle.putParcelable(SandboxedProcessService.EXTRA_IPC_FD, ipcFdParcel);
-
-                try {
-                    ParcelFileDescriptor crashFdParcel =
-                        ParcelFileDescriptor.fromFd(mConnectionParams.mCrashFd);
-                    bundle.putParcelable(SandboxedProcessService.EXTRA_CRASH_FD, crashFdParcel);
-                  // We will let the GC close the crash ParcelFileDescriptor.
-                } catch (java.io.IOException e) {
-                    Log.w(TAG, "Invalid crash Fd. Native crash reporting will be disabled.");
+                bundle.putParcelable(SandboxedProcessService.EXTRA_CHROME_PAK_FD,
+                                     chromePakFdParcel);
+                bundle.putParcelable(SandboxedProcessService.EXTRA_LOCALE_PAK_FD,
+                                     localePakFdParcel);
+                if (minidumpFdParcel != null) {
+                    bundle.putParcelable(SandboxedProcessService.EXTRA_MINIDUMP_FD,
+                                         minidumpFdParcel);
                 }
+                try {
+                    mPID = mService.setupConnection(bundle, mConnectionParams.mCallback);
+                } catch(RemoteException e) {
+                    Log.w(TAG, "Exception when trying to call service method.", e);
+                }
+            } else {
+                Log.e(TAG, "Failed to start a new renderer process, invalid FD(s) provided: "
+                      + " ipc=" + mConnectionParams.mIpcFd
+                      + " chromePack=" + mConnectionParams.mChromePakFd
+                      + " localePak=" + mConnectionParams.mLocalePakFd);
+            }
 
-                mPID = mService.setupConnection(bundle, mConnectionParams.mCallback);
-                ipcFdParcel.close();  // We proactivley close now rather than wait for GC & finalizer.
-            } catch(java.io.IOException e) {
-                Log.w(TAG, "Invalid ipc FD.");
-            } catch(android.os.RemoteException e) {
-                Log.w(TAG, "Exception when trying to call service method: "
-                        + e);
+            try {
+                // We proactivley close now rather than wait for GC & finalizer.
+                if (ipcFdParcel != null) ipcFdParcel.close();
+                if (chromePakFdParcel != null) chromePakFdParcel.close();
+                if (localePakFdParcel != null) localePakFdParcel.close();
+                if (minidumpFdParcel != null) minidumpFdParcel.close();
+            } catch (IOException ioe) {
+                Log.e(TAG, "Failed to close FD when starting renderer process.", ioe);
             }
         }
         mConnectionParams = null;
@@ -292,8 +277,8 @@ class SandboxedProcessConnection {
     }
 
     // Called on the main thread to notify that the sandboxed service did not disconnect gracefully.
-    private void onServiceDisconnected(ComponentName className) {
-        assert Thread.holdsLock(this);
+    @Override
+    public void onServiceDisconnected(ComponentName className) {
         int pid = mPID;  // Stash pid & connection callback since unbind() will clear them.
         Runnable onConnectionCallback =
             mConnectionParams != null ? mConnectionParams.mOnConnectionCallback : null;

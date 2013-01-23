@@ -15,9 +15,11 @@ typedef WebAccessibility::FloatAttribute FloatAttribute;
 typedef WebAccessibility::IntAttribute IntAttribute;
 typedef WebAccessibility::StringAttribute StringAttribute;
 
-#if ((defined(OS_POSIX) && !defined(OS_MACOSX)) || defined(USE_AURA)) && !defined(OS_ANDROID)
+#if ((defined(OS_POSIX) && !defined(OS_MACOSX)) || defined(USE_AURA))
 // There's no OS-specific implementation of BrowserAccessibilityManager
-// on Unix, so just instantiate the base class.
+// on Unix, so just instantiate the base class. On Android, this is also
+// required to link the instrumented version of the code when
+// "order_profiling=1" is part of your GYP_DEFINES
 // static
 BrowserAccessibility* BrowserAccessibility::Create() {
   return new BrowserAccessibility();

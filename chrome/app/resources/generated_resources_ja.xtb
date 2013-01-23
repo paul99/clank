@@ -8,6 +8,12 @@
 <translation id="8130276680150879341">プライベート ネットワークとの接続を切断</translation>
 <translation id="1058418043520174283"><ph name="COUNT"/> 件のうち <ph name="INDEX"/> 番目</translation>
 <translation id="4480627574828695486">このアカウントとの同期を停止...</translation>
+<translation id="2516632596252643567">&lt;p&gt;
+          パソコンで開いたタブにこちらからアクセスできます。
+          &lt;/p&gt;
+          &lt;p&gt;
+          パソコンでChromeを開き、メニューから[Chromeにログイン...]を選択します。
+          &lt;/p&gt;</translation>
 <translation id="7040807039050164757">このフィールドのスペルをチェック(&amp;C)</translation>
 <translation id="778579833039460630">データを受信して​​いません</translation>
 <translation id="8791923223854254330">ハンドラを管理...</translation>
@@ -1448,15 +1454,6 @@
 <translation id="6342069812937806050">たった今</translation>
 <translation id="5605716740717446121">正しい PIN ロック解除キーを入力できない場合、SIM カードは完全に無効になります。あと <ph name="TRIES_COUNT"/> 回入力できます。</translation>
 <translation id="8836712291807476944"><ph name="SAVED_BYTES"/> / <ph name="TOTAL_BYTES"/> バイトが完了したところで中断されました</translation>
-<translation id="3661943501691646627">&lt;p&gt;
-          パソコンで開いたタブにこちらからアクセスできます。
-          &lt;/p&gt;
-          &lt;p&gt;
-          パソコンで Chrome を開き、メニューから [Chrome にログイン...] を選択します。
-          &lt;/p&gt;
-          &lt;p&gt;
-          タブが同期され、モバイルで利用できるようになります。
-          &lt;/p&gt;</translation>
 <translation id="5502500733115278303">Firefox ブックマーク</translation>
 <translation id="569109051430110155">自動検出</translation>
 <translation id="4408599188496843485">ヘルプ(&amp;H)</translation>
@@ -2632,7 +2629,7 @@ Shift+検索キーを押すとキャンセルできます</translation>
 <translation id="580571955903695899">タイトルで並べ替え</translation>
 <translation id="5230516054153933099">ウインドウ</translation>
 <translation id="1799497982892676838">Google ダッシュボードで同期データを管理する</translation>
-<translation id="951981865514037445"><ph name="URL"/> では端末の現在地情報が必要となります。</translation>
+<translation id="951981865514037445"><ph name="URL"/> が現在地情報を求めています。</translation>
 <translation id="7554791636758816595">新しいタブ</translation>
 <translation id="6928853950228839340">テクスチャへの合成</translation>
 <translation id="8446084853024828633">ゲストセッションを開始する</translation>
@@ -3086,6 +3083,7 @@ Shift+検索キーを押すとキャンセルできます</translation>
 <translation id="8241707690549784388">検索しているページは、入力した情報を使用しています。このページに戻った場合、操作のやり直しが発生する可能性があります。続行しますか？</translation>
 <translation id="5359419173856026110">ハードウェア アクセラレーションが有効になっているときに、ページの実際のフレーム レート（1 秒あたりのフレーム数）を表示します。</translation>
 <translation id="4104163789986725820">エクスポート(&amp;X)</translation>
+<translation id="5143814737375740231">Chrome for Androidはこのプラグインに対応していません。</translation>
 <translation id="2113479184312716848">ファイルを開く（&amp;F）...</translation>
 <translation id="3314617171364900239">拡張機能「<ph name="EXTENSION_NAME"/>」の更新チェックが繰り返し失敗しました。</translation>
 <translation id="4850458635498951714">デバイスを追加</translation>

@@ -7,6 +7,7 @@ package org.chromium.content.browser;
 import android.content.Context;
 import android.graphics.Canvas;
 import android.graphics.Bitmap;
+import android.graphics.Color;
 import android.graphics.Matrix;
 import android.graphics.Paint;
 import android.graphics.Rect;
@@ -20,11 +21,13 @@ import android.view.View;
  * contents are not available. This happens when a resize is in progress.
  */
 class PlaceholderView extends View {
+    private static final boolean DEBUG_SHOW_PLACEHOLDER_VIEW_ACTIVE = false;
+
     private Bitmap mBitmap;
-    private Paint mBgPaint = new Paint();
-    private Rect mSurfaceRect = new Rect();
+    private final Paint mBgPaint = new Paint();
+    private final Rect mSurfaceRect = new Rect();
     private boolean mActive = false;
-    private ChromeView mChromeView;
+    private final ChromeView mChromeView;
     private Runnable mPostHideRunnable;
 
     public PlaceholderView(Context context, ChromeView chromeView) {
@@ -103,8 +106,7 @@ class PlaceholderView extends View {
     public void setBitmap(Bitmap bitmap, int cropWidth, int cropHeight) {
         mBitmap = bitmap;
         if (bitmap != null) {
-            mSurfaceRect.set(0, 0, Math.min(bitmap.getWidth(), cropWidth),
-                    Math.min(bitmap.getHeight(), cropHeight));
+            mSurfaceRect.set(0, 0, cropWidth, cropHeight);
         } else {
             mSurfaceRect.set(0, 0, 0, 0);
         }
@@ -135,7 +137,13 @@ class PlaceholderView extends View {
         canvas.drawRect(0, mSurfaceRect.bottom, getWidth(), getHeight(), mBgPaint);
         // Draw snapshot.
         if (mBitmap != null) {
-            canvas.drawBitmap(mBitmap, mSurfaceRect, mSurfaceRect, mBgPaint);
+            canvas.drawBitmap(mBitmap, null, mSurfaceRect, mBgPaint);
+            mBgPaint.setColorFilter(null);
+        }
+
+        if (DEBUG_SHOW_PLACEHOLDER_VIEW_ACTIVE) {
+            mBgPaint.setColor(Color.RED);
+            canvas.drawRect(10, 10, 90, 90, mBgPaint);
             mBgPaint.setColorFilter(null);
         }
     }

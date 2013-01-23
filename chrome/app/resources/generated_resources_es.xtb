@@ -8,6 +8,12 @@
 <translation id="8130276680150879341">Desconectar red privada</translation>
 <translation id="1058418043520174283"><ph name="INDEX"/> de <ph name="COUNT"/></translation>
 <translation id="4480627574828695486">Desvincular esta cuenta...</translation>
+<translation id="2516632596252643567">&lt;p&gt;
+          Accede directamente a las pestañas que tengas abiertas en tu ordenador.
+          &lt;/p&gt;
+          &lt;p&gt;
+          Solo tienes que abrir Chrome en tu ordenador, hacer clic en el icono de llave inglesa y seleccionar &quot;Iniciar sesión en Chrome...&quot;
+          &lt;/p&gt;</translation>
 <translation id="7040807039050164757">&amp;Comprobar ortografía en este campo</translation>
 <translation id="778579833039460630">No se ha recibido ningún dato</translation>
 <translation id="8791923223854254330">Administrar controladores...</translation>
@@ -105,7 +111,7 @@
 <translation id="7567293639574541773">I&amp;nspeccionar elemento</translation>
 <translation id="8392896330146417149">Estado de itinerancia:</translation>
 <translation id="5427459444770871191">Girar a la &amp;derecha</translation>
-<translation id="36224234498066874">Eliminar datos de navegación...</translation>
+<translation id="36224234498066874">Borrar datos de navegación...</translation>
 <translation id="3384773155383850738">Número máximo de sugerencias</translation>
 <translation id="8530339740589765688">Seleccionar por dominio</translation>
 <translation id="8677212948402625567">Ocultar todos...</translation>
@@ -146,9 +152,9 @@
         se haya producido algún error con tu conexión a Internet.</translation>
 <translation id="7624154074265342755">Redes inalámbricas</translation>
 <translation id="3315158641124845231">Ocultar <ph name="PRODUCT_NAME"/></translation>
-<translation id="7766807826975222231">Realizar un recorrido</translation>
+<translation id="7766807826975222231">Introducción</translation>
 <translation id="1993139350008738849">Notificaciones de aplicaciones</translation>
-<translation id="3496213124478423963">Reducir zoom</translation>
+<translation id="3496213124478423963">Reducir</translation>
 <translation id="2296019197782308739">Método EAP:</translation>
 <translation id="42981349822642051">Ampliar</translation>
 <translation id="4013794286379809233">Inicia sesión</translation>
@@ -209,7 +215,7 @@
 <translation id="4058922952496707368">Clave &quot;<ph name="SUBKEY"/>&quot;: <ph name="ERROR"/></translation>
 <translation id="5078796286268621944">PIN incorrecto</translation>
 <translation id="989988560359834682">Editar dirección</translation>
-<translation id="8487678622945914333">Ampliar zoom</translation>
+<translation id="8487678622945914333">Acercar</translation>
 <translation id="2972557485845626008">Firmware</translation>
 <translation id="735327918767574393">Se ha producido un error al mostrar esta página web. Para continuar, vuelve a cargar la página o accede a otra.</translation>
 <translation id="8028060951694135607">Recuperación de claves de Microsoft</translation>
@@ -276,7 +282,7 @@
 <translation id="6853700448789925482">Habilitar elemento <ph name="TRACK_HTML"/></translation>
 <translation id="7531238562312180404"><ph name="PRODUCT_NAME"/> no controla la forma en que las extensiones administran tus datos personales, por lo que todas las extensiones se han inhabilitado para las ventanas de incógnito. Puedes volver a habilitarlas en el
         <ph name="BEGIN_LINK"/>administrador de extensiones<ph name="END_LINK"/>.</translation>
-<translation id="5667293444945855280">Software malintencionado</translation>
+<translation id="5667293444945855280">Software malicioso</translation>
 <translation id="8707481173455612936">Página web oficial de las fuentes de audio</translation>
 <translation id="6831043979455480757">Traducir</translation>
 <translation id="2856203831666278378">La respuesta del servidor contenía encabezados duplicados.  Este problema
@@ -878,7 +884,7 @@ Calculando el tiempo restante</translation>
 <translation id="662720828712108508">¿Quieres permitir que <ph name="HANDLER_TITLE"/> (<ph name="HANDLER_HOSTNAME"/>) abra todos los enlaces de <ph name="PROTOCOL"/> en vez de <ph name="REPLACED_HANDLER_TITLE"/>?</translation>
 <translation id="6839225236531462745">Error de eliminación de certificado</translation>
 <translation id="6745994589677103306">No hacer nada</translation>
-<translation id="1637259088766071440">El sitio web <ph name="HOST_NAME"/> contiene elementos de sitios que parecen alojar software malintencionado, es decir, software que puede causar daños en tu dispositivo móvil o realizar acciones sin tu consentimiento. El dispositivo móvil puede resultar infectado con solo acceder a un sitio que contenga este tipo de software. El sitio web también aloja contenido de sitios de los que hemos recibido informes de suplantación de identidad. Este tipo de sitios engañan a los usuarios para que desvelen información personal o financiera, a menudo fingiendo ser instituciones de confianza, como bancos.</translation>
+<translation id="1637259088766071440">El sitio web <ph name="HOST_NAME"/> contiene elementos de sitios que parecen alojar software malicioso, es decir, software que puede causar daños en tu dispositivo móvil o realizar acciones sin tu consentimiento. El dispositivo móvil puede resultar infectado con solo acceder a un sitio que contenga este tipo de software. El sitio web también aloja contenido de sitios de los que hemos recibido informes de suplantación de identidad. Este tipo de sitios engañan a los usuarios para que desvelen información personal o financiera, a menudo fingiendo ser instituciones de confianza, como bancos.</translation>
 <translation id="5342221287123687807">Restablecer tema predeterminado</translation>
 <translation id="855081842937141170">Fijar pestaña</translation>
 <translation id="8395905375470807965">Inicia sesión con tu cuenta de Google</translation>
@@ -962,7 +968,7 @@ Calculando el tiempo restante</translation>
 <translation id="3511307672085573050">Copiar dire&amp;cción de enlace</translation>
 <translation id="6655190889273724601">Modo de desarrollador</translation>
 <translation id="1071917609930274619">Cifrado de datos</translation>
-<translation id="3473105180351527598">Habilitar protección contra phishing y software malintencionado</translation>
+<translation id="3473105180351527598">Habilitar protección contra phishing y software malicioso</translation>
 <translation id="6151323131516309312">Pulsa <ph name="SEARCH_KEY"/> para buscar en <ph name="SITE_NAME"/></translation>
 <translation id="8844703966364420804">¡Aquí no hay nada de nada!</translation>
 <translation id="5456397824015721611">Número máximo de caracteres en el búfer de preedición, incluidos los símbolos de bopomofo</translation>
@@ -1339,7 +1345,7 @@ Se solicitan resultados de búsqueda incluso cuando se está escribiendo la cons
 <translation id="6143635259298204954">No se puede descomprimir la extensión. Para descomprimir de forma segura una extensión, debe existir una ruta al directorio de tu perfil que no contenga ningún enlace simbólico. No existe ninguna ruta de este tipo para tu perfil.</translation>
 <translation id="3081104028562135154">Aumentar</translation>
 <translation id="3734816294831429815"><ph name="PRODUCT_NAME"/> se reiniciará en <ph name="SECONDS"/> segundos.</translation>
-<translation id="1813414402673211292">Eliminar datos de navegación</translation>
+<translation id="1813414402673211292">Borrar datos de navegación</translation>
 <translation id="2728624657977418581">Añadir nombre</translation>
 <translation id="4062903950301992112">Si eres consciente de que el hecho de acceder a este sitio puede dañar tu ordenador, haz clic en el enlace <ph name="PROCEED_LINK"/>.</translation>
 <translation id="32330993344203779">Tu dispositivo se ha registrado correctamente en la administración corporativa.</translation>
@@ -1505,15 +1511,6 @@ Exponente público (<ph name="PUBLIC_EXPONENT_NUM_BITS"/> bits):
 <translation id="6342069812937806050">Ahora</translation>
 <translation id="5605716740717446121">Si no introduces el código PIN de desbloqueo correcto, tu tarjeta SIM quedará inhabilitada permanentemente. Intentos restantes: <ph name="TRIES_COUNT"/>.</translation>
 <translation id="8836712291807476944"><ph name="SAVED_BYTES"/> / <ph name="TOTAL_BYTES"/> bytes, interrumpido</translation>
-<translation id="3661943501691646627">&lt;p&gt;
-          Podrás acceder a las pestañas que tenías abiertas en tu ordenador directamente.
-          &lt;/p&gt;
-          &lt;p&gt;
-          Solo tienes que abrir Chrome en el ordenador, hacer clic en el icono de llave inglesa y seleccionar &quot;Iniciar sesión en Chrome...&quot;.
-          &lt;/p&gt;
-          &lt;p&gt;
-          No está nada mal, ya verás.
-          &lt;/p&gt;</translation>
 <translation id="5502500733115278303">Importado desde Firefox</translation>
 <translation id="569109051430110155">Detección automática</translation>
 <translation id="4408599188496843485">Ay&amp;uda</translation>
@@ -1762,7 +1759,7 @@ Exponente público (<ph name="PUBLIC_EXPONENT_NUM_BITS"/> bits):
           <ph name="END_BOLD"/></translation>
 <translation id="8816996941061600321">&amp;Administrador de archivos</translation>
 <translation id="2773223079752808209">Asistencia al cliente</translation>
-<translation id="4821695613281243046">El sitio web <ph name="HOST_NAME"/> contiene elementos de sitios que parecen alojar software malintencionado, es decir, software que puede causar daños en tu dispositivo móvil o realizar acciones sin tu consentimiento. El dispositivo móvil puede resultar infectado con solo acceder a un sitio que contenga este tipo de software.</translation>
+<translation id="4821695613281243046">El sitio web <ph name="HOST_NAME"/> contiene elementos de sitios que parecen alojar software malicioso, es decir, software que puede causar daños en tu dispositivo móvil o realizar acciones sin tu consentimiento. El dispositivo móvil puede resultar infectado con solo acceder a un sitio que contenga este tipo de software.</translation>
 <translation id="4647175434312795566">Aceptar acuerdo</translation>
 <translation id="1084824384139382525">Copiar dir&amp;ección de enlace</translation>
 <translation id="1221462285898798023">Inicia <ph name="PRODUCT_NAME"/> como usuario normal. Para ejecutarlo como usuario administrador, debes especificar un directorio de datos del usuario (--user-data-dir) alternativo para almacenar los datos de perfil.</translation>
@@ -1820,7 +1817,7 @@ Exponente público (<ph name="PUBLIC_EXPONENT_NUM_BITS"/> bits):
 <translation id="7186367841673660872">Esta página se ha traducido del<ph name="ORIGINAL_LANGUAGE"/>al<ph name="LANGUAGE_LANGUAGE"/>.</translation>
 <translation id="8448695406146523553">Solo alguien con tu frase de contraseña puede leer tus datos cifrados (Google no envía ni almacena la frase de contraseña). Si la olvidas, deberás</translation>
 <translation id="6052976518993719690">Entidad emisora de certificados SSL</translation>
-<translation id="1636959874332483835"><ph name="HOST_NAME"/> contiene software malintencionado. Tu ordenador podría infectarse con un virus si accedes a este sitio.</translation>
+<translation id="1636959874332483835"><ph name="HOST_NAME"/> contiene software malicioso. Tu ordenador podría infectarse con un virus si accedes a este sitio.</translation>
 <translation id="8050783156231782848">No hay datos disponibles.</translation>
 <translation id="1175364870820465910">Im&amp;primir...</translation>
 <translation id="1220583964985596988">Añadir usuario</translation>
@@ -1833,7 +1830,7 @@ Exponente público (<ph name="PUBLIC_EXPONENT_NUM_BITS"/> bits):
 <translation id="1529968269513889022">la semana pasada</translation>
 <translation id="5542132724887566711">Perfil</translation>
 <translation id="5196117515621749903">Cargar de nuevo ignorando la caché</translation>
-<translation id="5552632479093547648">Se ha detectado suplantación de identidad y software malintencionado.</translation>
+<translation id="5552632479093547648">Se ha detectado suplantación de identidad y software malicioso.</translation>
 <translation id="4375848860086443985">Compositor</translation>
 <translation id="4988273303304146523">hace <ph name="NUMBER_DEFAULT"/> días</translation>
 <translation id="2527591341887670429">Batería en uso: <ph name="PRECENTAGE"/>%</translation>
@@ -1905,7 +1902,7 @@ Exponente público (<ph name="PUBLIC_EXPONENT_NUM_BITS"/> bits):
 <translation id="630065524203833229">&amp;Salir</translation>
 <translation id="4647090755847581616">&amp;Cerrar pestaña</translation>
 <translation id="2649204054376361687"><ph name="CITY"/>, <ph name="COUNTRY"/></translation>
-<translation id="7886758531743562066">El sitio web <ph name="HOST_NAME"/> contiene elementos de sitios que parecen alojar software malintencionado, es decir, software que puede dañar el ordenador o que puede realizar acciones sin tu consentimiento. El ordenador puede resultar infectado con solo visitar un sitio que aloje este tipo de software.</translation>
+<translation id="7886758531743562066">El sitio web <ph name="HOST_NAME"/> contiene elementos de sitios que parecen alojar software malicioso, es decir, software que puede dañar el ordenador o que puede realizar acciones sin tu consentimiento. El ordenador puede resultar infectado con solo visitar un sitio que aloje este tipo de software.</translation>
 <translation id="7538227655922918841">Las cookies de varios sitios se han habilitado solo para una sesión.</translation>
 <translation id="2385700042425247848">Nombre del servicio:</translation>
 <translation id="3128628928070793746">Accede al
@@ -2043,7 +2040,7 @@ Exponente público (<ph name="PUBLIC_EXPONENT_NUM_BITS"/> bits):
 <translation id="3355823806454867987">Cambiar la configuración de proxy...</translation>
 <translation id="4780374166989101364">Habilita las API de extensiones experimentales. Ten en cuenta que la galería de extensiones no permite subir extensiones que utilicen API experimentales.</translation>
 <translation id="7117247127439884114">Volver a iniciar sesión...</translation>
-<translation id="7227780179130368205">Detectado software malintencionado.</translation>
+<translation id="7227780179130368205">Detectado software malicioso.</translation>
 <translation id="435243347905038008">Datos de <ph name="NETWORK"/> bajos</translation>
 <translation id="2489428929217601177">ayer</translation>
 <translation id="5149131957118398098"><ph name="NUMBER_ZERO"/> hours left</translation>
@@ -2329,7 +2326,7 @@ Exponente público (<ph name="PUBLIC_EXPONENT_NUM_BITS"/> bits):
 <translation id="305803244554250778">Crear accesos directos a aplicaciones en las siguientes ubicaciones:</translation>
 <translation id="574392208103952083">Mediano</translation>
 <translation id="3745810751851099214">Enviar para:</translation>
-<translation id="3937609171782005782">Ayuda a mejorar la detección de software malintencionado enviando datos adicionales a Google sobre sitios en los que aparece esta advertencia. Estos datos se tratarán de acuerdo con la política de la página <ph name="PRIVACY_PAGE_LINK"/>.</translation>
+<translation id="3937609171782005782">Ayuda a mejorar la detección de software malicioso enviando datos adicionales a Google sobre sitios en los que aparece esta advertencia. Estos datos se tratarán de acuerdo con la política de la página <ph name="PRIVACY_PAGE_LINK"/>.</translation>
 <translation id="8877448029301136595">[directorio principal]</translation>
 <translation id="3816844797124379499">No se ha podido añadir la aplicación porque existe un conflicto con &quot;<ph name="APP_NAME"/>&quot;.</translation>
 <translation id="7301360164412453905">Teclas de selección del teclado Hsu</translation>
@@ -2361,7 +2358,7 @@ Exponente público (<ph name="PUBLIC_EXPONENT_NUM_BITS"/> bits):
 <translation id="2128691215891724419">Error de sincronización: actualiza la frase de contraseña de sincronización</translation>
 <translation id="2148716181193084225">Hoy</translation>
 <translation id="1002064594444093641">I&amp;mprimir marco...</translation>
-<translation id="7234674978021619913">Ya hemos informado al host <ph name="HOST_NAME"/> de que hemos encontrado software malintencionado en el sitio. Para obtener más información sobre las incidencias que se han detectado en el host <ph name="HOST_NAME2"/>, consulta la página <ph name="DIAGNOSTIC_PAGE"/> de Google.</translation>
+<translation id="7234674978021619913">Ya hemos informado al host <ph name="HOST_NAME"/> de que hemos encontrado software malicioso en el sitio. Para obtener más información sobre las incidencias que se han detectado en el host <ph name="HOST_NAME2"/>, consulta la página <ph name="DIAGNOSTIC_PAGE"/> de Google.</translation>
 <translation id="4608500690299898628">&amp;Buscar...</translation>
 <translation id="7582582252461552277">Establecer esta red como preferida</translation>
 <translation id="3574305903863751447"><ph name="CITY"/>, <ph name="STATE"/> <ph name="COUNTRY"/></translation>
@@ -2501,7 +2498,7 @@ Exponente público (<ph name="PUBLIC_EXPONENT_NUM_BITS"/> bits):
 <translation id="5788784787182153474">Servidor de depuración de página</translation>
 <translation id="2371076942591664043">Abrir al &amp;finalizar</translation>
 <translation id="3920504717067627103">Políticas de certificados</translation>
-<translation id="155865706765934889">Touchpad</translation>
+<translation id="155865706765934889">Panel táctil</translation>
 <translation id="3308134619352333507">Ocultar botón</translation>
 <translation id="7701040980221191251">Ninguno</translation>
 <translation id="2299271837233608948">Accede a tus marcadores, a tu historial y a tu configuración desde todos tus dispositivos.</translation>
@@ -2620,7 +2617,7 @@ Exponente público (<ph name="PUBLIC_EXPONENT_NUM_BITS"/> bits):
 <translation id="4157869833395312646">Criptografía activada por servidor de Microsoft</translation>
 <translation id="6660445291081843757">Nueva interfaz para las descargas</translation>
 <translation id="5685236799358487266">Añadir como mo&amp;tor de búsqueda...</translation>
-<translation id="8903921497873541725">Ampliar zoom</translation>
+<translation id="8903921497873541725">Acercar</translation>
 <translation id="2195729137168608510">Protección de correo electrónico</translation>
 <translation id="1425734930786274278">Se han bloqueado las siguientes cookies (las cookies de terceros se bloquean sin excepción):</translation>
 <translation id="6805647936811177813">Inicia sesión en <ph name="TOKEN_NAME"/> para importar el certificado de cliente de <ph name="HOST_NAME"/>.</translation>
@@ -2921,7 +2918,7 @@ Exponente público (<ph name="PUBLIC_EXPONENT_NUM_BITS"/> bits):
 <translation id="1385372238023117104">Error de sincronización: vuelve a iniciar sesión.</translation>
 <translation id="7714464543167945231">Certificado</translation>
 <translation id="5530864958284331435">$1 seleccionados, $2</translation>
-<translation id="3616741288025931835">&amp;Eliminar datos de navegación...</translation>
+<translation id="3616741288025931835">&amp;Borrar datos de navegación...</translation>
 <translation id="3313622045786997898">Valor de firma de certificados</translation>
 <translation id="8535005006684281994">URL de renovación de certificado de Netscape</translation>
 <translation id="6970856801391541997">Imprimir páginas específicas</translation>
@@ -3048,7 +3045,7 @@ Pulsa Ctrl+Alt+Z para cancelar.</translation>
 <translation id="4264154755694493263">Al instalar una aplicación, siempre se muestra un mensaje que apunta hacia el botón de la página Nueva pestaña en la barra de pestañas en lugar de abrir una nueva pestaña.</translation>
 <translation id="8051695050440594747"><ph name="MEGABYTES"/> MB disponible(s)</translation>
 <translation id="7088615885725309056">Más antigua</translation>
-<translation id="461656879692943278"><ph name="HOST_NAME"/> incluye contenido de <ph name="ELEMENTS_HOST_NAME"/>, un sitio conocido por distribuir software malintencionado. Tu ordenador podría infectarse con un virus si accedes a este sitio.</translation>
+<translation id="461656879692943278"><ph name="HOST_NAME"/> incluye contenido de <ph name="ELEMENTS_HOST_NAME"/>, un sitio conocido por distribuir software malicioso. Tu ordenador podría infectarse con un virus si accedes a este sitio.</translation>
 <translation id="8962198349065195967">El administrador ha configurado esta red.</translation>
 <translation id="2143778271340628265">Configuración de proxy manual</translation>
 <translation id="2441192698565541088">Si desvinculas tu cuenta de Google de <ph name="PRODUCT_NAME"/>, los datos que hayas cambiado en este ordenador ya no se podrán sincronizar con tu cuenta de Google. Sin embargo, los datos que ya se encuentren almacenados en tu cuenta de Google permanecerán ahí hasta que los elimines mediante el <ph name="BEGIN_LINK"/>panel de control de Google<ph name="END_LINK"/>.</translation>
@@ -3136,7 +3133,7 @@ Pulsa Ctrl+Alt+Z para cancelar.</translation>
 <translation id="2665717534925640469">Esta página se muestra ahora en pantalla completa y ha inhabilitado el cursor del ratón.</translation>
 <translation id="3414952576877147120">Tamaño:</translation>
 <translation id="9098468523912235228">hace <ph name="NUMBER_DEFAULT"/> segundos</translation>
-<translation id="7009102566764819240">A continuación, se incluye una lista de todos los elementos no seguros de la página. Haz clic en el enlace de diagnóstico para obtener más información sobre el subproceso del software malintencionado de un recurso en concreto. Si crees que se ha identificado erróneamente a un recurso como responsable de actividades de suplantación de identidad, haz clic en el enlace &quot;Informar de un error&quot;.</translation>
+<translation id="7009102566764819240">A continuación, se incluye una lista de todos los elementos no seguros de la página. Haz clic en el enlace de diagnóstico para obtener más información sobre el subproceso del software malicioso de un recurso en concreto. Si crees que se ha identificado erróneamente a un recurso como responsable de actividades de suplantación de identidad, haz clic en el enlace &quot;Informar de un error&quot;.</translation>
 <translation id="3592260987370335752">&amp;Más información</translation>
 <translation id="4923417429809017348">Esta página se ha traducido de un idioma desconocido al <ph name="LANGUAGE_LANGUAGE"/>.</translation>
 <translation id="3631337165634322335">Las excepciones que se indican a continuación solo se aplican a la sesión de incógnito actual.</translation>
@@ -3151,7 +3148,7 @@ Pulsa Ctrl+Alt+Z para cancelar.</translation>
 <translation id="721197778055552897"><ph name="BEGIN_LINK"/>Más información<ph name="END_LINK"/> sobre este problema.</translation>
 <translation id="1699395855685456105">Revisión de hardware:</translation>
 <translation id="6680028776254050810">Cambiar usuario</translation>
-<translation id="212464871579942993">El sitio web <ph name="HOST_NAME"/> contiene elementos de sitios que parecen alojar software malintencionado, es decir, software que puede dañar el ordenador o que puede realizar acciones sin tu consentimiento. El ordenador puede resultar infectado solo con visitar un sitio que aloje este tipo de software. El sitio web también aloja contenido de sitios de los que hemos recibido informes de suplantación de identidad. Este tipo de sitios engañan a los usuarios para que desvelen información personal o financiera, a menudo fingiendo ser instituciones de confianza, como bancos.</translation>
+<translation id="212464871579942993">El sitio web <ph name="HOST_NAME"/> contiene elementos de sitios que parecen alojar software malicioso, es decir, software que puede dañar el ordenador o que puede realizar acciones sin tu consentimiento. El ordenador puede resultar infectado solo con visitar un sitio que aloje este tipo de software. El sitio web también aloja contenido de sitios de los que hemos recibido informes de suplantación de identidad. Este tipo de sitios engañan a los usuarios para que desvelen información personal o financiera, a menudo fingiendo ser instituciones de confianza, como bancos.</translation>
 <translation id="9027307872616253016">Buscar servicios en Chrome Web Store</translation>
 <translation id="6937902506109081450">Habilitar página Uber (configuración, extensiones, acerca de/ayuda)</translation>
 <translation id="957120528631539888">Inhabilita la aparición de mensajes de validación e impide el envío de formularios.</translation>
@@ -3162,7 +3159,7 @@ Pulsa Ctrl+Alt+Z para cancelar.</translation>
 <translation id="8112223930265703044">Todo</translation>
 <translation id="3968739731834770921">Kana</translation>
 <translation id="3729920814805072072">Administrar contraseñas guardadas...</translation>
-<translation id="7387829944233909572">Diálogo &quot;Eliminar datos de navegación&quot;</translation>
+<translation id="7387829944233909572">Diálogo &quot;Borrar datos de navegación&quot;</translation>
 <translation id="8023801379949507775">Actualizar extensiones ahora</translation>
 <translation id="1103666958012677467">No puedes continuar porque el operador del sitio web ha solicitado mayores medidas de seguridad para este dominio.</translation>
 <translation id="3298789223962368867">URL introducida no válida</translation>
@@ -3171,6 +3168,7 @@ Pulsa Ctrl+Alt+Z para cancelar.</translation>
 <translation id="8241707690549784388">La página que buscas ha utilizado la información que has especificado. Volver a la página podría provocar la repetición de alguna acción. ¿Quieres continuar?</translation>
 <translation id="5359419173856026110">Muestra la tasa de fotogramas real de una página, en fotogramas por segundo, cuando la aceleración de hardware está activa.</translation>
 <translation id="4104163789986725820">E&amp;xportar...</translation>
+<translation id="5143814737375740231">Chrome para Android no admite este complemento.</translation>
 <translation id="2113479184312716848">Abrir &amp;archivo...</translation>
 <translation id="3314617171364900239">Las comprobaciones de actualizaciones de la extensión &quot;<ph name="EXTENSION_NAME"/>&quot; han fallado reiteradamente.</translation>
 <translation id="4850458635498951714">Añadir un dispositivo</translation>
@@ -3335,7 +3333,7 @@ Pulsa Ctrl+Alt+Z para cancelar.</translation>
 <translation id="3508920295779105875">Seleccionar otra carpeta...</translation>
 <translation id="2503458975635466059">Parece que el proceso <ph name="PROCESS_ID"/> está utilizando el perfil en el host <ph name="HOST_NAME"/>. Si sabes con seguridad que ningún otro proceso está utilizando este perfil, elimina el archivo <ph name="LOCK_FILE"/> y reinicia <ph name="PRODUCT_NAME"/>.</translation>
 <translation id="2987775926667433828">Chino tradicional</translation>
-<translation id="6684737638449364721">Eliminar todos los datos de navegación...</translation>
+<translation id="6684737638449364721">Borrar todos los datos de navegación...</translation>
 <translation id="3954582159466790312">Activar &amp;sonido</translation>
 <translation id="1110772031432362678">No se han encontrado redes.</translation>
 <translation id="8579724778016455313">Este dispositivo no se puede registrar en el dominio al que pertenece esta cuenta de usuario.</translation>
@@ -3474,7 +3472,7 @@ Calculando el tiempo de carga completa</translation>
 <translation id="5421136146218899937">Borrar datos de navegación...</translation>
 <translation id="5783059781478674569">Opciones de reconocimiento de voz</translation>
 <translation id="5441100684135434593">Red cableada</translation>
-<translation id="8606000531741139742">Touchpad:</translation>
+<translation id="8606000531741139742">Panel táctil:</translation>
 <translation id="3285322247471302225">Nueva &amp;pestaña</translation>
 <translation id="3943582379552582368">&amp;Atrás</translation>
 <translation id="7607002721634913082">En pausa</translation>
@@ -3810,7 +3808,7 @@ Es posible que algunas funciones no estén disponibles. Comprueba si el perfil e
 <translation id="2273562597641264981">Operador:</translation>
 <translation id="122082903575839559">Algoritmo de firma de certificado</translation>
 <translation id="2181257377760181418">Habilita una vista previa con pestañas de una operación de impresión.</translation>
-<translation id="5613166402967092338"><ph name="HOST_NAME"/> incluye contenido de <ph name="ELEMENTS_HOST_NAME"/>, un sitio conocido por distribuir software malintencionado. Tu dispositivo móvil podría infectarse con un virus si accedes a este sitio.</translation>
+<translation id="5613166402967092338"><ph name="HOST_NAME"/> incluye contenido de <ph name="ELEMENTS_HOST_NAME"/>, un sitio conocido por distribuir software malicioso. Tu dispositivo móvil podría infectarse con un virus si accedes a este sitio.</translation>
 <translation id="4575703660920788003">Para cambiar de diseño de teclado, pulsa Mayús+Alt.</translation>
 <translation id="7240120331469437312">Nombre alternativo de la entidad receptora del certificado</translation>
 <translation id="1131850611586448366">Hemos recibido informes de suplantación de identidad sobre el sitio web <ph name="HOST_NAME"/>. Este tipo de sitios engañan a los usuarios para que desvelen información personal o financiera, a menudo fingiendo ser instituciones de confianza, como bancos.</translation>
@@ -3820,7 +3818,7 @@ Es posible que algunas funciones no estén disponibles. Comprueba si el perfil e
 <translation id="1718559768876751602">Crear una cuenta de Google</translation>
 <translation id="1884319566525838835">Estado de la zona de pruebas</translation>
 <translation id="2770465223704140727">Eliminar de la lista</translation>
-<translation id="6053401458108962351">&amp;Eliminar datos de navegación...</translation>
+<translation id="6053401458108962351">&amp;Borrar datos de navegación...</translation>
 <translation id="2339641773402824483">Buscando actualizaciones</translation>
 <translation id="5770385044111747894">NPAPI</translation>
 <translation id="9111742992492686570">Descargar actualización de seguridad crítica</translation>
@@ -3873,7 +3871,7 @@ Guarda tu archivo de clave en un lugar seguro, ya que lo necesitarás para crear
 <translation id="9023317578768157226">¿Quieres permitir que <ph name="HANDLER_TITLE"/> (<ph name="HANDLER_HOSTNAME"/>) abra todos los enlaces de <ph name="PROTOCOL"/>?</translation>
 <translation id="6359806961507272919">SMS de <ph name="PHONE_NUMBER"/></translation>
 <translation id="4508765956121923607">Ver código f&amp;uente</translation>
-<translation id="5975083100439434680">Reducir zoom</translation>
+<translation id="5975083100439434680">Reducir</translation>
 <translation id="8080048886850452639">C&amp;opiar URL del audio</translation>
 <translation id="2817109084437064140">Importar y vincular al dispositivo...</translation>
 <translation id="3331321258768829690">(<ph name="UTCOFFSET"/>) <ph name="LONGTZNAME"/> (<ph name="EXEMPLARCITY"/>)</translation>
@@ -3893,6 +3891,6 @@ Guarda tu archivo de clave en un lugar seguro, ya que lo necesitarás para crear
 <translation id="1559528461873125649">No existe el archivo o el directorio.</translation>
 <translation id="3857773447683694438">Lorem ipsum dolor sit amet, consectetur adipiscing elit.</translation>
 <translation id="1244147615850840081">Operador</translation>
-<translation id="3346457130337124365"><ph name="HOST_NAME"/> contiene software malintencionado. Tu dispositivo móvil podría infectarse con un virus si accedes a este sitio.</translation>
+<translation id="3346457130337124365"><ph name="HOST_NAME"/> contiene software malicioso. Tu dispositivo móvil podría infectarse con un virus si accedes a este sitio.</translation>
 <translation id="406259880812417922">(Palabra clave: <ph name="KEYWORD"/>)</translation>
 </translationbundle>

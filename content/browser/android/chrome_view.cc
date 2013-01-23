@@ -335,7 +335,6 @@ class ChromeView::ChromeViewWebContentsObserver
                        const content::NotificationDetails& details);
 
   // WebContentsObserver
-  virtual void DidStartLoading();
   virtual void DidStartProvisionalLoadForFrame(
       int64 frame_id,
       bool is_main_frame,
@@ -387,10 +386,6 @@ void ChromeView::ChromeViewWebContentsObserver::Observe(int type,
     parent_->tab_contents_wrapper()->content_settings()->
         SetBlockageHasBeenIndicated(CONTENT_SETTINGS_TYPE_POPUPS);
   }
-}
-
-void ChromeView::ChromeViewWebContentsObserver::DidStartLoading() {
-  parent_->DidStartLoading();
 }
 
 void ChromeView::ChromeViewWebContentsObserver::DidStartProvisionalLoadForFrame(
@@ -711,15 +706,14 @@ void ChromeView::Show(bool requestByActivity) {
   // NativeWindow is attached in OnNativeWindowChanged(). This will avoid the
   // black screen flash. If the request comes from Activity due to resume, the
   // NativeWindow is not changed. So OnNativeWindowChanged() will not be called.
-  // If a render process doesn't exist, tab_crashed_ is marked as true, and
-  // OnNativeWindowChanged() will not be called. Notify the Chrome here.
   CommandLine* cmd = CommandLine::ForCurrentProcess();
-  if (!cmd->HasSwitch(switches::kForceCompositingMode)
-          || requestByActivity
-          || tab_crashed_) {
+  if (!cmd->HasSwitch(switches::kForceCompositingMode) || requestByActivity)
     web_contents()->DidBecomeSelected();
-    if (tab_crashed_)
-      tab_crashed_ = !(GetRenderWidgetHostViewAndroid());
+  else if (tab_crashed_) {
+    // If a render process doesn't exist as the tab is restored, tab_crashed_ is
+    // marked as true, trigger the "lazy" reload and reset tab_crashed_.
+    web_contents()->GetController().LoadIfNecessary();
+    tab_crashed_ = !(GetRenderWidgetHostViewAndroid());
   }
 }
 
@@ -761,12 +755,16 @@ void ChromeView::OnTabCrashed(const base::ProcessHandle handle) {
   // BrowserRenderProcessHost.
   if (tab_crashed_)
     return;
-  tab_crashed_ = true;
+
   // This can happen as TabContents is destroyed after java_object_ is set to 0
   if (!java_object_)
     return;
+
+  tab_crashed_ = true;
+
   JNIEnv* env = AttachCurrentThread();
   Java_ChromeView_onTabCrash(env, java_object_->View(env).obj(), handle);
+
   // reset accelerate_compositing_activated_ to false as mTextureView is removed
   // in onTabCrash() in ChromeView.java.
   accelerate_compositing_activated_ = false;
@@ -805,18 +803,22 @@ void ChromeView::ImeUpdateAdapter(int native_ime_adapter,
                                   int selection_end,
                                   int composition_start,
                                   int composition_end,
-                                  bool show_ime_if_needed) {
+                                  bool show_ime_if_needed,
+                                  const base::Time& request_time) {
   JNIEnv* env = AttachCurrentThread();
 
   ScopedJavaLocalRef<jstring> jstring_text = ConvertUTF8ToJavaString(env, text);
-  Java_ChromeView_imeUpdateAdapter(env, java_object_->View(env).obj(),
-                                   native_ime_adapter, text_input_type,
-                                   caret_rect.x(), caret_rect.y(),
-                                   caret_rect.bottom(), caret_rect.right(),
-                                   jstring_text.obj(),
-                                   selection_start, selection_end,
-                                   composition_start, composition_end,
-                                   show_ime_if_needed);
+  Java_ChromeView_imeUpdateAdapter(
+      env, java_object_->View(env).obj(),
+      native_ime_adapter, text_input_type,
+      caret_rect.x(), caret_rect.y(),
+      caret_rect.bottom(), caret_rect.right(),
+      jstring_text.obj(),
+      selection_start, selection_end,
+      composition_start, composition_end,
+      show_ime_if_needed,
+      (request_time.is_null()) ? 0
+          : (request_time - base::Time::UnixEpoch()).InMilliseconds());
 }
 
 void ChromeView::SetTitle(const string16& title) {
@@ -1122,11 +1124,6 @@ void ChromeView::resetLastPressAck() {
   Java_ChromeView_resetLastPressAck(env, java_object_->View(env).obj());
 }
 
-void ChromeView::DidStartLoading() {
-  JNIEnv* env = AttachCurrentThread();
-  Java_ChromeView_didStartLoading(env, java_object_->View(env).obj());
-}
-
 void ChromeView::OnPageStarted(const GURL& validated_url) {
   if (tab_contents_client_.get())
     tab_contents_client_->OnPageStarted(
@@ -1318,6 +1315,23 @@ void ChromeView::AddShortcutToBookmark(const GURL& url, const string16& title,
                                         r_value,
                                         g_value,
                                         b_value);
+}
+
+void ChromeView::PromoSendEmail(const string16& d_email,
+                                const string16& d_subj,
+                                const string16& d_body,
+                                const string16& d_inv) {
+  JNIEnv* env = AttachCurrentThread();
+  ScopedJavaLocalRef<jstring> j_email = ConvertUTF16ToJavaString(env, d_email);
+  ScopedJavaLocalRef<jstring> j_subj = ConvertUTF16ToJavaString(env, d_subj);
+  ScopedJavaLocalRef<jstring> j_body = ConvertUTF16ToJavaString(env, d_body);
+  ScopedJavaLocalRef<jstring> j_inv = ConvertUTF16ToJavaString(env, d_inv);
+  Java_ChromeView_promoSendEmail(env,
+                                 java_object_->View(env).obj(),
+                                 j_email.obj(),
+                                 j_subj.obj(),
+                                 j_body.obj(),
+                                 j_inv.obj());
 }
 
 // ----------------------------------------------------------------------------
@@ -1908,11 +1922,13 @@ void ChromeView::PurgeNativeMemory(JNIEnv* env, jobject obj) {
 void ChromeView::AddJavascriptInterface(JNIEnv* env,
                                         jobject /* obj */,
                                         jobject object,
-                                        jstring name) {
+                                        jstring name,
+                                        jboolean allow_inherited_methods) {
   ScopedJavaLocalRef<jobject> scoped_object(env, object);
   // JavaBoundObject creates the NPObject with a ref count of 1, and
   // JavaBridgeDispatcherHostManager takes its own ref.
-  NPObject* bound_object = JavaBoundObject::Create(scoped_object);
+  NPObject* bound_object = JavaBoundObject::Create(scoped_object,
+                                                   allow_inherited_methods);
   // ChromeView's TabContentsWrapper always wraps a TabContents.
   // TODO(steveblock): We should avoid this cast. See b/5867579.
   TabContents* tab_contents = reinterpret_cast<TabContents*>(web_contents());
@@ -2057,6 +2073,16 @@ static void SendFlushNotification() {
         content::NotificationService::AllSources(),
         content::NotificationService::NoDetails());
 
+    // We previously sent NOTIFICATION_FLUSH_FINISH and blocked for up to 3 seconds
+    // until completion, in an attempt to flush as much as possible without hitting
+    // the ANR limit of 5 seconds. We're still getting ANRs in this call stack, so
+    // this tactic doesn't seem to be working. In the master branch, both Android
+    // and Chrome now have strict guards against any blocking calls in the main
+    // thread, so we have just removed this code completely. In M18, we'll omit the
+    // NOTIFICATION_FLUSH_FINISH to get the same effect with a minimal diff. The
+    // only listener is SQLitePersistentCookieStore, and it is happy to receive only
+    // a FLUSH_START without a matching FLUSH_FINISH. See http://b/7085187
+#if 0
     // Allow a little time for I/O to complete, determined by --flush-deadline-secs.
     std::string flag = CommandLine::ForCurrentProcess()->GetSwitchValueASCII(
         switches::kFlushDeadlineSecs);
@@ -2080,6 +2106,7 @@ static void SendFlushNotification() {
       LOG(ERROR) << "Missed flush deadline (" << secs << "s) by " << (now - deadline).InSecondsF()
           << " seconds! We may lose data if the OS kills us before I/O is complete.";
     }
+#endif
   }
 }
 

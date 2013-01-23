@@ -112,6 +112,14 @@ class NativeThemeAndroid {
                         Part direction,
                         State state);
 
+  // Paint the common parts of the checkboxes and radio buttons.
+  // borderRadius specifies how rounded the corners should be.
+  SkRect PaintCheckboxRadioCommon(
+      SkCanvas* canvas,
+      State state,
+      const gfx::Rect& rect,
+      const SkScalar borderRadius) const;
+
   // Draw the checkbox.
   void PaintCheckbox(SkCanvas* canvas,
                      State state,

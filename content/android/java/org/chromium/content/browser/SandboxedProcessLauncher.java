@@ -18,14 +18,14 @@ import org.chromium.base.CalledByNative;
  * This class provides the method to start/stop SandboxedProcess called by
  * native.
  */
-class SandboxedProcessLauncher {
+public class SandboxedProcessLauncher {
     private static String TAG = "SandboxedProcessLauncher";
 
     // TODO(joth): The following code is a temporary hack to allow for more than one sandboxed
     // process. We currently register multiple SandboxedProcessService subclasses.
     // (If we retain this, we could consider using an array of weak references and avoid
     // the need for the explicit freeConnection() method).
-    private static final int NUM_REGISTERED_SERVICES = 5;
+    /* package */ static final int NUM_REGISTERED_SERVICES = 6;
     private static SandboxedProcessConnection[] mConnections =
             new SandboxedProcessConnection[NUM_REGISTERED_SERVICES];
 
@@ -124,14 +124,15 @@ class SandboxedProcessLauncher {
      * @param commandLine The sandboxed process command line argv.
      * @param ipcFd File descriptor used to set up IPC.
      * @param clientContext Arbitrary parameter used by the client to distinguish this connection.
-     * @return Connection object which maybe used with subsequent call to {@link #cancelStart}
      */
     @CalledByNative
-    static SandboxedProcessConnection start(
+    static void  start(
             Context context,
             final String[] commandLine,
             int ipcFd,
-            int crashFd,
+            int minidumpFd,
+            int chromePakFd,
+            int localePakFd,
             final int clientContext) {
         assert clientContext != 0;
         SandboxedProcessConnection allocatedConnection;
@@ -142,7 +143,9 @@ class SandboxedProcessLauncher {
         if (allocatedConnection == null) {
             allocatedConnection = allocateBoundConnection(context, commandLine);
             if (allocatedConnection == null) {
-                return null;
+                // Notify the native code so it can free the heap allocated callback.
+                nativeOnSandboxedProcessStarted(clientContext, 0);
+                return;
             }
         }
         final SandboxedProcessConnection connection = allocatedConnection;
@@ -161,21 +164,8 @@ class SandboxedProcessLauncher {
                 nativeOnSandboxedProcessStarted(clientContext, pid);
             }
         };
-        connection.setupConnection(commandLine, ipcFd, crashFd, createCallback(), onConnect);
-        return connection;
-    }
-
-    /**
-     * Cancels a pending connection to a sandboxed process. This may be called from any thread.
-     *
-     * @param connection the object that was returned from the corresponding call to {@link #start}.
-     */
-    @CalledByNative
-    static void cancelStart(SandboxedProcessConnection connection) {
-        assert connection != null;
-        assert !mServiceMap.containsValue(connection);
-        connection.unbind();
-        freeConnection(connection);
+        connection.setupConnection(commandLine, ipcFd, minidumpFd, chromePakFd, localePakFd,
+                                   createCallback(), onConnect);
     }
 
     /**

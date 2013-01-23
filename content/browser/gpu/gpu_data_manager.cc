@@ -438,6 +438,13 @@ GpuFeatureFlags GpuDataManager::GetGpuFeatureFlags() {
 
 #if defined(OS_ANDROID)
   if (gpu_info().gl_renderer.find("Adreno") != std::string::npos) {
+    std::string version = gpu_info().gl_version_string;
+    int major, minor;
+    int scanned = sscanf(version.c_str(), "OpenGL ES 2.0 V@%d.%d",
+                         &major, &minor);
+    if (scanned == 2 && (major >= 3 || minor >= 1))
+      return gpu_feature_flags_;
+
     GpuFeatureFlags flags;
     // Manual C++ blacklist since Android M18 doesn't support JSON-based
     // blacklist.

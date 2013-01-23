@@ -19,6 +19,7 @@
 #include "base/metrics/histogram.h"
 #include "base/string_util.h"
 #include "base/time.h"
+#include "base/utf_string_conversions.h"
 #include "chrome/browser/autocomplete/history_url_provider.h"
 #include "chrome/browser/bookmarks/bookmark_service.h"
 #include "chrome/browser/cancelable_request.h"
@@ -699,11 +700,15 @@ void HistoryBackend::InitImpl(const std::string& languages, Profile* profile) {
   expirer_.StartArchivingOldStuff(TimeDelta::FromDays(kArchiveDaysThreshold));
 
 #if defined(OS_ANDROID)
-  android_provider_backend_ = new AndroidProviderBackend(db_.get(),
-      thumbnail_db_.get(), bookmark_service_, this, profile);
-  if(!android_provider_backend_->Init()) {
-    LOG(ERROR) << "Couldn't initialize AndroidProviderBackend";
-    android_provider_backend_ = NULL;
+  // TODO(michaelbai): Make AndroidProviderBackend work even If the thumbnail
+  // database is not available.
+  if (thumbnail_db_.get()) {
+    android_provider_backend_ = new AndroidProviderBackend(db_.get(),
+        thumbnail_db_.get(), bookmark_service_, this, profile);
+    if(!android_provider_backend_->Init()) {
+      LOG(ERROR) << "Couldn't initialize AndroidProviderBackend";
+      android_provider_backend_ = NULL;
+    }
   }
 #endif
 
@@ -951,7 +956,8 @@ void HistoryBackend::SetPageTitle(const GURL& url,
     ScheduleCommit();
 }
 
-void HistoryBackend::AddPageNoVisitForBookmark(const GURL& url) {
+void HistoryBackend::AddPageNoVisitForBookmark(const GURL& url,
+                                               const string16& title) {
   if (!db_.get())
     return;
 
@@ -961,6 +967,13 @@ void HistoryBackend::AddPageNoVisitForBookmark(const GURL& url) {
     // URL is already known, nothing to do.
     return;
   }
+
+  if (!title.empty()) {
+    url_info.set_title(title);
+  } else {
+    url_info.set_title(UTF8ToUTF16(url.spec()));
+  }
+
   url_info.set_last_visit(Time::Now());
   // Mark the page hidden. If the user types it in, it'll unhide.
   url_info.set_hidden(true);

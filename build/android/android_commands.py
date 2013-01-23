@@ -48,10 +48,6 @@ LOCAL_PROPERTIES_PATH = '/data/local.prop'
 # Property in /data/local.prop that controls Java assertions.
 JAVA_ASSERT_PROPERTY = 'dalvik.vm.enableassertions'
 
-BOOT_COMPLETE_RE = re.compile(
-    re.escape('android.intent.action.MEDIA_MOUNTED path: /mnt/sdcard')
-    + '|' + re.escape('PowerManagerService: bootCompleted'))
-
 MEMORY_INFO_RE = re.compile('^(?P<key>\w+):\s+(?P<usage_kb>\d+) kB$')
 NVIDIA_MEMORY_INFO_RE = re.compile('^\s*(?P<user>\S+)\s*(?P<name>\S+)\s*'
                                    '(?P<pid>\d+)\s*(?P<usage_bytes>\d+)$')
@@ -219,13 +215,37 @@ class AndroidCommands(object):
     self._adb = adb_interface.AdbInterface()
     if device:
       self._adb.SetTargetSerial(device)
+    # So many users require root that we just always do it. This could
+    # be made more fine grain if necessary.
+    self.EnableAdbRoot()
     self._logcat = None
     self._original_governor = None
     self._pushed_files = []
+    self._external_storage = ''
 
   def Adb(self):
     """Returns our AdbInterface to avoid us wrapping all its methods."""
     return self._adb
+
+  def EnableAdbRoot(self):
+    """Enables adb root on the device.
+
+      Returns:
+        True: if output from executing adb reboot was as expected.
+        False: otherwise.
+    """
+    return_value = self._adb.EnableAdbRoot()
+    # EnableAdbRoot inserts a call for wait-for-device only when adb logcat
+    # output matches what is expected. Just to be safe add a call to
+    # wait-for-device.
+    self._adb.SendCommand('wait-for-device')
+    return return_value
+
+  def GetExternalStorage(self):
+    if not self._external_storage:
+      self._external_storage = self.RunShellCommand('echo $EXTERNAL_STORAGE')[0]
+      assert self._external_storage, 'Unable to find $EXTERNAL_STORAGE'
+    return self._external_storage
 
   def WaitForDevicePm(self):
     """Blocks until the device's package manager is available.
@@ -271,12 +291,12 @@ class AndroidCommands(object):
       return
     if full_reboot:
       self._adb.SendCommand('reboot')
+      timeout = 300
     else:
       self.RestartShell()
+      timeout = 120
     self.WaitForDevicePm()
-    self.StartMonitoringLogcat(timeout=120)
-    # TODO(tonyg): Is there an error log line to watch for here?
-    self.WaitForLogMatch(BOOT_COMPLETE_RE, None)
+    self.WaitForSdCardReady(timeout)
     self.UnlockDevice()
 
   def Uninstall(self, package):
@@ -314,6 +334,24 @@ class AndroidCommands(object):
     out = self._adb.SendCommand('remount')
     if out.strip() != 'remount succeeded':
       raise errors.MsgException('Remount failed: %s' % out)
+
+  def WaitForSdCardReady(self, timeout_time):
+    """Wait for the SD card ready before pushing data into it."""
+    logging.info('Waiting for SD card ready...')
+    sdcard_ready = False
+    attempts = 0
+    wait_period = 5
+    external_storage = self.GetExternalStorage()
+    while not sdcard_ready and attempts * wait_period < timeout_time:
+      output = self.RunShellCommand('ls ' + external_storage)
+      if output:
+        sdcard_ready = True
+      else:
+        time.sleep(wait_period)
+        attempts += 1
+    if not sdcard_ready:
+      raise errors.WaitForResponseTimedOutError(
+          'SD card not ready after %s seconds' % timeout_time)
 
   # It is tempting to turn this function into a generator, however this is not
   # possible without using a private (local) adb_shell instance (to ensure no
@@ -401,10 +439,6 @@ class AndroidCommands(object):
     """Tell the device to return to the home screen. Blocks until completion."""
     self.RunShellCommand('am start -W '
         '-a android.intent.action.MAIN -c android.intent.category.HOME')
-
-  def EnableAdbRoot(self):
-    """Enable root on the device."""
-    self._adb.EnableAdbRoot()
 
   def CloseApplication(self, package):
     """Attempt to close down the application, using increasing violence.

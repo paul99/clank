@@ -6,6 +6,7 @@
 
 #include <EGL/egl.h>
 
+#include "base/android/build_info.h"
 #include "base/logging.h"
 #include "base/memory/ref_counted.h"
 #include "ui/gfx/gl/egl_util.h"
@@ -128,6 +129,16 @@ bool AndroidViewSurface::Resize(const gfx::Size& size) {
     return pbuffer_surface_->Resize(size);
   else if (GetHandle()) {
     DCHECK(window_ && window_->GetNativeHandle());
+    static const char* renderer_str = reinterpret_cast<const char*>(
+        glGetString(GL_RENDERER));
+    DCHECK(renderer_str);
+    static int sdk_version = base::android::BuildInfo::GetInstance()->sdk_version_int;
+    static bool allow_realloc_for_resize = !renderer_str ||
+        strncmp(renderer_str, "Mali-400 MP", 11) || !(sdk_version < 17);
+    if (!allow_realloc_for_resize) {
+      // Avoid recreating the window surface.
+      return true;
+    }
     // Deactivate and restore any currently active context.
     EGLContext context = eglGetCurrentContext();
     if (context != EGL_NO_CONTEXT) {
@@ -172,10 +183,13 @@ void AndroidViewSurface::SetNativeWindow(NativeWindowInterface* window) {
     DCHECK(GetHandle());
     NativeViewGLSurfaceEGL::Destroy();
     window_ = NULL;
+  }
 
+  if (window_ == NULL) {
     pbuffer_surface_ = new PbufferGLSurfaceEGL(false, Size(1,1));
     pbuffer_surface_->Initialize();
   }
+
 }
 
 }  // namespace gfx

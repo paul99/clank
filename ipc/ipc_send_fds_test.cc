@@ -22,6 +22,8 @@ extern "C" {
 
 #if defined(OS_POSIX)
 #include "base/file_descriptor_posix.h"
+#include "base/global_descriptors_posix.h"
+#include "ipc/ipc_descriptors.h"
 
 namespace {
 
@@ -178,6 +180,8 @@ TEST_F(IPCChannelTest, DescriptorTestSandboxed) {
 #endif  // defined(OS_MACOSX)
 
 MULTIPROCESS_TEST_MAIN(RunTestDescriptorClient) {
+  base::GlobalDescriptors::GetInstance()->Set(kPrimaryIPCChannel,
+      kPrimaryIPCChannel + base::GlobalDescriptors::kBaseDescriptor);
   struct stat st;
   const int fd = open(kDevZeroPath, O_RDONLY);
   fstat(fd, &st);

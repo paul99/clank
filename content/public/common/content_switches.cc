@@ -582,6 +582,12 @@ const char kDisableSandboxedService[]       = "disable-sandbox-service";
 // Enable video
 const char kEnableVideo[]                   = "enable-video";
 
+// Disable history logging in mediaplayer
+const char kDisableMediaHistoryLogging[]    = "disable-media-history";
+
+// Running mediaplayer in renderer process.
+const char kMediaPlayerInRenderProcess[]    = "media-player-in-render-process";
+
 // Enable frame flattening (scrollable frames are expanded instead).
 const char kFrameFlattening[]               = "frame-flattening";
 

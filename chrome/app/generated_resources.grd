@@ -5323,12 +5323,22 @@ Because search results are requested even while you're typing your query, your d
       <message name="IDS_PLUGIN_NOT_AUTHORIZED" desc="The placeholder text for a plug-in that requires user permission to run.">
         The <ph name="PLUGIN_NAME">$1<ex>Java</ex></ph> plug-in needs your permission to run.
       </message>
-      <message name="IDS_PLUGIN_NOT_FOUND" desc="The placeholder text for an unknown plug-in that is not installed.">
-        No plug-in available to display this content.
-      </message>
-      <message name="IDS_PLUGIN_SEARCHING" desc="The placeholder text when searching for a missing plug-in.">
-        Looking for plug-in...
-      </message>
+      <if expr="pp_ifdef('android')">
+        <message name="IDS_PLUGIN_NOT_FOUND" desc="The placeholder text for an unknown plug-in that is not installed.">
+          Chrome for Android does not support this plug-in.
+        </message>
+        <message name="IDS_PLUGIN_SEARCHING" desc="The placeholder text when searching for a missing plug-in.">
+          Chrome for Android does not support this plug-in.
+        </message>
+      </if>
+      <if expr="not pp_ifdef('android')">
+        <message name="IDS_PLUGIN_NOT_FOUND" desc="The placeholder text for an unknown plug-in that is not installed.">
+          No plug-in available to display this content.
+        </message>
+        <message name="IDS_PLUGIN_SEARCHING" desc="The placeholder text when searching for a missing plug-in.">
+          Looking for plug-in...
+        </message>
+      </if>
       <message name="IDS_PLUGIN_DOWNLOADING" desc="The placeholder text when downloading a missing plug-in.">
         Downloading plug-in...
       </message>
@@ -9468,9 +9478,6 @@ experiment id: "<ph name="EXPERIMENT_ID">$5<ex>ar1</ex></ph>"
           &lt;/p&gt;
           &lt;p&gt;
           Just open Chrome on your computer, go to the menu, and select "Sign In to Chrome..."
-          &lt;/p&gt;
-          &lt;p&gt;
-          It's pretty awesome.
           &lt;/p&gt;
         </message>
         <message name="IDS_SYNC_ENABLE_SYNC" desc="Text that displayed on a link or button that allows the user to enable sync.">

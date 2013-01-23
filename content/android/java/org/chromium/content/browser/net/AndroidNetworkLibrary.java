@@ -7,6 +7,7 @@ package org.chromium.content.browser.net;
 import android.content.ActivityNotFoundException;
 import android.content.Context;
 import android.content.Intent;
+import android.security.KeyChain;
 import android.util.Log;
 
 import org.chromium.base.CalledByNative;
@@ -32,14 +33,32 @@ class AndroidNetworkLibrary {
     // Stores the key pair into the CertInstaller application.
     @CalledByNative
     static public boolean storeKeyPair(Context context, byte[] public_key, byte[] private_key) {
-        // This is based on android.security.Credentials.install()
-        // TODO(joth): Use KeyChain API instead of hard-coding constants here: http://b/5859651
+        // TODO(digit): Use KeyChain official extra values to pass the public and private
+        // keys when they're available. The "KEY" and "PKEY" hard-coded constants were taken
+        // from the platform sources, since there are no official KeyChain.EXTRA_XXX definitions
+        // for them. b/5859651
         try {
-            Intent intent = new Intent("android.credentials.INSTALL");
-            intent.setClassName("com.android.certinstaller",
-                    "com.android.certinstaller.CertInstallerMain");
-            intent.putExtra("KEY", private_key);
-            intent.putExtra("PKEY", public_key);
+            Intent intent = KeyChain.createInstallIntent();
+            intent.putExtra("PKEY", private_key);
+            intent.putExtra("KEY", public_key);
+            intent.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK);
+            context.startActivity(intent);
+            return true;
+        } catch (ActivityNotFoundException e) {
+            Log.w(TAG, "could not store key pair: " + e);
+        }
+        return false;
+    }
+
+    // Add a user certificate
+    @CalledByNative
+    static public boolean storeCertificate(Context context, byte[] cert, boolean isPKCS12) {
+        try {
+            Intent intent = KeyChain.createInstallIntent();
+            if (isPKCS12)
+              intent.putExtra(KeyChain.EXTRA_PKCS12, cert);
+            else
+              intent.putExtra(KeyChain.EXTRA_CERTIFICATE, cert);
             intent.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK);
             context.startActivity(intent);
             return true;

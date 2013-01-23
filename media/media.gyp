@@ -137,6 +137,7 @@
         'base/media_log.h',
         'base/media_log_event.h',
         'base/media_posix.cc',
+        'base/media_player_bridge_manager.h',
         'base/media_switches.cc',
         'base/media_switches.h',
         'base/media_win.cc',

@@ -139,6 +139,8 @@ class ChromeViewClient : public content::WebContentsDelegate {
 
   virtual bool TakeFocus(bool reverse) OVERRIDE;
 
+  virtual void WasCrashedForReload() OVERRIDE;
+
   virtual ~ChromeViewClient();
 
  private:

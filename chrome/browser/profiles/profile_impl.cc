@@ -82,7 +82,6 @@
 #include "chrome/browser/user_style_sheet_watcher.h"
 #include "chrome/browser/visitedlink/visitedlink_event_listener.h"
 #include "chrome/browser/visitedlink/visitedlink_master.h"
-#include "chrome/browser/web_resource/promo_resource_service.h"
 #include "chrome/browser/webdata/web_data_service.h"
 #include "chrome/common/chrome_constants.h"
 #include "chrome/common/chrome_notification_types.h"
@@ -107,6 +106,10 @@
 #include "net/http/http_server_properties.h"
 #include "webkit/database/database_tracker.h"
 #include "webkit/quota/quota_manager.h"
+
+#if defined(ENABLE_PROMO_RESOURCE_SERVICE)
+#include "chrome/browser/web_resource/promo_resource_service.h"
+#endif  // defined(ENABLE_PROMO_RESOURCE_SERVICE)
 
 #if defined(OS_WIN)
 #include "chrome/browser/instant/promo_counter.h"
@@ -539,10 +542,10 @@ void ProfileImpl::InitExtensions(bool extensions_enabled) {
 }
 
 void ProfileImpl::InitPromoResources() {
+#if defined(ENABLE_PROMO_RESOURCE_SERVICE)
   if (promo_resource_service_)
     return;
 
-#if !defined(ANDROID_BINSIZE_HACK)
   promo_resource_service_ = new PromoResourceService(this);
   promo_resource_service_->StartAfterDelay();
 #endif

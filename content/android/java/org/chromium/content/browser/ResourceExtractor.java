@@ -131,6 +131,13 @@ public class ResourceExtractor {
                         while ((count = is.read(buffer, 0, BUFFER_SIZE)) != -1) {
                             os.write(buffer, 0, count);
                         }
+                        os.flush();
+
+                        // ensure something reasonable was written.
+                        if (output.length() == 0) {
+                            throw new IOException(file + " extracted with 0 length!");
+                        }
+
                         filenames.add(file);
                     } finally {
                         try {

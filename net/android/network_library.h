@@ -44,6 +44,10 @@ bool StoreKeyPair(const uint8* public_key,
                   const uint8* private_key,
                   size_t private_len);
 
+// Helper to install an X509 certificate. Passes the certificate data
+// via JNI to the Credentials store.
+bool AddCertificate(const uint8* cert, size_t cert_len, bool isPKCS12);
+
 // Get the mime type (if any) that is associated with the file extension.
 // Returns true if a corresponding mime type exists.
 bool GetMimeTypeFromExtension(const std::string& extension,

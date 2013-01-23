@@ -38,7 +38,6 @@
 #include "chrome/browser/ui/webui/options/extension_settings_handler.h"
 #include "chrome/browser/ui/webui/plugins_ui.h"
 #include "chrome/browser/ui/webui/sync_promo/sync_promo_ui.h"
-#include "chrome/browser/web_resource/promo_resource_service.h"
 #include "content/browser/browser_main.h"
 #include "net/base/net_errors.h"
 #include "net/url_request/url_request_error_job.h"
@@ -563,26 +562,6 @@ PluginPrefs* PluginPrefs::GetForProfile(Profile* profile) {
 
 bool PluginPrefs::IsPluginEnabled(const webkit::WebPluginInfo& plugin) const {
   return true;
-}
-
-// static
-void PromoResourceService::RegisterPrefs(PrefService* local_state) {
-  // don't need prefs for things we don't use.
-}
-
-// static
-void PromoResourceService::RegisterUserPrefs(PrefService* prefs) {
-  // don't need prefs for things we don't use.
-}
-
-namespace PromoResourceServiceUtil {
-
-bool CanShowPromo(Profile* profile) {
-  // don't have apps
-  NOTREACHED();
-  return false;
-}
-
 }
 
 namespace browser {

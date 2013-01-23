@@ -69,7 +69,7 @@ class ChromeView {
                         const gfx::Rect& caret_rect, const std::string& text,
                         int selection_start, int selection_end,
                         int composition_start, int composition_end,
-                        bool show_ime_if_needed);
+                        bool show_ime_if_needed, const base::Time& request_time);
 
   void SetTitle(const string16& title);
 
@@ -109,7 +109,6 @@ class ChromeView {
   void SetLastPressAck(float x, float y, float width, float height);
   void resetLastPressAck();
 
-  void DidStartLoading();
   void OnPageStarted(const GURL& validated_url);
   void OnPageFinished(const GURL& validated_url);
   void OnPageFailed(int error_code, const string16& description, const GURL& failingUrl);
@@ -132,8 +131,14 @@ class ChromeView {
   void AddShortcutToBookmark(const GURL& url, const string16& title, const SkBitmap& skbitmap,
                              int r_value, int g_value, int b_value);
 
+  // Called when the mobile promo action asks to send an email.
+  void PromoSendEmail(const string16& data_email,
+                      const string16& data_subj,
+                      const string16& data_body,
+                      const string16& data_inv);
+
   void AddJavascriptInterface(JNIEnv* env, jobject obj, jobject object,
-                              jstring name);
+                              jstring name, jboolean allow_inherited_methods);
   void RemoveJavascriptInterface(JNIEnv* env, jobject obj, jstring name);
 
   void LoadUrlInternal(GURL url, int page_transition);

@@ -4,9 +4,6 @@
 # Use of this source code is governed by a BSD-style license that can be
 # found in the LICENSE file.
 
-export ANDROID_EABI_TOOLCHAIN=$ANDROID_BUILD_TOP/prebuilts/gcc/linux-x86/arm/arm-linux-androideabi-4.6/bin
-export ANDROID_TOOLCHAIN=$ANDROID_EABI_TOOLCHAIN
-
 # Sets up environment for building Chromium for Android.
 if [ -z "$ANDROID_BUILD_TOP" -o -z "$ANDROID_TOOLCHAIN" -o \
   -z "$ANDROID_PRODUCT_OUT" ]; then
@@ -25,7 +22,7 @@ host_os=$(uname -s | sed -e 's/Linux/linux/;s/Darwin/mac/')
 export TOP="$ANDROID_BUILD_TOP"
 
 # We export "ANDROID_NDK_ROOT" for building Chromium for Android by NDK.
-export ANDROID_NDK_ROOT=${ANDROID_BUILD_TOP}/prebuilt/ndk/android-ndk-r8
+export ANDROID_NDK_ROOT=${ANDROID_BUILD_TOP}/prebuilts/ndk/7
 
 # Find the root of the clank sources. The first try assumes that clank is
 # embedded inside an Android checkout. The second assumes that the android
@@ -104,6 +101,7 @@ if [ -z "$CLANK_BUNDLED_BUILD" ]; then
 else
   DEFINES+=" android_build_type=1"
 fi
+DEFINES+=" chrome_symbols_location=unavailable"
 DEFINES+=" host_os=${host_os}"
 DEFINES+=" android_product_out=$(echo -n ${ANDROID_PRODUCT_OUT})"
 DEFINES+=" linux_fpic=1"
@@ -154,20 +152,24 @@ ORDER_DEFINES="order_text_section=./orderfiles/orderfile.out"
 # in Android's armv5te.mk.
 case "${TARGET_PRODUCT}" in
   "passion"|"soju"|"sojua"|"sojus"|"yakju"|"mysid")
+    ANDROID_TARGET_ARCH=arm
     DEFINES+=" target_arch=arm"
     DEFINES+=" arm_neon=1 armv7=1 arm_thumb=1"
     DEFINES+=" ${ORDER_DEFINES}"
     ;;
   "trygon"|"tervigon")
+    ANDROID_TARGET_ARCH=arm
     DEFINES+=" target_arch=arm"
-    DEFINES+=" arm_neon=0 armv7=1 arm_thumb=1 arm_fpu=vfpv3-d16"
+    DEFINES+=" arm_neon=0 armv7=1 arm_thumb=1 arm_fpu=vfpv3-d16 arm_neon_optional=1"
     DEFINES+=" ${ORDER_DEFINES}"
     ;;
   "full")
+    ANDROID_TARGET_ARCH=arm
     DEFINES+=" target_arch=arm"
     DEFINES+=" arm_neon=0 armv7=0 arm_thumb=1 arm_fpu=vfp"
     ;;
   *x86*)
+    ANDROID_TARGET_ARCH=x86
     # TODO(tedbo): The ia32 build fails on ffmpeg, so we disable it here.
     DEFINES+=" target_arch=ia32 use_libffmpeg=0"
     ;;
@@ -175,6 +177,34 @@ case "${TARGET_PRODUCT}" in
     echo "TARGET_PRODUCT: ${TARGET_PRODUCT} is not supported." >& 2
     return 1
 esac
+
+# *********************************************************************
+# *********************************************************************
+# *****                                                           *****
+# *****      D O   N O T   U P S T R E A M                        *****
+# *****                                                           *****
+# *********************************************************************
+# *********************************************************************
+#
+# Use our custom NDK sysroot if we detect that the one provided by our
+# current NDK directory is buggy. See build/android/arm-sysroot/README
+# for details.
+
+SYSROOT_SUBDIR=platforms/android-9/arch-$ANDROID_TARGET_ARCH
+ANDROID_NDK_SYSROOT=$ANDROID_NDK_ROOT/$SYSROOT_SUBDIR
+# The following checks whether the symbol __exidx_start is exported by the
+# link-time C library. If it is, the sysroot is broken the generated library
+# won't load on Android master builds. See BUG=6314858
+# Remove this hack once we have a newer NDK with fixed link-time libraries.
+readelf -D -s $ANDROID_NDK_SYSROOT/usr/lib/libc.so | grep -q -e __exidx_start
+if [ $? = 0 ]; then
+    ANDROID_NDK_SYSROOT=$CLANK_SRC/build/android/arm-sysroot
+    DEFINES+=" android_ndk_sysroot=$ANDROID_NDK_SYSROOT"
+fi
+
+#
+# ******** 'DO NOT UPSTREAM' ENDS HERE *********************************
+#
 
 if [ -n "$CLANK_VALGRIND_BUILD" ]; then
 # arm_thumb=0 is a workaround for https://bugs.kde.org/show_bug.cgi?id=270709

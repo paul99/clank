@@ -219,6 +219,19 @@ bool ChromeViewClient::ShouldIgnoreNavigation(
     return false;
   }
 
+  // If the url has been typed into the omnibox, then we shouldn't even try to
+  // override it unless it's something we can't render as a page.
+  // This is to address the issue of going to pages like Play, where we get 3
+  // redirects:
+  // 1) http://play.google.com
+  // 2) https://play.google.com
+  // 3) https://play.google.com/store
+  // The transition type is retained across redirects.
+  if (transition_type == content::PAGE_TRANSITION_TYPED &&
+      (url.SchemeIs("http") || url.SchemeIs("https"))) {
+        return false;
+  }
+
   return ShouldOverrideLoading(url);
 }
 
@@ -444,6 +457,12 @@ bool ChromeViewClient::TakeFocus(bool reverse) {
   return Java_ChromeViewClient_takeFocus(env,
                                          weak_java_client_.get(env).obj(),
                                          reverse);
+}
+
+void ChromeViewClient::WasCrashedForReload() {
+  JNIEnv* env = AttachCurrentThread();
+  Java_ChromeViewClient_wasCrashedForReload(
+      env, weak_java_client_.get(env).obj());
 }
 
 ChromeViewClientError ChromeViewClient::ToChromeViewClientError(int netError)

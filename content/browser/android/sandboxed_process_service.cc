@@ -77,14 +77,16 @@ class SurfaceTexturePeerRendererImpl : public SurfaceTexturePeer {
   virtual ~SurfaceTexturePeerRendererImpl() {
   }
 
-  virtual void EstablishSurfaceTexturePeer(base::ProcessHandle pid,
-                                           SurfaceTextureTarget type,
-                                           jobject j_surface_texture,
-                                           int primary_id,
-                                           int secondary_id) {
+  virtual void EstablishSurfaceTexturePeer(
+      base::ProcessHandle pid,
+      SurfaceTextureTarget type,
+      scoped_refptr<SurfaceTextureBridge> surface_texture,
+      int primary_id,
+      int secondary_id) {
     JNIEnv* env = base::android::AttachCurrentThread();
     Java_SandboxedProcessService_establishSurfaceTexturePeer(env, service_,
-        pid, type, j_surface_texture, primary_id, secondary_id);
+        pid, type, surface_texture->j_surface_texture().obj(),
+        primary_id, secondary_id);
     CheckException(env);
   }
 
@@ -118,17 +120,14 @@ void ConfigApplicationContext(JNIEnv* env, jclass clazz, jobject service) {
 // Chrome actually uses the renderer code path for all of its sandboxed
 // processes such as renderers, plugins, etc.
 void InternalSandboxedProcessMain(int ipc_fd,
-                                  int crash_fd,
+                                  int minidump_fd,
+                                  int chrome_pak_fd,
+                                  int locale_pak_fd,
                                   JNIEnv* env,
                                   jclass clazz,
                                   jobject service) {
   // Set up the IPC file descriptor mapping.
   base::GlobalDescriptors::GetInstance()->Set(kPrimaryIPCChannel, ipc_fd);
-#if defined(USE_LINUX_BREAKPAD)
-  if (crash_fd > 0) {
-    base::GlobalDescriptors::GetInstance()->Set(kCrashDumpSignal, crash_fd);
-  }
-#endif
 
   // The command line should have already been copied over in JNI load.
   const CommandLine& command_line = *CommandLine::ForCurrentProcess();
@@ -137,8 +136,19 @@ void InternalSandboxedProcessMain(int ipc_fd,
   //SandboxInitWrapper sandbox_wrapper;
   ConfigApplicationContext(env, clazz, service);
 
+  CHECK(chrome_pak_fd) << "Invalid chrome pak descriptor.";
+  CHECK(locale_pak_fd) << "Invalid locale pak descriptor.";
+  base::GlobalDescriptors::GetInstance()->Set(
+      kAndroidChromePakDescriptor, chrome_pak_fd);
+  base::GlobalDescriptors::GetInstance()->Set(
+      kAndroidLocalePakDescriptor, locale_pak_fd);
+
 #if defined(USE_LINUX_BREAKPAD)
+#if defined(OS_ANDROID)
+  InitNonBrowserCrashReporter(minidump_fd);
+#else
   InitNonBrowserCrashReporter();
+#endif
 #endif
   SurfaceTexturePeer::InitInstance(new SurfaceTexturePeerRendererImpl(service));
   std::string process_type =
@@ -149,11 +159,8 @@ void InternalSandboxedProcessMain(int ipc_fd,
   content::SetContentClient(g_chrome_content_client.Pointer());
   if (process_type == switches::kRendererProcess) {
     content::GetContentClient()->set_renderer(g_renderer_client.Pointer());
-    // TODO(tedbo): This will not work when we turn on full sandboxing. We'll
-    // need to pass the resource file descriptors so that they can be mmap'd.
     // TODO(tedbo): Do the utility processes need ResourceBundle?
-    ResourceBundle::InitSharedInstanceWithLocale(
-        command_line.GetSwitchValueASCII(switches::kLang));
+    ResourceBundle::InitSharedInstanceWithPaks(locale_pak_fd, chrome_pak_fd);
   } else if (process_type == switches::kPpapiPluginProcess) {
     content::GetContentClient()->set_plugin(g_plugin_client.Pointer());
   } else if (process_type == switches::kUtilityProcess) {
@@ -304,10 +311,14 @@ static void SandboxedProcessMain(JNIEnv* env,
                                  jclass clazz,
                                  jobject service,
                                  jint ipc_fd,
-                                 jint crash_fd) {
+                                 jint minidump_fd,
+                                 jint chrome_pak_fd,
+                                 jint locale_pak_fd) {
   InternalSandboxedProcessMain(
       static_cast<int>(ipc_fd),
-      static_cast<int>(crash_fd),
+      static_cast<int>(minidump_fd),
+      static_cast<int>(chrome_pak_fd),
+      static_cast<int>(locale_pak_fd),
       env,
       clazz,
       service);

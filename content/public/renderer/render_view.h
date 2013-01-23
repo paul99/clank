@@ -137,7 +137,6 @@ class CONTENT_EXPORT RenderView : public IPC::Message::Sender {
 #if defined(OS_ANDROID)
   virtual void SetVideoSurface(jobject j_surface, int player_id) = 0;
 #endif
-
 };
 
 }  // namespace content
