@@ -169,6 +169,7 @@ case "${TARGET_PRODUCT}" in
     DEFINES+=" arm_neon=0 armv7=0 arm_thumb=1 arm_fpu=vfp"
     ;;
   "full_mips")
+    ANDROID_TARGET_ARCH=mips
     DEFINES+=" target_arch=mipsel"
     DEFINES+=""
     ;;
