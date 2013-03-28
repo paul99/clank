@@ -4,29 +4,35 @@
 
 #import "chrome/browser/ui/cocoa/extensions/extension_action_context_menu.h"
 
+#include "base/prefs/public/pref_change_registrar.h"
 #include "base/sys_string_conversions.h"
+#include "chrome/browser/extensions/extension_action.h"
+#include "chrome/browser/extensions/extension_action_manager.h"
 #include "chrome/browser/extensions/extension_service.h"
+#include "chrome/browser/extensions/extension_system.h"
 #include "chrome/browser/extensions/extension_tab_util.h"
 #include "chrome/browser/extensions/extension_uninstall_dialog.h"
-#include "chrome/browser/prefs/pref_change_registrar.h"
 #include "chrome/browser/prefs/pref_service.h"
 #include "chrome/browser/profiles/profile.h"
-#include "chrome/browser/ui/browser_list.h"
+#include "chrome/browser/ui/browser.h"
+#include "chrome/browser/ui/browser_finder.h"
+#include "chrome/browser/ui/browser_tabstrip.h"
+#include "chrome/browser/ui/chrome_pages.h"
 #include "chrome/browser/ui/cocoa/browser_window_cocoa.h"
 #include "chrome/browser/ui/cocoa/browser_window_controller.h"
 #include "chrome/browser/ui/cocoa/extensions/browser_actions_controller.h"
 #include "chrome/browser/ui/cocoa/extensions/extension_popup_controller.h"
 #include "chrome/browser/ui/cocoa/info_bubble_view.h"
+#include "chrome/browser/ui/cocoa/last_active_browser_cocoa.h"
 #import "chrome/browser/ui/cocoa/location_bar/location_bar_view_mac.h"
 #include "chrome/browser/ui/cocoa/toolbar/toolbar_controller.h"
 #include "chrome/common/chrome_notification_types.h"
 #include "chrome/common/extensions/extension.h"
-#include "chrome/common/extensions/extension_action.h"
 #include "chrome/common/extensions/extension_constants.h"
 #include "chrome/common/pref_names.h"
 #include "chrome/common/url_constants.h"
-#include "content/public/browser/notification_observer.h"
 #include "content/public/browser/notification_details.h"
+#include "content/public/browser/notification_observer.h"
 #include "content/public/browser/notification_source.h"
 #include "content/public/browser/web_contents.h"
 #include "grit/chromium_strings.h"
@@ -37,17 +43,18 @@
 using content::OpenURLParams;
 using content::Referrer;
 using content::WebContents;
+using extensions::Extension;
 
 // A class that loads the extension icon on the I/O thread before showing the
 // confirmation dialog to uninstall the given extension.
 // Also acts as the extension's UI delegate in order to display the dialog.
 class AsyncUninstaller : public ExtensionUninstallDialog::Delegate {
  public:
-  AsyncUninstaller(const Extension* extension, Profile* profile)
+  AsyncUninstaller(const Extension* extension, Browser* browser)
       : extension_(extension),
-        profile_(profile) {
+        profile_(browser->profile()) {
     extension_uninstall_dialog_.reset(
-        ExtensionUninstallDialog::Create(profile, this));
+        ExtensionUninstallDialog::Create(browser, this));
     extension_uninstall_dialog_->ConfirmUninstall(extension_);
   }
 
@@ -55,7 +62,7 @@ class AsyncUninstaller : public ExtensionUninstallDialog::Delegate {
 
   // ExtensionUninstallDialog::Delegate:
   virtual void ExtensionUninstallAccepted() {
-    profile_->GetExtensionService()->
+    extensions::ExtensionSystem::Get(profile_)->extension_service()->
         UninstallExtension(extension_->id(), false, NULL);
   }
   virtual void ExtensionUninstallCanceled() {}
@@ -72,25 +79,31 @@ class AsyncUninstaller : public ExtensionUninstallDialog::Delegate {
   DISALLOW_COPY_AND_ASSIGN(AsyncUninstaller);
 };
 
+@interface ExtensionActionContextMenu(Private)
+// Callback for the context menu items.
+- (void)dispatch:(id)menuItem;
+
+// Runs the action for |menuItem|.
+- (void)updateInspectorItem;
+@end
+
 namespace extension_action_context_menu {
 
-class DevmodeObserver : public content::NotificationObserver {
+class DevmodeObserver {
  public:
   DevmodeObserver(ExtensionActionContextMenu* menu,
-                             PrefService* service)
+                  PrefService* service)
       : menu_(menu), pref_service_(service) {
     registrar_.Init(pref_service_);
-    registrar_.Add(prefs::kExtensionsUIDeveloperMode, this);
+    registrar_.Add(
+        prefs::kExtensionsUIDeveloperMode,
+        base::Bind(&DevmodeObserver::OnExtensionsUIDeveloperModeChanged,
+                   base::Unretained(this)));
   }
   virtual ~DevmodeObserver() {}
 
-  void Observe(int type,
-               const content::NotificationSource& source,
-               const content::NotificationDetails& details) {
-    if (type == chrome::NOTIFICATION_PREF_CHANGED)
-      [menu_ updateInspectorItem];
-    else
-      NOTREACHED();
+  void OnExtensionsUIDeveloperModeChanged() {
+    [menu_ updateInspectorItem];
   }
 
  private:
@@ -99,40 +112,7 @@ class DevmodeObserver : public content::NotificationObserver {
   PrefChangeRegistrar registrar_;
 };
 
-class ProfileObserverBridge : public content::NotificationObserver {
- public:
-  ProfileObserverBridge(ExtensionActionContextMenu* owner,
-                        const Profile* profile)
-      : owner_(owner),
-        profile_(profile) {
-    registrar_.Add(this, chrome::NOTIFICATION_PROFILE_DESTROYED,
-                   content::Source<Profile>(profile));
-  }
-
-  ~ProfileObserverBridge() {}
-
-  // Overridden from content::NotificationObserver
-  void Observe(int type,
-               const content::NotificationSource& source,
-               const content::NotificationDetails& details) {
-    if (type == chrome::NOTIFICATION_PROFILE_DESTROYED &&
-        source == content::Source<Profile>(profile_)) {
-      [owner_ invalidateProfile];
-    }
-  }
-
- private:
-  ExtensionActionContextMenu* owner_;
-  const Profile* profile_;
-  content::NotificationRegistrar registrar_;
-};
-
 }  // namespace extension_action_context_menu
-
-@interface ExtensionActionContextMenu(Private)
-// Callback for the context menu items.
-- (void)dispatch:(id)menuItem;
-@end
 
 @implementation ExtensionActionContextMenu
 
@@ -142,42 +122,32 @@ namespace {
 enum {
   kExtensionContextName = 0,
   kExtensionContextOptions = 2,
-  kExtensionContextDisable = 3,
-  kExtensionContextUninstall = 4,
-  kExtensionContextHide = 5,
-  kExtensionContextManage = 7,
-  kExtensionContextInspect = 8
+  kExtensionContextUninstall = 3,
+  kExtensionContextHide = 4,
+  kExtensionContextManage = 6,
+  kExtensionContextInspect = 7
 };
-
-int CurrentTabId() {
-  Browser* browser = BrowserList::GetLastActive();
-  if(!browser)
-    return -1;
-  WebContents* contents = browser->GetSelectedWebContents();
-  if (!contents)
-    return -1;
-  return ExtensionTabUtil::GetTabId(contents);
-}
 
 }  // namespace
 
 - (id)initWithExtension:(const Extension*)extension
-                profile:(Profile*)profile
+                browser:(Browser*)browser
         extensionAction:(ExtensionAction*)action{
   if ((self = [super initWithTitle:@""])) {
     action_ = action;
     extension_ = extension;
-    profile_ = profile;
+    browser_ = browser;
 
+    // NOTE: You MUST keep this in sync with the enumeration in the header file.
     NSArray* menuItems = [NSArray arrayWithObjects:
         base::SysUTF8ToNSString(extension->name()),
         [NSMenuItem separatorItem],
         l10n_util::GetNSStringWithFixup(IDS_EXTENSIONS_OPTIONS_MENU_ITEM),
-        l10n_util::GetNSStringWithFixup(IDS_EXTENSIONS_DISABLE),
         l10n_util::GetNSStringWithFixup(IDS_EXTENSIONS_UNINSTALL),
         l10n_util::GetNSStringWithFixup(IDS_EXTENSIONS_HIDE_BUTTON),
         [NSMenuItem separatorItem],
         l10n_util::GetNSStringWithFixup(IDS_MANAGE_EXTENSIONS),
+        l10n_util::GetNSStringWithFixup(IDS_EXTENSION_ACTION_INSPECT_POPUP),
         nil];
 
     for (id item in menuItems) {
@@ -194,7 +164,8 @@ int CurrentTabId() {
         // Only browser actions can have their button hidden. Page actions
         // should never show the "Hide" menu item.
         if ([itemObj tag] == kExtensionContextHide &&
-            !extension->browser_action()) {
+            !extensions::ExtensionActionManager::Get(browser_->profile())->
+            GetBrowserAction(*extension)) {
           [itemObj setTarget:nil];  // Item is disabled.
           [itemObj setHidden:YES];  // Item is hidden.
         } else {
@@ -203,20 +174,9 @@ int CurrentTabId() {
       }
     }
 
-    NSString* inspectorTitle =
-        l10n_util::GetNSStringWithFixup(IDS_EXTENSION_ACTION_INSPECT_POPUP);
-    inspectorItem_.reset([[NSMenuItem alloc] initWithTitle:inspectorTitle
-                                                    action:@selector(dispatch:)
-                                             keyEquivalent:@""]);
-    [inspectorItem_.get() setTarget:self];
-    [inspectorItem_.get() setTag:kExtensionContextInspect];
-
-    PrefService* service = profile_->GetPrefs();
+    PrefService* service = browser_->profile()->GetPrefs();
     observer_.reset(
         new extension_action_context_menu::DevmodeObserver(self, service));
-    profile_observer_.reset(
-        new extension_action_context_menu::ProfileObserverBridge(self,
-                                                                 profile));
 
     [self updateInspectorItem];
     return self;
@@ -225,22 +185,13 @@ int CurrentTabId() {
 }
 
 - (void)updateInspectorItem {
-  PrefService* service = profile_->GetPrefs();
+  PrefService* service = browser_->profile()->GetPrefs();
   bool devmode = service->GetBoolean(prefs::kExtensionsUIDeveloperMode);
-  if (devmode) {
-    if ([self indexOfItem:inspectorItem_.get()] == -1)
-      [self addItem:inspectorItem_.get()];
-  } else {
-    if ([self indexOfItem:inspectorItem_.get()] != -1)
-      [self removeItem:inspectorItem_.get()];
-  }
+  NSMenuItem* item = [self itemWithTag:kExtensionContextInspect];
+  [item setHidden:!devmode];
 }
 
 - (void)dispatch:(id)menuItem {
-  Browser* browser = BrowserList::FindBrowserWithProfile(profile_);
-  if (!browser)
-    return;
-
   NSMenuItem* item = (NSMenuItem*)menuItem;
   switch ([item tag]) {
     case kExtensionContextName: {
@@ -249,48 +200,45 @@ int CurrentTabId() {
       OpenURLParams params(
           url, Referrer(), NEW_FOREGROUND_TAB, content::PAGE_TRANSITION_LINK,
            false);
-      browser->OpenURL(params);
+      browser_->OpenURL(params);
       break;
     }
     case kExtensionContextOptions: {
       DCHECK(!extension_->options_url().is_empty());
-      profile_->GetExtensionProcessManager()->OpenOptionsPage(extension_,
-                                                              browser);
-      break;
-    }
-    case kExtensionContextDisable: {
-      ExtensionService* extensionService = profile_->GetExtensionService();
-      if (!extensionService)
-        return; // Incognito mode.
-      extensionService->DisableExtension(extension_->id());
+      extensions::ExtensionSystem::Get(browser_->profile())->process_manager()->
+          OpenOptionsPage(extension_, browser_);
       break;
     }
     case kExtensionContextUninstall: {
-      uninstaller_.reset(new AsyncUninstaller(extension_, profile_));
+      uninstaller_.reset(new AsyncUninstaller(extension_, browser_));
       break;
     }
     case kExtensionContextHide: {
-      ExtensionService* extension_service = profile_->GetExtensionService();
-      extension_service->SetBrowserActionVisibility(extension_, false);
+      ExtensionService* extension_service = extensions::ExtensionSystem::Get(
+          browser_->profile())->extension_service();
+      extension_service->extension_prefs()->
+          SetBrowserActionVisibility(extension_, false);
       break;
     }
     case kExtensionContextManage: {
-      browser->ShowOptionsTab(chrome::kExtensionsSubPage);
+      chrome::ShowExtensions(browser_);
       break;
     }
     case kExtensionContextInspect: {
       BrowserWindowCocoa* window =
-          static_cast<BrowserWindowCocoa*>(browser->window());
+          static_cast<BrowserWindowCocoa*>(browser_->window());
       ToolbarController* toolbarController =
           [window->cocoa_controller() toolbarController];
       LocationBarViewMac* locationBarView =
           [toolbarController locationBarBridge];
 
+      extensions::ExtensionActionManager* action_manager =
+          extensions::ExtensionActionManager::Get(browser_->profile());
       NSPoint popupPoint = NSZeroPoint;
-      if (extension_->page_action() == action_) {
+      if (action_manager->GetPageAction(*extension_) == action_) {
         popupPoint = locationBarView->GetPageActionBubblePoint(action_);
 
-      } else if (extension_->browser_action() == action_) {
+      } else if (action_manager->GetBrowserAction(*extension_) == action_) {
         BrowserActionsController* controller =
             [toolbarController browserActionsController];
         popupPoint = [controller popupPointForBrowserAction:extension_];
@@ -299,11 +247,18 @@ int CurrentTabId() {
         NOTREACHED() << "action_ is not a page action or browser action?";
       }
 
-      int tabId = CurrentTabId();
+      content::WebContents* active_tab = chrome::GetActiveWebContents(browser_);
+      if (!active_tab)
+         break;
+
+      int tabId = ExtensionTabUtil::GetTabId(active_tab);
+
       GURL url = action_->GetPopupUrl(tabId);
-      DCHECK(url.is_valid());
+      if (!url.is_valid())
+        return;
+
       [ExtensionPopupController showURL:url
-                              inBrowser:BrowserList::GetLastActive()
+                              inBrowser:browser_
                              anchoredAt:popupPoint
                           arrowLocation:info_bubble::kTopRight
                                 devMode:YES];
@@ -316,19 +271,11 @@ int CurrentTabId() {
 }
 
 - (BOOL)validateMenuItem:(NSMenuItem*)menuItem {
-  if ([menuItem tag] == kExtensionContextInspect) {
-    // Disable 'Inspect popup' if there is no popup.
-    return action_ && action_->HasPopup(CurrentTabId());
-  } else if ([menuItem tag] == kExtensionContextOptions) {
+  if ([menuItem tag] == kExtensionContextOptions) {
     // Disable 'Options' if there are no options to set.
     return extension_->options_url().spec().length() > 0;
   }
   return YES;
-}
-
-- (void)invalidateProfile {
-  observer_.reset();
-  profile_ = NULL;
 }
 
 @end

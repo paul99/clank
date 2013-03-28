@@ -1,26 +1,25 @@
-// Copyright (c) 2011 The Chromium Authors. All rights reserved.
+// Copyright (c) 2012 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
 #ifndef CHROME_BROWSER_PASSWORD_MANAGER_NATIVE_BACKEND_KWALLET_X_H_
 #define CHROME_BROWSER_PASSWORD_MANAGER_NATIVE_BACKEND_KWALLET_X_H_
-#pragma once
 
 #include <string>
 
 #include "base/basictypes.h"
 #include "base/memory/ref_counted.h"
 #include "base/time.h"
+#include "chrome/browser/password_manager/password_store_factory.h"
 #include "chrome/browser/password_manager/password_store_x.h"
 #include "chrome/browser/profiles/profile.h"
 
 class Pickle;
+class PickleIterator;
 class PrefService;
 
-namespace webkit {
-namespace forms {
+namespace content {
 struct PasswordForm;
-}
 }
 
 namespace base {
@@ -42,12 +41,12 @@ class NativeBackendKWallet : public PasswordStoreX::NativeBackend {
   virtual bool Init() OVERRIDE;
 
   // Implements NativeBackend interface.
-  virtual bool AddLogin(const webkit::forms::PasswordForm& form) OVERRIDE;
-  virtual bool UpdateLogin(const webkit::forms::PasswordForm& form) OVERRIDE;
-  virtual bool RemoveLogin(const webkit::forms::PasswordForm& form) OVERRIDE;
+  virtual bool AddLogin(const content::PasswordForm& form) OVERRIDE;
+  virtual bool UpdateLogin(const content::PasswordForm& form) OVERRIDE;
+  virtual bool RemoveLogin(const content::PasswordForm& form) OVERRIDE;
   virtual bool RemoveLoginsCreatedBetween(
       const base::Time& delete_begin, const base::Time& delete_end) OVERRIDE;
-  virtual bool GetLogins(const webkit::forms::PasswordForm& form,
+  virtual bool GetLogins(const content::PasswordForm& form,
                          PasswordFormList* forms) OVERRIDE;
   virtual bool GetLoginsCreatedBetween(const base::Time& get_begin,
                                        const base::Time& get_end,
@@ -111,40 +110,23 @@ class NativeBackendKWallet : public PasswordStoreX::NativeBackend {
   // Returns kInvalidWalletHandle on error.
   int WalletHandle();
 
-  // Compares two PasswordForms and returns true if they are the same.
-  // If |update_check| is false, we only check the fields that are checked by
-  // LoginDatabase::UpdateLogin() when updating logins; otherwise, we check the
-  // fields that are checked by LoginDatabase::RemoveLogin() for removing them.
-  static bool CompareForms(const webkit::forms::PasswordForm& a,
-                           const webkit::forms::PasswordForm& b,
-                           bool update_check);
-
   // Serializes a list of PasswordForms to be stored in the wallet.
   static void SerializeValue(const PasswordFormList& forms, Pickle* pickle);
 
-  // Checks a serialized list of PasswordForms for sanity. Returns true if OK.
-  // Note that |realm| is only used for generating a useful warning message.
-  static bool CheckSerializedValue(const uint8_t* byte_array, size_t length,
-                                   const std::string& realm);
-
-  // Convenience function to read a GURL from a Pickle. Assumes the URL has
-  // been written as a std::string. Returns true on success.
-  static bool ReadGURL(const Pickle& pickle, void** iter, GURL* url);
+  // Deserializes a list of PasswordForms from the wallet.
+  // |size_32| controls reading the size field within the pickle as 32 bits.
+  // We used to use Pickle::WriteSize() to write the number of password forms,
+  // but that has a different size on 32- and 64-bit systems. So, now we always
+  // write a 64-bit quantity, but we support trying to read it as either size
+  // when reading old pickles that fail to deserialize using the native size.
+  static bool DeserializeValueSize(const std::string& signon_realm,
+                                   const PickleIterator& iter,
+                                   bool size_32, bool warn_only,
+                                   PasswordFormList* forms);
 
   // In case the fields in the pickle ever change, version them so we can try to
   // read old pickles. (Note: do not eat old pickles past the expiration date.)
-  static const int kPickleVersion = 0;
-
-  // Name of the folder to store passwords in.
-  static const char kKWalletFolder[];
-
-  // DBus service, path, and interface names for klauncher and kwalletd.
-  static const char kKWalletServiceName[];
-  static const char kKWalletPath[];
-  static const char kKWalletInterface[];
-  static const char kKLauncherServiceName[];
-  static const char kKLauncherPath[];
-  static const char kKLauncherInterface[];
+  static const int kPickleVersion = 1;
 
   // Generates a profile-specific folder name based on profile_id_.
   std::string GetProfileSpecificFolderName() const;

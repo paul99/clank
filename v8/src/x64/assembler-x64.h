@@ -161,23 +161,41 @@ struct Register {
   static const int kAllocationIndexByRegisterCode[kNumRegisters];
 };
 
-const Register rax = { 0 };
-const Register rcx = { 1 };
-const Register rdx = { 2 };
-const Register rbx = { 3 };
-const Register rsp = { 4 };
-const Register rbp = { 5 };
-const Register rsi = { 6 };
-const Register rdi = { 7 };
-const Register r8 = { 8 };
-const Register r9 = { 9 };
-const Register r10 = { 10 };
-const Register r11 = { 11 };
-const Register r12 = { 12 };
-const Register r13 = { 13 };
-const Register r14 = { 14 };
-const Register r15 = { 15 };
-const Register no_reg = { -1 };
+const int kRegister_rax_Code = 0;
+const int kRegister_rcx_Code = 1;
+const int kRegister_rdx_Code = 2;
+const int kRegister_rbx_Code = 3;
+const int kRegister_rsp_Code = 4;
+const int kRegister_rbp_Code = 5;
+const int kRegister_rsi_Code = 6;
+const int kRegister_rdi_Code = 7;
+const int kRegister_r8_Code = 8;
+const int kRegister_r9_Code = 9;
+const int kRegister_r10_Code = 10;
+const int kRegister_r11_Code = 11;
+const int kRegister_r12_Code = 12;
+const int kRegister_r13_Code = 13;
+const int kRegister_r14_Code = 14;
+const int kRegister_r15_Code = 15;
+const int kRegister_no_reg_Code = -1;
+
+const Register rax = { kRegister_rax_Code };
+const Register rcx = { kRegister_rcx_Code };
+const Register rdx = { kRegister_rdx_Code };
+const Register rbx = { kRegister_rbx_Code };
+const Register rsp = { kRegister_rsp_Code };
+const Register rbp = { kRegister_rbp_Code };
+const Register rsi = { kRegister_rsi_Code };
+const Register rdi = { kRegister_rdi_Code };
+const Register r8 = { kRegister_r8_Code };
+const Register r9 = { kRegister_r9_Code };
+const Register r10 = { kRegister_r10_Code };
+const Register r11 = { kRegister_r11_Code };
+const Register r12 = { kRegister_r12_Code };
+const Register r13 = { kRegister_r13_Code };
+const Register r14 = { kRegister_r14_Code };
+const Register r15 = { kRegister_r15_Code };
+const Register no_reg = { kRegister_no_reg_Code };
 
 
 struct XMMRegister {
@@ -437,6 +455,7 @@ class CpuFeatures : public AllStatic {
     ASSERT(initialized_);
     if (f == SSE2 && !FLAG_enable_sse2) return false;
     if (f == SSE3 && !FLAG_enable_sse3) return false;
+    if (f == SSE4_1 && !FLAG_enable_sse4_1) return false;
     if (f == CMOV && !FLAG_enable_cmov) return false;
     if (f == RDTSC && !FLAG_enable_rdtsc) return false;
     if (f == SAHF && !FLAG_enable_sahf) return false;
@@ -537,10 +556,7 @@ class Assembler : public AssemblerBase {
   // is too small, a fatal error occurs. No deallocation of the buffer is done
   // upon destruction of the assembler.
   Assembler(Isolate* isolate, void* buffer, int buffer_size);
-  ~Assembler();
-
-  // Overrides the default provided by FLAG_debug_code.
-  void set_emit_debug_code(bool value) { emit_debug_code_ = value; }
+  virtual ~Assembler() { }
 
   // GetCode emits any pending (non-emitted) code and fills the descriptor
   // desc. GetCode() is idempotent; it returns the same result if no other
@@ -557,10 +573,14 @@ class Assembler : public AssemblerBase {
   static inline Address target_address_at(Address pc);
   static inline void set_target_address_at(Address pc, Address target);
 
+  // Return the code target address at a call site from the return address
+  // of that call in the instruction stream.
+  static inline Address target_address_from_return_address(Address pc);
+
   // This sets the branch destination (which is in the instruction on x64).
   // This is for calls and branches within generated code.
-  inline static void set_target_at(Address instruction_payload,
-                                   Address target) {
+  inline static void deserialization_set_special_target_at(
+      Address instruction_payload, Address target) {
     set_target_address_at(instruction_payload, target);
   }
 
@@ -573,8 +593,7 @@ class Assembler : public AssemblerBase {
 
   inline Handle<Object> code_target_object_handle_at(Address pc);
   // Number of bytes taken up by the branch target in the code.
-  static const int kCallTargetSize = 4;      // Use 32-bit displacement.
-  static const int kExternalTargetSize = 8;  // Use 64-bit absolute.
+  static const int kSpecialTargetSize = 4;  // Use 32-bit displacement.
   // Distance between the address of the code target in the call instruction
   // and the return address pushed on the stack.
   static const int kCallTargetAddressOffset = 4;  // Use 32-bit displacement.
@@ -597,6 +616,7 @@ class Assembler : public AssemblerBase {
   static const int kCallInstructionLength = 13;
   static const int kJSReturnSequenceLength = 13;
   static const int kShortCallInstructionLength = 5;
+  static const int kPatchDebugBreakSlotReturnOffset = 4;
 
   // The debug break slot must be able to contain a call instruction.
   static const int kDebugBreakSlotLength = kCallInstructionLength;
@@ -612,7 +632,8 @@ class Assembler : public AssemblerBase {
   static const byte kJccShortPrefix = 0x70;
   static const byte kJncShortOpcode = kJccShortPrefix | not_carry;
   static const byte kJcShortOpcode = kJccShortPrefix | carry;
-
+  static const byte kJnzShortOpcode = kJccShortPrefix | not_zero;
+  static const byte kJzShortOpcode = kJccShortPrefix | zero;
 
 
   // ---------------------------------------------------------------------------
@@ -992,6 +1013,14 @@ class Assembler : public AssemblerBase {
     shift(dst, imm8, 0x1);
   }
 
+  void rorl(Register dst, Immediate imm8) {
+    shift_32(dst, imm8, 0x1);
+  }
+
+  void rorl_cl(Register dst) {
+    shift_32(dst, 0x1);
+  }
+
   // Shifts dst:src left by cl bits, affecting only dst.
   void shld(Register dst, Register src);
 
@@ -1183,7 +1212,7 @@ class Assembler : public AssemblerBase {
   void call(Label* L);
   void call(Handle<Code> target,
             RelocInfo::Mode rmode = RelocInfo::CODE_TARGET,
-            unsigned ast_id = kNoASTId);
+            TypeFeedbackId ast_id = TypeFeedbackId::None());
 
   // Calls directly to the given address using a relative offset.
   // Should only ever be used in Code objects for calls within the
@@ -1334,8 +1363,10 @@ class Assembler : public AssemblerBase {
   void cvtsd2siq(Register dst, XMMRegister src);
 
   void addsd(XMMRegister dst, XMMRegister src);
+  void addsd(XMMRegister dst, const Operand& src);
   void subsd(XMMRegister dst, XMMRegister src);
   void mulsd(XMMRegister dst, XMMRegister src);
+  void mulsd(XMMRegister dst, const Operand& src);
   void divsd(XMMRegister dst, XMMRegister src);
 
   void andpd(XMMRegister dst, XMMRegister src);
@@ -1357,6 +1388,7 @@ class Assembler : public AssemblerBase {
   void roundsd(XMMRegister dst, XMMRegister src, RoundingMode mode);
 
   void movmskpd(Register dst, XMMRegister src);
+  void movmskps(Register dst, XMMRegister src);
 
   // The first argument is the reg field, the second argument is the r/m field.
   void emit_sse_operand(XMMRegister dst, XMMRegister src);
@@ -1387,8 +1419,6 @@ class Assembler : public AssemblerBase {
   void db(uint8_t data);
   void dd(uint32_t data);
 
-  int pc_offset() const { return static_cast<int>(pc_ - buffer_); }
-
   PositionsRecorder* positions_recorder() { return &positions_recorder_; }
 
   // Check if there is less than kGap bytes available in the buffer.
@@ -1407,13 +1437,9 @@ class Assembler : public AssemblerBase {
 
   // Avoid overflows for displacements etc.
   static const int kMaximalBufferSize = 512*MB;
-  static const int kMinimalBufferSize = 4*KB;
 
   byte byte_at(int pos)  { return buffer_[pos]; }
   void set_byte_at(int pos, byte value) { buffer_[pos] = value; }
-
- protected:
-  bool emit_debug_code() const { return emit_debug_code_; }
 
  private:
   byte* addr_at(int pos)  { return buffer_ + pos; }
@@ -1433,7 +1459,7 @@ class Assembler : public AssemblerBase {
   inline void emitw(uint16_t x);
   inline void emit_code_target(Handle<Code> target,
                                RelocInfo::Mode rmode,
-                               unsigned ast_id = kNoASTId);
+                               TypeFeedbackId ast_id = TypeFeedbackId::None());
   void emit(Immediate x) { emitl(x.value_); }
 
   // Emits a REX prefix that encodes a 64-bit operand size and
@@ -1602,23 +1628,12 @@ class Assembler : public AssemblerBase {
   friend class EnsureSpace;
   friend class RegExpMacroAssemblerX64;
 
-  // Code buffer:
-  // The buffer into which code and relocation info are generated.
-  byte* buffer_;
-  int buffer_size_;
-  // True if the assembler owns the buffer, false if buffer is external.
-  bool own_buffer_;
-
   // code generation
-  byte* pc_;  // the program counter; moves forward
   RelocInfoWriter reloc_info_writer;
 
   List< Handle<Code> > code_targets_;
 
   PositionsRecorder positions_recorder_;
-
-  bool emit_debug_code_;
-
   friend class PositionsRecorder;
 };
 

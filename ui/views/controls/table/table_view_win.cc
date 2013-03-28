@@ -13,17 +13,17 @@
 #include "base/string_util.h"
 #include "base/win/scoped_gdi_object.h"
 #include "skia/ext/skia_utils_win.h"
-#include "third_party/skia/include/core/SkBitmap.h"
 #include "third_party/skia/include/core/SkColorFilter.h"
 #include "ui/base/l10n/l10n_util.h"
 #include "ui/base/l10n/l10n_util_win.h"
 #include "ui/base/models/table_model.h"
 #include "ui/base/resource/resource_bundle.h"
 #include "ui/base/win/hwnd_util.h"
-#include "ui/gfx/canvas_skia.h"
+#include "ui/gfx/canvas.h"
 #include "ui/gfx/favicon_size.h"
 #include "ui/gfx/font.h"
 #include "ui/gfx/icon_util.h"
+#include "ui/gfx/image/image_skia.h"
 #include "ui/views/controls/native/native_view_host.h"
 #include "ui/views/controls/table/table_view_observer.h"
 
@@ -517,7 +517,7 @@ LRESULT CALLBACK TableView::TableWndProc(HWND window,
   static bool select_on_mouse_up = false;
 
   // If the mouse is down, this is the location of the mouse down message.
-  static int mouse_down_x, mouse_down_y;
+  CR_DEFINE_STATIC_LOCAL(gfx::Point, mouse_down_pos, ());
 
   switch (message) {
     case WM_CONTEXTMENU: {
@@ -647,8 +647,8 @@ LRESULT CALLBACK TableView::TableWndProc(HWND window,
           table_view->ignore_listview_change_ = true;
           in_mouse_down = true;
           select_on_mouse_up = false;
-          mouse_down_x = GET_X_LPARAM(l_param);
-          mouse_down_y = GET_Y_LPARAM(l_param);
+          mouse_down_pos.set_x(GET_X_LPARAM(l_param));
+          mouse_down_pos.set_y(GET_Y_LPARAM(l_param));
           int model_index = table_view->ViewToModel(view_index);
           bool select = true;
           if (w_param & MK_CONTROL) {
@@ -709,9 +709,8 @@ LRESULT CALLBACK TableView::TableWndProc(HWND window,
 
     case WM_MOUSEMOVE: {
       if (in_mouse_down) {
-        int x = GET_X_LPARAM(l_param);
-        int y = GET_Y_LPARAM(l_param);
-        if (View::ExceededDragThreshold(x - mouse_down_x, y - mouse_down_y)) {
+        gfx::Point mouse_pos(GET_X_LPARAM(l_param), GET_Y_LPARAM(l_param));
+        if (View::ExceededDragThreshold(mouse_pos - mouse_down_pos)) {
           // We're about to start drag and drop, which results in no mouse up.
           // Release capture and reset state.
           ReleaseCapture();
@@ -809,10 +808,11 @@ HWND TableView::CreateNativeControl(HWND parent_container) {
     // We create 2 phony images because we are going to switch images at every
     // refresh in order to force a refresh of the icon area (somehow the clip
     // rect does not include the icon).
-    gfx::CanvasSkia canvas(gfx::Size(kImageSize, kImageSize), false);
+    gfx::Canvas canvas(gfx::Size(kImageSize, kImageSize), ui::SCALE_FACTOR_100P,
+        false);
     {
-      base::win::ScopedHICON empty_icon(
-          IconUtil::CreateHICONFromSkBitmap(canvas.ExtractBitmap()));
+      base::win::ScopedHICON empty_icon(IconUtil::CreateHICONFromSkBitmap(
+          canvas.ExtractImageRep().sk_bitmap()));
       ImageList_AddIcon(image_list, empty_icon);
       ImageList_AddIcon(image_list, empty_icon);
     }
@@ -1154,11 +1154,11 @@ void TableView::PaintAltText() {
   HDC dc = GetDC(GetNativeControlHWND());
   gfx::Font font = GetAltTextFont();
   gfx::Rect bounds = GetAltTextBounds();
-  gfx::CanvasSkia canvas(bounds.size(), false);
+  gfx::Canvas canvas(bounds.size(), ui::SCALE_FACTOR_100P, false);
   // Pad by 1 for halo.
   canvas.DrawStringWithHalo(alt_text_, font, SK_ColorDKGRAY, SK_ColorWHITE, 1,
                             1, bounds.width() - 2, bounds.height() - 2,
-                            gfx::CanvasSkia::DefaultCanvasTextAlignment());
+                            gfx::Canvas::DefaultCanvasTextAlignment());
   skia::DrawToNativeContext(
       canvas.sk_canvas(), dc, bounds.x(), bounds.y(), NULL);
   ReleaseDC(GetNativeControlHWND(), dc);
@@ -1225,7 +1225,7 @@ LRESULT TableView::OnCustomDraw(NMLVCUSTOMDRAW* draw_info) {
       LRESULT r = CDRF_DODEFAULT;
       // First let's take care of painting the right icon.
       if (table_type_ == ICON_AND_TEXT) {
-        SkBitmap image = model_->GetIcon(model_index);
+        gfx::ImageSkia image = model_->GetIcon(model_index);
         if (!image.isNull()) {
           // Get the rect that holds the icon.
           RECT icon_rect, client_rect;
@@ -1238,9 +1238,10 @@ LRESULT TableView::OnCustomDraw(NMLVCUSTOMDRAW* draw_info) {
             client_rect.top += content_offset_;
             // Make sure the region need to paint is visible.
             if (IntersectRect(&intersection, &icon_rect, &client_rect)) {
-              gfx::CanvasSkia canvas(
-                  gfx::Size(icon_rect.right - icon_rect.left,
-                            icon_rect.bottom - icon_rect.top), false);
+              gfx::Canvas canvas(gfx::Size(icon_rect.right - icon_rect.left,
+                                           icon_rect.bottom - icon_rect.top),
+                                 ui::SCALE_FACTOR_100P,
+                                 false);
 
               // It seems the state in nmcd.uItemState is not correct.
               // We'll retrieve it explicitly.
@@ -1259,12 +1260,12 @@ LRESULT TableView::OnCustomDraw(NMLVCUSTOMDRAW* draw_info) {
               // NOTE: This may be invoked without the ListView filling in the
               // background (or rather windows paints background, then invokes
               // this twice). As such, we always fill in the background.
-              canvas.sk_canvas()->drawColor(
+              canvas.DrawColor(
                   skia::COLORREFToSkColor(GetSysColor(bg_color_index)),
                   SkXfermode::kSrc_Mode);
               // + 1 for padding (we declared the image as 18x18 in the list-
               // view when they are 16x16 so we get an extra pixel of padding).
-              canvas.DrawBitmapInt(image, 0, 0,
+              canvas.DrawImageInt(image, 0, 0,
                                    image.width(), image.height(),
                                    1, 1,
                                    gfx::kFaviconSize, gfx::kFaviconSize, true);

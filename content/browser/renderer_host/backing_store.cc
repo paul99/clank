@@ -1,9 +1,10 @@
-// Copyright (c) 2010 The Chromium Authors. All rights reserved.
+// Copyright (c) 2012 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
-#include "base/logging.h"
 #include "content/browser/renderer_host/backing_store.h"
+
+namespace content {
 
 BackingStore::BackingStore(RenderWidgetHost* widget, const gfx::Size& size)
     : render_widget_host_(widget),
@@ -16,3 +17,5 @@ BackingStore::~BackingStore() {
 size_t BackingStore::MemorySize() {
   return size_.GetArea() * 4;
 }
+
+}  // namespace content

@@ -4,7 +4,6 @@
 
 #ifndef CHROME_BROWSER_UI_COCOA_LOCATION_BAR_STAR_DECORATION_H_
 #define CHROME_BROWSER_UI_COCOA_LOCATION_BAR_STAR_DECORATION_H_
-#pragma once
 
 #import <Cocoa/Cocoa.h>
 
@@ -22,6 +21,9 @@ class StarDecoration : public ImageDecoration {
   // Sets the image and tooltip based on |starred|.
   void SetStarred(bool starred);
 
+  // Returns true if the star is lit.
+  bool starred() const { return starred_; }
+
   // Get the point where the bookmark bubble should point within the
   // decoration's frame.
   NSPoint GetBubblePointInFrame(NSRect frame);
@@ -37,6 +39,9 @@ class StarDecoration : public ImageDecoration {
 
   // The string to show for a tooltip.
   scoped_nsobject<NSString> tooltip_;
+
+  // Whether the star icon is lit.
+  bool starred_;
 
   DISALLOW_COPY_AND_ASSIGN(StarDecoration);
 };

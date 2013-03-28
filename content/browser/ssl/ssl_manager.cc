@@ -1,4 +1,4 @@
-// Copyright (c) 2011 The Chromium Authors. All rights reserved.
+// Copyright (c) 2012 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -6,51 +6,56 @@
 
 #include "base/bind.h"
 #include "base/utf_string_conversions.h"
-#include "content/browser/load_from_memory_cache_details.h"
-#include "content/browser/renderer_host/resource_dispatcher_host.h"
-#include "content/browser/renderer_host/resource_dispatcher_host_request_info.h"
-#include "content/browser/renderer_host/resource_request_details.h"
+#include "content/browser/loader/resource_dispatcher_host_impl.h"
+#include "content/browser/loader/resource_request_info_impl.h"
 #include "content/browser/ssl/ssl_cert_error_handler.h"
 #include "content/browser/ssl/ssl_policy.h"
 #include "content/browser/ssl/ssl_request_info.h"
-#include "content/browser/tab_contents/navigation_entry_impl.h"
-#include "content/browser/tab_contents/provisional_load_details.h"
-#include "content/browser/tab_contents/tab_contents.h"
+#include "content/browser/web_contents/navigation_entry_impl.h"
+#include "content/browser/web_contents/web_contents_impl.h"
+#include "content/common/ssl_status_serialization.h"
 #include "content/public/browser/browser_thread.h"
+#include "content/public/browser/load_from_memory_cache_details.h"
 #include "content/public/browser/navigation_details.h"
 #include "content/public/browser/notification_service.h"
 #include "content/public/browser/notification_source.h"
-#include "content/public/browser/ssl_status.h"
-#include "net/base/cert_status_flags.h"
+#include "content/public/browser/resource_request_details.h"
+#include "content/public/common/ssl_status.h"
+#include "net/url_request/url_request.h"
 
-using content::BrowserThread;
-using content::NavigationController;
-using content::NavigationEntry;
-using content::NavigationEntryImpl;
-using content::SSLStatus;
-using content::WebContents;
+namespace content {
 
 // static
-void SSLManager::OnSSLCertificateError(ResourceDispatcherHost* rdh,
-                                       net::URLRequest* request,
-                                       const net::SSLInfo& ssl_info,
-                                       bool fatal) {
+void SSLManager::OnSSLCertificateError(
+    const base::WeakPtr<SSLErrorHandler::Delegate>& delegate,
+    const GlobalRequestID& id,
+    const ResourceType::Type resource_type,
+    const GURL& url,
+    int render_process_id,
+    int render_view_id,
+    const net::SSLInfo& ssl_info,
+    bool fatal) {
+  DCHECK(delegate);
   DVLOG(1) << "OnSSLCertificateError() cert_error: "
            << net::MapCertStatusToNetError(ssl_info.cert_status)
-           << " url: " << request->url().spec()
+           << " id: " << id.child_id << "," << id.request_id
+           << " resource_type: " << resource_type
+           << " url: " << url.spec()
+           << " render_process_id: " << render_process_id
+           << " render_view_id: " << render_view_id
            << " cert_status: " << std::hex << ssl_info.cert_status;
-
-  ResourceDispatcherHostRequestInfo* info =
-      ResourceDispatcherHost::InfoForRequest(request);
 
   // A certificate error occurred.  Construct a SSLCertErrorHandler object and
   // hand it over to the UI thread for processing.
   BrowserThread::PostTask(
       BrowserThread::UI, FROM_HERE,
       base::Bind(&SSLCertErrorHandler::Dispatch,
-                 new SSLCertErrorHandler(rdh,
-                                         request,
-                                         info->resource_type(),
+                 new SSLCertErrorHandler(delegate,
+                                         id,
+                                         resource_type,
+                                         url,
+                                         render_process_id,
+                                         render_view_id,
                                          ssl_info,
                                          fatal)));
 }
@@ -58,48 +63,10 @@ void SSLManager::OnSSLCertificateError(ResourceDispatcherHost* rdh,
 // static
 void SSLManager::NotifySSLInternalStateChanged(
     NavigationControllerImpl* controller) {
-  content::NotificationService::current()->Notify(
-      content::NOTIFICATION_SSL_INTERNAL_STATE_CHANGED,
-      content::Source<content::BrowserContext>(controller->GetBrowserContext()),
-      content::NotificationService::NoDetails());
-}
-
-// static
-std::string SSLManager::SerializeSecurityInfo(int cert_id,
-                                              net::CertStatus cert_status,
-                                              int security_bits,
-                                              int ssl_connection_status) {
-  Pickle pickle;
-  pickle.WriteInt(cert_id);
-  pickle.WriteUInt32(cert_status);
-  pickle.WriteInt(security_bits);
-  pickle.WriteInt(ssl_connection_status);
-  return std::string(static_cast<const char*>(pickle.data()), pickle.size());
-}
-
-// static
-bool SSLManager::DeserializeSecurityInfo(const std::string& state,
-                                         int* cert_id,
-                                         net::CertStatus* cert_status,
-                                         int* security_bits,
-                                         int* ssl_connection_status) {
-  DCHECK(cert_id && cert_status && security_bits && ssl_connection_status);
-  if (state.empty()) {
-    // No SSL used.
-    *cert_id = 0;
-    // The following are not applicable and are set to the default values.
-    *cert_status = 0;
-    *security_bits = -1;
-    *ssl_connection_status = 0;
-    return false;
-  }
-
-  Pickle pickle(state.data(), static_cast<int>(state.size()));
-  void * iter = NULL;
-  return pickle.ReadInt(&iter, cert_id) &&
-         pickle.ReadUInt32(&iter, cert_status) &&
-         pickle.ReadInt(&iter, security_bits) &&
-         pickle.ReadInt(&iter, ssl_connection_status);
+  NotificationService::current()->Notify(
+      NOTIFICATION_SSL_INTERNAL_STATE_CHANGED,
+      Source<BrowserContext>(controller->GetBrowserContext()),
+      NotificationService::NoDetails());
 }
 
 SSLManager::SSLManager(NavigationControllerImpl* controller)
@@ -109,20 +76,18 @@ SSLManager::SSLManager(NavigationControllerImpl* controller)
   DCHECK(controller_);
 
   // Subscribe to various notifications.
-  registrar_.Add(this, content::NOTIFICATION_FAIL_PROVISIONAL_LOAD_WITH_ERROR,
-                 content::Source<NavigationController>(controller_));
   registrar_.Add(
-      this, content::NOTIFICATION_RESOURCE_RESPONSE_STARTED,
-      content::Source<WebContents>(controller_->tab_contents()));
+      this, NOTIFICATION_RESOURCE_RESPONSE_STARTED,
+      Source<WebContents>(controller_->web_contents()));
   registrar_.Add(
-      this, content::NOTIFICATION_RESOURCE_RECEIVED_REDIRECT,
-      content::Source<WebContents>(controller_->tab_contents()));
+      this, NOTIFICATION_RESOURCE_RECEIVED_REDIRECT,
+      Source<WebContents>(controller_->web_contents()));
   registrar_.Add(
-      this, content::NOTIFICATION_LOAD_FROM_MEMORY_CACHE,
-      content::Source<NavigationController>(controller_));
+      this, NOTIFICATION_LOAD_FROM_MEMORY_CACHE,
+      Source<NavigationController>(controller_));
   registrar_.Add(
-      this, content::NOTIFICATION_SSL_INTERNAL_STATE_CHANGED,
-      content::Source<content::BrowserContext>(
+      this, NOTIFICATION_SSL_INTERNAL_STATE_CHANGED,
+      Source<BrowserContext>(
           controller_->GetBrowserContext()));
 }
 
@@ -130,9 +95,9 @@ SSLManager::~SSLManager() {
 }
 
 void SSLManager::DidCommitProvisionalLoad(
-    const content::NotificationDetails& in_details) {
-  content::LoadCommittedDetails* details =
-      content::Details<content::LoadCommittedDetails>(in_details).ptr();
+    const NotificationDetails& in_details) {
+  LoadCommittedDetails* details =
+      Details<LoadCommittedDetails>(in_details).ptr();
 
   NavigationEntryImpl* entry =
       NavigationEntryImpl::FromNavigationEntry(controller_->GetActiveEntry());
@@ -169,37 +134,24 @@ void SSLManager::DidRunInsecureContent(const std::string& security_origin) {
       security_origin);
 }
 
-bool SSLManager::ProcessedSSLErrorFromRequest() const {
-  NavigationEntry* entry = controller_->GetActiveEntry();
-  if (!entry) {
-    NOTREACHED();
-    return false;
-  }
-
-  return net::IsCertStatusError(entry->GetSSL().cert_status);
-}
-
 void SSLManager::Observe(int type,
-                         const content::NotificationSource& source,
-                         const content::NotificationDetails& details) {
+                         const NotificationSource& source,
+                         const NotificationDetails& details) {
   // Dispatch by type.
   switch (type) {
-    case content::NOTIFICATION_FAIL_PROVISIONAL_LOAD_WITH_ERROR:
-      // Do nothing.
-      break;
-    case content::NOTIFICATION_RESOURCE_RESPONSE_STARTED:
+    case NOTIFICATION_RESOURCE_RESPONSE_STARTED:
       DidStartResourceResponse(
-          content::Details<ResourceRequestDetails>(details).ptr());
+          Details<ResourceRequestDetails>(details).ptr());
       break;
-    case content::NOTIFICATION_RESOURCE_RECEIVED_REDIRECT:
+    case NOTIFICATION_RESOURCE_RECEIVED_REDIRECT:
       DidReceiveResourceRedirect(
-          content::Details<ResourceRedirectDetails>(details).ptr());
+          Details<ResourceRedirectDetails>(details).ptr());
       break;
-    case content::NOTIFICATION_LOAD_FROM_MEMORY_CACHE:
+    case NOTIFICATION_LOAD_FROM_MEMORY_CACHE:
       DidLoadFromMemoryCache(
-          content::Details<LoadFromMemoryCacheDetails>(details).ptr());
+          Details<LoadFromMemoryCacheDetails>(details).ptr());
       break;
-    case content::NOTIFICATION_SSL_INTERNAL_STATE_CHANGED:
+    case NOTIFICATION_SSL_INTERNAL_STATE_CHANGED:
       DidChangeSSLInternalState();
       break;
     default:
@@ -214,11 +166,11 @@ void SSLManager::DidLoadFromMemoryCache(LoadFromMemoryCacheDetails* details) {
   // This resource must have been loaded with no filtering because filtered
   // resouces aren't cachable.
   scoped_refptr<SSLRequestInfo> info(new SSLRequestInfo(
-      details->url(),
+      details->url,
       ResourceType::SUB_RESOURCE,
-      details->pid(),
-      details->ssl_cert_id(),
-      details->ssl_cert_status()));
+      details->pid,
+      details->cert_id,
+      details->cert_status));
 
   // Simulate loading this resource through the usual path.
   policy()->OnRequestStarted(info.get());
@@ -226,11 +178,11 @@ void SSLManager::DidLoadFromMemoryCache(LoadFromMemoryCacheDetails* details) {
 
 void SSLManager::DidStartResourceResponse(ResourceRequestDetails* details) {
   scoped_refptr<SSLRequestInfo> info(new SSLRequestInfo(
-      details->url(),
-      details->resource_type(),
-      details->origin_child_id(),
-      details->ssl_cert_id(),
-      details->ssl_cert_status()));
+      details->url,
+      details->resource_type,
+      details->origin_child_id,
+      details->ssl_cert_id,
+      details->ssl_cert_status));
 
   // Notify our policy that we started a resource request.  Ideally, the
   // policy should have the ability to cancel the request, but we can't do
@@ -259,12 +211,14 @@ void SSLManager::UpdateEntry(NavigationEntryImpl* entry) {
 
   SSLStatus original_ssl_status = entry->GetSSL();  // Copy!
 
-  policy()->UpdateEntry(entry, controller_->tab_contents());
+  policy()->UpdateEntry(entry, controller_->web_contents());
 
   if (!entry->GetSSL().Equals(original_ssl_status)) {
-    content::NotificationService::current()->Notify(
-        content::NOTIFICATION_SSL_VISIBLE_STATE_CHANGED,
-        content::Source<NavigationController>(controller_),
-        content::NotificationService::NoDetails());
+    NotificationService::current()->Notify(
+        NOTIFICATION_SSL_VISIBLE_STATE_CHANGED,
+        Source<NavigationController>(controller_),
+        NotificationService::NoDetails());
   }
 }
+
+}  // namespace content

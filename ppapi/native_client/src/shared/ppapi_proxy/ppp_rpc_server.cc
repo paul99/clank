@@ -268,6 +268,21 @@ static void PPP_MouseLock_MouseLockLostDispatcher(
   );
 }
 
+static void PPP_NetworkMonitor_Private_NetworkListChangedDispatcher(
+    NaClSrpcRpc* rpc,
+    NaClSrpcArg** inputs,
+    NaClSrpcArg** outputs,
+    NaClSrpcClosure* done
+) {
+  UNREFERENCED_PARAMETER(outputs);
+  PppNetworkMonitorPrivateRpcServer::PPP_NetworkMonitor_Private_NetworkListChanged(
+      rpc,
+      done,
+      inputs[0]->u.ival,
+      inputs[1]->u.ival
+  );
+}
+
 static void PPP_Printing_QuerySupportedFormatsDispatcher(
     NaClSrpcRpc* rpc,
     NaClSrpcArg** inputs,
@@ -341,38 +356,6 @@ static void PPP_Printing_IsScalingDisabledDispatcher(
   );
 }
 
-static void PPP_Scrollbar_ValueChangedDispatcher(
-    NaClSrpcRpc* rpc,
-    NaClSrpcArg** inputs,
-    NaClSrpcArg** outputs,
-    NaClSrpcClosure* done
-) {
-  UNREFERENCED_PARAMETER(outputs);
-  PppScrollbarRpcServer::PPP_Scrollbar_ValueChanged(
-      rpc,
-      done,
-      inputs[0]->u.ival,
-      inputs[1]->u.ival,
-      inputs[2]->u.ival
-  );
-}
-
-static void PPP_Scrollbar_OverlayChangedDispatcher(
-    NaClSrpcRpc* rpc,
-    NaClSrpcArg** inputs,
-    NaClSrpcArg** outputs,
-    NaClSrpcClosure* done
-) {
-  UNREFERENCED_PARAMETER(outputs);
-  PppScrollbarRpcServer::PPP_Scrollbar_OverlayChanged(
-      rpc,
-      done,
-      inputs[0]->u.ival,
-      inputs[1]->u.ival,
-      inputs[2]->u.ival
-  );
-}
-
 static void PPP_Selection_GetSelectedTextDispatcher(
     NaClSrpcRpc* rpc,
     NaClSrpcArg** inputs,
@@ -385,22 +368,6 @@ static void PPP_Selection_GetSelectedTextDispatcher(
       inputs[0]->u.ival,
       inputs[1]->u.ival,
       &(outputs[0]->u.count), outputs[0]->arrays.carr
-  );
-}
-
-static void PPP_Widget_InvalidateDispatcher(
-    NaClSrpcRpc* rpc,
-    NaClSrpcArg** inputs,
-    NaClSrpcArg** outputs,
-    NaClSrpcClosure* done
-) {
-  UNREFERENCED_PARAMETER(outputs);
-  PppWidgetRpcServer::PPP_Widget_Invalidate(
-      rpc,
-      done,
-      inputs[0]->u.ival,
-      inputs[1]->u.ival,
-      inputs[2]->u.count, inputs[2]->arrays.carr
   );
 }
 
@@ -439,15 +406,13 @@ NaClSrpcHandlerDesc PppRpcs::srpc_methods[] = {
   { "PPP_Instance_HandleDocumentLoad:ii:i", PPP_Instance_HandleDocumentLoadDispatcher },
   { "PPP_Messaging_HandleMessage:iC:", PPP_Messaging_HandleMessageDispatcher },
   { "PPP_MouseLock_MouseLockLost:i:", PPP_MouseLock_MouseLockLostDispatcher },
+  { "PPP_NetworkMonitor_Private_NetworkListChanged:ii:", PPP_NetworkMonitor_Private_NetworkListChangedDispatcher },
   { "PPP_Printing_QuerySupportedFormats:i:i", PPP_Printing_QuerySupportedFormatsDispatcher },
   { "PPP_Printing_Begin:iC:i", PPP_Printing_BeginDispatcher },
   { "PPP_Printing_PrintPages:iCi:i", PPP_Printing_PrintPagesDispatcher },
   { "PPP_Printing_End:i:", PPP_Printing_EndDispatcher },
   { "PPP_Printing_IsScalingDisabled:i:i", PPP_Printing_IsScalingDisabledDispatcher },
-  { "PPP_Scrollbar_ValueChanged:iii:", PPP_Scrollbar_ValueChangedDispatcher },
-  { "PPP_Scrollbar_OverlayChanged:iii:", PPP_Scrollbar_OverlayChangedDispatcher },
   { "PPP_Selection_GetSelectedText:ii:C", PPP_Selection_GetSelectedTextDispatcher },
-  { "PPP_Widget_Invalidate:iiC:", PPP_Widget_InvalidateDispatcher },
   { "PPP_Zoom_Zoom:idi:", PPP_Zoom_ZoomDispatcher },
   { NULL, NULL }
 };

@@ -1,4 +1,4 @@
-// Copyright (c) 2011 The Chromium Authors. All rights reserved.
+// Copyright (c) 2012 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -14,7 +14,8 @@
 namespace net {
 
 HttpResponseBodyDrainer::HttpResponseBodyDrainer(HttpStream* stream)
-    : stream_(stream),
+    : read_size_(0),
+      stream_(stream),
       next_state_(STATE_NONE),
       total_read_(0),
       session_(NULL) {}
@@ -97,9 +98,6 @@ int HttpResponseBodyDrainer::DoDrainResponseBodyComplete(int result) {
   if (result < 0)
     return result;
 
-  if (result == 0)
-    return ERR_CONNECTION_CLOSED;
-
   total_read_ += result;
   if (stream_->IsResponseBodyComplete())
     return OK;
@@ -107,6 +105,9 @@ int HttpResponseBodyDrainer::DoDrainResponseBodyComplete(int result) {
   DCHECK_LE(total_read_, kDrainBodyBufferSize);
   if (total_read_ >= kDrainBodyBufferSize)
     return ERR_RESPONSE_BODY_TOO_BIG_TO_DRAIN;
+
+  if (result == 0)
+    return ERR_CONNECTION_CLOSED;
 
   next_state_ = STATE_DRAIN_RESPONSE_BODY;
   return OK;

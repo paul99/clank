@@ -1,4 +1,4 @@
-// Copyright (c) 2011 The Chromium Authors. All rights reserved.
+// Copyright (c) 2012 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -9,10 +9,16 @@
 #include <vector>
 
 #include "base/memory/scoped_vector.h"
+#include "base/prefs/public/pref_member.h"
 #include "chrome/browser/password_manager/password_store.h"
 #include "chrome/browser/password_manager/password_store_consumer.h"
-#include "chrome/browser/prefs/pref_member.h"
 #include "chrome/browser/ui/webui/options/options_ui.h"
+
+namespace content {
+struct PasswordForm;
+}
+
+namespace options {
 
 class PasswordManagerHandler : public OptionsPageUIHandler,
                                public PasswordStore::Observer {
@@ -22,16 +28,11 @@ class PasswordManagerHandler : public OptionsPageUIHandler,
 
   // OptionsPageUIHandler implementation.
   virtual void GetLocalizedValues(DictionaryValue* localized_strings) OVERRIDE;
-  virtual void Initialize() OVERRIDE;
+  virtual void InitializeHandler() OVERRIDE;
   virtual void RegisterMessages() OVERRIDE;
 
   // PasswordStore::Observer implementation.
   virtual void OnLoginsChanged() OVERRIDE;
-
-  // content::NotificationObserver implementation.
-  virtual void Observe(int type,
-                       const content::NotificationSource& source,
-                       const content::NotificationDetails& details) OVERRIDE;
 
  private:
   // The password store associated with the currently active profile.
@@ -72,11 +73,6 @@ class PasswordManagerHandler : public OptionsPageUIHandler,
     // Send a query to the password store to populate a list.
     virtual void Populate() = 0;
 
-    // Send the password store's reply back to the handler.
-    virtual void OnPasswordStoreRequestDone(
-        CancelableRequestProvider::Handle handle,
-        const std::vector<webkit::forms::PasswordForm*>& result) = 0;
-
    protected:
     PasswordManagerHandler* page_;
     CancelableRequestProvider::Handle pending_login_query_;
@@ -93,7 +89,9 @@ class PasswordManagerHandler : public OptionsPageUIHandler,
     // Send the password store's reply back to the handler.
     virtual void OnPasswordStoreRequestDone(
         CancelableRequestProvider::Handle handle,
-        const std::vector<webkit::forms::PasswordForm*>& result) OVERRIDE;
+        const std::vector<content::PasswordForm*>& result) OVERRIDE;
+    virtual void OnGetPasswordStoreResults(
+        const std::vector<content::PasswordForm*>& results) OVERRIDE;
   };
 
   // A short class to mediate requests to the password store for exceptions.
@@ -107,15 +105,17 @@ class PasswordManagerHandler : public OptionsPageUIHandler,
     // Send the password store's reply back to the handler.
     virtual void OnPasswordStoreRequestDone(
         CancelableRequestProvider::Handle handle,
-        const std::vector<webkit::forms::PasswordForm*>& result) OVERRIDE;
+        const std::vector<content::PasswordForm*>& result) OVERRIDE;
+    virtual void OnGetPasswordStoreResults(
+        const std::vector<content::PasswordForm*>& results) OVERRIDE;
   };
 
   // Password store consumer for populating the password list and exceptions.
   PasswordListPopulater populater_;
   PasswordExceptionListPopulater exception_populater_;
 
-  ScopedVector<webkit::forms::PasswordForm> password_list_;
-  ScopedVector<webkit::forms::PasswordForm> password_exception_list_;
+  ScopedVector<content::PasswordForm> password_list_;
+  ScopedVector<content::PasswordForm> password_exception_list_;
 
   // User's pref
   std::string languages_;
@@ -125,5 +125,7 @@ class PasswordManagerHandler : public OptionsPageUIHandler,
 
   DISALLOW_COPY_AND_ASSIGN(PasswordManagerHandler);
 };
+
+}  // namespace options
 
 #endif  // CHROME_BROWSER_UI_WEBUI_OPTIONS_PASSWORD_MANAGER_HANDLER_H_

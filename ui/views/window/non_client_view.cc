@@ -1,4 +1,4 @@
-// Copyright (c) 2011 The Chromium Authors. All rights reserved.
+// Copyright (c) 2012 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -43,7 +43,7 @@ NonClientView::~NonClientView() {
 
 void NonClientView::SetFrameView(NonClientFrameView* frame_view) {
   // See comment in header about ownership.
-  frame_view->set_parent_owned(false);
+  frame_view->set_owned_by_client();
   if (frame_view_.get())
     RemoveChildView(frame_view_.get());
   frame_view_.reset(frame_view);
@@ -59,13 +59,14 @@ void NonClientView::WindowClosing() {
   client_view_->WidgetClosing();
 }
 
-void NonClientView::UpdateFrame() {
+void NonClientView::UpdateFrame(bool layout) {
   Widget* widget = GetWidget();
   SetFrameView(widget->CreateNonClientFrameView());
   widget->ThemeChanged();
-  Layout();
-  SchedulePaint();
-  widget->UpdateFrameAfterFrameChange();
+  if (layout) {
+    Layout();
+    SchedulePaint();
+  }
 }
 
 void NonClientView::SetInactiveRenderingDisabled(bool disable) {
@@ -93,6 +94,10 @@ void NonClientView::ResetWindowControls() {
 
 void NonClientView::UpdateWindowIcon() {
   frame_view_->UpdateWindowIcon();
+}
+
+void NonClientView::UpdateWindowTitle() {
+  frame_view_->UpdateWindowTitle();
 }
 
 void NonClientView::LayoutFrameView() {
@@ -127,6 +132,10 @@ gfx::Size NonClientView::GetPreferredSize() {
 
 gfx::Size NonClientView::GetMinimumSize() {
   return frame_view_->GetMinimumSize();
+}
+
+gfx::Size NonClientView::GetMaximumSize() {
+  return frame_view_->GetMaximumSize();
 }
 
 void NonClientView::Layout() {
@@ -168,10 +177,15 @@ views::View* NonClientView::GetEventHandlerForPoint(const gfx::Point& point) {
   // detect this condition and re-route the events to the non-client frame view.
   // The assumption is that the frame view's implementation of HitTest will only
   // return true for area not occupied by the client view.
-  gfx::Point point_in_child_coords(point);
-  View::ConvertPointToView(this, frame_view_.get(), &point_in_child_coords);
-  if (frame_view_->HitTest(point_in_child_coords))
-    return frame_view_->GetEventHandlerForPoint(point_in_child_coords);
+  if (frame_view_->parent() == this) {
+    // During the reset of the frame_view_ it's possible to be in this code
+    // after it's been removed from the view hierarchy but before it's been
+    // removed from the NonClientView.
+    gfx::Point point_in_child_coords(point);
+    View::ConvertPointToTarget(this, frame_view_.get(), &point_in_child_coords);
+    if (frame_view_->HitTestPoint(point_in_child_coords))
+      return frame_view_->GetEventHandlerForPoint(point_in_child_coords);
+  }
 
   return View::GetEventHandlerForPoint(point);
 }
@@ -180,23 +194,12 @@ views::View* NonClientView::GetEventHandlerForPoint(const gfx::Point& point) {
 // NonClientFrameView, public:
 
 void NonClientFrameView::SetInactiveRenderingDisabled(bool disable) {
-  // See comment in Widget::SetInactiveRenderingDisabled as to why we don't
-  // conditionally invoke ShouldPaintAsActiveChanged.
+  if (paint_as_active_ == disable)
+    return;
+
   paint_as_active_ = disable;
   ShouldPaintAsActiveChanged();
 }
-
-////////////////////////////////////////////////////////////////////////////////
-// NonClientFrameView, View overrides:
-
-bool NonClientFrameView::HitTest(const gfx::Point& l) const {
-  // For the default case, we assume the non-client frame view never overlaps
-  // the client view.
-  return !GetWidget()->client_view()->bounds().Contains(l);
-}
-
-////////////////////////////////////////////////////////////////////////////////
-// NonClientFrameView, protected:
 
 int NonClientFrameView::GetHTComponentForFrame(const gfx::Point& point,
                                                int top_resize_border_height,
@@ -247,13 +250,24 @@ int NonClientFrameView::GetHTComponentForFrame(const gfx::Point& point,
   return can_resize ? component : HTBORDER;
 }
 
+////////////////////////////////////////////////////////////////////////////////
+// NonClientFrameView, View overrides:
+
+bool NonClientFrameView::HitTestRect(const gfx::Rect& rect) const {
+  // For the default case, we assume the non-client frame view never overlaps
+  // the client view.
+  return !GetWidget()->client_view()->bounds().Intersects(rect);
+}
+
+////////////////////////////////////////////////////////////////////////////////
+// NonClientFrameView, protected:
+
 bool NonClientFrameView::ShouldPaintAsActive() const {
   return GetWidget()->IsActive() || paint_as_active_;
 }
 
 void NonClientFrameView::ShouldPaintAsActiveChanged() {
-  if (!paint_as_active_)
-    SchedulePaint();
+  SchedulePaint();
 }
 
 void NonClientFrameView::GetAccessibleState(ui::AccessibleViewState* state) {

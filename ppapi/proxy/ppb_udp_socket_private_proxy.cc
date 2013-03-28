@@ -1,4 +1,4 @@
-// Copyright (c) 2011 The Chromium Authors. All rights reserved.
+// Copyright (c) 2012 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -7,9 +7,9 @@
 #include <map>
 
 #include "base/logging.h"
+#include "ppapi/c/private/ppb_udp_socket_private.h"
 #include "ppapi/proxy/plugin_dispatcher.h"
 #include "ppapi/proxy/plugin_globals.h"
-#include "ppapi/proxy/plugin_proxy_delegate.h"
 #include "ppapi/proxy/plugin_resource_tracker.h"
 #include "ppapi/proxy/ppapi_messages.h"
 #include "ppapi/shared_impl/private/udp_socket_private_impl.h"
@@ -29,6 +29,7 @@ class UDPSocket : public UDPSocketPrivateImpl {
   UDPSocket(const HostResource& resource, uint32 socket_id);
   virtual ~UDPSocket();
 
+  virtual void SendBoolSocketFeature(int32_t name, bool value) OVERRIDE;
   virtual void SendBind(const PP_NetAddress_Private& addr) OVERRIDE;
   virtual void SendRecvFrom(int32_t num_bytes) OVERRIDE;
   virtual void SendSendTo(const std::string& data,
@@ -53,6 +54,11 @@ UDPSocket::~UDPSocket() {
   Close();
 }
 
+void UDPSocket::SendBoolSocketFeature(int32_t name, bool value) {
+  SendToBrowser(new PpapiHostMsg_PPBUDPSocket_SetBoolSocketFeature(
+      API_ID_PPB_UDPSOCKET_PRIVATE, socket_id_, name, value));
+}
+
 void UDPSocket::SendBind(const PP_NetAddress_Private& addr) {
   SendToBrowser(new PpapiHostMsg_PPBUDPSocket_Bind(
       API_ID_PPB_UDPSOCKET_PRIVATE, socket_id_, addr));
@@ -64,7 +70,8 @@ void UDPSocket::SendRecvFrom(int32_t num_bytes) {
 
 void UDPSocket::SendSendTo(const std::string& data,
                            const PP_NetAddress_Private& addr) {
-  SendToBrowser(new PpapiHostMsg_PPBUDPSocket_SendTo(socket_id_, data, addr));
+  SendToBrowser(new PpapiHostMsg_PPBUDPSocket_SendTo(
+      API_ID_PPB_UDPSOCKET_PRIVATE, socket_id_, data, addr));
 }
 
 void UDPSocket::SendClose() {
@@ -76,7 +83,7 @@ void UDPSocket::SendClose() {
 }
 
 void UDPSocket::SendToBrowser(IPC::Message* msg) {
-  PluginGlobals::Get()->plugin_proxy_delegate()->SendToBrowser(msg);
+  PluginGlobals::Get()->GetBrowserSender()->Send(msg);
 }
 
 }  // namespace
@@ -98,7 +105,7 @@ PP_Resource PPB_UDPSocket_Private_Proxy::CreateProxyResource(
     return 0;
 
   uint32 socket_id = 0;
-  PluginGlobals::Get()->plugin_proxy_delegate()->SendToBrowser(
+  PluginGlobals::Get()->GetBrowserSender()->Send(
       new PpapiHostMsg_PPBUDPSocket_Create(
           API_ID_PPB_UDPSOCKET_PRIVATE, dispatcher->plugin_dispatcher_id(),
           &socket_id));
@@ -126,7 +133,8 @@ bool PPB_UDPSocket_Private_Proxy::OnMessageReceived(const IPC::Message& msg) {
 void PPB_UDPSocket_Private_Proxy::OnMsgBindACK(
     uint32 /* plugin_dispatcher_id */,
     uint32 socket_id,
-    bool succeeded) {
+    bool succeeded,
+    const PP_NetAddress_Private& bound_addr) {
   if (!g_id_to_socket) {
     NOTREACHED();
     return;
@@ -134,7 +142,7 @@ void PPB_UDPSocket_Private_Proxy::OnMsgBindACK(
   IDToSocketMap::iterator iter = g_id_to_socket->find(socket_id);
   if (iter == g_id_to_socket->end())
     return;
-  iter->second->OnBindCompleted(succeeded);
+  iter->second->OnBindCompleted(succeeded, bound_addr);
 }
 
 void PPB_UDPSocket_Private_Proxy::OnMsgRecvFromACK(

@@ -1,18 +1,17 @@
-// Copyright (c) 2011 The Chromium Authors. All rights reserved.
+// Copyright (c) 2012 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
 #ifndef CHROME_BROWSER_UI_GTK_BROWSER_TOOLBAR_GTK_H_
 #define CHROME_BROWSER_UI_GTK_BROWSER_TOOLBAR_GTK_H_
-#pragma once
 
 #include <gtk/gtk.h>
 #include <string>
 
 #include "base/compiler_specific.h"
 #include "base/memory/scoped_ptr.h"
-#include "chrome/browser/command_updater.h"
-#include "chrome/browser/prefs/pref_member.h"
+#include "base/prefs/public/pref_member.h"
+#include "chrome/browser/command_observer.h"
 #include "chrome/browser/ui/gtk/custom_button.h"
 #include "chrome/browser/ui/gtk/menu_gtk.h"
 #include "chrome/browser/ui/toolbar/wrench_menu_model.h"
@@ -41,7 +40,7 @@ class WebContents;
 
 // View class that displays the GTK version of the toolbar and routes gtk
 // events back to the Browser.
-class BrowserToolbarGtk : public CommandUpdater::CommandObserver,
+class BrowserToolbarGtk : public CommandObserver,
                           public ui::AcceleratorProvider,
                           public MenuGtk::Delegate,
                           public content::NotificationObserver {
@@ -87,7 +86,7 @@ class BrowserToolbarGtk : public CommandUpdater::CommandObserver,
 
   void ShowAppMenu();
 
-  // Overridden from CommandUpdater::CommandObserver:
+  // Overridden from CommandObserver:
   virtual void EnabledStateChangedForCommand(int id, bool enabled) OVERRIDE;
 
   // Overridden from MenuGtk::Delegate:
@@ -105,13 +104,16 @@ class BrowserToolbarGtk : public CommandUpdater::CommandObserver,
                        const content::NotificationSource& source,
                        const content::NotificationDetails& details) OVERRIDE;
 
+  // Whether the wrench/hotdogs menu is currently visible to the user.
+  bool IsWrenchMenuShowing() const;
+
   // Message that we should react to a state change.
   void UpdateWebContents(content::WebContents* contents,
                          bool should_restore_state);
 
  private:
   // Connect/Disconnect signals for dragging a url onto the home button.
-  void SetUpDragForHomeButton(bool enable);
+  void SetUpDragForHomeButton();
 
   // Sets the top corners of the toolbar to rounded, or sets them to normal,
   // depending on the state of the browser window. Returns false if no action
@@ -141,9 +143,6 @@ class BrowserToolbarGtk : public CommandUpdater::CommandObserver,
   CHROMEGTK_CALLBACK_1(BrowserToolbarGtk, gboolean, OnWrenchMenuButtonExpose,
                        GdkEventExpose*);
 
-  // Updates preference-dependent state.
-  void NotifyPrefChanged(const std::string* pref);
-
   static void SetSyncMenuLabel(GtkWidget* widget, gpointer userdata);
 
   // Sometimes we only want to show the location w/o the toolbar buttons (e.g.,
@@ -152,6 +151,8 @@ class BrowserToolbarGtk : public CommandUpdater::CommandObserver,
 
   // Rebuilds the wrench menu.
   void RebuildWrenchMenu();
+
+  void UpdateShowHomeButton();
 
   // An event box that holds |toolbar_|. We need the toolbar to have its own
   // GdkWindow when we use the GTK drawing because otherwise the color from our

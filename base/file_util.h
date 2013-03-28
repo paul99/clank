@@ -7,7 +7,6 @@
 
 #ifndef BASE_FILE_UTIL_H_
 #define BASE_FILE_UTIL_H_
-#pragma once
 
 #include "build/build_config.h"
 
@@ -33,9 +32,9 @@
 #include "base/string16.h"
 
 #if defined(OS_POSIX)
-#include "base/eintr_wrapper.h"
 #include "base/file_descriptor_posix.h"
 #include "base/logging.h"
+#include "base/posix/eintr_wrapper.h"
 #endif
 
 namespace base {
@@ -43,6 +42,8 @@ class Time;
 }
 
 namespace file_util {
+
+extern bool g_bug108724_debug;
 
 //-----------------------------------------------------------------------------
 // Functions that operate purely on a path string w/o touching the filesystem:
@@ -98,6 +99,9 @@ BASE_EXPORT int64 ComputeFilesSize(const FilePath& directory,
 // subdirectories and their contents as well.
 // Returns true if successful, false otherwise.
 //
+// In posix environment and if |path| is a symbolic link, this deletes only
+// the symlink. (even if the symlink points to a non-existent file)
+//
 // WARNING: USING THIS WITH recursive==true IS EQUIVALENT
 //          TO "rm -rf", SO USE WITH CAUTION.
 BASE_EXPORT bool Delete(const FilePath& path, bool recursive);
@@ -115,7 +119,13 @@ BASE_EXPORT bool DeleteAfterReboot(const FilePath& path);
 // If a simple rename is not possible, such as in the case where the paths are
 // on different volumes, this will attempt to copy and delete. Returns
 // true for success.
+// This function fails if either path contains traversal components ('..').
 BASE_EXPORT bool Move(const FilePath& from_path, const FilePath& to_path);
+
+// Same as Move but allows paths with traversal components.
+// Use only with extreme care.
+BASE_EXPORT bool MoveUnsafe(const FilePath& from_path,
+                            const FilePath& to_path);
 
 // Renames file |from_path| to |to_path|. Both paths must be on the same
 // volume, or the function will fail. Destination file will be created
@@ -126,7 +136,13 @@ BASE_EXPORT bool ReplaceFile(const FilePath& from_path,
                              const FilePath& to_path);
 
 // Copies a single file. Use CopyDirectory to copy directories.
+// This function fails if either path contains traversal components ('..').
 BASE_EXPORT bool CopyFile(const FilePath& from_path, const FilePath& to_path);
+
+// Same as CopyFile but allows paths with traversal components.
+// Use only with extreme care.
+BASE_EXPORT bool CopyFileUnsafe(const FilePath& from_path,
+                                const FilePath& to_path);
 
 // Copies the given path, and optionally all subdirectories and their contents
 // as well.
@@ -172,6 +188,7 @@ BASE_EXPORT bool TextContentsEqual(const FilePath& filename1,
                                    const FilePath& filename2);
 
 // Read the file at |path| into |contents|, returning true on success.
+// This function fails if the |path| contains path traversal components ('..').
 // |contents| may be NULL, in which case this function is useful for its
 // side effect of priming the disk cache.
 // Useful for unit tests.
@@ -191,57 +208,37 @@ BASE_EXPORT bool CreateSymbolicLink(const FilePath& target,
 // Reads the given |symlink| and returns where it points to in |target|.
 // Returns false upon failure.
 BASE_EXPORT bool ReadSymbolicLink(const FilePath& symlink, FilePath* target);
+
+// Bits ans masks of the file permission.
+enum FilePermissionBits {
+  FILE_PERMISSION_MASK              = S_IRWXU | S_IRWXG | S_IRWXO,
+  FILE_PERMISSION_USER_MASK         = S_IRWXU,
+  FILE_PERMISSION_GROUP_MASK        = S_IRWXG,
+  FILE_PERMISSION_OTHERS_MASK       = S_IRWXO,
+
+  FILE_PERMISSION_READ_BY_USER      = S_IRUSR,
+  FILE_PERMISSION_WRITE_BY_USER     = S_IWUSR,
+  FILE_PERMISSION_EXECUTE_BY_USER   = S_IXUSR,
+  FILE_PERMISSION_READ_BY_GROUP     = S_IRGRP,
+  FILE_PERMISSION_WRITE_BY_GROUP    = S_IWGRP,
+  FILE_PERMISSION_EXECUTE_BY_GROUP  = S_IXGRP,
+  FILE_PERMISSION_READ_BY_OTHERS    = S_IROTH,
+  FILE_PERMISSION_WRITE_BY_OTHERS   = S_IWOTH,
+  FILE_PERMISSION_EXECUTE_BY_OTHERS = S_IXOTH,
+};
+
+// Reads the permission of the given |path|, storing the file permission
+// bits in |mode|. If |path| is symbolic link, |mode| is the permission of
+// a file which the symlink points to.
+BASE_EXPORT bool GetPosixFilePermissions(const FilePath& path,
+                                         int* mode);
+// Sets the permission of the given |path|. If |path| is symbolic link, sets
+// the permission of a file which the symlink points to.
+BASE_EXPORT bool SetPosixFilePermissions(const FilePath& path,
+                                         int mode);
 #endif  // defined(OS_POSIX)
 
 #if defined(OS_WIN)
-// Resolve Windows shortcut (.LNK file)
-// This methods tries to resolve a shortcut .LNK file. If the |path| is valid
-// returns true and puts the target into the |path|, otherwise returns
-// false leaving the path as it is.
-BASE_EXPORT bool ResolveShortcut(FilePath* path);
-
-// Create a Windows shortcut (.LNK file)
-// This method creates a shortcut link using the information given. Ensure
-// you have initialized COM before calling into this function. 'source'
-// and 'destination' parameters are required, everything else can be NULL.
-// 'source' is the existing file, 'destination' is the new link file to be
-// created; for best results pass the filename with the .lnk extension.
-// The 'icon' can specify a dll or exe in which case the icon index is the
-// resource id. 'app_id' is the app model id for the shortcut on Win7.
-// Note that if the shortcut exists it will overwrite it.
-BASE_EXPORT bool CreateShortcutLink(const wchar_t *source,
-                                    const wchar_t *destination,
-                                    const wchar_t *working_dir,
-                                    const wchar_t *arguments,
-                                    const wchar_t *description,
-                                    const wchar_t *icon,
-                                    int icon_index,
-                                    const wchar_t* app_id);
-
-// Update a Windows shortcut (.LNK file). This method assumes the shortcut
-// link already exists (otherwise false is returned). Ensure you have
-// initialized COM before calling into this function. Only 'destination'
-// parameter is required, everything else can be NULL (but if everything else
-// is NULL no changes are made to the shortcut). 'destination' is the link
-// file to be updated. 'app_id' is the app model id for the shortcut on Win7.
-// For best results pass the filename with the .lnk extension.
-BASE_EXPORT bool UpdateShortcutLink(const wchar_t *source,
-                                    const wchar_t *destination,
-                                    const wchar_t *working_dir,
-                                    const wchar_t *arguments,
-                                    const wchar_t *description,
-                                    const wchar_t *icon,
-                                    int icon_index,
-                                    const wchar_t* app_id);
-
-// Pins a shortcut to the Windows 7 taskbar. The shortcut file must already
-// exist and be a shortcut that points to an executable.
-BASE_EXPORT bool TaskbarPinShortcutLink(const wchar_t* shortcut);
-
-// Unpins a shortcut from the Windows 7 taskbar. The shortcut must exist and
-// already be pinned to the taskbar.
-BASE_EXPORT bool TaskbarUnpinShortcutLink(const wchar_t* shortcut);
-
 // Copy from_path to to_path recursively and then delete from_path recursively.
 // Returns true if all operations succeed.
 // This function simulates Move(), but unlike Move() it works across volumes.
@@ -381,12 +378,23 @@ BASE_EXPORT int WriteFile(const FilePath& filename, const char* data, int size);
 // Append the data to |fd|. Does not close |fd| when done.
 BASE_EXPORT int WriteFileDescriptor(const int fd, const char* data, int size);
 #endif
+// Append the given buffer into the file. Returns the number of bytes written,
+// or -1 on error.
+BASE_EXPORT int AppendToFile(const FilePath& filename,
+                             const char* data, int size);
 
 // Gets the current working directory for the process.
 BASE_EXPORT bool GetCurrentDirectory(FilePath* path);
 
 // Sets the current working directory for the process.
 BASE_EXPORT bool SetCurrentDirectory(const FilePath& path);
+
+// Attempts to find a number that can be appended to the |path| to make it
+// unique. If |path| does not exist, 0 is returned.  If it fails to find such
+// a number, -1 is returned. If |suffix| is not empty, also checks the
+// existence of it with the given suffix.
+BASE_EXPORT int GetUniquePathNumber(const FilePath& path,
+                                    const FilePath::StringType& suffix);
 
 #if defined(OS_POSIX)
 // Test that |path| can only be changed by a given user and members of
@@ -406,7 +414,7 @@ BASE_EXPORT bool VerifyPathControlledByUser(const FilePath& base,
                                             const std::set<gid_t>& group_gids);
 #endif  // defined(OS_POSIX)
 
-#if defined(OS_MACOSX)
+#if defined(OS_MACOSX) && !defined(OS_IOS)
 // Is |path| writable only by a user with administrator privileges?
 // This function uses Mac OS conventions.  The super user is assumed to have
 // uid 0, and the administrator group is assumed to be named "admin".
@@ -415,7 +423,7 @@ BASE_EXPORT bool VerifyPathControlledByUser(const FilePath& base,
 // "admin", are not writable by all users, and contain no symbolic links.
 // Will return false if |path| does not exist.
 BASE_EXPORT bool VerifyPathControlledByAdmin(const FilePath& path);
-#endif  // defined(OS_MACOSX)
+#endif  // defined(OS_MACOSX) && !defined(OS_IOS)
 
 // A class to handle auto-closing of FILE*'s.
 class ScopedFILEClose {
@@ -477,8 +485,8 @@ class BASE_EXPORT FileEnumerator {
   // files in one directory will be returned before any files in a
   // subdirectory.
   //
-  // |file_type| specifies whether the enumerator should match files,
-  // directories, or both.
+  // |file_type|, a bit mask of FileType, specifies whether the enumerator
+  // should match files, directories, or both.
   //
   // |pattern| is an optional pattern for which files to match. This
   // works like shell globbing. For example, "*.txt" or "Foo???.doc".
@@ -491,10 +499,10 @@ class BASE_EXPORT FileEnumerator {
   // TODO(erikkay): Fix the pattern matching to work at all levels.
   FileEnumerator(const FilePath& root_path,
                  bool recursive,
-                 FileType file_type);
+                 int file_type);
   FileEnumerator(const FilePath& root_path,
                  bool recursive,
-                 FileType file_type,
+                 int file_type,
                  const FilePath::StringType& pattern);
   ~FileEnumerator();
 
@@ -540,7 +548,7 @@ class BASE_EXPORT FileEnumerator {
 
   FilePath root_path_;
   bool recursive_;
-  FileType file_type_;
+  int file_type_;
   FilePath::StringType pattern_;  // Empty when we want to find everything.
 
   // A stack that keeps track of which subdirectories we still need to
@@ -608,16 +616,6 @@ BASE_EXPORT bool HasFileBeenModifiedSince(
     const FileEnumerator::FindInfo& find_info,
     const base::Time& cutoff_time);
 
-#if defined(OS_WIN)
-  // Loads the file passed in as an image section and touches pages to avoid
-  // subsequent hard page faults during LoadLibrary. The size to be pre read
-  // is passed in. If it is 0 then the whole file is paged in. The step size
-  // which indicates the number of bytes to skip after every page touched is
-  // also passed in.
-bool BASE_EXPORT PreReadImage(const wchar_t* file_path, size_t size_to_read,
-                              size_t step_size);
-#endif  // OS_WIN
-
 #if defined(OS_LINUX)
 // Broad categories of file systems as returned by statfs() on Linux.
 enum FileSystemType {
@@ -639,9 +637,5 @@ BASE_EXPORT bool GetFileSystemType(const FilePath& path, FileSystemType* type);
 #endif
 
 }  // namespace file_util
-
-// Deprecated functions have been moved to this separate header file,
-// which must be included last after all the above definitions.
-#include "base/file_util_deprecated.h"
 
 #endif  // BASE_FILE_UTIL_H_

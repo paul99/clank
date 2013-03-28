@@ -15,9 +15,15 @@
 #include "ppapi/shared_impl/tracked_callback.h"
 #include "ppapi/thunk/ppb_graphics_2d_api.h"
 #include "third_party/WebKit/Source/WebKit/chromium/public/platform/WebCanvas.h"
+#include "webkit/plugins/webkit_plugins_export.h"
 
 namespace gfx {
+class Point;
 class Rect;
+}
+
+namespace content {
+class PepperGraphics2DHost;
 }
 
 namespace webkit {
@@ -26,8 +32,9 @@ namespace ppapi {
 class PPB_ImageData_Impl;
 class PluginInstance;
 
-class PPB_Graphics2D_Impl : public ::ppapi::Resource,
-                            public ::ppapi::thunk::PPB_Graphics2D_API {
+class WEBKIT_PLUGINS_EXPORT PPB_Graphics2D_Impl :
+    public ::ppapi::Resource,
+    public ::ppapi::thunk::PPB_Graphics2D_API {
  public:
   virtual ~PPB_Graphics2D_Impl();
 
@@ -49,7 +56,11 @@ class PPB_Graphics2D_Impl : public ::ppapi::Resource,
   virtual void Scroll(const PP_Rect* clip_rect,
                       const PP_Point* amount) OVERRIDE;
   virtual void ReplaceContents(PP_Resource image_data) OVERRIDE;
-  virtual int32_t Flush(PP_CompletionCallback callback) OVERRIDE;
+  virtual bool SetScale(float scale) OVERRIDE;
+  virtual float GetScale() OVERRIDE;
+  virtual int32_t Flush(
+      scoped_refptr< ::ppapi::TrackedCallback> callback,
+      PP_Resource* old_image_data) OVERRIDE;
 
   bool ReadImageData(PP_Resource image, const PP_Point* top_left);
 
@@ -71,6 +82,16 @@ class PPB_Graphics2D_Impl : public ::ppapi::Resource,
   void ViewFlushedPaint();
 
   PPB_ImageData_Impl* image_data() { return image_data_.get(); }
+  PluginInstance* bound_instance() const { return bound_instance_; }
+
+  // Scale |op_rect| to logical pixels, taking care to include partially-
+  // covered logical pixels (aka DIPs). Also scale optional |delta| to logical
+  // pixels as well for scrolling cases. Returns false for scrolling cases where
+  // scaling either |op_rect| or |delta| would require scrolling to fall back to
+  // invalidation due to rounding errors, true otherwise.
+  static bool ConvertToLogicalPixels(float scale,
+                                     gfx::Rect* op_rect,
+                                     gfx::Point* delta);
 
  private:
   explicit PPB_Graphics2D_Impl(PP_Instance instance);
@@ -102,7 +123,7 @@ class PPB_Graphics2D_Impl : public ::ppapi::Resource,
     }
 
     void Execute(int32_t result) {
-      ::ppapi::TrackedCallback::ClearAndRun(&callback_, result);
+      callback_->Run(result);
     }
 
     void PostAbort() {
@@ -128,7 +149,8 @@ class PPB_Graphics2D_Impl : public ::ppapi::Resource,
   void ExecuteScroll(const gfx::Rect& clip, int dx, int dy,
                      gfx::Rect* invalidated_rect);
   void ExecuteReplaceContents(PPB_ImageData_Impl* image,
-                              gfx::Rect* invalidated_rect);
+                              gfx::Rect* invalidated_rect,
+                              PP_Resource* old_image_data);
 
   // Schedules the offscreen callback to be fired at a future time. This
   // will add the given item to the offscreen_flush_callbacks_ vector.
@@ -184,8 +206,13 @@ class PPB_Graphics2D_Impl : public ::ppapi::Resource,
   // This allows us to do more optimized painting in some cases.
   bool is_always_opaque_;
 
+  // Set to the scale between what the plugin considers to be one pixel and one
+  // DIP
+  float scale_;
+
   base::WeakPtrFactory<PPB_Graphics2D_Impl> weak_ptr_factory_;
 
+  friend class content::PepperGraphics2DHost;
   DISALLOW_COPY_AND_ASSIGN(PPB_Graphics2D_Impl);
 };
 

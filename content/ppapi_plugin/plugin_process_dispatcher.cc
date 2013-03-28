@@ -8,6 +8,7 @@
 #include "base/bind_helpers.h"
 #include "content/common/child_process.h"
 
+namespace content {
 namespace {
 
 // How long we wait before releasing the plugin process.
@@ -16,9 +17,12 @@ const int kPluginReleaseTimeSeconds = 30;
 }  // namespace
 
 PluginProcessDispatcher::PluginProcessDispatcher(
-    base::ProcessHandle remote_process_handle,
-    GetInterfaceFunc get_interface)
-    : ppapi::proxy::PluginDispatcher(remote_process_handle, get_interface) {
+    PP_GetInterface_Func get_interface,
+    const ppapi::PpapiPermissions& permissions,
+    bool incognito)
+    : ppapi::proxy::PluginDispatcher(get_interface,
+                                     permissions,
+                                     incognito) {
   ChildProcess::current()->AddRefProcess();
 }
 
@@ -34,3 +38,5 @@ PluginProcessDispatcher::~PluginProcessDispatcher() {
                  base::Unretained(ChildProcess::current())),
       base::TimeDelta::FromSeconds(kPluginReleaseTimeSeconds));
 }
+
+}  // namespace content

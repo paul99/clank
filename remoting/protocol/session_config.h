@@ -22,9 +22,9 @@ extern const int kDefaultStreamVersion;
 struct ChannelConfig {
   enum TransportType {
     TRANSPORT_STREAM,
+    TRANSPORT_MUX_STREAM,
     TRANSPORT_DATAGRAM,
-    TRANSPORT_SRTP,
-    TRANSPORT_RTP_DTLS,
+    TRANSPORT_NONE,
   };
 
   enum Codec {
@@ -32,16 +32,23 @@ struct ChannelConfig {
     CODEC_VERBATIM,
     CODEC_ZIP,
     CODEC_VP8,
+    CODEC_OPUS,
+    CODEC_SPEEX,
   };
 
+  // Creates a config with transport field set to TRANSPORT_NONE which indicates
+  // that corresponding channel is disabled.
+  static ChannelConfig None();
+
+  // Default constructor. Equivalent to None().
   ChannelConfig();
+
+  // Creates a channel config with the specified parameters.
   ChannelConfig(TransportType transport, int version, Codec codec);
 
   // operator== is overloaded so that std::find() works with
   // std::vector<ChannelConfig>.
   bool operator==(const ChannelConfig& b) const;
-
-  void Reset();
 
   TransportType transport;
   int version;
@@ -52,6 +59,8 @@ struct ChannelConfig {
 // chromotocol configuration.
 class SessionConfig {
  public:
+  SessionConfig();
+
   void set_control_config(const ChannelConfig& control_config) {
     control_config_ = control_config;
   }
@@ -64,13 +73,23 @@ class SessionConfig {
     video_config_ = video_config;
   }
   const ChannelConfig& video_config() const { return video_config_; }
+  void set_audio_config(const ChannelConfig& audio_config) {
+    audio_config_ = audio_config;
+  }
+  const ChannelConfig& audio_config() const { return audio_config_; }
 
-  static SessionConfig GetDefault();
+  bool is_audio_enabled() const {
+    return audio_config_.transport != ChannelConfig::TRANSPORT_NONE;
+  }
+
+  // Returns a suitable session configuration for use in tests.
+  static SessionConfig ForTest();
 
  private:
   ChannelConfig control_config_;
   ChannelConfig event_config_;
   ChannelConfig video_config_;
+  ChannelConfig audio_config_;
 };
 
 // Defines session description that is sent from client to the host in the
@@ -104,6 +123,14 @@ class CandidateSessionConfig {
     return &video_configs_;
   }
 
+  const std::vector<ChannelConfig>& audio_configs() const {
+    return audio_configs_;
+  }
+
+  std::vector<ChannelConfig>* mutable_audio_configs() {
+    return &audio_configs_;
+  }
+
   // Selects session configuration that is supported by both participants.
   // NULL is returned if such configuration doesn't exist. When selecting
   // channel configuration priority is given to the configs listed first
@@ -127,6 +154,9 @@ class CandidateSessionConfig {
       const SessionConfig& config);
   static scoped_ptr<CandidateSessionConfig> CreateDefault();
 
+  // Helper method that modifies |config| to disable audio support.
+  static void DisableAudioChannel(CandidateSessionConfig* config);
+
  private:
   CandidateSessionConfig();
   explicit CandidateSessionConfig(const CandidateSessionConfig& config);
@@ -142,6 +172,7 @@ class CandidateSessionConfig {
   std::vector<ChannelConfig> control_configs_;
   std::vector<ChannelConfig> event_configs_;
   std::vector<ChannelConfig> video_configs_;
+  std::vector<ChannelConfig> audio_configs_;
 };
 
 }  // namespace protocol

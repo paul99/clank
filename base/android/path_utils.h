@@ -1,4 +1,4 @@
-// Copyright (c) 2011 The Chromium Authors. All rights reserved.
+// Copyright (c) 2012 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -6,23 +6,38 @@
 #define BASE_ANDROID_PATH_UTILS_H_
 
 #include <jni.h>
-#include <string>
+
+#include "base/base_export.h"
+
+class FilePath;
 
 namespace base {
 namespace android {
 
-// Return the absolute path to the data directory of the current application.
+// Retrieves the absolute path to the data directory of the current
+// application. The result is placed in the FilePath pointed to by 'result'.
 // This method is dedicated for base_paths_android.c, Using
 // PathService::Get(base::DIR_ANDROID_APP_DATA, ...) gets the data dir.
-std::string GetDataDirectory();
+BASE_EXPORT bool GetDataDirectory(FilePath* result);
 
-// Return the absolute path to the cache directory. This method is dedicated for
+// Retrieves the absolute path to the cache directory. The result is placed in
+// the FilePath pointed to by 'result'. This method is dedicated for
 // base_paths_android.c, Using PathService::Get(base::DIR_CACHE, ...) gets the
 // cache dir.
-std::string GetCacheDirectory();
+BASE_EXPORT bool GetCacheDirectory(FilePath* result);
 
-// Return the absolute path to the external storage directory.
-std::string GetExternalStorageDirectory();
+// Retrieves the path to the public downloads directory. The result is placed
+// in the FilePath pointed to by 'result'.
+bool GetDownloadsDirectory(FilePath* result);
+
+// Retrieves the path to the native JNI libraries via
+// ApplicationInfo.nativeLibraryDir on the Java side. The result is placed in
+// the FilePath pointed to by 'result'.
+BASE_EXPORT bool GetNativeLibraryDirectory(FilePath* result);
+
+// Retrieves the absolute path to the external storage directory. The result
+// is placed in the FilePath pointed to by 'result'.
+BASE_EXPORT bool GetExternalStorageDirectory(FilePath* result);
 
 bool RegisterPathUtils(JNIEnv* env);
 

@@ -1,16 +1,17 @@
-// Copyright (c) 2011 The Chromium Authors. All rights reserved.
+// Copyright (c) 2012 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
 #ifndef PRINTING_BACKEND_PRINT_BACKEND_H_
 #define PRINTING_BACKEND_PRINT_BACKEND_H_
-#pragma once
 
 #include <map>
 #include <string>
 #include <vector>
 
 #include "base/memory/ref_counted.h"
+#include "base/string16.h"
+#include "printing/print_job_constants.h"
 #include "printing/printing_export.h"
 
 namespace base {
@@ -33,6 +34,19 @@ struct PRINTING_EXPORT PrinterBasicInfo {
 
 typedef std::vector<PrinterBasicInfo> PrinterList;
 
+struct PRINTING_EXPORT PrinterSemanticCapsAndDefaults {
+  PrinterSemanticCapsAndDefaults();
+  ~PrinterSemanticCapsAndDefaults();
+
+  // Capabilities.
+  bool color_capable;
+  bool duplex_capable;
+
+  // Current defaults.
+  bool color_default;
+  DuplexMode duplex_default;
+};
+
 struct PRINTING_EXPORT PrinterCapsAndDefaults {
   PrinterCapsAndDefaults();
   ~PrinterCapsAndDefaults();
@@ -53,27 +67,44 @@ struct PRINTING_EXPORT PrinterCapsAndDefaults {
 class PRINTING_EXPORT PrintBackend
     : public base::RefCountedThreadSafe<PrintBackend> {
  public:
-  virtual ~PrintBackend();
-
   // Enumerates the list of installed local and network printers.
   virtual bool EnumeratePrinters(PrinterList* printer_list) = 0;
 
   // Get the default printer name. Empty string if no default printer.
   virtual std::string GetDefaultPrinterName() = 0;
 
+  // Gets the semantic capabilities and defaults for a specific printer.
+  // This is usually a lighter implementation than GetPrinterCapsAndDefaults().
+  // NOTE: on some old platforms (WinXP without XPS pack)
+  // GetPrinterCapsAndDefaults() will fail, while this function will succeed.
+  virtual bool GetPrinterSemanticCapsAndDefaults(
+      const std::string& printer_name,
+      PrinterSemanticCapsAndDefaults* printer_info) = 0;
+
   // Gets the capabilities and defaults for a specific printer.
   virtual bool GetPrinterCapsAndDefaults(
       const std::string& printer_name,
       PrinterCapsAndDefaults* printer_info) = 0;
 
+  // Gets the information about driver for a specific printer.
+  virtual std::string GetPrinterDriverInfo(
+      const std::string& printer_name) = 0;
+
   // Returns true if printer_name points to a valid printer.
   virtual bool IsValidPrinter(const std::string& printer_name) = 0;
+
+  // Simplify title to resolve issue with some drivers.
+  static string16 SimplifyDocumentTitle(const string16& title);
 
   // Allocate a print backend. If |print_backend_settings| is NULL, default
   // settings will be used.
   // Return NULL if no print backend available.
   static scoped_refptr<PrintBackend> CreateInstance(
       const base::DictionaryValue* print_backend_settings);
+
+ protected:
+  friend class base::RefCountedThreadSafe<PrintBackend>;
+  virtual ~PrintBackend();
 };
 
 }  // namespace printing

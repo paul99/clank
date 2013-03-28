@@ -1,16 +1,11 @@
 #include "common/linux/synth_elf.h"
 
 #include <assert.h>
-#if defined(__ANDROID__)
-// TODO(zhenghao): Elf32_Nhdr isn't defined in elf.h on Android.
-// Check with Android team about this.
-#include <linux/elf.h>
-#define ELFOSABI_SYSV ELFOSABI_NONE
-#else
 #include <elf.h>
-#endif
 #include <stdio.h>
 #include <string.h>
+
+#include "common/using_std_string.h"
 
 namespace google_breakpad {
 namespace synth_elf {

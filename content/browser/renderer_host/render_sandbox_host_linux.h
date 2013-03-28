@@ -1,4 +1,4 @@
-// Copyright (c) 2011 The Chromium Authors. All rights reserved.
+// Copyright (c) 2012 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -6,7 +6,6 @@
 
 #ifndef CONTENT_BROWSER_RENDERER_HOST_RENDER_SANDBOX_HOST_LINUX_H_
 #define CONTENT_BROWSER_RENDERER_HOST_RENDER_SANDBOX_HOST_LINUX_H_
-#pragma once
 
 #include <string>
 
@@ -14,6 +13,8 @@
 #include "content/common/content_export.h"
 
 template <typename T> struct DefaultSingletonTraits;
+
+namespace content {
 
 // This is a singleton object which handles sandbox requests from the
 // renderers.
@@ -49,5 +50,7 @@ class CONTENT_EXPORT RenderSandboxHostLinux {
 
   DISALLOW_COPY_AND_ASSIGN(RenderSandboxHostLinux);
 };
+
+}  // namespace content
 
 #endif  // CONTENT_BROWSER_RENDERER_HOST_RENDER_SANDBOX_HOST_LINUX_H_

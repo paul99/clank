@@ -14,6 +14,25 @@ float AxisToButton(float input) {
   return (input + 1.f) / 2.f;
 }
 
+void DpadFromAxis(WebKit::WebGamepad* mapped, float dir) {
+  // Dpad is mapped as a direction on one axis, where -1 is up and it
+  // increases clockwise to 1, which is up + left. It's set to a large (> 1.f)
+  // number when nothing is depressed, except on start up, sometimes it's 0.0
+  // for no data, rather than the large number.
+  if (dir == 0.0f) {
+    mapped->buttons[kButtonDpadUp] = 0.f;
+    mapped->buttons[kButtonDpadDown] = 0.f;
+    mapped->buttons[kButtonDpadLeft] = 0.f;
+    mapped->buttons[kButtonDpadRight] = 0.f;
+  } else {
+    mapped->buttons[kButtonDpadUp] = (dir >= -1.f && dir < -0.7f) ||
+                                     (dir >= .95f && dir <= 1.f);
+    mapped->buttons[kButtonDpadRight] = dir >= -.75f && dir < -.1f;
+    mapped->buttons[kButtonDpadDown] = dir >= -.2f && dir < .45f;
+    mapped->buttons[kButtonDpadLeft] = dir >= .4f && dir <= 1.f;
+  }
+}
+
 void MapperXbox360Gamepad(
     const WebKit::WebGamepad& input,
     WebKit::WebGamepad* mapped) {
@@ -62,7 +81,7 @@ void MapperPlaystationSixAxis(
   mapped->axesLength = kNumAxes;
 }
 
-void MapperMacallyIshock(
+void MapperDirectInputStyle(
     const WebKit::WebGamepad& input,
     WebKit::WebGamepad* mapped) {
   *mapped = input;
@@ -70,29 +89,87 @@ void MapperMacallyIshock(
   mapped->buttons[kButtonSecondary] = input.buttons[2];
   mapped->buttons[kButtonTertiary] = input.buttons[0];
   mapped->axes[kAxisRightStickY] = input.axes[5];
-
-  // Dpad is mapped as a direction on one axis, where -1 is up and it
-  // increases clockwise to 1, which is up + left. It's set to a large (> 1.f)
-  // number when nothing is depressed, except on start up, sometimes it's 0.0
-  // for no data, rather than the large number.
-  float dir = input.axes[9];
-  if (dir == 0.0f) {
-    mapped->buttons[kButtonDpadUp] = 0.f;
-    mapped->buttons[kButtonDpadDown] = 0.f;
-    mapped->buttons[kButtonDpadLeft] = 0.f;
-    mapped->buttons[kButtonDpadRight] = 0.f;
-  } else {
-    mapped->buttons[kButtonDpadUp] = (dir >= -1.f && dir < -0.7f) ||
-                                     (dir >= .95f && dir <= 1.f);
-    mapped->buttons[kButtonDpadRight] = dir >= -.75f && dir < -.1f;
-    mapped->buttons[kButtonDpadDown] = dir >= -.2f && dir < .45f;
-    mapped->buttons[kButtonDpadLeft] = dir >= .4f && dir <= 1.f;
-  }
-
+  DpadFromAxis(mapped, input.axes[9]);
   mapped->buttonsLength = kNumButtons - 1; /* no meta */
   mapped->axesLength = kNumAxes;
 }
 
+void MapperMacallyIShock(
+    const WebKit::WebGamepad& input,
+    WebKit::WebGamepad* mapped) {
+  enum IShockButtons {
+    kButtonC = kNumButtons,
+    kButtonD,
+    kButtonE,
+    kNumIShockButtons
+  };
+
+  *mapped = input;
+  mapped->buttons[kButtonPrimary] = input.buttons[6];
+  mapped->buttons[kButtonSecondary] = input.buttons[5];
+  mapped->buttons[kButtonTertiary] = input.buttons[7];
+  mapped->buttons[kButtonQuaternary] = input.buttons[4];
+  mapped->buttons[kButtonLeftShoulder] = input.buttons[14];
+  mapped->buttons[kButtonRightShoulder] = input.buttons[12];
+  mapped->buttons[kButtonLeftTrigger] = input.buttons[15];
+  mapped->buttons[kButtonRightTrigger] = input.buttons[13];
+  mapped->buttons[kButtonBackSelect] = input.buttons[9];
+  mapped->buttons[kButtonStart] = input.buttons[10];
+  mapped->buttons[kButtonLeftThumbstick] = input.buttons[16];
+  mapped->buttons[kButtonRightThumbstick] = input.buttons[17];
+  mapped->buttons[kButtonDpadUp] = input.buttons[0];
+  mapped->buttons[kButtonDpadDown] = input.buttons[1];
+  mapped->buttons[kButtonDpadLeft] = input.buttons[2];
+  mapped->buttons[kButtonDpadRight] = input.buttons[3];
+  mapped->buttons[kButtonMeta] = input.buttons[11];
+  mapped->buttons[kButtonC] = input.buttons[8];
+  mapped->buttons[kButtonD] = input.buttons[18];
+  mapped->buttons[kButtonE] = input.buttons[19];
+  mapped->axes[kAxisLeftStickX] = input.axes[0];
+  mapped->axes[kAxisLeftStickY] = input.axes[1];
+  mapped->axes[kAxisRightStickX] = -input.axes[5];
+  mapped->axes[kAxisRightStickY] = input.axes[6];
+
+  mapped->buttonsLength = kNumIShockButtons;
+  mapped->axesLength = kNumAxes;
+}
+
+void MapperXGEAR(
+    const WebKit::WebGamepad& input,
+    WebKit::WebGamepad* mapped) {
+  *mapped = input;
+  mapped->buttons[kButtonPrimary] = input.buttons[2];
+  mapped->buttons[kButtonTertiary] = input.buttons[3];
+  mapped->buttons[kButtonQuaternary] = input.buttons[0];
+  mapped->buttons[kButtonLeftShoulder] = input.buttons[6];
+  mapped->buttons[kButtonRightShoulder] = input.buttons[7];
+  mapped->buttons[kButtonLeftTrigger] = input.buttons[4];
+  mapped->buttons[kButtonRightTrigger] = input.buttons[5];
+  DpadFromAxis(mapped, input.axes[9]);
+  mapped->axes[kAxisRightStickX] = input.axes[5];
+  mapped->axes[kAxisRightStickY] = input.axes[2];
+  mapped->buttonsLength = kNumButtons - 1; /* no meta */
+  mapped->axesLength = kNumAxes;
+}
+
+void MapperSmartJoyPLUS(
+    const WebKit::WebGamepad& input,
+    WebKit::WebGamepad* mapped) {
+  *mapped = input;
+  mapped->buttons[kButtonPrimary] = input.buttons[2];
+  mapped->buttons[kButtonTertiary] = input.buttons[3];
+  mapped->buttons[kButtonQuaternary] = input.buttons[0];
+  mapped->buttons[kButtonStart] = input.buttons[8];
+  mapped->buttons[kButtonBackSelect] = input.buttons[9];
+  mapped->buttons[kButtonLeftShoulder] = input.buttons[6];
+  mapped->buttons[kButtonRightShoulder] = input.buttons[7];
+  mapped->buttons[kButtonLeftTrigger] = input.buttons[4];
+  mapped->buttons[kButtonRightTrigger] = input.buttons[5];
+  DpadFromAxis(mapped, input.axes[9]);
+  mapped->axes[kAxisRightStickY] = input.axes[5];
+  mapped->buttonsLength = kNumButtons - 1; /* no meta */
+  mapped->axesLength = kNumAxes;
+}
 
 struct MappingData {
   const char* const vendor_id;
@@ -102,8 +179,14 @@ struct MappingData {
   // http://www.linux-usb.org/usb.ids
   { "045e", "028e", MapperXbox360Gamepad },     // Xbox 360 Controller
   { "045e", "028f", MapperXbox360Gamepad },     // Xbox 360 Wireless Controller
+  { "046d", "c216", MapperDirectInputStyle },   // Logitech F310, D mode
+  { "046d", "c218", MapperDirectInputStyle },   // Logitech F510, D mode
+  { "046d", "c219", MapperDirectInputStyle },   // Logitech F710, D mode
   { "054c", "0268", MapperPlaystationSixAxis }, // Playstation SIXAXIS
-  { "2222", "0060", MapperMacallyIshock },      // Macally iShockX, analog mode
+  { "0925", "0005", MapperSmartJoyPLUS },       // SmartJoy PLUS Adapter
+  { "0e8f", "0003", MapperXGEAR },              // XFXforce XGEAR PS2 Controller
+  { "2222", "0060", MapperDirectInputStyle },   // Macally iShockX, analog mode
+  { "2222", "4010", MapperMacallyIShock },      // Macally iShock
 };
 
 }  // namespace

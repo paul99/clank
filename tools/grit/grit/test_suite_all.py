@@ -8,7 +8,7 @@
 import os
 import sys
 if __name__ == '__main__':
-  sys.path.append(os.path.join(os.path.dirname(sys.argv[0]), '..'))
+  sys.path.append(os.path.join(os.path.dirname(__file__), '..'))
 
 import unittest
 
@@ -20,64 +20,123 @@ import unittest
 
 class TestSuiteAll(unittest.TestSuite):
   def __init__(self):
-    super(type(self), self).__init__()
+    super(TestSuiteAll, self).__init__()
     # Imports placed here to prevent circular imports.
-    from grit import grd_reader_unittest
-    from grit import grit_runner_unittest
-    from grit.node import base_unittest
-    from grit.node import io_unittest
-    from grit import clique_unittest
-    from grit.node import misc_unittest
-    from grit.gather import rc_unittest
-    from grit.gather import tr_html_unittest
-    from grit.node import message_unittest
-    from grit import tclib_unittest
-    import grit.format.rc_unittest
+    # pylint: disable-msg=C6204
+    import grit.clique_unittest
+    import grit.grd_reader_unittest
+    import grit.grit_runner_unittest
+    import grit.lazy_re_unittest
+    import grit.shortcuts_unittests
+    import grit.tclib_unittest
+    import grit.util_unittest
+    import grit.xtb_reader_unittest
+    import grit.format.android_xml_unittest
+    import grit.format.c_format_unittest
+    import grit.format.chrome_messages_json_unittest
     import grit.format.data_pack_unittest
-    from grit.tool import rc2grd_unittest
-    from grit.tool import transl2tc_unittest
-    from grit.gather import txt_unittest
-    from grit.gather import admin_template_unittest
-    from grit import xtb_reader_unittest
-    from grit import util_unittest
-    from grit.tool import preprocess_unittest
-    from grit.tool import postprocess_unittest
-    from grit import shortcuts_unittests
-    from grit.gather import muppet_strings_unittest
-    from grit.gather import policy_json_unittest
-    from grit.node.custom import filename_unittest
+    import grit.format.html_inline_unittest
     import grit.format.js_map_format_unittest
+    import grit.format.rc_header_unittest
+    import grit.format.rc_unittest
+    import grit.format.resource_map_unittest
+    import grit.format.policy_templates.policy_template_generator_unittest
+    import grit.format.policy_templates.writers.adm_writer_unittest
+    import grit.format.policy_templates.writers.doc_writer_unittest
+    import grit.format.policy_templates.writers.json_writer_unittest
+    import grit.format.policy_templates.writers.plist_strings_writer_unittest
+    import grit.format.policy_templates.writers.plist_writer_unittest
+    import grit.format.policy_templates.writers.reg_writer_unittest
+    import grit.format.policy_templates.writers.template_writer_unittest
+    import grit.format.policy_templates.writers.xml_writer_base_unittest
+    import grit.gather.admin_template_unittest
+    import grit.gather.chrome_html_unittest
+    import grit.gather.chrome_scaled_image_unittest
+    import grit.gather.igoogle_strings_unittest
+    import grit.gather.muppet_strings_unittest
+    import grit.gather.policy_json_unittest
+    import grit.gather.rc_unittest
+    import grit.gather.tr_html_unittest
+    import grit.gather.txt_unittest
+    import grit.node.base_unittest
+    import grit.node.io_unittest
+    import grit.node.message_unittest
+    import grit.node.misc_unittest
+    import grit.node.structure_unittest #
+    import grit.node.custom.filename_unittest
+    import grit.tool.android2grd_unittest
+    import grit.tool.build_unittest
+    import grit.tool.buildinfo_unittest
+    import grit.tool.postprocess_unittest
+    import grit.tool.preprocess_unittest
+    import grit.tool.rc2grd_unittest
+    import grit.tool.transl2tc_unittest
+    import grit.tool.xmb_unittest
 
     test_classes = [
-      base_unittest.NodeUnittest,
-      io_unittest.FileNodeUnittest,
-      grit_runner_unittest.OptionArgsUnittest,
-      grd_reader_unittest.GrdReaderUnittest,
-      clique_unittest.MessageCliqueUnittest,
-      misc_unittest.GritNodeUnittest,
-      rc_unittest.RcUnittest,
-      tr_html_unittest.ParserUnittest,
-      tr_html_unittest.TrHtmlUnittest,
-      message_unittest.MessageUnittest,
-      tclib_unittest.TclibUnittest,
-      grit.format.rc_unittest.FormatRcUnittest,
-      grit.format.data_pack_unittest.FormatDataPackUnittest,
-      rc2grd_unittest.Rc2GrdUnittest,
-      transl2tc_unittest.TranslationToTcUnittest,
-      txt_unittest.TxtUnittest,
-      admin_template_unittest.AdmGathererUnittest,
-      xtb_reader_unittest.XtbReaderUnittest,
-      misc_unittest.IfNodeUnittest,
-      util_unittest.UtilUnittest,
-      preprocess_unittest.PreProcessingUnittest,
-      postprocess_unittest.PostProcessingUnittest,
-      misc_unittest.ReleaseNodeUnittest,
-      shortcuts_unittests.ShortcutsUnittest,
-      muppet_strings_unittest.MuppetStringsUnittest,
-      filename_unittest.WindowsFilenameUnittest,
-      grit.format.js_map_format_unittest.JsMapFormatUnittest,
-      policy_json_unittest.PolicyJsonUnittest,
-      # add test classes here...
+        grit.clique_unittest.MessageCliqueUnittest,
+        grit.grd_reader_unittest.GrdReaderUnittest,
+        grit.grit_runner_unittest.OptionArgsUnittest,
+        grit.lazy_re_unittest.LazyReUnittest,
+        grit.shortcuts_unittests.ShortcutsUnittest,
+        grit.tclib_unittest.TclibUnittest,
+        grit.util_unittest.UtilUnittest,
+        grit.xtb_reader_unittest.XtbReaderUnittest,
+        grit.format.android_xml_unittest.AndroidXmlUnittest,
+        grit.format.c_format_unittest.CFormatUnittest,
+        grit.format.chrome_messages_json_unittest.
+            ChromeMessagesJsonFormatUnittest,
+        grit.format.data_pack_unittest.FormatDataPackUnittest,
+        grit.format.html_inline_unittest.HtmlInlineUnittest,
+        grit.format.js_map_format_unittest.JsMapFormatUnittest,
+        grit.format.rc_header_unittest.RcHeaderFormatterUnittest,
+        grit.format.rc_unittest.FormatRcUnittest,
+        grit.format.resource_map_unittest.FormatResourceMapUnittest,
+        grit.format.policy_templates.policy_template_generator_unittest.
+            PolicyTemplateGeneratorUnittest,
+        grit.format.policy_templates.writers.adm_writer_unittest.
+            AdmWriterUnittest,
+        grit.format.policy_templates.writers.doc_writer_unittest.
+            DocWriterUnittest,
+        grit.format.policy_templates.writers.json_writer_unittest.
+            JsonWriterUnittest,
+        grit.format.policy_templates.writers.plist_strings_writer_unittest.
+            PListStringsWriterUnittest,
+        grit.format.policy_templates.writers.plist_writer_unittest.
+            PListWriterUnittest,
+        grit.format.policy_templates.writers.reg_writer_unittest.
+            RegWriterUnittest,
+        grit.format.policy_templates.writers.template_writer_unittest.
+            TemplateWriterUnittests,
+        grit.format.policy_templates.writers.xml_writer_base_unittest.
+            XmlWriterBaseTest,
+        grit.gather.admin_template_unittest.AdmGathererUnittest,
+        grit.gather.chrome_html_unittest.ChromeHtmlUnittest,
+        grit.gather.chrome_scaled_image_unittest.ChromeScaledImageUnittest,
+        grit.gather.igoogle_strings_unittest.IgoogleStringsUnittest,
+        grit.gather.muppet_strings_unittest.MuppetStringsUnittest,
+        grit.gather.policy_json_unittest.PolicyJsonUnittest,
+        grit.gather.rc_unittest.RcUnittest,
+        grit.gather.tr_html_unittest.ParserUnittest,
+        grit.gather.tr_html_unittest.TrHtmlUnittest,
+        grit.gather.txt_unittest.TxtUnittest,
+        grit.node.base_unittest.NodeUnittest,
+        grit.node.io_unittest.FileNodeUnittest,
+        grit.node.message_unittest.MessageUnittest,
+        grit.node.misc_unittest.GritNodeUnittest,
+        grit.node.misc_unittest.IfNodeUnittest,
+        grit.node.misc_unittest.ReleaseNodeUnittest,
+        grit.node.structure_unittest.StructureUnittest,
+        grit.node.custom.filename_unittest.WindowsFilenameUnittest,
+        grit.tool.android2grd_unittest.Android2GrdUnittest,
+        grit.tool.build_unittest.BuildUnittest,
+        grit.tool.buildinfo_unittest.BuildInfoUnittest,
+        grit.tool.postprocess_unittest.PostProcessingUnittest,
+        grit.tool.preprocess_unittest.PreProcessingUnittest,
+        grit.tool.rc2grd_unittest.Rc2GrdUnittest,
+        grit.tool.transl2tc_unittest.TranslationToTcUnittest,
+        grit.tool.xmb_unittest.XmbUnittest,
+        # add test classes here, in alphabetical order...
     ]
 
     for test_class in test_classes:

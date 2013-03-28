@@ -16,6 +16,8 @@
 #include "ipc/ipc_channel_posix.h"
 #endif
 
+namespace content {
+
 typedef base::hash_map<std::string, scoped_refptr<NPChannelBase> > ChannelMap;
 static base::LazyInstance<ChannelMap>::Leaky
      g_channels = LAZY_INSTANCE_INITIALIZER;
@@ -109,8 +111,7 @@ NPObjectBase* NPChannelBase::GetNPObjectListenerForRoute(int route_id) {
   return iter->second;
 }
 
-base::WaitableEvent* NPChannelBase::GetModalDialogEvent(
-    gfx::NativeViewId containing_window) {
+base::WaitableEvent* NPChannelBase::GetModalDialogEvent(int render_view_id) {
   return NULL;
 }
 
@@ -118,10 +119,10 @@ bool NPChannelBase::Init(base::MessageLoopProxy* ipc_message_loop,
                          bool create_pipe_now,
                          base::WaitableEvent* shutdown_event) {
 #if defined(OS_POSIX)
-  // Check the validity of fd for bug investigation.  Remove after fixed.
-  // See for details: crbug.com/95129, crbug.com/97285.
-  if (mode_ == IPC::Channel::MODE_CLIENT)
-    CHECK_NE(-1, channel_handle_.socket.fd);
+  // Attempting to initialize with an invalid channel handle.
+  // See http://crbug.com/97285 for details.
+  if (mode_ == IPC::Channel::MODE_CLIENT && -1 == channel_handle_.socket.fd)
+    return false;
 #endif
 
   channel_.reset(new IPC::SyncChannel(
@@ -130,7 +131,7 @@ bool NPChannelBase::Init(base::MessageLoopProxy* ipc_message_loop,
 
 #if defined(OS_POSIX)
   // Check the validity of fd for bug investigation.  Remove after fixed.
-  // See for details: crbug.com/95129, crbug.com/97285.
+  // See crbug.com/97285 for details.
   if (mode_ == IPC::Channel::MODE_SERVER)
     CHECK_NE(-1, channel_->GetClientFileDescriptor());
 #endif
@@ -141,6 +142,7 @@ bool NPChannelBase::Init(base::MessageLoopProxy* ipc_message_loop,
 
 bool NPChannelBase::Send(IPC::Message* message) {
   if (!channel_.get()) {
+    VLOG(1) << "Channel is NULL; dropping message";
     delete message;
     return false;
   }
@@ -191,7 +193,7 @@ void NPChannelBase::OnChannelConnected(int32 peer_pid) {
 }
 
 void NPChannelBase::AddRoute(int route_id,
-                             IPC::Channel::Listener* listener,
+                             IPC::Listener* listener,
                              NPObjectBase* npobject) {
   if (npobject) {
     npobject_listeners_[route_id] = npobject;
@@ -225,14 +227,11 @@ void NPChannelBase::RemoveRoute(int route_id) {
   DCHECK(non_npobject_count_ >= 0);
 
   if (!non_npobject_count_) {
-    AutoReset<bool> auto_reset_in_remove_route(&in_remove_route_, true);
+    base::AutoReset<bool> auto_reset_in_remove_route(&in_remove_route_, true);
     for (ListenerMap::iterator npobj_iter = npobject_listeners_.begin();
          npobj_iter != npobject_listeners_.end(); ++npobj_iter) {
       if (npobj_iter->second) {
-        IPC::Channel::Listener* channel_listener =
-            npobj_iter->second->GetChannelListener();
-        DCHECK(channel_listener != NULL);
-        channel_listener->OnChannelError();
+        npobj_iter->second->GetChannelListener()->OnChannelError();
       }
     }
 
@@ -256,6 +255,20 @@ bool NPChannelBase::OnControlMessageReceived(const IPC::Message& msg) {
 
 void NPChannelBase::OnChannelError() {
   channel_valid_ = false;
+
+  // TODO(shess): http://crbug.com/97285
+  // Once an error is seen on a channel, remap the channel to prevent
+  // it from being vended again.  Keep the channel in the map so
+  // RemoveRoute() can clean things up correctly.
+  for (ChannelMap::iterator iter = g_channels.Get().begin();
+       iter != g_channels.Get().end(); ++iter) {
+    if (iter->second == this) {
+      // Insert new element before invalidating |iter|.
+      g_channels.Get()[iter->first + "-error"] = iter->second;
+      g_channels.Get().erase(iter);
+      break;
+    }
+  }
 }
 
 NPObject* NPChannelBase::GetExistingNPObjectProxy(int route_id) {
@@ -288,3 +301,5 @@ void NPChannelBase::RemoveMappingForNPObjectStub(int route_id,
 void NPChannelBase::RemoveMappingForNPObjectProxy(int route_id) {
   proxy_map_.erase(route_id);
 }
+
+}  // namespace content

@@ -4,7 +4,6 @@
 
 #ifndef CHROME_BROWSER_CHROMEOS_LOGIN_LOGIN_PERFORMER_H_
 #define CHROME_BROWSER_CHROMEOS_LOGIN_LOGIN_PERFORMER_H_
-#pragma once
 
 #include <string>
 
@@ -14,9 +13,9 @@
 #include "chrome/browser/chromeos/login/login_status_consumer.h"
 #include "chrome/browser/chromeos/login/online_attempt_host.h"
 #include "chrome/browser/profiles/profile_manager.h"
-#include "chrome/common/net/gaia/google_service_auth_error.h"
 #include "content/public/browser/notification_observer.h"
 #include "content/public/browser/notification_registrar.h"
+#include "google_apis/gaia/google_service_auth_error.h"
 
 namespace chromeos {
 
@@ -55,11 +54,19 @@ class LoginPerformer : public LoginStatusConsumer,
                        public content::NotificationObserver,
                        public OnlineAttemptHost::Delegate {
  public:
+  typedef enum AuthorizationMode {
+    // Authorization performed internally by Chrome.
+    AUTH_MODE_INTERNAL,
+    // Authorization performed by an extension.
+    AUTH_MODE_EXTENSION
+  } AuthorizationMode;
+
   // Delegate class to get notifications from the LoginPerformer.
   class Delegate : public LoginStatusConsumer {
    public:
     virtual ~Delegate() {}
     virtual void WhiteListCheckFailed(const std::string& email) = 0;
+    virtual void PolicyLoadFailed() = 0;
     virtual void OnOnlineChecked(const std::string& email, bool success) = 0;
   };
 
@@ -75,25 +82,30 @@ class LoginPerformer : public LoginStatusConsumer,
 
   // LoginStatusConsumer implementation:
   virtual void OnLoginFailure(const LoginFailure& error) OVERRIDE;
+  virtual void OnRetailModeLoginSuccess() OVERRIDE;
   virtual void OnLoginSuccess(
       const std::string& username,
       const std::string& password,
-      const GaiaAuthConsumer::ClientLoginResult& credentials,
       bool pending_requests,
       bool using_oauth) OVERRIDE;
   virtual void OnOffTheRecordLoginSuccess() OVERRIDE;
-  virtual void OnPasswordChangeDetected(
-      const GaiaAuthConsumer::ClientLoginResult& credentials) OVERRIDE;
+  virtual void OnPasswordChangeDetected() OVERRIDE;
 
-  // Completes login process that has already been authenticated with
-  // provided |username| and |password|.
-  void CompleteLogin(const std::string& username, const std::string& password);
+  // Performs a login for |username| and |password|. If auth_mode is
+  // AUTH_MODE_EXTENSION, there are no further auth checks, AUTH_MODE_INTERNAL
+  // will perform auth checks.
+  void PerformLogin(const std::string& username,
+                    const std::string& password,
+                    AuthorizationMode auth_mode);
 
-  // Performs login with the |username| and |password| specified.
-  void Login(const std::string& username, const std::string& password);
+  // Performs retail mode login.
+  void LoginRetailMode();
 
-  // Performs actions to prepare Guest mode login.
+  // Performs actions to prepare guest mode login.
   void LoginOffTheRecord();
+
+  // Performs a login into the public account identified by |username|.
+  void LoginAsPublicAccount(const std::string& username);
 
   // Migrates cryptohome using |old_password| specified.
   void RecoverEncryptedData(const std::string& old_password);
@@ -111,14 +123,20 @@ class LoginPerformer : public LoginStatusConsumer,
     return last_login_failure_.reason() == LoginFailure::LOGIN_TIMED_OUT;
   }
 
+  // True if password change has been detected.
+  bool password_changed() { return password_changed_; }
+
+  // Number of times we've been called with OnPasswordChangeDetected().
+  // If user enters incorrect old password, same LoginPerformer instance will
+  // be called so callback count makes it possible to distinguish initial
+  // "password changed detected" event from further attempts to enter old
+  // password for cryptohome migration (when > 1).
+  int password_changed_callback_count() {
+    return password_changed_callback_count_;
+  }
+
   void set_delegate(Delegate* delegate) { delegate_ = delegate; }
 
-  typedef enum AuthorizationMode {
-    // Authorization performed internally by Chrome.
-    AUTH_MODE_INTERNAL,
-    // Authorization performed by an extension.
-    AUTH_MODE_EXTENSION
-  } AuthorizationMode;
   AuthorizationMode auth_mode() const { return auth_mode_; }
 
  protected:
@@ -130,10 +148,6 @@ class LoginPerformer : public LoginStatusConsumer,
   virtual void Observe(int type,
                        const content::NotificationSource& source,
                        const content::NotificationDetails& details) OVERRIDE;
-
-  // Callback for asynchronous profile creation.
-  void OnProfileCreated(Profile* profile,
-                        Profile::CreateStatus status);
 
   // Requests screen lock and subscribes to screen lock notifications.
   void RequestScreenLock();
@@ -175,9 +189,6 @@ class LoginPerformer : public LoginStatusConsumer,
   // sign-in server. LoginFailure.None() by default.
   LoginFailure last_login_failure_;
 
-  // Cached credentials data when password change is detected.
-  GaiaAuthConsumer::ClientLoginResult cached_credentials_;
-
   // Username and password for the current login attempt.
   std::string username_;
   std::string password_;
@@ -188,6 +199,7 @@ class LoginPerformer : public LoginStatusConsumer,
   // True if password change has been detected.
   // Once correct password is entered homedir migration is executed.
   bool password_changed_;
+  int password_changed_callback_count_;
 
   // Used for ScreenLock notifications.
   content::NotificationRegistrar registrar_;
@@ -201,13 +213,8 @@ class LoginPerformer : public LoginStatusConsumer,
   // is locked during that stage. No need to resolve screen lock action then.
   bool initial_online_auth_pending_;
 
-  GaiaAuthConsumer::ClientLoginResult credentials_;
-
   // Authorization mode type.
   AuthorizationMode auth_mode_;
-
-  // True if we use OAuth during authorization process.
-  bool using_oauth_;
 
   base::WeakPtrFactory<LoginPerformer> weak_factory_;
 

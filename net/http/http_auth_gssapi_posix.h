@@ -1,10 +1,11 @@
-// Copyright (c) 2011 The Chromium Authors. All rights reserved.
+// Copyright (c) 2012 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
 #ifndef NET_HTTP_HTTP_AUTH_GSSAPI_POSIX_H_
 #define NET_HTTP_HTTP_AUTH_GSSAPI_POSIX_H_
-#pragma once
+
+#include <gssapi.h>
 
 #include <string>
 
@@ -13,13 +14,10 @@
 #include "net/base/net_export.h"
 #include "net/http/http_auth.h"
 
-#include <gssapi.h>
-
 namespace net {
 
-NET_EXPORT_PRIVATE extern gss_OID CHROME_GSS_C_NT_HOSTBASED_SERVICE_X;
-NET_EXPORT_PRIVATE extern gss_OID CHROME_GSS_C_NT_HOSTBASED_SERVICE;
-NET_EXPORT_PRIVATE extern gss_OID CHROME_GSS_KRB5_MECH_OID_DESC;
+// Mechanism OID for GSSAPI. We always use SPNEGO.
+NET_EXPORT_PRIVATE extern gss_OID CHROME_GSS_SPNEGO_MECH_OID_DESC;
 
 // GSSAPILibrary is introduced so unit tests can mock the calls to the GSSAPI
 // library. The default implementation attempts to load one of the standard

@@ -1,10 +1,9 @@
-// Copyright (c) 2011 The Chromium Authors. All rights reserved.
+// Copyright (c) 2012 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
 #ifndef CHROME_BROWSER_WEBDATA_AUTOFILL_TABLE_H_
 #define CHROME_BROWSER_WEBDATA_AUTOFILL_TABLE_H_
-#pragma once
 
 #include "base/compiler_specific.h"
 #include "base/gtest_prod_util.h"
@@ -19,17 +18,13 @@ class AutofillProfile;
 class AutofillTableTest;
 class CreditCard;
 
+struct FormFieldData;
+
 namespace base {
 class Time;
 }
 
-namespace webkit {
-namespace forms {
-struct FormField;
-}
-}
-
-// This class manages the various autofill tables within the SQLite database
+// This class manages the various Autofill tables within the SQLite database
 // passed to the constructor. It expects the following schemas:
 //
 // Note: The database stores time in seconds, UTC.
@@ -127,13 +122,13 @@ class AutofillTable : public WebDatabaseTable {
   // Records the form elements in |elements| in the database in the
   // autofill table.  A list of all added and updated autofill entries
   // is returned in the changes out parameter.
-  bool AddFormFieldValues(const std::vector<webkit::forms::FormField>& elements,
+  bool AddFormFieldValues(const std::vector<FormFieldData>& elements,
                           std::vector<AutofillChange>* changes);
 
   // Records a single form element in the database in the autofill table. A list
   // of all added and updated autofill entries is returned in the changes out
   // parameter.
-  bool AddFormFieldValue(const webkit::forms::FormField& element,
+  bool AddFormFieldValue(const FormFieldData& element,
                          std::vector<AutofillChange>* changes);
 
   // Retrieves a vector of all values which have been recorded in the autofill
@@ -154,22 +149,31 @@ class AutofillTable : public WebDatabaseTable {
                                       const base::Time& delete_end,
                                       std::vector<AutofillChange>* changes);
 
+  // Removes rows from autofill_dates if they were accessed strictly before
+  // |AutofillEntry::ExpirationTime()|. Removes the corresponding row from the
+  // autofill table. Also culls timestamps to only two. TODO(georgey): remove
+  // culling in future versions.
+  bool RemoveExpiredFormElements(std::vector<AutofillChange>* changes);
+
   // Removes from autofill_dates rows with given pair_id where date_created lies
-  // between delte_begin and delte_end.
+  // between |delete_begin| and |delete_end|.
   bool RemoveFormElementForTimeRange(int64 pair_id,
                                      const base::Time& delete_begin,
                                      const base::Time& delete_end,
                                      int* how_many);
 
-  // Increments the count in the row corresponding to |pair_id| by
-  // |delta|.  Removes the row from the table and sets the
-  // |was_removed| out parameter to true if the count becomes 0.
-  bool AddToCountOfFormElement(int64 pair_id, int delta, bool* was_removed);
+  // Increments the count in the row corresponding to |pair_id| by |delta|.
+  bool AddToCountOfFormElement(int64 pair_id, int delta);
+
+  // Counts how many timestamp data rows are in the |autofill_dates| table for
+  // a given |pair_id|. GetCountOfFormElement() on the other hand gives the
+  // |count| property for a given id.
+  int CountTimestampsData(int64 pair_id);
 
   // Gets the pair_id and count entries from name and value specified in
   // |element|.  Sets *pair_id and *count to 0 if there is no such row in
   // the table.
-  bool GetIDAndCountOfFormElement(const webkit::forms::FormField& element,
+  bool GetIDAndCountOfFormElement(const FormFieldData& element,
                                   int64* pair_id,
                                   int* count);
 
@@ -181,11 +185,14 @@ class AutofillTable : public WebDatabaseTable {
 
   // Adds a new row to the autofill table with name and value given in
   // |element|.  Sets *pair_id to the pair_id of the new row.
-  bool InsertFormElement(const webkit::forms::FormField& element,
+  bool InsertFormElement(const FormFieldData& element,
                          int64* pair_id);
 
   // Adds a new row to the autofill_dates table.
   bool InsertPairIDAndDate(int64 pair_id, const base::Time& date_created);
+
+  // Deletes last access to the Autofill data from the autofill_dates table.
+  bool DeleteLastAccess(int64 pair_id);
 
   // Removes row from the autofill tables given |pair_id|.
   bool RemoveFormElementForID(int64 pair_id);
@@ -314,10 +321,10 @@ class AutofillTable : public WebDatabaseTable {
   // Methods for adding autofill entries at a specified time.  For
   // testing only.
   bool AddFormFieldValuesTime(
-      const std::vector<webkit::forms::FormField>& elements,
+      const std::vector<FormFieldData>& elements,
       std::vector<AutofillChange>* changes,
       base::Time time);
-  bool AddFormFieldValueTime(const webkit::forms::FormField& element,
+  bool AddFormFieldValueTime(const FormFieldData& element,
                              std::vector<AutofillChange>* changes,
                              base::Time time);
 

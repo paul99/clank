@@ -1,4 +1,4 @@
-// Copyright (c) 2011 The Chromium Authors. All rights reserved.
+// Copyright (c) 2012 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -12,7 +12,8 @@
 #include "ppapi/c/pp_graphics_3d.h"
 #include "ppapi/c/pp_instance.h"
 #include "ppapi/proxy/interface_proxy.h"
-#include "ppapi/proxy/proxy_non_thread_safe_ref_count.h"
+#include "ppapi/proxy/proxy_completion_callback_factory.h"
+#include "ppapi/proxy/serialized_structs.h"
 #include "ppapi/shared_impl/ppb_graphics_3d_shared.h"
 #include "ppapi/shared_impl/resource.h"
 #include "ppapi/utility/completion_callback_factory.h"
@@ -28,7 +29,7 @@ class Graphics3D : public PPB_Graphics3D_Shared {
   explicit Graphics3D(const HostResource& resource);
   virtual ~Graphics3D();
 
-  bool Init();
+  bool Init(gpu::gles2::GLES2Implementation* share_gles2);
 
   // Graphics3DTrusted API. These are not implemented in the proxy.
   virtual PP_Bool InitCommandBuffer() OVERRIDE;
@@ -45,13 +46,18 @@ class Graphics3D : public PPB_Graphics3D_Shared {
       int32_t put_offset,
       int32_t last_known_get) OVERRIDE;
 
- protected:
-  // Graphics3DImpl overrides.
+ private:
+  class LockingCommandBuffer;
+
+  // PPB_Graphics3D_Shared overrides.
   virtual gpu::CommandBuffer* GetCommandBuffer() OVERRIDE;
   virtual int32 DoSwapBuffers() OVERRIDE;
+  virtual void PushAlreadyLocked() OVERRIDE;
+  virtual void PopAlreadyLocked() OVERRIDE;
 
- private:
+  int num_already_locked_calls_;
   scoped_ptr<gpu::CommandBuffer> command_buffer_;
+  scoped_ptr<LockingCommandBuffer> locking_command_buffer_;
 
   DISALLOW_COPY_AND_ASSIGN(Graphics3D);
 };
@@ -61,9 +67,10 @@ class PPB_Graphics3D_Proxy : public InterfaceProxy {
   PPB_Graphics3D_Proxy(Dispatcher* dispatcher);
   virtual ~PPB_Graphics3D_Proxy();
 
-  static PP_Resource CreateProxyResource(PP_Instance instance,
-                                         PP_Resource share_context,
-                                         const int32_t* attrib_list);
+  static PP_Resource CreateProxyResource(
+      PP_Instance instance,
+      PP_Resource share_context,
+      const int32_t* attrib_list);
 
   // InterfaceProxy implementation.
   virtual bool OnMessageReceived(const IPC::Message& msg);
@@ -72,28 +79,30 @@ class PPB_Graphics3D_Proxy : public InterfaceProxy {
 
  private:
   void OnMsgCreate(PP_Instance instance,
+                   HostResource share_context,
                    const std::vector<int32_t>& attribs,
                    HostResource* result);
   void OnMsgInitCommandBuffer(const HostResource& context);
   void OnMsgSetGetBuffer(const HostResource& context,
                          int32 id);
   void OnMsgGetState(const HostResource& context,
-                     gpu::CommandBuffer::State* state);
+                     gpu::CommandBuffer::State* state,
+                     bool* success);
   void OnMsgFlush(const HostResource& context,
                   int32 put_offset,
                   int32 last_known_get,
-                  gpu::CommandBuffer::State* state);
+                  gpu::CommandBuffer::State* state,
+                  bool* success);
   void OnMsgAsyncFlush(const HostResource& context,
                        int32 put_offset);
   void OnMsgCreateTransferBuffer(const HostResource& context,
-                                 int32 size,
+                                 uint32 size,
                                  int32* id);
   void OnMsgDestroyTransferBuffer(const HostResource& context,
                                   int32 id);
   void OnMsgGetTransferBuffer(const HostResource& context,
                               int32 id,
-                              base::SharedMemoryHandle* transfer_buffer,
-                              uint32* size);
+                              ppapi::proxy::SerializedHandle* transfer_buffer);
   void OnMsgSwapBuffers(const HostResource& context);
   // Renderer->plugin message handlers.
   void OnMsgSwapBuffersACK(const HostResource& context,
@@ -102,8 +111,7 @@ class PPB_Graphics3D_Proxy : public InterfaceProxy {
   void SendSwapBuffersACKToPlugin(int32_t result,
                                   const HostResource& context);
 
-  pp::CompletionCallbackFactory<PPB_Graphics3D_Proxy,
-                                ProxyNonThreadSafeRefCount> callback_factory_;
+  ProxyCompletionCallbackFactory<PPB_Graphics3D_Proxy> callback_factory_;
 
   DISALLOW_COPY_AND_ASSIGN(PPB_Graphics3D_Proxy);
 };

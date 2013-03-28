@@ -1,14 +1,21 @@
-// Copyright (c) 2011 The Chromium Authors. All rights reserved.
+// Copyright (c) 2012 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
 #ifndef CONTENT_BROWSER_BROWSER_PROCESS_SUB_THREAD_H_
 #define CONTENT_BROWSER_BROWSER_PROCESS_SUB_THREAD_H_
-#pragma once
 
 #include "base/basictypes.h"
 #include "content/browser/browser_thread_impl.h"
 #include "content/common/content_export.h"
+
+#if defined(OS_WIN)
+namespace base {
+namespace win {
+class ScopedCOMInitializer;
+}
+}
+#endif
 
 namespace content {
 class NotificationService;
@@ -36,14 +43,15 @@ class CONTENT_EXPORT BrowserProcessSubThread : public BrowserThreadImpl {
 
  private:
   // These methods encapsulate cleanup that needs to happen on the IO thread
-  // before/after we call the embedder's CleanUp function.
+  // before we call the embedder's CleanUp function.
   void IOThreadPreCleanUp();
-  void IOThreadPostCleanUp();
+
+#if defined (OS_WIN)
+  scoped_ptr<base::win::ScopedCOMInitializer> com_initializer_;
+#endif
 
   // Each specialized thread has its own notification service.
-  // Note: We don't use scoped_ptr because the destructor runs on the wrong
-  // thread.
-  NotificationService* notification_service_;
+  scoped_ptr<NotificationService> notification_service_;
 
   DISALLOW_COPY_AND_ASSIGN(BrowserProcessSubThread);
 };

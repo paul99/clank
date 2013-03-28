@@ -4,10 +4,9 @@
 
 #ifndef CHROME_BROWSER_UI_GTK_INFOBARS_CONFIRM_INFOBAR_GTK_H_
 #define CHROME_BROWSER_UI_GTK_INFOBARS_CONFIRM_INFOBAR_GTK_H_
-#pragma once
 
 #include "base/basictypes.h"
-#include "chrome/browser/tab_contents/confirm_infobar_delegate.h"
+#include "chrome/browser/api/infobars/confirm_infobar_delegate.h"
 #include "chrome/browser/ui/gtk/infobars/infobar_gtk.h"
 #include "ui/base/gtk/gtk_signal.h"
 

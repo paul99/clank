@@ -1,4 +1,4 @@
-// Copyright (c) 2011 The Chromium Authors. All rights reserved.
+// Copyright (c) 2012 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -7,10 +7,10 @@
 #include "base/basictypes.h"
 #include "base/logging.h"
 #include "base/memory/scoped_nsobject.h"
+#include "chrome/common/chrome_notification_types.h"
 #include "content/public/browser/notification_observer.h"
 #include "content/public/browser/notification_registrar.h"
 #include "content/public/browser/notification_service.h"
-#include "content/public/browser/notification_types.h"
 #import "third_party/GTM/AppKit/GTMNSAnimation+Duration.h"
 
 namespace {
@@ -22,9 +22,9 @@ const NSTimeInterval kOrderOutAnimationDuration = 0.15;
 // animation as quickly as possible.
 const NSTimeInterval kMinimumTimeInterval =
     std::numeric_limits<NSTimeInterval>::min();
-}
+}  // namespace
 
-@interface InfoBubbleWindow(Private)
+@interface InfoBubbleWindow (Private)
 - (void)appIsTerminating;
 - (void)finishCloseAfterAnimation;
 @end
@@ -33,7 +33,7 @@ const NSTimeInterval kMinimumTimeInterval =
 class AppNotificationBridge : public content::NotificationObserver {
  public:
   explicit AppNotificationBridge(InfoBubbleWindow* owner) : owner_(owner) {
-    registrar_.Add(this, content::NOTIFICATION_APP_TERMINATING,
+    registrar_.Add(this, chrome::NOTIFICATION_APP_TERMINATING,
                    content::NotificationService::AllSources());
   }
 
@@ -42,7 +42,7 @@ class AppNotificationBridge : public content::NotificationObserver {
                const content::NotificationSource& source,
                const content::NotificationDetails& details) {
     switch (type) {
-      case content::NOTIFICATION_APP_TERMINATING:
+      case chrome::NOTIFICATION_APP_TERMINATING:
         [owner_ appIsTerminating];
         break;
       default:

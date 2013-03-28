@@ -1,4 +1,4 @@
-// Copyright (c) 2011 The Chromium Authors. All rights reserved.
+// Copyright (c) 2012 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -13,7 +13,16 @@ var fileManager;
  * Called by main.html after the dom has been parsed.
  */
 function init() {
-  FileManager.initStrings(function () {
+  // Load test harness when running outside Chrome OS and not in an iframe.
+  if (chrome.fileBrowserPrivate.mocked &&
+      window == window.top && !window.harness) {
+    util.loadScripts(['js/harness.js'], function() {
+      harness.initEmbedded(init);
+    });
+    return;
+  }
+
+  FileManager.initStrings(function() {
     metrics.startInterval('Load.Construct');
     fileManager = new FileManager(document.body);
     metrics.recordInterval('Load.Construct');
@@ -23,3 +32,7 @@ function init() {
     chrome.test.sendMessage('ready');
   });
 }
+
+util.addPageLoadHandler(init);
+
+metrics.recordInterval('Load.Script');  // Must be the last line.

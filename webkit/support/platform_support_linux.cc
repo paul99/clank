@@ -23,13 +23,10 @@ void BeforeInitialize(bool unit_test_mode) {
 }
 
 void AfterInitialize(bool unit_test_mode) {
-  if (unit_test_mode)
-    return;  // We don't have a resource pack when running the unit-tests.
-
   FilePath data_path;
   PathService::Get(base::DIR_EXE, &data_path);
   data_path = data_path.Append("DumpRenderTree.pak");
-  ResourceBundle::InitSharedInstanceWithPakFile(data_path);
+  ResourceBundle::InitSharedInstanceWithPakPath(data_path);
 }
 
 void BeforeShutdown() {
@@ -45,7 +42,9 @@ string16 TestWebKitPlatformSupport::GetLocalizedString(int message_id) {
   return ResourceBundle::GetSharedInstance().GetLocalizedString(message_id);
 }
 
-base::StringPiece TestWebKitPlatformSupport::GetDataResource(int resource_id) {
+base::StringPiece TestWebKitPlatformSupport::GetDataResource(
+    int resource_id,
+    ui::ScaleFactor scale_factor) {
   FilePath resources_path;
   PathService::Get(base::DIR_EXE, &resources_path);
   resources_path = resources_path.Append("DumpRenderTree_resources");
@@ -72,5 +71,6 @@ base::StringPiece TestWebKitPlatformSupport::GetDataResource(int resource_id) {
     }
   }
 
-  return ResourceBundle::GetSharedInstance().GetRawDataResource(resource_id);
+  return ResourceBundle::GetSharedInstance().GetRawDataResourceForScale(
+      resource_id, scale_factor);
 }

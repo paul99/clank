@@ -1,4 +1,4 @@
-// Copyright (c) 2011 The Chromium Authors. All rights reserved.
+// Copyright (c) 2012 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 //
@@ -25,15 +25,14 @@
 #endif
 #include "base/file_path.h"
 #include "base/memory/ref_counted.h"
-#include "base/memory/scoped_ptr.h"
 #include "base/platform_file.h"
 #include "base/time.h"
 #include "base/values.h"
 #include "googleurl/src/gurl.h"
 #include "net/base/host_port_pair.h"
 #include "net/url_request/url_request_status.h"
+#include "third_party/WebKit/Source/Platform/chromium/public/WebReferrerPolicy.h"
 #include "third_party/WebKit/Source/WebKit/chromium/public/platform/WebURLRequest.h"
-#include "third_party/WebKit/Source/WebKit/chromium/public/WebReferrerPolicy.h"
 #include "webkit/glue/resource_type.h"
 #include "webkit/glue/webkit_glue_export.h"
 
@@ -42,6 +41,7 @@ class HttpResponseHeaders;
 }
 
 namespace webkit_glue {
+class ResourceRequestBody;
 
 // Structure containing timing information for the request. It addresses
 // http://groups.google.com/group/http-archive-specification/web/har-1-1-spec
@@ -109,7 +109,6 @@ struct ResourceDevToolsInfo : base::RefCounted<ResourceDevToolsInfo> {
       HeadersVector;
 
   WEBKIT_GLUE_EXPORT ResourceDevToolsInfo();
-  WEBKIT_GLUE_EXPORT ~ResourceDevToolsInfo();
 
   int32 http_status_code;
   std::string http_status_text;
@@ -117,6 +116,10 @@ struct ResourceDevToolsInfo : base::RefCounted<ResourceDevToolsInfo> {
   HeadersVector response_headers;
   std::string request_headers_text;
   std::string response_headers_text;
+
+ private:
+  friend class base::RefCounted<ResourceDevToolsInfo>;
+  WEBKIT_GLUE_EXPORT ~ResourceDevToolsInfo();
 };
 
 struct ResourceResponseInfo {
@@ -195,6 +198,9 @@ struct ResourceResponseInfo {
   // Note: we cannot tell if a transparent proxy may have been involved.
   bool was_fetched_via_proxy;
 
+  // NPN protocol negotiated with the server.
+  std::string npn_negotiated_protocol;
+
   // Remote address of the socket which fetched this resource.
   net::HostPortPair socket_address;
 };
@@ -269,8 +275,8 @@ class ResourceLoaderBridge {
     SyncLoadResponse();
     ~SyncLoadResponse();
 
-    // The response status.
-    net::URLRequestStatus status;
+    // The response error code.
+    int error_code;
 
     // The final URL of the response.  This may differ from the request URL in
     // the case of a server redirect.
@@ -289,8 +295,6 @@ class ResourceLoaderBridge {
   // for more information.
   class Peer {
    public:
-    virtual ~Peer() {}
-
     // Called as upload progress is made.
     // note: only for requests with LOAD_ENABLE_UPLOAD_PROGRESS set
     virtual void OnUploadProgress(uint64 position, uint64 size) = 0;
@@ -331,43 +335,24 @@ class ResourceLoaderBridge {
     virtual void OnReceivedCachedMetadata(const char* data, int len) { }
 
     // Called when the response is complete.  This method signals completion of
-    // the resource load.ff
+    // the resource load.
     virtual void OnCompletedRequest(
-        const net::URLRequestStatus& status,
+        int error_code,
+        bool was_ignored_by_handler,
         const std::string& security_info,
         const base::TimeTicks& completion_time) = 0;
+
+   protected:
+    virtual ~Peer() {}
   };
 
   // use WebKitPlatformSupportImpl::CreateResourceLoader() for construction, but
   // anybody can delete at any time, INCLUDING during processing of callbacks.
   WEBKIT_GLUE_EXPORT virtual ~ResourceLoaderBridge();
 
-  // Call this method before calling Start() to append a chunk of binary data
-  // to the request body.  May only be used with HTTP(S) POST requests.
-  virtual void AppendDataToUpload(const char* data, int data_len) = 0;
-
-  // Call this method before calling Start() to append the contents of a file
-  // to the request body.  May only be used with HTTP(S) POST requests.
-  void AppendFileToUpload(const FilePath& file_path) {
-    AppendFileRangeToUpload(file_path, 0, kuint64max, base::Time());
-  }
-
-  // Call this method before calling Start() to append the contents of a file
-  // to the request body.  May only be used with HTTP(S) POST requests.
-  virtual void AppendFileRangeToUpload(
-      const FilePath& file_path,
-      uint64 offset,
-      uint64 length,
-      const base::Time& expected_modification_time) = 0;
-
-  // Call this method before calling Start() to append the contents of a blob
-  // to the request body.  May only be used with HTTP(S) POST requests.
-  virtual void AppendBlobToUpload(const GURL& blob_url) = 0;
-
-  // Call this method before calling Start() to assign an upload identifier to
-  // this request.  This is used to enable caching of POST responses.  A value
-  // of 0 implies the unspecified identifier.
-  virtual void SetUploadIdentifier(int64 identifier) = 0;
+  // Call this method before calling Start() to set the request body.
+  // May only be used with HTTP(S) POST requests.
+  virtual void SetRequestBody(ResourceRequestBody* request_body) = 0;
 
   // Call this method to initiate the request.  If this method succeeds, then
   // the peer's methods will be called asynchronously to report various events.
@@ -391,10 +376,6 @@ class ResourceLoaderBridge {
   // interrupt this method.  Errors are reported via the status field of the
   // response parameter.
   virtual void SyncLoad(SyncLoadResponse* response) = 0;
-
-  // When loader is transferred from one page to another, the IPC routing id
-  // can change (they are associated with pages).
-  virtual void UpdateRoutingId(int new_routing_id) = 0;
 
  protected:
   // Construction must go through

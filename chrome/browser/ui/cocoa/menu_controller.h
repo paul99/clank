@@ -1,15 +1,14 @@
-// Copyright (c) 2011 The Chromium Authors. All rights reserved.
+// Copyright (c) 2012 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
 #ifndef CHROME_BROWSER_UI_COCOA_MENU_CONTROLLER_H_
 #define CHROME_BROWSER_UI_COCOA_MENU_CONTROLLER_H_
-#pragma once
 
 #import <Cocoa/Cocoa.h>
 
-#import "base/mac/cocoa_protocols.h"
 #include "base/memory/scoped_nsobject.h"
+#include "base/string16.h"
 
 namespace ui {
 class MenuModel;
@@ -34,6 +33,9 @@ class MenuModel;
 // |-initWithModel:useWithPopUpButtonCell:| or after the first call to |-menu|.
 @property(nonatomic) BOOL useWithPopUpButtonCell;
 
++ (string16)elideMenuTitle:(const string16&)title
+                   toWidth:(int)width;
+
 // NIB-based initializer. This does not create a menu. Clients can set the
 // properties of the object and the menu will be created upon the first call to
 // |-menu|. Note that the menu will be immutable after creation.
@@ -46,6 +48,9 @@ class MenuModel;
 // cannot be changed after it has been created.
 - (id)initWithModel:(ui::MenuModel*)model
     useWithPopUpButtonCell:(BOOL)useWithCell;
+
+// Programmatically close the constructed menu.
+- (void)cancel;
 
 // Access to the constructed menu if the complex initializer was used. If the
 // default initializer was used, then this will create the menu on first call.
@@ -70,6 +75,10 @@ class MenuModel;
             fromModel:(ui::MenuModel*)model
            modelIndex:(int)modelIndex;
 - (NSMenu*)menuFromModel:(ui::MenuModel*)model;
+// Returns the maximum width for the menu item. Returns -1 to indicate
+// that there's no maximum width.
+- (int)maxWidthForMenuModel:(ui::MenuModel*)model
+                 modelIndex:(int)modelIndex;
 @end
 
 #endif  // CHROME_BROWSER_UI_COCOA_MENU_CONTROLLER_H_

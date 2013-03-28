@@ -1,4 +1,4 @@
-// Copyright (c) 2011 The Chromium Authors. All rights reserved.
+// Copyright (c) 2012 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -19,8 +19,6 @@ namespace ppapi {
 // plugins, that only handles painting.
 class FullscreenContainer {
  public:
-  virtual ~FullscreenContainer() {}
-
   // Invalidates the full plugin region.
   virtual void Invalidate() = 0;
 
@@ -38,6 +36,11 @@ class FullscreenContainer {
   virtual void DidChangeCursor(const WebKit::WebCursorInfo& cursor) = 0;
 
   virtual PluginDelegate::PlatformContext3D* CreateContext3D() = 0;
+
+  virtual void ReparentContext(PluginDelegate::PlatformContext3D*) = 0;
+
+ protected:
+  virtual ~FullscreenContainer() {}
 };
 
 }  // namespace ppapi

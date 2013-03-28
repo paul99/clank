@@ -5,23 +5,35 @@
 #include "gpu/command_buffer/service/renderbuffer_manager.h"
 #include "base/logging.h"
 #include "base/debug/trace_event.h"
+#include "base/stringprintf.h"
 #include "gpu/command_buffer/common/gles2_cmd_utils.h"
 #include "gpu/command_buffer/service/gles2_cmd_decoder.h"
+#include "gpu/command_buffer/service/memory_tracking.h"
 
 namespace gpu {
 namespace gles2 {
 
 RenderbufferManager::RenderbufferManager(
-    GLint max_renderbuffer_size, GLint max_samples)
-    : max_renderbuffer_size_(max_renderbuffer_size),
+    MemoryTracker* memory_tracker,
+    GLint max_renderbuffer_size,
+    GLint max_samples)
+    : memory_tracker_(
+          new MemoryTypeTracker(memory_tracker, MemoryTracker::kUnmanaged)),
+      max_renderbuffer_size_(max_renderbuffer_size),
       max_samples_(max_samples),
       num_uncleared_renderbuffers_(0),
-      mem_represented_(0) {
-  UpdateMemRepresented();
+      renderbuffer_info_count_(0),
+      have_context_(true) {
+  memory_tracker_->UpdateMemRepresented();
 }
 
 RenderbufferManager::~RenderbufferManager() {
   DCHECK(renderbuffer_infos_.empty());
+  // If this triggers, that means something is keeping a reference to
+  // a RenderbufferInfo belonging to this.
+  CHECK_EQ(renderbuffer_info_count_, 0u);
+
+  DCHECK_EQ(0, num_uncleared_renderbuffers_);
 }
 
 size_t RenderbufferManager::RenderbufferInfo::EstimatedSize() {
@@ -29,39 +41,43 @@ size_t RenderbufferManager::RenderbufferInfo::EstimatedSize() {
          GLES2Util::RenderbufferBytesPerPixel(internal_format_);
 }
 
+void RenderbufferManager::RenderbufferInfo::AddToSignature(
+    std::string* signature) const {
+  DCHECK(signature);
+  *signature += base::StringPrintf(
+      "|Renderbuffer|internal_format=%04x|samples=%d|width=%d|height=%d",
+      internal_format_, samples_, width_, height_);
+}
+
 RenderbufferManager::RenderbufferInfo::~RenderbufferInfo() {
   if (manager_) {
+    if (manager_->have_context_) {
+      GLuint id = service_id();
+      glDeleteRenderbuffersEXT(1, &id);
+    }
     manager_->StopTracking(this);
     manager_ = NULL;
   }
 }
 
-void RenderbufferManager::UpdateMemRepresented() {
-  TRACE_COUNTER_ID1(
-      "RenderbufferManager", "RenderbufferMemory", this, mem_represented_);
+void RenderbufferManager::Destroy(bool have_context) {
+  have_context_ = have_context;
+  renderbuffer_infos_.clear();
+  DCHECK_EQ(0u, memory_tracker_->GetMemRepresented());
+  memory_tracker_->UpdateMemRepresented();
 }
 
-void RenderbufferManager::Destroy(bool have_context) {
-  while (!renderbuffer_infos_.empty()) {
-    RenderbufferInfo* info = renderbuffer_infos_.begin()->second;
-    if (have_context) {
-      if (!info->IsDeleted()) {
-        GLuint service_id = info->service_id();
-        glDeleteRenderbuffersEXT(1, &service_id);
-        info->MarkAsDeleted();
-      }
-    }
-    renderbuffer_infos_.erase(renderbuffer_infos_.begin());
-  }
-  DCHECK_EQ(0u, mem_represented_);
-  UpdateMemRepresented();
+void RenderbufferManager::StartTracking(RenderbufferInfo* /* renderbuffer */) {
+  ++renderbuffer_info_count_;
 }
 
 void RenderbufferManager::StopTracking(RenderbufferInfo* renderbuffer) {
+  --renderbuffer_info_count_;
   if (!renderbuffer->cleared()) {
     --num_uncleared_renderbuffers_;
   }
-  mem_represented_ -= renderbuffer->EstimatedSize();
+  memory_tracker_->TrackMemFree(renderbuffer->EstimatedSize());
+  memory_tracker_->UpdateMemRepresented();
 }
 
 void RenderbufferManager::SetInfo(
@@ -71,21 +87,22 @@ void RenderbufferManager::SetInfo(
   if (!renderbuffer->cleared()) {
     --num_uncleared_renderbuffers_;
   }
-  mem_represented_ -= renderbuffer->EstimatedSize();
+  memory_tracker_->TrackMemFree(renderbuffer->EstimatedSize());
   renderbuffer->SetInfo(samples, internalformat, width, height);
-  mem_represented_ += renderbuffer->EstimatedSize();
-  UpdateMemRepresented();
+  memory_tracker_->TrackMemAlloc(renderbuffer->EstimatedSize());
+  memory_tracker_->UpdateMemRepresented();
   if (!renderbuffer->cleared()) {
     ++num_uncleared_renderbuffers_;
   }
 }
 
-void RenderbufferManager::SetCleared(RenderbufferInfo* renderbuffer) {
+void RenderbufferManager::SetCleared(RenderbufferInfo* renderbuffer,
+                                     bool cleared) {
   DCHECK(renderbuffer);
   if (!renderbuffer->cleared()) {
     --num_uncleared_renderbuffers_;
   }
-  renderbuffer->set_cleared();
+  renderbuffer->set_cleared(cleared);
   if (!renderbuffer->cleared()) {
     ++num_uncleared_renderbuffers_;
   }
@@ -132,3 +149,5 @@ bool RenderbufferManager::GetClientId(
 
 }  // namespace gles2
 }  // namespace gpu
+
+

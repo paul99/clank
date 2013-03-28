@@ -1,13 +1,11 @@
-// Copyright (c) 2011 The Chromium Authors. All rights reserved.
+// Copyright (c) 2012 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
 #ifndef CHROME_BROWSER_TASK_MANAGER_TASK_MANAGER_H_
 #define CHROME_BROWSER_TASK_MANAGER_TASK_MANAGER_H_
-#pragma once
 
 #include <map>
-#include <string>
 #include <utility>
 #include <vector>
 
@@ -20,25 +18,38 @@
 #include "base/string16.h"
 #include "base/timer.h"
 #include "chrome/browser/renderer_host/web_cache_manager.h"
+#include "content/public/common/gpu_memory_stats.h"
 #include "third_party/WebKit/Source/WebKit/chromium/public/WebCache.h"
 
-class Extension;
-class SkBitmap;
-class TabContentsWrapper;
 class TaskManagerModel;
+class TaskManagerModelGpuDataManagerObserver;
 
 namespace base {
 class ProcessMetrics;
 }
+
+namespace content {
+class WebContents;
+}
+
+namespace extensions {
+class Extension;
+}
+
+namespace gfx {
+class ImageSkia;
+}
+
 namespace net {
 class URLRequest;
 }
 
 #define TASKMANAGER_RESOURCE_TYPE_LIST(def) \
     def(BROWSER)         /* The main browser process. */ \
-    def(RENDERER)        /* A normal TabContents renderer process. */ \
+    def(RENDERER)        /* A normal WebContents renderer process. */ \
     def(EXTENSION)       /* An extension or app process. */ \
     def(NOTIFICATION)    /* A notification process. */ \
+    def(GUEST)           /* A browser plugin guest process. */ \
     def(PLUGIN)          /* A plugin process. */ \
     def(WORKER)          /* A web worker process. */ \
     def(NACL)            /* A NativeClient loader or broker process. */ \
@@ -67,39 +78,39 @@ class TaskManager {
 
     virtual string16 GetTitle() const = 0;
     virtual string16 GetProfileName() const = 0;
-    virtual SkBitmap GetIcon() const = 0;
+    virtual gfx::ImageSkia GetIcon() const = 0;
     virtual base::ProcessHandle GetProcess() const = 0;
+    virtual int GetUniqueChildProcessId() const = 0;
     virtual Type GetType() const = 0;
-    virtual int GetRoutingId() const { return 0; }
+    virtual int GetRoutingID() const;
 
-    virtual bool ReportsCacheStats() const { return false; }
-    virtual WebKit::WebCache::ResourceTypeStats GetWebCoreCacheStats() const {
-      return WebKit::WebCache::ResourceTypeStats();
-    }
+    virtual bool ReportsCacheStats() const;
+    virtual WebKit::WebCache::ResourceTypeStats GetWebCoreCacheStats() const;
 
-    virtual bool ReportsFPS() const { return false; }
-    virtual float GetFPS() const { return 0.0f; }
+    virtual bool ReportsFPS() const;
+    virtual float GetFPS() const;
 
-    virtual bool ReportsSqliteMemoryUsed() const { return false; }
-    virtual size_t SqliteMemoryUsedBytes() const { return 0; }
+    virtual bool ReportsSqliteMemoryUsed() const;
+    virtual size_t SqliteMemoryUsedBytes() const;
 
     // Return extension associated with the resource, or NULL
     // if not applicable.
-    virtual const Extension* GetExtension() const { return NULL; }
+    virtual const extensions::Extension* GetExtension() const;
 
-    virtual bool ReportsV8MemoryStats() const { return false; }
-    virtual size_t GetV8MemoryAllocated() const { return 0; }
-    virtual size_t GetV8MemoryUsed() const { return 0; }
+    virtual bool ReportsV8MemoryStats() const;
+    virtual size_t GetV8MemoryAllocated() const;
+    virtual size_t GetV8MemoryUsed() const;
 
     // Returns true if this resource can be inspected using developer tools.
-    virtual bool CanInspect() const { return false; }
+    virtual bool CanInspect() const;
 
     // Invokes or reveals developer tools window for this resource.
     virtual void Inspect() const {}
 
-    // A helper function for ActivateFocusedTab.  Returns NULL by default
-    // because not all resources have an associated tab.
-    virtual TabContentsWrapper* GetTabContents() const { return NULL; }
+    // A helper function for ActivateProcess when selected resource refers
+    // to a Tab or other window containing web contents.  Returns NULL by
+    // default because not all resources have an associated web contents.
+    virtual content::WebContents* GetWebContents() const;
 
     // Whether this resource does report the network usage accurately.
     // This controls whether 0 or N/A is displayed when no bytes have been
@@ -124,7 +135,7 @@ class TaskManager {
 
     // Returns true if this resource is not visible to the user because it lives
     // in the background (e.g. extension background page, background contents).
-    virtual bool IsBackground() const { return false; }
+    virtual bool IsBackground() const;
 
     static const char* GetResourceTypeAsString(const Type type) {
       switch (type) {
@@ -136,6 +147,7 @@ class TaskManager {
     // Returns resource identifier that is unique within single task manager
     // session (between StartUpdating and StopUpdating).
     int get_unique_id() { return unique_id_; }
+
    protected:
     Resource() : unique_id_(0) {}
 
@@ -253,11 +265,24 @@ class TaskManagerModelObserver {
 
   // Invoked when a range of items has been removed.
   virtual void OnItemsRemoved(int start, int length) = 0;
+
+  // Invoked when a range of items is to be immediately removed. It differs
+  // from OnItemsRemoved by the fact that the item is still in the task manager,
+  // so it can be queried for and found.
+  virtual void OnItemsToBeRemoved(int start, int length) {}
+
+  // Invoked when the initialization of the model has been finished and
+  // periodical updates is started. The first periodical update will be done
+  // in a few seconds. (depending on platform)
+  virtual void OnReadyPeriodicalUpdate() {}
 };
 
 // The model that the TaskManager is using.
 class TaskManagerModel : public base::RefCountedThreadSafe<TaskManagerModel> {
  public:
+  // (start, length)
+  typedef std::pair<int, int> GroupRange;
+
   explicit TaskManagerModel(TaskManager* task_manager);
 
   void AddObserver(TaskManagerModelObserver* observer);
@@ -272,6 +297,7 @@ class TaskManagerModel : public base::RefCountedThreadSafe<TaskManagerModel> {
   int64 GetNetworkUsage(int index) const;
   double GetCPUUsage(int index) const;
   int GetProcessId(int index) const;
+  base::ProcessHandle GetProcess(int index) const;
   int GetResourceUniqueId(int index) const;
   // Returns the index of resource that has the given |unique_id|. Returns -1 if
   // no resouce has the |unique_id|.
@@ -289,6 +315,7 @@ class TaskManagerModel : public base::RefCountedThreadSafe<TaskManagerModel> {
   string16 GetResourceWebCoreImageCacheSize(int index) const;
   string16 GetResourceWebCoreScriptsCacheSize(int index) const;
   string16 GetResourceWebCoreCSSCacheSize(int index) const;
+  string16 GetResourceVideoMemory(int index) const;
   string16 GetResourceFPS(int index) const;
   string16 GetResourceSqliteMemoryUsed(int index) const;
   string16 GetResourceGoatsTeleported(int index) const;
@@ -313,6 +340,11 @@ class TaskManagerModel : public base::RefCountedThreadSafe<TaskManagerModel> {
   bool GetWebCoreCacheStats(int index,
                             WebKit::WebCache::ResourceTypeStats* result) const;
 
+  // Gets the GPU memory allocated of the given page.
+  bool GetVideoMemory(int index,
+                      size_t* video_memory,
+                      bool* has_duplicates) const;
+
   // Gets the fps of the given page. Return false if the resource for the given
   // row isn't a renderer.
   bool GetFPS(int index, float* result) const;
@@ -324,6 +356,10 @@ class TaskManagerModel : public base::RefCountedThreadSafe<TaskManagerModel> {
   // Gets the amount of memory allocated for javascript. Returns false if the
   // resource for the given row isn't a renderer.
   bool GetV8Memory(int index, size_t* result) const;
+
+  // Gets the amount of memory used for javascript. Returns false if the
+  // resource for the given row isn't a renderer.
+  bool GetV8MemoryUsed(int index, size_t* result) const;
 
   // Returns true if resource for the given row can be activated.
   bool CanActivate(int index) const;
@@ -348,10 +384,10 @@ class TaskManagerModel : public base::RefCountedThreadSafe<TaskManagerModel> {
   bool IsBackgroundResource(int index) const;
 
   // Returns icon to be used for resource (for example a favicon).
-  SkBitmap GetResourceIcon(int index) const;
+  gfx::ImageSkia GetResourceIcon(int index) const;
 
-  // Returns a pair (start, length) of the group range of resource.
-  std::pair<int, int> GetGroupRangeForResource(int index) const;
+  // Returns the group range of resource.
+  GroupRange GetGroupRangeForResource(int index) const;
 
   // Returns an index of groups to which the resource belongs.
   int GetGroupIndexForResource(int index) const;
@@ -368,20 +404,33 @@ class TaskManagerModel : public base::RefCountedThreadSafe<TaskManagerModel> {
   // Returns process handle for given resource.
   base::ProcessHandle GetResourceProcessHandle(int index) const;
 
+  // Returns the unique child process ID generated by Chromium, not the OS
+  // process id. This is used to identify processes internally and for
+  // extensions. It is not meant to be displayed to the user.
+  int GetUniqueChildProcessId(int index) const;
+
   // Returns the type of the given resource.
   TaskManager::Resource::Type GetResourceType(int index) const;
 
-  // Returns TabContents of given resource or NULL if not applicable.
-  TabContentsWrapper* GetResourceTabContents(int index) const;
+  // Returns WebContents of given resource or NULL if not applicable.
+  content::WebContents* GetResourceWebContents(int index) const;
 
   // Returns Extension of given resource or NULL if not applicable.
-  const Extension* GetResourceExtension(int index) const;
+  const extensions::Extension* GetResourceExtension(int index) const;
 
   void AddResource(TaskManager::Resource* resource);
   void RemoveResource(TaskManager::Resource* resource);
 
   void StartUpdating();
   void StopUpdating();
+
+  // Listening involves calling StartUpdating on all resource providers. This
+  // causes all of them to subscribe to notifications and enumerate current
+  // resources. It differs from StartUpdating that it doesn't start the
+  // Refresh timer. The end result is that we have a full view of resources, but
+  // don't spend unneeded time updating, unless we have a real need to.
+  void StartListening();
+  void StopListening();
 
   void Clear();  // Removes all items.
 
@@ -396,6 +445,9 @@ class TaskManagerModel : public base::RefCountedThreadSafe<TaskManagerModel> {
   void NotifyFPS(base::ProcessId renderer_id,
                  int routing_id,
                  float fps);
+
+  void NotifyVideoMemoryUsageStats(
+      const content::GPUVideoMemoryUsageStats& video_memory_usage_stats);
 
   void NotifyV8HeapStats(base::ProcessId renderer_id,
                          size_t v8_memory_allocated,
@@ -445,11 +497,14 @@ class TaskManagerModel : public base::RefCountedThreadSafe<TaskManagerModel> {
   typedef std::map<base::ProcessHandle, base::ProcessMetrics*> MetricsMap;
   typedef std::map<base::ProcessHandle, double> CPUUsageMap;
   typedef std::map<TaskManager::Resource*, int64> ResourceValueMap;
-  typedef std::map<base::ProcessHandle,
-                   std::pair<size_t, size_t> > MemoryUsageMap;
+  // Private memory in bytes, shared memory in bytes.
+  typedef std::pair<size_t, size_t> MemoryUsageEntry;
+  typedef std::map<base::ProcessHandle, MemoryUsageEntry> MemoryUsageMap;
 
   // Updates the values for all rows.
   void Refresh();
+
+  void RefreshVideoMemoryUsageStats();
 
   void AddItem(TaskManager::Resource* resource, bool notify_table);
   void RemoveItem(TaskManager::Resource* resource);
@@ -460,6 +515,14 @@ class TaskManagerModel : public base::RefCountedThreadSafe<TaskManagerModel> {
 
   // Called on the UI thread when some bytes are read.
   void BytesRead(BytesReadParam param);
+
+  void MultipleBytesRead(const std::vector<BytesReadParam>* params);
+
+  // Notifies the UI thread about all the bytes read. Allows for coalescing
+  // multiple bytes read into a single task for the UI thread. This is important
+  // for when downloading a lot of data on the IO thread, since posting a Task
+  // for each one is expensive.
+  void NotifyMultipleBytesRead();
 
   // Returns the network usage (in byte per second) that should be displayed for
   // the passed |resource|.  -1 means the information is not available for that
@@ -482,7 +545,7 @@ class TaskManagerModel : public base::RefCountedThreadSafe<TaskManagerModel> {
   // Looks up the data for |handle| and puts it in the mutable cache
   // |memory_usage_map_|.
   bool GetAndCacheMemoryMetrics(base::ProcessHandle handle,
-                                std::pair<size_t, size_t>* usage) const;
+                                MemoryUsageEntry* usage) const;
 
   // Adds a resource provider to be managed.
   void AddResourceProvider(TaskManager::ResourceProvider* provider);
@@ -515,6 +578,15 @@ class TaskManagerModel : public base::RefCountedThreadSafe<TaskManagerModel> {
   // A map that contains the CPU usage (in %) for a process since last refresh.
   CPUUsageMap cpu_usage_map_;
 
+  // A map that contains the video memory usage for a process
+  content::GPUVideoMemoryUsageStats video_memory_usage_stats_;
+  bool pending_video_memory_usage_stats_update_;
+
+  // An observer waiting for video memory usage stats updates from the GPU
+  // process
+  scoped_ptr<TaskManagerModelGpuDataManagerObserver>
+      video_memory_usage_stats_observer_;
+
   // A map that contains the private/shared memory usage of the process. We
   // cache this because the same APIs are called on linux and windows, and
   // because the linux call takes >10ms to complete. This cache is cleared on
@@ -527,14 +599,22 @@ class TaskManagerModel : public base::RefCountedThreadSafe<TaskManagerModel> {
   // StopUpdating.
   int update_requests_;
 
+  // How many calls to StartListening have been made without matching calls to
+  // StopListening.
+  int listen_requests_;
+
   // Whether we are currently in the process of updating.
   UpdateState update_state_;
 
   // A salt lick for the goats.
-  int goat_salt_;
+  uint64 goat_salt_;
 
   // Resource identifier that is unique within single session.
   int last_unique_id_;
+
+  // Buffer for coalescing BytesReadParam so we don't have to post a task on
+  // each NotifyBytesRead() call.
+  std::vector<BytesReadParam> bytes_read_buffer_;
 
   DISALLOW_COPY_AND_ASSIGN(TaskManagerModel);
 };

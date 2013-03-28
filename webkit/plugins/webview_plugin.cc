@@ -6,27 +6,19 @@
 
 #include "base/message_loop.h"
 #include "base/metrics/histogram.h"
+#include "skia/ext/platform_canvas.h"
 #include "third_party/WebKit/Source/WebKit/chromium/public/WebCursorInfo.h"
+#include "third_party/WebKit/Source/WebKit/chromium/public/WebDocument.h"
 #include "third_party/WebKit/Source/WebKit/chromium/public/WebElement.h"
 #include "third_party/WebKit/Source/WebKit/chromium/public/WebFrame.h"
 #include "third_party/WebKit/Source/WebKit/chromium/public/WebInputEvent.h"
 #include "third_party/WebKit/Source/WebKit/chromium/public/WebPluginContainer.h"
+#include "third_party/WebKit/Source/WebKit/chromium/public/WebView.h"
 #include "third_party/WebKit/Source/WebKit/chromium/public/platform/WebSize.h"
 #include "third_party/WebKit/Source/WebKit/chromium/public/platform/WebURL.h"
 #include "third_party/WebKit/Source/WebKit/chromium/public/platform/WebURLRequest.h"
 #include "third_party/WebKit/Source/WebKit/chromium/public/platform/WebURLResponse.h"
-#include "third_party/WebKit/Source/WebKit/chromium/public/WebView.h"
 #include "webkit/glue/webpreferences.h"
-
-#if defined(OS_ANDROID)
-#include "third_party/WebKit/Source/WebKit/chromium/public/WebDocument.h"
-#endif
-
-#if WEBKIT_USING_CG
-#include <CoreGraphics/CGContext.h>
-#elif WEBKIT_USING_SKIA
-#include "skia/ext/platform_canvas.h"
-#endif
 
 using WebKit::WebCanvas;
 using WebKit::WebCursorInfo;
@@ -48,10 +40,6 @@ using WebKit::WebURLResponse;
 using WebKit::WebVector;
 using WebKit::WebView;
 
-#if defined(OS_ANDROID)
-using WebKit::WebDocument;
-#endif
-
 namespace webkit {
 
 WebViewPlugin::WebViewPlugin(WebViewPlugin::Delegate* delegate)
@@ -63,10 +51,11 @@ WebViewPlugin::WebViewPlugin(WebViewPlugin::Delegate* delegate)
 }
 
 // static
-WebViewPlugin* WebViewPlugin::Create(WebViewPlugin::Delegate* delegate,
-                                     const WebPreferences& preferences,
-                                     const std::string& html_data,
-                                     const GURL& url) {
+WebViewPlugin* WebViewPlugin::Create(
+    WebViewPlugin::Delegate* delegate,
+    const webkit_glue::WebPreferences& preferences,
+    const std::string& html_data,
+    const GURL& url) {
   WebViewPlugin* plugin = new WebViewPlugin(delegate);
   WebView* web_view = plugin->web_view();
   preferences.Apply(web_view);
@@ -103,6 +92,9 @@ void WebViewPlugin::RestoreTitleText() {
     container_->element().setAttribute("title", old_title_);
 }
 
+WebKit::WebPluginContainer* WebViewPlugin::container() const {
+  return container_;
+}
 
 bool WebViewPlugin::initialize(WebPluginContainer* container) {
   container_ = container;
@@ -129,67 +121,38 @@ bool WebViewPlugin::getFormValue(WebString& value) {
 }
 
 void WebViewPlugin::paint(WebCanvas* canvas, const WebRect& rect) {
-  gfx::Rect paintRect(rect_.Intersect(rect));
-
-  if (paintRect.IsEmpty())
+  gfx::Rect paint_rect = gfx::IntersectRects(rect_, rect);
+  if (paint_rect.IsEmpty())
     return;
 
-  paintRect.Offset(-rect_.x(), -rect_.y());
+  paint_rect.Offset(-rect_.x(), -rect_.y());
 
-#if defined(OS_ANDROID)
-  float scaleFactor = 1.0f;
-  if (container_) {
-    scaleFactor = container_->element().document().frame()->top()->view()
-        ->pageScaleFactor();
-  }
+  float content_scale = 1.0f / GetPageScaleFactor();
+  paint_rect.SetRect(
+      ceil(content_scale * paint_rect.x()),
+      ceil(content_scale * paint_rect.y()),
+      ceil(content_scale * paint_rect.width()),
+      ceil(content_scale * paint_rect.height()));
 
-  float doc_scale = 1.0f / scaleFactor;
-
-  paintRect.SetRect(
-      ceil(static_cast<float>(doc_scale * paintRect.x())),
-      ceil(static_cast<float>(doc_scale * paintRect.y())),
-      ceil(static_cast<float>(doc_scale * paintRect.width())),
-      ceil(static_cast<float>(doc_scale * paintRect.height())));
-#endif
-
-#if WEBKIT_USING_CG
-  CGContextRef context = canvas;
-  CGContextTranslateCTM(context, rect_.x(), rect_.y());
-  CGContextSaveGState(context);
-#elif WEBKIT_USING_SKIA
   canvas->translate(SkIntToScalar(rect_.x()), SkIntToScalar(rect_.y()));
   canvas->save();
-#endif
 
   web_view_->layout();
-  web_view_->paint(canvas, paintRect);
+  web_view_->paint(canvas, paint_rect);
 
-#if WEBKIT_USING_SKIA
   canvas->restore();
-#elif WEBKIT_USING_CG
-  CGContextRestoreGState(context);
-#endif
 }
 
 // Coordinates are relative to the containing window.
 void WebViewPlugin::updateGeometry(
     const WebRect& frame_rect, const WebRect& clip_rect,
     const WebVector<WebRect>& cut_out_rects, bool is_visible) {
-  if (frame_rect != rect_) {
+  if (static_cast<gfx::Rect>(frame_rect) != rect_) {
     rect_ = frame_rect;
-#if defined(OS_ANDROID)
-    float scaleFactor = 1.0f;
-    if (container_) {
-      scaleFactor = container_->element().document().frame()->top()->view()
-          ->pageScaleFactor();
-    }
-    float doc_scale = 1.0f / scaleFactor;
 
-    web_view_->resize(WebSize(frame_rect.width * doc_scale,
-                              frame_rect.height * doc_scale));
-#else
-    web_view_->resize(WebSize(frame_rect.width, frame_rect.height));
-#endif
+    float content_scale = 1.0f / GetPageScaleFactor();
+    web_view_->resize(WebSize(content_scale * frame_rect.width,
+                              content_scale * frame_rect.height));
   }
 }
 
@@ -208,27 +171,7 @@ bool WebViewPlugin::handleInputEvent(const WebInputEvent& event,
     return true;
   }
   current_cursor_ = cursor;
-#if defined(OS_ANDROID)
-  const WebMouseEvent& scaled_event =
-      reinterpret_cast<const WebMouseEvent&>(event);
-  WebMouseEvent mouse_event;
-  float scaleFactor = 1.0f;
-  if (container_) {
-    scaleFactor = container_->element().document().frame()->top()->view()
-        ->pageScaleFactor();
-  }
-  float doc_scale = 1.0f / scaleFactor;
-  mouse_event.x = ceil(static_cast<float>(scaled_event.x * doc_scale));
-  mouse_event.y = ceil(static_cast<float>(scaled_event.y * doc_scale));
-  mouse_event.button = scaled_event.button;
-  mouse_event.clickCount = scaled_event.clickCount;
-  mouse_event.type = scaled_event.type;
-  mouse_event.modifiers = scaled_event.modifiers;
-  mouse_event.timeStampSeconds = scaled_event.timeStampSeconds;
-  bool handled = web_view_->handleInputEvent(mouse_event);
-#else
   bool handled = web_view_->handleInputEvent(event);
-#endif
   cursor = current_cursor_;
   return handled;
 }
@@ -262,7 +205,8 @@ void WebViewPlugin::setToolTipText(const WebKit::WebString& text,
     container_->element().setAttribute("title", text);
 }
 
-void WebViewPlugin::startDragging(const WebDragData&,
+void WebViewPlugin::startDragging(WebFrame*,
+                                  const WebDragData&,
                                   WebDragOperationsMask,
                                   const WebImage&,
                                   const WebPoint&) {
@@ -304,6 +248,15 @@ void WebViewPlugin::didReceiveResponse(WebFrame* frame,
                                        unsigned identifier,
                                        const WebURLResponse& response) {
   WebFrameClient::didReceiveResponse(frame, identifier, response);
+}
+
+float WebViewPlugin::GetPageScaleFactor() {
+  if (container_) {
+    WebFrame* frame = container_->element().document().frame();
+    WebView* top_view = frame->top()->view();
+    return top_view->pageScaleFactor();
+  }
+  return 1.0f;
 }
 
 }  // namespace webkit

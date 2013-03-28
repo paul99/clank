@@ -1,20 +1,21 @@
-// Copyright (c) 2011 The Chromium Authors. All rights reserved.
+// Copyright (c) 2012 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
 #include "chrome/browser/ui/views/infobars/confirm_infobar.h"
 
 #include "base/logging.h"
-#include "chrome/browser/tab_contents/confirm_infobar_delegate.h"
-#include "chrome/browser/ui/views/event_utils.h"
+#include "chrome/browser/api/infobars/confirm_infobar_delegate.h"
+#include "chrome/browser/event_disposition.h"
+#include "chrome/browser/infobars/infobar_tab_helper.h"
 #include "ui/views/controls/button/text_button.h"
 #include "ui/views/controls/label.h"
 #include "ui/views/controls/link.h"
 
 // ConfirmInfoBarDelegate -----------------------------------------------------
 
-InfoBar* ConfirmInfoBarDelegate::CreateInfoBar(InfoBarTabHelper* owner) {
-  return new ConfirmInfoBar(owner, this);
+InfoBar* ConfirmInfoBarDelegate::CreateInfoBar(InfoBarService* owner) {
+  return new ConfirmInfoBar(static_cast<InfoBarTabHelper*>(owner), this);
 }
 
 // ConfirmInfoBar -------------------------------------------------------------
@@ -97,7 +98,7 @@ void ConfirmInfoBar::ViewHierarchyChanged(bool is_add,
 }
 
 void ConfirmInfoBar::ButtonPressed(views::Button* sender,
-                                   const views::Event& event) {
+                                   const ui::Event& event) {
   if (!owned())
     return;  // We're closing; don't call anything, it might access the owner.
   ConfirmInfoBarDelegate* delegate = GetDelegate();
@@ -129,7 +130,7 @@ void ConfirmInfoBar::LinkClicked(views::Link* source, int event_flags) {
   DCHECK(link_ != NULL);
   DCHECK_EQ(link_, source);
   if (GetDelegate()->LinkClicked(
-      event_utils::DispositionFromEventFlags(event_flags)))
+      chrome::DispositionFromEventFlags(event_flags)))
     RemoveSelf();
 }
 

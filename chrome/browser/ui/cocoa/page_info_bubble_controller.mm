@@ -15,13 +15,16 @@
 #include "chrome/browser/profiles/profile.h"
 #include "chrome/browser/ui/browser_list.h"
 #import "chrome/browser/ui/cocoa/browser_window_controller.h"
+#import "chrome/browser/ui/cocoa/flipped_view.h"
 #import "chrome/browser/ui/cocoa/hyperlink_button_cell.h"
 #import "chrome/browser/ui/cocoa/info_bubble_view.h"
 #import "chrome/browser/ui/cocoa/info_bubble_window.h"
 #import "chrome/browser/ui/cocoa/location_bar/location_bar_view_mac.h"
 #include "chrome/common/url_constants.h"
-#include "content/browser/cert_store.h"
-#include "content/public/browser/ssl_status.h"
+#include "content/public/browser/cert_store.h"
+#include "content/public/browser/page_navigator.h"
+#include "content/public/browser/web_contents.h"
+#include "content/public/common/ssl_status.h"
 #include "grit/generated_resources.h"
 #include "grit/locale_settings.h"
 #include "net/base/cert_status_flags.h"
@@ -34,6 +37,7 @@
 using content::OpenURLParams;
 using content::Referrer;
 using content::SSLStatus;
+using content::WebContents;
 
 @interface PageInfoBubbleController (Private)
 - (PageInfoModel*)model;
@@ -56,18 +60,6 @@ using content::SSLStatus;
                          atOffset:(CGFloat)offset;
 - (NSPoint)anchorPointForWindowWithHeight:(CGFloat)bubbleHeight
                              parentWindow:(NSWindow*)parent;
-@end
-
-// This simple NSView subclass is used as the single subview of the page info
-// bubble's window's contentView. Drawing is flipped so that layout of the
-// sections is easier. Apple recommends flipping the coordinate origin when
-// doing a lot of text layout because it's more natural.
-@interface PageInfoContentView : NSView
-@end
-@implementation PageInfoContentView
-- (BOOL)isFlipped {
-  return YES;
-}
 @end
 
 namespace {
@@ -126,7 +118,7 @@ class PageInfoModelBubbleBridge : public PageInfoModelObserver {
     MessageLoop::current()->PostDelayedTask(FROM_HERE,
         base::Bind(&PageInfoModelBubbleBridge::PerformLayout,
                    weak_ptr_factory_.GetWeakPtr()),
-        1000 /* milliseconds */);
+        base::TimeDelta::FromSeconds(1));
   }
 
   // Sets the controller.
@@ -152,26 +144,30 @@ class PageInfoModelBubbleBridge : public PageInfoModelObserver {
 
 }  // namespace
 
-namespace browser {
+namespace chrome {
 
 void ShowPageInfoBubble(gfx::NativeWindow parent,
-                        Profile* profile,
+                        WebContents* web_contents,
                         const GURL& url,
                         const SSLStatus& ssl,
-                        bool show_history) {
+                        bool show_history,
+                        content::PageNavigator* navigator) {
   PageInfoModelBubbleBridge* bridge = new PageInfoModelBubbleBridge();
-  PageInfoModel* model =
-      new PageInfoModel(profile, url, ssl, show_history, bridge);
+  PageInfoModel* model = new PageInfoModel(
+      Profile::FromBrowserContext(web_contents->GetBrowserContext()), url, ssl,
+      show_history, bridge);
   PageInfoBubbleController* controller =
       [[PageInfoBubbleController alloc] initWithPageInfoModel:model
                                                 modelObserver:bridge
-                                                 parentWindow:parent];
+                                                 parentWindow:parent
+                                                  webContents:web_contents
+                                                    navigator:navigator];
   bridge->set_controller(controller);
   [controller setCertID:ssl.cert_id];
   [controller showWindow:nil];
 }
 
-}  // namespace browser
+}  // namespace chrome
 
 @implementation PageInfoBubbleController
 
@@ -179,11 +175,13 @@ void ShowPageInfoBubble(gfx::NativeWindow parent,
 
 - (id)initWithPageInfoModel:(PageInfoModel*)model
               modelObserver:(PageInfoModelObserver*)bridge
-               parentWindow:(NSWindow*)parentWindow {
+               parentWindow:(NSWindow*)parentWindow
+                webContents:(WebContents*)webContents
+                  navigator:(content::PageNavigator*)navigator {
   DCHECK(parentWindow);
 
   // Use an arbitrary height because it will be changed by the bridge.
-  NSRect contentRect = NSMakeRect(0, 0, kWindowWidth, 0);
+  NSRect contentRect = NSMakeRect(0, 0, kWindowWidth, 1);
   // Create an empty window into which content is placed.
   scoped_nsobject<InfoBubbleWindow> window(
       [[InfoBubbleWindow alloc] initWithContentRect:contentRect
@@ -196,6 +194,8 @@ void ShowPageInfoBubble(gfx::NativeWindow parent,
                          anchoredAt:NSZeroPoint])) {
     model_.reset(model);
     bridge_.reset(bridge);
+    webContents_ = webContents;
+    navigator_ = navigator;
     [[self bubble] setArrowLocation:info_bubble::kTopLeft];
     [self performLayout];
   }
@@ -208,15 +208,15 @@ void ShowPageInfoBubble(gfx::NativeWindow parent,
 
 - (IBAction)showCertWindow:(id)sender {
   DCHECK(certID_ != 0);
-  ShowCertificateViewerByID([self parentWindow], certID_);
+  ShowCertificateViewerByID(webContents_, [self parentWindow], certID_);
 }
 
 - (IBAction)showHelpPage:(id)sender {
-  Browser* browser = BrowserList::GetLastActive();
-  OpenURLParams params(
-      GURL(chrome::kPageInfoHelpCenterURL), Referrer(), NEW_FOREGROUND_TAB,
-      content::PAGE_TRANSITION_LINK, false);
-  browser->OpenURL(params);
+  navigator_->OpenURL(OpenURLParams(GURL(chrome::kPageInfoHelpCenterURL),
+                                    Referrer(),
+                                    NEW_FOREGROUND_TAB,
+                                    content::PAGE_TRANSITION_LINK,
+                                    false));
 }
 
 // This will create the subviews for the page info window. The general layout
@@ -237,7 +237,7 @@ void ShowPageInfoBubble(gfx::NativeWindow parent,
   BOOL showHelpButton = !(sectionCount == 1 && model_->GetSectionInfo(0).type ==
       PageInfoModel::SECTION_INFO_INTERNAL_PAGE);
 
-  // The subviews will be attached to the PageInfoContentView, which has a
+  // The subviews will be attached to the FlippedView, which has a
   // flipped origin. This allows the code to build top-to-bottom.
   for (int i = 0; i < sectionCount; ++i) {
     PageInfoModel::SectionInfo info = model_->GetSectionInfo(i);
@@ -294,8 +294,8 @@ void ShowPageInfoBubble(gfx::NativeWindow parent,
 
   // Create the dummy view that uses flipped coordinates.
   NSRect contentFrame = NSMakeRect(0, 0, kWindowWidth, offset);
-  scoped_nsobject<PageInfoContentView> contentView(
-      [[PageInfoContentView alloc] initWithFrame:contentFrame]);
+  scoped_nsobject<FlippedView> contentView(
+      [[FlippedView alloc] initWithFrame:contentFrame]);
   [contentView setSubviews:subviews];
   [contentView setAutoresizingMask:NSViewMinYMargin];
 
@@ -405,7 +405,7 @@ void ShowPageInfoBubble(gfx::NativeWindow parent,
 
   // By default, assume that we don't have certificate information to show.
   scoped_refptr<net::X509Certificate> cert;
-  CertStore::GetInstance()->RetrieveCert(certID_, &cert);
+  content::CertStore::GetInstance()->RetrieveCert(certID_, &cert);
 
   // Don't bother showing certificates if there isn't one.
   if (!cert.get() || !cert->os_cert_handle()) {
@@ -427,7 +427,7 @@ void ShowPageInfoBubble(gfx::NativeWindow parent,
   scoped_nsobject<NSImageView> imageView(
       [[NSImageView alloc] initWithFrame:frame]);
   [imageView setImageFrameStyle:NSImageFrameNone];
-  [imageView setImage:*model_->GetIconImage(info.icon_id)];
+  [imageView setImage:model_->GetIconImage(info.icon_id)->ToNSImage()];
   [subviews addObject:imageView.get()];
 }
 

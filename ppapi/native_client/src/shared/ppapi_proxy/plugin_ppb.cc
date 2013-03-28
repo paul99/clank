@@ -11,7 +11,6 @@
 #include "native_client/src/shared/ppapi_proxy/plugin_ppb_audio_config.h"
 #include "native_client/src/shared/ppapi_proxy/plugin_ppb_buffer.h"
 #include "native_client/src/shared/ppapi_proxy/plugin_ppb_core.h"
-#include "native_client/src/shared/ppapi_proxy/plugin_ppb_cursor_control.h"
 #include "native_client/src/shared/ppapi_proxy/plugin_ppb_file_io.h"
 #include "native_client/src/shared/ppapi_proxy/plugin_ppb_file_ref.h"
 #include "native_client/src/shared/ppapi_proxy/plugin_ppb_file_system.h"
@@ -21,15 +20,18 @@
 #include "native_client/src/shared/ppapi_proxy/plugin_ppb_gamepad.h"
 #include "native_client/src/shared/ppapi_proxy/plugin_ppb_graphics_2d.h"
 #include "native_client/src/shared/ppapi_proxy/plugin_ppb_graphics_3d.h"
+#include "native_client/src/shared/ppapi_proxy/plugin_ppb_host_resolver_private.h"
 #include "native_client/src/shared/ppapi_proxy/plugin_ppb_image_data.h"
 #include "native_client/src/shared/ppapi_proxy/plugin_ppb_input_event.h"
 #include "native_client/src/shared/ppapi_proxy/plugin_ppb_instance.h"
 #include "native_client/src/shared/ppapi_proxy/plugin_ppb_memory.h"
 #include "native_client/src/shared/ppapi_proxy/plugin_ppb_messaging.h"
+#include "native_client/src/shared/ppapi_proxy/plugin_ppb_mouse_cursor.h"
 #include "native_client/src/shared/ppapi_proxy/plugin_ppb_mouse_lock.h"
 #include "native_client/src/shared/ppapi_proxy/plugin_ppb_net_address_private.h"
-#include "native_client/src/shared/ppapi_proxy/plugin_ppb_pdf.h"
-#include "native_client/src/shared/ppapi_proxy/plugin_ppb_scrollbar.h"
+#include "native_client/src/shared/ppapi_proxy/plugin_ppb_network_list_private.h"
+#include "native_client/src/shared/ppapi_proxy/plugin_ppb_network_monitor_private.h"
+#include "native_client/src/shared/ppapi_proxy/plugin_ppb_tcp_server_socket_private.h"
 #include "native_client/src/shared/ppapi_proxy/plugin_ppb_tcp_socket_private.h"
 #include "native_client/src/shared/ppapi_proxy/plugin_ppb_testing.h"
 #include "native_client/src/shared/ppapi_proxy/plugin_ppb_udp_socket_private.h"
@@ -39,7 +41,6 @@
 #include "native_client/src/shared/ppapi_proxy/plugin_ppb_var.h"
 #include "native_client/src/shared/ppapi_proxy/plugin_ppb_view.h"
 #include "native_client/src/shared/ppapi_proxy/plugin_ppb_websocket.h"
-#include "native_client/src/shared/ppapi_proxy/plugin_ppb_widget.h"
 #include "native_client/src/shared/ppapi_proxy/plugin_ppb_zoom.h"
 #include "native_client/src/shared/ppapi_proxy/untrusted/srpcgen/ppb_rpc.h"
 #include "native_client/src/shared/ppapi_proxy/utility.h"
@@ -58,23 +59,29 @@ struct InterfaceMapElement {
 InterfaceMapElement interface_map[] = {
   { PPB_AUDIO_INTERFACE, PluginAudio::GetInterface(), true },
   { PPB_AUDIO_CONFIG_INTERFACE, PluginAudioConfig::GetInterface(), true },
-  { PPB_CORE_INTERFACE, PluginCore::GetInterface(), true },
-  { PPB_CURSOR_CONTROL_DEV_INTERFACE, PluginCursorControl::GetInterface(),
+  { PPB_AUDIO_CONFIG_INTERFACE_1_0, PluginAudioConfig::GetInterface1_0(),
     true },
-  { PPB_FILEIO_INTERFACE, PluginFileIO::GetInterface(), true },
+  { PPB_CORE_INTERFACE, PluginCore::GetInterface(), true },
+  { PPB_MOUSECURSOR_INTERFACE_1_0, PluginMouseCursor::GetInterface(),
+    true },
+  { PPB_FILEIO_INTERFACE_1_0, PluginFileIO::GetInterface1_0(), true },
   { PPB_FILEREF_INTERFACE, PluginFileRef::GetInterface(), true },
   { PPB_FILESYSTEM_INTERFACE, PluginFileSystem::GetInterface(), true },
   { PPB_FIND_DEV_INTERFACE, PluginFind::GetInterface(), true },
   { PPB_FONT_DEV_INTERFACE, PluginFont::GetInterface(), true },
   { PPB_FULLSCREEN_INTERFACE, PluginFullscreen::GetInterface(), true },
-  { PPB_GAMEPAD_DEV_INTERFACE, PluginGamepad::GetInterface(), true },
+  { PPB_GAMEPAD_INTERFACE, PluginGamepad::GetInterface(), true },
   { PPB_GRAPHICS_2D_INTERFACE, PluginGraphics2D::GetInterface(), true },
   { PPB_GRAPHICS_3D_INTERFACE, PluginGraphics3D::GetInterface(), true },
+  { PPB_HOSTRESOLVER_PRIVATE_INTERFACE,
+    PluginHostResolverPrivate::GetInterface(), true },
   { PPB_IMAGEDATA_INTERFACE, PluginImageData::GetInterface(), true },
   { PPB_INPUT_EVENT_INTERFACE, PluginInputEvent::GetInterface(), true },
   { PPB_INSTANCE_INTERFACE, PluginInstance::GetInterface(), true },
   { PPB_KEYBOARD_INPUT_EVENT_INTERFACE,
     PluginInputEvent::GetKeyboardInterface(), true },
+  { PPB_KEYBOARD_INPUT_EVENT_DEV_INTERFACE,
+    PluginInputEvent::GetKeyboardInterface_Dev(), true },
   { PPB_MEMORY_DEV_INTERFACE, PluginMemory::GetInterface(), true },
   { PPB_MESSAGING_INTERFACE, PluginMessaging::GetInterface(), true },
   { PPB_MOUSE_INPUT_EVENT_INTERFACE_1_0,
@@ -82,18 +89,51 @@ InterfaceMapElement interface_map[] = {
   { PPB_MOUSE_INPUT_EVENT_INTERFACE_1_1,
     PluginInputEvent::GetMouseInterface1_1(), true },
   { PPB_MOUSELOCK_INTERFACE, PluginMouseLock::GetInterface(), true },
-  { PPB_NETADDRESS_PRIVATE_INTERFACE, PluginNetAddressPrivate::GetInterface(),
+  { PPB_NETADDRESS_PRIVATE_INTERFACE_0_1,
+    PluginNetAddressPrivate::GetInterface0_1(), true },
+  { PPB_NETADDRESS_PRIVATE_INTERFACE_1_0,
+    PluginNetAddressPrivate::GetInterface1_0(), true },
+  { PPB_NETADDRESS_PRIVATE_INTERFACE_1_1,
+    PluginNetAddressPrivate::GetInterface1_1(), true },
+  { PPB_NETWORKLIST_PRIVATE_INTERFACE, PluginNetworkListPrivate::GetInterface(),
     true },
-  { PPB_OPENGLES2_INTERFACE, PluginGraphics3D::GetOpenGLESInterface(),
+  { PPB_NETWORKMONITOR_PRIVATE_INTERFACE,
+    PluginNetworkMonitorPrivate::GetInterface(), true },
+  { PPB_OPENGLES2_INTERFACE_1_0, PluginGraphics3D::GetOpenGLESInterface(),
     true },
-  { PPB_PDF_INTERFACE, PluginPDF::GetInterface(), true },
-  { PPB_SCROLLBAR_DEV_INTERFACE, PluginScrollbar::GetInterface(), true },
-  { PPB_TCPSOCKET_PRIVATE_INTERFACE, PluginTCPSocketPrivate::GetInterface(),
+  { PPB_OPENGLES2_INSTANCEDARRAYS_INTERFACE_1_0,
+    PluginGraphics3D::GetOpenGLESInstancedArraysInterface(),
     true },
+  { PPB_OPENGLES2_FRAMEBUFFERBLIT_INTERFACE_1_0,
+    PluginGraphics3D::GetOpenGLESFramebufferBlitInterface(),
+    true },
+  { PPB_OPENGLES2_FRAMEBUFFERMULTISAMPLE_INTERFACE_1_0,
+    PluginGraphics3D::GetOpenGLESFramebufferMultisampleInterface(),
+    true },
+  { PPB_OPENGLES2_CHROMIUMENABLEFEATURE_INTERFACE_1_0,
+    PluginGraphics3D::GetOpenGLESChromiumEnableFeatureInterface(),
+    true },
+  { PPB_OPENGLES2_CHROMIUMMAPSUB_INTERFACE_1_0,
+    PluginGraphics3D::GetOpenGLESChromiumMapSubInterface(),
+    true },
+  { PPB_OPENGLES2_QUERY_INTERFACE_1_0,
+    PluginGraphics3D::GetOpenGLESQueryInterface(),
+    true },
+  { PPB_TCPSERVERSOCKET_PRIVATE_INTERFACE,
+    PluginTCPServerSocketPrivate::GetInterface(),
+    true },
+  { PPB_TCPSOCKET_PRIVATE_INTERFACE_0_4,
+    PluginTCPSocketPrivate::GetInterface0_4(), true },
+  { PPB_TCPSOCKET_PRIVATE_INTERFACE_0_3,
+    PluginTCPSocketPrivate::GetInterface0_3(), true },
   { PPB_TESTING_DEV_INTERFACE_0_9, PluginTesting::GetInterface(), true },
   { PPB_TESTING_DEV_INTERFACE, PluginTesting::GetInterface(), true },
-  { PPB_UDPSOCKET_PRIVATE_INTERFACE, PluginUDPSocketPrivate::GetInterface(),
-    true },
+  { PPB_UDPSOCKET_PRIVATE_INTERFACE_0_2,
+    PluginUDPSocketPrivate::GetInterface0_2(), true },
+  { PPB_UDPSOCKET_PRIVATE_INTERFACE_0_3,
+    PluginUDPSocketPrivate::GetInterface0_3(), true },
+  { PPB_UDPSOCKET_PRIVATE_INTERFACE_0_4,
+    PluginUDPSocketPrivate::GetInterface0_4(), true },
   { PPB_URLLOADER_INTERFACE, PluginURLLoader::GetInterface(), true },
   { PPB_URLREQUESTINFO_INTERFACE, PluginURLRequestInfo::GetInterface(), true },
   { PPB_URLRESPONSEINFO_INTERFACE, PluginURLResponseInfo::GetInterface(),
@@ -107,7 +147,6 @@ InterfaceMapElement interface_map[] = {
     true },
   { PPB_WHEEL_INPUT_EVENT_INTERFACE, PluginInputEvent::GetWheelInterface(),
     true },
-  { PPB_WIDGET_DEV_INTERFACE, PluginWidget::GetInterface(), true },
   { PPB_ZOOM_DEV_INTERFACE, PluginZoom::GetInterface(), true },
 };
 

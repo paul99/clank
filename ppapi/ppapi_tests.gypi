@@ -3,68 +3,15 @@
 # found in the LICENSE file.
 
 {
-  'includes': [
-    'ppapi.gypi',
-  ],
   'targets': [
-     {
-      'target_name': 'ppapi_example',
-      'dependencies': [
-        'ppapi.gyp:ppapi_cpp'
-      ],
-      'xcode_settings': {
-        'INFOPLIST_FILE': 'example/Info.plist',
-      },
-      'sources': [
-        'example/example.cc',
-      ],
-      'conditions': [
-        ['OS=="win"', {
-          'type': 'shared_library',
-          'sources': [
-            'example/example.rc',
-          ],
-          'run_as': {
-            'action': [
-              '<(PRODUCT_DIR)/<(EXECUTABLE_PREFIX)chrome<(EXECUTABLE_SUFFIX)',
-              '--register-pepper-plugins=$(TargetPath);application/x-ppapi-example',
-              'file://$(ProjectDir)/example/example.html',
-            ],
-          },
-        }],
-        ['os_posix == 1 and OS != "mac"', {
-          'type': 'shared_library',
-          'cflags': ['-fvisibility=hidden'],
-          # -gstabs, used in the official builds, causes an ICE. Simply remove
-          # it.
-          'cflags!': ['-gstabs'],
-        }],
-        ['OS=="mac"', {
-          'type': 'loadable_module',
-          'mac_bundle': 1,
-          'product_name': 'PPAPIExample',
-          'product_extension': 'plugin',
-          'sources+': [
-            'example/Info.plist'
-          ],
-        }],
-      ],
-      # See README for instructions on how to run and debug on the Mac.
-      #'conditions' : [
-      #  ['OS=="mac"', {
-      #    'target_name' : 'Chromium',
-      #    'type' : 'executable',
-      #    'xcode_settings' : {
-      #      'ARGUMENTS' : '--renderer-startup-dialog --internal-pepper --no-sandbox file://${SRCROOT}/test_page.html'
-      #    },
-      #  }],
-      #],
-    },
     {
       'target_name': 'ppapi_tests',
       'type': 'loadable_module',
       'include_dirs': [
         'lib/gl/include',
+      ],
+      'defines': [
+        'GL_GLEXT_PROTOTYPES',
       ],
       'sources': [
         '<@(test_common_source_files)',
@@ -74,11 +21,28 @@
         'ppapi.gyp:ppapi_cpp',
         'ppapi_internal.gyp:ppapi_shared',
       ],
+      'copies': [
+        {
+          'destination': '<(PRODUCT_DIR)',
+          'files': [
+            # Keep 'test_case.html.mock-http-headers' with 'test_case.html'.
+            'tests/test_case.html',
+            'tests/test_case.html.mock-http-headers',
+            'tests/test_page.css',
+            'tests/ppapi_nacl_tests_newlib.nmf',
+          ],
+        },
+        {
+          'destination': '<(PRODUCT_DIR)/test_url_loader_data',
+          'files': [
+            'tests/test_url_loader_data/hello.txt',
+          ],
+        },
+      ],
       'run_as': {
         'action': [
           '<(PRODUCT_DIR)/<(EXECUTABLE_PREFIX)chrome<(EXECUTABLE_SUFFIX)',
           '--enable-pepper-testing',
-          '--enable-accelerated-plugins',
           '--register-pepper-plugins=$(TargetPath);application/x-ppapi-tests',
           'file://$(ProjectDir)/tests/test_case.html?testcase=',
         ],
@@ -96,12 +60,6 @@
           'mac_bundle': 1,
           'product_name': 'ppapi_tests',
           'product_extension': 'plugin',
-        }],
-        ['p2p_apis==1', {
-          'sources': [
-            'tests/test_transport.cc',
-            'tests/test_transport.h',
-          ],
         }],
       ],
 # TODO(dmichael):  Figure out what is wrong with the script on Windows and add
@@ -135,6 +93,8 @@
       'sources': [
         'proxy/ppapi_proxy_test.cc',
         'proxy/ppapi_proxy_test.h',
+        'proxy/resource_message_test_sink.cc',
+        'proxy/resource_message_test_sink.h',
         'shared_impl/test_globals.cc',
         'shared_impl/test_globals.h',
       ],
@@ -165,6 +125,7 @@
         'chromium_code': 1,
       },
       'dependencies': [
+        'ppapi_host',
         'ppapi_proxy',
         'ppapi_shared',
         'ppapi_unittest_shared',
@@ -172,13 +133,18 @@
         '../gpu/gpu.gyp:gpu_ipc',
         '../ipc/ipc.gyp:ipc',
         '../ipc/ipc.gyp:test_support_ipc',
+        '../media/media.gyp:shared_memory_support',
         '../testing/gmock.gyp:gmock',
         '../testing/gtest.gyp:gtest',
-        '../ui/gfx/surface/surface.gyp:surface',
+        '../ui/surface/surface.gyp:surface',
       ],
       'sources': [
         'proxy/run_all_unittests.cc',
 
+        'host/resource_message_filter_unittest.cc',
+        'proxy/device_enumeration_resource_helper_unittest.cc',
+        'proxy/file_chooser_resource_unittest.cc',
+        'proxy/flash_resource_unittest.cc',
         'proxy/mock_resource.cc',
         'proxy/mock_resource.h',
         'proxy/plugin_dispatcher_unittest.cc',
@@ -188,10 +154,24 @@
         'proxy/ppp_instance_private_proxy_unittest.cc',
         'proxy/ppp_instance_proxy_unittest.cc',
         'proxy/ppp_messaging_proxy_unittest.cc',
+        'proxy/printing_resource_unittest.cc',
         'proxy/serialized_var_unittest.cc',
+        'proxy/websocket_resource_unittest.cc',
         'shared_impl/resource_tracker_unittest.cc',
+        'shared_impl/time_conversion_unittest.cc',
         'shared_impl/tracked_callback_unittest.cc',
         'shared_impl/var_tracker_unittest.cc',
+      ],
+      'conditions': [
+        [ 'os_posix == 1 and OS != "mac" and OS != "android" and OS != "ios"', {
+          'conditions': [
+            [ 'linux_use_tcmalloc == 1', {
+              'dependencies': [
+                '../base/allocator/allocator.gyp:allocator',
+              ],
+            }],
+          ],
+        }],
       ],
     },
     {
@@ -225,6 +205,16 @@
           }],
         ],
       },
+    },
+    {
+      'target_name': 'ppapi_example_mouse_cursor',
+      'dependencies': [
+        'ppapi_example_skeleton',
+        'ppapi.gyp:ppapi_cpp',
+      ],
+      'sources': [
+        'examples/mouse_cursor/mouse_cursor.cc',
+      ],
     },
     {
       'target_name': 'ppapi_example_mouse_lock',
@@ -329,6 +319,16 @@
       ],
     },
     {
+      'target_name': 'ppapi_example_input',
+      'dependencies': [
+        'ppapi_example_skeleton',
+        'ppapi.gyp:ppapi_cpp',
+      ],
+      'sources': [
+        'examples/input/pointer_event_input.cc',
+      ],
+    },
+    {
       'target_name': 'ppapi_example_post_message',
       'dependencies': [
         'ppapi_example_skeleton',
@@ -369,6 +369,16 @@
       ],
     },
     {
+      'target_name': 'ppapi_example_url_loader_file',
+      'dependencies': [
+        'ppapi_example_skeleton',
+        'ppapi.gyp:ppapi_cpp',
+      ],
+      'sources': [
+        'examples/url_loader/stream_to_file.cc',
+      ],
+    },
+    {
       'target_name': 'ppapi_example_gles2',
       'dependencies': [
         'ppapi_example_skeleton',
@@ -381,7 +391,22 @@
       ],
       'sources': [
         'examples/gles2/gles2.cc',
-        'examples/gles2/testdata.h',
+      ],
+    },
+    {
+      'target_name': 'ppapi_example_video_decode',
+      'dependencies': [
+        'ppapi_example_skeleton',
+        'ppapi.gyp:ppapi_cpp',
+        'ppapi.gyp:ppapi_gles2',
+        'ppapi.gyp:ppapi_egl',
+      ],
+      'include_dirs': [
+        'lib/gl/include',
+      ],
+      'sources': [
+        'examples/video_decode/video_decode.cc',
+        'examples/video_decode/testdata.h',
       ],
     },
     {
@@ -397,6 +422,36 @@
       ],
       'sources': [
         'examples/video_capture/video_capture.cc',
+      ],
+    },
+    {
+      'target_name': 'ppapi_example_enumerate_devices',
+      'dependencies': [
+        'ppapi_example_skeleton',
+        'ppapi.gyp:ppapi_cpp',
+      ],
+      'sources': [
+        'examples/enumerate_devices/enumerate_devices.cc',
+      ],
+    },
+    {
+      'target_name': 'ppapi_example_flash_topmost',
+      'dependencies': [
+        'ppapi_example_skeleton',
+        'ppapi.gyp:ppapi_cpp',
+      ],
+      'sources': [
+        'examples/flash_topmost/flash_topmost.cc',
+      ],
+    },
+    {
+      'target_name': 'ppapi_example_printing',
+      'dependencies': [
+        'ppapi_example_skeleton',
+        'ppapi.gyp:ppapi_cpp',
+      ],
+      'sources': [
+        'examples/printing/printing.cc',
       ],
     },
   ],

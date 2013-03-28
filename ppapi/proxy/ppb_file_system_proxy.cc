@@ -19,7 +19,6 @@
 #include "ppapi/thunk/resource_creation_api.h"
 #include "ppapi/thunk/thunk.h"
 
-using ppapi::thunk::EnterFunctionNoLock;
 using ppapi::thunk::PPB_FileSystem_API;
 using ppapi::thunk::ResourceCreationAPI;
 
@@ -47,7 +46,7 @@ class FileSystem : public Resource, public PPB_FileSystem_API {
 
   // PPB_FileSystem_APi implementation.
   virtual int32_t Open(int64_t expected_size,
-                       PP_CompletionCallback callback) OVERRIDE;
+                       scoped_refptr<TrackedCallback> callback) OVERRIDE;
   virtual PP_FileSystemType GetType() OVERRIDE;
 
   // Called when the host has responded to our open request.
@@ -63,7 +62,7 @@ class FileSystem : public Resource, public PPB_FileSystem_API {
 
 FileSystem::FileSystem(const HostResource& host_resource,
                        PP_FileSystemType type)
-    : Resource(host_resource),
+    : Resource(OBJECT_IS_PROXY, host_resource),
       type_(type),
       called_open_(false) {
 }
@@ -76,13 +75,13 @@ PPB_FileSystem_API* FileSystem::AsPPB_FileSystem_API() {
 }
 
 int32_t FileSystem::Open(int64_t expected_size,
-                         PP_CompletionCallback callback) {
+                         scoped_refptr<TrackedCallback> callback) {
   if (TrackedCallback::IsPending(current_open_callback_))
     return PP_ERROR_INPROGRESS;
   if (called_open_)
     return PP_ERROR_FAILED;
 
-  current_open_callback_ = new TrackedCallback(this, callback);
+  current_open_callback_ = callback;
   called_open_ = true;
   PluginDispatcher::GetForResource(this)->Send(
       new PpapiHostMsg_PPBFileSystem_Open(
@@ -95,7 +94,7 @@ PP_FileSystemType FileSystem::GetType() {
 }
 
 void FileSystem::OpenComplete(int32_t result) {
-  TrackedCallback::ClearAndRun(&current_open_callback_, result);
+  current_open_callback_->Run(result);
 }
 
 PPB_FileSystem_Proxy::PPB_FileSystem_Proxy(Dispatcher* dispatcher)
@@ -136,14 +135,17 @@ PP_Resource PPB_FileSystem_Proxy::CreateProxyResource(
 bool PPB_FileSystem_Proxy::OnMessageReceived(const IPC::Message& msg) {
   bool handled = true;
   IPC_BEGIN_MESSAGE_MAP(PPB_FileSystem_Proxy, msg)
+#if !defined(OS_NACL)
     IPC_MESSAGE_HANDLER(PpapiHostMsg_PPBFileSystem_Create, OnMsgCreate)
     IPC_MESSAGE_HANDLER(PpapiHostMsg_PPBFileSystem_Open, OnMsgOpen)
+#endif
     IPC_MESSAGE_HANDLER(PpapiMsg_PPBFileSystem_OpenComplete, OnMsgOpenComplete)
     IPC_MESSAGE_UNHANDLED(handled = false)
   IPC_END_MESSAGE_MAP()
   return handled;
 }
 
+#if !defined(OS_NACL)
 void PPB_FileSystem_Proxy::OnMsgCreate(PP_Instance instance,
                                        int type,
                                        HostResource* result) {
@@ -165,6 +167,7 @@ void PPB_FileSystem_Proxy::OnMsgOpen(const HostResource& host_resource,
   if (enter.succeeded())
     enter.SetResult(enter.object()->Open(expected_size, enter.callback()));
 }
+#endif  // !defined(OS_NACL)
 
 // Called in the plugin to handle the open callback.
 void PPB_FileSystem_Proxy::OnMsgOpenComplete(const HostResource& host_resource,
@@ -174,12 +177,14 @@ void PPB_FileSystem_Proxy::OnMsgOpenComplete(const HostResource& host_resource,
     static_cast<FileSystem*>(enter.object())->OpenComplete(result);
 }
 
+#if !defined(OS_NACL)
 void PPB_FileSystem_Proxy::OpenCompleteInHost(
     int32_t result,
     const HostResource& host_resource) {
   dispatcher()->Send(new PpapiMsg_PPBFileSystem_OpenComplete(
       API_ID_PPB_FILE_SYSTEM, host_resource, result));
 }
+#endif  // !defined(OS_NACL)
 
 }  // namespace proxy
 }  // namespace ppapi

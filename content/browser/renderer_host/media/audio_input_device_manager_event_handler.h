@@ -1,4 +1,4 @@
-// Copyright (c) 2011 The Chromium Authors. All rights reserved.
+// Copyright (c) 2012 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -10,7 +10,7 @@
 
 #include "content/common/content_export.h"
 
-namespace media_stream {
+namespace content {
 
 class CONTENT_EXPORT AudioInputDeviceManagerEventHandler {
  public:
@@ -24,9 +24,10 @@ class CONTENT_EXPORT AudioInputDeviceManagerEventHandler {
   // calling Stop() on a started device.
   virtual void OnDeviceStopped(int session_id) = 0;
 
+ protected:
   virtual ~AudioInputDeviceManagerEventHandler() {}
 };
 
-}  // namespace media_stream
+}  // namespace content
 
 #endif  // CONTENT_BROWSER_RENDERER_HOST_MEDIA_AUDIO_INPUT_DEVICE_MANAGER_EVENT_HANDLER_H_

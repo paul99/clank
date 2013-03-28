@@ -4,9 +4,9 @@
 
 #ifndef UI_VIEWS_CONTROLS_TEXTFIELD_NATIVE_TEXTFIELD_WRAPPER_H_
 #define UI_VIEWS_CONTROLS_TEXTFIELD_NATIVE_TEXTFIELD_WRAPPER_H_
-#pragma once
 
 #include "base/string16.h"
+#include "base/i18n/rtl.h"
 #include "ui/gfx/native_widget_types.h"
 #include "ui/views/views_export.h"
 
@@ -17,13 +17,13 @@ struct StyleRange;
 }  // namespace gfx
 
 namespace ui {
+class KeyEvent;
 class Range;
 class TextInputClient;
 }  // namespace ui
 
 namespace views {
 
-class KeyEvent;
 class Textfield;
 class View;
 
@@ -45,12 +45,19 @@ class VIEWS_EXPORT NativeTextfieldWrapper {
   // text field.
   virtual void AppendText(const string16& text) = 0;
 
+  // Replaces the selected text with |text|.
+  virtual void ReplaceSelection(const string16& text) = 0;
+
+  // Returns the text direction.
+  virtual base::i18n::TextDirection GetTextDirection() const = 0;
+
   // Gets the text that is selected in the wrapped native text field.
   virtual string16 GetSelectedText() const = 0;
 
-  // Selects all the text in the edit.  Use this in place of SetSelAll() to
-  // avoid selecting the "phantom newline" at the end of the edit.
-  virtual void SelectAll() = 0;
+  // Select the entire text range. If |reversed| is true, the range will end at
+  // the logical beginning of the text; this generally shows the leading portion
+  // of text that overflows its display area.
+  virtual void SelectAll(bool reversed) = 0;
 
   // Clears the selection within the edit field and sets the caret to the end.
   virtual void ClearSelection() = 0;
@@ -114,6 +121,10 @@ class VIEWS_EXPORT NativeTextfieldWrapper {
   // Returns the currnet cursor position.
   virtual size_t GetCursorPosition() const = 0;
 
+  // Get or set whether or not the cursor is enabled.
+  virtual bool GetCursorEnabled() const = 0;
+  virtual void SetCursorEnabled(bool enabled) = 0;
+
   // Following methods are to forward key/focus related events to the
   // views wrapper so that TextfieldViews can handle key inputs without
   // having focus.
@@ -122,8 +133,8 @@ class VIEWS_EXPORT NativeTextfieldWrapper {
   // should return true if the event has been processed and false
   // otherwise.
   // See also View::OnKeyPressed/OnKeyReleased.
-  virtual bool HandleKeyPressed(const views::KeyEvent& e) = 0;
-  virtual bool HandleKeyReleased(const views::KeyEvent& e) = 0;
+  virtual bool HandleKeyPressed(const ui::KeyEvent& e) = 0;
+  virtual bool HandleKeyReleased(const ui::KeyEvent& e) = 0;
 
   // Invoked when focus is being moved from or to the Textfield.
   // See also View::OnFocus/OnBlur.
@@ -146,6 +157,14 @@ class VIEWS_EXPORT NativeTextfieldWrapper {
 
   // Get the height in pixels of the first font used in this textfield.
   virtual int GetFontHeight() = 0;
+
+  // Returns the baseline of the textfield. This should not take into account
+  // any insets.
+  virtual int GetTextfieldBaseline() const = 0;
+
+  // Performs the action associated with the specified command id. Not called
+  // ExecuteCommand to avoid name clash.
+  virtual void ExecuteTextCommand(int command_id) = 0;
 
   // Creates an appropriate NativeTextfieldWrapper for the platform.
   static NativeTextfieldWrapper* CreateWrapper(Textfield* field);

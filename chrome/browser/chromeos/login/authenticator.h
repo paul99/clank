@@ -1,15 +1,16 @@
-// Copyright (c) 2011 The Chromium Authors. All rights reserved.
+// Copyright (c) 2012 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
 #ifndef CHROME_BROWSER_CHROMEOS_LOGIN_AUTHENTICATOR_H_
 #define CHROME_BROWSER_CHROMEOS_LOGIN_AUTHENTICATOR_H_
-#pragma once
+
+#include <string>
 
 #include "base/basictypes.h"
 #include "base/memory/ref_counted.h"
 #include "chrome/browser/chromeos/login/login_status_consumer.h"
-#include "chrome/common/net/gaia/gaia_auth_consumer.h"
+#include "google_apis/gaia/gaia_auth_consumer.h"
 
 class Profile;
 
@@ -23,11 +24,7 @@ namespace chromeos {
 // consumer_->OnPasswordChangeDetected() on the UI thread.
 class Authenticator : public base::RefCountedThreadSafe<Authenticator> {
  public:
-  // A domain which requires special-case parsing in canonicalization.
-  static const char kSpecialCaseDomain[];
-
   explicit Authenticator(LoginStatusConsumer* consumer);
-  virtual ~Authenticator();
 
   // Given externally authenticated |username| and |password|, this method
   // attempts to complete authentication process.
@@ -51,16 +48,22 @@ class Authenticator : public base::RefCountedThreadSafe<Authenticator> {
   virtual void AuthenticateToUnlock(const std::string& username,
                                     const std::string& password) = 0;
 
+  // Initiates retail mode login.
+  virtual void LoginRetailMode() = 0;
+
   // Initiates incognito ("browse without signing in") login.
   virtual void LoginOffTheRecord() = 0;
 
-  // |credentials| are the tokens that we get back from the ClientLogin API.
+  // Initiates login into the public account identified by |username|.
+  virtual void LoginAsPublicAccount(const std::string& username) = 0;
+
+  // Completes retail mode login.
+  virtual void OnRetailModeLoginSuccess() = 0;
+
   // |request_pending| is true if we still plan to call consumer_ with the
   // results of more requests.
   // Must be called on the UI thread.
-  virtual void OnLoginSuccess(
-      const GaiaAuthConsumer::ClientLoginResult& credentials,
-      bool request_pending) = 0;
+  virtual void OnLoginSuccess(bool request_pending) = 0;
 
   // Must be called on the UI thread.
   virtual void OnLoginFailure(const LoginFailure& error) = 0;
@@ -71,17 +74,13 @@ class Authenticator : public base::RefCountedThreadSafe<Authenticator> {
   // occurred.
   // Call this method to migrate the user's encrypted data
   // forward to use his new password.  |old_password| is the password
-  // his data was last encrypted with, |result| is the blob of auth
-  // data passed back through OnPasswordChangeDetected().
+  // his data was last encrypted with.
   virtual void RecoverEncryptedData(
-      const std::string& old_password,
-      const GaiaAuthConsumer::ClientLoginResult& credentials) = 0;
+      const std::string& old_password) = 0;
 
   // Call this method to erase the user's encrypted data
-  // and create a new cryptohome.  |result| is the blob of auth
-  // data passed back through OnPasswordChangeDetected().
-  virtual void ResyncEncryptedData(
-      const GaiaAuthConsumer::ClientLoginResult& credentials) = 0;
+  // and create a new cryptohome.
+  virtual void ResyncEncryptedData() = 0;
 
   // Attempt to authenticate online again.
   virtual void RetryAuth(Profile* profile,
@@ -94,18 +93,18 @@ class Authenticator : public base::RefCountedThreadSafe<Authenticator> {
   // authentication process.
   Profile* authentication_profile() { return authentication_profile_; }
 
-  // Perform basic canonicalization of |email_address|, taking into account
-  // that gmail does not consider '.' or caps inside a username to matter.
-  // It also ignores everything after a '+'.
-  // For example, c.masone+abc@gmail.com == cMaSone@gmail.com, per
-  // http://mail.google.com/support/bin/answer.py?hl=en&ctx=mail&answer=10313#
-  static std::string Canonicalize(const std::string& email_address);
+  // Sets consumer explicitly.
+  void SetConsumer(LoginStatusConsumer* consumer);
 
  protected:
+  virtual ~Authenticator();
+
   LoginStatusConsumer* consumer_;
   Profile* authentication_profile_;
 
  private:
+  friend class base::RefCountedThreadSafe<Authenticator>;
+
   DISALLOW_COPY_AND_ASSIGN(Authenticator);
 };
 

@@ -1,4 +1,4 @@
-// Copyright (c) 2011 The Chromium Authors. All rights reserved.
+// Copyright (c) 2012 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -14,7 +14,6 @@
 
 #ifndef BASE_COMMAND_LINE_H_
 #define BASE_COMMAND_LINE_H_
-#pragma once
 
 #include <stddef.h>
 #include <map>
@@ -55,8 +54,10 @@ class BASE_EXPORT CommandLine {
   // Initialize the current process CommandLine singleton. On Windows, ignores
   // its arguments (we instead parse GetCommandLineW() directly) because we
   // don't trust the CRT's parsing of the command line, but it still must be
-  // called to set up the command line.
-  static void Init(int argc, const char* const* argv);
+  // called to set up the command line. Returns false if initialization has
+  // already occurred, and true otherwise. Only the caller receiving a 'true'
+  // return value should take responsibility for calling Reset.
+  static bool Init(int argc, const char* const* argv);
 
   // Destroys the current process CommandLine singleton. This is necessary if
   // you want to reset the base library to its initial state (for example, in an
@@ -78,8 +79,14 @@ class BASE_EXPORT CommandLine {
   void InitFromArgv(const StringVector& argv);
 
   // Constructs and returns the represented command line string.
-  // CAUTION! This should be avoided because quoting behavior is unclear.
+  // CAUTION! This should be avoided on POSIX because quoting behavior is
+  // unclear.
   StringType GetCommandLineString() const;
+
+  // Constructs and returns the represented arguments string.
+  // CAUTION! This should be avoided on POSIX because quoting behavior is
+  // unclear.
+  StringType GetArgumentsString() const;
 
   // Returns the original command line string as a vector of strings.
   const StringVector& argv() const { return argv_; }

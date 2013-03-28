@@ -1,4 +1,4 @@
-// Copyright (c) 2011 The Chromium Authors. All rights reserved.
+// Copyright (c) 2012 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -17,7 +17,7 @@ cr.define('cr.ui', function() {
   DropDownContainer.prototype = {
     __proto__: HTMLDivElement.prototype,
 
-    /** @inheritDoc */
+    /** @override */
     decorate: function() {
       this.classList.add('dropdown-container');
       // Selected item in the menu list.
@@ -79,20 +79,30 @@ cr.define('cr.ui', function() {
 
   DropDown.ITEM_DIVIDER_ID = -2;
 
+  DropDown.KEYCODE_DOWN = 40;
+  DropDown.KEYCODE_ENTER = 13;
+  DropDown.KEYCODE_ESC = 27;
+  DropDown.KEYCODE_SPACE = 32;
+  DropDown.KEYCODE_TAB = 9;
+  DropDown.KEYCODE_UP = 38;
+
   DropDown.prototype = {
     __proto__: HTMLDivElement.prototype,
 
-    /** @inheritDoc */
+    /** @override */
     decorate: function() {
       this.appendChild(this.createOverlay_());
       this.appendChild(this.title_ = this.createTitle_());
-      this.appendChild(new DropDownContainer());
+      var container = new DropDownContainer();
+      container.id = this.id + '-dropdown-container';
+      this.appendChild(container);
 
       this.addEventListener('keydown', this.keyDownHandler_);
 
       this.title_.id = this.id + '-dropdown';
       this.title_.setAttribute('role', 'button');
       this.title_.setAttribute('aria-haspopup', 'true');
+      this.title_.setAttribute('aria-owns', container.id);
     },
 
     /**
@@ -112,9 +122,7 @@ cr.define('cr.ui', function() {
       this.container.hidden = !show;
       if (show) {
         this.container.selectItem(this.container.firstItem, false);
-        this.title_.setAttribute('aria-pressed', 'true');
       } else {
-        this.title_.setAttribute('aria-pressed', 'false');
         this.title_.removeAttribute('aria-activedescendant');
       }
     },
@@ -191,6 +199,7 @@ cr.define('cr.ui', function() {
           span.classList.add('bold');
         var image = this.ownerDocument.createElement('img');
         image.alt = '';
+        image.classList.add('dropdown-image');
         if (item.icon)
           image.src = item.icon;
       }
@@ -212,7 +221,6 @@ cr.define('cr.ui', function() {
           wrapperDiv.setAttribute('aria-disabled', 'true');
         wrapperDiv.classList.add('dropdown-item-container');
         var imageDiv = this.ownerDocument.createElement('div');
-        imageDiv.classList.add('dropdown-image');
         imageDiv.appendChild(image);
         wrapperDiv.appendChild(imageDiv);
         wrapperDiv.appendChild(itemElement);
@@ -259,6 +267,7 @@ cr.define('cr.ui', function() {
     createTitle_: function() {
       var image = this.ownerDocument.createElement('img');
       image.alt = '';
+      image.classList.add('dropdown-image');
       var text = this.ownerDocument.createElement('div');
 
       var el = this.ownerDocument.createElement('div');
@@ -286,8 +295,10 @@ cr.define('cr.ui', function() {
 
       el.addEventListener('keydown', function f(e) {
         if (this.inFocus && !this.controller.isShown &&
-            (e.keyCode == 13 || e.keyCode == 32)) {
-          // Enter or space has been pressed.
+            (e.keyCode == DropDown.KEYCODE_ENTER ||
+             e.keyCode == DropDown.KEYCODE_SPACE ||
+             e.keyCode == DropDown.KEYCODE_UP ||
+             e.keyCode == DropDown.KEYCODE_DOWN)) {
           this.opening = true;
           this.controller.isShown = true;
         }
@@ -305,7 +316,7 @@ cr.define('cr.ui', function() {
         return;
       var selected = this.container.selectedItem;
       switch (e.keyCode) {
-        case 38: {  // Key up.
+        case DropDown.KEYCODE_UP: {
           do {
             selected = selected.previousSibling;
             if (!selected)
@@ -314,7 +325,7 @@ cr.define('cr.ui', function() {
           this.container.selectItem(selected, false);
           break;
         }
-        case 40: {  // Key down.
+        case DropDown.KEYCODE_DOWN: {
           do {
             selected = selected.nextSibling;
             if (!selected)
@@ -323,15 +334,15 @@ cr.define('cr.ui', function() {
           this.container.selectItem(selected, false);
           break;
         }
-        case 27: {  // Esc.
+        case DropDown.KEYCODE_ESC: {
           this.isShown = false;
           break;
         }
-        case 9: {  // Tab.
+        case DropDown.KEYCODE_TAB: {
           this.isShown = false;
           break;
         }
-        case 13: {  // Enter.
+        case DropDown.KEYCODE_ENTER: {
           var button = this.titleButton;
           if (!button.opening) {
             button.focus();
@@ -393,7 +404,7 @@ cr.define('cr.ui', function() {
   DropDown.hide = function(elementId) {
     if (DropDown.activeElementId_ == elementId) {
       DropDown.activeElementId_ = '';
-      chrome.send('networkDropdownHide', []);
+      chrome.send('networkDropdownHide');
     }
   };
 
@@ -401,7 +412,7 @@ cr.define('cr.ui', function() {
    * Refreshes network drop-down. Should be called on language change.
    */
   DropDown.refresh = function() {
-    chrome.send('networkDropdownRefresh', []);
+    chrome.send('networkDropdownRefresh');
   };
 
   return {

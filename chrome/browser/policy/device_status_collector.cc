@@ -4,17 +4,26 @@
 
 #include "chrome/browser/policy/device_status_collector.h"
 
+#include <limits>
+
 #include "base/bind.h"
-#include "base/callback.h"
+#include "base/bind_helpers.h"
+#include "base/location.h"
+#include "base/logging.h"
+#include "base/memory/scoped_ptr.h"
 #include "base/string_number_conversions.h"
-#include "chrome/browser/chromeos/cros_settings.h"
-#include "chrome/browser/chromeos/cros_settings_names.h"
+#include "base/values.h"
+#include "chrome/browser/chromeos/settings/cros_settings.h"
+#include "chrome/browser/chromeos/settings/cros_settings_names.h"
 #include "chrome/browser/chromeos/system/statistics_provider.h"
 #include "chrome/browser/policy/proto/device_management_backend.pb.h"
 #include "chrome/browser/prefs/pref_service.h"
 #include "chrome/browser/prefs/scoped_user_pref_update.h"
 #include "chrome/common/chrome_notification_types.h"
 #include "chrome/common/chrome_version_info.h"
+#include "chrome/common/pref_names.h"
+#include "content/public/browser/notification_details.h"
+#include "content/public/browser/notification_source.h"
 
 using base::Time;
 using base::TimeDelta;
@@ -24,19 +33,41 @@ namespace em = enterprise_management;
 
 namespace {
 // How many seconds of inactivity triggers the idle state.
-const unsigned int kIdleStateThresholdSeconds = 300;
+const int kIdleStateThresholdSeconds = 300;
 
-// The maximum number of time periods stored in the local state.
-const unsigned int kMaxStoredActivePeriods = 500;
+// How many days in the past to store active periods for.
+const unsigned int kMaxStoredPastActivityDays = 30;
 
-// Stores a list of timestamps representing device active periods.
-const char* const kPrefDeviceActivePeriods = "device_status.active_periods";
+// How many days in the future to store active periods for.
+const unsigned int kMaxStoredFutureActivityDays = 2;
 
-bool GetTimestamp(const ListValue* list, int index, int64* out_value) {
-  std::string string_value;
-  if (list->GetString(index, &string_value))
-    return base::StringToInt64(string_value, out_value);
-  return false;
+// How often, in seconds, to update the device location.
+const unsigned int kGeolocationPollIntervalSeconds = 30 * 60;
+
+const int64 kMillisecondsPerDay = Time::kMicrosecondsPerDay / 1000;
+
+const char kLatitude[] = "latitude";
+
+const char kLongitude[] = "longitude";
+
+const char kAltitude[] = "altitude";
+
+const char kAccuracy[] = "accuracy";
+
+const char kAltitudeAccuracy[] = "altitude_accuracy";
+
+const char kHeading[] = "heading";
+
+const char kSpeed[] = "speed";
+
+const char kTimestamp[] = "timestamp";
+
+// Determine the day key (milliseconds since epoch for corresponding day in UTC)
+// for a given |timestamp|.
+int64 TimestampToDayKey(Time timestamp) {
+  Time::Exploded exploded;
+  timestamp.LocalMidnight().LocalExplode(&exploded);
+  return (Time::FromUTCExploded(exploded) - Time::UnixEpoch()).InMilliseconds();
 }
 
 }  // namespace
@@ -45,19 +76,27 @@ namespace policy {
 
 DeviceStatusCollector::DeviceStatusCollector(
     PrefService* local_state,
-    chromeos::system::StatisticsProvider* provider)
-    : max_stored_active_periods_(kMaxStoredActivePeriods),
+    chromeos::system::StatisticsProvider* provider,
+    LocationUpdateRequester location_update_requester)
+    : max_stored_past_activity_days_(kMaxStoredPastActivityDays),
+      max_stored_future_activity_days_(kMaxStoredFutureActivityDays),
       local_state_(local_state),
       last_idle_check_(Time()),
-      last_idle_state_(IDLE_STATE_UNKNOWN),
+      last_reported_day_(0),
+      duration_for_last_reported_day_(0),
+      geolocation_update_in_progress_(false),
       statistics_provider_(provider),
+      ALLOW_THIS_IN_INITIALIZER_LIST(weak_factory_(this)),
+      location_update_requester_(location_update_requester),
       report_version_info_(false),
       report_activity_times_(false),
-      report_boot_mode_(false) {
-  timer_.Start(FROM_HERE,
-               TimeDelta::FromSeconds(
-                   DeviceStatusCollector::kPollIntervalSeconds),
-               this, &DeviceStatusCollector::CheckIdleState);
+      report_boot_mode_(false),
+      report_location_(false) {
+  if (!location_update_requester_)
+    location_update_requester_ = &content::RequestLocationUpdate;
+  idle_poll_timer_.Start(FROM_HERE,
+                         TimeDelta::FromSeconds(kIdlePollIntervalSeconds),
+                         this, &DeviceStatusCollector::CheckIdleState);
 
   cros_settings_ = chromeos::CrosSettings::Get();
 
@@ -67,18 +106,40 @@ DeviceStatusCollector::DeviceStatusCollector(
   cros_settings_->AddSettingsObserver(chromeos::kReportDeviceActivityTimes,
                                       this);
   cros_settings_->AddSettingsObserver(chromeos::kReportDeviceBootMode, this);
+  cros_settings_->AddSettingsObserver(chromeos::kReportDeviceLocation, this);
+
+  // The last known location is persisted in local state. This makes location
+  // information available immediately upon startup and avoids the need to
+  // reacquire the location on every user session change or browser crash.
+  content::Geoposition position;
+  std::string timestamp_str;
+  int64 timestamp;
+  const base::DictionaryValue* location =
+      local_state_->GetDictionary(prefs::kDeviceLocation);
+  if (location->GetDouble(kLatitude, &position.latitude) &&
+      location->GetDouble(kLongitude, &position.longitude) &&
+      location->GetDouble(kAltitude, &position.altitude) &&
+      location->GetDouble(kAccuracy, &position.accuracy) &&
+      location->GetDouble(kAltitudeAccuracy, &position.altitude_accuracy) &&
+      location->GetDouble(kHeading, &position.heading) &&
+      location->GetDouble(kSpeed, &position.speed) &&
+      location->GetString(kTimestamp, &timestamp_str) &&
+      base::StringToInt64(timestamp_str, &timestamp)) {
+    position.timestamp = Time::FromInternalValue(timestamp);
+    position_ = position;
+  }
 
   // Fetch the current values of the policies.
   UpdateReportingSettings();
 
   // Get the the OS and firmware version info.
-  version_loader_.GetVersion(&consumer_,
-                             base::Bind(&DeviceStatusCollector::OnOSVersion,
-                                        base::Unretained(this)),
-                             VersionLoader::VERSION_FULL);
-  version_loader_.GetFirmware(&consumer_,
-                              base::Bind(&DeviceStatusCollector::OnOSFirmware,
-                                         base::Unretained(this)));
+  version_loader_.GetVersion(
+      VersionLoader::VERSION_FULL,
+      base::Bind(&DeviceStatusCollector::OnOSVersion, base::Unretained(this)),
+      &tracker_);
+  version_loader_.GetFirmware(
+      base::Bind(&DeviceStatusCollector::OnOSFirmware, base::Unretained(this)),
+      &tracker_);
 }
 
 DeviceStatusCollector::~DeviceStatusCollector() {
@@ -87,11 +148,15 @@ DeviceStatusCollector::~DeviceStatusCollector() {
   cros_settings_->RemoveSettingsObserver(chromeos::kReportDeviceActivityTimes,
                                          this);
   cros_settings_->RemoveSettingsObserver(chromeos::kReportDeviceBootMode, this);
+  cros_settings_->RemoveSettingsObserver(chromeos::kReportDeviceLocation, this);
 }
 
 // static
 void DeviceStatusCollector::RegisterPrefs(PrefService* local_state) {
-  local_state->RegisterListPref(kPrefDeviceActivePeriods, new ListValue);
+  local_state->RegisterDictionaryPref(prefs::kDeviceActivityTimes,
+                                      new base::DictionaryValue);
+  local_state->RegisterDictionaryPref(prefs::kDeviceLocation,
+                                      new base::DictionaryValue);
 }
 
 void DeviceStatusCollector::CheckIdleState() {
@@ -104,17 +169,27 @@ void DeviceStatusCollector::UpdateReportingSettings() {
   // Attempt to fetch the current value of the reporting settings.
   // If trusted values are not available, register this function to be called
   // back when they are available.
-  bool is_trusted = cros_settings_->GetTrusted(
-      chromeos::kReportDeviceVersionInfo,
+  if (chromeos::CrosSettingsProvider::TRUSTED !=
+      cros_settings_->PrepareTrustedValues(
       base::Bind(&DeviceStatusCollector::UpdateReportingSettings,
-                 base::Unretained(this)));
-  if (is_trusted) {
-    cros_settings_->GetBoolean(
-        chromeos::kReportDeviceVersionInfo, &report_version_info_);
-    cros_settings_->GetBoolean(
-        chromeos::kReportDeviceActivityTimes, &report_activity_times_);
-    cros_settings_->GetBoolean(
-        chromeos::kReportDeviceBootMode, &report_boot_mode_);
+                 weak_factory_.GetWeakPtr()))) {
+    return;
+  }
+  cros_settings_->GetBoolean(
+      chromeos::kReportDeviceVersionInfo, &report_version_info_);
+  cros_settings_->GetBoolean(
+      chromeos::kReportDeviceActivityTimes, &report_activity_times_);
+  cros_settings_->GetBoolean(
+      chromeos::kReportDeviceBootMode, &report_boot_mode_);
+  cros_settings_->GetBoolean(
+      chromeos::kReportDeviceLocation, &report_location_);
+
+  if (report_location_) {
+    ScheduleGeolocationUpdateRequest();
+  } else {
+    geolocation_update_timer_.Stop();
+    position_ = content::Geoposition();
+    local_state_->ClearPref(prefs::kDeviceLocation);
   }
 }
 
@@ -122,36 +197,64 @@ Time DeviceStatusCollector::GetCurrentTime() {
   return Time::Now();
 }
 
-void DeviceStatusCollector::AddActivePeriod(Time start, Time end) {
-  // Maintain the list of active periods in a local_state pref.
-  ListPrefUpdate update(local_state_, kPrefDeviceActivePeriods);
-  ListValue* active_periods = update.Get();
+// Remove all out-of-range activity times from the local store.
+void DeviceStatusCollector::PruneStoredActivityPeriods(Time base_time) {
+  Time min_time =
+      base_time - TimeDelta::FromDays(max_stored_past_activity_days_);
+  Time max_time =
+      base_time + TimeDelta::FromDays(max_stored_future_activity_days_);
+  TrimStoredActivityPeriods(TimestampToDayKey(min_time), 0,
+                            TimestampToDayKey(max_time));
+}
 
-  // Cap the number of active periods that we store.
-  if (active_periods->GetSize() >= 2 * max_stored_active_periods_)
-    return;
+void DeviceStatusCollector::TrimStoredActivityPeriods(int64 min_day_key,
+                                                      int min_day_trim_duration,
+                                                      int64 max_day_key) {
+  const base::DictionaryValue* activity_times =
+      local_state_->GetDictionary(prefs::kDeviceActivityTimes);
 
-  Time epoch = Time::UnixEpoch();
-  int64 start_timestamp = (start - epoch).InMilliseconds();
-  Value* end_value = new StringValue(
-      base::Int64ToString((end - epoch).InMilliseconds()));
-
-  int list_size = active_periods->GetSize();
-  DCHECK(list_size % 2 == 0);
-
-  // Check if this period can be combined with the previous one.
-  if (list_size > 0 && last_idle_state_ == IDLE_STATE_ACTIVE) {
-    int64 last_period_end;
-    if (GetTimestamp(active_periods, list_size - 1, &last_period_end) &&
-        last_period_end == start_timestamp) {
-      active_periods->Set(list_size - 1, end_value);
-      return;
+  scoped_ptr<base::DictionaryValue> copy(activity_times->DeepCopy());
+  for (base::DictionaryValue::Iterator it(*activity_times); it.HasNext();
+       it.Advance()) {
+    int64 timestamp;
+    if (base::StringToInt64(it.key(), &timestamp)) {
+      // Remove data that is too old, or too far in the future.
+      if (timestamp >= min_day_key && timestamp < max_day_key) {
+        if (timestamp == min_day_key) {
+          int new_activity_duration = 0;
+          if (it.value().GetAsInteger(&new_activity_duration)) {
+            new_activity_duration =
+                std::max(new_activity_duration - min_day_trim_duration, 0);
+          }
+          copy->SetInteger(it.key(), new_activity_duration);
+        }
+        continue;
+      }
     }
+    // The entry is out of range or couldn't be parsed. Remove it.
+    copy->Remove(it.key(), NULL);
   }
-  // Add a new period to the list.
-  active_periods->Append(
-      new StringValue(base::Int64ToString(start_timestamp)));
-  active_periods->Append(end_value);
+  local_state_->Set(prefs::kDeviceActivityTimes, *copy);
+}
+
+void DeviceStatusCollector::AddActivePeriod(Time start, Time end) {
+  DCHECK(start < end);
+
+  // Maintain the list of active periods in a local_state pref.
+  DictionaryPrefUpdate update(local_state_, prefs::kDeviceActivityTimes);
+  base::DictionaryValue* activity_times = update.Get();
+
+  // Assign the period to day buckets in local time.
+  Time midnight = start.LocalMidnight();
+  while (midnight < end) {
+    midnight += TimeDelta::FromDays(1);
+    int64 activity = (std::min(end, midnight) - start).InMilliseconds();
+    std::string day_key = base::Int64ToString(TimestampToDayKey(start));
+    int previous_activity = 0;
+    activity_times->GetInteger(day_key, &previous_activity);
+    activity_times->SetInteger(day_key, previous_activity + activity);
+    start = midnight;
+  }
 }
 
 void DeviceStatusCollector::IdleStateCallback(IdleState state) {
@@ -162,44 +265,51 @@ void DeviceStatusCollector::IdleStateCallback(IdleState state) {
   Time now = GetCurrentTime();
 
   if (state == IDLE_STATE_ACTIVE) {
-    unsigned int poll_interval = DeviceStatusCollector::kPollIntervalSeconds;
-
-    // If it's been too long since the last report, assume that the system was
-    // in standby, and only count a single interval of activity.
-    if ((now - last_idle_check_).InSeconds() >= (2 * poll_interval))
-      AddActivePeriod(now - TimeDelta::FromSeconds(poll_interval), now);
-    else
+    // If it's been too long since the last report, or if the activity is
+    // negative (which can happen when the clock changes), assume a single
+    // interval of activity.
+    int active_seconds = (now - last_idle_check_).InSeconds();
+    if (active_seconds < 0 ||
+        active_seconds >= static_cast<int>((2 * kIdlePollIntervalSeconds))) {
+      AddActivePeriod(now - TimeDelta::FromSeconds(kIdlePollIntervalSeconds),
+                      now);
+    } else {
       AddActivePeriod(last_idle_check_, now);
+    }
+
+    PruneStoredActivityPeriods(now);
   }
   last_idle_check_ = now;
-  last_idle_state_ = state;
 }
 
 void DeviceStatusCollector::GetActivityTimes(
     em::DeviceStatusReportRequest* request) {
-  const ListValue* active_periods =
-      local_state_->GetList(kPrefDeviceActivePeriods);
-  em::TimePeriod* time_period;
+  DictionaryPrefUpdate update(local_state_, prefs::kDeviceActivityTimes);
+  base::DictionaryValue* activity_times = update.Get();
 
-  DCHECK(active_periods->GetSize() % 2 == 0);
+  for (base::DictionaryValue::key_iterator it = activity_times->begin_keys();
+       it != activity_times->end_keys(); ++it) {
+    int64 start_timestamp;
+    int activity_milliseconds;
+    if (base::StringToInt64(*it, &start_timestamp) &&
+        activity_times->GetInteger(*it, &activity_milliseconds)) {
+      // This is correct even when there are leap seconds, because when a leap
+      // second occurs, two consecutive seconds have the same timestamp.
+      int64 end_timestamp = start_timestamp + kMillisecondsPerDay;
 
-  int period_count = active_periods->GetSize() / 2;
-  for (int i = 0; i < period_count; i++) {
-    int64 start, end;
-
-    if (!GetTimestamp(active_periods, 2 * i, &start) ||
-        !GetTimestamp(active_periods, 2 * i + 1, &end) ||
-        end < start) {
-      // Something is amiss -- bail out.
+      em::ActiveTimePeriod* active_period = request->add_active_period();
+      em::TimePeriod* period = active_period->mutable_time_period();
+      period->set_start_timestamp(start_timestamp);
+      period->set_end_timestamp(end_timestamp);
+      active_period->set_active_duration(activity_milliseconds);
+      if (start_timestamp >= last_reported_day_) {
+        last_reported_day_ = start_timestamp;
+        duration_for_last_reported_day_ = activity_milliseconds;
+      }
+    } else {
       NOTREACHED();
-      break;
     }
-    time_period = request->add_active_time();
-    time_period->set_start_timestamp(start);
-    time_period->set_end_timestamp(end);
   }
-  ListPrefUpdate update(local_state_, kPrefDeviceActivePeriods);
-  update.Get()->Clear();
 }
 
 void DeviceStatusCollector::GetVersionInfo(
@@ -222,24 +332,72 @@ void DeviceStatusCollector::GetBootMode(
   }
 }
 
-void DeviceStatusCollector::GetStatus(em::DeviceStatusReportRequest* request) {
-  if (report_activity_times_)
-    GetActivityTimes(request);
-
-  if (report_version_info_)
-    GetVersionInfo(request);
-
-  if (report_boot_mode_)
-    GetBootMode(request);
+void DeviceStatusCollector::GetLocation(
+    em::DeviceStatusReportRequest* request) {
+  em::DeviceLocation* location = request->mutable_device_location();
+  if (!position_.Validate()) {
+    location->set_error_code(
+        em::DeviceLocation::ERROR_CODE_POSITION_UNAVAILABLE);
+    location->set_error_message(position_.error_message);
+  } else {
+    location->set_latitude(position_.latitude);
+    location->set_longitude(position_.longitude);
+    location->set_accuracy(position_.accuracy);
+    location->set_timestamp(
+        (position_.timestamp - Time::UnixEpoch()).InMilliseconds());
+    // Lowest point on land is at approximately -400 meters.
+    if (position_.altitude > -10000.)
+      location->set_altitude(position_.altitude);
+    if (position_.altitude_accuracy >= 0.)
+      location->set_altitude_accuracy(position_.altitude_accuracy);
+    if (position_.heading >= 0. && position_.heading <= 360)
+      location->set_heading(position_.heading);
+    if (position_.speed >= 0.)
+      location->set_speed(position_.speed);
+    location->set_error_code(em::DeviceLocation::ERROR_CODE_NONE);
+  }
 }
 
-void DeviceStatusCollector::OnOSVersion(VersionLoader::Handle handle,
-                                        std::string version) {
+void DeviceStatusCollector::GetStatus(em::DeviceStatusReportRequest* request) {
+  // TODO(mnissler): Remove once the old cloud policy stack is retired. The old
+  // stack doesn't support reporting successful submissions back to here, so
+  // just assume whatever ends up in |request| gets submitted successfully.
+  GetDeviceStatus(request);
+  OnSubmittedSuccessfully();
+}
+
+bool DeviceStatusCollector::GetDeviceStatus(
+    em::DeviceStatusReportRequest* status) {
+  if (report_activity_times_)
+    GetActivityTimes(status);
+
+  if (report_version_info_)
+    GetVersionInfo(status);
+
+  if (report_boot_mode_)
+    GetBootMode(status);
+
+  if (report_location_)
+    GetLocation(status);
+
+  return true;
+}
+
+bool DeviceStatusCollector::GetSessionStatus(
+    em::SessionStatusReportRequest* status) {
+  return false;
+}
+
+void DeviceStatusCollector::OnSubmittedSuccessfully() {
+  TrimStoredActivityPeriods(last_reported_day_, duration_for_last_reported_day_,
+                            std::numeric_limits<int64>::max());
+}
+
+void DeviceStatusCollector::OnOSVersion(const std::string& version) {
   os_version_ = version;
 }
 
-void DeviceStatusCollector::OnOSFirmware(VersionLoader::Handle handle,
-                                         std::string version) {
+void DeviceStatusCollector::OnOSFirmware(const std::string& version) {
   firmware_version_ = version;
 }
 
@@ -251,6 +409,61 @@ void DeviceStatusCollector::Observe(
     UpdateReportingSettings();
   else
     NOTREACHED();
+}
+
+void DeviceStatusCollector::ScheduleGeolocationUpdateRequest() {
+  if (geolocation_update_timer_.IsRunning() || geolocation_update_in_progress_)
+    return;
+
+  if (position_.Validate()) {
+    TimeDelta elapsed = GetCurrentTime() - position_.timestamp;
+    TimeDelta interval =
+        TimeDelta::FromSeconds(kGeolocationPollIntervalSeconds);
+    if (elapsed > interval) {
+      geolocation_update_in_progress_ = true;
+      location_update_requester_(base::Bind(
+          &DeviceStatusCollector::ReceiveGeolocationUpdate,
+          weak_factory_.GetWeakPtr()));
+    } else {
+      geolocation_update_timer_.Start(
+          FROM_HERE,
+          interval - elapsed,
+          this,
+          &DeviceStatusCollector::ScheduleGeolocationUpdateRequest);
+    }
+  } else {
+    geolocation_update_in_progress_ = true;
+    location_update_requester_(base::Bind(
+        &DeviceStatusCollector::ReceiveGeolocationUpdate,
+        weak_factory_.GetWeakPtr()));
+
+  }
+}
+
+void DeviceStatusCollector::ReceiveGeolocationUpdate(
+    const content::Geoposition& position) {
+  geolocation_update_in_progress_ = false;
+
+  // Ignore update if device location reporting has since been disabled.
+  if (!report_location_)
+    return;
+
+  if (position.Validate()) {
+    position_ = position;
+    base::DictionaryValue location;
+    location.SetDouble(kLatitude, position.latitude);
+    location.SetDouble(kLongitude, position.longitude);
+    location.SetDouble(kAltitude, position.altitude);
+    location.SetDouble(kAccuracy, position.accuracy);
+    location.SetDouble(kAltitudeAccuracy, position.altitude_accuracy);
+    location.SetDouble(kHeading, position.heading);
+    location.SetDouble(kSpeed, position.speed);
+    location.SetString(kTimestamp,
+        base::Int64ToString(position.timestamp.ToInternalValue()));
+    local_state_->Set(prefs::kDeviceLocation, location);
+  }
+
+  ScheduleGeolocationUpdateRequest();
 }
 
 }  // namespace policy

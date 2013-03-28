@@ -1,4 +1,4 @@
-// Copyright (c) 2010 Google Inc.
+// Copyright (c) 2012 Google Inc.
 // All rights reserved.
 //
 // Redistribution and use in source and binary forms, with or without
@@ -31,35 +31,68 @@
 #define CLIENT_LINUX_HANDLER_MINIDUMP_DESCRIPTOR_H_
 
 #include <assert.h>
-#include <stdio.h>
+#include <sys/types.h>
 
-// The MinidumpDescriptor describes how to access a Minidump file, either
-// with a path or with a file descriptor.
+#include <string>
 
+#include "common/using_std_string.h"
+
+// The MinidumpDescriptor describes how to access a minidump: it can contain
+// either a file descriptor or a path.
+// Note that when using files, it is created with the path to a directory.
+// The actual path where the minidump is generated is created by this class.
 namespace google_breakpad {
 
 class MinidumpDescriptor {
  public:
-  MinidumpDescriptor() : path_(NULL), fd_(-1) {}
+  MinidumpDescriptor() : fd_(-1) {}
 
-  explicit MinidumpDescriptor(const char* path) : path_(path), fd_(-1) {
-    assert(path_);
+  explicit MinidumpDescriptor(const string& directory)
+      : fd_(-1),
+        directory_(directory),
+        c_path_(NULL),
+        size_limit_(-1) {
+    assert(!directory.empty());
   }
 
-  explicit MinidumpDescriptor(const int fd) : path_(NULL), fd_(fd) {
+  explicit MinidumpDescriptor(int fd)
+      : fd_(fd),
+        c_path_(NULL),
+        size_limit_(-1) {
     assert(fd != -1);
   }
 
-  bool IsFD() const { return !path_; }
+  explicit MinidumpDescriptor(const MinidumpDescriptor& descriptor);
+  MinidumpDescriptor& operator=(const MinidumpDescriptor& descriptor);
+
+  bool IsFD() const { return fd_ != -1; }
 
   int fd() const { return fd_; }
-  void set_fd(const int fd) { fd_ = fd;}
 
-  const char* path() const { return path_; }
+  string directory() const { return directory_; }
+
+  const char* path() const { return c_path_; }
+
+  // Updates the path so it is unique.
+  // Should be called from a normal context: this methods uses the heap.
+  void UpdatePath();
+
+  off_t size_limit() const { return size_limit_; }
+  void set_size_limit(off_t limit) { size_limit_ = limit; }
 
  private:
-  const char* path_;
+  // The file descriptor where the minidump is generated.
   int fd_;
+
+  // The directory where the minidump should be generated.
+  string directory_;
+  // The full path to the generated minidump.
+  string path_;
+  // The C string of |path_|. Precomputed so it can be access from a compromised
+  // context.
+  const char* c_path_;
+
+  off_t size_limit_;
 };
 
 }  // namespace google_breakpad

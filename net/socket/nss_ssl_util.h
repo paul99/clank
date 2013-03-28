@@ -1,4 +1,4 @@
-// Copyright (c) 2010 The Chromium Authors. All rights reserved.
+// Copyright (c) 2012 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -10,12 +10,14 @@
 
 #include <prerror.h>
 
+#include "net/base/net_export.h"
+
 namespace net {
 
 class BoundNetLog;
 
 // Initalize NSS SSL library.
-void EnsureNSSSSLInit();
+NET_EXPORT void EnsureNSSSSLInit();
 
 // Log a failed NSS funcion call.
 void LogFailedNSSFunction(const BoundNetLog& net_log,
@@ -27,9 +29,6 @@ PRErrorCode MapErrorToNSS(int result);
 
 // Map NSS error code to network error code.
 int MapNSSError(PRErrorCode err);
-
-// Map NSS error code from the first SSL handshake to network error code.
-int MapNSSHandshakeError(PRErrorCode err);
 
 }  // namespace net
 

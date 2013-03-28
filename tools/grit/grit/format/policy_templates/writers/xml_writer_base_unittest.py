@@ -1,5 +1,5 @@
-#!/usr/bin/python2.4
-# Copyright (c) 2011 The Chromium Authors. All rights reserved.
+#!/usr/bin/env python
+# Copyright (c) 2012 The Chromium Authors. All rights reserved.
 # Use of this source code is governed by a BSD-style license that can be
 # found in the LICENSE file.
 
@@ -7,12 +7,8 @@
 """Unittests for grit.format.policy_templates.writers.admx_writer."""
 
 
-import os
-import sys
+import re
 import unittest
-
-
-from xml.dom import minidom
 
 
 class XmlWriterBaseTest(unittest.TestCase):
@@ -26,8 +22,14 @@ class XmlWriterBaseTest(unittest.TestCase):
 
     Return: XML of the chrildren of the parent node.
     '''
-    return ''.join(
-      child.toprettyxml(indent='  ') for child in parent.childNodes)
+    raw_pretty_xml = ''.join(
+        child.toprettyxml(indent='  ') for child in parent.childNodes)
+    # Python 2.6.5 which is present in Lucid has bug in its pretty print
+    # function which produces new lines around string literals. This has been
+    # fixed in Precise which has Python 2.7.3 but we have to keep compatibility
+    # with both for now.
+    text_re = re.compile('>\n\s+([^<>\s].*?)\n\s*</', re.DOTALL)    
+    return text_re.sub('>\g<1></', raw_pretty_xml)
 
   def AssertXMLEquals(self, output, expected_output):
     '''Asserts if the passed XML arguements are equal.

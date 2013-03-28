@@ -4,7 +4,6 @@
 
 #ifndef ASH_SHELL_WINDOW_TYPE_LAUNCHER_H_
 #define ASH_SHELL_WINDOW_TYPE_LAUNCHER_H_
-#pragma once
 
 #include "ui/views/context_menu_controller.h"
 #include "ui/views/controls/button/button.h"
@@ -44,18 +43,17 @@ class WindowTypeLauncher : public views::WidgetDelegateView,
 
   // Overridden from views::View:
   virtual void OnPaint(gfx::Canvas* canvas) OVERRIDE;
-  virtual void Layout() OVERRIDE;
-  virtual bool OnMousePressed(const views::MouseEvent& event) OVERRIDE;
+  virtual bool OnMousePressed(const ui::MouseEvent& event) OVERRIDE;
 
   // Overridden from views::WidgetDelegate:
   virtual views::View* GetContentsView() OVERRIDE;
   virtual bool CanResize() const OVERRIDE;
   virtual string16 GetWindowTitle() const OVERRIDE;
-  virtual views::NonClientFrameView* CreateNonClientFrameView() OVERRIDE;
+  virtual bool CanMaximize() const OVERRIDE;
 
   // Overridden from views::ButtonListener:
   virtual void ButtonPressed(views::Button* sender,
-                             const views::Event& event) OVERRIDE;
+                             const ui::Event& event) OVERRIDE;
 
 #if !defined(OS_MACOSX)
   // Overridden from views::MenuDelegate:
@@ -63,20 +61,24 @@ class WindowTypeLauncher : public views::WidgetDelegateView,
 
   // Override from views::ContextMenuController:
   virtual void ShowContextMenuForView(views::View* source,
-                                      const gfx::Point& p,
-                                      bool is_mouse_gesture) OVERRIDE;
+                                      const gfx::Point& point) OVERRIDE;
 #endif  // !defined(OS_MACOSX)
 
   views::NativeTextButton* create_button_;
+  views::NativeTextButton* create_persistant_button_;
+  views::NativeTextButton* panel_button_;
   views::NativeTextButton* create_nonresizable_button_;
   views::NativeTextButton* bubble_button_;
   views::NativeTextButton* lock_button_;
   views::NativeTextButton* widgets_button_;
   views::NativeTextButton* system_modal_button_;
   views::NativeTextButton* window_modal_button_;
+  views::NativeTextButton* child_modal_button_;
   views::NativeTextButton* transient_button_;
   views::NativeTextButton* examples_button_;
   views::NativeTextButton* show_hide_window_button_;
+  views::NativeTextButton* show_screensaver_;
+  views::NativeTextButton* show_web_notification_;
 #if !defined(OS_MACOSX)
   scoped_ptr<views::MenuRunner> menu_runner_;
 #endif

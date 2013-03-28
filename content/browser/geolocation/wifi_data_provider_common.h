@@ -1,10 +1,9 @@
-// Copyright (c) 2011 The Chromium Authors. All rights reserved.
+// Copyright (c) 2012 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
 #ifndef CONTENT_BROWSER_GEOLOCATION_WIFI_DATA_PROVIDER_COMMON_H_
 #define CONTENT_BROWSER_GEOLOCATION_WIFI_DATA_PROVIDER_COMMON_H_
-#pragma once
 
 #include <assert.h>
 
@@ -15,6 +14,8 @@
 #include "base/threading/thread.h"
 #include "content/browser/geolocation/device_data_provider.h"
 #include "content/common/content_export.h"
+
+namespace content {
 
 // Converts a MAC address stored as an array of uint8 to a string.
 string16 MacAddressAsString16(const uint8 mac_as_int[6]);
@@ -123,5 +124,7 @@ class CONTENT_EXPORT WifiDataProviderCommon
 
   DISALLOW_COPY_AND_ASSIGN(WifiDataProviderCommon);
 };
+
+}  // namespace content
 
 #endif  // CONTENT_BROWSER_GEOLOCATION_WIFI_DATA_PROVIDER_COMMON_H_

@@ -1,4 +1,4 @@
-// Copyright (c) 2011 The Chromium Authors. All rights reserved.
+// Copyright (c) 2012 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -9,7 +9,9 @@
 
 #ifndef NET_URL_REQUEST_URL_REQUEST_CONTEXT_H_
 #define NET_URL_REQUEST_URL_REQUEST_CONTEXT_H_
-#pragma once
+
+#include <set>
+#include <string>
 
 #include "base/memory/ref_counted.h"
 #include "base/memory/scoped_ptr.h"
@@ -19,8 +21,10 @@
 #include "net/base/net_log.h"
 #include "net/base/ssl_config_service.h"
 #include "net/base/transport_security_state.h"
+#include "net/http/http_network_session.h"
 #include "net/http/http_server_properties.h"
 #include "net/ftp/ftp_auth_cache.h"
+#include "net/url_request/url_request.h"
 
 namespace net {
 class CertVerifier;
@@ -30,28 +34,32 @@ class FtpTransactionFactory;
 class HostResolver;
 class HttpAuthHandlerFactory;
 class HttpTransactionFactory;
+class HttpUserAgentSettings;
 class NetworkDelegate;
-class OriginBoundCertService;
+class ServerBoundCertService;
 class ProxyService;
 class URLRequest;
 class URLRequestJobFactory;
+class URLRequestThrottlerManager;
 
 // Subclass to provide application-specific context for URLRequest
 // instances. Note that URLRequestContext typically does not provide storage for
 // these member variables, since they may be shared. For the ones that aren't
 // shared, URLRequestContextStorage can be helpful in defining their storage.
 class NET_EXPORT URLRequestContext
-    : public base::RefCountedThreadSafe<URLRequestContext>,
-      NON_EXPORTED_BASE(public base::NonThreadSafe) {
+    : NON_EXPORTED_BASE(public base::NonThreadSafe) {
  public:
   URLRequestContext();
-
-  base::WeakPtr<URLRequestContext> GetWeakPtr() {
-    return weak_factory_.GetWeakPtr();
-  }
+  virtual ~URLRequestContext();
 
   // Copies the state from |other| into this context.
-  void CopyFrom(URLRequestContext* other);
+  void CopyFrom(const URLRequestContext* other);
+
+  // May return NULL if this context doesn't have an associated network session.
+  const HttpNetworkSession::Params* GetNetworkSessionParams() const;
+
+  URLRequest* CreateRequest(
+      const GURL& url, URLRequest::Delegate* delegate) const;
 
   NetLog* net_log() const {
     return net_log_;
@@ -77,13 +85,13 @@ class NET_EXPORT URLRequestContext
     cert_verifier_ = cert_verifier;
   }
 
-  OriginBoundCertService* origin_bound_cert_service() const {
-    return origin_bound_cert_service_;
+  ServerBoundCertService* server_bound_cert_service() const {
+    return server_bound_cert_service_;
   }
 
-  void set_origin_bound_cert_service(
-      OriginBoundCertService* origin_bound_cert_service) {
-    origin_bound_cert_service_ = origin_bound_cert_service;
+  void set_server_bound_cert_service(
+      ServerBoundCertService* server_bound_cert_service) {
+    server_bound_cert_service_ = server_bound_cert_service;
   }
 
   FraudulentCertificateReporter* fraudulent_certificate_reporter() const {
@@ -108,7 +116,7 @@ class NET_EXPORT URLRequestContext
 
   // Gets the HTTP Authentication Handler Factory for this context.
   // The factory is only valid for the lifetime of this URLRequestContext
-  HttpAuthHandlerFactory* http_auth_handler_factory() {
+  HttpAuthHandlerFactory* http_auth_handler_factory() const {
     return http_auth_handler_factory_;
   }
   void set_http_auth_handler_factory(HttpAuthHandlerFactory* factory) {
@@ -158,45 +166,59 @@ class NET_EXPORT URLRequestContext
   }
 
   // Gets the FTP authentication cache for this context.
-  FtpAuthCache* ftp_auth_cache() const { return ftp_auth_cache_.get(); }
+  FtpAuthCache* ftp_auth_cache() const {
+#if !defined(DISABLE_FTP_SUPPORT)
+    return ftp_auth_cache_.get();
+#else
+    return NULL;
+#endif
+  }
 
+  // ---------------------------------------------------------------------------
+  // Legacy accessors that delegate to http_user_agent_settings_.
+  // TODO(pauljensen): Remove after all clients are updated to directly access
+  // http_user_agent_settings_.
   // Gets the value of 'Accept-Charset' header field.
-  const std::string& accept_charset() const { return accept_charset_; }
-  void set_accept_charset(const std::string& accept_charset) {
-    accept_charset_ = accept_charset;
-  }
-
+  std::string GetAcceptCharset() const;
   // Gets the value of 'Accept-Language' header field.
-  const std::string& accept_language() const { return accept_language_; }
-  void set_accept_language(const std::string& accept_language) {
-    accept_language_ = accept_language;
-  }
-
+  std::string GetAcceptLanguage() const;
   // Gets the UA string to use for the given URL.  Pass an invalid URL (such as
-  // GURL()) to get the default UA string.  Subclasses should override this
-  // method to provide a UA string.
-  virtual const std::string& GetUserAgent(const GURL& url) const;
-
-  // In general, referrer_charset is not known when URLRequestContext is
-  // constructed. So, we need a setter.
-  const std::string& referrer_charset() const { return referrer_charset_; }
-  void set_referrer_charset(const std::string& charset) {
-    referrer_charset_ = charset;
-  }
+  // GURL()) to get the default UA string.
+  std::string GetUserAgent(const GURL& url) const;
+  // ---------------------------------------------------------------------------
 
   const URLRequestJobFactory* job_factory() const { return job_factory_; }
   void set_job_factory(const URLRequestJobFactory* job_factory) {
     job_factory_ = job_factory;
   }
 
- protected:
-  friend class base::RefCountedThreadSafe<URLRequestContext>;
+  // May be NULL.
+  URLRequestThrottlerManager* throttler_manager() const {
+    return throttler_manager_;
+  }
+  void set_throttler_manager(URLRequestThrottlerManager* throttler_manager) {
+    throttler_manager_ = throttler_manager;
+  }
 
-  virtual ~URLRequestContext();
+  // Gets the URLRequest objects that hold a reference to this
+  // URLRequestContext.
+  std::set<const URLRequest*>* url_requests() const {
+    return url_requests_.get();
+  }
+
+  void AssertNoURLRequests() const;
+
+  // Get the underlying |HttpUserAgentSettings| implementation that provides
+  // the HTTP Accept-Language, Accept-Charset and User-Agent header values.
+  const HttpUserAgentSettings* http_user_agent_settings() const {
+    return http_user_agent_settings_;
+  }
+  void set_http_user_agent_settings(
+      HttpUserAgentSettings* http_user_agent_settings) {
+    http_user_agent_settings_ = http_user_agent_settings;
+  }
 
  private:
-  base::WeakPtrFactory<URLRequestContext> weak_factory_;
-
   // ---------------------------------------------------------------------------
   // Important: When adding any new members below, consider whether they need to
   // be added to CopyFrom.
@@ -207,30 +229,33 @@ class NET_EXPORT URLRequestContext
   NetLog* net_log_;
   HostResolver* host_resolver_;
   CertVerifier* cert_verifier_;
-  OriginBoundCertService* origin_bound_cert_service_;
+  ServerBoundCertService* server_bound_cert_service_;
   FraudulentCertificateReporter* fraudulent_certificate_reporter_;
   HttpAuthHandlerFactory* http_auth_handler_factory_;
   ProxyService* proxy_service_;
   scoped_refptr<SSLConfigService> ssl_config_service_;
   NetworkDelegate* network_delegate_;
   HttpServerProperties* http_server_properties_;
+  HttpUserAgentSettings* http_user_agent_settings_;
   scoped_refptr<CookieStore> cookie_store_;
   TransportSecurityState* transport_security_state_;
+#if !defined(DISABLE_FTP_SUPPORT)
   scoped_ptr<FtpAuthCache> ftp_auth_cache_;
-  std::string accept_language_;
-  std::string accept_charset_;
+#endif
   // The charset of the referrer where this request comes from. It's not
   // used in communication with a server but is used to construct a suggested
   // filename for file download.
-  std::string referrer_charset_;
   HttpTransactionFactory* http_transaction_factory_;
   FtpTransactionFactory* ftp_transaction_factory_;
   const URLRequestJobFactory* job_factory_;
+  URLRequestThrottlerManager* throttler_manager_;
 
   // ---------------------------------------------------------------------------
   // Important: When adding any new members below, consider whether they need to
   // be added to CopyFrom.
   // ---------------------------------------------------------------------------
+
+  scoped_ptr<std::set<const URLRequest*> > url_requests_;
 
   DISALLOW_COPY_AND_ASSIGN(URLRequestContext);
 };

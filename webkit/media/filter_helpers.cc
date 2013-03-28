@@ -4,78 +4,94 @@
 
 #include "webkit/media/filter_helpers.h"
 
+#include "base/bind.h"
+#include "base/command_line.h"
 #include "media/base/filter_collection.h"
-#include "media/base/message_loop_factory.h"
-#include "media/filters/chunk_demuxer_factory.h"
-#include "media/filters/dummy_demuxer_factory.h"
+#include "media/base/media_switches.h"
+#include "media/filters/chunk_demuxer.h"
+#include "media/filters/dummy_demuxer.h"
 #include "media/filters/ffmpeg_audio_decoder.h"
-#include "media/filters/ffmpeg_demuxer_factory.h"
+#include "media/filters/ffmpeg_demuxer.h"
 #include "media/filters/ffmpeg_video_decoder.h"
+#include "media/filters/opus_audio_decoder.h"
 #include "third_party/WebKit/Source/WebKit/chromium/public/platform/WebURL.h"
 #include "webkit/media/media_stream_client.h"
 
 namespace webkit_media {
 
 // Constructs and adds the default audio/video decoders to |filter_collection|.
+// Note that decoders in the |filter_collection| are ordered. The first
+// audio/video decoder in the |filter_collection| that supports the input
+// audio/video stream will be selected as the audio/video decoder in the media
+// pipeline. This is done by trying to initialize the decoder with the input
+// stream. Some decoder may only accept certain types of streams.
 static void AddDefaultDecodersToCollection(
-    media::MessageLoopFactory* message_loop_factory,
+    const scoped_refptr<base::MessageLoopProxy>& message_loop,
     media::FilterCollection* filter_collection) {
-  filter_collection->AddAudioDecoder(new media::FFmpegAudioDecoder(
-      message_loop_factory->GetMessageLoop("AudioDecoderThread")));
-  filter_collection->AddVideoDecoder(new media::FFmpegVideoDecoder(
-      message_loop_factory->GetMessageLoop("VideoDecoderThread")));
+
+  scoped_refptr<media::FFmpegAudioDecoder> ffmpeg_audio_decoder =
+      new media::FFmpegAudioDecoder(message_loop);
+  filter_collection->GetAudioDecoders()->push_back(ffmpeg_audio_decoder);
+
+  const CommandLine* cmd_line = CommandLine::ForCurrentProcess();
+  if (cmd_line->HasSwitch(switches::kEnableOpusPlayback)) {
+    scoped_refptr<media::OpusAudioDecoder> opus_audio_decoder =
+        new media::OpusAudioDecoder(message_loop);
+    filter_collection->GetAudioDecoders()->push_back(opus_audio_decoder);
+  }
+
+  scoped_refptr<media::FFmpegVideoDecoder> ffmpeg_video_decoder =
+      new media::FFmpegVideoDecoder(message_loop);
+  filter_collection->GetVideoDecoders()->push_back(ffmpeg_video_decoder);
 }
 
-bool BuildMediaStreamCollection(const WebKit::WebURL& url,
-                                MediaStreamClient* client,
-                                media::MessageLoopFactory* message_loop_factory,
-                                media::FilterCollection* filter_collection) {
+bool BuildMediaStreamCollection(
+    const WebKit::WebURL& url,
+    MediaStreamClient* client,
+    const scoped_refptr<base::MessageLoopProxy>& message_loop,
+    media::FilterCollection* filter_collection) {
   if (!client)
     return false;
 
   scoped_refptr<media::VideoDecoder> video_decoder = client->GetVideoDecoder(
-      url, message_loop_factory);
+      url, message_loop);
   if (!video_decoder)
     return false;
 
-  filter_collection->AddVideoDecoder(video_decoder);
+  // Remove all other decoders and just use the MediaStream one.
+  // NOTE: http://crbug.com/110800 is about replacing this ad-hockery with
+  // something more designed.
+  filter_collection->GetVideoDecoders()->clear();
+  filter_collection->GetVideoDecoders()->push_back(video_decoder);
 
-  // TODO(vrk/wjia): Setting true for local_source is under the assumption
-  // that the MediaStream represents a local webcam. This will need to
-  // change in the future when GetVideoDecoder is no longer hardcoded to
-  // only return CaptureVideoDecoders.
-  scoped_ptr<media::DemuxerFactory> demuxer_factory(
-      new media::DummyDemuxerFactory(true, false, true));
-  filter_collection->SetDemuxerFactory(demuxer_factory.Pass());
+  filter_collection->SetDemuxer(new media::DummyDemuxer(true, false));
 
   return true;
 }
 
-bool BuildMediaSourceCollection(const WebKit::WebURL& url,
-                                const WebKit::WebURL& media_source_url,
-                                media::ChunkDemuxerClient* client,
-                                media::MessageLoopFactory* message_loop_factory,
-                                media::FilterCollection* filter_collection) {
-  if (media_source_url.isEmpty() || url != media_source_url)
-    return false;
+void BuildMediaSourceCollection(
+    const scoped_refptr<media::ChunkDemuxer>& demuxer,
+    const scoped_refptr<base::MessageLoopProxy>& message_loop,
+    media::FilterCollection* filter_collection) {
+  DCHECK(demuxer);
+  filter_collection->SetDemuxer(demuxer);
 
-  scoped_ptr<media::DemuxerFactory> demuxer_factory(
-      new media::ChunkDemuxerFactory(client));
-  filter_collection->SetDemuxerFactory(demuxer_factory.Pass());
+  // Remove GPUVideoDecoder until it supports codec config changes.
+  // TODO(acolwell): Remove this once http://crbug.com/151045 is fixed.
+  DCHECK_LE(filter_collection->GetVideoDecoders()->size(), 1u);
+  filter_collection->GetVideoDecoders()->clear();
 
-  AddDefaultDecodersToCollection(message_loop_factory, filter_collection);
-  return true;
+  AddDefaultDecodersToCollection(message_loop, filter_collection);
 }
 
-void BuildDefaultCollection(const scoped_refptr<media::DataSource>& data_source,
-                            media::MessageLoopFactory* message_loop_factory,
-                            media::FilterCollection* filter_collection) {
-  scoped_ptr<media::DemuxerFactory> demuxer_factory(
-      new media::FFmpegDemuxerFactory(
-          data_source, message_loop_factory->GetMessageLoop("PipelineThread")));
-  filter_collection->SetDemuxerFactory(demuxer_factory.Pass());
+void BuildDefaultCollection(
+    const scoped_refptr<media::DataSource>& data_source,
+    const scoped_refptr<base::MessageLoopProxy>& message_loop,
+    media::FilterCollection* filter_collection) {
+  filter_collection->SetDemuxer(new media::FFmpegDemuxer(
+      message_loop, data_source));
 
-  AddDefaultDecodersToCollection(message_loop_factory, filter_collection);
+  AddDefaultDecodersToCollection(message_loop, filter_collection);
 }
 
 }  // webkit_media

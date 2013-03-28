@@ -4,7 +4,6 @@
 
 #ifndef SKIA_EXT_VECTOR_PLATFORM_DEVICE_EMF_WIN_H_
 #define SKIA_EXT_VECTOR_PLATFORM_DEVICE_EMF_WIN_H_
-#pragma once
 
 #include "base/basictypes.h"
 #include "base/compiler_specific.h"
@@ -18,7 +17,7 @@ namespace skia {
 // SkCanvas to draw into. This specific device is not not backed by a surface
 // and is thus unreadable. This is because the backend is completely vectorial.
 // This device is a simple wrapper over a Windows device context (HDC) handle.
-class VectorPlatformDeviceEmf : public PlatformDevice, public SkDevice {
+class VectorPlatformDeviceEmf : public SkDevice, public PlatformDevice {
  public:
   SK_API static SkDevice* CreateDevice(int width, int height, bool isOpaque,
                                        HANDLE shared_section);
@@ -33,8 +32,6 @@ class VectorPlatformDeviceEmf : public PlatformDevice, public SkDevice {
   virtual PlatformSurface BeginPlatformPaint() OVERRIDE;
   virtual void DrawToNativeContext(HDC dc, int x, int y,
                                    const RECT* src_rect) OVERRIDE;
-  virtual bool AlphaBlendUsed() const OVERRIDE { return alpha_blend_used_; }
-
   // SkDevice methods.
   virtual uint32_t getDeviceCapabilities();
   virtual void drawPaint(const SkDraw& draw, const SkPaint& paint) OVERRIDE;
@@ -127,11 +124,14 @@ class VectorPlatformDeviceEmf : public PlatformDevice, public SkDevice {
   // Previously selected pen before the current drawing.
   HGDIOBJ previous_pen_;
 
-  // True if AlphaBlend() was called during this print.
-  bool alpha_blend_used_;
-
   DISALLOW_COPY_AND_ASSIGN(VectorPlatformDeviceEmf);
 };
+
+typedef void (*SkiaEnsureTypefaceCharactersAccessible)
+    (const LOGFONT& font, const wchar_t* text, unsigned int text_length);
+
+SK_API void SetSkiaEnsureTypefaceCharactersAccessible(
+    SkiaEnsureTypefaceCharactersAccessible func);
 
 }  // namespace skia
 

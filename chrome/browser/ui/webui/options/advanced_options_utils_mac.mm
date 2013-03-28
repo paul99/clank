@@ -12,6 +12,8 @@
 
 using content::WebContents;
 
+namespace options {
+
 void AdvancedOptionsUtilities::ShowNetworkProxySettings(
       WebContents* web_contents) {
   NSArray* itemsToOpen = [NSArray arrayWithObject:[NSURL fileURLWithPath:
@@ -42,3 +44,5 @@ void AdvancedOptionsUtilities::ShowManageSSLCertificates(
    additionalEventParamDescriptor:nil
    launchIdentifier:nil];
 }
+
+}  // namespace options

@@ -7,8 +7,11 @@
  */
 
 cr.define('login', function() {
+  // Gaia loading time after which portal check should be fired.
+  /** @const */ var GAIA_LOADING_PORTAL_SUSSPECT_TIME_SEC = 5;
+
   // Maximum Gaia loading time in seconds.
-  const MAX_GAIA_LOADING_TIME_SEC = 60;
+  /** @const */ var MAX_GAIA_LOADING_TIME_SEC = 60;
 
   /**
    * Creates a new sign in screen div.
@@ -48,7 +51,7 @@ cr.define('login', function() {
 
     // Whether local version of Gaia page is used.
     // @type {boolean}
-    isLocal: false,
+    isLocal_: false,
 
     // Whether offline login is allowed.
     // @type {boolean}
@@ -56,12 +59,12 @@ cr.define('login', function() {
 
     // Email of the user, which is logging in using offline mode.
     // @type {string}
-    email: "",
+    email: '',
 
     // Timer id of pending load.
     loadingTimer_: undefined,
 
-    /** @inheritDoc */
+    /** @override */
     decorate: function() {
       this.frame_ = $('signin-frame');
 
@@ -77,6 +80,23 @@ cr.define('login', function() {
     },
 
     /**
+     * Returns true if local version of Gaia is used.
+     * @type {boolean}
+     */
+    get isLocal() {
+      return this.isLocal_;
+    },
+
+    /**
+     * Sets whether local version of Gaia is used.
+     * @param {boolean} value Whether local version of Gaia is used.
+     */
+    set isLocal(value) {
+      this.isLocal_ = value;
+      chrome.send('updateGaiaIsLocal', [value]);
+    },
+
+    /**
      * Shows/hides loading UI.
      * @param {boolean} show True to show loading UI.
      * @private
@@ -84,10 +104,22 @@ cr.define('login', function() {
     showLoadingUI_: function(show) {
       $('gaia-loading').hidden = !show;
       this.frame_.hidden = show;
+      $('signin-right').hidden = show;
+      $('enterprise-info-container').hidden = show;
+    },
 
-      // Sign-in right panel is hidden if all its items are hidden.
-      $('signin-right').hidden = show ||
-          ($('createAccount').hidden && $('guestSignin').hidden);
+    /**
+     * Handler for Gaia loading suspiciously long timeout.
+     * @private
+     */
+    onLoadingSuspiciouslyLong_: function() {
+      if (this != Oobe.getInstance().currentScreen)
+        return;
+      chrome.send('fixCaptivePortal');
+      this.loadingTimer_ = window.setTimeout(
+          this.onLoadingTimeOut_.bind(this),
+          (MAX_GAIA_LOADING_TIME_SEC - GAIA_LOADING_PORTAL_SUSSPECT_TIME_SEC) *
+          1000);
     },
 
     /**
@@ -97,7 +129,7 @@ cr.define('login', function() {
     onLoadingTimeOut_: function() {
       this.loadingTimer_ = undefined;
       this.clearRetry_();
-      $('error-message').showLoadingTimeoutError();
+      chrome.send('showLoadingTimeoutError');
     },
 
     /**
@@ -118,8 +150,8 @@ cr.define('login', function() {
     startLoadingTimer_: function() {
       this.clearLoadingTimer_();
       this.loadingTimer_ = window.setTimeout(
-          this.onLoadingTimeOut_.bind(this),
-          MAX_GAIA_LOADING_TIME_SEC * 1000);
+          this.onLoadingSuspiciouslyLong_.bind(this),
+          GAIA_LOADING_PORTAL_SUSSPECT_TIME_SEC * 1000);
     },
 
     /**
@@ -138,10 +170,13 @@ cr.define('login', function() {
 
     /**
      * Event handler that is invoked just before the frame is shown.
-     * @param data {string} Screen init payload. Url of auth extension start
-     *        page.
+     * @param {string} data Screen init payload. Url of auth extension start
+     *                      page.
      */
     onBeforeShow: function(data) {
+      chrome.send('loginUIStateChanged', ['gaia', true]);
+      $('login-header-bar').signinUIState = SIGNIN_UI_STATE.GAIA_SIGNIN;
+
       // Announce the name of the screen, if accessibility is on.
       $('gaia-signin-aria-label').setAttribute(
           'aria-label', localStrings.getString('signinScreenTitle'));
@@ -152,6 +187,14 @@ cr.define('login', function() {
     },
 
     /**
+     * Event handler that is invoked just before the screen is hidden.
+     */
+    onBeforeHide: function() {
+      chrome.send('loginUIStateChanged', ['gaia', false]);
+      $('login-header-bar').signinUIState = SIGNIN_UI_STATE.HIDDEN;
+    },
+
+    /**
      * Loads the authentication extension into the iframe.
      * @param {Object} data Extension parameters bag.
      * @private
@@ -159,7 +202,7 @@ cr.define('login', function() {
     loadAuthExtension_: function(data) {
       this.silentLoad_ = data.silentLoad;
       this.isLocal = data.isLocal;
-      this.email = "";
+      this.email = '';
 
       // Offline sign-in is only allowed for the case when users aren't shown
       // because there is no other way for an user to enter when device is
@@ -171,6 +214,8 @@ cr.define('login', function() {
       var params = [];
       if (data.gaiaOrigin)
         params.push('gaiaOrigin=' + encodeURIComponent(data.gaiaOrigin));
+      if (data.gaiaUrlPath)
+        params.push('gaiaUrlPath=' + encodeURIComponent(data.gaiaUrlPath));
       if (data.hl)
         params.push('hl=' + encodeURIComponent(data.hl));
       if (data.localizedStrings) {
@@ -191,7 +236,7 @@ cr.define('login', function() {
         url += '?' + params.join('&');
 
       if (data.forceReload || this.extensionUrl_ != url) {
-        console.log('Opening extension: ' + data.startUrl +
+        console.log('Opening extension: ' + data.url +
                     ', opt_email=' + data.email);
 
         this.error_ = 0;
@@ -229,11 +274,20 @@ cr.define('login', function() {
 
       $('createAccount').hidden = !data.createAccount;
       $('guestSignin').hidden = !data.guestSignin;
+      // Only show Cancel button when user pods can be displayed.
+      $('login-header-bar').allowCancel =
+          data.isShowUsers && $('pod-row').pods.length;
+
+      // Sign-in right panel is hidden if all its items are hidden.
+      var noRightPanel = $('createAccount').hidden && $('guestSignin').hidden;
+      this.classList[noRightPanel ? 'add' : 'remove']('no-right-panel');
+      if (Oobe.getInstance().currentScreen === this)
+        Oobe.getInstance().updateScreenSize(this);
     },
 
     /**
      * Checks if message comes from the loaded authentication extension.
-     * @param e {object} Payload of the received HTML5 message.
+     * @param {object} e Payload of the received HTML5 message.
      * @type {boolean}
      */
     isAuthExtMessage_: function(e) {
@@ -244,22 +298,42 @@ cr.define('login', function() {
 
     /**
      * Event handler that is invoked when HTML5 message is received.
-     * @param e {object} Payload of the received HTML5 message.
+     * @param {object} e Payload of the received HTML5 message.
      */
     onMessage_: function(e) {
+      if (!this.isAuthExtMessage_(e)) {
+        console.log('GaiaSigninScreen.onMessage_: Unknown message origin, ' +
+            'e.origin=' + e.origin);
+        return;
+      }
+
       var msg = e.data;
-      if (msg.method == 'completeLogin' && this.isAuthExtMessage_(e)) {
-        chrome.send('completeLogin', [msg.email, msg.password] );
+      console.log('GaiaSigninScreen.onMessage_: method=' + msg.method);
+
+      if (msg.method == 'completeLogin') {
+        chrome.send('completeLogin', [msg.email, msg.password]);
         this.loading = true;
         // Now that we're in logged in state header should be hidden.
         Oobe.getInstance().headerHidden = true;
-      } else if (msg.method == 'loginUILoaded' && this.isAuthExtMessage_(e)) {
+        // Clear any error messages that were shown before login.
+        Oobe.clearErrors();
+      } else if (msg.method == 'loginUILoaded') {
         this.loading = false;
-        $('error-message').update();
+        chrome.send('errorScreenUpdate');
         this.clearLoadingTimer_();
+        // Show deferred error bubble.
+        if (this.errorBubble_) {
+          this.showErrorBubble(this.errorBubble_[0], this.errorBubble_[1]);
+          this.errorBubble_ = undefined;
+        }
         this.clearRetry_();
         chrome.send('loginWebuiReady');
-      } else if (msg.method =='offlineLogin' && this.isAuthExtMessage_(e)) {
+        chrome.send('loginVisible', ['gaia']);
+        // Warm up the user images screen.
+        window.setTimeout(function() {
+            Oobe.getInstance().preloadScreen({id: SCREEN_USER_IMAGE_PICKER});
+        }, 0);
+      } else if (msg.method == 'offlineLogin') {
         this.email = msg.email;
         chrome.send('authenticateUser', [msg.email, msg.password]);
         this.loading = true;
@@ -280,9 +354,7 @@ cr.define('login', function() {
           // Show 'Cancel' button to allow user to return to the main screen
           // (e.g. this makes sense when connection is back).
           Oobe.getInstance().headerHidden = false;
-          $('add-user-header-bar-item').hidden = false;
-          $('add-user-button').hidden = true;
-          $('cancel-add-user-button').hidden = false;
+          $('login-header-bar').signinUIState = SIGNIN_UI_STATE.GAIA_SIGNIN;
           // Do nothing, since offline version is reloaded after an error comes.
         } else {
           Oobe.showSigninUI();
@@ -321,8 +393,8 @@ cr.define('login', function() {
       if (this.retryCount_ >= 3 || this.retryTimer_)
         return;
 
-      const MAX_DELAY = 7200;  // 7200 seconds (i.e. 2 hours)
-      const MIN_DELAY = 1;  // 1 second
+      /** @const */ var MAX_DELAY = 7200;  // 7200 seconds (i.e. 2 hours)
+      /** @const */ var MIN_DELAY = 1;  // 1 second
 
       var delay = Math.pow(2, this.retryCount_) * 5;
       delay = Math.max(MIN_DELAY, Math.min(MAX_DELAY, delay)) * 1000;
@@ -358,6 +430,28 @@ cr.define('login', function() {
       $('guestSigninLink').onclick = function() {
         chrome.send('launchIncognito');
       };
+    },
+
+    /**
+     * Shows sign-in error bubble.
+     * @param {number} loginAttempts Number of login attemps tried.
+     * @param {HTMLElement} content Content to show in bubble.
+     */
+    showErrorBubble: function(loginAttempts, error) {
+      if (this.isLocal) {
+        $('add-user-button').hidden = true;
+        $('cancel-add-user-button').hidden = false;
+        // Reload offline version of the sign-in extension, which will show
+        // error itself.
+        chrome.send('offlineLogin', [this.email]);
+      } else if (!this.loading) {
+        $('bubble').showContentForElement($('login-box'),
+                                          cr.ui.Bubble.Attachment.LEFT,
+                                          error);
+      } else {
+        // Defer the bubble until the frame has been loaded.
+        this.errorBubble_ = [loginAttempts, error];
+      }
     }
   };
 
@@ -375,6 +469,10 @@ cr.define('login', function() {
    */
   GaiaSigninScreen.updateAuthExtension = function(data) {
     $('gaia-signin').updateAuthExtension_(data);
+  };
+
+  GaiaSigninScreen.doReload = function() {
+    $('gaia-signin').doReload();
   };
 
   return {

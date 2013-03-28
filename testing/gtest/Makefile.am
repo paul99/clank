@@ -160,10 +160,6 @@ EXTRA_DIST += \
   codegear/gtest_main.cbproj \
   codegear/gtest_unittest.cbproj
 
-# Scripts and utilities
-bin_SCRIPTS = scripts/gtest-config
-CLEANFILES = $(bin_SCRIPTS)
-
 # Distribute and install M4 macro
 m4datadir = $(datadir)/aclocal
 m4data_DATA = m4/gtest.m4
@@ -242,6 +238,7 @@ TESTS += samples/sample1_unittest
 check_PROGRAMS += samples/sample1_unittest
 samples_sample1_unittest_SOURCES = samples/sample1_unittest.cc
 samples_sample1_unittest_LDADD = lib/libgtest_main.la \
+                                 lib/libgtest.la \
                                  samples/libsamples.la
 
 # Another sample.  It also verifies that libgtest works.
@@ -251,11 +248,12 @@ samples_sample10_unittest_SOURCES = samples/sample10_unittest.cc
 samples_sample10_unittest_LDADD = lib/libgtest.la
 
 # This tests most constructs of gtest and verifies that libgtest_main
-# works.
+# and libgtest work.
 TESTS += test/gtest_all_test
 check_PROGRAMS += test/gtest_all_test
 test_gtest_all_test_SOURCES = test/gtest_all_test.cc
-test_gtest_all_test_LDADD = lib/libgtest_main.la
+test_gtest_all_test_LDADD = lib/libgtest_main.la \
+                            lib/libgtest.la
 
 # Tests that fused gtest files compile and work.
 FUSED_GTEST_SRC = \
@@ -263,6 +261,7 @@ FUSED_GTEST_SRC = \
   fused-src/gtest/gtest.h \
   fused-src/gtest/gtest_main.cc
 
+if HAVE_PYTHON
 TESTS += test/fused_gtest_test
 check_PROGRAMS += test/fused_gtest_test
 test_fused_gtest_test_SOURCES = $(FUSED_GTEST_SRC) \
@@ -286,7 +285,20 @@ fused-gtest: $(pkginclude_HEADERS) $(pkginclude_internal_HEADERS) \
 
 maintainer-clean-local:
 	rm -rf "$(srcdir)/fused-src"
+endif
 
 # Death tests may produce core dumps in the build directory. In case
 # this happens, clean them to keep distcleancheck happy.
-CLEANFILES += core
+CLEANFILES = core
+
+# Disables 'make install' as installing a compiled version of Google
+# Test can lead to undefined behavior due to violation of the
+# One-Definition Rule.
+
+install-exec-local:
+	echo "'make install' is dangerous and not supported. Instead, see README for how to integrate Google Test into your build system."
+	false
+
+install-data-local:
+	echo "'make install' is dangerous and not supported. Instead, see README for how to integrate Google Test into your build system."
+	false

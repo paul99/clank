@@ -1,4 +1,4 @@
-// Copyright (c) 2010 The Chromium Authors. All rights reserved.
+// Copyright (c) 2012 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 //
@@ -41,7 +41,7 @@ float GetDecibel(float value) {
 
 }  // namespace
 
-namespace speech_input {
+namespace content {
 
 // Stores threshold-crossing histories for making decisions about the speech
 // state.
@@ -373,4 +373,4 @@ EpStatus EnergyEndpointer::Status(int64* status_time)  const {
   return status_;
 }
 
-}  // namespace speech
+}  // namespace content

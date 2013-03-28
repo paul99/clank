@@ -1,4 +1,4 @@
-// Copyright (c) 2011 The Chromium Authors. All rights reserved.
+// Copyright (c) 2012 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -7,72 +7,51 @@
 #include "base/command_line.h"
 #include "base/logging.h"
 #include "base/memory/scoped_ptr.h"
-#include "content/common/injection_test_dll.h"
+#include "base/string16.h"
+#include "base/win/win_util.h"
 #include "content/public/common/content_switches.h"
+#include "content/public/common/injection_test_win.h"
 #include "content/public/renderer/render_thread.h"
-#include "sandbox/src/sandbox.h"
+#include "content/renderer/render_thread_impl.h"
+#include "sandbox/win/src/sandbox.h"
 #include "skia/ext/skia_sandbox_support_win.h"
+#include "skia/ext/vector_platform_device_emf_win.h"
 #include "unicode/timezone.h"
 
+namespace content {
 namespace {
 
-// In order to have Theme support, we need to connect to the theme service.
-// This needs to be done before we lock down the renderer. Officially this
-// can be done with OpenThemeData() but it fails unless you pass a valid
-// window at least the first time. Interestingly, the very act of creating a
-// window also sets the connection to the theme service.
-void EnableThemeSupportForRenderer(bool no_sandbox) {
-  HWINSTA current = NULL;
-  HWINSTA winsta0 = NULL;
-
-  if (!no_sandbox) {
-    current = ::GetProcessWindowStation();
-    winsta0 = ::OpenWindowStationW(L"WinSta0", FALSE, GENERIC_READ);
-    if (!winsta0 || !::SetProcessWindowStation(winsta0)) {
-      // Could not set the alternate window station. There is a possibility
-      // that the theme wont be correctly initialized on XP.
-      NOTREACHED() << "Unable to switch to WinSt0";
-    }
-  }
-
-  HWND window = ::CreateWindowExW(0, L"Static", L"", WS_POPUP | WS_DISABLED,
-                                  CW_USEDEFAULT, 0, 0, 0,  HWND_MESSAGE, NULL,
-                                  ::GetModuleHandleA(NULL), NULL);
-  if (!window) {
-    DLOG(WARNING) << "failed to enable theme support";
-  } else {
-    ::DestroyWindow(window);
-  }
-
-  if (!no_sandbox) {
-    // Revert the window station.
-    if (!current || !::SetProcessWindowStation(current)) {
-      // We failed to switch back to the secure window station. This might
-      // confuse the renderer enough that we should kill it now.
-      LOG(FATAL) << "Failed to restore alternate window station";
-    }
-
-    if (!::CloseWindowStation(winsta0)) {
-      // We might be leaking a winsta0 handle.  This is a security risk, but
-      // since we allow fail over to no desktop protection in low memory
-      // condition, this is not a big risk.
-      NOTREACHED();
-    }
-  }
-}
-
 // Windows-only skia sandbox support
-void SkiaPreCacheFont(LOGFONT logfont) {
-  content::RenderThread* render_thread = content::RenderThread::Get();
+void SkiaPreCacheFont(const LOGFONT& logfont) {
+  RenderThread* render_thread = RenderThread::Get();
   if (render_thread) {
     render_thread->PreCacheFont(logfont);
   }
 }
 
+void SkiaPreCacheFontCharacters(const LOGFONT& logfont,
+                                const wchar_t* text,
+                                unsigned int text_length) {
+  content::RenderThreadImpl* render_thread_impl =
+      content::RenderThreadImpl::current();
+  if (render_thread_impl) {
+    render_thread_impl->PreCacheFontCharacters(logfont,
+                                               string16(text, text_length));
+  }
+}
+
+void InitExitInterceptions() {
+  // If code subsequently tries to exit using exit(), _exit(), abort(), or
+  // ExitProcess(), force a crash (since otherwise these would be silent
+  // terminations and fly under the radar).
+  base::win::SetShouldCrashOnProcessDetach(true);
+  base::win::SetAbortBehaviorForCrashReporting();
+}
+
 }  // namespace
 
 RendererMainPlatformDelegate::RendererMainPlatformDelegate(
-    const content::MainFunctionParams& parameters)
+    const MainFunctionParams& parameters)
         : parameters_(parameters),
           sandbox_test_module_(NULL) {
 }
@@ -81,11 +60,12 @@ RendererMainPlatformDelegate::~RendererMainPlatformDelegate() {
 }
 
 void RendererMainPlatformDelegate::PlatformInitialize() {
+  InitExitInterceptions();
+
   // Be mindful of what resources you acquire here. They can be used by
   // malicious code if the renderer gets compromised.
   const CommandLine& command_line = parameters_.command_line;
   bool no_sandbox = command_line.HasSwitch(switches::kNoSandbox);
-  EnableThemeSupportForRenderer(no_sandbox);
 
   if (!no_sandbox) {
     // ICU DateFormat class (used in base/time_format.cc) needs to get the
@@ -96,10 +76,15 @@ void RendererMainPlatformDelegate::PlatformInitialize() {
     // is disabled, we don't have to make this dummy call.
     scoped_ptr<icu::TimeZone> zone(icu::TimeZone::createDefault());
     SetSkiaEnsureTypefaceAccessible(SkiaPreCacheFont);
+    skia::SetSkiaEnsureTypefaceCharactersAccessible(
+        SkiaPreCacheFontCharacters);
   }
 }
 
 void RendererMainPlatformDelegate::PlatformUninitialize() {
+  // At this point we are shutting down in a normal code path, so undo our
+  // hack to crash on exit.
+  base::win::SetShouldCrashOnProcessDetach(false);
 }
 
 bool RendererMainPlatformDelegate::InitSandboxTests(bool no_sandbox) {
@@ -142,7 +127,7 @@ bool RendererMainPlatformDelegate::EnableSandbox() {
   return false;
 }
 
-void RendererMainPlatformDelegate::RunSandboxTests() {
+void RendererMainPlatformDelegate::RunSandboxTests(bool no_sandbox) {
   if (sandbox_test_module_) {
     RunRendererTests run_security_tests =
         reinterpret_cast<RunRendererTests>(GetProcAddress(sandbox_test_module_,
@@ -156,3 +141,5 @@ void RendererMainPlatformDelegate::RunSandboxTests() {
     }
   }
 }
+
+}  // namespace content

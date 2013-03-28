@@ -1,10 +1,9 @@
-// Copyright (c) 2011 The Chromium Authors. All rights reserved.
+// Copyright (c) 2012 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
 #ifndef DBUS_EXPORTED_OBJECT_H_
 #define DBUS_EXPORTED_OBJECT_H_
-#pragma once
 
 #include <dbus/dbus.h>
 
@@ -17,6 +16,8 @@
 #include "base/synchronization/waitable_event.h"
 #include "base/threading/platform_thread.h"
 #include "base/time.h"
+#include "dbus/dbus_export.h"
+#include "dbus/object_path.h"
 
 namespace dbus {
 
@@ -30,30 +31,36 @@ class Signal;
 //
 // ExportedObject is a ref counted object, to ensure that |this| of the
 // object is alive when callbacks referencing |this| are called.
-class ExportedObject : public base::RefCountedThreadSafe<ExportedObject> {
+class CHROME_DBUS_EXPORT ExportedObject
+    : public base::RefCountedThreadSafe<ExportedObject> {
  public:
   // Client code should use Bus::GetExportedObject() instead of this
   // constructor.
-  ExportedObject(Bus* bus,
-                 const std::string& service_name,
-                 const std::string& object_path);
+  ExportedObject(Bus* bus, const ObjectPath& object_path);
 
-  // Called to send a response from an exported method. Response* is the
-  // response message. Callers should pass a NULL Response* in the event
-  // of an error that prevents the sending of a response.
-  typedef base::Callback<void (Response*)> ResponseSender;
+  // Called to send a response from an exported method. |response| is the
+  // response message. Callers should pass NULL in the event of an error that
+  // prevents the sending of a response.
+  //
+  // ResponseSender takes ownership of |response| hence client code should
+  // not delete |response|.
+  // TODO(satorux): Change this to take scoped_ptr<Response> to make
+  // ownership clearer. crbug.com/163231
+  typedef base::Callback<void (Response* response)> ResponseSender;
 
-  // Called when an exported method is called. MethodCall* is the request
-  // message. ResponseSender is the callback that should be used to send a
-  // response.
-  typedef base::Callback<void (MethodCall*, ResponseSender)> MethodCallCallback;
+  // Called when an exported method is called. |method_call| is the request
+  // message. |sender| is the callback that's used to send a response.
+  //
+  // |method_call| is owned by ExportedObject, hence client code should not
+  // delete |method_call|.
+  typedef base::Callback<void (MethodCall* method_call, ResponseSender sender)>
+      MethodCallCallback;
 
   // Called when method exporting is done.
-  // Parameters:
-  // - the interface name.
-  // - the method name.
-  // - whether exporting was successful or not.
-  typedef base::Callback<void (const std::string&, const std::string&, bool)>
+  // |success| indicates whether exporting was successful or not.
+  typedef base::Callback<void (const std::string& interface_name,
+                               const std::string& method_name,
+                               bool success)>
       OnExportedCallback;
 
   // Exports the method specified by |interface_name| and |method_name|,
@@ -156,8 +163,7 @@ class ExportedObject : public base::RefCountedThreadSafe<ExportedObject> {
                                   void* user_data);
 
   scoped_refptr<Bus> bus_;
-  std::string service_name_;
-  std::string object_path_;
+  ObjectPath object_path_;
   bool object_is_registered_;
 
   // The method table where keys are absolute method names (i.e. interface

@@ -1,11 +1,14 @@
-// Copyright (c) 2011 The Chromium Authors. All rights reserved.
+// Copyright (c) 2012 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
-#include "../client/program_info_manager.h"
-#include "../client/gles2_implementation.h"
-
 #include <map>
+
+#include "base/compiler_specific.h"
+#include "../client/program_info_manager.h"
+#include "../client/atomicops.h"
+#include "../client/gles2_implementation.h"
+#include "../common/gles2_cmd_utils.h"
 
 namespace gpu {
 namespace gles2 {
@@ -15,28 +18,40 @@ class NonCachedProgramInfoManager : public ProgramInfoManager {
   NonCachedProgramInfoManager();
   virtual ~NonCachedProgramInfoManager();
 
-  virtual void CreateInfo(GLuint program);
+  virtual void CreateInfo(GLuint program) OVERRIDE;
 
-  virtual void DeleteInfo(GLuint program);
+  virtual void DeleteInfo(GLuint program) OVERRIDE;
 
-  virtual bool GetProgramiv(
-      GLES2Implementation* gl, GLuint program, GLenum pname, GLint* params);
+  virtual bool GetProgramiv(GLES2Implementation* gl,
+                            GLuint program,
+                            GLenum pname,
+                            GLint* params) OVERRIDE;
 
-  virtual GLint GetAttribLocation(
-      GLES2Implementation* gl, GLuint program, const char* name);
+  virtual GLint GetAttribLocation(GLES2Implementation* gl,
+                                  GLuint program,
+                                  const char* name) OVERRIDE;
 
-  virtual GLint GetUniformLocation(
-      GLES2Implementation* gl, GLuint program, const char* name);
+  virtual GLint GetUniformLocation(GLES2Implementation* gl,
+                                   GLuint program,
+                                   const char* name) OVERRIDE;
 
-  virtual bool GetActiveAttrib(
-      GLES2Implementation* gl,
-      GLuint program, GLuint index, GLsizei bufsize, GLsizei* length,
-      GLint* size, GLenum* type, char* name);
+  virtual bool GetActiveAttrib(GLES2Implementation* gl,
+                               GLuint program,
+                               GLuint index,
+                               GLsizei bufsize,
+                               GLsizei* length,
+                               GLint* size,
+                               GLenum* type,
+                               char* name) OVERRIDE;
 
-  virtual bool GetActiveUniform(
-      GLES2Implementation* gl,
-      GLuint program, GLuint index, GLsizei bufsize, GLsizei* length,
-      GLint* size, GLenum* type, char* name);
+  virtual bool GetActiveUniform(GLES2Implementation* gl,
+                                GLuint program,
+                                GLuint index,
+                                GLsizei bufsize,
+                                GLsizei* length,
+                                GLint* size,
+                                GLenum* type,
+                                char* name) OVERRIDE;
 
 };
 
@@ -91,29 +106,40 @@ class CachedProgramInfoManager : public ProgramInfoManager {
   CachedProgramInfoManager();
   virtual ~CachedProgramInfoManager();
 
-  virtual void CreateInfo(GLuint program);
+  virtual void CreateInfo(GLuint program) OVERRIDE;
 
-  virtual void DeleteInfo(GLuint program);
+  virtual void DeleteInfo(GLuint program) OVERRIDE;
 
-  virtual bool GetProgramiv(
-      GLES2Implementation* gl,
-      GLuint program, GLenum pname, GLint* params);
+  virtual bool GetProgramiv(GLES2Implementation* gl,
+                            GLuint program,
+                            GLenum pname,
+                            GLint* params) OVERRIDE;
 
-  virtual GLint GetAttribLocation(
-      GLES2Implementation* gl, GLuint program, const char* name);
+  virtual GLint GetAttribLocation(GLES2Implementation* gl,
+                                  GLuint program,
+                                  const char* name) OVERRIDE;
 
-  virtual GLint GetUniformLocation(
-      GLES2Implementation* gl, GLuint program, const char* name);
+  virtual GLint GetUniformLocation(GLES2Implementation* gl,
+                                   GLuint program,
+                                   const char* name) OVERRIDE;
 
-  virtual bool GetActiveAttrib(
-      GLES2Implementation* gl,
-      GLuint program, GLuint index, GLsizei bufsize, GLsizei* length,
-      GLint* size, GLenum* type, char* name);
+  virtual bool GetActiveAttrib(GLES2Implementation* gl,
+                               GLuint program,
+                               GLuint index,
+                               GLsizei bufsize,
+                               GLsizei* length,
+                               GLint* size,
+                               GLenum* type,
+                               char* name) OVERRIDE;
 
-  virtual bool GetActiveUniform(
-      GLES2Implementation* gl,
-      GLuint program, GLuint index, GLsizei bufsize, GLsizei* length,
-      GLint* size, GLenum* type, char* name);
+  virtual bool GetActiveUniform(GLES2Implementation* gl,
+                                GLuint program,
+                                GLuint index,
+                                GLsizei bufsize,
+                                GLsizei* length,
+                                GLint* size,
+                                GLenum* type,
+                                char* name) OVERRIDE;
 
  private:
   class ProgramInfo {
@@ -193,6 +219,8 @@ class CachedProgramInfoManager : public ProgramInfoManager {
   typedef std::map<GLuint, ProgramInfo> ProgramInfoMap;
 
   ProgramInfoMap program_infos_;
+
+  mutable Lock lock_;
 };
 
 CachedProgramInfoManager::ProgramInfo::UniformInfo::UniformInfo(
@@ -223,35 +251,27 @@ GLint CachedProgramInfoManager::ProgramInfo::GetAttribLocation(
   return -1;
 }
 
-// TODO(gman): Add a faster lookup.
 GLint CachedProgramInfoManager::ProgramInfo::GetUniformLocation(
     const std::string& name) const {
+  bool getting_array_location = false;
+  size_t open_pos = std::string::npos;
+  int index = 0;
+  if (!GLES2Util::ParseUniformName(
+      name, &open_pos, &index, &getting_array_location)) {
+    return -1;
+  }
   for (GLuint ii = 0; ii < uniform_infos_.size(); ++ii) {
     const UniformInfo& info = uniform_infos_[ii];
     if (info.name == name ||
         (info.is_array &&
          info.name.compare(0, info.name.size() - 3, name) == 0)) {
       return info.element_locations[0];
-    } else if (info.is_array &&
-               name.size() >= 3 && name[name.size() - 1] == ']') {
+    } else if (getting_array_location && info.is_array) {
       // Look for an array specification.
-      size_t open_pos = name.find_last_of('[');
-      if (open_pos != std::string::npos &&
-          open_pos < name.size() - 2 &&
-          info.name.size() > open_pos &&
+      size_t open_pos_2 = info.name.find_last_of('[');
+      if (open_pos_2 == open_pos &&
           name.compare(0, open_pos, info.name, 0, open_pos) == 0) {
-        GLint index = 0;
-        size_t last = name.size() - 1;
-        bool bad = false;
-        for (size_t pos = open_pos + 1; pos < last; ++pos) {
-          int8 digit = name[pos] - '0';
-          if (digit < 0 || digit > 9) {
-            bad = true;
-            break;
-          }
-          index = index * 10 + digit;
-        }
-        if (!bad && index >= 0 && index < info.size) {
+        if (index >= 0 && index < info.size) {
           return info.element_locations[index];
         }
       }
@@ -372,6 +392,7 @@ CachedProgramInfoManager::ProgramInfo*
 }
 
 void CachedProgramInfoManager::CreateInfo(GLuint program) {
+  AutoLock auto_lock(lock_);
   DeleteInfo(program);
   std::pair<ProgramInfoMap::iterator, bool> result =
       program_infos_.insert(std::make_pair(program, ProgramInfo()));
@@ -385,6 +406,7 @@ void CachedProgramInfoManager::DeleteInfo(GLuint program) {
 
 bool CachedProgramInfoManager::GetProgramiv(
     GLES2Implementation* gl, GLuint program, GLenum pname, GLint* params) {
+  AutoLock auto_lock(lock_);
   ProgramInfo* info = GetProgramInfo(gl, program);
   if (!info) {
     return false;
@@ -394,6 +416,7 @@ bool CachedProgramInfoManager::GetProgramiv(
 
 GLint CachedProgramInfoManager::GetAttribLocation(
     GLES2Implementation* gl, GLuint program, const char* name) {
+  AutoLock auto_lock(lock_);
   ProgramInfo* info = GetProgramInfo(gl, program);
   if (info) {
     return info->GetAttribLocation(name);
@@ -403,6 +426,7 @@ GLint CachedProgramInfoManager::GetAttribLocation(
 
 GLint CachedProgramInfoManager::GetUniformLocation(
     GLES2Implementation* gl, GLuint program, const char* name) {
+  AutoLock auto_lock(lock_);
   ProgramInfo* info = GetProgramInfo(gl, program);
   if (info) {
     return info->GetUniformLocation(name);
@@ -414,6 +438,7 @@ bool CachedProgramInfoManager::GetActiveAttrib(
     GLES2Implementation* gl,
     GLuint program, GLuint index, GLsizei bufsize, GLsizei* length,
     GLint* size, GLenum* type, char* name) {
+  AutoLock auto_lock(lock_);
   ProgramInfo* info = GetProgramInfo(gl, program);
   if (info) {
     const ProgramInfo::VertexAttribInfo* attrib_info =
@@ -448,6 +473,7 @@ bool CachedProgramInfoManager::GetActiveUniform(
     GLES2Implementation* gl,
     GLuint program, GLuint index, GLsizei bufsize, GLsizei* length,
     GLint* size, GLenum* type, char* name) {
+  AutoLock auto_lock(lock_);
   ProgramInfo* info = GetProgramInfo(gl, program);
   if (info) {
     const ProgramInfo::UniformInfo* uniform_info = info->GetUniformInfo(index);
@@ -483,8 +509,9 @@ ProgramInfoManager::ProgramInfoManager() {
 ProgramInfoManager::~ProgramInfoManager() {
 }
 
-ProgramInfoManager* ProgramInfoManager::Create(bool shared_resources) {
-  if (shared_resources) {
+ProgramInfoManager* ProgramInfoManager::Create(
+    bool shared_resources_across_processes) {
+  if (shared_resources_across_processes) {
     return new NonCachedProgramInfoManager();
   } else {
     return new CachedProgramInfoManager();

@@ -7,14 +7,22 @@
 #include "base/file_path.h"
 #include "base/metrics/histogram.h"
 #include "base/stringprintf.h"
+#include "base/threading/thread_restrictions.h"
 #include "base/utf_string_conversions.h"
 #include "base/values.h"
+#include "chrome/browser/browser_process.h"
+#include "chrome/browser/extensions/api/runtime/runtime_api.h"
+#include "chrome/browser/extensions/extension_action_manager.h"
 #include "chrome/browser/extensions/extension_prefs.h"
 #include "chrome/browser/extensions/extension_service.h"
+#include "chrome/browser/extensions/extension_system.h"
+#include "chrome/browser/extensions/management_policy.h"
+#include "chrome/browser/profiles/profile_manager.h"
 #include "chrome/common/chrome_switches.h"
 #include "chrome/common/extensions/extension.h"
 #include "chrome/common/extensions/extension_file_util.h"
 #include "chrome/common/extensions/extension_l10n_util.h"
+#include "chrome/common/extensions/extension_manifest_constants.h"
 #include "chrome/common/extensions/manifest.h"
 #include "chrome/common/pref_names.h"
 #include "content/public/browser/notification_service.h"
@@ -22,6 +30,8 @@
 
 using content::BrowserThread;
 using content::UserMetricsAction;
+using extensions::Extension;
+using extensions::ExtensionInfo;
 
 namespace errors = extension_manifest_errors;
 
@@ -50,6 +60,21 @@ ManifestReloadReason ShouldReloadExtensionManifest(const ExtensionInfo& info) {
   return NOT_NEEDED;
 }
 
+void DispatchOnInstalledEvent(
+    Profile* profile,
+    const std::string& extension_id,
+    const Version& old_version,
+    bool chrome_updated) {
+  // profile manager can be NULL in unit tests.
+  if (!g_browser_process->profile_manager())
+    return;
+  if (!g_browser_process->profile_manager()->IsValidProfile(profile))
+    return;
+
+  extensions::RuntimeEventRouter::DispatchOnInstalledEvent(
+      profile, extension_id, old_version, chrome_updated);
+}
+
 }  // namespace
 
 namespace extensions {
@@ -65,13 +90,7 @@ InstalledLoader::~InstalledLoader() {
 void InstalledLoader::Load(const ExtensionInfo& info, bool write_to_prefs) {
   std::string error;
   scoped_refptr<const Extension> extension(NULL);
-  // An explicit check against policy is required to behave correctly during
-  // startup.  This is because extensions that were previously OK might have
-  // been blacklisted in policy while Chrome was not running.
-  if (!extension_prefs_->IsExtensionAllowedByPolicy(info.extension_id,
-                                                    info.extension_location)) {
-    error = errors::kDisabledByPolicy;
-  } else if (info.extension_manifest.get()) {
+  if (info.extension_manifest.get()) {
     extension = Extension::Create(
         info.extension_path,
         info.extension_location,
@@ -91,6 +110,18 @@ void InstalledLoader::Load(const ExtensionInfo& info, bool write_to_prefs) {
     error = errors::kCannotChangeExtensionID;
     extension = NULL;
     content::RecordAction(UserMetricsAction("Extensions.IDChangedError"));
+  }
+
+  // Check policy on every load in case an extension was blacklisted while
+  // Chrome was not running.
+  const ManagementPolicy* policy = extensions::ExtensionSystem::Get(
+      extension_service_->profile())->management_policy();
+  if (extension &&
+      !policy->UserMayLoad(extension, NULL)) {
+    // The error message from UserMayInstall() often contains the extension ID
+    // and is therefore not well suited to this UI.
+    error = errors::kDisabledByPolicy;
+    extension = NULL;
   }
 
   if (!extension) {
@@ -115,9 +146,35 @@ void InstalledLoader::LoadAllExtensions() {
 
   std::vector<int> reload_reason_counts(NUM_MANIFEST_RELOAD_REASONS, 0);
   bool should_write_prefs = false;
+  int update_count = 0;
 
   for (size_t i = 0; i < extensions_info->size(); ++i) {
     ExtensionInfo* info = extensions_info->at(i).get();
+
+    scoped_ptr<ExtensionInfo> pending_update(
+        extension_prefs_->GetDelayedInstallInfo(info->extension_id));
+    if (pending_update) {
+      if (!extension_prefs_->FinishDelayedInstallInfo(info->extension_id))
+        NOTREACHED();
+
+      Version old_version;
+      if (info->extension_manifest) {
+        std::string version_str;
+        if (info->extension_manifest->GetString(
+            extension_manifest_keys::kVersion, &version_str)) {
+          old_version = Version(version_str);
+        }
+      }
+      MessageLoop::current()->PostTask(FROM_HERE,
+          base::Bind(&DispatchOnInstalledEvent, extension_service_->profile(),
+                     info->extension_id, old_version, false));
+
+      info = extension_prefs_->GetInstalledExtensionInfo(
+          info->extension_id).release();
+      extensions_info->at(i).reset(info);
+
+      update_count++;
+    }
 
     ManifestReloadReason reload_reason = ShouldReloadExtensionManifest(*info);
     ++reload_reason_counts[reload_reason];
@@ -141,12 +198,16 @@ void InstalledLoader::LoadAllExtensions() {
               GetCreationFlags(info),
               &error));
 
-      if (extension.get()) {
-        extensions_info->at(i)->extension_manifest.reset(
-            static_cast<DictionaryValue*>(
-                extension->manifest()->value()->DeepCopy()));
-        should_write_prefs = true;
+      if (!extension.get()) {
+        extension_service_->
+            ReportExtensionLoadError(info->extension_path, error, false);
+        continue;
       }
+
+      extensions_info->at(i)->extension_manifest.reset(
+          static_cast<DictionaryValue*>(
+              extension->manifest()->value()->DeepCopy()));
+      should_write_prefs = true;
     }
   }
 
@@ -169,6 +230,8 @@ void InstalledLoader::LoadAllExtensions() {
                            extension_service_->extensions()->size());
   UMA_HISTOGRAM_COUNTS_100("Extensions.Disabled",
                            extension_service_->disabled_extensions()->size());
+  UMA_HISTOGRAM_COUNTS_100("Extensions.UpdateOnLoad",
+                           update_count);
 
   UMA_HISTOGRAM_TIMES("Extensions.LoadAllTime",
                       base::TimeTicks::Now() - start_time);
@@ -176,13 +239,16 @@ void InstalledLoader::LoadAllExtensions() {
   int app_user_count = 0;
   int app_external_count = 0;
   int hosted_app_count = 0;
-  int packaged_app_count = 0;
+  int legacy_packaged_app_count = 0;
+  int platform_app_count = 0;
   int user_script_count = 0;
   int extension_user_count = 0;
   int extension_external_count = 0;
   int theme_count = 0;
   int page_action_count = 0;
   int browser_action_count = 0;
+  int disabled_for_permissions_count = 0;
+  int item_user_count = 0;
   const ExtensionSet* extensions = extension_service_->extensions();
   ExtensionSet::const_iterator ex;
   for (ex = extensions->begin(); ex != extensions->end(); ++ex) {
@@ -225,8 +291,16 @@ void InstalledLoader::LoadAllExtensions() {
           ++app_user_count;
         }
         break;
-      case Extension::TYPE_PACKAGED_APP:
-        ++packaged_app_count;
+      case Extension::TYPE_LEGACY_PACKAGED_APP:
+        ++legacy_packaged_app_count;
+        if (Extension::IsExternalLocation(location)) {
+          ++app_external_count;
+        } else {
+          ++app_user_count;
+        }
+        break;
+      case Extension::TYPE_PLATFORM_APP:
+        ++platform_app_count;
         if (Extension::IsExternalLocation(location)) {
           ++app_external_count;
         } else {
@@ -242,20 +316,37 @@ void InstalledLoader::LoadAllExtensions() {
         }
         break;
     }
-    if ((*ex)->page_action() != NULL)
+    if (!Extension::IsExternalLocation((*ex)->location()))
+      ++item_user_count;
+    ExtensionActionManager* extension_action_manager =
+        ExtensionActionManager::Get(extension_service_->profile());
+    if (extension_action_manager->GetPageAction(**ex))
       ++page_action_count;
-    if ((*ex)->browser_action() != NULL)
+    if (extension_action_manager->GetBrowserAction(**ex))
       ++browser_action_count;
 
     extension_service_->RecordPermissionMessagesHistogram(
         *ex, "Extensions.Permissions_Load");
   }
+  const ExtensionSet* disabled_extensions =
+      extension_service_->disabled_extensions();
+  for (ex = disabled_extensions->begin();
+       ex != disabled_extensions->end(); ++ex) {
+    if (extension_service_->extension_prefs()->
+        DidExtensionEscalatePermissions((*ex)->id())) {
+      ++disabled_for_permissions_count;
+    }
+  }
+
+  UMA_HISTOGRAM_COUNTS_100("Extensions.LoadAllUser", item_user_count);
   UMA_HISTOGRAM_COUNTS_100("Extensions.LoadApp",
                            app_user_count + app_external_count);
   UMA_HISTOGRAM_COUNTS_100("Extensions.LoadAppUser", app_user_count);
   UMA_HISTOGRAM_COUNTS_100("Extensions.LoadAppExternal", app_external_count);
   UMA_HISTOGRAM_COUNTS_100("Extensions.LoadHostedApp", hosted_app_count);
-  UMA_HISTOGRAM_COUNTS_100("Extensions.LoadPackagedApp", packaged_app_count);
+  UMA_HISTOGRAM_COUNTS_100("Extensions.LoadPackagedApp",
+                           legacy_packaged_app_count);
+  UMA_HISTOGRAM_COUNTS_100("Extensions.LoadPlatformApp", platform_app_count);
   UMA_HISTOGRAM_COUNTS_100("Extensions.LoadExtension",
                            extension_user_count + extension_external_count);
   UMA_HISTOGRAM_COUNTS_100("Extensions.LoadExtensionUser",
@@ -267,20 +358,16 @@ void InstalledLoader::LoadAllExtensions() {
   UMA_HISTOGRAM_COUNTS_100("Extensions.LoadPageAction", page_action_count);
   UMA_HISTOGRAM_COUNTS_100("Extensions.LoadBrowserAction",
                            browser_action_count);
+  UMA_HISTOGRAM_COUNTS_100("Extensions.DisabledForPermissions",
+                           disabled_for_permissions_count);
 }
 
 int InstalledLoader::GetCreationFlags(const ExtensionInfo* info) {
-  int flags = Extension::NO_FLAGS;
+  int flags = extension_prefs_->GetCreationFlags(info->extension_id);
   if (info->extension_location != Extension::LOAD)
     flags |= Extension::REQUIRE_KEY;
-  if (Extension::ShouldDoStrictErrorChecking(info->extension_location))
-    flags |= Extension::STRICT_ERROR_CHECKS;
   if (extension_prefs_->AllowFileAccess(info->extension_id))
     flags |= Extension::ALLOW_FILE_ACCESS;
-  if (extension_prefs_->IsFromWebStore(info->extension_id))
-    flags |= Extension::FROM_WEBSTORE;
-  if (extension_prefs_->IsFromBookmark(info->extension_id))
-    flags |= Extension::FROM_BOOKMARK;
   return flags;
 }
 

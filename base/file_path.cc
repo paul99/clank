@@ -1,4 +1,4 @@
-// Copyright (c) 2011 The Chromium Authors. All rights reserved.
+// Copyright (c) 2012 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -44,7 +44,10 @@ typedef FilePath::StringType StringType;
 
 namespace {
 
-const char* kCommonDoubleExtensions[] = { "gz", "z", "bz2" };
+const char* kCommonDoubleExtensionSuffixes[] = { "gz", "z", "bz2" };
+const char* kCommonDoubleExtensions[] = { "user.js" };
+
+const FilePath::CharType kStringTerminator = FILE_PATH_LITERAL('\0');
 
 // If this FilePath contains a drive letter specification, returns the
 // position of the last character of the drive letter specification,
@@ -130,33 +133,46 @@ StringType::size_type ExtensionSeparatorPosition(const StringType& path) {
   if (last_dot == StringType::npos || last_dot == 0U)
     return last_dot;
 
-  // Special case .<extension1>.<extension2>, but only if the final extension
-  // is one of a few common double extensions.
-  StringType extension(path, last_dot + 1);
-  bool is_common_double_extension = false;
-  for (size_t i = 0; i < arraysize(kCommonDoubleExtensions); ++i) {
-    if (LowerCaseEqualsASCII(extension, kCommonDoubleExtensions[i]))
-      is_common_double_extension = true;
-  }
-  if (!is_common_double_extension)
-    return last_dot;
-
-  // Check that <extension1> is 1-4 characters, otherwise fall back to
-  // <extension2>.
   const StringType::size_type penultimate_dot =
       path.rfind(FilePath::kExtensionSeparator, last_dot - 1);
   const StringType::size_type last_separator =
       path.find_last_of(FilePath::kSeparators, last_dot - 1,
                         arraysize(FilePath::kSeparators) - 1);
-  if (penultimate_dot != StringType::npos &&
-      (last_separator == StringType::npos ||
-      penultimate_dot > last_separator) &&
-      last_dot - penultimate_dot <= 5U &&
-      last_dot - penultimate_dot > 1U) {
-    return penultimate_dot;
+
+  if (penultimate_dot == StringType::npos ||
+      (last_separator != StringType::npos &&
+       penultimate_dot < last_separator)) {
+    return last_dot;
+  }
+
+  for (size_t i = 0; i < arraysize(kCommonDoubleExtensions); ++i) {
+    StringType extension(path, penultimate_dot + 1);
+    if (LowerCaseEqualsASCII(extension, kCommonDoubleExtensions[i]))
+      return penultimate_dot;
+  }
+
+  StringType extension(path, last_dot + 1);
+  for (size_t i = 0; i < arraysize(kCommonDoubleExtensionSuffixes); ++i) {
+    if (LowerCaseEqualsASCII(extension, kCommonDoubleExtensionSuffixes[i])) {
+      if ((last_dot - penultimate_dot) <= 5U &&
+          (last_dot - penultimate_dot) > 1U) {
+        return penultimate_dot;
+      }
+    }
   }
 
   return last_dot;
+}
+
+// Returns true if path is "", ".", or "..".
+bool IsEmptyOrSpecialCase(const StringType& path) {
+  // Special cases "", ".", and ".."
+  if (path.empty() || path == FilePath::kCurrentDirectory ||
+      path == FilePath::kParentDirectory) {
+    return true;
+  }
+
+  return false;
 }
 
 }  // namespace
@@ -168,6 +184,9 @@ FilePath::FilePath(const FilePath& that) : path_(that.path_) {
 }
 
 FilePath::FilePath(const StringType& path) : path_(path) {
+  StringType::size_type nul_pos = path_.find(kStringTerminator);
+  if (nul_pos != StringType::npos)
+    path_.erase(nul_pos, StringType::npos);
 }
 
 FilePath::~FilePath() {
@@ -375,18 +394,8 @@ FilePath FilePath::InsertBeforeExtension(const StringType& suffix) const {
   if (suffix.empty())
     return FilePath(path_);
 
-  if (path_.empty())
+  if (IsEmptyOrSpecialCase(BaseName().value()))
     return FilePath();
-
-  StringType base = BaseName().value();
-  if (base.empty())
-    return FilePath();
-  if (*(base.end() - 1) == kExtensionSeparator) {
-    // Special case "." and ".."
-    if (base == kCurrentDirectory || base == kParentDirectory) {
-      return FilePath();
-    }
-  }
 
   StringType ext = Extension();
   StringType ret = RemoveExtension().value();
@@ -405,19 +414,26 @@ FilePath FilePath::InsertBeforeExtensionASCII(const base::StringPiece& suffix)
 #endif
 }
 
-FilePath FilePath::ReplaceExtension(const StringType& extension) const {
-  if (path_.empty())
+FilePath FilePath::AddExtension(const StringType& extension) const {
+  if (IsEmptyOrSpecialCase(BaseName().value()))
     return FilePath();
 
-  StringType base = BaseName().value();
-  if (base.empty())
-    return FilePath();
-  if (*(base.end() - 1) == kExtensionSeparator) {
-    // Special case "." and ".."
-    if (base == kCurrentDirectory || base == kParentDirectory) {
-      return FilePath();
-    }
+  // If the new extension is "" or ".", then just return the current FilePath.
+  if (extension.empty() || extension == StringType(1, kExtensionSeparator))
+    return *this;
+
+  StringType str = path_;
+  if (extension[0] != kExtensionSeparator &&
+      *(str.end() - 1) != kExtensionSeparator) {
+    str.append(1, kExtensionSeparator);
   }
+  str.append(extension);
+  return FilePath(str);
+}
+
+FilePath FilePath::ReplaceExtension(const StringType& extension) const {
+  if (IsEmptyOrSpecialCase(BaseName().value()))
+    return FilePath();
 
   FilePath no_ext = RemoveExtension();
   // If the new extension is "" or ".", then just remove the current extension.
@@ -443,7 +459,17 @@ bool FilePath::MatchesExtension(const StringType& extension) const {
 }
 
 FilePath FilePath::Append(const StringType& component) const {
-  DCHECK(!IsPathAbsolute(component));
+  const StringType* appended = &component;
+  StringType without_nuls;
+
+  StringType::size_type nul_pos = component.find(kStringTerminator);
+  if (nul_pos != StringType::npos) {
+    without_nuls = component.substr(0, nul_pos);
+    appended = &without_nuls;
+  }
+
+  DCHECK(!IsPathAbsolute(*appended));
+
   if (path_.compare(kCurrentDirectory) == 0) {
     // Append normally doesn't do any normalization, but as a special case,
     // when appending to kCurrentDirectory, just return a new path for the
@@ -452,7 +478,7 @@ FilePath FilePath::Append(const StringType& component) const {
     // it's likely in practice to wind up with FilePath objects containing
     // only kCurrentDirectory when calling DirName on a single relative path
     // component.
-    return FilePath(component);
+    return FilePath(*appended);
   }
 
   FilePath new_path(path_);
@@ -461,7 +487,7 @@ FilePath FilePath::Append(const StringType& component) const {
   // Don't append a separator if the path is empty (indicating the current
   // directory) or if the path component is empty (indicating nothing to
   // append).
-  if (component.length() > 0 && new_path.path_.length() > 0) {
+  if (appended->length() > 0 && new_path.path_.length() > 0) {
     // Don't append a separator if the path still ends with a trailing
     // separator after stripping (indicating the root directory).
     if (!IsSeparator(new_path.path_[new_path.path_.length() - 1])) {
@@ -472,7 +498,7 @@ FilePath FilePath::Append(const StringType& component) const {
     }
   }
 
-  new_path.path_.append(component);
+  new_path.path_.append(*appended);
   return new_path;
 }
 
@@ -578,7 +604,7 @@ FilePath FilePath::FromUTF8Unsafe(const std::string& utf8) {
 }
 #endif
 
-void FilePath::WriteToPickle(Pickle* pickle) {
+void FilePath::WriteToPickle(Pickle* pickle) const {
 #if defined(OS_WIN)
   pickle->WriteString16(path_);
 #else
@@ -586,14 +612,17 @@ void FilePath::WriteToPickle(Pickle* pickle) {
 #endif
 }
 
-bool FilePath::ReadFromPickle(Pickle* pickle, void** iter) {
+bool FilePath::ReadFromPickle(PickleIterator* iter) {
 #if defined(OS_WIN)
-  if (!pickle->ReadString16(iter, &path_))
+  if (!iter->ReadString16(&path_))
     return false;
 #else
-  if (!pickle->ReadString(iter, &path_))
+  if (!iter->ReadString(&path_))
     return false;
 #endif
+
+  if (path_.find(kStringTerminator) != StringType::npos)
+    return false;
 
   return true;
 }
@@ -1210,12 +1239,18 @@ void FilePath::StripTrailingSeparatorsInternal() {
   }
 }
 
+FilePath FilePath::NormalizePathSeparators() const {
 #if defined(FILE_PATH_USES_WIN_SEPARATORS)
-FilePath FilePath::NormalizeWindowsPathSeparators() const {
   StringType copy = path_;
   for (size_t i = 1; i < arraysize(kSeparators); ++i) {
     std::replace(copy.begin(), copy.end(), kSeparators[i], kSeparators[0]);
   }
   return FilePath(copy);
-}
+#else
+  return *this;
 #endif
+}
+
+void PrintTo(const FilePath& path, std::ostream* out) {
+  *out << path.value();
+}

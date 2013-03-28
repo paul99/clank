@@ -4,7 +4,6 @@
 
 #ifndef CHROME_BROWSER_UPGRADE_DETECTOR_H_
 #define CHROME_BROWSER_UPGRADE_DETECTOR_H_
-#pragma once
 
 #include "base/timer.h"
 #include "chrome/browser/idle.h"
@@ -75,6 +74,10 @@ class UpgradeDetector {
   // either an icon appropriate for badging the wrench menu or one to display
   // within the wrench menu.
   int GetIconResourceID(UpgradeNotificationIconType type);
+
+  UpgradeNotificationAnnoyanceLevel upgrade_notification_stage() const {
+    return upgrade_notification_stage_;
+  }
 
  protected:
   UpgradeDetector();

@@ -1,0 +1,10 @@
+prefix=/usr
+exec_prefix=${prefix}
+libdir=/usr/lib/arm-linux-gnueabi
+includedir=${prefix}/include/nspr
+
+Name: NSPR
+Description: The Netscape Portable Runtime
+Version: 4.8.9
+Libs: -L/usr/lib/arm-linux-gnueabi -lplds4 -lplc4 -lnspr4 -lpthread -ldl 
+Cflags: -I${prefix}/include/nspr

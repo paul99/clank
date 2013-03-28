@@ -1,10 +1,9 @@
-// Copyright (c) 2011 The Chromium Authors. All rights reserved.
+// Copyright (c) 2012 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
 #ifndef CONTENT_BROWSER_CHILD_PROCESS_LAUNCHER_H_
 #define CONTENT_BROWSER_CHILD_PROCESS_LAUNCHER_H_
-#pragma once
 
 #include "base/basictypes.h"
 #include "base/memory/ref_counted.h"
@@ -12,6 +11,8 @@
 #include "content/common/content_export.h"
 
 class CommandLine;
+
+namespace content {
 
 // Launches a process asynchronously and notifies the client of the process
 // handle when it's available.  It's used to avoid blocking the calling thread
@@ -38,10 +39,11 @@ class CONTENT_EXPORT ChildProcessLauncher {
       const FilePath& exposed_dir,
 #elif defined(OS_POSIX)
       bool use_zygote,
-      const base::environment_vector& environ,
+      const base::EnvironmentVector& environ,
       int ipcfd,
 #endif
       CommandLine* cmd_line,
+      int child_process_id,
       Client* client);
   ~ChildProcessLauncher();
 
@@ -51,11 +53,14 @@ class CONTENT_EXPORT ChildProcessLauncher {
   // Getter for the process handle.  Only call after the process has started.
   base::ProcessHandle GetHandle();
 
-  // Call this when the child process exits to know what happened to
-  // it.  |exit_code| is the exit code of the process if it exited
-  // (e.g. status from waitpid if on posix, from GetExitCodeProcess on
-  // Windows). |exit_code| may be NULL.
-  base::TerminationStatus GetChildTerminationStatus(int* exit_code);
+  // Call this when the child process exits to know what happened to it.
+  // |known_dead| can be true if we already know the process is dead as it can
+  // help the implemention figure the proper TerminationStatus.
+  // |exit_code| is the exit code of the process if it exited (e.g. status from
+  // waitpid if on posix, from GetExitCodeProcess on Windows). |exit_code| may
+  // be NULL.
+  base::TerminationStatus GetChildTerminationStatus(bool known_dead,
+                                                    int* exit_code);
 
   // Changes whether the process runs in the background or not.  Only call
   // this after the process has started.
@@ -65,10 +70,6 @@ class CONTENT_EXPORT ChildProcessLauncher {
   // shutdown.
   void SetTerminateChildOnShutdown(bool terminate_on_shutdown);
 
-#if defined(OS_ANDROID)
-  int GetMinidumpFD();
-#endif
-
  private:
   class Context;
 
@@ -76,5 +77,7 @@ class CONTENT_EXPORT ChildProcessLauncher {
 
   DISALLOW_COPY_AND_ASSIGN(ChildProcessLauncher);
 };
+
+}  // namespace content
 
 #endif  // CONTENT_BROWSER_CHILD_PROCESS_LAUNCHER_H_

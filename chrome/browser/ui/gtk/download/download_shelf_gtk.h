@@ -4,7 +4,6 @@
 
 #ifndef CHROME_BROWSER_UI_GTK_DOWNLOAD_DOWNLOAD_SHELF_GTK_H_
 #define CHROME_BROWSER_UI_GTK_DOWNLOAD_DOWNLOAD_SHELF_GTK_H_
-#pragma once
 
 #include <gtk/gtk.h>
 
@@ -22,12 +21,15 @@
 #include "ui/base/gtk/owned_widget_gtk.h"
 #include "ui/gfx/native_widget_types.h"
 
-class BaseDownloadItemModel;
 class Browser;
 class CustomDrawButton;
 class DownloadItemGtk;
+class DownloadItemModel;
 class GtkThemeService;
-class SlideAnimatorGtk;
+
+namespace content {
+class PageNavigator;
+}
 
 namespace gfx {
 class Point;
@@ -41,6 +43,9 @@ class DownloadShelfGtk : public DownloadShelf,
   DownloadShelfGtk(Browser* browser, gfx::NativeView view);
 
   virtual ~DownloadShelfGtk();
+
+  // Retrieves the navigator for loading pages.
+  content::PageNavigator* GetNavigator();
 
   // DownloadShelf implementation.
   virtual bool IsShowing() const OVERRIDE;
@@ -64,7 +69,7 @@ class DownloadShelfGtk : public DownloadShelf,
 
  protected:
   // DownloadShelf implementation.
-  virtual void DoAddDownload(BaseDownloadItemModel* download_model) OVERRIDE;
+  virtual void DoAddDownload(DownloadItemModel* download_model) OVERRIDE;
   virtual void DoShow() OVERRIDE;
   virtual void DoClose() OVERRIDE;
 

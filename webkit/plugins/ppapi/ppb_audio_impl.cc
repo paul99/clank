@@ -1,4 +1,4 @@
-// Copyright (c) 2011 The Chromium Authors. All rights reserved.
+// Copyright (c) 2012 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -29,8 +29,9 @@ namespace ppapi {
 // PPB_Audio_Impl --------------------------------------------------------------
 
 PPB_Audio_Impl::PPB_Audio_Impl(PP_Instance instance)
-    : Resource(instance),
-      audio_(NULL) {
+    : Resource(::ppapi::OBJECT_IS_IMPL, instance),
+      audio_(NULL),
+      sample_frame_count_(0) {
 }
 
 PPB_Audio_Impl::~PPB_Audio_Impl() {
@@ -53,8 +54,6 @@ PP_Resource PPB_Audio_Impl::Create(PP_Instance instance,
   scoped_refptr<PPB_Audio_Impl> audio(new PPB_Audio_Impl(instance));
   if (!audio->Init(config, audio_callback, user_data))
     return 0;
-  CHECK(media::AudioOutputController::kPauseMark ==
-      ::ppapi::PPB_Audio_Shared::kPauseMark);
   return audio->GetReference();
 }
 
@@ -80,9 +79,10 @@ bool PPB_Audio_Impl::Init(PP_Resource config,
 
   // When the stream is created, we'll get called back on StreamCreated().
   CHECK(!audio_);
-  audio_ = plugin_delegate->CreateAudio(enter.object()->GetSampleRate(),
-                                        enter.object()->GetSampleFrameCount(),
-                                        this);
+  audio_ = plugin_delegate->CreateAudioOutput(
+      enter.object()->GetSampleRate(), enter.object()->GetSampleFrameCount(),
+      this);
+  sample_frame_count_ = enter.object()->GetSampleFrameCount();
   return audio_ != NULL;
 }
 
@@ -112,8 +112,9 @@ PP_Bool PPB_Audio_Impl::StopPlayback() {
   return PP_TRUE;
 }
 
-int32_t PPB_Audio_Impl::OpenTrusted(PP_Resource config,
-                                    PP_CompletionCallback create_callback) {
+int32_t PPB_Audio_Impl::OpenTrusted(
+    PP_Resource config,
+    scoped_refptr<TrackedCallback> create_callback) {
   // Validate the config and keep a reference to it.
   EnterResourceNoLock<PPB_AudioConfig_API> enter(config, true);
   if (enter.failed())
@@ -126,16 +127,16 @@ int32_t PPB_Audio_Impl::OpenTrusted(PP_Resource config,
 
   // When the stream is created, we'll get called back on StreamCreated().
   DCHECK(!audio_);
-  audio_ = plugin_delegate->CreateAudio(enter.object()->GetSampleRate(),
-                                        enter.object()->GetSampleFrameCount(),
-                                        this);
+  audio_ = plugin_delegate->CreateAudioOutput(
+      enter.object()->GetSampleRate(), enter.object()->GetSampleFrameCount(),
+      this);
   if (!audio_)
     return PP_ERROR_FAILED;
 
   // At this point, we are guaranteeing ownership of the completion
   // callback.  Audio promises to fire the completion callback
   // once and only once.
-  SetCreateCallback(new TrackedCallback(this, create_callback));
+  SetCreateCallback(create_callback);
 
   return PP_OK_COMPLETIONPENDING;
 }
@@ -153,7 +154,8 @@ void PPB_Audio_Impl::OnSetStreamInfo(
     base::SharedMemoryHandle shared_memory_handle,
     size_t shared_memory_size,
     base::SyncSocket::Handle socket_handle) {
-  SetStreamInfo(shared_memory_handle, shared_memory_size, socket_handle);
+  SetStreamInfo(pp_instance(), shared_memory_handle, shared_memory_size,
+                socket_handle, sample_frame_count_);
 }
 
 }  // namespace ppapi

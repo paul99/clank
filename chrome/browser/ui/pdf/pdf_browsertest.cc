@@ -3,22 +3,24 @@
 // found in the LICENSE file.
 
 #include "base/file_util.h"
+#include "base/hash.h"
 #include "base/path_service.h"
 #include "base/string_number_conversions.h"
 #include "base/string_util.h"
 #include "base/utf_string_conversions.h"
 #include "chrome/browser/ui/browser.h"
+#include "chrome/browser/ui/browser_tabstrip.h"
 #include "chrome/browser/ui/browser_window.h"
 #include "chrome/browser/ui/snapshot_tab_helper.h"
-#include "chrome/browser/ui/tab_contents/tab_contents_wrapper.h"
 #include "chrome/common/chrome_notification_types.h"
 #include "chrome/common/chrome_paths.h"
 #include "chrome/test/base/in_process_browser_test.h"
 #include "chrome/test/base/ui_test_utils.h"
-#include "content/browser/renderer_host/render_view_host.h"
 #include "content/public/browser/navigation_controller.h"
 #include "content/public/browser/notification_observer.h"
+#include "content/public/browser/render_view_host.h"
 #include "content/public/browser/web_contents.h"
+#include "content/public/test/browser_test_utils.h"
 #include "net/test/test_server.h"
 #include "third_party/skia/include/core/SkBitmap.h"
 #include "ui/base/clipboard/clipboard.h"
@@ -36,16 +38,16 @@ static const int kBrowserWidth = 1000;
 static const int kBrowserHeight = 600;
 
 class PDFBrowserTest : public InProcessBrowserTest,
+                       public testing::WithParamInterface<int>,
                        public content::NotificationObserver {
  public:
   PDFBrowserTest()
       : snapshot_different_(true),
         next_dummy_search_value_(0),
         load_stop_notification_count_(0) {
-    EnableDOMAutomation();
-
     pdf_test_server_.reset(new net::TestServer(
         net::TestServer::TYPE_HTTP,
+        net::TestServer::kLocalhost,
         FilePath(FILE_PATH_LITERAL("pdf/test"))));
   }
 
@@ -68,7 +70,8 @@ class PDFBrowserTest : public InProcessBrowserTest,
     // to a smaller window and then expanding leads to slight anti-aliasing
     // differences of the text and the pixel comparison fails.
     gfx::Rect bounds(gfx::Rect(0, 0, kBrowserWidth, kBrowserHeight));
-    gfx::Rect screen_bounds = gfx::Screen::GetPrimaryMonitorBounds();
+    gfx::Rect screen_bounds =
+        gfx::Screen::GetNativeScreen()->GetPrimaryDisplay().bounds();
     ASSERT_GT(screen_bounds.width(), kBrowserWidth);
     ASSERT_GT(screen_bounds.height(), kBrowserHeight);
     browser()->window()->SetBounds(bounds);
@@ -79,17 +82,20 @@ class PDFBrowserTest : public InProcessBrowserTest,
     ui_test_utils::NavigateToURL(browser(), url);
   }
 
-  void VerifySnapshot(const std::string& expected_filename) {
+  bool VerifySnapshot(const std::string& expected_filename) {
     snapshot_different_ = true;
     expected_filename_ = expected_filename;
-    TabContentsWrapper* wrapper =  browser()->GetSelectedTabContentsWrapper();
-    wrapper->snapshot_tab_helper()->CaptureSnapshot();
+    WebContents* web_contents =  chrome::GetActiveWebContents(browser());
+    SnapshotTabHelper::FromWebContents(web_contents)->CaptureSnapshot();
     ui_test_utils::RegisterAndWait(
         this,
         chrome::NOTIFICATION_TAB_SNAPSHOT_TAKEN,
-        content::Source<WebContents>(wrapper->web_contents()));
-    ASSERT_FALSE(snapshot_different_) << "Rendering didn't match, see result "
-        "at " << snapshot_filename_.value().c_str();
+        content::Source<WebContents>(web_contents));
+    if (snapshot_different_) {
+      LOG(INFO) << "Rendering didn't match, see result " <<
+          snapshot_filename_.value().c_str();
+    }
+    return !snapshot_different_;
   }
 
   void WaitForResponse() {
@@ -106,7 +112,8 @@ class PDFBrowserTest : public InProcessBrowserTest,
     string16 query = UTF8ToUTF16(
         std::string("xyzxyz" + base::IntToString(next_dummy_search_value_++)));
     ASSERT_EQ(0, ui_test_utils::FindInPage(
-        browser()->GetSelectedTabContentsWrapper(), query, true, false, NULL));
+        chrome::GetActiveWebContents(browser()), query, true, false, NULL,
+                                     NULL));
   }
 
  private:
@@ -210,13 +217,14 @@ IN_PROC_BROWSER_TEST_F(PDFBrowserTest, MAYBE_Basic) {
   // OS X uses CoreText, and FreeType renders slightly different on Linux and
   // Win.
 #if defined(OS_MACOSX)
-  std::string expectation_file = "pdf_browsertest_mac.png";
+  // The bots render differently than locally, see http://crbug.com/142531.
+  ASSERT_TRUE(VerifySnapshot("pdf_browsertest_mac.png") ||
+              VerifySnapshot("pdf_browsertest_mac2.png"));
 #elif defined(OS_LINUX)
-  std::string expectation_file = "pdf_browsertest_linux.png";
+  ASSERT_TRUE(VerifySnapshot("pdf_browsertest_linux.png"));
 #else
-  std::string expectation_file = "pdf_browsertest.png";
+  ASSERT_TRUE(VerifySnapshot("pdf_browsertest.png"));
 #endif
-  ASSERT_NO_FATAL_FAILURE(VerifySnapshot(expectation_file));
 }
 
 #if defined(OS_CHROMEOS)
@@ -236,13 +244,13 @@ IN_PROC_BROWSER_TEST_F(PDFBrowserTest, MAYBE_Scroll) {
   wheel_event.type = WebKit::WebInputEvent::MouseWheel;
   wheel_event.deltaY = -200;
   wheel_event.wheelTicksY = -2;
-  WebContents* web_contents = browser()->GetSelectedWebContents();
+  WebContents* web_contents = chrome::GetActiveWebContents(browser());
   web_contents->GetRenderViewHost()->ForwardWheelEvent(wheel_event);
   ASSERT_NO_FATAL_FAILURE(WaitForResponse());
 
   int y_offset = 0;
-  ASSERT_TRUE(ui_test_utils::ExecuteJavaScriptAndExtractInt(
-      browser()->GetSelectedWebContents()->GetRenderViewHost(),
+  ASSERT_TRUE(content::ExecuteJavaScriptAndExtractInt(
+      chrome::GetActiveWebContents(browser())->GetRenderViewHost(),
       std::wstring(),
       L"window.domAutomationController.send(plugin.pageYOffset())",
       &y_offset));
@@ -259,35 +267,37 @@ IN_PROC_BROWSER_TEST_F(PDFBrowserTest, MAYBE_FindAndCopy) {
   ASSERT_NO_FATAL_FAILURE(Load());
   // Verifies that find in page works.
   ASSERT_EQ(3, ui_test_utils::FindInPage(
-      browser()->GetSelectedTabContentsWrapper(), UTF8ToUTF16("adipiscing"),
-      true, false, NULL));
+      chrome::GetActiveWebContents(browser()), UTF8ToUTF16("adipiscing"),
+      true, false, NULL, NULL));
 
   // Verify that copying selected text works.
-  ui::Clipboard clipboard;
+  ui::Clipboard* clipboard = ui::Clipboard::GetForCurrentThread();
   // Reset the clipboard first.
   ui::Clipboard::ObjectMap objects;
   ui::Clipboard::ObjectMapParams params;
   params.push_back(std::vector<char>());
   objects[ui::Clipboard::CBF_TEXT] = params;
-  clipboard.WriteObjects(objects);
+  clipboard->WriteObjects(ui::Clipboard::BUFFER_STANDARD, objects);
 
-  browser()->GetSelectedWebContents()->GetRenderViewHost()->Copy();
+  chrome::GetActiveWebContents(browser())->GetRenderViewHost()->Copy();
   ASSERT_NO_FATAL_FAILURE(WaitForResponse());
 
   std::string text;
-  clipboard.ReadAsciiText(ui::Clipboard::BUFFER_STANDARD, &text);
+  clipboard->ReadAsciiText(ui::Clipboard::BUFFER_STANDARD, &text);
   ASSERT_EQ("adipiscing", text);
 }
+
+const int kLoadingNumberOfParts = 10;
 
 // Tests that loading async pdfs works correctly (i.e. document fully loads).
 // This also loads all documents that used to crash, to ensure we don't have
 // regressions.
-// Flaky as per http://crbug.com/74548.
-IN_PROC_BROWSER_TEST_F(PDFBrowserTest, FLAKY_SLOW_Loading) {
+// If it flakes, reopen http://crbug.com/74548.
+IN_PROC_BROWSER_TEST_P(PDFBrowserTest, Loading) {
   ASSERT_TRUE(pdf_test_server()->Start());
 
   NavigationController* controller =
-      &(browser()->GetSelectedWebContents()->GetController());
+      &(chrome::GetActiveWebContents(browser())->GetController());
   content::NotificationRegistrar registrar;
   registrar.Add(this,
                 content::NOTIFICATION_LOAD_STOP,
@@ -310,6 +320,13 @@ IN_PROC_BROWSER_TEST_F(PDFBrowserTest, FLAKY_SLOW_Loading) {
       continue;  // Crashes on Mac and Linux.  http://crbug.com/63549
 #endif
 
+    // Split the test into smaller sub-tests. Each one only loads
+    // every k-th file.
+    if (static_cast<int>(base::Hash(filename) % kLoadingNumberOfParts) !=
+        GetParam()) {
+      continue;
+    }
+
     LOG(WARNING) << "PDFBrowserTest.Loading: " << filename;
 
     GURL url = pdf_test_server()->GetURL(base_url + filename);
@@ -321,8 +338,8 @@ IN_PROC_BROWSER_TEST_F(PDFBrowserTest, FLAKY_SLOW_Loading) {
       // doing async loading.  This happens when the first loader is cancelled
       // and before creating a byte-range request loader.
       bool complete = false;
-      ASSERT_TRUE(ui_test_utils::ExecuteJavaScriptAndExtractBool(
-          browser()->GetSelectedWebContents()->GetRenderViewHost(),
+      ASSERT_TRUE(content::ExecuteJavaScriptAndExtractBool(
+          chrome::GetActiveWebContents(browser())->GetRenderViewHost(),
           std::wstring(),
           L"window.domAutomationController.send(plugin.documentLoadComplete())",
           &complete));
@@ -333,34 +350,64 @@ IN_PROC_BROWSER_TEST_F(PDFBrowserTest, FLAKY_SLOW_Loading) {
       // nested message loop for the JS call.
       if (last_count != load_stop_notification_count())
         continue;
-      ui_test_utils::WaitForLoadStop(browser()->GetSelectedWebContents());
+      content::WaitForLoadStop(chrome::GetActiveWebContents(browser()));
     }
   }
 }
 
+INSTANTIATE_TEST_CASE_P(PDFTestFiles,
+                        PDFBrowserTest,
+                        testing::Range(0, kLoadingNumberOfParts));
+
+IN_PROC_BROWSER_TEST_F(PDFBrowserTest, Action) {
+  ASSERT_NO_FATAL_FAILURE(Load());
+
+  ASSERT_TRUE(content::ExecuteJavaScript(
+      chrome::GetActiveWebContents(browser())->GetRenderViewHost(),
+      std::wstring(),
+      L"document.getElementsByName('plugin')[0].fitToHeight();"));
+
+  std::string zoom1, zoom2;
+  ASSERT_TRUE(content::ExecuteJavaScriptAndExtractString(
+      chrome::GetActiveWebContents(browser())->GetRenderViewHost(),
+      std::wstring(),
+      L"window.domAutomationController.send("
+      L"document.getElementsByName('plugin')[0].getZoomLevel().toString())",
+      &zoom1));
+
+  ASSERT_TRUE(content::ExecuteJavaScript(
+      chrome::GetActiveWebContents(browser())->GetRenderViewHost(),
+      std::wstring(),
+      L"document.getElementsByName('plugin')[0].fitToWidth();"));
+
+  ASSERT_TRUE(content::ExecuteJavaScriptAndExtractString(
+      chrome::GetActiveWebContents(browser())->GetRenderViewHost(),
+      std::wstring(),
+      L"window.domAutomationController.send("
+      L"document.getElementsByName('plugin')[0].getZoomLevel().toString())",
+      &zoom2));
+  ASSERT_NE(zoom1, zoom2);
+}
+
 // Flaky as per http://crbug.com/74549.
-#if defined(OS_MACOSX)
-#define MAYBE_OnLoadAndReload DISABLED_OnLoadAndReload
-#else
-#define MAYBE_OnLoadAndReload FLAKY_OnLoadAndReload
-#endif
-IN_PROC_BROWSER_TEST_F(PDFBrowserTest, MAYBE_OnLoadAndReload) {
+IN_PROC_BROWSER_TEST_F(PDFBrowserTest, DISABLED_OnLoadAndReload) {
   ASSERT_TRUE(pdf_test_server()->Start());
 
   GURL url = pdf_test_server()->GetURL("files/onload_reload.html");
   ui_test_utils::NavigateToURL(browser(), url);
 
-  ui_test_utils::WindowedNotificationObserver observer(
+  content::WindowedNotificationObserver observer(
       content::NOTIFICATION_LOAD_STOP,
       content::Source<NavigationController>(
-          &browser()->GetSelectedWebContents()->GetController()));
-  ASSERT_TRUE(ui_test_utils::ExecuteJavaScript(
-      browser()->GetSelectedWebContents()->GetRenderViewHost(),
+          &chrome::GetActiveWebContents(browser())->GetController()));
+  ASSERT_TRUE(content::ExecuteJavaScript(
+      chrome::GetActiveWebContents(browser())->GetRenderViewHost(),
       std::wstring(),
       L"reloadPDF();"));
   observer.Wait();
 
-  ASSERT_EQ("success", browser()->GetSelectedWebContents()->GetURL().query());
+  ASSERT_EQ("success",
+            chrome::GetActiveWebContents(browser())->GetURL().query());
 }
 
 }  // namespace

@@ -5,389 +5,764 @@
 #include "ash/wm/workspace/workspace_manager.h"
 
 #include <algorithm>
+#include <functional>
 
+#include "ash/root_window_controller.h"
+#include "ash/shell.h"
+#include "ash/shell_window_ids.h"
+#include "ash/wm/base_layout_manager.h"
+#include "ash/wm/frame_painter.h"
 #include "ash/wm/property_util.h"
+#include "ash/wm/shelf_layout_manager.h"
+#include "ash/wm/window_animations.h"
+#include "ash/wm/window_properties.h"
 #include "ash/wm/window_util.h"
+#include "ash/wm/workspace/auto_window_management.h"
+#include "ash/wm/workspace/desktop_background_fade_controller.h"
+#include "ash/wm/workspace/workspace_animations.h"
+#include "ash/wm/workspace/workspace_layout_manager.h"
 #include "ash/wm/workspace/workspace.h"
 #include "base/auto_reset.h"
 #include "base/logging.h"
 #include "base/stl_util.h"
 #include "ui/aura/client/aura_constants.h"
 #include "ui/aura/root_window.h"
-#include "ui/aura/screen_aura.h"
 #include "ui/aura/window.h"
+#include "ui/aura/window_property.h"
 #include "ui/base/ui_base_types.h"
-#include "ui/gfx/compositor/layer.h"
-#include "ui/gfx/compositor/layer_animator.h"
-#include "ui/gfx/compositor/scoped_layer_animation_settings.h"
-#include "ui/gfx/screen.h"
-#include "ui/gfx/transform.h"
+#include "ui/compositor/layer.h"
+#include "ui/compositor/layer_animator.h"
+#include "ui/compositor/scoped_layer_animation_settings.h"
+#include "ui/views/widget/widget.h"
 
-namespace {
+DECLARE_WINDOW_PROPERTY_TYPE(ash::internal::Workspace*);
+DECLARE_EXPORTED_WINDOW_PROPERTY_TYPE(ASH_EXPORT, ui::WindowShowState);
 
-// The horizontal margein between workspaces in pixels.
-const int kWorkspaceHorizontalMargin = 50;
-
-// Minimum/maximum scale for overview mode.
-const float kMaxOverviewScale = 0.9f;
-const float kMinOverviewScale = 0.3f;
-
-// Sets the visibility of the layer of each window in |windows| to |value|. We
-// set the visibility of the layer rather than the Window so that views doesn't
-// see the visibility change.
-// TODO: revisit this. Ideally the Window would think it's still visibile after
-// this. May be possible after Ben lands his changes.
-void SetWindowLayerVisibility(const std::vector<aura::Window*>& windows,
-                              bool value) {
-  for (size_t i = 0; i < windows.size(); ++i){
-    if (windows[i]->layer())
-      windows[i]->layer()->SetVisible(value);
-    SetWindowLayerVisibility(windows[i]->transient_children(), value);
-  }
-}
-
-// TODO(sky): this is a copy of that in ToplevelWindowEventFilter. Figure out
-// the right place to put it.
-int AlignToGrid(int location, int grid_size) {
-  if (grid_size <= 1 || location % grid_size == 0)
-    return location;
-  return floor(static_cast<float>(location) / static_cast<float>(grid_size) +
-               .5f) * grid_size;
-}
-
-gfx::Rect AlignRectToGrid(const gfx::Rect& rect, int grid_size) {
-  if (grid_size <= 1)
-    return rect;
-  return gfx::Rect(AlignToGrid(rect.x(), grid_size),
-                   AlignToGrid(rect.y(), grid_size),
-                   AlignToGrid(rect.width(), grid_size),
-                   AlignToGrid(rect.height(), grid_size));
-}
-
-}
+using aura::Window;
 
 namespace ash {
 namespace internal {
 
-////////////////////////////////////////////////////////////////////////////////
-// WindowManager, public:
+DEFINE_WINDOW_PROPERTY_KEY(Workspace*, kWorkspaceKey, NULL);
 
-// static
-const int WorkspaceManager::kOpenMaximizedThreshold = 1600;
+namespace {
 
-WorkspaceManager::WorkspaceManager(aura::Window* contents_view)
+// Duration for fading out the desktop background when maximizing.
+const int kCrossFadeSwitchTimeMS = 700;
+
+// Amount of time to pause before animating anything. Only used during initial
+// animation (when logging in).
+const int kInitialPauseTimeMS = 750;
+
+// Changes the parent of |window| and all its transient children to
+// |new_parent|. If |stack_beneach| is non-NULL all the windows are stacked
+// beneath it.
+void ReparentWindow(Window* window,
+                    Window* new_parent,
+                    Window* stack_beneath) {
+  new_parent->AddChild(window);
+  if (stack_beneath)
+    new_parent->StackChildBelow(window, stack_beneath);
+  for (size_t i = 0; i < window->transient_children().size(); ++i)
+    ReparentWindow(window->transient_children()[i], new_parent, stack_beneath);
+}
+
+}  // namespace
+
+// Workspace -------------------------------------------------------------------
+
+// LayoutManager installed on the parent window of all the Workspace window (eg
+// |WorkspaceManager::contents_view_|).
+class WorkspaceManager::LayoutManagerImpl : public BaseLayoutManager {
+ public:
+  explicit LayoutManagerImpl(WorkspaceManager* workspace_manager)
+      : BaseLayoutManager(workspace_manager->contents_view_->GetRootWindow()),
+        workspace_manager_(workspace_manager) {
+  }
+  virtual ~LayoutManagerImpl() {}
+
+  // Overridden from BaseWorkspaceLayoutManager:
+  virtual void OnWindowResized() OVERRIDE {
+    for (size_t i = 0; i < window()->children().size(); ++i)
+      window()->children()[i]->SetBounds(gfx::Rect(window()->bounds().size()));
+  }
+  virtual void OnWindowAddedToLayout(Window* child) OVERRIDE {
+    // Only workspaces should be added as children.
+    DCHECK((child->id() == kShellWindowId_WorkspaceContainer) ||
+           workspace_manager_->creating_fade_);
+    child->SetBounds(gfx::Rect(window()->bounds().size()));
+  }
+
+ private:
+  aura::Window* window() { return workspace_manager_->contents_view_; }
+
+  WorkspaceManager* workspace_manager_;
+
+  DISALLOW_COPY_AND_ASSIGN(LayoutManagerImpl);
+};
+
+// WorkspaceManager -----------------------------------------------------------
+
+WorkspaceManager::WorkspaceManager(Window* contents_view)
     : contents_view_(contents_view),
       active_workspace_(NULL),
-      workspace_size_(
-          gfx::Screen::GetMonitorAreaNearestWindow(contents_view_).size()),
-      is_overview_(false),
-      ignored_window_(NULL),
-      grid_size_(0),
-      open_new_windows_maximized_(true) {
-  DCHECK(contents_view);
+      shelf_(NULL),
+      in_move_(false),
+      ALLOW_THIS_IN_INITIALIZER_LIST(
+          clear_unminimizing_workspace_factory_(this)),
+      unminimizing_workspace_(NULL),
+      app_terminating_(false),
+      creating_fade_(false) {
+  // Clobber any existing event filter.
+  contents_view->SetEventFilter(NULL);
+  // |contents_view| takes ownership of LayoutManagerImpl.
+  contents_view->SetLayoutManager(new LayoutManagerImpl(this));
+  active_workspace_ = CreateWorkspace(false);
+  workspaces_.push_back(active_workspace_);
+  active_workspace_->window()->Show();
+  Shell::GetInstance()->AddShellObserver(this);
 }
 
 WorkspaceManager::~WorkspaceManager() {
-  for (size_t i = 0; i < workspaces_.size(); ++i) {
-    Workspace* workspace = workspaces_[i];
-    for (size_t j = 0; j < workspace->windows().size(); ++j)
-      workspace->windows()[j]->RemoveObserver(this);
-  }
-  std::vector<Workspace*> copy_to_delete(workspaces_);
-  STLDeleteElements(&copy_to_delete);
+  Shell::GetInstance()->RemoveShellObserver(this);
+  // Release the windows, they'll be destroyed when |contents_view_| is
+  // destroyed.
+  std::for_each(workspaces_.begin(), workspaces_.end(),
+                std::mem_fun(&Workspace::ReleaseWindow));
+  std::for_each(pending_workspaces_.begin(), pending_workspaces_.end(),
+                std::mem_fun(&Workspace::ReleaseWindow));
+  std::for_each(to_delete_.begin(), to_delete_.end(),
+                std::mem_fun(&Workspace::ReleaseWindow));
+  STLDeleteElements(&workspaces_);
+  STLDeleteElements(&pending_workspaces_);
+  STLDeleteElements(&to_delete_);
 }
 
-bool WorkspaceManager::IsManagedWindow(aura::Window* window) const {
-  return window->type() == aura::client::WINDOW_TYPE_NORMAL &&
-         !window->transient_parent();
+// static
+bool WorkspaceManager::IsMaximized(Window* window) {
+  return IsMaximizedState(window->GetProperty(aura::client::kShowStateKey));
 }
 
-bool WorkspaceManager::ShouldMaximize(aura::Window* window) const {
-  return !window->GetProperty(aura::client::kShowStateKey) &&
-         open_new_windows_maximized_ &&
-         contents_view_->bounds().width() < kOpenMaximizedThreshold;
+// static
+bool WorkspaceManager::IsMaximizedState(ui::WindowShowState state) {
+  return state == ui::SHOW_STATE_MAXIMIZED ||
+      state == ui::SHOW_STATE_FULLSCREEN;
 }
 
-void WorkspaceManager::AddWindow(aura::Window* window) {
-  DCHECK(IsManagedWindow(window));
+// static
+bool WorkspaceManager::WillRestoreMaximized(Window* window) {
+  return wm::IsWindowMinimized(window) &&
+      IsMaximizedState(window->GetProperty(internal::kRestoreShowStateKey));
+}
 
-  if (FindBy(window))
-    return;  // Already know about this window.
+WorkspaceWindowState WorkspaceManager::GetWindowState() const {
+  if (!shelf_)
+    return WORKSPACE_WINDOW_STATE_DEFAULT;
 
-  if (!window->GetProperty(aura::client::kShowStateKey)) {
-    if (ShouldMaximize(window)) {
-      window->SetIntProperty(aura::client::kShowStateKey,
-                             ui::SHOW_STATE_MAXIMIZED);
-    } else {
-      window->SetIntProperty(aura::client::kShowStateKey,
-                             ui::SHOW_STATE_NORMAL);
-    }
-  }
-
-  if (window_util::IsWindowMaximized(window) ||
-      window_util::IsWindowFullscreen(window)) {
-    SetFullScreenOrMaximizedBounds(window);
-  } else {
-    if (grid_size_ > 1)
-      SetWindowBounds(window, AlignBoundsToGrid(window->GetTargetBounds()));
-  }
-
-  // Add the observer after we change the state in anyway.
-  window->AddObserver(this);
-
-  Workspace* workspace = NULL;
-  Workspace::Type type_for_window = Workspace::TypeForWindow(window);
-  switch (type_for_window) {
-    case Workspace::TYPE_SPLIT:
-      // Splits either go in current workspace (if maximized or split). If the
-      // current workspace isn't split/maximized, then create a maximized
-      // workspace.
-      workspace = GetActiveWorkspace();
-      if (workspace &&
-          (workspace->type() == Workspace::TYPE_SPLIT ||
-           workspace->type() == Workspace::TYPE_MAXIMIZED)) {
-        // TODO: this needs to reset bounds of any existing windows in
-        // workspace.
-        workspace->SetType(Workspace::TYPE_SPLIT);
-      } else {
-        type_for_window = Workspace::TYPE_MAXIMIZED;
-        workspace = NULL;
+  const bool is_active_maximized = active_workspace_->is_maximized();
+  const gfx::Rect shelf_bounds(shelf_->GetIdealBounds());
+  const Window::Windows& windows(active_workspace_->window()->children());
+  bool window_overlaps_launcher = false;
+  bool has_maximized_window = false;
+  for (Window::Windows::const_iterator i = windows.begin();
+       i != windows.end(); ++i) {
+    if (GetIgnoredByShelf(*i))
+      continue;
+    ui::Layer* layer = (*i)->layer();
+    if (!layer->GetTargetVisibility() || layer->GetTargetOpacity() == 0.0f)
+      continue;
+    // Ignore maximized/fullscreen windows if we're in the desktop. Such a state
+    // is transitory and means we haven't yet switched. If we did consider such
+    // windows we'll return the wrong thing, which can lead to prematurely
+    // changing the launcher state and clobbering restore bounds.
+    if (is_active_maximized) {
+      if (wm::IsWindowMaximized(*i)) {
+        // An untracked window may still be fullscreen so we keep iterating when
+        // we hit a maximized window.
+        has_maximized_window = true;
+      } else if (wm::IsWindowFullscreen(*i)) {
+        return WORKSPACE_WINDOW_STATE_FULL_SCREEN;
       }
-      break;
-
-    case Workspace::TYPE_NORMAL:
-      // All normal windows go in the same workspace.
-      workspace = GetNormalWorkspace();
-      break;
-
-    case Workspace::TYPE_MAXIMIZED:
-      // All maximized windows go in their own workspace.
-      break;
-
-    default:
-      NOTREACHED();
-      break;
+    }
+    if (!window_overlaps_launcher && (*i)->bounds().Intersects(shelf_bounds))
+      window_overlaps_launcher = true;
   }
+  if (has_maximized_window)
+    return WORKSPACE_WINDOW_STATE_MAXIMIZED;
 
-  if (!workspace) {
-    workspace = new Workspace(this);
-    workspace->SetType(type_for_window);
-  }
-  workspace->AddWindowAfter(window, NULL);
-  workspace->Activate();
+  return window_overlaps_launcher ?
+      WORKSPACE_WINDOW_STATE_WINDOW_OVERLAPS_SHELF :
+      WORKSPACE_WINDOW_STATE_DEFAULT;
 }
 
-void WorkspaceManager::RemoveWindow(aura::Window* window) {
+void WorkspaceManager::SetShelf(ShelfLayoutManager* shelf) {
+  shelf_ = shelf;
+}
+
+void WorkspaceManager::SetActiveWorkspaceByWindow(Window* window) {
   Workspace* workspace = FindBy(window);
   if (!workspace)
     return;
-  window->RemoveObserver(this);
-  workspace->RemoveWindow(window);
-  if (workspace->is_empty())
-    delete workspace;
-}
 
-void WorkspaceManager::SetActiveWorkspaceByWindow(aura::Window* window) {
-  Workspace* workspace = FindBy(window);
-  if (workspace)
-    workspace->Activate();
-}
-
-gfx::Rect WorkspaceManager::GetDragAreaBounds() {
-  return GetWorkAreaBounds();
-}
-
-void WorkspaceManager::SetOverview(bool overview) {
-  if (is_overview_ == overview)
-    return;
-  NOTIMPLEMENTED();
-}
-
-void WorkspaceManager::SetWorkspaceSize(const gfx::Size& workspace_size) {
-  if (workspace_size == workspace_size_)
-    return;
-  workspace_size_ = workspace_size;
-  for (Workspaces::const_iterator i = workspaces_.begin();
-       i != workspaces_.end(); ++i) {
-    (*i)->WorkspaceSizeChanged();
-  }
-}
-
-gfx::Rect WorkspaceManager::AlignBoundsToGrid(const gfx::Rect& bounds) {
-  if (grid_size_ <= 1)
-    return bounds;
-  return AlignRectToGrid(bounds, grid_size_);
-}
-
-void WorkspaceManager::OnWindowPropertyChanged(aura::Window* window,
-                                               const char* name,
-                                               void* old) {
-  if (!IsManagedWindow(window))
-    return;
-
-  if (name != aura::client::kShowStateKey)
-    return;
-
-  DCHECK(FindBy(window));
-
-  Workspace::Type old_type = FindBy(window)->type();
-  Workspace::Type new_type = Workspace::TypeForWindow(window);
-  if (new_type != old_type) {
-    OnTypeOfWorkspacedNeededChanged(window);
-  } else if (new_type == Workspace::TYPE_MAXIMIZED) {
-    // Even though the type didn't change, the window may have gone from
-    // maximized to fullscreen. Adjust the bounds appropriately.
-    SetFullScreenOrMaximizedBounds(window);
-  }
-}
-
-////////////////////////////////////////////////////////////////////////////////
-// WorkspaceManager, private:
-
-void WorkspaceManager::AddWorkspace(Workspace* workspace) {
-  DCHECK(std::find(workspaces_.begin(), workspaces_.end(),
-                   workspace) == workspaces_.end());
-  if (active_workspace_) {
-    // New workspaces go right after current workspace.
-    Workspaces::iterator i = std::find(workspaces_.begin(), workspaces_.end(),
-                                       active_workspace_);
-    workspaces_.insert(++i, workspace);
-  } else {
-    workspaces_.push_back(workspace);
-  }
-}
-
-void WorkspaceManager::RemoveWorkspace(Workspace* workspace) {
-  Workspaces::iterator i = std::find(workspaces_.begin(),
-                                     workspaces_.end(),
-                                     workspace);
-  DCHECK(i != workspaces_.end());
-  i = workspaces_.erase(i);
-  if (active_workspace_ == workspace) {
-    // TODO: need mru order.
-    if (i != workspaces_.end())
-      SetActiveWorkspace(*i);
-    else if (!workspaces_.empty())
-      SetActiveWorkspace(workspaces_.back());
-    else
-      active_workspace_ = NULL;
-  }
-}
-
-Workspace* WorkspaceManager::GetActiveWorkspace() const {
-  return active_workspace_;
-}
-
-Workspace* WorkspaceManager::FindBy(aura::Window* window) const {
-  int index = GetWorkspaceIndexContaining(window);
-  return index < 0 ? NULL : workspaces_[index];
-}
-
-void WorkspaceManager::SetActiveWorkspace(Workspace* workspace) {
-  if (active_workspace_ == workspace)
-    return;
-  DCHECK(std::find(workspaces_.begin(), workspaces_.end(),
-                   workspace) != workspaces_.end());
-  if (active_workspace_)
-    SetWindowLayerVisibility(active_workspace_->windows(), false);
-  active_workspace_ = workspace;
-  if (active_workspace_)
-    SetWindowLayerVisibility(active_workspace_->windows(), true);
-
-  is_overview_ = false;
-}
-
-gfx::Rect WorkspaceManager::GetWorkAreaBounds() {
-  gfx::Rect bounds(workspace_size_);
-  bounds.Inset(
-      aura::RootWindow::GetInstance()->screen()->work_area_insets());
-  return bounds;
-}
-
-// Returns the index of the workspace that contains the |window|.
-int WorkspaceManager::GetWorkspaceIndexContaining(aura::Window* window) const {
-  for (Workspaces::const_iterator i = workspaces_.begin();
-       i != workspaces_.end();
-       ++i) {
-    if ((*i)->Contains(window))
-      return i - workspaces_.begin();
-  }
-  return -1;
-}
-
-void WorkspaceManager::SetWindowBounds(aura::Window* window,
-                                       const gfx::Rect& bounds) {
-  ignored_window_ = window;
-  window->SetBounds(bounds);
-  ignored_window_ = NULL;
-}
-
-void WorkspaceManager::SetWindowBoundsFromRestoreBounds(aura::Window* window) {
-  Workspace* workspace = FindBy(window);
-  DCHECK(workspace);
-  const gfx::Rect* restore = GetRestoreBounds(window);
-  gfx::Rect bounds;
-  if (restore) {
-    bounds = restore->AdjustToFit(workspace->GetWorkAreaBounds());
-  } else {
-    bounds = window->bounds().AdjustToFit(workspace->GetWorkAreaBounds());
-  }
-  SetWindowBounds(window, AlignRectToGrid(bounds, grid_size_));
-  ash::ClearRestoreBounds(window);
-}
-
-void WorkspaceManager::SetFullScreenOrMaximizedBounds(aura::Window* window) {
-  if (!GetRestoreBounds(window))
-    SetRestoreBounds(window, window->GetTargetBounds());
-  if (window_util::IsWindowMaximized(window))
-    SetWindowBounds(window, GetWorkAreaBounds());
-  else if (window_util::IsWindowFullscreen(window))
-    SetWindowBounds(window, gfx::Screen::GetMonitorAreaNearestWindow(window));
-}
-
-void WorkspaceManager::OnTypeOfWorkspacedNeededChanged(aura::Window* window) {
-  // TODO: needs to handle transitioning to split.
-  DCHECK(IsManagedWindow(window));
-  Workspace* current_workspace = FindBy(window);
-  DCHECK(current_workspace);
-  if (Workspace::TypeForWindow(window) == Workspace::TYPE_MAXIMIZED) {
-    // Unmaximized -> maximized; create a new workspace (unless current only has
-    // one window).
-    if (current_workspace->num_windows() != 1) {
-      current_workspace->RemoveWindow(window);
-      Workspace* workspace = new Workspace(this);
-      workspace->SetType(Workspace::TYPE_MAXIMIZED);
-      workspace->AddWindowAfter(window, NULL);
-      current_workspace = workspace;
+  if (workspace != active_workspace_) {
+    // A window is being made active. In the following cases we reparent to
+    // the active desktop:
+    // . The window is not tracked by workspace code. This is used for tab
+    //   dragging. Since tab dragging needs to happen in the active workspace we
+    //   have to reparent the window (otherwise the window you dragged the tab
+    //   out of would disappear since the workspace changed). Since this case is
+    //   only transiently used (property reset on input release) we don't worry
+    //   about window state. In fact we can't consider window state here as we
+    //   have to allow dragging of a maximized window to work in this case.
+    // . The window persists across all workspaces. For example, the task
+    //   manager is in the desktop worskpace and the current workspace is
+    //   maximized. If we swapped to the desktop you would lose context. Instead
+    //   we reparent.  The exception to this is if the window is maximized (it
+    //   needs its own workspace then) or we're in the process of maximizing. If
+    //   we're in the process of maximizing the window needs its own workspace.
+    if (!GetTrackedByWorkspace(window) ||
+        (GetPersistsAcrossAllWorkspaces(window) && !IsMaximized(window) &&
+         !(wm::IsWindowMinimized(window) && WillRestoreMaximized(window)))) {
+      ReparentWindow(window, active_workspace_->window(), NULL);
     } else {
-      current_workspace->SetType(Workspace::TYPE_MAXIMIZED);
+      SetActiveWorkspace(workspace, SWITCH_WINDOW_MADE_ACTIVE,
+                         base::TimeDelta());
     }
-    SetFullScreenOrMaximizedBounds(window);
-  } else {
-    // Maximized -> unmaximized; move window to unmaximized workspace (or reuse
-    // current if there isn't one).
-    window_util::SetOpenWindowSplit(window, false);
-    Workspace* workspace = GetNormalWorkspace();
-    if (workspace) {
-      current_workspace->RemoveWindow(window);
-      DCHECK(current_workspace->is_empty());
-      workspace->AddWindowAfter(window, NULL);
-      delete current_workspace;
-      current_workspace = workspace;
-    } else {
-      current_workspace->SetType(Workspace::TYPE_NORMAL);
-    }
-    SetWindowBoundsFromRestoreBounds(window);
   }
-  SetActiveWorkspace(current_workspace);
+  if (workspace->is_maximized() && IsMaximized(window)) {
+    // Clicking on the maximized window in a maximized workspace. Force all
+    // other windows to drop to the desktop.
+    MoveChildrenToDesktop(workspace->window(), NULL);
+  }
 }
 
-Workspace* WorkspaceManager::GetNormalWorkspace() {
-  for (size_t i = 0; i < workspaces_.size(); ++i) {
-    if (workspaces_[i]->type() == Workspace::TYPE_NORMAL)
-      return workspaces_[i];
+Window* WorkspaceManager::GetParentForNewWindow(Window* window) {
+  // Try to put windows with transient parents in the same workspace as their
+  // transient parent.
+  if (window->transient_parent() && !IsMaximized(window)) {
+    Workspace* workspace = FindBy(window->transient_parent());
+    if (workspace)
+      return workspace->window();
+    // Fall through to normal logic.
+  }
+
+  if (!GetTrackedByWorkspace(window))
+    return active_workspace_->window();
+
+  if (IsMaximized(window)) {
+    // Wait for the window to be made active before showing the workspace.
+    Workspace* workspace = CreateWorkspace(true);
+    pending_workspaces_.insert(workspace);
+    return workspace->window();
+  }
+
+  if (!GetTrackedByWorkspace(window) || GetPersistsAcrossAllWorkspaces(window))
+    return active_workspace_->window();
+
+  return desktop_workspace()->window();
+}
+
+bool WorkspaceManager::CycleToWorkspace(CycleDirection direction) {
+  aura::Window* active_window = wm::GetActiveWindow();
+  if (!active_workspace_->window()->Contains(active_window))
+    active_window = NULL;
+
+  Workspaces::const_iterator workspace_i(FindWorkspace(active_workspace_));
+  int workspace_offset = 0;
+  if (direction == CYCLE_PREVIOUS) {
+    workspace_offset = 1;
+    if (workspace_i == workspaces_.end() - 1)
+      return false;
+  } else {
+    workspace_offset = -1;
+    if (workspace_i == workspaces_.begin())
+      return false;
+  }
+
+  Workspaces::const_iterator next_workspace_i(workspace_i + workspace_offset);
+  SetActiveWorkspace(*next_workspace_i, SWITCH_OTHER, base::TimeDelta());
+
+  // The activation controller will pick a window from the just activated
+  // workspace to activate as a result of DeactivateWindow().
+  if (active_window)
+    wm::DeactivateWindow(active_window);
+  return true;
+}
+
+void WorkspaceManager::DoInitialAnimation() {
+  if (active_workspace_->is_maximized()) {
+    RootWindowController* root_controller = GetRootWindowController(
+        contents_view_->GetRootWindow());
+    if (root_controller) {
+      aura::Window* background = root_controller->GetContainer(
+          kShellWindowId_DesktopBackgroundContainer);
+      background->Show();
+      ShowOrHideDesktopBackground(background, SWITCH_INITIAL,
+                                  base::TimeDelta(), false);
+    }
+  }
+  ShowWorkspace(active_workspace_, active_workspace_, SWITCH_INITIAL);
+}
+
+void WorkspaceManager::OnAppTerminating() {
+  app_terminating_ = true;
+}
+
+void WorkspaceManager::UpdateShelfVisibility() {
+  if (shelf_)
+    shelf_->UpdateVisibilityState();
+}
+
+Workspace* WorkspaceManager::FindBy(Window* window) const {
+  while (window) {
+    Workspace* workspace = window->GetProperty(kWorkspaceKey);
+    if (workspace)
+      return workspace;
+    window = window->parent();
   }
   return NULL;
+}
+
+void WorkspaceManager::SetActiveWorkspace(Workspace* workspace,
+                                          SwitchReason reason,
+                                          base::TimeDelta duration) {
+  DCHECK(workspace);
+  if (active_workspace_ == workspace)
+    return;
+
+  pending_workspaces_.erase(workspace);
+
+  // Adjust the z-order. No need to adjust the z-order for the desktop since
+  // it always stays at the bottom.
+  if (workspace != desktop_workspace() &&
+      FindWorkspace(workspace) == workspaces_.end()) {
+    contents_view_->StackChildAbove(workspace->window(),
+                                    workspaces_.back()->window());
+    workspaces_.push_back(workspace);
+  }
+
+  Workspace* last_active = active_workspace_;
+  active_workspace_ = workspace;
+
+  // The display work-area may have changed while |workspace| was not the active
+  // workspace. Give it a chance to adjust its state for the new work-area.
+  active_workspace_->workspace_layout_manager()->
+      OnDisplayWorkAreaInsetsChanged();
+
+  const bool is_unminimizing_maximized_window =
+      unminimizing_workspace_ && unminimizing_workspace_ == active_workspace_ &&
+      active_workspace_->is_maximized();
+  if (is_unminimizing_maximized_window) {
+    // If we're unminimizing a window it needs to be on the top, otherwise you
+    // won't see the animation.
+    contents_view_->StackChildAtTop(active_workspace_->window());
+  } else if (active_workspace_->is_maximized() && last_active->is_maximized()) {
+    // When switching between maximized windows we need the last active
+    // workspace on top of the new, otherwise the animations won't look
+    // right. Since only one workspace is visible at a time stacking order of
+    // the workspace windows ultimately doesn't matter.
+    contents_view_->StackChildAtTop(last_active->window());
+  }
+
+  UpdateShelfVisibility();
+
+  // NOTE: duration supplied to this method is only used for desktop background.
+  HideWorkspace(last_active, reason, is_unminimizing_maximized_window);
+  ShowWorkspace(workspace, last_active, reason);
+
+  RootWindowController* root_controller = GetRootWindowController(
+      contents_view_->GetRootWindow());
+  if (root_controller) {
+    aura::Window* background = root_controller->GetContainer(
+        kShellWindowId_DesktopBackgroundContainer);
+    if (last_active == desktop_workspace()) {
+      ShowOrHideDesktopBackground(background, reason, duration, false);
+    } else if (active_workspace_ == desktop_workspace() && !app_terminating_) {
+      ShowOrHideDesktopBackground(background, reason, duration, true);
+    }
+  }
+
+  // Showing or hiding a workspace may change the "solo window" status of
+  // a window, requiring the header to be updated.
+  FramePainter::UpdateSoloWindowHeader(contents_view_->GetRootWindow());
+}
+
+WorkspaceManager::Workspaces::iterator
+WorkspaceManager::FindWorkspace(Workspace* workspace)  {
+  return std::find(workspaces_.begin(), workspaces_.end(), workspace);
+}
+
+Workspace* WorkspaceManager::CreateWorkspace(bool maximized) {
+  return new Workspace(this, contents_view_, maximized);
+}
+
+void WorkspaceManager::MoveWorkspaceToPendingOrDelete(
+    Workspace* workspace,
+    Window* stack_beneath,
+    SwitchReason reason) {
+  // We're all ready moving windows.
+  if (in_move_)
+    return;
+
+  DCHECK_NE(desktop_workspace(), workspace);
+
+  if (workspace == active_workspace_)
+    SelectNextWorkspace(reason);
+
+  base::AutoReset<bool> setter(&in_move_, true);
+
+  MoveChildrenToDesktop(workspace->window(), stack_beneath);
+
+  {
+    Workspaces::iterator workspace_i(FindWorkspace(workspace));
+    if (workspace_i != workspaces_.end())
+      workspaces_.erase(workspace_i);
+  }
+
+  if (workspace->window()->children().empty()) {
+    if (workspace == unminimizing_workspace_)
+      unminimizing_workspace_ = NULL;
+    pending_workspaces_.erase(workspace);
+    ScheduleDelete(workspace);
+  } else {
+    pending_workspaces_.insert(workspace);
+  }
+}
+
+void WorkspaceManager::MoveChildrenToDesktop(aura::Window* window,
+                                             aura::Window* stack_beneath) {
+  // Build the list of windows to move. Exclude maximized/fullscreen and windows
+  // with transient parents.
+  Window::Windows to_move;
+  for (size_t i = 0; i < window->children().size(); ++i) {
+    Window* child = window->children()[i];
+    if (!child->transient_parent() && !IsMaximized(child) &&
+        !WillRestoreMaximized(child)) {
+      to_move.push_back(child);
+    }
+  }
+  // Move the windows, but make sure the window is still a child of |window|
+  // (moving may cascade and cause other windows to move).
+  for (size_t i = 0; i < to_move.size(); ++i) {
+    if (std::find(window->children().begin(), window->children().end(),
+                  to_move[i]) != window->children().end()) {
+      ReparentWindow(to_move[i], desktop_workspace()->window(),
+                     stack_beneath);
+    }
+  }
+}
+
+void WorkspaceManager::SelectNextWorkspace(SwitchReason reason) {
+  DCHECK_NE(active_workspace_, desktop_workspace());
+
+  Workspaces::const_iterator workspace_i(FindWorkspace(active_workspace_));
+  Workspaces::const_iterator next_workspace_i(workspace_i + 1);
+  if (next_workspace_i != workspaces_.end())
+    SetActiveWorkspace(*next_workspace_i, reason, base::TimeDelta());
+  else
+    SetActiveWorkspace(*(workspace_i - 1), reason, base::TimeDelta());
+}
+
+void WorkspaceManager::ScheduleDelete(Workspace* workspace) {
+  to_delete_.insert(workspace);
+  delete_timer_.Stop();
+  delete_timer_.Start(FROM_HERE, base::TimeDelta::FromSeconds(1), this,
+                      &WorkspaceManager::ProcessDeletion);
+}
+
+void WorkspaceManager::SetUnminimizingWorkspace(Workspace* workspace) {
+  // The normal sequence of unminimizing a window is: Show() the window, which
+  // triggers changing the kShowStateKey to NORMAL and lastly the window is made
+  // active. This means at the time the window is unminimized we don't know if
+  // the workspace it is in is going to become active. To track this
+  // |unminimizing_workspace_| is set at the time we unminimize and a task is
+  // schedule to reset it. This way when we get the activate we know we're in
+  // the process unminimizing and can do the right animation.
+  unminimizing_workspace_ = workspace;
+  if (unminimizing_workspace_) {
+    MessageLoop::current()->PostTask(
+        FROM_HERE,
+        base::Bind(&WorkspaceManager::SetUnminimizingWorkspace,
+                   clear_unminimizing_workspace_factory_.GetWeakPtr(),
+                   static_cast<Workspace*>(NULL)));
+  }
+}
+
+void WorkspaceManager::FadeDesktop(aura::Window* window,
+                                   base::TimeDelta duration) {
+  if (views::corewm::WindowAnimationsDisabled(NULL) ||
+      ui::LayerAnimator::disable_animations_for_test())
+    return;
+
+  base::AutoReset<bool> reseter(&creating_fade_, true);
+  DesktopBackgroundFadeController::Direction direction;
+  aura::Window* parent = NULL;
+  aura::Window* stack_above = NULL;
+  if (active_workspace_ == desktop_workspace()) {
+    direction = DesktopBackgroundFadeController::FADE_IN;
+    parent = desktop_workspace()->window();
+    stack_above = window;
+  } else {
+    direction = DesktopBackgroundFadeController::FADE_OUT;
+    parent = contents_view_;
+    stack_above = desktop_workspace()->window();
+    DCHECK_EQ(kCrossFadeSwitchTimeMS, (int)duration.InMilliseconds());
+    duration = base::TimeDelta::FromMilliseconds(kCrossFadeSwitchTimeMS);
+  }
+  desktop_fade_controller_.reset(
+      new DesktopBackgroundFadeController(
+          parent, stack_above, duration, direction));
+}
+
+void WorkspaceManager::ShowOrHideDesktopBackground(
+    aura::Window* window,
+    SwitchReason reason,
+    base::TimeDelta duration,
+    bool show) const {
+  WorkspaceAnimationDetails details;
+  details.animate = true;
+  details.direction = show ? WORKSPACE_ANIMATE_UP : WORKSPACE_ANIMATE_DOWN;
+  details.animate_scale = reason != SWITCH_MAXIMIZED_OR_RESTORED;
+  details.duration = duration;
+  if (reason == SWITCH_INITIAL)
+    details.pause_time_ms = kInitialPauseTimeMS;
+  if (show)
+    ash::internal::ShowWorkspace(window, details);
+  else
+    ash::internal::HideWorkspace(window, details);
+}
+
+void WorkspaceManager::ShowWorkspace(
+    Workspace* workspace,
+    Workspace* last_active,
+    SwitchReason reason) const {
+  WorkspaceAnimationDetails details;
+  details.direction =
+      (last_active == desktop_workspace() || reason == SWITCH_INITIAL) ?
+      WORKSPACE_ANIMATE_DOWN : WORKSPACE_ANIMATE_UP;
+
+  switch (reason) {
+    case SWITCH_WINDOW_MADE_ACTIVE:
+    case SWITCH_TRACKED_BY_WORKSPACE_CHANGED:
+    case SWITCH_WINDOW_REMOVED:
+    case SWITCH_VISIBILITY_CHANGED:
+    case SWITCH_MINIMIZED:
+      details.animate = details.animate_scale = true;
+      details.animate_opacity = last_active == desktop_workspace();
+      break;
+
+    case SWITCH_INITIAL:
+      details.animate = details.animate_opacity = details.animate_scale = true;
+      details.pause_time_ms = kInitialPauseTimeMS;
+      break;
+
+    // Remaining cases require no animation.
+    default:
+      break;
+  }
+  ash::internal::ShowWorkspace(workspace->window(), details);
+}
+
+void WorkspaceManager::HideWorkspace(
+    Workspace* workspace,
+    SwitchReason reason,
+    bool is_unminimizing_maximized_window) const {
+  WorkspaceAnimationDetails details;
+  details.direction = active_workspace_ == desktop_workspace() ?
+      WORKSPACE_ANIMATE_UP : WORKSPACE_ANIMATE_DOWN;
+  switch (reason) {
+    case SWITCH_WINDOW_MADE_ACTIVE:
+    case SWITCH_TRACKED_BY_WORKSPACE_CHANGED:
+      details.animate_opacity =
+          ((active_workspace_ == desktop_workspace() ||
+            workspace != desktop_workspace()) &&
+           !is_unminimizing_maximized_window);
+      details.animate_scale = true;
+      details.animate = true;
+      break;
+
+    case SWITCH_VISIBILITY_CHANGED:
+      // The window is most likely closing. Make the workspace visible for the
+      // duration of the switch so that the close animation is visible.
+      details.animate = true;
+      details.animate_scale = true;
+      break;
+
+    case SWITCH_MAXIMIZED_OR_RESTORED:
+      if (active_workspace_->is_maximized()) {
+        // Delay the hide until the animation is done.
+        details.duration =
+            base::TimeDelta::FromMilliseconds(kCrossFadeSwitchTimeMS);
+        details.animate = true;
+      }
+      break;
+
+    // Remaining cases require no animation.
+    default:
+      break;
+  }
+  ash::internal::HideWorkspace(workspace->window(), details);
+}
+
+void WorkspaceManager::ProcessDeletion() {
+  std::set<Workspace*> to_delete;
+  to_delete.swap(to_delete_);
+  for (std::set<Workspace*>::iterator i = to_delete.begin();
+       i != to_delete.end(); ++i) {
+    Workspace* workspace = *i;
+    if (workspace->window()->layer()->children().empty()) {
+      delete workspace->ReleaseWindow();
+      delete workspace;
+    } else {
+      to_delete_.insert(workspace);
+    }
+  }
+  if (!to_delete_.empty()) {
+    delete_timer_.Start(FROM_HERE, base::TimeDelta::FromSeconds(1), this,
+                        &WorkspaceManager::ProcessDeletion);
+  }
+}
+
+void WorkspaceManager::OnWindowAddedToWorkspace(Workspace* workspace,
+                                                Window* child) {
+  child->SetProperty(kWorkspaceKey, workspace);
+  // Do nothing (other than updating shelf visibility) as the right parent was
+  // chosen by way of GetParentForNewWindow() or we explicitly moved the window
+  // to the workspace.
+  if (workspace == active_workspace_)
+    UpdateShelfVisibility();
+
+  RearrangeVisibleWindowOnShow(child);
+}
+
+void WorkspaceManager::OnWillRemoveWindowFromWorkspace(Workspace* workspace,
+                                                       Window* child) {
+  if (child->TargetVisibility())
+    RearrangeVisibleWindowOnHideOrRemove(child);
+  child->ClearProperty(kWorkspaceKey);
+}
+
+void WorkspaceManager::OnWindowRemovedFromWorkspace(Workspace* workspace,
+                                                    Window* child) {
+  if (workspace->ShouldMoveToPending())
+    MoveWorkspaceToPendingOrDelete(workspace, NULL, SWITCH_WINDOW_REMOVED);
+}
+
+void WorkspaceManager::OnWorkspaceChildWindowVisibilityChanged(
+    Workspace* workspace,
+    Window* child) {
+  if (workspace->ShouldMoveToPending()) {
+    MoveWorkspaceToPendingOrDelete(workspace, NULL, SWITCH_VISIBILITY_CHANGED);
+  } else {
+    if (child->TargetVisibility())
+      RearrangeVisibleWindowOnShow(child);
+    else
+      RearrangeVisibleWindowOnHideOrRemove(child);
+    if (workspace == active_workspace_)
+      UpdateShelfVisibility();
+  }
+}
+
+void WorkspaceManager::OnWorkspaceWindowChildBoundsChanged(
+    Workspace* workspace,
+    Window* child) {
+  if (workspace == active_workspace_)
+    UpdateShelfVisibility();
+}
+
+void WorkspaceManager::OnWorkspaceWindowShowStateChanged(
+    Workspace* workspace,
+    Window* child,
+    ui::WindowShowState last_show_state,
+    ui::Layer* old_layer) {
+  // |child| better still be in |workspace| else things have gone wrong.
+  DCHECK_EQ(workspace, child->GetProperty(kWorkspaceKey));
+  if (wm::IsWindowMinimized(child)) {
+    if (workspace->ShouldMoveToPending())
+      MoveWorkspaceToPendingOrDelete(workspace, NULL, SWITCH_MINIMIZED);
+    DCHECK(!old_layer);
+  } else {
+    // Set of cases to deal with:
+    // . More than one maximized window: move newly maximized window into
+    //   own workspace.
+    // . One maximized window and not in a maximized workspace: move window
+    //   into own workspace.
+    // . No maximized window and not in desktop: move to desktop and further
+    //   any existing windows are stacked beneath |child|.
+    const bool is_active = wm::IsActiveWindow(child);
+    Workspace* new_workspace = NULL;
+    const int max_count = workspace->GetNumMaximizedWindows();
+    base::TimeDelta duration = old_layer && !IsMaximized(child) ?
+            GetCrossFadeDuration(old_layer->bounds(), child->bounds()) :
+            base::TimeDelta::FromMilliseconds(kCrossFadeSwitchTimeMS);
+    if (max_count == 0) {
+      if (workspace != desktop_workspace()) {
+        {
+          base::AutoReset<bool> setter(&in_move_, true);
+          ReparentWindow(child, desktop_workspace()->window(), NULL);
+        }
+        DCHECK(!is_active || old_layer);
+        new_workspace = desktop_workspace();
+        SetActiveWorkspace(new_workspace, SWITCH_MAXIMIZED_OR_RESTORED,
+                           duration);
+        MoveWorkspaceToPendingOrDelete(workspace, child,
+                                       SWITCH_MAXIMIZED_OR_RESTORED);
+        if (FindWorkspace(workspace) == workspaces_.end())
+          workspace = NULL;
+      }
+    } else if ((max_count == 1 && workspace == desktop_workspace()) ||
+               max_count > 1) {
+      new_workspace = CreateWorkspace(true);
+      pending_workspaces_.insert(new_workspace);
+      ReparentWindow(child, new_workspace->window(), NULL);
+    }
+    if (is_active && new_workspace) {
+      // |old_layer| may be NULL if as part of processing
+      // WorkspaceLayoutManager::OnWindowPropertyChanged() the window is made
+      // active.
+      if (old_layer) {
+        SetActiveWorkspace(new_workspace, SWITCH_MAXIMIZED_OR_RESTORED,
+                           duration);
+        CrossFadeWindowBetweenWorkspaces(new_workspace->window(), child,
+                                         old_layer);
+        if (workspace == desktop_workspace() ||
+            new_workspace == desktop_workspace()) {
+          FadeDesktop(child, duration);
+        }
+      } else {
+        SetActiveWorkspace(new_workspace, SWITCH_OTHER, base::TimeDelta());
+      }
+    } else {
+      if (last_show_state == ui::SHOW_STATE_MINIMIZED)
+        SetUnminimizingWorkspace(new_workspace ? new_workspace : workspace);
+      DCHECK(!old_layer);
+    }
+  }
+  UpdateShelfVisibility();
+}
+
+void WorkspaceManager::OnTrackedByWorkspaceChanged(Workspace* workspace,
+                                                   aura::Window* window) {
+  Workspace* new_workspace = NULL;
+  if (IsMaximized(window)) {
+    new_workspace = CreateWorkspace(true);
+    pending_workspaces_.insert(new_workspace);
+  } else if (workspace->is_maximized()) {
+    new_workspace = desktop_workspace();
+  } else {
+    return;
+  }
+  // If the window is active we need to make sure the destination Workspace
+  // window is showing. Otherwise the window will be parented to a hidden window
+  // and lose activation.
+  const bool is_active = wm::IsActiveWindow(window);
+  if (is_active)
+    new_workspace->window()->Show();
+  ReparentWindow(window, new_workspace->window(), NULL);
+  if (is_active) {
+    SetActiveWorkspace(new_workspace, SWITCH_TRACKED_BY_WORKSPACE_CHANGED,
+                       base::TimeDelta());
+  }
 }
 
 }  // namespace internal

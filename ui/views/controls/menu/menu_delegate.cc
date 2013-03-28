@@ -1,4 +1,4 @@
-// Copyright (c) 2011 The Chromium Authors. All rights reserved.
+// Copyright (c) 2012 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -17,8 +17,8 @@ string16 MenuDelegate::GetLabel(int id) const {
   return string16();
 }
 
-const gfx::Font& MenuDelegate::GetLabelFont(int id) const {
-  return MenuConfig::instance().font;
+const gfx::Font* MenuDelegate::GetLabelFont(int id) const {
+  return NULL;
 }
 
 string16 MenuDelegate::GetTooltipText(int id,
@@ -57,9 +57,17 @@ void MenuDelegate::ExecuteCommand(int id, int mouse_event_flags) {
   ExecuteCommand(id);
 }
 
+bool MenuDelegate::ShouldExecuteCommandWithoutClosingMenu(int id,
+                                                          const ui::Event& e) {
+  return false;
+}
+
 bool MenuDelegate::IsTriggerableEvent(MenuItemView* source,
-                                      const MouseEvent& e) {
-  return e.IsLeftMouseButton() || e.IsRightMouseButton();
+                                      const ui::Event& e) {
+  return e.type() == ui::ET_GESTURE_TAP ||
+         e.type() == ui::ET_GESTURE_TAP_DOWN ||
+         (e.IsMouseEvent() && (e.flags() &
+              (ui::EF_LEFT_MOUSE_BUTTON | ui::EF_RIGHT_MOUSE_BUTTON)));
 }
 
 bool MenuDelegate::CanDrop(MenuItemView* menu, const OSExchangeData& data) {
@@ -78,7 +86,7 @@ bool MenuDelegate::AreDropTypesRequired(MenuItemView* menu) {
 }
 
 int MenuDelegate::GetDropOperation(MenuItemView* item,
-                                   const DropTargetEvent& event,
+                                   const ui::DropTargetEvent& event,
                                    DropPosition* position) {
   NOTREACHED() << "If you override CanDrop, you need to override this too";
   return ui::DragDropTypes::DRAG_NONE;
@@ -86,7 +94,7 @@ int MenuDelegate::GetDropOperation(MenuItemView* item,
 
 int MenuDelegate::OnPerformDrop(MenuItemView* menu,
                                 DropPosition position,
-                                const DropTargetEvent& event) {
+                                const ui::DropTargetEvent& event) {
   NOTREACHED() << "If you override CanDrop, you need to override this too";
   return ui::DragDropTypes::DRAG_NONE;
 }

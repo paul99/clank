@@ -4,10 +4,12 @@
 
 #ifndef MEDIA_BASE_MEDIA_LOG_H_
 #define MEDIA_BASE_MEDIA_LOG_H_
-#pragma once
+
+#include <sstream>
+#include <string>
 
 #include "base/memory/ref_counted.h"
-#include "base/synchronization/lock.h"
+#include "base/memory/scoped_ptr.h"
 #include "media/base/media_export.h"
 #include "media/base/media_log_event.h"
 #include "media/base/pipeline.h"
@@ -15,11 +17,29 @@
 
 namespace media {
 
+// Indicates a string should be added to the log.
+// First parameter - The string to add to the log.
+typedef base::Callback<void(const std::string&)> LogCB;
+
+// Helper class to make it easier to use log_cb like DVLOG().
+class LogHelper {
+ public:
+  LogHelper(const LogCB& Log_cb);
+  ~LogHelper();
+
+  std::ostream& stream() { return stream_; }
+
+ private:
+  LogCB log_cb_;
+  std::stringstream stream_;
+};
+
+#define MEDIA_LOG(log_cb) LogHelper(log_cb).stream()
+
 class MEDIA_EXPORT MediaLog : public base::RefCountedThreadSafe<MediaLog> {
  public:
   // Convert various enums to strings.
   static const char* EventTypeToString(MediaLogEvent::Type type);
-  static const char* PipelineStateToString(Pipeline::State);
   static const char* PipelineStatusToString(PipelineStatus);
 
   MediaLog();
@@ -32,8 +52,8 @@ class MEDIA_EXPORT MediaLog : public base::RefCountedThreadSafe<MediaLog> {
   scoped_ptr<MediaLogEvent> CreateEvent(MediaLogEvent::Type type);
   scoped_ptr<MediaLogEvent> CreateBooleanEvent(
       MediaLogEvent::Type type, const char* property, bool value);
-  scoped_ptr<MediaLogEvent> CreateIntegerEvent(
-      MediaLogEvent::Type type, const char* property, int64 value);
+  scoped_ptr<MediaLogEvent> CreateStringEvent(
+      MediaLogEvent::Type type, const char* property, const std::string& value);
   scoped_ptr<MediaLogEvent> CreateTimeEvent(
       MediaLogEvent::Type type, const char* property, base::TimeDelta value);
   scoped_ptr<MediaLogEvent> CreateLoadEvent(const std::string& url);
@@ -45,27 +65,16 @@ class MEDIA_EXPORT MediaLog : public base::RefCountedThreadSafe<MediaLog> {
       size_t width, size_t height);
   scoped_ptr<MediaLogEvent> CreateBufferedExtentsChangedEvent(
       size_t start, size_t current, size_t end);
-
-  // Called when the pipeline statistics have been updated.
-  // This gets called every frame, so we send the most recent stats after 500ms.
-  // This function is NOT thread safe.
-  void QueueStatisticsUpdatedEvent(PipelineStatistics stats);
+  scoped_ptr<MediaLogEvent> CreateMediaSourceErrorEvent(
+      const std::string& error);
 
  protected:
   friend class base::RefCountedThreadSafe<MediaLog>;
   virtual ~MediaLog();
 
  private:
-  // Actually add a STATISTICS_UPDATED event.
-  void AddStatisticsUpdatedEvent();
-
   // A unique (to this process) id for this MediaLog.
   int32 id_;
-
-  // The most recent set of pipeline stats.
-  PipelineStatistics last_statistics_;
-  bool stats_update_pending_;
-  base::Lock stats_lock_;
 
   DISALLOW_COPY_AND_ASSIGN(MediaLog);
 };

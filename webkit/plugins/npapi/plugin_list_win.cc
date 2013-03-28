@@ -1,10 +1,8 @@
-// Copyright (c) 2011 The Chromium Authors. All rights reserved.
+// Copyright (c) 2012 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
 #include "webkit/plugins/npapi/plugin_list.h"
-
-#include <tchar.h>
 
 #include <set>
 
@@ -19,13 +17,11 @@
 #include "base/win/pe_image.h"
 #include "base/win/registry.h"
 #include "base/win/scoped_handle.h"
+#include "base/win/windows_version.h"
 #include "webkit/plugins/npapi/plugin_constants_win.h"
 #include "webkit/plugins/npapi/plugin_lib.h"
 #include "webkit/plugins/plugin_switches.h"
 #include "webkit/glue/webkit_glue.h"
-
-namespace webkit {
-namespace npapi {
 
 namespace {
 
@@ -47,6 +43,10 @@ const char16 kRegistryJavaHome[] = L"JavaHome";
 const char16 kJavaDeploy1[] = L"npdeploytk.dll";
 const char16 kJavaDeploy2[] = L"npdeployjava1.dll";
 
+FilePath AppendPluginsDir(const FilePath& path) {
+  return path.AppendASCII("plugins");
+}
+
 // Gets the directory where the application data and libraries exist.  This
 // may be a versioned subdirectory, or it may be the same directory as the
 // GetExeDirectory(), depending on the embedder's implementation.
@@ -55,9 +55,7 @@ void GetAppDirectory(std::set<FilePath>* plugin_dirs) {
   FilePath app_path;
   if (!PathService::Get(base::DIR_MODULE, &app_path))
     return;
-
-  app_path = app_path.AppendASCII("plugins");
-  plugin_dirs->insert(app_path);
+  plugin_dirs->insert(AppendPluginsDir(app_path));
 }
 
 // Gets the directory where the launching executable resides on disk.
@@ -66,22 +64,28 @@ void GetExeDirectory(std::set<FilePath>* plugin_dirs) {
   FilePath exe_path;
   if (!PathService::Get(base::DIR_EXE, &exe_path))
     return;
-
-  exe_path = exe_path.AppendASCII("plugins");
-  plugin_dirs->insert(exe_path);
+  plugin_dirs->insert(AppendPluginsDir(exe_path));
 }
 
 // Gets the installed path for a registered app.
 bool GetInstalledPath(const char16* app, FilePath* out) {
-  std::wstring reg_path(kRegistryApps);
+  string16 reg_path(kRegistryApps);
   reg_path.append(L"\\");
   reg_path.append(app);
 
-  base::win::RegKey key(HKEY_LOCAL_MACHINE, reg_path.c_str(), KEY_READ);
-  std::wstring path;
-  if (key.ReadValue(kRegistryPath, &path) == ERROR_SUCCESS) {
+  base::win::RegKey hkcu_key(HKEY_CURRENT_USER, reg_path.c_str(), KEY_READ);
+  string16 path;
+  // As of Win7 AppPaths can also be registered in HKCU: http://goo.gl/UgFOf.
+  if (base::win::GetVersion() >= base::win::VERSION_WIN7 &&
+      hkcu_key.ReadValue(kRegistryPath, &path) == ERROR_SUCCESS) {
     *out = FilePath(path);
     return true;
+  } else {
+    base::win::RegKey hklm_key(HKEY_LOCAL_MACHINE, reg_path.c_str(), KEY_READ);
+    if (hklm_key.ReadValue(kRegistryPath, &path) == ERROR_SUCCESS) {
+      *out = FilePath(path);
+      return true;
+    }
   }
 
   return false;
@@ -90,17 +94,17 @@ bool GetInstalledPath(const char16* app, FilePath* out) {
 // Search the registry at the given path and detect plugin directories.
 void GetPluginsInRegistryDirectory(
     HKEY root_key,
-    const std::wstring& registry_folder,
+    const string16& registry_folder,
     std::set<FilePath>* plugin_dirs) {
   for (base::win::RegistryKeyIterator iter(root_key, registry_folder.c_str());
        iter.Valid(); ++iter) {
     // Use the registry to gather plugin across the file system.
-    std::wstring reg_path = registry_folder;
+    string16 reg_path = registry_folder;
     reg_path.append(L"\\");
     reg_path.append(iter.Name());
     base::win::RegKey key(root_key, reg_path.c_str(), KEY_READ);
 
-    std::wstring path;
+    string16 path;
     if (key.ReadValue(kRegistryPath, &path) == ERROR_SUCCESS)
       plugin_dirs->insert(FilePath(path));
   }
@@ -112,10 +116,10 @@ void GetFirefoxInstalledPaths(std::vector<FilePath>* out) {
   base::win::RegistryKeyIterator it(HKEY_LOCAL_MACHINE,
                                     kRegistryFirefoxInstalled);
   for (; it.Valid(); ++it) {
-    std::wstring full_path = std::wstring(kRegistryFirefoxInstalled) + L"\\" +
-                             it.Name() + L"\\Main";
+    string16 full_path = string16(kRegistryFirefoxInstalled) + L"\\" +
+                            it.Name() + L"\\Main";
     base::win::RegKey key(HKEY_LOCAL_MACHINE, full_path.c_str(), KEY_READ);
-    std::wstring install_dir;
+    string16 install_dir;
     if (key.ReadValue(L"Install Directory", &install_dir) != ERROR_SUCCESS)
       continue;
     out->push_back(FilePath(install_dir));
@@ -130,15 +134,14 @@ void GetFirefoxDirectory(std::set<FilePath>* plugin_dirs) {
   std::vector<FilePath> paths;
   GetFirefoxInstalledPaths(&paths);
   for (unsigned int i = 0; i < paths.size(); ++i) {
-    plugin_dirs->insert(paths[i].Append(L"plugins"));
+    plugin_dirs->insert(AppendPluginsDir(paths[i]));
   }
 
   FilePath firefox_app_data_plugin_path;
   if (PathService::Get(base::DIR_APP_DATA, &firefox_app_data_plugin_path)) {
     firefox_app_data_plugin_path =
-        firefox_app_data_plugin_path.AppendASCII("Mozilla")
-                                    .AppendASCII("plugins");
-    plugin_dirs->insert(firefox_app_data_plugin_path);
+        firefox_app_data_plugin_path.AppendASCII("Mozilla");
+    plugin_dirs->insert(AppendPluginsDir(firefox_app_data_plugin_path));
   }
 }
 
@@ -157,7 +160,7 @@ void GetAcrobatDirectory(std::set<FilePath>* plugin_dirs) {
 void GetQuicktimeDirectory(std::set<FilePath>* plugin_dirs) {
   FilePath path;
   if (GetInstalledPath(kRegistryQuickTime, &path))
-    plugin_dirs->insert(path.Append(L"plugins"));
+    plugin_dirs->insert(AppendPluginsDir(path));
 }
 
 // Hardcoded logic to detect Windows Media Player plugin location.
@@ -165,26 +168,6 @@ void GetWindowsMediaDirectory(std::set<FilePath>* plugin_dirs) {
   FilePath path;
   if (GetInstalledPath(kRegistryWindowsMedia, &path))
     plugin_dirs->insert(path);
-
-  // If the Windows Media Player Firefox plugin is installed before Firefox,
-  // the plugin will get written under PFiles\Plugins on one the drives
-  // (usually, but not always, the last letter).
-  int size = GetLogicalDriveStrings(0, NULL);
-  if (size) {
-    scoped_array<wchar_t> strings(new wchar_t[size]);
-    if (GetLogicalDriveStrings(size, strings.get())) {
-      wchar_t* next_drive = strings.get();
-      while (*next_drive) {
-        if (GetDriveType(next_drive) == DRIVE_FIXED) {
-          FilePath pfiles(next_drive);
-          pfiles = pfiles.Append(L"PFiles\\Plugins");
-          if (file_util::PathExists(pfiles))
-            plugin_dirs->insert(pfiles);
-        }
-        next_drive = &next_drive[wcslen(next_drive) + 1];
-      }
-    }
-  }
 }
 
 // Hardcoded logic to detect Java plugin location.
@@ -195,7 +178,7 @@ void GetJavaDirectory(std::set<FilePath>* plugin_dirs) {
                              KEY_QUERY_VALUE);
 
   // 2. Read the current Java version
-  std::wstring java_version;
+  string16 java_version;
   if (java_key.ReadValue(kRegistryBrowserJavaVersion, &java_version) !=
       ERROR_SUCCESS) {
     java_key.ReadValue(kRegistryCurrentJavaVersion, &java_version);
@@ -206,7 +189,7 @@ void GetJavaDirectory(std::set<FilePath>* plugin_dirs) {
 
     // 3. Install path of the JRE binaries is specified in "JavaHome"
     //    value under the Java version key.
-    std::wstring java_plugin_directory;
+    string16 java_plugin_directory;
     if (java_key.ReadValue(kRegistryJavaHome, &java_plugin_directory) ==
         ERROR_SUCCESS) {
       // 4. The new plugin resides under the 'bin/new_plugin'
@@ -233,7 +216,50 @@ bool IsValid32BitImage(const FilePath& path) {
   return (nt_headers->FileHeader.Machine == IMAGE_FILE_MACHINE_I386);
 }
 
-}  // anonymous namespace
+// Returns true if the given plugins share at least one mime type.  This is used
+// to differentiate newer versions of a plugin vs two plugins which happen to
+// have the same filename.
+bool HaveSharedMimeType(const webkit::WebPluginInfo& plugin1,
+                        const webkit::WebPluginInfo& plugin2) {
+  for (size_t i = 0; i < plugin1.mime_types.size(); ++i) {
+    for (size_t j = 0; j < plugin2.mime_types.size(); ++j) {
+      if (plugin1.mime_types[i].mime_type == plugin2.mime_types[j].mime_type)
+        return true;
+    }
+  }
+
+  return false;
+}
+
+// Compares Windows style version strings (i.e. 1,2,3,4).  Returns true if b's
+// version is newer than a's, or false if it's equal or older.
+bool IsNewerVersion(const string16& a, const string16& b) {
+  std::vector<string16> a_ver, b_ver;
+  base::SplitString(a, ',', &a_ver);
+  base::SplitString(b, ',', &b_ver);
+  if (a_ver.size() == 1 && b_ver.size() == 1) {
+    base::SplitString(a, '.', &a_ver);
+    base::SplitString(b, '.', &b_ver);
+  }
+  if (a_ver.size() != b_ver.size())
+    return false;
+  for (size_t i = 0; i < a_ver.size(); i++) {
+    int cur_a, cur_b;
+    base::StringToInt(a_ver[i], &cur_a);
+    base::StringToInt(b_ver[i], &cur_b);
+
+    if (cur_a > cur_b)
+      return false;
+    if (cur_a < cur_b)
+      return true;
+  }
+  return false;
+}
+
+}  // namespace
+
+namespace webkit {
+namespace npapi {
 
 void PluginList::PlatformInit() {
   const CommandLine& command_line = *CommandLine::ForCurrentProcess();
@@ -272,7 +298,7 @@ void PluginList::GetPluginsInDir(
   WIN32_FIND_DATA find_file_data;
   HANDLE find_handle;
 
-  std::wstring dir = path.value();
+  string16 dir = path.value();
   // FindFirstFile requires that you specify a wildcard for directories.
   dir.append(L"\\NP*.DLL");
 
@@ -305,75 +331,38 @@ void PluginList::GetPluginPathsFromRegistry(std::vector<FilePath>* plugins) {
   }
 }
 
-// Returns true if the given plugins share at least one mime type.  This is used
-// to differentiate newer versions of a plugin vs two plugins which happen to
-// have the same filename.
-bool HaveSharedMimeType(const webkit::WebPluginInfo& plugin1,
-                        const webkit::WebPluginInfo& plugin2) {
-  for (size_t i = 0; i < plugin1.mime_types.size(); ++i) {
-    for (size_t j = 0; j < plugin2.mime_types.size(); ++j) {
-      if (plugin1.mime_types[i].mime_type == plugin2.mime_types[j].mime_type)
-        return true;
+bool PluginList::ShouldLoadPluginUsingPluginList(
+    const webkit::WebPluginInfo& info,
+    std::vector<webkit::WebPluginInfo>* plugins) {
+  // Version check
+  for (size_t j = 0; j < plugins->size(); ++j) {
+    FilePath::StringType plugin1 =
+        StringToLowerASCII((*plugins)[j].path.BaseName().value());
+    FilePath::StringType plugin2 =
+        StringToLowerASCII(info.path.BaseName().value());
+    if ((plugin1 == plugin2 && HaveSharedMimeType((*plugins)[j], info)) ||
+        (plugin1 == kJavaDeploy1 && plugin2 == kJavaDeploy2) ||
+        (plugin1 == kJavaDeploy2 && plugin2 == kJavaDeploy1)) {
+      if (!IsNewerVersion((*plugins)[j].version, info.version))
+        return false;  // We have loaded a plugin whose version is newer.
+      plugins->erase(plugins->begin() + j);
+      break;
     }
   }
 
-  return false;
-}
+  // The checks below only apply to NPAPI plugins.
+  if (info.type != WebPluginInfo::PLUGIN_TYPE_NPAPI)
+    return true;
 
-// Compares Windows style version strings (i.e. 1,2,3,4).  Returns true if b's
-// version is newer than a's, or false if it's equal or older.
-bool IsNewerVersion(const std::wstring& a, const std::wstring& b) {
-  std::vector<std::wstring> a_ver, b_ver;
-  base::SplitString(a, ',', &a_ver);
-  base::SplitString(b, ',', &b_ver);
-  if (a_ver.size() == 1 && b_ver.size() == 1) {
-    a_ver.clear();
-    b_ver.clear();
-    base::SplitString(a, '.', &a_ver);
-    base::SplitString(b, '.', &b_ver);
-  }
-  if (a_ver.size() != b_ver.size())
-    return false;
-  for (size_t i = 0; i < a_ver.size(); i++) {
-    int cur_a, cur_b;
-    base::StringToInt(a_ver[i], &cur_a);
-    base::StringToInt(b_ver[i], &cur_b);
-
-    if (cur_a > cur_b)
-      return false;
-    if (cur_a < cur_b)
+  // If the plugin is in our internal list we should load it.
+  for (size_t i = 0; i < internal_plugins_.size(); ++i) {
+    if (info.path == internal_plugins_[i].info.path)
       return true;
   }
-  return false;
-}
 
-bool PluginList::ShouldLoadPlugin(const webkit::WebPluginInfo& info,
-                                  ScopedVector<PluginGroup>* plugin_groups) {
-  // Version check
-
-  for (size_t i = 0; i < plugin_groups->size(); ++i) {
-    const std::vector<webkit::WebPluginInfo>& plugins =
-        (*plugin_groups)[i]->web_plugin_infos();
-    for (size_t j = 0; j < plugins.size(); ++j) {
-      std::wstring plugin1 =
-          StringToLowerASCII(plugins[j].path.BaseName().value());
-      std::wstring plugin2 =
-          StringToLowerASCII(info.path.BaseName().value());
-      if ((plugin1 == plugin2 && HaveSharedMimeType(plugins[j], info)) ||
-          (plugin1 == kJavaDeploy1 && plugin2 == kJavaDeploy2) ||
-          (plugin1 == kJavaDeploy2 && plugin2 == kJavaDeploy1)) {
-        if (!IsNewerVersion(plugins[j].version, info.version))
-          return false;  // We have loaded a plugin whose version is newer.
-
-        (*plugin_groups)[i]->RemovePlugin(plugins[j].path);
-        break;
-      }
-    }
-  }
-
-  // Troublemakers
-
-  std::wstring filename = StringToLowerASCII(info.path.BaseName().value());
+  // Troublemakers.
+  FilePath::StringType filename =
+      StringToLowerASCII(info.path.BaseName().value());
   // Depends on XPCOM.
   if (filename == kMozillaActiveXPlugin)
     return false;
@@ -394,7 +383,7 @@ bool PluginList::ShouldLoadPlugin(const webkit::WebPluginInfo& info,
   // We only work with newer versions of the Java plugin which use NPAPI only
   // and don't depend on XPCOM.
   if (filename == kJavaPlugin1 || filename == kJavaPlugin2) {
-    std::vector<std::wstring> ver;
+    std::vector<FilePath::StringType> ver;
     base::SplitString(info.version, '.', &ver);
     int major, minor, update;
     if (ver.size() == 4 &&
@@ -406,47 +395,34 @@ bool PluginList::ShouldLoadPlugin(const webkit::WebPluginInfo& info,
     }
   }
 
-  // Special WMP handling
-
+  // Special WMP handling:
   // If both the new and old WMP plugins exist, only load the new one.
   if (filename == kNewWMPPlugin) {
     if (dont_load_new_wmp_)
       return false;
 
-    for (size_t i = 0; i < plugin_groups->size(); ++i) {
-      const std::vector<webkit::WebPluginInfo>& plugins =
-          (*plugin_groups)[i]->web_plugin_infos();
-      for (size_t j = 0; j < plugins.size(); ++j) {
-        if (plugins[j].path.BaseName().value() == kOldWMPPlugin) {
-          (*plugin_groups)[i]->RemovePlugin(plugins[j].path);
-          break;
-        }
+    for (size_t j = 0; j < plugins->size(); ++j) {
+      if ((*plugins)[j].path.BaseName().value() == kOldWMPPlugin) {
+        plugins->erase(plugins->begin() + j);
+        break;
       }
     }
+
   } else if (filename == kOldWMPPlugin) {
-    for (size_t i = 0; i < plugin_groups->size(); ++i) {
-      const std::vector<webkit::WebPluginInfo>& plugins =
-          (*plugin_groups)[i]->web_plugin_infos();
-      for (size_t j = 0; j < plugins.size(); ++j) {
-        if (plugins[j].path.BaseName().value() == kNewWMPPlugin)
-          return false;
-      }
+    for (size_t j = 0; j < plugins->size(); ++j) {
+      if ((*plugins)[j].path.BaseName().value() == kNewWMPPlugin)
+        return false;
     }
   }
 
-  HMODULE plugin_dll = NULL;
-  bool load_plugin = true;
-
-  // The plugin list could contain a 64 bit plugin which we cannot load.
-  for (size_t i = 0; i < internal_plugins_.size(); ++i) {
-    if (info.path == internal_plugins_[i].info.path)
-      continue;
-
-    if (file_util::PathExists(info.path) && (!IsValid32BitImage(info.path)))
-      load_plugin = false;
-    break;
-  }
-  return load_plugin;
+#if !defined(ARCH_CPU_X86_64)
+  // The plugin in question could be a 64 bit plugin which we cannot load.
+  FilePath plugin_path(info.path);
+  file_util::AbsolutePath(&plugin_path);
+  if (!IsValid32BitImage(plugin_path))
+    return false;
+#endif
+  return true;
 }
 
 }  // namespace npapi

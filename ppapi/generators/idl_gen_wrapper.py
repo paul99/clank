@@ -1,6 +1,4 @@
-#!/usr/bin/python
-#
-# Copyright (c) 2011 The Chromium Authors. All rights reserved.
+# Copyright (c) 2012 The Chromium Authors. All rights reserved.
 # Use of this source code is governed by a BSD-style license that can be
 # found in the LICENSE file.
 
@@ -14,6 +12,7 @@ import sys
 from idl_c_proto import CGen
 from idl_generator import Generator
 from idl_log import ErrOut, InfoOut, WarnOut
+from idl_option import  GetOption
 from idl_outfile import IDLOutFile
 
 
@@ -83,18 +82,19 @@ class WrapperGen(Generator):
     """Get the corresponding ppapi .h file from each IDL filename.
     """
     name = os.path.splitext(name)[0] + '.h'
+    name = name.replace(os.sep, '/')
     return 'ppapi/c/' + name
 
 
-  def WriteCopyrightGeneratedTime(self, out):
+  def WriteCopyright(self, out):
     now = datetime.now()
     c = """/* Copyright (c) %s The Chromium Authors. All rights reserved.
  * Use of this source code is governed by a BSD-style license that can be
  * found in the LICENSE file.
  */
 
-/* Last generated from IDL: %s. */
-""" % (now.year, datetime.ctime(now))
+/* NOTE: this is auto-generated from IDL */
+""" % now.year
     out.Write(c)
 
   def GetWrapperMetadataName(self):
@@ -220,8 +220,9 @@ const void *__%(wrapper_prefix)s_PPPGetInterface(const char *name) {
     for filenode in ast.GetListOf('File'):
       # If this file has errors, skip it
       if filenode in self.skip_list:
-        InfoOut.Log('WrapperGen: Skipping %s due to errors\n' %
-                    filenode.GetName())
+        if GetOption('verbose'):
+          InfoOut.Log('WrapperGen: Skipping %s due to errors\n' %
+                      filenode.GetName())
         continue
 
       file_name = self.GetHeaderName(filenode.GetName())
@@ -234,8 +235,9 @@ const void *__%(wrapper_prefix)s_PPPGetInterface(const char *name) {
                                                 include_version=True)
           needs_wrap = self.InterfaceVersionNeedsWrapping(iface, version)
           if not needs_wrap:
-            InfoOut.Log('Interface %s ver %s does not need wrapping' %
-                        (struct_name, version))
+            if GetOption('verbose'):
+              InfoOut.Log('Interface %s ver %s does not need wrapping' %
+                          (struct_name, version))
           iface_releases.append(
               Interface(iface, release, version,
                         struct_name, needs_wrap, file_name))
@@ -245,7 +247,7 @@ const void *__%(wrapper_prefix)s_PPPGetInterface(const char *name) {
   def GenerateIncludes(self, iface_releases, out):
     """Generate the list of #include that define the original interfaces.
     """
-    self.WriteCopyrightGeneratedTime(out)
+    self.WriteCopyright(out)
     # First include own header.
     out.Write('#include "%s"\n\n' % self.OwnHeaderFile())
 
@@ -432,6 +434,8 @@ const void *__%(wrapper_prefix)s_PPPGetInterface(const char *name) {
     # Generate the includes.
     self.GenerateIncludes(iface_releases, out)
 
+    out.Write(self.GetGuardStart())
+
     # Write out static helper functions (mystrcmp).
     self.GenerateHelperFunctions(out)
 
@@ -451,5 +455,7 @@ const void *__%(wrapper_prefix)s_PPPGetInterface(const char *name) {
 
     # Write out the IDL-invariant functions.
     self.GenerateFixedFunctions(out)
+
+    out.Write(self.GetGuardEnd())
     out.Close()
     return 0

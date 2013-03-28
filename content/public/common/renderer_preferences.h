@@ -11,7 +11,8 @@
 
 #ifndef CONTENT_PUBLIC_COMMON_RENDERER_PREFERENCES_H_
 #define CONTENT_PUBLIC_COMMON_RENDERER_PREFERENCES_H_
-#pragma once
+
+#include <string>
 
 #include "content/common/content_export.h"
 #include "third_party/skia/include/core/SkColor.h"
@@ -50,9 +51,20 @@ struct CONTENT_EXPORT RendererPreferences {
   // Currently only used by Linux.
   RendererPreferencesHintingEnum hinting;
 
+  // Whether auto hinter should be used. Currently only used by Linux.
+  bool use_autohinter;
+
+  // Whether embedded bitmap strikes in fonts should be used.
+  // Current only used by Linux.
+  bool use_bitmaps;
+
   // The type of subpixel rendering to use for text.
   // Currently only used by Linux.
   RendererPreferencesSubpixelRenderingEnum subpixel_rendering;
+
+  // Whether subpixel positioning should be used, permitting fractional X
+  // positions for glyphs.  Currently only used by Linux.
+  bool use_subpixel_positioning;
 
   // The color of the focus ring. Currently only used on Linux.
   SkColor focus_ring_color;
@@ -63,17 +75,17 @@ struct CONTENT_EXPORT RendererPreferences {
   SkColor thumb_inactive_color;
   SkColor track_color;
 
-  // The colors used in selection text. Currently only used on Linux.
+  // The colors used in selection text. Currently only used on Linux and Ash.
   SkColor active_selection_bg_color;
   SkColor active_selection_fg_color;
   SkColor inactive_selection_bg_color;
   SkColor inactive_selection_fg_color;
 
   // Browser wants a look at all non-local top level navigation requests.
-  bool browser_handles_top_level_requests;
+  bool browser_handles_non_local_top_level_requests;
 
-  // Browser wants a look at all navigation requests.
-  bool browser_handles_all_requests;
+  // Browser wants a look at all top-level navigation requests.
+  bool browser_handles_all_top_level_requests;
 
   // Cursor blink rate in seconds.
   // Currently only changed from default on Linux.  Uses |gtk-cursor-blink|
@@ -83,8 +95,18 @@ struct CONTENT_EXPORT RendererPreferences {
   // Set to false to not send referrers.
   bool enable_referrers;
 
+  // Set to true to indicate that the preference to set DNT to 1 is enabled.
+  bool enable_do_not_track;
+
   // Default page zoom level.
   double default_zoom_level;
+
+  // The user agent given to WebKit when it requests one and the user agent is
+  // being overridden for the current navigation.
+  std::string user_agent_override;
+
+  // Specifies whether renderer input event throttle is enabled.
+  bool throttle_input_events;
 };
 
 }  // namespace content

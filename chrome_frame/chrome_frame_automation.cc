@@ -14,6 +14,7 @@
 #include "base/file_version_info.h"
 #include "base/lazy_instance.h"
 #include "base/logging.h"
+#include "base/metrics/field_trial.h"
 #include "base/path_service.h"
 #include "base/process_util.h"
 #include "base/string_util.h"
@@ -34,11 +35,19 @@
 #include "chrome_frame/utils.h"
 #include "ui/base/ui_base_switches.h"
 
+namespace {
+
 #ifdef NDEBUG
 int64 kAutomationServerReasonableLaunchDelay = 1000;  // in milliseconds
 #else
 int64 kAutomationServerReasonableLaunchDelay = 1000 * 10;
 #endif
+
+const char kChromeShutdownDelaySeconds[] = "30";
+const char kWithDelayFieldTrialName[] = "WithShutdownDelay";
+const char kNoDelayFieldTrialName[] = "NoShutdownDelay";
+
+}  // namespace
 
 class ChromeFrameAutomationProxyImpl::TabProxyNotificationMessageFilter
     : public IPC::ChannelProxy::MessageFilter {
@@ -125,7 +134,7 @@ class ChromeFrameAutomationProxyImpl::CFMsgDispatcher
 
 ChromeFrameAutomationProxyImpl::ChromeFrameAutomationProxyImpl(
     AutomationProxyCacheEntry* entry,
-    std::string channel_id, int launch_timeout)
+    std::string channel_id, base::TimeDelta launch_timeout)
     : AutomationProxy(launch_timeout, false), proxy_entry_(entry) {
   TRACE_EVENT_BEGIN_ETW("chromeframe.automationproxy", this, "");
 
@@ -242,8 +251,10 @@ void AutomationProxyCacheEntry::CreateProxy(ChromeFrameLaunchParams* params,
   // At same time we must destroy/stop the thread from another thread.
   std::string channel_id = AutomationProxy::GenerateChannelID();
   ChromeFrameAutomationProxyImpl* proxy =
-      new ChromeFrameAutomationProxyImpl(this, channel_id,
-                                         params->launch_timeout());
+      new ChromeFrameAutomationProxyImpl(
+          this,
+          channel_id,
+          base::TimeDelta::FromMilliseconds(params->launch_timeout()));
 
   // Ensure that the automation proxy actually respects our choice on whether
   // or not to check the version.
@@ -291,6 +302,10 @@ void AutomationProxyCacheEntry::CreateProxy(ChromeFrameLaunchParams* params,
     if (IsAccessibleMode())
       command_line->AppendSwitch(switches::kForceRendererAccessibility);
 
+    if (params->send_shutdown_delay_switch())
+      command_line->AppendSwitchASCII(switches::kChromeFrameShutdownDelay,
+                                      kChromeShutdownDelaySeconds);
+
     DVLOG(1) << "Profile path: " << params->profile_path().value();
     command_line->AppendSwitchPath(switches::kUserDataDir,
                                    params->profile_path());
@@ -335,9 +350,19 @@ void AutomationProxyCacheEntry::CreateProxy(ChromeFrameLaunchParams* params,
     if (launch_result_ == AUTOMATION_SUCCESS) {
       UMA_HISTOGRAM_TIMES(
           "ChromeFrame.AutomationServerLaunchSuccessTime", delta);
+      UMA_HISTOGRAM_TIMES(
+          base::FieldTrial::MakeName(
+              "ChromeFrame.AutomationServerLaunchSuccessTime",
+              "ChromeShutdownDelay"),
+          delta);
     } else {
       UMA_HISTOGRAM_TIMES(
           "ChromeFrame.AutomationServerLaunchFailedTime", delta);
+      UMA_HISTOGRAM_TIMES(
+          base::FieldTrial::MakeName(
+              "ChromeFrame.AutomationServerLaunchFailedTime",
+              "ChromeShutdownDelay"),
+          delta);
     }
 
     UMA_HISTOGRAM_CUSTOM_COUNTS("ChromeFrame.LaunchResult",
@@ -375,7 +400,7 @@ void AutomationProxyCacheEntry::RemoveDelegate(LaunchDelegate* delegate,
       *was_last_delegate = true;
 
       // Process pending notifications.
-      thread_->message_loop()->RunAllPending();
+      thread_->message_loop()->RunUntilIdle();
 
       // Take down the proxy since we no longer have any clients.
       // Make sure we only do this once all pending messages have been cleared.
@@ -496,7 +521,13 @@ bool ProxyFactory::ReleaseAutomationServer(void* server_id,
     Vector::ContainerType::iterator it = std::find(proxies_.container().begin(),
                                                    proxies_.container().end(),
                                                    entry);
-    proxies_.container().erase(it);
+    if (it != proxies_.container().end()) {
+      proxies_.container().erase(it);
+    } else {
+      DLOG(ERROR) << "Proxy wasn't found. Proxy map is likely empty (size="
+                  << proxies_.container().size() << ").";
+    }
+
     lock_.Release();
   }
 
@@ -526,7 +557,9 @@ ChromeFrameAutomationClient::ChromeFrameAutomationClient()
       url_fetcher_(NULL),
       url_fetcher_flags_(PluginUrlRequestManager::NOT_THREADSAFE),
       navigate_after_initialization_(false),
-      route_all_top_level_navigations_(false) {
+      route_all_top_level_navigations_(false),
+      send_shutdown_delay_switch_(true) {
+  InitializeFieldTrials();
 }
 
 ChromeFrameAutomationClient::~ChromeFrameAutomationClient() {
@@ -665,7 +698,8 @@ bool ChromeFrameAutomationClient::InitiateNavigation(
       FilePath profile_path;
       chrome_launch_params_ = new ChromeFrameLaunchParams(parsed_url,
           referrer_gurl, profile_path, L"", SimpleResourceLoader::GetLanguage(),
-          false, false, route_all_top_level_navigations_);
+          false, false, route_all_top_level_navigations_,
+          send_shutdown_delay_switch_);
     } else {
       chrome_launch_params_->set_referrer(referrer_gurl);
       chrome_launch_params_->set_url(parsed_url);
@@ -1003,6 +1037,33 @@ bool ChromeFrameAutomationClient::ProcessUrlRequestMessage(TabProxy* tab,
   return true;
 }
 
+void ChromeFrameAutomationClient::InitializeFieldTrials() {
+  static base::FieldTrial* trial = NULL;
+  if (!trial) {
+    // Do one-time initialization of the field trial here.
+    // TODO(robertshield): End the field trial before March 7th 2013.
+    scoped_refptr<base::FieldTrial> new_trial =
+        base::FieldTrialList::FactoryGetFieldTrial(
+            "ChromeShutdownDelay", 1000, kWithDelayFieldTrialName,
+            2013, 3, 7, NULL);
+
+    // Be consistent for this client. Note that this will only have an effect
+    // once the client id is persisted. See http://crbug.com/117188
+    new_trial->UseOneTimeRandomization();
+
+    new_trial->AppendGroup(kNoDelayFieldTrialName, 500);    // 50% without.
+
+    trial = new_trial.get();
+  }
+
+  // Take action depending of which group we randomly land in.
+  if (trial->group_name() == kWithDelayFieldTrialName)
+    send_shutdown_delay_switch_ = true;
+  else
+    send_shutdown_delay_switch_ = false;
+
+}
+
 // These are invoked in channel's background thread.
 // Cannot call any method of the activex here since it is a STA kind of being.
 // By default we marshal the IPC message to the main/GUI thread and from there
@@ -1244,10 +1305,11 @@ void ChromeFrameAutomationClient::OnUnload(bool* should_unload) {
 // PluginUrlRequestDelegate implementation.
 // Forward network related responses to Chrome.
 
-void ChromeFrameAutomationClient::OnResponseStarted(int request_id,
-    const char* mime_type,  const char* headers, int size,
+void ChromeFrameAutomationClient::OnResponseStarted(
+    int request_id, const char* mime_type,  const char* headers, int size,
     base::Time last_modified, const std::string& redirect_url,
-    int redirect_status, const net::HostPortPair& socket_address) {
+    int redirect_status, const net::HostPortPair& socket_address,
+    uint64 upload_size) {
   AutomationURLResponse response;
   response.mime_type = mime_type;
   if (headers)
@@ -1257,6 +1319,7 @@ void ChromeFrameAutomationClient::OnResponseStarted(int request_id,
   response.redirect_url = redirect_url;
   response.redirect_status = redirect_status;
   response.socket_address = socket_address;
+  response.upload_size = upload_size;
 
   automation_server_->Send(new AutomationMsg_RequestStarted(
       tab_->handle(), request_id, response));

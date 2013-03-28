@@ -4,7 +4,6 @@
 
 #ifndef CHROME_INSTALLER_UTIL_SELF_CLEANING_TEMP_DIR_H_
 #define CHROME_INSTALLER_UTIL_SELF_CLEANING_TEMP_DIR_H_
-#pragma once
 
 #include "base/basictypes.h"
 #include "base/file_path.h"
@@ -13,7 +12,7 @@
 namespace installer {
 
 // A helper class for managing a temporary directory.  In relation to
-// ScopedTempDir, this class additionally cleans up all non-empty parent
+// base::ScopedTempDir, this class additionally cleans up all non-empty parent
 // directories of the temporary directory that are created by an instance.
 class SelfCleaningTempDir {
  public:

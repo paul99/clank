@@ -1,4 +1,4 @@
-// Copyright (c) 2011 The Chromium Authors. All rights reserved.
+// Copyright (c) 2012 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -18,14 +18,16 @@ namespace IPC {
 class Message;
 }
 
-class FileUtilitiesMessageFilter : public content::BrowserMessageFilter {
+namespace content {
+
+class FileUtilitiesMessageFilter : public BrowserMessageFilter {
  public:
   explicit FileUtilitiesMessageFilter(int process_id);
 
-  // content::BrowserMessageFilter implementation.
+  // BrowserMessageFilter implementation.
   virtual void OverrideThreadForMessage(
       const IPC::Message& message,
-      content::BrowserThread::ID* thread) OVERRIDE;
+      BrowserThread::ID* thread) OVERRIDE;
   virtual bool OnMessageReceived(const IPC::Message& message,
                                  bool* message_was_ok) OVERRIDE;
  private:
@@ -34,8 +36,9 @@ class FileUtilitiesMessageFilter : public content::BrowserMessageFilter {
   typedef void (*FileInfoWriteFunc)(IPC::Message* reply_msg,
                                     const base::PlatformFileInfo& file_info);
 
-  void OnGetFileSize(const FilePath& path, int64* result);
-  void OnGetFileModificationTime(const FilePath& path, base::Time* result);
+  void OnGetFileInfo(const FilePath& path,
+                     base::PlatformFileInfo* result,
+                     base::PlatformFileError* status);
   void OnOpenFile(const FilePath& path,
                   int mode,
                   IPC::PlatformFileForTransit* result);
@@ -45,5 +48,7 @@ class FileUtilitiesMessageFilter : public content::BrowserMessageFilter {
 
   DISALLOW_IMPLICIT_CONSTRUCTORS(FileUtilitiesMessageFilter);
 };
+
+}  // namespace content
 
 #endif  // CONTENT_BROWSER_RENDERER_HOST_FILE_UTILITIES_MESSAGE_FILTER_H_

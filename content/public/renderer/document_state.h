@@ -1,24 +1,18 @@
-// Copyright (c) 2011 The Chromium Authors. All rights reserved.
+// Copyright (c) 2012 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
 #ifndef CONTENT_PUBLIC_RENDERER_DOCUMENT_STATE_H_
 #define CONTENT_PUBLIC_RENDERER_DOCUMENT_STATE_H_
-#pragma once
 
 #include <string>
 
 #include "base/logging.h"
 #include "base/memory/scoped_ptr.h"
 #include "base/time.h"
+#include "third_party/WebKit/Source/Platform/chromium/public/WebReferrerPolicy.h"
 #include "third_party/WebKit/Source/WebKit/chromium/public/WebDataSource.h"
 #include "third_party/WebKit/Source/WebKit/chromium/public/platform/WebURLRequest.h"
-
-namespace webkit {
-namespace forms {
-struct PasswordForm;
-}
-}
 
 namespace webkit_glue {
 class AltErrorPageResourceFetcher;
@@ -27,6 +21,7 @@ class AltErrorPageResourceFetcher;
 namespace content {
 
 class NavigationState;
+struct PasswordForm;
 
 // The RenderView stores an instance of this class in the "extra data" of each
 // WebDataSource (see RenderView::DidCreateDataSource).
@@ -140,23 +135,30 @@ class DocumentState : public WebKit::WebDataSource::ExtraData {
   }
 
   // Indicator if SPDY was used as part of this page load.
-  void set_was_fetched_via_spdy(bool value) { was_fetched_via_spdy_ = value; }
   bool was_fetched_via_spdy() const { return was_fetched_via_spdy_; }
+  void set_was_fetched_via_spdy(bool value) { was_fetched_via_spdy_ = value; }
 
-  void set_was_npn_negotiated(bool value) { was_npn_negotiated_ = value; }
   bool was_npn_negotiated() const { return was_npn_negotiated_; }
+  void set_was_npn_negotiated(bool value) { was_npn_negotiated_ = value; }
 
-  void set_was_alternate_protocol_available(bool value) {
-    was_alternate_protocol_available_ = value;
+  const std::string& npn_negotiated_protocol() const {
+    return npn_negotiated_protocol_;
   }
+  void set_npn_negotiated_protocol(const std::string& value) {
+    npn_negotiated_protocol_ = value;
+  }
+
   bool was_alternate_protocol_available() const {
     return was_alternate_protocol_available_;
   }
+  void set_was_alternate_protocol_available(bool value) {
+    was_alternate_protocol_available_ = value;
+  }
 
+  bool was_fetched_via_proxy() const { return was_fetched_via_proxy_; }
   void set_was_fetched_via_proxy(bool value) {
     was_fetched_via_proxy_ = value;
   }
-  bool was_fetched_via_proxy() const { return was_fetched_via_proxy_; }
 
   const GURL& searchable_form_url() const { return searchable_form_url_; }
   void set_searchable_form_url(const GURL& url) { searchable_form_url_ = url; }
@@ -167,10 +169,10 @@ class DocumentState : public WebKit::WebDataSource::ExtraData {
     searchable_form_encoding_ = encoding;
   }
 
-  webkit::forms::PasswordForm* password_form_data() const {
+  PasswordForm* password_form_data() const {
     return password_form_data_.get();
   }
-  void set_password_form_data(webkit::forms::PasswordForm* data);
+  void set_password_form_data(scoped_ptr<PasswordForm> data);
 
   const std::string& security_info() const { return security_info_; }
   void set_security_info(const std::string& security_info) {
@@ -182,6 +184,21 @@ class DocumentState : public WebKit::WebDataSource::ExtraData {
   bool use_error_page() const { return use_error_page_; }
   void set_use_error_page(bool use_error_page) {
     use_error_page_ = use_error_page;
+  }
+
+  // True if the user agent was overridden for this page.
+  bool is_overriding_user_agent() const { return is_overriding_user_agent_; }
+  void set_is_overriding_user_agent(bool state) {
+    is_overriding_user_agent_ = state;
+  }
+
+  // True if we have to reset the scroll and scale state of the page
+  // after the provisional load has been committed.
+  bool must_reset_scroll_and_scale_state() const {
+    return must_reset_scroll_and_scale_state_;
+  }
+  void set_must_reset_scroll_and_scale_state(bool state) {
+    must_reset_scroll_and_scale_state_ = state;
   }
 
   void set_was_prefetcher(bool value) { was_prefetcher_ = value; }
@@ -217,6 +234,22 @@ class DocumentState : public WebKit::WebDataSource::ExtraData {
     return cache_policy_override_set_;
   }
 
+  // Sets the referrer policy to use. This is only used for browser initiated
+  // navigations, otherwise, the referrer policy is defined by the frame's
+  // document.
+  WebKit::WebReferrerPolicy referrer_policy() const {
+    return referrer_policy_;
+  }
+  void set_referrer_policy(WebKit::WebReferrerPolicy referrer_policy) {
+    referrer_policy_ = referrer_policy;
+    referrer_policy_set_ = true;
+  }
+  void clear_referrer_policy() {
+    referrer_policy_ = WebKit::WebReferrerPolicyDefault;
+    referrer_policy_set_ = false;
+  }
+  bool is_referrer_policy_set() const { return referrer_policy_set_; }
+
   webkit_glue::AltErrorPageResourceFetcher* alt_error_page_fetcher() const {
     return alt_error_page_fetcher_.get();
   }
@@ -224,6 +257,11 @@ class DocumentState : public WebKit::WebDataSource::ExtraData {
 
   NavigationState* navigation_state() { return navigation_state_.get(); }
   void set_navigation_state(NavigationState* navigation_state);
+
+  bool can_load_local_resources() const { return can_load_local_resources_; }
+  void set_can_load_local_resources(bool can_load) {
+    can_load_local_resources_ = can_load;
+  }
 
  private:
   base::Time request_time_;
@@ -238,15 +276,19 @@ class DocumentState : public WebKit::WebDataSource::ExtraData {
   int http_status_code_;
   bool was_fetched_via_spdy_;
   bool was_npn_negotiated_;
+  std::string npn_negotiated_protocol_;
   bool was_alternate_protocol_available_;
   bool was_fetched_via_proxy_;
 
   GURL searchable_form_url_;
   std::string searchable_form_encoding_;
-  scoped_ptr<webkit::forms::PasswordForm> password_form_data_;
+  scoped_ptr<PasswordForm> password_form_data_;
   std::string security_info_;
 
   bool use_error_page_;
+
+  bool is_overriding_user_agent_;
+  bool must_reset_scroll_and_scale_state_;
 
   // A prefetcher is a page that contains link rel=prefetch elements.
   bool was_prefetcher_;
@@ -257,9 +299,14 @@ class DocumentState : public WebKit::WebDataSource::ExtraData {
   bool cache_policy_override_set_;
   WebKit::WebURLRequest::CachePolicy cache_policy_override_;
 
+  bool referrer_policy_set_;
+  WebKit::WebReferrerPolicy referrer_policy_;
+
   scoped_ptr<webkit_glue::AltErrorPageResourceFetcher> alt_error_page_fetcher_;
 
   scoped_ptr<NavigationState> navigation_state_;
+
+  bool can_load_local_resources_;
 };
 
 #endif  // CONTENT_PUBLIC_RENDERER_DOCUMENT_STATE_H_

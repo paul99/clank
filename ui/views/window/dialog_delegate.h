@@ -1,20 +1,19 @@
-// Copyright (c) 2011 The Chromium Authors. All rights reserved.
+// Copyright (c) 2012 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
 #ifndef UI_VIEWS_WINDOW_DIALOG_DELEGATE_H_
 #define UI_VIEWS_WINDOW_DIALOG_DELEGATE_H_
-#pragma once
 
 #include "base/compiler_specific.h"
 #include "base/string16.h"
 #include "ui/base/accessibility/accessibility_types.h"
 #include "ui/base/ui_base_types.h"
 #include "ui/views/widget/widget_delegate.h"
-#include "ui/views/window/dialog_client_view.h"
 
 namespace views {
 
+class DialogClientView;
 class View;
 
 ///////////////////////////////////////////////////////////////////////////////
@@ -30,6 +29,8 @@ class View;
 class VIEWS_EXPORT DialogDelegate : public WidgetDelegate {
  public:
   virtual DialogDelegate* AsDialogDelegate() OVERRIDE;
+
+  virtual ~DialogDelegate();
 
   // Returns a mask specifying which of the available DialogButtons are visible
   // for the dialog. Note: If an OK button is provided, you should provide a
@@ -57,6 +58,10 @@ class VIEWS_EXPORT DialogDelegate : public WidgetDelegate {
   // Returns whether the specified dialog button is visible.
   virtual bool IsDialogButtonVisible(ui::DialogButton button) const;
 
+  // Returns whether to use chrome style for the button strip (like WebUI). If
+  // false, native style padding is used.
+  virtual bool UseChromeStyle() const;
+
   // Returns whether accelerators are enabled on the button. This is invoked
   // when an accelerator is pressed, not at construction time. This
   // returns true.
@@ -68,16 +73,16 @@ class VIEWS_EXPORT DialogDelegate : public WidgetDelegate {
   virtual View* GetExtraView();
 
   // Returns whether the height of the extra view should be at least as tall as
-  // the buttons. The default (false) is to give the extra view it's preferred
+  // the buttons. The default (false) is to give the extra view its preferred
   // height. By returning true the height becomes
   // max(extra_view preferred height, buttons preferred height).
   virtual bool GetSizeExtraViewHeightToButtons();
 
-  // For Dialog boxes, if there is a "Cancel" button, this is called when the
-  // user presses the "Cancel" button or the Close button on the window or
-  // in the system menu, or presses the Esc key. This function should return
-  // true if the window can be closed after it returns, or false if it must
-  // remain open.
+  // For Dialog boxes, if there is a "Cancel" button or no dialog button at all,
+  // this is called when the user presses the "Cancel" button or the Close
+  // button on the window or in the system menu, or presses the Esc key.
+  // This function should return true if the window can be closed after it
+  // returns, or false if it must remain open.
   virtual bool Cancel();
 
   // For Dialog boxes, this is called when the user presses the "OK" button,

@@ -1,4 +1,4 @@
-// Copyright (c) 2011 The Chromium Authors. All rights reserved.
+// Copyright (c) 2012 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -6,112 +6,71 @@
 
 #include <string>
 
-#include "base/logging.h"
 #include "base/android/jni_android.h"
 #include "base/android/jni_string.h"
 #include "base/android/scoped_java_ref.h"
+#include "base/logging.h"
+#include "base/memory/singleton.h"
+#include "jni/BuildInfo_jni.h"
 
-#include "jni/build_info_jni.h"
+namespace {
+
+// The caller takes ownership of the returned const char*.
+const char* StrDupJString(const base::android::JavaRef<jstring>& java_string) {
+  std::string str = ConvertJavaStringToUTF8(java_string);
+  return strdup(str.c_str());
+}
+
+}  // namespace
 
 namespace base {
 namespace android {
 
-BuildInfo* BuildInfo::instance_ = NULL;
-Lock BuildInfo::lock_;
-
-BuildInfo::BuildInfo(
-    const char* device,
-    const char* model,
-    const char* brand,
-    const char* android_build_id,
-    const char* android_build_fp,
-    const char* package_version_code,
-    const char* package_version_name,
-    const int sdk_version_int)
-    : device(device),
-      model(model),
-      brand(brand),
-      android_build_id(android_build_id),
-      android_build_fp(android_build_fp),
-      package_version_code(package_version_code),
-      package_version_name(package_version_name),
-      sdk_version_int(sdk_version_int),
-      java_exception_info(NULL) {
-}
-
-BuildInfo* const BuildInfo::GetInstance() {
-  base::AutoLock scoped_lock(lock_);
-  if (!instance_) {
-    JNIEnv* env = AttachCurrentThread();
-    jobject app_context = GetApplicationContext();
-
-    // The const char* pointers initialized below will be owned by the
-    // resultant BuildInfo.
-    std::string device_str =
-        ConvertJavaStringToUTF8(Java_BuildInfo_getDevice(env));
-    const char* device = strdup(device_str.c_str());
-
-    std::string model_str =
-        ConvertJavaStringToUTF8(Java_BuildInfo_getDeviceModel(env));
-    const char* model = strdup(model_str.c_str());
-
-    std::string brand_str =
-        ConvertJavaStringToUTF8(Java_BuildInfo_getBrand(env));
-    const char* brand = strdup(brand_str.c_str());
-
-    std::string android_build_id_str =
-        ConvertJavaStringToUTF8(Java_BuildInfo_getAndroidBuildId(env));
-    const char* android_build_id = strdup(android_build_id_str.c_str());
-
-    std::string android_build_fp_str =
-        ConvertJavaStringToUTF8(
-            Java_BuildInfo_getAndroidBuildFingerprint(env));
-    const char* android_build_fp = strdup(android_build_fp_str.c_str());
-
-    std::string package_version_code_str =
-        ConvertJavaStringToUTF8(Java_BuildInfo_getPackageVersionCode(
-            env, app_context));
-    const char* package_version_code =
-        strdup(package_version_code_str.c_str());
-
-    std::string package_version_name_str =
-        ConvertJavaStringToUTF8(
-            Java_BuildInfo_getPackageVersionName(env, app_context));
-    const char* package_version_name =
-        strdup(package_version_name_str.c_str());
-
-    const int sdk_version_int =
-        static_cast<int>(Java_BuildInfo_getSDKVersion(env));
-
-    instance_ = new BuildInfo(
-        device,
-        model,
-        brand,
-        android_build_id,
-        android_build_fp,
-        package_version_code,
-        package_version_name,
-        sdk_version_int);
-
-    LOG(INFO) << "BuildInfo instance initialized with"
-              << " device=" << instance_->device
-              << " model=" << instance_->model
-              << " brand=" << instance_->brand
-              << " android_build_id=" << instance_->android_build_id
-              << " android_build_fp=" << instance_->android_build_fp
-              << " package_version_code=" << instance_->package_version_code
-              << " package_version_name=" << instance_->package_version_name;
+struct BuildInfoSingletonTraits {
+  static BuildInfo* New() {
+    return new BuildInfo(AttachCurrentThread());
   }
-  return instance_;
+
+  static void Delete(BuildInfo* x) {
+    // We're leaking this type, see kRegisterAtExit.
+    NOTREACHED();
+  }
+
+  static const bool kRegisterAtExit = false;
+  static const bool kAllowedToAccessOnNonjoinableThread = true;
+};
+
+BuildInfo::BuildInfo(JNIEnv* env)
+    : device_(StrDupJString(Java_BuildInfo_getDevice(env))),
+      model_(StrDupJString(Java_BuildInfo_getDeviceModel(env))),
+      brand_(StrDupJString(Java_BuildInfo_getBrand(env))),
+      android_build_id_(StrDupJString(Java_BuildInfo_getAndroidBuildId(env))),
+      android_build_fp_(StrDupJString(
+          Java_BuildInfo_getAndroidBuildFingerprint(env))),
+      package_version_code_(StrDupJString(Java_BuildInfo_getPackageVersionCode(
+          env, GetApplicationContext()))),
+      package_version_name_(StrDupJString(Java_BuildInfo_getPackageVersionName(
+          env, GetApplicationContext()))),
+      package_label_(StrDupJString(Java_BuildInfo_getPackageLabel(
+          env, GetApplicationContext()))),
+      package_name_(StrDupJString(Java_BuildInfo_getPackageName(
+          env, GetApplicationContext()))),
+      sdk_int_(Java_BuildInfo_getSdkInt(env)),
+      java_exception_info_(NULL) {
 }
 
-void BuildInfo::set_java_exception_info(std::string info) {
-  DCHECK(!java_exception_info) << "info should be set only once.";
-  // Restrict exception info to 1024 bytes.
-  java_exception_info = strndup(info.c_str(), 1024);
+// static
+BuildInfo* BuildInfo::GetInstance() {
+  return Singleton<BuildInfo, BuildInfoSingletonTraits >::get();
 }
 
-bool RegisterBuildInfo(JNIEnv* env) {
+void BuildInfo::set_java_exception_info(const std::string& info) {
+  DCHECK(!java_exception_info_) << "info should be set only once.";
+  java_exception_info_ = strndup(info.c_str(), 1024);
+}
+
+// static
+bool BuildInfo::RegisterBindings(JNIEnv* env) {
   return RegisterNativesImpl(env);
 }
 

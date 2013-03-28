@@ -4,9 +4,13 @@
 
 #include "ppapi/proxy/ppapi_proxy_test.h"
 
+#include <sstream>
+
 #include "base/bind.h"
+#include "base/compiler_specific.h"
 #include "base/message_loop_proxy.h"
 #include "base/observer_list.h"
+#include "base/process_util.h"
 #include "ipc/ipc_sync_channel.h"
 #include "ppapi/c/pp_errors.h"
 #include "ppapi/c/private/ppb_proxy_private.h"
@@ -92,6 +96,12 @@ void TearDownRemoteHarness(ProxyTestHarnessBase* harness,
   harness_torn_down->Signal();
 }
 
+void RunTaskOnRemoteHarness(const base::Closure& task,
+                            base::WaitableEvent* task_complete) {
+ task.Run();
+ task_complete->Signal();
+}
+
 }  // namespace
 
 // ProxyTestHarnessBase --------------------------------------------------------
@@ -139,11 +149,14 @@ bool ProxyTestHarnessBase::SupportsInterface(const char* name) {
 
 // PluginProxyTestHarness ------------------------------------------------------
 
-PluginProxyTestHarness::PluginProxyTestHarness()
-    : plugin_globals_(PpapiGlobals::ForTest()) {
+PluginProxyTestHarness::PluginProxyTestHarness() {
 }
 
 PluginProxyTestHarness::~PluginProxyTestHarness() {
+}
+
+PpapiGlobals* PluginProxyTestHarness::GetGlobals() {
+  return plugin_globals_.get();
 }
 
 Dispatcher* PluginProxyTestHarness::GetDispatcher() {
@@ -151,14 +164,24 @@ Dispatcher* PluginProxyTestHarness::GetDispatcher() {
 }
 
 void PluginProxyTestHarness::SetUpHarness() {
+  plugin_globals_.reset(new PluginGlobals(PpapiGlobals::ForTest()));
+
   // These must be first since the dispatcher set-up uses them.
   PpapiGlobals::SetPpapiGlobalsOnThreadForTest(GetGlobals());
   resource_tracker().DidCreateInstance(pp_instance());
 
   plugin_dispatcher_.reset(new PluginDispatcher(
-      base::Process::Current().handle(),
-      &MockGetInterface));
+      &MockGetInterface,
+      PpapiPermissions(),
+      false));
   plugin_dispatcher_->InitWithTestSink(&sink());
+  // The plugin proxy delegate is needed for
+  // |PluginProxyDelegate::GetBrowserSender| which is used
+  // in |ResourceCreationProxy::GetConnection| to get the channel to the
+  // browser. In this case we just use the |plugin_dispatcher_| as the channel
+  // for test purposes.
+  plugin_delegate_mock_.set_browser_sender(plugin_dispatcher_.get());
+  PluginGlobals::Get()->set_plugin_proxy_delegate(&plugin_delegate_mock_);
   plugin_dispatcher_->DidCreateInstance(pp_instance());
 }
 
@@ -167,17 +190,23 @@ void PluginProxyTestHarness::SetUpHarnessWithChannel(
     base::MessageLoopProxy* ipc_message_loop,
     base::WaitableEvent* shutdown_event,
     bool is_client) {
+  plugin_globals_.reset(new PluginGlobals(PpapiGlobals::ForTest()));
+
   // These must be first since the dispatcher set-up uses them.
   PpapiGlobals::SetPpapiGlobalsOnThreadForTest(GetGlobals());
   resource_tracker().DidCreateInstance(pp_instance());
   plugin_delegate_mock_.Init(ipc_message_loop, shutdown_event);
 
   plugin_dispatcher_.reset(new PluginDispatcher(
-      base::Process::Current().handle(),
-      &MockGetInterface));
+      &MockGetInterface,
+      PpapiPermissions(),
+      false));
   plugin_dispatcher_->InitPluginWithChannel(&plugin_delegate_mock_,
+                                            base::kNullProcessId,
                                             channel_handle,
                                             is_client);
+  plugin_delegate_mock_.set_browser_sender(plugin_dispatcher_.get());
+  PluginGlobals::Get()->set_plugin_proxy_delegate(&plugin_delegate_mock_);
   plugin_dispatcher_->DidCreateInstance(pp_instance());
 }
 
@@ -186,6 +215,7 @@ void PluginProxyTestHarness::TearDownHarness() {
   plugin_dispatcher_.reset();
 
   resource_tracker().DidDeleteInstance(pp_instance());
+  plugin_globals_.reset();
 }
 
 base::MessageLoopProxy*
@@ -196,6 +226,16 @@ PluginProxyTestHarness::PluginDelegateMock::GetIPCMessageLoop() {
 base::WaitableEvent*
 PluginProxyTestHarness::PluginDelegateMock::GetShutdownEvent() {
   return shutdown_event_;
+}
+
+IPC::PlatformFileForTransit
+PluginProxyTestHarness::PluginDelegateMock::ShareHandleWithRemote(
+    base::PlatformFile handle,
+    base::ProcessId /* remote_pid */,
+    bool should_close_source) {
+  return IPC::GetFileHandleForProcess(handle,
+                                      base::Process::Current().handle(),
+                                      should_close_source);
 }
 
 std::set<PP_Instance>*
@@ -212,14 +252,20 @@ void PluginProxyTestHarness::PluginDelegateMock::Unregister(
     uint32 plugin_dispatcher_id) {
 }
 
-bool PluginProxyTestHarness::PluginDelegateMock::SendToBrowser(
-    IPC::Message* msg) {
-  NOTREACHED();
-  return false;
+IPC::Sender* PluginProxyTestHarness::PluginDelegateMock::GetBrowserSender() {
+  return browser_sender_;
+}
+
+std::string PluginProxyTestHarness::PluginDelegateMock::GetUILanguage() {
+  return std::string("en-US");
 }
 
 void PluginProxyTestHarness::PluginDelegateMock::PreCacheFont(
     const void* logfontw) {
+}
+
+void PluginProxyTestHarness::PluginDelegateMock::SetActiveURL(
+    const std::string& url) {
 }
 
 // PluginProxyTest -------------------------------------------------------------
@@ -240,11 +286,22 @@ void PluginProxyTest::TearDown() {
 
 // HostProxyTestHarness --------------------------------------------------------
 
+class HostProxyTestHarness::MockSyncMessageStatusReceiver
+    : public HostDispatcher::SyncMessageStatusReceiver {
+ public:
+  virtual void BeginBlockOnSyncMessage() OVERRIDE {}
+  virtual void EndBlockOnSyncMessage() OVERRIDE {}
+};
+
 HostProxyTestHarness::HostProxyTestHarness()
-    : host_globals_(PpapiGlobals::ForTest()) {
+    : status_receiver_(new MockSyncMessageStatusReceiver) {
 }
 
 HostProxyTestHarness::~HostProxyTestHarness() {
+}
+
+PpapiGlobals* HostProxyTestHarness::GetGlobals() {
+  return host_globals_.get();
 }
 
 Dispatcher* HostProxyTestHarness::GetDispatcher() {
@@ -252,12 +309,15 @@ Dispatcher* HostProxyTestHarness::GetDispatcher() {
 }
 
 void HostProxyTestHarness::SetUpHarness() {
+  host_globals_.reset(new ppapi::TestGlobals(PpapiGlobals::ForTest()));
+
   // These must be first since the dispatcher set-up uses them.
   PpapiGlobals::SetPpapiGlobalsOnThreadForTest(GetGlobals());
   host_dispatcher_.reset(new HostDispatcher(
-      base::Process::Current().handle(),
       pp_module(),
-      &MockGetInterface));
+      &MockGetInterface,
+      status_receiver_.release(),
+      PpapiPermissions::AllPermissions()));
   host_dispatcher_->InitWithTestSink(&sink());
   HostDispatcher::SetForInstance(pp_instance(), host_dispatcher_.get());
 }
@@ -267,16 +327,20 @@ void HostProxyTestHarness::SetUpHarnessWithChannel(
     base::MessageLoopProxy* ipc_message_loop,
     base::WaitableEvent* shutdown_event,
     bool is_client) {
+  host_globals_.reset(new ppapi::TestGlobals(PpapiGlobals::ForTest()));
+
   // These must be first since the dispatcher set-up uses them.
   PpapiGlobals::SetPpapiGlobalsOnThreadForTest(GetGlobals());
   delegate_mock_.Init(ipc_message_loop, shutdown_event);
 
   host_dispatcher_.reset(new HostDispatcher(
-      base::Process::Current().handle(),
       pp_module(),
-      &MockGetInterface));
+      &MockGetInterface,
+      status_receiver_.release(),
+      PpapiPermissions::AllPermissions()));
   ppapi::Preferences preferences;
-  host_dispatcher_->InitHostWithChannel(&delegate_mock_, channel_handle,
+  host_dispatcher_->InitHostWithChannel(&delegate_mock_,
+                                        base::kNullProcessId, channel_handle,
                                         is_client, preferences);
   HostDispatcher::SetForInstance(pp_instance(), host_dispatcher_.get());
 }
@@ -284,6 +348,7 @@ void HostProxyTestHarness::SetUpHarnessWithChannel(
 void HostProxyTestHarness::TearDownHarness() {
   HostDispatcher::RemoveForInstance(pp_instance());
   host_dispatcher_.reset();
+  host_globals_.reset();
 }
 
 base::MessageLoopProxy*
@@ -293,6 +358,16 @@ HostProxyTestHarness::DelegateMock::GetIPCMessageLoop() {
 
 base::WaitableEvent* HostProxyTestHarness::DelegateMock::GetShutdownEvent() {
   return shutdown_event_;
+}
+
+IPC::PlatformFileForTransit
+HostProxyTestHarness::DelegateMock::ShareHandleWithRemote(
+    base::PlatformFile handle,
+    base::ProcessId /* remote_pid */,
+    bool should_close_source) {
+  return IPC::GetFileHandleForProcess(handle,
+                                      base::Process::Current().handle(),
+                                      should_close_source);
 }
 
 
@@ -341,8 +416,11 @@ void TwoWayTest::SetUp() {
   io_thread_.StartWithOptions(options);
   plugin_thread_.Start();
 
-  IPC::ChannelHandle handle;
-  handle.name = "TwoWayTestChannel";
+  // Construct the IPC handle name using the process ID so we can safely run
+  // multiple |TwoWayTest|s concurrently.
+  std::ostringstream handle_name;
+  handle_name << "TwoWayTestChannel" << base::GetCurrentProcId();
+  IPC::ChannelHandle handle(handle_name.str());
   base::WaitableEvent remote_harness_set_up(true, false);
   plugin_thread_.message_loop_proxy()->PostTask(
       FROM_HERE,
@@ -371,6 +449,15 @@ void TwoWayTest::TearDown() {
   local_harness_->TearDownHarness();
 
   io_thread_.Stop();
+}
+
+void TwoWayTest::PostTaskOnRemoteHarness(const base::Closure& task) {
+  base::WaitableEvent task_complete(true, false);
+  plugin_thread_.message_loop_proxy()->PostTask(FROM_HERE,
+      base::Bind(&RunTaskOnRemoteHarness,
+                 task,
+                 &task_complete));
+  task_complete.Wait();
 }
 
 

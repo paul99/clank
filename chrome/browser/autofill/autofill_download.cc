@@ -9,29 +9,37 @@
 #include <vector>
 
 #include "base/logging.h"
+#include "base/prefs/public/pref_service_base.h"
 #include "base/rand_util.h"
 #include "base/stl_util.h"
 #include "base/string_util.h"
+#include "chrome/browser/autofill/autofill_download_url.h"
 #include "chrome/browser/autofill/autofill_metrics.h"
 #include "chrome/browser/autofill/autofill_xml_parser.h"
 #include "chrome/browser/autofill/form_structure.h"
-#include "chrome/browser/prefs/pref_service.h"
-#include "chrome/browser/profiles/profile.h"
 #include "chrome/common/pref_names.h"
-#include "content/public/common/url_fetcher.h"
+#include "content/public/browser/browser_context.h"
 #include "googleurl/src/gurl.h"
 #include "net/base/load_flags.h"
 #include "net/http/http_response_headers.h"
+#include "net/url_request/url_fetcher.h"
 #include "third_party/libjingle/source/talk/xmllite/xmlparser.h"
 
+using content::BrowserContext;
+
 namespace {
-const char kAutofillQueryServerRequestUrl[] =
-    "https://clients1.google.com/tbproxy/af/query";
-const char kAutofillUploadServerRequestUrl[] =
-    "https://clients1.google.com/tbproxy/af/upload";
 const char kAutofillQueryServerNameStartInHeader[] = "GFE/";
 
 const size_t kMaxFormCacheSize = 16;
+
+// Log the contents of the upload request
+static void LogUploadRequest(const GURL& url, const std::string& signature,
+                             const std::string& form_xml) {
+  VLOG(2) << url;
+  VLOG(2) << signature;
+  VLOG(2) << form_xml;
+}
+
 };
 
 struct AutofillDownloadManager::FormRequestData {
@@ -39,9 +47,9 @@ struct AutofillDownloadManager::FormRequestData {
   AutofillRequestType request_type;
 };
 
-AutofillDownloadManager::AutofillDownloadManager(Profile* profile,
+AutofillDownloadManager::AutofillDownloadManager(BrowserContext* context,
                                                  Observer* observer)
-    : profile_(profile),
+    : browser_context_(context),
       observer_(observer),
       max_form_cache_size_(kMaxFormCacheSize),
       next_query_request_(base::Time::Now()),
@@ -50,7 +58,8 @@ AutofillDownloadManager::AutofillDownloadManager(Profile* profile,
       negative_upload_rate_(0),
       fetcher_id_for_unittest_(0) {
   DCHECK(observer_);
-  PrefService* preferences = profile_->GetPrefs();
+  PrefServiceBase* preferences =
+      PrefServiceBase::FromBrowserContext(browser_context_);
   positive_upload_rate_ =
       preferences->GetDouble(prefs::kAutofillPositiveUploadRate);
   negative_upload_rate_ =
@@ -94,6 +103,13 @@ bool AutofillDownloadManager::StartUploadRequest(
     const FormStructure& form,
     bool form_was_autofilled,
     const FieldTypeSet& available_field_types) {
+  std::string form_xml;
+  if (!form.EncodeUploadRequest(available_field_types, form_was_autofilled,
+                                &form_xml))
+    return false;
+
+  LogUploadRequest(form.source_url(), form.FormSignature(), form_xml);
+
   if (next_upload_request_ > base::Time::Now()) {
     // We are in back-off mode: do not do the request.
     DVLOG(1) << "AutofillDownloadManager: Upload request is throttled.";
@@ -110,11 +126,6 @@ bool AutofillDownloadManager::StartUploadRequest(
     // If we ever need notification that upload was skipped, add it here.
     return false;
   }
-
-  std::string form_xml;
-  if (!form.EncodeUploadRequest(available_field_types, form_was_autofilled,
-                                &form_xml))
-    return false;
 
   FormRequestData request_data;
   request_data.form_signatures.push_back(form.FormSignature());
@@ -137,7 +148,8 @@ void AutofillDownloadManager::SetPositiveUploadRate(double rate) {
   positive_upload_rate_ = rate;
   DCHECK_GE(rate, 0.0);
   DCHECK_LE(rate, 1.0);
-  PrefService* preferences = profile_->GetPrefs();
+  PrefServiceBase* preferences = PrefServiceBase::FromBrowserContext(
+      browser_context_);
   preferences->SetDouble(prefs::kAutofillPositiveUploadRate, rate);
 }
 
@@ -147,31 +159,34 @@ void AutofillDownloadManager::SetNegativeUploadRate(double rate) {
   negative_upload_rate_ = rate;
   DCHECK_GE(rate, 0.0);
   DCHECK_LE(rate, 1.0);
-  PrefService* preferences = profile_->GetPrefs();
+  PrefServiceBase* preferences = PrefServiceBase::FromBrowserContext(
+      browser_context_);
   preferences->SetDouble(prefs::kAutofillNegativeUploadRate, rate);
 }
 
 bool AutofillDownloadManager::StartRequest(
     const std::string& form_xml,
     const FormRequestData& request_data) {
-  net::URLRequestContextGetter* request_context = profile_->GetRequestContext();
+  net::URLRequestContextGetter* request_context =
+      browser_context_->GetRequestContext();
   DCHECK(request_context);
-  std::string request_url;
+  GURL request_url;
   if (request_data.request_type == AutofillDownloadManager::REQUEST_QUERY)
-    request_url = kAutofillQueryServerRequestUrl;
+    request_url = autofill::GetAutofillQueryUrl();
   else
-    request_url = kAutofillUploadServerRequestUrl;
+    request_url = autofill::GetAutofillUploadUrl();
 
   // Id is ignored for regular chrome, in unit test id's for fake fetcher
   // factory will be 0, 1, 2, ...
-  content::URLFetcher* fetcher = content::URLFetcher::Create(
-      fetcher_id_for_unittest_++, GURL(request_url), content::URLFetcher::POST,
+  net::URLFetcher* fetcher = net::URLFetcher::Create(
+      fetcher_id_for_unittest_++, request_url, net::URLFetcher::POST,
       this);
   url_fetchers_[fetcher] = request_data;
   fetcher->SetAutomaticallyRetryOn5xx(false);
   fetcher->SetRequestContext(request_context);
   fetcher->SetUploadData("text/plain", form_xml);
-  fetcher->SetLoadFlags(net::LOAD_DO_NOT_SAVE_COOKIES);
+  fetcher->SetLoadFlags(net::LOAD_DO_NOT_SAVE_COOKIES |
+                        net::LOAD_DO_NOT_SEND_COOKIES);
   fetcher->Start();
   return true;
 }
@@ -231,9 +246,9 @@ std::string AutofillDownloadManager::GetCombinedSignature(
 }
 
 void AutofillDownloadManager::OnURLFetchComplete(
-    const content::URLFetcher* source) {
-  std::map<content::URLFetcher *, FormRequestData>::iterator it =
-      url_fetchers_.find(const_cast<content::URLFetcher*>(source));
+    const net::URLFetcher* source) {
+  std::map<net::URLFetcher *, FormRequestData>::iterator it =
+      url_fetchers_.find(const_cast<net::URLFetcher*>(source));
   if (it == url_fetchers_.end()) {
     // Looks like crash on Mac is possibly caused with callback entering here
     // with unknown fetcher when network is refreshed.

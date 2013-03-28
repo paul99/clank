@@ -1,5 +1,5 @@
-#!/usr/bin/python2.4
-# Copyright (c) 2011 The Chromium Authors. All rights reserved.
+#!/usr/bin/env python
+# Copyright (c) 2012 The Chromium Authors. All rights reserved.
 # Use of this source code is governed by a BSD-style license that can be
 # found in the LICENSE file.
 
@@ -12,7 +12,6 @@ import getopt
 import os
 import shutil
 import sys
-import types
 
 from grit import grd_reader
 from grit import util
@@ -20,20 +19,35 @@ from grit.tool import interface
 from grit import shortcuts
 
 
-def ParseDefine(define):
-  '''Parses a define that is either like "NAME" or "NAME=VAL" and
-  returns its components, using True as the default value.  Values of
-  "1" and "0" are transformed to True and False respectively.
-  '''
-  parts = [part.strip() for part in define.split('=')]
-  assert len(parts) >= 1
-  name = parts[0]
-  val = True
-  if len(parts) > 1:
-    val = parts[1]
-  if val == "1": val = True
-  elif val == "0": val = False
-  return (name, val)
+# It would be cleaner to have each module register itself, but that would
+# require importing all of them on every run of GRIT.
+'''Map from <output> node types to modules under grit.format.'''
+_format_modules = {
+  'android':                  'android_xml',
+  'c_format':                 'c_format',
+  'chrome_messages_json':     'chrome_messages_json',
+  'data_package':             'data_pack',
+  'js_map_format':            'js_map_format',
+  'rc_all':                   'rc',
+  'rc_translateable':         'rc',
+  'rc_nontranslateable':      'rc',
+  'rc_header':                'rc_header',
+  'resource_map_header':      'resource_map',
+  'resource_map_source':      'resource_map',
+  'resource_file_map_source': 'resource_map',
+}
+_format_modules.update((type, 'policy_templates.template_formatter')
+    for type in 'adm plist plist_strings admx adml doc json reg'.split())
+
+
+def GetFormatter(type):
+  modulename = 'grit.format.' + _format_modules[type]
+  __import__(modulename)
+  module = sys.modules[modulename]
+  try:
+    return module.Format
+  except AttributeError:
+    return module.GetFormatter(type)
 
 
 class RcBuilder(interface.Tool):
@@ -56,10 +70,10 @@ Options:
 
   -E NAME=VALUE     Set environment variable NAME to VALUE (within grit).
 
-  -f FIRSTIDFILE    Path to a python file that specifies the first id of
-                    value to use for resources.  Defaults to the file
-                    resources_ids next to grit.py.  Set to an empty string
-                    if you don't want to use a first id file.
+  -f FIRSTIDSFILE   Path to a python file that specifies the first id of
+                    value to use for resources.  A non-empty value here will
+                    override the value specified in the <grit> node's
+                    first_ids_file.
 
   -w WHITELISTFILE  Path to a file containing the string names of the
                     resources to include.  Anything not listed is dropped.
@@ -77,25 +91,28 @@ are exported to translation interchange files (e.g. XMB files), etc.
 
   def Run(self, opts, args):
     self.output_directory = '.'
-    first_id_filename = None
+    first_ids_file = None
     whitelist_filenames = []
     (own_opts, args) = getopt.getopt(args, 'o:D:E:f:w:')
     for (key, val) in own_opts:
       if key == '-o':
         self.output_directory = val
       elif key == '-D':
-        name, val = ParseDefine(val)
+        name, val = util.ParseDefine(val)
         self.defines[name] = val
       elif key == '-E':
-        (env_name, env_value) = val.split('=')
+        (env_name, env_value) = val.split('=', 1)
         os.environ[env_name] = env_value
       elif key == '-f':
-        first_id_filename = val
+        # TODO(joi@chromium.org): Remove this override once change
+        # lands in WebKit.grd to specify the first_ids_file in the
+        # .grd itself.
+        first_ids_file = val
       elif key == '-w':
         whitelist_filenames.append(val)
 
     if len(args):
-      print "This tool takes no tool-specific arguments."
+      print 'This tool takes no tool-specific arguments.'
       return 2
     self.SetOptions(opts)
     if self.scons_targets:
@@ -109,24 +126,29 @@ are exported to translation interchange files (e.g. XMB files), etc.
       self.whitelist_names = set()
       for whitelist_filename in whitelist_filenames:
         self.VerboseOut('Using whitelist: %s\n' % whitelist_filename);
-        whitelist_file = open(whitelist_filename)
-        self.whitelist_names |= set(whitelist_file.read().strip().split('\n'))
-        whitelist_file.close()
+        whitelist_contents = util.ReadFile(whitelist_filename, util.RAW_TEXT)
+        self.whitelist_names.update(whitelist_contents.strip().split('\n'))
 
-    self.res = grd_reader.Parse(opts.input, first_id_filename=first_id_filename,
-                                debug=opts.extra_verbose, defines=self.defines)
-    self.res.RunGatherers(recursive = True)
+    self.res = grd_reader.Parse(opts.input,
+                                debug=opts.extra_verbose,
+                                first_ids_file=first_ids_file,
+                                defines=self.defines)
+    # Set an output context so that conditionals can use defines during the
+    # gathering stage; we use a dummy language here since we are not outputting
+    # a specific language.
+    self.res.SetOutputLanguage('en')
+    self.res.RunGatherers()
     self.Process()
     return 0
 
-  def __init__(self):
-    # Default file-creation function is built-in file().  Only done to allow
+  def __init__(self, defines=None):
+    # Default file-creation function is built-in open().  Only done to allow
     # overriding by unit test.
-    self.fo_create = file
+    self.fo_create = open
 
     # key/value pairs of C-preprocessor like defines that are used for
     # conditional output of resources
-    self.defines = {}
+    self.defines = defines or {}
 
     # self.res is a fully-populated resource tree if Run()
     # has been called, otherwise None.
@@ -142,64 +164,37 @@ are exported to translation interchange files (e.g. XMB files), etc.
     self.whitelist_names = None
 
 
-  # static method
+  @staticmethod
   def AddWhitelistTags(start_node, whitelist_names):
     # Walk the tree of nodes added attributes for the nodes that shouldn't
     # be written into the target files (skip markers).
     from grit.node import include
     from grit.node import message
-    for node in start_node.inorder():
+    for node in start_node:
       # Same trick data_pack.py uses to see what nodes actually result in
       # real items.
       if (isinstance(node, include.IncludeNode) or
           isinstance(node, message.MessageNode)):
         text_ids = node.GetTextualIds()
         # Mark the item to be skipped if it wasn't in the whitelist.
-        if text_ids and not text_ids[0] in whitelist_names:
+        if text_ids and text_ids[0] not in whitelist_names:
           node.SetWhitelistMarkedAsSkip(True)
-  AddWhitelistTags = staticmethod(AddWhitelistTags)
 
-  # static method
+  @staticmethod
   def ProcessNode(node, output_node, outfile):
     '''Processes a node in-order, calling its formatter before and after
     recursing to its children.
 
     Args:
       node: grit.node.base.Node subclass
-      output_node: grit.node.io.File
+      output_node: grit.node.io.OutputNode
       outfile: open filehandle
     '''
-    # See if the node should be skipped by a whitelist.
-    # Note: Some Format calls have side effects, so Format is always called
-    # and the whitelist is used to only avoid the output.
-    should_write = not node.WhitelistMarkedAsSkip()
-
     base_dir = util.dirname(output_node.GetOutputFilename())
 
-    try:
-      formatter = node.ItemFormatter(output_node.GetType())
-      if formatter:
-        formatted = formatter.Format(node, output_node.GetLanguage(),
-                                     begin_item=True, output_dir=base_dir)
-        if should_write:
-          outfile.write(formatted)
-    except:
-      print u"Error processing node %s" % unicode(node)
-      raise
-
-    for child in node.children:
-      RcBuilder.ProcessNode(child, output_node, outfile)
-
-    try:
-      if formatter:
-        formatted = formatter.Format(node, output_node.GetLanguage(),
-                                     begin_item=False, output_dir=base_dir)
-        if should_write:
-          outfile.write(formatted)
-    except:
-      print u"Error processing node %s" % unicode(node)
-      raise
-  ProcessNode = staticmethod(ProcessNode)
+    formatter = GetFormatter(output_node.GetType())
+    formatted = formatter(node, output_node.GetLanguage(), output_dir=base_dir)
+    outfile.writelines(formatted)
 
 
   def Process(self):
@@ -232,17 +227,26 @@ are exported to translation interchange files (e.g. XMB files), etc.
       if output.GetType() in ('rc_header', 'resource_map_header',
           'resource_map_source', 'resource_file_map_source'):
         encoding = 'cp1252'
-      elif output.GetType() in ('android', 'js_map_format', 'plist', 'plist_strings',
-          'doc', 'json'):
+      elif output.GetType() in ('android', 'c_format', 'js_map_format', 'plist',
+                                'plist_strings', 'doc', 'json'):
         encoding = 'utf_8'
+      elif output.GetType() in ('chrome_messages_json'):
+        # Chrome Web Store currently expects BOM for UTF-8 files :-(
+        encoding = 'utf-8-sig'
       else:
         # TODO(gfeher) modify here to set utf-8 encoding for admx/adml
         encoding = 'utf_16'
+
+      # Set the context, for conditional inclusion of resources
+      self.res.SetOutputLanguage(output.GetLanguage())
+      self.res.SetOutputContext(output.GetContext())
+      self.res.SetDefines(self.defines)
 
       # Make the output directory if it doesn't exist.
       outdir = os.path.split(output.GetOutputFilename())[0]
       if not os.path.exists(outdir):
         os.makedirs(outdir)
+
       # Write the results to a temporary file and only overwrite the original
       # if the file changed.  This avoids unnecessary rebuilds.
       outfile = self.fo_create(output.GetOutputFilename() + '.tmp', 'wb')
@@ -250,17 +254,10 @@ are exported to translation interchange files (e.g. XMB files), etc.
       if output.GetType() != 'data_package':
         outfile = util.WrapOutputStream(outfile, encoding)
 
-      # Set the context, for conditional inclusion of resources
-      self.res.SetOutputContext(output.GetLanguage(), self.defines)
-
-      # TODO(joi) Handle this more gracefully
-      import grit.format.rc_header
-      grit.format.rc_header.Item.ids_ = {}
-
       # Iterate in-order through entire resource tree, calling formatters on
       # the entry into a node and on exit out of it.
-      self.ProcessNode(self.res, output, outfile)
-      outfile.close()
+      with outfile:
+        self.ProcessNode(self.res, output, outfile)
 
       # Now copy from the temp file back to the real output, but on Windows,
       # only if the real output doesn't exist or the contents of the file
@@ -294,7 +291,8 @@ are exported to translation interchange files (e.g. XMB files), etc.
     # and non-official build.
     warnings = (self.res.UberClique().MissingTranslationsReport().
         encode('ascii', 'replace'))
-    if warnings and self.defines.get('_google_chrome', False):
-      print warnings
+    if warnings:
+      self.VerboseOut(warnings)
     if self.res.UberClique().HasMissingTranslations():
+      print self.res.UberClique().missing_translations_
       sys.exit(-1)

@@ -35,9 +35,7 @@
 #define CLIENT_LINUX_MINIDUMP_WRITER_LINUX_CORE_DUMPER_H_
 
 #include "client/linux/minidump_writer/linux_dumper.h"
-#if !defined(__ANDROID__)
 #include "common/linux/elf_core_dump.h"
-#endif
 #include "common/linux/memory_mapped_file.h"
 
 namespace google_breakpad {
@@ -112,10 +110,8 @@ class LinuxCoreDumper : public LinuxDumper {
   // Memory-mapped core dump file at |core_path_|.
   MemoryMappedFile mapped_core_file_;
 
-#if !defined(__ANDROID__)
   // Content of the core dump file.
   ElfCoreDump core_;
-#endif
 
   // Thread info found in the core dump file.
   wasteful_vector<ThreadInfo> thread_infos_;

@@ -1,4 +1,4 @@
-// Copyright (c) 2010 The Chromium Authors. All rights reserved.
+// Copyright (c) 2012 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -14,17 +14,23 @@ using appcache::AppCacheBackend;
 using WebKit::WebApplicationCacheHostClient;
 using WebKit::WebConsoleMessage;
 
+namespace content {
+
+static bool g_disable_logging = false;
+
 RendererWebApplicationCacheHostImpl::RendererWebApplicationCacheHostImpl(
     RenderViewImpl* render_view,
     WebApplicationCacheHostClient* client,
     AppCacheBackend* backend)
     : WebApplicationCacheHostImpl(client, backend),
-      content_blocked_(false),
       routing_id_(render_view->routing_id()) {
 }
 
 void RendererWebApplicationCacheHostImpl::OnLogMessage(
     appcache::LogLevel log_level, const std::string& message) {
+  if (g_disable_logging)
+    return;
+
   RenderViewImpl* render_view = GetRenderView();
   if (!render_view || !render_view->webview() ||
       !render_view->webview()->mainFrame())
@@ -55,3 +61,10 @@ RenderViewImpl* RendererWebApplicationCacheHostImpl::GetRenderView() {
   return static_cast<RenderViewImpl*>
       (RenderThreadImpl::current()->ResolveRoute(routing_id_));
 }
+
+// static
+void RendererWebApplicationCacheHostImpl::DisableLoggingForTesting() {
+  g_disable_logging = true;
+}
+
+}  // namespace content

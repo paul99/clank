@@ -9,17 +9,20 @@
 #include "chrome/common/chrome_switches.h"
 #include "chrome/common/chrome_utility_messages.h"
 #include "chrome/common/web_resource/web_resource_unpacker.h"
-#include "content/browser/utility_process_host.h"
-#include "content/browser/renderer_host/resource_dispatcher_host.h"
 #include "content/public/browser/browser_thread.h"
+#include "content/public/browser/resource_dispatcher_host.h"
+#include "content/public/browser/utility_process_host.h"
+#include "content/public/browser/utility_process_host_client.h"
 
 using content::BrowserThread;
+using content::UtilityProcessHost;
+using content::UtilityProcessHostClient;
 
 // This class coordinates a web resource unpack and parse task which is run in
 // a separate process.  Results are sent back to this class and routed to
 // the WebResourceService.
 class JSONAsynchronousUnpackerImpl
-    : public UtilityProcessHost::Client,
+    : public UtilityProcessHostClient,
       public JSONAsynchronousUnpacker {
  public:
   explicit JSONAsynchronousUnpackerImpl(
@@ -36,7 +39,7 @@ class JSONAsynchronousUnpackerImpl
     // If we don't have a ResourceDispatcherHost, assume we're in a test and
     // run the unpacker directly in-process.
     bool use_utility_process =
-        ResourceDispatcherHost::Get() &&
+        content::ResourceDispatcherHost::Get() &&
         !CommandLine::ForCurrentProcess()->HasSwitch(switches::kSingleProcess);
     if (use_utility_process) {
       BrowserThread::ID thread_id;
@@ -59,7 +62,7 @@ class JSONAsynchronousUnpackerImpl
  private:
   virtual ~JSONAsynchronousUnpackerImpl() {}
 
-  // UtilityProcessHost::Client.
+  // UtilityProcessHostClient.
   virtual bool OnMessageReceived(const IPC::Message& message) OVERRIDE {
     bool handled = true;
     IPC_BEGIN_MESSAGE_MAP(JSONAsynchronousUnpackerImpl, message)
@@ -102,8 +105,9 @@ class JSONAsynchronousUnpackerImpl
 
   void StartProcessOnIOThread(BrowserThread::ID thread_id,
                               const std::string& json_data) {
-    UtilityProcessHost* host = new UtilityProcessHost(this, thread_id);
-    host->set_use_linux_zygote(true);
+    UtilityProcessHost* host = UtilityProcessHost::Create(
+        this, BrowserThread::GetMessageLoopProxyForThread(thread_id));
+    host->EnableZygote();
     // TODO(mrc): get proper file path when we start using web resources
     // that need to be unpacked.
     host->Send(new ChromeUtilityMsg_UnpackWebResource(json_data));

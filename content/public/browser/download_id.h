@@ -1,10 +1,9 @@
-// Copyright (c) 2011 The Chromium Authors. All rights reserved.
+// Copyright (c) 2012 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
 #ifndef CONTENT_PUBLIC_BROWSER_DOWNLOAD_ID_H_
 #define CONTENT_PUBLIC_BROWSER_DOWNLOAD_ID_H_
-#pragma once
 
 #include <iosfwd>
 #include <string>
@@ -20,10 +19,12 @@ namespace content {
 // sessions, but their local() field is.
 class DownloadId {
  public:
-  static DownloadId Invalid() { return DownloadId(NULL, -1); }
+  static DownloadId Invalid() { return DownloadId(); }
 
   // Domain separates spaces of local ids.
   typedef const void* Domain;
+
+  DownloadId() : domain_(NULL), local_id_(-1) {}
 
   DownloadId(Domain domain, int32 local_id)
     : domain_(domain),
@@ -56,7 +57,7 @@ class DownloadId {
   size_t hash() const {
     // The top half of domain_ is unlikely to be distinct, and the user is
     // unlikely to have >64K downloads. If these assumptions are incorrect, then
-    // DownloadFileManager's hash_map might have a few collisions, but it will
+    // hash_maps containing DownloadIds might have a few collisions, but can
     // use operator== to safely disambiguate.
     return reinterpret_cast<size_t>(domain_) +
            (static_cast<size_t>(local_id_) << (4 * sizeof(size_t)));

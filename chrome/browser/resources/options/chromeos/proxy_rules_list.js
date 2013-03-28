@@ -1,11 +1,11 @@
-// Copyright (c) 2011 The Chromium Authors. All rights reserved.
+// Copyright (c) 2012 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
 cr.define('options.proxyexceptions', function() {
-  const List = cr.ui.List;
-  const ListItem = cr.ui.ListItem;
-  const ArrayDataModel = cr.ui.ArrayDataModel;
+  /** @const */ var List = cr.ui.List;
+  /** @const */ var ListItem = cr.ui.ListItem;
+  /** @const */ var ArrayDataModel = cr.ui.ArrayDataModel;
 
   /**
    * Creates a new exception list.
@@ -20,9 +20,10 @@ cr.define('options.proxyexceptions', function() {
 
     pref: 'cros.session.proxy.ignorelist',
 
-    /** @inheritDoc */
+    /** @override */
     decorate: function() {
       List.prototype.decorate.call(this);
+      this.autoExpands = true;
 
       // HACK(arv): http://crbug.com/40902
       window.addEventListener('resize', this.redraw.bind(this));
@@ -34,7 +35,7 @@ cr.define('options.proxyexceptions', function() {
       // Listens to pref changes.
       Preferences.getInstance().addEventListener(this.pref,
           function(event) {
-            self.load_(event.value);
+            self.load_(event.value.value);
           });
     },
 
@@ -92,13 +93,13 @@ cr.define('options.proxyexceptions', function() {
      * Updates backend.
      */
     updateBackend_: function() {
-      Preferences.setListPref(this.pref, this.dataModel.slice());
+      Preferences.setListPref(this.pref, this.dataModel.slice(), true);
     }
   };
 
   /**
    * Creates a new exception list item.
-   * @param exception The exception account this represents.
+   * @param {Object} exception The exception account this represents.
    * @constructor
    * @extends {cr.ui.ListItem}
    */
@@ -121,7 +122,7 @@ cr.define('options.proxyexceptions', function() {
   ProxyExceptionsItem.prototype = {
     __proto__: ListItem.prototype,
 
-    /** @inheritDoc */
+    /** @override */
     decorate: function() {
       ListItem.prototype.decorate.call(this);
       this.className = 'exception-list-item';

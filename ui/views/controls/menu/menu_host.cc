@@ -1,14 +1,16 @@
-// Copyright (c) 2011 The Chromium Authors. All rights reserved.
+// Copyright (c) 2012 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
 #include "ui/views/controls/menu/menu_host.h"
 
+#include "ui/gfx/path.h"
+#include "ui/native_theme/native_theme.h"
 #include "ui/views/controls/menu/menu_controller.h"
 #include "ui/views/controls/menu/menu_host_root_view.h"
 #include "ui/views/controls/menu/menu_item_view.h"
-#include "ui/views/controls/menu/native_menu_host.h"
 #include "ui/views/controls/menu/submenu_view.h"
+#include "ui/views/round_rect_painter.h"
 #include "ui/views/widget/native_widget_private.h"
 #include "ui/views/widget/widget.h"
 
@@ -32,9 +34,17 @@ void MenuHost::InitMenuHost(Widget* parent,
                             bool do_capture) {
   Widget::InitParams params(Widget::InitParams::TYPE_MENU);
   params.has_dropshadow = true;
-  params.parent_widget = parent;
+  params.parent = parent ? parent->GetNativeView() : NULL;
   params.bounds = bounds;
   Init(params);
+
+  if (ui::NativeTheme::IsNewMenuStyleEnabled()) {
+    // TODO(yefim): Investigate it more on aura.
+    gfx::Path path;
+    RoundRectPainter::CreateRoundRectPath(bounds, &path);
+    SetShape(path.CreateNativeRegion());
+  }
+
   SetContentsView(contents_view);
   ShowMenuHost(do_capture);
 }
@@ -49,7 +59,7 @@ void MenuHost::ShowMenuHost(bool do_capture) {
   ignore_capture_lost_ = true;
   Show();
   if (do_capture)
-    native_widget_private()->SetMouseCapture();
+    native_widget_private()->SetCapture();
   ignore_capture_lost_ = false;
 }
 
@@ -72,8 +82,8 @@ void MenuHost::SetMenuHostBounds(const gfx::Rect& bounds) {
 }
 
 void MenuHost::ReleaseMenuHostCapture() {
-  if (native_widget_private()->HasMouseCapture())
-    native_widget_private()->ReleaseMouseCapture();
+  if (native_widget_private()->HasCapture())
+    native_widget_private()->ReleaseCapture();
 }
 
 ////////////////////////////////////////////////////////////////////////////////
@@ -105,6 +115,16 @@ void MenuHost::OnNativeWidgetDestroyed() {
     submenu_->MenuHostDestroyed();
   }
   Widget::OnNativeWidgetDestroyed();
+}
+
+void MenuHost::OnOwnerClosing() {
+  if (destroying_)
+    return;
+
+  MenuController* menu_controller =
+      submenu_->GetMenuItem()->GetMenuController();
+  if (menu_controller && !menu_controller->drag_in_progress())
+    menu_controller->CancelAll();
 }
 
 }  // namespace views

@@ -1,12 +1,13 @@
-// Copyright (c) 2011 The Chromium Authors. All rights reserved.
+// Copyright (c) 2012 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
 #ifndef PRINTING_BACKEND_CUPS_HELPER_H_
 #define PRINTING_BACKEND_CUPS_HELPER_H_
-#pragma once
 
 #include <cups/cups.h>
+
+#include <string>
 
 #include "printing/printing_export.h"
 
@@ -15,11 +16,14 @@ class GURL;
 // These are helper functions for dealing with CUPS.
 namespace printing {
 
+struct PrinterSemanticCapsAndDefaults;
+
 // Helper wrapper around http_t structure, with connection and cleanup
 // functionality.
 class PRINTING_EXPORT HttpConnectionCUPS {
  public:
-  explicit HttpConnectionCUPS(const GURL& print_server_url);
+  HttpConnectionCUPS(const GURL& print_server_url,
+                     http_encryption_t encryption);
   ~HttpConnectionCUPS();
 
   void SetBlocking(bool blocking);
@@ -29,6 +33,13 @@ class PRINTING_EXPORT HttpConnectionCUPS {
  private:
   http_t* http_;
 };
+
+// Helper function to parse and convert PPD capabilitites to
+// semantic options.
+PRINTING_EXPORT bool parsePpdCapabilities(
+    const std::string& printer_name,
+    const std::string& printer_capabilities,
+    PrinterSemanticCapsAndDefaults* printer_info);
 
 }  // namespace printing
 

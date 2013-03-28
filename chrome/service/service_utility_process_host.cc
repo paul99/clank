@@ -7,16 +7,17 @@
 #include "base/bind.h"
 #include "base/command_line.h"
 #include "base/file_util.h"
+#include "base/files/scoped_temp_dir.h"
 #include "base/logging.h"
 #include "base/message_loop.h"
 #include "base/message_loop_proxy.h"
 #include "base/process_util.h"
-#include "base/scoped_temp_dir.h"
 #include "base/utf_string_conversions.h"
 #include "chrome/common/chrome_switches.h"
 #include "chrome/common/chrome_utility_messages.h"
 #include "content/public/common/child_process_host.h"
 #include "content/public/common/result_codes.h"
+#include "content/public/common/sandbox_init.h"
 #include "ipc/ipc_switches.h"
 #include "printing/page_range.h"
 #include "ui/base/ui_base_switches.h"
@@ -26,7 +27,6 @@
 #include "base/file_path.h"
 #include "base/memory/scoped_ptr.h"
 #include "base/win/scoped_handle.h"
-#include "content/common/sandbox_policy.h"
 #include "printing/emf_win.h"
 #endif
 
@@ -56,7 +56,7 @@ bool ServiceUtilityProcessHost::StartRenderPDFPagesToMetafile(
   NOTIMPLEMENTED();
   return false;
 #else  // !defined(OS_WIN)
-  scratch_metafile_dir_.reset(new ScopedTempDir);
+  scratch_metafile_dir_.reset(new base::ScopedTempDir);
   if (!scratch_metafile_dir_->CreateUniqueTempDir())
     return false;
   if (!file_util::CreateTemporaryFileInDir(scratch_metafile_dir_->path(),
@@ -137,7 +137,7 @@ bool ServiceUtilityProcessHost::Launch(CommandLine* cmd_line,
     cmd_line->AppendSwitch(switches::kNoSandbox);
     base::LaunchProcess(*cmd_line, base::LaunchOptions(), &handle_);
   } else {
-    handle_ = sandbox::StartProcessWithAccess(cmd_line, exposed_dir);
+    handle_ = content::StartProcessWithAccess(cmd_line, exposed_dir);
   }
   return (handle_ != base::kNullProcessHandle);
 #endif  // !defined(OS_WIN)
@@ -230,12 +230,12 @@ void ServiceUtilityProcessHost::Client::MetafileAvailable(
     double scale_factor) {
   // The metafile was created in a temp folder which needs to get deleted after
   // we have processed it.
-  ScopedTempDir scratch_metafile_dir;
+  base::ScopedTempDir scratch_metafile_dir;
   if (!scratch_metafile_dir.Set(metafile_path.DirName()))
     LOG(WARNING) << "Unable to set scratch metafile directory";
 #if defined(OS_WIN)
   // It's important that metafile is declared after scratch_metafile_dir so
-  // that the metafile destructor closes the file before the ScopedTempDir
+  // that the metafile destructor closes the file before the base::ScopedTempDir
   // destructor tries to remove the directory.
   printing::Emf metafile;
   if (!metafile.InitFromFile(metafile_path)) {

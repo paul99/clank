@@ -1,4 +1,4 @@
-// Copyright (c) 2011 The Chromium Authors. All rights reserved.
+// Copyright (c) 2012 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -12,13 +12,14 @@
 #include "base/utf_string_conversions.h"
 #include "content/public/common/content_client.h"
 #include "content/public/common/content_switches.h"
+#include "ppapi/shared_impl/ppapi_permissions.h"
 #include "webkit/plugins/npapi/plugin_list.h"
 
+namespace content {
 namespace {
 
 // Appends any plugins from the command line to the given vector.
-void ComputePluginsFromCommandLine(
-    std::vector<content::PepperPluginInfo>* plugins) {
+void ComputePluginsFromCommandLine(std::vector<PepperPluginInfo>* plugins) {
   bool out_of_process =
       CommandLine::ForCurrentProcess()->HasSwitch(switches::kPpapiOutOfProcess);
   const std::string value =
@@ -46,7 +47,7 @@ void ComputePluginsFromCommandLine(
     std::vector<std::string> name_parts;
     base::SplitString(parts[0], '#', &name_parts);
 
-    content::PepperPluginInfo plugin;
+    PepperPluginInfo plugin;
     plugin.is_out_of_process = out_of_process;
 #if defined(OS_WIN)
     // This means we can't provide plugins from non-ASCII paths, but
@@ -69,13 +70,20 @@ void ComputePluginsFromCommandLine(
       plugin.mime_types.push_back(mime_type);
     }
 
+    // If the plugin name is empty, use the filename.
+    if (plugin.name.empty())
+      plugin.name = UTF16ToUTF8(plugin.path.BaseName().LossyDisplayName());
+
+    // Command-line plugins get full permissions.
+    plugin.permissions = ppapi::PERMISSION_ALL_BITS;
+
     plugins->push_back(plugin);
   }
 }
 
 }  // namespace
 
-webkit::WebPluginInfo content::PepperPluginInfo::ToWebPluginInfo() const {
+webkit::WebPluginInfo PepperPluginInfo::ToWebPluginInfo() const {
   webkit::WebPluginInfo info;
 
   info.type = is_out_of_process ?
@@ -90,12 +98,13 @@ webkit::WebPluginInfo content::PepperPluginInfo::ToWebPluginInfo() const {
   info.version = ASCIIToUTF16(version);
   info.desc = ASCIIToUTF16(description);
   info.mime_types = mime_types;
+  info.pepper_permissions = permissions;
 
   return info;
 }
 
 bool MakePepperPluginInfo(const webkit::WebPluginInfo& webplugin_info,
-                          content::PepperPluginInfo* pepper_info) {
+                          PepperPluginInfo* pepper_info) {
   if (!webkit::IsPepperPlugin(webplugin_info))
     return false;
 
@@ -108,6 +117,8 @@ bool MakePepperPluginInfo(const webkit::WebPluginInfo& webplugin_info,
   pepper_info->description = UTF16ToASCII(webplugin_info.desc);
   pepper_info->version = UTF16ToASCII(webplugin_info.version);
   pepper_info->mime_types = webplugin_info.mime_types;
+  pepper_info->permissions = webplugin_info.pepper_permissions;
+
   return true;
 }
 
@@ -122,15 +133,14 @@ PepperPluginRegistry* PepperPluginRegistry::GetInstance() {
 }
 
 // static
-void PepperPluginRegistry::ComputeList(
-    std::vector<content::PepperPluginInfo>* plugins) {
-  content::GetContentClient()->AddPepperPlugins(plugins);
+void PepperPluginRegistry::ComputeList(std::vector<PepperPluginInfo>* plugins) {
+  GetContentClient()->AddPepperPlugins(plugins);
   ComputePluginsFromCommandLine(plugins);
 }
 
 // static
 void PepperPluginRegistry::PreloadModules() {
-  std::vector<content::PepperPluginInfo> plugins;
+  std::vector<PepperPluginInfo> plugins;
   ComputeList(&plugins);
   for (size_t i = 0; i < plugins.size(); ++i) {
     if (!plugins[i].is_internal && plugins[i].is_sandboxed) {
@@ -145,7 +155,7 @@ void PepperPluginRegistry::PreloadModules() {
   }
 }
 
-const content::PepperPluginInfo* PepperPluginRegistry::GetInfoForPlugin(
+const PepperPluginInfo* PepperPluginRegistry::GetInfoForPlugin(
     const webkit::WebPluginInfo& info) {
   for (size_t i = 0; i < plugin_list_.size(); ++i) {
     if (info.path == plugin_list_[i].path)
@@ -156,7 +166,7 @@ const content::PepperPluginInfo* PepperPluginRegistry::GetInfoForPlugin(
   // is actually in |info| and we can use it to construct it and add it to
   // the list. This same deal needs to be done in the browser side in
   // PluginService.
-  content::PepperPluginInfo plugin;
+  PepperPluginInfo plugin;
   if (!MakePepperPluginInfo(info, &plugin))
     return NULL;
 
@@ -212,12 +222,13 @@ PepperPluginRegistry::PepperPluginRegistry() {
   // the initialized module, it will still try to unregister itself in its
   // destructor.
   for (size_t i = 0; i < plugin_list_.size(); i++) {
-    const content::PepperPluginInfo& current = plugin_list_[i];
+    const PepperPluginInfo& current = plugin_list_[i];
     if (current.is_out_of_process)
       continue;  // Out of process plugins need no special pre-initialization.
 
     scoped_refptr<webkit::ppapi::PluginModule> module =
-        new webkit::ppapi::PluginModule(current.name, current.path, this);
+        new webkit::ppapi::PluginModule(current.name, current.path, this,
+            ppapi::PpapiPermissions(current.permissions));
     AddLiveModule(current.path, module);
     if (current.is_internal) {
       if (!module->InitAsInternalPlugin(current.internal_entry_points)) {
@@ -235,3 +246,4 @@ PepperPluginRegistry::PepperPluginRegistry() {
   }
 }
 
+}  // namespace content

@@ -4,50 +4,21 @@
 
 #ifndef CHROME_BROWSER_UI_FIND_BAR_FIND_TAB_HELPER_H_
 #define CHROME_BROWSER_UI_FIND_BAR_FIND_TAB_HELPER_H_
-#pragma once
 
 #include "chrome/browser/ui/find_bar/find_bar_controller.h"
 #include "chrome/browser/ui/find_bar/find_notification_details.h"
 #include "content/public/browser/web_contents_observer.h"
+#include "content/public/browser/web_contents_user_data.h"
+
+namespace gfx {
+class RectF;
+}
 
 // Per-tab find manager. Handles dealing with the life cycle of find sessions.
-class FindTabHelper : public content::WebContentsObserver {
+class FindTabHelper : public content::WebContentsObserver,
+                      public content::WebContentsUserData<FindTabHelper> {
  public:
-
-#if defined(OS_ANDROID)
-  enum BlockingFindType {
-    FIND_NEXT,
-    FIND_ALL
-  };
-
-  enum BlockingFindDirection {
-    FORWARD_DIRECTION,
-    BACKWARD_DIRECTION
-  };
-#endif
-
-  explicit FindTabHelper(content::WebContents* web_contents);
   virtual ~FindTabHelper();
-
-#if defined(OS_ANDROID)
-  // If |find_type| is FIND_ALL finds all the occurrences of the search_string
-  // within the content of the page and returns the number of these
-  // occurrences. The occurrences are highlighted and the first match is
-  // highlighted with a different color.
-  //
-  // If |find_next| is true it moves the different color highlight to the
-  // next match and scrolls to it; |search_string| is ignored.
-  //
-  // This method is synchronous: in violation of the chrome design principles
-  // it will block waiting on the renderer and only return when a reply has
-  // been received from the renderer process.
-  //
-  // This is required for compatibility reasons to implement a
-  // method of the legacy Android Browser's WebView API
-  int BlockingFind(const string16& search_string,
-                   BlockingFindType find_type,
-                   BlockingFindDirection direction);
-#endif
 
   // Starts the Find operation by calling StartFinding on the Tab. This function
   // can be called from the outside as a result of hot-keys, so it uses the
@@ -59,19 +30,8 @@ class FindTabHelper : public content::WebContentsObserver {
                     bool forward_direction,
                     bool case_sensitive);
 
-#if defined(OS_ANDROID)
-  // Selects and zooms to the nearest find result to the point (x,y), where
-  // x and y are fractions of the content document's width and height.
-  void ActivateNearestFindResult(float x, float y);
-#endif
-
   // Stops the current Find operation.
   void StopFinding(FindBarController::SelectionAction selection_action);
-
-#if defined(OS_ANDROID)
-  // Asks the renderer to send the bounding boxes of the current find matches.
-  void RequestFindMatchRects(int have_version);
-#endif
 
   // Accessors/Setters for find_ui_active_.
   bool find_ui_active() const { return find_ui_active_; }
@@ -90,7 +50,7 @@ class FindTabHelper : public content::WebContentsObserver {
     current_find_request_id_ = current_find_request_id;
   }
 
-  // Accessor for find_text_. Used to determine if this TabContents has any
+  // Accessor for find_text_. Used to determine if this WebContents has any
   // active searches.
   string16 find_text() const { return find_text_; }
 
@@ -102,6 +62,15 @@ class FindTabHelper : public content::WebContentsObserver {
     return last_search_result_;
   }
 
+#if defined(OS_ANDROID)
+  // Selects and zooms to the find result nearest to the point (x,y)
+  // defined in find-in-page coordinates.
+  void ActivateNearestFindResult(float x, float y);
+
+  // Asks the renderer to send the rects of the current find matches.
+  void RequestFindMatchRects(int current_version);
+#endif
+
   void HandleFindReply(int request_id,
                        int number_of_matches,
                        const gfx::Rect& selection_rect,
@@ -109,11 +78,8 @@ class FindTabHelper : public content::WebContentsObserver {
                        bool final_update);
 
  private:
-  // Notify the UI, automation and any other observers that a find result was
-  // found.
-  void SendFindNotification(int request_id, int match_count,
-                            gfx::Rect selection, int ordinal,
-                            bool final_update);
+  explicit FindTabHelper(content::WebContents* web_contents);
+  friend class content::WebContentsUserData<FindTabHelper>;
 
   // Each time a search request comes in we assign it an id before passing it
   // over the IPC so that when the results come in we can evaluate whether we

@@ -1,15 +1,23 @@
-// Copyright (c) 2011 The Chromium Authors. All rights reserved.
+// Copyright (c) 2012 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
 #include "content/renderer/renderer_main_platform_delegate.h"
 
+#include <errno.h>
+#include <sys/stat.h>
+
 #include "base/command_line.h"
-#include "content/common/seccomp_sandbox.h"
+#include "base/file_util.h"
+#include "base/logging.h"
+#include "content/common/sandbox_linux.h"
 #include "content/public/common/content_switches.h"
+#include "content/public/common/sandbox_init.h"
+
+namespace content {
 
 RendererMainPlatformDelegate::RendererMainPlatformDelegate(
-    const content::MainFunctionParams& parameters)
+    const MainFunctionParams& parameters)
     : parameters_(parameters) {
 }
 
@@ -32,19 +40,47 @@ bool RendererMainPlatformDelegate::EnableSandbox() {
   // The setuid sandbox is started in the zygote process: zygote_main_linux.cc
   // http://code.google.com/p/chromium/wiki/LinuxSUIDSandbox
   //
-  // The seccomp sandbox is started in the renderer.
-  // http://code.google.com/p/seccompsandbox/
-#if defined(SECCOMP_SANDBOX)
-  // N.b. SupportsSeccompSandbox() returns a cached result, as we already
-  // called it earlier in the zygote. Thus, it is OK for us to not pass in
-  // a file descriptor for "/proc".
-  if (SeccompSandboxEnabled() && SupportsSeccompSandbox(-1))
-    StartSeccompSandbox();
-#endif
+  // The seccomp sandbox mode 1 (sandbox/linux/seccomp-legacy) and mode 2
+  // (sandbox/linux/seccomp-bpf) are started in InitializeSandbox().
+  InitializeSandbox();
   return true;
 }
 
-void RendererMainPlatformDelegate::RunSandboxTests() {
-  // The sandbox is started in the zygote process: zygote_main_linux.cc
-  // http://code.google.com/p/chromium/wiki/LinuxSUIDSandbox
+void RendererMainPlatformDelegate::RunSandboxTests(bool no_sandbox) {
+  // The LinuxSandbox class requires going through initialization before
+  // GetStatus() and others can be used.  When we are not launched through the
+  // Zygote, this initialization will only happen in the renderer process if
+  // EnableSandbox() above is called, which it won't necesserily be.
+  // This only happens with flags such as --renderer-cmd-prefix which are
+  // for debugging.
+  if (no_sandbox)
+    return;
+
+  // about:sandbox uses a value returned from LinuxSandbox::GetStatus() before
+  // any renderer has been started.
+  // Here, we test that the status of SeccompBpf in the renderer is consistent
+  // with what LinuxSandbox::GetStatus() said we would do.
+  class LinuxSandbox* linux_sandbox = LinuxSandbox::GetInstance();
+  if (linux_sandbox->GetStatus() & kSandboxLinuxSeccompBpf) {
+    CHECK(linux_sandbox->seccomp_bpf_started());
+  }
+
+  // Under the setuid sandbox, we should not be able to open any file via the
+  // filesystem.
+  if (linux_sandbox->GetStatus() & kSandboxLinuxSUID) {
+    CHECK(!file_util::PathExists(FilePath("/proc/cpuinfo")));
+  }
+
+#if defined(__x86_64__)
+  // Limit this test to architectures where seccomp BPF is active in renderers.
+  if (linux_sandbox->seccomp_bpf_started()) {
+    errno = 0;
+    // This should normally return EBADF since the first argument is bogus,
+    // but we know that under the seccomp-bpf sandbox, this should return EPERM.
+    CHECK_EQ(fchmod(-1, 07777), -1);
+    CHECK_EQ(errno, EPERM);
+  }
+#endif  // __x86_64__
 }
+
+}  // namespace content

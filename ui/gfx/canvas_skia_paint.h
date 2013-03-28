@@ -1,32 +1,23 @@
-// Copyright (c) 2011 The Chromium Authors. All rights reserved.
+// Copyright (c) 2012 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
 #ifndef UI_GFX_CANVAS_SKIA_PAINT_H_
 #define UI_GFX_CANVAS_SKIA_PAINT_H_
-#pragma once
 
-#include "skia/ext/canvas_paint.h"
-#include "ui/gfx/canvas_skia.h"
+// This file provides an easy way to include the appropriate CanvasPaint
+// header file on your platform.
 
-// Define a gfx::CanvasSkiaPaint type that wraps our gfx::Canvas like the
-// skia::PlatformCanvasPaint wraps PlatformCanvas.
-
-namespace skia {
-
-template<> inline
-PlatformCanvas* GetPlatformCanvas(skia::CanvasPaintT<gfx::CanvasSkia>* canvas) {
-  PlatformCanvas* platform_canvas = canvas->platform_canvas();
-  DCHECK(platform_canvas);
-  return platform_canvas;
-}
-
-}  // namespace skia
-
-namespace gfx {
-
-typedef skia::CanvasPaintT<CanvasSkia> CanvasSkiaPaint;
-
-}  // namespace gfx
+#if defined(WIN32)
+#include "ui/gfx/canvas_paint_win.h"
+#elif defined(__APPLE__)
+#include "ui/gfx/canvas_paint_mac.h"
+#elif defined(__linux__) || defined(__FreeBSD__) || defined(__OpenBSD__) || defined(__sun)
+#if defined(TOOLKIT_GTK)
+#include "ui/gfx/canvas_paint_gtk.h"
+#else
+#error "No canvas paint for this platform"
+#endif
+#endif
 
 #endif  // UI_GFX_CANVAS_SKIA_PAINT_H_

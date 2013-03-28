@@ -1,4 +1,4 @@
-// Copyright (c) 2011 The Chromium Authors. All rights reserved.
+// Copyright (c) 2012 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -53,6 +53,8 @@ enum IdNamespaces {
   kProgramsAndShaders,
   kRenderbuffers,
   kTextures,
+  kQueries,
+  kVertexArrays,
   kNumIdNamespaces
 };
 
@@ -135,6 +137,17 @@ struct ProgramInfoHeader {
   uint32 num_attribs;
   uint32 num_uniforms;
   // ProgramInput inputs[num_attribs + num_uniforms];
+};
+
+// The format of QuerySync used by EXT_occlusion_query_boolean
+struct QuerySync {
+  void Reset() {
+    process_count = 0;
+    result = 0;
+  }
+
+  uint32 process_count;
+  uint64 result;
 };
 
 COMPILE_ASSERT(sizeof(ProgramInput) == 20, ProgramInput_size_not_20);

@@ -1,4 +1,4 @@
-// Copyright (c) 2011 The Chromium Authors. All rights reserved.
+// Copyright (c) 2012 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -10,6 +10,7 @@
 #include "ui/views/controls/menu/menu_controller.h"
 #include "ui/views/controls/menu/menu_controller_delegate.h"
 #include "ui/views/controls/menu/menu_delegate.h"
+#include "ui/views/widget/widget.h"
 
 #if defined(OS_WIN)
 #include "base/win/win_util.h"
@@ -28,6 +29,8 @@ class MenuRunnerImpl : public internal::MenuControllerDelegate {
   explicit MenuRunnerImpl(MenuItemView* menu);
 
   MenuItemView* menu() { return menu_; }
+
+  bool running() const { return running_; }
 
   // See description above class for details.
   void Release();
@@ -158,20 +161,24 @@ MenuRunner::RunResult MenuRunnerImpl::RunMenuAt(
   running_ = true;
   for_drop_ = (types & MenuRunner::FOR_DROP) != 0;
   bool has_mnemonics = (types & MenuRunner::HAS_MNEMONICS) != 0 && !for_drop_;
-  menu_->PrepareForRun(has_mnemonics,
-                       !for_drop_ && ShouldShowMnemonics(button));
-  int mouse_event_flags = 0;
   owns_controller_ = false;
   if (!controller) {
     // No menus are showing, show one.
-    controller = new MenuController(!for_drop_, this);
+    ui::NativeTheme* theme = parent ? parent->GetNativeTheme() :
+        ui::NativeTheme::instance();
+    controller = new MenuController(theme, !for_drop_, this);
     owns_controller_ = true;
   }
   controller_ = controller;
   menu_->set_controller(controller_);
+  menu_->PrepareForRun(owns_controller_,
+                       has_mnemonics,
+                       !for_drop_ && ShouldShowMnemonics(button));
 
   // Run the loop.
+  int mouse_event_flags = 0;
   MenuItemView* result = controller->Run(parent, button, menu_, bounds, anchor,
+                                        (types & MenuRunner::CONTEXT_MENU) != 0,
                                          &mouse_event_flags);
 
   if (for_drop_) {
@@ -238,13 +245,22 @@ bool MenuRunnerImpl::ShouldShowMnemonics(MenuButton* button) {
   // Show mnemonics if the button has focus or alt is pressed.
   bool show_mnemonics = button ? button->HasFocus() : false;
 #if defined(OS_WIN)
-  // We don't currently need this on gtk as showing the menu gives focus to the
-  // button first.
+  // This is only needed on Windows.
   if (!show_mnemonics)
     show_mnemonics = base::win::IsAltPressed();
 #endif
   return show_mnemonics;
 }
+
+// In theory we could implement this every where, but for now we're only
+// implementing it on aura.
+#if !defined(USE_AURA)
+// static
+DisplayChangeListener* DisplayChangeListener::Create(Widget* widget,
+                                                     MenuRunner* runner) {
+  return NULL;
+}
+#endif
 
 }  // namespace internal
 
@@ -265,7 +281,22 @@ MenuRunner::RunResult MenuRunner::RunMenuAt(Widget* parent,
                                             const gfx::Rect& bounds,
                                             MenuItemView::AnchorPosition anchor,
                                             int32 types) {
+  // The parent of the nested menu will have created a DisplayChangeListener, so
+  // we avoid creating a DisplayChangeListener if nested. Drop menus are
+  // transient, so we don't cancel in that case.
+  if ((types & (IS_NESTED | FOR_DROP)) == 0) {
+    display_change_listener_.reset(
+        internal::DisplayChangeListener::Create(parent, this));
+  }
+  if ((types & MenuRunner::CONTEXT_MENU) && parent && parent->GetCurrentEvent())
+    anchor = parent->GetCurrentEvent()->IsGestureEvent() ?
+        MenuItemView::BOTTOMCENTER : MenuItemView::TOPLEFT;
+
   return holder_->RunMenuAt(parent, button, bounds, anchor, types);
+}
+
+bool MenuRunner::IsRunning() const {
+  return holder_->running();
 }
 
 void MenuRunner::Cancel() {

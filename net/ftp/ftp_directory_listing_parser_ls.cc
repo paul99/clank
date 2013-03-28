@@ -1,4 +1,4 @@
-// Copyright (c) 2011 The Chromium Authors. All rights reserved.
+// Copyright (c) 2012 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -16,62 +16,51 @@
 
 namespace {
 
-bool LooksLikeUnixPermission(const string16& text) {
-  if (text.length() != 3)
+bool TwoColumnDateListingToTime(const string16& date,
+                                const string16& time,
+                                base::Time* result) {
+  base::Time::Exploded time_exploded = { 0 };
+
+  // Date should be in format YYYY-MM-DD.
+  std::vector<string16> date_parts;
+  base::SplitString(date, '-', &date_parts);
+  if (date_parts.size() != 3)
+    return false;
+  if (!base::StringToInt(date_parts[0], &time_exploded.year))
+    return false;
+  if (!base::StringToInt(date_parts[1], &time_exploded.month))
+    return false;
+  if (!base::StringToInt(date_parts[2], &time_exploded.day_of_month))
     return false;
 
-  // Meaning of the flags:
-  // r - file is readable
-  // w - file is writable
-  // x - file is executable
-  // s or S - setuid/setgid bit set
-  // t or T - "sticky" bit set
-  return ((text[0] == 'r' || text[0] == '-') &&
-          (text[1] == 'w' || text[1] == '-') &&
-          (text[2] == 'x' || text[2] == 's' || text[2] == 'S' ||
-           text[2] == 't' || text[2] == 'T' || text[2] == '-'));
-}
-
-bool LooksLikeUnixPermissionsListing(const string16& text) {
-  if (text.length() < 7)
+  // Time should be in format HH:MM
+  if (time.length() != 5)
     return false;
 
-  // Do not check the first character (entry type). There are many weird
-  // servers that use special file types (for example Plan9 and append-only
-  // files). Fortunately, the rest of the permission listing is more consistent.
-
-  // Do not check the rest of the string. Some servers fail to properly
-  // separate this column from the next column (number of links), resulting
-  // in additional characters at the end. Also, sometimes there is a "+"
-  // sign at the end indicating the file has ACLs set.
-
-  // In fact, we don't even expect three "rwx" triplets of permission
-  // listing, as some FTP servers like Hylafax only send two.
-  return (LooksLikeUnixPermission(text.substr(1, 3)) &&
-          LooksLikeUnixPermission(text.substr(4, 3)));
-}
-
-bool LooksLikePermissionDeniedError(const string16& text) {
-  // Try to recognize a three-part colon-separated error message:
-  //
-  //   1. ftpd server name
-  //   2. directory name (often just ".")
-  //   3. message text (usually "Permission denied")
-  std::vector<string16> parts;
-  base::SplitString(CollapseWhitespace(text, false), ':', &parts);
-
-  if (parts.size() != 3)
+  std::vector<string16> time_parts;
+  base::SplitString(time, ':', &time_parts);
+  if (time_parts.size() != 2)
+    return false;
+  if (!base::StringToInt(time_parts[0], &time_exploded.hour))
+    return false;
+  if (!base::StringToInt(time_parts[1], &time_exploded.minute))
+    return false;
+  if (!time_exploded.HasValidValues())
     return false;
 
-  return parts[2].find(ASCIIToUTF16("Permission denied")) != string16::npos;
+  // We don't know the time zone of the server, so just use local time.
+  *result = base::Time::FromLocalExploded(time_exploded);
+  return true;
 }
 
 // Returns the column index of the end of the date listing and detected
 // last modification time.
-bool DetectColumnOffsetAndModificationTime(const std::vector<string16>& columns,
-                                           const base::Time& current_time,
-                                           size_t* offset,
-                                           base::Time* modification_time) {
+bool DetectColumnOffsetSizeAndModificationTime(
+    const std::vector<string16>& columns,
+    const base::Time& current_time,
+    size_t* offset,
+    string16* size,
+    base::Time* modification_time) {
   // The column offset can be arbitrarily large if some fields
   // like owner or group name contain spaces. Try offsets from left to right
   // and use the first one that matches a date listing.
@@ -94,6 +83,7 @@ bool DetectColumnOffsetAndModificationTime(const std::vector<string16>& columns,
                                           columns[i],
                                           current_time,
                                           modification_time)) {
+      *size = columns[i - 3];
       *offset = i;
       return true;
     }
@@ -108,6 +98,18 @@ bool DetectColumnOffsetAndModificationTime(const std::vector<string16>& columns,
                                           columns[i],
                                           current_time,
                                           modification_time)) {
+      *size = columns[i - 3];
+      *offset = i;
+      return true;
+    }
+  }
+
+  // Some FTP listings use a different date format.
+  for (size_t i = 5U; i < columns.size(); i++) {
+    if (TwoColumnDateListingToTime(columns[i - 1],
+                                   columns[i],
+                                   modification_time)) {
+      *size = columns[i - 2];
       *offset = i;
       return true;
     }
@@ -143,8 +145,8 @@ bool ParseFtpDirectoryListingLs(
     if (columns.size() == 2 && !received_total_line) {
       received_total_line = true;
 
-      int total_number;
-      if (!base::StringToInt(columns[1], &total_number))
+      int64 total_number;
+      if (!base::StringToInt64(columns[1], &total_number))
         return false;
       if (total_number < 0)
         return false;
@@ -155,30 +157,34 @@ bool ParseFtpDirectoryListingLs(
     FtpDirectoryListingEntry entry;
 
     size_t column_offset;
-    if (!DetectColumnOffsetAndModificationTime(columns,
-                                               current_time,
-                                               &column_offset,
-                                               &entry.last_modified)) {
-      // If we can't recognize a normal listing line, maybe it's an error?
-      // In that case, just ignore the error, but still recognize the data
-      // as valid listing.
-      if (LooksLikePermissionDeniedError(lines[i]))
+    string16 size;
+    if (!DetectColumnOffsetSizeAndModificationTime(columns,
+                                                   current_time,
+                                                   &column_offset,
+                                                   &size,
+                                                   &entry.last_modified)) {
+      // Some servers send a message in one of the first few lines.
+      // All those messages have in common is the string ".:",
+      // where "." means the current directory, and ":" separates it
+      // from the rest of the message, which may be empty.
+      if (lines[i].find(ASCIIToUTF16(".:")) != string16::npos)
         continue;
 
       return false;
     }
 
-    if (!LooksLikeUnixPermissionsListing(columns[0]))
-      return false;
-    if (columns[0][0] == 'l') {
+    // Do not check "validity" of the permission listing. It's quirky,
+    // and some servers send garbage here while other parts of the line are OK.
+
+    if (!columns[0].empty() && columns[0][0] == 'l') {
       entry.type = FtpDirectoryListingEntry::SYMLINK;
-    } else if (columns[0][0] == 'd') {
+    } else if (!columns[0].empty() && columns[0][0] == 'd') {
       entry.type = FtpDirectoryListingEntry::DIRECTORY;
     } else {
       entry.type = FtpDirectoryListingEntry::FILE;
     }
 
-    if (!base::StringToInt64(columns[column_offset - 3], &entry.size)) {
+    if (!base::StringToInt64(size, &entry.size)) {
       // Some FTP servers do not separate owning group name from file size,
       // like "group1234". We still want to display the file name for that
       // entry, but can't really get the size (What if the group is named

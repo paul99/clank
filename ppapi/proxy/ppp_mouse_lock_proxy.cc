@@ -1,4 +1,4 @@
-// Copyright (c) 2011 The Chromium Authors. All rights reserved.
+// Copyright (c) 2012 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -7,12 +7,14 @@
 #include "ppapi/c/ppp_mouse_lock.h"
 #include "ppapi/proxy/host_dispatcher.h"
 #include "ppapi/proxy/ppapi_messages.h"
+#include "ppapi/shared_impl/proxy_lock.h"
 
 namespace ppapi {
 namespace proxy {
 
 namespace {
 
+#if !defined(OS_NACL)
 void MouseLockLost(PP_Instance instance) {
   HostDispatcher* dispatcher = HostDispatcher::GetForInstance(instance);
   if (!dispatcher) {
@@ -28,6 +30,10 @@ void MouseLockLost(PP_Instance instance) {
 static const PPP_MouseLock mouse_lock_interface = {
   &MouseLockLost
 };
+#else
+// The NaCl plugin doesn't need the host side interface - stub it out.
+static const PPP_MouseLock mouse_lock_interface = {};
+#endif  // !defined(OS_NACL)
 
 InterfaceProxy* CreateMouseLockProxy(Dispatcher* dispatcher) {
   return new PPP_MouseLock_Proxy(dispatcher);
@@ -60,6 +66,9 @@ const InterfaceProxy::Info* PPP_MouseLock_Proxy::GetInfo() {
 }
 
 bool PPP_MouseLock_Proxy::OnMessageReceived(const IPC::Message& msg) {
+  if (!dispatcher()->IsPlugin())
+    return false;
+
   bool handled = true;
   IPC_BEGIN_MESSAGE_MAP(PPP_MouseLock_Proxy, msg)
     IPC_MESSAGE_HANDLER(PpapiMsg_PPPMouseLock_MouseLockLost,
@@ -71,7 +80,7 @@ bool PPP_MouseLock_Proxy::OnMessageReceived(const IPC::Message& msg) {
 
 void PPP_MouseLock_Proxy::OnMsgMouseLockLost(PP_Instance instance) {
   if (ppp_mouse_lock_impl_)
-    ppp_mouse_lock_impl_->MouseLockLost(instance);
+    CallWhileUnlocked(ppp_mouse_lock_impl_->MouseLockLost, instance);
 }
 
 }  // namespace proxy

@@ -4,12 +4,9 @@
 
 #ifndef ASH_WM_DIALOG_FRAME_VIEW_H_
 #define ASH_WM_DIALOG_FRAME_VIEW_H_
-#pragma once
 
 #include "ui/views/controls/button/button.h"
 #include "ui/views/window/non_client_view.h"
-
-class SkBitmap;
 
 namespace gfx {
 class Font;
@@ -41,6 +38,7 @@ class DialogFrameView : public views::NonClientFrameView,
                              gfx::Path* window_mask) OVERRIDE;
   virtual void ResetWindowControls() OVERRIDE;
   virtual void UpdateWindowIcon() OVERRIDE;
+  virtual void UpdateWindowTitle() OVERRIDE;
 
   // Overridden from View:
   virtual std::string GetClassName() const OVERRIDE;
@@ -49,17 +47,16 @@ class DialogFrameView : public views::NonClientFrameView,
 
   // Overridden from views::ButtonListener:
   virtual void ButtonPressed(views::Button* sender,
-                             const views::Event& event) OVERRIDE;
+                             const ui::Event& event) OVERRIDE;
 
  private:
   gfx::Insets GetPaddingInsets() const;
   gfx::Insets GetClientInsets() const;
 
+  scoped_ptr<gfx::Font> title_font_;
   gfx::Rect title_display_rect_;
 
   views::ImageButton* close_button_;
-
-  static gfx::Font* title_font_;
 
   DISALLOW_COPY_AND_ASSIGN(DialogFrameView);
 };

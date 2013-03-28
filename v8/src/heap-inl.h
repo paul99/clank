@@ -1,4 +1,4 @@
-// Copyright 2011 the V8 project authors. All rights reserved.
+// Copyright 2012 the V8 project authors. All rights reserved.
 // Redistribution and use in source and binary forms, with or without
 // modification, are permitted provided that the following conditions are
 // met:
@@ -32,6 +32,7 @@
 #include "isolate.h"
 #include "list-inl.h"
 #include "objects.h"
+#include "platform.h"
 #include "v8-counters.h"
 #include "store-buffer.h"
 #include "store-buffer-inl.h"
@@ -84,13 +85,16 @@ void PromotionQueue::ActivateGuardIfOnTheSamePage() {
 MaybeObject* Heap::AllocateStringFromUtf8(Vector<const char> str,
                                           PretenureFlag pretenure) {
   // Check for ASCII first since this is the common case.
-  if (String::IsAscii(str.start(), str.length())) {
+  const char* start = str.start();
+  int length = str.length();
+  int non_ascii_start = String::NonAsciiStart(start, length);
+  if (non_ascii_start >= length) {
     // If the string is ASCII, we do not need to convert the characters
     // since UTF8 is backwards compatible with ASCII.
-    return AllocateStringFromAscii(str, pretenure);
+    return AllocateStringFromOneByte(str, pretenure);
   }
   // Non-ASCII and we need to decode.
-  return AllocateStringFromUtf8Slow(str, pretenure);
+  return AllocateStringFromUtf8Slow(str, non_ascii_start, pretenure);
 }
 
 
@@ -105,12 +109,12 @@ MaybeObject* Heap::AllocateSymbol(Vector<const char> str,
 
 MaybeObject* Heap::AllocateAsciiSymbol(Vector<const char> str,
                                        uint32_t hash_field) {
-  if (str.length() > SeqAsciiString::kMaxLength) {
+  if (str.length() > SeqOneByteString::kMaxLength) {
     return Failure::OutOfMemoryException();
   }
   // Compute map and object size.
   Map* map = ascii_symbol_map();
-  int size = SeqAsciiString::SizeFor(str.length());
+  int size = SeqOneByteString::SizeFor(str.length());
 
   // Allocate string.
   Object* result;
@@ -130,7 +134,7 @@ MaybeObject* Heap::AllocateAsciiSymbol(Vector<const char> str,
   ASSERT_EQ(size, answer->Size());
 
   // Fill in the characters.
-  memcpy(answer->address() + SeqAsciiString::kHeaderSize,
+  memcpy(answer->address() + SeqOneByteString::kHeaderSize,
          str.start(), str.length());
 
   return answer;
@@ -266,13 +270,6 @@ MaybeObject* Heap::AllocateRawMap() {
 #endif
   MaybeObject* result = map_space_->AllocateRaw(Map::kSize);
   if (result->IsFailure()) old_gen_exhausted_ = true;
-#ifdef DEBUG
-  if (!result->IsFailure()) {
-    // Maps have their own alignment.
-    CHECK((reinterpret_cast<intptr_t>(result) & kMapAlignmentMask) ==
-          static_cast<intptr_t>(kHeapObjectTag));
-  }
-#endif
   return result;
 }
 
@@ -459,17 +456,20 @@ MaybeObject* Heap::PrepareForCompare(String* str) {
 }
 
 
-int Heap::AdjustAmountOfExternalAllocatedMemory(int change_in_bytes) {
+intptr_t Heap::AdjustAmountOfExternalAllocatedMemory(
+    intptr_t change_in_bytes) {
   ASSERT(HasBeenSetUp());
-  int amount = amount_of_external_allocated_memory_ + change_in_bytes;
-  if (change_in_bytes >= 0) {
+  intptr_t amount = amount_of_external_allocated_memory_ + change_in_bytes;
+  if (change_in_bytes > 0) {
     // Avoid overflow.
     if (amount > amount_of_external_allocated_memory_) {
       amount_of_external_allocated_memory_ = amount;
+    } else {
+      // Give up and reset the counters in case of an overflow.
+      amount_of_external_allocated_memory_ = 0;
+      amount_of_external_allocated_memory_at_last_global_gc_ = 0;
     }
-    int amount_since_last_global_gc =
-        amount_of_external_allocated_memory_ -
-        amount_of_external_allocated_memory_at_last_global_gc_;
+    intptr_t amount_since_last_global_gc = PromotedExternalMemorySize();
     if (amount_since_last_global_gc > external_allocation_limit_) {
       CollectAllGarbage(kNoGCFlags, "external memory allocation limit reached");
     }
@@ -477,7 +477,18 @@ int Heap::AdjustAmountOfExternalAllocatedMemory(int change_in_bytes) {
     // Avoid underflow.
     if (amount >= 0) {
       amount_of_external_allocated_memory_ = amount;
+    } else {
+      // Give up and reset the counters in case of an overflow.
+      amount_of_external_allocated_memory_ = 0;
+      amount_of_external_allocated_memory_at_last_global_gc_ = 0;
     }
+  }
+  if (FLAG_trace_external_memory) {
+    PrintPID("%8.0f ms: ", isolate()->time_millis_since_init());
+    PrintF("Adjust amount of external memory: delta=%6" V8_PTR_PREFIX "d KB, "
+           " amount=%6" V8_PTR_PREFIX "d KB, isolate=0x%08" V8PRIxPTR ".\n",
+           change_in_bytes / 1024, amount_of_external_allocated_memory_ / 1024,
+           reinterpret_cast<intptr_t>(isolate()));
   }
   ASSERT(amount_of_external_allocated_memory_ >= 0);
   return amount_of_external_allocated_memory_;
@@ -593,12 +604,24 @@ void ExternalStringTable::Iterate(ObjectVisitor* v) {
 void ExternalStringTable::Verify() {
 #ifdef DEBUG
   for (int i = 0; i < new_space_strings_.length(); ++i) {
-    ASSERT(heap_->InNewSpace(new_space_strings_[i]));
-    ASSERT(new_space_strings_[i] != HEAP->raw_unchecked_the_hole_value());
+    Object* obj = Object::cast(new_space_strings_[i]);
+    // TODO(yangguo): check that the object is indeed an external string.
+    ASSERT(heap_->InNewSpace(obj));
+    ASSERT(obj != HEAP->the_hole_value());
+    if (obj->IsExternalAsciiString()) {
+      ExternalAsciiString* string = ExternalAsciiString::cast(obj);
+      ASSERT(String::IsAscii(string->GetChars(), string->length()));
+    }
   }
   for (int i = 0; i < old_space_strings_.length(); ++i) {
-    ASSERT(!heap_->InNewSpace(old_space_strings_[i]));
-    ASSERT(old_space_strings_[i] != HEAP->raw_unchecked_the_hole_value());
+    Object* obj = Object::cast(old_space_strings_[i]);
+    // TODO(yangguo): check that the object is indeed an external string.
+    ASSERT(!heap_->InNewSpace(obj));
+    ASSERT(obj != HEAP->the_hole_value());
+    if (obj->IsExternalAsciiString()) {
+      ExternalAsciiString* string = ExternalAsciiString::cast(obj);
+      ASSERT(String::IsAscii(string->GetChars(), string->length()));
+    }
   }
 #endif
 }
@@ -613,9 +636,11 @@ void ExternalStringTable::AddOldString(String* string) {
 
 void ExternalStringTable::ShrinkNewStrings(int position) {
   new_space_strings_.Rewind(position);
+#ifdef VERIFY_HEAP
   if (FLAG_verify_heap) {
     Verify();
   }
+#endif
 }
 
 
@@ -658,15 +683,15 @@ double TranscendentalCache::SubCache::Calculate(double input) {
     case ATAN:
       return atan(input);
     case COS:
-      return cos(input);
+      return fast_cos(input);
     case EXP:
       return exp(input);
     case LOG:
-      return log(input);
+      return fast_log(input);
     case SIN:
-      return sin(input);
+      return fast_sin(input);
     case TAN:
-      return tan(input);
+      return fast_tan(input);
     default:
       return 0.0;  // Never happens.
   }
@@ -698,9 +723,89 @@ MaybeObject* TranscendentalCache::SubCache::Get(double input) {
 }
 
 
-Heap* _inline_get_heap_() {
-  return HEAP;
+AlwaysAllocateScope::AlwaysAllocateScope() {
+  // We shouldn't hit any nested scopes, because that requires
+  // non-handle code to call handle code. The code still works but
+  // performance will degrade, so we want to catch this situation
+  // in debug mode.
+  ASSERT(HEAP->always_allocate_scope_depth_ == 0);
+  HEAP->always_allocate_scope_depth_++;
 }
+
+
+AlwaysAllocateScope::~AlwaysAllocateScope() {
+  HEAP->always_allocate_scope_depth_--;
+  ASSERT(HEAP->always_allocate_scope_depth_ == 0);
+}
+
+
+void VerifyPointersVisitor::VisitPointers(Object** start, Object** end) {
+  for (Object** current = start; current < end; current++) {
+    if ((*current)->IsHeapObject()) {
+      HeapObject* object = HeapObject::cast(*current);
+      CHECK(HEAP->Contains(object));
+      CHECK(object->map()->IsMap());
+    }
+  }
+}
+
+
+double GCTracer::SizeOfHeapObjects() {
+  return (static_cast<double>(HEAP->SizeOfObjects())) / MB;
+}
+
+
+DisallowAllocationFailure::DisallowAllocationFailure() {
+#ifdef DEBUG
+  old_state_ = HEAP->disallow_allocation_failure_;
+  HEAP->disallow_allocation_failure_ = true;
+#endif
+}
+
+
+DisallowAllocationFailure::~DisallowAllocationFailure() {
+#ifdef DEBUG
+  HEAP->disallow_allocation_failure_ = old_state_;
+#endif
+}
+
+
+#ifdef DEBUG
+AssertNoAllocation::AssertNoAllocation() {
+  Isolate* isolate = ISOLATE;
+  active_ = !isolate->optimizing_compiler_thread()->IsOptimizerThread();
+  if (active_) {
+    old_state_ = isolate->heap()->allow_allocation(false);
+  }
+}
+
+
+AssertNoAllocation::~AssertNoAllocation() {
+  if (active_) HEAP->allow_allocation(old_state_);
+}
+
+
+DisableAssertNoAllocation::DisableAssertNoAllocation() {
+  Isolate* isolate = ISOLATE;
+  active_ = !isolate->optimizing_compiler_thread()->IsOptimizerThread();
+  if (active_) {
+    old_state_ = isolate->heap()->allow_allocation(true);
+  }
+}
+
+
+DisableAssertNoAllocation::~DisableAssertNoAllocation() {
+  if (active_) HEAP->allow_allocation(old_state_);
+}
+
+#else
+
+AssertNoAllocation::AssertNoAllocation() { }
+AssertNoAllocation::~AssertNoAllocation() { }
+DisableAssertNoAllocation::DisableAssertNoAllocation() { }
+DisableAssertNoAllocation::~DisableAssertNoAllocation() { }
+
+#endif
 
 
 } }  // namespace v8::internal

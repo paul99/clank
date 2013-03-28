@@ -4,7 +4,8 @@
 
 #ifndef NET_DNS_DNS_SESSION_H_
 #define NET_DNS_DNS_SESSION_H_
-#pragma once
+
+#include <vector>
 
 #include "base/memory/ref_counted.h"
 #include "base/memory/scoped_ptr.h"
@@ -12,6 +13,8 @@
 #include "net/base/net_export.h"
 #include "net/base/rand_callback.h"
 #include "net/dns/dns_config_service.h"
+#include "net/dns/dns_socket_pool.h"
+#include "net/udp/datagram_client_socket.h"
 
 namespace net {
 
@@ -26,15 +29,30 @@ class NET_EXPORT_PRIVATE DnsSession
  public:
   typedef base::Callback<int()> RandCallback;
 
+  class NET_EXPORT_PRIVATE SocketLease {
+   public:
+    SocketLease(scoped_refptr<DnsSession> session,
+                unsigned server_index,
+                scoped_ptr<DatagramClientSocket> socket);
+    ~SocketLease();
+
+    DatagramClientSocket* socket() { return socket_.get(); }
+
+   private:
+    scoped_refptr<DnsSession> session_;
+    unsigned server_index_;
+    scoped_ptr<DatagramClientSocket> socket_;
+
+    DISALLOW_COPY_AND_ASSIGN(SocketLease);
+  };
+
   DnsSession(const DnsConfig& config,
-             ClientSocketFactory* factory,
+             scoped_ptr<DnsSocketPool> socket_pool,
              const RandIntCallback& rand_int_callback,
              NetLog* net_log);
 
   const DnsConfig& config() const { return config_; }
   NetLog* net_log() const { return net_log_; }
-
-  ClientSocketFactory* socket_factory() { return socket_factory_.get(); }
 
   // Return the next random query ID.
   int NextQueryId() const;
@@ -45,12 +63,21 @@ class NET_EXPORT_PRIVATE DnsSession
   // Return the timeout for the next query.
   base::TimeDelta NextTimeout(int attempt);
 
+  // Allocate a socket, already connected to the server address.
+  // When the SocketLease is destroyed, the socket will be freed.
+  scoped_ptr<SocketLease> AllocateSocket(unsigned server_index,
+                                         const NetLog::Source& source);
+
  private:
   friend class base::RefCounted<DnsSession>;
   ~DnsSession();
 
+  // Release a socket.
+  void FreeSocket(unsigned server_index,
+                  scoped_ptr<DatagramClientSocket> socket);
+
   const DnsConfig config_;
-  scoped_ptr<ClientSocketFactory> socket_factory_;
+  scoped_ptr<DnsSocketPool> socket_pool_;
   RandCallback rand_callback_;
   NetLog* net_log_;
 
@@ -59,7 +86,6 @@ class NET_EXPORT_PRIVATE DnsSession
 
   // TODO(szym): Add current RTT estimate.
   // TODO(szym): Add TCP connection pool to support DNS over TCP.
-  // TODO(szym): Add UDP port pool to avoid NAT table overload.
 
   DISALLOW_COPY_AND_ASSIGN(DnsSession);
 };
@@ -67,4 +93,3 @@ class NET_EXPORT_PRIVATE DnsSession
 }  // namespace net
 
 #endif  // NET_DNS_DNS_SESSION_H_
-

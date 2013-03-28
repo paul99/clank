@@ -1,15 +1,12 @@
-// Copyright (c) 2011 The Chromium Authors. All rights reserved.
+// Copyright (c) 2012 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
 #include "chrome/browser/ui/tabs/dock_info.h"
 
+#include <stdlib.h>
+
 #include "base/logging.h"
-#if defined(TOOLKIT_VIEWS)
-#include "chrome/browser/ui/views/tabs/tab.h"
-#elif !defined(OS_ANDROID)
-#include "chrome/browser/ui/gtk/tabs/tab_gtk.h"
-#endif
 
 namespace {
 
@@ -22,9 +19,6 @@ const int kPopupWidth = 70;
 const int kPopupHeight = 70;
 
 }  // namespace
-
-// static
-DockInfo::Factory* DockInfo::factory_ = NULL;
 
 // static
 bool DockInfo::IsCloseToPoint(const gfx::Point& screen_loc,
@@ -65,11 +59,7 @@ bool DockInfo::IsCloseToMonitorPoint(const gfx::Point& screen_loc,
     case DockInfo::MAXIMIZE: {
       // Make the maximize height smaller than the tab height to avoid showing
       // the dock indicator when close to maximized browser.
-#if defined(TOOLKIT_VIEWS)
-      hot_spot_delta_y = Tab::GetMinimumUnselectedSize().height() - 1;
-#elif !defined(OS_ANDROID)
-      hot_spot_delta_y = TabGtk::GetMinimumUnselectedSize().height() - 1;
-#endif
+      hot_spot_delta_y = GetHotSpotDeltaY();
       enable_delta_y = hot_spot_delta_y / 2;
       break;
     }
@@ -234,7 +224,7 @@ gfx::Rect DockInfo::GetPopupRect() const {
     case BOTTOM_OF_WINDOW: {
       // Constrain the popup to the monitor's bounds.
       gfx::Rect ideal_bounds(x, y, popup_width(), popup_height());
-      ideal_bounds = ideal_bounds.AdjustToFit(monitor_bounds_);
+      ideal_bounds.AdjustToFit(monitor_bounds_);
       return ideal_bounds;
     }
     case DockInfo::MAXIMIZE:

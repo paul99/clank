@@ -1,4 +1,4 @@
-// Copyright (c) 2011 The Chromium Authors. All rights reserved.
+// Copyright (c) 2012 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -7,60 +7,100 @@
 #include <string>
 
 #include "base/bind.h"
-#include "base/threading/thread.h"
-#include "remoting/jingle_glue/jingle_thread.h"
+#include "remoting/base/auto_thread.h"
+#include "remoting/host/url_request_context.h"
 
 namespace remoting {
 
 ChromotingHostContext::ChromotingHostContext(
-    base::MessageLoopProxy* ui_message_loop)
-    : main_thread_("ChromotingMainThread"),
-      encode_thread_("ChromotingEncodeThread"),
-      desktop_thread_("ChromotingDesktopThread"),
-      ui_message_loop_(ui_message_loop) {
+    AutoThreadTaskRunner* ui_task_runner)
+    : ui_task_runner_(ui_task_runner) {
+#if defined(OS_WIN)
+  // On Windows the AudioCapturer requires COM, so we run a single-threaded
+  // apartment, which requires a UI thread.
+  audio_task_runner_ = AutoThread::CreateWithLoopAndComInitTypes(
+      "ChromotingAudioThread", ui_task_runner_, MessageLoop::TYPE_UI,
+      AutoThread::COM_INIT_STA);
+#else // !defined(OS_WIN)
+  audio_task_runner_ = AutoThread::CreateWithType(
+      "ChromotingAudioThread", ui_task_runner_, MessageLoop::TYPE_IO);
+#endif // !defined(OS_WIN)
+
+  file_task_runner_ = AutoThread::CreateWithType(
+      "ChromotingFileThread", ui_task_runner_, MessageLoop::TYPE_IO);
+  input_task_runner_ = AutoThread::CreateWithType(
+      "ChromotingInputThread", ui_task_runner_, MessageLoop::TYPE_IO);
+  network_task_runner_ = AutoThread::CreateWithType(
+      "ChromotingNetworkThread", ui_task_runner_, MessageLoop::TYPE_IO);
+  video_capture_task_runner_ = AutoThread::Create(
+      "ChromotingCaptureThread", ui_task_runner_);
+  video_encode_task_runner_ = AutoThread::Create(
+      "ChromotingEncodeThread", ui_task_runner_);
+
+  url_request_context_getter_ = new URLRequestContextGetter(
+      ui_task_runner_, network_task_runner_);
 }
 
 ChromotingHostContext::~ChromotingHostContext() {
 }
 
-void ChromotingHostContext::Start() {
-  // Start all the threads.
-  main_thread_.Start();
-  encode_thread_.Start();
-  jingle_thread_.Start();
-  desktop_thread_.Start();
+scoped_ptr<ChromotingHostContext> ChromotingHostContext::Create(
+    scoped_refptr<AutoThreadTaskRunner> ui_task_runner) {
+  DCHECK(ui_task_runner->BelongsToCurrentThread());
+
+  scoped_ptr<ChromotingHostContext> context(
+      new ChromotingHostContext(ui_task_runner));
+  if (!context->audio_task_runner_ ||
+      !context->file_task_runner_ ||
+      !context->input_task_runner_ ||
+      !context->network_task_runner_ ||
+      !context->video_capture_task_runner_ ||
+      !context->video_encode_task_runner_ ||
+      !context->url_request_context_getter_) {
+    context.reset();
+  }
+
+  return context.Pass();
 }
 
-void ChromotingHostContext::Stop() {
-  // Stop all the threads.
-  jingle_thread_.Stop();
-  encode_thread_.Stop();
-  main_thread_.Stop();
-  desktop_thread_.Stop();
+scoped_refptr<AutoThreadTaskRunner>
+ChromotingHostContext::audio_task_runner() {
+  return audio_task_runner_;
 }
 
-JingleThread* ChromotingHostContext::jingle_thread() {
-  return &jingle_thread_;
+scoped_refptr<AutoThreadTaskRunner>
+ChromotingHostContext::file_task_runner() {
+  return file_task_runner_;
 }
 
-base::MessageLoopProxy* ChromotingHostContext::ui_message_loop() {
-  return ui_message_loop_;
+scoped_refptr<AutoThreadTaskRunner>
+ChromotingHostContext::input_task_runner() {
+  return input_task_runner_;
 }
 
-MessageLoop* ChromotingHostContext::main_message_loop() {
-  return main_thread_.message_loop();
+scoped_refptr<AutoThreadTaskRunner>
+ChromotingHostContext::network_task_runner() {
+  return network_task_runner_;
 }
 
-MessageLoop* ChromotingHostContext::encode_message_loop() {
-  return encode_thread_.message_loop();
+scoped_refptr<AutoThreadTaskRunner>
+ChromotingHostContext::ui_task_runner() {
+  return ui_task_runner_;
 }
 
-base::MessageLoopProxy* ChromotingHostContext::network_message_loop() {
-  return jingle_thread_.message_loop_proxy();
+scoped_refptr<AutoThreadTaskRunner>
+ChromotingHostContext::video_capture_task_runner() {
+  return video_capture_task_runner_;
 }
 
-MessageLoop* ChromotingHostContext::desktop_message_loop() {
-  return desktop_thread_.message_loop();
+scoped_refptr<AutoThreadTaskRunner>
+ChromotingHostContext::video_encode_task_runner() {
+  return video_encode_task_runner_;
+}
+
+scoped_refptr<net::URLRequestContextGetter>
+ChromotingHostContext::url_request_context_getter() {
+  return url_request_context_getter_;
 }
 
 }  // namespace remoting

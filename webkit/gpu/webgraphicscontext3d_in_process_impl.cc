@@ -8,18 +8,21 @@
 
 #include <algorithm>
 #include <string>
+#include <vector>
 
+#include "base/lazy_instance.h"
 #include "base/logging.h"
-#include "base/string_split.h"
 #include "base/memory/scoped_ptr.h"
+#include "base/string_split.h"
+#include "base/synchronization/lock.h"
 #include "third_party/WebKit/Source/WebKit/chromium/public/WebFrame.h"
-#include "third_party/WebKit/Source/WebKit/chromium/public/platform/WebString.h"
 #include "third_party/WebKit/Source/WebKit/chromium/public/WebView.h"
-#include "ui/gfx/gl/gl_bindings.h"
-#include "ui/gfx/gl/gl_bindings_skia_in_process.h"
-#include "ui/gfx/gl/gl_context.h"
-#include "ui/gfx/gl/gl_implementation.h"
-#include "ui/gfx/gl/gl_surface.h"
+#include "third_party/WebKit/Source/WebKit/chromium/public/platform/WebString.h"
+#include "ui/gl/gl_bindings.h"
+#include "ui/gl/gl_bindings_skia_in_process.h"
+#include "ui/gl/gl_context.h"
+#include "ui/gl/gl_implementation.h"
+#include "ui/gl/gl_surface.h"
 
 namespace webkit {
 namespace gpu {
@@ -44,14 +47,17 @@ struct WebGraphicsContext3DInProcessImpl::ShaderSourceEntry {
 };
 
 WebGraphicsContext3DInProcessImpl::WebGraphicsContext3DInProcessImpl(
-    gfx::PluginWindowHandle window,
-    gfx::GLShareGroup* share_group)
+    gfx::GLSurface* surface,
+    gfx::GLContext* context,
+    bool render_directly_to_web_view)
     : initialized_(false),
-      render_directly_to_web_view_(false),
+      render_directly_to_web_view_(render_directly_to_web_view),
       is_gles2_(false),
       have_ext_framebuffer_object_(false),
       have_ext_framebuffer_multisample_(false),
       have_angle_framebuffer_multisample_(false),
+      have_ext_oes_standard_derivatives_(false),
+      have_ext_oes_egl_image_external_(false),
       texture_(0),
       fbo_(0),
       depth_stencil_buffer_(0),
@@ -65,13 +71,23 @@ WebGraphicsContext3DInProcessImpl::WebGraphicsContext3DInProcessImpl(
 #ifdef FLIP_FRAMEBUFFER_VERTICALLY
       scanline_(0),
 #endif
+      gl_context_(context),
+      gl_surface_(surface),
       fragment_compiler_(0),
-      vertex_compiler_(0),
-      window_(window),
-      share_group_(share_group) {
+      vertex_compiler_(0) {
 }
 
+// All instances in a process that share resources are in the same share group.
+static base::LazyInstance<
+    std::set<WebGraphicsContext3DInProcessImpl*> >
+        g_all_shared_contexts = LAZY_INSTANCE_INITIALIZER;
+static base::LazyInstance<base::Lock>::Leaky
+    g_all_shared_contexts_lock = LAZY_INSTANCE_INITIALIZER;
+
 WebGraphicsContext3DInProcessImpl::~WebGraphicsContext3DInProcessImpl() {
+  base::AutoLock a(g_all_shared_contexts_lock.Get());
+  g_all_shared_contexts.Pointer()->erase(this);
+
   if (!initialized_)
     return;
 
@@ -86,19 +102,12 @@ WebGraphicsContext3DInProcessImpl::~WebGraphicsContext3DInProcessImpl() {
     if (attributes_.depth || attributes_.stencil)
       glDeleteRenderbuffersEXT(1, &depth_stencil_buffer_);
   }
-
-#if defined(OS_ANDROID)
-  if (!render_directly_to_web_view_) {
-#endif
-    glDeleteTextures(1, &texture_);
+  glDeleteTextures(1, &texture_);
 #ifdef FLIP_FRAMEBUFFER_VERTICALLY
-    if (scanline_)
-      delete[] scanline_;
+  if (scanline_)
+    delete[] scanline_;
 #endif
-    glDeleteFramebuffersEXT(1, &fbo_);
-#if defined(OS_ANDROID)
-  }
-#endif
+  glDeleteFramebuffersEXT(1, &fbo_);
 
   gl_context_->ReleaseCurrent(gl_surface_.get());
   gl_context_->Destroy();
@@ -112,117 +121,87 @@ WebGraphicsContext3DInProcessImpl::~WebGraphicsContext3DInProcessImpl() {
   AngleDestroyCompilers();
 }
 
-bool WebGraphicsContext3DInProcessImpl::initialize(
+WebGraphicsContext3DInProcessImpl*
+WebGraphicsContext3DInProcessImpl::CreateForWebView(
     WebGraphicsContext3D::Attributes attributes,
-    WebView* webView,
     bool render_directly_to_web_view) {
   if (!gfx::GLSurface::InitializeOneOff())
-    return false;
+    return NULL;
 
-  render_directly_to_web_view_ = render_directly_to_web_view;
-  gfx::GLShareGroup* share_group = 0;
+  gfx::GLShareGroup* share_group = NULL;
 
-  is_gles2_ = gfx::GetGLImplementation() == gfx::kGLImplementationEGLGLES2;
-
-#if defined(OS_ANDROID)
-  if (render_directly_to_web_view_) {
-    gl_surface_ = gfx::GLSurface::CreateViewGLSurface(false, 0);
-  } else {
-    gl_surface_ = gfx::GLSurface::CreateOffscreenGLSurface(false,
-                                                           gfx::Size(1, 1));
+  if (attributes.shareResources) {
+    WebGraphicsContext3DInProcessImpl* context_impl =
+      g_all_shared_contexts.Pointer()->empty() ?
+        NULL : *g_all_shared_contexts.Pointer()->begin();
+    if (context_impl)
+        share_group = context_impl->gl_context_->share_group();
   }
-#else
-  if (window_ != gfx::kNullPluginWindow) {
-    share_group = share_group_;
-    gl_surface_ = gfx::GLSurface::CreateViewGLSurface(false, window_);
-  } else {
-    if (!render_directly_to_web_view) {
-      // Pick up the compositor's context to share resources with.
-      WebGraphicsContext3D* view_context = webView ?
-                                           webView->graphicsContext3D() : NULL;
-      if (view_context) {
-        WebGraphicsContext3DInProcessImpl* contextImpl =
-            static_cast<WebGraphicsContext3DInProcessImpl*>(view_context);
-        share_group = contextImpl->gl_context_->share_group();
-      } else {
-        // The compositor's context didn't get created
-        // successfully, so conceptually there is no way we can
-        // render successfully to the WebView.
-        render_directly_to_web_view_ = false;
-      }
-    }
-    // This implementation always renders offscreen regardless of
-    // whether render_directly_to_web_view is true. Both DumpRenderTree
-    // and test_shell paint first to an intermediate offscreen buffer
-    // and from there to the window, and WebViewImpl::paint already
-    // correctly handles the case where the compositor is active but
-    // the output needs to go to a WebCanvas.
-    gl_surface_ = gfx::GLSurface::CreateOffscreenGLSurface(false,
-        gfx::Size(1, 1));
-  }
-#endif
 
-  if (!gl_surface_.get()) {
-    if (!is_gles2_)
-      return false;
+  // This implementation always renders offscreen regardless of whether
+  // render_directly_to_web_view is true. Both DumpRenderTree and test_shell
+  // paint first to an intermediate offscreen buffer and from there to the
+  // window, and WebViewImpl::paint already correctly handles the case where the
+  // compositor is active but the output needs to go to a WebCanvas.
+  scoped_refptr<gfx::GLSurface> gl_surface =
+      gfx::GLSurface::CreateOffscreenGLSurface(false, gfx::Size(1, 1));
 
-    // Embedded systems have smaller limit on number of GL contexts. Sometimes
-    // failure of GL context creation is because of existing GL contexts
-    // referenced by JavaScript garbages. Collect garbage and try again.
-    // TODO: Besides this solution, kbr@chromium.org suggested: upon receiving
-    // a page unload event, iterate down any live WebGraphicsContext3D instances
-    // and force them to drop their contexts, sending a context lost event if
-    // necessary.
-    // megamerge: here is the old comment, when this was #ifdef'ed out.
-      // TODO: Enable this once GLSurface::CreateViewGLSurface() and other such
-      // methods are implemented on android (in gl_surface_android.cc)
-    // But GLSurface::CreateViewGLSurface() is now implemented.  Does
-    // that mean this should be on?
-#if !defined(OS_ANDROID)
-    if (webView) webView->mainFrame()->collectGarbage();
-#endif
-
-#if defined(OS_ANDROID)
-    if (render_directly_to_web_view_) {
-      gl_surface_ = gfx::GLSurface::CreateViewGLSurface(false, 0);
-    } else {
-      gl_surface_ = gfx::GLSurface::CreateOffscreenGLSurface(false,
-                                                             gfx::Size(1, 1));
-    }
-#else
-    gl_surface_ = gfx::GLSurface::CreateOffscreenGLSurface(false,
-                                                           gfx::Size(1, 1));
-#endif
-    if (!gl_surface_.get())
-      return false;
-  }
+  if (!gl_surface.get())
+    return NULL;
 
   // TODO(kbr): This implementation doesn't yet support lost contexts
   // and therefore can't yet properly support GPU switching.
   gfx::GpuPreference gpu_preference = gfx::PreferDiscreteGpu;
 
-  gl_context_ = gfx::GLContext::CreateGLContext(share_group,
-                                                gl_surface_.get(),
-                                                gpu_preference);
-  if (!gl_context_.get()) {
-    if (!is_gles2_)
-      return false;
+  scoped_refptr<gfx::GLContext> gl_context = gfx::GLContext::CreateGLContext(
+      share_group,
+      gl_surface.get(),
+      gpu_preference);
 
-    // Embedded systems have smaller limit on number of GL contexts. Sometimes
-    // failure of GL context creation is because of existing GL contexts
-    // referenced by JavaScript garbages. Collect garbage and try again.
-    // TODO: Besides this solution, kbr@chromium.org suggested: upon receiving
-    // a page unload event, iterate down any live WebGraphicsContext3D instances
-    // and force them to drop their contexts, sending a context lost event if
-    // necessary.
-    if (webView) webView->mainFrame()->collectGarbage();
+  if (!gl_context.get())
+    return NULL;
 
-    gl_context_ = gfx::GLContext::CreateGLContext(share_group,
-                                                  gl_surface_.get(),
-                                                  gpu_preference);
-    if (!gl_context_.get())
-      return false;
-  }
+  scoped_ptr<WebGraphicsContext3DInProcessImpl> context(
+      new WebGraphicsContext3DInProcessImpl(
+        gl_surface.get(), gl_context.get(), render_directly_to_web_view));
+  if (!context->Initialize(attributes))
+    return NULL;
+  return context.release();
+}
+
+WebGraphicsContext3DInProcessImpl*
+WebGraphicsContext3DInProcessImpl::CreateForWindow(
+    WebGraphicsContext3D::Attributes attributes,
+    gfx::AcceleratedWidget window,
+    gfx::GLShareGroup* share_group) {
+  if (!gfx::GLSurface::InitializeOneOff())
+    return NULL;
+
+  scoped_refptr<gfx::GLSurface> gl_surface =
+      gfx::GLSurface::CreateViewGLSurface(false, window);
+  if (!gl_surface.get())
+    return NULL;
+
+  gfx::GpuPreference gpu_preference = gfx::PreferDiscreteGpu;
+
+  scoped_refptr<gfx::GLContext> gl_context = gfx::GLContext::CreateGLContext(
+      share_group,
+      gl_surface.get(),
+      gpu_preference);
+  if (!gl_context.get())
+    return NULL;
+  scoped_ptr<WebGraphicsContext3DInProcessImpl> context(
+      new WebGraphicsContext3DInProcessImpl(
+          gl_surface.get(), gl_context.get(), true));
+  if (!context->Initialize(attributes))
+    return NULL;
+  return context.release();
+}
+
+bool WebGraphicsContext3DInProcessImpl::Initialize(
+    WebGraphicsContext3D::Attributes attributes) {
+  is_gles2_ = gfx::GetGLImplementation() == gfx::kGLImplementationEGLGLES2;
+
 
   attributes_ = attributes;
 
@@ -234,7 +213,7 @@ bool WebGraphicsContext3DInProcessImpl::initialize(
   // edges in some CSS 3D samples. Third, we don't have multisampling
   // support for the compositor in the normal case at the time of this
   // writing.
-  if (render_directly_to_web_view)
+  if (render_directly_to_web_view_)
     attributes_.antialias = false;
 
   if (!gl_context_->MakeCurrent(gl_surface_.get())) {
@@ -244,17 +223,22 @@ bool WebGraphicsContext3DInProcessImpl::initialize(
 
   const char* extensions =
       reinterpret_cast<const char*>(glGetString(GL_EXTENSIONS));
-
   DCHECK(extensions);
-#if !defined(OS_ANDROID) // TODO(sievers) - remove this
-  // TODO: I got a null point here. As we don't use it, comment it out for now.
   have_ext_framebuffer_object_ =
       strstr(extensions, "GL_EXT_framebuffer_object") != NULL;
   have_ext_framebuffer_multisample_ =
       strstr(extensions, "GL_EXT_framebuffer_multisample") != NULL;
+#if !defined(OS_ANDROID)
+  // Some Android Qualcomm drivers falsely report this ANGLE extension string.
+  // See http://crbug.com/165736
   have_angle_framebuffer_multisample_ =
       strstr(extensions, "GL_ANGLE_framebuffer_multisample") != NULL;
 #endif
+  have_ext_oes_standard_derivatives_ =
+      strstr(extensions, "GL_OES_standard_derivatives") != NULL;
+  have_ext_oes_egl_image_external_ =
+      strstr(extensions, "GL_OES_EGL_image_external") != NULL;
+
   ValidateAttributes();
 
   if (!is_gles2_) {
@@ -269,6 +253,10 @@ bool WebGraphicsContext3DInProcessImpl::initialize(
 
   initialized_ = true;
   gl_context_->ReleaseCurrent(gl_surface_.get());
+
+  if (attributes_.shareResources)
+    g_all_shared_contexts.Pointer()->insert(this);
+
   return true;
 }
 
@@ -276,8 +264,6 @@ void WebGraphicsContext3DInProcessImpl::ValidateAttributes() {
   const char* extensions =
       reinterpret_cast<const char*>(glGetString(GL_EXTENSIONS));
 
-#if !defined(OS_ANDROID) // TODO(sievers) - remove this
-  // TODO: I got a null point here. As we don't use it, comment it out for now.
   if (attributes_.stencil) {
     if (strstr(extensions, "GL_OES_packed_depth_stencil") ||
         strstr(extensions, "GL_EXT_packed_depth_stencil")) {
@@ -288,7 +274,6 @@ void WebGraphicsContext3DInProcessImpl::ValidateAttributes() {
       attributes_.stencil = false;
     }
   }
-#endif
   if (attributes_.antialias) {
     bool isValidVendor = true;
 #if defined(OS_MACOSX)
@@ -300,9 +285,6 @@ void WebGraphicsContext3DInProcessImpl::ValidateAttributes() {
     if (!(isValidVendor &&
           (have_ext_framebuffer_multisample_ ||
            (have_angle_framebuffer_multisample_ &&
-#if defined(OS_ANDROID) // TODO(sievers) - remove this
-               extensions &&
-#endif
             strstr(extensions, "GL_OES_rgb8_rgba8")))))
       attributes_.antialias = false;
 
@@ -365,22 +347,18 @@ WebGLId WebGraphicsContext3DInProcessImpl::getPlatformTextureId() {
 }
 
 void WebGraphicsContext3DInProcessImpl::prepareTexture() {
-  if (window_ != gfx::kNullPluginWindow) {
+  if (!gl_surface_->IsOffscreen()) {
     gl_surface_->SwapBuffers();
   } else if (!render_directly_to_web_view_) {
     // We need to prepare our rendering results for the compositor.
     makeContextCurrent();
     ResolveMultisampledFramebuffer(0, 0, cached_width_, cached_height_);
-#if defined(OS_ANDROID)
-  } else {
-    gl_surface_->SwapBuffers();
-#endif
   }
 }
 
 void WebGraphicsContext3DInProcessImpl::postSubBufferCHROMIUM(
     int x, int y, int width, int height) {
-  DCHECK(gl_context_->HasExtension("GL_CHROMIUM_post_sub_buffer"));
+  DCHECK(gl_surface_->HasExtension("GL_CHROMIUM_post_sub_buffer"));
   gl_surface_->PostSubBuffer(x, y, width, height);
 }
 
@@ -400,20 +378,10 @@ int CreateTextureObject(GLenum target) {
 void WebGraphicsContext3DInProcessImpl::reshape(int width, int height) {
   cached_width_ = width;
   cached_height_ = height;
-
-#if defined(OS_ANDROID)
-  if (render_directly_to_web_view_) {
-    // Deprecated path for test environment. If we don't use an FBO
-    // for the 'view' surface, need to resize here.
-    gl_surface_->Resize(gfx::Size(width, height));
-    return;
-  }
-#endif
-
   makeContextCurrent();
 
   bool must_restore_fbo = false;
-  if (window_ == gfx::kNullPluginWindow)
+  if (gl_surface_->IsOffscreen())
     must_restore_fbo = AllocateOffscreenFrameBuffer(width, height);
 
   gl_surface_->Resize(gfx::Size(width, height));
@@ -680,13 +648,6 @@ void WebGraphicsContext3DInProcessImpl::FlipVertically(
 bool WebGraphicsContext3DInProcessImpl::readBackFramebuffer(
     unsigned char* pixels, size_t bufferSize, WebGLId framebuffer,
     int width, int height) {
-
-#if (OS_ANDROID)
-  // We don't create an internal FBO on Android, which is fine this path should
-  // be only used for html canvas and webgl.
-  CHECK(!render_directly_to_web_view_);
-#endif
-
   if (bufferSize != static_cast<size_t>(4 * width * height))
     return false;
 
@@ -779,8 +740,43 @@ void WebGraphicsContext3DInProcessImpl::unmapTexSubImage2DCHROMIUM(
 void WebGraphicsContext3DInProcessImpl::setVisibilityCHROMIUM(bool visible) {
 }
 
+void WebGraphicsContext3DInProcessImpl::
+    setMemoryAllocationChangedCallbackCHROMIUM(
+        WebGraphicsMemoryAllocationChangedCallbackCHROMIUM* callback) {
+}
+
+void WebGraphicsContext3DInProcessImpl::discardFramebufferEXT(
+    WGC3Denum target, WGC3Dsizei numAttachments, const WGC3Denum* attachments) {
+}
+
+void WebGraphicsContext3DInProcessImpl::discardBackbufferCHROMIUM() {
+}
+
+void WebGraphicsContext3DInProcessImpl::ensureBackbufferCHROMIUM() {
+}
+
 void WebGraphicsContext3DInProcessImpl::copyTextureToParentTextureCHROMIUM(
     WebGLId id, WebGLId id2) {
+  NOTIMPLEMENTED();
+}
+
+void WebGraphicsContext3DInProcessImpl::bindUniformLocationCHROMIUM(
+    WebGLId program, WGC3Dint location, const WGC3Dchar* uniform) {
+  NOTIMPLEMENTED();
+}
+
+void WebGraphicsContext3DInProcessImpl::genMailboxCHROMIUM(
+    WGC3Dbyte* mailbox) {
+  NOTIMPLEMENTED();
+}
+
+void WebGraphicsContext3DInProcessImpl::produceTextureCHROMIUM(
+    WGC3Denum target, const WGC3Dbyte* mailbox) {
+  NOTIMPLEMENTED();
+}
+
+void WebGraphicsContext3DInProcessImpl::consumeTextureCHROMIUM(
+    WGC3Denum target, const WGC3Dbyte* mailbox) {
   NOTIMPLEMENTED();
 }
 
@@ -909,11 +905,7 @@ DELEGATE_TO_GL_2(bindBuffer, BindBuffer, WGC3Denum, WebGLId);
 void WebGraphicsContext3DInProcessImpl::bindFramebuffer(
     WGC3Denum target, WebGLId framebuffer) {
   makeContextCurrent();
-#if defined(OS_ANDROID)
-  if (!framebuffer && !render_directly_to_web_view_)
-#else
   if (!framebuffer)
-#endif
     framebuffer = (attributes_.antialias ? multisample_fbo_ : fbo_);
   if (framebuffer != bound_fbo_) {
     glBindFramebufferEXT(target, framebuffer);
@@ -1265,6 +1257,9 @@ void WebGraphicsContext3DInProcessImpl::getShaderiv(
   glGetShaderiv(shader, pname, value);
 }
 
+DELEGATE_TO_GL_4(getShaderPrecisionFormat, GetShaderPrecisionFormat,
+                 WGC3Denum, WGC3Denum, WGC3Dint*, WGC3Dint*)
+
 WebString WebGraphicsContext3DInProcessImpl::getShaderInfoLog(WebGLId shader) {
   makeContextCurrent();
 
@@ -1333,6 +1328,9 @@ WebString WebGraphicsContext3DInProcessImpl::getString(WGC3Denum name) {
         result += " GL_EXT_texture_format_BGRA8888 GL_EXT_read_format_bgra";
       }
     }
+    std::string surface_extensions = gl_surface_->GetExtensions();
+    if (!surface_extensions.empty())
+      result += " " + surface_extensions;
   } else {
     result = reinterpret_cast<const char*>(glGetString(name));
   }
@@ -1589,7 +1587,7 @@ DELEGATE_TO_GL_4(viewport, Viewport, WGC3Dint, WGC3Dint, WGC3Dsizei, WGC3Dsizei)
 
 WebGLId WebGraphicsContext3DInProcessImpl::createBuffer() {
   makeContextCurrent();
-  GLuint o;
+  GLuint o = 0;
   glGenBuffersARB(1, &o);
   return o;
 }
@@ -1608,7 +1606,7 @@ WebGLId WebGraphicsContext3DInProcessImpl::createProgram() {
 
 WebGLId WebGraphicsContext3DInProcessImpl::createRenderbuffer() {
   makeContextCurrent();
-  GLuint o;
+  GLuint o = 0;
   glGenRenderbuffersEXT(1, &o);
   return o;
 }
@@ -1633,7 +1631,7 @@ WebGLId WebGraphicsContext3DInProcessImpl::createShader(
 
 WebGLId WebGraphicsContext3DInProcessImpl::createTexture() {
   makeContextCurrent();
-  GLuint o;
+  GLuint o = 0;
   glGenTextures(1, &o);
   return o;
 }
@@ -1689,11 +1687,53 @@ void WebGraphicsContext3DInProcessImpl::texImageIOSurface2DCHROMIUM(
 DELEGATE_TO_GL_5(texStorage2DEXT, TexStorage2DEXT,
                  WGC3Denum, WGC3Dint, WGC3Duint, WGC3Dint, WGC3Dint)
 
-#if WEBKIT_USING_SKIA
+WebGLId WebGraphicsContext3DInProcessImpl::createQueryEXT() {
+  makeContextCurrent();
+  GLuint o = 0;
+  glGenQueriesARB(1, &o);
+  return o;
+}
+
+void WebGraphicsContext3DInProcessImpl::deleteQueryEXT(WebGLId query) {
+  makeContextCurrent();
+  glDeleteQueriesARB(1, &query);
+}
+
+DELEGATE_TO_GL_1R(isQueryEXT, IsQueryARB, WebGLId, WGC3Dboolean)
+DELEGATE_TO_GL_2(beginQueryEXT, BeginQueryARB, WGC3Denum, WebGLId)
+DELEGATE_TO_GL_1(endQueryEXT, EndQueryARB, WGC3Denum)
+DELEGATE_TO_GL_3(getQueryivEXT, GetQueryivARB, WGC3Denum, WGC3Denum, WGC3Dint*)
+DELEGATE_TO_GL_3(getQueryObjectuivEXT, GetQueryObjectuivARB,
+                 WebGLId, WGC3Denum, WGC3Duint*)
+
+void WebGraphicsContext3DInProcessImpl::copyTextureCHROMIUM(
+    WGC3Denum, WGC3Duint, WGC3Duint, WGC3Dint, WGC3Denum) {
+  NOTIMPLEMENTED();
+}
+
+void WebGraphicsContext3DInProcessImpl::bindTexImage2DCHROMIUM(
+    WGC3Denum target, WGC3Dint imageId) {
+  NOTIMPLEMENTED();
+}
+
+void WebGraphicsContext3DInProcessImpl::releaseTexImage2DCHROMIUM(
+    WGC3Denum target, WGC3Dint imageId) {
+  NOTIMPLEMENTED();
+}
+
+void* WebGraphicsContext3DInProcessImpl::mapBufferCHROMIUM(
+    WGC3Denum target, WGC3Denum access) {
+  return 0;
+}
+
+WGC3Dboolean WebGraphicsContext3DInProcessImpl::unmapBufferCHROMIUM(
+    WGC3Denum target) {
+  return false;
+}
+
 GrGLInterface* WebGraphicsContext3DInProcessImpl::onCreateGrGLInterface() {
   return gfx::CreateInProcessSkiaGLBinding();
 }
-#endif
 
 bool WebGraphicsContext3DInProcessImpl::AngleCreateCompilers() {
   if (!ShInitialize())
@@ -1713,6 +1753,9 @@ bool WebGraphicsContext3DInProcessImpl::AngleCreateCompilers() {
               &resources.MaxFragmentUniformVectors);
   // Always set to 1 for OpenGL ES.
   resources.MaxDrawBuffers = 1;
+
+  resources.OES_standard_derivatives = have_ext_oes_standard_derivatives_;
+  resources.OES_EGL_image_external = have_ext_oes_egl_image_external_;
 
   fragment_compiler_ = ShConstructCompiler(
       SH_FRAGMENT_SHADER, SH_WEBGL_SPEC,
@@ -1752,21 +1795,8 @@ bool WebGraphicsContext3DInProcessImpl::AngleValidateShaderSource(
   if (!compiler)
     return false;
 
-#if !defined(OS_ANDROID)
-  // TODO(sievers): Reenable after bug 5028871 is fixed.
-  // The translator output for most shaders is currently triggering this bug.
   char* source = entry->source.get();
-  if (!ShCompile(compiler, &source, 1, SH_OBJECT_CODE))
-#endif
-  {
-#if defined(OS_ANDROID)
-    // TODO(sievers): Extend validation to support the video shader, and remove this.
-    int length = strlen(entry->source.get()) + 1;
-    entry->translated_source.reset(new char[length]);
-    strncpy(entry->translated_source.get(), entry->source.get(), length);
-    entry->is_valid = true;
-    return true;
-#else
+  if (!ShCompile(compiler, &source, 1, SH_OBJECT_CODE)) {
     int logSize = 0;
     ShGetInfo(compiler, SH_INFO_LOG_LENGTH, &logSize);
     if (logSize > 1) {
@@ -1774,7 +1804,6 @@ bool WebGraphicsContext3DInProcessImpl::AngleValidateShaderSource(
       ShGetInfoLog(compiler, entry->log.get());
     }
     return false;
-#endif
   }
 
   int length = 0;
@@ -1786,19 +1815,6 @@ bool WebGraphicsContext3DInProcessImpl::AngleValidateShaderSource(
   entry->is_valid = true;
   return true;
 }
-
-#if defined(OS_ANDROID)
-WebGLId WebGraphicsContext3DInProcessImpl::createStreamTextureCHROMIUM(
-    WebGLId texture) {
-  NOTIMPLEMENTED();
-  return GL_ZERO;
-}
-
-void WebGraphicsContext3DInProcessImpl::destroyStreamTextureCHROMIUM(
-    WebGLId texture) {
-  NOTIMPLEMENTED();
-}
-#endif
 
 }  // namespace gpu
 }  // namespace webkit

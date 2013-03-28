@@ -8,6 +8,7 @@
 #include <string>
 
 #include "base/message_loop.h"
+#include "ui/base/events/event.h"
 #include "ui/base/keycodes/keyboard_codes.h"
 #include "ui/base/win/hwnd_util.h"
 #include "ui/base/win/window_impl.h"
@@ -221,12 +222,13 @@ void NativeScrollBarWin::Layout() {
 }
 
 gfx::Size NativeScrollBarWin::GetPreferredSize() {
+  const ui::NativeTheme* theme = native_scroll_bar_->GetNativeTheme();
   if (native_scroll_bar_->IsHorizontal())
-    return gfx::Size(0, GetHorizontalScrollBarHeight());
-  return gfx::Size(GetVerticalScrollBarWidth(), 0);
+    return gfx::Size(0, GetHorizontalScrollBarHeight(theme));
+  return gfx::Size(GetVerticalScrollBarWidth(theme), 0);
 }
 
-bool NativeScrollBarWin::OnKeyPressed(const KeyEvent& event) {
+bool NativeScrollBarWin::OnKeyPressed(const ui::KeyEvent& event) {
   if (!sb_container_.get())
     return false;
   int code = -1;
@@ -269,7 +271,7 @@ bool NativeScrollBarWin::OnKeyPressed(const KeyEvent& event) {
   return false;
 }
 
-bool NativeScrollBarWin::OnMouseWheel(const MouseWheelEvent& e) {
+bool NativeScrollBarWin::OnMouseWheel(const ui::MouseWheelEvent& e) {
   if (!sb_container_.get())
     return false;
   sb_container_->ScrollWithOffset(e.offset());
@@ -337,12 +339,14 @@ NativeScrollBarWrapper* NativeScrollBarWrapper::CreateWrapper(
 }
 
 // static
-int NativeScrollBarWrapper::GetHorizontalScrollBarHeight() {
+int NativeScrollBarWrapper::GetHorizontalScrollBarHeight(
+    const ui::NativeTheme* theme) {
   return GetSystemMetrics(SM_CYHSCROLL);
 }
 
 // static
-int NativeScrollBarWrapper::GetVerticalScrollBarWidth() {
+int NativeScrollBarWrapper::GetVerticalScrollBarWidth(
+    const ui::NativeTheme* theme) {
   return GetSystemMetrics(SM_CXVSCROLL);
 }
 

@@ -4,7 +4,6 @@
 
 #ifndef CHROME_SERVICE_SERVICE_UTILITY_PROCESS_HOST_H_
 #define CHROME_SERVICE_SERVICE_UTILITY_PROCESS_HOST_H_
-#pragma once
 
 #include "build/build_config.h"
 
@@ -16,15 +15,15 @@
 #include "base/memory/ref_counted.h"
 #include "base/memory/scoped_ptr.h"
 #include "base/process.h"
-#include "ipc/ipc_channel.h"
 #include "content/public/common/child_process_host_delegate.h"
+#include "ipc/ipc_channel.h"
 #include "printing/pdf_render_settings.h"
 
 class CommandLine;
-class ScopedTempDir;
 
 namespace base {
 class MessageLoopProxy;
+class ScopedTempDir;
 }  // namespace base
 
 namespace content {
@@ -147,7 +146,7 @@ class ServiceUtilityProcessHost : public content::ChildProcessHostDelegate {
   // The path to the temp file where the metafile will be written to.
   FilePath metafile_path_;
   // The temporary folder created for the metafile.
-  scoped_ptr<ScopedTempDir> scratch_metafile_dir_;
+  scoped_ptr<base::ScopedTempDir> scratch_metafile_dir_;
 
   DISALLOW_COPY_AND_ASSIGN(ServiceUtilityProcessHost);
 };

@@ -1,9 +1,10 @@
-// Copyright (c) 2011 The Chromium Authors. All rights reserved.
+// Copyright (c) 2012 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
 #include "webkit/database/database_util.h"
 
+#include "base/basictypes.h"
 #include "base/utf_string_conversions.h"
 #include "third_party/WebKit/Source/WebKit/chromium/public/WebSecurityOrigin.h"
 #include "third_party/WebKit/Source/WebKit/chromium/public/platform/WebString.h"
@@ -75,14 +76,30 @@ string16 DatabaseUtil::GetOriginIdentifier(const GURL& url) {
 }
 
 GURL DatabaseUtil::GetOriginFromIdentifier(const string16& origin_identifier) {
-  GURL origin(WebKit::WebSecurityOrigin::createFromDatabaseIdentifier(
-      origin_identifier).toString());
+  WebKit::WebSecurityOrigin web_security_origin =
+      WebKit::WebSecurityOrigin::createFromDatabaseIdentifier(
+          origin_identifier);
+
   // We need this work-around for file:/// URIs as
-  // createFromDatabaseIdentifier returns empty origin url for them.
-  if (origin.spec().empty() &&
-      origin_identifier.find(ASCIIToUTF16("file__")) == 0)
-    return GURL("file:///");
-  return origin;
+  // createFromDatabaseIdentifier returns null origin_url for them.
+  if (web_security_origin.isUnique()) {
+    if (origin_identifier.find(UTF8ToUTF16("file__")) == 0)
+      return GURL("file:///");
+    return GURL();
+  }
+
+  return GURL(web_security_origin.toString());
+}
+
+bool DatabaseUtil::IsValidOriginIdentifier(const string16& origin_identifier) {
+  string16 dotdot = ASCIIToUTF16("..");
+  char16 forbidden[] = {'\\', '/', '\0'};
+
+  string16::size_type pos = origin_identifier.find(dotdot);
+  if (pos == string16::npos)
+    pos = origin_identifier.find_first_of(forbidden, 0, arraysize(forbidden));
+
+  return pos == string16::npos;
 }
 
 }  // namespace webkit_database

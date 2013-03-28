@@ -67,6 +67,7 @@
 
 #include "breakpad_nlist_64.h"
 
+#include <CoreFoundation/CoreFoundation.h>
 #include <fcntl.h>
 #include <mach-o/nlist.h>
 #include <mach-o/loader.h>
@@ -190,7 +191,7 @@ int __breakpad_fdnlist(int fd, nlist_type *list, const char **symbolNames,
   struct exec buf;
   if (read(fd, (char *)&buf, sizeof(buf)) != sizeof(buf) ||
       (N_BADMAG(buf) && *((uint32_t *)&buf) != magic &&
-        NXSwapBigLongToHost(*((long *)&buf)) != FAT_MAGIC &&
+        CFSwapInt32BigToHost(*((uint32_t *)&buf)) != FAT_MAGIC &&
        /* The following is the big-endian ppc64 check */
        (*((uint32_t*)&buf)) != FAT_MAGIC)) {
     return -1;
@@ -198,16 +199,16 @@ int __breakpad_fdnlist(int fd, nlist_type *list, const char **symbolNames,
 
   /* Deal with fat file if necessary */
   unsigned arch_offset = 0;
-  if (NXSwapBigLongToHost(*((long *)&buf)) == FAT_MAGIC ||
+  if (CFSwapInt32BigToHost(*((uint32_t *)&buf)) == FAT_MAGIC ||
       /* The following is the big-endian ppc64 check */
       *((unsigned int *)&buf) == FAT_MAGIC) {
     /* Get host info */
     host_t host = mach_host_self();
-    unsigned i = HOST_BASIC_INFO_COUNT;
+    unsigned hic = HOST_BASIC_INFO_COUNT;
     struct host_basic_info hbi;
     kern_return_t kr;
     if ((kr = host_info(host, HOST_BASIC_INFO,
-                        (host_info_t)(&hbi), &i)) != KERN_SUCCESS) {
+                        (host_info_t)(&hbi), &hic)) != KERN_SUCCESS) {
       return -1;
     }
     mach_port_deallocate(mach_task_self(), host);
@@ -222,7 +223,7 @@ int __breakpad_fdnlist(int fd, nlist_type *list, const char **symbolNames,
     }
 
     /* Convert fat_narchs to host byte order */
-    fh.nfat_arch = NXSwapBigIntToHost(fh.nfat_arch);
+    fh.nfat_arch = CFSwapInt32BigToHost(fh.nfat_arch);
 
     /* Read in the fat archs */
     struct fat_arch *fat_archs =
@@ -243,15 +244,15 @@ int __breakpad_fdnlist(int fd, nlist_type *list, const char **symbolNames,
      */
     for (unsigned i = 0; i < fh.nfat_arch; i++) {
       fat_archs[i].cputype =
-        NXSwapBigIntToHost(fat_archs[i].cputype);
+        CFSwapInt32BigToHost(fat_archs[i].cputype);
       fat_archs[i].cpusubtype =
-        NXSwapBigIntToHost(fat_archs[i].cpusubtype);
+        CFSwapInt32BigToHost(fat_archs[i].cpusubtype);
       fat_archs[i].offset =
-        NXSwapBigIntToHost(fat_archs[i].offset);
+        CFSwapInt32BigToHost(fat_archs[i].offset);
       fat_archs[i].size =
-        NXSwapBigIntToHost(fat_archs[i].size);
+        CFSwapInt32BigToHost(fat_archs[i].size);
       fat_archs[i].align =
-        NXSwapBigIntToHost(fat_archs[i].align);
+        CFSwapInt32BigToHost(fat_archs[i].align);
     }
 
     struct fat_arch *fap = NULL;
@@ -360,7 +361,7 @@ int __breakpad_fdnlist(int fd, nlist_type *list, const char **symbolNames,
     if (read(fd, (char *)space, m) != m)
       break;
     n -= m;
-    long savpos = lseek(fd, 0, SEEK_CUR);
+    off_t savpos = lseek(fd, 0, SEEK_CUR);
     if (savpos == -1) {
       return -1;
     }

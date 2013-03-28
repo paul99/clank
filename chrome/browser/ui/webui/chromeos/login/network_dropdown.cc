@@ -6,6 +6,7 @@
 
 #include <string>
 
+#include "base/time.h"
 #include "base/values.h"
 #include "chrome/browser/chromeos/cros/cros_library.h"
 #include "chrome/browser/chromeos/login/base_login_display_host.h"
@@ -14,6 +15,16 @@
 #include "content/public/browser/web_ui.h"
 #include "ui/base/models/menu_model.h"
 #include "ui/gfx/font.h"
+#include "ui/gfx/image/image.h"
+#include "ui/gfx/image/image_skia.h"
+
+namespace {
+
+// Timeout between consecutive requests to network library for network
+// scan.
+const int kNetworkScanIntervalSecs = 60;
+
+}  // namespace
 
 namespace chromeos {
 
@@ -74,9 +85,12 @@ base::ListValue* NetworkMenuWebUI::ConvertMenuModel(ui::MenuModel* model) {
     base::DictionaryValue* item = new base::DictionaryValue();
     item->SetInteger("id", id);
     item->SetString("label", model->GetLabelAt(i));
-    SkBitmap icon;
-    if (model->GetIconAt(i, &icon))
-      item->SetString("icon", web_ui_util::GetImageDataUrl(icon));
+    gfx::Image icon;
+    if (model->GetIconAt(i, &icon)) {
+      SkBitmap icon_bitmap = icon.ToImageSkia()->GetRepresentation(
+          web_ui_->GetDeviceScaleFactor()).sk_bitmap();
+      item->SetString("icon", web_ui_util::GetBitmapDataUrl(icon_bitmap));
+    }
     if (id >= 0) {
       item->SetBoolean("enabled", model->IsEnabledAt(i));
       const gfx::Font* font = model->GetLabelFontAt(i);
@@ -101,7 +115,11 @@ NetworkDropdown::NetworkDropdown(content::WebUI* web_ui,
   network_icon_.reset(
       new NetworkMenuIcon(this, NetworkMenuIcon::DROPDOWN_MODE));
   CrosLibrary::Get()->GetNetworkLibrary()->AddNetworkManagerObserver(this);
+  CrosLibrary::Get()->GetNetworkLibrary()->RequestNetworkScan();
   Refresh();
+  network_scan_timer_.Start(FROM_HERE,
+      base::TimeDelta::FromSeconds(kNetworkScanIntervalSecs),
+      this, &NetworkDropdown::ForceNetworkScan);
 }
 
 NetworkDropdown::~NetworkDropdown() {
@@ -109,16 +127,11 @@ NetworkDropdown::~NetworkDropdown() {
 }
 
 void NetworkDropdown::SetLastNetworkType(ConnectionType last_network_type) {
-  network_icon_->set_last_network_type(last_network_type);
+  // No longer implemented. TODO(stevenjb): Purge from JS.
 }
 
 void NetworkDropdown::OnItemChosen(int id) {
   network_menu_->OnItemChosen(id);
-}
-
-views::MenuButton* NetworkDropdown::GetMenuButton() {
-  NOTREACHED();
-  return NULL;
 }
 
 gfx::NativeWindow NetworkDropdown::GetNativeWindow() const {
@@ -148,14 +161,21 @@ void NetworkDropdown::NetworkMenuIconChanged() {
 
 void NetworkDropdown::SetNetworkIconAndText() {
   string16 text;
-  const SkBitmap icon_bitmap = network_icon_->GetIconAndText(&text);
+  const gfx::ImageSkia icon_image = network_icon_->GetIconAndText(&text);
+  SkBitmap icon_bitmap = icon_image.GetRepresentation(
+      web_ui_->GetDeviceScaleFactor()).sk_bitmap();
   std::string icon_str =
-      icon_bitmap.empty() ?
-          std::string() : web_ui_util::GetImageDataUrl(icon_bitmap);
+      icon_image.isNull() ?
+          std::string() : web_ui_util::GetBitmapDataUrl(icon_bitmap);
   base::StringValue title(text);
   base::StringValue icon(icon_str);
   web_ui_->CallJavascriptFunction("cr.ui.DropDown.updateNetworkTitle",
                                   title, icon);
+}
+
+void NetworkDropdown::ForceNetworkScan() {
+  CrosLibrary::Get()->GetNetworkLibrary()->RequestNetworkScan();
+  Refresh();
 }
 
 }  // namespace chromeos

@@ -1,4 +1,4 @@
-// Copyright (c) 2011 The Chromium Authors. All rights reserved.
+// Copyright (c) 2012 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -16,6 +16,9 @@
 // IPC_MESSAGE_MACROS_LOG_ENABLED doesn't get undefined.
 #if defined(OS_POSIX) && defined(IPC_MESSAGE_LOG_ENABLED)
 #define IPC_MESSAGE_MACROS_LOG_ENABLED
+#include "content/public/common/content_ipc_logging.h"
+#define IPC_LOG_TABLE_ADD_ENTRY(msg_id, logger) \
+    content::RegisterIPCLogger(msg_id, logger)
 #include "chrome/common/all_messages.h"
 #endif
 
@@ -73,6 +76,12 @@ bool chrome_logging_redirected_ = false;
 const GUID kChromeTraceProviderName = {
     0x7fe69228, 0x633e, 0x4f06,
         { 0x80, 0xc1, 0x52, 0x7f, 0xea, 0x23, 0xe3, 0xa7 } };
+#endif
+
+#if defined(USE_LINUX_BREAKPAD) || defined(OS_MACOSX)
+// Pointer to the function that's called by DumpWithoutCrashing() to dump the
+// process's memory.
+void (*dump_without_crashing_function_)() = NULL;
 #endif
 
 // Assertion handler for logging errors that occur when dialogs are
@@ -158,20 +167,6 @@ LoggingDestination DetermineLogMode(const CommandLine& command_line) {
 
 #if defined(OS_CHROMEOS)
 namespace {
-FilePath GenerateTimestampedName(const FilePath& base_path,
-                                 base::Time timestamp) {
-  base::Time::Exploded time_deets;
-  timestamp.LocalExplode(&time_deets);
-  std::string suffix = base::StringPrintf("_%02d%02d%02d-%02d%02d%02d",
-                                          time_deets.year,
-                                          time_deets.month,
-                                          time_deets.day_of_month,
-                                          time_deets.hour,
-                                          time_deets.minute,
-                                          time_deets.second);
-  return base_path.InsertBeforeExtension(suffix);
-}
-
 FilePath SetUpSymlinkIfNeeded(const FilePath& symlink_path, bool new_log) {
   DCHECK(!symlink_path.empty());
 
@@ -266,13 +261,11 @@ void InitChromeLogging(const CommandLine& command_line,
   DCHECK(!chrome_logging_initialized_) <<
     "Attempted to initialize logging when it was already initialized.";
 
-#if defined(OS_POSIX) && defined(IPC_MESSAGE_LOG_ENABLED)
-  IPC::Logging::set_log_function_map(&g_log_function_mapping);
-#endif
   LoggingDestination logging_dest = DetermineLogMode(command_line);
+  LogLockingState log_locking_state = LOCK_LOG_FILE;
   FilePath log_path;
 #if defined(OS_CHROMEOS)
-    FilePath target_path;
+  FilePath target_path;
 #endif
 
   // Don't resolve the log path unless we need to. Otherwise we leave an open
@@ -299,6 +292,8 @@ void InitChromeLogging(const CommandLine& command_line,
     // since that will remove the newly created link instead.
     delete_old_log_file = logging::APPEND_TO_OLD_LOG_FILE;
 #endif
+  } else {
+    log_locking_state = DONT_LOCK_LOG_FILE;
   }
 
   logging::DcheckState dcheck_state =
@@ -308,7 +303,7 @@ void InitChromeLogging(const CommandLine& command_line,
 
   bool success = InitLogging(log_path.value().c_str(),
                              logging_dest,
-                             logging::LOCK_LOG_FILE,
+                             log_locking_state,
                              delete_old_log_file,
                              dcheck_state);
 
@@ -335,8 +330,8 @@ void InitChromeLogging(const CommandLine& command_line,
   // we want process and thread IDs because we have a lot of things running
   logging::SetLogItems(true,  // enable_process_id
                        true,  // enable_thread_id
-                       false, // enable_timestamp
-                       true); // enable_tickcount
+                       true,  // enable_timestamp
+                       false);  // enable_tickcount
 
   // We call running in unattended mode "headless", and allow
   // headless mode to be configured either by the Environment
@@ -363,8 +358,7 @@ void InitChromeLogging(const CommandLine& command_line,
 
 #if defined(OS_WIN)
   // Enable trace control and transport through event tracing for Windows.
-  if (env->HasVar(env_vars::kEtwLogging))
-    logging::LogEventProvider::Initialize(kChromeTraceProviderName);
+  logging::LogEventProvider::Initialize(kChromeTraceProviderName);
 #endif
 
 #ifdef NDEBUG
@@ -449,14 +443,36 @@ size_t GetFatalAssertions(AssertionList* assertions) {
   return assertion_count;
 }
 
-
 void DumpWithoutCrashing() {
 #if defined(OS_WIN)
   std::string str;
   DumpProcessAssertHandler(str);
+#elif defined(USE_LINUX_BREAKPAD) || defined(OS_MACOSX)
+  if (dump_without_crashing_function_)
+    (*dump_without_crashing_function_)();
 #else
   NOTIMPLEMENTED();
-#endif  // OS_WIN
+#endif
+}
+
+#if defined(USE_LINUX_BREAKPAD) || defined(OS_MACOSX)
+void SetDumpWithoutCrashingFunction(void (*function)()) {
+  dump_without_crashing_function_ = function;
+}
+#endif
+
+FilePath GenerateTimestampedName(const FilePath& base_path,
+                                 base::Time timestamp) {
+  base::Time::Exploded time_deets;
+  timestamp.LocalExplode(&time_deets);
+  std::string suffix = base::StringPrintf("_%02d%02d%02d-%02d%02d%02d",
+                                          time_deets.year,
+                                          time_deets.month,
+                                          time_deets.day_of_month,
+                                          time_deets.hour,
+                                          time_deets.minute,
+                                          time_deets.second);
+  return base_path.InsertBeforeExtensionASCII(suffix);
 }
 
 }  // namespace logging

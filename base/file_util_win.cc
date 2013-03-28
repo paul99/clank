@@ -5,7 +5,6 @@
 #include "base/file_util.h"
 
 #include <windows.h>
-#include <propvarutil.h>
 #include <psapi.h>
 #include <shellapi.h>
 #include <shlobj.h>
@@ -17,15 +16,13 @@
 #include "base/file_path.h"
 #include "base/logging.h"
 #include "base/metrics/histogram.h"
+#include "base/process_util.h"
 #include "base/string_number_conversions.h"
 #include "base/string_util.h"
 #include "base/threading/thread_restrictions.h"
 #include "base/time.h"
 #include "base/utf_string_conversions.h"
-#include "base/win/pe_image.h"
-#include "base/win/scoped_comptr.h"
 #include "base/win/scoped_handle.h"
-#include "base/win/win_util.h"
 #include "base/win/windows_version.h"
 
 namespace file_util {
@@ -101,6 +98,8 @@ bool Delete(const FilePath& path, bool recursive) {
   // into the rest of the buffer.
   wchar_t double_terminated_path[MAX_PATH + 1] = {0};
 #pragma warning(suppress:4996)  // don't complain about wcscpy deprecation
+  if (g_bug108724_debug)
+    LOG(WARNING) << "copying ";
   wcscpy(double_terminated_path, path.value().c_str());
 
   SHFILEOPSTRUCT file_operation = {0};
@@ -109,7 +108,11 @@ bool Delete(const FilePath& path, bool recursive) {
   file_operation.fFlags = FOF_NOERRORUI | FOF_SILENT | FOF_NOCONFIRMATION;
   if (!recursive)
     file_operation.fFlags |= FOF_NORECURSION | FOF_FILESONLY;
+  if (g_bug108724_debug)
+    LOG(WARNING) << "Performing shell operation";
   int err = SHFileOperation(&file_operation);
+  if (g_bug108724_debug)
+    LOG(WARNING) << "Done: " << err;
 
   // Since we're passing flags to the operation telling it to be silent,
   // it's possible for the operation to be aborted/cancelled without err
@@ -135,7 +138,7 @@ bool DeleteAfterReboot(const FilePath& path) {
                         MOVEFILE_REPLACE_EXISTING) != FALSE;
 }
 
-bool Move(const FilePath& from_path, const FilePath& to_path) {
+bool MoveUnsafe(const FilePath& from_path, const FilePath& to_path) {
   base::ThreadRestrictions::AssertIOAllowed();
 
   // NOTE: I suspect we could support longer paths, but that would involve
@@ -171,26 +174,22 @@ bool Move(const FilePath& from_path, const FilePath& to_path) {
 
 bool ReplaceFile(const FilePath& from_path, const FilePath& to_path) {
   base::ThreadRestrictions::AssertIOAllowed();
-
-  // Make sure that the target file exists.
-  HANDLE target_file = ::CreateFile(
-      to_path.value().c_str(),
-      0,
-      FILE_SHARE_READ | FILE_SHARE_WRITE,
-      NULL,
-      CREATE_NEW,
-      FILE_ATTRIBUTE_NORMAL,
-      NULL);
-  if (target_file != INVALID_HANDLE_VALUE)
-    ::CloseHandle(target_file);
-  // When writing to a network share, we may not be able to change the ACLs.
-  // Ignore ACL errors then (REPLACEFILE_IGNORE_MERGE_ERRORS).
-  return ::ReplaceFile(to_path.value().c_str(),
-      from_path.value().c_str(), NULL,
-      REPLACEFILE_IGNORE_MERGE_ERRORS, NULL, NULL) ? true : false;
+  // Try a simple move first.  It will only succeed when |to_path| doesn't
+  // already exist.
+  if (::MoveFile(from_path.value().c_str(), to_path.value().c_str()))
+    return true;
+  // Try the full-blown replace if the move fails, as ReplaceFile will only
+  // succeed when |to_path| does exist. When writing to a network share, we may
+  // not be able to change the ACLs. Ignore ACL errors then
+  // (REPLACEFILE_IGNORE_MERGE_ERRORS).
+  if (::ReplaceFile(to_path.value().c_str(), from_path.value().c_str(), NULL,
+                    REPLACEFILE_IGNORE_MERGE_ERRORS, NULL, NULL)) {
+    return true;
+  }
+  return false;
 }
 
-bool CopyFile(const FilePath& from_path, const FilePath& to_path) {
+bool CopyFileUnsafe(const FilePath& from_path, const FilePath& to_path) {
   base::ThreadRestrictions::AssertIOAllowed();
 
   // NOTE: I suspect we could support longer paths, but that would involve
@@ -205,12 +204,16 @@ bool CopyFile(const FilePath& from_path, const FilePath& to_path) {
 
 bool ShellCopy(const FilePath& from_path, const FilePath& to_path,
                bool recursive) {
+  // WinXP SHFileOperation doesn't like trailing separators.
+  FilePath stripped_from = from_path.StripTrailingSeparators();
+  FilePath stripped_to = to_path.StripTrailingSeparators();
+
   base::ThreadRestrictions::AssertIOAllowed();
 
   // NOTE: I suspect we could support longer paths, but that would involve
   // analyzing all our usage of files.
-  if (from_path.value().length() >= MAX_PATH ||
-      to_path.value().length() >= MAX_PATH) {
+  if (stripped_from.value().length() >= MAX_PATH ||
+      stripped_to.value().length() >= MAX_PATH) {
     return false;
   }
 
@@ -220,9 +223,9 @@ bool ShellCopy(const FilePath& from_path, const FilePath& to_path,
   wchar_t double_terminated_path_from[MAX_PATH + 1] = {0};
   wchar_t double_terminated_path_to[MAX_PATH + 1] = {0};
 #pragma warning(suppress:4996)  // don't complain about wcscpy deprecation
-  wcscpy(double_terminated_path_from, from_path.value().c_str());
+  wcscpy(double_terminated_path_from, stripped_from.value().c_str());
 #pragma warning(suppress:4996)  // don't complain about wcscpy deprecation
-  wcscpy(double_terminated_path_to, to_path.value().c_str());
+  wcscpy(double_terminated_path_to, stripped_to.value().c_str());
 
   SHFILEOPSTRUCT file_operation = {0};
   file_operation.wFunc = FO_COPY;
@@ -329,177 +332,6 @@ bool GetFileCreationLocalTime(const std::wstring& filename,
   return GetFileCreationLocalTimeFromHandle(file_handle.Get(), creation_time);
 }
 
-bool ResolveShortcut(FilePath* path) {
-  base::ThreadRestrictions::AssertIOAllowed();
-
-  HRESULT result;
-  base::win::ScopedComPtr<IShellLink> i_shell_link;
-  bool is_resolved = false;
-
-  // Get pointer to the IShellLink interface
-  result = i_shell_link.CreateInstance(CLSID_ShellLink, NULL,
-                                       CLSCTX_INPROC_SERVER);
-  if (SUCCEEDED(result)) {
-    base::win::ScopedComPtr<IPersistFile> persist;
-    // Query IShellLink for the IPersistFile interface
-    result = persist.QueryFrom(i_shell_link);
-    if (SUCCEEDED(result)) {
-      WCHAR temp_path[MAX_PATH];
-      // Load the shell link
-      result = persist->Load(path->value().c_str(), STGM_READ);
-      if (SUCCEEDED(result)) {
-        // Try to find the target of a shortcut
-        result = i_shell_link->Resolve(0, SLR_NO_UI);
-        if (SUCCEEDED(result)) {
-          result = i_shell_link->GetPath(temp_path, MAX_PATH,
-                                  NULL, SLGP_UNCPRIORITY);
-          *path = FilePath(temp_path);
-          is_resolved = true;
-        }
-      }
-    }
-  }
-
-  return is_resolved;
-}
-
-bool CreateShortcutLink(const wchar_t *source, const wchar_t *destination,
-                        const wchar_t *working_dir, const wchar_t *arguments,
-                        const wchar_t *description, const wchar_t *icon,
-                        int icon_index, const wchar_t* app_id) {
-  base::ThreadRestrictions::AssertIOAllowed();
-
-  // Length of arguments and description must be less than MAX_PATH.
-  DCHECK(lstrlen(arguments) < MAX_PATH);
-  DCHECK(lstrlen(description) < MAX_PATH);
-
-  base::win::ScopedComPtr<IShellLink> i_shell_link;
-  base::win::ScopedComPtr<IPersistFile> i_persist_file;
-
-  // Get pointer to the IShellLink interface
-  HRESULT result = i_shell_link.CreateInstance(CLSID_ShellLink, NULL,
-                                               CLSCTX_INPROC_SERVER);
-  if (FAILED(result))
-    return false;
-
-  // Query IShellLink for the IPersistFile interface
-  result = i_persist_file.QueryFrom(i_shell_link);
-  if (FAILED(result))
-    return false;
-
-  if (FAILED(i_shell_link->SetPath(source)))
-    return false;
-
-  if (working_dir && FAILED(i_shell_link->SetWorkingDirectory(working_dir)))
-    return false;
-
-  if (arguments && FAILED(i_shell_link->SetArguments(arguments)))
-    return false;
-
-  if (description && FAILED(i_shell_link->SetDescription(description)))
-    return false;
-
-  if (icon && FAILED(i_shell_link->SetIconLocation(icon, icon_index)))
-    return false;
-
-  if (app_id && (base::win::GetVersion() >= base::win::VERSION_WIN7)) {
-    base::win::ScopedComPtr<IPropertyStore> property_store;
-    if (FAILED(property_store.QueryFrom(i_shell_link)))
-      return false;
-
-    if (!base::win::SetAppIdForPropertyStore(property_store, app_id))
-      return false;
-  }
-
-  result = i_persist_file->Save(destination, TRUE);
-  return SUCCEEDED(result);
-}
-
-bool UpdateShortcutLink(const wchar_t *source, const wchar_t *destination,
-                        const wchar_t *working_dir, const wchar_t *arguments,
-                        const wchar_t *description, const wchar_t *icon,
-                        int icon_index, const wchar_t* app_id) {
-  base::ThreadRestrictions::AssertIOAllowed();
-
-  // Length of arguments and description must be less than MAX_PATH.
-  DCHECK(lstrlen(arguments) < MAX_PATH);
-  DCHECK(lstrlen(description) < MAX_PATH);
-
-  // Get pointer to the IPersistFile interface and load existing link
-  base::win::ScopedComPtr<IShellLink> i_shell_link;
-  if (FAILED(i_shell_link.CreateInstance(CLSID_ShellLink, NULL,
-                                         CLSCTX_INPROC_SERVER)))
-    return false;
-
-  base::win::ScopedComPtr<IPersistFile> i_persist_file;
-  if (FAILED(i_persist_file.QueryFrom(i_shell_link)))
-    return false;
-
-  if (FAILED(i_persist_file->Load(destination, STGM_READWRITE)))
-    return false;
-
-  if (source && FAILED(i_shell_link->SetPath(source)))
-    return false;
-
-  if (working_dir && FAILED(i_shell_link->SetWorkingDirectory(working_dir)))
-    return false;
-
-  if (arguments && FAILED(i_shell_link->SetArguments(arguments)))
-    return false;
-
-  if (description && FAILED(i_shell_link->SetDescription(description)))
-    return false;
-
-  if (icon && FAILED(i_shell_link->SetIconLocation(icon, icon_index)))
-    return false;
-
-  if (app_id && base::win::GetVersion() >= base::win::VERSION_WIN7) {
-    base::win::ScopedComPtr<IPropertyStore> property_store;
-    if (FAILED(property_store.QueryFrom(i_shell_link)))
-      return false;
-
-    if (!base::win::SetAppIdForPropertyStore(property_store, app_id))
-      return false;
-  }
-
-  HRESULT result = i_persist_file->Save(destination, TRUE);
-
-  i_persist_file.Release();
-  i_shell_link.Release();
-
-  // If we successfully updated the icon, notify the shell that we have done so.
-  if (SUCCEEDED(result)) {
-    SHChangeNotify(SHCNE_ASSOCCHANGED, SHCNF_IDLIST | SHCNF_FLUSHNOWAIT,
-                   NULL, NULL);
-  }
-
-  return SUCCEEDED(result);
-}
-
-bool TaskbarPinShortcutLink(const wchar_t* shortcut) {
-  base::ThreadRestrictions::AssertIOAllowed();
-
-  // "Pin to taskbar" is only supported after Win7.
-  if (base::win::GetVersion() < base::win::VERSION_WIN7)
-    return false;
-
-  int result = reinterpret_cast<int>(ShellExecute(NULL, L"taskbarpin", shortcut,
-      NULL, NULL, 0));
-  return result > 32;
-}
-
-bool TaskbarUnpinShortcutLink(const wchar_t* shortcut) {
-  base::ThreadRestrictions::AssertIOAllowed();
-
-  // "Unpin from taskbar" is only supported after Win7.
-  if (base::win::GetVersion() < base::win::VERSION_WIN7)
-    return false;
-
-  int result = reinterpret_cast<int>(ShellExecute(NULL, L"taskbarunpin",
-      shortcut, NULL, NULL, 0));
-  return result > 32;
-}
-
 bool GetTempDir(FilePath* path) {
   base::ThreadRestrictions::AssertIOAllowed();
 
@@ -565,15 +397,17 @@ bool CreateTemporaryFileInDir(const FilePath& dir,
     return false;
   }
 
-  DWORD path_len = GetLongPathName(temp_name, temp_name, MAX_PATH);
-  if (path_len > MAX_PATH + 1 || path_len == 0) {
-    DPLOG(WARNING) << "Failed to get long path name for " << temp_name;
-    return false;
+  wchar_t long_temp_name[MAX_PATH + 1];
+  DWORD long_name_len = GetLongPathName(temp_name, long_temp_name, MAX_PATH);
+  if (long_name_len > MAX_PATH || long_name_len == 0) {
+    // GetLongPathName() failed, but we still have a temporary file.
+    *temp_file = FilePath(temp_name);
+    return true;
   }
 
-  std::wstring temp_file_str;
-  temp_file_str.assign(temp_name, path_len);
-  *temp_file = FilePath(temp_file_str);
+  FilePath::StringType long_temp_name_str;
+  long_temp_name_str.assign(long_temp_name, long_name_len);
+  *temp_file = FilePath(long_temp_name_str);
   return true;
 }
 
@@ -590,6 +424,8 @@ bool CreateTemporaryDirInDir(const FilePath& base_dir,
     // the one exists, keep trying another path name until we reach some limit.
     string16 new_dir_name;
     new_dir_name.assign(prefix);
+    new_dir_name.append(base::IntToString16(::base::GetCurrentProcId()));
+    new_dir_name.push_back('_');
     new_dir_name.append(base::IntToString16(rand() % kint16max));
 
     path_to_create = base_dir.Append(new_dir_name);
@@ -753,6 +589,38 @@ int WriteFile(const FilePath& filename, const char* data, int size) {
   return -1;
 }
 
+int AppendToFile(const FilePath& filename, const char* data, int size) {
+  base::ThreadRestrictions::AssertIOAllowed();
+  base::win::ScopedHandle file(CreateFile(filename.value().c_str(),
+                                          FILE_APPEND_DATA,
+                                          0,
+                                          NULL,
+                                          OPEN_EXISTING,
+                                          0,
+                                          NULL));
+  if (!file) {
+    DLOG(WARNING) << "CreateFile failed for path " << filename.value()
+                  << " error code=" << GetLastError();
+    return -1;
+  }
+
+  DWORD written;
+  BOOL result = ::WriteFile(file, data, size, &written, NULL);
+  if (result && static_cast<int>(written) == size)
+    return written;
+
+  if (!result) {
+    // WriteFile failed.
+    DLOG(WARNING) << "writing file " << filename.value()
+                  << " failed, error code=" << GetLastError();
+  } else {
+    // Didn't write all the bytes.
+    DLOG(WARNING) << "wrote" << written << " bytes to "
+                  << filename.value() << " expected " << size;
+  }
+  return -1;
+}
+
 // Gets the current working directory for the process.
 bool GetCurrentDirectory(FilePath* dir) {
   base::ThreadRestrictions::AssertIOAllowed();
@@ -782,7 +650,7 @@ bool SetCurrentDirectory(const FilePath& directory) {
 
 FileEnumerator::FileEnumerator(const FilePath& root_path,
                                bool recursive,
-                               FileType file_type)
+                               int file_type)
     : recursive_(recursive),
       file_type_(file_type),
       has_find_data_(false),
@@ -795,7 +663,7 @@ FileEnumerator::FileEnumerator(const FilePath& root_path,
 
 FileEnumerator::FileEnumerator(const FilePath& root_path,
                                bool recursive,
-                               FileType file_type,
+                               int file_type,
                                const FilePath::StringType& pattern)
     : recursive_(recursive),
       file_type_(file_type),
@@ -822,6 +690,7 @@ void FileEnumerator::GetFindInfo(FindInfo* info) {
   memcpy(info, &find_data_, sizeof(*info));
 }
 
+// static
 bool FileEnumerator::IsDirectory(const FindInfo& info) {
   return (info.dwFileAttributes & FILE_ATTRIBUTE_DIRECTORY) != 0;
 }
@@ -1103,72 +972,6 @@ bool NormalizeToNativeFilePath(const FilePath& path, FilePath* nt_path) {
   }
   ::UnmapViewOfFile(file_view);
   return success;
-}
-
-bool PreReadImage(const wchar_t* file_path, size_t size_to_read,
-                  size_t step_size) {
-  base::ThreadRestrictions::AssertIOAllowed();
-  if (base::win::GetVersion() > base::win::VERSION_XP) {
-    // Vista+ branch. On these OSes, the forced reads through the DLL actually
-    // slows warm starts. The solution is to sequentially read file contents
-    // with an optional cap on total amount to read.
-    base::win::ScopedHandle file(
-        CreateFile(file_path,
-                   GENERIC_READ,
-                   FILE_SHARE_READ | FILE_SHARE_WRITE | FILE_SHARE_DELETE,
-                   NULL,
-                   OPEN_EXISTING,
-                   FILE_FLAG_SEQUENTIAL_SCAN,
-                   NULL));
-
-    if (!file.IsValid())
-      return false;
-
-    // Default to 1MB sequential reads.
-    const DWORD actual_step_size = std::max(static_cast<DWORD>(step_size),
-                                            static_cast<DWORD>(1024*1024));
-    LPVOID buffer = ::VirtualAlloc(NULL,
-                                   actual_step_size,
-                                   MEM_COMMIT,
-                                   PAGE_READWRITE);
-
-    if (buffer == NULL)
-      return false;
-
-    DWORD len;
-    size_t total_read = 0;
-    while (::ReadFile(file, buffer, actual_step_size, &len, NULL) &&
-           len > 0 &&
-           (size_to_read ? total_read < size_to_read : true)) {
-      total_read += static_cast<size_t>(len);
-    }
-    ::VirtualFree(buffer, 0, MEM_RELEASE);
-  } else {
-    // WinXP branch. Here, reading the DLL from disk doesn't do
-    // what we want so instead we pull the pages into memory by loading
-    // the DLL and touching pages at a stride.
-    HMODULE dll_module = ::LoadLibraryExW(
-        file_path,
-        NULL,
-        LOAD_WITH_ALTERED_SEARCH_PATH | DONT_RESOLVE_DLL_REFERENCES);
-
-    if (!dll_module)
-      return false;
-
-    base::win::PEImage pe_image(dll_module);
-    PIMAGE_NT_HEADERS nt_headers = pe_image.GetNTHeaders();
-    size_t actual_size_to_read = size_to_read ? size_to_read :
-                                 nt_headers->OptionalHeader.SizeOfImage;
-    volatile uint8* touch = reinterpret_cast<uint8*>(dll_module);
-    size_t offset = 0;
-    while (offset < actual_size_to_read) {
-      uint8 unused = *(touch + offset);
-      offset += step_size;
-    }
-    FreeLibrary(dll_module);
-  }
-
-  return true;
 }
 
 }  // namespace file_util

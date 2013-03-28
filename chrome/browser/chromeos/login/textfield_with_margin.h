@@ -4,7 +4,6 @@
 
 #ifndef CHROME_BROWSER_CHROMEOS_LOGIN_TEXTFIELD_WITH_MARGIN_H_
 #define CHROME_BROWSER_CHROMEOS_LOGIN_TEXTFIELD_WITH_MARGIN_H_
-#pragma once
 
 #include "base/compiler_specific.h"
 #include "ui/views/controls/textfield/textfield.h"
@@ -21,7 +20,7 @@ class TextfieldWithMargin : public views::Textfield {
  protected:
   // Overridden from views::View:
   virtual void Layout() OVERRIDE;
-  virtual bool OnKeyPressed(const views::KeyEvent& e) OVERRIDE;
+  virtual bool OnKeyPressed(const ui::KeyEvent& e) OVERRIDE;
 
  private:
   DISALLOW_COPY_AND_ASSIGN(TextfieldWithMargin);

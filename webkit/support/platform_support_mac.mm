@@ -1,10 +1,11 @@
-// Copyright (c) 2011 The Chromium Authors. All rights reserved.
+// Copyright (c) 2012 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
 #include "webkit/support/platform_support.h"
 
 #import <AppKit/AppKit.h>
+#include <AvailabilityMacros.h>
 #import <Foundation/Foundation.h>
 #import <objc/objc-runtime.h>
 
@@ -17,7 +18,6 @@
 #include "base/string16.h"
 #include "base/utf_string_conversions.h"
 #include "grit/webkit_resources.h"
-#include "third_party/WebKit/Source/WebKit/mac/WebCoreSupport/WebSystemInterface.h"
 #include "ui/base/resource/data_pack.h"
 #include "webkit/plugins/npapi/plugin_list.h"
 #include "webkit/support/test_webkit_platform_support.h"
@@ -32,10 +32,8 @@ static NSAutoreleasePool* autorelease_pool;
 
 void BeforeInitialize(bool unit_test_mode) {
   [CrDrtApplication sharedApplication];
-  // Need to initialize NSAutoreleasePool before InitWebCoreSystemInterface().
   autorelease_pool = [[NSAutoreleasePool alloc] init];
   DCHECK(autorelease_pool);
-  InitWebCoreSystemInterface();
 }
 
 #if OBJC_API_VERSION == 2
@@ -101,40 +99,57 @@ static void SwizzleNSPasteboard() {
 }
 
 void AfterInitialize(bool unit_test_mode) {
-  if (unit_test_mode)
-    return;  // We don't have a resource pack when running the unit-tests.
-
   // Load a data pack.
-  g_resource_data_pack = new ui::DataPack;
-  NSString* resource_path =
-      [base::mac::FrameworkBundle() pathForResource:@"DumpRenderTree"
-                                             ofType:@"pak"];
-  FilePath resources_pak_path([resource_path fileSystemRepresentation]);
-  if (!g_resource_data_pack->Load(resources_pak_path)) {
+  g_resource_data_pack = new ui::DataPack(ui::SCALE_FACTOR_100P);
+  FilePath resources_pak_path;
+  if (unit_test_mode) {
+    PathService::Get(base::DIR_EXE, &resources_pak_path);
+    resources_pak_path = resources_pak_path.Append("DumpRenderTree.app")
+        .Append("Contents")
+        .Append("Resources")
+        .Append("DumpRenderTree.pak");
+  } else {
+    NSString* resource_path =
+        [base::mac::FrameworkBundle() pathForResource:@"DumpRenderTree"
+                                               ofType:@"pak"];
+    resources_pak_path = FilePath([resource_path fileSystemRepresentation]);
+  }
+  if (!g_resource_data_pack->LoadFromPath(resources_pak_path)) {
     LOG(FATAL) << "failed to load DumpRenderTree.pak";
   }
+
+  if (unit_test_mode)
+    return;
 
   // Load font files in the resource folder.
   static const char* const fontFileNames[] = {
       "AHEM____.TTF",
-      // We don't register WebKitWeightWather fonts because of
-      // webkit.org/b/50709.
+      "WebKitWeightWatcher100.ttf",
+      "WebKitWeightWatcher200.ttf",
+      "WebKitWeightWatcher300.ttf",
+      "WebKitWeightWatcher400.ttf",
+      "WebKitWeightWatcher500.ttf",
+      "WebKitWeightWatcher600.ttf",
+      "WebKitWeightWatcher700.ttf",
+      "WebKitWeightWatcher800.ttf",
+      "WebKitWeightWatcher900.ttf",
   };
 
-  NSString* resources = [[NSBundle mainBundle] resourcePath];
+  NSMutableArray* font_urls = [NSMutableArray array];
+  NSURL* resources_directory = [[NSBundle mainBundle] resourceURL];
   for (unsigned i = 0; i < arraysize(fontFileNames); ++i) {
-    const char* resource_path = [[resources stringByAppendingPathComponent:
-        [NSString stringWithUTF8String:fontFileNames[i]]] UTF8String];
-    FSRef resource_ref;
-    const UInt8* uint8_resource_path
-        = reinterpret_cast<const UInt8*>(resource_path);
-    if (FSPathMakeRef(uint8_resource_path, &resource_ref, nil) != noErr) {
-      DLOG(FATAL) << "Fail to open " << resource_path;
-    }
-    if (ATSFontActivateFromFileReference(&resource_ref, kATSFontContextLocal,
-        kATSFontFormatUnspecified, 0, kATSOptionFlagsDefault, 0) != noErr) {
-      DLOG(FATAL) << "Fail to activate font: " << resource_path;
-    }
+    NSURL* font_url = [resources_directory
+        URLByAppendingPathComponent:[NSString
+            stringWithUTF8String:fontFileNames[i]]];
+    [font_urls addObject:[font_url absoluteURL]];
+  }
+
+  CFArrayRef errors = 0;
+  if (!CTFontManagerRegisterFontsForURLs((CFArrayRef)font_urls,
+                                         kCTFontManagerScopeProcess,
+                                         &errors)) {
+    DLOG(FATAL) << "Fail to activate fonts.";
+    CFRelease(errors);
   }
 
   SwizzleNSPasteboard();
@@ -159,6 +174,10 @@ void AfterShutdown() {
 }  // namespace webkit_support
 
 string16 TestWebKitPlatformSupport::GetLocalizedString(int message_id) {
+  // |g_resource_data_pack| is null on unit tests.
+  // But som unit tests reach GetLocalizedString().
+  if (!g_resource_data_pack)
+    return string16();
   base::StringPiece res;
   if (!g_resource_data_pack->GetStringPiece(message_id, &res)) {
     LOG(FATAL) << "failed to load webkit string with id " << message_id;
@@ -194,7 +213,9 @@ static FilePath GetResourcesFilePath() {
   return path.AppendASCII("Resources");
 }
 
-base::StringPiece TestWebKitPlatformSupport::GetDataResource(int resource_id) {
+base::StringPiece TestWebKitPlatformSupport::GetDataResource(
+    int resource_id,
+    ui::ScaleFactor scale_factor) {
   switch (resource_id) {
   case IDR_BROKENIMAGE: {
     // Use webkit's broken image icon (16x16)
@@ -205,6 +226,7 @@ base::StringPiece TestWebKitPlatformSupport::GetDataResource(int resource_id) {
       // use a PNG. The GIF doesn't have the color range needed to correctly
       // match the TIFF they use in Safari.
       path = path.AppendASCII("missingImage.png");
+      file_util::AbsolutePath(&path);
       bool success = file_util::ReadFileToString(path, &broken_image_data);
       if (!success) {
         LOG(FATAL) << "Failed reading: " << path.value();
@@ -218,6 +240,7 @@ base::StringPiece TestWebKitPlatformSupport::GetDataResource(int resource_id) {
     if (resize_corner_data.empty()) {
       FilePath path = GetResourcesFilePath();
       path = path.AppendASCII("textAreaResizeCorner.png");
+      file_util::AbsolutePath(&path);
       bool success = file_util::ReadFileToString(path, &resize_corner_data);
       if (!success) {
         LOG(FATAL) << "Failed reading: " << path.value();

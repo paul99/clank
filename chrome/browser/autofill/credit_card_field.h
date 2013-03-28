@@ -4,7 +4,6 @@
 
 #ifndef CHROME_BROWSER_AUTOFILL_CREDIT_CARD_FIELD_H_
 #define CHROME_BROWSER_AUTOFILL_CREDIT_CARD_FIELD_H_
-#pragma once
 
 #include <vector>
 
@@ -19,7 +18,8 @@ class AutofillScanner;
 
 class CreditCardField : public FormField {
  public:
-  static FormField* Parse(AutofillScanner* scanner);
+  static FormField* Parse(AutofillScanner* scanner,
+                          bool parse_new_field_types);
 
  protected:
   // FormField:
@@ -28,6 +28,7 @@ class CreditCardField : public FormField {
  private:
   FRIEND_TEST_ALL_PREFIXES(CreditCardFieldTest, ParseMiniumCreditCard);
   FRIEND_TEST_ALL_PREFIXES(CreditCardFieldTest, ParseFullCreditCard);
+  FRIEND_TEST_ALL_PREFIXES(CreditCardFieldTest, ParseCreditCardType);
   FRIEND_TEST_ALL_PREFIXES(CreditCardFieldTest, ParseExpMonthYear);
   FRIEND_TEST_ALL_PREFIXES(CreditCardFieldTest, ParseExpMonthYear2);
   FRIEND_TEST_ALL_PREFIXES(CreditCardFieldTest, ParseExpField);

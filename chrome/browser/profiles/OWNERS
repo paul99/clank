@@ -1,8 +1,9 @@
-set noparent
 mirandac@chromium.org
 erg@chromium.org
 sail@chromium.org
 davemoore@chromium.org
 rlp@chromium.org
+
 # Primarily for ProfileIOData and friends.
 willchan@chromium.org
+mmenke@chromium.org

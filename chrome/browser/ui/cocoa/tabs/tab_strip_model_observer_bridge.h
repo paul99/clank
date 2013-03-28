@@ -1,18 +1,20 @@
-// Copyright (c) 2011 The Chromium Authors. All rights reserved.
+// Copyright (c) 2012 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
 #ifndef CHROME_BROWSER_UI_COCOA_TABS_TAB_STRIP_MODEL_OBSERVER_BRIDGE_H_
 #define CHROME_BROWSER_UI_COCOA_TABS_TAB_STRIP_MODEL_OBSERVER_BRIDGE_H_
-#pragma once
 
 #import <Foundation/Foundation.h>
 
 #include "base/compiler_specific.h"
-#include "chrome/browser/tabs/tab_strip_model_observer.h"
+#include "chrome/browser/ui/tabs/tab_strip_model_observer.h"
 
-class TabContentsWrapper;
 class TabStripModel;
+
+namespace content {
+class WebContents;
+}
 
 // A C++ bridge class to handle receiving notifications from the C++ tab strip
 // model. When the caller allocates a bridge, it automatically registers for
@@ -25,27 +27,29 @@ class TabStripModelObserverBridge : public TabStripModelObserver {
   virtual ~TabStripModelObserverBridge();
 
   // Overridden from TabStripModelObserver
-  virtual void TabInsertedAt(TabContentsWrapper* contents,
+  virtual void TabInsertedAt(content::WebContents* contents,
                              int index,
                              bool foreground) OVERRIDE;
   virtual void TabClosingAt(TabStripModel* tab_strip_model,
-                            TabContentsWrapper* contents,
+                            content::WebContents* contents,
                             int index) OVERRIDE;
-  virtual void TabDetachedAt(TabContentsWrapper* contents, int index) OVERRIDE;
-  virtual void ActiveTabChanged(TabContentsWrapper* old_contents,
-                                TabContentsWrapper* new_contents,
+  virtual void TabDetachedAt(content::WebContents* contents,
+                             int index) OVERRIDE;
+  virtual void ActiveTabChanged(content::WebContents* old_contents,
+                                content::WebContents* new_contents,
                                 int index,
                                 bool user_gesture) OVERRIDE;
-  virtual void TabMoved(TabContentsWrapper* contents,
+  virtual void TabMoved(content::WebContents* contents,
                         int from_index,
                         int to_index) OVERRIDE;
-  virtual void TabChangedAt(TabContentsWrapper* contents, int index,
+  virtual void TabChangedAt(content::WebContents* contents,
+                            int index,
                             TabChangeType change_type) OVERRIDE;
   virtual void TabReplacedAt(TabStripModel* tab_strip_model,
-                             TabContentsWrapper* old_contents,
-                             TabContentsWrapper* new_contents,
+                             content::WebContents* old_contents,
+                             content::WebContents* new_contents,
                              int index) OVERRIDE;
-  virtual void TabMiniStateChanged(TabContentsWrapper* contents,
+  virtual void TabMiniStateChanged(content::WebContents* contents,
                                    int index) OVERRIDE;
   virtual void TabStripEmpty() OVERRIDE;
   virtual void TabStripModelDeleted() OVERRIDE;
@@ -59,27 +63,27 @@ class TabStripModelObserverBridge : public TabStripModelObserver {
 // Cocoa object to receive updates about changes to a tab strip model. It is
 // ok to not implement them, the calling code checks before calling.
 @interface NSObject(TabStripModelBridge)
-- (void)insertTabWithContents:(TabContentsWrapper*)contents
+- (void)insertTabWithContents:(content::WebContents*)contents
                       atIndex:(NSInteger)index
                  inForeground:(bool)inForeground;
-- (void)tabClosingWithContents:(TabContentsWrapper*)contents
+- (void)tabClosingWithContents:(content::WebContents*)contents
                        atIndex:(NSInteger)index;
-- (void)tabDetachedWithContents:(TabContentsWrapper*)contents
+- (void)tabDetachedWithContents:(content::WebContents*)contents
                         atIndex:(NSInteger)index;
-- (void)activateTabWithContents:(TabContentsWrapper*)newContents
-               previousContents:(TabContentsWrapper*)oldContents
+- (void)activateTabWithContents:(content::WebContents*)newContents
+               previousContents:(content::WebContents*)oldContents
                         atIndex:(NSInteger)index
                     userGesture:(bool)wasUserGesture;
-- (void)tabMovedWithContents:(TabContentsWrapper*)contents
-                    fromIndex:(NSInteger)from
-                      toIndex:(NSInteger)to;
-- (void)tabChangedWithContents:(TabContentsWrapper*)contents
+- (void)tabMovedWithContents:(content::WebContents*)contents
+                   fromIndex:(NSInteger)from
+                     toIndex:(NSInteger)to;
+- (void)tabChangedWithContents:(content::WebContents*)contents
                        atIndex:(NSInteger)index
                     changeType:(TabStripModelObserver::TabChangeType)change;
-- (void)tabReplacedWithContents:(TabContentsWrapper*)newContents
-               previousContents:(TabContentsWrapper*)oldContents
+- (void)tabReplacedWithContents:(content::WebContents*)newContents
+               previousContents:(content::WebContents*)oldContents
                         atIndex:(NSInteger)index;
-- (void)tabMiniStateChangedWithContents:(TabContentsWrapper*)contents
+- (void)tabMiniStateChangedWithContents:(content::WebContents*)contents
                                 atIndex:(NSInteger)index;
 - (void)tabStripEmpty;
 - (void)tabStripModelDeleted;

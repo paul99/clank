@@ -1,4 +1,4 @@
-// Copyright (c) 2011 The Chromium Authors. All rights reserved.
+// Copyright (c) 2012 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 //
@@ -6,7 +6,6 @@
 
 #ifndef CHROME_BROWSER_SAFE_BROWSING_SAFE_BROWSING_UTIL_H_
 #define CHROME_BROWSER_SAFE_BROWSING_SAFE_BROWSING_UTIL_H_
-#pragma once
 
 #include <cstring>
 #include <deque>
@@ -23,10 +22,9 @@ class SBEntry;
 // A truncated hash's type.
 typedef int32 SBPrefix;
 
-// Container for holding a chunk URL and the MAC of the contents of the URL.
+// Container for holding a chunk URL and the list it belongs to.
 struct ChunkUrl {
   std::string url;
-  std::string mac;
   std::string list_name;
 };
 
@@ -129,6 +127,27 @@ struct SBChunkDelete {
   std::vector<ChunkRange> chunk_del;
 };
 
+// Different types of threats that SafeBrowsing protects against.
+enum SBThreatType {
+  // No threat at all.
+  SB_THREAT_TYPE_SAFE,
+
+  // The URL is being used for phishing.
+  SB_THREAT_TYPE_URL_PHISHING,
+
+  // The URL hosts malware.
+  SB_THREAT_TYPE_URL_MALWARE,
+
+  // The download URL is malware.
+  SB_THREAT_TYPE_BINARY_MALWARE_URL,
+
+  // The hash of the download contents is malware.
+  SB_THREAT_TYPE_BINARY_MALWARE_HASH,
+
+  // Url detected by the client-side phishing model.  Note that unlike the
+  // above values, this does not correspond to a downloaded list.
+  SB_THREAT_TYPE_CLIENT_SIDE_PHISHING_URL,
+};
 
 // SBEntry ---------------------------------------------------------------------
 
@@ -318,12 +337,6 @@ bool IsPhishingList(const std::string& list_name);
 bool IsMalwareList(const std::string& list_name);
 bool IsBadbinurlList(const std::string& list_name);
 bool IsBadbinhashList(const std::string& list_name);
-
-// Returns 'true' if 'mac' can be verified using 'key' and 'data'.
-bool VerifyMAC(const std::string& key,
-               const std::string& mac,
-               const char* data,
-               int data_length);
 
 GURL GeneratePhishingReportUrl(const std::string& report_page,
                                const std::string& url_to_report,

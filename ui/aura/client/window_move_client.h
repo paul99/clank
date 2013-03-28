@@ -4,24 +4,33 @@
 
 #ifndef UI_AURA_CLIENT_WINDOW_MOVE_CLIENT_H_
 #define UI_AURA_CLIENT_WINDOW_MOVE_CLIENT_H_
-#pragma once
 
 #include "ui/aura/aura_export.h"
+#include "ui/gfx/vector2d.h"
+
+namespace gfx {
+class Point;
+}
 
 namespace aura {
 class Window;
 namespace client {
 
-// A property key to store a client that handles window moves. The type of
-// the value is |aura::client::WindowMoveClient*|.
-AURA_EXPORT extern const char kWindowMoveClientKey[];
+enum WindowMoveResult {
+  MOVE_SUCCESSFUL,  // Moving window was successful.
+  MOVE_CANCELED    // Moving window was canceled.
+};
 
 // An interface implemented by an object that manages programatically keyed
 // window moving.
 class AURA_EXPORT WindowMoveClient {
  public:
-  // Starts a nested message loop for moving the window.
-  virtual void RunMoveLoop(Window* window) = 0;
+  // Starts a nested message loop for moving the window. |drag_offset| is the
+  // offset from the window origin to the cursor when the drag was started.
+  // Returns MOVE_SUCCESSFUL if the move has completed successfully, or
+  // MOVE_CANCELED otherwise.
+  virtual WindowMoveResult RunMoveLoop(Window* window,
+                                       const gfx::Vector2d& drag_offset) = 0;
 
   // Ends a previously started move loop.
   virtual void EndMoveLoop() = 0;

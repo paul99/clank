@@ -10,10 +10,10 @@
 #include "skia/ext/image_operations.h"
 
 // TODO(pkasting): skia/ext should not depend on base/!
+#include "base/containers/stack_container.h"
 #include "base/debug/trace_event.h"
 #include "base/logging.h"
 #include "base/metrics/histogram.h"
-#include "base/stack_container.h"
 #include "base/time.h"
 #include "build/build_config.h"
 #include "skia/ext/convolver.h"
@@ -232,8 +232,8 @@ void ResizeFilter::ComputeFilters(int src_size,
   // Speed up the divisions below by turning them into multiplies.
   float inv_scale = 1.0f / scale;
 
-  StackVector<float, 64> filter_values;
-  StackVector<int16, 64> fixed_filter_values;
+  base::StackVector<float, 64> filter_values;
+  base::StackVector<int16, 64> fixed_filter_values;
 
   // Loop over all pixels in the output range. We will generate one set of
   // filter values for each one. Those values will tell us how to blend the
@@ -251,11 +251,7 @@ void ResizeFilter::ComputeFilters(int src_size,
     // downscale should "cover" the pixels around the pixel with *its center*
     // at coordinates (2.5, 2.5) in the source, not those around (0, 0).
     // Hence we need to scale coordinates (0.5, 0.5), not (0, 0).
-    // TODO(evannier): this code is therefore incorrect and should read:
-    // float src_pixel = (static_cast<float>(dest_subset_i) + 0.5f) * inv_scale;
-    // I leave it incorrect, because changing it would require modifying
-    // the results for the webkit test, which I will do in a subsequent checkin.
-    float src_pixel = dest_subset_i * inv_scale;
+    float src_pixel = (static_cast<float>(dest_subset_i) + 0.5f) * inv_scale;
 
     // Compute the (inclusive) range of source pixels the filter covers.
     int src_begin = std::max(0, FloorInt(src_pixel - src_support));
@@ -272,11 +268,8 @@ void ResizeFilter::ComputeFilters(int src_size,
       // example used above the distance from the center of the filter to
       // the pixel with coordinates (2, 2) should be 0, because its center
       // is at (2.5, 2.5).
-      // TODO(evannier): as above (in regards to the 0.5 pixel error),
-      // this code is incorrect, but is left it for the same reasons.
-      // float src_filter_dist =
-      //     ((static_cast<float>(cur_filter_pixel) + 0.5f) - src_pixel);
-      float src_filter_dist = cur_filter_pixel - src_pixel;
+      float src_filter_dist =
+          ((static_cast<float>(cur_filter_pixel) + 0.5f) - src_pixel);
 
       // Since the filter really exists in dest space, map it there.
       float dest_filter_dist = src_filter_dist * clamped_scale;
@@ -367,7 +360,7 @@ SkBitmap ImageOperations::ResizeSubpixel(const SkBitmap& source,
                "dst_pixels", dest_width*dest_height);
   // Currently only works on Linux/BSD because these are the only platforms
   // where SkFontHost::GetSubpixelOrder is defined.
-#if defined(OS_POSIX) && !defined(OS_MACOSX) && !defined(OS_ANDROID)
+#if defined(OS_LINUX) && !defined(GTV)
   // Understand the display.
   const SkFontHost::LCDOrder order = SkFontHost::GetSubpixelOrder();
   const SkFontHost::LCDOrientation orientation =
@@ -415,7 +408,7 @@ SkBitmap ImageOperations::ResizeSubpixel(const SkBitmap& source,
     uint32* src = src_row;
     uint32* dst = dst_row;
     for (int x = 0; x < dest_subset.width(); x++, src += w, dst++) {
-      uint8 r, g, b, a;
+      uint8 r = 0, g = 0, b = 0, a = 0;
       switch (order) {
         case SkFontHost::kRGB_LCDOrder:
           switch (orientation) {
@@ -449,6 +442,8 @@ SkBitmap ImageOperations::ResizeSubpixel(const SkBitmap& source,
               break;
           }
           break;
+        case SkFontHost::kNONE_LCDOrder:
+          NOTREACHED();
       }
       // Premultiplied alpha is very fragile.
       a = a > r ? a : r;
@@ -463,7 +458,7 @@ SkBitmap ImageOperations::ResizeSubpixel(const SkBitmap& source,
   return result;
 #else
   return SkBitmap();
-#endif  // OS_POSIX && !OS_MACOSX
+#endif  // OS_POSIX && !OS_MACOSX && !defined(OS_ANDROID)
 }
 
 // static

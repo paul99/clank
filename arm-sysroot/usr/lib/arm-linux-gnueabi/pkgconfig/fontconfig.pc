@@ -1,0 +1,11 @@
+prefix=/usr
+exec_prefix=${prefix}
+libdir=${prefix}/lib/arm-linux-gnueabi
+includedir=${prefix}/include
+
+Name: Fontconfig
+Description: Font configuration and customization library
+Version: 2.8.0
+Libs: -L${libdir} -lfontconfig
+Libs.private:  -lexpat -L/usr/lib/arm-linux-gnueabi -lfreetype -lz 
+Cflags: -I${includedir}

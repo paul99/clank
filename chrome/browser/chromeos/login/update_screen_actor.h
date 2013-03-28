@@ -1,15 +1,24 @@
-// Copyright (c) 2011 The Chromium Authors. All rights reserved.
+// Copyright (c) 2012 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
 #ifndef CHROME_BROWSER_CHROMEOS_LOGIN_UPDATE_SCREEN_ACTOR_H_
 #define CHROME_BROWSER_CHROMEOS_LOGIN_UPDATE_SCREEN_ACTOR_H_
-#pragma once
+
+#include "base/time.h"
 
 namespace chromeos {
 
 class UpdateScreenActor {
  public:
+  // Indices for corresponding info messages during update stage.
+  enum ProgressMessage {
+    PROGRESS_MESSAGE_UPDATE_AVAILABLE = 0,
+    PROGRESS_MESSAGE_INSTALLING_UPDATE,
+    PROGRESS_MESSAGE_VERIFYING,
+    PROGRESS_MESSAGE_FINALIZING
+  };
+
   class Delegate {
    public:
     virtual ~Delegate() {}
@@ -37,11 +46,20 @@ class UpdateScreenActor {
   // Sets current progress in percents.
   virtual void SetProgress(int progress) = 0;
 
-  // Shows screen curtains.
-  virtual void ShowCurtain(bool enable) = 0;
+  // Shows estimated time left message.
+  virtual void ShowEstimatedTimeLeft(bool visible) = 0;
 
-  // Shows label for "Preparing updates" state.
-  virtual void ShowPreparingUpdatesInfo(bool visible) = 0;
+  // Sets current estimation for time left in the downloading stage.
+  virtual void SetEstimatedTimeLeft(const base::TimeDelta& time) = 0;
+
+  // Shows message under progress bar.
+  virtual void ShowProgressMessage(bool visible) = 0;
+
+  // Sets message under progress bar.
+  virtual void SetProgressMessage(ProgressMessage message) = 0;
+
+  // Shows screen curtains.
+  virtual void ShowCurtain(bool visible) = 0;
 };
 
 }  // namespace chromeos

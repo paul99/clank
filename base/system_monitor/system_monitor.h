@@ -1,13 +1,19 @@
-// Copyright (c) 2011 The Chromium Authors. All rights reserved.
+// Copyright (c) 2012 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
 #ifndef BASE_SYSTEM_MONITOR_SYSTEM_MONITOR_H_
 #define BASE_SYSTEM_MONITOR_SYSTEM_MONITOR_H_
-#pragma once
+
+#include <map>
+#include <string>
+#include <vector>
 
 #include "base/base_export.h"
 #include "base/basictypes.h"
+#include "base/file_path.h"
+#include "base/string16.h"
+#include "base/synchronization/lock.h"
 #include "build/build_config.h"
 
 // Windows HiRes timers drain the battery faster so we need to know the battery
@@ -23,10 +29,14 @@
 #include "base/timer.h"
 #endif  // defined(ENABLE_BATTERY_MONITORING)
 
-#if defined(OS_MACOSX)
+#if defined(OS_MACOSX) && !defined(OS_IOS)
 #include <IOKit/pwr_mgt/IOPMLib.h>
 #include <IOKit/IOMessage.h>
-#endif  // OS_MACOSX
+#endif  // OS_MACOSX && !OS_IOS
+
+#if defined(OS_IOS)
+#include <objc/runtime.h>
+#endif  // OS_IOS
 
 namespace base {
 
@@ -42,6 +52,29 @@ class BASE_EXPORT SystemMonitor {
     RESUME_EVENT        // The system is being resumed.
   };
 
+  // Type of devices whose change need to be monitored, such as add/remove.
+  enum DeviceType {
+    DEVTYPE_AUDIO_CAPTURE,  // Audio capture device, e.g., microphone.
+    DEVTYPE_VIDEO_CAPTURE,  // Video capture device, e.g., webcam.
+    DEVTYPE_UNKNOWN,  // Other devices.
+  };
+
+  struct BASE_EXPORT RemovableStorageInfo {
+    RemovableStorageInfo();
+    RemovableStorageInfo(const std::string& id,
+                         const string16& device_name,
+                         const FilePath::StringType& device_location);
+
+    // Unique device id - persists between device attachments.
+    std::string device_id;
+
+    // Human readable removable storage device name.
+    string16 name;
+
+    // Current attached removable storage device location.
+    FilePath::StringType location;
+  };
+
   // Create SystemMonitor. Only one SystemMonitor instance per application
   // is allowed.
   SystemMonitor();
@@ -55,8 +88,15 @@ class BASE_EXPORT SystemMonitor {
   //
   // This function must be called before instantiating an instance of the class
   // and before the Sandbox is initialized.
+#if !defined(OS_IOS)
   static void AllocateSystemIOPorts();
-#endif
+#else
+  static void AllocateSystemIOPorts() {}
+#endif  // OS_IOS
+#endif  // OS_MACOSX
+
+  // Returns information for attached removable storage.
+  std::vector<RemovableStorageInfo> GetAttachedRemovableStorage() const;
 
   //
   // Power-related APIs
@@ -93,7 +133,16 @@ class BASE_EXPORT SystemMonitor {
   class BASE_EXPORT DevicesChangedObserver {
    public:
     // Notification that the devices connected to the system have changed.
-    virtual void OnDevicesChanged() {}
+    // This is only implemented on Windows currently.
+    virtual void OnDevicesChanged(DeviceType device_type) {}
+
+    // When a removable storage device is attached or detached, one of these
+    // two events is triggered.
+    virtual void OnRemovableStorageAttached(
+        const std::string& id,
+        const string16& name,
+        const FilePath::StringType& location) {}
+    virtual void OnRemovableStorageDetached(const std::string& id) {}
 
    protected:
     virtual ~DevicesChangedObserver() {}
@@ -111,6 +160,10 @@ class BASE_EXPORT SystemMonitor {
   void RemovePowerObserver(PowerObserver* obs);
   void RemoveDevicesChangedObserver(DevicesChangedObserver* obs);
 
+  // The ProcessFoo() style methods are a broken pattern and should not
+  // be copied. Any significant addition to this class is blocked on
+  // refactoring to improve the state of affairs. See http://crbug.com/149059
+
 #if defined(OS_WIN)
   // Windows-specific handling of a WM_POWERBROADCAST message.
   // Embedders of this API should hook their top-level window
@@ -122,9 +175,16 @@ class BASE_EXPORT SystemMonitor {
   void ProcessPowerMessage(PowerEvent event_id);
 
   // Cross-platform handling of a device change event.
-  void ProcessDevicesChanged();
+  void ProcessDevicesChanged(DeviceType device_type);
+  void ProcessRemovableStorageAttached(const std::string& id,
+                                       const string16& name,
+                                       const FilePath::StringType& location);
+  void ProcessRemovableStorageDetached(const std::string& id);
 
  private:
+  // Mapping of unique device id to device info tuple.
+  typedef std::map<std::string, RemovableStorageInfo> RemovableStorageMap;
+
 #if defined(OS_MACOSX)
   void PlatformInit();
   void PlatformDestroy();
@@ -140,7 +200,11 @@ class BASE_EXPORT SystemMonitor {
   void BatteryCheck();
 
   // Functions to trigger notifications.
-  void NotifyDevicesChanged();
+  void NotifyDevicesChanged(DeviceType device_type);
+  void NotifyRemovableStorageAttached(const std::string& id,
+                                      const string16& name,
+                                      const FilePath::StringType& location);
+  void NotifyRemovableStorageDetached(const std::string& id);
   void NotifyPowerStateChange();
   void NotifySuspend();
   void NotifyResume();
@@ -154,6 +218,16 @@ class BASE_EXPORT SystemMonitor {
 #if defined(ENABLE_BATTERY_MONITORING)
   base::OneShotTimer<SystemMonitor> delayed_battery_check_;
 #endif
+
+#if defined(OS_IOS)
+  // Holds pointers to system event notification observers.
+  std::vector<id> notification_observers_;
+#endif
+
+  // For manipulating removable_storage_map_ structure.
+  mutable base::Lock removable_storage_lock_;
+  // Map of all the attached removable storage devices.
+  RemovableStorageMap removable_storage_map_;
 
   DISALLOW_COPY_AND_ASSIGN(SystemMonitor);
 };

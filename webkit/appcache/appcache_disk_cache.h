@@ -10,14 +10,14 @@
 
 #include "base/memory/scoped_ptr.h"
 #include "net/disk_cache/disk_cache.h"
-#include "webkit/appcache/appcache_export.h"
 #include "webkit/appcache/appcache_response.h"
+#include "webkit/storage/webkit_storage_export.h"
 
 namespace appcache {
 
 // An implementation of AppCacheDiskCacheInterface that
 // uses net::DiskCache as the backing store.
-class APPCACHE_EXPORT AppCacheDiskCache
+class WEBKIT_STORAGE_EXPORT AppCacheDiskCache
     : public AppCacheDiskCacheInterface {
  public:
   AppCacheDiskCache();
@@ -64,19 +64,10 @@ class APPCACHE_EXPORT AppCacheDiskCache
     Entry** entry;
     net::CompletionCallback callback;
 
-    PendingCall()
-        : call_type(CREATE),
-          key(0),
-          entry(NULL) {
-    }
+    PendingCall();
 
     PendingCall(PendingCallType call_type, int64 key,
-                Entry** entry, const net::CompletionCallback& callback)
-        : call_type(call_type),
-          key(key),
-          entry(entry),
-          callback(callback) {
-    }
+                Entry** entry, const net::CompletionCallback& callback);
 
     ~PendingCall();
   };
@@ -107,4 +98,3 @@ class APPCACHE_EXPORT AppCacheDiskCache
 }  // namespace appcache
 
 #endif  // WEBKIT_APPCACHE_APPCACHE_DISK_CACHE_H_
-

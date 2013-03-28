@@ -1,4 +1,4 @@
-// Copyright (c) 2011 The Chromium Authors. All rights reserved.
+// Copyright (c) 2012 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -8,9 +8,6 @@
 #include "base/bind_helpers.h"
 #include "base/metrics/histogram.h"
 #include "chrome/browser/profiles/profile.h"
-#if defined(OS_ANDROID)
-#include "chrome/browser/sessions/session_restore.h"
-#endif
 #include "chrome/browser/sessions/tab_restore_service_delegate.h"
 #include "chrome/browser/sessions/tab_restore_service_factory.h"
 #include "chrome/browser/ui/webui/ntp/new_tab_ui.h"
@@ -19,13 +16,17 @@
 #include "content/public/browser/web_contents.h"
 #include "content/public/browser/web_ui.h"
 
+#if defined(OS_ANDROID)
+#include "chrome/browser/sessions/session_restore.h"
+#endif
+
 namespace {
 
 void TabToValue(const TabRestoreService::Tab& tab,
                 DictionaryValue* dictionary) {
   const TabNavigation& current_navigation =
       tab.navigations.at(tab.current_navigation_index);
-  NewTabUI::SetURLTitleAndDirection(dictionary, current_navigation.title(),
+  NewTabUI::SetUrlTitleAndDirection(dictionary, current_navigation.title(),
                                     current_navigation.virtual_url());
   dictionary->SetString("type", "tab");
   dictionary->SetDouble("timestamp", tab.timestamp.ToDoubleT());
@@ -66,19 +67,19 @@ RecentlyClosedTabsHandler::~RecentlyClosedTabsHandler() {
     tab_restore_service_->RemoveObserver(this);
 }
 
-#if defined(OS_ANDROID)
-// We restore tabs using SessionRestore::RestoreForeignSessionTab.
 void RecentlyClosedTabsHandler::HandleReopenTab(const ListValue* args) {
+  if (!tab_restore_service_)
+    return;
+
   double session_to_restore = 0.0;
   CHECK(args->GetDouble(0, &session_to_restore));
-  Profile* profile = Profile::FromWebUI(web_ui());
-  TabRestoreService* service =
-      TabRestoreServiceFactory::GetForProfile(profile);
 
+#if defined(OS_ANDROID)
   // Find and remove the corresponding tab entry from TabRestoreService.
   // We take ownership of the returned tab.
   scoped_ptr<TabRestoreService::Tab> tab_entry(
-      service->RemoveTabEntryById(static_cast<int>(session_to_restore)));
+      tab_restore_service_->RemoveTabEntryById(static_cast<int>(
+          session_to_restore)));
   if (tab_entry.get() == NULL)
     return;
 
@@ -87,18 +88,9 @@ void RecentlyClosedTabsHandler::HandleReopenTab(const ListValue* args) {
   session_tab.current_navigation_index = tab_entry->current_navigation_index;
   session_tab.navigations = tab_entry->navigations;
 
-  SessionRestore::RestoreForeignSessionTab(profile, session_tab);
-}
-#endif
-
-#if !defined(OS_ANDROID)
-void RecentlyClosedTabsHandler::HandleReopenTab(const ListValue* args) {
-  TabRestoreServiceDelegate* delegate =
-      TabRestoreServiceDelegate::FindDelegateForController(
-          &web_ui()->GetWebContents()->GetController(), NULL);
-  if (!delegate || !tab_restore_service_)
-    return;
-
+  SessionRestore::RestoreForeignSessionTab(web_ui()->GetWebContents(),
+                                           session_tab, NEW_FOREGROUND_TAB);
+#else
   double index = -1.0;
   CHECK(args->GetDouble(1, &index));
 
@@ -106,9 +98,11 @@ void RecentlyClosedTabsHandler::HandleReopenTab(const ListValue* args) {
   UMA_HISTOGRAM_ENUMERATION("NewTabPage.SessionRestore",
                             static_cast<int>(index), 20);
 
-  double session_to_restore = 0.0;
-  CHECK(args->GetDouble(0, &session_to_restore));
-
+  TabRestoreServiceDelegate* delegate =
+      TabRestoreServiceDelegate::FindDelegateForWebContents(
+          web_ui()->GetWebContents());
+  if (!delegate)
+    return;
   WindowOpenDisposition disposition =
       web_ui_util::GetDispositionFromClick(args, 2);
   tab_restore_service_->RestoreEntryById(delegate,
@@ -116,35 +110,19 @@ void RecentlyClosedTabsHandler::HandleReopenTab(const ListValue* args) {
                                          disposition);
   // The current tab has been nuked at this point; don't touch any member
   // variables.
-}
 #endif
+}
 
 void RecentlyClosedTabsHandler::HandleClearRecentlyClosed(
     const ListValue* args) {
-  if (!tab_restore_service_) {
-    tab_restore_service_ =
-        TabRestoreServiceFactory::GetForProfile(Profile::FromWebUI(web_ui()));
-  }
-  tab_restore_service_->ClearEntries();
+  EnsureTabRestoreService();
+  if (tab_restore_service_)
+    tab_restore_service_->ClearEntries();
 }
 
 void RecentlyClosedTabsHandler::HandleGetRecentlyClosedTabs(
     const ListValue* args) {
-  if (!tab_restore_service_) {
-    tab_restore_service_ =
-        TabRestoreServiceFactory::GetForProfile(Profile::FromWebUI(web_ui()));
-
-    // TabRestoreServiceFactory::GetForProfile() can return NULL (i.e., when in
-    // Off the Record mode)
-    if (tab_restore_service_) {
-      // This does nothing if the tabs have already been loaded or they
-      // shouldn't be loaded.
-      tab_restore_service_->LoadTabsFromLastSession();
-
-      tab_restore_service_->AddObserver(this);
-    }
-  }
-
+  EnsureTabRestoreService();
   if (tab_restore_service_)
     TabRestoreServiceChanged(tab_restore_service_);
 }
@@ -155,7 +133,7 @@ void RecentlyClosedTabsHandler::TabRestoreServiceChanged(
   TabRestoreService::Entries entries = service->entries();
   CreateRecentlyClosedValues(entries, &list_value);
 
-  web_ui()->CallJavascriptFunction("recentlyClosedTabs", list_value);
+  web_ui()->CallJavascriptFunction("ntp.setRecentlyClosedTabs", list_value);
 }
 
 void RecentlyClosedTabsHandler::TabRestoreServiceDestroyed(
@@ -187,5 +165,22 @@ void RecentlyClosedTabsHandler::CreateRecentlyClosedValues(
     entry_dict->SetInteger("sessionId", entry->id);
     entry_list_value->Append(entry_dict.release());
     added_count++;
+  }
+}
+
+void RecentlyClosedTabsHandler::EnsureTabRestoreService() {
+  if (tab_restore_service_)
+    return;
+
+  tab_restore_service_ =
+      TabRestoreServiceFactory::GetForProfile(Profile::FromWebUI(web_ui()));
+
+  // TabRestoreServiceFactory::GetForProfile() can return NULL (i.e., when in
+  // Off the Record mode)
+  if (tab_restore_service_) {
+    // This does nothing if the tabs have already been loaded or they
+    // shouldn't be loaded.
+    tab_restore_service_->LoadTabsFromLastSession();
+    tab_restore_service_->AddObserver(this);
   }
 }

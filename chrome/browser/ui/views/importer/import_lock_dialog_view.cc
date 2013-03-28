@@ -46,7 +46,7 @@ ImportLockDialogView::ImportLockDialogView(ImporterHost* importer_host)
   description_label_ = new views::Label(
       l10n_util::GetStringUTF16(IDS_IMPORTER_LOCK_TEXT));
   description_label_->SetMultiLine(true);
-  description_label_->SetHorizontalAlignment(views::Label::ALIGN_LEFT);
+  description_label_->SetHorizontalAlignment(gfx::ALIGN_LEFT);
   AddChildView(description_label_);
 }
 
@@ -69,11 +69,8 @@ void ImportLockDialogView::Layout() {
 
 string16 ImportLockDialogView::GetDialogButtonLabel(
     ui::DialogButton button) const {
-  if (button == ui::DIALOG_BUTTON_OK)
-    return l10n_util::GetStringUTF16(IDS_IMPORTER_LOCK_OK);
-  else if (button == ui::DIALOG_BUTTON_CANCEL)
-    return l10n_util::GetStringUTF16(IDS_IMPORTER_LOCK_CANCEL);
-  return string16();
+  return l10n_util::GetStringUTF16((button == ui::DIALOG_BUTTON_OK) ?
+      IDS_IMPORTER_LOCK_OK : IDS_IMPORTER_LOCK_CANCEL);
 }
 
 string16 ImportLockDialogView::GetWindowTitle() const {

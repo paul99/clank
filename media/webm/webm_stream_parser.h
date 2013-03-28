@@ -9,6 +9,7 @@
 #include "base/memory/ref_counted.h"
 #include "media/base/audio_decoder_config.h"
 #include "media/base/buffers.h"
+#include "media/base/byte_queue.h"
 #include "media/base/stream_parser.h"
 #include "media/base/video_decoder_config.h"
 #include "media/webm/webm_cluster_parser.h"
@@ -21,15 +22,22 @@ class WebMStreamParser : public StreamParser {
   virtual ~WebMStreamParser();
 
   // StreamParser implementation.
-  virtual void Init(const InitCB& init_cb, StreamParserHost* host) OVERRIDE;
+  virtual void Init(const InitCB& init_cb, const NewConfigCB& config_cb,
+                    const NewBuffersCB& audio_cb,
+                    const NewBuffersCB& video_cb,
+                    const NeedKeyCB& need_key_cb,
+                    const NewMediaSegmentCB& new_segment_cb,
+                    const base::Closure& end_of_segment_cb,
+                    const LogCB& log_cb) OVERRIDE;
   virtual void Flush() OVERRIDE;
-  virtual int Parse(const uint8* buf, int size) OVERRIDE;
+  virtual bool Parse(const uint8* buf, int size) OVERRIDE;
 
  private:
   enum State {
-    WAITING_FOR_INIT,
-    PARSING_HEADERS,
-    PARSING_CLUSTERS
+    kWaitingForInit,
+    kParsingHeaders,
+    kParsingClusters,
+    kError
   };
 
   void ChangeState(State new_state);
@@ -53,11 +61,25 @@ class WebMStreamParser : public StreamParser {
   // Returning > 0 indicates success & the number of bytes parsed.
   int ParseCluster(const uint8* data, int size);
 
+  // Fire needkey event through the |need_key_cb_|.
+  void FireNeedKey(const std::string& key_id);
+
   State state_;
   InitCB init_cb_;
-  StreamParserHost* host_;
+  NewConfigCB config_cb_;
+  NewBuffersCB audio_cb_;
+  NewBuffersCB video_cb_;
+  NeedKeyCB need_key_cb_;
+  NewMediaSegmentCB new_segment_cb_;
+  base::Closure end_of_segment_cb_;
+  LogCB log_cb_;
+
+  // True if a new cluster id has been seen, but no audio or video buffers have
+  // been parsed yet.
+  bool waiting_for_buffers_;
 
   scoped_ptr<WebMClusterParser> cluster_parser_;
+  ByteQueue byte_queue_;
 
   DISALLOW_COPY_AND_ASSIGN(WebMStreamParser);
 };

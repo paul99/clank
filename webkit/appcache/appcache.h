@@ -1,4 +1,4 @@
-// Copyright (c) 2011 The Chromium Authors. All rights reserved.
+// Copyright (c) 2012 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -15,8 +15,8 @@
 #include "googleurl/src/gurl.h"
 #include "webkit/appcache/appcache_database.h"
 #include "webkit/appcache/appcache_entry.h"
-#include "webkit/appcache/appcache_export.h"
 #include "webkit/appcache/manifest_parser.h"
+#include "webkit/storage/webkit_storage_export.h"
 
 namespace appcache {
 
@@ -27,7 +27,7 @@ class AppCacheService;
 // Set of cached resources for an application. A cache exists as long as a
 // host is associated with it, the cache is in an appcache group or the
 // cache is being created during an appcache upate.
-class APPCACHE_EXPORT AppCache : public base::RefCounted<AppCache> {
+class WEBKIT_STORAGE_EXPORT AppCache : public base::RefCounted<AppCache> {
  public:
   typedef std::map<GURL, AppCacheEntry> EntryMap;
   typedef std::set<AppCacheHost*> AppCacheHosts;
@@ -176,7 +176,7 @@ class APPCACHE_EXPORT AppCache : public base::RefCounted<AppCache> {
   AppCacheService* service_;
 
   FRIEND_TEST_ALL_PREFIXES(AppCacheTest, InitializeWithManifest);
-
+  FRIEND_TEST_ALL_PREFIXES(AppCacheTest, ToFromDatabaseRecords);
   DISALLOW_COPY_AND_ASSIGN(AppCache);
 };
 

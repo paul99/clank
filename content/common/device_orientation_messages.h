@@ -1,4 +1,4 @@
-// Copyright (c) 2011 The Chromium Authors. All rights reserved.
+// Copyright (c) 2012 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -10,13 +10,15 @@
 #define IPC_MESSAGE_START DeviceOrientationMsgStart
 
 IPC_STRUCT_BEGIN(DeviceOrientationMsg_Updated_Params)
-  // These fields have the same meaning as in device_orientation::Orientation.
+  // These fields have the same meaning as in content::Orientation.
   IPC_STRUCT_MEMBER(bool, can_provide_alpha)
   IPC_STRUCT_MEMBER(double, alpha)
   IPC_STRUCT_MEMBER(bool, can_provide_beta)
   IPC_STRUCT_MEMBER(double, beta)
   IPC_STRUCT_MEMBER(bool, can_provide_gamma)
   IPC_STRUCT_MEMBER(double, gamma)
+  IPC_STRUCT_MEMBER(bool, can_provide_absolute)
+  IPC_STRUCT_MEMBER(bool, absolute)
 IPC_STRUCT_END()
 
 // Messages sent from the browser to the renderer.

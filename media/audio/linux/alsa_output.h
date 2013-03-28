@@ -1,4 +1,4 @@
-// Copyright (c) 2011 The Chromium Authors. All rights reserved.
+// Copyright (c) 2012 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 //
@@ -29,16 +29,18 @@
 #include "base/gtest_prod_util.h"
 #include "base/memory/scoped_ptr.h"
 #include "base/memory/weak_ptr.h"
+#include "base/time.h"
 #include "media/audio/audio_io.h"
 #include "media/audio/audio_parameters.h"
 
+class MessageLoop;
+
 namespace media {
-class SeekableBuffer;
-};  // namespace media
 
 class AlsaWrapper;
 class AudioManagerLinux;
-class MessageLoop;
+class ChannelMixer;
+class SeekableBuffer;
 
 class MEDIA_EXPORT AlsaPcmOutputStream : public AudioOutputStream {
  public:
@@ -130,7 +132,7 @@ class MEDIA_EXPORT AlsaPcmOutputStream : public AudioOutputStream {
   snd_pcm_sframes_t GetCurrentDelay();
 
   // Attempts to find the best matching linux audio device for the given number
-  // of channels.  This function will set |device_name_| and |should_downmix_|.
+  // of channels.  This function will set |device_name_| and |channel_mixer_|.
   snd_pcm_t* AutoSelectDevice(uint32 latency);
 
   // Functions to safeguard state transitions.  All changes to the object state
@@ -138,6 +140,10 @@ class MEDIA_EXPORT AlsaPcmOutputStream : public AudioOutputStream {
   bool CanTransitionTo(InternalState to);
   InternalState TransitionTo(InternalState to);
   InternalState state();
+
+  // Returns true when we're on the audio thread or if the audio thread's
+  // message loop is NULL (which will happen during shutdown).
+  bool IsOnAudioThread() const;
 
   // API for Proxying calls to the AudioSourceCallback provided during
   // Start().
@@ -147,9 +153,7 @@ class MEDIA_EXPORT AlsaPcmOutputStream : public AudioOutputStream {
   // is passed into the output stream, but ownership is not transfered which
   // requires a synchronization on access of the |source_callback_| to avoid
   // using a deleted callback.
-  uint32 RunDataCallback(uint8* dest,
-                         uint32 max_size,
-                         AudioBuffersState buffers_state);
+  int RunDataCallback(AudioBus* audio_bus, AudioBuffersState buffers_state);
   void RunErrorCallback(int code);
 
   // Changes the AudioSourceCallback to proxy calls to.  Pass in NULL to
@@ -161,13 +165,13 @@ class MEDIA_EXPORT AlsaPcmOutputStream : public AudioOutputStream {
   const std::string requested_device_name_;
   const snd_pcm_format_t pcm_format_;
   const uint32 channels_;
+  const ChannelLayout channel_layout_;
   const uint32 sample_rate_;
   const uint32 bytes_per_sample_;
   const uint32 bytes_per_frame_;
 
   // Device configuration data. Populated after OpenTask() completes.
   std::string device_name_;
-  bool should_downmix_;
   uint32 packet_size_;
   uint32 micros_per_packet_;
   uint32 latency_micros_;
@@ -185,6 +189,12 @@ class MEDIA_EXPORT AlsaPcmOutputStream : public AudioOutputStream {
   // Audio manager that created us.  Used to report that we've been closed.
   AudioManagerLinux* manager_;
 
+  // Message loop to use for polling. The object is owned by the AudioManager.
+  // We hold a reference to the audio thread message loop since
+  // AudioManagerBase::ShutDown() can invalidate the message loop pointer
+  // before the stream gets deleted.
+  MessageLoop* message_loop_;
+
   // Handle to the actual PCM playback device.
   snd_pcm_t* playback_handle_;
 
@@ -200,10 +210,21 @@ class MEDIA_EXPORT AlsaPcmOutputStream : public AudioOutputStream {
 
   AudioSourceCallback* source_callback_;
 
+  base::Time last_fill_time_;  // Time for the last OnMoreData() callback.
+
+  // Container for retrieving data from AudioSourceCallback::OnMoreData().
+  scoped_ptr<AudioBus> audio_bus_;
+
+  // Channel mixer and temporary bus for the final mixed channel data.
+  scoped_ptr<ChannelMixer> channel_mixer_;
+  scoped_ptr<AudioBus> mixed_audio_bus_;
+
   DISALLOW_COPY_AND_ASSIGN(AlsaPcmOutputStream);
 };
 
 MEDIA_EXPORT std::ostream& operator<<(std::ostream& os,
                                       AlsaPcmOutputStream::InternalState);
+
+};  // namespace media
 
 #endif  // MEDIA_AUDIO_LINUX_ALSA_OUTPUT_H_

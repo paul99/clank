@@ -1,4 +1,4 @@
-// Copyright (c) 2011 The Chromium Authors. All rights reserved.
+// Copyright (c) 2012 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -7,20 +7,21 @@
 #include "base/logging.h"
 #include "gpu/command_buffer/client/gles2_implementation.h"
 #include "ppapi/c/pp_errors.h"
+#include "ppapi/shared_impl/ppb_graphics_3d_shared.h"
 #include "ppapi/shared_impl/resource_tracker.h"
 #include "ppapi/thunk/enter.h"
 
 namespace ppapi {
 
 PPB_VideoDecoder_Shared::PPB_VideoDecoder_Shared(PP_Instance instance)
-    : Resource(instance),
+    : Resource(OBJECT_IS_IMPL, instance),
       graphics_context_(0),
       gles2_impl_(NULL) {
 }
 
 PPB_VideoDecoder_Shared::PPB_VideoDecoder_Shared(
     const HostResource& host_resource)
-    : Resource(host_resource),
+    : Resource(OBJECT_IS_PROXY, host_resource),
       graphics_context_(0),
       gles2_impl_(NULL) {
 }
@@ -48,36 +49,35 @@ void PPB_VideoDecoder_Shared::Destroy() {
   PpapiGlobals::Get()->GetResourceTracker()->ReleaseResource(graphics_context_);
 }
 
-bool PPB_VideoDecoder_Shared::SetFlushCallback(PP_CompletionCallback callback) {
-  CHECK(callback.func);
-  if (flush_callback_.get())
+bool PPB_VideoDecoder_Shared::SetFlushCallback(
+    scoped_refptr<TrackedCallback> callback) {
+  if (TrackedCallback::IsPending(flush_callback_))
     return false;
-  flush_callback_ = new TrackedCallback(this, callback);
+  flush_callback_ = callback;
   return true;
 }
 
-bool PPB_VideoDecoder_Shared::SetResetCallback(PP_CompletionCallback callback) {
-  CHECK(callback.func);
+bool PPB_VideoDecoder_Shared::SetResetCallback(
+    scoped_refptr<TrackedCallback> callback) {
   if (TrackedCallback::IsPending(reset_callback_))
     return false;
-  reset_callback_ = new TrackedCallback(this, callback);
+  reset_callback_ = callback;
   return true;
 }
 
 bool PPB_VideoDecoder_Shared::SetBitstreamBufferCallback(
     int32 bitstream_buffer_id,
-    PP_CompletionCallback callback) {
+    scoped_refptr<TrackedCallback> callback) {
   return bitstream_buffer_callbacks_.insert(
-      std::make_pair(bitstream_buffer_id,
-                     new TrackedCallback(this, callback))).second;
+      std::make_pair(bitstream_buffer_id, callback)).second;
 }
 
 void PPB_VideoDecoder_Shared::RunFlushCallback(int32 result) {
-  TrackedCallback::ClearAndRun(&flush_callback_, result);
+  flush_callback_->Run(result);
 }
 
 void PPB_VideoDecoder_Shared::RunResetCallback(int32 result) {
-  TrackedCallback::ClearAndRun(&reset_callback_, result);
+  reset_callback_->Run(result);
 }
 
 void PPB_VideoDecoder_Shared::RunBitstreamBufferCallback(
@@ -91,8 +91,16 @@ void PPB_VideoDecoder_Shared::RunBitstreamBufferCallback(
 }
 
 void PPB_VideoDecoder_Shared::FlushCommandBuffer() {
-  if (gles2_impl_)
+  if (gles2_impl_) {
+    // To call Flush() we have to tell Graphics3D that we hold the proxy lock.
+    thunk::EnterResource<thunk::PPB_Graphics3D_API, false> enter_g3d(
+        graphics_context_, false);
+    DCHECK(enter_g3d.succeeded());
+    PPB_Graphics3D_Shared* graphics3d =
+        static_cast<PPB_Graphics3D_Shared*>(enter_g3d.object());
+    PPB_Graphics3D_Shared::ScopedNoLocking dont_lock(graphics3d);
     gles2_impl_->Flush();
+  }
 }
 
 }  // namespace ppapi

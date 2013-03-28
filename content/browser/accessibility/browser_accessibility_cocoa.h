@@ -1,10 +1,9 @@
-// Copyright (c) 2011 The Chromium Authors. All rights reserved.
+// Copyright (c) 2012 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
 #ifndef CONTENT_BROWSER_ACCESSIBILITY_BROWSER_ACCESSIBILITY_COCOA_H_
 #define CONTENT_BROWSER_ACCESSIBILITY_BROWSER_ACCESSIBILITY_COCOA_H_
-#pragma once
 
 #import <Cocoa/Cocoa.h>
 
@@ -18,7 +17,7 @@
 // This class converts it into a format Cocoa can query.
 @interface BrowserAccessibilityCocoa : NSObject {
  @private
-  BrowserAccessibility* browserAccessibility_;
+  content::BrowserAccessibility* browserAccessibility_;
   scoped_nsobject<NSMutableArray> children_;
   id<BrowserAccessibilityDelegateCocoa> delegate_;
 }
@@ -27,7 +26,7 @@
 // the cross platform BrowserAccessibility object.  The delegate is
 // used to communicate with the host renderer.  None of these
 // parameters can be null.
-- (id)initWithObject:(BrowserAccessibility*)accessibility
+- (id)initWithObject:(content::BrowserAccessibility*)accessibility
             delegate:(id<BrowserAccessibilityDelegateCocoa>)delegate;
 
 // Invalidate children for a non-ignored ancestor (including self).

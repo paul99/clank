@@ -4,12 +4,10 @@
 
 #ifndef BASE_STRING_UTIL_POSIX_H_
 #define BASE_STRING_UTIL_POSIX_H_
-#pragma once
 
 #include <stdarg.h>
 #include <stdio.h>
 #include <string.h>
-#include <strings.h>
 #include <wchar.h>
 
 #include "base/logging.h"

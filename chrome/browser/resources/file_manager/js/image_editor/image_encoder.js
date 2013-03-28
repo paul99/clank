@@ -7,10 +7,10 @@
  */
 function ImageEncoder() {}
 
-ImageEncoder.MAX_THUMBNAIL_DIMENSION = 320;
-
+//TODO(JSDOC)
 ImageEncoder.metadataEncoders = {};
 
+//TODO(JSDOC)
 ImageEncoder.registerMetadataEncoder = function(constructor, mimeType) {
   ImageEncoder.metadataEncoders[mimeType] = constructor;
 };
@@ -21,7 +21,7 @@ ImageEncoder.registerMetadataEncoder = function(constructor, mimeType) {
  * The encoder will own and modify a copy of the original metadata.
  *
  * @param {Object} metadata Original metadata
- * @return {ImageEncoder.MetadataEncoder}
+ * @return {ImageEncoder.MetadataEncoder} Created metadata encoder.
  */
 ImageEncoder.createMetadataEncoder = function(metadata) {
   var constructor = ImageEncoder.metadataEncoders[metadata.mimeType] ||
@@ -35,8 +35,9 @@ ImageEncoder.createMetadataEncoder = function(metadata) {
  * modified according to the properties of the supplied image.
  *
  * @param {Object} metadata Original metadata
- * @param {HTMLCanvasElement} canvas
+ * @param {HTMLCanvasElement} canvas Canvas to use for metadata.
  * @param {number} quality Encoding quality (defaults to 1)
+ * @return {ImageEncoder.MetadataEncoder} Encoder with encoded metadata.
  */
 ImageEncoder.encodeMetadata = function(metadata, canvas, quality) {
   var encoder = ImageEncoder.createMetadataEncoder(metadata);
@@ -49,26 +50,11 @@ ImageEncoder.encodeMetadata = function(metadata, canvas, quality) {
 /**
  * Return a blob with the encoded image with metadata inserted.
  * @param {HTMLCanvasElement} canvas The canvas with the image to be encoded.
- * @param {ImageEncoder.MetadataEncoder} metadataEncoder
- * @param {number} quality
- * @return {Blob}
+ * @param {ImageEncoder.MetadataEncoder} metadataEncoder Encoder to use.
+ * @param {Number} quality (0..1], Encoding quality, defaults to 0.9.
+ * @return {Blob} encoded data.
  */
 ImageEncoder.getBlob = function(canvas, metadataEncoder, quality) {
-  var blobBuilder = new WebKitBlobBuilder();
-  ImageEncoder.buildBlob(blobBuilder, canvas, metadataEncoder, quality);
-  return blobBuilder.getBlob(metadataEncoder.getMetadata().mimeType);
-};
-
-/**
- * Build a blob containing the encoded image with metadata inserted.
- * @param {BlobBuilder} blobBuilder
- * @param {HTMLCanvasElement} canvas The canvas with the image to be encoded.
- * @param {ImageEncoder.MetadataEncoder} metadataEncoder
- * @param {Number} quality (0..1], Encoding quality, defaults to 0.9.
- */
-ImageEncoder.buildBlob = function(
-    blobBuilder, canvas, metadataEncoder, quality) {
-
   // Contrary to what one might think 1.0 is not a good default. Opening and
   // saving an typical photo taken with consumer camera increases its file size
   // by 50-100%.
@@ -87,21 +73,31 @@ ImageEncoder.buildBlob = function(
 
   var encodedMetadata = metadataEncoder.encode();
 
+  var slices = [];
+
+  // TODO(kaznacheev): refactor |stringToArrayBuffer| and |encode| to return
+  // arrays instead of array buffers.
+  function appendSlice(arrayBuffer) {
+    slices.push(new DataView(arrayBuffer));
+  }
+
   ImageUtil.trace.resetTimer('blob');
   if (encodedMetadata.byteLength != 0) {
     var metadataRange = metadataEncoder.findInsertionRange(encodedImage);
-    blobBuilder.append(ImageEncoder.stringToArrayBuffer(
+    appendSlice(ImageEncoder.stringToArrayBuffer(
         encodedImage, 0, metadataRange.from));
 
-    blobBuilder.append(metadataEncoder.encode());
+    appendSlice(metadataEncoder.encode());
 
-    blobBuilder.append(ImageEncoder.stringToArrayBuffer(
+    appendSlice(ImageEncoder.stringToArrayBuffer(
         encodedImage, metadataRange.to, encodedImage.length));
   } else {
-    blobBuilder.append(ImageEncoder.stringToArrayBuffer(
+    appendSlice(ImageEncoder.stringToArrayBuffer(
         encodedImage, 0, encodedImage.length));
   }
+  var blob = new Blob(slices, {type: metadataEncoder.getMetadata().mimeType});
   ImageUtil.trace.reportTimer('blob');
+  return blob;
 };
 
 /**
@@ -110,7 +106,7 @@ ImageEncoder.buildBlob = function(
  * Why return a string? Calling atob and having the rest of the code deal
  * with a string is several times faster than decoding base64 in Javascript.
  *
- * @param {String} dataURL
+ * @param {String} dataURL Data URL to decode.
  * @return {String} A binary string (char codes are the actual byte values).
  */
 ImageEncoder.decodeDataURL = function(dataURL) {
@@ -127,7 +123,7 @@ ImageEncoder.decodeDataURL = function(dataURL) {
  * @return {HTMLCanvasElement} Thumbnail canvas
  */
 ImageEncoder.createThumbnail = function(canvas, opt_shrinkage) {
-  const MAX_THUMBNAIL_DIMENSION = 320;
+  var MAX_THUMBNAIL_DIMENSION = 320;
 
   opt_shrinkage = Math.max(opt_shrinkage || 4,
                        canvas.width / MAX_THUMBNAIL_DIMENSION,
@@ -160,7 +156,7 @@ ImageEncoder.stringToArrayBuffer = function(string, from, to) {
  * Serves as a default metadata encoder for images that none of the metadata
  * parsers recognized.
  *
- * @param {Object} original_metadata
+ * @param {Object} original_metadata Starting metadata.
  */
 ImageEncoder.MetadataEncoder = function(original_metadata) {
   this.metadata_ = ImageUtil.deepCopy(original_metadata) || {};
@@ -185,8 +181,8 @@ ImageEncoder.MetadataEncoder.prototype.setImageData = function(canvas) {
 };
 
 /**
- * @param {HTMLCanvasElement} canvas
- * @param {number} quality
+ * @param {HTMLCanvasElement} canvas Canvas to use as thumbnail.
+ * @param {number} quality Thumbnail quality.
  */
 ImageEncoder.MetadataEncoder.prototype.setThumbnailData =
     function(canvas, quality) {
@@ -196,7 +192,7 @@ ImageEncoder.MetadataEncoder.prototype.setThumbnailData =
 
 /**
  * Return a range where the metadata is (or should be) located.
- * @param {String} encodedImage
+ * @param {String} encodedImage //TODO(JSDOC)
  * @return {Object} An object with from and to properties.
  */
 ImageEncoder.MetadataEncoder.prototype.
@@ -205,7 +201,7 @@ ImageEncoder.MetadataEncoder.prototype.
 /**
  * Return serialized metadata ready to write to an image file.
  * The return type is optimized for passing to Blob.append.
- * @return {ArrayBuffer}
+ * @return {ArrayBuffer} //TODO(JSDOC)
  */
 ImageEncoder.MetadataEncoder.prototype.encode = function() {
   return new Uint8Array(0).buffer;

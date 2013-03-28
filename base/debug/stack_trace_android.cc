@@ -1,4 +1,4 @@
-// Copyright (c) 2011 The Chromium Authors. All rights reserved.
+// Copyright (c) 2012 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -13,15 +13,19 @@
 namespace base {
 namespace debug {
 
+bool EnableInProcessStackDumping() {
+  // When running in an application, our code typically expects SIGPIPE
+  // to be ignored.  Therefore, when testing that same code, it should run
+  // with SIGPIPE ignored as well.
+  // TODO(phajdan.jr): De-duplicate this SIGPIPE code.
+  struct sigaction action;
+  memset(&action, 0, sizeof(action));
+  action.sa_handler = SIG_IGN;
+  sigemptyset(&action.sa_mask);
+  return (sigaction(SIGPIPE, &action, NULL) == 0);
+}
+
 StackTrace::StackTrace() {
-}
-
-StackTrace::~StackTrace() {
-}
-
-const void* const* StackTrace::Addresses(size_t* count) const {
-  NOTIMPLEMENTED();
-  return NULL;
 }
 
 // Sends fake SIGSTKFLT signals to let the Android linker and debuggerd dump
@@ -50,11 +54,6 @@ void StackTrace::PrintBacktrace() const {
 
 void StackTrace::OutputToStream(std::ostream* os) const {
   NOTIMPLEMENTED();
-}
-
-std::string StackTrace::ToString() const {
-  NOTIMPLEMENTED();
-  return "";
 }
 
 }  // namespace debug

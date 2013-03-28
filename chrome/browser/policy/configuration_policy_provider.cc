@@ -4,7 +4,7 @@
 
 #include "chrome/browser/policy/configuration_policy_provider.h"
 
-#include <algorithm>
+#include <string>
 
 #include "chrome/browser/policy/policy_map.h"
 #include "policy/policy_constants.h"
@@ -21,57 +21,9 @@ const char* kProxyPolicies[] = {
   key::kProxyBypassList,
 };
 
-}  // namespace
-
-ConfigurationPolicyProvider::Observer::~Observer() {}
-
-void ConfigurationPolicyProvider::Observer::OnProviderGoingAway(
-    ConfigurationPolicyProvider* provider) {}
-
-// Class ConfigurationPolicyProvider.
-
-ConfigurationPolicyProvider::ConfigurationPolicyProvider(
-    const PolicyDefinitionList* policy_list)
-    : policy_definition_list_(policy_list) {
-}
-
-ConfigurationPolicyProvider::~ConfigurationPolicyProvider() {
-  FOR_EACH_OBSERVER(ConfigurationPolicyProvider::Observer,
-                    observer_list_,
-                    OnProviderGoingAway(this));
-}
-
-bool ConfigurationPolicyProvider::Provide(PolicyMap* result) {
-#if !defined(OFFICIAL_BUILD)
-  if (override_policies_.get()) {
-    result->CopyFrom(*override_policies_);
-    return true;
-  }
-#endif
-  if (ProvideInternal(result)) {
-    FixDeprecatedPolicies(result);
-    return true;
-  }
-  return false;
-}
-
-bool ConfigurationPolicyProvider::IsInitializationComplete() const {
-  return true;
-}
-
-#if !defined(OFFICIAL_BUILD)
-
-void ConfigurationPolicyProvider::OverridePolicies(PolicyMap* policies) {
-  if (policies)
-    FixDeprecatedPolicies(policies);
-  override_policies_.reset(policies);
-  NotifyPolicyUpdated();
-}
-
-#endif
-
-// static
-void ConfigurationPolicyProvider::FixDeprecatedPolicies(PolicyMap* policies) {
+// Helper that converts deprecated chrome policies into their corresponding
+// actual policies.
+void FixDeprecatedPolicies(PolicyMap* policies) {
   // Proxy settings have been configured by 5 policies that didn't mix well
   // together, and maps of policies had to take this into account when merging
   // policy sources. The proxy settings will eventually be configured by a
@@ -97,7 +49,11 @@ void ConfigurationPolicyProvider::FixDeprecatedPolicies(PolicyMap* policies) {
       policies->Erase(kProxyPolicies[i]);
     }
   }
-  if (!proxy_settings->empty() && !policies->Get(key::kProxySettings)) {
+  // Sets the new |proxy_settings| if kProxySettings isn't set yet, or if the
+  // new priority is higher.
+  const PolicyMap::Entry* existing = policies->Get(key::kProxySettings);
+  if (!proxy_settings->empty() &&
+      (!existing || current_priority.has_higher_priority_than(*existing))) {
     policies->Set(key::kProxySettings,
                   current_priority.level,
                   current_priority.scope,
@@ -105,7 +61,35 @@ void ConfigurationPolicyProvider::FixDeprecatedPolicies(PolicyMap* policies) {
   }
 }
 
-void ConfigurationPolicyProvider::NotifyPolicyUpdated() {
+}  // namespace
+
+ConfigurationPolicyProvider::Observer::~Observer() {}
+
+ConfigurationPolicyProvider::ConfigurationPolicyProvider()
+    : did_shutdown_(false) {}
+
+ConfigurationPolicyProvider::~ConfigurationPolicyProvider() {
+  DCHECK(did_shutdown_);
+}
+
+void ConfigurationPolicyProvider::Init() {}
+
+void ConfigurationPolicyProvider::Shutdown() {
+  did_shutdown_ = true;
+}
+
+bool ConfigurationPolicyProvider::IsInitializationComplete() const {
+  return true;
+}
+
+void ConfigurationPolicyProvider::UpdatePolicy(
+    scoped_ptr<PolicyBundle> bundle) {
+  if (bundle.get())
+    policy_bundle_.Swap(bundle.get());
+  else
+    policy_bundle_.Clear();
+  FixDeprecatedPolicies(
+      &policy_bundle_.Get(POLICY_DOMAIN_CHROME, std::string()));
   FOR_EACH_OBSERVER(ConfigurationPolicyProvider::Observer,
                     observer_list_,
                     OnUpdatePolicy(this));
@@ -117,37 +101,6 @@ void ConfigurationPolicyProvider::AddObserver(Observer* observer) {
 
 void ConfigurationPolicyProvider::RemoveObserver(Observer* observer) {
   observer_list_.RemoveObserver(observer);
-}
-
-ConfigurationPolicyObserverRegistrar::ConfigurationPolicyObserverRegistrar()
-  : provider_(NULL),
-    observer_(NULL) {}
-
-ConfigurationPolicyObserverRegistrar::~ConfigurationPolicyObserverRegistrar() {
-  if (provider_)
-    provider_->RemoveObserver(this);
-}
-
-void ConfigurationPolicyObserverRegistrar::Init(
-    ConfigurationPolicyProvider* provider,
-    ConfigurationPolicyProvider::Observer* observer) {
-  provider_ = provider;
-  observer_ = observer;
-  provider_->AddObserver(this);
-}
-
-void ConfigurationPolicyObserverRegistrar::OnUpdatePolicy(
-    ConfigurationPolicyProvider* provider) {
-  DCHECK_EQ(provider_, provider);
-  observer_->OnUpdatePolicy(provider_);
-}
-
-void ConfigurationPolicyObserverRegistrar::OnProviderGoingAway(
-    ConfigurationPolicyProvider* provider) {
-  DCHECK_EQ(provider_, provider);
-  observer_->OnProviderGoingAway(provider_);
-  provider_->RemoveObserver(this);
-  provider_ = NULL;
 }
 
 }  // namespace policy

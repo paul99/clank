@@ -5,33 +5,71 @@
 #include "chrome/browser/google/google_util.h"
 
 #include <string>
+#include <vector>
 
 #include "base/command_line.h"
 #include "base/string16.h"
+#include "base/string_number_conversions.h"
+#include "base/string_split.h"
 #include "base/string_util.h"
 #include "base/utf_string_conversions.h"
 #include "chrome/browser/browser_process.h"
 #include "chrome/browser/google/google_url_tracker.h"
-#include "chrome/browser/net/browser_url_util.h"
 #include "chrome/common/chrome_switches.h"
+#include "chrome/common/net/url_util.h"
 #include "chrome/installer/util/google_update_settings.h"
 #include "googleurl/src/gurl.h"
-#include "net/base/registry_controlled_domain.h"
+#include "net/base/registry_controlled_domains/registry_controlled_domain.h"
 
 #if defined(OS_MACOSX)
 #include "chrome/browser/mac/keystone_glue.h"
+#elif defined(OS_CHROMEOS)
+#include "chrome/browser/google/google_util_chromeos.h"
+#endif
+
+#if defined(GOOGLE_CHROME_BUILD)
+#include "chrome/browser/google/linkdoctor_internal/linkdoctor_internal.h"
+#endif
+
+#ifndef LINKDOCTOR_SERVER_REQUEST_URL
+#define LINKDOCTOR_SERVER_REQUEST_URL ""
 #endif
 
 namespace {
 
 const char* brand_for_testing = NULL;
 
+// True iff |str| contains a "q=" query parameter with a non-empty value.
+// |str| should be a URL parameter or a hash fragment, without the ? or # (as
+// returned by GURL::query() or GURL::ref().
+bool HasQueryParameter(const std::string& str) {
+  std::vector<std::string> parameters;
+
+  base::SplitString(str, '&', &parameters);
+  for (std::vector<std::string>::const_iterator itr = parameters.begin();
+       itr != parameters.end();
+       ++itr) {
+    if (StartsWithASCII(*itr, "q=", false) && itr->size() > 2)
+      return true;
+  }
+  return false;
+}
+
+bool gUseMockLinkDoctorBaseURLForTesting = false;
+
 }  // anonymous namespace
 
 namespace google_util {
 
-const char kLinkDoctorBaseURL[] =
-    "http://linkhelp.clients.google.com/tbproxy/lh/fixurl";
+GURL LinkDoctorBaseURL() {
+  if (gUseMockLinkDoctorBaseURLForTesting)
+    return GURL("http://mock.linkdoctor.url/for?testing");
+  return GURL(LINKDOCTOR_SERVER_REQUEST_URL);
+}
+
+void SetMockLinkDoctorBaseURLForTesting() {
+  gUseMockLinkDoctorBaseURLForTesting = true;
+}
 
 BrandForTesting::BrandForTesting(const std::string& brand) : brand_(brand) {
   DCHECK(brand_for_testing == NULL);
@@ -48,7 +86,7 @@ GURL AppendGoogleLocaleParam(const GURL& url) {
   std::string locale = g_browser_process->GetApplicationLocale();
   if (locale == "nb")
     locale = "no";
-  return chrome_browser_net::AppendQueryParameter(url, "hl", locale);
+  return chrome_common_net::AppendQueryParameter(url, "hl", locale);
 }
 
 std::string StringAppendGoogleLocaleParam(const std::string& url) {
@@ -58,16 +96,16 @@ std::string StringAppendGoogleLocaleParam(const std::string& url) {
   return localized_url.spec();
 }
 
-GURL AppendGoogleTLDParam(const GURL& url) {
+GURL AppendGoogleTLDParam(Profile* profile, const GURL& url) {
   const std::string google_domain(
       net::RegistryControlledDomainService::GetDomainAndRegistry(
-          GoogleURLTracker::GoogleURL()));
+          GoogleURLTracker::GoogleURL(profile)));
   const size_t first_dot = google_domain.find('.');
   if (first_dot == std::string::npos) {
     NOTREACHED();
     return url;
   }
-  return chrome_browser_net::AppendQueryParameter(
+  return chrome_common_net::AppendQueryParameter(
       url, "sd", google_domain.substr(first_dot + 1));
 }
 
@@ -104,6 +142,8 @@ bool GetBrand(std::string* brand) {
 
 #if defined(OS_MACOSX)
   brand->assign(keystone_glue::BrandCode());
+#elif defined(OS_CHROMEOS)
+  brand->assign(google_util::chromeos::GetBrand());
 #else
   brand->clear();
 #endif
@@ -117,41 +157,112 @@ bool GetReactivationBrand(std::string* brand) {
 
 #endif
 
+bool IsGoogleDomainUrl(const std::string& url,
+                       SubdomainPermission subdomain_permission,
+                       PortPermission port_permission) {
+  GURL original_url(url);
+  if (!original_url.is_valid() ||
+      !(original_url.SchemeIs("http") || original_url.SchemeIs("https")))
+    return false;
+
+  // If we have the Instant URL overridden with a command line flag, accept
+  // its domain/port combination as well.
+  const CommandLine& command_line = *CommandLine::ForCurrentProcess();
+  if (command_line.HasSwitch(switches::kInstantURL)) {
+    GURL custom_instant_url(
+        command_line.GetSwitchValueASCII(switches::kInstantURL));
+    if (original_url.host() == custom_instant_url.host() &&
+        original_url.port() == custom_instant_url.port())
+      return true;
+  }
+
+  return (original_url.port().empty() ||
+      port_permission == ALLOW_NON_STANDARD_PORTS) &&
+      google_util::IsGoogleHostname(original_url.host(), subdomain_permission);
+}
+
+bool IsGoogleHostname(const std::string& host,
+                      SubdomainPermission subdomain_permission) {
+  size_t tld_length =
+      net::RegistryControlledDomainService::GetRegistryLength(host, false);
+  if ((tld_length == 0) || (tld_length == std::string::npos))
+    return false;
+  std::string host_minus_tld(host, 0, host.length() - tld_length);
+  if (LowerCaseEqualsASCII(host_minus_tld, "google."))
+    return true;
+  if (subdomain_permission == ALLOW_SUBDOMAIN)
+    return EndsWith(host_minus_tld, ".google.", false);
+  return LowerCaseEqualsASCII(host_minus_tld, "www.google.");
+}
+
 bool IsGoogleHomePageUrl(const std::string& url) {
   GURL original_url(url);
-  if (!original_url.is_valid())
-    return false;
 
-  // Make sure the scheme is valid.
-  if (!original_url.SchemeIs("http") && !original_url.SchemeIs("https"))
-    return false;
-
-  // Make sure port is default for the respective scheme.
-  if (!original_url.port().empty())
-    return false;
-
-  // Accept only valid TLD.
-  size_t tld_length = net::RegistryControlledDomainService::GetRegistryLength(
-      original_url, false);
-  if (tld_length == 0 || tld_length == std::string::npos)
-    return false;
-
-  // We only accept "www.google." in front of the TLD.
-  std::string host = original_url.host();
-  host = host.substr(0, host.length() - tld_length);
-  if (!LowerCaseEqualsASCII(host, "www.google.") &&
-      !LowerCaseEqualsASCII(host, "google."))
+  // First check to see if this has a Google domain.
+  if (!IsGoogleDomainUrl(url, DISALLOW_SUBDOMAIN, DISALLOW_NON_STANDARD_PORTS))
     return false;
 
   // Make sure the path is a known home page path.
   std::string path(original_url.path());
-  if (!LowerCaseEqualsASCII(path, "/") &&
-      !LowerCaseEqualsASCII(path, "/webhp") &&
+  if (path != "/" && path != "/webhp" &&
       !StartsWithASCII(path, "/ig", false)) {
     return false;
   }
 
   return true;
+}
+
+bool IsGoogleSearchUrl(const std::string& url) {
+  GURL original_url(url);
+
+  // First check to see if this has a Google domain.
+  if (!IsGoogleDomainUrl(url, DISALLOW_SUBDOMAIN, DISALLOW_NON_STANDARD_PORTS))
+    return false;
+
+  // Make sure the path is a known search path.
+  std::string path(original_url.path());
+  bool has_valid_path = false;
+  bool is_home_page_base = false;
+  if (path == "/search") {
+    has_valid_path = true;
+  } else if (path == "/webhp" || path == "/") {
+    // Note that we allow both "/" and "" paths, but GURL spits them
+    // both out as just "/".
+    has_valid_path = true;
+    is_home_page_base = true;
+  }
+  if (!has_valid_path)
+    return false;
+
+  // Check for query parameter in URL parameter and hash fragment, depending on
+  // the path type.
+  std::string query(original_url.query());
+  std::string ref(original_url.ref());
+  return HasQueryParameter(ref) ||
+      (!is_home_page_base && HasQueryParameter(query));
+}
+
+bool IsInstantExtendedAPIGoogleSearchUrl(const std::string& url) {
+  if (!IsGoogleSearchUrl(url))
+    return false;
+
+  const std::string embedded_search_key = kInstantExtendedAPIParam;
+
+  url_parse::Parsed parsed_url;
+  url_parse::ParseStandardURL(url.c_str(), url.length(), &parsed_url);
+  url_parse::Component key, value;
+  while (url_parse::ExtractQueryKeyValue(
+      url.c_str(), &parsed_url.query, &key, &value)) {
+    // If the parameter key is |embedded_search_key| and the value is not 0 this
+    // is an Instant Extended API Google search URL.
+    if (!url.compare(key.begin, key.len, embedded_search_key)) {
+      int int_value = 0;
+      if (value.is_nonempty())
+        base::StringToInt(url.substr(value.begin, value.len), &int_value);
+      return int_value != 0;
+    }
+  }
+  return false;
 }
 
 bool IsOrganic(const std::string& brand) {

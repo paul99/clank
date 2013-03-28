@@ -1,4 +1,4 @@
-// Copyright (c) 2011 The Chromium Authors. All rights reserved.
+// Copyright (c) 2012 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -11,10 +11,12 @@
 #include "third_party/WebKit/Source/WebKit/chromium/public/WebExternalPopupMenu.h"
 #include "third_party/WebKit/Source/WebKit/chromium/public/WebPopupMenuInfo.h"
 
-class RenderViewImpl;
 namespace WebKit {
 class WebExternalPopupMenuClient;
 }
+
+namespace content {
+class RenderViewImpl;
 
 class ExternalPopupMenu : public WebKit::WebExternalPopupMenu {
  public:
@@ -24,9 +26,11 @@ class ExternalPopupMenu : public WebKit::WebExternalPopupMenu {
 
   virtual ~ExternalPopupMenu() {}
 
+#if defined(OS_MACOSX)
   // Called when the user has selected an item. |selected_item| is -1 if the
   // user canceled the popup.
   void DidSelectItem(int selected_index);
+#endif
 
 #if defined(OS_ANDROID)
   // Called when the user has selected items or canceled the popup.
@@ -44,5 +48,7 @@ class ExternalPopupMenu : public WebKit::WebExternalPopupMenu {
 
   DISALLOW_COPY_AND_ASSIGN(ExternalPopupMenu);
 };
+
+}  // namespace content
 
 #endif  // CONTENT_RENDERER_EXTERNAL_POPUP_MENU_H_

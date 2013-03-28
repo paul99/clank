@@ -6,7 +6,6 @@
 
 #ifndef CHROME_BROWSER_CHROMEOS_CROS_NATIVE_NETWORK_CONSTANTS_H_
 #define CHROME_BROWSER_CHROMEOS_CROS_NATIVE_NETWORK_CONSTANTS_H_
-#pragma once
 
 #include "chrome/browser/chromeos/cros/network_library.h"
 
@@ -15,7 +14,7 @@ namespace chromeos {
 // Format of the Carrier ID.
 extern const char kCarrierIdFormat[];
 
-// Path of the default (shared) flimflam profile.
+// Path of the default (shared) shill profile.
 extern const char kSharedProfilePath[];
 
 extern const char* ConnectionTypeToString(ConnectionType type);

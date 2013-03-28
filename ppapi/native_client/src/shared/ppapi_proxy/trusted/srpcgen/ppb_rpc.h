@@ -19,27 +19,6 @@
 #include "ppapi/c/pp_module.h"
 #include "ppapi/c/pp_resource.h"
 
-class NaClFileRpcServer {
- public:
-  static void StreamAsFile(
-      NaClSrpcRpc* rpc,
-      NaClSrpcClosure* done,
-      PP_Instance instance,
-      const char* url,
-      int32_t callback_id);
-  static void GetFileDesc(
-      NaClSrpcRpc* rpc,
-      NaClSrpcClosure* done,
-      PP_Instance instance,
-      const char* url,
-      NaClSrpcImcDescType* file_desc);
-
- private:
-  NaClFileRpcServer();
-  NaClFileRpcServer(const NaClFileRpcServer&);
-  void operator=(const NaClFileRpcServer);
-};  // class NaClFileRpcServer
-
 class PpbRpcServer {
  public:
   static void PPB_GetInterface(
@@ -103,9 +82,16 @@ class PpbAudioConfigRpcServer {
       NaClSrpcClosure* done,
       PP_Resource resource,
       int32_t* out_bool);
+  static void PPB_AudioConfig_RecommendSampleFrameCount_1_0(
+      NaClSrpcRpc* rpc,
+      NaClSrpcClosure* done,
+      int32_t request_sample_rate,
+      int32_t request_sample_frame_count,
+      int32_t* out_sample_frame_count);
   static void PPB_AudioConfig_RecommendSampleFrameCount(
       NaClSrpcRpc* rpc,
       NaClSrpcClosure* done,
+      PP_Instance instance,
       int32_t request_sample_rate,
       int32_t request_sample_frame_count,
       int32_t* out_sample_frame_count);
@@ -119,6 +105,11 @@ class PpbAudioConfigRpcServer {
       NaClSrpcClosure* done,
       PP_Resource resource,
       int32_t* sample_frame_count);
+  static void PPB_AudioConfig_RecommendSampleRate(
+      NaClSrpcRpc* rpc,
+      NaClSrpcClosure* done,
+      PP_Instance instance,
+      int32_t* sample_rate);
 
  private:
   PpbAudioConfigRpcServer();
@@ -161,43 +152,6 @@ class PpbCoreRpcServer {
   PpbCoreRpcServer(const PpbCoreRpcServer&);
   void operator=(const PpbCoreRpcServer);
 };  // class PpbCoreRpcServer
-
-class PpbCursorControlRpcServer {
- public:
-  static void PPB_CursorControl_SetCursor(
-      NaClSrpcRpc* rpc,
-      NaClSrpcClosure* done,
-      PP_Instance instance,
-      int32_t type,
-      PP_Resource custom_image,
-      nacl_abi_size_t hot_spot_bytes, char* hot_spot,
-      int32_t* success);
-  static void PPB_CursorControl_LockCursor(
-      NaClSrpcRpc* rpc,
-      NaClSrpcClosure* done,
-      PP_Instance instance,
-      int32_t* success);
-  static void PPB_CursorControl_UnlockCursor(
-      NaClSrpcRpc* rpc,
-      NaClSrpcClosure* done,
-      PP_Instance instance,
-      int32_t* success);
-  static void PPB_CursorControl_HasCursorLock(
-      NaClSrpcRpc* rpc,
-      NaClSrpcClosure* done,
-      PP_Instance instance,
-      int32_t* success);
-  static void PPB_CursorControl_CanLockCursor(
-      NaClSrpcRpc* rpc,
-      NaClSrpcClosure* done,
-      PP_Instance instance,
-      int32_t* success);
-
- private:
-  PpbCursorControlRpcServer();
-  PpbCursorControlRpcServer(const PpbCursorControlRpcServer&);
-  void operator=(const PpbCursorControlRpcServer);
-};  // class PpbCursorControlRpcServer
 
 class PpbFileIORpcServer {
  public:
@@ -489,7 +443,7 @@ class PpbFullscreenRpcServer {
 
 class PpbGamepadRpcServer {
  public:
-  static void PPB_Gamepad_SampleGamepads(
+  static void PPB_Gamepad_Sample(
       NaClSrpcRpc* rpc,
       NaClSrpcClosure* done,
       PP_Instance instance,
@@ -659,6 +613,51 @@ class PpbGraphics3DRpcServer {
   void operator=(const PpbGraphics3DRpcServer);
 };  // class PpbGraphics3DRpcServer
 
+class PpbHostResolverPrivateRpcServer {
+ public:
+  static void PPB_HostResolver_Private_Create(
+      NaClSrpcRpc* rpc,
+      NaClSrpcClosure* done,
+      PP_Instance instance,
+      PP_Resource* resource);
+  static void PPB_HostResolver_Private_IsHostResolver(
+      NaClSrpcRpc* rpc,
+      NaClSrpcClosure* done,
+      PP_Resource resource,
+      int32_t* is_host_resolver);
+  static void PPB_HostResolver_Private_Resolve(
+      NaClSrpcRpc* rpc,
+      NaClSrpcClosure* done,
+      PP_Resource host_resolver,
+      const char* host,
+      int32_t port,
+      nacl_abi_size_t hint_bytes, char* hint,
+      int32_t callback_id,
+      int32_t* pp_error);
+  static void PPB_HostResolver_Private_GetCanonicalName(
+      NaClSrpcRpc* rpc,
+      NaClSrpcClosure* done,
+      PP_Resource host_resolver,
+      nacl_abi_size_t* canonical_name_bytes, char* canonical_name);
+  static void PPB_HostResolver_Private_GetSize(
+      NaClSrpcRpc* rpc,
+      NaClSrpcClosure* done,
+      PP_Resource host_resolver,
+      int32_t* size);
+  static void PPB_HostResolver_Private_GetNetAddress(
+      NaClSrpcRpc* rpc,
+      NaClSrpcClosure* done,
+      PP_Resource host_resolver,
+      int32_t index,
+      nacl_abi_size_t* addr_bytes, char* addr,
+      int32_t* success);
+
+ private:
+  PpbHostResolverPrivateRpcServer();
+  PpbHostResolverPrivateRpcServer(const PpbHostResolverPrivateRpcServer&);
+  void operator=(const PpbHostResolverPrivateRpcServer);
+};  // class PpbHostResolverPrivateRpcServer
+
 class PpbImageDataRpcServer {
  public:
   static void PPB_ImageData_GetNativeImageDataFormat(
@@ -789,6 +788,23 @@ class PpbMessagingRpcServer {
   void operator=(const PpbMessagingRpcServer);
 };  // class PpbMessagingRpcServer
 
+class PpbMouseCursorRpcServer {
+ public:
+  static void PPB_MouseCursor_SetCursor(
+      NaClSrpcRpc* rpc,
+      NaClSrpcClosure* done,
+      PP_Instance instance,
+      int32_t type,
+      PP_Resource custom_image,
+      nacl_abi_size_t hot_spot_bytes, char* hot_spot,
+      int32_t* success);
+
+ private:
+  PpbMouseCursorRpcServer();
+  PpbMouseCursorRpcServer(const PpbMouseCursorRpcServer&);
+  void operator=(const PpbMouseCursorRpcServer);
+};  // class PpbMouseCursorRpcServer
+
 class PpbMouseLockRpcServer {
  public:
   static void PPB_MouseLock_LockMouse(
@@ -841,6 +857,40 @@ class PpbNetAddressPrivateRpcServer {
       NaClSrpcClosure* done,
       int32_t is_ipv6,
       nacl_abi_size_t* addr_bytes, char* addr);
+  static void PPB_NetAddress_Private_GetFamily(
+      NaClSrpcRpc* rpc,
+      NaClSrpcClosure* done,
+      nacl_abi_size_t addr_bytes, char* addr,
+      int32_t* addr_family);
+  static void PPB_NetAddress_Private_GetPort(
+      NaClSrpcRpc* rpc,
+      NaClSrpcClosure* done,
+      nacl_abi_size_t addr_bytes, char* addr,
+      int32_t* port);
+  static void PPB_NetAddress_Private_GetAddress(
+      NaClSrpcRpc* rpc,
+      NaClSrpcClosure* done,
+      nacl_abi_size_t addr_bytes, char* addr,
+      nacl_abi_size_t* address_bytes, char* address,
+      int32_t* success);
+  static void PPB_NetAddress_Private_GetScopeID(
+      NaClSrpcRpc* rpc,
+      NaClSrpcClosure* done,
+      nacl_abi_size_t addr_bytes, char* addr,
+      int32_t* scope_id);
+  static void PPB_NetAddress_Private_CreateFromIPv4Address(
+      NaClSrpcRpc* rpc,
+      NaClSrpcClosure* done,
+      nacl_abi_size_t ip_bytes, char* ip,
+      int32_t port,
+      nacl_abi_size_t* addr_bytes, char* addr);
+  static void PPB_NetAddress_Private_CreateFromIPv6Address(
+      NaClSrpcRpc* rpc,
+      NaClSrpcClosure* done,
+      nacl_abi_size_t ip_bytes, char* ip,
+      int32_t scope_id,
+      int32_t port,
+      nacl_abi_size_t* addr_bytes, char* addr);
 
  private:
   PpbNetAddressPrivateRpcServer();
@@ -848,136 +898,118 @@ class PpbNetAddressPrivateRpcServer {
   void operator=(const PpbNetAddressPrivateRpcServer);
 };  // class PpbNetAddressPrivateRpcServer
 
-class PpbPdfRpcServer {
+class PpbNetworkListPrivateServer {
  public:
-  static void PPB_PDF_GetLocalizedString(
+  static void PPB_NetworkList_Private_IsNetworkList(
       NaClSrpcRpc* rpc,
       NaClSrpcClosure* done,
-      PP_Instance instance,
-      int32_t string_id,
-      nacl_abi_size_t* string_bytes, char* string);
-  static void PPB_PDF_GetResourceImage(
+      PP_Resource resource,
+      int32_t* out_bool);
+  static void PPB_NetworkList_Private_GetCount(
       NaClSrpcRpc* rpc,
       NaClSrpcClosure* done,
-      PP_Instance instance,
-      int32_t image_id,
-      PP_Resource* image);
-  static void PPB_PDF_GetFontFileWithFallback(
-      NaClSrpcRpc* rpc,
-      NaClSrpcClosure* done,
-      PP_Instance instance,
-      nacl_abi_size_t description_bytes, char* description,
-      nacl_abi_size_t face_bytes, char* face,
-      int32_t charset,
-      PP_Resource* font);
-  static void PPB_PDF_GetFontTableForPrivateFontFile(
-      NaClSrpcRpc* rpc,
-      NaClSrpcClosure* done,
-      PP_Resource font_file,
-      int32_t table,
-      nacl_abi_size_t* output_bytes, char* output,
-      int32_t* success);
-  static void PPB_PDF_SearchString(
-      NaClSrpcRpc* rpc,
-      NaClSrpcClosure* done,
-      PP_Instance instance,
-      nacl_abi_size_t string_bytes, char* string,
-      nacl_abi_size_t term_bytes, char* term,
-      int32_t case_sensitive,
-      nacl_abi_size_t* results_bytes, char* results,
+      PP_Resource resource,
       int32_t* count);
-  static void PPB_PDF_DidStartLoading(
+  static void PPB_NetworkList_Private_GetName(
       NaClSrpcRpc* rpc,
       NaClSrpcClosure* done,
-      PP_Instance instance);
-  static void PPB_PDF_DidStopLoading(
+      PP_Resource resource,
+      int32_t index,
+      nacl_abi_size_t* name_bytes, char* name);
+  static void PPB_NetworkList_Private_GetType(
       NaClSrpcRpc* rpc,
       NaClSrpcClosure* done,
-      PP_Instance instance);
-  static void PPB_PDF_SetContentRestriction(
+      PP_Resource resource,
+      int32_t index,
+      int32_t* type);
+  static void PPB_NetworkList_Private_GetState(
       NaClSrpcRpc* rpc,
       NaClSrpcClosure* done,
-      PP_Instance instance,
-      int32_t restrictions);
-  static void PPB_PDF_HistogramPDFPageCount(
+      PP_Resource resource,
+      int32_t index,
+      int32_t* state);
+  static void PPB_NetworkList_Private_GetIpAddresses(
       NaClSrpcRpc* rpc,
       NaClSrpcClosure* done,
-      int32_t count);
-  static void PPB_PDF_UserMetricsRecordAction(
+      PP_Resource resource,
+      int32_t index,
+      nacl_abi_size_t* addr_bytes, char* addr,
+      int32_t* addresses_count);
+  static void PPB_NetworkList_Private_GetDisplayName(
       NaClSrpcRpc* rpc,
       NaClSrpcClosure* done,
-      nacl_abi_size_t action_bytes, char* action);
-  static void PPB_PDF_HasUnsupportedFeature(
+      PP_Resource resource,
+      int32_t index,
+      nacl_abi_size_t* display_name_bytes, char* display_name);
+  static void PPB_NetworkList_Private_GetMTU(
       NaClSrpcRpc* rpc,
       NaClSrpcClosure* done,
-      PP_Instance instance);
-  static void PPB_PDF_SaveAs(
-      NaClSrpcRpc* rpc,
-      NaClSrpcClosure* done,
-      PP_Instance instance);
+      PP_Resource resource,
+      int32_t index,
+      int32_t* mtu);
 
  private:
-  PpbPdfRpcServer();
-  PpbPdfRpcServer(const PpbPdfRpcServer&);
-  void operator=(const PpbPdfRpcServer);
-};  // class PpbPdfRpcServer
+  PpbNetworkListPrivateServer();
+  PpbNetworkListPrivateServer(const PpbNetworkListPrivateServer&);
+  void operator=(const PpbNetworkListPrivateServer);
+};  // class PpbNetworkListPrivateServer
 
-class PpbScrollbarRpcServer {
+class PpbNetworkMonitorPrivateServer {
  public:
-  static void PPB_Scrollbar_Create(
+  static void PPB_NetworkMonitor_Private_Create(
       NaClSrpcRpc* rpc,
       NaClSrpcClosure* done,
       PP_Instance instance,
-      int32_t vertical,
-      PP_Resource* scrollbar);
-  static void PPB_Scrollbar_IsScrollbar(
+      PP_Resource* out_resource);
+  static void PPB_NetworkMonitor_Private_IsNetworkMonitor(
       NaClSrpcRpc* rpc,
       NaClSrpcClosure* done,
       PP_Resource resource,
-      int32_t* is_scrollbar);
-  static void PPB_Scrollbar_IsOverlay(
-      NaClSrpcRpc* rpc,
-      NaClSrpcClosure* done,
-      PP_Resource resource,
-      int32_t* is_overlay);
-  static void PPB_Scrollbar_GetThickness(
-      NaClSrpcRpc* rpc,
-      NaClSrpcClosure* done,
-      PP_Resource resource,
-      int32_t* thickness);
-  static void PPB_Scrollbar_GetValue(
-      NaClSrpcRpc* rpc,
-      NaClSrpcClosure* done,
-      PP_Resource scrollbar,
-      int32_t* value);
-  static void PPB_Scrollbar_SetValue(
-      NaClSrpcRpc* rpc,
-      NaClSrpcClosure* done,
-      PP_Resource scrollbar,
-      int32_t value);
-  static void PPB_Scrollbar_SetDocumentSize(
-      NaClSrpcRpc* rpc,
-      NaClSrpcClosure* done,
-      PP_Resource scrollbar,
-      int32_t size);
-  static void PPB_Scrollbar_SetTickMarks(
-      NaClSrpcRpc* rpc,
-      NaClSrpcClosure* done,
-      PP_Resource scrollbar,
-      nacl_abi_size_t tick_marks_bytes, char* tick_marks,
-      int32_t count);
-  static void PPB_Scrollbar_ScrollBy(
-      NaClSrpcRpc* rpc,
-      NaClSrpcClosure* done,
-      PP_Resource scrollbar,
-      int32_t unit,
-      int32_t multiplier);
+      int32_t* out_bool);
 
  private:
-  PpbScrollbarRpcServer();
-  PpbScrollbarRpcServer(const PpbScrollbarRpcServer&);
-  void operator=(const PpbScrollbarRpcServer);
-};  // class PpbScrollbarRpcServer
+  PpbNetworkMonitorPrivateServer();
+  PpbNetworkMonitorPrivateServer(const PpbNetworkMonitorPrivateServer&);
+  void operator=(const PpbNetworkMonitorPrivateServer);
+};  // class PpbNetworkMonitorPrivateServer
+
+class PpbTCPServerSocketPrivateRpcServer {
+ public:
+  static void PPB_TCPServerSocket_Private_Create(
+      NaClSrpcRpc* rpc,
+      NaClSrpcClosure* done,
+      PP_Instance instance,
+      PP_Resource* resource);
+  static void PPB_TCPServerSocket_Private_IsTCPServerSocket(
+      NaClSrpcRpc* rpc,
+      NaClSrpcClosure* done,
+      PP_Resource resource,
+      int32_t* is_tcp_server_socket);
+  static void PPB_TCPServerSocket_Private_Listen(
+      NaClSrpcRpc* rpc,
+      NaClSrpcClosure* done,
+      PP_Resource tcp_server_socket,
+      nacl_abi_size_t addr_bytes, char* addr,
+      int32_t backlog,
+      int32_t callback_id,
+      int32_t* pp_error);
+  static void PPB_TCPServerSocket_Private_Accept(
+      NaClSrpcRpc* rpc,
+      NaClSrpcClosure* done,
+      PP_Resource tcp_server_socket,
+      int32_t callback_id,
+      PP_Resource* tcp_socket,
+      int32_t* pp_error);
+  static void PPB_TCPServerSocket_Private_StopListening(
+      NaClSrpcRpc* rpc,
+      NaClSrpcClosure* done,
+      PP_Resource tcp_server_socket);
+
+ private:
+  PpbTCPServerSocketPrivateRpcServer();
+  PpbTCPServerSocketPrivateRpcServer(const PpbTCPServerSocketPrivateRpcServer&);
+  void operator=(const PpbTCPServerSocketPrivateRpcServer);
+};  // class PpbTCPServerSocketPrivateRpcServer
 
 class PpbTCPSocketPrivateRpcServer {
  public:
@@ -1105,6 +1137,13 @@ class PpbUDPSocketPrivateRpcServer {
       NaClSrpcClosure* done,
       PP_Resource resource_id,
       int32_t* is_udp_socket_private);
+  static void PPB_UDPSocket_Private_SetSocketFeature(
+      NaClSrpcRpc* rpc,
+      NaClSrpcClosure* done,
+      PP_Resource udp_socket,
+      int32_t name,
+      nacl_abi_size_t value_bytes, char* value,
+      int32_t* pp_error);
   static void PPB_UDPSocket_Private_Bind(
       NaClSrpcRpc* rpc,
       NaClSrpcClosure* done,
@@ -1112,6 +1151,12 @@ class PpbUDPSocketPrivateRpcServer {
       nacl_abi_size_t addr_bytes, char* addr,
       int32_t callback_id,
       int32_t* pp_error);
+  static void PPB_UDPSocket_Private_GetBoundAddress(
+      NaClSrpcRpc* rpc,
+      NaClSrpcClosure* done,
+      PP_Resource udp_socket,
+      nacl_abi_size_t* addr_bytes, char* addr,
+      int32_t* success);
   static void PPB_UDPSocket_Private_RecvFrom(
       NaClSrpcRpc* rpc,
       NaClSrpcClosure* done,
@@ -1315,7 +1360,8 @@ class PpbWebSocketRpcServer {
       NaClSrpcClosure* done,
       PP_Resource ws,
       int32_t callback_id,
-      int32_t* pp_error);
+      int32_t* pp_error,
+      nacl_abi_size_t* sync_read_buffer_bytes, char* sync_read_buffer);
   static void PPB_WebSocket_SendMessage(
       NaClSrpcRpc* rpc,
       NaClSrpcClosure* done,
@@ -1368,44 +1414,6 @@ class PpbWebSocketRpcServer {
   PpbWebSocketRpcServer(const PpbWebSocketRpcServer&);
   void operator=(const PpbWebSocketRpcServer);
 };  // class PpbWebSocketRpcServer
-
-class PpbWidgetRpcServer {
- public:
-  static void PPB_Widget_IsWidget(
-      NaClSrpcRpc* rpc,
-      NaClSrpcClosure* done,
-      PP_Resource resource,
-      int32_t* is_widget);
-  static void PPB_Widget_Paint(
-      NaClSrpcRpc* rpc,
-      NaClSrpcClosure* done,
-      PP_Resource widget,
-      nacl_abi_size_t rect_bytes, char* rect,
-      PP_Resource image,
-      int32_t* success);
-  static void PPB_Widget_HandleEvent(
-      NaClSrpcRpc* rpc,
-      NaClSrpcClosure* done,
-      PP_Resource widget,
-      PP_Resource event,
-      int32_t* handled);
-  static void PPB_Widget_GetLocation(
-      NaClSrpcRpc* rpc,
-      NaClSrpcClosure* done,
-      PP_Resource widget,
-      nacl_abi_size_t* location_bytes, char* location,
-      int32_t* visible);
-  static void PPB_Widget_SetLocation(
-      NaClSrpcRpc* rpc,
-      NaClSrpcClosure* done,
-      PP_Resource widget,
-      nacl_abi_size_t location_bytes, char* location);
-
- private:
-  PpbWidgetRpcServer();
-  PpbWidgetRpcServer(const PpbWidgetRpcServer&);
-  void operator=(const PpbWidgetRpcServer);
-};  // class PpbWidgetRpcServer
 
 class PpbZoomRpcServer {
  public:

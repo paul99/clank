@@ -1,4 +1,4 @@
-// Copyright (c) 2011 The Chromium Authors. All rights reserved.
+// Copyright (c) 2012 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 //
@@ -7,12 +7,10 @@
 
 #ifndef CHROME_BROWSER_PREFS_SCOPED_USER_PREF_UPDATE_H_
 #define CHROME_BROWSER_PREFS_SCOPED_USER_PREF_UPDATE_H_
-#pragma once
 
 #include <string>
 
 #include "base/basictypes.h"
-#include "base/memory/scoped_ptr.h"
 #include "base/threading/non_thread_safe.h"
 #include "base/values.h"
 #include "chrome/browser/prefs/pref_service.h"
@@ -37,15 +35,15 @@ class ScopedUserPrefUpdateBase : public base::NonThreadSafe {
   ScopedUserPrefUpdateBase(PrefService* service, const char* path);
 
   // Calls Notify().
-  virtual ~ScopedUserPrefUpdateBase();
+  ~ScopedUserPrefUpdateBase();
 
   // Sets |value_| to |service_|->GetMutableUserPref and returns it.
-  base::Value* Get(base::Value::Type type);
+  base::Value* GetValueOfType(base::Value::Type type);
 
  private:
   // If |value_| is not null, triggers a notification of PrefObservers and
   // resets |value_|.
-  virtual void Notify();
+  void Notify();
 
   // Weak pointer.
   PrefService* service_;
@@ -82,9 +80,10 @@ class ScopedUserPrefUpdate : public subtle::ScopedUserPrefUpdateBase {
   // destruction time.
   //
   // The ownership of the return value remains with the user pref store.
+  // Virtual so it can be overriden in subclasses that transform the value
+  // before returning it (for example to return a subelement of a dictionary).
   virtual T* Get() {
-    return static_cast<T*>(
-        subtle::ScopedUserPrefUpdateBase::Get(type_enum_value));
+    return static_cast<T*>(GetValueOfType(type_enum_value));
   }
 
   T& operator*() {

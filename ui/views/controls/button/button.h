@@ -4,7 +4,6 @@
 
 #ifndef UI_VIEWS_CONTROLS_BUTTON_BUTTON_H_
 #define UI_VIEWS_CONTROLS_BUTTON_BUTTON_H_
-#pragma once
 
 #include "ui/views/view.h"
 
@@ -17,7 +16,7 @@ class Event;
 // pressed.
 class VIEWS_EXPORT ButtonListener {
  public:
-  virtual void ButtonPressed(Button* sender, const views::Event& event) = 0;
+  virtual void ButtonPressed(Button* sender, const ui::Event& event) = 0;
 
  protected:
   virtual ~ButtonListener() {}
@@ -34,10 +33,7 @@ class VIEWS_EXPORT Button : public View {
   int tag() const { return tag_; }
   void set_tag(int tag) { tag_ = tag; }
 
-  int mouse_event_flags() const { return mouse_event_flags_; }
-
   void SetAccessibleName(const string16& name);
-  void SetAccessibleKeyboardShortcut(const string16& shortcut);
 
   // Overridden from View:
   virtual bool GetTooltipText(const gfx::Point& p,
@@ -51,7 +47,7 @@ class VIEWS_EXPORT Button : public View {
   explicit Button(ButtonListener* listener);
 
   // Cause the button to notify the listener that a click occurred.
-  virtual void NotifyClick(const views::Event& event);
+  virtual void NotifyClick(const ui::Event& event);
 
   // The button's listener. Notified when clicked.
   ButtonListener* listener_;
@@ -62,14 +58,10 @@ class VIEWS_EXPORT Button : public View {
 
   // Accessibility data.
   string16 accessible_name_;
-  string16 accessible_shortcut_;
 
   // The id tag associated with this button. Used to disambiguate buttons in
   // the ButtonListener implementation.
   int tag_;
-
-  // Event flags present when the button was clicked.
-  int mouse_event_flags_;
 
   DISALLOW_COPY_AND_ASSIGN(Button);
 };

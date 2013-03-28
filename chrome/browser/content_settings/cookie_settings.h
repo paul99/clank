@@ -1,22 +1,21 @@
-// Copyright (c) 2011 The Chromium Authors. All rights reserved.
+// Copyright (c) 2012 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
 #ifndef CHROME_BROWSER_CONTENT_SETTINGS_COOKIE_SETTINGS_H_
 #define CHROME_BROWSER_CONTENT_SETTINGS_COOKIE_SETTINGS_H_
-#pragma once
 
 #include <string>
 
 #include "base/compiler_specific.h"
 #include "base/memory/ref_counted.h"
 #include "base/memory/singleton.h"
+#include "base/prefs/public/pref_change_registrar.h"
 #include "base/synchronization/lock.h"
 #include "chrome/browser/content_settings/host_content_settings_map.h"
-#include "chrome/browser/prefs/pref_change_registrar.h"
-#include "chrome/browser/profiles/profile_keyed_service_factory.h"
+#include "chrome/browser/profiles/refcounted_profile_keyed_service.h"
+#include "chrome/browser/profiles/refcounted_profile_keyed_service_factory.h"
 #include "chrome/common/content_settings.h"
-#include "content/public/browser/notification_observer.h"
 
 class ContentSettingsPattern;
 class CookieSettingsWrapper;
@@ -29,19 +28,11 @@ class Profile;
 // thread and read on any thread. One instance per profile.
 
 class CookieSettings
-    : public content::NotificationObserver,
-      public base::RefCountedThreadSafe<CookieSettings> {
+    : public RefcountedProfileKeyedService {
  public:
   CookieSettings(
       HostContentSettingsMap* host_content_settings_map,
       PrefService* prefs);
-
-  virtual ~CookieSettings();
-
-  // Returns the |CookieSettings| associated with the |profile|.
-  //
-  // This should only be called on the UI thread.
-  static CookieSettings* GetForProfile(Profile* profile);
 
   // Returns the default content setting (CONTENT_SETTING_ALLOW,
   // CONTENT_SETTING_BLOCK, or CONTENT_SETTING_SESSION_ONLY) for cookies. If
@@ -98,15 +89,10 @@ class CookieSettings
   void ResetCookieSetting(const ContentSettingsPattern& primary_pattern,
                           const ContentSettingsPattern& secondary_pattern);
 
-  // |NotificationObserver| implementation.
-  virtual void Observe(int type,
-                       const content::NotificationSource& source,
-                       const content::NotificationDetails& details) OVERRIDE;
-
   // Detaches the |CookieSettings| from all |Profile|-related objects like
   // |PrefService|. This methods needs to be called before destroying the
   // |Profile|. Afterwards, only const methods can be called.
-  void ShutdownOnUIThread();
+  virtual void ShutdownOnUIThread() OVERRIDE;
 
   // A helper for applying third party cookie blocking rules.
   ContentSetting GetCookieSetting(
@@ -117,24 +103,33 @@ class CookieSettings
 
   static void RegisterUserPrefs(PrefService* prefs);
 
-  class Factory : public ProfileKeyedServiceFactory {
+  class Factory : public RefcountedProfileKeyedServiceFactory {
    public:
+    // Returns the |CookieSettings| associated with the |profile|.
+    //
+    // This should only be called on the UI thread.
+    static scoped_refptr<CookieSettings> GetForProfile(Profile* profile);
+
     static Factory* GetInstance();
-    CookieSettingsWrapper* GetWrapperForProfile(Profile* profile);
 
    private:
     friend struct DefaultSingletonTraits<Factory>;
 
     Factory();
-    virtual ~Factory() {}
+    virtual ~Factory();
 
-    // |ProfileKeyedServiceFactory| methods:
-    virtual ProfileKeyedService* BuildServiceInstanceFor(
-        Profile* profile) const OVERRIDE;
-    virtual bool ServiceRedirectedInIncognito() OVERRIDE { return true; }
+    // |ProfileKeyedBaseFactory| methods:
+    virtual void RegisterUserPrefs(PrefService* user_prefs) OVERRIDE;
+    virtual bool ServiceRedirectedInIncognito() const OVERRIDE;
+    virtual scoped_refptr<RefcountedProfileKeyedService>
+        BuildServiceInstanceFor(Profile* profile) const OVERRIDE;
   };
 
  private:
+  virtual ~CookieSettings();
+
+  void OnBlockThirdPartyCookiesChanged();
+
   // Returns true if the "block third party cookies" preference is set.
   //
   // This method may be called on any thread.

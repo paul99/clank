@@ -1,4 +1,4 @@
-// Copyright (c) 2011 The Chromium Authors. All rights reserved.
+// Copyright (c) 2012 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -49,7 +49,7 @@ class FileBackgroundIO : public disk_cache::BackgroundIO {
   void Write();
 
  private:
-  ~FileBackgroundIO() {}
+  virtual ~FileBackgroundIO() {}
 
   disk_cache::FileIOCallback* callback_;
 
@@ -66,7 +66,7 @@ class FileBackgroundIO : public disk_cache::BackgroundIO {
 class FileInFlightIO : public disk_cache::InFlightIO {
  public:
   FileInFlightIO() {}
-  ~FileInFlightIO() {}
+  virtual ~FileInFlightIO() {}
 
   // These methods start an asynchronous operation. The arguments have the same
   // semantics of the File asynchronous operations, with the exception that the
@@ -82,7 +82,7 @@ class FileInFlightIO : public disk_cache::InFlightIO {
   // queued (because we are inside WaitForPendingIO), and false if said task is
   // the one performing the call.
   virtual void OnOperationComplete(disk_cache::BackgroundIO* operation,
-                                   bool cancel);
+                                   bool cancel) OVERRIDE;
 
  private:
   DISALLOW_COPY_AND_ASSIGN(FileInFlightIO);
@@ -97,7 +97,7 @@ void FileBackgroundIO::Read() {
   } else {
     result_ = net::ERR_CACHE_READ_FAILURE;
   }
-  controller_->OnIOComplete(this);
+  NotifyController();
 }
 
 // Runs on a worker thread.
@@ -105,7 +105,7 @@ void FileBackgroundIO::Write() {
   bool rv = file_->Write(buf_, buf_len_, offset_);
 
   result_ = rv ? static_cast<int>(buf_len_) : net::ERR_CACHE_WRITE_FAILURE;
-  controller_->OnIOComplete(this);
+  NotifyController();
 }
 
 // ---------------------------------------------------------------------------
@@ -279,6 +279,12 @@ void File::WaitForPendingIO(int* num_pending_io) {
   // We may be running unit tests so we should allow be able to reset the
   // message loop.
   GetFileInFlightIO()->WaitForPendingIO();
+  DeleteFileInFlightIO();
+}
+
+// Static.
+void File::DropPendingIO() {
+  GetFileInFlightIO()->DropPendingIO();
   DeleteFileInFlightIO();
 }
 

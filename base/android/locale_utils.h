@@ -5,15 +5,23 @@
 #ifndef BASE_ANDROID_LOCALE_UTILS_H_
 #define BASE_ANDROID_LOCALE_UTILS_H_
 
+#include <jni.h>
+
 #include <string>
 
+#include "base/base_export.h"
 #include "base/string16.h"
 
 namespace base {
 namespace android {
 
-string16 GetDisplayNameForLocale(const std::string& locale,
+// Return the current default locale of the device.
+BASE_EXPORT std::string GetDefaultLocale();
+
+BASE_EXPORT string16 GetDisplayNameForLocale(const std::string& locale,
                                  const std::string& display_locale);
+
+bool RegisterLocaleUtils(JNIEnv* env);
 
 }  // namespace android
 }  // namespace base

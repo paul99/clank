@@ -4,7 +4,6 @@
 
 #ifndef CONTENT_BROWSER_DOWNLOAD_MOCK_DOWNLOAD_FILE_H_
 #define CONTENT_BROWSER_DOWNLOAD_MOCK_DOWNLOAD_FILE_H_
-#pragma once
 
 #include <string>
 #include <map>
@@ -14,36 +13,44 @@
 #include "content/browser/download/download_file.h"
 #include "content/public/browser/download_id.h"
 #include "content/public/browser/download_manager.h"
-#include "net/base/net_errors.h"
 #include "testing/gmock/include/gmock/gmock.h"
 #include "testing/gtest/include/gtest/gtest.h"
 
+namespace content {
 struct DownloadCreateInfo;
 
-class MockDownloadFile : virtual public content::DownloadFile {
+class MockDownloadFile : virtual public DownloadFile {
  public:
   MockDownloadFile();
   virtual ~MockDownloadFile();
 
   // DownloadFile functions.
-  MOCK_METHOD0(Initialize, net::Error());
-  MOCK_METHOD2(AppendDataToFile, net::Error(const char* data, size_t data_len));
-  MOCK_METHOD1(Rename, net::Error(const FilePath& full_path));
+  MOCK_METHOD1(Initialize, void(const InitializeCallback&));
+  MOCK_METHOD2(AppendDataToFile, DownloadInterruptReason(
+      const char* data, size_t data_len));
+  MOCK_METHOD1(Rename, DownloadInterruptReason(const FilePath& full_path));
+  MOCK_METHOD2(RenameAndUniquify,
+               void(const FilePath& full_path,
+                    const RenameCompletionCallback& callback));
+  MOCK_METHOD2(RenameAndAnnotate,
+               void(const FilePath& full_path,
+                    const RenameCompletionCallback& callback));
   MOCK_METHOD0(Detach, void());
   MOCK_METHOD0(Cancel, void());
   MOCK_METHOD0(Finish, void());
-  MOCK_METHOD0(AnnotateWithSourceInformation, void());
   MOCK_CONST_METHOD0(FullPath, FilePath());
   MOCK_CONST_METHOD0(InProgress, bool());
   MOCK_CONST_METHOD0(BytesSoFar, int64());
   MOCK_CONST_METHOD0(CurrentSpeed, int64());
   MOCK_METHOD1(GetHash, bool(std::string* hash));
   MOCK_METHOD0(GetHashState, std::string());
-  MOCK_METHOD0(CancelDownloadRequest, void());
+  MOCK_METHOD0(SendUpdate, void());
   MOCK_CONST_METHOD0(Id, int());
-  MOCK_METHOD0(GetDownloadManager, content::DownloadManager*());
-  MOCK_CONST_METHOD0(GlobalId, const content::DownloadId&());
+  MOCK_METHOD0(GetDownloadManager, DownloadManager*());
+  MOCK_CONST_METHOD0(GlobalId, const DownloadId&());
   MOCK_CONST_METHOD0(DebugString, std::string());
 };
+
+}  // namespace content
 
 #endif  // CONTENT_BROWSER_DOWNLOAD_MOCK_DOWNLOAD_FILE_H_

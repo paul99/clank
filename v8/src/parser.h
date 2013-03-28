@@ -1,4 +1,4 @@
-// Copyright 2011 the V8 project authors. All rights reserved.
+// Copyright 2012 the V8 project authors. All rights reserved.
 // Redistribution and use in source and binary forms, with or without
 // modification, are permitted provided that the following conditions are
 // met:
@@ -96,7 +96,6 @@ class FunctionEntry BASE_EMBEDDED {
 
  private:
   Vector<unsigned> backing_;
-  bool owns_data_;
 };
 
 
@@ -172,15 +171,9 @@ class ParserApi {
   static bool Parse(CompilationInfo* info, int flags);
 
   // Generic preparser generating full preparse data.
-  static ScriptDataImpl* PreParse(UC16CharacterStream* source,
+  static ScriptDataImpl* PreParse(Utf16CharacterStream* source,
                                   v8::Extension* extension,
                                   int flags);
-
-  // Preparser that only does preprocessing that makes sense if only used
-  // immediately after.
-  static ScriptDataImpl* PartialPreParse(Handle<String> source,
-                                         v8::Extension* extension,
-                                         int flags);
 };
 
 // ----------------------------------------------------------------------------
@@ -200,12 +193,12 @@ class BufferedZoneList {
   // Adds element at end of list. This element is buffered and can
   // be read using last() or removed using RemoveLast until a new Add or until
   // RemoveLast or GetList has been called.
-  void Add(T* value) {
+  void Add(T* value, Zone* zone) {
     if (last_ != NULL) {
       if (list_ == NULL) {
-        list_ = new ZoneList<T*>(initial_size);
+        list_ = new(zone) ZoneList<T*>(initial_size, zone);
       }
-      list_->Add(last_);
+      list_->Add(last_, zone);
     }
     last_ = value;
   }
@@ -250,12 +243,12 @@ class BufferedZoneList {
     return length + ((last_ == NULL) ? 0 : 1);
   }
 
-  ZoneList<T*>* GetList() {
+  ZoneList<T*>* GetList(Zone* zone) {
     if (list_ == NULL) {
-      list_ = new ZoneList<T*>(initial_size);
+      list_ = new(zone) ZoneList<T*>(initial_size, zone);
     }
     if (last_ != NULL) {
-      list_->Add(last_);
+      list_->Add(last_, zone);
       last_ = NULL;
     }
     return list_;
@@ -270,7 +263,7 @@ class BufferedZoneList {
 // Accumulates RegExp atoms and assertions into lists of terms and alternatives.
 class RegExpBuilder: public ZoneObject {
  public:
-  RegExpBuilder();
+  explicit RegExpBuilder(Zone* zone);
   void AddCharacter(uc16 character);
   // "Adds" an empty expression. Does nothing except consume a
   // following quantifier
@@ -285,7 +278,7 @@ class RegExpBuilder: public ZoneObject {
   void FlushCharacters();
   void FlushText();
   void FlushTerms();
-  Zone* zone() { return zone_; }
+  Zone* zone() const { return zone_; }
 
   Zone* zone_;
   bool pending_empty_;
@@ -306,11 +299,13 @@ class RegExpParser {
  public:
   RegExpParser(FlatStringReader* in,
                Handle<String>* error,
-               bool multiline_mode);
+               bool multiline_mode,
+               Zone* zone);
 
   static bool ParseRegExp(FlatStringReader* input,
                           bool multiline,
-                          RegExpCompileData* result);
+                          RegExpCompileData* result,
+                          Zone* zone);
 
   RegExpTree* ParsePattern();
   RegExpTree* ParseDisjunction();
@@ -368,9 +363,10 @@ class RegExpParser {
    public:
     RegExpParserState(RegExpParserState* previous_state,
                       SubexpressionType group_type,
-                      int disjunction_capture_index)
+                      int disjunction_capture_index,
+                      Zone* zone)
         : previous_state_(previous_state),
-          builder_(new RegExpBuilder()),
+          builder_(new(zone) RegExpBuilder(zone)),
           group_type_(group_type),
           disjunction_capture_index_(disjunction_capture_index) {}
     // Parser state of containing expression, if any.
@@ -397,7 +393,7 @@ class RegExpParser {
   };
 
   Isolate* isolate() { return isolate_; }
-  Zone* zone() { return isolate_->zone(); }
+  Zone* zone() const { return zone_; }
 
   uc32 current() { return current_; }
   bool has_more() { return has_more_; }
@@ -407,6 +403,7 @@ class RegExpParser {
   void ScanForCaptures();
 
   Isolate* isolate_;
+  Zone* zone_;
   Handle<String>* error_;
   ZoneList<RegExpCapture*>* captures_;
   FlatStringReader* in_;
@@ -430,19 +427,18 @@ class SingletonLogger;
 
 class Parser {
  public:
-  Parser(Handle<Script> script,
+  Parser(CompilationInfo* info,
          int parsing_flags,  // Combination of ParsingFlags
          v8::Extension* extension,
          ScriptDataImpl* pre_data);
   virtual ~Parser() {
-    if (reusable_preparser_ != NULL) {
-      delete reusable_preparser_;
-    }
+    delete reusable_preparser_;
+    reusable_preparser_ = NULL;
   }
 
   // Returns NULL if parsing failed.
-  FunctionLiteral* ParseProgram(CompilationInfo* info);
-  FunctionLiteral* ParseLazy(CompilationInfo* info);
+  FunctionLiteral* ParseProgram();
+  FunctionLiteral* ParseLazy();
 
   void ReportMessageAt(Scanner::Location loc,
                        const char* message,
@@ -457,7 +453,7 @@ class Parser {
   // construct a hashable id, so if more than 2^17 are allowed, this
   // should be checked.
   static const int kMaxNumFunctionParameters = 32766;
-  static const int kMaxNumFunctionLocals = 32767;
+  static const int kMaxNumFunctionLocals = 131071;  // 2^17-1
 
   enum Mode {
     PARSE_LAZILY,
@@ -465,7 +461,8 @@ class Parser {
   };
 
   enum VariableDeclarationContext {
-    kSourceElement,
+    kModuleElement,
+    kBlockElement,
     kStatement,
     kForStatement
   };
@@ -477,14 +474,89 @@ class Parser {
   };
 
   class BlockState;
-  class FunctionState;
 
-  FunctionLiteral* ParseLazy(CompilationInfo* info,
-                             UC16CharacterStream* source,
+  class FunctionState BASE_EMBEDDED {
+   public:
+    FunctionState(Parser* parser,
+                  Scope* scope,
+                  Isolate* isolate);
+    ~FunctionState();
+
+    int NextMaterializedLiteralIndex() {
+      return next_materialized_literal_index_++;
+    }
+    int materialized_literal_count() {
+      return next_materialized_literal_index_ - JSFunction::kLiteralsPrefixSize;
+    }
+
+    int NextHandlerIndex() { return next_handler_index_++; }
+    int handler_count() { return next_handler_index_; }
+
+    void SetThisPropertyAssignmentInfo(
+        bool only_simple_this_property_assignments,
+        Handle<FixedArray> this_property_assignments) {
+      only_simple_this_property_assignments_ =
+          only_simple_this_property_assignments;
+      this_property_assignments_ = this_property_assignments;
+    }
+    bool only_simple_this_property_assignments() {
+      return only_simple_this_property_assignments_;
+    }
+    Handle<FixedArray> this_property_assignments() {
+      return this_property_assignments_;
+    }
+
+    void AddProperty() { expected_property_count_++; }
+    int expected_property_count() { return expected_property_count_; }
+
+    AstNodeFactory<AstConstructionVisitor>* factory() { return &factory_; }
+
+   private:
+    // Used to assign an index to each literal that needs materialization in
+    // the function.  Includes regexp literals, and boilerplate for object and
+    // array literals.
+    int next_materialized_literal_index_;
+
+    // Used to assign a per-function index to try and catch handlers.
+    int next_handler_index_;
+
+    // Properties count estimation.
+    int expected_property_count_;
+
+    // Keeps track of assignments to properties of this. Used for
+    // optimizing constructors.
+    bool only_simple_this_property_assignments_;
+    Handle<FixedArray> this_property_assignments_;
+
+    Parser* parser_;
+    FunctionState* outer_function_state_;
+    Scope* outer_scope_;
+    int saved_ast_node_id_;
+    AstNodeFactory<AstConstructionVisitor> factory_;
+  };
+
+  class ParsingModeScope BASE_EMBEDDED {
+   public:
+    ParsingModeScope(Parser* parser, Mode mode)
+        : parser_(parser),
+          old_mode_(parser->mode()) {
+      parser_->mode_ = mode;
+    }
+    ~ParsingModeScope() {
+      parser_->mode_ = old_mode_;
+    }
+
+   private:
+    Parser* parser_;
+    Mode old_mode_;
+  };
+
+  FunctionLiteral* ParseLazy(Utf16CharacterStream* source,
                              ZoneScope* zone_scope);
 
   Isolate* isolate() { return isolate_; }
-  Zone* zone() { return isolate_->zone(); }
+  Zone* zone() const { return zone_; }
+  CompilationInfo* info() const { return info_; }
 
   // Called by ParseProgram after setting up the scanner.
   FunctionLiteral* DoParseProgram(CompilationInfo* info,
@@ -495,6 +567,7 @@ class Parser {
   void ReportUnexpectedToken(Token::Value token);
   void ReportInvalidPreparseData(Handle<String> name, bool* ok);
   void ReportMessage(const char* message, Vector<const char*> args);
+  void ReportMessage(const char* message, Vector<Handle<String> > args);
 
   bool inside_with() const { return top_scope_->inside_with(); }
   Scanner& scanner()  { return scanner_; }
@@ -504,6 +577,10 @@ class Parser {
     ASSERT(top_scope_ != NULL);
     return top_scope_->is_extended_mode();
   }
+  Scope* DeclarationScope(VariableMode mode) {
+    return IsLexicalVariableMode(mode)
+        ? top_scope_ : top_scope_->DeclarationScope();
+  }
 
   // Check if the given string is 'eval' or 'arguments'.
   bool IsEvalOrArguments(Handle<String> string);
@@ -512,17 +589,29 @@ class Parser {
   // which is set to false if parsing failed; it is unchanged otherwise.
   // By making the 'exception handling' explicit, we are forced to check
   // for failure at the call sites.
-  void* ParseSourceElements(ZoneList<Statement*>* processor,
-                            int end_token, bool* ok);
-  Statement* ParseSourceElement(ZoneStringList* labels, bool* ok);
+  void* ParseSourceElements(ZoneList<Statement*>* processor, int end_token,
+                            bool is_eval, bool is_global, bool* ok);
+  Statement* ParseModuleElement(ZoneStringList* labels, bool* ok);
+  Statement* ParseModuleDeclaration(ZoneStringList* names, bool* ok);
+  Module* ParseModule(bool* ok);
+  Module* ParseModuleLiteral(bool* ok);
+  Module* ParseModulePath(bool* ok);
+  Module* ParseModuleVariable(bool* ok);
+  Module* ParseModuleUrl(bool* ok);
+  Module* ParseModuleSpecifier(bool* ok);
+  Block* ParseImportDeclaration(bool* ok);
+  Statement* ParseExportDeclaration(bool* ok);
+  Statement* ParseBlockElement(ZoneStringList* labels, bool* ok);
   Statement* ParseStatement(ZoneStringList* labels, bool* ok);
-  Statement* ParseFunctionDeclaration(bool* ok);
+  Statement* ParseFunctionDeclaration(ZoneStringList* names, bool* ok);
   Statement* ParseNativeDeclaration(bool* ok);
   Block* ParseBlock(ZoneStringList* labels, bool* ok);
   Block* ParseVariableStatement(VariableDeclarationContext var_context,
+                                ZoneStringList* names,
                                 bool* ok);
   Block* ParseVariableDeclarations(VariableDeclarationContext var_context,
                                    VariableDeclarationProperties* decl_props,
+                                   ZoneStringList* names,
                                    Handle<String>* out,
                                    bool* ok);
   Statement* ParseExpressionOrLabelledStatement(ZoneStringList* labels,
@@ -625,6 +714,7 @@ class Parser {
   void Expect(Token::Value token, bool* ok);
   bool Check(Token::Value token);
   void ExpectSemicolon(bool* ok);
+  void ExpectContextualKeyword(const char* keyword, bool* ok);
 
   Handle<String> LiteralString(PretenureFlag tenured) {
     if (scanner().is_literal_ascii()) {
@@ -632,7 +722,7 @@ class Parser {
           scanner().literal_ascii_string(), tenured);
     } else {
       return isolate_->factory()->NewStringFromTwoByte(
-            scanner().literal_uc16_string(), tenured);
+            scanner().literal_utf16_string(), tenured);
     }
   }
 
@@ -642,7 +732,7 @@ class Parser {
           scanner().next_literal_ascii_string(), tenured);
     } else {
       return isolate_->factory()->NewStringFromTwoByte(
-          scanner().next_literal_uc16_string(), tenured);
+          scanner().next_literal_utf16_string(), tenured);
     }
   }
 
@@ -651,7 +741,6 @@ class Parser {
   // Get odd-ball literals.
   Literal* GetLiteralUndefined();
   Literal* GetLiteralTheHole();
-  Literal* GetLiteralNumber(double value);
 
   Handle<String> ParseIdentifier(bool* ok);
   Handle<String> ParseIdentifierOrStrictReservedWord(
@@ -686,10 +775,10 @@ class Parser {
   void CheckConflictingVarDeclarations(Scope* scope, bool* ok);
 
   // Parser support
-  VariableProxy* Declare(Handle<String> name, VariableMode mode,
-                         FunctionLiteral* fun,
-                         bool resolve,
-                         bool* ok);
+  VariableProxy* NewUnresolved(Handle<String> name,
+                               VariableMode mode,
+                               Interface* interface);
+  void Declare(Declaration* declaration, bool resolve, bool* ok);
 
   bool TargetStackContainsLabel(Handle<String> label);
   BreakableStatement* LookupBreakTarget(Handle<String> label, bool* ok);
@@ -699,30 +788,11 @@ class Parser {
 
   // Factory methods.
 
-  Statement* EmptyStatement() {
-    static v8::internal::EmptyStatement* empty =
-        ::new v8::internal::EmptyStatement();
-    return empty;
-  }
-
   Scope* NewScope(Scope* parent, ScopeType type);
 
   Handle<String> LookupSymbol(int symbol_id);
 
   Handle<String> LookupCachedSymbol(int symbol_id);
-
-  Expression* NewCall(Expression* expression,
-                      ZoneList<Expression*>* arguments,
-                      int pos) {
-    return new(zone()) Call(isolate(), expression, arguments, pos);
-  }
-
-  inline Literal* NewLiteral(Handle<Object> handle) {
-    return new(zone()) Literal(isolate(), handle);
-  }
-
-  // Create a number literal.
-  Literal* NewNumberLiteral(double value);
 
   // Generate AST node that throw a ReferenceError with the given type.
   Expression* NewThrowReferenceError(Handle<String> type);
@@ -746,6 +816,10 @@ class Parser {
   preparser::PreParser::PreParseResult LazyParseFunctionLiteral(
        SingletonLogger* logger);
 
+  AstNodeFactory<AstConstructionVisitor>* factory() {
+    return current_function_state_->factory();
+  }
+
   Isolate* isolate_;
   ZoneList<Handle<String> > symbol_cache_;
 
@@ -762,6 +836,7 @@ class Parser {
   Mode mode_;
   bool allow_natives_syntax_;
   bool allow_lazy_;
+  bool allow_modules_;
   bool stack_overflow_;
   // If true, the next (and immediately following) function literal is
   // preceded by a parenthesis.
@@ -769,6 +844,8 @@ class Parser {
   // so never lazily compile it.
   bool parenthesized_function_;
 
+  Zone* zone_;
+  CompilationInfo* info_;
   friend class BlockState;
   friend class FunctionState;
 };

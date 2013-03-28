@@ -3,8 +3,9 @@
 // found in the LICENSE file.
 
 // Constants.
-var FEEDBACK_LANDING_PAGE =
-    'http://www.google.com/support/chrome/go/feedback_confirmation'
+/** @const */ var FEEDBACK_LANDING_PAGE =
+    'https://www.google.com/support/chrome/go/feedback_confirmation';
+/** @const */ var MAX_ATTACH_FILE_SIZE = 3 * 1024 * 1024;
 
 var selectedThumbnailDivId = '';
 var selectedThumbnailId = '';
@@ -14,12 +15,18 @@ var savedThumbnailIds = [];
 savedThumbnailIds['current-screenshots'] = '';
 savedThumbnailIds['saved-screenshots'] = '';
 
-var categoryTag = "";
+var categoryTag = '';
+var forceDisableScreenshots = false;
 
-var localStrings = new LocalStrings();
+
+// Globals to manage reading data from the attach a file option.
+var attachFileBinaryData = '';
+var lastReader = null;
 
 /**
  * Selects an image thumbnail in the specified div.
+ * @param {string} divId The id of the div to search in.
+ * @param {string} thumbnailId The id of the thumbnail to search for.
  */
 function selectImage(divId, thumbnailId) {
   var thumbnailDivs = $(divId).children;
@@ -28,21 +35,24 @@ function selectImage(divId, thumbnailId) {
     $(divId).hidden = true;
     return;
   }
+
   for (var i = 0; i < thumbnailDivs.length; i++) {
+    thumbnailDivs[i].className = 'image-thumbnail-container';
+
     // If the the current div matches the thumbnail id provided,
     // or there is no thumbnail id given, and we're at the first thumbnail.
-    if ((thumbnailDivs[i].id == thumbnailId) || (!thumbnailId && !i)) {
-      thumbnailDivs[i].className = 'image-thumbnail-container-selected';
-      selectedThumbnailId = thumbnailId;
+    if (thumbnailDivs[i].id == thumbnailId || (!thumbnailId && !i)) {
+      thumbnailDivs[i].classList.add('image-thumbnail-container-selected');
+      selectedThumbnailId = thumbnailDivs[i].id;
       savedThumbnailIds[divId] = thumbnailId;
-    } else {
-      thumbnailDivs[i].className = 'image-thumbnail-container';
     }
   }
 }
 
 /**
  * Adds an image thumbnail to the specified div.
+ * @param {string} divId The id of the div to add a screenshot to.
+ * @param {string} screenshot The URL of the screenshot being added.
  */
 function addScreenshot(divId, screenshot) {
   var thumbnailDiv = document.createElement('div');
@@ -54,10 +64,7 @@ function addScreenshot(divId, screenshot) {
   };
 
   var innerDiv = document.createElement('div');
-  if (divId == 'current-screenshots')
-    innerDiv.className = 'image-thumbnail-current';
-  else
-    innerDiv.className = 'image-thumbnail';
+  innerDiv.className = 'image-thumbnail';
 
   var thumbnail = document.createElement('img');
   thumbnail.id = thumbnailDiv.id + '-image';
@@ -76,23 +83,72 @@ function addScreenshot(divId, screenshot) {
 /**
  * Disables screenshots completely.
  */
-function disableScreenshots() {
-  $('screenshot-row').hidden = true;
-  $('screenshot-checkbox').checked = false;
-
-  $('current-screenshots').hidden = true;
-  if ($('saved-screenshots'))
-    $('saved-screenshots').hidden = true;
+function enableScreenshots() {
+  if (forceDisableScreenshots)
+    return;
+  $('screenshot-row').hidden = false;
 }
 
 /**
- * Send's the report; after the report is sent, we need to be redirected to
+ * Reads the selected file when the user selects a file.
+ * @param {event} evtFileSelected The on changed event for the file input box.
+ */
+function onFileSelected(evtFileSelected) {
+  var file = evtFileSelected.target.files[0];
+  if (!file) {
+    // User canceled file selection.
+    $('attach-file-checkbox').checked = false;
+    attachFileBinaryData = null;
+    return;
+  }
+
+  if (file.size > MAX_ATTACH_FILE_SIZE) {
+    $('attach-error').hidden = false;
+
+    // Clear our selected file.
+    $('attach-file').value = '';
+    attachFileBinaryData = null;
+    $('attach-file-checkbox').checked = false;
+
+    return;
+  }
+
+  $('attach-error').hidden = true;
+
+  // Abort an existing file read operation if one exists.
+  if (lastReader) {
+    lastReader.abort();
+    lastReader = null;
+  }
+
+  var reader = new FileReader();
+  reader.onloadend = function(evtLoadEnd) {
+    if (evtLoadEnd.target.readyState == FileReader.DONE) {
+      attachFileBinaryData = evtLoadEnd.target.result;
+      lastReader = null;
+      // Check the checkbox so we do send this file. Users can uncheck the
+      // box if they don't want to send the file.
+      $('attach-file-checkbox').checked = true;
+      $('reading-file').hidden = true;
+      $('send-report-button').disabled = false;
+    }
+  };
+
+  lastReader = reader;
+  reader.readAsBinaryString(file);
+  $('reading-file').hidden = false;
+  $('send-report-button').disabled = true;
+}
+
+/**
+ * Sends the report; after the report is sent, we need to be redirected to
  * the landing page, but we shouldn't be able to navigate back, hence
  * we open the landing page in a new tab and sendReport closes this tab.
+ * @return {boolean} True if the report was sent.
  */
 function sendReport() {
   if ($('description-text').value.length == 0) {
-    alert(localStrings.getString('no-description'));
+    alert(loadTimeData.getString('no-description'));
     return false;
   }
 
@@ -102,19 +158,26 @@ function sendReport() {
   var pageUrl = $('page-url-text').value;
   if (!$('page-url-checkbox').checked)
     pageUrl = '';
+  var userEmail = $('user-email-text').value;
+  if (!$('user-email-checkbox').checked)
+    userEmail = '';
 
   var reportArray = [pageUrl,
                      categoryTag,
                      $('description-text').value,
+                     userEmail,
                      imagePath];
 
   // Add chromeos data if it exists.
-  if ($('user-email-text') && $('sys-info-checkbox')) {
-    var userEmail= $('user-email-text').textContent;
-    if (!$('user-email-checkbox').checked)
-      userEmail = '';
-    reportArray = reportArray.concat([userEmail,
-                                      String($('sys-info-checkbox').checked)]);
+  if ($('sys-info-checkbox')) {
+    reportArray = reportArray.concat([String($('sys-info-checkbox').checked)]);
+  }
+
+  if ($('attach-file-checkbox') &&
+      $('attach-file-checkbox').checked &&
+      attachFileBinaryData) {
+    reportArray = reportArray.concat(
+        [$('attach-file').files[0].name, btoa(attachFileBinaryData)]);
   }
 
   // open the landing page in a new tab, sendReport will close this one.
@@ -123,9 +186,13 @@ function sendReport() {
   return true;
 }
 
-function cancel() {
-  chrome.send('cancel', []);
-  return true;
+/**
+ * Click listener for the cancel button.
+ * @param {Event} e The click event being handled.
+ */
+function cancel(e) {
+  chrome.send('cancel');
+  e.preventDefault();
 }
 
 /**
@@ -141,8 +208,6 @@ function currentSelected() {
   if (selectedThumbnailDivId != 'current-screenshots')
     selectImage('current-screenshots',
                 savedThumbnailIds['current-screenshots']);
-
-  return true;
 }
 
 /**
@@ -150,20 +215,16 @@ function currentSelected() {
  * selected when we had this div open previously.
  */
 function savedSelected() {
-  $('current-screenshots').hidden = true;
-
   if ($('saved-screenshots').childElementCount == 0) {
     // setupSavedScreenshots will take care of changing visibility
-    chrome.send('refreshSavedScreenshots', []);
+    chrome.send('refreshSavedScreenshots');
   } else {
+    $('current-screenshots').hidden = true;
     $('saved-screenshots').hidden = false;
     if (selectedThumbnailDivId != 'saved-screenshots')
       selectImage('saved-screenshots', savedThumbnailIds['saved-screenshots']);
   }
-
-  return true;
 }
-
 
 /**
  * Change the type of screenshot we're showing to the user from
@@ -201,6 +262,9 @@ function changeToCurrent() {
  * Window onload handler, sets up the page.
  */
 function load() {
+  if ($('attach-file'))
+    $('attach-file').addEventListener('change', onFileSelected);
+
   if ($('sysinfo-url')) {
     $('sysinfo-url').onclick = function(event) {
       chrome.send('openSystemTab');
@@ -213,10 +277,6 @@ function load() {
 </if>
   $('send-report-button').onclick = sendReport;
   $('cancel-button').onclick = cancel;
-
-  var menuOffPattern = /(^\?|&)menu=off($|&)/;
-  var menuDisabled = menuOffPattern.test(window.location.search);
-  document.documentElement.setAttribute('hide-menu', menuDisabled);
 
   // Set default values for the possible parameters, and then parse the actual
   // values from the URL hash.
@@ -245,15 +305,16 @@ function load() {
   if (parameters['customPageUrl'] != '') {
     $('page-url-text').value = parameters['customPageUrl'];
     // and disable the page image, since it doesn't make sense on a custum url.
-    disableScreenshots();
+    $('screenshot-checkbox').checked = false;
+    forceDisableScreenshots = true;
   }
 
   // Pick up the category tag (for most cases this will be an empty string)
   categoryTag = parameters['categoryTag'];
 
-  chrome.send('getDialogDefaults', []);
-  chrome.send('refreshCurrentScreenshot', []);
-};
+  chrome.send('getDialogDefaults');
+  chrome.send('refreshCurrentScreenshot');
+}
 
 function setupCurrentScreenshot(screenshot) {
   addScreenshot('current-screenshots', screenshot);
@@ -262,9 +323,10 @@ function setupCurrentScreenshot(screenshot) {
 function setupSavedScreenshots(screenshots) {
   if (screenshots.length == 0) {
     $('saved-screenshots').textContent =
-        localStrings.getString('no-saved-screenshots');
+        loadTimeData.getString('no-saved-screenshots');
 
     // Make sure we make the display the message.
+    $('current-screenshots').hidden = true;
     $('saved-screenshots').hidden = false;
 
     // In case the user tries to send now; fail safe, do not send a screenshot
@@ -282,24 +344,21 @@ function setupSavedScreenshots(screenshots) {
 }
 
 function setupDialogDefaults(defaults) {
-  if (defaults.length > 0) {
-    if ($('page-url-text').value == '')
-      $('page-url-text').value = defaults[0];
-    if (defaults[0] == '')
-      $('page-url-checkbox').checked = false;
+  // Current url.
+  if ($('page-url-text').value == '')
+    $('page-url-text').value = defaults.currentUrl;
+  if (defaults.currentUrl == '')
+    $('page-url-checkbox').checked = false;
+  // User e-mail.
+  $('user-email-text').value = defaults.userEmail;
+  $('user-email-checkbox').checked = defaults.emailCheckboxDefault;
 
-    if (defaults.length > 2) {
-      // We're in Chromium OS.
-      $('user-email-text').textContent = defaults[2];
-      if (defaults[2] == '') {
-        // if we didn't get an e-mail address from cros,
-        // disable the user email display totally.
-        $('user-email-table').hidden = true;
+  // Are screenshots disabled?
+  if (!defaults.disableScreenshots)
+    enableScreenshots();
 
-        // this also means we are in privacy mode, so no saved screenshots.
-        $('screenshot-link-tosaved').hidden = true;
-      }
-    }
+  if (defaults.useSaved) {
+    $('screenshot-link-tosaved').hidden = false;
   }
 }
 

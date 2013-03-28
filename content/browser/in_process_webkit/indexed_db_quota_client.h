@@ -9,13 +9,15 @@
 #include <string>
 
 #include "base/memory/ref_counted.h"
+#include "base/memory/weak_ptr.h"
 #include "base/message_loop_proxy.h"
 #include "content/common/content_export.h"
 #include "webkit/quota/quota_client.h"
 #include "webkit/quota/quota_task.h"
 #include "webkit/quota/quota_types.h"
 
-class IndexedDBContext;
+namespace content {
+class IndexedDBContextImpl;
 
 // A QuotaClient implementation to integrate IndexedDB
 // with the quota  management system. This interface is used
@@ -25,7 +27,7 @@ class IndexedDBQuotaClient : public quota::QuotaClient,
  public:
   CONTENT_EXPORT IndexedDBQuotaClient(
       base::MessageLoopProxy* tracker_thread,
-      IndexedDBContext* indexed_db_context);
+      IndexedDBContextImpl* indexed_db_context);
   CONTENT_EXPORT virtual ~IndexedDBQuotaClient();
 
   // QuotaClient method overrides
@@ -43,43 +45,12 @@ class IndexedDBQuotaClient : public quota::QuotaClient,
                                 quota::StorageType type,
                                 const DeletionCallback& callback) OVERRIDE;
  private:
-  class HelperTask;
-  class GetOriginUsageTask;
-  class GetOriginsTaskBase;
-  class GetAllOriginsTask;
-  class GetOriginsForHostTask;
-  class DeleteOriginTask;
-
-  typedef quota::CallbackQueueMap1
-      <GetUsageCallback,
-       GURL,  // origin
-       int64
-      > UsageForOriginCallbackMap;
-  typedef quota::CallbackQueue2
-      <GetOriginsCallback,
-       const std::set<GURL>&,
-       quota::StorageType
-      > OriginsForTypeCallbackQueue;
-  typedef quota::CallbackQueueMap2
-      <GetOriginsCallback,
-       std::string,  // host
-       const std::set<GURL>&,
-       quota::StorageType
-      > OriginsForHostCallbackMap;
-
-  void DidGetOriginUsage(const GURL& origin_url, int64 usage);
-  void DidGetAllOrigins(const std::set<GURL>& origins, quota::StorageType type);
-  void DidGetOriginsForHost(
-      const std::string& host, const std::set<GURL>& origins,
-          quota::StorageType type);
-
   scoped_refptr<base::MessageLoopProxy> webkit_thread_message_loop_;
-  scoped_refptr<IndexedDBContext> indexed_db_context_;
-  UsageForOriginCallbackMap usage_for_origin_callbacks_;
-  OriginsForTypeCallbackQueue origins_for_type_callbacks_;
-  OriginsForHostCallbackMap origins_for_host_callbacks_;
+  scoped_refptr<IndexedDBContextImpl> indexed_db_context_;
 
   DISALLOW_COPY_AND_ASSIGN(IndexedDBQuotaClient);
 };
+
+}  // namespace content
 
 #endif  // CONTENT_BROWER_IN_PROCESS_WEBKIT_QUOTA_CLIENT_H_

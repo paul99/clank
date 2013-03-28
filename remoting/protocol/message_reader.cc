@@ -1,4 +1,4 @@
-// Copyright (c) 2011 The Chromium Authors. All rights reserved.
+// Copyright (c) 2012 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -6,7 +6,10 @@
 
 #include "base/bind.h"
 #include "base/callback.h"
+#include "base/compiler_specific.h"
 #include "base/location.h"
+#include "base/thread_task_runner_handle.h"
+#include "base/single_thread_task_runner.h"
 #include "net/base/io_buffer.h"
 #include "net/base/net_errors.h"
 #include "net/socket/socket.h"
@@ -22,34 +25,37 @@ MessageReader::MessageReader()
     : socket_(NULL),
       read_pending_(false),
       pending_messages_(0),
-      closed_(false) {
-}
-
-MessageReader::~MessageReader() {
-  CHECK_EQ(pending_messages_, 0);
+      closed_(false),
+      ALLOW_THIS_IN_INITIALIZER_LIST(weak_factory_(this)) {
 }
 
 void MessageReader::Init(net::Socket* socket,
                          const MessageReceivedCallback& callback) {
+  DCHECK(CalledOnValidThread());
   message_received_callback_ = callback;
   DCHECK(socket);
   socket_ = socket;
   DoRead();
 }
 
+MessageReader::~MessageReader() {
+}
+
 void MessageReader::DoRead() {
+  DCHECK(CalledOnValidThread());
   // Don't try to read again if there is another read pending or we
   // have messages that we haven't finished processing yet.
   while (!closed_ && !read_pending_ && pending_messages_ == 0) {
     read_buffer_ = new net::IOBuffer(kReadBufferSize);
     int result = socket_->Read(
-        read_buffer_, kReadBufferSize, base::Bind(&MessageReader::OnRead,
-                                                  base::Unretained(this)));
+        read_buffer_, kReadBufferSize,
+        base::Bind(&MessageReader::OnRead, weak_factory_.GetWeakPtr()));
     HandleReadResult(result);
   }
 }
 
 void MessageReader::OnRead(int result) {
+  DCHECK(CalledOnValidThread());
   DCHECK(read_pending_);
   read_pending_ = false;
 
@@ -60,65 +66,55 @@ void MessageReader::OnRead(int result) {
 }
 
 void MessageReader::HandleReadResult(int result) {
+  DCHECK(CalledOnValidThread());
   if (closed_)
     return;
 
   if (result > 0) {
     OnDataReceived(read_buffer_, result);
+  } else if (result == net::ERR_IO_PENDING) {
+    read_pending_ = true;
   } else {
-    if (result == net::ERR_CONNECTION_CLOSED) {
-      closed_ = true;
-    } else if (result == net::ERR_IO_PENDING) {
-      read_pending_ = true;
-    } else {
+    if (result != net::ERR_CONNECTION_CLOSED) {
       LOG(ERROR) << "Read() returned error " << result;
     }
+    // Stop reading after any error.
+    closed_ = true;
   }
 }
 
 void MessageReader::OnDataReceived(net::IOBuffer* data, int data_size) {
+  DCHECK(CalledOnValidThread());
   message_decoder_.AddData(data, data_size);
 
   // Get list of all new messages first, and then call the callback
   // for all of them.
-  std::vector<CompoundBuffer*> new_messages;
   while (true) {
     CompoundBuffer* buffer = message_decoder_.GetNextMessage();
     if (!buffer)
       break;
-    new_messages.push_back(buffer);
-  }
-
-  pending_messages_ += new_messages.size();
-
-  // TODO(lambroslambrou): MessageLoopProxy::current() will not work from the
-  // plugin thread if this code is compiled into a separate binary.  Fix this.
-  for (std::vector<CompoundBuffer*>::iterator it = new_messages.begin();
-       it != new_messages.end(); ++it) {
-    message_received_callback_.Run(*it, base::Bind(
-        &MessageReader::OnMessageDone, this,
-        *it, base::MessageLoopProxy::current()));
-  }
-}
-
-void MessageReader::OnMessageDone(
-    CompoundBuffer* message,
-    scoped_refptr<base::MessageLoopProxy> message_loop) {
-  if (!message_loop->BelongsToCurrentThread()) {
-    message_loop->PostTask(
+    pending_messages_++;
+    base::ThreadTaskRunnerHandle::Get()->PostTask(
         FROM_HERE,
-        base::Bind(&MessageReader::OnMessageDone, this, message, message_loop));
-    return;
+        base::Bind(&MessageReader::RunCallback,
+                   weak_factory_.GetWeakPtr(),
+                   base::Passed(scoped_ptr<CompoundBuffer>(buffer))));
   }
-  delete message;
-  ProcessDoneEvent();
 }
 
-void MessageReader::ProcessDoneEvent() {
+void MessageReader::RunCallback(scoped_ptr<CompoundBuffer> message) {
+  message_received_callback_.Run(
+      message.Pass(), base::Bind(&MessageReader::OnMessageDone,
+                                 weak_factory_.GetWeakPtr()));
+}
+
+void MessageReader::OnMessageDone() {
+  DCHECK(CalledOnValidThread());
   pending_messages_--;
   DCHECK_GE(pending_messages_, 0);
 
-  DoRead(); // Start next read if neccessary.
+  // Start next read if necessary.
+  DoRead();
 }
 
 }  // namespace protocol

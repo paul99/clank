@@ -1,4 +1,4 @@
-// Copyright (c) 2011 The Chromium Authors. All rights reserved.
+// Copyright (c) 2012 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -8,38 +8,36 @@
 #include <string>
 #include <vector>
 
+#include "base/callback.h"
 #include "content/common/content_export.h"
+#include "content/public/common/media_stream_request.h"
 
-namespace media_stream {
+namespace content {
+
+// MediaStreamConstraint keys for constraints that are passed to getUserMedia.
+CONTENT_EXPORT extern const char kMediaStreamSource[];
+CONTENT_EXPORT extern const char kMediaStreamSourceId[];
+CONTENT_EXPORT extern const char kMediaStreamSourceTab[];
+
+// Callback to deliver the result of a media request. |label| is the string
+// to identify the request,
+typedef base::Callback< void(const std::string&, const MediaStreamDevices&) >
+    MediaRequestResponseCallback;
 
 // StreamOptions is a Chromium representation of WebKit's
-// WebGenerateStreamOptionFlags. It describes the components in a request for a
-// new media stream.
+// WebUserMediaRequest Options. It describes the components
+// in a request for a new media stream.
 struct CONTENT_EXPORT StreamOptions {
-  enum VideoOption {
-    kNoCamera = 0,
-    kFacingUser,
-    kFacingEnvironment,
-    kFacingBoth
-  };
+  StreamOptions();
+  StreamOptions(MediaStreamType audio_type, MediaStreamType video_type);
 
-  StreamOptions() : audio(false), video_option(kNoCamera) {}
-  StreamOptions(bool audio, VideoOption option)
-      : audio(audio), video_option(option) {}
+  // If not NO_SERVICE, the stream shall contain an audio input stream.
+  MediaStreamType audio_type;
+  std::string audio_device_id;
 
-  // True if the stream shall contain an audio input stream.
-  bool audio;
-
-  // Describes if a / which type of video capture device is requested.
-  VideoOption video_option;
-};
-
-// Type of media stream.
-enum MediaStreamType {
-  kNoService = 0,
-  kAudioCapture,
-  kVideoCapture,
-  kNumMediaStreamTypes
+  // If not NO_SERVICE, the stream shall contain a video input stream.
+  MediaStreamType video_type;
+  std::string video_device_id;
 };
 
 // StreamDeviceInfo describes information about a device.
@@ -51,14 +49,10 @@ struct CONTENT_EXPORT StreamDeviceInfo {
                    const std::string& name_param,
                    const std::string& device_param,
                    bool opened);
+  static bool IsEqual(const StreamDeviceInfo& first,
+                      const StreamDeviceInfo& second);
 
-  // Describes the capture type.
-  MediaStreamType stream_type;
-  // Friendly name of the device.
-  std::string name;
-  // Unique name of a device. Even if there are multiple devices with the same
-  // friendly name connected to the computer, this will be unique.
-  std::string device_id;
+  MediaStreamDevice device;
   // Set to true if the device has been opened, false otherwise.
   bool in_use;
   // Id for this capture session. Unique for all sessions of the same type.
@@ -67,6 +61,6 @@ struct CONTENT_EXPORT StreamDeviceInfo {
 
 typedef std::vector<StreamDeviceInfo> StreamDeviceInfoArray;
 
-}  // namespace media_stream
+}  // namespace content
 
 #endif  // CONTENT_COMMON_MEDIA_MEDIA_STREAM_OPTIONS_H_

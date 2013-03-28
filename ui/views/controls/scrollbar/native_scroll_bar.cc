@@ -8,6 +8,7 @@
 #include <string>
 
 #include "base/message_loop.h"
+#include "ui/base/events/event.h"
 #include "ui/views/controls/scrollbar/native_scroll_bar_wrapper.h"
 #include "ui/views/widget/widget.h"
 
@@ -31,13 +32,15 @@ NativeScrollBar::~NativeScrollBar() {
 }
 
 // static
-int NativeScrollBar::GetHorizontalScrollBarHeight() {
-  return NativeScrollBarWrapper::GetHorizontalScrollBarHeight();
+int NativeScrollBar::GetHorizontalScrollBarHeight(
+    const ui::NativeTheme* theme) {
+  return NativeScrollBarWrapper::GetHorizontalScrollBarHeight(theme);
 }
 
 // static
-int NativeScrollBar::GetVerticalScrollBarWidth() {
-  return NativeScrollBarWrapper::GetVerticalScrollBarWidth();
+int NativeScrollBar::GetVerticalScrollBarWidth(
+    const ui::NativeTheme* theme) {
+  return NativeScrollBarWrapper::GetVerticalScrollBarWidth(theme);
 }
 
 ////////////////////////////////////////////////////////////////////////////////
@@ -69,13 +72,19 @@ std::string NativeScrollBar::GetClassName() const {
 }
 
 // Overridden from View for keyboard UI.
-bool NativeScrollBar::OnKeyPressed(const KeyEvent& event) {
+bool NativeScrollBar::OnKeyPressed(const ui::KeyEvent& event) {
   if (!native_wrapper_)
     return false;
   return native_wrapper_->GetView()->OnKeyPressed(event);
 }
 
-bool NativeScrollBar::OnMouseWheel(const MouseWheelEvent& event) {
+void NativeScrollBar::OnGestureEvent(ui::GestureEvent* event) {
+  if (!native_wrapper_)
+    return;
+  native_wrapper_->GetView()->OnGestureEvent(event);
+}
+
+bool NativeScrollBar::OnMouseWheel(const ui::MouseWheelEvent& event) {
   if (!native_wrapper_)
     return false;
   return native_wrapper_->GetView()->OnMouseWheel(event);
@@ -94,7 +103,8 @@ void NativeScrollBar::Update(int viewport_size,
 
 int NativeScrollBar::GetLayoutSize() const {
   return IsHorizontal() ?
-      GetHorizontalScrollBarHeight() : GetVerticalScrollBarWidth();
+      GetHorizontalScrollBarHeight(GetNativeTheme()) :
+      GetVerticalScrollBarWidth(GetNativeTheme());
 }
 
 int NativeScrollBar::GetPosition() const {

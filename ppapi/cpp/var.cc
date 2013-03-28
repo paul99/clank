@@ -59,65 +59,63 @@ PP_Var VarFromUtf8Helper(const char* utf8_str, uint32_t len) {
 Var::Var() {
   memset(&var_, 0, sizeof(var_));
   var_.type = PP_VARTYPE_UNDEFINED;
-  needs_release_ = false;
+  is_managed_ = true;
 }
 
 Var::Var(Null) {
   memset(&var_, 0, sizeof(var_));
   var_.type = PP_VARTYPE_NULL;
-  needs_release_ = false;
+  is_managed_ = true;
 }
 
 Var::Var(bool b) {
   var_.type = PP_VARTYPE_BOOL;
   var_.padding = 0;
   var_.value.as_bool = PP_FromBool(b);
-  needs_release_ = false;
+  is_managed_ = true;
 }
 
 Var::Var(int32_t i) {
   var_.type = PP_VARTYPE_INT32;
   var_.padding = 0;
   var_.value.as_int = i;
-  needs_release_ = false;
+  is_managed_ = true;
 }
 
 Var::Var(double d) {
   var_.type = PP_VARTYPE_DOUBLE;
   var_.padding = 0;
   var_.value.as_double = d;
-  needs_release_ = false;
+  is_managed_ = true;
 }
 
 Var::Var(const char* utf8_str) {
   uint32_t len = utf8_str ? static_cast<uint32_t>(strlen(utf8_str)) : 0;
   var_ = VarFromUtf8Helper(utf8_str, len);
-  needs_release_ = (var_.type == PP_VARTYPE_STRING);
+  is_managed_ = true;
 }
 
 Var::Var(const std::string& utf8_str) {
   var_ = VarFromUtf8Helper(utf8_str.c_str(),
-                            static_cast<uint32_t>(utf8_str.size()));
-  needs_release_ = (var_.type == PP_VARTYPE_STRING);
+                           static_cast<uint32_t>(utf8_str.size()));
+  is_managed_ = true;
 }
 
 Var::Var(const Var& other) {
   var_ = other.var_;
+  is_managed_ = true;
   if (NeedsRefcounting(var_)) {
-    if (has_interface<PPB_Var_1_0>()) {
-      needs_release_ = true;
+    if (has_interface<PPB_Var_1_0>())
       get_interface<PPB_Var_1_0>()->AddRef(var_);
-    } else {
+    else
       var_.type = PP_VARTYPE_NULL;
-      needs_release_ = false;
-    }
-  } else {
-    needs_release_ = false;
   }
 }
 
 Var::~Var() {
-  if (needs_release_ && has_interface<PPB_Var_1_0>())
+  if (NeedsRefcounting(var_) &&
+      is_managed_ &&
+      has_interface<PPB_Var_1_0>())
     get_interface<PPB_Var_1_0>()->Release(var_);
 }
 
@@ -130,16 +128,14 @@ Var& Var::operator=(const Var& other) {
 
   // Be careful to keep the ref alive for cases where we're assigning an
   // object to itself by addrefing the new one before releasing the old one.
-  bool old_needs_release = needs_release_;
+  bool old_is_managed = is_managed_;
+  is_managed_ = true;
   if (NeedsRefcounting(other.var_)) {
     // Assume we already has_interface<PPB_Var_1_0> for refcounted vars or else
     // we couldn't have created them in the first place.
-    needs_release_ = true;
     get_interface<PPB_Var_1_0>()->AddRef(other.var_);
-  } else {
-    needs_release_ = false;
   }
-  if (old_needs_release)
+  if (NeedsRefcounting(var_) && old_is_managed)
     get_interface<PPB_Var_1_0>()->Release(var_);
 
   var_ = other.var_;
@@ -165,6 +161,7 @@ bool Var::operator==(const Var& other) const {
       return AsString() == other.AsString();
     case PP_VARTYPE_OBJECT:
     case PP_VARTYPE_ARRAY:
+    case PP_VARTYPE_ARRAY_BUFFER:
     case PP_VARTYPE_DICTIONARY:
     default:  // Objects, arrays, dictionaries.
       return var_.value.as_id == other.var_.value.as_id;
@@ -219,9 +216,6 @@ std::string Var::DebugString() const {
   } else if (is_bool()) {
     snprintf(buf, sizeof(buf), AsBool() ? "Var(true)" : "Var(false)");
   } else if (is_int()) {
-    // Note that the following static_cast is necessary because
-    // NativeClient's int32_t is actually "long".
-    // TODO(sehr,polina): remove this after newlib is changed.
     snprintf(buf, sizeof(buf), "Var(%d)", static_cast<int>(AsInt()));
   } else if (is_double()) {
     snprintf(buf, sizeof(buf), "Var(%f)", AsDouble());
@@ -236,8 +230,6 @@ std::string Var::DebugString() const {
     }
     snprintf(buf, sizeof(buf), format, str.c_str());
   } else if (is_array_buffer()) {
-    // TODO(dmichael): We could make this dump hex. Maybe DebugString should be
-    // virtual?
     snprintf(buf, sizeof(buf), "Var(ARRAY_BUFFER)");
   } else if (is_object()) {
     snprintf(buf, sizeof(buf), "Var(OBJECT)");

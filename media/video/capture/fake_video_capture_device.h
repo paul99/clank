@@ -20,6 +20,9 @@ class MEDIA_EXPORT FakeVideoCaptureDevice : public VideoCaptureDevice {
  public:
   static VideoCaptureDevice* Create(const Name& device_name);
   virtual ~FakeVideoCaptureDevice();
+  // Used for testing. This will make sure the next call to Create will
+  // return NULL;
+  static void SetFailNextCreate();
 
   static void GetDeviceNames(Names* device_names);
 
@@ -50,7 +53,13 @@ class MEDIA_EXPORT FakeVideoCaptureDevice : public VideoCaptureDevice {
   VideoCaptureDevice::EventHandler* observer_;
   InternalState state_;
   base::Thread capture_thread_;
+  int frame_size_;
   scoped_array<uint8> fake_frame_;
+  int frame_count_;
+  int frame_width_;
+  int frame_height_;
+
+  static bool fail_next_create_;
 
   DISALLOW_IMPLICIT_CONSTRUCTORS(FakeVideoCaptureDevice);
 };

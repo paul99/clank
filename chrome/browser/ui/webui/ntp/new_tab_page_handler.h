@@ -1,4 +1,4 @@
-// Copyright (c) 2011 The Chromium Authors. All rights reserved.
+// Copyright (c) 2012 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -17,27 +17,6 @@ class Profile;
 class NewTabPageHandler : public content::WebUIMessageHandler {
  public:
   NewTabPageHandler();
-  virtual ~NewTabPageHandler();
-
-  // WebUIMessageHandler implementation.
-  virtual void RegisterMessages() OVERRIDE;
-
-  // Callback for "closeNotificationPromo".
-  void HandleCloseNotificationPromo(const ListValue* args);
-
-  // Callback for "notificationPromoViewed".
-  void HandleNotificationPromoViewed(const ListValue* args);
-
-  // Callback for "pageSelected".
-  void HandlePageSelected(const ListValue* args);
-
-  // Callback for "introMessageDismissed". This is called when the close button
-  // on the ntp4 bubble is clicked or when a NavDot is clicked.
-  void HandleIntroMessageDismissed(const ListValue* args);
-
-  // Callback for "handleIntroMessageSeen". No arguments. Called when the intro
-  // message is displayed.
-  void HandleIntroMessageSeen(const ListValue* args);
 
   // Register NTP per-profile preferences.
   static void RegisterUserPrefs(PrefService* prefs);
@@ -48,24 +27,55 @@ class NewTabPageHandler : public content::WebUIMessageHandler {
   // Registers values (strings etc.) for the page.
   static void GetLocalizedValues(Profile* profile, DictionaryValue* values);
 
-  // Permanently dismiss the ntp4 bubble for new users.
-  static void DismissIntroMessage(PrefService* prefs);
-
  private:
+  virtual ~NewTabPageHandler();
+
+  // WebUIMessageHandler implementation.
+  virtual void RegisterMessages() OVERRIDE;
+
+  // Callback for "notificationPromoClosed". No arguments.
+  void HandleNotificationPromoClosed(const ListValue* args);
+
+  // Callback for "notificationPromoViewed". No arguments.
+  void HandleNotificationPromoViewed(const ListValue* args);
+
+  // Callback for "notificationPromoLinkClicked". No arguments.
+  void HandleNotificationPromoLinkClicked(const ListValue* args);
+
+  // Callback for "bubblePromoClosed". No arguments.
+  void HandleBubblePromoClosed(const ListValue* args);
+
+  // Callback for "bubblePromoViewed". No arguments.
+  void HandleBubblePromoViewed(const ListValue* args);
+
+  // Callback for "bubblePromoLinkClicked". No arguments.
+  void HandleBubblePromoLinkClicked(const ListValue* args);
+
+  // Callback for "pageSelected".
+  void HandlePageSelected(const ListValue* args);
+
+  // Callback for "logTimeToClick".
+  void HandleLogTimeToClick(const base::ListValue* args);
+
   // Tracks the number of times the user has switches pages (for UMA).
   size_t page_switch_count_;
 
   // The purpose of this enum is to track which page on the NTP is showing.
-  // The lower 10 bits of kNTPShownPage are used for the index within the page
+  // The lower 10 bits of kNtpShownPage are used for the index within the page
   // group, and the rest of the bits are used for the page group ID (defined
   // here).
   static const int kPageIdOffset = 10;
+  // TODO(vadimt): create a new enum and a new UMA histogram for search ntp so
+  // the two histograms don't get mixed in together.
   enum {
     INDEX_MASK = (1 << kPageIdOffset) - 1,
     MOST_VISITED_PAGE_ID = 1 << kPageIdOffset,
     APPS_PAGE_ID = 2 << kPageIdOffset,
     BOOKMARKS_PAGE_ID = 3 << kPageIdOffset,
-    LAST_PAGE_ID = BOOKMARKS_PAGE_ID
+    SUGGESTIONS_PAGE_ID = 4 << kPageIdOffset,
+    RECENTLY_CLOSED_PAGE_ID = 5 << kPageIdOffset,
+    OTHER_DEVICES_PAGE_ID = 6 << kPageIdOffset,
+    LAST_PAGE_ID = OTHER_DEVICES_PAGE_ID
   };
   static const int kHistogramEnumerationMax =
       (LAST_PAGE_ID >> kPageIdOffset) + 1;

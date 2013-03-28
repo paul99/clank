@@ -1,4 +1,4 @@
-// Copyright (c) 2011 The Chromium Authors. All rights reserved.
+// Copyright (c) 2012 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -17,6 +17,7 @@ class StreamSocket;
 namespace remoting {
 namespace protocol {
 
+class ChannelFactory;
 class Session;
 
 class ProtobufVideoReader : public VideoReader {
@@ -31,16 +32,15 @@ class ProtobufVideoReader : public VideoReader {
   virtual bool is_connected() OVERRIDE;
 
  private:
-  void OnChannelReady(net::StreamSocket* socket);
-  void OnNewData(VideoPacket* packet, const base::Closure& done_task);
-
-  Session* session_;
+  void OnChannelReady(scoped_ptr<net::StreamSocket> socket);
+  void OnNewData(scoped_ptr<VideoPacket> packet,
+                 const base::Closure& done_task);
 
   InitializedCallback initialized_callback_;
 
   VideoPacketFormat::Encoding encoding_;
 
-  // TODO(sergeyu): Remove |channel_| and let |reader_| own it.
+  ChannelFactory* channel_factory_;
   scoped_ptr<net::StreamSocket> channel_;
 
   ProtobufMessageReader<VideoPacket> reader_;

@@ -1,4 +1,4 @@
-// Copyright (c) 2011 The Chromium Authors. All rights reserved.
+// Copyright (c) 2012 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -10,10 +10,13 @@
 #include "content/public/browser/notification_types.h"
 
 class Profile;
-class TabContentsWrapper;
 
-namespace browser {
+namespace chrome {
 struct NavigateParams;
+}
+
+namespace content {
+class WebContents;
 }
 
 // Browsertest class for testing the browser navigation. It is also a base class
@@ -22,13 +25,13 @@ struct NavigateParams;
 class BrowserNavigatorTest : public InProcessBrowserTest,
                              public content::NotificationObserver {
  protected:
-  browser::NavigateParams MakeNavigateParams() const;
-  browser::NavigateParams MakeNavigateParams(Browser* browser) const;
+  chrome::NavigateParams MakeNavigateParams() const;
+  chrome::NavigateParams MakeNavigateParams(Browser* browser) const;
 
   Browser* CreateEmptyBrowserForType(Browser::Type type, Profile* profile);
   Browser* CreateEmptyBrowserForApp(Browser::Type type, Profile* profile);
 
-  TabContentsWrapper* CreateTabContents();
+  content::WebContents* CreateWebContents();
 
   void RunSuppressTest(WindowOpenDisposition disposition);
   void RunUseNonIncognitoWindowTest(const GURL& url);

@@ -95,6 +95,17 @@ class Handle {
 };
 
 
+// Convenience wrapper.
+template<class T>
+inline Handle<T> handle(T* t, Isolate* isolate) {
+  return Handle<T>(t, isolate);
+}
+
+
+class DeferredHandles;
+class HandleScopeImplementer;
+
+
 // A stack-allocated class that governs a number of local handles.
 // After a handle scope has been created, all local handles will be
 // allocated within that handle scope until either the handle scope is
@@ -156,8 +167,37 @@ class HandleScope {
   // Zaps the handles in the half-open interval [start, end).
   static void ZapRange(internal::Object** start, internal::Object** end);
 
+  friend class v8::internal::DeferredHandles;
   friend class v8::HandleScope;
+  friend class v8::internal::HandleScopeImplementer;
   friend class v8::ImplementationUtilities;
+  friend class v8::internal::Isolate;
+};
+
+
+class DeferredHandles;
+
+
+class DeferredHandleScope {
+ public:
+  explicit DeferredHandleScope(Isolate* isolate);
+  // The DeferredHandles object returned stores the Handles created
+  // since the creation of this DeferredHandleScope.  The Handles are
+  // alive as long as the DeferredHandles object is alive.
+  DeferredHandles* Detach();
+  ~DeferredHandleScope();
+
+ private:
+  Object** prev_limit_;
+  Object** prev_next_;
+  HandleScopeImplementer* impl_;
+
+#ifdef DEBUG
+  bool handles_detached_;
+  int prev_level_;
+#endif
+
+  friend class HandleScopeImplementer;
 };
 
 
@@ -174,7 +214,10 @@ void FlattenString(Handle<String> str);
 // string.
 Handle<String> FlattenGetString(Handle<String> str);
 
-Handle<Object> SetProperty(Handle<Object> object,
+int Utf8Length(Handle<String> str);
+
+Handle<Object> SetProperty(Isolate* isolate,
+                           Handle<Object> object,
                            Handle<Object> key,
                            Handle<Object> value,
                            PropertyAttributes attributes,
@@ -214,7 +257,7 @@ Handle<FixedArray> AddKeysFromJSArray(Handle<FixedArray>,
 // if none exists.
 Handle<JSValue> GetScriptWrapper(Handle<Script> script);
 
-// Script line number computations.
+// Script line number computations. Note that the line number is zero-based.
 void InitScriptLineEnds(Handle<Script> script);
 // For string calculates an array of line end positions. If the string
 // does not end with a new line character, this character may optionally be
@@ -225,6 +268,7 @@ int GetScriptLineNumber(Handle<Script> script, int code_position);
 // The safe version does not make heap allocations but may work much slower.
 int GetScriptLineNumberSafe(Handle<Script> script, int code_position);
 int GetScriptColumnNumber(Handle<Script> script, int code_position);
+Handle<Object> GetScriptNameOrSourceURL(Handle<Script> script);
 
 // Computes the enumerable keys from interceptors. Used for debug mirrors and
 // by GetKeysInFixedArrayFor below.
@@ -241,6 +285,7 @@ Handle<FixedArray> GetKeysInFixedArrayFor(Handle<JSReceiver> object,
                                           KeyCollectionType type,
                                           bool* threw);
 Handle<JSArray> GetKeysFor(Handle<JSReceiver> object, bool* threw);
+Handle<FixedArray> ReduceFixedArrayTo(Handle<FixedArray> array, int length);
 Handle<FixedArray> GetEnumPropertyKeys(Handle<JSObject> object,
                                        bool cache_result);
 
@@ -292,6 +337,7 @@ class NoHandleAllocation BASE_EMBEDDED {
   inline ~NoHandleAllocation();
  private:
   int level_;
+  bool active_;
 #endif
 };
 

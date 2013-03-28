@@ -25,7 +25,8 @@ using views::GridLayout;
 ///////////////////////////////////////////////////////////////////////////////
 // LoginView, public:
 
-LoginView::LoginView(const std::wstring& explanation, LoginModel* model)
+LoginView::LoginView(const string16& explanation,
+                     LoginModel* model)
     : username_field_(new views::Textfield),
       password_field_(new views::Textfield(views::Textfield::STYLE_OBSCURED)),
       username_label_(new views::Label(
@@ -35,7 +36,7 @@ LoginView::LoginView(const std::wstring& explanation, LoginModel* model)
       message_label_(new views::Label(explanation)),
       login_model_(model) {
   message_label_->SetMultiLine(true);
-  message_label_->SetHorizontalAlignment(views::Label::ALIGN_LEFT);
+  message_label_->SetHorizontalAlignment(gfx::ALIGN_LEFT);
   message_label_->SetAllowCharacterBreak(true);
 
   // Initialize the Grid Layout Manager used for this dialog box.
@@ -87,11 +88,11 @@ LoginView::~LoginView() {
     login_model_->SetObserver(NULL);
 }
 
-std::wstring LoginView::GetUsername() {
+string16 LoginView::GetUsername() {
   return username_field_->text();
 }
 
-std::wstring LoginView::GetPassword() {
+string16 LoginView::GetPassword() {
   return password_field_->text();
 }
 
@@ -102,11 +103,11 @@ views::View* LoginView::GetInitiallyFocusedView() {
 ///////////////////////////////////////////////////////////////////////////////
 // LoginView, views::View, views::LoginModelObserver overrides:
 
-void LoginView::OnAutofillDataAvailable(const std::wstring& username,
-                                        const std::wstring& password) {
+void LoginView::OnAutofillDataAvailable(const string16& username,
+                                        const string16& password) {
   if (username_field_->text().empty()) {
     username_field_->SetText(username);
     password_field_->SetText(password);
-    username_field_->SelectAll();
+    username_field_->SelectAll(true);
   }
 }

@@ -12,17 +12,17 @@
 
 #include "base/memory/scoped_ptr.h"
 #include "base/utf_string_conversions.h"
-#include "chrome/browser/infobars/infobar_delegate.h"
+#include "chrome/browser/api/infobars/infobar_delegate.h"
 #include "chrome/browser/ui/views/infobars/infobar_background.h"
 #include "chrome/browser/ui/views/infobars/infobar_button_border.h"
 #include "grit/generated_resources.h"
 #include "grit/theme_resources.h"
-#include "grit/ui_resources_standard.h"
+#include "grit/ui_resources.h"
 #include "third_party/skia/include/effects/SkGradientShader.h"
 #include "ui/base/accessibility/accessible_view_state.h"
 #include "ui/base/l10n/l10n_util.h"
 #include "ui/base/resource/resource_bundle.h"
-#include "ui/gfx/canvas_skia_paint.h"
+#include "ui/gfx/canvas.h"
 #include "ui/gfx/image/image.h"
 #include "ui/views/controls/button/image_button.h"
 #include "ui/views/controls/button/menu_button.h"
@@ -60,8 +60,10 @@ InfoBarView::InfoBarView(InfoBarTabHelper* owner, InfoBarDelegate* delegate)
     : InfoBar(owner, delegate),
       icon_(NULL),
       close_button_(NULL) {
-  set_parent_owned(false);  // InfoBar deletes itself at the appropriate time.
-  set_background(new InfoBarBackground(delegate->GetInfoBarType()));
+  set_owned_by_client();  // InfoBar deletes itself at the appropriate time.
+  set_background(new InfoBarBackground(
+      GetInfoBarTopColor(delegate->GetInfoBarType()),
+      GetInfoBarBottomColor(delegate->GetInfoBarType())));
 }
 
 InfoBarView::~InfoBarView() {
@@ -72,21 +74,22 @@ InfoBarView::~InfoBarView() {
 }
 
 views::Label* InfoBarView::CreateLabel(const string16& text) const {
+  ui::ResourceBundle& rb = ui::ResourceBundle::GetSharedInstance();
   views::Label* label = new views::Label(text,
-      ResourceBundle::GetSharedInstance().GetFont(ResourceBundle::MediumFont));
+      rb.GetFont(ui::ResourceBundle::MediumFont));
   label->SetBackgroundColor(background()->get_color());
   label->SetEnabledColor(SK_ColorBLACK);
-  label->SetHorizontalAlignment(views::Label::ALIGN_LEFT);
+  label->SetHorizontalAlignment(gfx::ALIGN_LEFT);
   return label;
 }
 
 views::Link* InfoBarView::CreateLink(const string16& text,
                                      views::LinkListener* listener) const {
+  ui::ResourceBundle& rb = ui::ResourceBundle::GetSharedInstance();
   views::Link* link = new views::Link;
   link->SetText(text);
-  link->SetFont(
-      ResourceBundle::GetSharedInstance().GetFont(ResourceBundle::MediumFont));
-  link->SetHorizontalAlignment(views::Label::ALIGN_LEFT);
+  link->SetFont(rb.GetFont(ui::ResourceBundle::MediumFont));
+  link->SetHorizontalAlignment(gfx::ALIGN_LEFT);
   link->set_listener(listener);
   link->SetBackgroundColor(background()->get_color());
   link->set_focusable(true);
@@ -96,18 +99,18 @@ views::Link* InfoBarView::CreateLink(const string16& text,
 // static
 views::MenuButton* InfoBarView::CreateMenuButton(
     const string16& text,
-    views::ViewMenuDelegate* menu_delegate) {
+    views::MenuButtonListener* menu_button_listener) {
   views::MenuButton* menu_button = new views::MenuButton(
-      NULL, text, menu_delegate, true);
+      NULL, text, menu_button_listener, true);
   menu_button->set_border(new InfoBarButtonBorder);
   menu_button->set_animate_on_state_change(false);
-  ResourceBundle& rb = ResourceBundle::GetSharedInstance();
+  ui::ResourceBundle& rb = ui::ResourceBundle::GetSharedInstance();
   menu_button->set_menu_marker(
-      rb.GetBitmapNamed(IDR_INFOBARBUTTON_MENU_DROPARROW));
+      rb.GetImageNamed(IDR_INFOBARBUTTON_MENU_DROPARROW).ToImageSkia());
   menu_button->SetEnabledColor(SK_ColorBLACK);
   menu_button->SetHighlightColor(SK_ColorBLACK);
   menu_button->SetHoverColor(SK_ColorBLACK);
-  menu_button->SetFont(rb.GetFont(ResourceBundle::MediumFont));
+  menu_button->SetFont(rb.GetFont(ui::ResourceBundle::MediumFont));
   menu_button->set_focusable(true);
   return menu_button;
 }
@@ -123,13 +126,13 @@ views::TextButton* InfoBarView::CreateTextButton(
   text_button->SetEnabledColor(SK_ColorBLACK);
   text_button->SetHighlightColor(SK_ColorBLACK);
   text_button->SetHoverColor(SK_ColorBLACK);
-  ResourceBundle& rb = ResourceBundle::GetSharedInstance();
-  text_button->SetFont(rb.GetFont(ResourceBundle::MediumFont));
+  ui::ResourceBundle& rb = ui::ResourceBundle::GetSharedInstance();
+  text_button->SetFont(rb.GetFont(ui::ResourceBundle::MediumFont));
 #if defined(OS_WIN)
   if (needs_elevation &&
       (base::win::GetVersion() >= base::win::VERSION_VISTA) &&
       base::win::UserAccountControlIsEnabled()) {
-    SHSTOCKICONINFO icon_info = { sizeof SHSTOCKICONINFO };
+    SHSTOCKICONINFO icon_info = { sizeof(SHSTOCKICONINFO) };
     // Even with the runtime guard above, we have to use GetProcAddress() here,
     // because otherwise the loader will try to resolve the function address on
     // startup, which will break on XP.
@@ -143,7 +146,7 @@ views::TextButton* InfoBarView::CreateTextButton(
           icon_info.hIcon, gfx::Size(GetSystemMetrics(SM_CXSMICON),
                                      GetSystemMetrics(SM_CYSMICON))));
       if (icon.get())
-        text_button->SetIcon(*icon);
+        text_button->SetIcon(gfx::ImageSkia(*icon));
       DestroyIcon(icon_info.hIcon);
     }
   }
@@ -217,18 +220,18 @@ void InfoBarView::ViewHierarchyChanged(bool is_add, View* parent, View* child) {
     gfx::Image* image = delegate()->GetIcon();
     if (image) {
       icon_ = new views::ImageView;
-      icon_->SetImage(image->ToSkBitmap());
+      icon_->SetImage(image->ToImageSkia());
       AddChildView(icon_);
     }
 
     close_button_ = new views::ImageButton(this);
-    ResourceBundle& rb = ResourceBundle::GetSharedInstance();
-    close_button_->SetImage(views::CustomButton::BS_NORMAL,
-                            rb.GetBitmapNamed(IDR_CLOSE_BAR));
-    close_button_->SetImage(views::CustomButton::BS_HOT,
-                            rb.GetBitmapNamed(IDR_CLOSE_BAR_H));
-    close_button_->SetImage(views::CustomButton::BS_PUSHED,
-                            rb.GetBitmapNamed(IDR_CLOSE_BAR_P));
+    ui::ResourceBundle& rb = ui::ResourceBundle::GetSharedInstance();
+    close_button_->SetImage(views::CustomButton::STATE_NORMAL,
+                            rb.GetImageNamed(IDR_CLOSE_BAR).ToImageSkia());
+    close_button_->SetImage(views::CustomButton::STATE_HOVERED,
+                            rb.GetImageNamed(IDR_CLOSE_BAR_H).ToImageSkia());
+    close_button_->SetImage(views::CustomButton::STATE_PRESSED,
+                            rb.GetImageNamed(IDR_CLOSE_BAR_P).ToImageSkia());
     close_button_->SetAccessibleName(
         l10n_util::GetStringUTF16(IDS_ACCNAME_CLOSE));
     close_button_->set_focusable(true);
@@ -240,6 +243,15 @@ void InfoBarView::ViewHierarchyChanged(bool is_add, View* parent, View* child) {
     RemoveChildView(close_button_);
     AddChildView(close_button_);
   }
+
+  // Ensure the infobar is tall enough to display its contents.
+  const int kMinimumVerticalPadding = 6;
+  int height = kDefaultBarTargetHeight;
+  for (int i = 0; i < child_count(); ++i) {
+    const int child_height = child_at(i)->GetPreferredSize().height();
+    height = std::max(height, child_height + kMinimumVerticalPadding);
+  }
+  SetBarTargetHeight(height);
 }
 
 void InfoBarView::PaintChildren(gfx::Canvas* canvas) {
@@ -249,8 +261,7 @@ void InfoBarView::PaintChildren(gfx::Canvas* canvas) {
   // broken on non-Windows platforms (crbug.com/75154). For now, just clip to
   // the bar bounds.
   //
-  // gfx::CanvasSkia* canvas_skia = canvas->AsCanvasSkia();
-  // canvas_skia->clipPath(fill_path_);
+  // canvas->sk_canvas()->clipPath(fill_path_);
   DCHECK_EQ(total_height(), height())
       << "Infobar piecewise heights do not match overall height";
   canvas->ClipRect(gfx::Rect(0, arrow_height(), width(), bar_height()));
@@ -259,7 +270,7 @@ void InfoBarView::PaintChildren(gfx::Canvas* canvas) {
 }
 
 void InfoBarView::ButtonPressed(views::Button* sender,
-                                const views::Event& event) {
+                                const ui::Event& event) {
   if (!owned())
     return;  // We're closing; don't call anything, it might access the owner.
   if (sender == close_button_) {

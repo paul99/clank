@@ -4,7 +4,6 @@
 
 #ifndef CHROME_BROWSER_UI_WEBUI_PRINT_PREVIEW_PRINT_PREVIEW_HANDLER_H_
 #define CHROME_BROWSER_UI_WEBUI_PRINT_PREVIEW_PRINT_PREVIEW_HANDLER_H_
-#pragma once
 
 #include <string>
 
@@ -14,29 +13,32 @@
 #include "base/memory/weak_ptr.h"
 #include "build/build_config.h"
 #include "chrome/browser/printing/print_view_manager_observer.h"
-#include "chrome/browser/ui/select_file_dialog.h"
 #include "content/public/browser/web_ui_message_handler.h"
 #include "printing/print_job_constants.h"
+#include "ui/base/dialogs/select_file_dialog.h"
 
 class FilePath;
 class PrintSystemTaskProxy;
-class RefCountedBytes;
-class TabContentsWrapper;
 
 namespace base {
 class DictionaryValue;
-class StringValue;
+class RefCountedBytes;
+}
+
+namespace content {
+class WebContents;
 }
 
 namespace printing {
 struct PageSizeMargins;
 class PrintBackend;
+class StickySettings;
 }
 
 // The handler for Javascript messages related to the print preview dialog.
 class PrintPreviewHandler : public content::WebUIMessageHandler,
                             public base::SupportsWeakPtr<PrintPreviewHandler>,
-                            public SelectFileDialog::Listener,
+                            public ui::SelectFileDialog::Listener,
                             public printing::PrintViewManagerObserver {
  public:
   PrintPreviewHandler();
@@ -71,18 +73,11 @@ class PrintPreviewHandler : public content::WebUIMessageHandler,
 
  private:
   friend class PrintPreviewHandlerTest;
+  // TODO(abodenha@chromium.org) See http://crbug.com/136843
+  // PrintSystemTaskProxy should not need to be a friend.
   friend class PrintSystemTaskProxy;
-  FRIEND_TEST_ALL_PREFIXES(PrintPreviewHandlerTest, StickyMarginsCustom);
-  FRIEND_TEST_ALL_PREFIXES(PrintPreviewHandlerTest, StickyMarginsDefault);
-  FRIEND_TEST_ALL_PREFIXES(PrintPreviewHandlerTest,
-                           StickyMarginsCustomThenDefault);
-  FRIEND_TEST_ALL_PREFIXES(PrintPreviewHandlerTest,
-                           GetLastUsedMarginSettingsCustom);
-  FRIEND_TEST_ALL_PREFIXES(PrintPreviewHandlerTest,
-                           GetLastUsedMarginSettingsDefault);
 
-  TabContentsWrapper* preview_tab_wrapper() const;
-  content::WebContents* preview_tab() const;
+  content::WebContents* preview_web_contents() const;
 
   // Gets the list of printers. |args| is unused.
   void HandleGetPrinters(const base::ListValue* args);
@@ -105,11 +100,9 @@ class PrintPreviewHandler : public content::WebUIMessageHandler,
   // Handles the request to cancel the pending print request. |args| is unused.
   void HandleCancelPendingPrintRequest(const base::ListValue* args);
 
-  // Handles a request to back up data about the last used cloud print
-  // printer.
-  // First element of |args| is the printer name.
-  // Second element of |args| is the current cloud print data JSON.
-  void HandleSaveLastPrinter(const base::ListValue* args);
+  // Handles a request to store data that the web ui wishes to persist.
+  // First element of |args| is the data to persist.
+  void HandleSaveAppState(const base::ListValue* args);
 
   // Gets the printer capabilities. First element of |args| is the printer name.
   void HandleGetPrinterCapabilities(const base::ListValue* args);
@@ -138,12 +131,16 @@ class PrintPreviewHandler : public content::WebUIMessageHandler,
   // |args| is unused.
   void HandleManagePrinters(const base::ListValue* args);
 
-  // Asks the browser to show the cloud print dialog.
-  void HandlePrintWithCloudPrint();
+  // Asks the browser to show the cloud print dialog. |args| is unused.
+  void HandlePrintWithCloudPrint(const base::ListValue* args);
 
   // Asks the browser for several settings that are needed before the first
   // preview is displayed.
   void HandleGetInitialSettings(const base::ListValue* args);
+
+  // Reports histogram data for a print preview UI action. |args| should consist
+  // of two elements: the bucket name, and the bucket event.
+  void HandleReportUiEvent(const base::ListValue* args);
 
   void SendInitialSettings(
       const std::string& default_printer,
@@ -153,6 +150,10 @@ class PrintPreviewHandler : public content::WebUIMessageHandler,
   // printer capabilities information.
   void SendPrinterCapabilities(const base::DictionaryValue& settings_info);
 
+  // Sends error notification to the Web UI when unable to return the printer
+  // capabilities.
+  void SendFailedToGetPrinterCapabilities(const std::string& printer_name);
+
   // Send the list of printers to the Web UI.
   void SetupPrinterList(const base::ListValue& printers);
 
@@ -160,11 +161,10 @@ class PrintPreviewHandler : public content::WebUIMessageHandler,
   void SendCloudPrintEnabled();
 
   // Send the PDF data to the cloud to print.
-  void SendCloudPrintJob(const base::DictionaryValue& settings,
-                         std::string print_ticket);
+  void SendCloudPrintJob();
 
   // Gets the initiator tab for the print preview tab.
-  TabContentsWrapper* GetInitiatorTab() const;
+  content::WebContents* GetInitiatorTab() const;
 
   // Activates the initiator tab and close the preview tab.
   void ActivateInitiatorTabAndClosePreviewTab();
@@ -176,29 +176,18 @@ class PrintPreviewHandler : public content::WebUIMessageHandler,
   void ClearInitiatorTabDetails();
 
   // Posts a task to save |data| to pdf at |print_to_pdf_path_|.
-  void PostPrintToPdfTask(scoped_refptr<RefCountedBytes> data);
+  void PostPrintToPdfTask(base::RefCountedBytes* data);
 
   // Populates |settings| according to the current locale.
   void GetNumberFormatAndMeasurementSystem(base::DictionaryValue* settings);
 
-  // Populates |last_used_custom_margins| according to the last used margin
-  // settings.
-  void GetLastUsedMarginSettings(
-      base::DictionaryValue* last_used_custom_margins);
+  static printing::StickySettings* GetStickySettings();
 
   // Pointer to current print system.
   scoped_refptr<printing::PrintBackend> print_backend_;
 
   // The underlying dialog object.
-  scoped_refptr<SelectFileDialog> select_file_dialog_;
-
-  static FilePath* last_saved_path_;
-  static std::string* last_used_printer_cloud_print_data_;
-  static std::string* last_used_printer_name_;
-  static printing::ColorModels last_used_color_model_;
-  static printing::MarginType last_used_margins_type_;
-  static printing::PageSizeMargins* last_used_page_size_margins_;
-  static bool last_used_headers_footers_;
+  scoped_refptr<ui::SelectFileDialog> select_file_dialog_;
 
   // A count of how many requests received to regenerate preview data.
   // Initialized to 0 then incremented and emitted to a histogram.
@@ -206,6 +195,7 @@ class PrintPreviewHandler : public content::WebUIMessageHandler,
 
   // A count of how many requests received to show manage printers dialog.
   int manage_printers_dialog_request_count_;
+  int manage_cloud_printers_dialog_request_count_;
 
   // Whether we have already logged a failed print preview.
   bool reported_failed_preview_;

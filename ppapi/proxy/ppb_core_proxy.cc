@@ -1,4 +1,4 @@
-// Copyright (c) 2011 The Chromium Authors. All rights reserved.
+// Copyright (c) 2012 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -9,8 +9,6 @@
 #include "base/bind.h"
 #include "base/debug/trace_event.h"
 #include "base/logging.h"
-#include "base/message_loop.h"
-#include "base/message_loop_proxy.h"
 #include "base/time.h"
 #include "ppapi/c/pp_completion_callback.h"
 #include "ppapi/c/pp_resource.h"
@@ -26,12 +24,6 @@ namespace ppapi {
 namespace proxy {
 
 namespace {
-
-base::MessageLoopProxy* GetMainThreadMessageLoop() {
-  CR_DEFINE_STATIC_LOCAL(scoped_refptr<base::MessageLoopProxy>, proxy,
-      (base::MessageLoopProxy::current()));
-  return proxy.get();
-}
 
 void AddRefResource(PP_Resource resource) {
   ppapi::ProxyAutoLock lock;
@@ -55,20 +47,30 @@ void CallbackWrapper(PP_CompletionCallback callback, int32_t result) {
   TRACE_EVENT2("ppapi proxy", "CallOnMainThread callback",
                "Func", reinterpret_cast<void*>(callback.func),
                "UserData", callback.user_data);
-  PP_RunCompletionCallback(&callback, result);
+  CallWhileUnlocked(PP_RunCompletionCallback, &callback, result);
 }
 
 void CallOnMainThread(int delay_in_ms,
                       PP_CompletionCallback callback,
                       int32_t result) {
-  GetMainThreadMessageLoop()->PostDelayedTask(
+  DCHECK(callback.func);
+#if defined(OS_NACL)
+  // Some NaCl apps pass a negative delay, so we just sanitize to 0, to run as
+  // soon as possible. MessageLoop checks that the delay is non-negative.
+  if (delay_in_ms < 0)
+    delay_in_ms = 0;
+#endif
+  if (!callback.func)
+    return;
+  PpapiGlobals::Get()->GetMainThreadMessageLoop()->PostDelayedTask(
       FROM_HERE,
-      base::Bind(&CallbackWrapper, callback, result),
-      delay_in_ms);
+      RunWhileLocked(base::Bind(&CallbackWrapper, callback, result)),
+      base::TimeDelta::FromMilliseconds(delay_in_ms));
 }
 
 PP_Bool IsMainThread() {
-  return PP_FromBool(GetMainThreadMessageLoop()->BelongsToCurrentThread());
+  return PP_FromBool(PpapiGlobals::Get()->
+      GetMainThreadMessageLoop()->BelongsToCurrentThread());
 }
 
 const PPB_Core core_interface = {
@@ -102,16 +104,19 @@ const PPB_Core* PPB_Core_Proxy::GetPPB_Core_Interface() {
 bool PPB_Core_Proxy::OnMessageReceived(const IPC::Message& msg) {
   bool handled = true;
   IPC_BEGIN_MESSAGE_MAP(PPB_Core_Proxy, msg)
+#if !defined(OS_NACL)
     IPC_MESSAGE_HANDLER(PpapiHostMsg_PPBCore_AddRefResource,
                         OnMsgAddRefResource)
     IPC_MESSAGE_HANDLER(PpapiHostMsg_PPBCore_ReleaseResource,
                         OnMsgReleaseResource)
+#endif
     IPC_MESSAGE_UNHANDLED(handled = false)
   IPC_END_MESSAGE_MAP()
   // TODO(brettw) handle bad messages!
   return handled;
 }
 
+#if !defined(OS_NACL)
 void PPB_Core_Proxy::OnMsgAddRefResource(const HostResource& resource) {
   ppb_core_impl_->AddRefResource(resource.host_resource());
 }
@@ -119,6 +124,7 @@ void PPB_Core_Proxy::OnMsgAddRefResource(const HostResource& resource) {
 void PPB_Core_Proxy::OnMsgReleaseResource(const HostResource& resource) {
   ppb_core_impl_->ReleaseResource(resource.host_resource());
 }
+#endif  // !defined(OS_NACL)
 
 }  // namespace proxy
 }  // namespace ppapi

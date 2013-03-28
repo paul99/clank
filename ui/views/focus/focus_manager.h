@@ -4,7 +4,6 @@
 
 #ifndef UI_VIEWS_FOCUS_FOCUS_MANAGER_H_
 #define UI_VIEWS_FOCUS_FOCUS_MANAGER_H_
-#pragma once
 
 #include <list>
 #include <map>
@@ -13,8 +12,8 @@
 #include "base/memory/scoped_ptr.h"
 #include "base/observer_list.h"
 #include "ui/base/accelerators/accelerator.h"
+#include "ui/base/accelerators/accelerator_manager.h"
 #include "ui/gfx/native_widget_types.h"
-#include "ui/views/events/event.h"
 #include "ui/views/views_export.h"
 
 // The FocusManager class is used to handle focus traversal, store/restore
@@ -75,10 +74,12 @@
 namespace ui {
 class AcceleratorTarget;
 class AcceleratorManager;
+class KeyEvent;
 }
 
 namespace views {
 
+class FocusManagerDelegate;
 class FocusSearch;
 class RootView;
 class View;
@@ -135,13 +136,13 @@ class VIEWS_EXPORT FocusManager {
     kReasonDirectFocusChange
   };
 
-  explicit FocusManager(Widget* widget);
+  FocusManager(Widget* widget, FocusManagerDelegate* delegate);
   virtual ~FocusManager();
 
   // Processes the passed key event for accelerators and tab traversal.
   // Returns false if the event has been consumed and should not be processed
   // further.
-  bool OnKeyEvent(const KeyEvent& event);
+  bool OnKeyEvent(const ui::KeyEvent& event);
 
   // Returns true is the specified is part of the hierarchy of the window
   // associated with this FocusManager.
@@ -175,9 +176,13 @@ class VIEWS_EXPORT FocusManager {
   // attached to the window hierarchy anymore.
   void ValidateFocusedView();
 
-  // Stores and restores the focused view. Used when the window becomes
-  // active/inactive.
-  void StoreFocusedView();
+  // Stores the focused view. Used when the widget loses activation.
+  // |clear_native_focus| indicates whether this should invoke ClearFocus().
+  // Typically |true| should be passed in.
+  void StoreFocusedView(bool clear_native_focus);
+
+  // Restore the view saved with a previous call to StoreFocusedView(). Used
+  // when the widget becomes active.
   void RestoreFocusedView();
 
   // Clears the stored focused view.
@@ -186,9 +191,24 @@ class VIEWS_EXPORT FocusManager {
   // Returns true if in the process of changing the focused view.
   bool is_changing_focus() const { return is_changing_focus_; }
 
+  // Disable shortcut handling.
+  static void set_shortcut_handling_suspended(bool suspended) {
+    shortcut_handling_suspended_ = suspended;
+  }
+  // Returns whether shortcut handling is currently suspended.
+  bool shortcut_handling_suspended() { return shortcut_handling_suspended_; }
+
   // Register a keyboard accelerator for the specified target. If multiple
   // targets are registered for an accelerator, a target registered later has
   // higher priority.
+  // |accelerator| is the accelerator to register.
+  // |priority| denotes the priority of the handler.
+  // NOTE: In almost all cases, you should specify kNormalPriority for this
+  // parameter. Setting it to kHighPriority prevents Chrome from sending the
+  // shortcut to the webpage if the renderer has focus, which is not desirable
+  // except for very isolated cases.
+  // |target| is the AcceleratorTarget that handles the event once the
+  // accelerator is pressed.
   // Note that we are currently limited to accelerators that are either:
   // - a key combination including Ctrl or Alt
   // - the escape key
@@ -196,6 +216,7 @@ class VIEWS_EXPORT FocusManager {
   // - any F key (F1, F2, F3 ...)
   // - any browser specific keys (as available on special keyboards)
   void RegisterAccelerator(const ui::Accelerator& accelerator,
+                           ui::AcceleratorManager::HandlerPriority priority,
                            ui::AcceleratorTarget* target);
 
   // Unregister the specified keyboard accelerator for the specified target.
@@ -215,12 +236,7 @@ class VIEWS_EXPORT FocusManager {
 
   // Resets menu key state if |event| is not menu key release.
   // This is effective only on x11.
-  void MaybeResetMenuKeyState(const KeyEvent& key);
-
-#if defined(TOOLKIT_USES_GTK)
-  // Resets menu key state. TODO(oshima): Remove this when views/gtk is removed.
-  void ResetMenuKeyState();
-#endif
+  void MaybeResetMenuKeyState(const ui::KeyEvent& key);
 
   // Called by a RootView when a view within its hierarchy is removed
   // from its parent. This will only be called by a RootView in a
@@ -239,13 +255,16 @@ class VIEWS_EXPORT FocusManager {
   ui::AcceleratorTarget* GetCurrentTargetForAccelerator(
       const ui::Accelerator& accelertor) const;
 
+  // Whether the given |accelerator| has a priority handler associated with it.
+  bool HasPriorityHandler(const ui::Accelerator& accelerator) const;
+
   // Clears the native view having the focus.
   virtual void ClearNativeFocus();
 
   // Convenience method that returns true if the passed |key_event| should
   // trigger tab traversal (if it is a TAB key press with or without SHIFT
   // pressed).
-  static bool IsTabTraversalKeyEvent(const KeyEvent& key_event);
+  static bool IsTabTraversalKeyEvent(const ui::KeyEvent& key_event);
 
  private:
   // Returns the next focusable view.
@@ -259,8 +278,15 @@ class VIEWS_EXPORT FocusManager {
                           View* starting_view,
                           bool reverse);
 
+  // Keeps track of whether shortcut handling is currently suspended.
+  static bool shortcut_handling_suspended_;
+
   // The top-level Widget this FocusManager is associated with.
   Widget* widget_;
+
+  // The object which handles an accelerator when |accelerator_manager_| doesn't
+  // handle it.
+  scoped_ptr<FocusManagerDelegate> delegate_;
 
   // The view that currently is focused.
   View* focused_view_;
@@ -277,11 +303,6 @@ class VIEWS_EXPORT FocusManager {
 
   // The list of registered FocusChange listeners.
   ObserverList<FocusChangeListener, true> focus_change_listeners_;
-
-#if defined(USE_X11)
-  // Indicates if we should handle the upcoming Alt key release event.
-  bool should_handle_menu_key_release_;
-#endif
 
   // See description above getter.
   bool is_changing_focus_;

@@ -1,17 +1,19 @@
-// Copyright (c) 2011 The Chromium Authors. All rights reserved.
+// Copyright (c) 2012 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
 #ifndef NET_DISK_CACHE_STATS_H_
 #define NET_DISK_CACHE_STATS_H_
-#pragma once
 
 #include <string>
 #include <vector>
 
 #include "base/basictypes.h"
-#include "base/memory/scoped_ptr.h"
 #include "net/disk_cache/stats_histogram.h"
+
+namespace base {
+class HistogramSamples;
+}  // namespace base
 
 namespace disk_cache {
 
@@ -46,6 +48,7 @@ class Stats {
     LAST_REPORT,  // Time of the last time we sent a report.
     LAST_REPORT_TIMER,  // Timer count of the last time we sent a report.
     DOOM_RECENT,  // The cache was partially cleared.
+    GAJS_EVICTED,  // ga.js was evicted from the cache.
     MAX_COUNTER
   };
 
@@ -76,7 +79,7 @@ class Stats {
   // Support for StatsHistograms. Together, these methods allow StatsHistograms
   // to take a snapshot of the data_sizes_ as the histogram data.
   int GetBucketRange(size_t i) const;
-  void Snapshot(StatsHistogram::StatsSamples* samples) const;
+  void Snapshot(base::HistogramSamples* samples) const;
 
  private:
   int GetStatsBucket(int32 size);

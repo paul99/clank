@@ -1,14 +1,16 @@
-// Copyright (c) 2011 The Chromium Authors. All rights reserved.
+// Copyright (c) 2012 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
 #ifndef CHROME_BROWSER_UI_WEBUI_DOWNLOADS_DOM_HANDLER_H_
 #define CHROME_BROWSER_UI_WEBUI_DOWNLOADS_DOM_HANDLER_H_
-#pragma once
 
+#include <set>
 #include <vector>
 
-#include "base/memory/scoped_ptr.h"
+#include "base/compiler_specific.h"
+#include "base/memory/weak_ptr.h"
+#include "chrome/browser/download/all_download_item_notifier.h"
 #include "content/public/browser/download_item.h"
 #include "content/public/browser/download_manager.h"
 #include "content/public/browser/web_ui_message_handler.h"
@@ -17,11 +19,14 @@ namespace base {
 class ListValue;
 }
 
+namespace content {
+class WebContents;
+}
+
 // The handler for Javascript messages related to the "downloads" view,
 // also observes changes to the download manager.
 class DownloadsDOMHandler : public content::WebUIMessageHandler,
-                            public content::DownloadManager::Observer,
-                            public content::DownloadItem::Observer {
+                            public AllDownloadItemNotifier::Observer {
  public:
   explicit DownloadsDOMHandler(content::DownloadManager* dlm);
   virtual ~DownloadsDOMHandler();
@@ -31,12 +36,19 @@ class DownloadsDOMHandler : public content::WebUIMessageHandler,
   // WebUIMessageHandler implementation.
   virtual void RegisterMessages() OVERRIDE;
 
-  // DownloadItem::Observer interface
-  virtual void OnDownloadUpdated(content::DownloadItem* download) OVERRIDE;
-  virtual void OnDownloadOpened(content::DownloadItem* download) OVERRIDE { }
+  // AllDownloadItemNotifier::Observer interface
+  virtual void OnDownloadCreated(
+      content::DownloadManager* manager,
+      content::DownloadItem* download_item) OVERRIDE;
+  virtual void OnDownloadUpdated(
+      content::DownloadManager* manager,
+      content::DownloadItem* download_item) OVERRIDE;
+  virtual void OnDownloadRemoved(
+      content::DownloadManager* manager,
+      content::DownloadItem* download_item) OVERRIDE;
 
-  // DownloadManager::Observer interface
-  virtual void ModelChanged() OVERRIDE;
+  // Callback for the "onPageLoaded" message.
+  void OnPageLoaded(const base::ListValue* args);
 
   // Callback for the "getDownloads" message.
   void HandleGetDownloads(const base::ListValue* args);
@@ -75,40 +87,55 @@ class DownloadsDOMHandler : public content::WebUIMessageHandler,
   // folder.
   void HandleOpenDownloadsFolder(const base::ListValue* args);
 
- private:
-  class OriginalDownloadManagerObserver;
+ protected:
+  // These methods are for mocking so that most of this class does not actually
+  // depend on WebUI. The other methods that depend on WebUI are
+  // RegisterMessages() and HandleDrag().
+  virtual content::WebContents* GetWebUIWebContents();
+  virtual void CallDownloadsList(const base::ListValue& downloads);
+  virtual void CallDownloadUpdated(const base::ListValue& download);
 
-  // Send the current list of downloads to the page.
+ private:
+  // Shorthand for |observing_items_|, which tracks all items that this is
+  // observing so that RemoveObserver will be called for all of them.
+  typedef std::set<content::DownloadItem*> DownloadSet;
+
+  // Schedules a call to SendCurrentDownloads() in the next message loop
+  // iteration.
+  void ScheduleSendCurrentDownloads();
+
+  // Sends the current list of downloads to the page.
   void SendCurrentDownloads();
 
-  // Clear all download items and their observers.
-  void ClearDownloadItems();
+  // Displays a native prompt asking the user for confirmation after accepting
+  // the dangerous download specified by |dangerous|. The function returns
+  // immediately, and will invoke DangerPromptAccepted() asynchronously if the
+  // user accepts the dangerous download. The native prompt will observe
+  // |dangerous| until either the dialog is dismissed or |dangerous| is no
+  // longer an in-progress dangerous download.
+  void ShowDangerPrompt(content::DownloadItem* dangerous);
 
-  // Return the download that corresponds to a given id.
-  content::DownloadItem* GetDownloadById(int id);
+  // Conveys danger acceptance from the DownloadDangerPrompt to the
+  // DownloadItem.
+  void DangerPromptAccepted(int download_id);
 
-  // Return the download that is referred to in a given value.
+  // Returns the download that is referred to in a given value.
   content::DownloadItem* GetDownloadByValue(const base::ListValue* args);
 
   // Current search text.
-  std::wstring search_text_;
+  string16 search_text_;
 
-  // Our model
-  content::DownloadManager* download_manager_;
+  // Notifies OnDownload*() and provides safe access to the DownloadManager.
+  AllDownloadItemNotifier main_notifier_;
 
-  // The downloads webui for an off-the-record window also shows downloads from
-  // the parent profile.
-  scoped_ptr<OriginalDownloadManagerObserver>
-      original_download_manager_observer_;
+  // If |main_notifier_| observes an incognito profile, then this observes the
+  // DownloadManager for the original profile; otherwise, this is NULL.
+  scoped_ptr<AllDownloadItemNotifier> original_notifier_;
 
-  // The current set of visible DownloadItems for this view received from the
-  // DownloadManager. DownloadManager owns the DownloadItems. The vector is
-  // kept in order, sorted by ascending start time.
-  // Note that when a download item is removed, the entry in the vector becomes
-  // null.  This should only be a transient state, as a ModelChanged()
-  // notification should follow close on the heels of such a change.
-  typedef std::vector<content::DownloadItem*> OrderedDownloads;
-  OrderedDownloads download_items_;
+  // Whether a call to SendCurrentDownloads() is currently scheduled.
+  bool update_scheduled_;
+
+  base::WeakPtrFactory<DownloadsDOMHandler> weak_ptr_factory_;
 
   DISALLOW_COPY_AND_ASSIGN(DownloadsDOMHandler);
 };

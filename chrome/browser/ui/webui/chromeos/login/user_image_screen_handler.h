@@ -1,4 +1,4 @@
-// Copyright (c) 2011 The Chromium Authors. All rights reserved.
+// Copyright (c) 2012 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -8,10 +8,11 @@
 #include "base/memory/weak_ptr.h"
 #include "base/time.h"
 #include "chrome/browser/chromeos/login/user_image_screen_actor.h"
-#include "chrome/browser/chromeos/options/take_photo_dialog.h"
+#include "chrome/browser/image_decoder.h"
 #include "chrome/browser/ui/webui/chromeos/login/base_screen_handler.h"
 #include "chrome/browser/ui/webui/chromeos/login/oobe_ui.h"
 #include "third_party/skia/include/core/SkBitmap.h"
+#include "ui/gfx/image/image_skia.h"
 #include "ui/gfx/native_widget_types.h"
 
 namespace base {
@@ -24,7 +25,7 @@ namespace chromeos {
 // with JS page part allowing user to select avatar.
 class UserImageScreenHandler : public UserImageScreenActor,
                                public BaseScreenHandler,
-                               public TakePhotoDialog::Delegate {
+                               public ImageDecoder::Delegate {
  public:
   UserImageScreenHandler();
   virtual ~UserImageScreenHandler();
@@ -41,26 +42,25 @@ class UserImageScreenHandler : public UserImageScreenActor,
   virtual void Hide() OVERRIDE;
   virtual void PrepareToShow() OVERRIDE;
   virtual void SelectImage(int index) OVERRIDE;
-  virtual void UpdateVideoFrame(const SkBitmap& frame) OVERRIDE;
-  virtual void ShowCameraError() OVERRIDE;
-  virtual void ShowCameraInitializing() OVERRIDE;
   virtual void CheckCameraPresence() OVERRIDE;
-  virtual bool IsCapturing() const OVERRIDE;
-  virtual void AddProfileImage(const SkBitmap& image) OVERRIDE;
+  virtual void AddProfileImage(const gfx::ImageSkia& image) OVERRIDE;
   virtual void OnProfileImageAbsent() OVERRIDE;
 
   // WebUIMessageHandler implementation:
   virtual void RegisterMessages() OVERRIDE;
 
-  // TakePhotoDialog::Delegate implementation.
-  virtual void OnPhotoAccepted(const SkBitmap& photo) OVERRIDE;
-
  private:
   // Sends profile image as a data URL to the page.
   void SendProfileImage(const std::string& data_url);
 
-  // Opens the camera capture dialog.
-  void HandleTakePhoto(const base::ListValue* args);
+  // Sends image data to the page.
+  void HandleGetImages(const base::ListValue* args);
+
+  // Handles photo taken with WebRTC UI.
+  void HandlePhotoTaken(const base::ListValue* args);
+
+  // Handles camera presence check request.
+  void HandleCheckCameraPresence(const base::ListValue* args);
 
   // Handles clicking on default user image.
   void HandleSelectImage(const base::ListValue* args);
@@ -74,6 +74,12 @@ class UserImageScreenHandler : public UserImageScreenActor,
   // Called when the camera presence check has been completed.
   void OnCameraPresenceCheckDone();
 
+  // Overriden from ImageDecoder::Delegate:
+  virtual void OnImageDecoded(const ImageDecoder* decoder,
+                              const SkBitmap& decoded_image) OVERRIDE;
+  virtual void OnDecodeImageFailed(const ImageDecoder* decoder) OVERRIDE;
+
+
   UserImageScreenActor::Delegate* screen_;
 
   // Keeps whether screen should be shown right after initialization.
@@ -83,7 +89,16 @@ class UserImageScreenHandler : public UserImageScreenActor,
   int selected_image_;
 
   // Last user photo, if taken.
-  SkBitmap user_photo_;
+  gfx::ImageSkia user_photo_;
+
+  // Last ImageDecoder instance used to decode an image blob received by
+  // HandlePhotoTaken.
+  scoped_refptr<ImageDecoder> image_decoder_;
+
+  // If |true|, decoded photo should be immediately accepeted (i.e., both
+  // HandleTakePhoto and HandleImageAccepted have already been called but we're
+  // still waiting for  photo image decoding to finish.
+  bool accept_photo_after_decoding_;
 
   // Data URL for |user_photo_|.
   std::string user_photo_data_url_;

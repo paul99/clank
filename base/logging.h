@@ -4,7 +4,6 @@
 
 #ifndef BASE_LOGGING_H_
 #define BASE_LOGGING_H_
-#pragma once
 
 #include <cassert>
 #include <string>
@@ -585,9 +584,6 @@ DEFINE_CHECK_OP_IMPL(GT, > )
 #define ENABLE_DCHECK 1
 #endif
 
-#define EAT_STREAM_PARAMETERS                                           \
-  true ? (void) 0 : ::logging::LogMessageVoidify() & LOG_STREAM(FATAL)
-
 // Definitions for DLOG et al.
 
 #if ENABLE_DLOG
@@ -953,8 +949,12 @@ inline std::ostream& operator<<(std::ostream& out, const std::wstring& wstr) {
 //   5 -- LOG(ERROR) at runtime, only once per call-site
 
 #ifndef NOTIMPLEMENTED_POLICY
+#if defined(OS_ANDROID) && defined(OFFICIAL_BUILD)
+#define NOTIMPLEMENTED_POLICY 0
+#else
 // Select default policy: LOG(ERROR)
 #define NOTIMPLEMENTED_POLICY 4
+#endif
 #endif
 
 #if defined(COMPILER_GCC)

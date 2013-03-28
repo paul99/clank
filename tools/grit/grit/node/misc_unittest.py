@@ -1,5 +1,5 @@
-#!/usr/bin/python2.4
-# Copyright (c) 2011 The Chromium Authors. All rights reserved.
+#!/usr/bin/env python
+# Copyright (c) 2012 The Chromium Authors. All rights reserved.
 # Use of this source code is governed by a BSD-style license that can be
 # found in the LICENSE file.
 
@@ -9,7 +9,7 @@
 import os
 import sys
 if __name__ == '__main__':
-  sys.path.append(os.path.join(os.path.dirname(sys.argv[0]), '../..'))
+  sys.path.append(os.path.join(os.path.dirname(__file__), '../..'))
 
 import unittest
 import StringIO
@@ -17,6 +17,7 @@ import StringIO
 from grit import grd_reader
 import grit.exception
 from grit import util
+from grit.format import rc
 from grit.node import misc
 
 
@@ -32,11 +33,14 @@ class GritNodeUnittest(unittest.TestCase):
   def testReadFirstIdsFromFile(self):
     test_resource_ids = os.path.join(os.path.dirname(__file__), '..',
                                      'testdata', 'resource_ids')
+    base_dir = os.path.dirname(test_resource_ids)
+
     src_dir, id_dict = misc._ReadFirstIdsFromFile(
         test_resource_ids,
         {
-          'FOO': '/bar',
-          'SHARED_INTERMEDIATE_DIR': '/out/Release/obj/gen',
+          'FOO': os.path.join(base_dir, 'bar'),
+          'SHARED_INTERMEDIATE_DIR': os.path.join(base_dir,
+                                                  'out/Release/obj/gen'),
         })
     self.assertEqual({}, id_dict.get('bar/file.grd', None))
     self.assertEqual({},
@@ -76,20 +80,66 @@ class IfNodeUnittest(unittest.TestCase):
     self.assertTrue(hello_message.name == 'message')
     self.assertTrue(french_message.name == 'message')
 
-    grd.SetOutputContext('fr', {'hello' : '1'})
-    self.failUnless(not bingo_message.SatisfiesOutputCondition())
-    self.failUnless(hello_message.SatisfiesOutputCondition())
-    self.failUnless(french_message.SatisfiesOutputCondition())
+    grd.SetOutputLanguage('fr')
+    grd.SetDefines({'hello': '1'})
+    active = set(grd.ActiveDescendants())
+    self.failUnless(bingo_message not in active)
+    self.failUnless(hello_message in active)
+    self.failUnless(french_message in active)
 
-    grd.SetOutputContext('en', {'bingo' : 1})
-    self.failUnless(bingo_message.SatisfiesOutputCondition())
-    self.failUnless(not hello_message.SatisfiesOutputCondition())
-    self.failUnless(not french_message.SatisfiesOutputCondition())
+    grd.SetOutputLanguage('en')
+    grd.SetDefines({'bingo': 1})
+    active = set(grd.ActiveDescendants())
+    self.failUnless(bingo_message in active)
+    self.failUnless(hello_message not in active)
+    self.failUnless(french_message not in active)
 
-    grd.SetOutputContext('en', {'FORCE_FRENCH' : '1', 'bingo' : '1'})
-    self.failUnless(bingo_message.SatisfiesOutputCondition())
-    self.failUnless(not hello_message.SatisfiesOutputCondition())
-    self.failUnless(french_message.SatisfiesOutputCondition())
+    grd.SetOutputLanguage('en')
+    grd.SetDefines({'FORCE_FRENCH': '1', 'bingo': '1'})
+    active = set(grd.ActiveDescendants())
+    self.failUnless(bingo_message in active)
+    self.failUnless(hello_message not in active)
+    self.failUnless(french_message in active)
+
+  def testElsiness(self):
+    grd = util.ParseGrdForUnittest('''
+        <messages>
+          <if expr="True">
+            <then> <message name="IDS_YES1"></message> </then>
+            <else> <message name="IDS_NO1"></message> </else>
+          </if>
+          <if expr="True">
+            <then> <message name="IDS_YES2"></message> </then>
+            <else> </else>
+          </if>
+          <if expr="True">
+            <then> </then>
+            <else> <message name="IDS_NO2"></message> </else>
+          </if>
+          <if expr="True">
+            <then> </then>
+            <else> </else>
+          </if>
+          <if expr="False">
+            <then> <message name="IDS_NO3"></message> </then>
+            <else> <message name="IDS_YES3"></message> </else>
+          </if>
+          <if expr="False">
+            <then> <message name="IDS_NO4"></message> </then>
+            <else> </else>
+          </if>
+          <if expr="False">
+            <then> </then>
+            <else> <message name="IDS_YES4"></message> </else>
+          </if>
+          <if expr="False">
+            <then> </then>
+            <else> </else>
+          </if>
+        </messages>''')
+    included = [msg.attrs['name'] for msg in grd.ActiveDescendants()
+                                  if msg.name == 'message']
+    self.assertEqual(['IDS_YES1', 'IDS_YES2', 'IDS_YES3', 'IDS_YES4'], included)
 
   def testIffynessWithOutputNodes(self):
     grd = grd_reader.Parse(StringIO.StringIO('''
@@ -122,33 +172,185 @@ class IfNodeUnittest(unittest.TestCase):
     self.assertTrue(doc_output.name == 'output')
     self.assertTrue(uncond2_output.name == 'output')
 
-    grd.SetOutputContext('ru', {'hello' : '1'})
+    grd.SetOutputLanguage('ru')
+    grd.SetDefines({'hello': '1'})
     outputs = [output.GetFilename() for output in grd.GetOutputFiles()]
     self.assertEquals(
         outputs,
         ['uncond1.rc', 'only_fr.adm', 'only_fr.plist', 'doc.html',
          'uncond2.adm', 'iftest.h'])
 
-    grd.SetOutputContext('ru', {'bingo': '2'})
+    grd.SetOutputLanguage('ru')
+    grd.SetDefines({'bingo': '2'})
     outputs = [output.GetFilename() for output in grd.GetOutputFiles()]
     self.assertEquals(
         outputs,
         ['uncond1.rc', 'doc.html', 'uncond2.adm', 'iftest.h'])
 
-    grd.SetOutputContext('fr', {'hello': '1'})
+    grd.SetOutputLanguage('fr')
+    grd.SetDefines({'hello': '1'})
     outputs = [output.GetFilename() for output in grd.GetOutputFiles()]
     self.assertEquals(
         outputs,
         ['uncond1.rc', 'only_fr.adm', 'only_fr.plist', 'uncond2.adm',
          'iftest.h'])
 
-    grd.SetOutputContext('en', {'bingo': '1'})
+    grd.SetOutputLanguage('en')
+    grd.SetDefines({'bingo': '1'})
     outputs = [output.GetFilename() for output in grd.GetOutputFiles()]
     self.assertEquals(outputs, ['uncond1.rc', 'uncond2.adm', 'iftest.h'])
 
-    grd.SetOutputContext('fr', {'bingo': '1'})
+    grd.SetOutputLanguage('fr')
+    grd.SetDefines({'bingo': '1'})
     outputs = [output.GetFilename() for output in grd.GetOutputFiles()]
     self.assertNotEquals(outputs, ['uncond1.rc', 'uncond2.adm', 'iftest.h'])
+
+  def testChildrenAccepted(self):
+    grd = grd_reader.Parse(StringIO.StringIO('''<?xml version="1.0"?>
+      <grit latest_public_release="2" source_lang_id="en-US" current_release="3" base_dir=".">
+        <release seq="3">
+          <includes>
+            <if expr="'bingo' in defs">
+              <include type="gif" name="ID_LOGO2" file="images/logo2.gif" />
+            </if>
+            <if expr="'bingo' in defs">
+              <if expr="'hello' in defs">
+                <include type="gif" name="ID_LOGO2" file="images/logo2.gif" />
+              </if>
+            </if>
+          </includes>
+          <structures>
+            <if expr="'bingo' in defs">
+              <structure type="dialog" name="IDD_ABOUTBOX" file="grit\\test\data\klonk.rc" encoding="utf-16" />
+            </if>
+            <if expr="'bingo' in defs">
+              <if expr="'hello' in defs">
+                <structure type="dialog" name="IDD_ABOUTBOX" file="grit\\test\data\klonk.rc" encoding="utf-16" />
+              </if>
+            </if>
+          </structures>
+          <messages>
+            <if expr="'bingo' in defs">
+              <message name="IDS_BINGO">Bingo!</message>
+            </if>
+            <if expr="'bingo' in defs">
+              <if expr="'hello' in defs">
+                <message name="IDS_BINGO">Bingo!</message>
+              </if>
+            </if>
+          </messages>
+        </release>
+        <translations>
+          <if expr="'bingo' in defs">
+            <file lang="nl" path="nl_translations.xtb" />
+          </if>
+          <if expr="'bingo' in defs">
+            <if expr="'hello' in defs">
+              <file lang="nl" path="nl_translations.xtb" />
+            </if>
+          </if>
+        </translations>
+      </grit>'''), dir='.')
+
+  def testIfBadChildrenNesting(self):
+    # includes
+    xml = StringIO.StringIO('''<?xml version="1.0"?>
+      <grit latest_public_release="2" source_lang_id="en-US" current_release="3" base_dir=".">
+        <release seq="3">
+          <includes>
+            <if expr="'bingo' in defs">
+              <structure type="dialog" name="IDD_ABOUTBOX" file="grit\\test\data\klonk.rc" encoding="utf-16" />
+            </if>
+          </includes>
+        </release>
+      </grit>''')
+    self.assertRaises(grit.exception.UnexpectedChild, grd_reader.Parse, xml)
+    # messages
+    xml = StringIO.StringIO('''<?xml version="1.0"?>
+      <grit latest_public_release="2" source_lang_id="en-US" current_release="3" base_dir=".">
+        <release seq="3">
+          <messages>
+            <if expr="'bingo' in defs">
+              <structure type="dialog" name="IDD_ABOUTBOX" file="grit\\test\data\klonk.rc" encoding="utf-16" />
+            </if>
+          </messages>
+        </release>
+      </grit>''')
+    self.assertRaises(grit.exception.UnexpectedChild, grd_reader.Parse, xml)
+    # structures
+    xml = StringIO.StringIO('''<?xml version="1.0"?>
+      <grit latest_public_release="2" source_lang_id="en-US" current_release="3" base_dir=".">
+        <release seq="3">
+          <structures>
+            <if expr="'bingo' in defs">
+              <message name="IDS_BINGO">Bingo!</message>
+            </if>
+          </structures>
+        </release>
+      </grit>''')
+    # translations
+    self.assertRaises(grit.exception.UnexpectedChild, grd_reader.Parse, xml)
+    xml = StringIO.StringIO('''<?xml version="1.0"?>
+      <grit latest_public_release="2" source_lang_id="en-US" current_release="3" base_dir=".">
+        <translations>
+          <if expr="'bingo' in defs">
+            <message name="IDS_BINGO">Bingo!</message>
+          </if>
+        </translations>
+      </grit>''')
+    self.assertRaises(grit.exception.UnexpectedChild, grd_reader.Parse, xml)
+    # same with nesting
+    xml = StringIO.StringIO('''<?xml version="1.0"?>
+      <grit latest_public_release="2" source_lang_id="en-US" current_release="3" base_dir=".">
+        <release seq="3">
+          <includes>
+            <if expr="'bingo' in defs">
+              <if expr="'hello' in defs">
+                <structure type="dialog" name="IDD_ABOUTBOX" file="grit\\test\data\klonk.rc" encoding="utf-16" />
+              </if>
+            </if>
+          </includes>
+        </release>
+      </grit>''')
+    self.assertRaises(grit.exception.UnexpectedChild, grd_reader.Parse, xml)
+    xml = StringIO.StringIO('''<?xml version="1.0"?>
+      <grit latest_public_release="2" source_lang_id="en-US" current_release="3" base_dir=".">
+        <release seq="3">
+          <messages>
+            <if expr="'bingo' in defs">
+              <if expr="'hello' in defs">
+                <structure type="dialog" name="IDD_ABOUTBOX" file="grit\\test\data\klonk.rc" encoding="utf-16" />
+              </if>
+            </if>
+          </messages>
+        </release>
+      </grit>''')
+    self.assertRaises(grit.exception.UnexpectedChild, grd_reader.Parse, xml)
+    xml = StringIO.StringIO('''<?xml version="1.0"?>
+      <grit latest_public_release="2" source_lang_id="en-US" current_release="3" base_dir=".">
+        <release seq="3">
+          <structures>
+            <if expr="'bingo' in defs">
+              <if expr="'hello' in defs">
+                <message name="IDS_BINGO">Bingo!</message>
+              </if>
+            </if>
+          </structures>
+        </release>
+      </grit>''')
+    self.assertRaises(grit.exception.UnexpectedChild, grd_reader.Parse, xml)
+    xml = StringIO.StringIO('''<?xml version="1.0"?>
+      <grit latest_public_release="2" source_lang_id="en-US" current_release="3" base_dir=".">
+        <translations>
+          <if expr="'bingo' in defs">
+            <if expr="'hello' in defs">
+              <message name="IDS_BINGO">Bingo!</message>
+            </if>
+          </if>
+        </translations>
+      </grit>''')
+    self.assertRaises(grit.exception.UnexpectedChild, grd_reader.Parse, xml)
+
 
 class ReleaseNodeUnittest(unittest.TestCase):
   def testPseudoControl(self):
@@ -175,7 +377,8 @@ class ReleaseNodeUnittest(unittest.TestCase):
           </structures>
         </release>
       </grit>'''), util.PathFromRoot('grit/testdata'))
-    grd.RunGatherers(recursive=True)
+    grd.SetOutputLanguage('en')
+    grd.RunGatherers()
 
     hello = grd.GetNodeById('IDS_HELLO')
     aboutbox = grd.GetNodeById('IDD_ABOUTBOX')
@@ -188,20 +391,13 @@ class ReleaseNodeUnittest(unittest.TestCase):
     for node in [bingo, menu]:
       self.failUnless(node.PseudoIsAllowed())
 
-    for node in [hello, aboutbox]:
-      try:
-        formatter = node.ItemFormatter('rc_all')
-        formatter.Format(node, 'xyz-pseudo')
-        self.fail('Should have failed during Format since pseudo is not allowed')
-      except:
-        pass  # expected case
+    # TODO(benrg): There was a test here that formatting hello and aboutbox with
+    # a pseudo language should fail, but they do not fail and the test was
+    # broken and failed to catch it. Fix this.
 
-    for node in [bingo, menu]:
-      try:
-        formatter = node.ItemFormatter('rc_all')
-        formatter.Format(node, 'xyz-pseudo')
-      except:
-        self.fail('Should not have gotten exception since pseudo is allowed')
+    # Should not raise an exception since pseudo is allowed
+    rc.FormatMessage(bingo, 'xyz-pseudo')
+    rc.FormatStructure(menu, 'xyz-pseudo', '.')
 
 
 if __name__ == '__main__':

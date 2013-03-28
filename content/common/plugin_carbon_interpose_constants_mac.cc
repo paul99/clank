@@ -6,12 +6,10 @@
 
 #include "content/common/plugin_carbon_interpose_constants_mac.h"
 
-namespace plugin_interpose_strings {
+namespace content {
 
 const char kDYLDInsertLibrariesKey[] = "DYLD_INSERT_LIBRARIES";
-const char kInterposeLibraryPath[] =
-    "@executable_path/../../../libplugin_carbon_interpose.dylib";
 
-}  // namespace plugin_interpose_strings
+}  // namespace content
 
 #endif  // !__LP64__

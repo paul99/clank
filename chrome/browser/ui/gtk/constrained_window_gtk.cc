@@ -10,20 +10,14 @@
 #include "base/message_loop.h"
 #include "chrome/browser/ui/browser_list.h"
 #include "chrome/browser/ui/constrained_window_tab_helper.h"
+#include "chrome/browser/ui/constrained_window_tab_helper_delegate.h"
 #include "chrome/browser/ui/gtk/gtk_util.h"
-#include "chrome/browser/ui/tab_contents/tab_contents_wrapper.h"
+#include "chrome/browser/ui/gtk/tab_contents/chrome_web_contents_view_delegate_gtk.h"
 #include "content/public/browser/browser_thread.h"
 #include "content/public/browser/web_contents.h"
+#include "ui/base/gtk/focus_store_gtk.h"
 #include "ui/base/gtk/gtk_compat.h"
 #include "ui/base/gtk/gtk_hig_constants.h"
-
-#if defined(TOOLKIT_VIEWS)
-#include "chrome/browser/ui/views/tab_contents/native_tab_contents_view_gtk.h"
-#include "chrome/browser/ui/views/tab_contents/tab_contents_view_views.h"
-#else
-#include "chrome/browser/tab_contents/chrome_tab_contents_view_wrapper_gtk.h"
-#include "content/browser/tab_contents/tab_contents_view_gtk.h"
-#endif
 
 using content::BrowserThread;
 
@@ -39,12 +33,13 @@ bool ConstrainedWindowGtkDelegate::ShouldHaveBorderPadding() const {
 }
 
 ConstrainedWindowGtk::ConstrainedWindowGtk(
-    TabContentsWrapper* wrapper, ConstrainedWindowGtkDelegate* delegate)
-    : wrapper_(wrapper),
+    content::WebContents* web_contents,
+    ConstrainedWindowGtkDelegate* delegate)
+    : web_contents_(web_contents),
       delegate_(delegate),
       visible_(false),
       weak_factory_(this) {
-  DCHECK(wrapper);
+  DCHECK(web_contents);
   DCHECK(delegate);
   GtkWidget* dialog = delegate->GetWidgetRoot();
 
@@ -61,13 +56,6 @@ ConstrainedWindowGtk::ConstrainedWindowGtk(
         ui::kContentAreaBorder, ui::kContentAreaBorder);
   }
 
-  GdkColor background;
-  if (delegate->GetBackgroundColor(&background)) {
-    gtk_widget_modify_base(ebox, GTK_STATE_NORMAL, &background);
-    gtk_widget_modify_fg(ebox, GTK_STATE_NORMAL, &background);
-    gtk_widget_modify_bg(ebox, GTK_STATE_NORMAL, &background);
-  }
-
   if (gtk_widget_get_parent(dialog))
     gtk_widget_reparent(dialog, alignment);
   else
@@ -77,13 +65,17 @@ ConstrainedWindowGtk::ConstrainedWindowGtk(
   gtk_container_add(GTK_CONTAINER(ebox), frame);
   border_.Own(ebox);
 
+  BackgroundColorChanged();
+
   gtk_widget_add_events(widget(), GDK_KEY_PRESS_MASK);
   g_signal_connect(widget(), "key-press-event", G_CALLBACK(OnKeyPressThunk),
                    this);
   g_signal_connect(widget(), "hierarchy-changed",
                    G_CALLBACK(OnHierarchyChangedThunk), this);
 
-  wrapper_->constrained_window_tab_helper()->AddConstrainedDialog(this);
+  ConstrainedWindowTabHelper* constrained_window_tab_helper =
+      ConstrainedWindowTabHelper::FromWebContents(web_contents_);
+  constrained_window_tab_helper->AddConstrainedDialog(this);
 }
 
 ConstrainedWindowGtk::~ConstrainedWindowGtk() {
@@ -104,7 +96,9 @@ void ConstrainedWindowGtk::CloseConstrainedWindow() {
   if (visible_)
     ContainingView()->RemoveConstrainedWindow(this);
   delegate_->DeleteDelegate();
-  wrapper_->constrained_window_tab_helper()->WillClose(this);
+  ConstrainedWindowTabHelper* constrained_window_tab_helper =
+      ConstrainedWindowTabHelper::FromWebContents(web_contents_);
+  constrained_window_tab_helper->WillClose(this);
 
   delete this;
 }
@@ -117,32 +111,28 @@ void ConstrainedWindowGtk::FocusConstrainedWindow() {
   // The user may have focused another tab. In this case do not grab focus
   // until this tab is refocused.
   ConstrainedWindowTabHelper* helper =
-      wrapper_->constrained_window_tab_helper();
+      ConstrainedWindowTabHelper::FromWebContents(web_contents_);
   if ((!helper->delegate() ||
        helper->delegate()->ShouldFocusConstrainedWindow()) &&
       gtk_util::IsWidgetAncestryVisible(focus_widget)) {
     gtk_widget_grab_focus(focus_widget);
   } else {
-  // TODO(estade): this define should not need to be here because this class
-  // should not be used on linux/views.
-#if defined(TOOLKIT_GTK)
-    static_cast<content::TabContentsViewGtk*>(
-        wrapper_->web_contents()->GetView())->SetFocusedWidget(focus_widget);
-#endif
+    ContainingView()->focus_store()->SetWidget(focus_widget);
+  }
+}
+
+void ConstrainedWindowGtk::BackgroundColorChanged() {
+  GdkColor background;
+  if (delegate_->GetBackgroundColor(&background)) {
+    gtk_widget_modify_base(border_.get(), GTK_STATE_NORMAL, &background);
+    gtk_widget_modify_fg(border_.get(), GTK_STATE_NORMAL, &background);
+    gtk_widget_modify_bg(border_.get(), GTK_STATE_NORMAL, &background);
   }
 }
 
 ConstrainedWindowGtk::TabContentsViewType*
-    ConstrainedWindowGtk::ContainingView() {
-#if defined(TOOLKIT_VIEWS)
-  return static_cast<NativeTabContentsViewGtk*>(
-      static_cast<TabContentsViewViews*>(wrapper_->web_contents()->GetView())->
-          native_tab_contents_view());
-#else
-  return static_cast<TabContentsViewType*>(
-      static_cast<content::TabContentsViewGtk*>(
-          wrapper_->web_contents()->GetView())->wrapper());
-#endif
+ConstrainedWindowGtk::ContainingView() {
+  return ChromeWebContentsViewDelegateGtk::GetFor(web_contents_);
 }
 
 gboolean ConstrainedWindowGtk::OnKeyPress(GtkWidget* sender,

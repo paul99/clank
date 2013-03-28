@@ -143,42 +143,60 @@ below:
   <translations>
     <file path="resources/webkit_strings_am.xtb" lang="am" />
     <file path="resources/webkit_strings_ar.xtb" lang="ar" />
-    <file path="../../third_party/launchpad_translations/webkit_strings_ast.xtb" lang="ast" />
+    <if expr="pp_ifdef('use_third_party_translations')">
+      <file path="../../third_party/launchpad_translations/webkit_strings_ast.xtb" lang="ast" />
+    </if>
     <file path="resources/webkit_strings_bg.xtb" lang="bg" />
     <file path="resources/webkit_strings_bn.xtb" lang="bn" />
-    <file path="../../third_party/launchpad_translations/webkit_strings_bs.xtb" lang="bs" />
+    <if expr="pp_ifdef('use_third_party_translations')">
+      <file path="../../third_party/launchpad_translations/webkit_strings_bs.xtb" lang="bs" />
+    </if>
     <file path="resources/webkit_strings_ca.xtb" lang="ca" />
-    <file path="../../third_party/launchpad_translations/webkit_strings_ca-valencia.xtb" lang="ca@valencia" />
+    <if expr="pp_ifdef('use_third_party_translations')">
+      <file path="../../third_party/launchpad_translations/webkit_strings_ca-valencia.xtb" lang="ca@valencia" />
+    </if>
     <file path="resources/webkit_strings_cs.xtb" lang="cs" />
     <file path="resources/webkit_strings_da.xtb" lang="da" />
     <file path="resources/webkit_strings_de.xtb" lang="de" />
     <file path="resources/webkit_strings_el.xtb" lang="el" />
-    <file path="../../third_party/launchpad_translations/webkit_strings_en-AU.xtb" lang="en-AU" />
+    <if expr="pp_ifdef('use_third_party_translations')">
+      <file path="../../third_party/launchpad_translations/webkit_strings_en-AU.xtb" lang="en-AU" />
+    </if>
     <file path="resources/webkit_strings_en-GB.xtb" lang="en-GB" />
     <file path="resources/webkit_strings_es.xtb" lang="es" />
     <file path="resources/webkit_strings_es-419.xtb" lang="es-419" />
     <file path="resources/webkit_strings_et.xtb" lang="et" />
-    <file path="../../third_party/launchpad_translations/webkit_strings_eu.xtb" lang="eu" />
+    <if expr="pp_ifdef('use_third_party_translations')">
+      <file path="../../third_party/launchpad_translations/webkit_strings_eu.xtb" lang="eu" />
+    </if>
     <file path="resources/webkit_strings_fa.xtb" lang="fa" />
     <file path="resources/webkit_strings_fi.xtb" lang="fi" />
     <file path="resources/webkit_strings_fil.xtb" lang="fil" />
     <file path="resources/webkit_strings_fr.xtb" lang="fr" />
-    <file path="../../third_party/launchpad_translations/webkit_strings_gl.xtb" lang="gl" />
+    <if expr="pp_ifdef('use_third_party_translations')">
+      <file path="../../third_party/launchpad_translations/webkit_strings_gl.xtb" lang="gl" />
+    </if>
     <file path="resources/webkit_strings_gu.xtb" lang="gu" />
     <file path="resources/webkit_strings_hi.xtb" lang="hi" />
     <file path="resources/webkit_strings_hr.xtb" lang="hr" />
     <file path="resources/webkit_strings_hu.xtb" lang="hu" />
-    <file path="../../third_party/launchpad_translations/webkit_strings_hy.xtb" lang="hy" />
+    <if expr="pp_ifdef('use_third_party_translations')">
+      <file path="../../third_party/launchpad_translations/webkit_strings_hy.xtb" lang="hy" />
+    </if>
     <file path="resources/webkit_strings_id.xtb" lang="id" />
     <file path="resources/webkit_strings_it.xtb" lang="it" />
     <!-- The translation console uses 'iw' for Hebrew, but we use 'he'. -->
     <file path="resources/webkit_strings_iw.xtb" lang="he" />
     <file path="resources/webkit_strings_ja.xtb" lang="ja" />
-    <file path="../../third_party/launchpad_translations/webkit_strings_ka.xtb" lang="ka" />
+    <if expr="pp_ifdef('use_third_party_translations')">
+      <file path="../../third_party/launchpad_translations/webkit_strings_ka.xtb" lang="ka" />
+    </if>
     <file path="resources/webkit_strings_kn.xtb" lang="kn" />
     <file path="resources/webkit_strings_ko.xtb" lang="ko" />
-    <file path="../../third_party/launchpad_translations/webkit_strings_ku.xtb" lang="ku" />
-    <file path="../../third_party/launchpad_translations/webkit_strings_kw.xtb" lang="kw" />
+    <if expr="pp_ifdef('use_third_party_translations')">
+      <file path="../../third_party/launchpad_translations/webkit_strings_ku.xtb" lang="ku" />
+      <file path="../../third_party/launchpad_translations/webkit_strings_kw.xtb" lang="kw" />
+    </if>
     <file path="resources/webkit_strings_lt.xtb" lang="lt" />
     <file path="resources/webkit_strings_lv.xtb" lang="lv" />
     <file path="resources/webkit_strings_ml.xtb" lang="ml" />
@@ -200,7 +218,9 @@ below:
     <file path="resources/webkit_strings_te.xtb" lang="te" />
     <file path="resources/webkit_strings_th.xtb" lang="th" />
     <file path="resources/webkit_strings_tr.xtb" lang="tr" />
-    <file path="../../third_party/launchpad_translations/webkit_strings_ug.xtb" lang="ug" />
+    <if expr="pp_ifdef('use_third_party_translations')">
+      <file path="../../third_party/launchpad_translations/webkit_strings_ug.xtb" lang="ug" />
+    </if>
     <file path="resources/webkit_strings_uk.xtb" lang="uk" />
     <file path="resources/webkit_strings_vi.xtb" lang="vi" />
     <file path="resources/webkit_strings_zh-CN.xtb" lang="zh-CN" />
@@ -218,6 +238,21 @@ below:
       </message>
       <message name="IDS_SEARCHABLE_INDEX_INTRO" desc="Text that appears at the start of nearly-obsolete webpages in the form of a 'searchable index'.">
         This is a searchable index. Enter search keywords: '''
+      </message>
+      <message name="IDS_FORM_CALENDAR_CLEAR" desc="Label for a button which clears a date input field.">
+        Clear
+      </message>
+      <message name="IDS_FORM_CALENDAR_TODAY" desc="Label for a button which sets today to a date input field.">
+        Today
+      </message>
+      <message name="IDS_FORM_DATE_FORMAT_DAY_IN_MONTH" desc="Short word to indicate which is the day-in-month part in a date format. e.g. 'Day' in 'Month/Day/Year'">
+        Day
+      </message>
+      <message name="IDS_FORM_DATE_FORMAT_MONTH" desc="Short word to indicate which is the month part in a date format. e.g. 'Month' in 'Month/Day/Year'">
+        Month
+      </message>
+      <message name="IDS_FORM_DATE_FORMAT_YEAR" desc="Short word to indicate which is the year part in a date format. e.g. 'Year' in 'Month/Day/Year'">
+        Year
       </message>
       <message name="IDS_FORM_SUBMIT_LABEL" desc="Default label for Submit buttons in forms on webpages.">
         Submit
@@ -242,6 +277,39 @@ below:
       </message>
       <message name="IDS_FORM_FILE_MULTIPLE_UPLOAD" desc="text to display next to file buttons in HTML forms when 2 or more files are selected for uploading. This is not used for a case that just 1 file is selected.">
         <ph name="NUMBER_OF_FILES">$1<ex>3</ex></ph> files
+      </message>
+      <message name="IDS_FORM_OTHER_COLOR_LABEL" desc="Label for button that opens a full color chooser so the user can choose colors other than the ones in the list.">
+        Other...
+      </message>
+      <message name="IDS_FORM_OTHER_DATE_LABEL" desc="Label for button that opens a full calendar picker so the user can choose dates other than the ones in the list." meaning="for date label">
+        Other...
+      </message>
+      <message name="IDS_FORM_OTHER_MONTH_LABEL" desc="Label for button that opens a full month picker so the user can choose dates other than the ones in the list." meaning="for month label">
+        Other...
+      </message>
+      <message name="IDS_FORM_OTHER_TIME_LABEL" desc="Label for button that opens a full time picker so the user can choose dates other than the ones in the list." meaning="for time label">
+        Other...
+      </message>
+      <message name="IDS_FORM_OTHER_WEEK_LABEL" desc="Label for button that opens a full week picker so the user can choose dates other than the ones in the list." meaning="for week label">
+        Other...
+      </message>
+      <message name="IDS_FORM_PLACEHOLDER_FOR_DAY_OF_MONTH_FIELD" desc="Text for denoting day of month field position in date format. Short text is prefered. See http://crbug.com/152632 for samples.">
+        dd
+      </message>
+      <message name="IDS_FORM_PLACEHOLDER_FOR_MONTH_FIELD" desc="Text for denoting month field position in date format. Short text is prefered. See http://crbug.com/152632 for samples.">
+        mm
+      </message>
+      <message name="IDS_FORM_PLACEHOLDER_FOR_YEAR_FIELD" desc="Text for denoting day of month field position in date format. Short text is prefered. See http://crbug.com/152632 for samples.">
+        yyyy
+      </message>
+      <message name="IDS_FORM_THIS_MONTH_LABEL" desc="Label for button in month picker to select this month.">
+        This month
+      </message>
+      <message name="IDS_FORM_THIS_WEEK_LABEL" desc="Label for button in week picker to select this week.">
+        This week
+      </message>
+      <message name="IDS_FORM_WEEK_NUMBER_LABEL" desc="Label for week number column in a calendar.">
+        Week
       </message>
 
       <message name="IDS_RECENT_SEARCHES_NONE" desc="Label for only item in menu that appears when clicking on the search field image, when no searches have been performed">
@@ -273,6 +341,12 @@ below:
       <message name="IDS_AX_ROLE_HEADING" desc="accessibility role description for headings">
         heading
       </message>
+      <message name="IDS_AX_ROLE_FOOTER" desc="accessibility role description for footers">
+        footer
+      </message>
+      <message name="IDS_AX_ROLE_STEPPER" desc="accessibility role description for a stepper - a control where you can use up/down arrows to increment or decrement it. The name 'stepper' is how this user interface element is described by VoiceOver on Mac OS X; the translation should be consistent with VoiceOver.">
+        stepper
+      </message>
 
       <message name="IDS_AX_BUTTON_ACTION_VERB" desc="Verb stating the action that will occur when a button is pressed, as used by accessibility.">
         press
@@ -293,6 +367,46 @@ below:
         jump
       </message>
 
+      <message name="IDS_AX_AM_PM_FIELD_TEXT" desc="Accessible description of the AM/PM field in a date/time control">
+        AM/PM
+      </message>
+
+      <message name="IDS_AX_DAY_OF_MONTH_FIELD_TEXT" desc="Accessible description of the day of month field in a date/time control">
+        Day
+      </message>
+
+      <message name="IDS_AX_DATE_TIME_FIELD_EMPTY_VALUE_TEXT" desc="Accessible description of empty value of field in a date/time control">
+        blank
+      </message>
+
+      <message name="IDS_AX_HOUR_FIELD_TEXT" desc="Accessible description of the hour field in a date/time control">
+        Hours
+      </message>
+
+      <message name="IDS_AX_MILLISECOND_FIELD_TEXT" desc="Accessible description of the millisecond field in a date/time control">
+        Milliseconds
+      </message>
+
+      <message name="IDS_AX_MINUTE_FIELD_TEXT" desc="Accessible description of the minute field in a date/time control">
+        Minutes
+      </message>
+
+      <message name="IDS_AX_MONTH_FIELD_TEXT" desc="Accessible description of the month field in a date/time control">
+        Month
+      </message>
+
+      <message name="IDS_AX_SECOND_FIELD_TEXT" desc="Accessible description of the second field in a date/time control">
+        Seconds
+      </message>
+
+      <message name="IDS_AX_WEEK_OF_YEAR_FIELD_TEXT" desc="Accessible description of the week of year field in a date/time control">
+        Week
+      </message>
+
+      <message name="IDS_AX_YEAR_FIELD_TEXT" desc="Accessible description of the year field in a date/time control">
+        Year
+      </message>
+
       <message name="IDS_KEYGEN_HIGH_GRADE_KEY" desc="High-grade cryptographic key size menu item">
         2048 (High Grade)
       </message>
@@ -300,6 +414,9 @@ below:
         1024 (Medium Grade)
       </message>
 
+      <message name="IDS_FORM_INPUT_WEEK_TEMPLATE" desc="A specfic week (1-53) in a specific year shown in a form control">
+        Week <ph name="WEEKNUMBER">$2<ex>51</ex></ph>, <ph name="YEAR">$1<ex>2012</ex></ph>
+      </message>
       <message name="IDS_FORM_VALIDATION_VALUE_MISSING_MULTIPLE_FILE" desc="Heading or short sentence shown when a file upload control in a webpage requires one or more files selected, but the user didn't specify any files.">
         Please select one or more files.
       </message>
@@ -317,6 +434,12 @@ below:
       </message>
       <message name="IDS_FORM_VALIDATION_STEP_MISMATCH" desc="Heading or short sentence shown when a form control value in a webpage should be aligned to a step value specified by the page author, but a user speficified non-aligned value. e.g. A number type field, minimum value is 0, and step value is 4. If A user-specified value is not a multiple of 4, this warning message is shown.">
         Invalid value.
+      </message>
+      <message name="IDS_FORM_VALIDATION_BAD_INPUT_DATETIME" desc="Heading or short sentence shown when a user specified an incomplete value or an invalid date (such as 02/31/2012) to a date/time form control in a webpage.">
+	Please enter a valid value. The field is incomplete or has an invalid date.
+      </message>
+      <message name="IDS_FORM_VALIDATION_BAD_INPUT_NUMBER" desc="Heading or short sentence shown when a user entered a non-number string to a number field in a webpage.">
+	Please enter a number.
       </message>
 
 <!-- The following IDS_FORM_VALIDATION_* messages were taken from Mozilla's dom.properties file.
@@ -406,7 +529,11 @@ below:
       <message name="IDS_PDF_PROGRESS_LOADING" desc="A message displayed on the progress control over PDF page during document loading.">
         Loading
       </message>
-      
+
+      <message name="IDS_PLUGIN_INITIALIZATION_ERROR" desc="A message displayed when a plug-in failed to load">
+        Couldn't load plug-in.
+      </message>
+
     </messages>
   </release>
 </grit>

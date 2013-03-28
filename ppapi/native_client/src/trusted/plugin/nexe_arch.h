@@ -1,7 +1,7 @@
 /*
- * Copyright 2011 The Chromium Authors. All rights reserved.
- * Use of this source code is governed by a BSD-style license that can
- * be found in the LICENSE file.
+ * Copyright (c) 2012 The Chromium Authors. All rights reserved.
+ * Use of this source code is governed by a BSD-style license that can be
+ * found in the LICENSE file.
  */
 
 // Routines for determining the most appropriate NaCl executable for
@@ -27,15 +27,5 @@ namespace plugin {
 // <platform>/nexe_arch.cc
 const char* GetSandboxISA();
 }  // namespace plugin
-
-#if defined(NACL_STANDALONE)
-// These symbols are for linking with things like unit test frameworks that
-// want to get at the C++ symbol names defined above in an un-mangled way.
-// TODO(dspringer): Figure out how to link the shared libs with the test
-// harness directly, and get rid of these wrappers.
-EXTERN_C_BEGIN
-DLLEXPORT const char* NaClPluginGetSandboxISA();
-EXTERN_C_END
-#endif
 
 #endif  // NATIVE_CLIENT_SRC_TRUSTED_PLUGIN_NEXE_ARCH_H_

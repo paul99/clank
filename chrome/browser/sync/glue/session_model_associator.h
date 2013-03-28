@@ -4,7 +4,6 @@
 
 #ifndef CHROME_BROWSER_SYNC_GLUE_SESSION_MODEL_ASSOCIATOR_H_
 #define CHROME_BROWSER_SYNC_GLUE_SESSION_MODEL_ASSOCIATOR_H_
-#pragma once
 
 #include <map>
 #include <set>
@@ -25,21 +24,28 @@
 #include "chrome/browser/sessions/session_id.h"
 #include "chrome/browser/sessions/session_service.h"
 #include "chrome/browser/sessions/session_types.h"
+#include "chrome/browser/sync/glue/data_type_error_handler.h"
 #include "chrome/browser/sync/glue/model_associator.h"
 #include "chrome/browser/sync/glue/synced_session_tracker.h"
 #include "chrome/browser/sync/glue/synced_tab_delegate.h"
 #include "chrome/browser/sync/glue/synced_window_delegate.h"
-#include "chrome/browser/sync/protocol/session_specifics.pb.h"
-#include "chrome/browser/sync/syncable/model_type.h"
+#include "chrome/common/cancelable_task_tracker.h"
+#include "googleurl/src/gurl.h"
+#include "sync/internal_api/public/base/model_type.h"
 
+class Prefservice;
 class Profile;
 class ProfileSyncService;
 
-namespace sync_api {
+namespace content {
+class NavigationEntry;
+}  // namespace content
+
+namespace syncer {
 class BaseTransaction;
 class ReadNode;
 class WriteTransaction;
-}  // namespace sync_api
+}  // namespace syncer
 
 namespace sync_pb {
 class SessionHeader;
@@ -61,7 +67,8 @@ class SessionModelAssociator
       public base::NonThreadSafe {
  public:
   // Does not take ownership of sync_service.
-  explicit SessionModelAssociator(ProfileSyncService* sync_service);
+  SessionModelAssociator(ProfileSyncService* sync_service,
+                         DataTypeErrorHandler* error_handler);
   SessionModelAssociator(ProfileSyncService* sync_service,
                          bool setup_for_test);
   virtual ~SessionModelAssociator();
@@ -80,12 +87,12 @@ class SessionModelAssociator
   virtual bool CryptoReadyIfNecessary() OVERRIDE;
 
   // Returns sync id for the given chrome model id.
-  // Returns sync_api::kInvalidId if the sync node is not found for the given
+  // Returns syncer::kInvalidId if the sync node is not found for the given
   // chrome id.
   virtual int64 GetSyncIdFromChromeId(const size_t& id) OVERRIDE;
 
   // Returns sync id for the given session tag.
-  // Returns sync_api::kInvalidId if the sync node is not found for the given
+  // Returns syncer::kInvalidId if the sync node is not found for the given
   // tag
   virtual int64 GetSyncIdFromSessionTag(const std::string& tag);
 
@@ -95,7 +102,7 @@ class SessionModelAssociator
 
   // Not used.
   virtual bool InitSyncNodeFromChromeId(const size_t& id,
-                                        sync_api::BaseNode* sync_node) OVERRIDE;
+                                        syncer::BaseNode* sync_node) OVERRIDE;
 
   // Not used.
   virtual void Associate(const SyncedTabDelegate* tab, int64 sync_id) OVERRIDE;
@@ -110,37 +117,43 @@ class SessionModelAssociator
   //
   // If |reload_tabs| is true, will also resync all tabs (same as calling
   // AssociateTabs with a vector of all tabs).
+  // |error| gets set if any association error occurred.
   // Returns: false if the local session's sync nodes were deleted and
   // reassociation is necessary, true otherwise.
-  bool AssociateWindows(bool reload_tabs, SyncError* error);
+  bool AssociateWindows(bool reload_tabs, syncer::SyncError* error);
 
   // Loads and reassociates the local tabs referenced in |tabs|.
+  // |error| gets set if any association error occurred.
   // Returns: false if the local session's sync nodes were deleted and
   // reassociation is necessary, true otherwise.
   bool AssociateTabs(const std::vector<SyncedTabDelegate*>& tabs,
-                     SyncError* error);
+                     syncer::SyncError* error);
 
   // Reassociates a single tab with the sync model. Will check if the tab
   // already is associated with a sync node and allocate one if necessary.
+  // |error| gets set if any association error occurred.
   // Returns: false if the local session's sync nodes were deleted and
   // reassociation is necessary, true otherwise.
-  bool AssociateTab(const SyncedTabDelegate& tab, SyncError* error);
+  bool AssociateTab(const SyncedTabDelegate& tab,
+                    syncer::SyncError* error);
 
   // Load any foreign session info stored in sync db and update the sync db
   // with local client data. Processes/reuses any sync nodes owned by this
   // client and creates any further sync nodes needed to store local header and
   // tab info.
-  virtual bool AssociateModels(SyncError* error) OVERRIDE;
+  virtual syncer::SyncError AssociateModels(
+      syncer::SyncMergeResult* local_merge_result,
+      syncer::SyncMergeResult* syncer_merge_result) OVERRIDE;
 
   // Initializes the given sync node from the given chrome node id.
   // Returns false if no sync node was found for the given chrome node id or
   // if the initialization of sync node fails.
   virtual bool InitSyncNodeFromChromeId(const std::string& id,
-                                        sync_api::BaseNode* sync_node);
+                                        syncer::BaseNode* sync_node);
 
   // Clear local sync data buffers. Does not delete sync nodes to avoid
   // tombstones. TODO(zea): way to eventually delete orphaned nodes.
-  virtual bool DisassociateModels(SyncError* error) OVERRIDE;
+  virtual syncer::SyncError DisassociateModels() OVERRIDE;
 
   // Returns the tag used to uniquely identify this machine's session in the
   // sync model.
@@ -149,8 +162,8 @@ class SessionModelAssociator
     return current_machine_tag_;
   }
 
-  // Load and associate window and tab data for a foreign session
-  bool AssociateForeignSpecifics(const sync_pb::SessionSpecifics& specifics,
+  // Load and associate window and tab data for a foreign session.
+  void AssociateForeignSpecifics(const sync_pb::SessionSpecifics& specifics,
                                  const base::Time& modification_time);
 
   // Removes a foreign session from our internal bookkeeping.
@@ -195,7 +208,7 @@ class SessionModelAssociator
   // stale.
   void SetStaleSessionThreshold(size_t stale_session_threshold_days);
 
-  // Delete a foreign session and all it's sync data.
+  // Delete a foreign session and all its sync data.
   void DeleteForeignSession(const std::string& tag);
 
   // Control which local tabs we're interested in syncing.
@@ -208,29 +221,24 @@ class SessionModelAssociator
   void FaviconsUpdated(const std::set<GURL>& urls);
 
   // Returns the syncable model type.
-  static syncable::ModelType model_type() { return syncable::SESSIONS; }
+  static syncer::ModelType model_type() { return syncer::SESSIONS; }
 
   // Testing only. Will cause the associator to call MessageLoop::Quit()
-  // when a local change is made, or when timeout_milli occurs, whichever is
+  // when a local change is made, or when timeout occurs, whichever is
   // first.
-  void BlockUntilLocalChangeForTest(int64 timeout_milli);
+  void BlockUntilLocalChangeForTest(base::TimeDelta timeout);
 
-  // Callback for when the session name has been computed.
-  void OnSessionNameInitialized(const std::string& name);
-
-#if defined(OS_ANDROID)
-  // Uses |tag| to initialize the device's machine tag instead of using the system default android
-  // ID, which is a static value that doesn't change when a clean instance of clank is started.
-  // Used only by clank sync tests.
-  static void SetMachineTagForTest(const long tag);
-#endif
   // If a valid favicon for the page at |url| is found, fills |png_favicon| with
   // the png-encoded image and returns true. Else, returns false.
   bool GetSyncedFaviconForPageURL(const std::string& url,
                                   std::string* png_favicon) const;
 
+  void SetCurrentMachineTagForTesting(const std::string& machine_tag) {
+    current_machine_tag_ = machine_tag;
+  }
+
  private:
-  friend class SessionModelAssociatorTest;
+  friend class SyncSessionModelAssociatorTest;
   FRIEND_TEST_ALL_PREFIXES(ProfileSyncServiceSessionTest, WriteSessionToNode);
   FRIEND_TEST_ALL_PREFIXES(ProfileSyncServiceSessionTest,
                            WriteFilledSessionToNode);
@@ -239,12 +247,14 @@ class SessionModelAssociator
   FRIEND_TEST_ALL_PREFIXES(ProfileSyncServiceSessionTest, TabNodePoolEmpty);
   FRIEND_TEST_ALL_PREFIXES(ProfileSyncServiceSessionTest, TabNodePoolNonEmpty);
   FRIEND_TEST_ALL_PREFIXES(ProfileSyncServiceSessionTest, ValidTabs);
-  FRIEND_TEST_ALL_PREFIXES(SessionModelAssociatorTest, PopulateSessionHeader);
-  FRIEND_TEST_ALL_PREFIXES(SessionModelAssociatorTest, PopulateSessionWindow);
-  FRIEND_TEST_ALL_PREFIXES(SessionModelAssociatorTest, PopulateSessionTab);
-  FRIEND_TEST_ALL_PREFIXES(SessionModelAssociatorTest,
-                           InitializeCurrentSessionName);
-  FRIEND_TEST_ALL_PREFIXES(SessionModelAssociatorTest,
+  FRIEND_TEST_ALL_PREFIXES(ProfileSyncServiceSessionTest, ExistingTabs);
+  FRIEND_TEST_ALL_PREFIXES(ProfileSyncServiceSessionTest, MissingLocalTabNode);
+  FRIEND_TEST_ALL_PREFIXES(SyncSessionModelAssociatorTest,
+                           PopulateSessionHeader);
+  FRIEND_TEST_ALL_PREFIXES(SyncSessionModelAssociatorTest,
+                           PopulateSessionWindow);
+  FRIEND_TEST_ALL_PREFIXES(SyncSessionModelAssociatorTest, PopulateSessionTab);
+  FRIEND_TEST_ALL_PREFIXES(SyncSessionModelAssociatorTest,
                            TabNodePool);
 
   // Keep all the links to local tab data in one place. A sync_id and tab must
@@ -255,19 +265,19 @@ class SessionModelAssociator
     TabLink(int64 sync_id, const SyncedTabDelegate* tab)
       : sync_id_(sync_id),
         tab_(tab),
-        favicon_load_handle_(0) {}
+        favicon_load_task_id_(CancelableTaskTracker::kBadTaskId) {}
 
     void set_tab(const SyncedTabDelegate* tab) { tab_ = tab; }
     void set_url(const GURL& url) { url_ = url; }
-    void set_favicon_load_handle(FaviconService::Handle load_handle) {
-      favicon_load_handle_ = load_handle;
+    void set_favicon_load_task_id(CancelableTaskTracker::TaskId task_id) {
+      favicon_load_task_id_ = task_id;
     }
 
     int64 sync_id() const { return sync_id_; }
     const SyncedTabDelegate* tab() const { return tab_; }
     const GURL& url() const { return url_; }
-    FaviconService::Handle favicon_load_handle() const {
-      return favicon_load_handle_;
+    FaviconService::Handle favicon_load_task_id() const {
+      return favicon_load_task_id_;
     }
 
    private:
@@ -282,12 +292,13 @@ class SessionModelAssociator
     // The currently visible url of the tab (used for syncing favicons).
     GURL url_;
 
-    // Handle for loading favicons.
-    FaviconService::Handle favicon_load_handle_;
+    // Task ID for loading favicons.
+    CancelableTaskTracker::TaskId favicon_load_task_id_;
   };
 
   // A pool for managing free/used tab sync nodes. Performs lazy creation
   // of sync nodes when necessary.
+  // TODO(zea): pull this into its own file.
   class TabNodePool {
    public:
     explicit TabNodePool(ProfileSyncService* sync_service);
@@ -303,7 +314,7 @@ class SessionModelAssociator
     // Returns the sync_id for the next free tab node. If none are available,
     // creates a new tab node.
     // Note: We make use of the following "id's"
-    // - a sync_id: an int64 used in |sync_api::InitByIdLookup|
+    // - a sync_id: an int64 used in |syncer::InitByIdLookup|
     // - a tab_id: created by session service, unique to this client
     // - a tab_node_id: the id for a particular sync tab node. This is used
     //   to generate the sync tab node tag through:
@@ -378,34 +389,40 @@ class SessionModelAssociator
   }
 
   // Initializes the tag corresponding to this machine.
-  void InitializeCurrentMachineTag(sync_api::WriteTransaction* trans);
-
-  // Initializes the user visible name for this session
-  void InitializeCurrentSessionName();
+  void InitializeCurrentMachineTag(syncer::WriteTransaction* trans);
 
   // Updates the server data based upon the current client session.  If no node
   // corresponding to this machine exists in the sync model, one is created.
   // Returns true on success, false if association failed.
-  bool UpdateSyncModelDataFromClient(SyncError* error);
+  bool UpdateSyncModelDataFromClient(syncer::SyncError* error);
 
   // Pulls the current sync model from the sync database and returns true upon
   // update of the client model. Will associate any foreign sessions as well as
   // keep track of any local tab nodes, adding them to our free tab node pool.
-  bool UpdateAssociationsFromSyncModel(const sync_api::ReadNode& root,
-                                       const sync_api::BaseTransaction* trans,
-                                       SyncError* error);
+  bool UpdateAssociationsFromSyncModel(const syncer::ReadNode& root,
+                                       syncer::WriteTransaction* trans,
+                                       syncer::SyncError* error);
 
-  // Fills a tab sync node with data from a TabContents object. Updates
+  // Return the virtual URL of the current tab, even if it's pending.
+  static GURL GetCurrentVirtualURL(const SyncedTabDelegate& tab_delegate);
+
+  // Fills a tab sync node with data from a WebContents object. Updates
   // |tab_link| with the current url if it's valid and triggers a favicon
   // load if the url has changed.
   // Returns true on success, false if we need to reassociate due to corruption.
   bool WriteTabContentsToSyncModel(TabLink* tab_link,
-                                   SyncError* error);
+                                   syncer::SyncError* error);
 
   // Decrements the favicon usage counters for the favicon used by |page_url|.
   // Deletes the favicon and associated pages from the favicon usage maps
   // if no page is found to be referring to the favicon anymore.
   void DecrementAndCleanFaviconForURL(const std::string& page_url);
+
+  // Set |session_tab| from |tab_delegate| and |mtime|.
+  static void SetSessionTabFromDelegate(
+      const SyncedTabDelegate& tab_delegate,
+      base::Time mtime,
+      SessionTab* session_tab);
 
   // Load the favicon for the tab specified by |tab_link|. Will cancel any
   // outstanding request for this tab. OnFaviconDataAvailable(..) will be called
@@ -414,14 +431,15 @@ class SessionModelAssociator
 
   // Callback method to store a tab's favicon into its sync node once it becomes
   // available. Does nothing if no favicon data was available.
-  void OnFaviconDataAvailable(FaviconService::Handle handle,
-                              history::FaviconData favicon);
+  void OnFaviconDataAvailable(
+      SessionID::id_type tab_id,
+      const history::FaviconBitmapResult& bitmap_result);
 
   // Used to populate a session header from the session specifics header
   // provided.
   static void PopulateSessionHeaderFromSpecifics(
     const sync_pb::SessionHeader& header_specifics,
-    const base::Time& mtime,
+    base::Time mtime,
     SyncedSession* session_header);
 
   // Used to populate a session window from the session specifics window
@@ -429,29 +447,14 @@ class SessionModelAssociator
   static void PopulateSessionWindowFromSpecifics(
       const std::string& foreign_session_tag,
       const sync_pb::SessionWindow& window,
-      const base::Time& mtime,
+      base::Time mtime,
       SessionWindow* session_window,
       SyncedSessionTracker* tracker);
-
-  // Used to populate a session tab from the session specifics tab provided.
-  static void PopulateSessionTabFromSpecifics(const sync_pb::SessionTab& tab,
-                                              const base::Time& mtime,
-                                              SessionTab* session_tab);
 
   // Helper method to load the favicon data from the tab specifics. If the
   // favicon is valid, stores the favicon data and increments the usage counter
   // in |synced_favicons_| and updates |synced_favicon_pages_| appropriately.
   void LoadForeignTabFavicon(const sync_pb::SessionTab& tab);
-
-  // Used to populate a session tab from the session specifics tab provided.
-  static void AppendSessionTabNavigation(
-     const sync_pb::TabNavigation& navigation,
-     std::vector<TabNavigation>* navigations);
-
-  // Populates the navigation portion of the session specifics.
-  static void PopulateSessionSpecificsNavigation(
-     const TabNavigation* navigation,
-     sync_pb::TabNavigation* tab_navigation);
 
   // Returns true if this tab belongs to this profile and belongs to a window,
   // false otherwise.
@@ -463,13 +466,6 @@ class SessionModelAssociator
   // invalid url's.
   bool TabHasValidEntry(const SyncedTabDelegate& tab) const;
 
-  // Sets the local_device_type_
-  void SetLocalDeviceType();
-
-  // Notifies listeners about a full complete sync cycle. Should not be done while we are
-  // associating.
-  void NotifySessionAssociationCycleComplete();
-
   // For testing only.
   size_t NumFaviconsForTesting() const;
 
@@ -478,14 +474,6 @@ class SessionModelAssociator
 
   // Unique client tag.
   std::string current_machine_tag_;
-
-#if defined(OS_ANDROID)
-  // Unique machine tag value used by clank sync tests.
-  static long machine_tag_for_test_;
-#endif
-
-  // Local device type.
-  sync_pb::SessionHeader::DeviceType local_device_type_;
 
   // User-visible machine name.
   std::string current_session_name_;
@@ -509,9 +497,6 @@ class SessionModelAssociator
   // stale and a candidate for garbage collection.
   size_t stale_session_threshold_days_;
 
-  // Consumer used to obtain the current session.
-  CancelableRequestConsumer consumer_;
-
   // To avoid certain checks not applicable to tests.
   bool setup_for_test_;
 
@@ -520,12 +505,16 @@ class SessionModelAssociator
   bool waiting_for_change_;
   base::WeakPtrFactory<SessionModelAssociator> test_weak_factory_;
 
-  // Profile being synced.
+  // Profile being synced. Weak pointer.
   Profile* const profile_;
 
-  // Used for loading favicons. For each outstanding favicon load, stores the
-  // SessionID for the tab whose favicon is being set.
-  CancelableRequestConsumerTSimple<SessionID::id_type> load_consumer_;
+  // Pref service. Used to persist the session sync guid. Weak pointer.
+  PrefService* const pref_service_;
+
+  DataTypeErrorHandler* error_handler_;
+
+  // Used for loading favicons.
+  CancelableTaskTracker cancelable_task_tracker_;
 
   // Synced favicon storage and tracking.
   // Map of favicon URL -> favicon info for favicons synced from other clients.

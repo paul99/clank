@@ -1,10 +1,9 @@
-// Copyright (c) 2010 The Chromium Authors. All rights reserved.
+// Copyright (c) 2012 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
 #ifndef CONTENT_BROWSER_CROSS_SITE_REQUEST_MANAGER_H_
 #define CONTENT_BROWSER_CROSS_SITE_REQUEST_MANAGER_H_
-#pragma once
 
 #include <set>
 #include <utility>
@@ -14,9 +13,11 @@
 
 template <typename T> struct DefaultSingletonTraits;
 
+namespace content {
+
 // CrossSiteRequestManager is used to handle bookkeeping for cross-site
 // requests and responses between the UI and IO threads.  Such requests involve
-// a transition from one RenderViewHost to another within TabContents, and
+// a transition from one RenderViewHost to another within WebContentsImpl, and
 // involve coordination with ResourceDispatcherHost.
 //
 // CrossSiteRequestManager is a singleton that may be used on any thread.
@@ -56,5 +57,7 @@ class CrossSiteRequestManager {
 
   DISALLOW_COPY_AND_ASSIGN(CrossSiteRequestManager);
 };
+
+}  // namespace content
 
 #endif  // CONTENT_BROWSER_CROSS_SITE_REQUEST_MANAGER_H_

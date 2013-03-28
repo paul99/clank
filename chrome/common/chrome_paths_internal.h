@@ -1,10 +1,11 @@
-// Copyright (c) 2011 The Chromium Authors. All rights reserved.
+// Copyright (c) 2012 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
 #ifndef CHROME_COMMON_CHROME_PATHS_INTERNAL_H_
 #define CHROME_COMMON_CHROME_PATHS_INTERNAL_H_
-#pragma once
+
+#include <string>
 
 #include "build/build_config.h"
 
@@ -41,7 +42,7 @@ void GetUserCacheDirectory(const FilePath& profile_dir, FilePath* result);
 // Get the path to the user's documents directory.
 bool GetUserDocumentsDirectory(FilePath* result);
 
-#if defined (OS_WIN)
+#if defined(OS_WIN) || defined(OS_LINUX)
 // Gets the path to a safe default download directory for a user.
 bool GetUserDownloadsDirectorySafe(FilePath* result);
 #endif
@@ -49,10 +50,16 @@ bool GetUserDownloadsDirectorySafe(FilePath* result);
 // Get the path to the user's downloads directory.
 bool GetUserDownloadsDirectory(FilePath* result);
 
-// The path to the user's desktop.
-bool GetUserDesktop(FilePath* result);
+// Gets the path to the user's music directory.
+bool GetUserMusicDirectory(FilePath* result);
 
-#if defined(OS_MACOSX)
+// Gets the path to the user's pictures directory.
+bool GetUserPicturesDirectory(FilePath* result);
+
+// Gets the path to the user's videos directory.
+bool GetUserVideosDirectory(FilePath* result);
+
+#if defined(OS_MACOSX) && !defined(OS_IOS)
 // The "versioned directory" is a directory in the browser .app bundle.  It
 // contains the bulk of the application, except for the things that the system
 // requires be located at spepcific locations.  The versioned directory is
@@ -83,7 +90,10 @@ bool GetGlobalApplicationSupportDirectory(FilePath* result);
 // inside the helper. In unbundled applications, such as tests, returns nil.
 NSBundle* OuterAppBundle();
 
-#endif  // OS_MACOSX
+#endif  // OS_MACOSX && !OS_IOS
+
+// Checks if the |process_type| has the rights to access the profile.
+bool ProcessNeedsProfileDir(const std::string& process_type);
 
 }  // namespace chrome
 

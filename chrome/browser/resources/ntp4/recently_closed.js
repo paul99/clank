@@ -1,4 +1,4 @@
-// Copyright (c) 2011 The Chromium Authors. All rights reserved.
+// Copyright (c) 2012 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -6,10 +6,8 @@
  * @fileoverview The recently closed menu: button, model data, and menu.
  */
 
-cr.define('ntp4', function() {
+cr.define('ntp', function() {
   'use strict';
-
-  var localStrings = new LocalStrings();
 
   /**
    * Returns the text used for a recently closed window.
@@ -18,8 +16,8 @@ cr.define('ntp4', function() {
    */
   function formatTabsText(numTabs) {
     if (numTabs == 1)
-      return localStrings.getString('closedwindowsingle');
-    return localStrings.getStringF('closedwindowmultiple', numTabs);
+      return loadTimeData.getString('closedwindowsingle');
+    return loadTimeData.getStringF('closedwindowmultiple', numTabs);
   }
 
   var Menu = cr.ui.Menu;
@@ -34,11 +32,11 @@ cr.define('ntp4', function() {
       MenuButton.prototype.decorate.call(this);
       this.menu = new Menu;
       cr.ui.decorate(this.menu, Menu);
-      this.menu.classList.add('recent-menu');
+      this.menu.classList.add('footer-menu');
       document.body.appendChild(this.menu);
 
       this.needsRebuild_ = true;
-      this.classList.add('invisible');
+      this.hidden = true;
       this.anchorType = cr.ui.AnchorType.ABOVE;
       this.invertLeftRight = true;
     },
@@ -66,10 +64,7 @@ cr.define('ntp4', function() {
     set dataItems(dataItems) {
       this.dataItems_ = dataItems;
       this.needsRebuild_ = true;
-      if (dataItems.length)
-        this.classList.remove('invisible');
-      else
-        this.classList.add('invisible');
+      this.hidden = !dataItems.length;
     },
 
     /**
@@ -80,29 +75,39 @@ cr.define('ntp4', function() {
     addItem_: function(data) {
       var isWindow = data.type == 'window';
       var a = this.ownerDocument.createElement('a');
-      a.className = 'recent-menu-item';
+      a.className = 'footer-menu-item';
       if (isWindow) {
         a.href = '';
         a.classList.add('recent-window');
         a.textContent = formatTabsText(data.tabs.length);
+        a.title = data.tabs.map(function(tab) { return tab.title; }).join('\n');
       } else {
         a.href = data.url;
-        a.style.backgroundImage = 'url(chrome://favicon/' + data.url + ')';
+        a.style.backgroundImage = url(getFaviconURL(data.url));
         a.textContent = data.title;
       }
 
-      function onClick(e) {
+      function onActivated(e) {
+        ntp.logTimeToClick('RecentlyClosed');
         chrome.send('recordAppLaunchByURL',
                     [encodeURIComponent(data.url),
-                     ntp4.APP_LAUNCH.NTP_RECENTLY_CLOSED]);
+                     ntp.APP_LAUNCH.NTP_RECENTLY_CLOSED]);
         var index = Array.prototype.indexOf.call(a.parentNode.children, a);
-        chrome.send('reopenTab', [data.sessionId, index,
-            e.button, e.altKey, e.ctrlKey, e.metaKey, e.shiftKey]);
-        // We are likely deleted by this point!
+        var orig = e.originalEvent;
+        var params = [data.sessionId,
+                      index,
+                      orig.type == 'click' ? orig.button : 0,
+                      orig.altKey,
+                      orig.ctrlKey,
+                      orig.metaKey,
+                      orig.shiftKey];
+        chrome.send('reopenTab', params);
 
+        // We are likely deleted by this point!
+        e.stopPropagation();
         e.preventDefault();
       }
-      a.addEventListener('click', onClick);
+      a.addEventListener('activate', onActivated);
 
       this.menu.appendChild(a);
       cr.ui.decorate(a, MenuItem);

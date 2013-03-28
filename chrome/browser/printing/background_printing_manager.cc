@@ -6,17 +6,15 @@
 
 #include "chrome/browser/printing/print_job.h"
 #include "chrome/browser/printing/print_preview_tab_controller.h"
-#include "chrome/browser/sessions/restore_tab_helper.h"
-#include "chrome/browser/tabs/tab_strip_model.h"
 #include "chrome/browser/ui/browser_list.h"
-#include "chrome/browser/ui/tab_contents/tab_contents_wrapper.h"
+#include "chrome/browser/ui/tabs/tab_strip_model.h"
 #include "chrome/common/chrome_notification_types.h"
-#include "content/browser/renderer_host/render_view_host.h"
 #include "content/public/browser/browser_thread.h"
 #include "content/public/browser/notification_details.h"
 #include "content/public/browser/notification_source.h"
-#include "content/public/browser/render_view_host_delegate.h"
+#include "content/public/browser/render_view_host.h"
 #include "content/public/browser/web_contents.h"
+#include "content/public/browser/web_contents_delegate.h"
 
 using content::BrowserThread;
 using content::WebContents;
@@ -29,31 +27,27 @@ BackgroundPrintingManager::BackgroundPrintingManager() {
 
 BackgroundPrintingManager::~BackgroundPrintingManager() {
   DCHECK(CalledOnValidThread());
-  // The might be some TabContentsWrappers still in |printing_tabs_| at
+  // The might be some WebContentses still in |printing_tabs_| at
   // this point. E.g. when the last remaining tab is a print preview tab and
   // tries to print. In which case it will fail to print.
-  // TODO(thestig) handle this case better.
+  // TODO(thestig): Handle this case better.
 }
 
-void BackgroundPrintingManager::OwnPrintPreviewTab(
-    TabContentsWrapper* preview_tab) {
+void BackgroundPrintingManager::OwnPrintPreviewTab(WebContents* preview_tab) {
   DCHECK(CalledOnValidThread());
   DCHECK(PrintPreviewTabController::IsPrintPreviewTab(preview_tab));
   CHECK(!HasPrintPreviewTab(preview_tab));
 
   printing_tabs_.insert(preview_tab);
 
-  registrar_.Add(this, chrome::NOTIFICATION_PRINT_JOB_RELEASED,
-                 content::Source<TabContentsWrapper>(preview_tab));
+  content::Source<WebContents> preview_source(preview_tab);
+  registrar_.Add(this, chrome::NOTIFICATION_PRINT_JOB_RELEASED, preview_source);
 
-  // OwnInitiatorTabContents() may have already added this notification.
-  WebContents* preview_contents = preview_tab->web_contents();
-  if (!registrar_.IsRegistered(
-          this,
-          content::NOTIFICATION_WEB_CONTENTS_DESTROYED,
-          content::Source<WebContents>(preview_contents))) {
+  // OwnInitiatorWebContents() may have already added this notification.
+  if (!registrar_.IsRegistered(this,
+      content::NOTIFICATION_WEB_CONTENTS_DESTROYED, preview_source)) {
     registrar_.Add(this, content::NOTIFICATION_WEB_CONTENTS_DESTROYED,
-                   content::Source<WebContents>(preview_contents));
+                   preview_source);
   }
 
   // If a tab that is printing crashes, the user cannot destroy it since it is
@@ -61,14 +55,12 @@ void BackgroundPrintingManager::OwnPrintPreviewTab(
   //
   // Multiple sites may share the same RenderProcessHost, so check if this
   // notification has already been added.
-  content::RenderProcessHost* rph =
-      preview_tab->web_contents()->GetRenderProcessHost();
+  content::Source<content::RenderProcessHost> rph_source(
+      preview_tab->GetRenderProcessHost());
   if (!registrar_.IsRegistered(this,
-                               content::NOTIFICATION_RENDERER_PROCESS_CLOSED,
-                               content::Source<content::RenderProcessHost>(
-                                  rph))) {
+      content::NOTIFICATION_RENDERER_PROCESS_CLOSED, rph_source)) {
     registrar_.Add(this, content::NOTIFICATION_RENDERER_PROCESS_CLOSED,
-                   content::Source<content::RenderProcessHost>(rph));
+                   rph_source);
   }
 
   // Activate the initiator tab.
@@ -76,47 +68,34 @@ void BackgroundPrintingManager::OwnPrintPreviewTab(
       PrintPreviewTabController::GetInstance();
   if (!tab_controller)
     return;
-  TabContentsWrapper* initiator_tab =
-      tab_controller->GetInitiatorTab(preview_tab);
+  WebContents* initiator_tab = tab_controller->GetInitiatorTab(preview_tab);
   if (!initiator_tab)
     return;
-  initiator_tab->web_contents()->GetRenderViewHost()->delegate()->Activate();
+  initiator_tab->GetDelegate()->ActivateContents(initiator_tab);
 }
 
 void BackgroundPrintingManager::Observe(
     int type,
     const content::NotificationSource& source,
     const content::NotificationDetails& details) {
-  switch (type) {
-    case content::NOTIFICATION_RENDERER_PROCESS_CLOSED: {
-      OnRendererProcessClosed(
-          content::Source<content::RenderProcessHost>(source).ptr());
-      break;
-    }
-    case chrome::NOTIFICATION_PRINT_JOB_RELEASED: {
-      OnPrintJobReleased(content::Source<TabContentsWrapper>(source).ptr());
-      break;
-    }
-    case content::NOTIFICATION_WEB_CONTENTS_DESTROYED: {
-      OnTabContentsDestroyed(
-          TabContentsWrapper::GetCurrentWrapperForContents(
-              content::Source<WebContents>(source).ptr()));
-      break;
-    }
-    default: {
-      NOTREACHED();
-      break;
-    }
+  if (type == content::NOTIFICATION_RENDERER_PROCESS_CLOSED) {
+    OnRendererProcessClosed(
+        content::Source<content::RenderProcessHost>(source).ptr());
+  } else if (type == chrome::NOTIFICATION_PRINT_JOB_RELEASED) {
+    OnPrintJobReleased(content::Source<WebContents>(source).ptr());
+  } else {
+    DCHECK_EQ(content::NOTIFICATION_WEB_CONTENTS_DESTROYED, type);
+    OnWebContentsDestroyed(content::Source<WebContents>(source).ptr());
   }
 }
 
 void BackgroundPrintingManager::OnRendererProcessClosed(
     content::RenderProcessHost* rph) {
-  TabContentsWrapperSet preview_tabs_pending_deletion;
-  TabContentsWrapperSet::const_iterator it;
+  WebContentsSet preview_tabs_pending_deletion;
+  WebContentsSet::const_iterator it;
   for (it = begin(); it != end(); ++it) {
-    TabContentsWrapper* preview_tab = *it;
-    if (preview_tab->web_contents()->GetRenderProcessHost() == rph) {
+    WebContents* preview_tab = *it;
+    if (preview_tab->GetRenderProcessHost() == rph) {
       preview_tabs_pending_deletion.insert(preview_tab);
     }
   }
@@ -127,16 +106,16 @@ void BackgroundPrintingManager::OnRendererProcessClosed(
   }
 }
 
-void BackgroundPrintingManager::OnPrintJobReleased(
-    TabContentsWrapper* preview_tab) {
+void BackgroundPrintingManager::OnPrintJobReleased(WebContents* preview_tab) {
   DeletePreviewTab(preview_tab);
 }
 
-void BackgroundPrintingManager::OnTabContentsDestroyed(
-    TabContentsWrapper* preview_tab) {
+void BackgroundPrintingManager::OnWebContentsDestroyed(
+    WebContents* preview_tab) {
   // Always need to remove this notification since the tab is gone.
+  content::Source<WebContents> preview_source(preview_tab);
   registrar_.Remove(this, content::NOTIFICATION_WEB_CONTENTS_DESTROYED,
-                    content::Source<WebContents>(preview_tab->web_contents()));
+                    preview_source);
 
   if (!HasPrintPreviewTab(preview_tab)) {
     NOTREACHED();
@@ -144,21 +123,19 @@ void BackgroundPrintingManager::OnTabContentsDestroyed(
   }
 
   // Remove NOTIFICATION_RENDERER_PROCESS_CLOSED if |preview_tab| is the last
-  // TabContents associated with |rph|.
+  // WebContents associated with |rph|.
   bool shared_rph = HasSharedRenderProcessHost(printing_tabs_, preview_tab) ||
       HasSharedRenderProcessHost(printing_tabs_pending_deletion_, preview_tab);
   if (!shared_rph) {
-    content::RenderProcessHost* rph =
-        preview_tab->web_contents()->GetRenderProcessHost();
+    content::RenderProcessHost* rph = preview_tab->GetRenderProcessHost();
     registrar_.Remove(this, content::NOTIFICATION_RENDERER_PROCESS_CLOSED,
                       content::Source<content::RenderProcessHost>(rph));
   }
 
-  // Remove other notifications and remove the tab from its
-  // TabContentsWrapperSet.
+  // Remove other notifications and remove the tab from its WebContentsSet.
   if (printing_tabs_.find(preview_tab) != printing_tabs_.end()) {
     registrar_.Remove(this, chrome::NOTIFICATION_PRINT_JOB_RELEASED,
-                      content::Source<TabContentsWrapper>(preview_tab));
+                      preview_source);
     printing_tabs_.erase(preview_tab);
   } else {
     // DeletePreviewTab already deleted the notification.
@@ -166,42 +143,39 @@ void BackgroundPrintingManager::OnTabContentsDestroyed(
   }
 }
 
-void BackgroundPrintingManager::DeletePreviewTab(TabContentsWrapper* tab) {
+void BackgroundPrintingManager::DeletePreviewTab(WebContents* tab) {
   registrar_.Remove(this, chrome::NOTIFICATION_PRINT_JOB_RELEASED,
-                    content::Source<TabContentsWrapper>(tab));
+                    content::Source<WebContents>(tab));
   printing_tabs_.erase(tab);
   printing_tabs_pending_deletion_.insert(tab);
   MessageLoop::current()->DeleteSoon(FROM_HERE, tab);
 }
 
 bool BackgroundPrintingManager::HasSharedRenderProcessHost(
-    const TabContentsWrapperSet& set,
-    TabContentsWrapper* tab) {
-  content::RenderProcessHost* rph = tab->web_contents()->GetRenderProcessHost();
-  for (TabContentsWrapperSet::const_iterator it = set.begin();
-       it != set.end();
-       ++it) {
-    TabContentsWrapper* iter_tab = *it;
+    const WebContentsSet& set,
+    WebContents* tab) {
+  content::RenderProcessHost* rph = tab->GetRenderProcessHost();
+  for (WebContentsSet::const_iterator it = set.begin(); it != set.end(); ++it) {
+    WebContents* iter_tab = *it;
     if ((iter_tab != tab) &&
-        (iter_tab->web_contents()->GetRenderProcessHost() == rph)) {
+        (iter_tab->GetRenderProcessHost() == rph)) {
       return true;
     }
   }
   return false;
 }
 
-BackgroundPrintingManager::TabContentsWrapperSet::const_iterator
+BackgroundPrintingManager::WebContentsSet::const_iterator
     BackgroundPrintingManager::begin() {
   return printing_tabs_.begin();
 }
 
-BackgroundPrintingManager::TabContentsWrapperSet::const_iterator
+BackgroundPrintingManager::WebContentsSet::const_iterator
     BackgroundPrintingManager::end() {
   return printing_tabs_.end();
 }
 
-bool BackgroundPrintingManager::HasPrintPreviewTab(
-    TabContentsWrapper* preview_tab) {
+bool BackgroundPrintingManager::HasPrintPreviewTab(WebContents* preview_tab) {
   if (printing_tabs_.find(preview_tab) != printing_tabs_.end())
     return true;
   return printing_tabs_pending_deletion_.find(preview_tab) !=

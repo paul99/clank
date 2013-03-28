@@ -11,6 +11,7 @@
 #include "base/callback_forward.h"
 #include "base/synchronization/lock.h"
 #include "content/common/content_export.h"
+#include "content/port/common/input_event_ack_state.h"
 #include "ipc/ipc_channel_proxy.h"
 #include "third_party/WebKit/Source/WebKit/chromium/public/WebInputEvent.h"
 
@@ -21,16 +22,16 @@
 // The user of this class provides an instance of InputEventFilter::Handler,
 // which will be passed WebInputEvents on the target thread.
 //
+
+namespace content {
+
 class CONTENT_EXPORT InputEventFilter
     : public IPC::ChannelProxy::MessageFilter {
  public:
   typedef base::Callback<void(int /*routing_id*/,
-                              const WebKit::WebInputEvent*)> InputHandler;
-  typedef base::Callback<void(int /*routing_id*/,
-                              int64 frameBeginTimeUSec,
-                              int64 currentFrameIntervalUSec)> VSyncHandler;
+                              const WebKit::WebInputEvent*)> Handler;
 
-  // The |input_handler| is invoked on the thread associated with |target_loop| to
+  // The |handler| is invoked on the thread associated with |target_loop| to
   // handle input events matching the filtered routes.  In response, the
   // handler should call either DidHandleInputEvent or DidNotHandleInputEvent.
   // These may be called asynchronously to the handler invocation, but they
@@ -43,10 +44,9 @@ class CONTENT_EXPORT InputEventFilter
   // is true, then a ViewHostMsg_HandleInputEvent_ACK will not be generated,
   // leaving that responsibility up to the eventual handler on the main thread.
   //
-  InputEventFilter(IPC::Channel::Listener* main_listener,
+  InputEventFilter(IPC::Listener* main_listener,
                    base::MessageLoopProxy* target_loop,
-                   const InputHandler& input_handler,
-                   const VSyncHandler& vsync_handler);
+                   const Handler& handler);
 
   // Define the message routes to be filtered.
   void AddRoute(int routing_id);
@@ -70,23 +70,21 @@ class CONTENT_EXPORT InputEventFilter
   virtual ~InputEventFilter();
 
   void ForwardToMainListener(const IPC::Message& message);
-  void ForwardInputEventToHandler(const IPC::Message& message);
-  void ForwardDidVSyncEventToHandler(const IPC::Message& message);
-  void SendACK(const IPC::Message& message, bool processed);
+  void ForwardToHandler(const IPC::Message& message);
+  void SendACK(const IPC::Message& message, InputEventAckState ack_result);
   void SendACKOnIOThread(int routing_id, WebKit::WebInputEvent::Type event_type,
-                         bool processed);
+                         InputEventAckState ack_result);
 
   scoped_refptr<base::MessageLoopProxy> main_loop_;
-  IPC::Channel::Listener* main_listener_;
+  IPC::Listener* main_listener_;
 
   // The sender_ only gets invoked on the thread corresponding to io_loop_.
   scoped_refptr<base::MessageLoopProxy> io_loop_;
-  IPC::Message::Sender* sender_;
+  IPC::Sender* sender_;
 
-  // The input_handler_ only gets Run on the thread corresponding to target_loop_.
+  // The handler_ only gets Run on the thread corresponding to target_loop_.
   scoped_refptr<base::MessageLoopProxy> target_loop_;
-  InputHandler input_handler_;
-  VSyncHandler vsync_handler_;
+  Handler handler_;
   std::queue<IPC::Message> messages_;
 
   // Protects access to routes_.
@@ -95,5 +93,7 @@ class CONTENT_EXPORT InputEventFilter
   // Indicates the routing_ids for which input events should be filtered.
   std::set<int> routes_;
 };
+
+}  // namespace content
 
 #endif  // CONTENT_RENDERER_GPU_INPUT_EVENT_FILTER_H_

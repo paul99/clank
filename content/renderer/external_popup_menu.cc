@@ -1,4 +1,4 @@
-// Copyright (c) 2010 The Chromium Authors. All rights reserved.
+// Copyright (c) 2012 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -8,6 +8,8 @@
 #include "content/renderer/render_view_impl.h"
 #include "third_party/WebKit/Source/WebKit/chromium/public/WebExternalPopupMenuClient.h"
 #include "third_party/WebKit/Source/WebKit/chromium/public/platform/WebRect.h"
+
+namespace content {
 
 ExternalPopupMenu::ExternalPopupMenu(
     RenderViewImpl* render_view,
@@ -27,7 +29,8 @@ void ExternalPopupMenu::show(const WebKit::WebRect& bounds) {
   for (size_t i = 0; i < popup_menu_info_.items.size(); ++i)
     popup_params.popup_items.push_back(WebMenuItem(popup_menu_info_.items[i]));
   popup_params.right_aligned = popup_menu_info_.rightAligned;
-  popup_params.multiple = popup_menu_info_.allowMultipleSelection;
+  popup_params.allow_multiple_selection =
+      popup_menu_info_.allowMultipleSelection;
   render_view_->Send(
       new ViewHostMsg_ShowPopup(render_view_->routing_id(), popup_params));
 }
@@ -37,6 +40,7 @@ void ExternalPopupMenu::close()  {
   render_view_ = NULL;
 }
 
+#if defined(OS_MACOSX)
 void ExternalPopupMenu::DidSelectItem(int index) {
   if (!popup_menu_client_)
     return;
@@ -45,6 +49,7 @@ void ExternalPopupMenu::DidSelectItem(int index) {
   else
     popup_menu_client_->didAcceptIndex(index);
 }
+#endif
 
 #if defined(OS_ANDROID)
 void ExternalPopupMenu::DidSelectItems(bool canceled,
@@ -57,3 +62,5 @@ void ExternalPopupMenu::DidSelectItems(bool canceled,
     popup_menu_client_->didAcceptIndices(indices);
 }
 #endif
+
+}  // namespace content

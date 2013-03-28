@@ -2,20 +2,25 @@
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
-#include "base/command_line.h"
 #include "base/memory/ref_counted.h"
 #include "base/stringprintf.h"
+#include "chrome/browser/extensions/api/dns/host_resolver_wrapper.h"
+#include "chrome/browser/extensions/api/dns/mock_host_resolver_creator.h"
 #include "chrome/browser/extensions/api/socket/socket_api.h"
 #include "chrome/browser/extensions/extension_apitest.h"
 #include "chrome/browser/extensions/extension_function_test_utils.h"
+#include "chrome/browser/extensions/extension_service.h"
 #include "chrome/browser/extensions/extension_test_message_listener.h"
 #include "chrome/browser/ui/browser.h"
 #include "chrome/common/chrome_switches.h"
 #include "chrome/test/base/in_process_browser_test.h"
 #include "chrome/test/base/ui_test_utils.h"
+#include "net/base/mock_host_resolver.h"
 #include "net/test/test_server.h"
 
-using namespace extension_function_test_utils;
+using extensions::Extension;
+
+namespace utils = extension_function_test_utils;
 
 namespace {
 
@@ -24,34 +29,53 @@ const int kPort = 8888;
 
 class SocketApiTest : public ExtensionApiTest {
  public:
-  virtual void SetUpCommandLine(CommandLine* command_line) {
+  SocketApiTest() : resolver_event_(true, false),
+                    resolver_creator_(
+                        new extensions::MockHostResolverCreator()) {
+  }
+
+  // We need this while the socket.{listen,accept} methods require the
+  // enable-experimental-extension-apis flag. After that we should remove it,
+  // as well as the "experimental" permission in the test apps' manifests.
+  virtual void SetUpCommandLine(CommandLine* command_line) OVERRIDE {
     ExtensionApiTest::SetUpCommandLine(command_line);
     command_line->AppendSwitch(switches::kEnableExperimentalExtensionApis);
-    command_line->AppendSwitch(switches::kEnablePlatformApps);
   }
 
-  static std::string GenerateCreateFunctionArgs(const std::string& protocol,
-                                                const std::string& address,
-                                                int port) {
-    return base::StringPrintf("[\"%s\", \"%s\", %d]", protocol.c_str(),
-                              address.c_str(), port);
+  void SetUpOnMainThread() OVERRIDE {
+    extensions::HostResolverWrapper::GetInstance()->SetHostResolverForTesting(
+        resolver_creator_->CreateMockHostResolver());
   }
+
+  void CleanUpOnMainThread() OVERRIDE {
+    extensions::HostResolverWrapper::GetInstance()->
+        SetHostResolverForTesting(NULL);
+    resolver_creator_->DeleteMockHostResolver();
+  }
+
+ private:
+  base::WaitableEvent resolver_event_;
+
+  // The MockHostResolver asserts that it's used on the same thread on which
+  // it's created, which is actually a stronger rule than its real counterpart.
+  // But that's fine; it's good practice.
+  scoped_refptr<extensions::MockHostResolverCreator> resolver_creator_;
 };
 
-}
+}  // namespace
 
 IN_PROC_BROWSER_TEST_F(SocketApiTest, SocketUDPCreateGood) {
   scoped_refptr<extensions::SocketCreateFunction> socket_create_function(
       new extensions::SocketCreateFunction());
-  scoped_refptr<Extension> empty_extension(CreateEmptyExtension());
+  scoped_refptr<Extension> empty_extension(utils::CreateEmptyExtension());
 
   socket_create_function->set_extension(empty_extension.get());
   socket_create_function->set_has_callback(true);
 
-  scoped_ptr<base::Value> result(RunFunctionAndReturnResult(
+  scoped_ptr<base::Value> result(utils::RunFunctionAndReturnSingleResult(
       socket_create_function,
-      GenerateCreateFunctionArgs("udp", kHostname, kPort),
-      browser(), NONE));
+      "[\"udp\"]",
+      browser(), utils::NONE));
   ASSERT_EQ(base::Value::TYPE_DICTIONARY, result->GetType());
   DictionaryValue *value = static_cast<DictionaryValue*>(result.get());
   int socketId = -1;
@@ -62,15 +86,15 @@ IN_PROC_BROWSER_TEST_F(SocketApiTest, SocketUDPCreateGood) {
 IN_PROC_BROWSER_TEST_F(SocketApiTest, SocketTCPCreateGood) {
   scoped_refptr<extensions::SocketCreateFunction> socket_create_function(
       new extensions::SocketCreateFunction());
-  scoped_refptr<Extension> empty_extension(CreateEmptyExtension());
+  scoped_refptr<Extension> empty_extension(utils::CreateEmptyExtension());
 
   socket_create_function->set_extension(empty_extension.get());
   socket_create_function->set_has_callback(true);
 
-  scoped_ptr<base::Value> result(RunFunctionAndReturnResult(
+  scoped_ptr<base::Value> result(utils::RunFunctionAndReturnSingleResult(
       socket_create_function,
-      GenerateCreateFunctionArgs("udp", kHostname, kPort),
-      browser(), NONE));
+      "[\"tcp\"]",
+      browser(), utils::NONE));
   ASSERT_EQ(base::Value::TYPE_DICTIONARY, result->GetType());
   DictionaryValue *value = static_cast<DictionaryValue*>(result.get());
   int socketId = -1;
@@ -78,32 +102,37 @@ IN_PROC_BROWSER_TEST_F(SocketApiTest, SocketTCPCreateGood) {
   ASSERT_TRUE(socketId > 0);
 }
 
-IN_PROC_BROWSER_TEST_F(SocketApiTest, SocketCreateBad) {
-  scoped_refptr<extensions::SocketCreateFunction> socket_create_function(
-      new extensions::SocketCreateFunction());
-  scoped_refptr<Extension> empty_extension(CreateEmptyExtension());
+IN_PROC_BROWSER_TEST_F(SocketApiTest, GetNetworkList) {
+  scoped_refptr<extensions::SocketGetNetworkListFunction> socket_function(
+      new extensions::SocketGetNetworkListFunction());
+  scoped_refptr<Extension> empty_extension(utils::CreateEmptyExtension());
 
-  socket_create_function->set_extension(empty_extension.get());
-  socket_create_function->set_has_callback(true);
+  socket_function->set_extension(empty_extension.get());
+  socket_function->set_has_callback(true);
 
-  // TODO(miket): this test currently passes only because of artificial code
-  // that doesn't run in production. Fix this when we're able to.
-  RunFunctionAndReturnError(
-      socket_create_function,
-      GenerateCreateFunctionArgs("xxxx", kHostname, kPort),
-      browser(), NONE);
+  scoped_ptr<base::Value> result(utils::RunFunctionAndReturnSingleResult(
+      socket_function, "[]", browser(), utils::NONE));
+  ASSERT_EQ(base::Value::TYPE_LIST, result->GetType());
+
+  // If we're invoking socket tests, all we can confirm is that we have at
+  // least one address, but not what it is.
+  ListValue *value = static_cast<ListValue*>(result.get());
+  ASSERT_TRUE(value->GetSize() > 0);
 }
 
-// http://crbug.com/111572
-IN_PROC_BROWSER_TEST_F(SocketApiTest, DISABLED_SocketUDPExtension) {
+IN_PROC_BROWSER_TEST_F(SocketApiTest, SocketUDPExtension) {
   scoped_ptr<net::TestServer> test_server(
       new net::TestServer(net::TestServer::TYPE_UDP_ECHO,
+                          net::TestServer::kLocalhost,
                           FilePath(FILE_PATH_LITERAL("net/data"))));
   EXPECT_TRUE(test_server->Start());
 
   net::HostPortPair host_port_pair = test_server->host_port_pair();
   int port = host_port_pair.port();
   ASSERT_TRUE(port > 0);
+
+  // Test that sendTo() is properly resolving hostnames.
+  host_port_pair.set_host("LOCALhost");
 
   ResultCatcher catcher;
   catcher.RestrictToProfile(browser()->profile());
@@ -118,16 +147,19 @@ IN_PROC_BROWSER_TEST_F(SocketApiTest, DISABLED_SocketUDPExtension) {
   EXPECT_TRUE(catcher.GetNextResult()) << catcher.message();
 }
 
-// http://crbug.com/111572
-IN_PROC_BROWSER_TEST_F(SocketApiTest, DISABLED_SocketTCPExtension) {
+IN_PROC_BROWSER_TEST_F(SocketApiTest, SocketTCPExtension) {
   scoped_ptr<net::TestServer> test_server(
       new net::TestServer(net::TestServer::TYPE_TCP_ECHO,
+                          net::TestServer::kLocalhost,
                           FilePath(FILE_PATH_LITERAL("net/data"))));
   EXPECT_TRUE(test_server->Start());
 
   net::HostPortPair host_port_pair = test_server->host_port_pair();
   int port = host_port_pair.port();
   ASSERT_TRUE(port > 0);
+
+  // Test that connect() is properly resolving hostnames.
+  host_port_pair.set_host("lOcAlHoSt");
 
   ResultCatcher catcher;
   catcher.RestrictToProfile(browser()->profile());
@@ -140,4 +172,21 @@ IN_PROC_BROWSER_TEST_F(SocketApiTest, DISABLED_SocketTCPExtension) {
       base::StringPrintf("tcp:%s:%d", host_port_pair.host().c_str(), port));
 
   EXPECT_TRUE(catcher.GetNextResult()) << catcher.message();
+}
+
+IN_PROC_BROWSER_TEST_F(SocketApiTest, SocketTCPServerExtension) {
+  ResultCatcher catcher;
+  catcher.RestrictToProfile(browser()->profile());
+  ExtensionTestMessageListener listener("info_please", true);
+  ASSERT_TRUE(LoadExtension(test_data_dir_.AppendASCII("socket/api")));
+  EXPECT_TRUE(listener.WaitUntilSatisfied());
+  listener.Reply(
+      base::StringPrintf("tcp_server:%s:%d", kHostname.c_str(), kPort));
+
+  EXPECT_TRUE(catcher.GetNextResult()) << catcher.message();
+}
+
+IN_PROC_BROWSER_TEST_F(SocketApiTest, SocketTCPServerUnbindOnUnload) {
+  ASSERT_TRUE(RunExtensionTest("socket/unload")) << message_;
+  ASSERT_TRUE(RunExtensionTest("socket/unload")) << message_;
 }

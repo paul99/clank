@@ -1,10 +1,9 @@
-// Copyright (c) 2010 The Chromium Authors. All rights reserved.
+// Copyright (c) 2012 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
 #ifndef CONTENT_RENDERER_WEBSHAREDWORKERREPOSITORY_IMPL_H_
 #define CONTENT_RENDERER_WEBSHAREDWORKERREPOSITORY_IMPL_H_
-#pragma once
 
 #include "third_party/WebKit/Source/WebKit/chromium/public/WebSharedWorkerRepository.h"
 
@@ -13,6 +12,8 @@
 namespace WebKit {
 class WebSharedWorker;
 }
+
+namespace content {
 
 class WebSharedWorkerRepositoryImpl : public WebKit::WebSharedWorkerRepository {
  public:
@@ -31,5 +32,7 @@ class WebSharedWorkerRepositoryImpl : public WebKit::WebSharedWorkerRepository {
   typedef base::hash_set<DocumentID> DocumentSet;
   DocumentSet shared_worker_parents_;
 };
+
+}  // namespace content
 
 #endif  // CONTENT_RENDERER_WEBSHAREDWORKERREPOSITORY_IMPL_H_

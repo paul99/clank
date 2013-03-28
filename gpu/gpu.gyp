@@ -4,94 +4,26 @@
 
 {
   'variables': {
-    'chromium_code': 1,
-    # These are defined here because we need to build this library twice. Once
-    # with extra parameter checking. Once with no parameter checking to be 100%
-    # OpenGL ES 2.0 compliant for the conformance tests.
-    'gles2_c_lib_source_files': [
-      'command_buffer/client/gles2_c_lib.cc',
-      'command_buffer/client/gles2_c_lib_autogen.h',
-      'command_buffer/client/gles2_c_lib_export.h',
-      'command_buffer/client/gles2_lib.h',
-      'command_buffer/client/gles2_lib.cc',
-    ],
-    # These are defined here because we need to build this library twice. Once
-    # with without support for client side arrays and once with for pepper and
-    # the OpenGL ES 2.0 compliant for the conformance tests.
-    'gles2_implementation_source_files': [
-      'command_buffer/client/gles2_implementation_autogen.h',
-      'command_buffer/client/gles2_implementation.cc',
-      'command_buffer/client/gles2_implementation.h',
-      'command_buffer/client/program_info_manager.cc',
-      'command_buffer/client/program_info_manager.h',
-    ]
+    'nacl_win64_target': 0,
   },
+  'includes': [
+    'gpu_common.gypi',
+  ],
   'targets': [
-    {
-      'target_name': 'command_buffer_common',
-      'type': 'static_library',
-      'include_dirs': [
-        '<(DEPTH)/third_party/khronos',
-      ],
-      'all_dependent_settings': {
-        'include_dirs': [
-          '<(DEPTH)/third_party/khronos',
-        ],
-      },
-      'dependencies': [
-        '../base/base.gyp:base',
-        'command_buffer/command_buffer.gyp:gles2_utils',
-      ],
-      'export_dependent_settings': [
-        '../base/base.gyp:base',
-      ],
-      'sources': [
-        'command_buffer/common/bitfield_helpers.h',
-        'command_buffer/common/buffer.h',
-        'command_buffer/common/cmd_buffer_common.h',
-        'command_buffer/common/cmd_buffer_common.cc',
-        'command_buffer/common/command_buffer.h',
-        'command_buffer/common/compiler_specific.h',
-        'command_buffer/common/constants.h',
-        'command_buffer/common/gles2_cmd_ids_autogen.h',
-        'command_buffer/common/gles2_cmd_ids.h',
-        'command_buffer/common/gles2_cmd_format_autogen.h',
-        'command_buffer/common/gles2_cmd_format.cc',
-        'command_buffer/common/gles2_cmd_format.h',
-        'command_buffer/common/id_allocator.cc',
-        'command_buffer/common/id_allocator.h',
-        'command_buffer/common/thread_local.h',
-        'command_buffer/common/types.h',
-      ],
-    },
-    {
-      # Library helps make GLES2 command buffers.
-      'target_name': 'gles2_cmd_helper',
-      'type': 'static_library',
-      'dependencies': [
-        'command_buffer_client',
-      ],
-      'sources': [
-        'command_buffer/client/gles2_cmd_helper.cc',
-        'command_buffer/client/gles2_cmd_helper.h',
-        'command_buffer/client/gles2_cmd_helper_autogen.h',
-      ],
-    },
     {
       # Library emulates GLES2 using command_buffers.
       'target_name': 'gles2_implementation',
-      'type': 'static_library',
+      'type': '<(component)',
       'dependencies': [
         '../base/base.gyp:base',
-        '../ui/gfx/gl/gl.gyp:gl',
+        '../third_party/khronos/khronos.gyp:khronos_headers',
+        '../ui/gl/gl.gyp:gl',
+        'command_buffer/command_buffer.gyp:gles2_utils',
         'gles2_cmd_helper',
       ],
-      'all_dependent_settings': {
-        'include_dirs': [
-          # For GLES2/gl2.h
-          '<(DEPTH)/third_party/khronos',
-        ],
-      },
+      'defines': [
+        'GLES2_IMPL_IMPLEMENTATION',
+      ],
       'sources': [
         '<@(gles2_implementation_source_files)',
       ],
@@ -99,20 +31,18 @@
     {
       # Library emulates GLES2 using command_buffers.
       'target_name': 'gles2_implementation_client_side_arrays',
-      'type': 'static_library',
+      'type': '<(component)',
       'defines': [
+        'GLES2_IMPL_IMPLEMENTATION',
         'GLES2_SUPPORT_CLIENT_SIDE_ARRAYS=1',
       ],
       'dependencies': [
         '../base/base.gyp:base',
+        '../third_party/khronos/khronos.gyp:khronos_headers',
+        '../ui/gl/gl.gyp:gl',
+        'command_buffer/command_buffer.gyp:gles2_utils',
         'gles2_cmd_helper',
       ],
-      'all_dependent_settings': {
-        'include_dirs': [
-          # For GLES2/gl2.h
-          '<(DEPTH)/third_party/khronos',
-        ],
-      },
       'sources': [
         '<@(gles2_implementation_source_files)',
       ],
@@ -120,21 +50,18 @@
     {
       # Library emulates GLES2 using command_buffers.
       'target_name': 'gles2_implementation_client_side_arrays_no_check',
-      'type': 'static_library',
+      'type': '<(component)',
       'defines': [
+        'GLES2_IMPL_IMPLEMENTATION',
         'GLES2_SUPPORT_CLIENT_SIDE_ARRAYS=1',
         'GLES2_CONFORMANCE_TESTS=1',
       ],
       'dependencies': [
         '../base/base.gyp:base',
+        '../third_party/khronos/khronos.gyp:khronos_headers',
+        'command_buffer/command_buffer.gyp:gles2_utils',
         'gles2_cmd_helper',
       ],
-      'all_dependent_settings': {
-        'include_dirs': [
-          # For GLES2/gl2.h
-          '<(DEPTH)/third_party/khronos',
-        ],
-      },
       'sources': [
         '<@(gles2_implementation_source_files)',
       ],
@@ -147,6 +74,8 @@
       'dependencies': [
         '../base/base.gyp:base',
         '../base/third_party/dynamic_annotations/dynamic_annotations.gyp:dynamic_annotations',
+        'command_buffer/command_buffer.gyp:gles2_utils',
+        'command_buffer_client',
         'gles2_implementation',
       ],
       'defines': [
@@ -168,6 +97,8 @@
       'dependencies': [
         '../base/base.gyp:base',
         '../base/third_party/dynamic_annotations/dynamic_annotations.gyp:dynamic_annotations',
+        'command_buffer/command_buffer.gyp:gles2_utils',
+        'command_buffer_client',
         'gles2_implementation_client_side_arrays_no_check',
       ],
       'sources': [
@@ -175,134 +106,21 @@
       ],
     },
     {
-      'target_name': 'command_buffer_client',
-      'type': 'static_library',
-      'include_dirs': [
-        '..',
-        '<(DEPTH)/third_party/khronos',
-      ],
-      'all_dependent_settings': {
-        'include_dirs': [
-          '..',
-          '<(DEPTH)/third_party/khronos',
-        ],
-      },
-      'dependencies': [
-        'command_buffer_common',
-      ],
-      'sources': [
-        'command_buffer/client/cmd_buffer_helper.cc',
-        'command_buffer/client/cmd_buffer_helper.h',
-        'command_buffer/client/fenced_allocator.cc',
-        'command_buffer/client/fenced_allocator.h',
-        'command_buffer/client/mapped_memory.cc',
-        'command_buffer/client/mapped_memory.h',
-        'command_buffer/client/ring_buffer.cc',
-        'command_buffer/client/ring_buffer.h',
-        'command_buffer/client/transfer_buffer.cc',
-        'command_buffer/client/transfer_buffer.h',
-      ],
-    },
-    {
-      'target_name': 'command_buffer_service',
-      'type': 'static_library',
-      'include_dirs': [
-        '..',
-        '<(DEPTH)/third_party/khronos',
-      ],
-      'all_dependent_settings': {
-        'include_dirs': [
-          '..',
-          '<(DEPTH)/third_party/khronos',
-        ],
-      },
-      'dependencies': [
-        'command_buffer_common',
-        '../base/base.gyp:base',
-        '../ui/gfx/gl/gl.gyp:gl',
-        '../ui/gfx/surface/surface.gyp:surface',
-        '../ui/ui.gyp:ui',
-        '../third_party/angle/src/build_angle.gyp:translator_glsl',
-      ],
-      'sources': [
-        'command_buffer/service/buffer_manager.h',
-        'command_buffer/service/buffer_manager.cc',
-        'command_buffer/service/framebuffer_manager.h',
-        'command_buffer/service/framebuffer_manager.cc',
-        'command_buffer/service/cmd_buffer_engine.h',
-        'command_buffer/service/cmd_parser.cc',
-        'command_buffer/service/cmd_parser.h',
-        'command_buffer/service/command_buffer_service.cc',
-        'command_buffer/service/command_buffer_service.h',
-        'command_buffer/service/common_decoder.cc',
-        'command_buffer/service/common_decoder.h',
-        'command_buffer/service/context_group.h',
-        'command_buffer/service/context_group.cc',
-        'command_buffer/service/feature_info.h',
-        'command_buffer/service/feature_info.cc',
-        'command_buffer/service/gles2_cmd_decoder.h',
-        'command_buffer/service/gles2_cmd_decoder_autogen.h',
-        'command_buffer/service/gles2_cmd_decoder.cc',
-        'command_buffer/service/gles2_cmd_validation.h',
-        'command_buffer/service/gles2_cmd_validation.cc',
-        'command_buffer/service/gles2_cmd_validation_autogen.h',
-        'command_buffer/service/gles2_cmd_validation_implementation_autogen.h',
-        'command_buffer/service/gl_utils.h',
-        'command_buffer/service/gpu_scheduler.h',
-        'command_buffer/service/gpu_scheduler.cc',
-        'command_buffer/service/gpu_scheduler_mock.h',
-        'command_buffer/service/gpu_switches.h',
-        'command_buffer/service/gpu_switches.cc',
-        'command_buffer/service/id_manager.h',
-        'command_buffer/service/id_manager.cc',
-        'command_buffer/service/mocks.h',
-        'command_buffer/service/program_manager.h',
-        'command_buffer/service/program_manager.cc',
-        'command_buffer/service/renderbuffer_manager.h',
-        'command_buffer/service/renderbuffer_manager.cc',
-        'command_buffer/service/shader_manager.h',
-        'command_buffer/service/shader_manager.cc',
-        'command_buffer/service/shader_translator.h',
-        'command_buffer/service/shader_translator.cc',
-        'command_buffer/service/stream_texture.h',
-        'command_buffer/service/stream_texture_manager.h',
-        'command_buffer/service/texture_manager.h',
-        'command_buffer/service/texture_manager.cc',
-        'command_buffer/service/vertex_attrib_manager.h',
-        'command_buffer/service/vertex_attrib_manager.cc',
-      ],
-      'conditions': [
-        ['toolkit_uses_gtk == 1', {
-          'dependencies': [
-            '../build/linux/system.gyp:gtk',
-          ],
-        }],
-        ['OS=="android"', {
-          'include_dirs': [
-            # Pull the EGL/GLES headers from here.
-            '<(android_src)/frameworks/base/opengl/include',
-          ],
-        }],
-        ['ui_compositor_image_transport==1', {
-          'include_dirs': [
-            '<(DEPTH)/third_party/angle/include',
-          ],
-        }],
-      ],
-    },
-    {
       'target_name': 'gpu_unittests',
-      'type': 'executable',
+      'type': '<(gtest_target_type)',
       'dependencies': [
-        '../base/base.gyp:test_support_base',
+        '../base/base.gyp:base',
         '../base/third_party/dynamic_annotations/dynamic_annotations.gyp:dynamic_annotations',
         '../testing/gmock.gyp:gmock',
-        '../testing/gmock.gyp:gmock_main',
         '../testing/gtest.gyp:gtest',
-        '../ui/gfx/gl/gl.gyp:gl',
+        '../third_party/angle/src/build_angle.gyp:translator_glsl',
+        '../ui/gl/gl.gyp:gl',
+        '../ui/ui.gyp:ui',
+        'command_buffer/command_buffer.gyp:gles2_utils',
         'command_buffer_client',
         'command_buffer_common',
         'command_buffer_service',
+        'gpu',
         'gpu_unittest_utils',
         'gles2_implementation_client_side_arrays',
         'gles2_cmd_helper',
@@ -312,31 +130,42 @@
       ],
       'sources': [
         '<@(gles2_c_lib_source_files)',
+        'command_buffer/client/buffer_tracker_unittest.cc',
         'command_buffer/client/client_test_helper.cc',
         'command_buffer/client/client_test_helper.h',
         'command_buffer/client/cmd_buffer_helper_test.cc',
         'command_buffer/client/fenced_allocator_test.cc',
+        'command_buffer/client/gles2_interface_stub.cc',
+        'command_buffer/client/gles2_interface_stub.h',
         'command_buffer/client/gles2_implementation_unittest.cc',
         'command_buffer/client/mapped_memory_unittest.cc',
+        'command_buffer/client/query_tracker_unittest.cc',
         'command_buffer/client/program_info_manager_unittest.cc',
         'command_buffer/client/ring_buffer_test.cc',
         'command_buffer/client/transfer_buffer_unittest.cc',
+        'command_buffer/client/vertex_array_object_manager_unittest.cc',
         'command_buffer/common/bitfield_helpers_test.cc',
         'command_buffer/common/command_buffer_mock.cc',
         'command_buffer/common/command_buffer_mock.h',
+        'command_buffer/common/command_buffer_shared_test.cc',
+        'command_buffer/common/debug_marker_manager_unittest.cc',
         'command_buffer/common/gles2_cmd_format_test.cc',
         'command_buffer/common/gles2_cmd_format_test_autogen.h',
         'command_buffer/common/gles2_cmd_utils_unittest.cc',
         'command_buffer/common/id_allocator_test.cc',
         'command_buffer/common/trace_event.h',
         'command_buffer/common/unittest_main.cc',
+        'command_buffer/service/async_pixel_transfer_delegate_mock.h',
+        'command_buffer/service/async_pixel_transfer_delegate_mock.cc',
         'command_buffer/service/buffer_manager_unittest.cc',
         'command_buffer/service/cmd_parser_test.cc',
+        'command_buffer/service/command_buffer_service_unittest.cc',
         'command_buffer/service/common_decoder_unittest.cc',
         'command_buffer/service/context_group_unittest.cc',
         'command_buffer/service/feature_info_unittest.cc',
         'command_buffer/service/framebuffer_manager_unittest.cc',
         'command_buffer/service/gles2_cmd_decoder_unittest.cc',
+        'command_buffer/service/gles2_cmd_decoder_unittest_0_autogen.h',
         'command_buffer/service/gles2_cmd_decoder_unittest_1.cc',
         'command_buffer/service/gles2_cmd_decoder_unittest_1_autogen.h',
         'command_buffer/service/gles2_cmd_decoder_unittest_2.cc',
@@ -345,12 +174,18 @@
         'command_buffer/service/gles2_cmd_decoder_unittest_3_autogen.h',
         'command_buffer/service/gles2_cmd_decoder_unittest_base.cc',
         'command_buffer/service/gles2_cmd_decoder_unittest_base.h',
+        'command_buffer/service/gl_surface_mock.cc',
+        'command_buffer/service/gl_surface_mock.h',
         'command_buffer/service/gpu_scheduler_unittest.cc',
         'command_buffer/service/id_manager_unittest.cc',
+        'command_buffer/service/memory_program_cache_unittest.cc',
         'command_buffer/service/mocks.cc',
         'command_buffer/service/mocks.h',
         'command_buffer/service/program_manager_unittest.cc',
+        'command_buffer/service/query_manager_unittest.cc',
         'command_buffer/service/renderbuffer_manager_unittest.cc',
+        'command_buffer/service/program_cache_lru_helper_unittest.cc',
+        'command_buffer/service/program_cache_unittest.cc',
         'command_buffer/service/shader_manager_unittest.cc',
         'command_buffer/service/shader_translator_unittest.cc',
         'command_buffer/service/stream_texture_mock.cc',
@@ -360,7 +195,63 @@
         'command_buffer/service/test_helper.cc',
         'command_buffer/service/test_helper.h',
         'command_buffer/service/texture_manager_unittest.cc',
+        'command_buffer/service/transfer_buffer_manager_unittest.cc',
         'command_buffer/service/vertex_attrib_manager_unittest.cc',
+        'command_buffer/service/vertex_array_manager_unittest.cc',
+      ],
+      'conditions': [
+        ['OS == "android" and gtest_target_type == "shared_library"', {
+          'dependencies': [
+            '../testing/android/native_test.gyp:native_test_native_code',
+          ],
+        }],
+      ],
+    },
+    {
+      'target_name': 'gl_tests',
+      'type': 'executable',
+      'dependencies': [
+        '../base/base.gyp:base',
+        '../base/third_party/dynamic_annotations/dynamic_annotations.gyp:dynamic_annotations',
+        '../testing/gmock.gyp:gmock',
+        '../testing/gtest.gyp:gtest',
+        '../third_party/angle/src/build_angle.gyp:translator_glsl',
+        '../ui/ui.gyp:ui',
+        'command_buffer/command_buffer.gyp:gles2_utils',
+        'command_buffer_client',
+        'command_buffer_common',
+        'command_buffer_service',
+        'gpu',
+        'gpu_unittest_utils',
+        'gles2_implementation_client_side_arrays',
+        'gles2_cmd_helper',
+        #'gl_unittests',
+      ],
+      'defines': [
+        'GLES2_C_LIB_IMPLEMENTATION',
+        'GL_GLEXT_PROTOTYPES',
+      ],
+      'sources': [
+        '<@(gles2_c_lib_source_files)',
+        'command_buffer/tests/gl_bind_uniform_location_unittest.cc',
+        'command_buffer/tests/gl_chromium_framebuffer_multisample_unittest.cc',
+        'command_buffer/tests/gl_copy_texture_CHROMIUM_unittest.cc',
+        'command_buffer/tests/gl_depth_texture_unittest.cc',
+        'command_buffer/tests/gl_query_unittests.cc',
+        'command_buffer/tests/gl_lose_context_chromium_unittests.cc',
+        'command_buffer/tests/gl_manager.cc',
+        'command_buffer/tests/gl_manager.h',
+        'command_buffer/tests/gl_pointcoord_unittest.cc',
+        'command_buffer/tests/gl_program_unittests.cc',
+        'command_buffer/tests/gl_shared_resources_unittests.cc',
+        'command_buffer/tests/gl_tests_main.cc',
+        'command_buffer/tests/gl_test_utils.cc',
+        'command_buffer/tests/gl_test_utils.h',
+        'command_buffer/tests/gl_texture_mailbox_unittests.cc',
+        'command_buffer/tests/gl_texture_storage_unittests.cc',
+        'command_buffer/tests/gl_unittests.cc',
+        'command_buffer/tests/gl_virtual_contexts_unittests.cc',
+        'command_buffer/tests/occlusion_query_unittests.cc',
       ],
     },
     {
@@ -369,42 +260,179 @@
       'dependencies': [
         '../testing/gmock.gyp:gmock',
         '../testing/gtest.gyp:gtest',
-        '../ui/gfx/gl/gl.gyp:gl',
+        '../third_party/khronos/khronos.gyp:khronos_headers',
+        '../ui/gl/gl.gyp:gl_unittest_utils',
       ],
       'include_dirs': [
         '..',
-        '<(DEPTH)/third_party/khronos',
       ],
       'sources': [
-        'command_buffer/common/gl_mock.h',
-        'command_buffer/common/gl_mock.cc',
         'command_buffer/service/gles2_cmd_decoder_mock.cc',
         'command_buffer/service/gles2_cmd_decoder_mock.cc',
       ],
-      'conditions': [
-        ['OS=="android"', {
-          'include_dirs': [
-            '<(android_src)/frameworks/base/opengl/include',   # for gl2.h/egl.h
+    },
+  ],
+  'conditions': [
+    ['component=="static_library"', {
+      'targets': [
+        {
+          'target_name': 'gpu',
+          'type': 'none',
+          'dependencies': [
+            'command_buffer_client',
+            'command_buffer_common',
+            'command_buffer_service',
+            'gles2_cmd_helper',
+            'gpu_ipc',
           ],
-        }],
+          'sources': [
+            'gpu_export.h',
+          ],
+        },
+        {
+          'target_name': 'command_buffer_common',
+          'type': 'static_library',
+          'includes': [
+            'command_buffer_common.gypi',
+          ],
+          'dependencies': [
+            '../base/base.gyp:base',
+            'command_buffer/command_buffer.gyp:gles2_utils',
+          ],
+          'export_dependent_settings': [
+            '../base/base.gyp:base',
+          ],
+        },
+        {
+          # Library helps make GLES2 command buffers.
+          'target_name': 'gles2_cmd_helper',
+          'type': 'static_library',
+          'includes': [
+            'gles2_cmd_helper.gypi',
+          ],
+          'dependencies': [
+            'command_buffer_client',
+          ],
+        },
+        {
+          'target_name': 'command_buffer_client',
+          'type': 'static_library',
+          'includes': [
+            'command_buffer_client.gypi',
+          ],
+          'dependencies': [
+            'command_buffer_common',
+          ],
+        },
+        {
+          'target_name': 'command_buffer_service',
+          'type': 'static_library',
+          'includes': [
+            'command_buffer_service.gypi',
+          ],
+          'dependencies': [
+            'command_buffer_common',
+          ],
+        },
+        {
+          'target_name': 'gpu_ipc',
+          'type': 'static_library',
+          'includes': [
+            'gpu_ipc.gypi',
+          ],
+          'dependencies': [
+            'command_buffer_common',
+          ],
+        },
       ],
     },
-    {
-      'target_name': 'gpu_ipc',
-      'type': 'static_library',
-      'dependencies': [
-        'command_buffer_client',
-        'gles2_c_lib',
-        '../base/base.gyp:base',
+    { # component != static_library
+      'targets': [
+        {
+          'target_name': 'gpu',
+          'type': 'shared_library',
+          'includes': [
+            'command_buffer_client.gypi',
+            'command_buffer_common.gypi',
+            'command_buffer_service.gypi',
+            'gles2_cmd_helper.gypi',
+            'gpu_ipc.gypi',
+          ],
+          'defines': [
+            'GPU_IMPLEMENTATION',
+          ],
+          'sources': [
+            'gpu_export.h',
+          ],
+          'dependencies': [
+            '../base/base.gyp:base',
+            'command_buffer/command_buffer.gyp:gles2_utils',
+          ],
+        },
+        {
+          'target_name': 'command_buffer_common',
+          'type': 'none',
+          'dependencies': [
+            'gpu',
+          ],
+        },
+        {
+          # Library helps make GLES2 command buffers.
+          'target_name': 'gles2_cmd_helper',
+          'type': 'none',
+          'dependencies': [
+            'gpu',
+          ],
+        },
+        {
+          'target_name': 'command_buffer_client',
+          'type': 'none',
+          'dependencies': [
+            'gpu',
+          ],
+        },
+        {
+          'target_name': 'command_buffer_service',
+          'type': 'none',
+          'dependencies': [
+            'gpu',
+          ],
+        },
+        {
+          'target_name': 'gpu_ipc',
+          'type': 'none',
+          'dependencies': [
+            'gpu',
+          ],
+        },
       ],
-      'include_dirs': [
-        '..',
-        '<(DEPTH)/third_party/khronos',
+    }],
+    ['disable_nacl!=1 and OS=="win"', {
+      'targets': [
+        {
+          'target_name': 'gpu_ipc_win64',
+          'type': 'static_library',
+          'variables': {
+            'nacl_win64_target': 1,
+          },
+          'includes': [
+            'gpu_ipc.gypi',
+          ],
+          'dependencies': [
+            '../base/base.gyp:base_nacl_win64',
+            '../ipc/ipc.gyp:ipc_win64',
+          ],
+          'defines': [
+            '<@(nacl_win64_defines)',
+            'GPU_IMPLEMENTATION',
+          ],
+          'configurations': {
+            'Common_Base': {
+              'msvs_target_platform': 'x64',
+            },
+          },
+        },
       ],
-      'sources': [
-        'ipc/gpu_command_buffer_traits.cc',
-        'ipc/gpu_command_buffer_traits.h',
-      ],
-    },
+    }],
   ],
 }

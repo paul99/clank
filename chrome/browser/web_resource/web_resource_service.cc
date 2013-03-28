@@ -14,15 +14,9 @@
 #include "chrome/browser/browser_process.h"
 #include "chrome/browser/google/google_util.h"
 #include "chrome/browser/prefs/pref_service.h"
-#include "chrome/common/chrome_switches.h"
-#include "chrome/common/chrome_utility_messages.h"
-#include "chrome/common/web_resource/web_resource_unpacker.h"
-#include "content/browser/renderer_host/resource_dispatcher_host.h"
-#include "content/browser/utility_process_host.h"
-#include "content/public/browser/browser_thread.h"
-#include "content/public/common/url_fetcher.h"
 #include "googleurl/src/gurl.h"
 #include "net/base/load_flags.h"
+#include "net/url_request/url_fetcher.h"
 #include "net/url_request/url_request_status.h"
 
 WebResourceService::WebResourceService(
@@ -33,14 +27,15 @@ WebResourceService::WebResourceService(
     int start_fetch_delay_ms,
     int cache_update_delay_ms)
     : prefs_(prefs),
-      ALLOW_THIS_IN_INITIALIZER_LIST(weak_ptr_factory_(this)),
       json_unpacker_(NULL),
       in_fetch_(false),
       web_resource_server_(web_resource_server),
       apply_locale_to_url_(apply_locale_to_url),
       last_update_time_pref_name_(last_update_time_pref_name),
       start_fetch_delay_ms_(start_fetch_delay_ms),
-      cache_update_delay_ms_(cache_update_delay_ms) {
+      cache_update_delay_ms_(cache_update_delay_ms),
+      ALLOW_THIS_IN_INITIALIZER_LIST(weak_ptr_factory_(this)) {
+  resource_request_allowed_notifier_.Init(this);
   DCHECK(prefs);
 }
 
@@ -68,6 +63,12 @@ void WebResourceService::EndFetch() {
 }
 
 void WebResourceService::StartAfterDelay() {
+  // If resource requests are not allowed, we'll get a callback when they are.
+  if (resource_request_allowed_notifier_.ResourceRequestsAllowed())
+    OnResourceRequestsAllowed();
+}
+
+void WebResourceService::OnResourceRequestsAllowed() {
   int64 delay = start_fetch_delay_ms_;
   // Check whether we have ever put a value in the web resource cache;
   // if so, pull it out and see if it's time to update again.
@@ -121,9 +122,9 @@ void WebResourceService::StartFetch() {
       google_util::AppendGoogleLocaleParam(web_resource_server_) :
       web_resource_server_;
 
-  DVLOG(1) << "WebResourceService StartFetch: " << web_resource_server;
-  url_fetcher_.reset(content::URLFetcher::Create(
-      web_resource_server, content::URLFetcher::GET, this));
+  DVLOG(1) << "WebResourceService StartFetch " << web_resource_server;
+  url_fetcher_.reset(net::URLFetcher::Create(
+      web_resource_server, net::URLFetcher::GET, this));
   // Do not let url fetcher affect existing state in system context
   // (by setting cookies, for example).
   url_fetcher_->SetLoadFlags(net::LOAD_DISABLE_CACHE |
@@ -135,15 +136,15 @@ void WebResourceService::StartFetch() {
   url_fetcher_->Start();
 }
 
-void WebResourceService::OnURLFetchComplete(const content::URLFetcher* source) {
+void WebResourceService::OnURLFetchComplete(const net::URLFetcher* source) {
   // Delete the URLFetcher when this function exits.
-  scoped_ptr<content::URLFetcher> clean_up_fetcher(url_fetcher_.release());
+  scoped_ptr<net::URLFetcher> clean_up_fetcher(url_fetcher_.release());
 
   if (source->GetStatus().is_success() && source->GetResponseCode() == 200) {
     std::string data;
     source->GetResponseAsString(&data);
 
-    // JSON unpacker calls EndFetch on completion.
+    // UnpackerClient calls EndFetch and releases itself on completion.
     json_unpacker_ = JSONAsynchronousUnpacker::Create(this);
     json_unpacker_->Start(data);
   } else {

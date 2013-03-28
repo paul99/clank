@@ -1,4 +1,4 @@
-// Copyright (c) 2011 The Chromium Authors. All rights reserved.
+// Copyright (c) 2012 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -39,16 +39,6 @@ ServiceIPCServer::~ServiceIPCServer() {
 #endif
 
   channel_->RemoveFilter(sync_message_filter_.get());
-
-  // The ChannelProxy object caches a pointer to the IPC thread, so need to
-  // reset it as it's not guaranteed to outlive this object.
-  // NOTE: this also has the side-effect of not closing the main IPC channel to
-  // the browser process.  This is needed because this is the signal that the
-  // browser uses to know that this process has died, so we need it to be alive
-  // until this process is shut down, and the OS closes the handle
-  // automatically.  We used to watch the object handle on Windows to do this,
-  // but it wasn't possible to do so on POSIX.
-  channel_->ClearIPCMessageLoop();
 }
 
 void ServiceIPCServer::OnChannelConnected(int32 peer_pid) {
@@ -109,10 +99,6 @@ bool ServiceIPCServer::OnMessageReceived(const IPC::Message& msg) {
                         OnGetCloudPrintProxyInfo)
     IPC_MESSAGE_HANDLER(ServiceMsg_Shutdown, OnShutdown);
     IPC_MESSAGE_HANDLER(ServiceMsg_UpdateAvailable, OnUpdateAvailable);
-    IPC_MESSAGE_HANDLER(ServiceMsg_EnableVirtualDriver,
-                        OnEnableVirtualDriver);
-    IPC_MESSAGE_HANDLER(ServiceMsg_DisableVirtualDriver,
-                        OnDisableVirtualDriver);
     IPC_MESSAGE_UNHANDLED(handled = false)
   IPC_END_MESSAGE_MAP()
   return handled;
@@ -125,11 +111,12 @@ void ServiceIPCServer::OnEnableCloudPrintProxy(const std::string& lsid) {
 void ServiceIPCServer::OnEnableCloudPrintProxyWithRobot(
     const std::string& robot_auth_code,
     const std::string& robot_email,
-    const std::string& user_email) {
+    const std::string& user_email,
+    bool connect_new_printers,
+    const std::vector<std::string>& printer_blacklist) {
   g_service_process->GetCloudPrintProxy()->EnableForUserWithRobot(
-      robot_auth_code,
-      robot_email,
-      user_email);
+      robot_auth_code, robot_email, user_email, connect_new_printers,
+      printer_blacklist);
 }
 
 void ServiceIPCServer::OnGetCloudPrintProxyInfo() {
@@ -139,7 +126,10 @@ void ServiceIPCServer::OnGetCloudPrintProxyInfo() {
 }
 
 void ServiceIPCServer::OnDisableCloudPrintProxy() {
-  g_service_process->GetCloudPrintProxy()->DisableForUser();
+  // User disabled CloudPrint proxy explicitly. Delete printers
+  // registered from this proxy and disable proxy.
+  g_service_process->GetCloudPrintProxy()->
+      UnregisterPrintersAndDisableForUser();
 }
 
 void ServiceIPCServer::OnShutdown() {
@@ -148,13 +138,5 @@ void ServiceIPCServer::OnShutdown() {
 
 void ServiceIPCServer::OnUpdateAvailable() {
   g_service_process->SetUpdateAvailable();
-}
-
-void ServiceIPCServer::OnEnableVirtualDriver() {
-  g_service_process->EnableVirtualPrintDriver();
-}
-
-void ServiceIPCServer::OnDisableVirtualDriver() {
-  g_service_process->DisableVirtualPrintDriver();
 }
 

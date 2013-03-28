@@ -1,4 +1,4 @@
-// Copyright (c) 2011 The Chromium Authors. All rights reserved.
+// Copyright (c) 2012 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -131,8 +131,8 @@ void DatabaseConnectionsWrapper::WaitForAllDatabasesToClose() {
   // We assume that new databases won't be open while we're waiting.
   DCHECK(main_thread_->BelongsToCurrentThread());
   if (HasOpenConnections()) {
-    AutoReset<bool> auto_reset(&waiting_for_dbs_to_close_, true);
-    MessageLoop::ScopedNestableTaskAllower nestable(MessageLoop::current());
+    base::AutoReset<bool> auto_reset(&waiting_for_dbs_to_close_, true);
+    MessageLoop::ScopedNestableTaskAllower allow(MessageLoop::current());
     MessageLoop::current()->Run();
   }
 }

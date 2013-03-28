@@ -1,4 +1,4 @@
-// Copyright (c) 2011 The Chromium Authors. All rights reserved.
+// Copyright (c) 2012 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -77,7 +77,7 @@ v8::Handle<v8::FunctionTemplate> ExternalExtensionWrapper::GetNativeFunction(
 
 // static
 RenderView* ExternalExtensionWrapper::GetRenderView() {
-  WebFrame* webframe = WebFrame::frameForEnteredContext();
+  WebFrame* webframe = WebFrame::frameForCurrentContext();
   DCHECK(webframe) << "There should be an active frame since we just got "
       "a native function called.";
   if (!webframe) return NULL;
@@ -102,7 +102,7 @@ v8::Handle<v8::Value> ExternalExtensionWrapper::AddSearchProvider(
   GURL osd_url(name);
   if (!osd_url.is_empty()) {
     render_view->Send(new ChromeViewHostMsg_PageHasOSDD(
-        render_view->GetRoutingId(), render_view->GetPageId(), osd_url,
+        render_view->GetRoutingID(), render_view->GetPageId(), osd_url,
         search_provider::EXPLICIT_PROVIDER));
   }
 
@@ -120,14 +120,14 @@ v8::Handle<v8::Value> ExternalExtensionWrapper::IsSearchProviderInstalled(
   RenderView* render_view = GetRenderView();
   if (!render_view) return v8::Undefined();
 
-  WebFrame* webframe = WebFrame::frameForEnteredContext();
+  WebFrame* webframe = WebFrame::frameForCurrentContext();
   if (!webframe) return v8::Undefined();
 
   search_provider::InstallState install = search_provider::DENIED;
   GURL inquiry_url = GURL(name);
   if (!inquiry_url.is_empty()) {
       render_view->Send(new ChromeViewHostMsg_GetSearchProviderInstallState(
-          render_view->GetRoutingId(),
+          render_view->GetRoutingID(),
           webframe->document().url(),
           inquiry_url,
           &install));

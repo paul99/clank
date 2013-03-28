@@ -1,10 +1,9 @@
-// Copyright (c) 2011 The Chromium Authors. All rights reserved.
+// Copyright (c) 2012 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
 #ifndef CONTENT_BROWSER_WORKER_HOST_MESSAGE_PORT_SERVICE_H_
 #define CONTENT_BROWSER_WORKER_HOST_MESSAGE_PORT_SERVICE_H_
-#pragma once
 
 #include <map>
 #include <utility>
@@ -15,6 +14,7 @@
 #include "base/string16.h"
 #include "ipc/ipc_message.h"
 
+namespace content {
 class WorkerMessageFilter;
 
 class MessagePortService {
@@ -70,5 +70,7 @@ class MessagePortService {
 
   DISALLOW_COPY_AND_ASSIGN(MessagePortService);
 };
+
+}  // namespace content
 
 #endif  // CONTENT_BROWSER_WORKER_HOST_MESSAGE_PORT_SERVICE_H_

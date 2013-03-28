@@ -4,13 +4,13 @@
 
 #ifndef CHROME_BROWSER_UI_GTK_CUSTOM_DRAG_H_
 #define CHROME_BROWSER_UI_GTK_CUSTOM_DRAG_H_
-#pragma once
 
 #include <gtk/gtk.h>
 #include <vector>
 
 #include "base/basictypes.h"
 #include "base/compiler_specific.h"
+#include "base/memory/scoped_ptr.h"
 #include "ui/base/gtk/gtk_signal.h"
 
 class BookmarkNode;
@@ -65,7 +65,7 @@ class DownloadItemDrag : public CustomDrag {
   // DownloadItemDrag object is created.
   // It is safe to call this multiple times with different values of |icon|.
   static void SetSource(GtkWidget* widget,
-                        content::DownloadItem* item,
+                        const content::DownloadItem* item,
                         gfx::Image* icon);
 
   // Creates a new DownloadItemDrag, the lifetime of which is tied to the
@@ -73,6 +73,8 @@ class DownloadItemDrag : public CustomDrag {
   static void BeginDrag(const content::DownloadItem* item, gfx::Image* icon);
 
  private:
+  class DragData;
+
   DownloadItemDrag(const content::DownloadItem* item, gfx::Image* icon);
   virtual ~DownloadItemDrag();
 
@@ -80,7 +82,7 @@ class DownloadItemDrag : public CustomDrag {
                              GtkSelectionData* selection_data,
                              guint target_type, guint time) OVERRIDE;
 
-  const content::DownloadItem* download_item_;
+  scoped_ptr<DragData> drag_data_;
 
   DISALLOW_COPY_AND_ASSIGN(DownloadItemDrag);
 };

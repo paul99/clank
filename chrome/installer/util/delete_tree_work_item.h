@@ -4,13 +4,12 @@
 
 #ifndef CHROME_INSTALLER_UTIL_DELETE_TREE_WORK_ITEM_H_
 #define CHROME_INSTALLER_UTIL_DELETE_TREE_WORK_ITEM_H_
-#pragma once
 
 #include <vector>
 
 #include "base/file_path.h"
+#include "base/files/scoped_temp_dir.h"
 #include "base/memory/scoped_ptr.h"
-#include "base/scoped_temp_dir.h"
 #include "chrome/installer/util/work_item.h"
 
 // A WorkItem subclass that recursively deletes a file system hierarchy at the
@@ -48,11 +47,11 @@ class DeleteTreeWorkItem : public WorkItem {
 
   // Contains the temp directories for the backed-up key files. The directories
   // are created and populated in Do() as-needed. We don't use a standard
-  // container for this since ScopedTempDir isn't CopyConstructible.
-  scoped_array<ScopedTempDir> key_backup_paths_;
+  // container for this since base::ScopedTempDir isn't CopyConstructible.
+  scoped_array<base::ScopedTempDir> key_backup_paths_;
 
   // The temporary directory into which the original root_path_ has been moved.
-  ScopedTempDir backup_path_;
+  base::ScopedTempDir backup_path_;
 
   // Set to true once root_path_ has been copied into backup_path_.
   bool copied_to_backup_;

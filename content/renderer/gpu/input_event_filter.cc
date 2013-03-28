@@ -1,27 +1,28 @@
-// Copyright (c) 2011 The Chromium Authors. All rights reserved.
+// Copyright (c) 2012 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
 #include "base/bind.h"
+#include "base/debug/trace_event.h"
 #include "base/location.h"
+#include "base/message_loop_proxy.h"
 #include "content/common/view_messages.h"
 #include "content/renderer/gpu/input_event_filter.h"
 
 using WebKit::WebInputEvent;
 
-InputEventFilter::InputEventFilter(IPC::Channel::Listener* main_listener,
+namespace content {
+
+InputEventFilter::InputEventFilter(IPC::Listener* main_listener,
                                    base::MessageLoopProxy* target_loop,
-                                   const InputHandler& input_handler,
-                                   const VSyncHandler& vsync_handler)
+                                   const Handler& handler)
     : main_loop_(base::MessageLoopProxy::current()),
       main_listener_(main_listener),
       sender_(NULL),
       target_loop_(target_loop),
-      input_handler_(input_handler),
-      vsync_handler_(vsync_handler) {
+      handler_(handler) {
   DCHECK(target_loop_);
-  DCHECK(!input_handler_.is_null());
-  DCHECK(!vsync_handler_.is_null());
+  DCHECK(!handler_.is_null());
 }
 
 void InputEventFilter::AddRoute(int routing_id) {
@@ -37,8 +38,7 @@ void InputEventFilter::RemoveRoute(int routing_id) {
 void InputEventFilter::DidHandleInputEvent() {
   DCHECK(target_loop_->BelongsToCurrentThread());
 
-  bool processed = true;
-  SendACK(messages_.front(), processed);
+  SendACK(messages_.front(), INPUT_EVENT_ACK_STATE_CONSUMED);
   messages_.pop();
 }
 
@@ -47,13 +47,15 @@ void InputEventFilter::DidNotHandleInputEvent(bool send_to_widget) {
 
   if (send_to_widget) {
     // Forward to the renderer thread, and dispatch the message there.
+    TRACE_EVENT0("InputEventFilter::DidNotHandleInputEvent",
+                 "ForwardToRenderThread");
     main_loop_->PostTask(
         FROM_HERE,
         base::Bind(&InputEventFilter::ForwardToMainListener,
                    this, messages_.front()));
   } else {
-    bool processed = false;
-    SendACK(messages_.front(), processed);
+    TRACE_EVENT0("InputEventFilter::DidNotHandleInputEvent", "LeaveUnhandled");
+    SendACK(messages_.front(), INPUT_EVENT_ACK_STATE_NO_CONSUMER_EXISTS);
   }
   messages_.pop();
 }
@@ -72,8 +74,7 @@ void InputEventFilter::OnChannelClosing() {
 }
 
 bool InputEventFilter::OnMessageReceived(const IPC::Message& message) {
-  if (!(message.type() == ViewMsg_HandleInputEvent::ID ||
-        message.type() == ViewMsg_DidVSync::ID))
+  if (message.type() != ViewMsg_HandleInputEvent::ID)
     return false;
 
   {
@@ -82,23 +83,9 @@ bool InputEventFilter::OnMessageReceived(const IPC::Message& message) {
       return false;
   }
 
-  if (message.type() == ViewMsg_HandleInputEvent::ID) {
-    const WebInputEvent* event = CrackMessage(message);
-    if (event->type == WebInputEvent::Undefined)
-      return false;
-
-    target_loop_->PostTask(
-        FROM_HERE,
-        base::Bind(&InputEventFilter::ForwardInputEventToHandler,
-                   this, message));
-    return true;
-  }
-
-  DCHECK(message.type() == ViewMsg_DidVSync::ID);
   target_loop_->PostTask(
       FROM_HERE,
-      base::Bind(&InputEventFilter::ForwardDidVSyncEventToHandler,
-                 this, message));
+      base::Bind(&InputEventFilter::ForwardToHandler, this, message));
   return true;
 }
 
@@ -107,13 +94,10 @@ const WebInputEvent* InputEventFilter::CrackMessage(
     const IPC::Message& message) {
   DCHECK(message.type() == ViewMsg_HandleInputEvent::ID);
 
-  void* iter = NULL;
-  const char* data;
-  int data_length;
-  if (!message.ReadData(&iter, &data, &data_length))
-    return NULL;
-
-  return reinterpret_cast<const WebInputEvent*>(data);
+  PickleIterator iter(message);
+  const WebInputEvent* event = NULL;
+  IPC::ParamTraits<IPC::WebInputEventPointer>::Read(&message, &iter, &event);
+  return event;
 }
 
 InputEventFilter::~InputEventFilter() {
@@ -123,7 +107,7 @@ void InputEventFilter::ForwardToMainListener(const IPC::Message& message) {
   main_listener_->OnMessageReceived(message);
 }
 
-void InputEventFilter::ForwardInputEventToHandler(const IPC::Message& message) {
+void InputEventFilter::ForwardToHandler(const IPC::Message& message) {
   DCHECK(target_loop_->BelongsToCurrentThread());
 
   // Save this message for later, in case we need to bounce it back up to the
@@ -134,38 +118,31 @@ void InputEventFilter::ForwardInputEventToHandler(const IPC::Message& message) {
   //
   messages_.push(message);
 
-  input_handler_.Run(message.routing_id(), CrackMessage(message));
+  handler_.Run(message.routing_id(), CrackMessage(message));
 }
 
-void InputEventFilter::ForwardDidVSyncEventToHandler(
-    const IPC::Message& message) {
-
-  DCHECK(target_loop_->BelongsToCurrentThread());
-  DCHECK(message.type() == ViewMsg_DidVSync::ID);
-
-  int64 a, b;
-  if (ViewMsg_DidVSync::Read(&message, &a, &b))
-    vsync_handler_.Run(message.routing_id(), a, b);
-}
-
-
-void InputEventFilter::SendACK(const IPC::Message& message, bool processed) {
+void InputEventFilter::SendACK(const IPC::Message& message,
+                               InputEventAckState ack_result) {
   DCHECK(target_loop_->BelongsToCurrentThread());
 
   io_loop_->PostTask(
       FROM_HERE,
       base::Bind(&InputEventFilter::SendACKOnIOThread, this,
-                 message.routing_id(), CrackMessage(message)->type, processed));
+                 message.routing_id(), CrackMessage(message)->type,
+                 ack_result));
 }
 
-void InputEventFilter::SendACKOnIOThread(int routing_id,
-                                         WebInputEvent::Type event_type,
-                                         bool processed) {
+void InputEventFilter::SendACKOnIOThread(
+    int routing_id,
+    WebInputEvent::Type event_type,
+    InputEventAckState ack_result) {
   DCHECK(io_loop_->BelongsToCurrentThread());
 
   if (!sender_)
     return;  // Filter was removed.
 
   sender_->Send(
-      new ViewHostMsg_HandleInputEvent_ACK(routing_id, event_type, processed));
+      new ViewHostMsg_HandleInputEvent_ACK(routing_id, event_type, ack_result));
 }
+
+}  // namespace content

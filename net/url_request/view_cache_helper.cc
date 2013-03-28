@@ -1,4 +1,4 @@
-// Copyright (c) 2011 The Chromium Authors. All rights reserved.
+// Copyright (c) 2012 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -17,8 +17,9 @@
 #include "net/url_request/url_request_context.h"
 
 #define VIEW_CACHE_HEAD \
-  "<html><meta charset=\"utf-8\"><meta http-equiv=\"X-WebKit-CSP\" " \
-  "content=\"object-src 'none'; script-src 'none' 'unsafe-eval'\">" \
+  "<html><meta charset=\"utf-8\">" \
+  "<meta http-equiv=\"Content-Security-Policy\" " \
+  "  content=\"object-src 'none'; script-src 'none' 'unsafe-eval'\">" \
   "<body><table>"
 
 #define VIEW_CACHE_TAIL \
@@ -41,7 +42,8 @@ std::string FormatEntryInfo(disk_cache::Entry* entry,
 }  // namespace.
 
 ViewCacheHelper::ViewCacheHelper()
-    : disk_cache_(NULL),
+    : context_(NULL),
+      disk_cache_(NULL),
       entry_(NULL),
       iter_(NULL),
       buf_len_(0),

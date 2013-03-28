@@ -6,13 +6,6 @@
   'variables': {
     'chromium_code': 1,
 
-    'variables': {
-      'version_py_path': '../tools/build/version.py',
-      'version_path': 'VERSION',
-    },
-    'version_py_path': '<(version_py_path) -f',
-    'version_path': '<(version_path)',
-
     # Keep the archive builder happy.
     'chrome_personalization%': 1,
     'use_syncapi_stub%': 0,
@@ -31,6 +24,7 @@
   },
   'includes': [
     '../build/win_precompile.gypi',
+    '../chrome/version.gypi',
   ],
   'target_defaults': {
     'dependencies': [
@@ -47,6 +41,38 @@
     ],
   },
   'targets': [
+    {
+      'target_name': 'chrome_frame_version_resources',
+      'type': 'none',
+      'conditions': [
+        ['branding == "Chrome"', {
+          'variables': {
+             'branding_path': '../chrome/app/theme/google_chrome/BRANDING',
+          },
+        }, { # else branding!="Chrome"
+          'variables': {
+             'branding_path': '../chrome/app/theme/chromium/BRANDING',
+          },
+        }],
+      ],
+      'variables': {
+        'output_dir': 'chrome_frame',
+        'template_input_path': 'npchrome_frame_version.rc.version',
+        'extra_variable_files_arguments': [ '-f', 'BRANDING' ],
+        'extra_variable_files': [ 'BRANDING' ], # NOTE: matches that above
+      },
+      'direct_dependent_settings': {
+        'include_dirs': [
+          '<(SHARED_INTERMEDIATE_DIR)/<(output_dir)',
+        ],
+      },
+      'sources': [
+        'npchrome_frame_dll.ver',
+      ],
+      'includes': [
+        '../chrome/version_resource_rules.gypi',
+      ],
+    },
     {
       # Builds the crash tests in crash_reporting.
       'target_name': 'chrome_frame_crash_tests',
@@ -79,6 +105,7 @@
       'dependencies': [
         '../base/base.gyp:test_support_base',
         '../chrome/app/policy/cloud_policy_codegen.gyp:policy',
+        '../chrome/chrome.gyp:test_support_common',
         '../net/net.gyp:net',
         '../testing/gmock.gyp:gmock',
         '../testing/gtest.gyp:gtest',
@@ -187,12 +214,12 @@
       'dependencies': [
         '../base/base.gyp:test_support_base',
         '../build/temp_gyp/googleurl.gyp:googleurl',
-        '../chrome/chrome.gyp:chrome_version_header',
         '../chrome/chrome.gyp:common',
         '../chrome/chrome.gyp:utility',
         '../chrome/chrome.gyp:browser',
         '../chrome/chrome.gyp:debugger',
         '../chrome/chrome.gyp:renderer',
+        '../chrome/chrome.gyp:test_support_common',
         '../chrome/installer/upgrade_test.gyp:alternate_version_generator_lib',
         '../content/content.gyp:content_gpu',
         '../net/net.gyp:net',
@@ -211,8 +238,6 @@
       ],
       'sources': [
         '../base/test/test_suite.h',
-        'cfproxy_test.cc',
-        'external_tab_test.cc',
         'test/automation_client_mock.cc',
         'test/automation_client_mock.h',
         'test/chrome_frame_test_utils.cc',
@@ -224,6 +249,8 @@
         'test/delete_chrome_history_test.cc',
         'test/dll_redirector_loading_test.cc',
         'test/header_test.cc',
+        'test/ie_configurator.cc',
+        'test/ie_configurator.h',
         'test/ie_event_sink.cc',
         'test/ie_event_sink.h',
         'test/mock_ie_event_sink_actions.h',
@@ -236,6 +263,8 @@
         'test/simple_resource_loader_test.cc',
         'test/simulate_input.cc',
         'test/simulate_input.h',
+        'test/test_scrubber.cc',
+        'test/test_scrubber.h',
         'test/test_server.cc',
         'test/test_server.h',
         'test/test_server_test.cc',
@@ -247,7 +276,7 @@
         'test/url_request_test.cc',
         'test/win_event_receiver.cc',
         'test/win_event_receiver.h',
-        'chrome_launcher_version.rc',
+        '<(SHARED_INTERMEDIATE_DIR)/chrome_frame/chrome_launcher_exe_version.rc',
         '<(SHARED_INTERMEDIATE_DIR)/chrome_frame/chrome_tab.h',
         'test_utils.cc',
         'test_utils.h',
@@ -302,6 +331,8 @@
         '../chrome/chrome.gyp:common',
         '../chrome/chrome.gyp:browser',
         '../chrome/chrome.gyp:debugger',
+        '../chrome/chrome.gyp:image_pre_reader',
+        '../chrome/chrome.gyp:test_support_common',
         '../chrome/chrome.gyp:test_support_ui',
         '../chrome/chrome.gyp:utility',
         '../content/content.gyp:content_gpu',
@@ -378,7 +409,7 @@
         '../chrome/chrome.gyp:browser',
         '../chrome/chrome.gyp:debugger',
         '../chrome/chrome.gyp:renderer',
-        '../chrome/chrome.gyp:syncapi_core',
+        '../chrome/chrome.gyp:test_support_common',
         '../chrome/chrome_resources.gyp:chrome_resources',
         '../content/content.gyp:content_app',
         '../content/content.gyp:content_gpu',
@@ -386,6 +417,7 @@
         '../net/net.gyp:net',
         '../net/net.gyp:net_test_support',
         '../skia/skia.gyp:skia',
+        '../sync/sync.gyp:sync_api',
         '../testing/gtest.gyp:gtest',
         '../third_party/icu/icu.gyp:icui18n',
         '../third_party/icu/icu.gyp:icuuc',
@@ -401,6 +433,8 @@
         '../net/url_request/url_request_unittest.cc',
         'test/chrome_frame_test_utils.cc',
         'test/chrome_frame_test_utils.h',
+        'test/ie_configurator.cc',
+        'test/ie_configurator.h',
         'test/simulate_input.cc',
         'test/simulate_input.h',
         'test/test_server.cc',
@@ -409,14 +443,11 @@
         'test/win_event_receiver.h',
         'test/net/fake_external_tab.cc',
         'test/net/fake_external_tab.h',
-        'test/net/process_singleton_subclass.cc',
-        'test/net/process_singleton_subclass.h',
         'test/net/test_automation_provider.cc',
         'test/net/test_automation_provider.h',
         'test/net/test_automation_resource_message_filter.cc',
         'test/net/test_automation_resource_message_filter.h',
         '<(SHARED_INTERMEDIATE_DIR)/chrome_frame/chrome_tab.h',
-        '<(SHARED_INTERMEDIATE_DIR)/ui/ui_resources/ui_resources.rc',
         'test_utils.cc',
         'test_utils.h',
       ],
@@ -531,6 +562,7 @@
       'dependencies': [
         '../base/base.gyp:test_support_base',
         '../build/temp_gyp/googleurl.gyp:googleurl',
+        '../chrome/chrome.gyp:test_support_common',
         '../net/net.gyp:net',
         '../net/net.gyp:net_test_support',
         '../testing/gmock.gyp:gmock',
@@ -549,6 +581,8 @@
         'test/chrome_frame_ui_test_utils.cc',
         'test/chrome_frame_ui_test_utils.h',
         'test/external_sites_test.cc',
+        'test/ie_configurator.cc',
+        'test/ie_configurator.h',
         'test/ie_event_sink.cc',
         'test/ie_event_sink.h',
         'test/mock_ie_event_sink_actions.h',
@@ -557,6 +591,8 @@
         'test/run_all_unittests.cc',
         'test/simulate_input.cc',
         'test/simulate_input.h',
+        'test/test_scrubber.cc',
+        'test/test_scrubber.h',
         'test/test_server.cc',
         'test/test_server.h',
         'test/test_with_web_server.cc',
@@ -653,7 +689,7 @@
         '../net/net.gyp:net',
         '../third_party/libxml/libxml.gyp:libxml',
         '../third_party/bzip2/bzip2.gyp:bzip2',
-        '../webkit/support/webkit_support.gyp:webkit_user_agent',
+        '../webkit/support/webkit_support.gyp:user_agent',
       ],
       'sources': [
         'bho.cc',
@@ -726,6 +762,8 @@
         'ready_mode/ready_mode.cc',
         'ready_mode/ready_mode.h',
         'register_bho.rgs',
+        'registry_list_preferences_holder.cc',
+        'registry_list_preferences_holder.h',
         'stream_impl.cc',
         'stream_impl.h',
         'urlmon_bind_status_callback.h',
@@ -758,11 +796,11 @@
           'dependencies': [
             '../breakpad/breakpad.gyp:breakpad_handler',
             '../chrome/chrome.gyp:automation',
-            # Make the archive build happy.
-            '../chrome/chrome.gyp:syncapi_core',
             # Installer
             '../chrome/chrome.gyp:installer_util',
             '../google_update/google_update.gyp:google_update',
+            # Make the archive build happy.
+            '../sync/sync.gyp:sync_api',
             # Crash Reporting
             'crash_reporting/crash_reporting.gyp:crash_report',
           ],
@@ -785,7 +823,7 @@
             '/Fo', '<(INTERMEDIATE_DIR)\<(RULE_INPUT_ROOT).obj',
             '/c', '<(RULE_INPUT_PATH)',
           ],
-          'process_outputs_as_sources': 0,
+          'process_outputs_as_sources': 1,
           'message':
               'Assembling <(RULE_INPUT_PATH) to ' \
               '<(INTERMEDIATE_DIR)\<(RULE_INPUT_ROOT).obj.',
@@ -803,11 +841,6 @@
       'target_name': 'chrome_frame_common',
       'type': 'static_library',
       'sources': [
-        'cfproxy.h',
-        'cfproxy_private.h',
-        'cfproxy_factory.cc',
-        'cfproxy_proxy.cc',
-        'cfproxy_support.cc',
         'chrome_frame_automation.h',
         'chrome_frame_automation.cc',
         'chrome_frame_delegate.h',
@@ -818,8 +851,6 @@
         'chrome_launcher_utils.h',
         'custom_sync_call_context.cc',
         'custom_sync_call_context.h',
-        'external_tab.h',
-        'external_tab.cc',
         'navigation_constraints.h',
         'navigation_constraints.cc',
         'plugin_url_request.h',
@@ -845,6 +876,7 @@
         'chrome_frame_ie',
         'chrome_frame_strings',
         'chrome_frame_utils',
+        'chrome_frame_version_resources',
         'chrome_tab_idl',
         'chrome_frame_launcher.gyp:chrome_launcher',
         'chrome_frame_launcher.gyp:chrome_frame_helper',
@@ -856,6 +888,9 @@
         '../chrome/chrome.gyp:chrome_version_resources',
         '../chrome/chrome.gyp:common',
       ],
+      'defines': [
+        '_WINDLL',
+      ],
       'sources': [
         'chrome_frame_elevation.rgs',
         'chrome_frame_reporting.cc',
@@ -863,11 +898,11 @@
         'chrome_tab.cc',
         'chrome_tab.def',
         '<(SHARED_INTERMEDIATE_DIR)/chrome_frame/chrome_tab.h',
+        '<(SHARED_INTERMEDIATE_DIR)/chrome_frame/npchrome_frame_dll_version.rc',
         # FIXME(slightlyoff): For chrome_tab.tlb. Giant hack until we can
         #   figure out something more gyp-ish.
         'resources/tlb_resource.rc',
         'chrome_tab.rgs',
-        'chrome_tab_version.rc',
         'resource.h',
       ],
       'conditions': [
@@ -884,11 +919,11 @@
           'dependencies': [
             '../breakpad/breakpad.gyp:breakpad_handler_dll',
             '../chrome/chrome.gyp:automation',
-            # Make the archive build happy.
-            '../chrome/chrome.gyp:syncapi_core',
             # Installer
             '../chrome/chrome.gyp:installer_util',
             '../google_update/google_update.gyp:google_update',
+            # Make the archive build happy.
+            '../sync/sync.gyp:sync_api',
             # Crash Reporting
             'crash_reporting/crash_reporting.gyp:crash_report',
           ],

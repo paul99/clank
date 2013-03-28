@@ -12,7 +12,7 @@
 #include "base/memory/ref_counted.h"
 #include "base/process.h"
 #include "webkit/blob/blob_data.h"
-#include "webkit/blob/blob_export.h"
+#include "webkit/storage/webkit_storage_export.h"
 
 class GURL;
 class FilePath;
@@ -20,14 +20,11 @@ class FilePath;
 namespace base {
 class Time;
 }
-namespace net {
-class UploadData;
-}
 
 namespace webkit_blob {
 
 // This class handles the logistics of blob Storage within the browser process.
-class BLOB_EXPORT BlobStorageController {
+class WEBKIT_STORAGE_EXPORT BlobStorageController {
  public:
   BlobStorageController();
   ~BlobStorageController();
@@ -39,10 +36,6 @@ class BLOB_EXPORT BlobStorageController {
   void CloneBlob(const GURL& url, const GURL& src_url);
   void RemoveBlob(const GURL& url);
   BlobData* GetBlobDataFromUrl(const GURL& url);
-
-  // If there is any blob reference in the upload data, it will get resolved
-  // and updated in place.
-  void ResolveBlobReferencesInUploadData(net::UploadData* upload_data);
 
  private:
   friend class ViewBlobInternalsJob;
@@ -57,6 +50,10 @@ class BLOB_EXPORT BlobStorageController {
   void AppendFileItem(BlobData* target_blob_data,
                       const FilePath& file_path, uint64 offset, uint64 length,
                       const base::Time& expected_modification_time);
+  void AppendFileSystemFileItem(
+      BlobData* target_blob_data,
+      const GURL& url, uint64 offset, uint64 length,
+      const base::Time& expected_modification_time);
 
   bool RemoveFromMapHelper(BlobMap* map, const GURL& url);
 

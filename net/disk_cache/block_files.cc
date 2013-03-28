@@ -284,8 +284,8 @@ bool BlockFiles::CreateBlock(FileType block_type, int block_count,
   if (!file)
     return false;
 
-  MappedFile::ScopedReadWrite rw(file);
-  BlockFileHeader* header = reinterpret_cast<BlockFileHeader*>(rw.buffer());
+  ScopedFlush flush(file);
+  BlockFileHeader* header = reinterpret_cast<BlockFileHeader*>(file->buffer());
 
   int target_size = 0;
   for (int i = block_count; i <= 4; i++) {
@@ -327,18 +327,10 @@ void BlockFiles::DeleteBlock(Addr address, bool deep) {
   if (deep)
     file->Write(zero_buffer_, size, offset);
 
-  {
-    MappedFile::ScopedReadWrite rw(file);
-    BlockFileHeader* header = reinterpret_cast<BlockFileHeader*>(rw.buffer());
-    DeleteMapBlock(address.start_block(), address.num_blocks(), header);
-  }
+  BlockFileHeader* header = reinterpret_cast<BlockFileHeader*>(file->buffer());
+  DeleteMapBlock(address.start_block(), address.num_blocks(), header);
+  file->Flush();
 
-  BlockFileHeader* header;
-  {
-    // RemoveEmptyFile may delete the file, ScopedReadOnly can't be around it.
-    MappedFile::ScopedReadOnly ro(file);
-    header = reinterpret_cast<BlockFileHeader*>(ro.buffer());
-  }
   if (!header->num_entries) {
     // This file is now empty. Let's try to delete it.
     FileType type = Addr::RequiredFileType(header->entry_size);
@@ -391,8 +383,7 @@ bool BlockFiles::IsValid(Addr address) {
   if (!file)
     return false;
 
-  MappedFile::ScopedReadOnly ro(file);
-  BlockFileHeader* header = reinterpret_cast<BlockFileHeader*>(ro.buffer());
+  BlockFileHeader* header = reinterpret_cast<BlockFileHeader*>(file->buffer());
   bool rv = UsedMapBlock(address.start_block(), address.num_blocks(), header);
   DCHECK(rv);
 
@@ -451,8 +442,7 @@ bool BlockFiles::OpenBlockFile(int index) {
     return false;
   }
 
-  MappedFile::ScopedReadOnly ro(file);
-  BlockFileHeader* header = reinterpret_cast<BlockFileHeader*>(ro.buffer());
+  BlockFileHeader* header = reinterpret_cast<BlockFileHeader*>(file->buffer());
   if (kBlockMagic != header->magic || kCurrentVersion != header->version) {
     LOG(ERROR) << "Invalid file version or magic " << name.value();
     return false;
@@ -479,7 +469,7 @@ bool BlockFiles::OpenBlockFile(int index) {
       return false;
   }
 
-  MappedFile::ScopedReadWrite rw(file);
+  ScopedFlush flush(file);
   DCHECK(!block_files_[index]);
   file.swap(&block_files_[index]);
   return true;
@@ -489,6 +479,7 @@ bool BlockFiles::GrowBlockFile(MappedFile* file, BlockFileHeader* header) {
   if (kMaxBlocks == header->max_entries)
     return false;
 
+  ScopedFlush flush(file);
   DCHECK(!header->empty[3]);
   int new_size = header->max_entries + 1024;
   if (new_size > kMaxBlocks)
@@ -501,14 +492,12 @@ bool BlockFiles::GrowBlockFile(MappedFile* file, BlockFileHeader* header) {
     if (header->updating < 10 && !FixBlockFileHeader(file)) {
       // If we can't fix the file increase the lock guard so we'll pick it on
       // the next start and replace it.
-      MappedFile::ScopedReadWrite rw(file);
       header->updating = 100;
       return false;
     }
     return (header->max_entries >= new_size);
   }
 
-  MappedFile::ScopedReadWrite rw(file);
   FileLock lock(header);
   header->empty[3] = (new_size - header->max_entries) / 4;  // 4 blocks entries
   header->max_entries = new_size;
@@ -519,17 +508,15 @@ bool BlockFiles::GrowBlockFile(MappedFile* file, BlockFileHeader* header) {
 MappedFile* BlockFiles::FileForNewBlock(FileType block_type, int block_count) {
   COMPILE_ASSERT(RANKINGS == 1, invalid_file_type);
   MappedFile* file = block_files_[block_type - 1];
+  BlockFileHeader* header = reinterpret_cast<BlockFileHeader*>(file->buffer());
 
   TimeTicks start = TimeTicks::Now();
-  while (true) {
-    MappedFile::ScopedReadOnly ro(file);
-    BlockFileHeader* header = reinterpret_cast<BlockFileHeader*>(ro.buffer());
-    if (!NeedToGrowBlockFile(header, block_count))
-      break;  // This file already has space for our block
+  while (NeedToGrowBlockFile(header, block_count)) {
     if (kMaxBlocks == header->max_entries) {
       file = NextFile(file);
       if (!file)
         return NULL;
+      header = reinterpret_cast<BlockFileHeader*>(file->buffer());
       continue;
     }
 
@@ -542,8 +529,8 @@ MappedFile* BlockFiles::FileForNewBlock(FileType block_type, int block_count) {
 }
 
 MappedFile* BlockFiles::NextFile(MappedFile* file) {
-  MappedFile::ScopedReadWrite rw(file);
-  BlockFileHeader* header = reinterpret_cast<BlockFileHeader*>(rw.buffer());
+  ScopedFlush flush(file);
+  BlockFileHeader* header = reinterpret_cast<BlockFileHeader*>(file->buffer());
   int new_file = header->next_file;
   if (!new_file) {
     // RANKINGS is not reported as a type for small entries, but we may be
@@ -577,32 +564,24 @@ int BlockFiles::CreateNextBlockFile(FileType block_type) {
 // that are empty.
 bool BlockFiles::RemoveEmptyFile(FileType block_type) {
   MappedFile* file = block_files_[block_type - 1];
+  BlockFileHeader* header = reinterpret_cast<BlockFileHeader*>(file->buffer());
 
-  while (true) {
-    MappedFile::ScopedReadWrite rw(file);
-    BlockFileHeader* header = reinterpret_cast<BlockFileHeader*>(rw.buffer());
-    if (!header->next_file)
-      break;
-
+  while (header->next_file) {
     // Only the block_file argument is relevant for what we want.
     Addr address(BLOCK_256, 1, header->next_file, 0);
     MappedFile* next_file = GetFile(address);
     if (!next_file)
       return false;
 
-    BlockFileHeader* next_header;
-    {
-      // As next_file may be deleted in the following DeleteCacheFile(),
-      // ScopedReadOnly dtor needs to be called before the file is deleted.
-      MappedFile::ScopedReadOnly next_ro(next_file);
-      next_header = reinterpret_cast<BlockFileHeader*>(next_ro.buffer());
-    }
+    BlockFileHeader* next_header =
+        reinterpret_cast<BlockFileHeader*>(next_file->buffer());
     if (!next_header->num_entries) {
       DCHECK_EQ(next_header->entry_size, header->entry_size);
       // Delete next_file and remove it from the chain.
       int file_index = header->next_file;
       header->next_file = next_header->next_file;
       DCHECK(block_files_.size() >= static_cast<unsigned int>(file_index));
+      file->Flush();
 
       // We get a new handle to the file and release the old one so that the
       // file gets unmmaped... so we can delete it.
@@ -619,6 +598,7 @@ bool BlockFiles::RemoveEmptyFile(FileType block_type) {
       continue;
     }
 
+    header = next_header;
     file = next_file;
   }
   return true;
@@ -627,8 +607,8 @@ bool BlockFiles::RemoveEmptyFile(FileType block_type) {
 // Note that we expect to be called outside of a FileLock... however, we cannot
 // DCHECK on header->updating because we may be fixing a crash.
 bool BlockFiles::FixBlockFileHeader(MappedFile* file) {
-  MappedFile::ScopedReadWrite rw(file);
-  BlockFileHeader* header = reinterpret_cast<BlockFileHeader*>(rw.buffer());
+  ScopedFlush flush(file);
+  BlockFileHeader* header = reinterpret_cast<BlockFileHeader*>(file->buffer());
   int file_size = static_cast<int>(file->GetLength());
   if (file_size < static_cast<int>(sizeof(*header)))
     return false;  // file_size > 2GB is also an error.
@@ -678,8 +658,8 @@ void BlockFiles::GetFileStats(int index, int* used_count, int* load) {
     if (!block_files_[index] && !OpenBlockFile(index))
       return;
 
-    MappedFile::ScopedReadOnly ro(block_files_[index]);
-    BlockFileHeader* header = reinterpret_cast<BlockFileHeader*>(ro.buffer());
+    BlockFileHeader* header =
+        reinterpret_cast<BlockFileHeader*>(block_files_[index]->buffer());
 
     max_blocks += header->max_entries;
     int used = header->max_entries;

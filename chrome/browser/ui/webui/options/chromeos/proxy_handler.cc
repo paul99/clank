@@ -1,4 +1,4 @@
-// Copyright (c) 2011 The Chromium Authors. All rights reserved.
+// Copyright (c) 2012 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -19,6 +19,7 @@
 #include "ui/base/resource/resource_bundle.h"
 
 namespace chromeos {
+namespace options {
 
 ProxyHandler::ProxyHandler() {
 }
@@ -29,59 +30,38 @@ ProxyHandler::~ProxyHandler() {
 void ProxyHandler::GetLocalizedValues(
     DictionaryValue* localized_strings) {
   DCHECK(localized_strings);
+
   // Proxy page - ChromeOS
-  localized_strings->SetString("proxyPage",
-      l10n_util::GetStringUTF16(IDS_OPTIONS_PROXY_TAB_LABEL));
-  localized_strings->SetString("proxyPageTitleFormat",
-     l10n_util::GetStringUTF16(IDS_PROXY_PAGE_TITLE_FORMAT));
-  localized_strings->SetString("proxy_config_title",
-     l10n_util::GetStringUTF16(IDS_PROXY_CONFIG_TITLE));
-  localized_strings->SetString("proxyDirectInternetConnection",
-     l10n_util::GetStringUTF16(IDS_PROXY_DIRECT_CONNECTION));
+  static OptionsStringResource resources[] = {
+    { "proxyPage", IDS_OPTIONS_PROXY_TAB_LABEL },
+    { "proxyDirectInternetConnection", IDS_PROXY_DIRECT_CONNECTION },
+    { "proxyManual", IDS_PROXY_MANUAL_CONFIG },
+    { "sameProxyProtocols", IDS_PROXY_SAME_FORALL },
+    { "httpProxy", IDS_PROXY_HTTP_PROXY },
+    { "secureHttpProxy", IDS_PROXY_HTTP_SECURE_HTTP_PROXY },
+    { "ftpProxy", IDS_PROXY_FTP_PROXY },
+    { "socksHost", IDS_PROXY_SOCKS_HOST },
+    { "proxyAutomatic", IDS_PROXY_AUTOMATIC },
+    { "proxyConfigUrl", IDS_PROXY_CONFIG_URL },
+    { "advancedProxyConfig", IDS_PROXY_ADVANCED_CONFIG },
+    { "addHost", IDS_PROXY_ADD_HOST },
+    { "removeHost", IDS_PROXY_REMOVE_HOST },
+    { "proxyPort", IDS_PROXY_PORT },
+    { "proxyBypass", IDS_PROXY_BYPASS },
+    { "proxyBannerPolicy", IDS_OPTIONS_SETTINGS_INTERNET_OPTIONS_PROXY_POLICY },
+    { "proxyBannerExtension",
+       IDS_OPTIONS_SETTINGS_INTERNET_OPTIONS_PROXY_EXTENSION },
+    { "proxyBannerOther",
+      IDS_OPTIONS_SETTINGS_INTERNET_OPTIONS_PROXY_OTHER_PRECEDE }
+  };
 
-  localized_strings->SetString("proxyManual",
-     l10n_util::GetStringUTF16(IDS_PROXY_MANUAL_CONFIG));
-  localized_strings->SetString("sameProxyProtocols",
-     l10n_util::GetStringUTF16(IDS_PROXY_SAME_FORALL));
+  RegisterStrings(localized_strings, resources, arraysize(resources));
 
-  localized_strings->SetString("httpProxy",
-     l10n_util::GetStringUTF16(IDS_PROXY_HTTP_PROXY));
-  localized_strings->SetString("secureHttpProxy",
-     l10n_util::GetStringUTF16(IDS_PROXY_HTTP_SECURE_HTTP_PROXY));
-  localized_strings->SetString("ftpProxy",
-     l10n_util::GetStringUTF16(IDS_PROXY_FTP_PROXY));
-  localized_strings->SetString("socksHost",
-     l10n_util::GetStringUTF16(IDS_PROXY_SOCKS_HOST));
-  localized_strings->SetString("proxyAutomatic",
-     l10n_util::GetStringUTF16(IDS_PROXY_AUTOMATIC));
-  localized_strings->SetString("proxyConfigUrl",
-     l10n_util::GetStringUTF16(IDS_PROXY_CONFIG_URL));
-  localized_strings->SetString("advanced_proxy_config",
-     l10n_util::GetStringUTF16(IDS_PROXY_ADVANCED_CONFIG));
-  localized_strings->SetString("addHost",
-     l10n_util::GetStringUTF16(IDS_PROXY_ADD_HOST));
-  localized_strings->SetString("removeHost",
-     l10n_util::GetStringUTF16(IDS_PROXY_REMOVE_HOST));
-  localized_strings->SetString("proxyPort",
-     l10n_util::GetStringUTF16(IDS_PROXY_PORT));
-  localized_strings->SetString("proxyBypass",
-     l10n_util::GetStringUTF16(IDS_PROXY_BYPASS));
-  localized_strings->SetString("policyManagedPrefsBannerText",
-      l10n_util::GetStringUTF16(IDS_OPTIONS_POLICY_MANAGED_PREFS));
-  localized_strings->SetString("extensionManagedPrefsBannerText",
-      l10n_util::GetStringUTF16(IDS_OPTIONS_EXTENSION_MANAGED_PREFS));
-  localized_strings->SetString("unmodifiablePrefsBannerText",
-      l10n_util::GetStringUTF16(IDS_OPTIONS_UNMODIFIABLE_PREFS));
-  localized_strings->SetString("enableSharedProxiesBannerText",
+  localized_strings->SetString("proxyBannerShared",
       l10n_util::GetStringFUTF16(
-          IDS_OPTIONS_SETTINGS_INTERNET_OPTIONS_ENABLE_SHARED_PROXIES_HINT,
+          IDS_OPTIONS_SETTINGS_INTERNET_OPTIONS_PROXY_ENABLE_SHARED_HINT,
           l10n_util::GetStringUTF16(IDS_OPTIONS_SETTINGS_USE_SHARED_PROXIES)));
 }
 
-void ProxyHandler::SetNetworkName(const std::string& name) {
-  StringValue network(name);
-  web_ui()->CallJavascriptFunction("options.ProxyOptions.setNetworkName",
-                                   network);
-}
-
+}  // namespace options
 }  // namespace chromeos

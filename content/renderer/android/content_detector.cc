@@ -4,14 +4,34 @@
 
 #include "content/renderer/android/content_detector.h"
 
-#include "third_party/WebKit/Source/WebKit/chromium/public/android/WebDOMTextContentWalker.h"
-#include "third_party/WebKit/Source/WebKit/chromium/public/android/WebHitTestInfo.h"
+#include "base/logging.h"
+#include "third_party/WebKit/Source/WebKit/chromium/public/platform/WebPoint.h"
+#include "third_party/WebKit/Source/WebKit/chromium/public/WebHitTestResult.h"
+#include "third_party/WebKit/Source/WebKit/chromium/public/WebSurroundingText.h"
 
-using WebKit::WebDOMTextContentWalker;
 using WebKit::WebRange;
+using WebKit::WebSurroundingText;
+
+namespace content {
+
+ContentDetector::Result::Result() : valid(false) {}
+
+ContentDetector::Result::Result(const WebKit::WebRange& content_boundaries,
+                                const std::string& text,
+                                const GURL& intent_url)
+  : valid(true),
+    content_boundaries(content_boundaries),
+    text(text),
+    intent_url(intent_url) {
+}
+
+ContentDetector::Result::~Result() {}
 
 ContentDetector::Result ContentDetector::FindTappedContent(
-    const WebKit::WebHitTestInfo& hit_test) {
+    const WebKit::WebHitTestResult& hit_test) {
+  if (hit_test.isNull())
+    return Result();
+
   std::string content_text;
   WebKit::WebRange range = FindContentRange(hit_test, &content_text);
   if (range.isNull())
@@ -22,16 +42,21 @@ ContentDetector::Result ContentDetector::FindTappedContent(
 }
 
 WebRange ContentDetector::FindContentRange(
-    const WebKit::WebHitTestInfo& hit_test, std::string* content_text) {
-  // As the content walker looks at maxLength/2 characters on either side of
-  // the hit point, we need to double max content length here.
-  WebDOMTextContentWalker content_walker(hit_test,
-                                         GetMaximumContentLength() * 2);
-  string16 content = content_walker.content();
+    const WebKit::WebHitTestResult& hit_test,
+    std::string* content_text) {
+  // As the surrounding text extractor looks at maxLength/2 characters on
+  // either side of the hit point, we need to double max content length here.
+  WebSurroundingText surrounding_text;
+  surrounding_text.initialize(hit_test.node(), hit_test.localPoint(),
+                              GetMaximumContentLength() * 2);
+  if (surrounding_text.isNull())
+    return WebRange();
+
+  string16 content = surrounding_text.textContent();
   if (content.empty())
     return WebRange();
 
-  size_t selected_offset = content_walker.hitOffsetInContent();
+  size_t selected_offset = surrounding_text.hitOffsetInTextContent();
   for (size_t start_offset = 0; start_offset < content.length();) {
     size_t relative_start, relative_end;
     if (!FindContent(content.begin() + start_offset,
@@ -43,7 +68,7 @@ WebRange ContentDetector::FindContentRange(
       DCHECK(content_end <= content.length());
 
       if (selected_offset >= content_start && selected_offset < content_end) {
-        WebRange range = content_walker.contentOffsetsToRange(
+        WebRange range = surrounding_text.rangeFromContentOffsets(
             content_start, content_end);
         DCHECK(!range.isNull());
         return range;
@@ -55,3 +80,5 @@ WebRange ContentDetector::FindContentRange(
 
   return WebRange();
 }
+
+}  // namespace content

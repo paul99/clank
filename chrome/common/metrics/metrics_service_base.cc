@@ -10,34 +10,50 @@
 
 using base::Histogram;
 
-MetricsServiceBase::MetricsServiceBase() {
+MetricsServiceBase::MetricsServiceBase()
+    : ALLOW_THIS_IN_INITIALIZER_LIST(histogram_snapshot_manager_(this)) {
 }
 
 MetricsServiceBase::~MetricsServiceBase() {
 }
 
+// static
+const char MetricsServiceBase::kServerUrlXml[] =
+    "https://clients4.google.com/firefox/metrics/collect";
+const char MetricsServiceBase::kServerUrlProto[] =
+    "https://clients4.google.com/uma/v2";
+
+// static
+const char MetricsServiceBase::kMimeTypeXml[] =
+    "application/vnd.mozilla.metrics.bz2";
+// static
+const char MetricsServiceBase::kMimeTypeProto[] =
+    "application/vnd.chrome.uma";
+
 void MetricsServiceBase::RecordCurrentHistograms() {
   DCHECK(log_manager_.current_log());
-  TransmitAllHistograms(base::Histogram::kNoFlags, true);
+  histogram_snapshot_manager_.PrepareDeltas(base::Histogram::kNoFlags, true);
 }
 
-void MetricsServiceBase::TransmitHistogramDelta(
+void MetricsServiceBase::RecordDelta(
     const base::Histogram& histogram,
-    const base::Histogram::SampleSet& snapshot) {
+    const base::HistogramSamples& snapshot) {
   log_manager_.current_log()->RecordHistogramDelta(histogram, snapshot);
 }
 
-void MetricsServiceBase::InconsistencyDetected(int problem) {
+void MetricsServiceBase::InconsistencyDetected(
+    Histogram::Inconsistencies problem) {
   UMA_HISTOGRAM_ENUMERATION("Histogram.InconsistenciesBrowser",
                             problem, Histogram::NEVER_EXCEEDED_VALUE);
 }
 
-void MetricsServiceBase::UniqueInconsistencyDetected(int problem) {
+void MetricsServiceBase::UniqueInconsistencyDetected(
+    Histogram::Inconsistencies problem) {
   UMA_HISTOGRAM_ENUMERATION("Histogram.InconsistenciesBrowserUnique",
                             problem, Histogram::NEVER_EXCEEDED_VALUE);
 }
 
-void MetricsServiceBase::SnapshotProblemResolved(int amount) {
+void MetricsServiceBase::InconsistencyDetectedInLoggedCount(int amount) {
   UMA_HISTOGRAM_COUNTS("Histogram.InconsistentSnapshotBrowser",
                        std::abs(amount));
 }

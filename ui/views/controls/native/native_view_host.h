@@ -4,7 +4,6 @@
 
 #ifndef UI_VIEWS_CONTROLS_NATIVE_NATIVE_VIEW_HOST_H_
 #define UI_VIEWS_CONTROLS_NATIVE_NATIVE_VIEW_HOST_H_
-#pragma once
 
 #include <string>
 
@@ -95,6 +94,11 @@ class VIEWS_EXPORT NativeViewHost : public View {
   // Detach the native view. |destroyed| is true if the native view is
   // detached because it's being destroyed, or false otherwise.
   void Detach(bool destroyed);
+
+  // Invokes ViewRemoved() on the FocusManager for all the child Widgets of our
+  // NativeView. This is used when detaching to ensure the FocusManager doesn't
+  // have a reference to a View that is no longer reachable.
+  void ClearFocus();
 
   // The attached native view. There is exactly one native_view_ attached.
   gfx::NativeView native_view_;

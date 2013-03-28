@@ -1,4 +1,4 @@
-// Copyright (c) 2011 The Chromium Authors. All rights reserved.
+// Copyright (c) 2012 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -170,15 +170,15 @@ bool ReplaceCharsT(const STR& input,
                    const STR& replace_with,
                    STR* output) {
   bool removed = false;
-  size_t found;
+  size_t replace_length = replace_with.length();
 
   *output = input;
 
-  found = output->find_first_of(replace_chars);
+  size_t found = output->find_first_of(replace_chars);
   while (found != STR::npos) {
     removed = true;
     output->replace(found, 1, replace_with);
-    found = output->find_first_of(replace_chars, found);
+    found = output->find_first_of(replace_chars, found + replace_length);
   }
 
   return removed;
@@ -386,11 +386,7 @@ bool ContainsOnlyWhitespaceASCII(const std::string& str) {
 }
 
 bool ContainsOnlyWhitespace(const string16& str) {
-  for (string16::const_iterator i(str.begin()); i != str.end(); ++i) {
-    if (!IsWhitespace(*i))
-      return false;
-  }
-  return true;
+  return str.find_first_not_of(kWhitespaceUTF16) == string16::npos;
 }
 
 template<typename STR>
@@ -476,7 +472,7 @@ bool IsStringUTF8(const std::string& str) {
     int32 code_point;
     CBU8_NEXT(src, char_index, src_len, code_point);
     if (!base::IsValidCharacter(code_point))
-       return false;
+      return false;
   }
   return true;
 }
@@ -754,8 +750,7 @@ size_t Tokenize(const base::StringPiece& str,
 }
 
 template<typename STR>
-static STR JoinStringT(const std::vector<STR>& parts,
-                       typename STR::value_type sep) {
+static STR JoinStringT(const std::vector<STR>& parts, const STR& sep) {
   if (parts.empty())
     return STR();
 
@@ -772,11 +767,21 @@ static STR JoinStringT(const std::vector<STR>& parts,
 }
 
 std::string JoinString(const std::vector<std::string>& parts, char sep) {
-  return JoinStringT(parts, sep);
+  return JoinStringT(parts, std::string(1, sep));
 }
 
 string16 JoinString(const std::vector<string16>& parts, char16 sep) {
-  return JoinStringT(parts, sep);
+  return JoinStringT(parts, string16(1, sep));
+}
+
+std::string JoinString(const std::vector<std::string>& parts,
+                       const std::string& separator) {
+  return JoinStringT(parts, separator);
+}
+
+string16 JoinString(const std::vector<string16>& parts,
+                    const string16& separator) {
+  return JoinStringT(parts, separator);
 }
 
 template<class FormatStringType, class OutStringType>

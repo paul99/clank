@@ -4,7 +4,6 @@
 
 #ifndef CHROME_COMMON_AUTOMATION_ID_H_
 #define CHROME_COMMON_AUTOMATION_ID_H_
-#pragma once
 
 #include <string>
 
@@ -29,6 +28,7 @@ class AutomationId {
     kTypeExtensionBgPage,
     kTypeExtensionInfobar,
     kTypeExtension,
+    kTypeAppShell,
   };
 
   static bool FromValue(

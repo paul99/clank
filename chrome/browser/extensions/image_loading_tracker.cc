@@ -4,33 +4,96 @@
 
 #include "chrome/browser/extensions/image_loading_tracker.h"
 
+#include <string>
+#include <vector>
+
 #include "base/bind.h"
 #include "base/file_util.h"
+#include "base/threading/sequenced_worker_pool.h"
+#include "chrome/browser/extensions/image_loader.h"
+#include "chrome/browser/ui/webui/extensions/extension_icon_source.h"
 #include "chrome/common/chrome_notification_types.h"
 #include "chrome/common/extensions/extension.h"
+#include "chrome/common/extensions/extension_constants.h"
+#include "chrome/common/extensions/extension_file_util.h"
 #include "chrome/common/extensions/extension_resource.h"
 #include "content/public/browser/browser_thread.h"
 #include "content/public/browser/notification_service.h"
 #include "skia/ext/image_operations.h"
 #include "third_party/skia/include/core/SkBitmap.h"
+#include "ui/base/resource/resource_bundle.h"
+#include "ui/gfx/image/image.h"
+#include "ui/gfx/image/image_skia_rep.h"
 #include "webkit/glue/image_decoder.h"
 
 using content::BrowserThread;
+using extensions::Extension;
+
+namespace {
+
+bool ShouldResizeImageRepresentation(
+    ImageLoadingTracker::ImageRepresentation::ResizeCondition resize_method,
+    const gfx::Size& decoded_size,
+    const gfx::Size& desired_size) {
+  switch (resize_method) {
+    case ImageLoadingTracker::ImageRepresentation::ALWAYS_RESIZE:
+      return decoded_size != desired_size;
+    case ImageLoadingTracker::ImageRepresentation::RESIZE_WHEN_LARGER:
+      return decoded_size.width() > desired_size.width() ||
+             decoded_size.height() > desired_size.height();
+    default:
+      NOTREACHED();
+      return false;
+  }
+}
+
+}  // namespace
+
+////////////////////////////////////////////////////////////////////////////////
+// ImageLoadingTracker::Observer
 
 ImageLoadingTracker::Observer::~Observer() {}
 
 ////////////////////////////////////////////////////////////////////////////////
+// ImageLoadingTracker::ImageRepresentation
+
+ImageLoadingTracker::ImageRepresentation::ImageRepresentation(
+    const ExtensionResource& resource,
+    ResizeCondition resize_method,
+    const gfx::Size& desired_size,
+    ui::ScaleFactor scale_factor)
+    : resource(resource),
+      resize_method(resize_method),
+      desired_size(desired_size),
+      scale_factor(scale_factor) {
+}
+
+ImageLoadingTracker::ImageRepresentation::~ImageRepresentation() {
+}
+
+////////////////////////////////////////////////////////////////////////////////
+// ImageLoadingTracker::PendingLoadInfo
+
+ImageLoadingTracker::PendingLoadInfo::PendingLoadInfo()
+  : extension(NULL),
+    cache(CACHE),
+    pending_count(0) {
+}
+
+ImageLoadingTracker::PendingLoadInfo::~PendingLoadInfo() {}
+
+////////////////////////////////////////////////////////////////////////////////
 // ImageLoadingTracker::ImageLoader
 
-// A RefCounted class for loading images on the File thread and reporting back
-// on the UI thread.
+// A RefCounted class for loading bitmaps/image reps on the File thread and
+// reporting back on the UI thread.
 class ImageLoadingTracker::ImageLoader
     : public base::RefCountedThreadSafe<ImageLoader> {
  public:
   explicit ImageLoader(ImageLoadingTracker* tracker)
       : tracker_(tracker) {
     CHECK(BrowserThread::GetCurrentThreadIdentifier(&callback_thread_id_));
-    DCHECK(!BrowserThread::CurrentlyOn(BrowserThread::FILE));
+    DCHECK(!BrowserThread::GetBlockingPool()->RunsTasksOnCurrentThread());
   }
 
   // Lets this class know that the tracker is no longer interested in the
@@ -39,76 +102,134 @@ class ImageLoadingTracker::ImageLoader
     tracker_ = NULL;
   }
 
-  // Instructs the loader to load a task on the File thread.
-  void LoadImage(const ExtensionResource& resource,
-                 const gfx::Size& max_size,
-                 int id) {
-    DCHECK(!BrowserThread::CurrentlyOn(BrowserThread::FILE));
-    BrowserThread::PostTask(
-        BrowserThread::FILE, FROM_HERE,
-        base::Bind(&ImageLoader::LoadOnFileThread, this, resource,
-                   max_size, id));
+  // Instructs the loader to load a task on the blocking pool.
+  void LoadImage(const ImageRepresentation& image_info, int id) {
+    DCHECK(BrowserThread::CurrentlyOn(callback_thread_id_));
+    BrowserThread::PostBlockingPoolTask(
+        FROM_HERE,
+        base::Bind(&ImageLoader::LoadOnBlockingPool, this, image_info, id));
   }
 
-  void LoadOnFileThread(const ExtensionResource& resource,
-                        const gfx::Size& max_size,
-                        int id) {
-    DCHECK(BrowserThread::CurrentlyOn(BrowserThread::FILE));
+  void LoadOnBlockingPool(const ImageRepresentation& image_info, int id) {
+    DCHECK(BrowserThread::GetBlockingPool()->RunsTasksOnCurrentThread());
 
     // Read the file from disk.
     std::string file_contents;
-    FilePath path = resource.GetFilePath();
+    FilePath path = image_info.resource.GetFilePath();
     if (path.empty() || !file_util::ReadFileToString(path, &file_contents)) {
-      ReportBack(NULL, resource, gfx::Size(), id);
+      ReportBack(NULL, image_info, gfx::Size(), id);
       return;
     }
 
-    // Decode the image using WebKit's image decoder.
+    // Decode the bitmap using WebKit's image decoder.
     const unsigned char* data =
         reinterpret_cast<const unsigned char*>(file_contents.data());
     webkit_glue::ImageDecoder decoder;
     scoped_ptr<SkBitmap> decoded(new SkBitmap());
+    // Note: This class only decodes bitmaps from extension resources. Chrome
+    // doesn't (for security reasons) directly load extension resources provided
+    // by the extension author, but instead decodes them in a separate
+    // locked-down utility process. Only if the decoding succeeds is the image
+    // saved from memory to disk and subsequently used in the Chrome UI.
+    // Chrome is therefore decoding bitmaps here that were generated by Chrome.
     *decoded = decoder.Decode(data, file_contents.length());
     if (decoded->empty()) {
-      ReportBack(NULL, resource, gfx::Size(), id);
+      ReportBack(NULL, image_info, gfx::Size(), id);
       return;  // Unable to decode.
     }
 
     gfx::Size original_size(decoded->width(), decoded->height());
+    *decoded = ResizeIfNeeded(*decoded, image_info);
 
-    if (decoded->width() > max_size.width() ||
-        decoded->height() > max_size.height()) {
-      // The bitmap is too big, re-sample.
-      *decoded = skia::ImageOperations::Resize(
-          *decoded, skia::ImageOperations::RESIZE_LANCZOS3,
-          max_size.width(), max_size.height());
-    }
-
-    ReportBack(decoded.release(), resource, original_size, id);
+    ReportBack(decoded.release(), image_info, original_size, id);
   }
 
-  void ReportBack(SkBitmap* image, const ExtensionResource& resource,
+  // Instructs the loader to load a resource on the UI thread.
+  void LoadResource(const ImageRepresentation& image_info,
+                    int id,
+                    int resource_id) {
+    DCHECK(BrowserThread::CurrentlyOn(callback_thread_id_));
+
+    if (BrowserThread::CurrentlyOn(BrowserThread::UI)) {
+      LoadResourceOnUIThread(image_info, id, resource_id);
+      return;
+    }
+
+    BrowserThread::PostTask(
+        BrowserThread::UI, FROM_HERE,
+        base::Bind(&ImageLoader::LoadResourceOnUIThread, this, image_info,
+                   id, resource_id));
+  }
+
+  void LoadResourceOnUIThread(const ImageRepresentation& image_info,
+                              int id,
+                              int resource_id) {
+    DCHECK(BrowserThread::CurrentlyOn(BrowserThread::UI));
+
+    // Bundled image resources is only safe to be loaded on UI thread.
+    gfx::ImageSkia* image =
+        ResourceBundle::GetSharedInstance().GetImageSkiaNamed(resource_id);
+    image->MakeThreadSafe();
+
+    BrowserThread::PostBlockingPoolTask(
+        FROM_HERE,
+        base::Bind(&ImageLoader::ResizeOnBlockingPool, this, image_info,
+                   id, *image));
+  }
+
+  void ResizeOnBlockingPool(const ImageRepresentation& image_info,
+                            int id,
+                            const gfx::ImageSkia& image) {
+    DCHECK(BrowserThread::GetBlockingPool()->RunsTasksOnCurrentThread());
+    // TODO(xiyuan): Clean up to use SkBitmap here and in LoadOnBlockingPool.
+    scoped_ptr<SkBitmap> bitmap(new SkBitmap);
+    gfx::Size original_size(image.width(), image.height());
+    *bitmap = ResizeIfNeeded(*image.bitmap(), image_info);
+    ReportBack(bitmap.release(), image_info, original_size, id);
+  }
+
+  void ReportBack(const SkBitmap* bitmap, const ImageRepresentation& image_info,
                   const gfx::Size& original_size, int id) {
-    DCHECK(BrowserThread::CurrentlyOn(BrowserThread::FILE));
+    DCHECK(BrowserThread::GetBlockingPool()->RunsTasksOnCurrentThread());
 
     BrowserThread::PostTask(
         callback_thread_id_, FROM_HERE,
-        base::Bind(&ImageLoader::ReportOnUIThread, this,
-                   image, resource, original_size, id));
+        base::Bind(&ImageLoader::ReportOnCallingThread, this,
+                   bitmap, image_info, original_size, id));
   }
 
-  void ReportOnUIThread(SkBitmap* image, const ExtensionResource& resource,
-                        const gfx::Size& original_size, int id) {
-    DCHECK(!BrowserThread::CurrentlyOn(BrowserThread::FILE));
+  void ReportOnCallingThread(const SkBitmap* bitmap,
+                             const ImageRepresentation& image_info,
+                             const gfx::Size& original_size,
+                             int id) {
+    DCHECK(BrowserThread::CurrentlyOn(callback_thread_id_));
 
     if (tracker_)
-      tracker_->OnImageLoaded(image, resource, original_size, id);
+      tracker_->OnBitmapLoaded(bitmap, image_info, original_size, id, true);
 
-    delete image;
+    if (bitmap)
+      delete bitmap;
   }
 
  private:
-  // The tracker we are loading the image for. If NULL, it means the tracker is
+  friend class base::RefCountedThreadSafe<ImageLoader>;
+  ~ImageLoader() {}
+
+  SkBitmap ResizeIfNeeded(const SkBitmap& bitmap,
+                          const ImageRepresentation& image_info) {
+    gfx::Size original_size(bitmap.width(), bitmap.height());
+    if (ShouldResizeImageRepresentation(image_info.resize_method,
+                                        original_size,
+                                        image_info.desired_size)) {
+      return skia::ImageOperations::Resize(
+          bitmap, skia::ImageOperations::RESIZE_LANCZOS3,
+          image_info.desired_size.width(), image_info.desired_size.height());
+    }
+
+    return bitmap;
+  }
+
+  // The tracker we are loading the bitmap for. If NULL, it means the tracker is
   // no longer interested in the reply.
   ImageLoadingTracker* tracker_;
 
@@ -139,46 +260,105 @@ void ImageLoadingTracker::LoadImage(const Extension* extension,
                                     const ExtensionResource& resource,
                                     const gfx::Size& max_size,
                                     CacheParam cache) {
-  // If we don't have a path we don't need to do any further work, just respond
-  // back.
-  int id = next_id_++;
-  if (resource.relative_path().empty()) {
-    OnImageLoaded(NULL, resource, max_size, id);
-    return;
-  }
-
-  DCHECK(extension->path() == resource.extension_root());
-
-  // See if the extension has the image already.
-  if (extension->HasCachedImage(resource, max_size)) {
-    SkBitmap image = extension->GetCachedImage(resource, max_size);
-    OnImageLoaded(&image, resource, max_size, id);
-    return;
-  }
-
-  if (cache == CACHE)
-    load_map_[id] = extension;
-
-  // Instruct the ImageLoader to load this on the File thread. LoadImage does
-  // not block.
-  if (!loader_)
-    loader_ = new ImageLoader(this);
-  loader_->LoadImage(resource, max_size, id);
+  std::vector<ImageRepresentation> info_list;
+  info_list.push_back(ImageRepresentation(
+      resource,
+      ImageRepresentation::RESIZE_WHEN_LARGER,
+      max_size,
+      ui::SCALE_FACTOR_100P));
+  LoadImages(extension, info_list, cache);
 }
 
-void ImageLoadingTracker::OnImageLoaded(
-    SkBitmap* image,
-    const ExtensionResource& resource,
+void ImageLoadingTracker::LoadImages(
+    const Extension* extension,
+    const std::vector<ImageRepresentation>& info_list,
+    CacheParam cache) {
+  PendingLoadInfo load_info;
+  load_info.extension = extension;
+  load_info.cache = cache;
+  load_info.extension_id = extension->id();
+  load_info.pending_count = info_list.size();
+  int id = next_id_++;
+  load_map_[id] = load_info;
+
+  for (std::vector<ImageRepresentation>::const_iterator it = info_list.begin();
+       it != info_list.end(); ++it) {
+    // If we don't have a path we don't need to do any further work, just
+    // respond back.
+    if (it->resource.relative_path().empty()) {
+      OnBitmapLoaded(NULL, *it, it->desired_size, id, false);
+      continue;
+    }
+
+    DCHECK(extension->path() == it->resource.extension_root());
+
+    // See if the extension has the bitmap already.
+    if (extension->HasCachedImage(it->resource, it->desired_size)) {
+      SkBitmap bitmap = extension->GetCachedImage(it->resource,
+                                                  it->desired_size);
+      OnBitmapLoaded(&bitmap, *it, it->desired_size, id, false);
+      continue;
+    }
+
+    // Instruct the ImageLoader to load this on the File thread. LoadImage and
+    // LoadResource do not block.
+    if (!loader_)
+      loader_ = new ImageLoader(this);
+
+    int resource_id = -1;
+    if (extension->location() == Extension::COMPONENT &&
+        extensions::ImageLoader::IsComponentExtensionResource(
+            extension->path(), it->resource.relative_path(), &resource_id)) {
+      loader_->LoadResource(*it, id, resource_id);
+    } else {
+      loader_->LoadImage(*it, id);
+    }
+  }
+}
+
+void ImageLoadingTracker::OnBitmapLoaded(
+    const SkBitmap* bitmap,
+    const ImageRepresentation& image_info,
     const gfx::Size& original_size,
-    int id) {
-  LoadMap::iterator i = load_map_.find(id);
-  if (i != load_map_.end()) {
-    i->second->SetCachedImage(resource, image ? *image : SkBitmap(),
-                              original_size);
-    load_map_.erase(i);
+    int id,
+    bool should_cache) {
+  LoadMap::iterator load_map_it = load_map_.find(id);
+  DCHECK(load_map_it != load_map_.end());
+  PendingLoadInfo* info = &load_map_it->second;
+
+  // Save the pending results.
+  DCHECK_GT(info->pending_count, 0u);
+  info->pending_count--;
+  if (bitmap) {
+    info->image_skia.AddRepresentation(gfx::ImageSkiaRep(*bitmap,
+                                       image_info.scale_factor));
   }
 
-  observer_->OnImageLoaded(image, resource, id);
+  // Add to the extension's bitmap cache if requested.
+  DCHECK(info->cache != CACHE || info->extension);
+  if (should_cache && info->cache == CACHE  && !image_info.resource.empty() &&
+      !info->extension->HasCachedImage(image_info.resource, original_size)) {
+    info->extension->SetCachedImage(image_info.resource,
+                                    bitmap ? *bitmap : SkBitmap(),
+                                    original_size);
+  }
+
+  // If all pending bitmaps are done then report back.
+  if (info->pending_count == 0) {
+    gfx::Image image;
+    std::string extension_id = info->extension_id;
+
+    if (!info->image_skia.isNull()) {
+      info->image_skia.MakeThreadSafe();
+      image = gfx::Image(info->image_skia);
+    }
+
+    load_map_.erase(load_map_it);
+
+    // ImageLoadingTracker might be deleted after the callback so don't do
+    // anything after this statement.
+    observer_->OnImageLoaded(image, extension_id, id);
+  }
 }
 
 void ImageLoadingTracker::Observe(int type,
@@ -187,14 +367,15 @@ void ImageLoadingTracker::Observe(int type,
   DCHECK(type == chrome::NOTIFICATION_EXTENSION_UNLOADED);
 
   const Extension* extension =
-      content::Details<UnloadedExtensionInfo>(details)->extension;
+      content::Details<extensions::UnloadedExtensionInfo>(details)->extension;
 
-  // Remove all entries in the load_map_ referencing the extension. This ensures
-  // we don't attempt to cache the image when the load completes.
-  for (LoadMap::iterator i = load_map_.begin(); i != load_map_.end();) {
-    if (i->second == extension)
-      load_map_.erase(i++);
-    else
-      ++i;
+  // Remove reference to this extension from all pending load entries. This
+  // ensures we don't attempt to cache the bitmap when the load completes.
+  for (LoadMap::iterator i = load_map_.begin(); i != load_map_.end(); ++i) {
+    PendingLoadInfo* info = &i->second;
+    if (info->extension == extension) {
+      info->extension = NULL;
+      info->cache = DONT_CACHE;
+    }
   }
 }

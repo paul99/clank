@@ -1,4 +1,4 @@
-// Copyright 2011 the V8 project authors. All rights reserved.
+// Copyright 2012 the V8 project authors. All rights reserved.
 // Redistribution and use in source and binary forms, with or without
 // modification, are permitted provided that the following conditions are
 // met:
@@ -165,6 +165,7 @@ class IC {
   // Access the target code for the given IC address.
   static inline Code* GetTargetAtAddress(Address address);
   static inline void SetTargetAtAddress(Address address, Code* target);
+  static void PostPatching(Address address, Code* target, Code* old_target);
 
  private:
   // Frame pointer for the frame that uses (calls) the IC.
@@ -376,14 +377,54 @@ class KeyedIC: public IC {
     STORE_NO_TRANSITION,
     STORE_TRANSITION_SMI_TO_OBJECT,
     STORE_TRANSITION_SMI_TO_DOUBLE,
-    STORE_TRANSITION_DOUBLE_TO_OBJECT
+    STORE_TRANSITION_DOUBLE_TO_OBJECT,
+    STORE_TRANSITION_HOLEY_SMI_TO_OBJECT,
+    STORE_TRANSITION_HOLEY_SMI_TO_DOUBLE,
+    STORE_TRANSITION_HOLEY_DOUBLE_TO_OBJECT,
+    STORE_AND_GROW_NO_TRANSITION,
+    STORE_AND_GROW_TRANSITION_SMI_TO_OBJECT,
+    STORE_AND_GROW_TRANSITION_SMI_TO_DOUBLE,
+    STORE_AND_GROW_TRANSITION_DOUBLE_TO_OBJECT,
+    STORE_AND_GROW_TRANSITION_HOLEY_SMI_TO_OBJECT,
+    STORE_AND_GROW_TRANSITION_HOLEY_SMI_TO_DOUBLE,
+    STORE_AND_GROW_TRANSITION_HOLEY_DOUBLE_TO_OBJECT
   };
+
+  static const int kGrowICDelta = STORE_AND_GROW_NO_TRANSITION -
+      STORE_NO_TRANSITION;
+  STATIC_ASSERT(kGrowICDelta ==
+                STORE_AND_GROW_TRANSITION_SMI_TO_OBJECT -
+                STORE_TRANSITION_SMI_TO_OBJECT);
+  STATIC_ASSERT(kGrowICDelta ==
+                STORE_AND_GROW_TRANSITION_SMI_TO_DOUBLE -
+                STORE_TRANSITION_SMI_TO_DOUBLE);
+  STATIC_ASSERT(kGrowICDelta ==
+                STORE_AND_GROW_TRANSITION_DOUBLE_TO_OBJECT -
+                STORE_TRANSITION_DOUBLE_TO_OBJECT);
+
   explicit KeyedIC(Isolate* isolate) : IC(NO_EXTRA_FRAME, isolate) {}
   virtual ~KeyedIC() {}
 
+  static inline KeyedAccessGrowMode GetGrowModeFromStubKind(
+      StubKind stub_kind) {
+    return (stub_kind >= STORE_AND_GROW_NO_TRANSITION)
+        ? ALLOW_JSARRAY_GROWTH
+        : DO_NOT_ALLOW_JSARRAY_GROWTH;
+  }
+
+  static inline StubKind GetGrowStubKind(StubKind stub_kind) {
+    ASSERT(stub_kind != LOAD);
+    if (stub_kind < STORE_AND_GROW_NO_TRANSITION) {
+      stub_kind = static_cast<StubKind>(static_cast<int>(stub_kind) +
+                                        kGrowICDelta);
+    }
+    return stub_kind;
+  }
+
   virtual Handle<Code> GetElementStubWithoutMapCheck(
       bool is_js_array,
-      ElementsKind elements_kind) = 0;
+      ElementsKind elements_kind,
+      KeyedAccessGrowMode grow_mode) = 0;
 
  protected:
   virtual Handle<Code> string_stub() {
@@ -397,17 +438,20 @@ class KeyedIC: public IC {
                            StrictModeFlag strict_mode,
                            Handle<Code> default_stub);
 
-  virtual Handle<Code> ComputePolymorphicStub(MapHandleList* receiver_maps,
-                                              StrictModeFlag strict_mode) = 0;
+  virtual Handle<Code> ComputePolymorphicStub(
+      MapHandleList* receiver_maps,
+      StrictModeFlag strict_mode,
+      KeyedAccessGrowMode grow_mode) = 0;
 
   Handle<Code> ComputeMonomorphicStubWithoutMapCheck(
       Handle<Map> receiver_map,
-      StrictModeFlag strict_mode);
+      StrictModeFlag strict_mode,
+      KeyedAccessGrowMode grow_mode);
 
  private:
   void GetReceiverMapsForStub(Handle<Code> stub, MapHandleList* result);
 
-  Handle<Code> ComputeMonomorphicStub(Handle<JSObject> receiver,
+  Handle<Code> ComputeMonomorphicStub(Handle<Map> receiver_map,
                                       StubKind stub_kind,
                                       StrictModeFlag strict_mode,
                                       Handle<Code> default_stub);
@@ -416,7 +460,18 @@ class KeyedIC: public IC {
                                      StubKind stub_kind);
 
   static bool IsTransitionStubKind(StubKind stub_kind) {
-    return stub_kind > STORE_NO_TRANSITION;
+    return stub_kind > STORE_NO_TRANSITION &&
+        stub_kind != STORE_AND_GROW_NO_TRANSITION;
+  }
+
+  static bool IsGrowStubKind(StubKind stub_kind) {
+    return stub_kind >= STORE_AND_GROW_NO_TRANSITION;
+  }
+
+  static StubKind GetNoTransitionStubKind(StubKind stub_kind) {
+    if (!IsTransitionStubKind(stub_kind)) return stub_kind;
+    if (IsGrowStubKind(stub_kind)) return STORE_AND_GROW_NO_TRANSITION;
+    return STORE_NO_TRANSITION;
   }
 };
 
@@ -455,7 +510,8 @@ class KeyedLoadIC: public KeyedIC {
 
   virtual Handle<Code> GetElementStubWithoutMapCheck(
       bool is_js_array,
-      ElementsKind elements_kind);
+      ElementsKind elements_kind,
+      KeyedAccessGrowMode grow_mode);
 
   virtual bool IsGeneric() const {
     return target() == *generic_stub();
@@ -465,7 +521,8 @@ class KeyedLoadIC: public KeyedIC {
   virtual Code::Kind kind() const { return Code::KEYED_LOAD_IC; }
 
   virtual Handle<Code> ComputePolymorphicStub(MapHandleList* receiver_maps,
-                                              StrictModeFlag strict_mode);
+                                              StrictModeFlag strict_mode,
+                                              KeyedAccessGrowMode grow_mode);
 
   virtual Handle<Code> string_stub() {
     return isolate()->builtins()->KeyedLoadIC_String();
@@ -539,8 +596,8 @@ class StoreIC: public IC {
 
   void set_target(Code* code) {
     // Strict mode must be preserved across IC patching.
-    ASSERT((code->extra_ic_state() & kStrictMode) ==
-           (target()->extra_ic_state() & kStrictMode));
+    ASSERT(Code::GetStrictMode(code->extra_ic_state()) ==
+           Code::GetStrictMode(target()->extra_ic_state()));
     IC::set_target(code);
   }
 
@@ -574,6 +631,18 @@ class StoreIC: public IC {
 };
 
 
+enum KeyedStoreCheckMap {
+  kDontCheckMap,
+  kCheckMap
+};
+
+
+enum KeyedStoreIncrementLength {
+  kDontIncrementLength,
+  kIncrementLength
+};
+
+
 class KeyedStoreIC: public KeyedIC {
  public:
   explicit KeyedStoreIC(Isolate* isolate) : KeyedIC(isolate) {
@@ -581,7 +650,7 @@ class KeyedStoreIC: public KeyedIC {
   }
 
   MUST_USE_RESULT MaybeObject* Store(State state,
-                                   StrictModeFlag strict_mode,
+                                     StrictModeFlag strict_mode,
                                      Handle<Object> object,
                                      Handle<Object> name,
                                      Handle<Object> value,
@@ -602,7 +671,8 @@ class KeyedStoreIC: public KeyedIC {
 
   virtual Handle<Code> GetElementStubWithoutMapCheck(
       bool is_js_array,
-      ElementsKind elements_kind);
+      ElementsKind elements_kind,
+      KeyedAccessGrowMode grow_mode);
 
   virtual bool IsGeneric() const {
     return target() == *generic_stub() ||
@@ -613,7 +683,8 @@ class KeyedStoreIC: public KeyedIC {
   virtual Code::Kind kind() const { return Code::KEYED_STORE_IC; }
 
   virtual Handle<Code> ComputePolymorphicStub(MapHandleList* receiver_maps,
-                                              StrictModeFlag strict_mode);
+                                              StrictModeFlag strict_mode,
+                                              KeyedAccessGrowMode grow_mode);
 
   private:
   // Update the inline cache.
@@ -626,8 +697,8 @@ class KeyedStoreIC: public KeyedIC {
 
   void set_target(Code* code) {
     // Strict mode must be preserved across IC patching.
-    ASSERT((code->extra_ic_state() & kStrictMode) ==
-           (target()->extra_ic_state() & kStrictMode));
+    ASSERT(Code::GetStrictMode(code->extra_ic_state()) ==
+           Code::GetStrictMode(target()->extra_ic_state()));
     IC::set_target(code);
   }
 
@@ -657,6 +728,10 @@ class KeyedStoreIC: public KeyedIC {
   }
 
   static void Clear(Address address, Code* target);
+
+  StubKind GetStubKind(Handle<JSObject> receiver,
+                       Handle<Object> key,
+                       Handle<Object> value);
 
   friend class IC;
 };
@@ -696,8 +771,7 @@ class BinaryOpIC: public IC {
     INT32,
     HEAP_NUMBER,
     ODDBALL,
-    BOTH_STRING,  // Only used for addition operation.
-    STRING,  // Only used for addition operation.  At least one string operand.
+    STRING,  // Only used for addition operation.
     GENERIC
   };
 
@@ -708,10 +782,6 @@ class BinaryOpIC: public IC {
   static const char* GetName(TypeInfo type_info);
 
   static State ToState(TypeInfo type_info);
-
-  static TypeInfo GetTypeInfo(Handle<Object> left, Handle<Object> right);
-
-  static TypeInfo JoinTypes(TypeInfo x, TypeInfo y);
 };
 
 
@@ -719,11 +789,11 @@ class CompareIC: public IC {
  public:
   enum State {
     UNINITIALIZED,
-    SMIS,
-    HEAP_NUMBERS,
-    SYMBOLS,
-    STRINGS,
-    OBJECTS,
+    SMI,
+    HEAP_NUMBER,
+    SYMBOL,
+    STRING,
+    OBJECT,
     KNOWN_OBJECTS,
     GENERIC
   };
@@ -734,26 +804,35 @@ class CompareIC: public IC {
   // Update the inline cache for the given operands.
   void UpdateCaches(Handle<Object> x, Handle<Object> y);
 
+
   // Factory method for getting an uninitialized compare stub.
   static Handle<Code> GetUninitialized(Token::Value op);
 
   // Helper function for computing the condition for a compare operation.
   static Condition ComputeCondition(Token::Value op);
 
-  // Helper function for determining the state of a compare IC.
-  static State ComputeState(Code* target);
-
   static const char* GetStateName(State state);
 
  private:
-  State TargetState(State state, bool has_inlined_smi_code,
-                    Handle<Object> x, Handle<Object> y);
+  static bool HasInlinedSmiCode(Address address);
+
+  State TargetState(State old_state,
+                    State old_left,
+                    State old_right,
+                    bool has_inlined_smi_code,
+                    Handle<Object> x,
+                    Handle<Object> y);
 
   bool strict() const { return op_ == Token::EQ_STRICT; }
   Condition GetCondition() const { return ComputeCondition(op_); }
-  State GetState() { return ComputeState(target()); }
+
+  static Code* GetRawUninitialized(Token::Value op);
+
+  static void Clear(Address address, Code* target);
 
   Token::Value op_;
+
+  friend class IC;
 };
 
 
@@ -766,7 +845,8 @@ class ToBooleanIC: public IC {
 
 
 // Helper for BinaryOpIC and CompareIC.
-void PatchInlinedSmiCode(Address address);
+enum InlinedSmiCheck { ENABLE_INLINED_SMI_CHECK, DISABLE_INLINED_SMI_CHECK };
+void PatchInlinedSmiCode(Address address, InlinedSmiCheck check);
 
 } }  // namespace v8::internal
 

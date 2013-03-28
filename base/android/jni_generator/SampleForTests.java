@@ -4,6 +4,8 @@
 
 package org.chromium.example.jni_generator;
 
+import android.graphics.Rect;
+
 // This class serves as a reference test for the bindings generator, and as example documentation
 // for how to use the jni generator.
 // The C++ counter-part is sample_for_tests.cc.
@@ -12,6 +14,11 @@ package org.chromium.example.jni_generator;
 //   * Compile sample_for_tests.cc using the generated header file.
 //   * link a native executable to prove the generated header + cc file are self-contained.
 // All comments are informational only, and are ignored by the jni generator.
+//
+// This JNINamespace annotation indicates that all native methods should be
+// generated inside this namespace, including the native class that this
+// object binds to.
+@JNINamespace("base::android")
 class SampleForTests {
   // Classes can store their C++ pointer counter part as an int that is normally initialized by
   // calling out a nativeInit() function.
@@ -73,8 +80,21 @@ class SampleForTests {
   @CalledByNativeUnchecked
   void methodThatThrowsException() throws Exception {}
 
+  // The generator is not confused by inline comments:
+  // @CalledByNative void thisShouldNotAppearInTheOutput();
+  // @CalledByNativeUnchecked public static void neitherShouldThis(int foo);
+
+  /**
+   * The generator is not confused by block comments:
+   * @CalledByNative void thisShouldNotAppearInTheOutputEither();
+   * @CalledByNativeUnchecked public static void andDefinitelyNotThis(int foo);
+   */
+
+  // String constants that look like comments don't confuse the generator:
+  private String arrgh = "*/*";
+
   //------------------------------------------------------------------------------------------------
-  // Java fields which are accessed from C++ code must be annotated with @AccessedByNative to
+  // Java fields which are accessed from C++ code only must be annotated with @AccessedByNative to
   // prevent them being eliminated when unreferenced code is stripped.
   @AccessedByNative
   private int javaField;
@@ -127,8 +147,9 @@ class SampleForTests {
   private native int nativeMethod(int nativeCPPClass);
 
   // Similar to nativeMethod above, but here the C++ fully qualified class name is taken from the
-  // comment rather than parameter name, which can thus be chosen freely.
-  private native double nativeMethodOtherP0(int nativeCPPClass /* cpp_namespace::CPPClass */);
+  // annotation rather than parameter name, which can thus be chosen freely.
+  @NativeClassQualifiedName("CPPClass::InnerClass")
+  private native double nativeMethodOtherP0(int nativePtr);
 
   // An inner class has some special attributes for annotation.
   class InnerClass {

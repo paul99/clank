@@ -1,4 +1,4 @@
-// Copyright (c) 2011 The Chromium Authors. All rights reserved.
+// Copyright (c) 2012 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -6,9 +6,12 @@
 
 #include "ppapi/c/dev/ppb_var_deprecated.h"
 #include "ppapi/c/dev/ppp_class_deprecated.h"
+#include "ppapi/c/pp_var.h"
 #include "ppapi/proxy/dispatcher.h"
+#include "ppapi/proxy/plugin_globals.h"
 #include "ppapi/proxy/ppapi_messages.h"
 #include "ppapi/proxy/serialized_var.h"
+#include "ppapi/shared_impl/proxy_lock.h"
 #include "ppapi/shared_impl/api_id.h"
 
 namespace ppapi {
@@ -33,11 +36,19 @@ struct ObjectProxy {
 };
 
 ObjectProxy* ToObjectProxy(void* data) {
-  return reinterpret_cast<ObjectProxy*>(data);
+  ObjectProxy* obj = reinterpret_cast<ObjectProxy*>(data);
+  if (!obj || !obj->dispatcher)
+    return NULL;
+  if (!obj->dispatcher->permissions().HasPermission(PERMISSION_DEV))
+    return NULL;
+  return obj;
 }
 
 bool HasProperty(void* object, PP_Var name, PP_Var* exception) {
   ObjectProxy* obj = ToObjectProxy(object);
+  if (!obj)
+    return false;
+
   bool result = false;
   ReceiveSerializedException se(obj->dispatcher, exception);
   obj->dispatcher->Send(new PpapiMsg_PPPClass_HasProperty(
@@ -48,6 +59,9 @@ bool HasProperty(void* object, PP_Var name, PP_Var* exception) {
 
 bool HasMethod(void* object, PP_Var name, PP_Var* exception) {
   ObjectProxy* obj = ToObjectProxy(object);
+  if (!obj)
+    return false;
+
   bool result = false;
   ReceiveSerializedException se(obj->dispatcher, exception);
   obj->dispatcher->Send(new PpapiMsg_PPPClass_HasMethod(
@@ -60,6 +74,9 @@ PP_Var GetProperty(void* object,
                    PP_Var name,
                    PP_Var* exception) {
   ObjectProxy* obj = ToObjectProxy(object);
+  if (!obj)
+    return PP_MakeUndefined();
+
   ReceiveSerializedException se(obj->dispatcher, exception);
   ReceiveSerializedVarReturnValue result;
   obj->dispatcher->Send(new PpapiMsg_PPPClass_GetProperty(
@@ -81,6 +98,9 @@ void SetProperty(void* object,
                  PP_Var value,
                  PP_Var* exception) {
   ObjectProxy* obj = ToObjectProxy(object);
+  if (!obj)
+    return;
+
   ReceiveSerializedException se(obj->dispatcher, exception);
   obj->dispatcher->Send(new PpapiMsg_PPPClass_SetProperty(
       API_ID_PPP_CLASS, obj->ppp_class, obj->user_data,
@@ -92,6 +112,9 @@ void RemoveProperty(void* object,
                     PP_Var name,
                     PP_Var* exception) {
   ObjectProxy* obj = ToObjectProxy(object);
+  if (!obj)
+    return;
+
   ReceiveSerializedException se(obj->dispatcher, exception);
   obj->dispatcher->Send(new PpapiMsg_PPPClass_RemoveProperty(
       API_ID_PPP_CLASS, obj->ppp_class, obj->user_data,
@@ -104,6 +127,8 @@ PP_Var Call(void* object,
             PP_Var* argv,
             PP_Var* exception) {
   ObjectProxy* obj = ToObjectProxy(object);
+  if (!obj)
+    return PP_MakeUndefined();
 
   ReceiveSerializedVarReturnValue result;
   ReceiveSerializedException se(obj->dispatcher, exception);
@@ -123,6 +148,8 @@ PP_Var Construct(void* object,
                  PP_Var* argv,
                  PP_Var* exception) {
   ObjectProxy* obj = ToObjectProxy(object);
+  if (!obj)
+    return PP_MakeUndefined();
 
   ReceiveSerializedVarReturnValue result;
   ReceiveSerializedException se(obj->dispatcher, exception);
@@ -138,6 +165,9 @@ PP_Var Construct(void* object,
 
 void Deallocate(void* object) {
   ObjectProxy* obj = ToObjectProxy(object);
+  if (!obj)
+    return;
+
   obj->dispatcher->Send(new PpapiMsg_PPPClass_Deallocate(
       API_ID_PPP_CLASS, obj->ppp_class, obj->user_data));
   delete obj;
@@ -189,12 +219,12 @@ InterfaceProxy* PPP_Class_Proxy::Create(Dispatcher* dispatcher) {
 // static
 PP_Var PPP_Class_Proxy::CreateProxiedObject(const PPB_Var_Deprecated* var,
                                             Dispatcher* dispatcher,
-                                            PP_Module module_id,
+                                            PP_Instance instance_id,
                                             int64 ppp_class,
                                             int64 class_data) {
   ObjectProxy* object_proxy = new ObjectProxy(dispatcher,
                                               ppp_class, class_data);
-  return var->CreateObject(module_id, &class_interface, object_proxy);
+  return var->CreateObject(instance_id, &class_interface, object_proxy);
 }
 
 // static
@@ -216,6 +246,9 @@ PP_Bool PPP_Class_Proxy::IsInstanceOf(const PPB_Var_Deprecated* ppb_var_impl,
 }
 
 bool PPP_Class_Proxy::OnMessageReceived(const IPC::Message& msg) {
+  if (!dispatcher()->IsPlugin())
+    return false;  // These messages are only valid from host->plugin.
+
   bool handled = true;
   IPC_BEGIN_MESSAGE_MAP(PPP_Class_Proxy, msg)
     IPC_MESSAGE_HANDLER(PpapiMsg_PPPClass_HasProperty,
@@ -243,23 +276,34 @@ void PPP_Class_Proxy::OnMsgHasProperty(int64 ppp_class, int64 object,
                                        SerializedVarReceiveInput property,
                                        SerializedVarOutParam exception,
                                        bool* result) {
-  *result = ToPPPClass(ppp_class)->HasProperty(ToUserData(object),
-      property.Get(dispatcher()), exception.OutParam(dispatcher()));
+  if (!ValidateUserData(ppp_class, object, &exception))
+    return;
+  *result = CallWhileUnlocked(ToPPPClass(ppp_class)->HasProperty,
+                              ToUserData(object),
+                              property.Get(dispatcher()),
+                              exception.OutParam(dispatcher()));
 }
 
 void PPP_Class_Proxy::OnMsgHasMethod(int64 ppp_class, int64 object,
                                      SerializedVarReceiveInput property,
                                      SerializedVarOutParam exception,
                                      bool* result) {
-  *result = ToPPPClass(ppp_class)->HasMethod(ToUserData(object),
-      property.Get(dispatcher()), exception.OutParam(dispatcher()));
+  if (!ValidateUserData(ppp_class, object, &exception))
+    return;
+  *result = CallWhileUnlocked(ToPPPClass(ppp_class)->HasMethod,
+                              ToUserData(object),
+                              property.Get(dispatcher()),
+                              exception.OutParam(dispatcher()));
 }
 
 void PPP_Class_Proxy::OnMsgGetProperty(int64 ppp_class, int64 object,
                                        SerializedVarReceiveInput property,
                                        SerializedVarOutParam exception,
                                        SerializedVarReturnValue result) {
-  result.Return(dispatcher(), ToPPPClass(ppp_class)->GetProperty(
+  if (!ValidateUserData(ppp_class, object, &exception))
+    return;
+  result.Return(dispatcher(), CallWhileUnlocked(
+      ToPPPClass(ppp_class)->GetProperty,
       ToUserData(object), property.Get(dispatcher()),
       exception.OutParam(dispatcher())));
 }
@@ -268,6 +312,8 @@ void PPP_Class_Proxy::OnMsgEnumerateProperties(
     int64 ppp_class, int64 object,
     std::vector<SerializedVar>* props,
     SerializedVarOutParam exception) {
+  if (!ValidateUserData(ppp_class, object, &exception))
+    return;
   NOTIMPLEMENTED();
   // TODO(brettw) implement this.
 }
@@ -276,7 +322,9 @@ void PPP_Class_Proxy::OnMsgSetProperty(int64 ppp_class, int64 object,
                                        SerializedVarReceiveInput property,
                                        SerializedVarReceiveInput value,
                                        SerializedVarOutParam exception) {
-  ToPPPClass(ppp_class)->SetProperty(
+  if (!ValidateUserData(ppp_class, object, &exception))
+    return;
+  CallWhileUnlocked(ToPPPClass(ppp_class)->SetProperty,
       ToUserData(object), property.Get(dispatcher()), value.Get(dispatcher()),
       exception.OutParam(dispatcher()));
 }
@@ -284,7 +332,9 @@ void PPP_Class_Proxy::OnMsgSetProperty(int64 ppp_class, int64 object,
 void PPP_Class_Proxy::OnMsgRemoveProperty(int64 ppp_class, int64 object,
                                           SerializedVarReceiveInput property,
                                           SerializedVarOutParam exception) {
-  ToPPPClass(ppp_class)->RemoveProperty(
+  if (!ValidateUserData(ppp_class, object, &exception))
+    return;
+  CallWhileUnlocked(ToPPPClass(ppp_class)->RemoveProperty,
       ToUserData(object), property.Get(dispatcher()),
       exception.OutParam(dispatcher()));
 }
@@ -295,9 +345,11 @@ void PPP_Class_Proxy::OnMsgCall(
     SerializedVarVectorReceiveInput arg_vector,
     SerializedVarOutParam exception,
     SerializedVarReturnValue result) {
+  if (!ValidateUserData(ppp_class, object, &exception))
+    return;
   uint32_t arg_count = 0;
   PP_Var* args = arg_vector.Get(dispatcher(), &arg_count);
-  result.Return(dispatcher(), ToPPPClass(ppp_class)->Call(
+  result.Return(dispatcher(), CallWhileUnlocked(ToPPPClass(ppp_class)->Call,
       ToUserData(object), method_name.Get(dispatcher()),
       arg_count, args, exception.OutParam(dispatcher())));
 }
@@ -307,14 +359,37 @@ void PPP_Class_Proxy::OnMsgConstruct(
     SerializedVarVectorReceiveInput arg_vector,
     SerializedVarOutParam exception,
     SerializedVarReturnValue result) {
+  if (!ValidateUserData(ppp_class, object, &exception))
+    return;
   uint32_t arg_count = 0;
   PP_Var* args = arg_vector.Get(dispatcher(), &arg_count);
-  result.Return(dispatcher(), ToPPPClass(ppp_class)->Construct(
+  result.Return(dispatcher(), CallWhileUnlocked(
+      ToPPPClass(ppp_class)->Construct,
       ToUserData(object), arg_count, args, exception.OutParam(dispatcher())));
 }
 
 void PPP_Class_Proxy::OnMsgDeallocate(int64 ppp_class, int64 object) {
-  ToPPPClass(ppp_class)->Deallocate(ToUserData(object));
+  if (!ValidateUserData(ppp_class, object, NULL))
+    return;
+  PluginGlobals::Get()->plugin_var_tracker()->PluginImplementedObjectDestroyed(
+      ToUserData(object));
+  CallWhileUnlocked(ToPPPClass(ppp_class)->Deallocate, ToUserData(object));
+}
+
+bool PPP_Class_Proxy::ValidateUserData(int64 ppp_class, int64 class_data,
+                                       SerializedVarOutParam* exception) {
+  if (!PluginGlobals::Get()->plugin_var_tracker()->ValidatePluginObjectCall(
+          ToPPPClass(ppp_class), ToUserData(class_data))) {
+    // Set the exception. This is so the caller will know about the error and
+    // also that we won't assert that somebody forgot to call OutParam on the
+    // output parameter. Although this exception of "1" won't be very useful
+    // this shouldn't happen in normal usage, only when the renderer is being
+    // malicious.
+    if (exception)
+      *exception->OutParam(dispatcher()) = PP_MakeInt32(1);
+    return false;
+  }
+  return true;
 }
 
 }  // namespace proxy

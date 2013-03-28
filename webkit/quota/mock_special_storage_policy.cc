@@ -1,4 +1,4 @@
-// Copyright (c) 2011 The Chromium Authors. All rights reserved.
+// Copyright (c) 2012 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -7,9 +7,8 @@
 namespace quota {
 
 MockSpecialStoragePolicy::MockSpecialStoragePolicy()
-    : all_unlimited_(false) {}
-
-MockSpecialStoragePolicy::~MockSpecialStoragePolicy() {}
+    : all_unlimited_(false) {
+}
 
 bool MockSpecialStoragePolicy::IsStorageProtected(const GURL& origin) {
   return protected_.find(origin) != protected_.end();
@@ -25,6 +24,10 @@ bool MockSpecialStoragePolicy::IsStorageSessionOnly(const GURL& origin) {
   return session_only_.find(origin) != session_only_.end();
 }
 
+bool MockSpecialStoragePolicy::IsInstalledApp(const GURL& origin) {
+  return installed_.find(origin) != installed_.end();
+}
+
 bool MockSpecialStoragePolicy::IsFileHandler(const std::string& extension_id) {
   return file_handlers_.find(extension_id) != file_handlers_.end();
 }
@@ -32,5 +35,7 @@ bool MockSpecialStoragePolicy::IsFileHandler(const std::string& extension_id) {
 bool MockSpecialStoragePolicy::HasSessionOnlyOrigins() {
   return !session_only_.empty();
 }
+
+MockSpecialStoragePolicy::~MockSpecialStoragePolicy() {}
 
 }  // namespace quota

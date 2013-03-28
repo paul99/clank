@@ -1,4 +1,4 @@
-// Copyright (c) 2011 The Chromium Authors. All rights reserved.
+// Copyright (c) 2012 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -11,39 +11,49 @@
 
 #include "base/command_line.h"
 #include "base/environment.h"
+#include "base/file_path.h"
 #include "base/i18n/rtl.h"
 #include "base/memory/scoped_ptr.h"
 #include "base/path_service.h"
 #include "base/scoped_native_library.h"
 #include "base/string_number_conversions.h"
+#include "base/threading/sequenced_worker_pool.h"
+#include "base/time.h"
 #include "base/utf_string_conversions.h"
+#include "base/win/metro.h"
+#include "base/win/text_services_message_filter.h"
 #include "base/win/windows_version.h"
 #include "base/win/wrapped_window_proc.h"
 #include "chrome/browser/browser_util_win.h"
 #include "chrome/browser/first_run/first_run.h"
 #include "chrome/browser/metrics/metrics_service.h"
 #include "chrome/browser/profiles/profile_info_cache.h"
-#include "chrome/browser/profiles/profile_shortcut_manager_win.h"
-#include "chrome/browser/ui/browser_list.h"
-#include "chrome/browser/ui/views/uninstall_view.h"
+#include "chrome/browser/profiles/profile_shortcut_manager.h"
+#include "chrome/browser/shell_integration.h"
+#include "chrome/browser/system_monitor/removable_device_notifications_window_win.h"
+#include "chrome/browser/ui/simple_message_box.h"
+#include "chrome/browser/ui/uninstall_browser_prompt.h"
 #include "chrome/common/chrome_constants.h"
 #include "chrome/common/chrome_result_codes.h"
 #include "chrome/common/chrome_switches.h"
 #include "chrome/common/env_vars.h"
+#include "chrome/installer/launcher_support/chrome_launcher_support.h"
 #include "chrome/installer/util/browser_distribution.h"
 #include "chrome/installer/util/helper.h"
 #include "chrome/installer/util/install_util.h"
+#include "chrome/installer/util/l10n_string_util.h"
 #include "chrome/installer/util/shell_util.h"
+#include "content/public/browser/browser_thread.h"
 #include "content/public/common/main_function_params.h"
 #include "grit/app_locale_settings.h"
 #include "grit/chromium_strings.h"
 #include "grit/generated_resources.h"
+#include "installer_util_strings/installer_util_strings.h"
 #include "ui/base/l10n/l10n_util.h"
 #include "ui/base/l10n/l10n_util_win.h"
-#include "ui/base/message_box_win.h"
+#include "ui/base/ui_base_switches.h"
+#include "ui/base/win/message_box_win.h"
 #include "ui/gfx/platform_font_win.h"
-#include "ui/views/focus/accelerator_handler.h"
-#include "ui/views/widget/widget.h"
 
 namespace {
 
@@ -74,49 +84,36 @@ int GetMinimumFontSize() {
   return min_font_size;
 }
 
+class TranslationDelegate : public installer::TranslationDelegate {
+ public:
+  virtual string16 GetLocalizedString(int installer_string_id) OVERRIDE;
+};
+
 }  // namespace
 
 void RecordBreakpadStatusUMA(MetricsService* metrics) {
-  DWORD len = ::GetEnvironmentVariableW(
-      ASCIIToWide(env_vars::kNoOOBreakpad).c_str() , NULL, 0);
-  metrics->RecordBreakpadRegistration((len == 0));
   metrics->RecordBreakpadHasDebugger(TRUE == ::IsDebuggerPresent());
 }
 
 void WarnAboutMinimumSystemRequirements() {
   if (base::win::GetVersion() < base::win::VERSION_XP) {
-    // Display a warning message if the user is running chrome on Windows 2000.
-    const string16 text =
-        l10n_util::GetStringUTF16(IDS_UNSUPPORTED_OS_PRE_WIN_XP);
-    const string16 caption = l10n_util::GetStringUTF16(IDS_PRODUCT_NAME);
-    ui::MessageBox(NULL, text, caption, MB_OK | MB_ICONWARNING | MB_TOPMOST);
+    chrome::ShowMessageBox(NULL,
+        l10n_util::GetStringUTF16(IDS_PRODUCT_NAME),
+        l10n_util::GetStringUTF16(IDS_UNSUPPORTED_OS_PRE_WIN_XP),
+        chrome::MESSAGE_BOX_TYPE_WARNING);
   }
 }
 
-void RecordBrowserStartupTime() {
-  // Calculate the time that has elapsed from our own process creation.
-  FILETIME creation_time = {};
-  FILETIME ignore = {};
-  ::GetProcessTimes(::GetCurrentProcess(), &creation_time, &ignore, &ignore,
-      &ignore);
-
-  RecordPreReadExperimentTime("Startup.BrowserMessageLoopStartTime",
-      base::Time::Now() - base::Time::FromFileTime(creation_time));
-}
-
-int AskForUninstallConfirmation() {
-  int ret = content::RESULT_CODE_NORMAL_EXIT;
-  views::Widget::CreateWindow(new UninstallView(&ret))->Show();
-  views::AcceleratorHandler accelerator_handler;
-  MessageLoopForUI::current()->RunWithDispatcher(&accelerator_handler);
-  return ret;
-}
-
 void ShowCloseBrowserFirstMessageBox() {
-  const string16 text = l10n_util::GetStringUTF16(IDS_UNINSTALL_CLOSE_APP);
-  const string16 caption = l10n_util::GetStringUTF16(IDS_PRODUCT_NAME);
-  const UINT flags = MB_OK | MB_ICONWARNING | MB_TOPMOST;
-  ui::MessageBox(NULL, text, caption, flags);
+  int message_id = IDS_UNINSTALL_CLOSE_APP;
+  if (base::win::GetVersion() >= base::win::VERSION_WIN8 &&
+      (ShellIntegration::GetDefaultBrowser() == ShellIntegration::IS_DEFAULT)) {
+    message_id = IDS_UNINSTALL_CLOSE_APP_IMMERSIVE;
+  }
+  chrome::ShowMessageBox(NULL,
+                         l10n_util::GetStringUTF16(IDS_PRODUCT_NAME),
+                         l10n_util::GetStringUTF16(message_id),
+                         chrome::MESSAGE_BOX_TYPE_WARNING);
 }
 
 int DoUninstallTasks(bool chrome_still_running) {
@@ -128,13 +125,15 @@ int DoUninstallTasks(bool chrome_still_running) {
     ShowCloseBrowserFirstMessageBox();
     return chrome::RESULT_CODE_UNINSTALL_CHROME_ALIVE;
   }
-  int ret = AskForUninstallConfirmation();
+  int result = chrome::ShowUninstallBrowserPrompt(
+      !chrome_launcher_support::IsAppLauncherPresent());
+  // Don't offer to delete the profile if the App Launcher is also installed.
   if (browser_util::IsBrowserAlreadyRunning()) {
     ShowCloseBrowserFirstMessageBox();
     return chrome::RESULT_CODE_UNINSTALL_CHROME_ALIVE;
   }
 
-  if (ret != chrome::RESULT_CODE_UNINSTALL_USER_CANCEL) {
+  if (result != chrome::RESULT_CODE_UNINSTALL_USER_CANCEL) {
     // The following actions are just best effort.
     VLOG(1) << "Executing uninstall actions";
     if (!first_run::RemoveSentinel())
@@ -142,21 +141,27 @@ int DoUninstallTasks(bool chrome_still_running) {
     // We want to remove user level shortcuts and we only care about the ones
     // created by us and not by the installer so |alternate| is false.
     BrowserDistribution* dist = BrowserDistribution::GetDistribution();
-    if (!ShellUtil::RemoveChromeDesktopShortcut(dist, ShellUtil::CURRENT_USER,
-                                                false)) {
-      VLOG(1) << "Failed to delete desktop shortcut.";
-    }
-    if (!ShellUtil::RemoveChromeDesktopShortcutsWithAppendedNames(
-        ProfileShortcutManagerWin::GenerateShortcutsFromProfiles(
-            ProfileInfoCache::GetProfileNames()))) {
-      VLOG(1) << "Failed to delete desktop profiles shortcuts.";
-    }
-    if (!ShellUtil::RemoveChromeQuickLaunchShortcut(dist,
-                                                    ShellUtil::CURRENT_USER)) {
-      VLOG(1) << "Failed to delete quick launch shortcut.";
+    FilePath chrome_exe;
+    if (PathService::Get(base::FILE_EXE, &chrome_exe)) {
+      ShellUtil::ShortcutLocation user_shortcut_locations[] = {
+        ShellUtil::SHORTCUT_LOCATION_DESKTOP,
+        ShellUtil::SHORTCUT_LOCATION_QUICK_LAUNCH,
+        ShellUtil::SHORTCUT_LOCATION_START_MENU,
+      };
+      for (size_t i = 0; i < arraysize(user_shortcut_locations); ++i) {
+        if (!ShellUtil::RemoveShortcut(
+                user_shortcut_locations[i], dist, chrome_exe.value(),
+                ShellUtil::CURRENT_USER, NULL)) {
+          VLOG(1) << "Failed to delete shortcut at location "
+                  << user_shortcut_locations[i];
+        }
+      }
+      // TODO(rlp): Cleanup profiles shortcuts.
+    } else {
+      NOTREACHED();
     }
   }
-  return ret;
+  return result;
 }
 
 // ChromeBrowserMainPartsWin ---------------------------------------------------
@@ -164,6 +169,24 @@ int DoUninstallTasks(bool chrome_still_running) {
 ChromeBrowserMainPartsWin::ChromeBrowserMainPartsWin(
     const content::MainFunctionParams& parameters)
     : ChromeBrowserMainParts(parameters) {
+  if (base::win::IsMetroProcess()) {
+    typedef const wchar_t* (*GetMetroSwitches)(void);
+    GetMetroSwitches metro_switches_proc = reinterpret_cast<GetMetroSwitches>(
+        GetProcAddress(base::win::GetMetroModule(),
+                       "GetMetroCommandLineSwitches"));
+    if (metro_switches_proc) {
+      string16 metro_switches = (*metro_switches_proc)();
+      if (!metro_switches.empty()) {
+        CommandLine extra_switches(CommandLine::NO_PROGRAM);
+        extra_switches.ParseFromString(metro_switches);
+        CommandLine::ForCurrentProcess()->AppendArguments(extra_switches,
+                                                          false);
+      }
+    }
+  }
+}
+
+ChromeBrowserMainPartsWin::~ChromeBrowserMainPartsWin() {
 }
 
 void ChromeBrowserMainPartsWin::ToolkitInitialized() {
@@ -173,11 +196,64 @@ void ChromeBrowserMainPartsWin::ToolkitInitialized() {
 }
 
 void ChromeBrowserMainPartsWin::PreMainMessageLoopStart() {
+  // installer_util references strings that are normally compiled into
+  // setup.exe.  In Chrome, these strings are in the locale files.
+  SetupInstallerUtilStrings();
+
   ChromeBrowserMainParts::PreMainMessageLoopStart();
   if (!parameters().ui_task) {
     // Make sure that we know how to handle exceptions from the message loop.
     InitializeWindowProcExceptions();
   }
+  removable_device_notifications_window_.reset(
+      chrome::RemovableDeviceNotificationsWindowWin::Create());
+}
+
+void ChromeBrowserMainPartsWin::PostMainMessageLoopStart() {
+  DCHECK_EQ(MessageLoop::TYPE_UI, MessageLoop::current()->type());
+
+  if (base::win::IsTSFAwareRequired()) {
+    // Create a TSF message filter for the message loop. MessageLoop takes
+    // ownership of the filter.
+    scoped_ptr<base::win::TextServicesMessageFilter> tsf_message_filter(
+      new base::win::TextServicesMessageFilter);
+    if (tsf_message_filter->Init()) {
+      MessageLoopForUI::current()->SetMessageFilter(
+        tsf_message_filter.PassAs<MessageLoopForUI::MessageFilter>());
+    }
+  }
+}
+
+void ChromeBrowserMainPartsWin::PreMainMessageLoopRun() {
+  ChromeBrowserMainParts::PreMainMessageLoopRun();
+
+  removable_device_notifications_window_->Init();
+}
+
+void ChromeBrowserMainPartsWin::PreInteractiveFirstRunInit() {
+  // Trigger the Active Setup command for system-level Chromes to finish
+  // configuring this user's install (e.g. per-user shortcuts).
+  // Delay the task slightly to give Chrome launch I/O priority while also
+  // making sure shortcuts are created promptly to avoid annoying the user by
+  // re-creating shortcuts he previously deleted.
+  static const int64 kTiggerActiveSetupDelaySeconds = 5;
+  FilePath chrome_exe;
+  if (!PathService::Get(base::FILE_EXE, &chrome_exe)) {
+    NOTREACHED();
+  } else if (!InstallUtil::IsPerUserInstall(chrome_exe.value().c_str())) {
+    content::BrowserThread::GetBlockingPool()->PostDelayedTask(
+        FROM_HERE,
+        base::Bind(&InstallUtil::TriggerActiveSetupCommand),
+        base::TimeDelta::FromSeconds(kTiggerActiveSetupDelaySeconds));
+  }
+
+  ChromeBrowserMainParts::PreInteractiveFirstRunInit();
+}
+
+void ChromeBrowserMainPartsWin::ShowMissingLocaleMessageBox() {
+  ui::MessageBox(NULL, ASCIIToUTF16(chrome_browser::kMissingLocaleDataMessage),
+                 ASCIIToUTF16(chrome_browser::kMissingLocaleDataTitle),
+                 MB_OK | MB_ICONERROR | MB_TOPMOST);
 }
 
 // static
@@ -233,23 +309,20 @@ void ChromeBrowserMainPartsWin::RegisterApplicationRestart(
   command_line.AppendArguments(parsed_command_line, false);
   if (!command_line.HasSwitch(switches::kRestoreLastSession))
     command_line.AppendSwitch(switches::kRestoreLastSession);
-  if (command_line.GetCommandLineString().length() > RESTART_MAX_CMD_LINE) {
-    LOG(WARNING) << "Command line too long for RegisterApplicationRestart";
-    return;
-  }
 
   // Restart Chrome if the computer is restarted as the result of an update.
   // This could be extended to handle crashes, hangs, and patches.
   HRESULT hr = register_application_restart(
       command_line.GetCommandLineString().c_str(),
       RESTART_NO_CRASH | RESTART_NO_HANG | RESTART_NO_PATCH);
-  DCHECK(SUCCEEDED(hr)) << "RegisterApplicationRestart failed.";
-}
-
-void ChromeBrowserMainPartsWin::ShowMissingLocaleMessageBox() {
-  ui::MessageBox(NULL, ASCIIToUTF16(chrome_browser::kMissingLocaleDataMessage),
-                 ASCIIToUTF16(chrome_browser::kMissingLocaleDataTitle),
-                 MB_OK | MB_ICONERROR | MB_TOPMOST);
+  if (FAILED(hr)) {
+    if (hr == E_INVALIDARG) {
+      LOG(WARNING) << "Command line too long for RegisterApplicationRestart";
+    } else {
+      NOTREACHED() << "RegisterApplicationRestart failed. hr: " << hr <<
+                      ", command_line: " << command_line.GetCommandLineString();
+    }
+  }
 }
 
 // static
@@ -285,28 +358,64 @@ bool ChromeBrowserMainPartsWin::CheckMachineLevelInstall() {
   // TODO(tommi): Check if using the default distribution is always the right
   // thing to do.
   BrowserDistribution* dist = BrowserDistribution::GetDistribution();
-  scoped_ptr<Version> version(InstallUtil::GetChromeVersion(dist, true));
-  if (version.get()) {
+  Version version;
+  InstallUtil::GetChromeVersion(dist, true, &version);
+  if (version.IsValid()) {
     FilePath exe_path;
     PathService::Get(base::DIR_EXE, &exe_path);
     std::wstring exe = exe_path.value();
     FilePath user_exe_path(installer::GetChromeInstallPath(false, dist));
     if (FilePath::CompareEqualIgnoreCase(exe, user_exe_path.value())) {
-      const string16 text =
-          l10n_util::GetStringUTF16(IDS_MACHINE_LEVEL_INSTALL_CONFLICT);
-      const string16 caption = l10n_util::GetStringUTF16(IDS_PRODUCT_NAME);
-      const UINT flags = MB_OK | MB_ICONERROR | MB_TOPMOST;
-      ui::MessageBox(NULL, text, caption, flags);
+      bool is_metro = base::win::IsMetroProcess();
+      if (!is_metro) {
+        // The dialog cannot be shown in Win8 Metro as doing so hangs Chrome on
+        // an invisible dialog.
+        // TODO (gab): Get rid of this dialog altogether and auto-launch
+        // system-level Chrome instead.
+        const string16 text =
+            l10n_util::GetStringUTF16(IDS_MACHINE_LEVEL_INSTALL_CONFLICT);
+        const string16 caption = l10n_util::GetStringUTF16(IDS_PRODUCT_NAME);
+        const UINT flags = MB_OK | MB_ICONERROR | MB_TOPMOST;
+        ui::MessageBox(NULL, text, caption, flags);
+      }
       CommandLine uninstall_cmd(
           InstallUtil::GetChromeUninstallCmd(false, dist->GetType()));
       if (!uninstall_cmd.GetProgram().empty()) {
         uninstall_cmd.AppendSwitch(installer::switches::kForceUninstall);
         uninstall_cmd.AppendSwitch(
             installer::switches::kDoNotRemoveSharedItems);
-        base::LaunchProcess(uninstall_cmd, base::LaunchOptions(), NULL);
+        base::LaunchOptions launch_options;
+        if (is_metro)
+          launch_options.force_breakaway_from_job_ = true;
+        base::LaunchProcess(uninstall_cmd, launch_options, NULL);
       }
       return true;
     }
   }
   return false;
+}
+
+string16 TranslationDelegate::GetLocalizedString(int installer_string_id) {
+  int resource_id = 0;
+  switch (installer_string_id) {
+  // HANDLE_STRING is used by the DO_INSTALLER_STRING_MAPPING macro which is in
+  // the generated header installer_util_strings.h.
+#define HANDLE_STRING(base_id, chrome_id) \
+  case base_id: \
+    resource_id = chrome_id; \
+    break;
+  DO_INSTALLER_STRING_MAPPING
+#undef HANDLE_STRING
+  default:
+    NOTREACHED();
+  }
+  if (resource_id)
+    return l10n_util::GetStringUTF16(resource_id);
+  return string16();
+}
+
+// static
+void ChromeBrowserMainPartsWin::SetupInstallerUtilStrings() {
+  CR_DEFINE_STATIC_LOCAL(TranslationDelegate, delegate, ());
+  installer::SetTranslationDelegate(&delegate);
 }

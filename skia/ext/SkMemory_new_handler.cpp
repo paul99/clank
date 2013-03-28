@@ -1,10 +1,12 @@
-// Copyright (c) 2011 The Chromium Authors. All rights reserved.
+// Copyright (c) 2012 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
 #include <stdio.h>
 #include <stdlib.h>
 #include <new>
+
+#include "base/process_util.h"
 
 #include "third_party/skia/include/core/SkTypes.h"
 #include "third_party/skia/include/core/SkThread.h"
@@ -14,7 +16,7 @@
 // during malloc(), when SK_MALLOC_THROW is not set (ie., when
 // sk_malloc_flags() would not abort on NULL).
 
-static SkMutex gSkNewHandlerMutex;
+SK_DECLARE_STATIC_MUTEX(gSkNewHandlerMutex);
 
 void sk_throw() {
     SkASSERT(!"sk_throw");
@@ -54,10 +56,14 @@ void* sk_malloc_flags(size_t size, unsigned flags) {
     p = malloc(size);
 #else
     if (!(flags & SK_MALLOC_THROW)) {
+#if defined(OS_MACOSX) && !defined(OS_IOS)
+      p = base::UncheckedMalloc(size);
+#else
       SkAutoMutexAcquire lock(gSkNewHandlerMutex);
       std::new_handler old_handler = std::set_new_handler(NULL);
       p = malloc(size);
       std::set_new_handler(old_handler);
+#endif
     } else {
       p = malloc(size);
     }

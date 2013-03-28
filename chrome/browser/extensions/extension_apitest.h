@@ -4,7 +4,6 @@
 
 #ifndef CHROME_BROWSER_EXTENSIONS_EXTENSION_APITEST_H_
 #define CHROME_BROWSER_EXTENSIONS_EXTENSION_APITEST_H_
-#pragma once
 
 #include <deque>
 #include <string>
@@ -14,7 +13,12 @@
 #include "chrome/browser/extensions/extension_browsertest.h"
 #include "content/public/browser/notification_registrar.h"
 
+class FilePath;
+
+namespace extensions {
 class Extension;
+}
+
 
 // The general flow of these API tests should work like this:
 // (1) Setup initial browser state (e.g. create some bookmarks for the
@@ -24,9 +28,37 @@ class Extension;
 //     chrome.test.fail
 // (4) Verify expected browser state.
 // TODO(erikkay): There should also be a way to drive events in these tests.
-
 class ExtensionApiTest : public ExtensionBrowserTest {
  public:
+  // Flags used to configure how the tests are run.
+  // TODO(aa): Many of these are dupes of ExtensionBrowserTest::Flags. Combine
+  // somehow?
+  enum Flags {
+    kFlagNone = 0,
+
+    // Allow the extension to run in incognito mode.
+    kFlagEnableIncognito = 1 << 0,
+
+    // Launch the test page in an incognito window.
+    kFlagUseIncognito = 1 << 1,
+
+    // Allow file access for the extension.
+    kFlagEnableFileAccess = 1 << 2,
+
+    // Loads the extension with location COMPONENT.
+    kFlagLoadAsComponent = 1 << 3,
+
+    // Launch the extension as a platform app.
+    kFlagLaunchPlatformApp = 1 << 4,
+
+    // Don't fail when the loaded manifest has warnings.
+    kFlagIgnoreManifestWarnings = 1 << 5,
+
+    // Allow manifest versions older that Extension::kModernManifestVersion.
+    // Used to test old manifest features.
+    kFlagAllowOldManifestVersions = 1 << 6,
+  };
+
   ExtensionApiTest();
   virtual ~ExtensionApiTest();
 
@@ -81,6 +113,12 @@ class ExtensionApiTest : public ExtensionBrowserTest {
   // Same as RunExtensionTest, but enables the extension for incognito mode.
   bool RunExtensionTestIncognito(const char* extension_name);
 
+  // Same as RunExtensionTest, but ignores any warnings in the manifest.
+  bool RunExtensionTestIgnoreManifestWarnings(const char* extension_name);
+
+  // Same as RunExtensionTest, allow old manifest ersions.
+  bool RunExtensionTestAllowOldManifestVersion(const char* extension_name);
+
   // Same as RunExtensionTest, but loads extension as component.
   bool RunComponentExtensionTest(const char* extension_name);
 
@@ -98,21 +136,16 @@ class ExtensionApiTest : public ExtensionBrowserTest {
   bool RunExtensionSubtest(const char* extension_name,
                            const std::string& page_url);
 
-  // Same as RunExtensionSubtest, but disables file access.
-  bool RunExtensionSubtestNoFileAccess(const char* extension_name,
-                                       const std::string& page_url);
-
-  // Same as RunExtensionSubtest, but enables the extension for incognito mode.
-  bool RunExtensionSubtestIncognito(const char* extension_name,
-                                    const std::string& page_url);
-
-  // Same as RunExtensionSubtestIncognito, but disables file access.
-  bool RunExtensionSubtestIncognitoNoFileAccess(const char* extension_name,
-                                                const std::string& page_url);
+  // Same as RunExtensionSubtest, except run with the specific |flags|
+  // (as defined in the Flags enum).
+  bool RunExtensionSubtest(const char* extension_name,
+                           const std::string& page_url,
+                           int flags);
 
   // Load |page_url| and wait for pass / fail notification from the extension
   // API on the page.
   bool RunPageTest(const std::string& page_url);
+  bool RunPageTest(const std::string& page_url, int flags);
 
   // Similar to RunExtensionTest, except used for running tests in platform app
   // shell windows.
@@ -122,9 +155,14 @@ class ExtensionApiTest : public ExtensionBrowserTest {
   // will be available to javascript tests using chrome.test.getConfig().
   bool StartTestServer();
 
+  // Start the test WebSocket server, and store details of its state. Those
+  // details will be available to javascript tests using
+  // chrome.test.getConfig().
+  bool StartWebSocketServer(const FilePath& root_directory);
+
   // Test that exactly one extension loaded.  If so, return a pointer to
   // the extension.  If not, return NULL and set message_.
-  const Extension* GetSingleLoadedExtension();
+  const extensions::Extension* GetSingleLoadedExtension();
 
   // All extensions tested by ExtensionApiTest are in the "api_test" dir.
   virtual void SetUpCommandLine(CommandLine* command_line) OVERRIDE;
@@ -133,13 +171,6 @@ class ExtensionApiTest : public ExtensionBrowserTest {
   std::string message_;
 
  private:
-  enum Flags {
-    kFlagNone = 0,
-    kFlagEnableIncognito = 1 << 0,
-    kFlagEnableFileAccess = 1 << 1,
-    kFlagLoadAsComponent = 1 << 2,
-    kFlagLaunchAppShell = 1 << 3
-  };
   bool RunExtensionTestImpl(const char* extension_name,
                             const std::string& test_page,
                             int flags);
@@ -147,6 +178,9 @@ class ExtensionApiTest : public ExtensionBrowserTest {
   // Hold details of the test, set in C++, which can be accessed by
   // javascript using chrome.test.getConfig().
   scoped_ptr<DictionaryValue> test_config_;
+
+  // Hold the test WebSocket server.
+  scoped_ptr<net::TestServer> websocket_server_;
 };
 
 #endif  // CHROME_BROWSER_EXTENSIONS_EXTENSION_APITEST_H_

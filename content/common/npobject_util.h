@@ -1,4 +1,4 @@
-// Copyright (c) 2011 The Chromium Authors. All rights reserved.
+// Copyright (c) 2012 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 //
@@ -6,7 +6,6 @@
 
 #ifndef CONTENT_COMMON_NPOBJECT_UTIL_H_
 #define CONTENT_COMMON_NPOBJECT_UTIL_H_
-#pragma once
 
 #include "build/build_config.h"
 
@@ -17,14 +16,16 @@
 #include "content/common/npobject_stub.h"
 
 class GURL;
-class NPChannelBase;
 
 struct _NPVariant;
-struct NPIdentifier_Param;
-struct NPVariant_Param;
 
 typedef _NPVariant NPVariant;
 typedef void *NPIdentifier;
+
+namespace content {
+class NPChannelBase;
+struct NPIdentifier_Param;
+struct NPVariant_Param;
 
 // Needs to be called early in the plugin process lifetime, before any
 // plugin instances are initialized.
@@ -48,7 +49,7 @@ void CreateNPVariantParam(const NPVariant& variant,
                           NPChannelBase* channel,
                           NPVariant_Param* param,
                           bool release,
-                          gfx::NativeViewId containing_window,
+                          int render_view_id,
                           const GURL& page_url);
 
 // Creates an NPVariant from the marshalled object.
@@ -56,16 +57,18 @@ void CreateNPVariantParam(const NPVariant& variant,
 bool CreateNPVariant(const NPVariant_Param& param,
                      NPChannelBase* channel,
                      NPVariant* result,
-                     gfx::NativeViewId containing_window,
+                     int render_view_id,
                      const GURL& page_url);
 
 #if defined(OS_WIN)
-// Given a plugin's HWND, returns an event associated with the TabContents
+// Given a plugin's HWND, returns an event associated with the WebContentsImpl
 // that's set when inside a messagebox.  This tells the plugin process that
 // the message queue should be pumped (as what would happen if everything was
 // in-process).  This avoids deadlocks when a plugin invokes javascript that
 // causes a message box to come up.
 HANDLE GetMessageBoxEvent(HWND hwnd);
 #endif  // defined(OS_WIN)
+
+}  // namespace content
 
 #endif  // CONTENT_COMMON_NPOBJECT_UTIL_H_

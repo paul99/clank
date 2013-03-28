@@ -7,9 +7,9 @@
 
 #ifndef BASE_PROCESS_UTIL_H_
 #define BASE_PROCESS_UTIL_H_
-#pragma once
 
 #include "base/basictypes.h"
+#include "base/time.h"
 
 #if defined(OS_WIN)
 #include <windows.h>
@@ -37,9 +37,12 @@ typedef struct _malloc_zone_t malloc_zone_t;
 #include <vector>
 
 #include "base/base_export.h"
-#include "base/file_descriptor_shuffle.h"
 #include "base/file_path.h"
 #include "base/process.h"
+
+#if defined(OS_POSIX)
+#include "base/posix/file_descriptor_shuffle.h"
+#endif
 
 class CommandLine;
 
@@ -134,11 +137,27 @@ enum TerminationStatus {
   TERMINATION_STATUS_MAX_ENUM
 };
 
+#if defined(USE_LINUX_BREAKPAD)
+BASE_EXPORT extern size_t g_oom_size;
+#endif
+
+#if defined(OS_WIN)
+// Output multi-process printf, cout, cerr, etc to the cmd.exe console that ran
+// chrome. This is not thread-safe: only call from main thread.
+BASE_EXPORT void RouteStdioToConsole();
+#endif
+
 // Returns the id of the current process.
 BASE_EXPORT ProcessId GetCurrentProcId();
 
 // Returns the ProcessHandle of the current process.
 BASE_EXPORT ProcessHandle GetCurrentProcessHandle();
+
+#if defined(OS_WIN)
+// Returns the module handle to which an address belongs. The reference count
+// of the module is not incremented.
+BASE_EXPORT HMODULE GetModuleFromAddress(void* address);
+#endif
 
 // Converts a PID to a process handle. This handle must be closed by
 // CloseProcessHandle when you are done with it. Returns true on success.
@@ -189,6 +208,9 @@ const int kMaxOomScore = 1000;
 // translate the given value into [0, 15].  Some aliasing of values
 // may occur in that case, of course.
 BASE_EXPORT bool AdjustOOMScore(ProcessId process, int score);
+
+// /proc/self/exe refers to the current executable.
+BASE_EXPORT extern const char kProcSelfExe[];
 #endif  // defined(OS_LINUX) || defined(OS_ANDROID)
 
 #if defined(OS_POSIX)
@@ -201,9 +223,8 @@ BASE_EXPORT ProcessId GetParentProcessId(ProcessHandle process);
 BASE_EXPORT void CloseSuperfluousFds(const InjectiveMultimap& saved_map);
 #endif  // defined(OS_POSIX)
 
-// TODO(evan): rename these to use StudlyCaps.
-typedef std::vector<std::pair<std::string, std::string> > environment_vector;
-typedef std::vector<std::pair<int, int> > file_handle_mapping_vector;
+typedef std::vector<std::pair<std::string, std::string> > EnvironmentVector;
+typedef std::vector<std::pair<int, int> > FileHandleMappingVector;
 
 #if defined(OS_MACOSX)
 // Used with LaunchOptions::synchronize and LaunchSynchronize, a
@@ -218,7 +239,8 @@ struct LaunchOptions {
   LaunchOptions() : wait(false),
 #if defined(OS_WIN)
                     start_hidden(false), inherit_handles(false), as_user(NULL),
-                    empty_desktop_name(false), job_handle(NULL)
+                    empty_desktop_name(false), job_handle(NULL),
+                    force_breakaway_from_job_(false)
 #else
                     environ(NULL), fds_to_remap(NULL), maximize_rlimits(NULL),
                     new_process_group(false)
@@ -255,20 +277,27 @@ struct LaunchOptions {
   // If true, use an empty string for the desktop name.
   bool empty_desktop_name;
 
-  // If non-NULL, launches the application in that job object.
+  // If non-NULL, launches the application in that job object. The process will
+  // be terminated immediately and LaunchProcess() will fail if assignment to
+  // the job object fails.
   HANDLE job_handle;
+
+  // If set to true, ensures that the child process is launched with the
+  // CREATE_BREAKAWAY_FROM_JOB flag which allows it to breakout of the parent
+  // job if any.
+  bool force_breakaway_from_job_;
 #else
   // If non-NULL, set/unset environment variables.
   // See documentation of AlterEnvironment().
   // This pointer is owned by the caller and must live through the
   // call to LaunchProcess().
-  const environment_vector* environ;
+  const EnvironmentVector* environ;
 
   // If non-NULL, remap file descriptors according to the mapping of
   // src fd->dest fd to propagate FDs into the child process.
   // This pointer is owned by the caller and must live through the
   // call to LaunchProcess().
-  const file_handle_mapping_vector* fds_to_remap;
+  const FileHandleMappingVector* fds_to_remap;
 
   // Each element is an RLIMIT_* constant that should be raised to its
   // rlim_max.  This pointer is owned by the caller and must live through
@@ -318,7 +347,9 @@ struct LaunchOptions {
 // Launch a process via the command line |cmdline|.
 // See the documentation of LaunchOptions for details on |options|.
 //
-// If |process_handle| is non-NULL, it will be filled in with the
+// Returns true upon success.
+//
+// Upon success, if |process_handle| is non-NULL, it will be filled in with the
 // handle of the launched process.  NOTE: In this case, the caller is
 // responsible for closing the handle so that it doesn't leak!
 // Otherwise, the process handle will be implicitly closed.
@@ -347,7 +378,7 @@ enum IntegrityLevel {
 // if the system does not support integrity levels (pre-Vista) or in the case
 // of an underlying system failure.
 BASE_EXPORT bool GetProcessIntegrityLevel(ProcessHandle process,
-                                          IntegrityLevel *level);
+                                          IntegrityLevel* level);
 
 // Windows-specific LaunchProcess that takes the command line as a
 // string.  Useful for situations where you need to control the
@@ -379,7 +410,7 @@ BASE_EXPORT bool LaunchProcess(const std::vector<std::string>& argv,
 // the second is empty, in which case the key-value is removed.
 //
 // The returned array is allocated using new[] and must be freed by the caller.
-BASE_EXPORT char** AlterEnvironment(const environment_vector& changes,
+BASE_EXPORT char** AlterEnvironment(const EnvironmentVector& changes,
                                     const char* const* const env);
 
 #if defined(OS_MACOSX)
@@ -408,6 +439,12 @@ BASE_EXPORT bool SetJobObjectAsKillOnJobClose(HANDLE job_object);
 BASE_EXPORT bool GetAppOutput(const CommandLine& cl, std::string* output);
 
 #if defined(OS_POSIX)
+// A POSIX-specific version of GetAppOutput that takes an argv array
+// instead of a CommandLine.  Useful for situations where you need to
+// control the command line arguments directly.
+BASE_EXPORT bool GetAppOutput(const std::vector<std::string>& argv,
+                              std::string* output);
+
 // A restricted version of |GetAppOutput()| which (a) clears the environment,
 // and (b) stores at most |max_output| bytes; also, it doesn't search the path
 // for the command.
@@ -475,6 +512,15 @@ BASE_EXPORT bool KillProcessById(ProcessId process_id, int exit_code,
 BASE_EXPORT TerminationStatus GetTerminationStatus(ProcessHandle handle,
                                                    int* exit_code);
 
+#if defined(OS_POSIX)
+// Wait for the process to exit and get the termination status. See
+// GetTerminationStatus for more information. On POSIX systems, we can't call
+// WaitForExitCode and then GetTerminationStatus as the child will be reaped
+// when WaitForExitCode return and this information will be lost.
+BASE_EXPORT TerminationStatus WaitForTerminationStatus(ProcessHandle handle,
+                                                       int* exit_code);
+#endif  // defined(OS_POSIX)
+
 // Waits for process to exit. On POSIX systems, if the process hasn't been
 // signaled then puts the exit code in |exit_code|; otherwise it's considered
 // a failure. On Windows |exit_code| is always filled. Returns true on success,
@@ -489,7 +535,7 @@ BASE_EXPORT bool WaitForExitCode(ProcessHandle handle, int* exit_code);
 // The caller is always responsible for closing the |handle|.
 BASE_EXPORT bool WaitForExitCodeWithTimeout(ProcessHandle handle,
                                             int* exit_code,
-                                            int64 timeout_milliseconds);
+                                            base::TimeDelta timeout);
 
 // Wait for all the processes based on the named executable to exit.  If filter
 // is non-null, then only processes selected by the filter are waited on.
@@ -497,14 +543,14 @@ BASE_EXPORT bool WaitForExitCodeWithTimeout(ProcessHandle handle,
 // Returns true if all the processes exited, false otherwise.
 BASE_EXPORT bool WaitForProcessesToExit(
     const FilePath::StringType& executable_name,
-    int64 wait_milliseconds,
+    base::TimeDelta wait,
     const ProcessFilter* filter);
 
 // Wait for a single process to exit. Return true if it exited cleanly within
 // the given time limit. On Linux |handle| must be a child process, however
 // on Mac and Windows it can be any process.
 BASE_EXPORT bool WaitForSingleProcess(ProcessHandle handle,
-                                      int64 wait_milliseconds);
+                                      base::TimeDelta wait);
 
 // Waits a certain amount of time (can be 0) for all the processes with a given
 // executable name to exit, then kills off any of them that are still around.
@@ -513,7 +559,7 @@ BASE_EXPORT bool WaitForSingleProcess(ProcessHandle handle,
 // any processes needed to be killed, true if they all exited cleanly within
 // the wait_milliseconds delay.
 BASE_EXPORT bool CleanupProcesses(const FilePath::StringType& executable_name,
-                                  int64 wait_milliseconds,
+                                  base::TimeDelta wait,
                                   int exit_code,
                                   const ProcessFilter* filter);
 
@@ -581,7 +627,7 @@ class BASE_EXPORT ProcessIterator {
   std::vector<kinfo_proc> kinfo_procs_;
   size_t index_of_kinfo_proc_;
 #elif defined(OS_POSIX)
-  DIR *procfs_dir_;
+  DIR* procfs_dir_;
 #endif
   ProcessEntry entry_;
   const ProcessFilter* filter_;
@@ -626,18 +672,11 @@ class BASE_EXPORT NamedProcessIterator : public ProcessIterator {
 // priv:           Memory.
 // shared:         0
 // shareable:      0
-//
-// On Android:
-// priv_dirty:     Additional field to track the private_dirty memory(kbytes).
-//                 may be 0 if the kernel doesn't support proc/pid/smaps.
 struct WorkingSetKBytes {
   WorkingSetKBytes() : priv(0), shareable(0), shared(0) {}
   size_t priv;
   size_t shareable;
   size_t shared;
-#if defined(OS_ANDROID)
-  size_t priv_dirty;
-#endif
 };
 
 // Committed (resident + paged) memory usage broken down by
@@ -677,11 +716,13 @@ class BASE_EXPORT ProcessMetrics {
 
   // Creates a ProcessMetrics for the specified process.
   // The caller owns the returned object.
-#if !defined(OS_MACOSX)
+#if !defined(OS_MACOSX) || defined(OS_IOS)
   static ProcessMetrics* CreateProcessMetrics(ProcessHandle process);
 #else
   class PortProvider {
    public:
+    virtual ~PortProvider() {}
+
     // Should return the mach task for |process| if possible, or else
     // |MACH_PORT_NULL|. Only processes that this returns tasks for will have
     // metrics on OS X (except for the current process, which always gets
@@ -694,7 +735,7 @@ class BASE_EXPORT ProcessMetrics {
   // only returns valid metrics if |process| is the current process.
   static ProcessMetrics* CreateProcessMetrics(ProcessHandle process,
                                               PortProvider* port_provider);
-#endif  // !defined(OS_MACOSX)
+#endif  // !defined(OS_MACOSX) || defined(OS_IOS)
 
   // Returns the current space allocated for the pagefile, in bytes (these pages
   // may or may not be in memory).  On Linux, this returns the total virtual
@@ -742,11 +783,11 @@ class BASE_EXPORT ProcessMetrics {
   bool GetIOCounters(IoCounters* io_counters) const;
 
  private:
-#if !defined(OS_MACOSX)
+#if !defined(OS_MACOSX) || defined(OS_IOS)
   explicit ProcessMetrics(ProcessHandle process);
 #else
   ProcessMetrics(ProcessHandle process, PortProvider* port_provider);
-#endif  // defined(OS_MACOSX)
+#endif  // !defined(OS_MACOSX) || defined(OS_IOS)
 
   ProcessHandle process_;
 
@@ -757,6 +798,7 @@ class BASE_EXPORT ProcessMetrics {
   int64 last_time_;
   int64 last_system_time_;
 
+#if !defined(OS_IOS)
 #if defined(OS_MACOSX)
   // Queries the port provider if it's set.
   mach_port_t TaskForPid(ProcessHandle process) const;
@@ -766,6 +808,7 @@ class BASE_EXPORT ProcessMetrics {
   // Jiffie count at the last_time_ we updated.
   int last_cpu_;
 #endif  // defined(OS_POSIX)
+#endif  // !defined(OS_IOS)
 
   DISALLOW_COPY_AND_ASSIGN(ProcessMetrics);
 };
@@ -773,16 +816,22 @@ class BASE_EXPORT ProcessMetrics {
 #if defined(OS_LINUX) || defined(OS_ANDROID)
 // Data from /proc/meminfo about system-wide memory consumption.
 // Values are in KB.
-struct SystemMemoryInfoKB {
-  SystemMemoryInfoKB() : total(0), free(0), buffers(0), cached(0),
-      active_anon(0), inactive_anon(0), shmem(0) {}
+struct BASE_EXPORT SystemMemoryInfoKB {
+  SystemMemoryInfoKB();
+
   int total;
   int free;
   int buffers;
   int cached;
   int active_anon;
   int inactive_anon;
+  int active_file;
+  int inactive_file;
   int shmem;
+
+  // Gem data will be -1 if not supported.
+  int gem_objects;
+  long long gem_size;
 };
 // Retrieves data from /proc/meminfo about system-wide memory consumption.
 // Fills in the provided |meminfo| structure. Returns true on success.
@@ -809,16 +858,6 @@ BASE_EXPORT void EnableTerminationOnHeapCorruption();
 // Turns on process termination if memory runs out.
 BASE_EXPORT void EnableTerminationOnOutOfMemory();
 
-#if defined(OS_MACOSX)
-// Exposed for testing.
-BASE_EXPORT malloc_zone_t* GetPurgeableZone();
-#endif  // defined(OS_MACOSX)
-
-// Enables stack dump to console output on exception and signals.
-// When enabled, the process will quit immediately. This is meant to be used in
-// unit_tests only!
-BASE_EXPORT bool EnableInProcessStackDumping();
-
 // If supported on the platform, and the user has sufficent rights, increase
 // the current process's scheduling priority to a high priority.
 BASE_EXPORT void RaiseProcessToHighPriority();
@@ -832,6 +871,20 @@ BASE_EXPORT void RaiseProcessToHighPriority();
 // in the child after forking will restore the standard exception handler.
 // See http://crbug.com/20371/ for more details.
 void RestoreDefaultExceptionHandler();
+#endif  // defined(OS_MACOSX)
+
+#if defined(OS_MACOSX)
+// Very large images or svg canvases can cause huge mallocs.  Skia
+// does tricks on tcmalloc-based systems to allow malloc to fail with
+// a NULL rather than hit the oom crasher.  This replicates that for
+// OSX.
+//
+// IF YOU USE THIS WITHOUT CONSULTING YOUR FRIENDLY OSX DEVELOPER,
+// YOUR CODE IS LIKELY TO BE REVERTED.  THANK YOU.
+//
+// TODO(shess): Weird place to put it, but this is where the OOM
+// killer currently lives.
+BASE_EXPORT void* UncheckedMalloc(size_t size);
 #endif  // defined(OS_MACOSX)
 
 }  // namespace base

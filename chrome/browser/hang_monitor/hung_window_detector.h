@@ -4,7 +4,6 @@
 
 #ifndef CHROME_BROWSER_HANG_MONITOR_HUNG_WINDOW_DETECTOR_H__
 #define CHROME_BROWSER_HANG_MONITOR_HUNG_WINDOW_DETECTOR_H__
-#pragma once
 
 #include "base/synchronization/lock.h"
 #include "chrome/common/worker_thread_ticker.h"
@@ -33,7 +32,6 @@ class HungWindowDetector : public WorkerThreadTicker::Callback {
    public:
     enum ActionOnHungWindow {
       HUNG_WINDOW_IGNORE,
-      HUNG_WINDOW_TERMINATE_THREAD,
       HUNG_WINDOW_TERMINATE_PROCESS,
     };
 

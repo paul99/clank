@@ -1,10 +1,9 @@
-// Copyright (c) 2011 The Chromium Authors. All rights reserved.
+// Copyright (c) 2012 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
 #ifndef CHROME_BROWSER_EXTENSIONS_EXTENSION_WEB_UI_H_
 #define CHROME_BROWSER_EXTENSIONS_EXTENSION_WEB_UI_H_
-#pragma once
 
 #include <string>
 
@@ -13,6 +12,10 @@
 #include "chrome/browser/favicon/favicon_service.h"
 #include "chrome/common/extensions/extension.h"
 #include "content/public/browser/web_ui_controller.h"
+
+namespace content {
+class WebContents;
+}
 
 class PrefService;
 class Profile;
@@ -42,20 +45,22 @@ class ExtensionWebUI : public content::WebUIController {
   // Page names are the keys, and chrome-extension: URLs are the values.
   // (e.g. { "newtab": "chrome-extension://<id>/my_new_tab.html" }
   static void RegisterChromeURLOverrides(Profile* profile,
-      const Extension::URLOverrideMap& overrides);
+      const extensions::Extension::URLOverrideMap& overrides);
   static void UnregisterChromeURLOverrides(Profile* profile,
-      const Extension::URLOverrideMap& overrides);
+      const extensions::Extension::URLOverrideMap& overrides);
   static void UnregisterChromeURLOverride(const std::string& page,
                                           Profile* profile,
-                                          base::Value* override);
+                                          const base::Value* override);
 
   // Called from BrowserPrefs
   static void RegisterUserPrefs(PrefService* prefs);
 
   // Get the favicon for the extension by getting an icon from the manifest.
-  static void GetFaviconForURL(Profile* profile,
-                               FaviconService::GetFaviconRequest* request,
-                               const GURL& page_url);
+  // Note. |callback| is always run asynchronously.
+  static void GetFaviconForURL(
+      Profile* profile,
+      const GURL& page_url,
+      const FaviconService::FaviconResultsCallback& callback);
 
  private:
   // Unregister the specified override, and if it's the currently active one,
@@ -63,7 +68,7 @@ class ExtensionWebUI : public content::WebUIController {
   static void UnregisterAndReplaceOverride(const std::string& page,
                                            Profile* profile,
                                            base::ListValue* list,
-                                           base::Value* override);
+                                           const base::Value* override);
 
   // TODO(aa): This seems out of place. Why is it not with the event routers for
   // the other extension APIs?

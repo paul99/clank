@@ -1,19 +1,18 @@
-// Copyright (c) 2011 The Chromium Authors. All rights reserved.
+// Copyright (c) 2012 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
 #ifndef CHROME_RENDERER_AUTOFILL_PASSWORD_AUTOFILL_MANAGER_H_
 #define CHROME_RENDERER_AUTOFILL_PASSWORD_AUTOFILL_MANAGER_H_
-#pragma once
 
 #include <map>
 #include <vector>
 
 #include "base/memory/weak_ptr.h"
+#include "chrome/common/password_form_fill_data.h"
 #include "chrome/renderer/page_click_listener.h"
 #include "content/public/renderer/render_view_observer.h"
 #include "third_party/WebKit/Source/WebKit/chromium/public/WebInputElement.h"
-#include "webkit/forms/password_form_dom_manager.h"
 
 namespace WebKit {
 class WebInputElement;
@@ -55,23 +54,9 @@ class PasswordAutofillManager : public content::RenderViewObserver,
 
   struct PasswordInfo {
     WebKit::WebInputElement password_field;
-    webkit::forms::PasswordFormFillData fill_data;
-#if defined(OS_ANDROID)
-    // because android cannot rely on the keyboard event to tell whether
-    // backspace was hit, we record the last text input length to see if
-    // the input is shortening. This has a side effect that committing
-    // composition may be wrongly treated as a backspace. But it is still
-    // better than the problem that we auto complete on each delete.
-    unsigned last_input_length;
-    bool is_autofilled;
-#endif
+    PasswordFormFillData fill_data;
     bool backspace_pressed_last;
-    PasswordInfo() : 
-#if defined(OS_ANDROID)
-        last_input_length(0),
-        is_autofilled(false),
-#endif
-	backspace_pressed_last(false) {}
+    PasswordInfo() : backspace_pressed_last(false) {}
   };
   typedef std::map<WebKit::WebElement, PasswordInfo> LoginToPasswordInfoMap;
 
@@ -89,23 +74,24 @@ class PasswordAutofillManager : public content::RenderViewObserver,
   virtual bool InputElementLostFocus() OVERRIDE;
 
   // RenderView IPC handlers:
-  void OnFillPasswordForm(const webkit::forms::PasswordFormFillData& form_data);
+  void OnFillPasswordForm(const PasswordFormFillData& form_data,
+                          bool disable_popup);
 
   // Scans the given frame for password forms and sends them up to the browser.
   // If |only_visible| is true, only forms visible in the layout are sent.
   void SendPasswordForms(WebKit::WebFrame* frame, bool only_visible);
 
-  void GetSuggestions(const webkit::forms::PasswordFormFillData& fill_data,
+  void GetSuggestions(const PasswordFormFillData& fill_data,
                       const string16& input,
                       std::vector<string16>* suggestions);
 
-  bool ShowSuggestionPopup(const webkit::forms::PasswordFormFillData& fill_data,
+  bool ShowSuggestionPopup(const PasswordFormFillData& fill_data,
                            const WebKit::WebInputElement& user_input);
 
   bool FillUserNameAndPassword(
       WebKit::WebInputElement* username_element,
       WebKit::WebInputElement* password_element,
-      const webkit::forms::PasswordFormFillData& fill_data,
+      const PasswordFormFillData& fill_data,
       bool exact_username_match,
       bool set_selection);
 
@@ -114,7 +100,7 @@ class PasswordAutofillManager : public content::RenderViewObserver,
   void PerformInlineAutocomplete(
       const WebKit::WebInputElement& username,
       const WebKit::WebInputElement& password,
-      const webkit::forms::PasswordFormFillData& fill_data);
+      const PasswordFormFillData& fill_data);
 
   // Invoked when the passed frame is closing.  Gives us a chance to clear any
   // reference we may have to elements in that frame.
@@ -127,6 +113,9 @@ class PasswordAutofillManager : public content::RenderViewObserver,
 
   // The logins we have filled so far with their associated info.
   LoginToPasswordInfoMap login_to_password_info_;
+
+  // Used to disable and hide the popup.
+  bool disable_popup_;
 
   base::WeakPtrFactory<PasswordAutofillManager> weak_ptr_factory_;
 

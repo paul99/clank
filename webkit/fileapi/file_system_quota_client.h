@@ -5,19 +5,22 @@
 #ifndef WEBKIT_FILEAPI_FILE_SYSTEM_QUOTA_CLIENT_H_
 #define WEBKIT_FILEAPI_FILE_SYSTEM_QUOTA_CLIENT_H_
 
-#include <deque>
-#include <list>
-#include <map>
 #include <set>
 #include <string>
+#include <utility>
 
 #include "base/basictypes.h"
+#include "base/compiler_specific.h"
 #include "base/file_path.h"
-#include "base/memory/scoped_ptr.h"
+#include "base/memory/ref_counted.h"
 #include "webkit/fileapi/file_system_quota_util.h"
 #include "webkit/fileapi/file_system_types.h"
 #include "webkit/quota/quota_client.h"
-#include "webkit/quota/quota_task.h"
+#include "webkit/storage/webkit_storage_export.h"
+
+namespace base {
+class SequencedTaskRunner;
+}
 
 namespace fileapi {
 
@@ -28,11 +31,10 @@ class FileSystemContext;
 // is called.
 // All of the public methods of this class are called by the quota manager
 // (except for the constructor/destructor).
-class FileSystemQuotaClient : public quota::QuotaClient,
-                              public quota::QuotaTaskObserver {
+class WEBKIT_STORAGE_EXPORT_PRIVATE FileSystemQuotaClient
+    : public NON_EXPORTED_BASE(quota::QuotaClient) {
  public:
   FileSystemQuotaClient(
-      scoped_refptr<base::MessageLoopProxy> file_message_loop,
       FileSystemContext* file_system_context,
       bool is_incognito);
   virtual ~FileSystemQuotaClient();
@@ -56,44 +58,11 @@ class FileSystemQuotaClient : public quota::QuotaClient,
       const DeletionCallback& callback) OVERRIDE;
 
  private:
-  class GetOriginUsageTask;
-  class GetOriginsTaskBase;
-  class GetOriginsForTypeTask;
-  class GetOriginsForHostTask;
-  class DeleteOriginTask;
+  base::SequencedTaskRunner* file_task_runner() const;
 
-  typedef std::pair<fileapi::FileSystemType, std::string> TypeAndHostOrOrigin;
-  typedef quota::CallbackQueueMap1<GetUsageCallback,
-                                   TypeAndHostOrOrigin,
-                                   int64
-                                   > UsageCallbackMap;
-  typedef quota::CallbackQueueMap2<GetOriginsCallback,
-                                   fileapi::FileSystemType,
-                                   const std::set<GURL>&,
-                                   quota::StorageType
-                                   > OriginsForTypeCallbackMap;
-  typedef quota::CallbackQueueMap2<GetOriginsCallback,
-                                   TypeAndHostOrOrigin,
-                                   const std::set<GURL>&,
-                                   quota::StorageType
-                                   > OriginsForHostCallbackMap;
-
-  void DidGetOriginUsage(fileapi::FileSystemType type,
-                         const GURL& origin, int64 usage);
-  void DidGetOriginsForType(fileapi::FileSystemType type,
-                            const std::set<GURL>& origins);
-  void DidGetOriginsForHost(const TypeAndHostOrOrigin& type_and_host,
-                            const std::set<GURL>& origins);
-
-  scoped_refptr<base::MessageLoopProxy> file_message_loop_;
   scoped_refptr<FileSystemContext> file_system_context_;
 
   bool is_incognito_;
-
-  // Pending callbacks.
-  UsageCallbackMap pending_usage_callbacks_;
-  OriginsForTypeCallbackMap pending_origins_for_type_callbacks_;
-  OriginsForHostCallbackMap pending_origins_for_host_callbacks_;
 
   DISALLOW_COPY_AND_ASSIGN(FileSystemQuotaClient);
 };

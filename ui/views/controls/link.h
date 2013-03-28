@@ -1,10 +1,9 @@
-// Copyright (c) 2011 The Chromium Authors. All rights reserved.
+// Copyright (c) 2012 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
 #ifndef UI_VIEWS_CONTROLS_LINK_H_
 #define UI_VIEWS_CONTROLS_LINK_H_
-#pragma once
 
 #include <string>
 
@@ -34,21 +33,26 @@ class VIEWS_EXPORT Link : public Label {
   // Overridden from View:
   virtual void OnEnabledChanged() OVERRIDE;
   virtual std::string GetClassName() const OVERRIDE;
-  virtual gfx::NativeCursor GetCursor(const MouseEvent& event) OVERRIDE;
-  virtual bool HitTest(const gfx::Point& l) const OVERRIDE;
-  virtual bool OnMousePressed(const MouseEvent& event) OVERRIDE;
-  virtual bool OnMouseDragged(const MouseEvent& event) OVERRIDE;
-  virtual void OnMouseReleased(const MouseEvent& event) OVERRIDE;
+  virtual gfx::NativeCursor GetCursor(const ui::MouseEvent& event) OVERRIDE;
+  virtual bool HitTestRect(const gfx::Rect& rect) const OVERRIDE;
+  virtual bool OnMousePressed(const ui::MouseEvent& event) OVERRIDE;
+  virtual bool OnMouseDragged(const ui::MouseEvent& event) OVERRIDE;
+  virtual void OnMouseReleased(const ui::MouseEvent& event) OVERRIDE;
   virtual void OnMouseCaptureLost() OVERRIDE;
-  virtual bool OnKeyPressed(const KeyEvent& event) OVERRIDE;
-  virtual bool SkipDefaultKeyEventProcessing(const KeyEvent& event) OVERRIDE;
+  virtual bool OnKeyPressed(const ui::KeyEvent& event) OVERRIDE;
+  virtual bool SkipDefaultKeyEventProcessing(
+      const ui::KeyEvent& event) OVERRIDE;
   virtual void GetAccessibleState(ui::AccessibleViewState* state) OVERRIDE;
+
+  // Overridden from ui::EventHandler:
+  virtual void OnGestureEvent(ui::GestureEvent* event) OVERRIDE;
 
   // Overridden from Label:
   virtual void SetFont(const gfx::Font& font) OVERRIDE;
 
-  virtual void SetEnabledColor(const SkColor& color) OVERRIDE;
-  void SetPressedColor(const SkColor& color);
+  virtual void SetEnabledColor(SkColor color) OVERRIDE;
+  void SetPressedColor(SkColor color);
+  void SetUnderline(bool underline);
 
   static const char kViewClassName[];
 
@@ -60,6 +64,9 @@ class VIEWS_EXPORT Link : public Label {
   void RecalculateFont();
 
   LinkListener* listener_;
+
+  // Whether the link should be underlined when enabled.
+  bool underline_;
 
   // Whether the link is currently pressed.
   bool pressed_;

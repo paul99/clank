@@ -1,4 +1,4 @@
-// Copyright (c) 2011 The Chromium Authors. All rights reserved.
+// Copyright (c) 2012 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -28,6 +28,19 @@ enum {
   SHA256_BLOCK_SIZE = 64  // Block size (in bytes) of the input to SHA-256.
 };
 
+// NSS doesn't accept size_t for text size, divide the data into smaller
+// chunks as needed.
+void Wrapped_SHA256_Update(SHA256Context* ctx, const unsigned char* text,
+                           size_t text_len) {
+  const unsigned int kChunkSize = 1 << 30;
+  while (text_len > kChunkSize) {
+    SHA256_Update(ctx, text, kChunkSize);
+    text += kChunkSize;
+    text_len -= kChunkSize;
+  }
+  SHA256_Update(ctx, text, (unsigned int)text_len);
+}
+
 // See FIPS 198: The Keyed-Hash Message Authentication Code (HMAC).
 void ComputeHMACSHA256(const unsigned char* key, size_t key_len,
                        const unsigned char* text, size_t text_len,
@@ -38,7 +51,7 @@ void ComputeHMACSHA256(const unsigned char* key, size_t key_len,
   unsigned char key0[SHA256_BLOCK_SIZE];
   if (key_len > SHA256_BLOCK_SIZE) {
     SHA256_Begin(&ctx);
-    SHA256_Update(&ctx, key, key_len);
+    Wrapped_SHA256_Update(&ctx, key, key_len);
     SHA256_End(&ctx, key0, NULL, SHA256_LENGTH);
     memset(key0 + SHA256_LENGTH, 0, SHA256_BLOCK_SIZE - SHA256_LENGTH);
   } else {
@@ -57,7 +70,7 @@ void ComputeHMACSHA256(const unsigned char* key, size_t key_len,
   // Compute the inner hash.
   SHA256_Begin(&ctx);
   SHA256_Update(&ctx, padded_key, SHA256_BLOCK_SIZE);
-  SHA256_Update(&ctx, text, text_len);
+  Wrapped_SHA256_Update(&ctx, text, text_len);
   SHA256_End(&ctx, inner_hash, NULL, SHA256_LENGTH);
 
   // XOR key0 with opad.
@@ -68,7 +81,7 @@ void ComputeHMACSHA256(const unsigned char* key, size_t key_len,
   SHA256_Begin(&ctx);
   SHA256_Update(&ctx, padded_key, SHA256_BLOCK_SIZE);
   SHA256_Update(&ctx, inner_hash, SHA256_LENGTH);
-  SHA256_End(&ctx, output, NULL, output_len);
+  SHA256_End(&ctx, output, NULL, (unsigned int) output_len);
 }
 
 }  // namespace
@@ -96,7 +109,7 @@ HMAC::HMAC(HashAlgorithm hash_alg)
   DCHECK(hash_alg_ == SHA1 || hash_alg_ == SHA256);
 }
 
-bool HMAC::Init(const unsigned char* key, int key_length) {
+bool HMAC::Init(const unsigned char* key, size_t key_length) {
   if (plat_->provider_ || plat_->key_ || !plat_->raw_key_.empty()) {
     // Init must not be called more than once on the same HMAC object.
     NOTREACHED();
@@ -104,8 +117,6 @@ bool HMAC::Init(const unsigned char* key, int key_length) {
   }
 
   if (hash_alg_ == SHA256) {
-    if (key_length < SHA256_LENGTH / 2)
-      return false;  // Key is too short.
     plat_->raw_key_.assign(key, key + key_length);
     return true;
   }
@@ -136,12 +147,12 @@ bool HMAC::Init(const unsigned char* key, int key_length) {
   key_blob->header.bVersion = CUR_BLOB_VERSION;
   key_blob->header.reserved = 0;
   key_blob->header.aiKeyAlg = CALG_RC2;
-  key_blob->key_size = key_length;
+  key_blob->key_size = static_cast<DWORD>(key_length);
   memcpy(key_blob->key_data, key, key_length);
 
   if (!CryptImportKey(plat_->provider_, &key_blob_storage[0],
-                      key_blob_storage.size(), 0, CRYPT_IPSEC_HMAC_KEY,
-                      plat_->key_.receive())) {
+                      (DWORD)key_blob_storage.size(), 0,
+                      CRYPT_IPSEC_HMAC_KEY, plat_->key_.receive())) {
     NOTREACHED();
     return false;
   }
@@ -157,7 +168,7 @@ HMAC::~HMAC() {
 
 bool HMAC::Sign(const base::StringPiece& data,
                 unsigned char* digest,
-                int digest_length) const {
+                size_t digest_length) const {
   if (hash_alg_ == SHA256) {
     if (plat_->raw_key_.empty())
       return false;
@@ -191,7 +202,7 @@ bool HMAC::Sign(const base::StringPiece& data,
                      static_cast<DWORD>(data.size()), 0))
     return false;
 
-  DWORD sha1_size = digest_length;
+  DWORD sha1_size = static_cast<DWORD>(digest_length);
   return !!CryptGetHashParam(hash, HP_HASHVAL, digest, &sha1_size, 0);
 }
 

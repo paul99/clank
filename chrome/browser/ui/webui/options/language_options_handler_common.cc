@@ -1,4 +1,4 @@
-// Copyright (c) 2011 The Chromium Authors. All rights reserved.
+// Copyright (c) 2012 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -29,6 +29,8 @@
 
 using content::UserMetricsAction;
 
+namespace options {
+
 LanguageOptionsHandlerCommon::LanguageOptionsHandlerCommon() {
 }
 
@@ -43,11 +45,6 @@ void LanguageOptionsHandlerCommon::GetLocalizedValues(
       l10n_util::GetStringUTF16(IDS_OPTIONS_SETTINGS_LANGUAGES_ADD_BUTTON));
   localized_strings->SetString("languages",
       l10n_util::GetStringUTF16(IDS_OPTIONS_SETTINGS_LANGUAGES_LANGUAGES));
-  localized_strings->SetString("please_add_another_language",
-      l10n_util::GetStringUTF16(
-          IDS_OPTIONS_SETTINGS_LANGUAGES_PLEASE_ADD_ANOTHER_LANGUAGE));
-  localized_strings->SetString("remove_button",
-      l10n_util::GetStringUTF16(IDS_OPTIONS_SETTINGS_LANGUAGES_REMOVE_BUTTON));
   localized_strings->SetString("add_language_instructions",
       l10n_util::GetStringUTF16(
           IDS_OPTIONS_SETTINGS_LANGUAGES_ADD_LANGUAGE_INSTRUCTIONS));
@@ -62,10 +59,6 @@ void LanguageOptionsHandlerCommon::GetLocalizedValues(
   localized_strings->SetString("display_in_this_language",
       l10n_util::GetStringFUTF16(
           IDS_OPTIONS_SETTINGS_LANGUAGES_DISPLAY_IN_THIS_LANGUAGE,
-          product_name));
-  localized_strings->SetString("this_language_is_currently_in_use",
-      l10n_util::GetStringFUTF16(
-          IDS_OPTIONS_SETTINGS_LANGUAGES_THIS_LANGUAGE_IS_CURRENTLY_IN_USE,
           product_name));
   localized_strings->SetString("restart_required",
           l10n_util::GetStringUTF16(IDS_OPTIONS_RELAUNCH_REQUIRED));
@@ -94,17 +87,21 @@ void LanguageOptionsHandlerCommon::GetLocalizedValues(
           IDS_OPTIONS_SETTINGS_LANGUAGES_RELAUNCH_BUTTON));
 
   // The following are resources, rather than local strings.
-  localized_strings->SetString("currentUiLanguageCode",
-                               g_browser_process->GetApplicationLocale());
+  std::string application_locale = g_browser_process->GetApplicationLocale();
+  localized_strings->SetString("currentUiLanguageCode", application_locale);
+  std::string prospective_locale =
+      g_browser_process->local_state()->GetString(prefs::kApplicationLocale);
+  localized_strings->SetString("prospectiveUiLanguageCode",
+      !prospective_locale.empty() ? prospective_locale : application_locale);
   localized_strings->Set("spellCheckLanguageCodeSet",
                          GetSpellCheckLanguageCodeSet());
   localized_strings->Set("uiLanguageCodeSet", GetUILanguageCodeSet());
 
   const CommandLine& command_line = *CommandLine::ForCurrentProcess();
-  bool experimental_spell_check_features =
-      command_line.HasSwitch(switches::kExperimentalSpellcheckerFeatures);
-  localized_strings->SetBoolean("experimentalSpellCheckFeatures",
-                                experimental_spell_check_features);
+  bool enable_spelling_auto_correct =
+      command_line.HasSwitch(switches::kEnableSpellingAutoCorrect);
+  localized_strings->SetBoolean("enableSpellingAutoCorrect",
+      enable_spelling_auto_correct);
 }
 
 void LanguageOptionsHandlerCommon::RegisterMessages() {
@@ -135,7 +132,7 @@ DictionaryValue* LanguageOptionsHandlerCommon::GetUILanguageCodeSet() {
 DictionaryValue* LanguageOptionsHandlerCommon::GetSpellCheckLanguageCodeSet() {
   DictionaryValue* dictionary = new DictionaryValue();
   std::vector<std::string> spell_check_languages;
-  SpellCheckCommon::SpellCheckLanguages(&spell_check_languages);
+  chrome::spellcheck_common::SpellCheckLanguages(&spell_check_languages);
   for (size_t i = 0; i < spell_check_languages.size(); ++i) {
     dictionary->SetBoolean(spell_check_languages[i], true);
   }
@@ -155,7 +152,9 @@ void LanguageOptionsHandlerCommon::UiLanguageChangeCallback(
       "LanguageOptions_UiLanguageChange_%s", language_code.c_str());
   content::RecordComputedAction(action);
   SetApplicationLocale(language_code);
-    web_ui()->CallJavascriptFunction("options.LanguageOptions.uiLanguageSaved");
+  StringValue language_value(language_code);
+  web_ui()->CallJavascriptFunction("options.LanguageOptions.uiLanguageSaved",
+                                   language_value);
 }
 
 void LanguageOptionsHandlerCommon::SpellCheckLanguageChangeCallback(
@@ -166,3 +165,5 @@ void LanguageOptionsHandlerCommon::SpellCheckLanguageChangeCallback(
       "LanguageOptions_SpellCheckLanguageChange_%s", language_code.c_str());
   content::RecordComputedAction(action);
 }
+
+}  // namespace options

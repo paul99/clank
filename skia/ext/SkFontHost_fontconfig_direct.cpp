@@ -23,7 +23,7 @@
 #include <fontconfig/fontconfig.h>
 
 #include "third_party/skia/include/core/SkTypeface.h"
-#include "unicode/utf16.h"
+#include "third_party/skia/include/core/SkUtils.h"
 
 namespace {
 
@@ -36,12 +36,14 @@ enum FontEquivClass
     SANS,
     SERIF,
     MONO,
-    PMINCHO,
-    MINCHO,
+    SYMBOL,
     PGOTHIC,
     GOTHIC,
+    PMINCHO,
+    MINCHO,
     SIMSUN,
     NSIMSUN,
+    SIMHEI,
 };
 
 // Match the font name against a whilelist of fonts, returning the equivalence
@@ -83,38 +85,51 @@ FontEquivClass GetFontEquivClass(const char* fontname)
         { MONO, "Cousine" },
         { MONO, "Liberation Mono" },
 
+        { SYMBOL, "Symbol" },
+        { SYMBOL, "Symbol Neu" },
+
         // ＭＳ Ｐゴシック
         { PGOTHIC, "MS PGothic" },
         { PGOTHIC, "\xef\xbc\xad\xef\xbc\xb3 \xef\xbc\xb0"
                    "\xe3\x82\xb4\xe3\x82\xb7\xe3\x83\x83\xe3\x82\xaf" },
         { PGOTHIC, "IPAPGothic" },
-
-        // 宋体
-        { SIMSUN, "Simsun" },
-        { SIMSUN, "\xe5\xae\x8b\xe4\xbd\x93" },
-        { SIMSUN, "Song ASC" },
-
-        // ＭＳ Ｐ明朝
-        { PMINCHO, "MS PMincho" },
-        { PMINCHO, "\xef\xbc\xad\xef\xbc\xb3 \xef\xbc\xb0"
-                   "\xe6\x98\x8e\xe6\x9c\x9d"},
-        { PMINCHO, "IPAPMincho" },
+        { PGOTHIC, "MotoyaG04Gothic" },
 
         // ＭＳ ゴシック
         { GOTHIC, "MS Gothic" },
         { GOTHIC, "\xef\xbc\xad\xef\xbc\xb3 "
                   "\xe3\x82\xb4\xe3\x82\xb7\xe3\x83\x83\xe3\x82\xaf" },
         { GOTHIC, "IPAGothic" },
+        { GOTHIC, "MotoyaG04GothicMono" },
+
+        // ＭＳ Ｐ明朝
+        { PMINCHO, "MS PMincho" },
+        { PMINCHO, "\xef\xbc\xad\xef\xbc\xb3 \xef\xbc\xb0"
+                   "\xe6\x98\x8e\xe6\x9c\x9d"},
+        { PMINCHO, "IPAPMincho" },
+        { PMINCHO, "MotoyaG04Mincho" },
 
         // ＭＳ 明朝
         { MINCHO, "MS Mincho" },
         { MINCHO, "\xef\xbc\xad\xef\xbc\xb3 \xe6\x98\x8e\xe6\x9c\x9d" },
         { MINCHO, "IPAMincho" },
+        { MINCHO, "MotoyaG04MinchoMono" },
+
+        // 宋体
+        { SIMSUN, "Simsun" },
+        { SIMSUN, "\xe5\xae\x8b\xe4\xbd\x93" },
+        { SIMSUN, "Song ASC" },
 
         // 新宋体
         { NSIMSUN, "NSimsun" },
         { NSIMSUN, "\xe6\x96\xb0\xe5\xae\x8b\xe4\xbd\x93" },
         { NSIMSUN, "N Song ASC" },
+
+        // 黑体
+        { SIMHEI, "Simhei" },
+        { SIMHEI, "\xe9\xbb\x91\xe4\xbd\x93" },
+        { SIMHEI, "MYingHeiGB18030" },
+        { SIMHEI, "MYingHeiB5HK" },
     };
 
     static const size_t kFontCount =
@@ -325,18 +340,10 @@ bool FontConfigDirect::Match(std::string* result_family,
     FcCharSet* charset = NULL;
     if (data) {
         charset = FcCharSetCreate();
-        const uint16_t* chars = (const uint16_t*) data;
-        size_t num_chars = characters_bytes / 2;
-        for (size_t i = 0; i < num_chars; ++i) {
-            if (U16_IS_SURROGATE(chars[i])
-                && U16_IS_SURROGATE_LEAD(chars[i])
-                && i != num_chars - 1
-                && U16_IS_TRAIL(chars[i + 1])) {
-                FcCharSetAddChar(charset, U16_GET_SUPPLEMENTARY(chars[i], chars[i+1]));
-                i++;
-            } else {
-                FcCharSetAddChar(charset, chars[i]);
-            }
+        const uint16_t* chars = (const uint16_t*)data;
+        const uint16_t* stop = chars + characters_bytes/2;
+        while (chars < stop) {
+            FcCharSetAddChar(charset, SkUTF16_NextUnichar(&chars));
         }
         FcPatternAddCharSet(pattern, FC_CHARSET, charset);
         FcCharSetDestroy(charset);  // pattern now owns it.

@@ -1,4 +1,4 @@
-// Copyright (c) 2011 The Chromium Authors. All rights reserved.
+// Copyright (c) 2012 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -12,7 +12,9 @@
 #include "base/logging.h"
 #include "base/message_loop.h"
 
-namespace{
+namespace content {
+namespace {
+
 const int kPollPeriodMovingMillis = 500;
 // Poll less frequently whilst stationary.
 const int kPollPeriodStationaryMillis = kPollPeriodMovingMillis * 3;
@@ -26,11 +28,11 @@ const int kMovementThresholdMeters = 20;
 // remove GPS location jitter noise.
 bool PositionsDifferSiginificantly(const Geoposition& position_1,
                                    const Geoposition& position_2) {
-  const bool pos_1_valid = position_1.IsValidFix();
-  if (pos_1_valid != position_2.IsValidFix())
+  const bool pos_1_valid = position_1.Validate();
+  if (pos_1_valid != position_2.Validate())
     return true;
   if (!pos_1_valid) {
-    DCHECK(!position_2.IsValidFix());
+    DCHECK(!position_2.Validate());
     return false;
   }
   double delta = std::sqrt(
@@ -75,10 +77,6 @@ void Win7LocationProvider::UpdatePosition() {
   ScheduleNextPoll(0);
 }
 
-void Win7LocationProvider::OnPermissionGranted(
-  const GURL& requesting_frame) {
-}
-
 void Win7LocationProvider::DoPollTask() {
   Geoposition new_position;
   api_->GetPosition(&new_position);
@@ -96,7 +94,7 @@ void Win7LocationProvider::ScheduleNextPoll(int interval) {
   MessageLoop::current()->PostDelayedTask(
       FROM_HERE,
       base::Bind(&Win7LocationProvider::DoPollTask, weak_factory_.GetWeakPtr()),
-      interval);
+      base::TimeDelta::FromMilliseconds(interval));
 }
 
 LocationProviderBase* NewSystemLocationProvider() {
@@ -105,3 +103,5 @@ LocationProviderBase* NewSystemLocationProvider() {
     return NULL; // API not supported on this machine.
   return new Win7LocationProvider(api);
 }
+
+}  // namespace content

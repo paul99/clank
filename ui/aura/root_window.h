@@ -4,149 +4,167 @@
 
 #ifndef UI_AURA_ROOT_WINDOW_H_
 #define UI_AURA_ROOT_WINDOW_H_
-#pragma once
+
+#include <vector>
 
 #include "base/basictypes.h"
 #include "base/memory/ref_counted.h"
+#include "base/memory/scoped_ptr.h"
 #include "base/memory/weak_ptr.h"
 #include "base/message_loop.h"
 #include "ui/aura/aura_export.h"
-#include "ui/aura/cursor.h"
-#include "ui/aura/focus_manager.h"
-#include "ui/aura/gestures/gesture_recognizer.h"
+#include "ui/aura/client/capture_delegate.h"
+#include "ui/aura/root_window_host_delegate.h"
 #include "ui/aura/window.h"
-#include "ui/base/events.h"
-#include "ui/gfx/compositor/compositor.h"
-#include "ui/gfx/compositor/layer_animation_observer.h"
+#include "ui/base/cursor/cursor.h"
+#include "ui/base/events/event_constants.h"
+#include "ui/base/events/event_dispatcher.h"
+#include "ui/base/gestures/gesture_recognizer.h"
+#include "ui/base/gestures/gesture_types.h"
+#include "ui/compositor/compositor.h"
+#include "ui/compositor/compositor_observer.h"
+#include "ui/compositor/layer_animation_observer.h"
 #include "ui/gfx/native_widget_types.h"
 #include "ui/gfx/point.h"
 
+class SkCanvas;
+
 namespace gfx {
 class Size;
+class Transform;
 }
 
 namespace ui {
+class GestureEvent;
+class GestureRecognizer;
+class KeyEvent;
 class LayerAnimationSequence;
-class Transform;
+class MouseEvent;
+class ScrollEvent;
+class TouchEvent;
+class ViewProp;
 }
 
 namespace aura {
 
+class RootWindow;
 class RootWindowHost;
 class RootWindowObserver;
-class KeyEvent;
-class MouseEvent;
-class ScreenAura;
-class StackingClient;
-class ScrollEvent;
-class TouchEvent;
-class GestureEvent;
 
 // RootWindow is responsible for hosting a set of windows.
 class AURA_EXPORT RootWindow : public ui::CompositorDelegate,
+                               public ui::CompositorObserver,
                                public Window,
-                               public internal::FocusManager,
-                               public ui::LayerAnimationObserver {
+                               public ui::EventDispatcherDelegate,
+                               public ui::GestureEventHelper,
+                               public ui::LayerAnimationObserver,
+                               public aura::client::CaptureDelegate,
+                               public aura::RootWindowHostDelegate {
  public:
-  static RootWindow* GetInstance();
-  static void DeleteInstance();
+  struct AURA_EXPORT CreateParams {
+    // CreateParams with initial_bounds and default host.
+    CreateParams(const gfx::Rect& initial_bounds);
+    ~CreateParams() {}
 
-  static void set_use_fullscreen_host_window(bool use_fullscreen) {
-    use_fullscreen_host_window_ = use_fullscreen;
-  }
-  static bool use_fullscreen_host_window() {
-    return use_fullscreen_host_window_;
-  }
+    gfx::Rect initial_bounds;
+
+    // A host to use in place of the default one that RootWindow will create.
+    // NULL by default.
+    RootWindowHost* host;
+  };
+
+  explicit RootWindow(const CreateParams& params);
+  virtual ~RootWindow();
+
+  // Returns the RootWindowHost for the specified accelerated widget, or NULL
+  // if there is none associated.
+  static RootWindow* GetForAcceleratedWidget(gfx::AcceleratedWidget widget);
 
   ui::Compositor* compositor() { return compositor_.get(); }
-  gfx::Point last_mouse_location() const { return last_mouse_location_; }
   gfx::NativeCursor last_cursor() const { return last_cursor_; }
   Window* mouse_pressed_handler() { return mouse_pressed_handler_; }
-  Window* capture_window() { return capture_window_; }
-  ScreenAura* screen() { return screen_; }
+
+  // Initializes the root window.
+  void Init();
 
   // Shows the root window host.
   void ShowRootWindow();
 
+  // Hides the root window host.
+  void HideRootWindow();
+
+  // Stop listening events in preparation for shutdown.
+  void PrepareForShutdown();
+
+  RootWindowHostDelegate* AsRootWindowHostDelegate();
+
   // Sets the size of the root window.
-  void SetHostSize(const gfx::Size& size);
+  void SetHostSize(const gfx::Size& size_in_pixel);
   gfx::Size GetHostSize() const;
 
-  // Shows the specified cursor.
+  // Sets the bounds of the host window.
+  void SetHostBounds(const gfx::Rect& size_in_pixel);
+
+  // Returns where the RootWindow is on screen.
+  gfx::Point GetHostOrigin() const;
+
+  // Sets the currently-displayed cursor. If the cursor was previously hidden
+  // via ShowCursor(false), it will remain hidden until ShowCursor(true) is
+  // called, at which point the cursor that was last set via SetCursor() will be
+  // used.
   void SetCursor(gfx::NativeCursor cursor);
 
-  // Sets current cursor visibility to |show|.
-  void ShowCursor(bool show);
+  // Invoked when the cursor's visibility has changed.
+  void OnCursorVisibilityChanged(bool visible);
+
+  // Invoked when the mouse events get enabled or disabled.
+  void OnMouseEventsEnableStateChanged(bool enabled);
 
   // Moves the cursor to the specified location relative to the root window.
-  void MoveCursorTo(const gfx::Point& location);
+  virtual void MoveCursorTo(const gfx::Point& location) OVERRIDE;
 
-  // Clips the cursor movement to |capture_window_|. Should be invoked only
-  // after SetCapture(). ReleaseCapture() implicitly removes any confines set
-  // using this function. Returns true if successful.
+  // Clips the cursor movement to the root_window.
   bool ConfineCursorToWindow();
-
-  // Shows the root window host and runs an event loop for it.
-  void Run();
 
   // Draws the necessary set of windows.
   void Draw();
 
-  // Handles a mouse event. Returns true if handled.
-  bool DispatchMouseEvent(MouseEvent* event);
-
-  // Handles a key event. Returns true if handled.
-  bool DispatchKeyEvent(KeyEvent* event);
-
-  // Handles a scroll event. Returns true if handled.
-  bool DispatchScrollEvent(ScrollEvent* event);
-
-  // Handles a touch event. Returns true if handled.
-  bool DispatchTouchEvent(TouchEvent* event);
+  // Draw the whole screen.
+  void ScheduleFullDraw();
 
   // Handles a gesture event. Returns true if handled. Unlike the other
   // event-dispatching function (e.g. for touch/mouse/keyboard events), gesture
   // events are dispatched from GestureRecognizer instead of RootWindowHost.
-  bool DispatchGestureEvent(GestureEvent* event);
-
-  // Called when the host changes size.
-  void OnHostResized(const gfx::Size& size);
-
-  // Called when the native screen's resolution changes.
-  void OnNativeScreenResized(const gfx::Size& size);
-
-  // Invoked when |window| is initialized.
-  void OnWindowInitialized(Window* window);
+  bool DispatchGestureEvent(ui::GestureEvent* event);
 
   // Invoked when |window| is being destroyed.
   void OnWindowDestroying(Window* window);
 
-  // Invokved when |window|'s bounds is changed. |contained_mouse| indicates if
+  // Invoked when |window|'s bounds have changed. |contained_mouse| indicates if
   // the bounds before change contained the |last_moust_location()|.
   void OnWindowBoundsChanged(Window* window, bool contained_mouse);
 
-  // Invokved when |window|'s visibility is changed.
+  // Invoked when |window|'s visibility is changed.
   void OnWindowVisibilityChanged(Window* window, bool is_visible);
 
-  // Invokved when |window|'s tranfrom has changed. |contained_mouse|
+  // Invoked when |window|'s tranfrom has changed. |contained_mouse|
   // indicates if the bounds before change contained the
   // |last_moust_location()|.
   void OnWindowTransformed(Window* window, bool contained_mouse);
 
-  // Returns the root window's dispatcher. The result should only be passed to
-  // MessageLoopForUI::RunWithDispatcher() or
-  // MessageLoopForUI::RunAllPendingWithDispatcher(), or used to dispatch
-  // an event by |Dispatch(const NativeEvent&)| on it. It must never be stored.
-#if !defined(OS_MACOSX)
-  MessageLoop::Dispatcher* GetDispatcher();
-#endif
+  // Invoked when the keyboard mapping (in X11 terms: the mapping between
+  // keycodes and keysyms) has changed.
+  void OnKeyboardMappingChanged();
 
-  // Add/remove observer.
+  // The system windowing system has sent a request that we close our window.
+  void OnRootWindowHostCloseRequested();
+
+  // Add/remove observer. There is no need to remove the observer if
+  // the root window is being deleted. In particular, you SHOULD NOT remove
+  // in |WindowObserver::OnWindowDestroying| of the observer observing
+  // the root window because it is too late to remove it.
   void AddRootWindowObserver(RootWindowObserver* observer);
   void RemoveRootWindowObserver(RootWindowObserver* observer);
-
-  // Are any mouse buttons currently down?
-  bool IsMouseButtonDown() const;
 
   // Posts |native_event| to the platform's event queue.
   void PostNativeEvent(const base::NativeEvent& native_event);
@@ -155,83 +173,174 @@ class AURA_EXPORT RootWindow : public ui::CompositorDelegate,
   // screen's.
   void ConvertPointToNativeScreen(gfx::Point* point) const;
 
-  // Capture -------------------------------------------------------------------
-
-  // Sets capture to the specified window.
-  void SetCapture(Window* window);
-
-  // If |window| has mouse capture, the current capture window is set to NULL.
-  void ReleaseCapture(Window* window);
+  // Converts |point| from native screen coordinate system to the root window's.
+  void ConvertPointFromNativeScreen(gfx::Point* point) const;
 
   // Gesture Recognition -------------------------------------------------------
 
-  // When a touch event is dispatched to a Window, it can notify the RootWindow
-  // to queue the touch event for asynchronous gesture recognition. These are
-  // the entry points for the asynchronous processing of the queued touch
-  // events.
-  // Process the next touch event for gesture recognition. |processed| indicates
-  // whether the queued event was processed by the window or not.
-  void AdvanceQueuedTouchEvent(Window* window, bool processed);
+  // When a touch event is dispatched to a Window, it may want to process the
+  // touch event asynchronously. In such cases, the window should consume the
+  // event during the event dispatch. Once the event is properly processed, the
+  // window should let the RootWindow know about the result of the event
+  // processing, so that gesture events can be properly created and dispatched.
+  void ProcessedTouchEvent(ui::TouchEvent* event,
+                           Window* window,
+                           ui::EventResult result);
 
-  GestureRecognizer* gesture_recognizer() const {
+  ui::GestureRecognizer* gesture_recognizer() const {
     return gesture_recognizer_.get();
   }
 
   // Provided only for testing:
-  void SetGestureRecognizerForTesting(GestureRecognizer* gr);
+  void SetGestureRecognizerForTesting(ui::GestureRecognizer* gr);
 
-  // Overridden from Window:
-  virtual void SetTransform(const ui::Transform& transform) OVERRIDE;
+  // Returns the accelerated widget from the RootWindowHost.
+  gfx::AcceleratedWidget GetAcceleratedWidget();
 
-#if !defined(NDEBUG)
   // Toggles the host's full screen state.
   void ToggleFullScreen();
-#endif
+
+  // These methods are used to defer the processing of mouse events related
+  // to resize. A client (typically a RenderWidgetHostViewAura) can call
+  // HoldMouseMoves when an resize is initiated and then ReleaseMouseMoves
+  // once the resize is completed.
+  //
+  // More than one hold can be invoked and each hold must be cancelled by a
+  // release before we resume normal operation.
+  void HoldMouseMoves();
+  void ReleaseMouseMoves();
+
+  // Sets if the window should be focused when shown.
+  void SetFocusWhenShown(bool focus_when_shown);
+
+  // Copies |source_bounds| from the root window (as displayed on the host
+  // machine) to |canvas| at offset |dest_offset|.
+  bool CopyAreaToSkCanvas(const gfx::Rect& source_bounds,
+                          const gfx::Point& dest_offset,
+                          SkCanvas* canvas);
+
+  // Grabs a snapshot of the root window using platform-specific APIs, encodes
+  // it in PNG format, and saves it to |png_representation|.
+  bool GrabSnapshot(const gfx::Rect& snapshot_bounds,
+                    std::vector<unsigned char>* png_representation);
+
+  // Gets the last location seen in a mouse event in this root window's
+  // coordinates. This may return a point outside the root window's bounds.
+  gfx::Point GetLastMouseLocationInRoot() const;
+
+  // Overridden from Window:
+  virtual RootWindow* GetRootWindow() OVERRIDE;
+  virtual const RootWindow* GetRootWindow() const OVERRIDE;
+  virtual void SetTransform(const gfx::Transform& transform) OVERRIDE;
+
+  // Overridden from ui::EventTarget:
+  virtual ui::EventTarget* GetParentTarget() OVERRIDE;
 
   // Overridden from ui::CompositorDelegate:
   virtual void ScheduleDraw() OVERRIDE;
 
-  // Overridden from Window:
-  virtual void OnWindowAttachedToRootWindow(
-      Window* window) OVERRIDE;
-  virtual void OnWindowDetachingFromRootWindow(
-      Window* window) OVERRIDE;
+  // Overridden from ui::CompositorObserver:
+  virtual void OnCompositingDidCommit(ui::Compositor*) OVERRIDE;
+  virtual void OnCompositingStarted(ui::Compositor*) OVERRIDE;
+  virtual void OnCompositingEnded(ui::Compositor*) OVERRIDE;
+  virtual void OnCompositingAborted(ui::Compositor*) OVERRIDE;
+  virtual void OnCompositingLockStateChanged(ui::Compositor*) OVERRIDE;
 
- private:
-  RootWindow();
-  virtual ~RootWindow();
-
-  // Called whenever the mouse moves, tracks the current |mouse_moved_handler_|,
-  // sending exited and entered events as its value changes.
-  void HandleMouseMoved(const MouseEvent& event, Window* target);
-
-  bool ProcessMouseEvent(Window* target, MouseEvent* event);
-  bool ProcessKeyEvent(Window* target, KeyEvent* event);
-  ui::TouchStatus ProcessTouchEvent(Window* target, TouchEvent* event);
-  ui::GestureStatus ProcessGestureEvent(Window* target, GestureEvent* event);
-  bool ProcessGestures(GestureRecognizer::Gestures* gestures);
+  // Overridden from ui::LayerDelegate:
+  virtual void OnDeviceScaleFactorChanged(float device_scale_factor) OVERRIDE;
 
   // Overridden from Window:
   virtual bool CanFocus() const OVERRIDE;
   virtual bool CanReceiveEvents() const OVERRIDE;
-  virtual internal::FocusManager* GetFocusManager() OVERRIDE;
-  virtual RootWindow* GetRootWindow() OVERRIDE;
+
+  // Overridden from aura::client::CaptureDelegate:
+  virtual void UpdateCapture(Window* old_capture, Window* new_capture) OVERRIDE;
+  virtual void SetNativeCapture() OVERRIDE;
+  virtual void ReleaseNativeCapture() OVERRIDE;
+
+  // Exposes RootWindowHost::QueryMouseLocation() for test purposes.
+  bool QueryMouseLocationForTest(gfx::Point* point) const;
+
+ private:
+  friend class Window;
+
+  // The parameter for OnWindowHidden() to specify why window is hidden.
+  enum WindowHiddenReason {
+    WINDOW_DESTROYED,  // Window is destroyed.
+    WINDOW_HIDDEN,     // Window is hidden.
+    WINDOW_MOVING,     // Window is temporarily marked as hidden due to move
+                       // across root windows.
+  };
+
+  // Updates the event with the appropriate transform for the device scale
+  // factor. The RootWindowHostDelegate dispatches events in the physical pixel
+  // coordinate. But the event processing from RootWindow onwards happen in
+  // device-independent pixel coordinate. So it is necessary to update the event
+  // received from the host.
+  void TransformEventForDeviceScaleFactor(ui::LocatedEvent* event);
+
+  // Called whenever the mouse moves, tracks the current |mouse_moved_handler_|,
+  // sending exited and entered events as its value changes.
+  void HandleMouseMoved(const ui::MouseEvent& event, Window* target);
+
+  void ProcessEvent(Window* target, ui::Event* event);
+
+  bool ProcessGestures(ui::GestureRecognizer::Gestures* gestures);
+
+  // Called when a Window is attached or detached from the RootWindow.
+  void OnWindowAddedToRootWindow(Window* window);
+  void OnWindowRemovedFromRootWindow(Window* window, RootWindow* new_root);
+
+  // Called when a window becomes invisible, either by being removed
+  // from root window hierarchy, via SetVisible(false) or being destroyed.
+  // |reason| specifies what triggered the hiding. |new_root| is the new root
+  // window, and may be NULL.
+  void OnWindowHidden(Window* invisible,
+                      WindowHiddenReason reason,
+                      RootWindow* new_root);
+
+  // Cleans up the gesture recognizer for all windows in |window| (including
+  // |window| itself).
+  void CleanupGestureRecognizerState(Window* window);
+
+  // Overridden from ui::EventDispatcherDelegate.
+  virtual bool CanDispatchToTarget(EventTarget* target) OVERRIDE;
+
+  // Overridden from ui::GestureEventHelper.
+  virtual bool DispatchLongPressGestureEvent(ui::GestureEvent* event) OVERRIDE;
+  virtual bool DispatchCancelTouchEvent(ui::TouchEvent* event) OVERRIDE;
 
   // Overridden from ui::LayerAnimationObserver:
   virtual void OnLayerAnimationEnded(
-      const ui::LayerAnimationSequence* animation) OVERRIDE;
+      ui::LayerAnimationSequence* animation) OVERRIDE;
   virtual void OnLayerAnimationScheduled(
-      const ui::LayerAnimationSequence* animation) OVERRIDE;
+      ui::LayerAnimationSequence* animation) OVERRIDE;
   virtual void OnLayerAnimationAborted(
-      const ui::LayerAnimationSequence* animation) OVERRIDE;
+      ui::LayerAnimationSequence* animation) OVERRIDE;
 
-  // Overridden from FocusManager:
-  virtual void SetFocusedWindow(Window* window) OVERRIDE;
-  virtual Window* GetFocusedWindow() OVERRIDE;
-  virtual bool IsFocusedWindow(const Window* window) const OVERRIDE;
+  // Overridden from aura::RootWindowHostDelegate:
+  virtual bool OnHostKeyEvent(ui::KeyEvent* event) OVERRIDE;
+  virtual bool OnHostMouseEvent(ui::MouseEvent* event) OVERRIDE;
+  virtual bool OnHostScrollEvent(ui::ScrollEvent* event) OVERRIDE;
+  virtual bool OnHostTouchEvent(ui::TouchEvent* event) OVERRIDE;
+  virtual void OnHostActivated() OVERRIDE;
+  virtual void OnHostLostWindowCapture() OVERRIDE;
+  virtual void OnHostLostMouseGrab() OVERRIDE;
+  virtual void OnHostPaint() OVERRIDE;
+  virtual void OnHostMoved(const gfx::Point& origin) OVERRIDE;
+  virtual void OnHostResized(const gfx::Size& size) OVERRIDE;
+  virtual float GetDeviceScaleFactor() OVERRIDE;
+  virtual RootWindow* AsRootWindow() OVERRIDE;
 
-  // Initializes the root window.
-  void Init();
+  // We hold and aggregate mouse drags as a way of throttling resizes when
+  // HoldMouseMoves() is called. The following methods are used to dispatch held
+  // and newly incoming mouse events, typically when an event other than a mouse
+  // drag needs dispatching or a matching ReleaseMouseMoves() is called.
+  // NOTE: because these methods dispatch events from RootWindowHost the
+  // coordinates are in terms of the root.
+  bool DispatchMouseEventImpl(ui::MouseEvent* event);
+  bool DispatchMouseEventToTarget(ui::MouseEvent* event, Window* target);
+  void DispatchHeldMouseMove();
 
   // Parses the switch describing the initial size for the host window and
   // returns bounds for the window.
@@ -245,16 +354,9 @@ class AURA_EXPORT RootWindow : public ui::CompositorDelegate,
   // current mouse location.
   void SynthesizeMouseMoveEvent();
 
-  scoped_refptr<ui::Compositor> compositor_;
+  scoped_ptr<ui::Compositor> compositor_;
 
   scoped_ptr<RootWindowHost> host_;
-
-  static RootWindow* instance_;
-
-  // If set before the RootWindow is created, the host window will cover the
-  // entire screen.  Note that this can still be overridden via the
-  // switches::kAuraHostWindowSize flag.
-  static bool use_fullscreen_host_window_;
 
   // Used to schedule painting.
   base::WeakPtrFactory<RootWindow> schedule_paint_factory_;
@@ -262,33 +364,40 @@ class AURA_EXPORT RootWindow : public ui::CompositorDelegate,
   // Use to post mouse move event.
   base::WeakPtrFactory<RootWindow> event_factory_;
 
-  // Last location seen in a mouse event.
-  gfx::Point last_mouse_location_;
-
   // ui::EventFlags containing the current state of the mouse buttons.
   int mouse_button_flags_;
+
+  // Touch ids that are currently down.
+  uint32 touch_ids_down_;
 
   // Last cursor set.  Used for testing.
   gfx::NativeCursor last_cursor_;
 
   ObserverList<RootWindowObserver> observers_;
 
-  ScreenAura* screen_;
-
-  // The capture window. When not-null, this window receives all the mouse and
-  // touch events.
-  Window* capture_window_;
-
   Window* mouse_pressed_handler_;
   Window* mouse_moved_handler_;
-  Window* focused_window_;
-  Window* touch_event_handler_;
-  Window* gesture_handler_;
+  Window* mouse_event_dispatch_target_;
+  Window* event_dispatch_target_;
 
   // The gesture_recognizer_ for this.
-  scoped_ptr<GestureRecognizer> gesture_recognizer_;
+  scoped_ptr<ui::GestureRecognizer> gesture_recognizer_;
 
   bool synthesize_mouse_move_;
+  bool waiting_on_compositing_end_;
+  bool draw_on_compositing_end_;
+
+  bool defer_draw_scheduling_;
+
+  // How many holds are outstanding. We try to defer dispatching mouse moves
+  // while the count is > 0.
+  int mouse_move_hold_count_;
+  scoped_ptr<ui::MouseEvent> held_mouse_move_;
+  // Used to schedule DispatchHeldMouseMove() when |mouse_move_hold_count_| goes
+  // to 0.
+  base::WeakPtrFactory<RootWindow> held_mouse_event_factory_;
+
+  scoped_ptr<ui::ViewProp> prop_;
 
   DISALLOW_COPY_AND_ASSIGN(RootWindow);
 };

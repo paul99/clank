@@ -1,4 +1,4 @@
-// Copyright 2011 the V8 project authors. All rights reserved.
+// Copyright 2012 the V8 project authors. All rights reserved.
 // Redistribution and use in source and binary forms, with or without
 // modification, are permitted provided that the following conditions are
 // met:
@@ -165,7 +165,7 @@ void SetExpectedNofProperties(Handle<JSFunction> func, int nof) {
   func->shared()->set_expected_nof_properties(nof);
   if (func->has_initial_map()) {
     Handle<Map> new_initial_map =
-        func->GetIsolate()->factory()->CopyMapDropTransitions(
+        func->GetIsolate()->factory()->CopyMap(
             Handle<Map>(func->initial_map()));
     new_initial_map->set_unused_property_fields(nof);
     func->set_initial_map(*new_initial_map);
@@ -229,12 +229,12 @@ Handle<Object> SetPrototype(Handle<JSFunction> function,
 }
 
 
-Handle<Object> SetProperty(Handle<Object> object,
+Handle<Object> SetProperty(Isolate* isolate,
+                           Handle<Object> object,
                            Handle<Object> key,
                            Handle<Object> value,
                            PropertyAttributes attributes,
                            StrictModeFlag strict_mode) {
-  Isolate* isolate = Isolate::Current();
   CALL_HEAP_FUNCTION(
       isolate,
       Runtime::SetObjectProperty(
@@ -561,6 +561,9 @@ v8::Handle<v8::Array> GetKeysForNamedInterceptor(Handle<JSReceiver> receiver,
       result = enum_fun(info);
     }
   }
+#if ENABLE_EXTRA_CHECKS
+  CHECK(result.IsEmpty() || v8::Utils::OpenHandle(*result)->IsJSObject());
+#endif
   return result;
 }
 
@@ -581,7 +584,29 @@ v8::Handle<v8::Array> GetKeysForIndexedInterceptor(Handle<JSReceiver> receiver,
       // Leaving JavaScript.
       VMState state(isolate, EXTERNAL);
       result = enum_fun(info);
+#if ENABLE_EXTRA_CHECKS
+      CHECK(result.IsEmpty() || v8::Utils::OpenHandle(*result)->IsJSObject());
+#endif
     }
+  }
+  return result;
+}
+
+
+Handle<Object> GetScriptNameOrSourceURL(Handle<Script> script) {
+  Isolate* isolate = script->GetIsolate();
+  Handle<String> name_or_source_url_key =
+      isolate->factory()->LookupAsciiSymbol("nameOrSourceURL");
+  Handle<JSValue> script_wrapper = GetScriptWrapper(script);
+  Handle<Object> property = GetProperty(script_wrapper,
+                                        name_or_source_url_key);
+  ASSERT(property->IsJSFunction());
+  Handle<JSFunction> method = Handle<JSFunction>::cast(property);
+  bool caught_exception;
+  Handle<Object> result = Execution::TryCall(method, script_wrapper, 0,
+                                             NULL, &caught_exception);
+  if (caught_exception) {
+    result = isolate->factory()->undefined_value();
   }
   return result;
 }
@@ -604,7 +629,7 @@ Handle<FixedArray> GetKeysInFixedArrayFor(Handle<JSReceiver> object,
   Isolate* isolate = object->GetIsolate();
   Handle<FixedArray> content = isolate->factory()->empty_fixed_array();
   Handle<JSObject> arguments_boilerplate = Handle<JSObject>(
-      isolate->context()->global_context()->arguments_boilerplate(),
+      isolate->context()->native_context()->arguments_boilerplate(),
       isolate);
   Handle<JSFunction> arguments_function = Handle<JSFunction>(
       JSFunction::cast(arguments_boilerplate->map()->constructor()),
@@ -699,46 +724,134 @@ Handle<JSArray> GetKeysFor(Handle<JSReceiver> object, bool* threw) {
 }
 
 
+Handle<FixedArray> ReduceFixedArrayTo(Handle<FixedArray> array, int length) {
+  ASSERT(array->length() >= length);
+  if (array->length() == length) return array;
+
+  Handle<FixedArray> new_array =
+      array->GetIsolate()->factory()->NewFixedArray(length);
+  for (int i = 0; i < length; ++i) new_array->set(i, array->get(i));
+  return new_array;
+}
+
+
 Handle<FixedArray> GetEnumPropertyKeys(Handle<JSObject> object,
                                        bool cache_result) {
-  int index = 0;
   Isolate* isolate = object->GetIsolate();
   if (object->HasFastProperties()) {
     if (object->map()->instance_descriptors()->HasEnumCache()) {
-      isolate->counters()->enum_cache_hits()->Increment();
+      int own_property_count = object->map()->EnumLength();
+      // If we have an enum cache, but the enum length of the given map is set
+      // to kInvalidEnumCache, this means that the map itself has never used the
+      // present enum cache. The first step to using the cache is to set the
+      // enum length of the map by counting the number of own descriptors that
+      // are not DONT_ENUM.
+      if (own_property_count == Map::kInvalidEnumCache) {
+        own_property_count = object->map()->NumberOfDescribedProperties(
+            OWN_DESCRIPTORS, DONT_ENUM);
+
+        if (cache_result) object->map()->SetEnumLength(own_property_count);
+      }
+
       DescriptorArray* desc = object->map()->instance_descriptors();
-      return Handle<FixedArray>(FixedArray::cast(desc->GetEnumCache()),
-                                isolate);
+      Handle<FixedArray> keys(desc->GetEnumCache(), isolate);
+
+      // In case the number of properties required in the enum are actually
+      // present, we can reuse the enum cache. Otherwise, this means that the
+      // enum cache was generated for a previous (smaller) version of the
+      // Descriptor Array. In that case we regenerate the enum cache.
+      if (own_property_count <= keys->length()) {
+        isolate->counters()->enum_cache_hits()->Increment();
+        return ReduceFixedArrayTo(keys, own_property_count);
+      }
     }
+
+    Handle<Map> map(object->map());
+
+    if (map->instance_descriptors()->IsEmpty()) {
+      isolate->counters()->enum_cache_hits()->Increment();
+      if (cache_result) map->SetEnumLength(0);
+      return isolate->factory()->empty_fixed_array();
+    }
+
     isolate->counters()->enum_cache_misses()->Increment();
-    int num_enum = object->NumberOfEnumProperties();
+    int num_enum = map->NumberOfDescribedProperties(ALL_DESCRIPTORS, DONT_ENUM);
+
     Handle<FixedArray> storage = isolate->factory()->NewFixedArray(num_enum);
-    Handle<FixedArray> sort_array = isolate->factory()->NewFixedArray(num_enum);
+    Handle<FixedArray> indices = isolate->factory()->NewFixedArray(num_enum);
+
     Handle<DescriptorArray> descs =
         Handle<DescriptorArray>(object->map()->instance_descriptors(), isolate);
+
+    int real_size = map->NumberOfOwnDescriptors();
+    int enum_size = 0;
+    int index = 0;
+
     for (int i = 0; i < descs->number_of_descriptors(); i++) {
-      if (descs->IsProperty(i) && !descs->IsDontEnum(i)) {
-        (*storage)->set(index, descs->GetKey(i));
-        PropertyDetails details(descs->GetDetails(i));
-        (*sort_array)->set(index, Smi::FromInt(details.index()));
+      PropertyDetails details = descs->GetDetails(i);
+      if (!details.IsDontEnum()) {
+        if (i < real_size) ++enum_size;
+        storage->set(index, descs->GetKey(i));
+        if (!indices.is_null()) {
+          if (details.type() != FIELD) {
+            indices = Handle<FixedArray>();
+          } else {
+            int field_index = Descriptor::IndexFromValue(descs->GetValue(i));
+            if (field_index >= map->inobject_properties()) {
+              field_index = -(field_index - map->inobject_properties() + 1);
+            }
+            indices->set(index, Smi::FromInt(field_index));
+          }
+        }
         index++;
       }
     }
-    (*storage)->SortPairs(*sort_array, sort_array->length());
+    ASSERT(index == storage->length());
+
+    Handle<FixedArray> bridge_storage =
+        isolate->factory()->NewFixedArray(
+            DescriptorArray::kEnumCacheBridgeLength);
+    DescriptorArray* desc = object->map()->instance_descriptors();
+    desc->SetEnumCache(*bridge_storage,
+                       *storage,
+                       indices.is_null() ? Object::cast(Smi::FromInt(0))
+                                         : Object::cast(*indices));
     if (cache_result) {
-      Handle<FixedArray> bridge_storage =
-          isolate->factory()->NewFixedArray(
-              DescriptorArray::kEnumCacheBridgeLength);
-      DescriptorArray* desc = object->map()->instance_descriptors();
-      desc->SetEnumCache(*bridge_storage, *storage);
+      object->map()->SetEnumLength(enum_size);
     }
-    ASSERT(storage->length() == index);
-    return storage;
+
+    return ReduceFixedArrayTo(storage, enum_size);
   } else {
-    int num_enum = object->NumberOfEnumProperties();
-    Handle<FixedArray> storage = isolate->factory()->NewFixedArray(num_enum);
-    Handle<FixedArray> sort_array = isolate->factory()->NewFixedArray(num_enum);
-    object->property_dictionary()->CopyEnumKeysTo(*storage, *sort_array);
+    Handle<StringDictionary> dictionary(object->property_dictionary());
+
+    int length = dictionary->NumberOfElements();
+    if (length == 0) {
+      return Handle<FixedArray>(isolate->heap()->empty_fixed_array());
+    }
+
+    // The enumeration array is generated by allocating an array big enough to
+    // hold all properties that have been seen, whether they are are deleted or
+    // not. Subsequently all visible properties are added to the array. If some
+    // properties were not visible, the array is trimmed so it only contains
+    // visible properties. This improves over adding elements and sorting by
+    // index by having linear complexity rather than n*log(n).
+
+    // By comparing the monotonous NextEnumerationIndex to the NumberOfElements,
+    // we can predict the number of holes in the final array. If there will be
+    // more than 50% holes, regenerate the enumeration indices to reduce the
+    // number of holes to a minimum. This avoids allocating a large array if
+    // many properties were added but subsequently deleted.
+    int next_enumeration = dictionary->NextEnumerationIndex();
+    if (!object->IsGlobalObject() && next_enumeration > (length * 3) / 2) {
+      StringDictionary::DoGenerateNewEnumerationIndices(dictionary);
+      next_enumeration = dictionary->NextEnumerationIndex();
+    }
+
+    Handle<FixedArray> storage =
+        isolate->factory()->NewFixedArray(next_enumeration);
+
+    storage = Handle<FixedArray>(dictionary->CopyEnumKeysTo(*storage));
+    ASSERT(storage->length() == object->NumberOfLocalProperties(DONT_ENUM));
     return storage;
   }
 }
@@ -766,6 +879,207 @@ Handle<ObjectHashTable> PutIntoObjectHashTable(Handle<ObjectHashTable> table,
   CALL_HEAP_FUNCTION(table->GetIsolate(),
                      table->Put(*key, *value),
                      ObjectHashTable);
+}
+
+
+// This method determines the type of string involved and then gets the UTF8
+// length of the string.  It doesn't flatten the string and has log(n) recursion
+// for a string of length n.  If the failure flag gets set, then we have to
+// flatten the string and retry.  Failures are caused by surrogate pairs in deep
+// cons strings.
+
+// Single surrogate characters that are encountered in the UTF-16 character
+// sequence of the input string get counted as 3 UTF-8 bytes, because that
+// is the way that WriteUtf8 will encode them.  Surrogate pairs are counted and
+// encoded as one 4-byte UTF-8 sequence.
+
+// This function conceptually uses recursion on the two halves of cons strings.
+// However, in order to avoid the recursion going too deep it recurses on the
+// second string of the cons, but iterates on the first substring (by manually
+// eliminating it as a tail recursion).  This means it counts the UTF-8 length
+// from the end to the start, which makes no difference to the total.
+
+// Surrogate pairs are recognized even if they are split across two sides of a
+// cons, which complicates the implementation somewhat.  Therefore, too deep
+// recursion cannot always be avoided.  This case is detected, and the failure
+// flag is set, a signal to the caller that the string should be flattened and
+// the operation retried.
+int Utf8LengthHelper(String* input,
+                     int from,
+                     int to,
+                     bool followed_by_surrogate,
+                     int max_recursion,
+                     bool* failure,
+                     bool* starts_with_surrogate) {
+  if (from == to) return 0;
+  int total = 0;
+  bool dummy;
+  while (true) {
+    if (input->IsOneByteRepresentation()) {
+      *starts_with_surrogate = false;
+      return total + to - from;
+    }
+    switch (StringShape(input).representation_tag()) {
+      case kConsStringTag: {
+        ConsString* str = ConsString::cast(input);
+        String* first = str->first();
+        String* second = str->second();
+        int first_length = first->length();
+        if (first_length - from > to - first_length) {
+          if (first_length < to) {
+            // Right hand side is shorter.  No need to check the recursion depth
+            // since this can only happen log(n) times.
+            bool right_starts_with_surrogate = false;
+            total += Utf8LengthHelper(second,
+                                      0,
+                                      to - first_length,
+                                      followed_by_surrogate,
+                                      max_recursion - 1,
+                                      failure,
+                                      &right_starts_with_surrogate);
+            if (*failure) return 0;
+            followed_by_surrogate = right_starts_with_surrogate;
+            input = first;
+            to = first_length;
+          } else {
+            // We only need the left hand side.
+            input = first;
+          }
+        } else {
+          if (first_length > from) {
+            // Left hand side is shorter.
+            if (first->IsOneByteRepresentation()) {
+              total += first_length - from;
+              *starts_with_surrogate = false;
+              starts_with_surrogate = &dummy;
+              input = second;
+              from = 0;
+              to -= first_length;
+            } else if (second->IsOneByteRepresentation()) {
+              followed_by_surrogate = false;
+              total += to - first_length;
+              input = first;
+              to = first_length;
+            } else if (max_recursion > 0) {
+              bool right_starts_with_surrogate = false;
+              // Recursing on the long one.  This may fail.
+              total += Utf8LengthHelper(second,
+                                        0,
+                                        to - first_length,
+                                        followed_by_surrogate,
+                                        max_recursion - 1,
+                                        failure,
+                                        &right_starts_with_surrogate);
+              if (*failure) return 0;
+              input = first;
+              to = first_length;
+              followed_by_surrogate = right_starts_with_surrogate;
+            } else {
+              *failure = true;
+              return 0;
+            }
+          } else {
+            // We only need the right hand side.
+            input = second;
+            from = 0;
+            to -= first_length;
+          }
+        }
+        continue;
+      }
+      case kExternalStringTag:
+      case kSeqStringTag: {
+        Vector<const uc16> vector = input->GetFlatContent().ToUC16Vector();
+        const uc16* p = vector.start();
+        int previous = unibrow::Utf16::kNoPreviousCharacter;
+        for (int i = from; i < to; i++) {
+          uc16 c = p[i];
+          total += unibrow::Utf8::Length(c, previous);
+          previous = c;
+        }
+        if (to - from > 0) {
+          if (unibrow::Utf16::IsLeadSurrogate(previous) &&
+              followed_by_surrogate) {
+            total -= unibrow::Utf8::kBytesSavedByCombiningSurrogates;
+          }
+          if (unibrow::Utf16::IsTrailSurrogate(p[from])) {
+            *starts_with_surrogate = true;
+          }
+        }
+        return total;
+      }
+      case kSlicedStringTag: {
+        SlicedString* str = SlicedString::cast(input);
+        int offset = str->offset();
+        input = str->parent();
+        from += offset;
+        to += offset;
+        continue;
+      }
+      default:
+        break;
+    }
+    UNREACHABLE();
+    return 0;
+  }
+  return 0;
+}
+
+
+int Utf8Length(Handle<String> str) {
+  bool dummy;
+  bool failure;
+  int len;
+  const int kRecursionBudget = 100;
+  do {
+    failure = false;
+    len = Utf8LengthHelper(
+        *str, 0, str->length(), false, kRecursionBudget, &failure, &dummy);
+    if (failure) FlattenString(str);
+  } while (failure);
+  return len;
+}
+
+
+DeferredHandleScope::DeferredHandleScope(Isolate* isolate)
+    : impl_(isolate->handle_scope_implementer()) {
+  ASSERT(impl_->isolate() == Isolate::Current());
+  impl_->BeginDeferredScope();
+  v8::ImplementationUtilities::HandleScopeData* data =
+      impl_->isolate()->handle_scope_data();
+  Object** new_next = impl_->GetSpareOrNewBlock();
+  Object** new_limit = &new_next[kHandleBlockSize];
+  ASSERT(data->limit == &impl_->blocks()->last()[kHandleBlockSize]);
+  impl_->blocks()->Add(new_next);
+
+#ifdef DEBUG
+  prev_level_ = data->level;
+#endif
+  data->level++;
+  prev_limit_ = data->limit;
+  prev_next_ = data->next;
+  data->next = new_next;
+  data->limit = new_limit;
+}
+
+
+DeferredHandleScope::~DeferredHandleScope() {
+  impl_->isolate()->handle_scope_data()->level--;
+  ASSERT(handles_detached_);
+  ASSERT(impl_->isolate()->handle_scope_data()->level == prev_level_);
+}
+
+
+DeferredHandles* DeferredHandleScope::Detach() {
+  DeferredHandles* deferred = impl_->Detach(prev_limit_);
+  v8::ImplementationUtilities::HandleScopeData* data =
+      impl_->isolate()->handle_scope_data();
+  data->next = prev_next_;
+  data->limit = prev_limit_;
+#ifdef DEBUG
+  handles_detached_ = true;
+#endif
+  return deferred;
 }
 
 

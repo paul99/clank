@@ -55,55 +55,14 @@ namespace google_breakpad {
 BOOL EnsureDirectoryPathExists(NSString *dirPath) {
   NSFileManager *mgr = [NSFileManager defaultManager];
 
-  // If we got a relative path, prepend the current directory
-  if (![dirPath isAbsolutePath])
-    dirPath =
-        [[mgr currentDirectoryPath] stringByAppendingPathComponent:dirPath];
-
-  NSString *path = dirPath;
-
-  // Ensure that no file exists within the path which would block creation
-  while (1) {
-    BOOL isDir;
-    if ([mgr fileExistsAtPath:path isDirectory:&isDir]) {
-      if (isDir)
-        break;
-
-      return NO;
-    }
-
-    path = [path stringByDeletingLastPathComponent];
-  }
-
-  // Path now contains the first valid directory (or is empty)
-  if (![path length])
-    return NO;
-
-  NSString *common =
-    [dirPath commonPrefixWithString:path options:NSLiteralSearch];
-
-  // If everything is good
-  if ([common isEqualToString:dirPath])
-    return YES;
-
-  // Break up the difference into components
-  NSString *diff = [dirPath substringFromIndex:[common length] + 1];
-  NSArray *components = [diff pathComponents];
-  NSUInteger count = [components count];
-
-  // Rebuild the path one component at a time
   NSDictionary *attrs =
     [NSDictionary dictionaryWithObject:[NSNumber numberWithUnsignedLong:0750]
                                 forKey:NSFilePosixPermissions];
-  path = common;
-  for (NSUInteger i = 0; i < count; ++i) {
-    path = [path stringByAppendingPathComponent:[components objectAtIndex:i]];
 
-    if (![mgr createDirectoryAtPath:path attributes:attrs])
-      return NO;
-  }
-
-  return YES;
+  return [mgr createDirectoryAtPath:dirPath
+        withIntermediateDirectories:YES
+                         attributes:attrs
+                              error:nil];
 }
 
 //=============================================================================
@@ -158,7 +117,9 @@ BOOL ConfigFile::AppendCrashTimeParameters(const char *processStartTimeString) {
   if (processStartTimeString) {
     time_t processStartTime = strtol(processStartTimeString, NULL, 10);
     time_t processUptime = tv.tv_sec - processStartTime;
-    sprintf(processUptimeString, "%zd", processUptime);
+    // Store the uptime in milliseconds.
+    sprintf(processUptimeString, "%llu",
+        static_cast<unsigned long long int>(processUptime) * 1000);
     if (!AppendConfigString(BREAKPAD_PROCESS_UP_TIME, processUptimeString))
       return false;
   }

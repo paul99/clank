@@ -4,27 +4,26 @@
 
 #ifndef CHROME_RENDERER_EXTENSIONS_EXTENSION_CUSTOM_BINDINGS_H_
 #define CHROME_RENDERER_EXTENSIONS_EXTENSION_CUSTOM_BINDINGS_H_
-#pragma once
 
 #include "chrome/renderer/extensions/chrome_v8_extension.h"
 
-class ExtensionDispatcher;
-
 namespace extensions {
+class Dispatcher;
 
 // Implements custom bindings for the extension API.
 class ExtensionCustomBindings : public ChromeV8Extension {
  public:
-  ExtensionCustomBindings(
-      int dependency_count,
-      const char** dependencies,
-      ExtensionDispatcher* extension_dispatcher);
-
-  virtual v8::Handle<v8::FunctionTemplate> GetNativeFunction(
-      v8::Handle<v8::String> name) OVERRIDE;
+  explicit ExtensionCustomBindings(Dispatcher* dispatcher);
 
  private:
   static v8::Handle<v8::Value> GetExtensionViews(const v8::Arguments& args);
+
+  // Creates a new messaging channel to the given extension.
+  static v8::Handle<v8::Value> OpenChannelToExtension(
+      const v8::Arguments& args);
+
+  static v8::Handle<v8::Value> OpenChannelToNativeApp(
+      const v8::Arguments& args);
 };
 
 }  // namespace extensions

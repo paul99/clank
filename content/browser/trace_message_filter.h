@@ -1,4 +1,4 @@
-// Copyright (c) 2011 The Chromium Authors. All rights reserved.
+// Copyright (c) 2012 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -10,18 +10,19 @@
 
 #include "content/public/browser/browser_message_filter.h"
 
+namespace content {
+
 // This class sends and receives trace messages on the browser process.
 // See also: trace_controller.h
 // See also: child_trace_message_filter.h
-class TraceMessageFilter : public content::BrowserMessageFilter {
+class TraceMessageFilter : public BrowserMessageFilter {
  public:
   TraceMessageFilter();
-  virtual ~TraceMessageFilter();
 
-  // content::BrowserMessageFilter override.
+  // BrowserMessageFilter override.
   virtual void OnFilterAdded(IPC::Channel* channel) OVERRIDE;
 
-  // content::BrowserMessageFilter implementation.
+  // BrowserMessageFilter implementation.
   virtual void OnChannelClosing() OVERRIDE;
   virtual bool OnMessageReceived(const IPC::Message& message,
                                  bool* message_was_ok) OVERRIDE;
@@ -30,12 +31,18 @@ class TraceMessageFilter : public content::BrowserMessageFilter {
                         const std::vector<std::string>& excluded_categories);
   void SendEndTracing();
   void SendGetTraceBufferPercentFull();
+  void SendSetWatchEvent(const std::string& category_name,
+                         const std::string& event_name);
+  void SendCancelWatchEvent();
+
+ protected:
+  virtual ~TraceMessageFilter();
 
  private:
   // Message handlers.
   void OnChildSupportsTracing();
   void OnEndTracingAck(const std::vector<std::string>& known_categories);
-  void OnTraceBufferFull();
+  void OnTraceNotification(int notification);
   void OnTraceBufferPercentFullReply(float percent_full);
   void OnTraceDataCollected(const std::string& data);
 
@@ -44,10 +51,12 @@ class TraceMessageFilter : public content::BrowserMessageFilter {
 
   // Awaiting ack for previously sent SendEndTracing
   bool is_awaiting_end_ack_;
-  bool is_awaiting_bpf_ack_;
+  // Awaiting ack for previously sent SendGetTraceBufferPercentFull
+  bool is_awaiting_buffer_percent_full_ack_;
 
   DISALLOW_COPY_AND_ASSIGN(TraceMessageFilter);
 };
 
-#endif  // CONTENT_BROWSER_TRACE_MESSAGE_FILTER_H_
+}  // namespace content
 
+#endif  // CONTENT_BROWSER_TRACE_MESSAGE_FILTER_H_

@@ -4,12 +4,12 @@
 
 #ifndef BASE_MEMORY_REF_COUNTED_H_
 #define BASE_MEMORY_REF_COUNTED_H_
-#pragma once
 
 #include <cassert>
 
 #include "base/atomic_ref_count.h"
 #include "base/base_export.h"
+#include "base/compiler_specific.h"
 #include "base/threading/thread_collision_warner.h"
 
 namespace base {
@@ -18,8 +18,6 @@ namespace subtle {
 
 class BASE_EXPORT RefCountedBase {
  public:
-  static bool ImplementsThreadSafeReferenceCounting() { return false; }
-
   bool HasOneRef() const { return ref_count_ == 1; }
 
  protected:
@@ -44,8 +42,6 @@ class BASE_EXPORT RefCountedBase {
 
 class BASE_EXPORT RefCountedThreadSafeBase {
  public:
-  static bool ImplementsThreadSafeReferenceCounting() { return true; }
-
   bool HasOneRef() const;
 
  protected:
@@ -85,8 +81,7 @@ class BASE_EXPORT RefCountedThreadSafeBase {
 template <class T>
 class RefCounted : public subtle::RefCountedBase {
  public:
-  RefCounted() { }
-  ~RefCounted() { }
+  RefCounted() {}
 
   void AddRef() const {
     subtle::RefCountedBase::AddRef();
@@ -97,6 +92,9 @@ class RefCounted : public subtle::RefCountedBase {
       delete static_cast<const T*>(this);
     }
   }
+
+ protected:
+  ~RefCounted() {}
 
  private:
   DISALLOW_COPY_AND_ASSIGN(RefCounted<T>);
@@ -133,8 +131,7 @@ struct DefaultRefCountedThreadSafeTraits {
 template <class T, typename Traits = DefaultRefCountedThreadSafeTraits<T> >
 class RefCountedThreadSafe : public subtle::RefCountedThreadSafeBase {
  public:
-  RefCountedThreadSafe() { }
-  ~RefCountedThreadSafe() { }
+  RefCountedThreadSafe() {}
 
   void AddRef() const {
     subtle::RefCountedThreadSafeBase::AddRef();
@@ -146,6 +143,9 @@ class RefCountedThreadSafe : public subtle::RefCountedThreadSafeBase {
     }
   }
 
+ protected:
+  ~RefCountedThreadSafe() {}
+
  private:
   friend struct DefaultRefCountedThreadSafeTraits<T>;
   static void DeleteInternal(const T* x) { delete x; }
@@ -154,16 +154,21 @@ class RefCountedThreadSafe : public subtle::RefCountedThreadSafeBase {
 };
 
 //
-// A wrapper for some piece of data so we can place other things in
-// scoped_refptrs<>.
+// A thread-safe wrapper for some piece of data so we can place other
+// things in scoped_refptrs<>.
 //
 template<typename T>
-class RefCountedData : public base::RefCounted< base::RefCountedData<T> > {
+class RefCountedData
+    : public base::RefCountedThreadSafe< base::RefCountedData<T> > {
  public:
   RefCountedData() : data() {}
   RefCountedData(const T& in_value) : data(in_value) {}
 
   T data;
+
+ private:
+  friend class base::RefCountedThreadSafe<base::RefCountedData<T> >;
+  ~RefCountedData() {}
 };
 
 }  // namespace base
@@ -219,6 +224,8 @@ class RefCountedData : public base::RefCounted< base::RefCountedData<T> > {
 template <class T>
 class scoped_refptr {
  public:
+  typedef T element_type;
+
   scoped_refptr() : ptr_(NULL) {
   }
 
@@ -248,17 +255,6 @@ class scoped_refptr {
   T* operator->() const {
     assert(ptr_ != NULL);
     return ptr_;
-  }
-
-  // Release a pointer.
-  // The return value is the current pointer held by this object.
-  // If this object holds a NULL pointer, the return value is NULL.
-  // After this operation, this object will hold a NULL pointer,
-  // and will not own the object any more.
-  T* release() {
-    T* retVal = ptr_;
-    ptr_ = NULL;
-    return retVal;
   }
 
   scoped_refptr<T>& operator=(T* p) {

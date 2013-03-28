@@ -1,16 +1,14 @@
-// Copyright (c) 2011 The Chromium Authors. All rights reserved.
+// Copyright (c) 2012 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
 #include "chrome/browser/ssl/ssl_add_cert_handler.h"
 
 #include "base/bind.h"
-#include "chrome/browser/tab_contents/tab_contents_ssl_helper.h"
+#include "chrome/browser/ssl/ssl_tab_helper.h"
 #include "chrome/browser/tab_contents/tab_util.h"
-#include "chrome/browser/ui/tab_contents/tab_contents_wrapper.h"
-#include "content/browser/renderer_host/resource_dispatcher_host.h"
-#include "content/browser/renderer_host/resource_dispatcher_host_request_info.h"
 #include "content/public/browser/browser_thread.h"
+#include "content/public/browser/resource_request_info.h"
 #include "content/public/browser/web_contents.h"
 #include "net/base/cert_database.h"
 #include "net/base/net_errors.h"
@@ -27,9 +25,8 @@ SSLAddCertHandler::SSLAddCertHandler(net::URLRequest* request,
     : cert_(cert),
       render_process_host_id_(render_process_host_id),
       render_view_id_(render_view_id) {
-  ResourceDispatcherHostRequestInfo* info =
-      ResourceDispatcherHost::InfoForRequest(request);
-  network_request_id_ = info->request_id();
+  network_request_id_
+      = content::ResourceRequestInfo::ForRequest(request)->GetRequestID();
   // Stay alive until the process completes and Finished() is called.
   AddRef();
   // Delay adding the certificate until the next mainloop iteration.
@@ -41,12 +38,12 @@ SSLAddCertHandler::SSLAddCertHandler(net::URLRequest* request,
 SSLAddCertHandler::~SSLAddCertHandler() {}
 
 void SSLAddCertHandler::Run() {
-  int cert_error;
-  {
-    net::CertDatabase db;
-    cert_error = db.CheckUserCert(cert_);
-  }
+  int cert_error = net::CertDatabase::GetInstance()->CheckUserCert(cert_);
   if (cert_error != net::OK) {
+    LOG_IF(ERROR, cert_error == net::ERR_NO_PRIVATE_KEY_FOR_CERT)
+        << "No corresponding private key in store for cert: "
+        << (cert_.get() ? cert_->subject().GetDisplayName() : "NULL");
+
     BrowserThread::PostTask(
       BrowserThread::UI, FROM_HERE,
       base::Bind(
@@ -72,10 +69,8 @@ void SSLAddCertHandler::AskToAddCert() {
 
 void SSLAddCertHandler::Finished(bool add_cert) {
   int cert_error = net::OK;
-  if (add_cert) {
-    net::CertDatabase db;
-    cert_error = db.AddUserCert(cert_);
-  }
+  if (add_cert)
+    cert_error = net::CertDatabase::GetInstance()->AddUserCert(cert_);
 
   BrowserThread::PostTask(
       BrowserThread::UI, FROM_HERE,
@@ -92,9 +87,8 @@ void SSLAddCertHandler::CallVerifyClientCertificateError(int cert_error) {
   if (!tab)
     return;
 
-  TabContentsWrapper* wrapper =
-      TabContentsWrapper::GetCurrentWrapperForContents(tab);
-  wrapper->ssl_helper()->OnVerifyClientCertificateError(this, cert_error);
+  SSLTabHelper* ssl_tab_helper = SSLTabHelper::FromWebContents(tab);
+  ssl_tab_helper->OnVerifyClientCertificateError(this, cert_error);
 }
 
 void SSLAddCertHandler::CallAddClientCertificate(bool add_cert,
@@ -104,14 +98,13 @@ void SSLAddCertHandler::CallAddClientCertificate(bool add_cert,
   if (!tab)
     return;
 
-  TabContentsWrapper* wrapper =
-      TabContentsWrapper::GetCurrentWrapperForContents(tab);
+  SSLTabHelper* ssl_tab_helper = SSLTabHelper::FromWebContents(tab);
   if (add_cert) {
     if (cert_error == net::OK) {
-      wrapper->ssl_helper()->OnAddClientCertificateSuccess(this);
+      ssl_tab_helper->OnAddClientCertificateSuccess(this);
     } else {
-      wrapper->ssl_helper()->OnAddClientCertificateError(this, cert_error);
+      ssl_tab_helper->OnAddClientCertificateError(this, cert_error);
     }
   }
-  wrapper->ssl_helper()->OnAddClientCertificateFinished(this);
+  ssl_tab_helper->OnAddClientCertificateFinished(this);
 }

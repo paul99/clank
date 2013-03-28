@@ -4,8 +4,6 @@
 
 #include "ppapi/proxy/host_dispatcher.h"
 
-#include <map>
-
 #include "base/debug/trace_event.h"
 #include "base/logging.h"
 #include "ppapi/c/private/ppb_proxy_private.h"
@@ -61,10 +59,12 @@ class BoolRestorer {
 
 }  // namespace
 
-HostDispatcher::HostDispatcher(base::ProcessHandle remote_process_handle,
-                               PP_Module module,
-                               GetInterfaceFunc local_get_interface)
-    : Dispatcher(remote_process_handle, local_get_interface),
+HostDispatcher::HostDispatcher(PP_Module module,
+                               PP_GetInterface_Func local_get_interface,
+                               SyncMessageStatusReceiver* sync_status,
+                               const PpapiPermissions& permissions)
+    : Dispatcher(local_get_interface, permissions),
+      sync_status_(sync_status),
       pp_module_(module),
       ppb_proxy_(NULL),
       allow_plugin_reentrancy_(false) {
@@ -72,7 +72,7 @@ HostDispatcher::HostDispatcher(base::ProcessHandle remote_process_handle,
     g_module_to_dispatcher = new ModuleToDispatcherMap;
   (*g_module_to_dispatcher)[pp_module_] = this;
 
-  SetSerializationRules(new HostVarSerializationRules(module));
+  SetSerializationRules(new HostVarSerializationRules);
 
   ppb_proxy_ = reinterpret_cast<const PPB_Proxy_Private*>(
       local_get_interface(PPB_PROXY_PRIVATE_INTERFACE));
@@ -87,11 +87,15 @@ HostDispatcher::~HostDispatcher() {
 
 bool HostDispatcher::InitHostWithChannel(
     Delegate* delegate,
+    base::ProcessId peer_pid,
     const IPC::ChannelHandle& channel_handle,
     bool is_client,
     const ppapi::Preferences& preferences) {
-  if (!Dispatcher::InitWithChannel(delegate, channel_handle, is_client))
+  if (!Dispatcher::InitWithChannel(delegate, peer_pid, channel_handle,
+                                   is_client))
     return false;
+  AddIOThreadMessageFilter(sync_status_.get());
+
   Send(new PpapiMsg_SetPreferences(preferences));
   return true;
 }
@@ -152,7 +156,12 @@ bool HostDispatcher::Send(IPC::Message* msg) {
     // waiting for the reply, dispatches an incoming ExecuteScript call which
     // destroys the plugin module and in turn the dispatcher.
     ScopedModuleReference scoped_ref(this);
-    return Dispatcher::Send(msg);
+
+    sync_status_->BeginBlockOnSyncMessage();
+    bool result = Dispatcher::Send(msg);
+    sync_status_->EndBlockOnSyncMessage();
+
+    return result;
   } else {
     // We don't want to have a scoped ref for async message cases since since
     // async messages are sent during module desruction. In this case, the
@@ -163,9 +172,14 @@ bool HostDispatcher::Send(IPC::Message* msg) {
 }
 
 bool HostDispatcher::OnMessageReceived(const IPC::Message& msg) {
+  // Prevent the dispatcher from going away during a message handler. This must
+  // be at the outermost scope so it's released last.
+  ScopedModuleReference death_grip(this);
+
   TRACE_EVENT2("ppapi proxy", "HostDispatcher::OnMessageReceived",
                "Class", IPC_MESSAGE_ID_CLASS(msg.type()),
                "Line", IPC_MESSAGE_ID_LINE(msg.type()));
+
   // We only want to allow reentrancy when the most recent message from the
   // plugin was a scripting message. We save the old state of the flag on the
   // stack in case we're (we are the host) being reentered ourselves. The flag
@@ -174,6 +188,11 @@ bool HostDispatcher::OnMessageReceived(const IPC::Message& msg) {
   // reentered.
   BoolRestorer restorer(&allow_plugin_reentrancy_);
   allow_plugin_reentrancy_ = false;
+
+  for (size_t i = 0; i < filters_.size(); i++) {
+    if (filters_[i]->OnMessageReceived(msg))
+      return true;
+  }
 
   bool handled = true;
   IPC_BEGIN_MESSAGE_MAP(HostDispatcher, msg)
@@ -184,6 +203,8 @@ bool HostDispatcher::OnMessageReceived(const IPC::Message& msg) {
   if (handled)
     return true;
   return Dispatcher::OnMessageReceived(msg);
+
+  // Note: |this| may be deleted once the death_grip goes out of scope!
 }
 
 void HostDispatcher::OnChannelError() {
@@ -228,7 +249,7 @@ void HostDispatcher::OnHostMsgLogWithSource(PP_Instance instance,
                                             int int_log_level,
                                             const std::string& source,
                                             const std::string& value) {
-  PP_LogLevel_Dev level = static_cast<PP_LogLevel_Dev>(int_log_level);
+  PP_LogLevel level = static_cast<PP_LogLevel>(int_log_level);
   if (instance) {
     PpapiGlobals::Get()->LogWithSource(instance, level, source, value);
   } else {
@@ -239,14 +260,17 @@ void HostDispatcher::OnHostMsgLogWithSource(PP_Instance instance,
 
 // ScopedModuleReference -------------------------------------------------------
 
-ScopedModuleReference::ScopedModuleReference(Dispatcher* dispatcher) {
-  DCHECK(!dispatcher->IsPlugin());
-  dispatcher_ = static_cast<HostDispatcher*>(dispatcher);
-  dispatcher_->ppb_proxy()->AddRefModule(dispatcher_->pp_module());
+ScopedModuleReference::ScopedModuleReference(Dispatcher* dispatcher)
+    : dispatcher_(NULL) {
+  if (!dispatcher->IsPlugin()) {
+    dispatcher_ = static_cast<HostDispatcher*>(dispatcher);
+    dispatcher_->ppb_proxy()->AddRefModule(dispatcher_->pp_module());
+  }
 }
 
 ScopedModuleReference::~ScopedModuleReference() {
-  dispatcher_->ppb_proxy()->ReleaseModule(dispatcher_->pp_module());
+  if (dispatcher_)
+    dispatcher_->ppb_proxy()->ReleaseModule(dispatcher_->pp_module());
 }
 
 }  // namespace proxy

@@ -1,4 +1,4 @@
-// Copyright (c) 2011 The Chromium Authors. All rights reserved.
+// Copyright (c) 2012 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -8,6 +8,8 @@
 #include "base/shared_memory.h"
 #include "base/time.h"
 #include "content/common/content_export.h"
+
+namespace content {
 
 // ID used for identifying an object of VideoCaptureController.
 struct CONTENT_EXPORT VideoCaptureControllerID {
@@ -43,11 +45,13 @@ class CONTENT_EXPORT VideoCaptureControllerEventHandler {
                            int height,
                            int frame_rate) = 0;
 
-  // Report that this object can be deleted.
-  virtual void OnReadyToDelete(const VideoCaptureControllerID& id) = 0;
+  // The capture session has been paused. No more frame will be sent.
+  virtual void OnPaused(const VideoCaptureControllerID& id) = 0;
 
  protected:
   virtual ~VideoCaptureControllerEventHandler() {}
 };
+
+}  // namespace content
 
 #endif  // CONTENT_BROWSER_RENDERER_HOST_MEDIA_VIDEO_CAPTURE_CONTROLLER_EVENT_HANDLER_H_

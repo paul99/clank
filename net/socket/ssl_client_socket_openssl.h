@@ -1,13 +1,13 @@
-// Copyright (c) 2011 The Chromium Authors. All rights reserved.
+// Copyright (c) 2012 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
 #ifndef NET_SOCKET_SSL_CLIENT_SOCKET_OPENSSL_H_
 #define NET_SOCKET_SSL_CLIENT_SOCKET_OPENSSL_H_
-#pragma once
 
 #include <string>
 
+#include "base/compiler_specific.h"
 #include "base/memory/scoped_ptr.h"
 #include "net/base/cert_verify_result.h"
 #include "net/base/completion_callback.h"
@@ -26,7 +26,6 @@ namespace net {
 class CertVerifier;
 class SingleRequestCertVerifier;
 class SSLCertRequestInfo;
-struct SSLConfig;
 class SSLInfo;
 
 // An SSL client socket implemented with OpenSSL.
@@ -56,22 +55,26 @@ class SSLClientSocketOpenSSL : public SSLClientSocket {
                               const unsigned char* in, unsigned int inlen);
 
   // SSLClientSocket implementation.
-  virtual void GetSSLInfo(SSLInfo* ssl_info) OVERRIDE;
   virtual void GetSSLCertRequestInfo(
       SSLCertRequestInfo* cert_request_info) OVERRIDE;
-  virtual int ExportKeyingMaterial(const base::StringPiece& label,
-                                   const base::StringPiece& context,
-                                   unsigned char *out,
-                                   unsigned int outlen) OVERRIDE;
   virtual NextProtoStatus GetNextProto(std::string* proto,
                                        std::string* server_protos) OVERRIDE;
+  virtual ServerBoundCertService* GetServerBoundCertService() const OVERRIDE;
+
+  // SSLSocket implementation.
+  virtual int ExportKeyingMaterial(const base::StringPiece& label,
+                                   bool has_context,
+                                   const base::StringPiece& context,
+                                   unsigned char* out,
+                                   unsigned int outlen) OVERRIDE;
+  virtual int GetTLSUniqueChannelBinding(std::string* out) OVERRIDE;
 
   // StreamSocket implementation.
   virtual int Connect(const CompletionCallback& callback) OVERRIDE;
   virtual void Disconnect() OVERRIDE;
   virtual bool IsConnected() const OVERRIDE;
   virtual bool IsConnectedAndIdle() const OVERRIDE;
-  virtual int GetPeerAddress(AddressList* address) const OVERRIDE;
+  virtual int GetPeerAddress(IPEndPoint* address) const OVERRIDE;
   virtual int GetLocalAddress(IPEndPoint* address) const OVERRIDE;
   virtual const BoundNetLog& NetLog() const OVERRIDE;
   virtual void SetSubresourceSpeculation() OVERRIDE;
@@ -80,6 +83,7 @@ class SSLClientSocketOpenSSL : public SSLClientSocket {
   virtual bool UsingTCPFastOpen() const OVERRIDE;
   virtual int64 NumBytesRead() const OVERRIDE;
   virtual base::TimeDelta GetConnectTimeMicros() const OVERRIDE;
+  virtual bool GetSSLInfo(SSLInfo* ssl_info) OVERRIDE;
 
   // Socket implementation.
   virtual int Read(IOBuffer* buf, int buf_len,
@@ -121,6 +125,7 @@ class SSLClientSocketOpenSSL : public SSLClientSocket {
   bool transport_send_busy_;
   scoped_refptr<DrainableIOBuffer> send_buffer_;
   bool transport_recv_busy_;
+  bool transport_recv_eof_;
   scoped_refptr<IOBuffer> recv_buffer_;
 
   CompletionCallback user_connect_callback_;

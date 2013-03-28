@@ -1,10 +1,9 @@
-// Copyright (c) 2011 The Chromium Authors. All rights reserved.
+// Copyright (c) 2012 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
 #ifndef NET_PROXY_PROXY_LIST_H_
 #define NET_PROXY_PROXY_LIST_H_
-#pragma once
 
 #include <string>
 #include <vector>
@@ -36,12 +35,22 @@ class NET_EXPORT_PRIVATE ProxyList {
   // them to the end of the fallback list.
   void DeprioritizeBadProxies(const ProxyRetryInfoMap& proxy_retry_info);
 
+  // Returns true if this proxy list contains at least one proxy that is
+  // not currently present in |proxy_retry_info|.
+  bool HasUntriedProxies(const ProxyRetryInfoMap& proxy_retry_info) const;
+
   // Delete any entry which doesn't have one of the specified proxy schemes.
   // |scheme_bit_field| is a bunch of ProxyServer::Scheme bitwise ORed together.
   void RemoveProxiesWithoutScheme(int scheme_bit_field);
 
+  // Clear the proxy list.
+  void Clear();
+
   // Returns true if there is nothing left in the ProxyList.
   bool IsEmpty() const;
+
+  // Returns the number of proxy servers in this list.
+  size_t size() const;
 
   // Returns the first proxy server in the list. It is only valid to call
   // this if !IsEmpty().
@@ -64,6 +73,12 @@ class NET_EXPORT_PRIVATE ProxyList {
   // there is another server available in the list.
   bool Fallback(ProxyRetryInfoMap* proxy_retry_info,
                 const BoundNetLog& net_log);
+
+  // Updates |proxy_retry_info| to indicate that the first proxy in the list
+  // is bad. This is distinct from Fallback(), above, to allow updating proxy
+  // retry information without modifying a given transction's proxy list.
+  void UpdateRetryInfoOnFallback(ProxyRetryInfoMap* proxy_retry_info,
+                                 const BoundNetLog& net_log) const;
 
  private:
   // List of proxies.

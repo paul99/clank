@@ -1,17 +1,18 @@
-// Copyright (c) 2011 The Chromium Authors. All rights reserved.
+// Copyright (c) 2012 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
 #ifndef CHROME_INSTALLER_UTIL_PRODUCT_OPERATIONS_H_
 #define CHROME_INSTALLER_UTIL_PRODUCT_OPERATIONS_H_
-#pragma once
 
 #include <set>
 #include <string>
 #include <vector>
 
 #include "base/file_path.h"
+#include "chrome/installer/util/shell_util.h"
 
+class BrowserDistribution;
 class CommandLine;
 
 namespace installer {
@@ -51,9 +52,11 @@ class ProductOperations {
   virtual void AddComDllList(const std::set<std::wstring>& options,
                              std::vector<FilePath>* com_dll_list) const = 0;
 
-  // Given a command line, appends the set of product-specific uninstall flags.
-  virtual void AppendUninstallFlags(const std::set<std::wstring>& options,
-                                    CommandLine* cmd_line) const = 0;
+  // Given a command line, appends the set of product-specific flags.  These are
+  // required for product-specific uninstall commands, but are of use for any
+  // invocation of setup.exe for the product.
+  virtual void AppendProductFlags(const std::set<std::wstring>& options,
+                                  CommandLine* cmd_line) const = 0;
 
   // Given a command line, appends the set of product-specific rename flags.
   virtual void AppendRenameFlags(const std::set<std::wstring>& options,
@@ -70,6 +73,13 @@ class ProductOperations {
   // MSI; see InstallerState::is_msi.
   virtual bool ShouldCreateUninstallEntry(
       const std::set<std::wstring>& options) const = 0;
+
+  // Modifies a ShellUtil::ShortcutProperties object by assigning default values
+  // to unintialized members.
+  virtual void AddDefaultShortcutProperties(
+      BrowserDistribution* dist,
+      const FilePath& target_exe,
+      ShellUtil::ShortcutProperties* properties) const = 0;
 };
 
 }  // namespace installer

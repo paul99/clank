@@ -1,31 +1,26 @@
-// Copyright (c) 2011 The Chromium Authors. All rights reserved.
+// Copyright (c) 2012 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
 #ifndef CONTENT_UTILITY_UTILITY_THREAD_IMPL_H_
 #define CONTENT_UTILITY_UTILITY_THREAD_IMPL_H_
-#pragma once
 
 #include <string>
 #include <vector>
 
 #include "base/basictypes.h"
 #include "base/compiler_specific.h"
-#include "base/string16.h"
 #include "content/common/child_thread.h"
 #include "content/common/content_export.h"
 #include "content/public/utility/utility_thread.h"
 
 class FilePath;
-class IndexedDBKey;
 
 namespace content {
-class SerializedScriptValue;
 class WebKitPlatformSupportImpl;
-}
 
 // This class represents the background thread where the utility task runs.
-class UtilityThreadImpl : public content::UtilityThread,
+class UtilityThreadImpl : public UtilityThread,
                           public ChildThread {
  public:
   UtilityThreadImpl();
@@ -43,14 +38,6 @@ class UtilityThreadImpl : public content::UtilityThread,
   virtual bool OnControlMessageReceived(const IPC::Message& msg) OVERRIDE;
 
   // IPC message handlers.
-  void OnIDBKeysFromValuesAndKeyPath(
-      int id,
-      const std::vector<content::SerializedScriptValue>&
-          serialized_script_values,
-      const string16& idb_key_path);
-  void OnInjectIDBKey(const IndexedDBKey& key,
-                      const content::SerializedScriptValue& value,
-                      const string16& key_path);
   void OnBatchModeStarted();
   void OnBatchModeFinished();
 
@@ -61,9 +48,11 @@ class UtilityThreadImpl : public content::UtilityThread,
   // True when we're running in batch mode.
   bool batch_mode_;
 
-  scoped_ptr<content::WebKitPlatformSupportImpl> webkit_platform_support_;
+  scoped_ptr<WebKitPlatformSupportImpl> webkit_platform_support_;
 
   DISALLOW_COPY_AND_ASSIGN(UtilityThreadImpl);
 };
+
+}  // namespace content
 
 #endif  // CONTENT_UTILITY_UTILITY_THREAD_IMPL_H_

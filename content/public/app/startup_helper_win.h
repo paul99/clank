@@ -1,10 +1,9 @@
-// Copyright (c) 2011 The Chromium Authors. All rights reserved.
+// Copyright (c) 2012 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
 #ifndef CONTENT_PUBLIC_APP_STARTUP_HELPER_WIN_H_
 #define CONTENT_PUBLIC_APP_STARTUP_HELPER_WIN_H_
-#pragma once
 
 class CommandLine;
 
@@ -14,6 +13,8 @@ struct SandboxInterfaceInfo;
 
 // This file contains functions that any embedder that's not using ContentMain
 // will want to call at startup.
+// NOTE: we never want to CONTENT_EXPORT these functions, they must run in the
+// same module that calls them.
 namespace content {
 
 // Initializes the sandbox code and turns on DEP. Note: This function

@@ -1,4 +1,4 @@
-// Copyright (c) 2006-2008 The Chromium Authors. All rights reserved.
+// Copyright (c) 2012 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -11,9 +11,11 @@
 #include "content/browser/download/save_file_manager.h"
 #include "content/browser/download/save_package.h"
 
+namespace content {
+
 // Constructor for SaveItem when creating each saving job.
 SaveItem::SaveItem(const GURL& url,
-                   const GURL& referrer,
+                   const Referrer& referrer,
                    SavePackage* package,
                    SaveFileCreateInfo::SaveFileSource save_source)
   : save_id_(-1),
@@ -128,3 +130,5 @@ void SaveItem::SetTotalBytes(int64 total_bytes) {
   DCHECK(total_bytes_ == 0);
   total_bytes_ = total_bytes;
 }
+
+}  // namespace content

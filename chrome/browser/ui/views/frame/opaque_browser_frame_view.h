@@ -4,27 +4,29 @@
 
 #ifndef CHROME_BROWSER_UI_VIEWS_FRAME_OPAQUE_BROWSER_FRAME_VIEW_H_
 #define CHROME_BROWSER_UI_VIEWS_FRAME_OPAQUE_BROWSER_FRAME_VIEW_H_
-#pragma once
 
 #include "base/memory/scoped_ptr.h"
 #include "chrome/browser/ui/views/frame/browser_frame.h"
 #include "chrome/browser/ui/views/frame/browser_non_client_frame_view.h"
-#include "chrome/browser/ui/views/tab_icon_view.h"
+#include "chrome/browser/ui/views/tab_icon_view_model.h"
 #include "content/public/browser/notification_observer.h"
 #include "content/public/browser/notification_registrar.h"
 #include "ui/views/controls/button/button.h"
 #include "ui/views/window/non_client_view.h"
 
 class BrowserView;
+class TabIconView;
+
 namespace views {
 class ImageButton;
 class FrameBackground;
+class Label;
 }
 
 class OpaqueBrowserFrameView : public BrowserNonClientFrameView,
                                public content::NotificationObserver,
                                public views::ButtonListener,
-                               public TabIconView::TabIconViewModel {
+                               public chrome::TabIconViewModel {
  public:
   // Constructs a non-client view for an BrowserFrame.
   OpaqueBrowserFrameView(BrowserFrame* frame, BrowserView* browser_view);
@@ -32,7 +34,8 @@ class OpaqueBrowserFrameView : public BrowserNonClientFrameView,
 
   // Overridden from BrowserNonClientFrameView:
   virtual gfx::Rect GetBoundsForTabStrip(views::View* tabstrip) const OVERRIDE;
-  virtual int GetHorizontalTabStripVerticalOffset(bool restored) const OVERRIDE;
+  virtual TabStripInsets GetTabStripInsets(bool restored) const OVERRIDE;
+  virtual int GetThemeBackgroundXInset() const OVERRIDE;
   virtual void UpdateThrobber(bool running) OVERRIDE;
   virtual gfx::Size GetMinimumSize() OVERRIDE;
 
@@ -52,18 +55,6 @@ class OpaqueBrowserFrameView : public BrowserNonClientFrameView,
   // true, acts as if the window is restored regardless of the real mode.
   int NonClientTopBorderHeight(bool restored) const;
 
-  // Allows a subclass to tweak the frame. Chromeos uses this to support
-  // drawing themes correctly. |theme_offset| is used to adjust the y offset
-  // of the theme frame bitmap, so they start at the right location.
-  // |theme_frame| will be used as theme frame bitmap. |left_corner| and
-  // |right_corner| will be used on the left and right of the tabstrip area
-  // as opposed to the theme frame.
-  virtual void ModifyMaximizedFramePainting(
-      int* theme_offset,
-      SkBitmap** theme_frame,
-      SkBitmap** left_corner,
-      SkBitmap** right_corner);
-
   // Overridden from views::NonClientFrameView:
   virtual gfx::Rect GetBoundsForClientView() const OVERRIDE;
   virtual gfx::Rect GetWindowBoundsForClientBounds(
@@ -73,28 +64,36 @@ class OpaqueBrowserFrameView : public BrowserNonClientFrameView,
       OVERRIDE;
   virtual void ResetWindowControls() OVERRIDE;
   virtual void UpdateWindowIcon() OVERRIDE;
+  virtual void UpdateWindowTitle() OVERRIDE;
 
   // Overridden from views::View:
   virtual void OnPaint(gfx::Canvas* canvas) OVERRIDE;
   virtual void Layout() OVERRIDE;
-  virtual bool HitTest(const gfx::Point& l) const OVERRIDE;
+  virtual bool HitTestRect(const gfx::Rect& rect) const OVERRIDE;
   virtual void GetAccessibleState(ui::AccessibleViewState* state) OVERRIDE;
 
   // Overridden from views::ButtonListener:
-  virtual void ButtonPressed(views::Button* sender, const views::Event& event)
+  virtual void ButtonPressed(views::Button* sender, const ui::Event& event)
       OVERRIDE;
 
-  // Overridden from TabIconView::TabIconViewModel:
+  // Overridden from chrome::TabIconViewModel:
   virtual bool ShouldTabIconViewAnimate() const OVERRIDE;
-  virtual SkBitmap GetFaviconForTabIconView() OVERRIDE;
+  virtual gfx::ImageSkia GetFaviconForTabIconView() OVERRIDE;
 
- protected:
   // content::NotificationObserver implementation:
   virtual void Observe(int type,
                        const content::NotificationSource& source,
                        const content::NotificationDetails& details) OVERRIDE;
 
  private:
+  // Creates, adds and returns a new image button with |this| as its listener.
+  // Memory is owned by the caller.
+  views::ImageButton* InitWindowCaptionButton(int normal_image_id,
+                                              int hot_image_id,
+                                              int pushed_image_id,
+                                              int mask_image_id,
+                                              int accessibility_string_id);
+
   // Returns the thickness of the border that makes up the window frame edges.
   // This does not include any client edge.  If |restored| is true, acts as if
   // the window is restored regardless of the real mode.
@@ -125,19 +124,21 @@ class OpaqueBrowserFrameView : public BrowserNonClientFrameView,
   // there was one).
   gfx::Rect IconBounds() const;
 
+  // Returns the combined bounds for the tab strip and avatar area.
+  gfx::Rect GetBoundsForTabStripAndAvatarArea(views::View* tabstrip) const;
+
   // Paint various sub-components of this view.  The *FrameBorder() functions
   // also paint the background of the titlebar area, since the top frame border
   // and titlebar background are a contiguous component.
   void PaintRestoredFrameBorder(gfx::Canvas* canvas);
   void PaintMaximizedFrameBorder(gfx::Canvas* canvas);
-  void PaintTitleBar(gfx::Canvas* canvas);
   void PaintToolbarBackground(gfx::Canvas* canvas);
   void PaintRestoredClientEdge(gfx::Canvas* canvas);
 
   // Compute aspects of the frame needed to paint the frame background.
   SkColor GetFrameColor() const;
-  SkBitmap* GetFrameBitmap() const;
-  SkBitmap* GetFrameOverlayBitmap() const;
+  gfx::ImageSkia* GetFrameImage() const;
+  gfx::ImageSkia* GetFrameOverlayImage() const;
   int GetTopAreaHeight() const;
 
   // Layout various sub-components of this view.
@@ -148,9 +149,6 @@ class OpaqueBrowserFrameView : public BrowserNonClientFrameView,
   // Returns the bounds of the client area for the specified view size.
   gfx::Rect CalculateClientAreaBounds(int width, int height) const;
 
-  // The layout rect of the title, if visible.
-  gfx::Rect title_bounds_;
-
   // The layout rect of the avatar icon, if visible.
   gfx::Rect avatar_bounds_;
 
@@ -160,8 +158,9 @@ class OpaqueBrowserFrameView : public BrowserNonClientFrameView,
   views::ImageButton* restore_button_;
   views::ImageButton* close_button_;
 
-  // The Window icon.
+  // The window icon and title.
   TabIconView* window_icon_;
+  views::Label* window_title_;
 
   // The bounds of the ClientView.
   gfx::Rect client_view_bounds_;

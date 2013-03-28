@@ -4,7 +4,6 @@
 
 #ifndef UI_BASE_DRAGDROP_DRAG_DROP_TYPES_H_
 #define UI_BASE_DRAGDROP_DRAG_DROP_TYPES_H_
-#pragma once
 
 #include "base/basictypes.h"
 #include "ui/base/ui_export.h"
@@ -18,6 +17,11 @@ class UI_EXPORT DragDropTypes {
     DRAG_MOVE = 1 << 0,
     DRAG_COPY = 1 << 1,
     DRAG_LINK = 1 << 2
+  };
+
+  enum DragEventSource {
+    DRAG_EVENT_SOURCE_MOUSE,
+    DRAG_EVENT_SOURCE_TOUCH,
   };
 
 #if defined(OS_WIN)

@@ -4,7 +4,6 @@
 
 #ifndef CHROME_BROWSER_TRANSLATE_TRANSLATE_MANAGER_H_
 #define CHROME_BROWSER_TRANSLATE_TRANSLATE_MANAGER_H_
-#pragma once
 
 #include <map>
 #include <set>
@@ -15,21 +14,26 @@
 #include "base/lazy_instance.h"
 #include "base/memory/scoped_ptr.h"
 #include "base/memory/weak_ptr.h"
+#include "base/prefs/public/pref_change_registrar.h"
 #include "base/time.h"
-#include "chrome/browser/prefs/pref_change_registrar.h"
 #include "chrome/common/translate_errors.h"
-#include "content/public/common/url_fetcher_delegate.h"
 #include "content/public/browser/notification_observer.h"
 #include "content/public/browser/notification_registrar.h"
+#include "net/url_request/url_fetcher_delegate.h"
 
 template <typename T> struct DefaultSingletonTraits;
 class GURL;
 struct PageTranslatedDetails;
 class PrefService;
+class PrefServiceBase;
 class TranslateInfoBarDelegate;
 
 namespace content {
 class WebContents;
+}
+
+namespace net {
+class URLFetcher;
 }
 
 // The TranslateManager class is responsible for showing an info-bar when a page
@@ -38,7 +42,7 @@ class WebContents;
 // It is a singleton.
 
 class TranslateManager : public content::NotificationObserver,
-                         public content::URLFetcherDelegate {
+                         public net::URLFetcherDelegate {
  public:
   // Returns the singleton instance.
   static TranslateManager* GetInstance();
@@ -79,8 +83,8 @@ class TranslateManager : public content::NotificationObserver,
                        const content::NotificationSource& source,
                        const content::NotificationDetails& details) OVERRIDE;
 
-  // content::URLFetcherDelegate implementation:
-  virtual void OnURLFetchComplete(const content::URLFetcher* source) OVERRIDE;
+  // net::URLFetcherDelegate implementation:
+  virtual void OnURLFetchComplete(const net::URLFetcher* source) OVERRIDE;
 
   // Used by unit-tests to override the default delay after which the translate
   // script is fetched again from the translation server.
@@ -90,7 +94,7 @@ class TranslateManager : public content::NotificationObserver,
   }
 
   // Convenience method to know if a tab is showing a translate infobar.
-  static bool IsShowingTranslateInfobar(content::WebContents* tab);
+  static bool IsShowingTranslateInfobar(content::WebContents* web_contents);
 
   // Returns true if the URL can be translated.
   static bool IsTranslatableURL(const GURL& url);
@@ -138,7 +142,7 @@ class TranslateManager : public content::NotificationObserver,
 
   // Starts the translation process on |tab| containing the page in the
   // |page_lang| language.
-  void InitiateTranslation(content::WebContents* tab,
+  void InitiateTranslation(content::WebContents* web_contents,
                            const std::string& page_lang);
 
   // If the tab identified by |process_id| and |render_id| has been closed, this
@@ -147,23 +151,24 @@ class TranslateManager : public content::NotificationObserver,
                                  int render_id,
                                  const std::string& page_lang);
 
-  // Sends a translation request to the RenderView of |tab_contents|.
+  // Sends a translation request to the RenderView of |web_contents|.
   void DoTranslatePage(content::WebContents* web_contents,
                        const std::string& translate_script,
                        const std::string& source_lang,
                        const std::string& target_lang);
 
   // Shows the after translate or error infobar depending on the details.
-  void PageTranslated(content::WebContents* tab,
+  void PageTranslated(content::WebContents* web_contents,
                       PageTranslatedDetails* details);
 
   // Returns true if the passed language has been configured by the user as an
   // accept language.
-  bool IsAcceptLanguage(content::WebContents* tab, const std::string& language);
+  bool IsAcceptLanguage(content::WebContents* web_contents,
+                        const std::string& language);
 
   // Initializes the |accept_languages_| language table based on the associated
   // preference in |prefs|.
-  void InitAcceptLanguages(PrefService* prefs);
+  void InitAcceptLanguages(PrefServiceBase* prefs);
 
   // Fetches the JS translate script (the script that is injected in the page
   // to translate it).
@@ -171,7 +176,7 @@ class TranslateManager : public content::NotificationObserver,
 
   // Shows the specified translate |infobar| in the given |tab|.  If a current
   // translate infobar is showing, it just replaces it with the new one.
-  void ShowInfoBar(content::WebContents* tab,
+  void ShowInfoBar(content::WebContents* web_contents,
                    TranslateInfoBarDelegate* infobar);
 
   // Returns the language to translate to. The language returned is the
@@ -184,7 +189,7 @@ class TranslateManager : public content::NotificationObserver,
 
   // Returns the translate info bar showing in |tab| or NULL if none is showing.
   static TranslateInfoBarDelegate* GetTranslateInfoBarDelegate(
-      content::WebContents* tab);
+      content::WebContents* web_contents);
 
   content::NotificationRegistrar notification_registrar_;
 
@@ -195,7 +200,7 @@ class TranslateManager : public content::NotificationObserver,
 
   // A map that associates a profile with its parsed "accept languages".
   typedef std::set<std::string> LanguageSet;
-  typedef std::map<PrefService*, LanguageSet> PrefServiceLanguagesMap;
+  typedef std::map<PrefServiceBase*, LanguageSet> PrefServiceLanguagesMap;
   PrefServiceLanguagesMap accept_languages_;
 
   base::WeakPtrFactory<TranslateManager> weak_method_factory_;
@@ -208,11 +213,11 @@ class TranslateManager : public content::NotificationObserver,
   base::TimeDelta translate_script_expiration_delay_;
 
   // Set when the translate JS is currently being retrieved. NULL otherwise.
-  scoped_ptr<content::URLFetcher> translate_script_request_pending_;
+  scoped_ptr<net::URLFetcher> translate_script_request_pending_;
 
   // Set when the list of languages is currently being retrieved.
   // NULL otherwise.
-  scoped_ptr<content::URLFetcher> language_list_request_pending_;
+  scoped_ptr<net::URLFetcher> language_list_request_pending_;
 
   // The list of pending translate requests.  Translate requests are queued when
   // the translate script is not ready and has to be fetched from the translate

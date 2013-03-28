@@ -1,4 +1,4 @@
-// Copyright (c) 2011 The Chromium Authors. All rights reserved.
+// Copyright (c) 2012 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -7,6 +7,7 @@
 #include "base/debug/trace_event.h"
 #include "chrome/browser/extensions/extension_context_menu_model.h"
 #include "chrome/browser/extensions/extension_host.h"
+#include "chrome/browser/infobars/infobar_tab_helper.h"
 #include "chrome/browser/platform_util.h"
 #include "chrome/browser/ui/gtk/browser_window_gtk.h"
 #include "chrome/browser/ui/gtk/custom_button.h"
@@ -14,14 +15,15 @@
 #include "chrome/browser/ui/gtk/gtk_util.h"
 #include "chrome/browser/ui/gtk/infobars/infobar_container_gtk.h"
 #include "chrome/common/extensions/extension.h"
+#include "chrome/common/extensions/extension_constants.h"
 #include "chrome/common/extensions/extension_icon_set.h"
 #include "chrome/common/extensions/extension_resource.h"
-#include "content/browser/renderer_host/render_view_host.h"
-#include "content/browser/renderer_host/render_widget_host_view.h"
+#include "content/public/browser/render_view_host.h"
+#include "content/public/browser/render_widget_host_view.h"
 #include "grit/theme_resources.h"
 #include "ui/base/gtk/gtk_signal_registrar.h"
 #include "ui/base/resource/resource_bundle.h"
-#include "ui/gfx/canvas_skia.h"
+#include "ui/gfx/canvas.h"
 #include "ui/gfx/gtk_util.h"
 #include "ui/gfx/image/image.h"
 
@@ -63,34 +65,36 @@ void ExtensionInfoBarGtk::GetBottomColor(InfoBarDelegate::Type type,
   *r = *g = *b = 218.0 / 255.0;
 }
 
-void ExtensionInfoBarGtk::OnImageLoaded(
-    SkBitmap* image, const ExtensionResource& resource, int index) {
+void ExtensionInfoBarGtk::OnImageLoaded(const gfx::Image& image,
+                                        const std::string& extension_id,
+                                        int index) {
   if (!delegate_)
     return;  // The delegate can go away while we asynchronously load images.
 
   // TODO(erg): IDR_EXTENSIONS_SECTION should have an IDR_INFOBAR_EXTENSIONS
   // icon of the correct size with real subpixel shading and such.
-  SkBitmap* icon = image;
+  const gfx::ImageSkia* icon = NULL;
   ui::ResourceBundle& rb = ui::ResourceBundle::GetSharedInstance();
-  if (!image || image->empty())
-    icon = rb.GetBitmapNamed(IDR_EXTENSIONS_SECTION);
+  if (image.IsEmpty())
+    icon = rb.GetImageSkiaNamed(IDR_EXTENSIONS_SECTION);
+  else
+    icon = image.ToImageSkia();
 
-  SkBitmap* drop_image = rb.GetBitmapNamed(IDR_APP_DROPARROW);
+  gfx::ImageSkia* drop_image = rb.GetImageSkiaNamed(IDR_APP_DROPARROW);
 
-  int image_size = Extension::EXTENSION_ICON_BITTY;
+  int image_size = extension_misc::EXTENSION_ICON_BITTY;
   // The margin between the extension icon and the drop-down arrow bitmap.
   static const int kDropArrowLeftMargin = 3;
-  scoped_ptr<gfx::CanvasSkia> canvas(new gfx::CanvasSkia(
+  scoped_ptr<gfx::Canvas> canvas(new gfx::Canvas(
       gfx::Size(image_size + kDropArrowLeftMargin + drop_image->width(),
-                image_size),
-      false));
-  canvas->DrawBitmapInt(*icon, 0, 0, icon->width(), icon->height(), 0, 0,
-                        image_size, image_size, false);
-  canvas->DrawBitmapInt(*drop_image, image_size + kDropArrowLeftMargin,
-                        image_size / 2);
+                image_size), ui::SCALE_FACTOR_100P, false));
+  canvas->DrawImageInt(*icon, 0, 0, icon->width(), icon->height(), 0, 0,
+                       image_size, image_size, false);
+  canvas->DrawImageInt(*drop_image, image_size + kDropArrowLeftMargin,
+                       image_size / 2);
 
-  SkBitmap bitmap = canvas->ExtractBitmap();
-  GdkPixbuf* pixbuf = gfx::GdkPixbufFromSkBitmap(&bitmap);
+  SkBitmap bitmap = canvas->ExtractImageRep().sk_bitmap();
+  GdkPixbuf* pixbuf = gfx::GdkPixbufFromSkBitmap(bitmap);
   gtk_image_set_from_pixbuf(GTK_IMAGE(icon_), pixbuf);
   g_object_unref(pixbuf);
 }
@@ -107,25 +111,22 @@ void ExtensionInfoBarGtk::BuildWidgets() {
   gtk_util::CenterWidgetInHBox(hbox_, button_, false, 0);
 
   // Start loading the image for the menu button.
-  const Extension* extension = delegate_->extension_host()->extension();
+  const extensions::Extension* extension =
+      delegate_->extension_host()->extension();
   ExtensionResource icon_resource = extension->GetIconResource(
-      Extension::EXTENSION_ICON_BITTY, ExtensionIconSet::MATCH_EXACTLY);
-  if (!icon_resource.relative_path().empty()) {
-    // Create a tracker to load the image. It will report back on OnImageLoaded.
-    tracker_.LoadImage(extension, icon_resource,
-                       gfx::Size(Extension::EXTENSION_ICON_BITTY,
-                                 Extension::EXTENSION_ICON_BITTY),
-                       ImageLoadingTracker::DONT_CACHE);
-  } else {
-    OnImageLoaded(NULL, icon_resource, 0);
-  }
+      extension_misc::EXTENSION_ICON_BITTY, ExtensionIconSet::MATCH_EXACTLY);
+  // Create a tracker to load the image. It will report back on OnImageLoaded.
+  tracker_.LoadImage(extension, icon_resource,
+                     gfx::Size(extension_misc::EXTENSION_ICON_BITTY,
+                               extension_misc::EXTENSION_ICON_BITTY),
+                     ImageLoadingTracker::DONT_CACHE);
 
   // Pad the bottom of the infobar by one pixel for the border.
   alignment_ = gtk_alignment_new(0.0, 0.0, 1.0, 1.0);
   gtk_alignment_set_padding(GTK_ALIGNMENT(alignment_), 0, 1, 0, 0);
   gtk_box_pack_start(GTK_BOX(hbox_), alignment_, TRUE, TRUE, 0);
 
-  ExtensionHost* extension_host = delegate_->extension_host();
+  extensions::ExtensionHost* extension_host = delegate_->extension_host();
   view_ = extension_host->view();
 
   if (gtk_widget_get_parent(view_->native_view())) {
@@ -156,7 +157,7 @@ Browser* ExtensionInfoBarGtk::GetBrowser() {
 }
 
 ui::MenuModel* ExtensionInfoBarGtk::BuildMenuModel() {
-  const Extension* extension = delegate_->extension();
+  const extensions::Extension* extension = delegate_->extension();
   if (!extension->ShowConfigureContextMenus())
     return NULL;
 
@@ -164,14 +165,14 @@ ui::MenuModel* ExtensionInfoBarGtk::BuildMenuModel() {
   if (!browser)
     return NULL;
 
-  return new ExtensionContextMenuModel(extension, browser, NULL);
+  return new ExtensionContextMenuModel(extension, browser);
 }
 
 void ExtensionInfoBarGtk::OnSizeAllocate(GtkWidget* widget,
                                          GtkAllocation* allocation) {
   gfx::Size new_size(allocation->width, allocation->height);
 
-  delegate_->extension_host()->view()->render_view_host()->view()
+  delegate_->extension_host()->view()->render_view_host()->GetView()
       ->SetSize(new_size);
 }
 
@@ -202,6 +203,6 @@ gboolean ExtensionInfoBarGtk::OnExpose(GtkWidget* sender,
   return FALSE;
 }
 
-InfoBar* ExtensionInfoBarDelegate::CreateInfoBar(InfoBarTabHelper* owner) {
-  return new ExtensionInfoBarGtk(owner, this);
+InfoBar* ExtensionInfoBarDelegate::CreateInfoBar(InfoBarService* owner) {
+  return new ExtensionInfoBarGtk(static_cast<InfoBarTabHelper*>(owner), this);
 }

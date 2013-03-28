@@ -18,19 +18,20 @@
 #include "net/http/http_response_headers.h"
 #include "net/url_request/url_request.h"
 #include "webkit/appcache/appcache.h"
-#include "webkit/appcache/appcache_export.h"
 #include "webkit/appcache/appcache_host.h"
 #include "webkit/appcache/appcache_interfaces.h"
 #include "webkit/appcache/appcache_response.h"
 #include "webkit/appcache/appcache_storage.h"
+#include "webkit/storage/webkit_storage_export.h"
 
 namespace appcache {
 
 class HostNotifier;
 
 // Application cache Update algorithm and state.
-class APPCACHE_EXPORT AppCacheUpdateJob : public AppCacheStorage::Delegate,
-                                          public AppCacheHost::Observer {
+class WEBKIT_STORAGE_EXPORT AppCacheUpdateJob
+    : public AppCacheStorage::Delegate,
+      public AppCacheHost::Observer {
  public:
   AppCacheUpdateJob(AppCacheService* service, AppCacheGroup* group);
   virtual ~AppCacheUpdateJob();
@@ -235,8 +236,8 @@ class APPCACHE_EXPORT AppCacheUpdateJob : public AppCacheStorage::Delegate,
   bool IsTerminating() { return internal_state_ >= REFETCH_MANIFEST ||
                                 stored_state_ != UNSTORED; }
 
-  GURL manifest_url_;  // here for easier access
   AppCacheService* service_;
+  const GURL manifest_url_;  // here for easier access
 
   scoped_refptr<AppCache> inprogress_cache_;
 

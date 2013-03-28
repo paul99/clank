@@ -1,10 +1,9 @@
-// Copyright (c) 2011 The Chromium Authors. All rights reserved.
+// Copyright (c) 2012 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
 #ifndef CHROME_BROWSER_PROFILES_PROFILE_INFO_CACHE_H_
 #define CHROME_BROWSER_PROFILES_PROFILE_INFO_CACHE_H_
-#pragma once
 
 #include <map>
 #include <string>
@@ -51,10 +50,15 @@ class ProfileInfoCache : public ProfileInfoInterface,
   virtual size_t GetIndexOfProfileWithPath(
       const FilePath& profile_path) const OVERRIDE;
   virtual string16 GetNameOfProfileAtIndex(size_t index) const OVERRIDE;
+  virtual string16 GetShortcutNameOfProfileAtIndex(size_t index)
+      const OVERRIDE;
   virtual FilePath GetPathOfProfileAtIndex(size_t index) const OVERRIDE;
   virtual string16 GetUserNameOfProfileAtIndex(size_t index) const OVERRIDE;
   virtual const gfx::Image& GetAvatarIconOfProfileAtIndex(
       size_t index) const OVERRIDE;
+  // Note that a return value of false could mean an error in collection or
+  // that there are currently no background apps running. However, the action
+  // which results is the same in both cases (thus far).
   virtual bool GetBackgroundStatusOfProfileAtIndex(
       size_t index) const OVERRIDE;
   virtual string16 GetGAIANameOfProfileAtIndex(size_t index) const OVERRIDE;
@@ -70,6 +74,7 @@ class ProfileInfoCache : public ProfileInfoInterface,
   size_t GetAvatarIconIndexOfProfileAtIndex(size_t index) const;
 
   void SetNameOfProfileAtIndex(size_t index, const string16& name);
+  void SetShortcutNameOfProfileAtIndex(size_t index, const string16& name);
   void SetUserNameOfProfileAtIndex(size_t index, const string16& user_name);
   void SetAvatarIconOfProfileAtIndex(size_t index, size_t icon_index);
   void SetBackgroundStatusOfProfileAtIndex(size_t index,
@@ -132,7 +137,7 @@ class ProfileInfoCache : public ProfileInfoInterface,
   void SetInfoForProfileAtIndex(size_t index, base::DictionaryValue* info);
   std::string CacheKeyFromProfilePath(const FilePath& profile_path) const;
   std::vector<std::string>::iterator FindPositionForProfile(
-      std::string search_key,
+      const std::string& search_key,
       const string16& search_name);
 
   // Returns true if the given icon index is not in use by another profie.

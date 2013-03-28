@@ -4,15 +4,13 @@
 
 #ifndef UI_VIEWS_CONTROLS_TEXTFIELD_TEXTFIELD_H_
 #define UI_VIEWS_CONTROLS_TEXTFIELD_TEXTFIELD_H_
-#pragma once
-
-#include "build/build_config.h"
 
 #include <string>
 
 #include "base/basictypes.h"
 #include "base/compiler_specific.h"
 #include "base/string16.h"
+#include "build/build_config.h"
 #include "third_party/skia/include/core/SkColor.h"
 #include "ui/base/ime/text_input_type.h"
 #include "ui/base/keycodes/keyboard_codes.h"
@@ -36,7 +34,6 @@ class TextInputClient;
 
 namespace views {
 
-class KeyEvent;
 class TextfieldController;
 
 // This class implements a View that wraps a native text (edit) field.
@@ -50,6 +47,9 @@ class VIEWS_EXPORT Textfield : public View {
     STYLE_OBSCURED  = 1 << 0,
     STYLE_LOWERCASE = 1 << 1
   };
+
+  // Returns true if the build or commandline dictates NativeTextfieldViews use.
+  static bool IsViewsTextfieldEnabled();
 
   Textfield();
   explicit Textfield(StyleFlags style);
@@ -65,9 +65,6 @@ class VIEWS_EXPORT Textfield : public View {
 
   // Gets/sets the STYLE_OBSCURED bit, controlling whether characters in this
   // Textfield are displayed as asterisks/bullets.
-  // TODO(bryeung): Currently SetObscured is only used in
-  // chrome/browser/chromeos/options/wifi_config_view.cc, which is being
-  // converted to WebUI.  Please remove it when that happens.
   bool IsObscured() const;
   void SetObscured(bool obscured);
 
@@ -87,11 +84,19 @@ class VIEWS_EXPORT Textfield : public View {
   // Appends the given string to the previously-existing text in the field.
   void AppendText(const string16& text);
 
+  // Replaces the selected text with |text|.
+  void ReplaceSelection(const string16& text);
+
+  // Returns the text direction.
+  base::i18n::TextDirection GetTextDirection() const;
+
   // Returns the text that is currently selected.
   string16 GetSelectedText() const;
 
-  // Causes the edit field to be fully selected.
-  void SelectAll();
+  // Select the entire text range. If |reversed| is true, the range will end at
+  // the logical beginning of the text; this generally shows the leading portion
+  // of text that overflows its display area.
+  void SelectAll(bool reversed);
 
   // Clears the selection within the edit field and sets the caret to the end.
   void ClearSelection() const;
@@ -103,28 +108,20 @@ class VIEWS_EXPORT Textfield : public View {
   StyleFlags style() const { return style_; }
 
   // Gets/Sets the text color to be used when painting the Textfield.
-  // Call |UseDefaultTextColor| to return to the system default colors.
-  SkColor text_color() const { return text_color_; }
+  // Call |UseDefaultTextColor| to restore the default system color.
+  SkColor GetTextColor() const;
   void SetTextColor(SkColor color);
-
-  // Gets/Sets whether the default text color should be used when painting the
-  // Textfield.
-  bool use_default_text_color() const {
-    return use_default_text_color_;
-  }
   void UseDefaultTextColor();
 
   // Gets/Sets the background color to be used when painting the Textfield.
-  // Call |UseDefaultBackgroundColor| to return to the system default colors.
-  SkColor background_color() const { return background_color_; }
+  // Call |UseDefaultBackgroundColor| to restore the default system color.
+  SkColor GetBackgroundColor() const;
   void SetBackgroundColor(SkColor color);
-
-  // Gets/Sets whether the default background color should be used when painting
-  // the Textfield.
-  bool use_default_background_color() const {
-    return use_default_background_color_;
-  }
   void UseDefaultBackgroundColor();
+
+  // Gets/Sets whether or not the cursor is enabled.
+  bool GetCursorEnabled() const;
+  void SetCursorEnabled(bool enabled);
 
   // Gets/Sets the font used when rendering the text within the Textfield.
   const gfx::Font& font() const { return font_; }
@@ -149,14 +146,19 @@ class VIEWS_EXPORT Textfield : public View {
   void RemoveBorder();
 
   // Sets the text to display when empty.
-  void set_text_to_display_when_empty(const string16& text) {
-    text_to_display_when_empty_ = text;
+  void set_placeholder_text(const string16& text) {
+    placeholder_text_ = text;
 #if !defined(OS_LINUX)
     NOTIMPLEMENTED();
 #endif
   }
-  const string16& text_to_display_when_empty() {
-    return text_to_display_when_empty_;
+  const string16& placeholder_text() const {
+    return placeholder_text_;
+  }
+
+  SkColor placeholder_text_color() const { return placeholder_text_color_; }
+  void set_placeholder_text_color(SkColor color) {
+    placeholder_text_color_ = color;
   }
 
   // Getter for the horizontal margins that were set. Returns false if
@@ -215,6 +217,9 @@ class VIEWS_EXPORT Textfield : public View {
   // Set the accessible name of the text field.
   void SetAccessibleName(const string16& name);
 
+  // Performs the action associated with the specified command id.
+  void ExecuteCommand(int command_id);
+
   // Provided only for testing:
   gfx::NativeView GetTestingHandle() const {
     return native_wrapper_ ? native_wrapper_->GetTestingHandle() : NULL;
@@ -225,14 +230,15 @@ class VIEWS_EXPORT Textfield : public View {
 
   // Overridden from View:
   virtual void Layout() OVERRIDE;
+  virtual int GetBaseline() const OVERRIDE;
   virtual gfx::Size GetPreferredSize() OVERRIDE;
   virtual void AboutToRequestFocusFromTabTraversal(bool reverse) OVERRIDE;
-  virtual bool SkipDefaultKeyEventProcessing(const KeyEvent& e) OVERRIDE;
+  virtual bool SkipDefaultKeyEventProcessing(const ui::KeyEvent& e) OVERRIDE;
   virtual void OnEnabledChanged() OVERRIDE;
-  virtual void OnPaintBackground(gfx::Canvas* canvas) OVERRIDE;
   virtual void OnPaintFocusBorder(gfx::Canvas* canvas) OVERRIDE;
-  virtual bool OnKeyPressed(const views::KeyEvent& e) OVERRIDE;
-  virtual bool OnKeyReleased(const views::KeyEvent& e) OVERRIDE;
+  virtual bool OnKeyPressed(const ui::KeyEvent& e) OVERRIDE;
+  virtual bool OnKeyReleased(const ui::KeyEvent& e) OVERRIDE;
+  virtual bool OnMouseDragged(const ui::MouseEvent& e) OVERRIDE;
   virtual void OnFocus() OVERRIDE;
   virtual void OnBlur() OVERRIDE;
   virtual void GetAccessibleState(ui::AccessibleViewState* state) OVERRIDE;
@@ -269,22 +275,16 @@ class VIEWS_EXPORT Textfield : public View {
   // Whether the border is drawn.
   bool draw_border_;
 
-  // The text color to be used when painting the Textfield, provided
-  // |use_default_text_color_| is set to false.
+  // Text color.  Only used if |use_default_text_color_| is false.
   SkColor text_color_;
 
-  // When true, the system text color for Textfields is used when painting this
-  // Textfield. When false, the value of |text_color_| determines the
-  // Textfield's text color.
+  // Should we use the system text color instead of |text_color_|?
   bool use_default_text_color_;
 
-  // The background color to be used when painting the Textfield, provided
-  // |use_default_background_color_| is set to false.
+  // Background color.  Only used if |use_default_background_color_| is false.
   SkColor background_color_;
 
-  // When true, the system background color for Textfields is used when painting
-  // this Textfield. When false, the value of |background_color_| determines the
-  // Textfield's background color.
+  // Should we use the system background color instead of |background_color_|?
   bool use_default_background_color_;
 
   // TODO(beng): remove this once NativeTextfieldWin subclasses
@@ -299,7 +299,10 @@ class VIEWS_EXPORT Textfield : public View {
   bool vertical_margins_were_set_;
 
   // Text to display when empty.
-  string16 text_to_display_when_empty_;
+  string16 placeholder_text_;
+
+  // Placeholder text color.
+  SkColor placeholder_text_color_;
 
   // The accessible name of the text field.
   string16 accessible_name_;

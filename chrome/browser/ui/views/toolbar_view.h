@@ -4,15 +4,14 @@
 
 #ifndef CHROME_BROWSER_UI_VIEWS_TOOLBAR_VIEW_H_
 #define CHROME_BROWSER_UI_VIEWS_TOOLBAR_VIEW_H_
-#pragma once
 
 #include <set>
 #include <string>
 
 #include "base/memory/scoped_ptr.h"
 #include "base/observer_list.h"
-#include "chrome/browser/command_updater.h"
-#include "chrome/browser/prefs/pref_member.h"
+#include "base/prefs/public/pref_member.h"
+#include "chrome/browser/command_observer.h"
 #include "chrome/browser/ui/toolbar/back_forward_menu_model.h"
 #include "chrome/browser/ui/views/location_bar/location_bar_view.h"
 #include "chrome/browser/ui/views/reload_button.h"
@@ -20,12 +19,13 @@
 #include "ui/base/animation/slide_animation.h"
 #include "ui/views/accessible_pane_view.h"
 #include "ui/views/controls/button/menu_button.h"
-#include "ui/views/controls/menu/view_menu_delegate.h"
+#include "ui/views/controls/button/menu_button_listener.h"
 #include "ui/views/view.h"
 
 class BrowserActionsContainer;
 class Browser;
 class WrenchMenu;
+class WrenchMenuModel;
 
 namespace views {
 class MenuListener;
@@ -33,12 +33,13 @@ class MenuListener;
 
 // The Browser Window's toolbar.
 class ToolbarView : public views::AccessiblePaneView,
-                    public views::ViewMenuDelegate,
+                    public views::MenuButtonListener,
                     public ui::AcceleratorProvider,
                     public LocationBarView::Delegate,
                     public content::NotificationObserver,
-                    public CommandUpdater::CommandObserver,
-                    public views::ButtonListener {
+                    public CommandObserver,
+                    public views::ButtonListener,
+                    public views::WidgetObserver {
  public:
   // The view class name.
   static const char kViewClassName[];
@@ -46,7 +47,7 @@ class ToolbarView : public views::AccessiblePaneView,
   explicit ToolbarView(Browser* browser);
   virtual ~ToolbarView();
 
-  // Create the contents of the Browser Toolbar
+  // Create the contents of the Browser Toolbar.
   void Init();
 
   // Updates the toolbar (and transitively the location bar) with the states of
@@ -69,11 +70,14 @@ class ToolbarView : public views::AccessiblePaneView,
   // Remove a menu listener.
   void RemoveMenuListener(views::MenuListener* listener);
 
-  // Gets a bitmap with the icon for the app menu and any overlaid notification
+  // Gets an image with the icon for the app menu and any overlaid notification
   // badge.
-  SkBitmap GetAppMenuIcon(views::CustomButton::ButtonState state);
+  gfx::ImageSkia GetAppMenuIcon(views::CustomButton::ButtonState state);
 
   virtual bool GetAcceleratorInfo(int id, ui::Accelerator* accel);
+
+  // Returns the view to which the bookmark bubble should be anchored.
+  views::View* GetBookmarkBubbleAnchor();
 
   // Accessors...
   Browser* browser() const { return browser_; }
@@ -86,20 +90,35 @@ class ToolbarView : public views::AccessiblePaneView,
   virtual bool SetPaneFocus(View* initial_focus) OVERRIDE;
   virtual void GetAccessibleState(ui::AccessibleViewState* state) OVERRIDE;
 
-  // Overridden from views::ViewMenuDelegate:
-  virtual void RunMenu(views::View* source, const gfx::Point& pt) OVERRIDE;
+  // Overridden from views::MenuButtonListener:
+  virtual void OnMenuButtonClicked(views::View* source,
+                                   const gfx::Point& point) OVERRIDE;
 
   // Overridden from LocationBarView::Delegate:
-  virtual TabContentsWrapper* GetTabContentsWrapper() const OVERRIDE;
+  virtual content::WebContents* GetWebContents() const OVERRIDE;
   virtual InstantController* GetInstant() OVERRIDE;
+  virtual views::Widget* CreateViewsBubble(
+      views::BubbleDelegateView* bubble_delegate) OVERRIDE;
+  virtual PageActionImageView* CreatePageActionImageView(
+      LocationBarView* owner, ExtensionAction* action) OVERRIDE;
+  virtual ContentSettingBubbleModelDelegate*
+      GetContentSettingBubbleModelDelegate() OVERRIDE;
+  virtual void ShowPageInfo(content::WebContents* web_contents,
+                            const GURL& url,
+                            const content::SSLStatus& ssl,
+                            bool show_history) OVERRIDE;
   virtual void OnInputInProgress(bool in_progress) OVERRIDE;
 
-  // Overridden from CommandUpdater::CommandObserver:
+  // Overridden from CommandObserver:
   virtual void EnabledStateChangedForCommand(int id, bool enabled) OVERRIDE;
 
-  // Overridden from views::BaseButton::ButtonListener:
-  virtual void ButtonPressed(views::Button* sender, const views::Event& event)
-      OVERRIDE;
+  // Overridden from views::ButtonListener:
+  virtual void ButtonPressed(views::Button* sender,
+                             const ui::Event& event) OVERRIDE;
+
+  // Overridden from views::WidgetObserver:
+  virtual void OnWidgetVisibilityChanged(views::Widget* widget,
+                                         bool visible) OVERRIDE;
 
   // Overridden from content::NotificationObserver:
   virtual void Observe(int type,
@@ -113,16 +132,20 @@ class ToolbarView : public views::AccessiblePaneView,
   // Overridden from views::View:
   virtual gfx::Size GetPreferredSize() OVERRIDE;
   virtual void Layout() OVERRIDE;
+  virtual bool HitTestRect(const gfx::Rect& rect) const OVERRIDE;
   virtual void OnPaint(gfx::Canvas* canvas) OVERRIDE;
   virtual bool GetDropFormats(
       int* formats,
       std::set<OSExchangeData::CustomFormat>* custom_formats) OVERRIDE;
   virtual bool CanDrop(const ui::OSExchangeData& data) OVERRIDE;
-  virtual int OnDragUpdated(const views::DropTargetEvent& event) OVERRIDE;
-  virtual int OnPerformDrop(const views::DropTargetEvent& event) OVERRIDE;
+  virtual int OnDragUpdated(const ui::DropTargetEvent& event) OVERRIDE;
+  virtual int OnPerformDrop(const ui::DropTargetEvent& event) OVERRIDE;
   virtual void OnThemeChanged() OVERRIDE;
   virtual std::string GetClassName() const OVERRIDE;
   virtual bool AcceleratorPressed(const ui::Accelerator& acc) OVERRIDE;
+
+  // Whether the wrench/hotdogs menu is currently showing.
+  bool IsWrenchMenuShowing() const;
 
   // The apparent horizontal space between most items, and the vertical padding
   // above and below them.
@@ -137,8 +160,15 @@ class ToolbarView : public views::AccessiblePaneView,
   virtual void RemovePaneFocus() OVERRIDE;
 
  private:
+  // Types of display mode this toolbar can have.
+  enum DisplayMode {
+    DISPLAYMODE_NORMAL,       // Normal toolbar with buttons, etc.
+    DISPLAYMODE_LOCATION      // Slimline toolbar showing only compact location
+                              // bar, used for popups.
+  };
+
   // Returns true if we should show the upgrade recommended dot.
-  bool IsUpgradeRecommended();
+  bool ShouldShowUpgradeRecommended();
 
   // Returns true if we should show the background page badge.
   bool ShouldShowBackgroundPageBadge();
@@ -152,13 +182,7 @@ class ToolbarView : public views::AccessiblePaneView,
   // Loads the images for all the child views.
   void LoadImages();
 
-  // Types of display mode this toolbar can have.
-  enum DisplayMode {
-    DISPLAYMODE_NORMAL,       // Normal toolbar with buttons, etc.
-    DISPLAYMODE_LOCATION      // Slimline toolbar showing only compact location
-                              // bar, used for popups.
-  };
-  bool IsDisplayModeNormal() const {
+  bool is_display_mode_normal() const {
     return display_mode_ == DISPLAYMODE_NORMAL;
   }
 
@@ -168,12 +192,7 @@ class ToolbarView : public views::AccessiblePaneView,
   // Updates the badge and the accessible name of the app menu (Wrench).
   void UpdateAppMenuState();
 
-  // Gets a badge for the wrench icon corresponding to the number of
-  // unacknowledged background pages in the system.
-  SkBitmap GetBackgroundPageBadge();
-
-  scoped_ptr<BackForwardMenuModel> back_menu_model_;
-  scoped_ptr<BackForwardMenuModel> forward_menu_model_;
+  void OnShowHomeButtonChanged();
 
   // The model that contains the security level, text, icon to display...
   ToolbarModel* model_;
@@ -188,16 +207,19 @@ class ToolbarView : public views::AccessiblePaneView,
   views::MenuButton* app_menu_;
   Browser* browser_;
 
-  // Contents of the profiles menu to populate with profile names.
-  scoped_ptr<ui::SimpleMenuModel> profiles_menu_contents_;
-
   // Controls whether or not a home button should be shown on the toolbar.
   BooleanPrefMember show_home_button_;
+
+  // A pref that counts how often the bubble has been shown.
+  IntegerPrefMember sideload_wipeout_bubble_shown_;
 
   // The display mode used when laying out the toolbar.
   DisplayMode display_mode_;
 
-  // Wrench menu.
+  // Wrench model and menu.
+  // Note that the menu should be destroyed before the model it uses, so the
+  // menu should be listed later.
+  scoped_ptr<WrenchMenuModel> wrench_menu_model_;
   scoped_ptr<WrenchMenu> wrench_menu_;
 
   // A list of listeners to call when the menu opens.

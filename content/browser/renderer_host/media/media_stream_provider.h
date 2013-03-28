@@ -1,4 +1,4 @@
-// Copyright (c) 2011 The Chromium Authors. All rights reserved.
+// Copyright (c) 2012 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -15,10 +15,15 @@
 #include <list>
 #include <string>
 
+#include "base/memory/ref_counted.h"
 #include "content/common/content_export.h"
 #include "content/common/media/media_stream_options.h"
 
-namespace media_stream {
+namespace base {
+class MessageLoopProxy;
+}
+
+namespace content {
 
 enum MediaStreamProviderError {
   kMediaStreamOk = 0,
@@ -57,10 +62,12 @@ class CONTENT_EXPORT MediaStreamProviderListener {
 };
 
 // Implemented by a manager class providing captured media.
-class CONTENT_EXPORT MediaStreamProvider {
+class CONTENT_EXPORT MediaStreamProvider
+    : public base::RefCountedThreadSafe<MediaStreamProvider> {
  public:
-  // Registers a listener, only one listener is allowed.
-  virtual void Register(MediaStreamProviderListener* listener) = 0;
+  // Registers a listener and a device message loop.
+  virtual void Register(MediaStreamProviderListener* listener,
+                        base::MessageLoopProxy* device_thread_loop) = 0;
 
   // Unregisters the previously registered listener.
   virtual void Unregister() = 0;
@@ -78,9 +85,10 @@ class CONTENT_EXPORT MediaStreamProvider {
   virtual void Close(int capture_session_id) = 0;
 
  protected:
+  friend class base::RefCountedThreadSafe<MediaStreamProvider>;
   virtual ~MediaStreamProvider() {}
 };
 
-}  // namespace media_stream
+}  // namespace content
 
 #endif  // CONTENT_BROWSER_RENDERER_HOST_MEDIA_MEDIA_STREAM_PROVIDER_H_

@@ -4,32 +4,36 @@
 
 #include "chrome/utility/chrome_content_utility_client.h"
 
-#include "base/bind.h"
 #include "base/base64.h"
+#include "base/bind.h"
 #include "base/command_line.h"
+#include "base/file_util.h"
 #include "base/json/json_reader.h"
+#include "base/memory/ref_counted.h"
+#include "base/message_loop_proxy.h"
 #include "base/threading/thread.h"
-#include "chrome/browser/importer/external_process_importer_bridge.h"
 #include "chrome/browser/importer/importer.h"
 #include "chrome/browser/importer/profile_import_process_messages.h"
+#include "chrome/common/child_process_logging.h"
 #include "chrome/common/chrome_paths.h"
 #include "chrome/common/chrome_utility_messages.h"
 #include "chrome/common/extensions/extension.h"
 #include "chrome/common/extensions/extension_l10n_util.h"
-#include "chrome/common/extensions/extension_unpacker.h"
+#include "chrome/common/extensions/unpacker.h"
 #include "chrome/common/extensions/update_manifest.h"
 #include "chrome/common/web_resource/web_resource_unpacker.h"
+#include "chrome/common/zip.h"
+#include "chrome/utility/profile_import_handler.h"
 #include "content/public/utility/utility_thread.h"
 #include "printing/backend/print_backend.h"
 #include "printing/page_range.h"
 #include "third_party/skia/include/core/SkBitmap.h"
 #include "ui/base/ui_base_switches.h"
+#include "ui/gfx/codec/jpeg_codec.h"
 #include "ui/gfx/rect.h"
 #include "webkit/glue/image_decoder.h"
 
 #if defined(OS_WIN)
-#include "base/file_util.h"
-#include "base/memory/scoped_ptr.h"
 #include "base/path_service.h"
 #include "base/win/iat_patch_function.h"
 #include "base/win/scoped_handle.h"
@@ -40,7 +44,10 @@
 
 namespace chrome {
 
-ChromeContentUtilityClient::ChromeContentUtilityClient() : items_to_import_(0) {
+ChromeContentUtilityClient::ChromeContentUtilityClient() {
+#if !defined(OS_ANDROID)
+  import_handler_.reset(new ProfileImportHandler());
+#endif
 }
 
 ChromeContentUtilityClient::~ChromeContentUtilityClient() {
@@ -77,19 +84,24 @@ bool ChromeContentUtilityClient::OnMessageReceived(
     IPC_MESSAGE_HANDLER(ChromeUtilityMsg_DecodeImageBase64, OnDecodeImageBase64)
     IPC_MESSAGE_HANDLER(ChromeUtilityMsg_RenderPDFPagesToMetafile,
                         OnRenderPDFPagesToMetafile)
+    IPC_MESSAGE_HANDLER(ChromeUtilityMsg_RobustJPEGDecodeImage,
+                        OnRobustJPEGDecodeImage)
     IPC_MESSAGE_HANDLER(ChromeUtilityMsg_ParseJSON, OnParseJSON)
     IPC_MESSAGE_HANDLER(ChromeUtilityMsg_GetPrinterCapsAndDefaults,
                         OnGetPrinterCapsAndDefaults)
-#if !defined(OS_ANDROID)
-    IPC_MESSAGE_HANDLER(ProfileImportProcessMsg_StartImport,
-                        OnImportStart)
-    IPC_MESSAGE_HANDLER(ProfileImportProcessMsg_CancelImport,
-                        OnImportCancel)
-    IPC_MESSAGE_HANDLER(ProfileImportProcessMsg_ReportImportItemFinished,
-                        OnImportItemFinished)
-#endif
+
+#if defined(OS_CHROMEOS)
+    IPC_MESSAGE_HANDLER(ChromeUtilityMsg_CreateZipFile, OnCreateZipFile)
+#endif  // defined(OS_CHROMEOS)
+
     IPC_MESSAGE_UNHANDLED(handled = false)
   IPC_END_MESSAGE_MAP()
+
+#if !defined(OS_ANDROID)
+  if (!handled)
+    handled = import_handler_->OnMessageReceived(message);
+#endif
+
   return handled;
 }
 
@@ -102,12 +114,12 @@ void ChromeContentUtilityClient::OnUnpackExtension(
     const std::string& extension_id,
     int location,
     int creation_flags) {
-  CHECK(location > Extension::INVALID);
-  CHECK(location < Extension::NUM_LOCATIONS);
-  ExtensionUnpacker unpacker(
+  CHECK(location > extensions::Extension::INVALID);
+  CHECK(location < extensions::Extension::NUM_LOCATIONS);
+  extensions::Unpacker unpacker(
       extension_path,
       extension_id,
-      static_cast<Extension::Location>(location),
+      static_cast<extensions::Extension::Location>(location),
       creation_flags);
   if (unpacker.Run() && unpacker.DumpImagesToFile() &&
       unpacker.DumpMessageCatalogsToFile()) {
@@ -179,6 +191,34 @@ void ChromeContentUtilityClient::OnDecodeImageBase64(
 
   OnDecodeImage(decoded_vector);
 }
+
+#if defined(OS_CHROMEOS)
+void ChromeContentUtilityClient::OnCreateZipFile(
+    const FilePath& src_dir,
+    const std::vector<FilePath>& src_relative_paths,
+    const base::FileDescriptor& dest_fd) {
+  bool succeeded = true;
+
+  // Check sanity of source relative paths. Reject if path is absolute or
+  // contains any attempt to reference a parent directory ("../" tricks).
+  for (std::vector<FilePath>::const_iterator iter = src_relative_paths.begin();
+      iter != src_relative_paths.end(); ++iter) {
+    if (iter->IsAbsolute() || iter->ReferencesParent()) {
+      succeeded = false;
+      break;
+    }
+  }
+
+  if (succeeded)
+    succeeded = zip::ZipFiles(src_dir, src_relative_paths, dest_fd.fd);
+
+  if (succeeded)
+    Send(new ChromeUtilityHostMsg_CreateZipFile_Succeeded());
+  else
+    Send(new ChromeUtilityHostMsg_CreateZipFile_Failed());
+  content::UtilityThread::Get()->ReleaseProcessIfNeeded();
+}
+#endif  // defined(OS_CHROMEOS)
 
 void ChromeContentUtilityClient::OnRenderPDFPagesToMetafile(
     base::PlatformFile pdf_file,
@@ -353,12 +393,28 @@ bool ChromeContentUtilityClient::RenderPDFToWinMetafile(
 }
 #endif  // defined(OS_WIN)
 
+void ChromeContentUtilityClient::OnRobustJPEGDecodeImage(
+    const std::vector<unsigned char>& encoded_data) {
+  // Our robust jpeg decoding is using IJG libjpeg.
+  if (gfx::JPEGCodec::JpegLibraryVariant() == gfx::JPEGCodec::IJG_LIBJPEG) {
+    scoped_ptr<SkBitmap> decoded_image(gfx::JPEGCodec::Decode(
+        &encoded_data[0], encoded_data.size()));
+    if (!decoded_image.get() || decoded_image->empty()) {
+      Send(new ChromeUtilityHostMsg_DecodeImage_Failed());
+    } else {
+      Send(new ChromeUtilityHostMsg_DecodeImage_Succeeded(*decoded_image));
+    }
+  } else {
+    Send(new ChromeUtilityHostMsg_DecodeImage_Failed());
+  }
+  content::UtilityThread::Get()->ReleaseProcessIfNeeded();
+}
 
 void ChromeContentUtilityClient::OnParseJSON(const std::string& json) {
   int error_code;
   std::string error;
-  Value* value =
-      base::JSONReader::ReadAndReturnError(json, false, &error_code, &error);
+  Value* value = base::JSONReader::ReadAndReturnError(
+      json, base::JSON_PARSE_RFC, &error_code, &error);
   if (value) {
     ListValue wrapper;
     wrapper.Append(value);
@@ -371,68 +427,24 @@ void ChromeContentUtilityClient::OnParseJSON(const std::string& json) {
 
 void ChromeContentUtilityClient::OnGetPrinterCapsAndDefaults(
     const std::string& printer_name) {
+#if defined(ENABLE_PRINTING)
   scoped_refptr<printing::PrintBackend> print_backend =
       printing::PrintBackend::CreateInstance(NULL);
   printing::PrinterCapsAndDefaults printer_info;
+
+  child_process_logging::ScopedPrinterInfoSetter prn_info(
+      print_backend->GetPrinterDriverInfo(printer_name));
+
   if (print_backend->GetPrinterCapsAndDefaults(printer_name, &printer_info)) {
     Send(new ChromeUtilityHostMsg_GetPrinterCapsAndDefaults_Succeeded(
         printer_name, printer_info));
-  } else {
+  } else
+#endif
+  {
     Send(new ChromeUtilityHostMsg_GetPrinterCapsAndDefaults_Failed(
         printer_name));
   }
   content::UtilityThread::Get()->ReleaseProcessIfNeeded();
 }
-
-#if !defined(OS_ANDROID)
-void ChromeContentUtilityClient::OnImportStart(
-    const importer::SourceProfile& source_profile,
-    uint16 items,
-    const DictionaryValue& localized_strings) {
-  bridge_ = new ExternalProcessImporterBridge(
-      localized_strings, content::UtilityThread::Get());
-  importer_ = importer::CreateImporterByType(source_profile.importer_type);
-  if (!importer_) {
-    Send(new ProfileImportProcessHostMsg_Import_Finished(false,
-        "Importer could not be created."));
-    return;
-  }
-
-  items_to_import_ = items;
-
-  // Create worker thread in which importer runs.
-  import_thread_.reset(new base::Thread("import_thread"));
-  base::Thread::Options options;
-  options.message_loop_type = MessageLoop::TYPE_IO;
-  if (!import_thread_->StartWithOptions(options)) {
-    NOTREACHED();
-    ImporterCleanup();
-  }
-  import_thread_->message_loop()->PostTask(
-      FROM_HERE, base::Bind(&Importer::StartImport, importer_.get(),
-                            source_profile, items, bridge_));
-}
-
-void ChromeContentUtilityClient::OnImportCancel() {
-  ImporterCleanup();
-}
-
-void ChromeContentUtilityClient::OnImportItemFinished(uint16 item) {
-  items_to_import_ ^= item;  // Remove finished item from mask.
-  // If we've finished with all items, notify the browser process.
-  if (items_to_import_ == 0) {
-    Send(new ProfileImportProcessHostMsg_Import_Finished(true, ""));
-    ImporterCleanup();
-  }
-}
-
-void ChromeContentUtilityClient::ImporterCleanup() {
-  importer_->Cancel();
-  importer_ = NULL;
-  bridge_ = NULL;
-  import_thread_.reset();
-  content::UtilityThread::Get()->ReleaseProcessIfNeeded();
-}
-#endif
 
 }  // namespace chrome

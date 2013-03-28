@@ -1,4 +1,4 @@
-// Copyright (c) 2011 The Chromium Authors. All rights reserved.
+// Copyright (c) 2012 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -80,7 +80,7 @@ void DetectFirefoxProfiles(std::vector<importer::SourceProfile*>* profiles) {
   }
 
   importer::SourceProfile* firefox = new importer::SourceProfile;
-  firefox->importer_name = l10n_util::GetStringUTF16(IDS_IMPORT_FROM_FIREFOX);
+  firefox->importer_name = GetFirefoxImporterName(app_path);
   firefox->importer_type = firefox_type;
   firefox->source_path = profile_path;
 #if defined(OS_WIN)
@@ -93,6 +93,7 @@ void DetectFirefoxProfiles(std::vector<importer::SourceProfile*>* profiles) {
   profiles->push_back(firefox);
 }
 
+#if defined(OS_WIN)
 void DetectGoogleToolbarProfiles(
     std::vector<importer::SourceProfile*>* profiles,
     scoped_refptr<net::URLRequestContextGetter> request_context_getter) {
@@ -109,6 +110,7 @@ void DetectGoogleToolbarProfiles(
   google_toolbar->request_context_getter = request_context_getter;
   profiles->push_back(google_toolbar);
 }
+#endif
 
 }  // namespace
 
@@ -206,7 +208,7 @@ void ImporterList::DetectSourceProfilesWorker() {
         FROM_HERE,
         base::Bind(&ImporterList::SourceProfilesLoaded, this, profiles));
   } else {
-    source_profiles_->assign(profiles.begin(), profiles.end());
+    source_profiles_.assign(profiles.begin(), profiles.end());
     source_profiles_loaded_ = true;
   }
 }
@@ -221,7 +223,7 @@ void ImporterList::SourceProfilesLoaded(
   BrowserThread::GetCurrentThreadIdentifier(&current_thread_id);
   DCHECK_EQ(current_thread_id, source_thread_id_);
 
-  source_profiles_->assign(profiles.begin(), profiles.end());
+  source_profiles_.assign(profiles.begin(), profiles.end());
   source_profiles_loaded_ = true;
   source_thread_id_ = BrowserThread::UI;
 

@@ -1,4 +1,4 @@
-// Copyright (c) 2011 The Chromium Authors. All rights reserved.
+// Copyright (c) 2012 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -20,10 +20,13 @@
 #include "chrome/browser/importer/importer_host.h"
 #include "chrome/browser/importer/importer_list.h"
 #include "chrome/browser/profiles/profile.h"
+#include "chrome/browser/ui/browser_finder.h"
 #include "content/public/browser/web_ui.h"
 #include "grit/chromium_strings.h"
 #include "grit/generated_resources.h"
 #include "ui/base/l10n/l10n_util.h"
+
+namespace options {
 
 ImportDataHandler::ImportDataHandler() : importer_host_(NULL),
                                          import_did_succeed_(false) {
@@ -59,7 +62,7 @@ void ImportDataHandler::GetLocalizedValues(DictionaryValue* localized_strings) {
                 IDS_IMPORT_SETTINGS_TITLE);
 }
 
-void ImportDataHandler::Initialize() {
+void ImportDataHandler::InitializeHandler() {
   Profile* profile = Profile::FromWebUI(web_ui());
   importer_list_ = new ImporterList(profile->GetRequestContext());
   importer_list_->DetectSourceProfiles(this);
@@ -115,6 +118,8 @@ void ImportDataHandler::ImportData(const ListValue* args) {
     importer_host_ = new ImporterHost;
 #endif
     importer_host_->SetObserver(this);
+    importer_host_->set_browser(
+        chrome::FindBrowserWithWebContents(web_ui()->GetWebContents()));
     Profile* profile = Profile::FromWebUI(web_ui());
     importer_host_->StartImportSettings(source_profile, profile,
                                         import_services,
@@ -126,6 +131,13 @@ void ImportDataHandler::ImportData(const ListValue* args) {
 }
 
 void ImportDataHandler::OnSourceProfilesLoaded() {
+  InitializePage();
+}
+
+void ImportDataHandler::InitializePage() {
+  if (!importer_list_->source_profiles_loaded())
+    return;
+
   ListValue browser_profiles;
   for (size_t i = 0; i < importer_list_->count(); ++i) {
     const importer::SourceProfile& source_profile =
@@ -176,3 +188,5 @@ void ImportDataHandler::ImportEnded() {
     web_ui()->CallJavascriptFunction("ImportDataOverlay.dismiss");
   }
 }
+
+}  // namespace options

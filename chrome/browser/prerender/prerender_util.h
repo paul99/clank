@@ -8,6 +8,10 @@
 #include "base/basictypes.h"
 #include "googleurl/src/gurl.h"
 
+namespace net {
+class URLRequest;
+}
+
 namespace prerender {
 
 // ID indicating that no experiment is active.
@@ -33,6 +37,20 @@ bool IsGoogleSearchResultURL(const GURL& url);
 // Returns true iff the URL provided is Web URL, using the scheme http
 // or https.
 bool IsWebURL(const GURL& url);
+
+// The prerender contents of some experiments should never be swapped in
+// by pretending to never match on the URL.  This function will return true
+// iff this is the case for the experiment_id specified.
+bool IsNoSwapInExperiment(uint8 experiment_id);
+
+// The prerender contents of some experiments should behave identical to the
+// control group, regardless of the field trial.  This function will return true
+// iff this is the case for the experiment_id specified.
+bool IsControlGroupExperiment(uint8 experiment_id);
+
+// Static method gathering stats about a URLRequest for which a response has
+// just started.
+void URLRequestResponseStarted(net::URLRequest* request);
 
 }  // namespace prerender
 

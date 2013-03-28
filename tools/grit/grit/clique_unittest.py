@@ -1,5 +1,5 @@
-#!/usr/bin/python2.4
-# Copyright (c) 2011 The Chromium Authors. All rights reserved.
+#!/usr/bin/env python
+# Copyright (c) 2012 The Chromium Authors. All rights reserved.
 # Use of this source code is governed by a BSD-style license that can be
 # found in the LICENSE file.
 
@@ -8,7 +8,7 @@
 import os
 import sys
 if __name__ == '__main__':
-  sys.path.append(os.path.join(os.path.dirname(sys.argv[0]), '..'))
+  sys.path.append(os.path.join(os.path.dirname(__file__), '..'))
 
 import re
 import StringIO
@@ -88,8 +88,8 @@ class MessageCliqueUnittest(unittest.TestCase):
     self.failUnless(count_best_cliques == 5)
 
   def testAllInUberClique(self):
-    resources = grd_reader.Parse(util.WrapInputStream(
-      StringIO.StringIO('''<?xml version="1.0" encoding="UTF-8"?>
+    resources = grd_reader.Parse(
+        StringIO.StringIO(u'''<?xml version="1.0" encoding="UTF-8"?>
 <grit latest_public_release="2" source_lang_id="en-US" current_release="3" base_dir=".">
   <release seq="3">
     <messages>
@@ -102,8 +102,9 @@ class MessageCliqueUnittest(unittest.TestCase):
       <structure type="tr_html" name="ID_HTML" file="grit/testdata/simple.html" />
     </structures>
   </release>
-</grit>''')), util.PathFromRoot('.'))
-    resources.RunGatherers(True)
+</grit>'''), util.PathFromRoot('.'))
+    resources.SetOutputLanguage('en')
+    resources.RunGatherers()
     content_list = []
     for clique_list in resources.UberClique().cliques_.values():
       for clique in clique_list:
@@ -114,16 +115,16 @@ class MessageCliqueUnittest(unittest.TestCase):
 
   def testCorrectExceptionIfWrongEncodingOnResourceFile(self):
     '''This doesn't really belong in this unittest file, but what the heck.'''
-    resources = grd_reader.Parse(util.WrapInputStream(
-      StringIO.StringIO('''<?xml version="1.0" encoding="UTF-8"?>
+    resources = grd_reader.Parse(
+        StringIO.StringIO(u'''<?xml version="1.0" encoding="UTF-8"?>
 <grit latest_public_release="2" source_lang_id="en-US" current_release="3" base_dir=".">
   <release seq="3">
     <structures>
       <structure type="dialog" name="IDD_ABOUTBOX" file="grit/testdata/klonk.rc" />
     </structures>
   </release>
-</grit>''')), util.PathFromRoot('.'))
-    self.assertRaises(exception.SectionNotFound, resources.RunGatherers, True)
+</grit>'''), util.PathFromRoot('.'))
+    self.assertRaises(exception.SectionNotFound, resources.RunGatherers)
 
   def testSemiIdenticalCliques(self):
     messages = [
@@ -187,6 +188,21 @@ class MessageCliqueUnittest(unittest.TestCase):
     translation = tclib.Translation(id=message.GetId(), text='Bilingo bolongo')
     c.AddTranslation(translation, 'fr')
     self.failUnless(c.MessageForLanguage('fr').GetRealContent().startswith('jjj'))
+
+  def testWhitespaceMessagesAreNontranslateable(self):
+    factory = clique.UberClique()
+
+    message = tclib.Message(text=' \t')
+    c = factory.MakeClique(message, translateable=True)
+    self.failIf(c.IsTranslateable())
+
+    message = tclib.Message(text='\n \n ')
+    c = factory.MakeClique(message, translateable=True)
+    self.failIf(c.IsTranslateable())
+
+    message = tclib.Message(text='\n hello')
+    c = factory.MakeClique(message, translateable=True)
+    self.failUnless(c.IsTranslateable())
 
 
 class DummyCustomType(clique.CustomType):

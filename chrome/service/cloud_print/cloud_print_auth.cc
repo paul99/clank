@@ -1,4 +1,4 @@
-// Copyright (c) 2011 The Chromium Authors. All rights reserved.
+// Copyright (c) 2012 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -6,18 +6,19 @@
 
 #include "base/bind.h"
 #include "base/string_util.h"
-#include "chrome/common/net/gaia/gaia_urls.h"
-#include "chrome/service/cloud_print/cloud_print_consts.h"
-#include "chrome/service/cloud_print/cloud_print_helpers.h"
+#include "chrome/common/cloud_print/cloud_print_constants.h"
+#include "chrome/common/cloud_print/cloud_print_helpers.h"
 #include "chrome/service/cloud_print/cloud_print_token_store.h"
 #include "chrome/service/gaia/service_gaia_authenticator.h"
 #include "chrome/service/net/service_url_request_context.h"
 #include "chrome/service/service_process.h"
+#include "google_apis/gaia/gaia_urls.h"
+
+namespace cloud_print {
 
 CloudPrintAuth::CloudPrintAuth(
     Client* client,
     const GURL& cloud_print_server_url,
-    const base::DictionaryValue* print_sys_settings,
     const gaia::OAuthClientInfo& oauth_client_info,
     const std::string& proxy_id)
       : client_(client),
@@ -25,13 +26,6 @@ CloudPrintAuth::CloudPrintAuth(
         cloud_print_server_url_(cloud_print_server_url),
         proxy_id_(proxy_id) {
   DCHECK(client);
-  if (print_sys_settings) {
-    // It is possible to have no print settings specified.
-    print_system_settings_.reset(print_sys_settings->DeepCopy());
-  }
-}
-
-CloudPrintAuth::~CloudPrintAuth() {
 }
 
 void CloudPrintAuth::AuthenticateWithLsid(
@@ -73,10 +67,9 @@ void CloudPrintAuth::AuthenticateWithToken(
   client_login_token_ = cloud_print_token;
 
   // We need to get the credentials of the robot here.
-  GURL get_authcode_url =
-      CloudPrintHelpers::GetUrlForGetAuthCode(cloud_print_server_url_,
-                                              oauth_client_info_.client_id,
-                                              proxy_id_);
+  GURL get_authcode_url = GetUrlForGetAuthCode(cloud_print_server_url_,
+                                               oauth_client_info_.client_id,
+                                               proxy_id_);
   request_ = new CloudPrintURLFetcher;
   request_->StartGetRequest(get_authcode_url,
                             this,
@@ -137,8 +130,8 @@ void CloudPrintAuth::OnRefreshTokenResponse(const std::string& access_token,
   // Schedule a task to refresh the access token again when it is about to
   // expire.
   DCHECK(expires_in_seconds > kTokenRefreshGracePeriodSecs);
-  int64 refresh_delay =
-      (expires_in_seconds - kTokenRefreshGracePeriodSecs)*1000;
+  base::TimeDelta refresh_delay = base::TimeDelta::FromSeconds(
+      expires_in_seconds - kTokenRefreshGracePeriodSecs);
   MessageLoop::current()->PostDelayedTask(
       FROM_HERE, base::Bind(&CloudPrintAuth::RefreshAccessToken, this),
       refresh_delay);
@@ -158,7 +151,7 @@ void CloudPrintAuth::OnNetworkError(int response_code) {
 }
 
 CloudPrintURLFetcher::ResponseAction CloudPrintAuth::HandleJSONData(
-    const content::URLFetcher* source,
+    const net::URLFetcher* source,
     const GURL& url,
     base::DictionaryValue* json_data,
     bool succeeded) {
@@ -203,3 +196,6 @@ std::string CloudPrintAuth::GetAuthHeader() {
   return header;
 }
 
+CloudPrintAuth::~CloudPrintAuth() {}
+
+}  // namespace cloud_print

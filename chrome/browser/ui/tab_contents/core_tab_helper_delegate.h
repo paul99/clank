@@ -1,25 +1,35 @@
-// Copyright (c) 2011 The Chromium Authors. All rights reserved.
+// Copyright (c) 2012 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
 #ifndef CHROME_BROWSER_UI_TAB_CONTENTS_CORE_TAB_HELPER_DELEGATE_H_
 #define CHROME_BROWSER_UI_TAB_CONTENTS_CORE_TAB_HELPER_DELEGATE_H_
-#pragma once
 
 #include "base/basictypes.h"
 
-class TabContentsWrapper;
+namespace content {
+class WebContents;
+}
 
-// Objects implement this interface to get notified about changes in the
-// TabContentsWrapper and to provide necessary functionality.
+// Objects implement this interface to get notified about changes in a
+// WebContents and to provide necessary functionality.
 //
-// This is considered part of the TabContentsWrapper "core" interface. If a
-// piece of code interacts with TabContentWrappers, it is guaranteed that it
-// will need to handle all of these callbacks.
+// This is the catch-all interface for holding additions to WebContents that are
+// needed when a WebContents is promoted to being a tab contents, but that
+// don't cleanly fit elsewhere.
 class CoreTabHelperDelegate {
  public:
-  virtual void SwapTabContents(TabContentsWrapper* old_tc,
-                               TabContentsWrapper* new_tc) = 0;
+  // The caller is responsible for deleting |old_contents|.
+  virtual void SwapTabContents(content::WebContents* old_contents,
+                               content::WebContents* new_contents);
+
+  // Whether the specified WebContents can be reloaded.
+  // Reloading can be disabled e.g. for the DevTools window.
+  virtual bool CanReloadContents(content::WebContents* web_contents) const;
+
+  // Whether the specified WebContents can be saved.
+  // Saving can be disabled e.g. for the DevTools window.
+  virtual bool CanSaveContents(content::WebContents* web_contents) const;
 
  protected:
   virtual ~CoreTabHelperDelegate();

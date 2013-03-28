@@ -15,6 +15,8 @@
 //            v                  IPC              v
 //  P2PSocketDispatcherHost  <--------->  P2PSocketDispatcher
 //
+// P2PSocketDispatcher receives and dispatches messages on the
+// IO thread.
 
 #ifndef CONTENT_RENDERER_P2P_SOCKET_DISPATCHER_H_
 #define CONTENT_RENDERER_P2P_SOCKET_DISPATCHER_H_
@@ -28,10 +30,8 @@
 #include "base/synchronization/lock.h"
 #include "content/common/content_export.h"
 #include "content/common/p2p_sockets.h"
-#include "content/public/renderer/render_view_observer.h"
+#include "ipc/ipc_channel_proxy.h"
 #include "net/base/net_util.h"
-
-class RenderViewImpl;
 
 namespace base {
 class MessageLoopProxy;
@@ -41,49 +41,50 @@ namespace net {
 class IPEndPoint;
 }  // namespace net
 
+namespace webkit_glue {
+class NetworkListObserver;
+}  // webkit_glue
+
 namespace content {
 
+class RenderViewImpl;
 class P2PHostAddressRequest;
 class P2PSocketClient;
 
-// P2PSocketDispatcher works on the renderer thread. It dispatches all
-// messages on that thread, and all its methods must be called on the
-// same thread.
-class CONTENT_EXPORT P2PSocketDispatcher : public content::RenderViewObserver {
+class CONTENT_EXPORT P2PSocketDispatcher
+    : public IPC::ChannelProxy::MessageFilter {
  public:
-  class NetworkListObserver {
-   public:
-    virtual ~NetworkListObserver() { }
-
-    virtual void OnNetworkListChanged(
-        const net::NetworkInterfaceList& list) = 0;
-
-   protected:
-    NetworkListObserver() { }
-
-   private:
-    DISALLOW_COPY_AND_ASSIGN(NetworkListObserver);
-  };
-
-  explicit P2PSocketDispatcher(RenderViewImpl* render_view);
-  virtual ~P2PSocketDispatcher();
+  P2PSocketDispatcher(base::MessageLoopProxy* ipc_message_loop);
 
   // Add a new network list observer. Each observer is called
-  // immidiately after its't registered and then later whenever
-  // network configuration changes.
-  void AddNetworkListObserver(NetworkListObserver* network_list_observer);
+  // immidiately after it is registered and then later whenever
+  // network configuration changes. Can be called on any thread. The
+  // observer is always called on the thread it was added.
+  void AddNetworkListObserver(
+      webkit_glue::NetworkListObserver* network_list_observer);
 
-  // Removes network list observer.
-  void RemoveNetworkListObserver(NetworkListObserver* network_list_observer);
+  // Removes network list observer. Must be called on the thread on
+  // which the observer was added.
+  void RemoveNetworkListObserver(
+      webkit_glue::NetworkListObserver* network_list_observer);
 
-  // RenderViewObserver overrides.
-  virtual bool OnMessageReceived(const IPC::Message& message) OVERRIDE;
+ protected:
+  virtual ~P2PSocketDispatcher();
 
  private:
   friend class P2PHostAddressRequest;
   friend class P2PSocketClient;
-  class AsyncMessageSender;
 
+  // Send a message asynchronously.
+  virtual void Send(IPC::Message* message);
+
+  // IPC::ChannelProxy::MessageFilter override. Called on IO thread.
+  virtual bool OnMessageReceived(const IPC::Message& message) OVERRIDE;
+  virtual void OnFilterAdded(IPC::Channel* channel) OVERRIDE;
+  virtual void OnFilterRemoved() OVERRIDE;
+  virtual void OnChannelClosing() OVERRIDE;
+
+  // Returns the IO message loop.
   base::MessageLoopProxy* message_loop();
 
   // Called by P2PSocketClient.
@@ -113,10 +114,10 @@ class CONTENT_EXPORT P2PSocketDispatcher : public content::RenderViewObserver {
   IDMap<P2PHostAddressRequest> host_address_requests_;
 
   bool network_notifications_started_;
-  scoped_refptr<ObserverListThreadSafe<NetworkListObserver> >
+  scoped_refptr<ObserverListThreadSafe<webkit_glue::NetworkListObserver> >
       network_list_observers_;
 
-  scoped_refptr<AsyncMessageSender> async_message_sender_;
+  IPC::Channel* channel_;
 
   DISALLOW_COPY_AND_ASSIGN(P2PSocketDispatcher);
 };

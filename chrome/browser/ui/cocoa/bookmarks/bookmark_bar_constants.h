@@ -8,7 +8,8 @@
 
 #ifndef CHROME_BROWSER_UI_COCOA_BOOKMARKS_BOOKMARK_BAR_CONSTANTS_H_
 #define CHROME_BROWSER_UI_COCOA_BOOKMARKS_BOOKMARK_BAR_CONSTANTS_H_
-#pragma once
+
+#include "chrome/browser/ui/bookmarks/bookmark_bar_constants.h"
 
 namespace bookmarks {
 
@@ -22,13 +23,10 @@ const int kVisualHeightOffset = 2;
 // |kVisualHeightOffset|.
 const int kBookmarkBarHeight = 26;
 
-// Our height, when visible in "new tab page" mode.
-const int kNTPBookmarkBarHeight = 40;
-
 // The amount of space between the inner bookmark bar and the outer toolbar on
 // new tab pages.
-const int kNTPBookmarkBarPadding =
-    (kNTPBookmarkBarHeight - (kBookmarkBarHeight + kVisualHeightOffset)) / 2;
+const int kNTPBookmarkBarPadding = (chrome::kNTPBookmarkBarHeight -
+    (kBookmarkBarHeight + kVisualHeightOffset)) / 2;
 
 // The height of buttons in the bookmark bar.
 const int kBookmarkButtonHeight = kBookmarkBarHeight + kVisualHeightOffset;

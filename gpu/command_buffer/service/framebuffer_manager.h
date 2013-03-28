@@ -1,4 +1,4 @@
-// Copyright (c) 2011 The Chromium Authors. All rights reserved.
+// Copyright (c) 2012 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -12,16 +12,17 @@
 #include "gpu/command_buffer/service/gl_utils.h"
 #include "gpu/command_buffer/service/renderbuffer_manager.h"
 #include "gpu/command_buffer/service/texture_manager.h"
+#include "gpu/gpu_export.h"
 
 namespace gpu {
 namespace gles2 {
 
 // This class keeps track of the frambebuffers and their attached renderbuffers
 // so we can correctly clear them.
-class FramebufferManager {
+class GPU_EXPORT FramebufferManager {
  public:
   // Info about Framebuffers currently in the system.
-  class FramebufferInfo : public base::RefCounted<FramebufferInfo> {
+  class GPU_EXPORT FramebufferInfo : public base::RefCounted<FramebufferInfo> {
    public:
     typedef scoped_refptr<FramebufferInfo> Ref;
 
@@ -29,7 +30,6 @@ class FramebufferManager {
      public:
       typedef scoped_refptr<Attachment> Ref;
 
-      virtual ~Attachment() { }
       virtual GLsizei width() const = 0;
       virtual GLsizei height() const = 0;
       virtual GLenum internal_format() const = 0;
@@ -37,22 +37,35 @@ class FramebufferManager {
       virtual bool cleared() const = 0;
       virtual void SetCleared(
           RenderbufferManager* renderbuffer_manager,
-          TextureManager* texture_manager) = 0;
+          TextureManager* texture_manager,
+          bool cleared) = 0;
       virtual bool IsTexture(TextureManager::TextureInfo* texture) const = 0;
       virtual bool IsRenderbuffer(
           RenderbufferManager::RenderbufferInfo* renderbuffer) const = 0;
       virtual bool CanRenderTo() const = 0;
-      virtual void DetachFromFramebuffer() = 0;
+      virtual void DetachFromFramebuffer() const = 0;
       virtual bool ValidForAttachmentType(GLenum attachment_type) = 0;
+      virtual void AddToSignature(
+          TextureManager* texture_manager, std::string* signature) const = 0;
+
+     protected:
+      friend class base::RefCounted<Attachment>;
+      virtual ~Attachment() {}
     };
 
-    explicit FramebufferInfo(GLuint service_id);
+    FramebufferInfo(FramebufferManager* manager, GLuint service_id);
 
     GLuint service_id() const {
       return service_id_;
     }
 
     bool HasUnclearedAttachment(GLenum attachment) const;
+
+    void MarkAttachmentAsCleared(
+      RenderbufferManager* renderbuffer_manager,
+      TextureManager* texture_manager,
+      GLenum attachment,
+      bool cleared);
 
     // Attaches a renderbuffer to a particlar attachment.
     // Pass null to detach.
@@ -75,7 +88,7 @@ class FramebufferManager {
     const Attachment* GetAttachment(GLenum attachment) const;
 
     bool IsDeleted() const {
-      return service_id_ == 0;
+      return deleted_;
     }
 
     void MarkAsValid() {
@@ -99,8 +112,13 @@ class FramebufferManager {
     // means it passed our tests.
     GLenum IsPossiblyComplete() const;
 
+    // Implements optimized glGetFramebufferStatus.
+    GLenum GetStatus(TextureManager* texture_manager, GLenum target) const;
+
     // Check all attachments are cleared
     bool IsCleared() const;
+
+    static void ClearFramebufferCompleteComboMap();
 
    private:
     friend class FramebufferManager;
@@ -112,7 +130,8 @@ class FramebufferManager {
 
     void MarkAttachmentsAsCleared(
       RenderbufferManager* renderbuffer_manager,
-      TextureManager* texture_manager);
+      TextureManager* texture_manager,
+      bool cleared);
 
     void MarkAsComplete(unsigned state_id) {
       framebuffer_complete_state_count_id_ = state_id;
@@ -121,6 +140,11 @@ class FramebufferManager {
     unsigned framebuffer_complete_state_count_id() const {
       return framebuffer_complete_state_count_id_;
     }
+
+    // The managers that owns this.
+    FramebufferManager* manager_;
+
+    bool deleted_;
 
     // Service side framebuffer id.
     GLuint service_id_;
@@ -134,6 +158,11 @@ class FramebufferManager {
     // A map of attachments.
     typedef base::hash_map<GLenum, Attachment::Ref> AttachmentMap;
     AttachmentMap attachments_;
+
+    // A map of successful frame buffer combos. If it's in the map
+    // it should be FRAMEBUFFER_COMPLETE.
+    typedef base::hash_map<std::string, bool> FramebufferComboCompleteMap;
+    static FramebufferComboCompleteMap* framebuffer_combo_complete_map_;
 
     DISALLOW_COPY_AND_ASSIGN(FramebufferInfo);
   };
@@ -172,6 +201,9 @@ class FramebufferManager {
   }
 
  private:
+  void StartTracking(FramebufferInfo* info);
+  void StopTracking(FramebufferInfo* info);
+
   // Info for each framebuffer in the system.
   typedef base::hash_map<GLuint, FramebufferInfo::Ref> FramebufferInfoMap;
   FramebufferInfoMap framebuffer_infos_;
@@ -179,6 +211,12 @@ class FramebufferManager {
   // Incremented anytime anything changes that might effect framebuffer
   // state.
   unsigned framebuffer_state_change_count_;
+
+  // Counts the number of FramebufferInfo allocated with 'this' as its manager.
+  // Allows to check no FramebufferInfo will outlive this.
+  unsigned int framebuffer_info_count_;
+
+  bool have_context_;
 
   DISALLOW_COPY_AND_ASSIGN(FramebufferManager);
 };

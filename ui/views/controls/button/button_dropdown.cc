@@ -1,4 +1,4 @@
-// Copyright (c) 2011 The Chromium Authors. All rights reserved.
+// Copyright (c) 2012 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -35,11 +35,21 @@ const int kMenuTimerDelay = 500;
 ButtonDropDown::ButtonDropDown(ButtonListener* listener, ui::MenuModel* model)
     : ImageButton(listener),
       model_(model),
+      menu_showing_(false),
       y_position_on_lbuttondown_(0),
       ALLOW_THIS_IN_INITIALIZER_LIST(show_menu_factory_(this)) {
+  set_context_menu_controller(this);
 }
 
 ButtonDropDown::~ButtonDropDown() {
+}
+
+void ButtonDropDown::ClearPendingMenu() {
+  show_menu_factory_.InvalidateWeakPtrs();
+}
+
+bool ButtonDropDown::IsMenuShowing() const {
+  return menu_showing_;
 }
 
 ////////////////////////////////////////////////////////////////////////////////
@@ -48,8 +58,9 @@ ButtonDropDown::~ButtonDropDown() {
 //
 ////////////////////////////////////////////////////////////////////////////////
 
-bool ButtonDropDown::OnMousePressed(const MouseEvent& event) {
-  if (enabled() && IsTriggerableEvent(event) && HitTest(event.location())) {
+bool ButtonDropDown::OnMousePressed(const ui::MouseEvent& event) {
+  if (enabled() && ShouldShowMenu() &&
+      IsTriggerableEvent(event) && HitTestPoint(event.location())) {
     // Store the y pos of the mouse coordinates so we can use them later to
     // determine if the user dragged the mouse down (which should pop up the
     // drag down menu immediately, instead of waiting for the timer)
@@ -59,14 +70,13 @@ bool ButtonDropDown::OnMousePressed(const MouseEvent& event) {
     MessageLoop::current()->PostDelayedTask(
         FROM_HERE,
         base::Bind(&ButtonDropDown::ShowDropDownMenu,
-                   show_menu_factory_.GetWeakPtr(),
-                   GetWidget()->GetNativeView()),
-        kMenuTimerDelay);
+                   show_menu_factory_.GetWeakPtr()),
+        base::TimeDelta::FromMilliseconds(kMenuTimerDelay));
   }
   return ImageButton::OnMousePressed(event);
 }
 
-bool ButtonDropDown::OnMouseDragged(const MouseEvent& event) {
+bool ButtonDropDown::OnMouseDragged(const ui::MouseEvent& event) {
   bool result = ImageButton::OnMouseDragged(event);
 
   if (show_menu_factory_.HasWeakPtrs()) {
@@ -75,45 +85,43 @@ bool ButtonDropDown::OnMouseDragged(const MouseEvent& event) {
     // it immediately.
     if (event.y() > y_position_on_lbuttondown_ + GetHorizontalDragThreshold()) {
       show_menu_factory_.InvalidateWeakPtrs();
-      ShowDropDownMenu(GetWidget()->GetNativeView());
+      ShowDropDownMenu();
     }
   }
 
   return result;
 }
 
-void ButtonDropDown::OnMouseReleased(const MouseEvent& event) {
+void ButtonDropDown::OnMouseReleased(const ui::MouseEvent& event) {
   if (IsTriggerableEvent(event) ||
-      (event.IsRightMouseButton() && !HitTest(event.location()))) {
+      (event.IsRightMouseButton() && !HitTestPoint(event.location()))) {
     ImageButton::OnMouseReleased(event);
   }
 
   if (IsTriggerableEvent(event))
     show_menu_factory_.InvalidateWeakPtrs();
-
-  if (enabled() && event.IsRightMouseButton() && HitTest(event.location())) {
-    show_menu_factory_.InvalidateWeakPtrs();
-    ShowDropDownMenu(GetWidget()->GetNativeView());
-  }
 }
 
 std::string ButtonDropDown::GetClassName() const {
   return kViewClassName;
 }
 
-void ButtonDropDown::OnMouseExited(const MouseEvent& event) {
+void ButtonDropDown::OnMouseExited(const ui::MouseEvent& event) {
   // Starting a drag results in a MouseExited, we need to ignore it.
   // A right click release triggers an exit event. We want to
   // remain in a PUSHED state until the drop down menu closes.
-  if (state_ != BS_DISABLED && !InDrag() && state_ != BS_PUSHED)
-    SetState(BS_NORMAL);
+  if (state_ != STATE_DISABLED && !InDrag() && state_ != STATE_PRESSED)
+    SetState(STATE_NORMAL);
 }
 
-void ButtonDropDown::ShowContextMenu(const gfx::Point& p,
-                                     bool is_mouse_gesture) {
-  show_menu_factory_.InvalidateWeakPtrs();
-  ShowDropDownMenu(GetWidget()->GetNativeView());
-  SetState(BS_HOT);
+void ButtonDropDown::OnGestureEvent(ui::GestureEvent* event) {
+  if (menu_showing_) {
+    // While dropdown menu is showing the button should not handle gestures.
+    event->StopPropagation();
+    return;
+  }
+
+  ImageButton::OnGestureEvent(event);
 }
 
 void ButtonDropDown::GetAccessibleState(ui::AccessibleViewState* state) {
@@ -123,14 +131,32 @@ void ButtonDropDown::GetAccessibleState(ui::AccessibleViewState* state) {
   state->state = ui::AccessibilityTypes::STATE_HASPOPUP;
 }
 
-bool ButtonDropDown::ShouldEnterPushedState(const MouseEvent& event) {
-  // Enter PUSHED state on press with Left or Right mouse button. Remain
-  // in this state while the context menu is open.
-  return ((ui::EF_LEFT_MOUSE_BUTTON |
-      ui::EF_RIGHT_MOUSE_BUTTON) & event.flags()) != 0;
+void ButtonDropDown::ShowContextMenuForView(View* source,
+                                            const gfx::Point& point) {
+  if (!enabled())
+    return;
+
+  show_menu_factory_.InvalidateWeakPtrs();
+  ShowDropDownMenu();
 }
 
-void ButtonDropDown::ShowDropDownMenu(gfx::NativeView window) {
+bool ButtonDropDown::ShouldEnterPushedState(const ui::Event& event) {
+  // Enter PUSHED state on press with Left or Right mouse button or on taps.
+  // Remain in this state while the context menu is open.
+  return event.type() == ui::ET_GESTURE_TAP ||
+         event.type() == ui::ET_GESTURE_TAP_DOWN ||
+         (event.IsMouseEvent() && ((ui::EF_LEFT_MOUSE_BUTTON |
+             ui::EF_RIGHT_MOUSE_BUTTON) & event.flags()) != 0);
+}
+
+bool ButtonDropDown::ShouldShowMenu() {
+  return true;
+}
+
+void ButtonDropDown::ShowDropDownMenu() {
+  if (!ShouldShowMenu())
+    return;
+
   gfx::Rect lb = GetLocalBounds();
 
   // Both the menu position and the menu anchor type change if the UI layout
@@ -152,28 +178,36 @@ void ButtonDropDown::ShowDropDownMenu(gfx::NativeView window) {
     menu_position.set_x(left_bound);
 
   // Make the button look depressed while the menu is open.
-  SetState(BS_PUSHED);
+  SetState(STATE_PRESSED);
+
+  menu_showing_ = true;
 
   // Create and run menu.  Display an empty menu if model is NULL.
-  if (model_) {
-    MenuModelAdapter menu_delegate(model_);
+  if (model_.get()) {
+    MenuModelAdapter menu_delegate(model_.get());
     menu_delegate.set_triggerable_event_flags(triggerable_event_flags());
-    MenuRunner runner(menu_delegate.CreateMenu());
-    if (runner.RunMenuAt(GetWidget(), NULL,
-                         gfx::Rect(menu_position, gfx::Size(0, 0)),
-                         MenuItemView::TOPLEFT,
-                         MenuRunner::HAS_MNEMONICS) == MenuRunner::MENU_DELETED)
+    menu_runner_.reset(new MenuRunner(menu_delegate.CreateMenu()));
+    MenuRunner::RunResult result =
+        menu_runner_->RunMenuAt(GetWidget(), NULL,
+                                gfx::Rect(menu_position, gfx::Size(0, 0)),
+                                MenuItemView::TOPLEFT,
+                                MenuRunner::HAS_MNEMONICS);
+    if (result == MenuRunner::MENU_DELETED)
       return;
   } else {
     MenuDelegate menu_delegate;
     MenuItemView* menu = new MenuItemView(&menu_delegate);
-    MenuRunner runner(menu);
-    if (runner.RunMenuAt(GetWidget(), NULL,
-                         gfx::Rect(menu_position, gfx::Size(0, 0)),
-                         views::MenuItemView::TOPLEFT,
-                         MenuRunner::HAS_MNEMONICS) == MenuRunner::MENU_DELETED)
+    menu_runner_.reset(new MenuRunner(menu));
+    MenuRunner::RunResult result =
+        menu_runner_->RunMenuAt(GetWidget(), NULL,
+                                gfx::Rect(menu_position, gfx::Size(0, 0)),
+                                MenuItemView::TOPLEFT,
+                                MenuRunner::HAS_MNEMONICS);
+    if (result == MenuRunner::MENU_DELETED)
       return;
   }
+
+  menu_showing_ = false;
 
   // Need to explicitly clear mouse handler so that events get sent
   // properly after the menu finishes running. If we don't do this, then
@@ -181,8 +215,8 @@ void ButtonDropDown::ShowDropDownMenu(gfx::NativeView window) {
   SetMouseHandler(NULL);
 
   // Set the state back to normal after the drop down menu is closed.
-  if (state_ != BS_DISABLED)
-    SetState(BS_NORMAL);
+  if (state_ != STATE_DISABLED)
+    SetState(STATE_NORMAL);
 }
 
 ////////////////////////////////////////////////////////////////////////////////

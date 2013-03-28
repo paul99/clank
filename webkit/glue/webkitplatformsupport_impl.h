@@ -10,23 +10,24 @@
 #include "base/threading/thread_local_storage.h"
 #include "base/timer.h"
 #include "third_party/WebKit/Source/WebKit/chromium/public/platform/WebKitPlatformSupport.h"
+#include "ui/base/layout.h"
 #include "webkit/glue/resource_loader_bridge.h"
 #include "webkit/glue/webkit_glue_export.h"
 
-#if defined(OS_WIN)
+#if defined(USE_DEFAULT_RENDER_THEME)
+#include "webkit/glue/webthemeengine_impl_default.h"
+#elif defined(OS_WIN)
 #include "webkit/glue/webthemeengine_impl_win.h"
 #elif defined(OS_MACOSX)
 #include "webkit/glue/webthemeengine_impl_mac.h"
 #elif defined(OS_ANDROID)
 #include "webkit/glue/webthemeengine_impl_android.h"
-#elif defined(OS_POSIX) && !defined(OS_ANDROID)
-#include "webkit/glue/webthemeengine_impl_linux.h"
 #endif
-
 
 class MessageLoop;
 
 namespace webkit {
+class WebCompositorSupportImpl;
 struct WebPluginInfo;
 }
 
@@ -63,11 +64,13 @@ class WEBKIT_GLUE_EXPORT WebKitPlatformSupportImpl :
   virtual size_t memoryUsageMB();
   virtual size_t actualMemoryUsageMB();
 #if defined(OS_ANDROID)  // Other OSes just use the default values.
-  virtual size_t lowMemoryUsageMB();
-  virtual size_t highMemoryUsageMB();
-  virtual size_t highUsageDeltaMB();
-  virtual size_t maxTextureMemoryUsageMB();
+  virtual size_t lowMemoryUsageMB() OVERRIDE;
+  virtual size_t highMemoryUsageMB() OVERRIDE;
+  virtual size_t highUsageDeltaMB() OVERRIDE;
 #endif
+  virtual bool processMemorySizesInBytes(size_t* private_bytes,
+                                         size_t* shared_bytes);
+  virtual bool memoryAllocatorWasteInBytes(size_t* size);
   virtual WebKit::WebURLLoader* createURLLoader();
   virtual WebKit::WebSocketStreamHandle* createSocketStreamHandle();
   virtual WebKit::WebString userAgent(const WebKit::WebURL& url);
@@ -78,11 +81,10 @@ class WEBKIT_GLUE_EXPORT WebKitPlatformSupportImpl :
     const char* name, int sample, int min, int max, int bucket_count);
   virtual void histogramEnumeration(
     const char* name, int sample, int boundary_value);
-  virtual bool isTraceEventEnabled() const;
-  virtual void traceEventBegin(const char* name, void* id, const char* extra);
-  virtual void traceEventEnd(const char* name, void* id, const char* extra);
   virtual const unsigned char* getTraceCategoryEnabledFlag(
       const char* category_name);
+  // TODO(caseq): compatibility overload. Remove once WebKitPlatformSupport
+  // is updated.
   virtual int addTraceEvent(
       char phase,
       const unsigned char* category_enabled,
@@ -94,6 +96,16 @@ class WEBKIT_GLUE_EXPORT WebKitPlatformSupportImpl :
       const unsigned long long* arg_values,
       int threshold_begin_id,
       long long threshold,
+      unsigned char flags);
+  virtual void addTraceEvent(
+      char phase,
+      const unsigned char* category_enabled,
+      const char* name,
+      unsigned long long id,
+      int num_args,
+      const char** arg_names,
+      const unsigned char* arg_types,
+      const unsigned long long* arg_values,
       unsigned char flags);
   virtual WebKit::WebData loadResource(const char* name);
   virtual bool loadAudioResource(
@@ -119,6 +131,7 @@ class WEBKIT_GLUE_EXPORT WebKitPlatformSupportImpl :
   virtual void callOnMainThread(void (*func)(void*), void* context);
   virtual WebKit::WebThread* createThread(const char* name);
   virtual WebKit::WebThread* currentThread();
+  virtual WebKit::WebCompositorSupport* compositorSupport();
 
 
   // Embedder functions. The following are not implemented by the glue layer and
@@ -130,7 +143,8 @@ class WEBKIT_GLUE_EXPORT WebKitPlatformSupportImpl :
 
   // Returns the raw data for a resource.  This resource must have been
   // specified as BINDATA in the relevant .rc file.
-  virtual base::StringPiece GetDataResource(int resource_id) = 0;
+  virtual base::StringPiece GetDataResource(int resource_id,
+                                            ui::ScaleFactor scale_factor) = 0;
 
   // Returns the list of plugins.
   virtual void GetPlugins(bool refresh,
@@ -145,11 +159,17 @@ class WEBKIT_GLUE_EXPORT WebKitPlatformSupportImpl :
 
   void SuspendSharedTimer();
   void ResumeSharedTimer();
+  virtual void OnStartSharedTimer(base::TimeDelta delay) {}
 
   virtual void didStartWorkerRunLoop(
       const WebKit::WebWorkerRunLoop& runLoop) OVERRIDE;
   virtual void didStopWorkerRunLoop(
       const WebKit::WebWorkerRunLoop& runLoop) OVERRIDE;
+
+  virtual WebKit::WebGestureCurve* createFlingAnimationCurve(
+      int device_source,
+      const WebKit::WebFloatPoint& velocity,
+      const WebKit::WebSize& cumulative_scroll) OVERRIDE;
 
  private:
   void DoTimeout() {
@@ -165,6 +185,7 @@ class WEBKIT_GLUE_EXPORT WebKitPlatformSupportImpl :
   int shared_timer_suspended_;  // counter
   WebThemeEngineImpl theme_engine_;
   base::ThreadLocalStorage::Slot current_thread_slot_;
+  scoped_ptr<webkit::WebCompositorSupportImpl> compositor_support_;
 };
 
 }  // namespace webkit_glue

@@ -1,4 +1,4 @@
-// Copyright (c) 2011 The Chromium Authors. All rights reserved.
+// Copyright (c) 2012 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -7,6 +7,7 @@
 #include <string>
 
 #include "base/logging.h"
+#include "base/memory/scoped_ptr.h"
 #include "jingle/notifier/listener/notification_constants.h"
 #include "jingle/notifier/listener/xml_element_util.h"
 #include "talk/base/task.h"
@@ -38,12 +39,12 @@ bool PushNotificationsSubscribeTask::HandleStanza(
 }
 
 int PushNotificationsSubscribeTask::ProcessStart() {
-  VLOG(1) << "Push notifications: Subscription task started.";
+  DVLOG(1) << "Push notifications: Subscription task started.";
   scoped_ptr<buzz::XmlElement> iq_stanza(
       MakeSubscriptionMessage(subscriptions_, GetClient()->jid(),
                               task_id()));
   std::string stanza_str = XmlElementToString(*iq_stanza.get());
-  VLOG(1) << "Push notifications: Subscription stanza: "
+  DVLOG(1) << "Push notifications: Subscription stanza: "
           << XmlElementToString(*iq_stanza.get());
 
   if (SendStanza(iq_stanza.get()) != buzz::XMPP_RETURN_OK) {
@@ -55,14 +56,14 @@ int PushNotificationsSubscribeTask::ProcessStart() {
 }
 
 int PushNotificationsSubscribeTask::ProcessResponse() {
-  VLOG(1) << "Push notifications: Subscription response received.";
+  DVLOG(1) << "Push notifications: Subscription response received.";
   const buzz::XmlElement* stanza = NextStanza();
   if (stanza == NULL) {
     return STATE_BLOCKED;
   }
   std::string stanza_str = XmlElementToString(*stanza);
-  VLOG(1) << "Push notifications: Subscription response: "
-          << XmlElementToString(*stanza);
+  DVLOG(1) << "Push notifications: Subscription response: "
+           << XmlElementToString(*stanza);
   // We've receieved a response to our subscription request.
   if (stanza->HasAttr(buzz::QN_TYPE) &&
     stanza->Attr(buzz::QN_TYPE) == buzz::STR_RESULT) {
@@ -84,8 +85,8 @@ buzz::XmlElement* PushNotificationsSubscribeTask::MakeSubscriptionMessage(
       kPushNotificationsNamespace, "subscribe");
 
   // Create the subscription stanza using the notifications protocol.
-  // <iq from={full_jid} to={bare_jid} type=’set’ id={id}>
-  //  <subscribe xmlns=’google:push’>
+  // <iq from={full_jid} to={bare_jid} type="set" id={id}>
+  //  <subscribe xmlns="google:push">
   //    <item channel={channel_name} from={domain_name or bare_jid}/>
   //    <item channel={channel_name2} from={domain_name or bare_jid}/>
   //    <item channel={channel_name3} from={domain_name or bare_jid}/>

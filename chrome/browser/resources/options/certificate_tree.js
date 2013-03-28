@@ -1,10 +1,42 @@
-// Copyright (c) 2011 The Chromium Authors. All rights reserved.
+// Copyright (c) 2012 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
 cr.define('options', function() {
-  const Tree = cr.ui.Tree;
-  const TreeItem = cr.ui.TreeItem;
+  /** @const */ var Tree = cr.ui.Tree;
+  /** @const */ var TreeItem = cr.ui.TreeItem;
+
+  /**
+   * Creates a new tree folder for certificate data.
+   * @param {Object=} data Data used to create a certificate tree folder.
+   * @constructor
+   * @extends {TreeItem}
+   */
+  function CertificateTreeFolder(data) {
+    data.isCert = false;
+    var treeFolder = new TreeItem({
+      label: data.name,
+      data: data
+    });
+    treeFolder.__proto__ = CertificateTreeFolder.prototype;
+
+    if (data.icon)
+      treeFolder.icon = data.icon;
+
+    return treeFolder;
+  }
+
+  CertificateTreeFolder.prototype = {
+    __proto__: TreeItem.prototype,
+
+    /**
+     * The tree path id/.
+     * @type {string}
+     */
+    get pathId() {
+      return this.data.id;
+    }
+  };
 
   /**
    * Creates a new tree item for certificate data.
@@ -13,6 +45,7 @@ cr.define('options', function() {
    * @extends {TreeItem}
    */
   function CertificateTreeItem(data) {
+    data.isCert = true;
     // TODO(mattm): other columns
     var treeItem = new TreeItem({
       label: data.name,
@@ -20,14 +53,13 @@ cr.define('options', function() {
     });
     treeItem.__proto__ = CertificateTreeItem.prototype;
 
-    if (data.icon) {
+    if (data.icon)
       treeItem.icon = data.icon;
-    }
 
     if (data.untrusted) {
       var badge = document.createElement('span');
-      badge.setAttribute('class', 'certUntrusted');
-      badge.textContent = localStrings.getString("badgeCertUntrusted");
+      badge.classList.add('cert-untrusted');
+      badge.textContent = loadTimeData.getString('badgeCertUntrusted');
       treeItem.labelElement.insertBefore(
           badge, treeItem.labelElement.firstChild);
     }
@@ -43,12 +75,7 @@ cr.define('options', function() {
      * @type {string}
      */
     get pathId() {
-      var parent = this.parentItem;
-      if (parent && parent instanceof CertificateTreeItem) {
-        return parent.pathId + ',' + this.data.id;
-      } else {
-        return this.data.id;
-      }
+      return this.parentItem.pathId + ',' + this.data.id;
     }
   };
 
@@ -63,20 +90,20 @@ cr.define('options', function() {
   CertificatesTree.prototype = {
     __proto__: Tree.prototype,
 
-    /** @inheritDoc */
+    /** @override */
     decorate: function() {
       Tree.prototype.decorate.call(this);
       this.treeLookup_ = {};
     },
 
-    /** @inheritDoc */
+    /** @override */
     addAt: function(child, index) {
       Tree.prototype.addAt.call(this, child, index);
       if (child.data && child.data.id)
         this.treeLookup_[child.data.id] = child;
     },
 
-    /** @inheritDoc */
+    /** @override */
     remove: function(child) {
       Tree.prototype.remove.call(this, child);
       if (child.data && child.data.id)
@@ -89,9 +116,8 @@ cr.define('options', function() {
     clear: function() {
       // Remove all fields without recreating the object since other code
       // references it.
-      for (var id in this.treeLookup_){
+      for (var id in this.treeLookup_)
         delete this.treeLookup_[id];
-      }
       this.textContent = '';
     },
 
@@ -103,10 +129,10 @@ cr.define('options', function() {
       this.clear();
 
       for (var i = 0; i < nodesData.length; ++i) {
-        var subnodes = nodesData[i]['subnodes'];
-        delete nodesData[i]['subnodes'];
+        var subnodes = nodesData[i].subnodes;
+        delete nodesData[i].subnodes;
 
-        var item = new CertificateTreeItem(nodesData[i]);
+        var item = new CertificateTreeFolder(nodesData[i]);
         this.addAt(item, i);
 
         for (var j = 0; j < subnodes.length; ++j) {

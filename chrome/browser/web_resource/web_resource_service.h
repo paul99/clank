@@ -1,33 +1,37 @@
-// Copyright (c) 2011 The Chromium Authors. All rights reserved.
+// Copyright (c) 2012 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
 #ifndef CHROME_BROWSER_WEB_RESOURCE_WEB_RESOURCE_SERVICE_H_
 #define CHROME_BROWSER_WEB_RESOURCE_WEB_RESOURCE_SERVICE_H_
-#pragma once
 
 #include <string>
 
 #include "base/memory/ref_counted.h"
 #include "base/memory/scoped_ptr.h"
 #include "base/memory/weak_ptr.h"
-#include "content/public/common/url_fetcher_delegate.h"
+#include "chrome/browser/metrics/variations/resource_request_allowed_notifier.h"
 #include "chrome/browser/web_resource/json_asynchronous_unpacker.h"
 #include "googleurl/src/gurl.h"
+#include "net/url_request/url_fetcher_delegate.h"
 
 class PrefService;
-class ResourceDispatcherHost;
 
 namespace base {
 class DictionaryValue;
 }
 
+namespace net {
+class URLFetcher;
+}
+
 // A WebResourceService fetches JSON data from a web server and periodically
 // refreshes it.
 class WebResourceService
-    : public content::URLFetcherDelegate,
+    : public net::URLFetcherDelegate,
       public JSONAsynchronousUnpackerDelegate,
-      public base::RefCountedThreadSafe<WebResourceService> {
+      public base::RefCountedThreadSafe<WebResourceService>,
+      public ResourceRequestAllowedNotifier::Observer {
  public:
   WebResourceService(PrefService* prefs,
                      const GURL& web_resource_server,
@@ -57,8 +61,8 @@ class WebResourceService
   class UnpackerClient;
   friend class base::RefCountedThreadSafe<WebResourceService>;
 
-  // content::URLFetcherDelegate implementation:
-  virtual void OnURLFetchComplete(const content::URLFetcher* source) OVERRIDE;
+  // net::URLFetcherDelegate implementation:
+  virtual void OnURLFetchComplete(const net::URLFetcher* source) OVERRIDE;
 
   // Schedules a fetch after |delay_ms| milliseconds.
   void ScheduleFetch(int64 delay_ms);
@@ -69,12 +73,15 @@ class WebResourceService
   // Set |in_fetch_| to false, clean up temp directories (in the future).
   void EndFetch();
 
-  // So that we can delay our start so as not to affect start-up time; also,
-  // so that we can schedule future cache updates.
-  base::WeakPtrFactory<WebResourceService> weak_ptr_factory_;
+  // Implements ResourceRequestAllowedNotifier::Observer.
+  virtual void OnResourceRequestsAllowed() OVERRIDE;
+
+  // Helper class used to tell this service if it's allowed to make network
+  // resource requests.
+  ResourceRequestAllowedNotifier resource_request_allowed_notifier_;
 
   // The tool that fetches the url data from the server.
-  scoped_ptr<content::URLFetcher> url_fetcher_;
+  scoped_ptr<net::URLFetcher> url_fetcher_;
 
   // The tool that parses and transforms the json data. Weak reference as it
   // deletes itself once the unpack is done.
@@ -100,6 +107,10 @@ class WebResourceService
   // Delay between calls to update the web resource cache. This delay may be
   // different for different builds of Chrome.
   int cache_update_delay_ms_;
+
+  // So that we can delay our start so as not to affect start-up time; also,
+  // so that we can schedule future cache updates.
+  base::WeakPtrFactory<WebResourceService> weak_ptr_factory_;
 
   DISALLOW_COPY_AND_ASSIGN(WebResourceService);
 };

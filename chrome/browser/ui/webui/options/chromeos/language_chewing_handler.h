@@ -1,10 +1,9 @@
-// Copyright (c) 2011 The Chromium Authors. All rights reserved.
+// Copyright (c) 2012 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
 #ifndef CHROME_BROWSER_UI_WEBUI_OPTIONS_CHROMEOS_LANGUAGE_CHEWING_HANDLER_H_
 #define CHROME_BROWSER_UI_WEBUI_OPTIONS_CHROMEOS_LANGUAGE_CHEWING_HANDLER_H_
-#pragma once
 
 #include "base/basictypes.h"
 #include "base/compiler_specific.h"
@@ -15,9 +14,10 @@ class DictionaryValue;
 }
 
 namespace chromeos {
+namespace options {
 
 // Chewing options page UI handler.
-class LanguageChewingHandler : public OptionsPageUIHandler {
+class LanguageChewingHandler : public ::options::OptionsPageUIHandler {
  public:
   LanguageChewingHandler();
   virtual ~LanguageChewingHandler();
@@ -30,6 +30,7 @@ class LanguageChewingHandler : public OptionsPageUIHandler {
   DISALLOW_COPY_AND_ASSIGN(LanguageChewingHandler);
 };
 
+}  // namespace options
 }  // namespace chromeos
 
 #endif  // CHROME_BROWSER_UI_WEBUI_OPTIONS_CHROMEOS_LANGUAGE_CHEWING_HANDLER_H_

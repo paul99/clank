@@ -1,4 +1,4 @@
-// Copyright (c) 2011 The Chromium Authors. All rights reserved.
+// Copyright (c) 2012 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -31,7 +31,7 @@ cr.define('oobe', function() {
      */
     dropdown_: null,
 
-    /** @inheritDoc */
+    /** @override */
     decorate: function() {
       Oobe.setupSelect($('language-select'),
                        templateData.languageList,
@@ -72,12 +72,19 @@ cr.define('oobe', function() {
       continueButton.id = 'continue-button';
       continueButton.textContent = localStrings.getString('continueButton');
       continueButton.addEventListener('click', function(e) {
-        chrome.send('networkOnExit', []);
+        chrome.send('networkOnExit');
         e.stopPropagation();
       });
       buttons.push(continueButton);
 
       return buttons;
+    },
+
+    /**
+     * Returns a control which should receive an initial focus.
+     */
+    get defaultControl() {
+      return $('language-select');
     }
   };
 
@@ -92,14 +99,9 @@ cr.define('oobe', function() {
     messageDiv.textContent = message;
     error.appendChild(messageDiv);
 
-    $('bubble').showContentForElement($('networks-list'), error);
-  };
-
-  /**
-   * Hides the error notification bubble (if any).
-   */
-  NetworkScreen.clearErrors = function() {
-    $('bubble').hide();
+    $('bubble').showContentForElement($('networks-list'),
+                                      cr.ui.Bubble.Attachment.BOTTOM,
+                                      error);
   };
 
   return {

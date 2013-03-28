@@ -4,82 +4,74 @@
 
 #ifndef NET_PROXY_PROXY_CONFIG_SERVICE_ANDROID_H_
 #define NET_PROXY_PROXY_CONFIG_SERVICE_ANDROID_H_
-#pragma once
-
-#include "base/android/scoped_java_ref.h"
-#include "base/memory/scoped_ptr.h"
-#include "base/memory/ref_counted.h"
-#include "base/observer_list.h"
-#include "base/string_piece.h"
-#include "base/synchronization/lock.h"
-#include "net/base/net_export.h"
-#include "net/proxy/proxy_config.h"
-#include "net/proxy/proxy_config_service.h"
 
 #include <string>
 
+#include "base/android/jni_android.h"
+#include "base/basictypes.h"
+#include "base/callback_forward.h"
+#include "base/compiler_specific.h"
+#include "base/memory/ref_counted.h"
+#include "net/base/net_export.h"
+#include "net/proxy/proxy_config_service.h"
+
 namespace base {
-class MessageLoopProxy;
+class SequencedTaskRunner;
 }
 
 namespace net {
 
+class ProxyConfig;
+
 class NET_EXPORT ProxyConfigServiceAndroid : public ProxyConfigService {
  public:
-  // Delegate abstracts access to the platform.
-  // Owned by ProxyConfigServiceAndroid.
-  class Delegate {
+  // Callback that returns the value of the property identified by the provided
+  // key. If it was not found, an empty string is returned. Note that this
+  // interface does not let you distinguish an empty property from a
+  // non-existing property. This callback is invoked on the JNI thread.
+  typedef base::Callback<std::string (const std::string& property)>
+      GetPropertyCallback;
+
+  // Separate class whose instance is owned by the Delegate class implemented in
+  // the .cc file.
+  class JNIDelegate {
    public:
-    virtual ~Delegate() {}
-    virtual void Start(ProxyConfigServiceAndroid* service) = 0;
-    virtual void Stop() = 0;
-    virtual std::string GetProperty(const std::string& property) const = 0;
+    virtual ~JNIDelegate() {}
+
+    // Called from Java (on JNI thread) to signal that the proxy settings have
+    // changed.
+    virtual void ProxySettingsChanged(JNIEnv*, jobject) = 0;
   };
 
-  static ProxyConfigService* Create();
-  // CreateForTests takes ownership of the delegate.
-  static ProxyConfigServiceAndroid* CreateForTests(Delegate* delegate);
+  ProxyConfigServiceAndroid(base::SequencedTaskRunner* network_task_runner,
+                            base::SequencedTaskRunner* jni_task_runner);
+
   virtual ~ProxyConfigServiceAndroid();
 
   // Register JNI bindings.
-  static bool RegisterProxyConfigService(JNIEnv* env);
+  static bool Register(JNIEnv* env);
 
   // ProxyConfigService:
+  // Called only on the network thread.
   virtual void AddObserver(Observer* observer) OVERRIDE;
   virtual void RemoveObserver(Observer* observer) OVERRIDE;
   virtual ConfigAvailability GetLatestProxyConfig(ProxyConfig* config) OVERRIDE;
 
-  // Called from the platform on any thread to signal that proxy settings have
-  // changed. AddObserver() must have been called at least once before.
+ private:
+  friend class ProxyConfigServiceAndroidTestBase;
+  class Delegate;
+
+  // For tests.
+  ProxyConfigServiceAndroid(base::SequencedTaskRunner* network_task_runner,
+                            base::SequencedTaskRunner* jni_task_runner,
+                            GetPropertyCallback get_property_callback);
+
+  // For tests.
   void ProxySettingsChanged();
 
-  // Called from Java to signal that the proxy settings have changed.
-  void ProxySettingsChanged(JNIEnv*, jobject) { ProxySettingsChanged(); }
+  scoped_refptr<Delegate> delegate_;
 
- private:
-  class NotifyTask;
-
-  explicit ProxyConfigServiceAndroid(Delegate* delegate);
-
-  void ProxySettingsChangedCallback();
-  void CancelNotifyTask();
-  void ClearNotifyTask();
-  bool OnObserverThread();
-  void AssignObserverThread();
-
-  // Accessed by the constructor, and from then on from the Observer thread.
-  scoped_ptr<Delegate> delegate_;
-  ObserverList<Observer> observers_;
-
-
-  base::Lock notify_task_lock_;
-  NotifyTask* notify_task_;  // Accessed from any thread, guarded by lock_.
-
-  // The thread that this object lives on; set on first call to AddObserver().
-  // Notifications from the platform (ProxySettingsChanged) will be bounced
-  // over to this thread before calling back to the Observer. All other
-  // methods should be called on this thread.
-  scoped_refptr<base::MessageLoopProxy> observer_loop_;
+  DISALLOW_COPY_AND_ASSIGN(ProxyConfigServiceAndroid);
 };
 
 } // namespace net

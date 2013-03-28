@@ -1,4 +1,4 @@
-// Copyright (c) 2011 The Chromium Authors. All rights reserved.
+// Copyright (c) 2012 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -9,17 +9,22 @@
 #include <string.h>
 
 extern "C" {
-#if defined(USE_SYSTEM_LIBPNG)
-#include <png.h>
-#else
 #include "third_party/libpng/png.h"
+
+#if defined(USE_SYSTEM_ZLIB)
+#include <zlib.h>
+#else
+#include "third_party/zlib/zlib.h"
 #endif
 }
 
 namespace webkit_support {
 
 // Define macro here to make webkit_support_gfx independent of target base.
-#define NOTREACHED(msg) exit(1)
+// Note that the NOTREACHED() macro will result in a crash. This is preferable
+// to calling exit() / abort(), since the latter may not surfce the problem as
+// crash reports, making it hard to tell where the problem is.
+#define NOTREACHED(msg) *((volatile int*)0) = 3
 #define DCHECK(condition) \
   if (!(condition)) fprintf(stderr, "DCHECK failed: " #condition ".")
 
@@ -41,6 +46,10 @@ enum ColorFormat {
   // 4 bytes per pixel, in BGRA order in memory regardless of endianness.
   // This is the default Windows DIB order.
   FORMAT_BGRA,
+
+  // 4 bytes per pixel, in pre-multiplied kARGB_8888_Config format. For use
+  // with directly writing to a skia bitmap.
+  FORMAT_SkBitmap
 };
 
 // Represents a comment in the tEXt ancillary chunk of the png.

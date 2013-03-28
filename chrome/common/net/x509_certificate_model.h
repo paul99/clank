@@ -4,9 +4,7 @@
 
 #ifndef CHROME_COMMON_NET_X509_CERTIFICATE_MODEL_H_
 #define CHROME_COMMON_NET_X509_CERTIFICATE_MODEL_H_
-#pragma once
 
-#include "net/base/cert_database.h"
 #include "net/base/cert_type.h"
 #include "net/base/x509_certificate.h"
 

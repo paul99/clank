@@ -1,10 +1,9 @@
-// Copyright (c) 2011 The Chromium Authors. All rights reserved.
+// Copyright (c) 2012 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
 #ifndef CHROME_BROWSER_UI_VIEWS_BOOKMARKS_BOOKMARK_MENU_CONTROLLER_VIEWS_H_
 #define CHROME_BROWSER_UI_VIEWS_BOOKMARKS_BOOKMARK_MENU_CONTROLLER_VIEWS_H_
-#pragma once
 
 #include <set>
 
@@ -17,7 +16,7 @@
 class BookmarkBarView;
 class BookmarkMenuDelegate;
 class BookmarkNode;
-class Profile;
+class Browser;
 
 namespace content {
 class PageNavigator;
@@ -51,7 +50,7 @@ class BookmarkMenuController : public BaseBookmarkModelObserver,
 
   // Creates a BookmarkMenuController showing the children of |node| starting
   // at |start_child_index|.
-  BookmarkMenuController(Profile* profile,
+  BookmarkMenuController(Browser* browser,
                          content::PageNavigator* page_navigator,
                          views::Widget* parent,
                          const BookmarkNode* node,
@@ -79,8 +78,11 @@ class BookmarkMenuController : public BaseBookmarkModelObserver,
   // MenuDelegate methods.
   virtual string16 GetTooltipText(int id, const gfx::Point& p) const OVERRIDE;
   virtual bool IsTriggerableEvent(views::MenuItemView* view,
-                                  const views::MouseEvent& e) OVERRIDE;
+                                  const ui::Event& e) OVERRIDE;
   virtual void ExecuteCommand(int id, int mouse_event_flags) OVERRIDE;
+  virtual bool ShouldExecuteCommandWithoutClosingMenu(
+      int id,
+      const ui::Event& e) OVERRIDE;
   virtual bool GetDropFormats(
       views::MenuItemView* menu,
       int* formats,
@@ -89,11 +91,11 @@ class BookmarkMenuController : public BaseBookmarkModelObserver,
   virtual bool CanDrop(views::MenuItemView* menu,
                        const ui::OSExchangeData& data) OVERRIDE;
   virtual int GetDropOperation(views::MenuItemView* item,
-                               const views::DropTargetEvent& event,
+                               const ui::DropTargetEvent& event,
                                DropPosition* position) OVERRIDE;
   virtual int OnPerformDrop(views::MenuItemView* menu,
                             DropPosition position,
-                            const views::DropTargetEvent& event) OVERRIDE;
+                            const ui::DropTargetEvent& event) OVERRIDE;
   virtual bool ShowContextMenu(views::MenuItemView* source,
                                int id,
                                const gfx::Point& p,

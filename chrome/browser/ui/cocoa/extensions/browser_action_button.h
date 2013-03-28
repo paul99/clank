@@ -1,25 +1,23 @@
-// Copyright (c) 2011 The Chromium Authors. All rights reserved.
+// Copyright (c) 2012 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
 #ifndef CHROME_BROWSER_UI_COCOA_EXTENSIONS_BROWSER_ACTION_BUTTON_H_
 #define CHROME_BROWSER_UI_COCOA_EXTENSIONS_BROWSER_ACTION_BUTTON_H_
-#pragma once
 
 #import <Cocoa/Cocoa.h>
 
 #import "base/memory/scoped_nsobject.h"
 #include "base/memory/scoped_ptr.h"
-#import "chrome/browser/ui/cocoa/gradient_button_cell.h"
+#import "chrome/browser/ui/cocoa/image_button_cell.h"
 
-class Extension;
+class Browser;
 class ExtensionAction;
-class ExtensionImageTrackerBridge;
-class Profile;
+class ExtensionActionIconFactoryBridge;
 
-// Fired when the Browser Action's state has changed. Usually the image needs to
-// be updated.
-extern NSString* const kBrowserActionButtonUpdatedNotification;
+namespace extensions {
+class Extension;
+}
 
 // Fired on each drag event while the user is moving the button.
 extern NSString* const kBrowserActionButtonDraggingNotification;
@@ -30,19 +28,13 @@ extern NSString* const kBrowserActionButtonDragEndNotification;
  @private
   // Bridge to proxy Chrome notifications to the Obj-C class as well as load the
   // extension's icon.
-  scoped_ptr<ExtensionImageTrackerBridge> imageLoadingBridge_;
-
-  // The default icon of the Button.
-  scoped_nsobject<NSImage> defaultIcon_;
-
-  // The icon specific to the active tab.
-  scoped_nsobject<NSImage> tabSpecificIcon_;
+  scoped_ptr<ExtensionActionIconFactoryBridge> iconFactoryBridge_;
 
   // Used to move the button and query whether a button is currently animating.
   scoped_nsobject<NSViewAnimation> moveAnimation_;
 
   // The extension for this button. Weak.
-  const Extension* extension_;
+  const extensions::Extension* extension_;
 
   // The ID of the active tab.
   int tabId_;
@@ -57,15 +49,11 @@ extern NSString* const kBrowserActionButtonDragEndNotification;
 }
 
 - (id)initWithFrame:(NSRect)frame
-          extension:(const Extension*)extension
-            profile:(Profile*)profile
+          extension:(const extensions::Extension*)extension
+            browser:(Browser*)browser
               tabId:(int)tabId;
 
 - (void)setFrame:(NSRect)frameRect animate:(BOOL)animate;
-
-- (void)setDefaultIcon:(NSImage*)image;
-
-- (void)setTabSpecificIcon:(NSImage*)image;
 
 - (void)updateState;
 
@@ -76,12 +64,12 @@ extern NSString* const kBrowserActionButtonDragEndNotification;
 - (NSImage*)compositedImage;
 
 @property(readonly, nonatomic) BOOL isBeingDragged;
-@property(readonly, nonatomic) const Extension* extension;
+@property(readonly, nonatomic) const extensions::Extension* extension;
 @property(readwrite, nonatomic) int tabId;
 
 @end
 
-@interface BrowserActionCell : GradientButtonCell {
+@interface BrowserActionCell : ImageButtonCell {
  @private
   // The current tab ID used when drawing the cell.
   int tabId_;

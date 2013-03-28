@@ -1,4 +1,4 @@
-// Copyright (c) 2011 The Chromium Authors. All rights reserved.
+// Copyright (c) 2012 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -30,7 +30,7 @@ VectorPlatformDeviceSkia::VectorPlatformDeviceSkia(
 VectorPlatformDeviceSkia::~VectorPlatformDeviceSkia() {
 }
 
-bool VectorPlatformDeviceSkia::IsNativeFontRenderingAllowed() {
+bool VectorPlatformDeviceSkia::SupportsPlatformPaint() {
   return false;
 }
 
@@ -41,19 +41,8 @@ PlatformSurface VectorPlatformDeviceSkia::BeginPlatformPaint() {
   // and return the context from it, then layer on the raster data as an
   // image in EndPlatformPaint.
   DCHECK(raster_surface_ == NULL);
-#if defined(OS_WIN)
-  raster_surface_ = BitmapPlatformDevice::create(width(),
-                                                 height(),
-                                                 false, /* not opaque */
-                                                 NULL);
-#elif defined(OS_POSIX) && !defined(OS_MACOSX)
-  raster_surface_ = BitmapPlatformDevice::Create(width(),
-                                                 height(),
-                                                 false /* not opaque */);
-#endif
-  raster_surface_->unref();  // SkRefPtr and create both took a reference.
-
-  SkCanvas canvas(raster_surface_.get());
+  raster_surface_ = skia::AdoptRef(
+      BitmapPlatformDevice::CreateAndClear(width(), height(), false));
   return raster_surface_->BeginPlatformPaint();
 }
 
@@ -68,7 +57,7 @@ void VectorPlatformDeviceSkia::EndPlatformPaint() {
   drawSprite(draw, raster_surface_->accessBitmap(false), 0, 0, paint);
   // BitmapPlatformDevice matches begin and end calls.
   raster_surface_->EndPlatformPaint();
-  raster_surface_ = NULL;
+  raster_surface_.clear();
 }
 
 #if defined(OS_WIN)

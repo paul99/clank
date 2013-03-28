@@ -1,17 +1,16 @@
-// Copyright (c) 2011 The Chromium Authors. All rights reserved.
+// Copyright (c) 2012 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
 #ifndef CHROME_SERVICE_CLOUD_PRINT_CLOUD_PRINT_PROXY_BACKEND_H_
 #define CHROME_SERVICE_CLOUD_PRINT_CLOUD_PRINT_PROXY_BACKEND_H_
-#pragma once
 
+#include <list>
 #include <string>
 
 #include "base/threading/thread.h"
+#include "chrome/service/cloud_print/connector_settings.h"
 #include "printing/backend/print_backend.h"
-
-class GURL;
 
 namespace base {
 class DictionaryValue;
@@ -20,6 +19,8 @@ class DictionaryValue;
 namespace gaia {
 struct OAuthClientInfo;
 }
+
+namespace cloud_print {
 
 // CloudPrintProxyFrontend is the interface used by CloudPrintProxyBackend to
 // communicate with the entity that created it and, presumably, is interested in
@@ -39,6 +40,10 @@ class CloudPrintProxyFrontend {
   virtual void OnAuthenticationFailed() = 0;
   // The print system could not be initialized.
   virtual void OnPrintSystemUnavailable() = 0;
+  // Receive auth token and list of printers.
+  virtual void OnUnregisterPrinters(
+      const std::string& auth_token,
+      const std::list<std::string>& printer_ids) = 0;
 
  protected:
   // Don't delete through SyncFrontend interface.
@@ -52,13 +57,10 @@ class CloudPrintProxyBackend {
  public:
   // It is OK for print_system_settings to be NULL. In this case system should
   // use system default settings.
-  CloudPrintProxyBackend(
-      CloudPrintProxyFrontend* frontend,
-      const std::string& proxy_id,
-      const GURL& cloud_print_server_url,
-      const base::DictionaryValue* print_sys_settings,
-      const gaia::OAuthClientInfo& oauth_client_info,
-      bool enable_job_poll);
+  CloudPrintProxyBackend(CloudPrintProxyFrontend* frontend,
+                         const ConnectorSettings& settings,
+                         const gaia::OAuthClientInfo& oauth_client_info,
+                         bool enable_job_poll);
   ~CloudPrintProxyBackend();
 
   // Called when the user enables Google Cloud Print.
@@ -66,24 +68,21 @@ class CloudPrintProxyBackend {
   // the previously persisted credentials if any. We will use this is the passed
   // in LSID belongs to the same user as |last_user_email|.
   bool InitializeWithLsid(const std::string& lsid,
-                          const std::string& proxy_id,
                           const std::string& last_robot_refresh_token,
                           const std::string& last_robot_email,
                           const std::string& last_user_email);
   // Legacy mechanism when we have saved user credentials but no saved robot
   // credentials.
-  bool InitializeWithToken(const std::string& cloud_print_token,
-                           const std::string& proxy_id);
+  bool InitializeWithToken(const std::string& cloud_print_token);
   // Called when we have saved robot credentials.
   bool InitializeWithRobotToken(const std::string& robot_oauth_refresh_token,
-                                const std::string& robot_email,
-                                const std::string& proxy_id);
+                                const std::string& robot_email);
   // Called when an external entity passed in the auth code for the robot.
   bool InitializeWithRobotAuthCode(const std::string& robot_oauth_auth_code,
-                                   const std::string& robot_email,
-                                   const std::string& proxy_id);
+                                   const std::string& robot_email);
   void Shutdown();
   void RegisterPrinters(const printing::PrinterList& printer_list);
+  void UnregisterPrinters();
 
  private:
   // The real guts of SyncBackendHost, to keep the public client API clean.
@@ -104,5 +103,7 @@ class CloudPrintProxyBackend {
 
   DISALLOW_COPY_AND_ASSIGN(CloudPrintProxyBackend);
 };
+
+}  // namespace cloud_print
 
 #endif  // CHROME_SERVICE_CLOUD_PRINT_CLOUD_PRINT_PROXY_BACKEND_H_

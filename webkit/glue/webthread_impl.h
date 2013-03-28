@@ -45,8 +45,6 @@ class WebThreadImpl : public WebThreadBase {
 
   MessageLoop* message_loop() const { return thread_->message_loop(); }
 
-  int thread_id() const { return thread_->thread_id(); }
-
  private:
   virtual bool IsCurrentThread() const OVERRIDE;
   scoped_ptr<base::Thread> thread_;
@@ -54,8 +52,9 @@ class WebThreadImpl : public WebThreadBase {
 
 class WebThreadImplForMessageLoop : public WebThreadBase {
  public:
-  explicit WebThreadImplForMessageLoop(base::MessageLoopProxy* message_loop);
-  virtual ~WebThreadImplForMessageLoop();
+  WEBKIT_GLUE_EXPORT explicit WebThreadImplForMessageLoop(
+      base::MessageLoopProxy* message_loop);
+  WEBKIT_GLUE_EXPORT virtual ~WebThreadImplForMessageLoop();
 
   virtual void postTask(Task* task);
   virtual void postDelayedTask(Task* task, long long delay_ms);

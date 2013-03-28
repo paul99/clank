@@ -25,19 +25,23 @@ class StreamTextureManager;
 namespace gles2 {
 
 class ContextGroup;
+class QueryManager;
+
 class MockGLES2Decoder : public GLES2Decoder {
  public:
   MockGLES2Decoder();
   virtual ~MockGLES2Decoder();
 
-  MOCK_METHOD6(Initialize,
+  MOCK_METHOD7(Initialize,
                bool(const scoped_refptr<gfx::GLSurface>& surface,
                     const scoped_refptr<gfx::GLContext>& context,
+                    bool offscreen,
                     const gfx::Size& size,
                     const DisallowedFeatures& disallowed_features,
                     const char* allowed_extensions,
                     const std::vector<int32>& attribs));
-  MOCK_METHOD0(Destroy, void());
+  MOCK_METHOD1(Destroy, void(bool have_context));
+  MOCK_METHOD1(SetSurface, void(const scoped_refptr<gfx::GLSurface>& surface));
   MOCK_METHOD2(SetParent, bool(GLES2Decoder* parent, uint32 parent_texture_id));
   MOCK_METHOD1(ResizeOffscreenFrameBuffer, bool(const gfx::Size& size));
   MOCK_METHOD0(MakeCurrent, bool());
@@ -47,8 +51,16 @@ class MockGLES2Decoder : public GLES2Decoder {
   MOCK_METHOD0(GetGLSurface, gfx::GLSurface*());
   MOCK_METHOD0(GetGLContext, gfx::GLContext*());
   MOCK_METHOD0(GetContextGroup, ContextGroup*());
+  MOCK_METHOD0(ProcessPendingQueries, bool());
+  MOCK_CONST_METHOD0(RestoreState, void());
+  MOCK_METHOD0(GetQueryManager, gpu::gles2::QueryManager*());
+  MOCK_METHOD0(GetVertexArrayManager, gpu::gles2::VertexArrayManager*());
   MOCK_METHOD1(SetResizeCallback, void(const base::Callback<void(gfx::Size)>&));
   MOCK_METHOD1(SetStreamTextureManager, void(StreamTextureManager*));
+  MOCK_METHOD0(GetAsyncPixelTransferDelegate,
+      gfx::AsyncPixelTransferDelegate*());
+  MOCK_METHOD1(SetAsyncPixelTransferDelegate,
+      void(gfx::AsyncPixelTransferDelegate*));
   MOCK_METHOD3(DoCommand, error::Error(unsigned int command,
                                        unsigned int arg_count,
                                        const void* cmd_data));
@@ -66,7 +78,14 @@ class MockGLES2Decoder : public GLES2Decoder {
       int width,
       int height,
       bool is_texture_immutable));
+  MOCK_METHOD0(GetGLError,  uint32());
   MOCK_METHOD1(SetMsgCallback, void(const MsgCallback& callback));
+  MOCK_METHOD0(GetTextureUploadCount, uint32());
+  MOCK_METHOD0(GetTotalTextureUploadTime, base::TimeDelta());
+  MOCK_METHOD0(GetTotalProcessingCommandsTime, base::TimeDelta());
+  MOCK_METHOD1(AddProcessingCommandsTime, void(base::TimeDelta));
+  MOCK_METHOD0(WasContextLost, bool());
+  MOCK_METHOD1(LoseContext, void(uint32 reset_status));
 
   DISALLOW_COPY_AND_ASSIGN(MockGLES2Decoder);
 };

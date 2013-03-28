@@ -1,4 +1,4 @@
-// Copyright (c) 2011 The Chromium Authors. All rights reserved.
+// Copyright (c) 2012 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -50,7 +50,8 @@ bool IsSwitch(const CommandLine::StringType& string,
               CommandLine::StringType* switch_value) {
   switch_string->clear();
   switch_value->clear();
-  if (GetSwitchPrefixLength(string) == 0)
+  size_t prefix_length = GetSwitchPrefixLength(string);
+  if (prefix_length == 0 || prefix_length == string.length())
     return false;
 
   const size_t equals_position = string.find(kSwitchValueSeparator);
@@ -167,12 +168,12 @@ CommandLine::~CommandLine() {
 }
 
 // static
-void CommandLine::Init(int argc, const char* const* argv) {
+bool CommandLine::Init(int argc, const char* const* argv) {
   if (current_process_commandline_) {
     // If this is intentional, Reset() must be called first. If we are using
     // the shared build mode, we have to share a single object across multiple
     // shared libraries.
-    return;
+    return false;
   }
 
   current_process_commandline_ = new CommandLine(NO_PROGRAM);
@@ -181,6 +182,8 @@ void CommandLine::Init(int argc, const char* const* argv) {
 #elif defined(OS_POSIX)
   current_process_commandline_->InitFromArgv(argc, argv);
 #endif
+
+  return true;
 }
 
 // static
@@ -225,31 +228,42 @@ CommandLine::StringType CommandLine::GetCommandLineString() const {
 #if defined(OS_WIN)
   string = QuoteForCommandLineToArgvW(string);
 #endif
+  StringType params(GetArgumentsString());
+  if (!params.empty()) {
+    string.append(StringType(FILE_PATH_LITERAL(" ")));
+    string.append(params);
+  }
+  return string;
+}
+
+CommandLine::StringType CommandLine::GetArgumentsString() const {
+  StringType params;
   // Append switches and arguments.
   bool parse_switches = true;
   for (size_t i = 1; i < argv_.size(); ++i) {
-    CommandLine::StringType arg = argv_[i];
-    CommandLine::StringType switch_string;
-    CommandLine::StringType switch_value;
+    StringType arg = argv_[i];
+    StringType switch_string;
+    StringType switch_value;
     parse_switches &= arg != kSwitchTerminator;
-    string.append(StringType(FILE_PATH_LITERAL(" ")));
+    if (i > 1)
+      params.append(StringType(FILE_PATH_LITERAL(" ")));
     if (parse_switches && IsSwitch(arg, &switch_string, &switch_value)) {
-      string.append(switch_string);
+      params.append(switch_string);
       if (!switch_value.empty()) {
 #if defined(OS_WIN)
         switch_value = QuoteForCommandLineToArgvW(switch_value);
 #endif
-        string.append(kSwitchValueSeparator + switch_value);
+        params.append(kSwitchValueSeparator + switch_value);
       }
     }
     else {
 #if defined(OS_WIN)
       arg = QuoteForCommandLineToArgvW(arg);
 #endif
-      string.append(arg);
+      params.append(arg);
     }
   }
-  return string;
+  return params;
 }
 
 FilePath CommandLine::GetProgram() const {

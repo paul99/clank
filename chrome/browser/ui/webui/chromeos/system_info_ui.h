@@ -4,9 +4,10 @@
 
 #ifndef CHROME_BROWSER_UI_WEBUI_CHROMEOS_SYSTEM_INFO_UI_H_
 #define CHROME_BROWSER_UI_WEBUI_CHROMEOS_SYSTEM_INFO_UI_H_
-#pragma once
 
 #include "content/public/browser/web_ui_controller.h"
+
+namespace chromeos {
 
 class SystemInfoUI : public content::WebUIController {
  public:
@@ -15,5 +16,7 @@ class SystemInfoUI : public content::WebUIController {
  private:
   DISALLOW_COPY_AND_ASSIGN(SystemInfoUI);
 };
+
+}  // namespace chromeos
 
 #endif  // CHROME_BROWSER_UI_WEBUI_CHROMEOS_SYSTEM_INFO_UI_H_

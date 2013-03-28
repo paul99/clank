@@ -1,4 +1,4 @@
-// Copyright (c) 2011 The Chromium Authors. All rights reserved.
+// Copyright (c) 2012 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -12,7 +12,7 @@
 #include "base/string_util.h"
 #include "base/threading/thread.h"
 #include "build/build_config.h"
-#include "chrome/browser/browser_process_impl.h"
+#include "chrome/browser/browser_process.h"
 #include "chrome/browser/platform_util.h"
 #include "chrome/browser/prefs/pref_service.h"
 #include "chrome/browser/prefs/scoped_user_pref_update.h"
@@ -136,7 +136,7 @@ class ExternalDefaultProtocolObserver
   bool prompt_user_;
 };
 
-} // namespace
+}  // namespace
 
 // static
 void ExternalProtocolHandler::PrepopulateDictionary(DictionaryValue* win_pref) {
@@ -233,8 +233,7 @@ void ExternalProtocolHandler::SetBlockState(const std::string& scheme,
     if (state == UNKNOWN) {
       update_excluded_schemas->Remove(scheme, NULL);
     } else {
-      update_excluded_schemas->SetBoolean(scheme,
-                                          state == BLOCK ? true : false);
+      update_excluded_schemas->SetBoolean(scheme, (state == BLOCK));
     }
   }
 }
@@ -258,19 +257,7 @@ void ExternalProtocolHandler::LaunchUrlWithDelegate(const GURL& url,
     return;
   }
 
-  bool prompt_user = block_state == UNKNOWN;
-
-#if defined(OS_ANDROID)
-  // On Android, we also want to show the external protocol handler dialog if
-  // the url is allowed. See http://b/issue?id=5897000
-  // TODO(jknotten): Eventually, we will want to support the
-  // platform_util::OpenExternal code path as well.
-  prompt_user = true;
-#else
-  // On mobile, we don't want to throttle the external protocol handler.
-  // See bug http://b/issue?id=5451299
   g_accept_requests = false;
-#endif
 
   // The worker creates tasks with references to itself and puts them into
   // message loops. When no tasks are left it will delete the observer and
@@ -279,7 +266,7 @@ void ExternalProtocolHandler::LaunchUrlWithDelegate(const GURL& url,
       new ExternalDefaultProtocolObserver(url,
                                           render_process_host_id,
                                           tab_contents_id,
-                                          prompt_user,
+                                          block_state == UNKNOWN,
                                           delegate);
   scoped_refptr<ShellIntegration::DefaultProtocolClientWorker> worker =
       CreateShellWorker(observer, escaped_url.scheme(), delegate);

@@ -1,4 +1,4 @@
-// Copyright (c) 2011 The Chromium Authors. All rights reserved.
+// Copyright (c) 2012 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -9,7 +9,10 @@
 #include "ipc/ipc_message.h"
 
 #ifdef IPC_MESSAGE_LOG_ENABLED
+#include "content/public/common/content_ipc_logging.h"
 #define IPC_MESSAGE_MACROS_LOG_ENABLED
+#define IPC_LOG_TABLE_ADD_ENTRY(msg_id, logger) \
+    content::RegisterIPCLogger(msg_id, logger)
 
 // We need to do this real early to be sure IPC_MESSAGE_MACROS_LOG_ENABLED
 // doesn't get undefined.
@@ -19,6 +22,7 @@
 
 #include <set>
 
+#include "base/memory/singleton.h"
 #include "base/string_util.h"
 #include "base/threading/thread.h"
 #include "base/time.h"
@@ -27,7 +31,7 @@
 #include "chrome/app/chrome_dll_resource.h"
 #include "chrome/browser/ui/browser_dialogs.h"
 #include "chrome/common/chrome_constants.h"
-#include "content/public/browser/content_ipc_logging.h"
+#include "content/public/browser/browser_ipc_logging.h"
 #include "net/url_request/url_request.h"
 #include "net/url_request/url_request_job.h"
 #include "ui/views/controls/button/text_button.h"
@@ -53,16 +57,6 @@ enum {
   kProcessColumn,
   kParamsColumn,
 };
-
-// This class registers the browser IPC logger functions with IPC::Logging.
-class RegisterLoggerFuncs {
- public:
-  RegisterLoggerFuncs() {
-    IPC::Logging::set_log_function_map(&g_log_function_mapping);
-  }
-};
-
-RegisterLoggerFuncs g_register_logger_funcs;
 
 // The singleton dialog box. This is non-NULL when a dialog is active so we
 // know not to create a new one.
@@ -96,7 +90,7 @@ void InitDialog(HWND hwnd) {
   messages->InsertColumn(0, L"id", LVCFMT_LEFT, 230);
 
   LogFunctionMap* log_functions = IPC::Logging::log_function_map();
-  for (LogFunctionMap::iterator i = log_functions->begin();
+  for (LogFunctionMap::iterator i(log_functions->begin());
        i != log_functions->end(); ++i) {
     std::string name;
     (*i->second)(&name, NULL, NULL);
@@ -139,7 +133,7 @@ void CloseDialog() {
   for (std::set<int>::const_iterator itr = disabled_messages_.begin();
        itr != disabled_messages_.end();
        ++itr) {
-    list->Append(Value::CreateIntegerValue(*itr));
+    list->Append(new base::FundamentalValue(*itr));
   }
   */
 }
@@ -262,8 +256,7 @@ views::View* AboutIPCDialog::GetContentsView() {
 }
 
 int AboutIPCDialog::GetDialogButtons() const {
-  // Don't want OK or Cancel.
-  return 0;
+  return ui::DIALOG_BUTTON_NONE;
 }
 
 string16 AboutIPCDialog::GetWindowTitle() const {
@@ -347,7 +340,7 @@ bool AboutIPCDialog::CanResize() const {
 }
 
 void AboutIPCDialog::ButtonPressed(
-    views::Button* button, const views::Event& event) {
+    views::Button* button, const ui::Event& event) {
   if (button == track_toggle_) {
     if (tracking_) {
       track_toggle_->SetText(kStartTrackingLabel);
@@ -366,12 +359,12 @@ void AboutIPCDialog::ButtonPressed(
   }
 }
 
-namespace browser {
+namespace chrome {
 
 void ShowAboutIPCDialog() {
   AboutIPCDialog::RunDialog();
 }
 
-} // namespace browser
+}  // namespace chrome
 
 #endif  // IPC_MESSAGE_LOG_ENABLED

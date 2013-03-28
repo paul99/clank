@@ -10,23 +10,18 @@
 #include "ppapi/cpp/size.h"
 #include "ppapi/cpp/resource.h"
 
-
 /// @file
 /// This file defines the APIs for determining how a browser
 /// handles image data.
 namespace pp {
 
-class Instance;
+class InstanceHandle;
 
 class ImageData : public Resource {
  public:
   /// Default constructor for creating an is_null() <code>ImageData</code>
   /// object.
   ImageData();
-
-  /// A special structure used by the constructor that does not increment the
-  /// reference count of the underlying Image resource.
-  struct PassRef {};
 
   /// A constructor used when you have received a <code>PP_Resource</code> as a
   /// return value that has already been reference counted.
@@ -45,8 +40,8 @@ class ImageData : public Resource {
   /// with the provided parameters. The resulting object will be is_null() if
   /// the allocation failed.
   ///
-  /// @param[in] instance A <code>PP_Instance</code> identifying one instance
-  /// of a module.
+  /// @param[in] instance The instance with which this resource will be
+  /// associated.
   ///
   /// @param[in] format A PP_ImageDataFormat containing desired image format.
   /// PP_ImageDataFormat is an enumeration of the different types of
@@ -62,7 +57,7 @@ class ImageData : public Resource {
   /// initialized to transparent during the creation process. If this flag is
   /// not set, the current contents of the bitmap will be undefined, and the
   /// module should be sure to set all the pixels.
-  ImageData(Instance* instance,
+  ImageData(const InstanceHandle& instance,
             PP_ImageDataFormat format,
             const Size& size,
             bool init_to_zero);
@@ -76,6 +71,18 @@ class ImageData : public Resource {
   ///
   /// @return A new image data context.
   ImageData& operator=(const ImageData& other);
+
+  /// IsImageDataFormatSupported() returns <code>true</code> if the supplied
+  /// format is supported by the browser. Note:
+  /// <code>PP_IMAGEDATAFORMAT_BGRA_PREMUL</code> and
+  /// <code>PP_IMAGEDATAFORMAT_RGBA_PREMUL</code> formats are always supported.
+  /// Other image formats do not make this guarantee, and should be checked
+  /// first with IsImageDataFormatSupported() before using.
+  ///
+  /// @param[in] format Image data format.
+  ///
+  /// @return <code>true</code> if the format is supported by the browser.
+  static bool IsImageDataFormatSupported(PP_ImageDataFormat format);
 
   /// GetNativeImageDataFormat() determines the browser's preferred format for
   /// images. Using this format guarantees no extra conversions will occur when
@@ -123,7 +130,7 @@ class ImageData : public Resource {
   uint32_t* GetAddr32(const Point& coord);
 
  private:
-  void PassRefAndInitData(PP_Resource resource);
+  void InitData();
 
   PP_ImageDataDesc desc_;
   void* data_;

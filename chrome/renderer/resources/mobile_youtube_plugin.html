@@ -1,11 +1,16 @@
 <!DOCTYPE html>
 <html>
 <head>
+<script>
+function insertBackground() {
+  var video = templateData['video_id'];
+  document.body.style.backgroundImage = "url('http://img.youtube.com/vi/" + video + "/0.jpg')";
+}
+</script>
 <style type="text/css">
 
 body {
   background-color: black;
-  background-image: url("http://img.youtube.com/vi/VIDEO_ID/0.jpg");
   background-repeat: no-repeat;
   background-size: cover;
 }
@@ -40,10 +45,10 @@ body {
 }
 </style>
 </head>
-<body id="body"">
-<div id="main"">
+<body id="body" onLoad="insertBackground()">
+<div id="main">
 <div id="logo"><img id="youtube" src="youtube.png"/></div>
-<div id="inner"><img id="play" src="play.png" onclick="plugin.openURL();"/></div>
+<div id="inner"><img id="play" src="play.png" onclick="plugin.openYoutubeURL();"/></div>
 </div>
 </body>
 </html>

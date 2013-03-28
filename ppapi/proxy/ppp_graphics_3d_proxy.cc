@@ -1,4 +1,4 @@
-// Copyright (c) 2011 The Chromium Authors. All rights reserved.
+// Copyright (c) 2012 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -8,12 +8,14 @@
 #include "ppapi/proxy/host_dispatcher.h"
 #include "ppapi/proxy/plugin_dispatcher.h"
 #include "ppapi/proxy/ppapi_messages.h"
+#include "ppapi/shared_impl/proxy_lock.h"
 
 namespace ppapi {
 namespace proxy {
 
 namespace {
 
+#if !defined(OS_NACL)
 void ContextLost(PP_Instance instance) {
   HostDispatcher::GetForInstance(instance)->Send(
       new PpapiMsg_PPPGraphics3D_ContextLost(API_ID_PPP_GRAPHICS_3D, instance));
@@ -22,6 +24,10 @@ void ContextLost(PP_Instance instance) {
 static const PPP_Graphics3D graphics_3d_interface = {
   &ContextLost
 };
+#else
+// The NaCl plugin doesn't need the host side interface - stub it out.
+static const PPP_Graphics3D graphics_3d_interface = {};
+#endif  // !defined(OS_NACL)
 
 InterfaceProxy* CreateGraphics3DProxy(Dispatcher* dispatcher) {
   return new PPP_Graphics3D_Proxy(dispatcher);
@@ -54,6 +60,9 @@ const InterfaceProxy::Info* PPP_Graphics3D_Proxy::GetInfo() {
 }
 
 bool PPP_Graphics3D_Proxy::OnMessageReceived(const IPC::Message& msg) {
+  if (!dispatcher()->IsPlugin())
+    return false;
+
   bool handled = true;
   IPC_BEGIN_MESSAGE_MAP(PPP_Graphics3D_Proxy, msg)
     IPC_MESSAGE_HANDLER(PpapiMsg_PPPGraphics3D_ContextLost,
@@ -65,7 +74,7 @@ bool PPP_Graphics3D_Proxy::OnMessageReceived(const IPC::Message& msg) {
 
 void PPP_Graphics3D_Proxy::OnMsgContextLost(PP_Instance instance) {
   if (ppp_graphics_3d_impl_)
-    ppp_graphics_3d_impl_->Graphics3DContextLost(instance);
+    CallWhileUnlocked(ppp_graphics_3d_impl_->Graphics3DContextLost, instance);
 }
 
 }  // namespace proxy

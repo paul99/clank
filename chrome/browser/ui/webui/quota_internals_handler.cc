@@ -12,8 +12,11 @@
 #include "chrome/browser/profiles/profile.h"
 #include "chrome/browser/ui/webui/quota_internals_proxy.h"
 #include "chrome/browser/ui/webui/quota_internals_types.h"
+#include "content/public/browser/storage_partition.h"
 #include "content/public/browser/web_ui.h"
 #include "net/base/net_util.h"
+
+using content::BrowserContext;
 
 namespace quota_internals {
 
@@ -84,7 +87,9 @@ void QuotaInternalsHandler::SendMessage(const std::string& message,
 void QuotaInternalsHandler::OnRequestInfo(const base::ListValue*) {
   if (!proxy_)
     proxy_ = new QuotaInternalsProxy(this);
-  proxy_->RequestInfo(Profile::FromWebUI(web_ui())->GetQuotaManager());
+  proxy_->RequestInfo(
+      BrowserContext::GetDefaultStoragePartition(
+          Profile::FromWebUI(web_ui()))->GetQuotaManager());
 }
 
 }  // namespace quota_internals

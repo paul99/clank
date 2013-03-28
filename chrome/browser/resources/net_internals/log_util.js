@@ -9,11 +9,11 @@ log_util = (function() {
    * Creates a new log dump.  |events| is a list of all events, |polledData| is
    * an object containing the results of each poll, |tabData| is an object
    * containing data for individual tabs, |date| is the time the dump was
-   * created, as a formatted string, and |securityStripping| is whether or not
+   * created, as a formatted string, and |privacyStripping| is whether or not
    * private information should be removed from the generated dump.
    *
    * Returns the new log dump as an object.  Resulting object may have a null
-   * |date| and/or |numericDate|.
+   * |numericDate|.
    *
    * TODO(eroman): Use javadoc notation for these parameters.
    *
@@ -32,8 +32,8 @@ log_util = (function() {
    * tabs not present on the OS the log is from.
    */
   function createLogDump(userComments, constants, events, polledData, tabData,
-                         numericDate, securityStripping) {
-    if (securityStripping)
+                         numericDate, privacyStripping) {
+    if (privacyStripping)
       events = events.map(stripCookiesAndLoginInfo);
 
     var logDump = {
@@ -47,8 +47,6 @@ log_util = (function() {
     // Not technically client info, but it's used at the same point in the code.
     if (numericDate && constants.clientInfo) {
       constants.clientInfo.numericDate = numericDate;
-      // TODO(mmenke):  Remove this some time after Chrome 17 hits stable.
-      constants.clientInfo.date = (new Date(numericDate)).toLocaleString();
     }
 
     return logDump;
@@ -59,17 +57,20 @@ log_util = (function() {
    * |oldLogDump|.  The other parts of the log dump come from current
    * net-internals state.
    */
-  function createUpdatedLogDump(userComments, oldLogDump, securityStripping) {
+  function createUpdatedLogDump(userComments, oldLogDump, privacyStripping) {
     var numericDate = null;
-    if (oldLogDump.clientInfo && oldLogDump.clientInfo.numericDate)
-      numericDate = oldLogDump.clientInfo.numericDate;
-    var logDump = createLogDump(userComments,
-                                Constants,
-                                g_browser.sourceTracker.getAllCapturedEvents(),
-                                oldLogDump.polledData,
-                                getTabData_(),
-                                numericDate,
-                                securityStripping);
+    if (oldLogDump.constants.clientInfo &&
+        oldLogDump.constants.clientInfo.numericDate) {
+      numericDate = oldLogDump.constants.clientInfo.numericDate;
+    }
+    var logDump = createLogDump(
+        userComments,
+        Constants,
+        EventsTracker.getInstance().getAllCapturedEvents(),
+        oldLogDump.polledData,
+        getTabData_(),
+        numericDate,
+        privacyStripping);
     return JSON.stringify(logDump, null, ' ');
   }
 
@@ -77,15 +78,16 @@ log_util = (function() {
    * Creates a full log dump using |polledData| and the return value of each
    * tab's saveState function and passes it to |callback|.
    */
-  function onUpdateAllCompleted(userComments, callback, securityStripping,
+  function onUpdateAllCompleted(userComments, callback, privacyStripping,
                                 polledData) {
-    var logDump = createLogDump(userComments,
-                                Constants,
-                                g_browser.sourceTracker.getAllCapturedEvents(),
-                                polledData,
-                                getTabData_(),
-                                timeutil.getCurrentTime(),
-                                securityStripping);
+    var logDump = createLogDump(
+        userComments,
+        Constants,
+        EventsTracker.getInstance().getAllCapturedEvents(),
+        polledData,
+        getTabData_(),
+        timeutil.getCurrentTime(),
+        privacyStripping);
     callback(JSON.stringify(logDump, null, ' '));
   }
 
@@ -94,10 +96,10 @@ log_util = (function() {
    * loaded.  Once a log dump has been created, |callback| is passed the dumped
    * text as a string.
    */
-  function createLogDumpAsync(userComments, callback, securityStripping) {
+  function createLogDumpAsync(userComments, callback, privacyStripping) {
     g_browser.updateAllInfo(
         onUpdateAllCompleted.bind(null, userComments, callback,
-                                  securityStripping));
+                                  privacyStripping));
   }
 
   /**
@@ -167,13 +169,55 @@ log_util = (function() {
 
     g_browser.receivedConstants(logDump.constants);
 
+    // Check for validity of each log entry, and then add the ones that pass.
+    // Since the events are kept around, and we can't just hide a single view
+    // on a bad event, we have more error checking for them than other data.
+    var validEvents = [];
+    var numDeprecatedPassiveEvents = 0;
+    for (var eventIndex = 0; eventIndex < logDump.events.length; ++eventIndex) {
+      var event = logDump.events[eventIndex];
+      if (typeof event == 'object' &&
+          typeof event.source == 'object' &&
+          typeof event.time == 'string' &&
+          typeof EventTypeNames[event.type] == 'string' &&
+          typeof EventSourceTypeNames[event.source.type] == 'string' &&
+          getKeyWithValue(EventPhase, event.phase) != '?') {
+        if (event.wasPassivelyCaptured) {
+          // NOTE: Up until Chrome 18, log dumps included "passively captured"
+          // events. These are no longer supported, so skip past them
+          // to avoid confusing the rest of the code.
+          numDeprecatedPassiveEvents++;
+          continue;
+        }
+        validEvents.push(event);
+      }
+    }
+
+    // Make sure the loaded log contained an export date. If not we will
+    // synthesize one. This can legitimately happen for dump files created
+    // via command line flag, or for older dump formats (before Chrome 17).
+    if (typeof logDump.constants.clientInfo.numericDate != 'number') {
+      errorString += 'The log file is missing clientInfo.numericDate.\n';
+
+      if (validEvents.length > 0) {
+        errorString +=
+            'Synthesizing export date as time of last event captured.\n';
+        var lastEvent = validEvents[validEvents.length - 1];
+        ClientInfo.numericDate =
+            timeutil.convertTimeTicksToDate(lastEvent.time).getTime();
+      } else {
+        errorString += 'Can\'t guess export date!\n';
+        ClientInfo.numericDate = 0;
+      }
+    }
+
     // Prevent communication with the browser.  Once the constants have been
     // loaded, it's safer to continue trying to load the log, even in the case
     // of bad data.
     MainView.getInstance().onLoadLog(opt_fileName);
 
     // Delete all events.  This will also update all logObservers.
-    g_browser.sourceTracker.deleteAllSourceEntries();
+    EventsTracker.getInstance().deleteAllLogEntries();
 
     // Inform all the views that a log file is being loaded, and pass in
     // view-specific saved state, if any.
@@ -183,35 +227,19 @@ log_util = (function() {
       var view = categoryTabSwitcher.findTabById(tabIds[i]).contentView;
       view.onLoadLogStart(logDump.polledData, logDump.tabData[tabIds[i]]);
     }
+    EventsTracker.getInstance().addLogEntries(validEvents);
 
-    // Check for validity of each log entry, and then add the ones that pass.
-    // Since the events are kept around, and we can't just hide a single view
-    // on a bad event, we have more error checking for them than other data.
-    var validPassiveEvents = [];
-    var validActiveEvents = [];
-    for (var eventIndex = 0; eventIndex < logDump.events.length; ++eventIndex) {
-      var event = logDump.events[eventIndex];
-      if (typeof(event) == 'object' && typeof(event.source) == 'object' &&
-          typeof(event.time) == 'string' &&
-          getKeyWithValue(LogEventType, event.type) != '?' &&
-          getKeyWithValue(LogSourceType, event.source.type) != '?' &&
-          getKeyWithValue(LogEventPhase, event.phase) != '?') {
-        if (event.wasPassivelyCaptured) {
-          validPassiveEvents.push(event);
-        } else {
-          validActiveEvents.push(event);
-        }
-      }
-    }
-    g_browser.sourceTracker.onReceivedPassiveLogEntries(validPassiveEvents);
-    g_browser.sourceTracker.onReceivedLogEntries(validActiveEvents);
-
-    var numInvalidEvents = logDump.events.length
-                               - validPassiveEvents.length
-                               - validActiveEvents.length;
+    var numInvalidEvents = logDump.events.length -
+        (validEvents.length + numDeprecatedPassiveEvents);
     if (numInvalidEvents > 0) {
       errorString += 'Unable to load ' + numInvalidEvents +
                      ' events, due to invalid data.\n\n';
+    }
+
+    if (numDeprecatedPassiveEvents > 0) {
+      errorString += 'Discarded ' + numDeprecatedPassiveEvents +
+          ' passively collected events. Use an older version of Chrome to' +
+          ' load this dump if you want to see them.\n\n';
     }
 
     // Update all views with data from the file.  Show only those views which

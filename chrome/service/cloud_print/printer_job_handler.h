@@ -1,10 +1,9 @@
-// Copyright (c) 2011 The Chromium Authors. All rights reserved.
+// Copyright (c) 2012 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
 #ifndef CHROME_SERVICE_CLOUD_PRINT_PRINTER_JOB_HANDLER_H_
 #define CHROME_SERVICE_CLOUD_PRINT_PRINTER_JOB_HANDLER_H_
-#pragma once
 
 #include <list>
 #include <string>
@@ -12,6 +11,7 @@
 
 #include "base/file_path.h"
 #include "base/memory/ref_counted.h"
+#include "base/memory/weak_ptr.h"
 #include "base/message_loop_proxy.h"
 #include "base/threading/thread.h"
 #include "base/time.h"
@@ -61,30 +61,13 @@ class URLFetcher;
 //                             Stop
 //               (If there are pending tasks go back to Start)
 
+namespace cloud_print {
+
 class PrinterJobHandler : public base::RefCountedThreadSafe<PrinterJobHandler>,
                           public CloudPrintURLFetcherDelegate,
                           public JobStatusUpdaterDelegate,
-                          public cloud_print::PrinterWatcherDelegate,
-                          public cloud_print::JobSpoolerDelegate {
-  enum PrintJobError {
-    SUCCESS,
-    JOB_DOWNLOAD_FAILED,
-    INVALID_JOB_DATA,
-    PRINT_FAILED,
-  };
-  struct JobDetails {
-    JobDetails();
-    ~JobDetails();
-    void Clear();
-
-    std::string job_id_;
-    std::string job_title_;
-    std::string print_ticket_;
-    FilePath print_data_file_path_;
-    std::string print_data_mime_type_;
-    std::vector<std::string> tags_;
-  };
-
+                          public PrinterWatcherDelegate,
+                          public JobSpoolerDelegate {
  public:
   class Delegate {
    public:
@@ -107,16 +90,20 @@ class PrinterJobHandler : public base::RefCountedThreadSafe<PrinterJobHandler>,
   PrinterJobHandler(const printing::PrinterBasicInfo& printer_info,
                     const PrinterInfoFromCloud& printer_info_from_server,
                     const GURL& cloud_print_server_url,
-                    cloud_print::PrintSystem* print_system,
+                    PrintSystem* print_system,
                     Delegate* delegate);
-  virtual ~PrinterJobHandler();
+
   bool Initialize();
+
   std::string GetPrinterName() const;
+
   // Requests a job check. |reason| is the reason for fetching the job. Used
   // for logging and diagnostc purposes.
   void CheckForJobs(const std::string& reason);
+
   // Shutdown everything (the process is exiting).
   void Shutdown();
+
   base::TimeTicks last_job_fetch_time() const { return last_job_fetch_time_; }
   // End public interface
 
@@ -124,18 +111,18 @@ class PrinterJobHandler : public base::RefCountedThreadSafe<PrinterJobHandler>,
 
   // CloudPrintURLFetcher::Delegate implementation.
   virtual CloudPrintURLFetcher::ResponseAction HandleRawResponse(
-      const content::URLFetcher* source,
+      const net::URLFetcher* source,
       const GURL& url,
       const net::URLRequestStatus& status,
       int response_code,
       const net::ResponseCookies& cookies,
       const std::string& data) OVERRIDE;
   virtual CloudPrintURLFetcher::ResponseAction HandleRawData(
-      const content::URLFetcher* source,
+      const net::URLFetcher* source,
       const GURL& url,
       const std::string& data) OVERRIDE;
   virtual CloudPrintURLFetcher::ResponseAction HandleJSONData(
-      const content::URLFetcher* source,
+      const net::URLFetcher* source,
       const GURL& url,
       base::DictionaryValue* json_data,
       bool succeeded) OVERRIDE;
@@ -147,62 +134,86 @@ class PrinterJobHandler : public base::RefCountedThreadSafe<PrinterJobHandler>,
   virtual bool OnJobCompleted(JobStatusUpdater* updater) OVERRIDE;
   virtual void OnAuthError() OVERRIDE;
 
-  // cloud_print::PrinterWatcherDelegate implementation
+  // PrinterWatcherDelegate implementation
   virtual void OnPrinterDeleted() OVERRIDE;
   virtual void OnPrinterChanged() OVERRIDE;
   virtual void OnJobChanged() OVERRIDE;
 
-  // cloud_print::JobSpoolerDelegate implementation.
+  // JobSpoolerDelegate implementation.
   // Called on print_thread_.
-  virtual void OnJobSpoolSucceeded(
-      const cloud_print::PlatformJobId& job_id) OVERRIDE;
+  virtual void OnJobSpoolSucceeded(const PlatformJobId& job_id) OVERRIDE;
   virtual void OnJobSpoolFailed() OVERRIDE;
 
   // End Delegate implementations
 
  private:
+  friend class base::RefCountedThreadSafe<PrinterJobHandler>;
+
+  enum PrintJobError {
+    SUCCESS,
+    JOB_DOWNLOAD_FAILED,
+    INVALID_JOB_DATA,
+    PRINT_FAILED,
+  };
+
   // Prototype for a JSON data handler.
   typedef CloudPrintURLFetcher::ResponseAction
-      (PrinterJobHandler::*JSONDataHandler)(const content::URLFetcher* source,
+      (PrinterJobHandler::*JSONDataHandler)(const net::URLFetcher* source,
                                             const GURL& url,
                                             base::DictionaryValue* json_data,
                                             bool succeeded);
   // Prototype for a data handler.
   typedef CloudPrintURLFetcher::ResponseAction
-      (PrinterJobHandler::*DataHandler)(const content::URLFetcher* source,
+      (PrinterJobHandler::*DataHandler)(const net::URLFetcher* source,
                                         const GURL& url,
                                         const std::string& data);
+
+  struct JobDetails {
+    JobDetails();
+    ~JobDetails();
+    void Clear();
+
+    std::string job_id_;
+    std::string job_title_;
+    std::string print_ticket_;
+    FilePath print_data_file_path_;
+    std::string print_data_mime_type_;
+    std::vector<std::string> tags_;
+  };
+
+  virtual ~PrinterJobHandler();
+
   // Begin request handlers for each state in the state machine
   CloudPrintURLFetcher::ResponseAction HandlePrinterUpdateResponse(
-      const content::URLFetcher* source,
+      const net::URLFetcher* source,
       const GURL& url,
       base::DictionaryValue* json_data,
       bool succeeded);
 
   CloudPrintURLFetcher::ResponseAction HandleJobMetadataResponse(
-      const content::URLFetcher* source,
+      const net::URLFetcher* source,
       const GURL& url,
       base::DictionaryValue* json_data,
       bool succeeded);
 
   CloudPrintURLFetcher::ResponseAction HandlePrintTicketResponse(
-      const content::URLFetcher* source,
+      const net::URLFetcher* source,
       const GURL& url,
       const std::string& data);
 
   CloudPrintURLFetcher::ResponseAction HandlePrintDataResponse(
-      const content::URLFetcher* source,
+      const net::URLFetcher* source,
       const GURL& url,
       const std::string& data);
 
   CloudPrintURLFetcher::ResponseAction HandleSuccessStatusUpdateResponse(
-      const content::URLFetcher* source,
+      const net::URLFetcher* source,
       const GURL& url,
       base::DictionaryValue* json_data,
       bool succeeded);
 
   CloudPrintURLFetcher::ResponseAction HandleFailureStatusUpdateResponse(
-      const content::URLFetcher* source,
+      const net::URLFetcher* source,
       const GURL& url,
       base::DictionaryValue* json_data,
       bool succeeded);
@@ -218,9 +229,8 @@ class PrinterJobHandler : public base::RefCountedThreadSafe<PrinterJobHandler>,
   void Stop();
 
   void StartPrinting();
-  void HandleServerError(const GURL& url);
   void Reset();
-  void UpdateJobStatus(cloud_print::PrintJobStatus status, PrintJobError error);
+  void UpdateJobStatus(PrintJobStatus status, PrintJobError error);
 
   // Sets the next response handler to the specifed JSON data handler.
   void SetNextJSONHandler(JSONDataHandler handler);
@@ -228,7 +238,7 @@ class PrinterJobHandler : public base::RefCountedThreadSafe<PrinterJobHandler>,
   void SetNextDataHandler(DataHandler handler);
 
   void JobFailed(PrintJobError error);
-  void JobSpooled(cloud_print::PlatformJobId local_job_id);
+  void JobSpooled(PlatformJobId local_job_id);
   // Returns false if printer info is up to date and no updating is needed.
   bool UpdatePrinterInfo();
   bool HavePendingTasks();
@@ -245,7 +255,7 @@ class PrinterJobHandler : public base::RefCountedThreadSafe<PrinterJobHandler>,
                const std::string& printer_name);
 
   scoped_refptr<CloudPrintURLFetcher> request_;
-  scoped_refptr<cloud_print::PrintSystem> print_system_;
+  scoped_refptr<PrintSystem> print_system_;
   printing::PrinterBasicInfo printer_info_;
   PrinterInfoFromCloud printer_info_cloud_;
   GURL cloud_print_server_url_;
@@ -254,7 +264,7 @@ class PrinterJobHandler : public base::RefCountedThreadSafe<PrinterJobHandler>,
   Delegate* delegate_;
   // Once the job has been spooled to the local spooler, this specifies the
   // job id of the job on the local spooler.
-  cloud_print::PlatformJobId local_job_id_;
+  PlatformJobId local_job_id_;
 
   // The next response handler can either be a JSONDataHandler or a
   // DataHandler (depending on the current request being made).
@@ -266,7 +276,7 @@ class PrinterJobHandler : public base::RefCountedThreadSafe<PrinterJobHandler>,
   base::Thread print_thread_;
   // The Job spooler object. This is only non-NULL during a print operation.
   // It lives and dies on |print_thread_|
-  scoped_refptr<cloud_print::PrintSystem::JobSpooler> job_spooler_;
+  scoped_refptr<PrintSystem::JobSpooler> job_spooler_;
   // The message loop proxy representing the thread on which this object
   // was created. Used by the print thread.
   scoped_refptr<base::MessageLoopProxy> job_handler_message_loop_proxy_;
@@ -284,11 +294,12 @@ class PrinterJobHandler : public base::RefCountedThreadSafe<PrinterJobHandler>,
 
   // Some task in the state machine is in progress.
   bool task_in_progress_;
-  scoped_refptr<cloud_print::PrintSystem::PrinterWatcher> printer_watcher_;
+  scoped_refptr<PrintSystem::PrinterWatcher> printer_watcher_;
   typedef std::list< scoped_refptr<JobStatusUpdater> > JobStatusUpdaterList;
   JobStatusUpdaterList job_status_updater_list_;
 
   base::TimeTicks last_job_fetch_time_;
+  base::WeakPtrFactory<PrinterJobHandler> weak_ptr_factory_;
 
   DISALLOW_COPY_AND_ASSIGN(PrinterJobHandler);
 };
@@ -298,5 +309,7 @@ class PrinterJobHandler : public base::RefCountedThreadSafe<PrinterJobHandler>,
 // classes and gives a C2500 error. (I saw this error on the try bots -
 // the workaround was not needed for my machine).
 typedef PrinterJobHandler::Delegate PrinterJobHandlerDelegate;
+
+}  // namespace cloud_print
 
 #endif  // CHROME_SERVICE_CLOUD_PRINT_PRINTER_JOB_HANDLER_H_

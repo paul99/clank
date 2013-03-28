@@ -1,4 +1,4 @@
-// Copyright (c) 2011 The Chromium Authors. All rights reserved.
+// Copyright (c) 2012 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -17,15 +17,17 @@
 namespace ppapi {
 namespace proxy {
 
-
-Dispatcher::Dispatcher(base::ProcessHandle remote_process_handle,
-                       GetInterfaceFunc local_get_interface)
-    : ProxyChannel(remote_process_handle),
-      disallow_trusted_interfaces_(false),  // TODO(brettw) make this settable.
-      local_get_interface_(local_get_interface) {
+Dispatcher::Dispatcher(PP_GetInterface_Func local_get_interface,
+                       const PpapiPermissions& permissions)
+    : local_get_interface_(local_get_interface),
+      permissions_(permissions) {
 }
 
 Dispatcher::~Dispatcher() {
+}
+
+void Dispatcher::AddFilter(IPC::Listener* listener) {
+  filters_.push_back(listener);
 }
 
 InterfaceProxy* Dispatcher::GetInterfaceProxy(ApiID id) {
@@ -51,6 +53,9 @@ base::MessageLoopProxy* Dispatcher::GetIPCMessageLoop() {
 
 void Dispatcher::AddIOThreadMessageFilter(
     IPC::ChannelProxy::MessageFilter* filter) {
+  // Our filter is refcounted. The channel will call the destruct method on the
+  // filter when the channel is done with it, so the corresponding Release()
+  // happens there.
   channel()->AddFilter(filter);
 }
 
@@ -71,7 +76,7 @@ bool Dispatcher::OnMessageReceived(const IPC::Message& msg) {
 
 void Dispatcher::SetSerializationRules(
     VarSerializationRules* var_serialization_rules) {
-  serialization_rules_.reset(var_serialization_rules);
+  serialization_rules_ = var_serialization_rules;
 }
 
 void Dispatcher::OnInvalidMessageReceived() {

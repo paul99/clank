@@ -18,7 +18,12 @@ namespace protocol {
 const char kTestJid[] = "host1@gmail.com/chromoting123";
 
 FakeSocket::FakeSocket()
-    : read_pending_(false),
+    : async_write_(false),
+      write_pending_(false),
+      write_limit_(0),
+      next_write_error_(net::OK),
+      next_read_error_(net::OK),
+      read_pending_(false),
       read_buffer_size_(0),
       input_pos_(0),
       message_loop_(MessageLoop::current()),
@@ -55,6 +60,13 @@ void FakeSocket::PairWith(FakeSocket* peer_socket) {
 int FakeSocket::Read(net::IOBuffer* buf, int buf_len,
                      const net::CompletionCallback& callback) {
   EXPECT_EQ(message_loop_, MessageLoop::current());
+
+  if (next_read_error_ != net::OK) {
+    int r = next_read_error_;
+    next_read_error_ = net::OK;
+    return r;
+  }
+
   if (input_pos_ < static_cast<int>(input_data_.size())) {
     int result = std::min(buf_len,
                           static_cast<int>(input_data_.size()) - input_pos_);
@@ -73,6 +85,45 @@ int FakeSocket::Read(net::IOBuffer* buf, int buf_len,
 int FakeSocket::Write(net::IOBuffer* buf, int buf_len,
                       const net::CompletionCallback& callback) {
   EXPECT_EQ(message_loop_, MessageLoop::current());
+  EXPECT_FALSE(write_pending_);
+
+  if (write_limit_ > 0)
+    buf_len = std::min(write_limit_, buf_len);
+
+  if (async_write_) {
+    message_loop_->PostTask(FROM_HERE, base::Bind(
+        &FakeSocket::DoAsyncWrite, weak_factory_.GetWeakPtr(),
+        scoped_refptr<net::IOBuffer>(buf), buf_len, callback));
+    write_pending_ = true;
+    return net::ERR_IO_PENDING;
+  } else {
+    if (next_write_error_ != net::OK) {
+      int r = next_write_error_;
+      next_write_error_ = net::OK;
+      return r;
+    }
+
+    DoWrite(buf, buf_len);
+    return buf_len;
+  }
+}
+
+void FakeSocket::DoAsyncWrite(scoped_refptr<net::IOBuffer> buf, int buf_len,
+                              const net::CompletionCallback& callback) {
+  write_pending_ = false;
+
+  if (next_write_error_ != net::OK) {
+    int r = next_write_error_;
+    next_write_error_ = net::OK;
+    callback.Run(r);
+    return;
+  }
+
+  DoWrite(buf, buf_len);
+  callback.Run(buf_len);
+}
+
+void FakeSocket::DoWrite(net::IOBuffer* buf, int buf_len) {
   written_data_.insert(written_data_.end(),
                        buf->data(), buf->data() + buf_len);
 
@@ -81,8 +132,6 @@ int FakeSocket::Write(net::IOBuffer* buf, int buf_len,
         &FakeSocket::AppendInputData, peer_socket_,
         std::vector<char>(buf->data(), buf->data() + buf_len)));
   }
-
-  return buf_len;
 }
 
 bool FakeSocket::SetReceiveBufferSize(int32 size) {
@@ -113,15 +162,13 @@ bool FakeSocket::IsConnectedAndIdle() const {
   return false;
 }
 
-int FakeSocket::GetPeerAddress(net::AddressList* address) const {
-  net::IPAddressNumber ip;
-  ip.resize(net::kIPv4AddressSize);
-  *address = net::AddressList::CreateFromIPAddress(ip, 0);
+int FakeSocket::GetPeerAddress(net::IPEndPoint* address) const {
+  net::IPAddressNumber ip(net::kIPv4AddressSize);
+  *address = net::IPEndPoint(ip, 0);
   return net::OK;
 }
 
-int FakeSocket::GetLocalAddress(
-    net::IPEndPoint* address) const {
+int FakeSocket::GetLocalAddress(net::IPEndPoint* address) const {
   NOTIMPLEMENTED();
   return net::ERR_FAILED;
 }
@@ -157,6 +204,19 @@ int64 FakeSocket::NumBytesRead() const {
 base::TimeDelta FakeSocket::GetConnectTimeMicros() const {
   NOTIMPLEMENTED();
   return base::TimeDelta();
+}
+
+bool FakeSocket::WasNpnNegotiated() const {
+  return false;
+}
+
+net::NextProto FakeSocket::GetNegotiatedProtocol() const {
+  NOTIMPLEMENTED();
+  return net::kProtoUnknown;
+}
+
+bool FakeSocket::GetSSLInfo(net::SSLInfo* ssl_info) {
+  return false;
 }
 
 FakeUdpSocket::FakeUdpSocket()
@@ -221,12 +281,15 @@ bool FakeUdpSocket::SetSendBufferSize(int32 size) {
 }
 
 FakeSession::FakeSession()
-    : candidate_config_(CandidateSessionConfig::CreateDefault()),
-      config_(SessionConfig::GetDefault()),
-      message_loop_(NULL),
+    : event_handler_(NULL),
+      candidate_config_(CandidateSessionConfig::CreateDefault()),
+      config_(SessionConfig::ForTest()),
+      message_loop_(MessageLoop::current()),
+      async_creation_(false),
       jid_(kTestJid),
       error_(OK),
-      closed_(false) {
+      closed_(false),
+      ALLOW_THIS_IN_INITIALIZER_LIST(weak_factory_(this)) {
 }
 
 FakeSession::~FakeSession() { }
@@ -239,33 +302,12 @@ FakeUdpSocket* FakeSession::GetDatagramChannel(const std::string& name) {
   return datagram_channels_[name];
 }
 
-void FakeSession::SetStateChangeCallback(const StateChangeCallback& callback) {
-  callback_ = callback;
+void FakeSession::SetEventHandler(EventHandler* event_handler) {
+  event_handler_ = event_handler;
 }
 
-void FakeSession::SetRouteChangeCallback(const RouteChangeCallback& callback) {
-  NOTIMPLEMENTED();
-}
-
-Session::Error FakeSession::error() {
+ErrorCode FakeSession::error() {
   return error_;
-}
-
-void FakeSession::CreateStreamChannel(
-    const std::string& name, const StreamChannelCallback& callback) {
-  FakeSocket* channel = new FakeSocket();
-  stream_channels_[name] = channel;
-  callback.Run(channel);
-}
-
-void FakeSession::CreateDatagramChannel(
-    const std::string& name, const DatagramChannelCallback& callback) {
-  FakeUdpSocket* channel = new FakeUdpSocket();
-  datagram_channels_[name] = channel;
-  callback.Run(channel);
-}
-
-void FakeSession::CancelChannelCreation(const std::string& name) {
 }
 
 const std::string& FakeSession::jid() {
@@ -284,8 +326,73 @@ void FakeSession::set_config(const SessionConfig& config) {
   config_ = config;
 }
 
+ChannelFactory* FakeSession::GetTransportChannelFactory() {
+  return this;
+}
+
+ChannelFactory* FakeSession::GetMultiplexedChannelFactory() {
+  return this;
+}
+
 void FakeSession::Close() {
   closed_ = true;
+}
+
+void FakeSession::CreateStreamChannel(
+    const std::string& name,
+    const StreamChannelCallback& callback) {
+  scoped_ptr<FakeSocket> channel;
+  // If we are in the error state then we put NULL in the channels list, so that
+  // NotifyStreamChannelCallback() still calls the callback.
+  if (error_ == OK)
+    channel.reset(new FakeSocket());
+  stream_channels_[name] = channel.release();
+
+  if (async_creation_) {
+    message_loop_->PostTask(FROM_HERE, base::Bind(
+        &FakeSession::NotifyStreamChannelCallback, weak_factory_.GetWeakPtr(),
+        name, callback));
+  } else {
+    NotifyStreamChannelCallback(name, callback);
+  }
+}
+
+void FakeSession::NotifyStreamChannelCallback(
+    const std::string& name,
+    const StreamChannelCallback& callback) {
+  if (stream_channels_.find(name) != stream_channels_.end())
+    callback.Run(scoped_ptr<net::StreamSocket>(stream_channels_[name]));
+}
+
+void FakeSession::CreateDatagramChannel(
+    const std::string& name,
+    const DatagramChannelCallback& callback) {
+  scoped_ptr<FakeUdpSocket> channel;
+  // If we are in the error state then we put NULL in the channels list, so that
+  // NotifyStreamChannelCallback() still calls the callback.
+  if (error_ == OK)
+    channel.reset(new FakeUdpSocket());
+  datagram_channels_[name] = channel.release();
+
+  if (async_creation_) {
+    message_loop_->PostTask(FROM_HERE, base::Bind(
+        &FakeSession::NotifyDatagramChannelCallback, weak_factory_.GetWeakPtr(),
+        name, callback));
+  } else {
+    NotifyDatagramChannelCallback(name, callback);
+  }
+}
+
+void FakeSession::NotifyDatagramChannelCallback(
+    const std::string& name,
+    const DatagramChannelCallback& callback) {
+  if (datagram_channels_.find(name) != datagram_channels_.end())
+    callback.Run(scoped_ptr<net::Socket>(datagram_channels_[name]));
+}
+
+void FakeSession::CancelChannelCreation(const std::string& name) {
+  stream_channels_.erase(name);
+  datagram_channels_.erase(name);
 }
 
 }  // namespace protocol

@@ -1,10 +1,9 @@
-// Copyright (c) 2011 The Chromium Authors. All rights reserved.
+// Copyright (c) 2012 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
 #ifndef CHROME_BROWSER_PASSWORD_MANAGER_PASSWORD_STORE_H_
 #define CHROME_BROWSER_PASSWORD_MANAGER_PASSWORD_STORE_H_
-#pragma once
 
 #include <vector>
 
@@ -13,7 +12,9 @@
 #include "base/observer_list.h"
 #include "base/threading/thread.h"
 #include "base/time.h"
-#include "chrome/browser/cancelable_request.h"
+#include "chrome/browser/common/cancelable_request.h"
+#include "chrome/browser/profiles/refcounted_profile_keyed_service.h"
+#include "chrome/common/cancelable_task_tracker.h"
 
 class PasswordStore;
 class PasswordStoreConsumer;
@@ -25,45 +26,50 @@ class PasswordModelAssociator;
 class PasswordModelWorker;
 }
 
-namespace webkit {
-namespace forms {
+namespace content {
 struct PasswordForm;
-}
 }
 
 namespace passwords_helper {
-void AddLogin(PasswordStore* store, const webkit::forms::PasswordForm& form);
-void RemoveLogin(PasswordStore* store, const webkit::forms::PasswordForm& form);
-void UpdateLogin(PasswordStore* store, const webkit::forms::PasswordForm& form);
+void AddLogin(PasswordStore* store, const content::PasswordForm& form);
+void RemoveLogin(PasswordStore* store, const content::PasswordForm& form);
+void UpdateLogin(PasswordStore* store, const content::PasswordForm& form);
 }
 
 // Interface for storing form passwords in a platform-specific secure way.
 // The login request/manipulation API is not threadsafe and must be used
 // from the UI thread.
 class PasswordStore
-    : public base::RefCountedThreadSafe<PasswordStore>,
+    : public RefcountedProfileKeyedService,
       public CancelableRequestProvider {
  public:
   typedef base::Callback<
-      void(Handle, const std::vector<webkit::forms::PasswordForm*>&)>
+      void(Handle, const std::vector<content::PasswordForm*>&)>
       GetLoginsCallback;
 
   // PasswordForm vector elements are meant to be owned by the
   // PasswordStoreConsumer. However, if the request is canceled after the
   // allocation, then the request must take care of the deletion.
-  // TODO(scr) If we can convert vector<PasswordForm*> to
-  // ScopedVector<PasswordForm>, then we can move the following class to merely
-  // a typedef. At the moment, a subclass of CancelableRequest1 is required to
-  // provide a destructor, which cleans up after canceled requests by deleting
-  // vector elements.
   class GetLoginsRequest
       : public CancelableRequest1<GetLoginsCallback,
-                                  std::vector<webkit::forms::PasswordForm*> > {
+                                  std::vector<content::PasswordForm*> > {
    public:
     explicit GetLoginsRequest(const GetLoginsCallback& callback);
+
+    void set_ignore_logins_cutoff(const base::Time& cutoff) {
+      ignore_logins_cutoff_ = cutoff;
+    }
+
+    // Removes any logins in the result list that were saved before the cutoff.
+    void ApplyIgnoreLoginsCutoff();
+
+   protected:
     virtual ~GetLoginsRequest();
 
    private:
+    // See GetLogins(). Logins older than this will be removed from the reply.
+    base::Time ignore_logins_cutoff_;
+
     DISALLOW_COPY_AND_ASSIGN(GetLoginsRequest);
   };
 
@@ -84,27 +90,25 @@ class PasswordStore
   // Reimplement this to add custom initialization. Always call this too.
   virtual bool Init();
 
-  // Invoked from the profiles destructor to shutdown the PasswordStore.
-  virtual void Shutdown();
-
   // Adds the given PasswordForm to the secure password store asynchronously.
-  virtual void AddLogin(const webkit::forms::PasswordForm& form);
+  virtual void AddLogin(const content::PasswordForm& form);
 
   // Updates the matching PasswordForm in the secure password store (async).
-  void UpdateLogin(const webkit::forms::PasswordForm& form);
+  void UpdateLogin(const content::PasswordForm& form);
 
   // Removes the matching PasswordForm from the secure password store (async).
-  void RemoveLogin(const webkit::forms::PasswordForm& form);
+  void RemoveLogin(const content::PasswordForm& form);
 
   // Removes all logins created in the given date range.
   void RemoveLoginsCreatedBetween(const base::Time& delete_begin,
                                   const base::Time& delete_end);
 
-  // Searches for a matching PasswordForm and returns a handle so the async
-  // request can be tracked. Implement the PasswordStoreConsumer interface to be
+  // Searches for a matching PasswordForm and returns a ID so the async request
+  // can be tracked. Implement the PasswordStoreConsumer interface to be
   // notified on completion.
-  virtual Handle GetLogins(const webkit::forms::PasswordForm& form,
-                           PasswordStoreConsumer* consumer);
+  virtual CancelableTaskTracker::TaskId GetLogins(
+      const content::PasswordForm& form,
+      PasswordStoreConsumer* consumer);
 
   // Gets the complete list of PasswordForms that are not blacklist entries--and
   // are thus auto-fillable--and returns a handle so the async request can be
@@ -132,11 +136,11 @@ class PasswordStore
   friend class browser_sync::PasswordModelAssociator;
   friend class browser_sync::PasswordModelWorker;
   friend void passwords_helper::AddLogin(PasswordStore*,
-                                         const webkit::forms::PasswordForm&);
+                                         const content::PasswordForm&);
   friend void passwords_helper::RemoveLogin(PasswordStore*,
-                                            const webkit::forms::PasswordForm&);
+                                            const content::PasswordForm&);
   friend void passwords_helper::UpdateLogin(PasswordStore*,
-                                            const webkit::forms::PasswordForm&);
+                                            const content::PasswordForm&);
 
   virtual ~PasswordStore();
 
@@ -145,26 +149,34 @@ class PasswordStore
   virtual GetLoginsRequest* NewGetLoginsRequest(
       const GetLoginsCallback& callback);
 
-  // Schedule the given |task| to be run in the PasswordStore's own thread.
-  virtual void ScheduleTask(const base::Closure& task);
+  // Schedule the given |task| to be run in the PasswordStore's task thread. By
+  // default it uses DB thread, but sub classes can override to use other
+  // threads.
+  virtual bool ScheduleTask(const base::Closure& task);
 
   // These will be run in PasswordStore's own thread.
   // Synchronous implementation that reports usage metrics.
   virtual void ReportMetricsImpl() = 0;
   // Synchronous implementation to add the given login.
-  virtual void AddLoginImpl(const webkit::forms::PasswordForm& form) = 0;
+  virtual void AddLoginImpl(const content::PasswordForm& form) = 0;
   // Synchronous implementation to update the given login.
-  virtual void UpdateLoginImpl(const webkit::forms::PasswordForm& form) = 0;
+  virtual void UpdateLoginImpl(const content::PasswordForm& form) = 0;
   // Synchronous implementation to remove the given login.
-  virtual void RemoveLoginImpl(const webkit::forms::PasswordForm& form) = 0;
+  virtual void RemoveLoginImpl(const content::PasswordForm& form) = 0;
   // Synchronous implementation to remove the given logins.
   virtual void RemoveLoginsCreatedBetweenImpl(const base::Time& delete_begin,
                                               const base::Time& delete_end) = 0;
+
+  typedef base::Callback<void(const std::vector<content::PasswordForm*>&)>
+      ConsumerCallbackRunner;  // Owns all PasswordForms in the vector.
+
   // Should find all PasswordForms with the same signon_realm. The results
   // will then be scored by the PasswordFormManager. Once they are found
   // (or not), the consumer should be notified.
-  virtual void GetLoginsImpl(GetLoginsRequest* request,
-                             const webkit::forms::PasswordForm& form) = 0;
+  virtual void GetLoginsImpl(
+      const content::PasswordForm& form,
+      const ConsumerCallbackRunner& callback_runner) = 0;
+
   // Finds all non-blacklist PasswordForms, and notifies the consumer.
   virtual void GetAutofillableLoginsImpl(GetLoginsRequest* request) = 0;
   // Finds all blacklist PasswordForms, and notifies the consumer.
@@ -172,28 +184,30 @@ class PasswordStore
 
   // Finds all non-blacklist PasswordForms, and fills the vector.
   virtual bool FillAutofillableLogins(
-      std::vector<webkit::forms::PasswordForm*>* forms) = 0;
+      std::vector<content::PasswordForm*>* forms) = 0;
   // Finds all blacklist PasswordForms, and fills the vector.
   virtual bool FillBlacklistLogins(
-      std::vector<webkit::forms::PasswordForm*>* forms) = 0;
+      std::vector<content::PasswordForm*>* forms) = 0;
 
   // Dispatches the result to the PasswordStoreConsumer on the original caller's
-  // thread so the callback can be executed there.  This should be the UI
-  // thread.
+  // thread so the callback can be executed there. This should be the UI thread.
   virtual void ForwardLoginsResult(GetLoginsRequest* request);
 
+ private:
   // Schedule the given |func| to be run in the PasswordStore's own thread with
   // responses delivered to |consumer| on the current thread.
   template<typename BackendFunc>
   Handle Schedule(BackendFunc func, PasswordStoreConsumer* consumer);
 
   // Schedule the given |func| to be run in the PasswordStore's own thread with
-  // argument |a| and responses delivered to |consumer| on the current thread.
-  template<typename BackendFunc, typename ArgA>
-  Handle Schedule(BackendFunc func, PasswordStoreConsumer* consumer,
-                  const ArgA& a);
+  // form |form| and responses delivered to |consumer| on the current thread.
+  // See GetLogins() for more information on |ignore_logins_cutoff|.
+  template<typename BackendFunc>
+  Handle Schedule(BackendFunc func,
+                  PasswordStoreConsumer* consumer,
+                  const content::PasswordForm& form,
+                  const base::Time& ignore_logins_cutoff);
 
- private:
   // Wrapper method called on the destination thread (DB for non-mac) that
   // invokes |task| and then calls back into the source thread to notify
   // observers that the password store may have been modified via

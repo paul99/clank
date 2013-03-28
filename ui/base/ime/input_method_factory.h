@@ -4,9 +4,9 @@
 
 #ifndef UI_BASE_IME_INPUT_METHOD_FACTORY_H_
 #define UI_BASE_IME_INPUT_METHOD_FACTORY_H_
-#pragma once
 
 #include "ui/base/ui_export.h"
+#include "ui/gfx/native_widget_types.h"
 
 namespace ui {
 
@@ -19,7 +19,8 @@ class InputMethodDelegate;
 // Creates and returns an input method implementation for the platform. Caller
 // must delete the object. The object does not own |delegate|.
 UI_EXPORT InputMethod* CreateInputMethod(
-    internal::InputMethodDelegate* delegate);
+    internal::InputMethodDelegate* delegate,
+    gfx::AcceleratedWidget widget);
 
 }  // namespace ui;
 

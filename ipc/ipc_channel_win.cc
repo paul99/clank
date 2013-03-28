@@ -10,12 +10,14 @@
 #include "base/bind.h"
 #include "base/compiler_specific.h"
 #include "base/logging.h"
+#include "base/pickle.h"
 #include "base/process_util.h"
 #include "base/rand_util.h"
 #include "base/string_number_conversions.h"
-#include "base/threading/non_thread_safe.h"
+#include "base/threading/thread_checker.h"
 #include "base/utf_string_conversions.h"
 #include "base/win/scoped_handle.h"
+#include "ipc/ipc_listener.h"
 #include "ipc/ipc_logging.h"
 #include "ipc/ipc_message_utils.h"
 
@@ -33,10 +35,11 @@ Channel::ChannelImpl::State::~State() {
 
 Channel::ChannelImpl::ChannelImpl(const IPC::ChannelHandle &channel_handle,
                                   Mode mode, Listener* listener)
-    : ALLOW_THIS_IN_INITIALIZER_LIST(input_state_(this)),
+    : ChannelReader(listener),
+      ALLOW_THIS_IN_INITIALIZER_LIST(input_state_(this)),
       ALLOW_THIS_IN_INITIALIZER_LIST(output_state_(this)),
       pipe_(INVALID_HANDLE_VALUE),
-      listener_(listener),
+      peer_pid_(base::kNullProcessId),
       waiting_connect_(mode & MODE_SERVER_FLAG),
       processing_incoming_(false),
       ALLOW_THIS_IN_INITIALIZER_LIST(weak_factory_(this)),
@@ -87,6 +90,7 @@ bool Channel::ChannelImpl::Send(Message* message) {
   Logging::GetInstance()->OnSendMessage(message, "");
 #endif
 
+  message->TraceMessageBegin();
   output_queue_.push(message);
   // ensure waiting to write
   if (!waiting_connect_) {
@@ -107,6 +111,74 @@ bool Channel::ChannelImpl::IsNamedServerInitialized(
   // If ERROR_SEM_TIMEOUT occurred, the pipe exists but is handling another
   // connection.
   return GetLastError() == ERROR_SEM_TIMEOUT;
+}
+
+Channel::ChannelImpl::ReadState Channel::ChannelImpl::ReadData(
+    char* buffer,
+    int buffer_len,
+    int* /* bytes_read */) {
+  if (INVALID_HANDLE_VALUE == pipe_)
+    return READ_FAILED;
+
+  DWORD bytes_read = 0;
+  BOOL ok = ReadFile(pipe_, buffer, buffer_len,
+                     &bytes_read, &input_state_.context.overlapped);
+  if (!ok) {
+    DWORD err = GetLastError();
+    if (err == ERROR_IO_PENDING) {
+      input_state_.is_pending = true;
+      return READ_PENDING;
+    }
+    LOG(ERROR) << "pipe error: " << err;
+    return READ_FAILED;
+  }
+
+  // We could return READ_SUCCEEDED here. But the way that this code is
+  // structured we instead go back to the message loop. Our completion port
+  // will be signalled even in the "synchronously completed" state.
+  //
+  // This allows us to potentially process some outgoing messages and
+  // interleave other work on this thread when we're getting hammered with
+  // input messages. Potentially, this could be tuned to be more efficient
+  // with some testing.
+  input_state_.is_pending = true;
+  return READ_PENDING;
+}
+
+bool Channel::ChannelImpl::WillDispatchInputMessage(Message* msg) {
+  // Make sure we get a hello when client validation is required.
+  if (validate_client_)
+    return IsHelloMessage(*msg);
+  return true;
+}
+
+void Channel::ChannelImpl::HandleHelloMessage(const Message& msg) {
+  // The hello message contains one parameter containing the PID.
+  PickleIterator it(msg);
+  int32 claimed_pid;
+  bool failed = !it.ReadInt(&claimed_pid);
+
+  if (!failed && validate_client_) {
+    int32 secret;
+    failed = it.ReadInt(&secret) ? (secret != client_secret_) : true;
+  }
+
+  if (failed) {
+    NOTREACHED();
+    Close();
+    listener()->OnChannelError();
+    return;
+  }
+
+  peer_pid_ = claimed_pid;
+  // Validation completed.
+  validate_client_ = false;
+  listener()->OnChannelConnected(claimed_pid);
+}
+
+bool Channel::ChannelImpl::DidEmptyInputBuffers() {
+  // We don't need to do anything here.
+  return true;
 }
 
 // static
@@ -189,7 +261,7 @@ bool Channel::ChannelImpl::CreatePipe(const IPC::ChannelHandle &channel_handle,
   if (pipe_ == INVALID_HANDLE_VALUE) {
     // If this process is being closed, the pipe may be gone already.
     LOG(WARNING) << "Unable to create pipe \"" << pipe_name <<
-                    "\" in " << (mode == 0 ? "server" : "client")
+                    "\" in " << (mode & MODE_SERVER_FLAG ? "server" : "client")
                     << " mode. Error :" << GetLastError();
     return false;
   }
@@ -217,7 +289,7 @@ bool Channel::ChannelImpl::Connect() {
   DLOG_IF(WARNING, thread_check_.get()) << "Connect called more than once";
 
   if (!thread_check_.get())
-    thread_check_.reset(new base::NonThreadSafe());
+    thread_check_.reset(new base::ThreadChecker());
 
   if (pipe_ == INVALID_HANDLE_VALUE)
     return false;
@@ -275,101 +347,6 @@ bool Channel::ChannelImpl::ProcessConnection() {
   default:
     NOTREACHED();
     return false;
-  }
-
-  return true;
-}
-
-bool Channel::ChannelImpl::ProcessIncomingMessages(
-    MessageLoopForIO::IOContext* context,
-    DWORD bytes_read) {
-  DCHECK(thread_check_->CalledOnValidThread());
-  if (input_state_.is_pending) {
-    input_state_.is_pending = false;
-    DCHECK(context);
-
-    if (!context || !bytes_read)
-      return false;
-  } else {
-    // This happens at channel initialization.
-    DCHECK(!bytes_read && context == &input_state_.context);
-  }
-
-  for (;;) {
-    if (bytes_read == 0) {
-      if (INVALID_HANDLE_VALUE == pipe_)
-        return false;
-
-      // Read from pipe...
-      BOOL ok = ReadFile(pipe_,
-                         input_buf_,
-                         Channel::kReadBufferSize,
-                         &bytes_read,
-                         &input_state_.context.overlapped);
-      if (!ok) {
-        DWORD err = GetLastError();
-        if (err == ERROR_IO_PENDING) {
-          input_state_.is_pending = true;
-          return true;
-        }
-        LOG(ERROR) << "pipe error: " << err;
-        return false;
-      }
-      input_state_.is_pending = true;
-      return true;
-    }
-    DCHECK(bytes_read);
-
-    // Process messages from input buffer.
-
-    const char* p, *end;
-    if (input_overflow_buf_.empty()) {
-      p = input_buf_;
-      end = p + bytes_read;
-    } else {
-      if (input_overflow_buf_.size() > (kMaximumMessageSize - bytes_read)) {
-        input_overflow_buf_.clear();
-        LOG(ERROR) << "IPC message is too big";
-        return false;
-      }
-      input_overflow_buf_.append(input_buf_, bytes_read);
-      p = input_overflow_buf_.data();
-      end = p + input_overflow_buf_.size();
-    }
-
-    while (p < end) {
-      const char* message_tail = Message::FindNext(p, end);
-      if (message_tail) {
-        int len = static_cast<int>(message_tail - p);
-        const Message m(p, len);
-        DVLOG(2) << "received message on channel @" << this
-                 << " with type " << m.type();
-        // Handle the hello message (must be the first message).
-        if (validate_client_ || (m.routing_id() == MSG_ROUTING_NONE &&
-                                 m.type() == HELLO_MESSAGE_TYPE)) {
-          MessageIterator it = MessageIterator(m);
-          int32 claimed_pid =  it.NextInt();
-          if (validate_client_ && (it.NextInt() != client_secret_)) {
-            NOTREACHED();
-            // Something went wrong. Abort connection.
-            Close();
-            listener_->OnChannelError();
-            return false;
-          }
-          validate_client_ = false;
-          listener_->OnChannelConnected(claimed_pid);
-        } else {
-          listener_->OnMessageReceived(m);
-        }
-        p = message_tail;
-      } else {
-        // Last message is partial.
-        break;
-      }
-    }
-    input_overflow_buf_.assign(p, end - p);
-
-    bytes_read = 0;  // Get more data.
   }
 
   return true;
@@ -433,8 +410,9 @@ bool Channel::ChannelImpl::ProcessOutgoingMessages(
 }
 
 void Channel::ChannelImpl::OnIOCompleted(MessageLoopForIO::IOContext* context,
-                            DWORD bytes_transfered, DWORD error) {
-  bool ok;
+                                         DWORD bytes_transfered,
+                                         DWORD error) {
+  bool ok = true;
   DCHECK(thread_check_->CalledOnValidThread());
   if (context == &input_state_.context) {
     if (waiting_connect_) {
@@ -447,10 +425,27 @@ void Channel::ChannelImpl::OnIOCompleted(MessageLoopForIO::IOContext* context,
         return;
       // else, fall-through and look for incoming messages...
     }
-    // we don't support recursion through OnMessageReceived yet!
+
+    // We don't support recursion through OnMessageReceived yet!
     DCHECK(!processing_incoming_);
-    AutoReset<bool> auto_reset_processing_incoming(&processing_incoming_, true);
-    ok = ProcessIncomingMessages(context, bytes_transfered);
+    base::AutoReset<bool> auto_reset_processing_incoming(
+        &processing_incoming_, true);
+
+    // Process the new data.
+    if (input_state_.is_pending) {
+      // This is the normal case for everything except the initialization step.
+      input_state_.is_pending = false;
+      if (!bytes_transfered)
+        ok = false;
+      else
+        ok = AsyncReadComplete(bytes_transfered);
+    } else {
+      DCHECK(!bytes_transfered);
+    }
+
+    // Request more data.
+    if (ok)
+      ok = ProcessIncomingMessages();
   } else {
     DCHECK(context == &output_state_.context);
     ok = ProcessOutgoingMessages(context, bytes_transfered);
@@ -458,7 +453,7 @@ void Channel::ChannelImpl::OnIOCompleted(MessageLoopForIO::IOContext* context,
   if (!ok && INVALID_HANDLE_VALUE != pipe_) {
     // We don't want to re-enter Close().
     Close();
-    listener_->OnChannelError();
+    listener()->OnChannelError();
   }
 }
 
@@ -478,11 +473,16 @@ bool Channel::Connect() {
 }
 
 void Channel::Close() {
-  channel_impl_->Close();
+  if (channel_impl_)
+    channel_impl_->Close();
 }
 
 void Channel::set_listener(Listener* listener) {
   channel_impl_->set_listener(listener);
+}
+
+base::ProcessId Channel::peer_pid() const {
+  return channel_impl_->peer_pid();
 }
 
 bool Channel::Send(Message* message) {

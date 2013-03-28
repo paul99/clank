@@ -4,7 +4,6 @@
 
 #ifndef CHROME_BROWSER_CHROMEOS_EXTENSIONS_MEDIA_PLAYER_EVENT_ROUTER_H_
 #define CHROME_BROWSER_CHROMEOS_EXTENSIONS_MEDIA_PLAYER_EVENT_ROUTER_H_
-#pragma once
 
 #include "base/basictypes.h"
 
@@ -18,7 +17,17 @@ class ExtensionMediaPlayerEventRouter {
 
   void Init(Profile* profile);
 
+  // Send notification that next-track shortcut key was pressed.
+  void NotifyNextTrack();
+
+  // Send notification that playlist changed.
   void NotifyPlaylistChanged();
+
+  // Send notification that previous-track shortcut key was pressed.
+  void NotifyPrevTrack();
+
+  // Send notification that play/pause shortcut key was pressed.
+  void NotifyTogglePlayState();
 
  private:
   Profile* profile_;

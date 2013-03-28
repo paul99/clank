@@ -1,4 +1,4 @@
-// Copyright (c) 2011 The Chromium Authors. All rights reserved.
+// Copyright (c) 2012 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -10,6 +10,7 @@
 #include "base/callback.h"
 #include "base/file_path.h"
 #include "base/memory/ref_counted.h"
+#include "base/memory/ref_counted_memory.h"
 #include "base/memory/scoped_ptr.h"
 #include "base/message_loop.h"
 #include "base/platform_file.h"
@@ -18,6 +19,8 @@
 #include "base/values.h"
 #include "chrome/browser/bookmarks/bookmark_codec.h"
 #include "chrome/browser/bookmarks/bookmark_model.h"
+#include "chrome/browser/bookmarks/bookmark_model_factory.h"
+#include "chrome/browser/favicon/favicon_service_factory.h"
 #include "chrome/browser/history/history_types.h"
 #include "chrome/browser/profiles/profile.h"
 #include "chrome/common/chrome_notification_types.h"
@@ -28,6 +31,7 @@
 #include "net/base/file_stream.h"
 #include "net/base/net_errors.h"
 #include "ui/base/l10n/l10n_util.h"
+#include "ui/gfx/favicon_size.h"
 
 using content::BrowserThread;
 
@@ -101,7 +105,7 @@ class Writer : public base::RefCountedThreadSafe<Writer> {
     if (!OpenFile())
       return;
 
-    Value* roots;
+    Value* roots = NULL;
     if (!Write(kHeader) ||
         bookmarks_->GetType() != Value::TYPE_DICTIONARY ||
         !static_cast<DictionaryValue*>(bookmarks_.get())->Get(
@@ -113,8 +117,8 @@ class Writer : public base::RefCountedThreadSafe<Writer> {
 
     DictionaryValue* roots_d_value = static_cast<DictionaryValue*>(roots);
     Value* root_folder_value;
-    Value* other_folder_value;
-    Value* mobile_folder_value;
+    Value* other_folder_value = NULL;
+    Value* mobile_folder_value = NULL;
     if (!roots_d_value->Get(BookmarkCodec::kRootFolderNameKey,
                             &root_folder_value) ||
         root_folder_value->GetType() != Value::TYPE_DICTIONARY ||
@@ -144,12 +148,14 @@ class Writer : public base::RefCountedThreadSafe<Writer> {
     Write(kFolderChildrenEnd);
     Write(kNewline);
     // File stream close is forced so that unit test could read it.
-    file_stream_.Close();
+    file_stream_.reset();
 
     NotifyOnFinish();
   }
 
  private:
+  friend class base::RefCountedThreadSafe<Writer>;
+
   // Types of text being written out. The type dictates how the text is
   // escaped.
   enum TextType {
@@ -161,10 +167,13 @@ class Writer : public base::RefCountedThreadSafe<Writer> {
     CONTENT
   };
 
+  ~Writer() {}
+
   // Opens the file, returning true on success.
   bool OpenFile() {
+    file_stream_.reset(new net::FileStream(NULL));
     int flags = base::PLATFORM_FILE_CREATE_ALWAYS | base::PLATFORM_FILE_WRITE;
-    return (file_stream_.Open(path_, flags) == net::OK);
+    return (file_stream_->OpenSync(path_, flags) == net::OK);
   }
 
   // Increments the indent.
@@ -188,8 +197,7 @@ class Writer : public base::RefCountedThreadSafe<Writer> {
   // Writes raw text out returning true on success. This does not escape
   // the text in anyway.
   bool Write(const std::string& text) {
-    size_t wrote = file_stream_.Write(text.c_str(), text.length(),
-                                      net::CompletionCallback());
+    size_t wrote = file_stream_->WriteSync(text.c_str(), text.length());
     bool result = (wrote == text.length());
     DCHECK(result);
     return result;
@@ -257,7 +265,7 @@ class Writer : public base::RefCountedThreadSafe<Writer> {
       BookmarkFaviconFetcher::URLFaviconMap::iterator itr =
           favicons_map_->find(url_string);
       if (itr != favicons_map_->end()) {
-        scoped_refptr<RefCountedMemory> data(itr->second.get());
+        scoped_refptr<base::RefCountedMemory> data(itr->second.get());
         std::string favicon_data;
         favicon_data.assign(reinterpret_cast<const char*>(data->front()),
                             data->size());
@@ -287,7 +295,7 @@ class Writer : public base::RefCountedThreadSafe<Writer> {
 
     // Folder.
     std::string last_modified_date;
-    Value* child_values;
+    const Value* child_values = NULL;
     if (!value.GetString(BookmarkCodec::kDateModifiedKey,
                          &last_modified_date) ||
         !value.Get(BookmarkCodec::kChildrenKey, &child_values) ||
@@ -326,15 +334,15 @@ class Writer : public base::RefCountedThreadSafe<Writer> {
     }
 
     // Write the children.
-    ListValue* children = static_cast<ListValue*>(child_values);
+    const ListValue* children = static_cast<const ListValue*>(child_values);
     for (size_t i = 0; i < children->GetSize(); ++i) {
-      Value* child_value;
+      const Value* child_value;
       if (!children->Get(i, &child_value) ||
           child_value->GetType() != Value::TYPE_DICTIONARY) {
         NOTREACHED();
         return false;
       }
-      if (!WriteNode(*static_cast<DictionaryValue*>(child_value),
+      if (!WriteNode(*static_cast<const DictionaryValue*>(child_value),
                      BookmarkNode::FOLDER)) {
         return false;
       }
@@ -366,7 +374,7 @@ class Writer : public base::RefCountedThreadSafe<Writer> {
   BookmarksExportObserver* observer_;
 
   // File we're writing to.
-  net::FileStream file_stream_;
+  scoped_ptr<net::FileStream> file_stream_;
 
   // How much we indent when writing a bookmark/folder. This is modified
   // via IncrementIndent and DecrementIndent.
@@ -394,9 +402,10 @@ BookmarkFaviconFetcher::~BookmarkFaviconFetcher() {
 }
 
 void BookmarkFaviconFetcher::ExportBookmarks() {
-  ExtractUrls(profile_->GetBookmarkModel()->bookmark_bar_node());
-  ExtractUrls(profile_->GetBookmarkModel()->other_node());
-  ExtractUrls(profile_->GetBookmarkModel()->mobile_node());
+  ExtractUrls(BookmarkModelFactory::GetForProfile(
+      profile_)->bookmark_bar_node());
+  ExtractUrls(BookmarkModelFactory::GetForProfile(profile_)->other_node());
+  ExtractUrls(BookmarkModelFactory::GetForProfile(profile_)->mobile_node());
   if (!bookmark_urls_.empty())
     FetchNextFavicon();
   else
@@ -432,7 +441,8 @@ void BookmarkFaviconFetcher::ExecuteWriter() {
   BrowserThread::PostTask(
       BrowserThread::FILE, FROM_HERE,
       base::Bind(&Writer::DoWrite,
-                 new Writer(codec.Encode(profile_->GetBookmarkModel()),
+                 new Writer(codec.Encode(BookmarkModelFactory::GetForProfile(
+                                profile_)),
                             path_, favicons_map_.release(), observer_)));
   if (fetcher != NULL) {
     MessageLoop::current()->DeleteSoon(FROM_HERE, fetcher);
@@ -449,12 +459,15 @@ bool BookmarkFaviconFetcher::FetchNextFavicon() {
     // Filter out urls that we've already got favicon for.
     URLFaviconMap::const_iterator iter = favicons_map_->find(url);
     if (favicons_map_->end() == iter) {
-      FaviconService* favicon_service =
-          profile_->GetFaviconService(Profile::EXPLICIT_ACCESS);
-      favicon_service->GetFaviconForURL(GURL(url), history::FAVICON,
-          &favicon_consumer_,
+      FaviconService* favicon_service = FaviconServiceFactory::GetForProfile(
+          profile_, Profile::EXPLICIT_ACCESS);
+      favicon_service->GetRawFaviconForURL(
+          FaviconService::FaviconForURLParams(
+              profile_, GURL(url), history::FAVICON, gfx::kFaviconSize),
+          ui::SCALE_FACTOR_100P,
           base::Bind(&BookmarkFaviconFetcher::OnFaviconDataAvailable,
-                     base::Unretained(this)));
+                     base::Unretained(this)),
+          &cancelable_task_tracker_);
       return true;
     } else {
       bookmark_urls_.pop_front();
@@ -464,15 +477,15 @@ bool BookmarkFaviconFetcher::FetchNextFavicon() {
 }
 
 void BookmarkFaviconFetcher::OnFaviconDataAvailable(
-    FaviconService::Handle handle,
-    history::FaviconData favicon) {
+    const history::FaviconBitmapResult& bitmap_result) {
   GURL url;
   if (!bookmark_urls_.empty()) {
     url = GURL(bookmark_urls_.front());
     bookmark_urls_.pop_front();
   }
-  if (favicon.is_valid() && !url.is_empty()) {
-    favicons_map_->insert(make_pair(url.spec(), favicon.image_data));
+  if (bitmap_result.is_valid() && !url.is_empty()) {
+    favicons_map_->insert(
+        make_pair(url.spec(), bitmap_result.bitmap_data));
   }
 
   if (FetchNextFavicon()) {

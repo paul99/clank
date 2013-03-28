@@ -290,6 +290,20 @@ NaClSrpcError PppMouseLockRpcClient::PPP_MouseLock_MouseLockLost(
   return retval;
 }
 
+NaClSrpcError PppNetworkMonitorPrivateRpcClient::PPP_NetworkMonitor_Private_NetworkListChanged(
+    NaClSrpcChannel* channel,
+    PP_Resource network_monitor,
+    PP_Resource network_list)  {
+  NaClSrpcError retval;
+  retval = NaClSrpcInvokeBySignature(
+      channel,
+      "PPP_NetworkMonitor_Private_NetworkListChanged:ii:",
+      network_monitor,
+      network_list
+  );
+  return retval;
+}
+
 NaClSrpcError PppPrintingRpcClient::PPP_Printing_QuerySupportedFormats(
     NaClSrpcChannel* channel,
     PP_Instance instance,
@@ -374,42 +388,6 @@ NaClSrpcError PppPrintingRpcClient::PPP_Printing_IsScalingDisabled(
   return retval;
 }
 
-NaClSrpcError PppScrollbarRpcClient::PPP_Scrollbar_ValueChanged(
-    NaClSrpcChannel* channel,
-    PP_Instance instance,
-    PP_Resource scrollbar,
-    int32_t value)  {
-  NaClSrpcError retval;
-  retval = NaClSrpcInvokeBySignature(
-      channel,
-      "PPP_Scrollbar_ValueChanged:iii:",
-      instance,
-      scrollbar,
-      value
-  );
-  if (retval == NACL_SRPC_RESULT_INTERNAL)
-    ppapi_proxy::CleanUpAfterDeadNexe(instance);
-  return retval;
-}
-
-NaClSrpcError PppScrollbarRpcClient::PPP_Scrollbar_OverlayChanged(
-    NaClSrpcChannel* channel,
-    PP_Instance instance,
-    PP_Resource scrollbar,
-    int32_t overlay)  {
-  NaClSrpcError retval;
-  retval = NaClSrpcInvokeBySignature(
-      channel,
-      "PPP_Scrollbar_OverlayChanged:iii:",
-      instance,
-      scrollbar,
-      overlay
-  );
-  if (retval == NACL_SRPC_RESULT_INTERNAL)
-    ppapi_proxy::CleanUpAfterDeadNexe(instance);
-  return retval;
-}
-
 NaClSrpcError PppSelectionRpcClient::PPP_Selection_GetSelectedText(
     NaClSrpcChannel* channel,
     PP_Instance instance,
@@ -422,24 +400,6 @@ NaClSrpcError PppSelectionRpcClient::PPP_Selection_GetSelectedText(
       instance,
       html,
       selected_text_bytes, selected_text
-  );
-  if (retval == NACL_SRPC_RESULT_INTERNAL)
-    ppapi_proxy::CleanUpAfterDeadNexe(instance);
-  return retval;
-}
-
-NaClSrpcError PppWidgetRpcClient::PPP_Widget_Invalidate(
-    NaClSrpcChannel* channel,
-    PP_Instance instance,
-    PP_Resource widget,
-    nacl_abi_size_t dirty_rect_bytes, char* dirty_rect)  {
-  NaClSrpcError retval;
-  retval = NaClSrpcInvokeBySignature(
-      channel,
-      "PPP_Widget_Invalidate:iiC:",
-      instance,
-      widget,
-      dirty_rect_bytes, dirty_rect
   );
   if (retval == NACL_SRPC_RESULT_INTERNAL)
     ppapi_proxy::CleanUpAfterDeadNexe(instance);

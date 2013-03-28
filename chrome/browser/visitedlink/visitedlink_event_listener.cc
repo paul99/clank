@@ -1,4 +1,4 @@
-// Copyright (c) 2011 The Chromium Authors. All rights reserved.
+// Copyright (c) 2012 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -6,14 +6,16 @@
 
 #include "base/shared_memory.h"
 #include "chrome/browser/profiles/profile.h"
+#include "chrome/browser/visitedlink/visitedlink_master_factory.h"
 #include "chrome/common/render_messages.h"
-#include "content/browser/renderer_host/render_widget_host.h"
 #include "content/public/browser/notification_service.h"
 #include "content/public/browser/notification_types.h"
 #include "content/public/browser/render_process_host.h"
+#include "content/public/browser/render_widget_host.h"
 
 using base::Time;
 using base::TimeDelta;
+using content::RenderWidgetHost;
 
 namespace {
 
@@ -117,6 +119,8 @@ VisitedLinkEventListener::VisitedLinkEventListener(Profile* profile)
 }
 
 VisitedLinkEventListener::~VisitedLinkEventListener() {
+  if (!pending_visited_links_.empty())
+    pending_visited_links_.clear();
 }
 
 void VisitedLinkEventListener::NewTable(base::SharedMemory* table_memory) {
@@ -132,7 +136,8 @@ void VisitedLinkEventListener::NewTable(base::SharedMemory* table_memory) {
       continue;
     Profile* profile = Profile::FromBrowserContext(
         process->GetBrowserContext());
-    VisitedLinkMaster* master = profile->GetVisitedLinkMaster();
+    VisitedLinkMaster* master =
+        VisitedLinkMasterFactory::GetForProfile(profile);
     if (master && master->shared_memory() == table_memory)
       i->second->SendVisitedLinkTable(table_memory);
   }
@@ -185,7 +190,8 @@ void VisitedLinkEventListener::Observe(
 
       // Initialize support for visited links. Send the renderer process its
       // initial set of visited links.
-      VisitedLinkMaster* master = profile->GetVisitedLinkMaster();
+      VisitedLinkMaster* master =
+        VisitedLinkMasterFactory::GetForProfile(profile);
       if (!master)
         return;
 
@@ -204,7 +210,7 @@ void VisitedLinkEventListener::Observe(
     case content::NOTIFICATION_RENDER_WIDGET_VISIBILITY_CHANGED: {
       RenderWidgetHost* widget =
           content::Source<RenderWidgetHost>(source).ptr();
-      int child_id = widget->process()->GetID();
+      int child_id = widget->GetProcess()->GetID();
       if (updaters_.count(child_id))
         updaters_[child_id]->Update();
       break;

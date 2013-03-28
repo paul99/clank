@@ -17,16 +17,6 @@
       'sources': [
         'image_diff.cc',
       ],
-      'conditions': [
-        [ 'OS == "android"', {
-          # FIXME(wangxianzhu): Without this dependency, image_diff won't be
-          # linked with '-lskia -lharfbuzz' libraries. In theory, the dependency
-          # app_base should automatically bring them.
-          'dependencies': [
-             '../../skia/skia.gyp:skia',
-          ],
-        }],
-      ],
     },
   ],
 }

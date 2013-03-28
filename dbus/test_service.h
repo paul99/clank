@@ -1,10 +1,9 @@
-// Copyright (c) 2011 The Chromium Authors. All rights reserved.
+// Copyright (c) 2012 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
 #ifndef DBUS_TEST_SERVICE_H_
 #define DBUS_TEST_SERVICE_H_
-#pragma once
 
 #include "base/compiler_specific.h"
 #include "base/memory/ref_counted.h"
@@ -66,6 +65,14 @@ class TestService : public base::Thread {
   // This function emulates dbus-send's behavior.
   void SendTestSignalFromRoot(const std::string& message);
 
+  // Request the ownership of a well-known name "TestService".
+  // |callback| will be called with the result when an ownership request is
+  // completed.
+  void RequestOwnership(base::Callback<void(bool)> callback);
+
+  // Returns whether this instance has the name ownership or not.
+  bool has_ownership() const { return has_ownership_; }
+
  private:
   // Helper function for SendTestSignal().
   void SendTestSignalInternal(const std::string& message);
@@ -75,6 +82,15 @@ class TestService : public base::Thread {
 
   // Helper function for ShutdownAndBlock().
   void ShutdownAndBlockInternal();
+
+  // Called when an ownership request is completed.
+  // |callback| is the callback to be called with the result. |service_name| is
+  // the requested well-known bus name. |callback| and |service_name| are bound
+  // when the service requests the ownership. |success| is the result of the
+  // completed request, and is propagated to |callback|.
+  void OnOwnership(base::Callback<void(bool)> callback,
+                   const std::string& service_name,
+                   bool success);
 
   // Called when a method is exported.
   void OnExported(const std::string& interface_name,
@@ -106,10 +122,34 @@ class TestService : public base::Thread {
   void BrokenMethod(MethodCall* method_call,
                     dbus::ExportedObject::ResponseSender response_sender);
 
+  // Returns a set of property values for testing.
+  void GetAllProperties(MethodCall* method_call,
+                        dbus::ExportedObject::ResponseSender response_sender);
+
+  // Returns a new value of 20 for the Version property when called.
+  void GetProperty(MethodCall* method_call,
+                   dbus::ExportedObject::ResponseSender response_sender);
+
+  // Allows the name property to be changed, errors otherwise.
+  void SetProperty(MethodCall* method_call,
+                   dbus::ExportedObject::ResponseSender response_sender);
+
+  // Sends a property changed signal for the name property.
+  void SendPropertyChangedSignal(const std::string& name);
+
+  // Helper function for SendPropertyChangedSignal().
+  void SendPropertyChangedSignalInternal(const std::string& name);
+
+  // Helper function for RequestOwnership().
+  void RequestOwnershipInternal(base::Callback<void(bool)> callback);
+
   scoped_refptr<base::MessageLoopProxy> dbus_thread_message_loop_proxy_;
   base::WaitableEvent on_all_methods_exported_;
   // The number of methods actually exported.
   int num_exported_methods_;
+
+  // True iff this instance has successfully acquired the name ownership.
+  bool has_ownership_;
 
   scoped_refptr<Bus> bus_;
   ExportedObject* exported_object_;

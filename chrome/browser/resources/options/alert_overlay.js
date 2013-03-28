@@ -1,4 +1,4 @@
-// Copyright (c) 2010 The Chromium Authors. All rights reserved.
+// Copyright (c) 2012 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -44,6 +44,14 @@ cr.define('options', function() {
       };
     },
 
+    /** @override */
+    get nestingLevel() {
+      // AlertOverlay is special in that it is not tied to one page or overlay.
+      // Set the nesting level arbitrarily high so as to always be recognized as
+      // the top-most visible page.
+      return 99;
+    },
+
     /**
      * Handle the 'ok' button.  Clear the overlay and call the ok callback if
      * available.
@@ -75,7 +83,7 @@ cr.define('options', function() {
       canShow_ = false;
     },
 
-    /** @inheritDoc */
+    /** @override */
     canShowPage: function() {
       return this.canShow_;
     },
@@ -135,7 +143,7 @@ cr.define('options', function() {
     // Intentionally don't show the URL in the location bar as we don't want
     // people trying to navigate here by hand.
     OptionsPage.showPageByName('alertOverlay', false);
-  }
+  };
 
   // Export
   return {

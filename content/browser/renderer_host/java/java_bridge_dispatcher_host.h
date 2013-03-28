@@ -4,16 +4,20 @@
 
 #ifndef CONTENT_BROWSER_RENDERER_HOST_JAVA_JAVA_BRIDGE_DISPATCHER_HOST_H_
 #define CONTENT_BROWSER_RENDERER_HOST_JAVA_JAVA_BRIDGE_DISPATCHER_HOST_H_
-#pragma once
 
+#include <vector>
 #include "base/memory/ref_counted.h"
+#include "base/memory/weak_ptr.h"
 #include "base/string16.h"
+#include "content/common/npobject_stub.h"
 #include "content/public/browser/render_view_host_observer.h"
 
-class NPChannelBase;
-class RenderViewHost;
 class RouteIDGenerator;
 struct NPObject;
+
+namespace content {
+class NPChannelBase;
+class RenderViewHost;
 struct NPVariant_Param;
 
 // This class handles injecting Java objects into a single RenderView. The Java
@@ -22,7 +26,7 @@ struct NPVariant_Param;
 // for each RenderViewHost.
 class JavaBridgeDispatcherHost
     : public base::RefCountedThreadSafe<JavaBridgeDispatcherHost>,
-      public content::RenderViewHostObserver {
+      public RenderViewHostObserver {
  public:
   // We hold a weak pointer to the RenderViewhost. It must outlive this object.
   JavaBridgeDispatcherHost(RenderViewHost* render_view_host);
@@ -61,8 +65,11 @@ class JavaBridgeDispatcherHost
 
   scoped_refptr<NPChannelBase> channel_;
   bool is_renderer_initialized_;
+  std::vector<base::WeakPtr<NPObjectStub> > stubs_;
 
   DISALLOW_COPY_AND_ASSIGN(JavaBridgeDispatcherHost);
 };
+
+}  // namespace content
 
 #endif  // CONTENT_BROWSER_RENDERER_HOST_JAVA_JAVA_BRIDGE_DISPATCHER_HOST_H_

@@ -1,4 +1,4 @@
-// Copyright (c) 2011 The Chromium Authors. All rights reserved.
+// Copyright (c) 2012 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -11,14 +11,20 @@
 #include "base/i18n/file_util_icu.h"
 #include "base/i18n/time_formatting.h"
 #include "base/message_loop.h"
+#include "base/metrics/histogram.h"
 #include "base/time.h"
 #include "base/utf_string_conversions.h"
 #include "base/values.h"
+#include "base/win/metro.h"
+#include "printing/backend/print_backend.h"
+#include "printing/backend/printing_info_win.h"
+#include "printing/backend/win_helper.h"
 #include "printing/print_job_constants.h"
 #include "printing/print_settings_initializer_win.h"
 #include "printing/printed_document.h"
 #include "printing/units.h"
 #include "skia/ext/platform_device.h"
+#include "win8/util/win8_util.h"
 
 using base::Time;
 
@@ -38,59 +44,6 @@ const int kPDFA4Height = 11.69 * kPDFDpi;
 // A3: 11.69 x 16.54 inches
 const int kPDFA3Width = 11.69 * kPDFDpi;
 const int kPDFA3Height = 16.54 * kPDFDpi;
-
-// Retrieves the printer's PRINTER_INFO_* structure.
-// Output |level| can be 9 (user-default), 8 (admin-default), or 2
-// (printer-default).
-// |devmode| is a pointer points to the start of DEVMODE structure in
-// |buffer|.
-bool GetPrinterInfo(HANDLE printer,
-                    const std::wstring &device_name,
-                    int* level,
-                    scoped_array<uint8>* buffer,
-                    DEVMODE** dev_mode) {
-  DCHECK(buffer);
-
-  // A PRINTER_INFO_9 structure specifying the per-user default printer
-  // settings.
-  printing::PrintingContextWin::GetPrinterHelper(printer, 9, buffer);
-  if (buffer->get()) {
-    PRINTER_INFO_9* info_9 = reinterpret_cast<PRINTER_INFO_9*>(buffer->get());
-    if (info_9->pDevMode != NULL) {
-      *level = 9;
-      *dev_mode = info_9->pDevMode;
-      return true;
-    }
-    buffer->reset();
-  }
-
-  // A PRINTER_INFO_8 structure specifying the global default printer settings.
-  printing::PrintingContextWin::GetPrinterHelper(printer, 8, buffer);
-  if (buffer->get()) {
-    PRINTER_INFO_8* info_8 = reinterpret_cast<PRINTER_INFO_8*>(buffer->get());
-    if (info_8->pDevMode != NULL) {
-      *level = 8;
-      *dev_mode = info_8->pDevMode;
-      return true;
-    }
-    buffer->reset();
-  }
-
-  // A PRINTER_INFO_2 structure specifying the driver's default printer
-  // settings.
-  printing::PrintingContextWin::GetPrinterHelper(printer, 2, buffer);
-  if (buffer->get()) {
-    PRINTER_INFO_2* info_2 = reinterpret_cast<PRINTER_INFO_2*>(buffer->get());
-    if (info_2->pDevMode != NULL) {
-      *level = 2;
-      *dev_mode = info_2->pDevMode;
-      return true;
-    }
-    buffer->reset();
-  }
-
-  return false;
-}
 
 }  // anonymous namespace
 
@@ -218,6 +171,25 @@ void PrintingContextWin::AskUserForSettings(
     const PrintSettingsCallback& callback) {
 #if !defined(USE_AURA)
   DCHECK(!in_print_job_);
+
+  if (win8::IsSingleWindowMetroMode()) {
+    // The system dialog can not be opened while running in Metro.
+    // But we can programatically launch the Metro print device charm though.
+    HMODULE metro_module = base::win::GetMetroModule();
+    if (metro_module != NULL) {
+      typedef void (*MetroShowPrintUI)();
+      MetroShowPrintUI metro_show_print_ui =
+          reinterpret_cast<MetroShowPrintUI>(
+              ::GetProcAddress(metro_module, "MetroShowPrintUI"));
+      if (metro_show_print_ui) {
+        // TODO(mad): Remove this once we can send user metrics from the metro
+        // driver. crbug.com/142330
+        UMA_HISTOGRAM_ENUMERATION("Metro.Print", 1, 2);
+        metro_show_print_ui();
+      }
+    }
+    return callback.Run(CANCEL);
+  }
   dialog_box_dismissed_ = false;
 
   HWND window;
@@ -381,9 +353,9 @@ PrintingContext::Result PrintingContextWin::UpdatePrinterSettings(
     return OK;
   }
 
-  HANDLE printer;
+  ScopedPrinterHandle printer;
   LPWSTR device_name_wide = const_cast<wchar_t*>(device_name.c_str());
-  if (!OpenPrinter(device_name_wide, &printer, NULL))
+  if (!OpenPrinter(device_name_wide, printer.Receive(), NULL))
     return OnError();
 
   // Make printer changes local to Chrome.
@@ -403,7 +375,6 @@ PrintingContext::Result PrintingContextWin::UpdatePrinterSettings(
   }
   if (dev_mode == NULL) {
     buffer.reset();
-    ClosePrinter(printer);
     return OnError();
   }
 
@@ -433,19 +404,16 @@ PrintingContext::Result PrintingContextWin::UpdatePrinterSettings(
   // Update data using DocumentProperties.
   if (DocumentProperties(NULL, printer, device_name_wide, dev_mode, dev_mode,
                          DM_IN_BUFFER | DM_OUT_BUFFER) != IDOK) {
-    ClosePrinter(printer);
     return OnError();
   }
 
   // Set printer then refresh printer settings.
   if (!AllocateContext(device_name, dev_mode, &context_)) {
-    ClosePrinter(printer);
     return OnError();
   }
   PrintSettingsInitializerWin::InitPrintSettings(context_, *dev_mode,
                                                  ranges, device_name,
                                                  false, &settings_);
-  ClosePrinter(printer);
   return OK;
 }
 
@@ -456,19 +424,15 @@ PrintingContext::Result PrintingContextWin::InitWithSettings(
   settings_ = settings;
 
   // TODO(maruel): settings_.ToDEVMODE()
-  HANDLE printer;
+  ScopedPrinterHandle printer;
   if (!OpenPrinter(const_cast<wchar_t*>(settings_.device_name().c_str()),
-                   &printer,
-                   NULL))
+                   printer.Receive(), NULL))
     return FAILED;
 
   Result status = OK;
 
   if (!GetPrinterSettings(printer, settings_.device_name()))
     status = FAILED;
-
-  // Close the printer after retrieving the context.
-  ClosePrinter(printer);
 
   if (status != OK)
     ResetSettings();
@@ -490,6 +454,7 @@ PrintingContext::Result PrintingContextWin::NewDocument(
   if (SP_ERROR == SetAbortProc(context_, &AbortProc))
     return OnError();
 
+  DCHECK(PrintBackend::SimplifyDocumentTitle(document_name) == document_name);
   DOCINFO di = { sizeof(DOCINFO) };
   const std::wstring& document_name_wide = UTF16ToWide(document_name);
   di.lpszDocName = document_name_wide.c_str();
@@ -644,18 +609,16 @@ bool PrintingContextWin::InitializeSettings(const DEVMODE& dev_mode,
 bool PrintingContextWin::GetPrinterSettings(HANDLE printer,
                                             const std::wstring& device_name) {
   DCHECK(!in_print_job_);
-  scoped_array<uint8> buffer;
-  int level = 0;
-  DEVMODE* dev_mode = NULL;
 
-  if (GetPrinterInfo(printer, device_name, &level, &buffer, &dev_mode) &&
-      AllocateContext(device_name, dev_mode, &context_)) {
-    return InitializeSettings(*dev_mode, device_name, NULL, 0, false);
+  UserDefaultDevMode user_settings;
+
+  if (!user_settings.Init(printer) ||
+      !AllocateContext(device_name, user_settings.get(), &context_)) {
+    ResetSettings();
+    return false;
   }
 
-  buffer.reset();
-  ResetSettings();
-  return false;
+  return InitializeSettings(*user_settings.get(), device_name, NULL, 0, false);
 }
 
 // static
@@ -794,20 +757,6 @@ PrintingContext::Result PrintingContextWin::ParseDialogResult(
     GlobalFree(dialog_options.hDevNames);
 
   return context_ ? OK : FAILED;
-}
-
-// static
-void PrintingContextWin::GetPrinterHelper(HANDLE printer, int level,
-                                          scoped_array<uint8>* buffer) {
-  DWORD buf_size = 0;
-  GetPrinter(printer, level, NULL, 0, &buf_size);
-  if (buf_size) {
-    buffer->reset(new uint8[buf_size]);
-    memset(buffer->get(), 0, buf_size);
-    if (!GetPrinter(printer, level, buffer->get(), buf_size, &buf_size)) {
-      buffer->reset();
-    }
-  }
 }
 
 }  // namespace printing

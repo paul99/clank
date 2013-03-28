@@ -1,4 +1,4 @@
-// Copyright (c) 2011 The Chromium Authors. All rights reserved.
+// Copyright (c) 2012 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -8,14 +8,14 @@
 #include <map>
 #include <vector>
 
-#include "base/compiler_specific.h"
 #include "base/basictypes.h"
+#include "base/compiler_specific.h"
 #include "base/gtest_prod_util.h"
 #include "base/memory/ref_counted.h"
 #include "base/memory/scoped_ptr.h"
 #include "net/base/completion_callback.h"
-#include "webkit/appcache/appcache_export.h"
 #include "webkit/appcache/appcache_working_set.h"
+#include "webkit/storage/webkit_storage_export.h"
 
 class GURL;
 
@@ -30,14 +30,12 @@ class AppCacheService;
 struct AppCacheInfoCollection;
 struct HttpResponseInfoIOBuffer;
 
-class APPCACHE_EXPORT AppCacheStorage {
+class WEBKIT_STORAGE_EXPORT AppCacheStorage {
  public:
   typedef std::map<GURL, int64> UsageMap;
 
-  class APPCACHE_EXPORT Delegate {
+  class WEBKIT_STORAGE_EXPORT Delegate {
    public:
-    virtual ~Delegate() {}
-
     // If retrieval fails, 'collection' will be NULL.
     virtual void OnAllInfo(AppCacheInfoCollection* collection) {}
 
@@ -70,6 +68,9 @@ class APPCACHE_EXPORT AppCacheStorage {
         const GURL& url, const AppCacheEntry& entry,
         const GURL& namespace_entry_url, const AppCacheEntry& fallback_entry,
         int64 cache_id, int64 group_id, const GURL& mainfest_url) {}
+
+   protected:
+    virtual ~Delegate() {}
   };
 
   explicit AppCacheStorage(AppCacheService* service);

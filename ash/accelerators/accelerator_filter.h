@@ -4,33 +4,24 @@
 
 #ifndef ASH_ACCELERATORS_ACCELERATOR_FILTER_H_
 #define ASH_ACCELERATORS_ACCELERATOR_FILTER_H_
-#pragma once
 
+#include "ash/ash_export.h"
 #include "base/basictypes.h"
 #include "base/compiler_specific.h"
-#include "ui/aura/event_filter.h"
-#include "ash/ash_export.h"
+#include "ui/base/events/event_handler.h"
 
 namespace ash {
 namespace internal {
 
 // AcceleratorFilter filters key events for AcceleratorControler handling global
 // keyboard accelerators.
-class ASH_EXPORT AcceleratorFilter : public aura::EventFilter {
+class ASH_EXPORT AcceleratorFilter : public ui::EventHandler {
  public:
   AcceleratorFilter();
   virtual ~AcceleratorFilter();
 
-  // Overridden from aura::EventFilter:
-  virtual bool PreHandleKeyEvent(aura::Window* target,
-                                 aura::KeyEvent* event) OVERRIDE;
-  virtual bool PreHandleMouseEvent(aura::Window* target,
-                                   aura::MouseEvent* event) OVERRIDE;
-  virtual ui::TouchStatus PreHandleTouchEvent(aura::Window* target,
-                                              aura::TouchEvent* event) OVERRIDE;
-  virtual ui::GestureStatus PreHandleGestureEvent(
-      aura::Window* target,
-      aura::GestureEvent* event) OVERRIDE;
+  // Overridden from ui::EventHandler:
+  virtual void OnKeyEvent(ui::KeyEvent* event) OVERRIDE;
 
  private:
   DISALLOW_COPY_AND_ASSIGN(AcceleratorFilter);

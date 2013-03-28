@@ -1,4 +1,4 @@
-// Copyright (c) 2011 The Chromium Authors. All rights reserved.
+// Copyright (c) 2012 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -6,28 +6,35 @@
 #define PPAPI_THUNK_PPB_FLASH_CLIPBOARD_API_H_
 
 #include "ppapi/c/private/ppb_flash_clipboard.h"
-#include "ppapi/shared_impl/api_id.h"
+#include "ppapi/shared_impl/singleton_resource_id.h"
 
 namespace ppapi {
 namespace thunk {
 
-class PPB_Flash_Clipboard_FunctionAPI {
+class PPB_Flash_Clipboard_API {
  public:
-  virtual ~PPB_Flash_Clipboard_FunctionAPI() {}
+  virtual ~PPB_Flash_Clipboard_API() {}
 
+  // PPB_Flash_Clipboard.
+  virtual uint32_t RegisterCustomFormat(PP_Instance instance,
+                                        const char* format_name) = 0;
   virtual PP_Bool IsFormatAvailable(PP_Instance instance,
                                     PP_Flash_Clipboard_Type clipboard_type,
-                                    PP_Flash_Clipboard_Format format) = 0;
-  virtual PP_Var ReadPlainText(PP_Instance instance,
-                               PP_Flash_Clipboard_Type clipboard_type) = 0;
-  virtual int32_t WritePlainText(PP_Instance instance,
-                                 PP_Flash_Clipboard_Type clipboard_type,
-                                 const PP_Var& text) = 0;
+                                    uint32_t format) = 0;
+  virtual PP_Var ReadData(PP_Instance instance,
+                          PP_Flash_Clipboard_Type clipboard_type,
+                          uint32_t format) = 0;
+  virtual int32_t WriteData(PP_Instance instance,
+                            PP_Flash_Clipboard_Type clipboard_type,
+                            uint32_t data_item_count,
+                            const uint32_t formats[],
+                            const PP_Var data_items[]) = 0;
 
-  static const ApiID kApiID = API_ID_PPB_FLASH_CLIPBOARD;
+  static const SingletonResourceID kSingletonResourceID =
+      FLASH_CLIPBOARD_SINGLETON_ID;
 };
 
 }  // namespace thunk
 }  // namespace ppapi
 
-#endif  // PPAPI_THUNK_PPB_FLASH_CLIPBOARD_API_H_
+#endif // PPAPI_THUNK_PPB_FLASH_CLIPBOARD_API_H_

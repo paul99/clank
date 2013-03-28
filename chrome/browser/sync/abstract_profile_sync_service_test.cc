@@ -1,4 +1,4 @@
-// Copyright (c) 2011 The Chromium Authors. All rights reserved.
+// Copyright (c) 2012 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -7,94 +7,37 @@
 #include "base/bind.h"
 #include "base/bind_helpers.h"
 #include "base/location.h"
-#include "chrome/browser/sync/internal_api/write_transaction.h"
-#include "chrome/browser/sync/protocol/sync.pb.h"
-#include "chrome/browser/sync/syncable/directory_manager.h"
-#include "chrome/browser/sync/syncable/syncable.h"
 #include "chrome/browser/sync/test_profile_sync_service.h"
-#include "chrome/browser/sync/test/engine/test_id_factory.h"
-#include "chrome/browser/sync/util/cryptographer.h"
+#include "sync/internal_api/public/test/test_user_share.h"
+#include "sync/internal_api/public/write_transaction.h"
+#include "sync/protocol/sync.pb.h"
+#include "sync/util/cryptographer.h"
 
-using browser_sync::TestIdFactory;
 using content::BrowserThread;
-using sync_api::UserShare;
-using syncable::BASE_VERSION;
-using syncable::CREATE;
-using syncable::DirectoryManager;
-using syncable::IS_DEL;
-using syncable::IS_DIR;
-using syncable::IS_UNAPPLIED_UPDATE;
-using syncable::IS_UNSYNCED;
-using syncable::ModelType;
-using syncable::MutableEntry;
-using syncable::SERVER_IS_DIR;
-using syncable::SERVER_VERSION;
-using syncable::SPECIFICS;
-using syncable::ScopedDirLookup;
-using syncable::UNIQUE_SERVER_TAG;
-using syncable::UNITTEST;
-using syncable::WriteTransaction;
+using syncer::ModelType;
+using syncer::UserShare;
 
 /* static */
-const std::string ProfileSyncServiceTestHelper::GetTagForType(
-    ModelType model_type) {
-  return syncable::ModelTypeToRootTag(model_type);
-}
-
-/* static */
-bool ProfileSyncServiceTestHelper::CreateRoot(ModelType model_type,
-                                              UserShare* user_share,
-                                              TestIdFactory* ids) {
-  DirectoryManager* dir_manager = user_share->dir_manager.get();
-
-  ScopedDirLookup dir(dir_manager, user_share->name);
-  if (!dir.good())
-    return false;
-
-  std::string tag_name = GetTagForType(model_type);
-
-  WriteTransaction wtrans(FROM_HERE, UNITTEST, dir);
-  MutableEntry node(&wtrans,
-                    CREATE,
-                    wtrans.root_id(),
-                    tag_name);
-  node.Put(UNIQUE_SERVER_TAG, tag_name);
-  node.Put(IS_DIR, true);
-  node.Put(SERVER_IS_DIR, false);
-  node.Put(IS_UNSYNCED, false);
-  node.Put(IS_UNAPPLIED_UPDATE, false);
-  node.Put(SERVER_VERSION, 20);
-  node.Put(BASE_VERSION, 20);
-  node.Put(IS_DEL, false);
-  node.Put(syncable::ID, ids->MakeServer(tag_name));
-  sync_pb::EntitySpecifics specifics;
-  syncable::AddDefaultExtensionValue(model_type, &specifics);
-  node.Put(SPECIFICS, specifics);
-
-  return true;
-}
-
-/* static */
-sync_api::ImmutableChangeRecordList
+syncer::ImmutableChangeRecordList
     ProfileSyncServiceTestHelper::MakeSingletonChangeRecordList(
-        int64 node_id, sync_api::ChangeRecord::Action action) {
-  sync_api::ChangeRecord record;
+        int64 node_id, syncer::ChangeRecord::Action action) {
+  syncer::ChangeRecord record;
   record.action = action;
   record.id = node_id;
-  sync_api::ChangeRecordList records(1, record);
-  return sync_api::ImmutableChangeRecordList(&records);
+  syncer::ChangeRecordList records(1, record);
+  return syncer::ImmutableChangeRecordList(&records);
 }
 
 /* static */
-sync_api::ImmutableChangeRecordList
+syncer::ImmutableChangeRecordList
     ProfileSyncServiceTestHelper::MakeSingletonDeletionChangeRecordList(
         int64 node_id, const sync_pb::EntitySpecifics& specifics) {
-  sync_api::ChangeRecord record;
-  record.action = sync_api::ChangeRecord::ACTION_DELETE;
+  syncer::ChangeRecord record;
+  record.action = syncer::ChangeRecord::ACTION_DELETE;
   record.id = node_id;
   record.specifics = specifics;
-  sync_api::ChangeRecordList records(1, record);
-  return sync_api::ImmutableChangeRecordList(&records);
+  syncer::ChangeRecordList records(1, record);
+  return syncer::ImmutableChangeRecordList(&records);
 }
 
 AbstractProfileSyncServiceTest::AbstractProfileSyncServiceTest()
@@ -102,7 +45,9 @@ AbstractProfileSyncServiceTest::AbstractProfileSyncServiceTest()
       db_thread_(BrowserThread::DB),
       file_thread_(BrowserThread::FILE),
       io_thread_(BrowserThread::IO),
-      token_service_(new TokenService) {}
+      token_service_(NULL),
+      sync_service_(NULL) {
+}
 
 AbstractProfileSyncServiceTest::~AbstractProfileSyncServiceTest() {}
 
@@ -115,24 +60,22 @@ void AbstractProfileSyncServiceTest::SetUp() {
 void AbstractProfileSyncServiceTest::TearDown() {
   // Pump messages posted by the sync core thread (which may end up
   // posting on the IO thread).
-  ui_loop_.RunAllPending();
-  // We need to destroy the |token_service_| here before we stop the
-  // |io_thread_| because it holds references to a ref-counted
-  // URLRequestContext. The deletion is passed to the |io_thread_|
-  // by scoped_refptr. If |token_service_| is destroyed after stopping
-  // the |io_thread_|, the deletion never happens.
-  token_service_.reset(NULL);
+  ui_loop_.RunUntilIdle();
   io_thread_.Stop();
   file_thread_.Stop();
   db_thread_.Stop();
-  ui_loop_.RunAllPending();
+  ui_loop_.RunUntilIdle();
 }
 
 bool AbstractProfileSyncServiceTest::CreateRoot(ModelType model_type) {
-  return ProfileSyncServiceTestHelper::CreateRoot(
-      model_type,
-      service_->GetUserShare(),
-      service_->id_factory());
+  return syncer::TestUserShare::CreateRoot(model_type,
+                                           sync_service_->GetUserShare());
+}
+
+// static
+ProfileKeyedService* AbstractProfileSyncServiceTest::BuildTokenService(
+    Profile* profile) {
+  return new TokenService;
 }
 
 CreateRootHelper::CreateRootHelper(AbstractProfileSyncServiceTest* test,

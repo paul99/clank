@@ -1,4 +1,4 @@
-# Copyright (c) 2011 The Chromium Authors. All rights reserved.
+# Copyright (c) 2012 The Chromium Authors. All rights reserved.
 # Use of this source code is governed by a BSD-style license that can be
 # found in the LICENSE file.
 
@@ -19,8 +19,12 @@
           'installer/util/auto_launch_util.h',
           'installer/util/browser_distribution.cc',
           'installer/util/browser_distribution.h',
+          'installer/util/callback_work_item.cc',
+          'installer/util/callback_work_item.h',
           'installer/util/channel_info.cc',
           'installer/util/channel_info.h',
+          'installer/util/chrome_app_host_distribution.cc',
+          'installer/util/chrome_app_host_distribution.h',
           'installer/util/chrome_frame_distribution.cc',
           'installer/util/chrome_frame_distribution.h',
           'installer/util/chromium_binaries_distribution.cc',
@@ -51,6 +55,8 @@
           'installer/util/google_update_constants.h',
           'installer/util/google_update_settings.cc',
           'installer/util/google_update_settings.h',
+          'installer/util/google_update_util.cc',
+          'installer/util/google_update_util.h',
           'installer/util/helper.cc',
           'installer/util/helper.h',
           'installer/util/install_util.cc',
@@ -99,20 +105,25 @@
           },
           'dependencies': [
             'installer_util_strings',
-            'common_constants',
             '<(DEPTH)/base/base.gyp:base',
             '<(DEPTH)/base/third_party/dynamic_annotations/dynamic_annotations.gyp:dynamic_annotations',
             '<(DEPTH)/build/temp_gyp/googleurl.gyp:googleurl',
             '<(DEPTH)/chrome/chrome_resources.gyp:chrome_resources',
             '<(DEPTH)/chrome/chrome_resources.gyp:chrome_strings',
+            '<(DEPTH)/chrome/common_constants.gyp:common_constants',
             '<(DEPTH)/content/content.gyp:content_common',
             '<(DEPTH)/courgette/courgette.gyp:courgette_lib',
+            '<(DEPTH)/crypto/crypto.gyp:crypto',
             '<(DEPTH)/third_party/bspatch/bspatch.gyp:bspatch',
             '<(DEPTH)/third_party/icu/icu.gyp:icui18n',
             '<(DEPTH)/third_party/icu/icu.gyp:icuuc',
             '<(DEPTH)/third_party/lzma_sdk/lzma_sdk.gyp:lzma_sdk',
           ],
           'sources': [
+            'installer/util/chrome_app_host_operations.cc',
+            'installer/util/chrome_app_host_operations.h',
+            'installer/util/chrome_binaries_operations.cc',
+            'installer/util/chrome_binaries_operations.h',
             'installer/util/chrome_browser_operations.cc',
             'installer/util/chrome_browser_operations.h',
             'installer/util/chrome_browser_sxs_operations.cc',
@@ -144,7 +155,7 @@
             'installer/util/shell_util.h',
           ],
           'conditions': [
-            ['component=="shared_library" and incremental_chrome_dll!=1', {
+            ['component=="shared_library"', {
               'sources': [ '../content/public/common/content_switches.cc' ],
               'defines': [ 'COMPILE_CONTENT_STATICALLY'],
             }, {
@@ -183,9 +194,9 @@
           'target_name': 'installer_util',
           'type': 'static_library',
           'dependencies': [
-            'common_constants',
             '<(DEPTH)/chrome/chrome_resources.gyp:chrome_resources',
             '<(DEPTH)/chrome/chrome_resources.gyp:chrome_strings',
+            '<(DEPTH)/chrome/common_constants.gyp:common_constants',
           ],
           'sources': [
             'installer/util/master_preferences.cc',

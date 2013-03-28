@@ -1,15 +1,16 @@
-// Copyright (c) 2011 The Chromium Authors. All rights reserved.
+// Copyright (c) 2012 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
 #include "chrome/browser/ui/cocoa/infobars/before_translate_infobar_controller.h"
 
 #include "base/sys_string_conversions.h"
+#import "chrome/browser/ui/cocoa/infobars/infobar_utilities.h"
 #include "grit/generated_resources.h"
 #include "ui/base/l10n/l10n_util.h"
 
-using TranslateInfoBarUtilities::MoveControl;
-using TranslateInfoBarUtilities::VerifyControlOrderAndSpacing;
+using InfoBarUtilities::MoveControl;
+using InfoBarUtilities::VerifyControlOrderAndSpacing;
 
 namespace {
 
@@ -37,7 +38,7 @@ NSButton* CreateNSButtonWithResourceIDAndParameter(
 }
 
 - (id)initWithDelegate:(InfoBarDelegate*)delegate
-                  owner:(InfoBarTabHelper*)owner {
+                  owner:(InfoBarService*)owner {
   if ((self = [super initWithDelegate:delegate owner:owner])) {
     [self initializeExtraControls];
   }
@@ -46,8 +47,8 @@ NSButton* CreateNSButtonWithResourceIDAndParameter(
 
 - (void)initializeExtraControls {
   TranslateInfoBarDelegate* delegate = [self delegate];
-  const string16& language = delegate->GetLanguageDisplayableNameAt(
-      delegate->original_language_index());
+  const string16& language =
+      delegate->language_name_at(delegate->original_language_index());
   neverTranslateButton_.reset(
       CreateNSButtonWithResourceIDAndParameter(
           IDS_TRANSLATE_INFOBAR_NEVER_TRANSLATE, language));

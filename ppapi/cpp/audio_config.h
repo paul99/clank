@@ -1,4 +1,4 @@
-// Copyright (c) 2011 The Chromium Authors. All rights reserved.
+// Copyright (c) 2012 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -9,18 +9,18 @@
 #include "ppapi/c/pp_stdint.h"
 #include "ppapi/cpp/resource.h"
 
-
 /// @file
 /// This file defines the interface for establishing an
 /// audio configuration resource within the browser.
 
 namespace pp {
 
-class Instance;
+class InstanceHandle;
 
 /// A 16 bit stereo AudioConfig resource. Refer to the
-/// <a href="/chrome/nativeclient/docs/audio.html">Pepper
-/// Audio API Code Walkthrough</a> for information on using this interface.
+/// <a href="/native-client/{{pepperversion}}/devguide/coding/audio">Audio
+/// </a>chapter in the Developer's Guide for information on using this
+/// interface.
 ///
 /// A single sample frame on a stereo device means one value for the left
 /// channel and one value for the right channel.
@@ -40,7 +40,7 @@ class Instance;
 /// Data will always be in the native endian format of the platform.
 ///
 /// <strong>Example:</strong>
-/// <code>
+/// @code
 ///
 /// // Create an audio config with a supported frame count.
 /// uint32_t sample_frame_count = AudioConfig::RecommendSampleFrameCount(
@@ -53,7 +53,7 @@ class Instance;
 ///  Audio audio(instance, config, callback, user_data);
 ///   if (audio.is_null())
 ///     return false;  // Couldn't create audio.
-/// </code>
+/// @endcode
 class AudioConfig : public Resource {
  public:
   /// An empty constructor for an <code>AudioConfig</code> resource.
@@ -64,16 +64,25 @@ class AudioConfig : public Resource {
   /// resulting resource will be is_null(). You can pass the result of
   /// RecommendSampleFrameCount() as the sample frame count.
   ///
-  /// @param[in] instance A pointer to an <code>Instance</code> identifying
-  /// one instance of a module.
+  /// @param[in] instance The instance associated with this resource.
+  ///
   /// @param[in] sample_rate A <code>PP_AudioSampleRate</code> which is either
   /// <code>PP_AUDIOSAMPLERATE_44100</code> or
   /// <code>PP_AUDIOSAMPLERATE_48000</code>.
+  ///
   /// @param[in] sample_frame_count A uint32_t frame count returned from the
   /// <code>RecommendSampleFrameCount</code> function.
-  AudioConfig(Instance* instance,
+  AudioConfig(const InstanceHandle& instance,
               PP_AudioSampleRate sample_rate,
               uint32_t sample_frame_count);
+
+  /// RecommendSampleRate() returns the native sample rate used by the
+  /// audio system.  Applications that use the recommended sample rate might
+  /// obtain lower latency and higher fidelity output.
+  ///
+  /// @param[in] instance The instance associated with this resource.
+  static PP_AudioSampleRate RecommendSampleRate(
+      const InstanceHandle& instance);
 
   /// RecommendSampleFrameCount() returns a supported frame count closest to
   /// the requested count. The sample frame count determines the overall
@@ -87,7 +96,8 @@ class AudioConfig : public Resource {
   /// will return a supported count closest to the requested value for use in
   /// the constructor.
   ///
- /// @param[in] sample_rate A <code>PP_AudioSampleRate</code> which is either
+  /// @param[in] instance The instance associated with this resource.
+  /// @param[in] sample_rate A <code>PP_AudioSampleRate</code> which is either
   /// <code>PP_AUDIOSAMPLERATE_44100</code> or
   /// <code>PP_AUDIOSAMPLERATE_48000</code>.
   /// @param[in] requested_sample_frame_count A uint_32t requested frame count.
@@ -96,6 +106,7 @@ class AudioConfig : public Resource {
   /// successful. If the sample frame count or bit rate is not supported,
   /// this function will fail and return 0.
   static uint32_t RecommendSampleFrameCount(
+      const InstanceHandle& instance,
       PP_AudioSampleRate sample_rate,
       uint32_t requested_sample_frame_count);
 
@@ -108,7 +119,7 @@ class AudioConfig : public Resource {
   /// Getter function for returning the internal sample frame count.
   ///
   /// @return A uint32_t containing the sample frame count.
-  uint32_t sample_frame_count() { return sample_frame_count_; }
+  uint32_t sample_frame_count() const { return sample_frame_count_; }
 
  private:
   PP_AudioSampleRate sample_rate_;

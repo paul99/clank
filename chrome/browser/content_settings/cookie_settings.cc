@@ -15,11 +15,11 @@
 #include "chrome/common/chrome_switches.h"
 #include "chrome/common/content_settings_pattern.h"
 #include "chrome/common/pref_names.h"
-#include "chrome/common/url_constants.h"
 #include "content/public/browser/browser_thread.h"
 #include "content/public/browser/notification_service.h"
 #include "content/public/browser/notification_source.h"
 #include "content/public/browser/user_metrics.h"
+#include "extensions/common/constants.h"
 #include "googleurl/src/gurl.h"
 #include "net/base/net_errors.h"
 #include "net/base/static_cookie_policy.h"
@@ -43,47 +43,41 @@ bool IsAllowed(ContentSetting setting) {
 
 }  // namespace
 
-// |ProfileKeyedFactory| is the owner of the |ProfileKeyedService|s. This
-// wrapper class allows others to hold shared pointers to CookieSettings.
-class CookieSettingsWrapper : public ProfileKeyedService {
- public:
-  explicit CookieSettingsWrapper(scoped_refptr<CookieSettings> cookie_settings)
-      : cookie_settings_(cookie_settings) {}
-  virtual ~CookieSettingsWrapper() {}
-
-  CookieSettings* cookie_settings() { return cookie_settings_.get(); }
-
- private:
-  // ProfileKeyedService methods:
-  virtual void Shutdown() OVERRIDE {
-    cookie_settings_->ShutdownOnUIThread();
-  }
-
-  scoped_refptr<CookieSettings> cookie_settings_;
-};
+// static
+scoped_refptr<CookieSettings> CookieSettings::Factory::GetForProfile(
+    Profile* profile) {
+  DCHECK(BrowserThread::CurrentlyOn(BrowserThread::UI));
+  return static_cast<CookieSettings*>(
+      GetInstance()->GetServiceForProfile(profile, true).get());
+}
 
 // static
 CookieSettings::Factory* CookieSettings::Factory::GetInstance() {
   return Singleton<CookieSettings::Factory>::get();
 }
 
-CookieSettingsWrapper* CookieSettings::Factory::GetWrapperForProfile(
-    Profile* profile) {
-  return static_cast<CookieSettingsWrapper*>(
-      GetServiceForProfile(profile, true));
-}
-
 CookieSettings::Factory::Factory()
-    : ProfileKeyedServiceFactory("CookieSettings",
-                                 ProfileDependencyManager::GetInstance()) {
+    : RefcountedProfileKeyedServiceFactory(
+        "CookieSettings",
+        ProfileDependencyManager::GetInstance()) {
 }
 
-ProfileKeyedService* CookieSettings::Factory::BuildServiceInstanceFor(
-      Profile* profile) const {
-  scoped_refptr<CookieSettings> cookie_settings = new CookieSettings(
-      profile->GetHostContentSettingsMap(),
-      profile->GetPrefs());
-  return new CookieSettingsWrapper(cookie_settings);
+CookieSettings::Factory::~Factory() {}
+
+void CookieSettings::Factory::RegisterUserPrefs(PrefService* user_prefs) {
+  user_prefs->RegisterBooleanPref(prefs::kBlockThirdPartyCookies,
+                                  false,
+                                  PrefService::SYNCABLE_PREF);
+}
+
+bool CookieSettings::Factory::ServiceRedirectedInIncognito() const {
+  return true;
+}
+
+scoped_refptr<RefcountedProfileKeyedService>
+CookieSettings::Factory::BuildServiceInstanceFor(Profile* profile) const {
+  return new CookieSettings(profile->GetHostContentSettingsMap(),
+                            profile->GetPrefs());
 }
 
 CookieSettings::CookieSettings(
@@ -101,19 +95,10 @@ CookieSettings::CookieSettings(
   }
 
   pref_change_registrar_.Init(prefs);
-  pref_change_registrar_.Add(prefs::kBlockThirdPartyCookies, this);
-}
-
-CookieSettings::~CookieSettings() {
-}
-
-// static
-CookieSettings* CookieSettings::GetForProfile(Profile* profile) {
-  DCHECK(BrowserThread::CurrentlyOn(BrowserThread::UI));
-  CookieSettings* cookie_settings =
-      Factory::GetInstance()->GetWrapperForProfile(profile)->cookie_settings();
-  DCHECK(cookie_settings);
-  return cookie_settings;
+  pref_change_registrar_.Add(
+      prefs::kBlockThirdPartyCookies,
+      base::Bind(&CookieSettings::OnBlockThirdPartyCookiesChanged,
+                 base::Unretained(this)));
 }
 
 ContentSetting
@@ -173,27 +158,6 @@ void CookieSettings::ResetCookieSetting(
       CONTENT_SETTING_DEFAULT);
 }
 
-void CookieSettings::Observe(int type,
-                             const content::NotificationSource& source,
-                             const content::NotificationDetails& details) {
-  DCHECK(BrowserThread::CurrentlyOn(BrowserThread::UI));
-
-  if (type == chrome::NOTIFICATION_PREF_CHANGED) {
-    PrefService* prefs = content::Source<PrefService>(source).ptr();
-    std::string* name = content::Details<std::string>(details).ptr();
-    if (*name == prefs::kBlockThirdPartyCookies) {
-      base::AutoLock auto_lock(lock_);
-      block_third_party_cookies_ = prefs->GetBoolean(
-          prefs::kBlockThirdPartyCookies);
-    } else {
-      NOTREACHED() << "Unexpected preference observed";
-      return;
-    }
-  } else {
-    NOTREACHED() << "Unexpected notification";
-  }
-}
-
 void CookieSettings::ShutdownOnUIThread() {
   DCHECK(BrowserThread::CurrentlyOn(BrowserThread::UI));
   pref_change_registrar_.RemoveAll();
@@ -218,10 +182,10 @@ ContentSetting CookieSettings::GetCookieSetting(
 
   // If no explicit exception has been made and third-party cookies are blocked
   // by default, apply that rule.
-  if (info.primary_pattern == ContentSettingsPattern::Wildcard() &&
-      info.secondary_pattern == ContentSettingsPattern::Wildcard() &&
+  if (info.primary_pattern.MatchesAllHosts() &&
+      info.secondary_pattern.MatchesAllHosts() &&
       ShouldBlockThirdPartyCookies() &&
-      !first_party_url.SchemeIs(chrome::kExtensionScheme)) {
+      !first_party_url.SchemeIs(extensions::kExtensionScheme)) {
     bool not_strict = CommandLine::ForCurrentProcess()->HasSwitch(
         switches::kOnlyBlockSettingThirdPartyCookies);
     net::StaticCookiePolicy policy(not_strict ?
@@ -242,11 +206,14 @@ ContentSetting CookieSettings::GetCookieSetting(
   return content_settings::ValueToContentSetting(value.get());
 }
 
-// static
-void CookieSettings::RegisterUserPrefs(PrefService* prefs) {
-  prefs->RegisterBooleanPref(prefs::kBlockThirdPartyCookies,
-                             false,
-                             PrefService::SYNCABLE_PREF);
+CookieSettings::~CookieSettings() {}
+
+void CookieSettings::OnBlockThirdPartyCookiesChanged() {
+  DCHECK(BrowserThread::CurrentlyOn(BrowserThread::UI));
+
+  base::AutoLock auto_lock(lock_);
+  block_third_party_cookies_ = pref_change_registrar_.prefs()->GetBoolean(
+      prefs::kBlockThirdPartyCookies);
 }
 
 bool CookieSettings::ShouldBlockThirdPartyCookies() const {

@@ -1,4 +1,4 @@
-// Copyright (c) 2011 The Chromium Authors. All rights reserved.
+// Copyright (c) 2012 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -13,7 +13,6 @@
 
 #ifndef NET_HTTP_HTTP_CACHE_H_
 #define NET_HTTP_HTTP_CACHE_H_
-#pragma once
 
 #include <list>
 #include <set>
@@ -31,7 +30,9 @@
 #include "net/base/completion_callback.h"
 #include "net/base/load_states.h"
 #include "net/base/net_export.h"
+#include "net/http/http_network_session.h"
 #include "net/http/http_transaction_factory.h"
+#include "net/http/infinite_cache.h"
 
 class GURL;
 
@@ -51,7 +52,7 @@ class HttpServerProperties;
 class IOBuffer;
 class NetLog;
 class NetworkDelegate;
-class OriginBoundCertService;
+class ServerBoundCertService;
 class ProxyService;
 class SSLConfigService;
 class TransportSecurityState;
@@ -119,17 +120,7 @@ class NET_EXPORT HttpCache : public HttpTransactionFactory,
 
   // The disk cache is initialized lazily (by CreateTransaction) in this case.
   // The HttpCache takes ownership of the |backend_factory|.
-  HttpCache(HostResolver* host_resolver,
-            CertVerifier* cert_verifier,
-            OriginBoundCertService* origin_bound_cert_service,
-            TransportSecurityState* transport_security_state,
-            ProxyService* proxy_service,
-            const std::string& ssl_session_cache_shard,
-            SSLConfigService* ssl_config_service,
-            HttpAuthHandlerFactory* http_auth_handler_factory,
-            NetworkDelegate* network_delegate,
-            HttpServerProperties* http_server_properties,
-            NetLog* net_log,
+  HttpCache(const net::HttpNetworkSession::Params& params,
             BackendFactory* backend_factory);
 
   // The disk cache is initialized lazily (by CreateTransaction) in  this case.
@@ -190,8 +181,15 @@ class NET_EXPORT HttpCache : public HttpTransactionFactory,
   // referred to by |url| and |http_method|.
   void OnExternalCacheHit(const GURL& url, const std::string& http_method);
 
+  // Initializes the Infinite Cache, if selected by the field trial.
+  void InitializeInfiniteCache(const FilePath& path);
+
+  // Returns a pointer to the Infinite Cache.
+  InfiniteCache* infinite_cache() { return &infinite_cache_; }
+
   // HttpTransactionFactory implementation:
-  virtual int CreateTransaction(scoped_ptr<HttpTransaction>* trans) OVERRIDE;
+  virtual int CreateTransaction(scoped_ptr<HttpTransaction>* trans,
+                                HttpTransactionDelegate* delegate) OVERRIDE;
   virtual HttpCache* GetCache() OVERRIDE;
   virtual HttpNetworkSession* GetSession() OVERRIDE;
 
@@ -211,10 +209,10 @@ class NET_EXPORT HttpCache : public HttpTransactionFactory,
   // Types --------------------------------------------------------------------
 
   class MetadataWriter;
-  class SSLHostInfoFactoryAdaptor;
   class Transaction;
   class WorkItem;
   friend class Transaction;
+  friend class InfiniteCache;
   struct PendingOp;  // Info for an entry under construction.
 
   typedef std::list<Transaction*> TransactionList;
@@ -379,8 +377,6 @@ class NET_EXPORT HttpCache : public HttpTransactionFactory,
 
   Mode mode_;
 
-  const scoped_ptr<SSLHostInfoFactoryAdaptor> ssl_host_info_factory_;
-
   const scoped_ptr<HttpTransactionFactory> network_layer_;
   scoped_ptr<disk_cache::Backend> disk_cache_;
 
@@ -394,6 +390,8 @@ class NET_EXPORT HttpCache : public HttpTransactionFactory,
   PendingOpsMap pending_ops_;
 
   scoped_ptr<PlaybackCacheMap> playback_cache_map_;
+
+  InfiniteCache infinite_cache_;
 
   DISALLOW_COPY_AND_ASSIGN(HttpCache);
 };

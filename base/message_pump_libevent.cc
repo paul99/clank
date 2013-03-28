@@ -1,4 +1,4 @@
-// Copyright (c) 2011 The Chromium Authors. All rights reserved.
+// Copyright (c) 2012 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -6,16 +6,17 @@
 
 #include <errno.h>
 #include <fcntl.h>
+#include <unistd.h>
 
 #include "base/auto_reset.h"
 #include "base/compiler_specific.h"
-#include "base/eintr_wrapper.h"
 #include "base/logging.h"
 #if defined(OS_MACOSX)
 #include "base/mac/scoped_nsautorelease_pool.h"
 #endif
 #include "base/memory/scoped_ptr.h"
 #include "base/observer_list.h"
+#include "base/posix/eintr_wrapper.h"
 #include "base/time.h"
 #if defined(USE_SYSTEM_LIBEVENT)
 #include <event.h>
@@ -57,8 +58,7 @@ static int SetNonBlocking(int fd) {
 }
 
 MessagePumpLibevent::FileDescriptorWatcher::FileDescriptorWatcher()
-    : is_persistent_(false),
-      event_(NULL),
+    : event_(NULL),
       pump_(NULL),
       watcher_(NULL),
       ALLOW_THIS_IN_INITIALIZER_LIST(weak_factory_(this)) {
@@ -83,12 +83,10 @@ bool MessagePumpLibevent::FileDescriptorWatcher::StopWatchingFileDescriptor() {
   return (rv == 0);
 }
 
-void MessagePumpLibevent::FileDescriptorWatcher::Init(event *e,
-                                                      bool is_persistent) {
+void MessagePumpLibevent::FileDescriptorWatcher::Init(event *e) {
   DCHECK(e);
   DCHECK(!event_);
 
-  is_persistent_ = is_persistent;
   event_ = e;
 }
 
@@ -146,7 +144,7 @@ MessagePumpLibevent::~MessagePumpLibevent() {
 
 bool MessagePumpLibevent::WatchFileDescriptor(int fd,
                                               bool persistent,
-                                              Mode mode,
+                                              int mode,
                                               FileDescriptorWatcher *controller,
                                               Watcher *delegate) {
   DCHECK_GE(fd, 0);
@@ -158,10 +156,10 @@ bool MessagePumpLibevent::WatchFileDescriptor(int fd,
   DCHECK(watch_file_descriptor_caller_checker_.CalledOnValidThread());
 
   int event_mask = persistent ? EV_PERSIST : 0;
-  if ((mode & WATCH_READ) != 0) {
+  if (mode & WATCH_READ) {
     event_mask |= EV_READ;
   }
-  if ((mode & WATCH_WRITE) != 0) {
+  if (mode & WATCH_WRITE) {
     event_mask |= EV_WRITE;
   }
 
@@ -192,17 +190,17 @@ bool MessagePumpLibevent::WatchFileDescriptor(int fd,
   event_set(evt.get(), fd, event_mask, OnLibeventNotification, controller);
 
   // Tell libevent which message pump this socket will belong to when we add it.
-  if (event_base_set(event_base_, evt.get()) != 0) {
+  if (event_base_set(event_base_, evt.get())) {
     return false;
   }
 
   // Add this socket to the list of monitored sockets.
-  if (event_add(evt.get(), NULL) != 0) {
+  if (event_add(evt.get(), NULL)) {
     return false;
   }
 
   // Transfer ownership of evt to controller.
-  controller->Init(evt.release(), persistent);
+  controller->Init(evt.release());
 
   controller->set_watcher(delegate);
   controller->set_pump(this);
@@ -227,7 +225,7 @@ static void timer_callback(int fd, short events, void *context)
 // Reentrant!
 void MessagePumpLibevent::Run(Delegate* delegate) {
   DCHECK(keep_running_) << "Quit must have been called outside of Run!";
-  AutoReset<bool> auto_reset_in_run(&in_run_, true);
+  base::AutoReset<bool> auto_reset_in_run(&in_run_, true);
 
   // event_base_loopexit() + EVLOOP_ONCE is leaky, see http://crbug.com/25641.
   // Instead, make our own timer and reuse it on each call to event_base_loop().

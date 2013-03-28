@@ -4,7 +4,6 @@
 
 #ifndef CHROME_BROWSER_SESSIONS_SESSION_BACKEND_H_
 #define CHROME_BROWSER_SESSIONS_SESSION_BACKEND_H_
-#pragma once
 
 #include <vector>
 
@@ -12,6 +11,7 @@
 #include "base/memory/scoped_ptr.h"
 #include "chrome/browser/sessions/base_session_service.h"
 #include "chrome/browser/sessions/session_command.h"
+#include "chrome/common/cancelable_task_tracker.h"
 
 namespace net {
 class FileStream;
@@ -54,6 +54,7 @@ class SessionBackend : public base::RefCountedThreadSafe<SessionBackend> {
   // NOTE: this is invoked before every command, and does nothing if we've
   // already Init'ed.
   void Init();
+  bool inited() const { return inited_; }
 
   // Appends the specified commands to the current file. If reset_first is
   // true the the current file is recreated.
@@ -66,7 +67,8 @@ class SessionBackend : public base::RefCountedThreadSafe<SessionBackend> {
   // Invoked from the service to read the commands that make up the last
   // session, invokes ReadLastSessionCommandsImpl to do the work.
   void ReadLastSessionCommands(
-      scoped_refptr<BaseSessionService::InternalGetCommandsRequest> request);
+      const CancelableTaskTracker::IsCanceledCallback& is_canceled,
+      const BaseSessionService::InternalGetCommandsCallback& callback);
 
   // Reads the commands from the last file.
   //
@@ -82,11 +84,6 @@ class SessionBackend : public base::RefCountedThreadSafe<SessionBackend> {
   // browsers are running.
   void MoveCurrentSessionToLastSession();
 
-  // Invoked from the service to read the commands that make up the current
-  // session, invokes ReadCurrentSessionCommandsImpl to do the work.
-  void ReadCurrentSessionCommands(
-      scoped_refptr<BaseSessionService::InternalGetCommandsRequest> request);
-
   // Reads the commands from the current file.
   //
   // On success, the read commands are added to commands. It is up to the
@@ -98,7 +95,6 @@ class SessionBackend : public base::RefCountedThreadSafe<SessionBackend> {
 
   ~SessionBackend();
 
-#if !defined(OS_ANDROID)
   // If current_session_file_ is open, it is truncated so that it is essentially
   // empty (only contains the header). If current_session_file_ isn't open, it
   // is is opened and the header is written to it. After this
@@ -138,7 +134,6 @@ class SessionBackend : public base::RefCountedThreadSafe<SessionBackend> {
 
   // If true, the file is empty (no commands have been added to it).
   bool empty_file_;
-#endif
 
   DISALLOW_COPY_AND_ASSIGN(SessionBackend);
 };

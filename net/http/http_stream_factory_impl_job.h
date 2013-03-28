@@ -13,9 +13,11 @@
 #include "net/base/ssl_config_service.h"
 #include "net/http/http_auth.h"
 #include "net/http/http_auth_controller.h"
+#include "net/http/http_pipelined_host.h"
 #include "net/http/http_request_info.h"
 #include "net/http/http_stream_factory_impl.h"
 #include "net/proxy/proxy_service.h"
+#include "net/quic/quic_stream_factory.h"
 #include "net/socket/client_socket_handle.h"
 #include "net/socket/ssl_client_socket.h"
 
@@ -25,6 +27,8 @@ class ClientSocketHandle;
 class HttpAuthController;
 class HttpNetworkSession;
 class HttpStream;
+class SpdySessionPool;
+class QuicHttpStream;
 
 // An HttpStreamRequestImpl exists for each stream which is in progress of being
 // created for the StreamFactory.
@@ -66,7 +70,7 @@ class HttpStreamFactoryImpl::Job {
   void Orphan(const Request* request);
 
   bool was_npn_negotiated() const;
-  SSLClientSocket::NextProto protocol_negotiated() const;
+  NextProto protocol_negotiated() const;
   bool using_spdy() const;
   const BoundNetLog& net_log() const { return net_log_; }
 
@@ -156,7 +160,7 @@ class HttpStreamFactoryImpl::Job {
   // Set the motivation for this request onto the underlying socket.
   void SetSocketMotivation();
 
-  bool IsHttpsProxyAndHttpUrl();
+  bool IsHttpsProxyAndHttpUrl() const;
 
 // Sets several fields of ssl_config for the given origin_server based on the
 // proxy info and other factors.
@@ -170,6 +174,11 @@ class HttpStreamFactoryImpl::Job {
   // This must only be called when we are using an SSLSocket.
   // After calling, the caller can use ssl_info_.
   void GetSSLInfo();
+
+  HostPortProxyPair GetSpdySessionKey() const;
+
+  // Returns true if the current request can use an existing spdy session.
+  bool CanUseExistingSpdySession() const;
 
   // Called when we encounter a network error that could be resolved by trying
   // a new proxy configuration.  If there is another proxy configuration to try
@@ -196,10 +205,22 @@ class HttpStreamFactoryImpl::Job {
   // Should we force SPDY to run without SSL for this stream request.
   bool ShouldForceSpdyWithoutSSL() const;
 
+  // Should we force QUIC for this stream request.
+  bool ShouldForceQuic() const;
+
   bool IsRequestEligibleForPipelining();
 
   // Record histograms of latency until Connect() completes.
   static void LogHttpConnectedMetrics(const ClientSocketHandle& handle);
+
+  // Invoked by the transport socket pool after host resolution is complete
+  // to allow the connection to be aborted, if a matching SPDY session can
+  // be found.  Will return ERR_SPDY_SESSION_ALREADY_EXISTS if such a
+  // session is found, and OK otherwise.
+  static int OnHostResolution(SpdySessionPool* spdy_session_pool,
+                              const HostPortProxyPair& spdy_session_key,
+                              const AddressList& addresses,
+                              const BoundNetLog& net_log);
 
   Request* request_;
 
@@ -243,11 +264,18 @@ class HttpStreamFactoryImpl::Job {
   // True if this network transaction is using SPDY instead of HTTP.
   bool using_spdy_;
 
+  // True if this network transaction is using QUIC instead of HTTP.
+  bool using_quic_;
+  QuicStreamRequest quic_request_;
+
   // Force spdy for all connections.
   bool force_spdy_always_;
 
   // Force spdy only for SSL connections.
   bool force_spdy_over_ssl_;
+
+  // Force quic for a specific port.
+  int force_quic_port_;
 
   // The certificate error while using SPDY over SSL for insecure URLs.
   int spdy_certificate_error_;
@@ -265,7 +293,7 @@ class HttpStreamFactoryImpl::Job {
   bool was_npn_negotiated_;
 
   // Protocol negotiated with the server.
-  SSLClientSocket::NextProto protocol_negotiated_;
+  NextProto protocol_negotiated_;
 
   // 0 if we're not preconnecting. Otherwise, the number of streams to
   // preconnect.
@@ -279,6 +307,9 @@ class HttpStreamFactoryImpl::Job {
 
   // Only used if |new_spdy_session_| is non-NULL.
   bool spdy_session_direct_;
+
+  // Key used to identify the HttpPipelinedHost for |request_|.
+  scoped_ptr<HttpPipelinedHost::Key> http_pipelining_key_;
 
   // True if an existing pipeline can handle this job's request.
   bool existing_available_pipeline_;

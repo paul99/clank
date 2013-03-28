@@ -10,13 +10,10 @@
 
 #include "base/bind.h"
 #include "base/compiler_specific.h"
-#include "base/file_util.h"
 #include "base/lazy_instance.h"
 #include "base/memory/scoped_ptr.h"
 #include "base/message_loop.h"
 #include "base/metrics/stats_counters.h"
-#include "base/string_number_conversions.h"
-#include "base/string_split.h"
 #include "base/string_util.h"
 #include "base/stringprintf.h"
 #include "base/synchronization/lock.h"
@@ -26,15 +23,17 @@
 #include "base/win/windows_version.h"
 #include "skia/ext/platform_canvas.h"
 #include "third_party/WebKit/Source/WebKit/chromium/public/WebInputEvent.h"
+#include "ui/base/win/hwnd_util.h"
 #include "webkit/glue/webkit_glue.h"
 #include "webkit/plugins/npapi/plugin_constants_win.h"
-#include "webkit/plugins/npapi/plugin_group.h"
 #include "webkit/plugins/npapi/plugin_instance.h"
 #include "webkit/plugins/npapi/plugin_lib.h"
 #include "webkit/plugins/npapi/plugin_list.h"
 #include "webkit/plugins/npapi/plugin_stream_url.h"
+#include "webkit/plugins/npapi/plugin_utils.h"
 #include "webkit/plugins/npapi/webplugin.h"
 #include "webkit/plugins/npapi/webplugin_ime_win.h"
+#include "webkit/plugins/plugin_constants.h"
 
 using WebKit::WebCursorInfo;
 using WebKit::WebKeyboardEvent;
@@ -48,6 +47,7 @@ namespace {
 
 const wchar_t kWebPluginDelegateProperty[] = L"WebPluginDelegateProperty";
 const wchar_t kPluginNameAtomProperty[] = L"PluginNameAtom";
+const wchar_t kPluginVersionAtomProperty[] = L"PluginVersionAtom";
 const wchar_t kDummyActivationWindowName[] = L"DummyWindowForActivation";
 const wchar_t kPluginFlashThrottle[] = L"FlashThrottle";
 
@@ -92,69 +92,6 @@ base::LazyInstance<base::win::IATPatchFunction> g_iat_patch_reg_enum_key_ex_w =
 // Helper object for patching the GetProcAddress API.
 base::LazyInstance<base::win::IATPatchFunction> g_iat_patch_get_proc_address =
     LAZY_INSTANCE_INITIALIZER;
-
-// Helper object for patching the GetKeyState API.
-base::LazyInstance<base::win::IATPatchFunction> g_iat_patch_get_key_state =
-    LAZY_INSTANCE_INITIALIZER;
-
-// Saved key state globals and helper access functions.
-SHORT (WINAPI *g_iat_orig_get_key_state)(int vkey);
-typedef size_t SavedStateType;
-const size_t kBitsPerType = sizeof(SavedStateType) * 8;
-// Bit array of key state corresponding to virtual key index (0=up, 1=down).
-SavedStateType g_saved_key_state[256 / kBitsPerType];
-
-bool GetSavedKeyState(WPARAM vkey) {
-  CHECK_LT(vkey, kBitsPerType * sizeof(g_saved_key_state));
-  if (g_saved_key_state[vkey / kBitsPerType] & 1 << (vkey % kBitsPerType))
-    return true;
-  return false;
-}
-
-void SetSavedKeyState(WPARAM vkey) {
-  CHECK_LT(vkey, kBitsPerType * sizeof(g_saved_key_state));
-  // Cache the key state only for keys blocked by UIPI.
-  if (g_iat_orig_get_key_state(vkey) == 0)
-    g_saved_key_state[vkey / kBitsPerType] |= 1 << (vkey % kBitsPerType);
-}
-
-void UnsetSavedKeyState(WPARAM vkey) {
-  CHECK_LT(vkey, kBitsPerType * sizeof(g_saved_key_state));
-  g_saved_key_state[vkey / kBitsPerType] &= ~(1 << (vkey % kBitsPerType));
-}
-
-void ClearSavedKeyState() {
-  memset(g_saved_key_state, 0, sizeof(g_saved_key_state));
-}
-
-// Helper objects for patching VirtualQuery, VirtualProtect.
-base::LazyInstance<base::win::IATPatchFunction> g_iat_patch_virtual_protect =
-    LAZY_INSTANCE_INITIALIZER;
-BOOL (WINAPI *g_iat_orig_virtual_protect)(LPVOID address,
-                                          SIZE_T size,
-                                          DWORD new_protect,
-                                          PDWORD old_protect);
-
-base::LazyInstance<base::win::IATPatchFunction> g_iat_patch_virtual_free =
-    LAZY_INSTANCE_INITIALIZER;
-BOOL (WINAPI *g_iat_orig_virtual_free)(LPVOID address,
-                                       SIZE_T size,
-                                       DWORD free_type);
-
-const DWORD kExecPageMask = PAGE_EXECUTE_READ;
-static volatile intptr_t g_max_exec_mem_size;
-static scoped_ptr<base::Lock> g_exec_mem_lock;
-
-void UpdateExecMemSize(intptr_t size) {
-  base::AutoLock locked(*g_exec_mem_lock);
-
-  static intptr_t s_exec_mem_size = 0;
-
-  // Floor to zero since shutdown may unmap pages created before our hooks.
-  s_exec_mem_size = std::max(0, s_exec_mem_size + size);
-  if (s_exec_mem_size > g_max_exec_mem_size)
-    g_max_exec_mem_size = s_exec_mem_size;
-}
 
 // http://crbug.com/16114
 // Enforces providing a valid device context in NPWindow, so that NPP_SetWindow
@@ -254,45 +191,52 @@ std::wstring GetKeyPath(HKEY key) {
 }
 
 int GetPluginMajorVersion(const WebPluginInfo& plugin_info) {
-  scoped_ptr<Version> plugin_version(PluginGroup::CreateVersionFromString(
-      plugin_info.version));
+  Version plugin_version;
+  webkit::npapi::CreateVersionFromString(plugin_info.version, &plugin_version);
+
   int major_version = 0;
-  if (plugin_version.get()) {
-    major_version = plugin_version->components()[0];
-  }
+  if (plugin_version.IsValid())
+    major_version = plugin_version.components()[0];
+
   return major_version;
+}
+
+bool GetPluginPropertyFromWindow(
+    HWND window, const wchar_t* plugin_atom_property,
+    string16* plugin_property) {
+  ATOM plugin_atom = reinterpret_cast<ATOM>(
+      GetPropW(window, plugin_atom_property));
+  if (plugin_atom != 0) {
+    WCHAR plugin_property_local[MAX_PATH] = {0};
+    GlobalGetAtomNameW(plugin_atom,
+                       plugin_property_local,
+                       ARRAYSIZE(plugin_property_local));
+    *plugin_property = plugin_property_local;
+    return true;
+  }
+  return false;
 }
 
 }  // namespace
 
 bool WebPluginDelegateImpl::IsPluginDelegateWindow(HWND window) {
-  static const int kBufLen = 64;
-  wchar_t class_name[kBufLen];
-  if (!GetClassNameW(window, class_name, kBufLen))
-    return false;
-  return wcscmp(class_name, kNativeWindowClassName) == 0;
+  return ui::GetClassName(window) == string16(kNativeWindowClassName);
 }
 
 // static
 bool WebPluginDelegateImpl::GetPluginNameFromWindow(
     HWND window, string16* plugin_name) {
-  if (NULL == plugin_name) {
-    return false;
-  }
-  if (!IsPluginDelegateWindow(window)) {
-    return false;
-  }
-  ATOM plugin_name_atom = reinterpret_cast<ATOM>(
-      GetPropW(window, kPluginNameAtomProperty));
-  if (plugin_name_atom != 0) {
-    WCHAR plugin_name_local[MAX_PATH] = {0};
-    GlobalGetAtomNameW(plugin_name_atom,
-                       plugin_name_local,
-                       ARRAYSIZE(plugin_name_local));
-    *plugin_name = plugin_name_local;
-    return true;
-  }
-  return false;
+  return IsPluginDelegateWindow(window) &&
+      GetPluginPropertyFromWindow(
+          window, kPluginNameAtomProperty, plugin_name);
+}
+
+// static
+bool WebPluginDelegateImpl::GetPluginVersionFromWindow(
+    HWND window, string16* plugin_version) {
+  return IsPluginDelegateWindow(window) &&
+      GetPluginPropertyFromWindow(
+          window, kPluginVersionAtomProperty, plugin_version);
 }
 
 bool WebPluginDelegateImpl::IsDummyActivationWindow(HWND window) {
@@ -304,6 +248,10 @@ bool WebPluginDelegateImpl::IsDummyActivationWindow(HWND window) {
     return (0 == lstrcmpiW(window_title, kDummyActivationWindowName));
   }
   return false;
+}
+
+HWND WebPluginDelegateImpl::GetDefaultWindowParent() {
+  return GetDesktopWindow();
 }
 
 LRESULT CALLBACK WebPluginDelegateImpl::HandleEventMessageFilterHook(
@@ -327,64 +275,9 @@ LRESULT CALLBACK WebPluginDelegateImpl::MouseHookProc(
   return CallNextHookEx(NULL, code, wParam, lParam);
 }
 
-// In addition to the key state we maintain, we also mask in the original
-// return value. This is done because system keys (e.g. tab, enter, shift)
-// and toggles (e.g. capslock, numlock) don't ever seem to be blocked.
-SHORT WINAPI WebPluginDelegateImpl::GetKeyStatePatch(int vkey) {
-  if (GetSavedKeyState(vkey))
-    return g_iat_orig_get_key_state(vkey) | 0x8000;
-  return g_iat_orig_get_key_state(vkey);
-}
-
-// We need to track RX memory usage in plugins to prevent JIT spraying attacks.
-// This is done by hooking VirtualProtect and VirtualFree.
-BOOL WINAPI WebPluginDelegateImpl::VirtualProtectPatch(LPVOID address,
-                                                       SIZE_T size,
-                                                       DWORD new_protect,
-                                                       PDWORD old_protect) {
-  if (g_iat_orig_virtual_protect(address, size, new_protect, old_protect)) {
-    bool is_exec = new_protect == kExecPageMask;
-    bool was_exec = *old_protect == kExecPageMask;
-    if (is_exec && !was_exec) {
-      UpdateExecMemSize(static_cast<intptr_t>(size));
-    } else if (!is_exec && was_exec) {
-      UpdateExecMemSize(-(static_cast<intptr_t>(size)));
-    }
-
-    return TRUE;
-  }
-
-  return FALSE;
-}
-
-BOOL WINAPI WebPluginDelegateImpl::VirtualFreePatch(LPVOID address,
-                                                    SIZE_T size,
-                                                    DWORD free_type) {
-  MEMORY_BASIC_INFORMATION mem_info;
-  if (::VirtualQuery(address, &mem_info, sizeof(mem_info))) {
-    size_t exec_size = 0;
-    void* base_address = mem_info.AllocationBase;
-    do {
-      if (mem_info.Protect == kExecPageMask)
-        exec_size += mem_info.RegionSize;
-      BYTE* next = reinterpret_cast<BYTE*>(mem_info.BaseAddress) +
-          mem_info.RegionSize;
-      if (!::VirtualQuery(next, &mem_info, sizeof(mem_info)))
-        break;
-    } while (base_address == mem_info.AllocationBase);
-
-    if (exec_size)
-      UpdateExecMemSize(-(static_cast<intptr_t>(exec_size)));
-  }
-
-  return g_iat_orig_virtual_free(address, size, free_type);
-}
-
 WebPluginDelegateImpl::WebPluginDelegateImpl(
-    gfx::PluginWindowHandle containing_view,
-    PluginInstance *instance)
-    : parent_(containing_view),
-      instance_(instance),
+    PluginInstance* instance)
+    : instance_(instance),
       quirks_(0),
       plugin_(NULL),
       windowless_(false),
@@ -394,7 +287,8 @@ WebPluginDelegateImpl::WebPluginDelegateImpl(
       last_message_(0),
       is_calling_wndproc(false),
       dummy_window_for_activation_(NULL),
-      parent_proxy_window_(NULL),
+      dummy_window_parent_(NULL),
+      old_dummy_window_proc_(NULL),
       handle_event_message_filter_hook_(NULL),
       handle_event_pump_messages_event_(NULL),
       user_gesture_message_posted_(false),
@@ -412,7 +306,7 @@ WebPluginDelegateImpl::WebPluginDelegateImpl(
   std::wstring filename =
       StringToLowerASCII(plugin_info.path.BaseName().value());
 
-  if (instance_->mime_type() == "application/x-shockwave-flash" ||
+  if (instance_->mime_type() == kFlashPluginSwfMimeType ||
       filename == kFlashPlugin) {
     // Flash only requests windowless plugins if we return a Mozilla user
     // agent.
@@ -421,12 +315,6 @@ WebPluginDelegateImpl::WebPluginDelegateImpl(
     quirks_ |= PLUGIN_QUIRK_PATCH_SETCURSOR;
     quirks_ |= PLUGIN_QUIRK_ALWAYS_NOTIFY_SUCCESS;
     quirks_ |= PLUGIN_QUIRK_HANDLE_MOUSE_CAPTURE;
-    if (filename == kBuiltinFlashPlugin &&
-        base::win::GetVersion() >= base::win::VERSION_VISTA) {
-      quirks_ |= PLUGIN_QUIRK_REPARENT_IN_BROWSER |
-                 PLUGIN_QUIRK_PATCH_GETKEYSTATE |
-                 PLUGIN_QUIRK_PATCH_VM_API;
-    }
     quirks_ |= PLUGIN_QUIRK_EMULATE_IME;
   } else if (filename == kAcrobatReaderPlugin) {
     // Check for the version number above or equal 9.
@@ -484,11 +372,14 @@ WebPluginDelegateImpl::WebPluginDelegateImpl(
 
 WebPluginDelegateImpl::~WebPluginDelegateImpl() {
   if (::IsWindow(dummy_window_for_activation_)) {
-    // Sandboxed Flash stacks two dummy windows to prevent UIPI failures
-    if (::IsWindow(parent_proxy_window_))
-      ::DestroyWindow(parent_proxy_window_);
-    else
-      ::DestroyWindow(dummy_window_for_activation_);
+    WNDPROC current_wnd_proc = reinterpret_cast<WNDPROC>(
+        GetWindowLongPtr(dummy_window_for_activation_, GWLP_WNDPROC));
+    if (current_wnd_proc == DummyWindowProc) {
+      SetWindowLongPtr(dummy_window_for_activation_,
+                       GWLP_WNDPROC,
+                       reinterpret_cast<LONG>(old_dummy_window_proc_));
+    }
+    ::DestroyWindow(dummy_window_for_activation_);
   }
 
   DestroyInstance();
@@ -507,7 +398,9 @@ bool WebPluginDelegateImpl::PlatformInitialize() {
   if (windowless_ && !instance_->plugin_lib()->internal()) {
     CreateDummyWindowForActivation();
     handle_event_pump_messages_event_ = CreateEvent(NULL, TRUE, FALSE, NULL);
-    plugin_->SetWindowlessPumpEvent(handle_event_pump_messages_event_);
+    plugin_->SetWindowlessData(
+        handle_event_pump_messages_event_,
+        reinterpret_cast<gfx::NativeViewId>(dummy_window_for_activation_));
   }
 
   // We cannot patch internal plugins as they are not shared libraries.
@@ -579,37 +472,6 @@ bool WebPluginDelegateImpl::PlatformInitialize() {
         GetProcAddressPatch);
   }
 
-  // Under UIPI the key state does not get forwarded properly to the child
-  // plugin window. So, instead we track the key state manually and intercept
-  // GetKeyState.
-  if ((quirks_ & PLUGIN_QUIRK_PATCH_GETKEYSTATE) &&
-      !g_iat_patch_get_key_state.Pointer()->is_patched()) {
-    g_iat_orig_get_key_state = ::GetKeyState;
-    g_iat_patch_get_key_state.Pointer()->Patch(
-        L"gcswf32.dll", "user32.dll", "GetKeyState",
-        WebPluginDelegateImpl::GetKeyStatePatch);
-  }
-
-  // Hook the VM calls so we can track the amount of executable memory being
-  // allocated by Flash (and potentially other plugins).
-  if (quirks_ & PLUGIN_QUIRK_PATCH_VM_API) {
-    if (!g_exec_mem_lock.get())
-      g_exec_mem_lock.reset(new base::Lock());
-
-    if (!g_iat_patch_virtual_protect.Pointer()->is_patched()) {
-      g_iat_orig_virtual_protect = ::VirtualProtect;
-      g_iat_patch_virtual_protect.Pointer()->Patch(
-          L"gcswf32.dll", "kernel32.dll", "VirtualProtect",
-          WebPluginDelegateImpl::VirtualProtectPatch);
-    }
-    if (!g_iat_patch_virtual_free.Pointer()->is_patched()) {
-      g_iat_orig_virtual_free = ::VirtualFree;
-      g_iat_patch_virtual_free.Pointer()->Patch(
-          L"gcswf32.dll", "kernel32.dll", "VirtualFree",
-          WebPluginDelegateImpl::VirtualFreePatch);
-    }
-  }
-
   return true;
 }
 
@@ -620,12 +482,6 @@ void WebPluginDelegateImpl::PlatformDestroyInstance() {
   // Unpatch if this is the last plugin instance.
   if (instance_->plugin_lib()->instance_count() != 1)
     return;
-
-  // Pass back the stats for max executable memory.
-  if (quirks_ & PLUGIN_QUIRK_PATCH_VM_API) {
-    plugin_->ReportExecutableMemory(g_max_exec_mem_size);
-    g_max_exec_mem_size = 0;
-  }
 
   if (g_iat_patch_set_cursor.Pointer()->is_patched())
     g_iat_patch_set_cursor.Pointer()->Unpatch();
@@ -644,7 +500,7 @@ void WebPluginDelegateImpl::PlatformDestroyInstance() {
 
 void WebPluginDelegateImpl::Paint(WebKit::WebCanvas* canvas,
                                   const gfx::Rect& rect) {
-  if (windowless_) {
+  if (windowless_ && skia::SupportsPlatformPaint(canvas)) {
     skia::ScopedPlatformPaint scoped_platform_paint(canvas);
     HDC hdc = scoped_platform_paint.GetPlatformSurface();
     WindowlessPaint(hdc, rect);
@@ -656,9 +512,6 @@ bool WebPluginDelegateImpl::WindowedCreatePlugin() {
 
   RegisterNativeWindowClass();
 
-  // UIPI requires reparenting in the (medium-integrity) browser process.
-  bool reparent_in_browser = (quirks_ & PLUGIN_QUIRK_REPARENT_IN_BROWSER) != 0;
-
   // The window will be sized and shown later.
   windowed_handle_ = CreateWindowEx(
       WS_EX_LEFT | WS_EX_LTRREADING | WS_EX_RIGHTSCROLLBAR,
@@ -669,45 +522,51 @@ bool WebPluginDelegateImpl::WindowedCreatePlugin() {
       0,
       0,
       0,
-      reparent_in_browser ? NULL : parent_,
+      GetDefaultWindowParent(),
       0,
       GetModuleHandle(NULL),
       0);
   if (windowed_handle_ == 0)
     return false;
 
-  if (reparent_in_browser) {
-    plugin_->ReparentPluginWindow(windowed_handle_, parent_);
-  } else if (IsWindow(parent_)) {
     // This is a tricky workaround for Issue 2673 in chromium "Flash: IME not
     // available". To use IMEs in this window, we have to make Windows attach
-    // IMEs to this window (i.e. load IME DLLs, attach them to this process,
-    // and add their message hooks to this window). Windows attaches IMEs while
-    // this process creates a top-level window. On the other hand, to layout
-    // this window correctly in the given parent window (RenderWidgetHostHWND),
-    // this window should be a child window of the parent window.
-    // To satisfy both of the above conditions, this code once creates a
-    // top-level window and change it to a child window of the parent window.
+  // IMEs to this window (i.e. load IME DLLs, attach them to this process, and
+  // add their message hooks to this window). Windows attaches IMEs while this
+  // process creates a top-level window. On the other hand, to layout this
+  // window correctly in the given parent window (RenderWidgetHostViewWin or
+  // RenderWidgetHostViewAura), this window should be a child window of the
+  // parent window. To satisfy both of the above conditions, this code once
+  // creates a top-level window and change it to a child window of the parent
+  // window (in the browser process).
     SetWindowLongPtr(windowed_handle_, GWL_STYLE,
                      WS_CHILD | WS_CLIPCHILDREN | WS_CLIPSIBLINGS);
-    SetParent(windowed_handle_, parent_);
-  }
 
   BOOL result = SetProp(windowed_handle_, kWebPluginDelegateProperty, this);
   DCHECK(result == TRUE) << "SetProp failed, last error = " << GetLastError();
-  // Get the name of the plugin, create an atom and set that in a window
-  // property. Use an atom so that other processes can access the name of
-  // the plugin that this window is hosting
+  // Get the name and version of the plugin, create atoms and set them in a
+  // window property. Use atoms so that other processes can access the name and
+  // version of the plugin that this window is hosting.
   if (instance_ != NULL) {
     PluginLib* plugin_lib = instance()->plugin_lib();
     if (plugin_lib != NULL) {
       std::wstring plugin_name = plugin_lib->plugin_info().name;
       if (!plugin_name.empty()) {
         ATOM plugin_name_atom = GlobalAddAtomW(plugin_name.c_str());
-        DCHECK(0 != plugin_name_atom);
+        DCHECK_NE(0, plugin_name_atom);
         result = SetProp(windowed_handle_,
             kPluginNameAtomProperty,
             reinterpret_cast<HANDLE>(plugin_name_atom));
+        DCHECK(result == TRUE) << "SetProp failed, last error = " <<
+            GetLastError();
+      }
+      string16 plugin_version = plugin_lib->plugin_info().version;
+      if (!plugin_version.empty()) {
+        ATOM plugin_version_atom = GlobalAddAtomW(plugin_version.c_str());
+        DCHECK_NE(0, plugin_version_atom);
+        result = SetProp(windowed_handle_,
+            kPluginVersionAtomProperty,
+            reinterpret_cast<HANDLE>(plugin_version_atom));
         DCHECK(result == TRUE) << "SetProp failed, last error = " <<
             GetLastError();
       }
@@ -800,7 +659,7 @@ void WebPluginDelegateImpl::OnThrottleMessage() {
   if (!throttle_queue_was_empty) {
     MessageLoop::current()->PostDelayedTask(
         FROM_HERE, base::Bind(&WebPluginDelegateImpl::OnThrottleMessage),
-        kFlashWMUSERMessageThrottleDelayMs);
+        base::TimeDelta::FromMilliseconds(kFlashWMUSERMessageThrottleDelayMs));
   }
 }
 
@@ -823,7 +682,7 @@ void WebPluginDelegateImpl::ThrottleMessage(WNDPROC proc, HWND hwnd,
   if (throttle_queue->size() == 1) {
     MessageLoop::current()->PostDelayedTask(
         FROM_HERE, base::Bind(&WebPluginDelegateImpl::OnThrottleMessage),
-        kFlashWMUSERMessageThrottleDelayMs);
+        base::TimeDelta::FromMilliseconds(kFlashWMUSERMessageThrottleDelayMs));
   }
 }
 
@@ -831,8 +690,8 @@ void WebPluginDelegateImpl::ThrottleMessage(WNDPROC proc, HWND hwnd,
 // windowless plugins.  We throttle the rate at which they deliver messages
 // so that they will not consume outrageous amounts of CPU.
 // static
-LRESULT CALLBACK WebPluginDelegateImpl::FlashWindowlessWndProc(HWND hwnd,
-    UINT message, WPARAM wparam, LPARAM lparam) {
+LRESULT CALLBACK WebPluginDelegateImpl::FlashWindowlessWndProc(
+    HWND hwnd, UINT message, WPARAM wparam, LPARAM lparam) {
   std::map<HWND, WNDPROC>::iterator index =
       g_window_handle_proc_map.Get().find(hwnd);
 
@@ -859,6 +718,41 @@ LRESULT CALLBACK WebPluginDelegateImpl::FlashWindowlessWndProc(HWND hwnd,
     }
   }
   return CallWindowProc(old_proc, hwnd, message, wparam, lparam);
+}
+
+LRESULT CALLBACK WebPluginDelegateImpl::DummyWindowProc(
+    HWND hwnd, UINT message, WPARAM w_param, LPARAM l_param) {
+  WebPluginDelegateImpl* delegate = reinterpret_cast<WebPluginDelegateImpl*>(
+      GetProp(hwnd, kWebPluginDelegateProperty));
+  CHECK(delegate);
+  if (message == WM_WINDOWPOSCHANGING) {
+    // We need to know when the dummy window is parented because windowless
+    // plugins need the parent window for things like menus. There's no message
+    // for a parent being changed, but a WM_WINDOWPOSCHANGING is sent so we
+    // check every time we get it.
+    // For non-aura builds, this never changes since RenderWidgetHostViewWin's
+    // window is constant. For aura builds, this changes every time the tab gets
+    // dragged to a new window.
+    HWND parent = GetParent(hwnd);
+    if (parent != delegate->dummy_window_parent_) {
+      delegate->dummy_window_parent_ = parent;
+
+      // Set the containing window handle as the instance window handle. This is
+      // what Safari does. Not having a valid window handle causes subtle bugs
+      // with plugins which retrieve the window handle and use it for things
+      // like context menus. The window handle can be retrieved via
+      // NPN_GetValue of NPNVnetscapeWindow.
+      delegate->instance_->set_window_handle(parent);
+
+      // The plugin caches the result of NPNVnetscapeWindow when we originally
+      // called NPP_SetWindow, so force it to get the new value.
+      delegate->WindowlessSetWindow();
+    }
+  } else if (message == WM_NCDESTROY) {
+    RemoveProp(hwnd, kWebPluginDelegateProperty);
+  }
+  return CallWindowProc(
+      delegate->old_dummy_window_proc_, hwnd, message, w_param, l_param);
 }
 
 // Callback for enumerating the Flash windows.
@@ -890,29 +784,6 @@ BOOL CALLBACK EnumFlashWindows(HWND window, LPARAM arg) {
 bool WebPluginDelegateImpl::CreateDummyWindowForActivation() {
   DCHECK(!dummy_window_for_activation_);
 
-  // Built-in Flash runs with UIPI, but in windowless mode Flash sometimes
-  // tries to attach windows to the parent (which fails under UIPI). To make
-  // it work we add an extra dummy parent in the low-integrity process.
-  if (quirks_ & PLUGIN_QUIRK_REPARENT_IN_BROWSER) {
-    parent_proxy_window_ = CreateWindowEx(
-      0,
-      L"Static",
-      kDummyActivationWindowName,
-      WS_POPUP,
-      0,
-      0,
-      0,
-      0,
-      0,
-      0,
-      GetModuleHandle(NULL),
-      0);
-
-    if (parent_proxy_window_ == 0)
-      return false;
-    plugin_->ReparentPluginWindow(parent_proxy_window_, parent_);
-  }
-
   dummy_window_for_activation_ = CreateWindowEx(
     0,
     L"Static",
@@ -922,13 +793,22 @@ bool WebPluginDelegateImpl::CreateDummyWindowForActivation() {
     0,
     0,
     0,
-    parent_proxy_window_ ? parent_proxy_window_ : parent_,
+    // We don't know the parent of the dummy window yet, so just set it to the
+    // desktop and it'll get parented by the browser.
+      GetDefaultWindowParent(),
     0,
     GetModuleHandle(NULL),
     0);
 
   if (dummy_window_for_activation_ == 0)
     return false;
+
+  BOOL result = SetProp(dummy_window_for_activation_,
+                        kWebPluginDelegateProperty, this);
+  DCHECK(result == TRUE) << "SetProp failed, last error = " << GetLastError();
+  old_dummy_window_proc_ = reinterpret_cast<WNDPROC>(SetWindowLongPtr(
+      dummy_window_for_activation_, GWLP_WNDPROC,
+      reinterpret_cast<LONG>(DummyWindowProc)));
 
   // Flash creates background windows which use excessive CPU in our
   // environment; we wrap these windows and throttle them so that they don't
@@ -1033,7 +913,7 @@ ATOM WebPluginDelegateImpl::RegisterNativeWindowClass() {
   WNDCLASSEX wcex;
   wcex.cbSize         = sizeof(WNDCLASSEX);
   wcex.style          = CS_DBLCLKS;
-  wcex.lpfnWndProc    = DummyWindowProc;
+  wcex.lpfnWndProc    = WrapperWindowProc;
   wcex.cbClsExtra     = 0;
   wcex.cbWndExtra     = 0;
   wcex.hInstance      = GetModuleHandle(NULL);
@@ -1052,7 +932,7 @@ ATOM WebPluginDelegateImpl::RegisterNativeWindowClass() {
   return RegisterClassEx(&wcex);
 }
 
-LRESULT CALLBACK WebPluginDelegateImpl::DummyWindowProc(
+LRESULT CALLBACK WebPluginDelegateImpl::WrapperWindowProc(
     HWND hWnd, UINT message, WPARAM wParam, LPARAM lParam) {
   // This is another workaround for Issue 2673 in chromium "Flash: IME not
   // available". Somehow, the CallWindowProc() function does not dispatch
@@ -1113,31 +993,6 @@ LRESULT CALLBACK WebPluginDelegateImpl::NativeWndProc(
     return FALSE;
   }
 
-  // Track the keystate to work around a UIPI issue.
-  if (delegate->GetQuirks() & PLUGIN_QUIRK_PATCH_GETKEYSTATE) {
-    switch (message) {
-      case WM_KEYDOWN:
-        SetSavedKeyState(wparam);
-        break;
-
-      case WM_KEYUP:
-        UnsetSavedKeyState(wparam);
-        break;
-
-      // Clear out the saved keystate whenever the Flash thread loses focus.
-      case WM_KILLFOCUS:
-      case WM_SETFOCUS:
-        if (::GetCurrentThreadId() != ::GetWindowThreadProcessId(
-            reinterpret_cast<HWND>(wparam), NULL)) {
-          ClearSavedKeyState();
-        }
-        break;
-
-      default:
-        break;
-    }
-  }
-
   LRESULT result;
   uint32 old_message = delegate->last_message_;
   delegate->last_message_ = message;
@@ -1184,7 +1039,7 @@ LRESULT CALLBACK WebPluginDelegateImpl::NativeWndProc(
           FROM_HERE,
           base::Bind(&WebPluginDelegateImpl::OnUserGestureEnd,
                      delegate->user_gesture_msg_factory_.GetWeakPtr()),
-          kWindowedPluginPopupTimerMs);
+          base::TimeDelta::FromMilliseconds(kWindowedPluginPopupTimerMs));
     }
 
     HandleCaptureForMessage(hwnd, message);
@@ -1207,6 +1062,10 @@ LRESULT CALLBACK WebPluginDelegateImpl::NativeWndProc(
           RemoveProp(hwnd, kPluginNameAtomProperty));
       if (plugin_name_atom != 0)
         GlobalDeleteAtom(plugin_name_atom);
+      ATOM plugin_version_atom = reinterpret_cast<ATOM>(
+          RemoveProp(hwnd, kPluginVersionAtomProperty));
+      if (plugin_version_atom != 0)
+        GlobalDeleteAtom(plugin_version_atom);
       ClearThrottleQueueForWindow(hwnd);
     }
   }
@@ -1300,15 +1159,12 @@ bool WebPluginDelegateImpl::PlatformSetPluginHasFocus(bool focused) {
   focus_event.wParam = 0;
   focus_event.lParam = 0;
 
-  if (GetQuirks() & PLUGIN_QUIRK_PATCH_GETKEYSTATE)
-    ClearSavedKeyState();
-
   instance()->NPP_HandleEvent(&focus_event);
   return true;
 }
 
 static bool NPEventFromWebMouseEvent(const WebMouseEvent& event,
-                                     NPEvent *np_event) {
+                                     NPEvent* np_event) {
   np_event->lParam = static_cast<uint32>(MAKELPARAM(event.windowX,
                                                    event.windowY));
   np_event->wParam = 0;
@@ -1363,7 +1219,7 @@ static bool NPEventFromWebMouseEvent(const WebMouseEvent& event,
 }
 
 static bool NPEventFromWebKeyboardEvent(const WebKeyboardEvent& event,
-                                        NPEvent *np_event) {
+                                        NPEvent* np_event) {
   np_event->wParam = event.windowsKeyCode;
 
   switch (event.type) {
@@ -1422,20 +1278,14 @@ bool WebPluginDelegateImpl::PlatformHandleInputEvent(
     return false;
   }
 
-  if (GetQuirks() & PLUGIN_QUIRK_PATCH_GETKEYSTATE) {
-    if (np_event.event == WM_KEYDOWN)
-      SetSavedKeyState(np_event.wParam);
-    else if (np_event.event == WM_KEYUP)
-      UnsetSavedKeyState(np_event.wParam);
-  }
-
   // Allow this plug-in to access this IME emulator through IMM32 API while the
   // plug-in is processing this event.
   if (GetQuirks() & PLUGIN_QUIRK_EMULATE_IME) {
     if (!plugin_ime_.get())
       plugin_ime_.reset(new WebPluginIMEWin);
   }
-  WebPluginIMEWin::ScopedLock lock(plugin_ime_.get());
+  WebPluginIMEWin::ScopedLock lock(
+      event.isKeyboardEventType(event.type) ? plugin_ime_.get() : NULL);
 
   HWND last_focus_window = NULL;
 
@@ -1456,7 +1306,13 @@ bool WebPluginDelegateImpl::PlatformHandleInputEvent(
     // windowless plugin is under the mouse and to handle this. This would
     // also require some changes in RenderWidgetHost to detect this in the
     // WM_MOUSEACTIVATE handler and inform the renderer accordingly.
-    last_focus_window = ::SetFocus(dummy_window_for_activation_);
+    bool valid =
+        GetParent(dummy_window_for_activation_) != GetDefaultWindowParent();
+    if (valid) {
+      last_focus_window = ::SetFocus(dummy_window_for_activation_);
+    } else {
+      NOTREACHED() << "Dummy window not parented";
+    }
   }
 
   bool old_task_reentrancy_state =
@@ -1572,7 +1428,14 @@ BOOL WINAPI WebPluginDelegateImpl::TrackPopupMenuPatch(
     // TrackPopupMenu fails if the window passed in belongs to a different
     // thread.
     if (::GetCurrentThreadId() != window_thread_id) {
-      window = g_current_plugin_instance->dummy_window_for_activation_;
+      bool valid =
+          GetParent(g_current_plugin_instance->dummy_window_for_activation_) !=
+              GetDefaultWindowParent();
+      if (valid) {
+        window = g_current_plugin_instance->dummy_window_for_activation_;
+      } else {
+        NOTREACHED() << "Dummy window not parented";
+      }
     }
   }
 

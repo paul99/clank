@@ -27,6 +27,8 @@ cr.define('gpu', function() {
                                      this.refresh.bind(this));
       browserBridge.addEventListener('clientInfoChange',
                                      this.refresh.bind(this));
+      browserBridge.addEventListener('crashListChange',
+                                     this.refresh.bind(this));
       this.refresh();
     },
 
@@ -66,8 +68,6 @@ cr.define('gpu', function() {
             description: '2D graphics backend',
             value: clientInfo.graphics_backend
           }]);
-
-        this.setTable_('performance-info', clientInfo.performance);
       } else {
         this.setText_('client-info', '... loading...');
       }
@@ -76,27 +76,60 @@ cr.define('gpu', function() {
       var featureLabelMap = {
         '2d_canvas': 'Canvas',
         '3d_css': '3D CSS',
-        'compositing': 'HTML Rendering',
+        'css_animation': 'CSS Animation',
+        'compositing': 'Compositing',
         'webgl': 'WebGL',
-        'multisampling': 'WebGL multisampling'
+        'multisampling': 'WebGL multisampling',
+        'flash_3d': 'Flash 3D',
+        'flash_stage3d': 'Flash Stage3D',
+        'texture_sharing': 'Texture Sharing',
+        'video_decode': 'Video Decode',
+        'video': 'Video',
+        // GPU Switching
+        'gpu_switching': 'GPU Switching',
+        'panel_fitting': 'Panel Fitting',
+        'force_compositing_mode': 'Force Compositing Mode',
       };
       var statusLabelMap = {
         'disabled_software': 'Software only. Hardware acceleration disabled.',
+        'disabled_software_animated': 'Software animated.',
         'disabled_off': 'Unavailable. Hardware acceleration disabled.',
         'software': 'Software rendered. Hardware acceleration not enabled.',
         'unavailable_off': 'Unavailable. Hardware acceleration unavailable',
         'unavailable_software':
             'Software only, hardware acceleration unavailable',
         'enabled_readback': 'Hardware accelerated, but at reduced performance',
-        'enabled': 'Hardware accelerated'
+        'enabled_force': 'Hardware accelerated on all pages',
+        'enabled_threaded': 'Hardware accelerated on demand and threaded',
+        'enabled_force_threaded':
+            'Hardware accelerated on all pages and threaded',
+        'enabled': 'Hardware accelerated',
+        'accelerated': 'Accelerated',
+        'accelerated_threaded': 'Accelerated and threaded',
+        // GPU Switching
+        'gpu_switching_automatic': 'Automatic switching',
+        'gpu_switching_force_discrete': 'Always on discrete GPU',
+        'gpu_switching_force_integrated': 'Always on integrated GPU',
       };
+
       var statusClassMap = {
         'disabled_software': 'feature-yellow',
+        'disabled_software_animated': 'feature-yellow',
         'disabled_off': 'feature-red',
         'software': 'feature-yellow',
         'unavailable_off': 'feature-red',
         'unavailable_software': 'feature-yellow',
-        'enabled': 'feature-green'
+        'enabled_force': 'feature-green',
+        'enabled_readback': 'feature-yellow',
+        'enabled_threaded': 'feature-green',
+        'enabled_force_threaded': 'feature-green',
+        'enabled': 'feature-green',
+        'accelerated': 'feature-green',
+        'accelerated_threaded': 'feature-green',
+        // GPU Switching
+        'gpu_switching_automatic': 'feature-green',
+        'gpu_switching_force_discrete': 'feature-red',
+        'gpu_switching_force_integrated': 'feature-red',
       };
 
       // GPU info, basic
@@ -105,6 +138,7 @@ cr.define('gpu', function() {
       var featureStatusList = this.querySelector('.feature-status-list');
       var problemsDiv = this.querySelector('.problems-div');
       var problemsList = this.querySelector('.problems-list');
+      var performanceDiv = this.querySelector('.performance-div');
       var gpuInfo = browserBridge.gpuInfo;
       var i;
       if (gpuInfo) {
@@ -158,6 +192,13 @@ cr.define('gpu', function() {
         else
           this.setTable_('basic-info', []);
 
+        if (gpuInfo.performance_info) {
+          performanceDiv.hidden = false;
+          this.setTable_('performance-info', gpuInfo.performance_info);
+        } else {
+          performanceDiv.hidden = true;
+        }
+
         if (gpuInfo.diagnostics) {
           diagnosticsDiv.hidden = false;
           diagnosticsLoadingDiv.hidden = true;
@@ -178,9 +219,13 @@ cr.define('gpu', function() {
         problemsDiv.hidden = true;
       }
 
+      // Crash list
+      jstProcess(new JsEvalContext({values: browserBridge.crashList}),
+                 $('crash-list'));
+
       // Log messages
       jstProcess(new JsEvalContext({values: browserBridge.logMessages}),
-                 document.getElementById('log-messages'));
+                 $('log-messages'));
     },
 
     createProblemEl_: function(problem) {

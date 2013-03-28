@@ -1,4 +1,4 @@
-// Copyright (c) 2011 The Chromium Authors. All rights reserved.
+// Copyright (c) 2012 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -10,16 +10,16 @@
 #include "base/base64.h"
 #include "base/file_path.h"
 #include "base/file_util.h"
-#include "base/json/json_value_serializer.h"
+#include "base/files/scoped_temp_dir.h"
+#include "base/json/json_file_value_serializer.h"
 #include "base/path_service.h"
-#include "base/scoped_temp_dir.h"
 #include "base/string_util.h"
 #include "base/utf_string_conversions.h"
 #include "chrome/browser/extensions/user_script_master.h"
 #include "chrome/common/chrome_paths.h"
 #include "chrome/common/extensions/extension.h"
-#include "chrome/common/extensions/extension_constants.h"
 #include "chrome/common/extensions/extension_file_util.h"
+#include "chrome/common/extensions/extension_manifest_constants.h"
 #include "chrome/common/extensions/user_script.h"
 #include "crypto/sha2.h"
 #include "googleurl/src/gurl.h"
@@ -27,9 +27,11 @@
 namespace keys = extension_manifest_keys;
 namespace values = extension_manifest_values;
 
+namespace extensions {
+
 scoped_refptr<Extension> ConvertUserScriptToExtension(
     const FilePath& user_script_path, const GURL& original_url,
-    string16* error) {
+    const FilePath& extensions_dir, string16* error) {
   std::string content;
   if (!file_util::ReadFileToString(user_script_path, &content)) {
     *error = ASCIIToUTF16("Could not read source file.");
@@ -48,14 +50,15 @@ scoped_refptr<Extension> ConvertUserScriptToExtension(
     return NULL;
   }
 
-  FilePath user_data_temp_dir = extension_file_util::GetUserDataTempDir();
-  if (user_data_temp_dir.empty()) {
+  FilePath install_temp_dir =
+      extension_file_util::GetInstallTempDir(extensions_dir);
+  if (install_temp_dir.empty()) {
     *error = ASCIIToUTF16("Could not get path to profile temporary directory.");
     return NULL;
   }
 
-  ScopedTempDir temp_dir;
-  if (!temp_dir.CreateUniqueTempDirUnderPath(user_data_temp_dir)) {
+  base::ScopedTempDir temp_dir;
+  if (!temp_dir.CreateUniqueTempDirUnderPath(install_temp_dir)) {
     *error = ASCIIToUTF16("Could not create temporary directory.");
     return NULL;
   }
@@ -185,3 +188,5 @@ scoped_refptr<Extension> ConvertUserScriptToExtension(
   temp_dir.Take();  // The caller takes ownership of the directory.
   return extension;
 }
+
+}  // namespace extensions

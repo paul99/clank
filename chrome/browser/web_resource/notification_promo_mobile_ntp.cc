@@ -4,47 +4,69 @@
 
 #include "chrome/browser/web_resource/notification_promo_mobile_ntp.h"
 
-#include "base/logging.h"
 #include "base/values.h"
+#include "chrome/browser/profiles/profile.h"
 #include "chrome/browser/web_resource/notification_promo.h"
 
-NotificationPromoMobileNtp::NotificationPromoMobileNtp(
-    const NotificationPromo& promo)
+
+NotificationPromoMobileNtp::NotificationPromoMobileNtp(Profile* profile)
     : valid_(false),
       action_args_(NULL),
-      requires_mobile_only_sync_(false),
-      requires_sync_(false),
-      show_on_most_visited_(false),
-      show_on_open_tabs_(false),
-      show_as_virtual_computer_(false),
-      payload_(NULL) {
-  type_ = promo.promo_type();
-  payload_ = promo.promo_payload();
-  if (!payload_)
-    return;
-  if (!payload_->GetString("promo_message_short", &text_))
-    return;
-  if (!payload_->GetString("promo_message_long", &text_long_))
-    return;
-  if (!payload_->GetString("promo_action_type", &action_type_))
-    return;
-  ListValue* args;
-  if (!payload_->GetList("promo_action_args", &args))
-    return;
-  action_args_ = const_cast<const base::ListValue*>(args);
-  DCHECK(action_args_ != NULL);
+      payload_(NULL),
+      notification_promo_(profile) {
+}
+
+NotificationPromoMobileNtp::~NotificationPromoMobileNtp() {
+}
+
+bool NotificationPromoMobileNtp::InitFromPrefs() {
+  notification_promo_.InitFromPrefs(NotificationPromo::MOBILE_NTP_SYNC_PROMO);
+  return InitFromNotificationPromo();
+}
+
+bool NotificationPromoMobileNtp::InitFromJson(
+    const base::DictionaryValue& json) {
+  notification_promo_.InitFromJson(
+      json, NotificationPromo::MOBILE_NTP_SYNC_PROMO);
+  return InitFromNotificationPromo();
+}
+
+bool NotificationPromoMobileNtp::CanShow() const {
+  return valid() && notification_promo_.CanShow();
+}
+
+bool NotificationPromoMobileNtp::InitFromNotificationPromo() {
+  valid_ = false;
+  requires_mobile_only_sync_ = true;
+  requires_sync_ = true;
+  show_on_most_visited_ = false;
+  show_on_open_tabs_ = true;
+  show_as_virtual_computer_ = true;
+  action_args_ = NULL;
+
+  // These fields are mandatory and must be specified in the promo.
+  payload_ = notification_promo_.promo_payload();
+  if (!payload_ ||
+      !payload_->GetString("promo_message_short", &text_) ||
+      !payload_->GetString("promo_message_long", &text_long_) ||
+      !payload_->GetString("promo_action_type", &action_type_) ||
+      !payload_->GetList("promo_action_args", &action_args_) ||
+      !action_args_) {
+    return false;
+  }
+
+  // The rest of the fields is optional.
+  valid_ = true;
   payload_->GetBoolean("promo_requires_mobile_only_sync",
-      &requires_mobile_only_sync_);
+                       &requires_mobile_only_sync_);
   payload_->GetBoolean("promo_requires_sync", &requires_sync_);
   payload_->GetBoolean("promo_show_on_most_visited", &show_on_most_visited_);
   payload_->GetBoolean("promo_show_on_open_tabs", &show_on_open_tabs_);
   payload_->GetBoolean("promo_show_as_virtual_computer",
-      &show_as_virtual_computer_);
+                       &show_as_virtual_computer_);
   payload_->GetString("promo_virtual_computer_title", &virtual_computer_title_);
   payload_->GetString("promo_virtual_computer_lastsync",
-      &virtual_computer_lastsync_);
-  valid_ = true;
+                      &virtual_computer_lastsync_);
+
+  return valid_;
 }
-
-NotificationPromoMobileNtp::~NotificationPromoMobileNtp() {}
-

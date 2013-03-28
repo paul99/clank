@@ -1,4 +1,4 @@
-IDC_KLONKMENU MENU 
+IDC_KLONKMENU MENU
 BEGIN
     POPUP "&File"
     BEGIN
@@ -6,7 +6,7 @@ BEGIN
         MENUITEM "This be ""Klonk"" me like",   ID_FILE_THISBE
         POPUP "gonk"
         BEGIN
-            MENUITEM "Klonk && is ""good""",           ID_GONK_KLONKIS
+            MENUITEM "Klonk && is [good]",           ID_GONK_KLONKIS
         END
     END
     POPUP "&Help"

@@ -1,10 +1,9 @@
-// Copyright (c) 2011 The Chromium Authors. All rights reserved.
+// Copyright (c) 2012 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
 #ifndef CHROME_BROWSER_UI_WEBUI_OPTIONS_LANGUAGE_OPTIONS_HANDLER_COMMON_H_
 #define CHROME_BROWSER_UI_WEBUI_OPTIONS_LANGUAGE_OPTIONS_HANDLER_COMMON_H_
-#pragma once
 
 #include "chrome/browser/ui/webui/options/options_ui.h"
 
@@ -12,6 +11,8 @@ namespace base {
 class DictionaryValue;
 class ListValue;
 }
+
+namespace options {
 
 // The base class for language options page UI handlers.  This class has code
 // common to the Chrome OS and non-Chrome OS implementation of the handler.
@@ -65,5 +66,7 @@ class LanguageOptionsHandlerCommon : public OptionsPageUIHandler {
 
   DISALLOW_COPY_AND_ASSIGN(LanguageOptionsHandlerCommon);
 };
+
+}  // namespace options
 
 #endif  // CHROME_BROWSER_UI_WEBUI_OPTIONS_LANGUAGE_OPTIONS_HANDLER_COMMON_H_

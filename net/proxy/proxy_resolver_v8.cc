@@ -2,10 +2,10 @@
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
+#include "net/proxy/proxy_resolver_v8.h"
+
 #include <algorithm>
 #include <cstdio>
-
-#include "net/proxy/proxy_resolver_v8.h"
 
 #include "base/basictypes.h"
 #include "base/compiler_specific.h"
@@ -369,7 +369,7 @@ class ProxyResolverV8::Context {
 
     v8::Handle<v8::Value> argv[] = {
       ASCIIStringToV8String(query_url.spec()),
-      ASCIIStringToV8String(query_url.host()),
+      ASCIIStringToV8String(query_url.HostNoBrackets()),
     };
 
     v8::TryCatch try_catch;

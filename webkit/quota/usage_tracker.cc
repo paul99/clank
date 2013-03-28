@@ -1,4 +1,4 @@
-// Copyright (c) 2011 The Chromium Authors. All rights reserved.
+// Copyright (c) 2012 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -36,14 +36,19 @@ class ClientUsageTracker::GatherUsageTaskBase : public QuotaTask {
         weak_factory_(ALLOW_THIS_IN_INITIALIZER_LIST(this)) {
     DCHECK(tracker_);
     DCHECK(client_);
-    client_tracker_ = tracker_->GetClientTracker(client_->id());
-    DCHECK(client_tracker_);
+    client_tracker_ = base::AsWeakPtr(
+        tracker_->GetClientTracker(client_->id()));
+    DCHECK(client_tracker_.get());
   }
   virtual ~GatherUsageTaskBase() {}
 
   // Get total usage for the given |origins|.
   void GetUsageForOrigins(const std::set<GURL>& origins, StorageType type) {
-    DCHECK(original_message_loop()->BelongsToCurrentThread());
+    DCHECK(original_task_runner()->BelongsToCurrentThread());
+    if (!client_tracker()) {
+      DeleteSoon();
+      return;
+    }
     // We do not get usage for origins for which we have valid usage cache.
     std::vector<GURL> origins_to_gather;
     std::set<GURL> cached_origins;
@@ -87,13 +92,17 @@ class ClientUsageTracker::GatherUsageTaskBase : public QuotaTask {
   }
 
   UsageTracker* tracker() const { return tracker_; }
-  ClientUsageTracker* client_tracker() const { return client_tracker_; }
+  ClientUsageTracker* client_tracker() const { return client_tracker_.get(); }
 
  private:
   void DidGetUsage(int64 usage) {
-    DCHECK(original_message_loop()->BelongsToCurrentThread());
+    if (!client_tracker()) {
+      DeleteSoon();
+      return;
+    }
+
+    DCHECK(original_task_runner()->BelongsToCurrentThread());
     DCHECK(!pending_origins_.empty());
-    DCHECK(client_tracker_);
 
     // Defend against confusing inputs from QuotaClients.
     DCHECK_GE(usage, 0);
@@ -121,7 +130,7 @@ class ClientUsageTracker::GatherUsageTaskBase : public QuotaTask {
 
   QuotaClient* client_;
   UsageTracker* tracker_;
-  ClientUsageTracker* client_tracker_;
+  base::WeakPtr<ClientUsageTracker> client_tracker_;
   std::deque<GURL> pending_origins_;
   std::map<GURL, int64> origin_usage_map_;
   base::WeakPtrFactory<GatherUsageTaskBase> weak_factory_;
@@ -248,10 +257,10 @@ void UsageTracker::GetGlobalUsage(const GlobalUsageCallback& callback) {
 }
 
 void UsageTracker::GetHostUsage(
-    const std::string& host, const HostUsageCallback& callback) {
+    const std::string& host, const UsageCallback& callback) {
   if (client_tracker_map_.size() == 0) {
     // No clients registered.
-    callback.Run(host, type_, 0);
+    callback.Run(0);
     return;
   }
   if (host_usage_callbacks_.Add(host, callback)) {
@@ -263,7 +272,7 @@ void UsageTracker::GetHostUsage(
          ++iter) {
       iter->second->GetHostUsage(host,
           base::Bind(&UsageTracker::DidGetClientHostUsage,
-                     weak_factory_.GetWeakPtr()));
+                     weak_factory_.GetWeakPtr(), host, type_));
     }
   }
 }
@@ -330,7 +339,7 @@ void UsageTracker::DidGetClientHostUsage(const std::string& host,
       info.usage = 0;
     // All the clients have returned their usage data.  Dispatches the
     // pending callbacks.
-    host_usage_callbacks_.Run(host, host, type, info.usage);
+    host_usage_callbacks_.Run(host, info.usage);
     outstanding_host_usage_.erase(host);
   }
 }
@@ -372,11 +381,11 @@ void ClientUsageTracker::GetGlobalUsage(const GlobalUsageCallback& callback) {
 }
 
 void ClientUsageTracker::GetHostUsage(
-    const std::string& host, const HostUsageCallback& callback) {
+    const std::string& host, const UsageCallback& callback) {
   HostSet::const_iterator found = cached_hosts_.find(host);
   if (found != cached_hosts_.end()) {
     // TODO(kinuko): Drop host_usage_map_ cache periodically.
-    callback.Run(host, type_, GetCachedHostUsage(host));
+    callback.Run(GetCachedHostUsage(host));
     return;
   }
   if (!host_usage_callbacks_.Add(host, callback) || global_usage_task_)
@@ -394,6 +403,7 @@ void ClientUsageTracker::UpdateUsageCache(
     global_usage_ += delta;
     if (global_unlimited_usage_is_valid_ && IsStorageUnlimited(origin))
       global_unlimited_usage_ += delta;
+    DCHECK_GE(cached_usage_[host][origin], 0);
     DCHECK_GE(global_usage_, 0);
     return;
   }
@@ -459,7 +469,7 @@ void ClientUsageTracker::GatherGlobalUsageComplete() {
 
   for (HostUsageCallbackMap::iterator iter = host_usage_callbacks_.Begin();
        iter != host_usage_callbacks_.End(); ++iter) {
-    iter->second.Run(iter->first, type_, GetCachedHostUsage(iter->first));
+    iter->second.Run(GetCachedHostUsage(iter->first));
   }
   host_usage_callbacks_.Clear();
 }
@@ -467,7 +477,7 @@ void ClientUsageTracker::GatherGlobalUsageComplete() {
 void ClientUsageTracker::GatherHostUsageComplete(const std::string& host) {
   DCHECK(host_usage_tasks_.find(host) != host_usage_tasks_.end());
   host_usage_tasks_.erase(host);
-  host_usage_callbacks_.Run(host, host, type_, GetCachedHostUsage(host));
+  host_usage_callbacks_.Run(host, GetCachedHostUsage(host));
 }
 
 int64 ClientUsageTracker::GetCachedHostUsage(const std::string& host) const {
@@ -506,11 +516,11 @@ void ClientUsageTracker::OnSpecialStoragePolicyChanged() {
   global_unlimited_usage_is_valid_ = false;
 }
 
-void ClientUsageTracker::NoopHostUsageCallback(
-    const std::string& host,  StorageType type, int64 usage) {
-}
+void ClientUsageTracker::NoopHostUsageCallback(int64 usage) {}
 
 bool ClientUsageTracker::IsStorageUnlimited(const GURL& origin) const {
+  if (type_ == kStorageTypeSyncable)
+    return false;
   return special_storage_policy_.get() &&
          special_storage_policy_->IsStorageUnlimited(origin);
 }

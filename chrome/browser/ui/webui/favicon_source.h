@@ -1,10 +1,9 @@
-// Copyright (c) 2011 The Chromium Authors. All rights reserved.
+// Copyright (c) 2012 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
 #ifndef CHROME_BROWSER_UI_WEBUI_FAVICON_SOURCE_H_
 #define CHROME_BROWSER_UI_WEBUI_FAVICON_SOURCE_H_
-#pragma once
 
 #include <map>
 #include <string>
@@ -13,6 +12,8 @@
 #include "base/memory/ref_counted.h"
 #include "chrome/browser/favicon/favicon_service.h"
 #include "chrome/browser/ui/webui/chrome_url_data_manager.h"
+#include "chrome/common/cancelable_task_tracker.h"
+#include "ui/gfx/favicon_size.h"
 
 class Profile;
 
@@ -31,6 +32,11 @@ class FaviconSource : public ChromeURLDataManager::DataSource {
   // |type| is the type of icon this FaviconSource will provide.
   FaviconSource(Profile* profile, IconType type);
 
+  // Constructor allowing the source name to be specified.
+  FaviconSource(Profile* profile,
+                IconType type,
+                const std::string& source_name);
+
   // Called when the network layer has requested a resource underneath
   // the path we registered.
   virtual void StartDataRequest(const std::string& path,
@@ -41,34 +47,54 @@ class FaviconSource : public ChromeURLDataManager::DataSource {
 
   virtual bool ShouldReplaceExistingSource() const OVERRIDE;
 
- private:
-  // Called when favicon data is available from the history backend.
-  void OnFaviconDataAvailable(FaviconService::Handle request_handle,
-                              history::FaviconData favicon);
-
-  // Sends the default favicon.
-  void SendDefaultResponse(int request_id);
-
+ protected:
   virtual ~FaviconSource();
 
   Profile* profile_;
-  CancelableRequestConsumerT<int, 0> cancelable_consumer_;
 
-  // Map from request ID to size requested (in pixels). TODO(estade): Get rid of
-  // this map when we properly support multiple favicon sizes.
-  std::map<int, int> request_size_map_;
+ private:
+  // Defines the allowed pixel sizes for requested favicons.
+  enum IconSize {
+    SIZE_16,
+    SIZE_32,
+    SIZE_64,
+    NUM_SIZES
+  };
 
-  // Raw PNG representation of the favicon to show when the favicon
-  // database doesn't have a favicon for a webpage.
-  // 16x16
-  scoped_refptr<RefCountedMemory> default_favicon_;
-  // 32x32
-  scoped_refptr<RefCountedMemory> default_favicon_large_;
-  // 64x64
-  scoped_refptr<RefCountedMemory> default_favicon_extra_large_;
+  struct IconRequest {
+    IconRequest()
+      : request_id(0),
+        size_in_dip(gfx::kFaviconSize),
+        scale_factor(ui::SCALE_FACTOR_NONE) {
+    }
+    IconRequest(int id, int size, ui::ScaleFactor scale)
+      : request_id(id),
+        size_in_dip(size),
+        scale_factor(scale) {
+    }
+    int request_id;
+    int size_in_dip;
+    ui::ScaleFactor scale_factor;
+  };
+
+  void Init(Profile* profile, IconType type);
+
+  // Called when favicon data is available from the history backend.
+  void OnFaviconDataAvailable(
+      const IconRequest& request,
+      const history::FaviconBitmapResult& bitmap_result);
+
+  // Sends the default favicon.
+  void SendDefaultResponse(const IconRequest& request);
+
+  CancelableTaskTracker cancelable_task_tracker_;
+
+  // Raw PNG representations of favicons of each size to show when the favicon
+  // database doesn't have a favicon for a webpage. Indexed by IconSize values.
+  scoped_refptr<base::RefCountedMemory> default_favicons_[NUM_SIZES];
 
   // The history::IconTypes of icon that this FaviconSource handles.
-  const int icon_types_;
+  int icon_types_;
 
   DISALLOW_COPY_AND_ASSIGN(FaviconSource);
 };

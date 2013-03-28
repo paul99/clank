@@ -11,7 +11,8 @@
 #include <pthread.h>
 #endif
 
-#include "ppapi/cpp/dev/message_loop_dev.h"
+#include "ppapi/cpp/instance_handle.h"
+#include "ppapi/cpp/message_loop.h"
 
 namespace pp {
 
@@ -25,9 +26,9 @@ class SimpleThread {
   typedef pthread_t ThreadHandle;
 #endif
 
-  typedef void (*ThreadFunc)(MessageLoop_Dev&, void* user_data);
+  typedef void (*ThreadFunc)(MessageLoop&, void* user_data);
 
-  SimpleThread(Instance* instance);
+  explicit SimpleThread(const InstanceHandle& instance);
   ~SimpleThread();
 
   // Starts a thread and runs a message loop in it. If you need control over
@@ -45,12 +46,12 @@ class SimpleThread {
   // is NULL, this acts the same as Start().
   bool StartWithFunction(ThreadFunc func, void* user_data);
 
-  MessageLoop_Dev& message_loop() { return message_loop_; }
+  MessageLoop& message_loop() { return message_loop_; }
   ThreadHandle thread() const { return thread_; }
 
  private:
-  Instance* instance_;
-  MessageLoop_Dev message_loop_;
+  InstanceHandle instance_;
+  MessageLoop message_loop_;
 
   ThreadHandle thread_;
 

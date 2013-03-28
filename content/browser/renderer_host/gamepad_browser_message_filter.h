@@ -1,10 +1,9 @@
-// Copyright (c) 2011 The Chromium Authors. All rights reserved.
+// Copyright (c) 2012 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
 #ifndef CONTENT_BROWSER_RENDERER_HOST_GAMEPAD_BROWSER_MESSAGE_FILTER_H_
 #define CONTENT_BROWSER_RENDERER_HOST_GAMEPAD_BROWSER_MESSAGE_FILTER_H_
-#pragma once
 
 #include "base/compiler_specific.h"
 #include "base/shared_memory.h"
@@ -15,14 +14,13 @@ namespace content {
 class GamepadService;
 class RenderProcessHost;
 
-class GamepadBrowserMessageFilter : public content::BrowserMessageFilter {
+class GamepadBrowserMessageFilter : public BrowserMessageFilter {
  public:
-  explicit GamepadBrowserMessageFilter(RenderProcessHost* rph);
+  GamepadBrowserMessageFilter();
 
-  // content::BrowserMessageFilter implementation.
+  // BrowserMessageFilter implementation.
   virtual bool OnMessageReceived(const IPC::Message& message,
                                  bool* message_was_ok) OVERRIDE;
-  GamepadBrowserMessageFilter();
 
  private:
   virtual ~GamepadBrowserMessageFilter();
@@ -30,11 +28,11 @@ class GamepadBrowserMessageFilter : public content::BrowserMessageFilter {
   void OnGamepadStartPolling(base::SharedMemoryHandle* renderer_handle);
   void OnGamepadStopPolling();
 
-  RenderProcessHost* render_process_host_;
+  bool is_started_;
 
   DISALLOW_COPY_AND_ASSIGN(GamepadBrowserMessageFilter);
 };
 
-} // namespace content
+}  // namespace content
 
 #endif  // CONTENT_BROWSER_RENDERER_HOST_GAMEPAD_BROWSER_MESSAGE_FILTER_H_

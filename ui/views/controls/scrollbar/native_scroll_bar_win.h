@@ -4,7 +4,6 @@
 
 #ifndef UI_VIEWS_CONTROLS_SCROLLBAR_NATIVE_SCROLL_BAR_WIN_H_
 #define UI_VIEWS_CONTROLS_SCROLLBAR_NATIVE_SCROLL_BAR_WIN_H_
-#pragma once
 
 #include "ui/views/controls/native_control_win.h"
 #include "ui/views/controls/scrollbar/native_scroll_bar_wrapper.h"
@@ -35,8 +34,8 @@ class NativeScrollBarWin : public NativeControlWin,
   virtual gfx::Size GetPreferredSize();
 
   // Overridden from View for keyboard UI purpose.
-  virtual bool OnKeyPressed(const KeyEvent& event);
-  virtual bool OnMouseWheel(const MouseWheelEvent& e);
+  virtual bool OnKeyPressed(const ui::KeyEvent& event);
+  virtual bool OnMouseWheel(const ui::MouseWheelEvent& e);
 
   // Overridden from NativeControlWin.
   virtual void CreateNativeControl();

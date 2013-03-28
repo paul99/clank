@@ -1,9 +1,10 @@
-// Copyright (c) 2011 The Chromium Authors. All rights reserved.
+// Copyright (c) 2012 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
 #include <vector>
 
+#include "base/command_line.h"
 #include "base/file_path.h"
 #include "base/string_util.h"
 #include "base/utf_string_conversions.h"
@@ -11,7 +12,8 @@
 #include "chrome/browser/autofill/data_driven_test.h"
 #include "chrome/browser/autofill/form_structure.h"
 #include "chrome/browser/ui/browser.h"
-#include "chrome/browser/ui/tab_contents/tab_contents_wrapper.h"
+#include "chrome/browser/ui/browser_tabstrip.h"
+#include "chrome/common/chrome_switches.h"
 #include "chrome/test/base/in_process_browser_test.h"
 #include "chrome/test/base/ui_test_utils.h"
 #include "googleurl/src/gurl.h"
@@ -36,9 +38,12 @@ class FormStructureBrowserTest : public InProcessBrowserTest,
   FormStructureBrowserTest();
   virtual ~FormStructureBrowserTest();
 
+  // InProcessBrowserTest:
+  virtual void SetUpCommandLine(CommandLine* command_line) OVERRIDE;
+
   // DataDrivenTest:
   virtual void GenerateResults(const std::string& input,
-                               std::string* output);
+                               std::string* output) OVERRIDE;
 
   // Serializes the given |forms| into a string.
   std::string FormStructuresToString(const std::vector<FormStructure*>& forms);
@@ -53,13 +58,18 @@ FormStructureBrowserTest::FormStructureBrowserTest() {
 FormStructureBrowserTest::~FormStructureBrowserTest() {
 }
 
+void FormStructureBrowserTest::SetUpCommandLine(CommandLine* command_line) {
+  // Include new field types and heuristics in the regression test.
+  command_line->AppendSwitch(switches::kEnableNewAutofillHeuristics);
+}
+
 void FormStructureBrowserTest::GenerateResults(const std::string& input,
                                                std::string* output) {
   ASSERT_NO_FATAL_FAILURE(ui_test_utils::NavigateToURL(browser(),
                                                        HTMLToDataURI(input)));
 
   AutofillManager* autofill_manager =
-      browser()->GetSelectedTabContentsWrapper()->autofill_manager();
+      AutofillManager::FromWebContents(chrome::GetActiveWebContents(browser()));
   ASSERT_NE(static_cast<AutofillManager*>(NULL), autofill_manager);
   std::vector<FormStructure*> forms = autofill_manager->form_structures_.get();
   *output = FormStructureBrowserTest::FormStructuresToString(forms);
@@ -146,10 +156,8 @@ IN_PROC_BROWSER_TEST_F(FormStructureBrowserTest,
                     kFileNamePattern);
 }
 
-// Has been failing on Mac since http://trac.webkit.org/changeset/105029
-// (WebKit roll http://crrev.com/117847).
 IN_PROC_BROWSER_TEST_F(FormStructureBrowserTest,
-    DISABLED_DataDrivenHeuristics07) {
+    MAYBE_DataDrivenHeuristics(07)) {
   const FilePath::CharType kFileNamePattern[] = FILE_PATH_LITERAL("07_*.html");
   RunDataDrivenTest(GetInputDirectory(kTestName),
                     GetOutputDirectory(kTestName),

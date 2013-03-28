@@ -15,6 +15,7 @@
 #include "base/string_number_conversions.h"
 #include "base/string_piece.h"
 #include "base/string_util.h"
+#include "base/time.h"
 
 using std::string;
 
@@ -316,6 +317,8 @@ namespace {
 const char* const kForbiddenHeaderFields[] = {
   "accept-charset",
   "accept-encoding",
+  "access-control-request-headers",
+  "access-control-request-method",
   "connection",
   "content-length",
   "cookie",
@@ -389,7 +392,10 @@ bool HttpUtil::IsNonCoalescingHeader(string::const_iterator name_begin,
     // The format of auth-challenges mixes both space separated tokens and
     // comma separated properties, so coalescing on comma won't work.
     "www-authenticate",
-    "proxy-authenticate"
+    "proxy-authenticate",
+    // STS specifies that UAs must not process any STS headers after the first
+    // one.
+    "strict-transport-security"
   };
   for (size_t i = 0; i < arraysize(kNonCoalescingHeaders); ++i) {
     if (LowerCaseEqualsASCII(name_begin, name_end, kNonCoalescingHeaders[i]))
@@ -697,6 +703,66 @@ void HttpUtil::AppendHeaderIfMissing(const char* header_name,
   *headers += std::string(header_name) + ": " + header_value + "\r\n";
 }
 
+bool HttpUtil::HasStrongValidators(HttpVersion version,
+                                   const std::string& etag_header,
+                                   const std::string& last_modified_header,
+                                   const std::string& date_header) {
+  if (version < HttpVersion(1, 1))
+    return false;
+
+  if (!etag_header.empty()) {
+    size_t slash = etag_header.find('/');
+    if (slash == std::string::npos || slash == 0)
+      return true;
+
+    std::string::const_iterator i = etag_header.begin();
+    std::string::const_iterator j = etag_header.begin() + slash;
+    TrimLWS(&i, &j);
+    if (!LowerCaseEqualsASCII(i, j, "w"))
+      return true;
+  }
+
+  base::Time last_modified;
+  if (!base::Time::FromString(last_modified_header.c_str(), &last_modified))
+    return false;
+
+  base::Time date;
+  if (!base::Time::FromString(date_header.c_str(), &date))
+    return false;
+
+  return ((date - last_modified).InSeconds() >= 60);
+}
+
+// Functions for histogram initialization.  The code 0 is put in the map to
+// track status codes that are invalid.
+// TODO(gavinp): Greatly prune the collected codes once we learn which
+// ones are not sent in practice, to reduce upload size & memory use.
+
+enum {
+  HISTOGRAM_MIN_HTTP_STATUS_CODE = 100,
+  HISTOGRAM_MAX_HTTP_STATUS_CODE = 599,
+};
+
+// static
+std::vector<int> HttpUtil::GetStatusCodesForHistogram() {
+  std::vector<int> codes;
+  codes.reserve(
+      HISTOGRAM_MAX_HTTP_STATUS_CODE - HISTOGRAM_MIN_HTTP_STATUS_CODE + 2);
+  codes.push_back(0);
+  for (int i = HISTOGRAM_MIN_HTTP_STATUS_CODE;
+       i <= HISTOGRAM_MAX_HTTP_STATUS_CODE; ++i)
+    codes.push_back(i);
+  return codes;
+}
+
+// static
+int HttpUtil::MapStatusCodeForHistogram(int code) {
+  if (HISTOGRAM_MIN_HTTP_STATUS_CODE <= code &&
+      code <= HISTOGRAM_MAX_HTTP_STATUS_CODE)
+    return code;
+  return 0;
+}
+
 // BNF from section 4.2 of RFC 2616:
 //
 //   message-header = field-name ":" [ field-value ]
@@ -790,8 +856,6 @@ HttpUtil::NameValuePairsIterator::NameValuePairsIterator(
     char delimiter)
     : props_(begin, end, delimiter),
       valid_(true),
-      begin_(begin),
-      end_(end),
       name_begin_(end),
       name_end_(end),
       value_begin_(end),

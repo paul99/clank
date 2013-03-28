@@ -24,26 +24,27 @@
 #include "chrome/browser/browser_process.h"
 #include "chrome/browser/first_run/upgrade_util.h"
 #include "chrome/browser/jankometer.h"
+#include "chrome/browser/lifetime/application_lifetime.h"
 #include "chrome/browser/metrics/metrics_service.h"
 #include "chrome/browser/prefs/pref_service.h"
 #include "chrome/browser/profiles/profile_manager.h"
 #include "chrome/browser/service/service_process_control.h"
-#include "chrome/browser/ui/browser_list.h"
 #include "chrome/browser/ui/webui/chrome_url_data_manager.h"
 #include "chrome/common/chrome_paths.h"
 #include "chrome/common/chrome_switches.h"
 #include "chrome/common/pref_names.h"
 #include "chrome/common/switch_utils.h"
-#include "content/browser/plugin_process_host.h"
-#include "content/browser/renderer_host/render_view_host.h"
-#include "content/browser/renderer_host/render_widget_host.h"
 #include "content/public/browser/browser_thread.h"
 #include "content/public/browser/render_process_host.h"
+#include "content/public/browser/render_view_host.h"
 #include "ui/base/resource/resource_bundle.h"
 
 #if defined(OS_WIN)
 #include "chrome/browser/browser_util_win.h"
 #include "chrome/browser/first_run/upgrade_util_win.h"
+#endif
+
+#if defined(ENABLE_RLZ)
 #include "chrome/browser/rlz/rlz.h"
 #endif
 
@@ -64,12 +65,16 @@ bool g_trying_to_quit = false;
 // Whether the browser should quit without closing browsers.
 bool g_shutting_down_without_closing_browsers = false;
 
+#if defined(OS_WIN)
+// Whether the next restart should happen in the opposite mode; desktop or
+// metro mode. Windows 8 only.
+bool g_mode_switch = false;
+#endif
+
 Time* shutdown_started_ = NULL;
 ShutdownType shutdown_type_ = NOT_VALID;
 int shutdown_num_processes_;
 int shutdown_num_processes_slow_;
-
-bool delete_resources_on_shutdown = true;
 
 const char kShutdownMsFile[] = "chrome_shutdown_ms.txt";
 
@@ -120,11 +125,6 @@ bool ShutdownPreThreadsStop() {
   chromeos::BootTimesLoader::Get()->AddLogoutTimeMarker(
       "BrowserShutdownStarted", false);
 #endif
-  // During shutdown we will end up some blocking operations.  But the
-  // work needs to get done and we're going to wait for them no matter
-  // what thread they're on, so don't worry about it slowing down
-  // shutdown.
-  base::ThreadRestrictions::SetIOAllowed(true);
 
   // Shutdown the IPC channel to the service processes.
   ServiceProcessControl::GetInstance()->Disconnect();
@@ -153,11 +153,19 @@ bool ShutdownPreThreadsStop() {
     restart_last_session =
         prefs->GetBoolean(prefs::kRestartLastSessionOnShutdown);
     prefs->ClearPref(prefs::kRestartLastSessionOnShutdown);
+#if defined(OS_WIN)
+    if (restart_last_session) {
+      if (prefs->HasPrefPath(prefs::kRestartSwitchMode)) {
+        g_mode_switch = prefs->GetBoolean(prefs::kRestartSwitchMode);
+        prefs->SetBoolean(prefs::kRestartSwitchMode, false);
+      }
+    }
+#endif
   }
 
   prefs->CommitPendingWrite();
 
-#if defined(OS_WIN) && defined(GOOGLE_CHROME_BUILD)
+#if defined(ENABLE_RLZ)
   // Cleanup any statics created by RLZ. Must be done before NotificationService
   // is destroyed.
   RLZTracker::CleanupRlz();
@@ -181,13 +189,8 @@ void ShutdownPostThreadsStop(bool restart_last_session) {
                                                         true);
 #endif
 
-#ifndef OS_ANDROID
   // Uninstall Jank-O-Meter here after the IO thread is no longer running.
   UninstallJankometer();
-#endif
-
-  if (delete_resources_on_shutdown)
-    ResourceBundle::CleanupSharedInstance();
 
 #if defined(OS_WIN)
   if (!browser_util::IsBrowserAlreadyRunning() &&
@@ -221,7 +224,17 @@ void ShutdownPostThreadsStop(bool restart_last_session) {
       else
         new_cl->AppendSwitch(i->first);
     }
+
+#if defined(OS_WIN)
+    // On Windows 8 we can relaunch in metro or desktop mode.
+    if (g_mode_switch)
+      upgrade_util::RelaunchChromeWithModeSwitch(*new_cl.get());
+    else
+      upgrade_util::RelaunchChromeBrowser(*new_cl.get());
+#else
     upgrade_util::RelaunchChromeBrowser(*new_cl.get());
+#endif  // defined(OS_WIN)
+
 #else
     NOTIMPLEMENTED();
 #endif  // !defined(OS_CHROMEOS)
@@ -240,7 +253,7 @@ void ShutdownPostThreadsStop(bool restart_last_session) {
   }
 
 #if defined(OS_CHROMEOS)
-  BrowserList::NotifyAndTerminate(false);
+  browser::NotifyAndTerminate(false);
 #endif
 
   ChromeURLDataManager::DeleteDataSources();

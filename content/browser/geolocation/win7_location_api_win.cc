@@ -1,4 +1,4 @@
-// Copyright (c) 2011 The Chromium Authors. All rights reserved.
+// Copyright (c) 2012 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -10,9 +10,10 @@
 #include "base/logging.h"
 #include "base/memory/scoped_ptr.h"
 #include "base/path_service.h"
-#include "content/common/geoposition.h"
 #include "content/public/common/content_switches.h"
+#include "content/public/common/geoposition.h"
 
+namespace content {
 namespace {
 const double kKnotsToMetresPerSecondConversionFactor = 0.5144;
 
@@ -98,7 +99,7 @@ void Win7LocationApi::GetPosition(Geoposition* position) {
   if (!GetPositionIfFixed(position))
     return;
   position->error_code = Geoposition::ERROR_CODE_NONE;
-  if (!position->IsValidFix()) {
+  if (!position->Validate()) {
     // GetPositionIfFixed returned true, yet we've not got a valid fix.
     // This shouldn't happen; something went wrong in the conversion.
     NOTREACHED() << "Invalid position from GetPositionIfFixed: lat,long "
@@ -165,3 +166,5 @@ bool Win7LocationApi::SetHighAccuracy(bool acc) {
             LOCATION_DESIRED_ACCURACY_DEFAULT);
   return SUCCEEDED(result_type);
 }
+
+}  // namespace content

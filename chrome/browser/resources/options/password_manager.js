@@ -1,10 +1,10 @@
-// Copyright (c) 2011 The Chromium Authors. All rights reserved.
+// Copyright (c) 2012 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
 cr.define('options', function() {
-  const OptionsPage = options.OptionsPage;
-  const ArrayDataModel = cr.ui.ArrayDataModel;
+  /** @const */ var OptionsPage = options.OptionsPage;
+  /** @const */ var ArrayDataModel = cr.ui.ArrayDataModel;
 
   /////////////////////////////////////////////////////////////////////////////
   // PasswordManager class:
@@ -17,7 +17,7 @@ cr.define('options', function() {
     this.activeNavTab = null;
     OptionsPage.call(this,
                      'passwords',
-                     templateData.passwordsPageTabTitle,
+                     loadTimeData.getString('passwordsPageTabTitle'),
                      'password-manager');
   }
 
@@ -54,9 +54,13 @@ cr.define('options', function() {
      */
     lastQuery_: null,
 
-    /** @inheritDoc */
+    /** @override */
     initializePage: function() {
       OptionsPage.prototype.initializePage.call(this);
+
+      $('password-manager-confirm').onclick = function() {
+        OptionsPage.closeOverlay();
+      };
 
       $('password-search-box').addEventListener('search',
           this.handleSearchQueryChange_.bind(this));
@@ -65,12 +69,12 @@ cr.define('options', function() {
       this.createPasswordExceptionsList_();
     },
 
-    /** @inheritDoc */
+    /** @override */
     canShowPage: function() {
-      return !PersonalOptions.disablePasswordManagement();
+      return !(cr.isChromeOS && UIAccountTweaks.loggedInAsGuest());
     },
 
-    /** @inheritDoc */
+    /** @override */
     didShowPage: function() {
       // Updating the password lists may cause a blocking platform dialog pop up
       // (Mac, Linux), so we delay this operation until the page is shown.
@@ -181,32 +185,30 @@ cr.define('options', function() {
   };
 
   /**
-   * Call to remove a saved password.
-   * @param rowIndex indicating the row to remove.
+   * Removes a saved password.
+   * @param {number} rowIndex indicating the row to remove.
    */
   PasswordManager.removeSavedPassword = function(rowIndex) {
       chrome.send('removeSavedPassword', [String(rowIndex)]);
   };
 
   /**
-   * Call to remove a password exception.
-   * @param rowIndex indicating the row to remove.
+   * Removes a password exception.
+   * @param {number} rowIndex indicating the row to remove.
    */
   PasswordManager.removePasswordException = function(rowIndex) {
       chrome.send('removePasswordException', [String(rowIndex)]);
   };
 
   /**
-   * Call to remove all saved passwords.
-   * @param tab contentType of the tab currently on.
+   * Removes all saved passwords.
    */
   PasswordManager.removeAllPasswords = function() {
     chrome.send('removeAllSavedPasswords');
   };
 
   /**
-   * Call to remove all saved passwords.
-   * @param tab contentType of the tab currently on.
+   * Removes all password exceptions.
    */
   PasswordManager.removeAllPasswordExceptions = function() {
     chrome.send('removeAllPasswordExceptions');

@@ -1,21 +1,25 @@
-// Copyright (c) 2011 The Chromium Authors. All rights reserved.
+// Copyright (c) 2012 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
 #include <string>
 
+#include "base/command_line.h"
 #include "chrome/browser/extensions/extension_service.h"
 #include "chrome/browser/profiles/profile.h"
 #include "chrome/browser/ui/browser.h"
 #include "chrome/common/chrome_notification_types.h"
 #include "chrome/common/chrome_switches.h"
 #include "chrome/common/extensions/extension.h"
+#include "chrome/common/extensions/permissions/permission_set.h"
 #include "chrome/test/base/in_process_browser_test.h"
 #include "chrome/test/base/ui_test_utils.h"
 #include "content/public/browser/notification_details.h"
 #include "content/public/browser/notification_observer.h"
 #include "content/public/browser/notification_registrar.h"
 #include "content/public/browser/notification_service.h"
+
+namespace extensions {
 
 class ExtensionFromWebAppTest
     : public InProcessBrowserTest, public content::NotificationObserver {
@@ -63,7 +67,7 @@ IN_PROC_BROWSER_TEST_F(ExtensionFromWebAppTest, Basic) {
           "files/extensions/convert_web_app/application.html"));
 
   if (!installed_extension_)
-    ui_test_utils::RunMessageLoop();
+    content::RunMessageLoop();
 
   EXPECT_TRUE(installed_extension_);
   EXPECT_TRUE(installed_extension_->is_hosted_app());
@@ -74,9 +78,9 @@ IN_PROC_BROWSER_TEST_F(ExtensionFromWebAppTest, Basic) {
 
   ASSERT_EQ(2u, installed_extension_->GetActivePermissions()->apis().size());
   EXPECT_TRUE(installed_extension_->HasAPIPermission(
-      ExtensionAPIPermission::kGeolocation));
+      APIPermission::kGeolocation));
   EXPECT_TRUE(installed_extension_->HasAPIPermission(
-      ExtensionAPIPermission::kNotification));
+      APIPermission::kNotification));
 
   ASSERT_EQ(3u, installed_extension_->icons().map().size());
   EXPECT_EQ("icons/16.png", installed_extension_->icons().Get(
@@ -86,3 +90,5 @@ IN_PROC_BROWSER_TEST_F(ExtensionFromWebAppTest, Basic) {
   EXPECT_EQ("icons/128.png", installed_extension_->icons().Get(
       128, ExtensionIconSet::MATCH_EXACTLY));
 }
+
+}  // namespace extensions

@@ -11,6 +11,7 @@
 #include "net/http/http_network_session.h"
 #include "net/http/http_network_transaction.h"
 #include "net/http/http_server_properties_impl.h"
+#include "net/http/http_stream_factory_impl_job.h"
 #include "net/spdy/spdy_framer.h"
 #include "net/spdy/spdy_session.h"
 #include "net/spdy/spdy_session_pool.h"
@@ -38,117 +39,17 @@ HttpTransactionFactory* HttpNetworkLayer::CreateFactory(
 }
 
 // static
-void HttpNetworkLayer::EnableSpdy(const std::string& mode) {
-  static const char kOff[] = "off";
-  static const char kSSL[] = "ssl";
-  static const char kDisableSSL[] = "no-ssl";
-  static const char kDisablePing[] = "no-ping";
-  static const char kExclude[] = "exclude";  // Hosts to exclude
-  static const char kDisableCompression[] = "no-compress";
-  static const char kDisableAltProtocols[] = "no-alt-protocols";
-  static const char kEnableVersionOne[] = "v1";
-  static const char kForceAltProtocols[] = "force-alt-protocols";
-  static const char kSingleDomain[] = "single-domain";
-
-  // If flow-control is enabled, received WINDOW_UPDATE and SETTINGS
-  // messages are processed and outstanding window size is actually obeyed
-  // when sending data frames, and WINDOW_UPDATE messages are generated
-  // when data is consumed.
-  static const char kEnableFlowControl[] = "flow-control";
-
-  // We want an A/B experiment between SPDY enabled and SPDY disabled,
-  // but only for pages where SPDY *could have been* negotiated.  To do
-  // this, we use NPN, but prevent it from negotiating SPDY.  If the
-  // server negotiates HTTP, rather than SPDY, today that will only happen
-  // on servers that installed NPN (and could have done SPDY).  But this is
-  // a bit of a hack, as this correlation between NPN and SPDY is not
-  // really guaranteed.
-  static const char kEnableNPN[] = "npn";
-  static const char kEnableNpnHttpOnly[] = "npn-http";
-
-  static const char kInitialMaxConcurrentStreams[] = "init-max-streams";
-
-  std::vector<std::string> spdy_options;
-  base::SplitString(mode, ',', &spdy_options);
-
-  bool use_alt_protocols = true;
-
-  for (std::vector<std::string>::iterator it = spdy_options.begin();
-       it != spdy_options.end(); ++it) {
-    const std::string& element = *it;
-    std::vector<std::string> name_value;
-    base::SplitString(element, '=', &name_value);
-    const std::string& option = name_value[0];
-    const std::string value = name_value.size() > 1 ? name_value[1] : "";
-
-    if (option == kOff) {
-      HttpStreamFactory::set_spdy_enabled(false);
-    } else if (option == kDisableSSL) {
-      SpdySession::SetSSLMode(false);  // Disable SSL
-      HttpStreamFactory::set_force_spdy_over_ssl(false);
-      HttpStreamFactory::set_force_spdy_always(true);
-    } else if (option == kSSL) {
-      HttpStreamFactory::set_force_spdy_over_ssl(true);
-      HttpStreamFactory::set_force_spdy_always(true);
-    } else if (option == kDisablePing) {
-      SpdySession::set_enable_ping_based_connection_checking(false);
-    } else if (option == kExclude) {
-      HttpStreamFactory::add_forced_spdy_exclusion(value);
-    } else if (option == kDisableCompression) {
-      spdy::SpdyFramer::set_enable_compression_default(false);
-    } else if (option == kEnableNPN) {
-      HttpStreamFactory::set_use_alternate_protocols(use_alt_protocols);
-      std::vector<std::string> next_protos;
-      next_protos.push_back("http/1.1");
-      next_protos.push_back("spdy/2");
-      HttpStreamFactory::set_next_protos(next_protos);
-    } else if (option == kEnableNpnHttpOnly) {
-      // Avoid alternate protocol in this case. Otherwise, browser will try SSL
-      // and then fallback to http. This introduces extra load.
-      HttpStreamFactory::set_use_alternate_protocols(false);
-      std::vector<std::string> next_protos;
-      next_protos.push_back("http/1.1");
-      next_protos.push_back("http1.1");
-      HttpStreamFactory::set_next_protos(next_protos);
-    } else if (option == kEnableVersionOne) {
-      spdy::SpdyFramer::set_protocol_version(1);
-      std::vector<std::string> next_protos;
-      // This is a temporary hack to pretend we support version 1.
-      next_protos.push_back("http/1.1");
-      next_protos.push_back("spdy/1");
-      HttpStreamFactory::set_next_protos(next_protos);
-    } else if (option == kDisableAltProtocols) {
-      use_alt_protocols = false;
-      HttpStreamFactory::set_use_alternate_protocols(false);
-    } else if (option == kEnableFlowControl) {
-      std::vector<std::string> next_protos;
-      next_protos.push_back("http/1.1");
-      next_protos.push_back("spdy/2");
-      next_protos.push_back("spdy/2.1");
-      HttpStreamFactory::set_next_protos(next_protos);
-    } else if (option == kForceAltProtocols) {
-      PortAlternateProtocolPair pair;
-      pair.port = 443;
-      pair.protocol = NPN_SPDY_2;
-      HttpServerPropertiesImpl::ForceAlternateProtocol(pair);
-    } else if (option == kSingleDomain) {
-      SpdySessionPool::ForceSingleDomain();
-      LOG(ERROR) << "FORCING SINGLE DOMAIN";
-    } else if (option == kInitialMaxConcurrentStreams) {
-      int streams;
-      if (base::StringToInt(value, &streams) && streams > 0)
-        SpdySession::set_init_max_concurrent_streams(streams);
-    } else if (option.empty() && it == spdy_options.begin()) {
-      continue;
-    } else {
-      LOG(DFATAL) << "Unrecognized spdy option: " << option;
-    }
-  }
+void HttpNetworkLayer::ForceAlternateProtocol() {
+  PortAlternateProtocolPair pair;
+  pair.port = 443;
+  pair.protocol = NPN_SPDY_2;
+  HttpServerPropertiesImpl::ForceAlternateProtocol(pair);
 }
 
 //-----------------------------------------------------------------------------
 
-int HttpNetworkLayer::CreateTransaction(scoped_ptr<HttpTransaction>* trans) {
+int HttpNetworkLayer::CreateTransaction(scoped_ptr<HttpTransaction>* trans,
+                                        HttpTransactionDelegate* delegate) {
   if (suspended_)
     return ERR_NETWORK_IO_SUSPENDED;
 

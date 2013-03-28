@@ -1,4 +1,4 @@
-// Copyright (c) 2011 The Chromium Authors. All rights reserved.
+// Copyright (c) 2012 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -7,14 +7,12 @@
 
 #include "base/bind.h"
 #include "base/callback.h"
-#include "base/memory/ref_counted.h"
 #include "base/memory/scoped_ptr.h"
-#include "base/message_loop_proxy.h"
+#include "base/memory/weak_ptr.h"
+#include "base/threading/non_thread_safe.h"
 #include "net/base/completion_callback.h"
 #include "remoting/base/compound_buffer.h"
 #include "remoting/protocol/message_decoder.h"
-
-class MessageLoop;
 
 namespace net {
 class IOBuffer;
@@ -35,13 +33,9 @@ namespace protocol {
 // It is still possible that the MessageReceivedCallback is called
 // twice (so that there is more than one outstanding message),
 // e.g. when we the sender sends multiple messages in one TCP packet.
-class MessageReader : public base::RefCountedThreadSafe<MessageReader> {
+class MessageReader : public base::NonThreadSafe {
  public:
-  // The callback is given ownership of the second argument
-  // (|done_task|).  The buffer (first argument) is owned by
-  // MessageReader and is freed when the task specified by the second
-  // argument is called.
-  typedef base::Callback<void(CompoundBuffer*, const base::Closure&)>
+  typedef base::Callback<void(scoped_ptr<CompoundBuffer>, const base::Closure&)>
       MessageReceivedCallback;
 
   MessageReader();
@@ -56,9 +50,8 @@ class MessageReader : public base::RefCountedThreadSafe<MessageReader> {
   void OnRead(int result);
   void HandleReadResult(int result);
   void OnDataReceived(net::IOBuffer* data, int data_size);
-  void OnMessageDone(CompoundBuffer* message,
-                     scoped_refptr<base::MessageLoopProxy> message_loop);
-  void ProcessDoneEvent();
+  void RunCallback(scoped_ptr<CompoundBuffer> message);
+  void OnMessageDone();
 
   net::Socket* socket_;
 
@@ -78,6 +71,10 @@ class MessageReader : public base::RefCountedThreadSafe<MessageReader> {
 
   // Callback is called when a message is received.
   MessageReceivedCallback message_received_callback_;
+
+  base::WeakPtrFactory<MessageReader> weak_factory_;
+
+  DISALLOW_COPY_AND_ASSIGN(MessageReader);
 };
 
 // Version of MessageReader for protocol buffer messages, that parses
@@ -85,7 +82,10 @@ class MessageReader : public base::RefCountedThreadSafe<MessageReader> {
 template <class T>
 class ProtobufMessageReader {
  public:
-  typedef typename base::Callback<void(T*, const base::Closure&)>
+  // The callback that is called when a new message is received. |done_task|
+  // must be called by the callback when it's done processing the |message|.
+  typedef typename base::Callback<void(scoped_ptr<T> message,
+                                       const base::Closure& done_task)>
       MessageReceivedCallback;
 
   ProtobufMessageReader() { };
@@ -94,33 +94,27 @@ class ProtobufMessageReader {
   void Init(net::Socket* socket, const MessageReceivedCallback& callback) {
     DCHECK(!callback.is_null());
     message_received_callback_ = callback;
-    message_reader_ = new MessageReader();
+    message_reader_.reset(new MessageReader());
     message_reader_->Init(
         socket, base::Bind(&ProtobufMessageReader<T>::OnNewData,
                            base::Unretained(this)));
   }
 
  private:
-  void OnNewData(CompoundBuffer* buffer, const base::Closure& done_task) {
-    T* message = new T();
-    CompoundBufferInputStream stream(buffer);
+  void OnNewData(scoped_ptr<CompoundBuffer> buffer,
+                 const base::Closure& done_task) {
+    scoped_ptr<T> message(new T());
+    CompoundBufferInputStream stream(buffer.get());
     bool ret = message->ParseFromZeroCopyStream(&stream);
     if (!ret) {
       LOG(WARNING) << "Received message that is not a valid protocol buffer.";
-      delete message;
     } else {
       DCHECK_EQ(stream.position(), buffer->total_bytes());
-      message_received_callback_.Run(message, base::Bind(
-          &ProtobufMessageReader<T>::OnDone, message, done_task));
+      message_received_callback_.Run(message.Pass(), done_task);
     }
   }
 
-  static void OnDone(T* message, const base::Closure& done_task) {
-    delete message;
-    done_task.Run();
-  }
-
-  scoped_refptr<MessageReader> message_reader_;
+  scoped_ptr<MessageReader> message_reader_;
   MessageReceivedCallback message_received_callback_;
 };
 

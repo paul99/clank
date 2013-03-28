@@ -5,15 +5,19 @@
 #include "chrome/browser/chromeos/system/statistics_provider.h"
 
 #include "base/bind.h"
+#include "base/chromeos/chromeos_version.h"
+#include "base/command_line.h"
 #include "base/file_path.h"
 #include "base/file_util.h"
 #include "base/logging.h"
 #include "base/memory/singleton.h"
 #include "base/synchronization/waitable_event.h"
+#include "base/threading/thread_restrictions.h"
 #include "base/time.h"
 #include "chrome/browser/chromeos/system/name_value_pairs_parser.h"
-#include "chrome/browser/chromeos/system/runtime_environment.h"
+#include "chrome/common/child_process_logging.h"
 #include "chrome/common/chrome_version_info.h"
+#include "chromeos/chromeos_switches.h"
 #include "content/public/browser/browser_thread.h"
 
 using content::BrowserThread;
@@ -41,6 +45,12 @@ const char kMachineHardwareInfoFile[] = "/tmp/machine-info";
 const char kMachineHardwareInfoEq[] = "=";
 const char kMachineHardwareInfoDelim[] = " \n";
 
+// File to get ECHO coupon info from, and key/value delimiters of
+// the file.
+const char kEchoCouponFile[] = "/var/cache/echo/vpd_echo.txt";
+const char kEchoCouponEq[] = "=";
+const char kEchoCouponDelim[] = "\n";
+
 // File to get machine OS info from, and key/value delimiters of the file.
 const char kMachineOSInfoFile[] = "/etc/lsb-release";
 const char kMachineOSInfoEq[] = "=";
@@ -60,6 +70,8 @@ const int kTimeoutSecs = 3;
 class StatisticsProviderImpl : public StatisticsProvider {
  public:
   // StatisticsProvider implementation:
+  virtual void Init() OVERRIDE;
+  virtual void StartLoadingMachineStatistics() OVERRIDE;
   virtual bool GetMachineStatistic(const std::string& name,
                                    std::string* result) OVERRIDE;
 
@@ -70,20 +82,37 @@ class StatisticsProviderImpl : public StatisticsProvider {
 
   StatisticsProviderImpl();
 
-  // Starts loading the machine statistcs.
-  void StartLoadingMachineStatistics();
+  // Loads the machine info file, which is necessary to get the Chrome channel.
+  // Treat MachineOSInfoFile specially, as distribution channel information
+  // (stable, beta, dev, canary) is required at earlier stage than everything
+  // else. Rather than posting a delayed task, read and parse the machine OS
+  // info file immediately.
+  void LoadMachineOSInfoFile();
 
   // Loads the machine statistcs by examining the system.
   void LoadMachineStatistics();
 
+  bool initialized_;
+  bool load_statistics_started_;
   NameValuePairsParser::NameValueMap machine_info_;
   base::WaitableEvent on_statistics_loaded_;
 
   DISALLOW_COPY_AND_ASSIGN(StatisticsProviderImpl);
 };
 
+void StatisticsProviderImpl::Init() {
+  DCHECK(!initialized_);
+  initialized_ = true;
+
+  // Load the machine info file immediately to get the channel info.
+  LoadMachineOSInfoFile();
+}
+
 bool StatisticsProviderImpl::GetMachineStatistic(
     const std::string& name, std::string* result) {
+  DCHECK(initialized_);
+  DCHECK(load_statistics_started_);
+
   VLOG(1) << "Statistic is requested for " << name;
   // Block if the statistics are not loaded yet. Per LOG(WARNING) below,
   // the statistics are loaded before requested as of now. For regular
@@ -98,7 +127,15 @@ bool StatisticsProviderImpl::GetMachineStatistic(
   if (!on_statistics_loaded_.IsSignaled()) {
     LOG(WARNING) << "Waiting to load statistics. Requested statistic: "
                  << name;
+    // http://crbug.com/125385
+    base::ThreadRestrictions::ScopedAllowWait allow_wait;
     on_statistics_loaded_.TimedWait(base::TimeDelta::FromSeconds(kTimeoutSecs));
+
+    if (!on_statistics_loaded_.IsSignaled()) {
+      LOG(ERROR) << "Statistics weren't loaded after waiting! "
+                 << "Requested statistic: " << name;
+      return false;
+    }
   }
 
   NameValuePairsParser::NameValueMap::iterator iter = machine_info_.find(name);
@@ -111,17 +148,34 @@ bool StatisticsProviderImpl::GetMachineStatistic(
 
 // manual_reset needs to be true, as we want to keep the signaled state.
 StatisticsProviderImpl::StatisticsProviderImpl()
-    : on_statistics_loaded_(true  /* manual_reset */,
+    : initialized_(false),
+      load_statistics_started_(false),
+      on_statistics_loaded_(true  /* manual_reset */,
                             false /* initially_signaled */) {
-  StartLoadingMachineStatistics();
+}
+
+void StatisticsProviderImpl::LoadMachineOSInfoFile() {
+  NameValuePairsParser parser(&machine_info_);
+  if (parser.GetNameValuePairsFromFile(FilePath(kMachineOSInfoFile),
+                                       kMachineOSInfoEq,
+                                       kMachineOSInfoDelim)) {
+#if defined(GOOGLE_CHROME_BUILD)
+    const char kChromeOSReleaseTrack[] = "CHROMEOS_RELEASE_TRACK";
+    NameValuePairsParser::NameValueMap::iterator iter =
+        machine_info_.find(kChromeOSReleaseTrack);
+    if (iter != machine_info_.end())
+      chrome::VersionInfo::SetChannel(iter->second);
+#endif
+  }
 }
 
 void StatisticsProviderImpl::StartLoadingMachineStatistics() {
+  DCHECK(initialized_);
+  DCHECK(!load_statistics_started_);
+  load_statistics_started_ = true;
+
   VLOG(1) << "Started loading statistics";
-  CHECK(BrowserThread::IsMessageLoopValid(BrowserThread::FILE))
-      << "StatisticsProvider must not be used before FILE thread is created";
-  BrowserThread::PostTask(
-      BrowserThread::FILE,
+  BrowserThread::PostBlockingPoolTask(
       FROM_HERE,
       base::Bind(&StatisticsProviderImpl::LoadMachineStatistics,
                  base::Unretained(this)));
@@ -131,9 +185,12 @@ void StatisticsProviderImpl::LoadMachineStatistics() {
   NameValuePairsParser parser(&machine_info_);
 
   // Parse all of the key/value pairs from the crossystem tool.
-  parser.ParseNameValuePairsFromTool(
-      arraysize(kCrosSystemTool), kCrosSystemTool, kCrosSystemEq,
-      kCrosSystemDelim, kCrosSystemCommentDelim);
+  if (!parser.ParseNameValuePairsFromTool(
+          arraysize(kCrosSystemTool), kCrosSystemTool, kCrosSystemEq,
+          kCrosSystemDelim, kCrosSystemCommentDelim)) {
+    LOG(WARNING) << "There were errors parsing the output of "
+                 << kCrosSystemTool << ".";
+  }
 
   // Ensure that the hardware class key is present with the expected
   // key name, and if it couldn't be retrieved, that the value is "unknown".
@@ -146,28 +203,14 @@ void StatisticsProviderImpl::LoadMachineStatistics() {
   parser.GetNameValuePairsFromFile(FilePath(kMachineHardwareInfoFile),
                                    kMachineHardwareInfoEq,
                                    kMachineHardwareInfoDelim);
-  parser.GetNameValuePairsFromFile(FilePath(kMachineOSInfoFile),
-                                   kMachineOSInfoEq,
-                                   kMachineOSInfoDelim);
+  parser.GetNameValuePairsFromFile(FilePath(kEchoCouponFile),
+                                   kEchoCouponEq,
+                                   kEchoCouponDelim);
   parser.GetNameValuePairsFromFile(FilePath(kVpdFile), kVpdEq, kVpdDelim);
 
   // Finished loading the statistics.
   on_statistics_loaded_.Signal();
   VLOG(1) << "Finished loading statistics";
-
-#if defined(GOOGLE_CHROME_BUILD)
-  // TODO(kochi): This is for providing a channel information to
-  // chrome::VersionInfo::GetChannel()/GetVersionStringModifier(),
-  // but this is still late for some early customers such as
-  // prerender::ConfigurePrefetchAndPrerender() and
-  // ThreadWatcherList::ParseCommandLine().
-  // See http://crbug.com/107333 .
-  const char kChromeOSReleaseTrack[] = "CHROMEOS_RELEASE_TRACK";
-  std::string channel;
-  if (GetMachineStatistic(kChromeOSReleaseTrack, &channel)) {
-      chrome::VersionInfo::SetChannel(channel);
-  }
-#endif
 }
 
 StatisticsProviderImpl* StatisticsProviderImpl::GetInstance() {
@@ -179,8 +222,26 @@ StatisticsProviderImpl* StatisticsProviderImpl::GetInstance() {
 class StatisticsProviderStubImpl : public StatisticsProvider {
  public:
   // StatisticsProvider implementation:
+  virtual void Init() OVERRIDE {}
+
+  virtual void StartLoadingMachineStatistics() OVERRIDE {}
+
   virtual bool GetMachineStatistic(const std::string& name,
                                    std::string* result) OVERRIDE {
+    if (name == "CHROMEOS_RELEASE_BOARD") {
+      // Note: syncer::GetSessionNameSynchronously() also uses the mechanism
+      // below to determine the CrOs release board. However, it cannot include
+      // statistics_provider.h and use this method because of the mutual
+      // dependency that creates between sync.gyp:sync and chrome.gyp:browser.
+      // TODO(rsimha): Update syncer::GetSessionNameSynchronously() if this code
+      // is ever moved into base/. See http://crbug.com/126732.
+      const CommandLine* command_line = CommandLine::ForCurrentProcess();
+      if (command_line->HasSwitch(chromeos::switches::kChromeOSReleaseBoard)) {
+        *result = command_line->
+            GetSwitchValueASCII(chromeos::switches::kChromeOSReleaseBoard);
+        return true;
+      }
+    }
     return false;
   }
 
@@ -199,7 +260,7 @@ class StatisticsProviderStubImpl : public StatisticsProvider {
 };
 
 StatisticsProvider* StatisticsProvider::GetInstance() {
-  if (system::runtime_environment::IsRunningOnChromeOS()) {
+  if (base::chromeos::IsRunningOnChromeOS()) {
     return StatisticsProviderImpl::GetInstance();
   } else {
     return StatisticsProviderStubImpl::GetInstance();

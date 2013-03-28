@@ -1,5 +1,5 @@
-#!/usr/bin/python2.4
-# Copyright (c) 2006-2008 The Chromium Authors. All rights reserved.
+#!/usr/bin/env python
+# Copyright (c) 2012 The Chromium Authors. All rights reserved.
 # Use of this source code is governed by a BSD-style license that can be
 # found in the LICENSE file.
 
@@ -20,25 +20,28 @@ from grit.node import io
 
 
 _ELEMENT_TO_CLASS = {
+  'identifiers'   : empty.IdentifiersNode,
   'includes'      : empty.IncludesNode,
   'messages'      : empty.MessagesNode,
+  'outputs'       : empty.OutputsNode,
   'structures'    : empty.StructuresNode,
   'translations'  : empty.TranslationsNode,
-  'outputs'       : empty.OutputsNode,
-  'message'       : message.MessageNode,
-  'ph'            : message.PhNode,
-  'ex'            : message.ExNode,
-  'grit'          : misc.GritNode,
   'include'       : include.IncludeNode,
-  'structure'     : structure.StructureNode,
-  'skeleton'      : variant.SkeletonNode,
-  'release'       : misc.ReleaseNode,
+  'emit'          : io.EmitNode,
   'file'          : io.FileNode,
   'output'        : io.OutputNode,
-  'emit'          : io.EmitNode,
-  'identifiers'   : empty.IdentifiersNode,
+  'ex'            : message.ExNode,
+  'message'       : message.MessageNode,
+  'ph'            : message.PhNode,
+  'else'          : misc.ElseNode,
+  'grit'          : misc.GritNode,
   'identifier'    : misc.IdentifierNode,
   'if'            : misc.IfNode,
+  'part'          : misc.PartNode,
+  'release'       : misc.ReleaseNode,
+  'then'          : misc.ThenNode,
+  'structure'     : structure.StructureNode,
+  'skeleton'      : variant.SkeletonNode,
 }
 
 
@@ -52,7 +55,7 @@ def ElementToClass(name, typeattr):
   Return:
     type
   '''
-  if not _ELEMENT_TO_CLASS.has_key(name):
+  if name not in _ELEMENT_TO_CLASS:
     raise exception.UnknownElement()
   return _ELEMENT_TO_CLASS[name]
 

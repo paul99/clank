@@ -1,4 +1,4 @@
-// Copyright (c) 2011 The Chromium Authors. All rights reserved.
+// Copyright (c) 2012 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -8,7 +8,6 @@
 
 #ifndef CONTENT_PUBLIC_BROWSER_PAGE_NAVIGATOR_H_
 #define CONTENT_PUBLIC_BROWSER_PAGE_NAVIGATOR_H_
-#pragma once
 
 #include <string>
 
@@ -29,11 +28,25 @@ struct CONTENT_EXPORT OpenURLParams {
                 WindowOpenDisposition disposition,
                 PageTransition transition,
                 bool is_renderer_initiated);
+  OpenURLParams(const GURL& url,
+                const Referrer& referrer,
+                int64 source_frame_id,
+                WindowOpenDisposition disposition,
+                PageTransition transition,
+                bool is_renderer_initiated);
   ~OpenURLParams();
 
   // The URL/referrer to be opened.
   GURL url;
   Referrer referrer;
+
+  // Extra headers to add to the request for this page.  Headers are
+  // represented as "<name>: <value>" and separated by \r\n.  The entire string
+  // is terminated by \r\n.  May be empty if no extra headers are needed.
+  std::string extra_headers;
+
+  // The source frame id or -1 to indicate the main frame.
+  int64 source_frame_id;
 
   // The disposition requested by the navigation source.
   WindowOpenDisposition disposition;
@@ -51,6 +64,10 @@ struct CONTENT_EXPORT OpenURLParams {
   // transferred to a new renderer.
   GlobalRequestID transferred_global_request_id;
 
+  // Indicates whether this navigation involves a cross-process redirect,
+  // in which case it should replace the current navigation entry.
+  bool is_cross_site_redirect;
+
  private:
   OpenURLParams();
 };
@@ -61,7 +78,7 @@ class PageNavigator {
 
   // Opens a URL with the given disposition.  The transition specifies how this
   // navigation should be recorded in the history system (for example, typed).
-  // Returns the TabContents the URL is opened in, or NULL if the URL wasn't
+  // Returns the WebContents the URL is opened in, or NULL if the URL wasn't
   // opened immediately.
   virtual WebContents* OpenURL(const OpenURLParams& params) = 0;
 };

@@ -1,4 +1,4 @@
-// Copyright (c) 2011 The Chromium Authors. All rights reserved.
+// Copyright (c) 2012 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -9,13 +9,15 @@
 #include "grit/ui_strings.h"
 #include "ui/base/accessibility/accessible_view_state.h"
 #include "ui/base/dragdrop/drag_drop_types.h"
+#include "ui/base/events/event.h"
+#include "ui/base/events/event_constants.h"
 #include "ui/base/l10n/l10n_util.h"
 #include "ui/base/resource/resource_bundle.h"
 #include "ui/gfx/canvas.h"
+#include "ui/gfx/image/image.h"
 #include "ui/gfx/screen.h"
 #include "ui/views/controls/button/button.h"
-#include "ui/views/controls/menu/view_menu_delegate.h"
-#include "ui/views/events/event.h"
+#include "ui/views/controls/button/menu_button_listener.h"
 #include "ui/views/widget/root_view.h"
 #include "ui/views/widget/widget.h"
 
@@ -28,15 +30,13 @@ namespace views {
 // pressed event to show the menu.
 static const int64 kMinimumTimeBetweenButtonClicks = 100;
 
-// How much padding to put on the left and right of the menu marker.
-static const int kMenuMarkerPaddingLeft = 3;
-static const int kMenuMarkerPaddingRight = -1;
-
 // Default menu offset.
 static const int kDefaultMenuOffsetX = -2;
 static const int kDefaultMenuOffsetY = -4;
 
 // static
+const int MenuButton::kMenuMarkerPaddingLeft = 3;
+const int MenuButton::kMenuMarkerPaddingRight = -1;
 const char MenuButton::kViewClassName[] = "views/MenuButton";
 
 ////////////////////////////////////////////////////////////////////////////////
@@ -47,15 +47,15 @@ const char MenuButton::kViewClassName[] = "views/MenuButton";
 
 MenuButton::MenuButton(ButtonListener* listener,
                        const string16& text,
-                       ViewMenuDelegate* menu_delegate,
+                       MenuButtonListener* menu_button_listener,
                        bool show_menu_marker)
     : TextButton(listener, text),
       menu_visible_(false),
       menu_offset_(kDefaultMenuOffsetX, kDefaultMenuOffsetY),
-      menu_delegate_(menu_delegate),
+      listener_(menu_button_listener),
       show_menu_marker_(show_menu_marker),
-      menu_marker_(ResourceBundle::GetSharedInstance().GetBitmapNamed(
-          IDR_MENU_DROPARROW)),
+      menu_marker_(ui::ResourceBundle::GetSharedInstance().GetImageNamed(
+          IDR_MENU_DROPARROW).ToImageSkia()),
       destroyed_flag_(NULL) {
   set_alignment(TextButton::ALIGN_LEFT);
 }
@@ -72,8 +72,8 @@ MenuButton::~MenuButton() {
 ////////////////////////////////////////////////////////////////////////////////
 
 bool MenuButton::Activate() {
-  SetState(BS_PUSHED);
-  if (menu_delegate_) {
+  SetState(STATE_PRESSED);
+  if (listener_) {
     gfx::Rect lb = GetLocalBounds();
 
     // The position of the menu depends on whether or not the locale is
@@ -107,7 +107,7 @@ bool MenuButton::Activate() {
     bool destroyed = false;
     destroyed_flag_ = &destroyed;
 
-    menu_delegate_->RunMenu(this, menu_position);
+    listener_->OnMenuButtonClicked(this, menu_position);
 
     if (destroyed) {
       // The menu was deleted while showing. Don't attempt any processing.
@@ -126,7 +126,7 @@ bool MenuButton::Activate() {
     // somewhere else (user clicked elsewhere on screen to close the menu
     // or selected an item) and we will inevitably refresh the hot state
     // in the event the mouse _is_ over the view.
-    SetState(BS_NORMAL);
+    SetState(STATE_NORMAL);
 
     // We must return false here so that the RootView does not get stuck
     // sending all mouse pressed events to us instead of the appropriate
@@ -152,7 +152,7 @@ void MenuButton::PaintButton(gfx::Canvas* canvas, PaintButtonMode mode) {
                            menu_marker_->width(),
                            menu_marker_->height());
     arrow_bounds.set_x(GetMirroredXForRect(arrow_bounds));
-    canvas->DrawBitmapInt(*menu_marker_, arrow_bounds.x(), arrow_bounds.y());
+    canvas->DrawImageInt(*menu_marker_, arrow_bounds.x(), arrow_bounds.y());
   }
 }
 
@@ -176,12 +176,13 @@ std::string MenuButton::GetClassName() const {
   return kViewClassName;
 }
 
-bool MenuButton::OnMousePressed(const MouseEvent& event) {
+bool MenuButton::OnMousePressed(const ui::MouseEvent& event) {
   RequestFocus();
-  if (state() != BS_DISABLED) {
+  if (state() != STATE_DISABLED) {
     // If we're draggable (GetDragOperations returns a non-zero value), then
     // don't pop on press, instead wait for release.
-    if (event.IsOnlyLeftMouseButton() && HitTest(event.location()) &&
+    if (event.IsOnlyLeftMouseButton() &&
+        HitTestPoint(event.location()) &&
         GetDragOperations(event.location()) == ui::DragDropTypes::DRAG_NONE) {
       TimeDelta delta = Time::Now() - menu_closed_time_;
       int64 delta_in_milliseconds = delta.InMilliseconds();
@@ -193,14 +194,14 @@ bool MenuButton::OnMousePressed(const MouseEvent& event) {
   return true;
 }
 
-void MenuButton::OnMouseReleased(const MouseEvent& event) {
+void MenuButton::OnMouseReleased(const ui::MouseEvent& event) {
   // Explicitly test for left mouse button to show the menu. If we tested for
   // !IsTriggerableEvent it could lead to a situation where we end up showing
   // the menu and context menu (this would happen if the right button is not
   // triggerable and there's a context menu).
   if (GetDragOperations(event.location()) != ui::DragDropTypes::DRAG_NONE &&
-      state() != BS_DISABLED && !InDrag() && event.IsOnlyLeftMouseButton() &&
-      HitTest(event.location())) {
+      state() != STATE_DISABLED && !InDrag() && event.IsOnlyLeftMouseButton() &&
+      HitTestPoint(event.location())) {
     Activate();
   } else {
     TextButton::OnMouseReleased(event);
@@ -210,15 +211,24 @@ void MenuButton::OnMouseReleased(const MouseEvent& event) {
 // The reason we override View::OnMouseExited is because we get this event when
 // we display the menu. If we don't override this method then
 // BaseButton::OnMouseExited will get the event and will set the button's state
-// to BS_NORMAL instead of keeping the state BM_PUSHED. This, in turn, will
+// to STATE_NORMAL instead of keeping the state BM_PUSHED. This, in turn, will
 // cause the button to appear depressed while the menu is displayed.
-void MenuButton::OnMouseExited(const MouseEvent& event) {
-  if ((state_ != BS_DISABLED) && (!menu_visible_) && (!InDrag())) {
-    SetState(BS_NORMAL);
+void MenuButton::OnMouseExited(const ui::MouseEvent& event) {
+  if ((state_ != STATE_DISABLED) && (!menu_visible_) && (!InDrag())) {
+    SetState(STATE_NORMAL);
   }
 }
 
-bool MenuButton::OnKeyPressed(const KeyEvent& event) {
+void MenuButton::OnGestureEvent(ui::GestureEvent* event) {
+  if (state() != STATE_DISABLED && event->type() == ui::ET_GESTURE_TAP) {
+    if (Activate())
+      event->StopPropagation();
+    return;
+  }
+  TextButton::OnGestureEvent(event);
+}
+
+bool MenuButton::OnKeyPressed(const ui::KeyEvent& event) {
   switch (event.key_code()) {
     case ui::VKEY_SPACE:
       // Alt-space on windows should show the window menu.
@@ -236,7 +246,7 @@ bool MenuButton::OnKeyPressed(const KeyEvent& event) {
   return false;
 }
 
-bool MenuButton::OnKeyReleased(const KeyEvent& event) {
+bool MenuButton::OnKeyReleased(const ui::KeyEvent& event) {
   // Override CustomButton's implementation, which presses the button when
   // you press space and clicks it when you release space.  For a MenuButton
   // we always activate the menu on key press.

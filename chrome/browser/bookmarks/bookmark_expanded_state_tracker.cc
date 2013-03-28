@@ -1,24 +1,25 @@
-// Copyright (c) 2011 The Chromium Authors. All rights reserved.
+// Copyright (c) 2012 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
 #include "chrome/browser/bookmarks/bookmark_expanded_state_tracker.h"
 
+#include "base/prefs/public/pref_service_base.h"
 #include "base/string_number_conversions.h"
 #include "base/values.h"
 #include "chrome/browser/bookmarks/bookmark_model.h"
-#include "chrome/browser/prefs/pref_service.h"
-#include "chrome/browser/profiles/profile.h"
+#include "chrome/browser/bookmarks/bookmark_model_factory.h"
+#include "chrome/common/pref_names.h"
 
-BookmarkExpandedStateTracker::BookmarkExpandedStateTracker(Profile* profile,
-                                                           const char* path)
-    : profile_(profile),
-      pref_path_(path) {
-  profile_->GetBookmarkModel()->AddObserver(this);
+BookmarkExpandedStateTracker::BookmarkExpandedStateTracker(
+    content::BrowserContext* browser_context,
+    BookmarkModel* bookmark_model)
+    : browser_context_(browser_context),
+      bookmark_model_(bookmark_model) {
+  bookmark_model->AddObserver(this);
 }
 
 BookmarkExpandedStateTracker::~BookmarkExpandedStateTracker() {
-  profile_->GetBookmarkModel()->RemoveObserver(this);
 }
 
 void BookmarkExpandedStateTracker::SetExpandedNodes(const Nodes& nodes) {
@@ -28,15 +29,15 @@ void BookmarkExpandedStateTracker::SetExpandedNodes(const Nodes& nodes) {
 BookmarkExpandedStateTracker::Nodes
 BookmarkExpandedStateTracker::GetExpandedNodes() {
   Nodes nodes;
-  BookmarkModel* model = profile_->GetBookmarkModel();
-  if (!model->IsLoaded())
+  if (!bookmark_model_->IsLoaded())
     return nodes;
 
-  PrefService* prefs = profile_->GetPrefs();
+  PrefServiceBase* prefs =
+      PrefServiceBase::FromBrowserContext(browser_context_);
   if (!prefs)
     return nodes;
 
-  const ListValue* value = prefs->GetList(pref_path_);
+  const ListValue* value = prefs->GetList(prefs::kBookmarkEditorExpandedNodes);
   if (!value)
     return nodes;
 
@@ -46,7 +47,8 @@ BookmarkExpandedStateTracker::GetExpandedNodes() {
     int64 node_id;
     const BookmarkNode* node;
     if ((*i)->GetAsString(&value) && base::StringToInt64(value, &node_id) &&
-        (node = model->GetNodeByID(node_id)) != NULL && node->is_folder()) {
+        (node = bookmark_model_->GetNodeByID(node_id)) != NULL &&
+        node->is_folder()) {
       nodes.insert(node);
     } else {
       changed = true;
@@ -71,6 +73,7 @@ void BookmarkExpandedStateTracker::BookmarkModelChanged() {
 
 void BookmarkExpandedStateTracker::BookmarkModelBeingDeleted(
     BookmarkModel* model) {
+  model->RemoveObserver(this);
 }
 
 void BookmarkExpandedStateTracker::BookmarkNodeRemoved(
@@ -86,7 +89,9 @@ void BookmarkExpandedStateTracker::BookmarkNodeRemoved(
 }
 
 void BookmarkExpandedStateTracker::UpdatePrefs(const Nodes& nodes) {
-  if (!profile_->GetPrefs())
+  PrefServiceBase* prefs =
+      PrefServiceBase::FromBrowserContext(browser_context_);
+  if (!prefs)
     return;
 
   ListValue values;
@@ -94,5 +99,6 @@ void BookmarkExpandedStateTracker::UpdatePrefs(const Nodes& nodes) {
     values.Set(values.GetSize(),
                new StringValue(base::Int64ToString((*i)->id())));
   }
-  profile_->GetPrefs()->Set(pref_path_, values);
+
+  prefs->Set(prefs::kBookmarkEditorExpandedNodes, values);
 }

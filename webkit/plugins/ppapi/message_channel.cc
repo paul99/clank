@@ -1,4 +1,4 @@
-// Copyright (c) 2011 The Chromium Authors. All rights reserved.
+// Copyright (c) 2012 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -24,6 +24,7 @@
 #include "v8/include/v8.h"
 #include "webkit/plugins/ppapi/host_array_buffer_var.h"
 #include "webkit/plugins/ppapi/npapi_glue.h"
+#include "webkit/plugins/ppapi/plugin_module.h"
 #include "webkit/plugins/ppapi/ppapi_plugin_instance.h"
 
 using ppapi::ArrayBufferVar;
@@ -46,9 +47,14 @@ const char kPostMessage[] = "postMessage";
 
 // Helper function to get the MessageChannel that is associated with an
 // NPObject*.
-MessageChannel& ToMessageChannel(NPObject* object) {
-  return *(static_cast<MessageChannel::MessageChannelNPObject*>(object)->
-      message_channel);
+MessageChannel* ToMessageChannel(NPObject* object) {
+  return static_cast<MessageChannel::MessageChannelNPObject*>(object)->
+      message_channel;
+}
+
+NPObject* ToPassThroughObject(NPObject* object) {
+  MessageChannel* channel = ToMessageChannel(object);
+  return channel ? channel->passthrough_object() : NULL;
 }
 
 // Helper function to determine if a given identifier is equal to kPostMessage.
@@ -173,7 +179,7 @@ bool MessageChannelHasMethod(NPObject* np_obj, NPIdentifier name) {
     return true;
 
   // Other method names we will pass to the passthrough object, if we have one.
-  NPObject* passthrough = ToMessageChannel(np_obj).passthrough_object();
+  NPObject* passthrough = ToPassThroughObject(np_obj);
   if (passthrough)
     return WebBindings::hasMethod(NULL, passthrough, name);
   return false;
@@ -187,14 +193,18 @@ bool MessageChannelInvoke(NPObject* np_obj, NPIdentifier name,
 
   // We only handle a function called postMessage.
   if (IdentifierIsPostMessage(name) && (arg_count == 1)) {
-    MessageChannel& message_channel(ToMessageChannel(np_obj));
-    PP_Var argument(NPVariantToPPVar(message_channel.instance(), &args[0]));
-    message_channel.PostMessageToNative(argument);
-    PpapiGlobals::Get()->GetVarTracker()->ReleaseVar(argument);
-    return true;
+    MessageChannel* message_channel = ToMessageChannel(np_obj);
+    if (message_channel) {
+      PP_Var argument(NPVariantToPPVar(message_channel->instance(), &args[0]));
+      message_channel->PostMessageToNative(argument);
+      PpapiGlobals::Get()->GetVarTracker()->ReleaseVar(argument);
+      return true;
+    } else {
+      return false;
+    }
   }
   // Other method calls we will pass to the passthrough object, if we have one.
-  NPObject* passthrough = ToMessageChannel(np_obj).passthrough_object();
+  NPObject* passthrough = ToPassThroughObject(np_obj);
   if (passthrough) {
     return WebBindings::invoke(NULL, passthrough, name, args, arg_count,
                                result);
@@ -210,7 +220,7 @@ bool MessageChannelInvokeDefault(NPObject* np_obj,
     return false;
 
   // Invoke on the passthrough object, if we have one.
-  NPObject* passthrough = ToMessageChannel(np_obj).passthrough_object();
+  NPObject* passthrough = ToPassThroughObject(np_obj);
   if (passthrough) {
     return WebBindings::invokeDefault(NULL, passthrough, args, arg_count,
                                       result);
@@ -223,7 +233,7 @@ bool MessageChannelHasProperty(NPObject* np_obj, NPIdentifier name) {
     return false;
 
   // Invoke on the passthrough object, if we have one.
-  NPObject* passthrough = ToMessageChannel(np_obj).passthrough_object();
+  NPObject* passthrough = ToPassThroughObject(np_obj);
   if (passthrough)
     return WebBindings::hasProperty(NULL, passthrough, name);
   return false;
@@ -239,7 +249,7 @@ bool MessageChannelGetProperty(NPObject* np_obj, NPIdentifier name,
     return false;
 
   // Invoke on the passthrough object, if we have one.
-  NPObject* passthrough = ToMessageChannel(np_obj).passthrough_object();
+  NPObject* passthrough = ToPassThroughObject(np_obj);
   if (passthrough)
     return WebBindings::getProperty(NULL, passthrough, name, result);
   return false;
@@ -255,7 +265,7 @@ bool MessageChannelSetProperty(NPObject* np_obj, NPIdentifier name,
     return false;
 
   // Invoke on the passthrough object, if we have one.
-  NPObject* passthrough = ToMessageChannel(np_obj).passthrough_object();
+  NPObject* passthrough = ToPassThroughObject(np_obj);
   if (passthrough)
     return WebBindings::setProperty(NULL, passthrough, name, variant);
   return false;
@@ -268,7 +278,7 @@ bool MessageChannelEnumerate(NPObject *np_obj, NPIdentifier **value,
 
   // Invoke on the passthrough object, if we have one, to enumerate its
   // properties.
-  NPObject* passthrough = ToMessageChannel(np_obj).passthrough_object();
+  NPObject* passthrough = ToPassThroughObject(np_obj);
   if (passthrough) {
     bool success = WebBindings::enumerate(NULL, passthrough, value, count);
     if (success) {
@@ -312,8 +322,7 @@ NPClass message_channel_class = {
 }  // namespace
 
 // MessageChannel --------------------------------------------------------------
-MessageChannel::MessageChannelNPObject::MessageChannelNPObject()
-    : message_channel(NULL) {
+MessageChannel::MessageChannelNPObject::MessageChannelNPObject() {
 }
 
 MessageChannel::MessageChannelNPObject::~MessageChannelNPObject() {}
@@ -322,13 +331,14 @@ MessageChannel::MessageChannel(PluginInstance* instance)
     : instance_(instance),
       passthrough_object_(NULL),
       np_object_(NULL),
-      ALLOW_THIS_IN_INITIALIZER_LIST(weak_ptr_factory_(this)) {
+      ALLOW_THIS_IN_INITIALIZER_LIST(weak_ptr_factory_(this)),
+      early_message_queue_state_(QUEUE_MESSAGES) {
   // Now create an NPObject for receiving calls to postMessage. This sets the
   // reference count to 1.  We release it in the destructor.
   NPObject* obj = WebBindings::createObject(NULL, &message_channel_class);
   DCHECK(obj);
   np_object_ = static_cast<MessageChannel::MessageChannelNPObject*>(obj);
-  np_object_->message_channel = this;
+  np_object_->message_channel = weak_ptr_factory_.GetWeakPtr();
 }
 
 void MessageChannel::PostMessageToJavaScript(PP_Var message_data) {
@@ -339,7 +349,8 @@ void MessageChannel::PostMessageToJavaScript(PP_Var message_data) {
   v8::Local<v8::Context> context =
       instance_->container()->element().document().frame()->
           mainWorldScriptContext();
-  context->Enter();
+  v8::Context::Scope context_scope(context);
+
   v8::Local<v8::Value> v8_val;
   if (!PPVarToV8Value(message_data, &v8_val)) {
     NOTREACHED();
@@ -348,13 +359,63 @@ void MessageChannel::PostMessageToJavaScript(PP_Var message_data) {
 
   WebSerializedScriptValue serialized_val =
       WebSerializedScriptValue::serialize(v8_val);
-  context->Exit();
 
+  if (instance_->module()->IsProxied()) {
+    if (early_message_queue_state_ != SEND_DIRECTLY) {
+      // We can't just PostTask here; the messages would arrive out of
+      // order. Instead, we queue them up until we're ready to post
+      // them.
+      early_message_queue_.push_back(serialized_val);
+    } else {
+      // The proxy sent an asynchronous message, so the plugin is already
+      // unblocked. Therefore, there's no need to PostTask.
+      DCHECK(early_message_queue_.size() == 0);
+      PostMessageToJavaScriptImpl(serialized_val);
+    }
+  } else {
+    MessageLoop::current()->PostTask(
+        FROM_HERE,
+        base::Bind(&MessageChannel::PostMessageToJavaScriptImpl,
+                   weak_ptr_factory_.GetWeakPtr(),
+                   serialized_val));
+  }
+}
+
+void MessageChannel::StopQueueingJavaScriptMessages() {
+  // We PostTask here instead of draining the message queue directly
+  // since we haven't finished initializing the WebPluginImpl yet, so
+  // the plugin isn't available in the DOM.
+  early_message_queue_state_ = DRAIN_PENDING;
   MessageLoop::current()->PostTask(
       FROM_HERE,
-      base::Bind(&MessageChannel::PostMessageToJavaScriptImpl,
-                 weak_ptr_factory_.GetWeakPtr(),
-                 serialized_val));
+      base::Bind(&MessageChannel::DrainEarlyMessageQueue,
+                 weak_ptr_factory_.GetWeakPtr()));
+}
+
+void MessageChannel::QueueJavaScriptMessages() {
+  if (early_message_queue_state_ == DRAIN_PENDING)
+    early_message_queue_state_ = DRAIN_CANCELLED;
+  else
+    early_message_queue_state_ = QUEUE_MESSAGES;
+}
+
+void MessageChannel::DrainEarlyMessageQueue() {
+  // Take a reference on the PluginInstance. This is because JavaScript code
+  // may delete the plugin, which would destroy the PluginInstance and its
+  // corresponding MessageChannel.
+  scoped_refptr<PluginInstance> instance_ref(instance_);
+
+  if (early_message_queue_state_ == DRAIN_CANCELLED) {
+    early_message_queue_state_ = QUEUE_MESSAGES;
+    return;
+  }
+  DCHECK(early_message_queue_state_ == DRAIN_PENDING);
+
+  while (!early_message_queue_.empty()) {
+    PostMessageToJavaScriptImpl(early_message_queue_.front());
+    early_message_queue_.pop_front();
+  }
+  early_message_queue_state_ = SEND_DIRECTLY;
 }
 
 void MessageChannel::PostMessageToJavaScriptImpl(
@@ -390,13 +451,20 @@ void MessageChannel::PostMessageToJavaScriptImpl(
 }
 
 void MessageChannel::PostMessageToNative(PP_Var message_data) {
-  // Make a copy of the message data for the Task we will run.
-  PP_Var var_copy(CopyPPVar(message_data));
+  if (instance_->module()->IsProxied()) {
+    // In the proxied case, the copy will happen via serializiation, and the
+    // message is asynchronous. Therefore there's no need to copy the Var, nor
+    // to PostTask.
+    PostMessageToNativeImpl(message_data);
+  } else {
+    // Make a copy of the message data for the Task we will run.
+    PP_Var var_copy(CopyPPVar(message_data));
 
-  MessageLoop::current()->PostTask(FROM_HERE,
-      base::Bind(&MessageChannel::PostMessageToNativeImpl,
-                 weak_ptr_factory_.GetWeakPtr(),
-                 var_copy));
+    MessageLoop::current()->PostTask(FROM_HERE,
+        base::Bind(&MessageChannel::PostMessageToNativeImpl,
+                   weak_ptr_factory_.GetWeakPtr(),
+                   var_copy));
+  }
 }
 
 void MessageChannel::PostMessageToNativeImpl(PP_Var message_data) {
@@ -412,7 +480,8 @@ MessageChannel::~MessageChannel() {
 void MessageChannel::SetPassthroughObject(NPObject* passthrough) {
   // Retain the passthrough object; We need to ensure it lives as long as this
   // MessageChannel.
-  WebBindings::retainObject(passthrough);
+  if (passthrough)
+    WebBindings::retainObject(passthrough);
 
   // If we had a passthrough set already, release it. Note that we retain the
   // incoming passthrough object first, so that we behave correctly if anyone

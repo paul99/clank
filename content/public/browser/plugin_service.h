@@ -4,7 +4,6 @@
 
 #ifndef CONTENT_PUBLIC_BROWSER_PLUGIN_SERVICE_H_
 #define CONTENT_PUBLIC_BROWSER_PLUGIN_SERVICE_H_
-#pragma once
 
 #include <string>
 #include <vector>
@@ -15,12 +14,10 @@
 
 class FilePath;
 class GURL;
-class PluginProcessHost;
 
 namespace webkit {
 struct WebPluginInfo;
 namespace npapi {
-class PluginGroup;
 class PluginList;
 }
 }
@@ -28,6 +25,7 @@ class PluginList;
 namespace content {
 
 class BrowserContext;
+class PluginProcessHost;
 class PluginServiceFilter;
 class ResourceContext;
 struct PepperPluginInfo;
@@ -40,8 +38,6 @@ class PluginService {
  public:
   typedef base::Callback<void(const std::vector<webkit::WebPluginInfo>&)>
       GetPluginsCallback;
-  typedef base::Callback<void(const std::vector<webkit::npapi::PluginGroup>&)>
-      GetPluginGroupsCallback;
 
   // Returns the PluginService singleton.
   CONTENT_EXPORT static PluginService* GetInstance();
@@ -63,12 +59,6 @@ class PluginService {
   // Starts watching for changes in the list of installed plug-ins.
   virtual void StartWatchingPlugins() = 0;
 
-  // Returns the plugin process host corresponding to the plugin process that
-  // has been started by this service. Returns NULL if no process has been
-  // started.
-  virtual PluginProcessHost* FindNpapiPluginProcess(
-      const FilePath& plugin_path) = 0;
-
   // Gets the plugin in the list of plugins that matches the given url and mime
   // type. Returns true if the data is frome a stale plugin list, false if it
   // is up to date. This can be called from any thread.
@@ -84,7 +74,7 @@ class PluginService {
   // via |is_stale| and returns whether or not the plugin can be found.
   virtual bool GetPluginInfo(int render_process_id,
                              int render_view_id,
-                             const ResourceContext& context,
+                             ResourceContext* context,
                              const GURL& url,
                              const GURL& page_url,
                              const std::string& mime_type,
@@ -99,13 +89,14 @@ class PluginService {
   virtual bool GetPluginInfoByPath(const FilePath& plugin_path,
                                    webkit::WebPluginInfo* info) = 0;
 
+  // Returns the display name for the plugin identified by the given path. If
+  // the path doesn't identify a plugin, or the plugin has no display name,
+  // this will attempt to generate a display name from the path.
+  virtual string16 GetPluginDisplayNameByPath(const FilePath& plugin_path) = 0;
+
   // Asynchronously loads plugins if necessary and then calls back to the
   // provided function on the calling MessageLoop on completion.
   virtual void GetPlugins(const GetPluginsCallback& callback) = 0;
-
-  // Asynchronously loads the list of plugin groups if necessary and then calls
-  // back to the provided function on the calling MessageLoop on completion.
-  virtual void GetPluginGroups(const GetPluginGroupsCallback& callback) = 0;
 
   // Returns information about a pepper plugin if it exists, otherwise NULL.
   // The caller does not own the pointer, and it's not guaranteed to live past
@@ -115,6 +106,9 @@ class PluginService {
 
   virtual void SetFilter(PluginServiceFilter* filter) = 0;
   virtual PluginServiceFilter* GetFilter() = 0;
+
+  // If the plugin with the given path is running, cleanly shuts it down.
+  virtual void ForcePluginShutdown(const FilePath& plugin_path) = 0;
 
   // Used to monitor plug-in stability. An unstable plug-in is one that has
   // crashed more than a set number of times in a set time period.
@@ -132,13 +126,20 @@ class PluginService {
   virtual void UnregisterInternalPlugin(const FilePath& path) = 0;
   virtual void RegisterInternalPlugin(const webkit::WebPluginInfo& info,
                                       bool add_at_beginning) = 0;
-  virtual string16 GetPluginGroupName(const std::string& plugin_name) = 0;
+  virtual void GetInternalPlugins(
+      std::vector<webkit::WebPluginInfo>* plugins) = 0;
 
   // TODO(dpranke): This should be private.
   virtual webkit::npapi::PluginList* GetPluginList() = 0;
 
   virtual void SetPluginListForTesting(
       webkit::npapi::PluginList* plugin_list) = 0;
+
+#if defined(OS_MACOSX)
+  // Called when the application is made active so that modal plugin windows can
+  // be made forward too.
+  virtual void AppActivated() = 0;
+#endif
 };
 
 }  // namespace content

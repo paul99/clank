@@ -5,12 +5,16 @@
 #include "ipc/ipc_sync_channel.h"
 
 #include "base/bind.h"
+#include "base/debug/trace_event.h"
 #include "base/lazy_instance.h"
 #include "base/location.h"
 #include "base/logging.h"
-#include "base/threading/thread_local.h"
 #include "base/synchronization/waitable_event.h"
 #include "base/synchronization/waitable_event_watcher.h"
+#include "base/thread_task_runner_handle.h"
+#include "base/threading/thread_local.h"
+#include "ipc/ipc_logging.h"
+#include "ipc/ipc_message_macros.h"
 #include "ipc/ipc_sync_message.h"
 
 using base::TimeDelta;
@@ -69,7 +73,7 @@ class SyncChannel::ReceivedSyncMsgQueue :
 
     dispatch_event_.Signal();
     if (!was_task_pending) {
-      listener_message_loop_->PostTask(
+      listener_task_runner_->PostTask(
           FROM_HERE, base::Bind(&ReceivedSyncMsgQueue::DispatchMessagesTask,
                                 this, scoped_refptr<SyncContext>(context)));
     }
@@ -103,8 +107,9 @@ class SyncChannel::ReceivedSyncMsgQueue :
           first_time = false;
         }
         for (; it != message_queue_.end(); it++) {
-          if (!it->context->restrict_dispatch() ||
-              it->context == dispatching_context) {
+          int message_group = it->context->restrict_dispatch_group();
+          if (message_group == kRestrictDispatchGroup_None ||
+              message_group == dispatching_context->restrict_dispatch_group()) {
             message = it->message;
             context = it->context;
             it = message_queue_.erase(it);
@@ -144,8 +149,8 @@ class SyncChannel::ReceivedSyncMsgQueue :
   }
 
   WaitableEvent* dispatch_event() { return &dispatch_event_; }
-  base::MessageLoopProxy* listener_message_loop() {
-    return listener_message_loop_;
+  base::SingleThreadTaskRunner* listener_task_runner() {
+    return listener_task_runner_;
   }
 
   // Holds a pointer to the per-thread ReceivedSyncMsgQueue object.
@@ -181,7 +186,7 @@ class SyncChannel::ReceivedSyncMsgQueue :
   ReceivedSyncMsgQueue() :
       message_queue_version_(0),
       dispatch_event_(true, false),
-      listener_message_loop_(base::MessageLoopProxy::current()),
+      listener_task_runner_(base::ThreadTaskRunnerHandle::Get()),
       task_pending_(false),
       listener_count_(0),
       top_send_done_watcher_(NULL) {
@@ -206,7 +211,7 @@ class SyncChannel::ReceivedSyncMsgQueue :
   // sender needs its reply before it can reply to our original synchronous
   // message.
   WaitableEvent dispatch_event_;
-  scoped_refptr<base::MessageLoopProxy> listener_message_loop_;
+  scoped_refptr<base::SingleThreadTaskRunner> listener_task_runner_;
   base::Lock message_lock_;
   bool task_pending_;
   int listener_count_;
@@ -222,13 +227,13 @@ base::LazyInstance<base::ThreadLocalPointer<SyncChannel::ReceivedSyncMsgQueue> >
         LAZY_INSTANCE_INITIALIZER;
 
 SyncChannel::SyncContext::SyncContext(
-    Channel::Listener* listener,
-    base::MessageLoopProxy* ipc_thread,
+    Listener* listener,
+    base::SingleThreadTaskRunner* ipc_task_runner,
     WaitableEvent* shutdown_event)
-    : ChannelProxy::Context(listener, ipc_thread),
+    : ChannelProxy::Context(listener, ipc_task_runner),
       received_sync_msgs_(ReceivedSyncMsgQueue::AddContext()),
       shutdown_event_(shutdown_event),
-      restrict_dispatch_(false) {
+      restrict_dispatch_group_(kRestrictDispatchGroup_None) {
 }
 
 SyncChannel::SyncContext::~SyncContext() {
@@ -272,7 +277,7 @@ bool SyncChannel::SyncContext::Pop() {
   // blocking Send() call, whose reply we received after we made this last
   // Send() call.  So check if we have any queued replies available that
   // can now unblock the listener thread.
-  ipc_message_loop()->PostTask(
+  ipc_task_runner()->PostTask(
       FROM_HERE, base::Bind(&ReceivedSyncMsgQueue::DispatchReplies,
                             received_sync_msgs_.get()));
 
@@ -299,9 +304,15 @@ bool SyncChannel::SyncContext::TryToUnblockListener(const Message* msg) {
     return false;
   }
 
+  // TODO(bauerb): Remove logging once investigation of http://crbug.com/141055
+  // has finished.
   if (!msg->is_reply_error()) {
-    deserializers_.back().send_result = deserializers_.back().deserializer->
+    bool send_result = deserializers_.back().deserializer->
         SerializeOutputParameters(*msg);
+    deserializers_.back().send_result = send_result;
+    VLOG_IF(1, !send_result) << "Couldn't deserialize reply message";
+  } else {
+    VLOG(1) << "Received error reply";
   }
   deserializers_.back().done_event->Signal();
 
@@ -322,13 +333,13 @@ bool SyncChannel::SyncContext::OnMessageReceived(const Message& msg) {
   if (TryToUnblockListener(&msg))
     return true;
 
-  if (msg.should_unblock()) {
-    received_sync_msgs_->QueueMessage(msg, this);
+  if (msg.is_reply()) {
+    received_sync_msgs_->QueueReply(msg, this);
     return true;
   }
 
-  if (msg.is_reply()) {
-    received_sync_msgs_->QueueReply(msg, this);
+  if (msg.should_unblock()) {
+    received_sync_msgs_->QueueMessage(msg, this);
     return true;
   }
 
@@ -355,6 +366,7 @@ void SyncChannel::SyncContext::OnChannelClosed() {
 void SyncChannel::SyncContext::OnSendTimeout(int message_id) {
   base::AutoLock auto_lock(deserializers_lock_);
   PendingSyncMessageQueue::iterator iter;
+  VLOG(1) << "Send timeout";
   for (iter = deserializers_.begin(); iter != deserializers_.end(); iter++) {
     if (iter->id == message_id) {
       iter->done_event->Signal();
@@ -366,6 +378,8 @@ void SyncChannel::SyncContext::OnSendTimeout(int message_id) {
 void SyncChannel::SyncContext::CancelPendingSends() {
   base::AutoLock auto_lock(deserializers_lock_);
   PendingSyncMessageQueue::iterator iter;
+  // TODO(bauerb): Remove once http://crbug/141055 is fixed.
+  VLOG(1) << "Canceling pending sends";
   for (iter = deserializers_.begin(); iter != deserializers_.end(); iter++)
     iter->done_event->Signal();
 }
@@ -386,21 +400,21 @@ void SyncChannel::SyncContext::OnWaitableEventSignaled(WaitableEvent* event) {
 SyncChannel::SyncChannel(
     const IPC::ChannelHandle& channel_handle,
     Channel::Mode mode,
-    Channel::Listener* listener,
-    base::MessageLoopProxy* ipc_message_loop,
+    Listener* listener,
+    base::SingleThreadTaskRunner* ipc_task_runner,
     bool create_pipe_now,
     WaitableEvent* shutdown_event)
-    : ChannelProxy(new SyncContext(listener, ipc_message_loop, shutdown_event)),
+    : ChannelProxy(new SyncContext(listener, ipc_task_runner, shutdown_event)),
       sync_messages_with_no_timeout_allowed_(true) {
   ChannelProxy::Init(channel_handle, mode, create_pipe_now);
   StartWatching();
 }
 
 SyncChannel::SyncChannel(
-    Channel::Listener* listener,
-    base::MessageLoopProxy* ipc_message_loop,
+    Listener* listener,
+    base::SingleThreadTaskRunner* ipc_task_runner,
     WaitableEvent* shutdown_event)
-    : ChannelProxy(new SyncContext(listener, ipc_message_loop, shutdown_event)),
+    : ChannelProxy(new SyncContext(listener, ipc_task_runner, shutdown_event)),
       sync_messages_with_no_timeout_allowed_(true) {
   StartWatching();
 }
@@ -408,8 +422,8 @@ SyncChannel::SyncChannel(
 SyncChannel::~SyncChannel() {
 }
 
-void SyncChannel::SetRestrictDispatchToSameChannel(bool value) {
-  sync_context()->set_restrict_dispatch(value);
+void SyncChannel::SetRestrictDispatchChannelGroup(int group) {
+  sync_context()->set_restrict_dispatch_group(group);
 }
 
 bool SyncChannel::Send(Message* message) {
@@ -417,6 +431,17 @@ bool SyncChannel::Send(Message* message) {
 }
 
 bool SyncChannel::SendWithTimeout(Message* message, int timeout_ms) {
+#ifdef IPC_MESSAGE_LOG_ENABLED
+  Logging* logger = Logging::GetInstance();
+  std::string name;
+  logger->GetMessageText(message->type(), &name, message, NULL);
+  TRACE_EVENT1("task", "SyncChannel::SendWithTimeout",
+               "name", name);
+#else
+  TRACE_EVENT2("task", "SyncChannel::SendWithTimeout",
+               "class", IPC_MESSAGE_ID_CLASS(message->type()),
+               "line", IPC_MESSAGE_ID_LINE(message->type()));
+#endif
   if (!message->is_sync()) {
     ChannelProxy::Send(message);
     return true;
@@ -425,6 +450,7 @@ bool SyncChannel::SendWithTimeout(Message* message, int timeout_ms) {
   // *this* might get deleted in WaitForReply.
   scoped_refptr<SyncContext> context(sync_context());
   if (context->shutdown_event()->IsSignaled()) {
+    VLOG(1) << "shutdown event is signaled";
     delete message;
     return false;
   }
@@ -442,10 +468,10 @@ bool SyncChannel::SendWithTimeout(Message* message, int timeout_ms) {
     // We use the sync message id so that when a message times out, we don't
     // confuse it with another send that is either above/below this Send in
     // the call stack.
-    context->ipc_message_loop()->PostDelayedTask(
+    context->ipc_task_runner()->PostDelayedTask(
         FROM_HERE,
         base::Bind(&SyncContext::OnSendTimeout, context.get(), message_id),
-        timeout_ms);
+        base::TimeDelta::FromMilliseconds(timeout_ms));
   }
 
   // Wait for reply, or for any other incoming synchronous messages.
@@ -506,11 +532,11 @@ void SyncChannel::WaitForReplyWithNestedMessageLoop(SyncContext* context) {
   sync_msg_queue->set_top_send_done_watcher(&send_done_watcher);
 
   send_done_watcher.StartWatching(context->GetSendDoneEvent(), context);
-  bool old_state = MessageLoop::current()->NestableTasksAllowed();
 
-  MessageLoop::current()->SetNestableTasksAllowed(true);
-  MessageLoop::current()->Run();
-  MessageLoop::current()->SetNestableTasksAllowed(old_state);
+  {
+    MessageLoop::ScopedNestableTaskAllower allow(MessageLoop::current());
+    MessageLoop::current()->Run();
+  }
 
   sync_msg_queue->set_top_send_done_watcher(old_send_done_event_watcher);
   if (old_send_done_event_watcher && old_event) {

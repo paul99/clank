@@ -4,15 +4,14 @@
 
 #ifndef UI_VIEWS_CONTROLS_TREE_TREE_VIEW_VIEWS_H_
 #define UI_VIEWS_CONTROLS_TREE_TREE_VIEW_VIEWS_H_
-#pragma once
 
 #include <vector>
 
 #include "base/basictypes.h"
 #include "base/compiler_specific.h"
-#include "third_party/skia/include/core/SkBitmap.h"
 #include "ui/base/models/tree_node_model.h"
 #include "ui/gfx/font.h"
+#include "ui/gfx/image/image_skia.h"
 #include "ui/views/controls/textfield/textfield_controller.h"
 #include "ui/views/focus/focus_manager.h"
 #include "ui/views/view.h"
@@ -81,7 +80,7 @@ class VIEWS_EXPORT TreeView : public View,
   ui::TreeModelNode* GetSelectedNode();
 
   // Marks |model_node| as collapsed. This only effects the UI if node and all
-  // it's parents are expanded (IsExpanded(model_node) returns true).
+  // its parents are expanded (IsExpanded(model_node) returns true).
   void Collapse(ui::TreeModelNode* model_node);
 
   // Make sure node and all its parents are expanded.
@@ -108,7 +107,8 @@ class VIEWS_EXPORT TreeView : public View,
   // View overrides:
   virtual void Layout() OVERRIDE;
   virtual gfx::Size GetPreferredSize() OVERRIDE;
-  virtual bool OnMousePressed(const MouseEvent& event) OVERRIDE;
+  virtual bool OnMousePressed(const ui::MouseEvent& event) OVERRIDE;
+  virtual void OnGestureEvent(ui::GestureEvent* event) OVERRIDE;
   virtual void ShowContextMenu(const gfx::Point& p,
                                bool is_mouse_gesture) OVERRIDE;
   virtual void GetAccessibleState(ui::AccessibleViewState* state) OVERRIDE;
@@ -129,7 +129,7 @@ class VIEWS_EXPORT TreeView : public View,
   virtual void ContentsChanged(Textfield* sender,
                                const string16& new_contents) OVERRIDE;
   virtual bool HandleKeyEvent(Textfield* sender,
-                              const KeyEvent& key_event) OVERRIDE;
+                              const ui::KeyEvent& key_event) OVERRIDE;
 
   // FocusChangeListener overrides:
   virtual void OnWillChangeFocus(View* focused_before,
@@ -140,13 +140,17 @@ class VIEWS_EXPORT TreeView : public View,
  protected:
   // View overrides:
   virtual gfx::Point GetKeyboardContextMenuLocation() OVERRIDE;
-  virtual bool OnKeyPressed(const KeyEvent& event) OVERRIDE;
+  virtual bool OnKeyPressed(const ui::KeyEvent& event) OVERRIDE;
   virtual void OnPaint(gfx::Canvas* canvas) OVERRIDE;
   virtual void OnFocus() OVERRIDE;
   virtual void OnBlur() OVERRIDE;
 
  private:
   friend class TreeViewViewsTest;
+
+  // Selects, expands or collapses nodes in the tree.  Consistent behavior for
+  // tap gesture and click events.
+  bool OnClickOrTap(const ui::LocatedEvent& event);
 
   // InternalNode is used to track information about the set of nodes displayed
   // by TreeViewViews.
@@ -178,7 +182,7 @@ class VIEWS_EXPORT TreeView : public View,
 
     // Returns the max width of all descendants (including this node). |indent|
     // is how many pixels each child is indented and |depth| is the depth of
-    // this node from it's parent.
+    // this node from its parent.
     int GetMaxWidth(int indent, int depth);
 
    private:
@@ -311,11 +315,11 @@ class VIEWS_EXPORT TreeView : public View,
   ui::TreeModel* model_;
 
   // Default icons for closed/open.
-  SkBitmap closed_icon_;
-  SkBitmap open_icon_;
+  gfx::ImageSkia closed_icon_;
+  gfx::ImageSkia open_icon_;
 
   // Icons from the model.
-  std::vector<SkBitmap> icons_;
+  std::vector<gfx::ImageSkia> icons_;
 
   // The root node.
   InternalNode root_;

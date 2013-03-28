@@ -21,6 +21,9 @@ void ConfigurePrefetchAndPrerender(const CommandLine& command_line);
 // prerendering from Omnibox experiment.
 bool IsOmniboxEnabled(Profile* profile);
 
+// Returns true iff the Prerender Local Predictor is enabled.
+bool IsLocalPredictorEnabled();
+
 }  // namespace prerender
 
 #endif  // CHROME_BROWSER_PRERENDER_PRERENDER_FIELD_TRIAL_H_

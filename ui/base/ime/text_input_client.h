@@ -4,7 +4,6 @@
 
 #ifndef UI_BASE_IME_TEXT_INPUT_CLIENT_H_
 #define UI_BASE_IME_TEXT_INPUT_CLIENT_H_
-#pragma once
 
 #include "base/basictypes.h"
 #include "base/i18n/rtl.h"
@@ -74,6 +73,13 @@ class UI_EXPORT TextInputClient {
   //    coordinates instead of screen.
   virtual gfx::Rect GetCaretBounds() = 0;
 
+  // Retrieves the composition character boundary rectangle relative to the
+  // screen coordinates. The |index| is zero-based index of character position
+  // in composition text.
+  // Returns false if there is no composition text or |index| is out of range.
+  // The |rect| is not touched in the case of failure.
+  virtual bool GetCompositionCharacterBounds(uint32 index, gfx::Rect* rect) = 0;
+
   // Returns true if there is composition text.
   virtual bool HasCompositionText() = 0;
 
@@ -121,6 +127,10 @@ class UI_EXPORT TextInputClient {
   // Returns false if the operation is not supported.
   virtual bool ChangeTextDirectionAndLayoutAlignment(
       base::i18n::TextDirection direction) = 0;
+
+  // Deletes the current selection plus the specified number of characters
+  // before and after the selection or caret.
+  virtual void ExtendSelectionAndDelete(size_t before, size_t after) = 0;
 };
 
 }  // namespace ui

@@ -1,4 +1,4 @@
-// Copyright (c) 2011 The Chromium Authors. All rights reserved.
+// Copyright (c) 2012 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 //
@@ -7,13 +7,10 @@
 
 #ifndef CHROME_INSTALLER_SETUP_INSTALL_WORKER_H_
 #define CHROME_INSTALLER_SETUP_INSTALL_WORKER_H_
-#pragma once
 
 #include <windows.h>
 
 #include <vector>
-
-#include "base/memory/scoped_ptr.h"
 
 class BrowserDistribution;
 class CommandLine;
@@ -26,6 +23,24 @@ namespace installer {
 class InstallationState;
 class InstallerState;
 class Product;
+
+// This method adds work items to create (or update) Chrome uninstall entry in
+// either the Control Panel->Add/Remove Programs list or in the Omaha client
+// state key if running under an MSI installer.
+void AddUninstallShortcutWorkItems(const InstallerState& installer_state,
+                                   const FilePath& setup_path,
+                                   const Version& new_version,
+                                   const Product& product,
+                                   WorkItemList* install_list);
+
+// Creates Version key for a product (if not already present) and sets the new
+// product version as the last step.  If |add_language_identifier| is true, the
+// "lang" value is also set according to the currently selected translation.
+void AddVersionKeyWorkItems(HKEY root,
+                            BrowserDistribution* dist,
+                            const Version& new_version,
+                            bool add_language_identifier,
+                            WorkItemList* list);
 
 // Helper function for AddGoogleUpdateWorkItems that mirrors oeminstall.
 void AddOemInstallWorkItems(const InstallationState& original_state,
@@ -62,9 +77,9 @@ void AddUsageStatsWorkItems(const InstallationState& original_state,
 //   it if not.
 // If these operations are successful, the function returns true, otherwise
 // false.
+// |current_version| can be NULL to indicate no Chrome is currently installed.
 bool AppendPostInstallTasks(const InstallerState& installer_state,
                             const FilePath& setup_path,
-                            const FilePath& new_chrome_exe,
                             const Version* current_version,
                             const Version& new_version,
                             const FilePath& temp_path,
@@ -81,14 +96,15 @@ bool AppendPostInstallTasks(const InstallerState& installer_state,
 //           to be installed.
 // temp_path: the path of working directory used during installation. This path
 //            does not need to exist.
+// |current_version| can be NULL to indicate no Chrome is currently installed.
 void AddInstallWorkItems(const InstallationState& original_state,
                          const InstallerState& installer_state,
                          const FilePath& setup_path,
                          const FilePath& archive_path,
                          const FilePath& src_path,
                          const FilePath& temp_path,
+                         const Version* current_version,
                          const Version& new_version,
-                         scoped_ptr<Version>* current_version,
                          WorkItemList* install_list);
 
 // Appends registration or unregistration work items to |work_item_list| for the
@@ -122,23 +138,26 @@ void AddChromeFrameWorkItems(const InstallationState& original_state,
                              const Product& product,
                              WorkItemList* list);
 
-// This method adds work items to create (or update) Chrome uninstall entry in
-// either the Control Panel->Add/Remove Programs list or in the Omaha client
-// state key if running under an MSI installer.
-void AddUninstallShortcutWorkItems(const InstallerState& installer_state,
-                                   const FilePath& setup_path,
-                                   const Version& new_version,
-                                   WorkItemList* install_list,
-                                   const Product& product);
+// Called for either installation or uninstallation. This method adds or
+// removes COM registration for a product's DelegateExecute verb handler.
+// If |new_version| is empty, the registrations will point to
+// delegate_execute.exe directly in |target_path|.
+void AddDelegateExecuteWorkItems(const InstallerState& installer_state,
+                                 const FilePath& target_path,
+                                 const Version& new_version,
+                                 const Product& product,
+                                 WorkItemList* list);
 
-// Create Version key for a product (if not already present) and sets the new
-// product version as the last step.  If |add_language_identifier| is true, the
-// "lang" value is also set according to the currently selected translation.
-void AddVersionKeyWorkItems(HKEY root,
-                            BrowserDistribution* dist,
-                            const Version& new_version,
-                            bool add_language_identifier,
-                            WorkItemList* list);
+// Adds Active Setup registration for sytem-level setup to be called by Windows
+// on user-login post-install/update.
+// This method should be called for installation only.
+// |product|: The product being installed. This method is a no-op if this is
+// anything other than system-level Chrome/Chromium.
+void AddActiveSetupWorkItems(const InstallerState& installer_state,
+                             const FilePath& setup_path,
+                             const Version& new_version,
+                             const Product& product,
+                             WorkItemList* list);
 
 // Unregisters the "opv" version of ChromeLauncher from IE's low rights
 // elevation policy.
@@ -158,18 +177,43 @@ void AppendUninstallCommandLineFlags(const InstallerState& installer_state,
 // Refreshes the elevation policy on platforms where it is supported.
 void RefreshElevationPolicy();
 
-// Add work items to add or remove the "quick-enable-cf" to the multi-installer
+// Adds work items to add or remove the "quick-enable-cf" to the multi-installer
 // binaries' version key on the basis of the current operation (represented in
 // |installer_state|) and the pre-existing machine configuration (represented in
 // |machine_state|).  |setup_path| (the path to the executable currently being
 // run) and |new_version| (the version of the product(s) currently being
 // installed) are required when processing product installation; they are unused
-// (and may therefore be NULL) when uninstalling.
-void AddQuickEnableWorkItems(const InstallerState& installer_state,
-                             const InstallationState& machine_state,
-                             const FilePath* setup_path,
-                             const Version* new_version,
-                             WorkItemList* work_item_list);
+// (and may therefore be empty) when uninstalling.
+void AddQuickEnableChromeFrameWorkItems(const InstallerState& installer_state,
+                                        const InstallationState& machine_state,
+                                        const FilePath& setup_path,
+                                        const Version& new_version,
+                                        WorkItemList* work_item_list);
+
+// Adds work items to add or remove the "quick-enable-application-host" command
+// to the multi-installer binaries' version key on the basis of the current
+// operation (represented in |installer_state|) and the pre-existing machine
+// configuration (represented in |machine_state|).  |setup_path| (the path to
+// the executable currently being run) and |new_version| (the version of the
+// product(s) currently being installed) are required when processing product
+// installation; they are unused ((and may therefore be empty) when
+// uninstalling).
+void AddQuickEnableApplicationLauncherWorkItems(
+    const InstallerState& installer_state,
+    const InstallationState& machine_state,
+    const FilePath& setup_path,
+    const Version& new_version,
+    WorkItemList* work_item_list);
+
+// Adds work items to add or remove the "on-os-upgrade" command to |product|'s
+// version key on the basis of the current operation (represented in
+// |installer_state|).  |new_version| is the version of the product(s)
+// currently being installed -- can be empty on uninstall.
+void AddOsUpgradeWorkItems(const InstallerState& installer_state,
+                           const FilePath& setup_path,
+                           const Version& new_version,
+                           const Product& product,
+                           WorkItemList* install_list);
 
 }  // namespace installer
 

@@ -4,28 +4,16 @@
 
 #ifndef UI_VIEWS_WIDGET_NATIVE_WIDGET_WIN_H_
 #define UI_VIEWS_WIDGET_NATIVE_WIDGET_WIN_H_
-#pragma once
 
-#include <atlbase.h>
-#include <atlapp.h>
-#include <atlcrack.h>
-#include <atlmisc.h>
-
-#include <string>
 #include <vector>
 
-#include "base/memory/ref_counted.h"
 #include "base/memory/scoped_ptr.h"
 #include "base/memory/scoped_vector.h"
-#include "base/memory/weak_ptr.h"
-#include "base/message_loop.h"
 #include "base/win/scoped_comptr.h"
 #include "base/win/win_util.h"
 #include "ui/base/win/window_impl.h"
-#include "ui/gfx/compositor/compositor.h"
-#include "ui/views/focus/focus_manager.h"
-#include "ui/views/layout/layout_manager.h"
 #include "ui/views/widget/native_widget_private.h"
+#include "ui/views/win/hwnd_message_handler_delegate.h"
 
 namespace ui {
 class Compositor;
@@ -33,7 +21,7 @@ class ViewProp;
 }
 
 namespace gfx {
-class CanvasSkia;
+class Canvas;
 class Font;
 class Rect;
 }
@@ -41,19 +29,10 @@ class Rect;
 namespace views {
 
 class DropTargetWin;
+class HWNDMessageHandler;
+class InputMethodDelegate;
 class RootView;
 class TooltipManagerWin;
-
-// These two messages aren't defined in winuser.h, but they are sent to windows
-// with captions. They appear to paint the window caption and frame.
-// Unfortunately if you override the standard non-client rendering as we do
-// with CustomFrameWindow, sometimes Windows (not deterministically
-// reproducibly but definitely frequently) will send these messages to the
-// window and paint the standard caption/title over the top of the custom one.
-// So we need to handle these messages in CustomFrameWindow to prevent this
-// from happening.
-const int WM_NCUAHDRAWCAPTION = 0xAE;
-const int WM_NCUAHDRAWFRAME = 0xAF;
 
 ///////////////////////////////////////////////////////////////////////////////
 //
@@ -68,28 +47,17 @@ const int WM_NCUAHDRAWFRAME = 0xAF;
 //  then responsible for cleaning up after it.
 //
 ///////////////////////////////////////////////////////////////////////////////
-class VIEWS_EXPORT NativeWidgetWin : public ui::WindowImpl,
-                                     public MessageLoopForUI::Observer,
-                                     public ui::CompositorDelegate,
-                                     public internal::NativeWidgetPrivate {
+class VIEWS_EXPORT NativeWidgetWin : public internal::NativeWidgetPrivate,
+                                     public HWNDMessageHandlerDelegate {
  public:
   explicit NativeWidgetWin(internal::NativeWidgetDelegate* delegate);
   virtual ~NativeWidgetWin();
-
-  // Returns true if we are on Windows Vista or greater and composition is
-  // enabled.
-  static bool IsAeroGlassEnabled();
 
   // Returns the system set window title font.
   static gfx::Font GetWindowTitleFont();
 
   // Show the window with the specified show command.
   void Show(int show_state);
-
-  // Disable Layered Window updates by setting to false.
-  void set_can_update_layered_window(bool can_update_layered_window) {
-    can_update_layered_window_ = can_update_layered_window;
-  }
 
   // Obtain the view event with the given MSAA child id.  Used in
   // NativeViewAccessibilityWin::get_accChild to support requests for
@@ -107,78 +75,17 @@ class VIEWS_EXPORT NativeWidgetWin : public ui::WindowImpl,
   // Clear a view that has recently been removed on a hierarchy change.
   void ClearAccessibilityViewEvent(View* view);
 
-  // Hides the window if it hasn't already been force-hidden. The force hidden
-  // count is tracked, so calling multiple times is allowed, you just have to
-  // be sure to call PopForceHidden the same number of times.
-  void PushForceHidden();
+  // Places the window in a pseudo-fullscreen mode where it looks and acts as
+  // like a fullscreen window except that it remains within the boundaries
+  // of the metro snap divider.
+  void SetMetroSnapFullscreen(bool metro_snap);
+  bool IsInMetroSnapMode() const;
 
-  // Decrements the force hidden count, showing the window if we have reached
-  // the top of the stack. See PushForceHidden.
-  void PopForceHidden();
-
-  BOOL IsWindow() const {
-    return ::IsWindow(GetNativeView());
-  }
-
-  BOOL ShowWindow(int command) {
-    DCHECK(::IsWindow(GetNativeView()));
-    return ::ShowWindow(GetNativeView(), command);
-  }
-
-  HWND GetParent() const {
-    return ::GetParent(GetNativeView());
-  }
-
-  LONG GetWindowLong(int index) {
-    DCHECK(::IsWindow(GetNativeView()));
-    return ::GetWindowLong(GetNativeView(), index);
-  }
-
-  BOOL GetWindowRect(RECT* rect) const {
-    return ::GetWindowRect(GetNativeView(), rect);
-  }
-
-  LONG SetWindowLong(int index, LONG new_long) {
-    DCHECK(::IsWindow(GetNativeView()));
-    return ::SetWindowLong(GetNativeView(), index, new_long);
-  }
-
-  BOOL SetWindowPos(HWND hwnd_after, int x, int y, int cx, int cy, UINT flags) {
-    DCHECK(::IsWindow(GetNativeView()));
-    return ::SetWindowPos(GetNativeView(), hwnd_after, x, y, cx, cy, flags);
-  }
-
-  BOOL IsZoomed() const {
-    DCHECK(::IsWindow(GetNativeView()));
-    return ::IsZoomed(GetNativeView());
-  }
-
-  BOOL MoveWindow(int x, int y, int width, int height) {
-    return MoveWindow(x, y, width, height, TRUE);
-  }
-
-  BOOL MoveWindow(int x, int y, int width, int height, BOOL repaint) {
-    DCHECK(::IsWindow(GetNativeView()));
-    return ::MoveWindow(GetNativeView(), x, y, width, height, repaint);
-  }
-
-  int SetWindowRgn(HRGN region, BOOL redraw) {
-    DCHECK(::IsWindow(GetNativeView()));
-    return ::SetWindowRgn(GetNativeView(), region, redraw);
-  }
-
-  BOOL GetClientRect(RECT* rect) const {
-    DCHECK(::IsWindow(GetNativeView()));
-    return ::GetClientRect(GetNativeView(), rect);
-  }
-
-  // Overridden from ui::CompositorDelegate:
-  virtual void ScheduleDraw();
+  void SetCanUpdateLayeredWindow(bool can_update);
 
   // Overridden from internal::NativeWidgetPrivate:
   virtual void InitNativeWidget(const Widget::InitParams& params) OVERRIDE;
   virtual NonClientFrameView* CreateNonClientFrameView() OVERRIDE;
-  virtual void UpdateFrameAfterFrameChange() OVERRIDE;
   virtual bool ShouldUseNativeFrame() const OVERRIDE;
   virtual void FrameTypeChanged() OVERRIDE;
   virtual Widget* GetWidget() OVERRIDE;
@@ -188,8 +95,7 @@ class VIEWS_EXPORT NativeWidgetWin : public ui::WindowImpl,
   virtual Widget* GetTopLevelWidget() OVERRIDE;
   virtual const ui::Compositor* GetCompositor() const OVERRIDE;
   virtual ui::Compositor* GetCompositor() OVERRIDE;
-  virtual void CalculateOffsetToAncestorWithLayer(
-      gfx::Point* offset,
+  virtual gfx::Vector2d CalculateOffsetToAncestorWithLayer(
       ui::Layer** layer_parent) OVERRIDE;
   virtual void ViewRemoved(View* view) OVERRIDE;
   virtual void SetNativeWindowProperty(const char* name, void* value) OVERRIDE;
@@ -199,28 +105,30 @@ class VIEWS_EXPORT NativeWidgetWin : public ui::WindowImpl,
   virtual void SendNativeAccessibilityEvent(
       View* view,
       ui::AccessibilityTypes::Event event_type) OVERRIDE;
-  virtual void SetMouseCapture() OVERRIDE;
-  virtual void ReleaseMouseCapture() OVERRIDE;
-  virtual bool HasMouseCapture() const OVERRIDE;
+  virtual void SetCapture() OVERRIDE;
+  virtual void ReleaseCapture() OVERRIDE;
+  virtual bool HasCapture() const OVERRIDE;
   virtual InputMethod* CreateInputMethod() OVERRIDE;
+  virtual internal::InputMethodDelegate* GetInputMethodDelegate() OVERRIDE;
   virtual void CenterWindow(const gfx::Size& size) OVERRIDE;
   virtual void GetWindowPlacement(
      gfx::Rect* bounds,
      ui::WindowShowState* show_state) const OVERRIDE;
   virtual void SetWindowTitle(const string16& title) OVERRIDE;
-  virtual void SetWindowIcons(const SkBitmap& window_icon,
-                              const SkBitmap& app_icon) OVERRIDE;
+  virtual void SetWindowIcons(const gfx::ImageSkia& window_icon,
+                              const gfx::ImageSkia& app_icon) OVERRIDE;
   virtual void SetAccessibleName(const string16& name) OVERRIDE;
   virtual void SetAccessibleRole(ui::AccessibilityTypes::Role role) OVERRIDE;
   virtual void SetAccessibleState(ui::AccessibilityTypes::State state) OVERRIDE;
   virtual void InitModalType(ui::ModalType modal_type) OVERRIDE;
-  virtual gfx::Rect GetWindowScreenBounds() const OVERRIDE;
-  virtual gfx::Rect GetClientAreaScreenBounds() const OVERRIDE;
+  virtual gfx::Rect GetWindowBoundsInScreen() const OVERRIDE;
+  virtual gfx::Rect GetClientAreaBoundsInScreen() const OVERRIDE;
   virtual gfx::Rect GetRestoredBounds() const OVERRIDE;
   virtual void SetBounds(const gfx::Rect& bounds) OVERRIDE;
   virtual void SetSize(const gfx::Size& size) OVERRIDE;
   virtual void StackAbove(gfx::NativeView native_view) OVERRIDE;
   virtual void StackAtTop() OVERRIDE;
+  virtual void StackBelow(gfx::NativeView native_view) OVERRIDE;
   virtual void SetShape(gfx::NativeRegion shape) OVERRIDE;
   virtual void Close() OVERRIDE;
   virtual void CloseNow() OVERRIDE;
@@ -243,216 +151,107 @@ class VIEWS_EXPORT NativeWidgetWin : public ui::WindowImpl,
   virtual bool IsFullscreen() const OVERRIDE;
   virtual void SetOpacity(unsigned char opacity) OVERRIDE;
   virtual void SetUseDragFrame(bool use_drag_frame) OVERRIDE;
+  virtual void FlashFrame(bool flash) OVERRIDE;
   virtual bool IsAccessibleWidget() const OVERRIDE;
   virtual void RunShellDrag(View* view,
                             const ui::OSExchangeData& data,
-                            int operation) OVERRIDE;
+                            const gfx::Point& location,
+                            int operation,
+                            ui::DragDropTypes::DragEventSource source) OVERRIDE;
   virtual void SchedulePaintInRect(const gfx::Rect& rect) OVERRIDE;
   virtual void SetCursor(gfx::NativeCursor cursor) OVERRIDE;
   virtual void ClearNativeFocus() OVERRIDE;
-  virtual void FocusNativeView(gfx::NativeView native_view) OVERRIDE;
   virtual gfx::Rect GetWorkAreaBoundsInScreen() const OVERRIDE;
   virtual void SetInactiveRenderingDisabled(bool value) OVERRIDE;
-  virtual Widget::MoveLoopResult RunMoveLoop() OVERRIDE;
+  virtual Widget::MoveLoopResult RunMoveLoop(
+      const gfx::Vector2d& drag_offset) OVERRIDE;
   virtual void EndMoveLoop() OVERRIDE;
   virtual void SetVisibilityChangedAnimationsEnabled(bool value) OVERRIDE;
+  virtual ui::NativeTheme* GetNativeTheme() const OVERRIDE;
 
  protected:
-  // Information saved before going into fullscreen mode, used to restore the
-  // window afterwards.
-  struct SavedWindowInfo {
-    bool maximized;
-    LONG style;
-    LONG ex_style;
-    RECT window_rect;
-  };
-
-  // Overridden from MessageLoop::Observer:
-  virtual base::EventStatus WillProcessEvent(
-      const base::NativeEvent& event) OVERRIDE;
-  virtual void DidProcessEvent(const base::NativeEvent& event) OVERRIDE;
-
-  // Overridden from WindowImpl:
-  virtual HICON GetDefaultWindowIcon() const OVERRIDE;
-  virtual LRESULT OnWndProc(UINT message,
-                            WPARAM w_param,
-                            LPARAM l_param) OVERRIDE;
-
-  // Message Handlers ----------------------------------------------------------
-
-  BEGIN_MSG_MAP_EX(NativeWidgetWin)
-    // Range handlers must go first!
-    MESSAGE_RANGE_HANDLER_EX(WM_MOUSEFIRST, WM_MOUSELAST, OnMouseRange)
-    MESSAGE_RANGE_HANDLER_EX(WM_NCMOUSEMOVE, WM_NCXBUTTONDBLCLK, OnMouseRange)
-
-    // Reflected message handler
-    MESSAGE_HANDLER_EX(base::win::kReflectedMessage, OnReflectedMessage)
-
-    // CustomFrameWindow hacks
-    MESSAGE_HANDLER_EX(WM_NCUAHDRAWCAPTION, OnNCUAHDrawCaption)
-    MESSAGE_HANDLER_EX(WM_NCUAHDRAWFRAME, OnNCUAHDrawFrame)
-
-    // Vista and newer
-    MESSAGE_HANDLER_EX(WM_DWMCOMPOSITIONCHANGED, OnDwmCompositionChanged)
-
-    // Non-atlcrack.h handlers
-    MESSAGE_HANDLER_EX(WM_GETOBJECT, OnGetObject)
-
-    // Mouse events.
-    MESSAGE_HANDLER_EX(WM_MOUSEACTIVATE, OnMouseActivate)
-    MESSAGE_HANDLER_EX(WM_MOUSELEAVE, OnMouseRange)
-    MESSAGE_HANDLER_EX(WM_NCMOUSELEAVE, OnMouseRange)
-    MESSAGE_HANDLER_EX(WM_SETCURSOR, OnSetCursor);
-
-    // Key events.
-    MESSAGE_HANDLER_EX(WM_KEYDOWN, OnKeyEvent)
-    MESSAGE_HANDLER_EX(WM_KEYUP, OnKeyEvent)
-    MESSAGE_HANDLER_EX(WM_SYSKEYDOWN, OnKeyEvent)
-    MESSAGE_HANDLER_EX(WM_SYSKEYUP, OnKeyEvent)
-
-    // IME Events.
-    MESSAGE_HANDLER_EX(WM_IME_SETCONTEXT, OnImeMessages)
-    MESSAGE_HANDLER_EX(WM_IME_STARTCOMPOSITION, OnImeMessages)
-    MESSAGE_HANDLER_EX(WM_IME_COMPOSITION, OnImeMessages)
-    MESSAGE_HANDLER_EX(WM_IME_ENDCOMPOSITION, OnImeMessages)
-    MESSAGE_HANDLER_EX(WM_IME_REQUEST, OnImeMessages)
-    MESSAGE_HANDLER_EX(WM_CHAR, OnImeMessages)
-    MESSAGE_HANDLER_EX(WM_SYSCHAR, OnImeMessages)
-    MESSAGE_HANDLER_EX(WM_DEADCHAR, OnImeMessages)
-    MESSAGE_HANDLER_EX(WM_SYSDEADCHAR, OnImeMessages)
-
-    // This list is in _ALPHABETICAL_ order! OR I WILL HURT YOU.
-    MSG_WM_ACTIVATE(OnActivate)
-    MSG_WM_ACTIVATEAPP(OnActivateApp)
-    MSG_WM_APPCOMMAND(OnAppCommand)
-    MSG_WM_CANCELMODE(OnCancelMode)
-    MSG_WM_CAPTURECHANGED(OnCaptureChanged)
-    MSG_WM_CLOSE(OnClose)
-    MSG_WM_COMMAND(OnCommand)
-    MSG_WM_CREATE(OnCreate)
-    MSG_WM_DESTROY(OnDestroy)
-    MSG_WM_DISPLAYCHANGE(OnDisplayChange)
-    MSG_WM_ERASEBKGND(OnEraseBkgnd)
-    MSG_WM_ENDSESSION(OnEndSession)
-    MSG_WM_ENTERSIZEMOVE(OnEnterSizeMove)
-    MSG_WM_EXITMENULOOP(OnExitMenuLoop)
-    MSG_WM_EXITSIZEMOVE(OnExitSizeMove)
-    MSG_WM_GETMINMAXINFO(OnGetMinMaxInfo)
-    MSG_WM_HSCROLL(OnHScroll)
-    MSG_WM_INITMENU(OnInitMenu)
-    MSG_WM_INITMENUPOPUP(OnInitMenuPopup)
-    MSG_WM_INPUTLANGCHANGE(OnInputLangChange)
-    MSG_WM_KILLFOCUS(OnKillFocus)
-    MSG_WM_MOVE(OnMove)
-    MSG_WM_MOVING(OnMoving)
-    MSG_WM_NCACTIVATE(OnNCActivate)
-    MSG_WM_NCCALCSIZE(OnNCCalcSize)
-    MSG_WM_NCHITTEST(OnNCHitTest)
-    MSG_WM_NCPAINT(OnNCPaint)
-    MSG_WM_NOTIFY(OnNotify)
-    MSG_WM_PAINT(OnPaint)
-    MSG_WM_POWERBROADCAST(OnPowerBroadcast)
-    MSG_WM_SETFOCUS(OnSetFocus)
-    MSG_WM_SETTEXT(OnSetText)
-    MSG_WM_SETTINGCHANGE(OnSettingChange)
-    MSG_WM_SIZE(OnSize)
-    MSG_WM_SYSCOMMAND(OnSysCommand)
-    MSG_WM_THEMECHANGED(OnThemeChanged)
-    MSG_WM_VSCROLL(OnVScroll)
-    MSG_WM_WINDOWPOSCHANGING(OnWindowPosChanging)
-    MSG_WM_WINDOWPOSCHANGED(OnWindowPosChanged)
-  END_MSG_MAP()
-
-  // These are all virtual so that specialized Widgets can modify or augment
-  // processing.
-  // This list is in _ALPHABETICAL_ order!
-  // Note: in the base class these functions must do nothing but convert point
-  //       coordinates to client coordinates (if necessary) and forward the
-  //       handling to the appropriate Process* function. This is so that
-  //       subclasses can easily override these methods to do different things
-  //       and have a convenient function to call to get the default behavior.
-  virtual void OnActivate(UINT action, BOOL minimized, HWND window);
-  virtual void OnActivateApp(BOOL active, DWORD thread_id);
-  virtual LRESULT OnAppCommand(HWND window, short app_command, WORD device,
-                               int keystate);
-  virtual void OnCancelMode();
-  virtual void OnCaptureChanged(HWND hwnd);
-  virtual void OnClose();
-  virtual void OnCommand(UINT notification_code, int command_id, HWND window);
-  virtual LRESULT OnCreate(CREATESTRUCT* create_struct);
-  // WARNING: If you override this be sure and invoke super, otherwise we'll
-  // leak a few things.
-  virtual void OnDestroy();
-  virtual void OnDisplayChange(UINT bits_per_pixel, CSize screen_size);
-  virtual LRESULT OnDwmCompositionChanged(UINT msg,
-                                          WPARAM w_param,
-                                          LPARAM l_param);
-  virtual void OnEndSession(BOOL ending, UINT logoff);
-  virtual void OnEnterSizeMove();
-  virtual LRESULT OnEraseBkgnd(HDC dc);
-  virtual void OnExitMenuLoop(BOOL is_track_popup_menu);
-  virtual void OnExitSizeMove();
-  virtual LRESULT OnGetObject(UINT uMsg, WPARAM w_param, LPARAM l_param);
-  virtual void OnGetMinMaxInfo(MINMAXINFO* minmax_info);
-  virtual void OnHScroll(int scroll_type, short position, HWND scrollbar);
-  virtual LRESULT OnImeMessages(UINT message, WPARAM w_param, LPARAM l_param);
-  virtual void OnInitMenu(HMENU menu);
-  virtual void OnInitMenuPopup(HMENU menu, UINT position, BOOL is_system_menu);
-  virtual void OnInputLangChange(DWORD character_set, HKL input_language_id);
-  virtual LRESULT OnKeyEvent(UINT message, WPARAM w_param, LPARAM l_param);
-  virtual void OnKillFocus(HWND focused_window);
-  virtual LRESULT OnMouseActivate(UINT message, WPARAM w_param, LPARAM l_param);
-  virtual LRESULT OnMouseRange(UINT message, WPARAM w_param, LPARAM l_param);
-  virtual void OnMove(const CPoint& point);
-  virtual void OnMoving(UINT param, LPRECT new_bounds);
-  virtual LRESULT OnNCActivate(BOOL active);
-  virtual LRESULT OnNCCalcSize(BOOL w_param, LPARAM l_param);
-  virtual LRESULT OnNCHitTest(const CPoint& pt);
-  virtual void OnNCPaint(HRGN rgn);
-  virtual LRESULT OnNCUAHDrawCaption(UINT msg,
-                                     WPARAM w_param,
-                                     LPARAM l_param);
-  virtual LRESULT OnNCUAHDrawFrame(UINT msg, WPARAM w_param, LPARAM l_param);
-  virtual LRESULT OnNotify(int w_param, NMHDR* l_param);
-  virtual void OnPaint(HDC dc);
-  virtual LRESULT OnPowerBroadcast(DWORD power_event, DWORD data);
-  virtual LRESULT OnReflectedMessage(UINT msg, WPARAM w_param, LPARAM l_param);
-  virtual LRESULT OnSetCursor(UINT message, WPARAM w_param, LPARAM l_param);
-  virtual void OnSetFocus(HWND focused_window);
-  virtual LRESULT OnSetText(const wchar_t* text);
-  virtual void OnSettingChange(UINT flags, const wchar_t* section);
-  virtual void OnSize(UINT param, const CSize& size);
-  virtual void OnSysCommand(UINT notification_code, CPoint click);
-  virtual void OnThemeChanged();
-  virtual void OnVScroll(int scroll_type, short position, HWND scrollbar);
-  virtual void OnWindowPosChanging(WINDOWPOS* window_pos);
-  virtual void OnWindowPosChanged(WINDOWPOS* window_pos);
-
   // Deletes this window as it is destroyed, override to provide different
   // behavior.
   virtual void OnFinalMessage(HWND window);
 
-  // Retrieve the show state of the window. This is one of the SW_SHOW* flags
-  // passed into Windows' ShowWindow method. For normal windows this defaults
-  // to SW_SHOWNORMAL, however windows (e.g. the main window) can override this
-  // method to provide different values (e.g. retrieve the user's specified
-  // show state from the shortcut starutp info).
-  virtual int GetShowState() const;
-
-  // Returns the insets of the client area relative to the non-client area of
-  // the window. Override this function instead of OnNCCalcSize, which is
-  // crazily complicated.
-  virtual gfx::Insets GetClientAreaInsets() const;
-
-  // Start tracking all mouse events so that this window gets sent mouse leave
-  // messages too.
-  void TrackMouseEvents(DWORD mouse_tracking_flags);
-
   // Called when a MSAA screen reader client is detected.
   virtual void OnScreenReaderDetected();
 
-  // Executes the specified SC_command.
-  void ExecuteSystemMenuCommand(int command);
+  HWNDMessageHandler* GetMessageHandler();
+
+  // Overridden from HWNDMessageHandlerDelegate:
+  virtual bool IsWidgetWindow() const OVERRIDE;
+  virtual bool IsUsingCustomFrame() const OVERRIDE;
+  virtual void SchedulePaint() OVERRIDE;
+  virtual void EnableInactiveRendering() OVERRIDE;
+  virtual bool IsInactiveRenderingDisabled() OVERRIDE;
+  virtual bool CanResize() const OVERRIDE;
+  virtual bool CanMaximize() const OVERRIDE;
+  virtual bool CanActivate() const OVERRIDE;
+  virtual bool WidgetSizeIsClientSize() const OVERRIDE;
+  virtual bool CanSaveFocus() const OVERRIDE;
+  virtual void SaveFocusOnDeactivate() OVERRIDE;
+  virtual void RestoreFocusOnActivate() OVERRIDE;
+  virtual void RestoreFocusOnEnable() OVERRIDE;
+  virtual bool IsModal() const OVERRIDE;
+  virtual int GetInitialShowState() const OVERRIDE;
+  virtual bool WillProcessWorkAreaChange() const OVERRIDE;
+  virtual int GetNonClientComponent(const gfx::Point& point) const OVERRIDE;
+  virtual void GetWindowMask(const gfx::Size& size, gfx::Path* path) OVERRIDE;
+  virtual bool GetClientAreaInsets(gfx::Insets* insets) const OVERRIDE;
+  virtual void GetMinMaxSize(gfx::Size* min_size,
+                             gfx::Size* max_size) const OVERRIDE;
+  virtual gfx::Size GetRootViewSize() const OVERRIDE;
+  virtual void ResetWindowControls() OVERRIDE;
+  virtual void PaintLayeredWindow(gfx::Canvas* canvas) OVERRIDE;
+  virtual gfx::NativeViewAccessible GetNativeViewAccessible() OVERRIDE;
+  virtual InputMethod* GetInputMethod() OVERRIDE;
+  virtual void HandleAppDeactivated() OVERRIDE;
+  virtual void HandleActivationChanged(bool active) OVERRIDE;
+  virtual bool HandleAppCommand(short command) OVERRIDE;
+  virtual void HandleCaptureLost() OVERRIDE;
+  virtual void HandleClose() OVERRIDE;
+  virtual bool HandleCommand(int command) OVERRIDE;
+  virtual void HandleAccelerator(const ui::Accelerator& accelerator) OVERRIDE;
+  virtual void HandleCreate() OVERRIDE;
+  virtual void HandleDestroying() OVERRIDE;
+  virtual void HandleDestroyed() OVERRIDE;
+  virtual bool HandleInitialFocus() OVERRIDE;
+  virtual void HandleDisplayChange() OVERRIDE;
+  virtual void HandleBeginWMSizeMove() OVERRIDE;
+  virtual void HandleEndWMSizeMove() OVERRIDE;
+  virtual void HandleMove() OVERRIDE;
+  virtual void HandleWorkAreaChanged() OVERRIDE;
+  virtual void HandleVisibilityChanged(bool visible) OVERRIDE;
+  virtual void HandleClientSizeChanged(const gfx::Size& new_size) OVERRIDE;
+  virtual void HandleFrameChanged() OVERRIDE;
+  virtual void HandleNativeFocus(HWND last_focused_window) OVERRIDE;
+  virtual void HandleNativeBlur(HWND focused_window) OVERRIDE;
+  virtual bool HandleMouseEvent(const ui::MouseEvent& event) OVERRIDE;
+  virtual bool HandleKeyEvent(const ui::KeyEvent& event) OVERRIDE;
+  virtual bool HandleUntranslatedKeyEvent(const ui::KeyEvent& event) OVERRIDE;
+  virtual bool HandleIMEMessage(UINT message,
+                                WPARAM w_param,
+                                LPARAM l_param,
+                                LRESULT* result) OVERRIDE;
+  virtual void HandleInputLanguageChange(DWORD character_set,
+                                         HKL input_language_id) OVERRIDE;
+  virtual bool HandlePaintAccelerated(const gfx::Rect& invalid_rect) OVERRIDE;
+  virtual void HandlePaint(gfx::Canvas* canvas) OVERRIDE;
+  virtual void HandleScreenReaderDetected() OVERRIDE;
+  virtual bool HandleTooltipNotify(int w_param,
+                                   NMHDR* l_param,
+                                   LRESULT* l_result) OVERRIDE;
+  virtual void HandleTooltipMouseMove(UINT message,
+                                      WPARAM w_param,
+                                      LPARAM l_param) OVERRIDE;
+  virtual bool PreHandleMSG(UINT message,
+                            WPARAM w_param,
+                            LPARAM l_param,
+                            LRESULT* result) OVERRIDE;
+  virtual void PostHandleMSG(UINT message,
+                             WPARAM w_param,
+                             LPARAM l_param) OVERRIDE;
 
   // The TooltipManager. This is NULL if there is a problem creating the
   // underlying tooltip window.
@@ -462,118 +261,17 @@ class VIEWS_EXPORT NativeWidgetWin : public ui::WindowImpl,
 
   scoped_refptr<DropTargetWin> drop_target_;
 
-  const gfx::Rect& invalid_rect() const { return invalid_rect_; }
-
-  // Saved window information from before entering fullscreen mode.
-  // TODO(beng): move to private once GetRestoredBounds() moves onto Widget.
-  SavedWindowInfo saved_window_info_;
-
  private:
   typedef ScopedVector<ui::ViewProp> ViewProps;
 
-  // Called after the WM_ACTIVATE message has been processed by the default
-  // windows procedure.
-  static void PostProcessActivateMessage(NativeWidgetWin* widget,
-                                         int activation_state);
-
   void SetInitParams(const Widget::InitParams& params);
-
-  // Synchronously paints the invalid contents of the Widget.
-  void RedrawInvalidRect();
-
-  // Synchronously updates the invalid contents of the Widget. Valid for
-  // layered windows only.
-  void RedrawLayeredWindowContents();
-
-  // Lock or unlock the window from being able to redraw itself in response to
-  // updates to its invalid region.
-  class ScopedRedrawLock;
-  void LockUpdates();
-  void UnlockUpdates();
-
-  // Determines whether the delegate expects the client size or the window size.
-  bool WidgetSizeIsClientSize() const;
-
-  // Responds to the client area changing size, either at window creation time
-  // or subsequently.
-  void ClientAreaSizeChanged();
-
-  // Resets the window region for the current widget bounds if necessary.
-  // If |force| is true, the window region is reset to NULL even for native
-  // frame windows.
-  void ResetWindowRegion(bool force);
-
-  // Calls DefWindowProc, safely wrapping the call in a ScopedRedrawLock to
-  // prevent frame flicker. DefWindowProc handling can otherwise render the
-  // classic-look window title bar directly.
-  LRESULT DefWindowProcWithRedrawLock(UINT message,
-                                      WPARAM w_param,
-                                      LPARAM l_param);
-
-  // Stops ignoring SetWindowPos() requests (see below).
-  void StopIgnoringPosChanges() { ignore_window_pos_changes_ = false; }
-
-  void RestoreEnabledIfNecessary();
-
-  void SetInitialFocus();
-
-  // Overridden from internal::InputMethodDelegate
-  virtual void DispatchKeyEventPostIME(const KeyEvent& key) OVERRIDE;
 
   // A delegate implementation that handles events received here.
   // See class documentation for Widget in widget.h for a note about ownership.
   internal::NativeWidgetDelegate* delegate_;
 
-  // The following factory is used for calls to close the NativeWidgetWin
-  // instance.
-  base::WeakPtrFactory<NativeWidgetWin> close_widget_factory_;
-
-  // The flags currently being used with TrackMouseEvent to track mouse
-  // messages. 0 if there is no active tracking. The value of this member is
-  // used when tracking is canceled.
-  DWORD active_mouse_tracking_flags_;
-
-  // Should we keep an off-screen buffer? This is false by default, set to true
-  // when WS_EX_LAYERED is specified before the native window is created.
-  //
-  // NOTE: this is intended to be used with a layered window (a window with an
-  // extended window style of WS_EX_LAYERED). If you are using a layered window
-  // and NOT changing the layered alpha or anything else, then leave this value
-  // alone. OTOH if you are invoking SetLayeredWindowAttributes then you'll
-  // most likely want to set this to false, or after changing the alpha toggle
-  // the extended style bit to false than back to true. See MSDN for more
-  // details.
-  bool use_layered_buffer_;
-
-  // The default alpha to be applied to the layered window.
-  BYTE layered_alpha_;
-
-  // A canvas that contains the window contents in the case of a layered
-  // window.
-  scoped_ptr<gfx::CanvasSkia> layered_window_contents_;
-
-  // We must track the invalid rect ourselves, for two reasons:
-  // For layered windows, Windows will not do this properly with
-  // InvalidateRect()/GetUpdateRect(). (In fact, it'll return misleading
-  // information from GetUpdateRect()).
-  // We also need to keep track of the invalid rectangle for the RootView should
-  // we need to paint the non-client area. The data supplied to WM_NCPAINT seems
-  // to be insufficient.
-  gfx::Rect invalid_rect_;
-
-  // A factory that allows us to schedule a redraw for layered windows.
-  base::WeakPtrFactory<NativeWidgetWin> paint_layered_window_factory_;
-
   // See class documentation for Widget in widget.h for a note about ownership.
   Widget::InitParams::Ownership ownership_;
-
-  // True if we are allowed to update the layered window from the DIB backing
-  // store if necessary.
-  bool can_update_layered_window_;
-
-  // Whether the focus should be restored next time we get enabled.  Needed to
-  // restore focus correctly when Windows modal dialogs are displayed.
-  bool restore_focus_when_enabled_;
 
   // Instance of accessibility information and handling for MSAA root
   base::win::ScopedComPtr<IAccessible> accessibility_root_;
@@ -592,66 +290,18 @@ class VIEWS_EXPORT NativeWidgetWin : public ui::WindowImpl,
   // we always mod this value with the max view events above .
   int accessibility_view_events_index_;
 
-  // The last cursor that was active before the current one was selected. Saved
-  // so that we can restore it.
-  gfx::NativeCursor previous_cursor_;
-
   ViewProps props_;
-
-  // True if we're in fullscreen mode.
-  bool fullscreen_;
-
-  // If this is greater than zero, we should prevent attempts to make the window
-  // visible when we handle WM_WINDOWPOSCHANGING. Some calls like
-  // ShowWindow(SW_RESTORE) make the window visible in addition to restoring it,
-  // when all we want to do is restore it.
-  int force_hidden_count_;
 
   // The window styles before we modified them for the drag frame appearance.
   DWORD drag_frame_saved_window_style_;
   DWORD drag_frame_saved_window_ex_style_;
 
-  // Represents the number of ScopedRedrawLocks active against this widget.
-  // If this is greater than zero, the widget should be locked against updates.
-  int lock_updates_count_;
-
-  // The window styles of the window before updates were locked.
-  DWORD saved_window_style_;
-
-  // When true, this flag makes us discard incoming SetWindowPos() requests that
-  // only change our position/size.  (We still allow changes to Z-order,
-  // activation, etc.)
-  bool ignore_window_pos_changes_;
-
-  // The following factory is used to ignore SetWindowPos() calls for short time
-  // periods.
-  base::WeakPtrFactory<NativeWidgetWin> ignore_pos_changes_factory_;
-
-  // The last-seen monitor containing us, and its rect and work area.  These are
-  // used to catch updates to the rect and work area and react accordingly.
-  HMONITOR last_monitor_;
-  gfx::Rect last_monitor_rect_, last_work_area_;
-
-  // Set to true when the user presses the right mouse button on the caption
-  // area. We need this so we can correctly show the context menu on mouse-up.
-  bool is_right_mouse_pressed_on_caption_;
-
-  // Whether all ancestors have been enabled. This is only used if is_modal_ is
-  // true.
-  bool restored_enabled_;
-
-  // The compositor for accelerated drawing.
-  scoped_refptr<ui::Compositor> compositor_;
-
-  // This flag can be initialized and checked after certain operations (such as
-  // DefWindowProc) to avoid stack-controlled NativeWidgetWin operations (such
-  // as unlocking the Window with a ScopedRedrawLock) after Widget destruction.
-  bool* destroyed_;
-
   // True if the widget is going to have a non_client_view. We cache this value
   // rather than asking the Widget for the non_client_view so that we know at
   // Init time, before the Widget has created the NonClientView.
   bool has_non_client_view_;
+
+  scoped_ptr<HWNDMessageHandler> message_handler_;
 
   DISALLOW_COPY_AND_ASSIGN(NativeWidgetWin);
 };

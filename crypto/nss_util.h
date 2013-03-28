@@ -4,7 +4,6 @@
 
 #ifndef CRYPTO_NSS_UTIL_H_
 #define CRYPTO_NSS_UTIL_H_
-#pragma once
 
 #include <string>
 #include "base/basictypes.h"
@@ -37,6 +36,17 @@ CRYPTO_EXPORT void EarlySetupForNSSInit();
 // thread-safe, and NSPR will only ever be initialized once.
 CRYPTO_EXPORT void EnsureNSPRInit();
 
+// Initialize NSS safely for strict sandboxing.  This function tells NSS to not
+// load user security modules, and makes sure NSS will have proper entropy in a
+// restricted, sandboxed environment.
+//
+// As a defense in depth measure, this function should be called in a sandboxed
+// environment.  That way, in the event of a bug, NSS will still not be able to
+// load security modules that could expose private data and keys.
+//
+// Make sure to get an LGTM from the Chrome Security Team if you use this.
+CRYPTO_EXPORT void InitNSSSafely();
+
 // Initialize NSS if it isn't already initialized.  This must be called before
 // any other NSS functions.  This function is thread-safe, and NSS will only
 // ever be initialized once.
@@ -59,7 +69,7 @@ CRYPTO_EXPORT void EnsureNSSInit();
 // WARNING: Use this with caution.
 CRYPTO_EXPORT void ForceNSSNoDBInit();
 
-// This methods is used to disable checks in NSS when used in a forked process.
+// This method is used to disable checks in NSS when used in a forked process.
 // NSS checks whether it is running a forked process to avoid problems when
 // using user security modules in a forked process.  However if we are sure
 // there are no modules loaded before the process is forked then there is no
@@ -89,33 +99,10 @@ bool CheckNSSVersion(const char* version);
 // GetPublicNSSKeySlot().
 CRYPTO_EXPORT void OpenPersistentNSSDB();
 
-// A delegate class that we can use to access the cros API for
-// communication with cryptohomed and the TPM.
-class CRYPTO_EXPORT TPMTokenInfoDelegate {
- public:
-  TPMTokenInfoDelegate();
-  virtual ~TPMTokenInfoDelegate();
-
-  // Returns true if the hardware supports a TPM Token and the TPM is enabled.
-  virtual bool IsTokenAvailable() const = 0;
-
-  // Returns true if the TPM and PKCS#11 token slot is ready to be used.
-  // If IsTokenAvailable() is false this should return false.
-  // If IsTokenAvailable() is true, this should eventually return true.
-  virtual bool IsTokenReady() const = 0;
-
-  // Fetches token properties. TODO(stevenjb): make this interface asynchronous
-  // so that the implementation does not have to be blocking.
-  virtual void GetTokenInfo(std::string* token_name,
-                            std::string* user_pin) const = 0;
-};
-
 // Indicates that NSS should load the Chaps library so that we
 // can access the TPM through NSS.  Once this is called,
 // GetPrivateNSSKeySlot() will return the TPM slot if one was found.
-// Takes ownership of the passed-in delegate object so it can access
-// the cros library to talk to cryptohomed.
-CRYPTO_EXPORT void EnableTPMTokenForNSS(TPMTokenInfoDelegate* delegate);
+CRYPTO_EXPORT void EnableTPMTokenForNSS();
 
 // Get name and user PIN for the built-in TPM token on ChromeOS.
 // Either one can safely be NULL.  Should only be called after
@@ -123,18 +110,15 @@ CRYPTO_EXPORT void EnableTPMTokenForNSS(TPMTokenInfoDelegate* delegate);
 CRYPTO_EXPORT void GetTPMTokenInfo(std::string* token_name,
                                    std::string* user_pin);
 
-// Returns true if the machine has a TPM and it can be used to store tokens.
-CRYPTO_EXPORT bool IsTPMTokenAvailable();
-
 // Returns true if the TPM is owned and PKCS#11 initialized with the
 // user and security officer PINs, and has been enabled in NSS by
 // calling EnableTPMForNSS, and Chaps has been successfully
 // loaded into NSS.
 CRYPTO_EXPORT bool IsTPMTokenReady();
 
-// Same as IsTPMTokenReady() except this attempts to initialize the token
-// if necessary.
-CRYPTO_EXPORT bool EnsureTPMTokenReady();
+// Initialize the TPM token.  Does nothing if it is already initialized.
+CRYPTO_EXPORT bool InitializeTPMToken(const std::string& token_name,
+                                      const std::string& user_pin);
 
 // Gets supplemental user key. Creates one in NSS database if it does not exist.
 // The supplemental user key is used for AES encryption of user data that is
@@ -155,11 +139,21 @@ CRYPTO_EXPORT int64 BaseTimeToPRTime(base::Time time);
 
 #if defined(USE_NSS)
 // Exposed for unittests only.
-// TODO(mattm): when https://bugzilla.mozilla.org/show_bug.cgi?id=588269 is
-// fixed, switch back to using a separate userdb for each test.  (Maybe refactor
-// to provide a ScopedTestNSSDB instead of open/close methods.)
-CRYPTO_EXPORT bool OpenTestNSSDB();
-// NOTE: due to NSS bug 588269, mentioned above, there is no CloseTestNSSDB.
+// TODO(mattm): When NSS 3.14 is the minimum version required,
+// switch back to using a separate user DB for each test.
+// Because of https://bugzilla.mozilla.org/show_bug.cgi?id=588269 , the
+// opened user DB is not automatically closed.
+class CRYPTO_EXPORT_PRIVATE ScopedTestNSSDB {
+ public:
+  ScopedTestNSSDB();
+  ~ScopedTestNSSDB();
+
+  bool is_open() { return is_open_; }
+
+ private:
+  bool is_open_;
+  DISALLOW_COPY_AND_ASSIGN(ScopedTestNSSDB);
+};
 
 // NSS has a bug which can cause a deadlock or stall in some cases when writing
 // to the certDB and keyDB. It also has a bug which causes concurrent key pair

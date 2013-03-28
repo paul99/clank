@@ -32,6 +32,7 @@
 
 #include "v8.h"
 
+#include "codegen.h"
 #include "platform.h"
 #include "vm-state-inl.h"
 
@@ -50,6 +51,22 @@ int strncasecmp(const char* s1, const char* s2, int n) {
 // the Microsoft Visual Studio C++ CRT.
 #ifdef __MINGW32__
 
+
+#ifndef __MINGW64_VERSION_MAJOR
+
+#define _TRUNCATE 0
+#define STRUNCATE 80
+
+inline void MemoryBarrier() {
+  int barrier = 0;
+  __asm__ __volatile__("xchgl %%eax,%0 ":"=r" (barrier));
+}
+
+#endif  // __MINGW64_VERSION_MAJOR
+
+
+#ifndef MINGW_HAS_SECURE_API
+
 int localtime_s(tm* out_tm, const time_t* time) {
   tm* posix_local_time_struct = localtime(time);
   if (posix_local_time_struct == NULL) return 1;
@@ -58,20 +75,10 @@ int localtime_s(tm* out_tm, const time_t* time) {
 }
 
 
-// Not sure this the correct interpretation of _mkgmtime
-time_t _mkgmtime(tm* timeptr) {
-  return mktime(timeptr);
-}
-
-
 int fopen_s(FILE** pFile, const char* filename, const char* mode) {
   *pFile = fopen(filename, mode);
   return *pFile != NULL ? 0 : 1;
 }
-
-
-#define _TRUNCATE 0
-#define STRUNCATE 80
 
 int _vsnprintf_s(char* buffer, size_t sizeOfBuffer, size_t count,
                  const char* format, va_list argptr) {
@@ -106,11 +113,7 @@ int strncpy_s(char* dest, size_t dest_size, const char* source, size_t count) {
   return 0;
 }
 
-
-inline void MemoryBarrier() {
-  int barrier = 0;
-  __asm__ __volatile__("xchgl %%eax,%0 ":"=r" (barrier));
-}
+#endif  // MINGW_HAS_SECURE_API
 
 #endif  // __MINGW32__
 
@@ -138,20 +141,11 @@ static Mutex* limit_mutex = NULL;
 
 #if defined(V8_TARGET_ARCH_IA32)
 static OS::MemCopyFunction memcopy_function = NULL;
-static Mutex* memcopy_function_mutex = OS::CreateMutex();
 // Defined in codegen-ia32.cc.
 OS::MemCopyFunction CreateMemCopyFunction();
 
 // Copy memory area to disjoint memory area.
 void OS::MemCopy(void* dest, const void* src, size_t size) {
-  if (memcopy_function == NULL) {
-    ScopedLock lock(memcopy_function_mutex);
-    if (memcopy_function == NULL) {
-      OS::MemCopyFunction temp = CreateMemCopyFunction();
-      MemoryBarrier();
-      memcopy_function = temp;
-    }
-  }
   // Note: here we rely on dependent reads being ordered. This is true
   // on all architectures we currently support.
   (*memcopy_function)(dest, src, size);
@@ -164,19 +158,14 @@ void OS::MemCopy(void* dest, const void* src, size_t size) {
 #ifdef _WIN64
 typedef double (*ModuloFunction)(double, double);
 static ModuloFunction modulo_function = NULL;
-static Mutex* modulo_function_mutex = OS::CreateMutex();
 // Defined in codegen-x64.cc.
 ModuloFunction CreateModuloFunction();
 
+void init_modulo_function() {
+  modulo_function = CreateModuloFunction();
+}
+
 double modulo(double x, double y) {
-  if (modulo_function == NULL) {
-    ScopedLock lock(modulo_function_mutex);
-    if (modulo_function == NULL) {
-      ModuloFunction temp = CreateModuloFunction();
-      MemoryBarrier();
-      modulo_function = temp;
-    }
-  }
   // Note: here we rely on dependent reads being ordered. This is true
   // on all architectures we currently support.
   return (*modulo_function)(x, y);
@@ -195,6 +184,46 @@ double modulo(double x, double y) {
 }
 
 #endif  // _WIN64
+
+
+#define UNARY_MATH_FUNCTION(name, generator)             \
+static UnaryMathFunction fast_##name##_function = NULL;  \
+void init_fast_##name##_function() {                     \
+  fast_##name##_function = generator;                    \
+}                                                        \
+double fast_##name(double x) {                           \
+  return (*fast_##name##_function)(x);                   \
+}
+
+UNARY_MATH_FUNCTION(sin, CreateTranscendentalFunction(TranscendentalCache::SIN))
+UNARY_MATH_FUNCTION(cos, CreateTranscendentalFunction(TranscendentalCache::COS))
+UNARY_MATH_FUNCTION(tan, CreateTranscendentalFunction(TranscendentalCache::TAN))
+UNARY_MATH_FUNCTION(log, CreateTranscendentalFunction(TranscendentalCache::LOG))
+UNARY_MATH_FUNCTION(exp, CreateExpFunction())
+UNARY_MATH_FUNCTION(sqrt, CreateSqrtFunction())
+
+#undef MATH_FUNCTION
+
+
+void lazily_initialize_fast_exp() {
+  if (fast_exp_function == NULL) {
+    init_fast_exp_function();
+  }
+}
+
+
+void MathSetup() {
+#ifdef _WIN64
+  init_modulo_function();
+#endif
+  init_fast_sin_function();
+  init_fast_cos_function();
+  init_fast_tan_function();
+  init_fast_log_function();
+  // fast_exp is initialized lazily.
+  init_fast_sqrt_function();
+}
+
 
 // ----------------------------------------------------------------------------
 // The Time class represents time on win32. A timestamp is represented as
@@ -440,6 +469,9 @@ void Time::SetToCurrentTime() {
   // Check if we need to resync due to elapsed time.
   needs_resync |= (time_now.t_ - init_time.t_) > kMaxClockElapsedTime;
 
+  // Check if we need to resync due to backwards time change.
+  needs_resync |= time_now.t_ < init_time.t_;
+
   // Resync the clock if necessary.
   if (needs_resync) {
     GetSystemTimeAsFileTime(&init_time.ft_);
@@ -481,11 +513,14 @@ int64_t Time::LocalOffset() {
   // Convert to local time, as struct with fields for day, hour, year, etc.
   tm posix_local_time_struct;
   if (localtime_s(&posix_local_time_struct, &posix_time)) return 0;
-  // Convert local time in struct to POSIX time as if it were a UTC time.
-  time_t local_posix_time = _mkgmtime(&posix_local_time_struct);
-  Time localtime(1000.0 * local_posix_time);
 
-  return localtime.Diff(&rounded_to_second);
+  if (posix_local_time_struct.tm_isdst > 0) {
+    return (tzinfo_.Bias + tzinfo_.DaylightBias) * -kMsPerMinute;
+  } else if (posix_local_time_struct.tm_isdst == 0) {
+    return (tzinfo_.Bias + tzinfo_.StandardBias) * -kMsPerMinute;
+  } else {
+    return tzinfo_.Bias * -kMsPerMinute;
+  }
 }
 
 
@@ -528,15 +563,13 @@ char* Time::LocalTimezone() {
 }
 
 
-void OS::SetUp() {
-  // Seed the random number generator.
-  // Convert the current time to a 64-bit integer first, before converting it
-  // to an unsigned. Going directly can cause an overflow and the seed to be
-  // set to all ones. The seed will be identical for different instances that
-  // call this setup code within the same millisecond.
-  uint64_t seed = static_cast<uint64_t>(TimeCurrentMillis());
-  srand(static_cast<unsigned int>(seed));
-  limit_mutex = CreateMutex();
+void OS::PostSetUp() {
+  // Math functions depend on CPU features therefore they are initialized after
+  // CPU.
+  MathSetup();
+#if defined(V8_TARGET_ARCH_IA32)
+  memcopy_function = CreateMemCopyFunction();
+#endif
 }
 
 
@@ -600,6 +633,11 @@ double OS::DaylightSavingsOffset(double time) {
 
 int OS::GetLastError() {
   return ::GetLastError();
+}
+
+
+int OS::GetCurrentProcessId() {
+  return static_cast<int>(::GetCurrentProcessId());
 }
 
 
@@ -931,15 +969,11 @@ void OS::Sleep(int milliseconds) {
 
 
 void OS::Abort() {
-  if (!IsDebuggerPresent()) {
-#ifdef _MSC_VER
-    // Make the MSVCRT do a silent abort.
-    _set_abort_behavior(0, _WRITE_ABORT_MSG);
-    _set_abort_behavior(0, _CALL_REPORTFAULT);
-#endif  // _MSC_VER
-    abort();
-  } else {
+  if (IsDebuggerPresent() || FLAG_break_on_abort) {
     DebugBreak();
+  } else {
+    // Make the MSVCRT do a silent abort.
+    raise(SIGABRT);
   }
 }
 
@@ -1526,6 +1560,12 @@ bool VirtualMemory::ReleaseRegion(void* base, size_t size) {
 }
 
 
+bool VirtualMemory::HasLazyCommits() {
+  // TODO(alph): implement for the platform.
+  return false;
+}
+
+
 // ----------------------------------------------------------------------------
 // Win32 thread support.
 
@@ -1828,14 +1868,26 @@ bool Win32Socket::Shutdown() {
 
 
 int Win32Socket::Send(const char* data, int len) const {
-  int status = send(socket_, data, len, 0);
-  return status;
+  if (len <= 0) return 0;
+  int written = 0;
+  while (written < len) {
+    int status = send(socket_, data + written, len - written, 0);
+    if (status == 0) {
+      break;
+    } else if (status > 0) {
+      written += status;
+    } else {
+      return 0;
+    }
+  }
+  return written;
 }
 
 
 int Win32Socket::Receive(char* data, int len) const {
+  if (len <= 0) return 0;
   int status = recv(socket_, data, len, 0);
-  return status;
+  return (status == SOCKET_ERROR) ? 0 : status;
 }
 
 
@@ -1923,11 +1975,14 @@ class Sampler::PlatformData : public Malloced {
 
 class SamplerThread : public Thread {
  public:
-  static const int kSamplerThreadStackSize = 32 * KB;
+  static const int kSamplerThreadStackSize = 64 * KB;
 
   explicit SamplerThread(int interval)
       : Thread(Thread::Options("SamplerThread", kSamplerThreadStackSize)),
         interval_(interval) {}
+
+  static void SetUp() { if (!mutex_) mutex_ = OS::CreateMutex(); }
+  static void TearDown() { delete mutex_; }
 
   static void AddActiveSampler(Sampler* sampler) {
     ScopedLock lock(mutex_);
@@ -1955,23 +2010,12 @@ class SamplerThread : public Thread {
     SamplerRegistry::State state;
     while ((state = SamplerRegistry::GetState()) !=
            SamplerRegistry::HAS_NO_SAMPLERS) {
-      bool cpu_profiling_enabled =
-          (state == SamplerRegistry::HAS_CPU_PROFILING_SAMPLERS);
-      bool runtime_profiler_enabled = RuntimeProfiler::IsEnabled();
       // When CPU profiling is enabled both JavaScript and C++ code is
       // profiled. We must not suspend.
-      if (!cpu_profiling_enabled) {
+      if (state == SamplerRegistry::HAS_CPU_PROFILING_SAMPLERS) {
+        SamplerRegistry::IterateActiveSamplers(&DoCpuProfile, this);
+      } else {
         if (rate_limiter_.SuspendIfNecessary()) continue;
-      }
-      if (cpu_profiling_enabled) {
-        if (!SamplerRegistry::IterateActiveSamplers(&DoCpuProfile, this)) {
-          return;
-        }
-      }
-      if (runtime_profiler_enabled) {
-        if (!SamplerRegistry::IterateActiveSamplers(&DoRuntimeProfile, NULL)) {
-          return;
-        }
       }
       OS::Sleep(interval_);
     }
@@ -1983,11 +2027,6 @@ class SamplerThread : public Thread {
     SamplerThread* sampler_thread =
         reinterpret_cast<SamplerThread*>(raw_sampler_thread);
     sampler_thread->SampleContext(sampler);
-  }
-
-  static void DoRuntimeProfile(Sampler* sampler, void* ignored) {
-    if (!sampler->isolate()->IsInitialized()) return;
-    sampler->isolate()->runtime_profiler()->NotifyTick();
   }
 
   void SampleContext(Sampler* sampler) {
@@ -2035,8 +2074,27 @@ class SamplerThread : public Thread {
 };
 
 
-Mutex* SamplerThread::mutex_ = OS::CreateMutex();
+Mutex* SamplerThread::mutex_ = NULL;
 SamplerThread* SamplerThread::instance_ = NULL;
+
+
+void OS::SetUp() {
+  // Seed the random number generator.
+  // Convert the current time to a 64-bit integer first, before converting it
+  // to an unsigned. Going directly can cause an overflow and the seed to be
+  // set to all ones. The seed will be identical for different instances that
+  // call this setup code within the same millisecond.
+  uint64_t seed = static_cast<uint64_t>(TimeCurrentMillis());
+  srand(static_cast<unsigned int>(seed));
+  limit_mutex = CreateMutex();
+  SamplerThread::SetUp();
+}
+
+
+void OS::TearDown() {
+  SamplerThread::TearDown();
+  delete limit_mutex;
+}
 
 
 Sampler::Sampler(Isolate* isolate, int interval)

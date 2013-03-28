@@ -1,4 +1,4 @@
-// Copyright (c) 2011 The Chromium Authors. All rights reserved.
+// Copyright (c) 2012 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -22,14 +22,14 @@ cr.define('options', function() {
     if (el.disabled && (Object.keys(el.disabledReasons).length == 0)) {
       // The element has been previously disabled without a reason, so we add
       // one to keep it disabled.
-      el.disabledReasons['other'] = true;
+      el.disabledReasons.other = true;
     }
     if (!el.disabled) {
       // If the element is not disabled, there should be no reason, except for
       // 'other'.
-      delete el.disabledReasons['other'];
+      delete el.disabledReasons.other;
       if (Object.keys(el.disabledReasons).length > 0)
-        console.error("Element is not disabled but should be");
+        console.error('Element is not disabled but should be');
     }
     if (disabled) {
       el.disabledReasons[reason] = true;
@@ -39,33 +39,13 @@ cr.define('options', function() {
     el.disabled = Object.keys(el.disabledReasons).length > 0;
   }
 
-  /**
-   * Helper function to update element's state from pref change event.
-   * @private
-   * @param {!HTMLElement} el The element to update.
-   * @param {!Event} event The pref change event.
-   */
-  function updateElementState_(el, event) {
-    el.controlledBy = null;
-
-    if (!event.value)
-      return;
-
-    updateDisabledState_(el, 'notUserModifiable', event.value.disabled);
-
-    el.controlledBy = event.value['controlledBy'];
-
-    OptionsPage.updateManagedBannerVisibility();
-  }
-
   /////////////////////////////////////////////////////////////////////////////
-  // PrefCheckbox class:
-  // TODO(jhawkins): Refactor all this copy-pasted code!
+  // PrefInputElement class:
 
   // Define a constructor that uses an input element as its underlying element.
-  var PrefCheckbox = cr.ui.define('input');
+  var PrefInputElement = cr.ui.define('input');
 
-  PrefCheckbox.prototype = {
+  PrefInputElement.prototype = {
     // Set up the prototype chain
     __proto__: HTMLInputElement.prototype,
 
@@ -73,53 +53,40 @@ cr.define('options', function() {
      * Initialization function for the cr.ui framework.
      */
     decorate: function() {
-      this.type = 'checkbox';
       var self = this;
 
-      self.initializeValueType(self.getAttribute('value-type'));
+      // Listen for user events.
+      this.addEventListener('change', this.handleChange_.bind(this));
 
-      // Listen to pref changes.
-      Preferences.getInstance().addEventListener(
-          this.pref,
-          function(event) {
-            var value = event.value && event.value['value'] != undefined ?
-                event.value['value'] : event.value;
-
-            // Invert pref value if inverted_pref == true.
-            if (self.inverted_pref)
-              self.checked = !Boolean(value);
-            else
-              self.checked = Boolean(value);
-
-            updateElementState_(self, event);
-          });
-
-      // Listen to user events.
-      this.addEventListener(
-          'change',
-          function(e) {
-            if (self.customChangeHandler(e))
-              return;
-            var value = self.inverted_pref ? !self.checked : self.checked;
-            switch(self.valueType) {
-              case 'number':
-                Preferences.setIntegerPref(self.pref,
-                    Number(value), self.metric);
-                break;
-              case 'boolean':
-                Preferences.setBooleanPref(self.pref,
-                    value, self.metric);
-                break;
-            }
-          });
+      // Listen for pref changes.
+      Preferences.getInstance().addEventListener(this.pref, function(event) {
+        if (event.value.uncommitted && !self.dialogPref)
+          return;
+        self.updateStateFromPref_(event);
+        updateDisabledState_(self, 'notUserModifiable', event.value.disabled);
+        self.controlledBy = event.value.controlledBy;
+      });
     },
 
     /**
-     * Sets up options in checkbox element.
-     * @param {String} valueType The preference type for this checkbox.
+     * Handle changes to the input element's state made by the user. If a custom
+     * change handler does not suppress it, a default handler is invoked that
+     * updates the associated pref.
+     * @param {Event} event Change event.
+     * @private
      */
-    initializeValueType: function(valueType) {
-      this.valueType = valueType || 'boolean';
+    handleChange_: function(event) {
+      if (!this.customChangeHandler(event))
+        this.updatePrefFromState_();
+    },
+
+    /**
+     * Update the input element's state when the associated pref changes.
+     * @param {Event} event Pref change event.
+     * @private
+     */
+    updateStateFromPref_: function(event) {
+      this.value = event.value.value;
     },
 
     /**
@@ -130,11 +97,12 @@ cr.define('options', function() {
     },
 
     /**
-     * This method is called first while processing an onchange event. If it
-     * returns false, regular onchange processing continues (setting the
-     * associated pref, etc). If it returns true, the rest of the onchange is
-     * not performed. I.e., this works like stopPropagation or cancelBubble.
-     * @param {Event} event Change event.
+     * Custom change handler that is invoked first when the user makes changes
+     * to the input element's state. If it returns false, a default handler is
+     * invoked next that updates the associated pref. If it returns true, the
+     * default handler is suppressed (i.e., this works like stopPropagation or
+     * cancelBubble).
+     * @param {Event} event Input element change event.
      */
     customChangeHandler: function(event) {
       return false;
@@ -142,156 +110,85 @@ cr.define('options', function() {
   };
 
   /**
-   * The preference name.
+   * The name of the associated preference.
    * @type {string}
    */
-  cr.defineProperty(PrefCheckbox, 'pref', cr.PropertyKind.ATTR);
+  cr.defineProperty(PrefInputElement, 'pref', cr.PropertyKind.ATTR);
 
   /**
-   * Whether the preference is controlled by something else than the user's
-   * settings (either 'policy' or 'extension').
+   * The data type of the associated preference, only relevant for derived
+   * classes that support different data types.
    * @type {string}
    */
-  cr.defineProperty(PrefCheckbox, 'controlledBy', cr.PropertyKind.ATTR);
+  cr.defineProperty(PrefInputElement, 'dataType', cr.PropertyKind.ATTR);
+
+  /**
+   * Whether this input element is part of a dialog. If so, changes take effect
+   * in the settings UI immediately but are only actually committed when the
+   * user confirms the dialog. If the user cancels the dialog instead, the
+   * changes are rolled back in the settings UI and never committed.
+   * @type {boolean}
+   */
+  cr.defineProperty(PrefInputElement, 'dialogPref', cr.PropertyKind.BOOL_ATTR);
+
+  /**
+   * Whether the associated preference is controlled by a source other than the
+   * user's setting (can be 'policy', 'extension', 'recommended' or unset).
+   * @type {string}
+   */
+  cr.defineProperty(PrefInputElement, 'controlledBy', cr.PropertyKind.ATTR);
 
   /**
    * The user metric string.
    * @type {string}
    */
-  cr.defineProperty(PrefCheckbox, 'metric', cr.PropertyKind.ATTR);
+  cr.defineProperty(PrefInputElement, 'metric', cr.PropertyKind.ATTR);
+
+  /////////////////////////////////////////////////////////////////////////////
+  // PrefCheckbox class:
+
+  // Define a constructor that uses an input element as its underlying element.
+  var PrefCheckbox = cr.ui.define('input');
+
+  PrefCheckbox.prototype = {
+    // Set up the prototype chain
+    __proto__: PrefInputElement.prototype,
+
+    /**
+     * Initialization function for the cr.ui framework.
+     */
+    decorate: function() {
+      PrefInputElement.prototype.decorate.call(this);
+      this.type = 'checkbox';
+    },
+
+    /**
+     * Update the associated pref when when the user makes changes to the
+     * checkbox state.
+     * @private
+     */
+    updatePrefFromState_: function() {
+      var value = this.inverted_pref ? !this.checked : this.checked;
+      Preferences.setBooleanPref(this.pref, value,
+                                 !this.dialogPref, this.metric);
+    },
+
+    /**
+     * Update the checkbox state when the associated pref changes.
+     * @param {Event} event Pref change event.
+     * @private
+     */
+    updateStateFromPref_: function(event) {
+      var value = Boolean(event.value.value);
+      this.checked = this.inverted_pref ? !value : value;
+    },
+  };
 
   /**
-   * Whether to use inverted pref value.
+   * Whether the mapping between checkbox state and associated pref is inverted.
    * @type {boolean}
    */
   cr.defineProperty(PrefCheckbox, 'inverted_pref', cr.PropertyKind.BOOL_ATTR);
-
-  /////////////////////////////////////////////////////////////////////////////
-  // PrefRadio class:
-
-  //Define a constructor that uses an input element as its underlying element.
-  var PrefRadio = cr.ui.define('input');
-
-  PrefRadio.prototype = {
-    // Set up the prototype chain
-    __proto__: HTMLInputElement.prototype,
-
-    /**
-     * Initialization function for the cr.ui framework.
-     */
-    decorate: function() {
-      this.type = 'radio';
-      var self = this;
-
-      // Listen to pref changes.
-      Preferences.getInstance().addEventListener(this.pref,
-          function(event) {
-            var value = event.value && event.value['value'] != undefined ?
-                event.value['value'] : event.value;
-            self.checked = String(value) == self.value;
-
-            updateElementState_(self, event);
-          });
-
-      // Listen to user events.
-      this.addEventListener('change',
-          function(e) {
-            if(self.value == 'true' || self.value == 'false') {
-              Preferences.setBooleanPref(self.pref,
-                  self.value == 'true', self.metric);
-            } else {
-              Preferences.setIntegerPref(self.pref,
-                  parseInt(self.value, 10), self.metric);
-            }
-          });
-    },
-
-    /**
-     * See |updateDisabledState_| above.
-     */
-    setDisabled: function(reason, disabled) {
-      updateDisabledState_(this, reason, disabled);
-    },
-  };
-
-  /**
-   * The preference name.
-   * @type {string}
-   */
-  cr.defineProperty(PrefRadio, 'pref', cr.PropertyKind.ATTR);
-
-  /**
-   * Whether the preference is controlled by something else than the user's
-   * settings (either 'policy' or 'extension').
-   * @type {string}
-   */
-  cr.defineProperty(PrefRadio, 'controlledBy', cr.PropertyKind.ATTR);
-
-  /**
-   * The user metric string.
-   * @type {string}
-   */
-  cr.defineProperty(PrefRadio, 'metric', cr.PropertyKind.ATTR);
-
-  /////////////////////////////////////////////////////////////////////////////
-  // PrefNumeric class:
-
-  // Define a constructor that uses an input element as its underlying element.
-  var PrefNumeric = function() {};
-  PrefNumeric.prototype = {
-    // Set up the prototype chain
-    __proto__: HTMLInputElement.prototype,
-
-    /**
-     * Initialization function for the cr.ui framework.
-     */
-    decorate: function() {
-      var self = this;
-
-      // Listen to pref changes.
-      Preferences.getInstance().addEventListener(this.pref,
-          function(event) {
-            self.value = event.value && event.value['value'] != undefined ?
-                event.value['value'] : event.value;
-
-            updateElementState_(self, event);
-          });
-
-      // Listen to user events.
-      this.addEventListener('change',
-          function(e) {
-            if (this.validity.valid) {
-              Preferences.setIntegerPref(self.pref, self.value, self.metric);
-            }
-          });
-    },
-
-    /**
-     * See |updateDisabledState_| above.
-     */
-    setDisabled: function(reason, disabled) {
-      updateDisabledState_(this, reason, disabled);
-    },
-  };
-
-  /**
-   * The preference name.
-   * @type {string}
-   */
-  cr.defineProperty(PrefNumeric, 'pref', cr.PropertyKind.ATTR);
-
-  /**
-   * Whether the preference is controlled by something else than the user's
-   * settings (either 'policy' or 'extension').
-   * @type {string}
-   */
-  cr.defineProperty(PrefNumeric, 'controlledBy', cr.PropertyKind.ATTR);
-
-  /**
-   * The user metric string.
-   * @type {string}
-   */
-  cr.defineProperty(PrefNumeric, 'metric', cr.PropertyKind.ATTR);
 
   /////////////////////////////////////////////////////////////////////////////
   // PrefNumber class:
@@ -301,29 +198,68 @@ cr.define('options', function() {
 
   PrefNumber.prototype = {
     // Set up the prototype chain
-    __proto__: PrefNumeric.prototype,
+    __proto__: PrefInputElement.prototype,
 
     /**
      * Initialization function for the cr.ui framework.
      */
     decorate: function() {
+      PrefInputElement.prototype.decorate.call(this);
       this.type = 'number';
-      PrefNumeric.prototype.decorate.call(this);
-
-      // Listen to user events.
-      this.addEventListener('input',
-          function(e) {
-            if (this.validity.valid) {
-              Preferences.setIntegerPref(self.pref, self.value, self.metric);
-            }
-          });
     },
 
     /**
-     * See |updateDisabledState_| above.
+     * Update the associated pref when when the user inputs a number.
+     * @private
      */
-    setDisabled: function(reason, disabled) {
-      updateDisabledState_(this, reason, disabled);
+    updatePrefFromState_: function() {
+      if (this.validity.valid) {
+        Preferences.setIntegerPref(this.pref, this.value,
+                                   !this.dialogPref, this.metric);
+      }
+    },
+  };
+
+  /////////////////////////////////////////////////////////////////////////////
+  // PrefRadio class:
+
+  //Define a constructor that uses an input element as its underlying element.
+  var PrefRadio = cr.ui.define('input');
+
+  PrefRadio.prototype = {
+    // Set up the prototype chain
+    __proto__: PrefInputElement.prototype,
+
+    /**
+     * Initialization function for the cr.ui framework.
+     */
+    decorate: function() {
+      PrefInputElement.prototype.decorate.call(this);
+      this.type = 'radio';
+    },
+
+    /**
+     * Update the associated pref when when the user selects the radio button.
+     * @private
+     */
+    updatePrefFromState_: function() {
+      if (this.value == 'true' || this.value == 'false') {
+        Preferences.setBooleanPref(this.pref,
+                                   this.value == String(this.checked),
+                                   !this.dialogPref, this.metric);
+      } else {
+        Preferences.setIntegerPref(this.pref, this.value,
+                                   !this.dialogPref, this.metric);
+      }
+    },
+
+    /**
+     * Update the radio button state when the associated pref changes.
+     * @param {Event} event Pref change event.
+     * @private
+     */
+    updateStateFromPref_: function(event) {
+      this.checked = this.value == String(event.value.value);
     },
   };
 
@@ -335,130 +271,76 @@ cr.define('options', function() {
 
   PrefRange.prototype = {
     // Set up the prototype chain
-    __proto__: HTMLInputElement.prototype,
+    __proto__: PrefInputElement.prototype,
 
     /**
-     * The map from input range value to the corresponding preference value.
+     * The map from slider position to corresponding pref value.
      */
     valueMap: undefined,
-
-    /**
-     * If true, the associated pref will be modified on each onchange event;
-     * otherwise, the pref will only be modified on the onmouseup event after
-     * the drag.
-     */
-    continuous: true,
 
     /**
      * Initialization function for the cr.ui framework.
      */
     decorate: function() {
+      PrefInputElement.prototype.decorate.call(this);
       this.type = 'range';
 
-      // Update the UI when the pref changes.
-      Preferences.getInstance().addEventListener(
-          this.pref, this.onPrefChange_.bind(this));
-
-      // Listen to user events.
+      // Listen for user events.
       // TODO(jhawkins): Add onmousewheel handling once the associated WK bug is
       // fixed.
       // https://bugs.webkit.org/show_bug.cgi?id=52256
-      this.onchange = this.onChange_.bind(this);
-      this.onkeyup = this.onmouseup = this.onInputUp_.bind(this);
+      this.addEventListener('keyup', this.handleRelease_.bind(this));
+      this.addEventListener('mouseup', this.handleRelease_.bind(this));
     },
 
     /**
-     * Event listener that updates the UI when the underlying pref changes.
-     * @param {Event} event The event that details the pref change.
+     * Update the associated pref when when the user releases the slider.
      * @private
      */
-    onPrefChange_: function(event) {
-      var value = event.value && event.value['value'] != undefined ?
-          event.value['value'] : event.value;
-      if (value != undefined)
-        this.value = this.valueMap ? this.valueMap.indexOf(value) : value;
+    updatePrefFromState_: function() {
+      Preferences.setIntegerPref(this.pref, this.mapPositionToPref(this.value),
+                                 !this.dialogPref, this.metric);
     },
 
     /**
-     * onchange handler that sets the pref when the user changes the value of
-     * the input element.
+     * Ignore changes to the slider position made by the user while the slider
+     * has not been released.
      * @private
      */
-    onChange_: function(event) {
-      if (this.continuous)
-        this.setRangePref_();
-
-      if (this.notifyChange)
-        this.notifyChange(this, this.mapValueToRange_(this.value));
+    handleChange_: function() {
     },
 
     /**
-     * Sets the integer value of |pref| to the value of this element.
+     * Handle changes to the slider position made by the user when the slider is
+     * released. If a custom change handler does not suppress it, a default
+     * handler is invoked that updates the associated pref.
+     * @param {Event} event Change event.
      * @private
      */
-    setRangePref_: function() {
-      Preferences.setIntegerPref(
-          this.pref, this.mapValueToRange_(this.value), this.metric);
-
-      if (this.notifyPrefChange)
-        this.notifyPrefChange(this, this.mapValueToRange_(this.value));
+    handleRelease_: function(event) {
+      if (!this.customChangeHandler(event))
+        this.updatePrefFromState_();
     },
 
     /**
-     * onkeyup/onmouseup handler that modifies the pref if |continuous| is
-     * false.
+     * Update the slider position when the associated pref changes.
+     * @param {Event} event Pref change event.
      * @private
      */
-    onInputUp_: function(event) {
-      if (!this.continuous)
-        this.setRangePref_();
+    updateStateFromPref_: function(event) {
+      var value = event.value.value;
+      this.value = this.valueMap ? this.valueMap.indexOf(value) : value;
     },
 
     /**
-     * Maps the value of this element into the range provided by the client,
+     * Map slider position to the range of values provided by the client,
      * represented by |valueMap|.
-     * @param {number} value The value to map.
-     * @private
+     * @param {number} position The slider position to map.
      */
-    mapValueToRange_: function(value) {
-      return this.valueMap ? this.valueMap[value] : value;
-    },
-
-    /**
-     * Called when the client has specified non-continuous mode and the value of
-     * the range control changes.
-     * @param {Element} el This element.
-     * @param {number} value The value of this element.
-     */
-    notifyChange: function(el, value) {
-    },
-
-    /**
-     * See |updateDisabledState_| above.
-     */
-    setDisabled: function(reason, disabled) {
-      updateDisabledState_(this, reason, disabled);
+    mapPositionToPref: function(position) {
+      return this.valueMap ? this.valueMap[position] : position;
     },
   };
-
-  /**
-   * The preference name.
-   * @type {string}
-   */
-  cr.defineProperty(PrefRange, 'pref', cr.PropertyKind.ATTR);
-
-  /**
-   * Whether the preference is controlled by something else than the user's
-   * settings (either 'policy' or 'extension').
-   * @type {string}
-   */
-  cr.defineProperty(PrefRange, 'controlledBy', cr.PropertyKind.ATTR);
-
-  /**
-   * The user metric string.
-   * @type {string}
-   */
-  cr.defineProperty(PrefRange, 'metric', cr.PropertyKind.ATTR);
 
   /////////////////////////////////////////////////////////////////////////////
   // PrefSelect class:
@@ -468,107 +350,67 @@ cr.define('options', function() {
 
   PrefSelect.prototype = {
     // Set up the prototype chain
-    __proto__: HTMLSelectElement.prototype,
+    __proto__: PrefInputElement.prototype,
 
     /**
-    * Initialization function for the cr.ui framework.
-    */
-    decorate: function() {
-      var self = this;
-
-      // Listen to pref changes.
-      Preferences.getInstance().addEventListener(this.pref,
-          function(event) {
-            var value = event.value && event.value['value'] != undefined ?
-                event.value['value'] : event.value;
-
-            // Make sure |value| is a string, because the value is stored as a
-            // string in the HTMLOptionElement.
-            value = value.toString();
-
-            updateElementState_(self, event);
-
-            var found = false;
-            for (var i = 0; i < self.options.length; i++) {
-              if (self.options[i].value == value) {
-                self.selectedIndex = i;
-                found = true;
-              }
-            }
-
-            // Item not found, select first item.
-            if (!found)
-              self.selectedIndex = 0;
-
-            if (self.onchange != undefined)
-              self.onchange(event);
-          });
-
-      // Listen to user events.
-      this.addEventListener('change',
-          function(e) {
-            if (!self.dataType) {
-              console.error('undefined data type for <select> pref');
-              return;
-            }
-
-            switch(self.dataType) {
-              case 'number':
-                Preferences.setIntegerPref(self.pref,
-                    self.options[self.selectedIndex].value, self.metric);
-                break;
-              case 'double':
-                Preferences.setDoublePref(self.pref,
-                    self.options[self.selectedIndex].value, self.metric);
-                break;
-              case 'boolean':
-                var option = self.options[self.selectedIndex];
-                var value = (option.value == 'true') ? true : false;
-                Preferences.setBooleanPref(self.pref, value, self.metric);
-                break;
-              case 'string':
-                Preferences.setStringPref(self.pref,
-                    self.options[self.selectedIndex].value, self.metric);
-                break;
-              default:
-                console.error('unknown data type for <select> pref: ' +
-                              self.dataType);
-            }
-          });
+     * Update the associated pref when when the user selects an item.
+     * @private
+     */
+    updatePrefFromState_: function() {
+      var value = this.options[this.selectedIndex].value;
+      switch (this.dataType) {
+        case 'number':
+          Preferences.setIntegerPref(this.pref, value,
+                                     !this.dialogPref, this.metric);
+          break;
+        case 'double':
+          Preferences.setDoublePref(this.pref, value,
+                                    !this.dialogPref, this.metric);
+          break;
+        case 'boolean':
+          Preferences.setBooleanPref(this.pref, value == 'true',
+                                     !this.dialogPref, this.metric);
+          break;
+        case 'string':
+          Preferences.setStringPref(this.pref, value,
+                                    !this.dialogPref, this.metric);
+          break;
+        default:
+          console.error('Unknown data type for <select> UI element: ' +
+                        this.dataType);
+      }
     },
 
     /**
-     * See |updateDisabledState_| above.
+     * Update the selected item when the associated pref changes.
+     * @param {Event} event Pref change event.
+     * @private
      */
-    setDisabled: function(reason, disabled) {
-      updateDisabledState_(this, reason, disabled);
+    updateStateFromPref_: function(event) {
+      // Make sure the value is a string, because the value is stored as a
+      // string in the HTMLOptionElement.
+      value = String(event.value.value);
+
+      var found = false;
+      for (var i = 0; i < this.options.length; i++) {
+        if (this.options[i].value == value) {
+          this.selectedIndex = i;
+          found = true;
+        }
+      }
+
+      // Item not found, select first item.
+      if (!found)
+        this.selectedIndex = 0;
+
+      // The "onchange" event automatically fires when the user makes a manual
+      // change. It should never be fired for a programmatic change. However,
+      // these two lines were here already and it is hard to tell who may be
+      // relying on them.
+      if (this.onchange)
+        this.onchange(event);
     },
   };
-
-  /**
-   * The preference name.
-   * @type {string}
-   */
-  cr.defineProperty(PrefSelect, 'pref', cr.PropertyKind.ATTR);
-
-  /**
-   * Whether the preference is controlled by something else than the user's
-   * settings (either 'policy' or 'extension').
-   * @type {string}
-   */
-  cr.defineProperty(PrefSelect, 'controlledBy', cr.PropertyKind.ATTR);
-
-  /**
-   * The user metric string.
-   * @type {string}
-   */
-  cr.defineProperty(PrefSelect, 'metric', cr.PropertyKind.ATTR);
-
-  /**
-   * The data type for the preference options.
-   * @type {string}
-   */
-  cr.defineProperty(PrefSelect, 'dataType', cr.PropertyKind.ATTR);
 
   /////////////////////////////////////////////////////////////////////////////
   // PrefTextField class:
@@ -578,81 +420,47 @@ cr.define('options', function() {
 
   PrefTextField.prototype = {
     // Set up the prototype chain
-    __proto__: HTMLInputElement.prototype,
+    __proto__: PrefInputElement.prototype,
 
     /**
      * Initialization function for the cr.ui framework.
      */
     decorate: function() {
+      PrefInputElement.prototype.decorate.call(this);
       var self = this;
 
-      // Listen to pref changes.
-      Preferences.getInstance().addEventListener(this.pref,
-          function(event) {
-            self.value = event.value && event.value['value'] != undefined ?
-                event.value['value'] : event.value;
-
-            updateElementState_(self, event);
-          });
-
-      // Listen to user events.
-      this.addEventListener('change',
-          function(e) {
-            switch(self.dataType) {
-              case 'number':
-                Preferences.setIntegerPref(self.pref, self.value, self.metric);
-                break;
-              case 'double':
-                Preferences.setDoublePref(self.pref, self.value, self.metric);
-                break;
-              case 'url':
-                Preferences.setURLPref(self.pref, self.value, self.metric);
-                break;
-              default:
-                Preferences.setStringPref(self.pref, self.value, self.metric);
-                break;
-            }
-          });
-
-      window.addEventListener('unload',
-          function() {
-            if (document.activeElement == self)
-              self.blur();
-          });
+      // Listen for user events.
+      window.addEventListener('unload', function() {
+        if (document.activeElement == self)
+          self.blur();
+      });
     },
 
     /**
-     * See |updateDisabledState_| above.
+     * Update the associated pref when when the user inputs text.
+     * @private
      */
-    setDisabled: function(reason, disabled) {
-      updateDisabledState_(this, reason, disabled);
+    updatePrefFromState_: function(event) {
+      switch (this.dataType) {
+        case 'number':
+          Preferences.setIntegerPref(this.pref, this.value,
+                                     !this.dialogPref, this.metric);
+          break;
+        case 'double':
+          Preferences.setDoublePref(this.pref, this.value,
+                                    !this.dialogPref, this.metric);
+          break;
+        case 'url':
+          Preferences.setURLPref(this.pref, this.value,
+                                 !this.dialogPref, this.metric);
+          break;
+        default:
+          Preferences.setStringPref(this.pref, this.value,
+                                    !this.dialogPref, this.metric);
+          break;
+      }
     },
   };
-
-  /**
-   * The preference name.
-   * @type {string}
-   */
-  cr.defineProperty(PrefTextField, 'pref', cr.PropertyKind.ATTR);
-
-  /**
-   * Whether the preference is controlled by something else than the user's
-   * settings (either 'policy' or 'extension').
-   * @type {string}
-   */
-  cr.defineProperty(PrefTextField, 'controlledBy', cr.PropertyKind.ATTR);
-
-  /**
-   * The user metric string.
-   * @type {string}
-   */
-  cr.defineProperty(PrefTextField, 'metric', cr.PropertyKind.ATTR);
-
-  /**
-   * The data type for the preference options.
-   * @type {string}
-   */
-  cr.defineProperty(PrefTextField, 'dataType', cr.PropertyKind.ATTR);
 
   /////////////////////////////////////////////////////////////////////////////
   // PrefButton class:
@@ -665,26 +473,22 @@ cr.define('options', function() {
     __proto__: HTMLButtonElement.prototype,
 
     /**
-    * Initialization function for the cr.ui framework.
-    */
+     * Initialization function for the cr.ui framework.
+     */
     decorate: function() {
       var self = this;
 
-      // Listen to pref changes. This element behaves like a normal button and
-      // doesn't affect the underlying preference; it just becomes disabled
-      // when the preference is managed, and its value is false.
-      // This is useful for buttons that should be disabled when the underlying
-      // boolean preference is set to false by a policy or extension.
-      Preferences.getInstance().addEventListener(this.pref,
-          function(event) {
-            var e = {
-              value: {
-                'disabled': event.value['disabled'] && !event.value['value'],
-                'controlledBy': event.value['controlledBy']
-              }
-            };
-            updateElementState_(self, e);
-          });
+      // Listen for pref changes.
+      // This element behaves like a normal button and does not affect the
+      // underlying preference; it just becomes disabled when the preference is
+      // managed, and its value is false. This is useful for buttons that should
+      // be disabled when the underlying Boolean preference is set to false by a
+      // policy or extension.
+      Preferences.getInstance().addEventListener(this.pref, function(event) {
+        updateDisabledState_(self, 'notUserModifiable',
+                             event.value.disabled && !event.value.value);
+        self.controlledBy = event.value.controlledBy;
+      });
     },
 
     /**
@@ -696,14 +500,14 @@ cr.define('options', function() {
   };
 
   /**
-   * The preference name.
+   * The name of the associated preference.
    * @type {string}
    */
   cr.defineProperty(PrefButton, 'pref', cr.PropertyKind.ATTR);
 
   /**
-   * Whether the preference is controlled by something else than the user's
-   * settings (either 'policy' or 'extension').
+   * Whether the associated preference is controlled by a source other than the
+   * user's setting (can be 'policy', 'extension', 'recommended' or unset).
    * @type {string}
    */
   cr.defineProperty(PrefButton, 'controlledBy', cr.PropertyKind.ATTR);
@@ -712,7 +516,6 @@ cr.define('options', function() {
   return {
     PrefCheckbox: PrefCheckbox,
     PrefNumber: PrefNumber,
-    PrefNumeric: PrefNumeric,
     PrefRadio: PrefRadio,
     PrefRange: PrefRange,
     PrefSelect: PrefSelect,

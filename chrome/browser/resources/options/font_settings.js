@@ -7,12 +7,6 @@ cr.define('options', function() {
   var OptionsPage = options.OptionsPage;
 
   /**
-   * This is the absolute difference maintained between standard and
-   * fixed-width font sizes. Refer http://crbug.com/91922.
-   */
-  const SIZE_DIFFERENCE_FIXED_STANDARD = 3;
-
-  /**
    * FontSettings class
    * Encapsulated handling of the 'Fonts and Encoding' page.
    * @class
@@ -20,7 +14,7 @@ cr.define('options', function() {
   function FontSettings() {
     OptionsPage.call(this,
                      'fonts',
-                     templateData.fontSettingsPageTabTitle,
+                     loadTimeData.getString('fontSettingsPageTabTitle'),
                      'font-settings');
   }
 
@@ -38,20 +32,20 @@ cr.define('options', function() {
       var standardFontRange = $('standard-font-size');
       standardFontRange.valueMap = [9, 10, 11, 12, 13, 14, 15, 16, 17, 18, 20,
           22, 24, 26, 28, 30, 32, 34, 36, 40, 44, 48, 56, 64, 72];
-      standardFontRange.continuous = false;
-      standardFontRange.notifyChange = this.standardRangeChanged_.bind(this);
-      standardFontRange.notifyPrefChange =
-          this.standardFontSizeChanged_.bind(this);
+      standardFontRange.addEventListener(
+          'change', this.standardRangeChanged_.bind(this, standardFontRange));
+      standardFontRange.customChangeHandler =
+          this.standardFontSizeChanged_.bind(standardFontRange);
 
       var minimumFontRange = $('minimum-font-size');
       minimumFontRange.valueMap = [6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17,
           18, 20, 22, 24];
-      minimumFontRange.continuous = false;
-      minimumFontRange.notifyChange = this.minimumRangeChanged_.bind(this);
-      minimumFontRange.notifyPrefChange =
-          this.minimumFontSizeChanged_.bind(this);
+      minimumFontRange.addEventListener(
+          'change', this.minimumRangeChanged_.bind(this, minimumFontRange));
+      minimumFontRange.customChangeHandler =
+          this.minimumFontSizeChanged_.bind(minimumFontRange);
 
-      var placeholder = localStrings.getString('fontSettingsPlaceholder');
+      var placeholder = loadTimeData.getString('fontSettingsPlaceholder');
       var elements = [$('standard-font-family'), $('serif-font-family'),
                       $('sans-serif-font-family'), $('fixed-font-family'),
                       $('font-encoding')];
@@ -59,6 +53,10 @@ cr.define('options', function() {
         el.appendChild(new Option(placeholder));
         el.setDisabled('noFontsAvailable', true);
       });
+
+      $('font-settings-confirm').onclick = function() {
+        OptionsPage.closeOverlay();
+      };
     },
 
     /**
@@ -76,67 +74,73 @@ cr.define('options', function() {
     },
 
     /**
-     * Called as the user changes the standard font size.  This allows for
-     * reflecting the change in the UI before the preference has been changed.
+     * Handler that is called when the user changes the position of the standard
+     * font size slider. This allows the UI to show a preview of the change
+     * before the slider has been released and the associated prefs updated.
      * @param {Element} el The slider input element.
-     * @param {number} value The mapped value currently set by the slider.
+     * @param {Event} event Change event.
      * @private
      */
-    standardRangeChanged_: function(el, value) {
+    standardRangeChanged_: function(el, event) {
+      var size = el.mapPositionToPref(el.value);
       var fontSampleEl = $('standard-font-sample');
-      this.setUpFontSample_(fontSampleEl, value, fontSampleEl.style.fontFamily,
+      this.setUpFontSample_(fontSampleEl, size, fontSampleEl.style.fontFamily,
                             true);
 
       fontSampleEl = $('serif-font-sample');
-      this.setUpFontSample_(fontSampleEl, value, fontSampleEl.style.fontFamily,
+      this.setUpFontSample_(fontSampleEl, size, fontSampleEl.style.fontFamily,
                             true);
 
       fontSampleEl = $('sans-serif-font-sample');
-      this.setUpFontSample_(fontSampleEl, value, fontSampleEl.style.fontFamily,
+      this.setUpFontSample_(fontSampleEl, size, fontSampleEl.style.fontFamily,
                             true);
 
       fontSampleEl = $('fixed-font-sample');
       this.setUpFontSample_(fontSampleEl,
-                            value - SIZE_DIFFERENCE_FIXED_STANDARD,
+                            size - OptionsPage.SIZE_DIFFERENCE_FIXED_STANDARD,
                             fontSampleEl.style.fontFamily, false);
     },
 
     /**
-     * Sets the 'default_fixed_font_size' preference when the standard font
-     * size has been changed by the user.
-     * @param {Element} el The slider input element.
-     * @param {number} value The mapped value that has been saved.
+     * Sets the 'default_fixed_font_size' preference when the user changes the
+     * standard font size.
+     * @param {Event} event Change event.
      * @private
      */
-    standardFontSizeChanged_: function(el, value) {
+    standardFontSizeChanged_: function(event) {
+      var size = this.mapPositionToPref(this.value);
       Preferences.setIntegerPref(
-        'webkit.webprefs.global.default_fixed_font_size',
-        value - SIZE_DIFFERENCE_FIXED_STANDARD, '');
+        'webkit.webprefs.default_fixed_font_size',
+        size - OptionsPage.SIZE_DIFFERENCE_FIXED_STANDARD, true);
+      return false;
     },
 
     /**
-     * Called as the user changes the miniumum font size.  This allows for
-     * reflecting the change in the UI before the preference has been changed.
+     * Handler that is called when the user changes the position of the minimum
+     * font size slider. This allows the UI to show a preview of the change
+     * before the slider has been released and the associated prefs updated.
      * @param {Element} el The slider input element.
-     * @param {number} value The mapped value currently set by the slider.
+     * @param {Event} event Change event.
      * @private
      */
-    minimumRangeChanged_: function(el, value) {
+    minimumRangeChanged_: function(el, event) {
+      var size = el.mapPositionToPref(el.value);
       var fontSampleEl = $('minimum-font-sample');
-      this.setUpFontSample_(fontSampleEl, value, fontSampleEl.style.fontFamily,
+      this.setUpFontSample_(fontSampleEl, size, fontSampleEl.style.fontFamily,
                             true);
     },
 
     /**
-     * Sets the 'minimum_logical_font_size' preference when the minimum font
-     * size has been changed by the user.
-     * @param {Element} el The slider input element.
-     * @param {number} value The mapped value that has been saved.
+     * Sets the 'minimum_logical_font_size' preference when the user changes the
+     * minimum font size.
+     * @param {Event} event Change event.
      * @private
      */
-    minimumFontSizeChanged_: function(el, value) {
+    minimumFontSizeChanged_: function(event) {
+      var size = this.mapPositionToPref(this.value);
       Preferences.setIntegerPref(
-        'webkit.webprefs.global.minimum_logical_font_size', value, '');
+        'webkit.webprefs.minimum_logical_font_size', size, true);
+      return false;
     },
 
     /**
@@ -150,7 +154,7 @@ cr.define('options', function() {
     setUpFontSample_: function(el, size, font, showSize) {
       var prefix = showSize ? (size + ': ') : '';
       el.textContent = prefix +
-          localStrings.getString('fontSettingsLoremIpsum');
+          loadTimeData.getString('fontSettingsLoremIpsum');
       el.style.fontSize = size + 'px';
       if (font)
         el.style.fontFamily = font;
@@ -172,9 +176,12 @@ cr.define('options', function() {
       for (var i = 0; i < items.length; i++) {
         value = items[i][0];
         text = items[i][1];
+        dir = items[i][2];
         if (text) {
           selected = value == selectedValue;
-          element.appendChild(new Option(text, value, false, selected));
+          var option = new Option(text, value, false, selected);
+          option.dir = dir;
+          element.appendChild(option);
         } else {
           element.appendChild(document.createElement('hr'));
         }

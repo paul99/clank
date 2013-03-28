@@ -12,26 +12,80 @@
 #include "base/stl_util.h"
 #include "base/stringprintf.h"
 #include "base/synchronization/waitable_event.h"
+#include "base/threading/thread_restrictions.h"
 #include "content/public/browser/browser_thread.h"
 #include "dbus/bus.h"
 #include "dbus/message.h"
+#include "dbus/object_path.h"
 #include "dbus/object_proxy.h"
 #include "grit/chromium_strings.h"
 #include "ui/base/l10n/l10n_util.h"
 
 using content::BrowserThread;
-using webkit::forms::PasswordForm;
+using content::PasswordForm;
+
+namespace {
 
 // We could localize this string, but then changing your locale would cause
 // you to lose access to all your stored passwords. Maybe best not to do that.
-const char NativeBackendKWallet::kKWalletFolder[] = "Chrome Form Data";
+// Name of the folder to store passwords in.
+const char kKWalletFolder[] = "Chrome Form Data";
 
-const char NativeBackendKWallet::kKWalletServiceName[] = "org.kde.kwalletd";
-const char NativeBackendKWallet::kKWalletPath[] = "/modules/kwalletd";
-const char NativeBackendKWallet::kKWalletInterface[] = "org.kde.KWallet";
-const char NativeBackendKWallet::kKLauncherServiceName[] = "org.kde.klauncher";
-const char NativeBackendKWallet::kKLauncherPath[] = "/KLauncher";
-const char NativeBackendKWallet::kKLauncherInterface[] = "org.kde.KLauncher";
+// DBus service, path, and interface names for klauncher and kwalletd.
+const char kKWalletServiceName[] = "org.kde.kwalletd";
+const char kKWalletPath[] = "/modules/kwalletd";
+const char kKWalletInterface[] = "org.kde.KWallet";
+const char kKLauncherServiceName[] = "org.kde.klauncher";
+const char kKLauncherPath[] = "/KLauncher";
+const char kKLauncherInterface[] = "org.kde.KLauncher";
+
+// Compares two PasswordForms and returns true if they are the same.
+// If |update_check| is false, we only check the fields that are checked by
+// LoginDatabase::UpdateLogin() when updating logins; otherwise, we check the
+// fields that are checked by LoginDatabase::RemoveLogin() for removing them.
+bool CompareForms(const content::PasswordForm& a,
+                  const content::PasswordForm& b,
+                  bool update_check) {
+  // An update check doesn't care about the submit element.
+  if (!update_check && a.submit_element != b.submit_element)
+    return false;
+  return a.origin           == b.origin &&
+         a.password_element == b.password_element &&
+         a.signon_realm     == b.signon_realm &&
+         a.username_element == b.username_element &&
+         a.username_value   == b.username_value;
+}
+
+// Checks a serialized list of PasswordForms for sanity. Returns true if OK.
+// Note that |realm| is only used for generating a useful warning message.
+bool CheckSerializedValue(const uint8_t* byte_array,
+                          size_t length,
+                          const std::string& realm) {
+  const Pickle::Header* header =
+      reinterpret_cast<const Pickle::Header*>(byte_array);
+  if (length < sizeof(*header) ||
+      header->payload_size > length - sizeof(*header)) {
+    LOG(WARNING) << "Invalid KWallet entry detected (realm: " << realm << ")";
+    return false;
+  }
+  return true;
+}
+
+// Convenience function to read a GURL from a Pickle. Assumes the URL has
+// been written as a UTF-8 string. Returns true on success.
+bool ReadGURL(PickleIterator* iter, bool warn_only, GURL* url) {
+  std::string url_string;
+  if (!iter->ReadString(&url_string)) {
+    if (!warn_only)
+      LOG(ERROR) << "Failed to deserialize URL.";
+    *url = GURL();
+    return false;
+  }
+  *url = GURL(url_string);
+  return true;
+}
+
+}  // namespace
 
 NativeBackendKWallet::NativeBackendKWallet(LocalProfileId id,
                                            PrefService* prefs)
@@ -83,6 +137,9 @@ bool NativeBackendKWallet::InitWithBus(scoped_refptr<dbus::Bus> optional_bus) {
                           base::Bind(&NativeBackendKWallet::InitOnDBThread,
                                      base::Unretained(this),
                                      optional_bus, &event, &success));
+
+  // This ScopedAllowWait should not be here. http://crbug.com/125331
+  base::ThreadRestrictions::ScopedAllowWait allow_wait;
   event.Wait();
   return success;
 }
@@ -103,7 +160,8 @@ void NativeBackendKWallet::InitOnDBThread(scoped_refptr<dbus::Bus> optional_bus,
     session_bus_ = new dbus::Bus(options);
   }
   kwallet_proxy_ =
-      session_bus_->GetObjectProxy(kKWalletServiceName, kKWalletPath);
+      session_bus_->GetObjectProxy(kKWalletServiceName,
+                                   dbus::ObjectPath(kKWalletPath));
   // kwalletd may not be running. If we get a temporary failure initializing it,
   // try to start it and then try again. (Note the short-circuit evaluation.)
   const InitResult result = InitWallet();
@@ -118,7 +176,8 @@ bool NativeBackendKWallet::StartKWalletd() {
   // Sadly kwalletd doesn't use DBus activation, so we have to make a call to
   // klauncher to start it.
   dbus::ObjectProxy* klauncher =
-      session_bus_->GetObjectProxy(kKLauncherServiceName, kKLauncherPath);
+      session_bus_->GetObjectProxy(kKLauncherServiceName,
+                                   dbus::ObjectPath(kKLauncherPath));
 
   dbus::MethodCall method_call(kKLauncherInterface,
                                "start_service_by_desktop_name");
@@ -628,25 +687,13 @@ bool NativeBackendKWallet::SetLoginsList(const PasswordFormList& forms,
   return ret == 0;
 }
 
-bool NativeBackendKWallet::CompareForms(const PasswordForm& a,
-                                        const PasswordForm& b,
-                                        bool update_check) {
-  // An update check doesn't care about the submit element.
-  if (!update_check && a.submit_element != b.submit_element)
-    return false;
-  return a.origin           == b.origin &&
-         a.password_element == b.password_element &&
-         a.signon_realm     == b.signon_realm &&
-         a.username_element == b.username_element &&
-         a.username_value   == b.username_value;
-}
-
+// static
 void NativeBackendKWallet::SerializeValue(const PasswordFormList& forms,
                                           Pickle* pickle) {
   pickle->WriteInt(kPickleVersion);
-  pickle->WriteSize(forms.size());
-  for (PasswordFormList::const_iterator it = forms.begin() ;
-       it != forms.end() ; ++it) {
+  pickle->WriteUInt64(forms.size());
+  for (PasswordFormList::const_iterator it = forms.begin();
+       it != forms.end(); ++it) {
     const PasswordForm* form = *it;
     pickle->WriteInt(form->scheme);
     pickle->WriteString(form->origin.spec());
@@ -663,50 +710,46 @@ void NativeBackendKWallet::SerializeValue(const PasswordFormList& forms,
   }
 }
 
-bool NativeBackendKWallet::CheckSerializedValue(const uint8_t* byte_array,
-                                                size_t length,
-                                                const std::string& realm) {
-  const Pickle::Header* header =
-      reinterpret_cast<const Pickle::Header*>(byte_array);
-  if (length < sizeof(*header) ||
-      header->payload_size > length - sizeof(*header)) {
-    LOG(WARNING) << "Invalid KWallet entry detected (realm: " << realm << ")";
-    return false;
-  }
-  return true;
-}
+// static
+bool NativeBackendKWallet::DeserializeValueSize(const std::string& signon_realm,
+                                                const PickleIterator& init_iter,
+                                                bool size_32, bool warn_only,
+                                                PasswordFormList* forms) {
+  PickleIterator iter = init_iter;
 
-void NativeBackendKWallet::DeserializeValue(const std::string& signon_realm,
-                                            const Pickle& pickle,
-                                            PasswordFormList* forms) {
-  void* iter = NULL;
-
-  int version = -1;
-  if (!pickle.ReadInt(&iter, &version) || version != kPickleVersion) {
-    // This is the only version so far, so anything else is an error.
-    LOG(ERROR) << "Failed to deserialize KWallet entry "
-               << "(realm: " << signon_realm << ")";
-    return;
-  }
-
-  size_t count = 0;
-  if (!pickle.ReadSize(&iter, &count)) {
-    LOG(ERROR) << "Failed to deserialize KWallet entry "
-               << "(realm: " << signon_realm << ")";
-    return;
+  uint64_t count = 0;
+  if (size_32) {
+    uint32_t count_32 = 0;
+    if (!iter.ReadUInt32(&count_32)) {
+      LOG(ERROR) << "Failed to deserialize KWallet entry "
+                 << "(realm: " << signon_realm << ")";
+      return false;
+    }
+    count = count_32;
+  } else {
+    if (!iter.ReadUInt64(&count)) {
+      LOG(ERROR) << "Failed to deserialize KWallet entry "
+                 << "(realm: " << signon_realm << ")";
+      return false;
+    }
   }
 
   if (count > 0xFFFF) {
     // Trying to pin down the cause of http://crbug.com/80728 (or fix it).
     // This is a very large number of passwords to be saved for a single realm.
     // It is almost certainly a corrupt pickle and not real data. Ignore it.
-    LOG(ERROR) << "Suspiciously large number of entries in KWallet entry "
-               << "(" << count << "; realm: " << signon_realm << ")";
-    return;
+    // This very well might actually be http://crbug.com/107701, so if we're
+    // reading an old pickle, we don't even log this the first time we try to
+    // read it. (That is, when we're reading the native architecture size.)
+    if (!warn_only) {
+      LOG(ERROR) << "Suspiciously large number of entries in KWallet entry "
+                 << "(" << count << "; realm: " << signon_realm << ")";
+    }
+    return false;
   }
 
   forms->reserve(forms->size() + count);
-  for (size_t i = 0; i < count; ++i) {
+  for (uint64_t i = 0; i < count; ++i) {
     scoped_ptr<PasswordForm> form(new PasswordForm());
     form->signon_realm.assign(signon_realm);
 
@@ -714,38 +757,66 @@ void NativeBackendKWallet::DeserializeValue(const std::string& signon_realm,
     int64 date_created = 0;
     // Note that these will be read back in the order listed due to
     // short-circuit evaluation. This is important.
-    if (!pickle.ReadInt(&iter, &scheme) ||
-        !ReadGURL(pickle, &iter, &form->origin) ||
-        !ReadGURL(pickle, &iter, &form->action) ||
-        !pickle.ReadString16(&iter, &form->username_element) ||
-        !pickle.ReadString16(&iter, &form->username_value) ||
-        !pickle.ReadString16(&iter, &form->password_element) ||
-        !pickle.ReadString16(&iter, &form->password_value) ||
-        !pickle.ReadString16(&iter, &form->submit_element) ||
-        !pickle.ReadBool(&iter, &form->ssl_valid) ||
-        !pickle.ReadBool(&iter, &form->preferred) ||
-        !pickle.ReadBool(&iter, &form->blacklisted_by_user) ||
-        !pickle.ReadInt64(&iter, &date_created)) {
-      LOG(ERROR) << "Failed to deserialize KWallet entry "
-                 << "(realm: " << signon_realm << ")";
-      break;
+    if (!iter.ReadInt(&scheme) ||
+        !ReadGURL(&iter, warn_only, &form->origin) ||
+        !ReadGURL(&iter, warn_only, &form->action) ||
+        !iter.ReadString16(&form->username_element) ||
+        !iter.ReadString16(&form->username_value) ||
+        !iter.ReadString16(&form->password_element) ||
+        !iter.ReadString16(&form->password_value) ||
+        !iter.ReadString16(&form->submit_element) ||
+        !iter.ReadBool(&form->ssl_valid) ||
+        !iter.ReadBool(&form->preferred) ||
+        !iter.ReadBool(&form->blacklisted_by_user) ||
+        !iter.ReadInt64(&date_created)) {
+      if (warn_only) {
+        LOG(WARNING) << "Failed to deserialize version 0 KWallet entry "
+                     << "(realm: " << signon_realm << ") with native "
+                     << "architecture size; will try alternate size.";
+      } else {
+        LOG(ERROR) << "Failed to deserialize KWallet entry "
+                   << "(realm: " << signon_realm << ")";
+      }
+      return false;
     }
     form->scheme = static_cast<PasswordForm::Scheme>(scheme);
     form->date_created = base::Time::FromTimeT(date_created);
     forms->push_back(form.release());
   }
+
+  return true;
 }
 
-bool NativeBackendKWallet::ReadGURL(const Pickle& pickle, void** iter,
-                                    GURL* url) {
-  std::string url_string;
-  if (!pickle.ReadString(iter, &url_string)) {
-    LOG(ERROR) << "Failed to deserialize URL";
-    *url = GURL();
-    return false;
+// static
+void NativeBackendKWallet::DeserializeValue(const std::string& signon_realm,
+                                            const Pickle& pickle,
+                                            PasswordFormList* forms) {
+  PickleIterator iter(pickle);
+
+  int version = -1;
+  if (!iter.ReadInt(&version) ||
+      version < 0 || version > kPickleVersion) {
+    LOG(ERROR) << "Failed to deserialize KWallet entry "
+               << "(realm: " << signon_realm << ")";
+    return;
   }
-  *url = GURL(url_string);
-  return true;
+
+  if (version == kPickleVersion) {
+    // In current pickles, we expect 64-bit sizes. Failure is an error.
+    DeserializeValueSize(signon_realm, iter, false, false, forms);
+    return;
+  }
+
+  const size_t saved_forms_size = forms->size();
+  const bool size_32 = sizeof(size_t) == sizeof(uint32_t);
+  if (!DeserializeValueSize(signon_realm, iter, size_32, true, forms)) {
+    // We failed to read the pickle using the native architecture of the system.
+    // Try again with the opposite architecture. Note that we do this even on
+    // 32-bit machines, in case we're reading a 64-bit pickle. (Probably rare,
+    // since mostly we expect upgrades, not downgrades, but both are possible.)
+    forms->resize(saved_forms_size);
+    DeserializeValueSize(signon_realm, iter, !size_32, false, forms);
+  }
 }
 
 int NativeBackendKWallet::WalletHandle() {

@@ -1,12 +1,12 @@
-// Copyright (c) 2011 The Chromium Authors. All rights reserved.
+// Copyright (c) 2012 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
 #ifndef CONTENT_PPAPI_PLUGIN_PPAPI_THREAD_H_
 #define CONTENT_PPAPI_PLUGIN_PPAPI_THREAD_H_
-#pragma once
 
 #include <map>
+#include <string>
 
 #include "base/basictypes.h"
 #include "base/compiler_specific.h"
@@ -20,48 +20,73 @@
 #include "ppapi/proxy/plugin_dispatcher.h"
 #include "ppapi/proxy/plugin_globals.h"
 #include "ppapi/proxy/plugin_proxy_delegate.h"
+#include "webkit/plugins/ppapi/plugin_module.h"
 
+#if defined(OS_WIN)
+#include "base/win/scoped_handle.h"
+#endif
+
+class CommandLine;
 class FilePath;
-class PpapiWebKitPlatformSupportImpl;
 
 namespace IPC {
 struct ChannelHandle;
 }
 
+namespace content {
+
+class PpapiWebKitPlatformSupportImpl;
+
 class PpapiThread : public ChildThread,
                     public ppapi::proxy::PluginDispatcher::PluginDelegate,
                     public ppapi::proxy::PluginProxyDelegate {
  public:
-  explicit PpapiThread(bool is_broker);
+  PpapiThread(const CommandLine& command_line, bool is_broker);
   virtual ~PpapiThread();
 
  private:
   // ChildThread overrides.
+  virtual bool Send(IPC::Message* msg) OVERRIDE;
   virtual bool OnMessageReceived(const IPC::Message& msg) OVERRIDE;
+  virtual void OnChannelConnected(int32 peer_pid) OVERRIDE;
 
   // PluginDispatcher::PluginDelegate implementation.
   virtual std::set<PP_Instance>* GetGloballySeenInstanceIDSet() OVERRIDE;
   virtual base::MessageLoopProxy* GetIPCMessageLoop() OVERRIDE;
   virtual base::WaitableEvent* GetShutdownEvent() OVERRIDE;
+  virtual IPC::PlatformFileForTransit ShareHandleWithRemote(
+      base::PlatformFile handle,
+      base::ProcessId peer_pid,
+      bool should_close_source) OVERRIDE;
   virtual uint32 Register(
       ppapi::proxy::PluginDispatcher* plugin_dispatcher) OVERRIDE;
   virtual void Unregister(uint32 plugin_dispatcher_id) OVERRIDE;
 
   // PluginProxyDelegate.
-  virtual bool SendToBrowser(IPC::Message* msg) OVERRIDE;
+  // SendToBrowser() is intended to be safe to use on another thread so
+  // long as the main PpapiThread outlives it.
+  virtual IPC::Sender* GetBrowserSender() OVERRIDE;
+  virtual std::string GetUILanguage() OVERRIDE;
   virtual void PreCacheFont(const void* logfontw) OVERRIDE;
+  virtual void SetActiveURL(const std::string& url) OVERRIDE;
 
   // Message handlers.
-  void OnMsgLoadPlugin(const FilePath& path);
-  void OnMsgCreateChannel(base::ProcessHandle host_process_handle,
-                          int renderer_id);
+  void OnMsgLoadPlugin(const FilePath& path,
+                       const ppapi::PpapiPermissions& permissions);
+  void OnMsgCreateChannel(base::ProcessId renderer_pid,
+                          int renderer_child_id,
+                          bool incognito);
+  void OnMsgResourceReply(
+      const ppapi::proxy::ResourceMessageReplyParams& reply_params,
+      const IPC::Message& nested_msg);
   void OnMsgSetNetworkState(bool online);
   void OnPluginDispatcherMessageReceived(const IPC::Message& msg);
 
   // Sets up the channel to the given renderer. On success, returns true and
   // fills the given ChannelHandle with the information from the new channel.
-  bool SetupRendererChannel(base::ProcessHandle host_process_handle,
-                            int renderer_id,
+  bool SetupRendererChannel(base::ProcessId renderer_pid,
+                            int renderer_child_id,
+                            bool incognito,
                             IPC::ChannelHandle* handle);
 
   // Sets up the name of the plugin for logging using the given path.
@@ -72,10 +97,13 @@ class PpapiThread : public ChildThread,
 
   base::ScopedNativeLibrary library_;
 
+  ppapi::PpapiPermissions permissions_;
+
   // Global state tracking for the proxy.
   ppapi::proxy::PluginGlobals plugin_globals_;
 
-  ppapi::proxy::Dispatcher::GetInterfaceFunc get_plugin_interface_;
+  // Storage for plugin entry points.
+  webkit::ppapi::PluginModule::EntryPoints plugin_entry_points_;
 
   // Callback to call when a new instance connects to the broker.
   // Used only when is_broker_.
@@ -99,7 +127,14 @@ class PpapiThread : public ChildThread,
   // The WebKitPlatformSupport implementation.
   scoped_ptr<PpapiWebKitPlatformSupportImpl> webkit_platform_support_;
 
+#if defined(OS_WIN)
+  // Caches the handle to the peer process if this is a broker.
+  base::win::ScopedHandle peer_handle_;
+#endif
+
   DISALLOW_IMPLICIT_CONSTRUCTORS(PpapiThread);
 };
+
+}  // namespace content
 
 #endif  // CONTENT_PPAPI_PLUGIN_PPAPI_THREAD_H_

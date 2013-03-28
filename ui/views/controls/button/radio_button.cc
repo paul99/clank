@@ -1,4 +1,4 @@
-// Copyright (c) 2011 The Chromium Authors. All rights reserved.
+// Copyright (c) 2012 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -84,11 +84,11 @@ bool RadioButton::IsGroupFocusTraversable() const {
 void RadioButton::OnFocus() {
   Checkbox::OnFocus();
   SetChecked(true);
-  views::MouseEvent event(ui::ET_MOUSE_PRESSED, 0, 0, 0);
+  ui::MouseEvent event(ui::ET_MOUSE_PRESSED, gfx::Point(), gfx::Point(), 0);
   TextButtonBase::NotifyClick(event);
 }
 
-void RadioButton::NotifyClick(const views::Event& event) {
+void RadioButton::NotifyClick(const ui::Event& event) {
   // Set the checked state to true only if we are unchecked, since we can't
   // be toggled on and off like a checkbox.
   if (!checked())
@@ -97,8 +97,8 @@ void RadioButton::NotifyClick(const views::Event& event) {
   TextButtonBase::NotifyClick(event);
 }
 
-gfx::NativeTheme::Part RadioButton::GetThemePart() const {
-  return gfx::NativeTheme::kRadio;
+ui::NativeTheme::Part RadioButton::GetThemePart() const {
+  return ui::NativeTheme::kRadio;
 }
 
 }  // namespace views

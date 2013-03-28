@@ -4,7 +4,6 @@
 
 #ifndef CHROME_BROWSER_BROWSER_ABOUT_HANDLER_H_
 #define CHROME_BROWSER_BROWSER_ABOUT_HANDLER_H_
-#pragma once
 
 #include <map>
 #include <string>
@@ -12,7 +11,7 @@
 
 #include "base/process.h"
 #include "base/stringprintf.h"
-#include "build/build_config.h"  // USE_TCMALLOC, OS_ANDROID
+#include "build/build_config.h"  // USE_TCMALLOC
 
 template <typename T> struct DefaultSingletonTraits;
 class GURL;
@@ -80,34 +79,5 @@ class AboutTcmallocOutputs {
 void AboutTcmallocRendererCallback(base::ProcessId pid,
                                    const std::string& output);
 #endif  // defined(USE_TCMALLOC)
-
-#if defined(OS_ANDROID)
-class AboutAndroidApp {
- public:
-  typedef std::string (*Callback)();
-
-  static std::string GetAppLabel() {
-    return label_getter_ != NULL ? label_getter_() : "";
-  }
-
-  static std::string GetAppVersionName() {
-    return version_name_getter_ != NULL ? version_name_getter_() : "";
-  }
-
-  static std::string GetAppVersionCode() {
-    return version_code_getter_ != NULL ? version_code_getter_() : "";
-  }
-
-  static void RegisterGetters(Callback label_getter,
-          Callback version_name_getter, Callback version_code_getter);
-
- private:
-  static Callback label_getter_;
-  static Callback version_name_getter_;
-  static Callback version_code_getter_;
-
-  DISALLOW_IMPLICIT_CONSTRUCTORS(AboutAndroidApp);
-};
-#endif
 
 #endif  // CHROME_BROWSER_BROWSER_ABOUT_HANDLER_H_

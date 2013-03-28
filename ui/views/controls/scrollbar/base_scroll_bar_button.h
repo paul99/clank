@@ -4,7 +4,6 @@
 
 #ifndef UI_VIEWS_CONTROLS_SCROLLBAR_BASE_SCROLL_BAR_BUTTON_H_
 #define UI_VIEWS_CONTROLS_SCROLLBAR_BASE_SCROLL_BAR_BUTTON_H_
-#pragma once
 
 #include "ui/views/controls/button/custom_button.h"
 
@@ -31,8 +30,8 @@ class VIEWS_EXPORT BaseScrollBarButton : public CustomButton {
   virtual ~BaseScrollBarButton();
 
  protected:
-  virtual bool OnMousePressed(const MouseEvent& event) OVERRIDE;
-  virtual void OnMouseReleased(const MouseEvent& event) OVERRIDE;
+  virtual bool OnMousePressed(const ui::MouseEvent& event) OVERRIDE;
+  virtual void OnMouseReleased(const ui::MouseEvent& event) OVERRIDE;
   virtual void OnMouseCaptureLost() OVERRIDE;
 
  private:

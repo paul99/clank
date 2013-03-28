@@ -1,10 +1,9 @@
-// Copyright (c) 2011 The Chromium Authors. All rights reserved.
+// Copyright (c) 2012 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
 #ifndef NET_BASE_CERT_STATUS_FLAGS_H_
 #define NET_BASE_CERT_STATUS_FLAGS_H_
-#pragma once
 
 #include "base/basictypes.h"
 #include "net/base/net_export.h"
@@ -30,14 +29,14 @@ static const CertStatus CERT_STATUS_UNABLE_TO_CHECK_REVOCATION = 1 << 5;
 static const CertStatus CERT_STATUS_REVOKED                    = 1 << 6;
 static const CertStatus CERT_STATUS_INVALID                    = 1 << 7;
 static const CertStatus CERT_STATUS_WEAK_SIGNATURE_ALGORITHM   = 1 << 8;
-static const CertStatus CERT_STATUS_NOT_IN_DNS                 = 1 << 9;
+// 1 << 9 was used for CERT_STATUS_NOT_IN_DNS
 static const CertStatus CERT_STATUS_NON_UNIQUE_NAME            = 1 << 10;
 static const CertStatus CERT_STATUS_WEAK_KEY                   = 1 << 11;
 
 // Bits 16 to 31 are for non-error statuses.
 static const CertStatus CERT_STATUS_IS_EV                      = 1 << 16;
 static const CertStatus CERT_STATUS_REV_CHECKING_ENABLED       = 1 << 17;
-static const CertStatus CERT_STATUS_IS_DNSSEC                  = 1 << 18;
+// bit 18 was CERT_STATUS_IS_DNSSEC.
 
 // Returns true if the specified cert status has an error set.
 static inline bool IsCertStatusError(CertStatus status) {
@@ -51,7 +50,7 @@ NET_EXPORT bool IsCertStatusMinorError(CertStatus cert_status);
 
 // Maps a network error code to the equivalent certificate status flag.  If
 // the error code is not a certificate error, it is mapped to 0.
-CertStatus MapNetErrorToCertStatus(int error);
+NET_EXPORT CertStatus MapNetErrorToCertStatus(int error);
 
 // Maps the most serious certificate error in the certificate status flags
 // to the equivalent network error code.

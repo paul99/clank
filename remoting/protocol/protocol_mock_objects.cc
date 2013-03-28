@@ -6,17 +6,16 @@
 
 #include "base/message_loop_proxy.h"
 #include "net/base/ip_endpoint.h"
+#include "remoting/protocol/transport.h"
 
 namespace remoting {
 namespace protocol {
 
 MockConnectionToClient::MockConnectionToClient(
     Session* session,
-    HostStub* host_stub,
-    InputStub* input_stub)
+    HostStub* host_stub)
     : ConnectionToClient(session) {
   set_host_stub(host_stub);
-  set_input_stub(input_stub);
 }
 
 MockConnectionToClient::~MockConnectionToClient() {}
@@ -24,6 +23,10 @@ MockConnectionToClient::~MockConnectionToClient() {}
 MockConnectionToClientEventHandler::MockConnectionToClientEventHandler() {}
 
 MockConnectionToClientEventHandler::~MockConnectionToClientEventHandler() {}
+
+MockClipboardStub::MockClipboardStub() {}
+
+MockClipboardStub::~MockClipboardStub() {}
 
 MockInputStub::MockInputStub() {}
 
@@ -44,6 +47,10 @@ MockVideoStub::~MockVideoStub() {}
 MockSession::MockSession() {}
 
 MockSession::~MockSession() {}
+
+MockSessionManager::MockSessionManager() {}
+
+MockSessionManager::~MockSessionManager() {}
 
 }  // namespace protocol
 }  // namespace remoting

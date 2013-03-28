@@ -1,4 +1,4 @@
-// Copyright (c) 2011 The Chromium Authors. All rights reserved.
+// Copyright (c) 2012 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -11,7 +11,10 @@
 #include "base/stl_util.h"
 #include "base/time.h"
 #include "chrome/browser/net/cert_logger.pb.h"
+#include "net/base/load_flags.h"
 #include "net/base/ssl_info.h"
+#include "net/base/upload_bytes_element_reader.h"
+#include "net/base/upload_data_stream.h"
 #include "net/base/x509_certificate.h"
 #include "net/url_request/url_request_context.h"
 
@@ -32,9 +35,8 @@ ChromeFraudulentCertificateReporter::~ChromeFraudulentCertificateReporter() {
   STLDeleteElements(&inflight_requests_);
 }
 
-static std::string BuildReport(
-    const std::string& hostname,
-    const net::SSLInfo& ssl_info) {
+static std::string BuildReport(const std::string& hostname,
+                               const net::SSLInfo& ssl_info) {
   CertLoggerRequest request;
   base::Time now = base::Time::Now();
   request.set_time_usec(now.ToInternalValue());
@@ -53,8 +55,12 @@ static std::string BuildReport(
   return out;
 }
 
-net::URLRequest* ChromeFraudulentCertificateReporter::CreateURLRequest() {
-  return new net::URLRequest(upload_url_, this);
+net::URLRequest* ChromeFraudulentCertificateReporter::CreateURLRequest(
+      net::URLRequestContext* context) {
+  net::URLRequest* request = context->CreateRequest(upload_url_, this);
+  request->set_load_flags(net::LOAD_DO_NOT_SEND_COOKIES |
+                          net::LOAD_DO_NOT_SAVE_COOKIES);
+  return request;
 }
 
 void ChromeFraudulentCertificateReporter::SendReport(
@@ -70,10 +76,13 @@ void ChromeFraudulentCertificateReporter::SendReport(
 
   std::string report = BuildReport(hostname, ssl_info);
 
-  net::URLRequest* url_request = CreateURLRequest();
-  url_request->set_context(request_context_);
+  net::URLRequest* url_request = CreateURLRequest(request_context_);
   url_request->set_method("POST");
-  url_request->AppendBytesToUpload(report.data(), report.size());
+
+  scoped_ptr<net::UploadElementReader> reader(
+      net::UploadOwnedBytesElementReader::CreateWithString(report));
+  url_request->set_upload(make_scoped_ptr(
+      net::UploadDataStream::CreateWithReader(reader.Pass(), 0)));
 
   net::HttpRequestHeaders headers;
   headers.SetHeader(net::HttpRequestHeaders::kContentType,
@@ -113,4 +122,3 @@ void ChromeFraudulentCertificateReporter::OnReadCompleted(
     net::URLRequest* request, int bytes_read) {}
 
 }  // namespace chrome_browser_net
-

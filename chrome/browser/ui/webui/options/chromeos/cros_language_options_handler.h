@@ -1,20 +1,21 @@
-// Copyright (c) 2011 The Chromium Authors. All rights reserved.
+// Copyright (c) 2012 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
 #ifndef CHROME_BROWSER_UI_WEBUI_OPTIONS_CHROMEOS_CROS_LANGUAGE_OPTIONS_HANDLER_H_
 #define CHROME_BROWSER_UI_WEBUI_OPTIONS_CHROMEOS_CROS_LANGUAGE_OPTIONS_HANDLER_H_
-#pragma once
 
 #include "base/compiler_specific.h"
-#include "chrome/browser/chromeos/input_method/ibus_controller.h"
+#include "chrome/browser/chromeos/input_method/input_method_descriptor.h"
 #include "chrome/browser/ui/webui/options/language_options_handler.h"
 
 namespace chromeos {
+namespace options {
 
 // Language options page UI handler for Chrome OS.  For non-Chrome OS,
 // see LanguageOptionsHnadler.
-class CrosLanguageOptionsHandler : public LanguageOptionsHandlerCommon {
+class CrosLanguageOptionsHandler
+    : public ::options::LanguageOptionsHandlerCommon {
  public:
   CrosLanguageOptionsHandler();
   virtual ~CrosLanguageOptionsHandler();
@@ -45,6 +46,12 @@ class CrosLanguageOptionsHandler : public LanguageOptionsHandlerCommon {
   static base::ListValue* GetLanguageList(
       const input_method::InputMethodDescriptors& descriptors);
 
+  // Gets the list of input methods that are implemented in an extension.
+  // The return value will look like:
+  // [{'id': '_ext_ime_nejguenhnsnjnwychcnsdsdjketest',
+  //   'displayName': 'Sample IME'},  ...]
+  static base::ListValue* GetExtensionImeList();
+
  private:
   // LanguageOptionsHandlerCommon implementation.
   virtual string16 GetProductName() OVERRIDE;
@@ -68,6 +75,7 @@ class CrosLanguageOptionsHandler : public LanguageOptionsHandlerCommon {
   DISALLOW_COPY_AND_ASSIGN(CrosLanguageOptionsHandler);
 };
 
-} // namespace chromeos
+}  // namespace options
+}  // namespace chromeos
 
 #endif  // CHROME_BROWSER_UI_WEBUI_OPTIONS_CHROMEOS_CROS_LANGUAGE_OPTIONS_HANDLER_H_

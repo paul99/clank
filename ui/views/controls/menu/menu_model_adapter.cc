@@ -1,4 +1,4 @@
-// Copyright (c) 2011 The Chromium Authors. All rights reserved.
+// Copyright (c) 2012 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -75,8 +75,10 @@ void MenuModelAdapter::ExecuteCommand(int id, int mouse_event_flags) {
 }
 
 bool MenuModelAdapter::IsTriggerableEvent(MenuItemView* source,
-                                          const MouseEvent& e) {
-  return (triggerable_event_flags_ & e.flags()) != 0;
+                                          const ui::Event& e) {
+  return e.type() == ui::ET_GESTURE_TAP ||
+         e.type() == ui::ET_GESTURE_TAP_DOWN ||
+         (e.IsMouseEvent() && (triggerable_event_flags_ & e.flags()) != 0);
 }
 
 bool MenuModelAdapter::GetAccelerator(int id,
@@ -100,12 +102,13 @@ string16 MenuModelAdapter::GetLabel(int id) const {
   return string16();
 }
 
-const gfx::Font& MenuModelAdapter::GetLabelFont(int id) const {
+const gfx::Font* MenuModelAdapter::GetLabelFont(int id) const {
   ui::MenuModel* model = menu_model_;
   int index = 0;
   if (ui::MenuModel::GetModelAndIndexForCommandId(id, &model, &index)) {
     const gfx::Font* font = model->GetLabelFontAt(index);
-    return font ? *font : MenuDelegate::GetLabelFont(id);
+    if (font)
+      return font;
   }
 
   // This line may be reached for the empty menu item.
@@ -180,8 +183,12 @@ void MenuModelAdapter::BuildMenuImpl(MenuItemView* menu, ui::MenuModel* model) {
   const int item_count = model->GetItemCount();
   for (int i = 0; i < item_count; ++i) {
     const int index = i + model->GetFirstItemIndex(NULL);
+
     MenuItemView* item = menu->AppendMenuItemFromModel(
         model, index, model->GetCommandIdAt(index));
+
+    if (item)
+      item->SetVisible(model->IsVisibleAt(index));
 
     if (model->GetTypeAt(index) == ui::MenuModel::TYPE_SUBMENU) {
       DCHECK(item);

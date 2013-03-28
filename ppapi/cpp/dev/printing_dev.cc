@@ -1,10 +1,12 @@
-// Copyright (c) 2011 The Chromium Authors. All rights reserved.
+// Copyright (c) 2012 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
 #include "ppapi/cpp/dev/printing_dev.h"
 
+#include "ppapi/c/dev/ppb_printing_dev.h"
 #include "ppapi/cpp/instance.h"
+#include "ppapi/cpp/instance_handle.h"
 #include "ppapi/cpp/module.h"
 #include "ppapi/cpp/module_impl.h"
 
@@ -14,9 +16,17 @@ namespace {
 
 static const char kPPPPrintingInterface[] = PPP_PRINTING_DEV_INTERFACE;
 
+template <> const char* interface_name<PPB_Printing_Dev_0_7>() {
+  return PPB_PRINTING_DEV_INTERFACE_0_7;
+}
+
+template <> const char* interface_name<PPB_Printing_Dev_0_6>() {
+  return PPB_PRINTING_DEV_INTERFACE_0_6;
+}
+
 uint32_t QuerySupportedFormats(PP_Instance instance) {
   void* object =
-      pp::Instance::GetPerInstanceObject(instance, kPPPPrintingInterface);
+      Instance::GetPerInstanceObject(instance, kPPPPrintingInterface);
   if (!object)
     return 0;
   return static_cast<Printing_Dev*>(object)->QuerySupportedPrintOutputFormats();
@@ -25,7 +35,7 @@ uint32_t QuerySupportedFormats(PP_Instance instance) {
 int32_t Begin(PP_Instance instance,
               const struct PP_PrintSettings_Dev* print_settings) {
   void* object =
-      pp::Instance::GetPerInstanceObject(instance, kPPPPrintingInterface);
+      Instance::GetPerInstanceObject(instance, kPPPPrintingInterface);
   if (!object)
     return 0;
   return static_cast<Printing_Dev*>(object)->PrintBegin(*print_settings);
@@ -70,13 +80,40 @@ const PPP_Printing_Dev ppp_printing = {
 }  // namespace
 
 Printing_Dev::Printing_Dev(Instance* instance)
-      : associated_instance_(instance) {
-  pp::Module::Get()->AddPluginInterface(kPPPPrintingInterface, &ppp_printing);
-  associated_instance_->AddPerInstanceObject(kPPPPrintingInterface, this);
+    : associated_instance_(instance) {
+  Module::Get()->AddPluginInterface(kPPPPrintingInterface, &ppp_printing);
+  instance->AddPerInstanceObject(
+      kPPPPrintingInterface, this);
+  if (has_interface<PPB_Printing_Dev_0_7>()) {
+    PassRefFromConstructor(get_interface<PPB_Printing_Dev_0_7>()->Create(
+        associated_instance_.pp_instance()));
+  }
 }
 
 Printing_Dev::~Printing_Dev() {
-  associated_instance_->RemovePerInstanceObject(kPPPPrintingInterface, this);
+  Instance::RemovePerInstanceObject(associated_instance_,
+                                    kPPPPrintingInterface, this);
+}
+
+// static
+bool Printing_Dev::IsAvailable() {
+  return has_interface<PPB_Printing_Dev_0_7>() ||
+      has_interface<PPB_Printing_Dev_0_6>();
+
+}
+
+int32_t Printing_Dev::GetDefaultPrintSettings(
+    const CompletionCallbackWithOutput<PP_PrintSettings_Dev>& callback) const {
+  if (has_interface<PPB_Printing_Dev_0_7>()) {
+    return get_interface<PPB_Printing_Dev_0_7>()->GetDefaultPrintSettings(
+        pp_resource(), callback.output(), callback.pp_completion_callback());
+  } else if (has_interface<PPB_Printing_Dev_0_6>()) {
+    bool success = PP_ToBool(get_interface<PPB_Printing_Dev_0_6>()->
+        GetDefaultPrintSettings(associated_instance_.pp_instance(),
+                                callback.output()));
+    return callback.MayForce(success ? PP_OK : PP_ERROR_FAILED);
+  }
+  return callback.MayForce(PP_ERROR_NOINTERFACE);
 }
 
 }  // namespace pp

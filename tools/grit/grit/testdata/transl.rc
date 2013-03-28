@@ -1,4 +1,4 @@
-IDC_KLONKMENU MENU 
+IDC_KLONKMENU MENU
 BEGIN
     POPUP "&Skra"
     BEGIN
@@ -6,7 +6,7 @@ BEGIN
         MENUITEM "Thetta er ""Klonk"" sem eg fyla",   ID_FILE_THISBE
         POPUP "gonkurinn"
         BEGIN
-            MENUITEM "Klonk && er ""gott""",           ID_GONK_KLONKIS
+            MENUITEM "Klonk && er [good]",           ID_GONK_KLONKIS
         END
     END
     POPUP "&Hjalp"

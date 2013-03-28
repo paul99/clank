@@ -15,6 +15,12 @@ static GLenum valid_attachment_table[] = {
   GL_STENCIL_ATTACHMENT,
 };
 
+static GLenum valid_backbuffer_attachment_table[] = {
+  GL_COLOR_EXT,
+  GL_DEPTH_EXT,
+  GL_STENCIL_EXT,
+};
+
 static GLenum valid_blit_filter_table[] = {
   GL_NEAREST,
   GL_LINEAR,
@@ -124,36 +130,17 @@ static GLenum valid_g_l_state_table[] = {
   GL_ALIASED_POINT_SIZE_RANGE,
   GL_ALPHA_BITS,
   GL_ARRAY_BUFFER_BINDING,
-  GL_BLEND,
-  GL_BLEND_COLOR,
-  GL_BLEND_DST_ALPHA,
-  GL_BLEND_DST_RGB,
-  GL_BLEND_EQUATION_ALPHA,
-  GL_BLEND_EQUATION_RGB,
-  GL_BLEND_SRC_ALPHA,
-  GL_BLEND_SRC_RGB,
   GL_BLUE_BITS,
-  GL_COLOR_CLEAR_VALUE,
-  GL_COLOR_WRITEMASK,
   GL_COMPRESSED_TEXTURE_FORMATS,
-  GL_CULL_FACE,
-  GL_CULL_FACE_MODE,
   GL_CURRENT_PROGRAM,
   GL_DEPTH_BITS,
-  GL_DEPTH_CLEAR_VALUE,
-  GL_DEPTH_FUNC,
   GL_DEPTH_RANGE,
-  GL_DEPTH_TEST,
-  GL_DEPTH_WRITEMASK,
-  GL_DITHER,
   GL_ELEMENT_ARRAY_BUFFER_BINDING,
   GL_FRAMEBUFFER_BINDING,
-  GL_FRONT_FACE,
   GL_GENERATE_MIPMAP_HINT,
   GL_GREEN_BITS,
   GL_IMPLEMENTATION_COLOR_READ_FORMAT,
   GL_IMPLEMENTATION_COLOR_READ_TYPE,
-  GL_LINE_WIDTH,
   GL_MAX_COMBINED_TEXTURE_IMAGE_UNITS,
   GL_MAX_CUBE_MAP_TEXTURE_SIZE,
   GL_MAX_FRAGMENT_UNIFORM_VECTORS,
@@ -168,9 +155,6 @@ static GLenum valid_g_l_state_table[] = {
   GL_NUM_COMPRESSED_TEXTURE_FORMATS,
   GL_NUM_SHADER_BINARY_FORMATS,
   GL_PACK_ALIGNMENT,
-  GL_POLYGON_OFFSET_FACTOR,
-  GL_POLYGON_OFFSET_FILL,
-  GL_POLYGON_OFFSET_UNITS,
   GL_RED_BITS,
   GL_RENDERBUFFER_BINDING,
   GL_SAMPLE_BUFFERS,
@@ -178,31 +162,64 @@ static GLenum valid_g_l_state_table[] = {
   GL_SAMPLE_COVERAGE_VALUE,
   GL_SAMPLES,
   GL_SCISSOR_BOX,
-  GL_SCISSOR_TEST,
   GL_SHADER_BINARY_FORMATS,
   GL_SHADER_COMPILER,
-  GL_STENCIL_BACK_FAIL,
-  GL_STENCIL_BACK_FUNC,
-  GL_STENCIL_BACK_PASS_DEPTH_FAIL,
-  GL_STENCIL_BACK_PASS_DEPTH_PASS,
-  GL_STENCIL_BACK_REF,
-  GL_STENCIL_BACK_VALUE_MASK,
-  GL_STENCIL_BACK_WRITEMASK,
-  GL_STENCIL_BITS,
-  GL_STENCIL_CLEAR_VALUE,
-  GL_STENCIL_FAIL,
-  GL_STENCIL_FUNC,
-  GL_STENCIL_PASS_DEPTH_FAIL,
-  GL_STENCIL_PASS_DEPTH_PASS,
-  GL_STENCIL_REF,
-  GL_STENCIL_TEST,
-  GL_STENCIL_VALUE_MASK,
-  GL_STENCIL_WRITEMASK,
   GL_SUBPIXEL_BITS,
+  GL_STENCIL_BITS,
   GL_TEXTURE_BINDING_2D,
   GL_TEXTURE_BINDING_CUBE_MAP,
   GL_UNPACK_ALIGNMENT,
+  GL_UNPACK_FLIP_Y_CHROMIUM,
+  GL_UNPACK_PREMULTIPLY_ALPHA_CHROMIUM,
+  GL_UNPACK_UNPREMULTIPLY_ALPHA_CHROMIUM,
+  GL_VERTEX_ARRAY_BINDING_OES,
   GL_VIEWPORT,
+  GL_BLEND_COLOR,
+  GL_BLEND_EQUATION_RGB,
+  GL_BLEND_EQUATION_ALPHA,
+  GL_BLEND_SRC_RGB,
+  GL_BLEND_DST_RGB,
+  GL_BLEND_SRC_ALPHA,
+  GL_BLEND_DST_ALPHA,
+  GL_COLOR_CLEAR_VALUE,
+  GL_DEPTH_CLEAR_VALUE,
+  GL_STENCIL_CLEAR_VALUE,
+  GL_COLOR_WRITEMASK,
+  GL_CULL_FACE_MODE,
+  GL_DEPTH_FUNC,
+  GL_DEPTH_WRITEMASK,
+  GL_DEPTH_RANGE,
+  GL_FRONT_FACE,
+  GL_LINE_WIDTH,
+  GL_POLYGON_OFFSET_FACTOR,
+  GL_POLYGON_OFFSET_UNITS,
+  GL_SAMPLE_COVERAGE_VALUE,
+  GL_SAMPLE_COVERAGE_INVERT,
+  GL_SCISSOR_BOX,
+  GL_STENCIL_FUNC,
+  GL_STENCIL_REF,
+  GL_STENCIL_VALUE_MASK,
+  GL_STENCIL_BACK_FUNC,
+  GL_STENCIL_BACK_REF,
+  GL_STENCIL_BACK_VALUE_MASK,
+  GL_STENCIL_WRITEMASK,
+  GL_STENCIL_BACK_WRITEMASK,
+  GL_STENCIL_FAIL,
+  GL_STENCIL_PASS_DEPTH_FAIL,
+  GL_STENCIL_PASS_DEPTH_PASS,
+  GL_STENCIL_BACK_FAIL,
+  GL_STENCIL_BACK_PASS_DEPTH_FAIL,
+  GL_STENCIL_BACK_PASS_DEPTH_PASS,
+  GL_VIEWPORT,
+  GL_BLEND,
+  GL_CULL_FACE,
+  GL_DEPTH_TEST,
+  GL_DITHER,
+  GL_POLYGON_OFFSET_FILL,
+  GL_SAMPLE_ALPHA_TO_COVERAGE,
+  GL_SAMPLE_COVERAGE,
+  GL_SCISSOR_TEST,
+  GL_STENCIL_TEST,
 };
 
 static GLenum valid_get_max_index_type_table[] = {
@@ -213,12 +230,7 @@ static GLenum valid_get_max_index_type_table[] = {
 
 static GLenum valid_get_tex_param_target_table[] = {
   GL_TEXTURE_2D,
-  GL_TEXTURE_CUBE_MAP_POSITIVE_X,
-  GL_TEXTURE_CUBE_MAP_NEGATIVE_X,
-  GL_TEXTURE_CUBE_MAP_POSITIVE_Y,
-  GL_TEXTURE_CUBE_MAP_NEGATIVE_Y,
-  GL_TEXTURE_CUBE_MAP_POSITIVE_Z,
-  GL_TEXTURE_CUBE_MAP_NEGATIVE_Z,
+  GL_TEXTURE_CUBE_MAP,
 };
 
 static GLenum valid_hint_mode_table[] = {
@@ -239,6 +251,9 @@ static GLenum valid_index_type_table[] = {
 static GLenum valid_pixel_store_table[] = {
   GL_PACK_ALIGNMENT,
   GL_UNPACK_ALIGNMENT,
+  GL_UNPACK_FLIP_Y_CHROMIUM,
+  GL_UNPACK_PREMULTIPLY_ALPHA_CHROMIUM,
+  GL_UNPACK_UNPREMULTIPLY_ALPHA_CHROMIUM,
 };
 
 static GLint valid_pixel_store_alignment_table[] = {
@@ -267,10 +282,34 @@ static GLenum valid_program_parameter_table[] = {
   GL_ACTIVE_UNIFORM_MAX_LENGTH,
 };
 
+static GLenum valid_query_object_parameter_table[] = {
+  GL_QUERY_RESULT_EXT,
+  GL_QUERY_RESULT_AVAILABLE_EXT,
+};
+
+static GLenum valid_query_parameter_table[] = {
+  GL_CURRENT_QUERY_EXT,
+};
+
+static GLenum valid_query_target_table[] = {
+  GL_ANY_SAMPLES_PASSED_EXT,
+  GL_ANY_SAMPLES_PASSED_CONSERVATIVE_EXT,
+  GL_COMMANDS_ISSUED_CHROMIUM,
+  GL_LATENCY_QUERY_CHROMIUM,
+  GL_ASYNC_PIXEL_TRANSFERS_COMPLETED_CHROMIUM,
+};
+
 static GLenum valid_read_pixel_format_table[] = {
   GL_ALPHA,
   GL_RGB,
   GL_RGBA,
+};
+
+static GLenum valid_read_pixel_type_table[] = {
+  GL_UNSIGNED_BYTE,
+  GL_UNSIGNED_SHORT_5_6_5,
+  GL_UNSIGNED_SHORT_4_4_4_4,
+  GL_UNSIGNED_SHORT_5_5_5_1,
 };
 
 static GLenum valid_render_buffer_format_table[] = {
@@ -295,6 +334,12 @@ static GLenum valid_render_buffer_parameter_table[] = {
 
 static GLenum valid_render_buffer_target_table[] = {
   GL_RENDERBUFFER,
+};
+
+static GLenum valid_reset_status_table[] = {
+  GL_GUILTY_CONTEXT_RESET_ARB,
+  GL_INNOCENT_CONTEXT_RESET_ARB,
+  GL_UNKNOWN_CONTEXT_RESET_ARB,
 };
 
 static GLenum valid_shader_parameter_table[] = {
@@ -410,8 +455,14 @@ static GLenum valid_texture_min_filter_mode_table[] = {
 static GLenum valid_texture_parameter_table[] = {
   GL_TEXTURE_MAG_FILTER,
   GL_TEXTURE_MIN_FILTER,
+  GL_TEXTURE_POOL_CHROMIUM,
   GL_TEXTURE_WRAP_S,
   GL_TEXTURE_WRAP_T,
+};
+
+static GLenum valid_texture_pool_table[] = {
+  GL_TEXTURE_POOL_MANAGED_CHROMIUM,
+  GL_TEXTURE_POOL_UNMANAGED_CHROMIUM,
 };
 
 static GLenum valid_texture_target_table[] = {
@@ -471,6 +522,9 @@ static GLint valid_zero_only_table[] = {
 Validators::Validators()
     : attachment(
           valid_attachment_table, arraysize(valid_attachment_table)),
+      backbuffer_attachment(
+          valid_backbuffer_attachment_table, arraysize(
+              valid_backbuffer_attachment_table)),
       blit_filter(
           valid_blit_filter_table, arraysize(valid_blit_filter_table)),
       buffer_parameter(
@@ -528,9 +582,18 @@ Validators::Validators()
       program_parameter(
           valid_program_parameter_table, arraysize(
               valid_program_parameter_table)),
+      query_object_parameter(
+          valid_query_object_parameter_table, arraysize(
+              valid_query_object_parameter_table)),
+      query_parameter(
+          valid_query_parameter_table, arraysize(valid_query_parameter_table)),
+      query_target(
+          valid_query_target_table, arraysize(valid_query_target_table)),
       read_pixel_format(
           valid_read_pixel_format_table, arraysize(
               valid_read_pixel_format_table)),
+      read_pixel_type(
+          valid_read_pixel_type_table, arraysize(valid_read_pixel_type_table)),
       render_buffer_format(
           valid_render_buffer_format_table, arraysize(
               valid_render_buffer_format_table)),
@@ -540,6 +603,8 @@ Validators::Validators()
       render_buffer_target(
           valid_render_buffer_target_table, arraysize(
               valid_render_buffer_target_table)),
+      reset_status(
+          valid_reset_status_table, arraysize(valid_reset_status_table)),
       shader_binary_format(),
       shader_parameter(
           valid_shader_parameter_table, arraysize(
@@ -578,6 +643,8 @@ Validators::Validators()
       texture_parameter(
           valid_texture_parameter_table, arraysize(
               valid_texture_parameter_table)),
+      texture_pool(
+          valid_texture_pool_table, arraysize(valid_texture_pool_table)),
       texture_target(
           valid_texture_target_table, arraysize(valid_texture_target_table)),
       texture_usage(

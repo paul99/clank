@@ -10,6 +10,7 @@
 #include "base/mac/mac_util.h"
 #include "base/memory/ref_counted.h"
 #include "skia/ext/bitmap_platform_device_data.h"
+#include "skia/ext/platform_canvas.h"
 #include "skia/ext/skia_utils_mac.h"
 #include "third_party/skia/include/core/SkMatrix.h"
 #include "third_party/skia/include/core/SkRegion.h"
@@ -27,6 +28,12 @@ static CGContextRef CGContextForData(void* data, int width, int height) {
 #if defined(SK_CPU_LENDIAN) && HAS_ARGB_SHIFTS(24, 16, 8, 0)
   // Allocate a bitmap context with 4 components per pixel (BGRA).  Apple
   // recommends these flags for improved CG performance.
+
+  // CGBitmapContextCreate returns NULL if width/height are 0. However, our
+  // callers expect to get a canvas back (which they later resize/reallocate)
+  // so we pin the dimensions here.
+  width = SkMax32(1, width);
+  height = SkMax32(1, height);
   CGContextRef context =
       CGBitmapContextCreate(data, width, height, 8, width * 4,
                             base::mac::GetSystemColorSpace(),
@@ -114,6 +121,9 @@ BitmapPlatformDevice* BitmapPlatformDevice::Create(CGContextRef context,
                                                    int width,
                                                    int height,
                                                    bool is_opaque) {
+  if (RasterDeviceTooBigToAllocate(width, height))
+    return NULL;
+
   SkBitmap bitmap;
   bitmap.setConfig(SkBitmap::kARGB_8888_Config, width, height);
   if (bitmap.allocPixels() != true)
@@ -125,11 +135,6 @@ BitmapPlatformDevice* BitmapPlatformDevice::Create(CGContextRef context,
     bitmap.setPixels(data);
   } else {
     data = bitmap.getPixels();
-
-    // Note: The Windows implementation clears the Bitmap later on.
-    // This bears mentioning since removal of this line makes the
-    // unit tests only fail periodically (or when MallocPreScribble is set).
-    bitmap.eraseARGB(0, 0, 0, 0);
   }
 
   bitmap.setIsOpaque(is_opaque);
@@ -151,13 +156,22 @@ BitmapPlatformDevice* BitmapPlatformDevice::Create(CGContextRef context,
     CGContextRetain(context);
 
   BitmapPlatformDevice* rv = new BitmapPlatformDevice(
-      new BitmapPlatformDeviceData(context), bitmap);
+      skia::AdoptRef(new BitmapPlatformDeviceData(context)), bitmap);
 
   // The device object took ownership of the graphics context with its own
   // CGContextRetain call.
   CGContextRelease(context);
 
   return rv;
+}
+
+BitmapPlatformDevice* BitmapPlatformDevice::CreateAndClear(int width,
+                                                           int height,
+                                                           bool is_opaque) {
+  BitmapPlatformDevice* device = Create(NULL, width, height, is_opaque);
+  if (!is_opaque)
+    device->accessBitmap(true).eraseARGB(0, 0, 0, 0);
+  return device;
 }
 
 BitmapPlatformDevice* BitmapPlatformDevice::CreateWithData(uint8_t* data,
@@ -181,14 +195,13 @@ BitmapPlatformDevice* BitmapPlatformDevice::CreateWithData(uint8_t* data,
 // The device will own the bitmap, which corresponds to also owning the pixel
 // data. Therefore, we do not transfer ownership to the SkDevice's bitmap.
 BitmapPlatformDevice::BitmapPlatformDevice(
-    BitmapPlatformDeviceData* data, const SkBitmap& bitmap)
+    const skia::RefPtr<BitmapPlatformDeviceData>& data, const SkBitmap& bitmap)
     : SkDevice(bitmap),
       data_(data) {
   SetPlatformDevice(this, this);
 }
 
 BitmapPlatformDevice::~BitmapPlatformDevice() {
-  data_->unref();
 }
 
 CGContextRef BitmapPlatformDevice::GetBitmapContext() {
@@ -233,15 +246,58 @@ void BitmapPlatformDevice::DrawToNativeContext(CGContextRef context, int x,
     data_->ReleaseBitmapContext();
 }
 
-void BitmapPlatformDevice::onAccessBitmap(SkBitmap*) {
+const SkBitmap& BitmapPlatformDevice::onAccessBitmap(SkBitmap* bitmap) {
   // Not needed in CoreGraphics
+  return *bitmap;
 }
 
 SkDevice* BitmapPlatformDevice::onCreateCompatibleDevice(
     SkBitmap::Config config, int width, int height, bool isOpaque,
     Usage /*usage*/) {
   SkASSERT(config == SkBitmap::kARGB_8888_Config);
-  return BitmapPlatformDevice::Create(NULL, width, height, isOpaque);
+  SkDevice* bitmap_device = BitmapPlatformDevice::CreateAndClear(width, height,
+                                                                 isOpaque);
+  return bitmap_device;
+}
+
+// PlatformCanvas impl
+
+SkCanvas* CreatePlatformCanvas(CGContextRef ctx, int width, int height,
+                               bool is_opaque, OnFailureType failureType) {
+  skia::RefPtr<SkDevice> dev = skia::AdoptRef(
+      BitmapPlatformDevice::Create(ctx, width, height, is_opaque));
+  return CreateCanvas(dev, failureType);
+}
+
+SkCanvas* CreatePlatformCanvas(int width, int height, bool is_opaque,
+                               uint8_t* data, OnFailureType failureType) {
+  skia::RefPtr<SkDevice> dev = skia::AdoptRef(
+      BitmapPlatformDevice::CreateWithData(data, width, height, is_opaque));
+  return CreateCanvas(dev, failureType);
+}
+
+// Port of PlatformBitmap to mac
+
+PlatformBitmap::~PlatformBitmap() {
+  if (surface_)
+    CGContextRelease(surface_);
+}
+
+bool PlatformBitmap::Allocate(int width, int height, bool is_opaque) {
+  if (RasterDeviceTooBigToAllocate(width, height))
+    return false;
+    
+  bitmap_.setConfig(SkBitmap::kARGB_8888_Config, width, height, width * 4);
+  if (!bitmap_.allocPixels())
+      return false;
+
+  if (!is_opaque)
+    bitmap_.eraseColor(0);
+  bitmap_.setIsOpaque(is_opaque);
+
+  surface_ = CGContextForData(bitmap_.getPixels(), bitmap_.width(),
+                              bitmap_.height());
+  return true;
 }
 
 }  // namespace skia

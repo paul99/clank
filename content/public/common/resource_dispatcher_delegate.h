@@ -1,10 +1,9 @@
-// Copyright (c) 2011 The Chromium Authors. All rights reserved.
+// Copyright (c) 2012 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
 #ifndef CONTENT_PUBLIC_COMMON_RESOURCE_DISPATCHER_DELEGATE_H_
 #define CONTENT_PUBLIC_COMMON_RESOURCE_DISPATCHER_DELEGATE_H_
-#pragma once
 
 #include "content/common/content_export.h"
 #include "webkit/glue/resource_loader_bridge.h"
@@ -20,7 +19,7 @@ class CONTENT_EXPORT ResourceDispatcherDelegate {
   virtual webkit_glue::ResourceLoaderBridge::Peer* OnRequestComplete(
       webkit_glue::ResourceLoaderBridge::Peer* current_peer,
       ResourceType::Type resource_type,
-      const net::URLRequestStatus& status) = 0;
+      int error_code) = 0;
 
   virtual webkit_glue::ResourceLoaderBridge::Peer* OnReceivedResponse(
       webkit_glue::ResourceLoaderBridge::Peer* current_peer,

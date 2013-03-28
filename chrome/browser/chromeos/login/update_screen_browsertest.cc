@@ -1,31 +1,35 @@
-// Copyright (c) 2011 The Chromium Authors. All rights reserved.
+// Copyright (c) 2012 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
-#include "base/message_loop.h"
+#include "base/memory/scoped_ptr.h"
 #include "chrome/browser/chromeos/cros/mock_network_library.h"
-#include "chrome/browser/chromeos/dbus/mock_dbus_thread_manager.h"
-#include "chrome/browser/chromeos/dbus/mock_session_manager_client.h"
-#include "chrome/browser/chromeos/dbus/mock_update_engine_client.h"
 #include "chrome/browser/chromeos/login/mock_screen_observer.h"
 #include "chrome/browser/chromeos/login/update_screen.h"
 #include "chrome/browser/chromeos/login/wizard_controller.h"
 #include "chrome/browser/chromeos/login/wizard_in_process_browser_test.h"
+#include "chromeos/dbus/mock_dbus_thread_manager.h"
+#include "chromeos/dbus/mock_session_manager_client.h"
+#include "chromeos/dbus/mock_update_engine_client.h"
+#include "testing/gmock/include/gmock/gmock.h"
 #include "testing/gtest/include/gtest/gtest.h"
 
-namespace chromeos {
 using ::testing::_;
 using ::testing::AnyNumber;
 using ::testing::AtLeast;
-using ::testing::Return;
-using ::testing::ReturnRef;
 using ::testing::Invoke;
-using chromeos::UpdateEngineClient;
+using ::testing::Return;
+
+namespace chromeos {
+
+namespace {
 
 static void RequestUpdateCheckSuccess(
     UpdateEngineClient::UpdateCheckCallback callback) {
   callback.Run(UpdateEngineClient::UPDATE_RESULT_SUCCESS);
 }
+
+}  // namespace
 
 class UpdateScreenTest : public WizardInProcessBrowserTest {
  public:
@@ -37,6 +41,8 @@ class UpdateScreenTest : public WizardInProcessBrowserTest {
   virtual void SetUpInProcessBrowserTestFixture() {
     MockDBusThreadManager* mock_dbus_thread_manager =
         new MockDBusThreadManager;
+    EXPECT_CALL(*mock_dbus_thread_manager, GetSystemBus())
+        .WillRepeatedly(Return(reinterpret_cast<dbus::Bus*>(NULL)));
     DBusThreadManager::InitializeForTesting(mock_dbus_thread_manager);
     WizardInProcessBrowserTest::SetUpInProcessBrowserTestFixture();
     cros_mock_->InitStatusAreaMocks();
@@ -62,6 +68,8 @@ class UpdateScreenTest : public WizardInProcessBrowserTest {
         .WillOnce(Invoke(RequestUpdateCheckSuccess));
 
     mock_network_library_ = cros_mock_->mock_network_library();
+    EXPECT_CALL(*mock_network_library_, SetDefaultCheckPortalList())
+        .Times(1);
     EXPECT_CALL(*mock_network_library_, Connected())
         .Times(1)  // also called by NetworkMenu::InitMenuItems()
         .WillRepeatedly((Return(false)))
@@ -69,23 +77,28 @@ class UpdateScreenTest : public WizardInProcessBrowserTest {
     EXPECT_CALL(*mock_network_library_, AddNetworkManagerObserver(_))
         .Times(1)
         .RetiresOnSaturation();
+    EXPECT_CALL(*mock_network_library_, AddUserActionObserver(_))
+        .Times(AnyNumber());
     EXPECT_CALL(*mock_network_library_, FindWifiDevice())
         .Times(AnyNumber());
     EXPECT_CALL(*mock_network_library_, FindEthernetDevice())
         .Times(AnyNumber());
+    EXPECT_CALL(*mock_network_library_, LoadOncNetworks(_, _, _, _))
+        .WillRepeatedly(Return(true));
   }
 
   virtual void SetUpOnMainThread() {
+    WizardInProcessBrowserTest::SetUpOnMainThread();
     mock_screen_observer_.reset(new MockScreenObserver());
-    ASSERT_TRUE(controller() != NULL);
-    update_screen_ = controller()->GetUpdateScreen();
+    ASSERT_TRUE(WizardController::default_controller() != NULL);
+    update_screen_ = WizardController::default_controller()->GetUpdateScreen();
     ASSERT_TRUE(update_screen_ != NULL);
-    ASSERT_EQ(controller()->current_screen(), update_screen_);
+    ASSERT_EQ(WizardController::default_controller()->current_screen(),
+              update_screen_);
     update_screen_->screen_observer_ = mock_screen_observer_.get();
   }
 
   virtual void TearDownInProcessBrowserTestFixture() {
-    update_screen_->screen_observer_ = (controller());
     WizardInProcessBrowserTest::TearDownInProcessBrowserTestFixture();
     DBusThreadManager::Shutdown();
   }

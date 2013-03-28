@@ -10,6 +10,7 @@
 #include "base/memory/scoped_nsobject.h"
 #include "base/sys_string_conversions.h"
 #include "base/utf_string_conversions.h"
+#include "ui/gfx/canvas.h"
 #include "ui/gfx/font.h"
 
 namespace gfx {
@@ -23,9 +24,6 @@ PlatformFontMac::PlatformFontMac() {
   NSFont* system_font = [NSFont systemFontOfSize:font_size_];
   font_name_ = base::SysNSStringToUTF8([system_font fontName]);
   CalculateMetrics();
-}
-
-PlatformFontMac::PlatformFontMac(const Font& other) {
 }
 
 PlatformFontMac::PlatformFontMac(NativeFont native_font) {
@@ -55,6 +53,11 @@ int PlatformFontMac::GetAverageCharacterWidth() const {
   return average_width_;
 }
 
+int PlatformFontMac::GetStringWidth(const string16& text) const {
+  return Canvas::GetStringWidth(text,
+                                Font(const_cast<PlatformFontMac*>(this)));
+}
+
 int PlatformFontMac::GetExpectedTextWidth(int length) const {
   return length * average_width_;
 }
@@ -72,11 +75,23 @@ int PlatformFontMac::GetFontSize() const {
 }
 
 NativeFont PlatformFontMac::GetNativeFont() const {
-  // TODO(pinkerton): apply |style_| to font. http://crbug.com/34667
   // We could cache this, but then we'd have to conditionally change the
   // dtor just for MacOS. Not sure if we want to/need to do that.
-  return [NSFont fontWithName:base::SysUTF8ToNSString(font_name_)
-                         size:font_size_];
+  NSFont* font = [NSFont fontWithName:base::SysUTF8ToNSString(font_name_)
+                                 size:font_size_];
+
+  if (style_ & Font::BOLD) {
+    font = [[NSFontManager sharedFontManager] convertFont:font
+                                              toHaveTrait:NSBoldFontMask];
+  }
+  if (style_ & Font::ITALIC) {
+    font = [[NSFontManager sharedFontManager] convertFont:font
+                                              toHaveTrait:NSItalicFontMask];
+  }
+  // Mac doesn't support underline as a font trait, just drop it. Underlines
+  // can instead be added as an attribute on an NSAttributedString.
+
+  return font;
 }
 
 ////////////////////////////////////////////////////////////////////////////////
@@ -104,7 +119,7 @@ void PlatformFontMac::CalculateMetrics() {
   height_ = [layout_manager defaultLineHeightForFont:font];
   ascent_ = [font ascender];
   average_width_ =
-      [font boundingRectForGlyph:[font glyphWithName:@"x"]].size.width;
+      NSWidth([font boundingRectForGlyph:[font glyphWithName:@"x"]]);
 }
 
 ////////////////////////////////////////////////////////////////////////////////
@@ -113,11 +128,6 @@ void PlatformFontMac::CalculateMetrics() {
 // static
 PlatformFont* PlatformFont::CreateDefault() {
   return new PlatformFontMac;
-}
-
-// static
-PlatformFont* PlatformFont::CreateFromFont(const Font& other) {
-  return new PlatformFontMac(other);
 }
 
 // static

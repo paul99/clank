@@ -1,4 +1,4 @@
-// Copyright (c) 2011 The Chromium Authors. All rights reserved.
+// Copyright (c) 2012 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -15,6 +15,7 @@
 #include "base/utf_string_conversions.h"
 #include "chrome/browser/bookmarks/bookmark_editor.h"
 #include "chrome/browser/bookmarks/bookmark_model.h"
+#include "chrome/browser/bookmarks/bookmark_model_factory.h"
 #include "chrome/browser/bookmarks/bookmark_utils.h"
 #include "chrome/browser/bookmarks/recently_used_folders_combo_model.h"
 #include "chrome/browser/profiles/profile.h"
@@ -23,7 +24,7 @@
 #include "chrome/browser/ui/gtk/gtk_theme_service.h"
 #include "chrome/browser/ui/gtk/gtk_util.h"
 #include "chrome/common/chrome_notification_types.h"
-#include "content/public/browser/notification_service.h"
+#include "content/public/browser/notification_source.h"
 #include "content/public/browser/user_metrics.h"
 #include "grit/generated_resources.h"
 #include "ui/base/gtk/gtk_hig_constants.h"
@@ -36,9 +37,6 @@ namespace {
 // We basically have a singleton, since a bubble is sort of app-modal.  This
 // keeps track of the currently open bubble, or NULL if none is open.
 BookmarkBubbleGtk* g_bubble = NULL;
-
-// Padding between content and edge of bubble.
-const int kContentBorder = 7;
 
 }  // namespace
 
@@ -60,11 +58,6 @@ void BookmarkBubbleGtk::BubbleClosing(BubbleGtk* bubble,
     remove_bookmark_ = newly_bookmarked_;
     apply_edits_ = false;
   }
-
-  content::NotificationService::current()->Notify(
-      chrome::NOTIFICATION_BOOKMARK_BUBBLE_HIDDEN,
-      content::Source<Profile>(profile_->GetOriginalProfile()),
-      content::NotificationService::NoDetails());
 }
 
 void BookmarkBubbleGtk::Observe(int type,
@@ -91,7 +84,7 @@ BookmarkBubbleGtk::BookmarkBubbleGtk(GtkWidget* anchor,
                                      bool newly_bookmarked)
     : url_(url),
       profile_(profile),
-      model_(profile->GetBookmarkModel()),
+      model_(BookmarkModelFactory::GetForProfile(profile)),
       theme_service_(GtkThemeService::GetFrom(profile_)),
       anchor_(anchor),
       content_(NULL),
@@ -118,7 +111,8 @@ BookmarkBubbleGtk::BookmarkBubbleGtk(GtkWidget* anchor,
   // portion with the name entry and the folder combo.  |bottom| is the final
   // row with a spacer, and the edit... and close buttons on the right.
   GtkWidget* content = gtk_vbox_new(FALSE, 5);
-  gtk_container_set_border_width(GTK_CONTAINER(content), kContentBorder);
+  gtk_container_set_border_width(GTK_CONTAINER(content),
+                                 ui::kContentAreaBorder);
   GtkWidget* top = gtk_hbox_new(FALSE, 0);
 
   gtk_misc_set_alignment(GTK_MISC(label), 0, 1);
@@ -168,8 +162,9 @@ BookmarkBubbleGtk::BookmarkBubbleGtk(GtkWidget* anchor,
                             NULL,
                             content,
                             arrow_location,
-                            true,  // match_system_theme
-                            true,  // grab_input
+                            BubbleGtk::MATCH_SYSTEM_THEME |
+                                BubbleGtk::POPUP_WINDOW |
+                                BubbleGtk::GRAB_INPUT,
                             theme_service_,
                             this);  // delegate
   if (!bubble_) {
@@ -183,8 +178,6 @@ BookmarkBubbleGtk::BookmarkBubbleGtk(GtkWidget* anchor,
                    G_CALLBACK(&OnNameActivateThunk), this);
   g_signal_connect(folder_combo_, "changed",
                    G_CALLBACK(&OnFolderChangedThunk), this);
-  g_signal_connect(folder_combo_, "notify::popup-shown",
-                   G_CALLBACK(&OnFolderPopupShownThunk), this);
   g_signal_connect(edit_button, "clicked",
                    G_CALLBACK(&OnEditClickedThunk), this);
   g_signal_connect(close_button, "clicked",
@@ -236,18 +229,6 @@ void BookmarkBubbleGtk::OnFolderChanged(GtkWidget* widget) {
         FROM_HERE,
         base::Bind(&BookmarkBubbleGtk::ShowEditor, factory_.GetWeakPtr()));
   }
-}
-
-void BookmarkBubbleGtk::OnFolderPopupShown(GtkWidget* widget,
-                                           GParamSpec* property) {
-  // GtkComboBox grabs the keyboard and pointer when it displays its popup,
-  // which steals the grabs that BubbleGtk had installed.  When the popup is
-  // hidden, we notify BubbleGtk so it can try to reacquire the grabs
-  // (otherwise, GTK won't activate our widgets when the user clicks in them).
-  gboolean popup_shown = FALSE;
-  g_object_get(G_OBJECT(folder_combo_), "popup-shown", &popup_shown, NULL);
-  if (!popup_shown)
-    bubble_->HandlePointerAndKeyboardUngrabbedByContent();
 }
 
 void BookmarkBubbleGtk::OnEditClicked(GtkWidget* widget) {

@@ -1,4 +1,4 @@
-// Copyright (c) 2011 The Chromium Authors. All rights reserved.
+// Copyright (c) 2012 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -7,6 +7,7 @@
 #include "base/logging.h"
 #include "ui/views/controls/button/text_button.h"
 #include "ui/views/widget/widget.h"
+#include "ui/views/window/dialog_client_view.h"
 
 namespace views {
 
@@ -14,6 +15,9 @@ namespace views {
 // DialogDelegate:
 
 DialogDelegate* DialogDelegate::AsDialogDelegate() { return this; }
+
+DialogDelegate::~DialogDelegate() {
+}
 
 int DialogDelegate::GetDialogButtons() const {
   return ui::DIALOG_BUTTON_OK | ui::DIALOG_BUTTON_CANCEL;
@@ -41,6 +45,10 @@ bool DialogDelegate::IsDialogButtonVisible(ui::DialogButton button) const {
   return true;
 }
 
+bool DialogDelegate::UseChromeStyle() const {
+  return false;
+}
+
 bool DialogDelegate::AreAcceleratorsEnabled(ui::DialogButton button) {
   return true;
 }
@@ -57,7 +65,7 @@ bool DialogDelegate::Cancel() {
   return true;
 }
 
-bool DialogDelegate::Accept(bool window_closiang) {
+bool DialogDelegate::Accept(bool window_closing) {
   return Accept();
 }
 
@@ -86,7 +94,11 @@ View* DialogDelegate::GetInitiallyFocusedView() {
 }
 
 ClientView* DialogDelegate::CreateClientView(Widget* widget) {
-  return new DialogClientView(widget, GetContentsView());
+  DialogClientView::StyleParams params = UseChromeStyle() ?
+      DialogClientView::GetChromeStyleParams() :
+      DialogClientView::StyleParams();
+
+  return new DialogClientView(widget, GetContentsView(), params);
 }
 
 const DialogClientView* DialogDelegate::GetDialogClientView() const {

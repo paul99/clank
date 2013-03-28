@@ -4,7 +4,6 @@
 
 #ifndef NET_HTTP_HTTP_PROXY_CLIENT_SOCKET_POOL_H_
 #define NET_HTTP_HTTP_PROXY_CLIENT_SOCKET_POOL_H_
-#pragma once
 
 #include <string>
 
@@ -27,7 +26,6 @@ namespace net {
 class HostResolver;
 class HttpAuthCache;
 class HttpAuthHandlerFactory;
-class HttpNetworkSession;
 class SSLClientSocketPool;
 class SSLSocketParams;
 class SpdySessionPool;
@@ -162,7 +160,7 @@ class HttpProxyConnectJob : public ConnectJob {
   scoped_ptr<ProxyClientSocket> transport_socket_;
   bool using_spdy_;
   // Protocol negotiated with the server.
-  SSLClientSocket::NextProto protocol_negotiated_;
+  NextProto protocol_negotiated_;
 
   HttpResponseInfo error_response_info_;
 
@@ -171,7 +169,9 @@ class HttpProxyConnectJob : public ConnectJob {
   DISALLOW_COPY_AND_ASSIGN(HttpProxyConnectJob);
 };
 
-class NET_EXPORT_PRIVATE HttpProxyClientSocketPool : public ClientSocketPool {
+class NET_EXPORT_PRIVATE HttpProxyClientSocketPool
+    : public ClientSocketPool,
+      public LayeredPool {
  public:
   HttpProxyClientSocketPool(
       int max_sockets,
@@ -204,7 +204,9 @@ class NET_EXPORT_PRIVATE HttpProxyClientSocketPool : public ClientSocketPool {
                              StreamSocket* socket,
                              int id) OVERRIDE;
 
-  virtual void Flush() OVERRIDE;
+  virtual void FlushWithError(int error) OVERRIDE;
+
+  virtual bool IsStalled() const OVERRIDE;
 
   virtual void CloseIdleSockets() OVERRIDE;
 
@@ -217,6 +219,10 @@ class NET_EXPORT_PRIVATE HttpProxyClientSocketPool : public ClientSocketPool {
       const std::string& group_name,
       const ClientSocketHandle* handle) const OVERRIDE;
 
+  virtual void AddLayeredPool(LayeredPool* layered_pool) OVERRIDE;
+
+  virtual void RemoveLayeredPool(LayeredPool* layered_pool) OVERRIDE;
+
   virtual base::DictionaryValue* GetInfoAsValue(
       const std::string& name,
       const std::string& type,
@@ -225,6 +231,9 @@ class NET_EXPORT_PRIVATE HttpProxyClientSocketPool : public ClientSocketPool {
   virtual base::TimeDelta ConnectionTimeout() const OVERRIDE;
 
   virtual ClientSocketPoolHistograms* histograms() const OVERRIDE;
+
+  // LayeredPool implementation.
+  virtual bool CloseOneIdleConnection() OVERRIDE;
 
  private:
   typedef ClientSocketPoolBase<HttpProxySocketParams> PoolBase;
@@ -243,9 +252,7 @@ class NET_EXPORT_PRIVATE HttpProxyClientSocketPool : public ClientSocketPool {
         const PoolBase::Request& request,
         ConnectJob::Delegate* delegate) const OVERRIDE;
 
-    virtual base::TimeDelta ConnectionTimeout() const OVERRIDE {
-      return timeout_;
-    }
+    virtual base::TimeDelta ConnectionTimeout() const OVERRIDE;
 
    private:
     TransportClientSocketPool* const transport_pool_;

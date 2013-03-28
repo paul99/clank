@@ -13,22 +13,16 @@
 
 #include "base/bind.h"
 #include "base/bind_helpers.h"
+#include "base/chromeos/chromeos_version.h"
 #include "base/logging.h"
 #include "base/message_loop.h"
 #include "base/threading/thread.h"
 #include "base/threading/thread_restrictions.h"
-#include "chrome/browser/browser_process.h"
-#include "chrome/browser/chromeos/system/runtime_environment.h"
-#include "chrome/browser/extensions/extension_tts_api_chromeos.h"
-#include "chrome/browser/prefs/pref_service.h"
-#include "chrome/common/pref_names.h"
 #include "content/public/browser/browser_thread.h"
 
 typedef long alsa_long_t;  // 'long' is required for ALSA API calls.
 
 using content::BrowserThread;
-using std::max;
-using std::min;
 using std::string;
 
 namespace chromeos {
@@ -46,17 +40,23 @@ const char* const kMasterElementNames[] = {
 };
 const char kPCMElementName[] = "PCM";
 
+const char kMicElementName[] = "Mic";
+const char kFrontMicElementName[] = "Front Mic";
+
 // Default minimum and maximum volume (before we've loaded the actual range from
 // ALSA), in decibels.
 const double kDefaultMinVolumeDb = -90.0;
 const double kDefaultMaxVolumeDb = 0.0;
 
-// Default value assigned to the pref when it's first created, in decibels.
-const double kDefaultVolumeDb = -10.0;
+// Default volume as a percentage in the range [0.0, 100.0].
+const double kDefaultVolumePercent = 75.0;
 
-// Values used for muted preference.
-const int kPrefMuteOff = 0;
-const int kPrefMuteOn = 1;
+// A value of less than 1.0 adjusts quieter volumes in larger steps (giving
+// finer resolution in the higher volumes).
+// TODO(derat): Choose a better mapping between percent and decibels.  The
+// bottom twenty-five percent or so is useless on a CR-48's internal speakers;
+// it's all inaudible.
+const double kVolumeBias = 0.5;
 
 // Number of seconds that we'll sleep between each connection attempt.
 const int kConnectionRetrySleepSec = 1;
@@ -72,12 +72,14 @@ const int kConnectionAttemptToLogFailure = 10;
 AudioMixerAlsa::AudioMixerAlsa()
     : min_volume_db_(kDefaultMinVolumeDb),
       max_volume_db_(kDefaultMaxVolumeDb),
-      volume_db_(kDefaultVolumeDb),
+      volume_db_(kDefaultMinVolumeDb),
       is_muted_(false),
       apply_is_pending_(true),
+      initial_volume_percent_(kDefaultVolumePercent),
       alsa_mixer_(NULL),
       pcm_element_(NULL),
-      prefs_(NULL),
+      mic_element_(NULL),
+      front_mic_element_(NULL),
       disconnected_event_(true, false),
       num_connection_attempts_(0) {
 }
@@ -90,7 +92,11 @@ AudioMixerAlsa::~AudioMixerAlsa() {
   thread_->message_loop()->PostTask(
       FROM_HERE, base::Bind(&AudioMixerAlsa::Disconnect,
                             base::Unretained(this)));
-  disconnected_event_.Wait();
+  {
+    // http://crbug.com/125206
+    base::ThreadRestrictions::ScopedAllowWait allow_wait;
+    disconnected_event_.Wait();
+  }
 
   base::ThreadRestrictions::ScopedAllowIO allow_io_for_thread_join;
   thread_->Stop();
@@ -99,10 +105,6 @@ AudioMixerAlsa::~AudioMixerAlsa() {
 
 void AudioMixerAlsa::Init() {
   DCHECK(BrowserThread::CurrentlyOn(BrowserThread::UI));
-  prefs_ = g_browser_process->local_state();
-  volume_db_ = prefs_->GetDouble(prefs::kAudioVolume);
-  is_muted_ = prefs_->GetInteger(prefs::kAudioMute);
-
   DCHECK(!thread_.get()) << "Init() called twice";
   thread_.reset(new base::Thread("AudioMixerAlsa"));
   CHECK(thread_->Start());
@@ -110,45 +112,27 @@ void AudioMixerAlsa::Init() {
       FROM_HERE, base::Bind(&AudioMixerAlsa::Connect, base::Unretained(this)));
 }
 
-bool AudioMixerAlsa::IsInitialized() {
+double AudioMixerAlsa::GetVolumePercent() {
   base::AutoLock lock(lock_);
-  return alsa_mixer_ != NULL;
+  return !alsa_mixer_ ?
+      initial_volume_percent_ :
+      DbToPercent(volume_db_);
 }
 
-void AudioMixerAlsa::GetVolumeLimits(double* min_volume_db,
-                                     double* max_volume_db) {
-  base::AutoLock lock(lock_);
-  if (min_volume_db)
-    *min_volume_db = min_volume_db_;
-  if (max_volume_db)
-    *max_volume_db = max_volume_db_;
-}
-
-double AudioMixerAlsa::GetVolumeDb() {
-  base::AutoLock lock(lock_);
-  return volume_db_;
-}
-
-void AudioMixerAlsa::SetVolumeDb(double volume_db) {
+void AudioMixerAlsa::SetVolumePercent(double percent) {
   DCHECK(BrowserThread::CurrentlyOn(BrowserThread::UI));
 
-  {
-    base::AutoLock lock(lock_);
-    if (isnan(volume_db)) {
-      LOG(WARNING) << "Got request to set volume to NaN";
-      volume_db = min_volume_db_;
-    } else {
-      volume_db = min(max(volume_db, min_volume_db_), max_volume_db_);
-    }
-  }
-
-  prefs_->SetDouble(prefs::kAudioVolume, volume_db);
+  if (isnan(percent))
+    percent = 0.0;
+  percent = std::max(std::min(percent, 100.0), 0.0);
 
   base::AutoLock lock(lock_);
-  volume_db_ = volume_db;
-  if (!apply_is_pending_)
-    thread_->message_loop()->PostTask(FROM_HERE,
-        base::Bind(&AudioMixerAlsa::ApplyState, base::Unretained(this)));
+  if (!alsa_mixer_) {
+    initial_volume_percent_ = percent;
+  } else {
+    volume_db_ = PercentToDb(percent);
+    ApplyStateIfNeeded();
+  }
 }
 
 bool AudioMixerAlsa::IsMuted() {
@@ -156,27 +140,53 @@ bool AudioMixerAlsa::IsMuted() {
   return is_muted_;
 }
 
-void AudioMixerAlsa::SetMuted(bool muted) {
+void AudioMixerAlsa::SetMuted(bool mute) {
   DCHECK(BrowserThread::CurrentlyOn(BrowserThread::UI));
-  prefs_->SetInteger(prefs::kAudioMute, muted ? kPrefMuteOn : kPrefMuteOff);
   base::AutoLock lock(lock_);
-  is_muted_ = muted;
-  if (!apply_is_pending_)
-    thread_->message_loop()->PostTask(FROM_HERE,
-        base::Bind(&AudioMixerAlsa::ApplyState, base::Unretained(this)));
+  if (is_mute_locked_) {
+    NOTREACHED() << "Capture mute has been locked!";
+    return;
+  }
+  is_muted_ = mute;
+  ApplyStateIfNeeded();
 }
 
-// static
-void AudioMixerAlsa::RegisterPrefs(PrefService* local_state) {
-  // TODO(derat): Store audio volume percent instead of decibels.
-  if (!local_state->FindPreference(prefs::kAudioVolume))
-    local_state->RegisterDoublePref(prefs::kAudioVolume,
-                                    kDefaultVolumeDb,
-                                    PrefService::UNSYNCABLE_PREF);
-  if (!local_state->FindPreference(prefs::kAudioMute))
-    local_state->RegisterIntegerPref(prefs::kAudioMute,
-                                     kPrefMuteOff,
-                                     PrefService::UNSYNCABLE_PREF);
+bool AudioMixerAlsa::IsMuteLocked() {
+  base::AutoLock lock(lock_);
+  return is_mute_locked_;
+}
+
+void AudioMixerAlsa::SetMuteLocked(bool locked) {
+  DCHECK(BrowserThread::CurrentlyOn(BrowserThread::UI));
+  base::AutoLock lock(lock_);
+  is_mute_locked_ = locked;
+}
+
+bool AudioMixerAlsa::IsCaptureMuted() {
+  base::AutoLock lock(lock_);
+  return is_capture_muted_;
+}
+
+void AudioMixerAlsa::SetCaptureMuted(bool mute) {
+  DCHECK(BrowserThread::CurrentlyOn(BrowserThread::UI));
+  base::AutoLock lock(lock_);
+  if (is_capture_mute_locked_) {
+    NOTREACHED() << "Capture mute has been locked!";
+    return;
+  }
+  is_capture_muted_ = mute;
+  ApplyStateIfNeeded();
+}
+
+bool AudioMixerAlsa::IsCaptureMuteLocked() {
+  base::AutoLock lock(lock_);
+  return is_capture_mute_locked_;
+}
+
+void AudioMixerAlsa::SetCaptureMuteLocked(bool locked) {
+  DCHECK(BrowserThread::CurrentlyOn(BrowserThread::UI));
+  base::AutoLock lock(lock_);
+  is_capture_mute_locked_ = locked;
 }
 
 void AudioMixerAlsa::Connect() {
@@ -187,13 +197,13 @@ void AudioMixerAlsa::Connect() {
     return;
 
   // Do not attempt to connect if we're not on the device.
-  if (!system::runtime_environment::IsRunningOnChromeOS())
+  if (!base::chromeos::IsRunningOnChromeOS())
     return;
 
   if (!ConnectInternal()) {
     thread_->message_loop()->PostDelayedTask(FROM_HERE,
         base::Bind(&AudioMixerAlsa::Connect, base::Unretained(this)),
-        kConnectionRetrySleepSec * 1000);
+        base::TimeDelta::FromSeconds(kConnectionRetrySleepSec));
   }
 }
 
@@ -298,21 +308,21 @@ bool AudioMixerAlsa::ConnectInternal() {
 
   VLOG(1) << "Volume range is " << min_volume_db << " dB to "
           << max_volume_db << " dB";
+
+  snd_mixer_elem_t* mic_element = FindElementWithName(handle, kMicElementName);
+  snd_mixer_elem_t* front_mic_element =
+      FindElementWithName(handle, kFrontMicElementName);
   {
     base::AutoLock lock(lock_);
     alsa_mixer_ = handle;
     master_element_ = master_element;
     pcm_element_ = pcm_element;
+    mic_element_ = mic_element;
+    front_mic_element_ = front_mic_element;
     min_volume_db_ = min_volume_db;
     max_volume_db_ = max_volume_db;
-    volume_db_ = min(max(volume_db_, min_volume_db_), max_volume_db_);
+    volume_db_ = PercentToDb(initial_volume_percent_);
   }
-
-  // The speech synthesis service shouldn't be initialized until after
-  // we get to this point, so we call this function to tell it that it's
-  // safe to do TTS now.  NotificationService would be cleaner,
-  // but it's not available at this point.
-  EnableChromeOsTts();
 
   ApplyState();
   return true;
@@ -333,10 +343,12 @@ void AudioMixerAlsa::ApplyState() {
     return;
 
   bool should_mute = false;
+  bool should_mute_capture = false;
   double new_volume_db = 0;
   {
     base::AutoLock lock(lock_);
     should_mute = is_muted_;
+    should_mute_capture = is_capture_muted_;
     new_volume_db = should_mute ? min_volume_db_ : volume_db_;
     apply_is_pending_ = false;
   }
@@ -357,6 +369,10 @@ void AudioMixerAlsa::ApplyState() {
   }
 
   SetElementMuted(master_element_, should_mute);
+  if (mic_element_)
+    SetElementMuted(mic_element_, should_mute_capture);
+  if (front_mic_element_)
+    SetElementMuted(front_mic_element_, should_mute_capture);
 }
 
 snd_mixer_elem_t* AudioMixerAlsa::FindElementWithName(
@@ -455,6 +471,29 @@ void AudioMixerAlsa::SetElementMuted(snd_mixer_elem_t* element, bool mute) {
   } else {
     VLOG(1) << "Set playback switch " << snd_mixer_selem_get_name(element)
             << " to " << mute;
+  }
+}
+
+double AudioMixerAlsa::DbToPercent(double db) const {
+  lock_.AssertAcquired();
+  if (db < min_volume_db_)
+    return 0.0;
+  return 100.0 * pow((db - min_volume_db_) /
+      (max_volume_db_ - min_volume_db_), 1/kVolumeBias);
+}
+
+double AudioMixerAlsa::PercentToDb(double percent) const {
+  lock_.AssertAcquired();
+  return pow(percent / 100.0, kVolumeBias) *
+      (max_volume_db_ - min_volume_db_) + min_volume_db_;
+}
+
+void AudioMixerAlsa::ApplyStateIfNeeded() {
+  lock_.AssertAcquired();
+  if (!apply_is_pending_) {
+    thread_->message_loop()->PostTask(
+        FROM_HERE,
+        base::Bind(&AudioMixerAlsa::ApplyState, base::Unretained(this)));
   }
 }
 

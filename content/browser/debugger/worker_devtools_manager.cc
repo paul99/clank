@@ -11,22 +11,15 @@
 #include "content/browser/debugger/devtools_agent_host.h"
 #include "content/browser/debugger/devtools_manager_impl.h"
 #include "content/browser/debugger/worker_devtools_message_filter.h"
-#include "content/browser/worker_host/worker_process_host.h"
 #include "content/browser/worker_host/worker_service_impl.h"
 #include "content/common/devtools_messages.h"
 #include "content/public/browser/browser_thread.h"
 #include "content/public/browser/child_process_data.h"
 #include "content/public/browser/devtools_agent_host_registry.h"
-#include "content/public/browser/notification_observer.h"
-#include "content/public/browser/notification_registrar.h"
-#include "content/public/browser/notification_service.h"
-#include "content/public/browser/notification_types.h"
 #include "content/public/common/process_type.h"
 #include "third_party/WebKit/Source/WebKit/chromium/public/platform/WebCString.h"
 #include "third_party/WebKit/Source/WebKit/chromium/public/WebDevToolsAgent.h"
 #include "third_party/WebKit/Source/WebKit/chromium/public/platform/WebString.h"
-
-using content::BrowserThread;
 
 namespace content {
 
@@ -40,8 +33,7 @@ DevToolsAgentHost* DevToolsAgentHostRegistry::GetDevToolsAgentHostForWorker(
       worker_route_id);
 }
 
-class WorkerDevToolsManager::AgentHosts
-    : private content::NotificationObserver {
+class WorkerDevToolsManager::AgentHosts {
 public:
   static void Add(WorkerId id, WorkerDevToolsAgentHost* host) {
     DCHECK(BrowserThread::CurrentlyOn(BrowserThread::UI));
@@ -73,20 +65,12 @@ public:
 
 private:
   AgentHosts() {
-    registrar_.Add(this, content::NOTIFICATION_APP_TERMINATING,
-                   content::NotificationService::AllSources());
   }
   ~AgentHosts() {}
-
-  // content::NotificationObserver implementation.
-  virtual void Observe(int type,
-                       const content::NotificationSource&,
-                       const content::NotificationDetails&) OVERRIDE;
 
   static AgentHosts* instance_;
   typedef std::map<WorkerId, WorkerDevToolsAgentHost*> Instances;
   Instances map_;
-  content::NotificationRegistrar registrar_;
 };
 
 WorkerDevToolsManager::AgentHosts*
@@ -139,9 +123,9 @@ class WorkerDevToolsManager::WorkerDevToolsAgentHost
   static void ForwardToWorkerDevToolsAgent(
       int worker_process_id,
       int worker_route_id,
-      const IPC::Message& message) {
+      IPC::Message* message) {
     WorkerDevToolsManager::GetInstance()->ForwardToWorkerDevToolsAgent(
-        worker_process_id, worker_route_id, message);
+        worker_process_id, worker_route_id, *message);
   }
 
   // DevToolsAgentHost implementation.
@@ -152,9 +136,10 @@ class WorkerDevToolsManager::WorkerDevToolsAgentHost
             &WorkerDevToolsAgentHost::ForwardToWorkerDevToolsAgent,
             worker_id_.first,
             worker_id_.second,
-            *message));
+            base::Owned(message)));
   }
-  virtual void NotifyClientClosing() OVERRIDE {}
+  virtual void NotifyClientAttaching() OVERRIDE {}
+  virtual void NotifyClientDetaching() OVERRIDE {}
   virtual int GetRenderProcessId() OVERRIDE { return -1; }
 
   WorkerId worker_id_;
@@ -181,8 +166,9 @@ class WorkerDevToolsManager::DetachedClientHosts {
     }
     DevToolsManagerImpl::GetInstance()->DispatchOnInspectorFrontend(
         agent,
-        WebKit::WebDevToolsAgent::disconnectEventAsText().utf8());
+        WebKit::WebDevToolsAgent::workerDisconnectedFromWorkerEvent().utf8());
     int cookie = DevToolsManagerImpl::GetInstance()->DetachClientHost(agent);
+    agent->WorkerDestroyed();
     if (cookie == -1) {
       RemovePendingWorkerData(id);
       return;
@@ -235,18 +221,6 @@ class WorkerDevToolsManager::DetachedClientHosts {
 WorkerDevToolsManager::DetachedClientHosts*
     WorkerDevToolsManager::DetachedClientHosts::instance_ = NULL;
 
-
-void WorkerDevToolsManager::AgentHosts::Observe(
-    int type,
-    const content::NotificationSource&,
-    const content::NotificationDetails&) {
-  DCHECK(type == content::NOTIFICATION_APP_TERMINATING);
-  Instances copy(map_);
-  for (Instances::iterator it = copy.begin(); it != copy.end(); ++it)
-    it->second->WorkerDestroyed();
-  DCHECK(!instance_);
-}
-
 struct WorkerDevToolsManager::InspectedWorker {
   InspectedWorker(WorkerProcessHost* host, int route_id, const GURL& url,
                   const string16& name)
@@ -278,7 +252,6 @@ DevToolsAgentHost* WorkerDevToolsManager::GetDevToolsAgentHostForWorker(
 }
 
 WorkerDevToolsManager::WorkerDevToolsManager() {
-  WorkerServiceImpl::GetInstance()->AddObserver(this);
 }
 
 WorkerDevToolsManager::~WorkerDevToolsManager() {
@@ -290,6 +263,7 @@ void WorkerDevToolsManager::WorkerCreated(
   for (TerminatedInspectedWorkers::iterator it = terminated_workers_.begin();
        it != terminated_workers_.end(); ++it) {
     if (instance.Matches(it->worker_url, it->worker_name,
+                         instance.partition(),
                          instance.resource_context())) {
       worker->Send(new DevToolsAgentMsg_PauseWorkerContextOnStart(
           instance.worker_route_id()));
@@ -495,4 +469,4 @@ void WorkerDevToolsManager::SendResumeToWorker(const WorkerId& id) {
     process->Send(new DevToolsAgentMsg_ResumeWorkerContext(id.second));
 }
 
-}  // namespace
+}  // namespace content

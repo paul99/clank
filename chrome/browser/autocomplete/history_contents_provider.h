@@ -1,17 +1,15 @@
-// Copyright (c) 2011 The Chromium Authors. All rights reserved.
+// Copyright (c) 2012 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
 #ifndef CHROME_BROWSER_AUTOCOMPLETE_HISTORY_CONTENTS_PROVIDER_H_
 #define CHROME_BROWSER_AUTOCOMPLETE_HISTORY_CONTENTS_PROVIDER_H_
-#pragma once
 
+#include "base/basictypes.h"
+#include "base/compiler_specific.h"
+#include "chrome/browser/autocomplete/autocomplete_input.h"
 #include "chrome/browser/autocomplete/history_provider.h"
 #include "chrome/browser/history/history.h"
-
-namespace bookmark_utils {
-struct TitleMatch;
-}
 
 // HistoryContentsProvider is an AutocompleteProvider that provides results from
 // the contents (body and/or title) of previously visited pages.
@@ -24,7 +22,7 @@ class HistoryContentsProvider : public HistoryProvider {
  public:
   // If |body_only| then only provide results for which there is a match in
   // the body, otherwise also match in the page URL and title.
-  HistoryContentsProvider(ACProviderListener* listener,
+  HistoryContentsProvider(AutocompleteProviderListener* listener,
                           Profile* profile,
                           bool body_only);
 
@@ -32,7 +30,7 @@ class HistoryContentsProvider : public HistoryProvider {
   // done SetResults is invoked.
   virtual void Start(const AutocompleteInput& input,
                      bool minimal_changes) OVERRIDE;
-  virtual void Stop() OVERRIDE;
+  virtual void Stop(bool clear_cached_results) OVERRIDE;
 
  private:
   // When processing the results from the history query, this structure points
@@ -69,14 +67,6 @@ class HistoryContentsProvider : public HistoryProvider {
   // Calculates and returns the relevance of a particular result. See the
   // chart in autocomplete.h for the list of values this returns.
   int CalculateRelevance(const history::URLResult& result);
-
-  // Queries the bookmarks for any bookmarks whose title matches input. All
-  // matches are added directly to results_.
-  void QueryBookmarks(const AutocompleteInput& input);
-
-  // Converts a BookmarkModel::TitleMatch to a QueryResult and adds it to
-  // results_.
-  void AddBookmarkTitleMatchToResults(const bookmark_utils::TitleMatch& match);
 
   // Return true if the search term can be found in the title of |result|.
   bool MatchInTitle(const history::URLResult& result);

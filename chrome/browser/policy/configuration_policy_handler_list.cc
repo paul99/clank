@@ -4,13 +4,15 @@
 
 #include "chrome/browser/policy/configuration_policy_handler_list.h"
 
+#include "base/prefs/pref_value_map.h"
 #include "base/stl_util.h"
 #include "base/values.h"
 #include "chrome/browser/policy/configuration_policy_handler.h"
 #include "chrome/browser/policy/policy_error_map.h"
 #include "chrome/browser/policy/policy_map.h"
-#include "chrome/browser/prefs/pref_value_map.h"
+#include "chrome/common/extensions/extension.h"
 #include "chrome/common/pref_names.h"
+#include "chromeos/network/onc/onc_constants.h"
 #include "grit/generated_resources.h"
 #include "policy/policy_constants.h"
 
@@ -39,9 +41,6 @@ const PolicyToPreferenceMapEntry kSimplePolicyMap[] = {
   { key::kHomepageIsNewTabPage,
     prefs::kHomePageIsNewTabPage,
     Value::TYPE_BOOLEAN },
-  { key::kRestoreOnStartup,
-    prefs::kRestoreOnStartup,
-    Value::TYPE_INTEGER },
   { key::kRestoreOnStartupURLs,
     prefs::kURLsToRestoreOnStartup,
     Value::TYPE_LIST },
@@ -54,6 +53,9 @@ const PolicyToPreferenceMapEntry kSimplePolicyMap[] = {
   { key::kDnsPrefetchingEnabled,
     prefs::kNetworkPredictionEnabled,
     Value::TYPE_BOOLEAN },
+  { key::kBuiltInDnsClientEnabled,
+    prefs::kBuiltInDnsClientEnabled,
+    Value::TYPE_BOOLEAN },
   { key::kDisableSpdy,
     prefs::kDisableSpdy,
     Value::TYPE_BOOLEAN },
@@ -62,6 +64,9 @@ const PolicyToPreferenceMapEntry kSimplePolicyMap[] = {
     Value::TYPE_LIST },
   { key::kSafeBrowsingEnabled,
     prefs::kSafeBrowsingEnabled,
+    Value::TYPE_BOOLEAN },
+  { key::kForceSafeSearch,
+    prefs::kForceSafeSearch,
     Value::TYPE_BOOLEAN },
   { key::kPasswordManagerEnabled,
     prefs::kPasswordManagerEnabled,
@@ -81,12 +86,6 @@ const PolicyToPreferenceMapEntry kSimplePolicyMap[] = {
   { key::kApplicationLocaleValue,
     prefs::kApplicationLocale,
     Value::TYPE_STRING },
-  { key::kExtensionInstallWhitelist,
-    prefs::kExtensionInstallAllowList,
-    Value::TYPE_LIST },
-  { key::kExtensionInstallBlacklist,
-    prefs::kExtensionInstallDenyList,
-    Value::TYPE_LIST },
   { key::kExtensionInstallForcelist,
     prefs::kExtensionInstallForceList,
     Value::TYPE_LIST },
@@ -104,9 +103,6 @@ const PolicyToPreferenceMapEntry kSimplePolicyMap[] = {
     Value::TYPE_BOOLEAN },
   { key::kSavingBrowserHistoryDisabled,
     prefs::kSavingBrowserHistoryDisabled,
-    Value::TYPE_BOOLEAN },
-  { key::kClearSiteDataOnExit,
-    prefs::kClearSiteDataOnExit,
     Value::TYPE_BOOLEAN },
   { key::kDeveloperToolsDisabled,
     prefs::kDevToolsDisabled,
@@ -180,6 +176,9 @@ const PolicyToPreferenceMapEntry kSimplePolicyMap[] = {
   { key::kDisableSSLRecordSplitting,
     prefs::kDisableSSLRecordSplitting,
     Value::TYPE_BOOLEAN },
+  { key::kEnableOnlineRevocationChecks,
+    prefs::kCertRevocationCheckingEnabled,
+    Value::TYPE_BOOLEAN },
   { key::kAuthSchemes,
     prefs::kAuthSchemes,
     Value::TYPE_STRING },
@@ -228,6 +227,18 @@ const PolicyToPreferenceMapEntry kSimplePolicyMap[] = {
   { key::kRemoteAccessHostFirewallTraversal,
     prefs::kRemoteAccessHostFirewallTraversal,
     Value::TYPE_BOOLEAN },
+  { key::kRemoteAccessHostRequireTwoFactor,
+    prefs::kRemoteAccessHostRequireTwoFactor,
+    Value::TYPE_BOOLEAN },
+  { key::kRemoteAccessHostDomain,
+    prefs::kRemoteAccessHostDomain,
+    Value::TYPE_STRING },
+  { key::kRemoteAccessHostTalkGadgetPrefix,
+    prefs::kRemoteAccessHostTalkGadgetPrefix,
+    Value::TYPE_STRING },
+  { key::kRemoteAccessHostRequireCurtain,
+    prefs::kRemoteAccessHostRequireCurtain,
+    Value::TYPE_BOOLEAN },
   { key::kCloudPrintProxyEnabled,
     prefs::kCloudPrintProxyEnabled,
     Value::TYPE_BOOLEAN },
@@ -270,9 +281,6 @@ const PolicyToPreferenceMapEntry kSimplePolicyMap[] = {
   { key::kMaxConnectionsPerProxy,
     prefs::kMaxConnectionsPerProxy,
     Value::TYPE_INTEGER },
-  { key::kHideWebStorePromo,
-    prefs::kNTPHideWebStorePromo,
-    Value::TYPE_BOOLEAN },
   { key::kURLBlacklist,
     prefs::kUrlBlacklist,
     Value::TYPE_LIST },
@@ -288,6 +296,27 @@ const PolicyToPreferenceMapEntry kSimplePolicyMap[] = {
   { key::kEnableMemoryInfo,
     prefs::kEnableMemoryInfo,
     Value::TYPE_BOOLEAN },
+  { key::kRestrictSigninToPattern,
+    prefs::kGoogleServicesUsernamePattern,
+    Value::TYPE_STRING },
+  { key::kDefaultMediaStreamSetting,
+    prefs::kManagedDefaultMediaStreamSetting,
+    Value::TYPE_INTEGER },
+  { key::kDisableSafeBrowsingProceedAnyway,
+    prefs::kSafeBrowsingProceedAnywayDisabled,
+    Value::TYPE_BOOLEAN },
+  { key::kSpellCheckServiceEnabled,
+    prefs::kSpellCheckUseSpellingService,
+    Value::TYPE_BOOLEAN },
+  { key::kDisableScreenshots,
+    prefs::kDisableScreenshots,
+    Value::TYPE_BOOLEAN },
+  { key::kAudioCaptureAllowed,
+    prefs::kAudioCaptureAllowed,
+    Value::TYPE_BOOLEAN },
+  { key::kVideoCaptureAllowed,
+    prefs::kVideoCaptureAllowed,
+    Value::TYPE_BOOLEAN },
 
 #if defined(OS_CHROMEOS)
   { key::kChromeOsLockOnIdleSuspend,
@@ -296,7 +325,44 @@ const PolicyToPreferenceMapEntry kSimplePolicyMap[] = {
   { key::kChromeOsReleaseChannel,
     prefs::kChromeOsReleaseChannel,
     Value::TYPE_STRING },
+  { key::kDriveDisabled,
+    prefs::kDisableDrive,
+    Value::TYPE_BOOLEAN },
+  { key::kDriveDisabledOverCellular,
+    prefs::kDisableDriveOverCellular,
+    Value::TYPE_BOOLEAN },
+  { key::kExternalStorageDisabled,
+    prefs::kExternalStorageDisabled,
+    Value::TYPE_BOOLEAN },
+  { key::kAudioOutputAllowed,
+    prefs::kAudioOutputAllowed,
+    Value::TYPE_BOOLEAN },
+  { key::kShowLogoutButtonInTray,
+    prefs::kShowLogoutButtonInTray,
+    Value::TYPE_BOOLEAN },
+  { key::kShelfAutoHideBehavior,
+    prefs::kShelfAutoHideBehaviorLocal,
+    Value::TYPE_STRING },
+  { key::kSessionLengthLimit,
+    prefs::kSessionLengthLimit,
+    Value::TYPE_INTEGER },
 #endif  // defined(OS_CHROMEOS)
+
+#if !defined(OS_MACOSX) && !defined(OS_CHROMEOS)
+  { key::kBackgroundModeEnabled,
+    prefs::kBackgroundModeEnabled,
+    Value::TYPE_BOOLEAN },
+#endif  // !defined(OS_MACOSX) && !defined(OS_CHROMEOS)
+};
+
+// Mapping from extension type names to Extension::Type.
+StringToIntEnumListPolicyHandler::MappingEntry kExtensionAllowedTypesMap[] = {
+  { "extension", extensions::Extension::TYPE_EXTENSION },
+  { "theme", extensions::Extension::TYPE_THEME },
+  { "user_script", extensions::Extension::TYPE_USER_SCRIPT },
+  { "hosted_app", extensions::Extension::TYPE_HOSTED_APP },
+  { "legacy_packaged_app", extensions::Extension::TYPE_LEGACY_PACKAGED_APP },
+  { "platform_app", extensions::Extension::TYPE_PLATFORM_APP },
 };
 
 }  // namespace
@@ -310,13 +376,34 @@ ConfigurationPolicyHandlerList::ConfigurationPolicyHandlerList() {
   }
 
   handlers_.push_back(new AutofillPolicyHandler());
+  handlers_.push_back(new ClearSiteDataOnExitPolicyHandler());
   handlers_.push_back(new DefaultSearchPolicyHandler());
   handlers_.push_back(new DiskCacheDirPolicyHandler());
   handlers_.push_back(new FileSelectionDialogsHandler());
   handlers_.push_back(new IncognitoModePolicyHandler());
   handlers_.push_back(new JavascriptPolicyHandler());
   handlers_.push_back(new ProxyPolicyHandler());
+  handlers_.push_back(new RestoreOnStartupPolicyHandler());
   handlers_.push_back(new SyncPolicyHandler());
+
+  handlers_.push_back(
+      new ExtensionListPolicyHandler(key::kExtensionInstallWhitelist,
+                                     prefs::kExtensionInstallAllowList,
+                                     false));
+  handlers_.push_back(
+      new ExtensionListPolicyHandler(key::kExtensionInstallBlacklist,
+                                     prefs::kExtensionInstallDenyList,
+                                     true));
+  handlers_.push_back(new ExtensionInstallForcelistPolicyHandler());
+  handlers_.push_back(
+      new ExtensionURLPatternListPolicyHandler(
+          key::kExtensionInstallSources,
+          prefs::kExtensionAllowedInstallSites));
+  handlers_.push_back(
+      new StringToIntEnumListPolicyHandler(
+          key::kExtensionAllowedTypes, prefs::kExtensionAllowedTypes,
+          kExtensionAllowedTypesMap,
+          kExtensionAllowedTypesMap + arraysize(kExtensionAllowedTypesMap)));
 
 #if !defined(OS_CHROMEOS)
   handlers_.push_back(new DownloadDirPolicyHandler());
@@ -326,11 +413,12 @@ ConfigurationPolicyHandlerList::ConfigurationPolicyHandlerList() {
   handlers_.push_back(
       new NetworkConfigurationPolicyHandler(
           key::kDeviceOpenNetworkConfiguration,
-          chromeos::NetworkUIData::ONC_SOURCE_DEVICE_POLICY));
+          chromeos::onc::ONC_SOURCE_DEVICE_POLICY));
   handlers_.push_back(
       new NetworkConfigurationPolicyHandler(
           key::kOpenNetworkConfiguration,
-          chromeos::NetworkUIData::ONC_SOURCE_USER_POLICY));
+          chromeos::onc::ONC_SOURCE_USER_POLICY));
+  handlers_.push_back(new PinnedLauncherAppsPolicyHandler());
 #endif  // defined(OS_CHROMEOS)
 }
 

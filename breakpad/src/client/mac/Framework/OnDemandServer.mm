@@ -28,7 +28,9 @@
 // OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 
 #import "OnDemandServer.h"
+
 #import "Breakpad.h"
+#include "common/mac/bootstrap_compat.h"
 
 #if DEBUG
   #define PRINT_MACH_RESULT(result_, message_) \
@@ -100,9 +102,10 @@ kern_return_t OnDemandServer::Initialize(const char *server_command,
   // in the subset by registering it under a known name. The inspector will
   // recover this port and set it as its own bootstrap port in Inspector.mm
   // Inspector::ResetBootstrapPort.
-  kr = bootstrap_register(bootstrap_subset_port,
-                          const_cast<char*>(BREAKPAD_BOOTSTRAP_PARENT_PORT),
-                          bootstrap_port);
+  kr = breakpad::BootstrapRegister(
+      bootstrap_subset_port,
+      const_cast<char*>(BREAKPAD_BOOTSTRAP_PARENT_PORT),
+      bootstrap_port);
   if (kr != BOOTSTRAP_SUCCESS) {
     PRINT_BOOTSTRAP_RESULT(kr, "bootstrap_register(): ");
     return kr;
@@ -120,11 +123,14 @@ kern_return_t OnDemandServer::Initialize(const char *server_command,
 
   strlcpy(service_name_, service_name, sizeof(service_name_));
 
+#pragma clang diagnostic push
+#pragma clang diagnostic ignored "-Wdeprecated-declarations"
   // Create a service called service_name, and return send rights to
   // that port in service_port_.
   kr = bootstrap_create_service(server_port_,
                                 const_cast<char*>(service_name),
                                 &service_port_);
+#pragma clang diagnostic pop
   if (kr != BOOTSTRAP_SUCCESS) {
     PRINT_BOOTSTRAP_RESULT(kr, "bootstrap_create_service(): ");
 
@@ -169,9 +175,9 @@ void OnDemandServer::Unregister() {
 
   if (server_port_ != MACH_PORT_NULL) {
     // unregister the service
-    kern_return_t kr = bootstrap_register(server_port_,
-                                          service_name_,
-                                          MACH_PORT_NULL);
+    kern_return_t kr = breakpad::BootstrapRegister(server_port_,
+                                                   service_name_,
+                                                   MACH_PORT_NULL);
 
     if (kr != KERN_SUCCESS) {
       PRINT_MACH_RESULT(kr, "Breakpad UNREGISTER : bootstrap_register() : ");

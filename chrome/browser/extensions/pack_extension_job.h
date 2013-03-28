@@ -1,10 +1,9 @@
-// Copyright (c) 2011 The Chromium Authors. All rights reserved.
+// Copyright (c) 2012 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
 #ifndef CHROME_BROWSER_EXTENSIONS_PACK_EXTENSION_JOB_H_
 #define CHROME_BROWSER_EXTENSIONS_PACK_EXTENSION_JOB_H_
-#pragma once
 
 #include <string>
 
@@ -14,6 +13,7 @@
 #include "content/public/browser/browser_thread.h"
 #include "chrome/browser/extensions/extension_creator.h"
 
+namespace extensions {
 
 // Manages packing an extension on the file thread and reporting the result
 // back to the UI.
@@ -67,9 +67,12 @@ class PackExtensionJob : public base::RefCountedThreadSafe<PackExtensionJob> {
   FilePath crx_file_out_;
   FilePath key_file_out_;
   bool asynchronous_;
-  int run_flags_;  // Bitset of ExtensionCreator::RunFlags values
+  int run_flags_;  // Bitset of ExtensionCreator::RunFlags values - we always
+                   // assume kRequireModernManifestVersion, though.
 
   DISALLOW_COPY_AND_ASSIGN(PackExtensionJob);
 };
+
+}  // namespace extensions
 
 #endif  // CHROME_BROWSER_EXTENSIONS_PACK_EXTENSION_JOB_H_

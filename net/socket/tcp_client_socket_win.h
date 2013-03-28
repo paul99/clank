@@ -1,10 +1,9 @@
-// Copyright (c) 2011 The Chromium Authors. All rights reserved.
+// Copyright (c) 2012 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
 #ifndef NET_SOCKET_TCP_CLIENT_SOCKET_WIN_H_
 #define NET_SOCKET_TCP_CLIENT_SOCKET_WIN_H_
-#pragma once
 
 #include <winsock2.h>
 
@@ -46,7 +45,7 @@ class NET_EXPORT TCPClientSocketWin : public StreamSocket,
   virtual void Disconnect();
   virtual bool IsConnected() const;
   virtual bool IsConnectedAndIdle() const;
-  virtual int GetPeerAddress(AddressList* address) const;
+  virtual int GetPeerAddress(IPEndPoint* address) const;
   virtual int GetLocalAddress(IPEndPoint* address) const;
   virtual const BoundNetLog& NetLog() const { return net_log_; }
   virtual void SetSubresourceSpeculation();
@@ -55,6 +54,9 @@ class NET_EXPORT TCPClientSocketWin : public StreamSocket,
   virtual bool UsingTCPFastOpen() const;
   virtual int64 NumBytesRead() const;
   virtual base::TimeDelta GetConnectTimeMicros() const;
+  virtual bool WasNpnNegotiated() const OVERRIDE;
+  virtual NextProto GetNegotiatedProtocol() const OVERRIDE;
+  virtual bool GetSSLInfo(SSLInfo* ssl_info) OVERRIDE;
 
   // Socket implementation.
   // Multiple outstanding requests are not supported.
@@ -66,6 +68,13 @@ class NET_EXPORT TCPClientSocketWin : public StreamSocket,
 
   virtual bool SetReceiveBufferSize(int32 size);
   virtual bool SetSendBufferSize(int32 size);
+
+  virtual bool SetKeepAlive(bool enable, int delay);
+  virtual bool SetNoDelay(bool no_delay);
+
+  // Perform reads in non-blocking mode instead of overlapped mode.
+  // Used for experiments.
+  static void DisableOverlappedReads();
 
  private:
   // State machine for connecting the socket.
@@ -83,7 +92,7 @@ class NET_EXPORT TCPClientSocketWin : public StreamSocket,
   int DoConnectComplete(int result);
 
   // Helper used by Disconnect(), which disconnects minus the logging and
-  // resetting of current_ai_.
+  // resetting of current_address_index_.
   void DoDisconnect();
 
   // Returns true if a Connect() is in progress.
@@ -94,11 +103,13 @@ class NET_EXPORT TCPClientSocketWin : public StreamSocket,
   // Called after Connect() has completed with |net_error|.
   void LogConnectCompletion(int net_error);
 
+  int DoRead(IOBuffer* buf, int buf_len, const CompletionCallback& callback);
   void DoReadCallback(int rv);
   void DoWriteCallback(int rv);
   void DidCompleteConnect();
   void DidCompleteRead();
   void DidCompleteWrite();
+  void DidSignalRead();
 
   SOCKET socket_;
 
@@ -112,8 +123,8 @@ class NET_EXPORT TCPClientSocketWin : public StreamSocket,
   // The list of addresses we should try in order to establish a connection.
   AddressList addresses_;
 
-  // Where we are in above list, or NULL if all addrinfos have been tried.
-  const struct addrinfo* current_ai_;
+  // Where we are in above list. Set to -1 if uninitialized.
+  int current_address_index_;
 
   // The various states that the socket could be in.
   bool waiting_read_;

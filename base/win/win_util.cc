@@ -1,4 +1,4 @@
-// Copyright (c) 2011 The Chromium Authors. All rights reserved.
+// Copyright (c) 2012 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -6,10 +6,13 @@
 
 #include <aclapi.h>
 #include <shobjidl.h>  // Must be before propkey.
+#include <initguid.h>
 #include <propkey.h>
 #include <propvarutil.h>
 #include <sddl.h>
 #include <shlobj.h>
+#include <signal.h>
+#include <stdlib.h>
 
 #include "base/logging.h"
 #include "base/memory/scoped_ptr.h"
@@ -20,8 +23,34 @@
 #include "base/win/scoped_handle.h"
 #include "base/win/windows_version.h"
 
+namespace {
+
+// Sets the value of |property_key| to |property_value| in |property_store|.
+// Clears the PropVariant contained in |property_value|.
+bool SetPropVariantValueForPropertyStore(
+    IPropertyStore* property_store,
+    const PROPERTYKEY& property_key,
+    PROPVARIANT* property_value) {
+  DCHECK(property_store);
+
+  HRESULT result = property_store->SetValue(property_key, *property_value);
+  if (result == S_OK)
+    result = property_store->Commit();
+
+  PropVariantClear(property_value);
+  return SUCCEEDED(result);
+}
+
+void __cdecl ForceCrashOnSigAbort(int) {
+  *((int*)0) = 0x1337;
+}
+
+}  // namespace
+
 namespace base {
 namespace win {
+
+static bool g_crash_on_process_detach = false;
 
 #define NONCLIENTMETRICS_SIZE_PRE_VISTA \
     SIZEOF_STRUCT_WITH_SPECIFIED_LAST_MEMBER(NONCLIENTMETRICS, lfMessageFont)
@@ -97,29 +126,36 @@ bool UserAccountControlIsEnabled() {
   return (uac_enabled != 0);
 }
 
+bool SetBooleanValueForPropertyStore(IPropertyStore* property_store,
+                                     const PROPERTYKEY& property_key,
+                                     bool property_bool_value) {
+  PROPVARIANT property_value;
+  if (FAILED(InitPropVariantFromBoolean(property_bool_value, &property_value)))
+    return false;
+
+  return SetPropVariantValueForPropertyStore(property_store,
+                                             property_key,
+                                             &property_value);
+}
+
 bool SetStringValueForPropertyStore(IPropertyStore* property_store,
                                     const PROPERTYKEY& property_key,
                                     const wchar_t* property_string_value) {
-  DCHECK(property_store);
-
   PROPVARIANT property_value;
   if (FAILED(InitPropVariantFromString(property_string_value, &property_value)))
     return false;
 
-  HRESULT result = property_store->SetValue(property_key, property_value);
-  if (S_OK == result)
-    result = property_store->Commit();
-
-  PropVariantClear(&property_value);
-  return SUCCEEDED(result);
+  return SetPropVariantValueForPropertyStore(property_store,
+                                             property_key,
+                                             &property_value);
 }
 
 bool SetAppIdForPropertyStore(IPropertyStore* property_store,
                               const wchar_t* app_id) {
-  // App id should be less than 128 chars and contain no space. And recommended
+  // App id should be less than 64 chars and contain no space. And recommended
   // format is CompanyName.ProductName[.SubProduct.ProductNumber].
   // See http://msdn.microsoft.com/en-us/library/dd378459%28VS.85%29.aspx
-  DCHECK(lstrlen(app_id) < 128 && wcschr(app_id, L' ') == NULL);
+  DCHECK(lstrlen(app_id) < 64 && wcschr(app_id, L' ') == NULL);
 
   return SetStringValueForPropertyStore(property_store,
                                         PKEY_AppUserModel_ID,
@@ -146,6 +182,45 @@ bool ReadCommandFromAutoRun(HKEY root_key,
                             string16* command) {
   base::win::RegKey autorun_key(root_key, kAutoRunKeyPath, KEY_QUERY_VALUE);
   return (autorun_key.ReadValue(name.c_str(), command) == ERROR_SUCCESS);
+}
+
+void SetShouldCrashOnProcessDetach(bool crash) {
+  g_crash_on_process_detach = crash;
+}
+
+bool ShouldCrashOnProcessDetach() {
+  return g_crash_on_process_detach;
+}
+
+void SetAbortBehaviorForCrashReporting() {
+  // Prevent CRT's abort code from prompting a dialog or trying to "report" it.
+  // Disabling the _CALL_REPORTFAULT behavior is important since otherwise it
+  // has the sideffect of clearing our exception filter, which means we
+  // don't get any crash.
+  _set_abort_behavior(0, _WRITE_ABORT_MSG | _CALL_REPORTFAULT);
+
+  // Set a SIGABRT handler for good measure. We will crash even if the default
+  // is left in place, however this allows us to crash earlier. And it also
+  // lets us crash in response to code which might directly call raise(SIGABRT)
+  signal(SIGABRT, ForceCrashOnSigAbort);
+}
+
+bool IsMachineATablet() {
+  if (base::win::GetVersion() < base::win::VERSION_WIN7)
+    return false;
+  const int kMultiTouch = NID_INTEGRATED_TOUCH | NID_MULTI_INPUT | NID_READY;
+  const int kMaxTabletScreenWidth = 1366;
+  const int kMaxTabletScreenHeight = 768;
+  int sm = GetSystemMetrics(SM_DIGITIZER);
+  if ((sm & kMultiTouch) == kMultiTouch) {
+    int cx = GetSystemMetrics(SM_CXSCREEN);
+    int cy = GetSystemMetrics(SM_CYSCREEN);
+    // Handle landscape and portrait modes.
+    return cx > cy ?
+        (cx <= kMaxTabletScreenWidth && cy <= kMaxTabletScreenHeight) :
+        (cy <= kMaxTabletScreenWidth && cx <= kMaxTabletScreenHeight);
+  }
+  return false;
 }
 
 }  // namespace win

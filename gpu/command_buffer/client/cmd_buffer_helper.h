@@ -10,6 +10,7 @@
 #include <string.h>
 #include <time.h>
 
+#include "../../gpu_export.h"
 #include "../common/logging.h"
 #include "../common/constants.h"
 #include "../common/cmd_buffer_common.h"
@@ -32,7 +33,7 @@ namespace gpu {
 //
 // helper.WaitForToken(token);  // this doesn't return until the first two
 //                              // commands have been executed.
-class CommandBufferHelper {
+class GPU_EXPORT CommandBufferHelper {
  public:
   explicit CommandBufferHelper(CommandBuffer* command_buffer);
   virtual ~CommandBufferHelper();
@@ -42,6 +43,13 @@ class CommandBufferHelper {
   //   ring_buffer_size: The size of the ring buffer portion of the command
   //       buffer.
   bool Initialize(int32 ring_buffer_size);
+
+  // Sets whether the command buffer should automatically flush periodically
+  // to try to increase performance. Defaults to true.
+  void SetAutomaticFlushes(bool enabled);
+
+  // True if the context is lost.
+  bool IsContextLost();
 
   // Asynchronously flushes the commands, setting the put pointer to let the
   // buffer interface know that new commands have been added. After a flush
@@ -128,7 +136,7 @@ class CommandBufferHelper {
   // Common Commands
   void Noop(uint32 skip_count) {
     cmd::Noop* cmd = GetImmediateCmdSpace<cmd::Noop>(
-        skip_count * sizeof(CommandBufferEntry));
+        (skip_count - 1) * sizeof(CommandBufferEntry));
     if (cmd) {
       cmd->Init(skip_count);
     }
@@ -208,14 +216,20 @@ class CommandBufferHelper {
     }
   }
 
-  void GetBucketSize(uint32 bucket_id,
-                     uint32 shared_memory_id,
-                     uint32 shared_memory_offset) {
-    cmd::GetBucketSize* cmd = GetCmdSpace<cmd::GetBucketSize>();
+  void GetBucketStart(uint32 bucket_id,
+                      uint32 result_memory_id,
+                      uint32 result_memory_offset,
+                      uint32 data_memory_size,
+                      uint32 data_memory_id,
+                      uint32 data_memory_offset) {
+    cmd::GetBucketStart* cmd = GetCmdSpace<cmd::GetBucketStart>();
     if (cmd) {
       cmd->Init(bucket_id,
-                shared_memory_id,
-                shared_memory_offset);
+                result_memory_id,
+                result_memory_offset,
+                data_memory_size,
+                data_memory_id,
+                data_memory_offset);
     }
   }
 
@@ -267,6 +281,7 @@ class CommandBufferHelper {
   }
 
   bool AllocateRingBuffer();
+  void FreeResources();
 
   CommandBuffer* command_buffer_;
   int32 ring_buffer_id_;
@@ -280,6 +295,8 @@ class CommandBufferHelper {
   int32 last_put_sent_;
   int commands_issued_;
   bool usable_;
+  bool context_lost_;
+  bool flush_automatically_;
 
   // Using C runtime instead of base because this file cannot depend on base.
   clock_t last_flush_time_;

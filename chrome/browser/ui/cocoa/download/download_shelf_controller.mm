@@ -12,6 +12,7 @@
 #include "chrome/browser/themes/theme_service.h"
 #include "chrome/browser/themes/theme_service_factory.h"
 #include "chrome/browser/ui/browser.h"
+#include "chrome/browser/ui/chrome_pages.h"
 #import "chrome/browser/ui/cocoa/animatable_view.h"
 #include "chrome/browser/ui/cocoa/browser_window_cocoa.h"
 #import "chrome/browser/ui/cocoa/browser_window_controller.h"
@@ -65,7 +66,7 @@ const NSTimeInterval kDownloadShelfCloseDuration = 0.12;
 const NSTimeInterval kAutoCloseDelaySeconds = 5;
 
 // The size of the x button by default.
-const NSSize kHoverCloseButtonDefaultSize = { 16, 16 };
+const NSSize kHoverCloseButtonDefaultSize = { 18, 18 };
 
 }  // namespace
 
@@ -112,6 +113,7 @@ const NSSize kHoverCloseButtonDefaultSize = { 16, 16 };
     downloadItemControllers_.reset([[NSMutableArray alloc] init]);
 
     bridge_.reset(new DownloadShelfMac(browser, self));
+    navigator_ = browser;
   }
   return self;
 }
@@ -170,7 +172,7 @@ const NSSize kHoverCloseButtonDefaultSize = { 16, 16 };
 }
 
 - (void)showDownloadsTab:(id)sender {
-  bridge_->browser()->ShowDownloadsTab();
+  chrome::ShowDownloads(bridge_->browser());
 }
 
 - (void)remove:(DownloadItemController*)download {
@@ -290,13 +292,15 @@ const NSSize kHoverCloseButtonDefaultSize = { 16, 16 };
   [self layoutItems:NO];
 }
 
-- (void)addDownloadItem:(BaseDownloadItemModel*)model {
+- (void)addDownloadItem:(DownloadItemModel*)model {
   DCHECK([NSThread isMainThread]);
   [self cancelAutoCloseAndRemoveTrackingArea];
 
   // Insert new item at the left.
   scoped_nsobject<DownloadItemController> controller(
-      [[DownloadItemController alloc] initWithModel:model shelf:self]);
+      [[DownloadItemController alloc] initWithModel:model
+                                              shelf:self
+                                          navigator:navigator_]);
 
   // Adding at index 0 in NSMutableArrays is O(1).
   [downloadItemControllers_ insertObject:controller.get() atIndex:0];

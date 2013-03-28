@@ -4,12 +4,10 @@
 
 #ifndef CHROME_BROWSER_UI_VIEWS_FIND_BAR_HOST_H_
 #define CHROME_BROWSER_UI_VIEWS_FIND_BAR_HOST_H_
-#pragma once
 
 #include "base/compiler_specific.h"
 #include "chrome/browser/ui/find_bar/find_bar.h"
 #include "chrome/browser/ui/views/dropdown_bar_host.h"
-#include "content/public/browser/render_view_host_delegate.h"
 #include "ui/gfx/native_widget_types.h"
 #include "ui/gfx/rect.h"
 #include "ui/views/controls/textfield/textfield.h"
@@ -23,7 +21,7 @@ class FindNotificationDetails;
 //
 // The FindBarHost implements the container widget for the
 // find-in-page functionality. It uses the appropriate implementation from
-// find_bar_host_win.cc or find_bar_host_gtk.cc to draw its content and is
+// find_bar_host_win.cc or find_bar_host_aura.cc to draw its content and is
 // responsible for showing, hiding, closing, and moving the widget if needed,
 // for example if the widget is obscuring the selection results. It also
 // receives notifications about the search results and communicates that to
@@ -45,7 +43,7 @@ class FindBarHost : public DropdownBarHost,
   // that arrow keys and PageUp and PageDown result in scrolling, instead of
   // being eaten because the FindBar has focus. Returns true if the keystroke
   // was forwarded, false if not.
-  bool MaybeForwardKeyEventToWebpage(const views::KeyEvent& key_event);
+  bool MaybeForwardKeyEventToWebpage(const ui::KeyEvent& key_event);
 
   // FindBar implementation:
   virtual FindBarController* GetFindBarController() const OVERRIDE;
@@ -122,8 +120,7 @@ class FindBarHost : public DropdownBarHost,
   void GetWidgetPositionNative(gfx::Rect* avoid_overlapping_rect);
 
   // Allows native implementation to prevent key events from being forwarded.
-  bool ShouldForwardKeyEventToWebpageNative(
-      const views::KeyEvent& key_event);
+  bool ShouldForwardKeyEventToWebpageNative(const ui::KeyEvent& key_event);
 
   // Returns the FindBarView.
   FindBarView* find_bar_view();

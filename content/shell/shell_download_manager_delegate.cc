@@ -1,8 +1,12 @@
-// Copyright (c) 2011 The Chromium Authors. All rights reserved.
+// Copyright (c) 2012 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
 #include "content/shell/shell_download_manager_delegate.h"
+
+#if defined(TOOLKIT_GTK)
+#include <gtk/gtk.h>
+#endif
 
 #if defined(OS_WIN)
 #include <windows.h>
@@ -14,17 +18,20 @@
 #include "base/logging.h"
 #include "base/string_util.h"
 #include "base/utf_string_conversions.h"
-#include "content/browser/download/download_state_info.h"
-#include "content/browser/tab_contents/tab_contents.h"
 #include "content/public/browser/browser_context.h"
 #include "content/public/browser/browser_thread.h"
 #include "content/public/browser/download_manager.h"
+#include "content/public/browser/web_contents.h"
+#include "content/public/browser/web_contents_view.h"
 #include "net/base/net_util.h"
 
 namespace content {
 
 ShellDownloadManagerDelegate::ShellDownloadManagerDelegate()
-    : download_manager_(NULL) {
+    : download_manager_(NULL),
+      suppress_prompting_(false) {
+  // Balanced in Shutdown();
+  AddRef();
 }
 
 ShellDownloadManagerDelegate::~ShellDownloadManagerDelegate(){
@@ -36,84 +43,99 @@ void ShellDownloadManagerDelegate::SetDownloadManager(
   download_manager_ = download_manager;
 }
 
-DownloadId ShellDownloadManagerDelegate::GetNextId() {
-  static int next_id;
-  return DownloadId(this, ++next_id);
+void ShellDownloadManagerDelegate::Shutdown() {
+  Release();
 }
 
-bool ShellDownloadManagerDelegate::ShouldStartDownload(int32 download_id) {
-  DownloadItem* download =
-      download_manager_->GetActiveDownloadItem(download_id);
-  DownloadStateInfo state = download->GetStateInfo();
+bool ShellDownloadManagerDelegate::DetermineDownloadTarget(
+    DownloadItem* download,
+    const DownloadTargetCallback& callback) {
+  DCHECK(BrowserThread::CurrentlyOn(BrowserThread::UI));
+  // This assignment needs to be here because even at the call to
+  // SetDownloadManager, the system is not fully initialized.
+  if (default_download_path_.empty()) {
+    default_download_path_ = download_manager_->GetBrowserContext()->GetPath().
+        Append(FILE_PATH_LITERAL("Downloads"));
+  }
 
-  if (!state.force_file_name.empty())
+  if (!download->GetForcedFilePath().empty()) {
+    callback.Run(download->GetForcedFilePath(),
+                 DownloadItem::TARGET_DISPOSITION_OVERWRITE,
+                 DOWNLOAD_DANGER_TYPE_NOT_DANGEROUS,
+                 download->GetForcedFilePath());
     return true;
+  }
 
   FilePath generated_name = net::GenerateFileName(
       download->GetURL(),
       download->GetContentDisposition(),
-      download->GetReferrerCharset(),
+      EmptyString(),
       download->GetSuggestedFilename(),
       download->GetMimeType(),
       "download");
-
-  // Since we have no download UI, show the user a dialog always.
-  state.prompt_user_for_save_location = true;
 
   BrowserThread::PostTask(
       BrowserThread::FILE,
       FROM_HERE,
       base::Bind(
           &ShellDownloadManagerDelegate::GenerateFilename,
-          this, download_id, state, generated_name));
-  return false;
+          this, download->GetId(), callback, generated_name,
+          default_download_path_));
+  return true;
 }
 
 void ShellDownloadManagerDelegate::GenerateFilename(
     int32 download_id,
-    DownloadStateInfo state,
-    const FilePath& generated_name) {
-  if (state.suggested_path.empty()) {
-    state.suggested_path = download_manager_->GetBrowserContext()->GetPath().
-        Append(FILE_PATH_LITERAL("Downloads"));
-    if (!file_util::PathExists(state.suggested_path))
-      file_util::CreateDirectory(state.suggested_path);
-  }
+    const DownloadTargetCallback& callback,
+    const FilePath& generated_name,
+    const FilePath& suggested_directory) {
+  DCHECK(BrowserThread::CurrentlyOn(BrowserThread::FILE));
+  if (!file_util::PathExists(suggested_directory))
+    file_util::CreateDirectory(suggested_directory);
 
-  state.suggested_path = state.suggested_path.Append(generated_name);
-
+  FilePath suggested_path(suggested_directory.Append(generated_name));
   BrowserThread::PostTask(
       BrowserThread::UI,
       FROM_HERE,
       base::Bind(
-          &ShellDownloadManagerDelegate::RestartDownload,
-          this, download_id, state));
+          &ShellDownloadManagerDelegate::OnDownloadPathGenerated,
+          this, download_id, callback, suggested_path));
 }
 
-void ShellDownloadManagerDelegate::RestartDownload(
+void ShellDownloadManagerDelegate::OnDownloadPathGenerated(
     int32 download_id,
-    DownloadStateInfo state) {
-  DownloadItem* download =
-      download_manager_->GetActiveDownloadItem(download_id);
-  if (!download)
+    const DownloadTargetCallback& callback,
+    const FilePath& suggested_path) {
+  DCHECK(BrowserThread::CurrentlyOn(BrowserThread::UI));
+  if (suppress_prompting_) {
+    // Testing exit.
+    callback.Run(suggested_path, DownloadItem::TARGET_DISPOSITION_OVERWRITE,
+                 DOWNLOAD_DANGER_TYPE_NOT_DANGEROUS,
+                 suggested_path.AddExtension(FILE_PATH_LITERAL(".crdownload")));
     return;
-  download->SetFileCheckResults(state);
-  download_manager_->RestartDownload(download_id);
+  }
+
+  ChooseDownloadPath(download_id, callback, suggested_path);
 }
 
 void ShellDownloadManagerDelegate::ChooseDownloadPath(
-    WebContents* web_contents,
-    const FilePath& suggested_path,
-    void* data) {
+    int32 download_id,
+    const DownloadTargetCallback& callback,
+    const FilePath& suggested_path) {
+  DCHECK(BrowserThread::CurrentlyOn(BrowserThread::UI));
+  DownloadItem* item = download_manager_->GetDownload(download_id);
+  if (!item || (item->GetState() != DownloadItem::IN_PROGRESS))
+    return;
+
   FilePath result;
-#if defined(OS_WIN)
+#if defined(OS_WIN) && !defined(USE_AURA)
   std::wstring file_part = FilePath(suggested_path).BaseName().value();
   wchar_t file_name[MAX_PATH];
   base::wcslcpy(file_name, file_part.c_str(), arraysize(file_name));
   OPENFILENAME save_as;
   ZeroMemory(&save_as, sizeof(save_as));
   save_as.lStructSize = sizeof(OPENFILENAME);
-  save_as.hwndOwner = web_contents->GetNativeView();
+  save_as.hwndOwner = item->GetWebContents()->GetNativeView();
   save_as.lpstrFile = file_name;
   save_as.nMaxFile = arraysize(file_name);
 
@@ -127,15 +149,41 @@ void ShellDownloadManagerDelegate::ChooseDownloadPath(
 
   if (GetSaveFileName(&save_as))
     result = FilePath(std::wstring(save_as.lpstrFile));
+#elif defined(TOOLKIT_GTK)
+  GtkWidget *dialog;
+  gfx::NativeWindow parent_window;
+  std::string base_name = FilePath(suggested_path).BaseName().value();
+
+  parent_window = item->GetWebContents()->GetView()->GetTopLevelNativeWindow();
+  dialog = gtk_file_chooser_dialog_new("Save File",
+                                       parent_window,
+                                       GTK_FILE_CHOOSER_ACTION_SAVE,
+                                       GTK_STOCK_CANCEL, GTK_RESPONSE_CANCEL,
+                                       GTK_STOCK_SAVE, GTK_RESPONSE_ACCEPT,
+                                       NULL);
+  gtk_file_chooser_set_do_overwrite_confirmation(GTK_FILE_CHOOSER(dialog),
+                                                 TRUE);
+  gtk_file_chooser_set_current_name(GTK_FILE_CHOOSER(dialog),
+                                    base_name.c_str());
+
+  if (gtk_dialog_run(GTK_DIALOG(dialog)) == GTK_RESPONSE_ACCEPT) {
+    char *filename;
+    filename = gtk_file_chooser_get_filename(GTK_FILE_CHOOSER(dialog));
+    result = FilePath(filename);
+  }
+  gtk_widget_destroy(dialog);
 #else
   NOTIMPLEMENTED();
 #endif
 
-  if (result.empty()) {
-    download_manager_->FileSelectionCanceled(data);
-  } else {
-    download_manager_->FileSelected(result, data);
-  }
+  callback.Run(result, DownloadItem::TARGET_DISPOSITION_PROMPT,
+               DOWNLOAD_DANGER_TYPE_NOT_DANGEROUS, result);
+}
+
+void ShellDownloadManagerDelegate::SetDownloadBehaviorForTesting(
+    const FilePath& default_download_path) {
+  default_download_path_ = default_download_path;
+  suppress_prompting_ = true;
 }
 
 }  // namespace content

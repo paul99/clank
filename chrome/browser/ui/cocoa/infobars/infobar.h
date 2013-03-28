@@ -4,7 +4,6 @@
 
 #ifndef CHROME_BROWSER_UI_COCOA_INFOBARS_INFOBAR_H_
 #define CHROME_BROWSER_UI_COCOA_INFOBARS_INFOBAR_H_
-#pragma once
 
 #include "base/logging.h"  // for DCHECK
 
@@ -16,7 +15,7 @@ class InfoBarController;
 
 // A C++ wrapper around an Objective-C InfoBarController.  This class
 // exists solely to be the return value for InfoBarDelegate::CreateInfoBar(),
-// as defined in chrome/browser/tab_contents/confirm_infobar_delegate.h.  This
+// as defined in chrome/browser/api/infobars/confirm_infobar_delegate.h.  This
 // class would be analogous to the various bridge classes we already
 // have, but since there is no pre-defined InfoBar interface, it is
 // easier to simply throw away this object and deal with the

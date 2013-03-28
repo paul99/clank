@@ -1,4 +1,4 @@
-// Copyright (c) 2011 The Chromium Authors. All rights reserved.
+// Copyright (c) 2012 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -14,23 +14,23 @@ namespace npapi {
 // to use |lock_| (but it doesn't hurt either).
 class MockPluginList : public PluginList {
  public:
-  MockPluginList(const PluginGroupDefinition* group_definitions,
-                 size_t num_group_definitions);
+  MockPluginList();
   virtual ~MockPluginList();
 
-  void AddPluginToLoad(const webkit::WebPluginInfo& plugin);
+  void AddPluginToLoad(const WebPluginInfo& plugin);
   void ClearPluginsToLoad();
 
   // PluginList:
-  virtual bool GetPluginsIfNoRefreshNeeded(
+  virtual bool GetPluginsNoRefresh(
       std::vector<webkit::WebPluginInfo>* plugins) OVERRIDE;
 
  private:
-  std::vector<webkit::WebPluginInfo> plugins_to_load_;
+  std::vector<WebPluginInfo> plugins_to_load_;
 
   // PluginList methods:
-  virtual void LoadPluginsInternal(
-      ScopedVector<PluginGroup>* plugin_groups) OVERRIDE;
+
+  virtual void LoadPluginsIntoPluginListInternal(
+        std::vector<webkit::WebPluginInfo>* plugins) OVERRIDE;
 };
 
 }  // npapi

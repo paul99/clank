@@ -1,13 +1,16 @@
-// Copyright (c) 2010 The Chromium Authors. All rights reserved.
+// Copyright (c) 2012 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
 #include "chrome/browser/memory_details.h"
 
 #include <set>
+#include <string>
+#include <vector>
 
 #include "base/bind.h"
 #include "base/process_util.h"
+#include "base/memory/scoped_ptr.h"
 #include "chrome/common/chrome_constants.h"
 #include "content/public/browser/browser_thread.h"
 #include "content/public/common/process_type.h"
@@ -27,10 +30,10 @@ void AddNonChildChromeProcesses(
     std::vector<ProcessMemoryInformation>* processes) {
   base::ProcessIterator process_iter(NULL);
   while (const ProcessEntry* process_entry = process_iter.NextProcessEntry()) {
-    // TODO(bulach): this is unreliable and slow, and we'd be better to track
-    // these processes by pid obtained from creation in the java side.
-    if (process_entry->cmd_line_args_[0].find(
-        chrome::kHelperProcessExecutableName) == std::string::npos) {
+    const std::vector<std::string>& cmd_args = process_entry->cmd_line_args();
+    if (cmd_args.empty() ||
+        cmd_args[0].find(chrome::kHelperProcessExecutableName) ==
+            std::string::npos) {
       continue;
     }
     ProcessMemoryInformation info;
@@ -39,21 +42,12 @@ void AddNonChildChromeProcesses(
   }
 }
 
-}  // namespace
-
-MemoryDetails::MemoryDetails() {
-}
-
-ProcessData* MemoryDetails::ChromeBrowser() {
-  return &process_data_[0];
-}
-
-// For each of a list of pids, collect memory information about that process
-// and append a record to |out|
-static void GetProcessDataMemoryInformation(
+// For each of the pids, collect memory information about that process
+// and append a record to |out|.
+void GetProcessDataMemoryInformation(
     const std::set<ProcessId>& pids, ProcessData* out) {
-  for (std::set<ProcessId>::const_iterator
-       i = pids.begin(); i != pids.end(); ++i) {
+  for (std::set<ProcessId>::const_iterator i = pids.begin(); i != pids.end();
+       ++i) {
     ProcessMemoryInformation pmi;
 
     pmi.pid = *i;
@@ -64,30 +58,30 @@ static void GetProcessDataMemoryInformation(
     else
       pmi.type = content::PROCESS_TYPE_UNKNOWN;
 
-    base::ProcessMetrics* metrics =
-        base::ProcessMetrics::CreateProcessMetrics(*i);
+    scoped_ptr<base::ProcessMetrics> metrics(
+        base::ProcessMetrics::CreateProcessMetrics(*i));
     metrics->GetWorkingSetKBytes(&pmi.working_set);
-    delete metrics;
 
     out->processes.push_back(pmi);
   }
 }
 
 // Find all children of the given process.
-static void GetAllChildren(const std::vector<ProcessEntry>& processes,
-                           const std::set<ProcessId>& roots,
-                           std::set<ProcessId>* out) {
+void GetAllChildren(const std::vector<ProcessEntry>& processes,
+                    const std::set<ProcessId>& roots,
+                    std::set<ProcessId>* out) {
   *out = roots;
 
-  std::set<ProcessId> wavefront, next_wavefront;
-  for (std::set<ProcessId>::const_iterator
-       i = roots.begin(); i != roots.end(); ++i) {
+  std::set<ProcessId> wavefront;
+  for (std::set<ProcessId>::const_iterator i = roots.begin(); i != roots.end();
+       ++i) {
     wavefront.insert(*i);
   }
 
   while (wavefront.size()) {
-    for (std::vector<ProcessEntry>::const_iterator
-         i = processes.begin(); i != processes.end(); ++i) {
+    std::set<ProcessId> next_wavefront;
+    for (std::vector<ProcessEntry>::const_iterator i = processes.begin();
+         i != processes.end(); ++i) {
       if (wavefront.count(i->parent_pid())) {
         out->insert(i->pid());
         next_wavefront.insert(i->pid());
@@ -97,6 +91,16 @@ static void GetAllChildren(const std::vector<ProcessEntry>& processes,
     wavefront.clear();
     wavefront.swap(next_wavefront);
   }
+}
+
+}  // namespace
+
+MemoryDetails::MemoryDetails()
+    : user_metrics_mode_(UPDATE_USER_METRICS) {
+}
+
+ProcessData* MemoryDetails::ChromeBrowser() {
+  return &process_data_[0];
 }
 
 void MemoryDetails::CollectProcessData(
@@ -125,7 +129,8 @@ void MemoryDetails::CollectProcessData(
   ProcessData current_browser;
   GetProcessDataMemoryInformation(current_browser_processes, &current_browser);
   current_browser.name = l10n_util::GetStringUTF16(IDS_PRODUCT_NAME);
-  current_browser.process_name = reinterpret_cast<unsigned int>(chrome::kBrowserProcessExecutableName);
+  current_browser.process_name =
+      reinterpret_cast<unsigned int>(chrome::kBrowserProcessExecutableName);
   process_data_.push_back(current_browser);
 
   // Finally return to the browser thread.

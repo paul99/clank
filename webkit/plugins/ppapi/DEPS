@@ -4,6 +4,8 @@ include_rules = [
   "+ppapi/thunk",
   "+printing",
   "+media/audio",
+  "+media/base",
   "+media/video",
   "+ui/base/ime",
+  "+ui/base/range",
 ]

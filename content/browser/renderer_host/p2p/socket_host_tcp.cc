@@ -1,4 +1,4 @@
-// Copyright (c) 2011 The Chromium Authors. All rights reserved.
+// Copyright (c) 2012 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -6,6 +6,7 @@
 
 #include "base/sys_byteorder.h"
 #include "content/common/p2p_messages.h"
+#include "ipc/ipc_sender.h"
 #include "net/base/io_buffer.h"
 #include "net/base/net_errors.h"
 #include "net/base/net_util.h"
@@ -18,9 +19,8 @@ const int kPacketHeaderSize = sizeof(uint16);
 
 namespace content {
 
-P2PSocketHostTcp::P2PSocketHostTcp(IPC::Message::Sender* message_sender,
-                                   int routing_id, int id)
-    : P2PSocketHost(message_sender, routing_id, id),
+P2PSocketHostTcp::P2PSocketHostTcp(IPC::Sender* message_sender, int id)
+    : P2PSocketHost(message_sender, id),
       connected_(false) {
 }
 
@@ -50,17 +50,13 @@ bool P2PSocketHostTcp::Init(const net::IPEndPoint& local_address,
   remote_address_ = remote_address;
   state_ = STATE_CONNECTING;
   scoped_ptr<net::TCPClientSocket> tcp_socket(new net::TCPClientSocket(
-      net::AddressList::CreateFromIPAddress(
-          remote_address.address(), remote_address.port()),
+      net::AddressList(remote_address),
       NULL, net::NetLog::Source()));
   if (tcp_socket->Bind(local_address) != net::OK) {
     OnError();
     return false;
   }
   socket_.reset(tcp_socket.release());
-
-  if (socket_->SetSendBufferSize(kMaxSendBufferSize))
-    LOG(WARNING) << "Failed to set send buffer size for TCP socket.";
 
   int result = socket_->Connect(
       base::Bind(&P2PSocketHostTcp::OnConnected, base::Unretained(this)));
@@ -75,8 +71,9 @@ void P2PSocketHostTcp::OnError() {
   socket_.reset();
 
   if (state_ == STATE_UNINITIALIZED || state_ == STATE_CONNECTING ||
-      state_ == STATE_OPEN)
-    message_sender_->Send(new P2PMsg_OnError(routing_id_, id_));
+      state_ == STATE_OPEN) {
+    message_sender_->Send(new P2PMsg_OnError(id_));
+  }
 
   state_ = STATE_ERROR;
 }
@@ -90,6 +87,10 @@ void P2PSocketHostTcp::OnConnected(int result) {
     return;
   }
 
+  if (!socket_->SetSendBufferSize(kMaxSendBufferSize)) {
+    LOG(WARNING) << "Failed to set send buffer size for TCP socket.";
+  }
+
   net::IPEndPoint address;
   result = socket_->GetLocalAddress(&address);
   if (result < 0) {
@@ -101,7 +102,7 @@ void P2PSocketHostTcp::OnConnected(int result) {
 
   VLOG(1) << "Local address: " << address.ToString();
   state_ = STATE_OPEN;
-  message_sender_->Send(new P2PMsg_OnSocketCreated(routing_id_, id_, address));
+  message_sender_->Send(new P2PMsg_OnSocketCreated(id_, address));
   DoRead();
 }
 
@@ -149,8 +150,7 @@ void P2PSocketHostTcp::OnPacket(std::vector<char>& data) {
     }
   }
 
-  message_sender_->Send(new P2PMsg_OnDataReceived(routing_id_, id_,
-                                                  remote_address_, data));
+  message_sender_->Send(new P2PMsg_OnDataReceived(id_, remote_address_, data));
 }
 
 void P2PSocketHostTcp::DidCompleteRead(int result) {
@@ -165,21 +165,26 @@ void P2PSocketHostTcp::DidCompleteRead(int result) {
   }
 
   read_buffer_->set_offset(read_buffer_->offset() + result);
-  if (read_buffer_->offset() > kPacketHeaderSize) {
-    int packet_size =
-        ntohs(*reinterpret_cast<uint16*>(read_buffer_->StartOfBuffer()));
-    if (packet_size + kPacketHeaderSize <= read_buffer_->offset()) {
-      // We've got a full packet!
-      char* start = read_buffer_->StartOfBuffer() + kPacketHeaderSize;
-      std::vector<char> data(start, start + packet_size);
-      OnPacket(data);
-
-      // Move remaining data to the start of the buffer.
-      memmove(read_buffer_->StartOfBuffer(), start + packet_size,
-              read_buffer_->offset() - packet_size - kPacketHeaderSize);
-      read_buffer_->set_offset(read_buffer_->offset() - packet_size -
-                               kPacketHeaderSize);
-    }
+  char* head = read_buffer_->StartOfBuffer();  // Purely a convenience.
+  int consumed = 0;
+  while (consumed + kPacketHeaderSize <= read_buffer_->offset() &&
+         state_ == STATE_OPEN) {
+    int packet_size = base::NetToHost16(
+        *reinterpret_cast<uint16*>(head + consumed));
+    if (consumed + packet_size + kPacketHeaderSize > read_buffer_->offset())
+      break;
+    // We've got a full packet!
+    consumed += kPacketHeaderSize;
+    char* cur = head + consumed;
+    std::vector<char> data(cur, cur + packet_size);
+    OnPacket(data);
+    consumed += packet_size;
+  }
+  // We've consumed all complete packets from the buffer; now move any remaining
+  // bytes to the head of the buffer and set offset to reflect this.
+  if (consumed && consumed <= read_buffer_->offset()) {
+    memmove(head, head + consumed, read_buffer_->offset() - consumed);
+    read_buffer_->set_offset(read_buffer_->offset() - consumed);
   }
 }
 
@@ -219,7 +224,8 @@ void P2PSocketHostTcp::Send(const net::IPEndPoint& to,
 
   int size = kPacketHeaderSize + data.size();
   write_buffer_ = new net::DrainableIOBuffer(new net::IOBuffer(size), size);
-  *reinterpret_cast<uint16*>(write_buffer_->data()) = htons(data.size());
+  *reinterpret_cast<uint16*>(write_buffer_->data()) =
+      base::HostToNet16(data.size());
   memcpy(write_buffer_->data() + kPacketHeaderSize, &data[0], data.size());
 
   DoWrite();

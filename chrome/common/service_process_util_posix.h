@@ -14,7 +14,7 @@
 #include "base/memory/scoped_ptr.h"
 #include "base/message_loop.h"
 
-#if defined(OS_POSIX) && !defined(OS_MACOSX) && !defined(OS_ANDROID)
+#if defined(OS_POSIX) && !defined(OS_MACOSX)
 #include "chrome/common/multi_process_lock.h"
 MultiProcessLock* TakeServiceRunningLock(bool waiting);
 #endif
@@ -72,7 +72,7 @@ struct ServiceProcessState::StateData
   base::mac::ScopedCFTypeRef<CFDictionaryRef> launchd_conf_;
   base::files::FilePathWatcher executable_watcher_;
 #endif  // OS_MACOSX
-#if defined(OS_POSIX) && !defined(OS_MACOSX) && !defined(OS_ANDROID)
+#if defined(OS_POSIX) && !defined(OS_MACOSX)
   scoped_ptr<MultiProcessLock> initializing_lock_;
   scoped_ptr<MultiProcessLock> running_lock_;
 #endif

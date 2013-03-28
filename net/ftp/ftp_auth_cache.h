@@ -4,7 +4,6 @@
 
 #ifndef NET_FTP_FTP_AUTH_CACHE_H_
 #define NET_FTP_FTP_AUTH_CACHE_H_
-#pragma once
 
 #include <list>
 
@@ -31,7 +30,7 @@ class NET_EXPORT_PRIVATE FtpAuthCache {
     Entry(const GURL& origin, const AuthCredentials& credentials);
     ~Entry();
 
-    const GURL origin;
+    GURL origin;
     AuthCredentials credentials;
   };
 

@@ -1,4 +1,4 @@
-// Copyright (c) 2011 The Chromium Authors. All rights reserved.
+// Copyright (c) 2012 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -9,7 +9,15 @@
 #include "base/logging.h"
 #include "base/memory/scoped_ptr.h"
 #include "base/values.h"
+#include "third_party/WebKit/Source/WebKit/chromium/public/WebArrayBuffer.h"
+#include "third_party/WebKit/Source/WebKit/chromium/public/platform/WebArrayBufferView.h"
 #include "v8/include/v8.h"
+
+using base::BinaryValue;
+using base::DictionaryValue;
+using base::ListValue;
+using base::StringValue;
+using base::Value;
 
 namespace content {
 
@@ -17,12 +25,27 @@ V8ValueConverter* V8ValueConverter::create() {
   return new V8ValueConverterImpl();
 }
 
+V8ValueConverterImpl::V8ValueConverterImpl()
+    : date_allowed_(false),
+      reg_exp_allowed_(false),
+      function_allowed_(false),
+      strip_null_from_objects_(false) {
 }
 
-V8ValueConverterImpl::V8ValueConverterImpl()
-    : allow_undefined_(false),
-      allow_date_(false),
-      allow_regexp_(false) {
+void V8ValueConverterImpl::SetDateAllowed(bool val) {
+  date_allowed_ = val;
+}
+
+void V8ValueConverterImpl::SetRegExpAllowed(bool val) {
+  reg_exp_allowed_ = val;
+}
+
+void V8ValueConverterImpl::SetFunctionAllowed(bool val) {
+  function_allowed_ = val;
+}
+
+void V8ValueConverterImpl::SetStripNullFromObjects(bool val) {
+  strip_null_from_objects_ = val;
 }
 
 v8::Handle<v8::Value> V8ValueConverterImpl::ToV8Value(
@@ -37,7 +60,8 @@ Value* V8ValueConverterImpl::FromV8Value(
     v8::Handle<v8::Context> context) const {
   v8::Context::Scope context_scope(context);
   v8::HandleScope handle_scope;
-  return FromV8ValueImpl(val);
+  std::set<int> unique_set;
+  return FromV8ValueImpl(val, &unique_set);
 }
 
 v8::Handle<v8::Value> V8ValueConverterImpl::ToV8ValueImpl(
@@ -77,6 +101,9 @@ v8::Handle<v8::Value> V8ValueConverterImpl::ToV8ValueImpl(
     case Value::TYPE_DICTIONARY:
       return ToV8Object(static_cast<const DictionaryValue*>(value));
 
+    case Value::TYPE_BINARY:
+      return ToArrayBuffer(static_cast<const BinaryValue*>(value));
+
     default:
       LOG(ERROR) << "Unexpected value type: " << value->GetType();
       return v8::Null();
@@ -88,7 +115,7 @@ v8::Handle<v8::Value> V8ValueConverterImpl::ToV8Array(
   v8::Handle<v8::Array> result(v8::Array::New(val->GetSize()));
 
   for (size_t i = 0; i < val->GetSize(); ++i) {
-    Value* child = NULL;
+    const Value* child = NULL;
     CHECK(val->Get(i, &child));
 
     v8::Handle<v8::Value> child_v8 = ToV8ValueImpl(child);
@@ -109,7 +136,7 @@ v8::Handle<v8::Value> V8ValueConverterImpl::ToV8Object(
 
   for (DictionaryValue::key_iterator iter = val->begin_keys();
        iter != val->end_keys(); ++iter) {
-    Value* child = NULL;
+    const Value* child = NULL;
     CHECK(val->GetWithoutPathExpansion(*iter, &child));
 
     const std::string& key = *iter;
@@ -127,7 +154,16 @@ v8::Handle<v8::Value> V8ValueConverterImpl::ToV8Object(
   return result;
 }
 
-Value* V8ValueConverterImpl::FromV8ValueImpl(v8::Handle<v8::Value> val) const {
+v8::Handle<v8::Value> V8ValueConverterImpl::ToArrayBuffer(
+    const BinaryValue* value) const {
+  WebKit::WebArrayBuffer buffer =
+      WebKit::WebArrayBuffer::create(value->GetSize(), 1);
+  memcpy(buffer.data(), value->GetBuffer(), value->GetSize());
+  return buffer.toV8Value();
+}
+
+Value* V8ValueConverterImpl::FromV8ValueImpl(v8::Handle<v8::Value> val,
+    std::set<int>* unique_set) const {
   CHECK(!val.IsEmpty());
 
   if (val->IsNull())
@@ -147,35 +183,67 @@ Value* V8ValueConverterImpl::FromV8ValueImpl(v8::Handle<v8::Value> val) const {
     return Value::CreateStringValue(std::string(*utf8, utf8.length()));
   }
 
-  if (allow_undefined_ && val->IsUndefined())
-    return Value::CreateNullValue();
+  if (val->IsUndefined())
+    // JSON.stringify ignores undefined.
+    return NULL;
 
-  if (allow_date_ && val->IsDate()) {
+  if (val->IsDate()) {
+    if (!date_allowed_)
+      // JSON.stringify would convert this to a string, but an object is more
+      // consistent within this class.
+      return FromV8Object(val->ToObject(), unique_set);
     v8::Date* date = v8::Date::Cast(*val);
     return Value::CreateDoubleValue(date->NumberValue() / 1000.0);
   }
 
-  if (allow_regexp_ && val->IsRegExp()) {
-    return Value::CreateStringValue(
-        *v8::String::Utf8Value(val->ToString()));
+  if (val->IsRegExp()) {
+    if (!reg_exp_allowed_)
+      // JSON.stringify converts to an object.
+      return FromV8Object(val->ToObject(), unique_set);
+    return Value::CreateStringValue(*v8::String::Utf8Value(val->ToString()));
   }
 
   // v8::Value doesn't have a ToArray() method for some reason.
   if (val->IsArray())
-    return FromV8Array(val.As<v8::Array>());
+    return FromV8Array(val.As<v8::Array>(), unique_set);
 
-  if (val->IsObject())
-    return FromV8Object(val->ToObject());
+  if (val->IsFunction()) {
+    if (!function_allowed_)
+      // JSON.stringify refuses to convert function(){}.
+      return NULL;
+    return FromV8Object(val->ToObject(), unique_set);
+  }
 
-#if !defined(OS_ANDROID)
-  // TODO: fix java api to not cause this frequently: http://b/5874468
+  if (val->IsObject()) {
+    BinaryValue* binary_value = FromV8Buffer(val);
+    if (binary_value) {
+      return binary_value;
+    } else {
+      return FromV8Object(val->ToObject(), unique_set);
+    }
+  }
+
   LOG(ERROR) << "Unexpected v8 value type encountered.";
-#endif
-  return Value::CreateNullValue();
+  return NULL;
 }
 
-ListValue* V8ValueConverterImpl::FromV8Array(v8::Handle<v8::Array> val) const {
+Value* V8ValueConverterImpl::FromV8Array(v8::Handle<v8::Array> val,
+    std::set<int>* unique_set) const {
+  if (unique_set && unique_set->count(val->GetIdentityHash()))
+    return Value::CreateNullValue();
+
+  scoped_ptr<v8::Context::Scope> scope;
+  // If val was created in a different context than our current one, change to
+  // that context, but change back after val is converted.
+  if (!val->CreationContext().IsEmpty() &&
+      val->CreationContext() != v8::Context::GetCurrent())
+    scope.reset(new v8::Context::Scope(val->CreationContext()));
+
   ListValue* result = new ListValue();
+
+  if (unique_set)
+    unique_set->insert(val->GetIdentityHash());
+  // Only fields with integer keys are carried over to the ListValue.
   for (uint32 i = 0; i < val->Length(); ++i) {
     v8::TryCatch try_catch;
     v8::Handle<v8::Value> child_v8 = val->Get(i);
@@ -184,46 +252,123 @@ ListValue* V8ValueConverterImpl::FromV8Array(v8::Handle<v8::Array> val) const {
       child_v8 = v8::Null();
     }
 
-    // TODO(aa): It would be nice to support getters, but we need
-    // http://code.google.com/p/v8/issues/detail?id=1342 to do it properly.
     if (!val->HasRealIndexedProperty(i))
       continue;
 
-    Value* child = FromV8ValueImpl(child_v8);
-    CHECK(child);
-
-    result->Append(child);
+    Value* child = FromV8ValueImpl(child_v8, unique_set);
+    if (child)
+      result->Append(child);
+    else
+      // JSON.stringify puts null in places where values don't serialize, for
+      // example undefined and functions. Emulate that behavior.
+      result->Append(Value::CreateNullValue());
   }
   return result;
 }
 
-DictionaryValue* V8ValueConverterImpl::FromV8Object(
-    v8::Handle<v8::Object> val) const {
-  DictionaryValue* result = new DictionaryValue();
-  v8::Handle<v8::Array> property_names(val->GetPropertyNames());
-  for (uint32 i = 0; i < property_names->Length(); ++i) {
-    v8::Handle<v8::String> name(property_names->Get(i).As<v8::String>());
+base::BinaryValue* V8ValueConverterImpl::FromV8Buffer(
+    v8::Handle<v8::Value> val) const {
+  char* data = NULL;
+  size_t length = 0;
 
-    // TODO(aa): It would be nice to support getters, but we need
-    // http://code.google.com/p/v8/issues/detail?id=1342 to do it properly.
-    if (!val->HasRealNamedProperty(name))
+  scoped_ptr<WebKit::WebArrayBuffer> array_buffer(
+      WebKit::WebArrayBuffer::createFromV8Value(val));
+  scoped_ptr<WebKit::WebArrayBufferView> view;
+  if (array_buffer.get()) {
+    data = reinterpret_cast<char*>(array_buffer->data());
+    length = array_buffer->byteLength();
+  } else {
+    view.reset(WebKit::WebArrayBufferView::createFromV8Value(val));
+    if (view.get()) {
+      data = reinterpret_cast<char*>(view->baseAddress()) + view->byteOffset();
+      length = view->byteLength();
+    }
+  }
+
+  if (data)
+    return base::BinaryValue::CreateWithCopiedBuffer(data, length);
+  else
+    return NULL;
+}
+
+Value* V8ValueConverterImpl::FromV8Object(
+    v8::Handle<v8::Object> val,
+    std::set<int>* unique_set) const {
+  if (unique_set && unique_set->count(val->GetIdentityHash()))
+    return Value::CreateNullValue();
+  scoped_ptr<v8::Context::Scope> scope;
+  // If val was created in a different context than our current one, change to
+  // that context, but change back after val is converted.
+  if (!val->CreationContext().IsEmpty() &&
+      val->CreationContext() != v8::Context::GetCurrent())
+    scope.reset(new v8::Context::Scope(val->CreationContext()));
+
+  scoped_ptr<DictionaryValue> result(new DictionaryValue());
+  v8::Handle<v8::Array> property_names(val->GetOwnPropertyNames());
+
+  if (unique_set)
+    unique_set->insert(val->GetIdentityHash());
+
+  for (uint32 i = 0; i < property_names->Length(); ++i) {
+    v8::Handle<v8::Value> key(property_names->Get(i));
+
+    // Extend this test to cover more types as necessary and if sensible.
+    if (!key->IsString() &&
+        !key->IsNumber()) {
+      NOTREACHED() << "Key \"" << *v8::String::AsciiValue(key) << "\" "
+                      "is neither a string nor a number";
+      continue;
+    }
+
+    // Skip all callbacks: crbug.com/139933
+    if (val->HasRealNamedCallbackProperty(key->ToString()))
       continue;
 
-    v8::String::Utf8Value name_utf8(name->ToString());
+    v8::String::Utf8Value name_utf8(key->ToString());
 
     v8::TryCatch try_catch;
-    v8::Handle<v8::Value> child_v8 = val->Get(name);
+    v8::Handle<v8::Value> child_v8 = val->Get(key);
+
     if (try_catch.HasCaught()) {
       LOG(ERROR) << "Getter for property " << *name_utf8
                  << " threw an exception.";
       child_v8 = v8::Null();
     }
 
-    Value* child = FromV8ValueImpl(child_v8);
-    CHECK(child);
+    scoped_ptr<Value> child(FromV8ValueImpl(child_v8, unique_set));
+    if (!child.get())
+      // JSON.stringify skips properties whose values don't serialize, for
+      // example undefined and functions. Emulate that behavior.
+      continue;
+
+    // Strip null if asked (and since undefined is turned into null, undefined
+    // too). The use case for supporting this is JSON-schema support,
+    // specifically for extensions, where "optional" JSON properties may be
+    // represented as null, yet due to buggy legacy code elsewhere isn't
+    // treated as such (potentially causing crashes). For example, the
+    // "tabs.create" function takes an object as its first argument with an
+    // optional "windowId" property.
+    //
+    // Given just
+    //
+    //   tabs.create({})
+    //
+    // this will work as expected on code that only checks for the existence of
+    // a "windowId" property (such as that legacy code). However given
+    //
+    //   tabs.create({windowId: null})
+    //
+    // there *is* a "windowId" property, but since it should be an int, code
+    // on the browser which doesn't additionally check for null will fail.
+    // We can avoid all bugs related to this by stripping null.
+    if (strip_null_from_objects_ && child->IsType(Value::TYPE_NULL))
+      continue;
 
     result->SetWithoutPathExpansion(std::string(*name_utf8, name_utf8.length()),
-                                    child);
+                                    child.release());
   }
-  return result;
+
+  return result.release();
 }
+
+}  // namespace content

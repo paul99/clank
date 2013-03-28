@@ -4,31 +4,34 @@
 
 #ifndef CONTENT_BROWSER_WEBUI_WEB_UI_IMPL_H_
 #define CONTENT_BROWSER_WEBUI_WEB_UI_IMPL_H_
-#pragma once
 
 #include <map>
 
 #include "base/compiler_specific.h"
+#include "base/memory/weak_ptr.h"
 #include "content/public/browser/web_ui.h"
-#include "ipc/ipc_channel.h"
+#include "ipc/ipc_listener.h"
 
+namespace content {
 class RenderViewHost;
 
-class CONTENT_EXPORT WebUIImpl : public content::WebUI,
-                                 public IPC::Channel::Listener {
+class CONTENT_EXPORT WebUIImpl : public WebUI,
+                                 public IPC::Listener,
+                                 public base::SupportsWeakPtr<WebUIImpl> {
  public:
-  explicit WebUIImpl(content::WebContents* contents);
+  explicit WebUIImpl(WebContents* contents);
   virtual ~WebUIImpl();
 
-  // Called by TabContents when the RenderView is first created. This is *not*
-  // called for every page load because in some cases RenderViewHostManager will
-  // reuse RenderView instances.
+  // Called by WebContentsImpl when the RenderView is first created. This is
+  // *not* called for every page load because in some cases
+  // RenderViewHostManager will reuse RenderView instances.
   void RenderViewCreated(RenderViewHost* render_view_host);
 
   // WebUI implementation:
-  virtual content::WebContents* GetWebContents() const OVERRIDE;
-  virtual content::WebUIController* GetController() const OVERRIDE;
-  virtual void SetController(content::WebUIController* controller) OVERRIDE;
+  virtual WebContents* GetWebContents() const OVERRIDE;
+  virtual WebUIController* GetController() const OVERRIDE;
+  virtual void SetController(WebUIController* controller) OVERRIDE;
+  virtual ui::ScaleFactor GetDeviceScaleFactor() const OVERRIDE;
   virtual bool ShouldHideFavicon() const OVERRIDE;
   virtual void HideFavicon() OVERRIDE;
   virtual bool ShouldFocusLocationBarByDefault() const OVERRIDE;
@@ -37,13 +40,12 @@ class CONTENT_EXPORT WebUIImpl : public content::WebUI,
   virtual void HideURL() OVERRIDE;
   virtual const string16& GetOverriddenTitle() const OVERRIDE;
   virtual void OverrideTitle(const string16& title) OVERRIDE;
-  virtual content::PageTransition GetLinkTransitionType() const OVERRIDE;
-  virtual void SetLinkTransitionType(content::PageTransition type) OVERRIDE;
+  virtual PageTransition GetLinkTransitionType() const OVERRIDE;
+  virtual void SetLinkTransitionType(PageTransition type) OVERRIDE;
   virtual int GetBindings() const OVERRIDE;
   virtual void SetBindings(int bindings) OVERRIDE;
   virtual void SetFrameXPath(const std::string& xpath) OVERRIDE;
-  virtual void AddMessageHandler(
-      content::WebUIMessageHandler* handler) OVERRIDE;
+  virtual void AddMessageHandler(WebUIMessageHandler* handler) OVERRIDE;
   typedef base::Callback<void(const base::ListValue*)> MessageCallback;
   virtual void RegisterMessageCallback(
       const std::string& message,
@@ -71,7 +73,7 @@ class CONTENT_EXPORT WebUIImpl : public content::WebUI,
       const std::string& function_name,
       const std::vector<const base::Value*>& args) OVERRIDE;
 
-  // IPC::Channel::Listener implementation:
+  // IPC::Listener implementation:
   virtual bool OnMessageReceived(const IPC::Message& message) OVERRIDE;
 
  private:
@@ -93,23 +95,25 @@ class CONTENT_EXPORT WebUIImpl : public content::WebUI,
   bool focus_location_bar_by_default_;
   bool should_hide_url_;
   string16 overridden_title_;  // Defaults to empty string.
-  content::PageTransition link_transition_type_;  // Defaults to LINK.
+  PageTransition link_transition_type_;  // Defaults to LINK.
   int bindings_;  // The bindings from BindingsPolicy that should be enabled for
                   // this page.
 
   // The WebUIMessageHandlers we own.
-  std::vector<content::WebUIMessageHandler*> handlers_;
+  std::vector<WebUIMessageHandler*> handlers_;
 
   // Non-owning pointer to the WebContents this WebUI is associated with.
-  content::WebContents* web_contents_;
+  WebContents* web_contents_;
 
   // The path for the iframe this WebUI is embedded in (empty if not in an
   // iframe).
   std::string frame_xpath_;
 
-  scoped_ptr<content::WebUIController> controller_;
+  scoped_ptr<WebUIController> controller_;
 
   DISALLOW_COPY_AND_ASSIGN(WebUIImpl);
 };
+
+}  // namespace content
 
 #endif  // CONTENT_BROWSER_WEBUI_WEB_UI_IMPL_H_

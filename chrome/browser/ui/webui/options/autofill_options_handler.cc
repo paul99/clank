@@ -8,6 +8,7 @@
 
 #include "base/bind.h"
 #include "base/bind_helpers.h"
+#include "base/guid.h"
 #include "base/logging.h"
 #include "base/string16.h"
 #include "base/string_number_conversions.h"
@@ -21,7 +22,6 @@
 #include "chrome/browser/autofill/phone_number_i18n.h"
 #include "chrome/browser/profiles/profile.h"
 #include "chrome/browser/ui/webui/web_ui_util.h"
-#include "chrome/common/guid.h"
 #include "chrome/common/url_constants.h"
 #include "content/public/browser/web_ui.h"
 #include "grit/generated_resources.h"
@@ -104,14 +104,14 @@ void GetValueList(const AutofillProfile& profile,
   list->reset(new ListValue);
 
   std::vector<string16> values;
-  profile.GetMultiInfo(type, &values);
+  profile.GetRawMultiInfo(type, &values);
 
-  // |GetMultiInfo()| always returns at least one, potentially empty, item.
+  // |GetRawMultiInfo()| always returns at least one, potentially empty, item.
   if (values.size() == 1 && values.front().empty())
     return;
 
   for (size_t i = 0; i < values.size(); ++i) {
-    (*list)->Set(i, Value::CreateStringValue(values[i]));
+    (*list)->Set(i, new base::StringValue(values[i]));
   }
 }
 
@@ -125,7 +125,7 @@ void SetValueList(const ListValue* list,
     if (list->GetString(i, &value))
       values[i] = value;
   }
-  profile->SetMultiInfo(type, values);
+  profile->SetRawMultiInfo(type, values);
 }
 
 // Get the multi-valued element for |type| and return it in |ListValue| form.
@@ -136,13 +136,13 @@ void GetNameList(const AutofillProfile& profile,
   std::vector<string16> first_names;
   std::vector<string16> middle_names;
   std::vector<string16> last_names;
-  profile.GetMultiInfo(NAME_FIRST, &first_names);
-  profile.GetMultiInfo(NAME_MIDDLE, &middle_names);
-  profile.GetMultiInfo(NAME_LAST, &last_names);
+  profile.GetRawMultiInfo(NAME_FIRST, &first_names);
+  profile.GetRawMultiInfo(NAME_MIDDLE, &middle_names);
+  profile.GetRawMultiInfo(NAME_LAST, &last_names);
   DCHECK_EQ(first_names.size(), middle_names.size());
   DCHECK_EQ(first_names.size(), last_names.size());
 
-  // |GetMultiInfo()| always returns at least one, potentially empty, item.
+  // |GetRawMultiInfo()| always returns at least one, potentially empty, item.
   if (first_names.size() == 1 && first_names.front().empty() &&
       middle_names.front().empty() && last_names.front().empty()) {
     return;
@@ -150,23 +150,22 @@ void GetNameList(const AutofillProfile& profile,
 
   for (size_t i = 0; i < first_names.size(); ++i) {
     ListValue* name = new ListValue;  // owned by |list|
-    name->Set(0, Value::CreateStringValue(first_names[i]));
-    name->Set(1, Value::CreateStringValue(middle_names[i]));
-    name->Set(2, Value::CreateStringValue(last_names[i]));
+    name->Set(0, new base::StringValue(first_names[i]));
+    name->Set(1, new base::StringValue(middle_names[i]));
+    name->Set(2, new base::StringValue(last_names[i]));
     (*names)->Set(i, name);
   }
 }
 
 // Set the multi-valued element for |type| from input |list| values.
-void SetNameList(const ListValue* names,
-                 AutofillProfile* profile) {
+void SetNameList(const ListValue* names, AutofillProfile* profile) {
   const size_t size = names->GetSize();
   std::vector<string16> first_names(size);
   std::vector<string16> middle_names(size);
   std::vector<string16> last_names(size);
 
   for (size_t i = 0; i < size; ++i) {
-    ListValue* name;
+    const ListValue* name;
     bool success = names->GetList(i, &name);
     DCHECK(success);
 
@@ -186,16 +185,16 @@ void SetNameList(const ListValue* names,
     last_names[i] = last_name;
   }
 
-  profile->SetMultiInfo(NAME_FIRST, first_names);
-  profile->SetMultiInfo(NAME_MIDDLE, middle_names);
-  profile->SetMultiInfo(NAME_LAST, last_names);
+  profile->SetRawMultiInfo(NAME_FIRST, first_names);
+  profile->SetRawMultiInfo(NAME_MIDDLE, middle_names);
+  profile->SetRawMultiInfo(NAME_LAST, last_names);
 }
 
 // Pulls the phone number |index|, |phone_number_list|, and |country_code| from
 // the |args| input.
 void ExtractPhoneNumberInformation(const ListValue* args,
                                    size_t* index,
-                                   ListValue** phone_number_list,
+                                   const ListValue** phone_number_list,
                                    std::string* country_code) {
   // Retrieve index as a |double|, as that is how it comes across from
   // JavaScript.
@@ -249,15 +248,20 @@ void RemoveDuplicatePhoneNumberAtIndex(size_t index,
     list->Remove(index, NULL);
 }
 
-void ValidatePhoneArguments(const ListValue* args, ListValue** list) {
+scoped_ptr<ListValue> ValidatePhoneArguments(const ListValue* args) {
   size_t index = 0;
   std::string country_code;
-  ExtractPhoneNumberInformation(args, &index, list, &country_code);
+  const ListValue* extracted_list = NULL;
+  ExtractPhoneNumberInformation(args, &index, &extracted_list, &country_code);
 
-  RemoveDuplicatePhoneNumberAtIndex(index, country_code, *list);
+  scoped_ptr<ListValue> list(extracted_list->DeepCopy());
+  RemoveDuplicatePhoneNumberAtIndex(index, country_code, list.get());
+  return list.Pass();
 }
 
 }  // namespace
+
+namespace options {
 
 AutofillOptionsHandler::AutofillOptionsHandler()
     : personal_data_(NULL) {
@@ -299,24 +303,23 @@ void AutofillOptionsHandler::GetLocalizedValues(
   SetCreditCardOverlayStrings(localized_strings);
 }
 
-void AutofillOptionsHandler::Initialize() {
+void AutofillOptionsHandler::InitializeHandler() {
   personal_data_ = PersonalDataManagerFactory::GetForProfile(
       Profile::FromWebUI(web_ui()));
   // personal_data_ is NULL in guest mode on Chrome OS.
-  if (personal_data_) {
+  if (personal_data_)
     personal_data_->SetObserver(this);
+}
+
+void AutofillOptionsHandler::InitializePage() {
+  if (personal_data_)
     LoadAutofillData();
-  }
 }
 
 void AutofillOptionsHandler::RegisterMessages() {
   web_ui()->RegisterMessageCallback(
-      "removeAddress",
-      base::Bind(&AutofillOptionsHandler::RemoveAddress,
-                 base::Unretained(this)));
-  web_ui()->RegisterMessageCallback(
-      "removeCreditCard",
-      base::Bind(&AutofillOptionsHandler::RemoveCreditCard,
+      "removeData",
+      base::Bind(&AutofillOptionsHandler::RemoveData,
                  base::Unretained(this)));
   web_ui()->RegisterMessageCallback(
       "loadAddressEditor",
@@ -350,35 +353,35 @@ void AutofillOptionsHandler::SetAddressOverlayStrings(
   localized_strings->SetString("autofillEditAddressTitle",
       l10n_util::GetStringUTF16(IDS_AUTOFILL_EDIT_ADDRESS_CAPTION));
   localized_strings->SetString("autofillFirstNameLabel",
-      l10n_util::GetStringUTF16(IDS_AUTOFILL_DIALOG_FIRST_NAME));
+      l10n_util::GetStringUTF16(IDS_AUTOFILL_FIELD_LABEL_FIRST_NAME));
   localized_strings->SetString("autofillMiddleNameLabel",
-      l10n_util::GetStringUTF16(IDS_AUTOFILL_DIALOG_MIDDLE_NAME));
+      l10n_util::GetStringUTF16(IDS_AUTOFILL_FIELD_LABEL_MIDDLE_NAME));
   localized_strings->SetString("autofillLastNameLabel",
-      l10n_util::GetStringUTF16(IDS_AUTOFILL_DIALOG_LAST_NAME));
+      l10n_util::GetStringUTF16(IDS_AUTOFILL_FIELD_LABEL_LAST_NAME));
   localized_strings->SetString("autofillCompanyNameLabel",
-      l10n_util::GetStringUTF16(IDS_AUTOFILL_DIALOG_COMPANY_NAME));
+      l10n_util::GetStringUTF16(IDS_AUTOFILL_FIELD_LABEL_COMPANY_NAME));
   localized_strings->SetString("autofillAddrLine1Label",
-      l10n_util::GetStringUTF16(IDS_AUTOFILL_DIALOG_ADDRESS_LINE_1));
+      l10n_util::GetStringUTF16(IDS_AUTOFILL_FIELD_LABEL_ADDRESS_LINE_1));
   localized_strings->SetString("autofillAddrLine2Label",
-      l10n_util::GetStringUTF16(IDS_AUTOFILL_DIALOG_ADDRESS_LINE_2));
+      l10n_util::GetStringUTF16(IDS_AUTOFILL_FIELD_LABEL_ADDRESS_LINE_2));
   localized_strings->SetString("autofillCityLabel",
-      l10n_util::GetStringUTF16(IDS_AUTOFILL_DIALOG_CITY));
+      l10n_util::GetStringUTF16(IDS_AUTOFILL_FIELD_LABEL_CITY));
   localized_strings->SetString("autofillCountryLabel",
-      l10n_util::GetStringUTF16(IDS_AUTOFILL_DIALOG_COUNTRY));
+      l10n_util::GetStringUTF16(IDS_AUTOFILL_FIELD_LABEL_COUNTRY));
   localized_strings->SetString("autofillPhoneLabel",
-      l10n_util::GetStringUTF16(IDS_AUTOFILL_DIALOG_PHONE));
+      l10n_util::GetStringUTF16(IDS_AUTOFILL_FIELD_LABEL_PHONE));
   localized_strings->SetString("autofillEmailLabel",
-      l10n_util::GetStringUTF16(IDS_AUTOFILL_DIALOG_EMAIL));
+      l10n_util::GetStringUTF16(IDS_AUTOFILL_FIELD_LABEL_EMAIL));
   localized_strings->SetString("autofillAddFirstNamePlaceholder",
-      l10n_util::GetStringUTF16(IDS_AUTOFILL_DIALOG_ADD_FIRST_NAME));
+      l10n_util::GetStringUTF16(IDS_AUTOFILL_FIELD_LABEL_ADD_FIRST_NAME));
   localized_strings->SetString("autofillAddMiddleNamePlaceholder",
-      l10n_util::GetStringUTF16(IDS_AUTOFILL_DIALOG_ADD_MIDDLE_NAME));
+      l10n_util::GetStringUTF16(IDS_AUTOFILL_FIELD_LABEL_ADD_MIDDLE_NAME));
   localized_strings->SetString("autofillAddLastNamePlaceholder",
-      l10n_util::GetStringUTF16(IDS_AUTOFILL_DIALOG_ADD_LAST_NAME));
+      l10n_util::GetStringUTF16(IDS_AUTOFILL_FIELD_LABEL_ADD_LAST_NAME));
   localized_strings->SetString("autofillAddPhonePlaceholder",
-      l10n_util::GetStringUTF16(IDS_AUTOFILL_DIALOG_ADD_PHONE));
+      l10n_util::GetStringUTF16(IDS_AUTOFILL_FIELD_LABEL_ADD_PHONE));
   localized_strings->SetString("autofillAddEmailPlaceholder",
-      l10n_util::GetStringUTF16(IDS_AUTOFILL_DIALOG_ADD_EMAIL));
+      l10n_util::GetStringUTF16(IDS_AUTOFILL_FIELD_LABEL_ADD_EMAIL));
 
   std::string app_locale = AutofillCountry::ApplicationLocale();
   std::string default_country_code =
@@ -392,15 +395,15 @@ void AutofillOptionsHandler::SetCreditCardOverlayStrings(
   localized_strings->SetString("autofillEditCreditCardTitle",
       l10n_util::GetStringUTF16(IDS_AUTOFILL_EDIT_CREDITCARD_CAPTION));
   localized_strings->SetString("nameOnCardLabel",
-      l10n_util::GetStringUTF16(IDS_AUTOFILL_DIALOG_NAME_ON_CARD));
+      l10n_util::GetStringUTF16(IDS_AUTOFILL_FIELD_LABEL_NAME_ON_CARD));
   localized_strings->SetString("creditCardNumberLabel",
-      l10n_util::GetStringUTF16(IDS_AUTOFILL_DIALOG_CREDIT_CARD_NUMBER));
+      l10n_util::GetStringUTF16(IDS_AUTOFILL_FIELD_LABEL_CREDIT_CARD_NUMBER));
   localized_strings->SetString("creditCardExpirationDateLabel",
-      l10n_util::GetStringUTF16(IDS_AUTOFILL_DIALOG_EXPIRATION_DATE));
+      l10n_util::GetStringUTF16(IDS_AUTOFILL_FIELD_LABEL_EXPIRATION_DATE));
 }
 
 void AutofillOptionsHandler::LoadAutofillData() {
-  if (!personal_data_->IsDataLoaded())
+  if (!IsPersonalDataLoaded())
     return;
 
   ListValue addresses;
@@ -413,8 +416,7 @@ void AutofillOptionsHandler::LoadAutofillData() {
     addresses.Append(entry);
   }
 
-  web_ui()->CallJavascriptFunction("AutofillOptions.setAddressList",
-                                   addresses);
+  web_ui()->CallJavascriptFunction("AutofillOptions.setAddressList", addresses);
 
   ListValue credit_cards;
   for (std::vector<CreditCard*>::const_iterator i =
@@ -425,7 +427,7 @@ void AutofillOptionsHandler::LoadAutofillData() {
     entry->Append(new StringValue((*i)->Label()));
     int res = CreditCardTypeToResourceID((*i)->type());
     entry->Append(
-        new StringValue(web_ui_util::GetImageDataUrlFromResource(res)));
+        new StringValue(web_ui_util::GetBitmapDataUrlFromResource(res)));
     entry->Append(new StringValue(LocalizedCreditCardType((*i)->type())));
     credit_cards.Append(entry);
   }
@@ -434,8 +436,8 @@ void AutofillOptionsHandler::LoadAutofillData() {
                                    credit_cards);
 }
 
-void AutofillOptionsHandler::RemoveAddress(const ListValue* args) {
-  DCHECK(personal_data_->IsDataLoaded());
+void AutofillOptionsHandler::RemoveData(const ListValue* args) {
+  DCHECK(IsPersonalDataLoaded());
 
   std::string guid;
   if (!args->GetString(0, &guid)) {
@@ -443,23 +445,11 @@ void AutofillOptionsHandler::RemoveAddress(const ListValue* args) {
     return;
   }
 
-  personal_data_->RemoveProfile(guid);
-}
-
-void AutofillOptionsHandler::RemoveCreditCard(const ListValue* args) {
-  DCHECK(personal_data_->IsDataLoaded());
-
-  std::string guid;
-  if (!args->GetString(0, &guid)) {
-    NOTREACHED();
-    return;
-  }
-
-  personal_data_->RemoveCreditCard(guid);
+  personal_data_->RemoveByGUID(guid);
 }
 
 void AutofillOptionsHandler::LoadAddressEditor(const ListValue* args) {
-  DCHECK(personal_data_->IsDataLoaded());
+  DCHECK(IsPersonalDataLoaded());
 
   std::string guid;
   if (!args->GetString(0, &guid)) {
@@ -482,12 +472,12 @@ void AutofillOptionsHandler::LoadAddressEditor(const ListValue* args) {
   scoped_ptr<ListValue> list;
   GetNameList(*profile, &list);
   address.Set("fullName", list.release());
-  address.SetString("companyName", profile->GetInfo(COMPANY_NAME));
-  address.SetString("addrLine1", profile->GetInfo(ADDRESS_HOME_LINE1));
-  address.SetString("addrLine2", profile->GetInfo(ADDRESS_HOME_LINE2));
-  address.SetString("city", profile->GetInfo(ADDRESS_HOME_CITY));
-  address.SetString("state", profile->GetInfo(ADDRESS_HOME_STATE));
-  address.SetString("postalCode", profile->GetInfo(ADDRESS_HOME_ZIP));
+  address.SetString("companyName", profile->GetRawInfo(COMPANY_NAME));
+  address.SetString("addrLine1", profile->GetRawInfo(ADDRESS_HOME_LINE1));
+  address.SetString("addrLine2", profile->GetRawInfo(ADDRESS_HOME_LINE2));
+  address.SetString("city", profile->GetRawInfo(ADDRESS_HOME_CITY));
+  address.SetString("state", profile->GetRawInfo(ADDRESS_HOME_STATE));
+  address.SetString("postalCode", profile->GetRawInfo(ADDRESS_HOME_ZIP));
   address.SetString("country", profile->CountryCode());
   GetValueList(*profile, PHONE_HOME_WHOLE_NUMBER, &list);
   address.Set("phone", list.release());
@@ -498,7 +488,7 @@ void AutofillOptionsHandler::LoadAddressEditor(const ListValue* args) {
 }
 
 void AutofillOptionsHandler::LoadCreditCardEditor(const ListValue* args) {
-  DCHECK(personal_data_->IsDataLoaded());
+  DCHECK(IsPersonalDataLoaded());
 
   std::string guid;
   if (!args->GetString(0, &guid)) {
@@ -519,21 +509,21 @@ void AutofillOptionsHandler::LoadCreditCardEditor(const ListValue* args) {
   DictionaryValue credit_card_data;
   credit_card_data.SetString("guid", credit_card->guid());
   credit_card_data.SetString("nameOnCard",
-                             credit_card->GetInfo(CREDIT_CARD_NAME));
+                             credit_card->GetRawInfo(CREDIT_CARD_NAME));
   credit_card_data.SetString("creditCardNumber",
-                             credit_card->GetInfo(CREDIT_CARD_NUMBER));
+                             credit_card->GetRawInfo(CREDIT_CARD_NUMBER));
   credit_card_data.SetString("expirationMonth",
-                             credit_card->GetInfo(CREDIT_CARD_EXP_MONTH));
+                             credit_card->GetRawInfo(CREDIT_CARD_EXP_MONTH));
   credit_card_data.SetString(
       "expirationYear",
-      credit_card->GetInfo(CREDIT_CARD_EXP_4_DIGIT_YEAR));
+      credit_card->GetRawInfo(CREDIT_CARD_EXP_4_DIGIT_YEAR));
 
   web_ui()->CallJavascriptFunction("AutofillOptions.editCreditCard",
                                    credit_card_data);
 }
 
 void AutofillOptionsHandler::SetAddress(const ListValue* args) {
-  if (!personal_data_->IsDataLoaded())
+  if (!IsPersonalDataLoaded())
     return;
 
   std::string guid;
@@ -546,30 +536,39 @@ void AutofillOptionsHandler::SetAddress(const ListValue* args) {
 
   std::string country_code;
   string16 value;
-  ListValue* list_value;
+  const ListValue* list_value;
   if (args->GetList(1, &list_value))
     SetNameList(list_value, &profile);
+
   if (args->GetString(2, &value))
-    profile.SetInfo(COMPANY_NAME, value);
+    profile.SetRawInfo(COMPANY_NAME, value);
+
   if (args->GetString(3, &value))
-    profile.SetInfo(ADDRESS_HOME_LINE1, value);
+    profile.SetRawInfo(ADDRESS_HOME_LINE1, value);
+
   if (args->GetString(4, &value))
-    profile.SetInfo(ADDRESS_HOME_LINE2, value);
+    profile.SetRawInfo(ADDRESS_HOME_LINE2, value);
+
   if (args->GetString(5, &value))
-    profile.SetInfo(ADDRESS_HOME_CITY, value);
+    profile.SetRawInfo(ADDRESS_HOME_CITY, value);
+
   if (args->GetString(6, &value))
-    profile.SetInfo(ADDRESS_HOME_STATE, value);
+    profile.SetRawInfo(ADDRESS_HOME_STATE, value);
+
   if (args->GetString(7, &value))
-    profile.SetInfo(ADDRESS_HOME_ZIP, value);
+    profile.SetRawInfo(ADDRESS_HOME_ZIP, value);
+
   if (args->GetString(8, &country_code))
     profile.SetCountryCode(country_code);
+
   if (args->GetList(9, &list_value))
     SetValueList(list_value, PHONE_HOME_WHOLE_NUMBER, &profile);
+
   if (args->GetList(10, &list_value))
     SetValueList(list_value, EMAIL_ADDRESS, &profile);
 
-  if (!guid::IsValidGUID(profile.guid())) {
-    profile.set_guid(guid::GenerateGUID());
+  if (!base::IsValidGUID(profile.guid())) {
+    profile.set_guid(base::GenerateGUID());
     personal_data_->AddProfile(profile);
   } else {
     personal_data_->UpdateProfile(profile);
@@ -577,7 +576,7 @@ void AutofillOptionsHandler::SetAddress(const ListValue* args) {
 }
 
 void AutofillOptionsHandler::SetCreditCard(const ListValue* args) {
-  if (!personal_data_->IsDataLoaded())
+  if (!IsPersonalDataLoaded())
     return;
 
   std::string guid;
@@ -590,16 +589,19 @@ void AutofillOptionsHandler::SetCreditCard(const ListValue* args) {
 
   string16 value;
   if (args->GetString(1, &value))
-    credit_card.SetInfo(CREDIT_CARD_NAME, value);
-  if (args->GetString(2, &value))
-    credit_card.SetInfo(CREDIT_CARD_NUMBER, value);
-  if (args->GetString(3, &value))
-    credit_card.SetInfo(CREDIT_CARD_EXP_MONTH, value);
-  if (args->GetString(4, &value))
-    credit_card.SetInfo(CREDIT_CARD_EXP_4_DIGIT_YEAR, value);
+    credit_card.SetRawInfo(CREDIT_CARD_NAME, value);
 
-  if (!guid::IsValidGUID(credit_card.guid())) {
-    credit_card.set_guid(guid::GenerateGUID());
+  if (args->GetString(2, &value))
+    credit_card.SetRawInfo(CREDIT_CARD_NUMBER, value);
+
+  if (args->GetString(3, &value))
+    credit_card.SetRawInfo(CREDIT_CARD_EXP_MONTH, value);
+
+  if (args->GetString(4, &value))
+    credit_card.SetRawInfo(CREDIT_CARD_EXP_4_DIGIT_YEAR, value);
+
+  if (!base::IsValidGUID(credit_card.guid())) {
+    credit_card.set_guid(base::GenerateGUID());
     personal_data_->AddCreditCard(credit_card);
   } else {
     personal_data_->UpdateCreditCard(credit_card);
@@ -607,12 +609,17 @@ void AutofillOptionsHandler::SetCreditCard(const ListValue* args) {
 }
 
 void AutofillOptionsHandler::ValidatePhoneNumbers(const ListValue* args) {
-  if (!personal_data_->IsDataLoaded())
+  if (!IsPersonalDataLoaded())
     return;
 
-  ListValue* list_value = NULL;
-  ValidatePhoneArguments(args, &list_value);
+  scoped_ptr<ListValue> list_value = ValidatePhoneArguments(args);
 
   web_ui()->CallJavascriptFunction(
     "AutofillEditAddressOverlay.setValidatedPhoneNumbers", *list_value);
 }
+
+bool AutofillOptionsHandler::IsPersonalDataLoaded() const {
+  return personal_data_ && personal_data_->IsDataLoaded();
+}
+
+}  // namespace options

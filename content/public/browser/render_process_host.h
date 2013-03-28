@@ -11,15 +11,17 @@
 #include "base/process_util.h"
 #include "content/common/content_export.h"
 #include "ipc/ipc_channel_proxy.h"
-#include "ipc/ipc_message.h"
+#include "ipc/ipc_sender.h"
 #include "ui/gfx/native_widget_types.h"
-#include "ui/gfx/surface/transport_dib.h"
+#include "ui/surface/transport_dib.h"
 
 class GURL;
 struct ViewMsg_SwapOut_Params;
 
 namespace content {
 class BrowserContext;
+class RenderWidgetHost;
+class StoragePartition;
 }
 
 namespace base {
@@ -31,54 +33,24 @@ namespace content {
 // Interface that represents the browser side of the browser <-> renderer
 // communication channel. There will generally be one RenderProcessHost per
 // renderer process.
-class CONTENT_EXPORT RenderProcessHost : public IPC::Message::Sender,
-                                         public IPC::Channel::Listener {
+class CONTENT_EXPORT RenderProcessHost : public IPC::Sender,
+                                         public IPC::Listener {
  public:
   typedef IDMap<RenderProcessHost>::iterator iterator;
-  typedef IDMap<IPC::Channel::Listener>::const_iterator listeners_iterator;
+  typedef IDMap<RenderWidgetHost>::const_iterator RenderWidgetHostsIterator;
 
   // Details for RENDERER_PROCESS_CLOSED notifications.
   struct RendererClosedDetails {
-    explicit RendererClosedDetails(base::ProcessHandle handle) {
+    RendererClosedDetails(base::ProcessHandle handle,
+                          base::TerminationStatus status,
+                          int exit_code) {
       this->handle = handle;
-      // default values should be updated by caller.
-      status = base::TERMINATION_STATUS_NORMAL_TERMINATION;
-      exit_code = 0;
-      was_alive = false;
-
-#if defined(OS_WIN)
-      have_process_times = false;
-      FILETIME win_creation_time;
-      FILETIME win_exit_time;
-      FILETIME win_kernel_time;
-      FILETIME win_user_time;
-      if (!GetProcessTimes(handle, &win_creation_time, &win_exit_time,
-                           &win_kernel_time, &win_user_time)) {
-        DWORD error = GetLastError();
-        DLOG(ERROR) << "Error getting process data" << error;
-        return;
-      }
-      user_duration = base::Time::FromFileTime(win_user_time) -
-          base::Time::Time();
-      kernel_duration = base::Time::FromFileTime(win_kernel_time) -
-          base::Time::Time();
-      run_duration = base::Time::FromFileTime(win_exit_time) -
-          base::Time::FromFileTime(win_creation_time);
-      have_process_times = true;
-#endif   // OS_WIN
+      this->status = status;
+      this->exit_code = exit_code;
     }
-
-#if defined(OS_WIN)
-    base::TimeDelta kernel_duration;
-    base::TimeDelta user_duration;
-    base::TimeDelta run_duration;
-    bool have_process_times;
-#endif   // OS_WIN
-
     base::ProcessHandle handle;
     base::TerminationStatus status;
     int exit_code;
-    bool was_alive;
   };
 
   virtual ~RenderProcessHost() {}
@@ -87,7 +59,7 @@ class CONTENT_EXPORT RenderProcessHost : public IPC::Message::Sender,
   // be called once before the object can be used, but can be called after
   // that with no effect. Therefore, if the caller isn't sure about whether
   // the process has been created, it should just call Init().
-  virtual bool Init(bool is_accessibility_enabled) = 0;
+  virtual bool Init() = 0;
 
   // Gets the next available routing id.
   virtual int GetNextRoutingID() = 0;
@@ -100,15 +72,14 @@ class CONTENT_EXPORT RenderProcessHost : public IPC::Message::Sender,
   // ResourceDispatcherHost.  Necessary for a cross-site request, in the case
   // that the original RenderViewHost is not live and thus cannot run an
   // unload handler.
-  virtual void CrossSiteSwapOutACK(
-      const ViewMsg_SwapOut_Params& params) = 0;
+  virtual void SimulateSwapOutACK(const ViewMsg_SwapOut_Params& params) = 0;
 
   // Called to wait for the next UpdateRect message for the specified render
   // widget.  Returns true if successful, and the msg out-param will contain a
   // copy of the received UpdateRect message.
-  virtual bool WaitForUpdateMsg(int render_widget_id,
-                                const base::TimeDelta& max_delay,
-                                IPC::Message* msg) = 0;
+  virtual bool WaitForBackingStoreMsg(int render_widget_id,
+                                      const base::TimeDelta& max_delay,
+                                      IPC::Message* msg) = 0;
 
   // Called when a received message cannot be decoded.
   virtual void ReceivedBadMessage() = 0;
@@ -118,6 +89,17 @@ class CONTENT_EXPORT RenderProcessHost : public IPC::Message::Sender,
   virtual void WidgetRestored() = 0;
   virtual void WidgetHidden() = 0;
   virtual int VisibleWidgetCount() const = 0;
+
+  // Indicates whether the current RenderProcessHost associated with a guest
+  // renderer process.
+  virtual bool IsGuest() const = 0;
+
+  // Returns the storage partition associated with this process.
+  //
+  // TODO(nasko): Remove this function from the public API once
+  // URLRequestContextGetter's creation is moved into StoragePartition.
+  // http://crbug.com/158595
+  virtual StoragePartition* GetStoragePartition() const = 0;
 
   // Try to shutdown the associated renderer process as fast as possible.
   // If this renderer has any RenderViews with unload handlers, then this
@@ -152,16 +134,20 @@ class CONTENT_EXPORT RenderProcessHost : public IPC::Message::Sender,
   // Returns the user browser context associated with this renderer process.
   virtual content::BrowserContext* GetBrowserContext() const = 0;
 
+  // Returns whether this process is using the same StoragePartition as
+  // |partition|.
+  virtual bool InSameStoragePartition(StoragePartition* partition) const = 0;
+
   // Returns the unique ID for this child process. This can be used later in
   // a call to FromID() to get back to this object (this is used to avoid
   // sending non-threadsafe pointers to other threads).
   //
   // This ID will be unique for all child processes, including workers, plugins,
-  // etc. It is generated by ChildProcessInfo.
+  // etc.
   virtual int GetID() const = 0;
 
-  // Returns the listener for the routing id passed in.
-  virtual IPC::Channel::Listener* GetListenerByID(int routing_id) = 0;
+  // Returns the render widget host for the routing id passed in.
+  virtual RenderWidgetHost* GetRenderWidgetHostByID(int routing_id) = 0;
 
   // Returns true iff channel_ has been set to non-NULL. Use this for checking
   // if there is connection or not. Virtual for mocking out for tests.
@@ -174,7 +160,8 @@ class CONTENT_EXPORT RenderProcessHost : public IPC::Message::Sender,
   // Returns the renderer channel.
   virtual IPC::ChannelProxy* GetChannel() = 0;
 
-  virtual listeners_iterator ListenersIterator() = 0;
+  // Returns the list of attached render widget hosts.
+  virtual RenderWidgetHostsIterator GetRenderWidgetHostsIterator() = 0;
 
   // Try to shutdown the associated render process as fast as possible
   virtual bool FastShutdownForPageCount(size_t count) = 0;
@@ -188,18 +175,13 @@ class CONTENT_EXPORT RenderProcessHost : public IPC::Message::Sender,
   // Used for refcounting, each holder of this object must Attach and Release
   // just like it would for a COM object. This object should be allocated on
   // the heap; when no listeners own it any more, it will delete itself.
-  virtual void Attach(IPC::Channel::Listener* listener, int routing_id) = 0;
+  virtual void Attach(content::RenderWidgetHost* host, int routing_id) = 0;
 
   // See Attach()
-  virtual void Release(int listener_id) = 0;
+  virtual void Release(int routing_id) = 0;
 
   // Schedules the host for deletion and removes it from the all_hosts list.
   virtual void Cleanup() = 0;
-
-  // Listeners should call this when they've sent a "Close" message and
-  // they're waiting for a "Close_ACK", so that if the renderer process
-  // goes away we'll know that it was intentional rather than a crash.
-  virtual void ReportExpectingClose(int32 listener_id) = 0;
 
   // Track the count of pending views that are being swapped back in.  Called
   // by listeners to register and unregister pending views to prevent the
@@ -218,6 +200,15 @@ class CONTENT_EXPORT RenderProcessHost : public IPC::Message::Sender,
   // 10 milliseconds.
   virtual base::TimeDelta GetChildProcessIdleTime() const = 0;
 
+  // Signals that a compositing surface has been updated after a lost context
+  // event, so that we can process requests from the renderer to create contexts
+  // with that surface.
+  virtual void SurfaceUpdated(int32 surface_id) = 0;
+
+  // Called to resume the requests for a view created through window.open that
+  // were initially blocked.
+  virtual void ResumeRequestsForView(int route_id) = 0;
+
   // Static management functions -----------------------------------------------
 
   // Flag to run the renderer in process.  This is primarily
@@ -228,7 +219,10 @@ class CONTENT_EXPORT RenderProcessHost : public IPC::Message::Sender,
   // Renderer is the same, it's just not crossing a process boundary.
 
   static bool run_renderer_in_process();
-  static void set_run_renderer_in_process(bool value);
+
+  // This also calls out to ContentBrowserClient::GetApplicationLocale and
+  // modifies the current process' command line.
+  static void SetRunRendererInProcess(bool value);
 
   // Allows iteration over all the RenderProcessHosts in the browser. Note
   // that each host may not be active, and therefore may have NULL channels.
@@ -240,7 +234,8 @@ class CONTENT_EXPORT RenderProcessHost : public IPC::Message::Sender,
 
   // Returns true if the caller should attempt to use an existing
   // RenderProcessHost rather than creating a new one.
-  static bool ShouldTryToUseExistingProcessHost();
+  static bool ShouldTryToUseExistingProcessHost(
+      content::BrowserContext* browser_context, const GURL& site_url);
 
   // Get an existing RenderProcessHost associated with the given browser
   // context, if possible.  The renderer process is chosen randomly from
@@ -252,12 +247,17 @@ class CONTENT_EXPORT RenderProcessHost : public IPC::Message::Sender,
       content::BrowserContext* browser_context, const GURL& site_url);
 
   // Overrides the default heuristic for limiting the max renderer process
-  // count.  This is useful for unit testing process limit behaviors.
+  // count.  This is useful for unit testing process limit behaviors.  It is
+  // also used to allow a command line parameter to configure the max number of
+  // renderer processes and should only be called once during startup.
   // A value of zero means to use the default heuristic.
-  static void SetMaxRendererProcessCountForTest(size_t count);
+  static void SetMaxRendererProcessCount(size_t count);
+
+  // Returns the current max number of renderer processes used by the content
+  // module.
+  static size_t GetMaxRendererProcessCount();
 };
 
 }  // namespace content.
 
 #endif  // CONTENT_PUBLIC_BROWSER_RENDER_PROCESS_HOST_H_
-

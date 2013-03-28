@@ -284,8 +284,8 @@ void Close(PP_Resource file_io) {
 
 }  // namespace
 
-const PPB_FileIO* PluginFileIO::GetInterface() {
-  static const PPB_FileIO file_io_interface = {
+const PPB_FileIO_1_0* PluginFileIO::GetInterface1_0() {
+  static const PPB_FileIO_1_0 file_io_interface = {
     Create,
     IsFileIO,
     Open,

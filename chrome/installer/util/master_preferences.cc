@@ -1,4 +1,4 @@
-// Copyright (c) 2011 The Chromium Authors. All rights reserved.
+// Copyright (c) 2012 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -6,7 +6,7 @@
 
 #include "base/environment.h"
 #include "base/file_util.h"
-#include "base/json/json_value_serializer.h"
+#include "base/json/json_string_value_serializer.h"
 #include "base/lazy_instance.h"
 #include "base/logging.h"
 #include "base/path_service.h"
@@ -17,7 +17,6 @@
 
 namespace {
 
-const char kDistroDict[] = "distribution";
 const char kFirstRunTabs[] = "first_run_tabs";
 
 base::LazyInstance<installer::MasterPreferences> g_master_preferences =
@@ -27,7 +26,8 @@ bool GetGURLFromValue(const Value* in_value, GURL* out_value) {
   if (!in_value || !out_value)
     return false;
   std::string url;
-  in_value->GetAsString(&url);
+  if (!in_value->GetAsString(&url))
+    return false;
   GURL gurl(url);
   *out_value = gurl;
   return true;
@@ -38,11 +38,11 @@ std::vector<GURL> GetNamedList(const char* name,
   std::vector<GURL> list;
   if (!prefs)
     return list;
-  ListValue* value_list = NULL;
+  const ListValue* value_list = NULL;
   if (!prefs->GetList(name, &value_list))
     return list;
   for (size_t i = 0; i < value_list->GetSize(); ++i) {
-    Value* entry;
+    const Value* entry;
     GURL gurl_entry;
     if (!value_list->Get(i, &entry) || !GetGURLFromValue(entry, &gurl_entry)) {
       NOTREACHED();
@@ -53,12 +53,7 @@ std::vector<GURL> GetNamedList(const char* name,
   return list;
 }
 
-DictionaryValue* ParseDistributionPreferences(
-    const FilePath& master_prefs_path) {
-  std::string json_data;
-  if (!file_util::ReadFileToString(master_prefs_path, &json_data))
-    return NULL;
-
+DictionaryValue* ParseDistributionPreferences(const std::string& json_data) {
   JSONStringValueSerializer json(json_data);
   std::string error;
   scoped_ptr<Value> root(json.Deserialize(NULL, &error));
@@ -81,6 +76,8 @@ namespace installer {
 MasterPreferences::MasterPreferences() : distribution_(NULL),
                                          preferences_read_from_file_(false),
                                          chrome_(true),
+                                         chrome_app_host_(false),
+                                         chrome_app_launcher_(false),
                                          chrome_frame_(false),
                                          multi_install_(false) {
   InitializeFromCommandLine(*CommandLine::ForCurrentProcess());
@@ -90,25 +87,43 @@ MasterPreferences::MasterPreferences(const CommandLine& cmd_line)
     : distribution_(NULL),
       preferences_read_from_file_(false),
       chrome_(true),
+      chrome_app_host_(false),
+      chrome_app_launcher_(false),
       chrome_frame_(false),
       multi_install_(false) {
   InitializeFromCommandLine(cmd_line);
 }
 
 MasterPreferences::MasterPreferences(const FilePath& prefs_path)
-    : distribution_(NULL), preferences_read_from_file_(false),
-      chrome_(true), chrome_frame_(false), multi_install_(false) {
-  master_dictionary_.reset(ParseDistributionPreferences(prefs_path));
-
-  if (!master_dictionary_.get()) {
-    master_dictionary_.reset(new DictionaryValue());
-  } else {
-    preferences_read_from_file_ = true;
-    // Cache a pointer to the distribution dictionary.
-    master_dictionary_->GetDictionary(kDistroDict, &distribution_);
+    : distribution_(NULL),
+      preferences_read_from_file_(false),
+      chrome_(true),
+      chrome_app_host_(false),
+      chrome_app_launcher_(false),
+      chrome_frame_(false),
+      multi_install_(false) {
+  std::string json_data;
+  // Failure to read the file is ignored as |json_data| will be the empty string
+  // and the remainder of this MasterPreferences objet should still be
+  // initialized as best as possible.
+  if (!file_util::ReadFileToString(prefs_path, &json_data)) {
+    LOG(ERROR) << "Failed to read master_preferences file at "
+               << prefs_path.value()
+               << ". Falling back to default preferences.";
   }
+  if (InitializeFromString(json_data))
+    preferences_read_from_file_ = true;
+}
 
-  InitializeProductFlags();
+MasterPreferences::MasterPreferences(const std::string& prefs)
+    : distribution_(NULL),
+      preferences_read_from_file_(false),
+      chrome_(true),
+      chrome_app_host_(false),
+      chrome_app_launcher_(false),
+      chrome_frame_(false),
+      multi_install_(false) {
+  InitializeFromString(prefs);
 }
 
 MasterPreferences::~MasterPreferences() {
@@ -135,18 +150,18 @@ void MasterPreferences::InitializeFromCommandLine(const CommandLine& cmd_line) {
   } translate_switches[] = {
     { installer::switches::kAutoLaunchChrome,
       installer::master_preferences::kAutoLaunchChrome },
+    { installer::switches::kChromeAppHost,
+      installer::master_preferences::kChromeAppHost },
+    { installer::switches::kChromeAppLauncher,
+      installer::master_preferences::kChromeAppLauncher },
     { installer::switches::kChrome,
       installer::master_preferences::kChrome },
     { installer::switches::kChromeFrame,
       installer::master_preferences::kChromeFrame },
     { installer::switches::kChromeFrameReadyMode,
       installer::master_preferences::kChromeFrameReadyMode },
-    { installer::switches::kCreateAllShortcuts,
-      installer::master_preferences::kCreateAllShortcuts },
     { installer::switches::kDisableLogging,
       installer::master_preferences::kDisableLogging },
-    { installer::switches::kDoNotCreateShortcuts,
-      installer::master_preferences::kDoNotCreateShortcuts },
     { installer::switches::kMsi,
       installer::master_preferences::kMsi },
     { installer::switches::kMultiInstall,
@@ -161,14 +176,12 @@ void MasterPreferences::InitializeFromCommandLine(const CommandLine& cmd_line) {
       installer::master_preferences::kSystemLevel },
     { installer::switches::kVerboseLogging,
       installer::master_preferences::kVerboseLogging },
-    { installer::switches::kAltDesktopShortcut,
-      installer::master_preferences::kAltShortcutText },
   };
 
-  std::string name(kDistroDict);
+  std::string name(installer::master_preferences::kDistroDict);
   for (int i = 0; i < arraysize(translate_switches); ++i) {
     if (cmd_line.HasSwitch(translate_switches[i].cmd_line_switch)) {
-      name.resize(arraysize(kDistroDict) - 1);
+      name.assign(installer::master_preferences::kDistroDict);
       name.append(".").append(translate_switches[i].distribution_switch);
       master_dictionary_->SetBoolean(name, true);
     }
@@ -178,7 +191,7 @@ void MasterPreferences::InitializeFromCommandLine(const CommandLine& cmd_line) {
   std::wstring str_value(cmd_line.GetSwitchValueNative(
       installer::switches::kLogFile));
   if (!str_value.empty()) {
-    name.resize(arraysize(kDistroDict) - 1);
+    name.assign(installer::master_preferences::kDistroDict);
     name.append(".").append(installer::master_preferences::kLogFile);
     master_dictionary_->SetString(name, str_value);
   }
@@ -191,27 +204,52 @@ void MasterPreferences::InitializeFromCommandLine(const CommandLine& cmd_line) {
     env->GetVar(kGoogleUpdateIsMachineEnvVar, &is_machine_var);
     if (!is_machine_var.empty() && is_machine_var[0] == '1') {
       VLOG(1) << "Taking system-level from environment.";
-      name.resize(arraysize(kDistroDict) - 1);
+      name.assign(installer::master_preferences::kDistroDict);
       name.append(".").append(installer::master_preferences::kSystemLevel);
       master_dictionary_->SetBoolean(name, true);
     }
   }
 
   // Cache a pointer to the distribution dictionary. Ignore errors if any.
-  master_dictionary_->GetDictionary(kDistroDict, &distribution_);
+  master_dictionary_->GetDictionary(installer::master_preferences::kDistroDict,
+                                    &distribution_);
 
   InitializeProductFlags();
 #endif
+}
+
+bool MasterPreferences::InitializeFromString(const std::string& json_data) {
+  bool data_is_valid = true;
+  master_dictionary_.reset(ParseDistributionPreferences(json_data));
+
+  if (!master_dictionary_.get()) {
+    master_dictionary_.reset(new DictionaryValue());
+    data_is_valid = false;
+  } else {
+    // Cache a pointer to the distribution dictionary.
+    master_dictionary_->GetDictionary(
+        installer::master_preferences::kDistroDict, &distribution_);
+  }
+
+  InitializeProductFlags();
+  EnforceLegacyPreferences();
+  return data_is_valid;
 }
 
 void MasterPreferences::InitializeProductFlags() {
   // Make sure we start out with the correct defaults.
   multi_install_ = false;
   chrome_frame_ = false;
+  chrome_app_host_ = false;
+  chrome_app_launcher_ = false;
   chrome_ = true;
 
   GetBool(installer::master_preferences::kMultiInstall, &multi_install_);
   GetBool(installer::master_preferences::kChromeFrame, &chrome_frame_);
+
+  GetBool(installer::master_preferences::kChromeAppHost, &chrome_app_host_);
+  GetBool(installer::master_preferences::kChromeAppLauncher,
+          &chrome_app_launcher_);
 
   // When multi-install is specified, the checks are pretty simple (in theory):
   // In order to be installed/uninstalled, each product must have its switch
@@ -227,6 +265,20 @@ void MasterPreferences::InitializeProductFlags() {
   } else {
     // If chrome-frame is on the command line however, we only install CF.
     chrome_ = !chrome_frame_;
+  }
+}
+
+void MasterPreferences::EnforceLegacyPreferences() {
+  // If create_all_shortcuts was explicitly set to false, set
+  // do_not_create_(desktop|quick_launch)_shortcut to true.
+  bool create_all_shortcuts = true;
+  GetBool(installer::master_preferences::kCreateAllShortcuts,
+          &create_all_shortcuts);
+  if (!create_all_shortcuts) {
+    distribution_->SetBoolean(
+        installer::master_preferences::kDoNotCreateDesktopShortcut, true);
+    distribution_->SetBoolean(
+        installer::master_preferences::kDoNotCreateQuickLaunchShortcut, true);
   }
 }
 

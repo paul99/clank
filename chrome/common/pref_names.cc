@@ -11,10 +11,6 @@ namespace prefs {
 // *************** PROFILE PREFS ***************
 // These are attached to the user profile
 
-// A counter that controls whether the apps promo is shown in the app launcher
-// or not.
-const char kAppsPromoCounter[] = "apps_promo_counter";
-
 // A string property indicating whether default apps should be installed
 // in this profile.  Use the value "install" to enable defaults apps, or
 // "noinstall" to disable them.  This property is usually set in the
@@ -34,23 +30,46 @@ const char kHomePage[] = "homepage";
 // Did the user change the home page after install?
 const char kHomePageChanged[] = "homepage_changed";
 
+// Does this user have a Google+ Profile?
+const char kIsGooglePlusUser[] = "is_google_plus_user";
+
 // Used to determine if the last session exited cleanly. Set to false when
 // first opened, and to true when closing. On startup if the value is false,
 // it means the profile didn't exit cleanly.
+// DEPRECATED: this is replaced by kSessionExitType and exists for backwards
+// compatability.
 const char kSessionExitedCleanly[] = "profile.exited_cleanly";
 
+// A string pref whose values is one of the values defined by
+// |ProfileImpl::kPrefExitTypeXXX|. Set to |kPrefExitTypeCrashed| on startup and
+// one of |kPrefExitTypeNormal| or |kPrefExitTypeSessionEnded| during
+// shutdown. Used to determine the exit type the last time the profile was open.
+const char kSessionExitType[] = "profile.exit_type";
+
 // An integer pref. Holds one of several values:
-// 0: (or empty) don't do anything special on startup.
+// 0: (deprecated) open the homepage on startup.
 // 1: restore the last session.
 // 2: this was used to indicate a specific session should be restored. It is
 //    no longer used, but saved to avoid conflict with old preferences.
 // 3: unused, previously indicated the user wants to restore a saved session.
 // 4: restore the URLs defined in kURLsToRestoreOnStartup.
+// 5: open the New Tab Page on startup.
 const char kRestoreOnStartup[] = "session.restore_on_startup";
 
 // The URLs to restore on startup or when the home button is pressed. The URLs
 // are only restored on startup if kRestoreOnStartup is 4.
 const char kURLsToRestoreOnStartup[] = "session.urls_to_restore_on_startup";
+
+// A preference to keep track of whether we have already checked whether we
+// need to migrate the user from kRestoreOnStartup=0 to kRestoreOnStartup=4.
+// We only need to do this check once, on upgrade from m18 or lower to m19 or
+// higher.
+const char kRestoreOnStartupMigrated[] = "session.restore_on_startup_migrated";
+
+// Disables screenshot accelerators and extension APIs.
+// This setting resides both in profile prefs and local state. Accelerator
+// handling code reads local state, while extension APIs use profile pref.
+const char kDisableScreenshots[] = "disable_screenshots";
 
 // The application locale.
 // For OS_CHROMEOS we maintain kApplicationLocale property in both local state
@@ -95,7 +114,7 @@ const char kApplicationLocaleBackup[] = "intl.app_locale_backup";
 
 // The default character encoding to assume for a web page in the
 // absence of MIME charset specification
-const char kGlobalDefaultCharset[] = "intl.global.charset_default";
+const char kDefaultCharset[] = "intl.charset_default";
 
 // The value to use for Accept-Languages HTTP header when making an HTTP
 // request.
@@ -106,11 +125,24 @@ const char kAcceptLanguages[] = "intl.accept_languages";
 // stored in non-translatable part of the resource bundle.
 const char kStaticEncodings[] = "intl.static_encodings";
 
-// OBSOLETE.  The list of hostnames for which we whitelist popups (rather than
-// blocking).
-const char kPopupWhitelistedHosts[] = "profile.popup_whitelisted_sites";
-
-// WebKit preferences.
+// Obselete WebKit prefs for migration.
+const char kGlobalDefaultCharset[] = "intl.global.charset_default";
+const char kWebKitGlobalDefaultFontSize[] =
+    "webkit.webprefs.global.default_font_size";
+const char kWebKitGlobalDefaultFixedFontSize[] =
+    "webkit.webprefs.global.default_fixed_font_size";
+const char kWebKitGlobalMinimumFontSize[] =
+    "webkit.webprefs.global.minimum_font_size";
+const char kWebKitGlobalMinimumLogicalFontSize[] =
+    "webkit.webprefs.global.minimum_logical_font_size";
+const char kWebKitGlobalJavascriptCanOpenWindowsAutomatically[] =
+    "webkit.webprefs.global.javascript_can_open_windows_automatically";
+const char kWebKitGlobalJavascriptEnabled[] =
+    "webkit.webprefs.global.javascript_enabled";
+const char kWebKitGlobalLoadsImagesAutomatically[] =
+    "webkit.webprefs.global.loads_images_automatically";
+const char kWebKitGlobalPluginsEnabled[] =
+    "webkit.webprefs.global.plugins_enabled";
 const char kWebKitGlobalStandardFontFamily[] =
     "webkit.webprefs.global.standard_font_family";
 const char kWebKitGlobalFixedFontFamily[] =
@@ -123,6 +155,45 @@ const char kWebKitGlobalCursiveFontFamily[] =
     "webkit.webprefs.global.cursive_font_family";
 const char kWebKitGlobalFantasyFontFamily[] =
     "webkit.webprefs.global.fantasy_font_family";
+const char kWebKitOldStandardFontFamily[] =
+    "webkit.webprefs.standard_font_family";
+const char kWebKitOldFixedFontFamily[] = "webkit.webprefs.fixed_font_family";
+const char kWebKitOldSerifFontFamily[] = "webkit.webprefs.serif_font_family";
+const char kWebKitOldSansSerifFontFamily[] =
+    "webkit.webprefs.sansserif_font_family";
+const char kWebKitOldCursiveFontFamily[] =
+    "webkit.webprefs.cursive_font_family";
+const char kWebKitOldFantasyFontFamily[] =
+    "webkit.webprefs.fantasy_font_family";
+
+// If these change, the corresponding enums in the extension API
+// experimental.fontSettings.json must also change.
+const char* const kWebKitScriptsForFontFamilyMaps[] = {
+  "Afak", "Arab", "Armi", "Armn", "Avst", "Bali", "Bamu", "Bass", "Batk",
+  "Beng", "Blis", "Bopo", "Brah", "Brai", "Bugi", "Buhd", "Cakm", "Cans",
+  "Cari", "Cham", "Cher", "Cirt", "Copt", "Cprt", "Cyrl", "Cyrs", "Deva",
+  "Dsrt", "Dupl", "Egyd", "Egyh", "Egyp", "Elba", "Ethi", "Geor", "Geok",
+  "Glag", "Goth", "Gran", "Grek", "Gujr", "Guru", "Hang", "Hani", "Hano",
+  "Hans", "Hant", "Hebr", "Hluw", "Hmng", "Hung", "Inds", "Ital", "Java",
+  "Jpan", "Jurc", "Kali", "Khar", "Khmr", "Khoj", "Knda", "Kpel", "Kthi",
+  "Lana", "Laoo", "Latf", "Latg", "Latn", "Lepc", "Limb", "Lina", "Linb",
+  "Lisu", "Loma", "Lyci", "Lydi", "Mand", "Mani", "Maya", "Mend", "Merc",
+  "Mero", "Mlym", "Moon", "Mong", "Mroo", "Mtei", "Mymr", "Narb", "Nbat",
+  "Nkgb", "Nkoo", "Nshu", "Ogam", "Olck", "Orkh", "Orya", "Osma", "Palm",
+  "Perm", "Phag", "Phli", "Phlp", "Phlv", "Phnx", "Plrd", "Prti", "Rjng",
+  "Roro", "Runr", "Samr", "Sara", "Sarb", "Saur", "Sgnw", "Shaw", "Shrd",
+  "Sind", "Sinh", "Sora", "Sund", "Sylo", "Syrc", "Syre", "Syrj", "Syrn",
+  "Tagb", "Takr", "Tale", "Talu", "Taml", "Tang", "Tavt", "Telu", "Teng",
+  "Tfng", "Tglg", "Thaa", "Thai", "Tibt", "Tirh", "Ugar", "Vaii", "Visp",
+  "Wara", "Wole", "Xpeo", "Xsux", "Yiii", "Zmth", "Zsym", "Zyyy"
+};
+
+const size_t kWebKitScriptsForFontFamilyMapsLength =
+    arraysize(kWebKitScriptsForFontFamilyMaps);
+
+// Strings for WebKit font family preferences. If these change, the pref prefix
+// in pref_names_util.cc and the pref format in font_settings_api.cc must also
+// change.
 const char kWebKitStandardFontFamilyMap[] =
     "webkit.webprefs.fonts.standard";
 const char kWebKitFixedFontFamilyMap[] =
@@ -135,13 +206,8 @@ const char kWebKitCursiveFontFamilyMap[] =
     "webkit.webprefs.fonts.cursive";
 const char kWebKitFantasyFontFamilyMap[] =
     "webkit.webprefs.fonts.fantasy";
-
-// TODO(falken): Add all the scripts we should support.
-const char* const kWebKitScriptsForFontFamilyMaps[] =
-    { "Arab", "Hang", "Hans", "Hant", "Hrkt" };
-const size_t kWebKitScriptsForFontFamilyMapsLength =
-    arraysize(kWebKitScriptsForFontFamilyMaps);
-
+const char kWebKitPictographFontFamilyMap[] =
+    "webkit.webprefs.fonts.pictograph";
 const char kWebKitStandardFontFamilyArabic[] =
     "webkit.webprefs.fonts.standard.Arab";
 const char kWebKitFixedFontFamilyArabic[] =
@@ -150,14 +216,30 @@ const char kWebKitSerifFontFamilyArabic[] =
     "webkit.webprefs.fonts.serif.Arab";
 const char kWebKitSansSerifFontFamilyArabic[] =
     "webkit.webprefs.fonts.sansserif.Arab";
+const char kWebKitStandardFontFamilyCyrillic[] =
+    "webkit.webprefs.fonts.standard.Cyrl";
+const char kWebKitFixedFontFamilyCyrillic[] =
+    "webkit.webprefs.fonts.fixed.Cyrl";
+const char kWebKitSerifFontFamilyCyrillic[] =
+    "webkit.webprefs.fonts.serif.Cyrl";
+const char kWebKitSansSerifFontFamilyCyrillic[] =
+    "webkit.webprefs.fonts.sansserif.Cyrl";
+const char kWebKitStandardFontFamilyGreek[] =
+    "webkit.webprefs.fonts.standard.Grek";
+const char kWebKitFixedFontFamilyGreek[] =
+    "webkit.webprefs.fonts.fixed.Grek";
+const char kWebKitSerifFontFamilyGreek[] =
+    "webkit.webprefs.fonts.serif.Grek";
+const char kWebKitSansSerifFontFamilyGreek[] =
+    "webkit.webprefs.fonts.sansserif.Grek";
 const char kWebKitStandardFontFamilyJapanese[] =
-    "webkit.webprefs.fonts.standard.Hrkt";
+    "webkit.webprefs.fonts.standard.Jpan";
 const char kWebKitFixedFontFamilyJapanese[] =
-    "webkit.webprefs.fonts.fixed.Hrkt";
+    "webkit.webprefs.fonts.fixed.Jpan";
 const char kWebKitSerifFontFamilyJapanese[] =
-    "webkit.webprefs.fonts.serif.Hrkt";
+    "webkit.webprefs.fonts.serif.Jpan";
 const char kWebKitSansSerifFontFamilyJapanese[] =
-    "webkit.webprefs.fonts.sansserif.Hrkt";
+    "webkit.webprefs.fonts.sansserif.Jpan";
 const char kWebKitStandardFontFamilyKorean[] =
     "webkit.webprefs.fonts.standard.Hang";
 const char kWebKitFixedFontFamilyKorean[] =
@@ -185,22 +267,7 @@ const char kWebKitSerifFontFamilyTraditionalHan[] =
 const char kWebKitSansSerifFontFamilyTraditionalHan[] =
     "webkit.webprefs.fonts.sansserif.Hant";
 
-const char kWebKitGlobalDefaultFontSize[] =
-    "webkit.webprefs.global.default_font_size";
-const char kWebKitGlobalDefaultFixedFontSize[] =
-    "webkit.webprefs.global.default_fixed_font_size";
-const char kWebKitGlobalMinimumFontSize[] =
-    "webkit.webprefs.global.minimum_font_size";
-const char kWebKitGlobalMinimumLogicalFontSize[] =
-    "webkit.webprefs.global.minimum_logical_font_size";
-const char kWebKitGlobalJavascriptCanOpenWindowsAutomatically[] =
-    "webkit.webprefs.global.javascript_can_open_windows_automatically";
-const char kWebKitGlobalJavascriptEnabled[] =
-    "webkit.webprefs.global.javascript_enabled";
-const char kWebKitGlobalLoadsImagesAutomatically[] =
-    "webkit.webprefs.global.loads_images_automatically";
-const char kWebKitGlobalPluginsEnabled[] =
-    "webkit.webprefs.global.plugins_enabled";
+// WebKit preferences.
 const char kWebKitWebSecurityEnabled[] = "webkit.webprefs.web_security_enabled";
 const char kWebKitDomPasteEnabled[] = "webkit.webprefs.dom_paste_enabled";
 const char kWebKitShrinksStandaloneImagesToFit[] =
@@ -216,22 +283,21 @@ const char kWebKitAllowDisplayingInsecureContent[] =
     "webkit.webprefs.allow_displaying_insecure_content";
 const char kWebKitAllowRunningInsecureContent[] =
     "webkit.webprefs.allow_running_insecure_content";
-const char kWebKitXSSAuditorEnabled[] =
-    "webkit.webprefs.xss_auditor_enabled";
 #if defined(OS_ANDROID)
 const char kWebKitFontScaleFactor[] = "webkit.webprefs.font_scale_factor";
 const char kWebKitForceEnableZoom[] = "webkit.webprefs.force_enable_zoom";
 #endif
 
-// Settings below can be overridden for each tab individually.
-const char kDefaultCharset[] = "intl.charset_default";
-const char kWebKitStandardFontFamily[] = "webkit.webprefs.standard_font_family";
-const char kWebKitFixedFontFamily[] = "webkit.webprefs.fixed_font_family";
-const char kWebKitSerifFontFamily[] = "webkit.webprefs.serif_font_family";
+const char kWebKitCommonScript[] = "Zyyy";
+const char kWebKitStandardFontFamily[] = "webkit.webprefs.fonts.standard.Zyyy";
+const char kWebKitFixedFontFamily[] = "webkit.webprefs.fonts.fixed.Zyyy";
+const char kWebKitSerifFontFamily[] = "webkit.webprefs.fonts.serif.Zyyy";
 const char kWebKitSansSerifFontFamily[] =
-    "webkit.webprefs.sansserif_font_family";
-const char kWebKitCursiveFontFamily[] = "webkit.webprefs.cursive_font_family";
-const char kWebKitFantasyFontFamily[] = "webkit.webprefs.fantasy_font_family";
+    "webkit.webprefs.fonts.sansserif.Zyyy";
+const char kWebKitCursiveFontFamily[] = "webkit.webprefs.fonts.cursive.Zyyy";
+const char kWebKitFantasyFontFamily[] = "webkit.webprefs.fonts.fantasy.Zyyy";
+const char kWebKitPictographFontFamily[] =
+    "webkit.webprefs.fonts.pictograph.Zyyy";
 const char kWebKitDefaultFontSize[] = "webkit.webprefs.default_font_size";
 const char kWebKitDefaultFixedFontSize[] =
     "webkit.webprefs.default_fixed_font_size";
@@ -243,8 +309,6 @@ const char kWebKitJavascriptCanOpenWindowsAutomatically[] =
     "webkit.webprefs.javascript_can_open_windows_automatically";
 const char kWebKitLoadsImagesAutomatically[] =
     "webkit.webprefs.loads_images_automatically";
-const char kWebKitImagesEnabled[] =
-    "webkit.webprefs.images_enabled";
 const char kWebKitPluginsEnabled[] = "webkit.webprefs.plugins_enabled";
 
 // Boolean which specifies whether the bookmark bar is visible on all tabs.
@@ -263,9 +327,17 @@ const char kPasswordManagerEnabled[] = "profile.password_manager_enabled";
 const char kPasswordManagerAllowShowPasswords[] =
     "profile.password_manager_allow_show_passwords";
 
+// Boolean that is true when password generation is enabled.
+const char kPasswordGenerationEnabled[] = "password_generation.enabled";
+
 // Booleans identifying whether normal and reverse auto-logins are enabled.
 const char kAutologinEnabled[] = "autologin.enabled";
 const char kReverseAutologinEnabled[] = "reverse_autologin.enabled";
+
+// List to keep track of emails for which the user has rejected one-click
+// sign-in.
+const char kReverseAutologinRejectedEmailList[] =
+    "reverse_autologin.rejected_email_list";
 
 // Boolean that is true when SafeBrowsing is enabled.
 const char kSafeBrowsingEnabled[] = "safebrowsing.enabled";
@@ -273,6 +345,11 @@ const char kSafeBrowsingEnabled[] = "safebrowsing.enabled";
 // Boolean that is true when SafeBrowsing Malware Report is enabled.
 const char kSafeBrowsingReportingEnabled[] =
     "safebrowsing.reporting_enabled";
+
+// Boolean that is true when the SafeBrowsing interstitial should not allow
+// users to proceed anyway.
+const char kSafeBrowsingProceedAnywayDisabled[] =
+    "safebrowsing.proceed_anyway_disabled";
 
 // Enum that specifies whether Incognito mode is:
 // 0 - Enabled. Default behaviour. Default mode is available on demand.
@@ -345,6 +422,10 @@ const char kDefaultSearchProviderID[] = "default_search_provider.id";
 const char kDefaultSearchProviderPrepopulateID[] =
     "default_search_provider.prepopulate_id";
 
+// The alternate urls of the default search provider.
+const char kDefaultSearchProviderAlternateURLs[] =
+    "default_search_provider.alternate_urls";
+
 // The dictionary key used when the default search providers are given
 // in the preferences file. Normally they are copied from the master
 // preferences file.
@@ -406,15 +487,12 @@ const char kInstantConfirmDialogShown[] = "instant.confirm_dialog_shown";
 // Boolean pref indicating if instant is enabled.
 const char kInstantEnabled[] = "instant.enabled";
 
-// Boolean pref indicating if instant was ever enabled.
-const char kInstantEnabledOnce[] = "instant.enabled_once";
+// Boolean pref indicating if instant is enabled for instant extended.
+const char kInstantExtendedEnabled[] = "instant_extended.enabled";
 
-// Time when instant was last enabled.
-const char kInstantEnabledTime[] = "instant.enabled_time";
-
-// Used to maintain instant promo keys. See PromoCounter for details of subkeys
-// that are used.
-const char kInstantPromo[] = "instant.promo";
+// Prefix URL for the experimental Instant ZeroSuggest provider.
+const char kInstantUIZeroSuggestUrlPrefix[] =
+    "instant_ui.zero_suggest_url_prefix";
 
 // Used to migrate preferences from local state to user preferences to
 // enable multiple profiles.
@@ -438,27 +516,58 @@ const char kNetworkPredictionEnabled[] = "dns_prefetching.enabled";
 // is async, and the user may have stopped chrome in the middle.  The next time
 // the profile is opened, the process will continue from where it left off.
 //
-// See possible values in external_extension_provider_impl.cc.
+// See possible values in external_provider_impl.cc.
 const char kDefaultAppsInstallState[] = "default_apps_install_state";
 
 #if defined(OS_CHROMEOS)
-// An integer pref to initially mute volume if 1.
+// An integer pref to initially mute volume if 1. This pref is ignored if
+// |kAudioOutputAllowed| is set to false, but its value is preserved, therefore
+// when the policy is lifted the original mute state is restored.
 const char kAudioMute[] = "settings.audio.mute";
 
-// A double pref to set initial volume.
-const char kAudioVolume[] = "settings.audio.volume";
+// A double pref storing the user-requested volume.
+const char kAudioVolumePercent[] = "settings.audio.volume_percent";
 
-// A boolean pref set to true if TapToClick is being done in browser.
+// A boolean pref set to true if touchpad tap-to-click is enabled.
 const char kTapToClickEnabled[] = "settings.touchpad.enable_tap_to_click";
+
+// A boolean pref set to true if touchpad tap-dragging is enabled.
+const char kTapDraggingEnabled[] = "settings.touchpad.enable_tap_dragging";
+
+// A boolean pref set to true if touchpad three-finger-click is enabled.
+const char kEnableTouchpadThreeFingerClick[] =
+    "settings.touchpad.enable_three_finger_click";
+
+// A boolean pref set to true if touchpad three-finger swipe is enabled.
+const char kEnableTouchpadThreeFingerSwipe[] =
+    "settings.touchpad.enable_three_finger_swipe";
+
+// A boolean pref set to true if touchpad natural scrolling is enabled.
+const char kNaturalScroll[] = "settings.touchpad.natural_scroll";
 
 // A boolean pref set to true if primary mouse button is the left button.
 const char kPrimaryMouseButtonRight[] = "settings.mouse.primary_right";
+
+// A integer pref for the touchpad sensitivity.
+const char kMouseSensitivity[] = "settings.mouse.sensitivity2";
 
 // A integer pref for the touchpad sensitivity.
 const char kTouchpadSensitivity[] = "settings.touchpad.sensitivity2";
 
 // A boolean pref set to true if time should be displayed in 24-hour clock.
 const char kUse24HourClock[] = "settings.clock.use_24hour_clock";
+
+// A boolean pref to disable Google Drive integration.
+// The pref prefix should remain as "gdata" for backward compatibility.
+const char kDisableDrive[] = "gdata.disabled";
+
+// A boolean pref to disable Drive over cellular connections.
+// The pref prefix should remain as "gdata" for backward compatibility.
+const char kDisableDriveOverCellular[] = "gdata.cellular.disabled";
+
+// A boolean pref to disable hosted files on Drive.
+// The pref prefix should remain as "gdata" for backward compatibility.
+const char kDisableDriveHostedFiles[] = "gdata.hosted_files.disabled";
 
 // A string pref set to the current input method.
 const char kLanguageCurrentInputMethod[] =
@@ -486,6 +595,10 @@ const char kLanguagePreferredLanguages[] =
 // A string pref (comma-separated list) set to the preloaded (active) input
 // method IDs (ex. "pinyin,mozc").
 const char kLanguagePreloadEngines[] = "settings.language.preload_engines";
+
+// A List pref (comma-separated list) set to the extension IMEs to filter out.
+const char kLanguageFilteredExtensionImes[] =
+    "settings.language.filtered_extension_imes";
 
 // Boolean prefs for ibus-chewing Chinese input method.
 const char kLanguageChewingAutoShiftCur[] =
@@ -589,15 +702,19 @@ const char kLanguageMozcUseDictionarySuggest[] =
 const char kLanguageMozcSuggestionsSize[] =
     "settings.language.mozc_suggestions_size";
 
-// A integer prefs which determine how we remap modifier keys (e.g. swap Alt-L
-// and Control-L.) Possible values for these prefs are 0-4. See ModifierKey enum
-// in src/third_party/cros/chrome_keyboard.h for details.
-const char kLanguageXkbRemapSearchKeyTo[] =
+// A integer prefs which determine how we remap modifier keys (e.g. swap Alt and
+// Control.) Possible values for these prefs are 0-4. See ModifierKey enum in
+// src/chrome/browser/chromeos/input_method/xkeyboard.h
+const char kLanguageRemapSearchKeyTo[] =
+    // Note: we no longer use XKB for remapping these keys, but we can't change
+    // the pref names since the names are already synced with the cloud.
     "settings.language.xkb_remap_search_key_to";
-const char kLanguageXkbRemapControlKeyTo[] =
+const char kLanguageRemapControlKeyTo[] =
     "settings.language.xkb_remap_control_key_to";
-const char kLanguageXkbRemapAltKeyTo[] =
+const char kLanguageRemapAltKeyTo[] =
     "settings.language.xkb_remap_alt_key_to";
+const char kLanguageRemapCapsLockKeyTo[] =
+    "settings.language.remap_caps_lock_key_to";
 
 // A boolean pref which determines whether key repeat is enabled.
 const char kLanguageXkbAutoRepeatEnabled[] =
@@ -611,19 +728,20 @@ const char kLanguageXkbAutoRepeatInterval[] =
 // "_r2" suffixes are added to the three prefs above when we change the
 // preferences not user-configurable, not to sync them with cloud.
 
-// A dictionary pref which determines a preferred virtual keyboard per layout.
-// e.g. { "us(dvorak)": "http://asdfg..yuiop/" }
-const char kLanguagePreferredVirtualKeyboard[] =
-    "settings.language.preferred_virtual_keyboard";
-
 // A boolean pref which determines whether spoken feedback is enabled.
 const char kSpokenFeedbackEnabled[] = "settings.accessibility";
 // A boolean pref which determines whether high conrast is enabled.
-const char kHighContrastEnabled[] = "settings.a11y.high_contrast";
+const char kHighContrastEnabled[] = "settings.a11y.high_contrast_enabled";
 // A boolean pref which determines whether screen magnifier is enabled.
 const char kScreenMagnifierEnabled[] = "settings.a11y.screen_magnifier";
+// A double pref which determines a zooming scale of the screen magnifier.
+const char kScreenMagnifierScale[] = "settings.a11y.screen_magnifier_scale";
 // A boolean pref which determines whether virtual keyboard is enabled.
+// TODO(hashimoto): Remove this pref.
 const char kVirtualKeyboardEnabled[] = "settings.a11y.virtual_keyboard";
+// A boolean pref which determines whether the accessibility menu shows
+// regardless of the state of a11y features.
+const char kShouldAlwaysShowAccessibilityMenu[] = "settings.a11y.enable_menu";
 
 // A boolean pref which turns on Advanced Filesystem
 // (USB support, SD card, etc).
@@ -644,6 +762,9 @@ const char kShowPlanNotifications[] =
 const char kShow3gPromoNotification[] =
     "settings.internet.mobile.show_3g_promo_notification";
 
+// A string pref that contains version where "What's new" promo was shown.
+const char kChromeOSReleaseNotesVersion[] = "settings.release_notes.version";
+
 // A boolean pref that uses shared proxies.
 const char kUseSharedProxies[] = "settings.use_shared_proxies";
 
@@ -652,6 +773,46 @@ const char kOAuth1Token[] = "settings.account.oauth1_token";
 
 // A string prefs for OAuth1 secret.
 const char kOAuth1Secret[] = "settings.account.oauth1_secret";
+
+// A boolean pref that enables the (private) pepper GetID() call.
+const char kEnableCrosDRM[] = "settings.privacy.drm_enabled";
+
+// A dictionary pref that specifies per-display overscan data.  Its key is the
+// display's ID and its value is a dictionary of canceling overscan pixels for
+// 'top', 'right', 'bottom', 'left'.
+const char kDisplayOverscans[] = "settings.display.overscans";
+
+// A 64bit integer pref that specifies the name of the primary display device.
+const char kPrimaryDisplayID[] = "settings.display.primary_id";
+
+// An enumeration that specifies the layout of the secondary display.
+//  0 - The secondary display is at the top of the primary display.
+//  1 - The secondary display is at the right of the primary display.
+//  2 - The secondary display is at the bottom of the primary display.
+//  3 - The secondary display is at the left of the primary display.
+// TODO(mukai,oshima): update the format of the multi-display settings.
+const char kSecondaryDisplayLayout[] = "settings.display.secondary_layout";
+
+// An integer pref that specifies how far the secondary display is positioned
+// from the edge of the primary display.
+const char kSecondaryDisplayOffset[] = "settings.display.secondary_offset";
+
+// A dictionary pref that specifies per-display layout/offset information.
+// Its key is the ID of the display and its value is a dictionary for the
+// layout/offset information.
+const char kSecondaryDisplays[] = "settings.display.secondary_displays";
+
+// A preference to keep track of the session start time. The value is set
+// after login. When the browser restarts after a crash, the pref value is not
+// changed unless it appears corrupted (value unset, value lying in the future,
+// zero value).
+const char kSessionStartTime[] = "session.start_time";
+
+// Holds the maximum session time in milliseconds. If this pref is set, the
+// user is logged out when the maximum session time is reached. The user is
+// informed about the remaining time by a countdown timer shown in the ash
+// system tray.
+const char kSessionLengthLimit[] = "session.length_limit";
 #endif  // defined(OS_CHROMEOS)
 
 // The disabled messages in IPC logging.
@@ -672,10 +833,13 @@ const char kDeleteCache[] = "browser.clear_data.cache";
 const char kDeleteCookies[] = "browser.clear_data.cookies";
 const char kDeletePasswords[] = "browser.clear_data.passwords";
 const char kDeleteFormData[] = "browser.clear_data.form_data";
+const char kDeleteHostedAppsData[] = "browser.clear_data.hosted_apps_data";
+const char kDeauthorizeContentLicenses[] =
+    "browser.clear_data.content_licenses";
 const char kDeleteTimePeriod[] = "browser.clear_data.time_period";
 
 // Boolean pref to define the default values for using spellchecker.
-const char kEnableSpellCheck[] = "browser.enable_spellchecking";
+const char kEnableContinuousSpellcheck[] = "browser.enable_spellchecking";
 
 // List of names of the enabled labs experiments (see chrome/browser/labs.cc).
 const char kEnabledLabsExperiments[] = "browser.enabled_labs_experiments";
@@ -685,18 +849,21 @@ const char kEnableAutoSpellCorrect[] = "browser.enable_autospellcorrect";
 
 // Boolean pref to define the default setting for "block offensive words".
 // The old key value is kept to avoid unnecessary migration code.
-const char kSpeechInputFilterProfanities[] =
+const char kSpeechRecognitionFilterProfanities[] =
     "browser.speechinput_censor_results";
 
-// Boolean pref to determine if the tray notification balloon for speech input
-// extension API has been already shown once to the user.
-const char kSpeechInputTrayNotificationShown[] =
-    "browser.speechinput_tray_notification_shown";
+// List of speech recognition context names (extensions or websites) for which
+// the tray notification balloon has already been shown.
+const char kSpeechRecognitionTrayNotificationShownContexts[] =
+    "browser.speechinput_tray_notification_shown_contexts";
 
 // Boolean controlling whether history saving is disabled.
 const char kSavingBrowserHistoryDisabled[] = "history.saving_disabled";
 
-#if defined(TOOLKIT_USES_GTK)
+// Boolean controlling whether SafeSearch is mandatory for Google Web Searches.
+const char kForceSafeSearch[] = "settings.force_safesearch";
+
+#if defined(TOOLKIT_GTK)
 // GTK specific preference on whether we should match the system GTK theme.
 const char kUsesSystemTheme[] = "extensions.theme.use_system";
 #endif
@@ -714,6 +881,14 @@ const char kExtensionsUIDeveloperMode[] = "extensions.ui.developer_mode";
 // Integer pref that tracks the number of browser actions visible in the browser
 // actions toolbar.
 const char kExtensionToolbarSize[] = "extensions.toolbarsize";
+
+// Dictionary pref that tracks which command belongs to which
+// extension + named command pair.
+const char kExtensionCommands[] = "extensions.commands";
+
+// Integer pref that tracks how often the bubble has been shown to the user.
+const char kExtensionsSideloadWipeoutBubbleShown[] =
+    "extensions.sideload_wipeout_bubble_shown";
 
 // Pref containing the directory for internal plugins as written to the plugins
 // list (below).
@@ -740,11 +915,24 @@ const char kPluginsEnabledInternalPDF[] = "plugins.enabled_internal_pdf3";
 // enable it by default, we'll want to do so only once.
 const char kPluginsEnabledNaCl[] = "plugins.enabled_nacl";
 
-const char kPluginsShowSetReaderDefaultInfobar[] =
-    "plugins.show_set_reader_default";
+// When bundled NPAPI Flash is removed, if at that point it is enabled while
+// Pepper Flash is disabled, we would like to turn on Pepper Flash. And we will
+// want to do so only once.
+const char kPluginsMigratedToPepperFlash[] = "plugins.migrated_to_pepper_flash";
 
+// In the early stage of component-updated PPAPI Flash, we did field trials in
+// which it was set to disabled by default. The corresponding settings item may
+// remain in some users' profiles. Currently it affects both the bundled and
+// component-updated PPAPI Flash (since the two share the same enable/disable
+// state). We want to remove this item to get those users to use PPAPI Flash.
+// We will want to do so only once.
+const char kPluginsRemovedOldComponentPepperFlashSettings[] =
+    "plugins.removed_old_component_pepper_flash_settings";
+
+#if !defined(OS_ANDROID)
 // Whether about:plugins is shown in the details mode or not.
 const char kPluginsShowDetails[] = "plugins.show_details";
+#endif
 
 // Boolean that indicates whether outdated plugins are allowed or not.
 const char kPluginsAllowOutdated[] = "plugins.allow_outdated";
@@ -753,9 +941,30 @@ const char kPluginsAllowOutdated[] = "plugins.allow_outdated";
 // be always allowed or not.
 const char kPluginsAlwaysAuthorize[] = "plugins.always_authorize";
 
+#if defined(ENABLE_PLUGIN_INSTALLATION)
+// Dictionary holding plug-ins metadata.
+const char kPluginsMetadata[] = "plugins.metadata";
+
+// Last update time of plug-ins resource cache.
+const char kPluginsResourceCacheUpdate[] = "plugins.resource_cache_update";
+#endif
+
+#if defined(ENABLE_WEB_INTENTS)
+// Boolean that is true if Web Intents is enabled.
+const char kWebIntentsEnabled[] = "webintents.enabled";
+#endif
+
 // Boolean that indicates whether we should check if we are the default browser
 // on start-up.
 const char kCheckDefaultBrowser[] = "browser.check_default_browser";
+
+#if defined(OS_WIN)
+// By default, setting Chrome as default during first run on Windows 8 will
+// trigger shutting down the current instance and spawning a new (Metro)
+// Chrome. This boolean preference supresses this behaviour.
+const char kSuppressSwitchToMetroModeOnSetDefault[] =
+    "browser.suppress_switch_to_metro_mode_on_set_default";
+#endif
 
 // Policy setting whether default browser check should be disabled and default
 // browser registration should take place.
@@ -778,14 +987,6 @@ const char kUseCustomChromeFrame[] = "browser.custom_chrome_frame";
 // done directly from the omnibox should be shown.
 const char kShowOmniboxSearchHint[] = "browser.show_omnibox_search_hint";
 
-// The list of origins which are allowed|denied to show desktop notifications.
-const char kDesktopNotificationDefaultContentSetting[] =
-    "profile.notifications_default_content_setting";
-const char kDesktopNotificationAllowedOrigins[] =
-    "profile.notification_allowed_sites";
-const char kDesktopNotificationDeniedOrigins[] =
-    "profile.notification_denied_sites";
-
 // The preferred position (which corner of screen) for desktop notifications.
 const char kDesktopNotificationPosition[] =
     "browser.desktop_notification_position";
@@ -793,19 +994,17 @@ const char kDesktopNotificationPosition[] =
 // Dictionary of content settings applied to all hosts by default.
 const char kDefaultContentSettings[] = "profile.default_content_settings";
 
-// OBSOLETE. Dictionary that maps hostnames to content related settings.
-// Default settings will be applied to hosts not in this pref.
-const char kPerHostContentSettings[] = "profile.per_host_content_settings";
+// Boolean indicating whether the clear on exit pref was migrated to content
+// settings yet.
+const char kContentSettingsClearOnExitMigrated[] =
+    "profile.content_settings.clear_on_exit_migrated";
 
 // Version of the pattern format used to define content settings.
 const char kContentSettingsVersion[] = "profile.content_settings.pref_version";
 
-// Patterns for mapping hostnames to content related settings. Default settings
-// will be applied to hosts that don't match any of the patterns. Replaces
-// kPerHostContentSettings. The pattern format used is defined by
-// kContentSettingsVersion.
-const char kContentSettingsPatterns[] = "profile.content_settings.patterns";
-
+// Patterns for mapping origins to origin related settings. Default settings
+// will be applied to origins that don't match any of the patterns. The pattern
+// format used is defined by kContentSettingsVersion.
 const char kContentSettingsPatternPairs[] =
     "profile.content_settings.pattern_pairs";
 
@@ -813,9 +1012,11 @@ const char kContentSettingsPatternPairs[] =
 const char kContentSettingsDefaultWhitelistVersion[] =
     "profile.content_settings.whitelist_version";
 
+#if !defined(OS_ANDROID)
 // Which plugins have been whitelisted manually by the user.
 const char kContentSettingsPluginWhitelist[] =
     "profile.content_settings.plugin_whitelist";
+#endif
 
 // Boolean that is true if we should unconditionally block third-party cookies,
 // regardless of other content settings.
@@ -831,10 +1032,6 @@ const char kDefaultZoomLevel[] = "profile.default_zoom_level";
 // Dictionary that maps hostnames to zoom levels.  Hosts not in this pref will
 // be displayed at the default zoom level.
 const char kPerHostZoomLevels[] = "profile.per_host_zoom_levels";
-
-// Boolean that specifies whether or not a shortcut has been created for this
-// profile in multi-profiles mode.
-const char kProfileShortcutCreated[] = "profile.shortcut_created";
 
 // Boolean that is true if Autofill is enabled and allowed to save profile data.
 const char kAutofillEnabled[] = "autofill.enabled";
@@ -859,28 +1056,20 @@ const char kEditBookmarksEnabled[] = "bookmarks.editing_enabled";
 // Boolean that is true when the translate feature is enabled.
 const char kEnableTranslate[] = "translate.enabled";
 
+#if !defined(OS_ANDROID)
 const char kPinnedTabs[] = "pinned_tabs";
-
-// Boolean that is true when HTTP throttling is enabled.
-const char kHttpThrottlingEnabled[] = "http_throttling.enabled";
-
-// Boolean that is true until the user changes the setting of the check-box
-// that controls whether HTTP throttling is enabled. When this is false,
-// we do not allow FieldTrial experiments to modify whether the feature
-// is enabled or not.
-const char kHttpThrottlingMayExperiment[] = "http_throttling.may_experiment";
-
-// Integer containing the default Geolocation content setting.
-const char kGeolocationDefaultContentSetting[] =
-    "geolocation.default_content_setting";
+#endif
 
 #if defined(OS_ANDROID)
 // Boolean that controls the enabled-state of Geolocation.
 const char kGeolocationEnabled[] = "geolocation.enabled";
 #endif
 
-// Dictionary that maps [frame, toplevel] to their Geolocation content setting.
-const char kGeolocationContentSettings[] = "geolocation.content_settings";
+// The default audio capture device used by the Media content setting.
+const char kDefaultAudioCaptureDevice[] = "media.default_audio_capture_device";
+
+// The default video capture device used by the Media content setting.
+const char kDefaultVideoCaptureDevice[] = "media.default_video_capture_Device";
 
 // Preference to disable 3D APIs (WebGL, Pepper 3D).
 const char kDisable3DAPIs[] = "disable_3d_apis";
@@ -891,13 +1080,20 @@ const char kEnableHyperlinkAuditing[] = "enable_a_ping";
 // Whether to enable sending referrers.
 const char kEnableReferrers[] = "enable_referrers";
 
+// Whether to send the DNT header.
+const char kEnableDoNotTrack[] = "enable_do_not_track";
+
 // Boolean to enable reporting memory info to page.
 const char kEnableMemoryInfo[] = "enable_memory_info";
 
-#if defined(OS_MACOSX)
-// Whether presentation mode is enabled for fullscreen (used on Lion only).
-const char kPresentationModeEnabled[] = "presentation_mode_enabled";
-#endif
+// GL_VENDOR string.
+const char kGLVendorString[] = "gl_vendor_string";
+
+// GL_RENDERER string.
+const char kGLRendererString[] = "gl_renderer_string";
+
+// GL_VERSION string.
+const char kGLVersionString[] = "gl_version_string";
 
 // Boolean that specifies whether to import bookmarks from the default browser
 // on first run.
@@ -941,6 +1137,24 @@ const char kPasswordsUseLocalProfileId[] =
 const char kProfileAvatarIndex[] = "profile.avatar_index";
 const char kProfileName[] = "profile.name";
 
+// Indicates if we've already shown a notification that high contrast
+// mode is on, recommending high-contrast extensions and themes.
+const char kInvertNotificationShown[] = "invert_notification_version_2_shown";
+
+// Boolean controlling whether printing is enabled.
+const char kPrintingEnabled[] = "printing.enabled";
+
+// Boolean controlling whether print preview is disabled.
+const char kPrintPreviewDisabled[] = "printing.print_preview_disabled";
+
+// An integer pref specifying the fallback behavior for sites outside of content
+// packs. One of:
+// 0: Allow (does nothing)
+// 1: Warn.
+// 2: Block.
+const char kDefaultManagedModeFilteringBehavior[] =
+    "profile.managed.default_filtering_behavior";
+
 // *************** LOCAL STATE ***************
 // These are attached to the machine/installation
 
@@ -954,6 +1168,11 @@ const char kProfilesLastActive[] = "profile.last_active_profiles";
 // directories.
 const char kProfilesNumCreated[] = "profile.profiles_created";
 
+// String containing the version of Chrome that the profile was created by.
+// If profile was created before this feature was added, this pref will default
+// to "1.0.0.0".
+const char kProfileCreatedByVersion[] = "profile.created_by_version";
+
 // A map of profile data directory to cached information. This cache can be
 // used to display information about profiles without actually having to load
 // them.
@@ -961,15 +1180,17 @@ const char kProfileInfoCache[] = "profile.info_cache";
 
 // Prefs for SSLConfigServicePref.
 const char kCertRevocationCheckingEnabled[] = "ssl.rev_checking.enabled";
-const char kSSL3Enabled[] = "ssl.ssl3.enabled";
-const char kTLS1Enabled[] = "ssl.tls1.enabled";
+const char kSSLVersionMin[] = "ssl.version_min";
+const char kSSLVersionMax[] = "ssl.version_max";
 const char kCipherSuiteBlacklist[] = "ssl.cipher_suites.blacklist";
 const char kEnableOriginBoundCerts[] = "ssl.origin_bound_certs.enabled";
 const char kDisableSSLRecordSplitting[] = "ssl.ssl_record_splitting.disabled";
 
-// The metrics client GUID and session ID.
+// The metrics client GUID, entropy source and session ID.
 const char kMetricsClientID[] = "user_experience_metrics.client_id";
 const char kMetricsSessionID[] = "user_experience_metrics.session_id";
+const char kMetricsLowEntropySource[] =
+    "user_experience_metrics.low_entropy_source";
 
 // Date/time when the current metrics profile ID was created
 // (which hopefully corresponds to first run).
@@ -983,16 +1204,33 @@ const char kMetricsReportingEnabled[] =
 
 // Array of strings that are each UMA logs that were supposed to be sent in the
 // first minute of a browser session. These logs include things like crash count
-// info, etc.
-const char kMetricsInitialLogs[] =
+// info, etc.  Currently we store both XML and protobuf versions of these logs.
+const char kMetricsInitialLogsXml[] =
     "user_experience_metrics.initial_logs";
+const char kMetricsInitialLogsProto[] =
+    "user_experience_metrics.initial_logs_as_protobufs";
 
 // Array of strings that are each UMA logs that were not sent because the
 // browser terminated before these accumulated metrics could be sent.  These
 // logs typically include histograms and memory reports, as well as ongoing
-// user activities.
-const char kMetricsOngoingLogs[] =
+// user activities.  Currently we store both XML and protobuf versions.
+const char kMetricsOngoingLogsXml[] =
     "user_experience_metrics.ongoing_logs";
+const char kMetricsOngoingLogsProto[] =
+    "user_experience_metrics.ongoing_logs_as_protobufs";
+
+// Boolean that is true when bookmark prompt is enabled.
+const char kBookmarkPromptEnabled[] = "bookmark_prompt_enabled";
+
+// Number of times bookmark prompt displayed.
+const char kBookmarkPromptImpressionCount[] =
+    "bookmark_prompt_impression_count";
+
+// String serialized form of variations seed protobuf.
+const char kVariationsSeed[] = "variations_seed";
+
+// 64-bit integer serialization of the base::Time from the last seed received.
+const char kVariationsSeedDate[] = "variations_seed_date";
 
 // Where profile specific metrics are placed.
 const char kProfileMetrics[] = "user_experience_metrics.profiles";
@@ -1105,6 +1343,7 @@ const char kStabilityPluginName[] = "name";
 const char kStabilityPluginLaunches[] = "launches";
 const char kStabilityPluginInstances[] = "instances";
 const char kStabilityPluginCrashes[] = "crashes";
+const char kStabilityPluginLoadingErrors[] = "loading_errors";
 
 // The keys below are strictly increasing counters over the lifetime of
 // a chrome installation. They are (optionally) sent up to the uninstall
@@ -1161,9 +1400,13 @@ const char kSelectFileLastDirectory[] = "selectfile.last_directory";
 // Boolean that specifies if file selection dialogs are shown.
 const char kAllowFileSelectionDialogs[] = "select_file_dialogs.allowed";
 
-// Map of timestamps of the last used file browser tasks.
-const char kLastUsedFileBrowserHandlers[] =
-    "filebrowser.handler.lastused";
+// Map of default tasks, associated by MIME type.
+const char kDefaultTasksByMimeType[] =
+    "filebrowser.tasks.default_by_mime_type";
+
+// Map of default tasks, associated by file suffix.
+const char kDefaultTasksBySuffix[] =
+    "filebrowser.tasks.default_by_suffix";
 
 // Extensions which should be opened upon completion.
 const char kDownloadExtensionsToOpen[] = "download.extensions_to_open";
@@ -1179,6 +1422,9 @@ const char kPluginMessageResponseTimeout[] =
 
 // String which represents the dictionary name for our spell-checker.
 const char kSpellCheckDictionary[] = "spellcheck.dictionary";
+
+// Boolean pref indicating whether the spelling confirm dialog has been shown.
+const char kSpellCheckConfirmDialogShown[] = "spellcheck.confirm_dialog_shown";
 
 // String which represents whether we use the spelling service.
 const char kSpellCheckUseSpellingService[] = "spellcheck.use_spelling_service";
@@ -1251,6 +1497,11 @@ const char kRestartLastSessionOnShutdown[] = "restart.last.session.on.shutdown";
 // Set before autorestarting Chrome, cleared on clean exit.
 const char kWasRestarted[] = "was.restarted";
 
+#if defined(OS_WIN)
+// On Windows 8 chrome can restart in desktop or in metro mode.
+const char kRestartSwitchMode[] = "restart.switch_mode";
+#endif
+
 // Number of bookmarks/folders on the bookmark bar/other bookmark folder.
 const char kNumBookmarksOnBookmarkBar[] =
     "user_experience_metrics.num_bookmarks_on_bookmark_bar";
@@ -1279,188 +1530,131 @@ const char kDisablePluginFinder[] = "plugins.disable_plugin_finder";
 const char kBrowserActionContainerWidth[] =
     "extensions.browseractions.container.width";
 
-// A whitelist of extension ids the user can install: exceptions from the
-// following blacklist. This is controlled by the administrator.
-const char kExtensionInstallAllowList[] = "extensions.install.allowlist";
-// A blacklist, containing extensions the user cannot install. This list can
-// conatin "*" meaning all extensions. This is controlled by the administrator.
-// This list should not be confused with the extension blacklist, which is
-// Google controlled.
-const char kExtensionInstallDenyList[] = "extensions.install.denylist";
+// Time of the last, and next scheduled, extensions auto-update checks.
+const char kLastExtensionsUpdateCheck[] = "extensions.autoupdate.last_check";
+const char kNextExtensionsUpdateCheck[] = "extensions.autoupdate.next_check";
 
 // Whether we have run the extension-alert system (see ExtensionGlobalError)
 // at least once for this profile.
 const char kExtensionAlertsInitializedPref[] = "extensions.alerts.initialized";
 
+// The sites that are allowed to install extensions. These sites should be
+// allowed to install extensions without the scary dangerous downloads bar.
+// Also, when off-store-extension installs are disabled, these sites are exempt.
+const char kExtensionAllowedInstallSites[] = "extensions.allowed_install_sites";
+
+// A list of allowed extension types. Extensions can only be installed if their
+// type is on this whitelist or alternatively on kExtensionInstallAllowList or
+// kExtensionInstallForceList.
+const char kExtensionAllowedTypes[] = "extensions.allowed_types";
+
+// Version number of last blacklist check.
+const char kExtensionBlacklistUpdateVersion[] =
+    "extensions.blacklistupdate.version";
+
+// A whitelist of extension ids the user can install: exceptions from the
+// following blacklist.
+const char kExtensionInstallAllowList[] = "extensions.install.allowlist";
+
+// A blacklist, containing extensions the user cannot install. This list can
+// contain "*" meaning all extensions. This list should not be confused with the
+// extension blacklist, which is Google controlled.
+const char kExtensionInstallDenyList[] = "extensions.install.denylist";
+
 // A list containing extensions that Chrome will silently install
 // at startup time. It is a list of strings, each string contains
 // an extension ID and an update URL, delimited by a semicolon.
 // This preference is set by an admin policy, and meant to be only
-// accessed through ExternalPolicyExtensionProvider.
+// accessed through extensions::ExternalPolicyProvider.
 const char kExtensionInstallForceList[] = "extensions.install.forcelist";
 
-// Time of the last, and next scheduled, extensions auto-update checks.
-const char kLastExtensionsUpdateCheck[] = "extensions.autoupdate.last_check";
-const char kNextExtensionsUpdateCheck[] = "extensions.autoupdate.next_check";
-// Version number of last blacklist check
-const char kExtensionBlacklistUpdateVersion[] =
-    "extensions.blacklistupdate.version";
+// Indicates on-disk data might have skeletal data that needs to be cleaned
+// on the next start of the browser.
+const char kExtensionStorageGarbageCollect[] =
+    "extensions.storage.garbagecollect";
 
-// Number of times the NTP4 informational bubble has been shown.
-const char kNTP4IntroDisplayCount[] = "ntp.intro_display_count";
+// Keeps track of which sessions are collapsed in the Other Devices menu.
+const char kNtpCollapsedForeignSessions[] = "ntp.collapsed_foreign_sessions";
 
 // New Tab Page URLs that should not be shown as most visited thumbnails.
-const char kNTPMostVisitedURLsBlacklist[] = "ntp.most_visited_blacklist";
-
-// The URLs that have been pinned to the Most Visited section of the New Tab
-// Page.
-const char kNTPMostVisitedPinnedURLs[] = "ntp.pinned_urls";
-
-// Data downloaded from promo resource pages (JSON, RSS) to be used to
-// dynamically deliver data for the new tab page.
-const char kNTPPromoResourceCache[] = "ntp.promo_resource_cache";
+const char kNtpMostVisitedURLsBlacklist[] = "ntp.most_visited_blacklist";
 
 // Last time of update of promo_resource_cache.
 const char kNtpPromoResourceCacheUpdate[] = "ntp.promo_resource_cache_update";
 
-// Is user logged into G+ (used for G+ extension promo).
-const char kNTPPromoIsLoggedInToPlus[] = "ntp.promo_is_logged_in_to_plus";
-
-// Bit mask used to decide when to show the NTP Promo.
-const char kNTPPromoFeatureMask[] = "ntp.promo_feature_mask";
-
-// Serves promo resources for the NTP.
-const char kNTPPromoResourceServer[] = "ntp.web_resource_server";
-
 // Serves tips for the NTP.
-const char kNTPTipsResourceServer[] = "ntp.tips_resource_server";
+const char kNtpTipsResourceServer[] = "ntp.tips_resource_server";
 
 // Serves dates to determine display of elements on the NTP.
-const char kNTPDateResourceServer[] = "ntp.date_resource_server";
+const char kNtpDateResourceServer[] = "ntp.date_resource_server";
 
 // Which bookmarks folder should be visible on the new tab page v4.
-const char kNTPShownBookmarksFolder[] = "ntp.shown_bookmarks_folder";
+const char kNtpShownBookmarksFolder[] = "ntp.shown_bookmarks_folder";
 
 // Which page should be visible on the new tab page v4
-const char kNTPShownPage[] = "ntp.shown_page";
-
-// Dates between which the NTP should show a custom logo rather than the
-// standard one.
-const char kNTPCustomLogoStart[] = "ntp.alt_logo_start";
-const char kNTPCustomLogoEnd[] = "ntp.alt_logo_end";
-
-// The promo resource service version number.
-const char kNtpPromoVersion[] = "ntp.promo_version";
-
-// The last locale the promo was fetched for.
-const char kNtpPromoLocale[] = "ntp.promo_locale";
-
-// Whether promo should be shown to Dev builds, Beta and Dev, or all builds.
-const char kNtpPromoBuild[] = "ntp.promo_build";
-
-// True if user has explicitly closed the promo line.
-const char kNtpPromoClosed[] = "ntp.promo_closed";
-
-// Users are randomly divided into 100 groups in order to slowly roll out
-// special promos.
-const char kNtpPromoGroup[] = "ntp.promo_group";
-
-// Number of promo groups (buckets).
-const char kNtpPromoNumGroups[] = "ntp.promo_num_groups";
-
-// Initial segment of the groups to show the promo to.
-const char kNtpPromoInitialSegment[] = "ntp.promo_initial_segment";
-
-// Number of additional segments to show this promo to every time slice.
-const char kNtpPromoIncrement[] = "ntp.promo_increment";
-
-// Amount of time each promo group should be shown a promo that is being slowly
-// rolled out, in seconds.
-const char kNtpPromoGroupTimeSlice[] = "ntp.promo_group_timeslice";
-
-// Number of groups to roll out this promo to.
-const char kNtpPromoGroupMax[] = "ntp.promo_group_max";
-
-// Number of views of this promo.
-const char kNtpPromoViews[] = "ntp.promo_views";
-
-// Max number of views of this promo.
-const char kNtpPromoViewsMax[] = "ntp.promo_views_max";
-
-// Target platform for this promo.
-const char kNtpPromoPlatform[] = "ntp.promo_platform";
-
-// Promo line from server.
-const char kNtpPromoLine[] = "ntp.promo_line";
-
-// Dates between which the NTP should show a promotional line downloaded
-// from the promo server.
-const char kNtpPromoStart[] = "ntp.promo_start";
-const char kNtpPromoEnd[] = "ntp.promo_end";
-
-// A randomly generated group created to control the number of users we show the
-// sync promo to on the NTP.
-const char kNTPSignInPromoGroup[] = "ntp.sign_in_promo.group";
-
-// The maximum allowable group that can be shown the sync promotion on the NTP.
-const char kNTPSignInPromoGroupMax[] = "ntp.sign_in_promo.group_max";
-
-// True if this promo should only be shown to G+ users.
-const char kNtpPromoGplusRequired[] = "ntp.gplus_required";
+const char kNtpShownPage[] = "ntp.shown_page";
 
 // True if a desktop sync session was found for this user.
 const char kNtpPromoDesktopSessionFound[] = "ntp.promo_desktop_session_found";
 
 // Boolean indicating whether the web store is active for the current locale.
-const char kNTPWebStoreEnabled[] = "ntp.webstore_enabled";
+const char kNtpWebStoreEnabled[] = "ntp.webstore_enabled";
 
 // The id of the last web store promo actually displayed on the NTP.
-const char kNTPWebStorePromoLastId[] = "ntp.webstore_last_promo_id";
+const char kNtpWebStorePromoLastId[] = "ntp.webstore_last_promo_id";
 
 // The id of the current web store promo.
-const char kNTPWebStorePromoId[] = "ntp.webstorepromo.id";
+const char kNtpWebStorePromoId[] = "ntp.webstorepromo.id";
 
 // The header line for the NTP web store promo.
-const char kNTPWebStorePromoHeader[] = "ntp.webstorepromo.header";
+const char kNtpWebStorePromoHeader[] = "ntp.webstorepromo.header";
 
 // The button text for the NTP web store promo.
-const char kNTPWebStorePromoButton[] = "ntp.webstorepromo.button";
+const char kNtpWebStorePromoButton[] = "ntp.webstorepromo.button";
 
 // The button link for the NTP web store promo.
-const char kNTPWebStorePromoLink[] = "ntp.webstorepromo.link";
+const char kNtpWebStorePromoLink[] = "ntp.webstorepromo.link";
 
 // The image URL for the NTP web store promo logo.
-const char kNTPWebStorePromoLogo[] = "ntp.webstorepromo.logo";
+const char kNtpWebStorePromoLogo[] = "ntp.webstorepromo.logo";
 
 // The original URL for the NTP web store promo logo.
-const char kNTPWebStorePromoLogoSource[] = "ntp.webstorepromo.logo_source";
+const char kNtpWebStorePromoLogoSource[] = "ntp.webstorepromo.logo_source";
 
 // The "hide this" link text for the NTP web store promo.
-const char kNTPWebStorePromoExpire[] = "ntp.webstorepromo.expire";
+const char kNtpWebStorePromoExpire[] = "ntp.webstorepromo.expire";
 
 // Specifies what users should maximize the NTP web store promo.
-const char kNTPWebStorePromoUserGroup[] = "ntp.webstorepromo.usergroup";
+const char kNtpWebStorePromoUserGroup[] = "ntp.webstorepromo.usergroup";
 
 // Customized app page names that appear on the New Tab Page.
-const char kNTPAppPageNames[] = "ntp.app_page_names";
-
-// When true, web store promos will never be shown.
-const char kNTPHideWebStorePromo[] = "ntp.hide_webstore_promo";
+const char kNtpAppPageNames[] = "ntp.app_page_names";
 
 const char kDevToolsDisabled[] = "devtools.disabled";
-
-// A boolean specifying whether dev tools window should be opened docked.
-const char kDevToolsOpenDocked[] = "devtools.open_docked";
 
 // A string specifying the dock location (either 'bottom' or 'right').
 const char kDevToolsDockSide[] = "devtools.dock_side";
 
-// Integer location of the split bar in the browser view.
-const char kDevToolsSplitLocation[] = "devtools.split_location";
+// Maps of files edited locally using DevTools.
+const char kDevToolsEditedFiles[] = "devtools.edited_files";
+
+// Integer location of the horizontal split bar in the browser view.
+const char kDevToolsHSplitLocation[] = "devtools.split_location";
+
+// A boolean specifying whether dev tools window should be opened docked.
+const char kDevToolsOpenDocked[] = "devtools.open_docked";
 
 #if defined(OS_ANDROID)
 // A boolean specifying whether remote dev tools debugging is enabled.
 const char kDevToolsRemoteEnabled[] = "devtools.remote_enabled";
+#endif
+
+// Integer location of the vertical split bar in the browser view.
+const char kDevToolsVSplitLocation[] = "devtools.v_split_location";
+
+#if defined(OS_ANDROID)
+// A boolean specifying whether a SPDY proxy is enabled.
+const char kSpdyProxyEnabled[] = "spdy_proxy.enabled";
 #endif
 
 // 64-bit integer serialization of the base::Time when the last sync occurred.
@@ -1490,6 +1684,7 @@ const char kSyncExtensions[] = "sync.extensions";
 const char kSyncExtensionSettings[] = "sync.extension_settings";
 const char kSyncSearchEngines[] = "sync.search_engines";
 const char kSyncSessions[] = "sync.sessions";
+const char kSyncHistoryDeleteDirectives[] = "sync.history_delete_directives";
 
 // Boolean used by enterprise configuration management in order to lock down
 // sync.
@@ -1507,21 +1702,51 @@ const char kSyncAcknowledgedSyncTypes[] = "sync.acknowledged_types";
 // version (int64 represented as a string).
 const char kSyncMaxInvalidationVersions[] = "sync.max_invalidation_versions";
 
+// The GUID session sync will use to identify this client, even across sync
+// disable/enable events.
+const char kSyncSessionsGUID[] = "sync.session_sync_guid";
+
+// Opaque state from the invalidation subsystem that is persisted via prefs.
+// The value is base 64 encoded.
+const char kInvalidatorInvalidationState[] = "invalidator.invalidation_state";
+
+// List of {source, name, max invalidation version} tuples. source is an int,
+// while max invalidation version is an int64; both are stored as string
+// representations though.
+const char kInvalidatorMaxInvalidationVersions[] =
+    "invalidator.max_invalidation_versions";
+
 // A string that can be used to restore sync encryption infrastructure on
 // startup so that the user doesn't need to provide credentials on each start.
 const char kSyncEncryptionBootstrapToken[] =
     "sync.encryption_bootstrap_token";
 
-// Boolean tracking whether the user authenticated with OAuth.
-const char kSyncUsingOAuth[] = "sync.using_oauth";
+// Same as kSyncEncryptionBootstrapToken, but derived from the keystore key,
+// so we don't have to do a GetKey command at restart.
+const char kSyncKeystoreEncryptionBootstrapToken[] =
+    "sync.keystore_encryption_bootstrap_token";
 
 // Boolean tracking whether the user chose to specify a secondary encryption
 // passphrase.
 const char kSyncUsingSecondaryPassphrase[] = "sync.using_secondary_passphrase";
 
-// String that identifies the user logged into sync and other google services.
+// String the identifies the last user that logged into sync and other
+// google services. As opposed to kGoogleServicesUsername, this value is not
+// cleared on signout, but while the user is signed in the two values will
+// be the same.
+const char kGoogleServicesLastUsername[] = "google.services.last_username";
+
+// String that identifies the current user logged into sync and other google
+// services.
 const char kGoogleServicesUsername[] = "google.services.username";
 
+// Local state pref containing a string regex that restricts which accounts
+// can be used to log in to chrome (e.g. "*@google.com"). If missing or blank,
+// all accounts are allowed (no restrictions).
+const char kGoogleServicesUsernamePattern[] =
+    "google.services.username_pattern";
+
+#if !defined(OS_ANDROID)
 // Tracks the number of times that we have shown the sync promo at startup.
 const char kSyncPromoStartupCount[] = "sync_promo.startup_count";
 
@@ -1542,6 +1767,11 @@ const char kSyncPromoShowOnFirstRunAllowed[] =
 // The bubble is used to confirm that the user is signed into sync.
 const char kSyncPromoShowNTPBubble[] = "sync_promo.show_ntp_bubble";
 
+// An error to show in the sync promo bubble, if needed.  If the sign in was
+// successful, this property holds an empty string.
+const char kSyncPromoErrorMessage[] = "sync_promo.error_message";
+#endif
+
 // Time when the user's GAIA info was last updated (represented as an int64).
 const char kProfileGAIAInfoUpdateTime[] = "profile.gaia_info_update_time";
 
@@ -1559,21 +1789,32 @@ const char kWebAppCreateInQuickLaunchBar[] =
 // corresponding access token.
 const char kGeolocationAccessToken[] = "geolocation.access_token";
 
-// Whether PasswordForms have been migrated from the WedDataService to the
-// LoginDatabase.
-const char kLoginDatabaseMigrated[] = "login_database.migrated";
-
 // Boolean that indicates whether to allow firewall traversal while trying to
 // establish the initial connection from the client or host.
 const char kRemoteAccessHostFirewallTraversal[] =
     "remote_access.host_firewall_traversal";
 
-// Boolean controlling whether printing is enabled.
-const char kPrintingEnabled[] = "printing.enabled";
+// Boolean controlling whether 2-factor auth should be required when connecting
+// to a host (instead of a PIN).
+const char kRemoteAccessHostRequireTwoFactor[] =
+    "remote_access.host_require_two_factor";
 
-// Boolean controlling whether print preview is disabled.
-const char kPrintPreviewDisabled[] = "printing.print_preview_disabled";
+// String containing the domain name that hosts must belong to. If blank, then
+// hosts can belong to any domain.
+const char kRemoteAccessHostDomain[] = "remote_access.host_domain";
 
+// String containing the domain name of the Chromoting Directory.
+// Used by Chromoting host and client.
+const char kRemoteAccessHostTalkGadgetPrefix[] =
+    "remote_access.host_talkgadget_prefix";
+
+// Boolean controlling whether curtaining is required when connecting to a host.
+const char kRemoteAccessHostRequireCurtain[] =
+    "remote_access.host_require_curtain";
+
+// The last used printer and its settings.
+const char kPrintPreviewStickySettings[] =
+    "printing.print_preview_sticky_settings";
 // The root URL of the cloud print service.
 const char kCloudPrintServiceURL[] = "cloud_print.service_url";
 
@@ -1588,13 +1829,20 @@ const char kCloudPrintSigninDialogWidth[] =
 const char kCloudPrintSigninDialogHeight[] =
     "cloud_print.signin_dialog_size.height";
 
+#if !defined(OS_ANDROID)
+// The Chrome To Mobile service mobile device list pref.
+const char kChromeToMobileDeviceList[] = "chrome_to_mobile.device_list";
+#endif
+
 // The list of BackgroundContents that should be loaded when the browser
 // launches.
 const char kRegisteredBackgroundContents[] = "background_contents.registered";
 
+#if !defined(OS_ANDROID)
 // An int that stores how often we've shown the "Chrome is configured to
 // auto-launch" infobar.
 const char kShownAutoLaunchInfobar[] = "browser.shown_autolaunch_infobar";
+#endif
 
 // String that lists supported HTTP authentication schemes.
 const char kAuthSchemes[] = "auth.schemes";
@@ -1603,26 +1851,53 @@ const char kAuthSchemes[] = "auth.schemes";
 // Kerberos SPN.
 const char kDisableAuthNegotiateCnameLookup[] =
     "auth.disable_negotiate_cname_lookup";
+
 // Boolean that specifies whether to include the port in a generated Kerberos
 // SPN.
 const char kEnableAuthNegotiatePort[] = "auth.enable_negotiate_port";
+
 // Whitelist containing servers for which Integrated Authentication is enabled.
 const char kAuthServerWhitelist[] = "auth.server_whitelist";
+
 // Whitelist containing servers Chrome is allowed to do Kerberos delegation
 // with.
 const char kAuthNegotiateDelegateWhitelist[] =
     "auth.negotiate_delegate_whitelist";
+
 // String that specifies the name of a custom GSSAPI library to load.
 const char kGSSAPILibraryName[] = "auth.gssapi_library_name";
+
+// String that specifies the origin allowed to use SpdyProxy
+// authentication, if any.
+const char kSpdyProxyOrigin[] = "auth.spdyproxy.origin";
 
 // Boolean that specifies whether to allow basic auth prompting on cross-
 // domain sub-content requests.
 const char kAllowCrossOriginAuthPrompt[] = "auth.allow_cross_origin_prompt";
 
+// Boolean that specifies whether the built-in asynchronous DNS client is used.
+const char kBuiltInDnsClientEnabled[] = "async_dns.enabled";
+
+// An int64 pref that contains the total size of all HTTP content that has been
+// received from the network.
+const char kHttpReceivedContentLength[] = "http_received_content_length";
+
+// An int64 pref that contains the total original size of all HTTP content that
+// was received over the network.
+const char kHttpOriginalContentLength[] = "http_original_content_length";
+
+// A pref holding the value of the policy used to disable capturing audio on
+// ChromeOS devices.
+const char kAudioCaptureAllowed[] = "hardware.audio_capture_enabled";
+
+// A pref holding the value of the policy used to disable capturing audio on
+// ChromeOS devices.
+const char kVideoCaptureAllowed[] = "hardware.video_capture_enabled";
+
 #if defined(OS_CHROMEOS)
-// Dictionary for transient storage of settings that should go into signed
+// Dictionary for transient storage of settings that should go into device
 // settings storage before owner has been assigned.
-const char kSignedSettingsCache[] = "signed_settings_cache";
+const char kDeviceSettingsCache[] = "signed_settings_cache";
 
 // The hardware keyboard layout of the device. This should look like
 // "xkb:us::eng".
@@ -1644,17 +1919,43 @@ const char kShouldAutoEnroll[] = "ShouldAutoEnroll";
 // modulus, then it will retry auto-enrollment using the updated value.
 const char kAutoEnrollmentPowerLimit[] = "AutoEnrollmentPowerLimit";
 
-// A boolean pref that indicates whether OS & firmware version info should be
-// reported along with device policy requests.
-const char kReportDeviceVersionInfo[] = "device_status.report_version_info";
+// The local state pref that stores device activity times before reporting
+// them to the policy server.
+const char kDeviceActivityTimes[] = "device_status.activity_times";
 
-// A boolean pref that indicates whether device activity times should be
-// recorded and reported along with device policy requests.
-const char kReportDeviceActivityTimes[] = "device_status.report_activity_times";
+// A pref holding the last known location when device location reporting is
+// enabled.
+const char kDeviceLocation[] = "device_status.location";
+
+// A string that is used to store first-time sync startup after once sync is
+// disabled. This will be refreshed every sign-in.
+const char kSyncSpareBootstrapToken[] = "sync.spare_bootstrap_token";
+
+// A pref holding the value of the policy used to disable mounting of external
+// storage for the user.
+const char kExternalStorageDisabled[] = "hardware.external_storage_disabled";
+
+// A pref holding the value of the policy used to disable playing audio on
+// ChromeOS devices. This pref overrides |kAudioMute| but does not overwrite
+// it, therefore when the policy is lifted the original mute state is restored.
+const char kAudioOutputAllowed[] = "hardware.audio_output_enabled";
+
+// A dictionary that maps usernames to wallpaper properties.
+const char kUsersWallpaperInfo[] = "user_wallpaper_info";
+
+// Copy of owner swap mouse buttons option to use on login screen.
+const char kOwnerPrimaryMouseButtonRight[] = "owner.mouse.primary_right";
+
+// Copy of owner tap-to-click option to use on login screen.
+const char kOwnerTapToClickEnabled[] = "owner.touchpad.enable_tap_to_click";
 #endif
 
 // Whether there is a Flash version installed that supports clearing LSO data.
 const char kClearPluginLSODataEnabled[] = "browser.clear_lso_data_enabled";
+
+// Whether we should show Pepper Flash-specific settings.
+const char kPepperFlashSettingsEnabled[] =
+    "browser.pepper_flash_settings_enabled";
 
 // String which specifies where to store the disk cache.
 const char kDiskCacheDir[] = "browser.disk_cache_dir";
@@ -1671,9 +1972,19 @@ const char kMediaCacheSize[] = "browser.media_cache_size";
 // fetch the correct value from the policy.
 const char kChromeOsReleaseChannel[] = "cros.system.releaseChannel";
 
+// Value of the enums in TabStrip::LayoutType as an int.
+const char kTabStripLayoutType[] = "tab_strip_layout_type";
+
+// If true, cloud policy for the user is loaded once the user signs in.
+const char kLoadCloudPolicyOnSignin[] = "policy.load_cloud_policy_on_signin";
+
+// Indicates that factory reset was requested from options page.
+const char kFactoryResetRequested[] = "FactoryResetRequested";
+
 // *************** SERVICE PREFS ***************
 // These are attached to the service process.
 
+const char kCloudPrintRoot[] = "cloud_print";
 const char kCloudPrintProxyEnabled[] = "cloud_print.enabled";
 // The unique id for this instance of the cloud print proxy.
 const char kCloudPrintProxyId[] = "cloud_print.proxy_id";
@@ -1693,8 +2004,14 @@ const char kCloudPrintPrintSystemSettings[] =
 const char kCloudPrintEnableJobPoll[] = "cloud_print.enable_job_poll";
 const char kCloudPrintRobotRefreshToken[] = "cloud_print.robot_refresh_token";
 const char kCloudPrintRobotEmail[] = "cloud_print.robot_email";
-// Indicates whether the Mac Virtual driver is enabled.
-const char kVirtualPrinterDriverEnabled[] = "cloud_print.enable_virtual_driver";
+// A boolean indicating whether we should connect to cloud print new printers.
+const char kCloudPrintConnectNewPrinters[] = "cloud_print.connect_new_printers";
+// A boolean indicating whether we should ping XMPP connection.
+const char kCloudPrintXmppPingEnabled[] = "cloud_print.xmpp_ping_enabled";
+// An int value indicating the average timeout between xmpp pings.
+const char kCloudPrintXmppPingTimeout[] = "cloud_print.xmpp_ping_timeout_sec";
+// List of printers which should not be connected.
+const char kCloudPrintPrinterBlacklist[] = "cloud_print.printer_blacklist";
 // A boolean indicating whether submitting jobs to Google Cloud Print is
 // blocked by policy.
 const char kCloudPrintSubmitEnabled[] = "cloud_print.submit_enabled";
@@ -1719,6 +2036,8 @@ const char kManagedDefaultGeolocationSetting[] =
     "profile.managed_default_content_settings.geolocation";
 const char kManagedDefaultNotificationsSetting[] =
     "profile.managed_default_content_settings.notifications";
+const char kManagedDefaultMediaStreamSetting[] =
+    "profile.managed_default_content_settings.media_stream";
 
 // Preferences that are exclusively used to store managed
 // content settings patterns.
@@ -1755,6 +2074,10 @@ const char kManagedAutoSelectCertificateForUrls[] =
 // uninstalling background apps.
 const char kUserCreatedLoginItem[] = "background_mode.user_created_login_item";
 
+// Set to true if the user removed our login item so we should not create a new
+// one when uninstalling background apps.
+const char kUserRemovedLoginItem[] = "background_mode.user_removed_login_item";
+
 // Set to true if background mode is enabled on this browser.
 const char kBackgroundModeEnabled[] = "background_mode.enabled";
 
@@ -1783,5 +2106,118 @@ const char kRecoveryComponentVersion[] = "recovery_component.version";
 // String that stores the component updater last known state. This is used for
 // troubleshooting.
 const char kComponentUpdaterState[] = "component_updater.state";
+
+// The next media gallery ID to assign.
+const char kMediaGalleriesUniqueId[] = "media_galleries.gallery_id";
+
+// A list of dictionaries, where each dictionary represents a known media
+// gallery.
+const char kMediaGalleriesRememberedGalleries[] =
+    "media_galleries.remembered_galleries";
+
+#if defined(USE_AURA)
+// |kShelfAlignment| and |kShelfAutoHideBehavior| have a local variant. The
+// local variant is not synced and is used if set. If the local variant is not
+// set its value is set from the synced value (once prefs have been
+// synced). This gives a per-machine setting that is initialized from the last
+// set value.
+// These values are default on the machine but can be overridden by per-display
+// values in kShelfPreferences (unless overridden by managed policy).
+// String value corresponding to ash::Shell::ShelfAlignment.
+const char kShelfAlignment[] = "shelf_alignment";
+const char kShelfAlignmentLocal[] = "shelf_alignment_local";
+// String value corresponding to ash::Shell::ShelfAutoHideBehavior.
+const char kShelfAutoHideBehavior[] = "auto_hide_behavior";
+const char kShelfAutoHideBehaviorLocal[] = "auto_hide_behavior_local";
+const char kPinnedLauncherApps[] = "pinned_launcher_apps";
+// Boolean value indicating whether to show a logout button in the ash tray.
+const char kShowLogoutButtonInTray[] = "show_logout_button_in_tray";
+// Dictionary value that holds per-display preference of shelf alignment and
+// auto-hide behavior. Key of the dictionary is the id of the display, and
+// its value is a dictionary whose keys are kShelfAlignment and
+// kShelfAutoHideBehavior.
+const char kShelfPreferences[] = "shelf_preferences";
+
+const char kFlingVelocityCap[] = "gesture.fling_velocity_cap";
+const char kLongPressTimeInSeconds[] =
+    "gesture.long_press_time_in_seconds";
+const char kMaxDistanceBetweenTapsForDoubleTap[] =
+    "gesture.max_distance_between_taps_for_double_tap";
+const char kMaxDistanceForTwoFingerTapInPixels[] =
+    "gesture.max_distance_for_two_finger_tap_in_pixels";
+const char kMaxSecondsBetweenDoubleClick[] =
+    "gesture.max_seconds_between_double_click";
+const char kMaxSeparationForGestureTouchesInPixels[] =
+    "gesture.max_separation_for_gesture_touches_in_pixels";
+const char kMaxSwipeDeviationRatio[] =
+    "gesture.max_swipe_deviation_ratio";
+const char kMaxTouchDownDurationInSecondsForClick[] =
+    "gesture.max_touch_down_duration_in_seconds_for_click";
+const char kMaxTouchMoveInPixelsForClick[] =
+    "gesture.max_touch_move_in_pixels_for_click";
+const char kMinDistanceForPinchScrollInPixels[] =
+    "gesture.min_distance_for_pinch_scroll_in_pixels";
+const char kMinFlickSpeedSquared[] =
+    "gesture.min_flick_speed_squared";
+const char kMinPinchUpdateDistanceInPixels[] =
+    "gesture.min_pinch_update_distance_in_pixels";
+const char kMinRailBreakVelocity[] =
+    "gesture.min_rail_break_velocity";
+const char kMinScrollDeltaSquared[] =
+    "gesture.min_scroll_delta_squared";
+const char kMinSwipeSpeed[] =
+    "gesture.min_swipe_speed";
+const char kMinTouchDownDurationInSecondsForClick[] =
+    "gesture.min_touch_down_duration_in_seconds_for_click";
+const char kPointsBufferedForVelocity[] =
+    "gesture.points_buffered_for_velocity";
+const char kRailBreakProportion[] =
+    "gesture.rail_break_proportion";
+const char kRailStartProportion[] =
+    "gesture.rail_start_proportion";
+const char kSemiLongPressTimeInSeconds[] =
+    "gesture.semi_long_press_time_in_seconds";
+const char kFlingAccelerationCurveCoefficient0[] =
+    "gesture.fling_acceleration_curve_coefficient_0";
+const char kFlingAccelerationCurveCoefficient1[] =
+    "gesture.fling_acceleration_curve_coefficient_1";
+const char kFlingAccelerationCurveCoefficient2[] =
+    "gesture.fling_acceleration_curve_coefficient_2";
+const char kFlingAccelerationCurveCoefficient3[] =
+    "gesture.fling_acceleration_curve_coefficient_3";
+
+const char kOverscrollHorizontalThresholdComplete[] =
+    "overscroll.horizontal_threshold_complete";
+const char kOverscrollVerticalThresholdComplete[] =
+    "overscroll.vertical_threshold_complete";
+const char kOverscrollMinimumThresholdStart[] =
+    "overscroll.minimum_threshold_start";
+const char kOverscrollHorizontalResistThreshold[] =
+    "overscroll.horizontal_resist_threshold";
+const char kOverscrollVerticalResistThreshold[] =
+    "overscroll.vertical_resist_threshold";
+#endif
+
+// Indicates whether the browser is in managed mode.
+const char kInManagedMode[] = "managed_mode";
+
+// Counts how many more times the 'profile on a network share' warning should be
+// shown to the user before the next silence period.
+const char kNetworkProfileWarningsLeft[] = "network_profile.warnings_left";
+// Tracks the time of the last shown warning. Used to reset
+// |network_profile.warnings_left| after a silence period.
+const char kNetworkProfileLastWarningTime[] =
+    "network_profile.last_warning_time";
+
+// 64-bit serialization of the time last policy usage statistics were collected
+// by UMA_HISTOGRAM_ENUMERATION.
+const char kLastPolicyStatisticsUpdate[] = "policy.last_statistics_update";
+
+#if defined(OS_CHROMEOS)
+// The RLZ brand code, if enabled.
+const char kRLZBrand[] = "rlz.brand";
+// Whether RLZ pings are disabled.
+const char kRLZDisabled[] = "rlz.disabled";
+#endif
 
 }  // namespace prefs

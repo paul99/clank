@@ -9,7 +9,6 @@
 
 #ifndef NET_HTTP_MOCK_HTTP_CACHE_H_
 #define NET_HTTP_MOCK_HTTP_CACHE_H_
-#pragma once
 
 #include "base/hash_tables.h"
 #include "net/disk_cache/disk_cache.h"
@@ -97,6 +96,7 @@ class MockDiskCache : public disk_cache::Backend {
   MockDiskCache();
   virtual ~MockDiskCache();
 
+  virtual net::CacheType GetCacheType() const OVERRIDE;
   virtual int32 GetEntryCount() const OVERRIDE;
   virtual int OpenEntry(const std::string& key, disk_cache::Entry** entry,
                         const net::CompletionCallback& callback) OVERRIDE;

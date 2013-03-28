@@ -9,22 +9,28 @@
 #endif
 
 #include "base/command_line.h"
+#include "base/logging.h"
 #include "base/memory/scoped_vector.h"
 #include "base/string16.h"
+#include "base/string_piece.h"
 #include "base/string_util.h"
 #include "base/stl_util.h"
 #include "base/utf_string_conversions.h"
-#include "chrome/browser/defaults.h"
 #include "chrome/browser/google/google_util.h"
 #include "chrome/browser/prefs/pref_service.h"
+#include "chrome/browser/profiles/profile.h"
+#include "chrome/browser/search_engines/prepopulated_engines.h"
 #include "chrome/browser/search_engines/search_engine_type.h"
 #include "chrome/browser/search_engines/search_terms_data.h"
 #include "chrome/browser/search_engines/template_url.h"
 #include "chrome/browser/search_engines/template_url_service.h"
 #include "chrome/common/chrome_switches.h"
 #include "chrome/common/pref_names.h"
+#include "content/public/browser/browser_thread.h"
 #include "googleurl/src/gurl.h"
+#include "grit/generated_resources.h"
 #include "grit/theme_resources.h"
+#include "ui/base/l10n/l10n_util.h"
 
 #if defined(OS_WIN)
 #undef IN  // On Windows, windef.h defines this, which screws up "India" cases.
@@ -32,2279 +38,11 @@
 #include "base/mac/scoped_cftyperef.h"
 #endif
 
-#if defined(OS_ANDROID)
-#define GOOGLE_SOURCE_ID L"chrome-mobile"
-#else
-#define GOOGLE_SOURCE_ID L"chrome"
-#endif
-
-using base::Time;
-
-namespace {
-
-// NOTE: See comments in GetDataVersion() below!  You should probably not change
-// the data in this file without changing the result of that function!
-
-// Engine definitions //////////////////////////////////////////////////////////
-
-struct PrepopulatedEngine {
-  const wchar_t* const name;
-  // If NULL, we'll autogenerate a keyword based on the search_url every time
-  // someone asks.  Only entries which need keywords to auto-track a dynamically
-  // generated search URL should use this.
-  // If the empty string, the engine has no keyword.
-  const wchar_t* const keyword;
-  const char* const favicon_url;  // If NULL, there is no favicon.
-  const wchar_t* const search_url;
-  const char* const encoding;
-  const wchar_t* const suggest_url;  // If NULL, this engine does not support
-                                     // suggestions.
-  const wchar_t* const instant_url;  // If NULL, this engine does not support
-                                     // instant.
-  // SEARCH_ENGINE_OTHER if no logo is available.
-  const SearchEngineType search_engine_type;
-  const int logo_id;  // Id for logo image in search engine dialog.
-  // Unique id for this prepopulate engine (corresponds to
-  // TemplateURL::prepopulate_id). This ID must be greater than zero and must
-  // remain the same for a particular site regardless of how the url changes;
-  // the ID is used when modifying engine data in subsequent versions, so that
-  // we can find the "old" entry to update even when the name or URL changes.
-  //
-  // This ID must be "unique" within one country's prepopulated data, but two
-  // entries can share an ID if they represent the "same" engine (e.g. Yahoo! US
-  // vs. Yahoo! UK) and will not appear in the same user-visible data set.  This
-  // facilitates changes like adding more specific per-country data in the
-  // future; in such a case the localized engines will transparently replace the
-  // previous, non-localized versions.  For engines where we need two instances
-  // to appear for one country (e.g. Bing Search U.S. English and Spanish), we
-  // must use two different unique IDs (and different keywords).
-  //
-  // The following unique IDs are available:
-  //    33, 34, 36, 39, 42, 43, 47, 48, 49, 50, 52, 53, 56, 58, 60, 61, 64, 65,
-  //    66, 70, 74, 78, 79, 80, 81, 84, 86, 88, 91, 92, 93, 94, 95, 96, 97, 98,
-  //    102+
-  //
-  // IDs > 1000 are reserved for distribution custom engines.
-  //
-  // NOTES:
-  //   CHANGE THE ABOVE NUMBERS IF YOU ADD A NEW ENGINE; ID conflicts = bad!
-  //   CHANGE kMaxPrepopulatedEngineID below if you add new engine outside
-  //       of the current range or it will not be counted in stats.
-  const int id;
-};
-
-const PrepopulatedEngine abcsok = {
-  L"ABC S\x00f8k",
-  L"abcsok.no",
-  "http://abcsok.no/favicon.ico",
-  L"http://abcsok.no/index.html?q={searchTerms}",
-  "UTF-8",
-  NULL,
-  NULL,
-  SEARCH_ENGINE_ABCSOK,
-  IDR_SEARCH_ENGINE_LOGO_ABCSOK,
-  72,
-};
-
-const PrepopulatedEngine altavista = {
-  L"AltaVista",
-  L"altavista.com",
-  "http://www.altavista.com/favicon.ico",
-  L"http://www.altavista.com/web/results?q={searchTerms}",
-  "UTF-8",
-  NULL,
-  NULL,
-  SEARCH_ENGINE_ALTAVISTA,
-  IDR_SEARCH_ENGINE_LOGO_ALTAVISTA,
-  89,
-};
-
-const PrepopulatedEngine altavista_ar = {
-  L"AltaVista",
-  L"ar.altavista.com",
-  "http://ar.altavista.com/favicon.ico",
-  L"http://ar.altavista.com/web/results?q={searchTerms}",
-  "UTF-8",
-  NULL,
-  NULL,
-  SEARCH_ENGINE_ALTAVISTA,
-  IDR_SEARCH_ENGINE_LOGO_ALTAVISTA,
-  89,
-};
-
-const PrepopulatedEngine altavista_se = {
-  L"AltaVista",
-  L"se.altavista.com",
-  "http://se.altavista.com/favicon.ico",
-  L"http://se.altavista.com/web/results?q={searchTerms}",
-  "UTF-8",
-  NULL,
-  NULL,
-  SEARCH_ENGINE_ALTAVISTA,
-  IDR_SEARCH_ENGINE_LOGO_ALTAVISTA,
-  89,
-};
-
-const PrepopulatedEngine aol = {
-  L"AOL",
-  L"aol.com",
-  "http://search.aol.com/favicon.ico",
-  L"http://search.aol.com/aol/search?query={searchTerms}",
-  "UTF-8",
-  NULL,
-  NULL,
-  SEARCH_ENGINE_OTHER,
-  IDR_SEARCH_ENGINE_LOGO_AOL,
-  35,
-};
-
-const PrepopulatedEngine araby = {
-  L"\x0639\x0631\x0628\x064a",
-  L"araby.com",
-  "http://araby.com/favicon.ico",
-  L"http://araby.com/?q={searchTerms}",
-  "UTF-8",
-  NULL,
-  NULL,
-  SEARCH_ENGINE_OTHER,
-  kNoSearchEngineLogo,
-  12,
-};
-
-const PrepopulatedEngine ask = {
-  L"Ask",
-  L"ask.com",
-  "http://www.ask.com/favicon.ico",
-  L"http://www.ask.com/web?q={searchTerms}",
-  "UTF-8",
-  L"http://ss.ask.com/query?q={searchTerms}&li=ff",
-  NULL,
-  SEARCH_ENGINE_ASK,
-  IDR_SEARCH_ENGINE_LOGO_ASK,
-  4,
-};
-
-const PrepopulatedEngine ask_de = {
-  L"Ask.com Deutschland",
-  L"de.ask.com",
-  "http://de.ask.com/favicon.ico",
-  L"http://de.ask.com/web?q={searchTerms}",
-  "UTF-8",
-  L"http://ss.de.ask.com/query?q={searchTerms}&li=ff",
-  NULL,
-  SEARCH_ENGINE_ASK,
-  IDR_SEARCH_ENGINE_LOGO_ASK,
-  4,
-};
-
-const PrepopulatedEngine ask_es = {
-  L"Ask.com Espa" L"\x00f1" L"a",
-  L"es.ask.com",
-  "http://es.ask.com/favicon.ico",
-  L"http://es.ask.com/web?q={searchTerms}",
-  "UTF-8",
-  L"http://ss.es.ask.com/query?q={searchTerms}&li=ff",
-  NULL,
-  SEARCH_ENGINE_ASK,
-  IDR_SEARCH_ENGINE_LOGO_ASK,
-  4,
-};
-
-const PrepopulatedEngine ask_it = {
-  L"Ask.com Italia",
-  L"it.ask.com",
-  "http://it.ask.com/favicon.ico",
-  L"http://it.ask.com/web?q={searchTerms}",
-  "UTF-8",
-  L"http://ss.it.ask.com/query?q={searchTerms}&li=ff",
-  NULL,
-  SEARCH_ENGINE_ASK,
-  IDR_SEARCH_ENGINE_LOGO_ASK,
-  4,
-};
-
-const PrepopulatedEngine ask_nl = {
-  L"Ask.com Nederland",
-  L"nl.ask.com",
-  "http://nl.ask.com/favicon.ico",
-  L"http://nl.ask.com/web?q={searchTerms}",
-  "UTF-8",
-  L"http://ss.nl.ask.com/query?q={searchTerms}&li=ff",
-  NULL,
-  SEARCH_ENGINE_ASK,
-  IDR_SEARCH_ENGINE_LOGO_ASK,
-  4,
-};
-
-const PrepopulatedEngine ask_uk = {
-  L"Ask Jeeves",
-  L"uk.ask.com",
-  "http://uk.ask.com/favicon.ico",
-  L"http://uk.ask.com/web?q={searchTerms}",
-  "UTF-8",
-  L"http://ss.uk.ask.com/query?q={searchTerms}&li=ff",
-  NULL,
-  SEARCH_ENGINE_ASK,
-  IDR_SEARCH_ENGINE_LOGO_ASK,
-  4,
-};
-
-const PrepopulatedEngine atlas_cz = {
-  L"Atlas",
-  L"atlas.cz",
-  "http://img.atlas.cz/favicon.ico",
-  L"http://search.atlas.cz/?q={searchTerms}",
-  "windows-1250",
-  NULL,
-  NULL,
-  SEARCH_ENGINE_OTHER,
-  kNoSearchEngineLogo,
-  27,
-};
-
-const PrepopulatedEngine atlas_sk = {
-  L"ATLAS.SK",
-  L"atlas.sk",
-  "http://www.atlas.sk/images/favicon.ico",
-  L"http://hladaj.atlas.sk/fulltext/?phrase={searchTerms}",
-  "UTF-8",
-  NULL,
-  NULL,
-  SEARCH_ENGINE_OTHER,
-  kNoSearchEngineLogo,
-  27,
-};
-
-const PrepopulatedEngine baidu = {
-  L"\x767e\x5ea6",
-  L"baidu.com",
-  "http://www.baidu.com/favicon.ico",
-  L"http://www.baidu.com/s?wd={searchTerms}",
-  "GB2312",
-  NULL,
-  NULL,
-  SEARCH_ENGINE_BAIDU,
-  IDR_SEARCH_ENGINE_LOGO_BAIDU,
-  21,
-};
-
-const PrepopulatedEngine bing = {
-  L"Bing",
-  L"bing.com",
-  "http://www.bing.com/s/wlflag.ico",
-  L"http://www.bing.com/search?q={searchTerms}",
-  "UTF-8",
-  L"http://api.bing.com/osjson.aspx?query={searchTerms}&language={language}",
-  NULL,
-  SEARCH_ENGINE_BING,
-  IDR_SEARCH_ENGINE_LOGO_BING,
-  3,
-};
-
-const PrepopulatedEngine bing_ar_XA = {
-  L"Bing",
-  L"",  // bing.com is taken by bing_en_XA.
-  "http://www.bing.com/s/wlflag.ico",
-  L"http://www.bing.com/search?setmkt=ar-XA&q={searchTerms}",
-  "UTF-8",
-  L"http://api.bing.com/osjson.aspx?query={searchTerms}&language={language}",
-  NULL,
-  SEARCH_ENGINE_BING,
-  IDR_SEARCH_ENGINE_LOGO_BING,
-  7,  // Can't be 3 as this has to appear in the Arabian countries' lists
-      // alongside bing_en_XA.
-};
-
-const PrepopulatedEngine bing_bg_BG = {
-  L"Bing",
-  L"bing.com",
-  "http://www.bing.com/s/wlflag.ico",
-  L"http://www.bing.com/search?setmkt=bg-BG&q={searchTerms}",
-  "UTF-8",
-  L"http://api.bing.com/osjson.aspx?query={searchTerms}&language={language}",
-  NULL,
-  SEARCH_ENGINE_BING,
-  IDR_SEARCH_ENGINE_LOGO_BING,
-  3,
-};
-
-const PrepopulatedEngine bing_cs_CZ = {
-  L"Bing",
-  L"bing.com",
-  "http://www.bing.com/s/wlflag.ico",
-  L"http://www.bing.com/search?setmkt=cs-CZ&q={searchTerms}",
-  "UTF-8",
-  L"http://api.bing.com/osjson.aspx?query={searchTerms}&language={language}",
-  NULL,
-  SEARCH_ENGINE_BING,
-  IDR_SEARCH_ENGINE_LOGO_BING,
-  3,
-};
-
-const PrepopulatedEngine bing_da_DK = {
-  L"Bing",
-  L"bing.com",
-  "http://www.bing.com/s/wlflag.ico",
-  L"http://www.bing.com/search?setmkt=da-DK&q={searchTerms}",
-  "UTF-8",
-  L"http://api.bing.com/osjson.aspx?query={searchTerms}&language={language}",
-  NULL,
-  SEARCH_ENGINE_BING,
-  IDR_SEARCH_ENGINE_LOGO_BING,
-  3,
-};
-
-const PrepopulatedEngine bing_de_AT = {
-  L"Bing",
-  L"bing.com",
-  "http://www.bing.com/s/wlflag.ico",
-  L"http://www.bing.com/search?setmkt=de-AT&q={searchTerms}",
-  "UTF-8",
-  L"http://api.bing.com/osjson.aspx?query={searchTerms}&language={language}",
-  NULL,
-  SEARCH_ENGINE_BING,
-  IDR_SEARCH_ENGINE_LOGO_BING,
-  3,
-};
-
-const PrepopulatedEngine bing_de_CH = {
-  L"Bing",
-  L"bing.com",
-  "http://www.bing.com/s/wlflag.ico",
-  L"http://www.bing.com/search?setmkt=de-CH&q={searchTerms}",
-  "UTF-8",
-  L"http://api.bing.com/osjson.aspx?query={searchTerms}&language={language}",
-  NULL,
-  SEARCH_ENGINE_BING,
-  IDR_SEARCH_ENGINE_LOGO_BING,
-  3,
-};
-
-const PrepopulatedEngine bing_de_DE = {
-  L"Bing",
-  L"bing.com",
-  "http://www.bing.com/s/wlflag.ico",
-  L"http://www.bing.com/search?setmkt=de-DE&q={searchTerms}",
-  "UTF-8",
-  L"http://api.bing.com/osjson.aspx?query={searchTerms}&language={language}",
-  NULL,
-  SEARCH_ENGINE_BING,
-  IDR_SEARCH_ENGINE_LOGO_BING,
-  3,
-};
-
-const PrepopulatedEngine bing_el_GR = {
-  L"Bing",
-  L"bing.com",
-  "http://www.bing.com/s/wlflag.ico",
-  L"http://www.bing.com/search?setmkt=el-GR&q={searchTerms}",
-  "UTF-8",
-  L"http://api.bing.com/osjson.aspx?query={searchTerms}&language={language}",
-  NULL,
-  SEARCH_ENGINE_BING,
-  IDR_SEARCH_ENGINE_LOGO_BING,
-  3,
-};
-
-const PrepopulatedEngine bing_en_AU = {
-  L"Bing",
-  L"bing.com",
-  "http://www.bing.com/s/wlflag.ico",
-  L"http://www.bing.com/search?setmkt=en-AU&q={searchTerms}",
-  "UTF-8",
-  L"http://api.bing.com/osjson.aspx?query={searchTerms}&language={language}",
-  NULL,
-  SEARCH_ENGINE_BING,
-  IDR_SEARCH_ENGINE_LOGO_BING,
-  3,
-};
-
-const PrepopulatedEngine bing_en_CA = {
-  L"Bing",
-  L"bing.com",
-  "http://www.bing.com/s/wlflag.ico",
-  L"http://www.bing.com/search?setmkt=en-CA&q={searchTerms}",
-  "UTF-8",
-  L"http://api.bing.com/osjson.aspx?query={searchTerms}&language={language}",
-  NULL,
-  SEARCH_ENGINE_BING,
-  IDR_SEARCH_ENGINE_LOGO_BING,
-  3,
-};
-
-const PrepopulatedEngine bing_en_GB = {
-  L"Bing",
-  L"bing.com",
-  "http://www.bing.com/s/wlflag.ico",
-  L"http://www.bing.com/search?setmkt=en-GB&q={searchTerms}",
-  "UTF-8",
-  L"http://api.bing.com/osjson.aspx?query={searchTerms}&language={language}",
-  NULL,
-  SEARCH_ENGINE_BING,
-  IDR_SEARCH_ENGINE_LOGO_BING,
-  3,
-};
-
-const PrepopulatedEngine bing_en_ID = {
-  L"Bing",
-  L"bing.com",
-  "http://www.bing.com/s/wlflag.ico",
-  L"http://www.bing.com/search?setmkt=en-ID&q={searchTerms}",
-  "UTF-8",
-  L"http://api.bing.com/osjson.aspx?query={searchTerms}&language={language}",
-  NULL,
-  SEARCH_ENGINE_BING,
-  IDR_SEARCH_ENGINE_LOGO_BING,
-  3,
-};
-
-const PrepopulatedEngine bing_en_IE = {
-  L"Bing",
-  L"bing.com",
-  "http://www.bing.com/s/wlflag.ico",
-  L"http://www.bing.com/search?setmkt=en-IE&q={searchTerms}",
-  "UTF-8",
-  L"http://api.bing.com/osjson.aspx?query={searchTerms}&language={language}",
-  NULL,
-  SEARCH_ENGINE_BING,
-  IDR_SEARCH_ENGINE_LOGO_BING,
-  3,
-};
-
-const PrepopulatedEngine bing_en_IN = {
-  L"Bing",
-  L"bing.com",
-  "http://www.bing.com/s/wlflag.ico",
-  L"http://www.bing.com/search?setmkt=en-IN&q={searchTerms}",
-  "UTF-8",
-  L"http://api.bing.com/osjson.aspx?query={searchTerms}&language={language}",
-  NULL,
-  SEARCH_ENGINE_BING,
-  IDR_SEARCH_ENGINE_LOGO_BING,
-  3,
-};
-
-const PrepopulatedEngine bing_en_MY = {
-  L"Bing",
-  L"bing.com",
-  "http://www.bing.com/s/wlflag.ico",
-  L"http://www.bing.com/search?setmkt=en-MY&q={searchTerms}",
-  "UTF-8",
-  L"http://api.bing.com/osjson.aspx?query={searchTerms}&language={language}",
-  NULL,
-  SEARCH_ENGINE_BING,
-  IDR_SEARCH_ENGINE_LOGO_BING,
-  3,
-};
-
-const PrepopulatedEngine bing_en_NZ = {
-  L"Bing",
-  L"bing.com",
-  "http://www.bing.com/s/wlflag.ico",
-  L"http://www.bing.com/search?setmkt=en-NZ&q={searchTerms}",
-  "UTF-8",
-  L"http://api.bing.com/osjson.aspx?query={searchTerms}&language={language}",
-  NULL,
-  SEARCH_ENGINE_BING,
-  IDR_SEARCH_ENGINE_LOGO_BING,
-  3,
-};
-
-const PrepopulatedEngine bing_en_PH = {
-  L"Bing",
-  L"bing.com",
-  "http://www.bing.com/s/wlflag.ico",
-  L"http://www.bing.com/search?setmkt=en-PH&q={searchTerms}",
-  "UTF-8",
-  L"http://api.bing.com/osjson.aspx?query={searchTerms}&language={language}",
-  NULL,
-  SEARCH_ENGINE_BING,
-  IDR_SEARCH_ENGINE_LOGO_BING,
-  3,
-};
-
-const PrepopulatedEngine bing_en_SG = {
-  L"Bing",
-  L"bing.com",
-  "http://www.bing.com/s/wlflag.ico",
-  L"http://www.bing.com/search?setmkt=en-SG&q={searchTerms}",
-  "UTF-8",
-  L"http://api.bing.com/osjson.aspx?query={searchTerms}&language={language}",
-  NULL,
-  SEARCH_ENGINE_BING,
-  IDR_SEARCH_ENGINE_LOGO_BING,
-  3,
-};
-
-const PrepopulatedEngine bing_en_US = {
-  L"Bing",
-  L"bing.com",
-  "http://www.bing.com/s/wlflag.ico",
-  L"http://www.bing.com/search?setmkt=en-US&q={searchTerms}",
-  "UTF-8",
-  L"http://api.bing.com/osjson.aspx?query={searchTerms}&language={language}",
-  NULL,
-  SEARCH_ENGINE_BING,
-  IDR_SEARCH_ENGINE_LOGO_BING,
-  3,
-};
-
-const PrepopulatedEngine bing_en_XA = {
-  L"Bing",
-  L"bing.com",
-  "http://www.bing.com/s/wlflag.ico",
-  L"http://www.bing.com/search?setmkt=en-XA&q={searchTerms}",
-  "UTF-8",
-  L"http://api.bing.com/osjson.aspx?query={searchTerms}&language={language}",
-  NULL,
-  SEARCH_ENGINE_BING,
-  IDR_SEARCH_ENGINE_LOGO_BING,
-  3,
-};
-
-const PrepopulatedEngine bing_en_ZA = {
-  L"Bing",
-  L"bing.com",
-  "http://www.bing.com/s/wlflag.ico",
-  L"http://www.bing.com/search?setmkt=en-ZA&q={searchTerms}",
-  "UTF-8",
-  L"http://api.bing.com/osjson.aspx?query={searchTerms}&language={language}",
-  NULL,
-  SEARCH_ENGINE_BING,
-  IDR_SEARCH_ENGINE_LOGO_BING,
-  3,
-};
-
-const PrepopulatedEngine bing_es_AR = {
-  L"Bing",
-  L"bing.com",
-  "http://www.bing.com/s/wlflag.ico",
-  L"http://www.bing.com/search?setmkt=es-AR&q={searchTerms}",
-  "UTF-8",
-  L"http://api.bing.com/osjson.aspx?query={searchTerms}&language={language}",
-  NULL,
-  SEARCH_ENGINE_BING,
-  IDR_SEARCH_ENGINE_LOGO_BING,
-  3,
-};
-
-const PrepopulatedEngine bing_es_CL = {
-  L"Bing",
-  L"bing.com",
-  "http://www.bing.com/s/wlflag.ico",
-  L"http://www.bing.com/search?setmkt=es-CL&q={searchTerms}",
-  "UTF-8",
-  L"http://api.bing.com/osjson.aspx?query={searchTerms}&language={language}",
-  NULL,
-  SEARCH_ENGINE_BING,
-  IDR_SEARCH_ENGINE_LOGO_BING,
-  3,
-};
-
-const PrepopulatedEngine bing_es_ES = {
-  L"Bing",
-  L"bing.com",
-  "http://www.bing.com/s/wlflag.ico",
-  L"http://www.bing.com/search?setmkt=es-ES&q={searchTerms}",
-  "UTF-8",
-  L"http://api.bing.com/osjson.aspx?query={searchTerms}&language={language}",
-  NULL,
-  SEARCH_ENGINE_BING,
-  IDR_SEARCH_ENGINE_LOGO_BING,
-  3,
-};
-
-const PrepopulatedEngine bing_es_MX = {
-  L"Bing",
-  L"bing.com",
-  "http://www.bing.com/s/wlflag.ico",
-  L"http://www.bing.com/search?setmkt=es-MX&q={searchTerms}",
-  "UTF-8",
-  L"http://api.bing.com/osjson.aspx?query={searchTerms}&language={language}",
-  NULL,
-  SEARCH_ENGINE_BING,
-  IDR_SEARCH_ENGINE_LOGO_BING,
-  3,
-};
-
-const PrepopulatedEngine bing_es_XL = {
-  L"Bing",
-  L"bing.com",
-  "http://www.bing.com/s/wlflag.ico",
-  L"http://www.bing.com/search?setmkt=es-XL&q={searchTerms}",
-  "UTF-8",
-  L"http://api.bing.com/osjson.aspx?query={searchTerms}&language={language}",
-  NULL,
-  SEARCH_ENGINE_BING,
-  IDR_SEARCH_ENGINE_LOGO_BING,
-  3,
-};
-
-const PrepopulatedEngine bing_et_EE = {
-  L"Bing",
-  L"bing.com",
-  "http://www.bing.com/s/wlflag.ico",
-  L"http://www.bing.com/search?setmkt=et-EE&q={searchTerms}",
-  "UTF-8",
-  L"http://api.bing.com/osjson.aspx?query={searchTerms}&language={language}",
-  NULL,
-  SEARCH_ENGINE_BING,
-  IDR_SEARCH_ENGINE_LOGO_BING,
-  3,
-};
-
-const PrepopulatedEngine bing_fi_FI = {
-  L"Bing",
-  L"bing.com",
-  "http://www.bing.com/s/wlflag.ico",
-  L"http://www.bing.com/search?setmkt=fi-FI&q={searchTerms}",
-  "UTF-8",
-  L"http://api.bing.com/osjson.aspx?query={searchTerms}&language={language}",
-  NULL,
-  SEARCH_ENGINE_BING,
-  IDR_SEARCH_ENGINE_LOGO_BING,
-  3,
-};
-
-const PrepopulatedEngine bing_fr_BE = {
-  L"Bing",
-  L"",  // bing.com is taken by bing_nl_BE.
-  "http://www.bing.com/s/wlflag.ico",
-  L"http://www.bing.com/search?setmkt=fr-BE&q={searchTerms}",
-  "UTF-8",
-  L"http://api.bing.com/osjson.aspx?query={searchTerms}&language={language}",
-  NULL,
-  SEARCH_ENGINE_BING,
-  IDR_SEARCH_ENGINE_LOGO_BING,
-  7,
-};
-
-const PrepopulatedEngine bing_fr_CA = {
-  L"Bing",
-  L"",  // bing.com is taken by bing_en_CA.
-  "http://www.bing.com/s/wlflag.ico",
-  L"http://www.bing.com/search?setmkt=fr-CA&q={searchTerms}",
-  "UTF-8",
-  L"http://api.bing.com/osjson.aspx?query={searchTerms}&language={language}",
-  NULL,
-  SEARCH_ENGINE_BING,
-  IDR_SEARCH_ENGINE_LOGO_BING,
-  7,
-};
-
-const PrepopulatedEngine bing_fr_CH = {
-  L"Bing",
-  L"",  // bing.com is taken by bing_de_CH.
-  "http://www.bing.com/s/wlflag.ico",
-  L"http://www.bing.com/search?setmkt=fr-CH&q={searchTerms}",
-  "UTF-8",
-  L"http://api.bing.com/osjson.aspx?query={searchTerms}&language={language}",
-  NULL,
-  SEARCH_ENGINE_BING,
-  IDR_SEARCH_ENGINE_LOGO_BING,
-  7,
-};
-
-const PrepopulatedEngine bing_fr_FR = {
-  L"Bing",
-  L"bing.com",
-  "http://www.bing.com/s/wlflag.ico",
-  L"http://www.bing.com/search?setmkt=fr-FR&q={searchTerms}",
-  "UTF-8",
-  L"http://api.bing.com/osjson.aspx?query={searchTerms}&language={language}",
-  NULL,
-  SEARCH_ENGINE_BING,
-  IDR_SEARCH_ENGINE_LOGO_BING,
-  3,
-};
-
-const PrepopulatedEngine bing_he_IL = {
-  L"Bing",
-  L"bing.com",
-  "http://www.bing.com/s/wlflag.ico",
-  L"http://www.bing.com/search?setmkt=he-IL&q={searchTerms}",
-  "UTF-8",
-  L"http://api.bing.com/osjson.aspx?query={searchTerms}&language={language}",
-  NULL,
-  SEARCH_ENGINE_BING,
-  IDR_SEARCH_ENGINE_LOGO_BING,
-  3,
-};
-
-const PrepopulatedEngine bing_hr_HR = {
-  L"Bing",
-  L"bing.com",
-  "http://www.bing.com/s/wlflag.ico",
-  L"http://www.bing.com/search?setmkt=hr-HR&q={searchTerms}",
-  "UTF-8",
-  L"http://api.bing.com/osjson.aspx?query={searchTerms}&language={language}",
-  NULL,
-  SEARCH_ENGINE_BING,
-  IDR_SEARCH_ENGINE_LOGO_BING,
-  3,
-};
-
-const PrepopulatedEngine bing_hu_HU = {
-  L"Bing",
-  L"bing.com",
-  "http://www.bing.com/s/wlflag.ico",
-  L"http://www.bing.com/search?setmkt=hu-HU&q={searchTerms}",
-  "UTF-8",
-  L"http://api.bing.com/osjson.aspx?query={searchTerms}&language={language}",
-  NULL,
-  SEARCH_ENGINE_BING,
-  IDR_SEARCH_ENGINE_LOGO_BING,
-  3,
-};
-
-const PrepopulatedEngine bing_it_IT = {
-  L"Bing",
-  L"bing.com",
-  "http://www.bing.com/s/wlflag.ico",
-  L"http://www.bing.com/search?setmkt=it-IT&q={searchTerms}",
-  "UTF-8",
-  L"http://api.bing.com/osjson.aspx?query={searchTerms}&language={language}",
-  NULL,
-  SEARCH_ENGINE_BING,
-  IDR_SEARCH_ENGINE_LOGO_BING,
-  3,
-};
-
-const PrepopulatedEngine bing_ja_JP = {
-  L"Bing",
-  L"bing.com",
-  "http://www.bing.com/s/wlflag.ico",
-  L"http://www.bing.com/search?setmkt=ja-JP&q={searchTerms}",
-  "UTF-8",
-  L"http://api.bing.com/osjson.aspx?query={searchTerms}&language={language}",
-  NULL,
-  SEARCH_ENGINE_BING,
-  IDR_SEARCH_ENGINE_LOGO_BING,
-  3,
-};
-
-const PrepopulatedEngine bing_ko_KR = {
-  L"Bing",
-  L"bing.com",
-  "http://www.bing.com/s/wlflag.ico",
-  L"http://www.bing.com/search?setmkt=ko-KR&q={searchTerms}",
-  "UTF-8",
-  L"http://api.bing.com/osjson.aspx?query={searchTerms}&language={language}",
-  NULL,
-  SEARCH_ENGINE_BING,
-  IDR_SEARCH_ENGINE_LOGO_BING,
-  3,
-};
-
-const PrepopulatedEngine bing_lt_LT = {
-  L"Bing",
-  L"bing.com",
-  "http://www.bing.com/s/wlflag.ico",
-  L"http://www.bing.com/search?setmkt=lt-LT&q={searchTerms}",
-  "UTF-8",
-  L"http://api.bing.com/osjson.aspx?query={searchTerms}&language={language}",
-  NULL,
-  SEARCH_ENGINE_BING,
-  IDR_SEARCH_ENGINE_LOGO_BING,
-  3,
-};
-
-const PrepopulatedEngine bing_lv_LV = {
-  L"Bing",
-  L"bing.com",
-  "http://www.bing.com/s/wlflag.ico",
-  L"http://www.bing.com/search?setmkt=lv-LV&q={searchTerms}",
-  "UTF-8",
-  L"http://api.bing.com/osjson.aspx?query={searchTerms}&language={language}",
-  NULL,
-  SEARCH_ENGINE_BING,
-  IDR_SEARCH_ENGINE_LOGO_BING,
-  3,
-};
-
-const PrepopulatedEngine bing_nb_NO = {
-  L"Bing",
-  L"bing.com",
-  "http://www.bing.com/s/wlflag.ico",
-  L"http://www.bing.com/search?setmkt=nb-NO&q={searchTerms}",
-  "UTF-8",
-  L"http://api.bing.com/osjson.aspx?query={searchTerms}&language={language}",
-  NULL,
-  SEARCH_ENGINE_BING,
-  IDR_SEARCH_ENGINE_LOGO_BING,
-  3,
-};
-
-const PrepopulatedEngine bing_nl_BE = {
-  L"Bing",
-  L"bing.com",
-  "http://www.bing.com/s/wlflag.ico",
-  L"http://www.bing.com/search?setmkt=nl-BE&q={searchTerms}",
-  "UTF-8",
-  L"http://api.bing.com/osjson.aspx?query={searchTerms}&language={language}",
-  NULL,
-  SEARCH_ENGINE_BING,
-  IDR_SEARCH_ENGINE_LOGO_BING,
-  3,
-};
-
-const PrepopulatedEngine bing_nl_NL = {
-  L"Bing",
-  L"bing.com",
-  "http://www.bing.com/s/wlflag.ico",
-  L"http://www.bing.com/search?setmkt=nl-NL&q={searchTerms}",
-  "UTF-8",
-  L"http://api.bing.com/osjson.aspx?query={searchTerms}&language={language}",
-  NULL,
-  SEARCH_ENGINE_BING,
-  IDR_SEARCH_ENGINE_LOGO_BING,
-  3,
-};
-
-const PrepopulatedEngine bing_pl_PL = {
-  L"Bing",
-  L"bing.com",
-  "http://www.bing.com/s/wlflag.ico",
-  L"http://www.bing.com/search?setmkt=pl-PL&q={searchTerms}",
-  "UTF-8",
-  L"http://api.bing.com/osjson.aspx?query={searchTerms}&language={language}",
-  NULL,
-  SEARCH_ENGINE_BING,
-  IDR_SEARCH_ENGINE_LOGO_BING,
-  3,
-};
-
-const PrepopulatedEngine bing_pt_BR = {
-  L"Bing",
-  L"bing.com",
-  "http://www.bing.com/s/wlflag.ico",
-  L"http://www.bing.com/search?setmkt=pt-BR&q={searchTerms}",
-  "UTF-8",
-  L"http://api.bing.com/osjson.aspx?query={searchTerms}&language={language}",
-  NULL,
-  SEARCH_ENGINE_BING,
-  IDR_SEARCH_ENGINE_LOGO_BING,
-  3,
-};
-
-const PrepopulatedEngine bing_pt_PT = {
-  L"Bing",
-  L"bing.com",
-  "http://www.bing.com/s/wlflag.ico",
-  L"http://www.bing.com/search?setmkt=pt-PT&q={searchTerms}",
-  "UTF-8",
-  L"http://api.bing.com/osjson.aspx?query={searchTerms}&language={language}",
-  NULL,
-  SEARCH_ENGINE_BING,
-  IDR_SEARCH_ENGINE_LOGO_BING,
-  3,
-};
-
-const PrepopulatedEngine bing_ro_RO = {
-  L"Bing",
-  L"bing.com",
-  "http://www.bing.com/s/wlflag.ico",
-  L"http://www.bing.com/search?setmkt=ro-RO&q={searchTerms}",
-  "UTF-8",
-  L"http://api.bing.com/osjson.aspx?query={searchTerms}&language={language}",
-  NULL,
-  SEARCH_ENGINE_BING,
-  IDR_SEARCH_ENGINE_LOGO_BING,
-  3,
-};
-
-const PrepopulatedEngine bing_ru_RU = {
-  L"Bing",
-  L"bing.com",
-  "http://www.bing.com/s/wlflag.ico",
-  L"http://www.bing.com/search?setmkt=ru-RU&q={searchTerms}",
-  "UTF-8",
-  L"http://api.bing.com/osjson.aspx?query={searchTerms}&language={language}",
-  NULL,
-  SEARCH_ENGINE_BING,
-  IDR_SEARCH_ENGINE_LOGO_BING,
-  3,
-};
-
-const PrepopulatedEngine bing_sl_SI = {
-  L"Bing",
-  L"bing.com",
-  "http://www.bing.com/s/wlflag.ico",
-  L"http://www.bing.com/search?setmkt=sl-SI&q={searchTerms}",
-  "UTF-8",
-  L"http://api.bing.com/osjson.aspx?query={searchTerms}&language={language}",
-  NULL,
-  SEARCH_ENGINE_BING,
-  IDR_SEARCH_ENGINE_LOGO_BING,
-  3,
-};
-
-const PrepopulatedEngine bing_sk_SK = {
-  L"Bing",
-  L"bing.com",
-  "http://www.bing.com/s/wlflag.ico",
-  L"http://www.bing.com/search?setmkt=sk-SK&q={searchTerms}",
-  "UTF-8",
-  L"http://api.bing.com/osjson.aspx?query={searchTerms}&language={language}",
-  NULL,
-  SEARCH_ENGINE_BING,
-  IDR_SEARCH_ENGINE_LOGO_BING,
-  3,
-};
-
-const PrepopulatedEngine bing_sv_SE = {
-  L"Bing",
-  L"bing.com",
-  "http://www.bing.com/s/wlflag.ico",
-  L"http://www.bing.com/search?setmkt=sv-SE&q={searchTerms}",
-  "UTF-8",
-  L"http://api.bing.com/osjson.aspx?query={searchTerms}&language={language}",
-  NULL,
-  SEARCH_ENGINE_BING,
-  IDR_SEARCH_ENGINE_LOGO_BING,
-  3,
-};
-
-const PrepopulatedEngine bing_th_TH = {
-  L"Bing",
-  L"bing.com",
-  "http://www.bing.com/s/wlflag.ico",
-  L"http://www.bing.com/search?setmkt=th-TH&q={searchTerms}",
-  "UTF-8",
-  L"http://api.bing.com/osjson.aspx?query={searchTerms}&language={language}",
-  NULL,
-  SEARCH_ENGINE_BING,
-  IDR_SEARCH_ENGINE_LOGO_BING,
-  3,
-};
-
-const PrepopulatedEngine bing_tr_TR = {
-  L"Bing",
-  L"bing.com",
-  "http://www.bing.com/s/wlflag.ico",
-  L"http://www.bing.com/search?setmkt=tr-TR&q={searchTerms}",
-  "UTF-8",
-  L"http://api.bing.com/osjson.aspx?query={searchTerms}&language={language}",
-  NULL,
-  SEARCH_ENGINE_BING,
-  IDR_SEARCH_ENGINE_LOGO_BING,
-  3,
-};
-
-const PrepopulatedEngine bing_uk_UA = {
-  L"Bing",
-  L"bing.com",
-  "http://www.bing.com/s/wlflag.ico",
-  L"http://www.bing.com/search?setmkt=uk-UA&q={searchTerms}",
-  "UTF-8",
-  L"http://api.bing.com/osjson.aspx?query={searchTerms}&language={language}",
-  NULL,
-  SEARCH_ENGINE_BING,
-  IDR_SEARCH_ENGINE_LOGO_BING,
-  3,
-};
-
-const PrepopulatedEngine bing_zh_CN = {
-  L"Bing",
-  L"bing.com",
-  "http://www.bing.com/s/wlflag.ico",
-  L"http://www.bing.com/search?setmkt=zh-CN&q={searchTerms}",
-  "UTF-8",
-  L"http://api.bing.com/osjson.aspx?query={searchTerms}&language={language}",
-  NULL,
-  SEARCH_ENGINE_BING,
-  IDR_SEARCH_ENGINE_LOGO_BING,
-  3,
-};
-
-const PrepopulatedEngine bing_zh_HK = {
-  L"Bing",
-  L"bing.com",
-  "http://www.bing.com/s/wlflag.ico",
-  L"http://www.bing.com/search?setmkt=zh-HK&q={searchTerms}",
-  "UTF-8",
-  L"http://api.bing.com/osjson.aspx?query={searchTerms}&language={language}",
-  NULL,
-  SEARCH_ENGINE_BING,
-  IDR_SEARCH_ENGINE_LOGO_BING,
-  3,
-};
-
-const PrepopulatedEngine bing_zh_TW = {
-  L"Bing",
-  L"bing.com",
-  "http://www.bing.com/s/wlflag.ico",
-  L"http://www.bing.com/search?setmkt=zh-TW&q={searchTerms}",
-  "UTF-8",
-  L"http://api.bing.com/osjson.aspx?query={searchTerms}&language={language}",
-  NULL,
-  SEARCH_ENGINE_BING,
-  IDR_SEARCH_ENGINE_LOGO_BING,
-  3,
-};
-
-const PrepopulatedEngine centrum_cz = {
-  L"Centrum.cz",
-  L"centrum.cz",
-  "http://img.centrum.cz/6/vy2/o/favicon.ico",
-  L"http://search.centrum.cz/index.php?charset={inputEncoding}&q={searchTerms}",
-  "UTF-8",
-  NULL,
-  NULL,
-  SEARCH_ENGINE_CENTRUM,
-  IDR_SEARCH_ENGINE_LOGO_CENTRUM,
-  26,
-};
-
-const PrepopulatedEngine centrum_sk = {
-  L"Centrum.sk",
-  L"centrum.sk",
-  "http://img.centrum.sk/4/favicon.ico",
-  L"http://search.centrum.sk/index.php?charset={inputEncoding}&q={searchTerms}",
-  "UTF-8",
-  NULL,
-  NULL,
-  SEARCH_ENGINE_CENTRUM,
-  IDR_SEARCH_ENGINE_LOGO_CENTRUM,
-  26,
-};
-
-const PrepopulatedEngine daum = {
-  L"Daum",
-  L"daum.net",
-  "http://search.daum.net/favicon.ico",
-  L"http://search.daum.net/search?q={searchTerms}",
-  "EUC-KR",
-  L"http://sug.search.daum.net/search_nsuggest?mod=fxjson&q={searchTerms}",
-  NULL,
-  SEARCH_ENGINE_DAUM,
-  IDR_SEARCH_ENGINE_LOGO_DAUM,
-  68,
-};
-
-const PrepopulatedEngine delfi_lt = {
-  L"DELFI",
-  L"delfi.lt",
-  "http://search.delfi.lt/img/favicon.png",
-  L"http://search.delfi.lt/search.php?q={searchTerms}",
-  "UTF-8",
-  NULL,
-  NULL,
-  SEARCH_ENGINE_DELFI,
-  IDR_SEARCH_ENGINE_LOGO_DELFI,
-  45,
-};
-
-const PrepopulatedEngine delfi_lv = {
-  L"DELFI",
-  L"delfi.lv",
-  "http://smart.delfi.lv/img/smart_search.png",
-  L"http://smart.delfi.lv/i.php?enc={inputEncoding}&q={searchTerms}",
-  "UTF-8",
-  NULL,
-  NULL,
-  SEARCH_ENGINE_DELFI,
-  IDR_SEARCH_ENGINE_LOGO_DELFI,
-  45,
-};
-
-const PrepopulatedEngine diri = {
-  L"diri",
-  L"diri.bg",
-  "http://i.dir.bg/diri/images/favicon.ico",
-  L"http://diri.bg/search.php?textfield={searchTerms}",
-  "windows-1251",
-  NULL,
-  NULL,
-  SEARCH_ENGINE_DIRI,
-  IDR_SEARCH_ENGINE_LOGO_DIRI,
-  32,
-};
-
-const PrepopulatedEngine eniro_fi = {
-  L"Eniro",
-  L"eniro.fi",
-  "http://eniro.fi/favicon.ico",
-  L"http://eniro.fi/query?search_word={searchTerms}&what=web_local",
-  "ISO-8859-1",
-  NULL,
-  NULL,
-  SEARCH_ENGINE_OTHER,
-  kNoSearchEngineLogo,
-  29,
-};
-
-const PrepopulatedEngine eniro_se = {
-  L"Eniro",
-  L"eniro.se",
-  "http://eniro.se/favicon.ico",
-  L"http://eniro.se/query?search_word={searchTerms}&what=web_local",
-  "ISO-8859-1",
-  NULL,
-  NULL,
-  SEARCH_ENGINE_OTHER,
-  kNoSearchEngineLogo,
-  29,
-};
-
-const PrepopulatedEngine fonecta_02_fi = {
-  L"Fonecta 02.fi",
-  L"www.fi",
-  "http://www.02.fi/img/favicon.ico",
-  L"http://www.02.fi/haku/{searchTerms}",
-  "UTF-8",
-  NULL,
-  NULL,
-  SEARCH_ENGINE_OTHER,
-  kNoSearchEngineLogo,
-  46,
-};
-
-const PrepopulatedEngine go = {
-  L"GO.com",
-  L"go.com",
-  "http://search.yahoo.com/favicon.ico",
-  L"http://search.yahoo.com/search?ei={inputEncoding}&p={searchTerms}&"
-      L"fr=hsusgo1",
-  "ISO-8859-1",
-  NULL,
-  NULL,
-  SEARCH_ENGINE_OTHER,
-  kNoSearchEngineLogo,
-  40,
-};
-
-const PrepopulatedEngine goo = {
-  L"goo",
-  L"search.goo.ne.jp",
-  "http://goo.ne.jp/favicon.ico",
-  L"http://search.goo.ne.jp/web.jsp?MT={searchTerms}&IE={inputEncoding}",
-  "UTF-8",
-  NULL,
-  NULL,
-  SEARCH_ENGINE_GOO,
-  IDR_SEARCH_ENGINE_LOGO_GOO,
-  23,
-};
-
-const PrepopulatedEngine google = {
-  L"Google",
-  NULL,
-  "http://www.google.com/favicon.ico",
-  L"{google:baseURL}search?{google:RLZ}{google:acceptedSuggestion}"
-      L"{google:originalQueryForSuggestion}{google:searchFieldtrialParameter}"
-      L"{google:instantFieldTrialGroupParameter}{google:searchClient}"
-      L"sourceid=" GOOGLE_SOURCE_ID L"&ie={inputEncoding}&q={searchTerms}",
-  "UTF-8",
-  L"{google:baseSuggestURL}search?{google:searchFieldtrialParameter}"
-      L"{google:instantFieldTrialGroupParameter}"
-      L"client=" GOOGLE_SOURCE_ID L"&hl={language}&q={searchTerms}",
-  L"{google:baseURL}webhp?{google:RLZ}sourceid=chrome-instant&"
-      L"{google:instantFieldTrialGroupParameter}"
-      L"ie={inputEncoding}{google:instantEnabledParameter}{searchTerms}",
-  SEARCH_ENGINE_GOOGLE,
-  IDR_SEARCH_ENGINE_LOGO_GOOGLE,
-  1,
-};
-
-const PrepopulatedEngine guruji = {
-  L"guruji",
-  L"guruji.com",
-  "http://guruji.com/favicon.ico",
-  L"http://guruji.com/search?q={searchTerms}",
-  "UTF-8",
-  NULL,
-  NULL,
-  SEARCH_ENGINE_OTHER,
-  kNoSearchEngineLogo,
-  38,
-};
-
-const PrepopulatedEngine hispavista = {
-  L"hispavista",
-  L"hispavista.com",
-  "http://buscar.hispavista.com/favicon.ico",
-  L"http://buscar.hispavista.com/?cadena={searchTerms}",
-  "iso-8859-1",
-  NULL,
-  NULL,
-  SEARCH_ENGINE_OTHER,
-  kNoSearchEngineLogo,
-  18,
-};
-
-const PrepopulatedEngine in = {
-  L"in.gr",
-  L"in.gr",
-  "http://www.in.gr/favicon.ico",
-  L"http://find.in.gr/?qs={searchTerms}",
-  "ISO-8859-7",
-  NULL,
-  NULL,
-  SEARCH_ENGINE_IN,
-  IDR_SEARCH_ENGINE_LOGO_IN,
-  54,
-};
-
-const PrepopulatedEngine jabse = {
-  L"Jabse",
-  L"jabse.com",
-  "http://www.jabse.com/favicon.ico",
-  L"http://www.jabse.com/searchmachine.php?query={searchTerms}",
-  "UTF-8",
-  NULL,
-  NULL,
-  SEARCH_ENGINE_OTHER,
-  kNoSearchEngineLogo,
-  19,
-};
-
-const PrepopulatedEngine jubii = {
-  L"Jubii",
-  L"jubii.dk",
-  "http://search.jubii.dk/favicon_jubii.ico",
-  L"http://search.jubii.dk/cgi-bin/pursuit?query={searchTerms}",
-  "ISO-8859-1",
-  NULL,
-  NULL,
-  SEARCH_ENGINE_OTHER,
-  kNoSearchEngineLogo,
-  28,
-};
-
-const PrepopulatedEngine kvasir = {
-  L"Kvasir",
-  L"kvasir.no",
-  "http://www.kvasir.no/img/favicon.ico",
-  L"http://www.kvasir.no/nettsok/searchResult.html?searchExpr={searchTerms}",
-  "ISO-8859-1",
-  NULL,
-  NULL,
-  SEARCH_ENGINE_OTHER,
-  kNoSearchEngineLogo,
-  73,
-};
-
-const PrepopulatedEngine latne = {
-  L"LATNE",
-  L"latne.lv",
-  "http://latne.lv/favicon.ico",
-  L"http://latne.lv/siets.php?q={searchTerms}",
-  "UTF-8",
-  NULL,
-  NULL,
-  SEARCH_ENGINE_OTHER,
-  kNoSearchEngineLogo,
-  71,
-};
-
-const PrepopulatedEngine leit = {
-  L"leit.is",
-  L"leit.is",
-  "http://leit.is/leit.ico",
-  L"http://leit.is/query.aspx?qt={searchTerms}",
-  "ISO-8859-1",
-  NULL,
-  NULL,
-  SEARCH_ENGINE_OTHER,
-  kNoSearchEngineLogo,
-  59,
-};
-
-const PrepopulatedEngine libero = {
-  L"Libero",
-  L"libero.it",
-  "http://arianna.libero.it/favicon.ico",
-  L"http://arianna.libero.it/search/abin/integrata.cgi?query={searchTerms}",
-  "ISO-8859-1",
-  NULL,
-  NULL,
-  SEARCH_ENGINE_OTHER,
-  kNoSearchEngineLogo,
-  63,
-};
-
-const PrepopulatedEngine mail_ru = {
-  L"@MAIL.RU",
-  L"mail.ru",
-  "http://img.go.mail.ru/favicon.ico",
-  L"http://go.mail.ru/search?q={searchTerms}",
-  "windows-1251",
-  L"http://suggests.go.mail.ru/chrome?q={searchTerms}",
-  NULL,
-  SEARCH_ENGINE_MAILRU,
-  IDR_SEARCH_ENGINE_LOGO_MAILRU,
-  83,
-};
-
-const PrepopulatedEngine maktoob = {
-  L"\x0645\x0643\x062a\x0648\x0628",
-  L"maktoob.com",
-  "http://www.maktoob.com/favicon.ico",
-  L"http://www.maktoob.com/searchResult.php?q={searchTerms}",
-  "UTF-8",
-  NULL,
-  NULL,
-  SEARCH_ENGINE_OTHER,
-  kNoSearchEngineLogo,
-  13,
-};
-
-const PrepopulatedEngine masrawy = {
-  L"\x0645\x0635\x0631\x0627\x0648\x064a",
-  L"masrawy.com",
-  "http://www.masrawy.com/new/images/masrawy.ico",
-  L"http://masrawy.com/new/search.aspx?sr={searchTerms}",
-  "windows-1256",
-  NULL,
-  NULL,
-  SEARCH_ENGINE_OTHER,
-  kNoSearchEngineLogo,
-  14,
-};
-
-const PrepopulatedEngine mynet = {
-  L"MYNET",
-  L"mynet.com",
-  "http://img.mynet.com/mynetfavori.ico",
-  L"http://arama.mynet.com/search.aspx?q={searchTerms}&pg=q",
-  "windows-1254",
-  NULL,
-  NULL,
-  SEARCH_ENGINE_OTHER,
-  kNoSearchEngineLogo,
-  101,
-};
-
-const PrepopulatedEngine najdi = {
-  L"Najdi.si",
-  L"najdi.si",
-  "http://www.najdi.si/master/favicon.ico",
-  L"http://www.najdi.si/search.jsp?q={searchTerms}",
-  "UTF-8",
-  NULL,
-  NULL,
-  SEARCH_ENGINE_NAJDI,
-  IDR_SEARCH_ENGINE_LOGO_NAJDI,
-  87,
-};
-
-const PrepopulatedEngine nate = {
-  L"\xb124\xc774\xd2b8\xb2f7\xcef4",
-  L"nate.com",
-  "http://nate.search.empas.com/favicon.ico",
-  L"http://nate.search.empas.com/search/all.html?q={searchTerms}",
-  "EUC-KR",
-  NULL,
-  NULL,
-  SEARCH_ENGINE_OTHER,
-  kNoSearchEngineLogo,
-  69,
-};
-
-const PrepopulatedEngine naver = {
-  L"\xb124\xc774\xbc84",
-  L"naver.com",
-  "http://search.naver.com/favicon.ico",
-  L"http://search.naver.com/search.naver?ie={inputEncoding}"
-      L"&query={searchTerms}",
-  "UTF-8",
-  L"http://ac.search.naver.com/autocompl?m=s&ie={inputEncoding}&oe=utf-8&"
-      L"q={searchTerms}",
-  NULL,
-  SEARCH_ENGINE_NAVER,
-  IDR_SEARCH_ENGINE_LOGO_NAVER,
-  67,
-};
-
-const PrepopulatedEngine neti = {
-  L"NETI",
-  L"neti.ee",
-  "http://www.neti.ee/favicon.ico",
-  L"http://www.neti.ee/cgi-bin/otsing?query={searchTerms}",
-  "ISO-8859-1",
-  NULL,
-  NULL,
-  SEARCH_ENGINE_NETI,
-  IDR_SEARCH_ENGINE_LOGO_NETI,
-  44,
-};
-
-const PrepopulatedEngine netsprint = {
-  L"NetSprint",
-  L"netsprint.pl",
-  "http://netsprint.pl/favicon.ico",
-  L"http://www.netsprint.pl/serwis/search?q={searchTerms}",
-  "UTF-8",
-  NULL,
-  NULL,
-  SEARCH_ENGINE_NETSPRINT,
-  IDR_SEARCH_ENGINE_LOGO_NETSPRINT,
-  30,
-};
-
-const PrepopulatedEngine nur_kz = {
-  L"NUR.KZ",
-  L"nur.kz",
-  "http://www.nur.kz/favicon_kz.ico",
-  L"http://search.nur.kz/?encoding={inputEncoding}&query={searchTerms}",
-  "UTF-8",
-  NULL,
-  NULL,
-  SEARCH_ENGINE_OTHER,
-  kNoSearchEngineLogo,
-  20,
-};
-
-const PrepopulatedEngine ok = {
-  L"OK.hu",
-  L"ok.hu",
-  "http://ok.hu/gfx/favicon.ico",
-  L"http://ok.hu/katalogus?q={searchTerms}",
-  "ISO-8859-2",
-  NULL,
-  NULL,
-  SEARCH_ENGINE_OK,
-  IDR_SEARCH_ENGINE_LOGO_OK,
-  6,
-};
-
-const PrepopulatedEngine onet = {
-  L"Onet.pl",
-  L"onet.pl",
-  "http://szukaj.onet.pl/favicon.ico",
-  L"http://szukaj.onet.pl/query.html?qt={searchTerms}",
-  "ISO-8859-2",
-  NULL,
-  NULL,
-  SEARCH_ENGINE_OTHER,
-  kNoSearchEngineLogo,
-  75,
-};
-
-const PrepopulatedEngine pogodak_rs = {
-  L"Pogodak!",
-  L"pogodak.rs",
-  "http://www.pogodak.rs/favicon.ico",
-  L"http://www.pogodak.rs/search.jsp?q={searchTerms}",
-  "UTF-8",
-  NULL,
-  NULL,
-  SEARCH_ENGINE_POGODAK,
-  IDR_SEARCH_ENGINE_LOGO_POGODAK,
-  24,
-};
-
-const PrepopulatedEngine rambler = {
-  L"Rambler",
-  L"rambler.ru",
-  "http://www.rambler.ru/favicon.ico",
-  L"http://www.rambler.ru/srch?words={searchTerms}",
-  "windows-1251",
-  NULL,
-  NULL,
-  SEARCH_ENGINE_RAMBLER,
-  IDR_SEARCH_ENGINE_LOGO_RAMBLER,
-  16,
-};
-
-const PrepopulatedEngine rediff = {
-  L"Rediff",
-  L"rediff.com",
-  "http://search1.rediff.com/favicon.ico",
-  L"http://search1.rediff.com/dirsrch/default.asp?MT={searchTerms}",
-  "UTF-8",
-  NULL,
-  NULL,
-  SEARCH_ENGINE_OTHER,
-  kNoSearchEngineLogo,
-  37,
-};
-
-const PrepopulatedEngine rednano = {
-  L"Rednano",
-  L"rednano.sg",
-  "http://rednano.sg/favicon.ico",
-  L"http://rednano.sg/sfe/lwi.action?querystring={searchTerms}",
-  "UTF-8",
-  NULL,
-  NULL,
-  SEARCH_ENGINE_OTHER,
-  kNoSearchEngineLogo,
-  41,
-};
-
-const PrepopulatedEngine sanook = {
-  L"\x0e2a\x0e19\x0e38\x0e01!",
-  L"sanook.com",
-  "http://search.sanook.com/favicon.ico",
-  L"http://search.sanook.com/search.php?q={searchTerms}",
-  "UTF-8",
-  NULL,
-  NULL,
-  SEARCH_ENGINE_SANOOK,
-  IDR_SEARCH_ENGINE_LOGO_SANOOK,
-  100,
-};
-
-const PrepopulatedEngine sapo = {
-  L"SAPO",
-  L"sapo.pt",
-  "http://imgs.sapo.pt/images/sapo.ico",
-  L"http://pesquisa.sapo.pt/?q={searchTerms}",
-  "UTF-8",
-  L"http://pesquisa.sapo.pt/livesapo?q={searchTerms}",
-  NULL,
-  SEARCH_ENGINE_SAPO,
-  IDR_SEARCH_ENGINE_LOGO_SAPO,
-  77,
-};
-
-const PrepopulatedEngine search_de_CH = {
-  L"search.ch",
-  L"search.ch",
-  "http://www.search.ch/favicon.ico",
-  L"http://www.search.ch/index.de.html?q={searchTerms}",
-  "ISO-8859-1",
-  NULL,
-  NULL,
-  SEARCH_ENGINE_OTHER,
-  kNoSearchEngineLogo,
-  51,
-};
-
-const PrepopulatedEngine search_fr_CH = {
-  L"search.ch",
-  L"",  // search.ch is taken by search_de_CH.
-  "http://www.search.ch/favicon.ico",
-  L"http://www.search.ch/index.fr.html?q={searchTerms}",
-  "ISO-8859-1",
-  NULL,
-  NULL,
-  SEARCH_ENGINE_OTHER,
-  kNoSearchEngineLogo,
-  22,
-};
-
-const PrepopulatedEngine seznam = {
-  L"Seznam",
-  L"seznam.cz",
-  "http://1.im.cz/szn/img/favicon.ico",
-  L"http://search.seznam.cz/?q={searchTerms}",
-  "UTF-8",
-  L"http:///suggest.fulltext.seznam.cz/?dict=fulltext_ff&phrase={searchTerms}&"
-      L"encoding={inputEncoding}&response_encoding=utf-8",
-  NULL,
-  SEARCH_ENGINE_SEZNAM,
-  IDR_SEARCH_ENGINE_LOGO_SEZNAM,
-  25,
-};
-
-const PrepopulatedEngine spray = {
-  L"Spray",
-  L"spray.se",
-  "http://www.eniro.se/favicon.ico",
-  L"http://www.eniro.se/query?ax=spray&search_word={searchTerms}&what=web",
-  "ISO-8859-1",
-  NULL,
-  NULL,
-  SEARCH_ENGINE_OTHER,
-  kNoSearchEngineLogo,
-  99,
-};
-
-const PrepopulatedEngine terra_ar = {
-  L"Terra Argentina",
-  L"terra.com.ar",
-  "http://buscar.terra.com.ar/favicon.ico",
-  L"http://buscar.terra.com.ar/Default.aspx?query={searchTerms}&source=Search",
-  "ISO-8859-1",
-  NULL,
-  NULL,
-  SEARCH_ENGINE_OTHER,
-  kNoSearchEngineLogo,
-  90,
-};
-
-const PrepopulatedEngine terra_es = {
-  L"Terra",
-  L"terra.es",
-  "http://buscador.terra.es/favicon.ico",
-  L"http://buscador.terra.es/Default.aspx?query={searchTerms}&source=Search",
-  "ISO-8859-1",
-  NULL,
-  NULL,
-  SEARCH_ENGINE_OTHER,
-  kNoSearchEngineLogo,
-  90,
-};
-
-const PrepopulatedEngine tut = {
-  L"TUT.BY",
-  L"tut.by",
-  "http://www.tut.by/favicon.ico",
-  L"http://search.tut.by/?query={searchTerms}",
-  "windows-1251",
-  NULL,
-  NULL,
-  SEARCH_ENGINE_TUT,
-  IDR_SEARCH_ENGINE_LOGO_TUT,
-  17,
-};
-
-const PrepopulatedEngine uol = {
-  L"UOL Busca",
-  L"busca.uol.com.br",
-  "http://busca.uol.com.br/favicon.ico",
-  L"http://busca.uol.com.br/www/index.html?q={searchTerms}",
-  "ISO-8859-1",
-  NULL,
-  NULL,
-  SEARCH_ENGINE_OTHER,
-  kNoSearchEngineLogo,
-  82,
-};
-
-const PrepopulatedEngine virgilio = {
-  L"Virgilio",
-  L"virgilio.it",
-  "http://ricerca.alice.it/favicon.ico",
-  L"http://ricerca.alice.it/ricerca?qs={searchTerms}",
-  "ISO-8859-1",
-  NULL,
-  NULL,
-  SEARCH_ENGINE_VIRGILIO,
-  IDR_SEARCH_ENGINE_LOGO_VIRGILIO,
-  62,
-};
-
-const PrepopulatedEngine walla = {
-  L"\x05d5\x05d5\x05d0\x05dc\x05d4!",
-  L"walla.co.il",
-  "http://www.walla.co.il/favicon.ico",
-  L"http://search.walla.co.il/?e=hew&q={searchTerms}",
-  "windows-1255",
-  NULL,
-  NULL,
-  SEARCH_ENGINE_WALLA,
-  IDR_SEARCH_ENGINE_LOGO_WALLA,
-  55,
-};
-
-const PrepopulatedEngine wp = {
-  L"Wirtualna Polska",
-  L"wp.pl",
-  "http://szukaj.wp.pl/favicon.ico",
-  L"http://szukaj.wp.pl/szukaj.html?szukaj={searchTerms}",
-  "ISO-8859-2",
-  NULL,
-  NULL,
-  SEARCH_ENGINE_OTHER,
-  kNoSearchEngineLogo,
-  76,
-};
-
-const PrepopulatedEngine yahoo = {
-  L"Yahoo!",
-  L"yahoo.com",
-  "http://search.yahoo.com/favicon.ico",
-  L"http://search.yahoo.com/search?ei={inputEncoding}&fr=crmas&p={searchTerms}",
-  "UTF-8",
-  L"http://ff.search.yahoo.com/gossip?output=fxjson&command={searchTerms}",
-  NULL,
-  SEARCH_ENGINE_YAHOO,
-  IDR_SEARCH_ENGINE_LOGO_YAHOO,
-  2,
-};
-
-// For regional Yahoo variants without region-specific suggestion service,
-// suggestion is disabled. For some of them, we might consider
-// using a fallback (e.g. de for at/ch, ca or fr for qc, en for nl, no, hk).
-const PrepopulatedEngine yahoo_ar = {
-  L"Yahoo! Argentina",
-  L"ar.yahoo.com",
-  "http://ar.search.yahoo.com/favicon.ico",
-  L"http://ar.search.yahoo.com/search?ei={inputEncoding}&fr=crmas&"
-      L"p={searchTerms}",
-  "UTF-8",
-  L"http://ar-sayt.ff.search.yahoo.com/gossip-ar-sayt?output=fxjson&"
-      L"command={searchTerms}",
-  NULL,
-  SEARCH_ENGINE_YAHOO,
-  IDR_SEARCH_ENGINE_LOGO_YAHOO,
-  2,
-};
-
-const PrepopulatedEngine yahoo_at = {
-  L"Yahoo! Suche",
-  L"at.yahoo.com",
-  "http://at.search.yahoo.com/favicon.ico",
-  L"http://at.search.yahoo.com/search?ei={inputEncoding}&fr=crmas&"
-      L"p={searchTerms}",
-  "UTF-8",
-  NULL,
-  NULL,
-  SEARCH_ENGINE_YAHOO,
-  IDR_SEARCH_ENGINE_LOGO_YAHOO,
-  2,
-};
-
-const PrepopulatedEngine yahoo_au = {
-  L"Yahoo!7",
-  L"au.yahoo.com",
-  "http://au.search.yahoo.com/favicon.ico",
-  L"http://au.search.yahoo.com/search?ei={inputEncoding}&fr=crmas&"
-      L"p={searchTerms}",
-  "UTF-8",
-  L"http://aue-sayt.ff.search.yahoo.com/gossip-au-sayt?output=fxjson&"
-      L"command={searchTerms}",
-  NULL,
-  SEARCH_ENGINE_YAHOO,
-  IDR_SEARCH_ENGINE_LOGO_YAHOO,
-  2,
-};
-
-const PrepopulatedEngine yahoo_br = {
-  L"Yahoo! Brasil",
-  L"br.yahoo.com",
-  "http://br.search.yahoo.com/favicon.ico",
-  L"http://br.search.yahoo.com/search?ei={inputEncoding}&fr=crmas&"
-      L"p={searchTerms}",
-  "UTF-8",
-  L"http://br-sayt.ff.search.yahoo.com/gossip-br-sayt?output=fxjson&"
-      L"command={searchTerms}",
-  NULL,
-  SEARCH_ENGINE_YAHOO,
-  IDR_SEARCH_ENGINE_LOGO_YAHOO,
-  2,
-};
-
-const PrepopulatedEngine yahoo_ca = {
-  L"Yahoo! Canada",
-  L"ca.yahoo.com",
-  "http://ca.search.yahoo.com/favicon.ico",
-  L"http://ca.search.yahoo.com/search?ei={inputEncoding}&fr=crmas&"
-      L"p={searchTerms}",
-  "UTF-8",
-  L"http://gossip.ca.yahoo.com/gossip-ca-sayt?output=fxjsonp&"
-      L"command={searchTerms}",
-  NULL,
-  SEARCH_ENGINE_YAHOO,
-  IDR_SEARCH_ENGINE_LOGO_YAHOO,
-  2,
-};
-
-const PrepopulatedEngine yahoo_ch = {
-  L"Yahoo! Suche",
-  L"ch.yahoo.com",
-  "http://ch.search.yahoo.com/favicon.ico",
-  L"http://ch.search.yahoo.com/search?ei={inputEncoding}&fr=crmas&"
-      L"p={searchTerms}",
-  "UTF-8",
-  NULL,
-  NULL,
-  SEARCH_ENGINE_YAHOO,
-  IDR_SEARCH_ENGINE_LOGO_YAHOO,
-  2,
-};
-
-const PrepopulatedEngine yahoo_cl = {
-  L"Yahoo! Chile",
-  L"cl.yahoo.com",
-  "http://cl.search.yahoo.com/favicon.ico",
-  L"http://cl.search.yahoo.com/search?ei={inputEncoding}&fr=crmas&"
-      L"p={searchTerms}",
-  "UTF-8",
-  L"http://gossip.telemundo.yahoo.com/gossip-e1-sayt?output=fxjson&"
-      L"command={searchTerms}",
-  NULL,
-  SEARCH_ENGINE_YAHOO,
-  IDR_SEARCH_ENGINE_LOGO_YAHOO,
-  2,
-};
-
-const PrepopulatedEngine yahoo_cn = {
-  L"\x4e2d\x56fd\x96c5\x864e",
-  L"cn.yahoo.com",
-  "http://search.cn.yahoo.com/favicon.ico",
-  L"http://search.cn.yahoo.com/search?ei={inputEncoding}&fr=crmas&"
-      L"p={searchTerms}",
-  "GB2312",
-  // http://cn.yahoo.com/cnsuggestion/suggestion.inc.php?of=fxjson&query=
-  // returns in a proprietary format ('|' delimeted word list).
-  NULL,
-  NULL,
-  SEARCH_ENGINE_YAHOO,
-  IDR_SEARCH_ENGINE_LOGO_YAHOO,
-  2,
-};
-
-const PrepopulatedEngine yahoo_co = {
-  L"Yahoo! Colombia",
-  L"co.yahoo.com",
-  "http://co.search.yahoo.com/favicon.ico",
-  L"http://co.search.yahoo.com/search?ei={inputEncoding}&fr=crmas&"
-      L"p={searchTerms}",
-  "UTF-8",
-  L"http://gossip.telemundo.yahoo.com/gossip-e1-sayt?output=fxjson&"
-      L"command={searchTerms}",
-  NULL,
-  SEARCH_ENGINE_YAHOO,
-  IDR_SEARCH_ENGINE_LOGO_YAHOO,
-  2,
-};
-
-const PrepopulatedEngine yahoo_de = {
-  L"Yahoo! Deutschland",
-  L"de.yahoo.com",
-  "http://de.search.yahoo.com/favicon.ico",
-  L"http://de.search.yahoo.com/search?ei={inputEncoding}&fr=crmas&"
-      L"p={searchTerms}",
-  "UTF-8",
-  L"http://de-sayt.ff.search.yahoo.com/gossip-de-sayt?output=fxjson&"
-      L"command={searchTerms}",
-  NULL,
-  SEARCH_ENGINE_YAHOO,
-  IDR_SEARCH_ENGINE_LOGO_YAHOO,
-  2,
-};
-
-const PrepopulatedEngine yahoo_dk = {
-  L"Yahoo! Danmark",
-  L"dk.yahoo.com",
-  "http://dk.search.yahoo.com/favicon.ico",
-  L"http://dk.search.yahoo.com/search?ei={inputEncoding}&fr=crmas&"
-      L"p={searchTerms}",
-  "UTF-8",
-  NULL,
-  NULL,
-  SEARCH_ENGINE_YAHOO,
-  IDR_SEARCH_ENGINE_LOGO_YAHOO,
-  2,
-};
-
-const PrepopulatedEngine yahoo_es = {
-  L"Yahoo! Espa" L"\x00f1" L"a",
-  L"es.yahoo.com",
-  "http://es.search.yahoo.com/favicon.ico",
-  L"http://es.search.yahoo.com/search?ei={inputEncoding}&fr=crmas&"
-      L"p={searchTerms}",
-  "UTF-8",
-  L"http://es-sayt.ff.search.yahoo.com/gossip-es-sayt?output=fxjson&"
-      L"command={searchTerms}",
-  NULL,
-  SEARCH_ENGINE_YAHOO,
-  IDR_SEARCH_ENGINE_LOGO_YAHOO,
-  2,
-};
-
-const PrepopulatedEngine yahoo_fi = {
-  L"Yahoo!-haku",
-  L"fi.yahoo.com",
-  "http://fi.search.yahoo.com/favicon.ico",
-  L"http://fi.search.yahoo.com/search?ei={inputEncoding}&fr=crmas&"
-      L"p={searchTerms}",
-  "UTF-8",
-  NULL,
-  NULL,
-  SEARCH_ENGINE_YAHOO,
-  IDR_SEARCH_ENGINE_LOGO_YAHOO,
-  2,
-};
-
-const PrepopulatedEngine yahoo_fr = {
-  L"Yahoo! France",
-  L"fr.yahoo.com",
-  "http://fr.search.yahoo.com/favicon.ico",
-  L"http://fr.search.yahoo.com/search?ei={inputEncoding}&fr=crmas&"
-      L"p={searchTerms}",
-  "UTF-8",
-  L"http://fr-sayt.ff.search.yahoo.com/gossip-fr-sayt?output=fxjson&"
-      L"command={searchTerms}",
-  NULL,
-  SEARCH_ENGINE_YAHOO,
-  IDR_SEARCH_ENGINE_LOGO_YAHOO,
-  2,
-};
-
-const PrepopulatedEngine yahoo_hk = {
-  L"Yahoo! Hong Kong",
-  L"hk.yahoo.com",
-  "http://hk.search.yahoo.com/favicon.ico",
-  L"http://hk.search.yahoo.com/search?ei={inputEncoding}&fr=crmas&"
-      L"p={searchTerms}",
-  "UTF-8",
-  // http://history.hk.search.yahoo.com/ac/ac_msearch.php?query={searchTerms}
-  // returns a JSON with key-value pairs. Setting parameters (ot, of, output)
-  // to fxjson, json, or js doesn't help.
-  NULL,
-  NULL,
-  SEARCH_ENGINE_YAHOO,
-  IDR_SEARCH_ENGINE_LOGO_YAHOO,
-  2,
-};
-
-const PrepopulatedEngine yahoo_id = {
-  L"Yahoo! Indonesia",
-  L"id.yahoo.com",
-  "http://id.search.yahoo.com/favicon.ico",
-  L"http://id.search.yahoo.com/search?ei={inputEncoding}&fr=crmas&"
-      L"p={searchTerms}",
-  "UTF-8",
-  L"http://id-sayt.ff.search.yahoo.com/gossip-id-sayt?output=fxjson&"
-      L"command={searchTerms}",
-  NULL,
-  SEARCH_ENGINE_YAHOO,
-  IDR_SEARCH_ENGINE_LOGO_YAHOO,
-  2,
-};
-
-const PrepopulatedEngine yahoo_in = {
-  L"Yahoo! India",
-  L"in.yahoo.com",
-  "http://in.search.yahoo.com/favicon.ico",
-  L"http://in.search.yahoo.com/search?ei={inputEncoding}&fr=crmas&"
-      L"p={searchTerms}",
-  "UTF-8",
-  L"http://in-sayt.ff.search.yahoo.com/gossip-in-sayt?output=fxjson&"
-      L"command={searchTerms}",
-  NULL,
-  SEARCH_ENGINE_YAHOO,
-  IDR_SEARCH_ENGINE_LOGO_YAHOO,
-  2,
-};
-
-const PrepopulatedEngine yahoo_it = {
-  L"Yahoo! Italia",
-  L"it.yahoo.com",
-  "http://it.search.yahoo.com/favicon.ico",
-  L"http://it.search.yahoo.com/search?ei={inputEncoding}&fr=crmas&"
-      L"p={searchTerms}",
-  "UTF-8",
-  L"http://it-sayt.ff.search.yahoo.com/gossip-it-sayt?output=fxjson&"
-      L"command={searchTerms}",
-  NULL,
-  SEARCH_ENGINE_YAHOO,
-  IDR_SEARCH_ENGINE_LOGO_YAHOO,
-  2,
-};
-
-const PrepopulatedEngine yahoo_jp = {
-  L"Yahoo! JAPAN",
-  L"yahoo.co.jp",
-  "http://search.yahoo.co.jp/favicon.ico",
-  L"http://search.yahoo.co.jp/search?ei={inputEncoding}&fr=crmas&"
-      L"p={searchTerms}",
-  "UTF-8",
-  NULL,
-  NULL,
-  SEARCH_ENGINE_YAHOOJP,
-  IDR_SEARCH_ENGINE_LOGO_YAHOOJP,
-  2,
-};
-
-const PrepopulatedEngine yahoo_kr = {
-  L"\xc57c\xd6c4! \xcf54\xb9ac\xc544",
-  L"kr.yahoo.com",
-  "http://kr.search.yahoo.com/favicon.ico",
-  L"http://kr.search.yahoo.com/search?ei={inputEncoding}&fr=crmas&"
-      L"p={searchTerms}",
-  "UTF-8",
-  L"http://kr.atc.search.yahoo.com/atcx.php?property=main&ot=fxjson&"
-     L"ei=utf8&eo=utf8&command={searchTerms}",
-  NULL,
-  SEARCH_ENGINE_YAHOO,
-  IDR_SEARCH_ENGINE_LOGO_YAHOO,
-  2,
-};
-
-const PrepopulatedEngine yahoo_malaysia = {
-  L"Yahoo! Malaysia",
-  L"malaysia.yahoo.com",
-  "http://malaysia.search.yahoo.com/favicon.ico",
-  L"http://malaysia.search.yahoo.com/search?ei={inputEncoding}&fr=crmas&"
-      L"p={searchTerms}",
-  "UTF-8",
-  L"http://my-sayt.ff.search.yahoo.com/gossip-my-sayt?output=fxjson&"
-      L"command={searchTerms}",
-  NULL,
-  SEARCH_ENGINE_YAHOO,
-  IDR_SEARCH_ENGINE_LOGO_YAHOO,
-  2,
-};
-
-const PrepopulatedEngine yahoo_mx = {
-  L"Yahoo! M\x00e9xico",
-  L"mx.yahoo.com",
-  "http://mx.search.yahoo.com/favicon.ico",
-  L"http://mx.search.yahoo.com/search?ei={inputEncoding}&fr=crmas&"
-      L"p={searchTerms}",
-  "UTF-8",
-  L"http://gossip.mx.yahoo.com/gossip-mx-sayt?output=fxjsonp&"
-      L"command={searchTerms}",
-  NULL,
-  SEARCH_ENGINE_YAHOO,
-  IDR_SEARCH_ENGINE_LOGO_YAHOO,
-  2,
-};
-
-const PrepopulatedEngine yahoo_nl = {
-  L"Yahoo! Nederland",
-  L"nl.yahoo.com",
-  "http://nl.search.yahoo.com/favicon.ico",
-  L"http://nl.search.yahoo.com/search?ei={inputEncoding}&fr=crmas&"
-      L"p={searchTerms}",
-  "UTF-8",
-  NULL,
-  NULL,
-  SEARCH_ENGINE_YAHOO,
-  IDR_SEARCH_ENGINE_LOGO_YAHOO,
-  2,
-};
-
-const PrepopulatedEngine yahoo_no = {
-  L"Yahoo! Norge",
-  L"no.yahoo.com",
-  "http://no.search.yahoo.com/favicon.ico",
-  L"http://no.search.yahoo.com/search?ei={inputEncoding}&fr=crmas&"
-      L"p={searchTerms}",
-  "UTF-8",
-  NULL,
-  NULL,
-  SEARCH_ENGINE_YAHOO,
-  IDR_SEARCH_ENGINE_LOGO_YAHOO,
-  2,
-};
-
-const PrepopulatedEngine yahoo_nz = {
-  L"Yahoo!Xtra",
-  L"nz.yahoo.com",
-  "http://nz.search.yahoo.com/favicon.ico",
-  L"http://nz.search.yahoo.com/search?ei={inputEncoding}&fr=crmas&"
-      L"p={searchTerms}",
-  "UTF-8",
-  L"http://aue-sayt.ff.search.yahoo.com/gossip-nz-sayt?output=fxjson&"
-      L"command={searchTerms}",
-  NULL,
-  SEARCH_ENGINE_YAHOO,
-  IDR_SEARCH_ENGINE_LOGO_YAHOO,
-  2,
-};
-
-const PrepopulatedEngine yahoo_pe = {
-  L"Yahoo! Per\x00fa",
-  L"pe.yahoo.com",
-  "http://pe.search.yahoo.com/favicon.ico",
-  L"http://pe.search.yahoo.com/search?ei={inputEncoding}&fr=crmas&"
-      L"p={searchTerms}",
-  "UTF-8",
-  L"http://gossip.telemundo.yahoo.com/gossip-e1-sayt?output=fxjson&"
-      L"command={searchTerms}",
-  NULL,
-  SEARCH_ENGINE_YAHOO,
-  IDR_SEARCH_ENGINE_LOGO_YAHOO,
-  2,
-};
-
-const PrepopulatedEngine yahoo_ph = {
-  L"Yahoo! Philippines",
-  L"ph.yahoo.com",
-  "http://ph.search.yahoo.com/favicon.ico",
-  L"http://ph.search.yahoo.com/search?ei={inputEncoding}&fr=crmas&"
-      L"p={searchTerms}",
-  "UTF-8",
-  L"http://ph-sayt.ff.search.yahoo.com/gossip-ph-sayt?output=fxjson&"
-      L"command={searchTerms}",
-  NULL,
-  SEARCH_ENGINE_YAHOO,
-  IDR_SEARCH_ENGINE_LOGO_YAHOO,
-  2,
-};
-
-const PrepopulatedEngine yahoo_qc = {
-  L"Yahoo! Qu" L"\x00e9" L"bec",
-  L"qc.yahoo.com",
-  "http://qc.search.yahoo.com/favicon.ico",
-  L"http://qc.search.yahoo.com/search?ei={inputEncoding}&fr=crmas&"
-      L"p={searchTerms}",
-  "UTF-8",
-  NULL,
-  NULL,
-  SEARCH_ENGINE_YAHOOQC,
-  IDR_SEARCH_ENGINE_LOGO_YAHOOQC,
-  5,  // Can't be 2 as this has to appear in the Canada list alongside yahoo_ca.
-};
-
-const PrepopulatedEngine yahoo_ru = {
-  L"Yahoo! \x043f\x043e-\x0440\x0443\x0441\x0441\x043a\x0438",
-  L"ru.yahoo.com",
-  "http://ru.search.yahoo.com/favicon.ico",
-  L"http://ru.search.yahoo.com/search?ei={inputEncoding}&fr=crmas&"
-      L"p={searchTerms}",
-  "UTF-8",
-  NULL,
-  NULL,
-  SEARCH_ENGINE_YAHOO,
-  IDR_SEARCH_ENGINE_LOGO_YAHOO,
-  2,
-};
-
-const PrepopulatedEngine yahoo_se = {
-  L"Yahoo! Sverige",
-  L"se.yahoo.com",
-  "http://se.search.yahoo.com/favicon.ico",
-  L"http://se.search.yahoo.com/search?ei={inputEncoding}&fr=crmas&"
-      L"p={searchTerms}",
-  "UTF-8",
-  NULL,
-  NULL,
-  SEARCH_ENGINE_YAHOO,
-  IDR_SEARCH_ENGINE_LOGO_YAHOO,
-  2,
-};
-
-const PrepopulatedEngine yahoo_sg = {
-  L"Yahoo! Singapore",
-  L"sg.yahoo.com",
-  "http://sg.search.yahoo.com/favicon.ico",
-  L"http://sg.search.yahoo.com/search?ei={inputEncoding}&fr=crmas&"
-      L"p={searchTerms}",
-  "UTF-8",
-  L"http://sg-sayt.ff.search.yahoo.com/gossip-sg-sayt?output=fxjson&"
-      L"command={searchTerms}",
-  NULL,
-  SEARCH_ENGINE_YAHOO,
-  IDR_SEARCH_ENGINE_LOGO_YAHOO,
-  2,
-};
-
-const PrepopulatedEngine yahoo_th = {
-  L"Yahoo! \x0e1b\x0e23\x0e30\x0e40\x0e17\x0e28\x0e44\x0e17\x0e22",
-  L"th.yahoo.com",
-  "http://th.search.yahoo.com/favicon.ico",
-  L"http://th.search.yahoo.com/search?ei={inputEncoding}&fr=crmas&"
-      L"p={searchTerms}",
-  "UTF-8",
-  L"http://th-sayt.ff.search.yahoo.com/gossip-th-sayt?output=fxjson&"
-      L"command={searchTerms}",
-  NULL,
-  SEARCH_ENGINE_YAHOO,
-  IDR_SEARCH_ENGINE_LOGO_YAHOO,
-  2,
-};
-
-const PrepopulatedEngine yahoo_tw = {
-  L"Yahoo!\x5947\x6469",
-  L"tw.yahoo.com",
-  "http://tw.search.yahoo.com/favicon.ico",
-  L"http://tw.search.yahoo.com/search?ei={inputEncoding}&fr=crmas&"
-      L"p={searchTerms}",
-  "UTF-8",
-  // "http://tw.yahoo.com/ac/ac_search.php?eo=utf8&of=js&prop=web&query="
-  // returns a JSON file prepended with 'fxsearch=('.
-  NULL,
-  NULL,
-  SEARCH_ENGINE_YAHOO,
-  IDR_SEARCH_ENGINE_LOGO_YAHOO,
-  2,
-};
-
-const PrepopulatedEngine yahoo_uk = {
-  L"Yahoo! UK & Ireland",
-  L"uk.yahoo.com",
-  "http://uk.search.yahoo.com/favicon.ico",
-  L"http://uk.search.yahoo.com/search?ei={inputEncoding}&fr=crmas&"
-      L"p={searchTerms}",
-  "UTF-8",
-  L"http://uk-sayt.ff.search.yahoo.com/gossip-uk-sayt?output=fxjson&"
-      L"command={searchTerms}",
-  NULL,
-  SEARCH_ENGINE_YAHOO,
-  IDR_SEARCH_ENGINE_LOGO_YAHOO,
-  2,
-};
-
-const PrepopulatedEngine yahoo_ve = {
-  L"Yahoo! Venezuela",
-  L"ve.yahoo.com",
-  "http://ve.search.yahoo.com/favicon.ico",
-  L"http://ve.search.yahoo.com/search?ei={inputEncoding}&fr=crmas&"
-      L"p={searchTerms}",
-  "UTF-8",
-  L"http://gossip.telemundo.yahoo.com/gossip-e1-sayt?output=fxjson&"
-      L"command={searchTerms}",
-  NULL,
-  SEARCH_ENGINE_YAHOO,
-  IDR_SEARCH_ENGINE_LOGO_YAHOO,
-  2,
-};
-
-const PrepopulatedEngine yahoo_vn = {
-  L"Yahoo! Vi\x1ec7t Nam",
-  L"vn.yahoo.com",
-  "http://vn.search.yahoo.com/favicon.ico",
-  L"http://vn.search.yahoo.com/search?ei={inputEncoding}&fr=crmas&"
-      L"p={searchTerms}",
-  "UTF-8",
-  L"http://vn-sayt.ff.search.yahoo.com/gossip-vn-sayt?output=fxjson&"
-      L"command={searchTerms}",
-  NULL,
-  SEARCH_ENGINE_YAHOO,
-  IDR_SEARCH_ENGINE_LOGO_YAHOO,
-  2,
-};
-
-const PrepopulatedEngine yamli = {
-  L"Yamli",
-  L"yamli.com",
-  "http://www.yamli.com/favicon.ico",
-  L"http://www.yamli.com/#q={searchTerms}",
-  "UTF-8",
-  NULL,
-  NULL,
-  SEARCH_ENGINE_OTHER,
-  kNoSearchEngineLogo,
-  11,
-};
-
-const PrepopulatedEngine yandex_ru = {
-  L"\x042f\x043d\x0434\x0435\x043a\x0441",
-  L"yandex.ru",
-  "http://yandex.ru/favicon.ico",
-  L"http://yandex.ru/yandsearch?text={searchTerms}",
-  "UTF-8",
-  L"http://suggest.yandex.net/suggest-ff.cgi?part={searchTerms}",
-  NULL,
-  SEARCH_ENGINE_YANDEX,
-  IDR_SEARCH_ENGINE_LOGO_YANDEX,
-  15,
-};
-
-const PrepopulatedEngine yandex_ua = {
-  L"\x042f\x043d\x0434\x0435\x043a\x0441",
-  L"yandex.ua",
-  "http://yandex.ua/favicon.ico",
-  L"http://yandex.ua/yandsearch?text={searchTerms}",
-  "UTF-8",
-  L"http://suggest.yandex.net/suggest-ff.cgi?part={searchTerms}",
-  NULL,
-  SEARCH_ENGINE_YANDEX,
-  IDR_SEARCH_ENGINE_LOGO_YANDEX,
-  15,
-};
-
-const PrepopulatedEngine zoznam = {
-  L"Zoznam",
-  L"zoznam.sk",
-  "http://zoznam.sk/favicon.ico",
-  L"http://zoznam.sk/hladaj.fcgi?s={searchTerms}",
-  "windows-1250",
-  NULL,
-  NULL,
-  SEARCH_ENGINE_ZOZNAM,
-  IDR_SEARCH_ENGINE_LOGO_ZOZNAM,
-  85,
-};
+namespace TemplateURLPrepopulateData {
+
+// NOTE: You should probably not change the data in this file without changing
+// |kCurrentDataVersion| in prepopulated_engines.json. See comments in
+// GetDataVersion() below!
 
 // Lists of engines per country ////////////////////////////////////////////////
 
@@ -2510,7 +248,7 @@ const PrepopulatedEngine* engines_IT[] =
 
 // Jamaica
 const PrepopulatedEngine* engines_JM[] =
-    { &google, &yahoo, &bing, &go, };
+    { &google, &yahoo, &bing, };
 
 // Jordan
 const PrepopulatedEngine* engines_JO[] =
@@ -2666,7 +404,7 @@ const PrepopulatedEngine* engines_SA[] =
 
 // Sweden
 const PrepopulatedEngine* engines_SE[] =
-    { &google, &bing_sv_SE, &yahoo_se, &altavista_se, &spray, &eniro_se };
+    { &google, &bing_sv_SE, &yahoo_se, &altavista_se, &eniro_se };
 
 // Singapore
 const PrepopulatedEngine* engines_SG[] =
@@ -2747,7 +485,8 @@ const PrepopulatedEngine* engines_ZW[] =
 
 // A list of all the engines that we know about.
 const PrepopulatedEngine* kAllEngines[] =
-    { &abcsok, &altavista, &altavista_ar, &altavista_se, &aol, &araby, &ask,
+    { // Prepopulated engines:
+      &abcsok, &altavista, &altavista_ar, &altavista_se, &aol, &araby, &ask,
       &ask_de, &ask_es, &ask_it, &ask_nl, &ask_uk, &atlas_cz, &atlas_sk, &baidu,
       &bing, &bing_ar_XA, &bing_bg_BG, &bing_cs_CZ, &bing_da_DK, &bing_de_AT,
       &bing_de_CH, &bing_de_DE, &bing_el_GR, &bing_en_AU, &bing_en_CA,
@@ -2761,19 +500,22 @@ const PrepopulatedEngine* kAllEngines[] =
       &bing_pt_PT, &bing_ro_RO, &bing_ru_RU, &bing_sl_SI, &bing_sk_SK,
       &bing_sv_SE, &bing_th_TH, &bing_tr_TR, &bing_uk_UA, &bing_zh_CN,
       &bing_zh_HK, &bing_zh_TW, &centrum_cz, &centrum_sk, &daum, &delfi_lt,
-      &delfi_lv, &diri, &eniro_fi, &eniro_se, &fonecta_02_fi, &go, &goo,
-      &google, &guruji, &hispavista, &in, &jabse, &jubii, &kvasir, &latne,
-      &leit, &libero, &mail_ru, &maktoob, &masrawy, &mynet, &najdi, &nate,
-      &naver, &neti, &netsprint, &nur_kz, &ok, &onet, &pogodak_rs, &rambler,
-      &rediff, &rednano, &sanook, &sapo, &search_de_CH, &search_fr_CH, &seznam,
-      &spray, &terra_ar, &terra_es, &tut, &uol, &virgilio, &walla, &wp, &yahoo,
+      &delfi_lv, &diri, &eniro_fi, &eniro_se, &fonecta_02_fi, &goo, &google,
+      &guruji, &hispavista, &in, &jabse, &jubii, &kvasir, &latne, &leit,
+      &libero, &mail_ru, &maktoob, &masrawy, &mynet, &najdi, &nate, &naver,
+      &neti, &netsprint, &nur_kz, &ok, &onet, &pogodak_rs, &rambler, &rediff,
+      &rednano, &sanook, &sapo, &search_de_CH, &search_fr_CH, &seznam,
+      &terra_ar, &terra_es, &tut, &uol, &virgilio, &walla, &wp, &yahoo,
       &yahoo_ar, &yahoo_at, &yahoo_au, &yahoo_br, &yahoo_ca, &yahoo_ch,
       &yahoo_cl, &yahoo_cn, &yahoo_co, &yahoo_de, &yahoo_dk, &yahoo_es,
       &yahoo_fi, &yahoo_fr, &yahoo_hk, &yahoo_id, &yahoo_in, &yahoo_it,
       &yahoo_jp, &yahoo_kr, &yahoo_malaysia, &yahoo_mx, &yahoo_nl, &yahoo_no,
       &yahoo_nz, &yahoo_pe, &yahoo_ph, &yahoo_qc, &yahoo_ru, &yahoo_se,
       &yahoo_sg, &yahoo_th, &yahoo_tw, &yahoo_uk, &yahoo_ve, &yahoo_vn, &yamli,
-      &yandex_ru, &yandex_ua, &zoznam };
+      &yandex_ru, &yandex_ua, &zoznam,
+      // UMA-only engines:
+      &all_by, &aport, &avg, &avg_i, &conduit, &icq, &meta_ua, &metabot_ru,
+      &nigma, &qip, &ukr_net, &webalta, &yandex_tr };
 
 
 // Geographic mappings /////////////////////////////////////////////////////////
@@ -2891,12 +633,21 @@ int GetCurrentCountryID() {
 
 #elif defined(OS_ANDROID)
 
+// Initialized by InitCountryCode().
+int g_country_code_at_install = kCountryIDUnknown;
+
 int GetCurrentCountryID() {
-  if (browser_defaults::kCountryCodeAtInstall != "")
-    return CountryCharsToCountryIDWithUpdate(
-        browser_defaults::kCountryCodeAtInstall[0],
-        browser_defaults::kCountryCodeAtInstall[1]);
-    return kCountryIDUnknown;
+  return g_country_code_at_install;
+}
+
+void InitCountryCode(const std::string& country_code) {
+  if (country_code.size() != 2) {
+    DLOG(ERROR) << "Invalid country code: " << country_code;
+    g_country_code_at_install = kCountryIDUnknown;
+  } else {
+    g_country_code_at_install =
+        CountryCharsToCountryIDWithUpdate(country_code[0], country_code[1]);
+  }
 }
 
 #elif defined(OS_POSIX)
@@ -2927,12 +678,6 @@ int GetCurrentCountryID() {
         base::ToUpperASCII(locale_str[begin + 1]));
   }
 
-  return kCountryIDUnknown;
-}
-#elif defined(OS_ANDROID)
-
-int GetCurrentCountryID() {
-  NOTIMPLEMENTED();
   return kCountryIDUnknown;
 }
 
@@ -3327,13 +1072,21 @@ void GetPrepopulationSetFromCountryID(PrefService* prefs,
   }
 }
 
-}  // namespace
 
-namespace TemplateURLPrepopulateData {
+// Logo URLs ///////////////////////////////////////////////////////////////////
 
-// The following id is for UMA stats only. Please update
-// kMaxPrepopulatedEngineID if it changes upwards.
-const int kMaxPrepopulatedEngineID = 101;
+struct LogoURLs {
+  const char* const logo_100_percent_url;
+  const char* const logo_200_percent_url;
+};
+
+const LogoURLs google_logos = {
+  "https://www.google.com/images/chrome_search/google_logo.png",
+  "https://www.google.com/images/chrome_search/google_logo_2x.png",
+};
+
+
+////////////////////////////////////////////////////////////////////////////////
 
 void RegisterUserPrefs(PrefService* prefs) {
   prefs->RegisterIntegerPref(prefs::kCountryIDAtInstall,
@@ -3351,155 +1104,133 @@ void RegisterUserPrefs(PrefService* prefs) {
 }
 
 int GetDataVersion(PrefService* prefs) {
-  // Increment this if you change the above data in ways that mean users with
-  // existing data should get a new version.
-  const int kCurrentDataVersion = 38;
-  if (!prefs)
-    return kCurrentDataVersion;
-  // If a version number exist in the preferences file, it overrides the
-  // version of the built-in data.
-  int version =
-    prefs->GetInteger(prefs::kSearchProviderOverridesVersion);
-  return (version >= 0) ? version : kCurrentDataVersion;
+  // Allow tests to override the local version.
+  return (prefs && prefs->HasPrefPath(prefs::kSearchProviderOverridesVersion)) ?
+      prefs->GetInteger(prefs::kSearchProviderOverridesVersion) :
+      kCurrentDataVersion;
 }
 
-TemplateURL* MakePrepopulatedTemplateURL(const wchar_t* name,
-                                         const wchar_t* keyword,
-                                         const wchar_t* search_url,
-                                         const char* favicon_url,
-                                         const wchar_t* suggest_url,
-                                         const wchar_t* instant_url,
-                                         const char* encoding,
-                                         SearchEngineType search_engine_type,
-                                         int logo_id,
+TemplateURL* MakePrepopulatedTemplateURL(Profile* profile,
+                                         const string16& name,
+                                         const string16& keyword,
+                                         const base::StringPiece& search_url,
+                                         const base::StringPiece& suggest_url,
+                                         const base::StringPiece& instant_url,
+                                         const ListValue& alternate_urls,
+                                         const base::StringPiece& favicon_url,
+                                         const base::StringPiece& encoding,
                                          int id) {
-  TemplateURL* new_turl = new TemplateURL();
-  new_turl->SetURL(WideToUTF8(search_url), 0, 0);
-  if (favicon_url)
-    new_turl->SetFaviconURL(GURL(favicon_url));
-  if (suggest_url)
-    new_turl->SetSuggestionsURL(WideToUTF8(suggest_url), 0, 0);
-  if (instant_url)
-    new_turl->SetInstantURL(WideToUTF8(instant_url), 0, 0);
-  new_turl->set_short_name(WideToUTF16Hack(name));
-  if (keyword == NULL)
-    new_turl->set_autogenerate_keyword(true);
-  else
-    new_turl->set_keyword(WideToUTF16Hack(keyword));
-  new_turl->set_show_in_default_list(true);
-  new_turl->set_safe_for_autoreplace(true);
-  new_turl->set_date_created(Time());
-  new_turl->set_last_modified(Time());
-  std::vector<std::string> turl_encodings;
-  turl_encodings.push_back(encoding);
-  new_turl->set_input_encodings(turl_encodings);
-  new_turl->set_search_engine_type(search_engine_type);
-  new_turl->set_logo_id(logo_id);
-  new_turl->SetPrepopulateId(id);
-  return new_turl;
+
+  TemplateURLData data;
+
+  data.short_name = name;
+  data.SetKeyword(keyword);
+  data.SetURL(search_url.as_string());
+  data.suggestions_url = suggest_url.as_string();
+  data.instant_url = instant_url.as_string();
+  for (size_t i = 0; i < alternate_urls.GetSize(); ++i) {
+    std::string alternate_url;
+    alternate_urls.GetString(i, &alternate_url);
+    DCHECK(!alternate_url.empty());
+    data.alternate_urls.push_back(alternate_url);
+  }
+  data.favicon_url = GURL(favicon_url.as_string());
+  data.show_in_default_list = true;
+  data.safe_for_autoreplace = true;
+  data.input_encodings.push_back(encoding.as_string());
+  data.date_created = base::Time();
+  data.last_modified = base::Time();
+  data.prepopulate_id = id;
+  return new TemplateURL(profile, data);
 }
 
-void GetPrepopulatedTemplateFromPrefs(PrefService* prefs,
+void GetPrepopulatedTemplateFromPrefs(Profile* profile,
                                       std::vector<TemplateURL*>* t_urls) {
-  if (!prefs)
+  if (!profile)
     return;
 
   const ListValue* list =
-      prefs->GetList(prefs::kSearchProviderOverrides);
+      profile->GetPrefs()->GetList(prefs::kSearchProviderOverrides);
   if (!list)
     return;
 
-  string16 name;
-  string16 keyword;
-  std::string search_url;
-  std::string suggest_url;
-  std::string instant_url;
-  std::string favicon_url;
-  std::string encoding;
-  int search_engine_type;
-  int logo_id;
-  int id;
-
   size_t num_engines = list->GetSize();
   for (size_t i = 0; i != num_engines; ++i) {
-    Value* val;
-    DictionaryValue* engine;
+    const DictionaryValue* engine;
+    string16 name;
+    string16 keyword;
+    std::string search_url;
+    std::string favicon_url;
+    std::string encoding;
+    int id;
+    // The following fields are required for each search engine configuration.
     if (list->GetDictionary(i, &engine) &&
-        engine->Get("name", &val) && val->GetAsString(&name) &&
-        engine->Get("keyword", &val) && val->GetAsString(&keyword) &&
-        engine->Get("search_url", &val) && val->GetAsString(&search_url) &&
-        engine->Get("suggest_url", &val) && val->GetAsString(&suggest_url) &&
-        engine->Get("instant_url", &val) && val->GetAsString(&instant_url) &&
-        engine->Get("favicon_url", &val) && val->GetAsString(&favicon_url) &&
-        engine->Get("encoding", &val) && val->GetAsString(&encoding) &&
-        engine->Get("search_engine_type", &val) && val->GetAsInteger(
-            &search_engine_type) &&
-        engine->Get("logo_id", &val) && val->GetAsInteger(&logo_id) &&
-        engine->Get("id", &val) && val->GetAsInteger(&id)) {
-      // These next fields are not allowed to be empty.
-      if (search_url.empty() || favicon_url.empty() || encoding.empty())
-        return;
-    } else {
-      // Got a parsing error. No big deal.
-      continue;
+        engine->GetString("name", &name) && !name.empty() &&
+        engine->GetString("keyword", &keyword) && !keyword.empty() &&
+        engine->GetString("search_url", &search_url) && !search_url.empty() &&
+        engine->GetString("favicon_url", &favicon_url) &&
+        !favicon_url.empty() &&
+        engine->GetString("encoding", &encoding) && !encoding.empty() &&
+        engine->GetInteger("id", &id)) {
+      // These fields are optional.
+      std::string suggest_url;
+      std::string instant_url;
+      ListValue empty_list;
+      const ListValue* alternate_urls = &empty_list;
+      engine->GetString("suggest_url", &suggest_url);
+      engine->GetString("instant_url", &instant_url);
+      engine->GetList("alternate_urls", &alternate_urls);
+      t_urls->push_back(MakePrepopulatedTemplateURL(profile, name, keyword,
+          search_url, suggest_url, instant_url, *alternate_urls, favicon_url,
+          encoding, id));
     }
-    // TODO(viettrungluu): convert |MakePrepopulatedTemplateURL()| and get rid
-    // of conversions.
-    t_urls->push_back(MakePrepopulatedTemplateURL(
-        UTF16ToWideHack(name).c_str(),
-        UTF16ToWideHack(keyword).c_str(),
-        UTF8ToWide(search_url).c_str(),
-        favicon_url.c_str(),
-        UTF8ToWide(suggest_url).c_str(),
-        UTF8ToWide(instant_url).c_str(),
-        encoding.c_str(),
-        static_cast<SearchEngineType>(search_engine_type),
-        logo_id,
-        id));
   }
 }
 
 // The caller owns the returned TemplateURL.
-TemplateURL* MakePrepopulateTemplateURLFromPrepopulateEngine(
+TemplateURL* MakePrepopulatedTemplateURLFromPrepopulateEngine(
+    Profile* profile,
     const PrepopulatedEngine& engine) {
-  return MakePrepopulatedTemplateURL(engine.name,
-                                     engine.keyword,
-                                     engine.search_url,
-                                     engine.favicon_url,
-                                     engine.suggest_url,
-                                     engine.instant_url,
-                                     engine.encoding,
-                                     engine.search_engine_type,
-                                     engine.logo_id,
-                                     engine.id);
+
+  ListValue alternate_urls;
+  if (engine.alternate_urls) {
+    for (size_t i = 0; i < engine.alternate_urls_size; ++i)
+      alternate_urls.AppendString(std::string(engine.alternate_urls[i]));
+  }
+
+  return MakePrepopulatedTemplateURL(profile, WideToUTF16(engine.name),
+      WideToUTF16(engine.keyword), engine.search_url, engine.suggest_url,
+      engine.instant_url, alternate_urls,
+      engine.favicon_url, engine.encoding, engine.id);
 }
 
-void GetPrepopulatedEngines(PrefService* prefs,
+void GetPrepopulatedEngines(Profile* profile,
                             std::vector<TemplateURL*>* t_urls,
                             size_t* default_search_provider_index) {
   // If there is a set of search engines in the preferences file, it overrides
   // the built-in set.
   *default_search_provider_index = 0;
-  GetPrepopulatedTemplateFromPrefs(prefs, t_urls);
+  GetPrepopulatedTemplateFromPrefs(profile, t_urls);
   if (!t_urls->empty())
     return;
 
   const PrepopulatedEngine** engines;
   size_t num_engines;
-  GetPrepopulationSetFromCountryID(prefs, &engines, &num_engines);
+  GetPrepopulationSetFromCountryID(profile ? profile->GetPrefs() : NULL,
+                                   &engines, &num_engines);
   for (size_t i = 0; i != num_engines; ++i) {
     t_urls->push_back(
-        MakePrepopulateTemplateURLFromPrepopulateEngine(*engines[i]));
+        MakePrepopulatedTemplateURLFromPrepopulateEngine(profile, *engines[i]));
   }
 }
 
-TemplateURL* GetPrepopulatedDefaultSearch(PrefService* prefs) {
+TemplateURL* GetPrepopulatedDefaultSearch(Profile* profile) {
   TemplateURL* default_search_provider = NULL;
   ScopedVector<TemplateURL> loaded_urls;
   size_t default_search_index;
   // This could be more efficient.  We are loading all the URLs to only keep
   // the first one.
-  GetPrepopulatedEngines(prefs, &loaded_urls.get(), &default_search_index);
+  GetPrepopulatedEngines(profile, &loaded_urls.get(), &default_search_index);
   if (default_search_index < loaded_urls.size()) {
     default_search_provider = loaded_urls[default_search_index];
     loaded_urls.weak_erase(loaded_urls.begin() + default_search_index);
@@ -3507,80 +1238,53 @@ TemplateURL* GetPrepopulatedDefaultSearch(PrefService* prefs) {
   return default_search_provider;
 }
 
-// Helper function for the templated function GetOriginForSearchURL.
-static const std::string& ToUTF8(const std::string& str) {
-  return str;
-}
+SearchEngineType GetEngineType(const std::string& url) {
+  // Restricted to UI thread because ReplaceSearchTerms() is so restricted.
+  using content::BrowserThread;
+  DCHECK(!BrowserThread::IsWellKnownThread(BrowserThread::UI) ||
+         BrowserThread::CurrentlyOn(BrowserThread::UI));
 
-// Helper function for the templated function GetOriginForSearchURL.
-static std::string ToUTF8(const wchar_t* str) {
-  return WideToUTF8(str);
-}
+  // We may get a valid URL, or we may get the Google prepopulate URL which
+  // can't be converted directly to a GURL.  To handle the latter, we first
+  // construct a TemplateURL from the provided |url|, then call
+  // ReplaceSearchTerms().  This should return a valid URL even when the input
+  // has Google base URLs.
+  TemplateURLData data;
+  data.SetURL(url);
+  TemplateURL turl(NULL, data);
+  GURL as_gurl(turl.url_ref().ReplaceSearchTerms(
+      TemplateURLRef::SearchTermsArgs(ASCIIToUTF16("x"))));
+  if (!as_gurl.is_valid())
+    return SEARCH_ENGINE_OTHER;
 
-template<typename STR>
-static GURL GetOriginForSearchURL(const STR& url_string) {
-  // It is much faster to parse the url without generating the search URL, so
-  // try that first.  If it fails, fallback to the slow method.
-  std::string url_utf8_string(ToUTF8(url_string));
-  GURL url(url_utf8_string);
-  if (!url.is_valid()) {
-    TemplateURL turl;
-    turl.SetURL(url_utf8_string, 0, 0);
+  // Check using origins, in order to more aggressively match search engine
+  // types for data imported from other browsers.
+  //
+  // First special-case Google, because the prepopulate URL for it will not
+  // convert to a GURL and thus won't have an origin.  Instead see if the
+  // incoming URL's host is "[*.]google.<TLD>".
+  if (google_util::IsGoogleHostname(as_gurl.host(),
+                                    google_util::DISALLOW_SUBDOMAIN))
+    return google.type;
 
-    UIThreadSearchTermsData search_terms_data;
-    url = TemplateURLService::GenerateSearchURLUsingTermsData(
-        &turl, search_terms_data);
-  }
-  return url.GetOrigin();
-}
-
-TemplateURL* GetEngineForOrigin(PrefService* prefs, const GURL& url_to_find) {
-  GURL origin_to_find = url_to_find.GetOrigin();
-
-  // Let's first try to find the url in the defaults. (In case the name
-  // of logo is different for the current locale versus others.)
-  ScopedVector<TemplateURL> loaded_urls;
-  size_t default_search_index;
-  GetPrepopulatedEngines(prefs, &loaded_urls.get(), &default_search_index);
-
-  UIThreadSearchTermsData search_terms_data;
-  for (std::vector<TemplateURL*>::iterator i = loaded_urls->begin();
-       i != loaded_urls->end(); ++i) {
-    TemplateURL* template_url = *i;
-    GURL engine_origin(GetOriginForSearchURL((*i)->url()->url()));
-    if (origin_to_find == engine_origin) {
-      loaded_urls.weak_erase(i);
-      return template_url;
-    }
-  }
-
-  // Let's try all of known engines now.
+  // Now check the rest of the prepopulate data.
+  GURL origin(as_gurl.GetOrigin());
   for (size_t i = 0; i < arraysize(kAllEngines); ++i) {
-    GURL engine_origin(GetOriginForSearchURL(kAllEngines[i]->search_url));
-    if (origin_to_find == engine_origin)
-      return MakePrepopulateTemplateURLFromPrepopulateEngine(*kAllEngines[i]);
+    GURL engine_url(kAllEngines[i]->search_url);
+    if (engine_url.is_valid() && (origin == engine_url.GetOrigin()))
+      return kAllEngines[i]->type;
   }
-  return NULL;
+
+  return SEARCH_ENGINE_OTHER;
 }
 
-int GetSearchEngineLogo(const GURL& url_to_find) {
-  GURL origin_to_find = url_to_find.GetOrigin();
-  for (size_t i = 0; i < arraysize(kAllEngines); ++i) {
-    std::string url_utf8_string(ToUTF8(kAllEngines[i]->search_url));
-    GURL url(url_utf8_string);
-    if (origin_to_find == url.GetOrigin())
-      return kAllEngines[i]->logo_id;
+GURL GetLogoURL(const TemplateURL& template_url, LogoSize size) {
+  if (GetEngineType(template_url.url()) == SEARCH_ENGINE_GOOGLE) {
+    return GURL((size == LOGO_200_PERCENT) ?
+                google_logos.logo_200_percent_url :
+                google_logos.logo_100_percent_url);
   }
-  return kNoSearchEngineLogo;
-}
-
-TemplateURL* FindPrepopulatedEngine(const std::string& search_url) {
-  GURL search_origin(GetOriginForSearchURL(search_url));
-  // First check if it is a Google URL. User may have a custom search provider
-  // with a hard-coded Google domain instead of {google:baseURL}.
-  if (google_util::IsGoogleHomePageUrl((search_origin.spec())))
-    return MakePrepopulateTemplateURLFromPrepopulateEngine(google);
-  return GetEngineForOrigin(NULL, search_origin);
+  return GURL();
 }
 
 }  // namespace TemplateURLPrepopulateData

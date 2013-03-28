@@ -1,18 +1,15 @@
-// Copyright (c) 2011 The Chromium Authors. All rights reserved.
+// Copyright (c) 2012 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
 #include "content/browser/browser_thread_impl.h"
 #include "content/browser/geolocation/gps_location_provider_linux.h"
-#include "content/browser/geolocation/libgps_wrapper_linux.h"
 #include "testing/gtest/include/gtest/gtest.h"
 
 #include "base/bind.h"
 
-using content::BrowserThread;
-using content::BrowserThreadImpl;
+namespace content {
 
-namespace {
 class MockLibGps : public LibGps {
  public:
   MockLibGps();
@@ -80,7 +77,7 @@ class GeolocationGpsProviderLinuxTests : public testing::Test {
 
 void CheckValidPosition(const Geoposition& expected,
                         const Geoposition& actual) {
-  EXPECT_TRUE(actual.IsValidFix());
+  EXPECT_TRUE(actual.Validate());
   EXPECT_DOUBLE_EQ(expected.latitude, actual.latitude);
   EXPECT_DOUBLE_EQ(expected.longitude, actual.longitude);
   EXPECT_DOUBLE_EQ(expected.accuracy, actual.accuracy);
@@ -123,8 +120,7 @@ TEST_F(GeolocationGpsProviderLinuxTests, NoLibGpsInstalled) {
   EXPECT_FALSE(ok);
   Geoposition position;
   provider_->GetPosition(&position);
-  EXPECT_TRUE(position.IsInitialized());
-  EXPECT_FALSE(position.IsValidFix());
+  EXPECT_FALSE(position.Validate());
   EXPECT_EQ(Geoposition::ERROR_CODE_POSITION_UNAVAILABLE, position.error_code);
 }
 
@@ -140,8 +136,7 @@ TEST_F(GeolocationGpsProviderLinuxTests, GetPosition) {
   EXPECT_EQ(0, MockLibGps::g_instance_->gps_read_calls_);
   Geoposition position;
   provider_->GetPosition(&position);
-  EXPECT_TRUE(position.IsInitialized());
-  EXPECT_FALSE(position.IsValidFix());
+  EXPECT_FALSE(position.Validate());
   EXPECT_EQ(Geoposition::ERROR_CODE_POSITION_UNAVAILABLE, position.error_code);
   MockLibGps::g_instance_->get_position_.error_code =
       Geoposition::ERROR_CODE_NONE;
@@ -150,7 +145,7 @@ TEST_F(GeolocationGpsProviderLinuxTests, GetPosition) {
   MockLibGps::g_instance_->get_position_.accuracy = 345;
   MockLibGps::g_instance_->get_position_.timestamp =
       base::Time::FromDoubleT(200);
-  EXPECT_TRUE(MockLibGps::g_instance_->get_position_.IsValidFix());
+  EXPECT_TRUE(MockLibGps::g_instance_->get_position_.Validate());
   MessageLoop::current()->Run();
   EXPECT_EQ(1, MockLibGps::g_instance_->get_position_calls_);
   EXPECT_EQ(1, MockLibGps::g_instance_->gps_open_calls_);
@@ -191,15 +186,16 @@ TEST_F(GeolocationGpsProviderLinuxTests, LibGpsReconnect) {
   MockLibGps::g_instance_->get_position_.accuracy = 345;
   MockLibGps::g_instance_->get_position_.timestamp =
       base::Time::FromDoubleT(200);
-  EXPECT_TRUE(MockLibGps::g_instance_->get_position_.IsValidFix());
+  EXPECT_TRUE(MockLibGps::g_instance_->get_position_.Validate());
   // This task makes gps_open() and LibGps::Start() to succeed after
   // 1500ms.
   MessageLoop::current()->PostDelayedTask(
-      FROM_HERE, base::Bind(&EnableGpsOpenCallback), 1500);
+      FROM_HERE,
+      base::Bind(&EnableGpsOpenCallback),
+      base::TimeDelta::FromMilliseconds(1500));
   MessageLoop::current()->Run();
   provider_->GetPosition(&position);
-  EXPECT_TRUE(position.IsInitialized());
-  EXPECT_TRUE(position.IsValidFix());
+  EXPECT_TRUE(position.Validate());
   // 3 gps_open() calls are expected (2 failures and 1 success)
   EXPECT_EQ(1, MockLibGps::g_instance_->get_position_calls_);
   EXPECT_EQ(3, MockLibGps::g_instance_->gps_open_calls_);
@@ -208,4 +204,4 @@ TEST_F(GeolocationGpsProviderLinuxTests, LibGpsReconnect) {
 
 #endif  // #if defined(OS_CHROMEOS)
 
-}  // namespace
+}  // namespace content

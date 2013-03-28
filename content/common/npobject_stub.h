@@ -1,4 +1,4 @@
-// Copyright (c) 2011 The Chromium Authors. All rights reserved.
+// Copyright (c) 2012 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 //
@@ -7,7 +7,6 @@
 
 #ifndef CONTENT_COMMON_NPOBJECT_STUB_H_
 #define CONTENT_COMMON_NPOBJECT_STUB_H_
-#pragma once
 
 #include <vector>
 
@@ -15,44 +14,47 @@
 #include "base/memory/weak_ptr.h"
 #include "content/common/npobject_base.h"
 #include "googleurl/src/gurl.h"
-#include "ipc/ipc_channel.h"
-#include "ui/gfx/native_widget_types.h"
+#include "ipc/ipc_listener.h"
+#include "ipc/ipc_sender.h"
 
+struct NPObject;
+
+namespace content {
 class NPChannelBase;
 struct NPIdentifier_Param;
-struct NPObject;
 struct NPVariant_Param;
 
 // This wraps an NPObject and converts IPC messages from NPObjectProxy to calls
 // to the object.  The results are marshalled back.  See npobject_proxy.h for
 // more information.
-class NPObjectStub : public IPC::Channel::Listener,
-                     public IPC::Message::Sender,
+class NPObjectStub : public IPC::Listener,
+                     public IPC::Sender,
                      public base::SupportsWeakPtr<NPObjectStub>,
                      public NPObjectBase {
  public:
   NPObjectStub(NPObject* npobject,
                NPChannelBase* channel,
                int route_id,
-               gfx::NativeViewId containing_window,
+               int render_view_id,
                const GURL& page_url);
   virtual ~NPObjectStub();
 
   // Schedules tear-down of this stub.  The underlying NPObject reference is
   // released, and further invokations form the IPC channel will fail once this
   // call has returned.  Deletion of the stub is deferred to the main loop, in
-  // case it is touched as the stack unwinds.
+  // case it is touched as the stack unwinds.  DeleteSoon() is safe to call
+  // more than once, until control returns to the main loop.
   void DeleteSoon();
 
-  // IPC::Message::Sender implementation:
+  // IPC::Sender implementation:
   virtual bool Send(IPC::Message* msg) OVERRIDE;
 
   // NPObjectBase implementation.
   virtual NPObject* GetUnderlyingNPObject() OVERRIDE;
-  virtual IPC::Channel::Listener* GetChannelListener() OVERRIDE;
+  virtual IPC::Listener* GetChannelListener() OVERRIDE;
 
  private:
-  // IPC::Channel::Listener implementation:
+  // IPC::Listener implementation:
   virtual bool OnMessageReceived(const IPC::Message& message) OVERRIDE;
   virtual void OnChannelError() OVERRIDE;
 
@@ -86,10 +88,12 @@ class NPObjectStub : public IPC::Channel::Listener,
   NPObject* npobject_;
   scoped_refptr<NPChannelBase> channel_;
   int route_id_;
-  gfx::NativeViewId containing_window_;
+  int render_view_id_;
 
   // The url of the main frame hosting the plugin.
   GURL page_url_;
 };
+
+}  // namespace content
 
 #endif  // CONTENT_COMMON_NPOBJECT_STUB_H_

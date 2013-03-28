@@ -1,4 +1,4 @@
-// Copyright (c) 2011 The Chromium Authors. All rights reserved.
+// Copyright (c) 2012 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -22,7 +22,7 @@ namespace webkit {
 namespace ppapi {
 
 PPB_Buffer_Impl::PPB_Buffer_Impl(PP_Instance instance)
-    : Resource(instance),
+    : Resource(::ppapi::OBJECT_IS_IMPL, instance),
       size_(0),
       map_count_(0) {
 }
@@ -32,10 +32,20 @@ PPB_Buffer_Impl::~PPB_Buffer_Impl() {
 
 // static
 PP_Resource PPB_Buffer_Impl::Create(PP_Instance instance, uint32_t size) {
+  scoped_refptr<PPB_Buffer_Impl> new_resource(CreateResource(instance, size));
+  if (new_resource)
+    return new_resource->GetReference();
+  return 0;
+}
+
+// static
+scoped_refptr<PPB_Buffer_Impl> PPB_Buffer_Impl::CreateResource(
+    PP_Instance instance,
+    uint32_t size) {
   scoped_refptr<PPB_Buffer_Impl> buffer(new PPB_Buffer_Impl(instance));
   if (!buffer->Init(size))
-    return 0;
-  return buffer->GetReference();
+    return scoped_refptr<PPB_Buffer_Impl>();
+  return buffer;
 }
 
 PPB_Buffer_Impl* PPB_Buffer_Impl::AsPPB_Buffer_Impl() {

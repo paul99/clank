@@ -13,11 +13,12 @@
 #include "ui/base/clipboard/clipboard.h"
 #include "ui/base/clipboard/scoped_clipboard_writer.h"
 #include "ui/base/range/range.h"
+#include "ui/base/text/utf16_indexing.h"
 #include "ui/gfx/canvas.h"
 #include "ui/gfx/font.h"
 #include "ui/gfx/render_text.h"
+#include "ui/gfx/text_constants.h"
 #include "ui/views/controls/textfield/textfield.h"
-#include "ui/views/views_delegate.h"
 
 namespace views {
 
@@ -280,7 +281,7 @@ TextfieldViewsModel::Delegate::~Delegate() {
 
 TextfieldViewsModel::TextfieldViewsModel(Delegate* delegate)
     : delegate_(delegate),
-      render_text_(gfx::RenderText::CreateRenderText()),
+      render_text_(gfx::RenderText::CreateInstance()),
       current_edit_(edit_history_.end()) {
 }
 
@@ -303,8 +304,9 @@ bool TextfieldViewsModel::SetText(const string16& text) {
     if (changed)  // No need to remember composition.
       Undo();
     size_t old_cursor = GetCursorPosition();
-    size_t new_cursor = old_cursor > text.length() ? text.length() : old_cursor;
-    SelectAll();
+    // SetText moves the cursor to the end.
+    size_t new_cursor = text.length();
+    SelectAll(false);
     // If there is a composition text, don't merge with previous edit.
     // Otherwise, force merge the edits.
     ExecuteAndRecordReplace(
@@ -345,7 +347,8 @@ bool TextfieldViewsModel::Delete() {
     size_t cursor_position = GetCursorPosition();
     size_t next_grapheme_index = render_text_->IndexOfAdjacentGrapheme(
         cursor_position, gfx::CURSOR_FORWARD);
-    ExecuteAndRecordDelete(cursor_position, next_grapheme_index, true);
+    ExecuteAndRecordDelete(ui::Range(cursor_position, next_grapheme_index),
+                           true);
     return true;
   }
   return false;
@@ -361,16 +364,19 @@ bool TextfieldViewsModel::Backspace() {
     DeleteSelection();
     return true;
   }
-  if (GetCursorPosition() > 0) {
-    size_t cursor_position = GetCursorPosition();
-    ExecuteAndRecordDelete(cursor_position, cursor_position - 1, true);
+  size_t cursor_position = GetCursorPosition();
+  if (cursor_position > 0) {
+    // Delete one code point, which may be two UTF-16 words.
+    size_t previous_char =
+        ui::UTF16OffsetToIndex(GetText(), cursor_position, -1);
+    ExecuteAndRecordDelete(ui::Range(cursor_position, previous_char), true);
     return true;
   }
   return false;
 }
 
 size_t TextfieldViewsModel::GetCursorPosition() const {
-  return render_text_->GetCursorPosition();
+  return render_text_->cursor_position();
 }
 
 void TextfieldViewsModel::MoveCursor(gfx::BreakType break_type,
@@ -381,20 +387,18 @@ void TextfieldViewsModel::MoveCursor(gfx::BreakType break_type,
   render_text_->MoveCursor(break_type, direction, select);
 }
 
-bool TextfieldViewsModel::MoveCursorTo(const gfx::SelectionModel& selection) {
+bool TextfieldViewsModel::MoveCursorTo(const gfx::SelectionModel& model) {
   if (HasCompositionText()) {
     ConfirmCompositionText();
     // ConfirmCompositionText() updates cursor position. Need to reflect it in
     // the SelectionModel parameter of MoveCursorTo().
-    if (render_text_->GetSelectionStart() != selection.selection_end())
-      return render_text_->SelectRange(ui::Range(
-          render_text_->GetSelectionStart(), selection.selection_end()));
-    gfx::SelectionModel sel(selection.selection_end(),
-                            selection.caret_pos(),
-                            selection.caret_placement());
-    return render_text_->MoveCursorTo(sel);
+    ui::Range range(render_text_->selection().start(), model.caret_pos());
+    if (!range.is_empty())
+      return render_text_->SelectRange(range);
+    return render_text_->MoveCursorTo(
+        gfx::SelectionModel(model.caret_pos(), model.caret_affinity()));
   }
-  return render_text_->MoveCursorTo(selection);
+  return render_text_->MoveCursorTo(model);
 }
 
 bool TextfieldViewsModel::MoveCursorTo(const gfx::Point& point, bool select) {
@@ -404,13 +408,8 @@ bool TextfieldViewsModel::MoveCursorTo(const gfx::Point& point, bool select) {
 }
 
 string16 TextfieldViewsModel::GetSelectedText() const {
-  return GetText().substr(render_text_->MinOfSelection(),
-      (render_text_->MaxOfSelection() - render_text_->MinOfSelection()));
-}
-
-void TextfieldViewsModel::GetSelectedRange(ui::Range* range) const {
-  range->set_start(render_text_->GetSelectionStart());
-  range->set_end(render_text_->GetCursorPosition());
+  return GetText().substr(render_text_->selection().GetMin(),
+                          render_text_->selection().length());
 }
 
 void TextfieldViewsModel::SelectRange(const ui::Range& range) {
@@ -429,10 +428,10 @@ void TextfieldViewsModel::SelectSelectionModel(const gfx::SelectionModel& sel) {
   render_text_->MoveCursorTo(sel);
 }
 
-void TextfieldViewsModel::SelectAll() {
+void TextfieldViewsModel::SelectAll(bool reversed) {
   if (HasCompositionText())
     ConfirmCompositionText();
-  render_text_->SelectAll();
+  render_text_->SelectAll(reversed);
 }
 
 void TextfieldViewsModel::SelectWord() {
@@ -498,16 +497,17 @@ bool TextfieldViewsModel::Redo() {
 }
 
 bool TextfieldViewsModel::Cut() {
-  if (!HasCompositionText() && HasSelection()) {
-    ui::ScopedClipboardWriter(views::ViewsDelegate::views_delegate
-        ->GetClipboard()).WriteText(GetSelectedText());
+  if (!HasCompositionText() && HasSelection() && !render_text_->obscured()) {
+    ui::ScopedClipboardWriter(
+        ui::Clipboard::GetForCurrentThread(),
+        ui::Clipboard::BUFFER_STANDARD).WriteText(GetSelectedText());
     // A trick to let undo/redo handle cursor correctly.
     // Undoing CUT moves the cursor to the end of the change rather
     // than beginning, unlike Delete/Backspace.
     // TODO(oshima): Change Delete/Backspace to use DeleteSelection,
     // update DeleteEdit and remove this trick.
-    render_text_->SelectRange(ui::Range(render_text_->GetCursorPosition(),
-                                        render_text_->GetSelectionStart()));
+    const ui::Range& selection = render_text_->selection();
+    render_text_->SelectRange(ui::Range(selection.end(), selection.start()));
     DeleteSelection();
     return true;
   }
@@ -515,9 +515,10 @@ bool TextfieldViewsModel::Cut() {
 }
 
 bool TextfieldViewsModel::Copy() {
-  if (!HasCompositionText() && HasSelection()) {
-    ui::ScopedClipboardWriter(views::ViewsDelegate::views_delegate
-        ->GetClipboard()).WriteText(GetSelectedText());
+  if (!HasCompositionText() && HasSelection() && !render_text_->obscured()) {
+    ui::ScopedClipboardWriter(
+        ui::Clipboard::GetForCurrentThread(),
+        ui::Clipboard::BUFFER_STANDARD).WriteText(GetSelectedText());
     return true;
   }
   return false;
@@ -525,7 +526,7 @@ bool TextfieldViewsModel::Copy() {
 
 bool TextfieldViewsModel::Paste() {
   string16 result;
-  views::ViewsDelegate::views_delegate->GetClipboard()
+  ui::Clipboard::GetForCurrentThread()
       ->ReadText(ui::Clipboard::BUFFER_STANDARD, &result);
   if (!result.empty()) {
     InsertTextInternal(result, false);
@@ -535,14 +536,13 @@ bool TextfieldViewsModel::Paste() {
 }
 
 bool TextfieldViewsModel::HasSelection() const {
-  return !render_text_->EmptySelection();
+  return !render_text_->selection().is_empty();
 }
 
 void TextfieldViewsModel::DeleteSelection() {
   DCHECK(!HasCompositionText());
   DCHECK(HasSelection());
-  ExecuteAndRecordDelete(render_text_->GetSelectionStart(),
-                         render_text_->GetCursorPosition(), false);
+  ExecuteAndRecordDelete(render_text_->selection(), false);
 }
 
 void TextfieldViewsModel::DeleteSelectionAndInsertTextAt(
@@ -657,19 +657,17 @@ void TextfieldViewsModel::ReplaceTextInternal(const string16& text,
     // with |text|. So, need to find the index of next grapheme first.
     size_t next =
         render_text_->IndexOfAdjacentGrapheme(cursor, gfx::CURSOR_FORWARD);
-    if (next == model.selection_end())
+    if (next == model.caret_pos())
       render_text_->MoveCursorTo(model);
     else
-      render_text_->SelectRange(ui::Range(next, model.selection_end()));
+      render_text_->SelectRange(ui::Range(next, model.caret_pos()));
   }
   // Edit history is recorded in InsertText.
   InsertTextInternal(text, mergeable);
 }
 
 void TextfieldViewsModel::ClearEditHistory() {
-  STLDeleteContainerPointers(edit_history_.begin(),
-                             edit_history_.end());
-  edit_history_.clear();
+  STLDeleteElements(&edit_history_);
   current_edit_ = edit_history_.end();
 }
 
@@ -686,13 +684,11 @@ void TextfieldViewsModel::ClearRedoHistory() {
   edit_history_.erase(delete_start, edit_history_.end());
 }
 
-void TextfieldViewsModel::ExecuteAndRecordDelete(size_t from,
-                                                 size_t to,
+void TextfieldViewsModel::ExecuteAndRecordDelete(ui::Range range,
                                                  bool mergeable) {
-  size_t old_text_start = std::min(from, to);
-  const string16 text = GetText().substr(old_text_start,
-      std::abs(static_cast<long>(from - to)));
-  bool backward = from > to;
+  size_t old_text_start = range.GetMin();
+  const string16 text = GetText().substr(old_text_start, range.length());
+  bool backward = range.is_reversed();
   Edit* edit = new DeleteEdit(mergeable, text, old_text_start, backward);
   bool delete_edit = AddOrMergeEditHistory(edit);
   edit->Redo(this);
@@ -702,7 +698,7 @@ void TextfieldViewsModel::ExecuteAndRecordDelete(size_t from,
 
 void TextfieldViewsModel::ExecuteAndRecordReplaceSelection(
     MergeType merge_type, const string16& new_text) {
-  size_t new_text_start = render_text_->MinOfSelection();
+  size_t new_text_start = render_text_->selection().GetMin();
   size_t new_cursor_pos = new_text_start + new_text.length();
   ExecuteAndRecordReplace(merge_type,
                           GetCursorPosition(),
@@ -716,9 +712,8 @@ void TextfieldViewsModel::ExecuteAndRecordReplace(MergeType merge_type,
                                                   size_t new_cursor_pos,
                                                   const string16& new_text,
                                                   size_t new_text_start) {
-  size_t old_text_start = render_text_->MinOfSelection();
-  bool backward =
-      render_text_->GetSelectionStart() > render_text_->GetCursorPosition();
+  size_t old_text_start = render_text_->selection().GetMin();
+  bool backward = render_text_->selection().is_reversed();
   Edit* edit = new ReplaceEdit(merge_type,
                                GetSelectedText(),
                                old_cursor_pos,

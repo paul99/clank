@@ -1,4 +1,4 @@
-// Copyright (c) 2011 The Chromium Authors. All rights reserved.
+// Copyright (c) 2012 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -102,6 +102,7 @@ const char WebApplicationInfo::kInvalidIconURL[] =
 
 WebApplicationInfo::WebApplicationInfo() {
   is_bookmark_app = false;
+  is_offline_enabled = false;
 }
 
 WebApplicationInfo::~WebApplicationInfo() {
@@ -216,8 +217,8 @@ bool ParseWebAppFromDefinitionFile(Value* definition_value,
   scoped_ptr<Value> schema(
       base::JSONReader::ReadAndReturnError(
           ResourceBundle::GetSharedInstance().GetRawDataResource(
-              IDR_WEB_APP_SCHEMA).as_string(),
-          false,  // disallow trailing comma
+              IDR_WEB_APP_SCHEMA),
+          base::JSON_PARSE_RFC,  // options
           &error_code,
           &error_message));
   DCHECK(schema.get())
@@ -313,6 +314,9 @@ bool ParseWebAppFromDefinitionFile(Value* definition_value,
       icons.push_back(icon);
     }
   }
+
+  // Parse if offline mode is enabled.
+  definition->GetBoolean("offline_enabled", &web_app->is_offline_enabled);
 
   CHECK(definition->GetString("name", &web_app->title));
   definition->GetString("description", &web_app->description);

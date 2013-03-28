@@ -1,21 +1,17 @@
-// Copyright (c) 2011 The Chromium Authors. All rights reserved.
+// Copyright (c) 2012 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
 #ifndef UI_VIEWS_LAYOUT_GRID_LAYOUT_H_
 #define UI_VIEWS_LAYOUT_GRID_LAYOUT_H_
-#pragma once
 
 #include <string>
 #include <vector>
 
 #include "base/compiler_specific.h"
+#include "ui/gfx/insets.h"
 #include "ui/views/layout/layout_manager.h"
 #include "ui/views/view.h"
-
-namespace gfx {
-class Insets;
-}
 
 // GridLayout is a LayoutManager that positions child Views in a grid. You
 // define the structure of the Grid first, then add the Views.
@@ -119,6 +115,9 @@ class VIEWS_EXPORT GridLayout : public LayoutManager {
   // the GridLayout is deleted.
   ColumnSet* AddColumnSet(int id);
 
+  // Returns the column set for the specified id, or NULL if one doesn't exist.
+  ColumnSet* GetColumnSet(int id);
+
   // Adds a padding row. Padding rows typically don't have any views, and
   // but are used to provide vertical white space between views.
   // Size specifies the height of the row.
@@ -183,6 +182,8 @@ class VIEWS_EXPORT GridLayout : public LayoutManager {
 
   virtual int GetPreferredHeightForWidth(View* host, int width) OVERRIDE;
 
+  void set_minimum_size(const gfx::Size& size) { minimum_size_ = size; }
+
  private:
   // As both Layout and GetPreferredSize need to do nearly the same thing,
   // they both call into this method. This sizes the Columns/Rows as
@@ -197,9 +198,6 @@ class VIEWS_EXPORT GridLayout : public LayoutManager {
   // This is called internally from AddView. It adds the ViewState to the
   // appropriate structures, and updates internal fields such as next_column_.
   void AddViewState(ViewState* view_state);
-
-  // Returns the column set for the specified id, or NULL if one doesn't exist.
-  ColumnSet* GetColumnSet(int id);
 
   // Adds the Row to rows_, as well as updating next_column_,
   // current_row_col_set ...
@@ -240,10 +238,7 @@ class VIEWS_EXPORT GridLayout : public LayoutManager {
   ColumnSet* current_row_col_set_;
 
   // Insets.
-  int top_inset_;
-  int bottom_inset_;
-  int left_inset_;
-  int right_inset_;
+  gfx::Insets insets_;
 
   // Set to true when adding a View.
   bool adding_view_;
@@ -256,6 +251,9 @@ class VIEWS_EXPORT GridLayout : public LayoutManager {
 
   // Rows.
   std::vector<Row*> rows_;
+
+  // Minimum preferred size.
+  gfx::Size minimum_size_;
 
   DISALLOW_COPY_AND_ASSIGN(GridLayout);
 };
@@ -301,7 +299,7 @@ class VIEWS_EXPORT ColumnSet {
   // ID of this ColumnSet.
   int id() const { return id_; }
 
-  int num_columns() { return static_cast<int>(columns_.size()); }
+  int num_columns() const { return static_cast<int>(columns_.size()); }
 
  private:
   friend class GridLayout;

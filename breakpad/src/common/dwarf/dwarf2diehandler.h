@@ -157,10 +157,12 @@
 #define COMMON_DWARF_DWARF2DIEHANDLER_H__
 
 #include <stack>
+#include <string>
 
 #include "common/dwarf/types.h"
 #include "common/dwarf/dwarf2enums.h"
 #include "common/dwarf/dwarf2reader.h"
+#include "common/using_std_string.h"
 
 namespace dwarf2reader {
 
@@ -208,7 +210,10 @@ class DIEHandler {
                                       uint64 len) { }
   virtual void ProcessAttributeString(enum DwarfAttribute attr,
                                       enum DwarfForm form,
-                                      const std::string& data) { }
+                                      const string& data) { }
+  virtual void ProcessAttributeSignature(enum DwarfAttribute attr,
+                                         enum DwarfForm form,
+                                         uint64 signture) { }
 
   // Once we have reported all the DIE's attributes' values, we call
   // this member function.  If it returns false, we skip all the DIE's
@@ -313,7 +318,11 @@ class DIEDispatcher: public Dwarf2Handler {
   void ProcessAttributeString(uint64 offset,
                               enum DwarfAttribute attr,
                               enum DwarfForm form,
-                              const std::string &data);
+                              const string &data);
+  void ProcessAttributeSignature(uint64 offset,
+                                 enum DwarfAttribute attr,
+                                 enum DwarfForm form,
+                                 uint64 signature);
   void EndDIE(uint64 offset);
 
  private:

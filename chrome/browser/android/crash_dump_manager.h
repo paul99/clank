@@ -2,14 +2,14 @@
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
-#ifndef CHROME_BROWSER_ANDROID_CRASH_DUMP_MANAGER_H
-#define CHROME_BROWSER_ANDROID_CRASH_DUMP_MANAGER_H
+#ifndef CHROME_BROWSER_ANDROID_CRASH_DUMP_MANAGER_H_
+#define CHROME_BROWSER_ANDROID_CRASH_DUMP_MANAGER_H_
 
 #include <map>
 
 #include "base/file_path.h"
-#include "base/memory/singleton.h"
 #include "base/platform_file.h"
+#include "base/process.h"
 #include "base/synchronization/lock.h"
 #include "content/public/browser/notification_observer.h"
 #include "content/public/browser/notification_registrar.h"
@@ -29,23 +29,26 @@ class RenderProcessHost;
 // processes and take the appropriate action when the render process terminates.
 class CrashDumpManager : public content::NotificationObserver {
  public:
-  // Should be created on the UI thread.
-  CrashDumpManager();
+  // This object is a singleton created and owned by the
+  // ChromeBrowserMainPartsAndroid.
+  static CrashDumpManager* GetInstance();
+
   virtual ~CrashDumpManager();
 
-  // Returns a file descriptor that the render process associated with |rph|
-  // should use to generate minidumps.
-  int CreateMinidumpFile();
+  // Returns a file descriptor that should be used to generate a minidump for
+  // the process |child_process_id|.
+  int CreateMinidumpFile(int child_process_id);
 
  private:
-  struct MinidumpInfo {
-    MinidumpInfo() : file(base::kInvalidPlatformFileValue) {}
-    base::PlatformFile file;
-    FilePath path;
-    int pid;
-  };
+  friend class ChromeBrowserMainPartsAndroid;
 
-  static void ProcessMinidump(const MinidumpInfo& minidump);
+  // Should be created on the UI thread.
+  CrashDumpManager();
+
+  typedef std::map<int, FilePath> ChildProcessIDToMinidumpPath;
+
+  static void ProcessMinidump(const FilePath& minidump_path,
+                              base::ProcessHandle pid);
 
   // NotificationObserver implementation:
   virtual void Observe(int type,
@@ -54,16 +57,14 @@ class CrashDumpManager : public content::NotificationObserver {
 
   content::NotificationRegistrar notification_registrar_;
 
-  typedef std::map<content::RenderProcessHost*, MinidumpInfo> RPHToMinidumpInfo;
-  RPHToMinidumpInfo rph_to_minidump_info_;
-
-  typedef std::map<base::PlatformFile, FilePath> FileToPath;
-  // This map should only be accessed with its lock aquired, as it is accessed
+  // This map should only be accessed with its lock aquired as it is accessed
   // from the PROCESS_LAUNCHER and UI threads.
-  FileToPath file_to_path_;
-  base::Lock file_to_path_lock_;
+  base::Lock child_process_id_to_minidump_path_lock_;
+  ChildProcessIDToMinidumpPath child_process_id_to_minidump_path_;
+
+  static CrashDumpManager* instance_;
 
   DISALLOW_COPY_AND_ASSIGN(CrashDumpManager);
 };
 
-#endif  // CHROME_BROWSER_ANDROID_CRASH_DUMP_MANAGER_H
+#endif  // CHROME_BROWSER_ANDROID_CRASH_DUMP_MANAGER_H_

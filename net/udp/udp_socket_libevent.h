@@ -1,17 +1,16 @@
-// Copyright (c) 2011 The Chromium Authors. All rights reserved.
+// Copyright (c) 2012 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
 #ifndef NET_UDP_UDP_SOCKET_LIBEVENT_H_
 #define NET_UDP_UDP_SOCKET_LIBEVENT_H_
-#pragma once
 
 #include "base/memory/ref_counted.h"
 #include "base/memory/scoped_ptr.h"
 #include "base/message_loop.h"
 #include "base/threading/non_thread_safe.h"
-#include "net/base/address_list_net_log_param.h"
 #include "net/base/completion_callback.h"
+#include "net/base/net_export.h"
 #include "net/base/rand_callback.h"
 #include "net/base/io_buffer.h"
 #include "net/base/ip_endpoint.h"
@@ -20,7 +19,7 @@
 
 namespace net {
 
-class UDPSocketLibevent : public base::NonThreadSafe {
+class NET_EXPORT UDPSocketLibevent : public base::NonThreadSafe {
  public:
   UDPSocketLibevent(DatagramSocket::BindType bind_type,
                     const RandIntCallback& rand_int_cb,
@@ -104,8 +103,23 @@ class UDPSocketLibevent : public base::NonThreadSafe {
 
   const BoundNetLog& NetLog() const { return net_log_; }
 
+  // Sets corresponding flags in |socket_options_| to allow the socket
+  // to share the local address to which the socket will be bound with
+  // other processes. Should be called before Bind().
+  void AllowAddressReuse();
+
+  // Sets corresponding flags in |socket_options_| to allow sending
+  // and receiving packets to and from broadcast addresses. Should be
+  // called before Bind().
+  void AllowBroadcast();
+
  private:
   static const int kInvalidSocket = -1;
+
+  enum SocketOptions {
+    SOCKET_OPTION_REUSE_ADDRESS = 1 << 0,
+    SOCKET_OPTION_BROADCAST     = 1 << 1
+  };
 
   class ReadWatcher : public MessageLoopForIO::Watcher {
    public:
@@ -113,10 +127,7 @@ class UDPSocketLibevent : public base::NonThreadSafe {
 
     // MessageLoopForIO::Watcher methods
 
-    virtual void OnFileCanReadWithoutBlocking(int /* fd */) OVERRIDE {
-      if (!socket_->read_callback_.is_null())
-        socket_->DidCompleteRead();
-    }
+    virtual void OnFileCanReadWithoutBlocking(int /* fd */) OVERRIDE;
 
     virtual void OnFileCanWriteWithoutBlocking(int /* fd */) OVERRIDE {}
 
@@ -134,10 +145,7 @@ class UDPSocketLibevent : public base::NonThreadSafe {
 
     virtual void OnFileCanReadWithoutBlocking(int /* fd */) OVERRIDE {}
 
-    virtual void OnFileCanWriteWithoutBlocking(int /* fd */) OVERRIDE {
-      if (!socket_->write_callback_.is_null())
-        socket_->DidCompleteWrite();
-    }
+    virtual void OnFileCanWriteWithoutBlocking(int /* fd */) OVERRIDE;
 
    private:
     UDPSocketLibevent* const socket_;
@@ -173,10 +181,17 @@ class UDPSocketLibevent : public base::NonThreadSafe {
   int InternalRecvFrom(IOBuffer* buf, int buf_len, IPEndPoint* address);
   int InternalSendTo(IOBuffer* buf, int buf_len, const IPEndPoint* address);
 
+  // Applies |socket_options_| to |socket_|. Should be called before
+  // Bind().
+  int SetSocketOptions();
   int DoBind(const IPEndPoint& address);
   int RandomBind(const IPEndPoint& address);
 
   int socket_;
+
+  // Bitwise-or'd combination of SocketOptions. Specifies the set of
+  // options that should be applied to |socket_| before Bind().
+  int socket_options_;
 
   // How to do source port binding, used only when UDPSocket is part of
   // UDPClientSocket, since UDPServerSocket provides Bind.

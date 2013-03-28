@@ -6,6 +6,8 @@
 #define PPAPI_CPP_RESOURCE_H_
 
 #include "ppapi/c/pp_resource.h"
+#include "ppapi/cpp/instance_handle.h"
+#include "ppapi/cpp/pass_ref.h"
 
 /// @file
 /// This file defines a <code>Resource</code> type representing data associated
@@ -15,7 +17,6 @@ namespace pp {
 /// A reference counted module resource.
 class Resource {
  public:
-
   /// The default constructor.
   Resource();
 
@@ -60,6 +61,10 @@ class Resource {
   /// resource.
   explicit Resource(PP_Resource resource);
 
+  /// Constructor used when a <code>PP_Resource</code> already has a ref count
+  /// assigned. Add additional refcount is not taken.
+  Resource(PassRef, PP_Resource resource);
+
   /// PassRefFromConstructor is called by derived class' constructors to
   /// initialize this <code>Resource</code> with a <code>PP_Resource</code>
   /// that has already had its reference count incremented by
@@ -84,6 +89,10 @@ class Resource {
 
 inline bool operator==(const pp::Resource& lhs, const pp::Resource& rhs) {
   return lhs.pp_resource() == rhs.pp_resource();
+}
+
+inline bool operator!=(const pp::Resource& lhs, const pp::Resource& rhs) {
+  return !(lhs == rhs);
 }
 
 #endif // PPAPI_CPP_RESOURCE_H_

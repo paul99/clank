@@ -1,16 +1,16 @@
-// Copyright (c) 2011 The Chromium Authors. All rights reserved.
+// Copyright (c) 2012 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
 #ifndef CONTENT_BROWSER_IN_PROCESS_WEBKIT_BROWSER_WEBKITPLATFORMSUPPORT_IMPL_H_
 #define CONTENT_BROWSER_IN_PROCESS_WEBKIT_BROWSER_WEBKITPLATFORMSUPPORT_IMPL_H_
-#pragma once
 
 #include "content/common/webkitplatformsupport_impl.h"
 #include "webkit/glue/webfileutilities_impl.h"
 
-class BrowserWebKitPlatformSupportImpl :
-    public content::WebKitPlatformSupportImpl {
+namespace content {
+
+class BrowserWebKitPlatformSupportImpl : public WebKitPlatformSupportImpl {
  public:
   BrowserWebKitPlatformSupportImpl();
   virtual ~BrowserWebKitPlatformSupportImpl();
@@ -38,26 +38,16 @@ class BrowserWebKitPlatformSupportImpl :
   virtual WebKit::WebSocketStreamHandle* createSocketStreamHandle();
   virtual void getPluginList(bool refresh, WebKit::WebPluginListBuilder*);
   virtual WebKit::WebData loadResource(const char* name);
-  virtual WebKit::WebStorageNamespace* createLocalStorageNamespace(
-      const WebKit::WebString& path, unsigned quota);
-  virtual void dispatchStorageEvent(const WebKit::WebString& key,
-      const WebKit::WebString& oldValue, const WebKit::WebString& newValue,
-      const WebKit::WebString& origin, const WebKit::WebURL& url,
-      bool isLocalStorage);
-  virtual WebKit::WebSharedWorkerRepository* sharedWorkerRepository();
   virtual int databaseDeleteFile(const WebKit::WebString& vfs_file_name,
                                  bool sync_dir);
-  virtual void createIDBKeysFromSerializedValuesAndKeyPath(
-      const WebKit::WebVector<WebKit::WebSerializedScriptValue>& values,
-      const WebKit::WebString& keyPath,
-      WebKit::WebVector<WebKit::WebIDBKey>& keys);
-  virtual WebKit::WebSerializedScriptValue injectIDBKeyIntoSerializedValue(
-      const WebKit::WebIDBKey& key,
-      const WebKit::WebSerializedScriptValue& value,
-      const WebKit::WebString& keyPath);
+
+ protected:
+  virtual GpuChannelHostFactory* GetGpuChannelHostFactory() OVERRIDE;
 
  private:
   webkit_glue::WebFileUtilitiesImpl file_utilities_;
 };
+
+}  // namespace content
 
 #endif  // CONTENT_BROWSER_IN_PROCESS_WEBKIT_BROWSER_WEBKITPLATFORMSUPPORT_IMPL_H_

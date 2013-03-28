@@ -1,4 +1,4 @@
-// Copyright (c) 2011 The Chromium Authors. All rights reserved.
+// Copyright (c) 2012 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -6,10 +6,66 @@
 
 // Multiply-included message file, hence no include guard.
 #include "base/shared_memory.h"
+#include "content/common/content_param_traits_macros.h"
 #include "content/public/common/common_param_traits.h"
 #include "content/public/common/resource_response.h"
 #include "ipc/ipc_message_macros.h"
-#include "net/base/upload_data.h"
+#include "webkit/glue/resource_request_body.h"
+
+#ifndef CONTENT_COMMON_RESOURCE_MESSAGES_H_
+#define CONTENT_COMMON_RESOURCE_MESSAGES_H_
+
+namespace webkit_glue {
+struct ResourceDevToolsInfo;
+struct ResourceLoadTimingInfo;
+}
+
+namespace IPC {
+
+template <>
+struct ParamTraits<scoped_refptr<net::HttpResponseHeaders> > {
+  typedef scoped_refptr<net::HttpResponseHeaders> param_type;
+  static void Write(Message* m, const param_type& p);
+  static bool Read(const Message* m, PickleIterator* iter, param_type* r);
+  static void Log(const param_type& p, std::string* l);
+};
+
+template <>
+struct CONTENT_EXPORT ParamTraits<webkit_base::DataElement> {
+  typedef webkit_base::DataElement param_type;
+  static void Write(Message* m, const param_type& p);
+  static bool Read(const Message* m, PickleIterator* iter, param_type* r);
+  static void Log(const param_type& p, std::string* l);
+};
+
+template <>
+struct ParamTraits<scoped_refptr<webkit_glue::ResourceDevToolsInfo> > {
+  typedef scoped_refptr<webkit_glue::ResourceDevToolsInfo> param_type;
+  static void Write(Message* m, const param_type& p);
+  static bool Read(const Message* m, PickleIterator* iter, param_type* r);
+  static void Log(const param_type& p, std::string* l);
+};
+
+template <>
+struct ParamTraits<webkit_glue::ResourceLoadTimingInfo> {
+  typedef webkit_glue::ResourceLoadTimingInfo param_type;
+  static void Write(Message* m, const param_type& p);
+  static bool Read(const Message* m, PickleIterator* iter, param_type* r);
+  static void Log(const param_type& p, std::string* l);
+};
+
+template <>
+struct ParamTraits<scoped_refptr<webkit_glue::ResourceRequestBody> > {
+  typedef scoped_refptr<webkit_glue::ResourceRequestBody> param_type;
+  static void Write(Message* m, const param_type& p);
+  static bool Read(const Message* m, PickleIterator* iter, param_type* r);
+  static void Log(const param_type& p, std::string* l);
+};
+
+}  // namespace IPC
+
+#endif  // CONTENT_COMMON_RESOURCE_MESSAGES_H_
+
 
 #define IPC_MESSAGE_START ResourceMsgStart
 #undef IPC_MESSAGE_EXPORT
@@ -17,7 +73,9 @@
 
 IPC_STRUCT_TRAITS_BEGIN(content::ResourceResponseHead)
   IPC_STRUCT_TRAITS_PARENT(webkit_glue::ResourceResponseInfo)
-  IPC_STRUCT_TRAITS_MEMBER(status)
+  IPC_STRUCT_TRAITS_MEMBER(error_code)
+  IPC_STRUCT_TRAITS_MEMBER(request_start)
+  IPC_STRUCT_TRAITS_MEMBER(response_start)
 IPC_STRUCT_TRAITS_END()
 
 IPC_STRUCT_TRAITS_BEGIN(content::SyncLoadResult)
@@ -46,6 +104,7 @@ IPC_STRUCT_TRAITS_BEGIN(webkit_glue::ResourceResponseInfo)
   IPC_STRUCT_TRAITS_MEMBER(was_npn_negotiated)
   IPC_STRUCT_TRAITS_MEMBER(was_alternate_protocol_available)
   IPC_STRUCT_TRAITS_MEMBER(was_fetched_via_proxy)
+  IPC_STRUCT_TRAITS_MEMBER(npn_negotiated_protocol)
   IPC_STRUCT_TRAITS_MEMBER(socket_address)
 IPC_STRUCT_TRAITS_END()
 
@@ -91,8 +150,9 @@ IPC_STRUCT_BEGIN(ResourceHostMsg_Request)
   // or kNoHostId.
   IPC_STRUCT_MEMBER(int, appcache_host_id)
 
-  // Optional upload data (may be null).
-  IPC_STRUCT_MEMBER(scoped_refptr<net::UploadData>, upload_data)
+  // Optional resource request body (may be null).
+  IPC_STRUCT_MEMBER(scoped_refptr<webkit_glue::ResourceRequestBody>,
+                    request_body)
 
   IPC_STRUCT_MEMBER(bool, download_to_file)
 
@@ -121,6 +181,9 @@ IPC_STRUCT_BEGIN(ResourceHostMsg_Request)
   // Unless this refers to a transferred navigation, these values are -1 and -1.
   IPC_STRUCT_MEMBER(int, transferred_request_child_id)
   IPC_STRUCT_MEMBER(int, transferred_request_request_id)
+
+  // Whether or not we should allow the URL to download.
+  IPC_STRUCT_MEMBER(bool, allow_download)
 IPC_STRUCT_END()
 
 // Resource messages sent from the browser to the renderer.
@@ -149,12 +212,26 @@ IPC_MESSAGE_ROUTED3(ResourceMsg_ReceivedRedirect,
                     GURL /* new_url */,
                     content::ResourceResponseHead)
 
-// Sent when some data from a resource request is ready. The handle should
-// already be mapped into the process that receives this message.
+// Sent to set the shared memory buffer to be used to transmit response data to
+// the renderer.  Subsequent DataReceived messages refer to byte ranges in the
+// shared memory buffer.  The shared memory buffer should be retained by the
+// renderer until the resource request completes.
+//
+// NOTE: The shared memory handle should already be mapped into the process
+// that receives this message.
+//
+IPC_MESSAGE_ROUTED3(ResourceMsg_SetDataBuffer,
+                    int /* request_id */,
+                    base::SharedMemoryHandle /* shm_handle */,
+                    int /* shm_size */)
+
+// Sent when some data from a resource request is ready.  The data offset and
+// length specify a byte range into the shared memory buffer provided by the
+// SetDataBuffer message.
 IPC_MESSAGE_ROUTED4(ResourceMsg_DataReceived,
                     int /* request_id */,
-                    base::SharedMemoryHandle /* data */,
-                    int /* data_len */,
+                    int /* data_offset */,
+                    int /* data_length */,
                     int /* encoded_data_length */)
 
 // Sent when some data from a resource request has been downloaded to
@@ -165,9 +242,10 @@ IPC_MESSAGE_ROUTED2(ResourceMsg_DataDownloaded,
                     int /* data_len */)
 
 // Sent when the request has been completed.
-IPC_MESSAGE_ROUTED4(ResourceMsg_RequestComplete,
+IPC_MESSAGE_ROUTED5(ResourceMsg_RequestComplete,
                     int /* request_id */,
-                    net::URLRequestStatus /* status */,
+                    int /* error_code */,
+                    bool /* was_ignored_by_handler */,
                     std::string /* security info */,
                     base::TimeTicks /* completion_time */)
 
@@ -181,13 +259,6 @@ IPC_MESSAGE_ROUTED2(ResourceHostMsg_RequestResource,
 // Cancels a resource request with the ID given as the parameter.
 IPC_MESSAGE_ROUTED1(ResourceHostMsg_CancelRequest,
                     int /* request_id */)
-
-// Sets a new routing id for the resource request with the ID given as the
-// parameter. This happens when a pending request is transferred to another
-// page.
-IPC_MESSAGE_CONTROL2(ResourceHostMsg_TransferRequestToNewPage,
-                     int /* new routing_id */,
-                     int /* request_id */)
 
 // Follows a redirect that occured for the resource request with the ID given
 // as the parameter.

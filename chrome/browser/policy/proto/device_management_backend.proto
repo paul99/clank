@@ -38,11 +38,11 @@ message DeviceRegisterRequest {
   // "Android", or "Chrome OS".
   optional string machine_model = 4;
 
-  // When true, indicates that the |machine_id| field should be known to the
-  // server. The server can do additional checks based on this information.
-  // This is currently used for requests triggered by auto-enrollment.
+  // When true, indicates that the |machine_id| has been identified as auto-
+  // enrollment candidate on the client and the server can use it to verify
+  // that the client is to be enrolled in the correct mode.
   // Defaults to false when not present.
-  optional bool known_machine_id = 5;
+  optional bool auto_enrolled = 5;
 }
 
 // Response from server to device register request.
@@ -56,6 +56,20 @@ message DeviceRegisterResponse {
   // the format of "Machine Model - Machine Id".  However, domain
   // admin can update it using CPanel, so do NOT treat it as constant.
   optional string machine_name = 2;
+
+  // Enum listing the possible modes the device should be locked into when the
+  // registration is finished.
+  enum DeviceMode {
+    // In ENTERPRISE mode the device has no local owner and device settings are
+    // controlled through the cloud policy infrastructure. Auto-enrollment is
+    // supported in that mode.
+    ENTERPRISE = 0;
+    // Devices in RETAIL mode also have no local owner and get their device
+    // settings from the cloud, but additionally this mode enables the demo
+    // account on the device.
+    RETAIL = 1;
+  }
+  optional DeviceMode enrollment_type = 3 [default = ENTERPRISE];
 }
 
 // Request from device to server to unregister device.
@@ -84,7 +98,7 @@ message PolicyFetchRequest {
   // Possible values for Chrome OS are:
   //   google/chromeos/device => ChromeDeviceSettingsProto
   //   google/chromeos/user => ChromeSettingsProto
-  //   google/chromeos/unregistered_user => ChromeInitialSettingsProto (unused)
+  //   google/chromeos/publicaccount => ChromeSettingsProto
   optional string policy_type = 1;
 
   // This is the last policy timestamp that client received from server.
@@ -109,6 +123,16 @@ message PolicyFetchRequest {
   // missing from the server, as indicated by the valid_serial_number_missing
   // field in the last policy fetch response.
   optional string machine_id = 5;
+
+  // This field is used for devices to send the additional ID to fetch settings.
+  // Retrieving some settings requires more than just device or user ID.
+  // For example, to retrieve public account, devices need to pass in
+  // public account ID in addition to device ID. To retrieve extension or
+  // plug-in settings, devices need to pass in extension/plug-in ID in
+  // addition to user ID.
+  // policy_type represents the type of settings (e.g. public account,
+  // extension) devices request to fetch.
+  optional string settings_entity_id = 6;
 }
 
 // This message is included in serialized form in PolicyFetchResponse
@@ -174,6 +198,10 @@ message PolicyData {
   // number with a device policy fetch request.  Note that this only
   // applies to device policy.
   optional bool valid_serial_number_missing = 10;
+
+  // Indicates which public account or extension/plug-in this policy data is
+  // for. See PolicyFetchRequest.settings_entity_id for more details.
+  optional string settings_entity_id = 11;
 }
 
 message PolicyFetchResponse {
@@ -229,6 +257,14 @@ message TimePeriod {
   optional int64 end_timestamp = 2;
 }
 
+message ActiveTimePeriod {
+  optional TimePeriod time_period = 1;
+
+  // The active duration during the above time period.
+  // The unit is milli-second.
+  optional int32 active_duration = 2;
+}
+
 // This captures launch events for one app/extension or other installments.
 message InstallableLaunch {
   optional string install_id = 1;
@@ -245,20 +281,68 @@ message InstallableLaunch {
   optional int64 total_count = 4;
 }
 
+// Used to report the device location.
+message DeviceLocation {
+  enum ErrorCode {
+    ERROR_CODE_NONE                 = 0;
+    ERROR_CODE_POSITION_UNAVAILABLE = 1;
+  }
+
+  // Latitude in decimal degrees north (WGS84 coordinate frame).
+  optional double latitude = 1;
+
+  // Longitude in decimal degrees west (WGS84 coordinate frame).
+  optional double longitude = 2;
+
+  // Altitude in meters (above WGS84 datum).
+  optional double altitude = 3;
+
+  // Accuracy of horizontal position in meters.
+  optional double accuracy = 4;
+
+  // Accuracy of altitude in meters.
+  optional double altitude_accuracy = 5;
+
+  // Heading in decimal degrees clockwise from true north.
+  optional double heading = 6;
+
+  // Horizontal component of device velocity in meters per second.
+  optional double speed = 7;
+
+  // Time of position measurement in milisecons since Epoch in UTC time.
+  optional int64 timestamp = 8;
+
+  // Error code, see enum above.
+  optional ErrorCode error_code = 9;
+
+  // Human-readable error message.
+  optional string error_message = 10;
+}
+
 // Report device level status.
 message DeviceStatusReportRequest {
+  // The OS version reported by the device is a platform version
+  // e.g. 1435.0.2011_12_16_1635.
   optional string os_version = 1;
   optional string firmware_version = 2;
 
-  // "Validated", "Dev". Same as verified mode.
+  // "Verified", "Dev". Same as verified mode.
   // If the mode is unknown, this field should not be set.
   optional string boot_mode = 3;
 
   // Device active times collection since last report rpc call.
-  repeated TimePeriod active_time = 4;
+  // No longer used -- use active_period instead.
+  repeated TimePeriod active_time = 4 [deprecated = true];
 
   // The browser version string as shown in the About dialog.
+  // e.g. 17.0.963.18.
   optional string browser_version = 5;
+
+  // A list of periods when the device was active, aggregated by day.
+  repeated ActiveTimePeriod active_period = 6;
+
+  // The device location.
+  optional DeviceLocation device_location = 7;
 }
 
 // Report session (a user on one device) level status.
@@ -341,19 +425,19 @@ message DeviceAutoEnrollmentResponse {
 // * Data mime type is application/x-protobuffer
 // * HTTP parameters are (all required, all case sensitive):
 //   * request: MUST BE one of
-//     * register
-//     * unregister
-//     * policy
-//     * ping
-//     * status
 //     * enterprise_check
+//     * ping
+//     * policy
+//     * register
+//     * status
+//     * unregister
 //
 //   * devicetype: MUST BE "1" for Android or "2" for Chrome OS.
 //   * apptype: MUST BE Android or Chrome.
 //   * deviceid: MUST BE no more than 64-char in [\x21-\x7E].
 //   * agent: MUST BE no more than 64-char long.
 // * HTTP Authorization header MUST be in the following formats:
-//   * For register and ping requests, using Gaia authentication:
+//   * For register and ping requests
 //     Authorization: GoogleLogin auth=<auth cookie for Mobile Sync>
 //
 //   * For unregister, policy and status requests:
@@ -401,7 +485,7 @@ message DeviceManagementRequest {
 // 401 Unauthorized: invalid auth cookie or DM token.
 // 403 Forbidden: device management is not allowed.
 // 404 Not Found: the request URL is invalid.
-// 410 Gone: device is unknown to the server.
+// 410 Device Not Found: the device id is not found.
 // 491 Request Pending: the request is pending approval.
 // 500 Internal Server Error: most likely a bug in DM server.
 // 503 Service Unavailable: most likely a backend error.

@@ -2,10 +2,10 @@
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
-cr.define('ntp4', function() {
+cr.define('ntp', function() {
   'use strict';
 
-  var TilePage = ntp4.TilePage;
+  var TilePage = ntp.TilePage;
 
   /**
    * A counter for generating unique tile IDs.
@@ -63,7 +63,7 @@ cr.define('ntp4', function() {
           '<span class="title"></span>';
 
       this.querySelector('.close-button').title =
-          templateData.removethumbnailtooltip;
+          loadTimeData.getString('removethumbnailtooltip');
 
       this.tabIndex = -1;
       this.data_ = null;
@@ -94,7 +94,7 @@ cr.define('ntp4', function() {
       this.classList.add('focusable');
 
       var faviconDiv = this.querySelector('.favicon');
-      var faviconUrl = 'chrome://favicon/size/16/' + data.url;
+      var faviconUrl = getFaviconURL(data.url);
       faviconDiv.style.backgroundImage = url(faviconUrl);
       chrome.send('getFaviconDominantColor', [faviconUrl, this.id]);
 
@@ -131,16 +131,19 @@ cr.define('ntp4', function() {
         this.blacklist_();
         e.preventDefault();
       } else {
+        ntp.logTimeToClick('MostVisited');
         // Records an app launch from the most visited page (Chrome will decide
         // whether the url is an app). TODO(estade): this only works for clicks;
         // other actions like "open in new tab" from the context menu won't be
         // recorded. Can this be fixed?
         chrome.send('recordAppLaunchByURL',
                     [encodeURIComponent(this.href),
-                     ntp4.APP_LAUNCH.NTP_MOST_VISITED]);
+                     ntp.APP_LAUNCH.NTP_MOST_VISITED]);
         // Records the index of this tile.
         chrome.send('metricsHandler:recordInHistogram',
-                    ['NTP_MostVisited', this.index, 8]);
+                    ['NewTabPage.MostVisited', this.index, 8]);
+        chrome.send('mostVisitedAction',
+                    [ntp.NtpFollowAction.CLICKED_TILE]);
       }
     },
 
@@ -168,25 +171,26 @@ cr.define('ntp4', function() {
     showUndoNotification_: function() {
       var data = this.data_;
       var self = this;
-      var doUndo = function () {
+      var doUndo = function() {
         chrome.send('removeURLsFromMostVisitedBlacklist', [data.url]);
         self.updateForData(data);
       }
 
       var undo = {
         action: doUndo,
-        text: templateData.undothumbnailremove,
-      }
+        text: loadTimeData.getString('undothumbnailremove'),
+      };
 
       var undoAll = {
         action: function() {
-          chrome.send('clearMostVisitedURLsBlacklist', []);
+          chrome.send('clearMostVisitedURLsBlacklist');
         },
-        text: templateData.restoreThumbnailsShort,
-      }
+        text: loadTimeData.getString('restoreThumbnailsShort'),
+      };
 
-      ntp4.showNotification(templateData.thumbnailremovednotification,
-                            [undo, undoAll]);
+      ntp.showNotification(
+          loadTimeData.getString('thumbnailremovednotification'),
+          [undo, undoAll]);
     },
 
     /**
@@ -197,12 +201,12 @@ cr.define('ntp4', function() {
      *     animate.
      */
     setBounds: function(size, x, y) {
-      this.style.width = size + 'px';
-      this.style.height = heightForWidth(size) + 'px';
+      this.style.width = toCssPx(size);
+      this.style.height = toCssPx(heightForWidth(size));
 
-      this.style.left = x + 'px';
-      this.style.right = x + 'px';
-      this.style.top = y + 'px';
+      this.style.left = toCssPx(x);
+      this.style.right = toCssPx(x);
+      this.style.top = toCssPx(y);
     },
 
     /**
@@ -289,6 +293,9 @@ cr.define('ntp4', function() {
       this.classList.add('most-visited-page');
       this.data_ = null;
       this.mostVisitedTiles_ = this.getElementsByClassName('most-visited real');
+
+      this.addEventListener('carddeselected', this.handleCardDeselected_);
+      this.addEventListener('cardselected', this.handleCardSelected_);
     },
 
     /**
@@ -317,6 +324,28 @@ cr.define('ntp4', function() {
     },
 
     /**
+     * Handles the 'card deselected' event (i.e. the user clicked to another
+     * pane).
+     * @param {Event} e The CardChanged event.
+     */
+    handleCardDeselected_: function(e) {
+      if (!document.documentElement.classList.contains('starting-up')) {
+        chrome.send('mostVisitedAction',
+                    [ntp.NtpFollowAction.CLICKED_OTHER_NTP_PANE]);
+      }
+    },
+
+    /**
+     * Handles the 'card selected' event (i.e. the user clicked to select the
+     * Most Visited pane).
+     * @param {Event} e The CardChanged event.
+     */
+    handleCardSelected_: function(e) {
+      if (!document.documentElement.classList.contains('starting-up'))
+        chrome.send('mostVisitedSelected');
+    },
+
+    /**
      * Array of most visited data objects.
      * @type {Array}
      */
@@ -338,22 +367,37 @@ cr.define('ntp4', function() {
       logEvent('mostVisited.layout: ' + (Date.now() - startTime));
     },
 
-    /** @inheritDoc */
+    /** @override */
     shouldAcceptDrag: function(e) {
       return false;
     },
 
-    /** @inheritDoc */
+    /** @override */
     heightForWidth: heightForWidth,
   };
+
+  /**
+   * Executed once the NTP has loaded. Checks if the Most Visited pane is
+   * shown or not. If it is shown, the 'mostVisitedSelected' message is sent
+   * to the C++ code, to record the fact that the user has seen this pane.
+   */
+  MostVisitedPage.onLoaded = function() {
+    if (ntp.getCardSlider() &&
+        ntp.getCardSlider().currentCardValue &&
+        ntp.getCardSlider().currentCardValue.classList
+        .contains('most-visited-page')) {
+      chrome.send('mostVisitedSelected');
+    }
+  }
 
   /**
    * We've gotten additional Most Visited data. Update our old data with the
    * new data. The ordering of the new data is not important, except when a
    * page is pinned. Thus we try to minimize re-ordering.
-   * @param {Object} oldData The current Most Visited page list.
-   * @param {Object} newData The new Most Visited page list.
-   * @return The merged page list that should replace the current page list.
+   * @param {Array} oldData The current Most Visited page list.
+   * @param {Array} newData The new Most Visited page list.
+   * @return {Array} The merged page list that should replace the current page
+   *     list.
    */
   function refreshData(oldData, newData) {
     oldData = oldData.slice(0, THUMBNAIL_COUNT);
@@ -423,3 +467,5 @@ cr.define('ntp4', function() {
     refreshData: refreshData,
   };
 });
+
+document.addEventListener('ntpLoaded', ntp.MostVisitedPage.onLoaded);

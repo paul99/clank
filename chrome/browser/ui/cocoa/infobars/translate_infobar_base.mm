@@ -1,13 +1,10 @@
-// Copyright (c) 2011 The Chromium Authors. All rights reserved.
+// Copyright (c) 2012 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
 #import "chrome/browser/ui/cocoa/infobars/translate_infobar_base.h"
 
-#import <Cocoa/Cocoa.h>
-
 #include "base/logging.h"
-#include "base/metrics/histogram.h"
 #include "base/sys_string_conversions.h"
 #include "chrome/app/chrome_command_ids.h"
 #include "chrome/browser/translate/translate_infobar_delegate.h"
@@ -18,99 +15,20 @@
 #import "chrome/browser/ui/cocoa/infobars/infobar_container_controller.h"
 #import "chrome/browser/ui/cocoa/infobars/infobar_controller.h"
 #import "chrome/browser/ui/cocoa/infobars/infobar_gradient_view.h"
+#import "chrome/browser/ui/cocoa/infobars/infobar_utilities.h"
 #include "chrome/browser/ui/cocoa/infobars/translate_message_infobar_controller.h"
 #include "grit/generated_resources.h"
 #include "third_party/GTM/AppKit/GTMUILocalizerAndLayoutTweaker.h"
 #include "ui/base/l10n/l10n_util.h"
 
-using TranslateInfoBarUtilities::MoveControl;
-using TranslateInfoBarUtilities::VerticallyCenterView;
-using TranslateInfoBarUtilities::VerifyControlOrderAndSpacing;
-using TranslateInfoBarUtilities::CreateLabel;
-using TranslateInfoBarUtilities::AddMenuItem;
-
-#pragma mark TranslateInfoBarUtilities helper functions.
-
-namespace TranslateInfoBarUtilities {
-
-// Move the |toMove| view |spacing| pixels before/after the |anchor| view.
-// |after| signifies the side of |anchor| on which to place |toMove|.
-void MoveControl(NSView* anchor, NSView* toMove, int spacing, bool after) {
-  NSRect anchorFrame = [anchor frame];
-  NSRect toMoveFrame = [toMove frame];
-
-  // At the time of this writing, OS X doesn't natively support BiDi UIs, but
-  // it doesn't hurt to be forward looking.
-  bool toRight = after;
-
-  if (toRight) {
-    toMoveFrame.origin.x = NSMaxX(anchorFrame) + spacing;
-  } else {
-    // Place toMove to theleft of anchor.
-    toMoveFrame.origin.x = NSMinX(anchorFrame) -
-        spacing - NSWidth(toMoveFrame);
-  }
-  [toMove setFrame:toMoveFrame];
-}
-
-// Check that the control |before| is ordered visually before the |after|
-// control.
-// Also, check that there is space between them.
-bool VerifyControlOrderAndSpacing(id before, id after) {
-  NSRect beforeFrame = [before frame];
-  NSRect afterFrame = [after frame];
-  return NSMinX(afterFrame) >= NSMaxX(beforeFrame);
-}
-
-// Vertically center |toMove| in its container.
-void VerticallyCenterView(NSView* toMove) {
-  NSRect superViewFrame = [[toMove superview] frame];
-  NSRect viewFrame = [toMove frame];
-  // If the superview is the infobar view, then subtract out the anti-spoof
-  // height so that the content is centered in the content area of the infobar,
-  // rather than in the total height (which includes the bulge).
-  CGFloat superHeight = NSHeight(superViewFrame);
-  if ([[toMove superview] isKindOfClass:[InfoBarGradientView class]])
-    superHeight = infobars::kBaseHeight;
-  viewFrame.origin.y =
-      floor((superHeight - NSHeight(viewFrame)) / 2.0);
-  [toMove setFrame:viewFrame];
-}
-
-// Creates a label control in the style we need for the translate infobar's
-// labels within |bounds|.
-NSTextField* CreateLabel(NSRect bounds) {
-  NSTextField* ret = [[NSTextField alloc] initWithFrame:bounds];
-  [ret setEditable:NO];
-  [ret setDrawsBackground:NO];
-  [ret setBordered:NO];
-  return ret;
-}
-
-// Adds an item with the specified properties to |menu|.
-void AddMenuItem(NSMenu *menu, id target, SEL selector, NSString* title,
-    int tag, bool enabled, bool checked) {
-  if (tag == -1) {
-    [menu addItem:[NSMenuItem separatorItem]];
-  } else {
-    NSMenuItem* item = [[[NSMenuItem alloc]
-      initWithTitle:title
-             action:selector
-      keyEquivalent:@""] autorelease];
-    [item setTag:tag];
-    [menu addItem:item];
-    [item setTarget:target];
-    if (checked)
-      [item setState:NSOnState];
-    if (!enabled)
-      [item setEnabled:NO];
-  }
-}
-
-}  // namespace TranslateInfoBarUtilities
+using InfoBarUtilities::MoveControl;
+using InfoBarUtilities::VerticallyCenterView;
+using InfoBarUtilities::VerifyControlOrderAndSpacing;
+using InfoBarUtilities::CreateLabel;
+using InfoBarUtilities::AddMenuItem;
 
 // TranslateInfoBarDelegate views specific method:
-InfoBar* TranslateInfoBarDelegate::CreateInfoBar(InfoBarTabHelper* owner) {
+InfoBar* TranslateInfoBarDelegate::CreateInfoBar(InfoBarService* owner) {
   TranslateInfoBarControllerBase* infobar_controller = NULL;
   switch (type_) {
     case BEFORE_TRANSLATE:
@@ -180,20 +98,6 @@ InfoBar* TranslateInfoBarDelegate::CreateInfoBar(InfoBarTabHelper* owner) {
 
 @implementation TranslateInfoBarControllerBase
 
-- (id)initWithDelegate:(InfoBarDelegate*)delegate
-                 owner:(InfoBarTabHelper*)owner {
-  if ((self = [super initWithDelegate:delegate owner:owner])) {
-      originalLanguageMenuModel_.reset(
-          new LanguagesMenuModel([self delegate],
-                                 LanguagesMenuModel::ORIGINAL));
-
-      targetLanguageMenuModel_.reset(
-          new LanguagesMenuModel([self delegate],
-                                 LanguagesMenuModel::TARGET));
-  }
-  return self;
-}
-
 - (TranslateInfoBarDelegate*)delegate {
   return reinterpret_cast<TranslateInfoBarDelegate*>(delegate_);
 }
@@ -212,7 +116,7 @@ InfoBar* TranslateInfoBarDelegate::CreateInfoBar(InfoBarTabHelper* owner) {
   fromLanguagePopUp_.reset([[NSPopUpButton alloc] initWithFrame:bogusFrame
                                                       pullsDown:NO]);
   toLanguagePopUp_.reset([[NSPopUpButton alloc] initWithFrame:bogusFrame
-                                                     pullsDown:NO]);
+                                                    pullsDown:NO]);
   showOriginalButton_.reset([[NSButton alloc] init]);
   translateMessageButton_.reset([[NSButton alloc] init]);
 }
@@ -222,7 +126,9 @@ InfoBar* TranslateInfoBarDelegate::CreateInfoBar(InfoBarTabHelper* owner) {
   DCHECK_NE(TranslateInfoBarDelegate::kNoIndex, newLanguageIdxSizeT);
   if (newLanguageIdxSizeT == [self delegate]->original_language_index())
     return;
-  [self delegate]->SetOriginalLanguage(newLanguageIdxSizeT);
+  [self delegate]->set_original_language_index(newLanguageIdxSizeT);
+  if ([self delegate]->type() == TranslateInfoBarDelegate::AFTER_TRANSLATE)
+    [self delegate]->Translate();
   int commandId = IDC_TRANSLATE_ORIGINAL_LANGUAGE_BASE + newLanguageIdx;
   int newMenuIdx = [fromLanguagePopUp_ indexOfItemWithTag:commandId];
   [fromLanguagePopUp_ selectItemAtIndex:newMenuIdx];
@@ -233,7 +139,9 @@ InfoBar* TranslateInfoBarDelegate::CreateInfoBar(InfoBarTabHelper* owner) {
   DCHECK_NE(TranslateInfoBarDelegate::kNoIndex, newLanguageIdxSizeT);
   if (newLanguageIdxSizeT == [self delegate]->target_language_index())
     return;
-  [self delegate]->SetTargetLanguage(newLanguageIdxSizeT);
+  [self delegate]->set_target_language_index(newLanguageIdxSizeT);
+  if ([self delegate]->type() == TranslateInfoBarDelegate::AFTER_TRANSLATE)
+    [self delegate]->Translate();
   int commandId = IDC_TRANSLATE_TARGET_LANGUAGE_BASE + newLanguageIdx;
   int newMenuIdx = [toLanguagePopUp_ indexOfItemWithTag:commandId];
   [toLanguagePopUp_ selectItemAtIndex:newMenuIdx];
@@ -322,18 +230,13 @@ InfoBar* TranslateInfoBarDelegate::CreateInfoBar(InfoBarTabHelper* owner) {
   NSMenu* optionsMenu = [optionsPopUp_ menu];
   [optionsMenu setAutoenablesItems:NO];
   for (int i = 0; i < optionsMenuModel_->GetItemCount(); ++i) {
-    NSString* title = base::SysUTF16ToNSString(
-        optionsMenuModel_->GetLabelAt(i));
-    int cmd = optionsMenuModel_->GetCommandIdAt(i);
-    bool checked = optionsMenuModel_->IsItemCheckedAt(i);
-    bool enabled = optionsMenuModel_->IsEnabledAt(i);
     AddMenuItem(optionsMenu,
                 self,
                 @selector(optionsMenuChanged:),
-                title,
-                cmd,
-                enabled,
-                checked);
+                base::SysUTF16ToNSString(optionsMenuModel_->GetLabelAt(i)),
+                optionsMenuModel_->GetCommandIdAt(i),
+                optionsMenuModel_->IsEnabledAt(i),
+                optionsMenuModel_->IsItemCheckedAt(i));
   }
 }
 
@@ -344,50 +247,30 @@ InfoBar* TranslateInfoBarDelegate::CreateInfoBar(InfoBarTabHelper* owner) {
 - (void)populateLanguageMenus {
   NSMenu* originalLanguageMenu = [fromLanguagePopUp_ menu];
   [originalLanguageMenu setAutoenablesItems:NO];
-  int selectedMenuIndex = 0;
-  int selectedLangIndex =
-      static_cast<int>([self delegate]->original_language_index());
-  for (int i = 0; i < originalLanguageMenuModel_->GetItemCount(); ++i) {
-    NSString* title = base::SysUTF16ToNSString(
-        originalLanguageMenuModel_->GetLabelAt(i));
-    int cmd = originalLanguageMenuModel_->GetCommandIdAt(i);
-    bool checked = (cmd == selectedLangIndex);
-    if (checked)
-      selectedMenuIndex = i;
-    bool enabled = originalLanguageMenuModel_->IsEnabledAt(i);
-    cmd += IDC_TRANSLATE_ORIGINAL_LANGUAGE_BASE;
+  NSMenu* targetLanguageMenu = [toLanguagePopUp_ menu];
+  [targetLanguageMenu setAutoenablesItems:NO];
+  for (size_t i = 0; i < [self delegate]->num_languages(); ++i) {
+    NSString* title =
+        base::SysUTF16ToNSString([self delegate]->language_name_at(i));
     AddMenuItem(originalLanguageMenu,
                 self,
                 @selector(languageMenuChanged:),
                 title,
-                cmd,
-                enabled,
-                checked);
-  }
-  [fromLanguagePopUp_ selectItemAtIndex:selectedMenuIndex];
-
-  NSMenu* targetLanguageMenu = [toLanguagePopUp_ menu];
-  [targetLanguageMenu setAutoenablesItems:NO];
-  selectedLangIndex =
-      static_cast<int>([self delegate]->target_language_index());
-  for (int i = 0; i < targetLanguageMenuModel_->GetItemCount(); ++i) {
-    NSString* title = base::SysUTF16ToNSString(
-        targetLanguageMenuModel_->GetLabelAt(i));
-    int cmd = targetLanguageMenuModel_->GetCommandIdAt(i);
-    bool checked = (cmd == selectedLangIndex);
-    if (checked)
-      selectedMenuIndex = i;
-    bool enabled = targetLanguageMenuModel_->IsEnabledAt(i);
-    cmd += IDC_TRANSLATE_TARGET_LANGUAGE_BASE;
+                IDC_TRANSLATE_ORIGINAL_LANGUAGE_BASE + i,
+                i != [self delegate]->target_language_index(),
+                i == [self delegate]->original_language_index());
     AddMenuItem(targetLanguageMenu,
                 self,
                 @selector(languageMenuChanged:),
                 title,
-                cmd,
-                enabled,
-                checked);
+                IDC_TRANSLATE_TARGET_LANGUAGE_BASE + i,
+                i != [self delegate]->original_language_index(),
+                i == [self delegate]->target_language_index());
   }
-  [toLanguagePopUp_ selectItemAtIndex:selectedMenuIndex];
+  [fromLanguagePopUp_
+      selectItemAtIndex:([self delegate]->original_language_index())];
+  [toLanguagePopUp_
+      selectItemAtIndex:([self delegate]->target_language_index())];
 }
 
 - (void)addAdditionalControls {
@@ -476,6 +359,9 @@ InfoBar* TranslateInfoBarDelegate::CreateInfoBar(InfoBarTabHelper* owner) {
   [self disablePopUpMenu:[fromLanguagePopUp_ menu]];
   [self disablePopUpMenu:[toLanguagePopUp_ menu]];
   [self disablePopUpMenu:[optionsPopUp_ menu]];
+  // [super infobarWillClose] clears the owner field which is relied on by the
+  // notification handler, so remove the handler first.
+  [[NSNotificationCenter defaultCenter] removeObserver:self];
   [super infobarWillClose];
 }
 
@@ -508,7 +394,6 @@ InfoBar* TranslateInfoBarDelegate::CreateInfoBar(InfoBarTabHelper* owner) {
   DCHECK(state == TranslateInfoBarDelegate::BEFORE_TRANSLATE ||
          state == TranslateInfoBarDelegate::TRANSLATION_ERROR);
   delegate->Translate();
-  UMA_HISTOGRAM_COUNTS("Translate.Translate", 1);
 }
 
 // Called when someone clicks on the "Nope" button.
@@ -518,7 +403,6 @@ InfoBar* TranslateInfoBarDelegate::CreateInfoBar(InfoBarTabHelper* owner) {
   TranslateInfoBarDelegate* delegate = [self delegate];
   DCHECK(delegate->type() == TranslateInfoBarDelegate::BEFORE_TRANSLATE);
   delegate->TranslationDeclined();
-  UMA_HISTOGRAM_COUNTS("Translate.DeclineTranslate", 1);
   [super removeSelf];
 }
 
@@ -569,6 +453,8 @@ InfoBar* TranslateInfoBarDelegate::CreateInfoBar(InfoBarTabHelper* owner) {
 }
 
 - (void)dealloc {
+  // Perhaps this was removed as an observer in -infobarWillClose, but there's
+  // no guarantee that that was the case.
   [[NSNotificationCenter defaultCenter] removeObserver:self];
   [showOriginalButton_ setTarget:nil];
   [translateMessageButton_ setTarget:nil];

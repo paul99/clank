@@ -4,10 +4,9 @@
 
 #ifndef CHROME_BROWSER_UI_VIEWS_GLOBAL_ERROR_BUBBLE_VIEW_H_
 #define CHROME_BROWSER_UI_VIEWS_GLOBAL_ERROR_BUBBLE_VIEW_H_
-#pragma once
 
 #include "base/memory/weak_ptr.h"
-#include "chrome/browser/ui/global_error_bubble_view_base.h"
+#include "chrome/browser/ui/global_error/global_error_bubble_view_base.h"
 #include "ui/views/bubble/bubble_delegate.h"
 #include "ui/views/controls/button/button.h"
 
@@ -24,12 +23,9 @@ class GlobalErrorBubbleView : public views::ButtonListener,
                         const base::WeakPtr<GlobalError>& error);
   virtual ~GlobalErrorBubbleView();
 
-  // views::BubbleDelegateView implementation.
-  virtual gfx::Rect GetAnchorRect() OVERRIDE;
-
   // views::ButtonListener implementation.
   virtual void ButtonPressed(views::Button* sender,
-                             const views::Event& event) OVERRIDE;
+                             const ui::Event& event) OVERRIDE;
 
   // views::WidgetDelegate implementation.
   virtual void WindowClosing() OVERRIDE;

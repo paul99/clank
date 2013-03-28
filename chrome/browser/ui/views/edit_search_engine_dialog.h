@@ -9,7 +9,6 @@
 
 #ifndef CHROME_BROWSER_UI_VIEWS_EDIT_SEARCH_ENGINE_DIALOG_H_
 #define CHROME_BROWSER_UI_VIEWS_EDIT_SEARCH_ENGINE_DIALOG_H_
-#pragma once
 
 #include "ui/views/controls/textfield/textfield_controller.h"
 #include "ui/views/window/dialog_delegate.h"
@@ -28,14 +27,14 @@ class EditSearchEngineDialog : public views::TextfieldController,
                                public views::DialogDelegateView {
  public:
   // The |template_url| and/or |delegate| may be NULL.
-  EditSearchEngineDialog(const TemplateURL* template_url,
+  EditSearchEngineDialog(TemplateURL* template_url,
                          EditSearchEngineControllerDelegate* delegate,
                          Profile* profile);
-  virtual ~EditSearchEngineDialog() {}
+  virtual ~EditSearchEngineDialog();
 
   // Shows the dialog to the user.
   static void Show(gfx::NativeWindow parent,
-                   const TemplateURL* template_url,
+                   TemplateURL* template_url,
                    EditSearchEngineControllerDelegate* delegate,
                    Profile* profile);
 
@@ -53,7 +52,7 @@ class EditSearchEngineDialog : public views::TextfieldController,
   virtual void ContentsChanged(views::Textfield* sender,
                                const string16& new_contents) OVERRIDE;
   virtual bool HandleKeyEvent(views::Textfield* sender,
-                              const views::KeyEvent& key_event) OVERRIDE;
+                              const ui::KeyEvent& key_event) OVERRIDE;
  private:
   void Init();
 

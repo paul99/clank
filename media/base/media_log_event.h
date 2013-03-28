@@ -4,7 +4,6 @@
 
 #ifndef MEDIA_BASE_MEDIA_LOG_EVENT_H_
 #define MEDIA_BASE_MEDIA_LOG_EVENT_H_
-#pragma once
 
 #include "base/time.h"
 #include "base/values.h"
@@ -56,9 +55,9 @@ struct MediaLogEvent {
     TOTAL_BYTES_SET,
     NETWORK_ACTIVITY_SET,
 
-    // Playback has ended.
-    // params: none.
-    ENDED,
+    // Audio/Video stream playback has ended.
+    AUDIO_ENDED,
+    VIDEO_ENDED,
 
     // The audio renderer has been disabled.
     // params: none.
@@ -70,10 +69,9 @@ struct MediaLogEvent {
     //         "buffer_end": <last buffered byte>.
     BUFFERED_EXTENTS_CHANGED,
 
-    // The recorded statistics of the media pipeline have been updated.
-    // params: "audio_bytes_decoded", "video_bytes_decoded",
-    //         "video_frames_decoded", "video_frames_dropped": <integers>.
-    STATISTICS_UPDATED,
+    // Errors reported by Media Source Extensions code.
+    MEDIA_SOURCE_ERROR,
+    // params: "error": Error string describing the error detected.
   };
 
   int32 id;

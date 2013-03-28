@@ -54,6 +54,7 @@
 #include "v8.h"
 #include "v8threads.h"
 
+#include "platform-posix.h"
 #include "platform.h"
 #include "vm-state-inl.h"
 
@@ -79,15 +80,8 @@ double ceiling(double x) {
 static Mutex* limit_mutex = NULL;
 
 
-void OS::SetUp() {
-  // Seed the random number generator.
-  // Convert the current time to a 64-bit integer first, before converting it
-  // to an unsigned. Going directly can cause an overflow and the seed to be
-  // set to all ones. The seed will be identical for different instances that
-  // call this setup code within the same millisecond.
-  uint64_t seed = static_cast<uint64_t>(TimeCurrentMillis());
-  srandom(static_cast<unsigned int>(seed));
-  limit_mutex = CreateMutex();
+void OS::PostSetUp() {
+  POSIXPostSetUp();
 }
 
 
@@ -462,6 +456,12 @@ bool VirtualMemory::ReleaseRegion(void* base, size_t size) {
 }
 
 
+bool VirtualMemory::HasLazyCommits() {
+  // TODO(alph): implement for the platform.
+  return false;
+}
+
+
 class Thread::PlatformData : public Malloced {
  public:
   pthread_t thread_;  // Thread handle for pthread.
@@ -560,6 +560,7 @@ class FreeBSDMutex : public Mutex {
     ASSERT(result == 0);
     result = pthread_mutex_init(&mutex_, &attrs);
     ASSERT(result == 0);
+    USE(result);
   }
 
   virtual ~FreeBSDMutex() { pthread_mutex_destroy(&mutex_); }
@@ -711,16 +712,14 @@ static void ProfilerSignalHandler(int signal, siginfo_t* info, void* context) {
 
 class SignalSender : public Thread {
  public:
-  enum SleepInterval {
-    HALF_INTERVAL,
-    FULL_INTERVAL
-  };
-
-  static const int kSignalSenderStackSize = 32 * KB;
+  static const int kSignalSenderStackSize = 64 * KB;
 
   explicit SignalSender(int interval)
       : Thread(Thread::Options("SignalSender", kSignalSenderStackSize)),
         interval_(interval) {}
+
+  static void SetUp() { if (!mutex_) mutex_ = OS::CreateMutex(); }
+  static void TearDown() { delete mutex_; }
 
   static void AddActiveSampler(Sampler* sampler) {
     ScopedLock lock(mutex_);
@@ -763,38 +762,14 @@ class SignalSender : public Thread {
     SamplerRegistry::State state;
     while ((state = SamplerRegistry::GetState()) !=
            SamplerRegistry::HAS_NO_SAMPLERS) {
-      bool cpu_profiling_enabled =
-          (state == SamplerRegistry::HAS_CPU_PROFILING_SAMPLERS);
-      bool runtime_profiler_enabled = RuntimeProfiler::IsEnabled();
       // When CPU profiling is enabled both JavaScript and C++ code is
       // profiled. We must not suspend.
-      if (!cpu_profiling_enabled) {
+      if (state == SamplerRegistry::HAS_CPU_PROFILING_SAMPLERS) {
+        SamplerRegistry::IterateActiveSamplers(&DoCpuProfile, this);
+      } else {
         if (rate_limiter_.SuspendIfNecessary()) continue;
       }
-      if (cpu_profiling_enabled && runtime_profiler_enabled) {
-        if (!SamplerRegistry::IterateActiveSamplers(&DoCpuProfile, this)) {
-          return;
-        }
-        Sleep(HALF_INTERVAL);
-        if (!SamplerRegistry::IterateActiveSamplers(&DoRuntimeProfile, NULL)) {
-          return;
-        }
-        Sleep(HALF_INTERVAL);
-      } else {
-        if (cpu_profiling_enabled) {
-          if (!SamplerRegistry::IterateActiveSamplers(&DoCpuProfile,
-                                                      this)) {
-            return;
-          }
-        }
-        if (runtime_profiler_enabled) {
-          if (!SamplerRegistry::IterateActiveSamplers(&DoRuntimeProfile,
-                                                      NULL)) {
-            return;
-          }
-        }
-        Sleep(FULL_INTERVAL);
-      }
+      Sleep();  // TODO(svenpanne) Figure out if OS:Sleep(interval_) is enough.
     }
   }
 
@@ -804,21 +779,15 @@ class SignalSender : public Thread {
     sender->SendProfilingSignal(sampler->platform_data()->vm_tid());
   }
 
-  static void DoRuntimeProfile(Sampler* sampler, void* ignored) {
-    if (!sampler->isolate()->IsInitialized()) return;
-    sampler->isolate()->runtime_profiler()->NotifyTick();
-  }
-
   void SendProfilingSignal(pthread_t tid) {
     if (!signal_handler_installed_) return;
     pthread_kill(tid, SIGPROF);
   }
 
-  void Sleep(SleepInterval full_or_half) {
+  void Sleep() {
     // Convert ms to us and subtract 100 us to compensate delays
     // occuring during signal delivery.
     useconds_t interval = interval_ * 1000 - 100;
-    if (full_or_half == HALF_INTERVAL) interval /= 2;
     int result = usleep(interval);
 #ifdef DEBUG
     if (result != 0 && errno != EINTR) {
@@ -845,10 +814,29 @@ class SignalSender : public Thread {
   DISALLOW_COPY_AND_ASSIGN(SignalSender);
 };
 
-Mutex* SignalSender::mutex_ = OS::CreateMutex();
+Mutex* SignalSender::mutex_ = NULL;
 SignalSender* SignalSender::instance_ = NULL;
 struct sigaction SignalSender::old_signal_handler_;
 bool SignalSender::signal_handler_installed_ = false;
+
+
+void OS::SetUp() {
+  // Seed the random number generator.
+  // Convert the current time to a 64-bit integer first, before converting it
+  // to an unsigned. Going directly can cause an overflow and the seed to be
+  // set to all ones. The seed will be identical for different instances that
+  // call this setup code within the same millisecond.
+  uint64_t seed = static_cast<uint64_t>(TimeCurrentMillis());
+  srandom(static_cast<unsigned int>(seed));
+  limit_mutex = CreateMutex();
+  SignalSender::SetUp();
+}
+
+
+void OS::TearDown() {
+  SignalSender::TearDown();
+  delete limit_mutex;
+}
 
 
 Sampler::Sampler(Isolate* isolate, int interval)

@@ -2,6 +2,8 @@
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
+#include "content/renderer/render_process_impl.h"
+
 #include "build/build_config.h"
 
 #if defined(OS_WIN)
@@ -9,8 +11,6 @@
 #include <objidl.h>
 #include <mlang.h>
 #endif
-
-#include "content/renderer/render_process_impl.h"
 
 #include "base/basictypes.h"
 #include "base/command_line.h"
@@ -25,20 +25,23 @@
 #include "ipc/ipc_channel.h"
 #include "ipc/ipc_message_utils.h"
 #include "skia/ext/platform_canvas.h"
-#include "ui/gfx/surface/transport_dib.h"
+#include "ui/surface/transport_dib.h"
+#include "webkit/glue/webkit_glue.h"
 #include "webkit/plugins/npapi/plugin_instance.h"
 #include "webkit/plugins/npapi/plugin_lib.h"
-#include "webkit/glue/webkit_glue.h"
 
 #if defined(OS_MACOSX)
 #include "base/mac/mac_util.h"
 #endif
 
+namespace content {
+
 RenderProcessImpl::RenderProcessImpl()
     : ALLOW_THIS_IN_INITIALIZER_LIST(shared_mem_cache_cleaner_(
           FROM_HERE, base::TimeDelta::FromSeconds(5),
           this, &RenderProcessImpl::ClearTransportDIBCache)),
-      transport_dib_next_sequence_number_(0) {
+      transport_dib_next_sequence_number_(0),
+      enabled_bindings_(0) {
   in_process_plugins_ = InProcessPlugins();
   for (size_t i = 0; i < arraysize(shared_mem_cache_); ++i)
     shared_mem_cache_[i] = NULL;
@@ -71,11 +74,6 @@ RenderProcessImpl::RenderProcessImpl()
     webkit_glue::SetJavaScriptFlags(
         command_line.GetSwitchValueASCII(switches::kJavaScriptFlags));
   }
-
-  if (command_line.HasSwitch(switches::kDartFlags)) {
-    webkit_glue::SetDartFlags(
-        command_line.GetSwitchValueASCII(switches::kDartFlags));
-  }
 }
 
 RenderProcessImpl::~RenderProcessImpl() {
@@ -101,6 +99,14 @@ bool RenderProcessImpl::InProcessPlugins() {
   return command_line.HasSwitch(switches::kInProcessPlugins) ||
          command_line.HasSwitch(switches::kSingleProcess);
 #endif
+}
+
+void RenderProcessImpl::AddBindings(int bindings) {
+  enabled_bindings_ |= bindings;
+}
+
+int RenderProcessImpl::GetEnabledBindings() const {
+  return enabled_bindings_;
 }
 
 // -----------------------------------------------------------------------------
@@ -145,7 +151,7 @@ skia::PlatformCanvas* RenderProcessImpl::GetDrawingCanvas(
     TransportDIB** memory, const gfx::Rect& rect) {
   int width = rect.width();
   int height = rect.height();
-  const size_t stride = skia::PlatformCanvas::StrideForWidth(rect.width());
+  const size_t stride = skia::PlatformCanvasStrideForWidth(rect.width());
 #if defined(OS_LINUX) || defined(OS_OPENBSD)
   const size_t max_size = base::SysInfo::MaxSharedMemorySize();
 #else
@@ -162,9 +168,8 @@ skia::PlatformCanvas* RenderProcessImpl::GetDrawingCanvas(
 
   if (!GetTransportDIBFromCache(memory, size)) {
     *memory = CreateTransportDIB(size);
-    if (!*memory) {
+    if (!*memory)
       return NULL;
-    }
   }
 
   return (*memory)->GetPlatformCanvas(width, height);
@@ -243,3 +248,5 @@ void RenderProcessImpl::ClearTransportDIBCache() {
     }
   }
 }
+
+}  // namespace content

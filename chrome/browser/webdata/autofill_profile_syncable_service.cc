@@ -4,21 +4,23 @@
 
 #include "chrome/browser/webdata/autofill_profile_syncable_service.h"
 
+#include "base/guid.h"
 #include "base/location.h"
 #include "base/logging.h"
 #include "base/utf_string_conversions.h"
 #include "chrome/browser/autofill/autofill_profile.h"
 #include "chrome/browser/autofill/form_group.h"
 #include "chrome/browser/profiles/profile.h"
-#include "chrome/browser/sync/api/sync_error.h"
 #include "chrome/browser/webdata/autofill_table.h"
 #include "chrome/browser/webdata/web_data_service.h"
 #include "chrome/browser/webdata/web_database.h"
 #include "chrome/common/chrome_notification_types.h"
-#include "chrome/common/guid.h"
 #include "content/public/browser/browser_thread.h"
 #include "content/public/browser/notification_details.h"
 #include "content/public/browser/notification_source.h"
+#include "sync/api/sync_error.h"
+#include "sync/api/sync_error_factory.h"
+#include "sync/protocol/sync.pb.h"
 
 using content::BrowserThread;
 
@@ -55,18 +57,24 @@ AutofillProfileSyncableService::AutofillProfileSyncableService()
   DCHECK(BrowserThread::CurrentlyOn(BrowserThread::DB));
 }
 
-SyncError AutofillProfileSyncableService::MergeDataAndStartSyncing(
-    syncable::ModelType type,
-    const SyncDataList& initial_sync_data,
-    SyncChangeProcessor* sync_processor) {
+syncer::SyncMergeResult
+AutofillProfileSyncableService::MergeDataAndStartSyncing(
+    syncer::ModelType type,
+    const syncer::SyncDataList& initial_sync_data,
+    scoped_ptr<syncer::SyncChangeProcessor> sync_processor,
+    scoped_ptr<syncer::SyncErrorFactory> sync_error_factory) {
   DCHECK(CalledOnValidThread());
   DCHECK(!sync_processor_.get());
+  DCHECK(sync_processor.get());
+  DCHECK(sync_error_factory.get());
   DVLOG(1) << "Associating Autofill: MergeDataAndStartSyncing";
 
+  syncer::SyncMergeResult merge_result(type);
+  sync_error_factory_ = sync_error_factory.Pass();
   if (!LoadAutofillData(&profiles_.get())) {
-    return SyncError(
-        FROM_HERE, "Could not get the autofill data from WebDatabase.",
-        model_type());
+    merge_result.set_error(sync_error_factory_->CreateAndUploadError(
+        FROM_HERE, "Could not get the autofill data from WebDatabase."));
+    return merge_result;
   }
 
   if (DLOG_IS_ON(INFO)) {
@@ -77,20 +85,21 @@ SyncError AutofillProfileSyncableService::MergeDataAndStartSyncing(
          profiles_.begin(); ix != profiles_.end(); ++ix) {
       AutofillProfile* p = *ix;
       DVLOG(2) << "[AUTOFILL MIGRATION]  "
-               << p->GetInfo(NAME_FIRST)
-               << p->GetInfo(NAME_LAST)
+               << p->GetRawInfo(NAME_FIRST)
+               << p->GetRawInfo(NAME_LAST)
                << p->guid();
     }
   }
 
-  sync_processor_.reset(sync_processor);
+  sync_processor_ = sync_processor.Pass();
 
   GUIDToProfileMap remaining_profiles;
   CreateGUIDToProfileMap(profiles_.get(), &remaining_profiles);
 
   DataBundle bundle;
   // Go through and check for all the profiles that sync already knows about.
-  for (SyncDataList::const_iterator sync_iter = initial_sync_data.begin();
+  for (syncer::SyncDataList::const_iterator sync_iter =
+           initial_sync_data.begin();
        sync_iter != initial_sync_data.end();
        ++sync_iter) {
     GUIDToProfileMap::iterator it =
@@ -115,8 +124,8 @@ SyncError AutofillProfileSyncableService::MergeDataAndStartSyncing(
         bundle.profiles_to_sync_back.push_back(it->second);
       DVLOG(2) << "[AUTOFILL SYNC]"
                << "Found similar profile in sync db but with a different guid: "
-               << UTF16ToUTF8(it->second->GetInfo(NAME_FIRST))
-               << UTF16ToUTF8(it->second->GetInfo(NAME_LAST))
+               << UTF16ToUTF8(it->second->GetRawInfo(NAME_FIRST))
+               << UTF16ToUTF8(it->second->GetRawInfo(NAME_LAST))
                << "New guid " << it->second->guid()
                << ". Profile to be deleted "
                << profile_to_merge->second->guid();
@@ -124,48 +133,57 @@ SyncError AutofillProfileSyncableService::MergeDataAndStartSyncing(
     }
   }
 
-  if (!SaveChangesToWebData(bundle))
-    return SyncError(FROM_HERE, "Failed to update webdata.", model_type());
+  if (!SaveChangesToWebData(bundle)) {
+    merge_result.set_error(sync_error_factory_->CreateAndUploadError(
+        FROM_HERE,
+        "Failed to update webdata."));
+    return merge_result;
+  }
 
-  SyncChangeList new_changes;
+  syncer::SyncChangeList new_changes;
   for (GUIDToProfileMap::iterator i = remaining_profiles.begin();
        i != remaining_profiles.end(); ++i) {
     new_changes.push_back(
-        SyncChange(SyncChange::ACTION_ADD, CreateData(*(i->second))));
+        syncer::SyncChange(FROM_HERE,
+                           syncer::SyncChange::ACTION_ADD,
+                           CreateData(*(i->second))));
     profiles_map_[i->first] = i->second;
   }
 
   for (size_t i = 0; i < bundle.profiles_to_sync_back.size(); ++i) {
     new_changes.push_back(
-        SyncChange(SyncChange::ACTION_UPDATE,
-                   CreateData(*(bundle.profiles_to_sync_back[i]))));
+        syncer::SyncChange(FROM_HERE,
+                           syncer::SyncChange::ACTION_UPDATE,
+                           CreateData(*(bundle.profiles_to_sync_back[i]))));
   }
 
-  SyncError error;
-  if (!new_changes.empty())
-    error = sync_processor_->ProcessSyncChanges(FROM_HERE, new_changes);
+  if (!new_changes.empty()) {
+    merge_result.set_error(
+        sync_processor_->ProcessSyncChanges(FROM_HERE, new_changes));
+  }
 
   WebDataService::NotifyOfMultipleAutofillChanges(web_data_service_);
 
-  return error;
+  return merge_result;
 }
 
-void AutofillProfileSyncableService::StopSyncing(syncable::ModelType type) {
+void AutofillProfileSyncableService::StopSyncing(syncer::ModelType type) {
   DCHECK(CalledOnValidThread());
-  DCHECK_EQ(type, syncable::AUTOFILL_PROFILE);
+  DCHECK_EQ(type, syncer::AUTOFILL_PROFILE);
 
   sync_processor_.reset();
-  profiles_.reset();
+  sync_error_factory_.reset();
+  profiles_.clear();
   profiles_map_.clear();
 }
 
-SyncDataList AutofillProfileSyncableService::GetAllSyncData(
-    syncable::ModelType type) const {
+syncer::SyncDataList AutofillProfileSyncableService::GetAllSyncData(
+    syncer::ModelType type) const {
   DCHECK(CalledOnValidThread());
   DCHECK(sync_processor_.get());
-  DCHECK_EQ(type, syncable::AUTOFILL_PROFILE);
+  DCHECK_EQ(type, syncer::AUTOFILL_PROFILE);
 
-  SyncDataList current_data;
+  syncer::SyncDataList current_data;
 
   for (GUIDToProfileMap::const_iterator i = profiles_map_.begin();
        i != profiles_map_.end(); ++i) {
@@ -174,46 +192,50 @@ SyncDataList AutofillProfileSyncableService::GetAllSyncData(
   return current_data;
 }
 
-SyncError AutofillProfileSyncableService::ProcessSyncChanges(
+syncer::SyncError AutofillProfileSyncableService::ProcessSyncChanges(
     const tracked_objects::Location& from_here,
-    const SyncChangeList& change_list) {
+    const syncer::SyncChangeList& change_list) {
   DCHECK(CalledOnValidThread());
   if (!sync_processor_.get()) {
-    SyncError error(FROM_HERE, "Models not yet associated.",
-                    syncable::AUTOFILL_PROFILE);
+    syncer::SyncError error(FROM_HERE, "Models not yet associated.",
+                    syncer::AUTOFILL_PROFILE);
     return error;
   }
 
   DataBundle bundle;
 
-  for (SyncChangeList::const_iterator i = change_list.begin();
+  for (syncer::SyncChangeList::const_iterator i = change_list.begin();
        i != change_list.end(); ++i) {
     DCHECK(i->IsValid());
     switch (i->change_type()) {
-      case SyncChange::ACTION_ADD:
-      case SyncChange::ACTION_UPDATE:
+      case syncer::SyncChange::ACTION_ADD:
+      case syncer::SyncChange::ACTION_UPDATE:
         CreateOrUpdateProfile(i->sync_data(), &profiles_map_, &bundle);
         break;
-      case SyncChange::ACTION_DELETE: {
+      case syncer::SyncChange::ACTION_DELETE: {
         std::string guid = i->sync_data().GetSpecifics().
-             GetExtension(sync_pb::autofill_profile).guid();
+             autofill_profile().guid();
         bundle.profiles_to_delete.push_back(guid);
         profiles_map_.erase(guid);
       } break;
       default:
         NOTREACHED() << "Unexpected sync change state.";
-        return SyncError(FROM_HERE, "ProcessSyncChanges failed on ChangeType " +
-                         SyncChange::ChangeTypeToString(i->change_type()),
-                         syncable::AUTOFILL_PROFILE);
+        return sync_error_factory_->CreateAndUploadError(
+              FROM_HERE,
+              "ProcessSyncChanges failed on ChangeType " +
+                  syncer::SyncChange::ChangeTypeToString(i->change_type()));
     }
   }
 
-  if (!SaveChangesToWebData(bundle))
-    return SyncError(FROM_HERE, "Failed to update webdata.", model_type());
+  if (!SaveChangesToWebData(bundle)) {
+    return sync_error_factory_->CreateAndUploadError(
+        FROM_HERE,
+        "Failed to update webdata.");
+  }
 
   WebDataService::NotifyOfMultipleAutofillChanges(web_data_service_);
 
-  return SyncError();
+  return syncer::SyncError();
 }
 
 void AutofillProfileSyncableService::Observe(int type,
@@ -300,9 +322,9 @@ void AutofillProfileSyncableService::WriteAutofillProfile(
     const AutofillProfile& profile,
     sync_pb::EntitySpecifics* profile_specifics) {
   sync_pb::AutofillProfileSpecifics* specifics =
-      profile_specifics->MutableExtension(sync_pb::autofill_profile);
+      profile_specifics->mutable_autofill_profile();
 
-  DCHECK(guid::IsValidGUID(profile.guid()));
+  DCHECK(base::IsValidGUID(profile.guid()));
 
   // Reset all multi-valued fields in the protobuf.
   specifics->clear_name_first();
@@ -313,35 +335,46 @@ void AutofillProfileSyncableService::WriteAutofillProfile(
 
   specifics->set_guid(profile.guid());
   std::vector<string16> values;
-  profile.GetMultiInfo(NAME_FIRST, &values);
-  for (size_t i = 0; i < values.size(); ++i)
+  profile.GetRawMultiInfo(NAME_FIRST, &values);
+  for (size_t i = 0; i < values.size(); ++i) {
     specifics->add_name_first(LimitData(UTF16ToUTF8(values[i])));
-  profile.GetMultiInfo(NAME_MIDDLE, &values);
-  for (size_t i = 0; i < values.size(); ++i)
+  }
+
+  profile.GetRawMultiInfo(NAME_MIDDLE, &values);
+  for (size_t i = 0; i < values.size(); ++i) {
     specifics->add_name_middle(LimitData(UTF16ToUTF8(values[i])));
-  profile.GetMultiInfo(NAME_LAST, &values);
-  for (size_t i = 0; i < values.size(); ++i)
+  }
+
+  profile.GetRawMultiInfo(NAME_LAST, &values);
+  for (size_t i = 0; i < values.size(); ++i) {
     specifics->add_name_last(LimitData(UTF16ToUTF8(values[i])));
+  }
+
   specifics->set_address_home_line1(
-      LimitData(UTF16ToUTF8(profile.GetInfo(ADDRESS_HOME_LINE1))));
+      LimitData(UTF16ToUTF8(profile.GetRawInfo(ADDRESS_HOME_LINE1))));
   specifics->set_address_home_line2(
-      LimitData(UTF16ToUTF8(profile.GetInfo(ADDRESS_HOME_LINE2))));
+      LimitData(UTF16ToUTF8(profile.GetRawInfo(ADDRESS_HOME_LINE2))));
   specifics->set_address_home_city(
-      LimitData(UTF16ToUTF8(profile.GetInfo(ADDRESS_HOME_CITY))));
+      LimitData(UTF16ToUTF8(profile.GetRawInfo(ADDRESS_HOME_CITY))));
   specifics->set_address_home_state(
-      LimitData(UTF16ToUTF8(profile.GetInfo(ADDRESS_HOME_STATE))));
+      LimitData(UTF16ToUTF8(profile.GetRawInfo(ADDRESS_HOME_STATE))));
   specifics->set_address_home_country(
-      LimitData(UTF16ToUTF8(profile.GetInfo(ADDRESS_HOME_COUNTRY))));
+      LimitData(UTF16ToUTF8(profile.GetRawInfo(ADDRESS_HOME_COUNTRY))));
   specifics->set_address_home_zip(
-      LimitData(UTF16ToUTF8(profile.GetInfo(ADDRESS_HOME_ZIP))));
-  profile.GetMultiInfo(EMAIL_ADDRESS, &values);
-  for (size_t i = 0; i < values.size(); ++i)
+      LimitData(UTF16ToUTF8(profile.GetRawInfo(ADDRESS_HOME_ZIP))));
+
+  profile.GetRawMultiInfo(EMAIL_ADDRESS, &values);
+  for (size_t i = 0; i < values.size(); ++i) {
     specifics->add_email_address(LimitData(UTF16ToUTF8(values[i])));
+  }
+
   specifics->set_company_name(
-      LimitData(UTF16ToUTF8(profile.GetInfo(COMPANY_NAME))));
-  profile.GetMultiInfo(PHONE_HOME_WHOLE_NUMBER, &values);
-  for (size_t i = 0; i < values.size(); ++i)
+      LimitData(UTF16ToUTF8(profile.GetRawInfo(COMPANY_NAME))));
+
+  profile.GetRawMultiInfo(PHONE_HOME_WHOLE_NUMBER, &values);
+  for (size_t i = 0; i < values.size(); ++i) {
     specifics->add_phone_home_whole_number(LimitData(UTF16ToUTF8(values[i])));
+  }
 }
 
 void AutofillProfileSyncableService::CreateGUIDToProfileMap(
@@ -355,15 +388,17 @@ void AutofillProfileSyncableService::CreateGUIDToProfileMap(
 
 AutofillProfileSyncableService::GUIDToProfileMap::iterator
 AutofillProfileSyncableService::CreateOrUpdateProfile(
-    const SyncData& data, GUIDToProfileMap* profile_map, DataBundle* bundle) {
+    const syncer::SyncData& data,
+    GUIDToProfileMap* profile_map,
+    DataBundle* bundle) {
   DCHECK(profile_map);
   DCHECK(bundle);
 
-  DCHECK_EQ(syncable::AUTOFILL_PROFILE, data.GetDataType());
+  DCHECK_EQ(syncer::AUTOFILL_PROFILE, data.GetDataType());
 
   const sync_pb::EntitySpecifics& specifics = data.GetSpecifics();
   const sync_pb::AutofillProfileSpecifics& autofill_specifics(
-      specifics.GetExtension(sync_pb::autofill_profile));
+      specifics.autofill_profile());
 
   GUIDToProfileMap::iterator it = profile_map->find(
         autofill_specifics.guid());
@@ -384,8 +419,8 @@ AutofillProfileSyncableService::CreateOrUpdateProfile(
         bundle->profiles_to_delete.push_back(i->second->guid());
         DVLOG(2) << "[AUTOFILL SYNC]"
                  << "Found in sync db but with a different guid: "
-                 << UTF16ToUTF8(i->second->GetInfo(NAME_FIRST))
-                 << UTF16ToUTF8(i->second->GetInfo(NAME_LAST))
+                 << UTF16ToUTF8(i->second->GetRawInfo(NAME_FIRST))
+                 << UTF16ToUTF8(i->second->GetRawInfo(NAME_LAST))
                  << "New guid " << new_profile->guid()
                  << ". Profile to be deleted " << i->second->guid();
         profile_map->erase(i);
@@ -412,12 +447,14 @@ void AutofillProfileSyncableService::ActOnChange(
           !change.profile()) ||
          (change.type() != AutofillProfileChange::REMOVE && change.profile()));
   DCHECK(sync_processor_.get());
-  SyncChangeList new_changes;
+  syncer::SyncChangeList new_changes;
   DataBundle bundle;
   switch (change.type()) {
     case AutofillProfileChange::ADD:
       new_changes.push_back(
-          SyncChange(SyncChange::ACTION_ADD, CreateData(*(change.profile()))));
+          syncer::SyncChange(FROM_HERE,
+                             syncer::SyncChange::ACTION_ADD,
+                             CreateData(*(change.profile()))));
       DCHECK(profiles_map_.find(change.profile()->guid()) ==
              profiles_map_.end());
       profiles_.push_back(new AutofillProfile(*(change.profile())));
@@ -429,43 +466,50 @@ void AutofillProfileSyncableService::ActOnChange(
       DCHECK(it != profiles_map_.end());
       *(it->second) = *(change.profile());
       new_changes.push_back(
-          SyncChange(SyncChange::ACTION_UPDATE,
-                     CreateData(*(change.profile()))));
+          syncer::SyncChange(FROM_HERE,
+                             syncer::SyncChange::ACTION_UPDATE,
+                             CreateData(*(change.profile()))));
       break;
     }
     case AutofillProfileChange::REMOVE: {
       AutofillProfile empty_profile(change.key());
-      new_changes.push_back(SyncChange(SyncChange::ACTION_DELETE,
-                                       CreateData(empty_profile)));
+      new_changes.push_back(
+          syncer::SyncChange(FROM_HERE,
+                             syncer::SyncChange::ACTION_DELETE,
+                             CreateData(empty_profile)));
       profiles_map_.erase(change.key());
       break;
     }
     default:
       NOTREACHED();
   }
-  SyncError error = sync_processor_->ProcessSyncChanges(FROM_HERE, new_changes);
+  syncer::SyncError error =
+      sync_processor_->ProcessSyncChanges(FROM_HERE, new_changes);
   if (error.IsSet()) {
-    DLOG(WARNING) << "[AUTOFILL SYNC]"
-                  << " Failed processing change:"
-                  << " Error:" << error.message()
-                  << " Guid:" << change.key();
+    // TODO(isherman): Investigating http://crbug.com/121592
+    VLOG(1) << "[AUTOFILL SYNC] "
+            << "Failed processing change:\n"
+            << "  Error: " << error.message() << "\n"
+            << "  Guid: " << change.key();
   }
 }
 
-SyncData AutofillProfileSyncableService::CreateData(
+syncer::SyncData AutofillProfileSyncableService::CreateData(
     const AutofillProfile& profile) {
   sync_pb::EntitySpecifics specifics;
   WriteAutofillProfile(profile, &specifics);
-  return SyncData::CreateLocalData(profile.guid(), profile.guid(), specifics);
+  return
+      syncer::SyncData::CreateLocalData(
+          profile.guid(), profile.guid(), specifics);
 }
 
 bool AutofillProfileSyncableService::UpdateField(
     AutofillFieldType field_type,
     const std::string& new_value,
     AutofillProfile* autofill_profile) {
-  if (UTF16ToUTF8(autofill_profile->GetInfo(field_type)) == new_value)
+  if (UTF16ToUTF8(autofill_profile->GetRawInfo(field_type)) == new_value)
     return false;
-  autofill_profile->SetInfo(field_type, UTF8ToUTF16(new_value));
+  autofill_profile->SetRawInfo(field_type, UTF8ToUTF16(new_value));
   return true;
 }
 
@@ -474,7 +518,7 @@ bool AutofillProfileSyncableService::UpdateMultivaluedField(
     const ::google::protobuf::RepeatedPtrField<std::string>& new_values,
     AutofillProfile* autofill_profile) {
   std::vector<string16> values;
-  autofill_profile->GetMultiInfo(field_type, &values);
+  autofill_profile->GetRawMultiInfo(field_type, &values);
   bool changed = false;
   if (static_cast<size_t>(new_values.size()) != values.size()) {
     values.clear();
@@ -490,7 +534,7 @@ bool AutofillProfileSyncableService::UpdateMultivaluedField(
     }
   }
   if (changed)
-    autofill_profile->SetMultiInfo(field_type, values);
+    autofill_profile->SetRawMultiInfo(field_type, values);
   return changed;
 }
 

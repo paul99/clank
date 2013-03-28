@@ -9,26 +9,31 @@
 #include "chrome/browser/browser_process.h"
 #include "chrome/browser/download/download_service.h"
 #include "chrome/browser/download/download_service_factory.h"
-#include "chrome/browser/download/download_test_observer.h"
+#include "chrome/browser/download/download_test_file_chooser_observer.h"
 #include "chrome/browser/net/url_request_mock_util.h"
 #include "chrome/browser/prefs/pref_service.h"
 #include "chrome/browser/profiles/profile.h"
 #include "chrome/browser/profiles/profile_manager.h"
 #include "chrome/browser/ui/browser.h"
+#include "chrome/browser/ui/browser_list.h"
+#include "chrome/browser/ui/browser_tabstrip.h"
 #include "chrome/browser/ui/browser_window.h"
-#include "chrome/browser/ui/webui/active_downloads_ui.h"
 #include "chrome/common/chrome_paths.h"
 #include "chrome/common/pref_names.h"
 #include "chrome/common/url_constants.h"
 #include "chrome/test/base/in_process_browser_test.h"
 #include "chrome/test/base/ui_test_utils.h"
-#include "content/browser/net/url_request_slow_download_job.h"
 #include "content/public/browser/download_item.h"
 #include "content/public/common/page_transition_types.h"
+#include "content/public/test/browser_test_utils.h"
+#include "content/public/test/download_test_observer.h"
+#include "content/test/net/url_request_slow_download_job.h"
 
+using content::BrowserContext;
 using content::BrowserThread;
 using content::DownloadItem;
 using content::DownloadManager;
+using content::URLRequestSlowDownloadJob;
 
 class BrowserCloseTest : public InProcessBrowserTest {
  public:
@@ -113,15 +118,13 @@ class BrowserCloseTest : public InProcessBrowserTest {
     // Setup an observer waiting for the given number of downloads
     // to get to IN_PROGRESS.
     DownloadManager* download_manager =
-        browser->profile()->GetDownloadManager();
-    scoped_ptr<DownloadTestObserver> observer(
-        new DownloadTestObserver(
-            download_manager, num_downloads,
-            DownloadItem::IN_PROGRESS,
-            true,  // Bail on select file.
-            DownloadTestObserver::ON_DANGEROUS_DOWNLOAD_FAIL));
+        BrowserContext::GetDownloadManager(browser->profile());
+    scoped_ptr<content::DownloadTestObserver> observer(
+        new content::DownloadTestObserverInProgress(download_manager,
+                                                    num_downloads));
 
     // Set of that number of downloads.
+    size_t count_downloads = num_downloads;
     while (num_downloads--)
       ui_test_utils::NavigateToURLWithDisposition(
           browser, url, NEW_BACKGROUND_TAB,
@@ -129,6 +132,8 @@ class BrowserCloseTest : public InProcessBrowserTest {
 
     // Wait for them.
     observer->WaitForFinished();
+    EXPECT_EQ(count_downloads,
+              observer->NumDownloadsSeenInState(DownloadItem::IN_PROGRESS));
   }
 
   // All all downloads created in CreateStalledDownloads() to
@@ -146,9 +151,9 @@ class BrowserCloseTest : public InProcessBrowserTest {
       DownloadService* download_service =
           DownloadServiceFactory::GetForProfile(*pit);
       if (download_service->HasCreatedDownloadManager()) {
-        DownloadManager *mgr = download_service->GetDownloadManager();
-        scoped_refptr<DownloadTestFlushObserver> observer(
-            new DownloadTestFlushObserver(mgr));
+        DownloadManager *mgr = BrowserContext::GetDownloadManager(*pit);
+        scoped_refptr<content::DownloadTestFlushObserver> observer(
+            new content::DownloadTestFlushObserver(mgr));
         observer->WaitForFlush();
       }
       if ((*pit)->HasOffTheRecordProfile()) {
@@ -156,10 +161,10 @@ class BrowserCloseTest : public InProcessBrowserTest {
           DownloadServiceFactory::GetForProfile(
               (*pit)->GetOffTheRecordProfile());
         if (incognito_download_service->HasCreatedDownloadManager()) {
-          DownloadManager *mgr =
-              incognito_download_service->GetDownloadManager();
-          scoped_refptr<DownloadTestFlushObserver> observer(
-              new DownloadTestFlushObserver(mgr));
+          DownloadManager *mgr = BrowserContext::GetDownloadManager(
+              (*pit)->GetOffTheRecordProfile());
+          scoped_refptr<content::DownloadTestFlushObserver> observer(
+              new content::DownloadTestFlushObserver(mgr));
           observer->WaitForFlush();
         }
       }
@@ -168,11 +173,10 @@ class BrowserCloseTest : public InProcessBrowserTest {
 
   // Create a Browser (with associated window) on the specified profile.
   Browser* CreateBrowserOnProfile(Profile* profile) {
-    Browser* new_browser = Browser::Create(profile);
-    new_browser->AddSelectedTabWithURL(GURL(chrome::kAboutBlankURL),
-                                       content::PAGE_TRANSITION_START_PAGE);
-    ui_test_utils::WaitForLoadStop(
-        new_browser->GetSelectedWebContents());
+    Browser* new_browser = new Browser(Browser::CreateParams(profile));
+    chrome::AddSelectedTabWithURL(new_browser, GURL(chrome::kAboutBlankURL),
+                                  content::PAGE_TRANSITION_AUTO_TOPLEVEL);
+    content::WaitForLoadStop(chrome::GetActiveWebContents(new_browser));
     new_browser->window()->Show();
     return new_browser;
   }
@@ -236,6 +240,8 @@ class BrowserCloseTest : public InProcessBrowserTest {
     EXPECT_TRUE(second_profile_);
     if (!second_profile_) return false;
 
+    DownloadTestFileChooserObserver(first_profile_) .EnableFileChooser(false);
+    DownloadTestFileChooserObserver(second_profile_).EnableFileChooser(false);
     return true;
   }
 
@@ -273,6 +279,10 @@ class BrowserCloseTest : public InProcessBrowserTest {
     Profile* first_profile_incognito = first_profile_->GetOffTheRecordProfile();
     Profile* second_profile_incognito =
         second_profile_->GetOffTheRecordProfile();
+    DownloadTestFileChooserObserver(first_profile_incognito)
+        .EnableFileChooser(false);
+    DownloadTestFileChooserObserver(second_profile_incognito)
+        .EnableFileChooser(false);
 
     // For simplicty of coding, we create a window on each profile so that
     // we can easily create downloads, then we destroy or create windows
@@ -315,15 +325,7 @@ class BrowserCloseTest : public InProcessBrowserTest {
       if (!result)
         return false;
     }
-    ui_test_utils::RunAllPendingInMessageLoop();
-
-#if defined(OS_CHROMEOS)
-    // Get rid of downloads panel on ChromeOS
-    Browser* panel = ActiveDownloadsUI::GetPopup();
-    if (panel)
-      panel->CloseWindow();
-    ui_test_utils::RunAllPendingInMessageLoop();
-#endif
+    content::RunAllPendingInMessageLoop();
 
     // All that work, for this one little test.
     EXPECT_TRUE((check_case.window_to_probe ==
@@ -365,7 +367,7 @@ class BrowserCloseTest : public InProcessBrowserTest {
         (*bit)->window()->Close();
       }
     }
-    ui_test_utils::RunAllPendingInMessageLoop();
+    content::RunAllPendingInMessageLoop();
 
     return true;
   }
@@ -376,9 +378,9 @@ class BrowserCloseTest : public InProcessBrowserTest {
   Profile* first_profile_;
   Profile* second_profile_;
 
-  ScopedTempDir first_profile_downloads_dir_;
-  ScopedTempDir second_profile_data_dir_;
-  ScopedTempDir second_profile_downloads_dir_;
+  base::ScopedTempDir first_profile_downloads_dir_;
+  base::ScopedTempDir second_profile_data_dir_;
+  base::ScopedTempDir second_profile_downloads_dir_;
 };
 
 const BrowserCloseTest::DownloadsCloseCheckCase
@@ -501,27 +503,33 @@ std::string BrowserCloseTest::DownloadsCloseCheckCase::DebugString() const {
 // The following test is split into six chunks to reduce the chance
 // of hitting the 25s timeout.
 
-IN_PROC_BROWSER_TEST_F(BrowserCloseTest, DownloadsCloseCheck_0) {
+// This test is timing out very often under AddressSanitizer.
+// http://crbug.com/111914 and http://crbug.com/103371.
+// Crashing on Linux. http://crbug.com/100566
+// Timing out on XP debug. http://crbug.com/111914
+// Timing out, http://crbug.com/159449 .
+
+#define MAYBE_DownloadsCloseCheck_0 DISABLED_DownloadsCloseCheck_0
+#define MAYBE_DownloadsCloseCheck_1 DISABLED_DownloadsCloseCheck_1
+#define MAYBE_DownloadsCloseCheck_2 DISABLED_DownloadsCloseCheck_2
+#define MAYBE_DownloadsCloseCheck_3 DISABLED_DownloadsCloseCheck_3
+#define MAYBE_DownloadsCloseCheck_4 DISABLED_DownloadsCloseCheck_4
+#define MAYBE_DownloadsCloseCheck_5 DISABLED_DownloadsCloseCheck_5
+
+IN_PROC_BROWSER_TEST_F(BrowserCloseTest, MAYBE_DownloadsCloseCheck_0) {
   ASSERT_TRUE(SetupForDownloadCloseCheck());
   for (size_t i = 0; i < arraysize(download_close_check_cases) / 6; ++i) {
     ExecuteDownloadCloseCheckCase(i);
   }
 }
 
-IN_PROC_BROWSER_TEST_F(BrowserCloseTest, DownloadsCloseCheck_1) {
+IN_PROC_BROWSER_TEST_F(BrowserCloseTest, MAYBE_DownloadsCloseCheck_1) {
   ASSERT_TRUE(SetupForDownloadCloseCheck());
   for (size_t i = arraysize(download_close_check_cases) / 6;
        i < 2 * arraysize(download_close_check_cases) / 6; ++i) {
     ExecuteDownloadCloseCheckCase(i);
   }
 }
-
-// Timing out on XP debug. http://crbug.com/111914
-#if defined(OS_WIN)
-#define MAYBE_DownloadsCloseCheck_2 FLAKY_DownloadsCloseCheck_2
-#else
-#define MAYBE_DownloadsCloseCheck_2 DownloadsCloseCheck_2
-#endif
 
 IN_PROC_BROWSER_TEST_F(BrowserCloseTest, MAYBE_DownloadsCloseCheck_2) {
   ASSERT_TRUE(SetupForDownloadCloseCheck());
@@ -531,7 +539,7 @@ IN_PROC_BROWSER_TEST_F(BrowserCloseTest, MAYBE_DownloadsCloseCheck_2) {
   }
 }
 
-IN_PROC_BROWSER_TEST_F(BrowserCloseTest, DownloadsCloseCheck_3) {
+IN_PROC_BROWSER_TEST_F(BrowserCloseTest, MAYBE_DownloadsCloseCheck_3) {
   ASSERT_TRUE(SetupForDownloadCloseCheck());
   for (size_t i = 3 * arraysize(download_close_check_cases) / 6;
        i < 4 * arraysize(download_close_check_cases) / 6; ++i) {
@@ -539,20 +547,13 @@ IN_PROC_BROWSER_TEST_F(BrowserCloseTest, DownloadsCloseCheck_3) {
   }
 }
 
-IN_PROC_BROWSER_TEST_F(BrowserCloseTest, DownloadsCloseCheck_4) {
+IN_PROC_BROWSER_TEST_F(BrowserCloseTest, MAYBE_DownloadsCloseCheck_4) {
   ASSERT_TRUE(SetupForDownloadCloseCheck());
   for (size_t i = 4 * arraysize(download_close_check_cases) / 6;
        i < 5 * arraysize(download_close_check_cases) / 6; ++i) {
     ExecuteDownloadCloseCheckCase(i);
   }
 }
-
-// Timing out on XP debug. http://crbug.com/111914
-#if defined(OS_WIN)
-#define MAYBE_DownloadsCloseCheck_5 FLAKY_DownloadsCloseCheck_5
-#else
-#define MAYBE_DownloadsCloseCheck_5 DownloadsCloseCheck_5
-#endif
 
 IN_PROC_BROWSER_TEST_F(BrowserCloseTest, MAYBE_DownloadsCloseCheck_5) {
   ASSERT_TRUE(SetupForDownloadCloseCheck());

@@ -4,16 +4,17 @@
 
 #ifndef CHROME_BROWSER_SYNC_GLUE_SYNCED_SESSION_H_
 #define CHROME_BROWSER_SYNC_GLUE_SYNCED_SESSION_H_
-#pragma once
 
 #include <map>
 #include <string>
 
 #include "base/time.h"
 #include "chrome/browser/sessions/session_id.h"
+#include "chrome/browser/sessions/session_types.h"
 
-struct SessionTab;
-struct SessionWindow;
+namespace content {
+class NavigationEntry;
+}
 
 namespace browser_sync {
 
@@ -53,6 +54,9 @@ struct SyncedSession {
   // itself and free'd on destruction.
   SyncedWindowMap windows;
 
+  // Converts the DeviceType enum value to a string. This is used
+  // in the NTP handler for foreign sessions for matching session
+  // types to an icon style.
   std::string DeviceTypeAsString() const {
     switch (device_type) {
       case SyncedSession::TYPE_WIN:
@@ -74,7 +78,7 @@ struct SyncedSession {
     }
   }
 
-  private:
+ private:
   DISALLOW_COPY_AND_ASSIGN(SyncedSession);
 };
 

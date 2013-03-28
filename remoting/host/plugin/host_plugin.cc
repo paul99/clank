@@ -1,4 +1,4 @@
-// Copyright (c) 2011 The Chromium Authors. All rights reserved.
+// Copyright (c) 2012 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -12,7 +12,8 @@
 #include "base/basictypes.h"
 #include "base/logging.h"
 #include "base/stringize_macros.h"
-#include "remoting/base/plugin_message_loop_proxy.h"
+#include "net/socket/ssl_server_socket.h"
+#include "remoting/base/plugin_thread_task_runner.h"
 #include "remoting/host/plugin/constants.h"
 #include "remoting/host/plugin/host_log_handler.h"
 #include "remoting/host/plugin/host_plugin_utils.h"
@@ -56,7 +57,7 @@ base::AtExitManager* g_at_exit_manager = NULL;
 // NPAPI plugin implementation for remoting host.
 // Documentation for most of the calls in this class can be found here:
 // https://developer.mozilla.org/en/Gecko_Plugin_API_Reference/Scripting_plugins
-class HostNPPlugin : public remoting::PluginMessageLoopProxy::Delegate {
+class HostNPPlugin : public remoting::PluginThreadTaskRunner::Delegate {
  public:
   // |mode| is the display mode of plug-in. Values:
   // NP_EMBED: (1) Instance was created by an EMBED tag and shares the browser
@@ -66,13 +67,26 @@ class HostNPPlugin : public remoting::PluginMessageLoopProxy::Delegate {
   HostNPPlugin(NPP instance, uint16 mode)
       : instance_(instance),
         scriptable_object_(NULL) {
+    plugin_task_runner_ = new remoting::PluginThreadTaskRunner(this);
+    plugin_auto_task_runner_ =
+        new remoting::AutoThreadTaskRunner(
+            plugin_task_runner_,
+            base::Bind(&remoting::PluginThreadTaskRunner::Quit,
+                       plugin_task_runner_));
   }
 
   ~HostNPPlugin() {
     if (scriptable_object_) {
+      DCHECK_EQ(scriptable_object_->referenceCount, 1UL);
       g_npnetscape_funcs->releaseobject(scriptable_object_);
       scriptable_object_ = NULL;
     }
+
+    // Process tasks on |plugin_task_runner_| until all references to
+    // |plugin_auto_task_runner_| have been dropped. This requires that the
+    // browser has dropped any script object references - see above.
+    plugin_auto_task_runner_ = NULL;
+    plugin_task_runner_->DetachAndRunShutdownLoop();
   }
 
   bool Init(int16 argc, char** argn, char** argv, NPSavedData* saved) {
@@ -114,6 +128,7 @@ class HostNPPlugin : public remoting::PluginMessageLoopProxy::Delegate {
       return false;
     }
 #endif  // OS_MACOSX
+    net::EnableSSLServerSockets();
     return true;
   }
 
@@ -146,19 +161,25 @@ class HostNPPlugin : public remoting::PluginMessageLoopProxy::Delegate {
     return scriptable_object_;
   }
 
-  // PluginMessageLoopProxy::Delegate implementation.
+  // PluginThreadTaskRunner::Delegate implementation.
   virtual bool RunOnPluginThread(
-      int delay_ms, void(function)(void*), void* data) OVERRIDE {
-    if (delay_ms == 0) {
+      base::TimeDelta delay, void(function)(void*), void* data) OVERRIDE {
+    if (delay == base::TimeDelta()) {
       g_npnetscape_funcs->pluginthreadasynccall(instance_, function, data);
     } else {
       base::AutoLock auto_lock(timers_lock_);
       uint32_t timer_id = g_npnetscape_funcs->scheduletimer(
-          instance_, delay_ms, false, &NPDelayedTaskSpringboard);
+          instance_, delay.InMilliseconds(), false, &NPDelayedTaskSpringboard);
       DelayedTask task = {function, data};
       timers_[timer_id] = task;
     }
     return true;
+  }
+
+  void SetWindow(NPWindow* np_window) {
+    if (scriptable_object_) {
+      ScriptableFromObject(scriptable_object_)->SetWindow(np_window);
+    }
   }
 
   static void NPDelayedTaskSpringboard(NPP npp, uint32_t timer_id) {
@@ -198,11 +219,8 @@ class HostNPPlugin : public remoting::PluginMessageLoopProxy::Delegate {
 
     object->_class = aClass;
     object->referenceCount = 1;
-    object->scriptable_object = new HostNPScriptObject(npp, object, plugin);
-    if (!object->scriptable_object->Init()) {
-      Deallocate(object);
-      object = NULL;
-    }
+    object->scriptable_object =
+        new HostNPScriptObject(npp, object, plugin->plugin_auto_task_runner_);
     return object;
   }
 
@@ -326,6 +344,9 @@ class HostNPPlugin : public remoting::PluginMessageLoopProxy::Delegate {
   NPP instance_;
   NPObject* scriptable_object_;
 
+  scoped_refptr<remoting::PluginThreadTaskRunner> plugin_task_runner_;
+  scoped_refptr<remoting::AutoThreadTaskRunner> plugin_auto_task_runner_;
+
   std::map<uint32_t, DelayedTask> timers_;
   base::Lock timers_lock_;
 };
@@ -419,6 +440,10 @@ NPError HandleEvent(NPP instance, void* ev) {
 
 NPError SetWindow(NPP instance, NPWindow* pNPWindow) {
   VLOG(2) << "SetWindow";
+  HostNPPlugin* plugin = PluginFromInstance(instance);
+  if (plugin) {
+    plugin->SetWindow(pNPWindow);
+  }
   return NPERR_NO_ERROR;
 }
 
@@ -491,9 +516,7 @@ EXPORT NPError API_CALL NP_Shutdown() {
 #if defined(OS_POSIX) && !defined(OS_MACOSX)
 EXPORT const char* API_CALL NP_GetMIMEDescription(void) {
   VLOG(2) << "NP_GetMIMEDescription";
-  return HOST_PLUGIN_MIME_TYPE ":"
-      HOST_PLUGIN_NAME ":"
-      HOST_PLUGIN_DESCRIPTION;
+  return HOST_PLUGIN_MIME_TYPE "::";
 }
 
 EXPORT NPError API_CALL NP_GetValue(void* npp,

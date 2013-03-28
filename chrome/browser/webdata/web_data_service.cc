@@ -1,4 +1,4 @@
-// Copyright (c) 2011 The Chromium Authors. All rights reserved.
+// Copyright (c) 2012 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -11,6 +11,7 @@
 #include "chrome/browser/autofill/autofill_country.h"
 #include "chrome/browser/autofill/autofill_profile.h"
 #include "chrome/browser/autofill/credit_card.h"
+#include "chrome/browser/intents/default_web_intent_service.h"
 #include "chrome/browser/profiles/profile.h"
 #include "chrome/browser/search_engines/template_url.h"
 #include "chrome/browser/ui/profile_error_dialog.h"
@@ -27,14 +28,16 @@
 #include "chrome/browser/webdata/web_intents_table.h"
 #include "chrome/common/chrome_constants.h"
 #include "chrome/common/chrome_notification_types.h"
+#include "chrome/common/form_field_data.h"
+#ifdef DEBUG
+#include "content/public/browser/browser_thread.h"
+#endif
 #include "content/public/browser/notification_details.h"
 #include "content/public/browser/notification_service.h"
 #include "content/public/browser/notification_source.h"
 #include "grit/chromium_strings.h"
 #include "grit/generated_resources.h"
 #include "third_party/skia/include/core/SkBitmap.h"
-#include "webkit/forms/form_field.h"
-#include "webkit/forms/password_form.h"
 
 ////////////////////////////////////////////////////////////////////////////////
 //
@@ -45,8 +48,6 @@
 using base::Bind;
 using base::Time;
 using content::BrowserThread;
-using webkit::forms::FormField;
-using webkit::forms::PasswordForm;
 using webkit_glue::WebIntentServiceData;
 
 namespace {
@@ -59,7 +60,7 @@ void NotifyOfMultipleAutofillChangesTask(
 
   content::NotificationService::current()->Notify(
       chrome::NOTIFICATION_AUTOFILL_MULTIPLE_CHANGED,
-      content::Source<WebDataService>(web_data_service.get()),
+      content::Source<WebDataServiceBase>(web_data_service.get()),
       content::NotificationService::NoDetails());
 }
 
@@ -77,14 +78,18 @@ WDKeywordsResult::WDKeywordsResult()
 WDKeywordsResult::~WDKeywordsResult() {}
 
 WebDataService::WebDataService()
-  : is_running_(false),
-    db_(NULL),
-    autocomplete_syncable_service_(NULL),
-    autofill_profile_syncable_service_(NULL),
-    failed_init_(false),
-    should_commit_(false),
-    next_request_handle_(1),
-    main_loop_(MessageLoop::current()) {
+    : is_running_(false),
+      db_(NULL),
+      autocomplete_syncable_service_(NULL),
+      autofill_profile_syncable_service_(NULL),
+      failed_init_(false),
+      should_commit_(false),
+      next_request_handle_(1),
+      main_loop_(MessageLoop::current()) {
+  // WebDataService requires DB thread if instantiated.
+  // Set WebDataServiceFactory::GetInstance()->SetTestingFactory(&profile, NULL)
+  // if you do not want to instantiate WebDataService in your test.
+  DCHECK(BrowserThread::IsWellKnownThread(BrowserThread::DB));
 }
 
 // static
@@ -101,16 +106,16 @@ void WebDataService::NotifyOfMultipleAutofillChanges(
            make_scoped_refptr(web_data_service)));
 }
 
+void WebDataService::ShutdownOnUIThread() {
+  ScheduleTask(FROM_HERE,
+               Bind(&WebDataService::ShutdownSyncableServices, this));
+  UnloadDatabase();
+}
+
 bool WebDataService::Init(const FilePath& profile_path) {
   FilePath path = profile_path;
   path = path.Append(chrome::kWebDataFilename);
   return InitWithPath(path);
-}
-
-void WebDataService::Shutdown() {
-  ScheduleTask(FROM_HERE,
-               Bind(&WebDataService::ShutdownSyncableServices, this));
-  UnloadDatabase();
 }
 
 bool WebDataService::IsRunning() const {
@@ -131,6 +136,10 @@ void WebDataService::CancelRequest(Handle h) {
   i->second->Cancel();
 }
 
+content::NotificationSource WebDataService::GetNotificationSource() {
+  return content::Source<WebDataService>(this);
+}
+
 bool WebDataService::IsDatabaseLoaded() {
   return db_ != NULL;
 }
@@ -146,31 +155,26 @@ WebDatabase* WebDataService::GetDatabase() {
 //
 //////////////////////////////////////////////////////////////////////////////
 
-void WebDataService::AddKeyword(const TemplateURL& url) {
-  // Ensure that the keyword is already generated (and cached) before caching
-  // the TemplateURL for use on another keyword.
-  url.EnsureKeyword();
-  GenericRequest<TemplateURL>* request =
-    new GenericRequest<TemplateURL>(this, GetNextRequestHandle(), NULL, url);
+void WebDataService::AddKeyword(const TemplateURLData& data) {
+  GenericRequest<TemplateURLData>* request =
+      new GenericRequest<TemplateURLData>(this, GetNextRequestHandle(), NULL,
+                                          data);
   RegisterRequest(request);
   ScheduleTask(FROM_HERE, Bind(&WebDataService::AddKeywordImpl, this, request));
 }
 
-void WebDataService::RemoveKeyword(const TemplateURL& url) {
+void WebDataService::RemoveKeyword(TemplateURLID id) {
   GenericRequest<TemplateURLID>* request =
-      new GenericRequest<TemplateURLID>(this, GetNextRequestHandle(),
-                                        NULL, url.id());
+      new GenericRequest<TemplateURLID>(this, GetNextRequestHandle(), NULL, id);
   RegisterRequest(request);
   ScheduleTask(FROM_HERE,
                Bind(&WebDataService::RemoveKeywordImpl, this, request));
 }
 
-void WebDataService::UpdateKeyword(const TemplateURL& url) {
-  // Ensure that the keyword is already generated (and cached) before caching
-  // the TemplateURL for use on another keyword.
-  url.EnsureKeyword();
-  GenericRequest<TemplateURL>* request =
-      new GenericRequest<TemplateURL>(this, GetNextRequestHandle(), NULL, url);
+void WebDataService::UpdateKeyword(const TemplateURLData& data) {
+  GenericRequest<TemplateURLData>* request =
+      new GenericRequest<TemplateURLData>(this, GetNextRequestHandle(), NULL,
+                                          data);
   RegisterRequest(request);
   ScheduleTask(FROM_HERE,
                Bind(&WebDataService::UpdateKeywordImpl, this, request));
@@ -187,11 +191,8 @@ WebDataService::Handle WebDataService::GetKeywords(
 }
 
 void WebDataService::SetDefaultSearchProvider(const TemplateURL* url) {
-  GenericRequest<TemplateURLID>* request =
-    new GenericRequest<TemplateURLID>(this,
-                                      GetNextRequestHandle(),
-                                      NULL,
-                                      url ? url->id() : 0);
+  GenericRequest<TemplateURLID>* request = new GenericRequest<TemplateURLID>(
+      this, GetNextRequestHandle(), NULL, url ? url->id() : 0);
   RegisterRequest(request);
   ScheduleTask(FROM_HERE, Bind(&WebDataService::SetDefaultSearchProviderImpl,
                                this, request));
@@ -199,7 +200,7 @@ void WebDataService::SetDefaultSearchProvider(const TemplateURL* url) {
 
 void WebDataService::SetBuiltinKeywordVersion(int version) {
   GenericRequest<int>* request =
-    new GenericRequest<int>(this, GetNextRequestHandle(), NULL, version);
+      new GenericRequest<int>(this, GetNextRequestHandle(), NULL, version);
   RegisterRequest(request);
   ScheduleTask(FROM_HERE, Bind(&WebDataService::SetBuiltinKeywordVersionImpl,
                                this, request));
@@ -275,7 +276,7 @@ void WebDataService::RemoveWebIntentService(
                                this, request));
 }
 
-WebDataService::Handle WebDataService::GetWebIntentServices(
+WebDataService::Handle WebDataService::GetWebIntentServicesForAction(
     const string16& action,
     WebDataServiceConsumer* consumer) {
   DCHECK(consumer);
@@ -308,6 +309,64 @@ WebDataService::Handle WebDataService::GetAllWebIntentServices(
   RegisterRequest(request);
   ScheduleTask(FROM_HERE, Bind(&WebDataService::GetAllWebIntentServicesImpl,
                                this, request));
+  return request->GetHandle();
+}
+
+void WebDataService::AddDefaultWebIntentService(
+    const DefaultWebIntentService& service) {
+  GenericRequest<DefaultWebIntentService>* request =
+      new GenericRequest<DefaultWebIntentService>(
+          this, GetNextRequestHandle(), NULL, service);
+  RegisterRequest(request);
+  ScheduleTask(FROM_HERE,
+               Bind(&WebDataService::AddDefaultWebIntentServiceImpl, this,
+                    request));
+}
+
+void WebDataService::RemoveDefaultWebIntentService(
+    const DefaultWebIntentService& service) {
+  GenericRequest<DefaultWebIntentService>* request =
+      new GenericRequest<DefaultWebIntentService>(
+          this, GetNextRequestHandle(), NULL, service);
+  RegisterRequest(request);
+  ScheduleTask(FROM_HERE,
+               Bind(&WebDataService::RemoveDefaultWebIntentServiceImpl, this,
+                    request));
+}
+
+void WebDataService::RemoveWebIntentServiceDefaults(
+    const GURL& service_url) {
+  GenericRequest<GURL>* request =
+      new GenericRequest<GURL>(
+          this, GetNextRequestHandle(), NULL, service_url);
+  RegisterRequest(request);
+  ScheduleTask(
+      FROM_HERE,
+      Bind(&WebDataService::RemoveWebIntentServiceDefaultsImpl, this, request));
+}
+
+WebDataService::Handle WebDataService::GetDefaultWebIntentServicesForAction(
+    const string16& action,
+    WebDataServiceConsumer* consumer) {
+  DCHECK(consumer);
+  GenericRequest<string16>* request = new GenericRequest<string16>(
+          this, GetNextRequestHandle(), consumer, action);
+  RegisterRequest(request);
+  ScheduleTask(FROM_HERE,
+               Bind(&WebDataService::GetDefaultWebIntentServicesForActionImpl,
+                    this, request));
+  return request->GetHandle();
+}
+
+WebDataService::Handle WebDataService::GetAllDefaultWebIntentServices(
+    WebDataServiceConsumer* consumer) {
+  DCHECK(consumer);
+  GenericRequest<std::string>* request = new GenericRequest<std::string>(
+      this, GetNextRequestHandle(), consumer, std::string());
+  RegisterRequest(request);
+  ScheduleTask(FROM_HERE,
+               Bind(&WebDataService::GetAllDefaultWebIntentServicesImpl,
+                    this, request));
   return request->GetHandle();
 }
 
@@ -351,94 +410,14 @@ WebDataService::Handle WebDataService::GetAllTokens(
 
 ////////////////////////////////////////////////////////////////////////////////
 //
-// Password manager.
-//
-////////////////////////////////////////////////////////////////////////////////
-
-void WebDataService::AddLogin(const PasswordForm& form) {
-  GenericRequest<PasswordForm>* request =
-      new GenericRequest<PasswordForm>(this, GetNextRequestHandle(), NULL,
-                                       form);
-  RegisterRequest(request);
-  ScheduleTask(FROM_HERE, Bind(&WebDataService::AddLoginImpl, this, request));
-}
-
-void WebDataService::UpdateLogin(const PasswordForm& form) {
-  GenericRequest<PasswordForm>* request =
-      new GenericRequest<PasswordForm>(this, GetNextRequestHandle(),
-                                       NULL, form);
-  RegisterRequest(request);
-  ScheduleTask(FROM_HERE,
-               Bind(&WebDataService::UpdateLoginImpl, this, request));
-}
-
-void WebDataService::RemoveLogin(const PasswordForm& form) {
-  GenericRequest<PasswordForm>* request =
-     new GenericRequest<PasswordForm>(this, GetNextRequestHandle(), NULL,
-                                      form);
-  RegisterRequest(request);
-  ScheduleTask(FROM_HERE,
-               Bind(&WebDataService::RemoveLoginImpl, this, request));
-}
-
-void WebDataService::RemoveLoginsCreatedBetween(const Time& delete_begin,
-                                                const Time& delete_end) {
-  GenericRequest2<Time, Time>* request =
-    new GenericRequest2<Time, Time>(this,
-                                    GetNextRequestHandle(),
-                                    NULL,
-                                    delete_begin,
-                                    delete_end);
-  RegisterRequest(request);
-  ScheduleTask(FROM_HERE, Bind(&WebDataService::RemoveLoginsCreatedBetweenImpl,
-                               this, request));
-}
-
-void WebDataService::RemoveLoginsCreatedAfter(const Time& delete_begin) {
-  RemoveLoginsCreatedBetween(delete_begin, Time());
-}
-
-WebDataService::Handle WebDataService::GetLogins(
-                                       const PasswordForm& form,
-                                       WebDataServiceConsumer* consumer) {
-  GenericRequest<PasswordForm>* request =
-      new GenericRequest<PasswordForm>(this, GetNextRequestHandle(),
-                                       consumer, form);
-  RegisterRequest(request);
-  ScheduleTask(FROM_HERE, Bind(&WebDataService::GetLoginsImpl, this, request));
-  return request->GetHandle();
-}
-
-WebDataService::Handle WebDataService::GetAutofillableLogins(
-    WebDataServiceConsumer* consumer) {
-  WebDataRequest* request =
-      new WebDataRequest(this, GetNextRequestHandle(), consumer);
-  RegisterRequest(request);
-  ScheduleTask(FROM_HERE,
-               Bind(&WebDataService::GetAutofillableLoginsImpl, this, request));
-  return request->GetHandle();
-}
-
-WebDataService::Handle WebDataService::GetBlacklistLogins(
-    WebDataServiceConsumer* consumer) {
-  WebDataRequest* request =
-      new WebDataRequest(this, GetNextRequestHandle(), consumer);
-  RegisterRequest(request);
-  ScheduleTask(FROM_HERE,
-               Bind(&WebDataService::GetBlacklistLoginsImpl, this, request));
-  return request->GetHandle();
-}
-
-////////////////////////////////////////////////////////////////////////////////
-//
 // Autofill.
 //
 ////////////////////////////////////////////////////////////////////////////////
 
 void WebDataService::AddFormFields(
-    const std::vector<FormField>& fields) {
-  GenericRequest<std::vector<FormField> >* request =
-      new GenericRequest<std::vector<FormField> >(
+    const std::vector<FormFieldData>& fields) {
+  GenericRequest<std::vector<FormFieldData> >* request =
+      new GenericRequest<std::vector<FormFieldData> >(
           this, GetNextRequestHandle(), NULL, fields);
   RegisterRequest(request);
   ScheduleTask(FROM_HERE,
@@ -468,6 +447,15 @@ void WebDataService::RemoveFormElementsAddedBetween(const Time& delete_begin,
   RegisterRequest(request);
   ScheduleTask(FROM_HERE,
                Bind(&WebDataService::RemoveFormElementsAddedBetweenImpl,
+                    this, request));
+}
+
+void WebDataService::RemoveExpiredFormElements() {
+  WebDataRequest* request =
+      new WebDataRequest(this, GetNextRequestHandle(), NULL);
+  RegisterRequest(request);
+  ScheduleTask(FROM_HERE,
+               Bind(&WebDataService::RemoveExpiredFormElementsImpl,
                     this, request));
 }
 
@@ -585,6 +573,7 @@ void WebDataService::RemoveAutofillProfilesAndCreditCardsModifiedBetween(
 WebDataService::~WebDataService() {
   if (is_running_ && db_) {
     DLOG_ASSERT("WebDataService dtor called without Shutdown");
+    NOTREACHED();
   }
 }
 
@@ -596,7 +585,9 @@ bool WebDataService::InitWithPath(const FilePath& path) {
   // [ http://crbug.com/100745 ], call |AutofillCountry::ApplicationLocale()| to
   // cache the application locale before we try to access it on the DB thread.
   // This should be safe to remove once [ http://crbug.com/100845 ] is fixed.
-  AutofillCountry::ApplicationLocale();
+  // Do not do it if the thread is not UI (can happen only in some tests).
+  if (BrowserThread::CurrentlyOn(BrowserThread::UI))
+    AutofillCountry::ApplicationLocale();
 
   ScheduleTask(FROM_HERE,
                Bind(&WebDataService::InitializeDatabaseIfNecessary, this));
@@ -766,7 +757,7 @@ int WebDataService::GetNextRequestHandle() {
 //
 ////////////////////////////////////////////////////////////////////////////////
 
-void WebDataService::AddKeywordImpl(GenericRequest<TemplateURL>* request) {
+void WebDataService::AddKeywordImpl(GenericRequest<TemplateURLData>* request) {
   InitializeDatabaseIfNecessary();
   if (db_ && !request->IsCancelled(NULL)) {
     db_->GetKeywordTable()->AddKeyword(request->arg());
@@ -775,8 +766,7 @@ void WebDataService::AddKeywordImpl(GenericRequest<TemplateURL>* request) {
   request->RequestComplete();
 }
 
-void WebDataService::RemoveKeywordImpl(
-    GenericRequest<TemplateURLID>* request) {
+void WebDataService::RemoveKeywordImpl(GenericRequest<TemplateURLID>* request) {
   InitializeDatabaseIfNecessary();
   if (db_ && !request->IsCancelled(NULL)) {
     DCHECK(request->arg());
@@ -786,7 +776,8 @@ void WebDataService::RemoveKeywordImpl(
   request->RequestComplete();
 }
 
-void WebDataService::UpdateKeywordImpl(GenericRequest<TemplateURL>* request) {
+void WebDataService::UpdateKeywordImpl(
+    GenericRequest<TemplateURLData>* request) {
   InitializeDatabaseIfNecessary();
   if (db_ && !request->IsCancelled(NULL)) {
     if (!db_->GetKeywordTable()->UpdateKeyword(request->arg())) {
@@ -807,12 +798,6 @@ void WebDataService::GetKeywordsImpl(WebDataRequest* request) {
         db_->GetKeywordTable()->GetDefaultSearchProviderID();
     result.builtin_keyword_version =
         db_->GetKeywordTable()->GetBuiltinKeywordVersion();
-    result.did_default_search_provider_change =
-        db_->GetKeywordTable()->DidDefaultSearchProviderChange();
-    result.default_search_provider_backup =
-        result.did_default_search_provider_change ?
-        db_->GetKeywordTable()->GetDefaultSearchProviderBackup() :
-        NULL;
     request->SetResult(
         new WDResult<WDKeywordsResult>(KEYWORDS_RESULT, result));
   }
@@ -929,10 +914,10 @@ void WebDataService::GetWebIntentServicesImpl(
   InitializeDatabaseIfNecessary();
   if (db_ && !request->IsCancelled(NULL)) {
     std::vector<WebIntentServiceData> result;
-    db_->GetWebIntentsTable()->GetWebIntentServices(request->arg(), &result);
-    request->SetResult(
-        new WDResult<std::vector<WebIntentServiceData> >(
-            WEB_INTENTS_RESULT, result));
+    db_->GetWebIntentsTable()->GetWebIntentServicesForAction(request->arg(),
+                                                             &result);
+    request->SetResult(new WDResult<std::vector<WebIntentServiceData> >(
+        WEB_INTENTS_RESULT, result));
   }
   request->RequestComplete();
 }
@@ -960,6 +945,66 @@ void WebDataService::GetAllWebIntentServicesImpl(
     request->SetResult(
         new WDResult<std::vector<WebIntentServiceData> >(
             WEB_INTENTS_RESULT, result));
+  }
+  request->RequestComplete();
+}
+
+void WebDataService::AddDefaultWebIntentServiceImpl(
+    GenericRequest<DefaultWebIntentService>* request) {
+  InitializeDatabaseIfNecessary();
+  if (db_ && !request->IsCancelled(NULL)) {
+    const DefaultWebIntentService& service = request->arg();
+    db_->GetWebIntentsTable()->SetDefaultService(service);
+    ScheduleCommit();
+  }
+  request->RequestComplete();
+}
+
+void WebDataService::RemoveDefaultWebIntentServiceImpl(
+    GenericRequest<DefaultWebIntentService>* request) {
+  InitializeDatabaseIfNecessary();
+  if (db_ && !request->IsCancelled(NULL)) {
+    const DefaultWebIntentService& service = request->arg();
+    db_->GetWebIntentsTable()->RemoveDefaultService(service);
+    ScheduleCommit();
+  }
+  request->RequestComplete();
+}
+
+void WebDataService::RemoveWebIntentServiceDefaultsImpl(
+    GenericRequest<GURL>* request) {
+  InitializeDatabaseIfNecessary();
+  if (db_ && !request->IsCancelled(NULL)) {
+    const GURL& service_url = request->arg();
+    db_->GetWebIntentsTable()->RemoveServiceDefaults(service_url);
+    ScheduleCommit();
+  }
+  request->RequestComplete();
+}
+
+void WebDataService::GetDefaultWebIntentServicesForActionImpl(
+    GenericRequest<string16>* request) {
+  InitializeDatabaseIfNecessary();
+  if (db_ && !request->IsCancelled(NULL)) {
+    std::vector<DefaultWebIntentService> result;
+    db_->GetWebIntentsTable()->GetDefaultServices(
+        request->arg(), &result);
+    request->SetResult(
+        new WDResult<std::vector<DefaultWebIntentService> >(
+            WEB_INTENTS_DEFAULTS_RESULT, result));
+  }
+  request->RequestComplete();
+}
+
+void WebDataService::GetAllDefaultWebIntentServicesImpl(
+    GenericRequest<std::string>* request) {
+  InitializeDatabaseIfNecessary();
+  if (db_ && !request->IsCancelled(NULL)) {
+    std::vector<DefaultWebIntentService> result;
+    db_->GetWebIntentsTable()->GetAllDefaultServices(&result);
+    request->SetResult(
+        new WDResult<std::vector<DefaultWebIntentService> >(
+            WEB_INTENTS_DEFAULTS_RESULT, result));
   }
   request->RequestComplete();
 }
@@ -1009,100 +1054,12 @@ void WebDataService::GetAllTokensImpl(
 
 ////////////////////////////////////////////////////////////////////////////////
 //
-// Password manager implementation.
-//
-////////////////////////////////////////////////////////////////////////////////
-
-void WebDataService::AddLoginImpl(GenericRequest<PasswordForm>* request) {
-  InitializeDatabaseIfNecessary();
-  if (db_ && !request->IsCancelled(NULL)) {
-    if (db_->GetLoginsTable()->AddLogin(request->arg()))
-      ScheduleCommit();
-  }
-  request->RequestComplete();
-}
-
-void WebDataService::UpdateLoginImpl(GenericRequest<PasswordForm>* request) {
-  InitializeDatabaseIfNecessary();
-  if (db_ && !request->IsCancelled(NULL)) {
-    if (db_->GetLoginsTable()->UpdateLogin(request->arg()))
-      ScheduleCommit();
-  }
-  request->RequestComplete();
-}
-
-void WebDataService::RemoveLoginImpl(GenericRequest<PasswordForm>* request) {
-  InitializeDatabaseIfNecessary();
-  if (db_ && !request->IsCancelled(NULL)) {
-    if (db_->GetLoginsTable()->RemoveLogin(request->arg()))
-      ScheduleCommit();
-  }
-  request->RequestComplete();
-}
-
-void WebDataService::RemoveLoginsCreatedBetweenImpl(
-    GenericRequest2<Time, Time>* request) {
-  InitializeDatabaseIfNecessary();
-  if (db_ && !request->IsCancelled(NULL)) {
-    if (db_->GetLoginsTable()->RemoveLoginsCreatedBetween(
-            request->arg1(), request->arg2())) {
-      ScheduleCommit();
-    }
-  }
-  request->RequestComplete();
-}
-
-void WebDataService::GetLoginsImpl(GenericRequest<PasswordForm>* request) {
-  InitializeDatabaseIfNecessary();
-  if (db_ && !request->IsCancelled(NULL)) {
-    std::vector<PasswordForm*> forms;
-    db_->GetLoginsTable()->GetLogins(request->arg(), &forms);
-    request->SetResult(
-        new WDResult<std::vector<PasswordForm*> >(PASSWORD_RESULT, forms));
-  }
-  request->RequestComplete();
-}
-
-void WebDataService::GetAutofillableLoginsImpl(WebDataRequest* request) {
-  InitializeDatabaseIfNecessary();
-  if (db_ && !request->IsCancelled(NULL)) {
-    std::vector<PasswordForm*> forms;
-    db_->GetLoginsTable()->GetAllLogins(&forms, false);
-    request->SetResult(
-        new WDResult<std::vector<PasswordForm*> >(PASSWORD_RESULT, forms));
-  }
-  request->RequestComplete();
-}
-
-void WebDataService::GetBlacklistLoginsImpl(WebDataRequest* request) {
-  InitializeDatabaseIfNecessary();
-  if (db_ && !request->IsCancelled(NULL)) {
-    std::vector<PasswordForm*> all_forms;
-    db_->GetLoginsTable()->GetAllLogins(&all_forms, true);
-    std::vector<PasswordForm*> blacklist_forms;
-    for (std::vector<PasswordForm*>::iterator i = all_forms.begin();
-         i != all_forms.end(); ++i) {
-      scoped_ptr<PasswordForm> form(*i);
-      if (form->blacklisted_by_user) {
-        blacklist_forms.push_back(form.release());
-      }
-    }
-    all_forms.clear();
-    request->SetResult(
-        new WDResult<std::vector<PasswordForm*> >(PASSWORD_RESULT,
-                                                  blacklist_forms));
-  }
-  request->RequestComplete();
-}
-
-////////////////////////////////////////////////////////////////////////////////
-//
 // Autofill implementation.
 //
 ////////////////////////////////////////////////////////////////////////////////
 
 void WebDataService::AddFormElementsImpl(
-    GenericRequest<std::vector<FormField> >* request) {
+    GenericRequest<std::vector<FormFieldData> >* request) {
   InitializeDatabaseIfNecessary();
   if (db_ && !request->IsCancelled(NULL)) {
     AutofillChangeList changes;
@@ -1147,6 +1104,29 @@ void WebDataService::RemoveFormElementsAddedBetweenImpl(
     AutofillChangeList changes;
     if (db_->GetAutofillTable()->RemoveFormElementsAddedBetween(
         request->arg1(), request->arg2(), &changes)) {
+      if (!changes.empty()) {
+        request->SetResult(
+            new WDResult<AutofillChangeList>(AUTOFILL_CHANGES, changes));
+
+        // Post the notifications including the list of affected keys.
+        // This is sent here so that work resulting from this notification
+        // will be done on the DB thread, and not the UI thread.
+        content::NotificationService::current()->Notify(
+            chrome::NOTIFICATION_AUTOFILL_ENTRIES_CHANGED,
+            content::Source<WebDataService>(this),
+            content::Details<AutofillChangeList>(&changes));
+      }
+      ScheduleCommit();
+    }
+  }
+  request->RequestComplete();
+}
+
+void WebDataService::RemoveExpiredFormElementsImpl(WebDataRequest* request) {
+  InitializeDatabaseIfNecessary();
+  if (db_ && !request->IsCancelled(NULL)) {
+    AutofillChangeList changes;
+    if (db_->GetAutofillTable()->RemoveExpiredFormElements(&changes)) {
       if (!changes.empty()) {
         request->SetResult(
             new WDResult<AutofillChangeList>(AUTOFILL_CHANGES, changes));

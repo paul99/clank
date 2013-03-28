@@ -14,7 +14,7 @@
 #include "unicode/uchar.h"
 #include "unicode/uscript.h"
 
-#if defined(TOOLKIT_USES_GTK)
+#if defined(TOOLKIT_GTK)
 #include <gtk/gtk.h>
 #endif
 
@@ -100,15 +100,6 @@ void SetICUDefaultLocale(const std::string& locale_string) {
   // it does not hurt to have it as a sanity check.
   DCHECK(U_SUCCESS(error_code));
   g_icu_text_direction = UNKNOWN_DIRECTION;
-
-  // If we use Views toolkit on top of GtkWidget, then we need to keep
-  // GtkWidget's default text direction consistent with ICU's text direction.
-  // Because in this case ICU's text direction will be used instead.
-  // See IsRTL() function below.
-#if defined(TOOLKIT_USES_GTK) && !defined(TOOLKIT_GTK)
-  gtk_widget_set_default_direction(
-      ICUIsRTL() ? GTK_TEXT_DIR_RTL : GTK_TEXT_DIR_LTR);
-#endif
 }
 
 bool IsRTL() {
@@ -298,7 +289,6 @@ void WrapStringWithLTRFormatting(string16* text) {
   text->push_back(kPopDirectionalFormatting);
 }
 
-
 void WrapStringWithRTLFormatting(string16* text) {
   if (text->empty())
     return;
@@ -329,11 +319,14 @@ void WrapPathWithLTRFormatting(const FilePath& path,
 }
 
 string16 GetDisplayStringInLTRDirectionality(const string16& text) {
-  if (!IsRTL())
-    return text;
-  string16 text_mutable(text);
-  WrapStringWithLTRFormatting(&text_mutable);
-  return text_mutable;
+  // Always wrap the string in RTL UI (it may be appended to RTL string).
+  // Also wrap strings with an RTL first strong character direction in LTR UI.
+  if (IsRTL() || GetFirstStrongCharacterDirection(text) == RIGHT_TO_LEFT) {
+    string16 text_mutable(text);
+    WrapStringWithLTRFormatting(&text_mutable);
+    return text_mutable;
+  }
+  return text;
 }
 
 string16 StripWrappingBidiControlCharacters(const string16& text) {

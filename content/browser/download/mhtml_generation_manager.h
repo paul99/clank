@@ -1,4 +1,4 @@
-// Copyright (c) 2011 The Chromium Authors. All rights reserved.
+// Copyright (c) 2012 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -7,32 +7,26 @@
 
 #include <map>
 
-#include "base/memory/ref_counted.h"
+#include "base/memory/singleton.h"
 #include "base/platform_file.h"
 #include "base/process.h"
-#include "content/common/content_export.h"
-#include "content/public/browser/browser_thread.h"
 #include "ipc/ipc_platform_file.h"
 
 class FilePath;
 
 namespace content {
 class WebContents;
-}
 
-class CONTENT_EXPORT MHTMLGenerationManager
-    : public base::RefCountedThreadSafe<
-          MHTMLGenerationManager, content::BrowserThread::DeleteOnUIThread> {
+class MHTMLGenerationManager {
  public:
-  MHTMLGenerationManager();
-  ~MHTMLGenerationManager();
+  static MHTMLGenerationManager* GetInstance();
 
   typedef base::Callback<void(const FilePath& /* path to the MHTML file */,
       int64 /* size of the file */)> GenerateMHTMLCallback;
 
   // Instructs the render view to generate a MHTML representation of the current
   // page for |web_contents|.
-  void GenerateMHTML(content::WebContents* web_contents,
+  void GenerateMHTML(WebContents* web_contents,
                      const FilePath& file,
                      const GenerateMHTMLCallback& callback);
 
@@ -42,6 +36,8 @@ class CONTENT_EXPORT MHTMLGenerationManager
   void MHTMLGenerated(int job_id, int64 mhtml_data_size);
 
  private:
+  friend struct DefaultSingletonTraits<MHTMLGenerationManager>;
+
   struct Job{
     Job();
     ~Job();
@@ -53,13 +49,16 @@ class CONTENT_EXPORT MHTMLGenerationManager
     base::PlatformFile browser_file;
     IPC::PlatformFileForTransit renderer_file;
 
-    // The IDs mapping to a specific tab.
+    // The IDs mapping to a specific contents.
     int process_id;
     int routing_id;
 
     // The callback to call once generation is complete.
     GenerateMHTMLCallback callback;
   };
+
+  MHTMLGenerationManager();
+  ~MHTMLGenerationManager();
 
   // Called on the file thread to create |file|.
   void CreateFile(int job_id,
@@ -87,5 +86,7 @@ class CONTENT_EXPORT MHTMLGenerationManager
 
   DISALLOW_COPY_AND_ASSIGN(MHTMLGenerationManager);
 };
+
+}  // namespace content
 
 #endif  // CONTENT_BROWSER_DOWNLOAD_MHTML_GENERATION_MANAGER_H_

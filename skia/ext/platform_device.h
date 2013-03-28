@@ -1,10 +1,9 @@
-// Copyright (c) 2011 The Chromium Authors. All rights reserved.
+// Copyright (c) 2012 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
 #ifndef SKIA_EXT_PLATFORM_DEVICE_H_
 #define SKIA_EXT_PLATFORM_DEVICE_H_
-#pragma once
 
 #include "build/build_config.h"
 
@@ -43,13 +42,11 @@ typedef void* PlatformSurface;
 typedef SkIRect* PlatformRect;
 #elif defined(OS_LINUX) || defined(OS_OPENBSD) || defined(OS_FREEBSD) \
     || defined(OS_SUN)
-
 typedef cairo_t* PlatformSurface;
 typedef cairo_rectangle_t PlatformRect;
 #elif defined(OS_MACOSX)
 typedef CGContextRef PlatformSurface;
 typedef CGRect PlatformRect;
-
 #endif
 
 // The following routines provide accessor points for the functionality
@@ -124,13 +121,8 @@ class SK_API PlatformDevice {
   virtual void DrawToNativeContext(PlatformSurface surface, int x, int y,
                                    const PlatformRect* src_rect) = 0;
 
-  // Returns if GDI is allowed to render text to this device.
-  virtual bool IsNativeFontRenderingAllowed();
-
-  // True if AlphaBlend() was called during a
-  // BeginPlatformPaint()/EndPlatformPaint() pair.
-  // Used by the printing subclasses.  See |VectorPlatformDeviceEmf|.
-  virtual bool AlphaBlendUsed() const;
+  // Returns true if GDI operations can be used for drawing into the bitmap.
+  virtual bool SupportsPlatformPaint();
 
 #if defined(OS_WIN)
   // Loads a SkPath into the GDI context. The path can there after be used for

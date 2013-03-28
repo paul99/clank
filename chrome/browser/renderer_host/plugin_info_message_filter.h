@@ -4,20 +4,23 @@
 
 #ifndef CHROME_BROWSER_RENDERER_HOST_PLUGIN_INFO_MESSAGE_FILTER_H_
 #define CHROME_BROWSER_RENDERER_HOST_PLUGIN_INFO_MESSAGE_FILTER_H_
-#pragma once
 
 #include <string>
 #include <vector>
 
 #include "base/compiler_specific.h"
 #include "base/memory/weak_ptr.h"
-#include "chrome/browser/prefs/pref_member.h"
+#include "base/prefs/public/pref_member.h"
+#include "base/sequenced_task_runner_helpers.h"
 #include "chrome/common/content_settings.h"
 #include "content/public/browser/browser_message_filter.h"
 
+struct ChromeViewHostMsg_GetPluginInfo_Output;
 struct ChromeViewHostMsg_GetPluginInfo_Status;
 class GURL;
 class HostContentSettingsMap;
+class PluginFinder;
+class PluginMetadata;
 class Profile;
 
 namespace content {
@@ -41,27 +44,31 @@ class PluginInfoMessageFilter : public content::BrowserMessageFilter {
     Context();
     ~Context();
 
-    void DecidePluginStatus(const GetPluginInfo_Params& params,
-                            ChromeViewHostMsg_GetPluginInfo_Status* status,
-                            webkit::WebPluginInfo* plugin,
-                            std::string* actual_mime_type) const;
+    void DecidePluginStatus(
+        const GetPluginInfo_Params& params,
+        const webkit::WebPluginInfo& plugin,
+        const PluginMetadata* plugin_metadata,
+        ChromeViewHostMsg_GetPluginInfo_Status* status) const;
     bool FindEnabledPlugin(int render_view_id,
                            const GURL& url,
                            const GURL& top_origin_url,
                            const std::string& mime_type,
                            ChromeViewHostMsg_GetPluginInfo_Status* status,
                            webkit::WebPluginInfo* plugin,
-                           std::string* actual_mime_type) const;
-    void GetPluginContentSetting(const webkit::WebPluginInfo* plugin,
+                           std::string* actual_mime_type,
+                           scoped_ptr<PluginMetadata>* plugin_metadata) const;
+    void GetPluginContentSetting(const webkit::WebPluginInfo& plugin,
                                  const GURL& policy_url,
                                  const GURL& plugin_url,
                                  const std::string& resource,
                                  ContentSetting* setting,
                                  bool* is_default) const;
+    void GrantAccess(const ChromeViewHostMsg_GetPluginInfo_Status& status,
+                     const FilePath& path) const;
 
    private:
     int render_process_id_;
-    const content::ResourceContext* resource_context_;
+    content::ResourceContext* resource_context_;
     const HostContentSettingsMap* host_content_settings_map_;
 
     BooleanPrefMember allow_outdated_plugins_;
@@ -69,7 +76,6 @@ class PluginInfoMessageFilter : public content::BrowserMessageFilter {
   };
 
   PluginInfoMessageFilter(int render_process_id, Profile* profile);
-  virtual ~PluginInfoMessageFilter();
 
   // content::BrowserMessageFilter methods:
   virtual bool OnMessageReceived(const IPC::Message& message,
@@ -77,6 +83,12 @@ class PluginInfoMessageFilter : public content::BrowserMessageFilter {
   virtual void OnDestruct() const OVERRIDE;
 
  private:
+  friend struct content::BrowserThread::DeleteOnThread<
+      content::BrowserThread::UI>;
+  friend class base::DeleteHelper<PluginInfoMessageFilter>;
+
+  virtual ~PluginInfoMessageFilter();
+
   void OnGetPluginInfo(int render_view_id,
                        const GURL& url,
                        const GURL& top_origin_url,

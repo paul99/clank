@@ -1,31 +1,35 @@
-// Copyright (c) 2011 The Chromium Authors. All rights reserved.
+// Copyright (c) 2012 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
 #include "net/url_request/url_request_context_getter.h"
 
 #include "base/location.h"
-#include "base/message_loop_proxy.h"
+#include "base/single_thread_task_runner.h"
 #include "net/url_request/url_request_context.h"
 
 namespace net {
-CookieStore* URLRequestContextGetter::DONTUSEME_GetCookieStore() {
-  return NULL;
-}
 
 URLRequestContextGetter::URLRequestContextGetter() {}
 
 URLRequestContextGetter::~URLRequestContextGetter() {}
 
 void URLRequestContextGetter::OnDestruct() const {
-  scoped_refptr<base::MessageLoopProxy> io_message_loop_proxy =
-      GetIOMessageLoopProxy();
-  DCHECK(io_message_loop_proxy);
-  if (io_message_loop_proxy) {
-    if (io_message_loop_proxy->BelongsToCurrentThread())
+  scoped_refptr<base::SingleThreadTaskRunner> network_task_runner =
+      GetNetworkTaskRunner();
+  DCHECK(network_task_runner);
+  if (network_task_runner) {
+    if (network_task_runner->BelongsToCurrentThread()) {
       delete this;
-    else
-      io_message_loop_proxy->DeleteSoon(FROM_HERE, this);
+    } else {
+      if (!network_task_runner->DeleteSoon(FROM_HERE, this)) {
+        // Can't force-delete the object here, because some derived classes
+        // can only be deleted on the owning thread, so just emit a warning to
+        // aid in debugging.
+        DLOG(WARNING) << "URLRequestContextGetter leaking due to no owning"
+                      << " thread.";
+      }
+    }
   }
   // If no IO message loop proxy was available, we will just leak memory.
   // This is also true if the IO thread is gone.

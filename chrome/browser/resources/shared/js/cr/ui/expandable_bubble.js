@@ -22,7 +22,7 @@ cr.define('cr.ui', function() {
   ExpandableBubble.prototype = {
     __proto__: HTMLDivElement.prototype,
 
-    /** @inheritDoc */
+    /** @override */
     decorate: function() {
       this.className = 'expandable-bubble';
       this.innerHTML =
@@ -193,7 +193,7 @@ cr.define('cr.ui', function() {
      * @param {Event} e The event.
      * @private
      */
-    onNotificationClick_ : function(e) {
+    onNotificationClick_: function(e) {
       if (!this.contains(e.target))
         return;
 

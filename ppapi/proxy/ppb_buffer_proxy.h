@@ -1,4 +1,4 @@
-// Copyright (c) 2011 The Chromium Authors. All rights reserved.
+// Copyright (c) 2012 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -8,6 +8,7 @@
 #include "base/shared_memory.h"
 #include "ppapi/c/pp_instance.h"
 #include "ppapi/proxy/interface_proxy.h"
+#include "ppapi/proxy/serialized_structs.h"
 #include "ppapi/shared_impl/resource.h"
 #include "ppapi/thunk/ppb_buffer_api.h"
 
@@ -36,7 +37,6 @@ class Buffer : public thunk::PPB_Buffer_API, public Resource {
  private:
   base::SharedMemory shm_;
   uint32_t size_;
-  void* mapped_data_;
   int map_count_;
 
   DISALLOW_COPY_AND_ASSIGN(Buffer);
@@ -63,7 +63,7 @@ class PPB_Buffer_Proxy : public InterfaceProxy {
   void OnMsgCreate(PP_Instance instance,
                    uint32_t size,
                    HostResource* result_resource,
-                   base::SharedMemoryHandle* result_shm_handle);
+                   ppapi::proxy::SerializedHandle* result_shm_handle);
 };
 
 }  // namespace proxy

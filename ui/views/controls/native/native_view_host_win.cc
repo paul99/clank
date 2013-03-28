@@ -1,4 +1,4 @@
-// Copyright (c) 2011 The Chromium Authors. All rights reserved.
+// Copyright (c) 2012 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -7,6 +7,8 @@
 #include <oleacc.h>
 
 #include "base/logging.h"
+#include "ui/base/win/hidden_window.h"
+#include "ui/base/win/window_impl.h"
 #include "ui/gfx/canvas.h"
 #include "ui/views/controls/native/native_view_host.h"
 #include "ui/views/focus/focus_manager.h"
@@ -29,22 +31,18 @@ NativeViewHostWin::~NativeViewHostWin() {
 
 ////////////////////////////////////////////////////////////////////////////////
 // NativeViewHostWin, NativeViewHostWrapper implementation:
-void NativeViewHostWin::NativeViewAttached() {
-  DCHECK(host_->native_view())
-      << "Impossible detatched tab case; See crbug.com/6316";
-
+void NativeViewHostWin::NativeViewWillAttach() {
   // First hide the new window. We don't want anything to draw (like sub-hwnd
-  // borders), when we change the parent below.
+  // borders), when NativeViewHost changes the parent.
   ShowWindow(host_->native_view(), SW_HIDE);
-
-  Widget::ReparentNativeView(host_->native_view(),
-                             host_->GetWidget()->GetNativeView());
-  host_->Layout();
 }
 
 void NativeViewHostWin::NativeViewDetaching(bool destroyed) {
-  if (!destroyed && installed_clip_)
-    UninstallClip();
+  if (!destroyed) {
+    if (installed_clip_)
+      UninstallClip();
+    Widget::ReparentNativeView(host_->native_view(), ui::GetHiddenWindow());
+  }
   installed_clip_ = false;
 }
 

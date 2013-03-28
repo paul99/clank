@@ -1,4 +1,4 @@
-// Copyright (c) 2011 The Chromium Authors. All rights reserved.
+// Copyright (c) 2012 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -21,13 +21,14 @@ class SessionServiceFactory : public ProfileKeyedServiceFactory {
   // service hasn't yet been created, this forces creation of the session
   // service.
   //
-  // This returns NULL in two situations: the profile is incognito, or the
-  // session service has been explicitly shutdown (browser is exiting). Callers
-  // should always check the return value for NULL.
+  // This returns NULL if the profile is incognito. Callers should always check
+  // the return value for NULL.
   static SessionService* GetForProfile(Profile* profile);
 
   // Returns the session service for |profile|, but do not create it if it
-  // doesn't exist.
+  // doesn't exist. This returns NULL if the profile is incognito or if session
+  // service has been explicitly shutdown (browser is exiting). Callers should
+  // always check the return value for NULL.
   static SessionService* GetForProfileIfExisting(Profile* profile);
 
   // If |profile| has a session service, it is shut down. To properly record the
@@ -56,8 +57,8 @@ class SessionServiceFactory : public ProfileKeyedServiceFactory {
   // ProfileKeyedServiceFactory:
   virtual ProfileKeyedService* BuildServiceInstanceFor(
       Profile* profile) const OVERRIDE;
-  virtual bool ServiceIsCreatedWithProfile() OVERRIDE;
-  virtual bool ServiceIsNULLWhileTesting() OVERRIDE;
+  virtual bool ServiceIsCreatedWithProfile() const OVERRIDE;
+  virtual bool ServiceIsNULLWhileTesting() const OVERRIDE;
 };
 
 #endif  // CHROME_BROWSER_SESSIONS_SESSION_SERVICE_FACTORY_H_

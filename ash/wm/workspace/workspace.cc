@@ -4,117 +4,91 @@
 
 #include "ash/wm/workspace/workspace.h"
 
-#include <algorithm>
-
+#include "ash/shell_window_ids.h"
 #include "ash/wm/property_util.h"
+#include "ash/wm/window_animations.h"
+#include "ash/wm/window_properties.h"
 #include "ash/wm/window_util.h"
+#include "ash/wm/workspace/workspace_event_handler.h"
+#include "ash/wm/workspace/workspace_layout_manager.h"
 #include "ash/wm/workspace/workspace_manager.h"
-#include "base/logging.h"
-#include "ui/aura/client/aura_constants.h"
-#include "ui/aura/root_window.h"
 #include "ui/aura/window.h"
-#include "ui/base/ui_base_types.h"
+#include "ui/views/corewm/visibility_controller.h"
 
 namespace ash {
 namespace internal {
 
-Workspace::Workspace(WorkspaceManager* manager)
-    : type_(TYPE_NORMAL),
-      workspace_manager_(manager) {
-  workspace_manager_->AddWorkspace(this);
+Workspace::Workspace(WorkspaceManager* manager,
+                     aura::Window* parent,
+                     bool is_maximized)
+    : is_maximized_(is_maximized),
+      workspace_manager_(manager),
+      window_(new aura::Window(NULL)),
+      event_handler_(new WorkspaceEventHandler(window_)),
+      workspace_layout_manager_(NULL) {
+  views::corewm::SetChildWindowVisibilityChangesAnimated(window_);
+  SetWindowVisibilityAnimationTransition(window_, views::corewm::ANIMATE_NONE);
+  window_->set_id(kShellWindowId_WorkspaceContainer);
+  window_->SetName("WorkspaceContainer");
+  window_->Init(ui::LAYER_NOT_DRAWN);
+  // Do this so when animating out windows don't extend beyond the bounds.
+  window_->layer()->SetMasksToBounds(true);
+  window_->Hide();
+  parent->AddChild(window_);
+  window_->SetProperty(internal::kUsesScreenCoordinatesKey, true);
+
+  // The layout-manager cannot be created in the initializer list since it
+  // depends on the window to have been initialized.
+  workspace_layout_manager_ = new WorkspaceLayoutManager(this);
+  window_->SetLayoutManager(workspace_layout_manager_);
 }
 
 Workspace::~Workspace() {
-  workspace_manager_->RemoveWorkspace(this);
+  // ReleaseWindow() should have been invoked before we're deleted.
+  DCHECK(!window_);
 }
 
-// static
-Workspace::Type Workspace::TypeForWindow(aura::Window* window) {
-  if (window_util::GetOpenWindowSplit(window))
-    return TYPE_SPLIT;
-  if (window_util::IsWindowMaximized(window) ||
-      window_util::IsWindowFullscreen(window)) {
-    return TYPE_MAXIMIZED;
-  }
-  return TYPE_NORMAL;
+aura::Window* Workspace::ReleaseWindow() {
+  // Remove the LayoutManager and EventFilter as they refer back to us and/or
+  // WorkspaceManager.
+  window_->SetLayoutManager(NULL);
+  window_->SetEventFilter(NULL);
+  aura::Window* window = window_;
+  window_ = NULL;
+  return window;
 }
 
-void Workspace::SetType(Type type) {
-  // Can only change the type when there are no windows, or the type of window
-  // matches the type changing to. We need only check the first window as CanAdd
-  // only allows new windows if the type matches.
-  DCHECK(windows_.empty() || TypeForWindow(windows_[0]) == type);
-  type_ = type;
-}
-
-void Workspace::WorkspaceSizeChanged() {
-  if (!windows_.empty()) {
-    // TODO: need to handle size changing.
-    NOTIMPLEMENTED();
-  }
-}
-
-gfx::Rect Workspace::GetWorkAreaBounds() const {
-  return workspace_manager_->GetWorkAreaBounds();
-}
-
-bool Workspace::AddWindowAfter(aura::Window* window, aura::Window* after) {
-  if (!CanAdd(window))
+bool Workspace::ShouldMoveToPending() const {
+  if (!is_maximized_)
     return false;
-  DCHECK(!Contains(window));
 
-  aura::Window::Windows::iterator i =
-      std::find(windows_.begin(), windows_.end(), after);
-  if (!after || i == windows_.end())
-    windows_.push_back(window);
-  else
-    windows_.insert(++i, window);
+  bool has_visible_non_maximized_window = false;
+  for (size_t i = 0; i < window_->children().size(); ++i) {
+    aura::Window* child(window_->children()[i]);
+    if (!GetTrackedByWorkspace(child) || !child->TargetVisibility() ||
+        wm::IsWindowMinimized(child))
+      continue;
+    if (WorkspaceManager::IsMaximized(child))
+      return false;
 
-  if (type_ == TYPE_MAXIMIZED) {
-    workspace_manager_->SetWindowBounds(window, GetWorkAreaBounds());
-  } else if (type_ == TYPE_SPLIT) {
-    // TODO: this needs to adjust bounds appropriately.
-    workspace_manager_->SetWindowBounds(window, GetWorkAreaBounds());
+    if (GetTrackedByWorkspace(child) && !GetPersistsAcrossAllWorkspaces(child))
+      has_visible_non_maximized_window = true;
   }
-
-  return true;
+  return !has_visible_non_maximized_window;
 }
 
-void Workspace::RemoveWindow(aura::Window* window) {
-  DCHECK(Contains(window));
-  windows_.erase(std::find(windows_.begin(), windows_.end(), window));
-  // TODO: this needs to adjust things.
-}
-
-bool Workspace::Contains(aura::Window* window) const {
-  return std::find(windows_.begin(), windows_.end(), window) != windows_.end();
-}
-
-void Workspace::Activate() {
-  workspace_manager_->SetActiveWorkspace(this);
-}
-
-bool Workspace::ContainsFullscreenWindow() const {
-  for (aura::Window::Windows::const_iterator i = windows_.begin();
-       i != windows_.end();
-       ++i) {
-    aura::Window* w = *i;
-    if (w->IsVisible() &&
-        w->GetIntProperty(aura::client::kShowStateKey) ==
-            ui::SHOW_STATE_FULLSCREEN)
-      return true;
+int Workspace::GetNumMaximizedWindows() const {
+  int count = 0;
+  for (size_t i = 0; i < window_->children().size(); ++i) {
+    aura::Window* child = window_->children()[i];
+    if (GetTrackedByWorkspace(child) &&
+        (WorkspaceManager::IsMaximized(child) ||
+         WorkspaceManager::WillRestoreMaximized(child))) {
+      if (++count == 2)
+        return count;
+    }
   }
-  return false;
-}
-
-int Workspace::GetIndexOf(aura::Window* window) const {
-  aura::Window::Windows::const_iterator i =
-      std::find(windows_.begin(), windows_.end(), window);
-  return i == windows_.end() ? -1 : i - windows_.begin();
-}
-
-bool Workspace::CanAdd(aura::Window* window) const {
-  return TypeForWindow(window) == type_;
+  return count;
 }
 
 }  // namespace internal

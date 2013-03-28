@@ -2,7 +2,11 @@
 <html i18n-values="dir:textdirection;">
 <head>
 <meta charset="utf-8">
-<link rel="stylesheet" href="flags.css"/>
+<if expr="pp_ifdef('android')">
+<meta name="viewport" content="width=device-width, user-scalable=no">
+</if>
+<link rel="stylesheet" href="flags.css">
+<script src="chrome://resources/js/util.js"></script>
 <script src="chrome://flags/flags.js"></script>
 <script src="chrome://flags/strings.js"></script>
 <script src="chrome://resources/js/i18n_template.js"></script>
@@ -10,7 +14,9 @@
 <body i18n-values=".style.fontFamily:fontfamily;.style.fontSize:fontsize">
 <div id="body-container" style="visibility:hidden">
 
-  <div id="header"><h1 i18n-content="flagsLongTitle">TITLE</h1></div>
+  <div id="header">
+    <div id="title-spacer"><h1 i18n-content="flagsLongTitle"></h1></div>
+  </div>
 
   <div id="blurb-container">
     <span id="blurb-warning" i18n-content="flagsWarningHeader">WARNING</span>
@@ -72,11 +78,11 @@
           </div>
           <div class="experiment-actions">
             <div jsdisplay="!supported" i18n-content="flagsNotSupported"></div>
-	    <!-- If enabled isn't set (i.e. in multi_type options),
-		 then both jsdisplay tests fail, and we get no
-		 rendering from this section. -->
+            <!-- If enabled isn't set (i.e. in multi_type options),
+                 then both jsdisplay tests fail, and we get no
+                 rendering from this section. -->
             <span>
-              <a 
+              <a
                 class="experiment-disable-link"
                 jsvalues=".internal_name:internal_name"
                 jsdisplay="supported && enabled"

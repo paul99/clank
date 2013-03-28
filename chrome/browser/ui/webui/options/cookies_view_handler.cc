@@ -1,27 +1,43 @@
-// Copyright (c) 2011 The Chromium Authors. All rights reserved.
+// Copyright (c) 2012 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
 #include "chrome/browser/ui/webui/options/cookies_view_handler.h"
 
+#include <string>
+
 #include "base/bind.h"
 #include "base/bind_helpers.h"
 #include "base/utf_string_conversions.h"
 #include "base/values.h"
-#include "chrome/browser/browsing_data_appcache_helper.h"
-#include "chrome/browser/browsing_data_cookie_helper.h"
-#include "chrome/browser/browsing_data_database_helper.h"
-#include "chrome/browser/browsing_data_file_system_helper.h"
-#include "chrome/browser/browsing_data_indexed_db_helper.h"
-#include "chrome/browser/browsing_data_quota_helper.h"
-#include "chrome/browser/browsing_data_local_storage_helper.h"
+#include "chrome/browser/browsing_data/browsing_data_appcache_helper.h"
+#include "chrome/browser/browsing_data/browsing_data_cookie_helper.h"
+#include "chrome/browser/browsing_data/browsing_data_database_helper.h"
+#include "chrome/browser/browsing_data/browsing_data_file_system_helper.h"
+#include "chrome/browser/browsing_data/browsing_data_flash_lso_helper.h"
+#include "chrome/browser/browsing_data/browsing_data_indexed_db_helper.h"
+#include "chrome/browser/browsing_data/browsing_data_local_storage_helper.h"
+#include "chrome/browser/browsing_data/browsing_data_quota_helper.h"
+#include "chrome/browser/browsing_data/browsing_data_server_bound_cert_helper.h"
 #include "chrome/browser/profiles/profile.h"
 #include "chrome/browser/ui/webui/cookies_tree_model_util.h"
+#include "content/public/browser/browser_context.h"
+#include "content/public/browser/render_process_host.h"
+#include "content/public/browser/site_instance.h"
+#include "content/public/browser/storage_partition.h"
 #include "content/public/browser/web_ui.h"
 #include "grit/generated_resources.h"
 #include "ui/base/l10n/l10n_util.h"
 
-CookiesViewHandler::CookiesViewHandler() : batch_update_(false) {
+namespace fileapi {
+class FileSystemContext;
+}
+
+namespace options {
+
+CookiesViewHandler::CookiesViewHandler()
+  : batch_update_(false),
+    model_util_(new CookiesTreeModelUtil) {
 }
 
 CookiesViewHandler::~CookiesViewHandler() {
@@ -62,6 +78,7 @@ void CookiesViewHandler::GetLocalizedValues(
     { "cookie_indexed_db", IDS_COOKIES_INDEXED_DB },
     { "cookie_local_storage", IDS_COOKIES_LOCAL_STORAGE },
     { "cookie_app_cache", IDS_COOKIES_APPLICATION_CACHE },
+    { "cookie_flash_lso", IDS_COOKIES_FLASH_LSO },
     { "search_cookies", IDS_COOKIES_SEARCH_COOKIES },
     { "remove_cookie", IDS_COOKIES_REMOVE_LABEL },
     { "remove_all_cookie", IDS_COOKIES_REMOVE_ALL_LABEL },
@@ -71,6 +88,17 @@ void CookiesViewHandler::GetLocalizedValues(
       IDS_COOKIES_FILE_SYSTEM_TEMPORARY_USAGE_LABEL },
     { "label_file_system_persistent_usage",
       IDS_COOKIES_FILE_SYSTEM_PERSISTENT_USAGE_LABEL },
+    { "cookie_server_bound_cert", IDS_COOKIES_SERVER_BOUND_CERT },
+    { "label_server_bound_cert_server_id",
+      IDS_COOKIES_SERVER_BOUND_CERT_ORIGIN_LABEL },
+    { "label_server_bound_cert_type",
+      IDS_COOKIES_SERVER_BOUND_CERT_TYPE_LABEL },
+    { "label_server_bound_cert_created",
+      IDS_COOKIES_SERVER_BOUND_CERT_CREATED_LABEL },
+    { "label_server_bound_cert_expires",
+      IDS_COOKIES_SERVER_BOUND_CERT_EXPIRES_LABEL },
+    { "label_protected_by_apps",
+      IDS_GEOLOCATION_SET_BY_HOVER },  // TODO(bauerb): Use a better string
   };
 
   RegisterStrings(localized_strings, resources, arraysize(resources));
@@ -91,6 +119,9 @@ void CookiesViewHandler::RegisterMessages() {
   web_ui()->RegisterMessageCallback("loadCookie",
       base::Bind(&CookiesViewHandler::LoadChildren,
                  base::Unretained(this)));
+  web_ui()->RegisterMessageCallback("reloadCookies",
+      base::Bind(&CookiesViewHandler::ReloadCookies,
+                 base::Unretained(this)));
 }
 
 void CookiesViewHandler::TreeNodesAdded(ui::TreeModel* model,
@@ -101,18 +132,17 @@ void CookiesViewHandler::TreeNodesAdded(ui::TreeModel* model,
   if (batch_update_)
     return;
 
-  CookieTreeNode* parent_node = cookies_tree_model_->AsNode(parent);
+  CookiesTreeModel* tree_model = static_cast<CookiesTreeModel*>(model);
+  CookieTreeNode* parent_node = tree_model->AsNode(parent);
 
   ListValue* children = new ListValue;
-  cookies_tree_model_util::GetChildNodeList(parent_node, start, count,
-                                            children);
+  model_util_->GetChildNodeList(parent_node, start, count, children);
 
   ListValue args;
-  args.Append(parent == cookies_tree_model_->GetRoot() ?
+  args.Append(parent == tree_model->GetRoot() ?
       Value::CreateNullValue() :
-      Value::CreateStringValue(
-          cookies_tree_model_util::GetTreeNodeId(parent_node)));
-  args.Append(Value::CreateIntegerValue(start));
+      new base::StringValue(model_util_->GetTreeNodeId(parent_node)));
+  args.Append(new base::FundamentalValue(start));
   args.Append(children);
   web_ui()->CallJavascriptFunction("CookiesView.onTreeItemAdded", args);
 }
@@ -125,13 +155,15 @@ void CookiesViewHandler::TreeNodesRemoved(ui::TreeModel* model,
   if (batch_update_)
     return;
 
+  CookiesTreeModel* tree_model = static_cast<CookiesTreeModel*>(model);
+
   ListValue args;
-  args.Append(parent == cookies_tree_model_->GetRoot() ?
+  args.Append(parent == tree_model->GetRoot() ?
       Value::CreateNullValue() :
-      Value::CreateStringValue(cookies_tree_model_util::GetTreeNodeId(
-          cookies_tree_model_->AsNode(parent))));
-  args.Append(Value::CreateIntegerValue(start));
-  args.Append(Value::CreateIntegerValue(count));
+      new base::StringValue(model_util_->GetTreeNodeId(
+          tree_model->AsNode(parent))));
+  args.Append(new base::FundamentalValue(start));
+  args.Append(new base::FundamentalValue(count));
   web_ui()->CallJavascriptFunction("CookiesView.onTreeItemRemoved", args);
 }
 
@@ -144,35 +176,45 @@ void CookiesViewHandler::TreeModelEndBatch(CookiesTreeModel* model) {
   DCHECK(batch_update_);
   batch_update_ = false;
 
-  SendChildren(cookies_tree_model_->GetRoot());
+  SendChildren(model->GetRoot());
 }
 
 void CookiesViewHandler::EnsureCookiesTreeModelCreated() {
   if (!cookies_tree_model_.get()) {
     Profile* profile = Profile::FromWebUI(web_ui());
-    cookies_tree_model_.reset(new CookiesTreeModel(
-        new BrowsingDataCookieHelper(profile),
+    content::StoragePartition* storage_partition =
+        content::BrowserContext::GetDefaultStoragePartition(profile);
+    content::IndexedDBContext* indexed_db_context =
+        storage_partition->GetIndexedDBContext();
+    fileapi::FileSystemContext* file_system_context =
+        storage_partition->GetFileSystemContext();
+    LocalDataContainer* container = new LocalDataContainer(
+        new BrowsingDataCookieHelper(profile->GetRequestContext()),
         new BrowsingDataDatabaseHelper(profile),
         new BrowsingDataLocalStorageHelper(profile),
         NULL,
         new BrowsingDataAppCacheHelper(profile),
-        BrowsingDataIndexedDBHelper::Create(profile),
-        BrowsingDataFileSystemHelper::Create(profile),
+        BrowsingDataIndexedDBHelper::Create(indexed_db_context),
+        BrowsingDataFileSystemHelper::Create(file_system_context),
         BrowsingDataQuotaHelper::Create(profile),
-        false));
+        BrowsingDataServerBoundCertHelper::Create(profile),
+        BrowsingDataFlashLSOHelper::Create(profile));
+    cookies_tree_model_.reset(
+        new CookiesTreeModel(container,
+                             profile->GetExtensionSpecialStoragePolicy(),
+                             false));
     cookies_tree_model_->AddCookiesTreeObserver(this);
   }
 }
 
 void CookiesViewHandler::UpdateSearchResults(const ListValue* args) {
-  std::string query;
-  if (!args->GetString(0, &query)) {
+  string16 query;
+  if (!args->GetString(0, &query))
     return;
-  }
 
   EnsureCookiesTreeModelCreated();
 
-  cookies_tree_model_->UpdateSearchResults(UTF8ToWide(query));
+  cookies_tree_model_->UpdateSearchResults(query);
 }
 
 void CookiesViewHandler::RemoveAll(const ListValue* args) {
@@ -182,42 +224,48 @@ void CookiesViewHandler::RemoveAll(const ListValue* args) {
 
 void CookiesViewHandler::Remove(const ListValue* args) {
   std::string node_path;
-  if (!args->GetString(0, &node_path)) {
+  if (!args->GetString(0, &node_path))
     return;
-  }
 
   EnsureCookiesTreeModelCreated();
 
-  CookieTreeNode* node = cookies_tree_model_util::GetTreeNodeFromPath(
+  const CookieTreeNode* node = model_util_->GetTreeNodeFromPath(
       cookies_tree_model_->GetRoot(), node_path);
   if (node)
-    cookies_tree_model_->DeleteCookieNode(node);
+    cookies_tree_model_->DeleteCookieNode(const_cast<CookieTreeNode*>(node));
 }
 
 void CookiesViewHandler::LoadChildren(const ListValue* args) {
   std::string node_path;
-  if (!args->GetString(0, &node_path)) {
+  if (!args->GetString(0, &node_path))
     return;
-  }
 
   EnsureCookiesTreeModelCreated();
 
-  CookieTreeNode* node = cookies_tree_model_util::GetTreeNodeFromPath(
+  const CookieTreeNode* node = model_util_->GetTreeNodeFromPath(
       cookies_tree_model_->GetRoot(), node_path);
   if (node)
     SendChildren(node);
 }
 
-void CookiesViewHandler::SendChildren(CookieTreeNode* parent) {
+void CookiesViewHandler::SendChildren(const CookieTreeNode* parent) {
   ListValue* children = new ListValue;
-  cookies_tree_model_util::GetChildNodeList(parent, 0, parent->child_count(),
+  model_util_->GetChildNodeList(parent, 0, parent->child_count(),
       children);
 
   ListValue args;
   args.Append(parent == cookies_tree_model_->GetRoot() ?
       Value::CreateNullValue() :
-      Value::CreateStringValue(cookies_tree_model_util::GetTreeNodeId(parent)));
+      new base::StringValue(model_util_->GetTreeNodeId(parent)));
   args.Append(children);
 
   web_ui()->CallJavascriptFunction("CookiesView.loadChildren", args);
 }
+
+void CookiesViewHandler::ReloadCookies(const base::ListValue* args) {
+  cookies_tree_model_.reset();
+
+  EnsureCookiesTreeModelCreated();
+}
+
+}  // namespace options

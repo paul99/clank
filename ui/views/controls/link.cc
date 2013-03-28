@@ -1,4 +1,4 @@
-// Copyright (c) 2011 The Chromium Authors. All rights reserved.
+// Copyright (c) 2012 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -6,25 +6,17 @@
 
 #include "build/build_config.h"
 
-#if defined(TOOLKIT_USES_GTK)
-#include <gdk/gdk.h>
-#endif
-
 #include "base/logging.h"
 #include "base/utf_string_conversions.h"
 #include "ui/base/accessibility/accessible_view_state.h"
+#include "ui/base/events/event.h"
 #include "ui/base/keycodes/keyboard_codes.h"
 #include "ui/gfx/color_utils.h"
 #include "ui/gfx/font.h"
 #include "ui/views/controls/link_listener.h"
-#include "ui/views/events/event.h"
-
-#if defined(TOOLKIT_USES_GTK)
-#include "ui/gfx/gtk_util.h"
-#endif
 
 #if defined(USE_AURA)
-#include "ui/aura/cursor.h"
+#include "ui/base/cursor/cursor.h"
 #endif
 
 namespace views {
@@ -51,26 +43,24 @@ std::string Link::GetClassName() const {
   return kViewClassName;
 }
 
-gfx::NativeCursor Link::GetCursor(const MouseEvent& event) {
+gfx::NativeCursor Link::GetCursor(const ui::MouseEvent& event) {
   if (!enabled())
     return gfx::kNullCursor;
 #if defined(USE_AURA)
-  return aura::kCursorHand;
+  return ui::kCursorHand;
 #elif defined(OS_WIN)
   static HCURSOR g_hand_cursor = LoadCursor(NULL, IDC_HAND);
   return g_hand_cursor;
-#elif defined(TOOLKIT_USES_GTK)
-  return gfx::GetCursor(GDK_HAND2);
 #endif
 }
 
-bool Link::HitTest(const gfx::Point& l) const {
+bool Link::HitTestRect(const gfx::Rect& rect) const {
   // We need to allow clicks on the link. So we override the implementation in
   // Label and use the default implementation of View.
-  return View::HitTest(l);
+  return View::HitTestRect(rect);
 }
 
-bool Link::OnMousePressed(const MouseEvent& event) {
+bool Link::OnMousePressed(const ui::MouseEvent& event) {
   if (!enabled() ||
       (!event.IsLeftMouseButton() && !event.IsMiddleMouseButton()))
     return false;
@@ -78,20 +68,20 @@ bool Link::OnMousePressed(const MouseEvent& event) {
   return true;
 }
 
-bool Link::OnMouseDragged(const MouseEvent& event) {
+bool Link::OnMouseDragged(const ui::MouseEvent& event) {
   SetPressed(enabled() &&
              (event.IsLeftMouseButton() || event.IsMiddleMouseButton()) &&
-             HitTest(event.location()));
+             HitTestPoint(event.location()));
   return true;
 }
 
-void Link::OnMouseReleased(const MouseEvent& event) {
+void Link::OnMouseReleased(const ui::MouseEvent& event) {
   // Change the highlight first just in case this instance is deleted
   // while calling the controller
   OnMouseCaptureLost();
   if (enabled() &&
       (event.IsLeftMouseButton() || event.IsMiddleMouseButton()) &&
-      HitTest(event.location())) {
+      HitTestPoint(event.location())) {
     // Focus the link on click.
     RequestFocus();
 
@@ -104,7 +94,7 @@ void Link::OnMouseCaptureLost() {
   SetPressed(false);
 }
 
-bool Link::OnKeyPressed(const KeyEvent& event) {
+bool Link::OnKeyPressed(const ui::KeyEvent& event) {
   bool activate = ((event.key_code() == ui::VKEY_SPACE) ||
                    (event.key_code() == ui::VKEY_RETURN));
   if (!activate)
@@ -121,7 +111,7 @@ bool Link::OnKeyPressed(const KeyEvent& event) {
   return true;
 }
 
-bool Link::SkipDefaultKeyEventProcessing(const KeyEvent& event) {
+bool Link::SkipDefaultKeyEventProcessing(const ui::KeyEvent& event) {
   // Make sure we don't process space or enter as accelerators.
   return (event.key_code() == ui::VKEY_SPACE) ||
       (event.key_code() == ui::VKEY_RETURN);
@@ -132,21 +122,45 @@ void Link::GetAccessibleState(ui::AccessibleViewState* state) {
   state->role = ui::AccessibilityTypes::ROLE_LINK;
 }
 
+void Link::OnGestureEvent(ui::GestureEvent* event) {
+  if (!enabled())
+    return;
+
+  if (event->type() == ui::ET_GESTURE_TAP_DOWN) {
+    SetPressed(true);
+  } else if (event->type() == ui::ET_GESTURE_TAP) {
+    RequestFocus();
+    if (listener_)
+      listener_->LinkClicked(this, event->flags());
+  } else {
+    SetPressed(false);
+    return;
+  }
+  event->SetHandled();
+}
+
 void Link::SetFont(const gfx::Font& font) {
   Label::SetFont(font);
   RecalculateFont();
 }
 
-void Link::SetEnabledColor(const SkColor& color) {
+void Link::SetEnabledColor(SkColor color) {
   requested_enabled_color_ = color;
   if (!pressed_)
     Label::SetEnabledColor(requested_enabled_color_);
 }
 
-void Link::SetPressedColor(const SkColor& color) {
+void Link::SetPressedColor(SkColor color) {
   requested_pressed_color_ = color;
   if (pressed_)
     Label::SetEnabledColor(requested_pressed_color_);
+}
+
+void Link::SetUnderline(bool underline) {
+  if (underline_ == underline)
+    return;
+  underline_ = underline;
+  RecalculateFont();
 }
 
 void Link::Init() {
@@ -171,6 +185,7 @@ void Link::Init() {
 
   listener_ = NULL;
   pressed_ = false;
+  underline_ = true;
   SetEnabledColor(kDefaultEnabledColor);
   SetDisabledColor(kDefaultDisabledColor);
   SetPressedColor(kDefaultPressedColor);
@@ -189,9 +204,11 @@ void Link::SetPressed(bool pressed) {
 }
 
 void Link::RecalculateFont() {
-  // The font should be underlined iff the link is enabled.
-  if (enabled() == !(font().GetStyle() & gfx::Font::UNDERLINED)) {
-    Label::SetFont(font().DeriveFont(0, enabled() ?
+  // The font should be underlined iff the link is enabled and |underline_| is
+  // true.
+  if ((enabled() && underline_) ==
+      !(font().GetStyle() & gfx::Font::UNDERLINED)) {
+    Label::SetFont(font().DeriveFont(0, enabled() && underline_ ?
         (font().GetStyle() | gfx::Font::UNDERLINED) :
         (font().GetStyle() & ~gfx::Font::UNDERLINED)));
   }

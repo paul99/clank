@@ -1,6 +1,5 @@
-#!/usr/bin/python
-#
-# Copyright (c) 2011 The Chromium Authors. All rights reserved.
+#!/usr/bin/env python
+# Copyright (c) 2012 The Chromium Authors. All rights reserved.
 # Use of this source code is governed by a BSD-style license that can be
 # found in the LICENSE file.
 
@@ -51,6 +50,13 @@ class PnaclGen(WrapperGen):
     """Return the header file that specifies the API of this wrapper.
     We do not generate the header files.  """
     return 'ppapi/generators/pnacl_shim.h'
+
+  def GetGuardStart(self):
+    return ('\n/* The PNaCl PPAPI shims are only needed on x86-64 and arm. */\n'
+            '#if defined(__x86_64__) || defined(__arm__)\n\n')
+
+  def GetGuardEnd(self):
+    return '\n#endif\n'
 
   def InterfaceNeedsWrapper(self, iface, releases):
     """Return true if the interface has ANY methods that need wrapping.

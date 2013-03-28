@@ -1,6 +1,7 @@
 // Copyright (c) 2012 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
+
 #include "chrome/browser/ui/webui/web_ui_browsertest.h"
 
 #include <string>
@@ -16,11 +17,12 @@
 #include "chrome/browser/printing/print_preview_tab_controller.h"
 #include "chrome/browser/profiles/profile.h"
 #include "chrome/browser/ui/browser.h"
+#include "chrome/browser/ui/browser_commands.h"
 #include "chrome/browser/ui/browser_navigator.h"
+#include "chrome/browser/ui/tabs/tab_strip_model.h"
 #include "chrome/browser/ui/webui/chrome_url_data_manager.h"
-#include "chrome/browser/ui/webui/chrome_web_ui.h"
 #include "chrome/browser/ui/webui/test_chrome_web_ui_controller_factory.h"
-#include "chrome/browser/ui/tab_contents/tab_contents_wrapper.h"
+#include "chrome/browser/ui/webui/web_ui_test_handler.h"
 #include "chrome/common/chrome_paths.h"
 #include "chrome/common/url_constants.h"
 #include "chrome/test/base/test_tab_strip_model_observer.h"
@@ -29,11 +31,14 @@
 #include "content/public/browser/web_contents.h"
 #include "content/public/browser/web_ui_controller.h"
 #include "content/public/browser/web_ui_message_handler.h"
+#include "net/base/net_util.h"
 #include "testing/gmock/include/gmock/gmock.h"
 #include "testing/gtest/include/gtest/gtest-spi.h"
 #include "ui/base/resource/resource_bundle.h"
+#include "ui/base/resource/resource_handle.h"
 
 using content::NavigationController;
+using content::RenderViewHost;
 using content::WebContents;
 using content::WebUIController;
 using content::WebUIMessageHandler;
@@ -70,7 +75,8 @@ void WebUIBrowserTest::AddLibrary(const FilePath& library_path) {
 }
 
 bool WebUIBrowserTest::RunJavascriptFunction(const std::string& function_name) {
-  return RunJavascriptFunction(function_name, ConstValueVector());
+  ConstValueVector empty_args;
+  return RunJavascriptFunction(function_name, empty_args);
 }
 
 bool WebUIBrowserTest::RunJavascriptFunction(const std::string& function_name,
@@ -110,7 +116,8 @@ bool WebUIBrowserTest::RunJavascriptTestF(bool is_async,
 }
 
 bool WebUIBrowserTest::RunJavascriptTest(const std::string& test_name) {
-  return RunJavascriptTest(test_name, ConstValueVector());
+  ConstValueVector empty_args;
+  return RunJavascriptTest(test_name, empty_args);
 }
 
 bool WebUIBrowserTest::RunJavascriptTest(const std::string& test_name,
@@ -137,7 +144,8 @@ bool WebUIBrowserTest::RunJavascriptTest(
 }
 
 bool WebUIBrowserTest::RunJavascriptAsyncTest(const std::string& test_name) {
-  return RunJavascriptAsyncTest(test_name, ConstValueVector());
+  ConstValueVector empty_args;
+  return RunJavascriptAsyncTest(test_name, empty_args);
 }
 
 bool WebUIBrowserTest::RunJavascriptAsyncTest(const std::string& test_name,
@@ -187,40 +195,39 @@ void WebUIBrowserTest::PreLoadJavascriptLibraries(
 }
 
 void WebUIBrowserTest::BrowsePreload(const GURL& browse_to) {
-  TestNavigationObserver navigation_observer(
+  content::TestNavigationObserver navigation_observer(
       content::Source<NavigationController>(
-          &browser()->GetSelectedTabContentsWrapper()->web_contents()->
-              GetController()),
+          &browser()->tab_strip_model()->
+              GetActiveWebContents()->GetController()),
       this, 1);
-  browser::NavigateParams params(
-      browser(), GURL(browse_to), content::PAGE_TRANSITION_TYPED);
+  chrome::NavigateParams params(browser(), GURL(browse_to),
+                                content::PAGE_TRANSITION_TYPED);
   params.disposition = CURRENT_TAB;
-  browser::Navigate(&params);
+  chrome::Navigate(&params);
   navigation_observer.WaitForObservation(
-      base::Bind(&ui_test_utils::RunMessageLoop),
+      base::Bind(&content::RunMessageLoop),
       base::Bind(&MessageLoop::Quit,
                  base::Unretained(MessageLoopForUI::current())));
-
 }
 
 void WebUIBrowserTest::BrowsePrintPreload(const GURL& browse_to) {
   ui_test_utils::NavigateToURL(browser(), browse_to);
 
   TestTabStripModelObserver tabstrip_observer(
-      browser()->tabstrip_model(), this);
-  browser()->Print();
+      browser()->tab_strip_model(), this);
+  chrome::Print(browser());
   tabstrip_observer.WaitForObservation(
-      base::Bind(&ui_test_utils::RunMessageLoop),
+      base::Bind(&content::RunMessageLoop),
       base::Bind(&MessageLoop::Quit,
                  base::Unretained(MessageLoopForUI::current())));
 
   printing::PrintPreviewTabController* tab_controller =
       printing::PrintPreviewTabController::GetInstance();
   ASSERT_TRUE(tab_controller);
-  TabContentsWrapper* preview_tab = tab_controller->GetPrintPreviewForTab(
-      browser()->GetSelectedTabContentsWrapper());
+  WebContents* preview_tab = tab_controller->GetPrintPreviewForTab(
+      browser()->tab_strip_model()->GetActiveWebContents());
   ASSERT_TRUE(preview_tab);
-  SetWebUIInstance(preview_tab->web_contents()->GetWebUI());
+  SetWebUIInstance(preview_tab->GetWebUI());
 }
 
 const char WebUIBrowserTest::kDummyURL[] = "chrome://DummyURL";
@@ -252,6 +259,8 @@ class MockWebUIDataSource : public ChromeURLDataManager::DataSource {
       : ChromeURLDataManager::DataSource("dummyurl", MessageLoop::current()) {}
 
  private:
+  virtual ~MockWebUIDataSource() {}
+
   virtual void StartDataRequest(const std::string& path,
                                 bool is_incognito,
                                 int request_id) OVERRIDE {
@@ -279,8 +288,7 @@ class MockWebUIProvider
   WebUIController* NewWebUI(content::WebUI* web_ui, const GURL& url) OVERRIDE {
     WebUIController* controller = new content::WebUIController(web_ui);
     Profile* profile = Profile::FromWebUI(web_ui);
-    profile->GetChromeURLDataManager()->AddDataSource(
-        new MockWebUIDataSource());
+    ChromeURLDataManager::AddDataSource(profile, new MockWebUIDataSource());
     return controller;
   }
 
@@ -318,7 +326,8 @@ void WebUIBrowserTest::SetUpInProcessBrowserTestFixture() {
   // TODO(dtseng): should this be part of every BrowserTest or just WebUI test.
   FilePath resources_pack_path;
   PathService::Get(chrome::FILE_RESOURCES_PACK, &resources_pack_path);
-  ResourceBundle::AddDataPackToSharedInstance(resources_pack_path);
+  ResourceBundle::GetSharedInstance().AddDataPackFromPath(
+      resources_pack_path, ui::SCALE_FACTOR_NONE);
 
   FilePath mockPath;
   ASSERT_TRUE(PathService::Get(base::DIR_SOURCE_ROOT, &mockPath));
@@ -391,20 +400,23 @@ string16 WebUIBrowserTest::BuildRunTestJSCall(
     bool is_async,
     const std::string& function_name,
     const WebUIBrowserTest::ConstValueVector& test_func_args) {
-  WebUIBrowserTest::ConstValueVector arguments;
-  base::FundamentalValue is_async_arg(is_async);
-  arguments.push_back(&is_async_arg);
-  StringValue function_name_arg(function_name);
-  arguments.push_back(&function_name_arg);
-  ListValue baked_argument_list;
-  WebUIBrowserTest::ConstValueVector::const_iterator arguments_iterator;
+  ConstValueVector arguments;
+  base::FundamentalValue* is_async_arg =
+      base::Value::CreateBooleanValue(is_async);
+  arguments.push_back(is_async_arg);
+  base::StringValue* function_name_arg =
+      base::Value::CreateStringValue(function_name);
+  arguments.push_back(function_name_arg);
+  base::ListValue* baked_argument_list = new base::ListValue();
+  ConstValueVector::const_iterator arguments_iterator;
   for (arguments_iterator = test_func_args.begin();
        arguments_iterator != test_func_args.end();
        ++arguments_iterator) {
-    baked_argument_list.Append(const_cast<Value*>(*arguments_iterator));
+    baked_argument_list->Append((*arguments_iterator)->DeepCopy());
   }
-  arguments.push_back(&baked_argument_list);
-  return content::WebUI::GetJavascriptCall(std::string("runTest"), arguments);
+  arguments.push_back(baked_argument_list);
+  return content::WebUI::GetJavascriptCall(std::string("runTest"),
+                                           arguments.get());
 }
 
 bool WebUIBrowserTest::RunJavascriptUsingHandler(
@@ -421,11 +433,12 @@ bool WebUIBrowserTest::RunJavascriptUsingHandler(
   if (!function_name.empty()) {
     string16 called_function;
     if (is_test) {
-      called_function = BuildRunTestJSCall(
-          is_async, function_name, function_arguments);
+      called_function =
+          BuildRunTestJSCall(is_async, function_name, function_arguments);
     } else {
-      called_function = content::WebUI::GetJavascriptCall(function_name,
-                                                          function_arguments);
+      called_function =
+          content::WebUI::GetJavascriptCall(function_name,
+                                            function_arguments.get());
     }
     content.append(called_function);
   }
@@ -453,7 +466,7 @@ bool WebUIBrowserTest::RunJavascriptUsingHandler(
 void WebUIBrowserTest::SetupHandlers() {
   content::WebUI* web_ui_instance = override_selected_web_ui_ ?
       override_selected_web_ui_ :
-      browser()->GetSelectedWebContents()->GetWebUI();
+      browser()->tab_strip_model()->GetActiveWebContents()->GetWebUI();
   ASSERT_TRUE(web_ui_instance != NULL);
 
   test_handler_->set_web_ui(web_ui_instance);
@@ -503,7 +516,7 @@ WebUIBrowserTest* WebUIBrowserExpectFailTest::s_test_ = NULL;
 IN_PROC_BROWSER_TEST_F(WebUIBrowserExpectFailTest, TestFailsFast) {
   AddLibrary(FilePath(FILE_PATH_LITERAL("sample_downloads.js")));
   ui_test_utils::NavigateToURL(browser(), GURL(chrome::kChromeUIDownloadsURL));
-  EXPECT_FATAL_FAILURE(RunJavascriptTestNoReturn("FAILS_BogusFunctionName"),
+  EXPECT_FATAL_FAILURE(RunJavascriptTestNoReturn("DISABLED_BogusFunctionName"),
                        "WebUITestHandler::Observe");
 }
 
@@ -521,7 +534,7 @@ IN_PROC_BROWSER_TEST_F(WebUIBrowserExpectFailTest, TestFailsAsyncFast) {
   AddLibrary(FilePath(FILE_PATH_LITERAL("sample_downloads.js")));
   ui_test_utils::NavigateToURL(browser(), GURL(chrome::kChromeUIDownloadsURL));
   EXPECT_FATAL_FAILURE(
-      RunJavascriptAsyncTestNoReturn("FAILS_BogusFunctionName"),
+      RunJavascriptAsyncTestNoReturn("DISABLED_BogusFunctionName"),
       "WebUITestHandler::Observe");
 }
 
@@ -574,7 +587,7 @@ class WebUIBrowserAsyncTest : public WebUIBrowserTest {
 
     // Starts the test in |list_value|[0] with the runAsync wrapper.
     void HandleStartAsyncTest(const ListValue* list_value) {
-      Value* test_name;
+      const Value* test_name;
       ASSERT_TRUE(list_value->Get(0, &test_name));
       web_ui()->CallJavascriptFunction("runAsync", *test_name);
     }

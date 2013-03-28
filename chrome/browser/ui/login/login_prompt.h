@@ -4,7 +4,6 @@
 
 #ifndef CHROME_BROWSER_UI_LOGIN_LOGIN_PROMPT_H_
 #define CHROME_BROWSER_UI_LOGIN_LOGIN_PROMPT_H_
-#pragma once
 
 #include <string>
 
@@ -36,7 +35,6 @@ class LoginHandler : public content::ResourceDispatcherHostLoginDelegate,
                      public content::NotificationObserver {
  public:
   LoginHandler(net::AuthChallengeInfo* auth_info, net::URLRequest* request);
-  virtual ~LoginHandler();
 
   // Builds the platform specific LoginHandler. Used from within
   // CreateLoginPrompt() which creates tasks.
@@ -52,14 +50,11 @@ class LoginHandler : public content::ResourceDispatcherHostLoginDelegate,
 
   // Sets information about the authentication type (|form|) and the
   // |password_manager| for this profile.
-  void SetPasswordForm(const webkit::forms::PasswordForm& form);
+  void SetPasswordForm(const content::PasswordForm& form);
   void SetPasswordManager(PasswordManager* password_manager);
 
   // Returns the WebContents that needs authentication.
   content::WebContents* GetWebContentsForLogin() const;
-
-  // Returns the RenderViewHostDelegate for the page that needs authentication.
-  content::RenderViewHostDelegate* GetRenderViewHostDelegate() const;
 
   // Resend the request with authentication credentials.
   // This function can be called from either thread.
@@ -84,6 +79,8 @@ class LoginHandler : public content::ResourceDispatcherHostLoginDelegate,
   bool WasAuthHandled() const;
 
  protected:
+  virtual ~LoginHandler();
+
   void SetModel(LoginModel* model);
 
   void SetDialog(ConstrainedWindow* dialog);
@@ -144,10 +141,9 @@ class LoginHandler : public content::ResourceDispatcherHostLoginDelegate,
   // when later notifying the password manager if the credentials were accepted
   // or rejected.
   // This should only be accessed on the UI loop.
-  webkit::forms::PasswordForm password_form_;
+  content::PasswordForm password_form_;
 
-  // Points to the password manager owned by the TabContents requesting auth.
-  // Can be null if the TabContents is not a TabContents.
+  // Points to the password manager owned by the WebContents requesting auth.
   // This should only be accessed on the UI loop.
   PasswordManager* password_manager_;
 

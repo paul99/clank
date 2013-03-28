@@ -4,7 +4,6 @@
 
 #ifndef UI_BASE_X_X11_UTIL_H_
 #define UI_BASE_X_X11_UTIL_H_
-#pragma once
 
 // This file declares utility functions for X11 (Linux only).
 //
@@ -16,16 +15,21 @@
 #include <vector>
 
 #include "base/basictypes.h"
-#include "ui/base/events.h"
+#include "base/event_types.h"
+#include "ui/base/events/event_constants.h"
+#include "ui/base/keycodes/keyboard_codes.h"
 #include "ui/base/ui_export.h"
+#include "ui/gfx/point.h"
 
 typedef unsigned long Atom;
 typedef unsigned long XID;
 typedef unsigned long XSharedMemoryId;  // ShmSeg in the X headers.
 typedef struct _XDisplay Display;
 typedef unsigned long Cursor;
+typedef struct _XcursorImage XcursorImage;
+typedef struct _XImage XImage;
 
-#if defined(TOOLKIT_USES_GTK)
+#if defined(TOOLKIT_GTK)
 typedef struct _GdkDrawable GdkWindow;
 typedef struct _GtkWidget GtkWidget;
 typedef struct _GtkWindow GtkWindow;
@@ -34,6 +38,7 @@ typedef struct _GtkWindow GtkWindow;
 namespace gfx {
 class Rect;
 }
+class SkBitmap;
 
 namespace ui {
 
@@ -69,13 +74,39 @@ UI_EXPORT bool QueryRenderSupport(Display* dpy);
 // Return the default screen number for the display
 int GetDefaultScreen(Display* display);
 
-// TODO(xiyuan): Fix the stale XCursorCache problem per http://crbug.com/102759.
-// A special cursor that makes GetXCursor below to clear its XCursorCache.
-const int kCursorClearXCursorCache = -1;
-
 // Returns an X11 Cursor, sharable across the process.
 // |cursor_shape| is an X font cursor shape, see XCreateFontCursor().
-UI_EXPORT Cursor GetXCursor(int cursor_shape);
+UI_EXPORT ::Cursor GetXCursor(int cursor_shape);
+
+#if defined(USE_AURA)
+// Creates a custom X cursor from the image. This takes ownership of image. The
+// caller must not free/modify the image. The refcount of the newly created
+// cursor is set to 1.
+UI_EXPORT ::Cursor CreateReffedCustomXCursor(XcursorImage* image);
+
+// Increases the refcount of the custom cursor.
+UI_EXPORT void RefCustomXCursor(::Cursor cursor);
+
+// Decreases the refcount of the custom cursor, and destroys it if it reaches 0.
+UI_EXPORT void UnrefCustomXCursor(::Cursor cursor);
+
+// Creates a XcursorImage and copies the SkBitmap |bitmap| on it. |bitmap|
+// should be non-null. Caller owns the returned object.
+UI_EXPORT XcursorImage* SkBitmapToXcursorImage(const SkBitmap* bitmap,
+                                               const gfx::Point& hotspot);
+
+// Coalesce all pending motion events (touch or mouse) that are at the top of
+// the queue, and return the number eliminated, storing the last one in
+// |last_event|.
+UI_EXPORT int CoalescePendingMotionEvents(const XEvent* xev,
+                                          XEvent* last_event);
+#endif
+
+// Hides the host cursor.
+UI_EXPORT void HideHostCursor();
+
+// Returns an invisible cursor.
+UI_EXPORT ::Cursor CreateInvisibleCursor();
 
 // These functions do not cache their results --------------------------
 
@@ -85,7 +116,7 @@ UI_EXPORT XID GetX11RootWindow();
 // Returns the user's current desktop.
 bool GetCurrentDesktop(int* desktop);
 
-#if defined(TOOLKIT_USES_GTK)
+#if defined(TOOLKIT_GTK)
 // Get the X window id for the given GTK widget.
 UI_EXPORT XID GetX11WindowFromGtkWidget(GtkWidget* widget);
 XID GetX11WindowFromGdkWindow(GdkWindow* window);
@@ -98,7 +129,19 @@ UI_EXPORT GtkWindow* GetGtkWindowFromX11Window(XID xid);
 // Get a Visual from the given widget. Since we don't include the Xlib
 // headers, this is returned as a void*.
 UI_EXPORT void* GetVisualFromGtkWidget(GtkWidget* widget);
-#endif  // defined(TOOLKIT_USES_GTK)
+#endif  // defined(TOOLKIT_GTK)
+
+enum HideTitlebarWhenMaximized {
+  SHOW_TITLEBAR_WHEN_MAXIMIZED = 0,
+  HIDE_TITLEBAR_WHEN_MAXIMIZED = 1,
+};
+// Sets _GTK_HIDE_TITLEBAR_WHEN_MAXIMIZED on |window|.
+UI_EXPORT void SetHideTitlebarWhenMaximizedProperty(
+    XID window,
+    HideTitlebarWhenMaximized property);
+
+// Clears all regions of X11's default root window by filling black pixels.
+UI_EXPORT void ClearX11DefaultRootWindow();
 
 // Return the number of bits-per-pixel for a pixmap of the given depth
 UI_EXPORT int BitsPerPixelForPixmapDepth(Display* display, int depth);
@@ -108,6 +151,9 @@ UI_EXPORT bool IsWindowVisible(XID window);
 
 // Returns the bounds of |window|.
 UI_EXPORT bool GetWindowRect(XID window, gfx::Rect* rect);
+
+// Returns true if |window| contains the point |screen_loc|.
+UI_EXPORT bool WindowContainsPoint(XID window, gfx::Point screen_loc);
 
 // Return true if |window| has any property with |property_name|.
 UI_EXPORT bool PropertyExists(XID window, const std::string& property_name);
@@ -147,6 +193,9 @@ static const int kAllDesktops = -1;
 // property not found.
 bool GetWindowDesktop(XID window, int* desktop);
 
+// Translates an X11 error code into a printable string.
+UI_EXPORT std::string GetX11ErrorString(Display* display, int err);
+
 // Implementers of this interface receive a notification for every X window of
 // the main display.
 class EnumerateWindowsDelegate {
@@ -163,6 +212,9 @@ class EnumerateWindowsDelegate {
 // windows up to a depth of |max_depth|.
 UI_EXPORT bool EnumerateAllWindows(EnumerateWindowsDelegate* delegate,
                                    int max_depth);
+
+// Enumerates the top-level windows of the current display.
+UI_EXPORT void EnumerateTopLevelWindows(ui::EnumerateWindowsDelegate* delegate);
 
 // Returns all children windows of a given window in top-to-bottom stacking
 // order.
@@ -210,6 +262,28 @@ UI_EXPORT void PutARGBImage(Display* display,
 void FreePicture(Display* display, XID picture);
 void FreePixmap(Display* display, XID pixmap);
 
+// Gets the list of the output displaying device handles via XRandR, and sets to
+// |outputs|.  Returns false if it fails to get the list and |outputs| is
+// cleared.
+UI_EXPORT bool GetOutputDeviceHandles(std::vector<XID>* outputs);
+
+// Gets some useful data from the specified output device, such like
+// manufacturer's ID, product code, and human readable name. Returns false if it
+// fails to get those data and doesn't touch manufacturer ID/product code/name.
+// NULL can be passed for unwanted output parameters.
+UI_EXPORT bool GetOutputDeviceData(XID output,
+                                   uint16* manufacturer_id,
+                                   uint16* product_code,
+                                   std::string* human_readable_name);
+
+// Gets the names of the all displays physically connected to the system.
+UI_EXPORT std::vector<std::string> GetDisplayNames(
+    const std::vector<XID>& output_id);
+
+// Gets the name of outputs given by |output_id|.
+UI_EXPORT std::vector<std::string> GetOutputNames(
+    const std::vector<XID>& output_id);
+
 enum WindowManagerName {
   WM_UNKNOWN,
   WM_BLACKBOX,
@@ -254,6 +328,62 @@ UI_EXPORT void InitXKeyEventForTesting(EventType type,
                                        KeyboardCode key_code,
                                        int flags,
                                        XEvent* event);
+
+// Keeps track of a string returned by an X function (e.g. XGetAtomName) and
+// makes sure it's XFree'd.
+class UI_EXPORT XScopedString {
+ public:
+  explicit XScopedString(char* str) : string_(str) {}
+  ~XScopedString();
+
+  const char* string() const { return string_; }
+
+ private:
+  char* string_;
+
+  DISALLOW_COPY_AND_ASSIGN(XScopedString);
+};
+
+// Keeps track of an image returned by an X function (e.g. XGetImage) and
+// makes sure it's XDestroyImage'd.
+class UI_EXPORT XScopedImage {
+ public:
+  explicit XScopedImage(XImage* image) : image_(image) {}
+  ~XScopedImage();
+
+  XImage* get() const {
+    return image_;
+  }
+
+  XImage* operator->() const {
+    return image_;
+  }
+
+  void reset(XImage* image);
+
+ private:
+  XImage* image_;
+
+  DISALLOW_COPY_AND_ASSIGN(XScopedImage);
+};
+
+// Keeps track of a cursor returned by an X function and makes sure it's
+// XFreeCursor'd.
+class UI_EXPORT XScopedCursor {
+ public:
+  // Keeps track of |cursor| created with |display|.
+  XScopedCursor(::Cursor cursor, Display* display);
+  ~XScopedCursor();
+
+  ::Cursor get() const;
+  void reset(::Cursor cursor);
+
+ private:
+  ::Cursor cursor_;
+  Display* display_;
+
+  DISALLOW_COPY_AND_ASSIGN(XScopedCursor);
+};
 
 }  // namespace ui
 

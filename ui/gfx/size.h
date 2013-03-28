@@ -1,18 +1,21 @@
-// Copyright (c) 2011 The Chromium Authors. All rights reserved.
+// Copyright (c) 2012 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
 #ifndef UI_GFX_SIZE_H_
 #define UI_GFX_SIZE_H_
-#pragma once
 
 #include <string>
 
-#include "build/build_config.h"
+#include "base/compiler_specific.h"
 #include "ui/base/ui_export.h"
+#include "ui/gfx/size_base.h"
+#include "ui/gfx/size_f.h"
 
 #if defined(OS_WIN)
 typedef struct tagSIZE SIZE;
+#elif defined(OS_IOS)
+#include <CoreGraphics/CoreGraphics.h>
 #elif defined(OS_MACOSX)
 #include <ApplicationServices/ApplicationServices.h>
 #endif
@@ -20,10 +23,10 @@ typedef struct tagSIZE SIZE;
 namespace gfx {
 
 // A size has width and height values.
-class UI_EXPORT Size {
+class UI_EXPORT Size : public SizeBase<Size, int> {
  public:
-  Size();
-  Size(int width, int height);
+  Size() : SizeBase<Size, int>(0, 0) {}
+  Size(int width, int height) : SizeBase<Size, int>(width, height) {}
 #if defined(OS_MACOSX)
   explicit Size(const CGSize& s);
 #endif
@@ -34,49 +37,30 @@ class UI_EXPORT Size {
   Size& operator=(const CGSize& s);
 #endif
 
-  int width() const { return width_; }
-  int height() const { return height_; }
-
-  int GetArea() const { return width_ * height_; }
-
-  void SetSize(int width, int height) {
-    set_width(width);
-    set_height(height);
-  }
-
-  void Enlarge(int width, int height) {
-    set_width(width_ + width);
-    set_height(height_ + height);
-  }
-
-  void set_width(int width);
-  void set_height(int height);
-
-  bool operator==(const Size& s) const {
-    return width_ == s.width_ && height_ == s.height_;
-  }
-
-  bool operator!=(const Size& s) const {
-    return !(*this == s);
-  }
-
-  bool IsEmpty() const {
-    // Size doesn't allow negative dimensions, so testing for 0 is enough.
-    return (width_ == 0) || (height_ == 0);
-  }
-
 #if defined(OS_WIN)
   SIZE ToSIZE() const;
 #elif defined(OS_MACOSX)
   CGSize ToCGSize() const;
 #endif
 
-  std::string ToString() const;
+  operator SizeF() const {
+    return SizeF(width(), height());
+  }
 
- private:
-  int width_;
-  int height_;
+  std::string ToString() const;
 };
+
+inline bool operator==(const Size& lhs, const Size& rhs) {
+  return lhs.width() == rhs.width() && lhs.height() == rhs.height();
+}
+
+inline bool operator!=(const Size& lhs, const Size& rhs) {
+  return !(lhs == rhs);
+}
+
+#if !defined(COMPILER_MSVC)
+extern template class SizeBase<Size, int>;
+#endif
 
 }  // namespace gfx
 

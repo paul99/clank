@@ -1,4 +1,4 @@
-// Copyright (c) 2011 The Chromium Authors. All rights reserved.
+// Copyright (c) 2012 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -11,7 +11,9 @@
 #include "base/file_path.h"
 #include "base/file_util.h"
 #include "base/lazy_instance.h"
+#include "base/location.h"
 #include "base/message_loop.h"
+#include "base/message_loop_proxy.h"
 #include "base/metrics/histogram.h"
 #include "base/process_util.h"
 #include "base/string_number_conversions.h"
@@ -24,16 +26,19 @@
 #include "chrome/browser/chromeos/login/authentication_notification_details.h"
 #include "chrome/browser/ui/browser.h"
 #include "chrome/browser/ui/browser_list.h"
+#include "chrome/browser/ui/browser_tabstrip.h"
 #include "chrome/common/chrome_notification_types.h"
 #include "chrome/common/chrome_switches.h"
-#include "content/browser/renderer_host/render_widget_host_view.h"
 #include "content/public/browser/browser_thread.h"
 #include "content/public/browser/navigation_controller.h"
 #include "content/public/browser/notification_service.h"
+#include "content/public/browser/render_widget_host_view.h"
 #include "content/public/browser/web_contents.h"
 
 using content::BrowserThread;
 using content::NavigationController;
+using content::RenderWidgetHost;
+using content::RenderWidgetHostView;
 using content::WebContents;
 
 namespace {
@@ -50,13 +55,13 @@ RenderWidgetHost* GetRenderWidgetHost(NavigationController* tab) {
 }
 
 const std::string GetTabUrl(RenderWidgetHost* rwh) {
-  RenderWidgetHostView* rwhv = rwh->view();
+  RenderWidgetHostView* rwhv = rwh->GetView();
   for (BrowserList::const_iterator it = BrowserList::begin();
        it != BrowserList::end();
        ++it) {
     Browser* browser = *it;
     for (int i = 0, tab_count = browser->tab_count(); i < tab_count; ++i) {
-      WebContents* tab = browser->GetWebContentsAt(i);
+      WebContents* tab = chrome::GetWebContentsAt(browser, i);
       if (tab->GetRenderWidgetHostView() == rwhv) {
         return tab->GetURL().spec();
       }
@@ -64,7 +69,18 @@ const std::string GetTabUrl(RenderWidgetHost* rwh) {
   }
   return std::string();
 }
+
+void PostCallbackIfNotCanceled(
+    const CancelableTaskTracker::IsCanceledCallback& is_canceled_cb,
+    base::TaskRunner* task_runner,
+    const chromeos::BootTimesLoader::GetBootTimesCallback& callback,
+    const chromeos::BootTimesLoader::BootTimes& boot_times) {
+  if (is_canceled_cb.Run())
+    return;
+  task_runner->PostTask(FROM_HERE, base::Bind(callback, boot_times));
 }
+
+}  // namespace
 
 namespace chromeos {
 
@@ -91,7 +107,6 @@ static const FilePath::CharType kChromeFirstRender[] =
     FPL("chrome-first-render");
 
 // Names of login UMA values.
-static const char kUmaAuthenticate[] = "BootTime.Authenticate";
 static const char kUmaLogin[] = "BootTime.Login";
 static const char kUmaLoginPrefix[] = "BootTime.";
 static const char kUmaLogout[] = "ShutdownTime.Logout";
@@ -120,31 +135,34 @@ BootTimesLoader* BootTimesLoader::Get() {
   return g_boot_times_loader.Pointer();
 }
 
-BootTimesLoader::Handle BootTimesLoader::GetBootTimes(
-    CancelableRequestConsumerBase* consumer,
-    const GetBootTimesCallback& callback) {
+CancelableTaskTracker::TaskId BootTimesLoader::GetBootTimes(
+      const GetBootTimesCallback& callback,
+      CancelableTaskTracker* tracker) {
   if (!BrowserThread::IsMessageLoopValid(BrowserThread::FILE)) {
     // This should only happen if Chrome is shutting down, so we don't do
     // anything.
-    return 0;
+    return CancelableTaskTracker::kBadTaskId;
   }
 
   const CommandLine& command_line = *CommandLine::ForCurrentProcess();
   if (command_line.HasSwitch(switches::kTestType)) {
     // TODO(davemoore) This avoids boottimes for tests. This needs to be
     // replaced with a mock of BootTimesLoader.
-    return 0;
+    return CancelableTaskTracker::kBadTaskId;
   }
 
-  scoped_refptr<CancelableRequest<GetBootTimesCallback> > request(
-      new CancelableRequest<GetBootTimesCallback>(callback));
-  AddRequest(request, consumer);
+  CancelableTaskTracker::IsCanceledCallback is_canceled;
+  CancelableTaskTracker::TaskId id = tracker->NewTrackedTaskId(&is_canceled);
 
+  GetBootTimesCallback callback_runner =
+      base::Bind(&PostCallbackIfNotCanceled,
+                 is_canceled, base::MessageLoopProxy::current(), callback);
   BrowserThread::PostTask(
       BrowserThread::FILE,
       FROM_HERE,
-      base::Bind(&Backend::GetBootTimes, backend_, request));
-  return request->handle();
+      base::Bind(&Backend::GetBootTimesAndRunCallback,
+                 backend_, is_canceled, callback_runner));
+  return id;
 }
 
 // Extracts the uptime value from files located in /tmp, returning the
@@ -212,8 +230,12 @@ static void SendBootTimesToUMA(const BootTimesLoader::BootTimes& boot_times) {
   DCHECK(file_util::PathExists(sent));
 }
 
-void BootTimesLoader::Backend::GetBootTimes(
-    const scoped_refptr<GetBootTimesRequest>& request) {
+void BootTimesLoader::Backend::GetBootTimesAndRunCallback(
+    const CancelableTaskTracker::IsCanceledCallback& is_canceled_cb,
+    const GetBootTimesCallback& callback) {
+  if (is_canceled_cb.Run())
+    return;
+
   const FilePath::CharType kFirmwareBootTime[] = FPL("firmware-boot-time");
   const FilePath::CharType kPreStartup[] = FPL("pre-startup");
   const FilePath::CharType kChromeExec[] = FPL("chrome-exec");
@@ -222,9 +244,6 @@ void BootTimesLoader::Backend::GetBootTimes(
   const FilePath::CharType kLoginPromptReady[] = FPL("login-prompt-ready");
   const FilePath::StringType uptime_prefix = kUptimePrefix;
 
-  if (request->canceled())
-    return;
-
   // Wait until firmware-boot-time file exists by reposting.
   FilePath log_dir(kLogPath);
   FilePath log_file = log_dir.Append(kFirmwareBootTime);
@@ -232,8 +251,9 @@ void BootTimesLoader::Backend::GetBootTimes(
     BrowserThread::PostDelayedTask(
         BrowserThread::FILE,
         FROM_HERE,
-        base::Bind(&Backend::GetBootTimes, this, request),
-        kReadAttemptDelayMs);
+        base::Bind(&Backend::GetBootTimesAndRunCallback,
+                   this, is_canceled_cb, callback),
+        base::TimeDelta::FromMilliseconds(kReadAttemptDelayMs));
     return;
   }
 
@@ -256,7 +276,7 @@ void BootTimesLoader::Backend::GetBootTimes(
 
   SendBootTimesToUMA(boot_times);
 
-  request->ForwardResult(request->handle(), boot_times);
+  callback.Run(boot_times);
 }
 
 // Appends the given buffer into the file. Returns the number of bytes
@@ -292,11 +312,16 @@ void BootTimesLoader::WriteTimes(
     const std::string base_name,
     const std::string uma_name,
     const std::string uma_prefix,
-    const std::vector<TimeMarker> login_times) {
+    std::vector<TimeMarker> login_times) {
   const int kMinTimeMillis = 1;
   const int kMaxTimeMillis = 30000;
   const int kNumBuckets = 100;
   const FilePath log_path(kLoginLogPath);
+
+  // Need to sort by time since the entries may have been pushed onto the
+  // vector (on the UI thread) in a different order from which they were
+  // created (potentially on other threads).
+  std::sort(login_times.begin(), login_times.end());
 
   base::Time first = login_times.front().time();
   base::Time last = login_times.back().time();
@@ -344,7 +369,8 @@ void BootTimesLoader::WriteTimes(
 }
 
 void BootTimesLoader::LoginDone() {
-  AddLoginTimeMarker("LoginDone", true);
+  DCHECK(BrowserThread::CurrentlyOn(BrowserThread::UI));
+  AddLoginTimeMarker("LoginDone", false);
   RecordCurrentStats(kChromeFirstRender);
   registrar_.Remove(this, content::NOTIFICATION_LOAD_START,
                     content::NotificationService::AllSources());
@@ -352,17 +378,25 @@ void BootTimesLoader::LoginDone() {
                     content::NotificationService::AllSources());
   registrar_.Remove(this, content::NOTIFICATION_WEB_CONTENTS_DESTROYED,
                     content::NotificationService::AllSources());
-  registrar_.Remove(this, content::NOTIFICATION_RENDER_WIDGET_HOST_DID_PAINT,
-                    content::NotificationService::AllSources());
+  registrar_.Remove(
+      this,
+      content::NOTIFICATION_RENDER_WIDGET_HOST_DID_UPDATE_BACKING_STORE,
+      content::NotificationService::AllSources());
   // Don't swamp the FILE thread right away.
   BrowserThread::PostDelayedTask(
       BrowserThread::FILE, FROM_HERE,
       base::Bind(&WriteTimes, kLoginTimes, kUmaLogin, kUmaLoginPrefix,
                  login_time_markers_),
-      kLoginTimeWriteDelayMs);
+      base::TimeDelta::FromMilliseconds(kLoginTimeWriteDelayMs));
 }
 
 void BootTimesLoader::WriteLogoutTimes() {
+  // Either we're on the browser thread, or (more likely) Chrome is in the
+  // process of shutting down and we're on the main thread but the message loop
+  // has already been terminated.
+  DCHECK(BrowserThread::CurrentlyOn(BrowserThread::UI) ||
+         !BrowserThread::IsMessageLoopValid(BrowserThread::UI));
+
   WriteTimes(kLogoutTimes,
              kUmaLogout,
              kUmaLogoutPrefix,
@@ -398,6 +432,7 @@ void BootTimesLoader::RecordChromeMainStats() {
 }
 
 void BootTimesLoader::RecordLoginAttempted() {
+  DCHECK(BrowserThread::CurrentlyOn(BrowserThread::UI));
   login_time_markers_.clear();
   AddLoginTimeMarker("LoginStarted", false);
   if (!have_registered_) {
@@ -410,19 +445,43 @@ void BootTimesLoader::RecordLoginAttempted() {
                    content::NotificationService::AllSources());
     registrar_.Add(this, content::NOTIFICATION_WEB_CONTENTS_DESTROYED,
                    content::NotificationService::AllSources());
-    registrar_.Add(this, content::NOTIFICATION_RENDER_WIDGET_HOST_DID_PAINT,
-                   content::NotificationService::AllSources());
+    registrar_.Add(
+        this,
+        content::NOTIFICATION_RENDER_WIDGET_HOST_DID_UPDATE_BACKING_STORE,
+        content::NotificationService::AllSources());
   }
 }
 
 void BootTimesLoader::AddLoginTimeMarker(
     const std::string& marker_name, bool send_to_uma) {
-  login_time_markers_.push_back(TimeMarker(marker_name, send_to_uma));
+  AddMarker(&login_time_markers_, TimeMarker(marker_name, send_to_uma));
 }
 
 void BootTimesLoader::AddLogoutTimeMarker(
     const std::string& marker_name, bool send_to_uma) {
-  logout_time_markers_.push_back(TimeMarker(marker_name, send_to_uma));
+  AddMarker(&logout_time_markers_, TimeMarker(marker_name, send_to_uma));
+}
+
+// static
+void BootTimesLoader::AddMarker(std::vector<TimeMarker>* vector,
+                                TimeMarker marker)
+{
+  // The marker vectors can only be safely manipulated on the main thread.
+  // If we're late in the process of shutting down (eg. as can be the case at
+  // logout), then we have to assume we're on the main thread already.
+  if (BrowserThread::CurrentlyOn(BrowserThread::UI) ||
+      !BrowserThread::IsMessageLoopValid(BrowserThread::UI)) {
+    vector->push_back(marker);
+  } else {
+    // Add the marker on the UI thread.
+    // Note that it's safe to use an unretained pointer to the vector because
+    // BootTimesLoader's lifetime exceeds that of the UI thread message loop.
+    BrowserThread::PostTask(
+        BrowserThread::UI, FROM_HERE,
+        base::Bind(&BootTimesLoader::AddMarker,
+                   base::Unretained(vector),
+                   marker));
+  }
 }
 
 void BootTimesLoader::Observe(
@@ -459,7 +518,7 @@ void BootTimesLoader::Observe(
       }
       break;
     }
-    case content::NOTIFICATION_RENDER_WIDGET_HOST_DID_PAINT: {
+    case content::NOTIFICATION_RENDER_WIDGET_HOST_DID_UPDATE_BACKING_STORE: {
       RenderWidgetHost* rwh = content::Source<RenderWidgetHost>(source).ptr();
       if (render_widget_hosts_loading_.find(rwh) !=
           render_widget_hosts_loading_.end()) {

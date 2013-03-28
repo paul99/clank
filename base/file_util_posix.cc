@@ -1,4 +1,4 @@
-// Copyright (c) 2011 The Chromium Authors. All rights reserved.
+// Copyright (c) 2012 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -8,7 +8,6 @@
 #include <errno.h>
 #include <fcntl.h>
 #include <fnmatch.h>
-#include <grp.h>
 #include <libgen.h>
 #include <limits.h>
 #include <stdio.h>
@@ -33,12 +32,12 @@
 #include <fstream>
 
 #include "base/basictypes.h"
-#include "base/eintr_wrapper.h"
 #include "base/file_path.h"
 #include "base/logging.h"
 #include "base/memory/scoped_ptr.h"
 #include "base/memory/singleton.h"
 #include "base/path_service.h"
+#include "base/posix/eintr_wrapper.h"
 #include "base/stl_util.h"
 #include "base/string_util.h"
 #include "base/stringprintf.h"
@@ -51,12 +50,19 @@
 #include "base/os_compat_android.h"
 #endif
 
+#if !defined(OS_IOS)
+#include <grp.h>
+#endif
+
+#if defined(OS_CHROMEOS)
+#include "base/chromeos/chromeos_version.h"
+#endif
+
 namespace file_util {
 
 namespace {
 
-#if defined(OS_BSD) || (defined(OS_MACOSX) && \
-    MAC_OS_X_VERSION_MIN_REQUIRED < MAC_OS_X_VERSION_10_5)
+#if defined(OS_BSD) || defined(OS_MACOSX)
 typedef struct stat stat_wrapper_t;
 static int CallStat(const char *path, stat_wrapper_t *sb) {
   base::ThreadRestrictions::AssertIOAllowed();
@@ -207,7 +213,7 @@ bool Delete(const FilePath& path, bool recursive) {
   base::ThreadRestrictions::AssertIOAllowed();
   const char* path_str = path.value().c_str();
   stat_wrapper_t file_info;
-  int test = CallStat(path_str, &file_info);
+  int test = CallLstat(path_str, &file_info);
   if (test != 0) {
     // The Windows version defines this condition as success.
     bool ret = (errno == ENOENT || errno == ENOTDIR);
@@ -221,9 +227,9 @@ bool Delete(const FilePath& path, bool recursive) {
   bool success = true;
   std::stack<std::string> directories;
   directories.push(path.value());
-  FileEnumerator traversal(path, true, static_cast<FileEnumerator::FileType>(
-        FileEnumerator::FILES | FileEnumerator::DIRECTORIES |
-        FileEnumerator::SHOW_SYM_LINKS));
+  FileEnumerator traversal(path, true,
+      FileEnumerator::FILES | FileEnumerator::DIRECTORIES |
+      FileEnumerator::SHOW_SYM_LINKS);
   for (FilePath current = traversal.Next(); success && !current.empty();
        current = traversal.Next()) {
     FileEnumerator::FindInfo info;
@@ -243,7 +249,7 @@ bool Delete(const FilePath& path, bool recursive) {
   return success;
 }
 
-bool Move(const FilePath& from_path, const FilePath& to_path) {
+bool MoveUnsafe(const FilePath& from_path, const FilePath& to_path) {
   base::ThreadRestrictions::AssertIOAllowed();
   // Windows compatibility: if to_path exists, from_path and to_path
   // must be the same type, either both files, or both directories.
@@ -309,12 +315,9 @@ bool CopyDirectory(const FilePath& from_path,
     return false;
 
   bool success = true;
-  FileEnumerator::FileType traverse_type =
-      static_cast<FileEnumerator::FileType>(FileEnumerator::FILES |
-      FileEnumerator::SHOW_SYM_LINKS);
+  int traverse_type = FileEnumerator::FILES | FileEnumerator::SHOW_SYM_LINKS;
   if (recursive)
-    traverse_type = static_cast<FileEnumerator::FileType>(
-        traverse_type | FileEnumerator::DIRECTORIES);
+    traverse_type |= FileEnumerator::DIRECTORIES;
   FileEnumerator traversal(from_path, recursive, traverse_type);
 
   // We have to mimic windows behavior here. |to_path| may not exist yet,
@@ -340,15 +343,15 @@ bool CopyDirectory(const FilePath& from_path,
   DCHECK(recursive || S_ISDIR(info.stat.st_mode));
 
   while (success && !current.empty()) {
-    // current is the source path, including from_path, so paste
-    // the suffix after from_path onto to_path to create the target_path.
-    std::string suffix(&current.value().c_str()[from_path_base.value().size()]);
-    // Strip the leading '/' (if any).
-    if (!suffix.empty()) {
-      DCHECK_EQ('/', suffix[0]);
-      suffix.erase(0, 1);
+    // current is the source path, including from_path, so append
+    // the suffix after from_path to to_path to create the target_path.
+    FilePath target_path(to_path);
+    if (from_path_base != current) {
+      if (!from_path_base.AppendRelativePath(current, &target_path)) {
+        success = false;
+        break;
+      }
     }
-    const FilePath target_path = to_path.Append(suffix);
 
     if (S_ISDIR(info.stat.st_mode)) {
       if (mkdir(target_path.value().c_str(), info.stat.st_mode & 01777) != 0 &&
@@ -454,6 +457,40 @@ bool ReadSymbolicLink(const FilePath& symlink_path,
   }
 
   *target_path = FilePath(FilePath::StringType(buf, count));
+  return true;
+}
+
+bool GetPosixFilePermissions(const FilePath& path, int* mode) {
+  base::ThreadRestrictions::AssertIOAllowed();
+  DCHECK(mode);
+
+  stat_wrapper_t file_info;
+  // Uses stat(), because on symbolic link, lstat() does not return valid
+  // permission bits in st_mode
+  if (CallStat(path.value().c_str(), &file_info) != 0)
+    return false;
+
+  *mode = file_info.st_mode & FILE_PERMISSION_MASK;
+  return true;
+}
+
+bool SetPosixFilePermissions(const FilePath& path,
+                             int mode) {
+  base::ThreadRestrictions::AssertIOAllowed();
+  DCHECK((mode & ~FILE_PERMISSION_MASK) == 0);
+
+  // Calls stat() so that we can preserve the higher bits like S_ISGID.
+  stat_wrapper_t stat_buf;
+  if (CallStat(path.value().c_str(), &stat_buf) != 0)
+    return false;
+
+  // Clears the existing permission bits, and adds the new ones.
+  mode_t updated_mode_bits = stat_buf.st_mode & ~FILE_PERMISSION_MASK;
+  updated_mode_bits |= mode & FILE_PERMISSION_MASK;
+
+  if (HANDLE_EINTR(chmod(path.value().c_str(), updated_mode_bits)) != 0)
+    return false;
+
   return true;
 }
 
@@ -578,10 +615,10 @@ bool CreateDirectory(const FilePath& full_path) {
 // TODO(rkc): Refactor GetFileInfo and FileEnumerator to handle symlinks
 // correctly. http://code.google.com/p/chromium-os/issues/detail?id=15948
 bool IsLink(const FilePath& file_path) {
-  struct stat st;
+  stat_wrapper_t st;
   // If we can't lstat the file, it's safe to assume that the file won't at
   // least be a 'followable' link.
-  if (lstat(file_path.value().c_str(), &st) != 0)
+  if (CallLstat(file_path.value().c_str(), &st) != 0)
     return false;
 
   if (S_ISLNK(st.st_mode))
@@ -665,6 +702,18 @@ int WriteFileDescriptor(const int fd, const char* data, int size) {
   return bytes_written_total;
 }
 
+int AppendToFile(const FilePath& filename, const char* data, int size) {
+  base::ThreadRestrictions::AssertIOAllowed();
+  int fd = HANDLE_EINTR(open(filename.value().c_str(), O_WRONLY | O_APPEND));
+  if (fd < 0)
+    return -1;
+
+  int bytes_written = WriteFileDescriptor(fd, data, size);
+  if (int ret = HANDLE_EINTR(close(fd)) < 0)
+    return ret;
+  return bytes_written;
+}
+
 // Gets the current working directory for the process.
 bool GetCurrentDirectory(FilePath* dir) {
   // getcwd can return ENOENT, which implies it checks against the disk.
@@ -691,7 +740,7 @@ bool SetCurrentDirectory(const FilePath& path) {
 
 FileEnumerator::FileEnumerator(const FilePath& root_path,
                                bool recursive,
-                               FileType file_type)
+                               int file_type)
     : current_directory_entry_(0),
       root_path_(root_path),
       recursive_(recursive),
@@ -703,7 +752,7 @@ FileEnumerator::FileEnumerator(const FilePath& root_path,
 
 FileEnumerator::FileEnumerator(const FilePath& root_path,
                                bool recursive,
-                               FileType file_type,
+                               int file_type,
                                const FilePath::StringType& pattern)
     : current_directory_entry_(0),
       root_path_(root_path),
@@ -775,6 +824,7 @@ void FileEnumerator::GetFindInfo(FindInfo* info) {
   info->filename.assign(cur_entry->filename.value());
 }
 
+// static
 bool FileEnumerator::IsDirectory(const FindInfo& info) {
   return S_ISDIR(info.stat.st_mode);
 }
@@ -962,6 +1012,11 @@ bool GetShmemTempDir(FilePath* path, bool executable) {
 #endif  // !defined(OS_ANDROID)
 
 FilePath GetHomeDir() {
+#if defined(OS_CHROMEOS)
+  if (base::chromeos::IsRunningOnChromeOS())
+    return FilePath("/home/chronos/user");
+#endif
+
   const char* home_dir = getenv("HOME");
   if (home_dir && home_dir[0])
     return FilePath(home_dir);
@@ -985,7 +1040,7 @@ FilePath GetHomeDir() {
   return FilePath("/tmp");
 }
 
-bool CopyFile(const FilePath& from_path, const FilePath& to_path) {
+bool CopyFileUnsafe(const FilePath& from_path, const FilePath& to_path) {
   base::ThreadRestrictions::AssertIOAllowed();
   int infile = HANDLE_EINTR(open(from_path.value().c_str(), O_RDONLY));
   if (infile < 0)
@@ -1031,7 +1086,7 @@ bool CopyFile(const FilePath& from_path, const FilePath& to_path) {
 
   return result;
 }
-#endif  // defined(OS_MACOSX)
+#endif  // !defined(OS_MACOSX)
 
 bool VerifyPathControlledByUser(const FilePath& base,
                                 const FilePath& path,
@@ -1072,7 +1127,7 @@ bool VerifyPathControlledByUser(const FilePath& base,
   return true;
 }
 
-#if defined(OS_MACOSX)
+#if defined(OS_MACOSX) && !defined(OS_IOS)
 bool VerifyPathControlledByAdmin(const FilePath& path) {
   const unsigned kRootUid = 0;
   const FilePath kFileSystemRoot("/");
@@ -1101,6 +1156,6 @@ bool VerifyPathControlledByAdmin(const FilePath& path) {
   return VerifyPathControlledByUser(
       kFileSystemRoot, path, kRootUid, allowed_group_ids);
 }
-#endif  // defined(OS_MACOSX)
+#endif  // defined(OS_MACOSX) && !defined(OS_IOS)
 
 }  // namespace file_util

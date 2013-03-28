@@ -4,7 +4,6 @@
 
 #ifndef NET_SOCKET_MOCK_CLIENT_SOCKET_POOL_MANAGER_H_
 #define NET_SOCKET_MOCK_CLIENT_SOCKET_POOL_MANAGER_H_
-#pragma once
 
 #include "base/basictypes.h"
 #include "net/socket/client_socket_pool_manager.h"
@@ -28,7 +27,7 @@ class MockClientSocketPoolManager : public ClientSocketPoolManager {
                                     SSLClientSocketPool* pool);
 
   // ClientSocketPoolManager methods:
-  virtual void FlushSocketPools() OVERRIDE;
+  virtual void FlushSocketPoolsWithError(int error) OVERRIDE;
   virtual void CloseIdleSockets() OVERRIDE;
   virtual TransportClientSocketPool* GetTransportSocketPool() OVERRIDE;
   virtual SSLClientSocketPool* GetSSLSocketPool() OVERRIDE;

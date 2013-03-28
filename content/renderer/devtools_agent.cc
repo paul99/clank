@@ -15,18 +15,29 @@
 #include "content/renderer/devtools_agent_filter.h"
 #include "content/renderer/devtools_client.h"
 #include "content/renderer/render_view_impl.h"
+#include "third_party/WebKit/Source/WebKit/chromium/public/WebConsoleMessage.h"
 #include "third_party/WebKit/Source/WebKit/chromium/public/WebDevToolsAgent.h"
 #include "third_party/WebKit/Source/WebKit/chromium/public/platform/WebPoint.h"
 #include "third_party/WebKit/Source/WebKit/chromium/public/platform/WebString.h"
+#include "third_party/WebKit/Source/WebKit/chromium/public/WebConsoleMessage.h"
+#include "third_party/WebKit/Source/WebKit/chromium/public/WebFrame.h"
 #include "third_party/WebKit/Source/WebKit/chromium/public/WebView.h"
 
+#if defined(USE_TCMALLOC)
+#include "third_party/tcmalloc/chromium/src/gperftools/heap-profiler.h"
+#endif
+
+using WebKit::WebConsoleMessage;
 using WebKit::WebDevToolsAgent;
 using WebKit::WebDevToolsAgentClient;
+using WebKit::WebFrame;
 using WebKit::WebPoint;
 using WebKit::WebString;
 using WebKit::WebCString;
 using WebKit::WebVector;
 using WebKit::WebView;
+
+namespace content {
 
 namespace {
 
@@ -38,10 +49,8 @@ class WebKitClientMessageLoopImpl
     message_loop_ = NULL;
   }
   virtual void run() {
-    bool old_state = message_loop_->NestableTasksAllowed();
-    message_loop_->SetNestableTasksAllowed(true);
+    MessageLoop::ScopedNestableTaskAllower allow(message_loop_);
     message_loop_->Run();
-    message_loop_->SetNestableTasksAllowed(old_state);
   }
   virtual void quitNow() {
     message_loop_->QuitNow();
@@ -57,8 +66,7 @@ base::LazyInstance<IdToAgentMap>::Leaky
 } //  namespace
 
 DevToolsAgent::DevToolsAgent(RenderViewImpl* render_view)
-    : content::RenderViewObserver(render_view),
-      is_attached_(false) {
+    : RenderViewObserver(render_view), is_attached_(false) {
   g_agent_for_routing_id.Get()[routing_id()] = this;
 
   render_view->webview()->setDevToolsAgentClient(this);
@@ -80,12 +88,15 @@ bool DevToolsAgent::OnMessageReceived(const IPC::Message& message) {
     IPC_MESSAGE_HANDLER(DevToolsAgentMsg_DispatchOnInspectorBackend,
                         OnDispatchOnInspectorBackend)
     IPC_MESSAGE_HANDLER(DevToolsAgentMsg_InspectElement, OnInspectElement)
+    IPC_MESSAGE_HANDLER(DevToolsAgentMsg_AddMessageToConsole,
+                        OnAddMessageToConsole)
     IPC_MESSAGE_HANDLER(DevToolsMsg_SetupDevToolsClient, OnSetupDevToolsClient)
     IPC_MESSAGE_UNHANDLED(handled = false)
   IPC_END_MESSAGE_MAP()
 
-  if (message.type() == ViewMsg_Navigate::ID)
-    OnNavigate();  // Don't want to swallow the message.
+  if (message.type() == ViewMsg_Navigate::ID ||
+      message.type() == ViewMsg_Close::ID)
+    ContinueProgram();  // Don't want to swallow the message.
 
   return handled;
 }
@@ -116,6 +127,20 @@ void DevToolsAgent::clearBrowserCache() {
 
 void DevToolsAgent::clearBrowserCookies() {
   Send(new DevToolsHostMsg_ClearBrowserCookies(routing_id()));
+}
+
+#if defined(USE_TCMALLOC) && !defined(OS_WIN)
+static void AllocationVisitor(void* data, const void* ptr) {
+    typedef WebKit::WebDevToolsAgentClient::AllocatedObjectVisitor Visitor;
+    Visitor* visitor = reinterpret_cast<Visitor*>(data);
+    visitor->visitObject(ptr);
+}
+#endif
+
+void DevToolsAgent::visitAllocatedObjects(AllocatedObjectVisitor* visitor) {
+#if defined(USE_TCMALLOC) && !defined(OS_WIN)
+  IterateAllocatedObjects(&AllocationVisitor, visitor);
+#endif
 }
 
 // static
@@ -165,11 +190,41 @@ void DevToolsAgent::OnInspectElement(int x, int y) {
   }
 }
 
-void DevToolsAgent::OnNavigate() {
-  WebDevToolsAgent* web_agent = GetWebAgent();
-  if (web_agent) {
-    web_agent->didNavigate();
+void DevToolsAgent::OnAddMessageToConsole(ConsoleMessageLevel level,
+                                          const std::string& message) {
+  WebView* web_view = render_view()->GetWebView();
+  if (!web_view)
+    return;
+
+  WebFrame* main_frame = web_view-> mainFrame();
+  if (!main_frame)
+    return;
+
+  WebConsoleMessage::Level target_level = WebConsoleMessage::LevelLog;
+  switch (level) {
+    case CONSOLE_MESSAGE_LEVEL_TIP:
+      target_level = WebConsoleMessage::LevelTip;
+      break;
+    case CONSOLE_MESSAGE_LEVEL_LOG:
+      target_level = WebConsoleMessage::LevelLog;
+      break;
+    case CONSOLE_MESSAGE_LEVEL_WARNING:
+      target_level = WebConsoleMessage::LevelWarning;
+      break;
+    case CONSOLE_MESSAGE_LEVEL_ERROR:
+      target_level = WebConsoleMessage::LevelError;
+      break;
   }
+  main_frame->addMessageToConsole(
+      WebConsoleMessage(target_level, WebString::fromUTF8(message)));
+}
+
+void DevToolsAgent::ContinueProgram() {
+  WebDevToolsAgent* web_agent = GetWebAgent();
+  // TODO(pfeldman): rename didNavigate to continueProgram upstream.
+  // That is in fact the purpose of the signal.
+  if (web_agent)
+    web_agent->didNavigate();
 }
 
 void DevToolsAgent::OnSetupDevToolsClient() {
@@ -186,3 +241,5 @@ WebDevToolsAgent* DevToolsAgent::GetWebAgent() {
 bool DevToolsAgent::IsAttached() {
   return is_attached_;
 }
+
+}  // namespace content

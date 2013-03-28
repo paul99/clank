@@ -12,6 +12,7 @@
 #include "chrome/browser/importer/importer_progress_dialog.h"
 #include "chrome/browser/importer/importer_progress_observer.h"
 #include "chrome/browser/profiles/profile_manager.h"
+#include "chrome/common/chrome_constants.h"
 #include "chrome/common/chrome_paths.h"
 #include "chrome/installer/util/master_preferences.h"
 #include "chrome/installer/util/master_preferences_constants.h"
@@ -66,7 +67,7 @@ bool GetFirstRunSentinelFilePath(FilePath* path) {
   if (!PathService::Get(chrome::DIR_USER_DATA, &first_run_sentinel))
     return false;
 
-  *path = first_run_sentinel.AppendASCII(kSentinelFile);
+  *path = first_run_sentinel.Append(chrome::kFirstRunSentinel);
   return true;
 }
 
@@ -78,8 +79,10 @@ bool ImportSettings(Profile* profile,
       importer_list->GetSourceProfileAt(0);
 
   // Ensure that importers aren't requested to import items that they do not
-  // support.
+  // support. If there is no overlap, skip.
   items_to_import &= source_profile.services_supported;
+  if (items_to_import == 0)
+    return true;
 
   scoped_ptr<ImportEndedObserver> observer(new ImportEndedObserver);
   importer_host->SetObserver(observer.get());
@@ -98,6 +101,28 @@ bool ImportSettings(Profile* profile,
   return true;
 }
 
+void SetImportPreferencesAndLaunchImport(
+    MasterPrefs* out_prefs,
+    installer::MasterPreferences* install_prefs) {
+  std::string import_bookmarks_path;
+  install_prefs->GetString(
+      installer::master_preferences::kDistroImportBookmarksFromFilePref,
+      &import_bookmarks_path);
+  if (!import_bookmarks_path.empty()) {
+    // There are bookmarks to import from a file.
+    FilePath path = FilePath::FromWStringHack(UTF8ToWide(
+        import_bookmarks_path));
+    if (!ImportBookmarks(path)) {
+      LOG(WARNING) << "silent bookmark import failed";
+    }
+  }
+}
+
+bool ShowPostInstallEULAIfNeeded(installer::MasterPreferences* install_prefs) {
+  // The EULA is only handled on Windows.
+  return true;
+}
+
 }  // namespace internal
 }  // namespace first_run
 
@@ -109,6 +134,5 @@ namespace first_run {
 int ImportNow(Profile* profile, const CommandLine& cmdline) {
   return internal::ImportBookmarkFromFileIfNeeded(profile, cmdline);
 }
-
 
 }  // namespace first_run

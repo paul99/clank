@@ -1,4 +1,4 @@
-// Copyright (c) 2011 The Chromium Authors. All rights reserved.
+// Copyright (c) 2012 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -22,6 +22,8 @@ namespace {
 const char kPostMethod[] = "post";
 
 EnumMapper<PropertyIndex>::Pair property_index_table[] = {
+  { shill::kActivateOverNonCellularNetworkProperty,
+    PROPERTY_INDEX_ACTIVATE_OVER_NON_CELLULAR_NETWORK },
   { flimflam::kActivationStateProperty, PROPERTY_INDEX_ACTIVATION_STATE },
   { flimflam::kActiveProfileProperty, PROPERTY_INDEX_ACTIVE_PROFILE },
   { flimflam::kArpGatewayProperty, PROPERTY_INDEX_ARP_GATEWAY },
@@ -35,6 +37,7 @@ EnumMapper<PropertyIndex>::Pair property_index_table[] = {
   { flimflam::kCellularApnProperty, PROPERTY_INDEX_CELLULAR_APN },
   { flimflam::kCellularLastGoodApnProperty,
     PROPERTY_INDEX_CELLULAR_LAST_GOOD_APN },
+  { flimflam::kCheckPortalProperty, PROPERTY_INDEX_CHECK_PORTAL },
   { flimflam::kCheckPortalListProperty, PROPERTY_INDEX_CHECK_PORTAL_LIST },
   { flimflam::kConnectableProperty, PROPERTY_INDEX_CONNECTABLE },
   { flimflam::kConnectedTechnologiesProperty,
@@ -72,6 +75,7 @@ EnumMapper<PropertyIndex>::Pair property_index_table[] = {
   { flimflam::kHardwareRevisionProperty, PROPERTY_INDEX_HARDWARE_REVISION },
   { flimflam::kHomeProviderProperty, PROPERTY_INDEX_HOME_PROVIDER },
   { flimflam::kHostProperty, PROPERTY_INDEX_HOST },
+  { flimflam::kIccidProperty, PROPERTY_INDEX_ICCID },
   { flimflam::kIdentityProperty, PROPERTY_INDEX_IDENTITY },
   { flimflam::kImeiProperty, PROPERTY_INDEX_IMEI },
   { flimflam::kImsiProperty, PROPERTY_INDEX_IMSI },
@@ -87,6 +91,8 @@ EnumMapper<PropertyIndex>::Pair property_index_table[] = {
   { flimflam::kL2tpIpsecIkeVersion, PROPERTY_INDEX_IPSEC_IKEVERSION },
   { flimflam::kL2tpIpsecPinProperty, PROPERTY_INDEX_L2TPIPSEC_PIN },
   { flimflam::kL2tpIpsecPskProperty, PROPERTY_INDEX_L2TPIPSEC_PSK },
+  { flimflam::kL2tpIpsecPskRequiredProperty,
+    PROPERTY_INDEX_L2TPIPSEC_PSK_REQUIRED },
   { flimflam::kL2tpIpsecPasswordProperty, PROPERTY_INDEX_L2TPIPSEC_PASSWORD },
   { flimflam::kL2tpIpsecUserProperty, PROPERTY_INDEX_L2TPIPSEC_USER },
   { flimflam::kL2tpIpsecGroupNameProperty,
@@ -113,10 +119,13 @@ EnumMapper<PropertyIndex>::Pair property_index_table[] = {
   { flimflam::kProfilesProperty, PROPERTY_INDEX_PROFILES },
   { flimflam::kProviderHostProperty, PROPERTY_INDEX_PROVIDER_HOST },
   { flimflam::kProviderProperty, PROPERTY_INDEX_PROVIDER },
+  { shill::kProviderRequiresRoamingProperty,
+    PROPERTY_INDEX_PROVIDER_REQUIRES_ROAMING },
   { flimflam::kProviderTypeProperty, PROPERTY_INDEX_PROVIDER_TYPE },
   { flimflam::kProxyConfigProperty, PROPERTY_INDEX_PROXY_CONFIG },
   { flimflam::kRoamingStateProperty, PROPERTY_INDEX_ROAMING_STATE },
   { flimflam::kSIMLockStatusProperty, PROPERTY_INDEX_SIM_LOCK },
+  { shill::kSIMPresentProperty, PROPERTY_INDEX_SIM_PRESENT },
   { flimflam::kSSIDProperty, PROPERTY_INDEX_SSID },
   { flimflam::kSaveCredentialsProperty, PROPERTY_INDEX_SAVE_CREDENTIALS },
   { flimflam::kScanningProperty, PROPERTY_INDEX_SCANNING },
@@ -129,12 +138,13 @@ EnumMapper<PropertyIndex>::Pair property_index_table[] = {
   { flimflam::kStateProperty, PROPERTY_INDEX_STATE },
   { flimflam::kSupportNetworkScanProperty,
     PROPERTY_INDEX_SUPPORT_NETWORK_SCAN },
+  { shill::kSupportedCarriersProperty, PROPERTY_INDEX_SUPPORTED_CARRIERS},
   { flimflam::kTechnologyFamilyProperty, PROPERTY_INDEX_TECHNOLOGY_FAMILY },
   { flimflam::kTypeProperty, PROPERTY_INDEX_TYPE },
   { flimflam::kUIDataProperty, PROPERTY_INDEX_UI_DATA },
+  { "UninitializedTechnologies",
+    PROPERTY_INDEX_UNINITIALIZED_TECHNOLOGIES },
   { flimflam::kUsageURLProperty, PROPERTY_INDEX_USAGE_URL },
-  { flimflam::kOpenVPNUserProperty, PROPERTY_INDEX_OPEN_VPN_USER },
-  { flimflam::kOpenVPNPasswordProperty, PROPERTY_INDEX_OPEN_VPN_PASSWORD },
   { flimflam::kOpenVPNClientCertIdProperty,
     PROPERTY_INDEX_OPEN_VPN_CLIENT_CERT_ID },
   { flimflam::kOpenVPNAuthProperty, PROPERTY_INDEX_OPEN_VPN_AUTH },
@@ -181,8 +191,10 @@ EnumMapper<PropertyIndex>::Pair property_index_table[] = {
   { flimflam::kOpenVPNTLSRemoteProperty, PROPERTY_INDEX_OPEN_VPN_TLSREMOTE },
   { flimflam::kOpenVPNUserProperty, PROPERTY_INDEX_OPEN_VPN_USER },
   { flimflam::kPaymentPortalProperty, PROPERTY_INDEX_OLP },
+  { flimflam::kPaymentURLProperty, PROPERTY_INDEX_OLP_URL },
   { flimflam::kVPNDomainProperty, PROPERTY_INDEX_VPN_DOMAIN },
   { flimflam::kWifiAuthMode, PROPERTY_INDEX_WIFI_AUTH_MODE },
+  { flimflam::kWifiBSsid, PROPERTY_INDEX_WIFI_BSSID },
   { flimflam::kWifiFrequency, PROPERTY_INDEX_WIFI_FREQUENCY },
   { flimflam::kWifiHexSsid, PROPERTY_INDEX_WIFI_HEX_SSID },
   { flimflam::kWifiHiddenSsid, PROPERTY_INDEX_WIFI_HIDDEN_SSID },
@@ -361,7 +373,15 @@ bool NativeNetworkDeviceParser::ParseValue(
       }
       break;
     }
+    case PROPERTY_INDEX_PROVIDER_REQUIRES_ROAMING: {
+      bool provider_requires_roaming;
+      if (!value.GetAsBoolean(&provider_requires_roaming))
+        return false;
+      device->set_provider_requires_roaming(provider_requires_roaming);
+      return true;
+    }
     case PROPERTY_INDEX_MEID:
+    case PROPERTY_INDEX_ICCID:
     case PROPERTY_INDEX_IMEI:
     case PROPERTY_INDEX_IMSI:
     case PROPERTY_INDEX_ESN:
@@ -378,6 +398,9 @@ bool NativeNetworkDeviceParser::ParseValue(
       switch (index) {
         case PROPERTY_INDEX_MEID:
           device->set_meid(item);
+          break;
+        case PROPERTY_INDEX_ICCID:
+          device->set_iccid(item);
           break;
         case PROPERTY_INDEX_IMEI:
           device->set_imei(item);
@@ -434,9 +457,20 @@ bool NativeNetworkDeviceParser::ParseValue(
         return true;
       }
       break;
-    case PROPERTY_INDEX_POWERED:
-      // we don't care about the value, just the fact that it changed
+    case PROPERTY_INDEX_SIM_PRESENT: {
+      bool sim_present;
+      if (!value.GetAsBoolean(&sim_present))
+        return false;
+      device->set_sim_present(sim_present);
       return true;
+    }
+    case PROPERTY_INDEX_POWERED: {
+      bool powered;
+      if (!value.GetAsBoolean(&powered))
+        return false;
+      device->set_powered(powered);
+      return true;
+    }
     case PROPERTY_INDEX_PRL_VERSION: {
       int prl_version;
       if (!value.GetAsInteger(&prl_version))
@@ -450,6 +484,13 @@ bool NativeNetworkDeviceParser::ParseValue(
         return false;
       device->set_support_network_scan(support_network_scan);
       return true;
+    }
+    case PROPERTY_INDEX_SUPPORTED_CARRIERS: {
+      if (value.IsType(base::Value::TYPE_LIST)) {
+        device->set_supported_carriers(static_cast<const ListValue&>(value));
+        return true;
+      }
+      break;
     }
     case PROPERTY_INDEX_TECHNOLOGY_FAMILY: {
       std::string technology_family_string;
@@ -546,13 +587,25 @@ bool NativeNetworkDeviceParser::ParseSimLockStateFromDictionary(
     int* out_retries,
     bool* out_enabled) {
   std::string state_string;
+  // Since RetriesLeft is sent as a uint32, which may overflow int32 range, from
+  // Shill, it may be stored as an integer or a double in DictionaryValue.
+  const base::Value* retries_value = NULL;
   if (!info.GetString(flimflam::kSIMLockTypeProperty, &state_string) ||
-      !info.GetInteger(flimflam::kSIMLockRetriesLeftProperty, out_retries) ||
-      !info.GetBoolean(flimflam::kSIMLockEnabledProperty, out_enabled)) {
+      !info.GetBoolean(flimflam::kSIMLockEnabledProperty, out_enabled) ||
+      !info.Get(flimflam::kSIMLockRetriesLeftProperty, &retries_value) ||
+      (retries_value->GetType() != base::Value::TYPE_INTEGER &&
+       retries_value->GetType() != base::Value::TYPE_DOUBLE)) {
     LOG(ERROR) << "Error parsing SIMLock state";
     return false;
   }
   *out_state = ParseSimLockState(state_string);
+  if (retries_value->GetType() == base::Value::TYPE_INTEGER) {
+    retries_value->GetAsInteger(out_retries);
+  } else if (retries_value->GetType() == base::Value::TYPE_DOUBLE) {
+    double retries_double = 0;
+    retries_value->GetAsDouble(&retries_double);
+    *out_retries = retries_double;
+  }
   return true;
 }
 
@@ -635,6 +688,8 @@ Network* NativeNetworkParser::CreateNewNetwork(
       network->SetNetworkParser(new NativeEthernetNetworkParser());
     else if (type == TYPE_WIFI)
       network->SetNetworkParser(new NativeWifiNetworkParser());
+    else if (type == TYPE_WIMAX)
+      network->SetNetworkParser(new NativeWimaxNetworkParser());
     else if (type == TYPE_CELLULAR)
       network->SetNetworkParser(new NativeCellularNetworkParser());
     else if (type == TYPE_VPN)
@@ -692,7 +747,7 @@ bool NativeNetworkParser::ParseValue(PropertyIndex index,
     case PROPERTY_INDEX_ERROR: {
       std::string error_string;
       if (value.GetAsString(&error_string)) {
-        network->set_error(ParseError(error_string));
+        network->SetError(ParseError(error_string));
         return true;
       }
       break;
@@ -721,6 +776,9 @@ bool NativeNetworkParser::ParseValue(PropertyIndex index,
       network->set_save_credentials(save_credentials);
       return true;
     }
+    case PROPERTY_INDEX_CHECK_PORTAL:
+      // This property is ignored.
+      return true;
     default:
       return NetworkParser::ParseValue(index, value, network);
       break;
@@ -805,8 +863,10 @@ NativeWirelessNetworkParser::~NativeWirelessNetworkParser() {}
 bool NativeWirelessNetworkParser::ParseValue(PropertyIndex index,
                                              const base::Value& value,
                                              Network* network) {
-  DCHECK_NE(TYPE_ETHERNET, network->type());
-  DCHECK_NE(TYPE_VPN, network->type());
+  CHECK(network->type() == TYPE_WIFI ||
+        network->type() == TYPE_WIMAX ||
+        network->type() == TYPE_BLUETOOTH ||
+        network->type() == TYPE_CELLULAR);
   WirelessNetwork* wireless_network = static_cast<WirelessNetwork*>(network);
   switch (index) {
     case PROPERTY_INDEX_SIGNAL_STRENGTH: {
@@ -831,17 +891,23 @@ NativeCellularNetworkParser::~NativeCellularNetworkParser() {}
 bool NativeCellularNetworkParser::ParseValue(PropertyIndex index,
                                              const base::Value& value,
                                              Network* network) {
-  DCHECK_EQ(TYPE_CELLULAR, network->type());
+  CHECK_EQ(TYPE_CELLULAR, network->type());
   CellularNetwork* cellular_network = static_cast<CellularNetwork*>(network);
   switch (index) {
+    case PROPERTY_INDEX_ACTIVATE_OVER_NON_CELLULAR_NETWORK: {
+      bool activate_over_non_cellular_network;
+      if (value.GetAsBoolean(&activate_over_non_cellular_network)) {
+        cellular_network->set_activate_over_non_cellular_network(
+            activate_over_non_cellular_network);
+        return true;
+      }
+      break;
+    }
     case PROPERTY_INDEX_ACTIVATION_STATE: {
       std::string activation_state_string;
       if (value.GetAsString(&activation_state_string)) {
-        ActivationState prev_state = cellular_network->activation_state();
         cellular_network->set_activation_state(
             ParseActivationState(activation_state_string));
-        if (cellular_network->activation_state() != prev_state)
-          cellular_network->RefreshDataPlansIfNeeded();
         return true;
       }
       break;
@@ -941,14 +1007,12 @@ bool NativeCellularNetworkParser::ParseValue(PropertyIndex index,
       }
       break;
     }
+    case PROPERTY_INDEX_OLP_URL:
+      // This property is ignored.
+      return true;
     case PROPERTY_INDEX_STATE: {
-      // Save previous state before calling WirelessNetwork::ParseValue.
-      ConnectionState prev_state = cellular_network->state();
-      if (NativeWirelessNetworkParser::ParseValue(index, value, network)) {
-        if (cellular_network->state() != prev_state)
-          cellular_network->RefreshDataPlansIfNeeded();
+      if (NativeWirelessNetworkParser::ParseValue(index, value, network))
         return true;
-      }
       break;
     }
     default:
@@ -1004,6 +1068,46 @@ NetworkRoamingState NativeCellularNetworkParser::ParseRoamingState(
   return parser.Get(roaming_state);
 }
 
+// -------------------- NativeWimaxNetworkParser --------------------
+
+NativeWimaxNetworkParser::NativeWimaxNetworkParser() {}
+NativeWimaxNetworkParser::~NativeWimaxNetworkParser() {}
+
+
+bool NativeWimaxNetworkParser::ParseValue(PropertyIndex index,
+                                          const base::Value& value,
+                                          Network* network) {
+  CHECK_EQ(TYPE_WIMAX, network->type());
+  WimaxNetwork* wimax_network = static_cast<WimaxNetwork*>(network);
+  switch (index) {
+    case PROPERTY_INDEX_PASSPHRASE_REQUIRED: {
+      bool passphrase_required;
+      if (!value.GetAsBoolean(&passphrase_required))
+        break;
+      wimax_network->set_passphrase_required(passphrase_required);
+      return true;
+    }
+    case PROPERTY_INDEX_EAP_IDENTITY: {
+      std::string eap_identity;
+      if (!value.GetAsString(&eap_identity))
+        break;
+
+      wimax_network->set_eap_identity(eap_identity);
+    }
+    case PROPERTY_INDEX_EAP_PASSWORD: {
+      std::string passphrase;
+      if (!value.GetAsString(&passphrase))
+        break;
+
+      wimax_network->set_eap_passphrase(passphrase);
+      return true;
+    }
+    default:
+      return NativeWirelessNetworkParser::ParseValue(index, value, network);
+  }
+  return false;
+}
+
 // -------------------- NativeWifiNetworkParser --------------------
 
 NativeWifiNetworkParser::NativeWifiNetworkParser() {}
@@ -1012,23 +1116,37 @@ NativeWifiNetworkParser::~NativeWifiNetworkParser() {}
 bool NativeWifiNetworkParser::ParseValue(PropertyIndex index,
                                          const base::Value& value,
                                          Network* network) {
-  DCHECK_EQ(TYPE_WIFI, network->type());
+  CHECK_EQ(TYPE_WIFI, network->type());
   WifiNetwork* wifi_network = static_cast<WifiNetwork*>(network);
   switch (index) {
     case PROPERTY_INDEX_WIFI_HEX_SSID: {
       std::string ssid_hex;
       if (!value.GetAsString(&ssid_hex))
         return false;
-
       wifi_network->SetHexSsid(ssid_hex);
       return true;
     }
-    case PROPERTY_INDEX_WIFI_AUTH_MODE:
-    case PROPERTY_INDEX_WIFI_PHY_MODE:
-    case PROPERTY_INDEX_WIFI_HIDDEN_SSID:
-    case PROPERTY_INDEX_WIFI_FREQUENCY:
-      // These properties are currently not used in the UI.
+    case PROPERTY_INDEX_WIFI_BSSID: {
+      std::string bssid;
+      if (!value.GetAsString(&bssid))
+        return false;
+      wifi_network->set_bssid(bssid);
       return true;
+    }
+    case PROPERTY_INDEX_WIFI_HIDDEN_SSID: {
+      bool hidden_ssid;
+      if (!value.GetAsBoolean(&hidden_ssid))
+        return false;
+      wifi_network->set_hidden_ssid(hidden_ssid);
+      return true;
+    }
+    case PROPERTY_INDEX_WIFI_FREQUENCY: {
+      int frequency;
+      if (!value.GetAsInteger(&frequency))
+        return false;
+      wifi_network->set_frequency(frequency);
+      return true;
+    }
     case PROPERTY_INDEX_NAME: {
       // Does not change network name when it was already set by WiFi.HexSSID.
       if (!wifi_network->name().empty())
@@ -1054,15 +1172,13 @@ bool NativeWifiNetworkParser::ParseValue(PropertyIndex index,
       std::string passphrase;
       if (!value.GetAsString(&passphrase))
         break;
-      // Only store the passphrase if we are the owner.
-      // TODO(stevenjb): Remove this when chromium-os:12948 is resolved.
-      if (chromeos::UserManager::Get()->current_user_is_owner())
+
+      if (chromeos::UserManager::Get()->IsCurrentUserOwner())
         wifi_network->set_passphrase(passphrase);
       return true;
     }
     case PROPERTY_INDEX_PASSPHRASE_REQUIRED: {
       bool passphrase_required;
-      value.GetAsBoolean(&passphrase_required);
       if (!value.GetAsBoolean(&passphrase_required))
         break;
       wifi_network->set_passphrase_required(passphrase_required);
@@ -1139,6 +1255,8 @@ bool NativeWifiNetworkParser::ParseValue(PropertyIndex index,
       wifi_network->set_eap_server_ca_cert_nss_nickname(eap_cert_nickname);
       return true;
     }
+    case PROPERTY_INDEX_WIFI_AUTH_MODE:
+    case PROPERTY_INDEX_WIFI_PHY_MODE:
     case PROPERTY_INDEX_EAP_CLIENT_CERT:
     case PROPERTY_INDEX_EAP_CLIENT_CERT_NSS:
     case PROPERTY_INDEX_EAP_PRIVATE_KEY:
@@ -1178,7 +1296,7 @@ NativeVirtualNetworkParser::~NativeVirtualNetworkParser() {}
 bool NativeVirtualNetworkParser::UpdateNetworkFromInfo(
     const DictionaryValue& info,
     Network* network) {
-  DCHECK_EQ(TYPE_VPN, network->type());
+  CHECK_EQ(TYPE_VPN, network->type());
   VirtualNetwork* virtual_network = static_cast<VirtualNetwork*>(network);
   if (!NativeNetworkParser::UpdateNetworkFromInfo(info, network))
     return false;
@@ -1196,16 +1314,21 @@ bool NativeVirtualNetworkParser::UpdateNetworkFromInfo(
 bool NativeVirtualNetworkParser::ParseValue(PropertyIndex index,
                                             const base::Value& value,
                                             Network* network) {
-  DCHECK_EQ(TYPE_VPN, network->type());
+  CHECK_EQ(TYPE_VPN, network->type());
   VirtualNetwork* virtual_network = static_cast<VirtualNetwork*>(network);
   switch (index) {
     case PROPERTY_INDEX_PROVIDER: {
-      DCHECK_EQ(value.GetType(), Value::TYPE_DICTIONARY);
+      // TODO(rkc): Figure out why is this ever not true and fix the root
+      // cause. 'value' comes to us all the way from the cros dbus call, the
+      // issue is likely on the cros side of things.
+      if (value.GetType() != Value::TYPE_DICTIONARY)
+        return false;
+
       const DictionaryValue& dict = static_cast<const DictionaryValue&>(value);
       for (DictionaryValue::key_iterator iter = dict.begin_keys();
            iter != dict.end_keys(); ++iter) {
         const std::string& key = *iter;
-        base::Value* provider_value;
+        const base::Value* provider_value;
         bool res = dict.GetWithoutPathExpansion(key, &provider_value);
         DCHECK(res);
         if (res) {
@@ -1264,6 +1387,13 @@ bool NativeVirtualNetworkParser::ParseProviderValue(PropertyIndex index,
       network->set_psk_passphrase(psk_passphrase);
       return true;
     }
+    case PROPERTY_INDEX_L2TPIPSEC_PSK_REQUIRED: {
+      bool psk_passphrase_required;
+      if (!value.GetAsBoolean(&psk_passphrase_required))
+        break;
+      network->set_psk_passphrase_required(psk_passphrase_required);
+      return true;
+    }
     case PROPERTY_INDEX_L2TPIPSEC_CLIENT_CERT_ID:
     case PROPERTY_INDEX_OPEN_VPN_CLIENT_CERT_ID: {
       std::string client_cert_id;
@@ -1286,6 +1416,13 @@ bool NativeVirtualNetworkParser::ParseProviderValue(PropertyIndex index,
       if (!value.GetAsString(&user_passphrase))
         break;
       network->set_user_passphrase(user_passphrase);
+      return true;
+    }
+    case PROPERTY_INDEX_PASSPHRASE_REQUIRED: {
+      bool user_passphrase_required;
+      if (!value.GetAsBoolean(&user_passphrase_required))
+        break;
+      network->set_user_passphrase_required(user_passphrase_required);
       return true;
     }
     case PROPERTY_INDEX_L2TPIPSEC_GROUP_NAME: {

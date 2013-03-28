@@ -4,8 +4,10 @@
 
 #include "content/renderer/android/email_detector.h"
 
+#include "base/logging.h"
 #include "base/memory/scoped_ptr.h"
 #include "base/utf_string_conversions.h"
+#include "content/public/renderer/android_content_detection_prefixes.h"
 #include "net/base/escape.h"
 #include "unicode/regex.h"
 
@@ -13,9 +15,6 @@ namespace {
 
 // Maximum length of an email address.
 const size_t kMaximumEmailLength = 254;
-
-// Prefix used for email intent URIs.
-const char kEmailSchemaPrefix[] = "mailto:";
 
 // Regex to match email addresses.
 // This is more specific than RFC 2822 (uncommon special characters are
@@ -25,6 +24,8 @@ const char kEmailSchemaPrefix[] = "mailto:";
 const char kEmailRegex[] = "\\b[A-Z0-9._%+-]+@[A-Z0-9.-]+\\.[A-Z]{2,6}\\b";
 
 }  // anonymous namespace
+
+namespace content {
 
 EmailDetector::EmailDetector() {
 }
@@ -37,13 +38,15 @@ GURL EmailDetector::GetIntentURL(const std::string& content_text) {
   if (content_text.empty())
     return GURL();
 
-  return GURL(kEmailSchemaPrefix +
+  return GURL(kEmailPrefix +
       net::EscapeQueryParamValue(content_text, true));
 }
 
 bool EmailDetector::FindContent(const string16::const_iterator& begin,
-    const string16::const_iterator& end, size_t* start_pos, size_t* end_pos,
-    std::string* content_text) {
+                                const string16::const_iterator& end,
+                                size_t* start_pos,
+                                size_t* end_pos,
+                                std::string* content_text) {
   string16 utf16_input = string16(begin, end);
   icu::UnicodeString pattern(kEmailRegex);
   icu::UnicodeString input(utf16_input.data(), utf16_input.length());
@@ -65,5 +68,6 @@ bool EmailDetector::FindContent(const string16::const_iterator& begin,
   }
 
   return false;
-
 }
+
+}  // namespace content

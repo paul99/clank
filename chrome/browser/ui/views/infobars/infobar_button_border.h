@@ -4,13 +4,12 @@
 
 #ifndef CHROME_BROWSER_UI_VIEWS_INFOBARS_INFOBAR_BUTTON_BORDER_H_
 #define CHROME_BROWSER_UI_VIEWS_INFOBARS_INFOBAR_BUTTON_BORDER_H_
-#pragma once
 
 #include "ui/views/controls/button/text_button.h"
 
 // A TextButtonBorder that is dark and also paints the button frame in the
 // normal state.
-class InfoBarButtonBorder : public views::TextButtonBorder {
+class InfoBarButtonBorder : public views::TextButtonDefaultBorder {
  public:
   InfoBarButtonBorder();
 

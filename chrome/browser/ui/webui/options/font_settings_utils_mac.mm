@@ -1,4 +1,4 @@
-// Copyright (c) 2011 The Chromium Authors. All rights reserved.
+// Copyright (c) 2012 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -11,6 +11,8 @@
 #include "base/values.h"
 #include "chrome/browser/prefs/pref_service.h"
 #include "chrome/common/pref_names.h"
+
+namespace options {
 
 static void ValidateFontFamily(PrefService* prefs,
                                const char* family_pref_name) {
@@ -32,7 +34,9 @@ static void ValidateFontFamily(PrefService* prefs,
 
 // static
 void FontSettingsUtilities::ValidateSavedFonts(PrefService* prefs) {
-  ValidateFontFamily(prefs, prefs::kWebKitGlobalSerifFontFamily);
-  ValidateFontFamily(prefs, prefs::kWebKitGlobalSansSerifFontFamily);
-  ValidateFontFamily(prefs, prefs::kWebKitGlobalFixedFontFamily);
+  ValidateFontFamily(prefs, prefs::kWebKitSerifFontFamily);
+  ValidateFontFamily(prefs, prefs::kWebKitSansSerifFontFamily);
+  ValidateFontFamily(prefs, prefs::kWebKitFixedFontFamily);
 }
+
+}  // namespace options

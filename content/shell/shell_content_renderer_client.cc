@@ -4,13 +4,53 @@
 
 #include "content/shell/shell_content_renderer_client.h"
 
+#include "base/callback.h"
+#include "base/command_line.h"
+#include "content/public/common/content_constants.h"
+#include "content/public/common/content_switches.h"
+#include "content/public/common/url_constants.h"
+#include "content/public/test/layouttest_support.h"
 #include "content/shell/shell_render_process_observer.h"
-#include "content/shell/shell_render_view_observer.h"
+#include "content/shell/shell_switches.h"
+#include "content/shell/webkit_test_runner.h"
+#include "third_party/WebKit/Source/WebKit/chromium/public/WebFrame.h"
+#include "third_party/WebKit/Source/WebKit/chromium/public/WebPluginParams.h"
+#include "third_party/WebKit/Tools/DumpRenderTree/chromium/TestRunner/public/WebTestPlugin.h"
+#include "third_party/WebKit/Tools/DumpRenderTree/chromium/TestRunner/public/WebTestProxy.h"
 #include "v8/include/v8.h"
+
+using WebKit::WebFrame;
+using WebTestRunner::WebTestPlugin;
+using WebTestRunner::WebTestProxyBase;
 
 namespace content {
 
+namespace {
+
+bool IsLocalhost(const std::string& host) {
+  return host == "127.0.0.1" || host == "localhost";
+}
+
+bool HostIsUsedBySomeTestsToGenerateError(const std::string& host) {
+  return host == "255.255.255.255";
+}
+
+bool IsExternalPage(const GURL& url) {
+  return !url.host().empty() &&
+         (url.SchemeIs(chrome::kHttpScheme) ||
+          url.SchemeIs(chrome::kHttpsScheme)) &&
+         !IsLocalhost(url.host()) &&
+         !HostIsUsedBySomeTestsToGenerateError(url.host());
+}
+
+}  // namespace
+
 ShellContentRendererClient::ShellContentRendererClient() {
+  if (CommandLine::ForCurrentProcess()->HasSwitch(switches::kDumpRenderTree)) {
+    EnableWebTestProxyCreation(
+        base::Bind(&ShellContentRendererClient::WebTestProxyCreated,
+                   base::Unretained(this)));
+  }
 }
 
 ShellContentRendererClient::~ShellContentRendererClient() {
@@ -20,126 +60,64 @@ void ShellContentRendererClient::RenderThreadStarted() {
   shell_observer_.reset(new ShellRenderProcessObserver());
 }
 
-void ShellContentRendererClient::RenderViewCreated(RenderView* render_view) {
-  new content::ShellRenderViewObserver(render_view);
-}
-
-void ShellContentRendererClient::SetNumberOfViews(int number_of_views) {
-}
-
-SkBitmap* ShellContentRendererClient::GetSadPluginBitmap() {
-  return NULL;
-}
-
-std::string ShellContentRendererClient::GetDefaultEncoding() {
-  return std::string();
-}
-
 bool ShellContentRendererClient::OverrideCreatePlugin(
     RenderView* render_view,
     WebKit::WebFrame* frame,
     const WebKit::WebPluginParams& params,
     WebKit::WebPlugin** plugin) {
+  std::string mime_type = params.mimeType.utf8();
+  if (mime_type == content::kBrowserPluginMimeType) {
+    // Allow browser plugin in content_shell only if it is forced by flag.
+    // Returning true here disables the plugin.
+    return !CommandLine::ForCurrentProcess()->HasSwitch(
+        switches::kEnableBrowserPluginForAllViewTypes);
+  }
+  if (params.mimeType == WebTestPlugin::mimeType()) {
+    *plugin = WebTestPlugin::create(
+        frame,
+        params,
+        ShellRenderProcessObserver::GetInstance()->test_delegate());
+    return true;
+  }
   return false;
 }
 
-bool ShellContentRendererClient::HasErrorPage(int http_status_code,
-                                              std::string* error_domain) {
-  return false;
-}
-
-void ShellContentRendererClient::GetNavigationErrorStrings(
-    const WebKit::WebURLRequest& failed_request,
-    const WebKit::WebURLError& error,
-    std::string* error_html,
-    string16* error_description) {
-}
-
-webkit_media::WebMediaPlayerImpl*
-ShellContentRendererClient::OverrideCreateWebMediaPlayer(
-    RenderView* render_view,
-    WebKit::WebFrame* frame,
-    WebKit::WebMediaPlayerClient* client,
-    base::WeakPtr<webkit_media::WebMediaPlayerDelegate> delegate,
-    media::FilterCollection* collection,
-    WebKit::WebAudioSourceProvider* audio_source_provider,
-    media::MessageLoopFactory* message_loop_factory,
-    webkit_media::MediaStreamClient* media_stream_client,
-    media::MediaLog* media_log) {
-  return NULL;
-}
-
-bool ShellContentRendererClient::RunIdleHandlerWhenWidgetsHidden() {
+bool ShellContentRendererClient::WillSendRequest(
+    WebFrame* frame,
+    PageTransition transition_type,
+    const GURL& url,
+    const GURL& first_party_for_cookies,
+    GURL* new_url) {
+  CommandLine* command_line = CommandLine::ForCurrentProcess();
+  if (!command_line->HasSwitch(switches::kDumpRenderTree))
+    return false;
+  ShellRenderProcessObserver* render_process_observer =
+      ShellRenderProcessObserver::GetInstance();
+  if (!command_line->HasSwitch(switches::kAllowExternalPages) &&
+      IsExternalPage(url) && !IsExternalPage(first_party_for_cookies)) {
+    render_process_observer->test_delegate()->printMessage(
+        std::string("Blocked access to external URL " + url.spec() + "\n"));
+    *new_url = GURL();
+    return true;
+  }
+  *new_url = render_process_observer->test_delegate()->rewriteLayoutTestsURL(
+      url.spec());
   return true;
 }
 
-bool ShellContentRendererClient::AllowPopup(const GURL& creator) {
-  return false;
-}
-
-bool ShellContentRendererClient::ShouldFork(WebKit::WebFrame* frame,
-                                            const GURL& url,
-                                            bool is_content_initiated,
-                                            bool is_initial_navigation,
-                                            bool* send_referrer) {
-  return false;
-}
-
-bool ShellContentRendererClient::WillSendRequest(WebKit::WebFrame* frame,
-                                                 const GURL& url,
-                                                 GURL* new_url) {
-  return false;
-}
-
-bool ShellContentRendererClient::ShouldPumpEventsDuringCookieMessage() {
-  return false;
-}
-
-void ShellContentRendererClient::DidCreateScriptContext(
-    WebKit::WebFrame* frame, v8::Handle<v8::Context> context, int world_id) {
-}
-
-void ShellContentRendererClient::WillReleaseScriptContext(
-    WebKit::WebFrame* frame, v8::Handle<v8::Context> context, int world_id) {
-}
-
-unsigned long long ShellContentRendererClient::VisitedLinkHash(
-    const char* canonical_url, size_t length) {
-  return 0LL;
-}
-
-bool ShellContentRendererClient::IsLinkVisited(unsigned long long link_hash) {
-  return false;
-}
-
-void ShellContentRendererClient::PrefetchHostName(
-    const char* hostname, size_t length) {
-}
-
-bool ShellContentRendererClient::ShouldOverridePageVisibilityState(
-    const RenderView* render_view,
-    WebKit::WebPageVisibilityState* override_state) const {
-  return false;
-}
-
-bool ShellContentRendererClient::HandleGetCookieRequest(
-    RenderView* sender,
-    const GURL& url,
-    const GURL& first_party_for_cookies,
-    std::string* cookies) {
-  return false;
-}
-
-bool ShellContentRendererClient::HandleSetCookieRequest(
-    RenderView* sender,
-    const GURL& url,
-    const GURL& first_party_for_cookies,
-    const std::string& value) {
-  return false;
-}
-
-void ShellContentRendererClient::RegisterPPAPIInterfaceFactories(
-    webkit::ppapi::PpapiInterfaceFactoryManager* factory_manager) {
+void ShellContentRendererClient::WebTestProxyCreated(RenderView* render_view,
+                                                     WebTestProxyBase* proxy) {
+  WebKitTestRunner* test_runner = new WebKitTestRunner(render_view);
+  if (!ShellRenderProcessObserver::GetInstance()->test_delegate()) {
+    ShellRenderProcessObserver::GetInstance()->SetMainWindow(render_view,
+                                                             test_runner,
+                                                             test_runner);
+  }
+  test_runner->set_proxy(proxy);
+  proxy->setDelegate(
+      ShellRenderProcessObserver::GetInstance()->test_delegate());
+  proxy->setInterfaces(
+      ShellRenderProcessObserver::GetInstance()->test_interfaces());
 }
 
 }  // namespace content

@@ -1,10 +1,9 @@
-// Copyright (c) 2011 The Chromium Authors. All rights reserved.
+// Copyright (c) 2012 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
 #ifndef CONTENT_BROWSER_DEBUGGER_DEVTOOLS_HTTP_HANDLER_IMPL_H_
 #define CONTENT_BROWSER_DEBUGGER_DEVTOOLS_HTTP_HANDLER_IMPL_H_
-#pragma once
 
 #include <map>
 #include <set>
@@ -15,40 +14,58 @@
 #include "base/memory/scoped_ptr.h"
 #include "content/common/content_export.h"
 #include "content/public/browser/devtools_http_handler.h"
-#include "net/base/abstract_linux_socket.h"
+#include "content/public/browser/devtools_http_handler_delegate.h"
+#include "content/public/browser/notification_observer.h"
+#include "content/public/browser/notification_registrar.h"
 #include "net/server/http_server.h"
-#include "net/url_request/url_request.h"
+
+namespace base {
+class DictionaryValue;
+class Thread;
+class Value;
+}
 
 namespace net {
-class URLRequestContext;
+class StreamListenSocketFactory;
+class URLRequestContextGetter;
 }
 
 namespace content {
 
+class DevToolsBrowserTarget;
 class DevToolsClientHost;
+class RenderViewHost;
 
 class DevToolsHttpHandlerImpl
     : public DevToolsHttpHandler,
+      public NotificationObserver,
       public base::RefCountedThreadSafe<DevToolsHttpHandlerImpl>,
-      public net::HttpServer::Delegate,
-      public net::URLRequest::Delegate {
+      public net::HttpServer::Delegate {
  private:
+  struct PageInfo;
+  typedef std::vector<PageInfo> PageList;
   friend class base::RefCountedThreadSafe<DevToolsHttpHandlerImpl>;
   friend class DevToolsHttpHandler;
-  DevToolsHttpHandlerImpl(const std::string& ip,
-                          int port,
+
+  static bool SortPageListByTime(const PageInfo& info1, const PageInfo& info2);
+
+  // Takes ownership over |socket_factory|.
+  DevToolsHttpHandlerImpl(const net::StreamListenSocketFactory* socket_factory,
                           const std::string& frontend_url,
                           DevToolsHttpHandlerDelegate* delegate);
-  DevToolsHttpHandlerImpl(
-      const std::string& linux_abstract_socket_name,
-      const std::string& frontend_url,
-      DevToolsHttpHandlerDelegate* delegate,
-      net::AbstractLinuxSocket::AbstractLinuxSocketAuthDelegate* auth_delegate);
   virtual ~DevToolsHttpHandlerImpl();
   void Start();
 
   // DevToolsHttpHandler implementation.
   virtual void Stop() OVERRIDE;
+  virtual void SetRenderViewHostBinding(
+      RenderViewHostBinding* binding) OVERRIDE;
+  virtual GURL GetFrontendURL(RenderViewHost* render_view_host) OVERRIDE;
+
+  // NotificationObserver implementation.
+  virtual void Observe(int type,
+                       const NotificationSource& source,
+                       const NotificationDetails& details) OVERRIDE;
 
   // net::HttpServer::Delegate implementation.
   virtual void OnHttpRequest(int connection_id,
@@ -60,52 +77,64 @@ class DevToolsHttpHandlerImpl
                                   const std::string& data) OVERRIDE;
   virtual void OnClose(int connection_id) OVERRIDE;
 
-  virtual void OnJsonRequestUI(int connection_id,
-                               const net::HttpServerRequestInfo& info);
-  virtual void OnWebSocketRequestUI(int connection_id,
-                                    const net::HttpServerRequestInfo& info);
-  virtual void OnWebSocketMessageUI(int connection_id,
-                                    const std::string& data);
-  virtual void OnCloseUI(int connection_id);
+  void OnJsonRequestUI(int connection_id,
+                       const net::HttpServerRequestInfo& info);
+  void OnThumbnailRequestUI(int connection_id,
+                            const net::HttpServerRequestInfo& info);
+  void OnDiscoveryPageRequestUI(int connection_id);
 
-  // net::URLRequest::Delegate implementation.
-  virtual void OnResponseStarted(net::URLRequest* request) OVERRIDE;
-  virtual void OnReadCompleted(net::URLRequest* request,
-                               int bytes_read) OVERRIDE;
+  void OnWebSocketRequestUI(int connection_id,
+                            const net::HttpServerRequestInfo& info);
+  void OnWebSocketMessageUI(int connection_id, const std::string& data);
+  void OnCloseUI(int connection_id);
+
+  void ResetHandlerThread();
+  void ResetHandlerThreadAndRelease();
 
   void Init();
-  void TeardownAndRelease();
-  void Bind(net::URLRequest* request, int connection_id);
-  void RequestCompleted(net::URLRequest* request);
+  void Teardown();
 
+  void StartHandlerThread();
+  void StopHandlerThread();
+
+  void SendJson(int connection_id,
+                net::HttpStatusCode status_code,
+                base::Value* value,
+                const std::string& message,
+                const std::string& jsonp);
   void Send200(int connection_id,
                const std::string& data,
-               const std::string& mime_type = "text/html");
+               const std::string& mime_type);
   void Send404(int connection_id);
   void Send500(int connection_id,
                const std::string& message);
   void AcceptWebSocket(int connection_id,
                        const net::HttpServerRequestInfo& request);
 
-  std::string ip_;
-  int port_;
-  std::string linux_abstract_socket_name_;
+  PageList GeneratePageList();
+
+  // Returns the front end url without the host at the beginning.
+  std::string GetFrontendURLInternal(const std::string rvh_id,
+                                     const std::string& host);
+
+  PageInfo CreatePageInfo(RenderViewHost* rvh);
+
+  base::DictionaryValue* SerializePageInfo(const PageInfo& page_info,
+                                           const std::string& host);
+
+  // The thread used by the devtools handler to run server socket.
+  scoped_ptr<base::Thread> thread_;
+
   std::string overridden_frontend_url_;
+  scoped_ptr<const net::StreamListenSocketFactory> socket_factory_;
   scoped_refptr<net::HttpServer> server_;
-  typedef std::map<net::URLRequest*, int>
-      RequestToSocketMap;
-  RequestToSocketMap request_to_connection_io_;
-  typedef std::map<int, std::set<net::URLRequest*> >
-      ConnectionToRequestsMap;
-  ConnectionToRequestsMap connection_to_requests_io_;
-  typedef std::map<net::URLRequest*, scoped_refptr<net::IOBuffer> >
-      BuffersMap;
-  BuffersMap request_to_buffer_io_;
-  typedef std::map<int, content::DevToolsClientHost*>
-      ConnectionToClientHostMap;
+  typedef std::map<int, DevToolsClientHost*> ConnectionToClientHostMap;
   ConnectionToClientHostMap connection_to_client_host_ui_;
   scoped_ptr<DevToolsHttpHandlerDelegate> delegate_;
-  net::AbstractLinuxSocket::AbstractLinuxSocketAuthDelegate* auth_delegate_;
+  RenderViewHostBinding* binding_;
+  scoped_ptr<RenderViewHostBinding> default_binding_;
+  NotificationRegistrar registrar_;
+  scoped_ptr<DevToolsBrowserTarget> browser_target_;
   DISALLOW_COPY_AND_ASSIGN(DevToolsHttpHandlerImpl);
 };
 

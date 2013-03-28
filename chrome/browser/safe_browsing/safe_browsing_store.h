@@ -1,10 +1,9 @@
-// Copyright (c) 2011 The Chromium Authors. All rights reserved.
+// Copyright (c) 2012 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
 #ifndef CHROME_BROWSER_SAFE_BROWSING_SAFE_BROWSING_STORE_H_
 #define CHROME_BROWSER_SAFE_BROWSING_SAFE_BROWSING_STORE_H_
-#pragma once
 
 #include <set>
 #include <vector>
@@ -136,10 +135,6 @@ bool SBAddPrefixHashLess(const T& a, const U& b) {
 // in parallel.  At this time this code does the sorting internally,
 // but it might make sense to make sorting an API requirement so that
 // the storage can optimize for it.
-//
-// TODO(shess): The original code did not process |sub_full_hashes|
-// for matches in |add_full_hashes|, so this code doesn't, either.  I
-// think this is probably a bug.
 void SBProcessSubs(SBAddPrefixes* add_prefixes,
                    std::vector<SBSubPrefix>* sub_prefixes,
                    std::vector<SBAddFullHash>* add_full_hashes,
@@ -219,6 +214,15 @@ class SafeBrowsingStore {
   // visible until the end of the transaction.
   virtual void DeleteAddChunk(int32 chunk_id) = 0;
   virtual void DeleteSubChunk(int32 chunk_id) = 0;
+
+  // May be called during update to verify that the storage is valid.
+  // Return true if the store seems valid.  If corruption is detected,
+  // calls the corruption callback and return false.
+  // NOTE(shess): When storage was SQLite, there was no guarantee that
+  // a structurally sound database actually contained valid data,
+  // whereas SafeBrowsingStoreFile checksums the data.  For now, this
+  // distinction doesn't matter.
+  virtual bool CheckValidity() = 0;
 
   // Pass the collected chunks through SBPRocessSubs() and commit to
   // permanent storage.  The resulting add prefixes and hashes will be

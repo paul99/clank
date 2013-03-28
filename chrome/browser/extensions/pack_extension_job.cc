@@ -1,4 +1,4 @@
-// Copyright (c) 2011 The Chromium Authors. All rights reserved.
+// Copyright (c) 2012 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -15,12 +15,14 @@
 
 using content::BrowserThread;
 
+namespace extensions {
+
 PackExtensionJob::PackExtensionJob(Client* client,
                                    const FilePath& root_directory,
                                    const FilePath& key_file,
                                    int run_flags)
     : client_(client), key_file_(key_file), asynchronous_(true),
-      run_flags_(run_flags) {
+      run_flags_(run_flags | ExtensionCreator::kRequireModernManifestVersion) {
   root_directory_ = root_directory.StripTrailingSeparators();
   CHECK(BrowserThread::GetCurrentThreadIdentifier(&client_thread_id_));
 }
@@ -103,3 +105,5 @@ string16 PackExtensionJob::StandardSuccessMessage(const FilePath& crx_file,
         key_file_string);
   }
 }
+
+}  // namespace extensions

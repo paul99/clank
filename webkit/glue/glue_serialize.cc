@@ -1,4 +1,4 @@
-// Copyright (c) 2011 The Chromium Authors. All rights reserved.
+// Copyright (c) 2012 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -17,7 +17,7 @@
 #include "third_party/WebKit/Source/WebKit/chromium/public/platform/WebString.h"
 #include "third_party/WebKit/Source/WebKit/chromium/public/platform/WebURL.h"
 #include "third_party/WebKit/Source/WebKit/chromium/public/platform/WebVector.h"
-#include "webkit/glue/webkit_glue.h"
+#include "webkit/base/file_path_string_conversions.h"
 
 using WebKit::WebData;
 using WebKit::WebHistoryItem;
@@ -31,17 +31,24 @@ using WebKit::WebVector;
 namespace webkit_glue {
 
 namespace {
+
+enum IncludeFormData {
+  NEVER_INCLUDE_FORM_DATA,
+  INCLUDE_FORM_DATA_WITHOUT_PASSWORDS,
+  ALWAYS_INCLUDE_FORM_DATA
+};
+
 struct SerializeObject {
-  SerializeObject() : iter(NULL), version(0) {}
+  SerializeObject() : version(0) {}
   SerializeObject(const char* data, int len)
-      : pickle(data, len), iter(NULL), version(0) {}
+      : pickle(data, len), version(0) { iter = PickleIterator(pickle); }
 
   std::string GetAsString() {
     return std::string(static_cast<const char*>(pickle.data()), pickle.size());
   }
 
   Pickle pickle;
-  mutable void* iter;
+  mutable PickleIterator iter;
   mutable int version;
 };
 
@@ -60,12 +67,14 @@ struct SerializeObject {
 // 9: Adds support for itemSequenceNumbers
 // 10: Adds support for blob
 // 11: Adds support for pageScaleFactor
+// 12: Adds support for hasPasswordData in HTTP body
+// 13: Adds support for URL (FileSystem URL)
 // Should be const, but unit tests may modify it.
 //
 // NOTE: If the version is -1, then the pickle contains only a URL string.
 // See CreateHistoryStateForURL.
 //
-int kVersion = 11;
+int kVersion = 13;
 
 // A bunch of convenience functions to read/write to SerializeObjects.
 // The serializers assume the input data is in the correct format and so does
@@ -250,11 +259,17 @@ void WriteFormData(const WebHTTPBody& http_body, SerializeObject* obj) {
       WriteInteger64(element.fileStart, obj);
       WriteInteger64(element.fileLength, obj);
       WriteReal(element.modificationTime, obj);
+    } else if (element.type == WebHTTPBody::Element::TypeURL) {
+      WriteGURL(element.url, obj);
+      WriteInteger64(element.fileStart, obj);
+      WriteInteger64(element.fileLength, obj);
+      WriteReal(element.modificationTime, obj);
     } else {
-      WriteGURL(element.blobURL, obj);
+      WriteGURL(element.url, obj);
     }
   }
   WriteInteger64(http_body.identifier(), obj);
+  WriteBoolean(http_body.containsPasswordData(), obj);
 }
 
 WebHTTPBody ReadFormData(const SerializeObject* obj) {
@@ -290,6 +305,16 @@ WebHTTPBody ReadFormData(const SerializeObject* obj) {
       }
       http_body.appendFileRange(file_path, file_start, file_length,
                                 modification_time);
+    } else if (type == WebHTTPBody::Element::TypeURL) {
+      GURL url = ReadGURL(obj);
+      long long file_start = 0;
+      long long file_length = -1;
+      double modification_time = 0.0;
+      file_start = ReadInteger64(obj);
+      file_length = ReadInteger64(obj);
+      modification_time = ReadReal(obj);
+      http_body.appendURLRange(url, file_start, file_length,
+                               modification_time);
     } else if (obj->version >= 10) {
       GURL blob_url = ReadGURL(obj);
       http_body.appendBlob(blob_url);
@@ -297,6 +322,9 @@ WebHTTPBody ReadFormData(const SerializeObject* obj) {
   }
   if (obj->version >= 4)
     http_body.setIdentifier(ReadInteger64(obj));
+
+  if (obj->version >= 12)
+    http_body.setContainsPasswordData(ReadBoolean(obj));
 
   return http_body;
 }
@@ -345,12 +373,6 @@ void WriteHistoryItem(
   WriteString(item.httpContentType(), obj);
   WriteString(item.referrer(), obj);
 
-#if defined(OS_ANDROID)
-  // WARNING: Be careful to preserve ordering during merges.
-  WriteReal(item.pageScaleFactor(), obj);
-  WriteBoolean(item.loadComplete(), obj);
-#endif
-
   // Subitems
   const WebVector<WebHistoryItem>& children = item.children();
   WriteInteger(static_cast<int>(children.size()), obj);
@@ -362,7 +384,7 @@ void WriteHistoryItem(
 // Assumes the data is in the format returned by WriteHistoryItem.
 WebHistoryItem ReadHistoryItem(
     const SerializeObject* obj,
-    bool include_form_data,
+    IncludeFormData include_form_data,
     bool include_scroll_offset) {
   // See note in WriteHistoryItem. on this.
   obj->version = ReadInteger(obj);
@@ -391,9 +413,8 @@ WebHistoryItem ReadHistoryItem(
 
   int x = ReadInteger(obj);
   int y = ReadInteger(obj);
-  if (include_scroll_offset) {
+  if (include_scroll_offset)
     item.setScrollOffset(WebPoint(x, y));
-  }
 
   item.setIsTargetItem(ReadBoolean(obj));
   item.setVisitCount(ReadInteger(obj));
@@ -419,18 +440,28 @@ WebHistoryItem ReadHistoryItem(
   const WebHTTPBody& http_body = ReadFormData(obj);
   const WebString& http_content_type = ReadString(obj);
   ALLOW_UNUSED const WebString& unused_referrer = ReadString(obj);
-  if (include_form_data) {
+  if (include_form_data == ALWAYS_INCLUDE_FORM_DATA ||
+      (include_form_data == INCLUDE_FORM_DATA_WITHOUT_PASSWORDS &&
+       !http_body.isNull() && !http_body.containsPasswordData())) {
+    // Include the full HTTP body.
     item.setHTTPBody(http_body);
     item.setHTTPContentType(http_content_type);
+  } else if (!http_body.isNull()) {
+    // Don't include the data in the HTTP body, but include its identifier. This
+    // enables fetching data from the cache.
+    WebHTTPBody empty_http_body;
+    empty_http_body.initialize();
+    empty_http_body.setIdentifier(http_body.identifier());
+    item.setHTTPBody(empty_http_body);
   }
 
 #if defined(OS_ANDROID)
-  // WARNING: Be careful to preserve ordering during merges.
-  float scale = ReadReal(obj);
-  if (include_scroll_offset) {
-    item.setPageScaleFactor(scale);
+  // Now-unused values that shipped in this version of Chrome for Android when
+  // it was on a private branch.
+  if (obj->version == 11) {
+    ReadReal(obj);
+    ReadBoolean(obj);
   }
-  item.setLoadComplete(ReadBoolean(obj));
 #endif
 
   // Subitems
@@ -445,12 +476,14 @@ WebHistoryItem ReadHistoryItem(
 
 // Reconstruct a HistoryItem from a string, using our JSON Value deserializer.
 // This assumes that the given serialized string has all the required key,value
-// pairs, and does minimal error checking. If |include_form_data| is true,
-// the form data from a post is restored, otherwise the form data is empty.
-// If |include_scroll_offset| is true, the scroll offset is restored.
+// pairs, and does minimal error checking. The form data of the post is restored
+// if |include_form_data| is |ALWAYS_INCLUDE_FORM_DATA| or if the data doesn't
+// contain passwords and |include_form_data| is
+// |INCLUDE_FORM_DATA_WITHOUT_PASSWORDS|. Otherwise the form data is empty. If
+// |include_scroll_offset| is true, the scroll offset is restored.
 WebHistoryItem HistoryItemFromString(
     const std::string& serialized_item,
-    bool include_form_data,
+    IncludeFormData include_form_data,
     bool include_scroll_offset) {
   if (serialized_item.empty())
     return WebHistoryItem();
@@ -459,46 +492,8 @@ WebHistoryItem HistoryItemFromString(
                       static_cast<int>(serialized_item.length()));
   return ReadHistoryItem(&obj, include_form_data, include_scroll_offset);
 }
+
 }  // namespace
-
-std::string RemoveFormDataFromHistoryState(const std::string& content_state) {
-  // TODO(darin): We should avoid using the WebKit API here, so that we do not
-  // need to have WebKit initialized before calling this method.
-  const WebHistoryItem& item =
-      HistoryItemFromString(content_state, false, true);
-  if (item.isNull()) {
-    // Couldn't parse the string, return an empty string.
-    return std::string();
-  }
-
-  return HistoryItemToString(item);
-}
-
-std::string RemoveScrollOffsetFromHistoryState(
-    const std::string& content_state) {
-  // TODO(darin): We should avoid using the WebKit API here, so that we do not
-  // need to have WebKit initialized before calling this method.
-  const WebHistoryItem& item =
-      HistoryItemFromString(content_state, true, false);
-  if (item.isNull()) {
-    // Couldn't parse the string, return an empty string.
-    return std::string();
-  }
-
-  return HistoryItemToString(item);
-}
-
-std::string CreateHistoryStateForURL(const GURL& url) {
-  // We avoid using the WebKit API here, so that we do not need to have WebKit
-  // initialized before calling this method.  Instead, we write a simple
-  // serialization of the given URL with a dummy version number of -1.  This
-  // will be interpreted by ReadHistoryItem as a request to create a default
-  // WebHistoryItem.
-  SerializeObject obj;
-  WriteInteger(-1, &obj);
-  WriteGURL(url, &obj);
-  return obj.GetAsString();
-}
 
 // Serialize a HistoryItem to a string, using our JSON Value serializer.
 std::string HistoryItemToString(const WebHistoryItem& item) {
@@ -511,7 +506,24 @@ std::string HistoryItemToString(const WebHistoryItem& item) {
 }
 
 WebHistoryItem HistoryItemFromString(const std::string& serialized_item) {
-  return HistoryItemFromString(serialized_item, true, true);
+  return HistoryItemFromString(serialized_item, ALWAYS_INCLUDE_FORM_DATA, true);
+}
+
+std::vector<FilePath> FilePathsFromHistoryState(
+    const std::string& content_state) {
+  std::vector<FilePath> to_return;
+  // TODO(darin): We should avoid using the WebKit API here, so that we do not
+  // need to have WebKit initialized before calling this method.
+  const WebHistoryItem& item =
+      HistoryItemFromString(content_state, ALWAYS_INCLUDE_FORM_DATA, true);
+  if (item.isNull()) {
+    // Couldn't parse the string.
+    return to_return;
+  }
+  const WebVector<WebString> file_paths = item.getReferencedFilePaths();
+  for (size_t i = 0; i < file_paths.size(); ++i)
+    to_return.push_back(webkit_base::WebStringToFilePath(file_paths[i]));
+  return to_return;
 }
 
 // For testing purposes only.
@@ -531,6 +543,64 @@ void HistoryItemToVersionedString(const WebHistoryItem& item, int version,
   *serialized_item = obj.GetAsString();
 
   kVersion = real_version;
+}
+
+int HistoryItemCurrentVersion() {
+  return kVersion;
+}
+
+std::string RemoveFormDataFromHistoryState(const std::string& content_state) {
+  // TODO(darin): We should avoid using the WebKit API here, so that we do not
+  // need to have WebKit initialized before calling this method.
+  const WebHistoryItem& item =
+      HistoryItemFromString(content_state, NEVER_INCLUDE_FORM_DATA, true);
+  if (item.isNull()) {
+    // Couldn't parse the string, return an empty string.
+    return std::string();
+  }
+
+  return HistoryItemToString(item);
+}
+
+std::string RemovePasswordDataFromHistoryState(
+    const std::string& content_state) {
+  // TODO(darin): We should avoid using the WebKit API here, so that we do not
+  // need to have WebKit initialized before calling this method.
+  const WebHistoryItem& item =
+      HistoryItemFromString(
+          content_state, INCLUDE_FORM_DATA_WITHOUT_PASSWORDS, true);
+  if (item.isNull()) {
+    // Couldn't parse the string, return an empty string.
+    return std::string();
+  }
+
+  return HistoryItemToString(item);
+}
+
+std::string RemoveScrollOffsetFromHistoryState(
+    const std::string& content_state) {
+  // TODO(darin): We should avoid using the WebKit API here, so that we do not
+  // need to have WebKit initialized before calling this method.
+  const WebHistoryItem& item =
+      HistoryItemFromString(content_state, ALWAYS_INCLUDE_FORM_DATA, false);
+  if (item.isNull()) {
+    // Couldn't parse the string, return an empty string.
+    return std::string();
+  }
+
+  return HistoryItemToString(item);
+}
+
+std::string CreateHistoryStateForURL(const GURL& url) {
+  // We avoid using the WebKit API here, so that we do not need to have WebKit
+  // initialized before calling this method.  Instead, we write a simple
+  // serialization of the given URL with a dummy version number of -1.  This
+  // will be interpreted by ReadHistoryItem as a request to create a default
+  // WebHistoryItem.
+  SerializeObject obj;
+  WriteInteger(-1, &obj);
+  WriteGURL(url, &obj);
+  return obj.GetAsString();
 }
 
 }  // namespace webkit_glue

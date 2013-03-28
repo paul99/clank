@@ -12,6 +12,8 @@
 #include "base/memory/ref_counted.h"
 #include "base/memory/scoped_ptr.h"
 #include "gpu/command_buffer/service/gl_utils.h"
+#include "gpu/command_buffer/service/memory_tracking.h"
+#include "gpu/gpu_export.h"
 
 namespace gpu {
 namespace gles2 {
@@ -21,10 +23,10 @@ namespace gles2 {
 //
 // NOTE: To support shared resources an instance of this class will need to be
 // shared by multiple GLES2Decoders.
-class BufferManager {
+class GPU_EXPORT BufferManager {
  public:
   // Info about Buffers currently in the system.
-  class BufferInfo : public base::RefCounted<BufferInfo> {
+  class GPU_EXPORT BufferInfo : public base::RefCounted<BufferInfo> {
    public:
     typedef scoped_refptr<BufferInfo> Ref;
 
@@ -122,6 +124,9 @@ class BufferManager {
     // Clears any cache of index ranges.
     void ClearCache();
 
+    // Check if an offset, size range is valid for the current buffer.
+    bool CheckRange(GLintptr offset, GLsizeiptr size) const;
+
     // The manager that owns this BufferInfo.
     BufferManager* manager_;
 
@@ -154,7 +159,7 @@ class BufferManager {
     RangeToMaxValueMap range_set_;
   };
 
-  BufferManager();
+  BufferManager(MemoryTracker* memory_tracker);
   ~BufferManager();
 
   // Must call before destruction.
@@ -182,11 +187,15 @@ class BufferManager {
     allow_buffers_on_multiple_targets_ = allow;
   }
 
- private:
-  void UpdateMemRepresented();
+  size_t mem_represented() const {
+    return memory_tracker_->GetMemRepresented();
+  }
 
+ private:
   void StartTracking(BufferInfo* info);
   void StopTracking(BufferInfo* info);
+
+  scoped_ptr<MemoryTypeTracker> memory_tracker_;
 
   // Info for each buffer in the system.
   typedef base::hash_map<GLuint, BufferInfo::Ref> BufferInfoMap;
@@ -194,9 +203,6 @@ class BufferManager {
 
   // Whether or not buffers can be bound to multiple targets.
   bool allow_buffers_on_multiple_targets_;
-
-  size_t mem_represented_;
-  size_t last_reported_mem_represented_;
 
   // Counts the number of BufferInfo allocated with 'this' as its manager.
   // Allows to check no BufferInfo will outlive this.

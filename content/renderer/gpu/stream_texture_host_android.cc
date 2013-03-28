@@ -1,13 +1,15 @@
-// Copyright (c) 2011 The Chromium Authors. All rights reserved.
+// Copyright (c) 2012 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
 #include "content/renderer/gpu/stream_texture_host_android.h"
 
+#include "content/common/gpu/client/gpu_channel_host.h"
 #include "content/common/gpu/gpu_messages.h"
-#include "content/renderer/gpu/gpu_channel_host.h"
 #include "content/renderer/render_thread_impl.h"
 #include "ipc/ipc_message_macros.h"
+
+namespace content {
 
 StreamTextureHost::StreamTextureHost(GpuChannelHost* channel)
     : route_id_(MSG_ROUTING_NONE),
@@ -53,10 +55,11 @@ bool StreamTextureHost::OnMessageReceived(const IPC::Message& message) {
 void StreamTextureHost::EstablishPeer(
     SurfaceTexturePeer::SurfaceTextureTarget type,
     int32 primary_id, int32 secondary_id) {
-  if (channel_.get())
+  if (channel_.get()) {
     channel_->Send(new GpuChannelMsg_EstablishStreamTexture(
         stream_id_, type,
         primary_id, secondary_id));
+  }
 }
 void StreamTextureHost::OnChannelError() {
 }
@@ -73,3 +76,5 @@ void StreamTextureHost::OnMatrixChanged(
   if (listener_)
     listener_->OnMatrixChanged((const float*)&params);
 }
+
+}  // namespace content

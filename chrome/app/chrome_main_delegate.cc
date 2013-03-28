@@ -25,19 +25,14 @@
 #include "chrome/common/chrome_version_info.h"
 #include "chrome/common/logging_chrome.h"
 #include "chrome/common/profiling.h"
+#include "chrome/common/startup_metric_utils.h"
 #include "chrome/common/url_constants.h"
 #include "chrome/plugin/chrome_content_plugin_client.h"
 #include "chrome/renderer/chrome_content_renderer_client.h"
 #include "chrome/utility/chrome_content_utility_client.h"
-#include "content/app/content_main.h"
-#include "content/common/content_counters.h"
-#include "content/public/app/content_main_delegate.h"
-#include "content/public/browser/render_process_host.h"
 #include "content/public/common/content_client.h"
 #include "content/public/common/content_paths.h"
 #include "content/public/common/content_switches.h"
-#include "media/base/media.h"
-#include "ui/base/resource/resource_bundle.h"
 #include "ui/base/ui_base_switches.h"
 
 #if defined(OS_WIN)
@@ -48,8 +43,9 @@
 #include "base/win/registry.h"
 #include "chrome/browser/policy/policy_path_parser.h"
 #include "policy/policy_constants.h"
-#include "sandbox/src/sandbox.h"
+#include "sandbox/win/src/sandbox.h"
 #include "tools/memory_watcher/memory_watcher.h"
+#include "ui/base/resource/resource_bundle_win.h"
 #endif
 
 #if defined(OS_MACOSX)
@@ -62,7 +58,6 @@
 #include "chrome/common/mac/cfbundle_blocker.h"
 #include "chrome/common/mac/objc_zombie.h"
 #include "grit/chromium_strings.h"
-#include "third_party/WebKit/Source/WebKit/mac/WebCoreSupport/WebSystemInterface.h"
 #include "ui/base/l10n/l10n_util_mac.h"
 #endif
 
@@ -81,14 +76,7 @@
 #endif
 
 #if defined(OS_ANDROID)
-#include "base/global_descriptors_posix.h"
-#include "content/common/chrome_descriptors.h"
-#endif
-
-#if defined(TOOLKIT_USES_GTK)
-#include <gdk/gdk.h>
-#include <glib.h>
-#include <gtk/gtk.h>
+#include "chrome/common/descriptors_android.h"
 #endif
 
 #if defined(USE_X11)
@@ -98,7 +86,7 @@
 #endif
 
 #if defined(USE_LINUX_BREAKPAD)
-#include "chrome/app/breakpad_posix.h"
+#include "chrome/app/breakpad_linux.h"
 #endif
 
 base::LazyInstance<chrome::ChromeContentBrowserClient>
@@ -266,26 +254,6 @@ void EnableHeapProfiler(const CommandLine& command_line) {
 #endif
 }
 
-void InitializeChromeContentRendererClient() {
-  content::GetContentClient()->set_renderer(
-      &g_chrome_content_renderer_client.Get());
-}
-
-void InitializeChromeContentClient(const std::string& process_type) {
-  if (process_type.empty()) {
-    content::GetContentClient()->set_browser(
-        &g_chrome_content_browser_client.Get());
-  } else if (process_type == switches::kPluginProcess) {
-    content::GetContentClient()->set_plugin(
-        &g_chrome_content_plugin_client.Get());
-  } else if (process_type == switches::kRendererProcess) {
-    InitializeChromeContentRendererClient();
-  } else if (process_type == switches::kUtilityProcess) {
-    content::GetContentClient()->set_utility(
-        &g_chrome_content_utility_client.Get());
-  }
-}
-
 // Returns true if this subprocess type needs the ResourceBundle initialized
 // and resources loaded.
 bool SubprocessNeedsResourceBundle(const std::string& process_type) {
@@ -403,6 +371,7 @@ struct MainFunction {
 }  // namespace
 
 ChromeMainDelegate::ChromeMainDelegate() {
+  startup_metric_utils::RecordMainEntryPointTime();
 }
 
 ChromeMainDelegate::~ChromeMainDelegate() {
@@ -438,12 +407,15 @@ bool ChromeMainDelegate::BasicStartupComplete(int* exit_code) {
 #endif
 #endif  // OS_POSIX
 
+  // No support for ANDROID yet as DiagnosticsMain needs wchar support.
+#if !defined(OS_ANDROID)
   // If we are in diagnostics mode this is the end of the line. After the
   // diagnostics are run the process will invariably exit.
   if (command_line.HasSwitch(switches::kDiagnostics)) {
     *exit_code = DiagnosticsMain(command_line);
     return true;
   }
+#endif
 
 #if defined(OS_WIN)
   // Must do this before any other usage of command line!
@@ -457,6 +429,9 @@ bool ChromeMainDelegate::BasicStartupComplete(int* exit_code) {
       command_line.HasSwitch(switches::kEnableBenchmarking)) {
     base::FieldTrial::EnableBenchmarking();
   }
+
+  content::SetContentClient(&chrome_content_client_);
+
   return false;
 }
 
@@ -553,11 +528,6 @@ void ChromeMainDelegate::PreSandboxStartup() {
   std::string process_type =
       command_line.GetSwitchValueASCII(switches::kProcessType);
 
-  // Initialize the content client which that code uses to talk to Chrome.
-  content::SetContentClient(&chrome_content_client_);
-  InitializeChromeContentClient(process_type);
-
-  // Initialize the Chrome path provider.
   chrome::RegisterPathProvider();
 
 #if defined(OS_MACOSX)
@@ -576,11 +546,16 @@ void ChromeMainDelegate::PreSandboxStartup() {
 #if defined(OS_MACOSX) || defined(OS_WIN)
   CheckUserDataDirPolicy(&user_data_dir);
 #endif
-  if (!user_data_dir.empty())
-    CHECK(PathService::Override(chrome::DIR_USER_DATA, user_data_dir));
+  if (!user_data_dir.empty()) {
+    CHECK(PathService::OverrideAndCreateIfNeeded(
+        chrome::DIR_USER_DATA,
+        user_data_dir,
+        chrome::ProcessNeedsProfileDir(process_type)));
+  }
 
+  stats_counter_timer_.reset(new base::StatsCounterTimer("Chrome.Init"));
   startup_timer_.reset(new base::StatsScope<base::StatsCounterTimer>
-                       (content::Counters::chrome_main()));
+                       (*stats_counter_timer_));
 
   // Enable the heap profiler as early as possible!
   EnableHeapProfiler(command_line);
@@ -589,40 +564,19 @@ void ChromeMainDelegate::PreSandboxStartup() {
   if (command_line.HasSwitch(switches::kMessageLoopHistogrammer))
     MessageLoop::EnableHistogrammer(true);
 
-  // Single-process is an unsupported and not fully tested mode, so
-  // don't enable it for official Chrome builds.
-#if !defined(GOOGLE_CHROME_BUILD)
-  if (command_line.HasSwitch(switches::kSingleProcess)) {
-    content::RenderProcessHost::set_run_renderer_in_process(true);
-#if defined(OS_MACOSX)
-    // TODO(port-mac): This is from renderer_main_platform_delegate.cc.
-    // shess tried to refactor things appropriately, but it sprawled out
-    // of control because different platforms needed different styles of
-    // initialization.  Try again once we understand the process
-    // architecture needed and where it should live.
-    InitWebCoreSystemInterface();
-#endif
-
-    InitializeChromeContentRendererClient();
-  }
-#endif  // GOOGLE_CHROME_BUILD
-
+#if !defined(OS_ANDROID)
+  // Android does InitLogging when library is loaded. Skip here.
   logging::OldFileDeletionState file_state =
       logging::APPEND_TO_OLD_LOG_FILE;
   if (process_type.empty()) {
     file_state = logging::DELETE_OLD_LOG_FILE;
   }
   logging::InitChromeLogging(command_line, file_state);
-
-  // Register internal Chrome schemes so they'll be parsed correctly. This
-  // must happen before we process any URLs with the affected schemes, and
-  // must be done in all processes that work with these URLs (i.e. including
-  // renderers).
-  chrome::RegisterChromeSchemes();
+#endif
 
 #if defined(OS_WIN)
   // TODO(darin): Kill this once http://crbug.com/52609 is fixed.
-  ResourceBundle::SetResourcesDataDLL(_AtlBaseModule.GetResourceInstance());
+  ui::SetResourcesDataDLL(_AtlBaseModule.GetResourceInstance());
 #endif
 
   if (SubprocessNeedsResourceBundle(process_type)) {
@@ -644,21 +598,30 @@ void ChromeMainDelegate::PreSandboxStartup() {
     const std::string locale =
         command_line.GetSwitchValueASCII(switches::kLang);
 #if defined(OS_ANDROID)
-    // The renderer sandboxing make it that we can't access any files even that
-    // early. So we access our local pak file directly from a file descriptor
-    // passed during process creation.
+    // The renderer sandbox prevents us from accessing our .pak files directly.
+    // Therefore file descriptors to the .pak files that we need are passed in
+    // at process creation time.
     int locale_pak_fd = base::GlobalDescriptors::GetInstance()->MaybeGet(
         kAndroidLocalePakDescriptor);
     CHECK(locale_pak_fd != -1);
-    int chrome_pak_fd = base::GlobalDescriptors::GetInstance()->MaybeGet(
-        kAndroidChromePakDescriptor);
-    CHECK(chrome_pak_fd != -1);
-    ResourceBundle::InitSharedInstanceWithPaks(locale_pak_fd, chrome_pak_fd);
+    ResourceBundle::InitSharedInstanceWithPakFile(locale_pak_fd, false);
+
+    int extra_pak_keys[] = {
+      kAndroidChromePakDescriptor,
+      kAndroidUIResourcesPakDescriptor,
+    };
+    for (size_t i = 0; i < arraysize(extra_pak_keys); ++i) {
+      int pak_fd =
+          base::GlobalDescriptors::GetInstance()->MaybeGet(extra_pak_keys[i]);
+      CHECK(pak_fd != -1);
+      ResourceBundle::GetSharedInstance().AddDataPackFromFile(
+          pak_fd, ui::SCALE_FACTOR_100P);
+    }
 
     const std::string loaded_locale = locale;
 #else
     const std::string loaded_locale =
-        ResourceBundle::InitSharedInstanceWithLocale(locale);
+        ResourceBundle::InitSharedInstanceWithLocale(locale, NULL);
 #endif
     CHECK(!loaded_locale.empty()) << "Locale could not be found for " <<
         locale;
@@ -674,8 +637,22 @@ void ChromeMainDelegate::PreSandboxStartup() {
   // Needs to be called after we have chrome::DIR_USER_DATA.  BrowserMain
   // sets this up for the browser process in a different manner. Zygotes
   // need to call InitCrashReporter() in RunZygote().
-  if (!process_type.empty() && process_type != switches::kZygoteProcess)
+  if (!process_type.empty() && process_type != switches::kZygoteProcess) {
+#if defined(OS_ANDROID)
+    // On Android we need to provide a FD to the file where the minidump is
+    // generated as the renderer and browser run with different UIDs
+    // (preventing the browser from inspecting the renderer process).
+    int minidump_fd = base::GlobalDescriptors::GetInstance()->
+        MaybeGet(kAndroidMinidumpDescriptor);
+    if (minidump_fd == base::kInvalidPlatformFileValue) {
+      NOTREACHED() << "Could not find minidump FD, crash reporting disabled.";
+    } else {
+      InitNonBrowserCrashReporterForAndroid(minidump_fd);
+    }
+#else
     InitCrashReporter();
+#endif
+  }
 #endif
 
 #if defined(OS_CHROMEOS)
@@ -703,6 +680,9 @@ void ChromeMainDelegate::SandboxInitialized(const std::string& process_type) {
 int ChromeMainDelegate::RunProcess(
     const std::string& process_type,
     const content::MainFunctionParams& main_function_params) {
+  // ANDROID doesn't support "service", so no ServiceProcessMain, and arraysize
+  // doesn't support empty array. So we comment out the block for Android.
+#if !defined(OS_ANDROID)
   static const MainFunction kMainFunctions[] = {
     { switches::kServiceProcess,     ServiceProcessMain },
 #if defined(OS_MACOSX)
@@ -718,16 +698,20 @@ int ChromeMainDelegate::RunProcess(
     if (process_type == kMainFunctions[i].name)
       return kMainFunctions[i].function(main_function_params);
   }
+#endif
 
-  NOTREACHED() << "Unknown process type: " << process_type;
-  return 1;
+  return -1;
 }
 
 void ChromeMainDelegate::ProcessExiting(const std::string& process_type) {
   if (SubprocessNeedsResourceBundle(process_type))
     ResourceBundle::CleanupSharedInstance();
-
+#if !defined(OS_ANDROID)
   logging::CleanupChromeLogging();
+#else
+  // Android doesn't use InitChromeLogging, so we close the log file manually.
+  logging::CloseLogFile();
+#endif  // !defined(OS_ANDROID)
 }
 
 #if defined(OS_MACOSX)
@@ -748,14 +732,8 @@ bool ChromeMainDelegate::DelaySandboxInitialization(
   return process_type == switches::kNaClLoaderProcess ||
       process_type == switches::kRelauncherProcess;
 }
-#elif defined(OS_POSIX)
+#elif defined(OS_POSIX) && !defined(OS_ANDROID)
 content::ZygoteForkDelegate* ChromeMainDelegate::ZygoteStarting() {
-  // Each Renderer we spawn will re-attempt initialization of the media
-  // libraries, at which point failure will be detected and handled, so
-  // we do not need to cope with initialization failures here.
-  FilePath media_path;
-  if (PathService::Get(chrome::DIR_MEDIA_LIBS, &media_path))
-    media::InitializeMediaLibrary(media_path);
 #if defined(DISABLE_NACL)
   return NULL;
 #else
@@ -764,10 +742,6 @@ content::ZygoteForkDelegate* ChromeMainDelegate::ZygoteStarting() {
 }
 
 void ChromeMainDelegate::ZygoteForked() {
-  const CommandLine& command_line = *CommandLine::ForCurrentProcess();
-  std::string process_type =
-      command_line.GetSwitchValueASCII(switches::kProcessType);
-
   Profiling::ProcessStarted();
   if (Profiling::BeingProfiled()) {
     base::debug::RestartProfilingAfterFork();
@@ -779,7 +753,25 @@ void ChromeMainDelegate::ZygoteForked() {
   // this up for the browser process in a different manner.
   InitCrashReporter();
 #endif
-
-  InitializeChromeContentClient(process_type);
 }
+
 #endif  // OS_MACOSX
+
+content::ContentBrowserClient*
+    ChromeMainDelegate::CreateContentBrowserClient() {
+  return &g_chrome_content_browser_client.Get();
+}
+
+content::ContentPluginClient* ChromeMainDelegate::CreateContentPluginClient() {
+  return &g_chrome_content_plugin_client.Get();
+}
+
+content::ContentRendererClient*
+    ChromeMainDelegate::CreateContentRendererClient() {
+  return &g_chrome_content_renderer_client.Get();
+}
+
+content::ContentUtilityClient*
+    ChromeMainDelegate::CreateContentUtilityClient() {
+  return &g_chrome_content_utility_client.Get();
+}

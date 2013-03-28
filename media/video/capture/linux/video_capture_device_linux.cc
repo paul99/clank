@@ -14,6 +14,7 @@
 #include <sys/ioctl.h>
 #include <sys/mman.h>
 
+#include <list>
 #include <string>
 
 #include "base/bind.h"
@@ -43,25 +44,30 @@ enum { kCaptureTimeoutUs = 200000 };
 // Time to wait in milliseconds before v4l2_thread_ reschedules OnCaptureTask
 // if an event is triggered (select) but no video frame is read.
 enum { kCaptureSelectWaitMs = 10 };
+// MJPEG is prefered if the width or height is larger than this.
+enum { kMjpegWidth = 640 };
+enum { kMjpegHeight = 480 };
 
 // V4L2 color formats VideoCaptureDeviceLinux support.
-static const int32 kV4l2Fmts[] = {
+static const int32 kV4l2RawFmts[] = {
   V4L2_PIX_FMT_YUV420,
   V4L2_PIX_FMT_YUYV
 };
 
-static VideoCaptureDevice::Format V4l2ColorToVideoCaptureColorFormat(
+static VideoCaptureCapability::Format V4l2ColorToVideoCaptureColorFormat(
     int32 v4l2_fourcc) {
-  VideoCaptureDevice::Format result = VideoCaptureDevice::kColorUnknown;
+  VideoCaptureCapability::Format result = VideoCaptureCapability::kColorUnknown;
   switch (v4l2_fourcc) {
     case V4L2_PIX_FMT_YUV420:
-      result = VideoCaptureDevice::kI420;
+      result = VideoCaptureCapability::kI420;
       break;
     case V4L2_PIX_FMT_YUYV:
-      result = VideoCaptureDevice::kYUY2;
+      result = VideoCaptureCapability::kYUY2;
       break;
+    case V4L2_PIX_FMT_MJPEG:
+      result = VideoCaptureCapability::kMJPEG;
   }
-  DCHECK_NE(result, VideoCaptureDevice::kColorUnknown);
+  DCHECK_NE(result, VideoCaptureCapability::kColorUnknown);
   return result;
 }
 
@@ -81,14 +87,15 @@ void VideoCaptureDevice::GetDeviceNames(Names* device_names) {
 
     Name name;
     name.unique_id = path.value() + info.filename;
-    if ((fd = open(name.unique_id.c_str() , O_RDONLY)) <= 0) {
+    if ((fd = open(name.unique_id.c_str() , O_RDONLY)) < 0) {
       // Failed to open this device.
       continue;
     }
-    // Test if this is a V4L2 device.
+    // Test if this is a V4L2 capture device.
     v4l2_capability cap;
     if ((ioctl(fd, VIDIOC_QUERYCAP, &cap) == 0) &&
-        (cap.capabilities & V4L2_CAP_VIDEO_CAPTURE)) {
+        (cap.capabilities & V4L2_CAP_VIDEO_CAPTURE) &&
+        !(cap.capabilities & V4L2_CAP_VIDEO_OUTPUT)) {
       // This is a V4L2 video capture device
       name.device_name = StringPrintf("%s", cap.card);
       device_names->push_back(name);
@@ -106,7 +113,7 @@ VideoCaptureDevice* VideoCaptureDevice::Create(const Name& device_name) {
   // allocates the camera.
   int fd = open(device_name.unique_id.c_str(), O_RDONLY);
   if (fd < 0) {
-    DPLOG(ERROR) << "Cannot open device";
+    DVLOG(1) << "Cannot open device";
     delete self;
     return NULL;
   }
@@ -197,15 +204,17 @@ void VideoCaptureDeviceLinux::OnAllocate(int width,
 
   observer_ = observer;
 
-  if ((device_fd_ = open(device_name_.unique_id.c_str(), O_RDONLY)) < 0) {
+  // Need to open camera with O_RDWR after Linux kernel 3.3.
+  if ((device_fd_ = open(device_name_.unique_id.c_str(), O_RDWR)) < 0) {
     SetErrorState("Failed to open V4L2 device driver.");
     return;
   }
 
-  // Test if this is a V4L2 device.
+  // Test if this is a V4L2 capture device.
   v4l2_capability cap;
   if (!((ioctl(device_fd_, VIDIOC_QUERYCAP, &cap) == 0) &&
-      (cap.capabilities & V4L2_CAP_VIDEO_CAPTURE))) {
+      (cap.capabilities & V4L2_CAP_VIDEO_CAPTURE) &&
+      !(cap.capabilities & V4L2_CAP_VIDEO_OUTPUT))) {
     // This is not a V4L2 video capture device.
     close(device_fd_);
     device_fd_ = -1;
@@ -223,10 +232,21 @@ void VideoCaptureDeviceLinux::OnAllocate(int width,
   // Some device failed in first VIDIOC_TRY_FMT with EBUSY or EIO.
   // But second VIDIOC_TRY_FMT succeeds.
   // See http://crbug.com/94134.
+  // For large resolutions, favour mjpeg over raw formats.
   bool format_match = false;
-  for (unsigned int i = 0; i < arraysize(kV4l2Fmts) && !format_match; i++) {
-    video_fmt.fmt.pix.pixelformat = kV4l2Fmts[i];
-    for (int attempt = 0; attempt < 2 && !format_match; attempt++) {
+  std::list<int> v4l2_formats;
+
+  if (width > kMjpegWidth || height > kMjpegHeight) {
+    v4l2_formats.push_back(V4L2_PIX_FMT_MJPEG);
+  }
+  for (size_t i = 0; i < arraysize(kV4l2RawFmts); ++i) {
+    v4l2_formats.push_back(kV4l2RawFmts[i]);
+  }
+
+  for (std::list<int>::const_iterator it = v4l2_formats.begin();
+       it != v4l2_formats.end() && !format_match; ++it) {
+    video_fmt.fmt.pix.pixelformat = *it;
+    for (int attempt = 0; attempt < 2 && !format_match; ++attempt) {
       ResetCameraByEnumeratingIoctlsHACK(device_fd_);
       if (ioctl(device_fd_, VIDIOC_TRY_FMT, &video_fmt) < 0) {
         if (errno != EIO)
@@ -248,12 +268,14 @@ void VideoCaptureDeviceLinux::OnAllocate(int width,
   }
 
   // Store our current width and height.
-  Capability current_settings;
+  VideoCaptureCapability current_settings;
   current_settings.color = V4l2ColorToVideoCaptureColorFormat(
       video_fmt.fmt.pix.pixelformat);
   current_settings.width  = video_fmt.fmt.pix.width;
   current_settings.height = video_fmt.fmt.pix.height;
   current_settings.frame_rate = frame_rate;
+  current_settings.expected_capture_delay = 0;
+  current_settings.interlaced = false;
 
   state_ = kAllocated;
   // Report the resulting frame size to the observer.
@@ -449,7 +471,7 @@ void VideoCaptureDeviceLinux::DeAllocateVideoBuffers() {
 }
 
 void VideoCaptureDeviceLinux::SetErrorState(const std::string& reason) {
-  DLOG(ERROR) << reason;
+  DVLOG(1) << reason;
   state_ = kError;
   observer_->OnError();
 }

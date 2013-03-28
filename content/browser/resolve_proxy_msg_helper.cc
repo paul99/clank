@@ -1,4 +1,4 @@
-// Copyright (c) 2011 The Chromium Authors. All rights reserved.
+// Copyright (c) 2012 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -11,6 +11,8 @@
 #include "net/base/net_errors.h"
 #include "net/url_request/url_request_context.h"
 #include "net/url_request/url_request_context_getter.h"
+
+namespace content {
 
 ResolveProxyMsgHelper::ResolveProxyMsgHelper(
     net::URLRequestContextGetter* getter)
@@ -40,6 +42,23 @@ void ResolveProxyMsgHelper::OnResolveProxy(const GURL& url,
   // If nothing is in progress, start.
   if (pending_requests_.size() == 1)
     StartPendingRequest();
+}
+
+ResolveProxyMsgHelper::~ResolveProxyMsgHelper() {
+  // Clear all pending requests if the ProxyService is still alive (if we have a
+  // default request context or override).
+  if (!pending_requests_.empty()) {
+    PendingRequest req = pending_requests_.front();
+    proxy_service_->CancelPacRequest(req.pac_req);
+  }
+
+  for (PendingRequestList::iterator it = pending_requests_.begin();
+       it != pending_requests_.end();
+       ++it) {
+    delete it->reply_msg;
+  }
+
+  pending_requests_.clear();
 }
 
 void ResolveProxyMsgHelper::OnResolveProxyCompleted(int result) {
@@ -81,19 +100,4 @@ void ResolveProxyMsgHelper::StartPendingRequest() {
     OnResolveProxyCompleted(result);
 }
 
-ResolveProxyMsgHelper::~ResolveProxyMsgHelper() {
-  // Clear all pending requests if the ProxyService is still alive (if we have a
-  // default request context or override).
-  if (!pending_requests_.empty()) {
-    PendingRequest req = pending_requests_.front();
-    proxy_service_->CancelPacRequest(req.pac_req);
-  }
-
-  for (PendingRequestList::iterator it = pending_requests_.begin();
-       it != pending_requests_.end();
-       ++it) {
-    delete it->reply_msg;
-  }
-
-  pending_requests_.clear();
-}
+}  // namespace content

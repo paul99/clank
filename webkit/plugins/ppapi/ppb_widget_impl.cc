@@ -1,4 +1,4 @@
-// Copyright (c) 2011 The Chromium Authors. All rights reserved.
+// Copyright (c) 2012 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -22,7 +22,8 @@ namespace webkit {
 namespace ppapi {
 
 PPB_Widget_Impl::PPB_Widget_Impl(PP_Instance instance)
-    : Resource(instance) {
+    : Resource(::ppapi::OBJECT_IS_IMPL, instance),
+      scale_(1.0f) {
   memset(&location_, 0, sizeof(location_));
 }
 
@@ -57,6 +58,10 @@ PP_Bool PPB_Widget_Impl::GetLocation(PP_Rect* location) {
 void PPB_Widget_Impl::SetLocation(const PP_Rect* location) {
   location_ = *location;
   SetLocationInternal(location);
+}
+
+void PPB_Widget_Impl::SetScale(float scale) {
+  scale_ = scale;
 }
 
 void PPB_Widget_Impl::Invalidate(const PP_Rect* dirty) {

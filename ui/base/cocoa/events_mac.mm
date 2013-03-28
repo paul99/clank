@@ -4,10 +4,12 @@
 
 #include <Cocoa/Cocoa.h>
 
-#include "ui/base/events.h"
+#include "ui/base/events/event_constants.h"
 
+#include "base/event_types.h"
 #include "base/logging.h"
 #include "base/time.h"
+#include "ui/base/events/event_utils.h"
 #import "ui/base/keycodes/keyboard_code_conversion_mac.h"
 #include "ui/gfx/point.h"
 
@@ -128,6 +130,13 @@ gfx::Point EventLocationFromNative(const base::NativeEvent& native_event) {
   return gfx::Point(NSPointToCGPoint(location));
 }
 
+gfx::Point EventSystemLocationFromNative(
+    const base::NativeEvent& native_event) {
+  // TODO(port): Needs to always return screen position here. Returning normal
+  // origin for now since that's obviously wrong.
+  return gfx::Point(0, 0);
+}
+
 KeyboardCode KeyboardCodeFromNative(const base::NativeEvent& native_event) {
   return ui::KeyboardCodeFromNSEvent(native_event);
 }
@@ -175,8 +184,13 @@ float GetTouchForce(const base::NativeEvent& native_event) {
 
 bool GetScrollOffsets(const base::NativeEvent& native_event,
                       float* x_offset,
-                      float* y_offset) {
+                      float* y_offset,
+                      int* finger_count) {
   return false;
+}
+
+bool IsNoopEvent(const base::NativeEvent& event) {
+  return ([event type] == NSApplicationDefined && [event subtype] == 0);
 }
 
 base::NativeEvent CreateNoopEvent() {
