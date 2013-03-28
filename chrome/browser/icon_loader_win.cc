@@ -1,4 +1,4 @@
-// Copyright (c) 2011 The Chromium Authors. All rights reserved.
+// Copyright (c) 2012 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -10,7 +10,9 @@
 #include "base/bind.h"
 #include "base/message_loop.h"
 #include "base/threading/thread.h"
+#include "third_party/skia/include/core/SkBitmap.h"
 #include "ui/gfx/icon_util.h"
+#include "ui/gfx/image/image_skia.h"
 #include "ui/gfx/size.h"
 
 void IconLoader::ReadIcon() {
@@ -28,15 +30,24 @@ void IconLoader::ReadIcon() {
     default:
       NOTREACHED();
   }
-  SHFILEINFO file_info = { 0 };
-  if (!SHGetFileInfo(group_.c_str(), FILE_ATTRIBUTE_NORMAL, &file_info,
-                     sizeof(SHFILEINFO),
-                     SHGFI_ICON | size | SHGFI_USEFILEATTRIBUTES))
-    return;
 
-  image_.reset(new gfx::Image(
-      IconUtil::CreateSkBitmapFromHICON(file_info.hIcon)));
-  DestroyIcon(file_info.hIcon);
+  image_.reset();
+
+  SHFILEINFO file_info = { 0 };
+  if (SHGetFileInfo(group_.c_str(), FILE_ATTRIBUTE_NORMAL, &file_info,
+                     sizeof(SHFILEINFO),
+                     SHGFI_ICON | size | SHGFI_USEFILEATTRIBUTES)) {
+    scoped_ptr<SkBitmap> bitmap(IconUtil::CreateSkBitmapFromHICON(
+        file_info.hIcon));
+    if (bitmap.get()) {
+      gfx::ImageSkia image_skia(*bitmap);
+      image_skia.MakeThreadSafe();
+      image_.reset(new gfx::Image(image_skia));
+      DestroyIcon(file_info.hIcon);
+    }
+  }
+
+  // Always notify the delegate, regardless of success.
   target_message_loop_->PostTask(FROM_HERE,
       base::Bind(&IconLoader::NotifyDelegate, this));
 }

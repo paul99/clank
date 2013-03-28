@@ -1,5 +1,5 @@
 #!/usr/bin/env python
-# Copyright (c) 2011 The Chromium Authors. All rights reserved.
+# Copyright (c) 2012 The Chromium Authors. All rights reserved.
 # Use of this source code is governed by a BSD-style license that can be
 # found in the LICENSE file.
 
@@ -43,7 +43,7 @@ def _ReorderBinary(relink_exe, executable, symbol, destination_dir):
   output binaries, otherwise orders them randomly.
   """
   cmd = [relink_exe,
-         '--verbose',
+         '--overwrite',
          '--input-dll=%s' % executable,
          '--input-pdb=%s' % symbol,
          '--output-dll=%s' % os.path.abspath(

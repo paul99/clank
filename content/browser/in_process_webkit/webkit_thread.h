@@ -1,10 +1,9 @@
-// Copyright (c) 2011 The Chromium Authors. All rights reserved.
+// Copyright (c) 2012 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
 #ifndef CONTENT_BROWSER_IN_PROCESS_WEBKIT_WEBKIT_THREAD_H_
 #define CONTENT_BROWSER_IN_PROCESS_WEBKIT_WEBKIT_THREAD_H_
-#pragma once
 
 #include "base/basictypes.h"
 #include "base/memory/scoped_ptr.h"
@@ -12,9 +11,8 @@
 #include "content/browser/browser_thread_impl.h"
 #include "content/common/content_export.h"
 
-class BrowserWebKitPlatformSupportImpl;
-
 namespace content {
+class BrowserWebKitPlatformSupportImpl;
 
 // This creates a WebKit main thread on instantiation (if not in
 // --single-process mode) on construction and kills it on deletion.
@@ -27,7 +25,7 @@ class CONTENT_EXPORT WebKitThread {
 
  private:
   // Must be private so that we can carefully control its lifetime.
-  class InternalWebKitThread : public content::BrowserThreadImpl {
+  class InternalWebKitThread : public BrowserThreadImpl {
    public:
     InternalWebKitThread();
     virtual ~InternalWebKitThread();

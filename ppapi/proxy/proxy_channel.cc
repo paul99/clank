@@ -1,18 +1,24 @@
-// Copyright (c) 2011 The Chromium Authors. All rights reserved.
+// Copyright (c) 2012 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
 #include "ppapi/proxy/proxy_channel.h"
 
+#include "base/logging.h"
+#include "base/process_util.h"
 #include "ipc/ipc_platform_file.h"
 #include "ipc/ipc_test_sink.h"
+
+#if defined(OS_NACL)
+#include <unistd.h>
+#endif
 
 namespace ppapi {
 namespace proxy {
 
-ProxyChannel::ProxyChannel(base::ProcessHandle remote_process_handle)
+ProxyChannel::ProxyChannel()
     : delegate_(NULL),
-      remote_process_handle_(remote_process_handle),
+      peer_pid_(base::kNullProcessId),
       test_sink_(NULL) {
 }
 
@@ -21,9 +27,11 @@ ProxyChannel::~ProxyChannel() {
 }
 
 bool ProxyChannel::InitWithChannel(Delegate* delegate,
+                                   base::ProcessId peer_pid,
                                    const IPC::ChannelHandle& channel_handle,
                                    bool is_client) {
   delegate_ = delegate;
+  peer_pid_ = peer_pid;
   IPC::Channel::Mode mode = is_client ? IPC::Channel::MODE_CLIENT
                                       : IPC::Channel::MODE_SERVER;
   channel_.reset(new IPC::SyncChannel(channel_handle, mode, this,
@@ -35,13 +43,16 @@ bool ProxyChannel::InitWithChannel(Delegate* delegate,
 void ProxyChannel::InitWithTestSink(IPC::TestSink* test_sink) {
   DCHECK(!test_sink_);
   test_sink_ = test_sink;
+#if !defined(OS_NACL)
+  peer_pid_ = base::GetCurrentProcId();
+#endif
 }
 
 void ProxyChannel::OnChannelError() {
   channel_.reset();
 }
 
-#if defined(OS_POSIX)
+#if defined(OS_POSIX) && !defined(OS_NACL)
 int ProxyChannel::TakeRendererFD() {
   DCHECK(channel());
   return channel()->TakeClientFileDescriptor();
@@ -51,8 +62,20 @@ int ProxyChannel::TakeRendererFD() {
 IPC::PlatformFileForTransit ProxyChannel::ShareHandleWithRemote(
       base::PlatformFile handle,
       bool should_close_source) {
-  return IPC::GetFileHandleForProcess(handle, remote_process_handle_,
-                                      should_close_source);
+  // Channel could be closed if the plugin crashes.
+  if (!channel_.get()) {
+    if (should_close_source) {
+#if !defined(OS_NACL)
+      base::ClosePlatformFile(handle);
+#else
+      close(handle);
+#endif
+    }
+    return IPC::InvalidPlatformFileForTransit();
+  }
+  DCHECK(peer_pid_ != base::kNullProcessId);
+  return delegate_->ShareHandleWithRemote(handle, peer_pid_,
+                                          should_close_source);
 }
 
 bool ProxyChannel::Send(IPC::Message* msg) {

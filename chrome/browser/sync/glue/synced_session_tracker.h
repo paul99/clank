@@ -1,10 +1,9 @@
-// Copyright (c) 2011 The Chromium Authors. All rights reserved.
+// Copyright (c) 2012 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
 #ifndef CHROME_BROWSER_SYNC_GLUE_SYNCED_SESSION_TRACKER_H_
 #define CHROME_BROWSER_SYNC_GLUE_SYNCED_SESSION_TRACKER_H_
-#pragma once
 
 #include <map>
 #include <set>
@@ -20,7 +19,7 @@
 namespace browser_sync {
 
 // Class to manage synced sessions. The tracker will own all SyncedSession
-// and SessionTab objects it creates, and deletes them appropriately on
+// and SyncedSessionTab objects it creates, and deletes them appropriately on
 // destruction.
 // Note: SyncedSession objects are created for all synced sessions, including
 // the local session (whose tag we maintain separately).
@@ -132,7 +131,7 @@ class SyncedSessionTracker {
  private:
   // Datatypes for accessing session data. Neither of the *Wrappers actually
   // have ownership of the Windows/Tabs, they just provide id-based access to
-  // them. The ownership remains within it's containing session (for windows and
+  // them. The ownership remains within its containing session (for windows and
   // mapped tabs, unmapped tabs are owned by the unmapped_tabs_ container).
   // Note, we pair pointers with bools so that we can track what is owned and
   // what can be deleted (see ResetSessionTracking(..) and CleanupSession(..)

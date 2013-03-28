@@ -1,4 +1,4 @@
-// Copyright (c) 2011 The Chromium Authors. All rights reserved.
+// Copyright (c) 2012 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -7,31 +7,56 @@
 #include "base/android/jni_android.h"
 #include "base/android/jni_string.h"
 #include "base/android/scoped_java_ref.h"
+#include "base/file_path.h"
 
-#include "jni/path_utils_jni.h"
+#include "jni/PathUtils_jni.h"
 
 namespace base {
 namespace android {
 
-std::string GetDataDirectory() {
+bool GetDataDirectory(FilePath* result) {
   JNIEnv* env = AttachCurrentThread();
   ScopedJavaLocalRef<jstring> path =
       Java_PathUtils_getDataDirectory(env, GetApplicationContext());
-  return ConvertJavaStringToUTF8(path);
+  FilePath data_path(ConvertJavaStringToUTF8(path));
+  *result = data_path;
+  return true;
 }
 
-std::string GetCacheDirectory() {
+bool GetCacheDirectory(FilePath* result) {
   JNIEnv* env = AttachCurrentThread();
   ScopedJavaLocalRef<jstring> path =
       Java_PathUtils_getCacheDirectory(env, GetApplicationContext());
-  return ConvertJavaStringToUTF8(path);
+  FilePath cache_path(ConvertJavaStringToUTF8(path));
+  *result = cache_path;
+  return true;
 }
 
-std::string GetExternalStorageDirectory() {
+bool GetDownloadsDirectory(FilePath* result) {
+  JNIEnv* env = AttachCurrentThread();
+  ScopedJavaLocalRef<jstring> path =
+      Java_PathUtils_getDownloadsDirectory(env, GetApplicationContext());
+  FilePath downloads_path(ConvertJavaStringToUTF8(path));
+  *result = downloads_path;
+  return true;
+}
+
+bool GetNativeLibraryDirectory(FilePath* result) {
+  JNIEnv* env = AttachCurrentThread();
+  ScopedJavaLocalRef<jstring> path =
+      Java_PathUtils_getNativeLibraryDirectory(env, GetApplicationContext());
+  FilePath library_path(ConvertJavaStringToUTF8(path));
+  *result = library_path;
+  return true;
+}
+
+bool GetExternalStorageDirectory(FilePath* result) {
   JNIEnv* env = AttachCurrentThread();
   ScopedJavaLocalRef<jstring> path =
       Java_PathUtils_getExternalStorageDirectory(env);
-  return ConvertJavaStringToUTF8(path);
+  FilePath storage_path(ConvertJavaStringToUTF8(path));
+  *result = storage_path;
+  return true;
 }
 
 bool RegisterPathUtils(JNIEnv* env) {

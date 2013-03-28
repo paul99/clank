@@ -2,16 +2,18 @@
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
+#include "base/command_line.h"
 #include "chrome/common/chrome_switches.h"
 #include "chrome/common/print_messages.h"
+#include "chrome/renderer/mock_printer.h"
 #include "chrome/renderer/print_web_view_helper.h"
 #include "chrome/test/base/chrome_render_view_test.h"
 #include "content/public/renderer/render_view.h"
 #include "printing/print_job_constants.h"
 #include "testing/gtest/include/gtest/gtest.h"
 #include "third_party/WebKit/Source/WebKit/chromium/public/WebFrame.h"
-#include "third_party/WebKit/Source/WebKit/chromium/public/platform/WebString.h"
 #include "third_party/WebKit/Source/WebKit/chromium/public/WebView.h"
+#include "third_party/WebKit/Source/WebKit/chromium/public/platform/WebString.h"
 
 #if defined(OS_WIN) || defined(OS_MACOSX)
 #include "base/file_util.h"
@@ -54,6 +56,12 @@ const char kHTMLWithLandscapePageCss[] =
 const char kPrintWithJSHTML[] =
     "<body>Hello<script>window.print()</script>World</body>";
 
+// A simple webpage with a button to print itself with.
+const char kPrintOnUserAction[] =
+    "<body>"
+    "  <button id=\"print\" onclick=\"window.print();\">Hello World!</button>"
+    "</body>";
+
 // A longer web page.
 const char kLongPageHTML[] =
     "<body><img src=\"\" width=10 height=10000 /></body>";
@@ -70,7 +78,7 @@ void CreatePrintSettingsDictionary(DictionaryValue* dict) {
   dict->SetInteger(printing::kSettingDuplexMode, printing::SIMPLEX);
   dict->SetInteger(printing::kSettingCopies, 1);
   dict->SetString(printing::kSettingDeviceName, "dummy");
-  dict->SetString(printing::kPreviewUIAddr, "0xb33fbeef");
+  dict->SetInteger(printing::kPreviewUIID, 4);
   dict->SetInteger(printing::kPreviewRequestID, 12345);
   dict->SetBoolean(printing::kIsFirstRequest, true);
   dict->SetInteger(printing::kSettingMarginsType, printing::DEFAULT_MARGINS);
@@ -191,6 +199,56 @@ TEST_F(PrintWebViewHelperTest, BlockScriptInitiatedPrinting) {
   // Unblock script initiated printing and verify printing works.
   PrintWebViewHelper::Get(view_)->ResetScriptedPrintCount();
   chrome_render_thread_->printer()->ResetPrinter();
+  LoadHTML(kPrintWithJSHTML);
+  VerifyPageCount(1);
+  VerifyPagesPrinted(true);
+}
+
+// Tests that the renderer always allows window.print() calls if they are user
+// initiated.
+TEST_F(PrintWebViewHelperTest, AllowUserOriginatedPrinting) {
+  // Pretend user will cancel printing.
+  chrome_render_thread_->set_print_dialog_user_response(false);
+  // Try to print with window.print() a few times.
+  LoadHTML(kPrintWithJSHTML);
+  LoadHTML(kPrintWithJSHTML);
+  LoadHTML(kPrintWithJSHTML);
+  VerifyPagesPrinted(false);
+
+  // Pretend user will print. (but printing is blocked.)
+  chrome_render_thread_->set_print_dialog_user_response(true);
+  LoadHTML(kPrintWithJSHTML);
+  VerifyPagesPrinted(false);
+
+  // Try again as if user initiated, without resetting the print count.
+  chrome_render_thread_->printer()->ResetPrinter();
+  LoadHTML(kPrintOnUserAction);
+  gfx::Size new_size(200,100);
+  Resize(new_size, gfx::Rect(), false);
+
+  gfx::Rect bounds = GetElementBounds("print");
+  EXPECT_FALSE(bounds.IsEmpty());
+  WebKit::WebMouseEvent mouse_event;
+  mouse_event.type = WebKit::WebInputEvent::MouseDown;
+  mouse_event.button = WebKit::WebMouseEvent::ButtonLeft;
+  mouse_event.x = bounds.CenterPoint().x();
+  mouse_event.y = bounds.CenterPoint().y();
+  mouse_event.clickCount = 1;
+  SendWebMouseEvent(mouse_event);
+  mouse_event.type = WebKit::WebInputEvent::MouseUp;
+  SendWebMouseEvent(mouse_event);
+
+  VerifyPageCount(1);
+  VerifyPagesPrinted(true);
+}
+
+TEST_F(PrintWebViewHelperTest, BlockScriptInitiatedPrintingFromPopup) {
+  PrintWebViewHelper* print_web_view_helper = PrintWebViewHelper::Get(view_);
+  print_web_view_helper->SetScriptedPrintBlocked(true);
+  LoadHTML(kPrintWithJSHTML);
+  VerifyPagesPrinted(false);
+
+  print_web_view_helper->SetScriptedPrintBlocked(false);
   LoadHTML(kPrintWithJSHTML);
   VerifyPageCount(1);
   VerifyPagesPrinted(true);
@@ -431,7 +489,7 @@ class PrintWebViewHelperPreviewTest : public PrintWebViewHelperTestBase {
       EXPECT_EQ(margin_right, param.a.margin_right);
       EXPECT_EQ(margin_left, param.a.margin_left);
       EXPECT_EQ(margin_bottom, param.a.margin_bottom);
-      EXPECT_EQ(page_has_print_css, param.b);
+      EXPECT_EQ(page_has_print_css, param.c);
     }
   }
 
@@ -601,7 +659,7 @@ TEST_F(PrintWebViewHelperPreviewTest, PrintPreviewShrinkToFitPage) {
   OnPrintPreview(dict);
 
   EXPECT_EQ(0, chrome_render_thread_->print_preview_pages_remaining());
-  VerifyDefaultPageLayout(576, 652, 69, 71, 18, 18, true);
+  VerifyDefaultPageLayout(612, 693, 49, 50, 0, 0, true);
   VerifyPrintPreviewCancelled(false);
   VerifyPrintPreviewFailed(false);
 }
@@ -759,6 +817,46 @@ TEST_F(PrintWebViewHelperPreviewTest,
   VerifyPrintPreviewGenerated(false);
 }
 
+// Tests that when the selected printer has invalid page settings, print preview
+// receives error message.
+TEST_F(PrintWebViewHelperPreviewTest,
+       OnPrintPreviewUsingInvalidPageSize) {
+  LoadHTML(kPrintPreviewHTML);
+
+  chrome_render_thread_->printer()->UseInvalidPageSize();
+
+  DictionaryValue dict;
+  CreatePrintSettingsDictionary(&dict);
+  OnPrintPreview(dict);
+
+  VerifyPrintPreviewInvalidPrinterSettings(true);
+  EXPECT_EQ(0, chrome_render_thread_->print_preview_pages_remaining());
+
+  // It should receive the invalid printer settings message only.
+  VerifyPrintPreviewFailed(false);
+  VerifyPrintPreviewGenerated(false);
+}
+
+// Tests that when the selected printer has invalid content settings, print
+// preview receives error message.
+TEST_F(PrintWebViewHelperPreviewTest,
+       OnPrintPreviewUsingInvalidContentSize) {
+  LoadHTML(kPrintPreviewHTML);
+
+  chrome_render_thread_->printer()->UseInvalidContentSize();
+
+  DictionaryValue dict;
+  CreatePrintSettingsDictionary(&dict);
+  OnPrintPreview(dict);
+
+  VerifyPrintPreviewInvalidPrinterSettings(true);
+  EXPECT_EQ(0, chrome_render_thread_->print_preview_pages_remaining());
+
+  // It should receive the invalid printer settings message only.
+  VerifyPrintPreviewFailed(false);
+  VerifyPrintPreviewGenerated(false);
+}
+
 TEST_F(PrintWebViewHelperPreviewTest,
        OnPrintForPrintPreviewUsingInvalidPrinterSettings) {
   LoadHTML(kPrintPreviewHTML);
@@ -776,3 +874,42 @@ TEST_F(PrintWebViewHelperPreviewTest,
 }
 
 #endif  // !defined(OS_CHROMEOS)
+
+class PrintWebViewHelperKioskTest : public PrintWebViewHelperTestBase {
+ public:
+  PrintWebViewHelperKioskTest() {}
+  virtual ~PrintWebViewHelperKioskTest() {}
+
+  virtual void SetUp() OVERRIDE {
+    // Append the throttling disable switch before creating the
+    // PrintWebViewHelper.
+    CommandLine::ForCurrentProcess()->AppendSwitch(
+        switches::kDisableScriptedPrintThrottling);
+
+    ChromeRenderViewTest::SetUp();
+  }
+
+ protected:
+  DISALLOW_COPY_AND_ASSIGN(PrintWebViewHelperKioskTest);
+};
+
+// Tests that the switch overrides the throttling that blocks window.print()
+// calls if they occur too frequently. Compare with
+// PrintWebViewHelperTest.BlockScriptInitiatedPrinting above.
+TEST_F(PrintWebViewHelperKioskTest, DontBlockScriptInitiatedPrinting) {
+  // Pretend user will cancel printing.
+  chrome_render_thread_->set_print_dialog_user_response(false);
+  // Try to print with window.print() a few times.
+  LoadHTML(kPrintWithJSHTML);
+  chrome_render_thread_->printer()->ResetPrinter();
+  LoadHTML(kPrintWithJSHTML);
+  chrome_render_thread_->printer()->ResetPrinter();
+  LoadHTML(kPrintWithJSHTML);
+  chrome_render_thread_->printer()->ResetPrinter();
+  VerifyPagesPrinted(false);
+
+  // Pretend user will print, should not be throttled.
+  chrome_render_thread_->set_print_dialog_user_response(true);
+  LoadHTML(kPrintWithJSHTML);
+  VerifyPagesPrinted(true);
+}

@@ -24,13 +24,8 @@ WebPageScreen::~WebPageScreen() {}
 ///////////////////////////////////////////////////////////////////////////////
 // WebPageScreen, content::WebContentsDelegate implementation:
 
-bool WebPageScreen::ShouldAddNavigationToHistory(
-    const history::HistoryAddPageArgs& add_page_args,
-    content::NavigationType navigation_type) {
-  return false;
-}
-
-bool WebPageScreen::HandleContextMenu(const ContextMenuParams& params) {
+bool WebPageScreen::HandleContextMenu(
+    const content::ContextMenuParams& params) {
   // Just return true because we don't want to show context menue.
   return true;
 }

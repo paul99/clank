@@ -16,15 +16,21 @@
 #include "googleurl/src/gurl.h"
 #include "net/base/mime_util.h"
 #include "webkit/glue/webkit_glue.h"
-#include "webkit/plugins/npapi/plugin_constants_win.h"
 #include "webkit/plugins/npapi/plugin_lib.h"
 #include "webkit/plugins/plugin_switches.h"
 
+#if defined(OS_WIN)
+#include "webkit/plugins/npapi/plugin_constants_win.h"
+#endif
+
 namespace {
+
+using webkit::npapi::PluginList;
+typedef PluginList::CustomLazyInstanceTraits CustomLazyInstanceTraits;
 
 const char kApplicationOctetStream[] = "application/octet-stream";
 
-base::LazyInstance<webkit::npapi::PluginList> g_singleton =
+base::LazyInstance<PluginList, CustomLazyInstanceTraits> g_singleton =
     LAZY_INSTANCE_INITIALIZER;
 
 bool AllowMimeTypeMismatch(const std::string& orig_mime_type,
@@ -48,187 +54,20 @@ bool AllowMimeTypeMismatch(const std::string& orig_mime_type,
   return allow;
 }
 
-}
+}  // namespace
 
 namespace webkit {
 namespace npapi {
 
-// Some version ranges can be shared across operating systems. This should be
-// done where possible to avoid duplication.
-// TODO(bauerb): The |requires_authorization| flag should be part of
-// PluginGroupDefinition, not VersionRangeDefinition.
-static const VersionRangeDefinition kAllVersionsInfobarVersionRange[] = {
-    { "", "", "", true }
+struct PluginList::CustomLazyInstanceTraits
+    : base::DefaultLazyInstanceTraits<PluginList> {
+  static PluginList* New(void* instance) {
+    PluginList* plugin_list =
+        base::DefaultLazyInstanceTraits<PluginList>::New(instance);
+    plugin_list->PlatformInit();
+    return plugin_list;
+  }
 };
-
-static const VersionRangeDefinition kAllVersionsNoInfobarVersionRange[] = {
-    { "", "", "", false }
-};
-
-// This is up to date with
-// http://www.adobe.com/support/security/bulletins/apsb11-26.html
-static const VersionRangeDefinition kFlashVersionRange[] = {
-    { "", "", "10.3.183", false }
-};
-// This is up to date with
-// http://www.adobe.com/support/security/bulletins/apsb11-19.html
-static const VersionRangeDefinition kShockwaveVersionRange[] = {
-    { "",  "", "11.6.1.629", true }
-};
-static const VersionRangeDefinition kSilverlightVersionRange[] = {
-    { "0", "4", "3.0.50611.0", false },
-    { "4", "5", "", false }
-};
-
-// Similarly, try and share the group definition for plug-ins that are
-// very consistent across OS'es.
-#define kFlashDefinition { \
-    "adobe-flash-player", "Flash", "Shockwave Flash", kFlashVersionRange,\
-    arraysize(kFlashVersionRange), "http://get.adobe.com/flashplayer/" }
-
-#define kShockwaveDefinition { \
-    "shockwave", PluginGroup::kShockwaveGroupName, "Shockwave for Director", \
-    kShockwaveVersionRange, arraysize(kShockwaveVersionRange), \
-    "http://www.adobe.com/shockwave/download/" }
-
-#define kSilverlightDefinition { \
-    "silverlight", PluginGroup::kSilverlightGroupName, "Silverlight", \
-    kSilverlightVersionRange, arraysize(kSilverlightVersionRange), \
-    "http://www.microsoft.com/getsilverlight/" }
-
-#define kChromePdfDefinition { \
-    "google-chrome-pdf", "Chrome PDF Viewer", "Chrome PDF Viewer", \
-    kAllVersionsNoInfobarVersionRange, \
-    arraysize(kAllVersionsNoInfobarVersionRange), "" }
-
-#define kGoogleTalkDefinition { \
-    "google-talk", "Google Talk NPAPI Plugin", "Google Talk NPAPI Plugin", \
-    kAllVersionsNoInfobarVersionRange, \
-    arraysize(kAllVersionsNoInfobarVersionRange), ""}
-
-#if defined(OS_MACOSX)
-// Plugin Groups for Mac.
-// Plugins are listed here as soon as vulnerabilities and solutions
-// (new versions) are published.
-static const VersionRangeDefinition kQuicktimeVersionRange[] = {
-    { "", "", "7.6.6", true }
-};
-static const VersionRangeDefinition kJavaVersionRange[] = {
-    { "0", "13.0", "12.8.0", true },  // Leopard
-    { "13.0", "14.0", "13.5.0", true },  // Snow Leopard
-    { "14.0", "", "14.0.3", true }  // Lion
-};
-static const VersionRangeDefinition kFlip4MacVersionRange[] = {
-    { "", "", "2.2.1", true }
-};
-// Note: The Adobe Reader browser plug-in is not supported in Chrome.
-// Note: The Real Player plugin for mac doesn't expose a version at all.
-static const PluginGroupDefinition kGroupDefinitions[] = {
-  kFlashDefinition,
-  { "apple-quicktime", PluginGroup::kQuickTimeGroupName, "QuickTime Plug-in",
-    kQuicktimeVersionRange, arraysize(kQuicktimeVersionRange),
-    "http://www.apple.com/quicktime/download/" },
-  { "java-runtime-environment", PluginGroup::kJavaGroupName, "Java",
-    kJavaVersionRange, arraysize(kJavaVersionRange),
-    "http://support.apple.com/kb/HT1338" },
-  kSilverlightDefinition,
-  { "flip4mac", "Flip4Mac", "Flip4Mac", kFlip4MacVersionRange,
-    arraysize(kFlip4MacVersionRange),
-    "http://www.telestream.net/flip4mac-wmv/overview.htm" },
-  kShockwaveDefinition,
-  kChromePdfDefinition,
-  kGoogleTalkDefinition,
-};
-
-#elif defined(OS_WIN)
-// TODO(panayiotis): We should group "RealJukebox NS Plugin" with the rest of
-// the RealPlayer files.
-static const VersionRangeDefinition kQuicktimeVersionRange[] = {
-    { "", "", "7.6.9", true }
-};
-static const VersionRangeDefinition kJavaVersionRange[] = {
-    { "0", "7", "6.0.310", true },  // "310" is not a typo.
-    { "7", "", "10.3", true }  // JDK7u3 identifies itself as 10.3
-};
-// This is up to date with
-// http://www.adobe.com/support/security/bulletins/apsb11-24.html
-static const VersionRangeDefinition kAdobeReaderVersionRange[] = {
-    { "10", "11", "10.1.1", false },
-    { "9", "10", "9.4.6", false },
-    { "0", "9", "8.3.1", false }
-};
-static const VersionRangeDefinition kDivXVersionRange[] = {
-    { "", "", "1.4.3.4", false }
-};
-static const VersionRangeDefinition kRealPlayerVersionRange[] = {
-    { "", "", "12.0.1.666", true }
-};
-static const PluginGroupDefinition kGroupDefinitions[] = {
-  kFlashDefinition,
-  { "apple-quicktime", PluginGroup::kQuickTimeGroupName, "QuickTime Plug-in",
-    kQuicktimeVersionRange, arraysize(kQuicktimeVersionRange),
-    "http://www.apple.com/quicktime/download/" },
-  { "java-runtime-environment", PluginGroup::kJavaGroupName, "Java",
-    kJavaVersionRange, arraysize(kJavaVersionRange),
-    "http://www.java.com/download" },
-  { "adobe-reader", PluginGroup::kAdobeReaderGroupName, "Adobe Acrobat",
-    kAdobeReaderVersionRange, arraysize(kAdobeReaderVersionRange),
-    "http://get.adobe.com/reader/" },
-  kSilverlightDefinition,
-  kShockwaveDefinition,
-  { "divx-player", "DivX Player", "DivX Web Player", kDivXVersionRange,
-    arraysize(kDivXVersionRange),
-    "http://download.divx.com/divx/autoupdate/player/"
-    "DivXWebPlayerInstaller.exe" },
-  { "realplayer", PluginGroup::kRealPlayerGroupName, "RealPlayer",
-    kRealPlayerVersionRange, arraysize(kRealPlayerVersionRange),
-    "http://www.real.com/realplayer/download" },
-  // These are here for grouping, no vulnerabilities known.
-  { "windows-media-player", PluginGroup::kWindowsMediaPlayerGroupName,
-    "Windows Media Player", kAllVersionsInfobarVersionRange,
-    arraysize(kAllVersionsInfobarVersionRange), "" },
-  { "microsoft-office", "Microsoft Office", "Microsoft Office",
-    NULL, 0, "" },
-  { "nvidia-3d", "NVIDIA 3D", "NVIDIA 3D", kAllVersionsInfobarVersionRange,
-    arraysize(kAllVersionsInfobarVersionRange), "" },
-  kChromePdfDefinition,
-  kGoogleTalkDefinition,
-};
-
-#elif defined(OS_CHROMEOS)
-// ChromeOS generally has (autoupdated) system plug-ins and no user-installable
-// plug-ins, so we just use these definitions for grouping.
-static const PluginGroupDefinition kGroupDefinitions[] = {
-  kFlashDefinition,
-  kChromePdfDefinition,
-};
-
-#else  // Most importantly, covers desktop Linux.
-static const VersionRangeDefinition kJavaVersionRange[] = {
-    { "0", "1.7", "1.6.0.29", true },
-    { "1.7", "", "1.7.0.1", true }
-};
-
-static const VersionRangeDefinition kRedhatIcedTeaVersionRange[] = {
-    { "0", "1.9", "1.8.10", true },
-    { "1.9", "1.10", "1.9.10", true },
-    { "1.10", "", "1.10.4", true }
-};
-
-static const PluginGroupDefinition kGroupDefinitions[] = {
-  // Flash on Linux is significant because there isn't yet a built-in Flash
-  // plug-in on the Linux 64-bit version of Chrome.
-  kFlashDefinition,
-  { "java-runtime-environment", PluginGroup::kJavaGroupName, "Java",
-    kJavaVersionRange, arraysize(kJavaVersionRange),
-    "http://www.java.com/en/download/manual.jsp" },
-  { "redhat-icetea-java", "IcedTea", "IcedTea",
-    kRedhatIcedTeaVersionRange, arraysize(kRedhatIcedTeaVersionRange),
-    "http://www.linuxsecurity.com/content/section/3/170/" },
-  kChromePdfDefinition,
-  kGoogleTalkDefinition,
-};
-#endif
 
 // static
 PluginList* PluginList::Singleton() {
@@ -243,7 +82,7 @@ bool PluginList::DebugPluginLoading() {
 
 void PluginList::RefreshPlugins() {
   base::AutoLock lock(lock_);
-  plugins_need_refresh_ = true;
+  loading_state_ = LOADING_STATE_NEEDS_REFRESH;
 }
 
 void PluginList::AddExtraPluginPath(const FilePath& plugin_path) {
@@ -382,39 +221,20 @@ bool PluginList::ParseMimeTypes(
 }
 
 PluginList::PluginList()
-    : plugins_need_refresh_(true) {
-  PlatformInit();
-  AddHardcodedPluginGroups(kGroupDefinitions,
-                           ARRAYSIZE_UNSAFE(kGroupDefinitions));
+    :
+#if defined(OS_WIN)
+      dont_load_new_wmp_(false),
+#endif
+      loading_state_(LOADING_STATE_NEEDS_REFRESH) {
 }
 
-PluginList::PluginList(const PluginGroupDefinition* definitions,
-                       size_t num_definitions)
-    : plugins_need_refresh_(true) {
-  // Don't do platform-dependend initialization in unit tests.
-  AddHardcodedPluginGroups(definitions, num_definitions);
-}
-
-PluginGroup* PluginList::CreatePluginGroup(
-      const webkit::WebPluginInfo& web_plugin_info) const {
-  for (size_t i = 0; i < hardcoded_plugin_groups_.size(); ++i) {
-    const PluginGroup* group = hardcoded_plugin_groups_[i];
-    if (group->Match(web_plugin_info))
-      return new PluginGroup(*group);
-  }
-  return PluginGroup::FromWebPluginInfo(web_plugin_info);
-}
-
-void PluginList::LoadPluginsInternal(ScopedVector<PluginGroup>* plugin_groups) {
+void PluginList::LoadPluginsIntoPluginListInternal(
+    std::vector<webkit::WebPluginInfo>* plugins) {
   base::Closure will_load_callback;
   {
     base::AutoLock lock(lock_);
-    // Clear the refresh bit now, because it might get set again before we
-    // reach the end of the method.
-    plugins_need_refresh_ = false;
     will_load_callback = will_load_plugins_callback_;
   }
-
   if (!will_load_callback.is_null())
     will_load_callback.Run();
 
@@ -424,54 +244,62 @@ void PluginList::LoadPluginsInternal(ScopedVector<PluginGroup>* plugin_groups) {
   for (std::vector<FilePath>::const_iterator it = plugin_paths.begin();
        it != plugin_paths.end();
        ++it) {
-    LoadPlugin(*it, plugin_groups);
+    WebPluginInfo plugin_info;
+    LoadPluginIntoPluginList(*it, plugins, &plugin_info);
   }
 }
 
 void PluginList::LoadPlugins() {
   {
     base::AutoLock lock(lock_);
-    if (!plugins_need_refresh_)
+    if (loading_state_ == LOADING_STATE_UP_TO_DATE)
       return;
+
+    loading_state_ = LOADING_STATE_REFRESHING;
   }
 
-  ScopedVector<PluginGroup> new_plugin_groups;
+  std::vector<webkit::WebPluginInfo> new_plugins;
   // Do the actual loading of the plugins.
-  LoadPluginsInternal(&new_plugin_groups);
+  LoadPluginsIntoPluginListInternal(&new_plugins);
 
   base::AutoLock lock(lock_);
-  plugin_groups_.swap(new_plugin_groups);
+  plugins_list_.swap(new_plugins);
+
+  // If we haven't been invalidated in the mean time, mark the plug-in list as
+  // up-to-date.
+  if (loading_state_ != LOADING_STATE_NEEDS_REFRESH)
+    loading_state_ = LOADING_STATE_UP_TO_DATE;
 }
 
-void PluginList::LoadPlugin(const FilePath& path,
-                            ScopedVector<PluginGroup>* plugin_groups) {
+bool PluginList::LoadPluginIntoPluginList(
+    const FilePath& path,
+    std::vector<webkit::WebPluginInfo>* plugins,
+    WebPluginInfo* plugin_info) {
   LOG_IF(ERROR, PluginList::DebugPluginLoading())
       << "Loading plugin " << path.value();
-  WebPluginInfo plugin_info;
   const PluginEntryPoints* entry_points;
 
-  if (!ReadPluginInfo(path, &plugin_info, &entry_points))
-    return;
+  if (!ReadPluginInfo(path, plugin_info, &entry_points))
+    return false;
 
-  if (!ShouldLoadPlugin(plugin_info, plugin_groups))
-    return;
+  if (!ShouldLoadPluginUsingPluginList(*plugin_info, plugins))
+    return false;
 
 #if defined(OS_WIN) && !defined(NDEBUG)
   if (path.BaseName().value() != L"npspy.dll")  // Make an exception for NPSPY
 #endif
   {
-    for (size_t i = 0; i < plugin_info.mime_types.size(); ++i) {
+    for (size_t i = 0; i < plugin_info->mime_types.size(); ++i) {
       // TODO: don't load global handlers for now.
       // WebKit hands to the Plugin before it tries
       // to handle mimeTypes on its own.
-      const std::string &mime_type = plugin_info.mime_types[i].mime_type;
+      const std::string &mime_type = plugin_info->mime_types[i].mime_type;
       if (mime_type == "*")
-        return;
+        return false;
     }
   }
-
-  base::AutoLock lock(lock_);
-  AddToPluginGroups(plugin_info, plugin_groups);
+  plugins->push_back(*plugin_info);
+  return true;
 }
 
 void PluginList::GetPluginPathsToLoad(std::vector<FilePath>* plugin_paths) {
@@ -511,14 +339,11 @@ void PluginList::GetPluginPathsToLoad(std::vector<FilePath>* plugin_paths) {
 void PluginList::SetPlugins(const std::vector<webkit::WebPluginInfo>& plugins) {
   base::AutoLock lock(lock_);
 
-  plugins_need_refresh_ = false;
+  DCHECK_NE(LOADING_STATE_REFRESHING, loading_state_);
+  loading_state_ = LOADING_STATE_UP_TO_DATE;
 
-  plugin_groups_.reset();
-  for (std::vector<webkit::WebPluginInfo>::const_iterator it = plugins.begin();
-       it != plugins.end();
-       ++it) {
-    AddToPluginGroups(*it, &plugin_groups_);
-  }
+  plugins_list_.clear();
+  plugins_list_.insert(plugins_list_.end(), plugins.begin(), plugins.end());
 }
 
 void PluginList::set_will_load_plugins_callback(const base::Closure& callback) {
@@ -529,25 +354,15 @@ void PluginList::set_will_load_plugins_callback(const base::Closure& callback) {
 void PluginList::GetPlugins(std::vector<WebPluginInfo>* plugins) {
   LoadPlugins();
   base::AutoLock lock(lock_);
-  for (size_t i = 0; i < plugin_groups_.size(); ++i) {
-    const std::vector<webkit::WebPluginInfo>& gr_plugins =
-        plugin_groups_[i]->web_plugin_infos();
-    plugins->insert(plugins->end(), gr_plugins.begin(), gr_plugins.end());
-  }
+  plugins->insert(plugins->end(), plugins_list_.begin(), plugins_list_.end());
 }
 
-bool PluginList::GetPluginsIfNoRefreshNeeded(
+bool PluginList::GetPluginsNoRefresh(
     std::vector<webkit::WebPluginInfo>* plugins) {
   base::AutoLock lock(lock_);
-  if (plugins_need_refresh_)
-    return false;
+  plugins->insert(plugins->end(), plugins_list_.begin(), plugins_list_.end());
 
-  for (size_t i = 0; i < plugin_groups_.size(); ++i) {
-    const std::vector<webkit::WebPluginInfo>& gr_plugins =
-        plugin_groups_[i]->web_plugin_infos();
-    plugins->insert(plugins->end(), gr_plugins.begin(), gr_plugins.end());
-  }
-  return true;
+  return loading_state_ == LOADING_STATE_UP_TO_DATE;
 }
 
 void PluginList::GetPluginInfoArray(
@@ -564,7 +379,7 @@ void PluginList::GetPluginInfoArray(
     LoadPlugins();
   base::AutoLock lock(lock_);
   if (use_stale)
-    *use_stale = plugins_need_refresh_;
+    *use_stale = (loading_state_ != LOADING_STATE_UP_TO_DATE);
   info->clear();
   if (actual_mime_types)
     actual_mime_types->clear();
@@ -572,17 +387,13 @@ void PluginList::GetPluginInfoArray(
   std::set<FilePath> visited_plugins;
 
   // Add in plugins by mime type.
-  for (size_t i = 0; i < plugin_groups_.size(); ++i) {
-    const std::vector<webkit::WebPluginInfo>& plugins =
-        plugin_groups_[i]->web_plugin_infos();
-    for (size_t i = 0; i < plugins.size(); ++i) {
-      if (SupportsType(plugins[i], mime_type, allow_wildcard)) {
-        FilePath path = plugins[i].path;
-        if (visited_plugins.insert(path).second) {
-          info->push_back(plugins[i]);
-          if (actual_mime_types)
-            actual_mime_types->push_back(mime_type);
-        }
+  for (size_t i = 0; i < plugins_list_.size(); ++i) {
+    if (SupportsType(plugins_list_[i], mime_type, allow_wildcard)) {
+      FilePath path = plugins_list_[i].path;
+      if (visited_plugins.insert(path).second) {
+        info->push_back(plugins_list_[i]);
+        if (actual_mime_types)
+          actual_mime_types->push_back(mime_type);
       }
     }
   }
@@ -593,102 +404,18 @@ void PluginList::GetPluginInfoArray(
   if (last_dot != std::string::npos) {
     std::string extension = StringToLowerASCII(std::string(path, last_dot+1));
     std::string actual_mime_type;
-    for (size_t i = 0; i < plugin_groups_.size(); ++i) {
-      const std::vector<webkit::WebPluginInfo>& plugins =
-          plugin_groups_[i]->web_plugin_infos();
-      for (size_t i = 0; i < plugins.size(); ++i) {
-        if (SupportsExtension(plugins[i], extension, &actual_mime_type)) {
-          FilePath path = plugins[i].path;
-          if (visited_plugins.insert(path).second &&
-              AllowMimeTypeMismatch(mime_type, actual_mime_type)) {
-            info->push_back(plugins[i]);
-            if (actual_mime_types)
-              actual_mime_types->push_back(actual_mime_type);
-          }
+    for (size_t i = 0; i < plugins_list_.size(); ++i) {
+      if (SupportsExtension(plugins_list_[i], extension, &actual_mime_type)) {
+        FilePath path = plugins_list_[i].path;
+        if (visited_plugins.insert(path).second &&
+            AllowMimeTypeMismatch(mime_type, actual_mime_type)) {
+          info->push_back(plugins_list_[i]);
+          if (actual_mime_types)
+            actual_mime_types->push_back(actual_mime_type);
         }
       }
     }
   }
-}
-
-void PluginList::GetPluginGroups(
-    bool load_if_necessary,
-    std::vector<PluginGroup>* plugin_groups) {
-  if (load_if_necessary)
-    LoadPlugins();
-  base::AutoLock lock(lock_);
-  plugin_groups->clear();
-  for (size_t i = 0; i < plugin_groups_.size(); ++i) {
-    // In some unit tests we can get confronted with empty groups but in real
-    // world code this if should never be false here.
-    if (!plugin_groups_[i]->IsEmpty())
-      plugin_groups->push_back(*plugin_groups_[i]);
-  }
-}
-
-PluginGroup* PluginList::GetPluginGroup(
-    const webkit::WebPluginInfo& web_plugin_info) {
-  base::AutoLock lock(lock_);
-  for (size_t i = 0; i < plugin_groups_->size(); ++i) {
-    const std::vector<webkit::WebPluginInfo>& plugins =
-        plugin_groups_[i]->web_plugin_infos();
-    for (size_t j = 0; j < plugins.size(); ++j) {
-      if (plugins[j].path == web_plugin_info.path) {
-        return new PluginGroup(*plugin_groups_[i]);
-      }
-    }
-  }
-  PluginGroup* group = CreatePluginGroup(web_plugin_info);
-  group->AddPlugin(web_plugin_info);
-  return group;
-}
-
-string16 PluginList::GetPluginGroupName(const std::string& identifier) {
-  for (size_t i = 0; i < plugin_groups_.size(); ++i) {
-    if (plugin_groups_[i]->identifier() == identifier)
-      return plugin_groups_[i]->GetGroupName();
-  }
-  return string16();
-}
-
-void PluginList::AddHardcodedPluginGroups(
-    const PluginGroupDefinition* group_definitions,
-    size_t num_group_definitions) {
-  for (size_t i = 0; i < num_group_definitions; ++i) {
-    hardcoded_plugin_groups_->push_back(
-        PluginGroup::FromPluginGroupDefinition(group_definitions[i]));
-  }
-}
-
-PluginGroup* PluginList::AddToPluginGroups(
-    const webkit::WebPluginInfo& web_plugin_info,
-    ScopedVector<PluginGroup>* plugin_groups) {
-  PluginGroup* group = NULL;
-  for (size_t i = 0; i < plugin_groups->size(); ++i) {
-    if ((*plugin_groups)[i]->Match(web_plugin_info)) {
-      group = (*plugin_groups)[i];
-      break;
-    }
-  }
-  if (!group) {
-    group = CreatePluginGroup(web_plugin_info);
-    std::string identifier = group->identifier();
-    // If the identifier is not unique, use the full path. This means that we
-    // probably won't be able to search for this group by identifier, but at
-    // least it's going to be in the set of plugin groups, and if there
-    // is already a plug-in with the same filename, it's probably going to
-    // handle the same MIME types (and it has a higher priority), so this one
-    // is not going to run anyway.
-    for (size_t i = 0; i < plugin_groups->size(); ++i) {
-      if ((*plugin_groups)[i]->identifier() == identifier) {
-        group->set_identifier(PluginGroup::GetLongIdentifier(web_plugin_info));
-        break;
-      }
-    }
-    plugin_groups->push_back(group);
-  }
-  group->AddPlugin(web_plugin_info);
-  return group;
 }
 
 bool PluginList::SupportsType(const webkit::WebPluginInfo& plugin,

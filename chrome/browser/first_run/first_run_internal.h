@@ -4,7 +4,6 @@
 
 #ifndef CHROME_BROWSER_FIRST_RUN_FIRST_RUN_INTERNAL_H_
 #define CHROME_BROWSER_FIRST_RUN_FIRST_RUN_INTERNAL_H_
-#pragma once
 
 #include <vector>
 
@@ -39,9 +38,6 @@ enum FirstRunState {
 // This variable should only be accessed through IsChromeFirstRun().
 extern FirstRunState first_run_;
 
-// The kSentinelFile file absence will tell us it is a first run.
-extern const char* const kSentinelFile;
-
 // Loads master preferences from the master preference file into the installer
 // master preferences. Passes the master preference file path out in
 // master_prefs_path. Returns the pointer to installer::MasterPreferences object
@@ -57,6 +53,20 @@ bool CopyPrefFile(const FilePath& user_data_dir,
 void SetupMasterPrefsFromInstallPrefs(
     MasterPrefs* out_prefs,
     installer::MasterPreferences* install_prefs);
+
+void SetShowWelcomePagePrefIfNeeded(
+    installer::MasterPreferences* install_prefs);
+
+void SetDefaultBrowser(installer::MasterPreferences* install_prefs);
+
+// Returns true if first run ui should be skipped, which is the case that
+// skip_first_run_ui setting is set to true. In the case the setting is
+// not found or specified, it returns false by default.
+bool SkipFirstRunUI(installer::MasterPreferences* install_prefs);
+
+// Sets ping_delay.
+void SetRLZPref(first_run::MasterPrefs* out_prefs,
+                installer::MasterPreferences* install_prefs);
 
 // -- Platform-specific functions --
 
@@ -79,15 +89,10 @@ bool ImportSettings(Profile* profile,
                     scoped_refptr<ImporterList> importer_list,
                     int items_to_import);
 
-#if defined(OS_WIN)
-// TODO(jennyz): This fuction will be moved to first_run_win.cc anonymous
-// namespace once we refactor its calling code in first_run.cc later.
-bool ImportSettingsWin(Profile* profile,
-                       int importer_type,
-                       int items_to_import,
-                       const FilePath& import_bookmarks_path,
-                       bool skip_first_run_ui);
-#endif  // OS_WIN
+// Sets import preferences and launch the import process.
+void SetImportPreferencesAndLaunchImport(
+    MasterPrefs* out_prefs,
+    installer::MasterPreferences* install_prefs);
 
 #if !defined(USE_AURA)
 // AutoImport code which is common to all platforms.
@@ -106,6 +111,11 @@ int ImportBookmarkFromFileIfNeeded(Profile* profile,
 #if !defined(OS_WIN)
 bool ImportBookmarks(const FilePath& import_bookmarks_path);
 #endif
+
+// Shows the EULA dialog if required. Returns true if the EULA is accepted,
+// returns false if the EULA has not been accepted, in which case the browser
+// should exit.
+bool ShowPostInstallEULAIfNeeded(installer::MasterPreferences* install_prefs);
 
 }  // namespace internal
 }  // namespace first_run

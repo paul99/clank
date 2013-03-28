@@ -1,11 +1,12 @@
 <div id="languagePinyinPage" class="page" hidden>
+  <div class="close-button"></div>
   <h1 i18n-content="languagePinyinPage"></h1>
-  <section>
+  <div class="content-area">
     <table class="option-control-table">
       <tr>
         <td class="option-name" colspan="2">
           <div class="checkbox">
-            <labl>
+            <label>
               <input id="pinyin-correct-pinyin"
                   pref="settings.language.pinyin_correct_pinyin"
                   type="checkbox">
@@ -144,5 +145,10 @@
         </td>
       </tr>
     </table>
-  </section>
+  </div>
+  <div class="action-area">
+    <div class="button-strip">
+      <button id="pinyin-confirm" i18n-content="done"></button>
+    </div>
+  </div>
 </div>

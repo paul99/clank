@@ -1,14 +1,16 @@
-// Copyright (c) 2010 The Chromium Authors. All rights reserved.
+// Copyright (c) 2012 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
 #include "base/logging.h"
 #include "chrome/browser/shell_integration.h"
 
+// TODO: crbug/115375 to track implementation for following methods.
 // static
-bool ShellIntegration::CanSetAsDefaultBrowser() {
+ShellIntegration::DefaultWebClientSetPermission
+    ShellIntegration::CanSetAsDefaultBrowser() {
   NOTIMPLEMENTED();
-  return false;
+  return SET_DEFAULT_NOT_ALLOWED;
 }
 
 // static
@@ -24,19 +26,20 @@ bool ShellIntegration::SetAsDefaultProtocolClient(const std::string& protocol) {
 }
 
 // static
-ShellIntegration::DefaultWebClientState ShellIntegration::IsDefaultBrowser() {
+ShellIntegration::DefaultWebClientState ShellIntegration::GetDefaultBrowser() {
   NOTIMPLEMENTED();
-  return UNKNOWN_DEFAULT_WEB_CLIENT;
+  return UNKNOWN_DEFAULT;
 }
 
-//static
+// static
 ShellIntegration::DefaultWebClientState
 ShellIntegration::IsDefaultProtocolClient(const std::string& protocol) {
   NOTIMPLEMENTED();
-  return UNKNOWN_DEFAULT_WEB_CLIENT;
+  return UNKNOWN_DEFAULT;
 }
 
 // static
 bool ShellIntegration::IsFirefoxDefaultBrowser() {
   return false;
 }
+

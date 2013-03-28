@@ -7,25 +7,31 @@
 #include "base/bind.h"
 #include "base/command_line.h"
 #include "base/logging.h"
+#include "base/mac/mac_util.h"
 #include "base/message_loop.h"
 #include "base/sys_string_conversions.h"
 #include "chrome/app/chrome_command_ids.h"
-#include "chrome/browser/bookmarks/bookmark_utils.h"
 #include "chrome/browser/download/download_shelf.h"
+#include "chrome/browser/extensions/tab_helper.h"
+#include "chrome/browser/password_manager/password_manager.h"
 #include "chrome/browser/prefs/pref_service.h"
 #include "chrome/browser/profiles/profile.h"
+#include "chrome/browser/ui/bookmarks/bookmark_utils.h"
 #include "chrome/browser/ui/browser.h"
+#include "chrome/browser/ui/browser_command_controller.h"
+#include "chrome/browser/ui/browser_commands.h"
 #include "chrome/browser/ui/browser_list.h"
+#include "chrome/browser/ui/browser_tabstrip.h"
+#include "chrome/browser/ui/browser_window_state.h"
 #import "chrome/browser/ui/cocoa/browser/avatar_button_controller.h"
 #import "chrome/browser/ui/cocoa/browser/avatar_menu_bubble_controller.h"
 #import "chrome/browser/ui/cocoa/browser/edit_search_engine_cocoa_controller.h"
+#import "chrome/browser/ui/cocoa/browser/password_generation_bubble_controller.h"
 #import "chrome/browser/ui/cocoa/browser_window_controller.h"
 #import "chrome/browser/ui/cocoa/browser_window_utils.h"
 #import "chrome/browser/ui/cocoa/chrome_event_processing_window.h"
-#import "chrome/browser/ui/cocoa/content_settings/collected_cookies_mac.h"
 #import "chrome/browser/ui/cocoa/download/download_shelf_controller.h"
 #include "chrome/browser/ui/cocoa/find_bar/find_bar_bridge.h"
-#import "chrome/browser/ui/cocoa/html_dialog_window_controller.h"
 #import "chrome/browser/ui/cocoa/info_bubble_view.h"
 #import "chrome/browser/ui/cocoa/location_bar/location_bar_view_mac.h"
 #import "chrome/browser/ui/cocoa/nsmenuitem_additions.h"
@@ -33,21 +39,26 @@
 #include "chrome/browser/ui/cocoa/status_bubble_mac.h"
 #include "chrome/browser/ui/cocoa/task_manager_mac.h"
 #import "chrome/browser/ui/cocoa/toolbar/toolbar_controller.h"
+#import "chrome/browser/ui/cocoa/web_dialog_window_controller.h"
+#import "chrome/browser/ui/cocoa/website_settings_bubble_controller.h"
 #include "chrome/browser/ui/page_info_bubble.h"
-#include "chrome/browser/ui/tab_contents/tab_contents_wrapper.h"
-#include "chrome/browser/ui/webui/chrome_web_ui.h"
-#include "chrome/browser/ui/webui/task_manager_dialog.h"
 #include "chrome/common/chrome_notification_types.h"
 #include "chrome/common/pref_names.h"
-#include "content/public/browser/notification_source.h"
 #include "content/public/browser/native_web_keyboard_event.h"
 #include "content/public/browser/notification_details.h"
+#include "content/public/browser/notification_source.h"
 #include "content/public/browser/web_contents.h"
+#include "content/public/common/password_form.h"
 #include "grit/chromium_strings.h"
 #include "grit/generated_resources.h"
 #include "ui/base/l10n/l10n_util_mac.h"
 #include "ui/gfx/rect.h"
 
+#if defined(ENABLE_ONE_CLICK_SIGNIN)
+#import "chrome/browser/ui/cocoa/one_click_signin_bubble_controller.h"
+#endif
+
+using content::NativeWebKeyboardEvent;
 using content::SSLStatus;
 using content::WebContents;
 
@@ -71,17 +82,36 @@ typedef NSInteger NSWindowAnimationBehavior;
 
 #endif  // MAC_OS_X_VERSION_10_7
 
+namespace {
+
+NSPoint GetPointForBubble(content::WebContents* web_contents,
+                          int x_offset,
+                          int y_offset) {
+  NSView* view = web_contents->GetNativeView();
+  NSRect bounds = [view bounds];
+  NSPoint point;
+  point.x = NSMinX(bounds) + x_offset;
+  // The view's origin is at the bottom but |rect|'s origin is at the top.
+  point.y = NSMaxY(bounds) - y_offset;
+  point = [view convertPoint:point toView:nil];
+  point = [[view window] convertBaseToScreen:point];
+  return point;
+}
+
+}  // namespace
+
 BrowserWindowCocoa::BrowserWindowCocoa(Browser* browser,
                                        BrowserWindowController* controller)
   : browser_(browser),
     controller_(controller),
     confirm_close_factory_(browser),
+    initial_show_state_(ui::SHOW_STATE_DEFAULT),
     attention_request_id_(0) {
 
-  pref_change_registrar_.Init(browser_->profile()->GetPrefs());
-  pref_change_registrar_.Add(prefs::kShowBookmarkBar, this);
-
-  initial_show_state_ = browser_->GetSavedWindowShowState();
+  gfx::Rect bounds;
+  chrome::GetSavedWindowBoundsAndShowState(browser_,
+                                           &bounds,
+                                           &initial_show_state_);
 }
 
 BrowserWindowCocoa::~BrowserWindowCocoa() {
@@ -92,8 +122,8 @@ void BrowserWindowCocoa::Show() {
   // browser at the time |Show()| is called. This is the natural behaviour under
   // Windows, but |-makeKeyAndOrderFront:| won't send |-windowDidBecomeMain:|
   // until we return to the runloop. Therefore any calls to
-  // |BrowserList::GetLastActive()| (for example, in bookmark_util), will return
-  // the previous browser instead if we don't explicitly set it here.
+  // |chrome::FindLastActiveWithHostDesktopType| will return the previous
+  // browser instead if we don't explicitly set it here.
   BrowserList::SetLastActive(browser_);
 
   bool is_session_restore = browser_->is_session_restore();
@@ -117,6 +147,8 @@ void BrowserWindowCocoa::Show() {
   if (initial_show_state_ == ui::SHOW_STATE_MINIMIZED) {
     [window() orderOut:controller_];
     [window() miniaturize:controller_];
+  } else if (initial_show_state_ == ui::SHOW_STATE_FULLSCREEN) {
+    chrome::ToggleFullscreenMode(browser_);
   }
   initial_show_state_ = ui::SHOW_STATE_DEFAULT;
 
@@ -131,6 +163,10 @@ void BrowserWindowCocoa::ShowInactive() {
   [window() orderFront:controller_];
 }
 
+void BrowserWindowCocoa::Hide() {
+  // Not implemented.
+}
+
 void BrowserWindowCocoa::SetBounds(const gfx::Rect& bounds) {
   gfx::Rect real_bounds = [controller_ enforceMinWindowSize:bounds];
 
@@ -141,7 +177,7 @@ void BrowserWindowCocoa::SetBounds(const gfx::Rect& bounds) {
   // Flip coordinates based on the primary screen.
   NSScreen* screen = [[NSScreen screens] objectAtIndex:0];
   cocoa_bounds.origin.y =
-      [screen frame].size.height - real_bounds.height() - real_bounds.y();
+      NSHeight([screen frame]) - real_bounds.height() - real_bounds.y();
 
   [window() setFrame:cocoa_bounds display:YES];
 }
@@ -156,16 +192,32 @@ void BrowserWindowCocoa::Close() {
   if ([controller_ overlayWindow]) {
     [controller_ deferPerformClose];
   } else {
-    // Make sure we hide the window immediately. Even though performClose:
-    // calls orderOut: eventually, it leaves the window on-screen long enough
-    // that we start to see tabs shutting down. http://crbug.com/23959
-    // TODO(viettrungluu): This is kind of bad, since |-performClose:| calls
-    // |-windowShouldClose:| (on its delegate, which is probably the
-    // controller) which may return |NO| causing the window to not be closed,
-    // thereby leaving a hidden window. In fact, our window-closing procedure
-    // involves a (indirect) recursion on |-performClose:|, which is also bad.
-    [window() orderOut:controller_];
-    [window() performClose:controller_];
+    // Using |-performClose:| can prevent the window from actually closing if
+    // a JavaScript beforeunload handler opens an alert during shutdown, as
+    // documented at <http://crbug.com/118424>. Re-implement
+    // -[NSWindow performClose:] as closely as possible to how Apple documents
+    // it.
+    //
+    // Before calling |-close|, hide the window immediately. |-performClose:|
+    // would do something similar, and this ensures that the window is removed
+    // from AppKit's display list. Not doing so can lead to crashes like
+    // <http://crbug.com/156101>.
+    id<NSWindowDelegate> delegate = [window() delegate];
+    SEL window_should_close = @selector(windowShouldClose:);
+    if ([delegate respondsToSelector:window_should_close]) {
+      if ([delegate windowShouldClose:window()]) {
+        [window() orderOut:nil];
+        [window() close];
+      }
+    } else if ([window() respondsToSelector:window_should_close]) {
+      if ([window() performSelector:window_should_close withObject:window()]) {
+        [window() orderOut:nil];
+        [window() close];
+      }
+    } else {
+      [window() orderOut:nil];
+      [window() close];
+    }
   }
 }
 
@@ -187,11 +239,15 @@ void BrowserWindowCocoa::FlashFrame(bool flash) {
   }
 }
 
+bool BrowserWindowCocoa::IsAlwaysOnTop() const {
+  return false;
+}
+
 bool BrowserWindowCocoa::IsActive() const {
   return [window() isKeyWindow];
 }
 
-gfx::NativeWindow BrowserWindowCocoa::GetNativeHandle() {
+gfx::NativeWindow BrowserWindowCocoa::GetNativeWindow() {
   return window();
 }
 
@@ -201,14 +257,6 @@ BrowserWindowTesting* BrowserWindowCocoa::GetBrowserWindowTesting() {
 
 StatusBubble* BrowserWindowCocoa::GetStatusBubble() {
   return [controller_ statusBubble];
-}
-
-void BrowserWindowCocoa::ToolbarSizeChanged(bool is_animating) {
-  // According to beng, this is an ugly method that comes from the days when the
-  // download shelf was a ChromeView attached to the WebContents, and as its
-  // size changed via animation it notified through TCD/etc to the browser view
-  // to relayout for each tick of the animation. We don't need anything of the
-  // sort on Mac.
 }
 
 void BrowserWindowCocoa::UpdateTitleBar() {
@@ -223,16 +271,14 @@ void BrowserWindowCocoa::UpdateTitleBar() {
 
 void BrowserWindowCocoa::BookmarkBarStateChanged(
     BookmarkBar::AnimateChangeType change_type) {
-  // TODO: route changes to state through this.
+  [[controller_ bookmarkBarController]
+      updateState:browser_->bookmark_bar_state()
+       changeType:change_type];
 }
 
 void BrowserWindowCocoa::UpdateDevTools() {
   [controller_ updateDevToolsForContents:
-      browser_->GetSelectedWebContents()];
-}
-
-void BrowserWindowCocoa::SetDevToolsDockSide(DevToolsDockSide side) {
-  [controller_ setDevToolsDockToRight:side == DEVTOOLS_DOCK_SIDE_RIGHT];
+      chrome::GetActiveWebContents(browser_)];
 }
 
 void BrowserWindowCocoa::UpdateLoadingAnimations(bool should_animate) {
@@ -243,12 +289,16 @@ void BrowserWindowCocoa::SetStarredState(bool is_starred) {
   [controller_ setStarredState:is_starred ? YES : NO];
 }
 
+void BrowserWindowCocoa::ZoomChangedForActiveTab(bool can_show_bubble) {
+  [controller_ zoomChangedForActiveTab:can_show_bubble ? YES : NO];
+}
+
 gfx::Rect BrowserWindowCocoa::GetRestoredBounds() const {
   // Flip coordinates based on the primary screen.
   NSScreen* screen = [[NSScreen screens] objectAtIndex:0];
   NSRect frame = [controller_ regularWindowFrame];
-  gfx::Rect bounds(frame.origin.x, 0, frame.size.width, frame.size.height);
-  bounds.set_y([screen frame].size.height - frame.origin.y - frame.size.height);
+  gfx::Rect bounds(frame.origin.x, 0, NSWidth(frame), NSHeight(frame));
+  bounds.set_y(NSHeight([screen frame]) - NSMaxY(frame));
   return bounds;
 }
 
@@ -306,7 +356,7 @@ bool BrowserWindowCocoa::IsFullscreenBubbleVisible() const {
 }
 
 void BrowserWindowCocoa::ConfirmAddSearchProvider(
-    const TemplateURL* template_url,
+    TemplateURL* template_url,
     Profile* profile) {
   // The controller will release itself when the window closes.
   EditSearchEngineCocoaController* editor =
@@ -332,9 +382,9 @@ void BrowserWindowCocoa::UpdateReloadStopState(bool is_loading, bool force) {
   [controller_ setIsLoading:is_loading force:force];
 }
 
-void BrowserWindowCocoa::UpdateToolbar(TabContentsWrapper* contents,
+void BrowserWindowCocoa::UpdateToolbar(content::WebContents* contents,
                                        bool should_restore_state) {
-  [controller_ updateToolbarWithContents:contents->web_contents()
+  [controller_ updateToolbarWithContents:contents
                       shouldRestoreState:should_restore_state ? YES : NO];
 }
 
@@ -354,9 +404,6 @@ void BrowserWindowCocoa::FocusBookmarksToolbar() {
   // Not needed on the Mac.
 }
 
-void BrowserWindowCocoa::FocusChromeOSStatus() {
-  // Not needed on the Mac.
-}
 
 bool BrowserWindowCocoa::IsBookmarkBarVisible() const {
   return browser_->profile()->GetPrefs()->GetBoolean(prefs::kShowBookmarkBar);
@@ -391,7 +438,7 @@ bool BrowserWindowCocoa::IsPanel() const {
 // setting the preference sends notifications to all windows who then
 // know what to do.
 void BrowserWindowCocoa::ToggleBookmarkBar() {
-  bookmark_utils::ToggleWhenVisible(browser_->profile());
+  chrome::ToggleBookmarkBarWhenVisible(browser_->profile());
 }
 
 void BrowserWindowCocoa::AddFindBar(
@@ -399,39 +446,16 @@ void BrowserWindowCocoa::AddFindBar(
   [controller_ addFindBar:find_bar_cocoa_controller];
 }
 
-void BrowserWindowCocoa::ShowAboutChromeDialog() {
-  // Go through AppController's implementation to bring up the branded panel.
-  [[NSApp delegate] orderFrontStandardAboutPanel:nil];
-}
-
 void BrowserWindowCocoa::ShowUpdateChromeDialog() {
   restart_browser::RequestRestart(window());
 }
 
 void BrowserWindowCocoa::ShowTaskManager() {
-#if defined(WEBUI_TASK_MANAGER)
-  TaskManagerDialog::Show();
-#else
-  // Uses WebUI TaskManager when swiches is set. It is beta feature.
-  if (chrome_web_ui::IsMoreWebUI()) {
-    TaskManagerDialog::Show();
-  } else {
-    TaskManagerMac::Show(false);
-  }
-#endif  // defined(WEBUI_TASK_MANAGER)
+  TaskManagerMac::Show(false);
 }
 
 void BrowserWindowCocoa::ShowBackgroundPages() {
-#if defined(WEBUI_TASK_MANAGER)
-  TaskManagerDialog::ShowBackgroundPages();
-#else
-  // Uses WebUI TaskManager when swiches is set. It is beta feature.
-  if (chrome_web_ui::IsMoreWebUI()) {
-    TaskManagerDialog::ShowBackgroundPages();
-  } else {
-    TaskManagerMac::Show(true);
-  }
-#endif  // defined(WEBUI_TASK_MANAGER)
+  TaskManagerMac::Show(true);
 }
 
 void BrowserWindowCocoa::ShowBookmarkBubble(const GURL& url,
@@ -440,6 +464,21 @@ void BrowserWindowCocoa::ShowBookmarkBubble(const GURL& url,
                       alreadyBookmarked:(already_bookmarked ? YES : NO)];
 }
 
+void BrowserWindowCocoa::ShowChromeToMobileBubble() {
+  [controller_ showChromeToMobileBubble];
+}
+
+#if defined(ENABLE_ONE_CLICK_SIGNIN)
+void BrowserWindowCocoa::ShowOneClickSigninBubble(
+      const StartSyncCallback& start_sync_callback) {
+  OneClickSigninBubbleController* bubble_controller =
+      [[OneClickSigninBubbleController alloc]
+        initWithBrowserWindowController:cocoa_controller()
+                    start_sync_callback:start_sync_callback];
+  [bubble_controller showWindow:nil];
+}
+#endif
+
 bool BrowserWindowCocoa::IsDownloadShelfVisible() const {
   return [controller_ isDownloadShelfVisible] != NO;
 }
@@ -447,12 +486,6 @@ bool BrowserWindowCocoa::IsDownloadShelfVisible() const {
 DownloadShelf* BrowserWindowCocoa::GetDownloadShelf() {
   DownloadShelfController* shelfController = [controller_ downloadShelf];
   return [shelfController bridge];
-}
-
-void BrowserWindowCocoa::ShowCollectedCookiesDialog(
-    TabContentsWrapper* wrapper) {
-  // Deletes itself on close.
-  new CollectedCookiesMac(GetNativeHandle(), wrapper);
 }
 
 // We allow closing the window here since the real quit decision on Mac is made
@@ -478,11 +511,22 @@ void BrowserWindowCocoa::WebContentsFocused(WebContents* contents) {
   NOTIMPLEMENTED();
 }
 
-void BrowserWindowCocoa::ShowPageInfo(Profile* profile,
+void BrowserWindowCocoa::ShowPageInfo(WebContents* web_contents,
                                       const GURL& url,
                                       const SSLStatus& ssl,
                                       bool show_history) {
-  browser::ShowPageInfoBubble(window(), profile, url, ssl, show_history);
+  chrome::ShowPageInfoBubble(window(), web_contents, url, ssl, show_history,
+                             browser_);
+}
+
+void BrowserWindowCocoa::ShowWebsiteSettings(
+    Profile* profile,
+    content::WebContents* web_contents,
+    const GURL& url,
+    const content::SSLStatus& ssl,
+    bool show_history) {
+  WebsiteSettingsUIBridge::Show(
+      window(), profile, web_contents, url, ssl);
 }
 
 void BrowserWindowCocoa::ShowAppMenu() {
@@ -494,11 +538,15 @@ bool BrowserWindowCocoa::PreHandleKeyboardEvent(
   if (![BrowserWindowUtils shouldHandleKeyboardEvent:event])
     return false;
 
+  if (event.type == WebKit::WebInputEvent::RawKeyDown &&
+      [controller_ handledByExtensionCommand:event.os_event])
+    return true;
+
   int id = [BrowserWindowUtils getCommandId:event];
   if (id == -1)
     return false;
 
-  if (browser_->IsReservedCommandOrKey(id, event)) {
+  if (browser_->command_controller()->IsReservedCommandOrKey(id, event)) {
       return [BrowserWindowUtils handleKeyboardEvent:event.os_event
                                             inWindow:window()];
   }
@@ -514,13 +562,8 @@ void BrowserWindowCocoa::HandleKeyboardEvent(
     [BrowserWindowUtils handleKeyboardEvent:event.os_event inWindow:window()];
 }
 
-void BrowserWindowCocoa::ShowCreateWebAppShortcutsDialog(
-    TabContentsWrapper* tab_contents) {
-  NOTIMPLEMENTED();
-}
-
 void BrowserWindowCocoa::ShowCreateChromeAppShortcutsDialog(
-    Profile* profile, const Extension* app) {
+    Profile* profile, const extensions::Extension* app) {
   NOTIMPLEMENTED();
 }
 
@@ -555,14 +598,6 @@ bool BrowserWindowCocoa::InPresentationMode() {
   return [controller_ inPresentationMode];
 }
 
-void BrowserWindowCocoa::ShowInstant(TabContentsWrapper* preview) {
-  [controller_ showInstant:preview->web_contents()];
-}
-
-void BrowserWindowCocoa::HideInstant() {
-  [controller_ hideInstant];
-}
-
 gfx::Rect BrowserWindowCocoa::GetInstantBounds() {
   // Flip coordinates based on the primary screen.
   NSScreen* screen = [[NSScreen screens] objectAtIndex:0];
@@ -573,8 +608,15 @@ gfx::Rect BrowserWindowCocoa::GetInstantBounds() {
   return bounds;
 }
 
+bool BrowserWindowCocoa::IsInstantTabShowing()  {
+  return [controller_ isInstantTabShowing];
+}
+
 WindowOpenDisposition BrowserWindowCocoa::GetDispositionForPopupBounds(
     const gfx::Rect& bounds) {
+  // In Lion fullscreen mode, convert popups into tabs.
+  if (base::mac::IsOSLionOrLater() && IsFullscreen())
+    return NEW_FOREGROUND_TAB;
   return NEW_POPUP;
 }
 
@@ -588,21 +630,19 @@ FindBar* BrowserWindowCocoa::CreateFindBar() {
   return bridge;
 }
 
-void BrowserWindowCocoa::Observe(int type,
-                                 const content::NotificationSource& source,
-                                 const content::NotificationDetails& details) {
-  switch (type) {
-    case chrome::NOTIFICATION_PREF_CHANGED: {
-      const std::string& pref_name =
-          *content::Details<std::string>(details).ptr();
-      DCHECK(pref_name == prefs::kShowBookmarkBar);
-      [controller_ updateBookmarkBarVisibilityWithAnimation:YES];
-      break;
-    }
-    default:
-      NOTREACHED();  // we don't ask for anything else!
-      break;
-  }
+bool BrowserWindowCocoa::GetConstrainedWindowTopY(int* top_y) {
+  return false;
+}
+
+extensions::ActiveTabPermissionGranter*
+    BrowserWindowCocoa::GetActiveTabPermissionGranter() {
+  WebContents* web_contents =
+      browser_->tab_strip_model()->GetActiveWebContents();
+  if (!web_contents)
+    return NULL;
+  extensions::TabHelper* tab_helper =
+      extensions::TabHelper::FromWebContents(web_contents);
+  return tab_helper ? tab_helper->active_tab_permission_granter() : NULL;
 }
 
 void BrowserWindowCocoa::DestroyBrowser() {
@@ -618,14 +658,7 @@ NSWindow* BrowserWindowCocoa::window() const {
 
 void BrowserWindowCocoa::ShowAvatarBubble(WebContents* web_contents,
                                           const gfx::Rect& rect) {
-  NSView* view = web_contents->GetNativeView();
-  NSRect bounds = [view bounds];
-  NSPoint point;
-  point.x = NSMinX(bounds) + rect.right();
-  // The view's origin is at the bottom but |rect|'s origin is at the top.
-  point.y = NSMaxY(bounds) - rect.bottom();
-  point = [view convertPoint:point toView:nil];
-  point = [[view window] convertBaseToScreen:point];
+  NSPoint point = GetPointForBubble(web_contents, rect.right(), rect.bottom());
 
   // |menu| will automatically release itself on close.
   AvatarMenuBubbleController* menu =
@@ -637,4 +670,25 @@ void BrowserWindowCocoa::ShowAvatarBubble(WebContents* web_contents,
 
 void BrowserWindowCocoa::ShowAvatarBubbleFromAvatarButton() {
   [[controller_ avatarButtonController] showAvatarBubble];
+}
+
+void BrowserWindowCocoa::ShowPasswordGenerationBubble(
+    const gfx::Rect& rect,
+    const content::PasswordForm& form,
+    autofill::PasswordGenerator* password_generator) {
+  WebContents* web_contents = chrome::GetActiveWebContents(browser_);
+  // We want to point to the middle of the rect instead of the right side.
+  NSPoint point = GetPointForBubble(web_contents,
+                                    rect.x() + rect.width()/2,
+                                    rect.bottom());
+
+  PasswordGenerationBubbleController* controller =
+      [[PasswordGenerationBubbleController alloc]
+        initWithWindow:browser_->window()->GetNativeWindow()
+            anchoredAt:point
+        renderViewHost:web_contents->GetRenderViewHost()
+        passwordManager:PasswordManager::FromWebContents(web_contents)
+        usingGenerator:password_generator
+               forForm:form];
+  [controller showWindow:nil];
 }

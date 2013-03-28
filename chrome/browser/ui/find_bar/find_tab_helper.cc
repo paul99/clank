@@ -6,24 +6,21 @@
 
 #include <vector>
 
-#include "chrome/common/render_messages.h"
 #include "chrome/browser/profiles/profile.h"
 #include "chrome/browser/ui/find_bar/find_bar_state.h"
 #include "chrome/browser/ui/find_bar/find_bar_state_factory.h"
-#include "content/browser/renderer_host/render_view_host.h"
 #include "chrome/common/chrome_notification_types.h"
 #include "content/public/browser/notification_service.h"
+#include "content/public/browser/render_view_host.h"
 #include "content/public/browser/web_contents.h"
 #include "content/public/common/stop_find_action.h"
 #include "third_party/WebKit/Source/WebKit/chromium/public/WebFindOptions.h"
+#include "ui/gfx/rect_f.h"
 
 using WebKit::WebFindOptions;
 using content::WebContents;
 
-#if defined(OS_ANDROID)
-#include "content/public/browser/web_contents_delegate.h"
-#include "content/common/view_messages.h"
-#endif
+DEFINE_WEB_CONTENTS_USER_DATA_KEY(FindTabHelper)
 
 // static
 int FindTabHelper::find_request_id_counter_ = -1;
@@ -39,65 +36,6 @@ FindTabHelper::FindTabHelper(WebContents* web_contents)
 
 FindTabHelper::~FindTabHelper() {
 }
-
-void FindTabHelper::SendFindNotification(int request_id, int match_count,
-                                         gfx::Rect selection, int ordinal,
-                                         bool final_update) {
-  last_search_result_ = FindNotificationDetails(
-      request_id, match_count, selection, ordinal, final_update);
-  content::NotificationService::current()->Notify(
-      chrome::NOTIFICATION_FIND_RESULT_AVAILABLE,
-      content::Source<content::WebContents>(web_contents()),
-      content::Details<FindNotificationDetails>(&last_search_result_));
-}
-
-#if defined(OS_ANDROID)
-int FindTabHelper::BlockingFind(const string16& search_string,
-                                BlockingFindType find_type,
-                                BlockingFindDirection direction) {
-  previous_find_text_ = find_text_;
-
-  if (find_type == FIND_ALL) {
-    current_find_request_id_ = find_request_id_counter_++;
-    find_text_ = search_string;
-  }
-
-  last_search_case_sensitive_ = false;
-  find_op_aborted_ = false;
-
-  // Keep track of what the last search was across the tabs.
-    Profile* profile =
-        Profile::FromBrowserContext(web_contents()->GetBrowserContext());
-  FindBarState* find_bar_state = FindBarStateFactory::GetForProfile(profile);
-  find_bar_state->set_last_prepopulate_text(find_text_);
-
-  int match_count;
-  int ordinal;
-  gfx::Rect selection;
-
-  if (find_text_.empty()) {
-    if (find_type == FIND_ALL)
-      StopFinding(FindBarController::kClearSelection);
-    SendFindNotification(current_find_request_id_, 0, gfx::Rect(), 0, true);
-    return 0;
-  }
-
-  WebFindOptions options;
-  options.forward = direction == FORWARD_DIRECTION;
-  options.matchCase = false;
-  options.findNext = find_type == FIND_NEXT;
-
-  web_contents()->GetRenderViewHost()->Send(new ViewMsg_BlockingFind(
-      web_contents()->GetRenderViewHost()->routing_id(),
-      current_find_request_id_, find_text_,
-      options, &match_count, &ordinal, &selection));
-
-  SendFindNotification(current_find_request_id_, match_count, selection,
-                       ordinal, true);
-
-  return match_count;
-}
-#endif
 
 void FindTabHelper::StartFinding(string16 search_string,
                                  bool forward_direction,
@@ -155,18 +93,9 @@ void FindTabHelper::StartFinding(string16 search_string,
                                             find_text_, options);
 }
 
-#if defined(OS_ANDROID)
-void FindTabHelper::ActivateNearestFindResult(float x, float y) {
-  if (!find_op_aborted_ && !find_text_.empty()) {
-    web_contents()->GetRenderViewHost()->ActivateNearestFindResult(
-        current_find_request_id_, x, y);
-  }
-}
-#endif
-
 void FindTabHelper::StopFinding(
     FindBarController::SelectionAction selection_action) {
-  if (selection_action == FindBarController::kClearSelection) {
+  if (selection_action == FindBarController::kClearSelectionOnPage) {
     // kClearSelection means the find string has been cleared by the user, but
     // the UI has not been dismissed. In that case we want to clear the
     // previously remembered search (http://crbug.com/42639).
@@ -182,13 +111,13 @@ void FindTabHelper::StopFinding(
 
   content::StopFindAction action;
   switch (selection_action) {
-    case FindBarController::kClearSelection:
+    case FindBarController::kClearSelectionOnPage:
       action = content::STOP_FIND_ACTION_CLEAR_SELECTION;
       break;
-    case FindBarController::kKeepSelection:
+    case FindBarController::kKeepSelectionOnPage:
       action = content::STOP_FIND_ACTION_KEEP_SELECTION;
       break;
-    case FindBarController::kActivateSelection:
+    case FindBarController::kActivateSelectionOnPage:
       action = content::STOP_FIND_ACTION_ACTIVATE_SELECTION;
       break;
     default:
@@ -199,9 +128,16 @@ void FindTabHelper::StopFinding(
 }
 
 #if defined(OS_ANDROID)
-void FindTabHelper::RequestFindMatchRects(int have_version) {
+void FindTabHelper::ActivateNearestFindResult(float x, float y) {
+  if (!find_op_aborted_ && !find_text_.empty()) {
+    web_contents()->GetRenderViewHost()->ActivateNearestFindResult(
+        current_find_request_id_, x, y);
+  }
+}
+
+void FindTabHelper::RequestFindMatchRects(int current_version) {
   if (!find_op_aborted_ && !find_text_.empty())
-    web_contents()->GetRenderViewHost()->RequestFindMatchRects(have_version);
+    web_contents()->GetRenderViewHost()->RequestFindMatchRects(current_version);
 }
 #endif
 
@@ -221,7 +157,9 @@ void FindTabHelper::HandleFindReply(int request_id,
       active_match_ordinal = last_search_result_.active_match_ordinal();
 
     gfx::Rect selection = selection_rect;
-    if (selection.IsEmpty())
+    if (final_update && active_match_ordinal == 0)
+      selection = gfx::Rect();
+    else if (selection_rect.IsEmpty())
       selection = last_search_result_.selection_rect();
 
     // Notify the UI, automation and any other observers that a find result was

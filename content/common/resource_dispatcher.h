@@ -1,4 +1,4 @@
-// Copyright (c) 2011 The Chromium Authors. All rights reserved.
+// Copyright (c) 2012 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -6,7 +6,6 @@
 
 #ifndef CONTENT_COMMON_RESOURCE_DISPATCHER_H_
 #define CONTENT_COMMON_RESOURCE_DISPATCHER_H_
-#pragma once
 
 #include <deque>
 #include <string>
@@ -17,23 +16,23 @@
 #include "base/shared_memory.h"
 #include "base/time.h"
 #include "content/common/content_export.h"
-#include "ipc/ipc_channel.h"
+#include "ipc/ipc_listener.h"
+#include "ipc/ipc_sender.h"
 #include "webkit/glue/resource_loader_bridge.h"
 
 namespace content {
 class ResourceDispatcherDelegate;
 struct ResourceResponseHead;
-}
 
 // This class serves as a communication interface between the
 // ResourceDispatcherHost in the browser process and the ResourceLoaderBridge in
 // the child process.  It can be used from any child process.
-class CONTENT_EXPORT ResourceDispatcher : public IPC::Channel::Listener {
+class CONTENT_EXPORT ResourceDispatcher : public IPC::Listener {
  public:
-  explicit ResourceDispatcher(IPC::Message::Sender* sender);
+  explicit ResourceDispatcher(IPC::Sender* sender);
   virtual ~ResourceDispatcher();
 
-  // IPC::Channel::Listener implementation.
+  // IPC::Listener implementation.
   virtual bool OnMessageReceived(const IPC::Message& message) OVERRIDE;
 
   // Creates a ResourceLoaderBridge for this type of dispatcher, this is so
@@ -55,7 +54,7 @@ class CONTENT_EXPORT ResourceDispatcher : public IPC::Channel::Listener {
   // Cancels a request in the pending_requests_ list.
   void CancelPendingRequest(int routing_id, int request_id);
 
-  IPC::Message::Sender* message_sender() const {
+  IPC::Sender* message_sender() const {
     return message_sender_;
   }
 
@@ -64,7 +63,7 @@ class CONTENT_EXPORT ResourceDispatcher : public IPC::Channel::Listener {
 
   // This does not take ownership of the delegate. It is expected that the
   // delegate have a longer lifetime than the ResourceDispatcher.
-  void set_delegate(content::ResourceDispatcherDelegate* delegate) {
+  void set_delegate(ResourceDispatcherDelegate* delegate) {
     delegate_ = delegate;
   }
 
@@ -73,17 +72,14 @@ class CONTENT_EXPORT ResourceDispatcher : public IPC::Channel::Listener {
 
   typedef std::deque<IPC::Message*> MessageQueue;
   struct PendingRequestInfo {
-    PendingRequestInfo() { }
+    PendingRequestInfo();
+
     PendingRequestInfo(webkit_glue::ResourceLoaderBridge::Peer* peer,
                        ResourceType::Type resource_type,
-                       const GURL& request_url)
-        : peer(peer),
-          resource_type(resource_type),
-          is_deferred(false),
-          url(request_url),
-          request_start(base::TimeTicks::Now()) {
-    }
-    ~PendingRequestInfo() { }
+                       const GURL& request_url);
+
+    ~PendingRequestInfo();
+
     webkit_glue::ResourceLoaderBridge::Peer* peer;
     ResourceType::Type resource_type;
     MessageQueue deferred_message_queue;
@@ -93,6 +89,8 @@ class CONTENT_EXPORT ResourceDispatcher : public IPC::Channel::Listener {
     base::TimeTicks request_start;
     base::TimeTicks response_start;
     base::TimeTicks completion_time;
+    linked_ptr<base::SharedMemory> buffer;
+    int buffer_size;
   };
   typedef base::hash_map<int, PendingRequestInfo> PendingRequestList;
 
@@ -109,18 +107,23 @@ class CONTENT_EXPORT ResourceDispatcher : public IPC::Channel::Listener {
       int request_id,
       int64 position,
       int64 size);
-  void OnReceivedResponse(int request_id, const content::ResourceResponseHead&);
+  void OnReceivedResponse(int request_id, const ResourceResponseHead&);
   void OnReceivedCachedMetadata(int request_id, const std::vector<char>& data);
   void OnReceivedRedirect(
       const IPC::Message& message,
       int request_id,
       const GURL& new_url,
-      const content::ResourceResponseHead& response_head);
+      const ResourceResponseHead& response_head);
+  void OnSetDataBuffer(
+      const IPC::Message& message,
+      int request_id,
+      base::SharedMemoryHandle shm_handle,
+      int shm_size);
   void OnReceivedData(
       const IPC::Message& message,
       int request_id,
-      base::SharedMemoryHandle data,
-      int data_len,
+      int data_offset,
+      int data_length,
       int encoded_data_length);
   void OnDownloadedData(
       const IPC::Message& message,
@@ -128,7 +131,8 @@ class CONTENT_EXPORT ResourceDispatcher : public IPC::Channel::Listener {
       int data_len);
   void OnRequestComplete(
       int request_id,
-      const net::URLRequestStatus& status,
+      int error_code,
+      bool was_ignored_by_handler,
       const std::string& security_info,
       const base::TimeTicks& completion_time);
 
@@ -141,7 +145,7 @@ class CONTENT_EXPORT ResourceDispatcher : public IPC::Channel::Listener {
 
   void ToResourceResponseInfo(
       const PendingRequestInfo& request_info,
-      const content::ResourceResponseHead& browser_info,
+      const ResourceResponseHead& browser_info,
       webkit_glue::ResourceResponseInfo* renderer_info) const;
 
   base::TimeTicks ToRendererCompletionTime(
@@ -162,16 +166,18 @@ class CONTENT_EXPORT ResourceDispatcher : public IPC::Channel::Listener {
   // for use on deferred message queues that are no longer needed.
   static void ReleaseResourcesInMessageQueue(MessageQueue* queue);
 
-  IPC::Message::Sender* message_sender_;
+  IPC::Sender* message_sender_;
 
   // All pending requests issued to the host
   PendingRequestList pending_requests_;
 
   base::WeakPtrFactory<ResourceDispatcher> weak_factory_;
 
-  content::ResourceDispatcherDelegate* delegate_;
+  ResourceDispatcherDelegate* delegate_;
 
   DISALLOW_COPY_AND_ASSIGN(ResourceDispatcher);
 };
+
+}  // namespace content
 
 #endif  // CONTENT_COMMON_RESOURCE_DISPATCHER_H_

@@ -1,4 +1,4 @@
-// Copyright (c) 2011 The Chromium Authors. All rights reserved.
+// Copyright (c) 2012 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -23,7 +23,7 @@ SymmetricKey* SymmetricKey::GenerateRandomKey(Algorithm algorithm,
   if (key_size_in_bits == 0)
     return NULL;
 
-  ScopedPK11Slot slot(PK11_GetBestSlot(CKM_AES_KEY_GEN, NULL));
+  ScopedPK11Slot slot(PK11_GetInternalSlot());
   if (!slot.get())
     return NULL;
 
@@ -68,7 +68,7 @@ SymmetricKey* SymmetricKey::DeriveKeyFromPassword(Algorithm algorithm,
   if (!alg_id.get())
     return NULL;
 
-  ScopedPK11Slot slot(PK11_GetBestSlot(SEC_OID_PKCS5_PBKDF2, NULL));
+  ScopedPK11Slot slot(PK11_GetInternalSlot());
   if (!slot.get())
     return NULL;
 
@@ -83,6 +83,7 @@ SymmetricKey* SymmetricKey::DeriveKeyFromPassword(Algorithm algorithm,
 // static
 SymmetricKey* SymmetricKey::Import(Algorithm algorithm,
                                    const std::string& raw_key) {
+  EnsureNSSInit();
   CK_MECHANISM_TYPE cipher =
       algorithm == AES ? CKM_AES_CBC : CKM_SHA_1_HMAC;
 
@@ -92,7 +93,7 @@ SymmetricKey* SymmetricKey::Import(Algorithm algorithm,
       const_cast<char *>(raw_key.data()));
   key_item.len = raw_key.size();
 
-  ScopedPK11Slot slot(PK11_GetBestSlot(cipher, NULL));
+  ScopedPK11Slot slot(PK11_GetInternalSlot());
   if (!slot.get())
     return NULL;
 

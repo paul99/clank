@@ -1,35 +1,45 @@
-// Copyright (c) 2011 The Chromium Authors. All rights reserved.
+// Copyright (c) 2012 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
 #ifndef UI_VIEWS_CONTROLS_MENU_MENU_CONFIG_H_
 #define UI_VIEWS_CONTROLS_MENU_MENU_CONFIG_H_
-#pragma once
 
 #include "third_party/skia/include/core/SkColor.h"
 #include "ui/gfx/font.h"
 #include "ui/views/views_export.h"
+
+namespace ui {
+class NativeTheme;
+}
 
 namespace views {
 
 // Layout type information for menu items. Use the instance() method to obtain
 // the MenuConfig for the current platform.
 struct VIEWS_EXPORT MenuConfig {
-  MenuConfig();
+  explicit MenuConfig(const ui::NativeTheme* theme);
   ~MenuConfig();
 
-  // Resets the single shared MenuConfig instance. The next time instance() is
-  // invoked a new MenuConfig is created and configured.
-  static void Reset();
-
-  // Returns the single shared MenuConfig instance, creating if necessary.
-  static const MenuConfig& instance();
+  static const MenuConfig& instance(const ui::NativeTheme* theme);
 
   // Font used by menus.
   gfx::Font font;
 
   // Normal text color.
   SkColor text_color;
+
+  // Color for the arrow to scroll bookmarks.
+  SkColor arrow_color;
+
+  // Menu border sizes.
+  int menu_vertical_border_size;
+  int menu_horizontal_border_size;
+
+  // Submenu horizontal inset with parent menu. This is the horizontal overlap
+  // between the submenu and its parent menu, not including the borders of
+  // submenu and parent menu.
+  int submenu_horizontal_inset;
 
   // Margins between the top of the item and the label.
   int item_top_margin;
@@ -71,8 +81,17 @@ struct VIEWS_EXPORT MenuConfig {
   // Width of the gutter. Only used if render_gutter is true.
   int gutter_width;
 
-  // Height of the separator.
+  // Height of a normal separator (ui::NORMAL_SEPARATOR).
   int separator_height;
+
+  // Height of a ui::UPPER_SEPARATOR.
+  int separator_upper_height;
+
+  // Height of a ui::LOWER_SEPARATOR.
+  int separator_lower_height;
+
+  // Height of a ui::SPACING_SEPARATOR.
+  int separator_spacing_height;
 
   // Whether or not the gutter should be rendered. The gutter is specific to
   // Vista.
@@ -88,13 +107,38 @@ struct VIEWS_EXPORT MenuConfig {
   // accelerator.
   int label_to_accelerator_padding;
 
+  // Minimum height of menu item.
+  int item_min_height;
+
   // Whether the keyboard accelerators are visible.
   bool show_accelerators;
 
+  // True if icon to label padding is always added with or without icon.
+  bool always_use_icon_to_label_padding;
+
+  // True if submenu arrow and shortcut right edge should be aligned.
+  bool align_arrow_and_shortcut;
+
+  // True if the context menu's should be offset from the cursor position.
+  bool offset_context_menus;
+
+  const ui::NativeTheme* native_theme;
+
+  // Delay, in ms, between when menus are selected or moused over and the menu
+  // appears.
+  int show_delay;
+
  private:
-  // Creates and configures a new MenuConfig as appropriate for the current
-  // platform.
-  static MenuConfig* Create();
+  // Configures a MenuConfig as appropriate for the current platform.
+  void Init(const ui::NativeTheme* theme);
+
+  // TODO: temporary until we standardize.
+#if defined(USE_AURA)
+  void InitAura();
+#endif
+
+  // Adjust some values for a new UI style.
+  void AdjustForCommonTheme();
 };
 
 }  // namespace views

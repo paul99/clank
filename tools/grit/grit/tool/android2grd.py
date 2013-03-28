@@ -1,39 +1,37 @@
-#!/usr/bin/python2.4
-# Copyright (c) 2006-2008 The Chromium Authors. All rights reserved.
+#!/usr/bin/env python
+# Copyright (c) 2012 The Chromium Authors. All rights reserved.
 # Use of this source code is governed by a BSD-style license that can be
 # found in the LICENSE file.
 
 """The 'grit android2grd' tool."""
 
+
 import getopt
 import os.path
-import re
 import StringIO
-import types
 from xml.dom import Node
-from xml.dom.minidom import parse
+import xml.dom.minidom
 
 import grit.node.empty
-from grit.node import empty
 from grit.node import io
 from grit.node import message
-from grit.node import misc
 
 from grit.tool import interface
 
 from grit import grd_reader
+from grit import lazy_re
 from grit import tclib
 from grit import util
 
 
 # The name of a string in strings.xml
-_STRING_NAME = re.compile(r'^[a-z0-9_]+$')
+_STRING_NAME = lazy_re.compile(r'[a-z0-9_]+\Z')
 
 # A string's character limit in strings.xml
-_CHAR_LIMIT = re.compile(r'\[CHAR-LIMIT=(\d+)\]')
+_CHAR_LIMIT = lazy_re.compile(r'\[CHAR-LIMIT=(\d+)\]')
 
 # Finds String.Format() style format specifiers such as "%-5.2f".
-_FORMAT_SPECIFIER = re.compile(
+_FORMAT_SPECIFIER = lazy_re.compile(
   '%'
   '([1-9][0-9]*\$|<)?'            # argument_index
   '([-#+ 0,(]*)'                  # flags
@@ -43,11 +41,11 @@ _FORMAT_SPECIFIER = re.compile(
 
 
 class Android2Grd(interface.Tool):
-  """Tool for converting android string.xml files into chrome Grd files.
+  """Tool for converting Android string.xml files into chrome Grd files.
 
 Usage: grit [global options] android2grd [OPTIONS] STRINGS_XML
 
-The Android2Grd tool will convert an android strings.xml file (whose path is
+The Android2Grd tool will convert an Android strings.xml file (whose path is
 specified by STRINGS_XML) and create a chrome style grd file containing the
 relevant information.
 
@@ -62,9 +60,8 @@ OPTIONS may be any of the following:
 
     --languages  LANGUAGES   Comma separated list of ISO language codes (e.g.
                              en-US, en-GB, ru, zh-CN). These codes will be used
-                             to defined both the names of resource and
-                             translations files that will be declared by the
-                             output grd file.
+                             to determine the names of resource and translations
+                             files that will be declared by the output grd file.
 
     --grd-dir    GRD_DIR     Specify where the resultant grd file
                              (FILENAME.grd) shoud be output. By default this
@@ -78,22 +75,22 @@ OPTIONS may be any of the following:
     --rc-dir     RC_DIR      Specify the directory where resource files will
                              be located. By default this is empty.
 
-    --xml-dir    XML_DIR     Specify the location of the android app's resource
+    --xml-dir    XML_DIR     Specify the location of the Android app's resource
                              directory. Internationalized strings.xml files will
                              be placed under this directory. For each langauge
-                             foo a values-foo/strings.xml file will be generated.
+                             xx a values-xx/strings.xml file will be generated.
 
     --xtb-dir    XTB_DIR     Specify where the output translation files will be
                              located.
 """
 
-  __NAME_FLAG = 'name'
-  __LANGUAGES_FLAG = 'languages'
-  __GRD_DIR_FLAG = 'grd-dir'
-  __RC_DIR_FLAG = 'rc-dir'
-  __HEADER_DIR_FLAG = 'header-dir'
-  __XTB_DIR_FLAG = 'xtb-dir'
-  __XML_DIR_FLAG = 'xml-dir'
+  _NAME_FLAG = 'name'
+  _LANGUAGES_FLAG = 'languages'
+  _GRD_DIR_FLAG = 'grd-dir'
+  _RC_DIR_FLAG = 'rc-dir'
+  _HEADER_DIR_FLAG = 'header-dir'
+  _XTB_DIR_FLAG = 'xtb-dir'
+  _XML_DIR_FLAG = 'xml-dir'
 
   def __init__(self):
     self.name = 'chrome_android_strings'
@@ -112,36 +109,36 @@ OPTIONS may be any of the following:
     Returns:
       A string containing a short description of the android2grd tool.
     """
-    return 'Converts android string.xml files into Chrome grd files.'
+    return 'Converts Android string.xml files into Chrome grd files.'
 
   def ParseOptions(self, args):
     """Set this objects and return all non-option arguments."""
     flags = [
-        Android2Grd.__NAME_FLAG,
-        Android2Grd.__LANGUAGES_FLAG,
-        Android2Grd.__GRD_DIR_FLAG,
-        Android2Grd.__RC_DIR_FLAG,
-        Android2Grd.__HEADER_DIR_FLAG,
-        Android2Grd.__XTB_DIR_FLAG,
-        Android2Grd.__XML_DIR_FLAG, ]
+        Android2Grd._NAME_FLAG,
+        Android2Grd._LANGUAGES_FLAG,
+        Android2Grd._GRD_DIR_FLAG,
+        Android2Grd._RC_DIR_FLAG,
+        Android2Grd._HEADER_DIR_FLAG,
+        Android2Grd._XTB_DIR_FLAG,
+        Android2Grd._XML_DIR_FLAG, ]
     (opts, args) = getopt.getopt(args, None, ['%s=' % o for o in flags])
 
     for key, val in opts:
-      # Get rid of the preceeding hypens
+      # Get rid of the preceding hypens.
       k = key[2:]
-      if k == Android2Grd.__NAME_FLAG:
+      if k == Android2Grd._NAME_FLAG:
         self.name = val
-      elif k == Android2Grd.__LANGUAGES_FLAG:
+      elif k == Android2Grd._LANGUAGES_FLAG:
         self.languages = val.split(',')
-      elif k == Android2Grd.__GRD_DIR_FLAG:
+      elif k == Android2Grd._GRD_DIR_FLAG:
         self.grd_dir = val
-      elif k == Android2Grd.__RC_DIR_FLAG:
+      elif k == Android2Grd._RC_DIR_FLAG:
         self.rc_dir = val
-      elif k == Android2Grd.__HEADER_DIR_FLAG:
+      elif k == Android2Grd._HEADER_DIR_FLAG:
         self.header_dir = val
-      elif k == Android2Grd.__XTB_DIR_FLAG:
+      elif k == Android2Grd._XTB_DIR_FLAG:
         self.xtb_dir = val
-      elif k == Android2Grd.__XML_DIR_FLAG:
+      elif k == Android2Grd._XML_DIR_FLAG:
         self.xml_res_dir = val
     return args
 
@@ -156,40 +153,39 @@ OPTIONS may be any of the following:
     """
     args = self.ParseOptions(args)
     if len(args) != 1:
-      print ('Tool requires one argument, a the path to a android '
+      print ('Tool requires one argument, the path to the Android '
              'strings.xml resource file to be converted.')
       return 2
     self.SetOptions(opts)
 
     android_path = args[0]
-    if not self.name:
-      self.name = 'android_strings'
-    out_path = os.path.join(util.dirname(android_path),
-                            self.name + '.grd')
 
     # Read and parse the Android strings.xml file.
-    android_file = open(android_path)
-    android_dom = parse(android_file)
+    with open(android_path) as android_file:
+      android_dom = xml.dom.minidom.parse(android_file)
 
-    # Create the top level grit node and write it to a file in grd_dir
-    grd_string = self.AndroidDOMToGRDString(android_dom)
+    # Do the hard work -- convert the Android dom to grd file contents.
+    grd_dom = self.AndroidDomToGrdDom(android_dom)
+    grd_string = unicode(grd_dom)
+
+    # Write the grd string to a file in grd_dir.
     grd_filename = self.name + '.grd'
     grd_path = os.path.join(self.grd_dir, grd_filename)
     with open(grd_path, 'w') as grd_file:
       grd_file.write(grd_string)
 
-  def AndroidDOMToGRDString(self, android_dom):
-    """Converts a strings.xml DOM into a grd string.
+  def AndroidDomToGrdDom(self, android_dom):
+    """Converts a strings.xml DOM into a DOM representing the contents of
+    a grd file.
 
     Args:
-      android_dom: A xml.dom.Document containing the contents of the android
+      android_dom: A xml.dom.Document containing the contents of the Android
           string.xml document.
     Returns:
-      A unicode string representing containing a grd xml document produced by
-      converting the specified android dom.
+      The DOM for the grd xml document produced by converting the Android DOM.
     """
 
-    # Start with a basic skeleton for the .grd file
+    # Start with a basic skeleton for the .grd file.
     root = grd_reader.Parse(StringIO.StringIO(
       '''<?xml version="1.0" encoding="UTF-8"?>
          <grit base_dir="." latest_public_release="0"
@@ -210,7 +206,7 @@ OPTIONS may be any of the following:
     if self.header_dir:
       cpp_header = self.__CreateCppHeaderOutputNode(outputs, self.header_dir)
     for lang in self.languages:
-      # Create an output for every language
+      # Create an output element for each language.
       if self.rc_dir:
         self.__CreateRcOutputNode(outputs, lang, self.rc_dir)
       if self.xml_res_dir:
@@ -219,14 +215,14 @@ OPTIONS may be any of the following:
     # Convert all the strings.xml strings into grd messages.
     self.__CreateMessageNodes(messages, android_dom.documentElement)
 
-    return unicode(root)
+    return root
 
   def __CreateMessageNodes(self, messages, resources):
     """Creates the <message> elements and adds them as children of <messages>.
 
     Args:
-      messages: the <messages> element in the string.xml dom.
-      resoures: the <resources> element in the grd dom.
+      messages: the <messages> element in the strings.xml dom.
+      resources: the <resources> element in the grd dom.
     """
     # <string> elements contain the definition of the resource.
     # The description of a <string> element is contained within the comment
@@ -235,19 +231,20 @@ OPTIONS may be any of the following:
     for child in resources.childNodes:
       if child.nodeType == Node.COMMENT_NODE:
         # Remove leading/trailing whitespace; collapse consecutive whitespaces.
-        description = ' '.join(child.data.split()).strip()
+        description = ' '.join(child.data.split())
       elif child.nodeType == Node.ELEMENT_NODE:
         if child.tagName != 'string':
-          print 'Warning: unknown tag <%s> in <messages>' % child.tagName
-        elif self.__IsTranslatable(child):
+          print 'Warning: ignoring unknown tag <%s>' % child.tagName
+        elif self.IsTranslatable(child):
           raw_name = child.getAttribute('name')
           product = child.getAttribute('product') or None
           grd_name = self.__FormatName(raw_name, product)
-          # Transform the <string> node contents into a tclib.Message, taking care
-          # to handle whitespace transformations and escaped characters, and
-          # coverting <xliff:g> placeholders into <ph> placeholders.
-          msg = self.__CreateTclibMessage(child)
-          msg_node = self.__CreateMessageNode(messages, grd_name, description, msg)
+          # Transform the <string> node contents into a tclib.Message, taking
+          # care to handle whitespace transformations and escaped characters,
+          # and coverting <xliff:g> placeholders into <ph> placeholders.
+          msg = self.CreateTclibMessage(child)
+          msg_node = self.__CreateMessageNode(messages, grd_name, description,
+              msg)
           messages.AddChild(msg_node)
           # Reset the description once a message has been parsed.
           description = ''
@@ -273,10 +270,10 @@ OPTIONS may be any of the following:
     product_suffix = ('_product_%s' % product.lower()) if product else ''
     return grd_name + product_suffix
 
-  def __CreateTclibMessage(self, message_node):
-    """Transforms a message_node from the strings.xml DOM into a tclib.Message.
+  def CreateTclibMessage(self, android_string):
+    """Transforms a <string/> element from strings.xml into a tclib.Message.
 
-    Interprets whitespace, quotes, and escaped characters in the message_node
+    Interprets whitespace, quotes, and escaped characters in the android_string
     according to Android's formatting and styling rules for strings.  Also
     converts <xliff:g> placeholders into <ph> placeholders, e.g.:
 
@@ -288,39 +285,46 @@ OPTIONS may be any of the following:
       The tclib.Message.
     """
     msg = tclib.Message()
-    inner_xml = ''
-    for childNode in message_node.childNodes:
-      if childNode.nodeType in (Node.TEXT_NODE, Node.CDATA_SECTION_NODE):
-        inner_xml += childNode.data
-      elif childNode.nodeType == Node.COMMENT_NODE:
-        pass
-      elif childNode.nodeType == Node.ELEMENT_NODE:
-        if inner_xml:
-          msg.AppendText(self.__FormatAndroidString(inner_xml))
-          inner_xml = ''
-        if childNode.tagName == 'xliff:g':
-          assert childNode.hasAttribute('id'), 'missing id: ' + childNode.data()
-          placeholder_id = childNode.getAttribute('id')
-          placeholder_text = self.__FormatPlaceholderText(childNode)
-          placeholder_example = childNode.getAttribute('example')
+    current_text = ''  # Accumulated text that hasn't yet been added to msg.
+    nodes = android_string.childNodes
+
+    for i, node in enumerate(nodes):
+      # Handle text nodes.
+      if node.nodeType in (Node.TEXT_NODE, Node.CDATA_SECTION_NODE):
+        current_text += node.data
+
+      # Handle <xliff:g> and other tags.
+      elif node.nodeType == Node.ELEMENT_NODE:
+        if node.tagName == 'xliff:g':
+          assert node.hasAttribute('id'), 'missing id: ' + node.data()
+          placeholder_id = node.getAttribute('id')
+          placeholder_text = self.__FormatPlaceholderText(node)
+          placeholder_example = node.getAttribute('example')
           if not placeholder_example:
             print ('Info: placeholder does not contain an example: %s' %
-                   childNode.toxml())
+                   node.toxml())
             placeholder_example = placeholder_id.upper()
           msg.AppendPlaceholder(tclib.Placeholder(placeholder_id,
               placeholder_text, placeholder_example))
         else:
           print ('Warning: removing tag <%s> which must be inside a '
-                 'placeholder: %s' % (childNode.tagName, childNode.toxml()))
-          msg.AppendText(self.__FormatPlaceholderText(childNode))
-      else:
-        assert False, 'unknown node type: %s' % childNode.nodeType
-    if inner_xml:
-      # For messages containing just text (no xml tags) Android strips leading
-      # and trailing whitespace.  We mimic that behavior.
-      if len(msg.GetContent()) == 0:
-        inner_xml = inner_xml.strip()
-      msg.AppendText(self.__FormatAndroidString(inner_xml))
+                 'placeholder: %s' % (node.tagName, node.toxml()))
+          msg.AppendText(self.__FormatPlaceholderText(node))
+
+      # Handle other nodes.
+      elif node.nodeType != Node.COMMENT_NODE:
+        assert False, 'Unknown node type: %s' % node.nodeType
+
+      is_last_node = (i == len(nodes) - 1)
+      if (current_text and
+          (is_last_node or nodes[i + 1].nodeType == Node.ELEMENT_NODE)):
+        # For messages containing just text and comments (no xml tags) Android
+        # strips leading and trailing whitespace.  We mimic that behavior.
+        if not msg.GetContent() and is_last_node:
+          current_text = current_text.strip()
+        msg.AppendText(self.__FormatAndroidString(current_text))
+        current_text = ''
+
     return msg
 
   def __FormatAndroidString(self, android_string, inside_placeholder=False):
@@ -328,7 +332,6 @@ OPTIONS may be any of the following:
 
       * Collapses consecutive whitespaces, except when inside double-quotes.
       * Replaces \\, \n, \t, \", \' with \, newline, tab, ", '.
-      * Removes other \x sequences.
     """
     backslash_map = {'\\' : '\\', 'n' : '\n', 't' : '\t', '"' : '"', "'" : "'"}
     is_quoted_section = False  # True when we're inside double quotes.
@@ -337,8 +340,9 @@ OPTIONS may be any of the following:
     output = []
     for c in android_string:
       if is_backslash_sequence:
-        # Unescape \\, \n, \t, \", and \' and remove other \x sequences.
-        output.append(backslash_map.get(c, ''))
+        # Unescape \\, \n, \t, \", and \'.
+        assert c in backslash_map, 'Illegal escape sequence: \\%s' % c
+        output.append(backslash_map[c])
         is_backslash_sequence = False
       elif c == '\\':
         is_backslash_sequence = True
@@ -352,6 +356,12 @@ OPTIONS may be any of the following:
         output.append(c)
       prev_char = c
     output = ''.join(output)
+
+    if is_quoted_section:
+      print 'Warning: unbalanced quotes in string: %s' % android_string
+
+    if is_backslash_sequence:
+      print 'Warning: trailing backslash in string: %s' % android_string
 
     # Check for format specifiers outside of placeholder tags.
     if not inside_placeholder:
@@ -375,7 +385,7 @@ OPTIONS may be any of the following:
   def __CreateMessageNode(self, messages_node, grd_name, description, msg):
     """Creates and initializes a <message> element.
 
-    Message elements correspond to android <string> elements in that they
+    Message elements correspond to Android <string> elements in that they
     declare a string resource along with a programmatic id.
     """
     if not description:
@@ -388,8 +398,6 @@ OPTIONS may be any of the following:
       if len(msg_content) > char_limit:
         print ('Warning: char-limit for %s is %d, but length is %d: %s' %
                (grd_name, char_limit, len(msg_content), msg_content))
-    else:
-      'Info: no char limit for %s' % grd_name
     return message.MessageNode.Construct(parent=messages_node,
                                          name=grd_name,
                                          message=msg,
@@ -443,8 +451,8 @@ OPTIONS may be any of the following:
   def __CreateAndroidXmlOutputNode(self, outputs_node, locale, xml_res_dir):
     """Creates the <output> element corresponding to various rc file output."""
     # Need to check to see if the locale has a region, e.g. the GB in en-GB.
-    # When a locale has a region android expects the region to be prefixed
-    # with an 'r'. For example for en-GB android expects a values-en-rGB
+    # When a locale has a region Android expects the region to be prefixed
+    # with an 'r'. For example for en-GB Android expects a values-en-rGB
     # directory.  Also, Android expects nb, tl, in, iw, ji as the language
     # codes for Norwegian, Tagalog/Filipino, Indonesian, Hebrew, and Yiddish:
     # http://developer.android.com/reference/java/util/Locale.html
@@ -468,13 +476,13 @@ OPTIONS may be any of the following:
     outputs_node.AddChild(node)
     return node
 
-  def __IsTranslatable(self, string):
+  def IsTranslatable(self, android_string):
     """Determines if a <string> element is a candidate for translation.
 
     A <string> element is by default translatable unless otherwise marked.
     """
-    if string.hasAttribute('translatable'):
-      value = string.getAttribute('translatable').lower()
+    if android_string.hasAttribute('translatable'):
+      value = android_string.getAttribute('translatable').lower()
       if value not in ('true', 'false'):
         print 'Warning: translatable attribute has invalid value: %s' % value
       return value == 'true'

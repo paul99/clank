@@ -1,11 +1,9 @@
-// Copyright (c) 2011 The Chromium Authors. All rights reserved.
+// Copyright (c) 2012 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
 #include "chrome/common/chrome_paths_internal.h"
 
-#include "base/android/jni_android.h"
-#include "base/android/path_utils.h"
 #include "base/file_path.h"
 #include "base/logging.h"
 #include "base/path_service.h"
@@ -13,7 +11,8 @@
 namespace chrome {
 
 void GetUserCacheDirectory(const FilePath& profile_dir, FilePath* result) {
-  PathService::Get(base::DIR_CACHE, result);
+  if (!PathService::Get(base::DIR_CACHE, result))
+    *result = profile_dir;
 }
 
 bool GetDefaultUserDataDirectory(FilePath* result) {
@@ -34,9 +33,23 @@ bool GetUserDownloadsDirectory(FilePath* result) {
   return true;
 }
 
-bool GetUserDesktop(FilePath* result) {
-  NOTREACHED() << "Android doesn't support GetUserDesktop";
+bool GetUserMusicDirectory(FilePath* result) {
+  NOTIMPLEMENTED();
   return false;
+}
+
+bool GetUserPicturesDirectory(FilePath* result) {
+  NOTIMPLEMENTED();
+  return false;
+}
+
+bool GetUserVideosDirectory(FilePath* result) {
+  NOTIMPLEMENTED();
+  return false;
+}
+
+bool ProcessNeedsProfileDir(const std::string& process_type) {
+  return true;
 }
 
 }  // namespace chrome

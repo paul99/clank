@@ -1,4 +1,4 @@
-// Copyright (c) 2010 The Chromium Authors. All rights reserved.
+// Copyright (c) 2012 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -9,20 +9,22 @@
 
 #include "third_party/WebKit/Source/WebKit/chromium/public/WebWidget.h"
 
+namespace content {
+
 // TODO(boliu): Override non-supported methods with no-op? eg setWindowRect().
 class RenderWidgetFullscreen : public RenderWidget {
  public:
-  // Creates a new RenderWidget.  The opener_id is the routing ID of the
-  // RenderView that this widget lives inside.
-  static RenderWidgetFullscreen* Create(int32 opener_id);
-
   virtual void show(WebKit::WebNavigationPolicy);
 
  protected:
-  virtual WebKit::WebWidget* CreateWebWidget();
-  RenderWidgetFullscreen();
+  RenderWidgetFullscreen(const WebKit::WebScreenInfo& screen_info);
+  virtual ~RenderWidgetFullscreen();
 
-  void Init(int32 opener_id);
+  virtual WebKit::WebWidget* CreateWebWidget();
+
+  bool Init(int32 opener_id);
 };
+
+}  // namespace content
 
 #endif  // CONTENT_RENDERER_RENDER_WIDGET_FULLSCREEN_H_

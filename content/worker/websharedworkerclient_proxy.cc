@@ -7,8 +7,8 @@
 #include "base/bind.h"
 #include "base/command_line.h"
 #include "base/message_loop.h"
-#include "content/common/file_system/file_system_dispatcher.h"
-#include "content/common/file_system/webfilesystem_callback_dispatcher.h"
+#include "content/common/fileapi/file_system_dispatcher.h"
+#include "content/common/fileapi/webfilesystem_callback_dispatcher.h"
 #include "content/common/webmessageportchannel_impl.h"
 #include "content/common/worker_messages.h"
 #include "content/public/common/content_switches.h"
@@ -32,6 +32,8 @@ using WebKit::WebSecurityOrigin;
 using WebKit::WebString;
 using WebKit::WebWorker;
 using WebKit::WebSharedWorkerClient;
+
+namespace content {
 
 // How long to wait for worker to finish after it's been told to terminate.
 #define kMaxTimeForRunawayWorkerSeconds 3
@@ -168,6 +170,13 @@ void WebSharedWorkerClientProxy::openFileSystem(
       size, create, new WebFileSystemCallbackDispatcher(callbacks));
 }
 
+bool WebSharedWorkerClientProxy::allowIndexedDB(const WebKit::WebString& name) {
+  bool result = false;
+  Send(new WorkerProcessHostMsg_AllowIndexedDB(
+      route_id_, stub_->url().GetOrigin(), name, &result));
+  return result;
+}
+
 void WebSharedWorkerClientProxy::dispatchDevToolsMessage(
     const WebString& message) {
   if (devtools_agent_)
@@ -185,15 +194,6 @@ bool WebSharedWorkerClientProxy::Send(IPC::Message* message) {
 }
 
 void WebSharedWorkerClientProxy::EnsureWorkerContextTerminates() {
-  // Avoid a worker doing a while(1) from never exiting.
-  if (CommandLine::ForCurrentProcess()->HasSwitch(
-          switches::kWebWorkerShareProcesses)) {
-    // Can't kill the process since there could be workers from other
-    // renderer process.
-    NOTIMPLEMENTED();
-    return;
-  }
-
   // This shuts down the process cleanly from the perspective of the browser
   // process, and avoids the crashed worker infobar from appearing to the new
   // page. It's ok to post several of theese, because the first executed task
@@ -204,3 +204,5 @@ void WebSharedWorkerClientProxy::EnsureWorkerContextTerminates() {
           weak_factory_.GetWeakPtr()),
       base::TimeDelta::FromSeconds(kMaxTimeForRunawayWorkerSeconds));
 }
+
+}  // namespace content

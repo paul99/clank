@@ -4,17 +4,16 @@
 
 #include "chrome/browser/extensions/system/system_api.h"
 
-#include "base/json/json_writer.h"
 #include "base/values.h"
-#include "chrome/browser/extensions/extension_event_router.h"
+#include "chrome/browser/browser_process.h"
+#include "chrome/browser/extensions/event_router_forwarder.h"
 #include "chrome/browser/prefs/pref_service.h"
 #include "chrome/browser/profiles/profile.h"
-#include "chrome/browser/profiles/profile_manager.h"
 #include "chrome/common/pref_names.h"
 
 #if defined(OS_CHROMEOS)
-#include "chrome/browser/chromeos/dbus/dbus_thread_manager.h"
-#include "chrome/browser/chromeos/dbus/update_engine_client.h"
+#include "chromeos/dbus/dbus_thread_manager.h"
+#include "chromeos/dbus/update_engine_client.h"
 #else
 #include "chrome/browser/upgrade_detector.h"
 #endif
@@ -48,19 +47,14 @@ const char kOnVolumeChanged[] = "systemPrivate.onVolumeChanged";
 const char kOnScreenUnlocked[] = "systemPrivate.onScreenUnlocked";
 const char kOnWokeUp[] = "systemPrivate.onWokeUp";
 
-// Dispatches an extension event with |args|
-void DispatchEvent(const std::string& event_name, const ListValue& args) {
-  Profile* profile = ProfileManager::GetDefaultProfile();
-  if (!profile)
-    return;
-  ExtensionEventRouter* extension_event_router =
-      profile->GetExtensionEventRouter();
-  if (!extension_event_router)
-    return;
-  std::string json_args;
-  base::JSONWriter::Write(&args, false, &json_args);
-  extension_event_router->DispatchEventToRenderers(
-      event_name, json_args, NULL, GURL());
+// Dispatches an extension event with |argument|
+void DispatchEvent(const std::string& event_name, base::Value* argument) {
+  scoped_ptr<base::ListValue> list_args(new base::ListValue());
+  if (argument) {
+    list_args->Append(argument);
+  }
+  g_browser_process->extension_event_router_forwarder()->
+      BroadcastEventToRenderers(event_name, list_args.Pass(), GURL());
 }
 
 }  // namespace
@@ -73,8 +67,7 @@ bool GetIncognitoModeAvailabilityFunction::RunImpl() {
   EXTENSION_FUNCTION_VALIDATE(
       value >= 0 &&
       value < static_cast<int>(arraysize(kIncognitoModeAvailabilityStrings)));
-  result_.reset(
-      Value::CreateStringValue(kIncognitoModeAvailabilityStrings[value]));
+  SetResult(Value::CreateStringValue(kIncognitoModeAvailabilityStrings[value]));
   return true;
 }
 
@@ -134,37 +127,31 @@ bool GetUpdateStatusFunction::RunImpl() {
   DictionaryValue* dict = new DictionaryValue();
   dict->SetString(kStateKey, state);
   dict->SetDouble(kDownloadProgressKey, download_progress);
-  result_.reset(dict);
+  SetResult(dict);
 
   return true;
 }
 
 void DispatchVolumeChangedEvent(double volume, bool is_volume_muted) {
-  ListValue args;
   DictionaryValue* dict = new DictionaryValue();
   dict->SetDouble(kVolumeKey, volume);
   dict->SetBoolean(kIsVolumeMutedKey, is_volume_muted);
-  args.Append(dict);
-  DispatchEvent(kOnVolumeChanged, args);
+  DispatchEvent(kOnVolumeChanged, dict);
 }
 
 void DispatchBrightnessChangedEvent(int brightness, bool user_initiated) {
-  ListValue args;
   DictionaryValue* dict = new DictionaryValue();
   dict->SetInteger(kBrightnessKey, brightness);
   dict->SetBoolean(kUserInitiatedKey, user_initiated);
-  args.Append(dict);
-  DispatchEvent(kOnBrightnessChanged, args);
+  DispatchEvent(kOnBrightnessChanged, dict);
 }
 
 void DispatchScreenUnlockedEvent() {
-  ListValue args;
-  DispatchEvent(kOnScreenUnlocked, args);
+  DispatchEvent(kOnScreenUnlocked, NULL);
 }
 
 void DispatchWokeUpEvent() {
-  ListValue args;
-  DispatchEvent(kOnWokeUp, args);
+  DispatchEvent(kOnWokeUp, NULL);
 }
 
 }  // namespace extensions

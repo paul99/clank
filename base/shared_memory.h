@@ -1,23 +1,27 @@
-// Copyright (c) 2011 The Chromium Authors. All rights reserved.
+// Copyright (c) 2012 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
 #ifndef BASE_SHARED_MEMORY_H_
 #define BASE_SHARED_MEMORY_H_
-#pragma once
 
 #include "build/build_config.h"
 
+#include <string>
+
 #if defined(OS_POSIX)
+#include <stdio.h>
 #include <sys/types.h>
 #include <semaphore.h>
-#include "base/file_descriptor_posix.h"
 #endif
-#include <string>
 
 #include "base/base_export.h"
 #include "base/basictypes.h"
 #include "base/process.h"
+
+#if defined(OS_POSIX)
+#include "base/file_descriptor_posix.h"
+#endif
 
 class FilePath;
 
@@ -49,7 +53,7 @@ struct SharedMemoryCreateOptions {
 
   // Size of the shared memory object to be created.
   // When opening an existing object, this has no effect.
-  uint32 size;
+  size_t size;
 
   // If true, and the shared memory already exists, Create() will open the
   // existing shared memory and ignore the size parameter.  If false,
@@ -103,11 +107,11 @@ class BASE_EXPORT SharedMemory {
 
   // Creates and maps an anonymous shared memory segment of size size.
   // Returns true on success and false on failure.
-  bool CreateAndMapAnonymous(uint32 size);
+  bool CreateAndMapAnonymous(size_t size);
 
   // Creates an anonymous shared memory segment of size size.
   // Returns true on success and false on failure.
-  bool CreateAnonymous(uint32 size) {
+  bool CreateAnonymous(size_t size) {
     SharedMemoryCreateOptions options;
     options.size = size;
     return Create(options);
@@ -119,7 +123,7 @@ class BASE_EXPORT SharedMemory {
   // If open_existing is false, shared memory must not exist.
   // size is the size of the block to be created.
   // Returns true on success, false on failure.
-  bool CreateNamed(const std::string& name, bool open_existing, uint32 size) {
+  bool CreateNamed(const std::string& name, bool open_existing, size_t size) {
     SharedMemoryCreateOptions options;
     options.name = &name;
     options.open_existing = open_existing;
@@ -138,8 +142,10 @@ class BASE_EXPORT SharedMemory {
 
   // Maps the shared memory into the caller's address space.
   // Returns true on success, false otherwise.  The memory address
-  // is accessed via the memory() accessor.
-  bool Map(uint32 bytes);
+  // is accessed via the memory() accessor.  The mapped address is guaranteed to
+  // have an alignment of at least MAP_MINIMUM_ALIGNMENT.
+  bool Map(size_t bytes);
+  enum { MAP_MINIMUM_ALIGNMENT = 32 };
 
   // Unmaps the shared memory from the caller's address space.
   // Returns true if successful; returns false on error or if the
@@ -154,7 +160,7 @@ class BASE_EXPORT SharedMemory {
   // Deprecated method, please keep track of the size yourself if you created
   // it.
   // http://crbug.com/60821
-  uint32 created_size() const { return created_size_; }
+  size_t created_size() const { return created_size_; }
 
   // Gets a pointer to the opened memory space if it has been
   // Mapped via Map().  Returns NULL if it is not mapped.
@@ -165,7 +171,7 @@ class BASE_EXPORT SharedMemory {
   // identifier is not portable.
   SharedMemoryHandle handle() const;
 
-#if defined(OS_POSIX)
+#if defined(OS_POSIX) && !defined(OS_NACL)
   // Returns a unique identifier for this shared memory segment. Inode numbers
   // are technically only unique to a single filesystem. However, we always
   // allocate shared memory backing files from the same directory, so will end
@@ -200,14 +206,11 @@ class BASE_EXPORT SharedMemory {
   }
 
   // Locks the shared memory.
-  // This is a cross-process lock which may be recursively
-  // locked by the same thread.
-  // TODO(port):
-  // WARNING: on POSIX the lock only works across processes, not
-  // across threads.  2 threads in the same process can both grab the
-  // lock at the same time.  There are several solutions for this
-  // (futex, lockf+anon_semaphore) but none are both clean and common
-  // across Mac and Linux.
+  //
+  // WARNING: on POSIX the memory locking primitive only works across
+  // processes, not across threads.  The Lock method is not currently
+  // used in inner loops, so we protect against multiple threads in a
+  // critical section using a class global lock.
   void Lock();
 
 #if defined(OS_WIN)
@@ -222,7 +225,7 @@ class BASE_EXPORT SharedMemory {
   void Unlock();
 
  private:
-#if defined(OS_POSIX)
+#if defined(OS_POSIX) && !defined(OS_NACL)
   bool PrepareMapFile(FILE *fp);
   bool FilePathForMemoryName(const std::string& mem_name, FilePath* path);
   void LockOrUnlockCommon(int function);
@@ -236,12 +239,12 @@ class BASE_EXPORT SharedMemory {
   HANDLE             mapped_file_;
 #elif defined(OS_POSIX)
   int                mapped_file_;
-  uint32             mapped_size_;
+  size_t             mapped_size_;
   ino_t              inode_;
 #endif
   void*              memory_;
   bool               read_only_;
-  uint32             created_size_;
+  size_t             created_size_;
 #if !defined(OS_POSIX)
   SharedMemoryLock   lock_;
 #endif

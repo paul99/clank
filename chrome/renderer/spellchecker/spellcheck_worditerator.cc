@@ -1,4 +1,4 @@
-// Copyright (c) 2011 The Chromium Authors. All rights reserved.
+// Copyright (c) 2012 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -64,7 +64,7 @@ void SpellcheckCharAttribute::CreateRuleSets(const std::string& language) {
       // For instance, U+05F4 is MidLetter. So, this may be
       // better, but it leads to an empty set error in Thai.
       // "$ALetter   = [[\\p{script=%s}] & [\\p{Word_Break = ALetter}]];"
-      "$ALetter      = [\\p{script=%s}];"
+      "$ALetter      = [\\p{script=%s}%s];"
       "$MidNumLet    = [\\p{Word_Break = MidNumLet}];"
       "$MidLetter    = [\\p{Word_Break = MidLetter}%s];"
       "$MidNum       = [\\p{Word_Break = MidNum}];"
@@ -154,6 +154,11 @@ void SpellcheckCharAttribute::CreateRuleSets(const std::string& language) {
   if (script_code_ == USCRIPT_HANGUL || script_code_ == USCRIPT_THAI)
     aletter_plus = kWithDictionary;
 
+  // Treat numbers as word characters except for Arabic and Hebrew.
+  const char* aletter_extra = " [0123456789]";
+  if (script_code_ == USCRIPT_HEBREW || script_code_ == USCRIPT_ARABIC)
+    aletter_extra = "";
+
   const char kMidLetterExtra[] = "";
   // For Hebrew, treat single/double quoation marks as MidLetter.
   const char kMidLetterExtraHebrew[] = "\"'";
@@ -171,12 +176,14 @@ void SpellcheckCharAttribute::CreateRuleSets(const std::string& language) {
   ruleset_allow_contraction_ = ASCIIToUTF16(
       base::StringPrintf(kRuleTemplate,
                          aletter,
+                         aletter_extra,
                          midletter_extra,
                          aletter_plus,
                          kAllowContraction));
   ruleset_disallow_contraction_ = ASCIIToUTF16(
       base::StringPrintf(kRuleTemplate,
                          aletter,
+                         aletter_extra,
                          midletter_extra,
                          aletter_plus,
                          kDisallowContraction));
@@ -293,7 +300,7 @@ SpellcheckWordIterator::SpellcheckWordIterator()
 }
 
 SpellcheckWordIterator::~SpellcheckWordIterator() {
-  Close();
+  Reset();
 }
 
 bool SpellcheckWordIterator::Initialize(
@@ -305,6 +312,11 @@ bool SpellcheckWordIterator::Initialize(
   UErrorCode open_status = U_ZERO_ERROR;
   UParseError parse_status;
   string16 rule(attribute->GetRuleSet(allow_contraction));
+
+  // If there is no rule set, the attributes were invalid.
+  if (rule.empty())
+    return false;
+
   iterator_ = ubrk_openRules(rule.c_str(), rule.length(), NULL, 0,
                              &parse_status, &open_status);
   if (U_FAILURE(open_status))
@@ -380,7 +392,7 @@ bool SpellcheckWordIterator::GetNextWord(string16* word_string,
   return false;
 }
 
-void SpellcheckWordIterator::Close() {
+void SpellcheckWordIterator::Reset() {
   if (iterator_) {
     ubrk_close(iterator_);
     iterator_ = NULL;

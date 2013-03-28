@@ -9,25 +9,25 @@
 #include "media/audio/audio_manager.h"
 #include "media/audio/audio_output_dispatcher.h"
 
+namespace media {
+
 AudioOutputProxy::AudioOutputProxy(AudioOutputDispatcher* dispatcher)
     : dispatcher_(dispatcher),
       state_(kCreated),
-      physical_stream_(NULL),
       volume_(1.0) {
 }
 
 AudioOutputProxy::~AudioOutputProxy() {
   DCHECK(CalledOnValidThread());
-  DCHECK(state_ == kCreated || state_ == kClosed);
-  DCHECK(!physical_stream_);
+  DCHECK(state_ == kCreated || state_ == kClosed) << "State is: " << state_;
 }
 
 bool AudioOutputProxy::Open() {
   DCHECK(CalledOnValidThread());
   DCHECK_EQ(state_, kCreated);
 
-  if (!dispatcher_->StreamOpened()) {
-    state_ = kError;
+  if (!dispatcher_->OpenStream()) {
+    state_ = kOpenError;
     return false;
   }
 
@@ -37,18 +37,13 @@ bool AudioOutputProxy::Open() {
 
 void AudioOutputProxy::Start(AudioSourceCallback* callback) {
   DCHECK(CalledOnValidThread());
-  DCHECK(physical_stream_ == NULL);
   DCHECK_EQ(state_, kOpened);
 
-  physical_stream_= dispatcher_->StreamStarted();
-  if (!physical_stream_) {
-    state_ = kError;
+  if (!dispatcher_->StartStream(callback, this)) {
+    state_ = kStartError;
     callback->OnError(this, 0);
     return;
   }
-
-  physical_stream_->SetVolume(volume_);
-  physical_stream_->Start(callback);
   state_ = kPlaying;
 }
 
@@ -57,19 +52,14 @@ void AudioOutputProxy::Stop() {
   if (state_ != kPlaying)
     return;
 
-  DCHECK(physical_stream_);
-  physical_stream_->Stop();
-  dispatcher_->StreamStopped(physical_stream_);
-  physical_stream_ = NULL;
+  dispatcher_->StopStream(this);
   state_ = kOpened;
 }
 
 void AudioOutputProxy::SetVolume(double volume) {
   DCHECK(CalledOnValidThread());
   volume_ = volume;
-  if (physical_stream_) {
-    physical_stream_->SetVolume(volume);
-  }
+  dispatcher_->StreamVolumeSet(this, volume);
 }
 
 void AudioOutputProxy::GetVolume(double* volume) {
@@ -79,11 +69,13 @@ void AudioOutputProxy::GetVolume(double* volume) {
 
 void AudioOutputProxy::Close() {
   DCHECK(CalledOnValidThread());
-  DCHECK(state_ == kCreated || state_ == kError || state_ == kOpened);
-  DCHECK(!physical_stream_);
+  DCHECK(state_ == kCreated || state_ == kOpenError || state_ == kOpened ||
+         state_ == kStartError);
 
-  if (state_ != kCreated)
-    dispatcher_->StreamClosed();
+  // kStartError means OpenStream() succeeded and the stream must be closed
+  // before destruction.
+  if (state_ != kCreated && state_ != kOpenError)
+    dispatcher_->CloseStream(this);
 
   state_ = kClosed;
 
@@ -93,3 +85,5 @@ void AudioOutputProxy::Close() {
   // dispatcher+audio manager.
   delete this;
 }
+
+}  // namespace media

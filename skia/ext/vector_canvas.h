@@ -4,7 +4,6 @@
 
 #ifndef SKIA_EXT_VECTOR_CANVAS_H_
 #define SKIA_EXT_VECTOR_CANVAS_H_
-#pragma once
 
 #include "base/compiler_specific.h"
 #include "skia/ext/platform_canvas.h"
@@ -19,12 +18,8 @@ namespace skia {
 // support reading back from the bitmap backstore since it is not used.
 class SK_API VectorCanvas : public PlatformCanvas {
  public:
-  VectorCanvas();
-#if !defined(OS_ANDROID)
-  // Older Skia in Android
   // Ownership of |device| is transfered to VectorCanvas.
   explicit VectorCanvas(SkDevice* device);
-#endif
   virtual ~VectorCanvas();
 
   virtual SkBounder* setBounder(SkBounder* bounder) OVERRIDE;
@@ -42,3 +37,4 @@ class SK_API VectorCanvas : public PlatformCanvas {
 }  // namespace skia
 
 #endif  // SKIA_EXT_VECTOR_CANVAS_H_
+

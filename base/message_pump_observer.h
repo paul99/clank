@@ -1,11 +1,11 @@
-// Copyright (c) 2011 The Chromium Authors. All rights reserved.
+// Copyright (c) 2012 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
 #ifndef BASE_MESSAGE_PUMP_OBSERVER_H
 #define BASE_MESSAGE_PUMP_OBSERVER_H
-#pragma once
 
+#include "base/base_export.h"
 #include "base/event_types.h"
 
 namespace base {
@@ -19,11 +19,11 @@ enum EventStatus {
 
 // A MessagePumpObserver is an object that receives global
 // notifications from the UI MessageLoop with MessagePumpWin or
-// MessagePumpX.
+// MessagePumpAuraX11.
 //
 // NOTE: An Observer implementation should be extremely fast!
 //
-// For use with MessagePumpX, please see message_pump_glib.h for more
+// For use with MessagePumpAuraX11, please see message_pump_glib.h for more
 // info about how this is invoked in this environment.
 class BASE_EXPORT MessagePumpObserver {
  public:

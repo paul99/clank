@@ -1,4 +1,4 @@
-// Copyright (c) 2011 The Chromium Authors. All rights reserved.
+// Copyright (c) 2012 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -7,15 +7,42 @@
 #import <QTKit/QTKit.h>
 
 #include "base/logging.h"
+#include "base/mac/crash_logging.h"
+#include "base/mac/scoped_nsexception_enabler.h"
 #include "media/video/capture/mac/video_capture_device_mac.h"
 #include "media/video/capture/video_capture_device.h"
+#include "media/video/capture/video_capture_types.h"
 
 @implementation VideoCaptureDeviceQTKit
 
 #pragma mark Class methods
 
-+ (NSArray *)deviceNames {
-  return [QTCaptureDevice inputDevicesWithMediaType:QTMediaTypeVideo];
++ (void)getDeviceNames:(NSMutableDictionary*)deviceNames {
+  // Third-party drivers often throw exceptions, which are fatal in
+  // Chromium (see comments in scoped_nsexception_enabler.h).  The
+  // following catches any exceptions and continues in an orderly
+  // fashion with no devices detected.
+  NSArray* captureDevices =
+      base::mac::RunBlockIgnoringExceptions(^() {
+          return [QTCaptureDevice inputDevicesWithMediaType:QTMediaTypeVideo];
+      });
+
+  for (QTCaptureDevice* device in captureDevices) {
+    [deviceNames setObject:[device localizedDisplayName]
+                    forKey:[device uniqueID]];
+  }
+}
+
++ (NSDictionary*)deviceNames {
+  NSMutableDictionary* deviceNames =
+      [[[NSMutableDictionary alloc] init] autorelease];
+
+  // TODO(shess): Post to the main thread to see if that helps
+  // http://crbug.com/139164
+  [self performSelectorOnMainThread:@selector(getDeviceNames:)
+                         withObject:deviceNames
+                      waitUntilDone:YES];
+  return deviceNames;
 }
 
 #pragma mark Public methods
@@ -24,6 +51,7 @@
   self = [super init];
   if (self) {
     frameReceiver_ = frameReceiver;
+    lock_ = [[NSLock alloc] init];
   }
   return self;
 }
@@ -32,6 +60,12 @@
   [captureSession_ release];
   [captureDeviceInput_ release];
   [super dealloc];
+}
+
+- (void)setFrameReceiver:(media::VideoCaptureDeviceMac *)frameReceiver {
+  [lock_ lock];
+  frameReceiver_ = frameReceiver;
+  [lock_ unlock];
 }
 
 - (BOOL)setCaptureDevice:(NSString *)deviceId {
@@ -69,6 +103,11 @@
                   << [[error localizedDescription] UTF8String];
       return NO;
     }
+
+    // This key can be used to check if video capture code was related to a
+    // particular crash.
+    base::mac::SetCrashKeyValue(@"VideoCaptureDeviceQTKit", @"OpenedDevice");
+
     return YES;
   } else {
     // Remove the previously set capture device.
@@ -79,6 +118,24 @@
     if ([[captureSession_ inputs] count] > 0) {
       // The device is still running.
       [self stopCapture];
+    }
+    if ([[captureSession_ outputs] count] > 0) {
+      // Only one output is set for |captureSession_|.
+      id output = [[captureSession_ outputs] objectAtIndex:0];
+      [output setDelegate:nil];
+
+      // TODO(shess): QTKit achieves thread safety by posting messages
+      // to the main thread.  As part of -addOutput:, it posts a
+      // message to the main thread which in turn posts a notification
+      // which will run in a future spin after the original method
+      // returns.  -removeOutput: can post a main-thread message in
+      // between while holding a lock which the notification handler
+      // will need.  Posting either -addOutput: or -removeOutput: to
+      // the main thread should fix it, remove is likely safer.
+      // http://crbug.com/152757
+      [captureSession_ performSelectorOnMainThread:@selector(removeOutput:)
+                                        withObject:output
+                                     waitUntilDone:YES];
     }
     [captureSession_ release];
     captureSession_ = nil;
@@ -95,6 +152,10 @@
   }
   if ([[captureSession_ outputs] count] != 1) {
     DLOG(ERROR) << "Video capture capabilities already set.";
+    return NO;
+  }
+  if (frameRate <= 0) {
+    DLOG(ERROR) << "Wrong frame rate.";
     return NO;
   }
 
@@ -114,6 +175,9 @@
           nil];
   [[[captureSession_ outputs] objectAtIndex:0]
       setPixelBufferAttributes:captureDictionary];
+
+  [[[captureSession_ outputs] objectAtIndex:0]
+      setMinimumVideoFrameInterval:(NSTimeInterval)1/(float)frameRate];
   return YES;
 }
 
@@ -147,7 +211,9 @@
   didOutputVideoFrame:(CVImageBufferRef)videoFrame
      withSampleBuffer:(QTSampleBuffer *)sampleBuffer
        fromConnection:(QTCaptureConnection *)connection {
+  [lock_ lock];
   if(!frameReceiver_) {
+    [lock_ unlock];
     return;
   }
 
@@ -159,18 +225,45 @@
     size_t bytesPerRow = CVPixelBufferGetBytesPerRow(videoFrame);
     int frameHeight = CVPixelBufferGetHeight(videoFrame);
     int frameSize = bytesPerRow * frameHeight;
-    media::VideoCaptureDevice::Capability captureCapability;
+
+    // TODO(shess): bytesPerRow may not correspond to frameWidth_*4,
+    // but VideoCaptureController::OnIncomingCapturedFrame() requires
+    // it to do so.  Plumbing things through is intrusive, for now
+    // just deliver an adjusted buffer.
+    UInt8* addressToPass = static_cast<UInt8*>(baseAddress);
+    size_t expectedBytesPerRow = frameWidth_ * 4;
+    if (bytesPerRow > expectedBytesPerRow) {
+      // TODO(shess): frameHeight and frameHeight_ are not the same,
+      // try to do what the surrounding code seems to assume.
+      // Ironically, captureCapability and frameSize are ignored
+      // anyhow.
+      adjustedFrame_.resize(expectedBytesPerRow * frameHeight);
+      // std::vector is contiguous according to standard.
+      UInt8* adjustedAddress = &adjustedFrame_[0];
+
+      for (int y = 0; y < frameHeight; ++y) {
+        memcpy(adjustedAddress + y * expectedBytesPerRow,
+               addressToPass + y * bytesPerRow,
+               expectedBytesPerRow);
+      }
+
+      addressToPass = adjustedAddress;
+      frameSize = frameHeight * expectedBytesPerRow;
+    }
+    media::VideoCaptureCapability captureCapability;
     captureCapability.width = frameWidth_;
     captureCapability.height = frameHeight_;
     captureCapability.frame_rate = frameRate_;
-    captureCapability.color = media::VideoCaptureDevice::kARGB;
+    captureCapability.color = media::VideoCaptureCapability::kARGB;
+    captureCapability.expected_capture_delay = 0;
+    captureCapability.interlaced = false;
 
     // Deliver the captured video frame.
-    frameReceiver_->ReceiveFrame(static_cast<UInt8*>(baseAddress), frameSize,
-                                 captureCapability);
+    frameReceiver_->ReceiveFrame(addressToPass, frameSize, captureCapability);
 
     CVPixelBufferUnlockBaseAddress(videoFrame, kLockFlags);
   }
+  [lock_ unlock];
 }
 
 @end

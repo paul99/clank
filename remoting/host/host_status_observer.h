@@ -7,6 +7,8 @@
 
 #include <string>
 
+#include "third_party/skia/include/core/SkRect.h"
+
 namespace net {
 class IPEndPoint;
 }  // namespace net
@@ -14,30 +16,45 @@ class IPEndPoint;
 namespace remoting {
 class SignalStrategy;
 
+namespace protocol {
+struct TransportRoute;
+};
+
 // Interface for host status observer. All methods are invoked on the
-// network thread.
+// network thread. Observers must not tear-down ChromotingHost state
+// on receipt of these callbacks; they are purely informational.
 class HostStatusObserver {
  public:
   HostStatusObserver() { }
   virtual ~HostStatusObserver() { }
 
   // Called when an unauthorized user attempts to connect to the host.
-  virtual void OnAccessDenied(const std::string& jid) = 0;
+  virtual void OnAccessDenied(const std::string& jid) {}
 
-  // Called when a client authenticates, or disconnects. Observers
-  // must not tear-down ChromotingHost state on receipt of this
-  // callback; it is purely informational.
-  virtual void OnClientAuthenticated(const std::string& jid) = 0;
-  virtual void OnClientDisconnected(const std::string& jid) = 0;
+  // A new client is authenticated.
+  virtual void OnClientAuthenticated(const std::string& jid) {}
+
+  // All channels for an autheticated client are connected.
+  virtual void OnClientConnected(const std::string& jid) {}
+
+  // An authenticated client is disconnected.
+  virtual void OnClientDisconnected(const std::string& jid) {}
 
   // Called on notification of a route change event, when a channel is
   // connected.
-  virtual void OnClientIpAddress(const std::string& jid,
-                                 const std::string& channel_name,
-                                 const net::IPEndPoint& end_point) { }
+  virtual void OnClientRouteChange(const std::string& jid,
+                                   const std::string& channel_name,
+                                   const protocol::TransportRoute& route) {}
+
+  // Called when the client view dimensions change.
+  virtual void OnClientDimensionsChanged(const std::string& jid,
+                                         const SkISize& size) {}
+
+  // Called when hosting is started for an account.
+  virtual void OnStart(const std::string& xmpp_login) {}
 
   // Called when the host shuts down.
-  virtual void OnShutdown() = 0;
+  virtual void OnShutdown() {}
 };
 
 }  // namespace remoting

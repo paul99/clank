@@ -7,121 +7,252 @@
  */
 var FileType = {};
 
-FileType.types = {
+/**
+ * Description of known file types.
+ * Pair type-subtype defines order when sorted by file type.
+ */
+FileType.types = [
   // Images
-  'jpeg': {type: 'image', name: 'IMAGE_FILE_TYPE', subtype: 'JPEG'},
-  'jpg':  {type: 'image', name: 'IMAGE_FILE_TYPE', subtype: 'JPEG'},
-  'bmp':  {type: 'image', name: 'IMAGE_FILE_TYPE', subtype: 'BMP'},
-  'gif':  {type: 'image', name: 'IMAGE_FILE_TYPE', subtype: 'GIF'},
-  'ico':  {type: 'image', name: 'IMAGE_FILE_TYPE', subtype: 'ICO'},
-  'png':  {type: 'image', name: 'IMAGE_FILE_TYPE', subtype: 'PNG'},
-  'webp': {type: 'image', name: 'IMAGE_FILE_TYPE', subtype: 'WebP'},
+  {type: 'image', name: 'IMAGE_FILE_TYPE', subtype: 'JPEG',
+   pattern: /\.jpe?g$/i},
+  {type: 'image', name: 'IMAGE_FILE_TYPE', subtype: 'BMP',
+   pattern: /\.bmp$/i},
+  {type: 'image', name: 'IMAGE_FILE_TYPE', subtype: 'GIF',
+   pattern: /\.gif$/i},
+  {type: 'image', name: 'IMAGE_FILE_TYPE', subtype: 'ICO',
+   pattern: /\.ico$/i},
+  {type: 'image', name: 'IMAGE_FILE_TYPE', subtype: 'PNG',
+   pattern: /\.png$/i},
+  {type: 'image', name: 'IMAGE_FILE_TYPE', subtype: 'WebP',
+   pattern: /\.webp$/i},
+  {type: 'image', name: 'IMAGE_FILE_TYPE', subtype: 'TIFF',
+   pattern: /\.tiff?$/i},
 
   // Video
-  '3gp':  {type: 'video', name: 'VIDEO_FILE_TYPE', subtype: '3GP'},
-  'avi':  {type: 'video', name: 'VIDEO_FILE_TYPE', subtype: 'AVI'},
-  'mov':  {type: 'video', name: 'VIDEO_FILE_TYPE', subtype: 'QuickTime'},
-  'mp4':  {type: 'video', name: 'VIDEO_FILE_TYPE', subtype: 'MPEG'},
-  'm4v':  {type: 'video', name: 'VIDEO_FILE_TYPE', subtype: 'MPEG'},
-  'mpg':  {type: 'video', name: 'VIDEO_FILE_TYPE', subtype: 'MPEG'},
-  'mpeg': {type: 'video', name: 'VIDEO_FILE_TYPE', subtype: 'MPEG'},
-  'mpg4': {type: 'video', name: 'VIDEO_FILE_TYPE', subtype: 'MPEG'},
-  'mpeg4': {type: 'video', name: 'VIDEO_FILE_TYPE', subtype: 'MPEG'},
-  'ogm':  {type: 'video', name: 'VIDEO_FILE_TYPE', subtype: 'OGG'},
-  'ogv':  {type: 'video', name: 'VIDEO_FILE_TYPE', subtype: 'OGG'},
-  'ogx':  {type: 'video', name: 'VIDEO_FILE_TYPE', subtype: 'OGG'},
-  'webm': {type: 'video', name: 'VIDEO_FILE_TYPE', subtype: 'WebM'},
+  {type: 'video', name: 'VIDEO_FILE_TYPE', subtype: '3GP',
+   pattern: /\.3gp$/i},
+  {type: 'video', name: 'VIDEO_FILE_TYPE', subtype: 'AVI',
+   pattern: /\.avi$/i},
+  {type: 'video', name: 'VIDEO_FILE_TYPE', subtype: 'QuickTime',
+   pattern: /\.mov$/i},
+  {type: 'video', name: 'VIDEO_FILE_TYPE', subtype: 'MPEG',
+   pattern: /\.m(p4|4v|pg|peg|pg4|peg4)$/i},
+  {type: 'video', name: 'VIDEO_FILE_TYPE', subtype: 'OGG',
+   pattern: /\.og(m|v|x)$/i},
+  {type: 'video', name: 'VIDEO_FILE_TYPE', subtype: 'WebM',
+   pattern: /\.webm$/i},
 
   // Audio
-  'flac': {type: 'audio', name: 'AUDIO_FILE_TYPE', subtype: 'FLAC'},
-  'mp3':  {type: 'audio', name: 'AUDIO_FILE_TYPE', subtype: 'MP3'},
-  'm4a':  {type: 'audio', name: 'AUDIO_FILE_TYPE', subtype: 'MPEG'},
-  'oga':  {type: 'audio', name: 'AUDIO_FILE_TYPE', subtype: 'OGG'},
-  'ogg':  {type: 'audio', name: 'AUDIO_FILE_TYPE', subtype: 'OGG'},
-  'wav':  {type: 'audio', name: 'AUDIO_FILE_TYPE', subtype: 'WAV'},
+  {type: 'audio', name: 'AUDIO_FILE_TYPE', subtype: 'FLAC',
+   pattern: /\.flac$/i},
+  {type: 'audio', name: 'AUDIO_FILE_TYPE', subtype: 'MP3',
+   pattern: /\.mp3$/i},
+  {type: 'audio', name: 'AUDIO_FILE_TYPE', subtype: 'MPEG',
+   pattern: /\.m4a$/i},
+  {type: 'audio', name: 'AUDIO_FILE_TYPE', subtype: 'OGG',
+   pattern: /\.og(a|g)$/i},
+  {type: 'audio', name: 'AUDIO_FILE_TYPE', subtype: 'WAV',
+   pattern: /\.wav$/i},
 
   // Text
-  'pod': {type: 'text', name: 'PLAIN_TEXT_FILE_TYPE', subtype: 'POD'},
-  'rst': {type: 'text', name: 'PLAIN_TEXT_FILE_TYPE', subtype: 'RST'},
-  'txt': {type: 'text', name: 'PLAIN_TEXT_FILE_TYPE', subtype: 'TXT'},
-  'log': {type: 'text', name: 'PLAIN_TEXT_FILE_TYPE', subtype: 'LOG'},
+  {type: 'text', name: 'PLAIN_TEXT_FILE_TYPE', subtype: 'TXT',
+   pattern: /\.txt$/i},
+
+  // Archive
+  {type: 'archive', name: 'ZIP_ARCHIVE_FILE_TYPE', subtype: 'ZIP',
+   pattern: /\.zip$/i},
+  {type: 'archive', name: 'RAR_ARCHIVE_FILE_TYPE', subtype: 'RAR',
+   pattern: /\.rar$/i},
+  {type: 'archive', name: 'TAR_ARCHIVE_FILE_TYPE', subtype: 'TAR',
+   pattern: /\.tar$/i},
+  {type: 'archive', name: 'TAR_BZIP2_ARCHIVE_FILE_TYPE', subtype: 'TBZ2',
+   pattern: /\.(tar\.bz2|tbz|tbz2)$/i},
+  {type: 'archive', name: 'TAR_GZIP_ARCHIVE_FILE_TYPE', subtype: 'TGZ',
+   pattern: /\.(tar\.|t)gz$/i},
+
+  // Hosted docs.
+  {type: 'hosted', icon: 'gdoc', name: 'GDOC_DOCUMENT_FILE_TYPE',
+   subtype: 'doc', pattern: /\.gdoc$/i},
+  {type: 'hosted', icon: 'gsheet', name: 'GSHEET_DOCUMENT_FILE_TYPE',
+   subtype: 'sheet', pattern: /\.gsheet$/i},
+  {type: 'hosted', icon: 'gslides', name: 'GSLIDES_DOCUMENT_FILE_TYPE',
+   subtype: 'slides', pattern: /\.gslides$/i},
+  {type: 'hosted', icon: 'gdraw', name: 'GDRAW_DOCUMENT_FILE_TYPE',
+   subtype: 'draw', pattern: /\.gdraw$/i},
+  {type: 'hosted', icon: 'gtable', name: 'GTABLE_DOCUMENT_FILE_TYPE',
+   subtype: 'table', pattern: /\.gtable$/i},
+  {type: 'hosted', icon: 'glink', name: 'GLINK_DOCUMENT_FILE_TYPE',
+   subtype: 'glink', pattern: /\.glink$/i},
 
   // Others
-  'zip': {type: 'archive', name: 'ZIP_ARCHIVE_FILE_TYPE'},
-
-  'pdf': {type: 'text', icon: 'pdf', name: 'PDF_DOCUMENT_FILE_TYPE',
-          subtype: 'PDF'},
-  'html': {type: 'text', icon: 'html', name: 'HTML_DOCUMENT_FILE_TYPE',
-           subtype: 'HTML'},
-  'htm': {type: 'text', icon: 'html', name: 'HTML_DOCUMENT_FILE_TYPE',
-          subtype: 'HTML'}
-};
-
-FileType.previewArt = {
-  'audio': 'images/filetype_large_audio.png',
-  'folder': 'images/filetype_large_folder.png',
-  'unknown': 'images/filetype_large_generic.png',
-  'image': 'images/filetype_large_image.png',
-  'video': 'images/filetype_large_video.png'
-};
+  {type: 'document', icon: 'pdf', name: 'PDF_DOCUMENT_FILE_TYPE',
+   subtype: 'PDF', pattern: /\.pdf$/i},
+  {type: 'document', name: 'HTML_DOCUMENT_FILE_TYPE',
+   subtype: 'HTML', pattern: /\.(html?|mht|mhtml)$/i},
+  {type: 'document', icon: 'word', name: 'WORD_DOCUMENT_FILE_TYPE',
+   subtype: 'Word', pattern: /\.(doc|docx)$/i},
+  {type: 'document', icon: 'ppt', name: 'POWERPOINT_PRESENTATION_FILE_TYPE',
+   subtype: 'PPT', pattern: /\.(ppt|pptx)$/i},
+  {type: 'document', icon: 'excel', name: 'EXCEL_FILE_TYPE',
+   subtype: 'Excel', pattern: /\.(xls|xlsx)$/i}
+];
 
 /**
- * Extract extension from the file name and convert it to lower case.
- *
- * @param {string} url
- * @return {string}
+ * A special type for directory.
  */
-FileType.getFileExtension_ = function (url) {
-  var extIndex = url.lastIndexOf('.');
-  if (extIndex < 0)
-    return '';
-  return url.substr(extIndex + 1).toLowerCase();
-};
+FileType.DIRECTORY = {name: 'FOLDER', type: '.folder', icon: 'folder'};
 
-FileType.getType = function(url) {
-  var extension = FileType.getFileExtension_(url);
-  if (extension in FileType.types)
-    return FileType.types[extension];
-  return {};
+/**
+ * Get the file type object for a given file.
+ *
+ * @param {string|Entry} file Reference to the file.
+ *     Can be a name, a path, a url or a File API Entry.
+ * @return {Object} The matching file type object or an empty object.
+ */
+FileType.getType = function(file) {
+  if (typeof file == 'object') {
+    if (file.isDirectory)
+      return FileType.DIRECTORY;
+    else
+      file = file.name;
+  }
+  var types = FileType.types;
+  for (var i = 0; i < types.length; i++) {
+    if (types[i].pattern.test(file)) {
+      return types[i];
+    }
+  }
+  // Unknown file type.
+  var extensionStartIndex = file.lastIndexOf('.');
+  if (extensionStartIndex == -1 || extensionStartIndex == file.length - 1) {
+    return { name: 'NO_EXTENSION_FILE_TYPE', type: 'UNKNOWN', icon: '' };
+  } else {
+    var extension = file.substr(extensionStartIndex + 1).toUpperCase();
+    return { name: 'GENERIC_FILE_TYPE', type: 'UNKNOWN',
+             subtype: extension, icon: '' };
+  }
 };
 
 /**
- * Get the media type for a given url.
+ * @param {string|Entry} file Reference to the file.
+ *     Can be a name, a path, a url or a File API Entry.
+ * @return {string} Localized string representation of file type.
+ */
+FileType.getTypeString = function(file) {
+  var fileType = FileType.getType(file);
+  if (fileType.subtype)
+    return strf(fileType.name, fileType.subtype);
+  else
+    return str(fileType.name);
+};
+
+/**
+ * Pattern for urls pointing to Google Drive files.
+ */
+FileType.GDRIVE_URL_PATTERN =
+    new RegExp('^filesystem:[^/]*://[^/]*/[^/]*/drive/(.*)');
+
+/**
+ * Pattern for file paths pointing to Google Drive files.
+ */
+FileType.GDRIVE_PATH_PATTERN =
+    new RegExp('^/drive/');
+
+/**
+ * @param {string|Entry} file The url string or entry.
+ * @return {boolean} Whether this provider supports the url.
+ */
+FileType.isOnGDrive = function(file) {
+  return typeof file == 'string' ?
+      FileType.GDRIVE_URL_PATTERN.test(file) :
+      FileType.GDRIVE_PATH_PATTERN.test(file.fullPath);
+};
+
+
+/**
+ * Get the media type for a given file.
  *
- * @param {string} url
+ * @param {string|Entry} file Reference to the file.
  * @return {string} The value of 'type' property from one of the elements in
  *   FileType.types or undefined.
  */
-FileType.getMediaType = function(url) {
-  return FileType.getType(url).type;
+FileType.getMediaType = function(file) {
+  return FileType.getType(file).type;
 };
 
 /**
- * Get the preview url for a given type.
- *
- * @param {string} type
- * @return {string}
+ * @param {string|Entry} file Reference to the file.
+ * @return {boolean} True if audio file.
  */
-FileType.getPreviewArt = function(type) {
-  return FileType.previewArt[type] || FileType.previewArt['unknown'];
+FileType.isAudio = function(file) {
+  return FileType.getMediaType(file) == 'audio';
 };
 
-FileType.MAX_PREVIEW_PIXEL_COUNT = 1 << 21; // 2 MPix
-FileType.MAX_PREVIEW_FILE_SIZE = 1 << 20; // 1 Mb
+/**
+ * @param {string|Entry} file Reference to the file.
+ * @return {boolean} True if image file.
+ */
+FileType.isImage = function(file) {
+  return FileType.getMediaType(file) == 'image';
+};
 
 /**
- * If an image file does not have an embedded thumbnail we might want to use
- * the image itself as a thumbnail. If the image is too large it hurts
- * the performance very much so we allow it only for moderately sized files.
- *
- * @param {Object} metadata
- * @param {number} opt_size The file size to be used if the metadata does not
- *   contain fileSize.
- * @return {boolean} Whether it is OK to use the image url for a preview.
+ * @param {string|Entry} file Reference to the file.
+ * @return {boolean} True if video file.
  */
-FileType.canUseImageUrlForPreview = function(metadata, opt_size) {
-  var fileSize = metadata.fileSize || opt_size;
-  return ((fileSize && fileSize <= FileType.MAX_PREVIEW_FILE_SIZE)  ||
-      (metadata.width && metadata.height &&
-      (metadata.width * metadata.height <= FileType.MAX_PREVIEW_PIXEL_COUNT)));
+FileType.isVideo = function(file) {
+  return FileType.getMediaType(file) == 'video';
+};
+
+
+/**
+ * Files with more pixels won't have preview.
+ * @param {string|Entry} file Reference to the file.
+ * @return {boolean} True if image or video.
+ */
+FileType.isImageOrVideo = function(file) {
+  var type = FileType.getMediaType(file);
+  return type == 'image' || type == 'video';
+};
+
+/**
+ * @param {string|Entry} file Reference to the file.
+ * @return {boolean} Returns true if the file is hosted.
+ */
+FileType.isHosted = function(file) {
+  return FileType.getType(file).type === 'hosted';
+};
+
+/**
+ * @param {string|Entry} file Reference to the file.
+ * @return {boolean} Returns true if the file is not hidden, and we should
+ *     display it.
+ */
+FileType.isVisible = function(file) {
+  if (typeof file == 'object') {
+    file = file.name;
+  }
+
+  var path = util.extractFilePath(file);
+  if (path) file = path;
+
+  file = file.split('/').pop();
+  return file.indexOf('.') != 0 && !(file in FileType.HIDDEN_NAMES);
+};
+
+/**
+ * File/directory names that we know are usually hidden.
+ */
+FileType.HIDDEN_NAMES = {
+  'RECYCLED': true
+};
+
+/**
+ * @param {string|Entry} file Reference to the file.
+ * @return {string} Returns string that represents the file icon.
+ *                  It refers to a file 'images/filetype_' + icon + '.png'.
+ */
+FileType.getIcon = function(file) {
+  var fileType = FileType.getType(file);
+  return fileType.icon || fileType.type || 'unknown';
 };

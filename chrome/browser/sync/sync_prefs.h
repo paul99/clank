@@ -1,21 +1,19 @@
-// Copyright (c) 2011 The Chromium Authors. All rights reserved.
+// Copyright (c) 2012 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
 #ifndef CHROME_BROWSER_SYNC_SYNC_PREFS_H_
 #define CHROME_BROWSER_SYNC_SYNC_PREFS_H_
-#pragma once
 
 #include "base/basictypes.h"
 #include "base/compiler_specific.h"
 #include "base/memory/weak_ptr.h"
 #include "base/observer_list.h"
+#include "base/prefs/public/pref_member.h"
 #include "base/threading/non_thread_safe.h"
 #include "base/time.h"
-#include "chrome/browser/prefs/pref_member.h"
-#include "chrome/browser/sync/notifier/invalidation_version_tracker.h"
-#include "chrome/browser/sync/syncable/model_type.h"
-#include "content/public/browser/notification_observer.h"
+#include "sync/internal_api/public/base/model_type.h"
+#include "sync/notifier/invalidation_state_tracker.h"
 
 class PrefService;
 
@@ -44,9 +42,8 @@ class SyncPrefObserver {
 //   sync_setup_wizard.cc
 //   sync_setup_wizard_unittest.cc
 //   two_client_preferences_sync_test.cc
-class SyncPrefs : public base::SupportsWeakPtr<SyncPrefs>,
-                  public sync_notifier::InvalidationVersionTracker,
-                  public content::NotificationObserver {
+class SyncPrefs : NON_EXPORTED_BASE(public base::NonThreadSafe),
+                  public base::SupportsWeakPtr<SyncPrefs> {
  public:
   // |pref_service| may be NULL (for unit tests), but in that case no
   // setter methods should be called.  Does not take ownership of
@@ -65,7 +62,6 @@ class SyncPrefs : public base::SupportsWeakPtr<SyncPrefs>,
 
   bool HasSyncSetupCompleted() const;
   void SetSyncSetupCompleted();
-  void ClearSyncSetupCompleted();
 
   bool IsStartSuppressed() const;
   void SetStartSuppressed(bool is_suppressed);
@@ -78,13 +74,11 @@ class SyncPrefs : public base::SupportsWeakPtr<SyncPrefs>,
   bool HasKeepEverythingSynced() const;
   void SetKeepEverythingSynced(bool keep_everything_synced);
 
-  std::string GetUsername() const;
-
   // The returned set is guaranteed to be a subset of
   // |registered_types|.  Returns |registered_types| directly if
   // HasKeepEverythingSynced() is true.
-  syncable::ModelTypeSet GetPreferredDataTypes(
-      syncable::ModelTypeSet registered_types) const;
+  syncer::ModelTypeSet GetPreferredDataTypes(
+      syncer::ModelTypeSet registered_types) const;
   // |preferred_types| should be a subset of |registered_types|.  All
   // types in |preferred_types| are marked preferred, and all types in
   // |registered_types| \ |preferred_types| are marked not preferred.
@@ -92,43 +86,55 @@ class SyncPrefs : public base::SupportsWeakPtr<SyncPrefs>,
   // HasKeepEverythingSynced() is true, but won't be visible until
   // SetKeepEverythingSynced(false) is called.
   void SetPreferredDataTypes(
-    syncable::ModelTypeSet registered_types,
-    syncable::ModelTypeSet preferred_types);
+    syncer::ModelTypeSet registered_types,
+    syncer::ModelTypeSet preferred_types);
 
   // This pref is set outside of sync.
   bool IsManaged() const;
 
+  // Use this encryption bootstrap token if we're using an explicit passphrase.
   std::string GetEncryptionBootstrapToken() const;
   void SetEncryptionBootstrapToken(const std::string& token);
 
-  // InvalidationVersionTracker implementation.
-  virtual sync_notifier::InvalidationVersionMap
-      GetAllMaxVersions() const OVERRIDE;
-  virtual void SetMaxVersion(syncable::ModelType model_type,
-                             int64 max_version) OVERRIDE;
+  // Use this keystore bootstrap token if we're not using an explicit
+  // passphrase.
+  std::string GetKeystoreEncryptionBootstrapToken() const;
+  void SetKeystoreEncryptionBootstrapToken(const std::string& token);
+
+  // Maps |data_type| to its corresponding preference name.
+  static const char* GetPrefNameForDataType(syncer::ModelType data_type);
+
+#if defined(OS_CHROMEOS)
+  // Use this spare bootstrap token only when setting up sync for the first
+  // time.
+  std::string GetSpareBootstrapToken() const;
+  void SetSpareBootstrapToken(const std::string& token);
+#endif
 
   // Merges the given set of types with the set of acknowledged types.
-  void AcknowledgeSyncedTypes(syncable::ModelTypeSet types);
-
-  // content::NotificationObserver implementation.
-  virtual void Observe(int type,
-                       const content::NotificationSource& source,
-                       const content::NotificationDetails& details) OVERRIDE;
+  void AcknowledgeSyncedTypes(syncer::ModelTypeSet types);
 
   // For testing.
 
   void SetManagedForTest(bool is_managed);
-  syncable::ModelTypeSet GetAcknowledgeSyncedTypesForTest() const;
+  syncer::ModelTypeSet GetAcknowledgeSyncedTypesForTest() const;
 
  private:
+  void RegisterPrefGroups();
   void RegisterPreferences();
 
   void RegisterDataTypePreferredPref(
-      syncable::ModelType type, bool is_preferred);
-  bool GetDataTypePreferred(syncable::ModelType type) const;
-  void SetDataTypePreferred(syncable::ModelType type, bool is_preferred);
+      syncer::ModelType type, bool is_preferred);
+  bool GetDataTypePreferred(syncer::ModelType type) const;
+  void SetDataTypePreferred(syncer::ModelType type, bool is_preferred);
 
-  base::NonThreadSafe non_thread_safe_;
+  // Returns a ModelTypeSet based on |types| expanded to include pref groups
+  // (see |pref_groups_|), but as a subset of |registered_types|.
+  syncer::ModelTypeSet ResolvePrefGroups(
+      syncer::ModelTypeSet registered_types,
+      syncer::ModelTypeSet types) const;
+
+  void OnSyncManagedPrefChanged();
 
   // May be NULL.
   PrefService* const pref_service_;
@@ -138,6 +144,16 @@ class SyncPrefs : public base::SupportsWeakPtr<SyncPrefs>,
   // The preference that controls whether sync is under control by
   // configuration management.
   BooleanPrefMember pref_sync_managed_;
+
+  // Groups of prefs that always have the same value as a "master" pref.
+  // For example, the APPS group has {APP_NOTIFICATIONS, APP_SETTINGS}
+  // (as well as APPS, but that is implied), so
+  //   pref_groups_[syncer::APPS] =       { syncer::APP_NOTIFICATIONS,
+  //                                          syncer::APP_SETTINGS }
+  //   pref_groups_[syncer::EXTENSIONS] = { syncer::EXTENSION_SETTINGS }
+  // etc.
+  typedef std::map<syncer::ModelType, syncer::ModelTypeSet> PrefGroupsMap;
+  PrefGroupsMap pref_groups_;
 
   DISALLOW_COPY_AND_ASSIGN(SyncPrefs);
 };

@@ -1,4 +1,4 @@
-// Copyright (c) 2011 The Chromium Authors. All rights reserved.
+// Copyright (c) 2012 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -9,8 +9,10 @@
 #include "base/stringprintf.h"
 #include "base/utf_string_conversions.h"
 #include "chrome/browser/extensions/extension_service.h"
+#include "chrome/browser/extensions/extension_system.h"
 #include "chrome/browser/profiles/profile.h"
 #include "chrome/browser/profiles/profile_manager.h"
+#include "content/public/browser/browser_thread.h"
 #include "grit/generated_resources.h"
 #include "ui/base/l10n/l10n_util.h"
 
@@ -21,7 +23,7 @@ namespace {
 const char kHelpAppFormat[] =
     "chrome-extension://honijodknafkokifofgiaalefdiedpko/oobe.html?id=%d";
 
-}
+}  // namespace
 
 namespace chromeos {
 
@@ -32,11 +34,10 @@ HelpAppLauncher::HelpAppLauncher(gfx::NativeWindow parent_window)
     : parent_window_(parent_window) {
 }
 
-HelpAppLauncher::~HelpAppLauncher() {}
-
 void HelpAppLauncher::ShowHelpTopic(HelpTopic help_topic_id) {
   Profile* profile = ProfileManager::GetDefaultProfile();
-  ExtensionService* service = profile->GetExtensionService();
+  ExtensionService* service =
+      extensions::ExtensionSystem::Get(profile)->extension_service();
 
   DCHECK(service);
   if (!service)
@@ -51,18 +52,23 @@ void HelpAppLauncher::ShowHelpTopic(HelpTopic help_topic_id) {
 }
 
 ///////////////////////////////////////////////////////////////////////////////
+// HelpApp, protected:
+
+HelpAppLauncher::~HelpAppLauncher() {}
+
+///////////////////////////////////////////////////////////////////////////////
 // HelpApp, private:
 
 void HelpAppLauncher::ShowHelpTopicDialog(const GURL& topic_url) {
   DCHECK(BrowserThread::CurrentlyOn(BrowserThread::UI));
-  dialog_.reset(new LoginHtmlDialog(
-      this,
+  LoginWebDialog* dialog = new LoginWebDialog(
+      NULL,
       parent_window_,
-      UTF16ToWide(
-          l10n_util::GetStringUTF16(IDS_LOGIN_OOBE_HELP_DIALOG_TITLE)),
+      l10n_util::GetStringUTF16(IDS_LOGIN_OOBE_HELP_DIALOG_TITLE),
       topic_url,
-      LoginHtmlDialog::STYLE_BUBBLE));
-  dialog_->Show();
+      LoginWebDialog::STYLE_BUBBLE);
+  dialog->Show();
+  // The dialog object will be deleted on dialog close.
 }
 
 }  // namespace chromeos

@@ -1,4 +1,4 @@
-// Copyright (c) 2011 The Chromium Authors. All rights reserved.
+// Copyright (c) 2012 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -13,6 +13,7 @@ using base::TimeDelta;
 const int64 ThumbnailScore::kUpdateThumbnailTimeDays = 1;
 const double ThumbnailScore::kThumbnailMaximumBoringness = 0.94;
 const double ThumbnailScore::kThumbnailDegradePerHour = 0.01;
+const double ThumbnailScore::kTooWideAspectRatio = 2.0;
 
 // Calculates a numeric score from traits about where a snapshot was
 // taken. The lower the better. We store the raw components in the
@@ -61,13 +62,10 @@ ThumbnailScore::~ThumbnailScore() {
 }
 
 bool ThumbnailScore::Equals(const ThumbnailScore& rhs) const {
-  // When testing equality we use ToTimeT() because that's the value
-  // stuck in the SQL database, so we need to test equivalence with
-  // that lower resolution.
   return boring_score == rhs.boring_score &&
       good_clipping == rhs.good_clipping &&
       at_top == rhs.at_top &&
-      time_at_snapshot.ToTimeT() == rhs.time_at_snapshot.ToTimeT() &&
+      time_at_snapshot == rhs.time_at_snapshot &&
       redirect_hops_from_dest == rhs.redirect_hops_from_dest;
 }
 

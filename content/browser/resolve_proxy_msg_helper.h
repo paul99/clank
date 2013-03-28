@@ -1,10 +1,9 @@
-// Copyright (c) 2011 The Chromium Authors. All rights reserved.
+// Copyright (c) 2012 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
 #ifndef CONTENT_BROWSER_RESOLVE_PROXY_MSG_HELPER_H_
 #define CONTENT_BROWSER_RESOLVE_PROXY_MSG_HELPER_H_
-#pragma once
 
 #include <deque>
 #include <string>
@@ -20,6 +19,8 @@ namespace net {
 class URLRequestContextGetter;
 }
 
+namespace content {
+
 // Responds to ChildProcessHostMsg_ResolveProxy, kicking off a ProxyResolve
 // request on the IO thread using the specified proxy service.  Completion is
 // notified through the delegate.  If multiple requests are started at the same
@@ -30,22 +31,22 @@ class URLRequestContextGetter;
 // the stored IPC::Message pointers for pending requests.
 //
 // This object is expected to live on the IO thread.
-class CONTENT_EXPORT ResolveProxyMsgHelper
-    : public content::BrowserMessageFilter {
+class CONTENT_EXPORT ResolveProxyMsgHelper : public BrowserMessageFilter {
  public:
   explicit ResolveProxyMsgHelper(net::URLRequestContextGetter* getter);
   // Constructor used by unittests.
   explicit ResolveProxyMsgHelper(net::ProxyService* proxy_service);
 
-  // Destruction cancels the current outstanding request, and clears the
-  // pending queue.
-  virtual ~ResolveProxyMsgHelper();
-
-  // content::BrowserMessageFilter implementation
+  // BrowserMessageFilter implementation
   virtual bool OnMessageReceived(const IPC::Message& message,
                                  bool* message_was_ok) OVERRIDE;
 
   void OnResolveProxy(const GURL& url, IPC::Message* reply_msg);
+
+ protected:
+  // Destruction cancels the current outstanding request, and clears the
+  // pending queue.
+  virtual ~ResolveProxyMsgHelper();
 
  private:
   // Callback for the ProxyService (bound to |callback_|).
@@ -80,5 +81,7 @@ class CONTENT_EXPORT ResolveProxyMsgHelper
   scoped_refptr<net::URLRequestContextGetter> context_getter_;
   net::ProxyService* proxy_service_;
 };
+
+}  // namespace content
 
 #endif  // CONTENT_BROWSER_RESOLVE_PROXY_MSG_HELPER_H_

@@ -15,9 +15,12 @@
 #include "chrome/common/chrome_notification_types.h"
 #include "content/public/browser/browser_thread.h"
 #include "content/public/browser/notification_service.h"
+#include "grit/generated_resources.h"
+#include "printing/backend/print_backend.h"
 #include "printing/print_job_constants.h"
 #include "printing/printed_document.h"
 #include "printing/printed_page.h"
+#include "ui/base/l10n/l10n_util.h"
 
 using content::BrowserThread;
 
@@ -69,6 +72,11 @@ void PrintJobWorker::SetNewOwner(PrintJobWorkerOwner* new_owner) {
   owner_ = new_owner;
 }
 
+void PrintJobWorker::SetPrintDestination(
+    PrintDestinationInterface* destination) {
+  destination_ = destination;
+}
+
 void PrintJobWorker::GetSettings(bool ask_user_for_settings,
                                  gfx::NativeView parent_view,
                                  int document_page_count,
@@ -85,7 +93,9 @@ void PrintJobWorker::GetSettings(bool ask_user_for_settings,
   // MessageLoop::current()->SetNestableTasksAllowed(true);
   printing_context_->set_margin_type(margin_type);
 
-  if (ask_user_for_settings) {
+  // When we delegate to a destination, we don't ask the user for settings.
+  // TODO(mad): Ask the destination for settings.
+  if (ask_user_for_settings && destination_.get() == NULL) {
     BrowserThread::PostTask(
         BrowserThread::UI, FROM_HERE,
         base::Bind(&HoldRefCallback, make_scoped_refptr(owner_),
@@ -115,10 +125,10 @@ void PrintJobWorker::UpdatePrintSettings(
     const DictionaryValue* const new_settings) {
   // Create new PageRanges based on |new_settings|.
   PageRanges new_ranges;
-  ListValue* page_range_array;
+  const ListValue* page_range_array;
   if (new_settings->GetList(kSettingPageRange, &page_range_array)) {
     for (size_t index = 0; index < page_range_array->GetSize(); ++index) {
-      DictionaryValue* dict;
+      const DictionaryValue* dict;
       if (!page_range_array->GetDictionary(index, &dict))
         continue;
 
@@ -195,8 +205,14 @@ void PrintJobWorker::StartPrinting(PrintedDocument* new_document) {
     return;
   }
 
+  string16 document_name =
+      printing::PrintBackend::SimplifyDocumentTitle(document_->name());
+  if (document_name.empty()) {
+    document_name = printing::PrintBackend::SimplifyDocumentTitle(
+        l10n_util::GetStringUTF16(IDS_DEFAULT_PRINT_DOCUMENT_TITLE));
+  }
   PrintingContext::Result result =
-      printing_context_->NewDocument(document_->name());
+      printing_context_->NewDocument(document_name);
   if (result != PrintingContext::OK) {
     OnFailure();
     return;
@@ -241,6 +257,8 @@ void PrintJobWorker::OnNewPage() {
     }
     // We have enough information to initialize page_number_.
     page_number_.Init(document_->settings(), page_count);
+    if (destination_.get() != NULL)
+      destination_->SetPageCount(page_count);
   }
   DCHECK_NE(page_number_, PageNumber::npos());
 
@@ -305,6 +323,18 @@ void PrintJobWorker::SpoolPage(PrintedPage* page) {
   // Preprocess.
   if (printing_context_->NewPage() != PrintingContext::OK) {
     OnFailure();
+    return;
+  }
+
+  if (destination_.get() != NULL) {
+    std::vector<uint8> metabytes(page->metafile()->GetDataSize());
+    bool success = page->metafile()->GetData(
+        reinterpret_cast<void*>(&metabytes[0]), metabytes.size());
+    DCHECK(success) << "Failed to get metafile data.";
+    destination_->SetPageContent(
+        page->page_number(),
+        reinterpret_cast<void*>(&metabytes[0]),
+        metabytes.size());
     return;
   }
 

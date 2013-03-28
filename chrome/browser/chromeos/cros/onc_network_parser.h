@@ -4,9 +4,9 @@
 
 #ifndef CHROME_BROWSER_CHROMEOS_CROS_ONC_NETWORK_PARSER_H_
 #define CHROME_BROWSER_CHROMEOS_CROS_ONC_NETWORK_PARSER_H_
-#pragma once
 
 #include <string>
+#include <vector>
 
 #include "base/compiler_specific.h"  // for OVERRIDE
 #include "base/gtest_prod_util.h"
@@ -14,6 +14,7 @@
 #include "base/values.h"
 #include "chrome/browser/chromeos/cros/network_parser.h"
 #include "chrome/browser/chromeos/cros/network_ui_data.h"
+#include "chromeos/network/onc/onc_constants.h"
 
 namespace base {
 class DictionaryValue;
@@ -23,11 +24,11 @@ class Value;
 
 namespace net {
 class ProxyServer;
-class X509Certificate;
-typedef std::vector<scoped_refptr<X509Certificate> > CertificateList;
 }
 
 namespace chromeos {
+
+class IssuerSubjectPattern;
 
 // This is a simple representation of the signature of an ONC typed
 // field, used in validation and translation.  It could be extended
@@ -53,9 +54,8 @@ class OncNetworkParser : public NetworkParser {
                                 const base::Value&,
                                 Network*);
 
-  OncNetworkParser(const std::string& onc_blob,
-                   const std::string& passphrase,
-                   NetworkUIData::ONCSource onc_source);
+  OncNetworkParser(const base::ListValue& network_configs,
+                   onc::ONCSource onc_source);
   virtual ~OncNetworkParser();
   static const EnumMapper<PropertyIndex>* property_mapper();
 
@@ -68,15 +68,9 @@ class OncNetworkParser : public NetworkParser {
 
   // Call to create the network by parsing network config in the nth position.
   // (0-based). CHECKs if |n| is out of range and returns NULL on parse errors.
-  Network* ParseNetwork(int n);
-
-  // Returns the number of certificates in the "Certificates" list.
-  int GetCertificatesSize() const;
-
-  // Call to parse and import the nth certificate in the certificate
-  // list into the certificate store.  Returns a NULL refptr if
-  // there's a parse error or if n is out of range.
-  scoped_refptr<net::X509Certificate> ParseCertificate(int n);
+  // |removed| is set to true if the network should be removed.  |removed| may
+  // be NULL.
+  Network* ParseNetwork(int n, bool* marked_for_removal);
 
   virtual Network* CreateNetworkFromInfo(const std::string& service_path,
       const base::DictionaryValue& info) OVERRIDE;
@@ -92,11 +86,11 @@ class OncNetworkParser : public NetworkParser {
 
   // Expands |value| with user account specific paramaters.
   static std::string GetUserExpandedValue(const base::Value& value,
-                                          NetworkUIData::ONCSource source);
+                                          onc::ONCSource source);
 
   const std::string& parse_error() const { return parse_error_; }
 
-  NetworkUIData::ONCSource onc_source() const { return onc_source_; }
+  onc::ONCSource onc_source() const { return onc_source_; }
 
  protected:
   OncNetworkParser();
@@ -125,50 +119,25 @@ class OncNetworkParser : public NetworkParser {
                                const std::string& onc_type);
 
 
-  // This lists the certificates that have the string |label| as their
-  // certificate nickname (exact match).
-  static void ListCertsWithNickname(const std::string& label,
-                                    net::CertificateList* result);
-  // This deletes any certificate that has the string |label| as its
-  // nickname (exact match).
-  static bool DeleteCertAndKeyByNickname(const std::string& label);
-
   // Find the PKCS#11 ID of the certificate with the given GUID.  Returns
   // an empty string on failure.
   static std::string GetPkcs11IdFromCertGuid(const std::string& guid);
 
   // Process ProxySettings dictionary into a format which is then updated into
-  // ProxyConfig property in flimflam.
+  // ProxyConfig property in shill.
   static bool ProcessProxySettings(OncNetworkParser* parser,
                                    const base::Value& value,
                                    Network* network);
 
+  static ClientCertType ParseClientCertType(const std::string& type);
+
+  // Parse ClientCertPattern dictionary that specifies certificate pattern for
+  // VPN and WiFi EAP certificates.
+  static bool ParseClientCertPattern(OncNetworkParser* parser,
+                                     PropertyIndex index,
+                                     const base::Value& value,
+                                     Network* network);
  private:
-  FRIEND_TEST_ALL_PREFIXES(OncNetworkParserTest, TestAddClientCertificate);
-  FRIEND_TEST_ALL_PREFIXES(OncNetworkParserTest, TestUpdateClientCertificate);
-  FRIEND_TEST_ALL_PREFIXES(OncNetworkParserTest, TestReimportClientCertificate);
-  FRIEND_TEST_ALL_PREFIXES(OncNetworkParserTest, TestAddServerCertificate);
-  FRIEND_TEST_ALL_PREFIXES(OncNetworkParserTest, TestUpdateServerCertificate);
-  FRIEND_TEST_ALL_PREFIXES(OncNetworkParserTest, TestReimportServerCertificate);
-  FRIEND_TEST_ALL_PREFIXES(OncNetworkParserTest,
-                           TestAddWebAuthorityCertificate);
-  FRIEND_TEST_ALL_PREFIXES(OncNetworkParserTest,
-                           TestUpdateWebAuthorityCertificate);
-  FRIEND_TEST_ALL_PREFIXES(OncNetworkParserTest,
-                           TestReimportWebAuthorityCertificate);
-  scoped_refptr<net::X509Certificate> ParseServerOrCaCertificate(
-    int cert_index,
-    const std::string& cert_type,
-    const std::string& guid,
-    base::DictionaryValue* certificate);
-  scoped_refptr<net::X509Certificate> ParseClientCertificate(
-    int cert_index,
-    const std::string& guid,
-    base::DictionaryValue* certificate);
-
-  base::DictionaryValue* Decrypt(const std::string& passphrase,
-                                 base::DictionaryValue* root);
-
   // Parse the ProxySettings dictionary.
   static bool ParseProxySettingsValue(OncNetworkParser* parser,
                                       PropertyIndex index,
@@ -194,15 +163,28 @@ class OncNetworkParser : public NetworkParser {
   static net::ProxyServer ParseProxyLocationValue(int property_index,
                                                   const base::Value& value);
 
+  // Parse IssuerSubjectPattern dictionary for certificate pattern fields.
+  static bool ParseIssuerPattern(OncNetworkParser* parser,
+                                 PropertyIndex index,
+                                 const base::Value& value,
+                                 Network* network);
+  static bool ParseSubjectPattern(OncNetworkParser* parser,
+                                  PropertyIndex index,
+                                  const base::Value& value,
+                                  Network* network);
+  static bool ParseIssuerSubjectPattern(IssuerSubjectPattern* pattern,
+                                        OncNetworkParser* parser,
+                                        PropertyIndex index,
+                                        const base::Value& value,
+                                        Network* network);
+
   // Error message from the JSON parser, if applicable.
   std::string parse_error_;
 
   // Where the ONC blob comes from.
-  NetworkUIData::ONCSource onc_source_;
+  onc::ONCSource onc_source_;
 
-  scoped_ptr<base::DictionaryValue> root_dict_;
-  base::ListValue* network_configs_;
-  base::ListValue* certificates_;
+  scoped_ptr<base::ListValue> network_configs_;
 
   DISALLOW_COPY_AND_ASSIGN(OncNetworkParser);
 };

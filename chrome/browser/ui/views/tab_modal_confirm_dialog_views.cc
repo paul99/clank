@@ -1,4 +1,4 @@
-// Copyright (c) 2011 The Chromium Authors. All rights reserved.
+// Copyright (c) 2012 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -8,38 +8,43 @@
 #include "chrome/browser/ui/browser_dialogs.h"
 #include "chrome/browser/ui/browser_list.h"
 #include "chrome/browser/ui/browser_window.h"
-#include "chrome/browser/ui/tab_contents/tab_contents_wrapper.h"
 #include "chrome/browser/ui/tab_modal_confirm_dialog_delegate.h"
 #include "chrome/browser/ui/views/constrained_window_views.h"
+#include "chrome/common/chrome_switches.h"
 #include "grit/generated_resources.h"
 #include "ui/base/l10n/l10n_util.h"
 #include "ui/views/controls/message_box_view.h"
+#include "ui/views/window/dialog_client_view.h"
 
-namespace browser {
-
-// Declared in browser_dialogs.h so others don't have to depend on our header.
-void ShowTabModalConfirmDialog(TabModalConfirmDialogDelegate* delegate,
-                               TabContentsWrapper* wrapper) {
-  new TabModalConfirmDialogViews(delegate, wrapper);
+// static
+TabModalConfirmDialog* TabModalConfirmDialog::Create(
+    TabModalConfirmDialogDelegate* delegate,
+    content::WebContents* web_contents) {
+  return new TabModalConfirmDialogViews(
+      delegate, web_contents);
 }
-
-}  // namespace browser
 
 //////////////////////////////////////////////////////////////////////////////
 // TabModalConfirmDialogViews, constructor & destructor:
 
 TabModalConfirmDialogViews::TabModalConfirmDialogViews(
     TabModalConfirmDialogDelegate* delegate,
-    TabContentsWrapper* wrapper)
+    content::WebContents* web_contents)
     : delegate_(delegate),
       message_box_view_(new views::MessageBoxView(
-          views::MessageBoxView::NO_OPTIONS,
-          delegate->GetMessage(),
-          string16())) {
-  delegate_->set_window(new ConstrainedWindowViews(wrapper, this));
+          views::MessageBoxView::InitParams(delegate->GetMessage()))) {
+  delegate_->set_window(new ConstrainedWindowViews(web_contents, this));
 }
 
 TabModalConfirmDialogViews::~TabModalConfirmDialogViews() {
+}
+
+void TabModalConfirmDialogViews::AcceptTabModalDialog() {
+  GetDialogClientView()->AcceptWindow();
+}
+
+void TabModalConfirmDialogViews::CancelTabModalDialog() {
+  GetDialogClientView()->CancelWindow();
 }
 
 //////////////////////////////////////////////////////////////////////////////
@@ -85,4 +90,12 @@ const views::Widget* TabModalConfirmDialogViews::GetWidget() const {
 
 void TabModalConfirmDialogViews::DeleteDelegate() {
   delete this;
+}
+
+ui::ModalType TabModalConfirmDialogViews::GetModalType() const {
+#if defined(USE_ASH)
+  return ui::MODAL_TYPE_CHILD;
+#else
+  return views::WidgetDelegate::GetModalType();
+#endif
 }

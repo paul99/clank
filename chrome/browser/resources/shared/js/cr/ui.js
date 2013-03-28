@@ -1,4 +1,4 @@
-// Copyright (c) 2010 The Chromium Authors. All rights reserved.
+// Copyright (c) 2012 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -106,8 +106,9 @@ cr.define('cr.ui', function() {
    * @param {HTMLElement} el The element to limit the width for.
    * @param {number} parentEl The parent element that should limit the size.
    * @param {number} min The minimum width.
+   * @param {number} opt_scale Optional scale factor to apply to the width.
    */
-  function limitInputWidth(el, parentEl, min) {
+  function limitInputWidth(el, parentEl, min, opt_scale) {
     // Needs a size larger than borders
     el.style.width = '10px';
     var doc = el.ownerDocument;
@@ -134,6 +135,8 @@ cr.define('cr.ui', function() {
         parseInt(parentComputedStyle.paddingRight, 10);
 
     var max = parentEl.clientWidth - startPos - inner - parentPadding;
+    if (opt_scale)
+      max *= opt_scale;
 
     function limit() {
       if (el.scrollWidth > max) {
@@ -153,9 +156,51 @@ cr.define('cr.ui', function() {
     limit();
   }
 
+  /**
+   * Takes a number and spits out a value CSS will be happy with. To avoid
+   * subpixel layout issues, the value is rounded to the nearest integral value.
+   * @param {number} pixels The number of pixels.
+   * @return {string} e.g. '16px'.
+   */
+  function toCssPx(pixels) {
+    if (!window.isFinite(pixels))
+      console.error('Pixel value is not a number: ' + pixels);
+    return Math.round(pixels) + 'px';
+  }
+
+  /**
+   * Users complain they occasionaly use doubleclicks instead of clicks
+   * (http://crbug.com/140364). To fix it we freeze click handling for
+   * the doubleclick time interval.
+   * @param {MouseEvent} e Initial click event.
+   */
+  function swallowDoubleClick(e) {
+    var doc = e.target.ownerDocument;
+    var counter = e.type == 'click' ? e.detail : 0;
+    function swallow(e) {
+      e.stopPropagation();
+      e.preventDefault();
+    }
+    function onclick(e) {
+      if (e.detail > counter) {
+        counter = e.detail;
+        // Swallow the click since it's a click inside the doubleclick timeout.
+        swallow(e);
+      } else {
+        // Stop tracking clicks and let regular handling.
+        doc.removeEventListener('dblclick', swallow, true);
+        doc.removeEventListener('click', onclick, true);
+      }
+    }
+    doc.addEventListener('click', onclick, true);
+    doc.addEventListener('dblclick', swallow, true);
+  }
+
   return {
     decorate: decorate,
     define: define,
-    limitInputWidth: limitInputWidth
+    limitInputWidth: limitInputWidth,
+    toCssPx: toCssPx,
+    swallowDoubleClick: swallowDoubleClick
   };
 });

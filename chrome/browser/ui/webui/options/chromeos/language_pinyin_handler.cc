@@ -1,4 +1,4 @@
-// Copyright (c) 2011 The Chromium Authors. All rights reserved.
+// Copyright (c) 2012 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -15,6 +15,7 @@ const char kI18nPrefix[] = "Pinyin";
 }  // namespace
 
 namespace chromeos {
+namespace options {
 
 LanguagePinyinHandler::LanguagePinyinHandler() {
 }
@@ -50,10 +51,10 @@ void LanguagePinyinHandler::GetLocalizedValues(
         item_message_id == 0)
       break;
     ListValue* option = new ListValue();
-    option->Append(Value::CreateIntegerValue(
+    option->Append(new base::FundamentalValue(
         language_prefs::kPinyinDoublePinyinSchema.values_and_ids[i].
         ibus_config_value));
-    option->Append(Value::CreateStringValue(l10n_util::GetStringUTF16(
+    option->Append(new base::StringValue(l10n_util::GetStringUTF16(
         language_prefs::kPinyinDoublePinyinSchema.values_and_ids[i].
         item_message_id)));
     list_value->Append(option);
@@ -64,4 +65,5 @@ void LanguagePinyinHandler::GetLocalizedValues(
       list_value);
 }
 
+}  // namespace options
 }  // namespace chromeos

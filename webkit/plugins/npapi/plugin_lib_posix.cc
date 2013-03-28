@@ -15,8 +15,8 @@
 #include <sys/types.h>
 #include <unistd.h>
 
-#include "base/eintr_wrapper.h"
 #include "base/file_util.h"
+#include "base/posix/eintr_wrapper.h"
 #include "base/string_split.h"
 #include "base/string_util.h"
 #include "base/sys_string_conversions.h"
@@ -172,11 +172,20 @@ bool PluginLib::ReadWebPluginInfo(const FilePath& filename,
       reinterpret_cast<NP_GetMimeDescriptionType>(
           dlsym(dl, "NP_GetMIMEDescription"));
   const char* mime_description = NULL;
-  if (NP_GetMIMEDescription)
-    mime_description = NP_GetMIMEDescription();
+  if (!NP_GetMIMEDescription) {
+    LOG_IF(ERROR, PluginList::DebugPluginLoading())
+        << "Plugin " << filename.value() << " doesn't have a "
+        << "NP_GetMIMEDescription symbol";
+    return false;
+  }
+  mime_description = NP_GetMIMEDescription();
 
-  if (mime_description)
-    ParseMIMEDescription(mime_description, &info->mime_types);
+  if (!mime_description) {
+    LOG_IF(ERROR, PluginList::DebugPluginLoading())
+        << "MIME description for " << filename.value() << " is empty";
+    return false;
+  }
+  ParseMIMEDescription(mime_description, &info->mime_types);
 
   // The plugin name and description live behind NP_GetValue calls.
   typedef NPError (*NP_GetValueType)(void* unused,
@@ -273,7 +282,7 @@ void PluginLib::ExtractVersionString(const std::string& desc,
   } kPrePostFixes[] = {
     { "Shockwave Flash ", 0 },
     { "Java(TM) Plug-in ", 0 },
-    { "(using IcedTea6 ", " " },
+    { "(using IcedTea-Web ", " " },
     { 0, 0 }
   };
   std::string version;

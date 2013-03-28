@@ -1,12 +1,13 @@
-// Copyright (c) 2011 The Chromium Authors. All rights reserved.
+// Copyright (c) 2012 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
 #ifndef UI_VIEWS_CONTROLS_BUTTON_CUSTOM_BUTTON_H_
 #define UI_VIEWS_CONTROLS_BUTTON_CUSTOM_BUTTON_H_
-#pragma once
 
+#include "base/memory/scoped_ptr.h"
 #include "ui/base/animation/animation_delegate.h"
+#include "ui/base/events/event_constants.h"
 #include "ui/views/controls/button/button.h"
 
 namespace ui {
@@ -14,6 +15,8 @@ class ThrobAnimation;
 }
 
 namespace views {
+
+class CustomButtonStateChangedDelegate;
 
 // A button with custom rendering. The common base class of ImageButton and
 // TextButton.
@@ -30,11 +33,11 @@ class VIEWS_EXPORT CustomButton : public Button,
 
   // Possible states
   enum ButtonState {
-    BS_NORMAL = 0,
-    BS_HOT,
-    BS_PUSHED,
-    BS_DISABLED,
-    BS_COUNT
+    STATE_NORMAL = 0,
+    STATE_HOVERED,
+    STATE_PRESSED,
+    STATE_DISABLED,
+    STATE_COUNT
   };
 
   // Get/sets the current display state of the button.
@@ -72,20 +75,22 @@ class VIEWS_EXPORT CustomButton : public Button,
   // when it's disabled.
   bool IsMouseHovered() const;
 
+  void SetHotTracked(bool is_hot_tracked);
+  bool IsHotTracked() const;
+
   // Overridden from View:
-  virtual void SetHotTracked(bool flag) OVERRIDE;
-  virtual bool IsHotTracked() const OVERRIDE;
   virtual void OnEnabledChanged() OVERRIDE;
   virtual std::string GetClassName() const OVERRIDE;
-  virtual bool OnMousePressed(const MouseEvent& event) OVERRIDE;
-  virtual bool OnMouseDragged(const MouseEvent& event) OVERRIDE;
-  virtual void OnMouseReleased(const MouseEvent& event) OVERRIDE;
+  virtual bool OnMousePressed(const ui::MouseEvent& event) OVERRIDE;
+  virtual bool OnMouseDragged(const ui::MouseEvent& event) OVERRIDE;
+  virtual void OnMouseReleased(const ui::MouseEvent& event) OVERRIDE;
   virtual void OnMouseCaptureLost() OVERRIDE;
-  virtual void OnMouseEntered(const MouseEvent& event) OVERRIDE;
-  virtual void OnMouseExited(const MouseEvent& event) OVERRIDE;
-  virtual void OnMouseMoved(const MouseEvent& event) OVERRIDE;
-  virtual bool OnKeyPressed(const KeyEvent& event) OVERRIDE;
-  virtual bool OnKeyReleased(const KeyEvent& event) OVERRIDE;
+  virtual void OnMouseEntered(const ui::MouseEvent& event) OVERRIDE;
+  virtual void OnMouseExited(const ui::MouseEvent& event) OVERRIDE;
+  virtual void OnMouseMoved(const ui::MouseEvent& event) OVERRIDE;
+  virtual bool OnKeyPressed(const ui::KeyEvent& event) OVERRIDE;
+  virtual bool OnKeyReleased(const ui::KeyEvent& event) OVERRIDE;
+  virtual void OnGestureEvent(ui::GestureEvent* event) OVERRIDE;
   virtual bool AcceleratorPressed(const ui::Accelerator& accelerator) OVERRIDE;
   virtual void ShowContextMenu(const gfx::Point& p,
                                bool is_mouse_gesture) OVERRIDE;
@@ -94,6 +99,11 @@ class VIEWS_EXPORT CustomButton : public Button,
 
   // Overridden from ui::AnimationDelegate:
   virtual void AnimationProgressed(const ui::Animation* animation) OVERRIDE;
+
+  // Takes ownership of the delegate.
+  void set_state_changed_delegate(CustomButtonStateChangedDelegate* delegate) {
+    state_changed_delegate_.reset(delegate);
+  }
 
  protected:
   // Construct the Button with a Listener. See comment for Button's ctor.
@@ -107,12 +117,12 @@ class VIEWS_EXPORT CustomButton : public Button,
 
   // Returns true if the event is one that can trigger notifying the listener.
   // This implementation returns true if the left mouse button is down.
-  virtual bool IsTriggerableEvent(const MouseEvent& event);
+  virtual bool IsTriggerableEvent(const ui::Event& event);
 
   // Returns true if the button should become pressed when the user
   // holds the mouse down over the button. For this implementation,
   // we simply return IsTriggerableEvent(event).
-  virtual bool ShouldEnterPushedState(const MouseEvent& event);
+  virtual bool ShouldEnterPushedState(const ui::Event& event);
 
   // Overridden from View:
   virtual void ViewHierarchyChanged(bool is_add,
@@ -139,7 +149,22 @@ class VIEWS_EXPORT CustomButton : public Button,
   // See description above setter.
   bool request_focus_on_press_;
 
+  scoped_ptr<CustomButtonStateChangedDelegate> state_changed_delegate_;
+
   DISALLOW_COPY_AND_ASSIGN(CustomButton);
+};
+
+// Delegate for actions taken on state changes by CustomButton.
+class VIEWS_EXPORT CustomButtonStateChangedDelegate {
+public:
+  virtual ~CustomButtonStateChangedDelegate() {}
+  virtual void StateChanged(CustomButton::ButtonState state) = 0;
+
+protected:
+  CustomButtonStateChangedDelegate() {}
+
+private:
+  DISALLOW_COPY_AND_ASSIGN(CustomButtonStateChangedDelegate);
 };
 
 }  // namespace views

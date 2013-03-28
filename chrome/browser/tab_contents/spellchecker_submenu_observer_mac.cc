@@ -1,4 +1,4 @@
-// Copyright (c) 2011 The Chromium Authors. All rights reserved.
+// Copyright (c) 2012 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -13,8 +13,8 @@
 #include "chrome/common/chrome_switches.h"
 #include "chrome/common/pref_names.h"
 #include "chrome/common/spellcheck_messages.h"
-#include "content/browser/renderer_host/render_view_host.h"
-#include "content/browser/renderer_host/render_widget_host_view.h"
+#include "content/public/browser/render_view_host.h"
+#include "content/public/browser/render_widget_host_view.h"
 #include "grit/generated_resources.h"
 #include "ui/base/l10n/l10n_util.h"
 #include "ui/base/models/simple_menu_model.h"
@@ -26,18 +26,16 @@ SpellCheckerSubMenuObserver::SpellCheckerSubMenuObserver(
     ui::SimpleMenuModel::Delegate* delegate,
     int group)
     : proxy_(proxy),
-      submenu_model_(delegate),
-      check_spelling_while_typing_(false) {
+      submenu_model_(delegate) {
   DCHECK(proxy_);
 }
 
 SpellCheckerSubMenuObserver::~SpellCheckerSubMenuObserver() {
 }
 
-void SpellCheckerSubMenuObserver::InitMenu(const ContextMenuParams& params) {
+void SpellCheckerSubMenuObserver::InitMenu(
+    const content::ContextMenuParams& params) {
   DCHECK(BrowserThread::CurrentlyOn(BrowserThread::UI));
-
-  check_spelling_while_typing_ = params.spellcheck_enabled;
 
   // Add an item that toggles the spelling panel.
   submenu_model_.AddCheckItem(
@@ -46,11 +44,11 @@ void SpellCheckerSubMenuObserver::InitMenu(const ContextMenuParams& params) {
           spellcheck_mac::SpellingPanelVisible() ?
               IDS_CONTENT_CONTEXT_HIDE_SPELLING_PANEL :
               IDS_CONTENT_CONTEXT_SHOW_SPELLING_PANEL));
-  submenu_model_.AddSeparator();
+  submenu_model_.AddSeparator(ui::NORMAL_SEPARATOR);
 
   // Add a 'Check Spelling While Typing' item in the sub menu.
   submenu_model_.AddCheckItem(
-      IDC_CHECK_SPELLING_OF_THIS_FIELD,
+      IDC_CHECK_SPELLING_WHILE_TYPING,
       l10n_util::GetStringUTF16(
           IDS_CONTENT_CONTEXT_CHECK_SPELLING_WHILE_TYPING));
 
@@ -67,7 +65,7 @@ bool SpellCheckerSubMenuObserver::IsCommandIdSupported(int command_id) {
       // is hard for this class to handle it.
       return false;
 
-    case IDC_CHECK_SPELLING_OF_THIS_FIELD:
+    case IDC_CHECK_SPELLING_WHILE_TYPING:
     case IDC_SPELLPANEL_TOGGLE:
     case IDC_SPELLCHECK_MENU:
     case IDC_CONTENT_CONTEXT_SPELLING_TOGGLE:
@@ -80,12 +78,11 @@ bool SpellCheckerSubMenuObserver::IsCommandIdSupported(int command_id) {
 bool SpellCheckerSubMenuObserver::IsCommandIdChecked(int command_id) {
   DCHECK(IsCommandIdSupported(command_id));
 
-  // Check box for 'Check the Spelling of this field'.
-  if (command_id == IDC_CHECK_SPELLING_OF_THIS_FIELD) {
+  // Check box for 'Check Spelling while typing'.
+  if (command_id == IDC_CHECK_SPELLING_WHILE_TYPING) {
     Profile* profile = proxy_->GetProfile();
-    if (!profile || !profile->GetPrefs()->GetBoolean(prefs::kEnableSpellCheck))
-      return false;
-    return check_spelling_while_typing_;
+    DCHECK(profile);
+    return profile->GetPrefs()->GetBoolean(prefs::kEnableContinuousSpellcheck);
   }
 
   return false;
@@ -94,16 +91,8 @@ bool SpellCheckerSubMenuObserver::IsCommandIdChecked(int command_id) {
 bool SpellCheckerSubMenuObserver::IsCommandIdEnabled(int command_id) {
   DCHECK(IsCommandIdSupported(command_id));
 
-  Profile* profile = proxy_->GetProfile();
-  if (!profile)
-    return false;
-
-  const PrefService* pref = profile->GetPrefs();
-
   switch (command_id) {
-    case IDC_CHECK_SPELLING_OF_THIS_FIELD:
-      return pref->GetBoolean(prefs::kEnableSpellCheck);
-
+    case IDC_CHECK_SPELLING_WHILE_TYPING:
     case IDC_SPELLPANEL_TOGGLE:
     case IDC_SPELLCHECK_MENU:
     case IDC_CONTENT_CONTEXT_SPELLING_TOGGLE:
@@ -116,15 +105,19 @@ bool SpellCheckerSubMenuObserver::IsCommandIdEnabled(int command_id) {
 void SpellCheckerSubMenuObserver::ExecuteCommand(int command_id) {
   DCHECK(IsCommandIdSupported(command_id));
 
-  RenderViewHost* rvh = proxy_->GetRenderViewHost();
+  content::RenderViewHost* rvh = proxy_->GetRenderViewHost();
+  Profile* profile = proxy_->GetProfile();
+  DCHECK(profile);
   switch (command_id) {
-    case IDC_CHECK_SPELLING_OF_THIS_FIELD:
-      rvh->Send(new SpellCheckMsg_ToggleSpellCheck(rvh->routing_id()));
+    case IDC_CHECK_SPELLING_WHILE_TYPING:
+      profile->GetPrefs()->SetBoolean(
+          prefs::kEnableContinuousSpellcheck,
+          !profile->GetPrefs()->GetBoolean(prefs::kEnableContinuousSpellcheck));
       break;
 
     case IDC_SPELLPANEL_TOGGLE:
       rvh->Send(new SpellCheckMsg_ToggleSpellPanel(
-          rvh->routing_id(), spellcheck_mac::SpellingPanelVisible()));
+          rvh->GetRoutingID(), spellcheck_mac::SpellingPanelVisible()));
       break;
   }
 }

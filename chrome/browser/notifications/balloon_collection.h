@@ -6,7 +6,6 @@
 
 #ifndef CHROME_BROWSER_NOTIFICATIONS_BALLOON_COLLECTION_H_
 #define CHROME_BROWSER_NOTIFICATIONS_BALLOON_COLLECTION_H_
-#pragma once
 
 #include <deque>
 #include <string>
@@ -62,6 +61,9 @@ class BalloonCollection {
   // Removes any balloons that have this source origin.  Returns
   // true if anything was removed.
   virtual bool RemoveBySourceOrigin(const GURL& source_origin) = 0;
+
+  // Removes any balloons matching |profile.  Returns true if any were removed.
+  virtual bool RemoveByProfile(Profile* profile) = 0;
 
   // Removes all balloons.
   virtual void RemoveAll() = 0;

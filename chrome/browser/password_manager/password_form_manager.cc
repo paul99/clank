@@ -1,4 +1,4 @@
-// Copyright (c) 2011 The Chromium Authors. All rights reserved.
+// Copyright (c) 2012 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -11,25 +11,31 @@
 #include "base/string_util.h"
 #include "chrome/browser/password_manager/password_manager.h"
 #include "chrome/browser/password_manager/password_store.h"
+#include "chrome/browser/password_manager/password_store_factory.h"
 #include "chrome/browser/profiles/profile.h"
-#include "webkit/forms/password_form_dom_manager.h"
+#include "chrome/common/autofill_messages.h"
+#include "content/public/browser/render_view_host.h"
+#include "content/public/browser/web_contents.h"
+#include "content/public/common/password_form.h"
 
 using base::Time;
-using webkit::forms::PasswordForm;
-using webkit::forms::PasswordFormMap;
+using content::PasswordForm;
+using content::PasswordFormMap;
 
 PasswordFormManager::PasswordFormManager(Profile* profile,
                                          PasswordManager* password_manager,
+                                         content::WebContents* web_contents,
                                          const PasswordForm& observed_form,
                                          bool ssl_valid)
     : best_matches_deleter_(&best_matches_),
       observed_form_(observed_form),
       is_new_login_(true),
+      has_generated_password_(false),
       password_manager_(password_manager),
-      pending_login_query_(0),
       preferred_match_(NULL),
       state_(PRE_MATCHING_PHASE),
       profile_(profile),
+      web_contents_(web_contents),
       manager_action_(kManagerActionNone),
       user_action_(kUserActionNone),
       submit_result_(kSubmitResultNotSubmitted) {
@@ -51,7 +57,8 @@ int PasswordFormManager::GetActionsTaken() {
 };
 
 // TODO(timsteele): use a hash of some sort in the future?
-bool PasswordFormManager::DoesManage(const PasswordForm& form) const {
+bool PasswordFormManager::DoesManage(const PasswordForm& form,
+                                     ActionMatch action_match) const {
   if (form.scheme != PasswordForm::SCHEME_HTML)
       return observed_form_.signon_realm == form.signon_realm;
 
@@ -62,10 +69,14 @@ bool PasswordFormManager::DoesManage(const PasswordForm& form) const {
     return false;
   }
 
-  // The action URL must also match, but the form is allowed to have an empty
-  // action URL (See bug 1107719).
-  if (form.action.is_valid() && (form.action != observed_form_.action))
-    return false;
+  // When action match is required, the action URL must match, but
+  // the form is allowed to have an empty action URL (See bug 1107719).
+  // Otherwise ignore action URL, this is to allow saving password form with
+  // dynamically changed action URL (See bug 27246).
+  if (form.action.is_valid() && (form.action != observed_form_.action)) {
+    if (action_match == ACTION_MATCH_REQUIRED)
+      return false;
+  }
 
   // If this is a replay of the same form in the case a user entered an invalid
   // password, the origin of the new form may equal the action of the "first"
@@ -114,8 +125,8 @@ void PasswordFormManager::PermanentlyBlacklist() {
   // autofill it again.
   if (!best_matches_.empty()) {
     PasswordFormMap::const_iterator iter;
-    PasswordStore* password_store =
-        profile_->GetPasswordStore(Profile::EXPLICIT_ACCESS);
+    PasswordStore* password_store = PasswordStoreFactory::GetForProfile(
+        profile_, Profile::EXPLICIT_ACCESS);
     if (!password_store) {
       NOTREACHED();
       return;
@@ -141,6 +152,17 @@ bool PasswordFormManager::IsNewLogin() {
   return is_new_login_;
 }
 
+void PasswordFormManager::SetHasGeneratedPassword() {
+  has_generated_password_ = true;
+}
+
+bool PasswordFormManager::HasGeneratedPassword() {
+  // This check is permissive, as the user may have generated a password and
+  // then edited it in the form itself. However, even in this case the user
+  // has already given consent, so we treat these cases the same.
+  return has_generated_password_;
+}
+
 bool PasswordFormManager::HasValidPasswordForm() {
   DCHECK_EQ(state_, POST_MATCHING_PHASE);
   // Non-HTML password forms (primarily HTTP and FTP autentication)
@@ -153,7 +175,7 @@ bool PasswordFormManager::HasValidPasswordForm() {
 
 void PasswordFormManager::ProvisionallySave(const PasswordForm& credentials) {
   DCHECK_EQ(state_, POST_MATCHING_PHASE);
-  DCHECK(DoesManage(credentials));
+  DCHECK(DoesManage(credentials, ACTION_MATCH_NOT_REQUIRED));
 
   // Make sure the important fields stay the same as the initially observed or
   // autofilled ones, as they may have changed if the user experienced a login
@@ -165,11 +187,6 @@ void PasswordFormManager::ProvisionallySave(const PasswordForm& credentials) {
     // The user signed in with a login we autofilled.
     pending_credentials_ = *it->second;
     is_new_login_ = false;
-    // If the user selected credentials we autofilled from a PasswordForm
-    // that contained no action URL (IE6/7 imported passwords, for example),
-    // bless it with the action URL from the observed form. See bug 1107719.
-    if (pending_credentials_.action.is_empty())
-      pending_credentials_.action = observed_form_.action;
 
     // Check to see if we're using a known username but a new password.
     if (pending_credentials_.password_value != credentials.password_value)
@@ -181,8 +198,18 @@ void PasswordFormManager::ProvisionallySave(const PasswordForm& credentials) {
     pending_credentials_.username_value = credentials.username_value;
   }
 
+  pending_credentials_.action = credentials.action;
+  // If the user selected credentials we autofilled from a PasswordForm
+  // that contained no action URL (IE6/7 imported passwords, for example),
+  // bless it with the action URL from the observed form. See bug 1107719.
+  if (pending_credentials_.action.is_empty())
+    pending_credentials_.action = observed_form_.action;
+
   pending_credentials_.password_value = credentials.password_value;
   pending_credentials_.preferred = credentials.preferred;
+
+  if (has_generated_password_)
+    pending_credentials_.type = PasswordForm::TYPE_GENERATED;
 }
 
 void PasswordFormManager::Save() {
@@ -197,22 +224,21 @@ void PasswordFormManager::Save() {
 
 void PasswordFormManager::FetchMatchingLoginsFromPasswordStore() {
   DCHECK_EQ(state_, PRE_MATCHING_PHASE);
-  DCHECK(!pending_login_query_);
   state_ = MATCHING_PHASE;
-  PasswordStore* password_store =
-      profile_->GetPasswordStore(Profile::EXPLICIT_ACCESS);
+  PasswordStore* password_store = PasswordStoreFactory::GetForProfile(
+      profile_, Profile::EXPLICIT_ACCESS);
   if (!password_store) {
     NOTREACHED();
     return;
   }
-  pending_login_query_ = password_store->GetLogins(observed_form_, this);
+  password_store->GetLogins(observed_form_, this);
 }
 
 bool PasswordFormManager::HasCompletedMatching() {
   return state_ == POST_MATCHING_PHASE;
 }
 
-void PasswordFormManager::OnRequestDone(int handle,
+void PasswordFormManager::OnRequestDone(
     const std::vector<PasswordForm*>& logins_result) {
   // Note that the result gets deleted after this call completes, but we own
   // the PasswordForm objects pointed to by the result vector, thus we keep
@@ -293,6 +319,9 @@ void PasswordFormManager::OnRequestDone(int handle,
     return;
   }
 
+  // If not blacklisted, send a message to allow password generation.
+  SendNotBlacklistedToRenderer();
+
   // Proceed to autofill.
   // Note that we provide the choices but don't actually prefill a value if
   // either: (1) we are in Incognito mode, or (2) the ACTION paths don't match.
@@ -305,22 +334,29 @@ void PasswordFormManager::OnRequestDone(int handle,
   else
     manager_action_ = kManagerActionAutofilled;
   password_manager_->Autofill(observed_form_, best_matches_,
-                              preferred_match_, wait_for_username);
+                              *preferred_match_, wait_for_username);
 }
 
 void PasswordFormManager::OnPasswordStoreRequestDone(
-    CancelableRequestProvider::Handle handle,
-    const std::vector<PasswordForm*>& result) {
-  DCHECK_EQ(state_, MATCHING_PHASE);
-  DCHECK_EQ(pending_login_query_, handle);
+      CancelableRequestProvider::Handle handle,
+      const std::vector<content::PasswordForm*>& result) {
+  // TODO(kaiwang): Remove this function.
+  NOTREACHED();
+}
 
-  if (result.empty()) {
+void PasswordFormManager::OnGetPasswordStoreResults(
+      const std::vector<content::PasswordForm*>& results) {
+  DCHECK_EQ(state_, MATCHING_PHASE);
+
+  if (results.empty()) {
     state_ = POST_MATCHING_PHASE;
+    // No result means that we visit this site the first time so we don't need
+    // to check whether this site is blacklisted or not. Just send a message
+    // to allow password generation.
+    SendNotBlacklistedToRenderer();
     return;
   }
-
-  OnRequestDone(handle, result);
-  pending_login_query_ = 0;
+  OnRequestDone(results);
 }
 
 bool PasswordFormManager::IgnoreResult(const PasswordForm& form) const {
@@ -347,8 +383,8 @@ void PasswordFormManager::SaveAsNewLogin(bool reset_preferred_login) {
 
   DCHECK(!profile_->IsOffTheRecord());
 
-  PasswordStore* password_store =
-      profile_->GetPasswordStore(Profile::IMPLICIT_ACCESS);
+  PasswordStore* password_store = PasswordStoreFactory::GetForProfile(
+      profile_, Profile::IMPLICIT_ACCESS);
   if (!password_store) {
     NOTREACHED();
     return;
@@ -388,8 +424,8 @@ void PasswordFormManager::UpdateLogin() {
   DCHECK(!IsNewLogin() && pending_credentials_.preferred);
   DCHECK(!profile_->IsOffTheRecord());
 
-  PasswordStore* password_store =
-      profile_->GetPasswordStore(Profile::IMPLICIT_ACCESS);
+  PasswordStore* password_store = PasswordStoreFactory::GetForProfile(
+      profile_, Profile::IMPLICIT_ACCESS);
   if (!password_store) {
     NOTREACHED();
     return;
@@ -480,4 +516,10 @@ void PasswordFormManager::SubmitPassed() {
 
 void PasswordFormManager::SubmitFailed() {
   submit_result_ = kSubmitResultFailed;
+}
+
+void PasswordFormManager::SendNotBlacklistedToRenderer() {
+  content::RenderViewHost* host = web_contents_->GetRenderViewHost();
+  host->Send(new AutofillMsg_FormNotBlacklisted(host->GetRoutingID(),
+                                                 observed_form_));
 }

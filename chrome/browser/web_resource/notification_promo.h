@@ -27,15 +27,19 @@ class NotificationPromo {
  public:
   static GURL PromoServerURL();
 
-  static const char kNtpNotificationPromoType[];
-  static const char kBubblePromoType[];
+  enum PromoType {
+    NO_PROMO,
+    NTP_NOTIFICATION_PROMO,
+    NTP_BUBBLE_PROMO,
+    MOBILE_NTP_SYNC_PROMO,
+  };
 
   explicit NotificationPromo(Profile* profile);
   ~NotificationPromo();
 
   // Initialize from json/prefs.
-  void InitFromJson(const base::DictionaryValue& json);
-  void InitFromPrefs();
+  void InitFromJson(const base::DictionaryValue& json, PromoType promo_type);
+  void InitFromPrefs(PromoType promo_type);
 
   // Can this promo be shown?
   bool CanShow() const;
@@ -46,18 +50,19 @@ class NotificationPromo {
   double EndTime() const;
 
   // Helpers for NewTabPageHandler.
-  void HandleClosed();
-  bool HandleViewed();  // returns true if views exceeds maximum allowed.
+  // Mark the promo as closed when the user dismisses it.
+  static void HandleClosed(Profile* profile, PromoType promo_type);
+  // Mark the promo has having been viewed. This returns true if views
+  // exceeds the maximum allowed.
+  static bool HandleViewed(Profile* profile, PromoType promo_type);
 
   bool new_notification() const { return new_notification_; }
 
-  std::string promo_type() const { return promo_type_; }
-  std::string promo_text() const { return promo_text_; }
-#if defined(OS_ANDROID) || defined(OS_IOS)
+  const std::string& promo_text() const { return promo_text_; }
+  PromoType promo_type() const { return promo_type_; }
   const base::DictionaryValue* promo_payload() const {
-    return const_cast<const base::DictionaryValue*>(promo_payload_.get());
+    return promo_payload_.get();
   }
-#endif  // defined(OS_ANDROID) ||  defined(OS_IOS)
 
   // Register preferences.
   static void RegisterUserPrefs(PrefService* prefs);
@@ -90,11 +95,11 @@ class NotificationPromo {
   Profile* profile_;
   PrefService* prefs_;
 
-  std::string promo_type_;
+  PromoType promo_type_;
   std::string promo_text_;
-#if defined(OS_ANDROID) || defined(OS_IOS)
-  scoped_ptr<base::DictionaryValue> promo_payload_;
-#endif  // defined(OS_ANDROID) || defined(OS_IOS)
+
+  // Note that promo_payload_ isn't currently used for desktop promos.
+  scoped_ptr<const base::DictionaryValue> promo_payload_;
 
   double start_;
   double end_;

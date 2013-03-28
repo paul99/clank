@@ -1,10 +1,9 @@
-// Copyright (c) 2011 The Chromium Authors. All rights reserved.
+// Copyright (c) 2012 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
 #ifndef CHROME_BROWSER_TASK_MANAGER_TASK_MANAGER_RESOURCE_PROVIDERS_H_
 #define CHROME_BROWSER_TASK_MANAGER_TASK_MANAGER_RESOURCE_PROVIDERS_H_
-#pragma once
 
 #include <map>
 #include <vector>
@@ -21,10 +20,17 @@
 
 class BackgroundContents;
 class BalloonHost;
-class Extension;
-class ExtensionHost;
+class Panel;
+class Profile;
+
+namespace content {
 class RenderViewHost;
-class TabContentsWrapper;
+class WebContents;
+}
+
+namespace extensions {
+class Extension;
+}
 
 // These file contains the resource providers used in the task manager.
 
@@ -33,13 +39,14 @@ class TabContentsWrapper;
 class TaskManagerRendererResource : public TaskManager::Resource {
  public:
   TaskManagerRendererResource(base::ProcessHandle process,
-                              RenderViewHost* render_view_host);
+                              content::RenderViewHost* render_view_host);
   virtual ~TaskManagerRendererResource();
 
   // TaskManager::Resource methods:
   virtual base::ProcessHandle GetProcess() const OVERRIDE;
+  virtual int GetUniqueChildProcessId() const OVERRIDE;
   virtual Type GetType() const OVERRIDE;
-  virtual int GetRoutingId() const OVERRIDE;
+  virtual int GetRoutingID() const OVERRIDE;
 
   virtual bool ReportsCacheStats() const OVERRIDE;
   virtual WebKit::WebCache::ResourceTypeStats GetWebCoreCacheStats() const
@@ -68,12 +75,17 @@ class TaskManagerRendererResource : public TaskManager::Resource {
   virtual void NotifyV8HeapStats(size_t v8_memory_allocated,
                                  size_t v8_memory_used) OVERRIDE;
 
+  content::RenderViewHost* render_view_host() const {
+    return render_view_host_;
+  }
+
  private:
   base::ProcessHandle process_;
   int pid_;
+  int unique_process_id_;
 
   // RenderViewHost we use to fetch stats.
-  RenderViewHost* render_view_host_;
+  content::RenderViewHost* render_view_host_;
   // The stats_ field holds information about resource usage in the renderer
   // process and so it is updated asynchronously by the Refresh() call.
   WebKit::WebCache::ResourceTypeStats stats_;
@@ -93,12 +105,14 @@ class TaskManagerRendererResource : public TaskManager::Resource {
   DISALLOW_COPY_AND_ASSIGN(TaskManagerRendererResource);
 };
 
+// Tracks a single tab contents, prerendered page, instant page, or background
+// printing page.
 class TaskManagerTabContentsResource : public TaskManagerRendererResource {
  public:
-  explicit TaskManagerTabContentsResource(TabContentsWrapper* tab_contents);
+  explicit TaskManagerTabContentsResource(content::WebContents* web_contents);
   virtual ~TaskManagerTabContentsResource();
 
-  // Called when the underlying tab_contents has been committed, and is thus no
+  // Called when the underlying web_contents has been committed and is no
   // longer an Instant preview.
   void InstantCommitted();
 
@@ -106,23 +120,24 @@ class TaskManagerTabContentsResource : public TaskManagerRendererResource {
   virtual Type GetType() const OVERRIDE;
   virtual string16 GetTitle() const OVERRIDE;
   virtual string16 GetProfileName() const OVERRIDE;
-  virtual SkBitmap GetIcon() const OVERRIDE;
-  virtual TabContentsWrapper* GetTabContents() const OVERRIDE;
-  virtual const Extension* GetExtension() const OVERRIDE;
+  virtual gfx::ImageSkia GetIcon() const OVERRIDE;
+  virtual content::WebContents* GetWebContents() const OVERRIDE;
+  virtual const extensions::Extension* GetExtension() const OVERRIDE;
 
  private:
-  bool IsPrerendering() const;
-
   // Returns true if contains content rendered by an extension.
   bool HostsExtension() const;
 
-  static SkBitmap* prerender_icon_;
-  TabContentsWrapper* tab_contents_;
+  static gfx::ImageSkia* prerender_icon_;
+  content::WebContents* web_contents_;
+  Profile* profile_;
   bool is_instant_preview_;
 
   DISALLOW_COPY_AND_ASSIGN(TaskManagerTabContentsResource);
 };
 
+// Provides resources for tab contents, prerendered pages, instant pages, and
+// background printing pages.
 class TaskManagerTabContentsResourceProvider
     : public TaskManager::ResourceProvider,
       public content::NotificationObserver {
@@ -143,11 +158,11 @@ class TaskManagerTabContentsResourceProvider
  private:
   virtual ~TaskManagerTabContentsResourceProvider();
 
-  void Add(TabContentsWrapper* tab_contents);
-  void Remove(TabContentsWrapper* tab_contents);
-  void Update(TabContentsWrapper* tab_contents);
+  void Add(content::WebContents* web_contents);
+  void Remove(content::WebContents* web_contents);
+  void InstantCommitted(content::WebContents* web_contents);
 
-  void AddToTaskManager(TabContentsWrapper* tab_contents);
+  void AddToTaskManager(content::WebContents* web_contents);
 
   // Whether we are currently reporting to the task manager. Used to ignore
   // notifications sent after StopUpdating().
@@ -155,14 +170,76 @@ class TaskManagerTabContentsResourceProvider
 
   TaskManager* task_manager_;
 
-  // Maps the actual resources (the TabContentsWrappers) to the Task Manager
+  // Maps the actual resources (the WebContentses) to the Task Manager
   // resources.
-  std::map<TabContentsWrapper*, TaskManagerTabContentsResource*> resources_;
+  std::map<content::WebContents*, TaskManagerTabContentsResource*> resources_;
 
   // A scoped container for notification registries.
   content::NotificationRegistrar registrar_;
 
   DISALLOW_COPY_AND_ASSIGN(TaskManagerTabContentsResourceProvider);
+};
+
+class TaskManagerPanelResource : public TaskManagerRendererResource {
+ public:
+  explicit TaskManagerPanelResource(Panel* panel);
+  virtual ~TaskManagerPanelResource();
+
+  // TaskManager::Resource methods:
+  virtual Type GetType() const OVERRIDE;
+  virtual string16 GetTitle() const OVERRIDE;
+  virtual string16 GetProfileName() const OVERRIDE;
+  virtual gfx::ImageSkia GetIcon() const OVERRIDE;
+  virtual content::WebContents* GetWebContents() const OVERRIDE;
+  virtual const extensions::Extension* GetExtension() const OVERRIDE;
+
+ private:
+  Panel* panel_;
+  // Determines prefix for title reflecting whether extensions are apps
+  // or in incognito mode.
+  int message_prefix_id_;
+
+  DISALLOW_COPY_AND_ASSIGN(TaskManagerPanelResource);
+};
+
+class TaskManagerPanelResourceProvider
+    : public TaskManager::ResourceProvider,
+      public content::NotificationObserver {
+ public:
+  explicit TaskManagerPanelResourceProvider(TaskManager* task_manager);
+
+  // TaskManager::ResourceProvider methods:
+  virtual TaskManager::Resource* GetResource(int origin_pid,
+                                             int render_process_host_id,
+                                             int routing_id) OVERRIDE;
+  virtual void StartUpdating() OVERRIDE;
+  virtual void StopUpdating() OVERRIDE;
+
+  // content::NotificationObserver method:
+  virtual void Observe(int type,
+                       const content::NotificationSource& source,
+                       const content::NotificationDetails& details) OVERRIDE;
+
+ private:
+  virtual ~TaskManagerPanelResourceProvider();
+
+  void Add(Panel* panel);
+  void Remove(Panel* panel);
+
+  // Whether we are currently reporting to the task manager. Used to ignore
+  // notifications sent after StopUpdating().
+  bool updating_;
+
+  TaskManager* task_manager_;
+
+  // Maps the actual resources (the Panels) to the Task Manager resources.
+  typedef std::map<Panel*, TaskManagerPanelResource*> PanelResourceMap;
+  PanelResourceMap resources_;
+
+  // A scoped container for notification registries.
+  content::NotificationRegistrar registrar_;
+
+  DISALLOW_COPY_AND_ASSIGN(TaskManagerPanelResourceProvider);
 };
 
 class TaskManagerBackgroundContentsResource
@@ -176,7 +253,7 @@ class TaskManagerBackgroundContentsResource
   // TaskManager::Resource methods:
   virtual string16 GetTitle() const OVERRIDE;
   virtual string16 GetProfileName() const OVERRIDE;
-  virtual SkBitmap GetIcon() const OVERRIDE;
+  virtual gfx::ImageSkia GetIcon() const OVERRIDE;
   virtual bool IsBackground() const OVERRIDE;
 
   const string16& application_name() const { return application_name_; }
@@ -188,7 +265,7 @@ class TaskManagerBackgroundContentsResource
   // The icon painted for BackgroundContents.
   // TODO(atwilson): Use the favicon when there's a way to get the favicon for
   // BackgroundContents.
-  static SkBitmap* default_icon_;
+  static gfx::ImageSkia* default_icon_;
 
   DISALLOW_COPY_AND_ASSIGN(TaskManagerBackgroundContentsResource);
 };
@@ -242,14 +319,16 @@ class TaskManagerChildProcessResource : public TaskManager::Resource {
  public:
   TaskManagerChildProcessResource(content::ProcessType type,
                                   const string16& name,
-                                  base::ProcessHandle handle);
+                                  base::ProcessHandle handle,
+                                  int unique_process_id);
   virtual ~TaskManagerChildProcessResource();
 
   // TaskManager::Resource methods:
   virtual string16 GetTitle() const OVERRIDE;
   virtual string16 GetProfileName() const OVERRIDE;
-  virtual SkBitmap GetIcon() const OVERRIDE;
+  virtual gfx::ImageSkia GetIcon() const OVERRIDE;
   virtual base::ProcessHandle GetProcess() const OVERRIDE;
+  virtual int GetUniqueChildProcessId() const OVERRIDE;
   virtual Type GetType() const OVERRIDE;
   virtual bool SupportNetworkUsage() const OVERRIDE;
   virtual void SetSupportNetworkUsage() OVERRIDE;
@@ -266,13 +345,14 @@ class TaskManagerChildProcessResource : public TaskManager::Resource {
   string16 name_;
   base::ProcessHandle handle_;
   int pid_;
+  int unique_process_id_;
   mutable string16 title_;
   bool network_usage_support_;
 
   // The icon painted for the child processs.
   // TODO(jcampan): we should have plugin specific icons for well-known
   // plugins.
-  static SkBitmap* default_icon_;
+  static gfx::ImageSkia* default_icon_;
 
   DISALLOW_COPY_AND_ASSIGN(TaskManagerChildProcessResource);
 };
@@ -336,20 +416,22 @@ class TaskManagerChildProcessResourceProvider
 
 class TaskManagerExtensionProcessResource : public TaskManager::Resource {
  public:
-  explicit TaskManagerExtensionProcessResource(ExtensionHost* extension_host);
+  explicit TaskManagerExtensionProcessResource(
+      content::RenderViewHost* render_view_host);
   virtual ~TaskManagerExtensionProcessResource();
 
   // TaskManager::Resource methods:
   virtual string16 GetTitle() const OVERRIDE;
   virtual string16 GetProfileName() const OVERRIDE;
-  virtual SkBitmap GetIcon() const OVERRIDE;
+  virtual gfx::ImageSkia GetIcon() const OVERRIDE;
   virtual base::ProcessHandle GetProcess() const OVERRIDE;
+  virtual int GetUniqueChildProcessId() const OVERRIDE;
   virtual Type GetType() const OVERRIDE;
   virtual bool CanInspect() const OVERRIDE;
   virtual void Inspect() const OVERRIDE;
   virtual bool SupportNetworkUsage() const OVERRIDE;
   virtual void SetSupportNetworkUsage() OVERRIDE;
-  virtual const Extension* GetExtension() const OVERRIDE;
+  virtual const extensions::Extension* GetExtension() const OVERRIDE;
 
   // Returns the pid of the extension process.
   int process_id() const { return pid_; }
@@ -359,13 +441,14 @@ class TaskManagerExtensionProcessResource : public TaskManager::Resource {
 
  private:
   // The icon painted for the extension process.
-  static SkBitmap* default_icon_;
+  static gfx::ImageSkia* default_icon_;
 
-  ExtensionHost* extension_host_;
+  content::RenderViewHost* render_view_host_;
 
   // Cached data about the extension.
   base::ProcessHandle process_handle_;
   int pid_;
+  int unique_process_id_;
   string16 title_;
 
   DISALLOW_COPY_AND_ASSIGN(TaskManagerExtensionProcessResource);
@@ -392,17 +475,17 @@ class TaskManagerExtensionProcessResourceProvider
  private:
   virtual ~TaskManagerExtensionProcessResourceProvider();
 
-  void AddToTaskManager(ExtensionHost* extension_host);
-  void RemoveFromTaskManager(ExtensionHost* extension_host);
+  bool IsHandledByThisProvider(content::RenderViewHost* render_view_host);
+  void AddToTaskManager(content::RenderViewHost* render_view_host);
+  void RemoveFromTaskManager(content::RenderViewHost* render_view_host);
 
   TaskManager* task_manager_;
 
-  // Maps the actual resources (ExtensionHost*) to the Task Manager resources.
-  std::map<ExtensionHost*, TaskManagerExtensionProcessResource*> resources_;
-
-  // Maps the pids to the resources (used for quick access to the resource on
-  // byte read notifications).
-  std::map<int, TaskManagerExtensionProcessResource*> pid_to_resources_;
+  // Maps the actual resources (content::RenderViewHost*) to the Task Manager
+  // resources.
+  typedef std::map<content::RenderViewHost*,
+      TaskManagerExtensionProcessResource*> ExtensionRenderViewHostMap;
+  ExtensionRenderViewHostMap resources_;
 
   // A scoped container for notification registries.
   content::NotificationRegistrar registrar_;
@@ -420,8 +503,9 @@ class TaskManagerNotificationResource : public TaskManager::Resource {
   // TaskManager::Resource interface
   virtual string16 GetTitle() const OVERRIDE;
   virtual string16 GetProfileName() const OVERRIDE;
-  virtual SkBitmap GetIcon() const OVERRIDE;
+  virtual gfx::ImageSkia GetIcon() const OVERRIDE;
   virtual base::ProcessHandle GetProcess() const OVERRIDE;
+  virtual int GetUniqueChildProcessId() const OVERRIDE;
   virtual Type GetType() const OVERRIDE;
   virtual bool CanInspect() const OVERRIDE;
   virtual void Inspect() const OVERRIDE;
@@ -430,7 +514,7 @@ class TaskManagerNotificationResource : public TaskManager::Resource {
 
  private:
   // The icon painted for notifications.       .
-  static SkBitmap* default_icon_;
+  static gfx::ImageSkia* default_icon_;
 
   // Non-owned pointer to the balloon host.
   BalloonHost* balloon_host_;
@@ -438,6 +522,7 @@ class TaskManagerNotificationResource : public TaskManager::Resource {
   // Cached data about the balloon host.
   base::ProcessHandle process_handle_;
   int pid_;
+  int unique_process_id_;
   string16 title_;
 
   DISALLOW_COPY_AND_ASSIGN(TaskManagerNotificationResource);
@@ -490,8 +575,9 @@ class TaskManagerBrowserProcessResource : public TaskManager::Resource {
   // TaskManager::Resource methods:
   virtual string16 GetTitle() const OVERRIDE;
   virtual string16 GetProfileName() const OVERRIDE;
-  virtual SkBitmap GetIcon() const OVERRIDE;
+  virtual gfx::ImageSkia GetIcon() const OVERRIDE;
   virtual base::ProcessHandle GetProcess() const OVERRIDE;
+  virtual int GetUniqueChildProcessId() const OVERRIDE;
   virtual Type GetType() const OVERRIDE;
 
   virtual bool SupportNetworkUsage() const OVERRIDE;
@@ -508,7 +594,7 @@ class TaskManagerBrowserProcessResource : public TaskManager::Resource {
   base::ProcessHandle process_;
   mutable string16 title_;
 
-  static SkBitmap* default_icon_;
+  static gfx::ImageSkia* default_icon_;
 
   DISALLOW_COPY_AND_ASSIGN(TaskManagerBrowserProcessResource);
 };
@@ -536,6 +622,64 @@ class TaskManagerBrowserProcessResourceProvider
   TaskManagerBrowserProcessResource resource_;
 
   DISALLOW_COPY_AND_ASSIGN(TaskManagerBrowserProcessResourceProvider);
+};
+
+
+class TaskManagerGuestResource : public TaskManagerRendererResource {
+ public:
+  explicit TaskManagerGuestResource(content::RenderViewHost* render_view_host);
+  virtual ~TaskManagerGuestResource();
+
+  // TaskManager::Resource methods:
+  virtual Type GetType() const OVERRIDE;
+  virtual string16 GetTitle() const OVERRIDE;
+  virtual string16 GetProfileName() const OVERRIDE;
+  virtual gfx::ImageSkia GetIcon() const OVERRIDE;
+  virtual content::WebContents* GetWebContents() const OVERRIDE;
+  virtual const extensions::Extension* GetExtension() const OVERRIDE;
+
+ private:
+  DISALLOW_COPY_AND_ASSIGN(TaskManagerGuestResource);
+};
+
+class TaskManagerGuestResourceProvider
+    : public TaskManager::ResourceProvider,
+      public content::NotificationObserver {
+ public:
+  explicit TaskManagerGuestResourceProvider(TaskManager* task_manager);
+
+  // TaskManager::ResourceProvider methods:
+  virtual TaskManager::Resource* GetResource(int origin_pid,
+                                             int render_process_host_id,
+                                             int routing_id) OVERRIDE;
+  virtual void StartUpdating() OVERRIDE;
+  virtual void StopUpdating() OVERRIDE;
+
+  // content::NotificationObserver method:
+  virtual void Observe(int type,
+                       const content::NotificationSource& source,
+                       const content::NotificationDetails& details) OVERRIDE;
+
+ private:
+  virtual ~TaskManagerGuestResourceProvider();
+
+  void Add(content::RenderViewHost* render_view_host);
+  void Remove(content::RenderViewHost* render_view_host);
+
+  // Whether we are currently reporting to the task manager. Used to ignore
+  // notifications sent after StopUpdating().
+  bool updating_;
+
+  TaskManager* task_manager_;
+
+  typedef std::map<content::RenderViewHost*,
+      TaskManagerGuestResource*> GuestResourceMap;
+  GuestResourceMap resources_;
+
+  // A scoped container for notification registries.
+  content::NotificationRegistrar registrar_;
+
+  DISALLOW_COPY_AND_ASSIGN(TaskManagerGuestResourceProvider);
 };
 
 #endif  // CHROME_BROWSER_TASK_MANAGER_TASK_MANAGER_RESOURCE_PROVIDERS_H_

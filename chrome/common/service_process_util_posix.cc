@@ -6,8 +6,8 @@
 
 #include "base/basictypes.h"
 #include "base/bind.h"
-#include "base/eintr_wrapper.h"
 #include "base/message_loop_proxy.h"
+#include "base/posix/eintr_wrapper.h"
 #include "base/synchronization/waitable_event.h"
 #include "chrome/common/multi_process_lock.h"
 
@@ -122,7 +122,7 @@ void ServiceProcessState::StateData::SignalReady(base::WaitableEvent* signal,
     signal->Signal();
     return;
   }
-#elif defined(OS_POSIX) && !defined(OS_ANDROID)
+#elif defined(OS_POSIX)
   initializing_lock_.reset();
 #endif  // OS_POSIX
   signal->Signal();
@@ -163,7 +163,7 @@ bool ServiceProcessState::SignalReady(
     const base::Closure& terminate_task) {
   DCHECK(state_);
 
-#if defined(OS_POSIX) && !defined(OS_MACOSX) && !defined(OS_ANDROID)
+#if defined(OS_POSIX) && !defined(OS_MACOSX)
   state_->running_lock_.reset(TakeServiceRunningLock(true));
   if (state_->running_lock_.get() == NULL) {
     return false;

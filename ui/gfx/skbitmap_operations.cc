@@ -1,4 +1,4 @@
-// Copyright (c) 2011 The Chromium Authors. All rights reserved.
+// Copyright (c) 2012 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -8,10 +8,16 @@
 #include <string.h>
 
 #include "base/logging.h"
+#include "skia/ext/refptr.h"
 #include "third_party/skia/include/core/SkBitmap.h"
 #include "third_party/skia/include/core/SkCanvas.h"
+#include "third_party/skia/include/core/SkColorFilter.h"
 #include "third_party/skia/include/core/SkColorPriv.h"
 #include "third_party/skia/include/core/SkUnPreMultiply.h"
+#include "third_party/skia/include/effects/SkBlurImageFilter.h"
+#include "ui/gfx/insets.h"
+#include "ui/gfx/point.h"
+#include "ui/gfx/size.h"
 
 // static
 SkBitmap SkBitmapOperations::CreateInvertedBitmap(const SkBitmap& image) {
@@ -150,11 +156,14 @@ SkBitmap SkBitmapOperations::CreateMaskedBitmap(const SkBitmap& rgb,
     for (int x = 0; x < masked.width(); ++x) {
       SkColor rgb_pixel = SkUnPreMultiply::PMColorToColor(rgb_row[x]);
       SkColor alpha_pixel = SkUnPreMultiply::PMColorToColor(alpha_row[x]);
-      int alpha = SkAlphaMul(SkColorGetA(rgb_pixel), SkColorGetA(alpha_pixel));
+      int alpha = SkAlphaMul(SkColorGetA(rgb_pixel),
+                             SkAlpha255To256(SkColorGetA(alpha_pixel)));
+      int alpha_256 = SkAlpha255To256(alpha);
       dst_row[x] = SkColorSetARGB(alpha,
-                                  SkAlphaMul(SkColorGetR(rgb_pixel), alpha),
-                                  SkAlphaMul(SkColorGetG(rgb_pixel), alpha),
-                                  SkAlphaMul(SkColorGetB(rgb_pixel), alpha));
+                                  SkAlphaMul(SkColorGetR(rgb_pixel), alpha_256),
+                                  SkAlphaMul(SkColorGetG(rgb_pixel), alpha_256),
+                                  SkAlphaMul(SkColorGetB(rgb_pixel),
+                                             alpha_256));
     }
   }
 
@@ -574,7 +583,7 @@ SkBitmap SkBitmapOperations::CreateHSLShiftedBitmap(
 SkBitmap SkBitmapOperations::CreateTiledBitmap(const SkBitmap& source,
                                                int src_x, int src_y,
                                                int dst_w, int dst_h) {
-  DCHECK(source.getConfig() == SkBitmap::kARGB_8888_Config);
+  DCHECK(source.config() == SkBitmap::kARGB_8888_Config);
 
   SkBitmap cropped;
   cropped.setConfig(SkBitmap::kARGB_8888_Config, dst_w, dst_h, 0);
@@ -716,7 +725,7 @@ SkBitmap SkBitmapOperations::UnPreMultiply(const SkBitmap& bitmap) {
 }
 
 // static
-SkBitmap SkBitmapOperations::CreateTransposedBtmap(const SkBitmap& image) {
+SkBitmap SkBitmapOperations::CreateTransposedBitmap(const SkBitmap& image) {
   DCHECK(image.config() == SkBitmap::kARGB_8888_Config);
 
   SkBitmap transposed;
@@ -738,3 +747,104 @@ SkBitmap SkBitmapOperations::CreateTransposedBtmap(const SkBitmap& image) {
   return transposed;
 }
 
+// static
+SkBitmap SkBitmapOperations::CreateColorMask(const SkBitmap& bitmap,
+                                             SkColor c) {
+  DCHECK(bitmap.config() == SkBitmap::kARGB_8888_Config);
+
+  SkBitmap color_mask;
+  color_mask.setConfig(SkBitmap::kARGB_8888_Config,
+                       bitmap.width(), bitmap.height());
+  color_mask.allocPixels();
+  color_mask.eraseARGB(0, 0, 0, 0);
+
+  SkCanvas canvas(color_mask);
+
+  skia::RefPtr<SkColorFilter> color_filter = skia::AdoptRef(
+      SkColorFilter::CreateModeFilter(c, SkXfermode::kSrcIn_Mode));
+  SkPaint paint;
+  paint.setColorFilter(color_filter.get());
+  canvas.drawBitmap(bitmap, SkIntToScalar(0), SkIntToScalar(0), &paint);
+  return color_mask;
+}
+
+// static
+SkBitmap SkBitmapOperations::CreateDropShadow(
+    const SkBitmap& bitmap,
+    const gfx::ShadowValues& shadows) {
+  DCHECK(bitmap.config() == SkBitmap::kARGB_8888_Config);
+
+  // Shadow margin insets are negative values because they grow outside.
+  // Negate them here as grow direction is not important and only pixel value
+  // is of interest here.
+  gfx::Insets shadow_margin = -gfx::ShadowValue::GetMargin(shadows);
+
+  SkBitmap image_with_shadow;
+  image_with_shadow.setConfig(SkBitmap::kARGB_8888_Config,
+                              bitmap.width() + shadow_margin.width(),
+                              bitmap.height() + shadow_margin.height());
+  image_with_shadow.allocPixels();
+  image_with_shadow.eraseARGB(0, 0, 0, 0);
+
+  SkCanvas canvas(image_with_shadow);
+  canvas.translate(SkIntToScalar(shadow_margin.left()),
+                   SkIntToScalar(shadow_margin.top()));
+
+  SkPaint paint;
+  for (size_t i = 0; i < shadows.size(); ++i) {
+    const gfx::ShadowValue& shadow = shadows[i];
+    SkBitmap shadow_image = SkBitmapOperations::CreateColorMask(bitmap,
+                                                                shadow.color());
+
+    skia::RefPtr<SkBlurImageFilter> filter =
+        skia::AdoptRef(new SkBlurImageFilter(SkDoubleToScalar(shadow.blur()),
+                                             SkDoubleToScalar(shadow.blur())));
+    paint.setImageFilter(filter.get());
+
+    canvas.saveLayer(0, &paint);
+    canvas.drawBitmap(shadow_image,
+                      SkIntToScalar(shadow.x()),
+                      SkIntToScalar(shadow.y()));
+    canvas.restore();
+  }
+
+  canvas.drawBitmap(bitmap, SkIntToScalar(0), SkIntToScalar(0));
+  return image_with_shadow;
+}
+
+// static
+SkBitmap SkBitmapOperations::Rotate(const SkBitmap& source,
+                                    RotationAmount rotation) {
+  SkBitmap result;
+  SkScalar angle = SkFloatToScalar(0.0f);
+
+  switch (rotation) {
+   case ROTATION_90_CW:
+     angle = SkFloatToScalar(-90.0f);
+     result.setConfig(
+         SkBitmap::kARGB_8888_Config, source.height(), source.width());
+     break;
+   case ROTATION_180_CW:
+     angle = SkFloatToScalar(-180.0f);
+     result.setConfig(
+         SkBitmap::kARGB_8888_Config, source.width(), source.height());
+     break;
+   case ROTATION_270_CW:
+     angle = SkFloatToScalar(-270.0f);
+     result.setConfig(
+         SkBitmap::kARGB_8888_Config, source.height(), source.width());
+     break;
+  }
+  result.allocPixels();
+  SkCanvas canvas(result);
+
+  canvas.translate(SkFloatToScalar(result.width() * 0.5f),
+                   SkFloatToScalar(result.height() * 0.5f));
+  canvas.rotate(angle);
+  canvas.translate(-SkFloatToScalar(source.width() * 0.5f),
+                   -SkFloatToScalar(source.height() * 0.5f));
+  canvas.drawBitmap(source, 0, 0);
+  canvas.flush();
+
+  return result;
+}

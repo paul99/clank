@@ -1,14 +1,13 @@
-// Copyright (c) 2010 The Chromium Authors. All rights reserved.
+// Copyright (c) 2012 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
 #include "base/message_loop.h"
 #include "content/browser/geolocation/win7_location_provider_win.h"
 #include "content/browser/geolocation/win7_location_api_win.h"
+#include "content/public/common/geoposition.h"
 #include "testing/gmock/include/gmock/gmock.h"
 #include "testing/gtest/include/gtest/gtest.h"
-
-struct Geoposition;
 
 using testing::_;
 using testing::AtLeast;
@@ -16,7 +15,7 @@ using testing::DoDefault;
 using testing::Invoke;
 using testing::Return;
 
-namespace {
+namespace content {
 
 class MockWin7LocationApi : public Win7LocationApi {
  public:
@@ -92,7 +91,7 @@ class GeolocationProviderWin7Tests : public testing::Test {
     provider_->UnregisterListener(&location_listener_);
     provider_->StopProvider();
     delete provider_;
-    main_message_loop_.RunAllPending();
+    main_message_loop_.RunUntilIdle();
   }
 
  protected:
@@ -121,7 +120,7 @@ TEST_F(GeolocationProviderWin7Tests, GetValidPosition) {
   main_message_loop_.Run();
   Geoposition position;
   provider_->GetPosition(&position);
-  EXPECT_TRUE(position.IsValidFix());
+  EXPECT_TRUE(position.Validate());
 }
 
 TEST_F(GeolocationProviderWin7Tests, GetInvalidPosition) {
@@ -135,7 +134,7 @@ TEST_F(GeolocationProviderWin7Tests, GetInvalidPosition) {
   main_message_loop_.Run();
   Geoposition position;
   provider_->GetPosition(&position);
-  EXPECT_FALSE(position.IsValidFix());
+  EXPECT_FALSE(position.Validate());
 }
 
-}  // namespace
+}  // namespace content

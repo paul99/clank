@@ -6,9 +6,9 @@
 
 #include "base/basictypes.h"
 #include "base/logging.h"
+#include "ui/base/events/event.h"
 #include "ui/base/ime/text_input_client.h"
 #include "ui/base/keycodes/keyboard_codes.h"
-#include "ui/views/events/event.h"
 #include "ui/views/widget/widget.h"
 
 namespace views {
@@ -43,13 +43,16 @@ void MockInputMethod::Init(Widget* widget) {
   InputMethodBase::Init(widget);
 }
 
-void MockInputMethod::DispatchKeyEvent(const KeyEvent& key) {
+void MockInputMethod::DispatchKeyEvent(const ui::KeyEvent& key) {
   bool handled = (composition_changed_ || result_text_.length()) &&
       !IsTextInputTypeNone();
 
   ClearStates();
   if (handled) {
-    KeyEvent mock_key(ui::ET_KEY_PRESSED, ui::VKEY_PROCESSKEY, key.flags());
+    ui::KeyEvent mock_key(ui::ET_KEY_PRESSED,
+                          ui::VKEY_PROCESSKEY,
+                          key.flags(),
+                          key.is_char());
     DispatchKeyEventPostIME(mock_key);
   } else {
     DispatchKeyEventPostIME(key);

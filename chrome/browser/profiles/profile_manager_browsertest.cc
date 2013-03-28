@@ -1,10 +1,11 @@
-// Copyright (c) 2011 The Chromium Authors. All rights reserved.
+// Copyright (c) 2012 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
 #include "base/bind.h"
 #include "chrome/browser/profiles/profile_info_cache.h"
 #include "chrome/browser/profiles/profile_manager.h"
+#include "chrome/browser/ui/host_desktop.h"
 #include "chrome/test/base/in_process_browser_test.h"
 #include "chrome/test/base/testing_browser_process.h"
 #include "chrome/test/base/ui_test_utils.h"
@@ -41,10 +42,11 @@ IN_PROC_BROWSER_TEST_F(ProfileManagerBrowserTest, DeleteSingletonProfile) {
   // Delete singleton profile.
   FilePath singleton_profile_path = cache.GetPathOfProfileAtIndex(0);
   EXPECT_FALSE(singleton_profile_path.empty());
-  profile_manager->ScheduleProfileForDeletion(singleton_profile_path);
+  profile_manager->ScheduleProfileForDeletion(singleton_profile_path,
+                                              chrome::HOST_DESKTOP_TYPE_NATIVE);
 
   // Spin things till profile is actually deleted.
-  ui_test_utils::RunAllPendingInMessageLoop();
+  content::RunAllPendingInMessageLoop();
 
   // Make sure a new profile was created automatically.
   EXPECT_EQ(cache.GetNumberOfProfiles(), 1U);
@@ -73,11 +75,12 @@ IN_PROC_BROWSER_TEST_F(ProfileManagerBrowserTest, MAYBE_DeleteAllProfiles) {
   // Create an additional profile.
   FilePath new_path = profile_manager->GenerateNextProfileDirectoryPath();
   profile_manager->CreateProfileAsync(new_path,
-                                      base::Bind(&OnUnblockOnProfileCreation));
+                                      base::Bind(&OnUnblockOnProfileCreation),
+                                      string16(), string16());
 
   // Spin to allow profile creation to take place, loop is terminated
   // by OnUnblockOnProfileCreation when the profile is created.
-  ui_test_utils::RunMessageLoop();
+  content::RunMessageLoop();
 
   ASSERT_EQ(cache.GetNumberOfProfiles(), 2U);
 
@@ -86,11 +89,13 @@ IN_PROC_BROWSER_TEST_F(ProfileManagerBrowserTest, MAYBE_DeleteAllProfiles) {
   FilePath profile_path2 = cache.GetPathOfProfileAtIndex(1);
   EXPECT_FALSE(profile_path1.empty());
   EXPECT_FALSE(profile_path2.empty());
-  profile_manager->ScheduleProfileForDeletion(profile_path1);
-  profile_manager->ScheduleProfileForDeletion(profile_path2);
+  profile_manager->ScheduleProfileForDeletion(profile_path1,
+                                              chrome::HOST_DESKTOP_TYPE_NATIVE);
+  profile_manager->ScheduleProfileForDeletion(profile_path2,
+                                              chrome::HOST_DESKTOP_TYPE_NATIVE);
 
   // Spin things so deletion can take place.
-  ui_test_utils::RunAllPendingInMessageLoop();
+  content::RunAllPendingInMessageLoop();
 
   // Make sure a new profile was created automatically.
   EXPECT_EQ(cache.GetNumberOfProfiles(), 1U);

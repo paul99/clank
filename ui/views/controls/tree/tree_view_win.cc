@@ -13,15 +13,18 @@
 #include "grit/ui_resources.h"
 #include "ui/base/accelerators/accelerator.h"
 #include "ui/base/accessibility/accessible_view_state.h"
+#include "ui/base/events/event_constants.h"
+#include "ui/base/events/event_utils.h"
 #include "ui/base/keycodes/keyboard_code_conversion_win.h"
 #include "ui/base/keycodes/keyboard_codes.h"
 #include "ui/base/l10n/l10n_util_win.h"
 #include "ui/base/resource/resource_bundle.h"
 #include "ui/base/win/hwnd_util.h"
-#include "ui/gfx/canvas_skia.h"
+#include "ui/gfx/canvas.h"
 #include "ui/gfx/canvas_skia_paint.h"
 #include "ui/gfx/favicon_size.h"
 #include "ui/gfx/icon_util.h"
+#include "ui/gfx/image/image.h"
 #include "ui/gfx/point.h"
 #include "ui/views/controls/tree/tree_view_controller.h"
 #include "ui/views/focus/focus_manager.h"
@@ -94,7 +97,10 @@ void TreeView::SetEditable(bool editable) {
   if (!tree_view_)
     return;
   LONG_PTR style = GetWindowLongPtr(tree_view_, GWL_STYLE);
-  style &= ~TVS_EDITLABELS;
+  if (editable_)
+    style |= TVS_EDITLABELS;
+  else
+    style &= ~TVS_EDITLABELS;
   SetWindowLongPtr(tree_view_, GWL_STYLE, style);
 }
 
@@ -471,10 +477,8 @@ bool TreeView::OnKeyDown(ui::KeyboardCode virtual_key_code) {
   } else if (virtual_key_code == ui::VKEY_RETURN && !process_enter_) {
     Widget* widget = GetWidget();
     DCHECK(widget);
-    ui::Accelerator accelerator(ui::Accelerator(virtual_key_code,
-                                                base::win::IsShiftPressed(),
-                                                base::win::IsCtrlPressed(),
-                                                base::win::IsAltPressed()));
+    ui::Accelerator accelerator(virtual_key_code,
+                                ui::GetModifiersFromKeyState());
     GetFocusManager()->ProcessAccelerator(accelerator);
     return true;
   }
@@ -498,7 +502,7 @@ void TreeView::OnContextMenu(const POINT& location) {
     // Make sure the mouse is over the selected node.
     TVHITTESTINFO hit_info;
     gfx::Point local_loc(location);
-    ConvertPointToView(NULL, this, &local_loc);
+    ConvertPointToTarget(NULL, this, &local_loc);
     hit_info.pt = local_loc.ToPOINT();
     HTREEITEM hit_item = TreeView_HitTest(tree_view_, &hit_info);
     if (!hit_item ||
@@ -659,17 +663,16 @@ TreeView::NodeDetails* TreeView::GetNodeDetailsByTreeItem(HTREEITEM tree_item) {
 }
 
 HIMAGELIST TreeView::CreateImageList() {
-  std::vector<SkBitmap> model_images;
+  std::vector<gfx::ImageSkia> model_images;
   model_->GetIcons(&model_images);
 
+  ui::ResourceBundle& rb = ui::ResourceBundle::GetSharedInstance();
   bool rtl = base::i18n::IsRTL();
   // Creates the default image list used for trees.
-  SkBitmap* closed_icon =
-      ResourceBundle::GetSharedInstance().GetBitmapNamed(
-          (rtl ? IDR_FOLDER_CLOSED_RTL : IDR_FOLDER_CLOSED));
-  SkBitmap* opened_icon =
-      ResourceBundle::GetSharedInstance().GetBitmapNamed(
-          (rtl ? IDR_FOLDER_OPEN_RTL : IDR_FOLDER_OPEN));
+  const gfx::ImageSkia* closed_icon = rb.GetImageNamed(
+      (rtl ? IDR_FOLDER_CLOSED_RTL : IDR_FOLDER_CLOSED)).ToImageSkia();
+  const gfx::ImageSkia* opened_icon = rb.GetImageNamed(
+      (rtl ? IDR_FOLDER_OPEN_RTL : IDR_FOLDER_OPEN)).ToImageSkia();
   int width = closed_icon->width();
   int height = closed_icon->height();
   DCHECK(opened_icon->width() == width && opened_icon->height() == height);
@@ -681,8 +684,10 @@ HIMAGELIST TreeView::CreateImageList() {
     // image index when adding items to the tree. If you change the
     // order you'll undoubtedly need to update itemex.iSelectedImage
     // when the item is added.
-    HICON h_closed_icon = IconUtil::CreateHICONFromSkBitmap(*closed_icon);
-    HICON h_opened_icon = IconUtil::CreateHICONFromSkBitmap(*opened_icon);
+    HICON h_closed_icon = IconUtil::CreateHICONFromSkBitmap(
+        *closed_icon->bitmap());
+    HICON h_opened_icon = IconUtil::CreateHICONFromSkBitmap(
+        *opened_icon->bitmap());
     ImageList_AddIcon(image_list, h_closed_icon);
     ImageList_AddIcon(image_list, h_opened_icon);
     DestroyIcon(h_closed_icon);
@@ -694,15 +699,18 @@ HIMAGELIST TreeView::CreateImageList() {
       // IDR_FOLDER_CLOSED if they aren't already.
       if (model_images[i].width() != width ||
           model_images[i].height() != height) {
-        gfx::CanvasSkia canvas(gfx::Size(width, height), false);
+        gfx::Canvas canvas(gfx::Size(width, height), ui::SCALE_FACTOR_100P,
+            false);
 
         // Draw our icons into this canvas.
         int height_offset = (height - model_images[i].height()) / 2;
         int width_offset = (width - model_images[i].width()) / 2;
-        canvas.DrawBitmapInt(model_images[i], width_offset, height_offset);
-        model_icon = IconUtil::CreateHICONFromSkBitmap(canvas.ExtractBitmap());
+        canvas.DrawImageInt(model_images[i], width_offset, height_offset);
+        model_icon = IconUtil::CreateHICONFromSkBitmap(
+            canvas.ExtractImageRep().sk_bitmap());
       } else {
-        model_icon = IconUtil::CreateHICONFromSkBitmap(model_images[i]);
+        model_icon = IconUtil::CreateHICONFromSkBitmap(
+            *model_images[i].bitmap());
       }
       ImageList_AddIcon(image_list, model_icon);
       DestroyIcon(model_icon);
@@ -749,7 +757,7 @@ LRESULT CALLBACK TreeView::TreeWndProc(HWND window,
 
       HDC dc = skia::BeginPlatformPaint(canvas.sk_canvas());
       if (base::i18n::IsRTL()) {
-        // gfx::CanvasSkia ends up configuring the DC with a mode of
+        // gfx::Canvas ends up configuring the DC with a mode of
         // GM_ADVANCED. For some reason a graphics mode of ADVANCED triggers
         // all the text to be mirrored when RTL. Set the mode back to COMPATIBLE
         // and explicitly set the layout. Additionally SetWorldTransform and

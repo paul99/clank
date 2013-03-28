@@ -1,41 +1,48 @@
-// Copyright (c) 2011 The Chromium Authors. All rights reserved.
+// Copyright (c) 2012 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
 #ifndef UI_AURA_FOCUS_MANAGER_H_
 #define UI_AURA_FOCUS_MANAGER_H_
-#pragma once
 
 #include "base/basictypes.h"
+#include "base/observer_list.h"
 #include "ui/aura/aura_export.h"
+#include "ui/aura/client/focus_client.h"
+
+namespace ui {
+class Event;
+}
 
 namespace aura {
-class Window;
 
-namespace internal {
+class Window;
 
 // An interface implemented by the Desktop to expose the focused window and
 // allow for it to be changed.
-class AURA_EXPORT FocusManager {
+class AURA_EXPORT FocusManager : public client::FocusClient {
  public:
-  // Sets the currently focused window. Before the currently focused window is
-  // changed, the previous focused window's delegate is sent a blur
-  // notification, and after it is changed the new focused window is sent a
-  // focused notification. Nothing happens if |window| and GetFocusedWindow()
-  // match.
-  virtual void SetFocusedWindow(Window* window) = 0;
+  FocusManager();
+  virtual ~FocusManager();
 
-  // Returns the currently focused window or NULL if there is none.
-  virtual Window* GetFocusedWindow() = 0;
-
-  // Returns true if |window| is the focused window.
-  virtual bool IsFocusedWindow(const Window* window) const = 0;
+ private:
+  // Overridden from client::FocusClient:
+  virtual void AddObserver(client::FocusChangeObserver* observer) OVERRIDE;
+  virtual void RemoveObserver(client::FocusChangeObserver* observer) OVERRIDE;
+  virtual void FocusWindow(Window* window, const ui::Event* event) OVERRIDE;
+  virtual Window* GetFocusedWindow() OVERRIDE;
+  virtual void OnWindowHiddenInRootWindow(aura::Window* window,
+                                          aura::RootWindow* root_window,
+                                          bool destroyed) OVERRIDE;
 
  protected:
-  virtual ~FocusManager() {}
+  aura::Window* focused_window_;
+
+  ObserverList<client::FocusChangeObserver> observers_;
+
+  DISALLOW_COPY_AND_ASSIGN(FocusManager);
 };
 
-}  // namespace internal
 }  // namespace aura
 
 #endif  // UI_AURA_FOCUS_MANAGER_H_

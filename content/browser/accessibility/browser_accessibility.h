@@ -4,7 +4,6 @@
 
 #ifndef CONTENT_BROWSER_ACCESSIBILITY_BROWSER_ACCESSIBILITY_H_
 #define CONTENT_BROWSER_ACCESSIBILITY_BROWSER_ACCESSIBILITY_H_
-#pragma once
 
 #include <map>
 #include <utility>
@@ -12,21 +11,26 @@
 
 #include "base/basictypes.h"
 #include "build/build_config.h"
+#include "content/common/accessibility_node_data.h"
 #include "content/common/content_export.h"
-#include "webkit/glue/webaccessibility.h"
 
-class BrowserAccessibilityManager;
 #if defined(OS_MACOSX) && __OBJC__
 @class BrowserAccessibilityCocoa;
-#elif defined(OS_WIN)
-class BrowserAccessibilityWin;
 #endif
 
-using webkit_glue::WebAccessibility;
-typedef std::map<WebAccessibility::BoolAttribute, bool> BoolAttrMap;
-typedef std::map<WebAccessibility::FloatAttribute, float> FloatAttrMap;
-typedef std::map<WebAccessibility::IntAttribute, int> IntAttrMap;
-typedef std::map<WebAccessibility::StringAttribute, string16> StringAttrMap;
+namespace content {
+class BrowserAccessibilityManager;
+#if defined(OS_WIN)
+class BrowserAccessibilityWin;
+#elif defined(TOOLKIT_GTK)
+class BrowserAccessibilityGtk;
+#endif
+
+typedef std::map<AccessibilityNodeData::BoolAttribute, bool> BoolAttrMap;
+typedef std::map<AccessibilityNodeData::FloatAttribute, float> FloatAttrMap;
+typedef std::map<AccessibilityNodeData::IntAttribute, int> IntAttrMap;
+typedef std::map<AccessibilityNodeData::StringAttribute, string16>
+    StringAttrMap;
 
 ////////////////////////////////////////////////////////////////////////////////
 //
@@ -58,13 +62,17 @@ class CONTENT_EXPORT BrowserAccessibility {
   // Child dependent initialization can be done here.
   virtual void PostInitialize() {}
 
+  // Returns true if this is a native platform-specific object, vs a
+  // cross-platform generic object.
+  virtual bool IsNative() const;
+
   // Initialize this object, reading attributes from |src|. Does not
   // recurse into children of |src| and build the whole subtree.
   void PreInitialize(BrowserAccessibilityManager* manager,
       BrowserAccessibility* parent,
       int32 child_id,
       int32 index_in_parent,
-      const WebAccessibility& src);
+      const AccessibilityNodeData& src);
 
   // Add a child of this object.
   void AddChild(BrowserAccessibility* child);
@@ -188,41 +196,55 @@ class CONTENT_EXPORT BrowserAccessibility {
   int32 ref_count() const { return ref_count_; }
 
 #if defined(OS_MACOSX) && __OBJC__
-  BrowserAccessibilityCocoa* toBrowserAccessibilityCocoa();
+  BrowserAccessibilityCocoa* ToBrowserAccessibilityCocoa();
 #elif defined(OS_WIN)
-  BrowserAccessibilityWin* toBrowserAccessibilityWin();
+  BrowserAccessibilityWin* ToBrowserAccessibilityWin();
+#elif defined(TOOLKIT_GTK)
+  BrowserAccessibilityGtk* ToBrowserAccessibilityGtk();
 #endif
-
-  // A string representation of this node.
-  // TODO(dtseng): Move to test only library.
-  std::string ToString();
 
   // Retrieve the value of a bool attribute from the bool attribute
   // map and returns true if found.
-  bool GetBoolAttribute(WebAccessibility::BoolAttribute attr, bool* value)
-      const;
+  bool GetBoolAttribute(
+      AccessibilityNodeData::BoolAttribute attr, bool* value) const;
 
   // Retrieve the value of a float attribute from the float attribute
   // map and returns true if found.
-  bool GetFloatAttribute(WebAccessibility::FloatAttribute attr, float* value)
-      const;
+  bool GetFloatAttribute(AccessibilityNodeData::FloatAttribute attr,
+                         float* value) const;
 
   // Retrieve the value of an integer attribute from the integer attribute
   // map and returns true if found.
-  bool GetIntAttribute(WebAccessibility::IntAttribute attribute, int* value)
-      const;
+  bool GetIntAttribute(AccessibilityNodeData::IntAttribute attribute,
+                       int* value) const;
 
   // Retrieve the value of a string attribute from the attribute map and
   // returns true if found.
-  bool GetStringAttribute(WebAccessibility::StringAttribute attribute,
-                          string16* value) const;
+  bool GetStringAttribute(
+      AccessibilityNodeData::StringAttribute attribute, string16* value) const;
 
   // Retrieve the value of a html attribute from the attribute map and
   // returns true if found.
   bool GetHtmlAttribute(const char* attr, string16* value) const;
 
+  // Utility method to handle special cases for ARIA booleans, tristates and
+  // booleans which have a "mixed" state.
+  //
+  // Warning: the term "Tristate" is used loosely by the spec and here,
+  // as some attributes support a 4th state.
+  //
+  // The following attributes are appropriate to use with this method:
+  // aria-selected  (selectable)
+  // aria-grabbed   (grabbable)
+  // aria-expanded  (expandable)
+  // aria-pressed   (toggleable/pressable) -- supports 4th "mixed" state
+  // aria-checked   (checkable) -- supports 4th "mixed state"
+  bool GetAriaTristate(const char* attr_name,
+                       bool* is_defined,
+                       bool* is_mixed) const;
+
   // Returns true if the bit corresponding to the given state enum is 1.
-  bool HasState(WebAccessibility::State state_enum) const;
+  bool HasState(AccessibilityNodeData::State state_enum) const;
 
   // Returns true if this node is an editable text field of any kind.
   bool IsEditableText() const;
@@ -288,5 +310,7 @@ class CONTENT_EXPORT BrowserAccessibility {
  private:
   DISALLOW_COPY_AND_ASSIGN(BrowserAccessibility);
 };
+
+}  // namespace content
 
 #endif  // CONTENT_BROWSER_ACCESSIBILITY_BROWSER_ACCESSIBILITY_H_

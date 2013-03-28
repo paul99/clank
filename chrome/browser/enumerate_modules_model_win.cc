@@ -1,4 +1,4 @@
-// Copyright (c) 2011 The Chromium Authors. All rights reserved.
+// Copyright (c) 2012 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -143,7 +143,10 @@ const ModuleEnumerator::BlacklistEntry ModuleEnumerator::kModuleBlacklist[] = {
   // cwalsp.dll, "%systemroot%\\system32\\".
   { "e579a039", "23d01d5b", "", "", "", kUninstallLink },
 
-  // datamngr.dll, "%programfiles%\\windows searchqu toolbar\\".
+  // datamngr.dll (1), "%programfiles%\\searchqu toolbar\\datamngr\\".
+  { "7add320b", "470a3da3", "", "", "", kUninstallLink },
+
+  // datamngr.dll (2), "%programfiles%\\windows searchqu toolbar\\".
   { "7add320b", "7a3c8be3", "", "", "", kUninstallLink },
 
   // dsoqq0.dll, "%temp%\\".
@@ -244,6 +247,9 @@ const ModuleEnumerator::BlacklistEntry ModuleEnumerator::kModuleBlacklist[] = {
   // sgprxy.dll, "%commonprogramfiles%\\is3\\anti-spyware\\".
   { "005965ea", "bc5673f2", "", "", "", INVESTIGATING },
 
+  // sprotector.dll, "". Different location each report.
+  { "24555d74", "", "", "", "", kUninstallLink },
+
   // swi_filter_0001.dll (Sophos Web Intelligence),
   // "%programfiles%\\sophos\\sophos anti-virus\\web intelligence\\".
   // A small random sample all showed version 1.0.5.0.
@@ -338,20 +344,17 @@ ModuleEnumerator::ModuleStatus ModuleEnumerator::Match(
           location_hash == blacklisted.location)) {
     // We have a name match against the blacklist (and possibly location match
     // also), so check version.
-    scoped_ptr<Version> module_version(
-        Version::GetVersionFromString(UTF16ToASCII(module.version)));
-    scoped_ptr<Version> version_min(
-        Version::GetVersionFromString(blacklisted.version_from));
-    scoped_ptr<Version> version_max(
-        Version::GetVersionFromString(blacklisted.version_to));
-    bool version_ok = !version_min.get() && !version_max.get();
+    Version module_version(UTF16ToASCII(module.version));
+    Version version_min(blacklisted.version_from);
+    Version version_max(blacklisted.version_to);
+    bool version_ok = !version_min.IsValid() && !version_max.IsValid();
     if (!version_ok) {
-      bool too_low = version_min.get() &&
-          (!module_version.get() ||
-          module_version->CompareTo(*version_min.get()) < 0);
-      bool too_high = version_max.get() &&
-          (!module_version.get() ||
-          module_version->CompareTo(*version_max.get()) >= 0);
+      bool too_low = version_min.IsValid() &&
+          (!module_version.IsValid() ||
+          module_version.CompareTo(version_min) < 0);
+      bool too_high = version_max.IsValid() &&
+          (!module_version.IsValid() ||
+          module_version.CompareTo(version_max) >= 0);
       version_ok = !too_low && !too_high;
     }
 

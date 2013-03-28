@@ -1,4 +1,4 @@
-// Copyright (c) 2011 The Chromium Authors. All rights reserved.
+// Copyright (c) 2012 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 //
@@ -19,6 +19,8 @@
 #include "ipc/ipc_channel_proxy.h"
 #include "media/video/capture/video_capture.h"
 
+namespace content {
+
 class CONTENT_EXPORT VideoCaptureMessageFilter
     : public IPC::ChannelProxy::MessageFilter {
  public:
@@ -33,7 +35,7 @@ class CONTENT_EXPORT VideoCaptureMessageFilter
 
     // Called when state of a video capture device has changed in the browser
     // process.
-    virtual void OnStateChanged(video_capture::State state) = 0;
+    virtual void OnStateChanged(VideoCaptureState state) = 0;
 
     // Called when device info is received from video capture device in the
     // browser process.
@@ -49,7 +51,6 @@ class CONTENT_EXPORT VideoCaptureMessageFilter
   };
 
   VideoCaptureMessageFilter();
-  virtual ~VideoCaptureMessageFilter();
 
   // Add a delegate to the map.
   void AddDelegate(Delegate* delegate);
@@ -60,17 +61,20 @@ class CONTENT_EXPORT VideoCaptureMessageFilter
   // Send a message asynchronously.
   virtual bool Send(IPC::Message* message);
 
- private:
-  FRIEND_TEST_ALL_PREFIXES(VideoCaptureMessageFilterTest, Basic);
-  FRIEND_TEST_ALL_PREFIXES(VideoCaptureMessageFilterTest, Delegates);
-
-  typedef std::map<int32, Delegate*> Delegates;
-
   // IPC::ChannelProxy::MessageFilter override. Called on IO thread.
   virtual bool OnMessageReceived(const IPC::Message& message) OVERRIDE;
   virtual void OnFilterAdded(IPC::Channel* channel) OVERRIDE;
   virtual void OnFilterRemoved() OVERRIDE;
   virtual void OnChannelClosing() OVERRIDE;
+
+ protected:
+  virtual ~VideoCaptureMessageFilter();
+
+ private:
+  FRIEND_TEST_ALL_PREFIXES(VideoCaptureMessageFilterTest, Basic);
+  FRIEND_TEST_ALL_PREFIXES(VideoCaptureMessageFilterTest, Delegates);
+
+  typedef std::map<int32, Delegate*> Delegates;
 
   // Receive a newly created buffer from browser process.
   void OnBufferCreated(int device_id,
@@ -82,8 +86,7 @@ class CONTENT_EXPORT VideoCaptureMessageFilter
                         int buffer_id, base::Time timestamp);
 
   // State of browser process' video capture device has changed.
-  void OnDeviceStateChanged(int device_id,
-                            video_capture::State state);
+  void OnDeviceStateChanged(int device_id, VideoCaptureState state);
 
   // Receive device info from browser process.
   void OnDeviceInfoReceived(int device_id,
@@ -100,5 +103,7 @@ class CONTENT_EXPORT VideoCaptureMessageFilter
 
   DISALLOW_COPY_AND_ASSIGN(VideoCaptureMessageFilter);
 };
+
+}  // namespace content
 
 #endif  // CONTENT_RENDERER_MEDIA_VIDEO_CAPTURE_MESSAGE_FILTER_H_

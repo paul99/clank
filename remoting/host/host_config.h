@@ -7,7 +7,11 @@
 
 #include <string>
 
-#include "base/memory/ref_counted.h"
+#include "base/basictypes.h"
+
+namespace base {
+class DictionaryValue;
+}  // namespace base
 
 namespace remoting {
 
@@ -19,6 +23,8 @@ extern const char kHostEnabledConfigPath[];
 extern const char kXmppLoginConfigPath[];
 // Auth token used to authenticate to XMPP network.
 extern const char kXmppAuthTokenConfigPath[];
+// OAuth refresh token used to fetch an access token for the XMPP network.
+extern const char kOAuthRefreshTokenConfigPath[];
 // Auth service used to authenticate to XMPP network.
 extern const char kXmppAuthServiceConfigPath[];
 // Unique identifier of the host used to register the host in directory.
@@ -30,16 +36,20 @@ extern const char kHostNameConfigPath[];
 extern const char kHostSecretHashConfigPath[];
 // Private keys used for host authentication.
 extern const char kPrivateKeyConfigPath[];
+// Whether consent is given for usage stats reporting.
+extern const char kUsageStatsConsentConfigPath[];
 
 // HostConfig interace provides read-only access to host configuration.
-class HostConfig : public base::RefCountedThreadSafe<HostConfig> {
+class HostConfig {
  public:
   HostConfig() {}
   virtual ~HostConfig() {}
 
-  virtual bool GetString(const std::string& path, std::string* out_value) = 0;
-  virtual bool GetBoolean(const std::string& path, bool* out_value) = 0;
+  virtual bool GetString(const std::string& path,
+                         std::string* out_value) const = 0;
+  virtual bool GetBoolean(const std::string& path, bool* out_value) const = 0;
 
+ private:
   DISALLOW_COPY_AND_ASSIGN(HostConfig);
 };
 
@@ -54,8 +64,13 @@ class MutableHostConfig : public HostConfig {
                          const std::string& in_value) = 0;
   virtual void SetBoolean(const std::string& path, bool in_value) = 0;
 
-  // Save's changes.
-  virtual void Save() = 0;
+  // Copy configuration from specified |dictionary|. Returns false if the
+  // |dictionary| contains some values that cannot be saved in the config. In
+  // that case, all other values are still copied.
+  virtual bool CopyFrom(const base::DictionaryValue* dictionary) = 0;
+
+  // Saves changes.
+  virtual bool Save() = 0;
 
   DISALLOW_COPY_AND_ASSIGN(MutableHostConfig);
 };

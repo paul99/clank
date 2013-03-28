@@ -9,7 +9,7 @@
 #include "base/logging.h"
 #include "chrome/browser/chromeos/login/helper.h"
 #include "grit/generated_resources.h"
-#include "grit/ui_resources_standard.h"
+#include "grit/ui_resources.h"
 #include "ui/base/resource/resource_bundle.h"
 #include "ui/views/controls/button/image_button.h"
 #include "ui/views/controls/image_view.h"
@@ -29,7 +29,7 @@ namespace chromeos {
 
 MessageBubble::MessageBubble(views::View* anchor_view,
                              views::BubbleBorder::ArrowLocation arrow_location,
-                             SkBitmap* image,
+                             gfx::ImageSkia* image,
                              const string16& text,
                              const std::vector<string16>& links)
     : BubbleDelegateView(anchor_view, arrow_location),
@@ -75,17 +75,17 @@ void MessageBubble::Init() {
 
   views::Label* label = new views::Label(text_);
   label->SetMultiLine(true);
-  label->SetHorizontalAlignment(views::Label::ALIGN_LEFT);
+  label->SetHorizontalAlignment(gfx::ALIGN_LEFT);
   label->SizeToFit(kMaxLabelWidth);
   layout->AddView(label);
 
   close_button_ = new views::ImageButton(this);
-  close_button_->SetImage(views::CustomButton::BS_NORMAL,
-      rb.GetBitmapNamed(IDR_CLOSE_BAR));
-  close_button_->SetImage(views::CustomButton::BS_HOT,
-      rb.GetBitmapNamed(IDR_CLOSE_BAR_H));
-  close_button_->SetImage(views::CustomButton::BS_PUSHED,
-      rb.GetBitmapNamed(IDR_CLOSE_BAR_P));
+  close_button_->SetImage(views::CustomButton::STATE_NORMAL,
+      rb.GetImageSkiaNamed(IDR_CLOSE_BAR));
+  close_button_->SetImage(views::CustomButton::STATE_HOVERED,
+      rb.GetImageSkiaNamed(IDR_CLOSE_BAR_H));
+  close_button_->SetImage(views::CustomButton::STATE_PRESSED,
+      rb.GetImageSkiaNamed(IDR_CLOSE_BAR_P));
   layout->AddView(close_button_);
 
   for (size_t i = 0; i < help_links_.size(); ++i) {
@@ -99,7 +99,7 @@ void MessageBubble::Init() {
 }
 
 void MessageBubble::ButtonPressed(views::Button* sender,
-                                  const views::Event& event) {
+                                  const ui::Event& event) {
   if (sender == close_button_) {
     GetWidget()->Close();
   } else {

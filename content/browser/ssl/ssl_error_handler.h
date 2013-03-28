@@ -1,27 +1,30 @@
-// Copyright (c) 2011 The Chromium Authors. All rights reserved.
+// Copyright (c) 2012 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
 #ifndef CONTENT_BROWSER_SSL_SSL_ERROR_HANDLER_H_
 #define CONTENT_BROWSER_SSL_SSL_ERROR_HANDLER_H_
-#pragma once
 
 #include <string>
 
 #include "base/basictypes.h"
 #include "base/memory/ref_counted.h"
-#include "content/browser/ssl/ssl_manager.h"
+#include "base/memory/weak_ptr.h"
 #include "content/common/content_export.h"
 #include "content/public/browser/global_request_id.h"
 #include "googleurl/src/gurl.h"
 #include "webkit/glue/resource_type.h"
 
-class ResourceDispatcherHost;
-class SSLCertErrorHandler;
-
 namespace net {
+class SSLInfo;
 class URLRequest;
 }  // namespace net
+
+namespace content {
+
+class ResourceDispatcherHostImpl;
+class SSLCertErrorHandler;
+class SSLManager;
 
 // An SSLErrorHandler carries information from the IO thread to the UI thread
 // and is dispatched to the appropriate SSLManager when it arrives on the
@@ -39,6 +42,27 @@ class URLRequest;
 //
 class SSLErrorHandler : public base::RefCountedThreadSafe<SSLErrorHandler> {
  public:
+  // Delegate functions must be called from IO thread. All functions accept
+  // |id| as the first argument. |id| is a copy of the second argument of
+  // SSLManager::OnSSLCertificateError() and represents the request.
+  // Finally, CancelSSLRequest() or ContinueSSLRequest() will be called after
+  // SSLErrorHandler makes a decision on the SSL error.
+  class Delegate {
+   public:
+    // Called when SSLErrorHandler decides to cancel the request because of
+    // the SSL error.
+    virtual void CancelSSLRequest(const GlobalRequestID& id,
+                                  int error,
+                                  const net::SSLInfo* ssl_info) = 0;
+
+    // Called when SSLErrorHandler decides to continue the request despite the
+    // SSL error.
+    virtual void ContinueSSLRequest(const GlobalRequestID& id) = 0;
+
+   protected:
+    virtual ~Delegate() {}
+  };
+
   virtual SSLCertErrorHandler* AsSSLCertErrorHandler();
 
   // Find the appropriate SSLManager for the net::URLRequest and begin handling
@@ -76,16 +100,19 @@ class SSLErrorHandler : public base::RefCountedThreadSafe<SSLErrorHandler> {
   // call this.
   void TakeNoAction();
 
-  int render_process_host_id() const { return render_process_host_id_; }
-  int tab_contents_id() const { return tab_contents_id_; }
+  int render_process_id() const { return render_process_id_; }
+  int render_view_id() const { return render_view_id_; }
 
  protected:
   friend class base::RefCountedThreadSafe<SSLErrorHandler>;
 
   // Construct on the IO thread.
-  SSLErrorHandler(ResourceDispatcherHost* resource_dispatcher_host,
-                  net::URLRequest* request,
-                  ResourceType::Type resource_type);
+  SSLErrorHandler(const base::WeakPtr<Delegate>& delegate,
+                  const GlobalRequestID& id,
+                  ResourceType::Type resource_type,
+                  const GURL& url,
+                  int render_process_id,
+                  int render_view_id);
 
   virtual ~SSLErrorHandler();
 
@@ -98,12 +125,12 @@ class SSLErrorHandler : public base::RefCountedThreadSafe<SSLErrorHandler> {
   // Should only be accessed on the UI thread.
   SSLManager* manager_;  // Our manager.
 
-  // The id of the net::URLRequest associated with this object.
+  // The id of the request associated with this object.
   // Should only be accessed from the IO thread.
-  content::GlobalRequestID request_id_;
+  GlobalRequestID request_id_;
 
-  // The ResourceDispatcherHost we are associated with.
-  ResourceDispatcherHost* resource_dispatcher_host_;
+  // The delegate we are associated with.
+  base::WeakPtr<Delegate> delegate_;
 
  private:
   // Completes the CancelRequest operation on the IO thread.
@@ -121,8 +148,8 @@ class SSLErrorHandler : public base::RefCountedThreadSafe<SSLErrorHandler> {
 
   // We use these members to find the correct SSLManager when we arrive on
   // the UI thread.
-  int render_process_host_id_;
-  int tab_contents_id_;
+  int render_process_id_;
+  int render_view_id_;
 
   // The URL that we requested.
   // This read-only member can be accessed on any thread.
@@ -139,5 +166,7 @@ class SSLErrorHandler : public base::RefCountedThreadSafe<SSLErrorHandler> {
 
   DISALLOW_COPY_AND_ASSIGN(SSLErrorHandler);
 };
+
+}  // namespace content
 
 #endif  // CONTENT_BROWSER_SSL_SSL_ERROR_HANDLER_H_

@@ -1,4 +1,4 @@
-# Copyright (c) 2010 The Chromium Authors. All rights reserved.
+# Copyright (c) 2012 The Chromium Authors. All rights reserved.
 # Use of this source code is governed by a BSD-style license that can be
 # found in the LICENSE file.
 
@@ -24,9 +24,6 @@
         # -fvisibility=hidden gets stripped by the exclusion in common.gypi
         # that is triggered when a shared library build is specified.
         'cflags/': [['include', '^-fvisibility=hidden$']],
-      }],
-      ['OS=="android"', {
-        'cflags': ['-DOS_ANDROID'],
       }],
     ],
   },

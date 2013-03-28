@@ -1,4 +1,4 @@
-// Copyright (c) 2011 The Chromium Authors. All rights reserved.
+// Copyright (c) 2012 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -20,8 +20,6 @@ var remoting = remoting || {};
  * @constructor
  */
 remoting.HostSession = function() {
-  /** @private */
-  this.HOST_PLUGIN_ID_ = 'host-plugin-id';
 };
 
 /** @type {remoting.HostPlugin} */
@@ -38,7 +36,21 @@ remoting.HostSession.State = {
   RECEIVED_ACCESS_CODE: 3,
   CONNECTED: 4,
   DISCONNECTING: 5,
-  ERROR: 6
+  ERROR: 6,
+  INVALID_DOMAIN_ERROR: 7
+};
+
+/**
+ * Create an instance of the host plugin.
+ * @return {remoting.HostPlugin} The new plugin instance.
+ */
+remoting.HostSession.createPlugin = function() {
+  var plugin = document.createElement('embed');
+  plugin.type = remoting.PLUGIN_MIMETYPE;
+  // Hiding the plugin means it doesn't load, so make it size zero instead.
+  plugin.width = 0;
+  plugin.height = 0;
+  return /** @type {remoting.HostPlugin} */ (plugin);
 };
 
 /**
@@ -56,13 +68,7 @@ remoting.HostSession.State = {
 remoting.HostSession.prototype.createPluginAndConnect =
     function(container, email, accessToken,
              onNatTraversalPolicyChanged, onStateChanged, logDebugInfo) {
-  this.plugin = /** @type {remoting.HostPlugin} */
-      document.createElement('embed');
-  this.plugin.type = remoting.PLUGIN_MIMETYPE;
-  this.plugin.id = this.HOST_PLUGIN_ID_;
-  // Hiding the plugin means it doesn't load, so make it size zero instead.
-  this.plugin.width = 0;
-  this.plugin.height = 0;
+  this.plugin = remoting.HostSession.createPlugin();
   container.appendChild(this.plugin);
   this.plugin.onNatTraversalPolicyChanged = onNatTraversalPolicyChanged;
   this.plugin.onStateChanged = onStateChanged;

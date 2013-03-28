@@ -5,36 +5,32 @@
 // Custom bindings for the input ime API. Only injected into the
 // v8 contexts for extensions which have permission for the API.
 
-(function() {
+var chromeHidden = requireNative('chrome_hidden').GetChromeHidden();
 
-native function GetChromeHidden();
+chromeHidden.registerCustomHook('input.ime', function() {
+  chrome.input.ime.onKeyEvent.dispatchToListener = function(callback, args) {
+    var engineID = args[0];
+    var keyData = args[1];
 
-GetChromeHidden().registerCustomHook('input.ime', function() {
-  chrome.input.ime.onKeyEvent.dispatch = function(engineID, keyData) {
-    var args = Array.prototype.slice.call(arguments);
-    if (this.validate_) {
-      var validationErrors = this.validate_(args);
-      if (validationErrors) {
-        chrome.input.ime.eventHandled(requestId, false);
-        return validationErrors;
+    var result = false;
+    try {
+      result = chrome.Event.prototype.dispatchToListener(callback, args);
+    } catch (e) {
+      console.error('Error in event handler for onKeyEvent: ' + e.stack);
+    }
+    if (!chrome.input.ime.onKeyEvent.async)
+      chrome.input.ime.keyEventHandled(keyData.requestId, result);
+  };
+
+  chrome.input.ime.onKeyEvent.addListener = function(cb, opt_extraInfo) {
+    chrome.input.ime.onKeyEvent.async = false;
+    if (opt_extraInfo instanceof Array) {
+      for (var i = 0; i < opt_extraInfo.length; ++i) {
+        if (opt_extraInfo[i] == "async") {
+          chrome.input.ime.onKeyEvent.async = true;
+        }
       }
     }
-    if (this.listeners_.length > 1) {
-      console.error("Too many listeners for 'onKeyEvent': " + e.stack);
-      chrome.input.ime.eventHandled(requestId, false);
-      return;
-    }
-    for (var i = 0; i < this.listeners_.length; i++) {
-      try {
-        var requestId = keyData.requestId;
-        var result = this.listeners_[i].apply(null, args);
-        chrome.input.ime.eventHandled(requestId, result);
-      } catch (e) {
-        console.error("Error in event handler for 'onKeyEvent': " + e.stack);
-        chrome.input.ime.eventHandled(requestId, false);
-      }
-    }
+    chrome.Event.prototype.addListener.call(this, cb, null);
   };
 });
-
-})();

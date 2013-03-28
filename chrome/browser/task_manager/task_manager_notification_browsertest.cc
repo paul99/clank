@@ -1,4 +1,4 @@
-// Copyright (c) 2011 The Chromium Authors. All rights reserved.
+// Copyright (c) 2012 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -16,12 +16,26 @@
 #include "chrome/browser/ui/browser_window.h"
 #include "chrome/test/base/in_process_browser_test.h"
 #include "chrome/test/base/ui_test_utils.h"
+#include "content/public/common/content_switches.h"
 #include "testing/gtest/include/gtest/gtest.h"
+
+#if !defined(USE_ASH)
+// These tests do not apply on Ash where notifications do not instantiate
+// a new renderer.
 
 class TaskManagerNotificationBrowserTest : public ExtensionBrowserTest {
  public:
   TaskManagerModel* model() const {
     return TaskManager::GetInstance()->model();
+  }
+ protected:
+  virtual void SetUpCommandLine(CommandLine* command_line) OVERRIDE {
+    ExtensionBrowserTest::SetUpCommandLine(command_line);
+
+    // Do not prelaunch the GPU process for these tests because it will show
+    // up in task manager but whether it appears before or after the new tab
+    // renderer process is not well defined.
+    command_line->AppendSwitch(switches::kDisableGpuProcessPrelaunch);
   }
 };
 
@@ -32,7 +46,7 @@ IN_PROC_BROWSER_TEST_F(TaskManagerNotificationBrowserTest,
   // Show the task manager.
   browser()->window()->ShowTaskManager();
   // Expect to see the browser and the New Tab Page renderer.
-  TaskManagerBrowserTestUtil::WaitForResourceChange(2);
+  TaskManagerBrowserTestUtil::WaitForWebResourceChange(1);
 
   // Show a notification.
   NotificationUIManager* notifications =
@@ -50,11 +64,13 @@ IN_PROC_BROWSER_TEST_F(TaskManagerNotificationBrowserTest,
       GURL(), GURL(content), ASCIIToUTF16("Test 2"), string16(), del2.get());
 
   notifications->Add(n1, browser()->profile());
-  TaskManagerBrowserTestUtil::WaitForResourceChange(3);
+  TaskManagerBrowserTestUtil::WaitForWebResourceChange(2);
   notifications->Add(n2, browser()->profile());
-  TaskManagerBrowserTestUtil::WaitForResourceChange(4);
+  TaskManagerBrowserTestUtil::WaitForWebResourceChange(3);
   notifications->CancelById(n1.notification_id());
-  TaskManagerBrowserTestUtil::WaitForResourceChange(3);
+  TaskManagerBrowserTestUtil::WaitForWebResourceChange(2);
   notifications->CancelById(n2.notification_id());
-  TaskManagerBrowserTestUtil::WaitForResourceChange(2);
+  TaskManagerBrowserTestUtil::WaitForWebResourceChange(1);
 }
+
+#endif  // !USE_ASH

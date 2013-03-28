@@ -1,10 +1,9 @@
-// Copyright (c) 2011 The Chromium Authors. All rights reserved.
+// Copyright (c) 2012 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
 #ifndef UI_VIEWS_VIEWS_DELEGATE_H_
 #define UI_VIEWS_VIEWS_DELEGATE_H_
-#pragma once
 
 #include <string>
 
@@ -15,21 +14,29 @@
 #include "base/string16.h"
 #include "ui/base/accessibility/accessibility_types.h"
 #include "ui/base/ui_base_types.h"
+#include "ui/gfx/native_widget_types.h"
 #include "ui/views/views_export.h"
+#include "ui/views/widget/widget.h"
+
+namespace content {
+class WebContents;
+class BrowserContext;
+class SiteInstance;
+}
 
 namespace gfx {
 class Rect;
 }
 
-namespace ui {
-class Clipboard;
-}
-
 namespace views {
 
+class NativeWidget;
 class NonClientFrameView;
 class View;
 class Widget;
+namespace internal {
+class NativeWidgetDelegate;
+}
 
 // ViewsDelegate is an interface implemented by an object using the views
 // framework. It is used to obtain various high level application utilities
@@ -43,9 +50,6 @@ class VIEWS_EXPORT ViewsDelegate {
   static ViewsDelegate* views_delegate;
 
   virtual ~ViewsDelegate() {}
-
-  // Gets the clipboard.
-  virtual ui::Clipboard* GetClipboard() const = 0;
 
   // Saves the position, size and "show" state for the window with the
   // specified name.
@@ -84,13 +88,31 @@ class VIEWS_EXPORT ViewsDelegate {
   virtual NonClientFrameView* CreateDefaultNonClientFrameView(
       Widget* widget) = 0;
 
+  // Returns whether the embedding app wants windows to be created with the
+  // views::Widget marked as transparent.  For example, an app may wish to
+  // apply transparent window frames in the NonClientFrameView.
+  virtual bool UseTransparentWindows() const = 0;
+
   // AddRef/ReleaseRef are invoked while a menu is visible. They are used to
   // ensure we don't attempt to exit while a menu is showing.
   virtual void AddRef() = 0;
   virtual void ReleaseRef() = 0;
 
-  // Converts views::Event::flags to a WindowOpenDisposition.
+  // Converts ui::Event::flags to a WindowOpenDisposition.
   virtual int GetDispositionForEvent(int event_flags) = 0;
+
+  // Creates a web contents. This will return NULL unless overriden.
+  virtual content::WebContents* CreateWebContents(
+      content::BrowserContext* browser_context,
+      content::SiteInstance* site_instance) = 0;
+
+  // Creates a NativeWidget implementation. Returning NULL means Widget will
+  // create a default implementation for the platform.
+  virtual NativeWidget* CreateNativeWidget(
+      Widget::InitParams::Type type,
+      internal::NativeWidgetDelegate* delegate,
+      gfx::NativeView parent,
+      gfx::NativeView context) = 0;
 };
 
 }  // namespace views

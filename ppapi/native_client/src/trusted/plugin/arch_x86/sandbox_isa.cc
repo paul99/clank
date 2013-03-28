@@ -1,6 +1,6 @@
-// Copyright 2011 The Chromium Authors. All rights reserved.
-// Use of this source code is governed by a BSD-style license that can
-// be found in the LICENSE file.
+// Copyright (c) 2012 The Chromium Authors. All rights reserved.
+// Use of this source code is governed by a BSD-style license that can be
+// found in the LICENSE file.
 
 #include "native_client/src/trusted/plugin/nexe_arch.h"
 #include "native_client/src/trusted/platform_qualify/nacl_os_qualify.h"
@@ -15,7 +15,8 @@ const char* const kNexeArchX86_64 = "x86-64";
 
 namespace plugin {
 const char* GetSandboxISA() {
-#if defined(NACL_ARCH_CPU_X86_64) && (defined(NACL_LINUX) || defined(NACL_OSX))
+#if (NACL_ARCH(NACL_BUILD_ARCH) == NACL_x86 && NACL_BUILD_SUBARCH == 64) && \
+    (defined(NACL_LINUX) || defined(NACL_OSX))
   return kNexeArchX86_64;  // 64-bit Linux or Mac.
 #else
   return NaClOsIs64BitWindows() == 1

@@ -1,4 +1,4 @@
-// Copyright (c) 2011 The Chromium Authors. All rights reserved.
+// Copyright (c) 2012 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -6,17 +6,20 @@
 
 #include "base/bind.h"
 #include "base/bind_helpers.h"
+#include "base/memory/ref_counted_memory.h"
+#include "base/memory/scoped_ptr.h"
 #include "base/memory/weak_ptr.h"
 #include "base/message_loop.h"
 #include "base/path_service.h"
 #include "base/string_piece.h"
 #include "base/string_util.h"
+#include "base/synchronization/waitable_event.h"
 #include "base/threading/thread.h"
 #include "base/time.h"
 #include "base/utf_string_conversions.h"
 #include "base/values.h"
 #include "chrome/browser/chromeos/cros/cros_library.h"
-#include "chrome/browser/chromeos/system/syslogs_provider.h"
+#include "chrome/browser/chromeos/system_logs/system_logs_fetcher.h"
 #include "chrome/browser/profiles/profile.h"
 #include "chrome/browser/ui/webui/chrome_url_data_manager.h"
 #include "chrome/common/chrome_paths.h"
@@ -38,6 +41,8 @@
 using content::WebContents;
 using content::WebUIMessageHandler;
 
+namespace chromeos {
+
 class SystemInfoUIHTMLSource : public ChromeURLDataManager::DataSource {
  public:
   SystemInfoUIHTMLSource();
@@ -46,23 +51,24 @@ class SystemInfoUIHTMLSource : public ChromeURLDataManager::DataSource {
   // the path we registered.
   virtual void StartDataRequest(const std::string& path,
                                 bool is_incognito,
-                                int request_id);
-  virtual std::string GetMimeType(const std::string&) const {
+                                int request_id) OVERRIDE;
+  virtual std::string GetMimeType(const std::string&) const OVERRIDE {
     return "text/html";
   }
 
  private:
   ~SystemInfoUIHTMLSource() {}
 
-  void SyslogsComplete(chromeos::system::LogDictionaryType* sys_info,
-                       std::string* ignored_content);
-
-  CancelableRequestConsumer consumer_;
+  void SysInfoComplete(scoped_ptr<SystemLogsResponse> response);
+  void RequestComplete();
+  void WaitForData();
 
   // Stored data from StartDataRequest()
   std::string path_;
   int request_id_;
 
+  scoped_ptr<SystemLogsResponse> response_;
+  base::WeakPtrFactory<SystemInfoUIHTMLSource> weak_ptr_factory_;
   DISALLOW_COPY_AND_ASSIGN(SystemInfoUIHTMLSource);
 };
 
@@ -88,7 +94,9 @@ class SystemInfoHandler : public WebUIMessageHandler,
 
 SystemInfoUIHTMLSource::SystemInfoUIHTMLSource()
     : DataSource(chrome::kChromeUISystemInfoHost, MessageLoop::current()),
-      request_id_(0) {
+      request_id_(0),
+      response_(NULL),
+      ALLOW_THIS_IN_INITIALIZER_LIST(weak_ptr_factory_(this)) {
 }
 
 void SystemInfoUIHTMLSource::StartDataRequest(const std::string& path,
@@ -97,23 +105,19 @@ void SystemInfoUIHTMLSource::StartDataRequest(const std::string& path,
   path_ = path;
   request_id_ = request_id;
 
-  chromeos::system::SyslogsProvider* provider =
-      chromeos::system::SyslogsProvider::GetInstance();
-  if (provider) {
-    provider->RequestSyslogs(
-        false,  // don't compress.
-        chromeos::system::SyslogsProvider::SYSLOGS_SYSINFO,
-        &consumer_,
-        base::Bind(&SystemInfoUIHTMLSource::SyslogsComplete,
-                   base::Unretained(this)));
-  }
+  SystemLogsFetcher* fetcher = new SystemLogsFetcher();
+  fetcher->Fetch(base::Bind(&SystemInfoUIHTMLSource::SysInfoComplete,
+                            weak_ptr_factory_.GetWeakPtr()));
 }
 
-void SystemInfoUIHTMLSource::SyslogsComplete(
-    chromeos::system::LogDictionaryType* sys_info,
-    std::string* ignored_content) {
-  DCHECK(!ignored_content);
 
+void SystemInfoUIHTMLSource::SysInfoComplete(
+    scoped_ptr<SystemLogsResponse> sys_info) {
+  response_ = sys_info.Pass();
+  RequestComplete();
+}
+
+void SystemInfoUIHTMLSource::RequestComplete() {
   DictionaryValue strings;
   strings.SetString("title", l10n_util::GetStringUTF16(IDS_ABOUT_SYS_TITLE));
   strings.SetString("description",
@@ -129,26 +133,24 @@ void SystemInfoUIHTMLSource::SyslogsComplete(
   strings.SetString("collapse_btn",
                     l10n_util::GetStringUTF16(IDS_ABOUT_SYS_COLLAPSE));
   SetFontAndTextDirection(&strings);
-
-  if (sys_info) {
-     ListValue* details = new ListValue();
-     strings.Set("details", details);
-     chromeos::system::LogDictionaryType::iterator it;
-     for (it = sys_info->begin(); it != sys_info->end(); ++it) {
-       DictionaryValue* val = new DictionaryValue;
-       val->SetString("stat_name", it->first);
-       val->SetString("stat_value", it->second);
-       details->Append(val);
-     }
-     strings.SetString("anchor", path_);
-     delete sys_info;
+  if (response_.get()) {
+    ListValue* details = new ListValue();
+    strings.Set("details", details);
+    for (SystemLogsResponse::const_iterator it = response_->begin();
+         it != response_->end();
+         ++it) {
+      DictionaryValue* val = new DictionaryValue;
+      val->SetString("stat_name", it->first);
+      val->SetString("stat_value", it->second);
+      details->Append(val);
+    }
+    strings.SetString("anchor", path_);
   }
   static const base::StringPiece systeminfo_html(
       ResourceBundle::GetSharedInstance().GetRawDataResource(
           IDR_ABOUT_SYS_HTML));
   std::string full_html = jstemplate_builder::GetTemplatesHtml(
       systeminfo_html, &strings, "t" /* template root node id */);
-
   SendResponse(request_id_, base::RefCountedString::TakeString(&full_html));
 }
 
@@ -180,5 +182,7 @@ SystemInfoUI::SystemInfoUI(content::WebUI* web_ui) : WebUIController(web_ui) {
 
   // Set up the chrome://system/ source.
   Profile* profile = Profile::FromWebUI(web_ui);
-  profile->GetChromeURLDataManager()->AddDataSource(html_source);
+  ChromeURLDataManager::AddDataSource(profile, html_source);
 }
+
+}  // namespace chromeos

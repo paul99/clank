@@ -1,8 +1,10 @@
-// Copyright (c) 2011 The Chromium Authors. All rights reserved.
+// Copyright (c) 2012 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
 #include <pwd.h>
+#include <sys/types.h>
+#include <unistd.h>
 
 #include "chrome/browser/policy/policy_path_parser.h"
 
@@ -20,6 +22,15 @@ const char* kUserNamePolicyVarName = "${user_name}";
 FilePath::StringType ExpandPathVariables(
     const FilePath::StringType& untranslated_string) {
   FilePath::StringType result(untranslated_string);
+  if (result.length() == 0)
+    return result;
+  // Sanitize quotes in case of any around the whole string.
+  if (result.length() > 1 &&
+      ((result[0] == '"' && result[result.length() - 1] == '"') ||
+      (result[0] == '\'' && result[result.length() - 1] == '\''))) {
+    // Strip first and last char which should be matching quotes now.
+    result = result.substr(1, result.length() - 2);
+  }
   // Translate two special variables ${user_name} and ${machine_name}
   size_t position = result.find(kUserNamePolicyVarName);
   if (position != std::string::npos) {

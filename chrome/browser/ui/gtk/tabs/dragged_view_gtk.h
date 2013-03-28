@@ -4,14 +4,13 @@
 
 #ifndef CHROME_BROWSER_UI_GTK_TABS_DRAGGED_VIEW_GTK_H_
 #define CHROME_BROWSER_UI_GTK_TABS_DRAGGED_VIEW_GTK_H_
-#pragma once
 
 #include <gtk/gtk.h>
+
 #include <vector>
 
 #include "base/callback.h"
 #include "base/compiler_specific.h"
-#include "base/memory/scoped_ptr.h"
 #include "ui/base/animation/animation_delegate.h"
 #include "ui/base/animation/slide_animation.h"
 #include "ui/base/gtk/gtk_signal.h"
@@ -21,7 +20,6 @@
 #include "ui/gfx/size.h"
 
 class DragData;
-class TabContents;
 class TabRendererGtk;
 
 class DraggedViewGtk : public ui::AnimationDelegate {
@@ -173,7 +171,7 @@ class DraggedViewGtk : public ui::AnimationDelegate {
   // tabstrip.
   gfx::Size attached_tab_size_;
 
-  // The dimensions of the TabContents being dragged.
+  // The dimensions of the WebContents being dragged.
   gfx::Size contents_size_;
 
   // The animation used to slide the attached tab to its final location.

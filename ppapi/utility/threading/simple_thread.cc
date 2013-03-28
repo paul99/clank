@@ -13,7 +13,7 @@ namespace pp {
 namespace {
 
 struct ThreadData {
-  MessageLoop_Dev message_loop;
+  MessageLoop message_loop;
 
   SimpleThread::ThreadFunc func;
   void* user_data;
@@ -38,7 +38,7 @@ void* RunThread(void* void_data) {
 
 }   // namespace
 
-SimpleThread::SimpleThread(Instance* instance)
+SimpleThread::SimpleThread(const InstanceHandle& instance)
     : instance_(instance),
       message_loop_(instance),
       thread_(0) {

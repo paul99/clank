@@ -1,10 +1,9 @@
-// Copyright (c) 2011 The Chromium Authors. All rights reserved.
+// Copyright (c) 2012 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
 #include "chrome/browser/ui/snapshot_tab_helper.h"
 
-#include "chrome/browser/ui/tab_contents/tab_contents_wrapper.h"
 #include "chrome/common/chrome_notification_types.h"
 #include "chrome/common/render_messages.h"
 #include "content/public/browser/notification_service.h"
@@ -12,8 +11,10 @@
 
 using content::WebContents;
 
-SnapshotTabHelper::SnapshotTabHelper(WebContents* tab)
-    : content::WebContentsObserver(tab) {
+DEFINE_WEB_CONTENTS_USER_DATA_KEY(SnapshotTabHelper)
+
+SnapshotTabHelper::SnapshotTabHelper(WebContents* web_contents)
+    : content::WebContentsObserver(web_contents) {
 }
 
 SnapshotTabHelper::~SnapshotTabHelper() {

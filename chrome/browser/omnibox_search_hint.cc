@@ -9,21 +9,21 @@
 #include "base/memory/weak_ptr.h"
 #include "base/message_loop.h"
 #include "base/metrics/histogram.h"
-#include "chrome/browser/autocomplete/autocomplete.h"
-#include "chrome/browser/autocomplete/autocomplete_edit.h"
+#include "chrome/browser/api/infobars/confirm_infobar_delegate.h"
+#include "chrome/browser/autocomplete/autocomplete_log.h"
 #include "chrome/browser/autocomplete/autocomplete_match.h"
+#include "chrome/browser/autocomplete/autocomplete_result.h"
 #include "chrome/browser/infobars/infobar_tab_helper.h"
 #include "chrome/browser/prefs/pref_service.h"
 #include "chrome/browser/profiles/profile.h"
 #include "chrome/browser/search_engines/template_url.h"
 #include "chrome/browser/search_engines/template_url_service.h"
 #include "chrome/browser/search_engines/template_url_service_factory.h"
-#include "chrome/browser/tab_contents/confirm_infobar_delegate.h"
-#include "chrome/browser/ui/browser_list.h"
+#include "chrome/browser/ui/browser.h"
+#include "chrome/browser/ui/browser_finder.h"
 #include "chrome/browser/ui/browser_window.h"
 #include "chrome/browser/ui/omnibox/location_bar.h"
 #include "chrome/browser/ui/omnibox/omnibox_view.h"
-#include "chrome/browser/ui/tab_contents/tab_contents_wrapper.h"
 #include "chrome/common/chrome_notification_types.h"
 #include "chrome/common/chrome_switches.h"
 #include "chrome/common/pref_names.h"
@@ -34,12 +34,14 @@
 #include "content/public/browser/notification_types.h"
 #include "content/public/browser/web_contents.h"
 #include "grit/generated_resources.h"
-#include "grit/theme_resources_standard.h"
+#include "grit/theme_resources.h"
 #include "ui/base/l10n/l10n_util.h"
 #include "ui/base/resource/resource_bundle.h"
 
 using content::NavigationController;
 using content::NavigationEntry;
+
+DEFINE_WEB_CONTENTS_USER_DATA_KEY(OmniboxSearchHint)
 
 // The URLs of search engines for which we want to trigger the infobar.
 const char* const kSearchEngineURLs[] = {
@@ -56,7 +58,8 @@ const char* const kSearchEngineURLs[] = {
 
 class HintInfoBar : public ConfirmInfoBarDelegate {
  public:
-  explicit HintInfoBar(OmniboxSearchHint* omnibox_hint);
+  HintInfoBar(OmniboxSearchHint* omnibox_hint,
+              InfoBarTabHelper* infobar_tab_helper);
 
  private:
   virtual ~HintInfoBar();
@@ -64,8 +67,6 @@ class HintInfoBar : public ConfirmInfoBarDelegate {
   void AllowExpiry() { should_expire_ = true; }
 
   // ConfirmInfoBarDelegate:
-  virtual bool ShouldExpire(
-      const content::LoadCommittedDetails& details) const OVERRIDE;
   virtual void InfoBarDismissed() OVERRIDE;
   virtual gfx::Image* GetIcon() const OVERRIDE;
   virtual Type GetInfoBarType() const OVERRIDE;
@@ -73,6 +74,8 @@ class HintInfoBar : public ConfirmInfoBarDelegate {
   virtual int GetButtons() const OVERRIDE;
   virtual string16 GetButtonLabel(InfoBarButton button) const OVERRIDE;
   virtual bool Accept() OVERRIDE;
+  virtual bool ShouldExpireInternal(
+      const content::LoadCommittedDetails& details) const OVERRIDE;
 
   // The omnibox hint that shows us.
   OmniboxSearchHint* omnibox_hint_;
@@ -89,8 +92,9 @@ class HintInfoBar : public ConfirmInfoBarDelegate {
   DISALLOW_COPY_AND_ASSIGN(HintInfoBar);
 };
 
-HintInfoBar::HintInfoBar(OmniboxSearchHint* omnibox_hint)
-    : ConfirmInfoBarDelegate(omnibox_hint->tab()->infobar_tab_helper()),
+HintInfoBar::HintInfoBar(OmniboxSearchHint* omnibox_hint,
+                         InfoBarTabHelper* infobar_tab_helper)
+    : ConfirmInfoBarDelegate(infobar_tab_helper),
       omnibox_hint_(omnibox_hint),
       action_taken_(false),
       should_expire_(false),
@@ -106,11 +110,6 @@ HintInfoBar::HintInfoBar(OmniboxSearchHint* omnibox_hint)
 HintInfoBar::~HintInfoBar() {
   if (!action_taken_)
     UMA_HISTOGRAM_COUNTS("OmniboxSearchHint.Ignored", 1);
-}
-
-bool HintInfoBar::ShouldExpire(
-    const content::LoadCommittedDetails& details) const {
-  return details.is_navigation_to_different_page() && should_expire_;
 }
 
 void HintInfoBar::InfoBarDismissed() {
@@ -151,11 +150,17 @@ bool HintInfoBar::Accept() {
   return true;
 }
 
+bool HintInfoBar::ShouldExpireInternal(
+    const content::LoadCommittedDetails& details) const {
+  return should_expire_;
+}
+
 
 // OmniboxSearchHint ----------------------------------------------------------
 
-OmniboxSearchHint::OmniboxSearchHint(TabContentsWrapper* tab) : tab_(tab) {
-  NavigationController* controller = &(tab->web_contents()->GetController());
+OmniboxSearchHint::OmniboxSearchHint(content::WebContents* web_contents)
+    : web_contents_(web_contents) {
+  NavigationController* controller = &(web_contents->GetController());
   notification_registrar_.Add(
       this,
       content::NOTIFICATION_NAV_ENTRY_COMMITTED,
@@ -164,10 +169,12 @@ OmniboxSearchHint::OmniboxSearchHint(TabContentsWrapper* tab) : tab_(tab) {
   for (size_t i = 0; i < arraysize(kSearchEngineURLs); ++i)
     search_engine_urls_[kSearchEngineURLs[i]] = 1;
 
+  Profile* profile =
+      Profile::FromBrowserContext(web_contents->GetBrowserContext());
   // Listen for omnibox to figure-out when the user searches from the omnibox.
   notification_registrar_.Add(this,
                               chrome::NOTIFICATION_OMNIBOX_OPENED_URL,
-                              content::Source<Profile>(tab->profile()));
+                              content::Source<Profile>(profile));
 }
 
 OmniboxSearchHint::~OmniboxSearchHint() {
@@ -178,28 +185,27 @@ void OmniboxSearchHint::Observe(int type,
                                 const content::NotificationDetails& details) {
   if (type == content::NOTIFICATION_NAV_ENTRY_COMMITTED) {
     content::NavigationEntry* entry =
-        tab_->web_contents()->GetController().GetActiveEntry();
+        web_contents_->GetController().GetActiveEntry();
     if (search_engine_urls_.find(entry->GetURL().spec()) ==
         search_engine_urls_.end()) {
       // The search engine is not in our white-list, bail.
       return;
     }
+    Profile* profile =
+        Profile::FromBrowserContext(web_contents_->GetBrowserContext());
     const TemplateURL* const default_provider =
-        TemplateURLServiceFactory::GetForProfile(tab_->profile())->
-        GetDefaultSearchProvider();
+        TemplateURLServiceFactory::GetForProfile(profile)->
+            GetDefaultSearchProvider();
     if (!default_provider)
       return;
 
-    const TemplateURLRef* const search_url = default_provider->url();
-    if (search_url->GetHost() == entry->GetURL().host())
+    if (default_provider->url_ref().GetHost() == entry->GetURL().host())
       ShowInfoBar();
   } else if (type == chrome::NOTIFICATION_OMNIBOX_OPENED_URL) {
     AutocompleteLog* log = content::Details<AutocompleteLog>(details).ptr();
     AutocompleteMatch::Type type =
         log->result.match_at(log->selected_index).type;
-    if (type == AutocompleteMatch::SEARCH_WHAT_YOU_TYPED ||
-        type == AutocompleteMatch::SEARCH_HISTORY ||
-        type == AutocompleteMatch::SEARCH_SUGGEST) {
+    if (AutocompleteMatch::IsSearchType(type)) {
       // The user performed a search from the omnibox, don't show the infobar
       // again.
       DisableHint();
@@ -208,20 +214,22 @@ void OmniboxSearchHint::Observe(int type,
 }
 
 void OmniboxSearchHint::ShowInfoBar() {
-  tab_->infobar_tab_helper()->AddInfoBar(new HintInfoBar(this));
+  InfoBarTabHelper* infobar_tab_helper =
+      InfoBarTabHelper::FromWebContents(web_contents_);
+  infobar_tab_helper->AddInfoBar(new HintInfoBar(this, infobar_tab_helper));
 }
 
 void OmniboxSearchHint::ShowEnteringQuery() {
-  LocationBar* location_bar = BrowserList::GetLastActiveWithProfile(
-      tab_->profile())->window()->GetLocationBar();
-  OmniboxView* omnibox_view = location_bar->location_entry();
+  LocationBar* location_bar = chrome::FindBrowserWithWebContents(
+      web_contents_)->window()->GetLocationBar();
+  OmniboxView* omnibox_view = location_bar->GetLocationEntry();
   location_bar->FocusLocation(true);
   omnibox_view->SetUserText(
       l10n_util::GetStringUTF16(IDS_OMNIBOX_SEARCH_HINT_OMNIBOX_TEXT));
   omnibox_view->SelectAll(false);
   // Entering text in the omnibox view triggers the suggestion popup that we
   // don't want to show in this case.
-  omnibox_view->ClosePopup();
+  omnibox_view->CloseOmniboxPopup();
 }
 
 void OmniboxSearchHint::DisableHint() {
@@ -229,8 +237,9 @@ void OmniboxSearchHint::DisableHint() {
   // OMNIBOX_OPENED_URL notification was there to set the kShowOmniboxSearchHint
   // prefs to false, none of them are needed anymore.
   notification_registrar_.RemoveAll();
-  tab_->profile()->GetPrefs()->SetBoolean(prefs::kShowOmniboxSearchHint,
-                                          false);
+  Profile* profile =
+      Profile::FromBrowserContext(web_contents_->GetBrowserContext());
+  profile->GetPrefs()->SetBoolean(prefs::kShowOmniboxSearchHint, false);
 }
 
 // static
@@ -239,5 +248,5 @@ bool OmniboxSearchHint::IsEnabled(Profile* profile) {
   // the user did not dismiss the infobar before.
   return profile->GetPrefs()->GetBoolean(prefs::kShowOmniboxSearchHint) &&
       CommandLine::ForCurrentProcess()->HasSwitch(
-      switches::kSearchInOmniboxHint);
+          switches::kSearchInOmniboxHint);
 }

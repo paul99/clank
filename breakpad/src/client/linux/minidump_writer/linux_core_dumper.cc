@@ -37,9 +37,7 @@
 #include <elf.h>
 #include <stdio.h>
 #include <string.h>
-#if !defined(__ANDROID__)
 #include <sys/procfs.h>
-#endif
 
 #include "common/linux/linux_libc_support.h"
 
@@ -78,7 +76,6 @@ bool LinuxCoreDumper::BuildProcPath(char* path, pid_t pid,
 
 void LinuxCoreDumper::CopyFromProcess(void* dest, pid_t child,
                                       const void* src, size_t length) {
-#if !defined(__ANDROID__)
   ElfCoreDump::Addr virtual_address = reinterpret_cast<ElfCoreDump::Addr>(src);
   // TODO(benchan): Investigate whether the data to be copied could span
   // across multiple segments in the core dump file. ElfCoreDump::CopyData
@@ -88,7 +85,6 @@ void LinuxCoreDumper::CopyFromProcess(void* dest, pid_t child,
     // with marker characters.
     memset(dest, 0xab, length);
   }
-#endif
 }
 
 bool LinuxCoreDumper::GetThreadInfoByIndex(size_t index, ThreadInfo* info) {
@@ -106,9 +102,8 @@ bool LinuxCoreDumper::GetThreadInfoByIndex(size_t index, ThreadInfo* info) {
 #else
 #error "This code hasn't been ported to your platform yet."
 #endif
-
-  return GetStackInfo(&info->stack, &info->stack_len,
-                      reinterpret_cast<uintptr_t>(stack_pointer));
+  info->stack_pointer = reinterpret_cast<uintptr_t>(stack_pointer);
+  return true;
 }
 
 bool LinuxCoreDumper::IsPostMortem() const {
@@ -124,7 +119,6 @@ bool LinuxCoreDumper::ThreadsResume() {
 }
 
 bool LinuxCoreDumper::EnumerateThreads() {
-#if !defined(__ANDROID__)
   if (!mapped_core_file_.Map(core_path_)) {
     fprintf(stderr, "Could not map core dump file into memory\n");
     return false;
@@ -232,7 +226,6 @@ bool LinuxCoreDumper::EnumerateThreads() {
     }
     note = note.GetNextNote();
   } while (note.IsValid());
-#endif
 
   return true;
 }

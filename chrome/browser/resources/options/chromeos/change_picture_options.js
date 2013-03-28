@@ -11,8 +11,9 @@ cr.define('options', function() {
   /**
    * Array of button URLs used on this page.
    * @type {Array.<string>}
+   * @const
    */
-  const ButtonImageUrls = [
+  var ButtonImageUrls = [
     ButtonImages.TAKE_PHOTO,
     ButtonImages.CHOOSE_FILE
   ];
@@ -28,7 +29,7 @@ cr.define('options', function() {
     OptionsPage.call(
         this,
         'changePicture',
-        localStrings.getString('changePicturePage'),
+        loadTimeData.getString('changePicturePage'),
         'change-picture-page');
   }
 
@@ -45,28 +46,54 @@ cr.define('options', function() {
       // Call base class implementation to start preferences initialization.
       OptionsPage.prototype.initializePage.call(this);
 
-      var imageGrid = $('images-grid');
+      var imageGrid = $('user-image-grid');
       UserImagesGrid.decorate(imageGrid);
 
-      imageGrid.addEventListener('change',
+      // Preview image will track the selected item's URL.
+      var previewElement = $('user-image-preview');
+      imageGrid.previewElement = previewElement;
+      imageGrid.selectionType = 'default';
+
+      imageGrid.addEventListener('select',
                                  this.handleImageSelected_.bind(this));
       imageGrid.addEventListener('activate',
                                  this.handleImageActivated_.bind(this));
-      imageGrid.addEventListener('dblclick',
-                                 this.handleImageDblClick_.bind(this));
+
+      // Set the title for "Take Photo" button.
+      imageGrid.cameraTitle = loadTimeData.getString('takePhoto');
 
       // Add the "Choose file" button.
       imageGrid.addItem(ButtonImages.CHOOSE_FILE,
-                        localStrings.getString('chooseFile'),
-                        this.handleChooseFile_.bind(this));
+                        loadTimeData.getString('chooseFile'),
+                        this.handleChooseFile_.bind(this)).type = 'file';
 
       // Profile image data.
       this.profileImage_ = imageGrid.addItem(
           ButtonImages.PROFILE_PICTURE,
-          localStrings.getString('profilePhotoLoading'));
+          loadTimeData.getString('profilePhotoLoading'));
+      this.profileImage_.type = 'profile';
+
+      $('take-photo').addEventListener(
+          'click', this.handleTakePhoto_.bind(this));
+      $('discard-photo').addEventListener(
+          'click', imageGrid.discardPhoto.bind(imageGrid));
+
+      // Toggle 'animation' class for the duration of WebKit transition.
+      $('flip-photo').addEventListener(
+          'click', function(e) {
+            previewElement.classList.add('animation');
+            imageGrid.flipPhoto = !imageGrid.flipPhoto;
+          });
+      $('user-image-stream-crop').addEventListener(
+          'webkitTransitionEnd', function(e) {
+            previewElement.classList.remove('animation');
+          });
 
       // Old user image data (if present).
       this.oldImage_ = null;
+
+      $('change-picture-overlay-confirm').addEventListener(
+          'click', this.closePage_.bind(this));
 
       chrome.send('onChangePicturePageInitialized');
     },
@@ -75,7 +102,10 @@ cr.define('options', function() {
      * Called right after the page has been shown to user.
      */
     didShowPage: function() {
-      $('images-grid').updateAndFocus();
+      var imageGrid = $('user-image-grid');
+      // Reset camera element.
+      imageGrid.cameraImage = null;
+      imageGrid.updateAndFocus();
       chrome.send('onChangePicturePageShown');
     },
 
@@ -83,8 +113,9 @@ cr.define('options', function() {
      * Called right before the page is hidden.
      */
     willHidePage: function() {
-      var imageGrid = $('images-grid');
+      var imageGrid = $('user-image-grid');
       imageGrid.blur();  // Make sure the image grid is not active.
+      imageGrid.stopCamera();
       if (this.oldImage_) {
         imageGrid.removeItem(this.oldImage_);
         this.oldImage_ = null;
@@ -92,20 +123,30 @@ cr.define('options', function() {
     },
 
     /**
+     * Called right after the page has been hidden.
+     */
+    // TODO(ivankr): both callbacks are required as only one of them is called
+    // depending on the way the page was closed, see http://crbug.com/118923.
+    didClosePage: function() {
+      this.willHidePage();
+    },
+
+    /**
      * Closes current page, returning back to Personal Stuff page.
      * @private
      */
     closePage_: function() {
-      OptionsPage.navigateToPage('personal');
+      OptionsPage.closeOverlay();
     },
 
     /**
-     * Handles "Take photo" button activation.
+     * Handles "Take photo" button click.
      * @private
      */
     handleTakePhoto_: function() {
-      chrome.send('takePhoto');
-      this.closePage_();
+      $('user-image-grid').takePhoto(function(photoURL) {
+        chrome.send('photoTaken', [photoURL]);
+      });
     },
 
     /**
@@ -119,18 +160,38 @@ cr.define('options', function() {
 
     /**
      * Handles image selection change.
+     * @param {Event} e Selection change Event.
      * @private
      */
-    handleImageSelected_: function() {
-      var imageGrid = $('images-grid');
+    handleImageSelected_: function(e) {
+      var imageGrid = $('user-image-grid');
       var url = imageGrid.selectedItemUrl;
-      // Ignore deselection, selection change caused by program itself and
-      // selection of one of the action buttons.
-      if (url &&
-          !imageGrid.inProgramSelection &&
-          ButtonImageUrls.indexOf(url) == -1) {
+      // Ignore selection change caused by program itself and selection of one
+      // of the action buttons.
+      if (!imageGrid.inProgramSelection &&
+          url != ButtonImages.TAKE_PHOTO && url != ButtonImages.CHOOSE_FILE) {
         chrome.send('selectImage', [url]);
       }
+      // Start/stop camera on (de)selection.
+      if (!imageGrid.inProgramSelection &&
+          imageGrid.selectionType != e.oldSelectionType) {
+        if (imageGrid.selectionType == 'camera') {
+          imageGrid.startCamera(
+              function() {
+                // Start capture if camera is still the selected item.
+                return imageGrid.selectedItem == imageGrid.cameraImage;
+              });
+        } else {
+          imageGrid.stopCamera();
+        }
+      }
+      // Update image attribution text.
+      var image = imageGrid.selectedItem;
+      $('user-image-author-name').textContent = image.author;
+      $('user-image-author-website').textContent = image.website;
+      $('user-image-author-website').href = image.website;
+      $('user-image-attribution').style.visibility =
+          (image.author || image.website) ? 'visible' : 'hidden';
     },
 
     /**
@@ -138,7 +199,7 @@ cr.define('options', function() {
      * @private
      */
     handleImageActivated_: function() {
-      switch ($('images-grid').selectedItemUrl) {
+      switch ($('user-image-grid').selectedItemUrl) {
         case ButtonImages.TAKE_PHOTO:
           this.handleTakePhoto_();
           break;
@@ -152,59 +213,19 @@ cr.define('options', function() {
     },
 
     /**
-     * Handles double click on the image grid.
-     * @param {Event} e Double click Event.
-     */
-    handleImageDblClick_: function(e) {
-      // Close page unless the click target is the grid itself or
-      // any of the buttons.
-      var url = e.target.src;
-      if (url && ButtonImageUrls.indexOf(url) == -1)
-        this.closePage_();
-    },
-
-    /**
-     * URL of the current user image.
-     * @type {string}
-     */
-    get currentUserImageUrl() {
-      return 'chrome://userimage/' + PersonalOptions.getLoggedInUsername() +
-          '?id=' + (new Date()).getTime();
-    },
-
-    /**
-     * Notifies about camera presence change.
-     * @param {boolean} present Whether a camera is present or not.
-     * @private
-     */
-    setCameraPresent_: function(present) {
-      var imageGrid = $('images-grid');
-      if (present && !this.takePhotoButton_) {
-        this.takePhotoButton_ = imageGrid.addItem(
-            ButtonImages.TAKE_PHOTO,
-            localStrings.getString('takePhoto'),
-            this.handleTakePhoto_.bind(this),
-            1);
-      } else if (!present && this.takePhotoButton_) {
-        imageGrid.removeItem(this.takePhotoButton_);
-        this.takePhotoButton_ = null;
-      }
-    },
-
-    /**
      * Adds or updates old user image taken from file/camera (neither a profile
      * image nor a default one).
+     * @param {string} imageUrl Old user image, as data or internal URL.
      * @private
      */
-    setOldImage_: function() {
-      var imageGrid = $('images-grid');
-      var url = this.currentUserImageUrl;
+    setOldImage_: function(imageUrl) {
+      var imageGrid = $('user-image-grid');
       if (this.oldImage_) {
-        this.oldImage_ = imageGrid.updateItem(this.oldImage_, url);
+        this.oldImage_ = imageGrid.updateItem(this.oldImage_, imageUrl);
       } else {
         // Insert next to the profile image.
         var pos = imageGrid.indexOf(this.profileImage_) + 1;
-        this.oldImage_ = imageGrid.addItem(url, undefined, undefined, pos);
+        this.oldImage_ = imageGrid.addItem(imageUrl, undefined, undefined, pos);
         imageGrid.selectedItem = this.oldImage_;
       }
     },
@@ -216,9 +237,9 @@ cr.define('options', function() {
      * @private
      */
     setProfileImage_: function(imageUrl, select) {
-      var imageGrid = $('images-grid');
+      var imageGrid = $('user-image-grid');
       this.profileImage_ = imageGrid.updateItem(
-          this.profileImage_, imageUrl, localStrings.getString('profilePhoto'));
+          this.profileImage_, imageUrl, loadTimeData.getString('profilePhoto'));
       if (select)
         imageGrid.selectedItem = this.profileImage_;
     },
@@ -229,18 +250,30 @@ cr.define('options', function() {
      * @private
      */
     setSelectedImage_: function(url) {
-      $('images-grid').selectedItemUrl = url;
+      $('user-image-grid').selectedItemUrl = url;
+    },
+
+    /**
+     * @param {boolean} present Whether camera is detected.
+     */
+    setCameraPresent_: function(present) {
+      $('user-image-grid').cameraPresent = present;
     },
 
     /**
      * Appends default images to the image grid. Should only be called once.
-     * @param {Array.<string>} images An array of URLs to default images.
+     * @param {Array.<{url: string, author: string, website: string}>}
+     *   imagesData An array of default images data, including URL, author and
+     *   website.
      * @private
      */
-    setDefaultImages_: function(images) {
-      var imageGrid = $('images-grid');
-      for (var i = 0, url; url = images[i]; i++) {
-        imageGrid.addItem(url);
+    setDefaultImages_: function(imagesData) {
+      var imageGrid = $('user-image-grid');
+      for (var i = 0, data; data = imagesData[i]; i++) {
+        var item = imageGrid.addItem(data.url);
+        item.type = 'default';
+        item.author = data.author || '';
+        item.website = data.website || '';
       }
     },
   };
@@ -265,4 +298,3 @@ cr.define('options', function() {
   };
 
 });
-

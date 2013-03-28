@@ -1,4 +1,4 @@
-// Copyright (c) 2011 The Chromium Authors. All rights reserved.
+// Copyright (c) 2012 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -6,74 +6,64 @@
 
 #include "media/base/limits.h"
 
+namespace media {
+
 AudioParameters::AudioParameters()
-    : format(AUDIO_PCM_LINEAR),
-      channel_layout(CHANNEL_LAYOUT_NONE),
-      sample_rate(0),
-      bits_per_sample(0),
-      samples_per_packet(0),
-      channels(0) {
+    : format_(AUDIO_PCM_LINEAR),
+      channel_layout_(CHANNEL_LAYOUT_NONE),
+      sample_rate_(0),
+      bits_per_sample_(0),
+      frames_per_buffer_(0),
+      channels_(0) {
 }
 
 AudioParameters::AudioParameters(Format format, ChannelLayout channel_layout,
                                  int sample_rate, int bits_per_sample,
-                                 int samples_per_packet)
-    : format(format),
-      channel_layout(channel_layout),
-      sample_rate(sample_rate),
-      bits_per_sample(bits_per_sample),
-      samples_per_packet(samples_per_packet),
-      channels(ChannelLayoutToChannelCount(channel_layout)) {
+                                 int frames_per_buffer)
+    : format_(format),
+      channel_layout_(channel_layout),
+      sample_rate_(sample_rate),
+      bits_per_sample_(bits_per_sample),
+      frames_per_buffer_(frames_per_buffer),
+      channels_(ChannelLayoutToChannelCount(channel_layout)) {
 }
 
-AudioParameters::AudioParameters(Format format,
-                                 int sample_rate, int bits_per_sample,
-                                 int samples_per_packet, int channels)
-    : format(format),
-      channel_layout(CHANNEL_LAYOUT_NONE),
-      sample_rate(sample_rate),
-      bits_per_sample(bits_per_sample),
-      samples_per_packet(samples_per_packet),
-      channels(channels) {
+void AudioParameters::Reset(Format format, ChannelLayout channel_layout,
+                            int sample_rate, int bits_per_sample,
+                            int frames_per_buffer) {
+  format_ = format;
+  channel_layout_ = channel_layout;
+  sample_rate_ = sample_rate;
+  bits_per_sample_ = bits_per_sample;
+  frames_per_buffer_ = frames_per_buffer;
+  channels_ = ChannelLayoutToChannelCount(channel_layout);
 }
-
 
 bool AudioParameters::IsValid() const {
-  return (format >= 0) && (format < AUDIO_LAST_FORMAT) &&
-      (channels > 0) && (channels <= media::limits::kMaxChannels) &&
-      (sample_rate > 0) && (sample_rate <= media::limits::kMaxSampleRate) &&
-      (bits_per_sample > 0) &&
-      (bits_per_sample <= media::limits::kMaxBitsPerSample) &&
-      (samples_per_packet > 0) &&
-      (samples_per_packet <= media::limits::kMaxSamplesPerPacket);
+  return (format_ >= AUDIO_PCM_LINEAR) &&
+         (format_ < AUDIO_LAST_FORMAT) &&
+         (channels_ > 0) &&
+         (channels_ <= media::limits::kMaxChannels) &&
+         (channel_layout_ > CHANNEL_LAYOUT_UNSUPPORTED) &&
+         (channel_layout_ < CHANNEL_LAYOUT_MAX) &&
+         (sample_rate_ >= media::limits::kMinSampleRate) &&
+         (sample_rate_ <= media::limits::kMaxSampleRate) &&
+         (bits_per_sample_ > 0) &&
+         (bits_per_sample_ <= media::limits::kMaxBitsPerSample) &&
+         (frames_per_buffer_ > 0) &&
+         (frames_per_buffer_ <= media::limits::kMaxSamplesPerPacket);
 }
 
-int AudioParameters::GetPacketSize() const {
-  return samples_per_packet * channels * bits_per_sample / 8;
+int AudioParameters::GetBytesPerBuffer() const {
+  return frames_per_buffer_ * GetBytesPerFrame();
 }
 
 int AudioParameters::GetBytesPerSecond() const {
-  return sample_rate * channels * bits_per_sample / 8;
+  return sample_rate_ * GetBytesPerFrame();
 }
 
-bool AudioParameters::Compare::operator()(
-    const AudioParameters& a,
-    const AudioParameters& b) const {
-  if (a.format < b.format)
-    return true;
-  if (a.format > b.format)
-    return false;
-  if (a.channels < b.channels)
-    return true;
-  if (a.channels > b.channels)
-    return false;
-  if (a.sample_rate < b.sample_rate)
-    return true;
-  if (a.sample_rate > b.sample_rate)
-    return false;
-  if (a.bits_per_sample < b.bits_per_sample)
-    return true;
-  if (a.bits_per_sample > b.bits_per_sample)
-    return false;
-  return a.samples_per_packet < b.samples_per_packet;
+int AudioParameters::GetBytesPerFrame() const {
+  return channels_ * bits_per_sample_ / 8;
 }
+
+}  // namespace media

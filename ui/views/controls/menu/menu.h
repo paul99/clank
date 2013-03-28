@@ -1,10 +1,9 @@
-// Copyright (c) 2011 The Chromium Authors. All rights reserved.
+// Copyright (c) 2012 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
 #ifndef UI_VIEWS_CONTROLS_MENU_MENU_H_
 #define UI_VIEWS_CONTROLS_MENU_MENU_H_
-#pragma once
 
 #include <string>
 
@@ -13,9 +12,8 @@
 #include "ui/gfx/native_widget_types.h"
 #include "ui/views/views_export.h"
 
-class SkBitmap;
-
 namespace gfx {
+class ImageSkia;
 class Point;
 }
 
@@ -40,42 +38,28 @@ class VIEWS_EXPORT Menu {
     virtual ~Delegate() {}
 
     // Whether or not an item should be shown as checked.
-    virtual bool IsItemChecked(int id) const {
-      return false;
-    }
+    virtual bool IsItemChecked(int id) const;
 
     // Whether or not an item should be shown as the default (using bold).
     // There can only be one default menu item.
-    virtual bool IsItemDefault(int id) const {
-      return false;
-    }
+    virtual bool IsItemDefault(int id) const;
 
     // The string shown for the menu item.
-    virtual string16 GetLabel(int id) const {
-      return string16();
-    }
+    virtual string16 GetLabel(int id) const;
 
     // The delegate needs to implement this function if it wants to display
     // the shortcut text next to each menu item. If there is an accelerator
     // for a given item id, the implementor must return it.
-    virtual bool GetAcceleratorInfo(int id, ui::Accelerator* accel) {
-      return false;
-    }
+    virtual bool GetAcceleratorInfo(int id, ui::Accelerator* accel);
 
     // The icon shown for the menu item.
-    virtual const SkBitmap& GetIcon(int id) const {
-      return GetEmptyIcon();
-    }
+    virtual const gfx::ImageSkia& GetIcon(int id) const;
 
     // The number of items to show in the menu
-    virtual int GetItemCount() const {
-      return 0;
-    }
+    virtual int GetItemCount() const;
 
     // Whether or not an item is a separator.
-    virtual bool IsItemSeparator(int id) const {
-      return false;
-    }
+    virtual bool IsItemSeparator(int id) const;
 
     // Shows the context menu with the specified id. This is invoked when the
     // user does the appropriate gesture to show a context menu. The id
@@ -91,9 +75,7 @@ class VIEWS_EXPORT Menu {
     }
 
     // Whether an item has an icon.
-    virtual bool HasIcon(int id) const {
-      return false;
-    }
+    virtual bool HasIcon(int id) const;
 
     // Notification that the menu is about to be popped up.
     virtual void MenuWillShow() {
@@ -110,21 +92,15 @@ class VIEWS_EXPORT Menu {
     virtual bool IsRightToLeftUILayout() const;
 
     // Controller
-    virtual bool SupportsCommand(int id) const {
-      return true;
-    }
-    virtual bool IsCommandEnabled(int id) const {
-      return true;
-    }
-    virtual bool GetContextualLabel(int id, string16* out) const {
-      return false;
-    }
+    virtual bool SupportsCommand(int id) const;
+    virtual bool IsCommandEnabled(int id) const;
+    virtual bool GetContextualLabel(int id, string16* out) const;
     virtual void ExecuteCommand(int id) {
     }
 
    protected:
     // Returns an empty icon.
-    const SkBitmap& GetEmptyIcon() const;
+    const gfx::ImageSkia& GetEmptyIcon() const;
   };
 
   // How this popup should align itself relative to the point it is run at.
@@ -194,11 +170,11 @@ class VIEWS_EXPORT Menu {
   // to draw the menu, instead of relying on Windows.
   Menu* AppendSubMenuWithIcon(int item_id,
                               const string16& label,
-                              const SkBitmap& icon);
+                              const gfx::ImageSkia& icon);
   virtual Menu* AddSubMenuWithIcon(int index,
                                    int item_id,
                                    const string16& label,
-                                   const SkBitmap& icon) = 0;
+                                   const gfx::ImageSkia& icon) = 0;
 
   // This is a convenience for standard text label menu items where the label
   // is provided with this call.
@@ -219,11 +195,11 @@ class VIEWS_EXPORT Menu {
   // the menu, instead of relying on Windows.
   void AppendMenuItemWithIcon(int item_id,
                               const string16& label,
-                              const SkBitmap& icon);
+                              const gfx::ImageSkia& icon);
   virtual void AddMenuItemWithIcon(int index,
                                    int item_id,
                                    const string16& label,
-                                   const SkBitmap& icon);
+                                   const gfx::ImageSkia& icon);
 
   // Enables or disables the item with the specified id.
   virtual void EnableMenuItemByID(int item_id, bool enabled) = 0;
@@ -235,7 +211,7 @@ class VIEWS_EXPORT Menu {
   // Sets an icon for an item with a given item_id. Calling this function
   // also forces the Menu class to draw the menu, instead of relying on Windows.
   // Returns false if the item with |item_id| is not found.
-  virtual bool SetIcon(const SkBitmap& icon, int item_id) = 0;
+  virtual bool SetIcon(const gfx::ImageSkia& icon, int item_id) = 0;
 
   // Shows the menu, blocks until the user dismisses the menu or selects an
   // item, and executes the command for the selected item (if any).
@@ -259,7 +235,7 @@ class VIEWS_EXPORT Menu {
   virtual void AddMenuItemInternal(int index,
                                    int item_id,
                                    const string16& label,
-                                   const SkBitmap& icon,
+                                   const gfx::ImageSkia& icon,
                                    MenuItemType type) = 0;
 
  private:

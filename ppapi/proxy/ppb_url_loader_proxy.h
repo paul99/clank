@@ -14,13 +14,14 @@
 #include "ppapi/c/ppb_url_loader.h"
 #include "ppapi/c/trusted/ppb_url_loader_trusted.h"
 #include "ppapi/proxy/interface_proxy.h"
-#include "ppapi/proxy/proxy_non_thread_safe_ref_count.h"
+#include "ppapi/proxy/proxy_completion_callback_factory.h"
 #include "ppapi/shared_impl/host_resource.h"
 #include "ppapi/utility/completion_callback_factory.h"
 
 namespace ppapi {
 
-struct PPB_URLRequestInfo_Data;
+struct URLRequestInfoData;
+struct URLResponseInfoData;
 
 namespace proxy {
 
@@ -54,17 +55,15 @@ class PPB_URLLoader_Proxy : public InterfaceProxy {
   static const ApiID kApiID = API_ID_PPB_URL_LOADER;
 
  private:
-  // Data associated with callbacks for ReadResponseBody.
-  struct ReadCallbackInfo;
-
   // Plugin->renderer message handlers.
   void OnMsgCreate(PP_Instance instance,
                    HostResource* result);
   void OnMsgOpen(const HostResource& loader,
-                 const PPB_URLRequestInfo_Data& data);
+                 const URLRequestInfoData& data);
   void OnMsgFollowRedirect(const HostResource& loader);
   void OnMsgGetResponseInfo(const HostResource& loader,
-                            HostResource* result);
+                            bool* success,
+                            URLResponseInfoData* result);
   void OnMsgReadResponseBody(const HostResource& loader,
                              int32_t bytes_to_read);
   void OnMsgFinishStreamingToFile(const HostResource& loader);
@@ -74,24 +73,17 @@ class PPB_URLLoader_Proxy : public InterfaceProxy {
   // Renderer->plugin message handlers.
   void OnMsgUpdateProgress(
       const PPBURLLoader_UpdateProgress_Params& params);
-  void OnMsgReadResponseBodyAck(const HostResource& host_resource,
-                                int32_t result,
-                                const std::string& data);
+  void OnMsgReadResponseBodyAck(const IPC::Message& message);
   void OnMsgCallbackComplete(const HostResource& host_resource, int32_t result);
 
-  // Handles callbacks for read complete messages. Takes ownership of the info
-  // pointer.
-  void OnReadCallback(int32_t result, ReadCallbackInfo* info);
+  // Handles callbacks for read complete messages. Takes ownership of the
+  // message pointer.
+  void OnReadCallback(int32_t result, IPC::Message* message);
 
   // Handles callback for everything but reads.
   void OnCallback(int32_t result, const HostResource& resource);
 
-  pp::CompletionCallbackFactory<PPB_URLLoader_Proxy,
-                                ProxyNonThreadSafeRefCount> callback_factory_;
-
-  // Valid only in the host, this lazily-initialized pointer indicates the
-  // URLLoaderTrusted interface.
-  const PPB_URLLoaderTrusted* host_urlloader_trusted_interface_;
+  ProxyCompletionCallbackFactory<PPB_URLLoader_Proxy> callback_factory_;
 };
 
 }  // namespace proxy

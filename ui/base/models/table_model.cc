@@ -1,13 +1,13 @@
-// Copyright (c) 2011 The Chromium Authors. All rights reserved.
+// Copyright (c) 2012 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
 #include "ui/base/models/table_model.h"
 
 #include "base/logging.h"
-#include "third_party/skia/include/core/SkBitmap.h"
 #include "ui/base/l10n/l10n_util.h"
 #include "ui/base/l10n/l10n_util_collator.h"
+#include "ui/gfx/image/image_skia.h"
 
 namespace ui {
 
@@ -23,50 +23,14 @@ TableColumn::TableColumn()
       sortable(false) {
 }
 
-TableColumn::TableColumn(int id, const string16& title,
-                         Alignment alignment,
-                         int width)
-    : id(id),
-      title(title),
-      alignment(alignment),
-      width(width),
-      percent(0),
-      min_visible_width(0),
-      sortable(false) {
-}
-
-TableColumn::TableColumn(int id, const string16& title,
-                         Alignment alignment, int width, float percent)
-    : id(id),
-      title(title),
-      alignment(alignment),
-      width(width),
-      percent(percent),
-      min_visible_width(0),
-      sortable(false) {
-}
-
-// It's common (but not required) to use the title's IDS_* tag as the column
-// id. In this case, the provided conveniences look up the title string on
-// bahalf of the caller.
-TableColumn::TableColumn(int id, Alignment alignment, int width)
-    : id(id),
-      alignment(alignment),
-      width(width),
-      percent(0),
-      min_visible_width(0),
-      sortable(false) {
-  title = l10n_util::GetStringUTF16(id);
-}
-
 TableColumn::TableColumn(int id, Alignment alignment, int width, float percent)
     : id(id),
+      title(l10n_util::GetStringUTF16(id)),
       alignment(alignment),
       width(width),
       percent(percent),
       min_visible_width(0),
       sortable(false) {
-  title = l10n_util::GetStringUTF16(id);
 }
 
 // TableModel -----------------------------------------------------------------
@@ -74,8 +38,8 @@ TableColumn::TableColumn(int id, Alignment alignment, int width, float percent)
 // Used for sorting.
 static icu::Collator* collator = NULL;
 
-SkBitmap TableModel::GetIcon(int row) {
-  return SkBitmap();
+gfx::ImageSkia TableModel::GetIcon(int row) {
+  return gfx::ImageSkia();
 }
 
 string16 TableModel::GetTooltip(int row) {

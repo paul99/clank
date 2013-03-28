@@ -1,4 +1,4 @@
-// Copyright (c) 2011 The Chromium Authors. All rights reserved.
+// Copyright (c) 2012 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -8,17 +8,18 @@
 
 #ifndef CONTENT_BROWSER_GEOLOCATION_CORE_LOCATION_DATA_PROVIDER_H_
 #define CONTENT_BROWSER_GEOLOCATION_CORE_LOCATION_DATA_PROVIDER_H_
-#pragma once
 
 #include "base/memory/ref_counted.h"
 #include "base/memory/scoped_nsobject.h"
-#include "content/common/geoposition.h"
 #include "content/public/browser/browser_thread.h"
+#include "content/public/common/geoposition.h"
 
 #import <Foundation/Foundation.h>
 
-class CoreLocationProviderMac;
 @class CoreLocationWrapperMac;
+
+namespace content {
+class CoreLocationProviderMac;
 
 // Data provider class that allows CoreLocation to run in Chrome's UI thread
 // while existing on any of Chrome's threads (in this case the IO thread)
@@ -30,7 +31,7 @@ class CoreLocationDataProviderMac
   bool StartUpdating(CoreLocationProviderMac* provider);
   void StopUpdating();
 
-  void UpdatePosition(Geoposition *position);
+  void UpdatePosition(Geoposition* position);
 
  protected:
   friend class base::RefCountedThreadSafe<CoreLocationDataProviderMac>;
@@ -48,5 +49,7 @@ class CoreLocationDataProviderMac
   // The LocationProviderBase class that should receive position data
   CoreLocationProviderMac* provider_;
 };
+
+}  // namespace content
 
 #endif  // CONTENT_BROWSER_GEOLOCATION_CORE_LOCATION_DATA_PROVIDER_H_

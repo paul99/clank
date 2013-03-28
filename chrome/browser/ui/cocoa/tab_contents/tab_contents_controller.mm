@@ -7,9 +7,10 @@
 #include <utility>
 
 #include "base/memory/scoped_nsobject.h"
-#include "content/browser/renderer_host/render_view_host.h"
-#include "content/browser/renderer_host/render_widget_host_view.h"
+#include "content/public/browser/render_view_host.h"
+#include "content/public/browser/render_widget_host_view.h"
 #include "content/public/browser/web_contents.h"
+#include "content/public/browser/web_contents_view.h"
 
 using content::WebContents;
 
@@ -60,6 +61,9 @@ using content::WebContents;
   }
   [contentsNativeView setAutoresizingMask:NSViewWidthSizable|
                                           NSViewHeightSizable];
+  // The find bar will overlap the content's view when it comes out; inform
+  // the view.
+  contents_->GetView()->SetAllowOverlappingViews(true);
 }
 
 - (void)changeWebContents:(WebContents*)newContents {
@@ -77,14 +81,14 @@ using content::WebContents;
   // The RWHV is ripped out of the view hierarchy on tab switches, so it never
   // formally resigns first responder status.  Handle this by explicitly sending
   // a Blur() message to the renderer, but only if the RWHV currently has focus.
-  RenderViewHost* rvh = [self webContents]->GetRenderViewHost();
-  if (rvh && rvh->view() && rvh->view()->HasFocus())
+  content::RenderViewHost* rvh = [self webContents]->GetRenderViewHost();
+  if (rvh && rvh->GetView() && rvh->GetView()->HasFocus())
     rvh->Blur();
 }
 
 - (void)willBecomeSelectedTab {
   // Do not explicitly call Focus() here, as the RWHV may not actually have
-  // focus (for example, if the omnibox has focus instead).  The TabContents
+  // focus (for example, if the omnibox has focus instead).  The WebContents
   // logic will restore focus to the appropriate view.
 }
 

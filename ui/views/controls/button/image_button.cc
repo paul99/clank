@@ -1,4 +1,4 @@
-// Copyright (c) 2011 The Chromium Authors. All rights reserved.
+// Copyright (c) 2012 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -7,7 +7,8 @@
 #include "base/utf_string_conversions.h"
 #include "ui/base/animation/throb_animation.h"
 #include "ui/gfx/canvas.h"
-#include "ui/gfx/skbitmap_operations.h"
+#include "ui/gfx/image/image_skia_operations.h"
+#include "ui/views/widget/widget.h"
 
 namespace views {
 
@@ -23,7 +24,7 @@ ImageButton::ImageButton(ButtonListener* listener)
       v_alignment_(ALIGN_TOP),
       preferred_size_(kDefaultWidth, kDefaultHeight) {
   // By default, we request that the gfx::Canvas passed to our View::OnPaint()
-  // implementation is flipped horizontally so that the button's bitmaps are
+  // implementation is flipped horizontally so that the button's images are
   // mirrored when the UI directionality is right-to-left.
   EnableCanvasFlippingForRTLUI(true);
 }
@@ -31,21 +32,29 @@ ImageButton::ImageButton(ButtonListener* listener)
 ImageButton::~ImageButton() {
 }
 
-void ImageButton::SetImage(ButtonState aState, const SkBitmap* anImage) {
-  images_[aState] = anImage ? *anImage : SkBitmap();
+void ImageButton::SetImage(ButtonState state, const gfx::ImageSkia* image) {
+  images_[state] = image ? *image : gfx::ImageSkia();
   PreferredSizeChanged();
 }
 
 void ImageButton::SetBackground(SkColor color,
-                                const SkBitmap* image,
-                                const SkBitmap* mask) {
-  if (!image || !mask) {
-    background_image_.reset();
+                                const gfx::ImageSkia* image,
+                                const gfx::ImageSkia* mask) {
+  if (image == NULL || mask == NULL) {
+    background_image_ = gfx::ImageSkia();
     return;
   }
 
-  background_image_ =
-      SkBitmapOperations::CreateButtonBackground(color, *image, *mask);
+  background_image_ = gfx::ImageSkiaOperations::CreateButtonBackground(color,
+     *image, *mask);
+}
+
+void ImageButton::SetOverlayImage(const gfx::ImageSkia* image) {
+  if (!image) {
+    overlay_image_ = gfx::ImageSkia();
+    return;
+  }
+  overlay_image_ = *image;
 }
 
 void ImageButton::SetImageAlignment(HorizontalAlignment h_align,
@@ -59,8 +68,10 @@ void ImageButton::SetImageAlignment(HorizontalAlignment h_align,
 // ImageButton, View overrides:
 
 gfx::Size ImageButton::GetPreferredSize() {
-  if (!images_[BS_NORMAL].isNull())
-    return gfx::Size(images_[BS_NORMAL].width(), images_[BS_NORMAL].height());
+  if (!images_[STATE_NORMAL].isNull()) {
+    return gfx::Size(images_[STATE_NORMAL].width(),
+                     images_[STATE_NORMAL].height());
+  }
   return preferred_size_;
 }
 
@@ -68,24 +79,17 @@ void ImageButton::OnPaint(gfx::Canvas* canvas) {
   // Call the base class first to paint any background/borders.
   View::OnPaint(canvas);
 
-  SkBitmap img = GetImageToPaint();
+  gfx::ImageSkia img = GetImageToPaint();
 
   if (!img.isNull()) {
-    int x = 0, y = 0;
+    gfx::Point position = ComputeImagePaintPosition(img);
+    if (!background_image_.isNull())
+      canvas->DrawImageInt(background_image_, position.x(), position.y());
 
-    if (h_alignment_ == ALIGN_CENTER)
-      x = (width() - img.width()) / 2;
-    else if (h_alignment_ == ALIGN_RIGHT)
-      x = width() - img.width();
+    canvas->DrawImageInt(img, position.x(), position.y());
 
-    if (v_alignment_ == ALIGN_MIDDLE)
-      y = (height() - img.height()) / 2;
-    else if (v_alignment_ == ALIGN_BOTTOM)
-      y = height() - img.height();
-
-    if (!background_image_.empty())
-      canvas->DrawBitmapInt(background_image_, x, y);
-    canvas->DrawBitmapInt(img, x, y);
+    if (!overlay_image_.isNull())
+      canvas->DrawImageInt(overlay_image_, position.x(), position.y());
   }
   OnPaintFocusBorder(canvas);
 }
@@ -93,17 +97,40 @@ void ImageButton::OnPaint(gfx::Canvas* canvas) {
 ////////////////////////////////////////////////////////////////////////////////
 // ImageButton, protected:
 
-SkBitmap ImageButton::GetImageToPaint() {
-  SkBitmap img;
+gfx::ImageSkia ImageButton::GetImageToPaint() {
+  gfx::ImageSkia img;
 
-  if (!images_[BS_HOT].isNull() && hover_animation_->is_animating()) {
-    img = SkBitmapOperations::CreateBlendedBitmap(images_[BS_NORMAL],
-        images_[BS_HOT], hover_animation_->GetCurrentValue());
+  if (!images_[STATE_HOVERED].isNull() && hover_animation_->is_animating()) {
+    img = gfx::ImageSkiaOperations::CreateBlendedImage(images_[STATE_NORMAL],
+        images_[STATE_HOVERED], hover_animation_->GetCurrentValue());
   } else {
     img = images_[state_];
   }
 
-  return !img.isNull() ? img : images_[BS_NORMAL];
+  return !img.isNull() ? img : images_[STATE_NORMAL];
+}
+
+////////////////////////////////////////////////////////////////////////////////
+// ImageButton, private:
+
+gfx::Point ImageButton::ComputeImagePaintPosition(const gfx::ImageSkia& image) {
+  int x = 0, y = 0;
+  gfx::Rect rect = GetContentsBounds();
+
+  if (h_alignment_ == ALIGN_CENTER)
+    x = (rect.width() - image.width()) / 2;
+  else if (h_alignment_ == ALIGN_RIGHT)
+    x = rect.width() - image.width();
+
+  if (v_alignment_ == ALIGN_MIDDLE)
+    y = (rect.height() - image.height()) / 2;
+  else if (v_alignment_ == ALIGN_BOTTOM)
+    y = rect.height() - image.height();
+
+  x += rect.x();
+  y += rect.y();
+
+  return gfx::Point(x, y);
 }
 
 ////////////////////////////////////////////////////////////////////////////////
@@ -121,8 +148,8 @@ void ToggleImageButton::SetToggled(bool toggled) {
   if (toggled == toggled_)
     return;
 
-  for (int i = 0; i < BS_COUNT; ++i) {
-    SkBitmap temp = images_[i];
+  for (int i = 0; i < STATE_COUNT; ++i) {
+    gfx::ImageSkia temp = images_[i];
     images_[i] = alternate_images_[i];
     alternate_images_[i] = temp;
   }
@@ -131,13 +158,13 @@ void ToggleImageButton::SetToggled(bool toggled) {
 }
 
 void ToggleImageButton::SetToggledImage(ButtonState state,
-                                        const SkBitmap* image) {
+                                        const gfx::ImageSkia* image) {
   if (toggled_) {
-    images_[state] = image ? *image : SkBitmap();
+    images_[state] = image ? *image : gfx::ImageSkia();
     if (state_ == state)
       SchedulePaint();
   } else {
-    alternate_images_[state] = image ? *image : SkBitmap();
+    alternate_images_[state] = image ? *image : gfx::ImageSkia();
   }
 }
 
@@ -148,11 +175,12 @@ void ToggleImageButton::SetToggledTooltipText(const string16& tooltip) {
 ////////////////////////////////////////////////////////////////////////////////
 // ToggleImageButton, ImageButton overrides:
 
-void ToggleImageButton::SetImage(ButtonState state, const SkBitmap* image) {
+void ToggleImageButton::SetImage(ButtonState state,
+                                 const gfx::ImageSkia* image) {
   if (toggled_) {
-    alternate_images_[state] = image ? *image : SkBitmap();
+    alternate_images_[state] = image ? *image : gfx::ImageSkia();
   } else {
-    images_[state] = image ? *image : SkBitmap();
+    images_[state] = image ? *image : gfx::ImageSkia();
     if (state_ == state)
       SchedulePaint();
   }

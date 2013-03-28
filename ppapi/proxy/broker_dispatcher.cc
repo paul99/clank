@@ -1,4 +1,4 @@
-// Copyright (c) 2011 The Chromium Authors. All rights reserved.
+// Copyright (c) 2012 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -12,10 +12,8 @@
 namespace ppapi {
 namespace proxy {
 
-BrokerDispatcher::BrokerDispatcher(base::ProcessHandle remote_process_handle,
-                                   PP_ConnectInstance_Func connect_instance)
-    : ProxyChannel(remote_process_handle),
-      connect_instance_(connect_instance) {
+BrokerDispatcher::BrokerDispatcher(PP_ConnectInstance_Func connect_instance)
+    : connect_instance_(connect_instance) {
 }
 
 BrokerDispatcher::~BrokerDispatcher() {
@@ -23,9 +21,11 @@ BrokerDispatcher::~BrokerDispatcher() {
 
 bool BrokerDispatcher::InitBrokerWithChannel(
     ProxyChannel::Delegate* delegate,
+    base::ProcessId peer_pid,
     const IPC::ChannelHandle& channel_handle,
     bool is_client) {
-  return ProxyChannel::InitWithChannel(delegate, channel_handle, is_client);
+  return ProxyChannel::InitWithChannel(delegate, peer_pid, channel_handle,
+                                       is_client);
 }
 
 bool BrokerDispatcher::OnMessageReceived(const IPC::Message& msg) {
@@ -65,9 +65,8 @@ void BrokerDispatcher::OnMsgConnectToPlugin(
   }
 }
 
-BrokerHostDispatcher::BrokerHostDispatcher(
-    base::ProcessHandle remote_process_handle)
-    : BrokerDispatcher(remote_process_handle, NULL) {
+BrokerHostDispatcher::BrokerHostDispatcher()
+    : BrokerDispatcher(NULL) {
 }
 
 void BrokerHostDispatcher::OnChannelError() {
@@ -80,9 +79,8 @@ void BrokerHostDispatcher::OnChannelError() {
 }
 
 BrokerSideDispatcher::BrokerSideDispatcher(
-    base::ProcessHandle remote_process_handle,
     PP_ConnectInstance_Func connect_instance)
-    : BrokerDispatcher(remote_process_handle, connect_instance) {
+    : BrokerDispatcher(connect_instance) {
 }
 
 void BrokerSideDispatcher::OnChannelError() {

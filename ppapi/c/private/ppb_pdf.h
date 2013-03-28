@@ -6,9 +6,11 @@
 #define PPAPI_C_PRIVATE_PPB_PDF_H_
 
 #include "ppapi/c/dev/ppb_font_dev.h"
+#include "ppapi/c/pp_bool.h"
 #include "ppapi/c/pp_instance.h"
 #include "ppapi/c/pp_resource.h"
 #include "ppapi/c/pp_var.h"
+#include "ppapi/c/private/pp_private_font_charset.h"
 
 #define PPB_PDF_INTERFACE "PPB_PDF;1"
 
@@ -71,26 +73,8 @@ typedef enum {
 } PP_ResourceImage;
 
 typedef enum {
-  PP_PRIVATEFONTCHARSET_ANSI = 0,
-  PP_PRIVATEFONTCHARSET_DEFAULT = 1,
-  PP_PRIVATEFONTCHARSET_SYMBOL = 2,
-  PP_PRIVATEFONTCHARSET_MAC = 77,
-  PP_PRIVATEFONTCHARSET_SHIFTJIS = 128,
-  PP_PRIVATEFONTCHARSET_HANGUL = 129,
-  PP_PRIVATEFONTCHARSET_JOHAB = 130,
-  PP_PRIVATEFONTCHARSET_GB2312 =134,
-  PP_PRIVATEFONTCHARSET_CHINESEBIG5 = 136,
-  PP_PRIVATEFONTCHARSET_GREEK = 161,
-  PP_PRIVATEFONTCHARSET_TURKISH = 162,
-  PP_PRIVATEFONTCHARSET_VIETNAMESE = 163,
-  PP_PRIVATEFONTCHARSET_HEBREW = 177,
-  PP_PRIVATEFONTCHARSET_ARABIC = 178,
-  PP_PRIVATEFONTCHARSET_BALTIC = 186,
-  PP_PRIVATEFONTCHARSET_RUSSIAN = 204,
-  PP_PRIVATEFONTCHARSET_THAI = 222,
-  PP_PRIVATEFONTCHARSET_EASTEUROPE = 238,
-  PP_PRIVATEFONTCHARSET_OEM = 255
-} PP_PrivateFontCharset;
+  PP_PDFFEATURE_HIDPI = 0
+} PP_PDFFeature;
 
 struct PP_PrivateFontFileDescription {
   const char* face;
@@ -162,6 +146,14 @@ struct PPB_PDF {
 
   // Invoke Print dialog for plugin.
   void (*Print)(PP_Instance instance);
+
+  PP_Bool(*IsFeatureEnabled)(PP_PDFFeature feature);
+
+  // Returns a resource image appropriate for a device with |scale| density.
+  // Returns 0 (NULL resource) if there is no resource at that scale
+  PP_Resource (*GetResourceImageForScale)(PP_Instance instance,
+                                          PP_ResourceImage image_id,
+                                          float scale);
 };
 
 #endif  // PPAPI_C_PRIVATE_PPB_PDF_H_

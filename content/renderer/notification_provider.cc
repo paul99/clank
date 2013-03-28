@@ -1,4 +1,4 @@
-// Copyright (c) 2011 The Chromium Authors. All rights reserved.
+// Copyright (c) 2012 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -22,8 +22,11 @@ using WebKit::WebSecurityOrigin;
 using WebKit::WebString;
 using WebKit::WebURL;
 
+namespace content {
+
+
 NotificationProvider::NotificationProvider(RenderViewImpl* render_view)
-    : content::RenderViewObserver(render_view) {
+    : RenderViewObserver(render_view) {
 }
 
 NotificationProvider::~NotificationProvider() {
@@ -69,7 +72,7 @@ void NotificationProvider::requestPermission(
     const WebSecurityOrigin& origin,
     WebNotificationPermissionCallback* callback) {
   // We only request permission in response to a user gesture.
-      if (!render_view()->GetWebView()->mainFrame()->isProcessingUserGesture())
+  if (!render_view()->GetWebView()->mainFrame()->isProcessingUserGesture())
     return;
 
   int id = manager_.RegisterPermissionRequest(callback);
@@ -99,7 +102,7 @@ bool NotificationProvider::OnMessageReceived(const IPC::Message& message) {
 bool NotificationProvider::ShowHTML(const WebNotification& notification,
                                     int id) {
   DCHECK(notification.isHTML());
-  content::ShowDesktopNotificationHostMsgParams params;
+  ShowDesktopNotificationHostMsgParams params;
   WebDocument document = render_view()->GetWebView()->mainFrame()->document();
   params.origin = GURL(document.securityOrigin().toString());
   params.is_html = true;
@@ -112,7 +115,7 @@ bool NotificationProvider::ShowHTML(const WebNotification& notification,
 bool NotificationProvider::ShowText(const WebNotification& notification,
                                     int id) {
   DCHECK(!notification.isHTML());
-  content::ShowDesktopNotificationHostMsgParams params;
+  ShowDesktopNotificationHostMsgParams params;
   params.is_html = false;
   WebDocument document = render_view()->GetWebView()->mainFrame()->document();
   params.origin = GURL(document.securityOrigin().toString());
@@ -173,3 +176,5 @@ void NotificationProvider::OnPermissionRequestComplete(int id) {
 void NotificationProvider::OnNavigate() {
   manager_.Clear();
 }
+
+}  // namespace content

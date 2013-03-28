@@ -4,7 +4,6 @@
 
 #ifndef UI_VIEWS_IME_MOCK_INPUT_METHOD_H_
 #define UI_VIEWS_IME_MOCK_INPUT_METHOD_H_
-#pragma once
 
 #include <string>
 
@@ -25,7 +24,7 @@ class VIEWS_EXPORT MockInputMethod : public InputMethodBase {
 
   // Overridden from InputMethod:
   virtual void Init(Widget* widget) OVERRIDE;
-  virtual void DispatchKeyEvent(const KeyEvent& key) OVERRIDE;
+  virtual void DispatchKeyEvent(const ui::KeyEvent& key) OVERRIDE;
   virtual void OnTextInputTypeChanged(View* view) OVERRIDE;
   virtual void OnCaretBoundsChanged(View* view) OVERRIDE;
   virtual void CancelComposition(View* view) OVERRIDE;

@@ -4,20 +4,29 @@
 
 #ifndef CHROME_BROWSER_EXTENSIONS_API_APP_APP_API_H_
 #define CHROME_BROWSER_EXTENSIONS_API_APP_APP_API_H_
-#pragma once
 
 #include "chrome/browser/extensions/extension_function.h"
 
+namespace extensions {
+
 class AppNotifyFunction : public SyncExtensionFunction {
+ public:
+  DECLARE_EXTENSION_FUNCTION_NAME("experimental.app.notify");
+
+ protected:
   virtual ~AppNotifyFunction() {}
   virtual bool RunImpl() OVERRIDE;
-  DECLARE_EXTENSION_FUNCTION_NAME("experimental.app.notify");
 };
 
 class AppClearAllNotificationsFunction : public SyncExtensionFunction {
+ public:
+  DECLARE_EXTENSION_FUNCTION_NAME("experimental.app.clearAllNotifications");
+
+ protected:
   virtual ~AppClearAllNotificationsFunction() {}
   virtual bool RunImpl() OVERRIDE;
-  DECLARE_EXTENSION_FUNCTION_NAME("experimental.app.clearAllNotifications");
 };
+
+}  // namespace extensions
 
 #endif  // CHROME_BROWSER_EXTENSIONS_API_APP_APP_API_H_

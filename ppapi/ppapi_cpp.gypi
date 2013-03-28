@@ -21,15 +21,6 @@
       'sources': [
         '<@(c_source_files)',
       ],
-      'conditions': [
-        ['order_profiling!=0', {
-          'conditions': [
-            ['OS=="android"', {
-              'dependencies': [ '../third_party/cygprofile/cygprofile.gyp:cygprofile' ],
-            }],
-          ],
-        }],  # order_profiling!=0
-      ],
     },
     {
       'target_name': 'ppapi_cpp_objects',

@@ -1,4 +1,4 @@
-// Copyright (c) 2011 The Chromium Authors. All rights reserved.
+// Copyright (c) 2012 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -43,11 +43,13 @@ bool PluginUrlRequest::Initialize(PluginUrlRequestDelegate* delegate,
     if (FAILED(hr)) {
       NOTREACHED();
     } else {
-      post_data_len_ = upload_data->GetContentLength();
       upload_stream->AddRef();
       upload_stream->Initialize(upload_data);
       upload_data_.Attach(upload_stream);
       is_chunked_upload_ = upload_data->is_chunked();
+      STATSTG stat;
+      upload_stream->Stat(&stat, STATFLAG_NONAME);
+      post_data_len_ = stat.cbSize.QuadPart;
     }
   }
 

@@ -1,12 +1,14 @@
-// Copyright (c) 2011 The Chromium Authors. All rights reserved.
+// Copyright (c) 2012 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
 #include "base/process_util.h"
 #include "base/sys_string_conversions.h"
 #include "base/utf_string_conversions.h"
+#include "chrome/browser/extensions/component_loader.h"
 #include "chrome/browser/extensions/extension_browsertest.h"
 #include "chrome/browser/ui/browser.h"
+#include "chrome/browser/ui/browser_tabstrip.h"
 #include "chrome/browser/ui/browser_window.h"
 #include "chrome/browser/ui/omnibox/location_bar.h"
 #include "chrome/browser/ui/omnibox/omnibox_view.h"
@@ -17,15 +19,22 @@
 #include "content/public/browser/navigation_controller.h"
 #include "content/public/browser/navigation_entry.h"
 #include "content/public/browser/web_contents.h"
+#include "extensions/common/constants.h"
 #include "googleurl/src/gurl.h"
 
 using content::NavigationEntry;
 
 class ExtensionURLRewriteBrowserTest : public ExtensionBrowserTest {
+ public:
+  virtual void SetUp() OVERRIDE {
+    extensions::ComponentLoader::EnableBackgroundExtensionsForTesting();
+    ExtensionBrowserTest::SetUp();
+  }
+
  protected:
   std::string GetLocationBarText() const {
     return UTF16ToUTF8(
-        browser()->window()->GetLocationBar()->location_entry()->GetText());
+        browser()->window()->GetLocationBar()->GetLocationEntry()->GetText());
   }
 
   GURL GetLocationBarTextAsURL() const {
@@ -33,7 +42,7 @@ class ExtensionURLRewriteBrowserTest : public ExtensionBrowserTest {
   }
 
   content::NavigationController* GetNavigationController() const {
-    return &browser()->GetSelectedWebContents()->GetController();
+    return &chrome::GetActiveWebContents(browser())->GetController();
   }
 
   NavigationEntry* GetNavigationEntry() const {
@@ -53,7 +62,7 @@ class ExtensionURLRewriteBrowserTest : public ExtensionBrowserTest {
     EXPECT_EQ(url, GetLocationBarTextAsURL());
     EXPECT_EQ(url, GetNavigationEntry()->GetVirtualURL());
     EXPECT_TRUE(
-        GetNavigationEntry()->GetURL().SchemeIs(chrome::kExtensionScheme));
+        GetNavigationEntry()->GetURL().SchemeIs(extensions::kExtensionScheme));
   }
 
   // Navigates to |url| and tests that the location bar is empty while the
@@ -79,7 +88,8 @@ IN_PROC_BROWSER_TEST_F(ExtensionURLRewriteBrowserTest, NewTabPageURLOverride) {
   LoadExtension(GetTestExtensionPath("newtab"));
   TestURLNotShown(GURL(chrome::kChromeUINewTabURL));
   // Check that the internal URL uses the chrome-extension:// scheme.
-  EXPECT_TRUE(GetNavigationEntry()->GetURL().SchemeIs(chrome::kExtensionScheme));
+  EXPECT_TRUE(GetNavigationEntry()->GetURL().SchemeIs(
+      extensions::kExtensionScheme));
 }
 
 IN_PROC_BROWSER_TEST_F(ExtensionURLRewriteBrowserTest, BookmarksURL) {

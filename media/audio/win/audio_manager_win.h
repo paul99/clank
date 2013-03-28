@@ -1,19 +1,17 @@
-// Copyright (c) 2011 The Chromium Authors. All rights reserved.
+// Copyright (c) 2012 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
 #ifndef MEDIA_AUDIO_WIN_AUDIO_MANAGER_WIN_H_
 #define MEDIA_AUDIO_WIN_AUDIO_MANAGER_WIN_H_
 
-#include <windows.h>
 #include <string>
 
-#include "base/basictypes.h"
-#include "base/compiler_specific.h"
-#include "base/gtest_prod_util.h"
 #include "media/audio/audio_manager_base.h"
 
-class PCMWaveOutAudioOutputStream;
+namespace media {
+
+class AudioDeviceListenerWin;
 
 // Windows implementation of the AudioManager singleton. This class is internal
 // to the audio output and only internal users can call methods not exposed by
@@ -21,27 +19,27 @@ class PCMWaveOutAudioOutputStream;
 class MEDIA_EXPORT AudioManagerWin : public AudioManagerBase {
  public:
   AudioManagerWin();
+
   // Implementation of AudioManager.
   virtual bool HasAudioOutputDevices() OVERRIDE;
   virtual bool HasAudioInputDevices() OVERRIDE;
-  virtual AudioOutputStream* MakeAudioOutputStream(
-      const AudioParameters& params) OVERRIDE;
-  virtual AudioInputStream* MakeAudioInputStream(
-      const AudioParameters& params, const std::string& device_id) OVERRIDE;
-  virtual void MuteAll() OVERRIDE;
-  virtual void UnMuteAll() OVERRIDE;
   virtual string16 GetAudioInputDeviceModel() OVERRIDE;
   virtual bool CanShowAudioInputSettings() OVERRIDE;
   virtual void ShowAudioInputSettings() OVERRIDE;
   virtual void GetAudioInputDeviceNames(media::AudioDeviceNames* device_names)
       OVERRIDE;
 
-  // Windows-only methods to free a stream created in MakeAudioStream. These
-  // are called internally by the audio stream when it has been closed.
-  void ReleaseOutputStream(AudioOutputStream* stream);
-
-  // Called internally by the audio stream when it has been closed.
-  void ReleaseInputStream(AudioInputStream* stream);
+  // Implementation of AudioManagerBase.
+  virtual AudioOutputStream* MakeLinearOutputStream(
+      const AudioParameters& params) OVERRIDE;
+  virtual AudioOutputStream* MakeLowLatencyOutputStream(
+      const AudioParameters& params) OVERRIDE;
+  virtual AudioInputStream* MakeLinearInputStream(
+      const AudioParameters& params, const std::string& device_id) OVERRIDE;
+  virtual AudioInputStream* MakeLowLatencyInputStream(
+      const AudioParameters& params, const std::string& device_id) OVERRIDE;
+  virtual AudioParameters GetPreferredLowLatencyOutputStreamParameters(
+      const AudioParameters& input_params) OVERRIDE;
 
  protected:
   virtual ~AudioManagerWin();
@@ -62,10 +60,25 @@ class MEDIA_EXPORT AudioManagerWin : public AudioManagerBase {
     enumeration_type_ = type;
   }
 
-  // Number of currently open output streams.
-  int num_output_streams_;
+  // Returns a PCMWaveInAudioInputStream instance or NULL on failure.
+  // This method converts MMDevice-style device ID to WaveIn-style device ID if
+  // necessary.
+  // (Please see device_enumeration_win.h for more info about the two kinds of
+  // device IDs.)
+  AudioInputStream* CreatePCMWaveInAudioInputStream(
+      const AudioParameters& params,
+      const std::string& device_id);
+
+  // Helper methods for constructing AudioDeviceListenerWin on the audio thread.
+  void CreateDeviceListener();
+  void DestroyDeviceListener();
+
+  // Listen for output device changes.
+  scoped_ptr<AudioDeviceListenerWin> output_device_listener_;
 
   DISALLOW_COPY_AND_ASSIGN(AudioManagerWin);
 };
+
+}  // namespace media
 
 #endif  // MEDIA_AUDIO_WIN_AUDIO_MANAGER_WIN_H_

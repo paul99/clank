@@ -9,9 +9,9 @@
 #include <vector>
 
 #include "base/basictypes.h"
-#include "ui/gfx/gl/gpu_preference.h"
 #include "ui/gfx/native_widget_types.h"
 #include "ui/gfx/rect.h"
+#include "ui/gl/gpu_preference.h"
 #include "webkit/plugins/webkit_plugins_export.h"
 
 // TODO(port): this typedef is obviously incorrect on non-Windows
@@ -78,14 +78,14 @@ class WebPlugin {
   // destroyed.
   virtual void WillDestroyWindow(gfx::PluginWindowHandle window) = 0;
 #if defined(OS_WIN)
-  // The pump_messages_event is a event handle which is valid only for
-  // windowless plugins and is used in NPP_HandleEvent calls to pump messages
-  // if the plugin enters a modal loop.
-  // Cancels a pending request.
-  virtual void SetWindowlessPumpEvent(HANDLE pump_messages_event) = 0;
-  virtual void ReparentPluginWindow(HWND window, HWND parent) = 0;
-  virtual void ReportExecutableMemory(size_t size) = 0;
+  // |pump_messages_event| is a event handle which is used in NPP_HandleEvent
+  // calls to pump messages if the plugin enters a modal loop.
+  // |dummy_activation_window} is used to ensure correct keyboard activation.
+  // It needs to be a child of the parent window.
+  virtual void SetWindowlessData(HANDLE pump_messages_event,
+                                 gfx::NativeViewId dummy_activation_window) = 0;
 #endif
+  // Cancels a pending request.
   virtual void CancelResource(unsigned long id) = 0;
   virtual void Invalidate() = 0;
   virtual void InvalidateRect(const gfx::Rect& rect) = 0;
@@ -157,7 +157,7 @@ class WebPlugin {
 
   // Returns the accelerated surface abstraction for accelerated plugins.
   virtual WebPluginAcceleratedSurface* GetAcceleratedSurface(
-      gfx::GpuPreference gpu_preference);
+      gfx::GpuPreference gpu_preference) = 0;
 
   // Composited Core Animation plugin support.
   virtual void AcceleratedPluginEnabledRendering() = 0;
@@ -176,6 +176,7 @@ class WebPlugin {
 class WebPluginResourceClient {
  public:
   virtual ~WebPluginResourceClient() {}
+
   virtual void WillSendRequest(const GURL& url, int http_status_code) = 0;
   // The request_is_seekable parameter indicates whether byte range requests
   // can be issued for the underlying stream.

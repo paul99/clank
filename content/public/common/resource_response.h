@@ -1,4 +1,4 @@
-// Copyright (c) 2011 The Chromium Authors. All rights reserved.
+// Copyright (c) 2012 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -6,7 +6,6 @@
 
 #ifndef CONTENT_PUBLIC_COMMON_RESOURCE_RESPONSE_H_
 #define CONTENT_PUBLIC_COMMON_RESOURCE_RESPONSE_H_
-#pragma once
 
 #include <string>
 
@@ -21,8 +20,8 @@ namespace content {
 
 // Parameters for a resource response header.
 struct ResourceResponseHead : webkit_glue::ResourceResponseInfo {
-  // The response status.
-  net::URLRequestStatus status;
+  // The response error_code.
+  int error_code;
   // TimeTicks::Now() when the browser received the request from the renderer.
   base::TimeTicks request_start;
   // TimeTicks::Now() when the browser sent the response to the renderer.
@@ -39,13 +38,14 @@ struct SyncLoadResult : ResourceResponseHead {
 };
 
 // Simple wrapper that refcounts ResourceResponseHead.
+// Inherited, rather than typedef'd, to allow forward declarations.
 struct CONTENT_EXPORT ResourceResponse
-    : public NON_EXPORTED_BASE(ResourceResponseHead),
-      public base::RefCounted<ResourceResponse> {
+    : public base::RefCounted<ResourceResponse> {
+ public:
+  ResourceResponseHead head;
 
  private:
   friend class base::RefCounted<ResourceResponse>;
-
   ~ResourceResponse() {}
 };
 

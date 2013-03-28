@@ -1,14 +1,9 @@
-// Copyright (c) 2011 The Chromium Authors. All rights reserved.
+// Copyright (c) 2012 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
 #ifndef CHROME_INSTALLER_UTIL_CHROME_BROWSER_OPERATIONS_H_
 #define CHROME_INSTALLER_UTIL_CHROME_BROWSER_OPERATIONS_H_
-#pragma once
-
-#include <set>
-#include <string>
-#include <vector>
 
 #include "base/basictypes.h"
 #include "base/compiler_specific.h"
@@ -34,7 +29,7 @@ class ChromeBrowserOperations : public ProductOperations {
       const std::set<std::wstring>& options,
       std::vector<FilePath>* com_dll_list) const OVERRIDE;
 
-  virtual void AppendUninstallFlags(
+  virtual void AppendProductFlags(
       const std::set<std::wstring>& options,
       CommandLine* cmd_line) const OVERRIDE;
 
@@ -48,6 +43,11 @@ class ChromeBrowserOperations : public ProductOperations {
 
   virtual bool ShouldCreateUninstallEntry(
       const std::set<std::wstring>& options) const OVERRIDE;
+
+  virtual void AddDefaultShortcutProperties(
+      BrowserDistribution* dist,
+      const FilePath& target_exe,
+      ShellUtil::ShortcutProperties* properties) const OVERRIDE;
 
  private:
   DISALLOW_COPY_AND_ASSIGN(ChromeBrowserOperations);

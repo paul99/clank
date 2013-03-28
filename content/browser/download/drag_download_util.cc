@@ -4,22 +4,24 @@
 
 #include "content/browser/download/drag_download_util.h"
 
+#include <string>
+
 #include "base/bind.h"
 #include "base/file_path.h"
 #include "base/file_util.h"
 #include "base/memory/scoped_ptr.h"
 #include "base/string_number_conversions.h"
 #include "base/string_util.h"
+#include "base/threading/thread_restrictions.h"
 #include "base/utf_string_conversions.h"
 #include "content/public/browser/browser_thread.h"
 #include "googleurl/src/gurl.h"
 #include "net/base/file_stream.h"
 #include "net/base/net_errors.h"
 
-using content::BrowserThread;
 using net::FileStream;
 
-namespace drag_download_util {
+namespace content {
 
 bool ParseDownloadMetadata(const string16& metadata,
                            string16* mime_type,
@@ -56,21 +58,21 @@ bool ParseDownloadMetadata(const string16& metadata,
   return true;
 }
 
-FileStream* CreateFileStreamForDrop(FilePath* file_path) {
+FileStream* CreateFileStreamForDrop(FilePath* file_path, net::NetLog* net_log) {
   DCHECK(file_path && !file_path->empty());
 
-  scoped_ptr<FileStream> file_stream(new FileStream);
+  scoped_ptr<FileStream> file_stream(new FileStream(net_log));
   const int kMaxSeq = 99;
   for (int seq = 0; seq <= kMaxSeq; seq++) {
     FilePath new_file_path;
     if (seq == 0) {
       new_file_path = *file_path;
     } else {
- #if defined(OS_WIN)
+#if defined(OS_WIN)
       string16 suffix = ASCIIToUTF16("-") + base::IntToString16(seq);
- #else
+#else
       std::string suffix = std::string("-") + base::IntToString(seq);
- #endif
+#endif
       new_file_path = file_path->InsertBeforeExtension(suffix);
     }
 
@@ -80,7 +82,7 @@ FileStream* CreateFileStreamForDrop(FilePath* file_path) {
     // Explicitly (and redundantly check) for file -- despite the fact that our
     // open won't overwrite -- just to avoid log spew.
     if (!file_util::PathExists(new_file_path) &&
-        file_stream->Open(new_file_path, base::PLATFORM_FILE_CREATE |
+        file_stream->OpenSync(new_file_path, base::PLATFORM_FILE_CREATE |
                               base::PLATFORM_FILE_WRITE) == net::OK) {
       *file_path = new_file_path;
       return file_stream.release();
@@ -95,13 +97,6 @@ PromiseFileFinalizer::PromiseFileFinalizer(
     : drag_file_downloader_(drag_file_downloader) {
 }
 
-PromiseFileFinalizer::~PromiseFileFinalizer() {}
-
-void PromiseFileFinalizer::Cleanup() {
-  if (drag_file_downloader_.get())
-    drag_file_downloader_ = NULL;
-}
-
 void PromiseFileFinalizer::OnDownloadCompleted(const FilePath& file_path) {
   BrowserThread::PostTask(
       BrowserThread::UI, FROM_HERE,
@@ -114,4 +109,11 @@ void PromiseFileFinalizer::OnDownloadAborted() {
       base::Bind(&PromiseFileFinalizer::Cleanup, this));
 }
 
-}  // namespace drag_download_util
+PromiseFileFinalizer::~PromiseFileFinalizer() {}
+
+void PromiseFileFinalizer::Cleanup() {
+  if (drag_file_downloader_.get())
+    drag_file_downloader_ = NULL;
+}
+
+}  // namespace content

@@ -1,4 +1,4 @@
-// Copyright (c) 2011 The Chromium Authors. All rights reserved.
+// Copyright (c) 2012 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -28,6 +28,7 @@ class ProfileMetrics {
     ICON_AVATAR_BUBBLE,       // User opens avatar icon menu from icon
     SWITCH_PROFILE_ICON,      // User switches profiles from icon menu
     SWITCH_PROFILE_MENU,      // User switches profiles from menu bar
+    SWITCH_PROFILE_DOCK,      // User switches profiles from dock (Mac-only)
     NUM_PROFILE_OPEN_METRICS
   };
 
@@ -39,7 +40,6 @@ class ProfileMetrics {
   };
 
   // Sign in is logged once the user has entered their GAIA information.
-  // See sync_setup_flow.h.
   // The options for sync are logged after the user has submitted the options
   // form. See sync_setup_handler.h.
   enum ProfileSync {

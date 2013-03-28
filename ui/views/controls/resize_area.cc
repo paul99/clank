@@ -1,4 +1,4 @@
-// Copyright (c) 2011 The Chromium Authors. All rights reserved.
+// Copyright (c) 2012 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -9,12 +9,8 @@
 #include "ui/base/resource/resource_bundle.h"
 #include "ui/views/controls/resize_area_delegate.h"
 
-#if defined(OS_LINUX)
-#include "ui/gfx/gtk_util.h"
-#endif
-
 #if defined(USE_AURA)
-#include "ui/aura/cursor.h"
+#include "ui/base/cursor/cursor.h"
 #endif
 
 namespace views {
@@ -36,20 +32,18 @@ std::string ResizeArea::GetClassName() const {
   return kViewClassName;
 }
 
-gfx::NativeCursor ResizeArea::GetCursor(const MouseEvent& event) {
+gfx::NativeCursor ResizeArea::GetCursor(const ui::MouseEvent& event) {
   if (!enabled())
     return gfx::kNullCursor;
 #if defined(USE_AURA)
-  return aura::kCursorEastWestResize;
+  return ui::kCursorEastWestResize;
 #elif defined(OS_WIN)
   static HCURSOR g_resize_cursor = LoadCursor(NULL, IDC_SIZEWE);
   return g_resize_cursor;
-#elif defined(OS_LINUX)
-  return gfx::GetCursor(GDK_SB_H_DOUBLE_ARROW);
 #endif
 }
 
-bool ResizeArea::OnMousePressed(const views::MouseEvent& event) {
+bool ResizeArea::OnMousePressed(const ui::MouseEvent& event) {
   if (!event.IsOnlyLeftMouseButton())
     return false;
 
@@ -63,7 +57,7 @@ bool ResizeArea::OnMousePressed(const views::MouseEvent& event) {
   return true;
 }
 
-bool ResizeArea::OnMouseDragged(const views::MouseEvent& event) {
+bool ResizeArea::OnMouseDragged(const ui::MouseEvent& event) {
   if (!event.IsLeftMouseButton())
     return false;
 
@@ -71,7 +65,7 @@ bool ResizeArea::OnMouseDragged(const views::MouseEvent& event) {
   return true;
 }
 
-void ResizeArea::OnMouseReleased(const views::MouseEvent& event) {
+void ResizeArea::OnMouseReleased(const ui::MouseEvent& event) {
   ReportResizeAmount(event.x(), true);
 }
 

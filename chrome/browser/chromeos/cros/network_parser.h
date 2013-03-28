@@ -1,15 +1,13 @@
-// Copyright (c) 2011 The Chromium Authors. All rights reserved.
+// Copyright (c) 2012 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
 #ifndef CHROME_BROWSER_CHROMEOS_CROS_NETWORK_PARSER_H_
 #define CHROME_BROWSER_CHROMEOS_CROS_NETWORK_PARSER_H_
-#pragma once
 
 #include <map>
 #include <string>
 
-#include "base/memory/scoped_ptr.h"
 #include "chrome/browser/chromeos/cros/enum_mapper.h"
 #include "chrome/browser/chromeos/cros/network_library.h"
 
@@ -22,11 +20,11 @@ namespace chromeos {
 
 class NetworkDevice;
 
-// This takes a Value of a particular form, and maps the keys in the
-// dictionary to a NetworkDevice object to initialize it properly.
-// Subclasses of this can then customize its methods to parse either
-// libcros (flimflam) data or network setup information obtained from
-// policy or setup file import depending on the EnumMapper supplied.
+// This takes a Value of a particular form, and maps the keys in the dictionary
+// to a NetworkDevice object to initialize it properly. Subclasses of this can
+// then customize its methods to parse either Shill data or network setup
+// information obtained from policy or setup file import depending on the
+// EnumMapper supplied.
 class NetworkDeviceParser {
  public:
   virtual ~NetworkDeviceParser();

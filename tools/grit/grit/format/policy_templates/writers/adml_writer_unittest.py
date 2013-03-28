@@ -1,5 +1,5 @@
-#!/usr/bin/python2.4
-# Copyright (c) 2011 The Chromium Authors. All rights reserved.
+#!/usr/bin/env python
+# Copyright (c) 2012 The Chromium Authors. All rights reserved.
 # Use of this source code is governed by a BSD-style license that can be
 # found in the LICENSE file.
 
@@ -11,12 +11,11 @@ import os
 import sys
 import unittest
 if __name__ == '__main__':
-  sys.path.append(os.path.join(os.path.dirname(sys.argv[0]), '../../../..'))
+  sys.path.append(os.path.join(os.path.dirname(__file__), '../../../..'))
 
 
 from grit.format.policy_templates.writers import adml_writer
 from grit.format.policy_templates.writers import xml_writer_base_unittest
-from xml.dom import minidom
 
 
 class AdmlWriterTest(xml_writer_base_unittest.XmlWriterBaseTest):
@@ -96,12 +95,9 @@ class AdmlWriterTest(xml_writer_base_unittest.XmlWriterBaseTest):
     # Assert generated string elements.
     output = self.GetXMLOfChildren(self.writer._string_table_elem)
     expected_output = (
-        '<string id="SUPPORTED_TESTOS">\n'
-        '  Supported on Test OS or higher\n'
-        '</string>\n'
-        '<string id="PolicyGroup_group">\n'
-        '  Test Group Caption\n'
-        '</string>')
+        '<string id="SUPPORTED_TESTOS">'
+        'Supported on Test OS or higher</string>\n'
+        '<string id="PolicyGroup_group">Test Group Caption</string>')
     self.AssertXMLEquals(output, expected_output)
     # Assert generated presentation elements.
     output = self.GetXMLOfChildren(self.writer._presentation_table_elem)
@@ -120,12 +116,9 @@ class AdmlWriterTest(xml_writer_base_unittest.XmlWriterBaseTest):
     # Assert generated string elements.
     output = self.GetXMLOfChildren(self.writer._string_table_elem)
     expected_output = (
-        '<string id="DummyMainPolicy">\n'
-        '  Main policy caption\n'
-        '</string>\n'
-        '<string id="DummyMainPolicy_Explain">\n'
-        '  Main policy test description.\n'
-        '</string>')
+        '<string id="DummyMainPolicy">Main policy caption</string>\n'
+        '<string id="DummyMainPolicy_Explain">'
+        'Main policy test description.</string>')
     self.AssertXMLEquals(output, expected_output)
     # Assert generated presentation elements.
     output = self.GetXMLOfChildren(self.writer._presentation_table_elem)
@@ -145,21 +138,16 @@ class AdmlWriterTest(xml_writer_base_unittest.XmlWriterBaseTest):
     # Assert generated string elements.
     output = self.GetXMLOfChildren(self.writer._string_table_elem)
     expected_output = (
-        '<string id="StringPolicyStub">\n'
-        '  String policy caption\n'
-        '</string>\n'
-        '<string id="StringPolicyStub_Explain">\n'
-        '  This is a test description.\n'
-        '</string>')
+        '<string id="StringPolicyStub">String policy caption</string>\n'
+        '<string id="StringPolicyStub_Explain">'
+        'This is a test description.</string>')
     self.AssertXMLEquals(output, expected_output)
     # Assert generated presentation elements.
     output = self.GetXMLOfChildren(self.writer._presentation_table_elem)
     expected_output = (
         '<presentation id="StringPolicyStub">\n'
         '  <textBox refId="StringPolicyStub">\n'
-        '    <label>\n'
-        '      String policy label\n'
-        '    </label>\n'
+        '    <label>String policy label</label>\n'
         '  </textBox>\n'
         '</presentation>')
     self.AssertXMLEquals(output, expected_output)
@@ -177,20 +165,16 @@ class AdmlWriterTest(xml_writer_base_unittest.XmlWriterBaseTest):
     # Assert generated string elements.
     output = self.GetXMLOfChildren(self.writer._string_table_elem)
     expected_output = (
-        '<string id="IntPolicyStub">\n'
-        '  Int policy caption\n'
-        '</string>\n'
-        '<string id="IntPolicyStub_Explain">\n'
-        '  This is a test description.\n'
-        '</string>')
+        '<string id="IntPolicyStub">Int policy caption</string>\n'
+        '<string id="IntPolicyStub_Explain">'
+        'This is a test description.</string>')
     self.AssertXMLEquals(output, expected_output)
     # Assert generated presentation elements.
     output = self.GetXMLOfChildren(self.writer._presentation_table_elem)
     expected_output = (
         '<presentation id="IntPolicyStub">\n'
-        '  <decimalTextBox refId="IntPolicyStub">\n'
-        '    Int policy label:\n'
-        '  </decimalTextBox>\n'
+        '  <decimalTextBox refId="IntPolicyStub">'
+        'Int policy label:</decimalTextBox>\n'
         '</presentation>')
     self.AssertXMLEquals(output, expected_output)
 
@@ -219,26 +203,18 @@ class AdmlWriterTest(xml_writer_base_unittest.XmlWriterBaseTest):
     # Assert generated string elements.
     output = self.GetXMLOfChildren(self.writer._string_table_elem)
     expected_output = (
-        '<string id="EnumPolicyStub">\n'
-        '  Enum policy caption\n'
-        '</string>\n'
-        '<string id="EnumPolicyStub_Explain">\n'
-        '  This is a test description.\n'
-        '</string>\n'
-        '<string id="item 1">\n'
-        '  Caption Item 1\n'
-        '</string>\n'
-        '<string id="item 2">\n'
-        '  Caption Item 2\n'
-        '</string>')
+        '<string id="EnumPolicyStub">Enum policy caption</string>\n'
+        '<string id="EnumPolicyStub_Explain">'
+        'This is a test description.</string>\n'
+        '<string id="item 1">Caption Item 1</string>\n'
+        '<string id="item 2">Caption Item 2</string>')
     self.AssertXMLEquals(output, expected_output)
     # Assert generated presentation elements.
     output = self.GetXMLOfChildren(self.writer._presentation_table_elem)
     expected_output = (
         '<presentation id="EnumPolicyStub">\n'
-        '  <dropdownList refId="EnumPolicyStub">\n'
-        '    Enum policy label\n'
-        '  </dropdownList>\n'
+        '  <dropdownList refId="EnumPolicyStub">'
+        'Enum policy label</dropdownList>\n'
         '</presentation>')
     self.AssertXMLEquals(output, expected_output)
 
@@ -267,26 +243,18 @@ class AdmlWriterTest(xml_writer_base_unittest.XmlWriterBaseTest):
     # Assert generated string elements.
     output = self.GetXMLOfChildren(self.writer._string_table_elem)
     expected_output = (
-        '<string id="EnumPolicyStub">\n'
-        '  Enum policy caption\n'
-        '</string>\n'
-        '<string id="EnumPolicyStub_Explain">\n'
-        '  This is a test description.\n'
-        '</string>\n'
-        '<string id="item 1">\n'
-        '  Caption Item 1\n'
-        '</string>\n'
-        '<string id="item 2">\n'
-        '  Caption Item 2\n'
-        '</string>')
+        '<string id="EnumPolicyStub">Enum policy caption</string>\n'
+        '<string id="EnumPolicyStub_Explain">'
+        'This is a test description.</string>\n'
+        '<string id="item 1">Caption Item 1</string>\n'
+        '<string id="item 2">Caption Item 2</string>')
     self.AssertXMLEquals(output, expected_output)
     # Assert generated presentation elements.
     output = self.GetXMLOfChildren(self.writer._presentation_table_elem)
     expected_output = (
         '<presentation id="EnumPolicyStub">\n'
-        '  <dropdownList refId="EnumPolicyStub">\n'
-        '    Enum policy label\n'
-        '  </dropdownList>\n'
+        '  <dropdownList refId="EnumPolicyStub">'
+        'Enum policy label</dropdownList>\n'
         '</presentation>')
     self.AssertXMLEquals(output, expected_output)
 
@@ -303,23 +271,43 @@ class AdmlWriterTest(xml_writer_base_unittest.XmlWriterBaseTest):
     # Assert generated string elements.
     output = self.GetXMLOfChildren(self.writer._string_table_elem)
     expected_output = (
-        '<string id="ListPolicyStub">\n'
-        '  List policy caption\n'
-        '</string>\n'
-        '<string id="ListPolicyStub_Explain">\n'
-        '  This is a test description.\n'
-        '</string>\n'
-        '<string id="ListPolicyStubDesc">\n'
-        '  List policy caption\n'
-        '</string>')
+        '<string id="ListPolicyStub">List policy caption</string>\n'
+        '<string id="ListPolicyStub_Explain">'
+        'This is a test description.</string>\n'
+        '<string id="ListPolicyStubDesc">List policy caption</string>')
     self.AssertXMLEquals(output, expected_output)
     # Assert generated presentation elements.
     output = self.GetXMLOfChildren(self.writer._presentation_table_elem)
     expected_output = (
         '<presentation id="ListPolicyStub">\n'
-        '  <listBox refId="ListPolicyStubDesc">\n'
-        '    List policy label\n'
-        '  </listBox>\n'
+        '  <listBox refId="ListPolicyStubDesc">List policy label</listBox>\n'
+        '</presentation>')
+    self.AssertXMLEquals(output, expected_output)
+
+  def testDictionaryPolicy(self):
+    dict_policy = {
+      'name': 'DictionaryPolicyStub',
+      'type': 'dict',
+      'caption': 'Dictionary policy caption',
+      'label': 'Dictionary policy label',
+      'desc': 'This is a test description.',
+    }
+    self. _InitWriterForAddingPolicies(self.writer, dict_policy)
+    self.writer.WritePolicy(dict_policy)
+    # Assert generated string elements.
+    output = self.GetXMLOfChildren(self.writer._string_table_elem)
+    expected_output = (
+        '<string id="DictionaryPolicyStub">Dictionary policy caption</string>\n'
+        '<string id="DictionaryPolicyStub_Explain">'
+        'This is a test description.</string>')
+    self.AssertXMLEquals(output, expected_output)
+    # Assert generated presentation elements.
+    output = self.GetXMLOfChildren(self.writer._presentation_table_elem)
+    expected_output = (
+        '<presentation id="DictionaryPolicyStub">\n'
+        '  <textBox refId="DictionaryPolicyStub">\n'
+        '    <label>Dictionary policy label</label>\n'
+        '  </textBox>\n'
         '</presentation>')
     self.AssertXMLEquals(output, expected_output)
 

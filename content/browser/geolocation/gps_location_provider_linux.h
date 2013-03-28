@@ -1,4 +1,4 @@
-// Copyright (c) 2011 The Chromium Authors. All rights reserved.
+// Copyright (c) 2012 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -9,16 +9,57 @@
 
 #ifndef CONTENT_BROWSER_GEOLOCATION_GPS_LOCATION_PROVIDER_LINUX_H_
 #define CONTENT_BROWSER_GEOLOCATION_GPS_LOCATION_PROVIDER_LINUX_H_
-#pragma once
 
 #include "base/compiler_specific.h"
 #include "base/memory/scoped_ptr.h"
 #include "base/memory/weak_ptr.h"
 #include "content/browser/geolocation/location_provider.h"
 #include "content/common/content_export.h"
-#include "content/common/geoposition.h"
+#include "content/public/common/geoposition.h"
 
-class LibGps;
+struct gps_data_t;
+
+namespace content {
+
+// Defines a wrapper around the C libgps API (gps.h). Similar to the libgpsmm.h
+// API provided by that package.
+class CONTENT_EXPORT LibGps {
+ public:
+  virtual ~LibGps();
+  // Attempts to dynamically load the libgps.so library and returns NULL on
+  // failure.
+  static LibGps* New();
+
+  bool Start();
+  void Stop();
+  bool Read(content::Geoposition* position);
+
+ protected:
+  typedef int (*gps_open_fn)(const char*, const char*, struct gps_data_t*);
+  typedef int (*gps_close_fn)(struct gps_data_t*);
+  typedef int (*gps_read_fn)(struct gps_data_t*);
+
+  explicit LibGps(void* dl_handle,
+                  gps_open_fn gps_open,
+                  gps_close_fn gps_close,
+                  gps_read_fn gps_read);
+
+  // Returns false if there is no fix available.
+  virtual bool GetPositionIfFixed(content::Geoposition* position);
+
+ private:
+#if defined(USE_LIBGPS)
+  void* dl_handle_;
+  gps_open_fn gps_open_;
+  gps_close_fn gps_close_;
+  gps_read_fn gps_read_;
+
+  scoped_ptr<gps_data_t> gps_data_;
+  bool is_open_;
+#endif  // defined(USE_LIBGPS)
+
+  DISALLOW_COPY_AND_ASSIGN(LibGps);
+};
 
 // Location provider for Linux, that uses libgps/gpsd to obtain position fixes.
 // TODO(joth): Currently this runs entirely in the client thread (i.e. Chrome's
@@ -48,7 +89,6 @@ class CONTENT_EXPORT GpsLocationProviderLinux : public LocationProviderBase {
   virtual void StopProvider() OVERRIDE;
   virtual void GetPosition(Geoposition* position) OVERRIDE;
   virtual void UpdatePosition() OVERRIDE;
-  virtual void OnPermissionGranted(const GURL& requesting_frame) OVERRIDE;
 
  private:
   // Task which run in the child thread.
@@ -68,5 +108,7 @@ class CONTENT_EXPORT GpsLocationProviderLinux : public LocationProviderBase {
   // Holder for the tasks which run on the thread; takes care of cleanup.
   base::WeakPtrFactory<GpsLocationProviderLinux> weak_factory_;
 };
+
+}  // namespace content
 
 #endif  // CONTENT_BROWSER_GEOLOCATION_GPS_LOCATION_PROVIDER_LINUX_H_

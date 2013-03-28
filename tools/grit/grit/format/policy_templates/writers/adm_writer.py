@@ -1,4 +1,5 @@
-# Copyright (c) 2011 The Chromium Authors. All rights reserved.
+#!/usr/bin/env python
+# Copyright (c) 2012 The Chromium Authors. All rights reserved.
 # Use of this source code is governed by a BSD-style license that can be
 # found in the LICENSE file.
 
@@ -69,14 +70,17 @@ class AdmWriter(template_writer.TemplateWriter):
     'int': 'NUMERIC',
     'string-enum': 'DROPDOWNLIST',
     'int-enum': 'DROPDOWNLIST',
-    'list': 'LISTBOX'
+    'list': 'LISTBOX',
+    'dict': 'EDITTEXT'
   }
 
   def _AddGuiString(self, name, value):
     # Escape newlines in the value.
     value = value.replace('\n', '\\n')
     if name in self.strings_seen:
-      assert value == self.strings_seen[name]
+      err = ('%s was added as "%s" and now added again as "%s"' %
+             (name, self.strings_seen[name], value))
+      assert value == self.strings_seen[name], err
     else:
       self.strings_seen[name] = value
       line = '%s="%s"' % (name, value)
@@ -109,6 +113,9 @@ class AdmWriter(template_writer.TemplateWriter):
       builder.AddLine('VALUEPREFIX ""')
     else:
       builder.AddLine('VALUENAME "%s"' % policy['name'])
+    if policy['type'] == 'int':
+      # The default max for NUMERIC values is 9999 which is too small for us.
+      builder.AddLine('MIN 0 MAX 2000000000')
     if policy['type'] in ('int-enum', 'string-enum'):
       builder.AddLine('ITEMLIST', 1)
       for item in policy['items']:
@@ -196,7 +203,7 @@ class AdmWriter(template_writer.TemplateWriter):
                        self.messages['win_supported_winxpsp2']['text'])
     category_path = self.config['win_mandatory_category_path']
     recommended_category_path = self.config['win_recommended_category_path']
-    recommended_name = '%s (%s)' % \
+    recommended_name = '%s - %s' % \
         (self.config['app_name'], self.messages['doc_recommended']['text'])
     if self.config['build'] == 'chrome':
       self._AddGuiString(category_path[0], 'Google')

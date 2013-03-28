@@ -1,13 +1,14 @@
-// Copyright (c) 2011 The Chromium Authors. All rights reserved.
+// Copyright (c) 2012 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
 #ifndef CHROME_BROWSER_UI_VIEWS_TABS_TAB_STRIP_CONTROLLER_H_
 #define CHROME_BROWSER_UI_VIEWS_TABS_TAB_STRIP_CONTROLLER_H_
-#pragma once
 
-class BaseTab;
+#include "chrome/browser/ui/views/tabs/tab_strip_types.h"
+
 class GURL;
+class Tab;
 class TabStrip;
 class TabStripSelectionModel;
 
@@ -34,14 +35,14 @@ class TabStripController {
   // one whose content is shown.
   virtual bool IsActiveTab(int index) const = 0;
 
+  // Returns the index of the active tab.
+  virtual int GetActiveIndex() const = 0;
+
   // Returns true if the selected index is selected.
   virtual bool IsTabSelected(int index) const = 0;
 
   // Returns true if the selected index is pinned.
   virtual bool IsTabPinned(int index) const = 0;
-
-  // Returns true if the selected index is closeable.
-  virtual bool IsTabCloseable(int index) const = 0;
 
   // Returns true if the selected index is the new tab page.
   virtual bool IsNewTabPage(int index) const = 0;
@@ -59,10 +60,10 @@ class TabStripController {
   virtual void AddSelectionFromAnchorTo(int index) = 0;
 
   // Closes the tab at the specified index in the model.
-  virtual void CloseTab(int index) = 0;
+  virtual void CloseTab(int index, CloseTabSource source) = 0;
 
   // Shows a context menu for the tab at the specified point in screen coords.
-  virtual void ShowContextMenuForTab(BaseTab* tab, const gfx::Point& p) = 0;
+  virtual void ShowContextMenuForTab(Tab* tab, const gfx::Point& p) = 0;
 
   // Updates the loading animations of all the tabs.
   virtual void UpdateLoadingAnimations() = 0;
@@ -86,12 +87,11 @@ class TabStripController {
   // Creates the new tab.
   virtual void CreateNewTab() = 0;
 
-  // Informs that an active tab is selected when already active (ie - clicked
-  // when already active/foreground).
-  virtual void ClickActiveTab(int index) = 0;
-
   // Returns true if the tab strip is in an incognito window.
   virtual bool IsIncognito() = 0;
+
+  // Invoked if the layout type might have changed.
+  virtual void LayoutTypeMaybeChanged() = 0;
 };
 
 #endif  // CHROME_BROWSER_UI_VIEWS_TABS_TAB_STRIP_CONTROLLER_H_

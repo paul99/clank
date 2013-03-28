@@ -4,11 +4,12 @@
 
 #ifndef CHROME_BROWSER_DOWNLOAD_DOWNLOAD_REQUEST_INFOBAR_DELEGATE_H_
 #define CHROME_BROWSER_DOWNLOAD_DOWNLOAD_REQUEST_INFOBAR_DELEGATE_H_
-#pragma once
 
 #include "base/basictypes.h"
+#include "chrome/browser/api/infobars/confirm_infobar_delegate.h"
 #include "chrome/browser/download/download_request_limiter.h"
-#include "chrome/browser/tab_contents/confirm_infobar_delegate.h"
+
+class InfoBarService;
 
 // An infobar delegate that presents the user with a choice to allow or deny
 // multiple downloads from the same site. This confirmation step protects
@@ -17,7 +18,7 @@
 class DownloadRequestInfoBarDelegate : public ConfirmInfoBarDelegate {
  public:
   DownloadRequestInfoBarDelegate(
-      InfoBarTabHelper* infobar_helper,
+      InfoBarService* infobar_service,
       DownloadRequestLimiter::TabDownloadState* host);
 
   void set_host(DownloadRequestLimiter::TabDownloadState* host) {

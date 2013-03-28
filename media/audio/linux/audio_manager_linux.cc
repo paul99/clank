@@ -11,21 +11,24 @@
 #include "base/process_util.h"
 #include "base/stl_util.h"
 #include "media/audio/audio_output_dispatcher.h"
-#include "media/audio/fake_audio_input_stream.h"
-#include "media/audio/fake_audio_output_stream.h"
+#include "media/audio/audio_util.h"
 #include "media/audio/linux/alsa_input.h"
 #include "media/audio/linux/alsa_output.h"
 #include "media/audio/linux/alsa_wrapper.h"
 #if defined(USE_PULSEAUDIO)
 #include "media/audio/pulse/pulse_output.h"
 #endif
+#if defined(USE_CRAS)
+#include "media/audio/linux/cras_input.h"
+#include "media/audio/linux/cras_output.h"
+#endif
 #include "media/base/limits.h"
 #include "media/base/media_switches.h"
 
-// Maximum number of output streams that can be open simultaneously.
-static const size_t kMaxOutputStreams = 50;
+namespace media {
 
-static const int kMaxInputChannels = 2;
+// Maximum number of output streams that can be open simultaneously.
+static const int kMaxOutputStreams = 50;
 
 // Since "default", "pulse" and "dmix" devices are virtual devices mapped to
 // real devices, we remove them from the list to avoiding duplicate counting.
@@ -36,108 +39,52 @@ static const char* kInvalidAudioInputDevices[] = {
   "null",
   "pulse",
   "dmix",
+  "surround",
 };
+
+static const char kCrasAutomaticDeviceName[] = "Automatic";
+static const char kCrasAutomaticDeviceId[] = "automatic";
 
 // Implementation of AudioManager.
 bool AudioManagerLinux::HasAudioOutputDevices() {
+  if (UseCras())
+    return true;
+
   return HasAnyAlsaAudioDevice(kStreamPlayback);
 }
 
 bool AudioManagerLinux::HasAudioInputDevices() {
+  if (UseCras())
+    return true;
+
   return HasAnyAlsaAudioDevice(kStreamCapture);
 }
 
-AudioOutputStream* AudioManagerLinux::MakeAudioOutputStream(
-    const AudioParameters& params) {
-  // Early return for testing hook.
-  if (params.format == AudioParameters::AUDIO_MOCK)
-    return FakeAudioOutputStream::MakeFakeStream(params);
-
-  // Don't allow opening more than |kMaxOutputStreams| streams.
-  if (active_output_stream_count_ >= kMaxOutputStreams)
-    return NULL;
-
-  AudioOutputStream* stream = NULL;
-#if defined(USE_PULSEAUDIO)
-  if (CommandLine::ForCurrentProcess()->HasSwitch(switches::kUsePulseAudio)) {
-    stream = new PulseAudioOutputStream(params, this);
-  } else {
-#endif
-    std::string device_name = AlsaPcmOutputStream::kAutoSelectDevice;
-    if (CommandLine::ForCurrentProcess()->HasSwitch(
-            switches::kAlsaOutputDevice)) {
-      device_name = CommandLine::ForCurrentProcess()->GetSwitchValueASCII(
-          switches::kAlsaOutputDevice);
-    }
-    stream = new AlsaPcmOutputStream(device_name, params, wrapper_.get(), this);
-#if defined(USE_PULSEAUDIO)
-  }
-#endif
-  ++active_output_stream_count_;
-  DCHECK(stream);
-  return stream;
+AudioManagerLinux::AudioManagerLinux()
+    : wrapper_(new AlsaWrapper()) {
+  SetMaxOutputStreamsAllowed(kMaxOutputStreams);
 }
-
-AudioInputStream* AudioManagerLinux::MakeAudioInputStream(
-    const AudioParameters& params, const std::string& device_id) {
-  if (!params.IsValid() || params.channels > kMaxInputChannels ||
-      device_id.empty()) {
-    return NULL;
-  }
-
-  if (params.format == AudioParameters::AUDIO_MOCK) {
-    return FakeAudioInputStream::MakeFakeStream(params);
-  }
-
-  std::string device_name = (device_id == AudioManagerBase::kDefaultDeviceId) ?
-      AlsaPcmInputStream::kAutoSelectDevice : device_id;
-  if (CommandLine::ForCurrentProcess()->HasSwitch(switches::kAlsaInputDevice)) {
-    device_name = CommandLine::ForCurrentProcess()->GetSwitchValueASCII(
-        switches::kAlsaInputDevice);
-  }
-
-  AlsaPcmInputStream* stream = new AlsaPcmInputStream(this,
-      device_name, params, wrapper_.get());
-
-  return stream;
-}
-
-AudioManagerLinux::AudioManagerLinux() : active_output_stream_count_(0U) {}
 
 AudioManagerLinux::~AudioManagerLinux() {
   Shutdown();
-  // All the streams should have been deleted on the audio thread via Shutdown.
-  CHECK_EQ(active_output_stream_count_, 0U);
-}
-
-void AudioManagerLinux::Init() {
-  AudioManagerBase::Init();
-  wrapper_.reset(new AlsaWrapper());
-}
-
-void AudioManagerLinux::MuteAll() {
-  NOTIMPLEMENTED();
-}
-
-void AudioManagerLinux::UnMuteAll() {
-  NOTIMPLEMENTED();
-}
-
-void AudioManagerLinux::ReleaseOutputStream(AudioOutputStream* stream) {
-  if (stream) {
-    delete stream;
-    --active_output_stream_count_;
-    DCHECK_GE(active_output_stream_count_, 0U);
-  }
 }
 
 bool AudioManagerLinux::CanShowAudioInputSettings() {
   scoped_ptr<base::Environment> env(base::Environment::Create());
-  base::nix::DesktopEnvironment desktop = base::nix::GetDesktopEnvironment(
-      env.get());
-  return (desktop == base::nix::DESKTOP_ENVIRONMENT_GNOME ||
-          desktop == base::nix::DESKTOP_ENVIRONMENT_KDE3 ||
-          desktop == base::nix::DESKTOP_ENVIRONMENT_KDE4);
+
+  switch (base::nix::GetDesktopEnvironment(env.get())) {
+    case base::nix::DESKTOP_ENVIRONMENT_GNOME:
+    case base::nix::DESKTOP_ENVIRONMENT_KDE3:
+    case base::nix::DESKTOP_ENVIRONMENT_KDE4:
+      return true;
+    case base::nix::DESKTOP_ENVIRONMENT_OTHER:
+    case base::nix::DESKTOP_ENVIRONMENT_UNITY:
+    case base::nix::DESKTOP_ENVIRONMENT_XFCE:
+      return false;
+  }
+  // Unless GetDesktopEnvironment() badly misbehaves, this should never happen.
+  NOTREACHED();
+  return false;
 }
 
 void AudioManagerLinux::ShowAudioInputSettings() {
@@ -153,18 +100,28 @@ void AudioManagerLinux::ShowAudioInputSettings() {
 void AudioManagerLinux::GetAudioInputDeviceNames(
     media::AudioDeviceNames* device_names) {
   DCHECK(device_names->empty());
+  if (UseCras()) {
+    GetCrasAudioInputDevices(device_names);
+    return;
+  }
 
   GetAlsaAudioInputDevices(device_names);
+}
 
-  if (!device_names->empty()) {
-    // Prepend the default device to the list since we always want it to be
-    // on the top of the list for all platforms. There is no duplicate
-    // counting here since the default device has been abstracted out before.
-    // We use index 0 to make up the unique_id to identify the default device.
-    device_names->push_front(media::AudioDeviceName(
-        AudioManagerBase::kDefaultDeviceName,
-        AudioManagerBase::kDefaultDeviceId));
+bool AudioManagerLinux::UseCras() {
+#if defined(USE_CRAS)
+  if (CommandLine::ForCurrentProcess()->HasSwitch(switches::kUseCras)) {
+    return true;
   }
+#endif
+  return false;
+}
+
+void AudioManagerLinux::GetCrasAudioInputDevices(
+    media::AudioDeviceNames* device_names) {
+  // Cras will route audio from a proper physical device automatically.
+  device_names->push_back(media::AudioDeviceName(
+      kCrasAutomaticDeviceName, kCrasAutomaticDeviceId));
 }
 
 void AudioManagerLinux::GetAlsaAudioInputDevices(
@@ -204,6 +161,17 @@ void AudioManagerLinux::GetAlsaDevicesInfo(
     if (io != NULL && strcmp(kOutputDevice, io.get()) == 0)
       continue;
 
+    // Found an input device, prepend the default device since we always want
+    // it to be on the top of the list for all platforms. And there is no
+    // duplicate counting here since it is only done if the list is still empty.
+    // Note, pulse has exclusively opened the default device, so we must open
+    // the device via the "default" moniker.
+    if (device_names->empty()) {
+      device_names->push_front(media::AudioDeviceName(
+          AudioManagerBase::kDefaultDeviceName,
+          AudioManagerBase::kDefaultDeviceId));
+    }
+
     // Get the unique device name for the device.
     scoped_ptr_malloc<char> unique_device_name(
         wrapper_->DeviceNameGetHint(*hint_iter, kNameHintName));
@@ -236,29 +204,15 @@ void AudioManagerLinux::GetAlsaDevicesInfo(
 }
 
 bool AudioManagerLinux::IsAlsaDeviceAvailable(const char* device_name) {
-  static const char kNotWantedSurroundDevices[] = "surround";
-
   if (!device_name)
     return false;
 
   // Check if the device is in the list of invalid devices.
   for (size_t i = 0; i < arraysize(kInvalidAudioInputDevices); ++i) {
-    if ((strcmp(kInvalidAudioInputDevices[i], device_name) == 0) ||
-        (strncmp(kNotWantedSurroundDevices, device_name,
-            arraysize(kNotWantedSurroundDevices) - 1) == 0))
+    if (strncmp(kInvalidAudioInputDevices[i], device_name,
+                strlen(kInvalidAudioInputDevices[i])) == 0)
       return false;
   }
-
-  // The only way to check if the device is available is to open/close the
-  // device. Return false if it fails either of operations.
-  snd_pcm_t* device_handle = NULL;
-  if (wrapper_->PcmOpen(&device_handle,
-                        device_name,
-                        SND_PCM_STREAM_CAPTURE,
-                        SND_PCM_NONBLOCK))
-    return false;
-  if (wrapper_->PcmClose(device_handle))
-    return false;
 
   return true;
 }
@@ -303,6 +257,96 @@ bool AudioManagerLinux::HasAnyAlsaAudioDevice(StreamType stream) {
   return has_device;
 }
 
+AudioOutputStream* AudioManagerLinux::MakeLinearOutputStream(
+    const AudioParameters& params) {
+  DCHECK_EQ(AudioParameters::AUDIO_PCM_LINEAR, params.format());
+  return MakeOutputStream(params);
+}
+
+AudioOutputStream* AudioManagerLinux::MakeLowLatencyOutputStream(
+    const AudioParameters& params) {
+  DCHECK_EQ(AudioParameters::AUDIO_PCM_LOW_LATENCY, params.format());
+  return MakeOutputStream(params);
+}
+
+AudioInputStream* AudioManagerLinux::MakeLinearInputStream(
+    const AudioParameters& params, const std::string& device_id) {
+  DCHECK_EQ(AudioParameters::AUDIO_PCM_LINEAR, params.format());
+  return MakeInputStream(params, device_id);
+}
+
+AudioInputStream* AudioManagerLinux::MakeLowLatencyInputStream(
+    const AudioParameters& params, const std::string& device_id) {
+  DCHECK_EQ(AudioParameters::AUDIO_PCM_LOW_LATENCY, params.format());
+  return MakeInputStream(params, device_id);
+}
+
+AudioOutputStream* AudioManagerLinux::MakeOutputStream(
+    const AudioParameters& params) {
+#if defined(USE_CRAS)
+  if (UseCras()) {
+    return new CrasOutputStream(params, this);
+  }
+#endif
+
+#if defined(USE_PULSEAUDIO)
+  if (CommandLine::ForCurrentProcess()->HasSwitch(switches::kUsePulseAudio)) {
+    return new PulseAudioOutputStream(params, this);
+  }
+#endif
+
+  std::string device_name = AlsaPcmOutputStream::kAutoSelectDevice;
+  if (CommandLine::ForCurrentProcess()->HasSwitch(
+          switches::kAlsaOutputDevice)) {
+    device_name = CommandLine::ForCurrentProcess()->GetSwitchValueASCII(
+        switches::kAlsaOutputDevice);
+  }
+  return new AlsaPcmOutputStream(device_name, params, wrapper_.get(), this);
+}
+
+AudioInputStream* AudioManagerLinux::MakeInputStream(
+    const AudioParameters& params, const std::string& device_id) {
+#if defined(USE_CRAS)
+  if (UseCras()) {
+    return new CrasInputStream(params, this);
+  }
+#endif
+
+  std::string device_name = (device_id == AudioManagerBase::kDefaultDeviceId) ?
+      AlsaPcmInputStream::kAutoSelectDevice : device_id;
+  if (CommandLine::ForCurrentProcess()->HasSwitch(switches::kAlsaInputDevice)) {
+    device_name = CommandLine::ForCurrentProcess()->GetSwitchValueASCII(
+        switches::kAlsaInputDevice);
+  }
+
+  return new AlsaPcmInputStream(this, device_name, params, wrapper_.get());
+}
+
 AudioManager* CreateAudioManager() {
   return new AudioManagerLinux();
 }
+
+AudioParameters AudioManagerLinux::GetPreferredLowLatencyOutputStreamParameters(
+    const AudioParameters& input_params) {
+  // Since Linux doesn't actually have a low latency path the hardware buffer
+  // size is quite large in order to prevent glitches with general usage.  Some
+  // clients, such as WebRTC, have a more limited use case and work acceptably
+  // with a smaller buffer size.  The check below allows clients which want to
+  // try a smaller buffer size on Linux to do so.
+  int buffer_size = GetAudioHardwareBufferSize();
+  if (input_params.frames_per_buffer() < buffer_size)
+    buffer_size = input_params.frames_per_buffer();
+
+  int sample_rate = GetAudioHardwareSampleRate();
+  // CRAS will sample rate convert if needed, so pass through input sample rate.
+  if (UseCras())
+    sample_rate = input_params.sample_rate();
+
+  // TODO(dalecurtis): This should include bits per channel and channel layout
+  // eventually.
+  return AudioParameters(
+      AudioParameters::AUDIO_PCM_LOW_LATENCY, input_params.channel_layout(),
+      sample_rate, 16, buffer_size);
+}
+
+}  // namespace media

@@ -1,4 +1,4 @@
-// Copyright (c) 2011 The Chromium Authors. All rights reserved.
+// Copyright (c) 2012 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -10,9 +10,12 @@
 #include "base/basictypes.h"
 #include "base/memory/ref_counted.h"
 #include "media/base/video_frame.h"
+#include "remoting/base/shared_buffer.h"
 #include "third_party/skia/include/core/SkRegion.h"
 
 namespace remoting {
+
+class SharedBuffer;
 
 struct DataPlanes {
   DataPlanes();
@@ -30,25 +33,24 @@ class CaptureData : public base::RefCountedThreadSafe<CaptureData> {
               const SkISize& size,
               media::VideoFrame::Format format);
 
-  // Get the data_planes data of the previous capture.
+  // Gets the data_planes data of the previous capture.
   const DataPlanes& data_planes() const { return data_planes_; }
 
-  // Get the dirty region from the previous capture.
+  // Gets the dirty region from the previous capture.
   const SkRegion& dirty_region() const { return dirty_region_; }
 
-  // Return the size of the image captured.
+  // Returns the size of the image captured.
   SkISize size() const { return size_; }
 
-  // Get the pixel format of the image captured.
+  // Gets the pixel format of the image captured.
   media::VideoFrame::Format pixel_format() const { return pixel_format_; }
 
-  // Mutating methods.
   SkRegion& mutable_dirty_region() { return dirty_region_; }
 
-  // Return the time spent on capturing.
+  // Returns the time spent on capturing.
   int capture_time_ms() const { return capture_time_ms_; }
 
-  // Set the time spent on capturing.
+  // Sets the time spent on capturing.
   void set_capture_time_ms(int capture_time_ms) {
     capture_time_ms_ = capture_time_ms;
   }
@@ -59,7 +61,22 @@ class CaptureData : public base::RefCountedThreadSafe<CaptureData> {
     client_sequence_number_ = client_sequence_number;
   }
 
+  SkIPoint dpi() const { return dpi_; }
+
+  void set_dpi(const SkIPoint& dpi) { dpi_ = dpi; }
+
+  // Returns the shared memory buffer pointed to by |data_planes_.data[0]|.
+  scoped_refptr<SharedBuffer> shared_buffer() const { return shared_buffer_; }
+
+  // Sets the shared memory buffer pointed to by |data_planes_.data[0]|.
+  void set_shared_buffer(scoped_refptr<SharedBuffer> shared_buffer) {
+    shared_buffer_ = shared_buffer;
+  }
+
  private:
+  friend class base::RefCountedThreadSafe<CaptureData>;
+  virtual ~CaptureData();
+
   const DataPlanes data_planes_;
   SkRegion dirty_region_;
   SkISize size_;
@@ -71,8 +88,10 @@ class CaptureData : public base::RefCountedThreadSafe<CaptureData> {
   // Sequence number supplied by client for performance tracking.
   int64 client_sequence_number_;
 
-  friend class base::RefCountedThreadSafe<CaptureData>;
-  virtual ~CaptureData();
+  // DPI for this frame.
+  SkIPoint dpi_;
+
+  scoped_refptr<SharedBuffer> shared_buffer_;
 };
 
 }  // namespace remoting

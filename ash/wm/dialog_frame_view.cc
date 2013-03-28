@@ -4,11 +4,12 @@
 
 #include "ash/wm/dialog_frame_view.h"
 
-#include "grit/ui_resources_standard.h"
+#include "grit/ui_resources.h"
 #include "ui/base/hit_test.h"
 #include "ui/base/resource/resource_bundle.h"
 #include "ui/gfx/canvas.h"
 #include "ui/gfx/font.h"
+#include "ui/gfx/image/image.h"
 #include "ui/gfx/insets.h"
 #include "ui/views/background.h"
 #include "ui/views/border.h"
@@ -54,26 +55,22 @@ namespace internal {
 // static
 const char DialogFrameView::kViewClassName[] = "ash/wm/DialogFrameView";
 
-// static
-gfx::Font* DialogFrameView::title_font_ = NULL;
-
 ////////////////////////////////////////////////////////////////////////////////
 // DialogFrameView, public:
 
 DialogFrameView::DialogFrameView() {
   set_background(views::Background::CreateSolidBackground(
       kDialogBackgroundColor));
-  if (!title_font_)
-    title_font_ = new gfx::Font(gfx::Font().DeriveFont(4, gfx::Font::NORMAL));
 
-  ResourceBundle& rb = ResourceBundle::GetSharedInstance();
+  ui::ResourceBundle& rb = ui::ResourceBundle::GetSharedInstance();
+  title_font_.reset(new gfx::Font(rb.GetFont(ui::ResourceBundle::MediumFont)));
   close_button_ = new views::ImageButton(this);
-  close_button_->SetImage(views::CustomButton::BS_NORMAL,
-      rb.GetBitmapNamed(IDR_CLOSE_BAR));
-  close_button_->SetImage(views::CustomButton::BS_HOT,
-      rb.GetBitmapNamed(IDR_CLOSE_BAR_H));
-  close_button_->SetImage(views::CustomButton::BS_PUSHED,
-      rb.GetBitmapNamed(IDR_CLOSE_BAR_P));
+  close_button_->SetImage(views::CustomButton::STATE_NORMAL,
+      rb.GetImageNamed(IDR_CLOSE_BAR).ToImageSkia());
+  close_button_->SetImage(views::CustomButton::STATE_HOVERED,
+      rb.GetImageNamed(IDR_CLOSE_BAR_H).ToImageSkia());
+  close_button_->SetImage(views::CustomButton::STATE_PRESSED,
+      rb.GetImageNamed(IDR_CLOSE_BAR_P).ToImageSkia());
   close_button_->SetImageAlignment(views::ImageButton::ALIGN_CENTER,
                                    views::ImageButton::ALIGN_MIDDLE);
   AddChildView(close_button_);
@@ -117,6 +114,10 @@ void DialogFrameView::UpdateWindowIcon() {
   // Nothing to do.
 }
 
+void DialogFrameView::UpdateWindowTitle() {
+  // Nothing to do.
+}
+
 ////////////////////////////////////////////////////////////////////////////////
 // DialogFrameView, views::View overrides:
 
@@ -141,7 +142,7 @@ void DialogFrameView::OnPaint(gfx::Canvas* canvas) {
   views::WidgetDelegate* delegate = GetWidget()->widget_delegate();
   if (!delegate)
     return;
-  canvas->DrawStringInt(delegate->GetWindowTitle(), *title_font_,
+  canvas->DrawStringInt(delegate->GetWindowTitle(), *title_font_.get(),
                         kDialogTitleColor, title_display_rect_);
 }
 
@@ -149,7 +150,7 @@ void DialogFrameView::OnPaint(gfx::Canvas* canvas) {
 // DialogFrameView, views::ButtonListener overrides:
 
 void DialogFrameView::ButtonPressed(views::Button* sender,
-                                    const views::Event& event) {
+                                    const ui::Event& event) {
   if (sender == close_button_)
     GetWidget()->Close();
 }

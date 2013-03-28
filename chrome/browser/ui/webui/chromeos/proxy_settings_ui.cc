@@ -1,14 +1,15 @@
-// Copyright (c) 2011 The Chromium Authors. All rights reserved.
+// Copyright (c) 2012 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
 #include "chrome/browser/ui/webui/chromeos/proxy_settings_ui.h"
 
+#include "base/memory/ref_counted_memory.h"
 #include "base/memory/scoped_ptr.h"
 #include "base/message_loop.h"
 #include "base/values.h"
-#include "chrome/browser/chromeos/cros_settings.h"
 #include "chrome/browser/chromeos/proxy_config_service_impl.h"
+#include "chrome/browser/chromeos/settings/cros_settings.h"
 #include "chrome/browser/profiles/profile.h"
 #include "chrome/browser/ui/webui/chrome_url_data_manager.h"
 #include "chrome/browser/ui/webui/options/chromeos/core_chromeos_options_handler.h"
@@ -34,10 +35,13 @@ class ProxySettingsHTMLSource : public ChromeURLDataManager::DataSource {
   // the path we registered.
   virtual void StartDataRequest(const std::string& path,
                                 bool is_incognito,
-                                int request_id);
-  virtual std::string GetMimeType(const std::string&) const {
+                                int request_id) OVERRIDE;
+  virtual std::string GetMimeType(const std::string&) const OVERRIDE {
     return "text/html";
   }
+
+ protected:
+  virtual ~ProxySettingsHTMLSource() {}
 
  private:
   scoped_ptr<DictionaryValue> localized_strings_;
@@ -71,8 +75,8 @@ namespace chromeos {
 
 ProxySettingsUI::ProxySettingsUI(content::WebUI* web_ui)
     : WebUIController(web_ui),
-      proxy_handler_(new ProxyHandler()),
-      core_handler_(new CoreChromeOSOptionsHandler()) {
+      proxy_handler_(new options::ProxyHandler()),
+      core_handler_(new options::CoreChromeOSOptionsHandler()) {
   // |localized_strings| will be owned by ProxySettingsHTMLSource.
   DictionaryValue* localized_strings = new DictionaryValue();
 
@@ -86,7 +90,7 @@ ProxySettingsUI::ProxySettingsUI(content::WebUI* web_ui)
   ProxySettingsHTMLSource* source =
       new ProxySettingsHTMLSource(localized_strings);
   Profile* profile = Profile::FromWebUI(web_ui);
-  profile->GetChromeURLDataManager()->AddDataSource(source);
+  ChromeURLDataManager::AddDataSource(profile, source);
 }
 
 ProxySettingsUI::~ProxySettingsUI() {
@@ -97,14 +101,15 @@ ProxySettingsUI::~ProxySettingsUI() {
 }
 
 void ProxySettingsUI::InitializeHandlers() {
-  core_handler_->Initialize();
-  proxy_handler_->Initialize();
+  core_handler_->InitializeHandler();
+  proxy_handler_->InitializeHandler();
+  core_handler_->InitializePage();
+  proxy_handler_->InitializePage();
   Profile* profile = Profile::FromWebUI(web_ui());
   PrefProxyConfigTracker* proxy_tracker = profile->GetProxyConfigTracker();
   proxy_tracker->UIMakeActiveNetworkCurrent();
   std::string network_name;
   proxy_tracker->UIGetCurrentNetworkName(&network_name);
-  proxy_handler_->SetNetworkName(network_name);
 }
 
 }  // namespace chromeos

@@ -114,6 +114,7 @@
 #include <string>
 
 #include "common/test_assembler.h"
+#include "common/using_std_string.h"
 #include "google_breakpad/common/breakpad_types.h"
 #include "google_breakpad/common/minidump_format.h"
 
@@ -121,7 +122,6 @@ namespace google_breakpad {
 
 namespace SynthMinidump {
 
-using std::string;
 using test_assembler::Endianness;
 using test_assembler::kBigEndian;
 using test_assembler::kLittleEndian;
@@ -228,6 +228,8 @@ class Context: public Section {
   // Create a context belonging to DUMP whose contents are a copy of CONTEXT.
   Context(const Dump &dump, const MDRawContextX86 &context);
   Context(const Dump &dump, const MDRawContextARM &context);
+  // Add an empty context to the dump.
+  Context(const Dump &dump) : Section(dump) {}
   // Add constructors for other architectures here. Remember to byteswap.
 };
 

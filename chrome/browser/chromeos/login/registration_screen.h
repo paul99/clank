@@ -4,12 +4,10 @@
 
 #ifndef CHROME_BROWSER_CHROMEOS_LOGIN_REGISTRATION_SCREEN_H_
 #define CHROME_BROWSER_CHROMEOS_LOGIN_REGISTRATION_SCREEN_H_
-#pragma once
 
 #include <string>
 
 #include "base/compiler_specific.h"
-#include "base/memory/scoped_ptr.h"
 #include "chrome/browser/chromeos/login/screen_observer.h"
 #include "chrome/browser/chromeos/login/view_screen.h"
 #include "chrome/browser/chromeos/login/web_page_screen.h"
@@ -20,6 +18,7 @@ class GURL;
 class Profile;
 
 namespace net {
+class NetworkDelegate;
 class URLRequest;
 class URLRequestJob;
 }  // namespace net
@@ -31,7 +30,7 @@ class ViewScreenDelegate;
 // Class that displays screen contents: page and throbber while waiting.
 class RegistrationView : public WebPageView {
  public:
-  RegistrationView() : dom_view_(new WebPageDomView()) {}
+  explicit RegistrationView(content::BrowserContext* browser_context);
 
  protected:
   virtual WebPageDomView* dom_view() OVERRIDE;
@@ -54,8 +53,12 @@ class RegistrationScreen : public ViewScreen<RegistrationView>,
   explicit RegistrationScreen(ViewScreenDelegate* delegate);
   virtual ~RegistrationScreen();
 
+  // WizardScreen overrides:
+  virtual std::string GetName() const OVERRIDE;
+
   // Handler factory for net::URLRequestFilter::AddHostnameHandler.
   static net::URLRequestJob* Factory(net::URLRequest* request,
+                                     net::NetworkDelegate* network_delegate,
                                      const std::string& scheme);
 
  private:
@@ -70,7 +73,8 @@ class RegistrationScreen : public ViewScreen<RegistrationView>,
       const content::OpenURLParams& params) OVERRIDE;
 
   virtual void HandleKeyboardEvent(
-      const NativeWebKeyboardEvent& event) OVERRIDE;
+      content::WebContents* source,
+      const content::NativeWebKeyboardEvent& event) OVERRIDE;
 
   // WebPageScreen implementation:
   virtual void CloseScreen(ScreenObserver::ExitCodes code) OVERRIDE;

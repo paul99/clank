@@ -4,33 +4,32 @@
 
 #ifndef CHROME_BROWSER_UI_INTENTS_WEB_INTENT_PICKER_MODEL_H_
 #define CHROME_BROWSER_UI_INTENTS_WEB_INTENT_PICKER_MODEL_H_
-#pragma once
 
 #include <vector>
 
+#include "base/basictypes.h"
 #include "base/string16.h"
+#include "chrome/browser/extensions/extension_install_prompt.h"
 #include "googleurl/src/gurl.h"
 #include "ui/gfx/image/image.h"
+#include "webkit/glue/web_intent_service_data.h"
+
+namespace content {
+class DownloadItem;
+}
 
 class WebIntentPickerModelObserver;
-
-namespace gfx {
-class Image;
-}
 
 // Model for the WebIntentPicker.
 class WebIntentPickerModel {
  public:
-  // The intent service disposition.
-  enum Disposition {
-    DISPOSITION_WINDOW,  // Display the intent service in a new window.
-    DISPOSITION_INLINE,  // Display the intent service in the picker.
-  };
-
   // An intent service to display in the picker.
-  struct Item {
-    Item(const string16& title, const GURL& url, Disposition disposition);
-    ~Item();
+  struct InstalledService {
+    InstalledService(
+        const string16& title,
+        const GURL& url,
+        webkit_glue::WebIntentServiceData::Disposition disposition);
+    ~InstalledService();
 
     // The title of this service.
     string16 title;
@@ -42,10 +41,27 @@ class WebIntentPickerModel {
     gfx::Image favicon;
 
     // The disposition to use when displaying this service.
-    Disposition disposition;
+    webkit_glue::WebIntentServiceData::Disposition disposition;
+  };
 
-   private:
-    DISALLOW_COPY_AND_ASSIGN(Item);
+  // A suggested extension to display in the picker.
+  struct SuggestedExtension {
+    SuggestedExtension(const string16& title,
+                       const std::string& id,
+                       double average_rating);
+    ~SuggestedExtension();
+
+    // The title of the intent service.
+    string16 title;
+
+    // The id of the extension that provides the intent service.
+    std::string id;
+
+    // The average rating of the extension.
+    double average_rating;
+
+    // The extension's icon.
+    gfx::Image icon;
   };
 
   WebIntentPickerModel();
@@ -55,48 +71,187 @@ class WebIntentPickerModel {
     observer_ = observer;
   }
 
-  // Add a new item with |title|, |url| and |disposition| to the picker.
-  void AddItem(const string16& title, const GURL& url, Disposition disposition);
+  const string16& action() const { return action_; }
+  void set_action(const string16& action) { action_ = action; }
 
-  // Remove an item from the picker at |index|.
-  void RemoveItemAt(size_t index);
+  const string16& type() const { return type_; }
+  void set_type(const string16& type) { type_ = type; }
 
-  // Remove all items from the picker, and resets to not displaying inline
-  // disposition.  Note that this does not clear the observer.
+  const GURL& default_service_url() const { return default_service_url_; }
+  void set_default_service_url(const GURL& default_url) {
+    default_service_url_ = default_url;
+  }
+
+  // Add a new installed service with |title|, |url| and |disposition| to the
+  // picker.
+  void AddInstalledService(
+      const string16& title,
+      const GURL& url,
+      webkit_glue::WebIntentServiceData::Disposition disposition);
+
+  // Remove an installed service from the picker at |index|.
+  void RemoveInstalledServiceAt(size_t index);
+
+  // Remove all installed services from the picker, and resets to not
+  // displaying inline disposition.  Note that this does not clear the
+  // observer.
   void Clear();
 
-  // Return the intent service item at |index|.
-  const Item& GetItemAt(size_t index) const;
+  // Return the intent service installed at |index|.
+  const InstalledService& GetInstalledServiceAt(size_t index) const;
+
+  // Return the intent service that uses |url| as its service url, or NULL.
+  const InstalledService* GetInstalledServiceWithURL(const GURL& url) const;
 
   // Return the number of intent services in the picker.
-  size_t GetItemCount() const;
+  size_t GetInstalledServiceCount() const;
 
-  // Update the favicon for the intent service at |index| to |image|.
-  void UpdateFaviconAt(size_t index, const gfx::Image& image);
+  // Update favicon for the intent service with service URL |url| to |image|.
+  void UpdateFaviconForServiceWithURL(const GURL& url, const gfx::Image& image);
 
-  // Set the picker to display the intent service at |index| inline.
-  void SetInlineDisposition(size_t index);
+  // Add a list of suggested extensions to the model.
+  void AddSuggestedExtensions(
+      const std::vector<SuggestedExtension>& suggestions);
+
+  // Remove the suggested extension with this id.
+  void RemoveSuggestedExtension(const std::string& id);
+
+  // Return the suggested extension at |index|.
+  const SuggestedExtension& GetSuggestedExtensionAt(size_t index) const;
+
+  // Return the suggested extension for the given id or NULL if none.
+  const SuggestedExtension* GetSuggestedExtensionWithId(
+      const std::string& id) const;
+
+  // Return the number of suggested extensions to be displayed.
+  size_t GetSuggestedExtensionCount() const;
+
+  // Return the text to use in the "Get more suggestions" link. Returns UTF8.
+  // Will return an empty string if the link should not be shown.
+  string16 GetSuggestionsLinkText() const;
+
+  // Set the icon image for the suggested extension with |id|.
+  void SetSuggestedExtensionIconWithId(const std::string& id,
+                                       const gfx::Image& image);
+
+  // Set the picker to display the intent service with |url| inline.
+  // To clear the current inline disposition set |url| to an empty URL.
+  void SetInlineDisposition(const GURL& url);
 
   // Returns true if the picker is currently displaying an inline service.
   bool IsInlineDisposition() const;
 
-  // Returns the index of the intent service that is being displayed inline, or
-  // std::string::npos if none.
-  size_t inline_disposition_index() const { return inline_disposition_index_; }
+  // Returns true if there is still a pending request for suggestions from CWS.
+  bool IsWaitingForSuggestions() const;
+
+  // Set the "waiting for suggestions" status to |waiting|
+  void SetWaitingForSuggestions(bool waiting);
+
+  // Returns the url of the intent service that is being displayed inline, or
+  // GURL::EmptyGURL() if none.
+  const GURL& inline_disposition_url() const { return inline_disposition_url_; }
+
+  // Sets the ID of the extension currently being installed.
+  void SetPendingExtensionInstallId(const std::string& id);
+
+  // Gets the ID of the extension currently being installed.
+  const std::string& pending_extension_install_id() const {
+    return pending_extension_install_id_;
+  }
+
+  // Updates the pending install download state.
+  void UpdateExtensionDownloadState(content::DownloadItem* item);
+
+  // Sets the download progress of the extension currently being downloaded.
+  void SetPendingExtensionInstallDownloadProgress(int progress);
+
+  // Gets the download progress of the extension currently being downloaded.
+  // Returns -1 if progress is indeterminate, otherwise a value from 0 to 100.
+  int pending_extension_install_download_progress() const {
+    return pending_extension_install_download_progress_;
+  }
+
+  // Sets the status of extension install process.
+  void SetPendingExtensionInstallStatusString(const string16& status);
+
+  // Gets the status of extension install process.
+  const string16& pending_extension_install_status_string() const {
+    return pending_extension_install_status_string_;
+  }
+
+  // Sets the extension install delegate.
+  void SetPendingExtensionInstallDelegate(
+      ExtensionInstallPrompt::Delegate* delegate);
+
+  // Gets the extension install delegate.
+  ExtensionInstallPrompt::Delegate* pending_extension_install_delegate() const {
+    return pending_extension_install_delegate_;
+  }
+
+  // Sets the extension install prompt.
+  void SetPendingExtensionInstallPrompt(
+      const ExtensionInstallPrompt::Prompt& prompt);
+
+  // Gets the extension install prompt.
+  const ExtensionInstallPrompt::Prompt* pending_extension_install_prompt()
+      const {
+    return pending_extension_install_prompt_.get();
+  }
+
+  // Removes any pending extension install state.
+  void ClearPendingExtensionInstall();
+
+  // Set whether the picker should be showing the use-another-app control.
+  void set_show_use_another_service(bool show) {
+    show_use_another_service_ = show;
+  }
+
+  // Whether or not the picker should show the use-another-app control.
+  bool show_use_another_service() const {
+    return show_use_another_service_;
+  }
 
  private:
-  // Delete all of |items_| and clear it.
-  void DestroyItems();
+  // Delete all elements in |installed_services_| and |suggested_extensions_|.
+  // Note that this method does not reset the observer.
+  void DestroyAll();
 
-  // A vector of all items in the picker. Each item is owned by this model.
-  std::vector<Item*> items_;
+  // A vector of all installed services in the picker. Each installed service
+  // is owned by this model.
+  std::vector<InstalledService*> installed_services_;
 
-  // The observer to send notifications to, or NULL if none.
+  // A vector of all suggested extensions in the picker.
+  std::vector<SuggestedExtension> suggested_extensions_;
+
+  // The observer to send notifications to, or NULL if none. Not owned.
   WebIntentPickerModelObserver* observer_;
 
-  // The index of the intent service that is being displayed inline, or
-  // std::string::npos if none.
-  size_t inline_disposition_index_;
+  // The url of the intent service that is being displayed inline, or
+  // GURL::EmptyGURL() if none.
+  GURL inline_disposition_url_;
+
+  // A cached copy of the action that instantiated the picker.
+  string16 action_;
+
+  // A cached copy of the type that instantiated the picker.
+  string16 type_;
+
+  // The non-empty url of the default service if the WebIntentsRegistry
+  // finds a default service matching the intent being dispatched.
+  GURL default_service_url_;
+
+  // Indicates that there are still open requests to CWS.
+  bool waiting_for_suggestions_;
+
+  // Information about the pending extension install.
+  std::string pending_extension_install_id_;
+  int pending_extension_install_download_progress_;
+  string16 pending_extension_install_status_string_;
+  ExtensionInstallPrompt::Delegate* pending_extension_install_delegate_;
+  scoped_ptr<ExtensionInstallPrompt::Prompt> pending_extension_install_prompt_;
+
+  // Indicates the use-another-service control should be shown.
+  bool show_use_another_service_;
 
   DISALLOW_COPY_AND_ASSIGN(WebIntentPickerModel);
 };

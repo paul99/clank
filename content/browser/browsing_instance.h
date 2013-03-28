@@ -4,7 +4,6 @@
 
 #ifndef CONTENT_BROWSER_BROWSING_INSTANCE_H_
 #define CONTENT_BROWSER_BROWSING_INSTANCE_H_
-#pragma once
 
 #include "base/hash_tables.h"
 #include "base/lazy_instance.h"
@@ -13,22 +12,10 @@
 #include "content/public/browser/browser_context.h"
 
 class GURL;
-class SiteInstanceImpl;
 
 namespace content {
 class SiteInstance;
-}
-
-#if defined(OS_ANDROID)
-namespace BASE_HASH_NAMESPACE {
-template<>
-struct hash<content::BrowserContext*> {
-  std::size_t operator()(content::BrowserContext* const& ptr) const {
-    return hash<size_t>()(reinterpret_cast<size_t>(ptr));
-  }
-};
-}  // BASE_HASH_NAMESPACE
-#endif  // OS_ANDROID
+class SiteInstanceImpl;
 
 ///////////////////////////////////////////////////////////////////////////////
 //
@@ -51,12 +38,6 @@ struct hash<content::BrowserContext*> {
 // might be able to script each other if they are in the same BrowsingInstance.
 // Thus, they must be rendered in the same process.
 //
-// If the process-per-site model is in use, then we ensure that there is only
-// one SiteInstance per site for the entire browser context, not just for each
-// BrowsingInstance.  This reduces the number of renderer processes we create.
-// (This is currently only true if --process-per-site is specified at the
-// command line.)
-//
 // A BrowsingInstance is live as long as any SiteInstance has a reference to
 // it.  A SiteInstance is live as long as any NavigationEntry or RenderViewHost
 // have references to it.  Because both classes are RefCounted, they do not
@@ -74,16 +55,10 @@ class CONTENT_EXPORT BrowsingInstance
     : public base::RefCounted<BrowsingInstance> {
  protected:
   // Create a new BrowsingInstance.
-  explicit BrowsingInstance(content::BrowserContext* context);
-
-  // Returns whether the process-per-site model is in use (globally or just for
-  // the given url), in which case we should ensure there is only one
-  // SiteInstance per site for the entire browser context, not just for this
-  // BrowsingInstance.
-  virtual bool ShouldUseProcessPerSite(const GURL& url);
+  explicit BrowsingInstance(BrowserContext* context);
 
   // Get the browser context to which this BrowsingInstance belongs.
-  content::BrowserContext* browser_context() const { return browser_context_; }
+  BrowserContext* browser_context() const { return browser_context_; }
 
   // Returns whether this BrowsingInstance has registered a SiteInstance for
   // the site of the given URL.
@@ -92,20 +67,20 @@ class CONTENT_EXPORT BrowsingInstance
   // Get the SiteInstance responsible for rendering the given URL.  Should
   // create a new one if necessary, but should not create more than one
   // SiteInstance per site.
-  content::SiteInstance* GetSiteInstanceForURL(const GURL& url);
+  SiteInstance* GetSiteInstanceForURL(const GURL& url);
 
   // Adds the given SiteInstance to our map, to ensure that we do not create
   // another SiteInstance for the same site.
-  void RegisterSiteInstance(content::SiteInstance* site_instance);
+  void RegisterSiteInstance(SiteInstance* site_instance);
 
   // Removes the given SiteInstance from our map, after all references to it
   // have been deleted.  This means it is safe to create a new SiteInstance
   // if the user later visits a page from this site, within this
   // BrowsingInstance.
-  void UnregisterSiteInstance(content::SiteInstance* site_instance);
+  void UnregisterSiteInstance(SiteInstance* site_instance);
 
   friend class SiteInstanceImpl;
-  friend class content::SiteInstance;
+  friend class SiteInstance;
 
   friend class base::RefCounted<BrowsingInstance>;
 
@@ -114,44 +89,22 @@ class CONTENT_EXPORT BrowsingInstance
 
  private:
   // Map of site to SiteInstance, to ensure we only have one SiteInstance per
-  typedef base::hash_map<std::string, content::SiteInstance*> SiteInstanceMap;
-
-  // Map of BrowserContext to SiteInstanceMap, for use in the process-per-site
-  // model.
-  typedef base::hash_map<content::BrowserContext*, SiteInstanceMap>
-      ContextSiteInstanceMap;
-
-  // Returns a pointer to the relevant SiteInstanceMap for this object.  If the
-  // process-per-site model is in use, or if process-per-site-instance is in
-  // use and |url| matches a site for which we always use one process (e.g.,
-  // the new tab page), then this returns the SiteInstanceMap for the entire
-  // browser context.  If not, this returns the BrowsingInstance's own private
-  // SiteInstanceMap.
-  SiteInstanceMap* GetSiteInstanceMap(content::BrowserContext* browser_context,
-                                      const GURL& url);
-
-  // Utility routine which removes the passed SiteInstance from the passed
-  // SiteInstanceMap.
-  bool RemoveSiteInstanceFromMap(SiteInstanceMap* map, const std::string& site,
-                                 content::SiteInstance* site_instance);
+  typedef base::hash_map<std::string, SiteInstance*> SiteInstanceMap;
 
   // Common browser context to which all SiteInstances in this BrowsingInstance
   // must belong.
-  content::BrowserContext* const browser_context_;
+  BrowserContext* const browser_context_;
 
   // Map of site to SiteInstance, to ensure we only have one SiteInstance per
   // site.  The site string should be the possibly_invalid_spec() of a GURL
   // obtained with SiteInstanceImpl::GetSiteForURL.  Note that this map may not
   // contain every active SiteInstance, because a race exists where two
   // SiteInstances can be assigned to the same site.  This is ok in rare cases.
-  // This field is only used if we are not using process-per-site.
   SiteInstanceMap site_instance_map_;
-
-  // Global map of BrowserContext to SiteInstanceMap, for process-per-site.
-  static base::LazyInstance<ContextSiteInstanceMap>::Leaky
-      context_site_instance_map_;
 
   DISALLOW_COPY_AND_ASSIGN(BrowsingInstance);
 };
+
+}  // namespace content
 
 #endif  // CONTENT_BROWSER_BROWSING_INSTANCE_H_

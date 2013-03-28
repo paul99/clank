@@ -1,4 +1,4 @@
-// Copyright (c) 2011 The Chromium Authors. All rights reserved.
+// Copyright (c) 2012 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -7,17 +7,22 @@
 #include "base/memory/scoped_ptr.h"
 #include "base/time.h"
 
-class BaseDownloadItemModel;
 @class ChromeUILocalizer;
 @class DownloadItemCell;
 @class DownloadItemButton;
 class DownloadItemMac;
+class DownloadItemModel;
 class DownloadShelfContextMenuMac;
 @class DownloadShelfController;
 @class GTMWidthBasedTweaker;
 
 namespace content {
 class DownloadItem;
+class PageNavigator;
+}
+
+namespace gfx {
+class Font;
 }
 
 // A controller class that manages one download item.
@@ -56,6 +61,9 @@ class DownloadItem;
   // The time at which this view was created.
   base::Time creationTime_;
 
+  // Default font to use for text metrics.
+  scoped_ptr<gfx::Font> font_;
+
   // The state of this item.
   enum DownoadItemState {
     kNormal,
@@ -64,11 +72,12 @@ class DownloadItem;
 };
 
 // Takes ownership of |downloadModel|.
-- (id)initWithModel:(BaseDownloadItemModel*)downloadModel
-              shelf:(DownloadShelfController*)shelf;
+- (id)initWithModel:(DownloadItemModel*)downloadModel
+              shelf:(DownloadShelfController*)shelf
+          navigator:(content::PageNavigator*)navigator;
 
 // Updates the UI and menu state from |downloadModel|.
-- (void)setStateFromDownload:(BaseDownloadItemModel*)downloadModel;
+- (void)setStateFromDownload:(DownloadItemModel*)downloadModel;
 
 // Remove ourself from the download UI.
 - (void)remove;

@@ -7,29 +7,23 @@
 
 #include <string>
 
-#include "base/callback.h"
-#include "base/threading/non_thread_safe.h"
-#include "remoting/protocol/buffered_socket_writer.h"
+#include "remoting/protocol/errors.h"
 #include "remoting/protocol/session_config.h"
 
 namespace net {
 class IPEndPoint;
-class Socket;
-class StreamSocket;
 }  // namespace net
 
 namespace remoting {
 namespace protocol {
 
+class ChannelFactory;
+struct TransportRoute;
+
 // Generic interface for Chromotocol connection used by both client and host.
 // Provides access to the connection channels, but doesn't depend on the
 // protocol used for each channel.
-//
-// Because libjingle's sigslot class doesn't handle deletion properly
-// while it is being invoked all Session instances must be deleted
-// with a clean stack, i.e. not from event handlers, when sigslot may
-// be present in the stack.
-class Session : public base::NonThreadSafe {
+class Session {
  public:
   enum State {
     // Created, but not connecting yet.
@@ -53,64 +47,39 @@ class Session : public base::NonThreadSafe {
     FAILED,
   };
 
-  // TODO(sergeyu): Move error codes to a separate file.
-  enum Error {
-    OK = 0,
-    PEER_IS_OFFLINE,
-    SESSION_REJECTED,
-    INCOMPATIBLE_PROTOCOL,
-    AUTHENTICATION_FAILED,
-    CHANNEL_CONNECTION_ERROR,
-    UNKNOWN_ERROR,
+  class EventHandler {
+   public:
+    EventHandler() {}
+    virtual ~EventHandler() {}
+
+    // Called after session state has changed. It is safe to destroy
+    // the session from within the handler if |state| is CLOSED or
+    // FAILED.
+    virtual void OnSessionStateChange(State state) = 0;
+
+    // Called whenever route for the channel specified with
+    // |channel_name| changes. Session must not be destroyed by the
+    // handler of this event.
+    virtual void OnSessionRouteChange(const std::string& channel_name,
+                                      const TransportRoute& route) = 0;
+
+    // Called when ready state on one of the channels changes. See
+    // comments in transport.h for explanation on what this state
+    // means and how it can used.
+    virtual void OnSessionChannelReady(const std::string& channel_name,
+                                       bool ready) {}
   };
 
-  // State change callbacks are called after session state has
-  // changed. It is not safe to destroy the session from within the
-  // handler unless |state| is CLOSED or FAILED.
-  typedef base::Callback<void(State state)> StateChangeCallback;
 
-  // TODO(lambroslambrou): Merge this together with StateChangeCallback into a
-  // single interface.
-  typedef base::Callback<void(
-      const std::string& channel_name,
-      const net::IPEndPoint& end_point)> RouteChangeCallback;
+  Session() {}
+  virtual ~Session() {}
 
-  // TODO(sergeyu): Specify connection error code when channel
-  // connection fails.
-  typedef base::Callback<void(net::StreamSocket*)> StreamChannelCallback;
-  typedef base::Callback<void(net::Socket*)> DatagramChannelCallback;
-
-  Session() { }
-  virtual ~Session() { }
-
-  // Set callback that is called when state of the connection is changed.
-  virtual void SetStateChangeCallback(const StateChangeCallback& callback) = 0;
-
-  // Set callback that is called when the route for a channel is changed.
-  // The callback must be registered immediately after
-  // JingleSessionManager::Connect() or from OnIncomingSession() callback.
-  virtual void SetRouteChangeCallback(const RouteChangeCallback& callback) = 0;
+  // Set event handler for this session. |event_handler| must outlive
+  // this object.
+  virtual void SetEventHandler(EventHandler* event_handler) = 0;
 
   // Returns error code for a failed session.
-  virtual Error error() = 0;
-
-  // Creates new channels for this connection. The specified callback
-  // is called when then new channel is created and connected. The
-  // callback is called with NULL if connection failed for any reason.
-  // Ownership of the channel socket is given to the caller when the
-  // callback is called. All channels must be destroyed before the
-  // session is destroyed. Can be called only when in CONNECTING,
-  // CONNECTED or AUTHENTICATED states.
-  virtual void CreateStreamChannel(
-      const std::string& name, const StreamChannelCallback& callback) = 0;
-  virtual void CreateDatagramChannel(
-      const std::string& name, const DatagramChannelCallback& callback) = 0;
-
-  // Cancels a pending CreateStreamChannel() or CreateDatagramChannel()
-  // operation for the named channel. If the channel creation already
-  // completed then cancelling it has no effect. When shutting down
-  // this method must be called for each channel pending creation.
-  virtual void CancelChannelCreation(const std::string& name) = 0;
+  virtual ErrorCode error() = 0;
 
   // JID of the other side.
   virtual const std::string& jid() = 0;
@@ -128,6 +97,12 @@ class Session : public base::NonThreadSafe {
   // called on the host before the connection is accepted, from
   // ChromotocolServer::IncomingConnectionCallback.
   virtual void set_config(const SessionConfig& config) = 0;
+
+  // GetTransportChannelFactory() returns a factory that creates a new transport
+  // channel for each logical channel. GetMultiplexedChannelFactory() channels
+  // share a single underlying transport channel
+  virtual ChannelFactory* GetTransportChannelFactory() = 0;
+  virtual ChannelFactory* GetMultiplexedChannelFactory() = 0;
 
   // Closes connection. Callbacks are guaranteed not to be called
   // after this method returns. Must be called before the object is

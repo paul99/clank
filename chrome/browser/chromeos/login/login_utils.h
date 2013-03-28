@@ -4,12 +4,10 @@
 
 #ifndef CHROME_BROWSER_CHROMEOS_LOGIN_LOGIN_UTILS_H_
 #define CHROME_BROWSER_CHROMEOS_LOGIN_LOGIN_UTILS_H_
-#pragma once
 
 #include <string>
 
 #include "base/memory/ref_counted.h"
-#include "chrome/common/net/gaia/gaia_auth_consumer.h"
 
 class CommandLine;
 class GURL;
@@ -30,8 +28,17 @@ class LoginUtils {
  public:
   class Delegate {
    public:
-    // Called after profile is loaded and prepared for the session.
+   // Called after profile is loaded and prepared for the session.
     virtual void OnProfilePrepared(Profile* profile) = 0;
+
+#if defined(ENABLE_RLZ)
+    // Called after post-profile RLZ initialization.
+    virtual void OnRlzInitialized(Profile* profile) {}
+#endif
+
+    // Called immediately after profile is created, should be used as a test
+    // se
+    virtual void OnProfileCreated(Profile* profile) {}
   };
 
   // Get LoginUtils singleton object. If it was not set before, new default
@@ -41,17 +48,17 @@ class LoginUtils {
   // Set LoginUtils singleton object for test purpose only!
   static void Set(LoginUtils* ptr);
 
-  // Thin wrapper around BrowserInit::LaunchBrowser().  Meant to be used in a
-  // Task posted to the UI thread.  Once the browser is launched the login
-  // host is deleted.
-  static void DoBrowserLaunch(Profile* profile,
-                              LoginDisplayHost* login_host);
-
   // Checks if the given username is whitelisted and allowed to sign-in to
   // this device.
   static bool IsWhitelisted(const std::string& username);
 
   virtual ~LoginUtils() {}
+
+  // Thin wrapper around StartupBrowserCreator::LaunchBrowser().  Meant to be
+  // used in a Task posted to the UI thread.  Once the browser is launched the
+  // login host is deleted.
+  virtual void DoBrowserLaunch(Profile* profile,
+                               LoginDisplayHost* login_host) = 0;
 
   // Loads and prepares profile for the session. Fires |delegate| in the end.
   // If |pending_requests| is true, there's a pending online auth request.
@@ -62,8 +69,6 @@ class LoginUtils {
       const std::string& username,
       const std::string& display_email,
       const std::string& password,
-      const GaiaAuthConsumer::ClientLoginResult& credentials,
-      bool pending_requests,
       bool using_oauth,
       bool has_cookies,
       Delegate* delegate) = 0;
@@ -98,31 +103,14 @@ class LoginUtils {
   // Restores authentication session after crash.
   virtual void RestoreAuthenticationSession(Profile* profile) = 0;
 
-  // Starts process of fetching OAuth2 tokens (based on OAuth1 tokens found
-  // in |user_profile|) and kicks off internal services that depend on them.
-  virtual void StartTokenServices(Profile* user_profile) = 0;
-
-  // Supply credentials for sync and others to use.
-  virtual void StartSignedInServices(
-      Profile* profile,
-      const GaiaAuthConsumer::ClientLoginResult& credentials) = 0;
-
-  // Transfers cookies from the |default_profile| into the |new_profile|.
-  // If authentication was performed by an extension, then
-  // the set of cookies that was acquired through such that process will be
-  // automatically transfered into the profile.
-  virtual void TransferDefaultCookies(Profile* default_profile,
-                                      Profile* new_profile) = 0;
-
-  // Transfers HTTP authentication cache from the |default_profile|
-  // into the |new_profile|. If user was required to authenticate with a proxy
-  // during the login, this authentication information will be transferred
-  // into the new session.
-  virtual void TransferDefaultAuthCache(Profile* default_profile,
-                                        Profile* new_profile) = 0;
-
   // Stops background fetchers.
   virtual void StopBackgroundFetchers() = 0;
+
+  // Initialize RLZ.
+  virtual void InitRlzDelayed(Profile* user_profile) = 0;
+
+  // Completed profile creation process.
+  virtual void CompleteProfileCreate(Profile* user_profile) {}
 
  protected:
   friend class ::BrowserGuestSessionNavigatorTest;

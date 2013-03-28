@@ -1,4 +1,4 @@
-// Copyright (c) 2011 The Chromium Authors. All rights reserved.
+// Copyright (c) 2012 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -6,6 +6,7 @@
 
 #include <list>
 
+#include "base/command_line.h"
 #include "base/logging.h"
 #include "base/memory/scoped_ptr.h"
 #include "build/build_config.h"
@@ -13,6 +14,8 @@
 #include "gpu/command_buffer/common/gles2_cmd_format.h"
 #include "gpu/command_buffer/common/gles2_cmd_utils.h"
 #include "gpu/command_buffer/service/gl_utils.h"
+#include "gpu/command_buffer/service/gpu_switches.h"
+#include "gpu/command_buffer/service/vertex_array_manager.h"
 
 namespace gpu {
 namespace gles2 {
@@ -26,11 +29,8 @@ VertexAttribManager::VertexAttribInfo::VertexAttribInfo()
       normalized_(GL_FALSE),
       gl_stride_(0),
       real_stride_(16),
+      divisor_(0),
       list_(NULL) {
-  value_.v[0] = 0.0f;
-  value_.v[1] = 0.0f;
-  value_.v[2] = 0.0f;
-  value_.v[3] = 1.0f;
 }
 
 VertexAttribManager::VertexAttribInfo::~VertexAttribInfo() {
@@ -59,25 +59,53 @@ bool VertexAttribManager::VertexAttribInfo::CanAccess(GLuint index) const {
 }
 
 VertexAttribManager::VertexAttribManager()
-    : max_vertex_attribs_(0),
-      num_fixed_attribs_(0) {
+    : num_fixed_attribs_(0),
+      element_array_buffer_(NULL),
+      manager_(NULL),
+      deleted_(false),
+      service_id_(0) {
+}
+
+VertexAttribManager::VertexAttribManager(
+    VertexArrayManager* manager, GLuint service_id, uint32 num_vertex_attribs)
+    : num_fixed_attribs_(0),
+      element_array_buffer_(NULL),
+      manager_(manager),
+      deleted_(false),
+      service_id_(service_id) {
+  manager_->StartTracking(this);
+  Initialize(num_vertex_attribs, false);
 }
 
 VertexAttribManager::~VertexAttribManager() {
+  if (manager_) {
+    if (manager_->have_context_) {
+      if (service_id_ != 0)  // 0 indicates an emulated VAO
+        glDeleteVertexArraysOES(1, &service_id_);
+    }
+    manager_->StopTracking(this);
+    manager_ = NULL;
+  }
 }
 
-void VertexAttribManager::Initialize(uint32 max_vertex_attribs) {
-  max_vertex_attribs_ = max_vertex_attribs;
-  vertex_attrib_infos_.reset(
-      new VertexAttribInfo[max_vertex_attribs]);
-  for (uint32 vv = 0; vv < max_vertex_attribs; ++vv) {
+void VertexAttribManager::Initialize(
+    uint32 max_vertex_attribs, bool init_attribs) {
+  vertex_attrib_infos_.resize(max_vertex_attribs);
+  bool disable_workarounds = CommandLine::ForCurrentProcess()->HasSwitch(
+      switches::kDisableGpuDriverBugWorkarounds);
+
+  for (uint32 vv = 0; vv < vertex_attrib_infos_.size(); ++vv) {
     vertex_attrib_infos_[vv].set_index(vv);
     vertex_attrib_infos_[vv].SetList(&disabled_vertex_attribs_);
+
+    if (!disable_workarounds && init_attribs) {
+      glVertexAttrib4f(vv, 0.0f, 0.0f, 0.0f, 1.0f);
+    }
   }
 }
 
 bool VertexAttribManager::Enable(GLuint index, bool enable) {
-  if (index >= max_vertex_attribs_) {
+  if (index >= vertex_attrib_infos_.size()) {
     return false;
   }
   VertexAttribInfo& info = vertex_attrib_infos_[index];
@@ -89,7 +117,10 @@ bool VertexAttribManager::Enable(GLuint index, bool enable) {
 }
 
 void VertexAttribManager::Unbind(BufferManager::BufferInfo* buffer) {
-  for (uint32 vv = 0; vv < max_vertex_attribs_; ++vv) {
+  if (element_array_buffer_ == buffer) {
+    element_array_buffer_ = NULL;
+  }
+  for (uint32 vv = 0; vv < vertex_attrib_infos_.size(); ++vv) {
     vertex_attrib_infos_[vv].Unbind(buffer);
   }
 }

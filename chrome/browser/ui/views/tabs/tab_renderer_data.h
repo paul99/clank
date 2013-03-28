@@ -1,15 +1,14 @@
-// Copyright (c) 2011 The Chromium Authors. All rights reserved.
+// Copyright (c) 2012 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
 #ifndef CHROME_BROWSER_UI_VIEWS_TABS_TAB_RENDERER_DATA_H_
 #define CHROME_BROWSER_UI_VIEWS_TABS_TAB_RENDERER_DATA_H_
-#pragma once
 
 #include "base/process_util.h"
 #include "base/string16.h"
 #include "googleurl/src/gurl.h"
-#include "third_party/skia/include/core/SkBitmap.h"
+#include "ui/gfx/image/image_skia.h"
 
 // Wraps the state needed by the renderers.
 struct TabRendererData {
@@ -20,6 +19,14 @@ struct TabRendererData {
     NETWORK_STATE_NONE,     // no network activity.
     NETWORK_STATE_WAITING,  // waiting for a connection.
     NETWORK_STATE_LOADING,  // connected, transferring data.
+  };
+
+  // Capture state of this tab. If a WebRTC media stream is active, then it is
+  // recording. If tab capturing is active then it is projecting.
+  enum CaptureState {
+    CAPTURE_STATE_NONE,
+    CAPTURE_STATE_RECORDING,
+    CAPTURE_STATE_PROJECTING
   };
 
   TabRendererData();
@@ -34,11 +41,10 @@ struct TabRendererData {
             crashed_status == base::TERMINATION_STATUS_ABNORMAL_TERMINATION);
   }
 
-  // Returns true if the TabRendererData is same as given |data|. Two favicons
-  // are considered equals if two SkBitmaps point to the same SkPixelRef object.
+  // Returns true if the TabRendererData is same as given |data|.
   bool Equals(const TabRendererData& data);
 
-  SkBitmap favicon;
+  gfx::ImageSkia favicon;
   NetworkState network_state;
   string16 title;
   GURL url;
@@ -49,6 +55,7 @@ struct TabRendererData {
   bool mini;
   bool blocked;
   bool app;
+  CaptureState capture_state;
 };
 
 #endif  // CHROME_BROWSER_UI_VIEWS_TABS_TAB_RENDERER_DATA_H_

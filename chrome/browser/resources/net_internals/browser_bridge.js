@@ -1,4 +1,4 @@
-// Copyright (c) 2011 The Chromium Authors. All rights reserved.
+// Copyright (c) 2012 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -23,9 +23,14 @@ var BrowserBridge = (function() {
     // List of observers for various bits of browser state.
     this.connectionTestsObservers_ = [];
     this.hstsObservers_ = [];
-    this.httpThrottlingObservers_ = [];
     this.constantsObservers_ = [];
     this.crosONCFileParseObservers_ = [];
+    this.storeDebugLogsObservers_ = [];
+    this.setNetworkDebugModeObservers_ = [];
+    // Unprocessed data received before the constants.  This serves to protect
+    // against passing along data before having information on how to interpret
+    // it.
+    this.earlyReceivedData_ = [];
 
     this.pollableDataHelpers_ = {};
     this.pollableDataHelpers_.proxySettings =
@@ -43,6 +48,12 @@ var BrowserBridge = (function() {
     this.pollableDataHelpers_.socketPoolInfo =
         new PollableDataHelper('onSocketPoolInfoChanged',
                                this.sendGetSocketPoolInfo.bind(this));
+    this.pollableDataHelpers_.sessionNetworkStats =
+      new PollableDataHelper('onSessionNetworkStatsChanged',
+                             this.sendGetSessionNetworkStats.bind(this));
+    this.pollableDataHelpers_.historicNetworkStats =
+      new PollableDataHelper('onHistoricNetworkStatsChanged',
+                             this.sendGetHistoricNetworkStats.bind(this));
     this.pollableDataHelpers_.spdySessionInfo =
         new PollableDataHelper('onSpdySessionInfoChanged',
                                this.sendGetSpdySessionInfo.bind(this));
@@ -64,10 +75,6 @@ var BrowserBridge = (function() {
     this.pollableDataHelpers_.httpPipeliningStatus =
         new PollableDataHelper('onHttpPipeliningStatusChanged',
                                this.sendGetHttpPipeliningStatus.bind(this));
-
-    // NetLog entries are all sent to the |SourceTracker|, which both tracks
-    // them and manages its own observer list.
-    this.sourceTracker = new SourceTracker();
 
     // Setting this to true will cause messages from the browser to be ignored,
     // and no messages will be sent to the browser, either.  Intended for use
@@ -144,6 +151,10 @@ var BrowserBridge = (function() {
       this.send('getHostResolverInfo');
     },
 
+    sendRunIPv6Probe: function() {
+      this.send('onRunIPv6Probe');
+    },
+
     sendClearBadProxies: function() {
       this.send('clearBadProxies');
     },
@@ -185,6 +196,14 @@ var BrowserBridge = (function() {
       this.send('getSocketPoolInfo');
     },
 
+    sendGetSessionNetworkStats: function() {
+      this.send('getSessionNetworkStats');
+    },
+
+    sendGetHistoricNetworkStats: function() {
+      this.send('getHistoricNetworkStats');
+    },
+
     sendCloseIdleSockets: function() {
       this.send('closeIdleSockets');
     },
@@ -221,10 +240,6 @@ var BrowserBridge = (function() {
       this.send('setLogLevel', ['' + logLevel]);
     },
 
-    enableHttpThrottling: function(enable) {
-      this.send('enableHttpThrottling', [enable]);
-    },
-
     refreshSystemLogs: function() {
       this.send('refreshSystemLogs');
     },
@@ -235,6 +250,14 @@ var BrowserBridge = (function() {
 
     importONCFile: function(fileContent, passcode) {
       this.send('importONCFile', [fileContent, passcode]);
+    },
+
+    storeDebugLogs: function() {
+      this.send('storeDebugLogs');
+    },
+
+    setNetworkDebugMode: function(subsystem) {
+      this.send('setNetworkDebugMode', [subsystem]);
     },
 
     sendGetHttpPipeliningStatus: function() {
@@ -249,7 +272,25 @@ var BrowserBridge = (function() {
       // Does nothing if disabled.
       if (this.disabled_)
         return;
+
+      // If no constants have been received, and params does not contain the
+      // constants, delay handling the data.
+      if (Constants == null && command != 'receivedConstants') {
+        this.earlyReceivedData_.push({ command: command, params: params });
+        return;
+      }
+
       this[command](params);
+
+      // Handle any data that was received early in the order it was received,
+      // once the constants have been processed.
+      if (this.earlyReceivedData_ != null) {
+        for (var i = 0; i < this.earlyReceivedData_.length; i++) {
+          var command = this.earlyReceivedData_[i];
+          this[command.command](command.params);
+        }
+        this.earlyReceivedData_ = null;
+      }
     },
 
     receivedConstants: function(constants) {
@@ -258,7 +299,7 @@ var BrowserBridge = (function() {
     },
 
     receivedLogEntries: function(logEntries) {
-      this.sourceTracker.onReceivedLogEntries(logEntries);
+      EventsTracker.getInstance().addLogEntries(logEntries);
     },
 
     receivedProxySettings: function(proxySettings) {
@@ -277,6 +318,15 @@ var BrowserBridge = (function() {
       this.pollableDataHelpers_.socketPoolInfo.update(socketPoolInfo);
     },
 
+    receivedSessionNetworkStats: function(sessionNetworkStats) {
+      this.pollableDataHelpers_.sessionNetworkStats.update(sessionNetworkStats);
+    },
+
+    receivedHistoricNetworkStats: function(historicNetworkStats) {
+      this.pollableDataHelpers_.historicNetworkStats.update(
+          historicNetworkStats);
+    },
+
     receivedSpdySessionInfo: function(spdySessionInfo) {
       this.pollableDataHelpers_.spdySessionInfo.update(spdySessionInfo);
     },
@@ -293,10 +343,6 @@ var BrowserBridge = (function() {
 
     receivedServiceProviders: function(serviceProviders) {
       this.pollableDataHelpers_.serviceProviders.update(serviceProviders);
-    },
-
-    receivedPassiveLogEntries: function(entries) {
-      this.sourceTracker.onReceivedPassiveLogEntries(entries);
     },
 
     receivedStartConnectionTestSuite: function() {
@@ -333,15 +379,18 @@ var BrowserBridge = (function() {
         this.crosONCFileParseObservers_[i].onONCFileParse(error);
     },
 
-    receivedHttpCacheInfo: function(info) {
-      this.pollableDataHelpers_.httpCacheInfo.update(info);
+    receivedStoreDebugLogs: function(status) {
+      for (var i = 0; i < this.storeDebugLogsObservers_.length; i++)
+        this.storeDebugLogsObservers_[i].onStoreDebugLogs(status);
     },
 
-    receivedHttpThrottlingEnabledPrefChanged: function(enabled) {
-      for (var i = 0; i < this.httpThrottlingObservers_.length; i++) {
-        this.httpThrottlingObservers_[i].onHttpThrottlingEnabledPrefChanged(
-            enabled);
-      }
+    receivedSetNetworkDebugMode: function(status) {
+      for (var i = 0; i < this.setNetworkDebugModeObservers_.length; i++)
+        this.setNetworkDebugModeObservers_[i].onSetNetworkDebugMode(status);
+    },
+
+    receivedHttpCacheInfo: function(info) {
+      this.pollableDataHelpers_.httpCacheInfo.update(info);
     },
 
     receivedPrerenderInfo: function(prerenderInfo) {
@@ -431,6 +480,28 @@ var BrowserBridge = (function() {
     addSocketPoolInfoObserver: function(observer, ignoreWhenUnchanged) {
       this.pollableDataHelpers_.socketPoolInfo.addObserver(observer,
                                                            ignoreWhenUnchanged);
+    },
+
+    /**
+     * Adds a listener of the network session. |observer| will be called back
+     * when data is received, through:
+     *
+     *   observer.onSessionNetworkStatsChanged(sessionNetworkStats)
+     */
+    addSessionNetworkStatsObserver: function(observer, ignoreWhenUnchanged) {
+      this.pollableDataHelpers_.sessionNetworkStats.addObserver(
+          observer, ignoreWhenUnchanged);
+    },
+
+    /**
+     * Adds a listener of persistent network session data. |observer| will be
+     * called back when data is received, through:
+     *
+     *   observer.onHistoricNetworkStatsChanged(historicNetworkStats)
+     */
+    addHistoricNetworkStatsObserver: function(observer, ignoreWhenUnchanged) {
+      this.pollableDataHelpers_.historicNetworkStats.addObserver(
+          observer, ignoreWhenUnchanged);
     },
 
     /**
@@ -529,13 +600,23 @@ var BrowserBridge = (function() {
     },
 
     /**
-     * Adds a listener for HTTP throttling-related events. |observer| will be
-     * called back when HTTP throttling is enabled/disabled, through:
+     * Adds a listener for storing log file status. The observer will be called
+     * back with:
      *
-     *   observer.onHttpThrottlingEnabledPrefChanged(enabled);
+     *   observer.onStoreDebugLogs(status);
      */
-    addHttpThrottlingObserver: function(observer) {
-      this.httpThrottlingObservers_.push(observer);
+    addStoreDebugLogsObserver: function(observer) {
+      this.storeDebugLogsObservers_.push(observer);
+    },
+
+    /**
+     * Adds a listener for network debugging mode status. The observer
+     * will be called back with:
+     *
+     *   observer.onSetNetworkDebugMode(status);
+     */
+    addSetNetworkDebugModeObserver: function(observer) {
+      this.setNetworkDebugModeObservers_.push(observer);
     },
 
     /**

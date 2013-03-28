@@ -1,4 +1,4 @@
-// Copyright (c) 2010 The Chromium Authors. All rights reserved.
+// Copyright (c) 2012 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -15,15 +15,12 @@ URLsModifiedDetails::URLsModifiedDetails() {}
 
 URLsModifiedDetails::~URLsModifiedDetails() {}
 
-URLsDeletedDetails::URLsDeletedDetails() : all_history(false) {}
-
-URLsDeletedDetails::~URLsDeletedDetails() {}
-
-URLsStarredDetails::URLsStarredDetails(bool being_starred)
-    : starred(being_starred) {
+URLsDeletedDetails::URLsDeletedDetails()
+    : all_history(false),
+      archived(false) {
 }
 
-URLsStarredDetails::~URLsStarredDetails() {}
+URLsDeletedDetails::~URLsDeletedDetails() {}
 
 FaviconChangeDetails::FaviconChangeDetails() {}
 

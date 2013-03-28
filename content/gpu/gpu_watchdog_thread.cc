@@ -10,12 +10,15 @@
 
 #include "base/bind.h"
 #include "base/bind_helpers.h"
+#include "base/command_line.h"
 #include "base/compiler_specific.h"
 #include "base/process_util.h"
 #include "base/process.h"
 #include "build/build_config.h"
+#include "content/public/common/content_switches.h"
 #include "content/public/common/result_codes.h"
 
+namespace content {
 namespace {
 const int64 kCheckPeriodMs = 2000;
 }  // namespace
@@ -50,24 +53,20 @@ GpuWatchdogThread::GpuWatchdogThread(int timeout)
   watched_message_loop_->AddTaskObserver(&task_observer_);
 }
 
-GpuWatchdogThread::~GpuWatchdogThread() {
-  // Verify that the thread was explicitly stopped. If the thread is stopped
-  // implicitly by the destructor, CleanUp() will not be called.
-  DCHECK(!weak_factory_.HasWeakPtrs());
-
-#if defined(OS_WIN)
-  CloseHandle(watched_thread_handle_);
-#endif
-
-  watched_message_loop_->RemoveTaskObserver(&task_observer_);
-}
-
 void GpuWatchdogThread::PostAcknowledge() {
   // Called on the monitored thread. Responds with OnAcknowledge. Cannot use
   // the method factory. Rely on reference counting instead.
   message_loop()->PostTask(
       FROM_HERE,
       base::Bind(&GpuWatchdogThread::OnAcknowledge, this));
+}
+
+void GpuWatchdogThread::CheckArmed() {
+  // Acknowledge the watchdog if it has armed itself. The watchdog will not
+  // change its armed state until it is acknowledged.
+  if (armed()) {
+    PostAcknowledge();
+  }
 }
 
 void GpuWatchdogThread::Init() {
@@ -97,12 +96,16 @@ void GpuWatchdogThread::GpuWatchdogTaskObserver::DidProcessTask(
   watchdog_->CheckArmed();
 }
 
-void GpuWatchdogThread::CheckArmed() {
-  // Acknowledge the watchdog if it has armed itself. The watchdog will not
-  // change its armed state until it is acknowledged.
-  if (armed()) {
-    PostAcknowledge();
-  }
+GpuWatchdogThread::~GpuWatchdogThread() {
+  // Verify that the thread was explicitly stopped. If the thread is stopped
+  // implicitly by the destructor, CleanUp() will not be called.
+  DCHECK(!weak_factory_.HasWeakPtrs());
+
+#if defined(OS_WIN)
+  CloseHandle(watched_thread_handle_);
+#endif
+
+  watched_message_loop_->RemoveTaskObserver(&task_observer_);
 }
 
 void GpuWatchdogThread::OnAcknowledge() {
@@ -123,39 +126,6 @@ void GpuWatchdogThread::OnAcknowledge() {
       base::Bind(&GpuWatchdogThread::OnCheck, weak_factory_.GetWeakPtr()),
       base::TimeDelta::FromMilliseconds(kCheckPeriodMs));
 }
-
-#if defined(OS_WIN)
-base::TimeDelta GpuWatchdogThread::GetWatchedThreadTime() {
-  FILETIME creation_time;
-  FILETIME exit_time;
-  FILETIME user_time;
-  FILETIME kernel_time;
-  BOOL result = GetThreadTimes(watched_thread_handle_,
-                               &creation_time,
-                               &exit_time,
-                               &kernel_time,
-                               &user_time);
-  DCHECK(result);
-
-  ULARGE_INTEGER user_time64;
-  user_time64.HighPart = user_time.dwHighDateTime;
-  user_time64.LowPart = user_time.dwLowDateTime;
-
-  ULARGE_INTEGER kernel_time64;
-  kernel_time64.HighPart = kernel_time.dwHighDateTime;
-  kernel_time64.LowPart = kernel_time.dwLowDateTime;
-
-  // Time is reported in units of 100 nanoseconds. Kernel and user time are
-  // summed to deal with to kinds of hangs. One is where the GPU process is
-  // stuck in user level, never calling into the kernel and kernel time is
-  // not increasing. The other is where either the kernel hangs and never
-  // returns to user level or where user level code
-  // calls into kernel level repeatedly, giving up its quanta before it is
-  // tracked, for example a loop that repeatedly Sleeps.
-  return base::TimeDelta::FromMilliseconds(static_cast<int64>(
-      (user_time64.QuadPart + kernel_time64.QuadPart) / 10000));
-}
-#endif
 
 void GpuWatchdogThread::OnCheck() {
   if (armed_)
@@ -231,8 +201,55 @@ void GpuWatchdogThread::DeliberatelyTerminateToRecoverFromHang() {
   LOG(ERROR) << "The GPU process hung. Terminating after "
              << timeout_.InMilliseconds() << " ms.";
 
-  base::Process current_process(base::GetCurrentProcessHandle());
-  current_process.Terminate(content::RESULT_CODE_HUNG);
+  bool should_crash =
+      CommandLine::ForCurrentProcess()->HasSwitch(switches::kCrashOnGpuHang);
+
+#if defined(OS_WIN)
+  should_crash = true;
+#endif
+
+  if (should_crash) {
+    // Deliberately crash the process to create a crash dump.
+    *((volatile int*)0) = 0x1337;
+  } else {
+    base::Process current_process(base::GetCurrentProcessHandle());
+    current_process.Terminate(RESULT_CODE_HUNG);
+  }
 
   terminated = true;
 }
+
+#if defined(OS_WIN)
+base::TimeDelta GpuWatchdogThread::GetWatchedThreadTime() {
+  FILETIME creation_time;
+  FILETIME exit_time;
+  FILETIME user_time;
+  FILETIME kernel_time;
+  BOOL result = GetThreadTimes(watched_thread_handle_,
+                               &creation_time,
+                               &exit_time,
+                               &kernel_time,
+                               &user_time);
+  DCHECK(result);
+
+  ULARGE_INTEGER user_time64;
+  user_time64.HighPart = user_time.dwHighDateTime;
+  user_time64.LowPart = user_time.dwLowDateTime;
+
+  ULARGE_INTEGER kernel_time64;
+  kernel_time64.HighPart = kernel_time.dwHighDateTime;
+  kernel_time64.LowPart = kernel_time.dwLowDateTime;
+
+  // Time is reported in units of 100 nanoseconds. Kernel and user time are
+  // summed to deal with to kinds of hangs. One is where the GPU process is
+  // stuck in user level, never calling into the kernel and kernel time is
+  // not increasing. The other is where either the kernel hangs and never
+  // returns to user level or where user level code
+  // calls into kernel level repeatedly, giving up its quanta before it is
+  // tracked, for example a loop that repeatedly Sleeps.
+  return base::TimeDelta::FromMilliseconds(static_cast<int64>(
+      (user_time64.QuadPart + kernel_time64.QuadPart) / 10000));
+}
+#endif
+
+}  // namespace content

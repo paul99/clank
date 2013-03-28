@@ -1,4 +1,4 @@
-// Copyright (c) 2011 The Chromium Authors. All rights reserved.
+// Copyright (c) 2012 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -10,8 +10,7 @@
 #include "content/common/appcache_messages.h"
 #include "content/public/browser/user_metrics.h"
 
-using content::BrowserMessageFilter;
-using content::UserMetricsAction;
+namespace content {
 
 AppCacheDispatcherHost::AppCacheDispatcherHost(
     ChromeAppCacheService* appcache_service,
@@ -20,8 +19,6 @@ AppCacheDispatcherHost::AppCacheDispatcherHost(
       ALLOW_THIS_IN_INITIALIZER_LIST(frontend_proxy_(this)),
       process_id_(process_id) {
 }
-
-AppCacheDispatcherHost::~AppCacheDispatcherHost() {}
 
 void AppCacheDispatcherHost::OnChannelConnected(int32 peer_pid) {
   BrowserMessageFilter::OnChannelConnected(peer_pid);
@@ -64,8 +61,10 @@ bool AppCacheDispatcherHost::OnMessageReceived(const IPC::Message& message,
   return handled;
 }
 
+AppCacheDispatcherHost::~AppCacheDispatcherHost() {}
+
 void AppCacheDispatcherHost::BadMessageReceived() {
-  content::RecordAction(UserMetricsAction("BadMessageTerminate_ACDH"));
+  RecordAction(UserMetricsAction("BadMessageTerminate_ACDH"));
   BrowserMessageFilter::BadMessageReceived();
 }
 
@@ -226,3 +225,5 @@ void AppCacheDispatcherHost::SwapCacheCallback(bool result, void* param) {
   AppCacheHostMsg_SwapCache::WriteReplyParams(reply_msg, result);
   Send(pending_reply_msg_.release());
 }
+
+}  // namespace content

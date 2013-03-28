@@ -1,4 +1,4 @@
-// Copyright (c) 2011 The Chromium Authors. All rights reserved.
+// Copyright (c) 2012 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -6,7 +6,7 @@
 
 #if defined(OS_WIN)
 #include <windows.h>
-#elif defined(TOOLKIT_USES_GTK)
+#elif defined(TOOLKIT_GTK)
 #include <gdk/gdk.h>
 #endif
 
@@ -17,11 +17,86 @@
 #include "grit/ui_strings.h"
 #include "ui/base/l10n/l10n_util.h"
 
-#if !defined(OS_WIN) && defined(USE_AURA)
+#if !defined(OS_WIN) && (defined(USE_AURA) || defined(OS_MACOSX))
 #include "ui/base/keycodes/keyboard_code_conversion.h"
 #endif
 
 namespace ui {
+
+Accelerator::Accelerator()
+    : key_code_(ui::VKEY_UNKNOWN),
+      type_(ui::ET_KEY_PRESSED),
+      modifiers_(0) {
+}
+
+Accelerator::Accelerator(KeyboardCode keycode, int modifiers)
+    : key_code_(keycode),
+      type_(ui::ET_KEY_PRESSED),
+      modifiers_(modifiers) {
+}
+
+Accelerator::Accelerator(const Accelerator& accelerator) {
+  key_code_ = accelerator.key_code_;
+  type_ = accelerator.type_;
+  modifiers_ = accelerator.modifiers_;
+  if (accelerator.platform_accelerator_.get())
+    platform_accelerator_ = accelerator.platform_accelerator_->CreateCopy();
+}
+
+Accelerator::~Accelerator() {
+}
+
+Accelerator& Accelerator::operator=(const Accelerator& accelerator) {
+  if (this != &accelerator) {
+    key_code_ = accelerator.key_code_;
+    type_ = accelerator.type_;
+    modifiers_ = accelerator.modifiers_;
+    if (accelerator.platform_accelerator_.get())
+      platform_accelerator_ = accelerator.platform_accelerator_->CreateCopy();
+    else
+      platform_accelerator_.reset();
+  }
+  return *this;
+}
+
+bool Accelerator::operator <(const Accelerator& rhs) const {
+  if (key_code_ != rhs.key_code_)
+    return key_code_ < rhs.key_code_;
+  if (type_ != rhs.type_)
+    return type_ < rhs.type_;
+  return modifiers_ < rhs.modifiers_;
+}
+
+bool Accelerator::operator ==(const Accelerator& rhs) const {
+  if (platform_accelerator_.get() != rhs.platform_accelerator_.get() &&
+      ((!platform_accelerator_.get() || !rhs.platform_accelerator_.get()) ||
+       !platform_accelerator_->Equals(*rhs.platform_accelerator_))) {
+    return false;
+  }
+
+  return (key_code_ == rhs.key_code_) && (type_ == rhs.type_) &&
+      (modifiers_ == rhs.modifiers_);
+}
+
+bool Accelerator::operator !=(const Accelerator& rhs) const {
+  return !(*this == rhs);
+}
+
+bool Accelerator::IsShiftDown() const {
+  return (modifiers_ & EF_SHIFT_DOWN) != 0;
+}
+
+bool Accelerator::IsCtrlDown() const {
+  return (modifiers_ & EF_CONTROL_DOWN) != 0;
+}
+
+bool Accelerator::IsAltDown() const {
+  return (modifiers_ & EF_ALT_DOWN) != 0;
+}
+
+bool Accelerator::IsCmdDown() const {
+  return (modifiers_ & EF_COMMAND_DOWN) != 0;
+}
 
 string16 Accelerator::GetShortcutText() const {
   int string_id = 0;
@@ -87,12 +162,11 @@ string16 Accelerator::GetShortcutText() const {
     else
       key = LOWORD(::MapVirtualKeyW(key_code_, MAPVK_VK_TO_CHAR));
     shortcut += key;
-#elif defined(USE_AURA)
+#elif defined(USE_AURA) || defined(OS_MACOSX)
     const uint16 c = GetCharacterFromKeyCode(key_code_, false);
-    if (c != 0) {
+    if (c != 0)
       shortcut += static_cast<string16::value_type>(base::ToUpperASCII(c));
-    }
-#elif defined(TOOLKIT_USES_GTK)
+#elif defined(TOOLKIT_GTK)
     const gchar* name = NULL;
     switch (key_code_) {
       case ui::VKEY_OEM_2:
@@ -136,6 +210,9 @@ string16 Accelerator::GetShortcutText() const {
   else if (IsAltDown())
     shortcut = l10n_util::GetStringFUTF16(IDS_APP_ALT_MODIFIER, shortcut);
 
+  if (IsCmdDown())
+    shortcut = l10n_util::GetStringFUTF16(IDS_APP_COMMAND_MODIFIER, shortcut);
+
   // For some reason, menus in Windows ignore standard Unicode directionality
   // marks (such as LRE, PDF, etc.). On RTL locales, we use RTL menus and
   // therefore any text we draw for the menu items is drawn in an RTL context.
@@ -146,10 +223,10 @@ string16 Accelerator::GetShortcutText() const {
   // problem).
   //
   // The only way to solve this problem is to adjust the string if the locale
-  // is RTL so that it is drawn correnctly in an RTL context. Instead of
+  // is RTL so that it is drawn correctly in an RTL context. Instead of
   // returning "Ctrl++" in the above example, we return "++Ctrl". This will
   // cause the text to appear as "Ctrl++" when Windows draws the string in an
-  // RTL context because the punctunation no longer appears at the end of the
+  // RTL context because the punctuation no longer appears at the end of the
   // string.
   //
   // TODO(idana) bug# 1232732: this hack can be avoided if instead of using

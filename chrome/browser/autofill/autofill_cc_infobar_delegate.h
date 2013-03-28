@@ -4,14 +4,13 @@
 
 #ifndef CHROME_BROWSER_AUTOFILL_AUTOFILL_CC_INFOBAR_DELEGATE_H_
 #define CHROME_BROWSER_AUTOFILL_AUTOFILL_CC_INFOBAR_DELEGATE_H_
-#pragma once
 
 #include "base/basictypes.h"
 #include "base/gtest_prod_util.h"
 #include "base/memory/scoped_ptr.h"
 #include "base/string16.h"
+#include "chrome/browser/api/infobars/confirm_infobar_delegate.h"
 #include "chrome/browser/autofill/autofill_metrics.h"
-#include "chrome/browser/tab_contents/confirm_infobar_delegate.h"
 #include "webkit/glue/window_open_disposition.h"
 
 class CreditCard;
@@ -25,7 +24,7 @@ struct LoadCommittedDetails;
 // card information gathered from a form submission.
 class AutofillCCInfoBarDelegate : public ConfirmInfoBarDelegate {
  public:
-  AutofillCCInfoBarDelegate(InfoBarTabHelper* infobar_helper,
+  AutofillCCInfoBarDelegate(InfoBarService* infobar_service,
                             const CreditCard* credit_card,
                             PersonalDataManager* personal_data,
                             const AutofillMetrics* metric_logger);

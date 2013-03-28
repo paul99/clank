@@ -8523,6 +8523,620 @@ COMPILE_ASSERT(offsetof(TexStorage2DEXT, width) == 16,
 COMPILE_ASSERT(offsetof(TexStorage2DEXT, height) == 20,
                OffsetOf_TexStorage2DEXT_height_not_20);
 
+struct GenQueriesEXT {
+  typedef GenQueriesEXT ValueType;
+  static const CommandId kCmdId = kGenQueriesEXT;
+  static const cmd::ArgFlags kArgFlags = cmd::kFixed;
+
+  static uint32 ComputeSize() {
+    return static_cast<uint32>(sizeof(ValueType));  // NOLINT
+  }
+
+  void SetHeader() {
+    header.SetCmd<ValueType>();
+  }
+
+  void Init(GLsizei _n, uint32 _queries_shm_id, uint32 _queries_shm_offset) {
+    SetHeader();
+    n = _n;
+    queries_shm_id = _queries_shm_id;
+    queries_shm_offset = _queries_shm_offset;
+  }
+
+  void* Set(
+      void* cmd, GLsizei _n, uint32 _queries_shm_id,
+      uint32 _queries_shm_offset) {
+    static_cast<ValueType*>(
+        cmd)->Init(_n, _queries_shm_id, _queries_shm_offset);
+    return NextCmdAddress<ValueType>(cmd);
+  }
+
+  gpu::CommandHeader header;
+  int32 n;
+  uint32 queries_shm_id;
+  uint32 queries_shm_offset;
+};
+
+COMPILE_ASSERT(sizeof(GenQueriesEXT) == 16,
+               Sizeof_GenQueriesEXT_is_not_16);
+COMPILE_ASSERT(offsetof(GenQueriesEXT, header) == 0,
+               OffsetOf_GenQueriesEXT_header_not_0);
+COMPILE_ASSERT(offsetof(GenQueriesEXT, n) == 4,
+               OffsetOf_GenQueriesEXT_n_not_4);
+COMPILE_ASSERT(offsetof(GenQueriesEXT, queries_shm_id) == 8,
+               OffsetOf_GenQueriesEXT_queries_shm_id_not_8);
+COMPILE_ASSERT(offsetof(GenQueriesEXT, queries_shm_offset) == 12,
+               OffsetOf_GenQueriesEXT_queries_shm_offset_not_12);
+
+struct GenQueriesEXTImmediate {
+  typedef GenQueriesEXTImmediate ValueType;
+  static const CommandId kCmdId = kGenQueriesEXTImmediate;
+  static const cmd::ArgFlags kArgFlags = cmd::kAtLeastN;
+
+  static uint32 ComputeDataSize(GLsizei n) {
+    return static_cast<uint32>(sizeof(GLuint) * n);  // NOLINT
+  }
+
+  static uint32 ComputeSize(GLsizei n) {
+    return static_cast<uint32>(
+        sizeof(ValueType) + ComputeDataSize(n));  // NOLINT
+  }
+
+  void SetHeader(GLsizei n) {
+    header.SetCmdByTotalSize<ValueType>(ComputeSize(n));
+  }
+
+  void Init(GLsizei _n, GLuint* _queries) {
+    SetHeader(_n);
+    n = _n;
+    memcpy(ImmediateDataAddress(this),
+           _queries, ComputeDataSize(_n));
+  }
+
+  void* Set(void* cmd, GLsizei _n, GLuint* _queries) {
+    static_cast<ValueType*>(cmd)->Init(_n, _queries);
+    const uint32 size = ComputeSize(_n);
+    return NextImmediateCmdAddressTotalSize<ValueType>(cmd, size);
+  }
+
+  gpu::CommandHeader header;
+  int32 n;
+};
+
+COMPILE_ASSERT(sizeof(GenQueriesEXTImmediate) == 8,
+               Sizeof_GenQueriesEXTImmediate_is_not_8);
+COMPILE_ASSERT(offsetof(GenQueriesEXTImmediate, header) == 0,
+               OffsetOf_GenQueriesEXTImmediate_header_not_0);
+COMPILE_ASSERT(offsetof(GenQueriesEXTImmediate, n) == 4,
+               OffsetOf_GenQueriesEXTImmediate_n_not_4);
+
+struct DeleteQueriesEXT {
+  typedef DeleteQueriesEXT ValueType;
+  static const CommandId kCmdId = kDeleteQueriesEXT;
+  static const cmd::ArgFlags kArgFlags = cmd::kFixed;
+
+  static uint32 ComputeSize() {
+    return static_cast<uint32>(sizeof(ValueType));  // NOLINT
+  }
+
+  void SetHeader() {
+    header.SetCmd<ValueType>();
+  }
+
+  void Init(GLsizei _n, uint32 _queries_shm_id, uint32 _queries_shm_offset) {
+    SetHeader();
+    n = _n;
+    queries_shm_id = _queries_shm_id;
+    queries_shm_offset = _queries_shm_offset;
+  }
+
+  void* Set(
+      void* cmd, GLsizei _n, uint32 _queries_shm_id,
+      uint32 _queries_shm_offset) {
+    static_cast<ValueType*>(
+        cmd)->Init(_n, _queries_shm_id, _queries_shm_offset);
+    return NextCmdAddress<ValueType>(cmd);
+  }
+
+  gpu::CommandHeader header;
+  int32 n;
+  uint32 queries_shm_id;
+  uint32 queries_shm_offset;
+};
+
+COMPILE_ASSERT(sizeof(DeleteQueriesEXT) == 16,
+               Sizeof_DeleteQueriesEXT_is_not_16);
+COMPILE_ASSERT(offsetof(DeleteQueriesEXT, header) == 0,
+               OffsetOf_DeleteQueriesEXT_header_not_0);
+COMPILE_ASSERT(offsetof(DeleteQueriesEXT, n) == 4,
+               OffsetOf_DeleteQueriesEXT_n_not_4);
+COMPILE_ASSERT(offsetof(DeleteQueriesEXT, queries_shm_id) == 8,
+               OffsetOf_DeleteQueriesEXT_queries_shm_id_not_8);
+COMPILE_ASSERT(offsetof(DeleteQueriesEXT, queries_shm_offset) == 12,
+               OffsetOf_DeleteQueriesEXT_queries_shm_offset_not_12);
+
+struct DeleteQueriesEXTImmediate {
+  typedef DeleteQueriesEXTImmediate ValueType;
+  static const CommandId kCmdId = kDeleteQueriesEXTImmediate;
+  static const cmd::ArgFlags kArgFlags = cmd::kAtLeastN;
+
+  static uint32 ComputeDataSize(GLsizei n) {
+    return static_cast<uint32>(sizeof(GLuint) * n);  // NOLINT
+  }
+
+  static uint32 ComputeSize(GLsizei n) {
+    return static_cast<uint32>(
+        sizeof(ValueType) + ComputeDataSize(n));  // NOLINT
+  }
+
+  void SetHeader(GLsizei n) {
+    header.SetCmdByTotalSize<ValueType>(ComputeSize(n));
+  }
+
+  void Init(GLsizei _n, const GLuint* _queries) {
+    SetHeader(_n);
+    n = _n;
+    memcpy(ImmediateDataAddress(this),
+           _queries, ComputeDataSize(_n));
+  }
+
+  void* Set(void* cmd, GLsizei _n, const GLuint* _queries) {
+    static_cast<ValueType*>(cmd)->Init(_n, _queries);
+    const uint32 size = ComputeSize(_n);
+    return NextImmediateCmdAddressTotalSize<ValueType>(cmd, size);
+  }
+
+  gpu::CommandHeader header;
+  int32 n;
+};
+
+COMPILE_ASSERT(sizeof(DeleteQueriesEXTImmediate) == 8,
+               Sizeof_DeleteQueriesEXTImmediate_is_not_8);
+COMPILE_ASSERT(offsetof(DeleteQueriesEXTImmediate, header) == 0,
+               OffsetOf_DeleteQueriesEXTImmediate_header_not_0);
+COMPILE_ASSERT(offsetof(DeleteQueriesEXTImmediate, n) == 4,
+               OffsetOf_DeleteQueriesEXTImmediate_n_not_4);
+
+struct BeginQueryEXT {
+  typedef BeginQueryEXT ValueType;
+  static const CommandId kCmdId = kBeginQueryEXT;
+  static const cmd::ArgFlags kArgFlags = cmd::kFixed;
+
+  static uint32 ComputeSize() {
+    return static_cast<uint32>(sizeof(ValueType));  // NOLINT
+  }
+
+  void SetHeader() {
+    header.SetCmd<ValueType>();
+  }
+
+  void Init(
+      GLenum _target, GLuint _id, uint32 _sync_data_shm_id,
+      uint32 _sync_data_shm_offset) {
+    SetHeader();
+    target = _target;
+    id = _id;
+    sync_data_shm_id = _sync_data_shm_id;
+    sync_data_shm_offset = _sync_data_shm_offset;
+  }
+
+  void* Set(
+      void* cmd, GLenum _target, GLuint _id, uint32 _sync_data_shm_id,
+      uint32 _sync_data_shm_offset) {
+    static_cast<ValueType*>(
+        cmd)->Init(_target, _id, _sync_data_shm_id, _sync_data_shm_offset);
+    return NextCmdAddress<ValueType>(cmd);
+  }
+
+  gpu::CommandHeader header;
+  uint32 target;
+  uint32 id;
+  uint32 sync_data_shm_id;
+  uint32 sync_data_shm_offset;
+};
+
+COMPILE_ASSERT(sizeof(BeginQueryEXT) == 20,
+               Sizeof_BeginQueryEXT_is_not_20);
+COMPILE_ASSERT(offsetof(BeginQueryEXT, header) == 0,
+               OffsetOf_BeginQueryEXT_header_not_0);
+COMPILE_ASSERT(offsetof(BeginQueryEXT, target) == 4,
+               OffsetOf_BeginQueryEXT_target_not_4);
+COMPILE_ASSERT(offsetof(BeginQueryEXT, id) == 8,
+               OffsetOf_BeginQueryEXT_id_not_8);
+COMPILE_ASSERT(offsetof(BeginQueryEXT, sync_data_shm_id) == 12,
+               OffsetOf_BeginQueryEXT_sync_data_shm_id_not_12);
+COMPILE_ASSERT(offsetof(BeginQueryEXT, sync_data_shm_offset) == 16,
+               OffsetOf_BeginQueryEXT_sync_data_shm_offset_not_16);
+
+struct EndQueryEXT {
+  typedef EndQueryEXT ValueType;
+  static const CommandId kCmdId = kEndQueryEXT;
+  static const cmd::ArgFlags kArgFlags = cmd::kFixed;
+
+  static uint32 ComputeSize() {
+    return static_cast<uint32>(sizeof(ValueType));  // NOLINT
+  }
+
+  void SetHeader() {
+    header.SetCmd<ValueType>();
+  }
+
+  void Init(GLenum _target, GLuint _submit_count) {
+    SetHeader();
+    target = _target;
+    submit_count = _submit_count;
+  }
+
+  void* Set(void* cmd, GLenum _target, GLuint _submit_count) {
+    static_cast<ValueType*>(cmd)->Init(_target, _submit_count);
+    return NextCmdAddress<ValueType>(cmd);
+  }
+
+  gpu::CommandHeader header;
+  uint32 target;
+  uint32 submit_count;
+};
+
+COMPILE_ASSERT(sizeof(EndQueryEXT) == 12,
+               Sizeof_EndQueryEXT_is_not_12);
+COMPILE_ASSERT(offsetof(EndQueryEXT, header) == 0,
+               OffsetOf_EndQueryEXT_header_not_0);
+COMPILE_ASSERT(offsetof(EndQueryEXT, target) == 4,
+               OffsetOf_EndQueryEXT_target_not_4);
+COMPILE_ASSERT(offsetof(EndQueryEXT, submit_count) == 8,
+               OffsetOf_EndQueryEXT_submit_count_not_8);
+
+struct InsertEventMarkerEXT {
+  typedef InsertEventMarkerEXT ValueType;
+  static const CommandId kCmdId = kInsertEventMarkerEXT;
+  static const cmd::ArgFlags kArgFlags = cmd::kFixed;
+
+  static uint32 ComputeSize() {
+    return static_cast<uint32>(sizeof(ValueType));  // NOLINT
+  }
+
+  void SetHeader() {
+    header.SetCmd<ValueType>();
+  }
+
+  void Init(GLuint _bucket_id) {
+    SetHeader();
+    bucket_id = _bucket_id;
+  }
+
+  void* Set(void* cmd, GLuint _bucket_id) {
+    static_cast<ValueType*>(cmd)->Init(_bucket_id);
+    return NextCmdAddress<ValueType>(cmd);
+  }
+
+  gpu::CommandHeader header;
+  uint32 bucket_id;
+};
+
+COMPILE_ASSERT(sizeof(InsertEventMarkerEXT) == 8,
+               Sizeof_InsertEventMarkerEXT_is_not_8);
+COMPILE_ASSERT(offsetof(InsertEventMarkerEXT, header) == 0,
+               OffsetOf_InsertEventMarkerEXT_header_not_0);
+COMPILE_ASSERT(offsetof(InsertEventMarkerEXT, bucket_id) == 4,
+               OffsetOf_InsertEventMarkerEXT_bucket_id_not_4);
+
+struct PushGroupMarkerEXT {
+  typedef PushGroupMarkerEXT ValueType;
+  static const CommandId kCmdId = kPushGroupMarkerEXT;
+  static const cmd::ArgFlags kArgFlags = cmd::kFixed;
+
+  static uint32 ComputeSize() {
+    return static_cast<uint32>(sizeof(ValueType));  // NOLINT
+  }
+
+  void SetHeader() {
+    header.SetCmd<ValueType>();
+  }
+
+  void Init(GLuint _bucket_id) {
+    SetHeader();
+    bucket_id = _bucket_id;
+  }
+
+  void* Set(void* cmd, GLuint _bucket_id) {
+    static_cast<ValueType*>(cmd)->Init(_bucket_id);
+    return NextCmdAddress<ValueType>(cmd);
+  }
+
+  gpu::CommandHeader header;
+  uint32 bucket_id;
+};
+
+COMPILE_ASSERT(sizeof(PushGroupMarkerEXT) == 8,
+               Sizeof_PushGroupMarkerEXT_is_not_8);
+COMPILE_ASSERT(offsetof(PushGroupMarkerEXT, header) == 0,
+               OffsetOf_PushGroupMarkerEXT_header_not_0);
+COMPILE_ASSERT(offsetof(PushGroupMarkerEXT, bucket_id) == 4,
+               OffsetOf_PushGroupMarkerEXT_bucket_id_not_4);
+
+struct PopGroupMarkerEXT {
+  typedef PopGroupMarkerEXT ValueType;
+  static const CommandId kCmdId = kPopGroupMarkerEXT;
+  static const cmd::ArgFlags kArgFlags = cmd::kFixed;
+
+  static uint32 ComputeSize() {
+    return static_cast<uint32>(sizeof(ValueType));  // NOLINT
+  }
+
+  void SetHeader() {
+    header.SetCmd<ValueType>();
+  }
+
+  void Init() {
+    SetHeader();
+  }
+
+  void* Set(void* cmd) {
+    static_cast<ValueType*>(cmd)->Init();
+    return NextCmdAddress<ValueType>(cmd);
+  }
+
+  gpu::CommandHeader header;
+};
+
+COMPILE_ASSERT(sizeof(PopGroupMarkerEXT) == 4,
+               Sizeof_PopGroupMarkerEXT_is_not_4);
+COMPILE_ASSERT(offsetof(PopGroupMarkerEXT, header) == 0,
+               OffsetOf_PopGroupMarkerEXT_header_not_0);
+
+struct GenVertexArraysOES {
+  typedef GenVertexArraysOES ValueType;
+  static const CommandId kCmdId = kGenVertexArraysOES;
+  static const cmd::ArgFlags kArgFlags = cmd::kFixed;
+
+  static uint32 ComputeSize() {
+    return static_cast<uint32>(sizeof(ValueType));  // NOLINT
+  }
+
+  void SetHeader() {
+    header.SetCmd<ValueType>();
+  }
+
+  void Init(GLsizei _n, uint32 _arrays_shm_id, uint32 _arrays_shm_offset) {
+    SetHeader();
+    n = _n;
+    arrays_shm_id = _arrays_shm_id;
+    arrays_shm_offset = _arrays_shm_offset;
+  }
+
+  void* Set(
+      void* cmd, GLsizei _n, uint32 _arrays_shm_id,
+      uint32 _arrays_shm_offset) {
+    static_cast<ValueType*>(cmd)->Init(_n, _arrays_shm_id, _arrays_shm_offset);
+    return NextCmdAddress<ValueType>(cmd);
+  }
+
+  gpu::CommandHeader header;
+  int32 n;
+  uint32 arrays_shm_id;
+  uint32 arrays_shm_offset;
+};
+
+COMPILE_ASSERT(sizeof(GenVertexArraysOES) == 16,
+               Sizeof_GenVertexArraysOES_is_not_16);
+COMPILE_ASSERT(offsetof(GenVertexArraysOES, header) == 0,
+               OffsetOf_GenVertexArraysOES_header_not_0);
+COMPILE_ASSERT(offsetof(GenVertexArraysOES, n) == 4,
+               OffsetOf_GenVertexArraysOES_n_not_4);
+COMPILE_ASSERT(offsetof(GenVertexArraysOES, arrays_shm_id) == 8,
+               OffsetOf_GenVertexArraysOES_arrays_shm_id_not_8);
+COMPILE_ASSERT(offsetof(GenVertexArraysOES, arrays_shm_offset) == 12,
+               OffsetOf_GenVertexArraysOES_arrays_shm_offset_not_12);
+
+struct GenVertexArraysOESImmediate {
+  typedef GenVertexArraysOESImmediate ValueType;
+  static const CommandId kCmdId = kGenVertexArraysOESImmediate;
+  static const cmd::ArgFlags kArgFlags = cmd::kAtLeastN;
+
+  static uint32 ComputeDataSize(GLsizei n) {
+    return static_cast<uint32>(sizeof(GLuint) * n);  // NOLINT
+  }
+
+  static uint32 ComputeSize(GLsizei n) {
+    return static_cast<uint32>(
+        sizeof(ValueType) + ComputeDataSize(n));  // NOLINT
+  }
+
+  void SetHeader(GLsizei n) {
+    header.SetCmdByTotalSize<ValueType>(ComputeSize(n));
+  }
+
+  void Init(GLsizei _n, GLuint* _arrays) {
+    SetHeader(_n);
+    n = _n;
+    memcpy(ImmediateDataAddress(this),
+           _arrays, ComputeDataSize(_n));
+  }
+
+  void* Set(void* cmd, GLsizei _n, GLuint* _arrays) {
+    static_cast<ValueType*>(cmd)->Init(_n, _arrays);
+    const uint32 size = ComputeSize(_n);
+    return NextImmediateCmdAddressTotalSize<ValueType>(cmd, size);
+  }
+
+  gpu::CommandHeader header;
+  int32 n;
+};
+
+COMPILE_ASSERT(sizeof(GenVertexArraysOESImmediate) == 8,
+               Sizeof_GenVertexArraysOESImmediate_is_not_8);
+COMPILE_ASSERT(offsetof(GenVertexArraysOESImmediate, header) == 0,
+               OffsetOf_GenVertexArraysOESImmediate_header_not_0);
+COMPILE_ASSERT(offsetof(GenVertexArraysOESImmediate, n) == 4,
+               OffsetOf_GenVertexArraysOESImmediate_n_not_4);
+
+struct DeleteVertexArraysOES {
+  typedef DeleteVertexArraysOES ValueType;
+  static const CommandId kCmdId = kDeleteVertexArraysOES;
+  static const cmd::ArgFlags kArgFlags = cmd::kFixed;
+
+  static uint32 ComputeSize() {
+    return static_cast<uint32>(sizeof(ValueType));  // NOLINT
+  }
+
+  void SetHeader() {
+    header.SetCmd<ValueType>();
+  }
+
+  void Init(GLsizei _n, uint32 _arrays_shm_id, uint32 _arrays_shm_offset) {
+    SetHeader();
+    n = _n;
+    arrays_shm_id = _arrays_shm_id;
+    arrays_shm_offset = _arrays_shm_offset;
+  }
+
+  void* Set(
+      void* cmd, GLsizei _n, uint32 _arrays_shm_id,
+      uint32 _arrays_shm_offset) {
+    static_cast<ValueType*>(cmd)->Init(_n, _arrays_shm_id, _arrays_shm_offset);
+    return NextCmdAddress<ValueType>(cmd);
+  }
+
+  gpu::CommandHeader header;
+  int32 n;
+  uint32 arrays_shm_id;
+  uint32 arrays_shm_offset;
+};
+
+COMPILE_ASSERT(sizeof(DeleteVertexArraysOES) == 16,
+               Sizeof_DeleteVertexArraysOES_is_not_16);
+COMPILE_ASSERT(offsetof(DeleteVertexArraysOES, header) == 0,
+               OffsetOf_DeleteVertexArraysOES_header_not_0);
+COMPILE_ASSERT(offsetof(DeleteVertexArraysOES, n) == 4,
+               OffsetOf_DeleteVertexArraysOES_n_not_4);
+COMPILE_ASSERT(offsetof(DeleteVertexArraysOES, arrays_shm_id) == 8,
+               OffsetOf_DeleteVertexArraysOES_arrays_shm_id_not_8);
+COMPILE_ASSERT(offsetof(DeleteVertexArraysOES, arrays_shm_offset) == 12,
+               OffsetOf_DeleteVertexArraysOES_arrays_shm_offset_not_12);
+
+struct DeleteVertexArraysOESImmediate {
+  typedef DeleteVertexArraysOESImmediate ValueType;
+  static const CommandId kCmdId = kDeleteVertexArraysOESImmediate;
+  static const cmd::ArgFlags kArgFlags = cmd::kAtLeastN;
+
+  static uint32 ComputeDataSize(GLsizei n) {
+    return static_cast<uint32>(sizeof(GLuint) * n);  // NOLINT
+  }
+
+  static uint32 ComputeSize(GLsizei n) {
+    return static_cast<uint32>(
+        sizeof(ValueType) + ComputeDataSize(n));  // NOLINT
+  }
+
+  void SetHeader(GLsizei n) {
+    header.SetCmdByTotalSize<ValueType>(ComputeSize(n));
+  }
+
+  void Init(GLsizei _n, const GLuint* _arrays) {
+    SetHeader(_n);
+    n = _n;
+    memcpy(ImmediateDataAddress(this),
+           _arrays, ComputeDataSize(_n));
+  }
+
+  void* Set(void* cmd, GLsizei _n, const GLuint* _arrays) {
+    static_cast<ValueType*>(cmd)->Init(_n, _arrays);
+    const uint32 size = ComputeSize(_n);
+    return NextImmediateCmdAddressTotalSize<ValueType>(cmd, size);
+  }
+
+  gpu::CommandHeader header;
+  int32 n;
+};
+
+COMPILE_ASSERT(sizeof(DeleteVertexArraysOESImmediate) == 8,
+               Sizeof_DeleteVertexArraysOESImmediate_is_not_8);
+COMPILE_ASSERT(offsetof(DeleteVertexArraysOESImmediate, header) == 0,
+               OffsetOf_DeleteVertexArraysOESImmediate_header_not_0);
+COMPILE_ASSERT(offsetof(DeleteVertexArraysOESImmediate, n) == 4,
+               OffsetOf_DeleteVertexArraysOESImmediate_n_not_4);
+
+struct IsVertexArrayOES {
+  typedef IsVertexArrayOES ValueType;
+  static const CommandId kCmdId = kIsVertexArrayOES;
+  static const cmd::ArgFlags kArgFlags = cmd::kFixed;
+
+  typedef uint32 Result;
+
+  static uint32 ComputeSize() {
+    return static_cast<uint32>(sizeof(ValueType));  // NOLINT
+  }
+
+  void SetHeader() {
+    header.SetCmd<ValueType>();
+  }
+
+  void Init(GLuint _array, uint32 _result_shm_id, uint32 _result_shm_offset) {
+    SetHeader();
+    array = _array;
+    result_shm_id = _result_shm_id;
+    result_shm_offset = _result_shm_offset;
+  }
+
+  void* Set(
+      void* cmd, GLuint _array, uint32 _result_shm_id,
+      uint32 _result_shm_offset) {
+    static_cast<ValueType*>(
+        cmd)->Init(_array, _result_shm_id, _result_shm_offset);
+    return NextCmdAddress<ValueType>(cmd);
+  }
+
+  gpu::CommandHeader header;
+  uint32 array;
+  uint32 result_shm_id;
+  uint32 result_shm_offset;
+};
+
+COMPILE_ASSERT(sizeof(IsVertexArrayOES) == 16,
+               Sizeof_IsVertexArrayOES_is_not_16);
+COMPILE_ASSERT(offsetof(IsVertexArrayOES, header) == 0,
+               OffsetOf_IsVertexArrayOES_header_not_0);
+COMPILE_ASSERT(offsetof(IsVertexArrayOES, array) == 4,
+               OffsetOf_IsVertexArrayOES_array_not_4);
+COMPILE_ASSERT(offsetof(IsVertexArrayOES, result_shm_id) == 8,
+               OffsetOf_IsVertexArrayOES_result_shm_id_not_8);
+COMPILE_ASSERT(offsetof(IsVertexArrayOES, result_shm_offset) == 12,
+               OffsetOf_IsVertexArrayOES_result_shm_offset_not_12);
+
+struct BindVertexArrayOES {
+  typedef BindVertexArrayOES ValueType;
+  static const CommandId kCmdId = kBindVertexArrayOES;
+  static const cmd::ArgFlags kArgFlags = cmd::kFixed;
+
+  static uint32 ComputeSize() {
+    return static_cast<uint32>(sizeof(ValueType));  // NOLINT
+  }
+
+  void SetHeader() {
+    header.SetCmd<ValueType>();
+  }
+
+  void Init(GLuint _array) {
+    SetHeader();
+    array = _array;
+  }
+
+  void* Set(void* cmd, GLuint _array) {
+    static_cast<ValueType*>(cmd)->Init(_array);
+    return NextCmdAddress<ValueType>(cmd);
+  }
+
+  gpu::CommandHeader header;
+  uint32 array;
+};
+
+COMPILE_ASSERT(sizeof(BindVertexArrayOES) == 8,
+               Sizeof_BindVertexArrayOES_is_not_8);
+COMPILE_ASSERT(offsetof(BindVertexArrayOES, header) == 0,
+               OffsetOf_BindVertexArrayOES_header_not_0);
+COMPILE_ASSERT(offsetof(BindVertexArrayOES, array) == 4,
+               OffsetOf_BindVertexArrayOES_array_not_4);
+
 struct SwapBuffers {
   typedef SwapBuffers ValueType;
   static const CommandId kCmdId = kSwapBuffers;
@@ -9260,6 +9874,999 @@ COMPILE_ASSERT(offsetof(TexImageIOSurface2DCHROMIUM, ioSurfaceId) == 16,
                OffsetOf_TexImageIOSurface2DCHROMIUM_ioSurfaceId_not_16);
 COMPILE_ASSERT(offsetof(TexImageIOSurface2DCHROMIUM, plane) == 20,
                OffsetOf_TexImageIOSurface2DCHROMIUM_plane_not_20);
+
+struct CopyTextureCHROMIUM {
+  typedef CopyTextureCHROMIUM ValueType;
+  static const CommandId kCmdId = kCopyTextureCHROMIUM;
+  static const cmd::ArgFlags kArgFlags = cmd::kFixed;
+
+  static uint32 ComputeSize() {
+    return static_cast<uint32>(sizeof(ValueType));  // NOLINT
+  }
+
+  void SetHeader() {
+    header.SetCmd<ValueType>();
+  }
+
+  void Init(
+      GLenum _target, GLenum _source_id, GLenum _dest_id, GLint _level,
+      GLint _internalformat) {
+    SetHeader();
+    target = _target;
+    source_id = _source_id;
+    dest_id = _dest_id;
+    level = _level;
+    internalformat = _internalformat;
+  }
+
+  void* Set(
+      void* cmd, GLenum _target, GLenum _source_id, GLenum _dest_id,
+      GLint _level, GLint _internalformat) {
+    static_cast<ValueType*>(
+        cmd)->Init(_target, _source_id, _dest_id, _level, _internalformat);
+    return NextCmdAddress<ValueType>(cmd);
+  }
+
+  gpu::CommandHeader header;
+  uint32 target;
+  uint32 source_id;
+  uint32 dest_id;
+  int32 level;
+  int32 internalformat;
+};
+
+COMPILE_ASSERT(sizeof(CopyTextureCHROMIUM) == 24,
+               Sizeof_CopyTextureCHROMIUM_is_not_24);
+COMPILE_ASSERT(offsetof(CopyTextureCHROMIUM, header) == 0,
+               OffsetOf_CopyTextureCHROMIUM_header_not_0);
+COMPILE_ASSERT(offsetof(CopyTextureCHROMIUM, target) == 4,
+               OffsetOf_CopyTextureCHROMIUM_target_not_4);
+COMPILE_ASSERT(offsetof(CopyTextureCHROMIUM, source_id) == 8,
+               OffsetOf_CopyTextureCHROMIUM_source_id_not_8);
+COMPILE_ASSERT(offsetof(CopyTextureCHROMIUM, dest_id) == 12,
+               OffsetOf_CopyTextureCHROMIUM_dest_id_not_12);
+COMPILE_ASSERT(offsetof(CopyTextureCHROMIUM, level) == 16,
+               OffsetOf_CopyTextureCHROMIUM_level_not_16);
+COMPILE_ASSERT(offsetof(CopyTextureCHROMIUM, internalformat) == 20,
+               OffsetOf_CopyTextureCHROMIUM_internalformat_not_20);
+
+struct DrawArraysInstancedANGLE {
+  typedef DrawArraysInstancedANGLE ValueType;
+  static const CommandId kCmdId = kDrawArraysInstancedANGLE;
+  static const cmd::ArgFlags kArgFlags = cmd::kFixed;
+
+  static uint32 ComputeSize() {
+    return static_cast<uint32>(sizeof(ValueType));  // NOLINT
+  }
+
+  void SetHeader() {
+    header.SetCmd<ValueType>();
+  }
+
+  void Init(GLenum _mode, GLint _first, GLsizei _count, GLsizei _primcount) {
+    SetHeader();
+    mode = _mode;
+    first = _first;
+    count = _count;
+    primcount = _primcount;
+  }
+
+  void* Set(
+      void* cmd, GLenum _mode, GLint _first, GLsizei _count,
+      GLsizei _primcount) {
+    static_cast<ValueType*>(cmd)->Init(_mode, _first, _count, _primcount);
+    return NextCmdAddress<ValueType>(cmd);
+  }
+
+  gpu::CommandHeader header;
+  uint32 mode;
+  int32 first;
+  int32 count;
+  int32 primcount;
+};
+
+COMPILE_ASSERT(sizeof(DrawArraysInstancedANGLE) == 20,
+               Sizeof_DrawArraysInstancedANGLE_is_not_20);
+COMPILE_ASSERT(offsetof(DrawArraysInstancedANGLE, header) == 0,
+               OffsetOf_DrawArraysInstancedANGLE_header_not_0);
+COMPILE_ASSERT(offsetof(DrawArraysInstancedANGLE, mode) == 4,
+               OffsetOf_DrawArraysInstancedANGLE_mode_not_4);
+COMPILE_ASSERT(offsetof(DrawArraysInstancedANGLE, first) == 8,
+               OffsetOf_DrawArraysInstancedANGLE_first_not_8);
+COMPILE_ASSERT(offsetof(DrawArraysInstancedANGLE, count) == 12,
+               OffsetOf_DrawArraysInstancedANGLE_count_not_12);
+COMPILE_ASSERT(offsetof(DrawArraysInstancedANGLE, primcount) == 16,
+               OffsetOf_DrawArraysInstancedANGLE_primcount_not_16);
+
+struct DrawElementsInstancedANGLE {
+  typedef DrawElementsInstancedANGLE ValueType;
+  static const CommandId kCmdId = kDrawElementsInstancedANGLE;
+  static const cmd::ArgFlags kArgFlags = cmd::kFixed;
+
+  static uint32 ComputeSize() {
+    return static_cast<uint32>(sizeof(ValueType));  // NOLINT
+  }
+
+  void SetHeader() {
+    header.SetCmd<ValueType>();
+  }
+
+  void Init(
+      GLenum _mode, GLsizei _count, GLenum _type, GLuint _index_offset,
+      GLsizei _primcount) {
+    SetHeader();
+    mode = _mode;
+    count = _count;
+    type = _type;
+    index_offset = _index_offset;
+    primcount = _primcount;
+  }
+
+  void* Set(
+      void* cmd, GLenum _mode, GLsizei _count, GLenum _type,
+      GLuint _index_offset, GLsizei _primcount) {
+    static_cast<ValueType*>(
+        cmd)->Init(_mode, _count, _type, _index_offset, _primcount);
+    return NextCmdAddress<ValueType>(cmd);
+  }
+
+  gpu::CommandHeader header;
+  uint32 mode;
+  int32 count;
+  uint32 type;
+  uint32 index_offset;
+  int32 primcount;
+};
+
+COMPILE_ASSERT(sizeof(DrawElementsInstancedANGLE) == 24,
+               Sizeof_DrawElementsInstancedANGLE_is_not_24);
+COMPILE_ASSERT(offsetof(DrawElementsInstancedANGLE, header) == 0,
+               OffsetOf_DrawElementsInstancedANGLE_header_not_0);
+COMPILE_ASSERT(offsetof(DrawElementsInstancedANGLE, mode) == 4,
+               OffsetOf_DrawElementsInstancedANGLE_mode_not_4);
+COMPILE_ASSERT(offsetof(DrawElementsInstancedANGLE, count) == 8,
+               OffsetOf_DrawElementsInstancedANGLE_count_not_8);
+COMPILE_ASSERT(offsetof(DrawElementsInstancedANGLE, type) == 12,
+               OffsetOf_DrawElementsInstancedANGLE_type_not_12);
+COMPILE_ASSERT(offsetof(DrawElementsInstancedANGLE, index_offset) == 16,
+               OffsetOf_DrawElementsInstancedANGLE_index_offset_not_16);
+COMPILE_ASSERT(offsetof(DrawElementsInstancedANGLE, primcount) == 20,
+               OffsetOf_DrawElementsInstancedANGLE_primcount_not_20);
+
+struct VertexAttribDivisorANGLE {
+  typedef VertexAttribDivisorANGLE ValueType;
+  static const CommandId kCmdId = kVertexAttribDivisorANGLE;
+  static const cmd::ArgFlags kArgFlags = cmd::kFixed;
+
+  static uint32 ComputeSize() {
+    return static_cast<uint32>(sizeof(ValueType));  // NOLINT
+  }
+
+  void SetHeader() {
+    header.SetCmd<ValueType>();
+  }
+
+  void Init(GLuint _index, GLuint _divisor) {
+    SetHeader();
+    index = _index;
+    divisor = _divisor;
+  }
+
+  void* Set(void* cmd, GLuint _index, GLuint _divisor) {
+    static_cast<ValueType*>(cmd)->Init(_index, _divisor);
+    return NextCmdAddress<ValueType>(cmd);
+  }
+
+  gpu::CommandHeader header;
+  uint32 index;
+  uint32 divisor;
+};
+
+COMPILE_ASSERT(sizeof(VertexAttribDivisorANGLE) == 12,
+               Sizeof_VertexAttribDivisorANGLE_is_not_12);
+COMPILE_ASSERT(offsetof(VertexAttribDivisorANGLE, header) == 0,
+               OffsetOf_VertexAttribDivisorANGLE_header_not_0);
+COMPILE_ASSERT(offsetof(VertexAttribDivisorANGLE, index) == 4,
+               OffsetOf_VertexAttribDivisorANGLE_index_not_4);
+COMPILE_ASSERT(offsetof(VertexAttribDivisorANGLE, divisor) == 8,
+               OffsetOf_VertexAttribDivisorANGLE_divisor_not_8);
+
+struct GenMailboxCHROMIUM {
+  typedef GenMailboxCHROMIUM ValueType;
+  static const CommandId kCmdId = kGenMailboxCHROMIUM;
+  static const cmd::ArgFlags kArgFlags = cmd::kFixed;
+
+  typedef SizedResult<GLint> Result;
+
+  static uint32 ComputeSize() {
+    return static_cast<uint32>(sizeof(ValueType));  // NOLINT
+  }
+
+  void SetHeader() {
+    header.SetCmd<ValueType>();
+  }
+
+  void Init(GLuint _bucket_id) {
+    SetHeader();
+    bucket_id = _bucket_id;
+  }
+
+  void* Set(void* cmd, GLuint _bucket_id) {
+    static_cast<ValueType*>(cmd)->Init(_bucket_id);
+    return NextCmdAddress<ValueType>(cmd);
+  }
+
+  gpu::CommandHeader header;
+  uint32 bucket_id;
+};
+
+COMPILE_ASSERT(sizeof(GenMailboxCHROMIUM) == 8,
+               Sizeof_GenMailboxCHROMIUM_is_not_8);
+COMPILE_ASSERT(offsetof(GenMailboxCHROMIUM, header) == 0,
+               OffsetOf_GenMailboxCHROMIUM_header_not_0);
+COMPILE_ASSERT(offsetof(GenMailboxCHROMIUM, bucket_id) == 4,
+               OffsetOf_GenMailboxCHROMIUM_bucket_id_not_4);
+
+struct ProduceTextureCHROMIUM {
+  typedef ProduceTextureCHROMIUM ValueType;
+  static const CommandId kCmdId = kProduceTextureCHROMIUM;
+  static const cmd::ArgFlags kArgFlags = cmd::kFixed;
+
+  static uint32 ComputeSize() {
+    return static_cast<uint32>(sizeof(ValueType));  // NOLINT
+  }
+
+  void SetHeader() {
+    header.SetCmd<ValueType>();
+  }
+
+  void Init(
+      GLenum _target, uint32 _mailbox_shm_id, uint32 _mailbox_shm_offset) {
+    SetHeader();
+    target = _target;
+    mailbox_shm_id = _mailbox_shm_id;
+    mailbox_shm_offset = _mailbox_shm_offset;
+  }
+
+  void* Set(
+      void* cmd, GLenum _target, uint32 _mailbox_shm_id,
+      uint32 _mailbox_shm_offset) {
+    static_cast<ValueType*>(
+        cmd)->Init(_target, _mailbox_shm_id, _mailbox_shm_offset);
+    return NextCmdAddress<ValueType>(cmd);
+  }
+
+  gpu::CommandHeader header;
+  uint32 target;
+  uint32 mailbox_shm_id;
+  uint32 mailbox_shm_offset;
+};
+
+COMPILE_ASSERT(sizeof(ProduceTextureCHROMIUM) == 16,
+               Sizeof_ProduceTextureCHROMIUM_is_not_16);
+COMPILE_ASSERT(offsetof(ProduceTextureCHROMIUM, header) == 0,
+               OffsetOf_ProduceTextureCHROMIUM_header_not_0);
+COMPILE_ASSERT(offsetof(ProduceTextureCHROMIUM, target) == 4,
+               OffsetOf_ProduceTextureCHROMIUM_target_not_4);
+COMPILE_ASSERT(offsetof(ProduceTextureCHROMIUM, mailbox_shm_id) == 8,
+               OffsetOf_ProduceTextureCHROMIUM_mailbox_shm_id_not_8);
+COMPILE_ASSERT(offsetof(ProduceTextureCHROMIUM, mailbox_shm_offset) == 12,
+               OffsetOf_ProduceTextureCHROMIUM_mailbox_shm_offset_not_12);
+
+struct ProduceTextureCHROMIUMImmediate {
+  typedef ProduceTextureCHROMIUMImmediate ValueType;
+  static const CommandId kCmdId = kProduceTextureCHROMIUMImmediate;
+  static const cmd::ArgFlags kArgFlags = cmd::kAtLeastN;
+
+  static uint32 ComputeDataSize() {
+    return static_cast<uint32>(
+        sizeof(GLbyte) * 64);  // NOLINT
+  }
+
+  static uint32 ComputeSize() {
+    return static_cast<uint32>(
+        sizeof(ValueType) + ComputeDataSize());  // NOLINT
+  }
+
+  void SetHeader() {
+    header.SetCmdByTotalSize<ValueType>(ComputeSize());
+  }
+
+  void Init(GLenum _target, const GLbyte* _mailbox) {
+    SetHeader();
+    target = _target;
+    memcpy(ImmediateDataAddress(this),
+           _mailbox, ComputeDataSize());
+  }
+
+  void* Set(void* cmd, GLenum _target, const GLbyte* _mailbox) {
+    static_cast<ValueType*>(cmd)->Init(_target, _mailbox);
+    const uint32 size = ComputeSize();
+    return NextImmediateCmdAddressTotalSize<ValueType>(cmd, size);
+  }
+
+  gpu::CommandHeader header;
+  uint32 target;
+};
+
+COMPILE_ASSERT(sizeof(ProduceTextureCHROMIUMImmediate) == 8,
+               Sizeof_ProduceTextureCHROMIUMImmediate_is_not_8);
+COMPILE_ASSERT(offsetof(ProduceTextureCHROMIUMImmediate, header) == 0,
+               OffsetOf_ProduceTextureCHROMIUMImmediate_header_not_0);
+COMPILE_ASSERT(offsetof(ProduceTextureCHROMIUMImmediate, target) == 4,
+               OffsetOf_ProduceTextureCHROMIUMImmediate_target_not_4);
+
+struct ConsumeTextureCHROMIUM {
+  typedef ConsumeTextureCHROMIUM ValueType;
+  static const CommandId kCmdId = kConsumeTextureCHROMIUM;
+  static const cmd::ArgFlags kArgFlags = cmd::kFixed;
+
+  static uint32 ComputeSize() {
+    return static_cast<uint32>(sizeof(ValueType));  // NOLINT
+  }
+
+  void SetHeader() {
+    header.SetCmd<ValueType>();
+  }
+
+  void Init(
+      GLenum _target, uint32 _mailbox_shm_id, uint32 _mailbox_shm_offset) {
+    SetHeader();
+    target = _target;
+    mailbox_shm_id = _mailbox_shm_id;
+    mailbox_shm_offset = _mailbox_shm_offset;
+  }
+
+  void* Set(
+      void* cmd, GLenum _target, uint32 _mailbox_shm_id,
+      uint32 _mailbox_shm_offset) {
+    static_cast<ValueType*>(
+        cmd)->Init(_target, _mailbox_shm_id, _mailbox_shm_offset);
+    return NextCmdAddress<ValueType>(cmd);
+  }
+
+  gpu::CommandHeader header;
+  uint32 target;
+  uint32 mailbox_shm_id;
+  uint32 mailbox_shm_offset;
+};
+
+COMPILE_ASSERT(sizeof(ConsumeTextureCHROMIUM) == 16,
+               Sizeof_ConsumeTextureCHROMIUM_is_not_16);
+COMPILE_ASSERT(offsetof(ConsumeTextureCHROMIUM, header) == 0,
+               OffsetOf_ConsumeTextureCHROMIUM_header_not_0);
+COMPILE_ASSERT(offsetof(ConsumeTextureCHROMIUM, target) == 4,
+               OffsetOf_ConsumeTextureCHROMIUM_target_not_4);
+COMPILE_ASSERT(offsetof(ConsumeTextureCHROMIUM, mailbox_shm_id) == 8,
+               OffsetOf_ConsumeTextureCHROMIUM_mailbox_shm_id_not_8);
+COMPILE_ASSERT(offsetof(ConsumeTextureCHROMIUM, mailbox_shm_offset) == 12,
+               OffsetOf_ConsumeTextureCHROMIUM_mailbox_shm_offset_not_12);
+
+struct ConsumeTextureCHROMIUMImmediate {
+  typedef ConsumeTextureCHROMIUMImmediate ValueType;
+  static const CommandId kCmdId = kConsumeTextureCHROMIUMImmediate;
+  static const cmd::ArgFlags kArgFlags = cmd::kAtLeastN;
+
+  static uint32 ComputeDataSize() {
+    return static_cast<uint32>(
+        sizeof(GLbyte) * 64);  // NOLINT
+  }
+
+  static uint32 ComputeSize() {
+    return static_cast<uint32>(
+        sizeof(ValueType) + ComputeDataSize());  // NOLINT
+  }
+
+  void SetHeader() {
+    header.SetCmdByTotalSize<ValueType>(ComputeSize());
+  }
+
+  void Init(GLenum _target, const GLbyte* _mailbox) {
+    SetHeader();
+    target = _target;
+    memcpy(ImmediateDataAddress(this),
+           _mailbox, ComputeDataSize());
+  }
+
+  void* Set(void* cmd, GLenum _target, const GLbyte* _mailbox) {
+    static_cast<ValueType*>(cmd)->Init(_target, _mailbox);
+    const uint32 size = ComputeSize();
+    return NextImmediateCmdAddressTotalSize<ValueType>(cmd, size);
+  }
+
+  gpu::CommandHeader header;
+  uint32 target;
+};
+
+COMPILE_ASSERT(sizeof(ConsumeTextureCHROMIUMImmediate) == 8,
+               Sizeof_ConsumeTextureCHROMIUMImmediate_is_not_8);
+COMPILE_ASSERT(offsetof(ConsumeTextureCHROMIUMImmediate, header) == 0,
+               OffsetOf_ConsumeTextureCHROMIUMImmediate_header_not_0);
+COMPILE_ASSERT(offsetof(ConsumeTextureCHROMIUMImmediate, target) == 4,
+               OffsetOf_ConsumeTextureCHROMIUMImmediate_target_not_4);
+
+struct BindUniformLocationCHROMIUM {
+  typedef BindUniformLocationCHROMIUM ValueType;
+  static const CommandId kCmdId = kBindUniformLocationCHROMIUM;
+  static const cmd::ArgFlags kArgFlags = cmd::kFixed;
+
+  static uint32 ComputeSize() {
+    return static_cast<uint32>(sizeof(ValueType));  // NOLINT
+  }
+
+  void SetHeader() {
+    header.SetCmd<ValueType>();
+  }
+
+  void Init(
+      GLuint _program, GLint _location, uint32 _name_shm_id,
+      uint32 _name_shm_offset, uint32 _data_size) {
+    SetHeader();
+    program = _program;
+    location = _location;
+    name_shm_id = _name_shm_id;
+    name_shm_offset = _name_shm_offset;
+    data_size = _data_size;
+  }
+
+  void* Set(
+      void* cmd, GLuint _program, GLint _location, uint32 _name_shm_id,
+      uint32 _name_shm_offset, uint32 _data_size) {
+    static_cast<ValueType*>(
+        cmd)->Init(
+            _program, _location, _name_shm_id, _name_shm_offset, _data_size);
+    return NextCmdAddress<ValueType>(cmd);
+  }
+
+  gpu::CommandHeader header;
+  uint32 program;
+  int32 location;
+  uint32 name_shm_id;
+  uint32 name_shm_offset;
+  uint32 data_size;
+};
+
+COMPILE_ASSERT(sizeof(BindUniformLocationCHROMIUM) == 24,
+               Sizeof_BindUniformLocationCHROMIUM_is_not_24);
+COMPILE_ASSERT(offsetof(BindUniformLocationCHROMIUM, header) == 0,
+               OffsetOf_BindUniformLocationCHROMIUM_header_not_0);
+COMPILE_ASSERT(offsetof(BindUniformLocationCHROMIUM, program) == 4,
+               OffsetOf_BindUniformLocationCHROMIUM_program_not_4);
+COMPILE_ASSERT(offsetof(BindUniformLocationCHROMIUM, location) == 8,
+               OffsetOf_BindUniformLocationCHROMIUM_location_not_8);
+COMPILE_ASSERT(offsetof(BindUniformLocationCHROMIUM, name_shm_id) == 12,
+               OffsetOf_BindUniformLocationCHROMIUM_name_shm_id_not_12);
+COMPILE_ASSERT(offsetof(BindUniformLocationCHROMIUM, name_shm_offset) == 16,
+               OffsetOf_BindUniformLocationCHROMIUM_name_shm_offset_not_16);
+COMPILE_ASSERT(offsetof(BindUniformLocationCHROMIUM, data_size) == 20,
+               OffsetOf_BindUniformLocationCHROMIUM_data_size_not_20);
+
+struct BindUniformLocationCHROMIUMImmediate {
+  typedef BindUniformLocationCHROMIUMImmediate ValueType;
+  static const CommandId kCmdId = kBindUniformLocationCHROMIUMImmediate;
+  static const cmd::ArgFlags kArgFlags = cmd::kAtLeastN;
+
+  static uint32 ComputeSize(uint32 data_size) {
+    return static_cast<uint32>(
+        sizeof(ValueType) + data_size);  // NOLINT
+  }
+
+  void SetHeader(uint32 data_size) {
+    header.SetCmdBySize<ValueType>(data_size);
+  }
+
+  void Init(
+      GLuint _program, GLint _location, const char* _name, uint32 _data_size) {
+    SetHeader(_data_size);
+    program = _program;
+    location = _location;
+    data_size = _data_size;
+    memcpy(ImmediateDataAddress(this), _name, _data_size);
+  }
+
+  void* Set(
+      void* cmd, GLuint _program, GLint _location, const char* _name,
+      uint32 _data_size) {
+    static_cast<ValueType*>(cmd)->Init(_program, _location, _name, _data_size);
+    return NextImmediateCmdAddress<ValueType>(cmd, _data_size);
+  }
+
+  gpu::CommandHeader header;
+  uint32 program;
+  int32 location;
+  uint32 data_size;
+};
+
+COMPILE_ASSERT(sizeof(BindUniformLocationCHROMIUMImmediate) == 16,
+               Sizeof_BindUniformLocationCHROMIUMImmediate_is_not_16);
+COMPILE_ASSERT(offsetof(BindUniformLocationCHROMIUMImmediate, header) == 0,
+               OffsetOf_BindUniformLocationCHROMIUMImmediate_header_not_0);
+COMPILE_ASSERT(offsetof(BindUniformLocationCHROMIUMImmediate, program) == 4,
+               OffsetOf_BindUniformLocationCHROMIUMImmediate_program_not_4);
+COMPILE_ASSERT(offsetof(BindUniformLocationCHROMIUMImmediate, location) == 8,
+               OffsetOf_BindUniformLocationCHROMIUMImmediate_location_not_8);
+COMPILE_ASSERT(offsetof(BindUniformLocationCHROMIUMImmediate, data_size) == 12,
+               OffsetOf_BindUniformLocationCHROMIUMImmediate_data_size_not_12);
+
+struct BindUniformLocationCHROMIUMBucket {
+  typedef BindUniformLocationCHROMIUMBucket ValueType;
+  static const CommandId kCmdId = kBindUniformLocationCHROMIUMBucket;
+  static const cmd::ArgFlags kArgFlags = cmd::kFixed;
+
+  static uint32 ComputeSize() {
+    return static_cast<uint32>(sizeof(ValueType));  // NOLINT
+  }
+
+  void SetHeader() {
+    header.SetCmd<ValueType>();
+  }
+
+  void Init(GLuint _program, GLint _location, uint32 _name_bucket_id) {
+    SetHeader();
+    program = _program;
+    location = _location;
+    name_bucket_id = _name_bucket_id;
+  }
+
+  void* Set(
+      void* cmd, GLuint _program, GLint _location, uint32 _name_bucket_id) {
+    static_cast<ValueType*>(cmd)->Init(_program, _location, _name_bucket_id);
+    return NextCmdAddress<ValueType>(cmd);
+  }
+
+  gpu::CommandHeader header;
+  uint32 program;
+  int32 location;
+  uint32 name_bucket_id;
+};
+
+COMPILE_ASSERT(sizeof(BindUniformLocationCHROMIUMBucket) == 16,
+               Sizeof_BindUniformLocationCHROMIUMBucket_is_not_16);
+COMPILE_ASSERT(offsetof(BindUniformLocationCHROMIUMBucket, header) == 0,
+               OffsetOf_BindUniformLocationCHROMIUMBucket_header_not_0);
+COMPILE_ASSERT(offsetof(BindUniformLocationCHROMIUMBucket, program) == 4,
+               OffsetOf_BindUniformLocationCHROMIUMBucket_program_not_4);
+COMPILE_ASSERT(offsetof(BindUniformLocationCHROMIUMBucket, location) == 8,
+               OffsetOf_BindUniformLocationCHROMIUMBucket_location_not_8);
+COMPILE_ASSERT(
+    offsetof(BindUniformLocationCHROMIUMBucket, name_bucket_id) == 12,
+               OffsetOf_BindUniformLocationCHROMIUMBucket_name_bucket_id_not_12);  // NOLINT
+
+struct BindTexImage2DCHROMIUM {
+  typedef BindTexImage2DCHROMIUM ValueType;
+  static const CommandId kCmdId = kBindTexImage2DCHROMIUM;
+  static const cmd::ArgFlags kArgFlags = cmd::kFixed;
+
+  static uint32 ComputeSize() {
+    return static_cast<uint32>(sizeof(ValueType));  // NOLINT
+  }
+
+  void SetHeader() {
+    header.SetCmd<ValueType>();
+  }
+
+  void Init(GLenum _target, GLint _imageId) {
+    SetHeader();
+    target = _target;
+    imageId = _imageId;
+  }
+
+  void* Set(void* cmd, GLenum _target, GLint _imageId) {
+    static_cast<ValueType*>(cmd)->Init(_target, _imageId);
+    return NextCmdAddress<ValueType>(cmd);
+  }
+
+  gpu::CommandHeader header;
+  uint32 target;
+  int32 imageId;
+};
+
+COMPILE_ASSERT(sizeof(BindTexImage2DCHROMIUM) == 12,
+               Sizeof_BindTexImage2DCHROMIUM_is_not_12);
+COMPILE_ASSERT(offsetof(BindTexImage2DCHROMIUM, header) == 0,
+               OffsetOf_BindTexImage2DCHROMIUM_header_not_0);
+COMPILE_ASSERT(offsetof(BindTexImage2DCHROMIUM, target) == 4,
+               OffsetOf_BindTexImage2DCHROMIUM_target_not_4);
+COMPILE_ASSERT(offsetof(BindTexImage2DCHROMIUM, imageId) == 8,
+               OffsetOf_BindTexImage2DCHROMIUM_imageId_not_8);
+
+struct ReleaseTexImage2DCHROMIUM {
+  typedef ReleaseTexImage2DCHROMIUM ValueType;
+  static const CommandId kCmdId = kReleaseTexImage2DCHROMIUM;
+  static const cmd::ArgFlags kArgFlags = cmd::kFixed;
+
+  static uint32 ComputeSize() {
+    return static_cast<uint32>(sizeof(ValueType));  // NOLINT
+  }
+
+  void SetHeader() {
+    header.SetCmd<ValueType>();
+  }
+
+  void Init(GLenum _target, GLint _imageId) {
+    SetHeader();
+    target = _target;
+    imageId = _imageId;
+  }
+
+  void* Set(void* cmd, GLenum _target, GLint _imageId) {
+    static_cast<ValueType*>(cmd)->Init(_target, _imageId);
+    return NextCmdAddress<ValueType>(cmd);
+  }
+
+  gpu::CommandHeader header;
+  uint32 target;
+  int32 imageId;
+};
+
+COMPILE_ASSERT(sizeof(ReleaseTexImage2DCHROMIUM) == 12,
+               Sizeof_ReleaseTexImage2DCHROMIUM_is_not_12);
+COMPILE_ASSERT(offsetof(ReleaseTexImage2DCHROMIUM, header) == 0,
+               OffsetOf_ReleaseTexImage2DCHROMIUM_header_not_0);
+COMPILE_ASSERT(offsetof(ReleaseTexImage2DCHROMIUM, target) == 4,
+               OffsetOf_ReleaseTexImage2DCHROMIUM_target_not_4);
+COMPILE_ASSERT(offsetof(ReleaseTexImage2DCHROMIUM, imageId) == 8,
+               OffsetOf_ReleaseTexImage2DCHROMIUM_imageId_not_8);
+
+struct TraceBeginCHROMIUM {
+  typedef TraceBeginCHROMIUM ValueType;
+  static const CommandId kCmdId = kTraceBeginCHROMIUM;
+  static const cmd::ArgFlags kArgFlags = cmd::kFixed;
+
+  static uint32 ComputeSize() {
+    return static_cast<uint32>(sizeof(ValueType));  // NOLINT
+  }
+
+  void SetHeader() {
+    header.SetCmd<ValueType>();
+  }
+
+  void Init(GLuint _bucket_id) {
+    SetHeader();
+    bucket_id = _bucket_id;
+  }
+
+  void* Set(void* cmd, GLuint _bucket_id) {
+    static_cast<ValueType*>(cmd)->Init(_bucket_id);
+    return NextCmdAddress<ValueType>(cmd);
+  }
+
+  gpu::CommandHeader header;
+  uint32 bucket_id;
+};
+
+COMPILE_ASSERT(sizeof(TraceBeginCHROMIUM) == 8,
+               Sizeof_TraceBeginCHROMIUM_is_not_8);
+COMPILE_ASSERT(offsetof(TraceBeginCHROMIUM, header) == 0,
+               OffsetOf_TraceBeginCHROMIUM_header_not_0);
+COMPILE_ASSERT(offsetof(TraceBeginCHROMIUM, bucket_id) == 4,
+               OffsetOf_TraceBeginCHROMIUM_bucket_id_not_4);
+
+struct TraceEndCHROMIUM {
+  typedef TraceEndCHROMIUM ValueType;
+  static const CommandId kCmdId = kTraceEndCHROMIUM;
+  static const cmd::ArgFlags kArgFlags = cmd::kFixed;
+
+  static uint32 ComputeSize() {
+    return static_cast<uint32>(sizeof(ValueType));  // NOLINT
+  }
+
+  void SetHeader() {
+    header.SetCmd<ValueType>();
+  }
+
+  void Init() {
+    SetHeader();
+  }
+
+  void* Set(void* cmd) {
+    static_cast<ValueType*>(cmd)->Init();
+    return NextCmdAddress<ValueType>(cmd);
+  }
+
+  gpu::CommandHeader header;
+};
+
+COMPILE_ASSERT(sizeof(TraceEndCHROMIUM) == 4,
+               Sizeof_TraceEndCHROMIUM_is_not_4);
+COMPILE_ASSERT(offsetof(TraceEndCHROMIUM, header) == 0,
+               OffsetOf_TraceEndCHROMIUM_header_not_0);
+
+struct AsyncTexSubImage2DCHROMIUM {
+  typedef AsyncTexSubImage2DCHROMIUM ValueType;
+  static const CommandId kCmdId = kAsyncTexSubImage2DCHROMIUM;
+  static const cmd::ArgFlags kArgFlags = cmd::kFixed;
+
+  static uint32 ComputeSize() {
+    return static_cast<uint32>(sizeof(ValueType));  // NOLINT
+  }
+
+  void SetHeader() {
+    header.SetCmd<ValueType>();
+  }
+
+  void Init(
+      GLenum _target, GLint _level, GLint _xoffset, GLint _yoffset,
+      GLsizei _width, GLsizei _height, GLenum _format, GLenum _type,
+      uint32 _data_shm_id, uint32 _data_shm_offset) {
+    SetHeader();
+    target = _target;
+    level = _level;
+    xoffset = _xoffset;
+    yoffset = _yoffset;
+    width = _width;
+    height = _height;
+    format = _format;
+    type = _type;
+    data_shm_id = _data_shm_id;
+    data_shm_offset = _data_shm_offset;
+  }
+
+  void* Set(
+      void* cmd, GLenum _target, GLint _level, GLint _xoffset, GLint _yoffset,
+      GLsizei _width, GLsizei _height, GLenum _format, GLenum _type,
+      uint32 _data_shm_id, uint32 _data_shm_offset) {
+    static_cast<ValueType*>(
+        cmd)->Init(
+            _target, _level, _xoffset, _yoffset, _width, _height, _format,
+            _type, _data_shm_id, _data_shm_offset);
+    return NextCmdAddress<ValueType>(cmd);
+  }
+
+  gpu::CommandHeader header;
+  uint32 target;
+  int32 level;
+  int32 xoffset;
+  int32 yoffset;
+  int32 width;
+  int32 height;
+  uint32 format;
+  uint32 type;
+  uint32 data_shm_id;
+  uint32 data_shm_offset;
+};
+
+COMPILE_ASSERT(sizeof(AsyncTexSubImage2DCHROMIUM) == 44,
+               Sizeof_AsyncTexSubImage2DCHROMIUM_is_not_44);
+COMPILE_ASSERT(offsetof(AsyncTexSubImage2DCHROMIUM, header) == 0,
+               OffsetOf_AsyncTexSubImage2DCHROMIUM_header_not_0);
+COMPILE_ASSERT(offsetof(AsyncTexSubImage2DCHROMIUM, target) == 4,
+               OffsetOf_AsyncTexSubImage2DCHROMIUM_target_not_4);
+COMPILE_ASSERT(offsetof(AsyncTexSubImage2DCHROMIUM, level) == 8,
+               OffsetOf_AsyncTexSubImage2DCHROMIUM_level_not_8);
+COMPILE_ASSERT(offsetof(AsyncTexSubImage2DCHROMIUM, xoffset) == 12,
+               OffsetOf_AsyncTexSubImage2DCHROMIUM_xoffset_not_12);
+COMPILE_ASSERT(offsetof(AsyncTexSubImage2DCHROMIUM, yoffset) == 16,
+               OffsetOf_AsyncTexSubImage2DCHROMIUM_yoffset_not_16);
+COMPILE_ASSERT(offsetof(AsyncTexSubImage2DCHROMIUM, width) == 20,
+               OffsetOf_AsyncTexSubImage2DCHROMIUM_width_not_20);
+COMPILE_ASSERT(offsetof(AsyncTexSubImage2DCHROMIUM, height) == 24,
+               OffsetOf_AsyncTexSubImage2DCHROMIUM_height_not_24);
+COMPILE_ASSERT(offsetof(AsyncTexSubImage2DCHROMIUM, format) == 28,
+               OffsetOf_AsyncTexSubImage2DCHROMIUM_format_not_28);
+COMPILE_ASSERT(offsetof(AsyncTexSubImage2DCHROMIUM, type) == 32,
+               OffsetOf_AsyncTexSubImage2DCHROMIUM_type_not_32);
+COMPILE_ASSERT(offsetof(AsyncTexSubImage2DCHROMIUM, data_shm_id) == 36,
+               OffsetOf_AsyncTexSubImage2DCHROMIUM_data_shm_id_not_36);
+COMPILE_ASSERT(offsetof(AsyncTexSubImage2DCHROMIUM, data_shm_offset) == 40,
+               OffsetOf_AsyncTexSubImage2DCHROMIUM_data_shm_offset_not_40);
+
+struct AsyncTexImage2DCHROMIUM {
+  typedef AsyncTexImage2DCHROMIUM ValueType;
+  static const CommandId kCmdId = kAsyncTexImage2DCHROMIUM;
+  static const cmd::ArgFlags kArgFlags = cmd::kFixed;
+
+  static uint32 ComputeSize() {
+    return static_cast<uint32>(sizeof(ValueType));  // NOLINT
+  }
+
+  void SetHeader() {
+    header.SetCmd<ValueType>();
+  }
+
+  void Init(
+      GLenum _target, GLint _level, GLint _internalformat, GLsizei _width,
+      GLsizei _height, GLint _border, GLenum _format, GLenum _type,
+      uint32 _pixels_shm_id, uint32 _pixels_shm_offset) {
+    SetHeader();
+    target = _target;
+    level = _level;
+    internalformat = _internalformat;
+    width = _width;
+    height = _height;
+    border = _border;
+    format = _format;
+    type = _type;
+    pixels_shm_id = _pixels_shm_id;
+    pixels_shm_offset = _pixels_shm_offset;
+  }
+
+  void* Set(
+      void* cmd, GLenum _target, GLint _level, GLint _internalformat,
+      GLsizei _width, GLsizei _height, GLint _border, GLenum _format,
+      GLenum _type, uint32 _pixels_shm_id, uint32 _pixels_shm_offset) {
+    static_cast<ValueType*>(
+        cmd)->Init(
+            _target, _level, _internalformat, _width, _height, _border, _format,
+            _type, _pixels_shm_id, _pixels_shm_offset);
+    return NextCmdAddress<ValueType>(cmd);
+  }
+
+  gpu::CommandHeader header;
+  uint32 target;
+  int32 level;
+  int32 internalformat;
+  int32 width;
+  int32 height;
+  int32 border;
+  uint32 format;
+  uint32 type;
+  uint32 pixels_shm_id;
+  uint32 pixels_shm_offset;
+};
+
+COMPILE_ASSERT(sizeof(AsyncTexImage2DCHROMIUM) == 44,
+               Sizeof_AsyncTexImage2DCHROMIUM_is_not_44);
+COMPILE_ASSERT(offsetof(AsyncTexImage2DCHROMIUM, header) == 0,
+               OffsetOf_AsyncTexImage2DCHROMIUM_header_not_0);
+COMPILE_ASSERT(offsetof(AsyncTexImage2DCHROMIUM, target) == 4,
+               OffsetOf_AsyncTexImage2DCHROMIUM_target_not_4);
+COMPILE_ASSERT(offsetof(AsyncTexImage2DCHROMIUM, level) == 8,
+               OffsetOf_AsyncTexImage2DCHROMIUM_level_not_8);
+COMPILE_ASSERT(offsetof(AsyncTexImage2DCHROMIUM, internalformat) == 12,
+               OffsetOf_AsyncTexImage2DCHROMIUM_internalformat_not_12);
+COMPILE_ASSERT(offsetof(AsyncTexImage2DCHROMIUM, width) == 16,
+               OffsetOf_AsyncTexImage2DCHROMIUM_width_not_16);
+COMPILE_ASSERT(offsetof(AsyncTexImage2DCHROMIUM, height) == 20,
+               OffsetOf_AsyncTexImage2DCHROMIUM_height_not_20);
+COMPILE_ASSERT(offsetof(AsyncTexImage2DCHROMIUM, border) == 24,
+               OffsetOf_AsyncTexImage2DCHROMIUM_border_not_24);
+COMPILE_ASSERT(offsetof(AsyncTexImage2DCHROMIUM, format) == 28,
+               OffsetOf_AsyncTexImage2DCHROMIUM_format_not_28);
+COMPILE_ASSERT(offsetof(AsyncTexImage2DCHROMIUM, type) == 32,
+               OffsetOf_AsyncTexImage2DCHROMIUM_type_not_32);
+COMPILE_ASSERT(offsetof(AsyncTexImage2DCHROMIUM, pixels_shm_id) == 36,
+               OffsetOf_AsyncTexImage2DCHROMIUM_pixels_shm_id_not_36);
+COMPILE_ASSERT(offsetof(AsyncTexImage2DCHROMIUM, pixels_shm_offset) == 40,
+               OffsetOf_AsyncTexImage2DCHROMIUM_pixels_shm_offset_not_40);
+
+struct DiscardFramebufferEXT {
+  typedef DiscardFramebufferEXT ValueType;
+  static const CommandId kCmdId = kDiscardFramebufferEXT;
+  static const cmd::ArgFlags kArgFlags = cmd::kFixed;
+
+  static uint32 ComputeSize() {
+    return static_cast<uint32>(sizeof(ValueType));  // NOLINT
+  }
+
+  void SetHeader() {
+    header.SetCmd<ValueType>();
+  }
+
+  void Init(
+      GLenum _target, GLsizei _count, uint32 _attachments_shm_id,
+      uint32 _attachments_shm_offset) {
+    SetHeader();
+    target = _target;
+    count = _count;
+    attachments_shm_id = _attachments_shm_id;
+    attachments_shm_offset = _attachments_shm_offset;
+  }
+
+  void* Set(
+      void* cmd, GLenum _target, GLsizei _count, uint32 _attachments_shm_id,
+      uint32 _attachments_shm_offset) {
+    static_cast<ValueType*>(
+        cmd)->Init(
+            _target, _count, _attachments_shm_id, _attachments_shm_offset);
+    return NextCmdAddress<ValueType>(cmd);
+  }
+
+  gpu::CommandHeader header;
+  uint32 target;
+  int32 count;
+  uint32 attachments_shm_id;
+  uint32 attachments_shm_offset;
+};
+
+COMPILE_ASSERT(sizeof(DiscardFramebufferEXT) == 20,
+               Sizeof_DiscardFramebufferEXT_is_not_20);
+COMPILE_ASSERT(offsetof(DiscardFramebufferEXT, header) == 0,
+               OffsetOf_DiscardFramebufferEXT_header_not_0);
+COMPILE_ASSERT(offsetof(DiscardFramebufferEXT, target) == 4,
+               OffsetOf_DiscardFramebufferEXT_target_not_4);
+COMPILE_ASSERT(offsetof(DiscardFramebufferEXT, count) == 8,
+               OffsetOf_DiscardFramebufferEXT_count_not_8);
+COMPILE_ASSERT(offsetof(DiscardFramebufferEXT, attachments_shm_id) == 12,
+               OffsetOf_DiscardFramebufferEXT_attachments_shm_id_not_12);
+COMPILE_ASSERT(offsetof(DiscardFramebufferEXT, attachments_shm_offset) == 16,
+               OffsetOf_DiscardFramebufferEXT_attachments_shm_offset_not_16);
+
+struct DiscardFramebufferEXTImmediate {
+  typedef DiscardFramebufferEXTImmediate ValueType;
+  static const CommandId kCmdId = kDiscardFramebufferEXTImmediate;
+  static const cmd::ArgFlags kArgFlags = cmd::kAtLeastN;
+
+  static uint32 ComputeDataSize(GLsizei count) {
+    return static_cast<uint32>(
+        sizeof(GLenum) * 1 * count);  // NOLINT
+  }
+
+  static uint32 ComputeSize(GLsizei count) {
+    return static_cast<uint32>(
+        sizeof(ValueType) + ComputeDataSize(count));  // NOLINT
+  }
+
+  void SetHeader(GLsizei count) {
+    header.SetCmdByTotalSize<ValueType>(ComputeSize(count));
+  }
+
+  void Init(GLenum _target, GLsizei _count, const GLenum* _attachments) {
+    SetHeader(_count);
+    target = _target;
+    count = _count;
+    memcpy(ImmediateDataAddress(this),
+           _attachments, ComputeDataSize(_count));
+  }
+
+  void* Set(
+      void* cmd, GLenum _target, GLsizei _count, const GLenum* _attachments) {
+    static_cast<ValueType*>(cmd)->Init(_target, _count, _attachments);
+    const uint32 size = ComputeSize(_count);
+    return NextImmediateCmdAddressTotalSize<ValueType>(cmd, size);
+  }
+
+  gpu::CommandHeader header;
+  uint32 target;
+  int32 count;
+};
+
+COMPILE_ASSERT(sizeof(DiscardFramebufferEXTImmediate) == 12,
+               Sizeof_DiscardFramebufferEXTImmediate_is_not_12);
+COMPILE_ASSERT(offsetof(DiscardFramebufferEXTImmediate, header) == 0,
+               OffsetOf_DiscardFramebufferEXTImmediate_header_not_0);
+COMPILE_ASSERT(offsetof(DiscardFramebufferEXTImmediate, target) == 4,
+               OffsetOf_DiscardFramebufferEXTImmediate_target_not_4);
+COMPILE_ASSERT(offsetof(DiscardFramebufferEXTImmediate, count) == 8,
+               OffsetOf_DiscardFramebufferEXTImmediate_count_not_8);
+
+struct LoseContextCHROMIUM {
+  typedef LoseContextCHROMIUM ValueType;
+  static const CommandId kCmdId = kLoseContextCHROMIUM;
+  static const cmd::ArgFlags kArgFlags = cmd::kFixed;
+
+  static uint32 ComputeSize() {
+    return static_cast<uint32>(sizeof(ValueType));  // NOLINT
+  }
+
+  void SetHeader() {
+    header.SetCmd<ValueType>();
+  }
+
+  void Init(GLenum _current, GLenum _other) {
+    SetHeader();
+    current = _current;
+    other = _other;
+  }
+
+  void* Set(void* cmd, GLenum _current, GLenum _other) {
+    static_cast<ValueType*>(cmd)->Init(_current, _other);
+    return NextCmdAddress<ValueType>(cmd);
+  }
+
+  gpu::CommandHeader header;
+  uint32 current;
+  uint32 other;
+};
+
+COMPILE_ASSERT(sizeof(LoseContextCHROMIUM) == 12,
+               Sizeof_LoseContextCHROMIUM_is_not_12);
+COMPILE_ASSERT(offsetof(LoseContextCHROMIUM, header) == 0,
+               OffsetOf_LoseContextCHROMIUM_header_not_0);
+COMPILE_ASSERT(offsetof(LoseContextCHROMIUM, current) == 4,
+               OffsetOf_LoseContextCHROMIUM_current_not_4);
+COMPILE_ASSERT(offsetof(LoseContextCHROMIUM, other) == 8,
+               OffsetOf_LoseContextCHROMIUM_other_not_8);
 
 
 #endif  // GPU_COMMAND_BUFFER_COMMON_GLES2_CMD_FORMAT_AUTOGEN_H_

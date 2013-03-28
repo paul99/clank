@@ -1,6 +1,6 @@
 #!/bin/bash -e
 
-# Copyright (c) 2011 The Chromium Authors. All rights reserved.
+# Copyright (c) 2012 The Chromium Authors. All rights reserved.
 # Use of this source code is governed by a BSD-style license that can be
 # found in the LICENSE file.
 
@@ -12,10 +12,9 @@ usage() {
   echo "Usage: $0 [--options]"
   echo "Options:"
   echo "--[no-]syms: enable or disable installation of debugging symbols"
-  echo "--[no-]gold: enable or disable installation of gold linker"
   echo "--[no-]lib32: enable or disable installation of 32 bit libraries"
-  echo "--[no-]restore-usr-bin-ld: enable or disable restoring /usr/bin/ld to"
-  echo "                           ld.bfd if it is currently gold"
+  echo "--[no-]arm: enable or disable installation of arm cross toolchain"
+  echo "--no-prompt: silently select standard options/defaults"
   echo "Script will prompt interactively if options not given."
   exit 1
 }
@@ -25,64 +24,23 @@ do
   case "$1" in
   --syms)                   do_inst_syms=1;;
   --no-syms)                do_inst_syms=0;;
-  --gold)                   do_inst_gold=1;;
-  --no-gold)                do_inst_gold=0;;
   --lib32)                  do_inst_lib32=1;;
   --no-lib32)               do_inst_lib32=0;;
-  --restore-usr-bin-ld)     do_restore_usr_bin_ld=1;;
-  --no-restore-usr-bin-ld)  do_restore_usr_bin_ld=0;;
+  --arm)                    do_inst_arm=1;;
+  --no-arm)                 do_inst_arm=0;;
+  --no-prompt)              do_default=1
+                            do_quietly="-qq --assume-yes"
+    ;;
   *) usage;;
   esac
   shift
 done
 
-install_gold() {
-  # Gold is optional; it's a faster replacement for ld,
-  # and makes life on 2GB machines much more pleasant.
+ubuntu_versions="10\.04|10\.10|11\.04|11\.10|12\.04"
+ubuntu_codenames="lucid|maverick|natty|oneiric|precise"
 
-  # First make sure root can access this directory, as that's tripped
-  # up some folks.
-  if sudo touch xyz.$$
-  then
-    sudo rm xyz.$$
-  else
-    echo root cannot write to the current directory, not installing gold
-    return
-  fi
-
-  BINUTILS=binutils-2.21.1
-  BINUTILS_URL=http://ftp.gnu.org/gnu/binutils/$BINUTILS.tar.bz2
-  BINUTILS_SHA1=525255ca6874b872540c9967a1d26acfbc7c8230
-
-  test -f $BINUTILS.tar.bz2 || wget $BINUTILS_URL
-  if test "`sha1sum $BINUTILS.tar.bz2|cut -d' ' -f1`" != "$BINUTILS_SHA1"
-  then
-    echo Bad sha1sum for $BINUTILS.tar.bz2
-    exit 1
-  fi
-
-  tar -xjvf $BINUTILS.tar.bz2
-  cd $BINUTILS
-  ./configure --prefix=/usr/local/gold --enable-gold=default --enable-threads \
-    --enable-bfd=yes
-  NCPU=`cat /proc/cpuinfo |grep ^processor|wc -l`
-  make maybe-all-binutils maybe-all-gold maybe-all-ld -j${NCPU}
-  if sudo make maybe-install-binutils maybe-install-gold maybe-install-ld
-  then
-    # Still need to figure out graceful way of pointing gyp to use
-    # /usr/local/gold/bin/ld without requiring him to set environment
-    # variables.
-    sudo strip /usr/local/gold/bin/ld.gold
-    sudo strip /usr/local/gold/bin/ld.bfd
-  else
-    echo "make install failed, not installing gold"
-  fi
-}
-
-if ! egrep -q \
-    'Ubuntu (10\.04|10\.10|11\.04|11\.10|lucid|maverick|natty|oneiric)' \
-    /etc/issue; then
-  echo "Only Ubuntu 10.04 (lucid) through 11.10 (oneiric) are currently" \
+if ! egrep -q "Ubuntu ($ubuntu_versions|$ubuntu_codenames)" /etc/issue; then
+  echo "ERROR: Only Ubuntu 10.04 (lucid) through 12.04 (precise) are currently"\
       "supported" >&2
   exit 1
 fi
@@ -99,54 +57,83 @@ if [ "x$(id -u)" != x0 ]; then
 fi
 
 # Packages needed for chromeos only
-chromeos_dev_list="libpulse-dev"
+chromeos_dev_list="libbluetooth-dev libpulse-dev"
 
 # Packages need for development
 dev_list="apache2.2-bin bison curl elfutils fakeroot flex g++ gperf
           language-pack-fr libapache2-mod-php5 libasound2-dev libbz2-dev
-          libcairo2-dev libcups2-dev libcurl4-gnutls-dev libdbus-glib-1-dev
-          libelf-dev libgconf2-dev libgl1-mesa-dev libglib2.0-dev
-          libglu1-mesa-dev libgnome-keyring-dev libgtk2.0-dev libjpeg62-dev
-          libkrb5-dev libnspr4-dev libnss3-dev libpam0g-dev libsctp-dev
+          libcairo2-dev libcups2-dev libcurl4-gnutls-dev libelf-dev
+          libgconf2-dev libgl1-mesa-dev libglib2.0-dev libglu1-mesa-dev
+          libgnome-keyring-dev libgtk2.0-dev libkrb5-dev libnspr4-dev
+          libnss3-dev libpam0g-dev libpci-dev libsctp-dev libspeechd-dev
           libsqlite3-dev libssl-dev libudev-dev libwww-perl libxslt1-dev
-          libxss-dev libxt-dev libxtst-dev mesa-common-dev msttcorefonts patch
-          perl php5-cgi pkg-config python python-cherrypy3 python-dev
-          python-psutil rpm ruby subversion ttf-dejavu-core ttf-indic-fonts
-          ttf-kochi-gothic ttf-kochi-mincho ttf-thai-tlwg wdiff
+          libxss-dev libxt-dev libxtst-dev mesa-common-dev patch perl php5-cgi
+          pkg-config python python-cherrypy3 python-dev python-psutil rpm ruby
+          subversion ttf-dejavu-core ttf-indic-fonts ttf-kochi-gothic
+          ttf-kochi-mincho ttf-thai-tlwg wdiff git-core
           $chromeos_dev_list"
+
+# 64-bit systems need a minimum set of 32-bit compat packages for the pre-built
+# NaCl binaries. These are always needed, regardless of whether or not we want
+# the full 32-bit "cross-compile" support (--lib32).
+if [ "$(uname -m)" = "x86_64" ]; then
+  dev_list="${dev_list} libc6-i386 lib32gcc1 lib32stdc++6"
+fi
 
 # Run-time libraries required by chromeos only
 chromeos_lib_list="libpulse0 libbz2-1.0 libcurl4-gnutls-dev"
 
 # Full list of required run-time libraries
-lib_list="libatk1.0-0 libc6 libasound2 libcairo2 libcups2 libdbus-glib-1-2
-          libexpat1 libfontconfig1 libfreetype6 libglib2.0-0 libgnome-keyring0
-          libgtk2.0-0 libpam0g libpango1.0-0 libpcre3 libpixman-1-0
-          libpng12-0 libstdc++6 libsqlite3-0 libudev0 libx11-6 libxau6 libxcb1
-          libxcomposite1 libxcursor1 libxdamage1 libxdmcp6 libxext6 libxfixes3
-          libxi6 libxinerama1 libxrandr2 libxrender1 libxtst6 zlib1g
-          $chromeos_lib_list"
+lib_list="libatk1.0-0 libc6 libasound2 libcairo2 libcups2 libexpat1
+          libfontconfig1 libfreetype6 libglib2.0-0 libgnome-keyring0
+          libgtk2.0-0 libpam0g libpango1.0-0 libpci3 libpcre3 libpixman-1-0
+          libpng12-0 libspeechd2 libstdc++6 libsqlite3-0 libudev0 libx11-6
+          libxau6 libxcb1 libxcomposite1 libxcursor1 libxdamage1 libxdmcp6
+          libxext6 libxfixes3 libxi6 libxinerama1 libxrandr2 libxrender1
+          libxtst6 zlib1g $chromeos_lib_list"
 
 # Debugging symbols for all of the run-time libraries
-dbg_list="libatk1.0-dbg libc6-dbg libcairo2-dbg libdbus-glib-1-2-dbg
-          libfontconfig1-dbg libglib2.0-0-dbg libgtk2.0-0-dbg
-          libpango1.0-0-dbg libpcre3-dbg libpixman-1-0-dbg
-          libsqlite3-0-dbg
-          libx11-6-dbg libxau6-dbg libxcb1-dbg libxcomposite1-dbg
-          libxcursor1-dbg libxdamage1-dbg libxdmcp6-dbg libxext6-dbg
-          libxfixes3-dbg libxi6-dbg libxinerama1-dbg libxrandr2-dbg
-          libxrender1-dbg libxtst6-dbg zlib1g-dbg"
+dbg_list="libatk1.0-dbg libc6-dbg libcairo2-dbg libfontconfig1-dbg
+          libglib2.0-0-dbg libgtk2.0-0-dbg libpango1.0-0-dbg libpcre3-dbg
+          libpixman-1-0-dbg libsqlite3-0-dbg libx11-6-dbg libxau6-dbg
+          libxcb1-dbg libxcomposite1-dbg libxcursor1-dbg libxdamage1-dbg
+          libxdmcp6-dbg libxext6-dbg libxfixes3-dbg libxi6-dbg libxinerama1-dbg
+          libxrandr2-dbg libxrender1-dbg libxtst6-dbg zlib1g-dbg"
+
+# arm cross toolchain packages needed to build chrome on arm
+arm_list="libc6-armel-cross libc6-dev-armel-cross libgcc1-armel-cross
+          libgomp1-armel-cross linux-libc-dev-armel-cross
+          libgcc1-dbg-armel-cross libgomp1-dbg-armel-cross
+          binutils-arm-linux-gnueabi cpp-arm-linux-gnueabi
+          gcc-arm-linux-gnueabi g++-arm-linux-gnueabi
+          libmudflap0-dbg-armel-cross"
 
 # Plugin lists needed for tests.
 plugin_list="flashplugin-installer"
 
-# Some NSS packages were renamed in Natty.
-if egrep -q 'Ubuntu (10\.04|10\.10)' /etc/issue; then
-  dbg_list="${dbg_list} libnspr4-0d-dbg libnss3-1d-dbg"
-  lib_list="${lib_list} libnspr4-0d libnss3-1d"
+# Some package names have changed over time
+if apt-cache show ttf-mscorefonts-installer >/dev/null 2>&1; then
+  dev_list="${dev_list} ttf-mscorefonts-installer"
 else
+  dev_list="${dev_list} msttcorefonts"
+fi
+if apt-cache show libnspr4-dbg >/dev/null 2>&1; then
   dbg_list="${dbg_list} libnspr4-dbg libnss3-dbg"
   lib_list="${lib_list} libnspr4 libnss3"
+else
+  dbg_list="${dbg_list} libnspr4-0d-dbg libnss3-1d-dbg"
+  lib_list="${lib_list} libnspr4-0d libnss3-1d"
+fi
+if apt-cache show libjpeg-dev >/dev/null 2>&1; then
+ dev_list="${dev_list} libjpeg-dev"
+else
+ dev_list="${dev_list} libjpeg62-dev"
+fi
+
+# Some packages are only needed, if the distribution actually supports
+# installing them.
+if apt-cache show appmenu-gtk >/dev/null 2>&1; then
+  lib_list="$lib_list appmenu-gtk"
 fi
 
 # Waits for the user to press 'Y' or 'N'. Either uppercase of lowercase is
@@ -156,6 +143,9 @@ fi
 # The function will echo the user's selection followed by a newline character.
 # Users can abort the function by pressing CTRL-C. This will call "exit 1".
 yes_no() {
+  if [ 0 -ne "${do_default-0}" ] ; then
+    return $1
+  fi
   local c
   while :; do
     c="$(trap 'stty echo -iuclc icanon 2>/dev/null' EXIT INT TERM QUIT
@@ -203,6 +193,26 @@ else
   dbg_list=
 fi
 
+# When cross building for arm on 64-bit systems the host binaries
+# that are part of v8 need to be compiled with -m32 which means
+# that basic multilib support is needed.
+if [ "$(uname -m)" = "x86_64" ]; then
+  arm_list="$arm_list g++-multilib"
+fi
+
+if test "$do_inst_arm" = "1"; then
+  . /etc/lsb-release
+  if test "$DISTRIB_CODENAME" != "precise"; then
+    echo "ERROR: Installing the ARM cross toolchain is only available on" \
+         "Ubuntu precise." >&2
+    exit 1
+  fi
+  echo "Installing ARM cross toolchain."
+else
+  echo "Skipping installation of ARM cross toolchain."
+  arm_list=
+fi
+
 sudo apt-get update
 
 # We initially run "apt-get" with the --reinstall option and parse its output.
@@ -210,8 +220,8 @@ sudo apt-get update
 # without accidentally promoting any packages from "auto" to "manual".
 # We then re-run "apt-get" with just the list of missing packages.
 echo "Finding missing packages..."
-packages="${dev_list} ${lib_list} ${dbg_list} ${plugin_list}"
-# Intentially leaving $packages unquoted so it's more readable.
+packages="${dev_list} ${lib_list} ${dbg_list} ${plugin_list} ${arm_list}"
+# Intentionally leaving $packages unquoted so it's more readable.
 echo "Packages required: " $packages
 echo
 new_list_cmd="sudo apt-get install --reinstall $(echo $packages)"
@@ -220,7 +230,7 @@ if new_list="$(yes n | LANG=C $new_list_cmd)"; then
   echo "No missing packages, and the packages are up-to-date."
 elif [ $? -eq 1 ]; then
   # We expect apt-get to have exit status of 1.
-  # This indicates that we canceled the install with "yes n|".
+  # This indicates that we cancelled the install with "yes n|".
   new_list=$(echo "$new_list" |
     sed -e '1,/The following NEW packages will be installed:/d;s/^  //;t;d')
   new_list=$(echo "$new_list" | sed 's/ *$//')
@@ -228,7 +238,7 @@ elif [ $? -eq 1 ]; then
     echo "No missing packages, and the packages are up-to-date."
   else
     echo "Installing missing packages: $new_list."
-    sudo apt-get install ${new_list}
+    sudo apt-get install ${do_quietly-} ${new_list}
   fi
   echo
 else
@@ -246,106 +256,34 @@ else
   exit 100
 fi
 
-# Some operating systems already ship gold (on recent Debian and
-# Ubuntu you can do "apt-get install binutils-gold" to get it), but
-# older releases didn't.  Additionally, gold 2.20 (included in Ubuntu
-# Lucid) makes binaries that just segfault, and 2.20.1 does not support
-# --map-whole-files.
-# So install from source if we don't have a good version.
-
-case `ld --version` in
-*gold*2.2[1-9].*)
-  echo "*** Warning ***"
-  echo "If the default linker is gold, linking may fail for:"
-  echo "the Linux kernel, kernel modules, Valgrind, and Wine."
-  echo "If you previously installed gold as the default linker,"
-  echo "you can restore the original linker by running:"
-  echo "'cd /usr/bin; sudo rm ld; sudo mv ld.orig ld'"
-  echo
-  if [ "$do_restore_usr_bin_ld" = "" ]
-  then
-    echo -n "Restore /usr/bin/ld to the original linker? (Y/n) "
-    if yes_no 0
-    then
-      do_restore_usr_bin_ld=1
-    fi
-    echo
-  fi
-  if [ "$do_restore_usr_bin_ld" = "1" ]
-  then
-    if sudo mv /usr/bin/ld.orig /usr/bin/ld
-    then
-      echo "Restored /usr/bin/ld.orig as /usr/bin/ld"
-    else
-      echo "Failed to restore /usr/bin/ld.orig as /usr/bin/ld"
-    fi
-    echo
-  fi
-  ;;
-esac
-
-# Check the gold version first.
-gold_up_to_date="1"
-if [ -x "/usr/local/gold/bin/ld" ]
-then
-  case `/usr/local/gold/bin/ld --version` in
-  *gold*2.2[1-9].*) ;;
-  * )
-    gold_up_to_date="0"
-  esac
-fi
-
-# Then check and make sure ld.bfd exists.
-if [ "$gold_up_to_date" = "1" ] && [ ! -x "/usr/local/gold/bin/ld.bfd" ]
-then
-  gold_up_to_date="0"
-fi
-
-if [ "$gold_up_to_date" = "0" ]
-then
-  if test "$do_inst_gold" = ""
-  then
-    echo "Gold is a new linker that links Chrome 5x faster than GNU ld."
-    echo -n "*** To use the gold linker, "
-    echo "you must pass -B/usr/local/gold/bin/ to g++ ***"
-    echo -n "Install the gold linker? (y/N) "
-    if yes_no 1; then
-      do_inst_gold=1
-    fi
-  fi
-  if test "$do_inst_gold" = "1"
-  then
-    echo "Building binutils with gold..."
-    install_gold || exit 99
-  else
-    echo "Not installing gold."
-  fi
-fi
-
 # Install 32bit backwards compatibility support for 64bit systems
 if [ "$(uname -m)" = "x86_64" ]; then
-  if test "$do_inst_lib32" = ""
+  if test "$do_inst_lib32" != "1"
   then
-    echo "Installing 32bit libraries not already provided by the system"
+    echo "NOTE: If you were expecting the option to install 32bit libs,"
+    echo "please run with the --lib32 flag."
     echo
-    echo "This is only needed to build a 32-bit Chrome on your 64-bit system."
-    echo
-    echo "While we only need to install a relatively small number of library"
-    echo "files, we temporarily need to download a lot of large *.deb packages"
-    echo "that contain these files. We will create new *.deb packages that"
-    echo "include just the 32bit libraries. These files will then be found on"
-    echo "your system in places like /lib32, /usr/lib32, /usr/lib/debug/lib32,"
-    echo "/usr/lib/debug/usr/lib32. If you ever need to uninstall these files,"
-    echo "look for packages named *-ia32.deb."
-    echo "Do you want me to download all packages needed to build new 32bit"
-    echo -n "package files (y/N) "
-    if yes_no 1; then
-      do_inst_lib32=1
-    fi
+    echo "Installation complete."
+    exit 0
+  fi
+
+  echo "WARNING"
+  echo
+  echo "We no longer recommend that you use this script to install"
+  echo "32bit libraries on a 64bit system. Instead, consider using the"
+  echo "install-chroot.sh script to help you set up a 32bit environment"
+  echo "for building and testing 32bit versions of Chrome."
+  echo
+  echo "The code for installing 32bit libraries on a 64bit system is"
+  echo "unmaintained and might not work with modern versions of Ubuntu"
+  echo "or Debian."
+  echo
+  echo -n "Are you sure you want to proceed (y/N) "
+  if yes_no 1; then
+    do_inst_lib32=1
   fi
   if test "$do_inst_lib32" != "1"
   then
-    echo "Exiting without installing any 32bit libraries."
     exit 0
   fi
 
@@ -358,7 +296,7 @@ if [ "$(uname -m)" = "x86_64" ]; then
   else
     cmp_list="${cmp_list} lib32readline5-dev"
   fi
-  sudo apt-get install $cmp_list
+  sudo apt-get install ${do_quietly-} $cmp_list
 
   tmp=/tmp/install-32bit.$$
   trap 'rm -rf "${tmp}"' EXIT INT TERM QUIT

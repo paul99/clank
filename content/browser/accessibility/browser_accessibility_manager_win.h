@@ -4,17 +4,14 @@
 
 #ifndef CONTENT_BROWSER_ACCESSIBILITY_BROWSER_ACCESSIBILITY_MANAGER_WIN_H_
 #define CONTENT_BROWSER_ACCESSIBILITY_BROWSER_ACCESSIBILITY_MANAGER_WIN_H_
-#pragma once
 
 #include <oleacc.h>
 
 #include "base/win/scoped_comptr.h"
 #include "content/browser/accessibility/browser_accessibility_manager.h"
-#include "webkit/glue/webaccessibility.h"
 
+namespace content {
 class BrowserAccessibilityWin;
-
-using webkit_glue::WebAccessibility;
 
 // Manages a tree of BrowserAccessibilityWin objects.
 class BrowserAccessibilityManagerWin : public BrowserAccessibilityManager {
@@ -36,7 +33,7 @@ class BrowserAccessibilityManagerWin : public BrowserAccessibilityManager {
  private:
   BrowserAccessibilityManagerWin(
       HWND parent_window,
-      const WebAccessibility& src,
+      const AccessibilityNodeData& src,
       BrowserAccessibilityDelegate* delegate,
       BrowserAccessibilityFactory* factory);
 
@@ -53,5 +50,7 @@ class BrowserAccessibilityManagerWin : public BrowserAccessibilityManager {
 
   DISALLOW_COPY_AND_ASSIGN(BrowserAccessibilityManagerWin);
 };
+
+}  // namespace content
 
 #endif  // CONTENT_BROWSER_ACCESSIBILITY_BROWSER_ACCESSIBILITY_MANAGER_WIN_H_

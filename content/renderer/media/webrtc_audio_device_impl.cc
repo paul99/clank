@@ -5,46 +5,47 @@
 #include "content/renderer/media/webrtc_audio_device_impl.h"
 
 #include "base/bind.h"
+#include "base/metrics/histogram.h"
 #include "base/string_util.h"
 #include "base/win/windows_version.h"
 #include "content/renderer/media/audio_hardware.h"
+#include "content/renderer/media/webrtc_audio_capturer.h"
+#include "content/renderer/media/webrtc_audio_renderer.h"
 #include "content/renderer/render_thread_impl.h"
+#include "media/audio/audio_parameters.h"
 #include "media/audio/audio_util.h"
+#include "media/audio/sample_rates.h"
 
-static const int64 kMillisecondsBetweenProcessCalls = 5000;
+using media::AudioParameters;
+using media::ChannelLayout;
+
+namespace content {
+
+namespace {
+
+const int64 kMillisecondsBetweenProcessCalls = 5000;
+const double kMaxVolumeLevel = 255.0;
+
+}  // namespace
 
 WebRtcAudioDeviceImpl::WebRtcAudioDeviceImpl()
     : ref_count_(0),
       render_loop_(base::MessageLoopProxy::current()),
       audio_transport_callback_(NULL),
-      input_buffer_size_(0),
-      output_buffer_size_(0),
-      input_channels_(0),
-      output_channels_(0),
-      input_sample_rate_(0),
-      output_sample_rate_(0),
       input_delay_ms_(0),
       output_delay_ms_(0),
       last_error_(AudioDeviceModule::kAdmErrNone),
       last_process_time_(base::TimeTicks::Now()),
       session_id_(0),
-      bytes_per_sample_(0),
       initialized_(false),
       playing_(false),
-      recording_(false) {
-    DVLOG(1) << "WebRtcAudioDeviceImpl::WebRtcAudioDeviceImpl()";
-    DCHECK(RenderThreadImpl::current()) <<
-        "WebRtcAudioDeviceImpl must be constructed on the render thread";
+      agc_is_enabled_(false) {
+  DVLOG(1) << "WebRtcAudioDeviceImpl::WebRtcAudioDeviceImpl()";
 }
 
 WebRtcAudioDeviceImpl::~WebRtcAudioDeviceImpl() {
   DVLOG(1) << "WebRtcAudioDeviceImpl::~WebRtcAudioDeviceImpl()";
-  if (playing_)
-    StopPlayout();
-  if (recording_)
-    StopRecording();
-  if (initialized_)
-    Terminate();
+  Terminate();
 }
 
 int32_t WebRtcAudioDeviceImpl::AddRef() {
@@ -59,11 +60,11 @@ int32_t WebRtcAudioDeviceImpl::Release() {
   return ret;
 }
 
-size_t WebRtcAudioDeviceImpl::Render(
-    const std::vector<float*>& audio_data,
-    size_t number_of_frames,
-    size_t audio_delay_milliseconds) {
-  DCHECK_LE(number_of_frames, output_buffer_size_);
+void WebRtcAudioDeviceImpl::RenderData(uint8* audio_data,
+                                       int number_of_channels,
+                                       int number_of_frames,
+                                       int audio_delay_milliseconds) {
+  DCHECK_LE(number_of_frames, output_buffer_size());
 
   {
     base::AutoLock auto_lock(lock_);
@@ -71,22 +72,21 @@ size_t WebRtcAudioDeviceImpl::Render(
     output_delay_ms_ = audio_delay_milliseconds;
   }
 
-  const int channels = audio_data.size();
-  DCHECK_LE(channels, output_channels_);
+  const int channels = number_of_channels;
+  DCHECK_LE(channels, output_channels());
 
-  int samples_per_sec = static_cast<int>(output_sample_rate_);
+  int samples_per_sec = output_sample_rate();
   if (samples_per_sec == 44100) {
     // Even if the hardware runs at 44.1kHz, we use 44.0 internally.
     samples_per_sec = 44000;
   }
-  uint32_t samples_per_10_msec = (samples_per_sec / 100);
+  int samples_per_10_msec = (samples_per_sec / 100);
+  int bytes_per_sample = output_audio_parameters_.bits_per_sample() / 8;
   const int bytes_per_10_msec =
-      channels * samples_per_10_msec * bytes_per_sample_;
+      channels * samples_per_10_msec * bytes_per_sample;
 
   uint32_t num_audio_samples = 0;
-  size_t accumulated_audio_samples = 0;
-
-  char* audio_byte_buffer = reinterpret_cast<char*>(output_buffer_.get());
+  int accumulated_audio_samples = 0;
 
   // Get audio samples in blocks of 10 milliseconds from the registered
   // webrtc::AudioTransport source. Keep reading until our internal buffer
@@ -94,38 +94,61 @@ size_t WebRtcAudioDeviceImpl::Render(
   while (accumulated_audio_samples < number_of_frames) {
     // Get 10ms and append output to temporary byte buffer.
     audio_transport_callback_->NeedMorePlayData(samples_per_10_msec,
-                                                bytes_per_sample_,
+                                                bytes_per_sample,
                                                 channels,
                                                 samples_per_sec,
-                                                audio_byte_buffer,
+                                                audio_data,
                                                 num_audio_samples);
     accumulated_audio_samples += num_audio_samples;
-    audio_byte_buffer += bytes_per_10_msec;
+    audio_data += bytes_per_10_msec;
   }
-
-  // Deinterleave each channel and convert to 32-bit floating-point
-  // with nominal range -1.0 -> +1.0 to match the callback format.
-  for (int channel_index = 0; channel_index < channels; ++channel_index) {
-    media::DeinterleaveAudioChannel(
-        output_buffer_.get(),
-        audio_data[channel_index],
-        channels,
-        channel_index,
-        bytes_per_sample_,
-        number_of_frames);
-  }
-  return number_of_frames;
 }
 
-void WebRtcAudioDeviceImpl::OnError() {
-  // TODO(henrika): Implement error handling.
+void WebRtcAudioDeviceImpl::SetRenderFormat(const AudioParameters& params) {
+  output_audio_parameters_ = params;
 }
 
-void WebRtcAudioDeviceImpl::Capture(
-    const std::vector<float*>& audio_data,
-    size_t number_of_frames,
-    size_t audio_delay_milliseconds) {
-  DCHECK_LE(number_of_frames, input_buffer_size_);
+void WebRtcAudioDeviceImpl::RemoveRenderer(WebRtcAudioRenderer* renderer) {
+  DCHECK(renderer);
+  base::AutoLock auto_lock(lock_);
+  if (renderer != renderer_)
+    return;
+
+  renderer_ = NULL;
+  playing_ = false;
+}
+
+// TODO(xians): Change the name to SetAudioRenderer().
+bool WebRtcAudioDeviceImpl::SetRenderer(WebRtcAudioRenderer* renderer) {
+  DCHECK(renderer);
+
+  base::AutoLock auto_lock(lock_);
+  if (renderer_)
+    return false;
+
+  if (!renderer->Initialize(this))
+    return false;
+
+  renderer_ = renderer;
+  return true;
+}
+
+void WebRtcAudioDeviceImpl::CaptureData(const int16* audio_data,
+                                        int number_of_channels,
+                                        int number_of_frames,
+                                        int audio_delay_milliseconds,
+                                        double volume) {
+  DCHECK_LE(number_of_frames, input_buffer_size());
+#if defined(OS_WIN) || defined(OS_MACOSX)
+  DCHECK_LE(volume, 1.0);
+#elif defined(OS_LINUX) || defined(OS_OPENBSD)
+  // We have a special situation on Linux where the microphone volume can be
+  // "higher than maximum". The input volume slider in the sound preference
+  // allows the user to set a scaling that is higher than 100%. It means that
+  // even if the reported maximum levels is N, the actual microphone level can
+  // go up to 1.5*N and that corresponds to a normalized |volume| of 1.5.
+  DCHECK_LE(volume, 1.5);
+#endif
 
   int output_delay_ms = 0;
   {
@@ -135,66 +158,63 @@ void WebRtcAudioDeviceImpl::Capture(
     output_delay_ms = output_delay_ms_;
   }
 
-  const int channels = audio_data.size();
-  DCHECK_LE(channels, input_channels_);
+  const int channels = number_of_channels;
+  DCHECK_LE(channels, input_channels());
   uint32_t new_mic_level = 0;
 
-  // Interleave, scale, and clip input to int16 and store result in
-  // a local byte buffer.
-  media::InterleaveFloatToInt16(audio_data,
-                                input_buffer_.get(),
-                                number_of_frames);
 
-  int samples_per_sec = static_cast<int>(input_sample_rate_);
+  int samples_per_sec = input_sample_rate();
   if (samples_per_sec == 44100) {
     // Even if the hardware runs at 44.1kHz, we use 44.0 internally.
     samples_per_sec = 44000;
   }
   const int samples_per_10_msec = (samples_per_sec / 100);
+  int bytes_per_sample = input_audio_parameters_.bits_per_sample() / 8;
   const int bytes_per_10_msec =
-      channels * samples_per_10_msec * bytes_per_sample_;
-  size_t accumulated_audio_samples = 0;
+      channels * samples_per_10_msec * bytes_per_sample;
+  int accumulated_audio_samples = 0;
 
-  char* audio_byte_buffer = reinterpret_cast<char*>(input_buffer_.get());
+  const uint8* audio_byte_buffer = reinterpret_cast<const uint8*>(audio_data);
+
+  // Map internal volume range of [0.0, 1.0] into [0, 255] used by the
+  // webrtc::VoiceEngine.
+  uint32_t current_mic_level = static_cast<uint32_t>(volume * kMaxVolumeLevel);
 
   // Write audio samples in blocks of 10 milliseconds to the registered
   // webrtc::AudioTransport sink. Keep writing until our internal byte
   // buffer is empty.
   while (accumulated_audio_samples < number_of_frames) {
-    // Deliver 10ms of recorded PCM audio.
-    // TODO(henrika): add support for analog AGC?
+    // Deliver 10ms of recorded 16-bit linear PCM audio.
     audio_transport_callback_->RecordedDataIsAvailable(
         audio_byte_buffer,
         samples_per_10_msec,
-        bytes_per_sample_,
+        bytes_per_sample,
         channels,
         samples_per_sec,
         input_delay_ms_ + output_delay_ms,
-        0,  // clock_drift
-        0,  // current_mic_level
-        new_mic_level);  // not used
+        0,  // TODO(henrika): |clock_drift| parameter is not utilized today.
+        current_mic_level,
+        new_mic_level);
+
     accumulated_audio_samples += samples_per_10_msec;
     audio_byte_buffer += bytes_per_10_msec;
   }
+
+  // The AGC returns a non-zero microphone level if it has been decided
+  // that a new level should be set.
+  if (new_mic_level != 0) {
+    // Use IPC and set the new level. Note that, it will take some time
+    // before the new level is effective due to the IPC scheme.
+    // During this time, |current_mic_level| will contain "non-valid" values
+    // and it might reduce the AGC performance. Measurements on Windows 7 have
+    // shown that we might receive old volume levels for one or two callbacks.
+    SetMicrophoneVolume(new_mic_level);
+  }
 }
 
-void WebRtcAudioDeviceImpl::OnDeviceStarted(const std::string& device_id) {
-  VLOG(1) << "OnDeviceStarted (device_id=" << device_id << ")";
-  // Empty string is an invalid device id. Do nothing if a valid device has
-  // been started. Otherwise update the |recording_| state to false.
-  if (!device_id.empty())
-    return;
-
-  base::AutoLock auto_lock(lock_);
-  if (recording_)
-    recording_ = false;
-}
-
-void WebRtcAudioDeviceImpl::OnDeviceStopped() {
-  DVLOG(1) << "OnDeviceStopped";
-  base::AutoLock auto_lock(lock_);
-  if (recording_)
-    recording_ = false;
+void WebRtcAudioDeviceImpl::SetCaptureFormat(
+    const media::AudioParameters& params) {
+  input_audio_parameters_ = params;
 }
 
 int32_t WebRtcAudioDeviceImpl::ChangeUniqueId(const int32_t id) {
@@ -238,11 +258,7 @@ int32_t WebRtcAudioDeviceImpl::RegisterEventObserver(
 
 int32_t WebRtcAudioDeviceImpl::RegisterAudioCallback(
     webrtc::AudioTransport* audio_callback) {
-  DVLOG(1) << "RegisterAudioCallback()";
-  if (playing_ || recording_)  {
-    LOG(ERROR) << "Unable to (de)register transport during active media";
-    return -1;
-  }
+  DCHECK_EQ(audio_transport_callback_ == NULL, audio_callback != NULL);
   audio_transport_callback_ = audio_callback;
   return 0;
 }
@@ -250,6 +266,8 @@ int32_t WebRtcAudioDeviceImpl::RegisterAudioCallback(
 int32_t WebRtcAudioDeviceImpl::Init() {
   DVLOG(1) << "Init()";
 
+  // TODO(henrika): Remove the following code if the |capturer_| does not need
+  // to be initialized in the render thread any more.
   if (!render_loop_->BelongsToCurrentThread()) {
     int32_t error = 0;
     base::WaitableEvent event(false, false);
@@ -264,190 +282,24 @@ int32_t WebRtcAudioDeviceImpl::Init() {
   }
 
   // Calling Init() multiple times in a row is OK.
+  // TODO(henrika): Figure out why we need to call Init()/Terminate() for
+  // multiple times. This feels like a bug on the webrtc side if Init is called
+  // multiple times. Init() in my mind feels like a constructor, so unless
+  // Terminate() is called (the equivalent of a dtor), then Init() should not
+  // be called randomly after it has already been called.
   if (initialized_)
     return 0;
 
-  DCHECK(!audio_input_device_);
-  DCHECK(!audio_output_device_);
-  DCHECK(!input_buffer_.get());
-  DCHECK(!output_buffer_.get());
+  DCHECK(!capturer_);
+  capturer_ = WebRtcAudioCapturer::CreateCapturer();
+  if (capturer_)
+    capturer_->AddCapturerSink(this);
 
-  // Ask the browser for the default audio output hardware sample-rate.
-  // This request is based on a synchronous IPC message.
-  int output_sample_rate =
-      static_cast<int>(audio_hardware::GetOutputSampleRate());
-  DVLOG(1) << "Audio output hardware sample rate: " << output_sample_rate;
-
-  // Ask the browser for the default audio input hardware sample-rate.
-  // This request is based on a synchronous IPC message.
-  int input_sample_rate =
-      static_cast<int>(audio_hardware::GetInputSampleRate());
-  DVLOG(1) << "Audio input hardware sample rate: " << input_sample_rate;
-
-  // Ask the browser for the default number of audio input channels.
-  // This request is based on a synchronous IPC message.
-  int input_channels = audio_hardware::GetInputChannelCount();
-  DVLOG(1) << "Audio input hardware channels: " << input_channels;
-
-  int output_channels = 0;
-
-  size_t input_buffer_size = 0;
-  size_t output_buffer_size = 0;
-
-// Windows
-#if defined(OS_WIN)
-  if (input_sample_rate != 48000 && input_sample_rate != 44100 &&
-      input_sample_rate != 32000 && input_sample_rate != 16000) {
-    DLOG(ERROR) << "Only 48, 44.1, 32 and 16kHz input rates are supported.";
-    return -1;
-  }
-  if (output_sample_rate != 48000 && output_sample_rate != 44100) {
-    DLOG(ERROR) << "Only 48 and 44.1kHz output rates are supported.";
-    return -1;
-  }
-
-  // Always use stereo rendering on Windows.
-  output_channels = 2;
-
-  // Capture side: AUDIO_PCM_LOW_LATENCY is based on the Core Audio (WASAPI)
-  // API which was introduced in Windows Vista. For lower Windows versions,
-  // a callback-driven Wave implementation is used instead. An input buffer
-  // size of 10ms works well for both these implementations.
-
-  // Use different buffer sizes depending on the current hardware sample rate.
-  if (input_sample_rate == 44100) {
-    // We do run at 44.1kHz at the actual audio layer, but ask for frames
-    // at 44.0kHz to ensure that we can feed them to the webrtc::VoiceEngine.
-    input_buffer_size = 440;
-  } else {
-    input_buffer_size = (input_sample_rate / 100);
-  }
-
-  // Render side: AUDIO_PCM_LOW_LATENCY is based on the Core Audio (WASAPI)
-  // API which was introduced in Windows Vista. For lower Windows versions,
-  // a callback-driven Wave implementation is used instead. An output buffer
-  // size of 10ms works well for WASAPI but 30ms is needed for Wave.
-
-  // Use different buffer sizes depending on the current hardware sample rate.
-  if (output_sample_rate == 48000) {
-    output_buffer_size = 480;
-  } else {
-    // We do run at 44.1kHz at the actual audio layer, but ask for frames
-    // at 44.0kHz to ensure that we can feed them to the webrtc::VoiceEngine.
-    // TODO(henrika): figure out why we seem to need 20ms here for glitch-
-    // free audio.
-    output_buffer_size = 2 * 440;
-  }
-
-  // Windows XP and lower can't cope with 10 ms output buffer size.
-  // It must be extended to 30 ms (60 ms will be used internally by WaveOut).
-  if (!media::IsWASAPISupported()) {
-    output_buffer_size = 3 * output_buffer_size;
-    DLOG(WARNING) << "Extending the output buffer size by a factor of three "
-                  << "since Windows XP has been detected.";
-  }
-
-// Mac OS X
-#elif defined(OS_MACOSX)
-  if (input_sample_rate != 48000 && input_sample_rate != 44100 &&
-      input_sample_rate != 32000 && input_sample_rate != 16000) {
-    DLOG(ERROR) << "Only 48, 44.1, 32 and 16kHz input rates are supported.";
-    return -1;
-  }
-  if (output_sample_rate != 48000 && output_sample_rate != 44100) {
-    DLOG(ERROR) << "Only 48 and 44.1kHz output rates are supported on Mac OSX.";
-    return -1;
-  }
-
-  output_channels = 1;
-
-  // Capture side: AUDIO_PCM_LOW_LATENCY on Mac OS X is based on a callback-
-  // driven Core Audio implementation. Tests have shown that 10ms is a suitable
-  // frame size to use, both for 48kHz and 44.1kHz.
-
-  // Use different buffer sizes depending on the current hardware sample rate.
-  if (input_sample_rate == 44100) {
-    // We do run at 44.1kHz at the actual audio layer, but ask for frames
-    // at 44.0kHz to ensure that we can feed them to the webrtc::VoiceEngine.
-    input_buffer_size = 440;
-  } else {
-    input_buffer_size = (input_sample_rate / 100);
-  }
-
-  // Render side: AUDIO_PCM_LOW_LATENCY on Mac OS X is based on a callback-
-  // driven Core Audio implementation. Tests have shown that 10ms is a suitable
-  // frame size to use, both for 48kHz and 44.1kHz.
-
-  // Use different buffer sizes depending on the current hardware sample rate.
-  if (output_sample_rate == 48000) {
-    output_buffer_size = 480;
-  } else {
-    // We do run at 44.1kHz at the actual audio layer, but ask for frames
-    // at 44.0kHz to ensure that we can feed them to the webrtc::VoiceEngine.
-    output_buffer_size = 440;
-  }
-// Linux
-#elif defined(OS_LINUX) || defined(OS_OPENBSD)
-  if (output_sample_rate != 48000) {
-    DLOG(ERROR) << "Only 48kHz sample rate is supported on Linux.";
-    return -1;
-  }
-  input_channels = 2;
-  output_channels = 1;
-
-  // Based on tests using the current ALSA implementation in Chrome, we have
-  // found that the best combination is 20ms on the input side and 10ms on the
-  // output side.
-  // TODO(henrika): It might be possible to reduce the input buffer
-  // size and reduce the delay even more.
-  input_buffer_size = 2 * 480;
-  output_buffer_size = 480;
-#else
-  DLOG(ERROR) << "Unsupported platform";
-  return -1;
-#endif
-
-  // Store utilized parameters to ensure that we can check them
-  // after a successful initialization.
-  output_buffer_size_ = output_buffer_size;
-  output_channels_ = output_channels;
-  output_sample_rate_ = static_cast<double>(output_sample_rate);
-
-  input_buffer_size_ = input_buffer_size;
-  input_channels_ = input_channels;
-  input_sample_rate_ = input_sample_rate;
-
-  // Create and configure the audio capturing client.
-  audio_input_device_ = new AudioInputDevice(
-      input_buffer_size, input_channels, input_sample_rate, this, this);
-
-  // Create and configure the audio rendering client.
-  audio_output_device_ = new AudioDevice(
-      output_buffer_size, output_channels, output_sample_rate, this);
-
-  DCHECK(audio_input_device_);
-  DCHECK(audio_output_device_);
-
-  // Allocate local audio buffers based on the parameters above.
-  // It is assumed that each audio sample contains 16 bits and each
-  // audio frame contains one or two audio samples depending on the
-  // number of channels.
-  input_buffer_.reset(new int16[input_buffer_size * input_channels]);
-  output_buffer_.reset(new int16[output_buffer_size * output_channels]);
-
-  DCHECK(input_buffer_.get());
-  DCHECK(output_buffer_.get());
-
-  bytes_per_sample_ = sizeof(*input_buffer_.get());
-
+  // We need to return a success to continue the initialization of WebRtc VoE
+  // because failure on the capturer_ initialization should not prevent WebRTC
+  // from working. See issue 144421 for details.
   initialized_ = true;
 
-  DVLOG(1) << "Capture parameters (size/channels/rate): ("
-           << input_buffer_size_ << "/" << input_channels_ << "/"
-           << input_sample_rate_ << ")";
-  DVLOG(1) << "Render parameters (size/channels/rate): ("
-           << output_buffer_size_ << "/" << output_channels_ << "/"
-           << output_sample_rate_ << ")";
   return 0;
 }
 
@@ -465,16 +317,20 @@ int32_t WebRtcAudioDeviceImpl::Terminate() {
   if (!initialized_)
     return 0;
 
-  DCHECK(audio_input_device_);
-  DCHECK(audio_output_device_);
-  DCHECK(input_buffer_.get());
-  DCHECK(output_buffer_.get());
+  StopRecording();
+  StopPlayout();
+
+  // It is necessary to stop the |renderer_| before going away.
+  if (renderer_) {
+    renderer_->Stop();
+    renderer_ = NULL;
+  }
 
   // Release all resources allocated in Init().
-  audio_input_device_ = NULL;
-  audio_output_device_ = NULL;
-  input_buffer_.reset();
-  output_buffer_.reset();
+  if (capturer_) {
+    capturer_->RemoveCapturerSink(this);
+    capturer_ = NULL;
+  }
 
   initialized_ = false;
   return 0;
@@ -536,7 +392,7 @@ int32_t WebRtcAudioDeviceImpl::SetRecordingDevice(WindowsDeviceType device) {
 
 int32_t WebRtcAudioDeviceImpl::PlayoutIsAvailable(bool* available) {
   DVLOG(1) << "PlayoutIsAvailable()";
-  *available = (audio_output_device_ != NULL);
+  *available = initialized_;
   return 0;
 }
 
@@ -548,12 +404,12 @@ int32_t WebRtcAudioDeviceImpl::InitPlayout() {
 
 bool WebRtcAudioDeviceImpl::PlayoutIsInitialized() const {
   DVLOG(1) << "PlayoutIsInitialized()";
-  return (audio_output_device_ != NULL);
+  return initialized_;
 }
 
 int32_t WebRtcAudioDeviceImpl::RecordingIsAvailable(bool* available) {
   DVLOG(1) << "RecordingIsAvailable()";
-  *available = (audio_input_device_ != NULL);
+  *available = (capturer_ != NULL);
   return 0;
 }
 
@@ -565,22 +421,26 @@ int32_t WebRtcAudioDeviceImpl::InitRecording() {
 
 bool WebRtcAudioDeviceImpl::RecordingIsInitialized() const {
   DVLOG(1) << "RecordingIsInitialized()";
-  return (audio_input_device_ != NULL);
+  return (capturer_ != NULL);
 }
 
 int32_t WebRtcAudioDeviceImpl::StartPlayout() {
   DVLOG(1) << "StartPlayout()";
-  if (!audio_transport_callback_) {
-    LOG(ERROR) << "Audio transport is missing";
-    return -1;
+  LOG_IF(ERROR, !audio_transport_callback_) << "Audio transport is missing";
+  {
+    base::AutoLock auto_lock(lock_);
+    if (!audio_transport_callback_)
+      return -1;
   }
+
   if (playing_) {
     // webrtc::VoiceEngine assumes that it is OK to call Start() twice and
     // that the call is ignored the second time.
     return 0;
   }
-  audio_output_device_->Start();
+
   playing_ = true;
+  start_render_time_ = base::Time::Now();
   return 0;
 }
 
@@ -590,7 +450,14 @@ int32_t WebRtcAudioDeviceImpl::StopPlayout() {
     // webrtc::VoiceEngine assumes that it is OK to call Stop() just in case.
     return 0;
   }
-  audio_output_device_->Stop();
+
+  // Add histogram data to be uploaded as part of an UMA logging event.
+  // This histogram keeps track of total playout times.
+  if (!start_render_time_.is_null()) {
+    base::TimeDelta render_time = base::Time::Now() - start_render_time_;
+    UMA_HISTOGRAM_LONG_TIMES("WebRTC.AudioRenderTime", render_time);
+  }
+
   playing_ = false;
   return 0;
 }
@@ -600,64 +467,77 @@ bool WebRtcAudioDeviceImpl::Playing() const {
 }
 
 int32_t WebRtcAudioDeviceImpl::StartRecording() {
+  DCHECK(initialized_);
   DVLOG(1) << "StartRecording()";
   LOG_IF(ERROR, !audio_transport_callback_) << "Audio transport is missing";
-  if (!audio_transport_callback_) {
-    LOG(ERROR) << "Audio transport is missing";
+  if (!audio_transport_callback_ || !capturer_) {
     return -1;
   }
 
   if (session_id_ <= 0) {
-    LOG(WARNING) << session_id_ << " is an invalid session id.";
-    // TODO(xians): enable the return -1 when MediaStreamManager can handle
-    // AudioInputDeviceManager.
-    // return -1;
+    LOG(ERROR) << session_id_ << " is an invalid session id.";
+    return -1;
   }
 
-  base::AutoLock auto_lock(lock_);
-  if (recording_) {
+  if (capturer_->is_recording()) {
     // webrtc::VoiceEngine assumes that it is OK to call Start() twice and
     // that the call is ignored the second time.
     return 0;
   }
 
+  start_capture_time_ = base::Time::Now();
+
   // Specify the session_id which is mapped to a certain device.
-  audio_input_device_->SetDevice(session_id_);
-  audio_input_device_->Start();
-  recording_ = true;
+  capturer_->SetDevice(session_id_);
+  capturer_->Start();
   return 0;
 }
 
 int32_t WebRtcAudioDeviceImpl::StopRecording() {
   DVLOG(1) << "StopRecording()";
-  {
-    base::AutoLock auto_lock(lock_);
-    if (!recording_) {
-      // webrtc::VoiceEngine assumes that it is OK to call Stop()
-      // more than once.
-      return 0;
-    }
+  if (!capturer_ || !capturer_->is_recording()) {
+    // webrtc::VoiceEngine assumes that it is OK to call Stop()
+    // more than once.
+    return 0;
   }
 
-  audio_input_device_->Stop();
+  // Add histogram data to be uploaded as part of an UMA logging event.
+  // This histogram keeps track of total recording times.
+  if (!start_capture_time_.is_null()) {
+    base::TimeDelta capture_time = base::Time::Now() - start_capture_time_;
+    UMA_HISTOGRAM_LONG_TIMES("WebRTC.AudioCaptureTime", capture_time);
+  }
 
-  base::AutoLock auto_lock(lock_);
-  recording_ = false;
+  capturer_->Stop();
+
   return 0;
 }
 
 bool WebRtcAudioDeviceImpl::Recording() const {
-  return recording_;
+  if (capturer_)
+    return capturer_->is_recording();
+
+  return false;
 }
 
 int32_t WebRtcAudioDeviceImpl::SetAGC(bool enable) {
-  DVLOG(2) << "WARNING: WebRtcAudioDeviceImpl::SetAGC() " << "NOT IMPLEMENTED";
-  return -1;
+  DCHECK(initialized_);
+  DVLOG(1) <<  "SetAGC(enable=" << enable << ")";
+  // The current implementation does not support changing the AGC state while
+  // recording. Using this approach simplifies the design and it is also
+  // inline with the  latest WebRTC standard.
+  if (!capturer_ || capturer_->is_recording())
+    return -1;
+
+  capturer_->SetAutomaticGainControl(enable);
+  agc_is_enabled_ = enable;
+  return 0;
 }
 
 bool WebRtcAudioDeviceImpl::AGC() const {
-  DVLOG(2) << "WARNING: WebRtcAudioDeviceImpl::AGC() " << "NOT IMPLEMENTED";
-  return false;
+  // To reduce the usage of IPC messages, an internal AGC state is used.
+  // TODO(henrika): investigate if there is a need for a "deeper" getter.
+  return agc_is_enabled_;
 }
 
 int32_t WebRtcAudioDeviceImpl::SetWaveOutVolume(uint16_t volume_left,
@@ -730,8 +610,7 @@ int32_t WebRtcAudioDeviceImpl::MaxSpeakerVolume(uint32_t* max_volume) const {
   return -1;
 }
 
-int32_t WebRtcAudioDeviceImpl::MinSpeakerVolume(
-    uint32_t* min_volume) const {
+int32_t WebRtcAudioDeviceImpl::MinSpeakerVolume(uint32_t* min_volume) const {
   NOTIMPLEMENTED();
   return -1;
 }
@@ -748,32 +627,43 @@ int32_t WebRtcAudioDeviceImpl::MicrophoneVolumeIsAvailable(bool* available) {
 }
 
 int32_t WebRtcAudioDeviceImpl::SetMicrophoneVolume(uint32_t volume) {
-  NOTIMPLEMENTED();
-  return -1;
+  DCHECK(initialized_);
+  DVLOG(1) << "SetMicrophoneVolume(" << volume << ")";
+  if (!capturer_)
+    return -1;
+
+  if (volume > kMaxVolumeLevel)
+    return -1;
+
+  // WebRTC uses a range of [0, 255] to represent the level of the microphone
+  // volume. The IPC channel between the renderer and browser process works
+  // with doubles in the [0.0, 1.0] range and we have to compensate for that.
+  double normalized_volume = static_cast<double>(volume) / kMaxVolumeLevel;
+  capturer_->SetVolume(normalized_volume);
+  return 0;
 }
 
 int32_t WebRtcAudioDeviceImpl::MicrophoneVolume(uint32_t* volume) const {
-  NOTIMPLEMENTED();
+  // The microphone level is fed to this class using the Capture() callback
+  // and this external API should not be used. Additional IPC messages are
+  // required if support for this API is ever needed.
+  NOTREACHED();
   return -1;
 }
 
-int32_t WebRtcAudioDeviceImpl::MaxMicrophoneVolume(
-    uint32_t* max_volume) const {
-  DVLOG(2) << "WARNING: WebRtcAudioDeviceImpl::MaxMicrophoneVolume() "
-           << "NOT IMPLEMENTED";
-  return -1;
+int32_t WebRtcAudioDeviceImpl::MaxMicrophoneVolume(uint32_t* max_volume) const {
+  *max_volume = kMaxVolumeLevel;
+  return 0;
 }
 
-int32_t WebRtcAudioDeviceImpl::MinMicrophoneVolume(
-    uint32_t* min_volume) const {
-  DVLOG(2) << "WARNING: WebRtcAudioDeviceImpl::MinMicrophoneVolume() "
-           << "NOT IMPLEMENTED";
-  return -1;
+int32_t WebRtcAudioDeviceImpl::MinMicrophoneVolume(uint32_t* min_volume) const {
+  *min_volume = 0;
+  return 0;
 }
 
 int32_t WebRtcAudioDeviceImpl::MicrophoneVolumeStepSize(
     uint16_t* step_size) const {
-  NOTIMPLEMENTED();
+  NOTREACHED();
   return -1;
 }
 
@@ -825,7 +715,8 @@ int32_t WebRtcAudioDeviceImpl::MicrophoneBoost(bool* enabled) const {
 
 int32_t WebRtcAudioDeviceImpl::StereoPlayoutIsAvailable(bool* available) const {
   DCHECK(initialized_) << "Init() must be called first.";
-  *available = (output_channels_ == 2);
+
+  *available = (output_channels() == 2);
   return 0;
 }
 
@@ -844,7 +735,10 @@ int32_t WebRtcAudioDeviceImpl::StereoPlayout(bool* enabled) const {
 int32_t WebRtcAudioDeviceImpl::StereoRecordingIsAvailable(
     bool* available) const {
   DCHECK(initialized_) << "Init() must be called first.";
-  *available = (input_channels_ == 2);
+  if (!capturer_)
+    return -1;
+
+  *available = (input_channels() == 2);
   return 0;
 }
 
@@ -861,12 +755,14 @@ int32_t WebRtcAudioDeviceImpl::StereoRecording(bool* enabled) const {
 }
 
 int32_t WebRtcAudioDeviceImpl::SetRecordingChannel(const ChannelType channel) {
-  NOTIMPLEMENTED();
+  DVLOG(2) << "WARNING: WebRtcAudioDeviceImpl::SetRecordingChannel() "
+           << "NOT IMPLEMENTED";
   return -1;
 }
 
 int32_t WebRtcAudioDeviceImpl::RecordingChannel(ChannelType* channel) const {
-  NOTIMPLEMENTED();
+  DVLOG(2) << "WARNING: WebRtcAudioDeviceImpl::RecordingChannel() "
+           << "NOT IMPLEMENTED";
   return -1;
 }
 
@@ -933,7 +829,7 @@ int32_t WebRtcAudioDeviceImpl::SetRecordingSampleRate(
 int32_t WebRtcAudioDeviceImpl::RecordingSampleRate(
     uint32_t* samples_per_sec) const {
   // Returns the sample rate set at construction.
-  *samples_per_sec = static_cast<uint32_t>(input_sample_rate_);
+  *samples_per_sec = static_cast<uint32_t>(input_sample_rate());
   return 0;
 }
 
@@ -947,7 +843,7 @@ int32_t WebRtcAudioDeviceImpl::SetPlayoutSampleRate(
 int32_t WebRtcAudioDeviceImpl::PlayoutSampleRate(
     uint32_t* samples_per_sec) const {
   // Returns the sample rate set at construction.
-  *samples_per_sec = static_cast<uint32_t>(output_sample_rate_);
+  *samples_per_sec = static_cast<uint32_t>(output_sample_rate());
   return 0;
 }
 
@@ -969,3 +865,5 @@ int32_t WebRtcAudioDeviceImpl::GetLoudspeakerStatus(bool* enabled) const {
 void WebRtcAudioDeviceImpl::SetSessionId(int session_id) {
   session_id_ = session_id;
 }
+
+}  // namespace content

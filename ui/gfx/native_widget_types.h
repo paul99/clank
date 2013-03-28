@@ -4,7 +4,6 @@
 
 #ifndef UI_GFX_NATIVE_WIDGET_TYPES_H_
 #define UI_GFX_NATIVE_WIDGET_TYPES_H_
-#pragma once
 
 #include "build/build_config.h"
 
@@ -43,10 +42,14 @@
 // 'views'.
 
 #if defined(USE_AURA)
+#include "ui/base/cursor/cursor.h"
+
 class SkRegion;
 namespace aura {
-class Event;
 class Window;
+}
+namespace ui {
+class Event;
 }
 #endif  // defined(USE_AURA)
 
@@ -54,6 +57,23 @@ class Window;
 #include <windows.h>  // NOLINT
 typedef struct HFONT__* HFONT;
 struct IAccessible;
+#elif defined(OS_IOS)
+struct CGContext;
+#ifdef __OBJC__
+@class UIEvent;
+@class UIFont;
+@class UIImage;
+@class UIView;
+@class UIWindow;
+@class UITextField;
+#else
+class UIEvent;
+class UIFont;
+class UIImage;
+class UIView;
+class UIWindow;
+class UITextField;
+#endif  // __OBJC__
 #elif defined(OS_MACOSX)
 struct CGContext;
 #ifdef __OBJC__
@@ -69,7 +89,7 @@ class NSCursor;
 class NSEvent;
 class NSFont;
 class NSImage;
-class NSView;
+struct NSView;
 class NSWindow;
 class NSTextField;
 #endif  // __OBJC__
@@ -78,16 +98,7 @@ typedef struct _PangoFontDescription PangoFontDescription;
 typedef struct _cairo cairo_t;
 #endif
 
-#if defined(USE_WAYLAND)
-typedef struct _GdkPixbuf GdkPixbuf;
-struct wl_egl_window;
-
-namespace ui {
-class WaylandWindow;
-}
-
-typedef struct _GdkRegion GdkRegion;
-#elif defined(TOOLKIT_USES_GTK)
+#if defined(TOOLKIT_GTK)
 typedef struct _GdkCursor GdkCursor;
 typedef union _GdkEvent GdkEvent;
 typedef struct _GdkPixbuf GdkPixbuf;
@@ -95,39 +106,41 @@ typedef struct _GdkRegion GdkRegion;
 typedef struct _GtkWidget GtkWidget;
 typedef struct _GtkWindow GtkWindow;
 #elif defined(OS_ANDROID)
-class ChromeView;
+struct ANativeWindow;
+namespace content {
+class ContentViewCore;
+}
+namespace ui {
+class WindowAndroid;
+}
 #endif
 class SkBitmap;
 
 namespace gfx {
 
 #if defined(USE_AURA)
-// See ui/aura/cursor.h for values.
-typedef int NativeCursor;
+typedef ui::Cursor NativeCursor;
 typedef aura::Window* NativeView;
 typedef aura::Window* NativeWindow;
 typedef SkRegion* NativeRegion;
-typedef aura::Event* NativeEvent;
+typedef ui::Event* NativeEvent;
 #elif defined(OS_WIN)
 typedef HCURSOR NativeCursor;
 typedef HWND NativeView;
 typedef HWND NativeWindow;
 typedef HRGN NativeRegion;
 typedef MSG NativeEvent;
+#elif defined(OS_IOS)
+typedef void* NativeCursor;
+typedef UIView* NativeView;
+typedef UIWindow* NativeWindow;
+typedef UIEvent* NativeEvent;
 #elif defined(OS_MACOSX)
 typedef NSCursor* NativeCursor;
 typedef NSView* NativeView;
 typedef NSWindow* NativeWindow;
 typedef NSEvent* NativeEvent;
-#elif defined(USE_WAYLAND)
-typedef void* NativeCursor;
-typedef ui::WaylandWindow* NativeView;
-typedef ui::WaylandWindow* NativeWindow;
-// TODO(dnicoara) This should be replaced with a cairo region or maybe
-// a Wayland specific region
-typedef GdkRegion* NativeRegion;
-typedef void* NativeEvent;
-#elif defined(TOOLKIT_USES_GTK)
+#elif defined(TOOLKIT_GTK)
 typedef GdkCursor* NativeCursor;
 typedef GtkWidget* NativeView;
 typedef GtkWindow* NativeWindow;
@@ -135,8 +148,8 @@ typedef GdkRegion* NativeRegion;
 typedef GdkEvent* NativeEvent;
 #elif defined(OS_ANDROID)
 typedef void* NativeCursor;
-typedef ChromeView* NativeView;
-typedef ChromeView* NativeWindow;
+typedef content::ContentViewCore* NativeView;
+typedef ui::WindowAndroid* NativeWindow;
 typedef void* NativeRegion;
 typedef jobject NativeEvent;
 #endif
@@ -147,19 +160,18 @@ typedef HWND NativeEditView;
 typedef HDC NativeDrawingContext;
 typedef HMENU NativeMenu;
 typedef IAccessible* NativeViewAccessible;
+#elif defined(OS_IOS)
+typedef UIFont* NativeFont;
+typedef UITextField* NativeEditView;
+typedef CGContext* NativeDrawingContext;
+typedef void* NativeMenu;
 #elif defined(OS_MACOSX)
 typedef NSFont* NativeFont;
 typedef NSTextField* NativeEditView;
 typedef CGContext* NativeDrawingContext;
 typedef void* NativeMenu;
 typedef void* NativeViewAccessible;
-#elif defined(USE_WAYLAND)
-typedef PangoFontDescription* NativeFont;
-typedef void* NativeEditView;
-typedef cairo_t* NativeDrawingContext;
-typedef void* NativeMenu;
-typedef void* NativeViewAccessible;
-#elif defined(TOOLKIT_USES_GTK)
+#elif defined(TOOLKIT_GTK)
 typedef PangoFontDescription* NativeFont;
 typedef GtkWidget* NativeEditView;
 typedef cairo_t* NativeDrawingContext;
@@ -180,9 +192,15 @@ typedef void* NativeViewAccessible;
 #endif
 
 // A constant value to indicate that gfx::NativeCursor refers to no cursor.
+#if defined(USE_AURA)
+const int kNullCursor = 0;
+#else
 const gfx::NativeCursor kNullCursor = static_cast<gfx::NativeCursor>(NULL);
+#endif
 
-#if defined(OS_MACOSX)
+#if defined(OS_IOS)
+typedef UIImage NativeImageType;
+#elif defined(OS_MACOSX)
 typedef NSImage NativeImageType;
 #elif defined(TOOLKIT_GTK)
 typedef GdkPixbuf NativeImageType;
@@ -228,9 +246,6 @@ static inline NativeView NativeViewFromIdInBrowser(NativeViewId id) {
 #if defined(OS_WIN)
   typedef HWND PluginWindowHandle;
   const PluginWindowHandle kNullPluginWindow = NULL;
-#elif defined(USE_WAYLAND)
-  typedef struct wl_egl_window* PluginWindowHandle;
-  const PluginWindowHandle kNullPluginWindow = NULL;
 #elif defined(USE_X11)
   typedef unsigned long PluginWindowHandle;
   const PluginWindowHandle kNullPluginWindow = 0;
@@ -258,27 +273,44 @@ static inline NativeView NativeViewFromIdInBrowser(NativeViewId id) {
   const PluginWindowHandle kNullPluginWindow = 0;
 #endif
 
+struct GLSurfaceHandle {
+  GLSurfaceHandle()
+      : handle(kNullPluginWindow),
+        transport(false),
+        parent_gpu_process_id(0),
+        parent_client_id(0) {
+  }
+  GLSurfaceHandle(PluginWindowHandle handle_, bool transport_)
+      : handle(handle_),
+        transport(transport_),
+        parent_gpu_process_id(0),
+        parent_client_id(0) {
+  }
+  bool is_null() const { return handle == kNullPluginWindow && !transport; }
+  PluginWindowHandle handle;
+  bool transport;
+  int parent_gpu_process_id;
+  uint32 parent_client_id;
+};
+
 // AcceleratedWidget provides a surface to compositors to paint pixels.
 #if defined(OS_WIN)
 typedef HWND AcceleratedWidget;
 const AcceleratedWidget kNullAcceleratedWidget = NULL;
-#elif defined(USE_WAYLAND)
-typedef struct wl_egl_window* AcceleratedWidget;
-const AcceleratedWidget kNullAcceleratedWidget = NULL;
 #elif defined(USE_X11)
 typedef unsigned long AcceleratedWidget;
 const AcceleratedWidget kNullAcceleratedWidget = 0;
-#elif defined(USE_AURA) && defined(OS_MACOSX)
-// Mac-Aura uses NSView-backed GLSurface.  Regular Mac does not.
-// TODO(dhollowa): Rationalize these two definitions. http://crbug.com/104551.
+#elif defined(OS_IOS)
+typedef UIView* AcceleratedWidget;
+const AcceleratedWidget kNullAcceleratedWidget = 0;
+#elif defined(OS_MACOSX)
 typedef NSView* AcceleratedWidget;
 const AcceleratedWidget kNullAcceleratedWidget = 0;
 #elif defined(OS_ANDROID)
-typedef uint64 AcceleratedWidget;
+typedef ANativeWindow* AcceleratedWidget;
 const AcceleratedWidget kNullAcceleratedWidget = 0;
 #else
-typedef void* AcceleratedWidget;
-const AcceleratedWidget kNullAcceleratedWidget = NULL;
+#error unknown platform
 #endif
 
 }  // namespace gfx

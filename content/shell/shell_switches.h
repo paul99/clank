@@ -6,11 +6,16 @@
 
 #ifndef CONTENT_SHELL_SHELL_SWITCHES_H_
 #define CONTENT_SHELL_SHELL_SWITCHES_H_
-#pragma once
 
 namespace switches {
 
+extern const char kAllowExternalPages[];
+extern const char kCheckLayoutTestSysDeps[];
+extern const char kContentBrowserTest[];
+extern const char kContentShellDataPath[];
 extern const char kDumpRenderTree[];
+extern const char kNoTimeout[];
+extern const char kOutputLayoutTestDifferences[];
 
 }  // namespace switches
 

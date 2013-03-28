@@ -16,11 +16,12 @@ extern "C" {
 #include "base/command_line.h"
 #include "base/compiler_specific.h"
 #include "base/file_util.h"
+#include "base/mac/bundle_locations.h"
 #include "base/mac/mac_util.h"
-#include "base/rand_util_c.h"
 #include "base/mac/scoped_cftyperef.h"
 #include "base/mac/scoped_nsautorelease_pool.h"
 #include "base/memory/scoped_nsobject.h"
+#include "base/rand_util.h"
 #include "base/string16.h"
 #include "base/string_piece.h"
 #include "base/string_util.h"
@@ -31,28 +32,30 @@ extern "C" {
 #include "content/public/common/content_client.h"
 #include "content/public/common/content_switches.h"
 #include "grit/content_resources.h"
+#include "ui/base/layout.h"
+#include "ui/gl/gl_surface.h"
 #include "unicode/uchar.h"
-#include "ui/gfx/gl/gl_surface.h"
 
+namespace content {
 namespace {
 
 struct SandboxTypeToResourceIDMapping {
-  content::SandboxType sandbox_type;
+  SandboxType sandbox_type;
   int sandbox_profile_resource_id;
 };
 
 // Mapping from sandbox process types to resource IDs containing the sandbox
 // profile for all process types known to content.
 SandboxTypeToResourceIDMapping kDefaultSandboxTypeToResourceIDMapping[] = {
-  { content::SANDBOX_TYPE_RENDERER, IDR_RENDERER_SANDBOX_PROFILE },
-  { content::SANDBOX_TYPE_WORKER,   IDR_WORKER_SANDBOX_PROFILE },
-  { content::SANDBOX_TYPE_UTILITY,  IDR_UTILITY_SANDBOX_PROFILE },
-  { content::SANDBOX_TYPE_GPU,      IDR_GPU_SANDBOX_PROFILE },
-  { content::SANDBOX_TYPE_PPAPI,    IDR_PPAPI_SANDBOX_PROFILE },
+  { SANDBOX_TYPE_RENDERER, IDR_RENDERER_SANDBOX_PROFILE },
+  { SANDBOX_TYPE_WORKER,   IDR_WORKER_SANDBOX_PROFILE },
+  { SANDBOX_TYPE_UTILITY,  IDR_UTILITY_SANDBOX_PROFILE },
+  { SANDBOX_TYPE_GPU,      IDR_GPU_SANDBOX_PROFILE },
+  { SANDBOX_TYPE_PPAPI,    IDR_PPAPI_SANDBOX_PROFILE },
 };
 
 COMPILE_ASSERT(arraysize(kDefaultSandboxTypeToResourceIDMapping) == \
-               size_t(content::SANDBOX_TYPE_AFTER_LAST_TYPE), \
+               size_t(SANDBOX_TYPE_AFTER_LAST_TYPE), \
                sandbox_type_to_resource_id_mapping_incorrect);
 
 // Try to escape |c| as a "SingleEscapeCharacter" (\n, etc).  If successful,
@@ -102,8 +105,38 @@ NOINLINE void FatalStringQuoteException(const std::string& str) {
 
 }  // namespace
 
-namespace sandbox {
+// static
+NSString* Sandbox::AllowMetadataForPath(const FilePath& allowed_path) {
+  // Collect a list of all parent directories.
+  FilePath last_path = allowed_path;
+  std::vector<FilePath> subpaths;
+  for (FilePath path = allowed_path;
+       path.value() != last_path.value();
+       path = path.DirName()) {
+    subpaths.push_back(path);
+    last_path = path;
+  }
 
+  // Iterate through all parents and allow stat() on them explicitly.
+  NSString* sandbox_command = @"(allow file-read-metadata ";
+  for (std::vector<FilePath>::reverse_iterator i = subpaths.rbegin();
+       i != subpaths.rend();
+       ++i) {
+    std::string subdir_escaped;
+    if (!QuotePlainString(i->value(), &subdir_escaped)) {
+      FatalStringQuoteException(i->value());
+      return nil;
+    }
+
+    NSString* subdir_escaped_ns =
+        base::SysUTF8ToNSString(subdir_escaped.c_str());
+    sandbox_command =
+        [sandbox_command stringByAppendingFormat:@"(literal \"%@\")",
+            subdir_escaped_ns];
+  }
+
+  return [sandbox_command stringByAppendingString:@")"];
+}
 
 // static
 bool Sandbox::QuotePlainString(const std::string& src_utf8, std::string* dst) {
@@ -265,14 +298,14 @@ void Sandbox::SandboxWarmup(int sandbox_type) {
 
   {
     // Allow access to /dev/urandom.
-    GetUrandomFD();
+    base::GetUrandomFD();
   }
 
   // Process-type dependent warm-up.
-  if (sandbox_type == content::SANDBOX_TYPE_GPU) {
-     // Preload either the desktop GL or the osmesa so, depending on the
-     // --use-gl flag.
-     gfx::GLSurface::InitializeOneOff();
+  if (sandbox_type == SANDBOX_TYPE_GPU) {
+    // Preload either the desktop GL or the osmesa so, depending on the
+    // --use-gl flag.
+    gfx::GLSurface::InitializeOneOff();
   }
 }
 
@@ -282,7 +315,7 @@ NSString* Sandbox::BuildAllowDirectoryAccessSandboxString(
     SandboxVariableSubstitions* substitutions) {
   // A whitelist is used to determine which directories can be statted
   // This means that in the case of an /a/b/c/d/ directory, we may be able to
-  // stat the leaf directory, but not it's parent.
+  // stat the leaf directory, but not its parent.
   // The extension code in Chrome calls realpath() which fails if it can't call
   // stat() on one of the parent directories in the path.
   // The solution to this is to allow statting the parent directories themselves
@@ -293,38 +326,13 @@ NSString* Sandbox::BuildAllowDirectoryAccessSandboxString(
   // needed so the caller doesn't need to worry about things like /var
   // being a link to /private/var (like in the paths CreateNewTempDirectory()
   // returns).
-  FilePath allowed_dir_canonical(allowed_dir);
-  GetCanonicalSandboxPath(&allowed_dir_canonical);
+  FilePath allowed_dir_canonical = GetCanonicalSandboxPath(allowed_dir);
 
-  // Collect a list of all parent directories.
-  FilePath last_path = allowed_dir_canonical;
-  std::vector<FilePath> subpaths;
-  for (FilePath path = allowed_dir_canonical.DirName();
-       path.value() != last_path.value();
-       path = path.DirName()) {
-    subpaths.push_back(path);
-    last_path = path;
-  }
+  NSString* sandbox_command = AllowMetadataForPath(allowed_dir_canonical);
+  sandbox_command = [sandbox_command
+      substringToIndex:[sandbox_command length] - 1];  // strip trailing ')'
 
-  // Iterate through all parents and allow stat() on them explicitly.
-  NSString* sandbox_command = @"(allow file-read-metadata ";
-  for (std::vector<FilePath>::reverse_iterator i = subpaths.rbegin();
-       i != subpaths.rend();
-       ++i) {
-    std::string subdir_escaped;
-    if (!QuotePlainString(i->value(), &subdir_escaped)) {
-      FatalStringQuoteException(i->value());
-      return nil;
-    }
-
-    NSString* subdir_escaped_ns =
-        base::SysUTF8ToNSString(subdir_escaped.c_str());
-    sandbox_command =
-        [sandbox_command stringByAppendingFormat:@"(literal \"%@\")",
-            subdir_escaped_ns];
-  }
-
-  // Finally append the leaf directory.  Unlike it's parents (for which only
+  // Finally append the leaf directory.  Unlike its parents (for which only
   // stat() should be allowed), the leaf directory needs full access.
   (*substitutions)["ALLOWED_DIR"] =
       SandboxSubstring(allowed_dir_canonical.value(),
@@ -357,13 +365,14 @@ NSString* LoadSandboxTemplate(int sandbox_type) {
   if (sandbox_profile_resource_id == -1) {
     // Check if the embedder knows about this sandbox process type.
     bool sandbox_type_found =
-        content::GetContentClient()->GetSandboxProfileForSandboxType(
+        GetContentClient()->GetSandboxProfileForSandboxType(
             sandbox_type, &sandbox_profile_resource_id);
     CHECK(sandbox_type_found) << "Unknown sandbox type " << sandbox_type;
   }
 
   base::StringPiece sandbox_definition =
-      content::GetContentClient()->GetDataResource(sandbox_profile_resource_id);
+      GetContentClient()->GetDataResource(
+          sandbox_profile_resource_id, ui::SCALE_FACTOR_NONE);
   if (sandbox_definition.empty()) {
     LOG(FATAL) << "Failed to load the sandbox profile (resource id "
                << sandbox_profile_resource_id << ")";
@@ -371,7 +380,8 @@ NSString* LoadSandboxTemplate(int sandbox_type) {
   }
 
   base::StringPiece common_sandbox_definition =
-      content::GetContentClient()->GetDataResource(IDR_COMMON_SANDBOX_PROFILE);
+      GetContentClient()->GetDataResource(
+          IDR_COMMON_SANDBOX_PROFILE, ui::SCALE_FACTOR_NONE);
   if (common_sandbox_definition.empty()) {
     LOG(FATAL) << "Failed to load the common sandbox profile";
     return nil;
@@ -399,7 +409,7 @@ bool Sandbox::PostProcessSandboxProfile(
         std::string *final_sandbox_profile_str) {
   NSString* sandbox_data = [[sandbox_template copy] autorelease];
 
-  // Remove comments, e.g. ;10.6_ONLY .
+  // Remove comments, e.g. ;10.7_OR_ABOVE .
   for (NSString* to_remove in comments_to_remove) {
     sandbox_data = [sandbox_data stringByReplacingOccurrencesOfString:to_remove
                                                            withString:@""];
@@ -467,8 +477,8 @@ bool Sandbox::EnableSandbox(int sandbox_type,
                             const FilePath& allowed_dir) {
   // Sanity - currently only SANDBOX_TYPE_UTILITY supports a directory being
   // passed in.
-  if (sandbox_type < content::SANDBOX_TYPE_AFTER_LAST_TYPE &&
-      sandbox_type != content::SANDBOX_TYPE_UTILITY) {
+  if (sandbox_type < SANDBOX_TYPE_AFTER_LAST_TYPE &&
+      sandbox_type != SANDBOX_TYPE_UTILITY) {
     DCHECK(allowed_dir.empty())
         << "Only SANDBOX_TYPE_UTILITY allows a custom directory parameter.";
   }
@@ -504,13 +514,11 @@ bool Sandbox::EnableSandbox(int sandbox_type,
     [tokens_to_remove addObject:@";ENABLE_LOGGING"];
   }
 
-  bool snow_leopard_or_later = base::mac::IsOSSnowLeopardOrLater();
   bool lion_or_later = base::mac::IsOSLionOrLater();
 
   // Without this, the sandbox will print a message to the system log every
-  // time it denies a request.  This floods the console with useless spew. The
-  // (with no-log) syntax is only supported on 10.6+
-  if (snow_leopard_or_later && !enable_logging) {
+  // time it denies a request.  This floods the console with useless spew.
+  if (!enable_logging) {
     substitutions["DISABLE_SANDBOX_DENIAL_LOGGING"] =
         SandboxSubstring("(with no-log)");
   } else {
@@ -521,8 +529,7 @@ bool Sandbox::EnableSandbox(int sandbox_type,
   // (see renderer.sb for details).
   std::string home_dir = [NSHomeDirectory() fileSystemRepresentation];
 
-  FilePath home_dir_canonical(home_dir);
-  GetCanonicalSandboxPath(&home_dir_canonical);
+  FilePath home_dir_canonical = GetCanonicalSandboxPath(FilePath(home_dir));
 
   substitutions["USER_HOMEDIR_AS_LITERAL"] =
       SandboxSubstring(home_dir_canonical.value(),
@@ -533,13 +540,20 @@ bool Sandbox::EnableSandbox(int sandbox_type,
     [tokens_to_remove addObject:@";10.7_OR_ABOVE"];
   }
 
-  if (snow_leopard_or_later) {
-    // >=10.6 Sandbox rules.
-    [tokens_to_remove addObject:@";10.6_OR_ABOVE"];
-  } else {
-    // Sandbox rules only for versions before 10.6.
-    [tokens_to_remove addObject:@";BEFORE_10.6"];
+  substitutions["COMPONENT_BUILD_WORKAROUND"] = SandboxSubstring("");
+#if defined(COMPONENT_BUILD)
+  // dlopen() fails without file-read-metadata access if the executable image
+  // contains LC_RPATH load commands. The components build uses those.
+  // See http://crbug.com/127465
+  if (base::mac::IsOSSnowLeopard()) {
+    FilePath bundle_executable = base::mac::NSStringToFilePath(
+        [base::mac::MainBundle() executablePath]);
+    NSString* sandbox_command = AllowMetadataForPath(
+        GetCanonicalSandboxPath(bundle_executable));
+    substitutions["COMPONENT_BUILD_WORKAROUND"] =
+        SandboxSubstring(base::SysNSStringToUTF8(sandbox_command));
   }
+#endif
 
   // All information needed to assemble the final profile has been collected.
   // Merge it all together.
@@ -562,23 +576,23 @@ bool Sandbox::EnableSandbox(int sandbox_type,
 }
 
 // static
-void Sandbox::GetCanonicalSandboxPath(FilePath* path) {
-  int fd = HANDLE_EINTR(open(path->value().c_str(), O_RDONLY));
+FilePath Sandbox::GetCanonicalSandboxPath(const FilePath& path) {
+  int fd = HANDLE_EINTR(open(path.value().c_str(), O_RDONLY));
   if (fd < 0) {
     DPLOG(FATAL) << "GetCanonicalSandboxPath() failed for: "
-                 << path->value();
-    return;
+                 << path.value();
+    return path;
   }
   file_util::ScopedFD file_closer(&fd);
 
   FilePath::CharType canonical_path[MAXPATHLEN];
   if (HANDLE_EINTR(fcntl(fd, F_GETPATH, canonical_path)) != 0) {
     DPLOG(FATAL) << "GetCanonicalSandboxPath() failed for: "
-                 << path->value();
-    return;
+                 << path.value();
+    return path;
   }
 
-  *path = FilePath(canonical_path);
+  return FilePath(canonical_path);
 }
 
-}  // namespace sandbox
+}  // namespace content

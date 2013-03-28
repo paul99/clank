@@ -4,7 +4,6 @@
 
 #ifndef CHROME_BROWSER_FIRST_RUN_UPGRADE_UTIL_H_
 #define CHROME_BROWSER_FIRST_RUN_UPGRADE_UTIL_H_
-#pragma once
 
 #include "build/build_config.h"
 
@@ -17,6 +16,14 @@ namespace upgrade_util {
 // Launches Chrome again simulating a "user" launch. If Chrome could not be
 // launched, returns false.
 bool RelaunchChromeBrowser(const CommandLine& command_line);
+
+#if defined(OS_WIN)
+
+// Like RelaunchChromeBrowser() but for Windows 8 if chrome is in desktop mode
+// it launches chrome in metro mode, and vice-versa.
+bool RelaunchChromeWithModeSwitch(const CommandLine& command_line);
+
+#endif
 
 #if !defined(OS_MACOSX)
 

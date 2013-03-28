@@ -1,10 +1,9 @@
-// Copyright (c) 2011 The Chromium Authors. All rights reserved.
+// Copyright (c) 2012 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
 #ifndef CHROME_BROWSER_PASSWORD_MANAGER_NATIVE_BACKEND_GNOME_X_H_
 #define CHROME_BROWSER_PASSWORD_MANAGER_NATIVE_BACKEND_GNOME_X_H_
-#pragma once
 
 #include <gnome-keyring.h>
 
@@ -12,15 +11,14 @@
 
 #include "base/basictypes.h"
 #include "base/time.h"
+#include "chrome/browser/password_manager/password_store_factory.h"
 #include "chrome/browser/password_manager/password_store_x.h"
 #include "chrome/browser/profiles/profile.h"
 
 class PrefService;
 
-namespace webkit {
-namespace forms {
+namespace content {
 struct PasswordForm;
-}
 }
 
 // Many of the gnome_keyring_* functions use variable arguments, which makes
@@ -75,12 +73,12 @@ class NativeBackendGnome : public PasswordStoreX::NativeBackend,
   virtual bool Init() OVERRIDE;
 
   // Implements NativeBackend interface.
-  virtual bool AddLogin(const webkit::forms::PasswordForm& form) OVERRIDE;
-  virtual bool UpdateLogin(const webkit::forms::PasswordForm& form) OVERRIDE;
-  virtual bool RemoveLogin(const webkit::forms::PasswordForm& form) OVERRIDE;
+  virtual bool AddLogin(const content::PasswordForm& form) OVERRIDE;
+  virtual bool UpdateLogin(const content::PasswordForm& form) OVERRIDE;
+  virtual bool RemoveLogin(const content::PasswordForm& form) OVERRIDE;
   virtual bool RemoveLoginsCreatedBetween(
       const base::Time& delete_begin, const base::Time& delete_end) OVERRIDE;
-  virtual bool GetLogins(const webkit::forms::PasswordForm& form,
+  virtual bool GetLogins(const content::PasswordForm& form,
                          PasswordFormList* forms) OVERRIDE;
   virtual bool GetLoginsCreatedBetween(const base::Time& get_begin,
                                        const base::Time& get_end,
@@ -90,7 +88,7 @@ class NativeBackendGnome : public PasswordStoreX::NativeBackend,
 
  private:
   // Adds a login form without checking for one to replace first.
-  bool RawAddLogin(const webkit::forms::PasswordForm& form);
+  bool RawAddLogin(const content::PasswordForm& form);
 
   // Reads PasswordForms from the keyring with the given autofillability state.
   bool GetLoginsList(PasswordFormList* forms, bool autofillable);

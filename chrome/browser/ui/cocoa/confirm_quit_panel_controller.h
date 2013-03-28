@@ -1,4 +1,4 @@
-// Copyright (c) 2011 The Chromium Authors. All rights reserved.
+// Copyright (c) 2012 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -7,30 +7,11 @@
 
 #import <Cocoa/Cocoa.h>
 
-#import "base/mac/cocoa_protocols.h"
-#include "ui/base/accelerators/accelerator_cocoa.h"
-
 @class ConfirmQuitFrameView;
 
-namespace confirm_quit {
-
-enum ConfirmQuitMetric {
-  // The user quit without having the feature enabled.
-  kNoConfirm = 0,
-  // The user held Cmd+Q for the entire duration.
-  kHoldDuration,
-  // The user hit Cmd+Q twice for the accelerated path.
-  kDoubleTap,
-  // The user tapped Cmd+Q once and then held it.
-  kTapHold,
-
-  kSampleCount
-};
-
-// Records the histogram value for the above metric.
-void RecordHistogram(ConfirmQuitMetric sample);
-
-}  // namespace confirm_quit
+namespace ui {
+class PlatformAcceleratorCocoa;
+}
 
 // The ConfirmQuitPanelController manages the black HUD window that tells users
 // to "Hold Cmd+Q to Quit".
@@ -59,16 +40,14 @@ void RecordHistogram(ConfirmQuitMetric sample);
 // instructions on how to quit.
 - (void)dismissPanel;
 
-// Returns the Accelerator for the Quit menu item.
-+ (ui::AcceleratorCocoa)quitAccelerator;
-
 // Returns a string representation fit for display of |+quitAccelerator|.
 + (NSString*)keyCommandString;
 
 @end
 
 @interface ConfirmQuitPanelController (UnitTesting)
-+ (NSString*)keyCombinationForAccelerator:(const ui::AcceleratorCocoa&)item;
++ (NSString*)keyCombinationForAccelerator:
+    (const ui::PlatformAcceleratorCocoa&)item;
 @end
 
 #endif  // CHROME_BROWSER_UI_COCOA_CONFIRM_QUIT_PANEL_CONTROLLER_H_

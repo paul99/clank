@@ -1,10 +1,14 @@
+// Copyright (c) 2012 The Chromium Authors. All rights reserved.
+// Use of this source code is governed by a BSD-style license that can be
+// found in the LICENSE file.
+
 [
   {
     "namespace":"management",
     "types": [
       {
         "id": "IconInfo",
-        "description": "Information about an icon belonging to an extension or app.",
+        "description": "Information about an icon belonging to an extension, app, or theme.",
         "type": "object",
         "properties": {
           "size": { "type": "integer", "description": "A number representing the width and height of the icon. Likely values include (but are not limited to) 128, 48, 24, and 16."  },
@@ -13,7 +17,7 @@
       },
       {
         "id": "ExtensionInfo",
-        "description": "Information about an installed extension or app.",
+        "description": "Information about an installed extension, app, or theme.",
         "type": "object",
         "properties": {
           "id": {
@@ -21,15 +25,15 @@
             "type": "string"
           },
           "name": {
-            "description": "The name of this extension or app.",
+            "description": "The name of this extension, app, or theme.",
             "type": "string"
           },
           "description": {
-            "description": "The description of this extension or app.",
+            "description": "The description of this extension, app, or theme.",
             "type": "string"
           },
           "version": {
-            "description": "The <a href='manifest.html#version'>version</a> of this extension or app.",
+            "description": "The <a href='manifest.html#version'>version</a> of this extension, app, or theme.",
             "type": "string"
           },
           "mayDisable": {
@@ -48,7 +52,13 @@
           },
           "isApp": {
             "description": "True if this is an app.",
-            "type": "boolean"
+            "type": "boolean",
+            "nodoc": true
+          },
+          "type": {
+            "description": "The type of this extension, app, or theme.",
+            "type": "string",
+            "enum": ["extension", "hosted_app", "packaged_app", "legacy_packaged_app", "theme"]
           },
           "appLaunchUrl": {
             "description": "The launch url (only present for apps).",
@@ -56,17 +66,17 @@
             "optional": true
           },
           "homepageUrl": {
-            "description": "The URL of the homepage of this extension or app.",
+            "description": "The URL of the homepage of this extension, app, or theme.",
             "type": "string",
             "optional": true
           },
           "updateUrl": {
-            "description": "The update URL of this extension or app.",
+            "description": "The update URL of this extension, app, or theme.",
             "type": "string",
             "optional": true
           },
           "offlineEnabled": {
-            "description": "Whether the extension or app declares that it supports offline.",
+            "description": "Whether the extension, app, or theme declares that it supports offline.",
             "type": "boolean"
           },
           "optionsUrl": {
@@ -94,6 +104,11 @@
             "items" : {
               "type": "string"
             }
+          },
+          "installType": {
+            "description": "How the extension was installed. One of<br><var>admin</var>: The extension was installed because of an administrative policy,<br><var>development</var>: The extension was loaded unpacked in developer mode,<br><var>normal</var>: The extension was installed normally via a .crx file,<br><var>sideload</var>: The extension was installed by other software on the machine,<br><var>other</var>: The extension was installed by other means.",
+            "type": "string",
+            "enum": ["admin", "development", "normal", "sideload", "other"]
           }
         }
       }
@@ -121,7 +136,7 @@
       },
       {
         "name": "get",
-        "description": "Returns information about the installed extension or app that has the given ID.",
+        "description": "Returns information about the installed extension, app, or theme that has the given ID.",
         "parameters": [
           {
             "name": "id",
@@ -218,6 +233,18 @@
             "description": "This should be the id from an item of $ref:ExtensionInfo."
           },
           {
+            "type": "object",
+            "name": "options",
+            "optional": "true",
+            "properties": {
+              "showConfirmDialog": {
+                "type": "boolean",
+                "optional": true,
+                "description": "Whether or not a confirm-uninstall dialog should prompt the user. Defaults to false."
+              }
+            }
+          },
+          {
             "name": "callback",
             "type": "function",
             "optional": "true",
@@ -258,7 +285,7 @@
           {
            "name": "id",
            "type": "string",
-           "description": "The id of the extension or app that was uninstalled."
+           "description": "The id of the extension, app, or theme that was uninstalled."
           }
         ]
       },

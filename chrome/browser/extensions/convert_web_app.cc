@@ -1,4 +1,4 @@
-// Copyright (c) 2011 The Chromium Authors. All rights reserved.
+// Copyright (c) 2012 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -12,22 +12,24 @@
 #include "base/base64.h"
 #include "base/file_path.h"
 #include "base/file_util.h"
-#include "base/json/json_value_serializer.h"
+#include "base/files/scoped_temp_dir.h"
+#include "base/json/json_file_value_serializer.h"
 #include "base/logging.h"
 #include "base/path_service.h"
-#include "base/scoped_temp_dir.h"
 #include "base/stringprintf.h"
 #include "base/time.h"
 #include "base/utf_string_conversions.h"
 #include "chrome/common/chrome_paths.h"
 #include "chrome/common/extensions/extension.h"
-#include "chrome/common/extensions/extension_constants.h"
 #include "chrome/common/extensions/extension_file_util.h"
+#include "chrome/common/extensions/extension_manifest_constants.h"
 #include "chrome/common/web_apps.h"
 #include "crypto/sha2.h"
 #include "googleurl/src/gurl.h"
 #include "third_party/skia/include/core/SkBitmap.h"
 #include "ui/gfx/codec/png_codec.h"
+
+namespace extensions {
 
 namespace keys = extension_manifest_keys;
 
@@ -83,15 +85,17 @@ std::string ConvertTimeToExtensionVersion(const Time& create_time) {
 
 scoped_refptr<Extension> ConvertWebAppToExtension(
     const WebApplicationInfo& web_app,
-    const Time& create_time) {
-  FilePath user_data_temp_dir = extension_file_util::GetUserDataTempDir();
-  if (user_data_temp_dir.empty()) {
+    const Time& create_time,
+    const FilePath& extensions_dir) {
+  FilePath install_temp_dir =
+      extension_file_util::GetInstallTempDir(extensions_dir);
+  if (install_temp_dir.empty()) {
     LOG(ERROR) << "Could not get path to profile temporary directory.";
     return NULL;
   }
 
-  ScopedTempDir temp_dir;
-  if (!temp_dir.CreateUniqueTempDirUnderPath(user_data_temp_dir)) {
+  base::ScopedTempDir temp_dir;
+  if (!temp_dir.CreateUniqueTempDirUnderPath(install_temp_dir)) {
     LOG(ERROR) << "Could not create temporary directory.";
     return NULL;
   }
@@ -102,6 +106,10 @@ scoped_refptr<Extension> ConvertWebAppToExtension(
     root->SetString(keys::kPublicKey, GenerateKey(web_app.manifest_url));
   else
     root->SetString(keys::kPublicKey, GenerateKey(web_app.app_url));
+
+  if (web_app.is_offline_enabled)
+    root->SetBoolean(keys::kOfflineEnabled, true);
+
   root->SetString(keys::kName, UTF16ToUTF8(web_app.title));
   root->SetString(keys::kVersion, ConvertTimeToExtensionVersion(create_time));
   root->SetString(keys::kDescription, UTF16ToUTF8(web_app.description));
@@ -173,7 +181,7 @@ scoped_refptr<Extension> ConvertWebAppToExtension(
 
   // Finally, create the extension object to represent the unpacked directory.
   std::string error;
-  int extension_flags = Extension::STRICT_ERROR_CHECKS;
+  int extension_flags = Extension::NO_FLAGS;
   if (web_app.is_bookmark_app)
     extension_flags |= Extension::FROM_BOOKMARK;
   scoped_refptr<Extension> extension = Extension::Create(
@@ -190,3 +198,5 @@ scoped_refptr<Extension> ConvertWebAppToExtension(
   temp_dir.Take();  // The caller takes ownership of the directory.
   return extension;
 }
+
+}  // namespace extensions

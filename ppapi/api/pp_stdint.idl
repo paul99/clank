@@ -39,12 +39,18 @@ describe {
 
   /** Pointer to memory (void *). */
   mem_t;
-  
+
   /** Pointer to null terminated string (char *). */
   str_t;
 
+  /** Pointer to constant null terminated string (const char *). */
+  cstr_t;
+
   /** No return value. */
   void;
+
+  /** Platform-specific file handle */
+  PP_FileHandle;
 };
 
 #inline c

@@ -21,6 +21,7 @@
 #include "base/command_line.h"
 #include "base/debug/debug_on_start_win.h"
 #include "base/perftimer.h"
+#include "base/pickle.h"
 #include "base/test/perf_test_suite.h"
 #include "base/test/test_suite.h"
 #include "base/threading/thread.h"
@@ -28,13 +29,10 @@
 #include "ipc/ipc_channel.h"
 #include "ipc/ipc_channel_proxy.h"
 #include "ipc/ipc_message_utils.h"
+#include "ipc/ipc_multiprocess_test.h"
+#include "ipc/ipc_sender.h"
 #include "ipc/ipc_switches.h"
 #include "testing/multiprocess_func_list.h"
-
-#if defined(OS_POSIX)
-#include "base/global_descriptors_posix.h"
-#include "ipc/ipc_descriptors.h"
-#endif
 
 // Define to enable IPC performance testing instead of the regular unit tests
 // #define PERFORMANCE_TEST
@@ -89,7 +87,7 @@ base::ProcessHandle IPCChannelTest::SpawnChild(ChildType child_type,
   bool debug_on_start =
       CommandLine::ForCurrentProcess()->HasSwitch(switches::kDebugChildren);
 
-  base::file_handle_mapping_vector fds_to_map;
+  base::FileHandleMappingVector fds_to_map;
   const int ipcfd = channel->GetClientFileDescriptor();
   if (ipcfd > -1) {
     fds_to_map.push_back(std::pair<int, int>(ipcfd, kPrimaryIPCChannel + 3));
@@ -145,7 +143,7 @@ TEST_F(IPCChannelTest, BasicMessageTest) {
   EXPECT_TRUE(m.WriteString(v2));
   EXPECT_TRUE(m.WriteWString(v3));
 
-  void* iter = NULL;
+  PickleIterator iter(m);
 
   int vi;
   std::string vs;
@@ -166,7 +164,7 @@ TEST_F(IPCChannelTest, BasicMessageTest) {
   EXPECT_FALSE(m.ReadWString(&iter, &vw));
 }
 
-static void Send(IPC::Message::Sender* sender, const char* text) {
+static void Send(IPC::Sender* sender, const char* text) {
   static int message_index = 0;
 
   IPC::Message* message = new IPC::Message(0,
@@ -185,14 +183,17 @@ static void Send(IPC::Message::Sender* sender, const char* text) {
   sender->Send(message);
 }
 
-class MyChannelListener : public IPC::Channel::Listener {
+class MyChannelListener : public IPC::Listener {
  public:
   virtual bool OnMessageReceived(const IPC::Message& message) {
-    IPC::MessageIterator iter(message);
+    PickleIterator iter(message);
 
-    iter.NextInt();
-    const std::string data = iter.NextString();
-    const std::string big_string = iter.NextString();
+    int ignored;
+    EXPECT_TRUE(iter.ReadInt(&ignored));
+    std::string data;
+    EXPECT_TRUE(iter.ReadString(&data));
+    std::string big_string;
+    EXPECT_TRUE(iter.ReadString(&big_string));
     EXPECT_EQ(kLongMessageStringNumBytes - 1, big_string.length());
 
 
@@ -210,13 +211,13 @@ class MyChannelListener : public IPC::Channel::Listener {
     MessageLoop::current()->Quit();
   }
 
-  void Init(IPC::Message::Sender* s) {
+  void Init(IPC::Sender* s) {
     sender_ = s;
     messages_left_ = 50;
   }
 
  private:
-  IPC::Message::Sender* sender_;
+  IPC::Sender* sender_;
   int messages_left_;
 };
 
@@ -241,7 +242,8 @@ TEST_F(IPCChannelTest, ChannelTest) {
   chan.Close();
 
   // Cleanup child process.
-  EXPECT_TRUE(base::WaitForSingleProcess(process_handle, 5000));
+  EXPECT_TRUE(base::WaitForSingleProcess(
+      process_handle, base::TimeDelta::FromSeconds(5)));
   base::CloseProcessHandle(process_handle);
 }
 
@@ -281,7 +283,8 @@ TEST_F(IPCChannelTest, ChannelTestExistingPipe) {
   chan.Close();
 
   // Cleanup child process.
-  EXPECT_TRUE(base::WaitForSingleProcess(process_handle, 5000));
+  EXPECT_TRUE(base::WaitForSingleProcess(
+      process_handle, base::TimeDelta::FromSeconds(5)));
   base::CloseProcessHandle(process_handle);
 }
 #endif  // defined (OS_WIN)
@@ -306,7 +309,7 @@ TEST_F(IPCChannelTest, ChannelProxyTest) {
 #elif defined(OS_POSIX)
     bool debug_on_start = CommandLine::ForCurrentProcess()->HasSwitch(
                               switches::kDebugChildren);
-    base::file_handle_mapping_vector fds_to_map;
+    base::FileHandleMappingVector fds_to_map;
     const int ipcfd = chan.GetClientFileDescriptor();
     if (ipcfd > -1) {
       fds_to_map.push_back(std::pair<int, int>(ipcfd, kPrimaryIPCChannel + 3));
@@ -326,24 +329,28 @@ TEST_F(IPCChannelTest, ChannelProxyTest) {
     MessageLoop::current()->Run();
 
     // cleanup child process
-    EXPECT_TRUE(base::WaitForSingleProcess(process_handle, 5000));
+    EXPECT_TRUE(base::WaitForSingleProcess(
+        process_handle, base::TimeDelta::FromSeconds(5)));
     base::CloseProcessHandle(process_handle);
   }
   thread.Stop();
 }
 
-class ChannelListenerWithOnConnectedSend : public IPC::Channel::Listener {
+class ChannelListenerWithOnConnectedSend : public IPC::Listener {
  public:
   virtual void OnChannelConnected(int32 peer_pid) OVERRIDE {
     SendNextMessage();
   }
 
   virtual bool OnMessageReceived(const IPC::Message& message) OVERRIDE {
-    IPC::MessageIterator iter(message);
+    PickleIterator iter(message);
 
-    iter.NextInt();
-    const std::string data = iter.NextString();
-    const std::string big_string = iter.NextString();
+    int ignored;
+    EXPECT_TRUE(iter.ReadInt(&ignored));
+    std::string data;
+    EXPECT_TRUE(iter.ReadString(&data));
+    std::string big_string;
+    EXPECT_TRUE(iter.ReadString(&big_string));
     EXPECT_EQ(kLongMessageStringNumBytes - 1, big_string.length());
     SendNextMessage();
     return true;
@@ -355,7 +362,7 @@ class ChannelListenerWithOnConnectedSend : public IPC::Channel::Listener {
     MessageLoop::current()->Quit();
   }
 
-  void Init(IPC::Message::Sender* s) {
+  void Init(IPC::Sender* s) {
     sender_ = s;
     messages_left_ = 50;
   }
@@ -369,11 +376,17 @@ class ChannelListenerWithOnConnectedSend : public IPC::Channel::Listener {
     }
   }
 
-  IPC::Message::Sender* sender_;
+  IPC::Sender* sender_;
   int messages_left_;
 };
 
-TEST_F(IPCChannelTest, SendMessageInChannelConnected) {
+#if defined(OS_WIN)
+// Acting flakey in Windows. http://crbug.com/129595
+#define MAYBE_SendMessageInChannelConnected DISABLED_SendMessageInChannelConnected
+#else
+#define MAYBE_SendMessageInChannelConnected SendMessageInChannelConnected
+#endif
+TEST_F(IPCChannelTest, MAYBE_SendMessageInChannelConnected) {
   // This tests the case of a listener sending back an event in it's
   // OnChannelConnected handler.
 
@@ -396,15 +409,12 @@ TEST_F(IPCChannelTest, SendMessageInChannelConnected) {
   channel.Close();
 
   // Cleanup child process.
-  EXPECT_TRUE(base::WaitForSingleProcess(process_handle, 5000));
+  EXPECT_TRUE(base::WaitForSingleProcess(
+      process_handle, base::TimeDelta::FromSeconds(5)));
   base::CloseProcessHandle(process_handle);
 }
 
-MULTIPROCESS_TEST_MAIN(RunTestClient) {
-#if defined(OS_POSIX)
-  base::GlobalDescriptors::GetInstance()->Set(kPrimaryIPCChannel,
-      kPrimaryIPCChannel + base::GlobalDescriptors::kBaseDescriptor);
-#endif
+MULTIPROCESS_IPC_TEST_MAIN(RunTestClient) {
   MessageLoopForIO main_message_loop;
   MyChannelListener channel_listener;
 
@@ -440,7 +450,7 @@ MULTIPROCESS_TEST_MAIN(RunTestClient) {
 // This channel listener just replies to all messages with the exact same
 // message. It assumes each message has one string parameter. When the string
 // "quit" is sent, it will exit.
-class ChannelReflectorListener : public IPC::Channel::Listener {
+class ChannelReflectorListener : public IPC::Listener {
  public:
   explicit ChannelReflectorListener(IPC::Channel *channel) :
     channel_(channel),
@@ -456,9 +466,11 @@ class ChannelReflectorListener : public IPC::Channel::Listener {
 
   virtual bool OnMessageReceived(const IPC::Message& message) {
     count_messages_++;
-    IPC::MessageIterator iter(message);
-    int time = iter.NextInt();
-    int msgid = iter.NextInt();
+    PickleIterator iter(message);
+    int time;
+    EXPECT_TRUE(iter.ReadInt(&time));
+    int msgid;
+    EXPECT_TRUE(iter.ReadInt(&msgid));
     std::string payload = iter.NextString();
     latency_messages_ += GetTickCount() - time;
 
@@ -475,13 +487,14 @@ class ChannelReflectorListener : public IPC::Channel::Listener {
     channel_->Send(msg);
     return true;
   }
+
  private:
   IPC::Channel *channel_;
   int count_messages_;
   int latency_messages_;
 };
 
-class ChannelPerfListener : public IPC::Channel::Listener {
+class ChannelPerfListener : public IPC::Listener {
  public:
   ChannelPerfListener(IPC::Channel* channel, int msg_count, int msg_size) :
        count_down_(msg_count),
@@ -501,14 +514,14 @@ class ChannelPerfListener : public IPC::Channel::Listener {
 
   virtual bool OnMessageReceived(const IPC::Message& message) {
     count_messages_++;
-    // decode the string so this gets counted in the total time
-    IPC::MessageIterator iter(message);
-    int time = iter.NextInt();
-    int msgid = iter.NextInt();
+    // Decode the string so this gets counted in the total time.
+    PickleIterator iter(message);
+    int time;
+    EXPECT_TRUE(iter.ReadInt(&time));
+    int msgid;
+    EXPECT_TRUE(iter.ReadInt(&msgid));
     std::string cur = iter.NextString();
     latency_messages_ += GetTickCount() - time;
-
-    // cout << "perflistener got message" << endl;
 
     count_down_--;
     if (count_down_ == 0) {
@@ -573,11 +586,7 @@ TEST_F(IPCChannelTest, Performance) {
 }
 
 // This message loop bounces all messages back to the sender
-MULTIPROCESS_TEST_MAIN(RunReflector) {
-#if defined(OS_POSIX)
-  base::GlobalDescriptors::GetInstance()->Set(kPrimaryIPCChannel,
-      kPrimaryIPCChannel + base::GlobalDescriptors::kBaseDescriptor);
-#endif
+MULTIPROCESS_IPC_TEST_MAIN(RunReflector) {
   MessageLoopForIO main_message_loop;
   IPC::Channel chan(kReflectorChannel, IPC::Channel::MODE_CLIENT, NULL);
   ChannelReflectorListener channel_reflector_listener(&chan);

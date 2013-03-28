@@ -6,7 +6,6 @@
 
 #ifndef CHROME_BROWSER_CHROMEOS_LOGIN_HELPER_H_
 #define CHROME_BROWSER_CHROMEOS_LOGIN_HELPER_H_
-#pragma once
 
 #include "base/compiler_specific.h"
 #include "base/string16.h"
@@ -58,12 +57,16 @@ GURL GetAccountRecoveryHelpUrl();
 // Ethernet > WiFi > Cellular. Same for connecting network.
 string16 GetCurrentNetworkName(NetworkLibrary* network_library);
 
+// Returns the size of user image required for proper display under current DPI.
+int GetCurrentUserImageSize();
+
 // Define the constants in |login| namespace to avoid potential
 // conflict with other chromeos components.
 namespace login {
 
-// The size of user image.
-const int kUserImageSize = 256;
+// Maximum size of user image, in which it should be saved to be properly
+// displayed under all possible DPI values.
+const int kMaxUserImageSize = 512;
 
 // Default link color on login/OOBE controls.
 const SkColor kLinkColor = 0xFF0066CC;
@@ -79,21 +82,12 @@ const int kUserCornerRadius = 6;
 }  // namespace login
 
 // Font size correction in pixels for login/oobe controls.
-#if defined(CROS_FONTS_USING_BCI)
-const int kFontSizeCorrectionDelta = 1;
-const int kNetworkSelectionLabelFontDelta = 1;
-const int kSelectedUsernameFontDelta = 1;
-const int kUnselectedUsernameFontDelta = 1;
-const int kWelcomeTitleFontDelta = 8;
-const int kLoginTitleFontDelta = 3;
-#else
 const int kFontSizeCorrectionDelta = 2;
 const int kNetworkSelectionLabelFontDelta = 1;
 const int kSelectedUsernameFontDelta = 1;
 const int kUnselectedUsernameFontDelta = 2;
 const int kWelcomeTitleFontDelta = 9;
 const int kLoginTitleFontDelta = 4;
-#endif
 
 }  // namespace chromeos
 

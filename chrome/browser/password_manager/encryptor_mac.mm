@@ -1,4 +1,4 @@
-// Copyright (c) 2011 The Chromium Authors. All rights reserved.
+// Copyright (c) 2012 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -9,10 +9,12 @@
 #include "base/logging.h"
 #include "base/memory/scoped_ptr.h"
 #include "base/utf_string_conversions.h"
+#include "chrome/browser/password_manager/encryptor_password_mac.h"
+#include "crypto/apple_keychain.h"
 #include "crypto/encryptor.h"
 #include "crypto/symmetric_key.h"
-#include "chrome/browser/password_manager/encryptor_password_mac.h"
-#include "chrome/browser/keychain_mac.h"
+
+using crypto::AppleKeychain;
 
 namespace {
 
@@ -43,7 +45,7 @@ crypto::SymmetricKey* GetEncryptionKey() {
   if (use_mock_keychain) {
     password = "mock_password";
   } else {
-    MacKeychain keychain;
+    AppleKeychain keychain;
     EncryptorPassword encryptor_password(keychain);
     password = encryptor_password.GetEncryptorPassword();
   }

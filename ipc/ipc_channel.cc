@@ -11,12 +11,14 @@
 #include "base/rand_util.h"
 #include "base/stringprintf.h"
 
+#if !defined(OS_NACL)
 namespace {
 
 // Global atomic used to guarantee channel IDs are unique.
-base::AtomicSequenceNumber g_last_id(base::LINKER_INITIALIZED);
+base::StaticAtomicSequenceNumber g_last_id;
 
 }  // namespace
+#endif
 
 namespace IPC {
 
@@ -30,8 +32,9 @@ std::string Channel::GenerateUniqueRandomChannelID() {
   // component. The strong random component prevents other processes from
   // hijacking or squatting on predictable channel names.
 
+  int process_id = base::GetCurrentProcId();
   return base::StringPrintf("%d.%u.%d",
-      base::GetCurrentProcId(),
+      process_id,
       g_last_id.GetNext(),
       base::RandInt(0, std::numeric_limits<int32>::max()));
 }

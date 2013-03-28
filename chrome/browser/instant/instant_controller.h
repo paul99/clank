@@ -1,266 +1,328 @@
-// Copyright (c) 2012 The Chromium Authors. All rights reserved.
+// Copyright 2012 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
 #ifndef CHROME_BROWSER_INSTANT_INSTANT_CONTROLLER_H_
 #define CHROME_BROWSER_INSTANT_INSTANT_CONTROLLER_H_
-#pragma once
 
-#include <set>
+#include <map>
 #include <string>
+#include <vector>
 
 #include "base/basictypes.h"
+#include "base/gtest_prod_util.h"
 #include "base/memory/scoped_ptr.h"
-#include "base/memory/scoped_vector.h"
-#include "base/memory/weak_ptr.h"
 #include "base/string16.h"
+#include "base/time.h"
+#include "base/timer.h"
 #include "chrome/browser/instant/instant_commit_type.h"
-#include "chrome/browser/instant/instant_loader_delegate.h"
-#include "chrome/browser/search_engines/template_url_id.h"
+#include "chrome/browser/instant/instant_model.h"
+#include "chrome/browser/ui/omnibox/omnibox_edit_model.h"
 #include "chrome/common/instant_types.h"
+#include "chrome/common/search_types.h"
 #include "content/public/common/page_transition_types.h"
 #include "googleurl/src/gurl.h"
 #include "ui/gfx/native_widget_types.h"
 #include "ui/gfx/rect.h"
 
 struct AutocompleteMatch;
-class InstantDelegate;
+class AutocompleteProvider;
 class InstantLoader;
-class InstantTest;
-class PrefService;
-class Profile;
-class TabContents;
-class TabContentsWrapper;
+class InstantTab;
 class TemplateURL;
 
-// InstantController maintains a TabContents that is intended to give a preview
-// of a URL. InstantController is owned by Browser.
-//
-// At any time the TabContents maintained by InstantController may be destroyed
-// by way of |DestroyPreviewContents|, which results in |HideInstant| being
-// invoked on the delegate. Similarly the preview may be committed at any time
-// by invoking |CommitCurrentPreview|, which results in |CommitInstant|
-// being invoked on the delegate. Also see |PrepareForCommit| below.
-class InstantController : public InstantLoaderDelegate {
+namespace chrome {
+class BrowserInstantController;
+}
+
+namespace content {
+class WebContents;
+}
+
+// InstantController maintains a WebContents that is intended to give a preview
+// of search suggestions and results. InstantController is owned by Browser via
+// BrowserInstantController.
+class InstantController {
  public:
-  // Amount of time to wait before starting the instant animation.
-  static const int kAutoCommitPauseTimeMS = 1000;
-  // Duration of the instant animation in which the colors change.
-  static const int kAutoCommitFadeInTimeMS = 300;
+  // The URL for the local omnibox popup.
+  static const char* kLocalOmniboxPopupURL;
 
-  InstantController(Profile* profile, InstantDelegate* delegate);
-  virtual ~InstantController();
+  // |use_local_preview_only| will force the use of kLocalOmniboxPopupURL as the
+  // instant URL and is only applicable if |extended_enabled| is true.
+  InstantController(chrome::BrowserInstantController* browser,
+                    bool extended_enabled,
+                    bool use_local_preview_only);
+  ~InstantController();
 
-  // Registers instant related preferences.
-  static void RegisterUserPrefs(PrefService* prefs);
-
-  // Records instant metrics.
-  static void RecordMetrics(Profile* profile);
-
-  // Returns true if instant is enabled.
-  static bool IsEnabled(Profile* profile);
-
-  // Enables instant.
-  static void Enable(Profile* profile);
-
-  // Disables instant.
-  static void Disable(Profile* profile);
-
-  // Accepts the currently showing instant preview, if any, and returns true.
-  // Returns false if there is no instant preview showing.
-  static bool CommitIfCurrent(InstantController* controller);
-
-  // Invoked as the user types in the omnibox with the url to navigate to. If
-  // the url is valid and a preview TabContents has not been created, it is
-  // created. If |verbatim| is true search results are shown for |user_text|
-  // rather than the best guess as to what the search thought the user meant.
-  // |verbatim| only matters if the AutocompleteMatch is for a search engine
-  // that supports instant. Returns true if the attempt to update does not
-  // result in the preview TabContents being destroyed.
-  bool Update(TabContentsWrapper* tab_contents,
-              const AutocompleteMatch& match,
+  // Invoked as the user types into the omnibox. |user_text| is what the user
+  // has typed. |full_text| is what the omnibox is showing. These may differ if
+  // the user typed only some text, and the rest was inline autocompleted. If
+  // |verbatim| is true, search results are shown for the exact omnibox text,
+  // rather than the best guess as to what the user means. Returns true if the
+  // update is accepted (i.e., if |match| is a search rather than a URL).
+  // |is_keyword_search| is true if keyword searching is in effect.
+  bool Update(const AutocompleteMatch& match,
               const string16& user_text,
+              const string16& full_text,
+              size_t selection_start,
+              size_t selection_end,
               bool verbatim,
-              string16* suggested_text);
+              bool user_input_in_progress,
+              bool omnibox_popup_is_open,
+              bool escape_pressed,
+              bool is_keyword_search);
 
-  // Sets the bounds of the omnibox (in screen coordinates). The bounds are
-  // remembered until the preview is committed or destroyed. This is only used
-  // when showing results for a search provider that supports instant.
-  void SetOmniboxBounds(const gfx::Rect& bounds);
+  // Sets the bounds of the omnibox popup, in screen coordinates.
+  void SetPopupBounds(const gfx::Rect& bounds);
 
-  // Notifies the delegate to hide the preview and destroys the preview
-  // TabContents. Does nothing if the preview TabContents has not been created.
-  void DestroyPreviewContents();
+  // Sets the start and end margins of the omnibox text area.
+  void SetMarginSize(int start, int end);
 
-  // Notifies the delegate to hide the preview but leaves it around in hopes it
-  // can be subsequently used. The preview will not be used until Update() (with
-  // valid parameters) is invoked.
-  void Hide();
+  // Send autocomplete results from |providers| to the preview page.
+  void HandleAutocompleteResults(
+      const std::vector<AutocompleteProvider*>& providers);
 
-  // Returns true if we're showing the last URL passed to |Update|. If this is
-  // false a commit does not result in committing the last url passed to update.
-  // A return value of false happens if we're in the process of determining if
-  // the page supports instant.
-  bool IsCurrent() const;
+  // Called when the user presses up or down. |count| is a repeat count,
+  // negative for moving up, positive for moving down. Returns true if Instant
+  // handled the key press.
+  bool OnUpOrDownKeyPressed(int count);
 
-  // Returns true if the caller should proceed with committing the preview. A
-  // return value of false means that there is no valid preview to commit. This
-  // is used by Browser, when the user presses <Enter>, to decide whether to
-  // load the omnibox contents through Instant or otherwise. This is needed
-  // because calls to |Update| don't necessarily result in a preview being
-  // shown, such as in the HIDDEN and SILENT field trials.
-  bool PrepareForCommit();
+  // The preview WebContents. May be NULL. InstantController retains ownership.
+  content::WebContents* GetPreviewContents() const;
 
-  // Invoked when the user does some gesture that should trigger making the
-  // current previewed page the permanent page.  Returns the TCW that contains
-  // the committed preview.
-  TabContentsWrapper* CommitCurrentPreview(InstantCommitType type);
+  // Returns true if the Instant preview is showing a search results preview.
+  bool IsPreviewingSearchResults() const;
 
-  // Sets InstantController so that when the mouse is released the preview is
-  // committed.
-  void SetCommitOnMouseUp();
+  // If the preview is showing search results, commits the preview, calling
+  // CommitInstant() on the browser, and returns true. Else, returns false.
+  bool CommitIfPossible(InstantCommitType type);
 
-  bool commit_on_mouse_up() const { return commit_on_mouse_up_; }
+  // Called to indicate that the omnibox focus state changed with the given
+  // |reason|. If |focus_state| is FOCUS_NONE, |view_gaining_focus| is set to
+  // the view gaining focus.
+  void OmniboxFocusChanged(OmniboxFocusState focus_state,
+                           OmniboxFocusChangeReason reason,
+                           gfx::NativeView view_gaining_focus);
 
-  // Returns true if the mouse is down as the result of activating the preview
-  // content.
-  bool IsMouseDownFromActivate();
+  // The search mode in the active tab has changed. Pass the message down to
+  // the loader which will notify the renderer. Create |instant_tab_| if the
+  // |new_mode| reflects an Instant search results page.
+  void SearchModeChanged(const chrome::search::Mode& old_mode,
+                         const chrome::search::Mode& new_mode);
 
-  // The autocomplete edit that was initiating the current instant session has
-  // lost focus. Commit or discard the preview accordingly.
-  void OnAutocompleteLostFocus(gfx::NativeView view_gaining_focus);
+  // The user switched tabs. Hide the preview. Create |instant_tab_| if the
+  // newly active tab is an Instant search results page.
+  void ActiveTabChanged();
 
-  // The autocomplete edit has gained focus. Preload the instant URL of the
-  // default search engine, in anticipation of the user typing a query.
-  void OnAutocompleteGotFocus(TabContentsWrapper* tab_contents);
+  // The user is about to switch tabs. Commit the preview if needed.
+  void TabDeactivated(content::WebContents* contents);
 
-  // Releases the preview TabContents passing ownership to the caller. This is
-  // intended to be called when the preview TabContents is committed. This does
-  // not notify the delegate. |tab_contents| is the underlying tab onto which
-  // the preview will be committed. It can be NULL when the underlying tab is
-  // irrelevant, for example when |type| is INSTANT_COMMIT_DESTROY.
-  // WARNING: be sure and invoke CompleteRelease after adding the returned
-  // TabContents to a tabstrip.
-  TabContentsWrapper* ReleasePreviewContents(InstantCommitType type,
-                                             TabContentsWrapper* tab_contents);
+  // Sets whether Instant should show result previews.
+  void SetInstantEnabled(bool instant_enabled);
 
-  // Does cleanup after the preview contents has been added to the tabstrip.
-  // Invoke this if you explicitly invoke ReleasePreviewContents.
-  void CompleteRelease(TabContentsWrapper* tab);
+  // The theme has changed. Pass the message to the preview page.
+  void ThemeChanged(const ThemeBackgroundInfo& theme_info);
 
-  // TabContents the match is being shown for.
-  TabContentsWrapper* tab_contents() const { return tab_contents_; }
-
-  // The preview TabContents; may be null.
-  TabContentsWrapper* GetPreviewContents() const;
-
-  // Returns true if the preview TabContents is ready to be displayed. In some
-  // situations this may return false yet GetPreviewContents() returns non-NULL.
-  bool is_displayable() const { return is_displayable_; }
+  // The theme area height has changed. Pass the message to the preview page.
+  void ThemeAreaHeightChanged(int height);
 
   // Returns the transition type of the last AutocompleteMatch passed to Update.
   content::PageTransition last_transition_type() const {
     return last_transition_type_;
   }
 
-  // InstantLoaderDelegate
-  virtual void InstantStatusChanged(InstantLoader* loader) OVERRIDE;
-  virtual void SetSuggestedTextFor(InstantLoader* loader,
-                                   const string16& text,
-                                   InstantCompleteBehavior behavior) OVERRIDE;
-  virtual gfx::Rect GetInstantBounds() OVERRIDE;
-  virtual bool ShouldCommitInstantOnMouseUp() OVERRIDE;
-  virtual void CommitInstantLoader(InstantLoader* loader) OVERRIDE;
-  virtual void InstantLoaderDoesntSupportInstant(
-      InstantLoader* loader) OVERRIDE;
-  virtual void AddToBlacklist(InstantLoader* loader,
-                              const GURL& url) OVERRIDE;
-  virtual void SwappedTabContents(InstantLoader* loader) OVERRIDE;
+  const InstantModel* model() const { return &model_; }
+
+  // Invoked by the page when it has suggested text.
+  void SetSuggestions(const content::WebContents* contents,
+                      const std::vector<InstantSuggestion>& suggestions);
+
+  // Invoked by the page when its support for the Instant API is determined.
+  void InstantSupportDetermined(const content::WebContents* contents,
+                                bool supports_instant);
+
+  // Invoked by InstantLoader to request that the preview be shown.
+  void ShowInstantPreview(InstantShownReason reason,
+                          int height,
+                          InstantSizeUnits units);
+
+  // Invoked by InstantLoader to request the browser to start capturing user key
+  // strokes.
+  void StartCapturingKeyStrokes();
+
+  // Invoked by InstantLoader to request the browser to stop capturing user key
+  // strokes.
+  void StopCapturingKeyStrokes();
+
+  // Invoked by InstantLoader when it has swapped a different WebContents into
+  // the preview, usually because a prerendered page was navigated to.
+  void SwappedWebContents();
+
+  // Invoked by InstantLoader when the preview gains focus, usually due to the
+  // user clicking on it.
+  void InstantLoaderContentsFocused();
+
+  // Invoked by the InstantLoader when its RenderView crashes.
+  void InstantLoaderRenderViewGone();
+
+  // Invoked by InstantLoader when the instant page is about to navigate.
+  void InstantLoaderAboutToNavigateMainFrame(const GURL& url);
+
+  // Invoked by the InstantLoader when the instant page wants to navigate to
+  // the speicfied URL.
+  void NavigateToURL(const GURL& url, content::PageTransition transition);
 
  private:
-  friend class InstantTest;
+  FRIEND_TEST_ALL_PREFIXES(InstantTest, OmniboxFocusLoadsInstant);
+  FRIEND_TEST_ALL_PREFIXES(InstantTest, NonInstantSearchProvider);
+  FRIEND_TEST_ALL_PREFIXES(InstantTest, InstantLoaderRefresh);
 
-  typedef std::set<std::string> HostBlacklist;
+  // Helper for OmniboxFocusChanged. Commit or discard the preview.
+  void OmniboxLostFocus(gfx::NativeView view_gaining_focus);
 
-  // Updates |is_displayable_| and if necessary notifies the delegate.
-  void UpdateIsDisplayable();
+  // Creates a new loader if necessary, using the instant_url property of the
+  // |template_url| (for example, if the Instant URL has changed since the last
+  // time the loader was created). If |fallback_to_local| is true will use
+  // kLocalOmniboxPopupURL as the fallback url (in extended mode) in case
+  // the |template_url| doesn't have a valid Instant URL. Returns true if an
+  // instant URL could be determined.
+  bool ResetLoader(const TemplateURL* template_url,
+                   const content::WebContents* active_tab,
+                   bool fallback_to_local);
 
-  // Updates InstantLoaderManager and its current InstantLoader. This is invoked
-  // internally from Update.
-  void UpdateLoader(const TemplateURL* template_url,
-                    const GURL& url,
-                    content::PageTransition transition_type,
-                    const string16& user_text,
-                    bool verbatim,
-                    string16* suggested_text);
+  // Ensures that the |loader_| uses the default Instant URL, recreating it if
+  // necessary, and returns true. Returns false if the Instant URL could not be
+  // determined or the active tab is NULL (browser is shutting down).
+  bool CreateDefaultLoader();
 
-  // Returns true if instant should be used for the specified match. Instant is
-  // only used if |match| corresponds to the default search provider.
-  bool ShouldUseInstant(const AutocompleteMatch& match);
+  // Called when the |loader_| might be stale. If it's actually stale, and the
+  // omnibox doesn't have focus, and the preview isn't showing, the |loader_| is
+  // deleted and recreated. Else the refresh is skipped.
+  void OnStaleLoader();
 
-  // Returns true if |template_url| is a valid TemplateURL for use by instant.
-  bool IsValidInstantTemplateURL(const TemplateURL* template_url);
+  // If the active tab is an Instant search results page, sets |instant_tab_| to
+  // point to it. Else, deletes any existing |instant_tab_|.
+  void ResetInstantTab();
 
-  // Marks the loader as not supporting instant.
-  void BlacklistFromInstant();
+  // Called by Update() to ensure we have an Instant page that can process
+  // |match|. Returns true if we should continue with the Update().
+  bool ResetLoaderForMatch(const AutocompleteMatch& match);
 
-  // Returns true if the specified id has been blacklisted from supporting
-  // instant.
-  bool IsBlacklistedFromInstant(TemplateURLID id);
+  // Hide the preview. Also sends an onchange event (with blank query) to the
+  // preview, telling it to clear out results for any old queries.
+  void HideLoader();
 
-  // Clears the set of search engines blacklisted.
-  void ClearBlacklist();
+  // Like HideLoader(), but doesn't call OnStaleLoader(). Use HideLoader()
+  // unless you are going to call loader_.reset() yourself subsequently.
+  void HideInternal();
 
-  // Deletes |loader| after a delay. At the time we determine a site doesn't
-  // want to participate in instant we can't destroy the loader (because
-  // destroying the loader destroys the TabContents and the TabContents is on
-  // the stack). Instead we place the loader in |loaders_to_destroy_| and
-  // schedule a task.
-  void ScheduleDestroy(InstantLoader* loader);
+  // Counterpart to HideLoader(). Asks the |browser_| to display the preview
+  // with the given |height|.
+  void ShowLoader(InstantShownReason reason,
+                  int height,
+                  InstantSizeUnits units);
 
-  // Destroys all loaders scheduled for destruction in |ScheduleForDestroy|.
-  void DestroyLoaders();
+  // Send the omnibox popup bounds to the page.
+  void SendPopupBoundsToPage();
 
-  InstantDelegate* delegate_;
+  // If |template_url| is a valid TemplateURL for use with Instant, fills in
+  // |instant_url| and returns true; returns false otherwise.
+  // Note: If the command-line switch kInstantURL is set, this method uses its
+  // value for |instant_url| and returns true without examining |template_url|.
+  bool GetInstantURL(const TemplateURL* template_url,
+                     std::string* instant_url) const;
 
-  // The TabContents last passed to |Update|.
-  TabContentsWrapper* tab_contents_;
+  chrome::BrowserInstantController* const browser_;
 
-  // True if |loader_| is ready to be displayed.
-  bool is_displayable_;
+  // Whether the extended API and regular API are enabled. If both are false,
+  // Instant is effectively disabled.
+  const bool extended_enabled_;
+  bool instant_enabled_;
 
-  // Set to true in Hide() and false in UpdateLoader(). Used when we persist
-  // the |loader_|, but it isn't up to date.
-  bool is_out_of_date_;
+  // If true, the instant URL is set to kLocalOmniboxPopupURL.
+  const bool use_local_preview_only_;
 
+  // The state of the preview page, i.e., the page owned by |loader_|. Ignored
+  // if |instant_tab_| is in use.
+  InstantModel model_;
+
+  // The preview WebContents.
   scoped_ptr<InstantLoader> loader_;
 
-  // See description above setter.
-  gfx::Rect omnibox_bounds_;
+  // A committed WebContents that supports Instant. If non-NULL, the |loader_|
+  // is guaranteed to be hidden and messages will be sent to this instead.
+  scoped_ptr<InstantTab> instant_tab_;
 
-  // See description above CommitOnMouseUp.
-  bool commit_on_mouse_up_;
+  // The most recent full_text passed to Update(). If empty, we'll not accept
+  // search suggestions from |loader_| or |instant_tab_|.
+  string16 last_omnibox_text_;
 
-  // See description above getter.
+  // True if the last Update() had an inline autocompletion. Used only to make
+  // sure that we don't accidentally suggest gray text suggestion in that case.
+  bool last_omnibox_text_has_inline_autocompletion_;
+
+  // The most recent verbatim passed to Update(). Used only to ensure that we
+  // don't accidentally suggest an inline autocompletion.
+  bool last_verbatim_;
+
+  // The most recent suggestion received from the page, minus any prefix that
+  // the user has typed.
+  InstantSuggestion last_suggestion_;
+
+  // See comments on the getter above.
   content::PageTransition last_transition_type_;
 
-  // The IDs of any search engines that don't support instant. We assume all
-  // search engines support instant, but if we determine an engine doesn't
-  // support instant it is added to this list. The list is cleared out on every
-  // reset/commit.
-  std::set<TemplateURLID> blacklisted_ids_;
+  // True if the last match passed to Update() was a search (versus a URL).
+  // Used to ensure that the preview page is committable.
+  bool last_match_was_search_;
 
-  // Used by ScheduleForDestroy; see it for details.
-  base::WeakPtrFactory<InstantController> weak_factory_;
+  // Omnibox focus state.
+  OmniboxFocusState omnibox_focus_state_;
 
-  // List of InstantLoaders to destroy. See ScheduleForDestroy for details.
-  ScopedVector<InstantLoader> loaders_to_destroy_;
+  // The search model mode for the active tab.
+  chrome::search::Mode search_mode_;
 
-  // The URL of the most recent match passed to |Update|.
-  GURL last_url_;
+  // Current omnibox popup bounds.
+  gfx::Rect popup_bounds_;
 
-  // The most recent user_text passed to |Update|.
-  string16 last_user_text_;
+  // Last popup bounds passed to the page.
+  gfx::Rect last_popup_bounds_;
+
+  // Size of the start-edge omnibox text area margin.
+  int start_margin_;
+
+  // Size of the end-edge omnibox text area margin.
+  int end_margin_;
+
+  // Timer used to update the bounds of the omnibox popup.
+  base::OneShotTimer<InstantController> update_bounds_timer_;
+
+  // Timer used to ensure that the Instant page does not get too stale.
+  base::OneShotTimer<InstantController> stale_loader_timer_;
+
+  // For each key K => value N, the map says that we found that the search
+  // engine identified by Instant URL K didn't support the Instant API, or
+  // caused RenderView crashes in each of the last N times that we loaded it.
+  // If an Instant URL isn't present in the map at all or has a value 0,
+  // it means that search engine supports the Instant API (or we assume it does,
+  // since we haven't determined it doesn't) and it did not cause a crash.
+  std::map<std::string, int> blacklisted_urls_;
+
+  // Search terms extraction (for autocomplete history matches) doesn't work
+  // on Instant URLs. So, whenever the user commits an Instant search, we add
+  // an equivalent non-Instant search URL to history, so that the search shows
+  // up in autocomplete history matches.
+  // TODO(sreeram): Remove when http://crbug.com/155373 is fixed.
+  GURL url_for_history_;
+
+  // The timestamp at which query editing began. This value is used when the
+  // preview is showed and cleared when the preview is hidden.
+  base::Time first_interaction_time_;
+
+  // Whether to allow the preview to show search suggestions. In general, the
+  // preview is allowed to show search suggestions whenever |search_mode_| is
+  // MODE_SEARCH_SUGGESTIONS, except in those cases where this is false.
+  bool allow_preview_to_show_search_suggestions_;
 
   DISALLOW_COPY_AND_ASSIGN(InstantController);
 };

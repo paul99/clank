@@ -1,4 +1,4 @@
-// Copyright (c) 2011 The Chromium Authors. All rights reserved.
+// Copyright (c) 2012 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -11,25 +11,24 @@
 #include "base/logging.h"
 #include "base/path_service.h"
 #include "base/stringprintf.h"
+#include "ui/base/ui_base_paths.h"
+#include "ui/base/resource/resource_handle.h"
 
 namespace ui {
 
-// static
-FilePath ResourceBundle::GetResourcesFilePath() {
-  FilePath data_path;
-  PathService::Get(base::DIR_ANDROID_APP_DATA, &data_path);
-  DCHECK(!data_path.empty());
-  return data_path.Append(FILE_PATH_LITERAL("paks/chrome.pak"));
+void ResourceBundle::LoadCommonResources() {
+  FilePath path;
+  PathService::Get(ui::DIR_RESOURCE_PAKS_ANDROID, &path);
+  AddDataPackFromPath(path.AppendASCII("chrome.pak"),
+                      SCALE_FACTOR_NONE);
+  AddDataPackFromPath(path.AppendASCII("chrome_100_percent.pak"),
+                      SCALE_FACTOR_100P);
 }
 
-gfx::Image& ResourceBundle::GetNativeImageNamed(int resource_id) {
+gfx::Image& ResourceBundle::GetNativeImageNamed(int resource_id, ImageRTL rtl) {
+  // Flipped image is not used on Android.
+  DCHECK_EQ(rtl, RTL_DISABLED);
   return GetImageNamed(resource_id);
-}
-
-// static
-FilePath ResourceBundle::GetLargeIconResourcesFilePath() {
-  // Not supported.
-  return FilePath();
 }
 
 }

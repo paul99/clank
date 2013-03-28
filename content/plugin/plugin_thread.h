@@ -1,10 +1,9 @@
-// Copyright (c) 2011 The Chromium Authors. All rights reserved.
+// Copyright (c) 2012 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
 #ifndef CONTENT_PLUGIN_PLUGIN_THREAD_H_
 #define CONTENT_PLUGIN_PLUGIN_THREAD_H_
-#pragma once
 
 #include "base/file_path.h"
 #include "base/native_library.h"
@@ -16,6 +15,8 @@
 #if defined(OS_POSIX)
 #include "base/file_descriptor_posix.h"
 #endif
+
+namespace content {
 
 // The PluginThread class represents a background thread where plugin instances
 // live.  Communication occurs between WebPluginDelegateProxy in the renderer
@@ -45,5 +46,7 @@ class PluginThread : public ChildThread {
 
   DISALLOW_COPY_AND_ASSIGN(PluginThread);
 };
+
+}  // namespace content
 
 #endif  // CONTENT_PLUGIN_PLUGIN_THREAD_H_

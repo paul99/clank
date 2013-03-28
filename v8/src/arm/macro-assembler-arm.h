@@ -68,6 +68,13 @@ enum AllocationFlags {
   SIZE_IN_WORDS = 1 << 2
 };
 
+// Flags used for AllocateHeapNumber
+enum TaggingMode {
+  // Tag the result.
+  TAG_RESULT,
+  // Don't tag
+  DONT_TAG_RESULT
+};
 
 // Flags used for the ObjectToDoubleVFPRegister function.
 enum ObjectToDoubleFlags {
@@ -85,8 +92,20 @@ enum SmiCheck { INLINE_SMI_CHECK, OMIT_SMI_CHECK };
 enum LinkRegisterStatus { kLRHasNotBeenSaved, kLRHasBeenSaved };
 
 
-bool AreAliased(Register r1, Register r2, Register r3, Register r4);
+#ifdef DEBUG
+bool AreAliased(Register reg1,
+                Register reg2,
+                Register reg3 = no_reg,
+                Register reg4 = no_reg,
+                Register reg5 = no_reg,
+                Register reg6 = no_reg);
+#endif
 
+
+enum TargetAddressStorageMode {
+  CAN_INLINE_TARGET_ADDRESS,
+  NEVER_INLINE_TARGET_ADDRESS
+};
 
 // MacroAssembler implements a collection of frequently used macros.
 class MacroAssembler: public Assembler {
@@ -103,18 +122,22 @@ class MacroAssembler: public Assembler {
   void Jump(Handle<Code> code, RelocInfo::Mode rmode, Condition cond = al);
   static int CallSize(Register target, Condition cond = al);
   void Call(Register target, Condition cond = al);
-  static int CallSize(Address target,
-                      RelocInfo::Mode rmode,
-                      Condition cond = al);
-  void Call(Address target, RelocInfo::Mode rmode, Condition cond = al);
-  static int CallSize(Handle<Code> code,
-                      RelocInfo::Mode rmode = RelocInfo::CODE_TARGET,
-                      unsigned ast_id = kNoASTId,
-                      Condition cond = al);
+  int CallSize(Address target, RelocInfo::Mode rmode, Condition cond = al);
+  static int CallSizeNotPredictableCodeSize(Address target,
+                                            RelocInfo::Mode rmode,
+                                            Condition cond = al);
+  void Call(Address target, RelocInfo::Mode rmode,
+            Condition cond = al,
+            TargetAddressStorageMode mode = CAN_INLINE_TARGET_ADDRESS);
+  int CallSize(Handle<Code> code,
+               RelocInfo::Mode rmode = RelocInfo::CODE_TARGET,
+               TypeFeedbackId ast_id = TypeFeedbackId::None(),
+               Condition cond = al);
   void Call(Handle<Code> code,
             RelocInfo::Mode rmode = RelocInfo::CODE_TARGET,
-            unsigned ast_id = kNoASTId,
-            Condition cond = al);
+            TypeFeedbackId ast_id = TypeFeedbackId::None(),
+            Condition cond = al,
+            TargetAddressStorageMode mode = CAN_INLINE_TARGET_ADDRESS);
   void Ret(Condition cond = al);
 
   // Emit code to discard a non-negative number of pointer-sized elements
@@ -146,7 +169,7 @@ class MacroAssembler: public Assembler {
            int lsb,
            int width,
            Condition cond = al);
-  void Bfc(Register dst, int lsb, int width, Condition cond = al);
+  void Bfc(Register dst, Register src, int lsb, int width, Condition cond = al);
   void Usat(Register dst, int satpos, const Operand& src,
             Condition cond = al);
 
@@ -299,6 +322,7 @@ class MacroAssembler: public Assembler {
 
   // Push a handle.
   void Push(Handle<Object> handle);
+  void Push(Smi* smi) { Push(Handle<Smi>(smi)); }
 
   // Push two registers.  Pushes leftmost register first (to highest address).
   void Push(Register src1, Register src2, Condition cond = al) {
@@ -475,6 +499,7 @@ class MacroAssembler: public Assembler {
 
   void Vmov(const DwVfpRegister dst,
             const double imm,
+            const Register scratch = no_reg,
             const Condition cond = al);
 
   // Enter exit frame.
@@ -490,6 +515,23 @@ class MacroAssembler: public Assembler {
   static int ActivationFrameAlignment();
 
   void LoadContext(Register dst, int context_chain_length);
+
+  // Conditionally load the cached Array transitioned map of type
+  // transitioned_kind from the native context if the map in register
+  // map_in_out is the cached Array map in the native context of
+  // expected_kind.
+  void LoadTransitionedArrayMapConditional(
+      ElementsKind expected_kind,
+      ElementsKind transitioned_kind,
+      Register map_in_out,
+      Register scratch,
+      Label* no_map_match);
+
+  // Load the initial map for new Arrays from a JSFunction.
+  void LoadInitialArrayMap(Register function_in,
+                           Register scratch,
+                           Register map_out,
+                           bool can_have_holes);
 
   void LoadGlobalFunction(int index, Register function);
 
@@ -566,20 +608,18 @@ class MacroAssembler: public Assembler {
   // Exception handling
 
   // Push a new try handler and link into try handler chain.
-  void PushTryHandler(CodeLocation try_location,
-                      HandlerType type,
-                      int handler_index);
+  void PushTryHandler(StackHandler::Kind kind, int handler_index);
 
   // Unlink the stack handler on top of the stack from the try handler chain.
   // Must preserve the result register.
   void PopTryHandler();
 
-  // Passes thrown value (in r0) to the handler of top of the try handler chain.
+  // Passes thrown value to the handler of top of the try handler chain.
   void Throw(Register value);
 
   // Propagates an uncatchable exception to the top of the current JS stack's
   // handler chain.
-  void ThrowUncatchable(UncatchableExceptionType type, Register value);
+  void ThrowUncatchable(Register value);
 
   // ---------------------------------------------------------------------------
   // Inline caching support
@@ -707,7 +747,8 @@ class MacroAssembler: public Assembler {
                           Register scratch1,
                           Register scratch2,
                           Register heap_number_map,
-                          Label* gc_required);
+                          Label* gc_required,
+                          TaggingMode tagging_mode = TAG_RESULT);
   void AllocateHeapNumberWithValue(Register result,
                                    DwVfpRegister value,
                                    Register scratch1,
@@ -781,22 +822,24 @@ class MacroAssembler: public Assembler {
 
   // Check if a map for a JSObject indicates that the object has fast smi only
   // elements.  Jump to the specified label if it does not.
-  void CheckFastSmiOnlyElements(Register map,
-                                Register scratch,
-                                Label* fail);
+  void CheckFastSmiElements(Register map,
+                            Register scratch,
+                            Label* fail);
 
   // Check to see if maybe_number can be stored as a double in
   // FastDoubleElements. If it can, store it at the index specified by key in
-  // the FastDoubleElements array elements, otherwise jump to fail.
+  // the FastDoubleElements array elements. Otherwise jump to fail, in which
+  // case scratch2, scratch3 and scratch4 are unmodified.
   void StoreNumberToDoubleElements(Register value_reg,
                                    Register key_reg,
-                                   Register receiver_reg,
+                                   // All regs below here overwritten.
                                    Register elements_reg,
                                    Register scratch1,
                                    Register scratch2,
                                    Register scratch3,
                                    Register scratch4,
-                                   Label* fail);
+                                   Label* fail,
+                                   int elements_offset = 0);
 
   // Compare an object's map with the specified map and its transitioned
   // elements maps if mode is ALLOW_ELEMENT_TRANSITION_MAPS. Condition flags are
@@ -804,6 +847,13 @@ class MacroAssembler: public Assembler {
   // compare sequences branches to early_success.
   void CompareMap(Register obj,
                   Register scratch,
+                  Handle<Map> map,
+                  Label* early_success,
+                  CompareMapMode mode = REQUIRE_EXACT_MAP);
+
+  // As above, but the map of the object is already loaded into the register
+  // which is preserved by the code generated.
+  void CompareMap(Register obj_map,
                   Handle<Map> map,
                   Label* early_success,
                   CompareMapMode mode = REQUIRE_EXACT_MAP);
@@ -844,12 +894,15 @@ class MacroAssembler: public Assembler {
 
   // Load and check the instance type of an object for being a string.
   // Loads the type into the second argument register.
-  // Returns a condition that will be enabled if the object was a string.
+  // Returns a condition that will be enabled if the object was a string
+  // and the passed-in condition passed. If the passed-in condition failed
+  // then flags remain unchanged.
   Condition IsObjectStringType(Register obj,
-                               Register type) {
-    ldr(type, FieldMemOperand(obj, HeapObject::kMapOffset));
-    ldrb(type, FieldMemOperand(type, Map::kInstanceTypeOffset));
-    tst(type, Operand(kIsNotStringMask));
+                               Register type,
+                               Condition cond = al) {
+    ldr(type, FieldMemOperand(obj, HeapObject::kMapOffset), cond);
+    ldrb(type, FieldMemOperand(type, Map::kInstanceTypeOffset), cond);
+    tst(type, Operand(kIsNotStringMask), cond);
     ASSERT_EQ(0, kStringTag);
     return eq;
   }
@@ -906,21 +959,30 @@ class MacroAssembler: public Assembler {
                       DwVfpRegister double_scratch,
                       Label *not_int32);
 
-  // Truncates a double using a specific rounding mode.
+  // Try to convert a double to a signed 32-bit integer. If the double value
+  // can be exactly represented as an integer, the code jumps to 'done' and
+  // 'result' contains the integer value. Otherwise, the code falls through.
+  void TryFastDoubleToInt32(Register result,
+                            DwVfpRegister double_input,
+                            DwVfpRegister double_scratch,
+                            Label* done);
+
+  // Truncates a double using a specific rounding mode, and writes the value
+  // to the result register.
   // Clears the z flag (ne condition) if an overflow occurs.
-  // If exact_conversion is true, the z flag is also cleared if the conversion
-  // was inexact, i.e. if the double value could not be converted exactly
-  // to a 32bit integer.
+  // If kCheckForInexactConversion is passed, the z flag is also cleared if the
+  // conversion was inexact, i.e. if the double value could not be converted
+  // exactly to a 32-bit integer.
   void EmitVFPTruncate(VFPRoundingMode rounding_mode,
-                       SwVfpRegister result,
+                       Register result,
                        DwVfpRegister double_input,
-                       Register scratch1,
-                       Register scratch2,
+                       Register scratch,
+                       DwVfpRegister double_scratch,
                        CheckForInexactConversion check
                            = kDontCheckForInexactConversion);
 
   // Helper for EmitECMATruncate.
-  // This will truncate a floating-point value outside of the singed 32bit
+  // This will truncate a floating-point value outside of the signed 32bit
   // integer range to a 32bit signed integer.
   // Expects the double value loaded in input_high and input_low.
   // Exits with the answer in 'result'.
@@ -935,7 +997,7 @@ class MacroAssembler: public Assembler {
   // Exits with 'result' holding the answer and all other registers clobbered.
   void EmitECMATruncate(Register result,
                         DwVfpRegister double_input,
-                        SwVfpRegister single_scratch,
+                        DwVfpRegister double_scratch,
                         Register scratch,
                         Register scratch2,
                         Register scratch3);
@@ -1144,7 +1206,15 @@ class MacroAssembler: public Assembler {
     mov(dst, Operand(src, ASR, kSmiTagSize), s);
   }
 
-  // Jump the register contains a smi.
+  // Untag the source value into destination and jump if source is a smi.
+  // Souce and destination can be the same register.
+  void UntagAndJumpIfSmi(Register dst, Register src, Label* smi_case);
+
+  // Untag the source value into destination and jump if source is not a smi.
+  // Souce and destination can be the same register.
+  void UntagAndJumpIfNotSmi(Register dst, Register src, Label* non_smi_case);
+
+  // Jump if the register contains a smi.
   inline void JumpIfSmi(Register value, Label* smi_label) {
     tst(value, Operand(kSmiTagMask));
     b(eq, smi_label);
@@ -1159,17 +1229,18 @@ class MacroAssembler: public Assembler {
   // Jump if either of the registers contain a smi.
   void JumpIfEitherSmi(Register reg1, Register reg2, Label* on_either_smi);
 
-  // Abort execution if argument is a smi. Used in debug code.
-  void AbortIfSmi(Register object);
-  void AbortIfNotSmi(Register object);
+  // Abort execution if argument is a smi, enabled via --debug-code.
+  void AssertNotSmi(Register object);
+  void AssertSmi(Register object);
 
-  // Abort execution if argument is a string. Used in debug code.
-  void AbortIfNotString(Register object);
+  // Abort execution if argument is a string, enabled via --debug-code.
+  void AssertString(Register object);
 
-  // Abort execution if argument is not the root value with the given index.
-  void AbortIfNotRootValue(Register src,
-                           Heap::RootListIndex root_value_index,
-                           const char* message);
+  // Abort execution if argument is not the root value with the given index,
+  // enabled via --debug-code.
+  void AssertRootValue(Register src,
+                       Heap::RootListIndex root_value_index,
+                       const char* message);
 
   // ---------------------------------------------------------------------------
   // HeapNumber utilities
@@ -1231,10 +1302,24 @@ class MacroAssembler: public Assembler {
 
 
   void LoadInstanceDescriptors(Register map, Register descriptors);
+  void EnumLength(Register dst, Register map);
+  void NumberOfOwnDescriptors(Register dst, Register map);
+
+  template<typename Field>
+  void DecodeField(Register reg) {
+    static const int shift = Field::kShift;
+    static const int mask = (Field::kMask >> shift) << kSmiTagSize;
+    mov(reg, Operand(reg, LSR, shift));
+    and_(reg, reg, Operand(mask));
+  }
 
   // Activation support.
   void EnterFrame(StackFrame::Type type);
   void LeaveFrame(StackFrame::Type type);
+
+  // Expects object in r0 and returns map with validated enum cache
+  // in r0.  Assumes that any other register can be used as a scratch.
+  void CheckEnumCache(Register null_value, Label* call_runtime);
 
  private:
   void CallCFunctionHelper(Register function,
@@ -1294,7 +1379,6 @@ class MacroAssembler: public Assembler {
 };
 
 
-#ifdef ENABLE_DEBUGGER_SUPPORT
 // The code patcher is used to patch (typically) small parts of code e.g. for
 // debugging and other types of instrumentation. When using the code patcher
 // the exact number of bytes specified must be emitted. It is not legal to emit
@@ -1324,7 +1408,6 @@ class CodePatcher {
   int size_;  // Number of bytes of the expected patch size.
   MacroAssembler masm_;  // Macro assembler used to generate the code.
 };
-#endif  // ENABLE_DEBUGGER_SUPPORT
 
 
 // -----------------------------------------------------------------------------
@@ -1336,7 +1419,7 @@ inline MemOperand ContextOperand(Register context, int index) {
 
 
 inline MemOperand GlobalObjectOperand()  {
-  return ContextOperand(cp, Context::GLOBAL_INDEX);
+  return ContextOperand(cp, Context::GLOBAL_OBJECT_INDEX);
 }
 
 

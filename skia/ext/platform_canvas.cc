@@ -9,50 +9,13 @@
 
 namespace skia {
 
-PlatformCanvas::PlatformCanvas() {}
-
-SkDevice* PlatformCanvas::setBitmapDevice(const SkBitmap&) {
-  SkASSERT(false);  // Should not be called.
-  return NULL;
-}
-
-// static
-size_t PlatformCanvas::StrideForWidth(unsigned width) {
-  return 4 * width;
-}
-
-bool PlatformCanvas::initializeWithDevice(SkDevice* device) {
-  if (!device)
-    return false;
-
-  setDevice(device);
-  device->unref();  // Was created with refcount 1, and setDevice also refs.
-  return true;
-}
-
-SkCanvas* CreateBitmapCanvas(int width, int height, bool is_opaque) {
-  return new PlatformCanvas(width, height, is_opaque);
-}
-
-SkCanvas* TryCreateBitmapCanvas(int width, int height, bool is_opaque) {
-  PlatformCanvas* canvas = new PlatformCanvas();
-  if (!canvas->initialize(width, height, is_opaque)) {
-    delete canvas;
-    canvas = NULL;
-  }
-  return canvas;
-}
-
 SkDevice* GetTopDevice(const SkCanvas& canvas) {
-  SkCanvas::LayerIter iter(const_cast<SkCanvas*>(&canvas), false);
-  return iter.device();
+  return canvas.getTopDevice(true);
 }
 
 bool SupportsPlatformPaint(const SkCanvas* canvas) {
-  // TODO(alokp): Rename IsNativeFontRenderingAllowed after removing these
-  // calls from WebKit.
   PlatformDevice* platform_device = GetPlatformDevice(GetTopDevice(*canvas));
-  return platform_device && platform_device->IsNativeFontRenderingAllowed();
+  return platform_device && platform_device->SupportsPlatformPaint();
 }
 
 PlatformSurface BeginPlatformPaint(SkCanvas* canvas) {
@@ -91,8 +54,25 @@ void MakeOpaque(SkCanvas* canvas, int x, int y, int width, int height) {
   // so we don't draw anything on a device that ignores xfermodes
   paint.setColor(0);
   // install our custom mode
-  paint.setXfermode(new SkProcXfermode(MakeOpaqueXfermodeProc))->unref();
+  skia::RefPtr<SkProcXfermode> xfermode =
+      skia::AdoptRef(new SkProcXfermode(MakeOpaqueXfermodeProc));
+  paint.setXfermode(xfermode.get());
   canvas->drawRect(rect, paint);
 }
+
+size_t PlatformCanvasStrideForWidth(unsigned width) {
+  return 4 * width;
+}
+
+SkCanvas* CreateCanvas(const skia::RefPtr<SkDevice>& device, OnFailureType failureType) {
+  if (!device) {
+    if (CRASH_ON_FAILURE == failureType)
+      SK_CRASH();
+    return NULL;
+  }
+  return new SkCanvas(device.get());
+}
+
+PlatformBitmap::PlatformBitmap() : surface_(0), platform_extra_(0) {}
 
 }  // namespace skia

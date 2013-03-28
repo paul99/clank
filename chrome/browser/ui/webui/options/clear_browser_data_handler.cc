@@ -1,4 +1,4 @@
-// Copyright (c) 2011 The Chromium Authors. All rights reserved.
+// Copyright (c) 2012 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -10,6 +10,9 @@
 #include "base/string16.h"
 #include "base/values.h"
 #include "chrome/browser/browser_process.h"
+#include "chrome/browser/browsing_data/browsing_data_helper.h"
+#include "chrome/browser/browsing_data/browsing_data_remover.h"
+#include "chrome/browser/google/google_util.h"
 #include "chrome/browser/prefs/pref_service.h"
 #include "chrome/browser/profiles/profile.h"
 #include "chrome/common/pref_names.h"
@@ -20,7 +23,15 @@
 #include "grit/locale_settings.h"
 #include "ui/base/l10n/l10n_util.h"
 
-ClearBrowserDataHandler::ClearBrowserDataHandler() : remover_(NULL) {
+namespace {
+const char kClearBrowsingDataLearnMoreUrl[] =
+    "https://support.google.com/chrome/?p=settings_clear_browsing_data";
+}
+
+namespace options {
+
+ClearBrowserDataHandler::ClearBrowserDataHandler()
+    : remover_(NULL) {
 }
 
 ClearBrowserDataHandler::~ClearBrowserDataHandler() {
@@ -28,10 +39,11 @@ ClearBrowserDataHandler::~ClearBrowserDataHandler() {
     remover_->RemoveObserver(this);
 }
 
-void ClearBrowserDataHandler::Initialize() {
+void ClearBrowserDataHandler::InitializeHandler() {
   clear_plugin_lso_data_enabled_.Init(prefs::kClearPluginLSODataEnabled,
-                                      Profile::FromWebUI(web_ui())->GetPrefs(),
-                                      NULL);
+                                      Profile::FromWebUI(web_ui())->GetPrefs());
+  pepper_flash_settings_enabled_.Init(prefs::kPepperFlashSettingsEnabled,
+                                      Profile::FromWebUI(web_ui())->GetPrefs());
 }
 
 void ClearBrowserDataHandler::GetLocalizedValues(
@@ -47,15 +59,20 @@ void ClearBrowserDataHandler::GetLocalizedValues(
     { "deleteCookiesFlashCheckbox", IDS_DEL_COOKIES_FLASH_CHKBOX },
     { "deletePasswordsCheckbox", IDS_DEL_PASSWORDS_CHKBOX },
     { "deleteFormDataCheckbox", IDS_DEL_FORM_DATA_CHKBOX },
+    { "deleteHostedAppsDataCheckbox", IDS_DEL_HOSTED_APPS_DATA_CHKBOX },
+    { "deauthorizeContentLicensesCheckbox",
+      IDS_DEAUTHORIZE_CONTENT_LICENSES_CHKBOX },
     { "clearBrowserDataCommit", IDS_CLEAR_BROWSING_DATA_COMMIT },
-    { "flashStorageSettings", IDS_FLASH_STORAGE_SETTINGS },
     { "flash_storage_url", IDS_FLASH_STORAGE_URL },
-    { "clearDataDeleting", IDS_CLEAR_DATA_DELETING },
   };
 
   RegisterStrings(localized_strings, resources, arraysize(resources));
   RegisterTitle(localized_strings, "clearBrowserDataOverlay",
                 IDS_CLEAR_BROWSING_DATA_TITLE);
+  localized_strings->SetString(
+      "clearBrowsingDataLearnMoreUrl",
+      google_util::StringAppendGoogleLocaleParam(
+          kClearBrowsingDataLearnMoreUrl));
 
   ListValue* time_list = new ListValue;
   for (int i = 0; i < 5; i++) {
@@ -78,8 +95,8 @@ void ClearBrowserDataHandler::GetLocalizedValues(
         break;
     }
     ListValue* option = new ListValue();
-    option->Append(Value::CreateIntegerValue(i));
-    option->Append(Value::CreateStringValue(label_string));
+    option->Append(new base::FundamentalValue(i));
+    option->Append(new base::StringValue(label_string));
     time_list->Append(option);
   }
   localized_strings->Set("clearBrowserDataTimeList", time_list);
@@ -93,10 +110,18 @@ void ClearBrowserDataHandler::RegisterMessages() {
 }
 
 void ClearBrowserDataHandler::HandleClearBrowserData(const ListValue* value) {
+  DCHECK(!remover_);
+
   Profile* profile = Profile::FromWebUI(web_ui());
   PrefService* prefs = profile->GetPrefs();
 
+  int site_data_mask = BrowsingDataRemover::REMOVE_SITE_DATA;
+  // Don't try to clear LSO data if it's not supported.
+  if (!*clear_plugin_lso_data_enabled_)
+    site_data_mask &= ~BrowsingDataRemover::REMOVE_PLUGIN_DATA;
+
   int remove_mask = 0;
+  int origin_mask = 0;
   if (prefs->GetBoolean(prefs::kDeleteBrowsingHistory))
     remove_mask |= BrowsingDataRemover::REMOVE_HISTORY;
   if (prefs->GetBoolean(prefs::kDeleteDownloadHistory))
@@ -104,34 +129,29 @@ void ClearBrowserDataHandler::HandleClearBrowserData(const ListValue* value) {
   if (prefs->GetBoolean(prefs::kDeleteCache))
     remove_mask |= BrowsingDataRemover::REMOVE_CACHE;
   if (prefs->GetBoolean(prefs::kDeleteCookies)) {
-    int site_data_mask = BrowsingDataRemover::REMOVE_SITE_DATA;
-    // Don't try to clear LSO data if it's not supported.
-    if (!*clear_plugin_lso_data_enabled_)
-      site_data_mask &= ~BrowsingDataRemover::REMOVE_PLUGIN_DATA;
     remove_mask |= site_data_mask;
+    origin_mask |= BrowsingDataHelper::UNPROTECTED_WEB;
   }
   if (prefs->GetBoolean(prefs::kDeletePasswords))
     remove_mask |= BrowsingDataRemover::REMOVE_PASSWORDS;
   if (prefs->GetBoolean(prefs::kDeleteFormData))
     remove_mask |= BrowsingDataRemover::REMOVE_FORM_DATA;
-
-  int period_selected = prefs->GetInteger(prefs::kDeleteTimePeriod);
-
-  base::FundamentalValue state(true);
-  web_ui()->CallJavascriptFunction("ClearBrowserDataOverlay.setClearingState",
-                                   state);
-
-  // If we are still observing a previous data remover, we need to stop
-  // observing.
-  if (remover_)
-    remover_->RemoveObserver(this);
+  // Clearing Content Licenses is only supported in Pepper Flash.
+  if (prefs->GetBoolean(prefs::kDeauthorizeContentLicenses) &&
+      *pepper_flash_settings_enabled_) {
+    remove_mask |= BrowsingDataRemover::REMOVE_CONTENT_LICENSES;
+  }
+  if (prefs->GetBoolean(prefs::kDeleteHostedAppsData)) {
+    remove_mask |= site_data_mask;
+    origin_mask |= BrowsingDataHelper::PROTECTED_WEB;
+  }
 
   // BrowsingDataRemover deletes itself when done.
-  remover_ = new BrowsingDataRemover(profile,
-      static_cast<BrowsingDataRemover::TimePeriod>(period_selected),
-      base::Time());
+  int period_selected = prefs->GetInteger(prefs::kDeleteTimePeriod);
+  remover_ = BrowsingDataRemover::CreateForPeriod(profile,
+      static_cast<BrowsingDataRemover::TimePeriod>(period_selected));
   remover_->AddObserver(this);
-  remover_->Remove(remove_mask);
+  remover_->Remove(remove_mask, origin_mask);
 }
 
 void ClearBrowserDataHandler::OnBrowsingDataRemoverDone() {
@@ -140,3 +160,5 @@ void ClearBrowserDataHandler::OnBrowsingDataRemoverDone() {
   remover_ = NULL;
   web_ui()->CallJavascriptFunction("ClearBrowserDataOverlay.doneClearing");
 }
+
+}  // namespace options

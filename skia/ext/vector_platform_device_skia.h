@@ -4,13 +4,12 @@
 
 #ifndef SKIA_EXT_VECTOR_PLATFORM_DEVICE_SKIA_H_
 #define SKIA_EXT_VECTOR_PLATFORM_DEVICE_SKIA_H_
-#pragma once
 
 #include "base/basictypes.h"
 #include "base/compiler_specific.h"
 #include "base/logging.h"
 #include "skia/ext/platform_device.h"
-#include "third_party/skia/include/core/SkRefCnt.h"
+#include "skia/ext/refptr.h"
 #include "third_party/skia/include/core/SkTScopedPtr.h"
 #include "third_party/skia/include/pdf/SkPDFDevice.h"
 
@@ -20,7 +19,7 @@ namespace skia {
 
 class BitmapPlatformDevice;
 
-class VectorPlatformDeviceSkia : public PlatformDevice, public SkPDFDevice {
+class VectorPlatformDeviceSkia : public SkPDFDevice, public PlatformDevice {
  public:
   SK_API VectorPlatformDeviceSkia(const SkISize& pageSize,
                                   const SkISize& contentSize,
@@ -28,7 +27,7 @@ class VectorPlatformDeviceSkia : public PlatformDevice, public SkPDFDevice {
   virtual ~VectorPlatformDeviceSkia();
 
   // PlatformDevice methods.
-  virtual bool IsNativeFontRenderingAllowed() OVERRIDE;
+  virtual bool SupportsPlatformPaint() OVERRIDE;
 
   virtual PlatformSurface BeginPlatformPaint() OVERRIDE;
   virtual void EndPlatformPaint() OVERRIDE;
@@ -51,7 +50,7 @@ class VectorPlatformDeviceSkia : public PlatformDevice, public SkPDFDevice {
 #endif
 
  private:
-  SkRefPtr<BitmapPlatformDevice> raster_surface_;
+  skia::RefPtr<BitmapPlatformDevice> raster_surface_;
 
   DISALLOW_COPY_AND_ASSIGN(VectorPlatformDeviceSkia);
 };

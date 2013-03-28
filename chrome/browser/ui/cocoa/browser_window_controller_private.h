@@ -1,10 +1,9 @@
-// Copyright (c) 2011 The Chromium Authors. All rights reserved.
+// Copyright (c) 2012 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
 #ifndef CHROME_BROWSER_UI_COCOA_BROWSER_WINDOW_CONTROLLER_PRIVATE_H_
 #define CHROME_BROWSER_UI_COCOA_BROWSER_WINDOW_CONTROLLER_PRIVATE_H_
-#pragma once
 
 #import "chrome/browser/ui/cocoa/browser_window_controller.h"
 
@@ -20,10 +19,6 @@
 // Create the appropriate tab strip controller based on whether or not side
 // tabs are enabled. Replaces the current controller.
 - (void)createTabStripController;
-
-// Creates the button used to toggle presentation mode.  Must only be called on
-// Lion or later.  Does nothing if the button already exists.
-- (void)createAndInstallPresentationModeToggleButton;
 
 // Saves the window's position in the local state preferences.
 - (void)saveWindowPositionIfNeeded;
@@ -46,12 +41,6 @@
 // Shows the informational "how to exit fullscreen" bubble.
 - (void)showFullscreenExitBubbleIfNecessary;
 - (void)destroyFullscreenExitBubbleIfNecessary;
-
-// Lays out the presentation mode toggle button at the top right corner of the
-// overlay.  Creates the button if needed, and removes it if it is not needed.
-// This method is safe to call on all OS versions.
-- (void)layoutPresentationModeToggleAtOverlayMaxX:(CGFloat)maxX
-                                      overlayMaxY:(CGFloat)maxY;
 
 // Lays out the tab strip at the given maximum y-coordinate, with the given
 // width, possibly for fullscreen mode; returns the new maximum y (below the
@@ -76,9 +65,12 @@
 // call it with the appropriate |maxY| which depends on whether or not the
 // bookmark bar is shown as the NTP bubble or not (use
 // |-placeBookmarkBarBelowInfoBar|).
-- (CGFloat)layoutBookmarkBarAtMinX:(CGFloat)minX
-                              maxY:(CGFloat)maxY
-                             width:(CGFloat)width;
+- (CGFloat)layoutTopBookmarkBarAtMinX:(CGFloat)minX
+                                 maxY:(CGFloat)maxY
+                                width:(CGFloat)width;
+
+// Lays out the bookmark at the bottom of the content area.
+- (void)layoutBottomBookmarkBarInContentFrame:(NSRect)contentFrame;
 
 // Lay out the view which draws the background for the floating bar when in
 // presentation mode, with the given frame and presentation-mode-status. Should
@@ -103,24 +95,10 @@
 // sends a message to the renderer to resize.
 - (void)layoutTabContentArea:(NSRect)frame;
 
-// Should we show the normal bookmark bar?
-- (BOOL)shouldShowBookmarkBar;
-
-// Is the current page one for which the bookmark should be shown detached *if*
-// the normal bookmark bar is not shown?
-- (BOOL)shouldShowDetachedBookmarkBar;
-
 // Sets the toolbar's height to a value appropriate for the given compression.
 // Also adjusts the bookmark bar's height by the opposite amount in order to
 // keep the total height of the two views constant.
 - (void)adjustToolbarAndBookmarkBarForCompression:(CGFloat)compression;
-
-// Gets and sets whether to default to presentation mode when entering
-// fullscreen on Lion or later.  On Leopard and Snow Leopard, this preference is
-// ignored (fullscreen mode always turns presentation mode on).  This method is
-// safe to call on all OS versions.
-- (BOOL)shouldUsePresentationModeWhenEnteringFullscreen;
-- (void)setShouldUsePresentationModeWhenEnteringFullscreen:(BOOL)flag;
 
 // Whether to show the presentation mode toggle button in the UI.  Returns YES
 // if in fullscreen mode on Lion or later.  This method is safe to call on all
@@ -128,13 +106,13 @@
 - (BOOL)shouldShowPresentationModeToggle;
 
 // Moves views between windows in preparation for fullscreen mode on Snow
-// Leopard or earlier.  (Lion and later reuses the original window for
+// Leopard.  (Lion and later reuses the original window for
 // fullscreen mode, so there is no need to move views around.)  This method does
 // not position views; callers must also call |-layoutSubviews|.  This method
 // must not be called on Lion or later.
-- (void)moveViewsForFullscreenForSnowLeopardOrEarlier:(BOOL)fullscreen
-    regularWindow:(NSWindow*)regularWindow
-    fullscreenWindow:(NSWindow*)fullscreenWindow;
+- (void)moveViewsForFullscreenForSnowLeopard:(BOOL)fullscreen
+                               regularWindow:(NSWindow*)regularWindow
+                            fullscreenWindow:(NSWindow*)fullscreenWindow;
 
 // Sets presentation mode, creating the PresentationModeController if needed and
 // forcing a relayout.  If |forceDropdown| is YES, this method will always
@@ -147,8 +125,8 @@
 // Called on Snow Leopard or earlier to enter or exit fullscreen.  These methods
 // are internal implementations of |-setFullscreen:|.  These methods must not be
 // called on Lion or later.
-- (void)enterFullscreenForSnowLeopardOrEarlier;
-- (void)exitFullscreenForSnowLeopardOrEarlier;
+- (void)enterFullscreenForSnowLeopard;
+- (void)exitFullscreenForSnowLeopard;
 
 // Register or deregister for content view resize notifications.  These
 // notifications are used while transitioning to fullscreen mode in Lion or

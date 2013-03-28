@@ -1,10 +1,9 @@
-// Copyright (c) 2011 The Chromium Authors. All rights reserved.
+// Copyright (c) 2012 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
 #ifndef UI_BASE_DRAGDROP_OS_EXCHANGE_DATA_PROVIDER_GTK_H_
 #define UI_BASE_DRAGDROP_OS_EXCHANGE_DATA_PROVIDER_GTK_H_
-#pragma once
 
 #include <gtk/gtk.h>
 #include <map>
@@ -17,7 +16,7 @@
 #include "base/string16.h"
 #include "googleurl/src/gurl.h"
 #include "ui/base/dragdrop/os_exchange_data.h"
-#include "ui/gfx/point.h"
+#include "ui/gfx/vector2d.h"
 
 namespace ui {
 
@@ -62,11 +61,20 @@ class UI_EXPORT OSExchangeDataProviderGtk : public OSExchangeData::Provider {
   virtual void SetString(const string16& data) OVERRIDE;
   virtual void SetURL(const GURL& url, const string16& title) OVERRIDE;
   virtual void SetFilename(const FilePath& path) OVERRIDE;
+  virtual void SetFilenames(
+      const std::vector<OSExchangeData::FileInfo>& filenames) OVERRIDE {
+    NOTREACHED();
+  }
   virtual void SetPickledData(OSExchangeData::CustomFormat format,
                               const Pickle& data) OVERRIDE;
   virtual bool GetString(string16* data) const OVERRIDE;
   virtual bool GetURLAndTitle(GURL* url, string16* title) const OVERRIDE;
   virtual bool GetFilename(FilePath* path) const OVERRIDE;
+  virtual bool GetFilenames(
+      std::vector<OSExchangeData::FileInfo>* filenames) const OVERRIDE {
+    NOTREACHED();
+    return false;
+  }
   virtual bool GetPickledData(OSExchangeData::CustomFormat format,
                               Pickle* data) const OVERRIDE;
   virtual bool HasString() const OVERRIDE;
@@ -77,9 +85,9 @@ class UI_EXPORT OSExchangeDataProviderGtk : public OSExchangeData::Provider {
 
   // Set the image and cursor offset data for this drag.  Will
   // increment the ref count of pixbuf.
-  void SetDragImage(GdkPixbuf* pixbuf, const gfx::Point& cursor_offset);
+  void SetDragImage(GdkPixbuf* pixbuf, const gfx::Vector2d& cursor_offset);
   GdkPixbuf* drag_image() const { return drag_image_; }
-  gfx::Point cursor_offset() const { return cursor_offset_; }
+  gfx::Vector2d cursor_offset() const { return cursor_offset_; }
 
  private:
   typedef std::map<OSExchangeData::CustomFormat, Pickle>  PickleData;
@@ -113,7 +121,7 @@ class UI_EXPORT OSExchangeDataProviderGtk : public OSExchangeData::Provider {
 
   // Drag image and offset data.
   GdkPixbuf* drag_image_;
-  gfx::Point cursor_offset_;
+  gfx::Vector2d cursor_offset_;
 
   DISALLOW_COPY_AND_ASSIGN(OSExchangeDataProviderGtk);
 };

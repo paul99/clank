@@ -1,4 +1,4 @@
-// Copyright (c) 2011 The Chromium Authors. All rights reserved.
+// Copyright (c) 2012 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -8,13 +8,17 @@
 #include "chrome/browser/browser_process.h"
 #include "chrome/common/chrome_utility_messages.h"
 #include "content/public/browser/browser_thread.h"
+#include "content/public/browser/utility_process_host.h"
 
 using content::BrowserThread;
+using content::UtilityProcessHost;
 
 ImageDecoder::ImageDecoder(Delegate* delegate,
-                           const std::string& image_data)
+                           const std::string& image_data,
+                           ImageCodec image_codec)
     : delegate_(delegate),
       image_data_(image_data.begin(), image_data.end()),
+      image_codec_(image_codec),
       target_thread_id_(BrowserThread::UI) {
 }
 
@@ -57,9 +61,13 @@ void ImageDecoder::OnDecodeImageFailed() {
 void ImageDecoder::DecodeImageInSandbox(
     const std::vector<unsigned char>& image_data) {
   DCHECK(BrowserThread::CurrentlyOn(BrowserThread::IO));
-  UtilityProcessHost* utility_process_host =
-      new UtilityProcessHost(this,
-                             target_thread_id_);
-  utility_process_host->set_use_linux_zygote(true);
-  utility_process_host->Send(new ChromeUtilityMsg_DecodeImage(image_data));
+  UtilityProcessHost* utility_process_host = UtilityProcessHost::Create(
+      this, BrowserThread::GetMessageLoopProxyForThread(target_thread_id_));
+  utility_process_host->EnableZygote();
+  if (image_codec_ == ROBUST_JPEG_CODEC) {
+    utility_process_host->Send(
+        new ChromeUtilityMsg_RobustJPEGDecodeImage(image_data));
+  } else {
+    utility_process_host->Send(new ChromeUtilityMsg_DecodeImage(image_data));
+  }
 }

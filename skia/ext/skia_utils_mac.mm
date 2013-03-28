@@ -7,31 +7,12 @@
 #import <AppKit/AppKit.h>
 
 #include "base/logging.h"
-#include "base/mac/mac_util.h"
 #include "base/mac/scoped_cftyperef.h"
 #include "base/memory/scoped_nsobject.h"
 #include "base/memory/scoped_ptr.h"
 #include "skia/ext/bitmap_platform_device_mac.h"
 #include "third_party/skia/include/core/SkRegion.h"
 #include "third_party/skia/include/utils/mac/SkCGUtils.h"
-#include "ui/gfx/scoped_ns_graphics_context_save_gstate_mac.h"
-
-// 10.6 API that we use if available.
-#if !defined(MAC_OS_X_VERSION_10_6) || \
-    MAC_OS_X_VERSION_MAX_ALLOWED < MAC_OS_X_VERSION_10_6
-
-@interface NSImageRep (NSObject)
-
-- (BOOL)drawInRect:(NSRect)dstSpacePortionRect
-          fromRect:(NSRect)srcSpacePortionRect
-         operation:(NSCompositingOperation)op
-          fraction:(CGFloat)requestedAlpha
-    respectFlipped:(BOOL)respectContextIsFlipped
-             hints:(NSDictionary*)hints;
-
-@end
-
-#endif // OSes < Mac OS X 10.6
 
 namespace {
 
@@ -75,40 +56,28 @@ SkBitmap NSImageOrNSImageRepToSkBitmap(
   // Something went really wrong. Best guess is that the bitmap data is invalid.
   DCHECK(context);
 
-  // Save the current graphics context so that we can restore it later.
-  gfx::ScopedNSGraphicsContextSaveGState scoped_g_state;
+  [NSGraphicsContext saveGraphicsState];
 
-  // Dummy context that we will draw into.
   NSGraphicsContext* context_cocoa =
       [NSGraphicsContext graphicsContextWithGraphicsPort:context flipped:NO];
   [NSGraphicsContext setCurrentContext:context_cocoa];
 
-  // This will stretch any images to |size| if it does not fit or is non-square.
   NSRect drawRect = NSMakeRect(0, 0, size.width, size.height);
-
-  // NSImage does caching such that subsequent drawing is much faster (on my
-  // machine, about 4x faster). Unfortunately on 10.5 NSImageRep doesn't do
-  // caching. For this reason we draw using an NSImage if available. Once
-  // 10.5 is no longer supported we can drop this and always use NSImageRep.
   if (image) {
     [image drawInRect:drawRect
              fromRect:NSZeroRect
             operation:NSCompositeCopy
              fraction:1.0];
   } else {
-    // Use NSCompositeCopy if available, it's slightly faster.
-    if ([image_rep respondsToSelector:@selector(
-        drawInRect:fromRect:operation:fraction:respectFlipped:hints:)]) {
-      [image_rep drawInRect:drawRect
-                   fromRect:NSZeroRect
-                  operation:NSCompositeCopy
-                   fraction:1.0
-             respectFlipped:NO
-                      hints:NO];
-    } else {
-      [image_rep drawInRect:drawRect];
-    }
+    [image_rep drawInRect:drawRect
+                 fromRect:NSZeroRect
+                operation:NSCompositeCopy
+                 fraction:1.0
+           respectFlipped:NO
+                    hints:nil];
   }
+
+  [NSGraphicsContext restoreGraphicsState];
 
   return bitmap;
 }
@@ -132,22 +101,9 @@ CGAffineTransform SkMatrixToCGAffineTransform(const SkMatrix& matrix) {
                                matrix[SkMatrix::kMTransY]);
 }
 
-SkIRect CGRectToSkIRect(const CGRect& rect) {
-  SkIRect sk_rect = {
-    SkScalarRound(rect.origin.x),
-    SkScalarRound(rect.origin.y),
-    SkScalarRound(rect.origin.x + rect.size.width),
-    SkScalarRound(rect.origin.y + rect.size.height)
-  };
-  return sk_rect;
-}
-
 SkRect CGRectToSkRect(const CGRect& rect) {
   SkRect sk_rect = {
-    rect.origin.x,
-    rect.origin.y,
-    rect.origin.x + rect.size.width,
-    rect.origin.y + rect.size.height,
+    rect.origin.x, rect.origin.y, CGRectGetMaxX(rect), CGRectGetMaxY(rect)
   };
   return sk_rect;
 }
@@ -179,11 +135,24 @@ SkColor CGColorRefToSkColor(CGColorRef color) {
 }
 
 // Converts ARGB to CGColorRef.
-CGColorRef SkColorToCGColorRef(SkColor color) {
+CGColorRef CGColorCreateFromSkColor(SkColor color) {
   return CGColorCreateGenericRGB(SkColorGetR(color) / 255.0,
                                  SkColorGetG(color) / 255.0,
                                  SkColorGetB(color) / 255.0,
                                  SkColorGetA(color) / 255.0);
+}
+
+// Converts NSColor to ARGB
+SkColor NSDeviceColorToSkColor(NSColor* color) {
+  DCHECK([color colorSpace] == [NSColorSpace genericRGBColorSpace] ||
+         [color colorSpace] == [NSColorSpace deviceRGBColorSpace]);
+  CGFloat red, green, blue, alpha;
+  color = [color colorUsingColorSpace:[NSColorSpace deviceRGBColorSpace]];
+  [color getRed:&red green:&green blue:&blue alpha:&alpha];
+  return SkColorSetARGB(SkScalarRound(255.0 * alpha),
+                        SkScalarRound(255.0 * red),
+                        SkScalarRound(255.0 * green),
+                        SkScalarRound(255.0 * blue));
 }
 
 // Converts ARGB to NSColor.
@@ -192,6 +161,13 @@ NSColor* SkColorToCalibratedNSColor(SkColor color) {
                                    green:SkColorGetG(color) / 255.0
                                     blue:SkColorGetB(color) / 255.0
                                    alpha:SkColorGetA(color) / 255.0];
+}
+
+NSColor* SkColorToDeviceNSColor(SkColor color) {
+  return [NSColor colorWithDeviceRed:SkColorGetR(color) / 255.0
+                               green:SkColorGetG(color) / 255.0
+                                blue:SkColorGetB(color) / 255.0
+                               alpha:SkColorGetA(color) / 255.0];
 }
 
 SkBitmap CGImageToSkBitmap(CGImageRef image) {
@@ -230,8 +206,28 @@ SkBitmap NSImageToSkBitmap(NSImage* image, NSSize size, bool is_opaque) {
   return NSImageOrNSImageRepToSkBitmap(image, nil, size, is_opaque);
 }
 
-SkBitmap NSImageRepToSkBitmap(NSImageRep* image, NSSize size, bool is_opaque) {
-  return NSImageOrNSImageRepToSkBitmap(nil, image, size, is_opaque);
+SkBitmap NSImageRepToSkBitmap(
+    NSImageRep* image_rep, NSSize size, bool is_opaque) {
+  return NSImageOrNSImageRepToSkBitmap(nil, image_rep, size, is_opaque);
+}
+
+NSBitmapImageRep* SkBitmapToNSBitmapImageRep(const SkBitmap& skiaBitmap) {
+  base::mac::ScopedCFTypeRef<CGColorSpaceRef> color_space(
+      CGColorSpaceCreateWithName(kCGColorSpaceGenericRGB));
+  return SkBitmapToNSBitmapImageRepWithColorSpace(skiaBitmap, color_space);
+}
+
+NSBitmapImageRep* SkBitmapToNSBitmapImageRepWithColorSpace(
+    const SkBitmap& skiaBitmap,
+    CGColorSpaceRef colorSpace) {
+  // First convert SkBitmap to CGImageRef.
+  base::mac::ScopedCFTypeRef<CGImageRef> cgimage(
+      SkCreateCGImageRefWithColorspace(skiaBitmap, colorSpace));
+
+  // Now convert to NSBitmapImageRep.
+  scoped_nsobject<NSBitmapImageRep> bitmap(
+      [[NSBitmapImageRep alloc] initWithCGImage:cgimage]);
+  return [bitmap.release() autorelease];
 }
 
 NSImage* SkBitmapToNSImageWithColorSpace(const SkBitmap& skiaBitmap,
@@ -239,15 +235,9 @@ NSImage* SkBitmapToNSImageWithColorSpace(const SkBitmap& skiaBitmap,
   if (skiaBitmap.isNull())
     return nil;
 
-  // First convert SkBitmap to CGImageRef.
-  base::mac::ScopedCFTypeRef<CGImageRef> cgimage(
-      SkCreateCGImageRefWithColorspace(skiaBitmap, colorSpace));
-
-  // Now convert to NSImage.
-  scoped_nsobject<NSBitmapImageRep> bitmap(
-      [[NSBitmapImageRep alloc] initWithCGImage:cgimage]);
   scoped_nsobject<NSImage> image([[NSImage alloc] init]);
-  [image addRepresentation:bitmap];
+  [image addRepresentation:
+      SkBitmapToNSBitmapImageRepWithColorSpace(skiaBitmap, colorSpace)];
   [image setSize:NSMakeSize(skiaBitmap.width(), skiaBitmap.height())];
   return [image.release() autorelease];
 }
@@ -258,43 +248,6 @@ NSImage* SkBitmapToNSImage(const SkBitmap& skiaBitmap) {
   return SkBitmapToNSImageWithColorSpace(skiaBitmap, colorSpace.get());
 }
 
-NSImage* SkBitmapsToNSImage(const std::vector<const SkBitmap*>& bitmaps) {
-  if (bitmaps.empty())
-    return nil;
-
-  base::mac::ScopedCFTypeRef<CGColorSpaceRef> color_space(
-      CGColorSpaceCreateWithName(kCGColorSpaceGenericRGB));
-  scoped_nsobject<NSImage> image([[NSImage alloc] init]);
-  NSSize min_size = NSZeroSize;
-
-  for (std::vector<const SkBitmap*>::const_iterator it = bitmaps.begin();
-       it != bitmaps.end(); ++it) {
-    const SkBitmap& skiaBitmap = **it;
-    // First convert SkBitmap to CGImageRef.
-    base::mac::ScopedCFTypeRef<CGImageRef> cgimage(
-        SkCreateCGImageRefWithColorspace(skiaBitmap, color_space));
-
-    // Now convert to NSImage.
-    scoped_nsobject<NSBitmapImageRep> bitmap(
-        [[NSBitmapImageRep alloc] initWithCGImage:cgimage]);
-    [image addRepresentation:bitmap];
-
-    if (min_size.width == 0 || min_size.width > skiaBitmap.width()) {
-      min_size.width = skiaBitmap.width();
-      min_size.height = skiaBitmap.height();
-    }
-  }
-
-  [image setSize:min_size];
-  return [image.release() autorelease];
-}
-
-SkBitmap AppplicationIconAtSize(int size) {
-  NSImage* image = [NSImage imageNamed:@"NSApplicationIcon"];
-  return NSImageToSkBitmap(image, NSMakeSize(size, size), /* is_opaque=*/true);
-}
-
-
 SkiaBitLocker::SkiaBitLocker(SkCanvas* canvas)
     : canvas_(canvas),
       cgContext_(0) {
@@ -304,10 +257,91 @@ SkiaBitLocker::~SkiaBitLocker() {
   releaseIfNeeded();
 }
 
+// This must be called to balance calls to cgContext
 void SkiaBitLocker::releaseIfNeeded() {
   if (!cgContext_)
     return;
-  canvas_->getTopDevice()->accessBitmap(true).unlockPixels();
+  if (useDeviceBits_) {
+    bitmap_.unlockPixels();
+  } else {
+    // Find the bits that were drawn to.
+    SkAutoLockPixels lockedPixels(bitmap_);
+    const uint32_t* pixelBase
+        = reinterpret_cast<uint32_t*>(bitmap_.getPixels());
+    int rowPixels = bitmap_.rowBytesAsPixels();
+    int width = bitmap_.width();
+    int height = bitmap_.height();
+    SkIRect bounds;
+    bounds.fTop = 0;
+    int x;
+    int y = -1;
+    const uint32_t* pixels = pixelBase;
+    while (++y < height) {
+      for (x = 0; x < width; ++x) {
+        if (pixels[x]) {
+          bounds.fTop = y;
+          goto foundTop;
+        }
+      }
+      pixels += rowPixels;
+    }
+foundTop:
+    bounds.fBottom = height;
+    y = height;
+    pixels = pixelBase + rowPixels * (y - 1);
+    while (--y > bounds.fTop) {
+      for (x = 0; x < width; ++x) {
+        if (pixels[x]) {
+          bounds.fBottom = y + 1;
+          goto foundBottom;
+        }
+      }
+      pixels -= rowPixels;
+    }
+foundBottom:
+    bounds.fLeft = 0;
+    x = -1;
+    while (++x < width) {
+      pixels = pixelBase + rowPixels * bounds.fTop;
+      for (y = bounds.fTop; y < bounds.fBottom; ++y) {
+        if (pixels[x]) {
+          bounds.fLeft = x;
+          goto foundLeft;
+        }
+        pixels += rowPixels;
+      }
+    }
+foundLeft:
+    bounds.fRight = width;
+    x = width;
+    while (--x > bounds.fLeft) {
+      pixels = pixelBase + rowPixels * bounds.fTop;
+      for (y = bounds.fTop; y < bounds.fBottom; ++y) {
+        if (pixels[x]) {
+          bounds.fRight = x + 1;
+          goto foundRight;
+        }
+        pixels += rowPixels;
+      }
+    }
+foundRight:
+    SkBitmap subset;
+    if (!bitmap_.extractSubset(&subset, bounds)) {
+        return;
+    }
+    // Neutralize the global matrix by concatenating the inverse. In the
+    // future, Skia may provide some mechanism to set the device portion of
+    // the matrix to identity without clobbering any hosting matrix (e.g., the
+    // picture's matrix).
+    const SkMatrix& skMatrix = canvas_->getTotalMatrix();
+    SkMatrix inverse;
+    if (!skMatrix.invert(&inverse))
+      return;
+    canvas_->save();
+    canvas_->concat(inverse);
+    canvas_->drawBitmap(subset, bounds.fLeft, bounds.fTop);
+    canvas_->restore();
+  }
   CGContextRelease(cgContext_);
   cgContext_ = 0;
 }
@@ -317,12 +351,20 @@ CGContextRef SkiaBitLocker::cgContext() {
   DCHECK(device);
   if (!device)
     return 0;
-  releaseIfNeeded();
-  const SkBitmap& bitmap = device->accessBitmap(true);
-  bitmap.lockPixels();
-  void* pixels = bitmap.getPixels();
-  cgContext_ = CGBitmapContextCreate(pixels, device->width(),
-    device->height(), 8, bitmap.rowBytes(), CGColorSpaceCreateDeviceRGB(), 
+  releaseIfNeeded(); // This flushes any prior bitmap use
+  const SkBitmap& deviceBits = device->accessBitmap(true);
+  useDeviceBits_ = deviceBits.getPixels();
+  if (useDeviceBits_) {
+    bitmap_ = deviceBits;
+    bitmap_.lockPixels();
+  } else {
+    bitmap_.setConfig(
+        SkBitmap::kARGB_8888_Config, deviceBits.width(), deviceBits.height());
+    bitmap_.allocPixels();
+    bitmap_.eraseColor(0);
+  }
+  cgContext_ = CGBitmapContextCreate(bitmap_.getPixels(), bitmap_.width(),
+    bitmap_.height(), 8, bitmap_.rowBytes(), CGColorSpaceCreateDeviceRGB(), 
     kCGBitmapByteOrder32Host | kCGImageAlphaPremultipliedFirst);
 
   // Apply device matrix.
@@ -331,19 +373,32 @@ CGContextRef SkiaBitLocker::cgContext() {
       -device->height());
   CGContextConcatCTM(cgContext_, contentsTransform);
 
-  // Apply clip in device coordinates.
-  CGMutablePathRef clipPath = CGPathCreateMutable();
-  SkRegion::Iterator iter(canvas_->getTotalClip());
   const SkIPoint& pt = device->getOrigin();
-  for (; !iter.done(); iter.next()) {
-    SkIRect skRect = iter.rect();
-    skRect.offset(-pt);
-    CGRect cgRect = SkIRectToCGRect(skRect);
-    CGPathAddRect(clipPath, 0, cgRect);
+  // Skip applying the clip when not writing directly to device.
+  // They're applied in the offscreen case when the bitmap is drawn.
+  if (useDeviceBits_) {
+      // Apply clip in device coordinates.
+      CGMutablePathRef clipPath = CGPathCreateMutable();
+      const SkRegion& clipRgn = canvas_->getTotalClip();
+      if (clipRgn.isEmpty()) {
+        // CoreGraphics does not consider a newly created path to be empty.
+        // Explicitly set it to empty so the subsequent drawing is clipped out.
+        // It would be better to make the CGContext hidden if there was a CG
+        // call that does that.
+        CGPathAddRect(clipPath, 0, CGRectMake(0, 0, 0, 0));
+      }
+      SkRegion::Iterator iter(clipRgn);
+      const SkIPoint& pt = device->getOrigin();
+      for (; !iter.done(); iter.next()) {
+        SkIRect skRect = iter.rect();
+        skRect.offset(-pt);
+        CGRect cgRect = SkIRectToCGRect(skRect);
+        CGPathAddRect(clipPath, 0, cgRect);
+      }
+      CGContextAddPath(cgContext_, clipPath);
+      CGContextClip(cgContext_);
+      CGPathRelease(clipPath);
   }
-  CGContextAddPath(cgContext_, clipPath);
-  CGContextClip(cgContext_);
-  CGPathRelease(clipPath);
 
   // Apply content matrix.
   SkMatrix skMatrix = canvas_->getTotalMatrix();

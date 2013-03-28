@@ -1,20 +1,20 @@
-// Copyright (c) 2011 The Chromium Authors. All rights reserved.
+// Copyright (c) 2012 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
 #include "chrome/browser/ui/views/chrome_views_delegate.h"
 
+#include "base/command_line.h"
 #include "base/memory/scoped_ptr.h"
 #include "base/string_util.h"
 #include "base/utf_string_conversions.h"
 #include "chrome/browser/browser_process.h"
+#include "chrome/browser/event_disposition.h"
 #include "chrome/browser/prefs/pref_service.h"
 #include "chrome/browser/prefs/scoped_user_pref_update.h"
 #include "chrome/browser/profiles/profile_manager.h"
-#include "chrome/browser/ui/views/accessibility_event_router_views.h"
-#include "chrome/browser/ui/views/event_utils.h"
+#include "chrome/browser/ui/views/accessibility/accessibility_event_router_views.h"
 #include "chrome/common/pref_names.h"
-#include "ui/base/clipboard/clipboard.h"
 #include "ui/gfx/rect.h"
 #include "ui/gfx/screen.h"
 #include "ui/views/widget/native_widget.h"
@@ -24,8 +24,15 @@
 #include "chrome/browser/app_icon_win.h"
 #endif
 
-#if defined(USE_AURA)
+#if defined(USE_AURA) && !defined(OS_CHROMEOS)
+#include "ui/views/widget/desktop_aura/desktop_native_widget_aura.h"
+#include "ui/views/widget/native_widget_aura.h"
+#endif
+
+#if defined(USE_ASH)
 #include "ash/shell.h"
+#include "chrome/browser/ui/ash/ash_init.h"
+#include "chrome/browser/ui/ash/ash_util.h"
 #endif
 
 namespace {
@@ -51,10 +58,6 @@ PrefService* GetPrefsForWindow(const views::Widget* window) {
 ///////////////////////////////////////////////////////////////////////////////
 // ChromeViewsDelegate, views::ViewsDelegate implementation:
 
-ui::Clipboard* ChromeViewsDelegate::GetClipboard() const {
-  return g_browser_process->clipboard();
-}
-
 void ChromeViewsDelegate::SaveWindowPlacement(const views::Widget* window,
                                               const std::string& window_name,
                                               const gfx::Rect& bounds,
@@ -72,8 +75,8 @@ void ChromeViewsDelegate::SaveWindowPlacement(const views::Widget* window,
   window_preferences->SetInteger("bottom", bounds.bottom());
   window_preferences->SetBoolean("maximized",
                                  show_state == ui::SHOW_STATE_MAXIMIZED);
-
-  gfx::Rect work_area(gfx::Screen::GetMonitorWorkAreaMatching(bounds));
+  gfx::Rect work_area(gfx::Screen::GetScreenFor(window->GetNativeView())->
+      GetDisplayMatching(bounds).work_area());
   window_preferences->SetInteger("work_area_left", work_area.x());
   window_preferences->SetInteger("work_area_top", work_area.y());
   window_preferences->SetInteger("work_area_right", work_area.right());
@@ -130,10 +133,25 @@ HICON ChromeViewsDelegate::GetDefaultWindowIcon() const {
 
 views::NonClientFrameView* ChromeViewsDelegate::CreateDefaultNonClientFrameView(
     views::Widget* widget) {
-#if defined(USE_AURA)
-  return ash::Shell::GetInstance()->CreateDefaultNonClientFrameView(widget);
-#else
+#if defined(USE_ASH)
+  if (chrome::IsNativeViewInAsh(widget->GetNativeView()))
+    return ash::Shell::GetInstance()->CreateDefaultNonClientFrameView(widget);
+#endif
   return NULL;
+}
+
+bool ChromeViewsDelegate::UseTransparentWindows() const {
+#if defined(USE_ASH)
+  // TODO(scottmg): http://crbug.com/133312. This needs context to determine
+  // if it's desktop or ash.
+#if defined(OS_CHROMEOS)
+  return true;
+#else
+  NOTIMPLEMENTED();
+  return false;
+#endif
+#else
+  return false;
 #endif
 }
 
@@ -146,5 +164,29 @@ void ChromeViewsDelegate::ReleaseRef() {
 }
 
 int ChromeViewsDelegate::GetDispositionForEvent(int event_flags) {
-  return event_utils::DispositionFromEventFlags(event_flags);
+  return chrome::DispositionFromEventFlags(event_flags);
+}
+
+content::WebContents* ChromeViewsDelegate::CreateWebContents(
+    content::BrowserContext* browser_context,
+    content::SiteInstance* site_instance) {
+  return NULL;
+}
+
+views::NativeWidget* ChromeViewsDelegate::CreateNativeWidget(
+    views::Widget::InitParams::Type type,
+    views::internal::NativeWidgetDelegate* delegate,
+    gfx::NativeView parent,
+    gfx::NativeView context) {
+#if defined(USE_AURA) && !defined(OS_CHROMEOS)
+  if (parent && type != views::Widget::InitParams::TYPE_MENU)
+    return new views::NativeWidgetAura(delegate);
+  // TODO(erg): Once we've threaded context to everywhere that needs it, we
+  // should remove this check here.
+  gfx::NativeView to_check = context ? context : parent;
+  if (chrome::GetHostDesktopTypeForNativeView(to_check) ==
+      chrome::HOST_DESKTOP_TYPE_NATIVE)
+    return new views::DesktopNativeWidgetAura(delegate);
+#endif
+  return NULL;
 }

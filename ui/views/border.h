@@ -4,11 +4,12 @@
 
 #ifndef UI_VIEWS_BORDER_H_
 #define UI_VIEWS_BORDER_H_
-#pragma once
 
+#include "base/basictypes.h"
 #include "third_party/skia/include/core/SkColor.h"
 #include "ui/gfx/insets.h"
 #include "ui/views/view.h"
+#include "ui/views/views_export.h"
 
 namespace gfx{
 class Canvas;
@@ -35,6 +36,8 @@ class View;
 //
 ////////////////////////////////////////////////////////////////////////////////
 
+class TextButtonBorder;
+
 class VIEWS_EXPORT Border {
  public:
   Border();
@@ -48,15 +51,29 @@ class VIEWS_EXPORT Border {
   // paint anything.
   static Border* CreateEmptyBorder(int top, int left, int bottom, int right);
 
+  // Creates a border of the specified color, and specified thickness on each
+  // side.
+  static Border* CreateSolidSidedBorder(int top,
+                                        int left,
+                                        int bottom,
+                                        int right,
+                                        SkColor color);
+
   // Creates a Border from the specified Painter. The border owns the painter,
   // thus the painter is deleted when the Border is deleted.
-  static Border* CreateBorderPainter(Painter* painter);
+  // |insets| define size of an area allocated for a Border.
+  static Border* CreateBorderPainter(Painter* painter,
+                                     const gfx::Insets& insets);
 
   // Renders the border for the specified view.
-  virtual void Paint(const View& view, gfx::Canvas* canvas) const = 0;
+  virtual void Paint(const View& view, gfx::Canvas* canvas) = 0;
 
   // Sets the specified insets to the the border insets.
-  virtual void GetInsets(gfx::Insets* insets) const = 0;
+  virtual gfx::Insets GetInsets() const = 0;
+
+  // Manual RTTI for text buttons.
+  virtual TextButtonBorder* AsTextButtonBorder();
+  virtual const TextButtonBorder* AsTextButtonBorder() const;
 
  private:
   DISALLOW_COPY_AND_ASSIGN(Border);

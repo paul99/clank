@@ -1,4 +1,4 @@
-// Copyright (c) 2011 The Chromium Authors. All rights reserved.
+// Copyright (c) 2012 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 //
@@ -15,7 +15,6 @@
 
 #ifndef CHROME_BROWSER_UI_VIEWS_DOWNLOAD_DOWNLOAD_ITEM_VIEW_H__
 #define CHROME_BROWSER_UI_VIEWS_DOWNLOAD_DOWNLOAD_ITEM_VIEW_H__
-#pragma once
 
 #include <string>
 
@@ -25,23 +24,23 @@
 #include "base/string_util.h"
 #include "base/time.h"
 #include "base/timer.h"
-#include "chrome/browser/cancelable_request.h"
+#include "chrome/browser/common/cancelable_request.h"
 #include "chrome/browser/icon_manager.h"
 #include "content/public/browser/download_item.h"
 #include "content/public/browser/download_manager.h"
 #include "ui/base/animation/animation_delegate.h"
 #include "ui/gfx/font.h"
+#include "ui/views/context_menu_controller.h"
 #include "ui/views/controls/button/button.h"
-#include "ui/views/events/event.h"
 #include "ui/views/view.h"
 
-class BaseDownloadItemModel;
+class DownloadItemModel;
 class DownloadShelfView;
-class SkBitmap;
 class DownloadShelfContextMenuView;
 
 namespace gfx {
 class Image;
+class ImageSkia;
 }
 
 namespace ui {
@@ -55,12 +54,13 @@ class TextButton;
 
 class DownloadItemView : public views::ButtonListener,
                          public views::View,
+                         public views::ContextMenuController,
                          public content::DownloadItem::Observer,
                          public ui::AnimationDelegate {
  public:
   DownloadItemView(content::DownloadItem* download,
                    DownloadShelfView* parent,
-                   BaseDownloadItemModel* model);
+                   DownloadItemModel* model);
   virtual ~DownloadItemView();
 
   // Timer callback for handling animations
@@ -69,34 +69,41 @@ class DownloadItemView : public views::ButtonListener,
   void StopDownloadProgress();
 
   // IconManager::Client interface.
-  void OnExtractIconComplete(IconManager::Handle handle, gfx::Image* icon);
+  void OnExtractIconComplete(gfx::Image* icon);
 
   // Returns the DownloadItem model object belonging to this item.
   content::DownloadItem* download() const { return download_; }
 
-  // DownloadObserver method
+  // DownloadItem::Observer methods
   virtual void OnDownloadUpdated(content::DownloadItem* download) OVERRIDE;
   virtual void OnDownloadOpened(content::DownloadItem* download) OVERRIDE;
+  virtual void OnDownloadDestroyed(content::DownloadItem* download) OVERRIDE;
 
   // Overridden from views::View:
   virtual void Layout() OVERRIDE;
   virtual gfx::Size GetPreferredSize() OVERRIDE;
-  virtual bool OnMousePressed(const views::MouseEvent& event) OVERRIDE;
-  virtual bool OnMouseDragged(const views::MouseEvent& event) OVERRIDE;
-  virtual void OnMouseReleased(const views::MouseEvent& event) OVERRIDE;
+  virtual bool OnMousePressed(const ui::MouseEvent& event) OVERRIDE;
+  virtual bool OnMouseDragged(const ui::MouseEvent& event) OVERRIDE;
+  virtual void OnMouseReleased(const ui::MouseEvent& event) OVERRIDE;
   virtual void OnMouseCaptureLost() OVERRIDE;
-  virtual void OnMouseMoved(const views::MouseEvent& event) OVERRIDE;
-  virtual void OnMouseExited(const views::MouseEvent& event) OVERRIDE;
-  virtual bool OnKeyPressed(const views::KeyEvent& event) OVERRIDE;
+  virtual void OnMouseMoved(const ui::MouseEvent& event) OVERRIDE;
+  virtual void OnMouseExited(const ui::MouseEvent& event) OVERRIDE;
+  virtual bool OnKeyPressed(const ui::KeyEvent& event) OVERRIDE;
   virtual bool GetTooltipText(const gfx::Point& p,
                               string16* tooltip) const OVERRIDE;
-  virtual void ShowContextMenu(const gfx::Point& p,
-                               bool is_mouse_gesture) OVERRIDE;
   virtual void GetAccessibleState(ui::AccessibleViewState* state) OVERRIDE;
+  virtual void OnThemeChanged() OVERRIDE;
+
+  // Overridden from ui::EventHandler:
+  virtual void OnGestureEvent(ui::GestureEvent* event) OVERRIDE;
+
+  // Overridden from views::ContextMenuController.
+  virtual void ShowContextMenuForView(View* source,
+                                      const gfx::Point& point) OVERRIDE;
 
   // ButtonListener implementation.
   virtual void ButtonPressed(views::Button* sender,
-                             const views::Event& event) OVERRIDE;
+                             const ui::Event& event) OVERRIDE;
 
   // ui::AnimationDelegate implementation.
   virtual void AnimationProgressed(const ui::Animation* animation) OVERRIDE;
@@ -120,22 +127,22 @@ class DownloadItemView : public views::ButtonListener,
 
   // The image set associated with the part containing the icon and text.
   struct BodyImageSet {
-    SkBitmap* top_left;
-    SkBitmap* left;
-    SkBitmap* bottom_left;
-    SkBitmap* top;
-    SkBitmap* center;
-    SkBitmap* bottom;
-    SkBitmap* top_right;
-    SkBitmap* right;
-    SkBitmap* bottom_right;
+    gfx::ImageSkia* top_left;
+    gfx::ImageSkia* left;
+    gfx::ImageSkia* bottom_left;
+    gfx::ImageSkia* top;
+    gfx::ImageSkia* center;
+    gfx::ImageSkia* bottom;
+    gfx::ImageSkia* top_right;
+    gfx::ImageSkia* right;
+    gfx::ImageSkia* bottom_right;
   };
 
   // The image set associated with the drop-down button on the right.
   struct DropDownImageSet {
-    SkBitmap* top;
-    SkBitmap* center;
-    SkBitmap* bottom;
+    gfx::ImageSkia* top;
+    gfx::ImageSkia* center;
+    gfx::ImageSkia* bottom;
   };
 
   void OpenDownload();
@@ -143,12 +150,23 @@ class DownloadItemView : public views::ButtonListener,
   void LoadIcon();
   void LoadIconIfItemPathChanged();
 
-  // Convenience method to paint the 3 vertical bitmaps (bottom, middle, top)
+  // Update the button colors based on the current theme.
+  void UpdateColorsFromTheme();
+
+  // Shows the context menu at the specified location. |point| is in the view's
+  // coordinate system.
+  void ShowContextMenuImpl(const gfx::Point& point, bool is_mouse_gesture);
+
+  // Common code for handling pointer events (i.e. mouse or gesture).
+  void HandlePressEvent(const ui::LocatedEvent& event, bool active_event);
+  void HandleClickEvent(const ui::LocatedEvent& event, bool active_event);
+
+  // Convenience method to paint the 3 vertical images (bottom, middle, top)
   // that form the background.
-  void PaintBitmaps(gfx::Canvas* canvas,
-                    const SkBitmap* top_bitmap,
-                    const SkBitmap* center_bitmap,
-                    const SkBitmap* bottom_bitmap,
+  void PaintImages(gfx::Canvas* canvas,
+                    const gfx::ImageSkia* top_image,
+                    const gfx::ImageSkia* center_image,
+                    const gfx::ImageSkia* bottom_image,
                     int x,
                     int y,
                     int height,
@@ -158,7 +176,7 @@ class DownloadItemView : public views::ButtonListener,
   void SetState(State body_state, State drop_down_state);
 
   // Whether we are in the dangerous mode.
-  bool IsShowingWarningDialog() {
+  bool IsShowingWarningDialog() const {
     return mode_ == DANGEROUS_MODE || mode_ == MALICIOUS_MODE;
   }
 
@@ -197,6 +215,11 @@ class DownloadItemView : public views::ButtonListener,
   // Update the location of the drop down button.
   void UpdateDropDownButtonPosition();
 
+  // Show/Hide/Reset |animation| based on the state transition specified by
+  // |from| and |to|.
+  void AnimateStateTransition(State from, State to,
+                              ui::SlideAnimation* animation);
+
   // The different images used for the background.
   BodyImageSet normal_body_image_set_;
   BodyImageSet hot_body_image_set_;
@@ -208,13 +231,13 @@ class DownloadItemView : public views::ButtonListener,
   DropDownImageSet pushed_drop_down_image_set_;
 
   // The warning icon showns for dangerous downloads.
-  const SkBitmap* warning_icon_;
+  const gfx::ImageSkia* warning_icon_;
 
   // The model we query for display information
   content::DownloadItem* download_;
 
-  // Our parent view that owns us.
-  DownloadShelfView* parent_;
+  // The download shelf that owns us.
+  DownloadShelfView* shelf_;
 
   // Elements of our particular download
   string16 status_text_;
@@ -222,7 +245,7 @@ class DownloadItemView : public views::ButtonListener,
   // The font used to print the file name and status.
   gfx::Font font_;
 
-  // The tooltip.
+  // The tooltip.  Only displayed when not showing a warning dialog.
   string16 tooltip_text_;
 
   // The current state (normal, hot or pushed) of the body and drop-down.
@@ -258,12 +281,12 @@ class DownloadItemView : public views::ButtonListener,
   gfx::Point drag_start_point_;
 
   // For canceling an in progress icon request.
-  CancelableRequestConsumerT<int, 0> icon_consumer_;
+  CancelableTaskTracker cancelable_task_tracker_;
 
   // A model class to control the status text we display and the cancel
   // behavior.
   // This class owns the pointer.
-  scoped_ptr<BaseDownloadItemModel> model_;
+  scoped_ptr<DownloadItemModel> model_;
 
   // Hover animations for our body and drop buttons.
   scoped_ptr<ui::SlideAnimation> body_hover_animation_;

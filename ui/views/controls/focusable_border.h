@@ -4,7 +4,6 @@
 
 #ifndef UI_VIEWS_CONTROLS_FOCUSABLE_BORDER_H_
 #define UI_VIEWS_CONTROLS_FOCUSABLE_BORDER_H_
-#pragma once
 
 #include "base/basictypes.h"
 #include "base/compiler_specific.h"
@@ -32,8 +31,8 @@ class FocusableBorder : public Border {
   }
 
   // Overridden from Border:
-  virtual void Paint(const View& view, gfx::Canvas* canvas) const OVERRIDE;
-  virtual void GetInsets(gfx::Insets* insets) const OVERRIDE;
+  virtual void Paint(const View& view, gfx::Canvas* canvas) OVERRIDE;
+  virtual gfx::Insets GetInsets() const OVERRIDE;
 
  private:
   bool has_focus_;

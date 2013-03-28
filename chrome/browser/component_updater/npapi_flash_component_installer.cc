@@ -1,4 +1,4 @@
-// Copyright (c) 2011 The Chromium Authors. All rights reserved.
+// Copyright (c) 2012 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -16,7 +16,7 @@
 #include "base/string_util.h"
 #include "base/values.h"
 #include "chrome/browser/component_updater/component_updater_service.h"
-#include "chrome/browser/plugin_prefs.h"
+#include "chrome/browser/plugins/plugin_prefs.h"
 #include "chrome/common/chrome_paths.h"
 #include "content/public/browser/browser_thread.h"
 #include "content/public/browser/plugin_service.h"
@@ -143,7 +143,8 @@ void FinishFlashUpdateRegistration(ComponentUpdateService* cus,
 void StartFlashUpdateRegistration(ComponentUpdateService* cus,
                                   const std::vector<webkit::WebPluginInfo>&) {
   FilePath builtin_plugin_path;
-  if (!PathService::Get(chrome::FILE_FLASH_PLUGIN, &builtin_plugin_path))
+  if (!PathService::Get(chrome::FILE_FLASH_PLUGIN_EXISTING,
+      &builtin_plugin_path))
     return;
 
   FilePath updated_plugin_path =
@@ -212,10 +213,12 @@ void RegisterNPAPIFlashComponent(ComponentUpdateService* cus) {
 
   // Post the task to the FILE thread because IO may be done once the plugins
   // are loaded.
-  BrowserThread::PostDelayedTask(BrowserThread::FILE, FROM_HERE,
+  BrowserThread::PostDelayedTask(
+      BrowserThread::FILE,
+      FROM_HERE,
       base::Bind(&PluginService::GetPlugins,
                  base::Unretained(PluginService::GetInstance()),
                  base::Bind(&StartFlashUpdateRegistration, cus)),
-      8000);
+      base::TimeDelta::FromSeconds(8));
 #endif
 }

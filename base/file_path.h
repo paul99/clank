@@ -1,4 +1,4 @@
-// Copyright (c) 2011 The Chromium Authors. All rights reserved.
+// Copyright (c) 2012 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -53,6 +53,8 @@
 // between char[]-based pathnames on POSIX systems and wchar_t[]-based
 // pathnames on Windows.
 //
+// Paths can't contain NULs as a precaution agaist premature truncation.
+//
 // Because a FilePath object should not be instantiated at the global scope,
 // instead, use a FilePath::CharType[] and initialize it with
 // FILE_PATH_LITERAL.  At runtime, a FilePath object can be created from the
@@ -99,7 +101,6 @@
 
 #ifndef BASE_FILE_PATH_H_
 #define BASE_FILE_PATH_H_
-#pragma once
 
 #include <stddef.h>
 #include <string>
@@ -122,6 +123,7 @@
 #endif  // OS_WIN
 
 class Pickle;
+class PickleIterator;
 
 // An abstraction to isolate users from the differences between native
 // pathnames on different platforms.
@@ -241,8 +243,13 @@ class BASE_EXPORT FilePath {
   FilePath InsertBeforeExtensionASCII(
       const base::StringPiece& suffix) const WARN_UNUSED_RESULT;
 
+  // Adds |extension| to |file_name|. Returns the current FilePath if
+  // |extension| is empty. Returns "" if BaseName() == "." or "..".
+  FilePath AddExtension(
+      const StringType& extension) const WARN_UNUSED_RESULT;
+
   // Replaces the extension of |file_name| with |extension|.  If |file_name|
-  // does not have an extension, them |extension| is added.  If |extension| is
+  // does not have an extension, then |extension| is added.  If |extension| is
   // empty, then the extension is removed from |file_name|.
   // Returns "" if BaseName() == "." or "..".
   FilePath ReplaceExtension(
@@ -338,13 +345,12 @@ class BASE_EXPORT FilePath {
   // AsUTF8Unsafe() for details.
   static FilePath FromUTF8Unsafe(const std::string& utf8);
 
-  void WriteToPickle(Pickle* pickle);
-  bool ReadFromPickle(Pickle* pickle, void** iter);
+  void WriteToPickle(Pickle* pickle) const;
+  bool ReadFromPickle(PickleIterator* iter);
 
-#if defined(FILE_PATH_USES_WIN_SEPARATORS)
-  // Normalize all path separators to backslash.
-  FilePath NormalizeWindowsPathSeparators() const;
-#endif
+  // Normalize all path separators to backslash on Windows
+  // (if FILE_PATH_USES_WIN_SEPARATORS is true), or do nothing on POSIX systems.
+  FilePath NormalizePathSeparators() const;
 
   // Compare two strings in the same way the file system does.
   // Note that these always ignore case, even on file systems that are case-
@@ -391,6 +397,9 @@ class BASE_EXPORT FilePath {
 
   StringType path_;
 };
+
+// This is required by googletest to print a readable output on test failures.
+BASE_EXPORT extern void PrintTo(const FilePath& path, std::ostream* out);
 
 // Macros for string literal initialization of FilePath::CharType[], and for
 // using a FilePath::CharType[] in a printf-style format string.

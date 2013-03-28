@@ -1,4 +1,4 @@
-// Copyright (c) 2011 The Chromium Authors. All rights reserved.
+// Copyright (c) 2012 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -9,16 +9,13 @@
 #include "content/renderer/media/video_capture_impl.h"
 #include "content/renderer/media/video_capture_message_filter.h"
 
+namespace content {
+
 VideoCaptureImplManager::VideoCaptureImplManager()
     : thread_("VC manager") {
   thread_.Start();
   message_loop_proxy_ = thread_.message_loop_proxy();
   filter_ = new VideoCaptureMessageFilter();
-}
-
-VideoCaptureImplManager::~VideoCaptureImplManager() {
-  STLDeleteContainerPairSecondPointers(devices_.begin(), devices_.end());
-  thread_.Stop();
 }
 
 media::VideoCapture* VideoCaptureImplManager::AddDevice(
@@ -66,6 +63,13 @@ void VideoCaptureImplManager::FreeDevice(VideoCaptureImpl* vc) {
   delete vc;
 }
 
+VideoCaptureImplManager::~VideoCaptureImplManager() {
+  thread_.Stop();
+  // TODO(wjia): uncomment the line below after collecting enough info for
+  // crbug.com/152418.
+  // STLDeleteContainerPairSecondPointers(devices_.begin(), devices_.end());
+}
+
 VideoCaptureImplManager::Device::Device(
     VideoCaptureImpl* device,
     media::VideoCapture::EventHandler* handler)
@@ -74,3 +78,5 @@ VideoCaptureImplManager::Device::Device(
 }
 
 VideoCaptureImplManager::Device::~Device() {}
+
+}  // namespace content

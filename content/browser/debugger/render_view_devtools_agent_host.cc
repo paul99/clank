@@ -9,9 +9,9 @@
 #include "content/browser/debugger/devtools_manager_impl.h"
 #include "content/browser/debugger/render_view_devtools_agent_host.h"
 #include "content/browser/renderer_host/render_process_host_impl.h"
-#include "content/browser/renderer_host/render_view_host.h"
+#include "content/browser/renderer_host/render_view_host_impl.h"
 #include "content/browser/site_instance_impl.h"
-#include "content/browser/tab_contents/tab_contents.h"
+#include "content/browser/web_contents/web_contents_impl.h"
 #include "content/common/devtools_messages.h"
 #include "content/public/browser/content_browser_client.h"
 #include "content/public/browser/devtools_agent_host_registry.h"
@@ -60,10 +60,11 @@ bool DevToolsAgentHostRegistry::IsDebuggerAttached(WebContents* web_contents) {
   DevToolsManager* devtools_manager = DevToolsManager::GetInstance();
   if (!devtools_manager)
     return false;
-  RenderViewHostDelegate* delegate = static_cast<TabContents*>(web_contents);
+  RenderViewHostDelegate* delegate =
+      static_cast<WebContentsImpl*>(web_contents);
   for (Instances::iterator it = g_instances.Get().begin();
        it != g_instances.Get().end(); ++it) {
-    if (it->first->delegate() != delegate)
+    if (it->first->GetDelegate() != delegate)
       continue;
     if (devtools_manager->GetDevToolsClientHostFor(it->second))
       return true;
@@ -71,35 +72,46 @@ bool DevToolsAgentHostRegistry::IsDebuggerAttached(WebContents* web_contents) {
   return false;
 }
 
-RenderViewDevToolsAgentHost::RenderViewDevToolsAgentHost(RenderViewHost* rvh)
-    : content::RenderViewHostObserver(rvh),
+RenderViewDevToolsAgentHost::RenderViewDevToolsAgentHost(
+    RenderViewHost* rvh)
+    : RenderViewHostObserver(rvh),
       render_view_host_(rvh) {
   g_instances.Get()[rvh] = this;
 }
 
 void RenderViewDevToolsAgentHost::SendMessageToAgent(IPC::Message* msg) {
-  msg->set_routing_id(render_view_host_->routing_id());
+  msg->set_routing_id(render_view_host_->GetRoutingID());
   render_view_host_->Send(msg);
 }
 
-void RenderViewDevToolsAgentHost::NotifyClientClosing() {
-  content::NotificationService::current()->Notify(
-      content::NOTIFICATION_DEVTOOLS_WINDOW_CLOSING,
-      content::Source<content::BrowserContext>(
-          render_view_host_->site_instance()->GetProcess()->
+void RenderViewDevToolsAgentHost::NotifyClientAttaching() {
+  NotificationService::current()->Notify(
+      NOTIFICATION_DEVTOOLS_AGENT_ATTACHED,
+      Source<BrowserContext>(
+          render_view_host_->GetSiteInstance()->GetProcess()->
               GetBrowserContext()),
-      content::Details<RenderViewHost>(render_view_host_));
+      Details<RenderViewHost>(render_view_host_));
+}
+
+void RenderViewDevToolsAgentHost::NotifyClientDetaching() {
+  NotificationService::current()->Notify(
+      NOTIFICATION_DEVTOOLS_AGENT_DETACHED,
+      Source<BrowserContext>(
+          render_view_host_->GetSiteInstance()->GetProcess()->
+              GetBrowserContext()),
+      Details<RenderViewHost>(render_view_host_));
 }
 
 int RenderViewDevToolsAgentHost::GetRenderProcessId() {
-  return render_view_host_->process()->GetID();
+  return render_view_host_->GetProcess()->GetID();
 }
 
 RenderViewDevToolsAgentHost::~RenderViewDevToolsAgentHost() {
   g_instances.Get().erase(render_view_host_);
 }
 
-void RenderViewDevToolsAgentHost::RenderViewHostDestroyed(RenderViewHost* rvh) {
+void RenderViewDevToolsAgentHost::RenderViewHostDestroyed(
+    RenderViewHost* rvh) {
   NotifyCloseListener();
   delete this;
 }
@@ -132,11 +144,11 @@ void RenderViewDevToolsAgentHost::OnDispatchOnInspectorFrontend(
 }
 
 void RenderViewDevToolsAgentHost::OnClearBrowserCache() {
-  content::GetContentClient()->browser()->ClearCache(render_view_host_);
+  GetContentClient()->browser()->ClearCache(render_view_host_);
 }
 
 void RenderViewDevToolsAgentHost::OnClearBrowserCookies() {
-  content::GetContentClient()->browser()->ClearCookies(render_view_host_);
+  GetContentClient()->browser()->ClearCookies(render_view_host_);
 }
 
 }  // namespace content

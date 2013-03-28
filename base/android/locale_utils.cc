@@ -7,18 +7,29 @@
 #include "base/android/jni_android.h"
 #include "base/android/jni_string.h"
 #include "base/android/scoped_java_ref.h"
+#include "base/logging.h"
 #include "base/string_util.h"
+#include "jni/LocaleUtils_jni.h"
 #include "unicode/uloc.h"
 
 namespace base {
 namespace android {
 
+std::string GetDefaultLocale() {
+  JNIEnv* env = AttachCurrentThread();
+  ScopedJavaLocalRef<jstring> locale = Java_LocaleUtils_getDefaultLocale(env);
+  return ConvertJavaStringToUTF8(locale);
+}
+
 namespace {
 
-std::string GetLocaleComponent(
-    const std::string& locale,
-    int32_t (*uloc_func)(const char*, char*, int32_t, UErrorCode*),
-    int32_t max_capacity) {
+// Common prototype of ICU uloc_getXXX() functions.
+typedef int32_t (*UlocGetComponentFunc)(const char*, char*, int32_t,
+                                        UErrorCode*);
+
+std::string GetLocaleComponent(const std::string& locale,
+                               UlocGetComponentFunc uloc_func,
+                               int32_t max_capacity) {
   std::string result;
   UErrorCode error = U_ZERO_ERROR;
   int32_t actual_length = uloc_func(locale.c_str(),
@@ -36,6 +47,7 @@ ScopedJavaLocalRef<jobject> NewJavaLocale(
     ScopedJavaLocalRef<jclass> locale_class,
     jmethodID constructor_id,
     const std::string& locale) {
+  // TODO(wangxianzhu): Use new Locale API once Android supports scripts.
   std::string language = GetLocaleComponent(
       locale, uloc_getLanguage, ULOC_LANG_CAPACITY);
   std::string country = GetLocaleComponent(
@@ -50,22 +62,6 @@ ScopedJavaLocalRef<jobject> NewJavaLocale(
           ConvertUTF8ToJavaString(env, variant).obj()));
 }
 
-string16 GetDisplayScript(const std::string& locale,
-                          const std::string& display_locale) {
-  const int kBufferSize = 1024;
-  string16 result;
-  UErrorCode error = U_ZERO_ERROR;
-  int32_t actual_length = uloc_getDisplayScript(locale.c_str(),
-                                                display_locale.c_str(),
-                                                WriteInto(&result, kBufferSize),
-                                                kBufferSize,
-                                                &error);
-  DCHECK(U_SUCCESS(error));
-  DCHECK(actual_length < kBufferSize);
-  result.resize(actual_length);
-  return result;
-}
-
 }  // namespace
 
 string16 GetDisplayNameForLocale(const std::string& locale,
@@ -73,37 +69,26 @@ string16 GetDisplayNameForLocale(const std::string& locale,
   JNIEnv* env = AttachCurrentThread();
 
   ScopedJavaLocalRef<jclass> locale_class = GetClass(env, "java/util/Locale");
-  jmethodID constructor_id = GetMethodID(
-      env, locale_class, "<init>",
+  jmethodID constructor_id = MethodID::Get<MethodID::TYPE_INSTANCE>(
+      env, locale_class.obj(), "<init>",
       "(Ljava/lang/String;Ljava/lang/String;Ljava/lang/String;)V");
-
-  // GetDisplayNameForLocale() in l10n_utils.cc converts zh-CN and zh-TW into
-  // zh-Hans and zh-Hant respectively expecting to get better display name for
-  // Chinese locales. However, the Java Locale class doesn't support scripts,
-  // so we get the display names of the scripts later from ICU.
-  // We have display names of Hans and Hant in our version of ICU data.
-  bool is_zh = locale == "zh-Hans" || locale == "zh-Hant";
   ScopedJavaLocalRef<jobject> java_locale = NewJavaLocale(
-      env, locale_class, constructor_id, is_zh ? "zh" : locale);
+      env, locale_class, constructor_id, locale);
   ScopedJavaLocalRef<jobject> java_display_locale = NewJavaLocale(
       env, locale_class, constructor_id, display_locale);
 
-  jmethodID method_id = GetMethodID(env, locale_class, "getDisplayName",
-                                    "(Ljava/util/Locale;)Ljava/lang/String;");
+  jmethodID method_id = MethodID::Get<MethodID::TYPE_INSTANCE>(
+      env, locale_class.obj(), "getDisplayName",
+      "(Ljava/util/Locale;)Ljava/lang/String;");
   ScopedJavaLocalRef<jstring> java_result(
       env,
       static_cast<jstring>(env->CallObjectMethod(java_locale.obj(), method_id,
                                                  java_display_locale.obj())));
-  string16 result = ConvertJavaStringToUTF16(java_result);
+  return ConvertJavaStringToUTF16(java_result);
+}
 
-  if (is_zh) {
-    result.append(1, ' ');
-    result.append(1, '(');
-    result.append(GetDisplayScript(locale, display_locale));
-    result.append(1, ')');
-  }
-
-  return result;
+bool RegisterLocaleUtils(JNIEnv* env) {
+  return RegisterNativesImpl(env);
 }
 
 }  // namespace android

@@ -4,138 +4,63 @@
 
 #include "ash/wm/workspace_controller.h"
 
-#include "ash/shell.h"
+#include "ash/ash_switches.h"
 #include "ash/wm/window_util.h"
-#include "ash/wm/workspace/workspace_event_filter.h"
-#include "ash/wm/workspace/workspace_layout_manager.h"
+#include "ash/wm/workspace/workspace_cycler.h"
 #include "ash/wm/workspace/workspace_manager.h"
-#include "base/utf_string_conversions.h"
+#include "base/command_line.h"
 #include "ui/aura/client/activation_client.h"
 #include "ui/aura/client/aura_constants.h"
 #include "ui/aura/root_window.h"
 #include "ui/aura/window.h"
-#include "ui/views/controls/menu/menu_model_adapter.h"
-#include "ui/views/controls/menu/menu_runner.h"
 
 namespace ash {
 namespace internal {
 
-namespace {
-
-// Size of the grid when a grid is enabled.
-const int kGridSize = 8;
-
-}  // namespace
-
 WorkspaceController::WorkspaceController(aura::Window* viewport)
     : viewport_(viewport),
-      workspace_manager_(new WorkspaceManager(viewport)),
-      layout_manager_(NULL),
-      event_filter_(NULL) {
-  event_filter_ = new WorkspaceEventFilter(viewport);
-  viewport->SetEventFilter(event_filter_);
-  layout_manager_ = new WorkspaceLayoutManager(workspace_manager_.get());
-  viewport->SetLayoutManager(layout_manager_);
-  aura::RootWindow::GetInstance()->AddRootWindowObserver(this);
-  aura::RootWindow::GetInstance()->AddObserver(this);
-  workspace_manager_->set_grid_size(kGridSize);
-  event_filter_->set_grid_size(kGridSize);
+      workspace_cycler_(NULL) {
+  aura::RootWindow* root_window = viewport->GetRootWindow();
+  workspace_manager_.reset(new WorkspaceManager(viewport));
+  if (CommandLine::ForCurrentProcess()->HasSwitch(
+      switches::kAshEnableWorkspaceScrubbing)) {
+    workspace_cycler_.reset(new WorkspaceCycler(workspace_manager_.get()));
+  }
+  aura::client::GetActivationClient(root_window)->AddObserver(this);
 }
 
 WorkspaceController::~WorkspaceController() {
-  aura::RootWindow::GetInstance()->RemoveObserver(this);
-  aura::RootWindow::GetInstance()->RemoveRootWindowObserver(this);
+  aura::client::GetActivationClient(viewport_->GetRootWindow())->
+      RemoveObserver(this);
 }
 
-void WorkspaceController::ToggleOverview() {
-  workspace_manager_->SetOverview(!workspace_manager_->is_overview());
+WorkspaceWindowState WorkspaceController::GetWindowState() const {
+  return workspace_manager_->GetWindowState();
 }
 
-void WorkspaceController::ShowMenu(views::Widget* widget,
-                                   const gfx::Point& location) {
-  ui::SimpleMenuModel menu_model(this);
-  // This is just for testing and will be ripped out before we ship, so none of
-  // the strings are localized.
-  menu_model.AddCheckItem(MENU_SNAP_TO_GRID,
-                          ASCIIToUTF16("Snap to grid"));
-  menu_model.AddCheckItem(MENU_OPEN_MAXIMIZED,
-                          ASCIIToUTF16("Maximize new windows"));
-  views::MenuModelAdapter menu_model_adapter(&menu_model);
-  menu_runner_.reset(new views::MenuRunner(menu_model_adapter.CreateMenu()));
-  if (menu_runner_->RunMenuAt(
-          widget, NULL, gfx::Rect(location, gfx::Size()),
-          views::MenuItemView::TOPRIGHT, views::MenuRunner::HAS_MNEMONICS) ==
-      views::MenuRunner::MENU_DELETED)
-    return;
+void WorkspaceController::SetShelf(ShelfLayoutManager* shelf) {
+  workspace_manager_->SetShelf(shelf);
 }
 
-void WorkspaceController::OnRootWindowResized(const gfx::Size& new_size) {
-  workspace_manager_->SetWorkspaceSize(new_size);
+void WorkspaceController::SetActiveWorkspaceByWindow(aura::Window* window) {
+  return workspace_manager_->SetActiveWorkspaceByWindow(window);
 }
 
-void WorkspaceController::OnWindowPropertyChanged(aura::Window* window,
-                                                  const char* key,
-                                                  void* old) {
-  if (key == aura::client::kRootWindowActiveWindow)
-    workspace_manager_->SetActiveWorkspaceByWindow(GetActiveWindow());
+aura::Window* WorkspaceController::GetParentForNewWindow(aura::Window* window) {
+  return workspace_manager_->GetParentForNewWindow(window);
 }
 
-bool WorkspaceController::IsCommandIdChecked(int command_id) const {
-  switch (static_cast<MenuItem>(command_id)) {
-    case MENU_SNAP_TO_GRID:
-      return workspace_manager_->grid_size() != 0;
 
-    case MENU_OPEN_MAXIMIZED:
-      return workspace_manager_->open_new_windows_maximized();
+void WorkspaceController::DoInitialAnimation() {
+  workspace_manager_->DoInitialAnimation();
+}
 
-    default:
-      break;
+void WorkspaceController::OnWindowActivated(aura::Window* gained_active,
+                                            aura::Window* lost_active) {
+  if (!gained_active ||
+      gained_active->GetRootWindow() == viewport_->GetRootWindow()) {
+    workspace_manager_->SetActiveWorkspaceByWindow(gained_active);
   }
-  return false;
-}
-
-bool WorkspaceController::IsCommandIdEnabled(int command_id) const {
-  switch (static_cast<MenuItem>(command_id)) {
-    case MENU_OPEN_MAXIMIZED:
-      return workspace_manager_->contents_view()->bounds().width() <
-          WorkspaceManager::kOpenMaximizedThreshold;
-
-    default:
-      return true;
-  }
-  return true;
-}
-
-void WorkspaceController::ExecuteCommand(int command_id) {
-  switch (static_cast<MenuItem>(command_id)) {
-    case MENU_SNAP_TO_GRID: {
-      int size = workspace_manager_->grid_size() == 0 ? kGridSize : 0;
-      workspace_manager_->set_grid_size(size);
-      event_filter_->set_grid_size(size);
-      if (!size)
-        return;
-      for (size_t i = 0; i < viewport_->children().size(); ++i) {
-        aura::Window* window = viewport_->children()[i];
-        if (!window_util::IsWindowMaximized(window) &&
-            !window_util::IsWindowFullscreen(window)) {
-          window->SetBounds(workspace_manager_->AlignBoundsToGrid(
-                                window->GetTargetBounds()));
-        }
-      }
-      break;
-    }
-
-    case MENU_OPEN_MAXIMIZED:
-      workspace_manager_->set_open_new_windows_maximized(
-          !workspace_manager_->open_new_windows_maximized());
-      break;
-  }
-}
-
-bool WorkspaceController::GetAcceleratorForCommandId(
-      int command_id,
-      ui::Accelerator* accelerator) {
-  return false;
 }
 
 }  // namespace internal

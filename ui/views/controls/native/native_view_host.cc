@@ -1,4 +1,4 @@
-// Copyright (c) 2011 The Chromium Authors. All rights reserved.
+// Copyright (c) 2012 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -14,9 +14,10 @@ namespace views {
 // static
 const char NativeViewHost::kViewClassName[] = "views/NativeViewHost";
 
-#if defined(OS_LINUX)
-// GTK renders the focus.
-// static
+#if defined(USE_AURA)
+// Views implmenetatxion draws the focus.
+// TODO(oshima): Eliminate this flag and consolidate
+// the focus border code.
 const bool NativeViewHost::kRenderNativeControlFocus = false;
 #else
 // static
@@ -44,7 +45,9 @@ void NativeViewHost::Attach(gfx::NativeView native_view) {
   // be seen as focused when the native view receives focus.
   if (!focus_view_)
     focus_view_ = this;
-  native_wrapper_->NativeViewAttached();
+  native_wrapper_->NativeViewWillAttach();
+  Widget::ReparentNativeView(native_view_, GetWidget()->GetNativeView());
+  Layout();
 }
 
 void NativeViewHost::Detach() {
@@ -125,7 +128,7 @@ void NativeViewHost::OnPaint(gfx::Canvas* canvas) {
   // It would be nice if this used some approximation of the page's
   // current background color.
   if (native_wrapper_->HasInstalledClip())
-    canvas->FillRect(SK_ColorWHITE, GetLocalBounds());
+    canvas->FillRect(GetLocalBounds(), SK_ColorWHITE);
 }
 
 void NativeViewHost::VisibilityChanged(View* starting_from, bool is_visible) {
@@ -180,9 +183,26 @@ gfx::NativeViewAccessible NativeViewHost::GetNativeViewAccessible() {
 
 void NativeViewHost::Detach(bool destroyed) {
   if (native_view_) {
+    if (!destroyed)
+      ClearFocus();
     native_wrapper_->NativeViewDetaching(destroyed);
     native_view_ = NULL;
   }
 }
+
+void NativeViewHost::ClearFocus() {
+  FocusManager* focus_manager = GetFocusManager();
+  if (!focus_manager || !focus_manager->GetFocusedView())
+    return;
+
+  Widget::Widgets widgets;
+  Widget::GetAllChildWidgets(native_view(), &widgets);
+  for (Widget::Widgets::iterator i = widgets.begin(); i != widgets.end(); ++i) {
+    focus_manager->ViewRemoved((*i)->GetRootView());
+    if (!focus_manager->GetFocusedView())
+      return;
+  }
+}
+
 
 }  // namespace views

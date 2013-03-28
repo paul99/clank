@@ -1,4 +1,4 @@
-// Copyright (c) 2011 The Chromium Authors. All rights reserved.
+// Copyright (c) 2012 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -15,13 +15,16 @@
 using WebKit::WebDevToolsAgent;
 using WebKit::WebString;
 
+namespace content {
+
 namespace {
 
 class MessageImpl : public WebDevToolsAgent::MessageDescriptor {
  public:
   MessageImpl(const std::string& message, int host_id)
       : msg(message),
-        host_id(host_id) {}
+        host_id(host_id) {
+  }
   virtual ~MessageImpl() {}
   virtual WebDevToolsAgent* agent() {
     DevToolsAgent* agent = DevToolsAgent::FromHostId(host_id);
@@ -35,19 +38,12 @@ class MessageImpl : public WebDevToolsAgent::MessageDescriptor {
   int host_id;
 };
 
-}
-
-// static
-IPC::Channel* DevToolsAgentFilter::channel_ = NULL;
-// static
-int DevToolsAgentFilter::current_routing_id_ = 0;
+}  // namespace
 
 DevToolsAgentFilter::DevToolsAgentFilter()
     : message_handled_(false),
-      render_thread_loop_(MessageLoop::current()) {
-}
-
-DevToolsAgentFilter::~DevToolsAgentFilter() {
+      render_thread_loop_(MessageLoop::current()),
+      current_routing_id_(0) {
 }
 
 bool DevToolsAgentFilter::OnMessageReceived(const IPC::Message& message) {
@@ -62,9 +58,7 @@ bool DevToolsAgentFilter::OnMessageReceived(const IPC::Message& message) {
   return message_handled_;
 }
 
-void DevToolsAgentFilter::OnFilterAdded(IPC::Channel* channel) {
-  channel_ = channel;
-}
+DevToolsAgentFilter::~DevToolsAgentFilter() {}
 
 void DevToolsAgentFilter::OnDispatchOnInspectorBackend(
     const std::string& message) {
@@ -79,3 +73,5 @@ void DevToolsAgentFilter::OnDispatchOnInspectorBackend(
   render_thread_loop_->PostTask(
       FROM_HERE, base::Bind(&WebDevToolsAgent::processPendingMessages));
 }
+
+}  // namespace content

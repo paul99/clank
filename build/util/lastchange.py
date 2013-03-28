@@ -73,17 +73,18 @@ def RunGitCommand(directory, command):
     A process object or None.
   """
   command = ['git'] + command
-  # Force shell usage under cygwin & win32. This is a workaround for
+  # Force shell usage under cygwin. This is a workaround for
   # mysterious loss of cwd while invoking cygwin's git.
   # We can't just pass shell=True to Popen, as under win32 this will
   # cause CMD to be used, while we explicitly want a cygwin shell.
-  if sys.platform in ('cygwin', 'win32'):
+  if sys.platform == 'cygwin':
     command = ['sh', '-c', ' '.join(command)]
   try:
     proc = subprocess.Popen(command,
                             stdout=subprocess.PIPE,
                             stderr=subprocess.PIPE,
-                            cwd=directory)
+                            cwd=directory,
+                            shell=(sys.platform=='win32'))
     return proc
   except OSError:
     return None
@@ -195,6 +196,8 @@ def main(argv=None):
                     help="write last change to FILE")
   parser.add_option("--revision-only", action='store_true',
                     help="just print the SVN revision number")
+  parser.add_option("-s", "--source-dir", metavar="DIR",
+                    help="use repository in the given directory")
   opts, args = parser.parse_args(argv[1:])
 
   out_file = opts.output
@@ -207,7 +210,12 @@ def main(argv=None):
     parser.print_help()
     sys.exit(2)
 
-  version_info = FetchVersionInfo(opts.default_lastchange)
+  if opts.source_dir:
+    src_dir = opts.source_dir
+  else:
+    src_dir = os.path.dirname(os.path.abspath(__file__))
+
+  version_info = FetchVersionInfo(opts.default_lastchange, src_dir)
 
   if version_info.revision == None:
     version_info.revision = '0'

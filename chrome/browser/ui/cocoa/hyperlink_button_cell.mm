@@ -1,19 +1,30 @@
-// Copyright (c) 2011 The Chromium Authors. All rights reserved.
+// Copyright (c) 2012 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
 #import "chrome/browser/ui/cocoa/hyperlink_button_cell.h"
 
-@interface HyperlinkButtonCell (Private)
-- (NSDictionary*)linkAttributres;
+@interface HyperlinkButtonCell ()
 - (void)customizeButtonCell;
 @end
 
 @implementation HyperlinkButtonCell
+
 @dynamic textColor;
+@synthesize underlineOnHover = underlineOnHover_;
 
 + (NSColor*)defaultTextColor {
   return [NSColor blueColor];
+}
+
++ (NSButton*)buttonWithString:(NSString*)string {
+  NSButton* button = [[[NSButton alloc] initWithFrame:NSZeroRect] autorelease];
+  scoped_nsobject<HyperlinkButtonCell> cell(
+      [[HyperlinkButtonCell alloc] initTextCell:string]);
+  [cell setAlignment:NSLeftTextAlignment];
+  [button setCell:cell.get()];
+  [button setBezelStyle:NSRegularSquareBezelStyle];
+  return button;
 }
 
 // Designated initializer.
@@ -65,10 +76,14 @@
 
 // Creates the NSDictionary of attributes for the attributed string.
 - (NSDictionary*)linkAttributes {
-  NSUInteger underlineMask = NSUnderlinePatternSolid | NSUnderlineStyleSingle;
+  NSUInteger underlineMask = NSNoUnderlineStyle;
+  if (!underlineOnHover_ || (mouseIsInside_ && [self isEnabled]))
+    underlineMask = NSUnderlinePatternSolid | NSUnderlineStyleSingle;
+
   scoped_nsobject<NSMutableParagraphStyle> paragraphStyle(
     [[NSParagraphStyle defaultParagraphStyle] mutableCopy]);
   [paragraphStyle setAlignment:[self alignment]];
+  [paragraphStyle setLineBreakMode:[self lineBreakMode]];
 
   return [NSDictionary dictionaryWithObjectsAndKeys:
       [self textColor], NSForegroundColorAttributeName,
@@ -96,16 +111,28 @@
 
 // Override the default behavior to draw the border. Instead, change the cursor.
 - (void)mouseEntered:(NSEvent*)event {
-  [[NSCursor pointingHandCursor] push];
+  mouseIsInside_ = YES;
+  if ([self isEnabled])
+    [[NSCursor pointingHandCursor] push];
+  else
+    [[NSCursor currentCursor] push];
+  if (underlineOnHover_)
+    [[self controlView] setNeedsDisplay:YES];
 }
 
 - (void)mouseExited:(NSEvent*)event {
+  mouseIsInside_ = NO;
   [NSCursor pop];
+  if (underlineOnHover_)
+    [[self controlView] setNeedsDisplay:YES];
 }
 
 // Setters and getters.
 - (NSColor*)textColor {
-  return textColor_.get();
+  if ([self isEnabled])
+    return textColor_.get();
+  else
+    return [NSColor disabledControlTextColor];
 }
 
 - (void)setTextColor:(NSColor*)color {

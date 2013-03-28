@@ -1,4 +1,4 @@
-// Copyright (c) 2011 The Chromium Authors. All rights reserved.
+// Copyright (c) 2012 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -13,6 +13,7 @@
 #include "base/utf_string_conversions.h"
 #include "build/build_config.h"
 #include "grit/ui_strings.h"
+#include "ui/base/events/event.h"
 #include "ui/base/keycodes/keyboard_codes.h"
 #include "ui/base/l10n/l10n_util.h"
 #include "ui/gfx/canvas.h"
@@ -39,7 +40,7 @@ BaseScrollBar::BaseScrollBar(bool horizontal, BaseScrollBarThumb* thumb)
       thumb_(thumb),
       contents_size_(0),
       contents_scroll_offset_(0),
-      thumb_track_state_(CustomButton::BS_NORMAL),
+      thumb_track_state_(CustomButton::STATE_NORMAL),
       last_scroll_amount_(SCROLL_NONE),
       ALLOW_THIS_IN_INITIALIZER_LIST(repeater_(
           base::Bind(&BaseScrollBar::TrackClicked, base::Unretained(this)))),
@@ -98,52 +99,39 @@ void BaseScrollBar::ScrollToThumbPosition(int thumb_position,
   SchedulePaint();
 }
 
-void BaseScrollBar::ScrollByContentsOffset(int contents_offset) {
+bool BaseScrollBar::ScrollByContentsOffset(int contents_offset) {
+  int old_offset = contents_scroll_offset_;
   contents_scroll_offset_ -= contents_offset;
   if (contents_scroll_offset_ < GetMinPosition()) {
     contents_scroll_offset_ = GetMinPosition();
   } else if (contents_scroll_offset_ > GetMaxPosition()) {
     contents_scroll_offset_ = GetMaxPosition();
   }
+  if (old_offset == contents_scroll_offset_)
+    return false;
+
   ScrollContentsToOffset();
+  return true;
 }
 
 ///////////////////////////////////////////////////////////////////////////////
 // BaseScrollBar, View implementation:
 
-bool BaseScrollBar::OnMousePressed(const MouseEvent& event) {
-  if (event.IsOnlyLeftMouseButton()) {
-    SetThumbTrackState(CustomButton::BS_PUSHED);
-    gfx::Rect thumb_bounds = thumb_->bounds();
-    if (IsHorizontal()) {
-      if (event.x() < thumb_bounds.x()) {
-        last_scroll_amount_ = SCROLL_PREV_PAGE;
-      } else if (event.x() > thumb_bounds.right()) {
-        last_scroll_amount_ = SCROLL_NEXT_PAGE;
-      }
-    } else {
-      if (event.y() < thumb_bounds.y()) {
-        last_scroll_amount_ = SCROLL_PREV_PAGE;
-      } else if (event.y() > thumb_bounds.bottom()) {
-        last_scroll_amount_ = SCROLL_NEXT_PAGE;
-      }
-    }
-    TrackClicked();
-    repeater_.Start();
-  }
+bool BaseScrollBar::OnMousePressed(const ui::MouseEvent& event) {
+  if (event.IsOnlyLeftMouseButton())
+    ProcessPressEvent(event);
   return true;
 }
 
-void BaseScrollBar::OnMouseReleased(const MouseEvent& event) {
+void BaseScrollBar::OnMouseReleased(const ui::MouseEvent& event) {
   OnMouseCaptureLost();
 }
 
 void BaseScrollBar::OnMouseCaptureLost() {
-  SetThumbTrackState(CustomButton::BS_NORMAL);
-  repeater_.Stop();
+  ResetState();
 }
 
-bool BaseScrollBar::OnKeyPressed(const KeyEvent& event) {
+bool BaseScrollBar::OnKeyPressed(const ui::KeyEvent& event) {
   ScrollAmount amount = SCROLL_NONE;
   switch (event.key_code()) {
     case ui::VKEY_UP:
@@ -184,9 +172,72 @@ bool BaseScrollBar::OnKeyPressed(const KeyEvent& event) {
   return false;
 }
 
-bool BaseScrollBar::OnMouseWheel(const MouseWheelEvent& event) {
+bool BaseScrollBar::OnMouseWheel(const ui::MouseWheelEvent& event) {
   ScrollByContentsOffset(event.offset());
   return true;
+}
+
+void BaseScrollBar::OnGestureEvent(ui::GestureEvent* event) {
+  // If a fling is in progress, then stop the fling for any incoming gesture
+  // event (except for the GESTURE_END event that is generated at the end of the
+  // fling).
+  if (scroll_animator_.get() && scroll_animator_->is_scrolling() &&
+      (event->type() != ui::ET_GESTURE_END ||
+       event->details().touch_points() > 1)) {
+    scroll_animator_->Stop();
+  }
+
+  if (event->type() == ui::ET_GESTURE_TAP_DOWN) {
+    ProcessPressEvent(*event);
+    event->SetHandled();
+    return;
+  }
+
+  if (event->type() == ui::ET_GESTURE_LONG_PRESS) {
+    // For a long-press, the repeater started in tap-down should continue. So
+    // return early.
+    return;
+  }
+
+  ResetState();
+
+  if (event->type() == ui::ET_GESTURE_TAP) {
+    // TAP_DOWN would have already scrolled some amount. So scrolling again on
+    // TAP is not necessary.
+    event->SetHandled();
+    return;
+  }
+
+  if (event->type() == ui::ET_GESTURE_SCROLL_BEGIN ||
+      event->type() == ui::ET_GESTURE_SCROLL_END) {
+    event->SetHandled();
+    return;
+  }
+
+  if (event->type() == ui::ET_GESTURE_SCROLL_UPDATE) {
+    if (ScrollByContentsOffset(IsHorizontal() ? event->details().scroll_x() :
+                                                event->details().scroll_y())) {
+      event->SetHandled();
+    }
+    return;
+  }
+
+  if (event->type() == ui::ET_SCROLL_FLING_START) {
+    if (!scroll_animator_.get())
+      scroll_animator_.reset(new ScrollAnimator(this));
+    scroll_animator_->Start(
+        IsHorizontal() ?  event->details().velocity_x() : 0.f,
+        IsHorizontal() ? 0.f : event->details().velocity_y());
+    event->SetHandled();
+  }
+}
+
+///////////////////////////////////////////////////////////////////////////////
+// BaseScrollBar, ScrollDelegate implementation:
+
+bool BaseScrollBar::OnScroll(float dx, float dy) {
+  return IsHorizontal() ? ScrollByContentsOffset(dx) :
+                          ScrollByContentsOffset(dy);
 }
 
 ///////////////////////////////////////////////////////////////////////////////
@@ -202,11 +253,9 @@ enum ScrollBarContextMenuCommands {
   ScrollBarContextMenuCommand_ScrollNext
 };
 
-void BaseScrollBar::ShowContextMenuForView(View* source,
-                                             const gfx::Point& p,
-                                             bool is_mouse_gesture) {
+void BaseScrollBar::ShowContextMenuForView(View* source, const gfx::Point& p) {
   Widget* widget = GetWidget();
-  gfx::Rect widget_bounds = widget->GetWindowScreenBounds();
+  gfx::Rect widget_bounds = widget->GetWindowBoundsInScreen();
   gfx::Point temp_pt(p.x() - widget_bounds.x(), p.y() - widget_bounds.y());
   View::ConvertPointFromWidget(this, &temp_pt);
   context_menu_mouse_position_ = IsHorizontal() ? temp_pt.x() : temp_pt.y();
@@ -224,8 +273,9 @@ void BaseScrollBar::ShowContextMenuForView(View* source,
   menu->AppendSeparator();
   menu->AppendDelegateMenuItem(ScrollBarContextMenuCommand_ScrollPrev);
   menu->AppendDelegateMenuItem(ScrollBarContextMenuCommand_ScrollNext);
-  if (menu_runner_->RunMenuAt(GetWidget(), NULL, gfx::Rect(p, gfx::Size(0, 0)),
-      MenuItemView::TOPLEFT, MenuRunner::HAS_MNEMONICS) ==
+  if (menu_runner_->RunMenuAt(GetWidget(), NULL, gfx::Rect(p, gfx::Size()),
+          MenuItemView::TOPLEFT, MenuRunner::HAS_MNEMONICS |
+          views::MenuRunner::CONTEXT_MENU) ==
       MenuRunner::MENU_DELETED)
     return;
 }
@@ -358,6 +408,31 @@ int BaseScrollBar::GetScrollIncrement(bool is_page, bool is_positive) {
 
 ///////////////////////////////////////////////////////////////////////////////
 // BaseScrollBar, private:
+
+void BaseScrollBar::ProcessPressEvent(const ui::LocatedEvent& event) {
+  SetThumbTrackState(CustomButton::STATE_PRESSED);
+  gfx::Rect thumb_bounds = thumb_->bounds();
+  if (IsHorizontal()) {
+    if (event.x() < thumb_bounds.x()) {
+      last_scroll_amount_ = SCROLL_PREV_PAGE;
+    } else if (event.x() > thumb_bounds.right()) {
+      last_scroll_amount_ = SCROLL_NEXT_PAGE;
+    }
+  } else {
+    if (event.y() < thumb_bounds.y()) {
+      last_scroll_amount_ = SCROLL_PREV_PAGE;
+    } else if (event.y() > thumb_bounds.bottom()) {
+      last_scroll_amount_ = SCROLL_NEXT_PAGE;
+    }
+  }
+  TrackClicked();
+  repeater_.Start();
+}
+
+void BaseScrollBar::ResetState() {
+  SetThumbTrackState(CustomButton::STATE_NORMAL);
+  repeater_.Stop();
+}
 
 void BaseScrollBar::TrackClicked() {
   if (last_scroll_amount_ != SCROLL_NONE)

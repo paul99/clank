@@ -32,16 +32,20 @@ cr.define('cr.ui', function() {
    * be invoked to do final setup.
    */
   Oobe.initialize = function() {
+    DisplayManager.initialize();
     login.AccountPickerScreen.register();
     login.GaiaSigninScreen.register();
     oobe.OAuthEnrollmentScreen.register();
-    oobe.UserImageScreen.register();
+    oobe.UserImageScreen.register(/* lazyInit= */ true);
+    oobe.ResetScreen.register();
     login.ErrorMessageScreen.register();
+    login.TPMErrorMessageScreen.register();
+    login.PasswordChangedScreen.register();
 
     cr.ui.Bubble.decorate($('bubble'));
     login.HeaderBar.decorate($('login-header-bar'));
 
-    chrome.send('screenStateInitialize', []);
+    chrome.send('screenStateInitialize');
   };
 
   /**
@@ -65,13 +69,21 @@ cr.define('cr.ui', function() {
   /**
    * Dummy Oobe functions not present with stripped login UI.
    */
+  Oobe.initializeA11yMenu = function(e) {};
+  Oobe.handleAccessbilityLinkClick = function(e) {};
+  Oobe.handleSpokenFeedbackClick = function(e) {};
+  Oobe.handleHighContrastClick = function(e) {};
+  Oobe.handleScreenMagnifierClick = function(e) {};
   Oobe.enableContinueButton = function(enable) {};
   Oobe.setUsageStats = function(checked) {};
   Oobe.setOemEulaUrl = function(oemEulaUrl) {};
   Oobe.setUpdateProgress = function(progress) {};
+  Oobe.showUpdateEstimatedTimeLeft = function(enable) {};
+  Oobe.setUpdateEstimatedTimeLeft = function(seconds) {};
   Oobe.setUpdateMessage = function(message) {};
   Oobe.showUpdateCurtain = function(enable) {};
   Oobe.setTpmPassword = function(password) {};
+  Oobe.refreshA11yInfo = function(data) {};
   Oobe.reloadContent = function(data) {};
 
   /**
@@ -133,10 +145,42 @@ cr.define('cr.ui', function() {
   };
 
   /**
+   * Shows password changed screen that offers migration.
+   * @param {boolean} showError Whether to show the incorrect password error.
+   */
+  Oobe.showPasswordChangedScreen = function(showError) {
+    DisplayManager.showPasswordChangedScreen(showError);
+  };
+
+  /**
+   * Shows TPM error screen.
+   */
+  Oobe.showTpmError = function() {
+    DisplayManager.showTpmError();
+  };
+
+  /**
    * Clears error bubble.
    */
   Oobe.clearErrors = function() {
     DisplayManager.clearErrors();
+  };
+
+  /**
+   * Displays animations on successful authentication, that have to happen
+   * before login UI is dismissed.
+   */
+  Oobe.animateAuthenticationSuccess = function() {
+    $('login-header-bar').animateOut(function() {
+      chrome.send('unlockOnLoginSuccess');
+    });
+  };
+
+  /**
+   * Displays animations that have to happen once login UI is fully displayed.
+   */
+  Oobe.animateOnceFullyDisplayed = function() {
+    $('login-header-bar').animateIn();
   };
 
   /**
@@ -159,6 +203,22 @@ cr.define('cr.ui', function() {
     DisplayManager.setLabelText(labelId, labelText);
   };
 
+  /**
+   * Sets the text content of the enterprise info message.
+   * If the text is empty, the entire notification will be hidden.
+   * @param {string} messageText The message text.
+   */
+  Oobe.setEnterpriseInfo = function(messageText) {
+    DisplayManager.setEnterpriseInfo(messageText);
+  };
+
+  /**
+   * Enforces focus on user pod of locked user.
+   */
+  Oobe.forceLockedUserPodFocus = function() {
+    login.AccountPickerScreen.forceLockedUserPodFocus();
+  };
+
   // Export
   return {
     Oobe: Oobe
@@ -167,6 +227,13 @@ cr.define('cr.ui', function() {
 
 var Oobe = cr.ui.Oobe;
 
-disableTextSelectAndDrag();
+// Allow selection events on components with editable text (password field)
+// bug (http://code.google.com/p/chromium/issues/detail?id=125863)
+disableTextSelectAndDrag(function(e) {
+  var src = e.target;
+  return src instanceof HTMLTextAreaElement ||
+         src instanceof HTMLInputElement &&
+         /text|password|search/.test(src.type);
+});
 
 document.addEventListener('DOMContentLoaded', cr.ui.Oobe.initialize);

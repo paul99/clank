@@ -1,4 +1,4 @@
-// Copyright (c) 2011 The Chromium Authors. All rights reserved.
+// Copyright (c) 2012 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -10,15 +10,19 @@
 
 #include "base/bind.h"
 #include "base/bind_helpers.h"
+#include "base/i18n/rtl.h"
 #include "base/stringprintf.h"
 #include "base/utf_string_conversions.h"
 #include "base/values.h"
 #include "chrome/app/chrome_command_ids.h"
 #include "chrome/browser/browser_process.h"
+#include "chrome/browser/chromeos/input_method/input_method_configuration.h"
 #include "chrome/browser/chromeos/input_method/input_method_manager.h"
 #include "chrome/browser/chromeos/input_method/input_method_util.h"
+#include "chrome/browser/lifetime/application_lifetime.h"
 #include "chrome/browser/profiles/profile.h"
 #include "chrome/browser/ui/browser.h"
+#include "chrome/browser/ui/browser_finder.h"
 #include "content/public/browser/navigation_controller.h"
 #include "content/public/browser/user_metrics.h"
 #include "content/public/browser/web_contents.h"
@@ -29,6 +33,7 @@
 using content::UserMetricsAction;
 
 namespace chromeos {
+namespace options {
 
 CrosLanguageOptionsHandler::CrosLanguageOptionsHandler() {
 }
@@ -38,7 +43,8 @@ CrosLanguageOptionsHandler::~CrosLanguageOptionsHandler() {
 
 void CrosLanguageOptionsHandler::GetLocalizedValues(
     DictionaryValue* localized_strings) {
-  LanguageOptionsHandlerCommon::GetLocalizedValues(localized_strings);
+  ::options::LanguageOptionsHandlerCommon::GetLocalizedValues(
+      localized_strings);
 
   RegisterTitle(localized_strings, "languagePage",
                 IDS_OPTIONS_SETTINGS_LANGUAGES_AND_INPUT_DIALOG_TITLE);
@@ -62,21 +68,25 @@ void CrosLanguageOptionsHandler::GetLocalizedValues(
   localized_strings->SetString("restart_button",
       l10n_util::GetStringUTF16(
           IDS_OPTIONS_SETTINGS_LANGUAGES_SIGN_OUT_BUTTON));
-  localized_strings->SetString("virtual_keyboard_button",
+  localized_strings->SetString("extension_ime_label",
       l10n_util::GetStringUTF16(
-          IDS_OPTIONS_SETTINGS_LANGUAGES_VIRTUAL_KEYBOARD_BUTTON));
+          IDS_OPTIONS_SETTINGS_LANGUAGES_INPUT_METHOD_EXTENSION_IME));
+  localized_strings->SetString("extension_ime_description",
+      l10n_util::GetStringUTF16(
+          IDS_OPTIONS_SETTINGS_LANGUAGES_INPUT_METHOD_EXTENSION_DESCRIPTION));
 
   input_method::InputMethodManager* manager =
-      input_method::InputMethodManager::GetInstance();
+      input_method::GetInputMethodManager();
   // GetSupportedInputMethods() never return NULL.
   scoped_ptr<input_method::InputMethodDescriptors> descriptors(
       manager->GetSupportedInputMethods());
   localized_strings->Set("languageList", GetLanguageList(*descriptors));
   localized_strings->Set("inputMethodList", GetInputMethodList(*descriptors));
+  localized_strings->Set("extensionImeList", GetExtensionImeList());
 }
 
 void CrosLanguageOptionsHandler::RegisterMessages() {
-  LanguageOptionsHandlerCommon::RegisterMessages();
+  ::options::LanguageOptionsHandlerCommon::RegisterMessages();
 
   web_ui()->RegisterMessageCallback("inputMethodDisable",
       base::Bind(&CrosLanguageOptionsHandler::InputMethodDisableCallback,
@@ -95,16 +105,14 @@ void CrosLanguageOptionsHandler::RegisterMessages() {
 ListValue* CrosLanguageOptionsHandler::GetInputMethodList(
     const input_method::InputMethodDescriptors& descriptors) {
   input_method::InputMethodManager* manager =
-      input_method::InputMethodManager::GetInstance();
+      input_method::GetInputMethodManager();
 
   ListValue* input_method_list = new ListValue();
 
   for (size_t i = 0; i < descriptors.size(); ++i) {
     const input_method::InputMethodDescriptor& descriptor =
         descriptors[i];
-    const std::string language_code =
-        manager->GetInputMethodUtil()->GetLanguageCodeFromDescriptor(
-            descriptor);
+    const std::string language_code = descriptor.language_code();
     const std::string display_name =
         manager->GetInputMethodUtil()->GetInputMethodDisplayNameFromId(
             descriptor.id());
@@ -138,16 +146,11 @@ ListValue* CrosLanguageOptionsHandler::GetInputMethodList(
 
 ListValue* CrosLanguageOptionsHandler::GetLanguageList(
     const input_method::InputMethodDescriptors& descriptors) {
-  input_method::InputMethodManager* manager =
-      input_method::InputMethodManager::GetInstance();
-
   std::set<std::string> language_codes;
   // Collect the language codes from the supported input methods.
   for (size_t i = 0; i < descriptors.size(); ++i) {
     const input_method::InputMethodDescriptor& descriptor = descriptors[i];
-    const std::string language_code =
-        manager->GetInputMethodUtil()->GetLanguageCodeFromDescriptor(
-            descriptor);
+    const std::string language_code = descriptor.language_code();
     language_codes.insert(language_code);
   }
   // Collect the language codes from kExtraLanguages.
@@ -170,8 +173,10 @@ ListValue* CrosLanguageOptionsHandler::GetLanguageList(
   // Build the list of display names, and build the language map.
   for (std::set<std::string>::const_iterator iter = language_codes.begin();
        iter != language_codes.end(); ++iter) {
+    input_method::InputMethodUtil* input_method_util =
+        input_method::GetInputMethodManager()->GetInputMethodUtil();
     const string16 display_name =
-        input_method::InputMethodUtil::GetLanguageDisplayNameFromCode(*iter);
+        input_method_util->GetLanguageDisplayNameFromCode(*iter);
     const string16 native_display_name =
         input_method::InputMethodUtil::GetLanguageNativeDisplayNameFromCode(
             *iter);
@@ -188,10 +193,19 @@ ListValue* CrosLanguageOptionsHandler::GetLanguageList(
   // Build the language list from the language map.
   ListValue* language_list = new ListValue();
   for (size_t i = 0; i < display_names.size(); ++i) {
+    // Sets the directionality of the display language name.
+    string16 display_name(display_names[i]);
+    bool markup_removal =
+        base::i18n::UnadjustStringForLocaleDirection(&display_name);
+    DCHECK(markup_removal);
+    bool has_rtl_chars = base::i18n::StringContainsStrongRTLChars(display_name);
+    std::string directionality = has_rtl_chars ? "rtl" : "ltr";
+
     const LanguagePair& pair = language_map[display_names[i]];
     DictionaryValue* dictionary = new DictionaryValue();
-    dictionary->SetString("code",  pair.first);
+    dictionary->SetString("code", pair.first);
     dictionary->SetString("displayName", display_names[i]);
+    dictionary->SetString("textDirection", directionality);
     dictionary->SetString("nativeDisplayName", pair.second);
     language_list->Append(dictionary);
   }
@@ -199,8 +213,28 @@ ListValue* CrosLanguageOptionsHandler::GetLanguageList(
   return language_list;
 }
 
+base::ListValue* CrosLanguageOptionsHandler::GetExtensionImeList() {
+  input_method::InputMethodManager* manager =
+      input_method::GetInputMethodManager();
+
+  input_method::InputMethodDescriptors descriptors;
+  manager->GetInputMethodExtensions(&descriptors);
+
+  ListValue* extension_ime_ids_list = new ListValue();
+
+  for (size_t i = 0; i < descriptors.size(); ++i) {
+    const input_method::InputMethodDescriptor& descriptor = descriptors[i];
+    DictionaryValue* dictionary = new DictionaryValue();
+    dictionary->SetString("id", descriptor.id());
+    dictionary->SetString("displayName", descriptor.name());
+    extension_ime_ids_list->Append(dictionary);
+  }
+
+  return extension_ime_ids_list;
+}
+
 string16 CrosLanguageOptionsHandler::GetProductName() {
-  return l10n_util::GetStringUTF16(IDS_PRODUCT_OS_NAME);
+  return l10n_util::GetStringUTF16(IDS_SHORT_PRODUCT_OS_NAME);
 }
 
 void CrosLanguageOptionsHandler::SetApplicationLocale(
@@ -211,11 +245,7 @@ void CrosLanguageOptionsHandler::SetApplicationLocale(
 
 void CrosLanguageOptionsHandler::RestartCallback(const ListValue* args) {
   content::RecordAction(UserMetricsAction("LanguageOptions_SignOut"));
-
-  Browser* browser = Browser::GetBrowserForController(
-      &web_ui()->GetWebContents()->GetController(), NULL);
-  if (browser)
-    browser->ExecuteCommand(IDC_EXIT);
+  browser::AttemptUserExit();
 }
 
 void CrosLanguageOptionsHandler::InputMethodDisableCallback(
@@ -242,4 +272,5 @@ void CrosLanguageOptionsHandler::InputMethodOptionsOpenCallback(
   content::RecordComputedAction(action);
 }
 
-} // namespace chromeos
+}  // namespace options
+}  // namespace chromeos

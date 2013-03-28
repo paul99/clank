@@ -1,4 +1,4 @@
-// Copyright (c) 2010 The Chromium Authors. All rights reserved.
+// Copyright (c) 2012 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -27,9 +27,6 @@ inline int vsnprintfT(char* buffer,
 }
 
 #if !defined(OS_ANDROID)
-// The Bionic libc does not support wide characters, so none of the wchar
-// functions in this file work. We remove them because link errors are easier to
-// spot than runtime failures.
 inline int vsnprintfT(wchar_t* buffer,
                       size_t buf_size,
                       const wchar_t* format,

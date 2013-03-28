@@ -1,4 +1,4 @@
-// Copyright (c) 2011 The Chromium Authors. All rights reserved.
+// Copyright (c) 2012 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -13,7 +13,6 @@
 
 #ifndef CHROME_BROWSER_EXTENSIONS_EXTENSIONS_QUOTA_SERVICE_H_
 #define CHROME_BROWSER_EXTENSIONS_EXTENSIONS_QUOTA_SERVICE_H_
-#pragma once
 
 #include <list>
 #include <map>
@@ -22,6 +21,7 @@
 #include "base/compiler_specific.h"
 #include "base/hash_tables.h"
 #include "base/memory/scoped_ptr.h"
+#include "base/threading/non_thread_safe.h"
 #include "base/time.h"
 #include "base/timer.h"
 #include "base/values.h"
@@ -30,7 +30,17 @@ class ExtensionFunction;
 class QuotaLimitHeuristic;
 typedef std::list<QuotaLimitHeuristic*> QuotaLimitHeuristics;
 
-class ExtensionsQuotaService {
+namespace extensions {
+class TestResetQuotaFunction;
+}
+
+// The ExtensionsQuotaService takes care that calls to certain extension
+// functions do not exceed predefined quotas.
+//
+// The ExtensionsQuotaService needs to live entirely on one thread, i.e.
+// be created, called and destroyed on the same thread, due to its use
+// of a RepeatingTimer.
+class ExtensionsQuotaService : public base::NonThreadSafe {
  public:
   // Some concrete heuristics (declared below) that ExtensionFunctions can
   // use to help the service make decisions about quota violations.
@@ -38,24 +48,30 @@ class ExtensionsQuotaService {
   class SustainedLimit;
 
   ExtensionsQuotaService();
-  ~ExtensionsQuotaService();
+  virtual ~ExtensionsQuotaService();
 
   // Decide whether the invocation of |function| with argument |args| by the
   // extension specified by |extension_id| results in a quota limit violation.
-  // Returns true if the request is fine and can proceed, false if the request
-  // should be throttled and an error returned to the extension.
-  bool Assess(const std::string& extension_id, ExtensionFunction* function,
-              const ListValue* args, const base::TimeTicks& event_time);
- private:
-  friend class ExtensionTestQuotaResetFunction;
-  typedef std::map<std::string, QuotaLimitHeuristics> FunctionHeuristicsMap;
+  // Returns an error message representing the failure if quota was exceeded,
+  // or empty-string if the request is fine and can proceed.
+  std::string Assess(const std::string& extension_id,
+                     ExtensionFunction* function,
+                     const ListValue* args,
+                     const base::TimeTicks& event_time);
 
-  // Purge resets all accumulated data (except |violators_|) as if the service
-  // was just created. Called periodically so we don't consume an unbounded
-  // amount of memory while tracking quota.  Yes, this could mean an extension
-  // gets away with murder if it is timed right, but the extensions we are
-  // trying to limit are ones that consistently violate, so we'll converge
-  // to the correct set.
+ private:
+  friend class extensions::TestResetQuotaFunction;
+  typedef std::string ExtensionId;
+  typedef std::string FunctionName;
+  // All QuotaLimitHeuristic instances in this map are owned by us.
+  typedef std::map<FunctionName, QuotaLimitHeuristics> FunctionHeuristicsMap;
+
+  // Purge resets all accumulated data (except |violation_errors_|) as if the
+  // service was just created. Called periodically so we don't consume an
+  // unbounded amount of memory while tracking quota.  Yes, this could mean an
+  // extension gets away with murder if it is timed right, but the extensions
+  // we are trying to limit are ones that consistently violate, so we'll
+  // converge to the correct set.
   void Purge();
   void PurgeFunctionHeuristicsMap(FunctionHeuristicsMap* map);
   base::RepeatingTimer<ExtensionsQuotaService> purge_timer_;
@@ -65,12 +81,13 @@ class ExtensionsQuotaService {
   // key for the mapping.  As an extension invokes functions, the map keeps
   // track of which functions it has invoked and the heuristics for each one.
   // Each heuristic will be evaluated and ANDed together to get a final answer.
-  std::map<std::string, FunctionHeuristicsMap> function_heuristics_;
+  std::map<ExtensionId, FunctionHeuristicsMap> function_heuristics_;
 
   // For now, as soon as an extension violates quota, we don't allow it to
   // make any more requests to quota limited functions.  This provides a quick
   // lookup for these extensions that is only stored in memory.
-  base::hash_set<std::string> violators_;
+  typedef std::map<std::string, std::string> ViolationErrorMap;
+  ViolationErrorMap violation_errors_;
 
   DISALLOW_COPY_AND_ASSIGN(ExtensionsQuotaService);
 };
@@ -124,9 +141,6 @@ class QuotaLimitHeuristic {
   };
   typedef std::list<Bucket*> BucketList;
 
-  // A generic error message for quota violating requests.
-  static const char kGenericOverQuotaError[];
-
   // A helper interface to retrieve the bucket corresponding to |args| from
   // the set of buckets (which is typically stored in the BucketMapper itself)
   // for this QuotaLimitHeuristic.
@@ -156,8 +170,10 @@ class QuotaLimitHeuristic {
     DISALLOW_COPY_AND_ASSIGN(SingletonBucketMapper);
   };
 
-  // Ownership of |mapper| is given to the new QuotaLimitHeuristic.
-  QuotaLimitHeuristic(const Config& config, BucketMapper* map);
+  // Ownership of |map| is given to the new QuotaLimitHeuristic.
+  QuotaLimitHeuristic(const Config& config,
+                      BucketMapper* map,
+                      const std::string& name);
   virtual ~QuotaLimitHeuristic();
 
   // Determines if sufficient quota exists (according to the Apply
@@ -165,6 +181,9 @@ class QuotaLimitHeuristic {
   // based on the history of similar operations with similar arguments (which
   // is retrieved using the BucketMapper).
   bool ApplyToArgs(const ListValue* args, const base::TimeTicks& event_time);
+
+  // Returns an error formatted according to this heuristic.
+  std::string GetError() const;
 
  protected:
   const Config& config() { return config_; }
@@ -178,8 +197,11 @@ class QuotaLimitHeuristic {
 
   const Config config_;
 
-  // The mapper used in Map.  Cannot be NULL.
+  // The mapper used in Map. Cannot be NULL.
   scoped_ptr<BucketMapper> bucket_mapper_;
+
+  // The name of the heuristic for formatting error messages.
+  std::string name_;
 
   DISALLOW_COPY_AND_ASSIGN(QuotaLimitHeuristic);
 };
@@ -188,8 +210,8 @@ class QuotaLimitHeuristic {
 // a given period of time; e.g "no more than 100 events in an hour".
 class ExtensionsQuotaService::TimedLimit : public QuotaLimitHeuristic {
  public:
-  TimedLimit(const Config& config, BucketMapper* map)
-      : QuotaLimitHeuristic(config, map) {}
+  TimedLimit(const Config& config, BucketMapper* map, const std::string& name)
+      : QuotaLimitHeuristic(config, map, name) {}
   virtual bool Apply(Bucket* bucket,
                      const base::TimeTicks& event_time) OVERRIDE;
 };
@@ -201,7 +223,8 @@ class ExtensionsQuotaService::SustainedLimit : public QuotaLimitHeuristic {
  public:
   SustainedLimit(const base::TimeDelta& sustain,
                  const Config& config,
-                 BucketMapper* map);
+                 BucketMapper* map,
+                 const std::string& name);
   virtual bool Apply(Bucket* bucket,
                      const base::TimeTicks& event_time) OVERRIDE;
  private:

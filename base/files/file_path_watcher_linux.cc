@@ -17,7 +17,6 @@
 #include <vector>
 
 #include "base/bind.h"
-#include "base/eintr_wrapper.h"
 #include "base/file_path.h"
 #include "base/file_util.h"
 #include "base/hash_tables.h"
@@ -27,6 +26,7 @@
 #include "base/memory/scoped_ptr.h"
 #include "base/message_loop.h"
 #include "base/message_loop_proxy.h"
+#include "base/posix/eintr_wrapper.h"
 #include "base/synchronization/lock.h"
 #include "base/threading/thread.h"
 
@@ -92,16 +92,15 @@ class FilePathWatcherImpl : public FilePathWatcher::PlatformDelegate,
   // Called for each event coming from the watch. |fired_watch| identifies the
   // watch that fired, |child| indicates what has changed, and is relative to
   // the currently watched path for |fired_watch|. The flag |created| is true if
-  // the object appears, and |is_directory| is set when the event refers to a
-  // directory.
+  // the object appears.
   void OnFilePathChanged(InotifyReader::Watch fired_watch,
                          const FilePath::StringType& child,
-                         bool created,
-                         bool is_directory);
+                         bool created);
 
   // Start watching |path| for changes and notify |delegate| on each change.
   // Returns true if watch for |path| has been added successfully.
   virtual bool Watch(const FilePath& path,
+                     bool recursive,
                      FilePathWatcher::Delegate* delegate) OVERRIDE;
 
   // Cancel the watch. This unregisters the instance with InotifyReader.
@@ -112,11 +111,12 @@ class FilePathWatcherImpl : public FilePathWatcher::PlatformDelegate,
   // cleanup thread, in case it quits before Cancel() is called.
   virtual void WillDestroyCurrentMessageLoop() OVERRIDE;
 
- private:
+ protected:
   virtual ~FilePathWatcherImpl() {}
 
+ private:
   // Cleans up and stops observing the |message_loop_| thread.
-  void CancelOnMessageLoopThread() OVERRIDE;
+  virtual void CancelOnMessageLoopThread() OVERRIDE;
 
   // Inotify watches are installed for all directory components of |target_|. A
   // WatchEntry instance holds the watch descriptor for a component and the
@@ -208,7 +208,7 @@ void InotifyReaderCallback(InotifyReader* reader, int inotify_fd,
   }
 }
 
-static base::LazyInstance<InotifyReader> g_inotify_reader =
+static base::LazyInstance<InotifyReader>::Leaky g_inotify_reader =
     LAZY_INSTANCE_INITIALIZER;
 
 InotifyReader::InotifyReader()
@@ -291,8 +291,7 @@ void InotifyReader::OnInotifyEvent(const inotify_event* event) {
        ++watcher) {
     (*watcher)->OnFilePathChanged(event->wd,
                                   child,
-                                  event->mask & (IN_CREATE | IN_MOVED_TO),
-                                  event->mask & IN_ISDIR);
+                                  event->mask & (IN_CREATE | IN_MOVED_TO));
   }
 }
 
@@ -300,12 +299,9 @@ FilePathWatcherImpl::FilePathWatcherImpl()
     : delegate_(NULL) {
 }
 
-void FilePathWatcherImpl::OnFilePathChanged(
-    InotifyReader::Watch fired_watch,
-    const FilePath::StringType& child,
-    bool created,
-    bool is_directory) {
-
+void FilePathWatcherImpl::OnFilePathChanged(InotifyReader::Watch fired_watch,
+                                            const FilePath::StringType& child,
+                                            bool created) {
   if (!message_loop()->BelongsToCurrentThread()) {
     // Switch to message_loop_ to access watches_ safely.
     message_loop()->PostTask(FROM_HERE,
@@ -313,8 +309,7 @@ void FilePathWatcherImpl::OnFilePathChanged(
                    this,
                    fired_watch,
                    child,
-                   created,
-                   is_directory));
+                   created));
     return;
   }
 
@@ -339,9 +334,10 @@ void FilePathWatcherImpl::OnFilePathChanged(
 
       // Update watches if a directory component of the |target_| path
       // (dis)appears. Note that we don't add the additional restriction
-      // of checking is_directory here as changes to symlinks on the
-      // target path will not have is_directory set but as a result we
-      // may sometimes call UpdateWatches unnecessarily.
+      // of checking the event mask to see if it is for a directory here
+      // as changes to symlinks on the target path will not have
+      // IN_ISDIR set in the event masks. As a result we may sometimes
+      // call UpdateWatches() unnecessarily.
       if (change_on_target_path && !UpdateWatches()) {
         delegate_->OnFilePathError(target_);
         return;
@@ -363,13 +359,18 @@ void FilePathWatcherImpl::OnFilePathChanged(
       }
     }
   }
-
 }
 
 bool FilePathWatcherImpl::Watch(const FilePath& path,
+                                bool recursive,
                                 FilePathWatcher::Delegate* delegate) {
   DCHECK(target_.empty());
   DCHECK(MessageLoopForIO::current());
+  if (recursive) {
+    // Recursive watch is not supported on this platform.
+    NOTIMPLEMENTED();
+    return false;
+  }
 
   set_message_loop(base::MessageLoopProxy::current());
   delegate_ = delegate;
@@ -379,10 +380,10 @@ bool FilePathWatcherImpl::Watch(const FilePath& path,
   std::vector<FilePath::StringType> comps;
   target_.GetComponents(&comps);
   DCHECK(!comps.empty());
-  for (std::vector<FilePath::StringType>::const_iterator comp =
-           comps.begin() + 1; comp != comps.end(); ++comp) {
+  std::vector<FilePath::StringType>::const_iterator comp = comps.begin();
+  for (++comp; comp != comps.end(); ++comp)
     watches_.push_back(WatchEntry(InotifyReader::kInvalidWatch, *comp));
-  }
+
   watches_.push_back(WatchEntry(InotifyReader::kInvalidWatch,
                                 FilePath::StringType()));
   return UpdateWatches();
@@ -428,7 +429,7 @@ void FilePathWatcherImpl::WillDestroyCurrentMessageLoop() {
 }
 
 bool FilePathWatcherImpl::UpdateWatches() {
-  // Ensure this runs on the message_loop_ exclusively in order to avoid
+  // Ensure this runs on the |message_loop_| exclusively in order to avoid
   // concurrency issues.
   DCHECK(message_loop()->BelongsToCurrentThread());
 
@@ -443,23 +444,24 @@ bool FilePathWatcherImpl::UpdateWatches() {
       if ((watch_entry->watch_ == InotifyReader::kInvalidWatch) &&
           file_util::IsLink(path)) {
         FilePath link;
-        file_util::ReadSymbolicLink(path, &link);
-        if (!link.IsAbsolute())
-          link = path.DirName().Append(link);
-        // Try watching symlink target directory. If the link target is "/",
-        // then we shouldn't get here in normal situations and if we do, we'd
-        // watch "/" for changes to a component "/" which is harmless so no
-        // special treatment of this case is required.
-        watch_entry->watch_ =
-            g_inotify_reader.Get().AddWatch(link.DirName(), this);
-        if (watch_entry->watch_ != InotifyReader::kInvalidWatch) {
-          watch_entry->linkname_ = link.BaseName().value();
-        } else {
-          DPLOG(WARNING) << "Watch failed for "  << link.DirName().value();
-          // TODO(craig) Symlinks only work if the parent directory
-          // for the target exist. Ideally we should make sure we've
-          // watched all the components of the symlink path for
-          // changes. See crbug.com/91561 for details.
+        if (file_util::ReadSymbolicLink(path, &link)) {
+          if (!link.IsAbsolute())
+            link = path.DirName().Append(link);
+          // Try watching symlink target directory. If the link target is "/",
+          // then we shouldn't get here in normal situations and if we do, we'd
+          // watch "/" for changes to a component "/" which is harmless so no
+          // special treatment of this case is required.
+          watch_entry->watch_ =
+              g_inotify_reader.Get().AddWatch(link.DirName(), this);
+          if (watch_entry->watch_ != InotifyReader::kInvalidWatch) {
+            watch_entry->linkname_ = link.BaseName().value();
+          } else {
+            DPLOG(WARNING) << "Watch failed for "  << link.DirName().value();
+            // TODO(craig) Symlinks only work if the parent directory
+            // for the target exist. Ideally we should make sure we've
+            // watched all the components of the symlink path for
+            // changes. See crbug.com/91561 for details.
+          }
         }
       }
       if (watch_entry->watch_ == InotifyReader::kInvalidWatch) {

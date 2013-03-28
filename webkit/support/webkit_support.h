@@ -9,9 +9,13 @@
 
 #include "base/basictypes.h"
 #include "base/string16.h"
-#include "third_party/WebKit/Source/WebKit/chromium/public/WebDevToolsAgentClient.h"
+#include "third_party/WebKit/Source/Platform/chromium/public/Platform.h"
+#include "third_party/WebKit/Source/Platform/chromium/public/WebReferrerPolicy.h"
 #include "third_party/WebKit/Source/WebKit/chromium/public/platform/WebFileSystem.h"
 #include "third_party/WebKit/Source/WebKit/chromium/public/platform/WebGraphicsContext3D.h"
+#include "third_party/WebKit/Source/WebKit/chromium/public/platform/WebURLRequest.h"
+#include "third_party/WebKit/Source/WebKit/chromium/public/platform/WebVector.h"
+#include "third_party/WebKit/Source/WebKit/chromium/public/WebDevToolsAgentClient.h"
 #include "ui/base/keycodes/keyboard_codes.h"
 
 namespace WebKit {
@@ -24,11 +28,12 @@ class WebKitPlatformSupport;
 class WebMediaPlayer;
 class WebMediaPlayerClient;
 class WebPlugin;
+class WebStorageNamespace;
 class WebString;
 class WebThemeEngine;
 class WebURL;
-class WebURLRequest;
 class WebURLResponse;
+class WebView;
 struct WebPluginParams;
 struct WebURLError;
 }
@@ -56,6 +61,9 @@ namespace webkit_support {
 // initialized (as it is already done by the TestSuite).
 void SetUpTestEnvironment();
 void SetUpTestEnvironmentForUnitTests();
+void SetUpTestEnvironment(WebKit::Platform* shadow_platform_delegate);
+void SetUpTestEnvironmentForUnitTests(
+    WebKit::Platform* shadow_platform_delegate);
 void TearDownTestEnvironment();
 
 // Returns a pointer to a WebKitPlatformSupport implementation for
@@ -70,17 +78,26 @@ WebKit::WebPlugin* CreateWebPlugin(WebKit::WebFrame* frame,
 // This is used by WebFrameClient::createMediaPlayer().
 WebKit::WebMediaPlayer* CreateMediaPlayer(
     WebKit::WebFrame* frame,
+    const WebKit::WebURL& url,
     WebKit::WebMediaPlayerClient* client,
     webkit_media::MediaStreamClient* media_stream_client);
 
 // This is used by WebFrameClient::createMediaPlayer().
 WebKit::WebMediaPlayer* CreateMediaPlayer(
     WebKit::WebFrame* frame,
+    const WebKit::WebURL& url,
     WebKit::WebMediaPlayerClient* client);
+
+#if defined(OS_ANDROID)
+void ReleaseMediaResources();
+#endif
 
 // This is used by WebFrameClient::createApplicationCacheHost().
 WebKit::WebApplicationCacheHost* CreateApplicationCacheHost(
     WebKit::WebFrame* frame, WebKit::WebApplicationCacheHostClient* client);
+
+// This is used by WebViewHost::createSessionStorageNamespace().
+WebKit::WebStorageNamespace* CreateSessionStorageNamespace(unsigned quota);
 
 // Returns the root directory of the WebKit code.
 WebKit::WebString GetWebKitRootDir();
@@ -101,8 +118,7 @@ GraphicsContext3DImplementation GetGraphicsContext3DImplementation();
 
 WebKit::WebGraphicsContext3D* CreateGraphicsContext3D(
     const WebKit::WebGraphicsContext3D::Attributes& attributes,
-    WebKit::WebView* web_view,
-    bool direct);
+    WebKit::WebView* web_view);
 
 // ------- URL load mocking.
 // Registers the file at |file_path| to be served when |url| is requested.
@@ -111,6 +127,11 @@ void RegisterMockedURL(const WebKit::WebURL& url,
                        const WebKit::WebURLResponse& response,
                        const WebKit::WebString& file_path);
 
+// Registers the error to be returned when |url| is requested.
+void RegisterMockedErrorURL(const WebKit::WebURL& url,
+                            const WebKit::WebURLResponse& response,
+                            const WebKit::WebURLError& error);
+
 // Unregisters URLs so they are no longer mocked.
 void UnregisterMockedURL(const WebKit::WebURL& url);
 void UnregisterAllMockedURLs();
@@ -118,6 +139,9 @@ void UnregisterAllMockedURLs();
 // Causes all pending asynchronous requests to be served.  When this method
 // returns all the pending requests have been processed.
 void ServeAsynchronousMockedRequests();
+
+// Returns the last request that handled by |ServeAsynchronousMockedRequests()|.
+WebKit::WebURLRequest GetLastHandledAsynchronousMockedRequest();
 
 // Wrappers to minimize dependecy.
 
@@ -138,6 +162,7 @@ class TaskAdaptor {
 
 void RunMessageLoop();
 void QuitMessageLoop();
+void QuitMessageLoopNow();
 void RunAllPendingMessages();
 void DispatchMessageLoop();
 bool MessageLoopNestableTasksAllowed();
@@ -189,6 +214,9 @@ std::string EscapePath(const std::string& path);
 std::string MakeURLErrorDescription(const WebKit::WebURLError& error);
 // Creates WebURLError for an aborted request.
 WebKit::WebURLError CreateCancelledError(const WebKit::WebURLRequest& request);
+// Create "extra data" for a ResourceRequest required by Chrome's network stack.
+WebKit::WebURLRequest::ExtraData* CreateWebURLRequestExtraData(
+    WebKit::WebReferrerPolicy referrer_policy);
 
 // - Database
 void SetDatabaseQuota(int quota);
@@ -207,8 +235,18 @@ WebKit::WebThemeEngine* GetThemeEngine();
 WebKit::WebURL GetDevToolsPathAsURL();
 
 // - FileSystem
-void OpenFileSystem(WebKit::WebFrame* frame, WebKit::WebFileSystem::Type type,
-    long long size, bool create, WebKit::WebFileSystemCallbacks* callbacks);
+void OpenFileSystem(WebKit::WebFrame* frame,
+                    WebKit::WebFileSystem::Type type,
+                    long long size,
+                    bool create,
+                    WebKit::WebFileSystemCallbacks* callbacks);
+void DeleteFileSystem(WebKit::WebFrame* frame,
+                      WebKit::WebFileSystem::Type type,
+                      WebKit::WebFileSystemCallbacks* callbacks);
+
+// Returns a filesystem ID for the newly created isolated filesystem.
+WebKit::WebString RegisterIsolatedFileSystem(
+    const WebKit::WebVector<WebKit::WebString>& filenames);
 
 // -------- Keyboard code
 enum {
@@ -227,7 +265,7 @@ enum {
     VKEY_F1 = ui::VKEY_F1,
 };
 
-#if defined(TOOLKIT_USES_GTK)
+#if defined(TOOLKIT_GTK)
 int NativeKeyCodeForWindowsKeyCode(int keycode, bool shift);
 #endif
 

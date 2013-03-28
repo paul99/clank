@@ -1,10 +1,9 @@
-// Copyright (c) 2011 The Chromium Authors. All rights reserved.
+// Copyright (c) 2012 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
 #ifndef UI_VIEWS_PAINTER_H_
 #define UI_VIEWS_PAINTER_H_
-#pragma once
 
 #include "base/basictypes.h"
 #include "base/compiler_specific.h"
@@ -13,9 +12,16 @@
 
 namespace gfx {
 class Canvas;
+class ImageSkia;
 class Insets;
+class Rect;
+class Size;
 }
-class SkBitmap;
+
+// A macro to define arrays of IDR constants used with CreateImageGridPainter.
+#define IMAGE_GRID(x) { x ## _TOP_LEFT,    x ## _TOP,    x ## _TOP_RIGHT, \
+                        x ## _LEFT,        x ## _CENTER, x ## _RIGHT, \
+                        x ## _BOTTOM_LEFT, x ## _BOTTOM, x ## _BOTTOM_RIGHT, }
 
 namespace views {
 
@@ -26,27 +32,41 @@ class VIEWS_EXPORT Painter {
  public:
   // A convenience method for painting a Painter in a particular region.
   // This translates the canvas to x/y and paints the painter.
-  static void PaintPainterAt(int x, int y, int w, int h,
-                             gfx::Canvas* canvas, Painter* painter);
+  static void PaintPainterAt(gfx::Canvas* canvas,
+                             Painter* painter,
+                             const gfx::Rect& rect);
 
   // Creates a painter that draws a gradient between the two colors.
   static Painter* CreateHorizontalGradient(SkColor c1, SkColor c2);
   static Painter* CreateVerticalGradient(SkColor c1, SkColor c2);
 
+  // Creates a painter that draws a multi-color gradient. |colors| contains the
+  // gradient colors and |pos| the relative positions of the colors. The first
+  // element in |pos| must be 0.0 and the last element 1.0. |count| contains
+  // the number of elements in |colors| and |pos|.
+  static Painter* CreateVerticalMultiColorGradient(SkColor* colors,
+                                                   SkScalar* pos,
+                                                   size_t count);
+
   // Creates a painter that divides |image| into nine regions. The four corners
-  // are rendered at the size specified in insets (for example, the upper
-  // left corners is rendered at 0x0 with a size of
-  // insets.left()xinsets.right()). The four edges are stretched to fill the
-  // destination size.
-  // Ownership is passed to the caller.
-  static Painter* CreateImagePainter(const SkBitmap& image,
-                                     const gfx::Insets& insets,
-                                     bool paint_center);
+  // are rendered at the size specified in insets (eg. the upper-left corner is
+  // rendered at 0 x 0 with a size of insets.left() x insets.top()). The four
+  // edges are tiled and the center is stretched to fill the destination size.
+  static Painter* CreateImagePainter(const gfx::ImageSkia& image,
+                                     const gfx::Insets& insets);
+
+  // Creates a painter that paints nine images as a scalable grid. The four
+  // corners are rendered in their full sizes (they are assumed to share widths
+  // by column and heights by row). The four edges are tiled and the center is
+  // stretched to fill the destination size.
+  // |image_ids| must contain nine image IDs specified in this order: Top-Left,
+  // Top, Top-Right, Left, Center, Right, Bottom-Left, Bottom, Bottom-Right.
+  static Painter* CreateImageGridPainter(const int image_ids[]);
 
   virtual ~Painter() {}
 
   // Paints the painter in the specified region.
-  virtual void Paint(int w, int h, gfx::Canvas* canvas) = 0;
+  virtual void Paint(gfx::Canvas* canvas, const gfx::Size& size) = 0;
 };
 
 // HorizontalPainter paints 3 images into a box: left, center and right. The
@@ -62,7 +82,7 @@ class VIEWS_EXPORT HorizontalPainter : public Painter {
   virtual ~HorizontalPainter() {}
 
   // Paints the images.
-  virtual void Paint(int w, int h, gfx::Canvas* canvas) OVERRIDE;
+  virtual void Paint(gfx::Canvas* canvas, const gfx::Size& size) OVERRIDE;
 
   // Height of the images.
   int height() const { return height_; }
@@ -78,7 +98,7 @@ class VIEWS_EXPORT HorizontalPainter : public Painter {
   // The height.
   int height_;
   // NOTE: the images are owned by ResourceBundle. Don't free them.
-  SkBitmap* images_[3];
+  const gfx::ImageSkia* images_[3];
 
   DISALLOW_COPY_AND_ASSIGN(HorizontalPainter);
 };

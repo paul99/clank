@@ -4,17 +4,12 @@
 
 #include "chrome/browser/printing/print_job_manager.h"
 
-#include "chrome/browser/prefs/pref_service.h"
 #include "chrome/browser/printing/print_job.h"
 #include "chrome/browser/printing/printer_query.h"
 #include "chrome/common/chrome_notification_types.h"
-#include "chrome/common/pref_names.h"
-#include "content/public/browser/browser_thread.h"
 #include "content/public/browser/notification_service.h"
 #include "printing/printed_document.h"
 #include "printing/printed_page.h"
-
-using content::BrowserThread;
 
 namespace printing {
 
@@ -28,43 +23,28 @@ PrintJobManager::~PrintJobManager() {
   queued_queries_.clear();
 }
 
-void PrintJobManager::InitOnUIThread(PrefService* prefs) {
-  DCHECK(BrowserThread::CurrentlyOn(BrowserThread::UI));
-  printing_enabled_.Init(prefs::kPrintingEnabled, prefs, NULL);
-  printing_enabled_.MoveToThread(BrowserThread::IO);
-}
-
 void PrintJobManager::OnQuit() {
-#if defined(OS_MACOSX)
-  // OnQuit is too late to try to wait for jobs on the Mac, since the runloop
-  // has already been torn down; instead, StopJobs(true) is called earlier in
-  // the shutdown process, and this is just here in case something sneaks
-  // in after that.
-  StopJobs(false);
-#else
   StopJobs(true);
-#endif
   registrar_.RemoveAll();
 }
 
 void PrintJobManager::StopJobs(bool wait_for_finish) {
-  if (current_jobs_.empty())
-    return;
-  {
-    // Copy the array since it can be modified in transit.
-    PrintJobs current_jobs(current_jobs_);
-    // Wait for each job to finish.
-    for (size_t i = 0; i < current_jobs.size(); ++i) {
-      PrintJob* job = current_jobs[i];
-      if (!job)
-        continue;
-      // Wait for 120 seconds for the print job to be spooled.
-      if (wait_for_finish)
-        job->FlushJob(120000);
-      job->Stop();
-    }
+  // Copy the array since it can be modified in transit.
+  PrintJobs to_stop;
+  to_stop.swap(current_jobs_);
+
+  for (PrintJobs::const_iterator job = to_stop.begin(); job != to_stop.end();
+       ++job) {
+    // Wait for two minutes for the print job to be spooled.
+    if (wait_for_finish)
+      (*job)->FlushJob(base::TimeDelta::FromMinutes(2));
+    (*job)->Stop();
   }
-  current_jobs_.clear();
+}
+
+void PrintJobManager::SetPrintDestination(
+    PrintDestinationInterface* destination) {
+  destination_ = destination;
 }
 
 void PrintJobManager::QueuePrinterQuery(PrinterQuery* job) {
@@ -91,11 +71,6 @@ void PrintJobManager::PopPrinterQuery(int document_cookie,
   }
 }
 
-// static
-void PrintJobManager::RegisterPrefs(PrefService* prefs) {
-  prefs->RegisterBooleanPref(prefs::kPrintingEnabled, true);
-}
-
 void PrintJobManager::Observe(int type,
                               const content::NotificationSource& source,
                               const content::NotificationDetails& details) {
@@ -117,36 +92,18 @@ void PrintJobManager::OnPrintJobEvent(
     const JobEventDetails& event_details) {
   switch (event_details.type()) {
     case JobEventDetails::NEW_DOC: {
-      DCHECK(current_jobs_.end() == std::find(current_jobs_.begin(),
-                                              current_jobs_.end(),
-                                              print_job));
+      DCHECK(current_jobs_.end() == current_jobs_.find(print_job));
       // Causes a AddRef().
-      current_jobs_.push_back(make_scoped_refptr(print_job));
+      current_jobs_.insert(print_job);
       break;
     }
     case JobEventDetails::JOB_DONE: {
-      PrintJobs::iterator itr = std::find(current_jobs_.begin(),
-                                          current_jobs_.end(),
-                                          print_job);
-      DCHECK(current_jobs_.end() != itr);
-      current_jobs_.erase(itr);
-      DCHECK(current_jobs_.end() == std::find(current_jobs_.begin(),
-                                              current_jobs_.end(),
-                                              print_job));
+      DCHECK(current_jobs_.end() != current_jobs_.find(print_job));
+      current_jobs_.erase(print_job);
       break;
     }
     case JobEventDetails::FAILED: {
-      PrintJobs::iterator itr = std::find(current_jobs_.begin(),
-                                          current_jobs_.end(),
-                                          print_job);
-      // A failed job may have never started.
-      if (current_jobs_.end() != itr) {
-        current_jobs_.erase(itr);
-        DCHECK(current_jobs_.end() ==
-                  std::find(current_jobs_.begin(),
-                            current_jobs_.end(),
-                            print_job));
-      }
+      current_jobs_.erase(print_job);
       break;
     }
     case JobEventDetails::USER_INIT_DONE:
@@ -164,10 +121,6 @@ void PrintJobManager::OnPrintJobEvent(
       break;
     }
   }
-}
-
-bool PrintJobManager::printing_enabled() const {
-  return *printing_enabled_;
 }
 
 }  // namespace printing

@@ -28,7 +28,6 @@
 // OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 
 #import <fcntl.h>
-#import <pwd.h>
 #import <sys/stat.h>
 #include <TargetConditionals.h>
 #import <unistd.h>
@@ -41,7 +40,7 @@
 #import "client/mac/sender/uploader.h"
 #import "common/mac/GTMLogger.h"
 
-const int kMinidumpFileLengthLimit = 800000;
+const int kMinidumpFileLengthLimit = 2 * 1024 * 1024;  // 2MB
 
 #define kApplePrefsSyncExcludeAllKey \
   @"com.apple.PreferenceSync.ExcludeAllSyncKeys"
@@ -251,7 +250,7 @@ NSDictionary *readConfigurationData(const char *configFile) {
   long clientId1 = random();
   long clientId2 = random();
   long clientId3 = random();
-  crashClientID = [NSString stringWithFormat:@"%x%x%x",
+  crashClientID = [NSString stringWithFormat:@"%lx%lx%lx",
                             clientId1, clientId2, clientId3];
 
   [ud setObject:crashClientID forKey:kClientIdPreferenceKey];
@@ -418,6 +417,7 @@ NSDictionary *readConfigurationData(const char *configFile) {
   [googleDictionary_ setObject:@"comments" forKey:@BREAKPAD_COMMENTS];
   [googleDictionary_ setObject:@"prod" forKey:@BREAKPAD_PRODUCT];
   [googleDictionary_ setObject:@"ver" forKey:@BREAKPAD_VERSION];
+  [googleDictionary_ setObject:@"guid" forKey:@"guid"];
 
   [socorroDictionary_ setObject:@"Comments" forKey:@BREAKPAD_COMMENTS];
   [socorroDictionary_ setObject:@"CrashTime"
@@ -503,6 +503,11 @@ NSDictionary *readConfigurationData(const char *configFile) {
   if (minidumpContents_) {
     [upload addFileContents:minidumpContents_ name:@"upload_file_minidump"];
 
+    // If there is a log file, upload it together with the minidump.
+    if (logFileData_) {
+      [upload addFileContents:logFileData_ name:@"log"];
+    }
+
     // Send it
     NSError *error = nil;
     NSData *data = [upload send:&error];
@@ -543,12 +548,12 @@ NSDictionary *readConfigurationData(const char *configFile) {
                      reportID );
     }
     [result release];
+  } else {
+    // Minidump is missing -- upload just the log file.
+    if (logFileData_) {
+      [self uploadData:logFileData_ name:@"log"];
+    }
   }
-
-  if (logFileData_) {
-    [self uploadData:logFileData_ name:@"log"];
-  }
-
   [upload release];
 }
 

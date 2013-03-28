@@ -1,12 +1,13 @@
-// Copyright (c) 2011 The Chromium Authors. All rights reserved.
+// Copyright (c) 2012 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
 #ifndef CHROME_BROWSER_UI_WEBUI_OPTIONS_LANGUAGE_OPTIONS_HANDLER_H_
 #define CHROME_BROWSER_UI_WEBUI_OPTIONS_LANGUAGE_OPTIONS_HANDLER_H_
-#pragma once
 
 #include "chrome/browser/ui/webui/options/language_options_handler_common.h"
+
+namespace options {
 
 // Language options UI page handler for non-Chrome OS platforms.  For Chrome OS,
 // see chromeos::CrosLanguageOptionsHandler.
@@ -40,5 +41,7 @@ class LanguageOptionsHandler : public LanguageOptionsHandlerCommon {
 
   DISALLOW_COPY_AND_ASSIGN(LanguageOptionsHandler);
 };
+
+}  // namespace options
 
 #endif  // CHROME_BROWSER_UI_WEBUI_OPTIONS_LANGUAGE_OPTIONS_HANDLER_H_

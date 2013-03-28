@@ -1,10 +1,9 @@
-// Copyright (c) 2011 The Chromium Authors. All rights reserved.
+// Copyright (c) 2012 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
 #ifndef CHROME_BROWSER_CHROMEOS_LOGIN_EULA_SCREEN_ACTOR_H_
 #define CHROME_BROWSER_CHROMEOS_LOGIN_EULA_SCREEN_ACTOR_H_
-#pragma once
 
 #include <string>
 
@@ -22,16 +21,13 @@ class EulaScreenActor {
    public:
     virtual ~Delegate() {}
 
-    // Returns true if TPM is enabled.
-    virtual bool IsTpmEnabled() const = 0;
-
     // Returns URL of the OEM EULA page that should be displayed using current
     // locale and manifest. Returns empty URL otherwise.
     virtual GURL GetOemEulaUrl() const = 0;
 
     // Called when screen is exited. |accepted| indicates if EULA was
     // accepted or not.
-    virtual void OnExit(bool accepted, bool is_usage_stats_checked) = 0;
+    virtual void OnExit(bool accepted, bool usage_stats_enabled) = 0;
 
     // Initiate TPM password fetch. Will call actor's OnPasswordFetched() when
     // done.

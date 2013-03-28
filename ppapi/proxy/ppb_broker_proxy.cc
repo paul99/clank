@@ -1,4 +1,4 @@
-// Copyright (c) 2011 The Chromium Authors. All rights reserved.
+// Copyright (c) 2012 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -33,7 +33,8 @@ class Broker : public PPB_Broker_API, public Resource {
   virtual PPB_Broker_API* AsPPB_Broker_API() OVERRIDE;
 
   // PPB_Broker_API implementation.
-  virtual int32_t Connect(PP_CompletionCallback connect_callback) OVERRIDE;
+  virtual int32_t Connect(
+      scoped_refptr<TrackedCallback> connect_callback) OVERRIDE;
   virtual int32_t GetHandle(int32_t* handle) OVERRIDE;
 
   // Called by the proxy when the host side has completed the request.
@@ -54,7 +55,7 @@ class Broker : public PPB_Broker_API, public Resource {
 };
 
 Broker::Broker(const HostResource& resource)
-    : Resource(resource),
+    : Resource(OBJECT_IS_PROXY, resource),
       called_connect_(false),
       socket_handle_(base::kInvalidPlatformFileValue) {
 }
@@ -67,18 +68,13 @@ PPB_Broker_API* Broker::AsPPB_Broker_API() {
   return this;
 }
 
-int32_t Broker::Connect(PP_CompletionCallback connect_callback) {
-  if (!connect_callback.func) {
-    // Synchronous calls are not supported.
-    return PP_ERROR_BLOCKS_MAIN_THREAD;
-  }
-
+int32_t Broker::Connect(scoped_refptr<TrackedCallback> connect_callback) {
   if (TrackedCallback::IsPending(current_connect_callback_))
     return PP_ERROR_INPROGRESS;
   else if (called_connect_)
     return PP_ERROR_FAILED;
 
-  current_connect_callback_ = new TrackedCallback(this, connect_callback);
+  current_connect_callback_ = connect_callback;
   called_connect_ = true;
 
   bool success = PluginDispatcher::GetForResource(this)->Send(
@@ -112,7 +108,7 @@ void Broker::ConnectComplete(IPC::PlatformFileForTransit socket_handle,
     return;
   }
 
-  TrackedCallback::ClearAndRun(&current_connect_callback_, result);
+  current_connect_callback_->Run(result);
 }
 
 PPB_Broker_Proxy::PPB_Broker_Proxy(Dispatcher* dispatcher)
@@ -151,6 +147,8 @@ bool PPB_Broker_Proxy::OnMessageReceived(const IPC::Message& msg) {
 
 void PPB_Broker_Proxy::OnMsgCreate(PP_Instance instance,
                                    HostResource* result_resource) {
+  if (!dispatcher()->permissions().HasPermission(PERMISSION_PRIVATE))
+    return;
   thunk::EnterResourceCreation enter(instance);
   if (enter.succeeded()) {
     result_resource->SetHostResource(
@@ -160,6 +158,8 @@ void PPB_Broker_Proxy::OnMsgCreate(PP_Instance instance,
 }
 
 void PPB_Broker_Proxy::OnMsgConnect(const HostResource& broker) {
+  if (!dispatcher()->permissions().HasPermission(PERMISSION_PRIVATE))
+    return;
   EnterHostFromHostResourceForceCallback<PPB_Broker_API> enter(
       broker, callback_factory_,
       &PPB_Broker_Proxy::ConnectCompleteInHost, broker);

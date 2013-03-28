@@ -4,7 +4,6 @@
 
 #ifndef UI_VIEWS_CONTROLS_SINGLE_SPLIT_VIEW_H_
 #define UI_VIEWS_CONTROLS_SINGLE_SPLIT_VIEW_H_
-#pragma once
 
 #include "base/gtest_prod_util.h"
 #include "ui/views/view.h"
@@ -42,7 +41,7 @@ class VIEWS_EXPORT SingleSplitView : public View {
   virtual gfx::Size GetPreferredSize() OVERRIDE;
 
   // Overriden to return a resize cursor when over the divider.
-  virtual gfx::NativeCursor GetCursor(const MouseEvent& event) OVERRIDE;
+  virtual gfx::NativeCursor GetCursor(const ui::MouseEvent& event) OVERRIDE;
 
   Orientation orientation() const {
     return is_horizontal_ ? HORIZONTAL_SPLIT : VERTICAL_SPLIT;
@@ -73,10 +72,16 @@ class VIEWS_EXPORT SingleSplitView : public View {
 
   void SetAccessibleName(const string16& name);
 
+  // This allows for a layout where another view is placed between the
+  // leading view and the separator. Calling this method will cause a layout
+  // invalidation, i.e., InvalidateLayou()t will be called if |offset| is
+  // different from the current value of |leading_bottom_offset_|.
+  void SetLeadingBottomOffset(int offset);
+
  protected:
   // View overrides.
-  virtual bool OnMousePressed(const MouseEvent& event) OVERRIDE;
-  virtual bool OnMouseDragged(const MouseEvent& event) OVERRIDE;
+  virtual bool OnMousePressed(const ui::MouseEvent& event) OVERRIDE;
+  virtual bool OnMouseDragged(const ui::MouseEvent& event) OVERRIDE;
   virtual void OnMouseCaptureLost() OVERRIDE;
   virtual void OnBoundsChanged(const gfx::Rect& previous_bounds) OVERRIDE;
 
@@ -129,6 +134,10 @@ class VIEWS_EXPORT SingleSplitView : public View {
 
   // The accessible name of this view.
   string16 accessible_name_;
+
+  // An offset to leave room between the bottom of the leading view bounds and
+  // the separator, if any, or the bottom of the splitview bounds otherwise.
+  int leading_bottom_offset_;
 
   DISALLOW_COPY_AND_ASSIGN(SingleSplitView);
 };

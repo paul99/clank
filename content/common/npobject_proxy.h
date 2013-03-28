@@ -1,4 +1,4 @@
-// Copyright (c) 2011 The Chromium Authors. All rights reserved.
+// Copyright (c) 2012 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 //
@@ -7,17 +7,19 @@
 
 #ifndef CONTENT_COMMON_NPOBJECT_PROXY_H_
 #define CONTENT_COMMON_NPOBJECT_PROXY_H_
-#pragma once
 
 #include "base/memory/ref_counted.h"
 #include "content/common/npobject_base.h"
 #include "googleurl/src/gurl.h"
-#include "ipc/ipc_channel.h"
+#include "ipc/ipc_listener.h"
+#include "ipc/ipc_sender.h"
 #include "third_party/npapi/bindings/npruntime.h"
 #include "ui/gfx/native_widget_types.h"
 
-class NPChannelBase;
 struct NPObject;
+
+namespace content {
+class NPChannelBase;
 
 // When running a plugin in a different process from the renderer, we need to
 // proxy calls to NPObjects across process boundaries.  This happens both ways,
@@ -27,18 +29,18 @@ struct NPObject;
 // channel (specifically, a NPChannelBase).  The NPObjectStub on the other
 // side translates the IPC messages into calls to the actual NPObject, and
 // returns the marshalled result.
-class NPObjectProxy : public IPC::Channel::Listener,
-                      public IPC::Message::Sender,
+class NPObjectProxy : public IPC::Listener,
+                      public IPC::Sender,
                       public NPObjectBase {
  public:
   virtual ~NPObjectProxy();
 
   static NPObject* Create(NPChannelBase* channel,
                           int route_id,
-                          gfx::NativeViewId containing_window,
+                          int render_view_id,
                           const GURL& page_url);
 
-  // IPC::Message::Sender implementation:
+  // IPC::Sender implementation:
   virtual bool Send(IPC::Message* msg) OVERRIDE;
   int route_id() { return route_id_; }
   NPChannelBase* channel() { return channel_; }
@@ -93,15 +95,15 @@ class NPObjectProxy : public IPC::Channel::Listener,
   // NPObjectBase implementation.
   virtual NPObject* GetUnderlyingNPObject() OVERRIDE;
 
-  virtual IPC::Channel::Listener* GetChannelListener() OVERRIDE;
+  virtual IPC::Listener* GetChannelListener() OVERRIDE;
 
  private:
   NPObjectProxy(NPChannelBase* channel,
                 int route_id,
-                gfx::NativeViewId containing_window,
+                int render_view_id,
                 const GURL& page_url);
 
-  // IPC::Channel::Listener implementation:
+  // IPC::Listener implementation:
   virtual bool OnMessageReceived(const IPC::Message& msg) OVERRIDE;
   virtual void OnChannelError() OVERRIDE;
 
@@ -114,10 +116,12 @@ class NPObjectProxy : public IPC::Channel::Listener,
 
   scoped_refptr<NPChannelBase> channel_;
   int route_id_;
-  gfx::NativeViewId containing_window_;
+  int render_view_id_;
 
   // The url of the main frame hosting the plugin.
   GURL page_url_;
 };
+
+}  // namespace content
 
 #endif  // CONTENT_COMMON_NPOBJECT_PROXY_H_

@@ -1,10 +1,9 @@
-// Copyright (c) 2010 The Chromium Authors. All rights reserved.
+// Copyright (c) 2012 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
 #ifndef BASE_DEBUG_LEAK_TRACKER_H_
 #define BASE_DEBUG_LEAK_TRACKER_H_
-#pragma once
 
 // Only enable leak tracking in debug builds.
 #ifndef NDEBUG
@@ -12,8 +11,8 @@
 #endif
 
 #ifdef ENABLE_LEAK_TRACKER
+#include "base/containers/linked_list.h"
 #include "base/debug/stack_trace.h"
-#include "base/linked_list.h"
 #include "base/logging.h"
 #endif  // ENABLE_LEAK_TRACKER
 
@@ -53,6 +52,7 @@ namespace debug {
 template<typename T>
 class LeakTracker {
  public:
+  ~LeakTracker() {}
   static void CheckForLeaks() {}
   static int NumLiveInstances() { return -1; }
 };

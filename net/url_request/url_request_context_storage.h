@@ -1,10 +1,9 @@
-// Copyright (c) 2011 The Chromium Authors. All rights reserved.
+// Copyright (c) 2012 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
 #ifndef NET_URL_REQUEST_URL_REQUEST_CONTEXT_STORAGE_H_
 #define NET_URL_REQUEST_URL_REQUEST_CONTEXT_STORAGE_H_
-#pragma once
 
 #include "base/basictypes.h"
 #include "base/memory/ref_counted.h"
@@ -21,14 +20,16 @@ class HostResolver;
 class HttpAuthHandlerFactory;
 class HttpServerProperties;
 class HttpTransactionFactory;
+class HttpUserAgentSettings;
 class NetLog;
 class NetworkDelegate;
-class OriginBoundCertService;
+class ServerBoundCertService;
 class ProxyService;
 class SSLConfigService;
 class TransportSecurityState;
 class URLRequestContext;
 class URLRequestJobFactory;
+class URLRequestThrottlerManager;
 
 // URLRequestContextStorage is a helper class that provides storage for unowned
 // member variables of URLRequestContext.
@@ -41,13 +42,13 @@ class NET_EXPORT URLRequestContextStorage {
   ~URLRequestContextStorage();
 
   // These setters will set both the member variables and call the setter on the
-  // URLRequestContext object.
+  // URLRequestContext object. In all cases, ownership is passed to |this|.
 
   void set_net_log(NetLog* net_log);
-  void set_host_resolver(HostResolver* host_resolver);
+  void set_host_resolver(scoped_ptr<HostResolver> host_resolver);
   void set_cert_verifier(CertVerifier* cert_verifier);
-  void set_origin_bound_cert_service(
-      OriginBoundCertService* origin_bound_cert_service);
+  void set_server_bound_cert_service(
+      ServerBoundCertService* server_bound_cert_service);
   void set_fraudulent_certificate_reporter(
       FraudulentCertificateReporter* fraudulent_certificate_reporter);
   void set_http_auth_handler_factory(
@@ -64,6 +65,9 @@ class NET_EXPORT URLRequestContextStorage {
   void set_ftp_transaction_factory(
       FtpTransactionFactory* ftp_transaction_factory);
   void set_job_factory(URLRequestJobFactory* job_factory);
+  void set_throttler_manager(URLRequestThrottlerManager* throttler_manager);
+  void set_http_user_agent_settings(
+      HttpUserAgentSettings* http_user_agent_settings);
 
  private:
   // We use a raw pointer to prevent reference cycles, since
@@ -75,7 +79,7 @@ class NET_EXPORT URLRequestContextStorage {
   scoped_ptr<NetLog> net_log_;
   scoped_ptr<HostResolver> host_resolver_;
   scoped_ptr<CertVerifier> cert_verifier_;
-  scoped_ptr<OriginBoundCertService> origin_bound_cert_service_;
+  scoped_ptr<ServerBoundCertService> server_bound_cert_service_;
   scoped_ptr<FraudulentCertificateReporter> fraudulent_certificate_reporter_;
   scoped_ptr<HttpAuthHandlerFactory> http_auth_handler_factory_;
   scoped_ptr<ProxyService> proxy_service_;
@@ -83,12 +87,14 @@ class NET_EXPORT URLRequestContextStorage {
   scoped_refptr<SSLConfigService> ssl_config_service_;
   scoped_ptr<NetworkDelegate> network_delegate_;
   scoped_ptr<HttpServerProperties> http_server_properties_;
+  scoped_ptr<HttpUserAgentSettings> http_user_agent_settings_;
   scoped_refptr<CookieStore> cookie_store_;
   scoped_ptr<TransportSecurityState> transport_security_state_;
 
   scoped_ptr<HttpTransactionFactory> http_transaction_factory_;
   scoped_ptr<FtpTransactionFactory> ftp_transaction_factory_;
   scoped_ptr<URLRequestJobFactory> job_factory_;
+  scoped_ptr<URLRequestThrottlerManager> throttler_manager_;
 
   DISALLOW_COPY_AND_ASSIGN(URLRequestContextStorage);
 };

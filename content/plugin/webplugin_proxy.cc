@@ -35,6 +35,10 @@
 #include "ui/base/x/x11_util_internal.h"
 #endif
 
+#if defined(OS_WIN)
+#include "content/public/common/sandbox_init.h"
+#endif
+
 using WebKit::WebBindings;
 
 using webkit::npapi::WebPluginResourceClient;
@@ -42,11 +46,19 @@ using webkit::npapi::WebPluginResourceClient;
 using webkit::npapi::WebPluginAcceleratedSurface;
 #endif
 
+namespace content {
+
+WebPluginProxy::SharedTransportDIB::SharedTransportDIB(TransportDIB* dib)
+    : dib_(dib) {
+}
+
+WebPluginProxy::SharedTransportDIB::~SharedTransportDIB() {
+}
+
 WebPluginProxy::WebPluginProxy(
     PluginChannel* channel,
     int route_id,
     const GURL& page_url,
-    gfx::NativeViewId containing_window,
     int host_render_view_routing_id)
     : channel_(channel),
       route_id_(route_id),
@@ -54,9 +66,7 @@ WebPluginProxy::WebPluginProxy(
       plugin_element_(NULL),
       delegate_(NULL),
       waiting_for_paint_(false),
-      containing_window_(containing_window),
       page_url_(page_url),
-      transparent_(false),
       windowless_buffer_index_(0),
       host_render_view_routing_id_(host_render_view_routing_id),
       ALLOW_THIS_IN_INITIALIZER_LIST(weak_factory_(this)) {
@@ -127,25 +137,15 @@ void WebPluginProxy::WillDestroyWindow(gfx::PluginWindowHandle window) {
 }
 
 #if defined(OS_WIN)
-void WebPluginProxy::SetWindowlessPumpEvent(HANDLE pump_messages_event) {
+void WebPluginProxy::SetWindowlessData(
+    HANDLE pump_messages_event, gfx::NativeViewId dummy_activation_window) {
   HANDLE pump_messages_event_for_renderer = NULL;
-  DuplicateHandle(GetCurrentProcess(), pump_messages_event,
-                  channel_->renderer_handle(),
-                  &pump_messages_event_for_renderer,
-                  0, FALSE, DUPLICATE_SAME_ACCESS);
-  DCHECK(pump_messages_event_for_renderer != NULL);
-  Send(new PluginHostMsg_SetWindowlessPumpEvent(
-      route_id_, pump_messages_event_for_renderer));
-}
-
-void WebPluginProxy::ReparentPluginWindow(HWND window, HWND parent) {
-  PluginThread::current()->Send(
-      new PluginProcessHostMsg_ReparentPluginWindow(window, parent));
-}
-
-void WebPluginProxy::ReportExecutableMemory(size_t size) {
-  PluginThread::current()->Send(
-      new PluginProcessHostMsg_ReportExecutableMemory(size));
+  BrokerDuplicateHandle(pump_messages_event, channel_->peer_pid(),
+                                 &pump_messages_event_for_renderer,
+                                 SYNCHRONIZE | EVENT_MODIFY_STATE, 0);
+  DCHECK(pump_messages_event_for_renderer);
+  Send(new PluginHostMsg_SetWindowlessData(
+      route_id_, pump_messages_event_for_renderer, dummy_activation_window));
 }
 #endif
 
@@ -174,11 +174,12 @@ void WebPluginProxy::InvalidateRect(const gfx::Rect& rect) {
   // offscreen, so constrain invalidates to the plugin rect.
   gfx::Rect plugin_rect = delegate_->GetRect();
   plugin_rect.set_origin(gfx::Point(0, 0));
-  const gfx::Rect invalidate_rect(rect.Intersect(plugin_rect));
+  plugin_rect.Intersect(rect);
+  const gfx::Rect invalidate_rect(plugin_rect);
 #else
   const gfx::Rect invalidate_rect(rect);
 #endif
-  damaged_rect_ = damaged_rect_.Union(invalidate_rect);
+  damaged_rect_.Union(invalidate_rect);
   // Ignore NPN_InvalidateRect calls with empty rects.  Also don't send an
   // invalidate if it's outside the clipping region, since if we did it won't
   // lead to a paint and we'll be stuck waiting forever for a DidPaint response.
@@ -217,7 +218,7 @@ NPObject* WebPluginProxy::GetWindowScriptNPObject() {
     return NULL;
 
   window_npobject_ = NPObjectProxy::Create(
-      channel_, npobject_route_id, containing_window_, page_url_);
+      channel_, npobject_route_id, host_render_view_routing_id_, page_url_);
 
   return window_npobject_;
 }
@@ -234,7 +235,7 @@ NPObject* WebPluginProxy::GetPluginElement() {
     return NULL;
 
   plugin_element_ = NPObjectProxy::Create(
-      channel_, npobject_route_id, containing_window_, page_url_);
+      channel_, npobject_route_id, host_render_view_routing_id_, page_url_);
 
   return plugin_element_;
 }
@@ -339,14 +340,14 @@ void WebPluginProxy::Paint(const gfx::Rect& rect) {
   if (!windowless_context())
     return;
 #else
-  if (!windowless_canvas())
+  if (!windowless_canvas() || !windowless_canvas()->getDevice())
     return;
 #endif
 
   // Clear the damaged area so that if the plugin doesn't paint there we won't
   // end up with the old values.
   gfx::Rect offset_rect = rect;
-  offset_rect.Offset(delegate_->GetRect().origin());
+  offset_rect.Offset(delegate_->GetRect().OffsetFromOrigin());
 #if defined(OS_MACOSX)
   CGContextSaveGState(windowless_context());
   // It is possible for windowless_contexts_ to change during plugin painting
@@ -360,18 +361,6 @@ void WebPluginProxy::Paint(const gfx::Rect& rect) {
   // it is going to continue to be used.
   int saved_index = windowless_buffer_index_;
 
-  if (background_context_.get()) {
-    base::mac::ScopedCFTypeRef<CGImageRef> image(
-        CGBitmapContextCreateImage(background_context_));
-    CGRect source_rect = rect.ToCGRect();
-    // Flip the rect we use to pull from the canvas, since it's upside-down.
-    source_rect.origin.y = CGImageGetHeight(image) - rect.y() - rect.height();
-    base::mac::ScopedCFTypeRef<CGImageRef> sub_image(
-        CGImageCreateWithImageInRect(image, source_rect));
-    CGContextDrawImage(windowless_context(), rect.ToCGRect(), sub_image);
-  } else if (transparent_) {
-    CGContextClearRect(windowless_context(), rect.ToCGRect());
-  }
   CGContextClipToRect(windowless_context(), rect.ToCGRect());
   // TODO(caryclark): This is a temporary workaround to allow the Darwin / Skia
   // port to share code with the Darwin / CG port. All ports will eventually use
@@ -380,43 +369,38 @@ void WebPluginProxy::Paint(const gfx::Rect& rect) {
   if (windowless_contexts_[saved_index].get() == saved_context_weak)
     CGContextRestoreGState(windowless_contexts_[saved_index]);
 #else
-  windowless_canvas()->save();
+  // See above comment about windowless_context_ changing.
+  // http::/crbug.com/139462
+  skia::RefPtr<skia::PlatformCanvas> saved_canvas = windowless_canvas();
+#if defined(USE_X11)
+  scoped_refptr<SharedTransportDIB> local_dib_ref(
+      windowless_dibs_[windowless_buffer_index_]);
+#endif
+
+  saved_canvas->save();
 
   // The given clip rect is relative to the plugin coordinate system.
   SkRect sk_rect = { SkIntToScalar(rect.x()),
                      SkIntToScalar(rect.y()),
                      SkIntToScalar(rect.right()),
                      SkIntToScalar(rect.bottom()) };
-  windowless_canvas()->clipRect(sk_rect);
+  saved_canvas->clipRect(sk_rect);
 
-  // Setup the background.
-  if (background_canvas_.get()) {
-    // When a background canvas is given, we're in transparent mode. This means
-    // the plugin wants to have the image of the page in the canvas it's drawing
-    // into (which is windowless_canvases_) so it can do blending. So we copy
-    // the background bitmap into the windowless canvas.
-    const SkBitmap& background_bitmap =
-        skia::GetTopDevice(*background_canvas_)->accessBitmap(false);
-    windowless_canvas()->drawBitmap(background_bitmap, 0, 0);
-  } else {
-    // In non-transparent mode, the plugin doesn't care what's underneath, so we
-    // can just give it black.
-    SkPaint black_fill_paint;
-    black_fill_paint.setARGB(0xFF, 0x00, 0x00, 0x00);
-    windowless_canvas()->drawPaint(black_fill_paint);
-  }
+  // Fill a transparent value so that if the plugin supports transparency that
+  // will work.
+  saved_canvas->drawColor(SkColorSetARGB(0, 0, 0, 0), SkXfermode::kSrc_Mode);
 
   // Bring the windowless canvas into the window coordinate system, which is
   // how the plugin expects to draw (since the windowless API was originally
   // designed just for scribbling over the web page).
-  windowless_canvas()->translate(SkIntToScalar(-delegate_->GetRect().x()),
-                                 SkIntToScalar(-delegate_->GetRect().y()));
+  saved_canvas->translate(SkIntToScalar(-delegate_->GetRect().x()),
+                          SkIntToScalar(-delegate_->GetRect().y()));
 
   // Before we send the invalidate, paint so that renderer uses the updated
   // bitmap.
-  delegate_->Paint(windowless_canvas(), offset_rect);
+  delegate_->Paint(saved_canvas.get(), offset_rect);
 
-  windowless_canvas()->restore();
+  saved_canvas->restore();
 #endif
 }
 
@@ -425,12 +409,9 @@ void WebPluginProxy::UpdateGeometry(
     const gfx::Rect& clip_rect,
     const TransportDIB::Handle& windowless_buffer0,
     const TransportDIB::Handle& windowless_buffer1,
-    int windowless_buffer_index,
-    const TransportDIB::Handle& background_buffer,
-    bool transparent) {
+    int windowless_buffer_index) {
   gfx::Rect old = delegate_->GetRect();
   gfx::Rect old_clip_rect = delegate_->GetClipRect();
-  transparent_ = transparent;
 
   // Update the buffers before doing anything that could call into plugin code,
   // so that we don't process buffer changes out of order if plugins make
@@ -439,7 +420,6 @@ void WebPluginProxy::UpdateGeometry(
     // The plugin's rect changed, so now we have new buffers to draw into.
     SetWindowlessBuffers(windowless_buffer0,
                          windowless_buffer1,
-                         background_buffer,
                          window_rect);
   }
 
@@ -469,59 +449,34 @@ void WebPluginProxy::UpdateGeometry(
 void WebPluginProxy::CreateCanvasFromHandle(
     const TransportDIB::Handle& dib_handle,
     const gfx::Rect& window_rect,
-    scoped_ptr<skia::PlatformCanvas>* canvas_out) {
-  // Create a canvas that will reference the shared bits. We have to handle
-  // errors here since we're mapping a large amount of memory that may not fit
-  // in our address space, or go wrong in some other way.
-  HANDLE section;
-  DuplicateHandle(channel_->renderer_handle(), dib_handle, GetCurrentProcess(),
-                  &section,
-                  STANDARD_RIGHTS_REQUIRED | FILE_MAP_READ | FILE_MAP_WRITE,
-                  FALSE, 0);
-  scoped_ptr<skia::PlatformCanvas> canvas(new skia::PlatformCanvas);
-  if (!canvas->initialize(
-          window_rect.width(),
-          window_rect.height(),
-          true,
-          section)) {
-    canvas_out->reset();
-  }
-  canvas_out->reset(canvas.release());
+    skia::RefPtr<skia::PlatformCanvas>* canvas) {
+  *canvas = skia::AdoptRef(
+      skia::CreatePlatformCanvas(window_rect.width(),
+                                 window_rect.height(),
+                                 true,
+                                 dib_handle,
+                                 skia::RETURN_NULL_ON_FAILURE));
   // The canvas does not own the section so we need to close it now.
-  CloseHandle(section);
+  CloseHandle(dib_handle);
 }
 
 void WebPluginProxy::SetWindowlessBuffers(
     const TransportDIB::Handle& windowless_buffer0,
     const TransportDIB::Handle& windowless_buffer1,
-    const TransportDIB::Handle& background_buffer,
     const gfx::Rect& window_rect) {
   CreateCanvasFromHandle(windowless_buffer0,
                          window_rect,
                          &windowless_canvases_[0]);
-  if (!windowless_canvases_[0].get()) {
-    windowless_canvases_[1].reset();
-    background_canvas_.reset();
+  if (!windowless_canvases_[0]) {
+    windowless_canvases_[1].clear();
     return;
   }
   CreateCanvasFromHandle(windowless_buffer1,
                          window_rect,
                          &windowless_canvases_[1]);
-  if (!windowless_canvases_[1].get()) {
-    windowless_canvases_[0].reset();
-    background_canvas_.reset();
+  if (!windowless_canvases_[1]) {
+    windowless_canvases_[0].clear();
     return;
-  }
-
-  if (background_buffer) {
-    CreateCanvasFromHandle(background_buffer,
-                           window_rect,
-                           &background_canvas_);
-    if (!background_canvas_.get()) {
-      windowless_canvases_[0].reset();
-      windowless_canvases_[1].reset();
-      return;
-    }
   }
 }
 
@@ -555,7 +510,6 @@ void WebPluginProxy::CreateDIBAndCGContextFromHandle(
 void WebPluginProxy::SetWindowlessBuffers(
     const TransportDIB::Handle& windowless_buffer0,
     const TransportDIB::Handle& windowless_buffer1,
-    const TransportDIB::Handle& background_buffer,
     const gfx::Rect& window_rect) {
   CreateDIBAndCGContextFromHandle(windowless_buffer0,
                                   window_rect,
@@ -565,10 +519,6 @@ void WebPluginProxy::SetWindowlessBuffers(
                                   window_rect,
                                   &windowless_dibs_[1],
                                   &windowless_contexts_[1]);
-  CreateDIBAndCGContextFromHandle(background_buffer,
-                                  window_rect,
-                                  &background_dib_,
-                                  &background_context_);
 }
 
 #elif defined(USE_X11)
@@ -576,17 +526,18 @@ void WebPluginProxy::SetWindowlessBuffers(
 void WebPluginProxy::CreateDIBAndCanvasFromHandle(
     const TransportDIB::Handle& dib_handle,
     const gfx::Rect& window_rect,
-    scoped_ptr<TransportDIB>* dib_out,
-    scoped_ptr<skia::PlatformCanvas>* canvas_out) {
+    scoped_refptr<SharedTransportDIB>* dib_out,
+    skia::RefPtr<skia::PlatformCanvas>* canvas) {
   TransportDIB* dib = TransportDIB::Map(dib_handle);
-  skia::PlatformCanvas* canvas = NULL;
   // dib may be NULL if the renderer has already destroyed the TransportDIB by
   // the time we receive the handle, e.g. in case of multiple resizes.
   if (dib) {
-    canvas = dib->GetPlatformCanvas(window_rect.width(), window_rect.height());
+    *canvas = skia::AdoptRef(
+        dib->GetPlatformCanvas(window_rect.width(), window_rect.height()));
+  } else {
+    canvas->clear();
   }
-  dib_out->reset(dib);
-  canvas_out->reset(canvas);
+  *dib_out = new SharedTransportDIB(dib);
 }
 
 void WebPluginProxy::CreateShmPixmapFromDIB(
@@ -614,7 +565,6 @@ void WebPluginProxy::CreateShmPixmapFromDIB(
 void WebPluginProxy::SetWindowlessBuffers(
     const TransportDIB::Handle& windowless_buffer0,
     const TransportDIB::Handle& windowless_buffer1,
-    const TransportDIB::Handle& background_buffer,
     const gfx::Rect& window_rect) {
   CreateDIBAndCanvasFromHandle(windowless_buffer0,
                                window_rect,
@@ -624,18 +574,14 @@ void WebPluginProxy::SetWindowlessBuffers(
                                window_rect,
                                &windowless_dibs_[1],
                                &windowless_canvases_[1]);
-  CreateDIBAndCanvasFromHandle(background_buffer,
-                               window_rect,
-                               &background_dib_,
-                               &background_canvas_);
 
   // If SHM pixmaps support is available, create SHM pixmaps to pass to the
   // delegate for windowless plugin painting.
   if (delegate_->IsWindowless() && use_shm_pixmap_) {
-    CreateShmPixmapFromDIB(windowless_dibs_[0].get(),
+    CreateShmPixmapFromDIB(windowless_dibs_[0]->dib(),
                            window_rect,
                            &windowless_shm_pixmaps_[0]);
-    CreateShmPixmapFromDIB(windowless_dibs_[1].get(),
+    CreateShmPixmapFromDIB(windowless_dibs_[1]->dib(),
                            window_rect,
                            &windowless_shm_pixmaps_[1]);
   }
@@ -646,7 +592,6 @@ void WebPluginProxy::SetWindowlessBuffers(
 void WebPluginProxy::SetWindowlessBuffers(
     const TransportDIB::Handle& windowless_buffer0,
     const TransportDIB::Handle& windowless_buffer1,
-    const TransportDIB::Handle& background_buffer,
     const gfx::Rect& window_rect) {
   NOTIMPLEMENTED();
 }
@@ -744,18 +689,10 @@ void WebPluginProxy::AcceleratedPluginSwappedIOSurface() {
 #endif
 
 void WebPluginProxy::OnPaint(const gfx::Rect& damaged_rect) {
-  content::GetContentClient()->SetActiveURL(page_url_);
+  GetContentClient()->SetActiveURL(page_url_);
 
   Paint(damaged_rect);
-  bool allow_buffer_flipping;
-#if defined(OS_MACOSX)
-  allow_buffer_flipping = delegate_->AllowBufferFlipping();
-#else
-  allow_buffer_flipping = true;
-#endif
-  Send(new PluginHostMsg_InvalidateRect(route_id_,
-                                        damaged_rect,
-                                        allow_buffer_flipping));
+  Send(new PluginHostMsg_InvalidateRect(route_id_, damaged_rect));
 }
 
 bool WebPluginProxy::IsOffTheRecord() {
@@ -792,3 +729,5 @@ void WebPluginProxy::UpdateIMEStatus() {
   Send(new PluginHostMsg_NotifyIMEStatus(route_id_, input_type, caret_rect));
 }
 #endif
+
+}  // namespace content

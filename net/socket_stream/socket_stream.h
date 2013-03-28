@@ -1,10 +1,9 @@
-// Copyright (c) 2011 The Chromium Authors. All rights reserved.
+// Copyright (c) 2012 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
 #ifndef NET_SOCKET_STREAM_SOCKET_STREAM_H_
 #define NET_SOCKET_STREAM_SOCKET_STREAM_H_
-#pragma once
 
 #include <deque>
 #include <map>
@@ -20,11 +19,9 @@
 #include "net/base/net_log.h"
 #include "net/base/net_errors.h"
 #include "net/base/ssl_config_service.h"
-#include "net/http/http_auth.h"
-#include "net/http/http_auth_cache.h"
-#include "net/http/http_auth_handler.h"
 #include "net/proxy/proxy_service.h"
 #include "net/socket/tcp_client_socket.h"
+#include "net/url_request/url_request.h"
 #include "net/url_request/url_request_context.h"
 
 namespace net {
@@ -33,8 +30,9 @@ class AuthChallengeInfo;
 class ClientSocketFactory;
 class CookieOptions;
 class HostResolver;
-class HttpAuthHandlerFactory;
+class HttpAuthController;
 class SSLConfigService;
+class SSLInfo;
 class SingleRequestHostResolver;
 class SocketStreamMetrics;
 
@@ -58,12 +56,8 @@ class NET_EXPORT SocketStream
 
   class NET_EXPORT Delegate {
    public:
-    virtual ~Delegate() {}
-
     virtual int OnStartOpenConnection(SocketStream* socket,
-                                      const CompletionCallback& callback) {
-      return OK;
-    }
+                                      const CompletionCallback& callback);
 
     // Called when socket stream has been connected.  The socket stream accepts
     // at most |max_pending_send_allowed| so that a client of the socket stream
@@ -87,10 +81,14 @@ class NET_EXPORT SocketStream
     // The delegate should call RestartWithAuth() if credential for |auth_info|
     // is found in password database, or call Close() to close the connection.
     virtual void OnAuthRequired(SocketStream* socket,
-                                AuthChallengeInfo* auth_info) {
-      // By default, no credential is available and close the connection.
-      socket->Close();
-    }
+                                AuthChallengeInfo* auth_info);
+
+    // Called when using SSL and the server responds with a certificate with an
+    // error. The delegate should call CancelBecauseOfCertError() or
+    // ContinueDespiteCertError() to resume connection handling.
+    virtual void OnSSLCertificateError(SocketStream* socket,
+                                       const SSLInfo& ssl_info,
+                                       bool fatal);
 
     // Called when an error occured.
     // This is only for error reporting to the delegate.
@@ -99,18 +97,17 @@ class NET_EXPORT SocketStream
 
     // Called when reading cookies to allow the delegate to block access to the
     // cookie.
-    virtual bool CanGetCookies(SocketStream* socket, const GURL& url) {
-      return true;
-    }
+    virtual bool CanGetCookies(SocketStream* socket, const GURL& url);
 
     // Called when a cookie is set to allow the delegate to block access to the
     // cookie.
     virtual bool CanSetCookie(SocketStream* request,
                               const GURL& url,
                               const std::string& cookie_line,
-                              CookieOptions* options) {
-      return true;
-    }
+                              CookieOptions* options);
+
+   protected:
+    virtual ~Delegate() {}
   };
 
   SocketStream(const GURL& url, Delegate* delegate);
@@ -128,8 +125,8 @@ class NET_EXPORT SocketStream
   Delegate* delegate() const { return delegate_; }
   int max_pending_send_allowed() const { return max_pending_send_allowed_; }
 
-  URLRequestContext* context() const { return context_.get(); }
-  void set_context(URLRequestContext* context);
+  const URLRequestContext* context() const { return context_; }
+  void set_context(const URLRequestContext* context);
 
   BoundNetLog* net_log() { return &net_log_; }
 
@@ -158,12 +155,21 @@ class NET_EXPORT SocketStream
 
   const ProxyServer& proxy_server() const;
 
-  // Sets an alternative HostResolver. For testing purposes only.
-  void SetHostResolver(HostResolver* host_resolver);
-
   // Sets an alternative ClientSocketFactory.  Doesn't take ownership of
   // |factory|.  For testing purposes only.
   void SetClientSocketFactory(ClientSocketFactory* factory);
+
+  // Cancels the connection because of an error.
+  // |error| is net::Error which represents the error.
+  void CancelWithError(int error);
+
+  // Cancels the connection because of receiving a certificate with an error.
+  void CancelWithSSLError(const SSLInfo& ssl_info);
+
+  // Continues to establish the connection in spite of an error. Usually this
+  // case happens because users allow certificate with an error by manual
+  // actions on alert dialog or browser cached such kinds of user actions.
+  void ContinueDespiteError();
 
  protected:
   friend class base::RefCountedThreadSafe<SocketStream>;
@@ -191,7 +197,7 @@ class NET_EXPORT SocketStream
     std::string headers_;
 
     private:
-     virtual ~RequestHeaders() { data_ = NULL; }
+     virtual ~RequestHeaders();
   };
 
   class ResponseHeaders : public IOBuffer {
@@ -211,6 +217,8 @@ class NET_EXPORT SocketStream
 
   enum State {
     STATE_NONE,
+    STATE_BEFORE_CONNECT,
+    STATE_BEFORE_CONNECT_COMPLETE,
     STATE_RESOLVE_PROXY,
     STATE_RESOLVE_PROXY_COMPLETE,
     STATE_RESOLVE_HOST,
@@ -219,6 +227,8 @@ class NET_EXPORT SocketStream
     STATE_RESOLVE_PROTOCOL_COMPLETE,
     STATE_TCP_CONNECT,
     STATE_TCP_CONNECT_COMPLETE,
+    STATE_GENERATE_PROXY_AUTH_TOKEN,
+    STATE_GENERATE_PROXY_AUTH_TOKEN_COMPLETE,
     STATE_WRITE_TUNNEL_HEADERS,
     STATE_WRITE_TUNNEL_HEADERS_COMPLETE,
     STATE_READ_TUNNEL_HEADERS,
@@ -227,8 +237,12 @@ class NET_EXPORT SocketStream
     STATE_SOCKS_CONNECT_COMPLETE,
     STATE_SECURE_PROXY_CONNECT,
     STATE_SECURE_PROXY_CONNECT_COMPLETE,
+    STATE_SECURE_PROXY_HANDLE_CERT_ERROR,
+    STATE_SECURE_PROXY_HANDLE_CERT_ERROR_COMPLETE,
     STATE_SSL_CONNECT,
     STATE_SSL_CONNECT_COMPLETE,
+    STATE_SSL_HANDLE_CERT_ERROR,
+    STATE_SSL_HANDLE_CERT_ERROR_COMPLETE,
     STATE_READ_WRITE,
     STATE_AUTH_REQUIRED,
     STATE_CLOSE,
@@ -243,9 +257,8 @@ class NET_EXPORT SocketStream
   // Use the same number as HttpNetworkTransaction::kMaxHeaderBufSize.
   enum { kMaxTunnelResponseHeadersSize = 32768 };  // 32 kilobytes.
 
-  // Copies the given addrinfo list in |addresses_|.
   // Used for WebSocketThrottleTest.
-  void CopyAddrInfo(struct addrinfo* head);
+  void set_addresses(const AddressList& addresses);
 
   void DoClose();
 
@@ -254,7 +267,6 @@ class NET_EXPORT SocketStream
   // notifications will be sent to delegate.
   void Finish(int result);
 
-  int DidEstablishSSL(int result, SSLConfig* ssl_config);
   int DidEstablishConnection();
   int DidReceiveData(int result);
   int DidSendData(int result);
@@ -265,6 +277,8 @@ class NET_EXPORT SocketStream
 
   void DoLoop(int result);
 
+  int DoBeforeConnect();
+  int DoBeforeConnectComplete(int result);
   int DoResolveProxy();
   int DoResolveProxyComplete(int result);
   int DoResolveHost();
@@ -273,6 +287,8 @@ class NET_EXPORT SocketStream
   int DoResolveProtocolComplete(int result);
   int DoTcpConnect(int result);
   int DoTcpConnectComplete(int result);
+  int DoGenerateProxyAuthToken();
+  int DoGenerateProxyAuthTokenComplete(int result);
   int DoWriteTunnelHeaders();
   int DoWriteTunnelHeadersComplete(int result);
   int DoReadTunnelHeaders();
@@ -281,17 +297,22 @@ class NET_EXPORT SocketStream
   int DoSOCKSConnectComplete(int result);
   int DoSecureProxyConnect();
   int DoSecureProxyConnectComplete(int result);
+  int DoSecureProxyHandleCertError(int result);
+  int DoSecureProxyHandleCertErrorComplete(int result);
   int DoSSLConnect();
   int DoSSLConnectComplete(int result);
+  int DoSSLHandleCertError(int result);
+  int DoSSLHandleCertErrorComplete(int result);
   int DoReadWrite(int result);
 
   GURL ProxyAuthOrigin() const;
   int HandleAuthChallenge(const HttpResponseHeaders* headers);
-  int HandleCertificateRequest(int result);
+  int HandleCertificateRequest(int result, SSLConfig* ssl_config);
   void DoAuthRequired();
   void DoRestartWithAuth();
 
   int HandleCertificateError(int result);
+  int AllowCertErrorForReconnection(SSLConfig* ssl_config);
 
   SSLConfigService* ssl_config_service() const;
   ProxyService* proxy_service() const;
@@ -300,15 +321,14 @@ class NET_EXPORT SocketStream
 
   GURL url_;
   int max_pending_send_allowed_;
-  scoped_refptr<URLRequestContext> context_;
+  const URLRequestContext* context_;
 
   UserDataMap user_data_;
 
   State next_state_;
   HostResolver* host_resolver_;
   CertVerifier* cert_verifier_;
-  OriginBoundCertService* origin_bound_cert_service_;
-  HttpAuthHandlerFactory* http_auth_handler_factory_;
+  ServerBoundCertService* server_bound_cert_service_;
   ClientSocketFactory* factory_;
 
   ProxyMode proxy_mode_;
@@ -317,10 +337,7 @@ class NET_EXPORT SocketStream
   ProxyService::PacRequest* pac_request_;
   ProxyInfo proxy_info_;
 
-  HttpAuthCache auth_cache_;
-  scoped_ptr<HttpAuthHandler> auth_handler_;
-  HttpAuth::Identity auth_identity_;
-  scoped_refptr<AuthChallengeInfo> auth_info_;
+  scoped_refptr<HttpAuthController> proxy_auth_controller_;
 
   scoped_refptr<RequestHeaders> tunnel_request_headers_;
   size_t tunnel_request_headers_bytes_sent_;

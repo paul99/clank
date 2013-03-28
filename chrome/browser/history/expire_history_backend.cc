@@ -5,13 +5,15 @@
 #include "chrome/browser/history/expire_history_backend.h"
 
 #include <algorithm>
+#include <functional>
 #include <limits>
 
 #include "base/bind.h"
 #include "base/compiler_specific.h"
 #include "base/file_util.h"
+#include "base/logging.h"
 #include "base/message_loop.h"
-#include "chrome/browser/bookmarks/bookmark_service.h"
+#include "chrome/browser/api/bookmarks/bookmark_service.h"
 #include "chrome/browser/history/archived_database.h"
 #include "chrome/browser/history/history_database.h"
 #include "chrome/browser/history/history_notifications.h"
@@ -103,7 +105,7 @@ bool ShouldArchiveVisit(const VisitRow& visit) {
   // to see them.
   if (no_qualifier == content::PAGE_TRANSITION_TYPED ||
       no_qualifier == content::PAGE_TRANSITION_AUTO_BOOKMARK ||
-      no_qualifier == content::PAGE_TRANSITION_START_PAGE)
+      no_qualifier == content::PAGE_TRANSITION_AUTO_TOPLEVEL)
     return true;
 
   // Only archive these "less important" transitions when they were the final
@@ -159,7 +161,7 @@ struct ExpireHistoryBackend::DeleteDependencies {
   // ----- Filled by DeleteOneURL -----
 
   // The URLs deleted during this operation.
-  std::vector<URLRow> deleted_urls;
+  URLRows deleted_urls;
 
   // The list of all favicon IDs that the affected URLs had. Favicons will be
   // shared between all URLs with the same favicon, so this is the set of IDs
@@ -237,7 +239,7 @@ void ExpireHistoryBackend::DeleteURLs(const std::vector<GURL>& urls) {
   if (text_db_)
     text_db_->OptimizeChangedDatabases(dependencies.text_db_changes);
 
-  BroadcastDeleteNotifications(&dependencies);
+  BroadcastDeleteNotifications(&dependencies, DELETION_USER_INITIATED);
 }
 
 void ExpireHistoryBackend::ExpireHistoryBetween(
@@ -269,6 +271,30 @@ void ExpireHistoryBackend::ExpireHistoryBetween(
   ExpireVisits(visits);
 }
 
+void ExpireHistoryBackend::ExpireHistoryForTimes(
+    const std::vector<base::Time>& times) {
+  // |times| must be in reverse chronological order and have no
+  // duplicates, i.e. each member must be earlier than the one before
+  // it.
+  DCHECK(
+      std::adjacent_find(
+          times.begin(), times.end(), std::less_equal<base::Time>()) ==
+      times.end());
+
+  if (!main_db_)
+    return;
+
+  // There may be stuff in the text database manager's temporary cache.
+  if (text_db_)
+    text_db_->DeleteFromUncommittedForTimes(times);
+
+  // Find the affected visits and delete them.
+  // TODO(brettw): bug 1171164: We should query the archived database here, too.
+  VisitVector visits;
+  main_db_->GetVisitsForTimes(times, &visits);
+  ExpireVisits(visits);
+}
+
 void ExpireHistoryBackend::ExpireVisits(const VisitVector& visits) {
   if (visits.empty())
     return;
@@ -283,7 +309,7 @@ void ExpireHistoryBackend::ExpireVisits(const VisitVector& visits) {
   DeleteFaviconsIfPossible(dependencies.affected_favicons);
 
   // An is_null begin time means that all history should be deleted.
-  BroadcastDeleteNotifications(&dependencies);
+  BroadcastDeleteNotifications(&dependencies, DELETION_USER_INITIATED);
 
   // Pick up any bits possibly left over.
   ParanoidExpireHistory();
@@ -351,7 +377,7 @@ void ExpireHistoryBackend::DeleteFaviconsIfPossible(
 }
 
 void ExpireHistoryBackend::BroadcastDeleteNotifications(
-    DeleteDependencies* dependencies) {
+    DeleteDependencies* dependencies, DeletionType type) {
   if (!dependencies->deleted_urls.empty()) {
     // Broadcast the URL deleted notification. Note that we also broadcast when
     // we were requested to delete everything even if that was a NOP, since
@@ -359,8 +385,8 @@ void ExpireHistoryBackend::BroadcastDeleteNotifications(
     // determine if they care whether anything was deleted).
     URLsDeletedDetails* deleted_details = new URLsDeletedDetails;
     deleted_details->all_history = false;
-    for (size_t i = 0; i < dependencies->deleted_urls.size(); i++)
-      deleted_details->urls.insert(dependencies->deleted_urls[i].url());
+    deleted_details->archived = (type == DELETION_ARCHIVED);
+    deleted_details->rows = dependencies->deleted_urls;
     delegate_->BroadcastNotifications(
         chrome::NOTIFICATION_HISTORY_URLS_DELETED, deleted_details);
   }
@@ -666,7 +692,7 @@ bool ExpireHistoryBackend::ArchiveSomeOldHistory(
   // in history views since they were subframes, but they will be in the visited
   // link system, which needs to be updated now. This function is smart enough
   // to not do anything if nothing was deleted.
-  BroadcastDeleteNotifications(&deleted_dependencies);
+  BroadcastDeleteNotifications(&deleted_dependencies, DELETION_ARCHIVED);
 
   return more_to_expire;
 }
@@ -691,6 +717,11 @@ void ExpireHistoryBackend::ScheduleExpireHistoryIndexFiles() {
 }
 
 void ExpireHistoryBackend::DoExpireHistoryIndexFiles() {
+  if (!text_db_) {
+    // The text database may have been closed since the task was scheduled.
+    return;
+  }
+
   Time::Exploded exploded;
   Time::Now().LocalExplode(&exploded);
   int cutoff_month =

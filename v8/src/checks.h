@@ -51,20 +51,12 @@ extern "C" void V8_Fatal(const char* file, int line, const char* format, ...);
 #endif
 
 
-// Used by the CHECK macro -- should not be called directly.
-inline void CheckHelper(const char* file,
-                        int line,
-                        const char* source,
-                        bool condition) {
-  if (!condition)
-    V8_Fatal(file, line, "CHECK(%s) failed", source);
-}
-
-
 // The CHECK macro checks that the given condition is true; if not, it
 // prints a message to stderr and aborts.
-#define CHECK(condition) do {                                             \
-    if (!(condition)) CheckHelper(__FILE__, __LINE__, #condition, false); \
+#define CHECK(condition) do {                                       \
+    if (!(condition)) {                                             \
+      V8_Fatal(__FILE__, __LINE__, "CHECK(%s) failed", #condition); \
+    }                                                               \
   } while (0)
 
 
@@ -291,5 +283,13 @@ extern bool FLAG_enable_slow_asserts;
 #define STATIC_ASSERT(test)  STATIC_CHECK(test)
 
 #define ASSERT_NOT_NULL(p)  ASSERT_NE(NULL, p)
+
+// "Extra checks" are lightweight checks that are enabled in some release
+// builds.
+#ifdef ENABLE_EXTRA_CHECKS
+#define EXTRA_CHECK(condition) CHECK(condition)
+#else
+#define EXTRA_CHECK(condition) ((void) 0)
+#endif
 
 #endif  // V8_CHECKS_H_

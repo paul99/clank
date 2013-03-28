@@ -8,6 +8,9 @@
 #include <string>
 
 #include "content/renderer/media/media_stream_dispatcher.h"
+#include "googleurl/src/gurl.h"
+
+namespace content {
 
 // This class is a mock implementation of MediaStreamDispatcher.
 class MockMediaStreamDispatcher : public MediaStreamDispatcher {
@@ -15,31 +18,37 @@ class MockMediaStreamDispatcher : public MediaStreamDispatcher {
   MockMediaStreamDispatcher();
   virtual ~MockMediaStreamDispatcher();
 
-  virtual void GenerateStream(int request_id,
-                              MediaStreamDispatcherEventHandler* event_handler,
-                              media_stream::StreamOptions components,
-                              const std::string& security_origin) OVERRIDE;
+  virtual void GenerateStream(
+      int request_id,
+      const base::WeakPtr<MediaStreamDispatcherEventHandler>& event_handler,
+      const StreamOptions& components,
+      const GURL& url) OVERRIDE;
+  virtual void CancelGenerateStream(int request_id) OVERRIDE;
   virtual void StopStream(const std::string& label) OVERRIDE;
   virtual bool IsStream(const std::string& label) OVERRIDE;
   virtual int video_session_id(const std::string& label, int index) OVERRIDE;
   virtual int audio_session_id(const std::string& label, int index) OVERRIDE;
 
   int request_id() const { return request_id_; }
-  MediaStreamDispatcherEventHandler* event_handler() const {
-    return event_handler_;
-  }
-  media_stream::StreamOptions* components() const { return components_; }
-  const std::string& security_origin() const { return security_origin_; }
+  int request_stream_counter() const { return request_stream_counter_; }
   int stop_stream_counter() const { return stop_stream_counter_; }
+  const std::string& stream_label() const { return stream_label_;}
+  StreamDeviceInfoArray audio_array() const { return audio_array_; }
+  StreamDeviceInfoArray video_array() const { return video_array_; }
 
  private:
   int request_id_;
-  MediaStreamDispatcherEventHandler* event_handler_;
-  media_stream::StreamOptions* components_;
-  std::string security_origin_;
+  base::WeakPtr<MediaStreamDispatcherEventHandler> event_handler_;
+  int request_stream_counter_;
   int stop_stream_counter_;
+
+  std::string stream_label_;
+  StreamDeviceInfoArray audio_array_;
+  StreamDeviceInfoArray video_array_;
 
   DISALLOW_COPY_AND_ASSIGN(MockMediaStreamDispatcher);
 };
+
+}  // namespace content
 
 #endif  // CONTENT_RENDERER_MEDIA_MOCK_MEDIA_STREAM_DISPATCHER_H_

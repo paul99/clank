@@ -4,14 +4,14 @@
 
 #include "content/public/browser/web_contents_delegate.h"
 
-#include "base/command_line.h"
 #include "base/compiler_specific.h"
 #include "base/logging.h"
 #include "base/memory/singleton.h"
+#include "content/public/browser/render_view_host.h"
 #include "content/public/browser/web_contents.h"
 #include "content/public/browser/web_intents_dispatcher.h"
-#include "content/public/common/content_switches.h"
 #include "content/public/common/url_constants.h"
+#include "content/public/common/bindings_policy.h"
 #include "ui/gfx/rect.h"
 #include "webkit/glue/web_intent_data.h"
 
@@ -25,37 +25,31 @@ WebContents* WebContentsDelegate::OpenURLFromTab(WebContents* source,
   return NULL;
 }
 
-#if defined(OS_ANDROID)
-bool WebContentsDelegate::ShouldIgnoreNavigation(
-    WebContents* source,
-    const GURL& url,
-    const content::Referrer& referrer,
-    WindowOpenDisposition disposition,
-    content::PageTransition transition_type) {
-  return false;
-}
-#endif
-
 bool WebContentsDelegate::IsPopupOrPanel(const WebContents* source) const {
   return false;
 }
 
-bool WebContentsDelegate::IsApplication() const { return false; }
+bool WebContentsDelegate::CanLoadDataURLsInWebUI() const { return false; }
 
-bool WebContentsDelegate::CanReloadContents(WebContents* source) const {
-  return true;
-}
+bool WebContentsDelegate::CanOverscrollContent() const { return false; }
 
 gfx::Rect WebContentsDelegate::GetRootWindowResizerRect() const {
   return gfx::Rect();
 }
 
 bool WebContentsDelegate::ShouldSuppressDialogs() {
-  const CommandLine& command_line = *CommandLine::ForCurrentProcess();
-  return command_line.HasSwitch(switches::kDisableJavaScriptDialogs);
+  return false;
 }
 
-void WebContentsDelegate::BeforeUnloadFired(WebContents* tab,
+bool WebContentsDelegate::AddMessageToConsole(WebContents* source,
+                                              int32 level,
+                                              const string16& message,
+                                              int32 line_no,
+                                              const string16& source_id) {
+  return false;
+}
+
+void WebContentsDelegate::BeforeUnloadFired(WebContents* web_contents,
                                             bool proceed,
                                             bool* proceed_to_fire_unload) {
   *proceed_to_fire_unload = true;
@@ -65,7 +59,7 @@ bool WebContentsDelegate::ShouldFocusPageAfterCrash() {
   return true;
 }
 
-bool WebContentsDelegate::TakeFocus(bool reverse) {
+bool WebContentsDelegate::TakeFocus(WebContents* soruce, bool reverse) {
   return false;
 }
 
@@ -73,15 +67,14 @@ int WebContentsDelegate::GetExtraRenderViewHeight() const {
   return 0;
 }
 
-bool WebContentsDelegate::CanDownload(WebContents* source, int request_id) {
+bool WebContentsDelegate::CanDownload(RenderViewHost* render_view_host,
+                                      int request_id,
+                                      const std::string& request_method) {
   return true;
 }
 
-bool WebContentsDelegate::HandleContextMenu(const ContextMenuParams& params) {
-  return false;
-}
-
-bool WebContentsDelegate::ExecuteContextMenuCommand(int command) {
+bool WebContentsDelegate::HandleContextMenu(
+    const content::ContextMenuParams& params) {
   return false;
 }
 
@@ -109,6 +102,7 @@ void WebContentsDelegate::ViewSourceForFrame(WebContents* source,
 }
 
 bool WebContentsDelegate::PreHandleKeyboardEvent(
+    WebContents* source,
     const NativeWebKeyboardEvent& event,
     bool* is_keyboard_shortcut) {
   return false;
@@ -118,44 +112,45 @@ bool WebContentsDelegate::OnGoToEntryOffset(int offset) {
   return true;
 }
 
-bool WebContentsDelegate::ShouldAddNavigationToHistory(
-    const history::HistoryAddPageArgs& add_page_args,
-    NavigationType navigation_type) {
-  return true;
-}
-
-gfx::NativeWindow WebContentsDelegate::GetFrameNativeWindow() {
-  return NULL;
-}
-
 bool WebContentsDelegate::ShouldCreateWebContents(
     WebContents* web_contents,
     int route_id,
     WindowContainerType window_container_type,
-    const string16& frame_name) {
+    const string16& frame_name,
+    const GURL& target_url) {
   return true;
 }
-
-#if defined(OS_ANDROID)
-bool WebContentsDelegate::ShouldOverrideLoading(const GURL& url) {
-  return false;
-}
-#endif
 
 JavaScriptDialogCreator* WebContentsDelegate::GetJavaScriptDialogCreator() {
   return NULL;
 }
 
-bool WebContentsDelegate::IsFullscreenForTab(const WebContents* tab) const {
+bool WebContentsDelegate::IsFullscreenForTabOrPending(
+    const WebContents* web_contents) const {
   return false;
 }
 
+content::ColorChooser* WebContentsDelegate::OpenColorChooser(
+    WebContents* web_contents,
+    int color_chooser_id,
+    SkColor color) {
+  return NULL;
+}
+
 void WebContentsDelegate::WebIntentDispatch(
-    WebContents* tab,
+    WebContents* web_contents,
     WebIntentsDispatcher* intents_dispatcher) {
   // The caller passes this method ownership of the |intents_dispatcher|, but
   // this empty implementation will not use it, so we delete it immediately.
   delete intents_dispatcher;
+}
+
+bool WebContentsDelegate::RequestPpapiBrokerPermission(
+    WebContents* web_contents,
+    const GURL& url,
+    const FilePath& plugin_path,
+    const base::Callback<void(bool)>& callback) {
+  return false;
 }
 
 WebContentsDelegate::~WebContentsDelegate() {

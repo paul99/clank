@@ -1,4 +1,4 @@
-// Copyright (c) 2011 The Chromium Authors. All rights reserved.
+// Copyright (c) 2012 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -12,7 +12,6 @@
 #include "net/base/address_list.h"
 #include "net/base/net_errors.h"
 #include "net/base/net_util.h"
-#include "net/base/sys_addrinfo.h"
 #include "net/socket/stream_socket.h"
 
 namespace {
@@ -22,9 +21,8 @@ const int kListenBacklog = 5;
 namespace content {
 
 P2PSocketHostTcpServer::P2PSocketHostTcpServer(
-    IPC::Message::Sender* message_sender,
-    int routing_id, int id)
-    : P2PSocketHost(message_sender, routing_id, id),
+    IPC::Sender* message_sender, int id)
+    : P2PSocketHost(message_sender, id),
       socket_(new net::TCPServerSocket(NULL, net::NetLog::Source())),
       ALLOW_THIS_IN_INITIALIZER_LIST(accept_callback_(
           base::Bind(&P2PSocketHostTcpServer::OnAccepted,
@@ -62,8 +60,7 @@ bool P2PSocketHostTcpServer::Init(const net::IPEndPoint& local_address,
   VLOG(1) << "Local address: " << local_address_.ToString();
 
   state_ = STATE_OPEN;
-  message_sender_->Send(new P2PMsg_OnSocketCreated(routing_id_, id_,
-                                                   local_address_));
+  message_sender_->Send(new P2PMsg_OnSocketCreated(id_, local_address_));
   DoAccept();
   return true;
 }
@@ -72,7 +69,7 @@ void P2PSocketHostTcpServer::OnError() {
   socket_.reset();
 
   if (state_ == STATE_UNINITIALIZED || state_ == STATE_OPEN)
-    message_sender_->Send(new P2PMsg_OnError(routing_id_, id_));
+    message_sender_->Send(new P2PMsg_OnError(id_));
 
   state_ = STATE_ERROR;
 }
@@ -96,21 +93,18 @@ void P2PSocketHostTcpServer::HandleAcceptResult(int result) {
   }
 
   net::IPEndPoint address;
-  net::AddressList addr_list;
-  if (accept_socket_->GetPeerAddress(&addr_list) != net::OK ||
-      !address.FromSockAddr(addr_list.head()->ai_addr,
-                            addr_list.head()->ai_addrlen)) {
+  if (accept_socket_->GetPeerAddress(&address) != net::OK) {
     LOG(ERROR) << "Failed to get address of an accepted socket.";
     accept_socket_.reset();
     return;
   }
   AcceptedSocketsMap::iterator it = accepted_sockets_.find(address);
-  if (it != accepted_sockets_.end()) {
+  if (it != accepted_sockets_.end())
     delete it->second;
-    }
+
   accepted_sockets_[address] = accept_socket_.release();
   message_sender_->Send(
-      new P2PMsg_OnIncomingTcpConnection(routing_id_, id_, address));
+      new P2PMsg_OnIncomingTcpConnection(id_, address));
 }
 
 void P2PSocketHostTcpServer::OnAccepted(int result) {
@@ -134,7 +128,7 @@ P2PSocketHost* P2PSocketHostTcpServer::AcceptIncomingTcpConnection(
   net::StreamSocket* socket = it->second;
   accepted_sockets_.erase(it);
   scoped_ptr<P2PSocketHostTcp> result(
-      new P2PSocketHostTcp(message_sender_, routing_id_, id));
+      new P2PSocketHostTcp(message_sender_, id));
   if (!result->InitAccepted(remote_address, socket))
     return NULL;
 

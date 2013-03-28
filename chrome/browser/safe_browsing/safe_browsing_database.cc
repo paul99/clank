@@ -14,7 +14,6 @@
 #include "base/metrics/stats_counters.h"
 #include "base/process_util.h"
 #include "base/time.h"
-#include "chrome/browser/safe_browsing/bloom_filter.h"
 #include "chrome/browser/safe_browsing/prefix_set.h"
 #include "chrome/browser/safe_browsing/safe_browsing_store_file.h"
 #include "content/public/browser/browser_thread.h"
@@ -31,6 +30,8 @@ namespace {
 
 // Filename suffix for the bloom filter.
 const FilePath::CharType kBloomFilterFile[] = FILE_PATH_LITERAL(" Filter 2");
+// Filename suffix for the prefix set.
+const FilePath::CharType kPrefixSetFile[] = FILE_PATH_LITERAL(" Prefix Set");
 // Filename suffix for download store.
 const FilePath::CharType kDownloadDBFile[] = FILE_PATH_LITERAL(" Download");
 // Filename suffix for client-side phishing detection whitelist store.
@@ -40,7 +41,11 @@ const FilePath::CharType kCsdWhitelistDBFile[] =
 const FilePath::CharType kDownloadWhitelistDBFile[] =
     FILE_PATH_LITERAL(" Download Whitelist");
 // Filename suffix for browse store.
-// TODO(lzheng): change to a better name when we change the file format.
+// TODO(shess): "Safe Browsing Bloom Prefix Set" is full of win.
+// Unfortunately, to change the name implies lots of transition code
+// for little benefit.  If/when file formats change (say to put all
+// the data in one file), that would be a convenient point to rectify
+// this.
 const FilePath::CharType kBrowseDBFile[] = FILE_PATH_LITERAL(" Bloom");
 
 // The maximum staleness for a cached entry.
@@ -223,177 +228,48 @@ void UpdateChunkRanges(SafeBrowsingStore* store,
   }
 }
 
+// Helper for deleting chunks left over from obsolete lists.
+void DeleteChunksFromStore(SafeBrowsingStore* store, int listid){
+  std::vector<int> add_chunks;
+  size_t adds_deleted = 0;
+  store->GetAddChunks(&add_chunks);
+  for (std::vector<int>::const_iterator iter = add_chunks.begin();
+       iter != add_chunks.end(); ++iter) {
+    if (GetListIdBit(*iter) == GetListIdBit(listid)) {
+      adds_deleted++;
+      store->DeleteAddChunk(*iter);
+    }
+  }
+  if (adds_deleted > 0)
+    UMA_HISTOGRAM_COUNTS("SB2.DownloadBinhashAddsDeleted", adds_deleted);
+
+  std::vector<int> sub_chunks;
+  size_t subs_deleted = 0;
+  store->GetSubChunks(&sub_chunks);
+  for (std::vector<int>::const_iterator iter = sub_chunks.begin();
+       iter != sub_chunks.end(); ++iter) {
+    if (GetListIdBit(*iter) == GetListIdBit(listid)) {
+      subs_deleted++;
+      store->DeleteSubChunk(*iter);
+    }
+  }
+  if (subs_deleted > 0)
+    UMA_HISTOGRAM_COUNTS("SB2.DownloadBinhashSubsDeleted", subs_deleted);
+}
+
 // Order |SBAddFullHash| on the prefix part.  |SBAddPrefixLess()| from
 // safe_browsing_store.h orders on both chunk-id and prefix.
 bool SBAddFullHashPrefixLess(const SBAddFullHash& a, const SBAddFullHash& b) {
   return a.full_hash.prefix < b.full_hash.prefix;
 }
 
-// As compared to the bloom filter, PrefixSet should have these
-// properties:
-// - Any bloom filter miss should be a prefix set miss.
-// - Any prefix set hit should be a bloom filter hit.
-// - Bloom filter false positives are prefix set misses.
-// The following is to log actual performance to verify this.
-enum PrefixSetEvent {
-  PREFIX_SET_EVENT_HIT,
-  PREFIX_SET_EVENT_BLOOM_HIT,
-  PREFIX_SET_EVENT_BLOOM_MISS_PREFIX_HIT,
-  PREFIX_SET_EVENT_BLOOM_MISS_PREFIX_HIT_INVALID,
-  PREFIX_SET_GETPREFIXES_BROKEN,
-  PREFIX_SET_GETPREFIXES_BROKEN_SIZE,
-  PREFIX_SET_GETPREFIXES_FIRST_BROKEN,
-  PREFIX_SET_SBPREFIX_WAS_BROKEN,
-  PREFIX_SET_GETPREFIXES_BROKEN_SORTING,
-  PREFIX_SET_GETPREFIXES_BROKEN_DUPLICATION,
-  PREFIX_SET_GETPREFIX_UNSORTED_IS_DELTA,
-  PREFIX_SET_GETPREFIX_UNSORTED_IS_INDEX,
-  PREFIX_SET_GETPREFIX_CHECKSUM_MISMATCH,
-
-  // Memory space for histograms is determined by the max.  ALWAYS ADD
-  // NEW VALUES BEFORE THIS ONE.
-  PREFIX_SET_EVENT_MAX
-};
-
-void RecordPrefixSetInfo(PrefixSetEvent event_type) {
-  UMA_HISTOGRAM_ENUMERATION("SB2.PrefixSetEvent", event_type,
-                            PREFIX_SET_EVENT_MAX);
-}
-
-// Generate a |PrefixSet| instance from the contents of
-// |add_prefixes|.  Additionally performs various checks to make sure
-// that the resulting prefix set is valid, so that the
-// PREFIX_SET_EVENT_BLOOM_MISS_PREFIX_HIT_INVALID histogram in
-// ContainsBrowseUrl() can be trustworthy.
-safe_browsing::PrefixSet* PrefixSetFromAddPrefixes(
-    const SBAddPrefixes& add_prefixes) {
-  // TODO(shess): If |add_prefixes| were sorted by the prefix, it
-  // could be passed directly to |PrefixSet()|, removing the need for
-  // |prefixes|.  For now, |prefixes| is useful while debugging
-  // things.
-  std::vector<SBPrefix> prefixes;
-  prefixes.reserve(add_prefixes.size());
-  for (SBAddPrefixes::const_iterator iter = add_prefixes.begin();
-       iter != add_prefixes.end(); ++iter) {
-    prefixes.push_back(iter->prefix);
-  }
-
-  std::sort(prefixes.begin(), prefixes.end());
-  prefixes.erase(std::unique(prefixes.begin(), prefixes.end()),
-                 prefixes.end());
-
-  scoped_ptr<safe_browsing::PrefixSet>
-      prefix_set(new safe_browsing::PrefixSet(prefixes));
-
-  std::vector<SBPrefix> restored;
-  prefix_set->GetPrefixes(&restored);
-
-  // Expect them to be equal.
-  if (restored.size() == prefixes.size() &&
-      std::equal(prefixes.begin(), prefixes.end(), restored.begin()))
-    return prefix_set.release();
-
-  // Log BROKEN for continuity with previous release, and SIZE to
-  // distinguish which test failed.
-  NOTREACHED();
-  RecordPrefixSetInfo(PREFIX_SET_GETPREFIXES_BROKEN);
-  if (restored.size() != prefixes.size())
-    RecordPrefixSetInfo(PREFIX_SET_GETPREFIXES_BROKEN_SIZE);
-
-  // Try to distinguish between updates from one broken user and a
-  // distributed problem.
-  static bool logged_broken = false;
-  if (!logged_broken) {
-    RecordPrefixSetInfo(PREFIX_SET_GETPREFIXES_FIRST_BROKEN);
-    logged_broken = true;
-  }
-
-  // This seems so very very unlikely.  But if it ever were true, then
-  // it could explain why GetPrefixes() seemed broken.
-  if (sizeof(int) != sizeof(int32))
-    RecordPrefixSetInfo(PREFIX_SET_SBPREFIX_WAS_BROKEN);
-
-  // Check if memory was corrupted during construction.
-  if (!prefix_set->CheckChecksum())
-    RecordPrefixSetInfo(PREFIX_SET_GETPREFIX_CHECKSUM_MISMATCH);
-
-  // Check whether |restored| is unsorted, or has duplication.
-  if (restored.size()) {
-    size_t unsorted_count = 0;
-    bool duplicates = false;
-    SBPrefix prev = restored[0];
-    for (size_t i = 0; i < restored.size(); prev = restored[i], ++i) {
-      if (prev > restored[i]) {
-        unsorted_count++;
-        UMA_HISTOGRAM_COUNTS("SB2.PrefixSetUnsortedDifference",
-                             prev - restored[i]);
-
-        // When unsorted, how big is the set, and how far are we into
-        // it.  If the set is very small or large, that might inform
-        // pursuit of a degenerate case.  If the percentage is close
-        // to 0%, 100%, or 50%, then there might be an interesting
-        // degenerate case to explore.
-        UMA_HISTOGRAM_COUNTS("SB2.PrefixSetUnsortedSize", restored.size());
-        UMA_HISTOGRAM_PERCENTAGE("SB2.PrefixSetUnsortedPercent",
-                                 i * 100 / restored.size());
-
-        if (prefix_set->IsDeltaAt(i)) {
-          RecordPrefixSetInfo(PREFIX_SET_GETPREFIX_UNSORTED_IS_DELTA);
-
-          // Histograms require memory on the order of the number of
-          // buckets, making high-precision logging expensive.  For
-          // now aim for a sense of the range of the problem.
-          UMA_HISTOGRAM_CUSTOM_COUNTS("SB2.PrefixSetUnsortedDelta",
-                                      prefix_set->DeltaAt(i), 1, 0xFFFF, 50);
-        } else {
-          RecordPrefixSetInfo(PREFIX_SET_GETPREFIX_UNSORTED_IS_INDEX);
-        }
-      }
-      if (prev == restored[i])
-        duplicates = true;
-    }
-
-    // Record findings.
-    if (unsorted_count) {
-      RecordPrefixSetInfo(PREFIX_SET_GETPREFIXES_BROKEN_SORTING);
-      UMA_HISTOGRAM_COUNTS_100("SB2.PrefixSetUnsorted", unsorted_count);
-    }
-    if (duplicates)
-      RecordPrefixSetInfo(PREFIX_SET_GETPREFIXES_BROKEN_DUPLICATION);
-
-    // Fix the problems noted.  If |restored| was unsorted, then
-    // |duplicates| may give a false negative.
-    if (unsorted_count)
-      std::sort(restored.begin(), restored.end());
-    if (unsorted_count || duplicates)
-      restored.erase(std::unique(restored.begin(), restored.end()),
-                     restored.end());
-  }
-
-  // NOTE(shess): The following could be done using a single
-  // uber-loop, but it's complicated by needing multiple parallel
-  // iterators.  Didn't seem worthwhile for something that will only
-  // live for a short period and only fires for one in a million
-  // updates.
-
-  // Find elements in |restored| which are not in |prefixes|.
-  std::vector<SBPrefix> difference;
-  std::set_difference(restored.begin(), restored.end(),
-                      prefixes.begin(), prefixes.end(),
-                      std::back_inserter(difference));
-  if (difference.size())
-    UMA_HISTOGRAM_COUNTS_100("SB2.PrefixSetRestoredExcess", difference.size());
-
-  // Find elements in |prefixes| which are not in |restored|.
-  difference.clear();
-  std::set_difference(prefixes.begin(), prefixes.end(),
-                      restored.begin(), restored.end(),
-                      std::back_inserter(difference));
-  if (difference.size())
-    UMA_HISTOGRAM_COUNTS_100("SB2.PrefixSetRestoredShortfall",
-                             difference.size());
-
-  return prefix_set.release();
+// This code always checks for non-zero file size.  This helper makes
+// that less verbose.
+int64 GetFileSizeOrZero(const FilePath& file_path) {
+  int64 size_64;
+  if (!file_util::GetFileSize(file_path, &size_64))
+    return 0;
+  return size_64;
 }
 
 }  // namespace
@@ -456,6 +332,12 @@ FilePath SafeBrowsingDatabase::DownloadDBFilename(
 FilePath SafeBrowsingDatabase::BloomFilterForFilename(
     const FilePath& db_filename) {
   return FilePath(db_filename.value() + kBloomFilterFile);
+}
+
+// static
+FilePath SafeBrowsingDatabase::PrefixSetForFilename(
+    const FilePath& db_filename) {
+  return FilePath(db_filename.value() + kPrefixSetFile);
 }
 
 // static
@@ -532,7 +414,7 @@ void SafeBrowsingDatabaseNew::Init(const FilePath& filename_base) {
   DCHECK(download_whitelist_filename_.empty());
 
   browse_filename_ = BrowseDBFilename(filename_base);
-  bloom_filter_filename_ = BloomFilterForFilename(browse_filename_);
+  prefix_set_filename_ = PrefixSetForFilename(browse_filename_);
 
   browse_store_->Init(
       browse_filename_,
@@ -548,7 +430,7 @@ void SafeBrowsingDatabaseNew::Init(const FilePath& filename_base) {
     base::AutoLock locked(lookup_lock_);
     full_browse_hashes_.clear();
     pending_browse_hashes_.clear();
-    LoadBloomFilter();
+    LoadPrefixSet();
   }
 
   if (download_store_.get()) {
@@ -611,12 +493,7 @@ bool SafeBrowsingDatabaseNew::ResetDatabase() {
     full_browse_hashes_.clear();
     pending_browse_hashes_.clear();
     prefix_miss_cache_.clear();
-    // TODO(shess): This could probably be |bloom_filter_.reset()|.
-    browse_bloom_filter_ = new BloomFilter(BloomFilter::kBloomFilterMinSize *
-                                           BloomFilter::kBloomFilterSizeRatio);
-    // TODO(shess): It is simpler for the code to assume that presence
-    // of a bloom filter always implies presence of a prefix set.
-    prefix_set_.reset(new safe_browsing::PrefixSet(std::vector<SBPrefix>()));
+    prefix_set_.reset();
   }
   // Wants to acquire the lock itself.
   WhitelistEverything(&csd_whitelist_);
@@ -643,49 +520,22 @@ bool SafeBrowsingDatabaseNew::ContainsBrowseUrl(
     return false;
 
   // This function is called on the I/O thread, prevent changes to
-  // bloom filter and caches.
+  // filter and caches.
   base::AutoLock locked(lookup_lock_);
 
-  if (!browse_bloom_filter_.get())
+  // |prefix_set_| is empty until it is either read from disk, or the
+  // first update populates it.  Bail out without a hit if not yet
+  // available.
+  if (!prefix_set_.get())
     return false;
-  DCHECK(prefix_set_.get());
-
-  // Used to double-check in case of a hit mis-match.
-  std::vector<SBPrefix> restored;
 
   size_t miss_count = 0;
   for (size_t i = 0; i < full_hashes.size(); ++i) {
-    bool found = prefix_set_->Exists(full_hashes[i].prefix);
-
-    if (browse_bloom_filter_->Exists(full_hashes[i].prefix)) {
-      RecordPrefixSetInfo(PREFIX_SET_EVENT_BLOOM_HIT);
-      if (found)
-        RecordPrefixSetInfo(PREFIX_SET_EVENT_HIT);
-      prefix_hits->push_back(full_hashes[i].prefix);
-      if (prefix_miss_cache_.count(full_hashes[i].prefix) > 0)
+    const SBPrefix prefix = full_hashes[i].prefix;
+    if (prefix_set_->Exists(prefix)) {
+      prefix_hits->push_back(prefix);
+      if (prefix_miss_cache_.count(prefix) > 0)
         ++miss_count;
-    } else {
-      // Bloom filter misses should never be in prefix set.  Re-create
-      // the original prefixes and manually search for it, to check if
-      // there's a bug with how |Exists()| is implemented.
-      // |UpdateBrowseStore()| previously verified that
-      // |GetPrefixes()| returns the same prefixes as were passed to
-      // the constructor.
-      DCHECK(!found);
-      if (found) {
-        if (restored.empty())
-          prefix_set_->GetPrefixes(&restored);
-
-        // If the item is not in the re-created list, then there is an
-        // error in |PrefixSet::Exists()|.  If the item is in the
-        // re-created list, then the bloom filter was wrong.
-        if (std::binary_search(restored.begin(), restored.end(),
-                               full_hashes[i].prefix)) {
-          RecordPrefixSetInfo(PREFIX_SET_EVENT_BLOOM_MISS_PREFIX_HIT);
-        } else {
-          RecordPrefixSetInfo(PREFIX_SET_EVENT_BLOOM_MISS_PREFIX_HIT_INVALID);
-        }
-      }
     }
   }
 
@@ -944,7 +794,7 @@ void SafeBrowsingDatabaseNew::InsertChunks(const std::string& list_name,
   if (corruption_detected_ || chunks.empty())
     return;
 
-  const base::Time insert_start = base::Time::Now();
+  const base::TimeTicks before = base::TimeTicks::Now();
 
   const int list_id = safe_browsing_util::GetListId(list_name);
   DVLOG(2) << list_name << ": " << list_id;
@@ -962,7 +812,7 @@ void SafeBrowsingDatabaseNew::InsertChunks(const std::string& list_name,
   }
   store->FinishChunk();
 
-  UMA_HISTOGRAM_TIMES("SB2.ChunkInsert", base::Time::Now() - insert_start);
+  UMA_HISTOGRAM_TIMES("SB2.ChunkInsert", base::TimeTicks::Now() - before);
 }
 
 void SafeBrowsingDatabaseNew::DeleteChunks(
@@ -1065,18 +915,31 @@ bool SafeBrowsingDatabaseNew::UpdateStarted(
   UpdateChunkRanges(browse_store_.get(), browse_listnames, lists);
 
   if (download_store_.get()) {
+    // This store used to contain kBinHashList in addition to
+    // kBinUrlList.  Strip the stale data before generating the chunk
+    // ranges to request.  UpdateChunkRanges() will traverse the chunk
+    // list, so this is very cheap if there are no kBinHashList chunks.
+    const int listid =
+        safe_browsing_util::GetListId(safe_browsing_util::kBinHashList);
+    DeleteChunksFromStore(download_store_.get(), listid);
+
+    // The above marks the chunks for deletion, but they are not
+    // actually deleted until the database is rewritten.  The
+    // following code removes the kBinHashList part of the request
+    // before continuing so that UpdateChunkRanges() doesn't break.
     std::vector<std::string> download_listnames;
     download_listnames.push_back(safe_browsing_util::kBinUrlList);
     download_listnames.push_back(safe_browsing_util::kBinHashList);
     UpdateChunkRanges(download_store_.get(), download_listnames, lists);
     DCHECK_EQ(lists->back().name,
               std::string(safe_browsing_util::kBinHashList));
-    // Remove kBinHashList entry so that we do not request updates for it from
-    // the server.  The existing data will still be retained by
-    // SafeBrowsingStoreFile::DoUpdate.
-    // TODO(mattm): write some code to remove the kBinHashList data from the
-    // file?
     lists->pop_back();
+
+    // TODO(shess): This problem could also be handled in
+    // BeginUpdate() by detecting the chunks to delete and rewriting
+    // the database before it's used.  When I implemented that, it
+    // felt brittle, it might be easier to just wait for some future
+    // format change.
   }
 
   if (csd_whitelist_store_.get()) {
@@ -1101,11 +964,34 @@ bool SafeBrowsingDatabaseNew::UpdateStarted(
 
 void SafeBrowsingDatabaseNew::UpdateFinished(bool update_succeeded) {
   DCHECK_EQ(creation_loop_, MessageLoop::current());
+
+  // The update may have failed due to corrupt storage (for instance,
+  // an excessive number of invalid add_chunks and sub_chunks).
+  // Double-check that the databases are valid.
+  // TODO(shess): Providing a checksum for the add_chunk and sub_chunk
+  // sections would allow throwing a corruption error in
+  // UpdateStarted().
+  if (!update_succeeded) {
+    if (!browse_store_->CheckValidity())
+      DLOG(ERROR) << "Safe-browsing browse database corrupt.";
+
+    if (download_store_.get() && !download_store_->CheckValidity())
+      DLOG(ERROR) << "Safe-browsing download database corrupt.";
+
+    if (csd_whitelist_store_.get() && !csd_whitelist_store_->CheckValidity())
+      DLOG(ERROR) << "Safe-browsing csd whitelist database corrupt.";
+
+    if (download_whitelist_store_.get() &&
+        !download_whitelist_store_->CheckValidity()) {
+      DLOG(ERROR) << "Safe-browsing download whitelist database corrupt.";
+    }
+  }
+
   if (corruption_detected_)
     return;
 
   // Unroll the transaction if there was a protocol error or if the
-  // transaction was empty.  This will leave the bloom filter, the
+  // transaction was empty.  This will leave the prefix set, the
   // pending hashes, and the prefix miss cache in place.
   if (!update_succeeded || !change_detected_) {
     // Track empty updates to answer questions at http://crbug.com/72216 .
@@ -1174,8 +1060,6 @@ void SafeBrowsingDatabaseNew::UpdateDownloadStore() {
   std::vector<SBAddFullHash> empty_add_hashes;
 
   // For download, backend lookup happens only if a prefix is in add list.
-  // No need to pass in miss cache when call FinishUpdate to caculate
-  // bloomfilter false positives.
   std::set<SBPrefix> empty_miss_cache;
 
   // These results are not used after this call. Simply ignore the
@@ -1189,11 +1073,9 @@ void SafeBrowsingDatabaseNew::UpdateDownloadStore() {
                                      &add_full_hashes_result))
     RecordFailure(FAILURE_DOWNLOAD_DATABASE_UPDATE_FINISH);
 
-  int64 size_64;
-  if (file_util::GetFileSize(download_filename_, &size_64)) {
-    UMA_HISTOGRAM_COUNTS("SB2.DownloadDatabaseKilobytes",
-                         static_cast<int>(size_64 / 1024));
-  }
+  int64 file_size = GetFileSizeOrZero(download_filename_);
+  UMA_HISTOGRAM_COUNTS("SB2.DownloadDatabaseKilobytes",
+                       static_cast<int>(file_size / 1024));
 
 #if defined(OS_MACOSX)
   base::mac::SetFileBackupExclusion(download_filename_);
@@ -1211,7 +1093,7 @@ void SafeBrowsingDatabaseNew::UpdateBrowseStore() {
                               pending_browse_hashes_.end());
   }
 
-  // Measure the amount of IO during the bloom filter build.
+  // Measure the amount of IO during the filter build.
   base::IoCounters io_before, io_after;
   base::ProcessHandle handle = base::Process::Current().handle();
   scoped_ptr<base::ProcessMetrics> metric(
@@ -1228,7 +1110,7 @@ void SafeBrowsingDatabaseNew::UpdateBrowseStore() {
   // stats if they are available.
   const bool got_counters = metric->GetIOCounters(&io_before);
 
-  const base::Time before = base::Time::Now();
+  const base::TimeTicks before = base::TimeTicks::Now();
 
   SBAddPrefixes add_prefixes;
   std::vector<SBAddFullHash> add_full_hashes;
@@ -1238,19 +1120,20 @@ void SafeBrowsingDatabaseNew::UpdateBrowseStore() {
     return;
   }
 
-  // Create and populate |filter| from |add_prefixes|.
-  // TODO(shess): The bloom filter doesn't need to be a
-  // scoped_refptr<> for this code.  Refactor that away.
-  const int filter_size =
-      BloomFilter::FilterSizeForKeyCount(add_prefixes.size());
-  scoped_refptr<BloomFilter> filter(new BloomFilter(filter_size));
+  // TODO(shess): If |add_prefixes| were sorted by the prefix, it
+  // could be passed directly to |PrefixSet()|, removing the need for
+  // |prefixes|.  For now, |prefixes| is useful while debugging
+  // things.
+  std::vector<SBPrefix> prefixes;
+  prefixes.reserve(add_prefixes.size());
   for (SBAddPrefixes::const_iterator iter = add_prefixes.begin();
        iter != add_prefixes.end(); ++iter) {
-    filter->Insert(iter->prefix);
+    prefixes.push_back(iter->prefix);
   }
 
+  std::sort(prefixes.begin(), prefixes.end());
   scoped_ptr<safe_browsing::PrefixSet>
-      prefix_set(PrefixSetFromAddPrefixes(add_prefixes));
+      prefix_set(new safe_browsing::PrefixSet(prefixes));
 
   // This needs to be in sorted order by prefix for efficient access.
   std::sort(add_full_hashes.begin(), add_full_hashes.end(),
@@ -1268,15 +1151,17 @@ void SafeBrowsingDatabaseNew::UpdateBrowseStore() {
     // hash will be fetched again).
     pending_browse_hashes_.clear();
     prefix_miss_cache_.clear();
-    browse_bloom_filter_.swap(filter);
     prefix_set_.swap(prefix_set);
   }
 
-  const base::TimeDelta bloom_gen = base::Time::Now() - before;
+  DVLOG(1) << "SafeBrowsingDatabaseImpl built prefix set in "
+           << (base::TimeTicks::Now() - before).InMilliseconds()
+           << " ms total.  prefix count: " << add_prefixes.size();
+  UMA_HISTOGRAM_LONG_TIMES("SB2.BuildFilter", base::TimeTicks::Now() - before);
 
-  // Persist the bloom filter to disk.  Since only this thread changes
-  // |browse_bloom_filter_|, there is no need to lock.
-  WriteBloomFilter();
+  // Persist the prefix set to disk.  Since only this thread changes
+  // |prefix_set_|, there is no need to lock.
+  WritePrefixSet();
 
   // Gather statistics.
   if (got_counters && metric->GetIOCounters(&io_after)) {
@@ -1293,17 +1178,13 @@ void SafeBrowsingDatabaseNew::UpdateBrowseStore() {
                          static_cast<int>(io_after.WriteOperationCount -
                                           io_before.WriteOperationCount));
   }
-  DVLOG(1) << "SafeBrowsingDatabaseImpl built bloom filter in "
-           << bloom_gen.InMilliseconds() << " ms total.  prefix count: "
-           << add_prefixes.size();
-  UMA_HISTOGRAM_LONG_TIMES("SB2.BuildFilter", bloom_gen);
-  UMA_HISTOGRAM_COUNTS("SB2.FilterKilobytes",
-                       browse_bloom_filter_->size() / 1024);
-  int64 size_64;
-  if (file_util::GetFileSize(browse_filename_, &size_64)) {
-    UMA_HISTOGRAM_COUNTS("SB2.BrowseDatabaseKilobytes",
-                         static_cast<int>(size_64 / 1024));
-  }
+
+  int64 file_size = GetFileSizeOrZero(prefix_set_filename_);
+  UMA_HISTOGRAM_COUNTS("SB2.PrefixSetKilobytes",
+                       static_cast<int>(file_size / 1024));
+  file_size = GetFileSizeOrZero(browse_filename_);
+  UMA_HISTOGRAM_COUNTS("SB2.BrowseDatabaseKilobytes",
+                       static_cast<int>(file_size / 1024));
 
 #if defined(OS_MACOSX)
   base::mac::SetFileBackupExclusion(browse_filename_);
@@ -1325,42 +1206,33 @@ void SafeBrowsingDatabaseNew::OnHandleCorruptDatabase() {
   RecordFailure(FAILURE_DATABASE_CORRUPT_HANDLER);
   corruption_detected_ = true;  // Stop updating the database.
   ResetDatabase();
-  DCHECK(false) << "SafeBrowsing database was corrupt and reset";
+  DLOG(FATAL) << "SafeBrowsing database was corrupt and reset";
 }
 
 // TODO(shess): I'm not clear why this code doesn't have any
 // real error-handling.
-void SafeBrowsingDatabaseNew::LoadBloomFilter() {
+void SafeBrowsingDatabaseNew::LoadPrefixSet() {
   DCHECK_EQ(creation_loop_, MessageLoop::current());
-  DCHECK(!bloom_filter_filename_.empty());
+  DCHECK(!prefix_set_filename_.empty());
 
-  // If we're missing either of the database or filter files, we wait until the
-  // next update to generate a new filter.
-  // TODO(paulg): Investigate how often the filter file is missing and how
-  // expensive it would be to regenerate it.
-  int64 size_64 = 0;
-  if (!file_util::GetFileSize(browse_filename_, &size_64) || size_64 == 0)
+  // If there is no database, the filter cannot be used.
+  base::PlatformFileInfo db_info;
+  if (!file_util::GetFileInfo(browse_filename_, &db_info) || db_info.size == 0)
     return;
 
-  if (!file_util::GetFileSize(bloom_filter_filename_, &size_64) ||
-      size_64 == 0) {
-    RecordFailure(FAILURE_DATABASE_FILTER_MISSING);
-    return;
-  }
+  // Cleanup any stale bloom filter (no longer used).
+  // TODO(shess): Track failure to delete?
+  FilePath bloom_filter_filename = BloomFilterForFilename(browse_filename_);
+  file_util::Delete(bloom_filter_filename, false);
 
   const base::TimeTicks before = base::TimeTicks::Now();
-  browse_bloom_filter_ = BloomFilter::LoadFile(bloom_filter_filename_);
-  DVLOG(1) << "SafeBrowsingDatabaseNew read bloom filter in "
+  prefix_set_.reset(safe_browsing::PrefixSet::LoadFile(prefix_set_filename_));
+  DVLOG(1) << "SafeBrowsingDatabaseNew read prefix set in "
            << (base::TimeTicks::Now() - before).InMilliseconds() << " ms";
+  UMA_HISTOGRAM_TIMES("SB2.PrefixSetLoad", base::TimeTicks::Now() - before);
 
-  if (!browse_bloom_filter_.get())
-    RecordFailure(FAILURE_DATABASE_FILTER_READ);
-
-  // Manually re-generate the prefix set from the main database.
-  // TODO(shess): Write/read for prefix set.
-  SBAddPrefixes add_prefixes;
-  browse_store_->GetAddPrefixes(&add_prefixes);
-  prefix_set_.reset(PrefixSetFromAddPrefixes(add_prefixes));
+  if (!prefix_set_.get())
+    RecordFailure(FAILURE_DATABASE_PREFIX_SET_READ);
 }
 
 bool SafeBrowsingDatabaseNew::Delete() {
@@ -1384,28 +1256,34 @@ bool SafeBrowsingDatabaseNew::Delete() {
   if (!r4)
     RecordFailure(FAILURE_DATABASE_STORE_DELETE);
 
-  const bool r5 = file_util::Delete(bloom_filter_filename_, false);
+  FilePath bloom_filter_filename = BloomFilterForFilename(browse_filename_);
+  const bool r5 = file_util::Delete(bloom_filter_filename, false);
   if (!r5)
     RecordFailure(FAILURE_DATABASE_FILTER_DELETE);
-  return r1 && r2 && r3 && r4 && r5;
+
+  const bool r6 = file_util::Delete(prefix_set_filename_, false);
+  if (!r6)
+    RecordFailure(FAILURE_DATABASE_PREFIX_SET_DELETE);
+  return r1 && r2 && r3 && r4 && r5 && r6;
 }
 
-void SafeBrowsingDatabaseNew::WriteBloomFilter() {
+void SafeBrowsingDatabaseNew::WritePrefixSet() {
   DCHECK_EQ(creation_loop_, MessageLoop::current());
 
-  if (!browse_bloom_filter_.get())
+  if (!prefix_set_.get())
     return;
 
   const base::TimeTicks before = base::TimeTicks::Now();
-  const bool write_ok = browse_bloom_filter_->WriteFile(bloom_filter_filename_);
-  DVLOG(1) << "SafeBrowsingDatabaseNew wrote bloom filter in "
+  const bool write_ok = prefix_set_->WriteFile(prefix_set_filename_);
+  DVLOG(1) << "SafeBrowsingDatabaseNew wrote prefix set in "
            << (base::TimeTicks::Now() - before).InMilliseconds() << " ms";
+  UMA_HISTOGRAM_TIMES("SB2.PrefixSetWrite", base::TimeTicks::Now() - before);
 
   if (!write_ok)
-    RecordFailure(FAILURE_DATABASE_FILTER_WRITE);
+    RecordFailure(FAILURE_DATABASE_PREFIX_SET_WRITE);
 
 #if defined(OS_MACOSX)
-  base::mac::SetFileBackupExclusion(bloom_filter_filename_);
+  base::mac::SetFileBackupExclusion(prefix_set_filename_);
 #endif
 }
 

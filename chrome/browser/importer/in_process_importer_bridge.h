@@ -1,10 +1,9 @@
-// Copyright (c) 2011 The Chromium Authors. All rights reserved.
+// Copyright (c) 2012 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
 #ifndef CHROME_BROWSER_IMPORTER_IN_PROCESS_IMPORTER_BRIDGE_H_
 #define CHROME_BROWSER_IMPORTER_IN_PROCESS_IMPORTER_BRIDGE_H_
-#pragma once
 
 #include <string>
 #include <vector>
@@ -37,15 +36,14 @@ class InProcessImporterBridge : public ImporterBridge {
   virtual void SetFavicons(
       const std::vector<history::ImportedFaviconUsage>& favicons) OVERRIDE;
 
-  virtual void SetHistoryItems(const std::vector<history::URLRow>& rows,
+  virtual void SetHistoryItems(const history::URLRows& rows,
                                history::VisitSource visit_source) OVERRIDE;
 
   virtual void SetKeywords(const std::vector<TemplateURL*>& template_urls,
-                           int default_keyword_index,
                            bool unique_on_host_and_path) OVERRIDE;
 
   virtual void SetPasswordForm(
-      const webkit::forms::PasswordForm& form) OVERRIDE;
+      const content::PasswordForm& form) OVERRIDE;
 
   virtual void NotifyStarted() OVERRIDE;
   virtual void NotifyItemStarted(importer::ImportItem item) OVERRIDE;

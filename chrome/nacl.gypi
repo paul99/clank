@@ -1,4 +1,4 @@
-# Copyright (c) 2011 The Chromium Authors. All rights reserved.
+# Copyright (c) 2012 The Chromium Authors. All rights reserved.
 # Use of this source code is governed by a BSD-style license that can be
 # found in the LICENSE file.
 
@@ -24,6 +24,8 @@
           # .cc, .h, and .mm files under nacl that are used on all
           # platforms, including both 32-bit and 64-bit Windows.
           # Test files are also not included.
+          'nacl/nacl_ipc_adapter.cc',
+          'nacl/nacl_ipc_adapter.h',
           'nacl/nacl_main.cc',
           'nacl/nacl_main_platform_delegate.h',
           'nacl/nacl_main_platform_delegate_linux.cc',
@@ -31,6 +33,9 @@
           'nacl/nacl_main_platform_delegate_win.cc',
           'nacl/nacl_listener.cc',
           'nacl/nacl_listener.h',
+          'nacl/nacl_validation_db.h',
+          'nacl/nacl_validation_query.cc',
+          'nacl/nacl_validation_query.h',
         ],
         # TODO(gregoryd): consider switching NaCl to use Chrome OS defines
         'conditions': [
@@ -68,13 +73,17 @@
             '../base/base.gyp:base',
             '../ipc/ipc.gyp:ipc',
             '../ppapi/native_client/src/trusted/plugin/plugin.gyp:ppGoogleNaClPluginChrome',
-            '../native_client/src/trusted/service_runtime/service_runtime.gyp:sel',
-            '../native_client/src/trusted/platform_qualify/platform_qualify.gyp:platform_qual_lib',
+            '../ppapi/ppapi_internal.gyp:ppapi_shared',
+            '../ppapi/ppapi_internal.gyp:ppapi_ipc',
+            '../native_client/src/trusted/service_runtime/service_runtime.gyp:sel_main_chrome',
           ],
           'conditions': [
             ['disable_nacl_untrusted==0', {
               'dependencies': [
                 '../ppapi/native_client/native_client.gyp:nacl_irt',
+                '../ppapi/native_client/native_client.gyp:nacl_irt_srpc',
+                '../ppapi/native_client/src/untrusted/pnacl_irt_shim/pnacl_irt_shim.gyp:pnacl_irt_shim',
+                '../ppapi/native_client/src/untrusted/pnacl_support_extension/pnacl_support_extension.gyp:pnacl_support_extension',
               ],
             }],
           ],
@@ -95,12 +104,18 @@
                 'nacl_target': 1,
               },
               'dependencies': [
-                '../native_client/src/trusted/service_runtime/service_runtime.gyp:sel64',
-                '../native_client/src/trusted/platform_qualify/platform_qualify.gyp:platform_qual_lib64',
+                '../native_client/src/trusted/service_runtime/service_runtime.gyp:sel_main_chrome64',
+                '../ppapi/ppapi_internal.gyp:ppapi_shared_win64',
+                '../ppapi/ppapi_internal.gyp:ppapi_ipc_win64',
+              ],
+              'export_dependent_settings': [
+                '../ppapi/ppapi_internal.gyp:ppapi_ipc_win64',
               ],
               'sources': [
                 'common/nacl_cmd_line.cc',
+                'common/nacl_debug_exception_handler_win.cc',
                 'common/nacl_messages.cc',
+                'common/nacl_types.cc',
                 'nacl/nacl_broker_listener.cc',
                 'nacl/nacl_broker_listener.h',
               ],
@@ -124,7 +139,7 @@
             },
           ],
         }],
-        ['OS=="linux" and coverage==0', {
+        ['OS=="linux"', {
           'targets': [
             {
               'target_name': 'nacl_helper',
@@ -133,13 +148,16 @@
                 '..',
               ],
               'dependencies': [
+                '../crypto/crypto.gyp:crypto',
+                '../sandbox/sandbox.gyp:libc_urandom_override',
                 'nacl',
               ],
               'sources': [
                 'nacl/nacl_helper_linux.cc',
+                '../base/posix/unix_domain_socket.cc',
                 '../chrome/common/nacl_messages.cc',
+                '../chrome/common/nacl_types.cc',
                 '../content/common/child_process_sandbox_support_impl_shm_linux.cc',
-                '../content/common/unix_domain_socket_posix.cc',
               ],
               'conditions': [
                 ['toolkit_uses_gtk == 1', {

@@ -11,6 +11,7 @@
 #include <string>
 #include <vector>
 
+#include "base/guid.h"
 #include "base/i18n/case_conversion.h"
 #include "base/logging.h"
 #include "base/string_number_conversions.h"
@@ -23,13 +24,12 @@
 #include "chrome/browser/autofill/personal_data_manager.h"
 #include "chrome/browser/password_manager/encryptor.h"
 #include "chrome/browser/webdata/autofill_change.h"
-#include "chrome/common/guid.h"
+#include "chrome/browser/webdata/autofill_entry.h"
+#include "chrome/common/form_field_data.h"
 #include "sql/statement.h"
 #include "ui/base/l10n/l10n_util.h"
-#include "webkit/forms/form_field.h"
 
 using base::Time;
-using webkit::forms::FormField;
 
 namespace {
 
@@ -51,22 +51,22 @@ string16 LimitDataSize(const string16& data) {
 
 void BindAutofillProfileToStatement(const AutofillProfile& profile,
                                     sql::Statement* s) {
-  DCHECK(guid::IsValidGUID(profile.guid()));
+  DCHECK(base::IsValidGUID(profile.guid()));
   s->BindString(0, profile.guid());
 
-  string16 text = profile.GetInfo(COMPANY_NAME);
+  string16 text = profile.GetRawInfo(COMPANY_NAME);
   s->BindString16(1, LimitDataSize(text));
-  text = profile.GetInfo(ADDRESS_HOME_LINE1);
+  text = profile.GetRawInfo(ADDRESS_HOME_LINE1);
   s->BindString16(2, LimitDataSize(text));
-  text = profile.GetInfo(ADDRESS_HOME_LINE2);
+  text = profile.GetRawInfo(ADDRESS_HOME_LINE2);
   s->BindString16(3, LimitDataSize(text));
-  text = profile.GetInfo(ADDRESS_HOME_CITY);
+  text = profile.GetRawInfo(ADDRESS_HOME_CITY);
   s->BindString16(4, LimitDataSize(text));
-  text = profile.GetInfo(ADDRESS_HOME_STATE);
+  text = profile.GetRawInfo(ADDRESS_HOME_STATE);
   s->BindString16(5, LimitDataSize(text));
-  text = profile.GetInfo(ADDRESS_HOME_ZIP);
+  text = profile.GetRawInfo(ADDRESS_HOME_ZIP);
   s->BindString16(6, LimitDataSize(text));
-  text = profile.GetInfo(ADDRESS_HOME_COUNTRY);
+  text = profile.GetRawInfo(ADDRESS_HOME_COUNTRY);
   s->BindString16(7, LimitDataSize(text));
   std::string country_code = profile.CountryCode();
   s->BindString(8, country_code);
@@ -76,14 +76,14 @@ void BindAutofillProfileToStatement(const AutofillProfile& profile,
 AutofillProfile* AutofillProfileFromStatement(const sql::Statement& s) {
   AutofillProfile* profile = new AutofillProfile;
   profile->set_guid(s.ColumnString(0));
-  DCHECK(guid::IsValidGUID(profile->guid()));
+  DCHECK(base::IsValidGUID(profile->guid()));
 
-  profile->SetInfo(COMPANY_NAME, s.ColumnString16(1));
-  profile->SetInfo(ADDRESS_HOME_LINE1, s.ColumnString16(2));
-  profile->SetInfo(ADDRESS_HOME_LINE2, s.ColumnString16(3));
-  profile->SetInfo(ADDRESS_HOME_CITY, s.ColumnString16(4));
-  profile->SetInfo(ADDRESS_HOME_STATE, s.ColumnString16(5));
-  profile->SetInfo(ADDRESS_HOME_ZIP, s.ColumnString16(6));
+  profile->SetRawInfo(COMPANY_NAME, s.ColumnString16(1));
+  profile->SetRawInfo(ADDRESS_HOME_LINE1, s.ColumnString16(2));
+  profile->SetRawInfo(ADDRESS_HOME_LINE2, s.ColumnString16(3));
+  profile->SetRawInfo(ADDRESS_HOME_CITY, s.ColumnString16(4));
+  profile->SetRawInfo(ADDRESS_HOME_STATE, s.ColumnString16(5));
+  profile->SetRawInfo(ADDRESS_HOME_ZIP, s.ColumnString16(6));
   // Intentionally skip column 7, which stores the localized country name.
   profile->SetCountryCode(s.ColumnString(8));
   // Intentionally skip column 9, which stores the profile's modification date.
@@ -93,16 +93,16 @@ AutofillProfile* AutofillProfileFromStatement(const sql::Statement& s) {
 
 void BindCreditCardToStatement(const CreditCard& credit_card,
                                sql::Statement* s) {
-  DCHECK(guid::IsValidGUID(credit_card.guid()));
+  DCHECK(base::IsValidGUID(credit_card.guid()));
   s->BindString(0, credit_card.guid());
 
-  string16 text = credit_card.GetInfo(CREDIT_CARD_NAME);
+  string16 text = credit_card.GetRawInfo(CREDIT_CARD_NAME);
   s->BindString16(1, LimitDataSize(text));
-  text = credit_card.GetInfo(CREDIT_CARD_EXP_MONTH);
+  text = credit_card.GetRawInfo(CREDIT_CARD_EXP_MONTH);
   s->BindString16(2, LimitDataSize(text));
-  text = credit_card.GetInfo(CREDIT_CARD_EXP_4_DIGIT_YEAR);
+  text = credit_card.GetRawInfo(CREDIT_CARD_EXP_4_DIGIT_YEAR);
   s->BindString16(3, LimitDataSize(text));
-  text = credit_card.GetInfo(CREDIT_CARD_NUMBER);
+  text = credit_card.GetRawInfo(CREDIT_CARD_NUMBER);
   std::string encrypted_data;
   Encryptor::EncryptString16(text, &encrypted_data);
   s->BindBlob(4, encrypted_data.data(),
@@ -114,11 +114,11 @@ CreditCard* CreditCardFromStatement(const sql::Statement& s) {
   CreditCard* credit_card = new CreditCard;
 
   credit_card->set_guid(s.ColumnString(0));
-  DCHECK(guid::IsValidGUID(credit_card->guid()));
+  DCHECK(base::IsValidGUID(credit_card->guid()));
 
-  credit_card->SetInfo(CREDIT_CARD_NAME, s.ColumnString16(1));
-  credit_card->SetInfo(CREDIT_CARD_EXP_MONTH, s.ColumnString16(2));
-  credit_card->SetInfo(CREDIT_CARD_EXP_4_DIGIT_YEAR, s.ColumnString16(3));
+  credit_card->SetRawInfo(CREDIT_CARD_NAME, s.ColumnString16(1));
+  credit_card->SetRawInfo(CREDIT_CARD_EXP_MONTH, s.ColumnString16(2));
+  credit_card->SetRawInfo(CREDIT_CARD_EXP_4_DIGIT_YEAR, s.ColumnString16(3));
   int encrypted_number_len = s.ColumnByteLength(4);
   string16 credit_card_number;
   if (encrypted_number_len) {
@@ -127,7 +127,7 @@ CreditCard* CreditCardFromStatement(const sql::Statement& s) {
     memcpy(&encrypted_number[0], s.ColumnBlob(4), encrypted_number_len);
     Encryptor::DecryptString16(encrypted_number, &credit_card_number);
   }
-  credit_card->SetInfo(CREDIT_CARD_NUMBER, credit_card_number);
+  credit_card->SetRawInfo(CREDIT_CARD_NUMBER, credit_card_number);
   // Intentionally skip column 5, which stores the modification date.
 
   return credit_card;
@@ -156,9 +156,9 @@ bool AddAutofillProfileNamesToProfile(sql::Connection* db,
   if (!s.Succeeded())
     return false;
 
-  profile->SetMultiInfo(NAME_FIRST, first_names);
-  profile->SetMultiInfo(NAME_MIDDLE, middle_names);
-  profile->SetMultiInfo(NAME_LAST, last_names);
+  profile->SetRawMultiInfo(NAME_FIRST, first_names);
+  profile->SetRawMultiInfo(NAME_MIDDLE, middle_names);
+  profile->SetRawMultiInfo(NAME_LAST, last_names);
   return true;
 }
 
@@ -181,7 +181,7 @@ bool AddAutofillProfileEmailsToProfile(sql::Connection* db,
   if (!s.Succeeded())
     return false;
 
-  profile->SetMultiInfo(EMAIL_ADDRESS, emails);
+  profile->SetRawMultiInfo(EMAIL_ADDRESS, emails);
   return true;
 }
 
@@ -207,18 +207,18 @@ bool AddAutofillProfilePhonesToProfile(sql::Connection* db,
   if (!s.Succeeded())
     return false;
 
-  profile->SetMultiInfo(PHONE_HOME_WHOLE_NUMBER, numbers);
+  profile->SetRawMultiInfo(PHONE_HOME_WHOLE_NUMBER, numbers);
   return true;
 }
 
 bool AddAutofillProfileNames(const AutofillProfile& profile,
                              sql::Connection* db) {
   std::vector<string16> first_names;
-  profile.GetMultiInfo(NAME_FIRST, &first_names);
+  profile.GetRawMultiInfo(NAME_FIRST, &first_names);
   std::vector<string16> middle_names;
-  profile.GetMultiInfo(NAME_MIDDLE, &middle_names);
+  profile.GetRawMultiInfo(NAME_MIDDLE, &middle_names);
   std::vector<string16> last_names;
-  profile.GetMultiInfo(NAME_LAST, &last_names);
+  profile.GetRawMultiInfo(NAME_LAST, &last_names);
   DCHECK_EQ(first_names.size(), middle_names.size());
   DCHECK_EQ(middle_names.size(), last_names.size());
 
@@ -242,7 +242,7 @@ bool AddAutofillProfileNames(const AutofillProfile& profile,
 bool AddAutofillProfileEmails(const AutofillProfile& profile,
                               sql::Connection* db) {
   std::vector<string16> emails;
-  profile.GetMultiInfo(EMAIL_ADDRESS, &emails);
+  profile.GetRawMultiInfo(EMAIL_ADDRESS, &emails);
 
   for (size_t i = 0; i < emails.size(); ++i) {
     // Add the new email.
@@ -263,7 +263,7 @@ bool AddAutofillProfileEmails(const AutofillProfile& profile,
 bool AddAutofillProfilePhones(const AutofillProfile& profile,
                               sql::Connection* db) {
   std::vector<string16> numbers;
-  profile.GetMultiInfo(PHONE_HOME_WHOLE_NUMBER, &numbers);
+  profile.GetRawMultiInfo(PHONE_HOME_WHOLE_NUMBER, &numbers);
 
   for (size_t i = 0; i < numbers.size(); ++i) {
     // Add the new number.
@@ -342,12 +342,13 @@ bool AutofillTable::IsSyncable() {
   return true;
 }
 
-bool AutofillTable::AddFormFieldValues(const std::vector<FormField>& elements,
-                                       std::vector<AutofillChange>* changes) {
+bool AutofillTable::AddFormFieldValues(
+    const std::vector<FormFieldData>& elements,
+    std::vector<AutofillChange>* changes) {
   return AddFormFieldValuesTime(elements, changes, Time::Now());
 }
 
-bool AutofillTable::AddFormFieldValue(const FormField& element,
+bool AutofillTable::AddFormFieldValue(const FormFieldData& element,
                                       std::vector<AutofillChange>* changes) {
   return AddFormFieldValueTime(element, changes, Time::Now());
 }
@@ -404,7 +405,7 @@ bool AutofillTable::RemoveFormElementsAddedBetween(
       "WHERE ad.date_created >= ? AND ad.date_created < ?"));
   s.BindInt64(0, delete_begin.ToTimeT());
   s.BindInt64(1,
-              delete_end.is_null() ?
+              (delete_end.is_null() || delete_end == base::Time::Max()) ?
                   std::numeric_limits<int64>::max() :
                   delete_end.ToTimeT());
 
@@ -418,21 +419,100 @@ bool AutofillTable::RemoveFormElementsAddedBetween(
     return false;
 
   for (AutofillElementList::iterator itr = elements.begin();
-       itr != elements.end(); itr++) {
+       itr != elements.end(); ++itr) {
     int how_many = 0;
     if (!RemoveFormElementForTimeRange(itr->a, delete_begin, delete_end,
                                        &how_many)) {
       return false;
     }
-    bool was_removed = false;
-    if (!AddToCountOfFormElement(itr->a, -how_many, &was_removed))
-      return false;
+    // We store at most 2 time stamps. If we remove both of them we should
+    // delete the corresponding data. If we delete only one it could still be
+    // the last timestamp for the data, so check how many timestamps do remain.
+    bool should_remove = (CountTimestampsData(itr->a) == 0);
+    if (should_remove) {
+      if (!RemoveFormElementForID(itr->a))
+        return false;
+    } else {
+      if (!AddToCountOfFormElement(itr->a, -how_many))
+        return false;
+    }
     AutofillChange::Type change_type =
-        was_removed ? AutofillChange::REMOVE : AutofillChange::UPDATE;
+        should_remove ? AutofillChange::REMOVE : AutofillChange::UPDATE;
     changes->push_back(AutofillChange(change_type,
                                       AutofillKey(itr->b, itr->c)));
   }
 
+  return true;
+}
+
+bool AutofillTable::RemoveExpiredFormElements(
+    std::vector<AutofillChange>* changes) {
+  DCHECK(changes);
+
+  base::Time delete_end = AutofillEntry::ExpirationTime();
+  // Query for the pair_id, name, and value of all form elements that
+  // were last used before the |delete_end|.
+  sql::Statement select_for_delete(db_->GetUniqueStatement(
+      "SELECT DISTINCT pair_id, name, value "
+      "FROM autofill WHERE pair_id NOT IN "
+      "(SELECT DISTINCT pair_id "
+      "FROM autofill_dates WHERE date_created >= ?)"));
+  select_for_delete.BindInt64(0, delete_end.ToTimeT());
+  AutofillElementList entries_to_delete;
+  while (select_for_delete.Step()) {
+    entries_to_delete.push_back(MakeTuple(select_for_delete.ColumnInt64(0),
+                                          select_for_delete.ColumnString16(1),
+                                          select_for_delete.ColumnString16(2)));
+  }
+
+  if (!select_for_delete.Succeeded())
+    return false;
+
+  sql::Statement delete_data_statement(db_->GetUniqueStatement(
+      "DELETE FROM autofill WHERE pair_id NOT IN ("
+      "SELECT pair_id FROM autofill_dates WHERE date_created >= ?)"));
+  delete_data_statement.BindInt64(0, delete_end.ToTimeT());
+  if (!delete_data_statement.Run())
+    return false;
+
+  sql::Statement delete_times_statement(db_->GetUniqueStatement(
+      "DELETE FROM autofill_dates WHERE pair_id NOT IN ("
+      "SELECT pair_id FROM autofill_dates WHERE date_created >= ?)"));
+  delete_times_statement.BindInt64(0, delete_end.ToTimeT());
+  if (!delete_times_statement.Run())
+    return false;
+
+  // Cull remaining entries' timestamps.
+  std::vector<AutofillEntry> entries;
+  if (!GetAllAutofillEntries(&entries))
+    return false;
+  sql::Statement cull_date_entry(db_->GetUniqueStatement(
+      "DELETE FROM autofill_dates "
+      "WHERE pair_id == (SELECT pair_id FROM autofill "
+                         "WHERE name = ? and value = ?)"
+      "AND date_created != ? AND date_created != ?"));
+  for (size_t i = 0; i < entries.size(); ++i) {
+    cull_date_entry.BindString16(0, entries[i].key().name());
+    cull_date_entry.BindString16(1, entries[i].key().value());
+    cull_date_entry.BindInt64(2,
+        entries[i].timestamps().empty() ? 0 :
+        entries[i].timestamps().front().ToTimeT());
+    cull_date_entry.BindInt64(3,
+        entries[i].timestamps().empty() ? 0 :
+        entries[i].timestamps().back().ToTimeT());
+    if (!cull_date_entry.Run())
+      return false;
+    cull_date_entry.Reset(true);
+  }
+
+  changes->clear();
+  changes->reserve(entries_to_delete.size());
+
+  for (AutofillElementList::iterator it = entries_to_delete.begin();
+       it != entries_to_delete.end(); ++it) {
+    changes->push_back(AutofillChange(
+        AutofillChange::REMOVE, AutofillKey(it->b, it->c)));
+  }
   return true;
 }
 
@@ -455,20 +535,29 @@ bool AutofillTable::RemoveFormElementForTimeRange(int64 pair_id,
   return result;
 }
 
+int AutofillTable::CountTimestampsData(int64 pair_id) {
+  sql::Statement s(db_->GetUniqueStatement(
+      "SELECT COUNT(*) FROM autofill_dates WHERE pair_id = ?"));
+  s.BindInt64(0, pair_id);
+  if (!s.Step()) {
+    NOTREACHED();
+    return 0;
+  } else {
+    return s.ColumnInt(0);
+  }
+}
+
 bool AutofillTable::AddToCountOfFormElement(int64 pair_id,
-                                            int delta,
-                                            bool* was_removed) {
-  DCHECK(was_removed);
+                                            int delta) {
   int count = 0;
-  *was_removed = false;
 
   if (!GetCountOfFormElement(pair_id, &count))
     return false;
 
   if (count + delta == 0) {
-    if (!RemoveFormElementForID(pair_id))
-      return false;
-    *was_removed = true;
+    // Should remove the element earlier in the code.
+    NOTREACHED();
+    return false;
   } else {
     if (!SetCountOfFormElement(pair_id, count + delta))
       return false;
@@ -477,7 +566,7 @@ bool AutofillTable::AddToCountOfFormElement(int64 pair_id,
 }
 
 bool AutofillTable::GetIDAndCountOfFormElement(
-    const FormField& element,
+    const FormFieldData& element,
     int64* pair_id,
     int* count) {
   DCHECK(pair_id);
@@ -525,7 +614,7 @@ bool AutofillTable::SetCountOfFormElement(int64 pair_id, int count) {
   return s.Run();
 }
 
-bool AutofillTable::InsertFormElement(const FormField& element,
+bool AutofillTable::InsertFormElement(const FormFieldData& element,
                                       int64* pair_id) {
   DCHECK(pair_id);
   sql::Statement s(db_->GetUniqueStatement(
@@ -552,8 +641,21 @@ bool AutofillTable::InsertPairIDAndDate(int64 pair_id,
   return s.Run();
 }
 
+bool AutofillTable::DeleteLastAccess(int64 pair_id) {
+  // Inner SELECT selects the newest |date_created| for a given |pair_id|.
+  // DELETE deletes only that entry.
+  sql::Statement s(db_->GetUniqueStatement(
+      "DELETE FROM autofill_dates WHERE pair_id = ? and date_created IN "
+      "(SELECT date_created FROM autofill_dates WHERE pair_id = ? "
+      "ORDER BY date_created DESC LIMIT 1)"));
+  s.BindInt64(0, pair_id);
+  s.BindInt64(1, pair_id);
+
+  return s.Run();
+}
+
 bool AutofillTable::AddFormFieldValuesTime(
-    const std::vector<FormField>& elements,
+    const std::vector<FormFieldData>& elements,
     std::vector<AutofillChange>* changes,
     Time time) {
   // Only add one new entry for each unique element name.  Use |seen_names| to
@@ -561,10 +663,8 @@ bool AutofillTable::AddFormFieldValuesTime(
   const size_t kMaximumUniqueNames = 256;
   std::set<string16> seen_names;
   bool result = true;
-  for (std::vector<FormField>::const_iterator
-       itr = elements.begin();
-       itr != elements.end();
-       itr++) {
+  for (std::vector<FormFieldData>::const_iterator itr = elements.begin();
+       itr != elements.end(); ++itr) {
     if (seen_names.size() >= kMaximumUniqueNames)
       break;
     if (seen_names.find(itr->name) != seen_names.end())
@@ -718,7 +818,7 @@ bool AutofillTable::InsertAutofillEntry(const AutofillEntry& entry) {
   return true;
 }
 
-bool AutofillTable::AddFormFieldValueTime(const FormField& element,
+bool AutofillTable::AddFormFieldValueTime(const FormFieldData& element,
                                           std::vector<AutofillChange>* changes,
                                           Time time) {
   int count = 0;
@@ -731,6 +831,11 @@ bool AutofillTable::AddFormFieldValueTime(const FormField& element,
     return false;
 
   if (!SetCountOfFormElement(pair_id, count + 1))
+    return false;
+
+  // If we already have more than 2 times delete last one, before adding new
+  // one.
+  if (count >= 2 && !DeleteLastAccess(pair_id))
     return false;
 
   if (!InsertPairIDAndDate(pair_id, time))
@@ -777,7 +882,7 @@ bool AutofillTable::AddAutofillProfile(const AutofillProfile& profile) {
 
 bool AutofillTable::GetAutofillProfile(const std::string& guid,
                                        AutofillProfile** profile) {
-  DCHECK(guid::IsValidGUID(guid));
+  DCHECK(base::IsValidGUID(guid));
   DCHECK(profile);
   sql::Statement s(db_->GetUniqueStatement(
       "SELECT guid, company_name, address_line_1, address_line_2, city, state,"
@@ -825,7 +930,7 @@ bool AutofillTable::GetAutofillProfiles(
 }
 
 bool AutofillTable::UpdateAutofillProfile(const AutofillProfile& profile) {
-  DCHECK(guid::IsValidGUID(profile.guid()));
+  DCHECK(base::IsValidGUID(profile.guid()));
 
   // Don't update anything until the trash has been emptied.  There may be
   // pending modifications to process.
@@ -844,23 +949,23 @@ bool AutofillTable::UpdateAutofillProfile(const AutofillProfile& profile) {
   AutofillProfile new_profile(profile);
   std::vector<string16> values;
 
-  old_profile->GetMultiInfo(NAME_FULL, &values);
-  values[0] = new_profile.GetInfo(NAME_FULL);
-  new_profile.SetMultiInfo(NAME_FULL, values);
+  old_profile->GetRawMultiInfo(NAME_FULL, &values);
+  values[0] = new_profile.GetRawInfo(NAME_FULL);
+  new_profile.SetRawMultiInfo(NAME_FULL, values);
 
-  old_profile->GetMultiInfo(EMAIL_ADDRESS, &values);
-  values[0] = new_profile.GetInfo(EMAIL_ADDRESS);
-  new_profile.SetMultiInfo(EMAIL_ADDRESS, values);
+  old_profile->GetRawMultiInfo(EMAIL_ADDRESS, &values);
+  values[0] = new_profile.GetRawInfo(EMAIL_ADDRESS);
+  new_profile.SetRawMultiInfo(EMAIL_ADDRESS, values);
 
-  old_profile->GetMultiInfo(PHONE_HOME_WHOLE_NUMBER, &values);
-  values[0] = new_profile.GetInfo(PHONE_HOME_WHOLE_NUMBER);
-  new_profile.SetMultiInfo(PHONE_HOME_WHOLE_NUMBER, values);
+  old_profile->GetRawMultiInfo(PHONE_HOME_WHOLE_NUMBER, &values);
+  values[0] = new_profile.GetRawInfo(PHONE_HOME_WHOLE_NUMBER);
+  new_profile.SetRawMultiInfo(PHONE_HOME_WHOLE_NUMBER, values);
 
   return UpdateAutofillProfileMulti(new_profile);
 }
 
 bool AutofillTable::UpdateAutofillProfileMulti(const AutofillProfile& profile) {
-  DCHECK(guid::IsValidGUID(profile.guid()));
+  DCHECK(base::IsValidGUID(profile.guid()));
 
   // Don't update anything until the trash has been emptied.  There may be
   // pending modifications to process.
@@ -898,7 +1003,7 @@ bool AutofillTable::UpdateAutofillProfileMulti(const AutofillProfile& profile) {
 }
 
 bool AutofillTable::RemoveAutofillProfile(const std::string& guid) {
-  DCHECK(guid::IsValidGUID(guid));
+  DCHECK(base::IsValidGUID(guid));
 
   if (IsAutofillGUIDInTrash(guid)) {
     sql::Statement s_trash(db_->GetUniqueStatement(
@@ -962,7 +1067,7 @@ bool AutofillTable::AddCreditCard(const CreditCard& credit_card) {
 
 bool AutofillTable::GetCreditCard(const std::string& guid,
                                   CreditCard** credit_card) {
-  DCHECK(guid::IsValidGUID(guid));
+  DCHECK(base::IsValidGUID(guid));
   sql::Statement s(db_->GetUniqueStatement(
       "SELECT guid, name_on_card, expiration_month, expiration_year, "
       "card_number_encrypted, date_modified "
@@ -998,7 +1103,7 @@ bool AutofillTable::GetCreditCards(
 }
 
 bool AutofillTable::UpdateCreditCard(const CreditCard& credit_card) {
-  DCHECK(guid::IsValidGUID(credit_card.guid()));
+  DCHECK(base::IsValidGUID(credit_card.guid()));
 
   CreditCard* tmp_credit_card = NULL;
   if (!GetCreditCard(credit_card.guid(), &tmp_credit_card))
@@ -1023,7 +1128,7 @@ bool AutofillTable::UpdateCreditCard(const CreditCard& credit_card) {
 }
 
 bool AutofillTable::RemoveCreditCard(const std::string& guid) {
-  DCHECK(guid::IsValidGUID(guid));
+  DCHECK(base::IsValidGUID(guid));
   sql::Statement s(db_->GetUniqueStatement(
       "DELETE FROM credit_cards WHERE guid = ?"));
   s.BindString(0, guid);
@@ -1039,9 +1144,9 @@ bool AutofillTable::RemoveAutofillProfilesAndCreditCardsModifiedBetween(
   DCHECK(delete_end.is_null() || delete_begin < delete_end);
 
   time_t delete_begin_t = delete_begin.ToTimeT();
-  time_t delete_end_t = delete_end.is_null() ?
-      std::numeric_limits<time_t>::max() :
-      delete_end.ToTimeT();
+  time_t delete_end_t =
+      (delete_end.is_null() || delete_end == base::Time::Max()) ?
+          std::numeric_limits<time_t>::max() : delete_end.ToTimeT();
 
   // Remember Autofill profiles in the time range.
   sql::Statement s_profiles_get(db_->GetUniqueStatement(
@@ -1536,7 +1641,7 @@ bool AutofillTable::MigrateToVersion31AddGUIDToCreditCardsAndProfiles() {
       sql::Statement update_s(
           db_->GetUniqueStatement("UPDATE autofill_profiles "
                                   "SET guid=? WHERE unique_id=?"));
-      update_s.BindString(0, guid::GenerateGUID());
+      update_s.BindString(0, base::GenerateGUID());
       update_s.BindInt(1, s.ColumnInt(0));
 
       if (!update_s.Run())
@@ -1564,7 +1669,7 @@ bool AutofillTable::MigrateToVersion31AddGUIDToCreditCardsAndProfiles() {
       sql::Statement update_s(
           db_->GetUniqueStatement("UPDATE credit_cards "
                                   "set guid=? WHERE unique_id=?"));
-      update_s.BindString(0, guid::GenerateGUID());
+      update_s.BindString(0, base::GenerateGUID());
       update_s.BindInt(1, s.ColumnInt(0));
 
       if (!update_s.Run())
@@ -1677,20 +1782,20 @@ bool AutofillTable::MigrateToVersion33ProfilesBasedOnFirstName() {
     while (s.Step()) {
       AutofillProfile profile;
       profile.set_guid(s.ColumnString(0));
-      DCHECK(guid::IsValidGUID(profile.guid()));
+      DCHECK(base::IsValidGUID(profile.guid()));
 
-      profile.SetInfo(NAME_FIRST, s.ColumnString16(1));
-      profile.SetInfo(NAME_MIDDLE, s.ColumnString16(2));
-      profile.SetInfo(NAME_LAST, s.ColumnString16(3));
-      profile.SetInfo(EMAIL_ADDRESS, s.ColumnString16(4));
-      profile.SetInfo(COMPANY_NAME, s.ColumnString16(5));
-      profile.SetInfo(ADDRESS_HOME_LINE1, s.ColumnString16(6));
-      profile.SetInfo(ADDRESS_HOME_LINE2, s.ColumnString16(7));
-      profile.SetInfo(ADDRESS_HOME_CITY, s.ColumnString16(8));
-      profile.SetInfo(ADDRESS_HOME_STATE, s.ColumnString16(9));
-      profile.SetInfo(ADDRESS_HOME_ZIP, s.ColumnString16(10));
-      profile.SetInfo(ADDRESS_HOME_COUNTRY, s.ColumnString16(11));
-      profile.SetInfo(PHONE_HOME_WHOLE_NUMBER, s.ColumnString16(12));
+      profile.SetRawInfo(NAME_FIRST, s.ColumnString16(1));
+      profile.SetRawInfo(NAME_MIDDLE, s.ColumnString16(2));
+      profile.SetRawInfo(NAME_LAST, s.ColumnString16(3));
+      profile.SetRawInfo(EMAIL_ADDRESS, s.ColumnString16(4));
+      profile.SetRawInfo(COMPANY_NAME, s.ColumnString16(5));
+      profile.SetRawInfo(ADDRESS_HOME_LINE1, s.ColumnString16(6));
+      profile.SetRawInfo(ADDRESS_HOME_LINE2, s.ColumnString16(7));
+      profile.SetRawInfo(ADDRESS_HOME_CITY, s.ColumnString16(8));
+      profile.SetRawInfo(ADDRESS_HOME_STATE, s.ColumnString16(9));
+      profile.SetRawInfo(ADDRESS_HOME_ZIP, s.ColumnString16(10));
+      profile.SetRawInfo(ADDRESS_HOME_COUNTRY, s.ColumnString16(11));
+      profile.SetRawInfo(PHONE_HOME_WHOLE_NUMBER, s.ColumnString16(12));
       int64 date_modified = s.ColumnInt64(13);
 
       sql::Statement s_insert(db_->GetUniqueStatement(
@@ -1699,13 +1804,13 @@ bool AutofillTable::MigrateToVersion33ProfilesBasedOnFirstName() {
           " state, zipcode, country, date_modified)"
           "VALUES (?,?,?,?,?,?,?,?,?)"));
       s_insert.BindString(0, profile.guid());
-      s_insert.BindString16(1, profile.GetInfo(COMPANY_NAME));
-      s_insert.BindString16(2, profile.GetInfo(ADDRESS_HOME_LINE1));
-      s_insert.BindString16(3, profile.GetInfo(ADDRESS_HOME_LINE2));
-      s_insert.BindString16(4, profile.GetInfo(ADDRESS_HOME_CITY));
-      s_insert.BindString16(5, profile.GetInfo(ADDRESS_HOME_STATE));
-      s_insert.BindString16(6, profile.GetInfo(ADDRESS_HOME_ZIP));
-      s_insert.BindString16(7, profile.GetInfo(ADDRESS_HOME_COUNTRY));
+      s_insert.BindString16(1, profile.GetRawInfo(COMPANY_NAME));
+      s_insert.BindString16(2, profile.GetRawInfo(ADDRESS_HOME_LINE1));
+      s_insert.BindString16(3, profile.GetRawInfo(ADDRESS_HOME_LINE2));
+      s_insert.BindString16(4, profile.GetRawInfo(ADDRESS_HOME_CITY));
+      s_insert.BindString16(5, profile.GetRawInfo(ADDRESS_HOME_STATE));
+      s_insert.BindString16(6, profile.GetRawInfo(ADDRESS_HOME_ZIP));
+      s_insert.BindString16(7, profile.GetRawInfo(ADDRESS_HOME_COUNTRY));
       s_insert.BindInt64(8, date_modified);
 
       if (!s_insert.Run())

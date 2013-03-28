@@ -1,8 +1,10 @@
-// Copyright (c) 2011 The Chromium Authors. All rights reserved.
+// Copyright (c) 2012 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
 #include "chrome/browser/ui/webui/options/chromeos/accounts_options_handler.h"
+
+#include <string>
 
 #include "base/bind.h"
 #include "base/bind_helpers.h"
@@ -11,13 +13,14 @@
 #include "base/utf_string_conversions.h"
 #include "base/values.h"
 #include "chrome/browser/browser_process.h"
-#include "chrome/browser/chromeos/cros_settings.h"
-#include "chrome/browser/chromeos/cros_settings_names.h"
-#include "chrome/browser/chromeos/login/authenticator.h"
 #include "chrome/browser/chromeos/login/user_manager.h"
-#include "chrome/browser/prefs/pref_service.h"
+#include "chrome/browser/chromeos/settings/cros_settings.h"
+#include "chrome/browser/chromeos/settings/cros_settings_names.h"
 #include "chrome/browser/policy/browser_policy_connector.h"
+#include "chrome/browser/prefs/pref_service.h"
+#include "chrome/browser/ui/webui/chromeos/ui_account_tweaks.h"
 #include "content/public/browser/web_ui.h"
+#include "google_apis/gaia/gaia_auth_util.h"
 #include "grit/generated_resources.h"
 #include "ui/base/l10n/l10n_util.h"
 
@@ -37,6 +40,8 @@ bool WhitelistUser(const std::string& username) {
 }
 
 }  // namespace
+
+namespace options {
 
 AccountsOptionsHandler::AccountsOptionsHandler() {
 }
@@ -65,35 +70,23 @@ void AccountsOptionsHandler::GetLocalizedValues(
 
   localized_strings->SetString("allow_BWSI", l10n_util::GetStringUTF16(
       IDS_OPTIONS_ACCOUNTS_ALLOW_BWSI_DESCRIPTION));
-  localized_strings->SetString("use_whitelist",l10n_util::GetStringUTF16(
+  localized_strings->SetString("use_whitelist", l10n_util::GetStringUTF16(
       IDS_OPTIONS_ACCOUNTS_USE_WHITELIST_DESCRIPTION));
-  localized_strings->SetString("show_user_on_signin",l10n_util::GetStringUTF16(
+  localized_strings->SetString("show_user_on_signin", l10n_util::GetStringUTF16(
       IDS_OPTIONS_ACCOUNTS_SHOW_USER_NAMES_ON_SINGIN_DESCRIPTION));
-  localized_strings->SetString("username_edit_hint",l10n_util::GetStringUTF16(
+  localized_strings->SetString("username_edit_hint", l10n_util::GetStringUTF16(
       IDS_OPTIONS_ACCOUNTS_USERNAME_EDIT_HINT));
-  localized_strings->SetString("username_format",l10n_util::GetStringUTF16(
+  localized_strings->SetString("username_format", l10n_util::GetStringUTF16(
       IDS_OPTIONS_ACCOUNTS_USERNAME_FORMAT));
-  localized_strings->SetString("add_users",l10n_util::GetStringUTF16(
+  localized_strings->SetString("add_users", l10n_util::GetStringUTF16(
       IDS_OPTIONS_ACCOUNTS_ADD_USERS));
   localized_strings->SetString("owner_only", l10n_util::GetStringUTF16(
       IDS_OPTIONS_ACCOUNTS_OWNER_ONLY));
 
-  std::string owner_email;
-  CrosSettings::Get()->GetString(kDeviceOwner, &owner_email);
-  // Translate owner's email to the display email.
-  std::string display_email =
-      UserManager::Get()->GetUserDisplayEmail(owner_email);
-  localized_strings->SetString("owner_user_id", UTF8ToUTF16(display_email));
+  localized_strings->SetBoolean("whitelist_is_managed",
+      g_browser_process->browser_policy_connector()->IsEnterpriseManaged());
 
-  localized_strings->SetString("current_user_is_owner",
-      UserManager::Get()->current_user_is_owner() ?
-      ASCIIToUTF16("true") : ASCIIToUTF16("false"));
-  localized_strings->SetString("logged_in_as_guest",
-      UserManager::Get()->IsLoggedInAsGuest() ?
-      ASCIIToUTF16("true") : ASCIIToUTF16("false"));
-  localized_strings->SetString("whitelist_is_managed",
-      g_browser_process->browser_policy_connector()->IsEnterpriseManaged() ?
-          ASCIIToUTF16("true") : ASCIIToUTF16("false"));
+  AddAccountUITweaksLocalizedValues(localized_strings);
 }
 
 void AccountsOptionsHandler::HandleWhitelistUser(const base::ListValue* args) {
@@ -104,7 +97,7 @@ void AccountsOptionsHandler::HandleWhitelistUser(const base::ListValue* args) {
     return;
   }
 
-  WhitelistUser(Authenticator::Canonicalize(typed_email));
+  WhitelistUser(gaia::CanonicalizeEmail(typed_email));
 }
 
 void AccountsOptionsHandler::HandleUnwhitelistUser(
@@ -114,7 +107,7 @@ void AccountsOptionsHandler::HandleUnwhitelistUser(
     return;
   }
 
-  base::StringValue canonical_email(Authenticator::Canonicalize(email));
+  base::StringValue canonical_email(gaia::CanonicalizeEmail(email));
   CrosSettings::Get()->RemoveFromList(kAccountsPrefUsers, &canonical_email);
   UserManager::Get()->RemoveUser(email, NULL);
 }
@@ -123,10 +116,24 @@ void AccountsOptionsHandler::HandleWhitelistExistingUsers(
     const base::ListValue* args) {
   DCHECK(args && args->empty());
 
+  // Creates one list to set. This is needed because user white list update is
+  // asynchronous and sequential. Before previous write comes back, cached list
+  // is stale and should not be used for appending. See http://crbug.com/127215
+  scoped_ptr<base::ListValue> new_list;
+
+  CrosSettings* cros_settings = CrosSettings::Get();
+  const base::ListValue* existing = NULL;
+  if (cros_settings->GetList(kAccountsPrefUsers, &existing) && existing)
+    new_list.reset(existing->DeepCopy());
+  else
+    new_list.reset(new base::ListValue);
+
   const UserList& users = UserManager::Get()->GetUsers();
-  for (UserList::const_iterator it = users.begin(); it < users.end(); ++it) {
-    WhitelistUser((*it)->email());
-  }
+  for (UserList::const_iterator it = users.begin(); it < users.end(); ++it)
+    new_list->AppendIfNotPresent(new base::StringValue((*it)->email()));
+
+  cros_settings->Set(kAccountsPrefUsers, *new_list.get());
 }
 
+}  // namespace options
 }  // namespace chromeos

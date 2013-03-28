@@ -1,4 +1,4 @@
-// Copyright (c) 2011 The Chromium Authors. All rights reserved.
+// Copyright (c) 2012 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -8,6 +8,7 @@
 
 #include "base/utf_string_conversions.h"
 #include "chrome/browser/extensions/extension_service.h"
+#include "chrome/browser/infobars/infobar_tab_helper.h"
 #include "chrome/browser/profiles/profile.h"
 #include "chrome/browser/themes/theme_service.h"
 #include "chrome/browser/themes/theme_service_factory.h"
@@ -15,7 +16,7 @@
 #include "chrome/common/extensions/extension.h"
 #include "content/public/browser/notification_source.h"
 #include "grit/generated_resources.h"
-#include "grit/theme_resources_standard.h"
+#include "grit/theme_resources.h"
 #include "ui/base/l10n/l10n_util.h"
 #include "ui/base/resource/resource_bundle.h"
 
@@ -23,7 +24,7 @@ ThemeInstalledInfoBarDelegate::ThemeInstalledInfoBarDelegate(
     InfoBarTabHelper* infobar_helper,
     ExtensionService* extension_service,
     ThemeService* theme_service,
-    const Extension* new_theme,
+    const extensions::Extension* new_theme,
     const std::string& previous_theme_id,
     bool previous_using_native_theme)
     : ConfirmInfoBarDelegate(infobar_helper),
@@ -38,7 +39,8 @@ ThemeInstalledInfoBarDelegate::ThemeInstalledInfoBarDelegate(
                  content::Source<ThemeService>(theme_service_));
 }
 
-bool ThemeInstalledInfoBarDelegate::MatchesTheme(const Extension* theme) const {
+bool ThemeInstalledInfoBarDelegate::MatchesTheme(
+    const extensions::Extension* theme) const {
   return theme && (theme->id() == theme_id_);
 }
 
@@ -51,7 +53,7 @@ ThemeInstalledInfoBarDelegate::~ThemeInstalledInfoBarDelegate() {
 
 bool ThemeInstalledInfoBarDelegate::Cancel() {
   if (!previous_theme_id_.empty()) {
-    const Extension* previous_theme =
+    const extensions::Extension* previous_theme =
         extension_service_->GetExtensionById(previous_theme_id_, true);
     if (previous_theme) {
       theme_service_->SetTheme(previous_theme);

@@ -1,12 +1,12 @@
-// Copyright (c) 2011 The Chromium Authors. All rights reserved.
+// Copyright (c) 2012 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
 cr.define('options.passwordManager', function() {
-  const ArrayDataModel = cr.ui.ArrayDataModel;
-  const DeletableItemList = options.DeletableItemList;
-  const DeletableItem = options.DeletableItem;
-  const List = cr.ui.List;
+  /** @const */ var ArrayDataModel = cr.ui.ArrayDataModel;
+  /** @const */ var DeletableItemList = options.DeletableItemList;
+  /** @const */ var DeletableItem = options.DeletableItem;
+  /** @const */ var List = cr.ui.List;
 
   /**
    * Creates a new passwords list item.
@@ -27,7 +27,7 @@ cr.define('options.passwordManager', function() {
   PasswordListItem.prototype = {
     __proto__: DeletableItem.prototype,
 
-    /** @inheritDoc */
+    /** @override */
     decorate: function(showPasswords) {
       DeletableItem.prototype.decorate.call(this);
 
@@ -38,7 +38,14 @@ cr.define('options.passwordManager', function() {
       urlLabel.classList.add('url');
       urlLabel.setAttribute('title', this.url);
       urlLabel.textContent = this.url;
-      urlLabel.style.backgroundImage = url('chrome://favicon/' + this.url);
+
+      // The favicon URL is prefixed with "origin/", which essentially removes
+      // the URL path past the top-level domain and ensures that a scheme (e.g.,
+      // http) is being used. This ensures that the favicon returned is the
+      // default favicon for the domain and that the URL has a scheme if none
+      // is present in the password manager.
+      urlLabel.style.backgroundImage =
+          url('chrome://favicon/origin/' + this.url);
       this.contentElement.appendChild(urlLabel);
 
       // The stored username.
@@ -63,8 +70,8 @@ cr.define('options.passwordManager', function() {
       if (showPasswords) {
         var button = this.ownerDocument.createElement('button');
         button.hidden = true;
-        button.classList.add('password-button');
-        button.textContent = localStrings.getString('passwordShowButton');
+        button.className = 'list-inline-button custom-appearance';
+        button.textContent = loadTimeData.getString('passwordShowButton');
         button.addEventListener('click', this.onClick_, true);
         passwordInputDiv.appendChild(button);
       }
@@ -72,7 +79,7 @@ cr.define('options.passwordManager', function() {
       this.contentElement.appendChild(passwordInputDiv);
     },
 
-    /** @inheritDoc */
+    /** @override */
     selectionChanged: function() {
       var passwordInput = this.querySelector('input[type=password]');
       var textInput = this.querySelector('input[type=text]');
@@ -101,10 +108,10 @@ cr.define('options.passwordManager', function() {
       var passwordInput = button.previousSibling;
       if (passwordInput.type == 'password') {
         passwordInput.type = 'text';
-        button.textContent = localStrings.getString('passwordHideButton');
+        button.textContent = loadTimeData.getString('passwordHideButton');
       } else {
         passwordInput.type = 'password';
-        button.textContent = localStrings.getString('passwordShowButton');
+        button.textContent = loadTimeData.getString('passwordShowButton');
       }
     },
 
@@ -172,7 +179,14 @@ cr.define('options.passwordManager', function() {
       urlLabel.classList.add('favicon-cell');
       urlLabel.classList.add('weakrtl');
       urlLabel.textContent = this.url;
-      urlLabel.style.backgroundImage = url('chrome://favicon/' + this.url);
+
+      // The favicon URL is prefixed with "origin/", which essentially removes
+      // the URL path past the top-level domain and ensures that a scheme (e.g.,
+      // http) is being used. This ensures that the favicon returned is the
+      // default favicon for the domain and that the URL has a scheme if none
+      // is present in the password manager.
+      urlLabel.style.backgroundImage =
+          url('chrome://favicon/origin/' + this.url);
       this.contentElement.appendChild(urlLabel);
     },
 
@@ -205,11 +219,11 @@ cr.define('options.passwordManager', function() {
      */
     showPasswords_: true,
 
-    /** @inheritDoc */
+    /** @override */
     decorate: function() {
       DeletableItemList.prototype.decorate.call(this);
       Preferences.getInstance().addEventListener(
-          "profile.password_manager_allow_show_passwords",
+          'profile.password_manager_allow_show_passwords',
           this.onPreferenceChanged_.bind(this));
     },
 
@@ -223,12 +237,12 @@ cr.define('options.passwordManager', function() {
       this.redraw();
     },
 
-    /** @inheritDoc */
+    /** @override */
     createItem: function(entry) {
       return new PasswordListItem(entry, this.showPasswords_);
     },
 
-    /** @inheritDoc */
+    /** @override */
     deleteItemAtIndex: function(index) {
       var item = this.dataModel.item(index);
       if (item && item.length > 3) {
@@ -256,12 +270,12 @@ cr.define('options.passwordManager', function() {
   PasswordExceptionsList.prototype = {
     __proto__: DeletableItemList.prototype,
 
-    /** @inheritDoc */
+    /** @override */
     createItem: function(entry) {
       return new PasswordExceptionsListItem(entry);
     },
 
-    /** @inheritDoc */
+    /** @override */
     deleteItemAtIndex: function(index) {
       PasswordManager.removePasswordException(index);
     },

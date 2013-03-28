@@ -6,13 +6,14 @@
 
 #include <algorithm>
 
+#include "base/string_util.h"
 #include "base/utf_string_conversions.h"
+#include "content/public/renderer/android_content_detection_prefixes.h"
 #include "net/base/escape.h"
 #include "third_party/libphonenumber/src/phonenumber_api.h"
 #include "third_party/libphonenumber/src/phonenumbers/phonenumbermatch.h"
 #include "third_party/libphonenumber/src/phonenumbers/phonenumbermatcher.h"
 #include "third_party/libphonenumber/src/phonenumbers/region_code.h"
-#include "third_party/WebKit/Source/WebKit/chromium/public/platform/WebString.h"
 
 using i18n::phonenumbers::PhoneNumberMatch;
 using i18n::phonenumbers::PhoneNumberMatcher;
@@ -24,10 +25,9 @@ namespace {
 // Maximum number of characters to look around for phone number detection.
 const size_t kMaximumTelephoneLength = 20;
 
-// Prefix used for telephone number intent URIs.
-const char kPhoneNumberSchemaPrefix[] = "tel:";
-
 }  // anonymous namespace
+
+namespace content {
 
 PhoneNumberDetector::PhoneNumberDetector()
     : region_code_(RegionCode::GetUnknown()) {
@@ -50,13 +50,15 @@ GURL PhoneNumberDetector::GetIntentURL(const std::string& content_text) {
   if (content_text.empty())
     return GURL();
 
-  return GURL(kPhoneNumberSchemaPrefix +
+  return GURL(kPhoneNumberPrefix +
       net::EscapeQueryParamValue(content_text, true));
 }
 
 bool PhoneNumberDetector::FindContent(const string16::const_iterator& begin,
-    const string16::const_iterator& end, size_t* start_pos, size_t* end_pos,
-    std::string* content_text) {
+                                      const string16::const_iterator& end,
+                                      size_t* start_pos,
+                                      size_t* end_pos,
+                                      std::string* content_text) {
   string16 utf16_input = string16(begin, end);
   std::string utf8_input = UTF16ToUTF8(utf16_input);
 
@@ -83,3 +85,5 @@ bool PhoneNumberDetector::FindContent(const string16::const_iterator& begin,
 
   return false;
 }
+
+}  // namespace content

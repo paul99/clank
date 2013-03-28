@@ -1,5 +1,5 @@
-#!/usr/bin/python
-# Copyright (c) 2011 The Chromium Authors. All rights reserved.
+#!/usr/bin/env python
+# Copyright (c) 2012 The Chromium Authors. All rights reserved.
 # Use of this source code is governed by a BSD-style license that can be
 # found in the LICENSE file.
 
@@ -9,16 +9,19 @@ http://dev.chromium.org/developers/design-documents/linuxresourcesandlocalizedst
 for details about the file format.
 """
 
+import os
 import sys
+if __name__ == '__main__':
+  sys.path.append(os.path.join(os.path.dirname(__file__), '../..'))
 
-import data_pack
+import grit.format.data_pack
 
 def main(argv):
   if len(argv) < 3:
     print ("Usage:\n  %s <output_filename> <input_file1> [input_file2] ... " %
            argv[0])
     sys.exit(-1)
-  data_pack.DataPack.RePack(argv[1], argv[2:])
+  grit.format.data_pack.RePack(argv[1], argv[2:])
 
 if '__main__' == __name__:
   main(sys.argv)

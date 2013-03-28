@@ -1,19 +1,11 @@
-// Copyright (c) 2011 The Chromium Authors. All rights reserved.
+// Copyright (c) 2012 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
-#include <string>
-
 #include "base/memory/scoped_ptr.h"
-#include "base/message_loop.h"
-#include "base/string16.h"
-#include "base/string_number_conversions.h"
-#include "base/utf_string_conversions.h"
 #include "chrome/browser/chromeos/cros/cros_library.h"
 #include "chrome/browser/chromeos/cros/mock_network_library.h"
 #include "chrome/browser/chromeos/cros/network_library.h"
-#include "chrome/browser/chromeos/dbus/mock_dbus_thread_manager.h"
-#include "chrome/browser/chromeos/dbus/mock_session_manager_client.h"
 #include "chrome/browser/chromeos/login/mock_screen_observer.h"
 #include "chrome/browser/chromeos/login/network_screen.h"
 #include "chrome/browser/chromeos/login/view_screen.h"
@@ -21,25 +13,25 @@
 #include "chrome/browser/chromeos/login/wizard_in_process_browser_test.h"
 #include "chrome/browser/chromeos/login/wizard_screen.h"
 #include "chrome/test/base/ui_test_utils.h"
-#include "grit/generated_resources.h"
+#include "chromeos/dbus/mock_dbus_thread_manager.h"
+#include "chromeos/dbus/mock_session_manager_client.h"
+#include "content/public/test/test_utils.h"
 #include "testing/gmock/include/gmock/gmock.h"
 #include "testing/gtest/include/gtest/gtest.h"
-#include "ui/base/l10n/l10n_util.h"
-#include "ui/views/controls/button/text_button.h"
+#include "ui/views/controls/button/button.h"
 
-namespace chromeos {
+using ::testing::_;
 using ::testing::AnyNumber;
-using ::testing::InvokeWithoutArgs;
 using ::testing::Return;
 using ::testing::ReturnRef;
-using ::testing::_;
-using ::testing::A;
 using views::Button;
+
+namespace chromeos {
 
 class DummyButtonListener : public views::ButtonListener {
  public:
   virtual void ButtonPressed(views::Button* sender,
-                             const views::Event& event) {}
+                             const ui::Event& event) {}
 };
 
 class NetworkScreenTest : public WizardInProcessBrowserTest {
@@ -52,6 +44,8 @@ class NetworkScreenTest : public WizardInProcessBrowserTest {
   virtual void SetUpInProcessBrowserTestFixture() {
     MockDBusThreadManager* mock_dbus_thread_manager =
         new MockDBusThreadManager;
+    EXPECT_CALL(*mock_dbus_thread_manager, GetSystemBus())
+        .WillRepeatedly(Return(reinterpret_cast<dbus::Bus*>(NULL)));
     DBusThreadManager::InitializeForTesting(mock_dbus_thread_manager);
     cros_mock_->InitStatusAreaMocks();
     mock_network_library_ = cros_mock_->mock_network_library();
@@ -60,12 +54,14 @@ class NetworkScreenTest : public WizardInProcessBrowserTest {
     cellular_.reset(new NetworkDevice("cellular"));
     EXPECT_CALL(*mock_session_manager_client, EmitLoginPromptReady())
         .Times(1);
-    EXPECT_CALL(*mock_session_manager_client, RetrievePolicy(_))
+    EXPECT_CALL(*mock_session_manager_client, RetrieveDevicePolicy(_))
         .Times(AnyNumber());
 
     // Minimal set of expectations needed on NetworkScreen initialization.
     // Status bar expectations are defined with RetiresOnSaturation() so
     // these mocks will be active once status bar is initialized.
+    EXPECT_CALL(*mock_network_library_, AddUserActionObserver(_))
+        .Times(AnyNumber());
     EXPECT_CALL(*mock_network_library_, wifi_connected())
         .Times(1)
         .WillRepeatedly(Return(false));
@@ -73,6 +69,8 @@ class NetworkScreenTest : public WizardInProcessBrowserTest {
         .Times(AnyNumber());
     EXPECT_CALL(*mock_network_library_, FindEthernetDevice())
         .Times(AnyNumber());
+    EXPECT_CALL(*mock_network_library_, LoadOncNetworks(_, _, _, _))
+        .WillRepeatedly(Return(true));
 
     cros_mock_->SetStatusAreaMocksExpectations();
 
@@ -104,6 +102,18 @@ class NetworkScreenTest : public WizardInProcessBrowserTest {
     EXPECT_CALL(*mock_network_library_, cellular_connecting())
         .Times(AnyNumber())
         .WillRepeatedly((Return(false)));
+    EXPECT_CALL(*mock_network_library_, wimax_available())
+        .Times(AnyNumber())
+        .WillRepeatedly((Return(true)));
+    EXPECT_CALL(*mock_network_library_, wimax_enabled())
+        .Times(AnyNumber())
+        .WillRepeatedly((Return(true)));
+    EXPECT_CALL(*mock_network_library_, wimax_connected())
+        .Times(AnyNumber())
+        .WillRepeatedly((Return(false)));
+    EXPECT_CALL(*mock_network_library_, wimax_connecting())
+        .Times(AnyNumber())
+        .WillRepeatedly((Return(false)));
 
     EXPECT_CALL(*mock_network_library_, FindCellularDevice())
         .Times(AnyNumber())
@@ -111,17 +121,19 @@ class NetworkScreenTest : public WizardInProcessBrowserTest {
   }
 
   virtual void SetUpOnMainThread() {
+    WizardInProcessBrowserTest::SetUpOnMainThread();
     mock_screen_observer_.reset(new MockScreenObserver());
-    ASSERT_TRUE(controller() != NULL);
-    network_screen_ = controller()->GetNetworkScreen();
+    ASSERT_TRUE(WizardController::default_controller() != NULL);
+    network_screen_ =
+        WizardController::default_controller()->GetNetworkScreen();
     ASSERT_TRUE(network_screen_ != NULL);
-    ASSERT_EQ(controller()->current_screen(), network_screen_);
+    ASSERT_EQ(WizardController::default_controller()->current_screen(),
+              network_screen_);
     network_screen_->screen_observer_ = mock_screen_observer_.get();
     ASSERT_TRUE(network_screen_->actor() != NULL);
   }
 
   virtual void TearDownInProcessBrowserTestFixture() {
-    network_screen_->screen_observer_ = controller();
     CrosInProcessBrowserTest::TearDownInProcessBrowserTestFixture();
     DBusThreadManager::Shutdown();
   }
@@ -133,7 +145,7 @@ class NetworkScreenTest : public WizardInProcessBrowserTest {
     EXPECT_CALL(*mock_network_library_, Connected())
         .WillOnce(Return(true));
     network_screen->OnContinuePressed();
-    ui_test_utils::RunAllPendingInMessageLoop();
+    content::RunAllPendingInMessageLoop();
   }
 
   scoped_ptr<MockScreenObserver> mock_screen_observer_;

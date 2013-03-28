@@ -13,22 +13,15 @@
 #include "base/basictypes.h"
 #include "base/callback.h"
 #include "base/file_path.h"
+#include "base/lazy_instance.h"
 #include "base/memory/linked_ptr.h"
 #include "base/memory/scoped_vector.h"
 #include "base/synchronization/lock.h"
 #include "third_party/npapi/bindings/nphostapi.h"
-#include "webkit/plugins/npapi/plugin_group.h"
 #include "webkit/plugins/webkit_plugins_export.h"
 #include "webkit/plugins/webplugininfo.h"
 
 class GURL;
-
-namespace base {
-
-template <typename T>
-struct DefaultLazyInstanceTraits;
-
-}  // namespace base
 
 namespace webkit {
 namespace npapi {
@@ -55,12 +48,22 @@ struct PluginEntryPoints {
 // This object is thread safe.
 class WEBKIT_PLUGINS_EXPORT PluginList {
  public:
+  // Custom traits that performs platform-dependent initialization
+  // when the instance is created.
+  struct CustomLazyInstanceTraits;
+
   // Gets the one instance of the PluginList.
   static PluginList* Singleton();
 
   // Returns true if we're in debug-plugin-loading mode. This is controlled
   // by a command line switch.
   static bool DebugPluginLoading();
+
+  // Returns true if the plugin supports |mime_type|. |mime_type| should be all
+  // lower case.
+  static bool SupportsType(const webkit::WebPluginInfo& plugin,
+                           const std::string& mime_type,
+                           bool allow_wildcard);
 
   // Cause the plugin list to refresh next time they are accessed, regardless
   // of whether they are already loaded.
@@ -121,12 +124,12 @@ class WEBKIT_PLUGINS_EXPORT PluginList {
       const string16& mime_type_descriptions,
       std::vector<webkit::WebPluginMimeType>* parsed_mime_types);
 
-  // Get all the plugins synchronously.
+  // Get all the plugins synchronously, loading them if necessary.
   void GetPlugins(std::vector<webkit::WebPluginInfo>* plugins);
 
-  // Returns true if the list of plugins is cached and is copied into the out
-  // pointer; returns false if the plugin list needs to be refreshed.
-  virtual bool GetPluginsIfNoRefreshNeeded(
+  // Copies the list of plug-ins into |plugins| without loading them.
+  // Returns true if the list of plugins is up-to-date.
+  virtual bool GetPluginsNoRefresh(
       std::vector<webkit::WebPluginInfo>* plugins);
 
   // Returns a list in |info| containing plugins that are found for
@@ -148,23 +151,11 @@ class WEBKIT_PLUGINS_EXPORT PluginList {
                           std::vector<webkit::WebPluginInfo>* info,
                           std::vector<std::string>* actual_mime_types);
 
-  // Populates the given vector with all available plugin groups. If
-  // |load_if_necessary| is true, this will potentially load the plugin list
-  // synchronously.
-  void GetPluginGroups(bool load_if_necessary,
-                       std::vector<PluginGroup>* plugin_groups);
-
-  // Returns a copy of the PluginGroup corresponding to the given WebPluginInfo.
-  // The caller takes ownership of the returned PluginGroup.
-  PluginGroup* GetPluginGroup(const webkit::WebPluginInfo& web_plugin_info);
-
-  // Returns the name of the PluginGroup with the given identifier.
-  // If no such group exists, an empty string is returned.
-  string16 GetPluginGroupName(const std::string& identifier);
-
-  // Load a specific plugin with full path.
-  void LoadPlugin(const FilePath& filename,
-                  ScopedVector<PluginGroup>* plugin_groups);
+  // Load a specific plugin with full path. Return true iff loading the plug-in
+  // was successful.
+  bool LoadPluginIntoPluginList(const FilePath& filename,
+                                std::vector<webkit::WebPluginInfo>* plugins,
+                                webkit::WebPluginInfo* plugin_info);
 
   // The following functions are used to support probing for WebPluginInfo
   // using a different instance of this class.
@@ -172,7 +163,7 @@ class WEBKIT_PLUGINS_EXPORT PluginList {
   // Computes a list of all plugins to potentially load from all sources.
   void GetPluginPathsToLoad(std::vector<FilePath>* plugin_paths);
 
-  // Clears the internal list of PluginGroups and copies them from the vector.
+  // Clears the internal list of Plugins and copies them from the vector.
   void SetPlugins(const std::vector<webkit::WebPluginInfo>& plugins);
 
   void set_will_load_plugins_callback(const base::Closure& callback);
@@ -180,38 +171,29 @@ class WEBKIT_PLUGINS_EXPORT PluginList {
   virtual ~PluginList();
 
  protected:
-  // This constructor is used in unit tests to override the platform-dependent
-  // real-world plugin group definitions with custom ones.
-  PluginList(const PluginGroupDefinition* definitions, size_t num_definitions);
-
-  // Adds the given WebPluginInfo to its corresponding group, creating it if
-  // necessary, and returns the group.
-  // Callers need to protect calls to this method by a lock themselves.
-  PluginGroup* AddToPluginGroups(const webkit::WebPluginInfo& web_plugin_info,
-                                 ScopedVector<PluginGroup>* plugin_groups);
-
- private:
-  friend class PluginListTest;
-  friend struct base::DefaultLazyInstanceTraits<PluginList>;
-  FRIEND_TEST_ALL_PREFIXES(PluginGroupTest, PluginGroupDefinition);
-
-  // Constructors are private for singletons.
+  // Constructors are private for singletons but we expose this one
+  // for subclasses for test purposes.
   PluginList();
 
-  // Creates PluginGroups for the hardcoded group definitions, and stores them
-  // in |hardcoded_plugin_groups_|.
-  void AddHardcodedPluginGroups(const PluginGroupDefinition* group_definitions,
-                                size_t num_group_definitions);
+ private:
+  enum LoadingState {
+    LOADING_STATE_NEEDS_REFRESH,
+    LOADING_STATE_REFRESHING,
+    LOADING_STATE_UP_TO_DATE,
+  };
 
-  // Creates a new PluginGroup either from a hardcoded group definition, or from
-  // the plug-in information.
-  // Caller takes ownership of the returned PluginGroup.
-  PluginGroup* CreatePluginGroup(
-      const webkit::WebPluginInfo& web_plugin_info) const;
+  struct InternalPlugin {
+    webkit::WebPluginInfo info;
+    PluginEntryPoints entry_points;
+  };
+
+  friend class PluginListTest;
+  friend struct base::DefaultLazyInstanceTraits<PluginList>;
 
   // Implements all IO dependent operations of the LoadPlugins method so that
   // test classes can mock these out.
-  virtual void LoadPluginsInternal(ScopedVector<PluginGroup>* plugin_groups);
+  virtual void LoadPluginsIntoPluginListInternal(
+      std::vector<webkit::WebPluginInfo>* plugins);
 
   // Load all plugins from the default plugins directory.
   void LoadPlugins();
@@ -223,14 +205,9 @@ class WEBKIT_PLUGINS_EXPORT PluginList {
   // Returns true if we should load the given plugin, or false otherwise.
   // |plugins| is the list of plugins we have crawled in the current plugin
   // loading run.
-  bool ShouldLoadPlugin(const webkit::WebPluginInfo& info,
-                        ScopedVector<PluginGroup>* plugins);
-
-  // Returns true if the plugin supports |mime_type|. |mime_type| should be all
-  // lower case.
-  bool SupportsType(const webkit::WebPluginInfo& plugin,
-                    const std::string& mime_type,
-                    bool allow_wildcard);
+  bool ShouldLoadPluginUsingPluginList(
+      const webkit::WebPluginInfo& info,
+      std::vector<webkit::WebPluginInfo>* plugins);
 
   // Returns true if the given plugin supports a given file extension.
   // |extension| should be all lower case. If |mime_type| is not NULL, it will
@@ -264,8 +241,10 @@ class WEBKIT_PLUGINS_EXPORT PluginList {
   // Internals
   //
 
-  // If true, we reload plugins even if they've been loaded already.
-  bool plugins_need_refresh_;
+  // States whether we will load the plug-in list the next time we try to access
+  // it, whether we are currently in the process of loading it, or whether we
+  // consider it up-to-date.
+  LoadingState loading_state_;
 
   // Extra plugin paths that we want to search when loading.
   std::vector<FilePath> extra_plugin_paths_;
@@ -273,19 +252,11 @@ class WEBKIT_PLUGINS_EXPORT PluginList {
   // Extra plugin directories that we want to search when loading.
   std::vector<FilePath> extra_plugin_dirs_;
 
-  struct InternalPlugin {
-    webkit::WebPluginInfo info;
-    PluginEntryPoints entry_points;
-  };
   // Holds information about internal plugins.
   std::vector<InternalPlugin> internal_plugins_;
 
-  // Holds the currently available plugin groups.
-  ScopedVector<PluginGroup> plugin_groups_;
-
-  // Holds the hardcoded definitions of well-known plug-ins.
-  // This should only be modified during construction of the PluginList.
-  ScopedVector<PluginGroup> hardcoded_plugin_groups_;
+  // A list holding all plug-ins.
+  std::vector<webkit::WebPluginInfo> plugins_list_;
 
   // Callback that is invoked whenever the PluginList will reload the plugins.
   base::Closure will_load_plugins_callback_;

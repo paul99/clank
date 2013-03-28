@@ -1,4 +1,4 @@
-// Copyright (c) 2011 The Chromium Authors. All rights reserved.
+// Copyright (c) 2012 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -123,7 +123,8 @@ ImeInput::ImeInput()
       input_language_id_(LANG_USER_DEFAULT),
       is_composing_(false),
       system_caret_(false),
-      caret_rect_(-1, -1, 0, 0) {
+      caret_rect_(-1, -1, 0, 0),
+      use_composition_window_(false) {
 }
 
 ImeInput::~ImeInput() {
@@ -136,7 +137,7 @@ bool ImeInput::SetInputLanguage() {
   // while composing a text.
   HKL keyboard_layout = ::GetKeyboardLayout(0);
   input_language_id_ = reinterpret_cast<LANGID>(keyboard_layout);
-  ime_status_ = (::ImmIsIME(keyboard_layout) == TRUE) ? true : false;
+  ime_status_ = (::ImmIsIME(keyboard_layout) == TRUE);
   return ime_status_;
 }
 
@@ -190,20 +191,24 @@ void ImeInput::DestroyImeWindow(HWND window_handle) {
 void ImeInput::MoveImeWindow(HWND window_handle, HIMC imm_context) {
   int x = caret_rect_.x();
   int y = caret_rect_.y();
+
   const int kCaretMargin = 1;
-  // As written in a comment in ImeInput::CreateImeWindow(),
-  // Chinese IMEs ignore function calls to ::ImmSetCandidateWindow()
-  // when a user disables TSF (Text Service Framework) and CUAS (Cicero
-  // Unaware Application Support).
-  // On the other hand, when a user enables TSF and CUAS, Chinese IMEs
-  // ignore the position of the current system caret and uses the
-  // parameters given to ::ImmSetCandidateWindow() with its 'dwStyle'
-  // parameter CFS_CANDIDATEPOS.
-  // Therefore, we do not only call ::ImmSetCandidateWindow() but also
-  // set the positions of the temporary system caret if it exists.
-  CANDIDATEFORM candidate_position = {0, CFS_CANDIDATEPOS, {x, y},
-                                      {0, 0, 0, 0}};
-  ::ImmSetCandidateWindow(imm_context, &candidate_position);
+  if (!use_composition_window_ &&
+      PRIMARYLANGID(input_language_id_) == LANG_CHINESE) {
+    // As written in a comment in ImeInput::CreateImeWindow(),
+    // Chinese IMEs ignore function calls to ::ImmSetCandidateWindow()
+    // when a user disables TSF (Text Service Framework) and CUAS (Cicero
+    // Unaware Application Support).
+    // On the other hand, when a user enables TSF and CUAS, Chinese IMEs
+    // ignore the position of the current system caret and uses the
+    // parameters given to ::ImmSetCandidateWindow() with its 'dwStyle'
+    // parameter CFS_CANDIDATEPOS.
+    // Therefore, we do not only call ::ImmSetCandidateWindow() but also
+    // set the positions of the temporary system caret if it exists.
+    CANDIDATEFORM candidate_position = {0, CFS_CANDIDATEPOS, {x, y},
+                                        {0, 0, 0, 0}};
+    ::ImmSetCandidateWindow(imm_context, &candidate_position);
+  }
   if (system_caret_) {
     switch (PRIMARYLANGID(input_language_id_)) {
       case LANG_JAPANESE:
@@ -214,6 +219,14 @@ void ImeInput::MoveImeWindow(HWND window_handle, HIMC imm_context) {
         break;
     }
   }
+  if (use_composition_window_) {
+    // Moves the composition text window.
+    COMPOSITIONFORM cf = {CFS_POINT, {x, y}};
+    ::ImmSetCompositionWindow(imm_context, &cf);
+    // Don't need to set the position of candidate window.
+    return;
+  }
+
   if (PRIMARYLANGID(input_language_id_) == LANG_KOREAN) {
     // Chinese IMEs and Japanese IMEs require the upper-left corner of
     // the caret to move the position of their candidate windows.
@@ -442,6 +455,10 @@ void ImeInput::UpdateCaretRect(HWND window_handle,
       ::ImmReleaseContext(window_handle, imm_context);
     }
   }
+}
+
+void ImeInput::SetUseCompositionWindow(bool use_composition_window) {
+  use_composition_window_ = use_composition_window;
 }
 
 std::string ImeInput::GetInputLanguageName() const {

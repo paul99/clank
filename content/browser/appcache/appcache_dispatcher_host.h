@@ -1,10 +1,9 @@
-// Copyright (c) 2011 The Chromium Authors. All rights reserved.
+// Copyright (c) 2012 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
 #ifndef CONTENT_BROWSER_APPCACHE_APPCACHE_DISPATCHER_HOST_H_
 #define CONTENT_BROWSER_APPCACHE_APPCACHE_DISPATCHER_HOST_H_
-#pragma once
 
 #include <vector>
 
@@ -12,31 +11,33 @@
 #include "base/memory/scoped_ptr.h"
 #include "base/process.h"
 #include "content/browser/appcache/appcache_frontend_proxy.h"
-#include "content/browser/renderer_host/resource_dispatcher_host.h"
 #include "content/public/browser/browser_message_filter.h"
 #include "webkit/appcache/appcache_backend_impl.h"
 
+namespace content {
 class ChromeAppCacheService;
 
 // Handles appcache related messages sent to the main browser process from
 // its child processes. There is a distinct host for each child process.
 // Messages are handled on the IO thread. The BrowserRenderProcessHost and
 // WorkerProcessHost create an instance and delegates calls to it.
-class AppCacheDispatcherHost : public content::BrowserMessageFilter {
+class AppCacheDispatcherHost : public BrowserMessageFilter {
  public:
   AppCacheDispatcherHost(ChromeAppCacheService* appcache_service,
                          int process_id);
-  virtual ~AppCacheDispatcherHost();
 
   // BrowserIOMessageFilter implementation
   virtual void OnChannelConnected(int32 peer_pid) OVERRIDE;
   virtual bool OnMessageReceived(const IPC::Message& message,
                                  bool* message_was_ok) OVERRIDE;
 
- private:
-  // content::BrowserMessageFilter override.
+ protected:
+  virtual ~AppCacheDispatcherHost();
+
+  // BrowserMessageFilter override.
   virtual void BadMessageReceived() OVERRIDE;
 
+ private:
   // IPC message handlers
   void OnRegisterHost(int host_id);
   void OnUnregisterHost(int host_id);
@@ -74,5 +75,7 @@ class AppCacheDispatcherHost : public content::BrowserMessageFilter {
 
   DISALLOW_COPY_AND_ASSIGN(AppCacheDispatcherHost);
 };
+
+}  // namespace content
 
 #endif  // CONTENT_BROWSER_APPCACHE_APPCACHE_DISPATCHER_HOST_H_

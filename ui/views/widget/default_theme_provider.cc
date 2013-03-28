@@ -1,13 +1,14 @@
-// Copyright (c) 2011 The Chromium Authors. All rights reserved.
+// Copyright (c) 2012 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
 #include "ui/views/widget/default_theme_provider.h"
 
 #include "ui/base/resource/resource_bundle.h"
+#include "ui/gfx/image/image_skia.h"
 
 #if defined(OS_WIN) && !defined(USE_AURA)
-#include "ui/views/widget/native_widget_win.h"
+#include "ui/base/win/shell.h"
 #endif
 
 namespace views {
@@ -16,10 +17,8 @@ DefaultThemeProvider::DefaultThemeProvider() {}
 
 DefaultThemeProvider::~DefaultThemeProvider() {}
 
-void DefaultThemeProvider::Init(Profile* profile) {}
-
-SkBitmap* DefaultThemeProvider::GetBitmapNamed(int id) const {
-  return ResourceBundle::GetSharedInstance().GetBitmapNamed(id);
+gfx::ImageSkia* DefaultThemeProvider::GetImageSkiaNamed(int id) const {
+  return ResourceBundle::GetSharedInstance().GetImageSkiaNamed(id);
 }
 
 SkColor DefaultThemeProvider::GetColor(int id) const {
@@ -33,7 +32,7 @@ bool DefaultThemeProvider::GetDisplayProperty(int id, int* result) const {
 
 bool DefaultThemeProvider::ShouldUseNativeFrame() const {
 #if defined(OS_WIN) && !defined(USE_AURA)
-  return NativeWidgetWin::IsAeroGlassEnabled();
+  return ui::win::IsAeroGlassEnabled();
 #else
   return false;
 #endif
@@ -43,7 +42,9 @@ bool DefaultThemeProvider::HasCustomImage(int id) const {
   return false;
 }
 
-RefCountedMemory* DefaultThemeProvider::GetRawData(int id) const {
+base::RefCountedMemory* DefaultThemeProvider::GetRawData(
+    int id,
+    ui::ScaleFactor scale_factor) const {
   return NULL;
 }
 

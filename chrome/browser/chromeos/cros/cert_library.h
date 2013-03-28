@@ -1,15 +1,13 @@
-// Copyright (c) 2011 The Chromium Authors. All rights reserved.
+// Copyright (c) 2012 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
 #ifndef CHROME_BROWSER_CHROMEOS_CROS_CERT_LIBRARY_H_
 #define CHROME_BROWSER_CHROMEOS_CROS_CERT_LIBRARY_H_
-#pragma once
 
 #include <string>
 
 #include "base/string16.h"
-#include "net/base/cert_database.h"
 #include "net/base/x509_certificate.h"
 
 namespace crypto {
@@ -41,8 +39,8 @@ class CertLibrary {
   // Wrapper class to provide an additional interface for net::CertificateList.
   class CertList {
    public:
-    explicit CertList(CertLibrary* library) : cert_library_(library) {}
-    ~CertList() {}
+    explicit CertList(CertLibrary* library);
+    ~CertList();
     void Append(net::X509Certificate* cert) { list_.push_back(cert); }
     void Clear() { list_.clear(); }
     int Size() const { return static_cast<int>(list_.size()); }
@@ -76,9 +74,8 @@ class CertLibrary {
   // on the same thread on which AddObserver() was called.
   virtual void RemoveObserver(Observer* observer) = 0;
 
-  // Call this to start the certificate list initialization process.
-  // Must be called from the UI thread.
-  virtual void RequestCertificates() = 0;
+  // Loads the key/certificates database for the current logged in user.
+  virtual void LoadKeyStore() = 0;
 
   // Returns true when the certificate list has been requested but not loaded.
   virtual bool CertificatesLoading() const = 0;

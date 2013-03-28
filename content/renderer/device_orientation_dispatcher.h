@@ -1,4 +1,4 @@
-// Copyright (c) 2011 The Chromium Authors. All rights reserved.
+// Copyright (c) 2012 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -6,19 +6,17 @@
 #define CONTENT_RENDERER_DEVICE_ORIENTATION_DISPATCHER_H_
 
 #include "third_party/WebKit/Source/WebKit/chromium/public/WebDeviceOrientationClient.h"
+#include "third_party/WebKit/Source/WebKit/chromium/public/WebDeviceOrientation.h"
 
 #include "base/memory/scoped_ptr.h"
 #include "content/public/renderer/render_view_observer.h"
 
-class RenderViewImpl;
-
-namespace WebKit {
-class WebDeviceOrientation;
-}
-
 struct DeviceOrientationMsg_Updated_Params;
 
-class DeviceOrientationDispatcher : public content::RenderViewObserver,
+namespace content {
+class RenderViewImpl;
+
+class DeviceOrientationDispatcher : public RenderViewObserver,
                                     public WebKit::WebDeviceOrientationClient {
  public:
   explicit DeviceOrientationDispatcher(RenderViewImpl* render_view);
@@ -39,8 +37,10 @@ class DeviceOrientationDispatcher : public content::RenderViewObserver,
       const DeviceOrientationMsg_Updated_Params& p);
 
   scoped_ptr<WebKit::WebDeviceOrientationController> controller_;
-  scoped_ptr<WebKit::WebDeviceOrientation> last_orientation_;
+  WebKit::WebDeviceOrientation last_orientation_;
   bool started_;
 };
+
+}  // namespace content
 
 #endif  // CONTENT_RENDERER_DEVICE_ORIENTATION_DISPATCHER_H_

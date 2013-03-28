@@ -1,4 +1,4 @@
-// Copyright 2011 the V8 project authors. All rights reserved.
+// Copyright 2012 the V8 project authors. All rights reserved.
 // Redistribution and use in source and binary forms, with or without
 // modification, are permitted provided that the following conditions are
 // met:
@@ -71,12 +71,11 @@ namespace internal {
 // tick profiler requires code events, so --prof implies --log-code.
 
 // Forward declarations.
-class HashMap;
 class LogMessageBuilder;
 class Profiler;
 class Semaphore;
-class SlidingStateWindow;
 class Ticker;
+class Isolate;
 
 #undef LOG
 #define LOG(isolate, Call)                          \
@@ -86,6 +85,15 @@ class Ticker;
     if (logger->is_logging())                       \
       logger->Call;                                 \
   } while (false)
+
+#define LOG_CODE_EVENT(isolate, Call)               \
+  do {                                              \
+    v8::internal::Logger* logger =                  \
+        (isolate)->logger();                        \
+    if (logger->is_logging_code_events())           \
+      logger->Call;                                 \
+  } while (false)
+
 
 #define LOG_EVENTS_AND_TAGS_LIST(V)                                     \
   V(CODE_CREATION_EVENT,            "code-creation")                    \
@@ -152,6 +160,10 @@ class Logger {
   // Acquires resources for logging if the right flags are set.
   bool SetUp();
 
+  // Sets the current code event handler.
+  void SetCodeEventHandler(uint32_t options,
+                           JitCodeEventHandler event_handler);
+
   void EnsureTickerStarted();
   void EnsureTickerStopped();
 
@@ -161,9 +173,6 @@ class Logger {
   // When a temporary file is used for the log, returns its stream descriptor,
   // leaving the file open.
   FILE* TearDown();
-
-  // Enable the computation of a sliding window of states.
-  void EnableSlidingStateWindow();
 
   // Emits an event with a string value -> (name, value).
   void StringEvent(const char* name, const char* value);
@@ -263,6 +272,37 @@ class Logger {
                           uintptr_t start,
                           uintptr_t end);
 
+  // ==== Events logged by --log-timer-events. ====
+  void TimerEvent(const char* name, int64_t start, int64_t end);
+  void ExternalSwitch(StateTag old_tag, StateTag new_tag);
+
+  static void EnterExternal();
+  static void LeaveExternal();
+
+  class TimerEventScope {
+   public:
+    TimerEventScope(Isolate* isolate, const char* name)
+        : isolate_(isolate), name_(name), start_(0) {
+      if (FLAG_log_internal_timer_events) start_ = OS::Ticks();
+    }
+
+    ~TimerEventScope() {
+      if (FLAG_log_internal_timer_events) LogTimerEvent();
+    }
+
+    void LogTimerEvent();
+
+    static const char* v8_recompile_synchronous;
+    static const char* v8_recompile_parallel;
+    static const char* v8_compile_full_code;
+    static const char* v8_execute;
+
+   private:
+    Isolate* isolate_;
+    const char* name_;
+    int64_t start_;
+  };
+
   // ==== Events logged by --log-regexp ====
   // Regexp compilation and execution events.
 
@@ -273,6 +313,10 @@ class Logger {
 
   bool is_logging() {
     return logging_nesting_ > 0;
+  }
+
+  bool is_logging_code_events() {
+    return is_logging() || code_event_handler_ != NULL;
   }
 
   // Pause/Resume collection of profiling data.
@@ -312,6 +356,11 @@ class Logger {
 
   Logger();
   ~Logger();
+
+  // Issue code notifications.
+  void IssueCodeAddedEvent(Code* code, const char* name, size_t name_len);
+  void IssueCodeMovedEvent(Address from, Address to);
+  void IssueCodeRemovedEvent(Address from);
 
   // Emits the profiler's first message.
   void ProfilerBeginEvent();
@@ -380,10 +429,6 @@ class Logger {
   // of samples.
   Profiler* profiler_;
 
-  // SlidingStateWindow instance keeping a sliding window of the most
-  // recent VM states.
-  SlidingStateWindow* sliding_state_window_;
-
   // An array of log events names.
   const char* const* log_events_;
 
@@ -394,7 +439,6 @@ class Logger {
   friend class LogMessageBuilder;
   friend class TimeLog;
   friend class Profiler;
-  friend class SlidingStateWindow;
   friend class StackTracer;
   friend class VMState;
 
@@ -414,6 +458,9 @@ class Logger {
   // 'true' between SetUp() and TearDown().
   bool is_initialized_;
 
+  // The code event handler - if any.
+  JitCodeEventHandler code_event_handler_;
+
   // Support for 'incremental addresses' in compressed logs:
   //  LogMessageBuilder::AppendAddress(Address addr)
   Address last_address_;
@@ -424,6 +471,9 @@ class Logger {
   Address prev_to_;
   //  Logger::FunctionCreateEvent(...)
   Address prev_code_;
+
+  int64_t epoch_;
+  static int64_t enter_external_;
 
   friend class CpuProfiler;
 };
@@ -437,6 +487,8 @@ class SamplerRegistry : public AllStatic {
     HAS_SAMPLERS,
     HAS_CPU_PROFILING_SAMPLERS
   };
+
+  static void SetUp();
 
   typedef void (*VisitSampler)(Sampler*, void*);
 
@@ -455,7 +507,6 @@ class SamplerRegistry : public AllStatic {
     return active_samplers_ != NULL && !active_samplers_->is_empty();
   }
 
-  static Mutex* mutex_;  // Protects the state below.
   static List<Sampler*>* active_samplers_;
 
   DISALLOW_IMPLICIT_CONSTRUCTORS(SamplerRegistry);

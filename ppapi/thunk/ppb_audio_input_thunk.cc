@@ -3,8 +3,10 @@
 // found in the LICENSE file.
 
 #include "ppapi/c/pp_errors.h"
-#include "ppapi/thunk/common.h"
+#include "ppapi/shared_impl/ppb_device_ref_shared.h"
+#include "ppapi/shared_impl/tracked_callback.h"
 #include "ppapi/thunk/enter.h"
+#include "ppapi/thunk/ppb_device_ref_api.h"
 #include "ppapi/thunk/ppb_audio_input_api.h"
 #include "ppapi/thunk/resource_creation_api.h"
 #include "ppapi/thunk/thunk.h"
@@ -16,16 +18,12 @@ namespace {
 
 typedef EnterResource<PPB_AudioInput_API> EnterAudioInput;
 
-PP_Resource Create(PP_Instance instance,
-                   PP_Resource config_id,
-                   PPB_AudioInput_Callback callback,
-                   void* user_data) {
-  EnterFunction<ResourceCreationAPI> enter(instance, true);
+PP_Resource Create(PP_Instance instance) {
+  EnterResourceCreation enter(instance);
   if (enter.failed())
     return 0;
 
-  return enter.functions()->CreateAudioInput(instance, config_id,
-      callback, user_data);
+  return enter.functions()->CreateAudioInput(instance);
 }
 
 PP_Bool IsAudioInput(PP_Resource resource) {
@@ -33,8 +31,63 @@ PP_Bool IsAudioInput(PP_Resource resource) {
   return PP_FromBool(enter.succeeded());
 }
 
-PP_Resource GetCurrentConfiguration(PP_Resource audio_id) {
-  EnterAudioInput enter(audio_id, true);
+int32_t EnumerateDevices0_2(PP_Resource audio_input,
+                            PP_Resource* devices,
+                            PP_CompletionCallback callback) {
+  EnterAudioInput enter(audio_input, callback, true);
+  if (enter.failed())
+    return enter.retval();
+
+  return enter.SetResult(enter.object()->EnumerateDevices0_2(devices,
+                                                             enter.callback()));
+}
+
+int32_t EnumerateDevices(PP_Resource audio_input,
+                         PP_ArrayOutput output,
+                         PP_CompletionCallback callback) {
+  EnterAudioInput enter(audio_input, callback, true);
+  if (enter.failed())
+    return enter.retval();
+
+  return enter.SetResult(enter.object()->EnumerateDevices(output,
+                                                          enter.callback()));
+}
+
+int32_t MonitorDeviceChange(PP_Resource audio_input,
+                            PP_MonitorDeviceChangeCallback callback,
+                            void* user_data) {
+  EnterAudioInput enter(audio_input, true);
+  if (enter.failed())
+    return enter.retval();
+  return enter.object()->MonitorDeviceChange(callback, user_data);
+}
+
+int32_t Open(PP_Resource audio_input,
+             PP_Resource device_ref,
+             PP_Resource config,
+             PPB_AudioInput_Callback audio_input_callback,
+             void* user_data,
+             PP_CompletionCallback callback) {
+  EnterAudioInput enter(audio_input, callback, true);
+  if (enter.failed())
+    return enter.retval();
+
+  std::string device_id;
+  // |device_id| remains empty if |device_ref| is 0, which means the default
+  // device.
+  if (device_ref != 0) {
+    EnterResourceNoLock<PPB_DeviceRef_API> enter_device_ref(device_ref, true);
+    if (enter_device_ref.failed())
+      return enter.SetResult(PP_ERROR_BADRESOURCE);
+    device_id = enter_device_ref.object()->GetDeviceRefData().id;
+  }
+
+  return enter.SetResult(enter.object()->Open(
+      device_id, config, audio_input_callback, user_data, enter.callback()));
+}
+
+PP_Resource GetCurrentConfig(PP_Resource audio_input) {
+  EnterAudioInput enter(audio_input, true);
   if (enter.failed())
     return 0;
   return enter.object()->GetCurrentConfig();
@@ -56,18 +109,43 @@ PP_Bool StopCapture(PP_Resource audio_input) {
   return enter.object()->StopCapture();
 }
 
-const PPB_AudioInput_Dev g_ppb_audioinput_thunk = {
+void Close(PP_Resource audio_input) {
+  EnterAudioInput enter(audio_input, true);
+  if (enter.succeeded())
+    enter.object()->Close();
+}
+
+const PPB_AudioInput_Dev_0_2 g_ppb_audioinput_0_2_thunk = {
   &Create,
   &IsAudioInput,
-  &GetCurrentConfiguration,
+  &EnumerateDevices0_2,
+  &Open,
+  &GetCurrentConfig,
   &StartCapture,
-  &StopCapture
+  &StopCapture,
+  &Close
+};
+
+const PPB_AudioInput_Dev_0_3 g_ppb_audioinput_0_3_thunk = {
+  &Create,
+  &IsAudioInput,
+  &EnumerateDevices,
+  &MonitorDeviceChange,
+  &Open,
+  &GetCurrentConfig,
+  &StartCapture,
+  &StopCapture,
+  &Close
 };
 
 }  // namespace
 
-const PPB_AudioInput_Dev_0_1* GetPPB_AudioInput_Dev_0_1_Thunk() {
-  return &g_ppb_audioinput_thunk;
+const PPB_AudioInput_Dev_0_2* GetPPB_AudioInput_Dev_0_2_Thunk() {
+  return &g_ppb_audioinput_0_2_thunk;
+}
+
+const PPB_AudioInput_Dev_0_3* GetPPB_AudioInput_Dev_0_3_Thunk() {
+  return &g_ppb_audioinput_0_3_thunk;
 }
 
 }  // namespace thunk

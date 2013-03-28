@@ -1,4 +1,4 @@
-// Copyright (c) 2011 The Chromium Authors. All rights reserved.
+// Copyright (c) 2012 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 //
@@ -6,16 +6,24 @@
 
 #ifndef CHROME_INSTALLER_SETUP_SETUP_UTIL_H_
 #define CHROME_INSTALLER_SETUP_SETUP_UTIL_H_
-#pragma once
 
-#include "base/file_path.h"
-#include "base/version.h"
+#include <windows.h>
+
+#include "base/basictypes.h"
+#include "base/string16.h"
 #include "base/win/scoped_handle.h"
-#include "chrome/installer/util/install_util.h"
+#include "chrome/installer/util/browser_distribution.h"
+#include "chrome/installer/util/util_constants.h"
+
+class CommandLine;
+class FilePath;
+class Version;
 
 namespace installer {
 
+class InstallationState;
 class InstallerState;
+class ProductState;
 
 // Apply a diff patch to source file. First tries to apply it using courgette
 // since it checks for courgette header and fails quickly. If that fails
@@ -41,29 +49,53 @@ Version* GetMaxVersionFromArchiveDir(const FilePath& chrome_path);
 bool DeleteFileFromTempProcess(const FilePath& path,
                                uint32 delay_before_delete_ms);
 
-// A predicate that compares the program portion of a command line with a given
-// file path.  First, the file paths are compared directly.  If they do not
-// match, the filesystem is consulted to determine if the paths reference the
-// same file.
-class ProgramCompare : public InstallUtil::RegistryValuePredicate {
+// Returns true and populates |setup_exe| with the path to an existing product
+// installer if one is found that is newer than the currently running installer
+// (|installer_version|).
+bool GetExistingHigherInstaller(const InstallationState& original_state,
+                                bool system_install,
+                                const Version& installer_version,
+                                FilePath* setup_exe);
+
+// Invokes the pre-existing |setup_exe| to handle the current operation (as
+// dictated by |command_line|). An installerdata file, if specified, is first
+// unconditionally copied into place so that it will be in effect in case the
+// invoked |setup_exe| runs the newly installed product prior to exiting.
+// Returns true if |setup_exe| was launched, false otherwise.
+bool DeferToExistingInstall(const FilePath& setup_exe,
+                            const CommandLine& command_line,
+                            const InstallerState& installer_state,
+                            const FilePath& temp_path,
+                            InstallStatus* install_status);
+
+// This class will enable the privilege defined by |privilege_name| on the
+// current process' token. The privilege will be disabled upon the
+// ScopedTokenPrivilege's destruction (unless it was already enabled when the
+// ScopedTokenPrivilege object was constructed).
+// Some privileges might require admin rights to be enabled (check is_enabled()
+// to know whether |privilege_name| was successfully enabled).
+class ScopedTokenPrivilege {
  public:
-  explicit ProgramCompare(const FilePath& path_to_match);
-  virtual ~ProgramCompare();
-  virtual bool Evaluate(const std::wstring& value) const OVERRIDE;
+  explicit ScopedTokenPrivilege(const wchar_t* privilege_name);
+  ~ScopedTokenPrivilege();
 
- protected:
-  static bool OpenForInfo(const FilePath& path,
-                          base::win::ScopedHandle* handle);
-  static bool GetInfo(const base::win::ScopedHandle& handle,
-                      BY_HANDLE_FILE_INFORMATION* info);
-
-  FilePath path_to_match_;
-  base::win::ScopedHandle file_handle_;
-  BY_HANDLE_FILE_INFORMATION file_info_;
+  // Always returns true unless the privilege could not be enabled.
+  bool is_enabled() const { return is_enabled_; }
 
  private:
-  DISALLOW_COPY_AND_ASSIGN(ProgramCompare);
-};  // class ProgramCompare
+  // Always true unless the privilege could not be enabled.
+  bool is_enabled_;
+
+  // A scoped handle to the current process' token. This will be closed
+  // preemptively should enabling the privilege fail in the constructor.
+  base::win::ScopedHandle token_;
+
+  // The previous state of the privilege this object is responsible for. As set
+  // by AdjustTokenPrivileges() upon construction.
+  TOKEN_PRIVILEGES previous_privileges_;
+
+  DISALLOW_IMPLICIT_CONSTRUCTORS(ScopedTokenPrivilege);
+};
 
 }  // namespace installer
 

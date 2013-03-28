@@ -1,4 +1,4 @@
-// Copyright (c) 2011 The Chromium Authors. All rights reserved.
+// Copyright (c) 2012 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -6,11 +6,14 @@
 
 #include <string.h>
 
+#include <utility>
+
 #include "base/basictypes.h"
 #include "base/hash_tables.h"
+#include "base/logging.h"
 #include "content/public/browser/browser_thread.h"
+#include "ui/base/events/event.h"
 #include "ui/base/keycodes/keyboard_codes.h"
-#include "ui/views/events/event.h"
 
 using content::BrowserThread;
 
@@ -285,18 +288,20 @@ static const KeyIdentifier kKeyIdentifiers[] = {
 
 static const int kNumKeyIdentifiers = arraysize(kKeyIdentifiers);
 
-typedef base::hash_map<std::string, const views::KeyEvent*> IdentifierMap;
-typedef std::pair<std::string, const views::KeyEvent*> IdentifierPair;
+typedef base::hash_map<std::string, const ui::KeyEvent*> IdentifierMap;
+typedef std::pair<std::string, const ui::KeyEvent*> IdentifierPair;
 static IdentifierMap* identifierMaps[kNumIdentifierTypes] = { NULL };
 
-static views::KeyEvent* kUnknownKeyEvent = NULL;
+static ui::KeyEvent* kUnknownKeyEvent = NULL;
 
 static void InitializeMaps() {
   if (identifierMaps[0])
     return;
 
-  kUnknownKeyEvent = new views::KeyEvent(
-    ui::ET_KEY_PRESSED, ui::VKEY_UNKNOWN, 0);
+  kUnknownKeyEvent = new ui::KeyEvent(ui::ET_KEY_PRESSED,
+                                      ui::VKEY_UNKNOWN,
+                                      0,
+                                      false);
 
   for (int i = 0; i < kNumIdentifierTypes; ++i)
     identifierMaps[i] = new IdentifierMap;
@@ -304,9 +309,10 @@ static void InitializeMaps() {
   for (int i = 0; i < kNumKeyIdentifiers; ++i) {
     const KeyIdentifier& key = kKeyIdentifiers[i];
 
-    views::KeyEvent* event = new views::KeyEvent(
-        ui::ET_KEY_PRESSED, key.key_code, key.event_flags);
-
+    ui::KeyEvent* event = new ui::KeyEvent(ui::ET_KEY_PRESSED,
+                                           key.key_code,
+                                           key.event_flags,
+                                           false);
     for (int j = 0; j < kNumIdentifierTypes; ++j) {
       if (key.identifiers[j][0] != '\0') {
         std::pair<IdentifierMap::iterator, bool> result =
@@ -321,7 +327,7 @@ static void InitializeMaps() {
 }  // namespace
 
 
-const views::KeyEvent& KeyEventFromKeyIdentifier(
+const ui::KeyEvent& KeyEventFromKeyIdentifier(
     const std::string& key_identifier) {
   DCHECK(BrowserThread::CurrentlyOn(BrowserThread::UI));
   InitializeMaps();

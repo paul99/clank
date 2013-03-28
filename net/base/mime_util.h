@@ -1,10 +1,9 @@
-// Copyright (c) 2011 The Chromium Authors. All rights reserved.
+// Copyright (c) 2012 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
 #ifndef NET_BASE_MIME_UTIL_H__
 #define NET_BASE_MIME_UTIL_H__
-#pragma once
 
 #include <string>
 #include <vector>
@@ -40,14 +39,16 @@ NET_EXPORT bool GetPreferredExtensionForMimeType(
     FilePath::StringType* extension);
 
 // Check to see if a particular MIME type is in our list.
-NET_EXPORT bool IsSupportedImageMimeType(const char* mime_type);
-NET_EXPORT bool IsSupportedMediaMimeType(const char* mime_type);
-NET_EXPORT bool IsSupportedNonImageMimeType(const char* mime_type);
-NET_EXPORT bool IsSupportedJavascriptMimeType(const char* mime_type);
+NET_EXPORT bool IsSupportedImageMimeType(const std::string& mime_type);
+NET_EXPORT bool IsSupportedMediaMimeType(const std::string& mime_type);
+NET_EXPORT bool IsSupportedNonImageMimeType(const std::string& mime_type);
+NET_EXPORT bool IsUnsupportedTextMimeType(const std::string& mime_type);
+NET_EXPORT bool IsSupportedJavascriptMimeType(const std::string& mime_type);
+NET_EXPORT bool IsSupportedCertificateMimeType(const std::string& mime_type);
 
 // Get whether this mime type should be displayed in view-source mode.
 // (For example, XML.)
-NET_EXPORT bool IsViewSourceMimeType(const char* mime_type);
+NET_EXPORT bool IsViewSourceMimeType(const std::string& mime_type);
 
 // Convenience function.
 NET_EXPORT bool IsSupportedMimeType(const std::string& mime_type);
@@ -55,8 +56,13 @@ NET_EXPORT bool IsSupportedMimeType(const std::string& mime_type);
 // Returns true if this the mime_type_pattern matches a given mime-type.
 // Checks for absolute matching and wildcards.  mime-types should be in
 // lower case.
-NET_EXPORT bool MatchesMimeType(const std::string &mime_type_pattern,
-                             const std::string &mime_type);
+NET_EXPORT bool MatchesMimeType(const std::string& mime_type_pattern,
+                                const std::string& mime_type);
+
+// Returns true if the |type_string| is a correctly-formed mime type specifier.
+// Allows strings of the form x/y[;params], where "x" is a legal mime type name.
+// Also allows wildcard types -- "x/*", "*/*", and "*".
+NET_EXPORT bool IsMimeType(const std::string& type_string);
 
 // Returns true if and only if all codecs are supported, false otherwise.
 NET_EXPORT bool AreSupportedMediaCodecs(const std::vector<std::string>& codecs);
@@ -83,32 +89,39 @@ NET_EXPORT bool IsSupportedStrictMediaMimeType(
     const std::string& mime_type,
     const std::vector<std::string>& codecs);
 
-// Get the extensions for images files.
-// Note that we do not erase the existing elements in the the provided vector.
-// Instead, we append the result to it.
-NET_EXPORT void GetImageExtensions(
-    std::vector<FilePath::StringType>* extensions);
-
-// Get the extensions for audio files.
-// Note that we do not erase the existing elements in the the provided vector.
-// Instead, we append the result to it.
-NET_EXPORT void GetAudioExtensions(
-    std::vector<FilePath::StringType>* extensions);
-
-// Get the extensions for video files.
-// Note that we do not erase the existing elements in the the provided vector.
-// Instead, we append the result to it.
-NET_EXPORT void GetVideoExtensions(
-    std::vector<FilePath::StringType>* extensions);
-
-// Get the extensions associated with the given mime type.
-// There could be multiple extensions for a given mime type, like "html,htm"
-// for "text/html".
+// Get the extensions associated with the given mime type. This should be passed
+// in lower case. There could be multiple extensions for a given mime type, like
+// "html,htm" for "text/html", or "txt,text,html,..." for "text/*".
 // Note that we do not erase the existing elements in the the provided vector.
 // Instead, we append the result to it.
 NET_EXPORT void GetExtensionsForMimeType(
     const std::string& mime_type,
     std::vector<FilePath::StringType>* extensions);
+
+// Test only methods that return lists of proprietary media types and codecs
+// that are not supported by all variations of Chromium.
+// These types and codecs must be blacklisted to ensure consistent layout test
+// results across all Chromium variations.
+NET_EXPORT void GetMediaTypesBlacklistedForTests(
+    std::vector<std::string>* types);
+NET_EXPORT void GetMediaCodecsBlacklistedForTests(
+    std::vector<std::string>* codecs);
+
+// Returns the IANA media type contained in |mime_type|, or an empty
+// string if |mime_type| does not specifify a known media type.
+// Supported media types are defined at:
+// http://www.iana.org/assignments/media-types/index.html
+NET_EXPORT const std::string GetIANAMediaType(const std::string& mime_type);
+
+// A list of supported certificate-related mime types.
+enum CertificateMimeType {
+#define CERTIFICATE_MIME_TYPE(name, value) CERTIFICATE_MIME_TYPE_ ## name = value,
+#include "net/base/mime_util_certificate_type_list.h"
+#undef CERTIFICATE_MIME_TYPE
+};
+
+NET_EXPORT CertificateMimeType GetCertificateMimeTypeForMimeType(
+    const std::string& mime_type);
 
 }  // namespace net
 

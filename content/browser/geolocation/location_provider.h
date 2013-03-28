@@ -1,4 +1,4 @@
-// Copyright (c) 2011 The Chromium Authors. All rights reserved.
+// Copyright (c) 2012 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -11,7 +11,6 @@
 
 #ifndef CONTENT_BROWSER_GEOLOCATION_LOCATION_PROVIDER_H_
 #define CONTENT_BROWSER_GEOLOCATION_LOCATION_PROVIDER_H_
-#pragma once
 
 #include <map>
 
@@ -19,16 +18,15 @@
 #include "base/threading/non_thread_safe.h"
 #include "content/common/content_export.h"
 
-struct Geoposition;
 class GURL;
-
-namespace content {
-class AccessTokenStore;
-}
 
 namespace net {
 class URLRequestContextGetter;
 }
+
+namespace content {
+class AccessTokenStore;
+struct Geoposition;
 
 // The base class used by all location providers.
 class CONTENT_EXPORT LocationProviderBase
@@ -75,7 +73,7 @@ class CONTENT_EXPORT LocationProviderBase
   virtual void UpdatePosition() {}
   // Delegated to the provider by GeolocationArbitrator. See the corresponding
   // method on that class for more details.
-  virtual void OnPermissionGranted(const GURL& requesting_frame) {}
+  virtual void OnPermissionGranted() {}
 
   bool has_listeners() const;
 
@@ -96,10 +94,12 @@ class CONTENT_EXPORT LocationProviderBase
 // Factory functions for the various types of location provider to abstract
 // over the platform-dependent implementations.
 CONTENT_EXPORT LocationProviderBase* NewNetworkLocationProvider(
-    content::AccessTokenStore* access_token_store,
+    AccessTokenStore* access_token_store,
     net::URLRequestContextGetter* context,
     const GURL& url,
     const string16& access_token);
 LocationProviderBase* NewSystemLocationProvider();
+
+}  // namespace content
 
 #endif  // CONTENT_BROWSER_GEOLOCATION_LOCATION_PROVIDER_H_

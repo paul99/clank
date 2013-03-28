@@ -1,4 +1,4 @@
-// Copyright (c) 2011 The Chromium Authors. All rights reserved.
+// Copyright (c) 2012 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -14,6 +14,7 @@
 using content::UserMetricsAction;
 
 namespace chromeos {
+namespace options {
 
 StatsOptionsHandler::StatsOptionsHandler() {
 }
@@ -21,9 +22,6 @@ StatsOptionsHandler::StatsOptionsHandler() {
 // OptionsPageUIHandler implementation.
 void StatsOptionsHandler::GetLocalizedValues(
     DictionaryValue* localized_strings) {
-}
-
-void StatsOptionsHandler::Initialize() {
 }
 
 // WebUIMessageHandler implementation.
@@ -45,4 +43,5 @@ void StatsOptionsHandler::HandleMetricsReportingCheckbox(
 #endif
 }
 
+}  // namespace options
 }  // namespace chromeos

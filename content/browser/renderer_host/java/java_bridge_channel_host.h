@@ -1,19 +1,15 @@
-// Copyright (c) 2011 The Chromium Authors. All rights reserved.
+// Copyright (c) 2012 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
 #ifndef CONTENT_BROWSER_RENDERER_HOST_JAVA_JAVA_BRIDGE_CHANNEL_HOST_H_
 #define CONTENT_BROWSER_RENDERER_HOST_JAVA_JAVA_BRIDGE_CHANNEL_HOST_H_
-#pragma once
 
 #include "content/common/np_channel_base.h"
 
-// Extras for Channel leaking work-around
-#include "content/public/browser/notification_observer.h"
-#include "content/public/browser/notification_registrar.h"
+namespace content {
 
-class JavaBridgeChannelHost : public NPChannelBase,
-                              public content::NotificationObserver {
+class JavaBridgeChannelHost : public NPChannelBase {
  public:
   static JavaBridgeChannelHost* GetJavaBridgeChannelHost(
       int renderer_id,
@@ -32,19 +28,12 @@ class JavaBridgeChannelHost : public NPChannelBase,
                     bool create_pipe_now,
                     base::WaitableEvent* shutdown_event) OVERRIDE;
 
-  virtual void Observe(int type,
-                       const content::NotificationSource& source,
-                       const content::NotificationDetails& details);
-
-  void RegisterForNotification();
-  content::NotificationRegistrar registrar_;
-
  protected:
   // NPChannelBase override:
   virtual bool OnControlMessageReceived(const IPC::Message& message) OVERRIDE;
 
  private:
-  JavaBridgeChannelHost();
+  JavaBridgeChannelHost() {}
   friend class base::RefCountedThreadSafe<JavaBridgeChannelHost>;
   virtual ~JavaBridgeChannelHost();
 
@@ -57,5 +46,7 @@ class JavaBridgeChannelHost : public NPChannelBase,
 
   DISALLOW_COPY_AND_ASSIGN(JavaBridgeChannelHost);
 };
+
+}  // namespace content
 
 #endif  // CONTENT_BROWSER_RENDERER_HOST_JAVA_JAVA_BRIDGE_CHANNEL_HOST_H_

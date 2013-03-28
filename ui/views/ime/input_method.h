@@ -1,10 +1,9 @@
-// Copyright (c) 2011 The Chromium Authors. All rights reserved.
+// Copyright (c) 2012 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
 #ifndef UI_VIEWS_IME_INPUT_METHOD_H_
 #define UI_VIEWS_IME_INPUT_METHOD_H_
-#pragma once
 
 #include <string>
 
@@ -14,6 +13,7 @@
 #include "ui/views/views_export.h"
 
 namespace ui {
+class KeyEvent;
 class TextInputClient;
 }  // namespace ui
 
@@ -23,17 +23,16 @@ namespace internal {
 class InputMethodDelegate;
 }  // namespace internal
 
-class KeyEvent;
 class View;
 class Widget;
 
 // An interface implemented by an object that encapsulates a native input method
 // service provided by the underlying operation system.
 // Because on most systems, the system input method service is bound to
-// individual native window. On Windows, its HWND, on Linux/Gtk, its GdkWindow.
-// And in Views control system, only the top-level NativeWidget has a native
-// window that can get keyboard focus. So this API is designed to be bound to
-// the top-level NativeWidget.
+// individual native window. On Windows, its HWND, on Aura, its
+// ui::aura::Window. And in Views control system, only the top-level
+// NativeWidget has a native window that can get keyboard focus. So this API is
+// designed to be bound to the top-level NativeWidget.
 class VIEWS_EXPORT InputMethod {
  public:
   virtual ~InputMethod() {}
@@ -61,7 +60,7 @@ class VIEWS_EXPORT InputMethod {
   // it's processed by the input method. It should only be called by the
   // top-level NativeWidget which owns this InputMethod instance, or other
   // related platform dependent code, such as a message dispatcher.
-  virtual void DispatchKeyEvent(const KeyEvent& key) = 0;
+  virtual void DispatchKeyEvent(const ui::KeyEvent& key) = 0;
 
   // Called by the focused |view| whenever its text input type is changed.
   // Before calling this method, the focused |view| must confirm or clear

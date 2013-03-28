@@ -1,10 +1,10 @@
-// Copyright (c) 2011 The Chromium Authors. All rights reserved.
+// Copyright (c) 2012 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
 cr.define('options', function() {
-  const DeletableItem = options.DeletableItem;
-  const DeletableItemList = options.DeletableItemList;
+  /** @const */ var DeletableItem = options.DeletableItem;
+  /** @const */ var DeletableItemList = options.DeletableItemList;
 
   /**
    * Creates a new list item with support for inline editing.
@@ -67,7 +67,7 @@ cr.define('options', function() {
      */
     editClickTarget_: null,
 
-    /** @inheritDoc */
+    /** @override */
     decorate: function() {
       DeletableItem.prototype.decorate.call(this);
 
@@ -77,7 +77,7 @@ cr.define('options', function() {
       this.addEventListener('leadChange', this.handleLeadChange_);
     },
 
-    /** @inheritDoc */
+    /** @override */
     selectionChanged: function() {
       this.updateEditState();
     },
@@ -180,7 +180,7 @@ cr.define('options', function() {
     /**
      * The HTML element that should have focus initially when editing starts,
      * if a specific element wasn't clicked.
-     * Defaults to the first <input> element; can be overriden by subclasses if
+     * Defaults to the first <input> element; can be overridden by subclasses if
      * a different element should be focused.
      * @type {HTMLElement}
      */
@@ -192,7 +192,7 @@ cr.define('options', function() {
      * Whether the input in currently valid to submit. If this returns false
      * when editing would be submitted, either editing will not be ended,
      * or it will be cancelled, depending on the context.
-     * Can be overrided by subclasses to perform input validation.
+     * Can be overridden by subclasses to perform input validation.
      * @type {boolean}
      */
     get currentInputIsValid() {
@@ -201,7 +201,7 @@ cr.define('options', function() {
 
     /**
      * Returns true if the item has been changed by an edit.
-     * Can be overrided by subclasses to return false when nothing has changed
+     * Can be overridden by subclasses to return false when nothing has changed
      * to avoid unnecessary commits.
      * @type {boolean}
      */
@@ -296,7 +296,7 @@ cr.define('options', function() {
     },
 
     /**
-     * Called a key is pressed. Handles committing and cancelling edits.
+     * Called when a key is pressed. Handles committing and canceling edits.
      * @param {Event} e The key down event.
      * @private
      */
@@ -356,7 +356,7 @@ cr.define('options', function() {
       var itemAncestor = findAncestor(document.activeElement, function(node) {
         return node instanceof InlineEditableItem;
       });
-      if (itemAncestor);
+      if (itemAncestor)
         document.activeElement.blur();
     });
   }
@@ -373,7 +373,7 @@ cr.define('options', function() {
      */
     focusPlaceholder: false,
 
-    /** @inheritDoc */
+    /** @override */
     decorate: function() {
       DeletableItemList.prototype.decorate.call(this);
       this.setAttribute('inlineeditable', '');
@@ -399,7 +399,8 @@ cr.define('options', function() {
 
     /**
      * May be overridden by subclasses to disable focusing the placeholder.
-     * @return true if the placeholder element should be focused on edit commit.
+     * @return {boolean} True if the placeholder element should be focused on
+     *     edit commit.
      */
     shouldFocusPlaceholder: function() {
       return true;

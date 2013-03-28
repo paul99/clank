@@ -4,7 +4,6 @@
 
 #ifndef CHROME_BROWSER_UI_GTK_CONSTRAINED_WINDOW_GTK_H_
 #define CHROME_BROWSER_UI_GTK_CONSTRAINED_WINDOW_GTK_H_
-#pragma once
 
 #include <gtk/gtk.h>
 
@@ -15,13 +14,12 @@
 #include "ui/base/gtk/gtk_signal.h"
 #include "ui/base/gtk/owned_widget_gtk.h"
 
-class TabContentsWrapper;
 typedef struct _GdkColor GdkColor;
-#if defined(TOOLKIT_VIEWS)
-class NativeTabContentsViewGtk;
-#else
-class ChromeTabContentsViewWrapperGtk;
-#endif
+class ChromeWebContentsViewDelegateGtk;
+
+namespace content {
+class WebContents;
+}
 
 class ConstrainedWindowGtkDelegate {
  public:
@@ -49,13 +47,9 @@ class ConstrainedWindowGtkDelegate {
 // centers the dialog. It is thus an order of magnitude simpler.
 class ConstrainedWindowGtk : public ConstrainedWindow {
  public:
-#if defined(TOOLKIT_VIEWS)
-   typedef NativeTabContentsViewGtk TabContentsViewType;
-#else
-   typedef ChromeTabContentsViewWrapperGtk TabContentsViewType;
-#endif
+  typedef ChromeWebContentsViewDelegateGtk TabContentsViewType;
 
-  ConstrainedWindowGtk(TabContentsWrapper* wrapper,
+  ConstrainedWindowGtk(content::WebContents* web_contents,
                        ConstrainedWindowGtkDelegate* delegate);
   virtual ~ConstrainedWindowGtk();
 
@@ -64,8 +58,11 @@ class ConstrainedWindowGtk : public ConstrainedWindow {
   virtual void CloseConstrainedWindow() OVERRIDE;
   virtual void FocusConstrainedWindow() OVERRIDE;
 
-  // Returns the TabContentsWrapper that constrains this Constrained Window.
-  TabContentsWrapper* owner() const { return wrapper_; }
+  // Called when the result of GetBackgroundColor may have changed.
+  void BackgroundColorChanged();
+
+  // Returns the WebContents that constrains this Constrained Window.
+  content::WebContents* owner() const { return web_contents_; }
 
   // Returns the toplevel widget that displays this "window".
   GtkWidget* widget() { return border_.get(); }
@@ -82,8 +79,8 @@ class ConstrainedWindowGtk : public ConstrainedWindow {
   CHROMEGTK_CALLBACK_1(ConstrainedWindowGtk, void, OnHierarchyChanged,
                        GtkWidget*);
 
-  // The TabContentsWrapper that owns and constrains this ConstrainedWindow.
-  TabContentsWrapper* wrapper_;
+  // The WebContents that owns and constrains this ConstrainedWindow.
+  content::WebContents* web_contents_;
 
   // The top level widget container that exports to our WebContentsView.
   ui::OwnedWidgetGtk border_;

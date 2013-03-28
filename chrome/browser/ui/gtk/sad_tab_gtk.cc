@@ -6,6 +6,7 @@
 
 #include "base/utf_string_conversions.h"
 #include "chrome/browser/ui/gtk/gtk_chrome_link_button.h"
+#include "chrome/browser/ui/gtk/tab_contents/chrome_web_contents_view_delegate_gtk.h"
 #include "chrome/common/url_constants.h"
 #include "content/public/browser/web_contents.h"
 #include "grit/generated_resources.h"
@@ -51,7 +52,7 @@ GtkWidget* MakeWhiteMarkupLabel(const char* format, const std::string& str) {
 
 }  // namespace
 
-SadTabGtk::SadTabGtk(WebContents* web_contents, Kind kind)
+SadTabGtk::SadTabGtk(WebContents* web_contents, chrome::SadTabKind kind)
     : web_contents_(web_contents),
       kind_(kind) {
   DCHECK(web_contents_);
@@ -59,9 +60,8 @@ SadTabGtk::SadTabGtk(WebContents* web_contents, Kind kind)
   // Use an event box to get the background painting correctly.
   event_box_.Own(gtk_event_box_new());
   gtk_widget_modify_bg(event_box_.get(), GTK_STATE_NORMAL,
-                       kind == CRASHED ?
-                       &kCrashedBackgroundColor :
-                       &kKilledBackgroundColor);
+      (kind == chrome::SAD_TAB_KIND_CRASHED) ?
+          &kCrashedBackgroundColor : &kKilledBackgroundColor);
   // Allow ourselves to be resized arbitrarily small.
   gtk_widget_set_size_request(event_box_.get(), 0, 0);
 
@@ -72,10 +72,11 @@ SadTabGtk::SadTabGtk(WebContents* web_contents, Kind kind)
   GtkWidget* vbox = gtk_vbox_new(FALSE, 0);
   gtk_container_add(GTK_CONTAINER(centering), vbox);
 
+  ui::ResourceBundle& rb = ui::ResourceBundle::GetSharedInstance();
   // Add center-aligned image.
-  GtkWidget* image = gtk_image_new_from_pixbuf(
-      ui::ResourceBundle::GetSharedInstance().GetNativeImageNamed(
-          kind == CRASHED ? IDR_SAD_TAB : IDR_KILLED_TAB));
+  GtkWidget* image = gtk_image_new_from_pixbuf(rb.GetNativeImageNamed(
+      (kind == chrome::SAD_TAB_KIND_CRASHED) ?
+          IDR_SAD_TAB : IDR_KILLED_TAB).ToGdkPixbuf());
   gtk_misc_set_alignment(GTK_MISC(image), 0.5, 0.5);
   gtk_box_pack_start(GTK_BOX(vbox), image, FALSE, FALSE, 0);
 
@@ -87,9 +88,8 @@ SadTabGtk::SadTabGtk(WebContents* web_contents, Kind kind)
   // Add center-aligned title.
   GtkWidget* title = MakeWhiteMarkupLabel(
       "<span size=\"larger\" style=\"normal\"><b>%s</b></span>",
-      l10n_util::GetStringUTF8(kind == CRASHED ?
-                               IDS_SAD_TAB_TITLE :
-                               IDS_KILLED_TAB_TITLE));
+      l10n_util::GetStringUTF8((kind == chrome::SAD_TAB_KIND_CRASHED) ?
+          IDS_SAD_TAB_TITLE : IDS_KILLED_TAB_TITLE));
   gtk_box_pack_start(GTK_BOX(vbox), title, FALSE, FALSE, 0);
 
   // Add spacer between title and message.
@@ -99,9 +99,8 @@ SadTabGtk::SadTabGtk(WebContents* web_contents, Kind kind)
   // Add center-aligned message.
   GtkWidget* message = MakeWhiteMarkupLabel(
       "<span style=\"normal\">%s</span>",
-      l10n_util::GetStringUTF8(kind == CRASHED ?
-                               IDS_SAD_TAB_MESSAGE :
-                               IDS_KILLED_TAB_MESSAGE));
+      l10n_util::GetStringUTF8((kind == chrome::SAD_TAB_KIND_CRASHED) ?
+          IDS_SAD_TAB_MESSAGE : IDS_KILLED_TAB_MESSAGE));
   gtk_label_set_line_wrap(GTK_LABEL(message), TRUE);
   gtk_box_pack_start(GTK_BOX(vbox), message, FALSE, FALSE, 0);
 
@@ -109,17 +108,18 @@ SadTabGtk::SadTabGtk(WebContents* web_contents, Kind kind)
   spacer = gtk_label_new(" ");
   gtk_box_pack_start(GTK_BOX(vbox), spacer, FALSE, FALSE, 0);
 
-  if (web_contents_ != NULL) {
+  if (web_contents_) {
     // Create the help link and alignment.
     std::string link_text(l10n_util::GetStringUTF8(
-        kind == CRASHED ? IDS_SAD_TAB_HELP_LINK : IDS_LEARN_MORE));
+        (kind == chrome::SAD_TAB_KIND_CRASHED) ?
+            IDS_SAD_TAB_HELP_LINK : IDS_LEARN_MORE));
     GtkWidget* link = gtk_chrome_link_button_new(link_text.c_str());
     gtk_chrome_link_button_set_normal_color(GTK_CHROME_LINK_BUTTON(link),
                                             &ui::kGdkWhite);
     g_signal_connect(link, "clicked", G_CALLBACK(OnLinkButtonClickThunk), this);
     GtkWidget* help_alignment = gtk_alignment_new(0.5, 0.5, 0.0, 0.0);
 
-    if (kind == CRASHED) {
+    if (kind == chrome::SAD_TAB_KIND_CRASHED) {
       // Use a horizontal box to contain the help text and link.
       GtkWidget* help_hbox = gtk_hbox_new(FALSE, 0);
       gtk_container_add(GTK_CONTAINER(vbox), help_hbox);
@@ -155,13 +155,35 @@ SadTabGtk::~SadTabGtk() {
   event_box_.Destroy();
 }
 
+void SadTabGtk::Show() {
+  GtkWidget* expanded_container =
+      ChromeWebContentsViewDelegateGtk::GetFor(web_contents_)->
+          expanded_container();
+  gtk_container_add(GTK_CONTAINER(expanded_container), event_box_.get());
+  gtk_widget_show(event_box_.get());
+}
+
+void SadTabGtk::Close() {
+  GtkWidget* expanded_container =
+      ChromeWebContentsViewDelegateGtk::GetFor(web_contents_)->
+          expanded_container();
+  gtk_container_remove(GTK_CONTAINER(expanded_container), event_box_.get());
+}
+
 void SadTabGtk::OnLinkButtonClick(GtkWidget* sender) {
-  if (web_contents_ != NULL) {
-    GURL help_url(
-        kind_ == CRASHED ? chrome::kCrashReasonURL : chrome::kKillReasonURL);
-    OpenURLParams params(
-        help_url, content::Referrer(), CURRENT_TAB,
-        content::PAGE_TRANSITION_LINK, false);
+  if (web_contents_) {
+    GURL help_url((kind_ == chrome::SAD_TAB_KIND_CRASHED) ?
+        chrome::kCrashReasonURL : chrome::kKillReasonURL);
+    OpenURLParams params(help_url, content::Referrer(), CURRENT_TAB,
+                         content::PAGE_TRANSITION_LINK, false);
     web_contents_->OpenURL(params);
   }
 }
+
+namespace chrome {
+
+SadTab* SadTab::Create(content::WebContents* web_contents, SadTabKind kind) {
+  return new SadTabGtk(web_contents, kind);
+}
+
+}  // namespace chrome

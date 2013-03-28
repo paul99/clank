@@ -1,4 +1,4 @@
-// Copyright (c) 2011 The Chromium Authors. All rights reserved.
+// Copyright (c) 2012 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -7,14 +7,18 @@
 #include "base/message_loop.h"
 #include "base/stl_util.h"
 #include "chrome/browser/extensions/extension_function.h"
+#include "extensions/common/error_utils.h"
+
+namespace {
 
 // If the browser stays open long enough, we reset state once a day.
 // Whatever this value is, it should be an order of magnitude longer than
 // the longest interval in any of the QuotaLimitHeuristics in use.
-static const int kPurgeIntervalInDays = 1;
+const int kPurgeIntervalInDays = 1;
 
-const char QuotaLimitHeuristic::kGenericOverQuotaError[] =
-    "This request exceeds available quota.";
+const char kOverQuotaError[] = "This request exceeds the * quota.";
+
+}  // namespace
 
 ExtensionsQuotaService::ExtensionsQuotaService() {
   if (MessageLoop::current() != NULL) {  // Null in unit tests.
@@ -25,13 +29,21 @@ ExtensionsQuotaService::ExtensionsQuotaService() {
 }
 
 ExtensionsQuotaService::~ExtensionsQuotaService() {
+  DCHECK(CalledOnValidThread());
   purge_timer_.Stop();
   Purge();
 }
 
-bool ExtensionsQuotaService::Assess(const std::string& extension_id,
-    ExtensionFunction* function, const ListValue* args,
+std::string ExtensionsQuotaService::Assess(
+    const std::string& extension_id,
+    ExtensionFunction* function,
+    const ListValue* args,
     const base::TimeTicks& event_time) {
+  DCHECK(CalledOnValidThread());
+
+  if (function->ShouldSkipQuotaLimiting())
+    return "";
+
   // Lookup function list for extension.
   FunctionHeuristicsMap& functions = function_heuristics_[extension_id];
 
@@ -41,25 +53,33 @@ bool ExtensionsQuotaService::Assess(const std::string& extension_id,
     function->GetQuotaLimitHeuristics(&heuristics);
 
   if (heuristics.empty())
-    return true;  // No heuristic implies no limit.
+    return "";  // No heuristic implies no limit.
 
-  if (violators_.find(extension_id) != violators_.end())
-    return false;  // Repeat offender.
+  ViolationErrorMap::iterator violation_error =
+      violation_errors_.find(extension_id);
+  if (violation_error != violation_errors_.end())
+    return violation_error->second;  // Repeat offender.
 
-  bool global_decision = true;
+  QuotaLimitHeuristic* failed_heuristic = NULL;
   for (QuotaLimitHeuristics::iterator heuristic = heuristics.begin();
        heuristic != heuristics.end(); ++heuristic) {
     // Apply heuristic to each item (bucket).
-    global_decision = (*heuristic)->ApplyToArgs(args, event_time) &&
-        global_decision;
+    if (!(*heuristic)->ApplyToArgs(args, event_time)) {
+      failed_heuristic = *heuristic;
+      break;
+    }
   }
 
-  if (!global_decision) {
-    PurgeFunctionHeuristicsMap(&functions);
-    function_heuristics_.erase(extension_id);
-    violators_.insert(extension_id);
-  }
-  return global_decision;
+  if (!failed_heuristic)
+    return "";
+
+  std::string error = failed_heuristic->GetError();
+  DCHECK_GT(error.length(), 0u);
+
+  PurgeFunctionHeuristicsMap(&functions);
+  function_heuristics_.erase(extension_id);
+  violation_errors_[extension_id] = error;
+  return error;
 }
 
 void ExtensionsQuotaService::PurgeFunctionHeuristicsMap(
@@ -72,6 +92,7 @@ void ExtensionsQuotaService::PurgeFunctionHeuristicsMap(
 }
 
 void ExtensionsQuotaService::Purge() {
+  DCHECK(CalledOnValidThread());
   std::map<std::string, FunctionHeuristicsMap>::iterator it =
       function_heuristics_.begin();
   for (; it != function_heuristics_.end(); function_heuristics_.erase(it++))
@@ -91,8 +112,9 @@ void QuotaLimitHeuristic::SingletonBucketMapper::GetBucketsForArgs(
 }
 
 QuotaLimitHeuristic::QuotaLimitHeuristic(const Config& config,
-                                         BucketMapper* map)
-    : config_(config), bucket_mapper_(map) {
+                                         BucketMapper* map,
+                                         const std::string& name)
+    : config_(config), bucket_mapper_(map), name_(name) {
 }
 
 QuotaLimitHeuristic::~QuotaLimitHeuristic() {}
@@ -110,9 +132,16 @@ bool QuotaLimitHeuristic::ApplyToArgs(const ListValue* args,
   return true;
 }
 
+std::string QuotaLimitHeuristic::GetError() const {
+  return extensions::ErrorUtils::FormatErrorMessage(kOverQuotaError, name_);
+}
+
 ExtensionsQuotaService::SustainedLimit::SustainedLimit(
-    const base::TimeDelta& sustain, const Config& config, BucketMapper* map)
-    : QuotaLimitHeuristic(config, map),
+    const base::TimeDelta& sustain,
+    const Config& config,
+    BucketMapper* map,
+    const std::string& name)
+    : QuotaLimitHeuristic(config, map, name),
       repeat_exhaustion_allowance_(sustain.InSeconds() /
                                    config.refill_interval.InSeconds()),
       num_available_repeat_exhaustions_(repeat_exhaustion_allowance_) {

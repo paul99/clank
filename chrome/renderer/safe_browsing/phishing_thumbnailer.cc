@@ -32,16 +32,18 @@ SkBitmap GrabPhishingThumbnail(content::RenderView* render_view,
   }
   WebView* view = render_view->GetWebView();
   base::TimeTicks beginning_time = base::TimeTicks::Now();
-  skia::PlatformCanvas canvas;
-  if (!canvas.initialize(view_size.width(), view_size.height(), true)) {
+  skia::RefPtr<SkCanvas> canvas = skia::AdoptRef(
+      skia::CreatePlatformCanvas(view_size.width(),
+                                 view_size.height(), true, 0,
+                                 skia::RETURN_NULL_ON_FAILURE));
+  if (!canvas)
     return SkBitmap();
-  }
 
   // Make sure we are not using any zoom when we take the snapshot.  We will
   // restore the previous zoom level after the snapshot is taken.
-  int old_zoom_level = view->zoomLevel();
-  if (view->zoomLevel() != 0) {
-    view->setZoomLevel(false, 0);
+  double old_zoom_level = view->zoomLevel();
+  if (view->zoomLevel() != 0.0) {
+    view->setZoomLevel(false, 0.0);
   }
   WebSize old_size = view->size();
   // TODO(noelutz): not only should we hide all scroll bars but we should also
@@ -49,10 +51,10 @@ SkBitmap GrabPhishingThumbnail(content::RenderView* render_view,
   view->mainFrame()->setCanHaveScrollbars(false);  // always hide scrollbars.
   view->resize(view_size);
   view->layout();
-  view->paint(webkit_glue::ToWebCanvas(&canvas),
+  view->paint(webkit_glue::ToWebCanvas(canvas.get()),
               WebRect(0, 0, view_size.width(), view_size.height()));
 
-  SkDevice* device = skia::GetTopDevice(canvas);
+  SkDevice* device = skia::GetTopDevice(*canvas);
 
   // Now resize the thumbnail to the right size.  Note: it is important that we
   // use this resize algorithm here.
@@ -72,8 +74,8 @@ SkBitmap GrabPhishingThumbnail(content::RenderView* render_view,
       render_view->ShouldDisplayScrollbars(old_size.width, old_size.height));
   view->resize(old_size);
 
-  HISTOGRAM_TIMES("SBClientPhishing.GrabPhishingThumbnail",
-                  base::TimeTicks::Now() - beginning_time);
+  UMA_HISTOGRAM_TIMES("SBClientPhishing.GrabPhishingThumbnail",
+                      base::TimeTicks::Now() - beginning_time);
   return thumbnail;
 }
 

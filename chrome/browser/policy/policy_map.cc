@@ -7,7 +7,6 @@
 #include <algorithm>
 
 #include "base/stl_util.h"
-#include "policy/policy_constants.h"
 
 namespace policy {
 
@@ -73,6 +72,12 @@ void PolicyMap::CopyFrom(const PolicyMap& other) {
   }
 }
 
+scoped_ptr<PolicyMap> PolicyMap::DeepCopy() const {
+  PolicyMap* copy = new PolicyMap();
+  copy->CopyFrom(*this);
+  return make_scoped_ptr(copy);
+}
+
 void PolicyMap::MergeFrom(const PolicyMap& other) {
   for (const_iterator it = other.begin(); it != other.end(); ++it) {
     const Entry* entry = Get(it->first);
@@ -122,10 +127,12 @@ void PolicyMap::GetDifferingKeys(const PolicyMap& other,
 void PolicyMap::FilterLevel(PolicyLevel level) {
   PolicyMapType::iterator iter(map_.begin());
   while (iter != map_.end()) {
-    if (iter->second.level != level)
+    if (iter->second.level != level) {
+      delete iter->second.value;
       map_.erase(iter++);
-    else
+    } else {
       ++iter;
+    }
   }
 }
 

@@ -2,53 +2,31 @@
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
-#include <CoreAudio/AudioHardware.h>
+#include "media/audio/mac/audio_manager_mac.h"
 
+#include <CoreAudio/AudioHardware.h>
+#include <string>
+
+#include "base/bind.h"
+#include "base/command_line.h"
 #include "base/mac/mac_logging.h"
-#include "base/mac/mac_util.h"
 #include "base/mac/scoped_cftyperef.h"
 #include "base/sys_string_conversions.h"
-#include "media/audio/fake_audio_input_stream.h"
-#include "media/audio/fake_audio_output_stream.h"
+#include "media/audio/audio_util.h"
 #include "media/audio/mac/audio_input_mac.h"
 #include "media/audio/mac/audio_low_latency_input_mac.h"
 #include "media/audio/mac/audio_low_latency_output_mac.h"
-#include "media/audio/mac/audio_manager_mac.h"
 #include "media/audio/mac/audio_output_mac.h"
+#include "media/audio/mac/audio_synchronized_mac.h"
+#include "media/audio/mac/audio_unified_mac.h"
+#include "media/base/bind_to_loop.h"
 #include "media/base/limits.h"
+#include "media/base/media_switches.h"
 
-static const int kMaxInputChannels = 2;
+namespace media {
 
 // Maximum number of output streams that can be open simultaneously.
-static const size_t kMaxOutputStreams = 50;
-
-// By experiment the maximum number of audio streams allowed in Leopard
-// is 18. But we put a slightly smaller number just to be safe.
-static const size_t kMaxOutputStreamsLeopard = 15;
-
-// Initialized to ether |kMaxOutputStreams| or |kMaxOutputStreamsLeopard|.
-static size_t g_max_output_streams = 0;
-
-// Returns the number of audio streams allowed. This is a practical limit to
-// prevent failure caused by too many audio streams opened.
-static size_t GetMaxAudioOutputStreamsAllowed() {
-  if (g_max_output_streams == 0) {
-    // We are hitting a bug in Leopard where too many audio streams will cause
-    // a deadlock in the AudioQueue API when starting the stream. Unfortunately
-    // there's no way to detect it within the AudioQueue API, so we put a
-    // special hard limit only for Leopard.
-    // See bug: http://crbug.com/30242
-    if (base::mac::IsOSLeopardOrEarlier()) {
-      g_max_output_streams = kMaxOutputStreamsLeopard;
-    } else {
-      // In OS other than OSX Leopard, the number of audio streams
-      // allowed is a lot more.
-      g_max_output_streams = kMaxOutputStreams;
-    }
-  }
-
-  return g_max_output_streams;
-}
+static const int kMaxOutputStreams = 50;
 
 static bool HasAudioHardware(AudioObjectPropertySelector selector) {
   AudioDeviceID output_device_id = kAudioObjectUnknown;
@@ -57,7 +35,7 @@ static bool HasAudioHardware(AudioObjectPropertySelector selector) {
     kAudioObjectPropertyScopeGlobal,            // mScope
     kAudioObjectPropertyElementMaster           // mElement
   };
-  size_t output_device_id_size = sizeof(output_device_id);
+  UInt32 output_device_id_size = static_cast<UInt32>(sizeof(output_device_id));
   OSStatus err = AudioObjectGetPropertyData(kAudioObjectSystemObject,
                                             &property_address,
                                             0,     // inQualifierDataSize
@@ -66,6 +44,45 @@ static bool HasAudioHardware(AudioObjectPropertySelector selector) {
                                             &output_device_id);
   return err == kAudioHardwareNoError &&
       output_device_id != kAudioObjectUnknown;
+}
+
+// Returns true if the default input device is the same as
+// the default output device.
+static bool HasUnifiedDefaultIO() {
+  AudioDeviceID input_id, output_id;
+
+  AudioObjectPropertyAddress pa;
+  pa.mSelector = kAudioHardwarePropertyDefaultInputDevice;
+  pa.mScope = kAudioObjectPropertyScopeGlobal;
+  pa.mElement = kAudioObjectPropertyElementMaster;
+  UInt32 size = sizeof(input_id);
+
+  // Get the default input.
+  OSStatus result = AudioObjectGetPropertyData(
+      kAudioObjectSystemObject,
+      &pa,
+      0,
+      0,
+      &size,
+      &input_id);
+
+  if (result != noErr)
+    return false;
+
+  // Get the default output.
+  pa.mSelector = kAudioHardwarePropertyDefaultOutputDevice;
+  result = AudioObjectGetPropertyData(
+      kAudioObjectSystemObject,
+      &pa,
+      0,
+      0,
+      &size,
+      &output_id);
+
+  if (result != noErr)
+    return false;
+
+  return input_id == output_id;
 }
 
 static void GetAudioDeviceInfo(bool is_input,
@@ -106,36 +123,17 @@ static void GetAudioDeviceInfo(bool is_input,
 
   // Iterate over all available devices to gather information.
   for (int i = 0; i < device_count; ++i) {
-    int channels = 0;
     // Get the number of input or output channels of the device.
     property_address.mScope = is_input ?
         kAudioDevicePropertyScopeInput : kAudioDevicePropertyScopeOutput;
-    property_address.mSelector = kAudioDevicePropertyStreamConfiguration;
+    property_address.mSelector = kAudioDevicePropertyStreams;
+    size = 0;
     result = AudioObjectGetPropertyDataSize(device_ids[i],
                                             &property_address,
                                             0,
                                             NULL,
                                             &size);
-    if (result)
-      continue;
-
-    scoped_ptr_malloc<AudioBufferList>
-        buffer(reinterpret_cast<AudioBufferList*>(malloc(size)));
-    AudioBufferList* buffer_list = buffer.get();
-    result = AudioObjectGetPropertyData(device_ids[i],
-                                        &property_address,
-                                        0,
-                                        NULL,
-                                        &size,
-                                        buffer_list);
-    if (result)
-      continue;
-
-    for (uint32 j = 0; j < buffer_list->mNumberBuffers; ++j)
-      channels += buffer_list->mBuffers[j].mNumberChannels;
-
-    // Exclude those devices without the type of channel we are interested in.
-    if (!channels)
+    if (result || !size)
       continue;
 
     // Get device UID.
@@ -235,11 +233,76 @@ static AudioDeviceID GetAudioDeviceIdByUId(bool is_input,
   return audio_device_id;
 }
 
+// Property address to monitor for device changes.
+static const AudioObjectPropertyAddress kDeviceChangePropertyAddress = {
+  kAudioHardwarePropertyDefaultOutputDevice,
+  kAudioObjectPropertyScopeGlobal,
+  kAudioObjectPropertyElementMaster
+};
+
+// Callback from the system when the default device changes; this must be called
+// on the MessageLoop that created the AudioManager.
+static OSStatus OnDefaultDeviceChangedCallback(
+    AudioObjectID object,
+    UInt32 num_addresses,
+    const AudioObjectPropertyAddress addresses[],
+    void* context) {
+  if (object != kAudioObjectSystemObject)
+    return noErr;
+
+  for (UInt32 i = 0; i < num_addresses; ++i) {
+    if (addresses[i].mSelector == kDeviceChangePropertyAddress.mSelector &&
+        addresses[i].mScope == kDeviceChangePropertyAddress.mScope &&
+        addresses[i].mElement == kDeviceChangePropertyAddress.mElement &&
+        context) {
+      static_cast<AudioManagerMac*>(context)->OnDeviceChange();
+      break;
+    }
+  }
+
+  return noErr;
+}
+
 AudioManagerMac::AudioManagerMac()
-    : num_output_streams_(0) {
+    : listener_registered_(false),
+      creating_message_loop_(base::MessageLoopProxy::current()) {
+  SetMaxOutputStreamsAllowed(kMaxOutputStreams);
+
+  // AudioManagerMac is expected to be created by the root platform thread, this
+  // is generally BrowserMainLoop, it's MessageLoop will drive the NSApplication
+  // pump which in turn fires the property listener callbacks.
+  if (!creating_message_loop_)
+    return;
+
+  OSStatus result = AudioObjectAddPropertyListener(
+      kAudioObjectSystemObject,
+      &kDeviceChangePropertyAddress,
+      &OnDefaultDeviceChangedCallback,
+      this);
+
+  if (result != noErr) {
+    OSSTATUS_DLOG(ERROR, result) << "AudioObjectAddPropertyListener() failed!";
+    return;
+  }
+
+  listener_registered_ = true;
 }
 
 AudioManagerMac::~AudioManagerMac() {
+  if (listener_registered_) {
+    // TODO(dalecurtis): CHECK destruction happens on |creating_message_loop_|,
+    // should be true, but currently several unit tests perform destruction in
+    // odd places so we can't CHECK here currently.
+    OSStatus result = AudioObjectRemovePropertyListener(
+        kAudioObjectSystemObject,
+        &kDeviceChangePropertyAddress,
+        &OnDefaultDeviceChangedCallback,
+        this);
+    OSSTATUS_DLOG_IF(ERROR, result != noErr, result)
+        << "AudioObjectRemovePropertyListener() failed!";
+  }
+
+  Shutdown();
 }
 
 bool AudioManagerMac::HasAudioOutputDevices() {
@@ -252,11 +315,6 @@ bool AudioManagerMac::HasAudioInputDevices() {
 
 void AudioManagerMac::GetAudioInputDeviceNames(
     media::AudioDeviceNames* device_names) {
-  // This is needed because AudioObjectGetPropertyDataSize has memory leak
-  // when there is no soundcard in the machine.
-  if (!HasAudioInputDevices())
-    return;
-
   GetAudioDeviceInfo(true, device_names);
   if (!device_names->empty()) {
     // Prepend the default device to the list since we always want it to be
@@ -269,71 +327,80 @@ void AudioManagerMac::GetAudioInputDeviceNames(
   }
 }
 
-AudioOutputStream* AudioManagerMac::MakeAudioOutputStream(
+AudioOutputStream* AudioManagerMac::MakeLinearOutputStream(
     const AudioParameters& params) {
-  if (!params.IsValid())
-    return NULL;
-
-  // Limit the number of audio streams opened. This is to prevent using
-  // excessive resources for a large number of audio streams. More
-  // importantly it prevents instability on certain systems.
-  // See bug: http://crbug.com/30242
-  if (num_output_streams_ >= GetMaxAudioOutputStreamsAllowed()) {
-    return NULL;
-  }
-
-  if (params.format == AudioParameters::AUDIO_MOCK) {
-    return FakeAudioOutputStream::MakeFakeStream(params);
-  } else if (params.format == AudioParameters::AUDIO_PCM_LINEAR) {
-    num_output_streams_++;
-    return new PCMQueueOutAudioOutputStream(this, params);
-  } else if (params.format == AudioParameters::AUDIO_PCM_LOW_LATENCY) {
-    num_output_streams_++;
-    return new AUAudioOutputStream(this, params);
-  }
-  return NULL;
+  DCHECK_EQ(AudioParameters::AUDIO_PCM_LINEAR, params.format());
+  return new PCMQueueOutAudioOutputStream(this, params);
 }
 
-AudioInputStream* AudioManagerMac::MakeAudioInputStream(
+AudioOutputStream* AudioManagerMac::MakeLowLatencyOutputStream(
+    const AudioParameters& params) {
+  DCHECK_EQ(AudioParameters::AUDIO_PCM_LOW_LATENCY, params.format());
+
+  // TODO(crogers): remove once we properly handle input device selection.
+  if (CommandLine::ForCurrentProcess()->HasSwitch(
+      switches::kEnableWebAudioInput)) {
+    if (HasUnifiedDefaultIO())
+      return new AudioHardwareUnifiedStream(this, params);
+
+    // kAudioDeviceUnknown translates to "use default" here.
+    return new AudioSynchronizedStream(this,
+                                       params,
+                                       kAudioDeviceUnknown,
+                                       kAudioDeviceUnknown);
+  }
+
+  return new AUAudioOutputStream(this, params);
+}
+
+AudioInputStream* AudioManagerMac::MakeLinearInputStream(
     const AudioParameters& params, const std::string& device_id) {
-  if (!params.IsValid() || (params.channels > kMaxInputChannels) ||
-      device_id.empty())
-    return NULL;
+  DCHECK_EQ(AudioParameters::AUDIO_PCM_LINEAR, params.format());
+  return new PCMQueueInAudioInputStream(this, params);
+}
 
-  if (params.format == AudioParameters::AUDIO_MOCK) {
-    return FakeAudioInputStream::MakeFakeStream(params);
-  } else if (params.format == AudioParameters::AUDIO_PCM_LINEAR) {
-    return new PCMQueueInAudioInputStream(this, params);
-  } else if (params.format == AudioParameters::AUDIO_PCM_LOW_LATENCY) {
-    // Gets the AudioDeviceID that refers to the AudioDevice with the device
-    // unique id. This AudioDeviceID is used to set the device for Audio Unit.
-    AudioDeviceID audio_device_id = GetAudioDeviceIdByUId(true, device_id);
-    if (audio_device_id != kAudioObjectUnknown)
-      return new AUAudioInputStream(this, params, audio_device_id);
+AudioInputStream* AudioManagerMac::MakeLowLatencyInputStream(
+    const AudioParameters& params, const std::string& device_id) {
+  DCHECK_EQ(AudioParameters::AUDIO_PCM_LOW_LATENCY, params.format());
+  // Gets the AudioDeviceID that refers to the AudioOutputDevice with the device
+  // unique id. This AudioDeviceID is used to set the device for Audio Unit.
+  AudioDeviceID audio_device_id = GetAudioDeviceIdByUId(true, device_id);
+  AudioInputStream* stream = NULL;
+  if (audio_device_id != kAudioObjectUnknown)
+    stream = new AUAudioInputStream(this, params, audio_device_id);
+
+  return stream;
+}
+
+AudioParameters AudioManagerMac::GetPreferredLowLatencyOutputStreamParameters(
+    const AudioParameters& input_params) {
+  if (CommandLine::ForCurrentProcess()->HasSwitch(
+      switches::kEnableWebAudioInput)) {
+    // TODO(crogers): given the limitations of the AudioOutputStream
+    // back-ends used with kEnableWebAudioInput, we hard-code to stereo.
+    // Specifically, this is a limitation of AudioSynchronizedStream which
+    // can be removed as part of the work to consolidate these back-ends.
+    return AudioParameters(
+        AudioParameters::AUDIO_PCM_LOW_LATENCY, CHANNEL_LAYOUT_STEREO,
+        GetAudioHardwareSampleRate(), 16, GetAudioHardwareBufferSize());
   }
-  return NULL;
+
+  return AudioManagerBase::GetPreferredLowLatencyOutputStreamParameters(
+      input_params);
 }
 
-void AudioManagerMac::MuteAll() {
-  // TODO(cpu): implement.
-}
-
-void AudioManagerMac::UnMuteAll() {
-  // TODO(cpu): implement.
-}
-
-// Called by the stream when it has been released by calling Close().
-void AudioManagerMac::ReleaseOutputStream(AudioOutputStream* stream) {
-  DCHECK(stream);
-  num_output_streams_--;
-  delete stream;
-}
-
-// Called by the stream when it has been released by calling Close().
-void AudioManagerMac::ReleaseInputStream(AudioInputStream* stream) {
-  delete stream;
+void AudioManagerMac::OnDeviceChange() {
+  // Post the task to the |creating_message_loop_| to execute our listener
+  // callback.  The callback is created using BindToLoop() so will hop over
+  // to the audio thread upon execution.
+  creating_message_loop_->PostTask(FROM_HERE, BindToLoop(
+      GetMessageLoop(), base::Bind(
+          &AudioManagerMac::NotifyAllOutputDeviceChangeListeners,
+          base::Unretained(this))));
 }
 
 AudioManager* CreateAudioManager() {
   return new AudioManagerMac();
 }
+
+}  // namespace media

@@ -1,10 +1,9 @@
-// Copyright (c) 2011 The Chromium Authors. All rights reserved.
+// Copyright (c) 2012 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
 #ifndef CHROME_BROWSER_PASSWORD_MANAGER_PASSWORD_STORE_X_H_
 #define CHROME_BROWSER_PASSWORD_MANAGER_PASSWORD_STORE_X_H_
-#pragma once
 
 #include <vector>
 
@@ -15,7 +14,6 @@
 class LoginDatabase;
 class PrefService;
 class Profile;
-class WebDataService;
 
 // PasswordStoreX is used on Linux and other non-Windows, non-Mac OS X
 // operating systems. It uses a "native backend" to actually store the password
@@ -30,18 +28,18 @@ class PasswordStoreX : public PasswordStoreDefault {
   // with return values rather than implicit consumer notification.
   class NativeBackend {
    public:
-    typedef std::vector<webkit::forms::PasswordForm*> PasswordFormList;
+    typedef std::vector<content::PasswordForm*> PasswordFormList;
 
     virtual ~NativeBackend() {}
 
     virtual bool Init() = 0;
 
-    virtual bool AddLogin(const webkit::forms::PasswordForm& form) = 0;
-    virtual bool UpdateLogin(const webkit::forms::PasswordForm& form) = 0;
-    virtual bool RemoveLogin(const webkit::forms::PasswordForm& form) = 0;
+    virtual bool AddLogin(const content::PasswordForm& form) = 0;
+    virtual bool UpdateLogin(const content::PasswordForm& form) = 0;
+    virtual bool RemoveLogin(const content::PasswordForm& form) = 0;
     virtual bool RemoveLoginsCreatedBetween(const base::Time& delete_begin,
                                             const base::Time& delete_end) = 0;
-    virtual bool GetLogins(const webkit::forms::PasswordForm& form,
+    virtual bool GetLogins(const content::PasswordForm& form,
                            PasswordFormList* forms) = 0;
     virtual bool GetLoginsCreatedBetween(const base::Time& get_begin,
                                          const base::Time& get_end,
@@ -53,9 +51,8 @@ class PasswordStoreX : public PasswordStoreDefault {
   // Takes ownership of |login_db| and |backend|. |backend| may be NULL in which
   // case this PasswordStoreX will act the same as PasswordStoreDefault.
   PasswordStoreX(LoginDatabase* login_db,
-                   Profile* profile,
-                   WebDataService* web_data_service,
-                   NativeBackend* backend);
+                 Profile* profile,
+                 NativeBackend* backend);
 
 #if !defined(OS_MACOSX) && !defined(OS_CHROMEOS) && defined(OS_POSIX)
   // Registers the pref setting used for the methods below.
@@ -76,21 +73,22 @@ class PasswordStoreX : public PasswordStoreDefault {
   virtual ~PasswordStoreX();
 
   // Implements PasswordStore interface.
-  virtual void AddLoginImpl(const webkit::forms::PasswordForm& form) OVERRIDE;
+  virtual void AddLoginImpl(const content::PasswordForm& form) OVERRIDE;
   virtual void UpdateLoginImpl(
-      const webkit::forms::PasswordForm& form) OVERRIDE;
+      const content::PasswordForm& form) OVERRIDE;
   virtual void RemoveLoginImpl(
-      const webkit::forms::PasswordForm& form) OVERRIDE;
+      const content::PasswordForm& form) OVERRIDE;
   virtual void RemoveLoginsCreatedBetweenImpl(
       const base::Time& delete_begin, const base::Time& delete_end) OVERRIDE;
-  virtual void GetLoginsImpl(GetLoginsRequest* request,
-                             const webkit::forms::PasswordForm& form) OVERRIDE;
+  virtual void GetLoginsImpl(
+      const content::PasswordForm& form,
+      const ConsumerCallbackRunner& callback_runner) OVERRIDE;
   virtual void GetAutofillableLoginsImpl(GetLoginsRequest* request) OVERRIDE;
   virtual void GetBlacklistLoginsImpl(GetLoginsRequest* request) OVERRIDE;
   virtual bool FillAutofillableLogins(
-      std::vector<webkit::forms::PasswordForm*>* forms) OVERRIDE;
+      std::vector<content::PasswordForm*>* forms) OVERRIDE;
   virtual bool FillBlacklistLogins(
-      std::vector<webkit::forms::PasswordForm*>* forms) OVERRIDE;
+      std::vector<content::PasswordForm*>* forms) OVERRIDE;
 
   // Sort logins by origin, like the ORDER BY clause in login_database.cc.
   void SortLoginsByOrigin(NativeBackend::PasswordFormList* list);

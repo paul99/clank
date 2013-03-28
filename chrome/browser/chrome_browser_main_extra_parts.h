@@ -15,32 +15,35 @@
 // separate to allow stages to be further subdivided for Chrome specific
 // initialization stages (e.g. browser process init, profile init).
 
+// While ChromeBrowserMainParts are platform-specific,
+// ChromeBrowserMainExtraParts are used to do further initialization for various
+// Chrome toolkits (e.g., GTK, VIEWS, ASH, AURA, etc.; see
+// ChromeContentBrowserClient::CreateBrowserMainParts()).
+
 class ChromeBrowserMainExtraParts {
  public:
-  ChromeBrowserMainExtraParts();
-  virtual ~ChromeBrowserMainExtraParts();
+  virtual ~ChromeBrowserMainExtraParts() {}
 
   // EarlyInitialization methods.
-  virtual void PreEarlyInitialization();
-  virtual void PostEarlyInitialization();
+  virtual void PreEarlyInitialization() {}
+  virtual void PostEarlyInitialization() {}
 
   // ToolkitInitialized methods.
-  virtual void ToolkitInitialized();
+  virtual void ToolkitInitialized() {}
 
   // MainMessageLoopStart methods.
-  virtual void PreMainMessageLoopStart();
-  virtual void PostMainMessageLoopStart();
+  virtual void PreMainMessageLoopStart() {}
+  virtual void PostMainMessageLoopStart() {}
 
   // MainMessageLoopRun methods.
-  virtual void PreProfileInit();
-  virtual void PostProfileInit();
-  virtual void PreBrowserStart();
-  virtual void PostBrowserStart();
-  virtual void PreMainMessageLoopRun();
-  virtual void PostMainMessageLoopRun();
-
- private:
-  DISALLOW_COPY_AND_ASSIGN(ChromeBrowserMainExtraParts);
+  virtual void PreProfileInit() {}
+  virtual void PostProfileInit() {}
+  virtual void PreInteractiveFirstRunInit() {}
+  virtual void PostInteractiveFirstRunInit() {}
+  virtual void PreBrowserStart() {}
+  virtual void PostBrowserStart() {}
+  virtual void PreMainMessageLoopRun() {}
+  virtual void PostMainMessageLoopRun() {}
 };
 
 #endif  // CHROME_BROWSER_CHROME_BROWSER_MAIN_EXTRA_PARTS_H_

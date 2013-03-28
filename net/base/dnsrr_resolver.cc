@@ -1,4 +1,4 @@
-// Copyright (c) 2011 The Chromium Authors. All rights reserved.
+// Copyright (c) 2012 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -183,13 +183,7 @@ class RRResolverWorker {
       Finish();
       return;
     }
-
     NOTIMPLEMENTED();
-// This was the original 'empty' implementation.
-//    response_.fetch_time = base::Time::Now();
-//    response_.negative = true;
-//    result_ = ERR_NAME_NOT_RESOLVED;
-//    Finish();
   }
 
 #elif defined(OS_POSIX)
@@ -442,7 +436,6 @@ bool RRResponse::ParseFromResponse(const uint8* p, unsigned len,
   // Bit 5 is the Authenticated Data (AD) bit. See
   // http://tools.ietf.org/html/rfc2535#section-6.1
   if (flags2 & 32) {
-#if !defined(OS_ANDROID)
     // AD flag is set. We'll trust it if it came from a local nameserver.
     // Currently the resolv structure is IPv4 only, so we can't test for IPv6
     // loopback addresses.
@@ -451,7 +444,6 @@ bool RRResponse::ParseFromResponse(const uint8* p, unsigned len,
                "\x7f\x00\x00\x01" /* 127.0.0.1 */, 4) == 0) {
       dnssec = true;
     }
-#endif
   }
 
   uint16 query_count, answer_count, authority_count, additional_count;
@@ -517,11 +509,7 @@ class RRResolverJob {
   }
 
   ~RRResolverJob() {
-    if (worker_) {
-      worker_->Cancel();
-      worker_ = NULL;
-      PostAll(ERR_ABORTED, NULL);
-    }
+    Cancel(ERR_ABORTED);
   }
 
   void AddHandle(RRResolverHandle* handle) {
@@ -531,6 +519,14 @@ class RRResolverJob {
   void HandleResult(int result, const RRResponse& response) {
     worker_ = NULL;
     PostAll(result, &response);
+  }
+
+  void Cancel(int result) {
+    if (worker_) {
+      worker_->Cancel();
+      worker_ = NULL;
+      PostAll(result, NULL);
+    }
   }
 
  private:
@@ -651,6 +647,9 @@ void DnsRRResolver::OnIPAddressChanged() {
   inflight.swap(inflight_);
   cache_.clear();
 
+  std::map<std::pair<std::string, uint16>, RRResolverJob*>::iterator it;
+  for (it = inflight.begin(); it != inflight.end(); ++it)
+    it->second->Cancel(ERR_NETWORK_CHANGED);
   STLDeleteValues(&inflight);
 }
 

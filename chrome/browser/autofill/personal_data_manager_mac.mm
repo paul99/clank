@@ -1,4 +1,4 @@
-// Copyright (c) 2011 The Chromium Authors. All rights reserved.
+// Copyright (c) 2012 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -9,14 +9,15 @@
 #import <AddressBook/AddressBook.h>
 
 #include "base/format_macros.h"
+#include "base/guid.h"
 #include "base/logging.h"
+#import "base/mac/scoped_nsexception_enabler.h"
 #include "base/memory/scoped_ptr.h"
 #include "base/memory/scoped_vector.h"
 #include "base/stringprintf.h"
 #include "base/sys_string_conversions.h"
 #include "chrome/browser/autofill/autofill_profile.h"
 #include "chrome/browser/autofill/phone_number.h"
-#include "chrome/common/guid.h"
 #include "grit/generated_resources.h"
 #include "ui/base/l10n/l10n_util_mac.h"
 
@@ -66,9 +67,15 @@ class AuxiliaryProfilesImpl {
 // information and translates it to the internal list of |AutofillProfile| data
 // structures.
 void AuxiliaryProfilesImpl::GetAddressBookMeCard() {
-  profiles_.reset();
+  profiles_.clear();
 
-  ABAddressBook* addressBook = [ABAddressBook sharedAddressBook];
+  // +[ABAddressBook sharedAddressBook] throws an exception internally in
+  // circumstances that aren't clear. The exceptions are only observed in crash
+  // reports, so it is unknown whether they would be caught by AppKit and nil
+  // returned, or if they would take down the app. In either case, avoid
+  // crashing. http://crbug.com/129022
+  ABAddressBook* addressBook = base::mac::PerformSelectorIgnoringExceptions(
+      NSClassFromString(@"ABAddressBook"), @selector(sharedAddressBook));
   ABPerson* me = [addressBook me];
   if (!me)
     return;
@@ -107,7 +114,7 @@ void AuxiliaryProfilesImpl::GetAddressBookMeCard() {
     DCHECK_EQ(kGUIDLength, guid.size());
 
     scoped_ptr<AutofillProfile> profile(new AutofillProfile(guid));
-    DCHECK(guid::IsValidGUID(profile->guid()));
+    DCHECK(base::IsValidGUID(profile->guid()));
 
     // Fill in name and company information.
     GetAddressBookNames(me, addressLabelRaw, profile.get());
@@ -137,11 +144,11 @@ void AuxiliaryProfilesImpl::GetAddressBookNames(
   NSString* lastName = [me valueForProperty:kABLastNameProperty];
   NSString* companyName = [me valueForProperty:kABOrganizationProperty];
 
-  profile->SetInfo(NAME_FIRST, base::SysNSStringToUTF16(firstName));
-  profile->SetInfo(NAME_MIDDLE, base::SysNSStringToUTF16(middleName));
-  profile->SetInfo(NAME_LAST, base::SysNSStringToUTF16(lastName));
+  profile->SetRawInfo(NAME_FIRST, base::SysNSStringToUTF16(firstName));
+  profile->SetRawInfo(NAME_MIDDLE, base::SysNSStringToUTF16(middleName));
+  profile->SetRawInfo(NAME_LAST, base::SysNSStringToUTF16(lastName));
   if ([addressLabelRaw isEqualToString:kABAddressWorkLabel])
-    profile->SetInfo(COMPANY_NAME, base::SysNSStringToUTF16(companyName));
+    profile->SetRawInfo(COMPANY_NAME, base::SysNSStringToUTF16(companyName));
 }
 
 // Addresss information from the Address Book may span multiple lines.
@@ -166,24 +173,29 @@ void AuxiliaryProfilesImpl::GetAddressBookAddresses(NSDictionary* address,
       NSString* addressField2 =
           [[chunks subarrayWithRange:NSMakeRange(1, [chunks count] - 1)]
               componentsJoinedByString:separator];
-      profile->SetInfo(ADDRESS_HOME_LINE1,
-                       base::SysNSStringToUTF16(addressField1));
-      profile->SetInfo(ADDRESS_HOME_LINE2,
-                       base::SysNSStringToUTF16(addressField2));
+      profile->SetRawInfo(ADDRESS_HOME_LINE1,
+                          base::SysNSStringToUTF16(addressField1));
+      profile->SetRawInfo(ADDRESS_HOME_LINE2,
+                          base::SysNSStringToUTF16(addressField2));
     } else {
-      profile->SetInfo(ADDRESS_HOME_LINE1,
-                       base::SysNSStringToUTF16(addressField));
+      profile->SetRawInfo(ADDRESS_HOME_LINE1,
+                          base::SysNSStringToUTF16(addressField));
     }
   }
 
   if (NSString* city = [address objectForKey:kABAddressCityKey])
-    profile->SetInfo(ADDRESS_HOME_CITY, base::SysNSStringToUTF16(city));
+    profile->SetRawInfo(ADDRESS_HOME_CITY, base::SysNSStringToUTF16(city));
+
   if (NSString* state = [address objectForKey:kABAddressStateKey])
-    profile->SetInfo(ADDRESS_HOME_STATE, base::SysNSStringToUTF16(state));
+    profile->SetRawInfo(ADDRESS_HOME_STATE, base::SysNSStringToUTF16(state));
+
   if (NSString* zip = [address objectForKey:kABAddressZIPKey])
-    profile->SetInfo(ADDRESS_HOME_ZIP, base::SysNSStringToUTF16(zip));
-  if (NSString* country = [address objectForKey:kABAddressCountryKey])
-    profile->SetInfo(ADDRESS_HOME_COUNTRY, base::SysNSStringToUTF16(country));
+    profile->SetRawInfo(ADDRESS_HOME_ZIP, base::SysNSStringToUTF16(zip));
+
+  if (NSString* country = [address objectForKey:kABAddressCountryKey]) {
+    profile->SetRawInfo(ADDRESS_HOME_COUNTRY,
+                        base::SysNSStringToUTF16(country));
+  }
 }
 
 // Fills in email address matching current address label.  Note that there may
@@ -203,7 +215,7 @@ void AuxiliaryProfilesImpl::GetAddressBookEmail(
       break;
     }
   }
-  profile->SetInfo(EMAIL_ADDRESS, base::SysNSStringToUTF16(emailAddress));
+  profile->SetRawInfo(EMAIL_ADDRESS, base::SysNSStringToUTF16(emailAddress));
 }
 
 // Fills in telephone numbers.  Each of these are special cases.
@@ -223,17 +235,17 @@ void AuxiliaryProfilesImpl::GetAddressBookPhoneNumbers(
         [phoneLabelRaw isEqualToString:kABPhoneHomeLabel]) {
       string16 homePhone = base::SysNSStringToUTF16(
           [phoneNumbers valueAtIndex:reverseK]);
-      profile->SetInfo(PHONE_HOME_WHOLE_NUMBER, homePhone);
+      profile->SetRawInfo(PHONE_HOME_WHOLE_NUMBER, homePhone);
     } else if ([addressLabelRaw isEqualToString:kABAddressWorkLabel] &&
                [phoneLabelRaw isEqualToString:kABPhoneWorkLabel]) {
       string16 workPhone = base::SysNSStringToUTF16(
           [phoneNumbers valueAtIndex:reverseK]);
-      profile->SetInfo(PHONE_HOME_WHOLE_NUMBER, workPhone);
+      profile->SetRawInfo(PHONE_HOME_WHOLE_NUMBER, workPhone);
     } else if ([phoneLabelRaw isEqualToString:kABPhoneMobileLabel] ||
                [phoneLabelRaw isEqualToString:kABPhoneMainLabel]) {
       string16 phone = base::SysNSStringToUTF16(
           [phoneNumbers valueAtIndex:reverseK]);
-      profile->SetInfo(PHONE_HOME_WHOLE_NUMBER, phone);
+      profile->SetRawInfo(PHONE_HOME_WHOLE_NUMBER, phone);
     }
   }
 }
@@ -241,7 +253,7 @@ void AuxiliaryProfilesImpl::GetAddressBookPhoneNumbers(
 }  // namespace
 
 // Populate |auxiliary_profiles_| with the Address Book data.
-void PersonalDataManager::LoadAuxiliaryProfiles() const {
+void PersonalDataManager::LoadAuxiliaryProfiles() {
   AuxiliaryProfilesImpl impl(&auxiliary_profiles_);
   impl.GetAddressBookMeCard();
 }

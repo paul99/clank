@@ -1,4 +1,4 @@
-// Copyright (c) 2011 The Chromium Authors. All rights reserved.
+// Copyright (c) 2012 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -19,8 +19,10 @@
 using WebKit::WebDevToolsFrontend;
 using WebKit::WebString;
 
+namespace content {
+
 DevToolsClient::DevToolsClient(RenderViewImpl* render_view)
-    : content::RenderViewObserver(render_view) {
+    : RenderViewObserver(render_view) {
   const CommandLine& command_line = *CommandLine::ForCurrentProcess();
   web_tools_frontend_.reset(
       WebDevToolsFrontend::create(
@@ -62,14 +64,6 @@ void DevToolsClient::moveWindowBy(const WebKit::WebFloatPoint& offset) {
   Send(new DevToolsHostMsg_MoveWindow(routing_id(), offset.x, offset.y));
 }
 
-void DevToolsClient::requestDockWindow() {
-  Send(new DevToolsHostMsg_RequestDockWindow(routing_id()));
-}
-
-void DevToolsClient::requestUndockWindow() {
-  Send(new DevToolsHostMsg_RequestUndockWindow(routing_id()));
-}
-
 void DevToolsClient::requestSetDockSide(const WebKit::WebString& side) {
   Send(new DevToolsHostMsg_RequestSetDockSide(routing_id(), side.utf8()));
 }
@@ -79,10 +73,19 @@ void DevToolsClient::openInNewTab(const WebKit::WebString& url) {
                                         url.utf8()));
 }
 
-void DevToolsClient::saveAs(const WebKit::WebString& file_name,
+void DevToolsClient::save(const WebKit::WebString& url,
+                          const WebKit::WebString& content,
+                          bool save_as) {
+  Send(new DevToolsHostMsg_Save(routing_id(),
+                                url.utf8(),
+                                content.utf8(),
+                                save_as));
+}
+
+void DevToolsClient::append(const WebKit::WebString& url,
                             const WebKit::WebString& content) {
-  Send(new DevToolsHostMsg_SaveAs(routing_id(),
-                                  file_name.utf8(),
+  Send(new DevToolsHostMsg_Append(routing_id(),
+                                  url.utf8(),
                                   content.utf8()));
 }
 
@@ -90,3 +93,5 @@ void DevToolsClient::OnDispatchOnInspectorFrontend(const std::string& message) {
   web_tools_frontend_->dispatchOnInspectorFrontend(
       WebString::fromUTF8(message));
 }
+
+}  // namespace content

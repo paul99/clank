@@ -8,11 +8,15 @@
 #include "base/compiler_specific.h"
 #include "base/memory/ref_counted.h"
 #include "net/url_request/url_request_job_factory.h"
-#include "webkit/blob/blob_export.h"
+#include "webkit/storage/webkit_storage_export.h"
 
 namespace base {
 class MessageLoopProxy;
 }  // namespace base
+
+namespace fileapi {
+class FileSystemContext;
+}  // namespace fileapi
 
 namespace net {
 class URLRequest;
@@ -23,17 +27,18 @@ namespace webkit_blob {
 class BlobData;
 class BlobStorageController;
 
-class BLOB_EXPORT BlobProtocolHandler
+class WEBKIT_STORAGE_EXPORT BlobProtocolHandler
     : public net::URLRequestJobFactory::ProtocolHandler {
  public:
   // |controller|'s lifetime should exceed the lifetime of the ProtocolHandler.
-  explicit BlobProtocolHandler(
-      BlobStorageController* blob_storage_controller,
-      base::MessageLoopProxy* file_loop_proxy);
+  BlobProtocolHandler(BlobStorageController* blob_storage_controller,
+                      fileapi::FileSystemContext* file_system_context,
+                      base::MessageLoopProxy* file_loop_proxy);
   virtual ~BlobProtocolHandler();
 
   virtual net::URLRequestJob* MaybeCreateJob(
-      net::URLRequest* request) const OVERRIDE;
+      net::URLRequest* request,
+      net::NetworkDelegate* network_delegate) const OVERRIDE;
 
  private:
   virtual scoped_refptr<BlobData> LookupBlobData(
@@ -42,6 +47,7 @@ class BLOB_EXPORT BlobProtocolHandler
   // No scoped_refptr because |blob_storage_controller_| is owned by the
   // ProfileIOData, which also owns this ProtocolHandler.
   BlobStorageController* const blob_storage_controller_;
+  const scoped_refptr<fileapi::FileSystemContext> file_system_context_;
   const scoped_refptr<base::MessageLoopProxy> file_loop_proxy_;
 
   DISALLOW_COPY_AND_ASSIGN(BlobProtocolHandler);

@@ -1,10 +1,9 @@
-// Copyright (c) 2011 The Chromium Authors. All rights reserved.
+// Copyright (c) 2012 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
 #ifndef UI_VIEWS_CONTROLS_MENU_MENU_DELEGATE_H_
 #define UI_VIEWS_CONTROLS_MENU_MENU_DELEGATE_H_
-#pragma once
 
 #include <set>
 #include <string>
@@ -14,7 +13,6 @@
 #include "ui/base/dragdrop/drag_drop_types.h"
 #include "ui/base/dragdrop/os_exchange_data.h"
 #include "ui/views/controls/menu/menu_item_view.h"
-#include "ui/views/events/event.h"
 
 using ui::OSExchangeData;
 
@@ -71,7 +69,7 @@ class VIEWS_EXPORT MenuDelegate {
   virtual string16 GetLabel(int id) const;
 
   // The font for the menu item label.
-  virtual const gfx::Font& GetLabelFont(int id) const;
+  virtual const gfx::Font* GetLabelFont(int id) const;
 
   // The tooltip shown for the menu item. This is invoked when the user
   // hovers over the item, and no tooltip text has been set for that item.
@@ -109,14 +107,19 @@ class VIEWS_EXPORT MenuDelegate {
   virtual bool ShouldCloseAllMenusOnExecute(int id);
 
   // Executes the specified command. mouse_event_flags give the flags of the
-  // mouse event that triggered this to be invoked (views::MouseEvent
+  // mouse event that triggered this to be invoked (ui::MouseEvent
   // flags). mouse_event_flags is 0 if this is triggered by a user gesture
   // other than a mouse event.
   virtual void ExecuteCommand(int id, int mouse_event_flags);
 
-  // Returns true if the specified mouse event is one the user can use
-  // to trigger, or accept, the mouse. Defaults to left or right mouse buttons.
-  virtual bool IsTriggerableEvent(MenuItemView* view, const MouseEvent& e);
+  // Returns true if ExecuteCommand() should be invoked while leaving the
+  // menu open. Default implementation returns true.
+  virtual bool ShouldExecuteCommandWithoutClosingMenu(int id,
+                                                      const ui::Event& e);
+
+  // Returns true if the specified event is one the user can use to trigger, or
+  // accept, the item. Defaults to left or right mouse buttons or tap.
+  virtual bool IsTriggerableEvent(MenuItemView* view, const ui::Event& e);
 
   // Invoked to determine if drops can be accepted for a submenu. This is
   // ONLY invoked for menus that have submenus and indicates whether or not
@@ -150,7 +153,7 @@ class VIEWS_EXPORT MenuDelegate {
   //
   // If a drop should not be allowed, returned ui::DragDropTypes::DRAG_NONE.
   virtual int GetDropOperation(MenuItemView* item,
-                               const DropTargetEvent& event,
+                               const ui::DropTargetEvent& event,
                                DropPosition* position);
 
   // Invoked to perform the drop operation. This is ONLY invoked if
@@ -160,7 +163,7 @@ class VIEWS_EXPORT MenuDelegate {
   // menu indicates the menu the drop occurred on.
   virtual int OnPerformDrop(MenuItemView* menu,
                             DropPosition position,
-                            const DropTargetEvent& event);
+                            const ui::DropTargetEvent& event);
 
   // Invoked to determine if it is possible for the user to drag the specified
   // menu item.

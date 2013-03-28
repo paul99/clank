@@ -1,4 +1,4 @@
-// Copyright (c) 2011 The Chromium Authors. All rights reserved.
+// Copyright (c) 2012 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -20,16 +20,21 @@ namespace quota {
 class QuotaManager;
 }
 
+namespace content {
 class QuotaPermissionContext;
 
-class QuotaDispatcherHost : public content::BrowserMessageFilter {
+class QuotaDispatcherHost : public BrowserMessageFilter {
  public:
   QuotaDispatcherHost(int process_id,
                       quota::QuotaManager* quota_manager,
                       QuotaPermissionContext* permission_context);
-  virtual ~QuotaDispatcherHost();
+
+  // BrowserMessageFilter:
   virtual bool OnMessageReceived(const IPC::Message& message,
                                  bool* message_was_ok) OVERRIDE;
+
+ protected:
+  virtual ~QuotaDispatcherHost();
 
  private:
   class RequestDispatcher;
@@ -57,5 +62,7 @@ class QuotaDispatcherHost : public content::BrowserMessageFilter {
 
   DISALLOW_IMPLICIT_CONSTRUCTORS(QuotaDispatcherHost);
 };
+
+}  // namespace content
 
 #endif  // CONTENT_BROWSER_RENDERER_HOST_QUOTA_DISPATCHER_HOST_H_

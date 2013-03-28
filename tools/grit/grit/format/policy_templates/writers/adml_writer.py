@@ -1,4 +1,5 @@
-# Copyright (c) 2011 The Chromium Authors. All rights reserved.
+#!/usr/bin/env python
+# Copyright (c) 2012 The Chromium Authors. All rights reserved.
 # Use of this source code is governed by a BSD-style license that can be
 # found in the LICENSE file.
 
@@ -82,7 +83,8 @@ class ADMLWriter(xml_formatted_writer.XMLFormattedWriter):
 
     if policy_type == 'main':
       pass
-    elif policy_type == 'string':
+    elif policy_type in ('string', 'dict'):
+      # 'dict' policies are configured as JSON-encoded strings on Windows.
       textbox_elem = self.AddElement(presentation_elem, 'textBox',
                                      {'refId': policy_name})
       label_elem = self.AddElement(textbox_elem, 'label')
@@ -132,7 +134,7 @@ class ADMLWriter(xml_formatted_writer.XMLFormattedWriter):
     '''
     self._AddString(string_table_elem, self.config['win_supported_os'],
                     self.messages['win_supported_winxpsp2']['text'])
-    recommended_name = '%s (%s)' % \
+    recommended_name = '%s - %s' % \
         (self.config['app_name'], self.messages['doc_recommended']['text'])
     if build == 'chrome':
       self._AddString(string_table_elem,

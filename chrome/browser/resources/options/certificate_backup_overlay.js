@@ -1,9 +1,9 @@
-// Copyright (c) 2010 The Chromium Authors. All rights reserved.
+// Copyright (c) 2012 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
 cr.define('options', function() {
-  const OptionsPage = options.OptionsPage;
+  /** @const */ var OptionsPage = options.OptionsPage;
 
   /**
    * CertificateBackupOverlay class
@@ -30,14 +30,15 @@ cr.define('options', function() {
       var self = this;
       $('certificateBackupCancelButton').onclick = function(event) {
         self.cancelBackup_();
-      }
+      };
       $('certificateBackupOkButton').onclick = function(event) {
         self.finishBackup_();
-      }
-      $('certificateBackupPassword').oninput =
-      $('certificateBackupPassword2').oninput = function(event) {
+      };
+      var onBackupPasswordInput = function(event) {
         self.comparePasswords_();
-      }
+      };
+      $('certificateBackupPassword').oninput = onBackupPasswordInput;
+      $('certificateBackupPassword2').oninput = onBackupPasswordInput;
 
       self.clearInputFields_();
     },

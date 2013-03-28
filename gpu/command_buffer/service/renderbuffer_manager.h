@@ -5,26 +5,31 @@
 #ifndef GPU_COMMAND_BUFFER_SERVICE_RENDERBUFFER_MANAGER_H_
 #define GPU_COMMAND_BUFFER_SERVICE_RENDERBUFFER_MANAGER_H_
 
+#include <string>
 #include "base/basictypes.h"
 #include "base/hash_tables.h"
 #include "base/memory/ref_counted.h"
 #include "base/memory/scoped_ptr.h"
 #include "gpu/command_buffer/service/gl_utils.h"
+#include "gpu/command_buffer/service/memory_tracking.h"
+#include "gpu/gpu_export.h"
 
 namespace gpu {
 namespace gles2 {
 
 // This class keeps track of the renderbuffers and whether or not they have
 // been cleared.
-class RenderbufferManager {
+class GPU_EXPORT RenderbufferManager {
  public:
   // Info about Renderbuffers currently in the system.
-  class RenderbufferInfo : public base::RefCounted<RenderbufferInfo> {
+  class GPU_EXPORT RenderbufferInfo
+      : public base::RefCounted<RenderbufferInfo> {
    public:
     typedef scoped_refptr<RenderbufferInfo> Ref;
 
     RenderbufferInfo(RenderbufferManager* manager, GLuint service_id)
         : manager_(manager),
+          deleted_(false),
           service_id_(service_id),
           cleared_(true),
           has_been_bound_(false),
@@ -32,6 +37,7 @@ class RenderbufferManager {
           internal_format_(GL_RGBA4),
           width_(0),
           height_(0) {
+      manager_->StartTracking(this);
     }
 
     GLuint service_id() const {
@@ -59,7 +65,7 @@ class RenderbufferManager {
     }
 
     bool IsDeleted() const {
-      return service_id_ == 0;
+      return deleted_;
     }
 
     void MarkAsValid() {
@@ -72,14 +78,16 @@ class RenderbufferManager {
 
     size_t EstimatedSize();
 
+    void AddToSignature(std::string* signature) const;
+
    private:
     friend class RenderbufferManager;
     friend class base::RefCounted<RenderbufferInfo>;
 
     ~RenderbufferInfo();
 
-    void set_cleared() {
-      cleared_ = true;
+    void set_cleared(bool cleared) {
+      cleared_ = cleared;
     }
 
     void SetInfo(
@@ -92,11 +100,13 @@ class RenderbufferManager {
     }
 
     void MarkAsDeleted() {
-      service_id_ = 0;
+      deleted_ = true;
     }
 
     // RenderbufferManager that owns this RenderbufferInfo.
     RenderbufferManager* manager_;
+
+    bool deleted_;
 
     // Service side renderbuffer id.
     GLuint service_id_;
@@ -118,7 +128,9 @@ class RenderbufferManager {
     GLsizei height_;
   };
 
-  RenderbufferManager(GLint max_renderbuffer_size, GLint max_samples);
+  RenderbufferManager(MemoryTracker* memory_tracker,
+                      GLint max_renderbuffer_size,
+                      GLint max_samples);
   ~RenderbufferManager();
 
   GLint max_renderbuffer_size() const {
@@ -137,7 +149,7 @@ class RenderbufferManager {
       RenderbufferInfo* renderbuffer,
       GLsizei samples, GLenum internalformat, GLsizei width, GLsizei height);
 
-  void SetCleared(RenderbufferInfo* renderbuffer);
+  void SetCleared(RenderbufferInfo* renderbuffer, bool cleared);
 
   // Must call before destruction.
   void Destroy(bool have_context);
@@ -154,17 +166,26 @@ class RenderbufferManager {
   // Gets a client id for a given service id.
   bool GetClientId(GLuint service_id, GLuint* client_id) const;
 
- private:
-  void UpdateMemRepresented();
+  size_t mem_represented() const {
+    return memory_tracker_->GetMemRepresented();
+  }
 
+ private:
+  void StartTracking(RenderbufferInfo* renderbuffer);
   void StopTracking(RenderbufferInfo* renderbuffer);
+
+  scoped_ptr<MemoryTypeTracker> memory_tracker_;
 
   GLint max_renderbuffer_size_;
   GLint max_samples_;
 
   int num_uncleared_renderbuffers_;
 
-  size_t mem_represented_;
+  // Counts the number of RenderbufferInfo allocated with 'this' as its manager.
+  // Allows to check no RenderbufferInfo will outlive this.
+  unsigned renderbuffer_info_count_;
+
+  bool have_context_;
 
   // Info for each renderbuffer in the system.
   typedef base::hash_map<GLuint, RenderbufferInfo::Ref> RenderbufferInfoMap;

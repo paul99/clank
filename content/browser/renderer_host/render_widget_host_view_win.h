@@ -4,13 +4,11 @@
 
 #ifndef CONTENT_BROWSER_RENDERER_HOST_RENDER_WIDGET_HOST_VIEW_WIN_H_
 #define CONTENT_BROWSER_RENDERER_HOST_RENDER_WIDGET_HOST_VIEW_WIN_H_
-#pragma once
 
 #include <atlbase.h>
 #include <atlapp.h>
 #include <atlcrack.h>
 #include <atlmisc.h>
-#include <peninputpanel.h>
 #include <vector>
 
 #include "base/compiler_specific.h"
@@ -20,18 +18,22 @@
 #include "base/time.h"
 #include "base/win/scoped_comptr.h"
 #include "content/browser/accessibility/browser_accessibility_manager.h"
-#include "content/browser/renderer_host/render_widget_host_view.h"
+#include "content/browser/renderer_host/render_widget_host_view_base.h"
 #include "content/common/content_export.h"
 #include "content/public/browser/notification_observer.h"
 #include "content/public/browser/notification_registrar.h"
+#include "ui/base/gestures/gesture_recognizer.h"
+#include "ui/base/gestures/gesture_types.h"
+#include "ui/base/ime/text_input_client.h"
+#include "ui/base/ime/win/tsf_bridge.h"
+#include "ui/base/win/extra_sdk_defines.h"
 #include "ui/base/win/ime_input.h"
 #include "ui/gfx/native_widget_types.h"
 #include "ui/gfx/point.h"
-#include "ui/gfx/surface/accelerated_surface_win.h"
+#include "ui/surface/accelerated_surface_win.h"
 #include "webkit/glue/webcursor.h"
 
-class BackingStore;
-class RenderWidgetHost;
+class SkRegion;
 
 namespace gfx {
 class Size;
@@ -46,25 +48,15 @@ namespace ui {
 class ViewProp;
 }
 
+namespace content {
+class BackingStore;
+class RenderWidgetHost;
+class WebTouchState;
+
 typedef CWinTraits<WS_CHILD | WS_CLIPCHILDREN | WS_CLIPSIBLINGS, 0>
     RenderWidgetHostHWNDTraits;
 
 CONTENT_EXPORT extern const wchar_t kRenderWidgetHostHWNDClass[];
-
-// TODO(ananta)
-// This should be removed once we have the new windows SDK which defines these
-// messages.
-#if !defined(WM_POINTERUPDATE)
-#define WM_POINTERUPDATE 0x0245
-#endif  // WM_POINTERUPDATE
-
-#if !defined(WM_POINTERDOWN)
-#define WM_POINTERDOWN  0x0246
-#endif  // WM_POINTERDOWN
-
-#if !defined(WM_POINTERUP)
-#define WM_POINTERUP    0x0247
-#endif  // WM_POINTERUP
 
 ///////////////////////////////////////////////////////////////////////////////
 // RenderWidgetHostViewWin
@@ -81,19 +73,23 @@ CONTENT_EXPORT extern const wchar_t kRenderWidgetHostHWNDClass[];
 //     If the render process dies, the RenderWidgetHostHWND goes away and all
 //     references to it must become NULL."
 //
+// RenderWidgetHostView class hierarchy described in render_widget_host_view.h.
 class RenderWidgetHostViewWin
     : public CWindowImpl<RenderWidgetHostViewWin,
                          CWindow,
                          RenderWidgetHostHWNDTraits>,
-      public RenderWidgetHostView,
-      public content::NotificationObserver,
-      public BrowserAccessibilityDelegate {
+      public RenderWidgetHostViewBase,
+      public NotificationObserver,
+      public BrowserAccessibilityDelegate,
+      public ui::GestureConsumer,
+      public ui::GestureEventHelper,
+      public ui::TextInputClient {  // for Win8/metro TSF support.
  public:
   virtual ~RenderWidgetHostViewWin();
 
   CONTENT_EXPORT void CreateWnd(HWND parent);
 
-  void ScheduleComposite();
+  void AcceleratedPaint(HDC dc);
 
   DECLARE_WND_CLASS_EX(kRenderWidgetHostHWNDClass, CS_DBLCLKS, 0);
 
@@ -103,6 +99,7 @@ class RenderWidgetHostViewWin
     MSG_WM_DESTROY(OnDestroy)
     MSG_WM_PAINT(OnPaint)
     MSG_WM_NCPAINT(OnNCPaint)
+    MSG_WM_NCHITTEST(OnNCHitTest)
     MSG_WM_ERASEBKGND(OnEraseBkgnd)
     MSG_WM_SETCURSOR(OnSetCursor)
     MSG_WM_SETFOCUS(OnSetFocus)
@@ -143,78 +140,96 @@ class RenderWidgetHostViewWin
     MESSAGE_HANDLER(WM_MOUSEACTIVATE, OnMouseActivate)
     MESSAGE_HANDLER(WM_GETOBJECT, OnGetObject)
     MESSAGE_HANDLER(WM_PARENTNOTIFY, OnParentNotify)
-    MESSAGE_HANDLER(WM_POINTERDOWN, OnPointerMessage)
-    MESSAGE_HANDLER(WM_POINTERUP, OnPointerMessage)
     MESSAGE_HANDLER(WM_GESTURE, OnGestureEvent)
+    MESSAGE_HANDLER(WM_MOVE, OnMoveOrSize)
+    MESSAGE_HANDLER(WM_SIZE, OnMoveOrSize)
   END_MSG_MAP()
 
-  // Implementation of RenderWidgetHostView:
+  // RenderWidgetHostView implementation.
   virtual void InitAsChild(gfx::NativeView parent_view) OVERRIDE;
-  virtual void InitAsPopup(RenderWidgetHostView* parent_host_view,
-                           const gfx::Rect& pos) OVERRIDE;
-  virtual void InitAsFullscreen(
-      RenderWidgetHostView* reference_host_view) OVERRIDE;
   virtual RenderWidgetHost* GetRenderWidgetHost() const OVERRIDE;
-  virtual void DidBecomeSelected() OVERRIDE;
-  virtual void WasHidden() OVERRIDE;
   virtual void SetSize(const gfx::Size& size) OVERRIDE;
   virtual void SetBounds(const gfx::Rect& rect) OVERRIDE;
   virtual gfx::NativeView GetNativeView() const OVERRIDE;
   virtual gfx::NativeViewId GetNativeViewId() const OVERRIDE;
   virtual gfx::NativeViewAccessible GetNativeViewAccessible() OVERRIDE;
-  virtual void MovePluginWindows(
-      const std::vector<webkit::npapi::WebPluginGeometry>& moves) OVERRIDE;
-  virtual void Focus() OVERRIDE;
-  virtual void Blur() OVERRIDE;
   virtual bool HasFocus() const OVERRIDE;
+  virtual bool IsSurfaceAvailableForCopy() const OVERRIDE;
   virtual void Show() OVERRIDE;
   virtual void Hide() OVERRIDE;
   virtual bool IsShowing() OVERRIDE;
   virtual gfx::Rect GetViewBounds() const OVERRIDE;
+  virtual void SetBackground(const SkBitmap& background) OVERRIDE;
+
+  // Implementation of RenderWidgetHostViewPort.
+  virtual void InitAsPopup(RenderWidgetHostView* parent_host_view,
+                           const gfx::Rect& pos) OVERRIDE;
+  virtual void InitAsFullscreen(
+      RenderWidgetHostView* reference_host_view) OVERRIDE;
+  virtual void WasShown() OVERRIDE;
+  virtual void WasHidden() OVERRIDE;
+  virtual void MovePluginWindows(
+      const gfx::Vector2d& scroll_offset,
+      const std::vector<webkit::npapi::WebPluginGeometry>& moves) OVERRIDE;
+  virtual void Focus() OVERRIDE;
+  virtual void Blur() OVERRIDE;
   virtual void UpdateCursor(const WebCursor& cursor) OVERRIDE;
   virtual void SetIsLoading(bool is_loading) OVERRIDE;
-  virtual void TextInputStateChanged(ui::TextInputType type,
-                                     bool can_compose_inline) OVERRIDE;
-  virtual void SelectionBoundsChanged(const gfx::Rect& start_rect,
-                                      const gfx::Rect& end_rect) OVERRIDE;
+  virtual void TextInputStateChanged(
+      const ViewHostMsg_TextInputState_Params& params) OVERRIDE;
+  virtual void SelectionBoundsChanged(
+      const gfx::Rect& start_rect,
+      WebKit::WebTextDirection start_direction,
+      const gfx::Rect& end_rect,
+      WebKit::WebTextDirection end_direction) OVERRIDE;
   virtual void ImeCancelComposition() OVERRIDE;
-  virtual void ImeCompositionRangeChanged(const ui::Range& range) OVERRIDE;
+  virtual void ImeCompositionRangeChanged(
+      const ui::Range& range,
+      const std::vector<gfx::Rect>& character_bounds) OVERRIDE;
   virtual void DidUpdateBackingStore(
-      const gfx::Rect& scroll_rect, int scroll_dx, int scroll_dy,
+      const gfx::Rect& scroll_rect,
+      const gfx::Vector2d& scroll_delta,
       const std::vector<gfx::Rect>& copy_rects) OVERRIDE;
   virtual void RenderViewGone(base::TerminationStatus status,
                               int error_code) OVERRIDE;
-  // called by TabContents before DestroyWindow
+  // called by WebContentsImpl before DestroyWindow
   virtual void WillWmDestroy() OVERRIDE;
   virtual void Destroy() OVERRIDE;
   virtual void SetTooltipText(const string16& tooltip_text) OVERRIDE;
   virtual BackingStore* AllocBackingStore(const gfx::Size& size) OVERRIDE;
+  virtual void CopyFromCompositingSurface(
+      const gfx::Rect& src_subrect,
+      const gfx::Size& dst_size,
+      const base::Callback<void(bool)>& callback,
+      skia::PlatformBitmap* output) OVERRIDE;
   virtual void OnAcceleratedCompositingStateChange() OVERRIDE;
-  virtual void SetBackground(const SkBitmap& background) OVERRIDE;
-  virtual void UnhandledWheelEvent(
-      const WebKit::WebMouseWheelEvent& event) OVERRIDE;
-  virtual void ProcessTouchAck(bool processed) OVERRIDE;
+  virtual void ProcessAckedTouchEvent(const WebKit::WebTouchEvent& touch,
+                                      InputEventAckState ack_result) OVERRIDE;
   virtual void SetHasHorizontalScrollbar(
       bool has_horizontal_scrollbar) OVERRIDE;
   virtual void SetScrollOffsetPinning(
       bool is_pinned_to_left, bool is_pinned_to_right) OVERRIDE;
-  virtual gfx::PluginWindowHandle GetCompositingSurface() OVERRIDE;
+  virtual gfx::Rect GetBoundsInRootWindow() OVERRIDE;
+  virtual gfx::GLSurfaceHandle GetCompositingSurface() OVERRIDE;
   virtual void AcceleratedSurfaceBuffersSwapped(
       const GpuHostMsg_AcceleratedSurfaceBuffersSwapped_Params& params,
       int gpu_host_id) OVERRIDE;
   virtual void AcceleratedSurfacePostSubBuffer(
       const GpuHostMsg_AcceleratedSurfacePostSubBuffer_Params& params,
       int gpu_host_id) OVERRIDE;
+  virtual void AcceleratedSurfaceSuspend() OVERRIDE;
+  virtual bool HasAcceleratedSurface(const gfx::Size& desired_size) OVERRIDE;
   virtual void OnAccessibilityNotifications(
-      const std::vector<ViewHostMsg_AccessibilityNotification_Params>& params
+      const std::vector<AccessibilityHostMsg_NotificationParams>& params
       ) OVERRIDE;
   virtual bool LockMouse() OVERRIDE;
   virtual void UnlockMouse() OVERRIDE;
+  virtual void SetClickthroughRegion(SkRegion* region) OVERRIDE;
 
-  // Implementation of content::NotificationObserver:
+  // Implementation of NotificationObserver:
   virtual void Observe(int type,
-                       const content::NotificationSource& source,
-                       const content::NotificationDetails& details) OVERRIDE;
+                       const NotificationSource& source,
+                       const NotificationDetails& details) OVERRIDE;
 
   // Implementation of BrowserAccessibilityDelegate:
   virtual void SetAccessibilityFocus(int acc_obj_id) OVERRIDE;
@@ -225,6 +240,37 @@ class RenderWidgetHostViewWin
       int acc_obj_id, gfx::Point point) OVERRIDE;
   virtual void AccessibilitySetTextSelection(
       int acc_obj_id, int start_offset, int end_offset) OVERRIDE;
+  virtual gfx::Point GetLastTouchEventLocation() const OVERRIDE;
+
+  // Overridden from ui::GestureEventHelper.
+  virtual bool DispatchLongPressGestureEvent(ui::GestureEvent* event) OVERRIDE;
+  virtual bool DispatchCancelTouchEvent(ui::TouchEvent* event) OVERRIDE;
+
+  // Overridden from ui::TextInputClient for Win8/metro TSF support.
+  // Following methods are not used in existing IMM32 related implementation.
+  virtual void SetCompositionText(
+      const ui::CompositionText& composition) OVERRIDE;
+  virtual void ConfirmCompositionText()  OVERRIDE;
+  virtual void ClearCompositionText() OVERRIDE;
+  virtual void InsertText(const string16& text) OVERRIDE;
+  virtual void InsertChar(char16 ch, int flags) OVERRIDE;
+  virtual ui::TextInputType GetTextInputType() const OVERRIDE;
+  virtual bool CanComposeInline() const OVERRIDE;
+  virtual gfx::Rect GetCaretBounds() OVERRIDE;
+  virtual bool GetCompositionCharacterBounds(uint32 index,
+                                             gfx::Rect* rect) OVERRIDE;
+  virtual bool HasCompositionText() OVERRIDE;
+  virtual bool GetTextRange(ui::Range* range) OVERRIDE;
+  virtual bool GetCompositionTextRange(ui::Range* range) OVERRIDE;
+  virtual bool GetSelectionRange(ui::Range* range) OVERRIDE;
+  virtual bool SetSelectionRange(const ui::Range& range) OVERRIDE;
+  virtual bool DeleteRange(const ui::Range& range) OVERRIDE;
+  virtual bool GetTextFromRange(const ui::Range& range,
+                                string16* text) OVERRIDE;
+  virtual void OnInputMethodChanged() OVERRIDE;
+  virtual bool ChangeTextDirectionAndLayoutAlignment(
+      base::i18n::TextDirection direction) OVERRIDE;
+  virtual void ExtendSelectionAndDelete(size_t before, size_t after) OVERRIDE;
 
  protected:
   friend class RenderWidgetHostView;
@@ -240,6 +286,7 @@ class RenderWidgetHostViewWin
   void OnDestroy();
   void OnPaint(HDC unused_dc);
   void OnNCPaint(HRGN update_region);
+  LRESULT OnNCHitTest(const CPoint& pt);
   LRESULT OnEraseBkgnd(HDC dc);
   LRESULT OnSetCursor(HWND window, UINT hittest_code, UINT mouse_message_id);
   void OnSetFocus(HWND window);
@@ -282,12 +329,11 @@ class RenderWidgetHostViewWin
   LRESULT OnParentNotify(UINT message, WPARAM wparam, LPARAM lparam,
                          BOOL& handled);
 
-  // Handle the new pointer messages
-  LRESULT OnPointerMessage(UINT message, WPARAM wparam, LPARAM lparam,
-                           BOOL& handled);
   // Handle high-level touch events.
   LRESULT OnGestureEvent(UINT message, WPARAM wparam, LPARAM lparam,
                          BOOL& handled);
+  LRESULT OnMoveOrSize(UINT message, WPARAM wparam, LPARAM lparam,
+                       BOOL& handled);
 
   void OnFinalMessage(HWND window);
 
@@ -310,6 +356,13 @@ class RenderWidgetHostViewWin
   // becomes hidden, this method is called to reset the tooltip.
   void ResetTooltip();
 
+  // Builds and forwards a WebKitGestureEvent to the renderer.
+  bool ForwardGestureEventToRenderer(
+    ui::GestureEvent* gesture);
+
+  // Process all of the given gestures (passes them on to renderer)
+  void ProcessGestures(ui::GestureRecognizer::Gestures* gestures);
+
   // Sends the specified mouse event to the renderer.
   void ForwardMouseEventToRenderer(UINT message, WPARAM wparam, LPARAM lparam);
 
@@ -329,9 +382,6 @@ class RenderWidgetHostViewWin
   // will be tiled such that it lines up with existing tiles starting from the
   // origin of |dc|.
   void DrawBackground(const RECT& rect, CPaintDC* dc);
-
-  // Create an intermediate window between the given HWND and its parent.
-  HWND ReparentWindow(HWND window);
 
   // Clean up the compositor window, if needed.
   void CleanupCompositorWindow();
@@ -353,18 +403,20 @@ class RenderWidgetHostViewWin
 
   LRESULT OnDocumentFeed(RECONVERTSTRING* reconv);
   LRESULT OnReconvertString(RECONVERTSTRING* reconv);
+  LRESULT OnQueryCharPosition(IMECHARPOSITION* position);
 
-  // Displays the on screen keyboard for editable fields.
-  void DisplayOnScreenKeyboardIfNeeded();
+  // Sets the appropriate mode for raw-touches or gestures. Currently touch mode
+  // will only take effect on Win7+.
+  void UpdateDesiredTouchMode();
 
-  // Invoked in a delayed task to reset the fact that we are in the context of
-  // a WM_POINTERDOWN message.
-  void ResetPointerDownContext();
+  // Configures the enable/disable state of |ime_input_| to match with the
+  // current |text_input_type_|.
+  void UpdateIMEState();
 
   // The associated Model.  While |this| is being Destroyed,
   // |render_widget_host_| is NULL and the Windows message loop is run one last
   // time. Message handlers must check for a NULL |render_widget_host_|.
-  RenderWidgetHost* render_widget_host_;
+  RenderWidgetHostImpl* render_widget_host_;
 
   // When we are doing accelerated compositing
   HWND compositor_host_window_;
@@ -400,42 +452,10 @@ class RenderWidgetHostViewWin
   // true if the View is not visible.
   bool is_hidden_;
 
-  // Wrapper for maintaining touchstate associated with a WebTouchEvent.
-  class WebTouchState {
-   public:
-    explicit WebTouchState(const CWindowImpl* window);
-
-    // Updates the current touchpoint state with the supplied touches.
-    // Touches will be consumed only if they are of the same type (e.g. down,
-    // up, move). Returns the number of consumed touches.
-    size_t UpdateTouchPoints(TOUCHINPUT* points, size_t count);
-
-    // Marks all active touchpoints as released.
-    bool ReleaseTouchPoints();
-
-    // The contained WebTouchEvent.
-    const WebKit::WebTouchEvent& touch_event() { return touch_event_; }
-
-    // Returns if any touches are modified in the event.
-    bool is_changed() { return touch_event_.changedTouchesLength != 0; }
-
-   private:
-    // Adds a touch point or returns NULL if there's not enough space.
-    WebKit::WebTouchPoint* AddTouchPoint(TOUCHINPUT* touch_input);
-
-    // Copy details from a TOUCHINPUT to an existing WebTouchPoint, returning
-    // true if the resulting point is a stationary move.
-    bool UpdateTouchPoint(WebKit::WebTouchPoint* touch_point,
-                          TOUCHINPUT* touch_input);
-
-    WebKit::WebTouchEvent touch_event_;
-    const CWindowImpl* const window_;
-  };
-
   // The touch-state. Its touch-points are updated as necessary. A new
   // touch-point is added from an TOUCHEVENTF_DOWN message, and a touch-point
   // is removed from the list on an TOUCHEVENTF_UP message.
-  WebTouchState touch_state_;
+  scoped_ptr<WebTouchState> touch_state_;
 
   // True if we're in the midst of a paint operation and should respond to
   // DidPaintRect() notifications by merely invalidating.  See comments on
@@ -464,25 +484,21 @@ class RenderWidgetHostViewWin
   // Factory used to safely scope delayed calls to ShutdownHost().
   base::WeakPtrFactory<RenderWidgetHostViewWin> weak_factory_;
 
-  // Our parent HWND.  We keep a reference to it as we SetParent(NULL) when
-  // hidden to prevent getting messages (Paint, Resize...), and we reattach
-  // when shown again.
-  HWND parent_hwnd_;
-
   // The time at which this view started displaying white pixels as a result of
   // not having anything to paint (empty backing store from renderer). This
   // value returns true for is_null() if we are not recording whiteout times.
   base::TimeTicks whiteout_start_time_;
 
   // The time it took after this view was selected for it to be fully painted.
-  base::TimeTicks tab_switch_paint_time_;
+  base::TimeTicks web_contents_switch_paint_time_;
 
   // Registrar so we can listen to RENDERER_PROCESS_TERMINATED events.
-  content::NotificationRegistrar registrar_;
+  NotificationRegistrar registrar_;
 
   // Stores the current text input type received by TextInputStateChanged()
   // method.
   ui::TextInputType text_input_type_;
+  bool can_compose_inline_;
 
   ScopedVector<ui::ViewProp> props_;
 
@@ -517,35 +533,36 @@ class RenderWidgetHostViewWin
 
   ui::Range composition_range_;
 
-  // Set to true if the next lbutton down message is to be ignored. Set by the
-  // WM_POINTERXX handler. We do this to ensure that we don't send out
-  // duplicate lbutton down messages to the renderer.
-  bool ignore_next_lbutton_message_at_same_location;
+  // The current composition character bounds.
+  std::vector<gfx::Rect> composition_character_bounds_;
+
+  // A cached latest caret rectangle sent from renderer.
+  gfx::Rect caret_rect_;
 
   // TODO(ananta)
-  // The WM_POINTERDOWN and on screen keyboard handling related members should
-  // be moved to an independent class to reduce the clutter. This includes all
-  // members starting from last_pointer_down_location_ to the
-  // received_focus_change_after_pointer_down_.
-
-  // The location of the last WM_POINTERDOWN message. We ignore the subsequent
-  // lbutton down only if the locations match.
-  LPARAM last_pointer_down_location_;
-
-  // IPenInputPanel to allow us to show the Windows virtual keyboard when a
-  // user touches an editable field on the page.
-  base::win::ScopedComPtr<IPenInputPanel> virtual_keyboard_;
+  // The WM_POINTERDOWN and touch related members should be moved to an
+  // independent class to reduce the clutter. This includes members
+  // pointer_down_context_ and last_touch_location_;
 
   // Set to true if we are in the context of a WM_POINTERDOWN message
   bool pointer_down_context_;
 
-  // Set to true if the focus is currently on an editable field on the page.
-  bool focus_on_editable_field_;
+  // The global x, y coordinates of the last point a touch event was
+  // received, used to determine if it's okay to open the on-screen
+  // keyboard. Reset when the window loses focus.
+  gfx::Point last_touch_location_;
 
-  // Set to true if we received a focus change after a WM_POINTERDOWN message.
-  bool received_focus_change_after_pointer_down_;
+  // Region in which the view will be transparent to clicks.
+  scoped_ptr<SkRegion> transparent_region_;
+
+  // Are touch events currently enabled?
+  bool touch_events_enabled_;
+
+  scoped_ptr<ui::GestureRecognizer> gesture_recognizer_;
 
   DISALLOW_COPY_AND_ASSIGN(RenderWidgetHostViewWin);
 };
+
+}  // namespace content
 
 #endif  // CONTENT_BROWSER_RENDERER_HOST_RENDER_WIDGET_HOST_VIEW_WIN_H_

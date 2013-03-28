@@ -1,4 +1,4 @@
-// Copyright (c) 2011 The Chromium Authors. All rights reserved.
+// Copyright (c) 2012 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -11,13 +11,24 @@
 #include "chrome/browser/chromeos/login/enrollment/enterprise_enrollment_screen_actor.h"
 #include "chrome/browser/chromeos/login/existing_user_controller.h"
 #include "chrome/browser/chromeos/login/screen_locker.h"
+#include "chrome/browser/chromeos/login/user_image.h"
+#include "chrome/browser/chromeos/login/user_image_manager.h"
 #include "chrome/browser/chromeos/login/user_manager.h"
 #include "chrome/browser/chromeos/login/wizard_controller.h"
+#include "chrome/browser/chromeos/login/wizard_screen.h"
 #include "chrome/common/chrome_notification_types.h"
 #include "content/public/browser/notification_service.h"
 
 using chromeos::CrosLibrary;
 using chromeos::NetworkLibrary;
+using chromeos::WizardController;
+
+namespace {
+
+// Fake screen name for the user session (reported by WizardControllerObserver).
+const char kSessionScreenName[] = "session";
+
+}
 
 NetworkManagerInitObserver::NetworkManagerInitObserver(
     AutomationProvider* automation)
@@ -48,23 +59,28 @@ void NetworkManagerInitObserver::OnNetworkManagerChanged(NetworkLibrary* obj) {
   }
 }
 
-LoginWebuiReadyObserver::LoginWebuiReadyObserver(
-    AutomationProvider* automation)
+OOBEWebuiReadyObserver::OOBEWebuiReadyObserver(AutomationProvider* automation)
     : automation_(automation->AsWeakPtr()) {
-  registrar_.Add(this, chrome::NOTIFICATION_LOGIN_WEBUI_READY,
-                 content::NotificationService::AllSources());
+  if (WizardController::default_controller() &&
+      WizardController::default_controller()->current_screen()) {
+    OOBEWebuiReady();
+  } else {
+    registrar_.Add(this, chrome::NOTIFICATION_LOGIN_WEBUI_VISIBLE,
+                   content::NotificationService::AllSources());
+  }
 }
 
-LoginWebuiReadyObserver::~LoginWebuiReadyObserver() {
-}
-
-void LoginWebuiReadyObserver::Observe(
+void OOBEWebuiReadyObserver::Observe(
     int type,
     const content::NotificationSource& source,
     const content::NotificationDetails& details) {
-  DCHECK(type == chrome::NOTIFICATION_LOGIN_WEBUI_READY);
+  DCHECK(type == chrome::NOTIFICATION_LOGIN_WEBUI_VISIBLE);
+  OOBEWebuiReady();
+}
+
+void OOBEWebuiReadyObserver::OOBEWebuiReady() {
   if (automation_)
-    automation_->OnLoginWebuiReady();
+    automation_->OnOOBEWebuiReady();
   delete this;
 }
 
@@ -92,11 +108,56 @@ void LoginObserver::OnLoginFailure(const chromeos::LoginFailure& error) {
 void LoginObserver::OnLoginSuccess(
     const std::string& username,
     const std::string& password,
-    const GaiaAuthConsumer::ClientLoginResult& credentials,
     bool pending_requests,
     bool using_oauth) {
   controller_->set_login_status_consumer(NULL);
   AutomationJSONReply(automation_, reply_message_.release()).SendSuccess(NULL);
+  delete this;
+}
+
+WizardControllerObserver::WizardControllerObserver(
+    WizardController* wizard_controller,
+    AutomationProvider* automation,
+    IPC::Message* reply_message)
+    : wizard_controller_(wizard_controller),
+      automation_(automation->AsWeakPtr()),
+      reply_message_(reply_message) {
+  wizard_controller_->AddObserver(this);
+  registrar_.Add(this, chrome::NOTIFICATION_LOGIN_WEBUI_LOADED,
+                 content::NotificationService::AllSources());
+}
+
+WizardControllerObserver::~WizardControllerObserver() {
+  wizard_controller_->RemoveObserver(this);
+}
+
+void WizardControllerObserver::OnScreenChanged(
+    chromeos::WizardScreen* next_screen) {
+  std::string screen_name = next_screen->GetName();
+  if (screen_to_wait_for_.empty() || screen_to_wait_for_ == screen_name) {
+    SendReply(screen_name);
+  } else {
+    DVLOG(2) << "Still waiting for " << screen_to_wait_for_;
+  }
+}
+
+void WizardControllerObserver::OnSessionStart() {
+  SendReply(kSessionScreenName);
+}
+
+void WizardControllerObserver::Observe(
+    int type,
+    const content::NotificationSource& source,
+    const content::NotificationDetails& details) {
+  DCHECK(type == chrome::NOTIFICATION_LOGIN_WEBUI_LOADED);
+  SendReply(WizardController::kLoginScreenName);
+}
+
+void WizardControllerObserver::SendReply(const std::string& screen_name) {
+  scoped_ptr<DictionaryValue> return_value(new DictionaryValue);
+  return_value->SetString("next_screen", screen_name);
+  AutomationJSONReply(automation_, reply_message_.release())
+      .SendSuccess(return_value.get());
   delete this;
 }
 
@@ -364,20 +425,17 @@ chromeos::VirtualNetwork* VirtualConnectObserver::GetVirtualNetwork(
 
 EnrollmentObserver::EnrollmentObserver(AutomationProvider* automation,
     IPC::Message* reply_message,
-    chromeos::EnterpriseEnrollmentScreenActor* enrollment_screen_actor,
     chromeos::EnterpriseEnrollmentScreen* enrollment_screen)
     : automation_(automation->AsWeakPtr()),
       reply_message_(reply_message),
       enrollment_screen_(enrollment_screen) {
-  enrollment_screen_actor->AddObserver(this);
+  enrollment_screen_->AddTestingObserver(this);
 }
 
 EnrollmentObserver::~EnrollmentObserver() {}
 
-void EnrollmentObserver::OnEnrollmentComplete(
-    chromeos::EnterpriseEnrollmentScreenActor* enrollment_screen_actor,
-    bool succeeded) {
-  enrollment_screen_actor->RemoveObserver(this);
+void EnrollmentObserver::OnEnrollmentComplete(bool succeeded) {
+  enrollment_screen_->RemoveTestingObserver(this);
   if (automation_) {
     if (succeeded) {
       AutomationJSONReply(automation_,
@@ -388,76 +446,6 @@ void EnrollmentObserver::OnEnrollmentComplete(
       AutomationJSONReply(automation_, reply_message_.release())
           .SendSuccess(return_value.get());
     }
-  }
-  delete this;
-}
-
-PhotoCaptureObserver::PhotoCaptureObserver(
-    AutomationProvider* automation,
-    IPC::Message* reply_message)
-    : automation_(automation->AsWeakPtr()),
-      reply_message_(reply_message) {
-}
-
-PhotoCaptureObserver::~PhotoCaptureObserver() {
-  // TODO(frankf): Currently, we do not destroy TakePhotoDialog
-  // or any of its children.
-}
-
-void PhotoCaptureObserver::OnCaptureSuccess(
-    chromeos::TakePhotoDialog* take_photo_dialog,
-    chromeos::TakePhotoView* take_photo_view) {
-  take_photo_view->FlipCapturingState();
-}
-
-void PhotoCaptureObserver::OnCaptureFailure(
-    chromeos::TakePhotoDialog* take_photo_dialog,
-    chromeos::TakePhotoView* take_photo_view) {
-  if (automation_) {
-    AutomationJSONReply(automation_,
-                        reply_message_.release()).SendError("Capture failure");
-  }
-  delete this;
-}
-
-void PhotoCaptureObserver::OnCapturingStopped(
-    chromeos::TakePhotoDialog* take_photo_dialog,
-    chromeos::TakePhotoView* take_photo_view) {
-  take_photo_dialog->Accept();
-  const SkBitmap& photo = take_photo_view->GetImage();
-  chromeos::UserManager* user_manager = chromeos::UserManager::Get();
-  if (!user_manager) {
-    if (automation_) {
-      AutomationJSONReply(
-          automation_,
-          reply_message_.release()).SendError("No user manager");
-    }
-    delete this;
-    return;
-  }
-
-  const chromeos::User& user = user_manager->logged_in_user();
-  if (user.email().empty()) {
-    if (automation_) {
-      AutomationJSONReply(
-          automation_,
-          reply_message_.release()).SendError("User email is not set");
-    }
-    delete this;
-    return;
-  }
-
-  // Set up an observer for UserManager (it will delete itself).
-  user_manager->AddObserver(this);
-  user_manager->SaveUserImage(user.email(), photo);
-}
-
-void PhotoCaptureObserver::LocalStateChanged(
-    chromeos::UserManager* user_manager) {
-  user_manager->RemoveObserver(this);
-  if (automation_) {
-    AutomationJSONReply(
-        automation_, reply_message_.release()).SendSuccess(NULL);
   }
   delete this;
 }

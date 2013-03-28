@@ -13,21 +13,22 @@
 #include "base/stringprintf.h"
 #include "base/sys_info.h"
 #include "chrome/browser/browser_process.h"
+#include "chrome/browser/net/basic_http_user_agent_settings.h"
 #include "chrome/browser/net/chrome_net_log.h"
 #include "chrome/common/chrome_version_info.h"
 #include "content/public/browser/browser_thread.h"
 #include "content/public/common/content_client.h"
-#include "content/public/common/url_fetcher.h"
 #include "googleurl/src/gurl.h"
-#include "net/base/cookie_monster.h"
 #include "net/base/escape.h"
 #include "net/base/host_resolver.h"
 #include "net/base/load_flags.h"
 #include "net/base/net_errors.h"
 #include "net/base/ssl_config_service_defaults.h"
+#include "net/cookies/cookie_monster.h"
 #include "net/http/http_network_layer.h"
 #include "net/http/http_response_headers.h"
 #include "net/proxy/proxy_service.h"
+#include "net/url_request/url_fetcher.h"
 #include "net/url_request/url_request_context.h"
 #include "net/url_request/url_request_context_getter.h"
 #include "net/url_request/url_request_status.h"
@@ -57,20 +58,16 @@ const char kDMTokenAuthHeader[] = "Authorization: GoogleDMToken token=";
 const int kSuccess = 200;
 const int kInvalidArgument = 400;
 const int kInvalidAuthCookieOrDMToken = 401;
+const int kMissingLicenses = 402;
 const int kDeviceManagementNotAllowed = 403;
-const int kInvalidURL = 404; // This error is not coming from the GFE.
+const int kInvalidURL = 404;  // This error is not coming from the GFE.
 const int kInvalidSerialNumber = 405;
 const int kDeviceIdConflict = 409;
 const int kDeviceNotFound = 410;
 const int kPendingApproval = 412;
 const int kInternalServerError = 500;
 const int kServiceUnavailable = 503;
-const int kPolicyNotFound = 902; // This error is not sent as HTTP status code.
-
-// TODO(pastarmovj): Legacy error codes are here for compatibility only. They
-// should be removed once the DM Server has been updated.
-const int kPendingApprovalLegacy = 491;
-const int kDeviceNotFoundLegacy = 901;
+const int kPolicyNotFound = 902;  // This error is not sent as HTTP status code.
 
 #if defined(OS_CHROMEOS)
 // Machine info keys.
@@ -93,7 +90,7 @@ bool IsProxyError(const net::URLRequestStatus status) {
   return false;
 }
 
-bool IsProtobufMimeType(const content::URLFetcher* source) {
+bool IsProtobufMimeType(const net::URLFetcher* source) {
   return source->GetResponseHeaders()->HasHeaderValue(
       "content-type", "application/x-protobuffer");
 }
@@ -143,7 +140,7 @@ const std::string& GetPlatformString() {
     return platform;
 
   std::string os_name(base::SysInfo::OperatingSystemName());
-  std::string os_hardware(base::SysInfo::CPUArchitecture());
+  std::string os_hardware(base::SysInfo::OperatingSystemArchitecture());
 
 #if defined(OS_CHROMEOS)
   chromeos::system::StatisticsProvider* provider =
@@ -189,12 +186,13 @@ class DeviceManagementRequestContext : public net::URLRequestContext {
   virtual ~DeviceManagementRequestContext();
 
  private:
-  // Overridden from net::URLRequestContext:
-  virtual const std::string& GetUserAgent(const GURL& url) const OVERRIDE;
+  BasicHttpUserAgentSettings basic_http_user_agent_settings_;
 };
 
 DeviceManagementRequestContext::DeviceManagementRequestContext(
-    net::URLRequestContext* base_context) {
+    net::URLRequestContext* base_context)
+    // Use sane Accept-Language and Accept-Charset values for our purposes.
+    : basic_http_user_agent_settings_("*", "*") {
   // Share resolver, proxy service and ssl bits with the baseline context. This
   // is important so we don't make redundant requests (e.g. when resolving proxy
   // auto configuration).
@@ -211,18 +209,11 @@ DeviceManagementRequestContext::DeviceManagementRequestContext(
   // No cookies, please.
   set_cookie_store(new net::CookieMonster(NULL, NULL));
 
-  // Initialize these to sane values for our purposes.
-  set_accept_language("*");
-  set_accept_charset("*");
+  set_http_user_agent_settings(&basic_http_user_agent_settings_);
 }
 
 DeviceManagementRequestContext::~DeviceManagementRequestContext() {
   delete http_transaction_factory();
-}
-
-const std::string& DeviceManagementRequestContext::GetUserAgent(
-    const GURL& url) const {
-  return content::GetUserAgent(url);
 }
 
 // Request context holder.
@@ -235,11 +226,14 @@ class DeviceManagementRequestContextGetter
 
   // Overridden from net::URLRequestContextGetter:
   virtual net::URLRequestContext* GetURLRequestContext() OVERRIDE;
-  virtual scoped_refptr<base::MessageLoopProxy> GetIOMessageLoopProxy()
-      const OVERRIDE;
+  virtual scoped_refptr<base::SingleThreadTaskRunner>
+      GetNetworkTaskRunner() const OVERRIDE;
+
+ protected:
+  virtual ~DeviceManagementRequestContextGetter() {}
 
  private:
-  scoped_refptr<net::URLRequestContext> context_;
+  scoped_ptr<net::URLRequestContext> context_;
   scoped_refptr<net::URLRequestContextGetter> base_context_getter_;
 };
 
@@ -247,16 +241,16 @@ class DeviceManagementRequestContextGetter
 net::URLRequestContext*
 DeviceManagementRequestContextGetter::GetURLRequestContext() {
   DCHECK(BrowserThread::CurrentlyOn(BrowserThread::IO));
-  if (!context_) {
-    context_ = new DeviceManagementRequestContext(
-        base_context_getter_->GetURLRequestContext());
+  if (!context_.get()) {
+    context_.reset(new DeviceManagementRequestContext(
+        base_context_getter_->GetURLRequestContext()));
   }
 
   return context_.get();
 }
 
-scoped_refptr<base::MessageLoopProxy>
-DeviceManagementRequestContextGetter::GetIOMessageLoopProxy() const {
+scoped_refptr<base::SingleThreadTaskRunner>
+DeviceManagementRequestContextGetter::GetNetworkTaskRunner() const {
   return BrowserThread::GetMessageLoopProxyForThread(BrowserThread::IO);
 }
 
@@ -279,7 +273,7 @@ class DeviceManagementRequestJobImpl : public DeviceManagementRequestJob {
   GURL GetURL(const std::string& server_url);
 
   // Configures the fetcher, setting up payload and headers.
-  void ConfigureRequest(content::URLFetcher* fetcher);
+  void ConfigureRequest(net::URLFetcher* fetcher);
 
  protected:
   // DeviceManagementRequestJob:
@@ -315,9 +309,14 @@ void DeviceManagementRequestJobImpl::HandleResponse(
     const net::ResponseCookies& cookies,
     const std::string& data) {
   if (status.status() != net::URLRequestStatus::SUCCESS) {
+    LOG(WARNING) << "DMServer request failed, status: " << status.status()
+                 << ", error: " << status.error();
     ReportError(DM_STATUS_REQUEST_FAILED);
     return;
   }
+
+  if (response_code != kSuccess)
+    LOG(WARNING) << "DMServer sent an error response: " << response_code;
 
   switch (response_code) {
     case kSuccess: {
@@ -335,10 +334,12 @@ void DeviceManagementRequestJobImpl::HandleResponse(
     case kInvalidAuthCookieOrDMToken:
       ReportError(DM_STATUS_SERVICE_MANAGEMENT_TOKEN_INVALID);
       return;
+    case kMissingLicenses:
+      ReportError(DM_STATUS_SERVICE_MISSING_LICENSES);
+      return;
     case kDeviceManagementNotAllowed:
       ReportError(DM_STATUS_SERVICE_MANAGEMENT_NOT_SUPPORTED);
       return;
-    case kPendingApprovalLegacy:
     case kPendingApproval:
       ReportError(DM_STATUS_SERVICE_ACTIVATION_PENDING);
       return;
@@ -347,7 +348,6 @@ void DeviceManagementRequestJobImpl::HandleResponse(
     case kServiceUnavailable:
       ReportError(DM_STATUS_TEMPORARY_UNAVAILABLE);
       return;
-    case kDeviceNotFoundLegacy:
     case kDeviceNotFound:
       ReportError(DM_STATUS_SERVICE_DEVICE_NOT_FOUND);
       return;
@@ -361,8 +361,6 @@ void DeviceManagementRequestJobImpl::HandleResponse(
       ReportError(DM_STATUS_SERVICE_DEVICE_ID_CONFLICT);
       return;
     default:
-      VLOG(1) << "Unexpected HTTP status in response from DMServer : "
-              << response_code << ".";
       // Handle all unknown 5xx HTTP error codes as temporary and any other
       // unknown error as one that needs more time to recover.
       if (response_code >= 500 && response_code <= 599)
@@ -390,7 +388,7 @@ GURL DeviceManagementRequestJobImpl::GetURL(
 }
 
 void DeviceManagementRequestJobImpl::ConfigureRequest(
-    content::URLFetcher* fetcher) {
+    net::URLFetcher* fetcher) {
   std::string payload;
   CHECK(request_.SerializeToString(&payload));
   fetcher->SetUploadData(kPostContentType, payload);
@@ -507,20 +505,26 @@ DeviceManagementService::DeviceManagementService(
 
 void DeviceManagementService::StartJob(DeviceManagementRequestJobImpl* job,
                                        bool bypass_proxy) {
-  content::URLFetcher* fetcher = content::URLFetcher::Create(
-      0, job->GetURL(server_url_), content::URLFetcher::POST, this);
+  net::URLFetcher* fetcher = net::URLFetcher::Create(
+      0, job->GetURL(server_url_), net::URLFetcher::POST, this);
   fetcher->SetLoadFlags(net::LOAD_DO_NOT_SEND_COOKIES |
                         net::LOAD_DO_NOT_SAVE_COOKIES |
                         net::LOAD_DISABLE_CACHE |
                         (bypass_proxy ? net::LOAD_BYPASS_PROXY : 0));
   fetcher->SetRequestContext(request_context_getter_.get());
+  // Early device policy fetches on ChromeOS and Auto-Enrollment checks are
+  // often interrupted during ChromeOS startup when network change notifications
+  // are sent. Allowing the fetcher to retry once after that is enough to
+  // recover; allow it to retry up to 3 times just in case.
+  // http://crosbug.com/16114
+  fetcher->SetAutomaticallyRetryOnNetworkChanges(3);
   job->ConfigureRequest(fetcher);
   pending_jobs_[fetcher] = job;
   fetcher->Start();
 }
 
 void DeviceManagementService::OnURLFetchComplete(
-    const content::URLFetcher* source) {
+    const net::URLFetcher* source) {
   JobFetcherMap::iterator entry(pending_jobs_.find(source));
   if (entry == pending_jobs_.end()) {
     NOTREACHED() << "Callback from foreign URL fetcher";
@@ -540,6 +544,7 @@ void DeviceManagementService::OnURLFetchComplete(
       LOG(WARNING) << "Proxy failed while contacting dmserver.";
       retry = true;
     } else if (source->GetStatus().is_success() &&
+               source->GetResponseCode() == kSuccess &&
                source->WasFetchedViaProxy() &&
                !IsProtobufMimeType(source)) {
       // The proxy server can be misconfigured but pointing to an existing

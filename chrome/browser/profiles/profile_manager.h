@@ -6,7 +6,6 @@
 
 #ifndef CHROME_BROWSER_PROFILES_PROFILE_MANAGER_H_
 #define CHROME_BROWSER_PROFILES_PROFILE_MANAGER_H_
-#pragma once
 
 #include <list>
 #include <vector>
@@ -20,20 +19,18 @@
 #include "base/message_loop.h"
 #include "base/threading/non_thread_safe.h"
 #include "chrome/browser/profiles/profile.h"
-#include "chrome/browser/ui/browser_init.h"
-#include "chrome/browser/ui/browser_list.h"
+#include "chrome/browser/profiles/profile_shortcut_manager.h"
+#include "chrome/browser/ui/browser_list_observer.h"
+#include "chrome/browser/ui/host_desktop.h"
+#include "chrome/browser/ui/startup/startup_types.h"
 #include "content/public/browser/notification_observer.h"
 #include "content/public/browser/notification_registrar.h"
 
-#if defined(OS_WIN)
-#include "chrome/browser/profiles/profile_shortcut_manager_win.h"
-#endif
-
+class CommandLine;
 class NewProfileLauncher;
 class ProfileInfoCache;
 
 class ProfileManager : public base::NonThreadSafe,
-                       public BrowserList::Observer,
                        public content::NotificationObserver,
                        public Profile::Delegate {
  public:
@@ -42,8 +39,10 @@ class ProfileManager : public base::NonThreadSafe,
   explicit ProfileManager(const FilePath& user_data_dir);
   virtual ~ProfileManager();
 
+#if defined(ENABLE_SESSION_SERVICE)
   // Invokes SessionServiceFactory::ShutdownForProfile() for all profiles.
   static void ShutdownSessionServices();
+#endif
 
   // Physically remove deleted profile directories from disk.
   static void NukeDeletedProfilesFromDisk();
@@ -59,6 +58,11 @@ class ProfileManager : public base::NonThreadSafe,
   // Same as instance method but provides the default user_data_dir as well.
   static Profile* GetDefaultProfile();
 
+  // DEPRECATED: DO NOT USE unless in ChromeOS.
+  // Same as GetDefaultProfile() but returns OffTheRecord profile
+  // if guest login.
+  static Profile* GetDefaultProfileOrOffTheRecord();
+
   // Returns a profile for a specific profile directory within the user data
   // dir. This will return an existing profile it had already been created,
   // otherwise it will create and manage it.
@@ -71,7 +75,9 @@ class ProfileManager : public base::NonThreadSafe,
   // If the profile has already been created then callback is called
   // immediately. Should be called on the UI thread.
   void CreateProfileAsync(const FilePath& profile_path,
-                          const CreateCallback& callback);
+                          const CreateCallback& callback,
+                          const string16& name,
+                          const string16& icon_url);
 
   // Initiates default profile creation. If default profile has already been
   // created then the callback is called immediately. Should be called on the
@@ -113,10 +119,14 @@ class ProfileManager : public base::NonThreadSafe,
                        const content::NotificationSource& source,
                        const content::NotificationDetails& details) OVERRIDE;
 
-  // BrowserList::Observer implementation.
-  virtual void OnBrowserAdded(const Browser* browser) OVERRIDE;
-  virtual void OnBrowserRemoved(const Browser* browser) OVERRIDE;
-  virtual void OnBrowserSetLastActive(const Browser* browser) OVERRIDE;
+  // Returns true if the given command line indicates that this is a short-lived
+  // profile import process.
+  static bool IsImportProcess(const CommandLine& command_line);
+
+  // Whether a first-run import was triggered before the browser mainloop began.
+  // This is used in testing to verify import startup actions that occur before
+  // an observer can be registered in the test.
+  static bool DidPerformProfileImport();
 
   // Indicate that an import process will run for the next created Profile.
   void SetWillImport();
@@ -139,17 +149,23 @@ class ProfileManager : public base::NonThreadSafe,
   // otherwise return NULL.
   Profile* GetProfileByPath(const FilePath& path) const;
 
-  // Opens a new window with the given profile. This launches a new browser for
-  // the profile or activates an existing one; it is the static equivalent of
-  // the instance method Browser::NewWindow(), used for the creation of a
-  // Window from the multi-profile dropdown menu.
-  static void NewWindowWithProfile(
+  // Activates a window for |profile| on the desktop specified by
+  // |desktop_type|. If no such window yet exists, or if |always_create| is
+  // true, this first creates a new window, then activates
+  // that. If activating an exiting window and multiple windows exists then the
+  // window that was most recently active is activated. This is used for
+  // creation of a window from the multi-profile dropdown menu.
+  static void FindOrCreateNewWindowForProfile(
       Profile* profile,
-      BrowserInit::IsProcessStartup process_startup,
-      BrowserInit::IsFirstRun is_first_run);
+      chrome::startup::IsProcessStartup process_startup,
+      chrome::startup::IsFirstRun is_first_run,
+      chrome::HostDesktopType desktop_type,
+      bool always_create);
 
   // Profile::Delegate implementation:
-  virtual void OnProfileCreated(Profile* profile, bool success) OVERRIDE;
+  virtual void OnProfileCreated(Profile* profile,
+                                bool success,
+                                bool is_new_profile) OVERRIDE;
 
   // Add or remove a profile launcher to/from the list of launchers waiting for
   // new profiles to be created from the multi-profile menu.
@@ -160,7 +176,11 @@ class ProfileManager : public base::NonThreadSafe,
   // Directories are named "profile_1", "profile_2", etc., in sequence of
   // creation. (Because directories can be removed, however, it may be the case
   // that at some point the list of numbered profiles is not continuous.)
-  static void CreateMultiProfileAsync();
+  static void CreateMultiProfileAsync(
+      const string16& name,
+      const string16& icon_url,
+      const CreateCallback& callback,
+      chrome::HostDesktopType desktop_type);
 
   // Register multi-profile related preferences in Local State.
   static void RegisterPrefs(PrefService* prefs);
@@ -169,8 +189,13 @@ class ProfileManager : public base::NonThreadSafe,
   // about profiles without having to load them from disk.
   ProfileInfoCache& GetProfileInfoCache();
 
+  // Returns a ProfileShortcut Manager that enables the caller to create
+  // profile specfic desktop shortcuts.
+  ProfileShortcutManager* profile_shortcut_manager();
+
   // Schedules the profile at the given path to be deleted on shutdown.
-  void ScheduleProfileForDeletion(const FilePath& profile_dir);
+  void ScheduleProfileForDeletion(const FilePath& profile_dir,
+                                  chrome::HostDesktopType desktop_type);
 
   // Checks if multiple profiles is enabled.
   static bool IsMultipleProfilesEnabled();
@@ -202,12 +227,6 @@ class ProfileManager : public base::NonThreadSafe,
   virtual Profile* CreateProfileAsyncHelper(const FilePath& path,
                                             Delegate* delegate);
 
-#if defined(OS_WIN)
-  // Creates a shortcut manager. Override this to return a different shortcut
-  // manager or NULL to avoid creating shortcuts.
-  virtual ProfileShortcutManagerWin* CreateShortcutManager();
-#endif
-
  private:
   friend class TestingProfileManager;
   FRIEND_TEST_ALL_PREFIXES(ProfileManagerBrowserTest, DeleteAllProfiles);
@@ -215,15 +234,15 @@ class ProfileManager : public base::NonThreadSafe,
   // This struct contains information about profiles which are being loaded or
   // were loaded.
   struct ProfileInfo {
-    ProfileInfo(Profile* profile, bool created)
-        : profile(profile), created(created) {
-    }
+    ProfileInfo(Profile* profile, bool created);
 
-    ~ProfileInfo() {}
+    ~ProfileInfo();
 
     scoped_ptr<Profile> profile;
     // Whether profile has been fully loaded (created and initialized).
     bool created;
+    // Whether or not this profile should have a shortcut.
+    bool create_shortcut;
     // List of callbacks to run when profile initialization is done. Note, when
     // profile is fully loaded this vector will be empty.
     std::vector<CreateCallback> callbacks;
@@ -242,6 +261,10 @@ class ProfileManager : public base::NonThreadSafe,
   // entry.
   ProfileInfo* RegisterProfile(Profile* profile, bool created);
 
+  // Returns ProfileInfo associated with given |path|, registred earlier with
+  // RegisterProfile.
+  ProfileInfo* GetProfileInfoByPath(const FilePath& path) const;
+
   typedef std::pair<FilePath, string16> ProfilePathAndName;
   typedef std::vector<ProfilePathAndName> ProfilePathAndNames;
   ProfilePathAndNames GetSortedProfilesFromDirectoryMap();
@@ -252,12 +275,6 @@ class ProfileManager : public base::NonThreadSafe,
 
   // Adds |profile| to the profile info cache if it hasn't been added yet.
   void AddProfileToCache(Profile* profile);
-
-#if defined(OS_WIN)
-  // Creates a profile desktop shortcut for |profile| if we are in multi
-  // profile mode and the shortcut has not been created before.
-  void CreateDesktopShortcut(Profile* profile);
-#endif
 
   // Initializes user prefs of |profile|. This includes profile name and
   // avatar values
@@ -301,16 +318,34 @@ class ProfileManager : public base::NonThreadSafe,
   // if it has not been explicitly deleted.
   scoped_ptr<ProfileInfoCache> profile_info_cache_;
 
-#if defined(OS_WIN)
-  // Manages the creation, deletion, and renaming of Windows shortcuts by
-  // observing the ProfileInfoCache.
-  scoped_ptr<ProfileShortcutManagerWin> profile_shortcut_manager_;
-#endif
+  // Manages the process of creating, deleteing and updating Desktop shortcuts.
+  scoped_ptr<ProfileShortcutManager> profile_shortcut_manager_;
+
+#if !defined(OS_ANDROID) && !defined(OS_IOS)
+  class BrowserListObserver : public chrome::BrowserListObserver {
+   public:
+    explicit BrowserListObserver(ProfileManager* manager);
+    virtual ~BrowserListObserver();
+
+    // chrome::BrowserListObserver implementation.
+    virtual void OnBrowserAdded(Browser* browser) OVERRIDE;
+    virtual void OnBrowserRemoved(Browser* browser) OVERRIDE;
+    virtual void OnBrowserSetLastActive(Browser* browser) OVERRIDE;
+
+   private:
+    ProfileManager* profile_manager_;
+    DISALLOW_COPY_AND_ASSIGN(BrowserListObserver);
+  };
+
+  BrowserListObserver browser_list_observer_;
+#endif  // !defined(OS_ANDROID) && !defined(OS_IOS)
 
   // For keeping track of the last active profiles.
   std::map<Profile*, int> browser_counts_;
+  // On startup we launch the active profiles in the order they became active
+  // during the last run. This is why they are kept in a list, not in a set.
   std::vector<Profile*> active_profiles_;
-  bool shutdown_started_;
+  bool closing_all_browsers_;
 
   DISALLOW_COPY_AND_ASSIGN(ProfileManager);
 };

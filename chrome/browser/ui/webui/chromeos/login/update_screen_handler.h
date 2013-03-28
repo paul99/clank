@@ -1,4 +1,4 @@
-// Copyright (c) 2011 The Chromium Authors. All rights reserved.
+// Copyright (c) 2012 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -29,8 +29,11 @@ class UpdateScreenHandler : public UpdateScreenActor,
   virtual void PrepareToShow() OVERRIDE;
   virtual void ShowManualRebootInfo() OVERRIDE;
   virtual void SetProgress(int progress) OVERRIDE;
-  virtual void ShowCurtain(bool enable) OVERRIDE;
-  virtual void ShowPreparingUpdatesInfo(bool visible) OVERRIDE;
+  virtual void ShowEstimatedTimeLeft(bool visible) OVERRIDE;
+  virtual void SetEstimatedTimeLeft(const base::TimeDelta& time) OVERRIDE;
+  virtual void ShowProgressMessage(bool visible) OVERRIDE;
+  virtual void SetProgressMessage(ProgressMessage message) OVERRIDE;
+  virtual void ShowCurtain(bool visible) OVERRIDE;
 
   // WebUIMessageHandler implementation:
   virtual void RegisterMessages() OVERRIDE;

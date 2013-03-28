@@ -1,4 +1,4 @@
-// Copyright (c) 2011 The Chromium Authors. All rights reserved.
+// Copyright (c) 2012 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -24,19 +24,17 @@
 namespace appcache {
 
 AppCacheURLRequestJob::AppCacheURLRequestJob(
-    net::URLRequest* request, AppCacheStorage* storage)
-    : net::URLRequestJob(request), storage_(storage),
+    net::URLRequest* request,
+    net::NetworkDelegate* network_delegate,
+    AppCacheStorage* storage)
+    : net::URLRequestJob(request, network_delegate),
+      storage_(storage),
       has_been_started_(false), has_been_killed_(false),
       delivery_type_(AWAITING_DELIVERY_ORDERS),
       group_id_(0), cache_id_(kNoCacheId), is_fallback_(false),
       cache_entry_not_found_(false),
       ALLOW_THIS_IN_INITIALIZER_LIST(weak_factory_(this)) {
   DCHECK(storage_);
-}
-
-AppCacheURLRequestJob::~AppCacheURLRequestJob() {
-  if (storage_)
-    storage_->CancelDelegateCallbacks(this);
 }
 
 void AppCacheURLRequestJob::DeliverAppCachedResponse(
@@ -95,7 +93,7 @@ void AppCacheURLRequestJob::BeginDelivery() {
 
     case ERROR_DELIVERY:
       request()->net_log().AddEvent(
-          net::NetLog::TYPE_APPCACHE_DELIVERING_ERROR_RESPONSE, NULL);
+          net::NetLog::TYPE_APPCACHE_DELIVERING_ERROR_RESPONSE);
       NotifyStartError(net::URLRequestStatus(net::URLRequestStatus::FAILED,
                                              net::ERR_FAILED));
       break;
@@ -104,8 +102,7 @@ void AppCacheURLRequestJob::BeginDelivery() {
       request()->net_log().AddEvent(
           is_fallback_ ?
               net::NetLog::TYPE_APPCACHE_DELIVERING_FALLBACK_RESPONSE :
-              net::NetLog::TYPE_APPCACHE_DELIVERING_CACHED_RESPONSE,
-          NULL);
+              net::NetLog::TYPE_APPCACHE_DELIVERING_CACHED_RESPONSE);
       storage_->LoadResponseInfo(
           manifest_url_, group_id_, entry_.response_id(), this);
       break;
@@ -114,6 +111,11 @@ void AppCacheURLRequestJob::BeginDelivery() {
       NOTREACHED();
       break;
   }
+}
+
+AppCacheURLRequestJob::~AppCacheURLRequestJob() {
+  if (storage_)
+    storage_->CancelDelegateCallbacks(this);
 }
 
 void AppCacheURLRequestJob::OnResponseInfoLoaded(

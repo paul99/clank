@@ -4,7 +4,6 @@
 
 #ifndef PENDING_TASK_H_
 #define PENDING_TASK_H_
-#pragma once
 
 #include <queue>
 
@@ -19,6 +18,9 @@ namespace base {
 // Contains data about a pending task. Stored in TaskQueue and DelayedTaskQueue
 // for use by classes that queue and execute tasks.
 struct BASE_EXPORT PendingTask : public TrackingInfo {
+#if _MSC_VER >= 1700
+  PendingTask();
+#endif
   PendingTask(const tracked_objects::Location& posted_from,
               const Closure& task);
   PendingTask(const tracked_objects::Location& posted_from,

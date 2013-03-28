@@ -1,4 +1,4 @@
-// Copyright 2011 the V8 project authors. All rights reserved.
+// Copyright 2012 the V8 project authors. All rights reserved.
 // Redistribution and use in source and binary forms, with or without
 // modification, are permitted provided that the following conditions are
 // met:
@@ -25,10 +25,10 @@
 // (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE USE
 // OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 
-#include "v8.h"
+#include <string.h>
 
+#include "v8.h"
 #include "zone-inl.h"
-#include "splay-tree-inl.h"
 
 namespace v8 {
 namespace internal {
@@ -67,20 +67,20 @@ class Segment {
 };
 
 
-Zone::Zone()
+Zone::Zone(Isolate* isolate)
     : zone_excess_limit_(256 * MB),
       segment_bytes_allocated_(0),
       position_(0),
       limit_(0),
       scope_nesting_(0),
-      segment_head_(NULL) {
+      segment_head_(NULL),
+      isolate_(isolate) {
 }
 unsigned Zone::allocation_size_ = 0;
 
 ZoneScope::~ZoneScope() {
-  ASSERT_EQ(Isolate::Current(), isolate_);
-  if (ShouldDeleteOnExit()) isolate_->zone()->DeleteAll();
-  isolate_->zone()->scope_nesting_--;
+  if (ShouldDeleteOnExit()) zone_->DeleteAll();
+  zone_->scope_nesting_--;
 }
 
 

@@ -1,4 +1,4 @@
-// Copyright (c) 2011 The Chromium Authors. All rights reserved.
+// Copyright (c) 2012 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -50,13 +50,8 @@ CloudPolicySubsystem::ObserverRegistrar::~ObserverRegistrar() {
 
 CloudPolicySubsystem::CloudPolicySubsystem(
     CloudPolicyDataStore* data_store,
-    CloudPolicyCacheBase* policy_cache) {
-  std::string device_management_url;
-  CommandLine* command_line = CommandLine::ForCurrentProcess();
-  if (command_line->HasSwitch(switches::kDeviceManagementUrl)) {
-    device_management_url =
-        command_line->GetSwitchValueASCII(switches::kDeviceManagementUrl);
-  }
+    CloudPolicyCacheBase* policy_cache,
+    const std::string& device_management_url) {
   Initialize(data_store, policy_cache, device_management_url);
 }
 
@@ -108,7 +103,10 @@ void CloudPolicySubsystem::CompleteInitialization(
     PrefService* local_state = g_browser_process->local_state();
     DCHECK(pref_change_registrar_.IsEmpty());
     pref_change_registrar_.Init(local_state);
-    pref_change_registrar_.Add(refresh_pref_name_, this);
+    pref_change_registrar_.Add(
+        refresh_pref_name_,
+        base::Bind(&CloudPolicySubsystem::OnRefreshPrefChanged,
+                   base::Unretained(this)));
     UpdatePolicyRefreshRate(local_state->GetInteger(refresh_pref_name_));
   }
 }
@@ -136,9 +134,12 @@ void CloudPolicySubsystem::Reset() {
   device_token_fetcher_->Reset();
 }
 
-void CloudPolicySubsystem::RefreshPolicies() {
+void CloudPolicySubsystem::RefreshPolicies(bool wait_for_auth_token) {
+  data_store_->set_policy_fetching_enabled(true);
   if (cloud_policy_controller_.get())
-    cloud_policy_controller_->RefreshPolicies();
+    cloud_policy_controller_->RefreshPolicies(wait_for_auth_token);
+  // Make sure the |device_management_service_| is rolling.
+  device_management_service_->ScheduleInitialization(0);
 }
 
 // static
@@ -160,19 +161,9 @@ void CloudPolicySubsystem::UpdatePolicyRefreshRate(int64 refresh_rate) {
   }
 }
 
-void CloudPolicySubsystem::Observe(
-    int type,
-    const content::NotificationSource& source,
-    const content::NotificationDetails& details) {
-  if (type == chrome::NOTIFICATION_PREF_CHANGED) {
-    DCHECK_EQ(*(content::Details<std::string>(details).ptr()),
-              std::string(refresh_pref_name_));
-    PrefService* local_state = g_browser_process->local_state();
-    DCHECK_EQ(content::Source<PrefService>(source).ptr(), local_state);
-    UpdatePolicyRefreshRate(local_state->GetInteger(refresh_pref_name_));
-  } else {
-    NOTREACHED();
-  }
+void CloudPolicySubsystem::OnRefreshPrefChanged() {
+  PrefService* local_state = g_browser_process->local_state();
+  UpdatePolicyRefreshRate(local_state->GetInteger(refresh_pref_name_));
 }
 
 void CloudPolicySubsystem::ScheduleServiceInitialization(

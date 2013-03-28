@@ -14,8 +14,10 @@
 extern "C" {
 #if defined(USE_SYSTEM_LIBJPEG)
 #include <jpeglib.h>
+#elif defined(USE_LIBJPEG_TURBO)
+#include "third_party/libjpeg_turbo/jpeglib.h"
 #else
-#include "jpeglib.h"
+#include "third_party/libjpeg/jpeglib.h"
 #endif
 }
 
@@ -39,6 +41,17 @@ void ErrorExit(jpeg_common_struct* cinfo) {
 }
 
 }  // namespace
+
+// This method helps identify at run time which library chromium is using.
+JPEGCodec::LibraryVariant JPEGCodec::JpegLibraryVariant() {
+#if defined(USE_SYSTEM_LIBJPEG)
+  return SYSTEM_LIBJPEG;
+#elif defined(USE_LIBJPEG_TURBO)
+  return LIBJPEG_TURBO;
+#else
+  return IJG_LIBJPEG;
+#endif
+}
 
 // Encoder ---------------------------------------------------------------------
 //
@@ -130,6 +143,7 @@ void TermDestination(jpeg_compress_struct* cinfo) {
   state->out->resize(state->image_buffer_used);
 }
 
+#if !defined(JCS_EXTENSIONS)
 // Converts RGBA to RGB (removing the alpha values) to prepare to send data to
 // libjpeg. This converts one row of data in rgba with the given width in
 // pixels the the given rgb destination buffer (which should have enough space
@@ -159,6 +173,7 @@ void BGRAtoRGB(const unsigned char* bgra, int pixel_width, unsigned char* rgb)
     pixel_out[2] = pixel_in[0];
   }
 }
+#endif  // !defined(JCS_EXTENSIONS)
 
 // This class destroys the given jpeg_compress object when it goes out of
 // scope. It simplifies the error handling in Encode (and even applies to the
@@ -380,6 +395,7 @@ void SkipInputData(j_decompress_ptr cinfo, long num_bytes) {
 void TermSource(j_decompress_ptr cinfo) {
 }
 
+#if !defined(JCS_EXTENSIONS)
 // Converts one row of rgb data to rgba data by adding a fully-opaque alpha
 // value.
 void AddAlpha(const unsigned char* rgb, int pixel_width, unsigned char* rgba) {
@@ -406,6 +422,7 @@ void RGBtoBGRA(const unsigned char* bgra, int pixel_width, unsigned char* rgb)
     pixel_out[3] = 0xff;
   }
 }
+#endif  // !defined(JCS_EXTENSIONS)
 
 // This class destroys the given jpeg_decompress object when it goes out of
 // scope. It simplifies the error handling in Decode (and even applies to the

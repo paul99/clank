@@ -6,33 +6,56 @@
 #define REMOTING_HOST_CLIENT_SESSION_H_
 
 #include <list>
-#include <set>
 
+#include "base/memory/ref_counted.h"
+#include "base/sequenced_task_runner_helpers.h"
 #include "base/time.h"
+#include "base/timer.h"
 #include "base/threading/non_thread_safe.h"
+#include "remoting/host/mouse_clamping_filter.h"
+#include "remoting/host/remote_input_filter.h"
+#include "remoting/protocol/clipboard_echo_filter.h"
+#include "remoting/protocol/clipboard_filter.h"
+#include "remoting/protocol/clipboard_stub.h"
 #include "remoting/protocol/connection_to_client.h"
 #include "remoting/protocol/host_stub.h"
+#include "remoting/protocol/input_event_tracker.h"
+#include "remoting/protocol/input_filter.h"
 #include "remoting/protocol/input_stub.h"
 #include "third_party/skia/include/core/SkPoint.h"
+#include "third_party/skia/include/core/SkSize.h"
+
+namespace base {
+class SingleThreadTaskRunner;
+}  // namespace base
 
 namespace remoting {
 
-class Capturer;
+class AudioEncoder;
+class AudioScheduler;
+struct ClientSessionTraits;
+class DesktopEnvironment;
+class DesktopEnvironmentFactory;
+class VideoEncoder;
+class VideoFrameCapturer;
+class VideoScheduler;
 
 // A ClientSession keeps a reference to a connection to a client, and maintains
 // per-client state.
-class ClientSession : public protocol::HostStub,
-                      public protocol::InputStub,
-                      public protocol::ConnectionToClient::EventHandler,
-                      public base::NonThreadSafe {
+class ClientSession
+    : public base::RefCountedThreadSafe<ClientSession, ClientSessionTraits>,
+      public protocol::HostStub,
+      public protocol::ConnectionToClient::EventHandler,
+      public base::NonThreadSafe {
  public:
   // Callback interface for passing events to the ChromotingHost.
   class EventHandler {
    public:
-    virtual ~EventHandler() {}
-
     // Called after authentication has finished successfully.
     virtual void OnSessionAuthenticated(ClientSession* client) = 0;
+
+    // Called after we've finished connecting all channels.
+    virtual void OnSessionChannelsConnected(ClientSession* client) = 0;
 
     // Called after authentication has failed. Must not tear down this
     // object. OnSessionClosed() is notified after this handler
@@ -49,118 +72,175 @@ class ClientSession : public protocol::HostStub,
 
     // Called on notification of a route change event, when a channel is
     // connected.
-    virtual void OnSessionIpAddress(ClientSession* client,
-                                    const std::string& channel_name,
-                                    const net::IPEndPoint& end_point) = 0;
+    virtual void OnSessionRouteChange(
+        ClientSession* client,
+        const std::string& channel_name,
+        const protocol::TransportRoute& route) = 0;
+
+    // Called when the initial client dimensions are received, and when they
+    // change.
+    virtual void OnClientDimensionsChanged(ClientSession* client,
+                                           const SkISize& size) = 0;
+
+   protected:
+    virtual ~EventHandler() {}
   };
 
-  // Takes ownership of |connection|. Does not take ownership of
-  // |event_handler|, |input_stub| or |capturer|.
-  ClientSession(EventHandler* event_handler,
-                protocol::ConnectionToClient* connection,
-                protocol::InputStub* input_stub,
-                Capturer* capturer);
-  virtual ~ClientSession();
+  // |event_handler| must outlive |this|. |desktop_environment_factory| is only
+  // used by the constructor to create an instance of DesktopEnvironment.
+  ClientSession(
+      EventHandler* event_handler,
+      scoped_refptr<base::SingleThreadTaskRunner> audio_task_runner,
+      scoped_refptr<base::SingleThreadTaskRunner> video_capture_task_runner,
+      scoped_refptr<base::SingleThreadTaskRunner> video_encode_task_runner,
+      scoped_refptr<base::SingleThreadTaskRunner> network_task_runner,
+      scoped_ptr<protocol::ConnectionToClient> connection,
+      DesktopEnvironmentFactory* desktop_environment_factory,
+      const base::TimeDelta& max_duration);
 
-  // protocol::InputStub interface.
-  virtual void InjectKeyEvent(const protocol::KeyEvent& event) OVERRIDE;
-  virtual void InjectMouseEvent(const protocol::MouseEvent& event) OVERRIDE;
+  // protocol::HostStub interface.
+  virtual void NotifyClientDimensions(
+      const protocol::ClientDimensions& dimensions) OVERRIDE;
+  virtual void ControlVideo(
+      const protocol::VideoControl& video_control) OVERRIDE;
+  virtual void ControlAudio(
+      const protocol::AudioControl& audio_control) OVERRIDE;
 
   // protocol::ConnectionToClient::EventHandler interface.
-  virtual void OnConnectionOpened(
+  virtual void OnConnectionAuthenticated(
       protocol::ConnectionToClient* connection) OVERRIDE;
-  virtual void OnConnectionClosed(
+  virtual void OnConnectionChannelsConnected(
       protocol::ConnectionToClient* connection) OVERRIDE;
-  virtual void OnConnectionFailed(protocol::ConnectionToClient* connection,
-                                  protocol::Session::Error error) OVERRIDE;
+  virtual void OnConnectionClosed(protocol::ConnectionToClient* connection,
+                                  protocol::ErrorCode error) OVERRIDE;
   virtual void OnSequenceNumberUpdated(
       protocol::ConnectionToClient* connection, int64 sequence_number) OVERRIDE;
-  virtual void OnClientIpAddress(protocol::ConnectionToClient* connection,
-                                 const std::string& channel_name,
-                                 const net::IPEndPoint& end_point) OVERRIDE;
+  virtual void OnRouteChange(
+      protocol::ConnectionToClient* connection,
+      const std::string& channel_name,
+      const protocol::TransportRoute& route) OVERRIDE;
 
-  // Disconnects the session and destroys the transport. Event handler
-  // is guaranteed not to be called after this method is called. Can
-  // be called multiple times. The object should not be used after
-  // this method returns.
+  // Disconnects the session, tears down transport resources and stops scheduler
+  // components. |event_handler_| is guaranteed not to be called after this
+  // method returns.
   void Disconnect();
+
+  // Stops the ClientSession, and calls |stopped_task| on |network_task_runner_|
+  // when fully stopped.
+  void Stop(const base::Closure& stopped_task);
 
   protocol::ConnectionToClient* connection() const {
     return connection_.get();
   }
 
-  bool authenticated() const {
-    return authenticated_;
-  }
-
-  void set_awaiting_continue_approval(bool awaiting) {
-    awaiting_continue_approval_ = awaiting;
+  DesktopEnvironment* desktop_environment() const {
+    return desktop_environment_.get();
   }
 
   const std::string& client_jid() { return client_jid_; }
+
+  bool is_authenticated() { return auth_input_filter_.enabled();  }
 
   // Indicate that local mouse activity has been detected. This causes remote
   // inputs to be ignored for a short time so that the local user will always
   // have the upper hand in 'pointer wars'.
   void LocalMouseMoved(const SkIPoint& new_pos);
 
-  bool ShouldIgnoreRemoteMouseInput(const protocol::MouseEvent& event) const;
-  bool ShouldIgnoreRemoteKeyboardInput(const protocol::KeyEvent& event) const;
+  // Disable handling of input events from this client. If the client has any
+  // keys or mouse buttons pressed then these will be released.
+  void SetDisableInputs(bool disable_inputs);
 
  private:
-  friend class ClientSessionTest_RestoreEventState_Test;
+  friend class base::DeleteHelper<ClientSession>;
+  friend struct ClientSessionTraits;
+  virtual ~ClientSession();
 
-  // Keep track of input state so that we can clean up the event queue when
-  // the user disconnects.
-  void RecordKeyEvent(const protocol::KeyEvent& event);
-  void RecordMouseButtonState(const protocol::MouseEvent& event);
+  // Creates a proxy for sending clipboard events to the client.
+  scoped_ptr<protocol::ClipboardStub> CreateClipboardProxy();
 
-  // Synthesize KeyUp and MouseUp events so that we can undo these events
-  // when the user disconnects.
-  void RestoreEventState();
+  void OnRecorderStopped();
+
+  // Creates an audio encoder for the specified configuration.
+  static scoped_ptr<AudioEncoder> CreateAudioEncoder(
+      const protocol::SessionConfig& config);
+
+  // Creates a video encoder for the specified configuration.
+  static scoped_ptr<VideoEncoder> CreateVideoEncoder(
+      const protocol::SessionConfig& config);
 
   EventHandler* event_handler_;
 
   // The connection to the client.
   scoped_ptr<protocol::ConnectionToClient> connection_;
 
+  // The desktop environment used by this session.
+  scoped_ptr<DesktopEnvironment> desktop_environment_;
+
   std::string client_jid_;
 
-  // The input stub to which this object delegates.
-  protocol::InputStub* input_stub_;
+  // The host clipboard and input stubs to which this object delegates.
+  // These are the final elements in the clipboard & input pipelines, which
+  // appear in order below.
+  protocol::ClipboardStub* host_clipboard_stub_;
+  protocol::InputStub* host_input_stub_;
 
-  // Capturer, used to determine current screen size for ensuring injected
-  // mouse events fall within the screen area.
-  // TODO(lambroslambrou): Move floor-control logic, and clamping to screen
-  // area, out of this class (crbug.com/96508).
-  Capturer* capturer_;
+  // Tracker used to release pressed keys and buttons when disconnecting.
+  protocol::InputEventTracker input_tracker_;
 
-  // Whether this client is authenticated.
-  bool authenticated_;
+  // Filter used to disable remote inputs during local input activity.
+  RemoteInputFilter remote_input_filter_;
 
-  // Whether or not inputs from this client are blocked pending approval from
-  // the host user to continue the connection.
-  bool awaiting_continue_approval_;
+  // Filter used to clamp mouse events to the current display dimensions.
+  MouseClampingFilter mouse_clamping_filter_;
 
-  // State to control remote input blocking while the local pointer is in use.
-  uint32 remote_mouse_button_state_;
+  // Filter to used to stop clipboard items sent from the client being echoed
+  // back to it.
+  protocol::ClipboardEchoFilter clipboard_echo_filter_;
 
-  // Current location of the mouse pointer. This is used to provide appropriate
-  // coordinates when we release the mouse buttons after a user disconnects.
-  SkIPoint remote_mouse_pos_;
+  // Filters used to manage enabling & disabling of input & clipboard.
+  protocol::InputFilter disable_input_filter_;
+  protocol::ClipboardFilter disable_clipboard_filter_;
 
-  // Queue of recently-injected mouse positions.  This is used to detect whether
-  // mouse events from the local input monitor are echoes of injected positions,
-  // or genuine mouse movements of a local input device.
-  std::list<SkIPoint> injected_mouse_positions_;
+  // Filters used to disable input & clipboard when we're not authenticated.
+  protocol::InputFilter auth_input_filter_;
+  protocol::ClipboardFilter auth_clipboard_filter_;
 
-  base::Time latest_local_input_time_;
+  // Factory for weak pointers to the client clipboard stub.
+  // This must appear after |clipboard_echo_filter_|, so that it won't outlive
+  // it.
+  base::WeakPtrFactory<protocol::ClipboardStub> client_clipboard_factory_;
 
-  // Set of keys that are currently pressed down by the user. This is used so
-  // we can release them if the user disconnects.
-  std::set<int> pressed_keys_;
+  // The maximum duration of this session.
+  // There is no maximum if this value is <= 0.
+  base::TimeDelta max_duration_;
+
+  // A timer that triggers a disconnect when the maximum session duration
+  // is reached.
+  base::OneShotTimer<ClientSession> max_duration_timer_;
+
+  scoped_refptr<base::SingleThreadTaskRunner> audio_task_runner_;
+  scoped_refptr<base::SingleThreadTaskRunner> video_capture_task_runner_;
+  scoped_refptr<base::SingleThreadTaskRunner> video_encode_task_runner_;
+  scoped_refptr<base::SingleThreadTaskRunner> network_task_runner_;
+
+  // Schedulers for audio and video capture.
+  scoped_refptr<AudioScheduler> audio_scheduler_;
+  scoped_refptr<VideoScheduler> video_scheduler_;
+
+  // Number of screen recorders and audio schedulers that are currently being
+  // used or shutdown. Used to delay shutdown if one or more
+  // recorders/schedulers are asynchronously shutting down.
+  int active_recorders_;
+
+  // Task to execute once the session is completely stopped.
+  base::Closure stopped_task_;
 
   DISALLOW_COPY_AND_ASSIGN(ClientSession);
+};
+
+// Destroys |ClienSession| instances on the network thread.
+struct ClientSessionTraits {
+  static void Destruct(const ClientSession* client);
 };
 
 }  // namespace remoting

@@ -1,10 +1,9 @@
-// Copyright (c) 2011 The Chromium Authors. All rights reserved.
+// Copyright (c) 2012 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
 #ifndef CHROME_BROWSER_BOOKMARKS_BOOKMARK_NODE_DATA_H_
 #define CHROME_BROWSER_BOOKMARKS_BOOKMARK_NODE_DATA_H_
-#pragma once
 
 #include <vector>
 
@@ -18,6 +17,7 @@
 
 class BookmarkNode;
 class Pickle;
+class PickleIterator;
 class Profile;
 
 // BookmarkNodeData is used to represent the following:
@@ -64,7 +64,7 @@ struct BookmarkNodeData {
 
     // For reading/writing this Element.
     void WriteToPickle(Pickle* pickle) const;
-    bool ReadFromPickle(Pickle* pickle, void** iterator);
+    bool ReadFromPickle(Pickle* pickle, PickleIterator* iterator);
 
     // ID of the node.
     int64 id_;
@@ -88,7 +88,9 @@ struct BookmarkNodeData {
   // Creates a single-bookmark DragData from url/title pair.
   bool ReadFromTuple(const GURL& url, const string16& title);
 
-  // Writes elements to the clipboard.
+  // Writes elements to the clipboard. If |profile| is not NULL, this will write
+  // the profile path to the pickled data. A NULL |profile| indicates that the
+  // data is not associated with a particular profile.
   void WriteToClipboard(Profile* profile) const;
 
   // Reads bookmarks from the general copy/paste clipboard. Prefers data

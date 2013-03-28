@@ -4,7 +4,6 @@
 
 #ifndef CHROME_BROWSER_CHROMEOS_SYSTEM_MOCK_STATISTICS_PROVIDER_H_
 #define CHROME_BROWSER_CHROMEOS_SYSTEM_MOCK_STATISTICS_PROVIDER_H_
-#pragma once
 
 #include "base/basictypes.h"
 #include "chrome/browser/chromeos/system/statistics_provider.h"
@@ -18,6 +17,8 @@ class MockStatisticsProvider : public system::StatisticsProvider {
   MockStatisticsProvider();
   virtual ~MockStatisticsProvider();
 
+  MOCK_METHOD0(Init, void());
+  MOCK_METHOD0(StartLoadingMachineStatistics, void());
   MOCK_METHOD2(GetMachineStatistic, bool(const std::string& name,
                                          std::string* result));
 

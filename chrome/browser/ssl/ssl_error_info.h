@@ -4,7 +4,6 @@
 
 #ifndef CHROME_BROWSER_SSL_SSL_ERROR_INFO_H_
 #define CHROME_BROWSER_SSL_SSL_ERROR_INFO_H_
-#pragma once
 
 #include <string>
 #include <vector>
@@ -21,6 +20,7 @@ class GURL;
 // Note no DISALLOW_COPY_AND_ASSIGN as we want the copy constructor.
 class SSLErrorInfo {
  public:
+  // This enum is being histogrammed; please only add new values at the end.
   enum ErrorType {
     CERT_COMMON_NAME_INVALID = 0,
     CERT_DATE_INVALID,
@@ -31,9 +31,9 @@ class SSLErrorInfo {
     CERT_REVOKED,
     CERT_INVALID,
     CERT_WEAK_SIGNATURE_ALGORITHM,
-    CERT_NOT_IN_DNS,
     CERT_WEAK_KEY,
-    UNKNOWN
+    UNKNOWN,
+    END_OF_ENUM
   };
 
   virtual ~SSLErrorInfo();

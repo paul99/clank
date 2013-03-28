@@ -4,22 +4,20 @@
 
 #include "media/audio/mac/audio_input_mac.h"
 
-#include <CoreServices/CoreServices.h>
-
 #include "base/basictypes.h"
 #include "base/logging.h"
+#include "base/mac/mac_logging.h"
+#include "media/audio/audio_manager_base.h"
 #include "media/audio/audio_util.h"
-#include "media/audio/mac/audio_manager_mac.h"
 
-#if !defined(MAC_OS_X_VERSION_10_6) || \
-    MAC_OS_X_VERSION_MAX_ALLOWED < MAC_OS_X_VERSION_10_6
-enum {
-  kAudioQueueErr_EnqueueDuringReset = -66632
-};
+#if !defined(OS_IOS)
+#include <CoreServices/CoreServices.h>
 #endif
 
+namespace media {
+
 PCMQueueInAudioInputStream::PCMQueueInAudioInputStream(
-    AudioManagerMac* manager, const AudioParameters& params)
+    AudioManagerBase* manager, const AudioParameters& params)
     : manager_(manager),
       callback_(NULL),
       audio_queue_(NULL),
@@ -30,18 +28,18 @@ PCMQueueInAudioInputStream::PCMQueueInAudioInputStream(
   // A frame is one sample across all channels. In interleaved audio the per
   // frame fields identify the set of n |channels|. In uncompressed audio, a
   // packet is always one frame.
-  format_.mSampleRate = params.sample_rate;
+  format_.mSampleRate = params.sample_rate();
   format_.mFormatID = kAudioFormatLinearPCM;
   format_.mFormatFlags = kLinearPCMFormatFlagIsPacked |
                          kLinearPCMFormatFlagIsSignedInteger;
-  format_.mBitsPerChannel = params.bits_per_sample;
-  format_.mChannelsPerFrame = params.channels;
+  format_.mBitsPerChannel = params.bits_per_sample();
+  format_.mChannelsPerFrame = params.channels();
   format_.mFramesPerPacket = 1;
-  format_.mBytesPerPacket = (params.bits_per_sample * params.channels) / 8;
+  format_.mBytesPerPacket = (params.bits_per_sample() * params.channels()) / 8;
   format_.mBytesPerFrame = format_.mBytesPerPacket;
   format_.mReserved = 0;
 
-  buffer_size_bytes_ = params.GetPacketSize();
+  buffer_size_bytes_ = params.GetBytesPerBuffer();
 }
 
 PCMQueueInAudioInputStream::~PCMQueueInAudioInputStream() {
@@ -113,11 +111,34 @@ void PCMQueueInAudioInputStream::Close() {
   // CARE: This object may now be destroyed.
 }
 
+double PCMQueueInAudioInputStream::GetMaxVolume() {
+  NOTREACHED() << "Only supported for low-latency mode.";
+  return 0.0;
+}
+
+void PCMQueueInAudioInputStream::SetVolume(double volume) {
+  NOTREACHED() << "Only supported for low-latency mode.";
+}
+
+double PCMQueueInAudioInputStream::GetVolume() {
+  NOTREACHED() << "Only supported for low-latency mode.";
+  return 0.0;
+}
+
+void PCMQueueInAudioInputStream::SetAutomaticGainControl(bool enabled) {
+  NOTREACHED() << "Only supported for low-latency mode.";
+}
+
+bool PCMQueueInAudioInputStream::GetAutomaticGainControl() {
+  NOTREACHED() << "Only supported for low-latency mode.";
+  return false;
+}
+
 void PCMQueueInAudioInputStream::HandleError(OSStatus err) {
   if (callback_)
     callback_->OnError(this, static_cast<int>(err));
-  NOTREACHED() << "error " << GetMacOSStatusErrorString(err)
-               << " (" << err << ")";
+  // This point should never be reached.
+  OSSTATUS_DCHECK(0, err);
 }
 
 bool PCMQueueInAudioInputStream::SetupBuffers() {
@@ -171,11 +192,29 @@ void PCMQueueInAudioInputStream::HandleInputBuffer(
     return;
   }
 
-  if (audio_buffer->mAudioDataByteSize)
+  if (audio_buffer->mAudioDataByteSize) {
+    // The AudioQueue API may use a large internal buffer and repeatedly call us
+    // back to back once that internal buffer is filled.  When this happens the
+    // renderer client does not have enough time to read data back from the
+    // shared memory before the next write comes along.  If HandleInputBuffer()
+    // is called too frequently, Sleep() at least 5ms to ensure the shared
+    // memory doesn't get trampled.
+    // TODO(dalecurtis): This is a HACK.  Long term the AudioQueue path is going
+    // away in favor of the AudioUnit based AUAudioInputStream().  Tracked by
+    // http://crbug.com/161383.
+    base::TimeDelta elapsed = base::Time::Now() - last_fill_;
+    const base::TimeDelta kMinDelay = base::TimeDelta::FromMilliseconds(5);
+    if (elapsed < kMinDelay)
+      base::PlatformThread::Sleep(kMinDelay - elapsed);
+
     callback_->OnData(this,
                       reinterpret_cast<const uint8*>(audio_buffer->mAudioData),
                       audio_buffer->mAudioDataByteSize,
-                      audio_buffer->mAudioDataByteSize);
+                      audio_buffer->mAudioDataByteSize,
+                      0.0);
+
+    last_fill_ = base::Time::Now();
+  }
   // Recycle the buffer.
   OSStatus err = QueueNextBuffer(audio_buffer);
   if (err != noErr) {
@@ -193,3 +232,5 @@ void PCMQueueInAudioInputStream::HandleInputBuffer(
     HandleError(err);
   }
 }
+
+}  // namespace media

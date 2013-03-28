@@ -1,4 +1,4 @@
-// Copyright (c) 2011 The Chromium Authors. All rights reserved.
+// Copyright (c) 2012 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -28,6 +28,7 @@ P2PHostAddressRequest::~P2PHostAddressRequest() {
 void P2PHostAddressRequest::Request(const std::string& host_name,
                                     const DoneCallback& done_callback) {
   DCHECK(delegate_message_loop_->BelongsToCurrentThread());
+  DCHECK_EQ(STATE_CREATED, state_);
 
   state_ = STATE_SENT;
   ipc_message_loop_->PostTask(FROM_HERE, base::Bind(
@@ -52,7 +53,7 @@ void P2PHostAddressRequest::DoSendRequest(const std::string& host_name,
   request_id_ = dispatcher_->RegisterHostAddressRequest(this);
   registered_ = true;
   dispatcher_->SendP2PMessage(
-      new P2PHostMsg_GetHostAddress(0, host_name, request_id_));
+      new P2PHostMsg_GetHostAddress(host_name, request_id_));
 }
 
 void P2PHostAddressRequest::DoUnregister() {

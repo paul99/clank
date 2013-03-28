@@ -1,8 +1,10 @@
-// Copyright (c) 2010 The Chromium Authors. All rights reserved.
+// Copyright (c) 2012 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
 #include "webkit/glue/webcookie.h"
+
+#include "net/cookies/canonical_cookie.h"
 
 namespace webkit_glue {
 
@@ -13,7 +15,7 @@ WebCookie::WebCookie()
       session(false) {
 }
 
-WebCookie::WebCookie(const net::CookieMonster::CanonicalCookie& c)
+WebCookie::WebCookie(const net::CanonicalCookie& c)
     : name(c.Name()),
       value(c.Value()),
       domain(c.Domain()),
@@ -21,11 +23,7 @@ WebCookie::WebCookie(const net::CookieMonster::CanonicalCookie& c)
       expires(c.ExpiryDate().ToDoubleT() * 1000),
       http_only(c.IsHttpOnly()),
       secure(c.IsSecure()),
-#if defined(OS_ANDROID)
-      session(c.IsSessionCookie()) {
-#else
       session(!c.IsPersistent()) {
-#endif
 }
 
 WebCookie::WebCookie(const std::string& name, const std::string& value,

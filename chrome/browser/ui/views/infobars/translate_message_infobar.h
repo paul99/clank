@@ -4,7 +4,6 @@
 
 #ifndef CHROME_BROWSER_UI_VIEWS_INFOBARS_TRANSLATE_MESSAGE_INFOBAR_H_
 #define CHROME_BROWSER_UI_VIEWS_INFOBARS_TRANSLATE_MESSAGE_INFOBAR_H_
-#pragma once
 
 #include "chrome/browser/ui/views/infobars/translate_infobar_base.h"
 
@@ -22,7 +21,7 @@ class TranslateMessageInfoBar : public TranslateInfoBarBase {
                                     View* parent,
                                     View* child) OVERRIDE;
   virtual void ButtonPressed(views::Button* sender,
-                             const views::Event& event) OVERRIDE;
+                             const ui::Event& event) OVERRIDE;
   virtual int ContentMinimumWidth() const OVERRIDE;
 
   views::Label* label_;

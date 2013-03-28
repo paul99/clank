@@ -4,7 +4,6 @@
 
 #ifndef CHROME_BROWSER_COMPONENT_UPDATER_COMPONENT_UPDATER_INTERCEPTOR_H_
 #define CHROME_BROWSER_COMPONENT_UPDATER_COMPONENT_UPDATER_INTERCEPTOR_H_
-#pragma once
 
 #include <map>
 #include <string>
@@ -38,7 +37,9 @@ class ComponentUpdateInterceptor
 
  private:
   // When computing matches, this ignores the query parameters of the url.
-  virtual net::URLRequestJob* MaybeIntercept(net::URLRequest* request) OVERRIDE;
+  virtual net::URLRequestJob* MaybeIntercept(
+      net::URLRequest* request,
+      net::NetworkDelegate* network_delegate) OVERRIDE;
 
   friend class base::RefCountedThreadSafe<ComponentUpdateInterceptor>;
 

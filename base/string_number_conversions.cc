@@ -15,10 +15,6 @@
 #include "base/third_party/dmg_fp/dmg_fp.h"
 #include "base/utf_string_conversions.h"
 
-#if defined(OS_ANDROID)
-#include <ctype.h>
-#endif
-
 namespace base {
 
 namespace {

@@ -4,19 +4,21 @@
 
 #ifndef CHROME_BROWSER_EXTENSIONS_CONVERT_WEB_APP_H_
 #define CHROME_BROWSER_EXTENSIONS_CONVERT_WEB_APP_H_
-#pragma once
 
 #include <string>
 
 #include "base/memory/ref_counted.h"
 
-class Extension;
+class FilePath;
 
 namespace base {
 class Time;
 }
 
 struct WebApplicationInfo;
+
+namespace extensions {
+class Extension;
 
 // Generates a version number for an extension from a time. The goal is to make
 // use of the version number to communicate the date in a human readable form,
@@ -38,6 +40,9 @@ std::string ConvertTimeToExtensionVersion(const base::Time& time);
 // returned object.
 scoped_refptr<Extension> ConvertWebAppToExtension(
     const WebApplicationInfo& web_app_info,
-    const base::Time& create_time);
+    const base::Time& create_time,
+    const FilePath& extensions_dir);
+
+}  // namespace extensions
 
 #endif  // CHROME_BROWSER_EXTENSIONS_CONVERT_WEB_APP_H_

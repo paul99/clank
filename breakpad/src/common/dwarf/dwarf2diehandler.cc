@@ -31,9 +31,12 @@
 // dwarf2diehandler.cc: Implement the dwarf2reader::DieDispatcher class.
 // See dwarf2diehandler.h for details.
 
-#include "common/dwarf/dwarf2diehandler.h"
-
 #include <assert.h>
+
+#include <string>
+
+#include "common/dwarf/dwarf2diehandler.h"
+#include "common/using_std_string.h"
 
 namespace dwarf2reader {
 
@@ -176,11 +179,21 @@ void DIEDispatcher::ProcessAttributeBuffer(uint64 offset,
 void DIEDispatcher::ProcessAttributeString(uint64 offset,
                                            enum DwarfAttribute attr,
                                            enum DwarfForm form,
-                                           const std::string& data) {
+                                           const string& data) {
   HandlerStack &current = die_handlers_.top();
   // This had better be an attribute of the DIE we were meant to handle.
   assert(offset == current.offset_);
   current.handler_->ProcessAttributeString(attr, form, data);
+}
+
+void DIEDispatcher::ProcessAttributeSignature(uint64 offset,
+                                              enum DwarfAttribute attr,
+                                              enum DwarfForm form,
+                                              uint64 signature) {
+  HandlerStack &current = die_handlers_.top();
+  // This had better be an attribute of the DIE we were meant to handle.
+  assert(offset == current.offset_);
+  current.handler_->ProcessAttributeSignature(attr, form, signature);
 }
 
 } // namespace dwarf2reader

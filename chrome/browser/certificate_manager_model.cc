@@ -1,4 +1,4 @@
-// Copyright (c) 2011 The Chromium Authors. All rights reserved.
+// Copyright (c) 2012 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -23,7 +23,8 @@
 #endif
 
 CertificateManagerModel::CertificateManagerModel(Observer* observer)
-    : observer_(observer) {
+    : cert_db_(net::NSSCertDatabase::GetInstance()),
+      observer_(observer) {
 }
 
 CertificateManagerModel::~CertificateManagerModel() {
@@ -32,11 +33,11 @@ CertificateManagerModel::~CertificateManagerModel() {
 void CertificateManagerModel::Refresh() {
   VLOG(1) << "refresh started";
   net::CryptoModuleList modules;
-  cert_db_.ListModules(&modules, false);
+  cert_db_->ListModules(&modules, false);
   VLOG(1) << "refresh waiting for unlocking...";
-  browser::UnlockSlotsIfNecessary(
+  chrome::UnlockSlotsIfNecessary(
       modules,
-      browser::kCryptoModulePasswordListCerts,
+      chrome::kCryptoModulePasswordListCerts,
       "",  // unused.
       base::Bind(&CertificateManagerModel::RefreshSlotsUnlocked,
                  base::Unretained(this)));
@@ -44,7 +45,7 @@ void CertificateManagerModel::Refresh() {
 
 void CertificateManagerModel::RefreshSlotsUnlocked() {
   VLOG(1) << "refresh listing certs...";
-  cert_db_.ListCerts(&cert_list_);
+  cert_db_->ListCerts(&cert_list_);
   observer_->CertificatesRefreshed();
   VLOG(1) << "refresh finished";
 }
@@ -81,9 +82,7 @@ string16 CertificateManagerModel::GetColumnText(
 
 #if defined(OS_CHROMEOS)
       // TODO(xiyuan): Put this into a column when we have js tree-table.
-      if (crypto::IsTPMTokenReady() &&
-          cert.os_cert_handle()->slot ==
-            cert_db().GetPrivateModule()->os_module_handle()) {
+      if (IsHardwareBacked(&cert)) {
         rv = l10n_util::GetStringFUTF16(
             IDS_CERT_MANAGER_HARDWARE_BACKED_KEY_FORMAT,
             rv,
@@ -114,8 +113,8 @@ int CertificateManagerModel::ImportFromPKCS12(net::CryptoModule* module,
                                               const std::string& data,
                                               const string16& password,
                                               bool is_extractable) {
-  int result = cert_db_.ImportFromPKCS12(module, data, password,
-                                         is_extractable, NULL);
+  int result = cert_db_->ImportFromPKCS12(module, data, password,
+                                          is_extractable, NULL);
   if (result == net::OK)
     Refresh();
   return result;
@@ -123,9 +122,9 @@ int CertificateManagerModel::ImportFromPKCS12(net::CryptoModule* module,
 
 bool CertificateManagerModel::ImportCACerts(
     const net::CertificateList& certificates,
-    net::CertDatabase::TrustBits trust_bits,
-    net::CertDatabase::ImportCertFailureList* not_imported) {
-  bool result = cert_db_.ImportCACerts(certificates, trust_bits, not_imported);
+    net::NSSCertDatabase::TrustBits trust_bits,
+    net::NSSCertDatabase::ImportCertFailureList* not_imported) {
+  bool result = cert_db_->ImportCACerts(certificates, trust_bits, not_imported);
   if (result && not_imported->size() != certificates.size())
     Refresh();
   return result;
@@ -133,8 +132,10 @@ bool CertificateManagerModel::ImportCACerts(
 
 bool CertificateManagerModel::ImportServerCert(
     const net::CertificateList& certificates,
-    net::CertDatabase::ImportCertFailureList* not_imported) {
-  bool result = cert_db_.ImportServerCert(certificates, not_imported);
+    net::NSSCertDatabase::TrustBits trust_bits,
+    net::NSSCertDatabase::ImportCertFailureList* not_imported) {
+  bool result = cert_db_->ImportServerCert(certificates, trust_bits,
+                                           not_imported);
   if (result && not_imported->size() != certificates.size())
     Refresh();
   return result;
@@ -143,13 +144,24 @@ bool CertificateManagerModel::ImportServerCert(
 bool CertificateManagerModel::SetCertTrust(
     const net::X509Certificate* cert,
     net::CertType type,
-    net::CertDatabase::TrustBits trust_bits) {
-  return cert_db_.SetCertTrust(cert, type, trust_bits);
+    net::NSSCertDatabase::TrustBits trust_bits) {
+  return cert_db_->SetCertTrust(cert, type, trust_bits);
 }
 
 bool CertificateManagerModel::Delete(net::X509Certificate* cert) {
-  bool result = cert_db_.DeleteCertAndKey(cert);
+  bool result = cert_db_->DeleteCertAndKey(cert);
   if (result)
     Refresh();
   return result;
+}
+
+bool CertificateManagerModel::IsHardwareBacked(
+    const net::X509Certificate* cert) const {
+#if defined(OS_CHROMEOS)
+  return crypto::IsTPMTokenReady() &&
+         cert->os_cert_handle()->slot ==
+             cert_db_->GetPrivateModule()->os_module_handle();
+#else
+  return false;
+#endif
 }

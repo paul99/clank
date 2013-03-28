@@ -1,10 +1,9 @@
-// Copyright (c) 2011 The Chromium Authors. All rights reserved.
+// Copyright (c) 2012 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
 #ifndef CONTENT_GPU_GPU_CHILD_THREAD_H_
 #define CONTENT_GPU_GPU_CHILD_THREAD_H_
-#pragma once
 
 #include <string>
 
@@ -22,22 +21,12 @@
 #include "content/public/common/gpu_info.h"
 #include "ui/gfx/native_widget_types.h"
 
-#if defined(OS_ANDROID)
-#include "base/memory/weak_ptr.h"
-#endif
-
 namespace sandbox {
 class TargetServices;
 }
 
+namespace content {
 class GpuWatchdogThread;
-
-#if defined(OS_ANDROID)
-namespace base {
-class WaitableEvent;
-}
-struct ANativeWindow;
-#endif
 
 // The main thread of the GPU child process. There will only ever be one of
 // these per process. It does process initialization and shutdown. It forwards
@@ -45,7 +34,9 @@ struct ANativeWindow;
 // commands to the GPU.
 class GpuChildThread : public ChildThread {
  public:
-  explicit GpuChildThread(bool dead_on_arrival);
+  explicit GpuChildThread(GpuWatchdogThread* gpu_watchdog_thread,
+                          bool dead_on_arrival,
+                          const GPUInfo& gpu_info);
 
   // For single-process mode.
   explicit GpuChildThread(const std::string& channel_id);
@@ -59,26 +50,20 @@ class GpuChildThread : public ChildThread {
   virtual bool Send(IPC::Message* msg) OVERRIDE;
   virtual bool OnControlMessageReceived(const IPC::Message& msg) OVERRIDE;
 
-#if defined(OS_ANDROID)
-  // this can be called from any thread
-  void SetNativeWindow(int32 view_or_surface_id,
-                       int32 renderer_id,
-                       ANativeWindow* native_window,
-                       base::WaitableEvent* completion);
-#endif
-
  private:
   // Message handlers.
   void OnInitialize();
   void OnCollectGraphicsInfo();
+  void OnGetVideoMemoryUsageStats();
+  void OnSetVideoMemoryWindowCount(uint32 window_count);
+
   void OnClean();
   void OnCrash();
   void OnHang();
+  void OnDisableWatchdog();
 
-#if defined(OS_WIN)
-  static void CollectDxDiagnostics(GpuChildThread* thread);
-  static void SetDxDiagnostics(GpuChildThread* thread,
-                               const content::DxDiagNode& node);
+#if defined(USE_TCMALLOC)
+  void OnGetGpuTcmalloc();
 #endif
 
   // Set this flag to true if a fatal error occurred before we receive the
@@ -90,21 +75,16 @@ class GpuChildThread : public ChildThread {
 #if defined(OS_WIN)
   // Windows specific client sandbox interface.
   sandbox::TargetServices* target_services_;
-
-  // Indicates whether DirectX Diagnostics collection is ongoing.
-  bool collecting_dx_diagnostics_;
 #endif
 
   scoped_ptr<GpuChannelManager> gpu_channel_manager_;
 
   // Information about the GPU, such as device and vendor ID.
-  content::GPUInfo gpu_info_;
-
-#if defined(OS_ANDROID)
-  base::WeakPtrFactory<GpuChildThread> weak_ptr_factory_;
-#endif
+  GPUInfo gpu_info_;
 
   DISALLOW_COPY_AND_ASSIGN(GpuChildThread);
 };
+
+}  // namespace content
 
 #endif  // CONTENT_GPU_GPU_CHILD_THREAD_H_

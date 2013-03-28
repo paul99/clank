@@ -5,7 +5,6 @@
 
 #ifndef NET_FTP_FTP_CTRL_RESPONSE_BUFFER_H_
 #define NET_FTP_FTP_CTRL_RESPONSE_BUFFER_H_
-#pragma once
 
 #include <queue>
 #include <string>
@@ -13,6 +12,7 @@
 
 #include "base/basictypes.h"
 #include "net/base/net_export.h"
+#include "net/base/net_log.h"
 
 namespace net {
 
@@ -28,7 +28,7 @@ struct NET_EXPORT_PRIVATE FtpCtrlResponse {
 
 class NET_EXPORT_PRIVATE FtpCtrlResponseBuffer {
  public:
-  FtpCtrlResponseBuffer();
+  FtpCtrlResponseBuffer(const BoundNetLog& net_log);
   ~FtpCtrlResponseBuffer();
 
   // Called when data is received from the control socket. Returns error code.
@@ -90,6 +90,8 @@ class NET_EXPORT_PRIVATE FtpCtrlResponseBuffer {
 
   // As we read full responses (possibly multiline), we add them to the queue.
   std::queue<FtpCtrlResponse> responses_;
+
+  BoundNetLog net_log_;
 
   DISALLOW_COPY_AND_ASSIGN(FtpCtrlResponseBuffer);
 };

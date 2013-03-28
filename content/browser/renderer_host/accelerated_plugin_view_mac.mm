@@ -10,11 +10,14 @@
 #include "base/debug/trace_event.h"
 #include "content/browser/renderer_host/render_widget_host_view_mac.h"
 #include "content/public/browser/browser_thread.h"
-#include "ui/gfx/gl/gl_context.h"
-#include "ui/gfx/gl/gl_switches.h"
+#import "ui/base/cocoa/underlay_opengl_hosting_window.h"
 #include "ui/gfx/scoped_ns_graphics_context_save_gstate_mac.h"
+#include "ui/gl/gl_context.h"
+#include "ui/gl/gl_switches.h"
+#include "ui/gl/gpu_switching_manager.h"
 
 using content::BrowserThread;
+using content::RenderWidgetHostViewMac;
 
 @interface AcceleratedPluginView(Private)
 
@@ -80,7 +83,7 @@ using content::BrowserThread;
 - (void)drawRect:(NSRect)rect {
   TRACE_EVENT0("browser", "AcceleratedPluginView::drawRect");
   const NSRect* dirtyRects;
-  int dirtyRectCount;
+  NSInteger dirtyRectCount;
   [self getRectsBeingDrawn:&dirtyRects count:&dirtyRectCount];
 
   {
@@ -179,28 +182,6 @@ using content::BrowserThread;
   [glContext_ makeCurrentContext];
 }
 
-- (void)viewWillMoveToWindow:(NSWindow*)newWindow {
-  TRACE_EVENT1("browser", "AcceleratedPluginView::viewWillMoveToWindow",
-               "newWindow", newWindow);
-  // Inform the window hosting this accelerated view that it needs to be
-  // transparent.
-  if (![self isHiddenOrHasHiddenAncestor]) {
-    if ([[self window] respondsToSelector:@selector(underlaySurfaceRemoved)])
-      [static_cast<id>([self window]) underlaySurfaceRemoved];
-    if ([newWindow respondsToSelector:@selector(underlaySurfaceAdded)])
-      [static_cast<id>(newWindow) underlaySurfaceAdded];
-  }
-}
-
-- (void)viewDidHide {
-  TRACE_EVENT0("browser", "AcceleratedPluginView::viewDidHide");
-  [super viewDidHide];
-
-  if ([[self window] respondsToSelector:@selector(underlaySurfaceRemoved)]) {
-    [static_cast<id>([self window]) underlaySurfaceRemoved];
-  }
-}
-
 - (void)viewDidUnhide {
   TRACE_EVENT0("browser", "AcceleratedPluginView::viewDidUnhide");
   [super viewDidUnhide];
@@ -208,10 +189,6 @@ using content::BrowserThread;
   // Delay context creation until view unhide, see http://crbug.com/109151
   if (renderWidgetHostView_ && !glContext_) {
     [self initOpenGLContext];
-  }
-
-  if ([[self window] respondsToSelector:@selector(underlaySurfaceRemoved)]) {
-    [static_cast<id>([self window]) underlaySurfaceAdded];
   }
 }
 
@@ -243,7 +220,7 @@ using content::BrowserThread;
   TRACE_EVENT0("browser", "AcceleratedPluginViewMac::initOpenGLContext");
   std::vector<NSOpenGLPixelFormatAttribute> attributes;
   attributes.push_back(NSOpenGLPFADoubleBuffer);
-  if (gfx::GLContext::SupportsDualGpus())
+  if (ui::GpuSwitchingManager::GetInstance()->SupportsDualGpus())
     attributes.push_back(NSOpenGLPFAAllowOfflineRenderers);
   attributes.push_back(0);
 

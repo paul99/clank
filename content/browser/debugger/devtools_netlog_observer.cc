@@ -1,4 +1,4 @@
-// Copyright (c) 2011 The Chromium Authors. All rights reserved.
+// Copyright (c) 2012 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -11,27 +11,22 @@
 #include "content/public/browser/content_browser_client.h"
 #include "content/public/common/resource_response.h"
 #include "net/base/load_flags.h"
-#include "net/http/http_net_log_params.h"
 #include "net/http/http_response_headers.h"
 #include "net/http/http_util.h"
+#include "net/spdy/spdy_header_block.h"
 #include "net/url_request/url_request.h"
 #include "net/url_request/url_request_netlog_params.h"
 #include "webkit/glue/resource_loader_bridge.h"
 
-using content::BrowserThread;
-
+namespace content {
 const size_t kMaxNumEntries = 1000;
 
 DevToolsNetLogObserver* DevToolsNetLogObserver::instance_ = NULL;
 
-DevToolsNetLogObserver::DevToolsNetLogObserver(net::NetLog* net_log)
-    : net::NetLog::ThreadSafeObserver(net::NetLog::LOG_ALL_BUT_BYTES),
-      net_log_(net_log) {
-  net_log_->AddThreadSafeObserver(this);
+DevToolsNetLogObserver::DevToolsNetLogObserver() {
 }
 
 DevToolsNetLogObserver::~DevToolsNetLogObserver() {
-  net_log_->RemoveThreadSafeObserver(this);
 }
 
 DevToolsNetLogObserver::ResourceInfo*
@@ -42,41 +37,35 @@ DevToolsNetLogObserver::GetResourceInfo(uint32 id) {
   return NULL;
 }
 
-void DevToolsNetLogObserver::OnAddEntry(net::NetLog::EventType type,
-                                        const base::TimeTicks& time,
-                                        const net::NetLog::Source& source,
-                                        net::NetLog::EventPhase phase,
-                                        net::NetLog::EventParameters* params) {
+void DevToolsNetLogObserver::OnAddEntry(const net::NetLog::Entry& entry) {
   // The events that the Observer is interested in only occur on the IO thread.
   if (!BrowserThread::CurrentlyOn(BrowserThread::IO))
     return;
 
-  // The events that the Observer is interested in only occur on the IO thread.
-  if (!BrowserThread::CurrentlyOn(BrowserThread::IO))
-    return;
-  if (source.type == net::NetLog::SOURCE_URL_REQUEST)
-    OnAddURLRequestEntry(type, time, source, phase, params);
-  else if (source.type == net::NetLog::SOURCE_HTTP_STREAM_JOB)
-    OnAddHTTPStreamJobEntry(type, time, source, phase, params);
-  else if (source.type == net::NetLog::SOURCE_SOCKET)
-    OnAddSocketEntry(type, time, source, phase, params);
+  if (entry.source().type == net::NetLog::SOURCE_URL_REQUEST)
+    OnAddURLRequestEntry(entry);
+  else if (entry.source().type == net::NetLog::SOURCE_HTTP_STREAM_JOB)
+    OnAddHTTPStreamJobEntry(entry);
+  else if (entry.source().type == net::NetLog::SOURCE_SOCKET)
+    OnAddSocketEntry(entry);
 }
 
 void DevToolsNetLogObserver::OnAddURLRequestEntry(
-    net::NetLog::EventType type,
-    const base::TimeTicks& time,
-    const net::NetLog::Source& source,
-    net::NetLog::EventPhase phase,
-    net::NetLog::EventParameters* params) {
+    const net::NetLog::Entry& entry) {
   DCHECK(BrowserThread::CurrentlyOn(BrowserThread::IO));
 
-  bool is_begin = phase == net::NetLog::PHASE_BEGIN;
-  bool is_end = phase == net::NetLog::PHASE_END;
+  bool is_begin = entry.phase() == net::NetLog::PHASE_BEGIN;
+  bool is_end = entry.phase() == net::NetLog::PHASE_END;
 
-  if (type == net::NetLog::TYPE_URL_REQUEST_START_JOB) {
+  if (entry.type() == net::NetLog::TYPE_URL_REQUEST_START_JOB) {
     if (is_begin) {
-      int load_flags = static_cast<
-          net::URLRequestStartEventParameters*>(params)->load_flags();
+      int load_flags;
+      scoped_ptr<Value> event_param(entry.ParametersToValue());
+      if (!net::StartEventLoadFlagsFromEventParams(event_param.get(),
+                                                   &load_flags)) {
+        return;
+      }
+
       if (!(load_flags & net::LOAD_REPORT_RAW_HEADERS))
         return;
 
@@ -86,7 +75,7 @@ void DevToolsNetLogObserver::OnAddURLRequestEntry(
         request_to_info_.clear();
       }
 
-      request_to_info_[source.id] = new ResourceInfo();
+      request_to_info_[entry.source().id] = new ResourceInfo();
 
       if (request_to_encoded_data_length_.size() > kMaxNumEntries) {
         LOG(WARNING) << "The encoded data length observer url request count "
@@ -94,28 +83,33 @@ void DevToolsNetLogObserver::OnAddURLRequestEntry(
         request_to_encoded_data_length_.clear();
       }
 
-      request_to_encoded_data_length_[source.id] = 0;
+      request_to_encoded_data_length_[entry.source().id] = 0;
     }
     return;
-  } else if (type == net::NetLog::TYPE_REQUEST_ALIVE) {
+  } else if (entry.type() == net::NetLog::TYPE_REQUEST_ALIVE) {
     // Cleanup records based on the TYPE_REQUEST_ALIVE entry.
     if (is_end) {
-      request_to_info_.erase(source.id);
-      request_to_encoded_data_length_.erase(source.id);
+      request_to_info_.erase(entry.source().id);
+      request_to_encoded_data_length_.erase(entry.source().id);
     }
     return;
   }
 
-  ResourceInfo* info = GetResourceInfo(source.id);
+  ResourceInfo* info = GetResourceInfo(entry.source().id);
   if (!info)
     return;
 
-  switch (type) {
+  switch (entry.type()) {
     case net::NetLog::TYPE_HTTP_TRANSACTION_SEND_REQUEST_HEADERS: {
-      net::NetLogHttpRequestParameter* request_parameter =
-          static_cast<net::NetLogHttpRequestParameter*>(params);
-      const net::HttpRequestHeaders &request_headers =
-          request_parameter->GetHeaders();
+      scoped_ptr<Value> event_params(entry.ParametersToValue());
+      std::string request_line;
+      net::HttpRequestHeaders request_headers;
+
+      if (!net::HttpRequestHeaders::FromNetLogParam(event_params.get(),
+                                                    &request_headers,
+                                                    &request_line)) {
+        NOTREACHED();
+      }
 
       // We need to clear headers in case the same url_request is reused for
       // several http requests (e.g. see http://crbug.com/80157).
@@ -123,19 +117,43 @@ void DevToolsNetLogObserver::OnAddURLRequestEntry(
 
       for (net::HttpRequestHeaders::Iterator it(request_headers);
            it.GetNext();) {
-        info->request_headers.push_back(std::make_pair(it.name(),
-                                                       it.value()));
+        info->request_headers.push_back(std::make_pair(it.name(), it.value()));
       }
-      info->request_headers_text =
-          request_parameter->GetLine() +
-          request_parameter->GetHeaders().ToString();
+      info->request_headers_text = request_line + request_headers.ToString();
+      break;
+    }
+    case net::NetLog::TYPE_HTTP_TRANSACTION_SPDY_SEND_REQUEST_HEADERS: {
+      scoped_ptr<Value> event_params(entry.ParametersToValue());
+      net::SpdyHeaderBlock request_headers;
+
+      if (!net::SpdyHeaderBlockFromNetLogParam(event_params.get(),
+                                               &request_headers)) {
+        NOTREACHED();
+      }
+
+      // We need to clear headers in case the same url_request is reused for
+      // several http requests (e.g. see http://crbug.com/80157).
+      info->request_headers.clear();
+
+      for (net::SpdyHeaderBlock::const_iterator it = request_headers.begin();
+           it != request_headers.end(); ++it) {
+        info->request_headers.push_back(std::make_pair(it->first, it->second));
+      }
+      info->request_headers_text = "";
       break;
     }
     case net::NetLog::TYPE_HTTP_TRANSACTION_READ_RESPONSE_HEADERS: {
-      const net::HttpResponseHeaders& response_headers =
-          static_cast<net::NetLogHttpResponseParameter*>(params)->GetHeaders();
-      info->http_status_code = response_headers.response_code();
-      info->http_status_text = response_headers.GetStatusText();
+      scoped_ptr<Value> event_params(entry.ParametersToValue());
+
+      scoped_refptr<net::HttpResponseHeaders> response_headers;
+
+      if (!net::HttpResponseHeaders::FromNetLogParam(event_params.get(),
+                                                     &response_headers)) {
+        NOTREACHED();
+      }
+
+      info->http_status_code = response_headers->response_code();
+      info->http_status_text = response_headers->GetStatusText();
       std::string name, value;
 
       // We need to clear headers in case the same url_request is reused for
@@ -143,17 +161,24 @@ void DevToolsNetLogObserver::OnAddURLRequestEntry(
       info->response_headers.clear();
 
       for (void* it = NULL;
-           response_headers.EnumerateHeaderLines(&it, &name, &value); ) {
+           response_headers->EnumerateHeaderLines(&it, &name, &value); ) {
         info->response_headers.push_back(std::make_pair(name, value));
       }
       info->response_headers_text =
           net::HttpUtil::ConvertHeadersBackToHTTPResponse(
-              response_headers.raw_headers());
+              response_headers->raw_headers());
       break;
     }
     case net::NetLog::TYPE_HTTP_STREAM_REQUEST_BOUND_TO_JOB: {
-      uint32 http_stream_job_id = static_cast<net::NetLogSourceParameter*>(
-          params)->value().id;
+      scoped_ptr<Value> event_params(entry.ParametersToValue());
+      net::NetLog::Source http_stream_job_source;
+      if (!net::NetLog::Source::FromEventParameters(event_params.get(),
+                                                    &http_stream_job_source)) {
+        NOTREACHED();
+        break;
+      }
+
+      uint32 http_stream_job_id = http_stream_job_source.id;
       HTTPStreamJobToSocketMap::iterator it =
           http_stream_job_to_socket_.find(http_stream_job_id);
       if (it == http_stream_job_to_socket_.end())
@@ -166,7 +191,7 @@ void DevToolsNetLogObserver::OnAddURLRequestEntry(
         socket_to_request_.clear();
       }
 
-      socket_to_request_[socket_id] = source.id;
+      socket_to_request_[socket_id] = entry.source().id;
       http_stream_job_to_socket_.erase(http_stream_job_id);
       break;
     }
@@ -176,16 +201,17 @@ void DevToolsNetLogObserver::OnAddURLRequestEntry(
 }
 
 void DevToolsNetLogObserver::OnAddHTTPStreamJobEntry(
-    net::NetLog::EventType type,
-    const base::TimeTicks& time,
-    const net::NetLog::Source& source,
-    net::NetLog::EventPhase phase,
-    net::NetLog::EventParameters* params) {
+    const net::NetLog::Entry& entry) {
   DCHECK(BrowserThread::CurrentlyOn(BrowserThread::IO));
 
-  if (type == net::NetLog::TYPE_SOCKET_POOL_BOUND_TO_SOCKET) {
-    uint32 socket_id = static_cast<net::NetLogSourceParameter*>(
-      params)->value().id;
+  if (entry.type() == net::NetLog::TYPE_SOCKET_POOL_BOUND_TO_SOCKET) {
+    scoped_ptr<Value> event_params(entry.ParametersToValue());
+    net::NetLog::Source socket_source;
+    if (!net::NetLog::Source::FromEventParameters(event_params.get(),
+                                                  &socket_source)) {
+      NOTREACHED();
+      return;
+    }
 
     // Prevents us from passively growing the memory unbounded in
     // case something went wrong. Should not happen.
@@ -194,28 +220,25 @@ void DevToolsNetLogObserver::OnAddHTTPStreamJobEntry(
                       "has grown larger than expected, resetting";
       http_stream_job_to_socket_.clear();
     }
-    http_stream_job_to_socket_[source.id] = socket_id;
+    http_stream_job_to_socket_[entry.source().id] = socket_source.id;
   }
 }
 
 void DevToolsNetLogObserver::OnAddSocketEntry(
-    net::NetLog::EventType type,
-    const base::TimeTicks& time,
-    const net::NetLog::Source& source,
-    net::NetLog::EventPhase phase,
-    net::NetLog::EventParameters* params) {
+    const net::NetLog::Entry& entry) {
   DCHECK(BrowserThread::CurrentlyOn(BrowserThread::IO));
 
-  bool is_end = phase == net::NetLog::PHASE_END;
+  bool is_end = entry.phase() == net::NetLog::PHASE_END;
 
-  SocketToRequestMap::iterator it = socket_to_request_.find(source.id);
+  SocketToRequestMap::iterator it =
+      socket_to_request_.find(entry.source().id);
   if (it == socket_to_request_.end())
     return;
   uint32 request_id = it->second;
 
-  if (type == net::NetLog::TYPE_SOCKET_IN_USE) {
+  if (entry.type() == net::NetLog::TYPE_SOCKET_IN_USE) {
     if (is_end)
-      socket_to_request_.erase(source.id);
+      socket_to_request_.erase(entry.source().id);
     return;
   }
 
@@ -224,9 +247,9 @@ void DevToolsNetLogObserver::OnAddSocketEntry(
   if (encoded_data_length_it == request_to_encoded_data_length_.end())
     return;
 
-  if (net::NetLog::TYPE_SOCKET_BYTES_RECEIVED == type) {
+  if (net::NetLog::TYPE_SOCKET_BYTES_RECEIVED == entry.type()) {
     int byte_count = 0;
-    scoped_ptr<Value> value(params->ToValue());
+    scoped_ptr<Value> value(entry.ParametersToValue());
     if (!value->IsType(Value::TYPE_DICTIONARY))
       return;
 
@@ -240,15 +263,20 @@ void DevToolsNetLogObserver::OnAddSocketEntry(
 
 void DevToolsNetLogObserver::Attach() {
   DCHECK(!instance_);
-  net::NetLog* net_log = content::GetContentClient()->browser()->GetNetLog();
-  if (net_log)
-    instance_ = new DevToolsNetLogObserver(net_log);
+  net::NetLog* net_log = GetContentClient()->browser()->GetNetLog();
+  if (net_log) {
+    instance_ = new DevToolsNetLogObserver();
+    net_log->AddThreadSafeObserver(instance_, net::NetLog::LOG_ALL_BUT_BYTES);
+  }
 }
 
 void DevToolsNetLogObserver::Detach() {
   DCHECK(BrowserThread::CurrentlyOn(BrowserThread::IO));
 
   if (instance_) {
+    // Safest not to do this in the destructor to maintain thread safety across
+    // refactorings.
+    instance_->net_log()->RemoveThreadSafeObserver(instance_);
     delete instance_;
     instance_ = NULL;
   }
@@ -263,7 +291,7 @@ DevToolsNetLogObserver* DevToolsNetLogObserver::GetInstance() {
 // static
 void DevToolsNetLogObserver::PopulateResponseInfo(
     net::URLRequest* request,
-    content::ResourceResponse* response) {
+    ResourceResponse* response) {
   if (!(request->load_flags() & net::LOAD_REPORT_RAW_HEADERS))
     return;
 
@@ -272,7 +300,7 @@ void DevToolsNetLogObserver::PopulateResponseInfo(
       DevToolsNetLogObserver::GetInstance();
   if (dev_tools_net_log_observer == NULL)
     return;
-  response->devtools_info =
+  response->head.devtools_info =
       dev_tools_net_log_observer->GetResourceInfo(source_id);
 }
 
@@ -297,3 +325,5 @@ int DevToolsNetLogObserver::GetAndResetEncodedDataLength(
   it->second = 0;
   return encoded_data_length;
 }
+
+}  // namespace content

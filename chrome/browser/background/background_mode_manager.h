@@ -1,16 +1,15 @@
-// Copyright (c) 2011 The Chromium Authors. All rights reserved.
+// Copyright (c) 2012 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
 #ifndef CHROME_BROWSER_BACKGROUND_BACKGROUND_MODE_MANAGER_H_
 #define CHROME_BROWSER_BACKGROUND_BACKGROUND_MODE_MANAGER_H_
-#pragma once
 
 #include <map>
 
 #include "base/gtest_prod_util.h"
+#include "base/prefs/public/pref_change_registrar.h"
 #include "chrome/browser/background/background_application_list_model.h"
-#include "chrome/browser/prefs/pref_change_registrar.h"
 #include "chrome/browser/profiles/profile_info_cache_observer.h"
 #include "chrome/browser/profiles/profile_keyed_service.h"
 #include "chrome/browser/status_icons/status_icon.h"
@@ -20,12 +19,15 @@
 
 class Browser;
 class CommandLine;
-class Extension;
 class PrefService;
 class Profile;
 class ProfileInfoCache;
 class StatusIcon;
 class StatusTray;
+
+namespace extensions {
+class Extension;
+}
 
 // BackgroundModeManager is responsible for switching Chrome into and out of
 // "background mode" and for providing UI for the user to exit Chrome when there
@@ -45,7 +47,6 @@ class BackgroundModeManager
     : public content::NotificationObserver,
       public BackgroundApplicationListModel::Observer,
       public ProfileInfoCacheObserver,
-      public ProfileKeyedService,
       public ui::SimpleMenuModel::Delegate {
  public:
   BackgroundModeManager(CommandLine* command_line,
@@ -56,26 +57,26 @@ class BackgroundModeManager
 
   virtual void RegisterProfile(Profile* profile);
 
-  // Returns true if background mode is permanently disabled for this Chrome
-  // session.
-  static bool IsBackgroundModePermanentlyDisabled(
-      const CommandLine* command_line);
-
   static void LaunchBackgroundApplication(Profile* profile,
-                                          const Extension* extension);
+      const extensions::Extension* extension);
 
   // For testing purposes.
   int NumberOfBackgroundModeData();
 
  private:
-  friend class TestBackgroundModeManager;
+  friend class AppBackgroundPageApiTest;
   friend class BackgroundModeManagerTest;
+  friend class TestBackgroundModeManager;
   FRIEND_TEST_ALL_PREFIXES(BackgroundModeManagerTest,
                            BackgroundAppLoadUnload);
   FRIEND_TEST_ALL_PREFIXES(BackgroundModeManagerTest,
                            BackgroundLaunchOnStartup);
   FRIEND_TEST_ALL_PREFIXES(BackgroundModeManagerTest,
                            BackgroundAppInstallUninstallWhileDisabled);
+  FRIEND_TEST_ALL_PREFIXES(BackgroundModeManagerTest,
+                           BackgroundModeDisabledPreventsKeepAliveOnStartup);
+  FRIEND_TEST_ALL_PREFIXES(BackgroundModeManagerTest,
+                           DisableBackgroundModeUnderTestFlag);
   FRIEND_TEST_ALL_PREFIXES(BackgroundModeManagerTest,
                            EnableAfterBackgroundAppInstall);
   FRIEND_TEST_ALL_PREFIXES(BackgroundModeManagerTest,
@@ -157,8 +158,11 @@ class BackgroundModeManager
                        const content::NotificationSource& source,
                        const content::NotificationDetails& details) OVERRIDE;
 
+  // Called when the kBackgroundModeEnabled preference changes.
+  void OnBackgroundModeEnabledPrefChanged();
+
   // BackgroundApplicationListModel::Observer implementation.
-  virtual void OnApplicationDataChanged(const Extension* extension,
+  virtual void OnApplicationDataChanged(const extensions::Extension* extension,
                                         Profile* profile) OVERRIDE;
   virtual void OnApplicationListChanged(Profile* profile) OVERRIDE;
 
@@ -182,7 +186,7 @@ class BackgroundModeManager
   // Invoked when an extension is installed so we can ensure that
   // launch-on-startup is enabled if appropriate. |extension| can be NULL when
   // called from unit tests.
-  void OnBackgroundAppInstalled(const Extension* extension);
+  void OnBackgroundAppInstalled(const extensions::Extension* extension);
 
   // Called to make sure that our launch-on-startup mode is properly set.
   // (virtual so we can override for tests).
@@ -190,7 +194,7 @@ class BackgroundModeManager
 
   // Invoked when a background app is installed so we can display a
   // platform-specific notification to the user.
-  void DisplayAppInstalledNotification(const Extension* extension);
+  void DisplayAppInstalledNotification(const extensions::Extension* extension);
 
   // Invoked to put Chrome in KeepAlive mode - chrome runs in the background
   // and has a status bar icon.
@@ -243,6 +247,9 @@ class BackgroundModeManager
   // (virtual to allow overriding in tests).
   virtual bool IsBackgroundModePrefEnabled() const;
 
+  // Returns true if background mode is active. Used only by tests.
+  bool IsBackgroundModeActiveForTest();
+
   // Turns off background mode if it's currently enabled.
   void DisableBackgroundMode();
 
@@ -255,6 +262,9 @@ class BackgroundModeManager
 
   // Returns the number of background apps for a profile.
   virtual int GetBackgroundAppCountForProfile(Profile* const profile) const;
+
+  // Returns true if we should be in background mode.
+  bool ShouldBeInBackgroundMode() const;
 
   // Reference to the profile info cache. It is used to update the background
   // app status of profiles when they open/close background apps.

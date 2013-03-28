@@ -20,7 +20,6 @@
 
 #ifndef BASE_HASH_TABLES_H_
 #define BASE_HASH_TABLES_H_
-#pragma once
 
 #include "build/build_config.h"
 
@@ -61,11 +60,6 @@
 #define __DEPRECATED CHROME_OLD__DEPRECATED
 #undef CHROME_OLD__DEPRECATED
 #endif
-
-namespace base {
-using BASE_HASH_NAMESPACE::hash_map;
-using BASE_HASH_NAMESPACE::hash_set;
-}  // namespace base
 
 namespace BASE_HASH_NAMESPACE {
 
@@ -119,6 +113,8 @@ DEFINE_STRING_HASH(string16);
 
 namespace base {
 using BASE_HASH_NAMESPACE::hash_map;
+using BASE_HASH_NAMESPACE::hash_multimap;
+using BASE_HASH_NAMESPACE::hash_multiset;
 using BASE_HASH_NAMESPACE::hash_set;
 }
 

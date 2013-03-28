@@ -4,15 +4,16 @@
 
 #ifndef CHROME_BROWSER_EXTENSIONS_BROWSER_ACTION_TEST_UTIL_H_
 #define CHROME_BROWSER_EXTENSIONS_BROWSER_ACTION_TEST_UTIL_H_
-#pragma once
 
 #include <string>
 
 #include "build/build_config.h"
 
 class Browser;
+class ExtensionAction;
 
 namespace gfx {
+class Image;
 class Rect;
 class Size;
 }  // namespace gfx
@@ -27,15 +28,18 @@ class BrowserActionTestUtil {
   // Returns the number of browser action currently visible.
   int VisibleBrowserActions();
 
-#if defined(TOOLKIT_VIEWS) && defined(UNIT_TEST)
-  // Waits for a browser action at |index| to get updated.
-  void WaitForBrowserActionUpdated(int index);
+#if defined(TOOLKIT_VIEWS)
+  // Returns the ExtensionAction for the given index.
+  ExtensionAction* GetExtensionAction(int index);
 #endif
 
   // Returns whether the browser action at |index| has a non-null icon. Note
   // that the icon is loaded asynchronously, in which case you can wait for it
   // to load by calling WaitForBrowserActionUpdated.
   bool HasIcon(int index);
+
+  // Returns icon for the browser action at |index|.
+  gfx::Image GetIcon(int index);
 
   // Simulates a user click on the browser action button at |index|.
   void Press(int index);

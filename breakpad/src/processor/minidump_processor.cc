@@ -36,6 +36,7 @@
 #include "google_breakpad/processor/minidump.h"
 #include "google_breakpad/processor/process_state.h"
 #include "google_breakpad/processor/exploitability.h"
+#include "google_breakpad/processor/stack_frame_symbolizer.h"
 #include "processor/logging.h"
 #include "processor/scoped_ptr.h"
 #include "processor/stackwalker_x86.h"
@@ -44,18 +45,29 @@ namespace google_breakpad {
 
 MinidumpProcessor::MinidumpProcessor(SymbolSupplier *supplier,
                                      SourceLineResolverInterface *resolver)
-    : supplier_(supplier), resolver_(resolver),
+    : frame_symbolizer_(new StackFrameSymbolizer(supplier, resolver)),
+      own_frame_symbolizer_(true),
       enable_exploitability_(false) {
 }
 
 MinidumpProcessor::MinidumpProcessor(SymbolSupplier *supplier,
                                      SourceLineResolverInterface *resolver,
                                      bool enable_exploitability)
-    : supplier_(supplier), resolver_(resolver),
+    : frame_symbolizer_(new StackFrameSymbolizer(supplier, resolver)),
+      own_frame_symbolizer_(true),
       enable_exploitability_(enable_exploitability) {
 }
 
+MinidumpProcessor::MinidumpProcessor(StackFrameSymbolizer *frame_symbolizer,
+                                     bool enable_exploitability)
+    : frame_symbolizer_(frame_symbolizer),
+      own_frame_symbolizer_(false),
+      enable_exploitability_(enable_exploitability) {
+  assert(frame_symbolizer_);
+}
+
 MinidumpProcessor::~MinidumpProcessor() {
+  if (own_frame_symbolizer_) delete frame_symbolizer_;
 }
 
 ProcessResult MinidumpProcessor::Process(
@@ -126,6 +138,10 @@ ProcessResult MinidumpProcessor::Process(
   bool interrupted = false;
   bool found_requesting_thread = false;
   unsigned int thread_count = threads->thread_count();
+
+  // Reset frame_symbolizer_ at the beginning of stackwalk for each minidump.
+  frame_symbolizer_->Reset();
+
   for (unsigned int thread_index = 0;
        thread_index < thread_count;
        ++thread_index) {
@@ -192,7 +208,6 @@ ProcessResult MinidumpProcessor::Process(
     MinidumpMemoryRegion *thread_memory = thread->GetMemory();
     if (!thread_memory) {
       BPLOG(ERROR) << "No memory region for " << thread_string;
-      return PROCESS_ERROR_NO_MEMORY_FOR_THREAD;
     }
 
     // Use process_state->modules_ instead of module_list, because the
@@ -208,18 +223,20 @@ ProcessResult MinidumpProcessor::Process(
                                        context,
                                        thread_memory,
                                        process_state->modules_,
-                                       supplier_,
-                                       resolver_));
-    if (!stackwalker.get()) {
-      BPLOG(ERROR) << "No stackwalker for " << thread_string;
-      return PROCESS_ERROR_NO_STACKWALKER_FOR_THREAD;
-    }
+                                       frame_symbolizer_));
 
     scoped_ptr<CallStack> stack(new CallStack());
-    if (!stackwalker->Walk(stack.get())) {
-      BPLOG(INFO) << "Stackwalker interrupt (missing symbols?) at " <<
+    if (stackwalker.get()) {
+      if (!stackwalker->Walk(stack.get())) {
+        BPLOG(INFO) << "Stackwalker interrupt (missing symbols?) at " <<
           thread_string;
-      interrupted = true;
+        interrupted = true;
+      }
+    } else {
+      // Threads with missing CPU contexts will hit this, but
+      // don't abort processing the rest of the dump just for
+      // one bad thread.
+      BPLOG(ERROR) << "No stackwalker for " << thread_string;
     }
     process_state->threads_.push_back(stack.release());
     process_state->thread_memory_regions_.push_back(thread_memory);
@@ -401,6 +418,11 @@ bool MinidumpProcessor::GetOSInfo(Minidump *dump, SystemInfo *info) {
       break;
     }
 
+    case MD_OS_ANDROID: {
+      info->os = "Android";
+      break;
+    }
+
     default: {
       // Assign the numeric platform ID into the OS string.
       char os_string[11];
@@ -479,26 +501,61 @@ string MinidumpProcessor::GetCrashReason(Minidump *dump, u_int64_t *address) {
             case MD_EXCEPTION_CODE_MAC_MEMORY_ERROR:
               reason.append("KERN_MEMORY_ERROR");
               break;
-            // These are ppc only but shouldn't be a problem as they're
-            // unused on x86
-            case MD_EXCEPTION_CODE_MAC_PPC_VM_PROT_READ:
-              reason.append("EXC_PPC_VM_PROT_READ");
-              break;
-            case MD_EXCEPTION_CODE_MAC_PPC_BADSPACE:
-              reason.append("EXC_PPC_BADSPACE");
-              break;
-            case MD_EXCEPTION_CODE_MAC_PPC_UNALIGNED:
-              reason.append("EXC_PPC_UNALIGNED");
-              break;
             default:
-              reason.append(flags_string);
-              BPLOG(INFO) << "Unknown exception reason " << reason;
+              // arm and ppc overlap
+              if (raw_system_info->processor_architecture ==
+                  MD_CPU_ARCHITECTURE_ARM) {
+                switch (exception_flags) {
+                  case MD_EXCEPTION_CODE_MAC_ARM_DA_ALIGN:
+                    reason.append("EXC_ARM_DA_ALIGN");
+                    break;
+                  case MD_EXCEPTION_CODE_MAC_ARM_DA_DEBUG:
+                    reason.append("EXC_ARM_DA_DEBUG");
+                    break;
+                  default:
+                    reason.append(flags_string);
+                    BPLOG(INFO) << "Unknown exception reason " << reason;
+                    break;
+                }
+              } else if (raw_system_info->processor_architecture ==
+                         MD_CPU_ARCHITECTURE_PPC) {
+                switch (exception_flags) {
+                  case MD_EXCEPTION_CODE_MAC_PPC_VM_PROT_READ:
+                    reason.append("EXC_PPC_VM_PROT_READ");
+                    break;
+                  case MD_EXCEPTION_CODE_MAC_PPC_BADSPACE:
+                    reason.append("EXC_PPC_BADSPACE");
+                    break;
+                  case MD_EXCEPTION_CODE_MAC_PPC_UNALIGNED:
+                    reason.append("EXC_PPC_UNALIGNED");
+                    break;
+                  default:
+                    reason.append(flags_string);
+                    BPLOG(INFO) << "Unknown exception reason " << reason;
+                    break;
+                }
+              } else {
+                reason.append(flags_string);
+                BPLOG(INFO) << "Unknown exception reason " << reason;
+              }
               break;
           }
           break;
         case MD_EXCEPTION_MAC_BAD_INSTRUCTION:
           reason = "EXC_BAD_INSTRUCTION / ";
           switch (raw_system_info->processor_architecture) {
+            case MD_CPU_ARCHITECTURE_ARM: {
+              switch (exception_flags) {
+                case MD_EXCEPTION_CODE_MAC_ARM_UNDEFINED:
+                  reason.append("EXC_ARM_UNDEFINED");
+                  break;
+                default:
+                  reason.append(flags_string);
+                  BPLOG(INFO) << "Unknown exception reason " << reason;
+                  break;
+              }
+              break;
+            }
             case MD_CPU_ARCHITECTURE_PPC: {
               switch (exception_flags) {
                 case MD_EXCEPTION_CODE_MAC_PPC_INVALID_SYSCALL:
@@ -643,6 +700,12 @@ string MinidumpProcessor::GetCrashReason(Minidump *dump, u_int64_t *address) {
         case MD_EXCEPTION_MAC_SOFTWARE:
           reason = "EXC_SOFTWARE / ";
           switch (exception_flags) {
+            case MD_EXCEPTION_CODE_MAC_ABORT:
+              reason.append("SIGABRT");
+              break;
+            case MD_EXCEPTION_CODE_MAC_NS_EXCEPTION:
+              reason.append("UNCAUGHT_NS_EXCEPTION");
+              break;
             // These are ppc only but shouldn't be a problem as they're
             // unused on x86
             case MD_EXCEPTION_CODE_MAC_PPC_TRAP:
@@ -660,6 +723,24 @@ string MinidumpProcessor::GetCrashReason(Minidump *dump, u_int64_t *address) {
         case MD_EXCEPTION_MAC_BREAKPOINT:
           reason = "EXC_BREAKPOINT / ";
           switch (raw_system_info->processor_architecture) {
+            case MD_CPU_ARCHITECTURE_ARM: {
+              switch (exception_flags) {
+                case MD_EXCEPTION_CODE_MAC_ARM_DA_ALIGN:
+                  reason.append("EXC_ARM_DA_ALIGN");
+                  break;
+                case MD_EXCEPTION_CODE_MAC_ARM_DA_DEBUG:
+                  reason.append("EXC_ARM_DA_DEBUG");
+                  break;
+                case MD_EXCEPTION_CODE_MAC_ARM_BREAKPOINT:
+                  reason.append("EXC_ARM_BREAKPOINT");
+                  break;
+                default:
+                  reason.append(flags_string);
+                  BPLOG(INFO) << "Unknown exception reason " << reason;
+                  break;
+              }
+              break;
+            }
             case MD_CPU_ARCHITECTURE_PPC: {
               switch (exception_flags) {
                 case MD_EXCEPTION_CODE_MAC_PPC_BREAKPOINT:
@@ -832,6 +913,7 @@ string MinidumpProcessor::GetCrashReason(Minidump *dump, u_int64_t *address) {
       break;
     }
 
+    case MD_OS_ANDROID:
     case MD_OS_LINUX: {
       switch (exception_code) {
         case MD_EXCEPTION_CODE_LIN_SIGHUP:
@@ -926,6 +1008,9 @@ string MinidumpProcessor::GetCrashReason(Minidump *dump, u_int64_t *address) {
           break;
         case MD_EXCEPTION_CODE_LIN_SIGSYS:
           reason = "SIGSYS";
+          break;
+      case MD_EXCEPTION_CODE_LIN_DUMP_REQUESTED:
+          reason = "DUMP_REQUESTED";
           break;
         default:
           BPLOG(INFO) << "Unknown exception reason " << reason;
@@ -1092,7 +1177,8 @@ string MinidumpProcessor::GetAssertion(Minidump *dump) {
     break;
   default: {
     char assertion_type[32];
-    sprintf(assertion_type, "0x%08x", raw_assertion->type);
+    snprintf(assertion_type, sizeof(assertion_type),
+             "0x%08x", raw_assertion->type);
     assertion_string = "Unknown assertion type ";
     assertion_string += assertion_type;
     break;
@@ -1116,7 +1202,7 @@ string MinidumpProcessor::GetAssertion(Minidump *dump) {
 
   if (raw_assertion->line != 0) {
     char assertion_line[32];
-    sprintf(assertion_line, "%u", raw_assertion->line);
+    snprintf(assertion_line, sizeof(assertion_line), "%u", raw_assertion->line);
     assertion_string.append(" at line ");
     assertion_string.append(assertion_line);
   }

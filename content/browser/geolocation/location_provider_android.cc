@@ -1,12 +1,14 @@
-// Copyright (c) 2010 The Chromium Authors. All rights reserved.
+// Copyright (c) 2012 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
 #include "content/browser/geolocation/location_provider_android.h"
 
 #include "base/time.h"
-#include "content/browser/geolocation/android_location_api_adapter.h"
-#include "content/common/geoposition.h"
+#include "content/browser/geolocation/location_api_adapter_android.h"
+#include "content/public/common/geoposition.h"
+
+namespace content {
 
 // LocationProviderAndroid
 LocationProviderAndroid::LocationProviderAndroid() {
@@ -38,11 +40,12 @@ void LocationProviderAndroid::UpdatePosition() {
   // Nothing to do here, android framework will call us back on new position.
 }
 
-void LocationProviderAndroid::OnPermissionGranted(
-  const GURL& requesting_frame) {
+void LocationProviderAndroid::OnPermissionGranted() {
   // Nothing to do here.
 }
 
 LocationProviderBase* NewSystemLocationProvider() {
   return new LocationProviderAndroid;
 }
+
+}  // namespace content

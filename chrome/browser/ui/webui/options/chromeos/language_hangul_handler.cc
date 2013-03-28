@@ -1,4 +1,4 @@
-// Copyright (c) 2011 The Chromium Authors. All rights reserved.
+// Copyright (c) 2012 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -11,6 +11,7 @@
 #include "ui/base/l10n/l10n_util.h"
 
 namespace chromeos {
+namespace options {
 
 LanguageHangulHandler::LanguageHangulHandler() {
 }
@@ -35,13 +36,14 @@ ListValue* LanguageHangulHandler::GetKeyboardLayoutList() {
   ListValue* keyboard_layout_list = new ListValue();
   for (size_t i = 0; i < language_prefs::kNumHangulKeyboardNameIDPairs; ++i) {
     ListValue* option = new ListValue();
-    option->Append(Value::CreateStringValue(
+    option->Append(new base::StringValue(
         language_prefs::kHangulKeyboardNameIDPairs[i].keyboard_id));
-    option->Append(Value::CreateStringValue(l10n_util::GetStringUTF16(
+    option->Append(new base::StringValue(l10n_util::GetStringUTF16(
         language_prefs::kHangulKeyboardNameIDPairs[i].message_id)));
     keyboard_layout_list->Append(option);
   }
   return keyboard_layout_list;
 }
 
+}  // namespace options
 }  // namespace chromeos

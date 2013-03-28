@@ -1,19 +1,20 @@
-// Copyright (c) 2011 The Chromium Authors. All rights reserved.
+// Copyright (c) 2012 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
 #include "chrome/browser/ui/views/infobars/link_infobar.h"
 
 #include "base/logging.h"
-#include "chrome/browser/tab_contents/link_infobar_delegate.h"
-#include "chrome/browser/ui/views/event_utils.h"
+#include "chrome/browser/api/infobars/link_infobar_delegate.h"
+#include "chrome/browser/event_disposition.h"
+#include "chrome/browser/infobars/infobar_tab_helper.h"
 #include "ui/views/controls/label.h"
 #include "ui/views/controls/link.h"
 
 // LinkInfoBarDelegate --------------------------------------------------------
 
-InfoBar* LinkInfoBarDelegate::CreateInfoBar(InfoBarTabHelper* owner) {
-  return new LinkInfoBar(owner, this);
+InfoBar* LinkInfoBarDelegate::CreateInfoBar(InfoBarService* owner) {
+  return new LinkInfoBar(static_cast<InfoBarTabHelper*>(owner), this);
 }
 
 // LinkInfoBar ----------------------------------------------------------------
@@ -77,7 +78,7 @@ void LinkInfoBar::LinkClicked(views::Link* source, int event_flags) {
   DCHECK(link_ != NULL);
   DCHECK_EQ(link_, source);
   if (GetDelegate()->LinkClicked(
-      event_utils::DispositionFromEventFlags(event_flags)))
+      chrome::DispositionFromEventFlags(event_flags)))
     RemoveSelf();
 }
 

@@ -1,5 +1,5 @@
-#!/usr/bin/python2.4
-# Copyright (c) 2011 The Chromium Authors. All rights reserved.
+#!/usr/bin/env python
+# Copyright (c) 2012 The Chromium Authors. All rights reserved.
 # Use of this source code is governed by a BSD-style license that can be
 # found in the LICENSE file.
 
@@ -11,15 +11,13 @@ import sys
 import types
 from xml.sax import saxutils
 
+from grit import clique
 from grit import exception
 from grit import util
-from grit import clique
-import grit.format.interface
 
 
-class Node(grit.format.interface.ItemFormatter):
-  '''An item in the tree that has children.  Also implements the
-  ItemFormatter interface to allow formatting a node as a GRD document.'''
+class Node(object):
+  '''An item in the tree that has children.'''
 
   # Valid content types that can be returned by _ContentType()
   _CONTENT_TYPE_NONE = 0   # No CDATA content but may have children
@@ -39,18 +37,40 @@ class Node(grit.format.interface.ItemFormatter):
     self.parent = None        # Our parent unless we are the root element.
     self.uberclique = None    # Allows overriding uberclique for parts of tree
 
-  def __iter__(self):
-    '''An in-order iteration through the tree that this node is the
-    root of.'''
-    return self.inorder()
+  # This context handler allows you to write "with node:" and get a
+  # line identifying the offending node if an exception escapes from the body
+  # of the with statement.
+  def __enter__(self):
+    return self
 
-  def inorder(self):
+  def __exit__(self, exc_type, exc_value, traceback):
+    if exc_type is not None:
+      print u'Error processing node %s' % unicode(self)
+
+  def __iter__(self):
+    '''A preorder iteration through the tree that this node is the root of.'''
+    return self.Preorder()
+
+  def Preorder(self):
     '''Generator that generates first this node, then the same generator for
     any child nodes.'''
     yield self
     for child in self.children:
-      for iterchild in child.inorder():
+      for iterchild in child.Preorder():
         yield iterchild
+
+  def ActiveChildren(self):
+    '''Returns the children of this node that should be included in the current
+    configuration. Overridden by <if>.'''
+    return [node for node in self.children if not node.WhitelistMarkedAsSkip()]
+
+  def ActiveDescendants(self):
+    '''Yields the current node and all descendants that should be included in
+    the current configuration, in preorder.'''
+    yield self
+    for child in self.ActiveChildren():
+      for descendant in child.ActiveDescendants():
+        yield descendant
 
   def GetRoot(self):
     '''Returns the root Node in the tree this Node belongs to.'''
@@ -89,10 +109,7 @@ class Node(grit.format.interface.ItemFormatter):
     assert isinstance(child, Node)
     if (not self._IsValidChild(child) or
         self._ContentType() == self._CONTENT_TYPE_CDATA):
-      if child.parent:
-        explanation = 'child %s of parent %s' % (child.name, child.parent.name)
-      else:
-        explanation = 'node %s with no parent' % child.name
+      explanation = 'invalid child %s for parent %s' % (str(child), self.name)
       raise exception.UnexpectedChild(explanation)
     self.children.append(child)
     self.mixed_content.append(child)
@@ -212,21 +229,14 @@ class Node(grit.format.interface.ItemFormatter):
   def GetCdata(self):
     '''Returns all CDATA of this element, concatenated into a single
     string.  Note that this ignores any elements embedded in CDATA.'''
-    return ''.join(filter(lambda c: isinstance(c, types.StringTypes),
-                          self.mixed_content))
+    return ''.join([c for c in self.mixed_content
+                    if isinstance(c, types.StringTypes)])
 
   def __unicode__(self):
     '''Returns this node and all nodes below it as an XML document in a Unicode
     string.'''
     header = u'<?xml version="1.0" encoding="UTF-8"?>\n'
     return header + self.FormatXml()
-
-  # Compliance with ItemFormatter interface.
-  def Format(self, item, lang_re = None, begin_item=True):
-    if not begin_item:
-      return ''
-    else:
-      return item.FormatXml()
 
   def FormatXml(self, indent = u'', one_line = False):
     '''Returns this node and all nodes below it as an XML
@@ -242,14 +252,12 @@ class Node(grit.format.interface.ItemFormatter):
     inside_content = self.ContentsAsXml(indent, content_one_line)
 
     # Then the attributes for this node.
-    attribs = u' '
-    for (attrib, value) in self.attrs.iteritems():
+    attribs = u''
+    default_attribs = self.DefaultAttributes()
+    for attrib, value in sorted(self.attrs.items()):
       # Only print an attribute if it is other than the default value.
-      if (not self.DefaultAttributes().has_key(attrib) or
-          value != self.DefaultAttributes()[attrib]):
-        attribs += u'%s=%s ' % (attrib, saxutils.quoteattr(value))
-    attribs = attribs.rstrip()  # if no attribs, we end up with '', otherwise
-                                # we end up with a space-prefixed string
+      if attrib not in default_attribs or value != default_attribs[attrib]:
+        attribs += u' %s=%s' % (attrib, saxutils.quoteattr(value))
 
     # Finally build the XML for our node and return it
     if len(inside_content) > 0:
@@ -303,53 +311,16 @@ class Node(grit.format.interface.ItemFormatter):
 
     return u''.join(inside_parts)
 
-  def RunGatherers(self, recursive=0, debug=False):
-    '''Runs all gatherers on this object, which may add to the data stored
-    by the object.  If 'recursive' is true, will call RunGatherers() recursively
-    on all child nodes first.  If 'debug' is True, will print out information
-    as it is running each nodes' gatherers.
+  def SubstituteMessages(self, substituter):
+    '''Applies substitutions to all messages in the tree.
 
-    Gatherers for <translations> child nodes will always be run after all other
-    child nodes have been gathered.
-    '''
-    if recursive:
-      process_last = []
-      for child in self.children:
-        if child.name == 'translations':
-          process_last.append(child)
-        else:
-          child.RunGatherers(recursive=recursive, debug=debug)
-      for child in process_last:
-        child.RunGatherers(recursive=recursive, debug=debug)
-
-  def ItemFormatter(self, type):
-    '''Returns an instance of the item formatter for this object of the
-    specified type, or None if not supported.
+    Called as a final step of RunGatherers.
 
     Args:
-      type: 'rc-header'
-
-    Return:
-      (object RcHeaderItemFormatter)
+      substituter: a grit.util.Substituter object.
     '''
-    if type == 'xml':
-      return self
-    else:
-      return None
-
-  def SatisfiesOutputCondition(self):
-    '''Returns true if this node is either not a child of an <if> element
-    or if it is a child of an <if> element and the conditions for it being
-    output are satisfied.
-
-    Used to determine whether to return item formatters for formats that
-    obey conditional output of resources (e.g. the RC formatters).
-    '''
-    from grit.node import misc
-    if not self.parent or not isinstance(self.parent, misc.IfNode):
-      return True
-    else:
-      return self.parent.IsConditionSatisfied()
+    for child in self.children:
+      child.SubstituteMessages(substituter)
 
   def _IsValidChild(self, child):
     '''Returns true if 'child' is a valid child of this node.
@@ -403,18 +374,14 @@ class Node(grit.format.interface.ItemFormatter):
       'resource'
     '''
     return util.normpath(os.path.join(self.GetRoot().GetBaseDir(),
-                                      path_from_basedir))
+                                      os.path.expandvars(path_from_basedir)))
 
-  def FilenameToOpen(self):
-    '''Returns a path, either absolute or relative to the current working
-    directory, that points to the file the node refers to.  This is only valid
-    for nodes that have a 'file' or 'path' attribute.  Note that the attribute
-    is a path to the file relative to the 'base-dir' of the .grd file, whereas
-    this function returns a path that can be used to open the file.'''
-    file_attribute = 'file'
-    if not file_attribute in self.attrs:
-      file_attribute = 'path'
-    return self.ToRealPath(self.attrs[file_attribute])
+  def GetInputPath(self):
+    '''Returns a path, relative to the base directory set for the grd file,
+    that points to the file the node refers to.
+    '''
+    # This implementation works for most nodes that have an input file.
+    return self.attrs['file']
 
   def UberClique(self):
     '''Returns the uberclique that should be used for messages originating in
@@ -448,13 +415,24 @@ class Node(grit.format.interface.ItemFormatter):
         return node
     return None
 
+  def GetChildrenOfType(self, type):
+    '''Returns a list of all subnodes (recursing to all leaves) of this node
+    that are of the indicated type (or tuple of types).
+
+    Args:
+      type: A type you could use with isinstance().
+
+    Return:
+      A list, possibly empty.
+    '''
+    return [child for child in self if isinstance(child, type)]
+
   def GetTextualIds(self):
-    '''Returns the textual ids of this node, if it has some.
-    Otherwise it just returns None.
+    '''Returns a list of the textual ids of this node.
     '''
     if 'name' in self.attrs:
       return [self.attrs['name']]
-    return None
+    return []
 
   def EvaluateCondition(self, expr):
     '''Returns true if and only if the Python expression 'expr' evaluates
@@ -462,33 +440,34 @@ class Node(grit.format.interface.ItemFormatter):
 
     The expression is given a few local variables:
       - 'lang' is the language currently being output
-      - 'defs' is a map of C preprocessor-style define names to their values
+           (the 'lang' attribute of the <output> element).
+      - 'context' is the current output context
+           (the 'context' attribute of the <output> element).
+      - 'defs' is a map of C preprocessor-style symbol names to their values.
       - 'os' is the current platform (likely 'linux2', 'win32' or 'darwin').
-      - 'pp_ifdef(define)' which behaves just like the C preprocessors #ifdef,
-        i.e. it is shorthand for "define in defs"
-      - 'pp_if(define)' which behaves just like the C preprocessor's #if, i.e.
-        it is shorthand for "define in defs and defs[define]".
+      - 'pp_ifdef(symbol)' is a shorthand for "symbol in defs".
+      - 'pp_if(symbol)' is a shorthand for "symbol in defs and defs[symbol]".
+      - 'is_linux', 'is_macosx', 'is_win', 'is_posix' are true if 'os'
+           matches the given platform.
     '''
     root = self.GetRoot()
-    lang = ''
-    defs = {}
-    def pp_ifdef(define):
-      return define in defs
-    def pp_if(define):
-      return define in defs and defs[define]
-    if hasattr(root, 'output_language'):
-      lang = root.output_language
-    if hasattr(root, 'defines'):
-      defs = root.defines
+    lang = getattr(root, 'output_language', '')
+    context = getattr(root, 'output_context', '')
+    defs = getattr(root, 'defines', {})
+    def pp_ifdef(symbol):
+      return symbol in defs
+    def pp_if(symbol):
+      return symbol in defs and defs[symbol]
     variable_map = {
         'lang' : lang,
+        'context' : context,
         'defs' : defs,
         'os': sys.platform,
         'is_linux': sys.platform.startswith('linux'),
         'is_macosx': sys.platform == 'darwin',
         'is_win': sys.platform in ('cygwin', 'win32'),
         'is_posix': (sys.platform in ('darwin', 'linux2', 'linux3', 'sunos5')
-                     or sys.platform.find('bsd') != -1),
+                     or 'bsd' in sys.platform),
         'pp_ifdef' : pp_ifdef,
         'pp_if' : pp_if,
     }
@@ -506,29 +485,38 @@ class Node(grit.format.interface.ItemFormatter):
           node.GetLang() not in languages):
         node.DisableLoading()
 
+  def FindBooleanAttribute(self, attr, default, skip_self):
+    '''Searches all ancestors of the current node for the nearest enclosing
+    definition of the given boolean attribute.
+
+    Args:
+      attr: 'fallback_to_english'
+      default: What to return if no node defines the attribute.
+      skip_self: Don't check the current node, only its parents.
+    '''
+    p = self.parent if skip_self else self
+    while p:
+      value = p.attrs.get(attr, 'default').lower()
+      if value != 'default':
+        return (value == 'true')
+      p = p.parent
+    return default
+
   def PseudoIsAllowed(self):
     '''Returns true if this node is allowed to use pseudo-translations.  This
     is true by default, unless this node is within a <release> node that has
     the allow_pseudo attribute set to false.
     '''
-    p = self.parent
-    while p:
-      if 'allow_pseudo' in p.attrs:
-        return (p.attrs['allow_pseudo'].lower() == 'true')
-      p = p.parent
-    return True
+    return self.FindBooleanAttribute('allow_pseudo',
+                                     default=True, skip_self=True)
 
   def ShouldFallbackToEnglish(self):
     '''Returns true iff this node should fall back to English when
     pseudotranslations are disabled and no translation is available for a
     given message.
     '''
-    p = self.parent
-    while p:
-      if 'fallback_to_english' in p.attrs:
-        return (p.attrs['fallback_to_english'].lower() == 'true')
-      p = p.parent
-    return False
+    return self.FindBooleanAttribute('fallback_to_english',
+                                     default=False, skip_self=True)
 
   def WhitelistMarkedAsSkip(self):
     '''Returns true if the node is marked to be skipped in the output by a
@@ -540,6 +528,10 @@ class Node(grit.format.interface.ItemFormatter):
     '''Sets WhitelistMarkedAsSkip.
     '''
     self._whitelist_marked_as_skip = mark_skipped
+
+  def ExpandVariables(self):
+    '''Whether we need to expand variables on a given node.'''
+    return False
 
 
 class ContentNode(Node):

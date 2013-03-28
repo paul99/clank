@@ -1,4 +1,4 @@
-// Copyright (c) 2011 The Chromium Authors. All rights reserved.
+// Copyright (c) 2012 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -12,15 +12,21 @@
 #include "chrome/common/zip_internal.h"
 #include "chrome/common/zip_reader.h"
 #include "net/base/file_stream.h"
+
+#if defined(USE_SYSTEM_MINIZIP)
+#include <minizip/unzip.h>
+#include <minizip/zip.h>
+#else
 #include "third_party/zlib/contrib/minizip/unzip.h"
 #include "third_party/zlib/contrib/minizip/zip.h"
+#endif
 
 namespace {
 
 bool AddFileToZip(zipFile zip_file, const FilePath& src_dir) {
-  net::FileStream stream;
+  net::FileStream stream(NULL);
   int flags = base::PLATFORM_FILE_OPEN | base::PLATFORM_FILE_READ;
-  if (stream.Open(src_dir, flags) != 0) {
+  if (stream.OpenSync(src_dir, flags) != 0) {
     DLOG(ERROR) << "Could not open stream for path "
                 << src_dir.value();
     return false;
@@ -29,8 +35,7 @@ bool AddFileToZip(zipFile zip_file, const FilePath& src_dir) {
   int num_bytes;
   char buf[zip::internal::kZipBufSize];
   do {
-    num_bytes = stream.Read(buf, zip::internal::kZipBufSize,
-                            net::CompletionCallback());
+    num_bytes = stream.ReadSync(buf, zip::internal::kZipBufSize);
     if (num_bytes > 0) {
       if (ZIP_OK != zipWriteInFileInZip(zip_file, buf, num_bytes)) {
         DLOG(ERROR) << "Could not write data to zip for path "
@@ -131,11 +136,9 @@ bool ZipWithFilterCallback(const FilePath& src_dir, const FilePath& dest_file,
   }
 
   bool success = true;
-  file_util::FileEnumerator file_enumerator(
-      src_dir, true,  // recursive
-      static_cast<file_util::FileEnumerator::FileType>(
-          file_util::FileEnumerator::FILES |
-          file_util::FileEnumerator::DIRECTORIES));
+  file_util::FileEnumerator file_enumerator(src_dir, true /* recursive */,
+      file_util::FileEnumerator::FILES |
+      file_util::FileEnumerator::DIRECTORIES);
   for (FilePath path = file_enumerator.Next(); !path.value().empty();
        path = file_enumerator.Next()) {
     if (!filter_cb.Run(path)) {
@@ -148,7 +151,7 @@ bool ZipWithFilterCallback(const FilePath& src_dir, const FilePath& dest_file,
     }
   }
 
-  if (ZIP_OK != zipClose(zip_file, NULL)) {  // global comment
+  if (ZIP_OK != zipClose(zip_file, NULL)) {
     DLOG(ERROR) << "Error closing zip file " << dest_file.value();
     return false;
   }
@@ -166,5 +169,37 @@ bool Zip(const FilePath& src_dir, const FilePath& dest_file,
         src_dir, dest_file, base::Bind(&ExcludeHiddenFilesFilter));
   }
 }
+
+#if defined(OS_POSIX)
+bool ZipFiles(const FilePath& src_dir,
+              const std::vector<FilePath>& src_relative_paths,
+              int dest_fd) {
+  DCHECK(file_util::DirectoryExists(src_dir));
+  zipFile zip_file = internal::OpenFdForZipping(dest_fd, APPEND_STATUS_CREATE);
+
+  if (!zip_file) {
+    DLOG(ERROR) << "couldn't create file for fd " << dest_fd;
+    return false;
+  }
+
+  bool success = true;
+  for (std::vector<FilePath>::const_iterator iter = src_relative_paths.begin();
+      iter != src_relative_paths.end(); ++iter) {
+    const FilePath& path = src_dir.Append(*iter);
+    if (!AddEntryToZip(zip_file, path, src_dir)) {
+      // TODO(hshi): clean up the partial zip file when error occurs.
+      success = false;
+      break;
+    }
+  }
+
+  if (ZIP_OK != zipClose(zip_file, NULL)) {
+    DLOG(ERROR) << "Error closing zip file for fd " << dest_fd;
+    success = false;
+  }
+
+  return success;
+}
+#endif  // defined(OS_POSIX)
 
 }  // namespace zip

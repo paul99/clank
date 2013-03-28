@@ -4,7 +4,6 @@
 
 #ifndef CHROME_BROWSER_UI_FIND_BAR_FIND_BAR_STATE_FACTORY_H_
 #define CHROME_BROWSER_UI_FIND_BAR_FIND_BAR_STATE_FACTORY_H_
-#pragma once
 
 #include "base/basictypes.h"
 #include "base/memory/singleton.h"
@@ -34,7 +33,7 @@ class FindBarStateFactory : public ProfileKeyedServiceFactory {
   // ProfileKeyedServiceFactory:
   virtual ProfileKeyedService* BuildServiceInstanceFor(
       Profile* profile) const OVERRIDE;
-  virtual bool ServiceHasOwnInstanceInIncognito() OVERRIDE;
+  virtual bool ServiceHasOwnInstanceInIncognito() const OVERRIDE;
 
   DISALLOW_COPY_AND_ASSIGN(FindBarStateFactory);
 };

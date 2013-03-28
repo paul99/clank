@@ -6,12 +6,14 @@
 #define PPAPI_CPP_PRIVATE_FLASH_CLIPBOARD_H_
 
 #include <string>
+#include <vector>
 
 #include "ppapi/c/private/ppb_flash_clipboard.h"
+#include "ppapi/cpp/var.h"
 
 namespace pp {
 
-class Instance;
+class InstanceHandle;
 
 namespace flash {
 
@@ -20,21 +22,29 @@ class Clipboard {
   // Returns true if the required interface is available.
   static bool IsAvailable();
 
+  // Returns a format ID on success or PP_FLASH_CLIPBOARD_FORMAT_INVALID on
+  // failure.
+  static uint32_t RegisterCustomFormat(const InstanceHandle& instance,
+                                       const std::string& format_name);
+
   // Returns true if the given format is available from the given clipboard.
-  static bool IsFormatAvailable(Instance* instance,
+  static bool IsFormatAvailable(const InstanceHandle& instance,
                                 PP_Flash_Clipboard_Type clipboard_type,
-                                PP_Flash_Clipboard_Format format);
+                                uint32_t format);
 
-  // Returns true on success, in which case |text_out| will be filled with plain
-  // text read from the given clipboard.
-  static bool ReadPlainText(Instance* instance,
-                            PP_Flash_Clipboard_Type clipboard_type,
-                            std::string* text_out);
+  // Returns true on success, in which case |out| will be filled with
+  // data read from the given clipboard in the given format.
+  static bool ReadData(const InstanceHandle& instance,
+                       PP_Flash_Clipboard_Type clipboard_type,
+                       uint32_t clipboard_format,
+                       Var* out);
 
-  // Returns true on success (it may fail if |text| is too big).
-  static bool WritePlainText(Instance* instance,
-                             PP_Flash_Clipboard_Type clipboard_type,
-                             const std::string& text);
+  // Returns true on success in which case all of |data| will be written to
+  // the clipboard. Otherwise nothing will be written.
+  static bool WriteData(const InstanceHandle& instance,
+                        PP_Flash_Clipboard_Type clipboard_type,
+                        const std::vector<uint32_t>& formats,
+                        const std::vector<Var>& data_items);
 };
 
 }  // namespace flash

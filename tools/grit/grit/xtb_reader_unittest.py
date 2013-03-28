@@ -1,5 +1,5 @@
-#!/usr/bin/python2.4
-# Copyright (c) 2011 The Chromium Authors. All rights reserved.
+#!/usr/bin/env python
+# Copyright (c) 2012 The Chromium Authors. All rights reserved.
 # Use of this source code is governed by a BSD-style license that can be
 # found in the LICENSE file.
 
@@ -9,16 +9,14 @@
 import os
 import sys
 if __name__ == '__main__':
-  sys.path.append(os.path.join(os.path.dirname(sys.argv[0]), '..'))
+  sys.path.append(os.path.join(os.path.dirname(__file__), '..'))
 
 import StringIO
 import unittest
 
-from grit import xtb_reader
-from grit import clique
-from grit import grd_reader
-from grit import tclib
 from grit import util
+from grit import xtb_reader
+from grit.node import empty
 
 
 class XtbReaderUnittest(unittest.TestCase):
@@ -47,15 +45,16 @@ and another after a blank line.</translation>
     self.failUnless(messages[4][1][7][1] == 'and another after a blank line.')
 
   def testParsingIntoMessages(self):
-    grd = grd_reader.Parse(StringIO.StringIO('''<?xml version="1.0" encoding="UTF-8"?>
+    root = util.ParseGrdForUnittest('''
       <messages>
         <message name="ID_MEGA">Fantastic!</message>
         <message name="ID_HELLO_USER">Hello <ph name="USERNAME">%s<ex>Joi</ex></ph></message>
-      </messages>'''), dir='.', flexible_root=True)
+      </messages>''')
 
-    clique_mega = grd.children[0].GetCliques()[0]
+    msgs, = root.GetChildrenOfType(empty.MessagesNode)
+    clique_mega = msgs.children[0].GetCliques()[0]
     msg_mega = clique_mega.GetMessage()
-    clique_hello_user = grd.children[1].GetCliques()[0]
+    clique_hello_user = msgs.children[1].GetCliques()[0]
     msg_hello_user = clique_hello_user.GetMessage()
 
     xtb_file = StringIO.StringIO('''<?xml version="1.0" encoding="UTF-8"?>
@@ -65,18 +64,18 @@ and another after a blank line.</translation>
         <translation id="%s">Saelir <ph name="USERNAME"/></translation>
       </translationbundle>''' % (msg_mega.GetId(), msg_hello_user.GetId()))
 
-    xtb_reader.Parse(xtb_file, grd.UberClique().GenerateXtbParserCallback('is'))
-    self.failUnless(clique_mega.MessageForLanguage('is').GetRealContent() ==
-                    'Meirihattar!')
-    self.failUnless(clique_hello_user.MessageForLanguage('is').GetRealContent() ==
-                    'Saelir %s')
+    xtb_reader.Parse(xtb_file,
+                     msgs.UberClique().GenerateXtbParserCallback('is'))
+    self.assertEqual('Meirihattar!',
+                     clique_mega.MessageForLanguage('is').GetRealContent())
+    self.failUnless('Saelir %s',
+                    clique_hello_user.MessageForLanguage('is').GetRealContent())
 
   def testParseLargeFile(self):
     def Callback(id, structure):
       pass
-    xtb = file(util.PathFromRoot('grit/testdata/generated_resources_fr.xtb'))
-    xtb_reader.Parse(xtb, Callback)
-    xtb.close()
+    with open(util.PathFromRoot('grit/testdata/generated_resources_fr.xtb')) as xtb:
+      xtb_reader.Parse(xtb, Callback)
 
 
 if __name__ == '__main__':

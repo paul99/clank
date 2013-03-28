@@ -1,4 +1,4 @@
-# Copyright (c) 2011 The Chromium Authors. All rights reserved.
+# Copyright (c) 2012 The Chromium Authors. All rights reserved.
 # Use of this source code is governed by a BSD-style license that can be
 # found in the LICENSE file.
 {
@@ -10,16 +10,16 @@
       }, {  # else: branding!="Chrome"
         'branding_flag': ['-b', 'chromium',],
       }],
-    ]
+    ],
   },
   'inputs': [
     'tools/build/repack_locales.py',
-    '<!@pymod_do_main(repack_locales -p <(OS) -i <(branding_flag) -g <(grit_out_dir) -s <(SHARED_INTERMEDIATE_DIR) -x <(INTERMEDIATE_DIR) <(pseudo_locales))'
+    '<!@pymod_do_main(repack_locales -i -p <(OS) <(branding_flag) -g <(grit_out_dir) -s <(SHARED_INTERMEDIATE_DIR) -x <(INTERMEDIATE_DIR) <(pseudo_locales))'
   ],
   'conditions': [
-    ['OS == "mac"', {
+    ['OS == "mac" or OS == "ios"', {
       'outputs': [
-        '<!@pymod_do_main(repack_locales -p <(OS) -o -g <(grit_out_dir) -s <(SHARED_INTERMEDIATE_DIR) -x <(SHARED_INTERMEDIATE_DIR) <(pseudo_locales))'
+        '<!@pymod_do_main(repack_locales -o -p <(OS) -g <(grit_out_dir) -s <(SHARED_INTERMEDIATE_DIR) -x <(SHARED_INTERMEDIATE_DIR) <(pseudo_locales))'
       ],
     }, { # else 'OS != "mac"'
       'outputs': [

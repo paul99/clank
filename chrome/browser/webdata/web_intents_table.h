@@ -4,7 +4,6 @@
 
 #ifndef CHROME_BROWSER_WEBDATA_WEB_INTENTS_TABLE_H_
 #define CHROME_BROWSER_WEBDATA_WEB_INTENTS_TABLE_H_
-#pragma once
 
 #include <vector>
 
@@ -56,13 +55,21 @@ class WebIntentsTable : public WebDatabaseTable {
   virtual bool Init() OVERRIDE;
   virtual bool IsSyncable() OVERRIDE;
 
+  // Adds "scheme" column to the web_intents and web_intents_defaults tables.
+  bool MigrateToVersion46AddSchemeColumn();
+
   // Adds a web intent service to the WebIntents table.
   // If |service| already exists, replaces it.
   bool SetWebIntentService(const webkit_glue::WebIntentServiceData& service);
 
   // Retrieve all |services| from WebIntents table that match |action|.
-  bool GetWebIntentServices(
+  bool GetWebIntentServicesForAction(
       const string16& action,
+      std::vector<webkit_glue::WebIntentServiceData>* services);
+
+  // Retrieve all |services| from WebIntents table that match |scheme|.
+  bool GetWebIntentServicesForScheme(
+      const string16& scheme,
       std::vector<webkit_glue::WebIntentServiceData>* services);
 
   // Retrieves all |services| from WebIntents table that match |service_url|.
@@ -94,8 +101,11 @@ class WebIntentsTable : public WebDatabaseTable {
   bool SetDefaultService(const DefaultWebIntentService& default_service);
 
   // Removes a default |service| from table - must match the action, type,
-  // and url_prefix parameters exactly.
+  // and url_pattern parameters exactly.
   bool RemoveDefaultService(const DefaultWebIntentService& default_service);
+
+  // Removes all default services associated with |service_url|.
+  bool RemoveServiceDefaults(const GURL& service_url);
 
  private:
   DISALLOW_COPY_AND_ASSIGN(WebIntentsTable);

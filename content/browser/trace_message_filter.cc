@@ -1,22 +1,18 @@
-// Copyright (c) 2011 The Chromium Authors. All rights reserved.
+// Copyright (c) 2012 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
 #include "content/browser/trace_message_filter.h"
 
-#include "content/browser/trace_controller.h"
-#include "content/common/child_process_messages.h"
+#include "content/browser/trace_controller_impl.h"
+#include "content/components/tracing/tracing_messages.h"
 
-using content::BrowserMessageFilter;
-using content::BrowserThread;
+namespace content {
 
 TraceMessageFilter::TraceMessageFilter() :
     has_child_(false),
     is_awaiting_end_ack_(false),
-    is_awaiting_bpf_ack_(false) {
-}
-
-TraceMessageFilter::~TraceMessageFilter() {
+    is_awaiting_buffer_percent_full_ack_(false) {
 }
 
 void TraceMessageFilter::OnFilterAdded(IPC::Channel* channel) {
@@ -29,13 +25,13 @@ void TraceMessageFilter::OnChannelClosing() {
   BrowserMessageFilter::OnChannelClosing();
 
   if (has_child_) {
-    if (is_awaiting_bpf_ack_)
+    if (is_awaiting_end_ack_)
       OnEndTracingAck(std::vector<std::string>());
 
-    if (is_awaiting_end_ack_)
+    if (is_awaiting_buffer_percent_full_ack_)
       OnTraceBufferPercentFullReply(0.0f);
 
-    TraceController::GetInstance()->RemoveFilter(this);
+    TraceControllerImpl::GetInstance()->RemoveFilter(this);
   }
 }
 
@@ -44,14 +40,14 @@ bool TraceMessageFilter::OnMessageReceived(const IPC::Message& message,
   // Always on IO thread (BrowserMessageFilter guarantee).
   bool handled = true;
   IPC_BEGIN_MESSAGE_MAP_EX(TraceMessageFilter, message, *message_was_ok)
-    IPC_MESSAGE_HANDLER(ChildProcessHostMsg_ChildSupportsTracing,
+    IPC_MESSAGE_HANDLER(TracingHostMsg_ChildSupportsTracing,
                         OnChildSupportsTracing)
-    IPC_MESSAGE_HANDLER(ChildProcessHostMsg_EndTracingAck, OnEndTracingAck)
-    IPC_MESSAGE_HANDLER(ChildProcessHostMsg_TraceDataCollected,
+    IPC_MESSAGE_HANDLER(TracingHostMsg_EndTracingAck, OnEndTracingAck)
+    IPC_MESSAGE_HANDLER(TracingHostMsg_TraceDataCollected,
                         OnTraceDataCollected)
-    IPC_MESSAGE_HANDLER(ChildProcessHostMsg_TraceBufferFull,
-                        OnTraceBufferFull)
-    IPC_MESSAGE_HANDLER(ChildProcessHostMsg_TraceBufferPercentFullReply,
+    IPC_MESSAGE_HANDLER(TracingHostMsg_TraceNotification,
+                        OnTraceNotification)
+    IPC_MESSAGE_HANDLER(TracingHostMsg_TraceBufferPercentFullReply,
                         OnTraceBufferPercentFullReply)
     IPC_MESSAGE_UNHANDLED(handled = false)
   IPC_END_MESSAGE_MAP_EX()
@@ -62,27 +58,39 @@ void TraceMessageFilter::SendBeginTracing(
     const std::vector<std::string>& included_categories,
     const std::vector<std::string>& excluded_categories) {
   DCHECK(BrowserThread::CurrentlyOn(BrowserThread::UI));
-  Send(new ChildProcessMsg_BeginTracing(included_categories,
-                                        excluded_categories));
+  Send(new TracingMsg_BeginTracing(included_categories,
+                                   excluded_categories,
+                                   base::TimeTicks::NowFromSystemTraceTime()));
 }
 
 void TraceMessageFilter::SendEndTracing() {
   DCHECK(BrowserThread::CurrentlyOn(BrowserThread::UI));
   DCHECK(!is_awaiting_end_ack_);
   is_awaiting_end_ack_ = true;
-  Send(new ChildProcessMsg_EndTracing);
+  Send(new TracingMsg_EndTracing);
 }
 
 void TraceMessageFilter::SendGetTraceBufferPercentFull() {
   DCHECK(BrowserThread::CurrentlyOn(BrowserThread::UI));
-  DCHECK(!is_awaiting_bpf_ack_);
-  is_awaiting_bpf_ack_ = true;
-  Send(new ChildProcessMsg_GetTraceBufferPercentFull);
+  DCHECK(!is_awaiting_buffer_percent_full_ack_);
+  is_awaiting_buffer_percent_full_ack_ = true;
+  Send(new TracingMsg_GetTraceBufferPercentFull);
 }
+
+void TraceMessageFilter::SendSetWatchEvent(const std::string& category_name,
+                                           const std::string& event_name) {
+  Send(new TracingMsg_SetWatchEvent(category_name, event_name));
+}
+
+void TraceMessageFilter::SendCancelWatchEvent() {
+  Send(new TracingMsg_CancelWatchEvent);
+}
+
+TraceMessageFilter::~TraceMessageFilter() {}
 
 void TraceMessageFilter::OnChildSupportsTracing() {
   has_child_ = true;
-  TraceController::GetInstance()->AddFilter(this);
+  TraceControllerImpl::GetInstance()->AddFilter(this);
 }
 
 void TraceMessageFilter::OnEndTracingAck(
@@ -91,24 +99,30 @@ void TraceMessageFilter::OnEndTracingAck(
   // child process is compromised.
   if (is_awaiting_end_ack_) {
     is_awaiting_end_ack_ = false;
-    TraceController::GetInstance()->OnEndTracingAck(known_categories);
+    TraceControllerImpl::GetInstance()->OnEndTracingAck(known_categories);
+  } else {
+    NOTREACHED();
   }
 }
 
 void TraceMessageFilter::OnTraceDataCollected(const std::string& data) {
-  TraceController::GetInstance()->OnTraceDataCollected(
-      make_scoped_refptr(new base::debug::TraceLog::RefCountedString(data)));
+  scoped_refptr<base::RefCountedString> data_ptr(new base::RefCountedString());
+  data_ptr->data() = data;
+  TraceControllerImpl::GetInstance()->OnTraceDataCollected(data_ptr);
 }
 
-void TraceMessageFilter::OnTraceBufferFull() {
-  TraceController::GetInstance()->OnTraceBufferFull();
+void TraceMessageFilter::OnTraceNotification(int notification) {
+  TraceControllerImpl::GetInstance()->OnTraceNotification(notification);
 }
 
 void TraceMessageFilter::OnTraceBufferPercentFullReply(float percent_full) {
-  if (is_awaiting_bpf_ack_) {
-    is_awaiting_bpf_ack_ = false;
-    TraceController::GetInstance()->OnTraceBufferPercentFullReply(
+  if (is_awaiting_buffer_percent_full_ack_) {
+    is_awaiting_buffer_percent_full_ack_ = false;
+    TraceControllerImpl::GetInstance()->OnTraceBufferPercentFullReply(
         percent_full);
+  } else {
+    NOTREACHED();
   }
 }
 
+}  // namespace content

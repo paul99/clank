@@ -1,4 +1,4 @@
-// Copyright (c) 2011 The Chromium Authors. All rights reserved.
+// Copyright (c) 2012 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -11,13 +11,16 @@
 #include "base/bind_helpers.h"
 #include "base/logging.h"
 #include "base/md5.h"
+#include "base/memory/ref_counted_memory.h"
+#include "base/message_loop_proxy.h"
 #include "base/string_util.h"
+#include "base/task_runner.h"
 #include "base/utf_string_conversions.h"
 #include "base/values.h"
 #include "chrome/browser/history/history_backend.h"
 #include "chrome/browser/history/history_notifications.h"
+#include "chrome/browser/history/history_service_factory.h"
 #include "chrome/browser/history/page_usage_data.h"
-#include "chrome/browser/history/top_sites_backend.h"
 #include "chrome/browser/history/top_sites_cache.h"
 #include "chrome/browser/prefs/pref_service.h"
 #include "chrome/browser/prefs/scoped_user_pref_update.h"
@@ -38,13 +41,29 @@
 #include "grit/locale_settings.h"
 #include "grit/theme_resources.h"
 #include "ui/base/l10n/l10n_util.h"
+#include "ui/base/layout.h"
 #include "ui/base/resource/resource_bundle.h"
 #include "ui/gfx/image/image_util.h"
 
+using base::DictionaryValue;
 using content::BrowserThread;
 using content::NavigationController;
 
 namespace history {
+
+namespace {
+
+void RunOrPostGetMostVisitedURLsCallback(
+    base::TaskRunner* task_runner,
+    const TopSites::GetMostVisitedURLsCallback& callback,
+    const MostVisitedURLList& urls) {
+  if (task_runner->RunsTasksOnCurrentThread())
+    callback.Run(urls);
+  else
+    task_runner->PostTask(FROM_HERE, base::Bind(callback, urls));
+}
+
+}  // namespace
 
 // How many top sites to store in the cache.
 static const size_t kTopSitesNumber = 20;
@@ -65,17 +84,19 @@ static const int64 kMaxUpdateIntervalMinutes = 60;
 static const int kTopSitesImageQuality = 100;
 
 const TopSites::PrepopulatedPage kPrepopulatedPages[] = {
-#if !defined(OS_ANDROID)
-    { IDS_CHROME_WELCOME_URL, IDS_NEW_TAB_CHROME_WELCOME_PAGE_TITLE,
-    IDR_PRODUCT_LOGO_16, IDR_NEWTAB_CHROME_WELCOME_PAGE_THUMBNAIL,
-    SkColorSetRGB(0, 147, 60) }
-, { IDS_WEBSTORE_URL, IDS_EXTENSION_WEB_STORE_TITLE,
-    IDR_WEBSTORE_ICON_16, IDR_NEWTAB_WEBSTORE_THUMBNAIL,
-    SkColorSetRGB(63, 132, 197) }
-#else
+#if defined(OS_ANDROID)
     { IDS_MOBILE_WELCOME_URL, IDS_NEW_TAB_CHROME_WELCOME_PAGE_TITLE,
     IDR_PRODUCT_LOGO_16, IDR_NEWTAB_CHROME_WELCOME_PAGE_THUMBNAIL,
     SkColorSetRGB(0, 147, 60) }
+#else
+  { IDS_CHROME_WELCOME_URL, IDS_NEW_TAB_CHROME_WELCOME_PAGE_TITLE,
+    IDR_PRODUCT_LOGO_16, IDR_NEWTAB_CHROME_WELCOME_PAGE_THUMBNAIL,
+    SkColorSetRGB(0, 147, 60) },
+#endif
+#if !defined(OS_ANDROID)
+  { IDS_WEBSTORE_URL, IDS_EXTENSION_WEB_STORE_TITLE,
+    IDR_WEBSTORE_ICON_16, IDR_NEWTAB_WEBSTORE_THUMBNAIL,
+    SkColorSetRGB(63, 132, 197) }
 #endif
 };
 
@@ -94,7 +115,7 @@ class LoadThumbnailsFromHistoryTask : public HistoryDBTask {
     // l10n_util isn't thread safe, so cache for use on the db thread.
     ignore_urls_.insert(l10n_util::GetStringUTF8(IDS_CHROME_WELCOME_URL));
     ignore_urls_.insert(l10n_util::GetStringUTF8(IDS_WEBSTORE_URL));
-#ifdef OS_ANDROID
+#if defined(OS_ANDROID)
     ignore_urls_.insert(l10n_util::GetStringUTF8(IDS_MOBILE_WELCOME_URL));
 #endif
   }
@@ -110,7 +131,7 @@ class LoadThumbnailsFromHistoryTask : public HistoryDBTask {
     for (size_t i = 0; i < data_.most_visited.size(); ++i) {
       const GURL& url = data_.most_visited[i].url;
       if (ShouldFetchThumbnailFor(url)) {
-        scoped_refptr<RefCountedBytes> data;
+        scoped_refptr<base::RefCountedBytes> data;
         backend->GetPageThumbnailDirectly(url, &data);
         data_.url_to_thumbnail_map[url] = data;
       }
@@ -123,6 +144,8 @@ class LoadThumbnailsFromHistoryTask : public HistoryDBTask {
   }
 
  private:
+  virtual ~LoadThumbnailsFromHistoryTask() {}
+
   bool ShouldFetchThumbnailFor(const GURL& url) {
     return ignore_urls_.find(url.spec()) == ignore_urls_.end();
   }
@@ -149,8 +172,6 @@ TopSites::TopSites(Profile* profile)
       thread_safe_cache_(new TopSitesCache()),
       profile_(profile),
       last_num_urls_changed_(0),
-      blacklist_(NULL),
-      pinned_urls_(NULL),
       history_state_(HISTORY_LOADING),
       top_sites_state_(TOP_SITES_LOADING),
       loaded_(false) {
@@ -165,22 +186,11 @@ TopSites::TopSites(Profile* profile)
     registrar_.Add(this, content::NOTIFICATION_NAV_ENTRY_COMMITTED,
                    content::NotificationService::AllSources());
   }
-
-  // We create update objects here to be sure that dictionaries are created
-  // in the user preferences.
-  DictionaryPrefUpdate(profile_->GetPrefs(),
-                       prefs::kNTPMostVisitedURLsBlacklist).Get();
-  DictionaryPrefUpdate(profile_->GetPrefs(),
-                       prefs::kNTPMostVisitedPinnedURLs).Get();
-
-  // Now the dictionaries are guaranteed to exist and we can cache pointers
-  // to them.
-  blacklist_ =
-      profile_->GetPrefs()->GetDictionary(prefs::kNTPMostVisitedURLsBlacklist);
-  pinned_urls_ =
-      profile_->GetPrefs()->GetDictionary(prefs::kNTPMostVisitedPinnedURLs);
-  DCHECK(blacklist_ != NULL);
-  DCHECK(pinned_urls_ != NULL);
+  for (size_t i = 0; i < arraysize(kPrepopulatedPages); i++) {
+    int url_id = kPrepopulatedPages[i].url_id;
+    prepopulated_page_urls_.push_back(
+        GURL(l10n_util::GetStringUTF8(url_id)));
+  }
 }
 
 void TopSites::Init(const FilePath& db_name) {
@@ -189,12 +199,13 @@ void TopSites::Init(const FilePath& db_name) {
   backend_ = new TopSitesBackend;
   backend_->Init(db_name);
   backend_->GetMostVisitedThumbnails(
-      &top_sites_consumer_,
       base::Bind(&TopSites::OnGotMostVisitedThumbnails,
-                 base::Unretained(this)));
+                 base::Unretained(this)),
+      &cancelable_task_tracker_);
 
   // History may have already finished loading by the time we're created.
-  HistoryService* history = profile_->GetHistoryServiceWithoutCreating();
+  HistoryService* history =
+      HistoryServiceFactory::GetForProfileWithoutCreating(profile_);
   if (history && history->backend_loaded()) {
     if (history->needs_top_sites_migration())
       MigrateFromHistory();
@@ -204,7 +215,7 @@ void TopSites::Init(const FilePath& db_name) {
 }
 
 bool TopSites::SetPageThumbnail(const GURL& url,
-                                gfx::Image* thumbnail,
+                                const gfx::Image& thumbnail,
                                 const ThumbnailScore& score) {
   DCHECK(BrowserThread::CurrentlyOn(BrowserThread::UI));
 
@@ -226,7 +237,7 @@ bool TopSites::SetPageThumbnail(const GURL& url,
   if (!HistoryService::CanAddURL(url))
     return false;  // It's not a real webpage.
 
-  scoped_refptr<RefCountedBytes> thumbnail_data;
+  scoped_refptr<base::RefCountedBytes> thumbnail_data;
   if (!EncodeBitmap(thumbnail, &thumbnail_data))
     return false;
 
@@ -241,31 +252,27 @@ bool TopSites::SetPageThumbnail(const GURL& url,
   return SetPageThumbnailEncoded(url, thumbnail_data, score);
 }
 
-void TopSites::GetMostVisitedURLs(CancelableRequestConsumer* consumer,
-                                  const GetTopSitesCallback& callback) {
-  // WARNING: this may be invoked on any thread.
-  scoped_refptr<CancelableRequest<GetTopSitesCallback> > request(
-      new CancelableRequest<GetTopSitesCallback>(callback));
-  // This ensures cancellation of requests when either the consumer or the
-  // provider is deleted. Deletion of requests is also guaranteed.
-  AddRequest(request, consumer);
+// WARNING: this function may be invoked on any thread.
+void TopSites::GetMostVisitedURLs(const GetMostVisitedURLsCallback& callback) {
   MostVisitedURLList filtered_urls;
   {
     base::AutoLock lock(lock_);
     if (!loaded_) {
-      // A request came in before we finished loading. Put the request in
-      // pending_callbacks_ and we'll notify it when we finish loading.
-      pending_callbacks_.insert(request);
+      // A request came in before we finished loading. Store the callback and
+      // we'll run it on current thread when we finish loading.
+      pending_callbacks_.push_back(
+          base::Bind(&RunOrPostGetMostVisitedURLsCallback,
+                     base::MessageLoopProxy::current(),
+                     callback));
       return;
     }
-
     filtered_urls = thread_safe_cache_->top_sites();
   }
-  request->ForwardResult(filtered_urls);
+  callback.Run(filtered_urls);
 }
 
 bool TopSites::GetPageThumbnail(const GURL& url,
-                                scoped_refptr<RefCountedMemory>* bytes) {
+                                scoped_refptr<base::RefCountedMemory>* bytes) {
   // WARNING: this may be invoked on any thread.
   {
     base::AutoLock lock(lock_);
@@ -275,9 +282,11 @@ bool TopSites::GetPageThumbnail(const GURL& url,
 
   // Resource bundle is thread safe.
   for (size_t i = 0; i < arraysize(kPrepopulatedPages); i++) {
-    if (url.spec() == l10n_util::GetStringUTF8(kPrepopulatedPages[i].url_id)) {
-      *bytes = ResourceBundle::GetSharedInstance().LoadDataResourceBytes(
-          kPrepopulatedPages[i].thumbnail_id);
+    if (url == prepopulated_page_urls_[i]) {
+      *bytes = ResourceBundle::GetSharedInstance().
+          LoadDataResourceBytesForScale(
+              kPrepopulatedPages[i].thumbnail_id,
+              ui::SCALE_FACTOR_100P);
       return true;
     }
   }
@@ -323,12 +332,12 @@ void TopSites::MigrateFromHistory() {
   }
 
   history_state_ = HISTORY_MIGRATING;
-  profile_->GetHistoryService(Profile::EXPLICIT_ACCESS)->ScheduleDBTask(
-      new LoadThumbnailsFromHistoryTask(
-          this,
-          num_results_to_request_from_history()),
-      &history_consumer_);
-  MigratePinnedURLs();
+  HistoryServiceFactory::GetForProfile(
+      profile_, Profile::EXPLICIT_ACCESS)->ScheduleDBTask(
+          new LoadThumbnailsFromHistoryTask(
+              this,
+              num_results_to_request_from_history()),
+          &history_consumer_);
 }
 
 void TopSites::FinishHistoryMigration(const ThumbnailMigration& data) {
@@ -358,9 +367,9 @@ void TopSites::FinishHistoryMigration(const ThumbnailMigration& data) {
   // that notifies us when done. When done we'll know everything was written and
   // we can tell history to finish its part of migration.
   backend_->DoEmptyRequest(
-      &top_sites_consumer_,
       base::Bind(&TopSites::OnHistoryMigrationWrittenToDisk,
-                 base::Unretained(this)));
+                 base::Unretained(this)),
+      &cancelable_task_tracker_);
 }
 
 void TopSites::HistoryLoaded() {
@@ -394,17 +403,18 @@ void TopSites::SyncWithHistory() {
 }
 
 bool TopSites::HasBlacklistedItems() const {
-  return !blacklist_->empty();
+  const DictionaryValue* blacklist =
+      profile_->GetPrefs()->GetDictionary(prefs::kNtpMostVisitedURLsBlacklist);
+  return blacklist && !blacklist->empty();
 }
 
 void TopSites::AddBlacklistedURL(const GURL& url) {
   DCHECK(BrowserThread::CurrentlyOn(BrowserThread::UI));
 
-  RemovePinnedURL(url);
   Value* dummy = Value::CreateNullValue();
   {
     DictionaryPrefUpdate update(profile_->GetPrefs(),
-                                prefs::kNTPMostVisitedURLsBlacklist);
+                                prefs::kNtpMostVisitedURLsBlacklist);
     DictionaryValue* blacklist = update.Get();
     blacklist->SetWithoutPathExpansion(GetURLHash(url), dummy);
   }
@@ -417,7 +427,7 @@ void TopSites::RemoveBlacklistedURL(const GURL& url) {
   DCHECK(BrowserThread::CurrentlyOn(BrowserThread::UI));
   {
     DictionaryPrefUpdate update(profile_->GetPrefs(),
-                                prefs::kNTPMostVisitedURLsBlacklist);
+                                prefs::kNtpMostVisitedURLsBlacklist);
     DictionaryValue* blacklist = update.Get();
     blacklist->RemoveWithoutPathExpansion(GetURLHash(url), NULL);
   }
@@ -427,75 +437,21 @@ void TopSites::RemoveBlacklistedURL(const GURL& url) {
 
 bool TopSites::IsBlacklisted(const GURL& url) {
   DCHECK(BrowserThread::CurrentlyOn(BrowserThread::UI));
-  return blacklist_->HasKey(GetURLHash(url));
+  const DictionaryValue* blacklist =
+      profile_->GetPrefs()->GetDictionary(prefs::kNtpMostVisitedURLsBlacklist);
+  return blacklist && blacklist->HasKey(GetURLHash(url));
 }
 
 void TopSites::ClearBlacklistedURLs() {
   DCHECK(BrowserThread::CurrentlyOn(BrowserThread::UI));
   {
     DictionaryPrefUpdate update(profile_->GetPrefs(),
-                                prefs::kNTPMostVisitedURLsBlacklist);
+                                prefs::kNtpMostVisitedURLsBlacklist);
     DictionaryValue* blacklist = update.Get();
     blacklist->Clear();
   }
   ResetThreadSafeCache();
   NotifyTopSitesChanged();
-}
-
-void TopSites::AddPinnedURL(const GURL& url, size_t pinned_index) {
-  DCHECK(BrowserThread::CurrentlyOn(BrowserThread::UI));
-
-  GURL old;
-  if (GetPinnedURLAtIndex(pinned_index, &old))
-    RemovePinnedURL(old);
-
-  if (IsURLPinned(url))
-    RemovePinnedURL(url);
-
-  Value* index = Value::CreateIntegerValue(pinned_index);
-
-  {
-    DictionaryPrefUpdate update(profile_->GetPrefs(),
-                                prefs::kNTPMostVisitedPinnedURLs);
-    DictionaryValue* pinned_urls = update.Get();
-    pinned_urls->SetWithoutPathExpansion(GetURLString(url), index);
-  }
-
-  ResetThreadSafeCache();
-  NotifyTopSitesChanged();
-}
-
-bool TopSites::IsURLPinned(const GURL& url) {
-  int tmp;
-  return pinned_urls_->GetIntegerWithoutPathExpansion(GetURLString(url), &tmp);
-}
-
-void TopSites::RemovePinnedURL(const GURL& url) {
-  DCHECK(BrowserThread::CurrentlyOn(BrowserThread::UI));
-
-  {
-    DictionaryPrefUpdate update(profile_->GetPrefs(),
-                                prefs::kNTPMostVisitedPinnedURLs);
-    DictionaryValue* pinned_urls = update.Get();
-    pinned_urls->RemoveWithoutPathExpansion(GetURLString(url), NULL);
-  }
-
-  ResetThreadSafeCache();
-  NotifyTopSitesChanged();
-}
-
-bool TopSites::GetPinnedURLAtIndex(size_t index, GURL* url) {
-  for (DictionaryValue::key_iterator it = pinned_urls_->begin_keys();
-       it != pinned_urls_->end_keys(); ++it) {
-    int current_index;
-    if (pinned_urls_->GetIntegerWithoutPathExpansion(*it, &current_index)) {
-      if (static_cast<size_t>(current_index) == index) {
-        *url = GURL(*it);
-        return true;
-      }
-    }
-  }
-  return false;
 }
 
 void TopSites::Shutdown() {
@@ -504,7 +460,6 @@ void TopSites::Shutdown() {
   // invoked Shutdown (this could happen if we have a pending request and
   // Shutdown is invoked).
   history_consumer_.CancelAllRequests();
-  top_sites_consumer_.CancelAllRequests();
   backend_->Shutdown();
 }
 
@@ -555,7 +510,8 @@ CancelableRequestProvider::Handle TopSites::StartQueryForMostVisited() {
   if (!profile_)
     return 0;
 
-  HistoryService* hs = profile_->GetHistoryService(Profile::EXPLICIT_ACCESS);
+  HistoryService* hs = HistoryServiceFactory::GetForProfile(
+      profile_, Profile::EXPLICIT_ACCESS);
   // |hs| may be null during unit tests.
   if (hs) {
     return hs->QueryMostVisitedURLs(
@@ -580,7 +536,7 @@ TopSites::~TopSites() {
 }
 
 bool TopSites::SetPageThumbnailNoDB(const GURL& url,
-                                    const RefCountedBytes* thumbnail_data,
+                                    const base::RefCountedBytes* thumbnail_data,
                                     const ThumbnailScore& score) {
   // This should only be invoked when we know about the url.
   DCHECK(cache_->IsKnownURL(url));
@@ -601,7 +557,7 @@ bool TopSites::SetPageThumbnailNoDB(const GURL& url,
       image->thumbnail.get())
     return false;  // The one we already have is better.
 
-  image->thumbnail = const_cast<RefCountedBytes*>(thumbnail_data);
+  image->thumbnail = const_cast<base::RefCountedBytes*>(thumbnail_data);
   image->thumbnail_score = new_score_with_redirects;
 
   ResetThreadSafeImageCache();
@@ -609,7 +565,7 @@ bool TopSites::SetPageThumbnailNoDB(const GURL& url,
 }
 
 bool TopSites::SetPageThumbnailEncoded(const GURL& url,
-                                       const RefCountedBytes* thumbnail,
+                                       const base::RefCountedBytes* thumbnail,
                                        const ThumbnailScore& score) {
   if (!SetPageThumbnailNoDB(url, thumbnail, score))
     return false;
@@ -627,13 +583,13 @@ bool TopSites::SetPageThumbnailEncoded(const GURL& url,
 }
 
 // static
-bool TopSites::EncodeBitmap(gfx::Image* bitmap,
-                            scoped_refptr<RefCountedBytes>* bytes) {
-  if (!bitmap)
+bool TopSites::EncodeBitmap(const gfx::Image& bitmap,
+                            scoped_refptr<base::RefCountedBytes>* bytes) {
+  if (bitmap.IsEmpty())
     return false;
-  *bytes = new RefCountedBytes();
+  *bytes = new base::RefCountedBytes();
   std::vector<unsigned char> data;
-  if (!gfx::JPEGEncodedDataFromImage(*bitmap, kTopSitesImageQuality, &data))
+  if (!gfx::JPEG1xEncodedDataFromImage(bitmap, kTopSitesImageQuality, &data))
     return false;
 
   // As we're going to cache this data, make sure the vector is only as big as
@@ -654,14 +610,14 @@ void TopSites::RemoveTemporaryThumbnailByURL(const GURL& url) {
 }
 
 void TopSites::AddTemporaryThumbnail(const GURL& url,
-                                     const RefCountedBytes* thumbnail,
+                                     const base::RefCountedBytes* thumbnail,
                                      const ThumbnailScore& score) {
   if (temp_images_.size() == kMaxTempTopImages)
     temp_images_.erase(temp_images_.begin());
 
   TempImage image;
   image.first = url;
-  image.second.thumbnail = const_cast<RefCountedBytes*>(thumbnail);
+  image.second.thumbnail = const_cast<base::RefCountedBytes*>(thumbnail);
   image.second.thumbnail_score = score;
   temp_images_.push_back(image);
 }
@@ -681,20 +637,18 @@ int TopSites::GetRedirectDistanceForURL(const MostVisitedURL& most_visited,
   return 0;
 }
 
-// static
 MostVisitedURLList TopSites::GetPrepopulatePages() {
   MostVisitedURLList urls;
   urls.resize(arraysize(kPrepopulatedPages));
   for (size_t i = 0; i < urls.size(); ++i) {
     MostVisitedURL& url = urls[i];
-    url.url = GURL(l10n_util::GetStringUTF8(kPrepopulatedPages[i].url_id));
+    url.url = GURL(prepopulated_page_urls_[i]);
     url.redirects.push_back(url.url);
     url.title = l10n_util::GetStringUTF16(kPrepopulatedPages[i].title_id);
   }
   return urls;
 }
 
-// static
 bool TopSites::AddPrepopulatedPages(MostVisitedURLList* urls) {
   bool added = false;
   MostVisitedURLList prepopulate_urls = GetPrepopulatePages();
@@ -708,84 +662,11 @@ bool TopSites::AddPrepopulatedPages(MostVisitedURLList* urls) {
   return added;
 }
 
-void TopSites::MigratePinnedURLs() {
-  DCHECK(BrowserThread::CurrentlyOn(BrowserThread::UI));
-
-  std::map<GURL, size_t> tmp_map;
-  for (DictionaryValue::key_iterator it = pinned_urls_->begin_keys();
-       it != pinned_urls_->end_keys(); ++it) {
-    Value* value;
-    if (!pinned_urls_->GetWithoutPathExpansion(*it, &value))
-      continue;
-
-    if (value->IsType(DictionaryValue::TYPE_DICTIONARY)) {
-      DictionaryValue* dict = static_cast<DictionaryValue*>(value);
-      std::string url_string;
-      int index;
-      if (dict->GetString("url", &url_string) &&
-          dict->GetInteger("index", &index))
-        tmp_map[GURL(url_string)] = index;
-    }
-  }
-
-  {
-    DictionaryPrefUpdate update(profile_->GetPrefs(),
-                                prefs::kNTPMostVisitedPinnedURLs);
-    DictionaryValue* pinned_urls = update.Get();
-    pinned_urls->Clear();
-  }
-
-  for (std::map<GURL, size_t>::iterator it = tmp_map.begin();
-       it != tmp_map.end(); ++it)
-    AddPinnedURL(it->first, it->second);
-}
-
-void TopSites::ApplyBlacklistAndPinnedURLs(const MostVisitedURLList& urls,
-                                           MostVisitedURLList* out) {
-  MostVisitedURLList urls_copy;
-  for (size_t i = 0; i < urls.size(); i++) {
+void TopSites::ApplyBlacklist(const MostVisitedURLList& urls,
+                              MostVisitedURLList* out) {
+  for (size_t i = 0; i < urls.size() && i < kTopSitesNumber; ++i) {
     if (!IsBlacklisted(urls[i].url))
-      urls_copy.push_back(urls[i]);
-  }
-
-  for (size_t pinned_index = 0; pinned_index < kTopSitesNumber;
-       pinned_index++) {
-    GURL url;
-    bool found = GetPinnedURLAtIndex(pinned_index, &url);
-    if (!found)
-      continue;
-
-    DCHECK(!url.is_empty());
-    int cur_index = IndexOf(urls_copy, url);
-    MostVisitedURL tmp;
-    if (cur_index < 0) {
-      // Pinned URL not in urls.
-      tmp.url = url;
-    } else {
-      tmp = urls_copy[cur_index];
-      urls_copy.erase(urls_copy.begin() + cur_index);
-    }
-    if (pinned_index > out->size())
-      out->resize(pinned_index);  // Add empty URLs as fillers.
-    out->insert(out->begin() + pinned_index, tmp);
-  }
-
-  // Add non-pinned URLs in the empty spots.
-  size_t current_url = 0;  // Index into the remaining URLs in urls_copy.
-  for (size_t i = 0; i < kTopSitesNumber && current_url < urls_copy.size();
-       i++) {
-    if (i == out->size()) {
-      out->push_back(urls_copy[current_url]);
-      current_url++;
-    } else if (i < out->size()) {
-      if ((*out)[i].url.is_empty()) {
-        // Replace the filler
-        (*out)[i] = urls_copy[current_url];
-        current_url++;
-      }
-    } else {
-      NOTREACHED();
-    }
+      out->push_back(urls[i]);
   }
 }
 
@@ -809,19 +690,6 @@ base::TimeDelta TopSites::GetUpdateDelay() {
   return base::TimeDelta::FromMinutes(minutes);
 }
 
-// static
-void TopSites::ProcessPendingCallbacks(
-    const PendingCallbackSet& pending_callbacks,
-    const MostVisitedURLList& urls) {
-  PendingCallbackSet::const_iterator i;
-  for (i = pending_callbacks.begin();
-       i != pending_callbacks.end(); ++i) {
-    scoped_refptr<CancelableRequest<GetTopSitesCallback> > request = *i;
-    if (!request->canceled())
-      request->ForwardResult(urls);
-  }
-}
-
 void TopSites::Observe(int type,
                        const content::NotificationSource& source,
                        const content::NotificationDetails& details) {
@@ -835,10 +703,10 @@ void TopSites::Observe(int type,
       backend_->ResetDatabase();
     } else {
       std::set<size_t> indices_to_delete;  // Indices into top_sites_.
-      for (std::set<GURL>::iterator i = deleted_details->urls.begin();
-           i != deleted_details->urls.end(); ++i) {
-        if (cache_->IsKnownURL(*i))
-          indices_to_delete.insert(cache_->GetURLIndex(*i));
+      for (URLRows::const_iterator i = deleted_details->rows.begin();
+           i != deleted_details->rows.end(); ++i) {
+        if (cache_->IsKnownURL(i->url()))
+          indices_to_delete.insert(cache_->GetURLIndex(i->url()));
       }
 
       if (indices_to_delete.empty())
@@ -847,9 +715,7 @@ void TopSites::Observe(int type,
       MostVisitedURLList new_top_sites(cache_->top_sites());
       for (std::set<size_t>::reverse_iterator i = indices_to_delete.rbegin();
            i != indices_to_delete.rend(); i++) {
-        size_t index = *i;
-        RemovePinnedURL(new_top_sites[index].url);
-        new_top_sites.erase(new_top_sites.begin() + index);
+        new_top_sites.erase(new_top_sites.begin() + *i);
       }
       SetTopSites(new_top_sites);
     }
@@ -928,14 +794,16 @@ void TopSites::SetTopSites(const MostVisitedURLList& new_top_sites) {
 int TopSites::num_results_to_request_from_history() const {
   DCHECK(BrowserThread::CurrentlyOn(BrowserThread::UI));
 
-  return kTopSitesNumber + blacklist_->size();
+  const DictionaryValue* blacklist =
+      profile_->GetPrefs()->GetDictionary(prefs::kNtpMostVisitedURLsBlacklist);
+  return kTopSitesNumber + (blacklist ? blacklist->size() : 0);
 }
 
 void TopSites::MoveStateToLoaded() {
   DCHECK(BrowserThread::CurrentlyOn(BrowserThread::UI));
 
   MostVisitedURLList filtered_urls;
-  PendingCallbackSet pending_callbacks;
+  PendingCallbacks pending_callbacks;
   {
     base::AutoLock lock(lock_);
 
@@ -951,7 +819,8 @@ void TopSites::MoveStateToLoaded() {
     }
   }
 
-  ProcessPendingCallbacks(pending_callbacks, filtered_urls);
+  for (size_t i = 0; i < pending_callbacks.size(); i++)
+    pending_callbacks[i].Run(filtered_urls);
 
   content::NotificationService::current()->Notify(
       chrome::NOTIFICATION_TOP_SITES_LOADED,
@@ -962,7 +831,7 @@ void TopSites::MoveStateToLoaded() {
 void TopSites::ResetThreadSafeCache() {
   base::AutoLock lock(lock_);
   MostVisitedURLList cached;
-  ApplyBlacklistAndPinnedURLs(cache_->top_sites(), &cached);
+  ApplyBlacklist(cache_->top_sites(), &cached);
   thread_safe_cache_->SetTopSites(cached);
 }
 
@@ -989,33 +858,32 @@ void TopSites::RestartQueryForTopSitesTimer(base::TimeDelta delta) {
   timer_.Start(FROM_HERE, delta, this, &TopSites::TimerFired);
 }
 
-void TopSites::OnHistoryMigrationWrittenToDisk(TopSitesBackend::Handle handle) {
+void TopSites::OnHistoryMigrationWrittenToDisk() {
   DCHECK(BrowserThread::CurrentlyOn(BrowserThread::UI));
 
   if (!profile_)
     return;
 
-  HistoryService* history =
-      profile_->GetHistoryService(Profile::EXPLICIT_ACCESS);
+  HistoryService* history = HistoryServiceFactory::GetForProfile(
+      profile_, Profile::EXPLICIT_ACCESS);
   if (history)
     history->OnTopSitesReady();
 }
 
 void TopSites::OnGotMostVisitedThumbnails(
-    CancelableRequestProvider::Handle handle,
-    scoped_refptr<MostVisitedThumbnails> data,
-    bool may_need_history_migration) {
+    const scoped_refptr<MostVisitedThumbnails>& thumbnails,
+    const bool* need_history_migration) {
   DCHECK(BrowserThread::CurrentlyOn(BrowserThread::UI));
   DCHECK_EQ(top_sites_state_, TOP_SITES_LOADING);
 
-  if (!may_need_history_migration) {
+  if (!*need_history_migration) {
     top_sites_state_ = TOP_SITES_LOADED;
 
     // Set the top sites directly in the cache so that SetTopSites diffs
     // correctly.
-    cache_->SetTopSites(data->most_visited);
-    SetTopSites(data->most_visited);
-    cache_->SetThumbnails(data->url_to_images_map);
+    cache_->SetTopSites(thumbnails->most_visited);
+    SetTopSites(thumbnails->most_visited);
+    cache_->SetThumbnails(thumbnails->url_to_images_map);
 
     ResetThreadSafeImageCache();
 
@@ -1035,7 +903,7 @@ void TopSites::OnGotMostVisitedThumbnails(
       top_sites_state_ = TOP_SITES_LOADED_WAITING_FOR_HISTORY;
       // Ask for history just in case it hasn't been loaded yet. When history
       // finishes loading we'll do migration and/or move to loaded.
-      profile_->GetHistoryService(Profile::EXPLICIT_ACCESS);
+      HistoryServiceFactory::GetForProfile(profile_, Profile::EXPLICIT_ACCESS);
     }
   }
 }

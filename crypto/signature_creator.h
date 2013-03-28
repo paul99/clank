@@ -1,10 +1,9 @@
-// Copyright (c) 2011 The Chromium Authors. All rights reserved.
+// Copyright (c) 2012 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
 #ifndef CRYPTO_SIGNATURE_CREATOR_H_
 #define CRYPTO_SIGNATURE_CREATOR_H_
-#pragma once
 
 #include "build/build_config.h"
 
@@ -14,7 +13,7 @@ typedef struct env_md_ctx_st EVP_MD_CTX;
 #elif defined(USE_NSS)
 // Forward declaration.
 struct SGNContextStr;
-#elif defined(OS_MACOSX)
+#elif defined(OS_MACOSX) && !defined(OS_IOS)
 #include <Security/cssm.h>
 #endif
 
@@ -22,13 +21,14 @@ struct SGNContextStr;
 
 #include "base/basictypes.h"
 #include "crypto/crypto_export.h"
-#include "crypto/rsa_private_key.h"
 
 #if defined(OS_WIN)
 #include "crypto/scoped_capi_types.h"
 #endif
 
 namespace crypto {
+
+class RSAPrivateKey;
 
 // Signs data using a bare private key (as opposed to a full certificate).
 // Currently can only sign data using SHA-1 with RSA encryption.
@@ -56,7 +56,7 @@ class CRYPTO_EXPORT SignatureCreator {
   EVP_MD_CTX* sign_context_;
 #elif defined(USE_NSS)
   SGNContextStr* sign_context_;
-#elif defined(OS_MACOSX)
+#elif defined(OS_MACOSX) && !defined(OS_IOS)
   CSSM_CC_HANDLE sig_handle_;
 #elif defined(OS_WIN)
   ScopedHCRYPTHASH hash_object_;

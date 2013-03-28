@@ -4,7 +4,6 @@
 
 #ifndef WEBKIT_QUOTA_USAGE_TRACKER_H_
 #define WEBKIT_QUOTA_USAGE_TRACKER_H_
-#pragma once
 
 #include <list>
 #include <map>
@@ -38,7 +37,7 @@ class UsageTracker : public QuotaTaskObserver {
   ClientUsageTracker* GetClientTracker(QuotaClient::ID client_id);
 
   void GetGlobalUsage(const GlobalUsageCallback& callback);
-  void GetHostUsage(const std::string& host, const HostUsageCallback& callback);
+  void GetHostUsage(const std::string& host, const UsageCallback& callback);
   void UpdateUsageCache(QuotaClient::ID client_id,
                         const GURL& origin,
                         int64 delta);
@@ -81,7 +80,8 @@ class UsageTracker : public QuotaTaskObserver {
 // This class holds per-client usage tracking information and caches per-host
 // usage data.  An instance of this class is created per client.
 class ClientUsageTracker : public SpecialStoragePolicy::Observer,
-                           public base::NonThreadSafe {
+                           public base::NonThreadSafe,
+                           public base::SupportsWeakPtr<ClientUsageTracker> {
  public:
   ClientUsageTracker(UsageTracker* tracker,
                      QuotaClient* client,
@@ -90,7 +90,7 @@ class ClientUsageTracker : public SpecialStoragePolicy::Observer,
   virtual ~ClientUsageTracker();
 
   void GetGlobalUsage(const GlobalUsageCallback& callback);
-  void GetHostUsage(const std::string& host, const HostUsageCallback& callback);
+  void GetHostUsage(const std::string& host, const UsageCallback& callback);
   void UpdateUsageCache(const GURL& origin, int64 delta);
   void GetCachedHostsUsage(std::map<std::string, int64>* host_usage) const;
   void GetCachedOrigins(std::set<GURL>* origins) const;
@@ -114,8 +114,7 @@ class ClientUsageTracker : public SpecialStoragePolicy::Observer,
   int64 GetCachedHostUsage(const std::string& host) const;
   int64 GetCachedGlobalUnlimitedUsage();
   virtual void OnSpecialStoragePolicyChanged() OVERRIDE;
-  void NoopHostUsageCallback(
-    const std::string& host,  StorageType type, int64 usage);
+  void NoopHostUsageCallback(int64 usage);
   bool IsStorageUnlimited(const GURL& origin) const;
 
   UsageTracker* tracker_;

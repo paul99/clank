@@ -8,8 +8,8 @@
 #include <vector>
 #include "base/basictypes.h"
 #include "base/memory/ref_counted.h"
-#include "base/memory/scoped_ptr.h"
 #include "media/audio/audio_parameters.h"
+#include "media/base/audio_bus.h"
 #include "media/base/media_export.h"
 
 namespace media {
@@ -23,31 +23,37 @@ class AudioRendererSink
  public:
   class RenderCallback {
    public:
-    // Fills entire buffer of length |number_of_frames| but returns actual
-    // number of frames it got from its source (|number_of_frames| in case of
-    // continuous stream). That actual number of frames is passed to host
-    // together with PCM audio data and host is free to use or ignore it.
-    // TODO(crogers): use base:Callback instead.
-    virtual size_t Render(const std::vector<float*>& audio_data,
-                          size_t number_of_frames,
-                          size_t audio_delay_milliseconds) = 0;
+    // Attempts to completely fill all channels of |dest|, returns actual
+    // number of frames filled.
+    virtual int Render(AudioBus* dest, int audio_delay_milliseconds) = 0;
+
+    // Synchronized audio I/O - see InitializeIO() below.
+    virtual void RenderIO(AudioBus* source,
+                          AudioBus* dest,
+                          int audio_delay_milliseconds) {}
 
     // Signals an error has occurred.
-    virtual void OnError() = 0;
+    virtual void OnRenderError() = 0;
 
    protected:
     virtual ~RenderCallback() {}
   };
 
-  virtual ~AudioRendererSink() {}
-
   // Sets important information about the audio stream format.
   // It must be called before any of the other methods.
-  virtual void Initialize(size_t buffer_size,
-                          int channels,
-                          double sample_rate,
-                          AudioParameters::Format latency_format,
+  virtual void Initialize(const AudioParameters& params,
                           RenderCallback* callback) = 0;
+
+  // InitializeIO() may be called instead of Initialize() for clients who wish
+  // to have synchronized input and output.  |input_channels| specifies the
+  // number of input channels which will be at the same sample-rate
+  // and buffer-size as the output as specified in |params|.
+  // The callback's RenderIO() method will be called instead of Render(),
+  // providing the synchronized input data at the same time as when new
+  // output data is to be rendered.
+  virtual void InitializeIO(const AudioParameters& params,
+                            int input_channels,
+                            RenderCallback* callback) {}
 
   // Starts audio playback.
   virtual void Start() = 0;
@@ -65,8 +71,9 @@ class AudioRendererSink
   // Returns |true| on success.
   virtual bool SetVolume(double volume) = 0;
 
-  // Gets the playback volume, with range [0.0, 1.0] inclusive.
-  virtual void GetVolume(double* volume) = 0;
+ protected:
+  friend class base::RefCountedThreadSafe<AudioRendererSink>;
+  virtual ~AudioRendererSink() {}
 };
 
 }  // namespace media

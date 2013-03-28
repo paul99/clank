@@ -1,17 +1,18 @@
-// Copyright (c) 2011 The Chromium Authors. All rights reserved.
+// Copyright (c) 2012 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
 #ifndef CONTENT_PLUGIN_WEBPLUGIN_ACCELERATED_SURFACE_PROXY_H_
 #define CONTENT_PLUGIN_WEBPLUGIN_ACCELERATED_SURFACE_PROXY_H_
-#pragma once
 
 #include "base/compiler_specific.h"
-#include "ui/gfx/gl/gpu_preference.h"
+#include "ui/gl/gpu_preference.h"
 #include "webkit/plugins/npapi/webplugin_accelerated_surface_mac.h"
 
-class WebPluginProxy;
 class AcceleratedSurface;
+
+namespace content {
+class WebPluginProxy;
 
 // Out-of-process implementation of WebPluginAcceleratedSurface that proxies
 // calls through a WebPluginProxy.
@@ -47,5 +48,7 @@ class WebPluginAcceleratedSurfaceProxy
 
   DISALLOW_COPY_AND_ASSIGN(WebPluginAcceleratedSurfaceProxy);
 };
+
+}  // namespace content
 
 #endif  // CONTENT_PLUGIN_WEBPLUGIN_ACCELERATED_SURFACE_PROXY_H_

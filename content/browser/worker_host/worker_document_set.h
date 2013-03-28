@@ -1,16 +1,16 @@
-// Copyright (c) 2011 The Chromium Authors. All rights reserved.
+// Copyright (c) 2012 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
 #ifndef CONTENT_BROWSER_WORKER_HOST_WORKER_DOCUMENT_SET_H_
 #define CONTENT_BROWSER_WORKER_HOST_WORKER_DOCUMENT_SET_H_
-#pragma once
 
 #include <set>
 
 #include "base/basictypes.h"
 #include "base/memory/ref_counted.h"
 
+namespace content {
 class WorkerMessageFilter;
 
 // The WorkerDocumentSet tracks all of the DOM documents associated with a
@@ -86,5 +86,7 @@ class WorkerDocumentSet : public base::RefCounted<WorkerDocumentSet> {
 
   DocumentInfoSet document_set_;
 };
+
+}  // namespace content
 
 #endif  // CONTENT_BROWSER_WORKER_HOST_WORKER_DOCUMENT_SET_H_

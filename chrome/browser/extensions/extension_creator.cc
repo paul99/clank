@@ -10,11 +10,11 @@
 #include "base/bind.h"
 #include "base/callback.h"
 #include "base/file_util.h"
+#include "base/files/scoped_temp_dir.h"
 #include "base/memory/scoped_handle.h"
-#include "base/scoped_temp_dir.h"
 #include "base/string_util.h"
+#include "chrome/browser/extensions/crx_file.h"
 #include "chrome/browser/extensions/extension_creator_filter.h"
-#include "chrome/browser/extensions/sandboxed_extension_unpacker.h"
 #include "chrome/common/extensions/extension.h"
 #include "chrome/common/extensions/extension_file_util.h"
 #include "chrome/common/zip.h"
@@ -26,6 +26,8 @@
 namespace {
   const int kRSAKeySize = 1024;
 };
+
+namespace extensions {
 
 ExtensionCreator::ExtensionCreator() : error_type_(kOtherError) {
 }
@@ -82,7 +84,8 @@ bool ExtensionCreator::InitializeInput(
 }
 
 bool ExtensionCreator::ValidateManifest(const FilePath& extension_dir,
-                                        crypto::RSAPrivateKey* key_pair) {
+                                        crypto::RSAPrivateKey* key_pair,
+                                        int run_flags) {
   std::vector<uint8> public_key_bytes;
   if (!key_pair->ExportPublicKey(&public_key_bytes)) {
     error_message_ =
@@ -100,12 +103,18 @@ bool ExtensionCreator::ValidateManifest(const FilePath& extension_dir,
 
   // Load the extension once. We don't really need it, but this does a lot of
   // useful validation of the structure.
+  int create_flags =
+      Extension::FOLLOW_SYMLINKS_ANYWHERE | Extension::ERROR_ON_PRIVATE_KEY;
+  if (run_flags & kRequireModernManifestVersion)
+    create_flags |= Extension::REQUIRE_MODERN_MANIFEST_VERSION;
+
   scoped_refptr<Extension> extension(
-      extension_file_util::LoadExtension(extension_dir,
-                                         extension_id,
-                                         Extension::INTERNAL,
-                                         Extension::STRICT_ERROR_CHECKS,
-                                         &error_message_));
+      extension_file_util::LoadExtension(
+          extension_dir,
+          extension_id,
+          Extension::INTERNAL,
+          create_flags,
+          &error_message_));
   return !!extension.get();
 }
 
@@ -238,15 +247,15 @@ bool ExtensionCreator::WriteCRX(const FilePath& zip_path,
   std::vector<uint8> public_key;
   CHECK(private_key->ExportPublicKey(&public_key));
 
-  SandboxedExtensionUnpacker::ExtensionHeader header;
-  memcpy(&header.magic, SandboxedExtensionUnpacker::kExtensionHeaderMagic,
-         SandboxedExtensionUnpacker::kExtensionHeaderMagicSize);
-  header.version = SandboxedExtensionUnpacker::kCurrentVersion;
-  header.key_size = public_key.size();
-  header.signature_size = signature.size();
+  CrxFile::Error error;
+  scoped_ptr<CrxFile> crx(
+      CrxFile::Create(public_key.size(), signature.size(), &error));
+  if (!crx.get()) {
+    LOG(ERROR) << "cannot create CrxFileHeader: " << error;
+  }
+  const CrxFile::Header header = crx->header();
 
-  if (fwrite(&header, sizeof(SandboxedExtensionUnpacker::ExtensionHeader), 1,
-             crx_handle.get()) != 1) {
+  if (fwrite(&header, sizeof(header), 1, crx_handle.get()) != 1) {
     PLOG(ERROR) << "fwrite failed to write header";
   }
   if (fwrite(&public_key.front(), sizeof(uint8), public_key.size(),
@@ -294,10 +303,12 @@ bool ExtensionCreator::Run(const FilePath& extension_dir,
     return false;
 
   // Perform some extra validation by loading the extension.
-  if (!ValidateManifest(extension_dir, key_pair.get()))
+  // TODO(aa): Can this go before creating the key pair? This would mean not
+  // passing ID into LoadExtension which seems OK.
+  if (!ValidateManifest(extension_dir, key_pair.get(), run_flags))
     return false;
 
-  ScopedTempDir temp_dir;
+  base::ScopedTempDir temp_dir;
   if (!temp_dir.CreateUniqueTempDir())
     return false;
 
@@ -314,3 +325,5 @@ bool ExtensionCreator::Run(const FilePath& extension_dir,
   file_util::Delete(zip_path, false);
   return result;
 }
+
+}  // namespace extensions

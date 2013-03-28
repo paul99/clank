@@ -1,4 +1,4 @@
-// Copyright (c) 2011 The Chromium Authors. All rights reserved.
+// Copyright (c) 2012 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -38,13 +38,20 @@ void PopupNonClientFrameView::ResetWindowControls() {
 void PopupNonClientFrameView::UpdateWindowIcon() {
 }
 
+void PopupNonClientFrameView::UpdateWindowTitle() {
+}
+
 gfx::Rect PopupNonClientFrameView::GetBoundsForTabStrip(
     views::View* tabstrip) const {
   return gfx::Rect(0, 0, width(), tabstrip->GetPreferredSize().height());
 }
 
-int PopupNonClientFrameView::GetHorizontalTabStripVerticalOffset(
-    bool restored) const {
+BrowserNonClientFrameView::TabStripInsets
+PopupNonClientFrameView::GetTabStripInsets(bool restored) const {
+  return TabStripInsets();
+}
+
+int PopupNonClientFrameView::GetThemeBackgroundXInset() const {
   return 0;
 }
 

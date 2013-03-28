@@ -1,9 +1,9 @@
-// Copyright (c) 2011 The Chromium Authors. All rights reserved.
+// Copyright (c) 2012 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
 cr.define('cr.ui', function() {
-  const Command = cr.ui.Command;
+  /** @const */ var Command = cr.ui.Command;
 
   /**
    * Creates a new menu item element.
@@ -15,7 +15,7 @@ cr.define('cr.ui', function() {
 
   /**
    * Creates a new menu separator element.
-   * @return {cr.ui.MenuItem}
+   * @return {cr.ui.MenuItem} The new separator element.
    */
   MenuItem.createSeparator = function() {
     var el = cr.doc.createElement('hr');
@@ -36,9 +36,15 @@ cr.define('cr.ui', function() {
 
       this.addEventListener('mouseup', this.handleMouseUp_);
 
-      // Adding the 'custom-appearance' class prevents button.css from changing
+      // Adding the 'custom-appearance' class prevents widgets.css from changing
       // the appearance of this element.
       this.classList.add('custom-appearance');
+
+      this.setAttribute('role', 'menuitem');
+
+      var iconUrl;
+      if ((iconUrl = this.getAttribute('icon')))
+        this.iconUrl = iconUrl;
     },
 
     /**
@@ -78,6 +84,8 @@ cr.define('cr.ui', function() {
         this.command_.addEventListener('hiddenChange', this);
         this.command_.addEventListener('checkedChange', this);
       }
+
+      this.updateShortcut_();
     },
 
     /**
@@ -92,6 +100,17 @@ cr.define('cr.ui', function() {
     },
 
     /**
+     * Menu icon.
+     * @type {string}
+     */
+    get iconUrl() {
+      return this.style.backgroundImage;
+    },
+    set iconUrl(url) {
+      this.style.backgroundImage = 'url(' + url + ')';
+    },
+
+    /**
      * @return {boolean} Whether the menu item is a separator.
      */
     isSeparator: function() {
@@ -99,19 +118,94 @@ cr.define('cr.ui', function() {
     },
 
     /**
-     * Handles mouseup events. This dispatches an active event and if there
-     * is an assiciated command then that is executed.
-     * @param {Event} The mouseup event object.
+     * Updates shortcut text according to associated command. If command has
+     * multiple shortcuts, only first one is displayed.
+     */
+    updateShortcut_: function() {
+      this.removeAttribute('shortcutText');
+
+      if (!(this.command_ && this.command_.shortcut))
+        return;
+
+      var shortcuts = this.command_.shortcut.split(/\s+/);
+
+      if (shortcuts.length == 0)
+        return;
+
+      var shortcut = shortcuts[0];
+      var mods = {};
+      var ident = '';
+      shortcut.split('-').forEach(function(part) {
+        var partUc = part.toUpperCase();
+        switch (partUc) {
+          case 'CTRL':
+          case 'ALT':
+          case 'SHIFT':
+          case 'META':
+            mods[partUc] = true;
+            break;
+          default:
+            console.assert(!ident, 'Shortcut has two non-modifier keys');
+            ident = part;
+        }
+      });
+
+      var shortcutText = '';
+
+      // TODO(zvorygin): if more cornercases appear - optimize following
+      // code. Currently 'Enter' keystroke is passed as 'Enter', and 'Space'
+      // is passed as 'U+0020'
+      if (ident == 'U+0020')
+        ident = 'Space';
+
+      ['CTRL', 'ALT', 'SHIFT', 'META'].forEach(function(mod) {
+        if (mods[mod])
+          shortcutText += loadTimeData.getString('SHORTCUT_' + mod) + '+';
+      });
+
+      if (ident.indexOf('U+') != 0) {
+        shortcutText +=
+            loadTimeData.getString('SHORTCUT_' + ident.toUpperCase());
+      } else {
+        shortcutText +=
+            String.fromCharCode(parseInt(ident.substring(2), 16));
+      }
+
+      this.setAttribute('shortcutText', shortcutText);
+    },
+
+    /**
+     * Handles mouseup events. This dispatches an activate event; if there is an
+     * associated command, that command is executed.
+     * @param {Event} e The mouseup event object.
      * @private
      */
     handleMouseUp_: function(e) {
       if (!this.disabled && !this.isSeparator() && this.selected) {
+        // Store |contextElement| since it'll be removed by {Menu} on handling
+        // 'activate' event.
+        var contextElement = this.parentNode.contextElement;
+        var activationEvent = cr.doc.createEvent('Event');
+        activationEvent.initEvent('activate', true, true);
+        activationEvent.originalEvent = e;
         // Dispatch command event followed by executing the command object.
-        if (cr.dispatchSimpleEvent(this, 'activate', true, true)) {
+        if (this.dispatchEvent(activationEvent)) {
           var command = this.command;
-          if (command)
-            command.execute();
+          if (command) {
+            command.execute(contextElement);
+            cr.ui.swallowDoubleClick(e);
+          }
         }
+      }
+    },
+
+    /**
+     * Updates command according to the node on which this menu was invoked.
+     * @param {Node=} opt_node Node on which menu was opened.
+     */
+    updateCommand: function(opt_node) {
+      if (this.command_) {
+        this.command_.canExecuteChange(opt_node);
       }
     },
 

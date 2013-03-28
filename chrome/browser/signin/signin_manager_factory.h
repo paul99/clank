@@ -4,7 +4,6 @@
 
 #ifndef CHROME_BROWSER_SIGNIN_SIGNIN_MANAGER_FACTORY_H_
 #define CHROME_BROWSER_SIGNIN_SIGNIN_MANAGER_FACTORY_H_
-#pragma once
 
 #include "base/memory/singleton.h"
 #include "chrome/browser/profiles/profile_keyed_service_factory.h"
@@ -22,11 +21,20 @@ class SigninManagerFactory : public ProfileKeyedServiceFactory {
   // SigninManager (for example, if |profile| is incognito).
   static SigninManager* GetForProfile(Profile* profile);
 
+  // Returns the instance of SigninManager associated with this profile. Returns
+  // null if no SigninManager instance currently exists (will not create a new
+  // instance).
+  static SigninManager* GetForProfileIfExists(Profile* profile);
+
   // Returns an instance of the SigninManagerFactory singleton.
   static SigninManagerFactory* GetInstance();
 
   // Implementation of ProfileKeyedServiceFactory (public so tests can call it).
   virtual void RegisterUserPrefs(PrefService* user_prefs) OVERRIDE;
+
+  // Registers the browser-global prefs used by SigninManager.
+  static void RegisterPrefs(PrefService* local_state);
+
  private:
   friend struct DefaultSingletonTraits<SigninManagerFactory>;
 

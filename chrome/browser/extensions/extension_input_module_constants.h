@@ -6,7 +6,6 @@
 
 #ifndef CHROME_BROWSER_EXTENSIONS_EXTENSION_INPUT_MODULE_CONSTANTS_H_
 #define CHROME_BROWSER_EXTENSIONS_EXTENSION_INPUT_MODULE_CONSTANTS_H_
-#pragma once
 
 namespace extension_input_module_constants {
 
@@ -39,6 +38,9 @@ extern const char kStyleDoubleUnderline[];
 extern const char kStyleKey[];
 extern const char kStyleUnderline[];
 extern const char kTextKey[];
+extern const char kUsageBodyKey[];
+extern const char kUsageKey[];
+extern const char kUsageTitleKey[];
 extern const char kVerticalKey[];
 extern const char kVisibleKey[];
 

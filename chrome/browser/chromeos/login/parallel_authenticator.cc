@@ -1,74 +1,194 @@
-// Copyright (c) 2011 The Chromium Authors. All rights reserved.
+// Copyright (c) 2012 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
 #include "chrome/browser/chromeos/login/parallel_authenticator.h"
-
-#include <string>
-#include <vector>
 
 #include "base/bind.h"
 #include "base/command_line.h"
 #include "base/file_path.h"
 #include "base/file_util.h"
 #include "base/logging.h"
-#include "base/path_service.h"
+#include "base/string_number_conversions.h"
 #include "base/string_util.h"
-#include "base/synchronization/lock.h"
+#include "chrome/browser/chromeos/boot_times_loader.h"
 #include "chrome/browser/chromeos/cros/cert_library.h"
+#include "chrome/browser/chromeos/cros/cros_library.h"
 #include "chrome/browser/chromeos/cros/cryptohome_library.h"
-#include "chrome/browser/chromeos/login/auth_response_handler.h"
 #include "chrome/browser/chromeos/login/authentication_notification_details.h"
 #include "chrome/browser/chromeos/login/login_status_consumer.h"
-#include "chrome/browser/chromeos/login/ownership_service.h"
+#include "chrome/browser/chromeos/login/user.h"
 #include "chrome/browser/chromeos/login/user_manager.h"
-#include "chrome/browser/profiles/profile.h"
-#include "chrome/browser/profiles/profile_manager.h"
+#include "chrome/browser/chromeos/settings/cros_settings.h"
 #include "chrome/common/chrome_notification_types.h"
-#include "chrome/common/chrome_paths.h"
 #include "chrome/common/chrome_switches.h"
-#include "chrome/common/net/gaia/gaia_auth_fetcher.h"
-#include "chrome/common/net/gaia/gaia_constants.h"
+#include "chromeos/cryptohome/async_method_caller.h"
+#include "chromeos/dbus/cryptohome_client.h"
+#include "chromeos/dbus/dbus_thread_manager.h"
 #include "content/public/browser/browser_thread.h"
 #include "content/public/browser/notification_service.h"
-#include "net/base/load_flags.h"
-#include "net/base/net_errors.h"
-#include "net/url_request/url_request_status.h"
-#include "third_party/libjingle/source/talk/base/urlencode.h"
+#include "crypto/sha2.h"
+#include "google_apis/gaia/gaia_auth_util.h"
+#include "third_party/cros_system_api/dbus/service_constants.h"
 
-using base::Time;
-using base::TimeDelta;
 using content::BrowserThread;
-using file_util::GetFileSize;
-using file_util::PathExists;
-using file_util::ReadFile;
-using file_util::ReadFileToString;
 
 namespace chromeos {
 
-// static
-const char ParallelAuthenticator::kLocalaccountFile[] = "localaccount";
+namespace {
 
-// static
-const int ParallelAuthenticator::kClientLoginTimeoutMs = 10000;
-// static
-const int ParallelAuthenticator::kLocalaccountRetryIntervalMs = 20;
+// Milliseconds until we timeout our attempt to hit ClientLogin.
+const int kClientLoginTimeoutMs = 10000;
+
+// Length of password hashed with SHA-256.
+const int kPasswordHashLength = 32;
+
+// Records status and calls resolver->Resolve().
+void TriggerResolve(AuthAttemptState* attempt,
+                    scoped_refptr<ParallelAuthenticator> resolver,
+                    bool success,
+                    cryptohome::MountError return_code) {
+  DCHECK(BrowserThread::CurrentlyOn(BrowserThread::UI));
+  attempt->RecordCryptohomeStatus(success, return_code);
+  resolver->Resolve();
+}
+
+// Calls TriggerResolve while adding login time marker.
+void TriggerResolveWithLoginTimeMarker(
+    const std::string& marker_name,
+    AuthAttemptState* attempt,
+    scoped_refptr<ParallelAuthenticator> resolver,
+    bool success,
+    cryptohome::MountError return_code) {
+  chromeos::BootTimesLoader::Get()->AddLoginTimeMarker(marker_name, false);
+  TriggerResolve(attempt, resolver, success, return_code);
+}
+
+// Calls cryptohome's mount method.
+void Mount(AuthAttemptState* attempt,
+           scoped_refptr<ParallelAuthenticator> resolver,
+           int flags) {
+  DCHECK(BrowserThread::CurrentlyOn(BrowserThread::UI));
+  chromeos::BootTimesLoader::Get()->AddLoginTimeMarker(
+      "CryptohomeMount-Start", false);
+  cryptohome::AsyncMethodCaller::GetInstance()->AsyncMount(
+      attempt->username,
+      attempt->ascii_hash,
+      flags,
+      base::Bind(&TriggerResolveWithLoginTimeMarker,
+                 "CryptohomeMount-End",
+                 attempt,
+                 resolver));
+}
+
+// Calls cryptohome's mount method for guest.
+void MountGuest(AuthAttemptState* attempt,
+                scoped_refptr<ParallelAuthenticator> resolver) {
+  DCHECK(BrowserThread::CurrentlyOn(BrowserThread::UI));
+  cryptohome::AsyncMethodCaller::GetInstance()->AsyncMountGuest(
+      base::Bind(&TriggerResolveWithLoginTimeMarker,
+                 "CryptohomeMount-End",
+                 attempt,
+                 resolver));
+}
+
+// Calls cryptohome's key migration method.
+void Migrate(AuthAttemptState* attempt,
+             scoped_refptr<ParallelAuthenticator> resolver,
+             bool passing_old_hash,
+             const std::string& hash) {
+  DCHECK(BrowserThread::CurrentlyOn(BrowserThread::UI));
+  chromeos::BootTimesLoader::Get()->AddLoginTimeMarker(
+      "CryptohomeMigrate-Start", false);
+  cryptohome::AsyncMethodCaller* caller =
+      cryptohome::AsyncMethodCaller::GetInstance();
+  if (passing_old_hash) {
+    caller->AsyncMigrateKey(
+        attempt->username,
+        hash,
+        attempt->ascii_hash,
+        base::Bind(&TriggerResolveWithLoginTimeMarker,
+                   "CryptohomeMount-End",
+                   attempt,
+                   resolver));
+  } else {
+    caller->AsyncMigrateKey(
+        attempt->username,
+        attempt->ascii_hash,
+        hash,
+        base::Bind(&TriggerResolveWithLoginTimeMarker,
+                   "CryptohomeMount-End",
+                   attempt,
+                   resolver));
+  }
+}
+
+// Calls cryptohome's remove method.
+void Remove(AuthAttemptState* attempt,
+            scoped_refptr<ParallelAuthenticator> resolver) {
+  DCHECK(BrowserThread::CurrentlyOn(BrowserThread::UI));
+  chromeos::BootTimesLoader::Get()->AddLoginTimeMarker(
+      "CryptohomeRemove-Start", false);
+  cryptohome::AsyncMethodCaller::GetInstance()->AsyncRemove(
+      attempt->username,
+      base::Bind(&TriggerResolveWithLoginTimeMarker,
+                 "CryptohomeRemove-End",
+                 attempt,
+                 resolver));
+}
+
+// Calls cryptohome's key check method.
+void CheckKey(AuthAttemptState* attempt,
+              scoped_refptr<ParallelAuthenticator> resolver) {
+  DCHECK(BrowserThread::CurrentlyOn(BrowserThread::UI));
+  cryptohome::AsyncMethodCaller::GetInstance()->AsyncCheckKey(
+      attempt->username,
+      attempt->ascii_hash,
+      base::Bind(&TriggerResolve, attempt, resolver));
+}
+
+// Returns whether the login failure was connection issue.
+bool WasConnectionIssue(const LoginFailure& online_outcome) {
+  return ((online_outcome.reason() == LoginFailure::LOGIN_TIMED_OUT) ||
+          (online_outcome.error().state() ==
+           GoogleServiceAuthError::CONNECTION_FAILED) ||
+          (online_outcome.error().state() ==
+           GoogleServiceAuthError::REQUEST_CANCELED));
+}
+
+// Returns hash of |password|, salted with the system salt.
+std::string HashPassword(const std::string& password) {
+  // Get salt, ascii encode, update sha with that, then update with ascii
+  // of password, then end.
+  std::string ascii_salt =
+      CrosLibrary::Get()->GetCryptohomeLibrary()->GetSystemSalt();
+  char passhash_buf[kPasswordHashLength];
+
+  // Hash salt and password
+  crypto::SHA256HashString(ascii_salt + password,
+                           &passhash_buf, sizeof(passhash_buf));
+
+  // Only want the top half for 'weak' hashing so that the passphrase is not
+  // immediately exposed even if the output is reversed.
+  const int encoded_length = sizeof(passhash_buf) / 2;
+
+  return StringToLowerASCII(base::HexEncode(
+      reinterpret_cast<const void*>(passhash_buf), encoded_length));
+}
+
+}  // namespace
 
 ParallelAuthenticator::ParallelAuthenticator(LoginStatusConsumer* consumer)
     : Authenticator(consumer),
+      migrate_attempted_(false),
+      remove_attempted_(false),
+      ephemeral_mount_attempted_(false),
+      check_key_attempted_(false),
       already_reported_success_(false),
-      checked_for_localaccount_(false),
-      using_oauth_(
-          CommandLine::ForCurrentProcess()->HasSwitch(
-              switches::kWebUILogin) &&
-          !CommandLine::ForCurrentProcess()->HasSwitch(
-                  switches::kSkipOAuthLogin)) {
-  // If not already owned, this is a no-op.  If it is, this loads the owner's
-  // public key off of disk.
-  OwnershipService::GetSharedInstance()->StartLoadOwnerKeyAttempt();
+      owner_is_verified_(false),
+      user_can_login_(false),
+      using_oauth_(true) {
 }
-
-ParallelAuthenticator::~ParallelAuthenticator() {}
 
 void ParallelAuthenticator::AuthenticateToLogin(
     Profile* profile,
@@ -76,112 +196,140 @@ void ParallelAuthenticator::AuthenticateToLogin(
     const std::string& password,
     const std::string& login_token,
     const std::string& login_captcha) {
-  std::string canonicalized = Authenticator::Canonicalize(username);
+  std::string canonicalized = gaia::CanonicalizeEmail(username);
   authentication_profile_ = profile;
   current_state_.reset(
       new AuthAttemptState(
           canonicalized,
           password,
-          CrosLibrary::Get()->GetCryptohomeLibrary()->HashPassword(password),
+          HashPassword(password),
           login_token,
           login_captcha,
+          User::USER_TYPE_REGULAR,
           !UserManager::Get()->IsKnownUser(canonicalized)));
-  mounter_ = CryptohomeOp::CreateMountAttempt(current_state_.get(),
-                                              this,
-                                              false /* don't create */);
-  // Sadly, this MUST be on the UI thread due to sending DBus traffic :-/
+  // Reset the verified flag.
+  owner_is_verified_ = false;
+
   BrowserThread::PostTask(
       BrowserThread::UI, FROM_HERE,
-
-      base::Bind(&CryptohomeOp::Initiate, mounter_.get()));
+      base::Bind(&Mount,
+                 current_state_.get(),
+                 scoped_refptr<ParallelAuthenticator>(this),
+                 cryptohome::MOUNT_FLAGS_NONE));
   // ClientLogin authentication check should happen immediately here.
   // We should not try OAuthLogin check until the profile loads.
   if (!using_oauth_) {
     // Initiate ClientLogin-based post authentication.
-    current_online_ = new OnlineAttempt(using_oauth_,
-                                        current_state_.get(),
-                                        this);
+    current_online_.reset(new OnlineAttempt(using_oauth_,
+                                            current_state_.get(),
+                                            this));
     current_online_->Initiate(profile);
   }
-
-  BrowserThread::PostTask(
-      BrowserThread::FILE, FROM_HERE,
-      base::Bind(&ParallelAuthenticator::LoadLocalaccount, this,
-                 std::string(kLocalaccountFile)));
 }
 
 void ParallelAuthenticator::CompleteLogin(Profile* profile,
                                           const std::string& username,
                                           const std::string& password) {
-  std::string canonicalized = Authenticator::Canonicalize(username);
+  std::string canonicalized = gaia::CanonicalizeEmail(username);
   authentication_profile_ = profile;
   current_state_.reset(
       new AuthAttemptState(
           canonicalized,
           password,
-          CrosLibrary::Get()->GetCryptohomeLibrary()->HashPassword(password),
+          HashPassword(password),
           !UserManager::Get()->IsKnownUser(canonicalized)));
-  mounter_ = CryptohomeOp::CreateMountAttempt(current_state_.get(),
-                                              this,
-                                              false /* don't create */);
-  // Sadly, this MUST be on the UI thread due to sending DBus traffic :-/
+
+  // Reset the verified flag.
+  owner_is_verified_ = false;
+
   BrowserThread::PostTask(
       BrowserThread::UI, FROM_HERE,
-      base::Bind(&CryptohomeOp::Initiate, mounter_.get()));
+      base::Bind(&Mount,
+                 current_state_.get(),
+                 scoped_refptr<ParallelAuthenticator>(this),
+                 cryptohome::MOUNT_FLAGS_NONE));
 
   if (!using_oauth_) {
     // Test automation needs to disable oauth, but that leads to other
     // services not being able to fetch a token, leading to browser crashes.
     // So initiate ClientLogin-based post authentication.
     // TODO(xiyuan): This should not be required.
-    current_online_ = new OnlineAttempt(using_oauth_,
-                                        current_state_.get(),
-                                        this);
+    current_online_.reset(new OnlineAttempt(using_oauth_,
+                                            current_state_.get(),
+                                            this));
     current_online_->Initiate(profile);
   } else {
     // For login completion from extension, we just need to resolve the current
     // auth attempt state, the rest of OAuth related tasks will be done in
     // parallel.
     BrowserThread::PostTask(
-        BrowserThread::IO, FROM_HERE,
+        BrowserThread::UI, FROM_HERE,
         base::Bind(&ParallelAuthenticator::ResolveLoginCompletionStatus, this));
   }
-
-  BrowserThread::PostTask(
-      BrowserThread::FILE, FROM_HERE,
-      base::Bind(&ParallelAuthenticator::LoadLocalaccount, this,
-                 std::string(kLocalaccountFile)));
 }
 
 void ParallelAuthenticator::AuthenticateToUnlock(const std::string& username,
                                                  const std::string& password) {
   current_state_.reset(
       new AuthAttemptState(
-          Authenticator::Canonicalize(username),
-          CrosLibrary::Get()->GetCryptohomeLibrary()->HashPassword(password)));
-  BrowserThread::PostTask(
-      BrowserThread::FILE, FROM_HERE,
-      base::Bind(&ParallelAuthenticator::LoadLocalaccount, this,
-                 std::string(kLocalaccountFile)));
-  key_checker_ = CryptohomeOp::CreateCheckKeyAttempt(current_state_.get(),
-                                                     this);
-  // Sadly, this MUST be on the UI thread due to sending DBus traffic :-/
+          gaia::CanonicalizeEmail(username),
+          HashPassword(password)));
+  check_key_attempted_ = true;
   BrowserThread::PostTask(
       BrowserThread::UI, FROM_HERE,
-      base::Bind(&CryptohomeOp::Initiate, key_checker_.get()));
+      base::Bind(&CheckKey,
+                 current_state_.get(),
+                 scoped_refptr<ParallelAuthenticator>(this)));
+}
+
+void ParallelAuthenticator::LoginRetailMode() {
+  DCHECK(BrowserThread::CurrentlyOn(BrowserThread::UI));
+  // Note: |kRetailModeUserEMail| is used in other places to identify a retail
+  // mode session.
+  current_state_.reset(new AuthAttemptState(kRetailModeUserEMail,
+                                            "", "", "", "",
+                                            User::USER_TYPE_RETAIL_MODE,
+                                            false));
+  ephemeral_mount_attempted_ = true;
+  MountGuest(current_state_.get(),
+             scoped_refptr<ParallelAuthenticator>(this));
 }
 
 void ParallelAuthenticator::LoginOffTheRecord() {
-  current_state_.reset(new AuthAttemptState("", "", "", "", "", false));
-  guest_mounter_ =
-      CryptohomeOp::CreateMountGuestAttempt(current_state_.get(), this);
   DCHECK(BrowserThread::CurrentlyOn(BrowserThread::UI));
-  guest_mounter_->Initiate();
+  current_state_.reset(new AuthAttemptState("", "", "", "", "",
+                                            User::USER_TYPE_GUEST,
+                                            false));
+  ephemeral_mount_attempted_ = true;
+  MountGuest(current_state_.get(),
+             scoped_refptr<ParallelAuthenticator>(this));
 }
 
-void ParallelAuthenticator::OnLoginSuccess(
-    const GaiaAuthConsumer::ClientLoginResult& credentials,
-    bool request_pending) {
+void ParallelAuthenticator::LoginAsPublicAccount(const std::string& username) {
+  DCHECK(BrowserThread::CurrentlyOn(BrowserThread::UI));
+  current_state_.reset(new AuthAttemptState(username, "", "", "", "",
+                                            User::USER_TYPE_PUBLIC_ACCOUNT,
+                                            false));
+  ephemeral_mount_attempted_ = true;
+  Mount(current_state_.get(),
+        scoped_refptr<ParallelAuthenticator>(this),
+        cryptohome::CREATE_IF_MISSING | cryptohome::ENSURE_EPHEMERAL);
+}
+
+void ParallelAuthenticator::OnRetailModeLoginSuccess() {
+  DCHECK(BrowserThread::CurrentlyOn(BrowserThread::UI));
+  VLOG(1) << "Retail mode login success";
+  // Send notification of success
+  AuthenticationNotificationDetails details(true);
+  content::NotificationService::current()->Notify(
+      chrome::NOTIFICATION_LOGIN_AUTHENTICATION,
+      content::NotificationService::AllSources(),
+      content::Details<AuthenticationNotificationDetails>(&details));
+  if (consumer_)
+    consumer_->OnRetailModeLoginSuccess();
+}
+
+void ParallelAuthenticator::OnLoginSuccess(bool request_pending) {
   DCHECK(BrowserThread::CurrentlyOn(BrowserThread::UI));
   VLOG(1) << "Login success";
   // Send notification of success
@@ -194,11 +342,11 @@ void ParallelAuthenticator::OnLoginSuccess(
     base::AutoLock for_this_block(success_lock_);
     already_reported_success_ = true;
   }
-  consumer_->OnLoginSuccess(current_state_->username,
-                            current_state_->password,
-                            credentials,
-                            request_pending,
-                            using_oauth_);
+  if (consumer_)
+    consumer_->OnLoginSuccess(current_state_->username,
+                              current_state_->password,
+                              request_pending,
+                              using_oauth_);
 }
 
 void ParallelAuthenticator::OnOffTheRecordLoginSuccess() {
@@ -209,48 +357,14 @@ void ParallelAuthenticator::OnOffTheRecordLoginSuccess() {
       chrome::NOTIFICATION_LOGIN_AUTHENTICATION,
       content::NotificationService::AllSources(),
       content::Details<AuthenticationNotificationDetails>(&details));
-  consumer_->OnOffTheRecordLoginSuccess();
+  if (consumer_)
+    consumer_->OnOffTheRecordLoginSuccess();
 }
 
-void ParallelAuthenticator::OnPasswordChangeDetected(
-    const GaiaAuthConsumer::ClientLoginResult& credentials) {
+void ParallelAuthenticator::OnPasswordChangeDetected() {
   DCHECK(BrowserThread::CurrentlyOn(BrowserThread::UI));
-  consumer_->OnPasswordChangeDetected(credentials);
-}
-
-void ParallelAuthenticator::CheckLocalaccount(const LoginFailure& error) {
-  {
-    base::AutoLock for_this_block(localaccount_lock_);
-    VLOG(2) << "Checking localaccount";
-    if (!checked_for_localaccount_) {
-      BrowserThread::PostDelayedTask(
-          BrowserThread::FILE, FROM_HERE,
-          base::Bind(&ParallelAuthenticator::CheckLocalaccount, this, error),
-          kLocalaccountRetryIntervalMs);
-      return;
-    }
-  }
-
-  if (!localaccount_.empty() && localaccount_ == current_state_->username) {
-    // Success.  Go mount a tmpfs for the profile, if necessary.
-    if (!current_state_->unlock) {
-      guest_mounter_ =
-          CryptohomeOp::CreateMountGuestAttempt(current_state_.get(), this);
-      BrowserThread::PostTask(
-          BrowserThread::UI, FROM_HERE,
-          base::Bind(&CryptohomeOp::Initiate, guest_mounter_.get()));
-    } else {
-      BrowserThread::PostTask(
-          BrowserThread::UI, FROM_HERE,
-          base::Bind(&ParallelAuthenticator::OnLoginSuccess, this,
-                     GaiaAuthConsumer::ClientLoginResult(), false));
-    }
-  } else {
-    // Not the localaccount.  Fail, passing along cached error info.
-    BrowserThread::PostTask(
-        BrowserThread::UI, FROM_HERE,
-        base::Bind(&ParallelAuthenticator::OnLoginFailure, this, error));
-  }
+  if (consumer_)
+    consumer_->OnPasswordChangeDetected();
 }
 
 void ParallelAuthenticator::OnLoginFailure(const LoginFailure& error) {
@@ -262,7 +376,8 @@ void ParallelAuthenticator::OnLoginFailure(const LoginFailure& error) {
       content::NotificationService::AllSources(),
       content::Details<AuthenticationNotificationDetails>(&details));
   LOG(WARNING) << "Login failed: " << error.GetErrorString();
-  consumer_->OnLoginFailure(error);
+  if (consumer_)
+    consumer_->OnLoginFailure(error);
 }
 
 void ParallelAuthenticator::RecordOAuthCheckFailure(
@@ -270,41 +385,65 @@ void ParallelAuthenticator::RecordOAuthCheckFailure(
   DCHECK(BrowserThread::CurrentlyOn(BrowserThread::UI));
   DCHECK(using_oauth_);
   // Mark this account's OAuth token state as invalid in the local state.
-  UserManager::Get()->SaveUserOAuthStatus(user_name,
-                                          User::OAUTH_TOKEN_STATUS_INVALID);
+  UserManager::Get()->SaveUserOAuthStatus(
+      user_name,
+      CommandLine::ForCurrentProcess()->HasSwitch(switches::kForceOAuth1) ?
+          User::OAUTH1_TOKEN_STATUS_INVALID :
+          User::OAUTH2_TOKEN_STATUS_INVALID);
 }
 
 void ParallelAuthenticator::RecoverEncryptedData(
-    const std::string& old_password,
-    const GaiaAuthConsumer::ClientLoginResult& credentials) {
-  std::string old_hash =
-      CrosLibrary::Get()->GetCryptohomeLibrary()->HashPassword(old_password);
-  key_migrator_ = CryptohomeOp::CreateMigrateAttempt(current_state_.get(),
-                                                     this,
-                                                     true,
-                                                     old_hash);
-  BrowserThread::PostTask(
-      BrowserThread::IO, FROM_HERE,
-      base::Bind(&ParallelAuthenticator::ResyncRecoverHelper, this,
-                 key_migrator_));
-}
-
-void ParallelAuthenticator::ResyncEncryptedData(
-    const GaiaAuthConsumer::ClientLoginResult& credentials) {
-  data_remover_ =
-      CryptohomeOp::CreateRemoveAttempt(current_state_.get(), this);
-  BrowserThread::PostTask(
-      BrowserThread::IO, FROM_HERE,
-      base::Bind(&ParallelAuthenticator::ResyncRecoverHelper, this,
-                 data_remover_));
-}
-
-void ParallelAuthenticator::ResyncRecoverHelper(CryptohomeOp* to_initiate) {
-  DCHECK(BrowserThread::CurrentlyOn(BrowserThread::IO));
+    const std::string& old_password) {
+  std::string old_hash = HashPassword(old_password);
+  migrate_attempted_ = true;
   current_state_->ResetCryptohomeStatus();
   BrowserThread::PostTask(
       BrowserThread::UI, FROM_HERE,
-      base::Bind(&CryptohomeOp::Initiate, to_initiate));
+      base::Bind(&Migrate,
+                 current_state_.get(),
+                 scoped_refptr<ParallelAuthenticator>(this),
+                 true,
+                 old_hash));
+}
+
+void ParallelAuthenticator::ResyncEncryptedData() {
+  remove_attempted_ = true;
+  current_state_->ResetCryptohomeStatus();
+  BrowserThread::PostTask(
+      BrowserThread::UI, FROM_HERE,
+      base::Bind(&Remove,
+                 current_state_.get(),
+                 scoped_refptr<ParallelAuthenticator>(this)));
+}
+
+bool ParallelAuthenticator::VerifyOwner() {
+  if (owner_is_verified_)
+    return true;
+  // Check if policy data is fine and continue in safe mode if needed.
+  bool is_safe_mode = false;
+  CrosSettings::Get()->GetBoolean(kPolicyMissingMitigationMode, &is_safe_mode);
+  if (!is_safe_mode) {
+    // Now we can continue with the login and report mount success.
+    user_can_login_ = true;
+    owner_is_verified_ = true;
+    return true;
+  }
+  // First we have to make sure the current user's cert store is available.
+  CrosLibrary::Get()->GetCertLibrary()->LoadKeyStore();
+  // Now we can continue reading the private key.
+  DeviceSettingsService::Get()->SetUsername(current_state_->username);
+  DeviceSettingsService::Get()->GetOwnershipStatusAsync(
+      base::Bind(&ParallelAuthenticator::OnOwnershipChecked, this));
+  return false;
+}
+
+void ParallelAuthenticator::OnOwnershipChecked(
+    DeviceSettingsService::OwnershipStatus status,
+    bool is_owner) {
+  // Now we can check if this user is the owner.
+  user_can_login_ = is_owner;
+  owner_is_verified_ = true;
+  Resolve();
 }
 
 void ParallelAuthenticator::RetryAuth(Profile* profile,
@@ -314,27 +453,28 @@ void ParallelAuthenticator::RetryAuth(Profile* profile,
                                       const std::string& login_captcha) {
   reauth_state_.reset(
       new AuthAttemptState(
-          Authenticator::Canonicalize(username),
+          gaia::CanonicalizeEmail(username),
           password,
-          CrosLibrary::Get()->GetCryptohomeLibrary()->HashPassword(password),
+          HashPassword(password),
           login_token,
           login_captcha,
+          User::USER_TYPE_REGULAR,
           false /* not a new user */));
   // Always use ClientLogin regardless of using_oauth flag. This is because
   // we are unable to renew oauth token on lock screen currently and will
   // stuck with lock screen if we use OAuthLogin here.
   // TODO(xiyuan): Revisit this after we support Gaia in lock screen.
-  current_online_ = new OnlineAttempt(false /* using_oauth */,
-                                      reauth_state_.get(),
-                                      this);
+  current_online_.reset(new OnlineAttempt(false /* using_oauth */,
+                                          reauth_state_.get(),
+                                          this));
   current_online_->Initiate(profile);
 }
 
 
 void ParallelAuthenticator::Resolve() {
-  DCHECK(BrowserThread::CurrentlyOn(BrowserThread::IO));
+  DCHECK(BrowserThread::CurrentlyOn(BrowserThread::UI));
   bool request_pending = false;
-  bool create = false;
+  int mount_flags = cryptohome::MOUNT_FLAGS_NONE;
   ParallelAuthenticator::AuthState state = ResolveState();
   VLOG(1) << "Resolved state to: " << state;
   switch (state) {
@@ -362,29 +502,36 @@ void ParallelAuthenticator::Resolve() {
                      LoginFailure(LoginFailure::DATA_REMOVAL_FAILED)));
       break;
     case FAILED_TMPFS:
-      // In this case, we tried to mount a tmpfs for BWSI or the localaccount
-      // user and failed.
+      // In this case, we tried to mount a tmpfs for guest and failed.
       BrowserThread::PostTask(
           BrowserThread::UI, FROM_HERE,
           base::Bind(&ParallelAuthenticator::OnLoginFailure, this,
                      LoginFailure(LoginFailure::COULD_NOT_MOUNT_TMPFS)));
       break;
-    case CREATE_NEW:
-      create = true;
-    case RECOVER_MOUNT:
-      current_state_->ResetCryptohomeStatus();
-      mounter_ = CryptohomeOp::CreateMountAttempt(current_state_.get(),
-                                                  this,
-                                                  create);
+    case FAILED_TPM:
+      // In this case, we tried to create/mount cryptohome and failed
+      // because of the critical TPM error.
+      // Chrome will notify user and request reboot.
       BrowserThread::PostTask(
           BrowserThread::UI, FROM_HERE,
-          base::Bind(&CryptohomeOp::Initiate, mounter_.get()));
+          base::Bind(&ParallelAuthenticator::OnLoginFailure, this,
+                     LoginFailure(LoginFailure::TPM_ERROR)));
+      break;
+    case CREATE_NEW:
+      mount_flags |= cryptohome::CREATE_IF_MISSING;
+    case RECOVER_MOUNT:
+      current_state_->ResetCryptohomeStatus();
+      BrowserThread::PostTask(
+          BrowserThread::UI, FROM_HERE,
+          base::Bind(&Mount,
+                     current_state_.get(),
+                     scoped_refptr<ParallelAuthenticator>(this),
+                     mount_flags));
       break;
     case NEED_OLD_PW:
       BrowserThread::PostTask(
           BrowserThread::UI, FROM_HERE,
-          base::Bind(&ParallelAuthenticator::OnPasswordChangeDetected, this,
-                     current_state_->credentials()));
+          base::Bind(&ParallelAuthenticator::OnPasswordChangeDetected, this));
       break;
     case ONLINE_FAILED:
       // In this case, we know online login was rejected because the account
@@ -405,8 +552,7 @@ void ParallelAuthenticator::Resolve() {
             // OnLoginSuccess(..., ..., true) -> OnLoginFailure().
             BrowserThread::PostTask(
                 BrowserThread::UI, FROM_HERE,
-                base::Bind(&ParallelAuthenticator::OnLoginSuccess, this,
-                           current_state_->credentials(), true));
+                base::Bind(&ParallelAuthenticator::OnLoginSuccess, this, true));
           }
         }
         const LoginFailure& login_failure =
@@ -428,14 +574,14 @@ void ParallelAuthenticator::Resolve() {
         break;
     }
     case HAVE_NEW_PW:
-      key_migrator_ =
-          CryptohomeOp::CreateMigrateAttempt(reauth_state_.get(),
-                                             this,
-                                             true,
-                                             current_state_->ascii_hash);
+      migrate_attempted_ = true;
       BrowserThread::PostTask(
           BrowserThread::UI, FROM_HERE,
-          base::Bind(&CryptohomeOp::Initiate, key_migrator_.get()));
+          base::Bind(&Migrate,
+                     reauth_state_.get(),
+                     scoped_refptr<ParallelAuthenticator>(this),
+                     true,
+                     current_state_->ascii_hash));
       break;
     case OFFLINE_LOGIN:
       VLOG(2) << "Offline login";
@@ -456,28 +602,61 @@ void ParallelAuthenticator::Resolve() {
       BrowserThread::PostTask(
           BrowserThread::UI, FROM_HERE,
           base::Bind(&ParallelAuthenticator::OnLoginSuccess, this,
-                     current_state_->credentials(), request_pending));
+                     request_pending));
       break;
-    case LOCAL_LOGIN:
+    case DEMO_LOGIN:
+      VLOG(2) << "Retail mode login";
+      using_oauth_ = false;
+      BrowserThread::PostTask(
+          BrowserThread::UI, FROM_HERE,
+          base::Bind(&ParallelAuthenticator::OnRetailModeLoginSuccess, this));
+      break;
+    case GUEST_LOGIN:
       BrowserThread::PostTask(
           BrowserThread::UI, FROM_HERE,
           base::Bind(&ParallelAuthenticator::OnOffTheRecordLoginSuccess, this));
       break;
+    case PUBLIC_ACCOUNT_LOGIN:
+      using_oauth_ = false;
+      BrowserThread::PostTask(
+          BrowserThread::UI, FROM_HERE,
+          base::Bind(&ParallelAuthenticator::OnLoginSuccess, this, false));
+      break;
     case LOGIN_FAILED:
       current_state_->ResetCryptohomeStatus();
-      BrowserThread::PostTask(
-          BrowserThread::FILE, FROM_HERE,
-          base::Bind(&ParallelAuthenticator::CheckLocalaccount, this,
-                     current_state_->online_outcome()));
+      BrowserThread::PostTask(BrowserThread::UI,
+                              FROM_HERE,
+                              base::Bind(
+                                  &ParallelAuthenticator::OnLoginFailure,
+                                  this,
+                                  current_state_->online_outcome()));
       break;
+    case OWNER_REQUIRED: {
+      current_state_->ResetCryptohomeStatus();
+      bool success = false;
+      DBusThreadManager::Get()->GetCryptohomeClient()->Unmount(&success);
+      if (!success) {
+        // Maybe we should reboot immediately here?
+        LOG(ERROR) << "Couldn't unmount users home!";
+      }
+      BrowserThread::PostTask(BrowserThread::UI,
+                              FROM_HERE,
+                              base::Bind(
+                                  &ParallelAuthenticator::OnLoginFailure,
+                                  this,
+                                  LoginFailure(LoginFailure::OWNER_REQUIRED)));
+      break;
+    }
     default:
       NOTREACHED();
       break;
   }
 }
 
+ParallelAuthenticator::~ParallelAuthenticator() {}
+
 ParallelAuthenticator::AuthState ParallelAuthenticator::ResolveState() {
-  DCHECK(BrowserThread::CurrentlyOn(BrowserThread::IO));
+  DCHECK(BrowserThread::CurrentlyOn(BrowserThread::UI));
   // If we haven't mounted the user's home dir yet, we can't be done.
   // We never get past here if a cryptohome op is still pending.
   // This is an important invariant.
@@ -494,10 +673,10 @@ ParallelAuthenticator::AuthState ParallelAuthenticator::ResolveState() {
     state = ResolveCryptohomeFailureState();
 
   DCHECK(current_state_->cryptohome_complete());  // Ensure invariant holds.
-  key_migrator_ = NULL;
-  data_remover_ = NULL;
-  guest_mounter_ = NULL;
-  key_checker_ = NULL;
+  migrate_attempted_ = false;
+  remove_attempted_ = false;
+  ephemeral_mount_attempted_ = false;
+  check_key_attempted_ = false;
 
   if (state != POSSIBLE_PW_CHANGE &&
       state != NO_MOUNT &&
@@ -518,7 +697,7 @@ ParallelAuthenticator::AuthState ParallelAuthenticator::ResolveState() {
 
 ParallelAuthenticator::AuthState
 ParallelAuthenticator::ResolveReauthState() {
-  DCHECK(BrowserThread::CurrentlyOn(BrowserThread::IO));
+  DCHECK(BrowserThread::CurrentlyOn(BrowserThread::UI));
   if (reauth_state_->cryptohome_complete()) {
     if (!reauth_state_->cryptohome_outcome()) {
       // If we've tried to migrate and failed, log the error and just wait
@@ -540,15 +719,21 @@ ParallelAuthenticator::ResolveReauthState() {
 
 ParallelAuthenticator::AuthState
 ParallelAuthenticator::ResolveCryptohomeFailureState() {
-  DCHECK(BrowserThread::CurrentlyOn(BrowserThread::IO));
-  if (data_remover_.get())
+  DCHECK(BrowserThread::CurrentlyOn(BrowserThread::UI));
+  if (remove_attempted_)
     return FAILED_REMOVE;
-  if (guest_mounter_.get())
+  if (ephemeral_mount_attempted_)
     return FAILED_TMPFS;
-  if (key_migrator_.get())
+  if (migrate_attempted_)
     return NEED_OLD_PW;
-  if (key_checker_.get())
+  if (check_key_attempted_)
     return LOGIN_FAILED;
+
+  if (current_state_->cryptohome_code() ==
+      cryptohome::MOUNT_ERROR_TPM_NEEDS_REBOOT) {
+    // Critical TPM error detected, reboot needed.
+    return FAILED_TPM;
+  }
 
   // Return intermediate states in the following cases:
   // 1. When there is a parallel online attempt to resolve them later;
@@ -557,14 +742,14 @@ ParallelAuthenticator::ResolveCryptohomeFailureState() {
   //    This is the case after user finishes Gaia login;
   if (current_online_.get() || current_state_->online_complete()) {
     if (current_state_->cryptohome_code() ==
-        chromeos::kCryptohomeMountErrorKeyFailure) {
+        cryptohome::MOUNT_ERROR_KEY_FAILURE) {
       // If we tried a mount but they used the wrong key, we may need to
       // ask the user for her old password.  We'll only know once we've
       // done the online check.
       return POSSIBLE_PW_CHANGE;
     }
     if (current_state_->cryptohome_code() ==
-        chromeos::kCryptohomeMountErrorUserDoesNotExist) {
+        cryptohome::MOUNT_ERROR_USER_DOES_NOT_EXIST) {
       // If we tried a mount but the user did not exist, then we should wait
       // for online login to succeed and try again with the "create" flag set.
       return NO_MOUNT;
@@ -576,32 +761,30 @@ ParallelAuthenticator::ResolveCryptohomeFailureState() {
 
 ParallelAuthenticator::AuthState
 ParallelAuthenticator::ResolveCryptohomeSuccessState() {
-  DCHECK(BrowserThread::CurrentlyOn(BrowserThread::IO));
-  if (data_remover_.get())
+  DCHECK(BrowserThread::CurrentlyOn(BrowserThread::UI));
+  if (remove_attempted_)
     return CREATE_NEW;
-  if (guest_mounter_.get())
-    return LOCAL_LOGIN;
-  if (key_migrator_.get())
+  if (migrate_attempted_)
     return RECOVER_MOUNT;
-  if (key_checker_.get())
+  if (check_key_attempted_)
     return UNLOCK;
-  return OFFLINE_LOGIN;
-}
 
-namespace {
-bool WasConnectionIssue(const LoginFailure& online_outcome) {
-  return ((online_outcome.reason() == LoginFailure::LOGIN_TIMED_OUT) ||
-          (online_outcome.error().state() ==
-           GoogleServiceAuthError::CONNECTION_FAILED) ||
-          (online_outcome.error().state() ==
-           GoogleServiceAuthError::REQUEST_CANCELED));
+  if (current_state_->user_type == User::USER_TYPE_GUEST)
+    return GUEST_LOGIN;
+  if (current_state_->user_type == User::USER_TYPE_RETAIL_MODE)
+    return DEMO_LOGIN;
+  if (current_state_->user_type == User::USER_TYPE_PUBLIC_ACCOUNT)
+    return PUBLIC_ACCOUNT_LOGIN;
+
+  if (!VerifyOwner())
+    return CONTINUE;
+  return user_can_login_ ? OFFLINE_LOGIN : OWNER_REQUIRED;
 }
-}  // anonymous namespace
 
 ParallelAuthenticator::AuthState
 ParallelAuthenticator::ResolveOnlineFailureState(
     ParallelAuthenticator::AuthState offline_state) {
-  DCHECK(BrowserThread::CurrentlyOn(BrowserThread::IO));
+  DCHECK(BrowserThread::CurrentlyOn(BrowserThread::UI));
   if (offline_state == OFFLINE_LOGIN) {
     if (WasConnectionIssue(current_state_->online_outcome())) {
       // Couldn't do an online check, so just go with the offline result.
@@ -620,7 +803,7 @@ ParallelAuthenticator::ResolveOnlineFailureState(
 ParallelAuthenticator::AuthState
 ParallelAuthenticator::ResolveOnlineSuccessState(
     ParallelAuthenticator::AuthState offline_state) {
-  DCHECK(BrowserThread::CurrentlyOn(BrowserThread::IO));
+  DCHECK(BrowserThread::CurrentlyOn(BrowserThread::UI));
   switch (offline_state) {
     case POSSIBLE_PW_CHANGE:
       return NEED_OLD_PW;
@@ -634,41 +817,16 @@ ParallelAuthenticator::ResolveOnlineSuccessState(
   }
 }
 
-void ParallelAuthenticator::LoadLocalaccount(const std::string& filename) {
-  DCHECK(BrowserThread::CurrentlyOn(BrowserThread::FILE));
-  {
-    base::AutoLock for_this_block(localaccount_lock_);
-    if (checked_for_localaccount_)
-      return;
-  }
-  FilePath localaccount_file;
-  std::string localaccount;
-  if (PathService::Get(base::DIR_EXE, &localaccount_file)) {
-    localaccount_file = localaccount_file.Append(filename);
-    VLOG(2) << "Looking for localaccount in " << localaccount_file.value();
-
-    ReadFileToString(localaccount_file, &localaccount);
-    TrimWhitespaceASCII(localaccount, TRIM_TRAILING, &localaccount);
-    VLOG(1) << "Loading localaccount: " << localaccount;
-  } else {
-    VLOG(1) << "Assuming no localaccount";
-  }
-  SetLocalaccount(localaccount);
-}
-
-void ParallelAuthenticator::SetLocalaccount(const std::string& new_name) {
-  localaccount_ = new_name;
-  {  // extra braces for clarity about AutoLock scope.
-    base::AutoLock for_this_block(localaccount_lock_);
-    checked_for_localaccount_ = true;
-  }
-}
-
 void ParallelAuthenticator::ResolveLoginCompletionStatus() {
   // Shortcut online state resolution process.
-  current_state_->RecordOnlineLoginStatus(GaiaAuthConsumer::ClientLoginResult(),
-                                          LoginFailure::None());
+  current_state_->RecordOnlineLoginStatus(LoginFailure::None());
   Resolve();
+}
+
+void ParallelAuthenticator::SetOwnerState(bool owner_check_finished,
+                                          bool check_result) {
+  owner_is_verified_ = owner_check_finished;
+  user_can_login_ = check_result;
 }
 
 }  // namespace chromeos

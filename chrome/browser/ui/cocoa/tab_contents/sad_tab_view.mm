@@ -1,4 +1,4 @@
-// Copyright (c) 2011 The Chromium Authors. All rights reserved.
+// Copyright (c) 2012 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -34,8 +34,7 @@ static const CGFloat kTabHorzMargin = 13;
 - (void)awakeFromNib {
   // Load resource for image and set it.
   ResourceBundle& rb = ResourceBundle::GetSharedInstance();
-  NSImage* image = rb.GetNativeImageNamed(IDR_SAD_TAB);
-  DCHECK(image);
+  NSImage* image = rb.GetNativeImageNamed(IDR_SAD_TAB).ToNSImage();
   [image_ setImage:image];
 
   // Set font for title.

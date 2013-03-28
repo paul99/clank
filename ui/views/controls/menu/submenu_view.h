@@ -4,7 +4,6 @@
 
 #ifndef UI_VIEWS_CONTROLS_MENU_SUBMENU_VIEW_H_
 #define UI_VIEWS_CONTROLS_MENU_SUBMENU_VIEW_H_
-#pragma once
 
 #include <string>
 
@@ -68,16 +67,17 @@ class VIEWS_EXPORT SubmenuView : public View,
       std::set<OSExchangeData::CustomFormat>* custom_formats) OVERRIDE;
   virtual bool AreDropTypesRequired() OVERRIDE;
   virtual bool CanDrop(const OSExchangeData& data) OVERRIDE;
-  virtual void OnDragEntered(const DropTargetEvent& event) OVERRIDE;
-  virtual int OnDragUpdated(const DropTargetEvent& event) OVERRIDE;
+  virtual void OnDragEntered(const ui::DropTargetEvent& event) OVERRIDE;
+  virtual int OnDragUpdated(const ui::DropTargetEvent& event) OVERRIDE;
   virtual void OnDragExited() OVERRIDE;
-  virtual int OnPerformDrop(const DropTargetEvent& event) OVERRIDE;
+  virtual int OnPerformDrop(const ui::DropTargetEvent& event) OVERRIDE;
 
   // Scrolls on menu item boundaries.
-  virtual bool OnMouseWheel(const MouseWheelEvent& e) OVERRIDE;
+  virtual bool OnMouseWheel(const ui::MouseWheelEvent& e) OVERRIDE;
 
+  // Overridden from ui::EventHandler.
   // Scrolls on menu item boundaries.
-  virtual ui::GestureStatus OnGestureEvent(const GestureEvent& e) OVERRIDE;
+  virtual void OnGestureEvent(ui::GestureEvent* event) OVERRIDE;
 
   // Returns true if the menu is showing.
   bool IsShowing();
@@ -110,7 +110,7 @@ class VIEWS_EXPORT SubmenuView : public View,
   void ReleaseCapture();
 
   // Overriden from View to prevent tab from doing anything.
-  virtual bool SkipDefaultKeyEventProcessing(const KeyEvent& e) OVERRIDE;
+  virtual bool SkipDefaultKeyEventProcessing(const ui::KeyEvent& e) OVERRIDE;
 
   // Returns the parent menu item we're showing children for.
   MenuItemView* GetMenuItem() const;
@@ -148,9 +148,6 @@ class VIEWS_EXPORT SubmenuView : public View,
     resize_open_menu_ = resize_open_menu;
   }
 
-  // Padding around the edges of the submenu.
-  static const int kSubmenuBorderSize;
-
  protected:
   // View override.
   virtual std::string GetClassName() const OVERRIDE;
@@ -176,7 +173,7 @@ class VIEWS_EXPORT SubmenuView : public View,
                                          MenuDelegate::DropPosition position);
 
   // Implementation of ScrollDelegate
-  virtual void OnScroll(float dx, float dy) OVERRIDE;
+  virtual bool OnScroll(float dx, float dy) OVERRIDE;
 
   // Parent menu item.
   MenuItemView* parent_menu_item_;

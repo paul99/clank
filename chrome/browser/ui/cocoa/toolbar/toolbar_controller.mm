@@ -1,4 +1,4 @@
-// Copyright (c) 2011 The Chromium Authors. All rights reserved.
+// Copyright (c) 2012 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -13,15 +13,17 @@
 #include "base/sys_string_conversions.h"
 #include "base/utf_string_conversions.h"
 #include "chrome/app/chrome_command_ids.h"
-#include "chrome/browser/autocomplete/autocomplete.h"
 #include "chrome/browser/autocomplete/autocomplete_classifier.h"
+#include "chrome/browser/autocomplete/autocomplete_classifier_factory.h"
 #include "chrome/browser/autocomplete/autocomplete_match.h"
+#include "chrome/browser/command_updater.h"
 #include "chrome/browser/net/url_fixer_upper.h"
 #include "chrome/browser/prefs/pref_service.h"
 #include "chrome/browser/profiles/profile.h"
 #include "chrome/browser/search_engines/template_url_service.h"
 #include "chrome/browser/themes/theme_service.h"
 #include "chrome/browser/ui/browser.h"
+#include "chrome/browser/ui/browser_tabstrip.h"
 #include "chrome/browser/ui/browser_window.h"
 #import "chrome/browser/ui/cocoa/background_gradient_view.h"
 #include "chrome/browser/ui/cocoa/drag_util.h"
@@ -40,22 +42,21 @@
 #import "chrome/browser/ui/cocoa/toolbar/toolbar_view.h"
 #import "chrome/browser/ui/cocoa/view_id_util.h"
 #import "chrome/browser/ui/cocoa/wrench_menu/wrench_menu_controller.h"
-#include "chrome/browser/ui/global_error_service.h"
-#include "chrome/browser/ui/global_error_service_factory.h"
+#include "chrome/browser/ui/global_error/global_error_service.h"
+#include "chrome/browser/ui/global_error/global_error_service_factory.h"
 #include "chrome/browser/ui/omnibox/omnibox_view.h"
 #include "chrome/browser/ui/toolbar/toolbar_model.h"
 #include "chrome/browser/ui/toolbar/wrench_menu_model.h"
 #include "chrome/browser/upgrade_detector.h"
 #include "chrome/common/chrome_notification_types.h"
 #include "chrome/common/pref_names.h"
+#include "content/public/browser/notification_details.h"
 #include "content/public/browser/notification_observer.h"
 #include "content/public/browser/notification_service.h"
-#include "content/public/browser/notification_details.h"
 #include "content/public/browser/web_contents.h"
 #include "grit/chromium_strings.h"
 #include "grit/generated_resources.h"
 #include "grit/theme_resources.h"
-#include "grit/theme_resources_standard.h"
 #include "ui/base/l10n/l10n_util.h"
 #include "ui/base/l10n/l10n_util_mac.h"
 #include "ui/base/resource/resource_bundle.h"
@@ -86,7 +87,7 @@ const CGFloat kWrenchMenuLeftPadding = 3.0;
 @property(assign, nonatomic) Browser* browser;
 - (void)addAccessibilityDescriptions;
 - (void)initCommandStatus:(CommandUpdater*)commands;
-- (void)prefChanged:(std::string*)prefName;
+- (void)prefChanged:(const std::string&)prefName;
 - (BackgroundGradientView*)backgroundGradientView;
 - (void)toolbarFrameChanged;
 - (void)pinLocationBarToLeftOfBrowserActionsContainerAndAnimate:(BOOL)animate;
@@ -104,7 +105,8 @@ namespace ToolbarControllerInternal {
 // A class registered for C++ notifications. This is used to detect changes in
 // preferences and upgrade available notifications. Bridges the notification
 // back to the ToolbarController.
-class NotificationBridge : public content::NotificationObserver {
+class NotificationBridge
+    : public content::NotificationObserver {
  public:
   explicit NotificationBridge(ToolbarController* controller)
       : controller_(controller) {
@@ -117,11 +119,8 @@ class NotificationBridge : public content::NotificationObserver {
   // Overridden from content::NotificationObserver:
   virtual void Observe(int type,
                        const content::NotificationSource& source,
-                       const content::NotificationDetails& details) {
+                       const content::NotificationDetails& details) OVERRIDE {
     switch (type) {
-      case chrome::NOTIFICATION_PREF_CHANGED:
-        [controller_ prefChanged:content::Details<std::string>(details).ptr()];
-        break;
       case chrome::NOTIFICATION_UPGRADE_RECOMMENDED:
       case chrome::NOTIFICATION_GLOBAL_ERRORS_CHANGED:
         [controller_ badgeWrenchMenuIfNeeded];
@@ -129,6 +128,10 @@ class NotificationBridge : public content::NotificationObserver {
       default:
         NOTREACHED();
     }
+  }
+
+  void OnPreferenceChanged(const std::string& pref_name) {
+    [controller_ prefChanged:pref_name];
   }
 
  private:
@@ -273,8 +276,11 @@ class NotificationBridge : public content::NotificationObserver {
   notificationBridge_.reset(
       new ToolbarControllerInternal::NotificationBridge(self));
   PrefService* prefs = profile_->GetPrefs();
-  showHomeButton_.Init(prefs::kShowHomeButton, prefs,
-                       notificationBridge_.get());
+  showHomeButton_.Init(
+      prefs::kShowHomeButton, prefs,
+      base::Bind(
+          &ToolbarControllerInternal::NotificationBridge::OnPreferenceChanged,
+          base::Unretained(notificationBridge_.get())));
   [self showOptionalHomeButton];
   [self installWrenchMenu];
 
@@ -303,7 +309,7 @@ class NotificationBridge : public content::NotificationObserver {
                                            NSTrackingInVisibleRect |
                                            NSTrackingMouseEnteredAndExited |
                                            NSTrackingActiveAlways
-                              proxiedOwner:self
+                                     owner:self
                                   userInfo:nil]);
   NSView* toolbarView = [self view];
   [toolbarView addTrackingArea:trackingArea_.get()];
@@ -430,7 +436,7 @@ class NotificationBridge : public content::NotificationObserver {
                shouldRestoreState:(BOOL)shouldRestore {
   locationBarView_->Update(tab, shouldRestore ? true : false);
 
-  [locationBar_ updateCursorAndToolTipRects];
+  [locationBar_ updateMouseTracking];
 
   if (browserActionsController_.get()) {
     [browserActionsController_ update];
@@ -439,6 +445,10 @@ class NotificationBridge : public content::NotificationObserver {
 
 - (void)setStarredState:(BOOL)isStarred {
   locationBarView_->SetStarred(isStarred ? true : false);
+}
+
+- (void)zoomChangedForActiveTab:(BOOL)canShowBubble {
+  locationBarView_->ZoomChangedForActiveTab(canShowBubble ? true : false);
 }
 
 - (void)setIsLoading:(BOOL)isLoading force:(BOOL)force {
@@ -558,9 +568,8 @@ class NotificationBridge : public content::NotificationObserver {
   [[wrenchButton_ cell] setOverlayImageID:error_badge_id];
 }
 
-- (void)prefChanged:(std::string*)prefName {
-  if (!prefName) return;
-  if (*prefName == prefs::kShowHomeButton) {
+- (void)prefChanged:(const std::string&)prefName {
+  if (prefName == prefs::kShowHomeButton) {
     [self showOptionalHomeButton];
   }
 }
@@ -756,12 +765,12 @@ class NotificationBridge : public content::NotificationObserver {
       base::SysNSStringToUTF8([urls objectAtIndex:0]), std::string()));
 
   if (url.SchemeIs(chrome::kJavaScriptScheme)) {
-    browser_->window()->GetLocationBar()->location_entry()->SetUserText(
-        OmniboxView::StripJavascriptSchemas(UTF8ToUTF16(url.spec())));
+    browser_->window()->GetLocationBar()->GetLocationEntry()->SetUserText(
+          OmniboxView::StripJavascriptSchemas(UTF8ToUTF16(url.spec())));
   }
   OpenURLParams params(
       url, Referrer(), CURRENT_TAB, content::PAGE_TRANSITION_TYPED, false);
-  browser_->GetSelectedWebContents()->OpenURL(params);
+  chrome::GetActiveWebContents(browser_)->OpenURL(params);
 }
 
 // (URLDropTargetController protocol)
@@ -772,13 +781,13 @@ class NotificationBridge : public content::NotificationObserver {
 
   // If the input is plain text, classify the input and make the URL.
   AutocompleteMatch match;
-  browser_->profile()->GetAutocompleteClassifier()->Classify(
+  AutocompleteClassifierFactory::GetForProfile(browser_->profile())->Classify(
       base::SysNSStringToUTF16(text), string16(), false, false, &match, NULL);
   GURL url(match.destination_url);
 
   OpenURLParams params(
       url, Referrer(), CURRENT_TAB, content::PAGE_TRANSITION_TYPED, false);
-  browser_->GetSelectedWebContents()->OpenURL(params);
+  chrome::GetActiveWebContents(browser_)->OpenURL(params);
 }
 
 // (URLDropTargetController protocol)

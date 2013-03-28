@@ -4,7 +4,6 @@
 
 #ifndef CHROME_BROWSER_UI_COCOA_BROWSER_WINDOW_CONTROLLER_H_
 #define CHROME_BROWSER_UI_COCOA_BROWSER_WINDOW_CONTROLLER_H_
-#pragma once
 
 // A class acting as the Objective-C controller for the Browser
 // object. Handles interactions between Cocoa and the cross-platform
@@ -31,12 +30,12 @@
 class Browser;
 class BrowserWindow;
 class BrowserWindowCocoa;
-class ConstrainedWindowMac;
+@class ChromeToMobileBubbleController;
 @class DevToolsController;
 @class DownloadShelfController;
+class ExtensionKeybindingRegistryCocoa;
 @class FindBarCocoaController;
 @class FullscreenWindow;
-@class GTMWindowSheetController;
 @class InfoBarContainerController;
 class LocationBarViewMac;
 @class PresentationModeController;
@@ -86,6 +85,8 @@ class WebContents;
   BOOL initializing_;  // YES while we are currently in initWithBrowser:
   BOOL ownsBrowser_;  // Only ever NO when testing
 
+  ChromeToMobileBubbleController* chromeToMobileBubbleController_;  // Weak.
+
   // The total amount by which we've grown the window up or down (to display a
   // bookmark bar and/or download shelf), respectively; reset to 0 when moved
   // away from the bottom/top or resized (or zoomed).
@@ -108,10 +109,6 @@ class WebContents;
   // unless it's appropriate to show it.
   scoped_nsobject<AvatarButtonController> avatarButtonController_;
 
-  // The view that shows the presentation mode toggle when in Lion fullscreen
-  // mode.  Nil if not in fullscreen mode or not on Lion.
-  scoped_nsobject<NSButton> presentationModeToggleButton_;
-
   // Lazily created view which draws the background for the floating set of bars
   // in presentation mode (for window types having a floating bar; it remains
   // nil for those which don't).
@@ -131,8 +128,12 @@ class WebContents;
   BOOL enteredPresentationModeFromFullscreen_;
 
   // True between -windowWillEnterFullScreen and -windowDidEnterFullScreen.
-  // Only used on Lion.
+  // Only used on Lion and higher.
   BOOL enteringFullscreen_;
+
+  // True between |-setPresentationMode:url:bubbleType:| and
+  // -windowDidEnterFullScreen. Only used on Lion and higher.
+  BOOL enteringPresentationMode_;
 
   // The size of the original (non-fullscreen) window.  This is saved just
   // before entering fullscreen mode and is only valid when |-isFullscreen|
@@ -158,6 +159,10 @@ class WebContents;
   // -windowDidEnterFullScreen: gets called.
   GURL fullscreenUrl_;
   FullscreenExitBubbleType fullscreenBubbleType_;
+
+  // The Extension Command Registry used to determine which keyboard events to
+  // handle.
+  scoped_ptr<ExtensionKeybindingRegistryCocoa> extension_keybinding_registry_;
 }
 
 // A convenience class method which gets the |BrowserWindowController| for a
@@ -215,6 +220,11 @@ class WebContents;
 // Sets whether or not the current page in the frontmost tab is bookmarked.
 - (void)setStarredState:(BOOL)isStarred;
 
+// Happens when the zoom level is changed in the active tab, the active tab is
+// changed, or a new browser window or tab is created. |canShowBubble| denotes
+// whether it would be appropriate to show a zoom bubble or not.
+- (void)zoomChangedForActiveTab:(BOOL)canShowBubble;
+
 // Return the rect, in WebKit coordinates (flipped), of the window's grow box
 // in the coordinate system of the content area of the currently selected tab.
 - (NSRect)selectedTabGrowBoxRect;
@@ -247,9 +257,7 @@ class WebContents;
 // Returns YES if the bookmark bar is currently animating.
 - (BOOL)isBookmarkBarAnimating;
 
-// Called after bookmark bar visibility changes (due to pref change or change in
-// tab/tab contents).
-- (void)updateBookmarkBarVisibilityWithAnimation:(BOOL)animate;
+- (BookmarkBarController*)bookmarkBarController;
 
 - (BOOL)isDownloadShelfVisible;
 
@@ -269,6 +277,10 @@ class WebContents;
 // "chrome/app/chrome_command_ids.h" file.
 - (void)executeCommand:(int)command;
 
+// Consults the Command Registry to see if this |event| needs to be handled as
+// an extension command and returns YES if so (NO otherwise).
+- (BOOL)handledByExtensionCommand:(NSEvent*)event;
+
 // Delegate method for the status bubble to query its base frame.
 - (NSRect)statusBubbleBaseFrame;
 
@@ -276,23 +288,15 @@ class WebContents;
 - (void)showBookmarkBubbleForURL:(const GURL&)url
                alreadyBookmarked:(BOOL)alreadyBookmarked;
 
-// Returns the (lazily created) window sheet controller of this window. Used
-// for the per-tab sheets.
-- (GTMWindowSheetController*)sheetController;
+// Show the Chrome To Mobile bubble (e.g. user just clicked on the icon)
+- (void)showChromeToMobileBubble;
 
-// Requests that |window| is opened as a per-tab sheet to the current tab.
-- (void)attachConstrainedWindow:(ConstrainedWindowMac*)window;
-// Closes the tab sheet |window| and potentially shows the next sheet in the
-// tab's sheet queue.
-- (void)removeConstrainedWindow:(ConstrainedWindowMac*)window;
-// Returns NO if constrained windows cannot be attached to this window.
-- (BOOL)canAttachConstrainedWindow;
+// Nil out the weak Chrome To Mobile bubble controller reference.
+// This should be called by the ChromeToMobileBubbleController on close.
+- (void)chromeToMobileBubbleWindowWillClose;
 
 // Shows or hides the docked web inspector depending on |contents|'s state.
 - (void)updateDevToolsForContents:(content::WebContents*)contents;
-
-// Specifies whether devtools should dock to right.
-- (void)setDevToolsDockToRight:(bool)dock_to_right;
 
 // Gets the current theme provider.
 - (ui::ThemeProvider*)themeProvider;
@@ -303,13 +307,13 @@ class WebContents;
 // Gets the pattern phase for the window.
 - (NSPoint)themePatternPhase;
 
-// Return the point to which a bubble window's arrow should point.
+// Return the point to which a bubble window's arrow should point, in window
+// coordinates.
 - (NSPoint)bookmarkBubblePoint;
 
 // Shows or hides the Instant preview contents.
-- (void)showInstant:(content::WebContents*)previewContents;
-- (void)hideInstant;
 - (void)commitInstant;
+- (BOOL)isInstantTabShowing;
 
 // Returns the frame, in Cocoa (unflipped) screen coordinates, of the area where
 // Instant results are.  If Instant is not showing, returns the frame of where
@@ -381,11 +385,6 @@ class WebContents;
 
 // Returns fullscreen state.  This method is safe to call on all OS versions.
 - (BOOL)isFullscreen;
-
-// Toggles presentation mode without exiting fullscreen mode.  Should only be
-// called by the presentation mode toggle button.  This method should not be
-// called on Snow Leopard or earlier.
-- (void)togglePresentationModeForLionOrLater:(id)sender;
 
 // Enters (or exits) presentation mode.  Also enters fullscreen mode if this
 // window is not already fullscreen.  This method is safe to call on all OS

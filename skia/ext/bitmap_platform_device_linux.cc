@@ -3,8 +3,8 @@
 // found in the LICENSE file.
 
 #include "skia/ext/bitmap_platform_device_linux.h"
-
 #include "skia/ext/bitmap_platform_device_data.h"
+#include "skia/ext/platform_canvas.h"
 
 #if defined(OS_OPENBSD)
 #include <cairo.h>
@@ -83,6 +83,10 @@ void BitmapPlatformDevice::BitmapPlatformDeviceData::LoadConfig() {
 BitmapPlatformDevice* BitmapPlatformDevice::Create(int width, int height,
                                                    bool is_opaque,
                                                    cairo_surface_t* surface) {
+  if (cairo_surface_status(surface) != CAIRO_STATUS_SUCCESS) {
+    cairo_surface_destroy(surface);
+    return NULL;
+  }
   SkBitmap bitmap;
   bitmap.setConfig(SkBitmap::kARGB_8888_Config, width, height,
                    cairo_image_surface_get_stride(surface));
@@ -108,6 +112,14 @@ BitmapPlatformDevice* BitmapPlatformDevice::Create(int width, int height,
 #endif
 
   return device;
+}
+
+BitmapPlatformDevice* BitmapPlatformDevice::CreateAndClear(int width,
+                                                           int height,
+                                                           bool is_opaque) {
+  // The Linux port always constructs initialized bitmaps, so there is no extra
+  // work to perform here.
+  return Create(width, height, is_opaque);
 }
 
 BitmapPlatformDevice* BitmapPlatformDevice::Create(int width, int height,
@@ -164,4 +176,37 @@ void BitmapPlatformDevice::setMatrixClip(const SkMatrix& transform,
   data_->SetMatrixClip(transform, region);
 }
 
+// PlatformCanvas impl
+
+SkCanvas* CreatePlatformCanvas(int width, int height, bool is_opaque,
+                               uint8_t* data, OnFailureType failureType) {
+  skia::RefPtr<SkDevice> dev = skia::AdoptRef(
+      BitmapPlatformDevice::Create(width, height, is_opaque, data));
+  return CreateCanvas(dev, failureType);
+}
+
+// Port of PlatformBitmap to linux
+
+PlatformBitmap::~PlatformBitmap() {
+  cairo_destroy(surface_);
+}
+
+bool PlatformBitmap::Allocate(int width, int height, bool is_opaque) {
+  cairo_surface_t* surf = cairo_image_surface_create(CAIRO_FORMAT_ARGB32,
+                                                     width, height);
+  if (cairo_surface_status(surf) != CAIRO_STATUS_SUCCESS) {
+    cairo_surface_destroy(surf);
+    return false;
+  }
+
+  bitmap_.setConfig(SkBitmap::kARGB_8888_Config, width, height,
+                    cairo_image_surface_get_stride(surf));
+  bitmap_.setPixels(cairo_image_surface_get_data(surf));
+  bitmap_.setIsOpaque(is_opaque);
+
+  surface_ = cairo_create(surf);
+  cairo_surface_destroy(surf);
+  return true;
+}
+    
 }  // namespace skia

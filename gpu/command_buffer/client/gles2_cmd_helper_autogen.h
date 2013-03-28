@@ -1524,6 +1524,130 @@
     }
   }
 
+  void GenQueriesEXT(
+      GLsizei n, uint32 queries_shm_id, uint32 queries_shm_offset) {
+    gles2::GenQueriesEXT* c = GetCmdSpace<gles2::GenQueriesEXT>();
+    if (c) {
+      c->Init(n, queries_shm_id, queries_shm_offset);
+    }
+  }
+
+  void GenQueriesEXTImmediate(GLsizei n, GLuint* queries) {
+    const uint32 size = gles2::GenQueriesEXTImmediate::ComputeSize(n);
+    gles2::GenQueriesEXTImmediate* c =
+        GetImmediateCmdSpaceTotalSize<gles2::GenQueriesEXTImmediate>(size);
+    if (c) {
+      c->Init(n, queries);
+    }
+  }
+
+  void DeleteQueriesEXT(
+      GLsizei n, uint32 queries_shm_id, uint32 queries_shm_offset) {
+    gles2::DeleteQueriesEXT* c = GetCmdSpace<gles2::DeleteQueriesEXT>();
+    if (c) {
+      c->Init(n, queries_shm_id, queries_shm_offset);
+    }
+  }
+
+  void DeleteQueriesEXTImmediate(GLsizei n, const GLuint* queries) {
+    const uint32 size = gles2::DeleteQueriesEXTImmediate::ComputeSize(n);
+    gles2::DeleteQueriesEXTImmediate* c =
+        GetImmediateCmdSpaceTotalSize<gles2::DeleteQueriesEXTImmediate>(size);
+    if (c) {
+      c->Init(n, queries);
+    }
+  }
+
+  void BeginQueryEXT(
+      GLenum target, GLuint id, uint32 sync_data_shm_id,
+      uint32 sync_data_shm_offset) {
+    gles2::BeginQueryEXT* c = GetCmdSpace<gles2::BeginQueryEXT>();
+    if (c) {
+      c->Init(target, id, sync_data_shm_id, sync_data_shm_offset);
+    }
+  }
+
+  void EndQueryEXT(GLenum target, GLuint submit_count) {
+    gles2::EndQueryEXT* c = GetCmdSpace<gles2::EndQueryEXT>();
+    if (c) {
+      c->Init(target, submit_count);
+    }
+  }
+
+  void InsertEventMarkerEXT(GLuint bucket_id) {
+    gles2::InsertEventMarkerEXT* c =
+        GetCmdSpace<gles2::InsertEventMarkerEXT>();
+    if (c) {
+      c->Init(bucket_id);
+    }
+  }
+
+  void PushGroupMarkerEXT(GLuint bucket_id) {
+    gles2::PushGroupMarkerEXT* c = GetCmdSpace<gles2::PushGroupMarkerEXT>();
+    if (c) {
+      c->Init(bucket_id);
+    }
+  }
+
+  void PopGroupMarkerEXT() {
+    gles2::PopGroupMarkerEXT* c = GetCmdSpace<gles2::PopGroupMarkerEXT>();
+    if (c) {
+      c->Init();
+    }
+  }
+
+  void GenVertexArraysOES(
+      GLsizei n, uint32 arrays_shm_id, uint32 arrays_shm_offset) {
+    gles2::GenVertexArraysOES* c = GetCmdSpace<gles2::GenVertexArraysOES>();
+    if (c) {
+      c->Init(n, arrays_shm_id, arrays_shm_offset);
+    }
+  }
+
+  void GenVertexArraysOESImmediate(GLsizei n, GLuint* arrays) {
+    const uint32 size = gles2::GenVertexArraysOESImmediate::ComputeSize(n);
+    gles2::GenVertexArraysOESImmediate* c =
+        GetImmediateCmdSpaceTotalSize<gles2::GenVertexArraysOESImmediate>(
+            size);
+    if (c) {
+      c->Init(n, arrays);
+    }
+  }
+
+  void DeleteVertexArraysOES(
+      GLsizei n, uint32 arrays_shm_id, uint32 arrays_shm_offset) {
+    gles2::DeleteVertexArraysOES* c =
+        GetCmdSpace<gles2::DeleteVertexArraysOES>();
+    if (c) {
+      c->Init(n, arrays_shm_id, arrays_shm_offset);
+    }
+  }
+
+  void DeleteVertexArraysOESImmediate(GLsizei n, const GLuint* arrays) {
+    const uint32 size = gles2::DeleteVertexArraysOESImmediate::ComputeSize(n);
+    gles2::DeleteVertexArraysOESImmediate* c =
+        GetImmediateCmdSpaceTotalSize<gles2::DeleteVertexArraysOESImmediate>(
+            size);
+    if (c) {
+      c->Init(n, arrays);
+    }
+  }
+
+  void IsVertexArrayOES(
+      GLuint array, uint32 result_shm_id, uint32 result_shm_offset) {
+    gles2::IsVertexArrayOES* c = GetCmdSpace<gles2::IsVertexArrayOES>();
+    if (c) {
+      c->Init(array, result_shm_id, result_shm_offset);
+    }
+  }
+
+  void BindVertexArrayOES(GLuint array) {
+    gles2::BindVertexArrayOES* c = GetCmdSpace<gles2::BindVertexArrayOES>();
+    if (c) {
+      c->Init(array);
+    }
+  }
+
   void SwapBuffers() {
     gles2::SwapBuffers* c = GetCmdSpace<gles2::SwapBuffers>();
     if (c) {
@@ -1664,6 +1788,202 @@
         GetCmdSpace<gles2::TexImageIOSurface2DCHROMIUM>();
     if (c) {
       c->Init(target, width, height, ioSurfaceId, plane);
+    }
+  }
+
+  void CopyTextureCHROMIUM(
+      GLenum target, GLenum source_id, GLenum dest_id, GLint level,
+      GLint internalformat) {
+    gles2::CopyTextureCHROMIUM* c = GetCmdSpace<gles2::CopyTextureCHROMIUM>();
+    if (c) {
+      c->Init(target, source_id, dest_id, level, internalformat);
+    }
+  }
+
+  void DrawArraysInstancedANGLE(
+      GLenum mode, GLint first, GLsizei count, GLsizei primcount) {
+    gles2::DrawArraysInstancedANGLE* c =
+        GetCmdSpace<gles2::DrawArraysInstancedANGLE>();
+    if (c) {
+      c->Init(mode, first, count, primcount);
+    }
+  }
+
+  void DrawElementsInstancedANGLE(
+      GLenum mode, GLsizei count, GLenum type, GLuint index_offset,
+      GLsizei primcount) {
+    gles2::DrawElementsInstancedANGLE* c =
+        GetCmdSpace<gles2::DrawElementsInstancedANGLE>();
+    if (c) {
+      c->Init(mode, count, type, index_offset, primcount);
+    }
+  }
+
+  void VertexAttribDivisorANGLE(GLuint index, GLuint divisor) {
+    gles2::VertexAttribDivisorANGLE* c =
+        GetCmdSpace<gles2::VertexAttribDivisorANGLE>();
+    if (c) {
+      c->Init(index, divisor);
+    }
+  }
+
+  void GenMailboxCHROMIUM(GLuint bucket_id) {
+    gles2::GenMailboxCHROMIUM* c = GetCmdSpace<gles2::GenMailboxCHROMIUM>();
+    if (c) {
+      c->Init(bucket_id);
+    }
+  }
+
+  void ProduceTextureCHROMIUM(
+      GLenum target, uint32 mailbox_shm_id, uint32 mailbox_shm_offset) {
+    gles2::ProduceTextureCHROMIUM* c =
+        GetCmdSpace<gles2::ProduceTextureCHROMIUM>();
+    if (c) {
+      c->Init(target, mailbox_shm_id, mailbox_shm_offset);
+    }
+  }
+
+  void ProduceTextureCHROMIUMImmediate(GLenum target, const GLbyte* mailbox) {
+    const uint32 size = gles2::ProduceTextureCHROMIUMImmediate::ComputeSize();
+    gles2::ProduceTextureCHROMIUMImmediate* c =
+        GetImmediateCmdSpaceTotalSize<gles2::ProduceTextureCHROMIUMImmediate>(
+            size);
+    if (c) {
+      c->Init(target, mailbox);
+    }
+  }
+
+  void ConsumeTextureCHROMIUM(
+      GLenum target, uint32 mailbox_shm_id, uint32 mailbox_shm_offset) {
+    gles2::ConsumeTextureCHROMIUM* c =
+        GetCmdSpace<gles2::ConsumeTextureCHROMIUM>();
+    if (c) {
+      c->Init(target, mailbox_shm_id, mailbox_shm_offset);
+    }
+  }
+
+  void ConsumeTextureCHROMIUMImmediate(GLenum target, const GLbyte* mailbox) {
+    const uint32 size = gles2::ConsumeTextureCHROMIUMImmediate::ComputeSize();
+    gles2::ConsumeTextureCHROMIUMImmediate* c =
+        GetImmediateCmdSpaceTotalSize<gles2::ConsumeTextureCHROMIUMImmediate>(
+            size);
+    if (c) {
+      c->Init(target, mailbox);
+    }
+  }
+
+  void BindUniformLocationCHROMIUM(
+      GLuint program, GLint location, uint32 name_shm_id,
+      uint32 name_shm_offset, uint32 data_size) {
+    gles2::BindUniformLocationCHROMIUM* c =
+        GetCmdSpace<gles2::BindUniformLocationCHROMIUM>();
+    if (c) {
+      c->Init(program, location, name_shm_id, name_shm_offset, data_size);
+    }
+  }
+
+  void BindUniformLocationCHROMIUMImmediate(
+      GLuint program, GLint location, const char* name) {
+    const uint32 data_size = strlen(name);
+    gles2::BindUniformLocationCHROMIUMImmediate* c =
+        GetImmediateCmdSpace<gles2::BindUniformLocationCHROMIUMImmediate>(
+            data_size);
+    if (c) {
+      c->Init(program, location, name, data_size);
+    }
+  }
+
+  void BindUniformLocationCHROMIUMBucket(
+      GLuint program, GLint location, uint32 name_bucket_id) {
+    gles2::BindUniformLocationCHROMIUMBucket* c =
+        GetCmdSpace<gles2::BindUniformLocationCHROMIUMBucket>();
+    if (c) {
+      c->Init(program, location, name_bucket_id);
+    }
+  }
+
+  void BindTexImage2DCHROMIUM(GLenum target, GLint imageId) {
+    gles2::BindTexImage2DCHROMIUM* c =
+        GetCmdSpace<gles2::BindTexImage2DCHROMIUM>();
+    if (c) {
+      c->Init(target, imageId);
+    }
+  }
+
+  void ReleaseTexImage2DCHROMIUM(GLenum target, GLint imageId) {
+    gles2::ReleaseTexImage2DCHROMIUM* c =
+        GetCmdSpace<gles2::ReleaseTexImage2DCHROMIUM>();
+    if (c) {
+      c->Init(target, imageId);
+    }
+  }
+
+  void TraceBeginCHROMIUM(GLuint bucket_id) {
+    gles2::TraceBeginCHROMIUM* c = GetCmdSpace<gles2::TraceBeginCHROMIUM>();
+    if (c) {
+      c->Init(bucket_id);
+    }
+  }
+
+  void TraceEndCHROMIUM() {
+    gles2::TraceEndCHROMIUM* c = GetCmdSpace<gles2::TraceEndCHROMIUM>();
+    if (c) {
+      c->Init();
+    }
+  }
+
+  void AsyncTexSubImage2DCHROMIUM(
+      GLenum target, GLint level, GLint xoffset, GLint yoffset, GLsizei width,
+      GLsizei height, GLenum format, GLenum type, uint32 data_shm_id,
+      uint32 data_shm_offset) {
+    gles2::AsyncTexSubImage2DCHROMIUM* c =
+        GetCmdSpace<gles2::AsyncTexSubImage2DCHROMIUM>();
+    if (c) {
+      c->Init(
+          target, level, xoffset, yoffset, width, height, format, type,
+          data_shm_id, data_shm_offset);
+    }
+  }
+
+  void AsyncTexImage2DCHROMIUM(
+      GLenum target, GLint level, GLint internalformat, GLsizei width,
+      GLsizei height, GLint border, GLenum format, GLenum type,
+      uint32 pixels_shm_id, uint32 pixels_shm_offset) {
+    gles2::AsyncTexImage2DCHROMIUM* c =
+        GetCmdSpace<gles2::AsyncTexImage2DCHROMIUM>();
+    if (c) {
+      c->Init(
+          target, level, internalformat, width, height, border, format, type,
+          pixels_shm_id, pixels_shm_offset);
+    }
+  }
+
+  void DiscardFramebufferEXT(
+      GLenum target, GLsizei count, uint32 attachments_shm_id,
+      uint32 attachments_shm_offset) {
+    gles2::DiscardFramebufferEXT* c =
+        GetCmdSpace<gles2::DiscardFramebufferEXT>();
+    if (c) {
+      c->Init(target, count, attachments_shm_id, attachments_shm_offset);
+    }
+  }
+
+  void DiscardFramebufferEXTImmediate(
+      GLenum target, GLsizei count, const GLenum* attachments) {
+    const uint32 size =
+        gles2::DiscardFramebufferEXTImmediate::ComputeSize(count);
+    gles2::DiscardFramebufferEXTImmediate* c =
+        GetImmediateCmdSpaceTotalSize<gles2::DiscardFramebufferEXTImmediate>(
+            size);
+    if (c) {
+      c->Init(target, count, attachments);
+    }
+  }
+
+  void LoseContextCHROMIUM(GLenum current, GLenum other) {
+    gles2::LoseContextCHROMIUM* c = GetCmdSpace<gles2::LoseContextCHROMIUM>();
+    if (c) {
+      c->Init(current, other);
     }
   }
 

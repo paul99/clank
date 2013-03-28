@@ -1,4 +1,4 @@
-// Copyright (c) 2011 The Chromium Authors. All rights reserved.
+// Copyright (c) 2012 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -15,10 +15,17 @@ BrowserOptionsWebUITest.prototype = {
   /**
    * Browse to browser options.
    **/
-  browsePreload: 'chrome://settings/browser',
+  browsePreload: 'chrome://chrome/settings/',
 };
 
 // Test opening the browser options has correct location.
-TEST_F('BrowserOptionsWebUITest', 'testOpenBrowserOptions', function() {
+// Times out on Mac debug only. See http://crbug.com/121030
+GEN('#if defined(OS_MACOSX) && !defined(NDEBUG)');
+GEN('#define MAYBE_testOpenBrowserOptions ' +
+    'DISABLED_testOpenBrowserOptions');
+GEN('#else');
+GEN('#define MAYBE_testOpenBrowserOptions testOpenBrowserOptions');
+GEN('#endif  // defined(OS_MACOSX)');
+TEST_F('BrowserOptionsWebUITest', 'MAYBE_testOpenBrowserOptions', function() {
   assertEquals(this.browsePreload, document.location.href);
 });

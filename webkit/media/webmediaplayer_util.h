@@ -7,7 +7,7 @@
 
 #include "base/time.h"
 
-namespace webkit_glue {
+namespace webkit_media {
 
 // Platform independent method for converting and rounding floating point
 // seconds to an int64 timestamp.

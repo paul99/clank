@@ -1,4 +1,4 @@
-// Copyright (c) 2011 The Chromium Authors. All rights reserved.
+// Copyright (c) 2012 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -12,6 +12,7 @@
 
 #include "base/bind.h"
 #include "base/file_util.h"
+#include "base/logging.h"
 #include "base/message_loop.h"
 #include "base/message_loop_proxy.h"
 #include "base/stringprintf.h"
@@ -54,7 +55,6 @@ class FilePathWatcherImpl : public FilePathWatcher::PlatformDelegate,
                             public MessageLoop::DestructionObserver {
  public:
   FilePathWatcherImpl() : kqueue_(-1) {}
-  virtual ~FilePathWatcherImpl() {}
 
   // MessageLoopForIO::Watcher overrides.
   virtual void OnFileCanReadWithoutBlocking(int fd) OVERRIDE;
@@ -65,8 +65,12 @@ class FilePathWatcherImpl : public FilePathWatcher::PlatformDelegate,
 
   // FilePathWatcher::PlatformDelegate overrides.
   virtual bool Watch(const FilePath& path,
+                     bool recursive,
                      FilePathWatcher::Delegate* delegate) OVERRIDE;
   virtual void Cancel() OVERRIDE;
+
+ protected:
+  virtual ~FilePathWatcherImpl() {}
 
  private:
   class EventData {
@@ -203,7 +207,7 @@ void FilePathWatcherImpl::CloseFileDescriptor(int *fd) {
   }
 
   if (HANDLE_EINTR(close(*fd)) != 0) {
-    PLOG(ERROR) << "close";
+    DPLOG(ERROR) << "close";
   }
   *fd = -1;
 }
@@ -211,7 +215,7 @@ void FilePathWatcherImpl::CloseFileDescriptor(int *fd) {
 bool FilePathWatcherImpl::AreKeventValuesValid(struct kevent* kevents,
                                                int count) {
   if (count < 0) {
-    PLOG(ERROR) << "kevent";
+    DPLOG(ERROR) << "kevent";
     return false;
   }
   bool valid = true;
@@ -235,7 +239,7 @@ bool FilePathWatcherImpl::AreKeventValuesValid(struct kevent* kevents,
         path_name = base::StringPrintf(
             "fd %d", *reinterpret_cast<int*>(&kevents[i].ident));
       }
-      LOG(ERROR) << "Error: " << kevents[i].data << " for " << path_name;
+      DLOG(ERROR) << "Error: " << kevents[i].data << " for " << path_name;
       valid = false;
     }
   }
@@ -346,8 +350,8 @@ bool FilePathWatcherImpl::UpdateWatches(bool* target_file_affected) {
 
 void FilePathWatcherImpl::OnFileCanReadWithoutBlocking(int fd) {
   DCHECK(MessageLoopForIO::current());
-  CHECK_EQ(fd, kqueue_);
-  CHECK(events_.size());
+  DCHECK_EQ(fd, kqueue_);
+  DCHECK(events_.size());
 
   // Request the file system update notifications that have occurred and return
   // them in |updates|. |count| will contain the number of updates that have
@@ -426,11 +430,18 @@ void FilePathWatcherImpl::WillDestroyCurrentMessageLoop() {
 }
 
 bool FilePathWatcherImpl::Watch(const FilePath& path,
+                                bool recursive,
                                 FilePathWatcher::Delegate* delegate) {
   DCHECK(MessageLoopForIO::current());
   DCHECK(target_.value().empty());  // Can only watch one path.
   DCHECK(delegate);
   DCHECK_EQ(kqueue_, -1);
+
+  if (recursive) {
+    // Recursive watch is not supported on this platform.
+    NOTIMPLEMENTED();
+    return false;
+  }
 
   delegate_ = delegate;
   target_ = path;
@@ -440,12 +451,12 @@ bool FilePathWatcherImpl::Watch(const FilePath& path,
 
   kqueue_ = kqueue();
   if (kqueue_ == -1) {
-    PLOG(ERROR) << "kqueue";
+    DPLOG(ERROR) << "kqueue";
     return false;
   }
 
   int last_entry = EventsForPath(target_, &events_);
-  CHECK_NE(last_entry, 0);
+  DCHECK_NE(last_entry, 0);
 
   EventVector responses(last_entry);
 

@@ -6,6 +6,8 @@
 
 #include "base/command_line.h"
 #include "base/string_number_conversions.h"
+#include "base/string_util.h"
+#include "base/stringprintf.h"
 #include "base/utf_string_conversions.h"
 #include "chrome/browser/browser_process.h"
 #include "chrome/browser/first_run/first_run.h"
@@ -15,6 +17,7 @@
 #include "chrome/browser/profiles/profile_info_cache.h"
 #include "chrome/browser/profiles/profile_manager.h"
 #include "chrome/browser/sync/profile_sync_service.h"
+#include "chrome/browser/sync/profile_sync_service_factory.h"
 #include "chrome/browser/ui/webui/chrome_url_data_manager.h"
 #include "chrome/browser/ui/webui/chrome_web_ui_data_source.h"
 #include "chrome/browser/ui/webui/options/core_options_handler.h"
@@ -24,12 +27,15 @@
 #include "chrome/common/chrome_switches.h"
 #include "chrome/common/pref_names.h"
 #include "chrome/common/url_constants.h"
+#include "chrome/common/net/url_util.h"
 #include "content/public/browser/web_contents.h"
 #include "content/public/browser/web_ui.h"
-#include "googleurl/src/url_util.h"
+#include "google_apis/gaia/gaia_urls.h"
 #include "grit/browser_resources.h"
 #include "grit/generated_resources.h"
 #include "grit/theme_resources.h"
+#include "net/base/escape.h"
+#include "net/base/network_change_notifier.h"
 #include "ui/base/l10n/l10n_util.h"
 
 using content::WebContents;
@@ -39,9 +45,14 @@ namespace {
 const char kStringsJsFile[] = "strings.js";
 const char kSyncPromoJsFile[] = "sync_promo.js";
 
-const char kSyncPromoQueryKeyIsLaunchPage[] = "is_launch_page";
+const char kSyncPromoQueryKeyAutoClose[] = "auto_close";
+const char kSyncPromoQueryKeyContinue[] = "continue";
 const char kSyncPromoQueryKeyNextPage[] = "next_page";
 const char kSyncPromoQueryKeySource[] = "source";
+
+// TODO(rogerta): It would be better to use about:blank, but until that is
+// supported by Gaia this blank continue URL will be used.
+const char kContinueUrl[] = "http://www.google.com/gen_204";
 
 // The maximum number of times we want to show the sync promo at startup.
 const int kSyncPromoShowAtStartupMaximum = 10;
@@ -57,14 +68,8 @@ bool AllowPromoAtStartupForCurrentBrand() {
   if (google_util::IsInternetCafeBrandCode(brand))
     return false;
 
-  if (google_util::IsOrganic(brand))
-    return true;
-
-  if (StartsWithASCII(brand, "CH", true))
-    return true;
-
-  // Default to disallow for all other brand codes.
-  return false;
+  // Enable for both organic and distribution.
+  return true;
 }
 
 // The Web UI data source for the sync promo page.
@@ -80,55 +85,30 @@ class SyncPromoUIHTMLSource : public ChromeWebUIDataSource {
 SyncPromoUIHTMLSource::SyncPromoUIHTMLSource(content::WebUI* web_ui)
     : ChromeWebUIDataSource(chrome::kChromeUISyncPromoHost) {
   DictionaryValue localized_strings;
-  CoreOptionsHandler::GetStaticLocalizedValues(&localized_strings);
+  options::CoreOptionsHandler::GetStaticLocalizedValues(&localized_strings);
   SyncSetupHandler::GetStaticLocalizedValues(&localized_strings, web_ui);
   AddLocalizedStrings(localized_strings);
-}
-
-// Looks for |search_key| in the query portion of |url|. Returns true if the
-// key is found and sets |out_value| to the value for the key. Returns false if
-// the key is not found.
-bool GetValueForKeyInQuery(const GURL& url, const std::string& search_key,
-                           std::string* out_value) {
-  url_parse::Component query = url.parsed_for_possibly_invalid_spec().query;
-  url_parse::Component key, value;
-  while (url_parse::ExtractQueryKeyValue(
-      url.spec().c_str(), &query, &key, &value)) {
-    if (key.is_nonempty()) {
-      std::string key_string = url.spec().substr(key.begin, key.len);
-      if (key_string == search_key) {
-        if (value.is_nonempty())
-          *out_value = url.spec().substr(value.begin, value.len);
-        else
-          *out_value = "";
-        return true;
-      }
-    }
-  }
-  return false;
 }
 
 }  // namespace
 
 SyncPromoUI::SyncPromoUI(content::WebUI* web_ui) : WebUIController(web_ui) {
-  web_ui->HideURL();
-
   SyncPromoHandler* handler = new SyncPromoHandler(
-      GetSourceForSyncPromoURL(web_ui->GetWebContents()->GetURL()),
       g_browser_process->profile_manager());
   web_ui->AddMessageHandler(handler);
 
   // Set up the chrome://theme/ source.
   Profile* profile = Profile::FromWebUI(web_ui);
   ThemeSource* theme = new ThemeSource(profile);
-  profile->GetChromeURLDataManager()->AddDataSource(theme);
+  ChromeURLDataManager::AddDataSource(profile, theme);
 
   // Set up the sync promo source.
   SyncPromoUIHTMLSource* html_source = new SyncPromoUIHTMLSource(web_ui);
   html_source->set_json_path(kStringsJsFile);
   html_source->add_resource_path(kSyncPromoJsFile, IDR_SYNC_PROMO_JS);
   html_source->set_default_resource(IDR_SYNC_PROMO_HTML);
-  profile->GetChromeURLDataManager()->AddDataSource(html_source);
+  html_source->set_use_json_js_format_v2();
+  ChromeURLDataManager::AddDataSource(profile, html_source);
 
   sync_promo_trial::RecordUserShownPromo(web_ui);
 }
@@ -146,13 +126,18 @@ bool SyncPromoUI::ShouldShowSyncPromo(Profile* profile) {
   return false;
 #endif
 
+  // Don't bother if we don't have any kind of network connection.
+  if (net::NetworkChangeNotifier::IsOffline())
+    return false;
+
   // Honor the sync policies.
   if (!profile->GetOriginalProfile()->IsSyncAccessible())
     return false;
 
   // If the user is already signed into sync then don't show the promo.
   ProfileSyncService* service =
-      profile->GetOriginalProfile()->GetProfileSyncService();
+      ProfileSyncServiceFactory::GetInstance()->GetForProfile(
+          profile->GetOriginalProfile());
   if (!service || service->HasSyncSetupCompleted())
     return false;
 
@@ -174,11 +159,8 @@ void SyncPromoUI::RegisterUserPrefs(PrefService* prefs) {
 
 // static
 bool SyncPromoUI::ShouldShowSyncPromoAtStartup(Profile* profile,
-                                               bool is_new_profile,
-                                               bool* promo_suppressed) {
+                                               bool is_new_profile) {
   DCHECK(profile);
-  DCHECK(promo_suppressed);
-  *promo_suppressed = false;
 
   if (!ShouldShowSyncPromo(profile))
     return false;
@@ -204,19 +186,6 @@ bool SyncPromoUI::ShouldShowSyncPromoAtStartup(Profile* profile,
   if (show_count >= kSyncPromoShowAtStartupMaximum)
     return false;
 
-  // If the current install is part of trial then let the trial determine if we
-  // should show the promo or not.
-  switch (sync_promo_trial::GetStartupOverrideForCurrentTrial()) {
-    case sync_promo_trial::STARTUP_OVERRIDE_NONE:
-      // No override so simply continue.
-      break;
-    case sync_promo_trial::STARTUP_OVERRIDE_SHOW:
-      return true;
-    case sync_promo_trial::STARTUP_OVERRIDE_HIDE:
-      *promo_suppressed = true;
-      return false;
-  }
-
   // This pref can be set in the master preferences file to allow or disallow
   // showing the sync promo at startup.
   if (prefs->HasPrefPath(prefs::kSyncPromoShowOnFirstRunAllowed))
@@ -226,8 +195,12 @@ bool SyncPromoUI::ShouldShowSyncPromoAtStartup(Profile* profile,
   if (!AllowPromoAtStartupForCurrentBrand())
     return false;
 
-  // Default to show the promo.
+  // Default to show the promo for Google Chrome builds.
+#if defined(GOOGLE_CHROME_BUILD)
   return true;
+#else
+  return false;
+#endif
 }
 
 void SyncPromoUI::DidShowSyncPromoAtStartup(Profile* profile) {
@@ -247,85 +220,94 @@ void SyncPromoUI::SetUserSkippedSyncPromo(Profile* profile) {
 
 // static
 GURL SyncPromoUI::GetSyncPromoURL(const GURL& next_page,
-                                  bool show_title,
-                                  const std::string& source) {
-  std::stringstream stream;
-  stream << chrome::kChromeUISyncPromoURL << "?"
-         << kSyncPromoQueryKeyIsLaunchPage << "="
-         << (show_title ? "true" : "false") << "&"
-         << kSyncPromoQueryKeySource << "=" << source;
+                                  Source source,
+                                  bool auto_close) {
+  DCHECK_NE(SOURCE_UNKNOWN, source);
 
-  if (!next_page.spec().empty()) {
-    url_canon::RawCanonOutputT<char> output;
-    url_util::EncodeURIComponent(
-        next_page.spec().c_str(), next_page.spec().length(), &output);
-    std::string escaped_spec(output.data(), output.length());
-    stream << "&" << kSyncPromoQueryKeyNextPage << "=" << escaped_spec;
+  std::string url_string;
+
+  if (UseWebBasedSigninFlow()) {
+    // Build a Gaia-based URL that can be used to sign the user into chrome.
+    // There are required request parameters:
+    //
+    //  - tell Gaia which service the user is signing into.  In this case,
+    //    a chrome sign in uses the service "chromiumsync"
+    //  - provide a continue URL.  This is the URL that Gaia will redirect to
+    //    once the sign is complete.
+    //
+    // The continue URL includes a source parameter that can be extracted using
+    // the function GetSourceForSyncPromoURL() below.  This is used to know
+    // which of the chrome sign in access points was used to sign the userr in.
+    // See OneClickSigninHelper for details.
+    url_string = GaiaUrls::GetInstance()->service_login_url();
+    url_string.append("?service=chromiumsync");
+
+    std::string continue_url = base::StringPrintf("%s?%s=%d",
+        kContinueUrl, kSyncPromoQueryKeySource, static_cast<int>(source));
+
+    base::StringAppendF(&url_string, "&%s=%s", kSyncPromoQueryKeyContinue,
+                        net::EscapeQueryParamValue(
+                            continue_url, false).c_str());
+  } else {
+    url_string = base::StringPrintf("%s?%s=%d", chrome::kChromeUISyncPromoURL,
+                                    kSyncPromoQueryKeySource,
+                                    static_cast<int>(source));
+
+    if (auto_close)
+      base::StringAppendF(&url_string, "&%s=1", kSyncPromoQueryKeyAutoClose);
+
+    if (!next_page.spec().empty()) {
+      base::StringAppendF(&url_string, "&%s=%s", kSyncPromoQueryKeyNextPage,
+                          net::EscapeQueryParamValue(next_page.spec(),
+                                                     false).c_str());
+    }
   }
 
-  return GURL(stream.str());
-}
-
-// static
-bool SyncPromoUI::GetIsLaunchPageForSyncPromoURL(const GURL& url) {
-  std::string value;
-  // Show the title if the promo is currently the Chrome launch page (and not
-  // the page accessed through the NTP).
-  if (GetValueForKeyInQuery(url, kSyncPromoQueryKeyIsLaunchPage, &value))
-    return value == "true";
-  return false;
+  return GURL(url_string);
 }
 
 // static
 GURL SyncPromoUI::GetNextPageURLForSyncPromoURL(const GURL& url) {
   std::string value;
-  if (GetValueForKeyInQuery(url, kSyncPromoQueryKeyNextPage, &value)) {
-    url_canon::RawCanonOutputT<char16> output;
-    url_util::DecodeURLEscapeSequences(value.c_str(), value.length(), &output);
-    std::string url;
-    UTF16ToUTF8(output.data(), output.length(), &url);
-    return GURL(url);
+  if (chrome_common_net::GetValueForKeyInQuery(
+          url, kSyncPromoQueryKeyNextPage, &value)) {
+    return GURL(value);
   }
   return GURL();
 }
 
 // static
-std::string SyncPromoUI::GetSourceForSyncPromoURL(const GURL& url) {
+SyncPromoUI::Source SyncPromoUI::GetSourceForSyncPromoURL(const GURL& url) {
   std::string value;
-  return GetValueForKeyInQuery(url, kSyncPromoQueryKeySource, &value) ?
-      value : std::string();
-}
-
-// static
-bool SyncPromoUI::UserHasSeenSyncPromoAtStartup(Profile* profile) {
-  return profile->GetPrefs()->GetInteger(prefs::kSyncPromoStartupCount) > 0;
-}
-
-// static
-SyncPromoUI::Version SyncPromoUI::GetSyncPromoVersion() {
-  int value = 0;
-  if (base::StringToInt(CommandLine::ForCurrentProcess()->
-      GetSwitchValueASCII(switches::kSyncPromoVersion), &value)) {
-    if (value >= VERSION_DEFAULT && value < VERSION_COUNT)
-      return static_cast<Version>(value);
-  }
-
-  Version version;
-  if (sync_promo_trial::GetSyncPromoVersionForCurrentTrial(&version)) {
-    // Currently the sync promo dialog has two problems. First, it's not modal
-    // so the user can interact with other browser windows. Second, it uses
-    // a nested message loop that can cause the sync promo page not to render.
-    // To work around these problems the sync promo dialog is only shown for
-    // the first profile. TODO(sail): Fix these issues if the sync promo dialog
-    // is more widely deployed.
-    ProfileInfoCache& cache =
-        g_browser_process->profile_manager()->GetProfileInfoCache();
-    if (cache.GetNumberOfProfiles() > 1 &&
-        version == SyncPromoUI::VERSION_DIALOG) {
-      return SyncPromoUI::VERSION_SIMPLE;
+  if (chrome_common_net::GetValueForKeyInQuery(
+          url, kSyncPromoQueryKeySource, &value)) {
+    int source = 0;
+    if (base::StringToInt(value, &source) && source >= SOURCE_START_PAGE &&
+        source < SOURCE_UNKNOWN) {
+      return static_cast<Source>(source);
     }
-    return version;
   }
+  return SOURCE_UNKNOWN;
+}
 
-  return VERSION_DEFAULT;
+// static
+bool SyncPromoUI::GetAutoCloseForSyncPromoURL(const GURL& url) {
+  std::string value;
+  if (chrome_common_net::GetValueForKeyInQuery(
+          url, kSyncPromoQueryKeyAutoClose, &value)) {
+    int source = 0;
+    base::StringToInt(value, &source);
+    return (source == 1);
+  }
+  return false;
+}
+
+// static
+bool SyncPromoUI::UseWebBasedSigninFlow() {
+#if defined(ENABLE_ONE_CLICK_SIGNIN)
+  return CommandLine::ForCurrentProcess()->HasSwitch(
+      switches::kUseWebBasedSigninFlow);
+#else
+  return false;
+#endif
 }

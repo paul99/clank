@@ -4,7 +4,6 @@
 
 #ifndef CHROME_BROWSER_PROCESS_INFO_SNAPSHOT_H_
 #define CHROME_BROWSER_PROCESS_INFO_SNAPSHOT_H_
-#pragma once
 
 #include <sys/types.h>
 
@@ -58,16 +57,7 @@ class ProcessInfoSnapshot {
     uint64_t vsize;
     std::string command;
 
-    ProcInfoEntry()
-        : pid(0),
-          ppid(0),
-          uid(0),
-          euid(0),
-          rss(0),
-          rshrd(0),
-          rprvt(0),
-          vsize(0) {
-    }
+    ProcInfoEntry();
   };
 
   // Get process information for a given PID.

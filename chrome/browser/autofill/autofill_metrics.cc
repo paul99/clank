@@ -1,4 +1,4 @@
-// Copyright (c) 2011 The Chromium Authors. All rights reserved.
+// Copyright (c) 2012 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -9,7 +9,7 @@
 #include "base/time.h"
 #include "chrome/browser/autofill/autofill_type.h"
 #include "chrome/browser/autofill/form_structure.h"
-#include "webkit/forms/form_data.h"
+#include "chrome/common/form_data.h"
 
 namespace {
 
@@ -32,6 +32,7 @@ enum ServerExperiment {
   PROBABILITY_PICKER_025_CC_THRESHOLD_03,
   PROBABILITY_PICKER_025_CONTEXTUAL_CC_THRESHOLD_03,
   PROBABILITY_PICKER_025_CONTEXTUAL_CC_THRESHOLD_03_WITH_FALLBACK,
+  PROBABILITY_PICKER_05_CC_NAME_THRESHOLD_03_EXPERIMENT_1,
   NUM_SERVER_EXPERIMENTS
 };
 
@@ -51,6 +52,7 @@ enum FieldTypeGroupForMetrics {
   CREDIT_CARD_NAME,
   CREDIT_CARD_NUMBER,
   CREDIT_CARD_DATE,
+  CREDIT_CARD_TYPE,
   NUM_FIELD_TYPE_GROUPS_FOR_METRICS
 };
 
@@ -136,6 +138,8 @@ int GetFieldTypeGroupMetric(const AutofillFieldType field_type,
         case ::CREDIT_CARD_NUMBER:
           group = CREDIT_CARD_NUMBER;
           break;
+        case ::CREDIT_CARD_TYPE:
+          group = CREDIT_CARD_TYPE;
         default:
           group = CREDIT_CARD_DATE;
       }
@@ -202,7 +206,7 @@ void LogServerExperimentId(const std::string& histogram_name,
   ServerExperiment metric = UNKNOWN_EXPERIMENT;
 
   const std::string default_experiment_name =
-      FormStructure(webkit::forms::FormData()).server_experiment_id();
+      FormStructure(FormData()).server_experiment_id();
   if (experiment_id.empty())
     metric = NO_EXPERIMENT;
   else if (experiment_id == "ar06")
@@ -235,6 +239,8 @@ void LogServerExperimentId(const std::string& histogram_name,
     metric = PROBABILITY_PICKER_025_CONTEXTUAL_CC_THRESHOLD_03;
   else if (experiment_id == "fp05cco03cstd")
     metric = PROBABILITY_PICKER_025_CONTEXTUAL_CC_THRESHOLD_03_WITH_FALLBACK;
+  else if (experiment_id == "fp05cc03e1")
+    metric = PROBABILITY_PICKER_05_CC_NAME_THRESHOLD_03_EXPERIMENT_1;
 
   DCHECK(metric < NUM_SERVER_EXPERIMENTS);
   LogUMAHistogramEnumeration(histogram_name, metric, NUM_SERVER_EXPERIMENTS);
@@ -253,6 +259,14 @@ void AutofillMetrics::LogCreditCardInfoBarMetric(InfoBarMetric metric) const {
 
   UMA_HISTOGRAM_ENUMERATION("Autofill.CreditCardInfoBar", metric,
                             NUM_INFO_BAR_METRICS);
+}
+
+void AutofillMetrics::LogDeveloperEngagementMetric(
+    DeveloperEngagementMetric metric) const {
+  DCHECK(metric < NUM_DEVELOPER_ENGAGEMENT_METRICS);
+
+  UMA_HISTOGRAM_ENUMERATION("Autofill.DeveloperEngagement", metric,
+                            NUM_DEVELOPER_ENGAGEMENT_METRICS);
 }
 
 void AutofillMetrics::LogHeuristicTypePrediction(

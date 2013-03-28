@@ -1,4 +1,4 @@
-// Copyright (c) 2011 The Chromium Authors. All rights reserved.
+// Copyright (c) 2012 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -6,21 +6,21 @@
 
 #include "chrome/browser/ui/constrained_window.h"
 #include "chrome/browser/ui/constrained_window_tab_helper_delegate.h"
-#include "chrome/browser/ui/tab_contents/tab_contents_wrapper.h"
 #include "chrome/common/render_messages.h"
-#include "content/browser/renderer_host/render_view_host.h"
-#include "content/browser/renderer_host/render_widget_host_view.h"
 #include "content/public/browser/navigation_details.h"
 #include "content/public/browser/navigation_entry.h"
+#include "content/public/browser/render_view_host.h"
+#include "content/public/browser/render_widget_host_view.h"
 #include "content/public/browser/web_contents.h"
-#include "net/base/registry_controlled_domain.h"
+#include "net/base/registry_controlled_domains/registry_controlled_domain.h"
 
 using content::WebContents;
 
+DEFINE_WEB_CONTENTS_USER_DATA_KEY(ConstrainedWindowTabHelper)
+
 ConstrainedWindowTabHelper::ConstrainedWindowTabHelper(
-    TabContentsWrapper* wrapper)
-    : content::WebContentsObserver(wrapper->web_contents()),
-      wrapper_(wrapper),
+    content::WebContents* web_contents)
+    : content::WebContentsObserver(web_contents),
       delegate_(NULL) {
 }
 
@@ -32,7 +32,7 @@ void ConstrainedWindowTabHelper::AddConstrainedDialog(
     ConstrainedWindow* window) {
   child_windows_.push_back(window);
 
-  if (child_windows_.size() == 1) {
+  if (child_windows_.size() == 1 && window->CanShowConstrainedWindow()) {
     window->ShowConstrainedWindow();
     BlockTabContent(true);
   }
@@ -73,19 +73,19 @@ void ConstrainedWindowTabHelper::WillClose(ConstrainedWindow* window) {
 void ConstrainedWindowTabHelper::BlockTabContent(bool blocked) {
   WebContents* contents = web_contents();
   if (!contents) {
-    // The TabContents has already disconnected.
+    // The WebContents has already disconnected.
     return;
   }
 
   // RenderViewHost may be NULL during shutdown.
-  RenderViewHost* host = contents->GetRenderViewHost();
+  content::RenderViewHost* host = contents->GetRenderViewHost();
   if (host) {
-    host->set_ignore_input_events(blocked);
-    host->Send(
-        new ChromeViewMsg_SetVisuallyDeemphasized(host->routing_id(), blocked));
+    host->SetIgnoreInputEvents(blocked);
+    host->Send(new ChromeViewMsg_SetVisuallyDeemphasized(
+        host->GetRoutingID(), blocked));
   }
   if (delegate_)
-    delegate_->SetTabContentBlocked(wrapper_, blocked);
+    delegate_->SetTabContentBlocked(contents, blocked);
 }
 
 void ConstrainedWindowTabHelper::DidNavigateMainFrame(

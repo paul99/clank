@@ -4,7 +4,6 @@
 
 #ifndef CHROME_BROWSER_UI_COCOA_BOOKMARKS_BOOKMARK_BAR_FOLDER_CONTROLLER_H_
 #define CHROME_BROWSER_UI_COCOA_BOOKMARKS_BOOKMARK_BAR_FOLDER_CONTROLLER_H_
-#pragma once
 
 #import <Cocoa/Cocoa.h>
 
@@ -141,6 +140,9 @@
   // Set to YES to prevent any node animations. Useful for unit testing so that
   // incomplete animations do not cause valgrind complaints.
   BOOL ignoreAnimations_;
+
+  // The screen to which the menu should be restricted.
+  NSScreen* screen_;
 
   int selectedIndex_;
   NSString* typedPrefix_;

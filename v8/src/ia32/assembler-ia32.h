@@ -97,16 +97,25 @@ struct Register {
   int code_;
 };
 
+const int kRegister_eax_Code = 0;
+const int kRegister_ecx_Code = 1;
+const int kRegister_edx_Code = 2;
+const int kRegister_ebx_Code = 3;
+const int kRegister_esp_Code = 4;
+const int kRegister_ebp_Code = 5;
+const int kRegister_esi_Code = 6;
+const int kRegister_edi_Code = 7;
+const int kRegister_no_reg_Code = -1;
 
-const Register eax = { 0 };
-const Register ecx = { 1 };
-const Register edx = { 2 };
-const Register ebx = { 3 };
-const Register esp = { 4 };
-const Register ebp = { 5 };
-const Register esi = { 6 };
-const Register edi = { 7 };
-const Register no_reg = { -1 };
+const Register eax = { kRegister_eax_Code };
+const Register ecx = { kRegister_ecx_Code };
+const Register edx = { kRegister_edx_Code };
+const Register ebx = { kRegister_ebx_Code };
+const Register esp = { kRegister_esp_Code };
+const Register ebp = { kRegister_ebp_Code };
+const Register esi = { kRegister_esi_Code };
+const Register edi = { kRegister_edi_Code };
+const Register no_reg = { kRegister_no_reg_Code };
 
 
 inline const char* Register::AllocationIndexToString(int index) {
@@ -573,10 +582,7 @@ class Assembler : public AssemblerBase {
   // upon destruction of the assembler.
   // TODO(vitalyr): the assembler does not need an isolate.
   Assembler(Isolate* isolate, void* buffer, int buffer_size);
-  ~Assembler();
-
-  // Overrides the default provided by FLAG_debug_code.
-  void set_emit_debug_code(bool value) { emit_debug_code_ = value; }
+  virtual ~Assembler() { }
 
   // GetCode emits any pending (non-emitted) code and fills the descriptor
   // desc. GetCode() is idempotent; it returns the same result if no other
@@ -587,10 +593,14 @@ class Assembler : public AssemblerBase {
   inline static Address target_address_at(Address pc);
   inline static void set_target_address_at(Address pc, Address target);
 
+  // Return the code target address at a call site from the return address
+  // of that call in the instruction stream.
+  inline static Address target_address_from_return_address(Address pc);
+
   // This sets the branch destination (which is in the instruction on x86).
   // This is for calls and branches within generated code.
-  inline static void set_target_at(Address instruction_payload,
-                                   Address target) {
+  inline static void deserialization_set_special_target_at(
+      Address instruction_payload, Address target) {
     set_target_address_at(instruction_payload, target);
   }
 
@@ -601,8 +611,7 @@ class Assembler : public AssemblerBase {
     set_target_address_at(instruction_payload, target);
   }
 
-  static const int kCallTargetSize = kPointerSize;
-  static const int kExternalTargetSize = kPointerSize;
+  static const int kSpecialTargetSize = kPointerSize;
 
   // Distance between the address of the code target in the call instruction
   // and the return address
@@ -616,13 +625,12 @@ class Assembler : public AssemblerBase {
   static const int kPatchDebugBreakSlotAddressOffset = 1;  // JMP imm32.
 
   static const int kCallInstructionLength = 5;
+  static const int kPatchDebugBreakSlotReturnOffset = kPointerSize;
   static const int kJSReturnSequenceLength = 6;
 
   // The debug break slot must be able to contain a call instruction.
   static const int kDebugBreakSlotLength = kCallInstructionLength;
 
-  // One byte opcode for test eax,0xXXXXXXXX.
-  static const byte kTestEaxByte = 0xA9;
   // One byte opcode for test al, 0xXX.
   static const byte kTestAlByte = 0xA8;
   // One byte opcode for nop.
@@ -634,6 +642,9 @@ class Assembler : public AssemblerBase {
   static const byte kJccShortPrefix = 0x70;
   static const byte kJncShortOpcode = kJccShortPrefix | not_carry;
   static const byte kJcShortOpcode = kJccShortPrefix | carry;
+  static const byte kJnzShortOpcode = kJccShortPrefix | not_zero;
+  static const byte kJzShortOpcode = kJccShortPrefix | zero;
+
 
   // ---------------------------------------------------------------------------
   // Code generation
@@ -798,6 +809,8 @@ class Assembler : public AssemblerBase {
 
   void rcl(Register dst, uint8_t imm8);
   void rcr(Register dst, uint8_t imm8);
+  void ror(Register dst, uint8_t imm8);
+  void ror_cl(Register dst);
 
   void sar(Register dst, uint8_t imm8);
   void sar_cl(Register dst);
@@ -874,8 +887,8 @@ class Assembler : public AssemblerBase {
   void call(const Operand& adr);
   int CallSize(Handle<Code> code, RelocInfo::Mode mode);
   void call(Handle<Code> code,
-            RelocInfo::Mode rmode = RelocInfo::CODE_TARGET,
-            unsigned ast_id = kNoASTId);
+            RelocInfo::Mode rmode,
+            TypeFeedbackId id = TypeFeedbackId::None());
 
   // Jumps
   // unconditional jump to L
@@ -969,6 +982,7 @@ class Assembler : public AssemblerBase {
   // SSE2 instructions
   void cvttss2si(Register dst, const Operand& src);
   void cvttsd2si(Register dst, const Operand& src);
+  void cvtsd2si(Register dst, XMMRegister src);
 
   void cvtsi2sd(XMMRegister dst, Register src) { cvtsi2sd(dst, Operand(src)); }
   void cvtsi2sd(XMMRegister dst, const Operand& src);
@@ -976,14 +990,17 @@ class Assembler : public AssemblerBase {
   void cvtsd2ss(XMMRegister dst, XMMRegister src);
 
   void addsd(XMMRegister dst, XMMRegister src);
+  void addsd(XMMRegister dst, const Operand& src);
   void subsd(XMMRegister dst, XMMRegister src);
   void mulsd(XMMRegister dst, XMMRegister src);
+  void mulsd(XMMRegister dst, const Operand& src);
   void divsd(XMMRegister dst, XMMRegister src);
   void xorpd(XMMRegister dst, XMMRegister src);
   void xorps(XMMRegister dst, XMMRegister src);
   void sqrtsd(XMMRegister dst, XMMRegister src);
 
   void andpd(XMMRegister dst, XMMRegister src);
+  void orpd(XMMRegister dst, XMMRegister src);
 
   void ucomisd(XMMRegister dst, XMMRegister src);
   void ucomisd(XMMRegister dst, const Operand& src);
@@ -998,8 +1015,10 @@ class Assembler : public AssemblerBase {
   void roundsd(XMMRegister dst, XMMRegister src, RoundingMode mode);
 
   void movmskpd(Register dst, XMMRegister src);
+  void movmskps(Register dst, XMMRegister src);
 
   void cmpltsd(XMMRegister dst, XMMRegister src);
+  void pcmpeqd(XMMRegister dst, XMMRegister src);
 
   void movaps(XMMRegister dst, XMMRegister src);
 
@@ -1032,7 +1051,7 @@ class Assembler : public AssemblerBase {
   void psllq(XMMRegister dst, XMMRegister src);
   void psrlq(XMMRegister reg, int8_t shift);
   void psrlq(XMMRegister dst, XMMRegister src);
-  void pshufd(XMMRegister dst, XMMRegister src, int8_t shuffle);
+  void pshufd(XMMRegister dst, XMMRegister src, uint8_t shuffle);
   void pextrd(Register dst, XMMRegister src, int8_t offset) {
     pextrd(Operand(dst), src, offset);
   }
@@ -1075,8 +1094,6 @@ class Assembler : public AssemblerBase {
   void db(uint8_t data);
   void dd(uint32_t data);
 
-  int pc_offset() const { return pc_ - buffer_; }
-
   // Check if there is less than kGap bytes available in the buffer.
   // If this is the case, we need to grow the buffer before emitting
   // an instruction or relocation information.
@@ -1095,14 +1112,11 @@ class Assembler : public AssemblerBase {
 
   // Avoid overflows for displacements etc.
   static const int kMaximalBufferSize = 512*MB;
-  static const int kMinimalBufferSize = 4*KB;
 
   byte byte_at(int pos)  { return buffer_[pos]; }
   void set_byte_at(int pos, byte value) { buffer_[pos] = value; }
 
  protected:
-  bool emit_debug_code() const { return emit_debug_code_; }
-
   void movsd(XMMRegister dst, const Operand& src);
   void movsd(const Operand& dst, XMMRegister src);
 
@@ -1127,7 +1141,7 @@ class Assembler : public AssemblerBase {
   inline void emit(Handle<Object> handle);
   inline void emit(uint32_t x,
                    RelocInfo::Mode rmode,
-                   unsigned ast_id = kNoASTId);
+                   TypeFeedbackId id = TypeFeedbackId::None());
   inline void emit(const Immediate& x);
   inline void emit_w(const Immediate& x);
 
@@ -1163,21 +1177,10 @@ class Assembler : public AssemblerBase {
   friend class CodePatcher;
   friend class EnsureSpace;
 
-  // Code buffer:
-  // The buffer into which code and relocation info are generated.
-  byte* buffer_;
-  int buffer_size_;
-  // True if the assembler owns the buffer, false if buffer is external.
-  bool own_buffer_;
-
   // code generation
-  byte* pc_;  // the program counter; moves forward
   RelocInfoWriter reloc_info_writer;
 
   PositionsRecorder positions_recorder_;
-
-  bool emit_debug_code_;
-
   friend class PositionsRecorder;
 };
 

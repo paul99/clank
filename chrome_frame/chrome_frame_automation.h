@@ -1,4 +1,4 @@
-// Copyright (c) 2011 The Chromium Authors. All rights reserved.
+// Copyright (c) 2012 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -11,9 +11,9 @@
 #include <string>
 #include <vector>
 
+#include "base/containers/stack_container.h"
 #include "base/memory/ref_counted.h"
 #include "base/memory/scoped_handle.h"
-#include "base/stack_container.h"
 #include "base/synchronization/lock.h"
 #include "base/threading/thread.h"
 #include "base/timer.h"
@@ -92,7 +92,7 @@ class ChromeFrameAutomationProxyImpl
   friend class AutomationProxyCacheEntry;
   ChromeFrameAutomationProxyImpl(AutomationProxyCacheEntry* entry,
                                  std::string channel_id,
-                                 int launch_timeout);
+                                 base::TimeDelta launch_timeout);
 
   class CFMsgDispatcher;
   class TabProxyNotificationMessageFilter;
@@ -111,13 +111,15 @@ class ChromeFrameLaunchParams :  // NOLINT
                           const std::wstring& profile_name,
                           const std::wstring& language,
                           bool incognito, bool widget_mode,
-                          bool route_all_top_level_navigations)
+                          bool route_all_top_level_navigations,
+                          bool send_shutdown_delay_switch)
     : launch_timeout_(kCommandExecutionTimeout), url_(url),
       referrer_(referrer), profile_path_(profile_path),
       profile_name_(profile_name), language_(language),
       version_check_(true), incognito_mode_(incognito),
       is_widget_mode_(widget_mode),
-      route_all_top_level_navigations_(route_all_top_level_navigations) {
+      route_all_top_level_navigations_(route_all_top_level_navigations),
+      send_shutdown_delay_switch_(send_shutdown_delay_switch) {
   }
 
   ~ChromeFrameLaunchParams() {
@@ -184,6 +186,10 @@ class ChromeFrameLaunchParams :  // NOLINT
     return route_all_top_level_navigations_;
   }
 
+  bool send_shutdown_delay_switch() const {
+    return send_shutdown_delay_switch_;
+  }
+
  protected:
   int launch_timeout_;
   GURL url_;
@@ -195,6 +201,7 @@ class ChromeFrameLaunchParams :  // NOLINT
   bool incognito_mode_;
   bool is_widget_mode_;
   bool route_all_top_level_navigations_;
+  bool send_shutdown_delay_switch_;
 
  private:
   DISALLOW_COPY_AND_ASSIGN(ChromeFrameLaunchParams);
@@ -287,7 +294,7 @@ class ProxyFactory {
                                        LaunchDelegate* delegate);
 
  private:
-  typedef StackVector<scoped_refptr<AutomationProxyCacheEntry>, 4> Vector;
+  typedef base::StackVector<scoped_refptr<AutomationProxyCacheEntry>, 4> Vector;
   Vector proxies_;
   // Lock if we are going to call GetAutomationServer from more than one thread.
   base::Lock lock_;
@@ -366,8 +373,13 @@ class ChromeFrameAutomationClient
   void set_use_chrome_network(bool use_chrome_network) {
     use_chrome_network_ = use_chrome_network;
   }
+
   bool use_chrome_network() const {
     return use_chrome_network_;
+  }
+
+  bool send_shutdown_delay_switch() const {
+    return send_shutdown_delay_switch_;
   }
 
 #ifdef UNIT_TEST
@@ -399,11 +411,6 @@ class ChromeFrameAutomationClient
   // the website to put up a confirmation dialog on unload.
   void OnUnload(bool* should_unload);
 
-  void set_route_all_top_level_navigations(
-      bool route_all_top_level_navigations) {
-    route_all_top_level_navigations_ = route_all_top_level_navigations;
-  }
-
  protected:
   // ChromeFrameAutomationProxy::LaunchDelegate implementation.
   virtual void LaunchComplete(ChromeFrameAutomationProxy* proxy,
@@ -432,6 +439,8 @@ class ChromeFrameAutomationClient
   }
 
  private:
+  void InitializeFieldTrials();
+
   void OnMessageReceivedUIThread(const IPC::Message& msg);
   void OnChannelErrorUIThread();
 
@@ -448,10 +457,11 @@ class ChromeFrameAutomationClient
 
   // PluginUrlRequestDelegate implementation. Simply adds tab's handle
   // as parameter and forwards to Chrome via IPC.
-  virtual void OnResponseStarted(int request_id, const char* mime_type,
-      const char* headers, int size, base::Time last_modified,
-      const std::string& redirect_url, int redirect_status,
-      const net::HostPortPair& socket_address);
+  virtual void OnResponseStarted(
+      int request_id, const char* mime_type, const char* headers, int size,
+      base::Time last_modified, const std::string& redirect_url,
+      int redirect_status, const net::HostPortPair& socket_address,
+      uint64 upload_size);
   virtual void OnReadComplete(int request_id, const std::string& data);
   virtual void OnResponseEnd(int request_id,
                              const net::URLRequestStatus& status);
@@ -514,6 +524,10 @@ class ChromeFrameAutomationClient
   // in this page. This typically applies to hosts which would render the new
   // page without chrome frame. Defaults to false.
   bool route_all_top_level_navigations_;
+
+  // Set to true if Chrome Frame should tell Chrome to delay shutdown after
+  // we break a connection. Currently used only as part of a field trial.
+  bool send_shutdown_delay_switch_;
 
   friend class BeginNavigateContext;
   friend class CreateExternalTabContext;

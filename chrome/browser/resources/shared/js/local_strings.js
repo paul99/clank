@@ -1,10 +1,10 @@
-// Copyright (c) 2011 The Chromium Authors. All rights reserved.
+// Copyright (c) 2012 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
-// TODO(arv): Namespace
-
 /**
+ * NOTE: The use of this file is deprecated. Use load_time_data.js instead.
+ *
  * The local strings get injected into the page using a variable named
  * {@code templateData}. This class provides a simpler interface to access those
  * strings.
@@ -60,7 +60,12 @@ LocalStrings.prototype = {
    */
   getString: function(id) {
     // TODO(arv): We should not rely on a global variable here.
-    return (this.templateData || window.templateData)[id] || '';
+    var templateData = this.templateData || window.templateData;
+    var str = templateData[id];
+    // TODO(jhawkins): Change to console.error when all errors are fixed.
+    if (!str)
+      console.warn('Missing string for id: ' + id);
+    return str;
   },
 
   /**

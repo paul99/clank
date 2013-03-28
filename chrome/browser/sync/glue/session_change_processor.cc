@@ -8,24 +8,25 @@
 #include <vector>
 
 #include "base/logging.h"
-#include "chrome/browser/extensions/extension_tab_helper.h"
+#include "chrome/browser/extensions/tab_helper.h"
 #include "chrome/browser/history/history_notifications.h"
 #include "chrome/browser/profiles/profile.h"
-#include "chrome/browser/sync/api/sync_error.h"
 #include "chrome/browser/sync/glue/session_model_associator.h"
-#include "chrome/browser/sync/internal_api/change_record.h"
-#include "chrome/browser/sync/internal_api/read_node.h"
 #include "chrome/browser/sync/profile_sync_service.h"
-#include "chrome/browser/sync/protocol/session_specifics.pb.h"
-#include "chrome/browser/ui/sync/tab_contents_wrapper_synced_tab_delegate.h"
-#include "chrome/browser/ui/tab_contents/tab_contents_wrapper.h"
+#include "chrome/browser/ui/sync/tab_contents_synced_tab_delegate.h"
 #include "chrome/common/chrome_notification_types.h"
 #include "content/public/browser/navigation_controller.h"
 #include "content/public/browser/navigation_entry.h"
-#include "content/public/browser/notification_service.h"
 #include "content/public/browser/notification_details.h"
+#include "content/public/browser/notification_service.h"
 #include "content/public/browser/notification_source.h"
 #include "content/public/browser/web_contents.h"
+#include "sync/api/sync_error.h"
+#include "sync/internal_api/public/base/model_type.h"
+#include "sync/internal_api/public/base/model_type_invalidation_map.h"
+#include "sync/internal_api/public/change_record.h"
+#include "sync/internal_api/public/read_node.h"
+#include "sync/protocol/session_specifics.pb.h"
 
 using content::BrowserThread;
 using content::NavigationController;
@@ -43,17 +44,14 @@ static const char kNTPOpenTabSyncURL[] = "chrome://newtab/#open_tabs";
 // from a NavigationController, if it exists. Returns |NULL| otherwise.
 SyncedTabDelegate* ExtractSyncedTabDelegate(
     const content::NotificationSource& source) {
-  TabContentsWrapper* tab = TabContentsWrapper::GetCurrentWrapperForContents(
+  return TabContentsSyncedTabDelegate::FromWebContents(
       content::Source<NavigationController>(source).ptr()->GetWebContents());
-  if (!tab)
-    return NULL;
-  return tab->synced_tab_delegate();
 }
 
 }  // namespace
 
 SessionChangeProcessor::SessionChangeProcessor(
-    UnrecoverableErrorHandler* error_handler,
+    DataTypeErrorHandler* error_handler,
     SessionModelAssociator* session_model_associator)
     : ChangeProcessor(error_handler),
       session_model_associator_(session_model_associator),
@@ -65,7 +63,7 @@ SessionChangeProcessor::SessionChangeProcessor(
 }
 
 SessionChangeProcessor::SessionChangeProcessor(
-    UnrecoverableErrorHandler* error_handler,
+    DataTypeErrorHandler* error_handler,
     SessionModelAssociator* session_model_associator,
     bool setup_for_test)
     : ChangeProcessor(error_handler),
@@ -86,7 +84,6 @@ void SessionChangeProcessor::Observe(
     const content::NotificationSource& source,
     const content::NotificationDetails& details) {
   DCHECK(BrowserThread::CurrentlyOn(BrowserThread::UI));
-  DCHECK(running());
   DCHECK(profile_);
 
   // Track which windows and/or tabs are modified.
@@ -109,10 +106,10 @@ void SessionChangeProcessor::Observe(
       break;
     }
 
-    case content::NOTIFICATION_TAB_PARENTED: {
+    case chrome::NOTIFICATION_TAB_PARENTED: {
+      WebContents* web_contents = content::Source<WebContents>(source).ptr();
       SyncedTabDelegate* tab =
-          content::Source<TabContentsWrapper>(source).ptr()->
-              synced_tab_delegate();
+          TabContentsSyncedTabDelegate::FromWebContents(web_contents);
       if (!tab || tab->profile() != profile_) {
         return;
       }
@@ -122,13 +119,9 @@ void SessionChangeProcessor::Observe(
     }
 
     case content::NOTIFICATION_LOAD_COMPLETED_MAIN_FRAME: {
-      TabContentsWrapper* tab_contents_wrapper =
-          TabContentsWrapper::GetCurrentWrapperForContents(
-              content::Source<WebContents>(source).ptr());
-      if (!tab_contents_wrapper) {
-        return;
-      }
-      SyncedTabDelegate* tab = tab_contents_wrapper->synced_tab_delegate();
+      WebContents* web_contents = content::Source<WebContents>(source).ptr();
+      SyncedTabDelegate* tab =
+          TabContentsSyncedTabDelegate::FromWebContents(web_contents);
       if (!tab || tab->profile() != profile_) {
         return;
       }
@@ -137,13 +130,15 @@ void SessionChangeProcessor::Observe(
       break;
     }
 
-    case content::NOTIFICATION_TAB_CLOSED: {
-      SyncedTabDelegate* tab = ExtractSyncedTabDelegate(source);
-      if (!tab || tab->profile() != profile_) {
+    case content::NOTIFICATION_WEB_CONTENTS_DESTROYED: {
+      WebContents* web_contents = content::Source<WebContents>(source).ptr();
+      SyncedTabDelegate* tab =
+          TabContentsSyncedTabDelegate::FromWebContents(web_contents);
+      if (!tab || tab->profile() != profile_)
         return;
-      }
       modified_tabs.push_back(tab);
-      DVLOG(1) << "Received TAB_CLOSED for profile " << profile_;
+      DVLOG(1) << "Received NOTIFICATION_WEB_CONTENTS_DESTROYED for profile "
+               << profile_;
       break;
     }
 
@@ -178,16 +173,16 @@ void SessionChangeProcessor::Observe(
     }
 
     case chrome::NOTIFICATION_TAB_CONTENTS_APPLICATION_EXTENSION_CHANGED: {
-      ExtensionTabHelper* extension_tab_helper =
-          content::Source<ExtensionTabHelper>(source).ptr();
-      if (!extension_tab_helper ||
-          extension_tab_helper->web_contents()->GetBrowserContext() !=
+      extensions::TabHelper* extension_tab_helper =
+          content::Source<extensions::TabHelper>(source).ptr();
+      if (extension_tab_helper->web_contents()->GetBrowserContext() !=
               profile_) {
         return;
       }
       if (extension_tab_helper->extension_app()) {
-        modified_tabs.push_back(extension_tab_helper->tab_contents_wrapper()->
-            synced_tab_delegate());
+        SyncedTabDelegate* tab = TabContentsSyncedTabDelegate::FromWebContents(
+            extension_tab_helper->web_contents());
+        modified_tabs.push_back(tab);
       }
       DVLOG(1) << "Received TAB_CONTENTS_APPLICATION_EXTENSION_CHANGED "
                << "for profile " << profile_;
@@ -211,11 +206,14 @@ void SessionChangeProcessor::Observe(
         entry->GetVirtualURL().is_valid() &&
         entry->GetVirtualURL().spec() == kNTPOpenTabSyncURL) {
       DVLOG(1) << "Triggering sync refresh for sessions datatype.";
-      const syncable::ModelType type = syncable::SESSIONS;
+      const syncer::ModelTypeSet types(syncer::SESSIONS);
+      const syncer::ModelTypeInvalidationMap& invalidation_map =
+          ModelTypeSetToInvalidationMap(types, std::string());
       content::NotificationService::current()->Notify(
-          chrome::NOTIFICATION_SYNC_REFRESH,
+          chrome::NOTIFICATION_SYNC_REFRESH_LOCAL,
           content::Source<Profile>(profile_),
-          content::Details<const syncable::ModelType>(&type));
+          content::Details<const syncer::ModelTypeInvalidationMap>(
+              &invalidation_map));
     }
   }
 
@@ -223,80 +221,85 @@ void SessionChangeProcessor::Observe(
   // Note that if we fail to associate, it means something has gone wrong,
   // such as our local session being deleted, so we disassociate and associate
   // again.
-  SyncError error;
   bool reassociation_needed = !modified_tabs.empty() &&
-      !session_model_associator_->AssociateTabs(modified_tabs, &error);
+      !session_model_associator_->AssociateTabs(modified_tabs, NULL);
 
   // Note, we always associate windows because it's possible a tab became
   // "interesting" by going to a valid URL, in which case it needs to be added
   // to the window's tab information.
   if (!reassociation_needed) {
     reassociation_needed =
-        !session_model_associator_->AssociateWindows(false, &error);
+        !session_model_associator_->AssociateWindows(false, NULL);
   }
 
   if (reassociation_needed) {
-    DVLOG(1) << "Reassociation of local models triggered.";
-    error = SyncError();
-    session_model_associator_->DisassociateModels(&error);
-    session_model_associator_->AssociateModels(&error);
+    LOG(WARNING) << "Reassociation of local models triggered.";
+    syncer::SyncError error;
+    error = session_model_associator_->DisassociateModels();
+    error = session_model_associator_->AssociateModels(NULL, NULL);
     if (error.IsSet()) {
-      error_handler()->OnUnrecoverableError(FROM_HERE,
-          "Sessions reassociation failed.");
+      error_handler()->OnSingleDatatypeUnrecoverableError(
+          error.location(),
+          error.message());
     }
   }
 }
 
 void SessionChangeProcessor::ApplyChangesFromSyncModel(
-    const sync_api::BaseTransaction* trans,
-    const sync_api::ImmutableChangeRecordList& changes) {
+    const syncer::BaseTransaction* trans,
+    int64 model_version,
+    const syncer::ImmutableChangeRecordList& changes) {
   DCHECK(BrowserThread::CurrentlyOn(BrowserThread::UI));
-  if (!running()) {
-    return;
-  }
 
   ScopedStopObserving<SessionChangeProcessor> stop_observing(this);
 
-  sync_api::ReadNode root(trans);
-  if (!root.InitByTagLookup(kSessionsTag)) {
-    error_handler()->OnUnrecoverableError(FROM_HERE,
+  syncer::ReadNode root(trans);
+  if (root.InitByTagLookup(kSessionsTag) != syncer::BaseNode::INIT_OK) {
+    error_handler()->OnSingleDatatypeUnrecoverableError(FROM_HERE,
         "Sessions root node lookup failed.");
     return;
   }
 
-  for (sync_api::ChangeRecordList::const_iterator it =
+  std::string local_tag = session_model_associator_->GetCurrentMachineTag();
+  for (syncer::ChangeRecordList::const_iterator it =
            changes.Get().begin(); it != changes.Get().end(); ++it) {
-    const sync_api::ChangeRecord& change = *it;
-    sync_api::ChangeRecord::Action action(change.action);
-    if (sync_api::ChangeRecord::ACTION_DELETE == action) {
+    const syncer::ChangeRecord& change = *it;
+    syncer::ChangeRecord::Action action(change.action);
+    if (syncer::ChangeRecord::ACTION_DELETE == action) {
       // Deletions are all or nothing (since we only ever delete entire
       // sessions). Therefore we don't care if it's a tab node or meta node,
       // and just ensure we've disassociated.
-      DCHECK_EQ(syncable::GetModelTypeFromSpecifics(it->specifics),
-                syncable::SESSIONS);
-      const sync_pb::SessionSpecifics& specifics =
-          it->specifics.GetExtension(sync_pb::session);
-      session_model_associator_->DisassociateForeignSession(
-          specifics.session_tag());
+      DCHECK_EQ(syncer::GetModelTypeFromSpecifics(it->specifics),
+                syncer::SESSIONS);
+      const sync_pb::SessionSpecifics& specifics = it->specifics.session();
+      if (specifics.session_tag() == local_tag) {
+        // Another client has attempted to delete our local data (possibly by
+        // error or their/our clock is inaccurate). Just ignore the deletion
+        // for now to avoid any possible ping-pong delete/reassociate sequence.
+        LOG(WARNING) << "Local session data deleted. Ignoring until next local "
+                     << "navigation event.";
+      } else {
+        session_model_associator_->DisassociateForeignSession(
+            specifics.session_tag());
+      }
       continue;
     }
 
     // Handle an update or add.
-    sync_api::ReadNode sync_node(trans);
-    if (!sync_node.InitByIdLookup(change.id)) {
-      error_handler()->OnUnrecoverableError(FROM_HERE,
+    syncer::ReadNode sync_node(trans);
+    if (sync_node.InitByIdLookup(change.id) != syncer::BaseNode::INIT_OK) {
+      error_handler()->OnSingleDatatypeUnrecoverableError(FROM_HERE,
           "Session node lookup failed.");
       return;
     }
 
     // Check that the changed node is a child of the session folder.
     DCHECK(root.GetId() == sync_node.GetParentId());
-    DCHECK(syncable::SESSIONS == sync_node.GetModelType());
+    DCHECK(syncer::SESSIONS == sync_node.GetModelType());
 
     const sync_pb::SessionSpecifics& specifics(
         sync_node.GetSessionSpecifics());
-    if (specifics.session_tag() ==
-            session_model_associator_->GetCurrentMachineTag() &&
+    if (specifics.session_tag() == local_tag &&
         !setup_for_test_) {
       // We should only ever receive a change to our own machine's session info
       // if encryption was turned on. In that case, the data is still the same,
@@ -324,18 +327,14 @@ void SessionChangeProcessor::StartImpl(Profile* profile) {
   StartObserving();
 }
 
-void SessionChangeProcessor::StopImpl() {
-  DCHECK(BrowserThread::CurrentlyOn(BrowserThread::UI));
-  StopObserving();
-  profile_ = NULL;
-}
-
 void SessionChangeProcessor::StartObserving() {
   DCHECK(BrowserThread::CurrentlyOn(BrowserThread::UI));
-  DCHECK(profile_);
-  notification_registrar_.Add(this, content::NOTIFICATION_TAB_PARENTED,
+  if (!profile_)
+    return;
+  notification_registrar_.Add(this, chrome::NOTIFICATION_TAB_PARENTED,
       content::NotificationService::AllSources());
-  notification_registrar_.Add(this, content::NOTIFICATION_TAB_CLOSED,
+  notification_registrar_.Add(this,
+      content::NOTIFICATION_WEB_CONTENTS_DESTROYED,
       content::NotificationService::AllSources());
   notification_registrar_.Add(this, content::NOTIFICATION_NAV_LIST_PRUNED,
       content::NotificationService::AllSources());
@@ -357,7 +356,6 @@ void SessionChangeProcessor::StartObserving() {
 
 void SessionChangeProcessor::StopObserving() {
   DCHECK(BrowserThread::CurrentlyOn(BrowserThread::UI));
-  DCHECK(profile_);
   notification_registrar_.RemoveAll();
 }
 

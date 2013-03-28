@@ -1,19 +1,21 @@
-// Copyright (c) 2011 The Chromium Authors. All rights reserved.
+// Copyright (c) 2012 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
 #ifndef CHROME_BROWSER_UI_WEBUI_OPTIONS_CORE_OPTIONS_HANDLER_H_
 #define CHROME_BROWSER_UI_WEBUI_OPTIONS_CORE_OPTIONS_HANDLER_H_
-#pragma once
 
 #include <map>
 #include <string>
 
+#include "base/callback.h"
+#include "base/prefs/public/pref_change_registrar.h"
 #include "base/values.h"
-#include "chrome/browser/plugin_data_remover_helper.h"
-#include "chrome/browser/prefs/pref_change_registrar.h"
+#include "chrome/browser/plugins/plugin_status_pref_setter.h"
 #include "chrome/browser/prefs/pref_service.h"
 #include "chrome/browser/ui/webui/options/options_ui.h"
+
+namespace options {
 
 // Core options UI handler.
 // Handles resource and JS calls common to all options sub-pages.
@@ -23,14 +25,10 @@ class CoreOptionsHandler : public OptionsPageUIHandler {
   virtual ~CoreOptionsHandler();
 
   // OptionsPageUIHandler implementation.
-  virtual void Initialize() OVERRIDE;
   virtual void GetLocalizedValues(DictionaryValue* localized_strings) OVERRIDE;
+  virtual void InitializeHandler() OVERRIDE;
+  virtual void InitializePage() OVERRIDE;
   virtual void Uninitialize() OVERRIDE;
-
-  // content::NotificationObserver implementation.
-  virtual void Observe(int type,
-                       const content::NotificationSource& source,
-                       const content::NotificationDetails& details) OVERRIDE;
 
   // WebUIMessageHandler implementation.
   virtual void RegisterMessages() OVERRIDE;
@@ -51,6 +49,9 @@ class CoreOptionsHandler : public OptionsPageUIHandler {
   // Observes a pref of given |pref_name|.
   virtual void ObservePref(const std::string& pref_name);
 
+  // Stops observing given preference identified by |pref_name|.
+  virtual void StopObservingPref(const std::string& pref_name);
+
   // Sets a pref |value| to given |pref_name|.
   virtual void SetPref(const std::string& pref_name,
                        const base::Value* value,
@@ -59,12 +60,16 @@ class CoreOptionsHandler : public OptionsPageUIHandler {
   // Clears pref value for given |pref_name|.
   void ClearPref(const std::string& pref_name, const std::string& metric);
 
-  // Stops observing given preference identified by |path|.
-  virtual void StopObservingPref(const std::string& path);
-
   // Records a user metric action for the given value.
   void ProcessUserMetric(const base::Value* value,
                          const std::string& metric);
+
+  // Virtual dispatch is needed as handling of some prefs may be
+  // finessed in subclasses.  The PrefServiceBase pointer is included
+  // so that subclasses can know whether the observed pref is from the
+  // local state or not.
+  virtual void OnPreferenceChanged(PrefServiceBase* service,
+                                   const std::string& pref_name);
 
   // Notifies registered JS callbacks on change in |pref_name| preference.
   // |controlling_pref_name| controls if |pref_name| is managed by
@@ -73,14 +78,19 @@ class CoreOptionsHandler : public OptionsPageUIHandler {
   void NotifyPrefChanged(const std::string& pref_name,
                          const std::string& controlling_pref_name);
 
-  // Creates dictionary value for |pref|, |controlling_pref| controls if |pref|
-  // is managed by policy/extension; NULL indicates no other pref is controlling
-  // |pref|.
-  DictionaryValue* CreateValueForPref(
-      const PrefService::Preference* pref,
-      const PrefService::Preference* controlling_pref);
+  // Calls JS callbacks to report a change in the value of the |name|
+  // preference. |value| is the new value for |name|.  Called from
+  // Notify*Changed methods to fire off the notifications.
+  void DispatchPrefChangeNotification(const std::string& name,
+                                      scoped_ptr<base::Value> value);
 
-  typedef std::multimap<std::string, std::wstring> PreferenceCallbackMap;
+  // Creates dictionary value for the pref described by |pref_name|.
+  // If |controlling_pref| is not empty, it describes the pref that manages
+  // |pref| via policy or extension.
+  base::Value* CreateValueForPref(const std::string& pref_name,
+                                  const std::string& controlling_pref_name);
+
+  typedef std::multimap<std::string, std::string> PreferenceCallbackMap;
   PreferenceCallbackMap pref_callback_map_;
 
  private:
@@ -94,6 +104,10 @@ class CoreOptionsHandler : public OptionsPageUIHandler {
     TYPE_URL,
     TYPE_LIST,
   };
+
+  // Finds the pref service that holds the given pref. If the pref is not found,
+  // it will return user prefs.
+  PrefService* FindServiceForPref(const std::string& pref_name);
 
   // Callback for the "coreOptionsInitialize" message.  This message will
   // trigger the Initialize() method of all other handlers so that final
@@ -136,15 +150,27 @@ class CoreOptionsHandler : public OptionsPageUIHandler {
   void HandleUserMetricsAction(const ListValue* args);
 
   void UpdateClearPluginLSOData();
+  void UpdatePepperFlashSettingsEnabled();
 
   OptionsPageUIHandlerHost* handlers_host_;
+  // This registrar keeps track of user prefs.
   PrefChangeRegistrar registrar_;
+  // This registrar keeps track of local state.
+  PrefChangeRegistrar local_state_registrar_;
 
-  // Used for asynchronously updating the preference stating whether clearing
-  // LSO data is supported.
-  PluginDataRemoverHelper clear_plugin_lso_data_enabled_;
+  PluginStatusPrefSetter plugin_status_pref_setter_;
+
+  // This maps pref names to filter functions. The callbacks should take the
+  // value that the user has attempted to set for the pref, and should return
+  // true if that value may be applied. If the return value is false, the
+  // change will be ignored.
+  typedef std::map<std::string, base::Callback<bool(const base::Value*)> >
+      PrefChangeFilterMap;
+  PrefChangeFilterMap pref_change_filters_;
 
   DISALLOW_COPY_AND_ASSIGN(CoreOptionsHandler);
 };
+
+}  // namespace options
 
 #endif  // CHROME_BROWSER_UI_WEBUI_OPTIONS_CORE_OPTIONS_HANDLER_H_

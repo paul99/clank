@@ -4,20 +4,21 @@
 
 #ifndef CHROME_BROWSER_PRINTING_PRINT_VIEW_MANAGER_H_
 #define CHROME_BROWSER_PRINTING_PRINT_VIEW_MANAGER_H_
-#pragma once
 
 #include "base/memory/ref_counted.h"
+#include "base/prefs/public/pref_member.h"
 #include "base/string16.h"
 #include "content/public/browser/notification_observer.h"
 #include "content/public/browser/notification_registrar.h"
 #include "content/public/browser/web_contents_observer.h"
+#include "content/public/browser/web_contents_user_data.h"
 #include "printing/printed_pages_source.h"
 
-class TabContentsWrapper;
 struct PrintHostMsg_DidPrintPage_Params;
 
 namespace content {
 class RenderProcessHost;
+class RenderViewHost;
 }
 
 namespace printing {
@@ -27,13 +28,12 @@ class PrintJob;
 class PrintJobWorkerOwner;
 class PrintViewManagerObserver;
 
-// Manages the print commands in relation to a TabContents. TabContents
-// delegates a few printing related commands to this instance.
+// Manages the print commands for a WebContents.
 class PrintViewManager : public content::NotificationObserver,
                          public PrintedPagesSource,
-                         public content::WebContentsObserver {
+                         public content::WebContentsObserver,
+                         public content::WebContentsUserData<PrintViewManager> {
  public:
-  explicit PrintViewManager(TabContentsWrapper* tab);
   virtual ~PrintViewManager();
 
   // Prints the current document immediately. Since the rendering is
@@ -50,6 +50,11 @@ class PrintViewManager : public content::NotificationObserver,
   // preview tab.
   bool AdvancedPrintNow();
 
+  // Same as PrintNow(), but for the case where we want to send the result to
+  // another destination.
+  // TODO(mad) Add an argument so we can pass the destination interface.
+  bool PrintToDestination();
+
   // Initiate print preview of the current document by first notifying the
   // renderer. Since this happens asynchronous, the print preview tab creation
   // will not be completed on the return of this function. Returns false if
@@ -64,8 +69,8 @@ class PrintViewManager : public content::NotificationObserver,
   // renderer in the case of scripted print preview.
   void PrintPreviewDone();
 
-  // Handles cancelled preview printing request.
-  void PreviewPrintingRequestCancelled();
+  // Whether to block scripted printing for our tab or not.
+  void UpdateScriptedPrintingBlocked();
 
   // Sets |observer| as the current PrintViewManagerObserver. Pass in NULL to
   // remove the current observer. |observer| may always be NULL, but |observer_|
@@ -81,6 +86,10 @@ class PrintViewManager : public content::NotificationObserver,
                        const content::NotificationDetails& details) OVERRIDE;
 
   // content::WebContentsObserver implementation.
+  virtual void DidStartLoading(
+      content::RenderViewHost* render_view_host) OVERRIDE;
+
+  // content::WebContentsObserver implementation.
   virtual bool OnMessageReceived(const IPC::Message& message) OVERRIDE;
 
   // Terminates or cancels the print job if one was pending.
@@ -90,6 +99,9 @@ class PrintViewManager : public content::NotificationObserver,
   virtual void StopNavigation() OVERRIDE;
 
  private:
+  explicit PrintViewManager(content::WebContents* web_contents);
+  friend class content::WebContentsUserData<PrintViewManager>;
+
   enum PrintPreviewState {
     NOT_PREVIEWING,
     USER_INITIATED_PREVIEW,
@@ -158,8 +170,8 @@ class PrintViewManager : public content::NotificationObserver,
   // Helper method for Print*Now().
   bool PrintNowInternal(IPC::Message* message);
 
-  // TabContentsWrapper we're associated with.
-  TabContentsWrapper* tab_;
+  // Release the PrinterQuery associated with our |cookie_|.
+  void ReleasePrinterQuery();
 
   content::NotificationRegistrar registrar_;
 
@@ -194,6 +206,12 @@ class PrintViewManager : public content::NotificationObserver,
 
   // Keeps track of the pending callback during scripted print preview.
   content::RenderProcessHost* scripted_print_preview_rph_;
+
+  // Whether printing is enabled.
+  BooleanPrefMember printing_enabled_;
+
+  // Whether our content is in blocked state.
+  bool tab_content_blocked_;
 
   DISALLOW_COPY_AND_ASSIGN(PrintViewManager);
 };

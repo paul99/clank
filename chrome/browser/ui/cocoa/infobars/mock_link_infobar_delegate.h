@@ -4,12 +4,11 @@
 
 #ifndef CHROME_BROWSER_UI_COCOA_INFOBARS_MOCK_LINK_INFOBAR_DELEGATE_H_
 #define CHROME_BROWSER_UI_COCOA_INFOBARS_MOCK_LINK_INFOBAR_DELEGATE_H_
-#pragma once
 
 #include "base/basictypes.h"
 #include "base/compiler_specific.h"
 #include "base/string16.h"
-#include "chrome/browser/tab_contents/link_infobar_delegate.h"
+#include "chrome/browser/api/infobars/link_infobar_delegate.h"
 
 class MockLinkInfoBarDelegate : public LinkInfoBarDelegate {
  public:

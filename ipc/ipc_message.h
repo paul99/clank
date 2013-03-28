@@ -1,18 +1,18 @@
-// Copyright (c) 2011 The Chromium Authors. All rights reserved.
+// Copyright (c) 2012 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
 #ifndef IPC_IPC_MESSAGE_H_
 #define IPC_IPC_MESSAGE_H_
-#pragma once
 
 #include <string>
 
 #include "base/basictypes.h"
+#include "base/debug/trace_event.h"
 #include "base/pickle.h"
 #include "ipc/ipc_export.h"
 
-#ifndef NDEBUG
+#if !defined(NDEBUG)
 #define IPC_MESSAGE_LOG_ENABLED
 #endif
 
@@ -30,28 +30,27 @@ namespace IPC {
 
 //------------------------------------------------------------------------------
 
-class Channel;
-class Message;
 struct LogData;
 
 class IPC_EXPORT Message : public Pickle {
  public:
-  // Implemented by objects that can send IPC messages across a channel.
-  class IPC_EXPORT Sender {
-   public:
-    virtual ~Sender() {}
-
-    // Sends the given IPC message.  The implementor takes ownership of the
-    // given Message regardless of whether or not this method succeeds.  This
-    // is done to make this method easier to use.  Returns true on success and
-    // false otherwise.
-    virtual bool Send(Message* msg) = 0;
-  };
-
   enum PriorityValue {
     PRIORITY_LOW = 1,
     PRIORITY_NORMAL,
     PRIORITY_HIGH
+  };
+
+  // Bit values used in the flags field.
+  // Upper 24 bits of flags store a reference number, so this enum is limited to
+  // 8 bits.
+  enum {
+    PRIORITY_MASK     = 0x03,  // Low 2 bits of store the priority value.
+    SYNC_BIT          = 0x04,
+    REPLY_BIT         = 0x08,
+    REPLY_ERROR_BIT   = 0x10,
+    UNBLOCK_BIT       = 0x20,
+    PUMPING_MSGS_BIT  = 0x40,
+    HAS_SENT_TIME_BIT = 0x80,
   };
 
   virtual ~Message();
@@ -75,6 +74,9 @@ class IPC_EXPORT Message : public Pickle {
   }
 
   // True if this is a synchronous message.
+  void set_sync() {
+    header()->flags |= SYNC_BIT;
+  }
   bool is_sync() const {
     return (header()->flags & SYNC_BIT) != 0;
   }
@@ -131,6 +133,14 @@ class IPC_EXPORT Message : public Pickle {
     header()->routing = new_id;
   }
 
+  uint32 flags() const {
+    return header()->flags;
+  }
+
+  // Sets all the given header values. The message should be empty at this
+  // call.
+  void SetHeaderValues(int32 routing, uint32 type, uint32 flags);
+
   template<class T, class S>
   static bool Dispatch(const Message* msg, T* obj, S* sender,
                        void (T::*func)()) {
@@ -173,11 +183,16 @@ class IPC_EXPORT Message : public Pickle {
   // On POSIX, a message supports reading / writing FileDescriptor objects.
   // This is used to pass a file descriptor to the peer of an IPC channel.
 
-  // Add a descriptor to the end of the set. Returns false iff the set is full.
+  // Add a descriptor to the end of the set. Returns false if the set is full.
   bool WriteFileDescriptor(const base::FileDescriptor& descriptor);
+
   // Get a file descriptor from the message. Returns false on error.
   //   iter: a Pickle iterator to the current location in the message.
-  bool ReadFileDescriptor(void** iter, base::FileDescriptor* descriptor) const;
+  bool ReadFileDescriptor(PickleIterator* iter,
+                          base::FileDescriptor* descriptor) const;
+
+  // Returns true if there are any file descriptors in this message.
+  bool HasFileDescriptors() const;
 #endif
 
 #ifdef IPC_MESSAGE_LOG_ENABLED
@@ -200,25 +215,19 @@ class IPC_EXPORT Message : public Pickle {
   bool dont_log() const { return dont_log_; }
 #endif
 
+  // Called to trace when message is sent.
+  void TraceMessageBegin() {
+    TRACE_EVENT_FLOW_BEGIN0("ipc", "IPC", header()->flags);
+  }
+  // Called to trace when message is received.
+  void TraceMessageEnd() {
+    TRACE_EVENT_FLOW_END0("ipc", "IPC", header()->flags);
+  }
+
  protected:
   friend class Channel;
   friend class MessageReplyDeserializer;
   friend class SyncMessage;
-
-  void set_sync() {
-    header()->flags |= SYNC_BIT;
-  }
-
-  // flags
-  enum {
-    PRIORITY_MASK   = 0x0003,
-    SYNC_BIT        = 0x0004,
-    REPLY_BIT       = 0x0008,
-    REPLY_ERROR_BIT = 0x0010,
-    UNBLOCK_BIT     = 0x0020,
-    PUMPING_MSGS_BIT= 0x0040,
-    HAS_SENT_TIME_BIT = 0x0080,
-  };
 
 #pragma pack(push, 4)
   struct Header : Pickle::Header {

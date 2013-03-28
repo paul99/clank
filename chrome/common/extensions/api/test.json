@@ -1,3 +1,7 @@
+// Copyright (c) 2012 The Chromium Authors. All rights reserved.
+// Use of this source code is governed by a BSD-style license that can be
+// found in the LICENSE file.
+
 [
   {
     "namespace": "test",
@@ -31,6 +35,12 @@
                   "testDataDirectory": {
                     "type": "string",
                     "description": "file:/// URL for the API test data directory."
+                  },
+                  "testWebSocketPort": {
+                    "type": "integer",
+                    "description": "The port on which the test WebSocket server is listening.",
+                    "minimum": 0,
+                    "maximum": 65535
                   }
                 }
               }
@@ -64,6 +74,7 @@
       },
       {
         "name": "log",
+        "unprivileged": true,
         "type": "function",
         "description": "Logs a message during internal unit testing.",
         "parameters": [

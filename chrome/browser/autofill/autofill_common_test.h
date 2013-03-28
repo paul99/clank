@@ -4,17 +4,12 @@
 
 #ifndef CHROME_BROWSER_AUTOFILL_AUTOFILL_COMMON_TEST_H_
 #define CHROME_BROWSER_AUTOFILL_AUTOFILL_COMMON_TEST_H_
-#pragma once
 
 class AutofillProfile;
 class CreditCard;
 class Profile;
 
-namespace webkit {
-namespace forms {
-struct FormField;
-}
-}
+struct FormFieldData;
 
 // Common utilities shared amongst Autofill tests.
 namespace autofill_test {
@@ -24,7 +19,7 @@ void CreateTestFormField(const char* label,
                          const char* name,
                          const char* value,
                          const char* type,
-                         webkit::forms::FormField* field);
+                         FormFieldData* field);
 
 // A unit testing utility that is common to a number of the Autofill unit
 // tests.  |SetProfileInfo| provides a quick way to populate a profile with

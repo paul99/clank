@@ -1,31 +1,27 @@
-// Copyright (c) 2011 The Chromium Authors. All rights reserved.
+// Copyright (c) 2012 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
 #ifndef NET_SPDY_SPDY_HTTP_STREAM_H_
 #define NET_SPDY_SPDY_HTTP_STREAM_H_
-#pragma once
 
 #include <list>
-#include <string>
 
 #include "base/basictypes.h"
 #include "base/memory/ref_counted.h"
 #include "base/memory/weak_ptr.h"
 #include "net/base/completion_callback.h"
 #include "net/base/net_log.h"
-#include "net/http/http_request_info.h"
 #include "net/http/http_stream.h"
-#include "net/spdy/spdy_protocol.h"
-#include "net/spdy/spdy_session.h"
 #include "net/spdy/spdy_stream.h"
 
 namespace net {
 
+class DrainableIOBuffer;
+struct HttpRequestInfo;
 class HttpResponseInfo;
 class IOBuffer;
 class SpdySession;
-class UploadData;
 class UploadDataStream;
 
 // The SpdyHttpStream is a HTTP-specific type of stream known to a SpdySession.
@@ -35,7 +31,7 @@ class NET_EXPORT_PRIVATE SpdyHttpStream : public SpdyStream::Delegate,
   SpdyHttpStream(SpdySession* spdy_session, bool direct);
   virtual ~SpdyHttpStream();
 
-  // Initializes this SpdyHttpStream by wraping an existing SpdyStream.
+  // Initializes this SpdyHttpStream by wrapping an existing SpdyStream.
   void InitializeWithExistingStream(SpdyStream* spdy_stream);
 
   SpdyStream* stream() { return stream_.get(); }
@@ -48,10 +44,9 @@ class NET_EXPORT_PRIVATE SpdyHttpStream : public SpdyStream::Delegate,
                                const BoundNetLog& net_log,
                                const CompletionCallback& callback) OVERRIDE;
   virtual int SendRequest(const HttpRequestHeaders& headers,
-                          UploadDataStream* request_body,
                           HttpResponseInfo* response,
                           const CompletionCallback& callback) OVERRIDE;
-  virtual uint64 GetUploadProgress() const OVERRIDE;
+  virtual UploadProgress GetUploadProgress() const OVERRIDE;
   virtual int ReadResponseHeaders(const CompletionCallback& callback) OVERRIDE;
   virtual const HttpResponseInfo* GetResponseInfo() const OVERRIDE;
   virtual int ReadResponseBody(IOBuffer* buf,
@@ -76,19 +71,23 @@ class NET_EXPORT_PRIVATE SpdyHttpStream : public SpdyStream::Delegate,
   virtual bool OnSendHeadersComplete(int status) OVERRIDE;
   virtual int OnSendBody() OVERRIDE;
   virtual int OnSendBodyComplete(int status, bool* eof) OVERRIDE;
-  virtual int OnResponseReceived(const spdy::SpdyHeaderBlock& response,
+  virtual int OnResponseReceived(const SpdyHeaderBlock& response,
                                  base::Time response_time,
                                  int status) OVERRIDE;
-  virtual void OnDataReceived(const char* buffer, int bytes) OVERRIDE;
+  virtual void OnHeadersSent() OVERRIDE;
+  virtual int OnDataReceived(const char* buffer, int bytes) OVERRIDE;
   virtual void OnDataSent(int length) OVERRIDE;
   virtual void OnClose(int status) OVERRIDE;
-  virtual void set_chunk_callback(ChunkCallback* callback) OVERRIDE;
 
  private:
-  FRIEND_TEST_ALL_PREFIXES(SpdyNetworkTransactionTest, FlowControlStallResume);
+  // Reads the data (whether chunked or not) from the request body stream and
+  // sends the data by calling WriteStreamData on the underlying SpdyStream.
+  int SendData();
 
   // Call the user callback.
   void DoCallback(int rv);
+
+  int OnRequestBodyReadCompleted(int status);
 
   void ScheduleBufferedReadCallback();
 
@@ -103,7 +102,7 @@ class NET_EXPORT_PRIVATE SpdyHttpStream : public SpdyStream::Delegate,
   // The request to send.
   const HttpRequestInfo* request_info_;
 
-  scoped_ptr<UploadDataStream> request_body_stream_;
+  bool has_upload_data_;
 
   // |response_info_| is the HTTP response data object which is filled in
   // when a SYN_REPLY comes in for the stream.
@@ -125,6 +124,11 @@ class NET_EXPORT_PRIVATE SpdyHttpStream : public SpdyStream::Delegate,
   scoped_refptr<IOBuffer> user_buffer_;
   int user_buffer_len_;
 
+  // Temporary buffer used to read the request body from UploadDataStream.
+  scoped_refptr<IOBufferWithSize> raw_request_body_buf_;
+  // Wraps raw_request_body_buf_ to read the remaining data progressively.
+  scoped_refptr<DrainableIOBuffer> request_body_buf_;
+
   // Is there a scheduled read callback pending.
   bool buffered_read_callback_pending_;
   // Has more data been received from the network during the wait for the
@@ -133,8 +137,6 @@ class NET_EXPORT_PRIVATE SpdyHttpStream : public SpdyStream::Delegate,
 
   // Is this spdy stream direct to the origin server (or to a proxy).
   bool direct_;
-
-  bool send_last_chunk_;
 
   DISALLOW_COPY_AND_ASSIGN(SpdyHttpStream);
 };

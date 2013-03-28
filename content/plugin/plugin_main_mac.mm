@@ -9,15 +9,17 @@
 #include "base/string_util.h"
 #include "content/common/plugin_carbon_interpose_constants_mac.h"
 #include "content/plugin/plugin_interpose_util_mac.h"
+#include "content/public/common/content_client.h"
+
+namespace content {
 
 #if !defined(__LP64__)
 void TrimInterposeEnvironment() {
   scoped_ptr<base::Environment> env(base::Environment::Create());
 
   std::string interpose_list;
-  if (!env->GetVar(plugin_interpose_strings::kDYLDInsertLibrariesKey,
-                   &interpose_list)) {
-    NOTREACHED() << "No interposing libraries set";
+  if (!env->GetVar(kDYLDInsertLibrariesKey, &interpose_list)) {
+    LOG(INFO) << "No Carbon Interpose library found.";
     return;
   }
 
@@ -26,18 +28,17 @@ void TrimInterposeEnvironment() {
   // need to handle are:
   // 1) The whole string is "<kInterposeLibraryPath>", so just clear it, or
   // 2) ":<kInterposeLibraryPath>" is the end of the string, so trim and re-set.
-  std::string interpose_library_path(
-      plugin_interpose_strings::kInterposeLibraryPath);
+  std::string interpose_library_path =
+      GetContentClient()->GetCarbonInterposePath();
   DCHECK_GE(interpose_list.size(), interpose_library_path.size());
   size_t suffix_offset = interpose_list.size() - interpose_library_path.size();
   if (suffix_offset == 0 &&
       interpose_list == interpose_library_path) {
-    env->UnSetVar(plugin_interpose_strings::kDYLDInsertLibrariesKey);
+    env->UnSetVar(kDYLDInsertLibrariesKey);
   } else if (suffix_offset > 0 && interpose_list[suffix_offset - 1] == ':' &&
              interpose_list.substr(suffix_offset) == interpose_library_path) {
     std::string trimmed_list = interpose_list.substr(0, suffix_offset - 1);
-    env->SetVar(plugin_interpose_strings::kDYLDInsertLibrariesKey,
-                trimmed_list.c_str());
+    env->SetVar(kDYLDInsertLibrariesKey, trimmed_list.c_str());
   } else {
     NOTREACHED() << "Missing Carbon interposing library";
   }
@@ -48,3 +49,5 @@ void InitializeChromeApplication() {
   [NSApplication sharedApplication];
   mac_plugin_interposing::SetUpCocoaInterposing();
 }
+
+}  // namespace content

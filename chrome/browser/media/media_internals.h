@@ -1,30 +1,56 @@
-// Copyright (c) 2011 The Chromium Authors. All rights reserved.
+// Copyright (c) 2012 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
 #ifndef CHROME_BROWSER_MEDIA_MEDIA_INTERNALS_H_
 #define CHROME_BROWSER_MEDIA_MEDIA_INTERNALS_H_
-#pragma once
+
+#include <string>
 
 #include "base/memory/ref_counted.h"
+#include "base/memory/singleton.h"
 #include "base/observer_list.h"
-#include "base/threading/non_thread_safe.h"
 #include "base/values.h"
-#include "content/browser/renderer_host/media/media_observer.h"
+#include "content/public/browser/media_observer.h"
+#include "content/public/common/media_stream_request.h"
 
+class MediaCaptureDevicesDispatcher;
 class MediaInternalsObserver;
+class MediaStreamCaptureIndicator;
+class Profile;
 
 namespace media {
+
 struct MediaLogEvent;
+
+// Helper to get the default devices which can be used by the media request,
+// if the return list is empty, it means there is no available device on the OS.
+// Called on the UI thread.
+void GetDefaultDevicesForProfile(Profile* profile,
+                                 bool audio,
+                                 bool video,
+                                 content::MediaStreamDevices* devices);
+
+// Helper for picking the device that was requested for an OpenDevice request.
+// If the device requested is not available it will revert to using the first
+// available one instead or will return an empty list if no devices of the
+// requested kind are present.
+void GetRequestedDevice(const std::string& requested_device_id,
+                        bool audio,
+                        bool video,
+                        content::MediaStreamDevices* devices);
 }
 
 // This class stores information about currently active media.
-// All of its methods are called on the IO thread.
-class MediaInternals : public MediaObserver, public base::NonThreadSafe {
+// It's constructed on the UI thread but all of its methods are called on the IO
+// thread.
+class MediaInternals : public content::MediaObserver {
  public:
   virtual ~MediaInternals();
 
-  // MediaObserver implementation.
+  static MediaInternals* GetInstance();
+
+  // Overridden from content::MediaObserver:
   virtual void OnDeleteAudioStream(void* host, int stream_id) OVERRIDE;
   virtual void OnSetAudioStreamPlaying(void* host,
                                        int stream_id,
@@ -37,6 +63,23 @@ class MediaInternals : public MediaObserver, public base::NonThreadSafe {
                                       double volume) OVERRIDE;
   virtual void OnMediaEvent(int render_process_id,
                             const media::MediaLogEvent& event) OVERRIDE;
+  virtual void OnCaptureDevicesOpened(
+      int render_process_id,
+      int render_view_id,
+      const content::MediaStreamDevices& devices) OVERRIDE;
+  virtual void OnCaptureDevicesClosed(
+      int render_process_id,
+      int render_view_id,
+      const content::MediaStreamDevices& devices) OVERRIDE;
+  virtual void OnAudioCaptureDevicesChanged(
+      const content::MediaStreamDevices& devices) OVERRIDE;
+  virtual void OnVideoCaptureDevicesChanged(
+      const content::MediaStreamDevices& devices) OVERRIDE;
+  virtual void OnMediaRequestStateChanged(
+      int render_process_id,
+      int render_view_id,
+      const content::MediaStreamDevice& device,
+      content::MediaRequestState state) OVERRIDE;
 
   // Methods for observers.
   // Observers should add themselves on construction and remove themselves
@@ -45,9 +88,13 @@ class MediaInternals : public MediaObserver, public base::NonThreadSafe {
   void RemoveObserver(MediaInternalsObserver* observer);
   void SendEverything();
 
+  scoped_refptr<MediaStreamCaptureIndicator> GetMediaStreamCaptureIndicator();
+  scoped_refptr<MediaCaptureDevicesDispatcher>
+      GetMediaCaptureDevicesDispatcher();
+
  private:
-  friend class IOThread;
   friend class MediaInternalsTest;
+  friend struct DefaultSingletonTraits<MediaInternals>;
 
   MediaInternals();
 
@@ -68,9 +115,10 @@ class MediaInternals : public MediaObserver, public base::NonThreadSafe {
   // Calls javascript |function|(|value|) on each attached UI.
   void SendUpdate(const std::string& function, Value* value);
 
-  static MediaInternals* instance_;
   DictionaryValue data_;
   ObserverList<MediaInternalsObserver> observers_;
+  scoped_refptr<MediaStreamCaptureIndicator> media_stream_capture_indicator_;
+  scoped_refptr<MediaCaptureDevicesDispatcher> media_devices_dispatcher_;
 
   DISALLOW_COPY_AND_ASSIGN(MediaInternals);
 };

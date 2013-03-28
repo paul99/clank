@@ -1,4 +1,4 @@
-// Copyright (c) 2011 The Chromium Authors. All rights reserved.
+// Copyright (c) 2012 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -24,7 +24,7 @@
 #include "ipc/ipc_logging.h"
 
 #if defined(OS_LINUX)
-#include "base/posix_util.h"
+#include "base/linux_util.h"
 #elif defined(OS_WIN)
 #include "content/common/font_cache_dispatcher_win.h"
 #endif  // OS_LINUX
@@ -77,6 +77,8 @@ FilePath TransformPathForFeature(const FilePath& path,
 
 namespace content {
 
+int ChildProcessHostImpl::kInvalidChildProcessId = -1;
+
 // static
 ChildProcessHost* ChildProcessHost::Create(ChildProcessHostDelegate* delegate) {
   return new ChildProcessHostImpl(delegate);
@@ -96,7 +98,7 @@ FilePath ChildProcessHost::GetChildPath(int flags) {
   // Valgrind executable, which then crashes. However, it's almost safe to
   // assume that the updates won't happen while testing with Valgrind tools.
   if (child_path.empty() && flags & CHILD_ALLOW_SELF && !RunningOnValgrind())
-    child_path = FilePath("/proc/self/exe");
+    child_path = FilePath(base::kProcSelfExe);
 #endif
 
   // On most platforms, the child executable is the same as the current
@@ -195,7 +197,7 @@ bool ChildProcessHostImpl::Send(IPC::Message* message) {
 }
 
 void ChildProcessHostImpl::AllocateSharedMemory(
-      uint32 buffer_size, base::ProcessHandle child_process_handle,
+      size_t buffer_size, base::ProcessHandle child_process_handle,
       base::SharedMemoryHandle* shared_memory_handle) {
   base::SharedMemory shared_buf;
   if (!shared_buf.CreateAndMapAnonymous(buffer_size)) {
@@ -208,8 +210,14 @@ void ChildProcessHostImpl::AllocateSharedMemory(
 
 int ChildProcessHostImpl::GenerateChildProcessUniqueId() {
   // This function must be threadsafe.
+  //
+  // TODO(ajwong): Why not StaticAtomicSequenceNumber?
   static base::subtle::Atomic32 last_unique_child_id = 0;
-  return base::subtle::NoBarrier_AtomicIncrement(&last_unique_child_id, 1);
+  int id = base::subtle::NoBarrier_AtomicIncrement(&last_unique_child_id, 1);
+
+  CHECK_NE(kInvalidChildProcessId, id);
+
+  return id;
 }
 
 bool ChildProcessHostImpl::OnMessageReceived(const IPC::Message& msg) {

@@ -2,9 +2,8 @@
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
-#ifndef CHROME_BROWSER_UI_WEBUI_TEST_CHROME_WEB_UI_FACTORY_H_
-#define CHROME_BROWSER_UI_WEBUI_TEST_CHROME_WEB_UI_FACTORY_H_
-#pragma once
+#ifndef CHROME_BROWSER_UI_WEBUI_TEST_CHROME_WEB_UI_CONTROLLER_FACTORY_H_
+#define CHROME_BROWSER_UI_WEBUI_TEST_CHROME_WEB_UI_CONTROLLER_FACTORY_H_
 
 #include <functional>
 #include <map>
@@ -21,7 +20,7 @@ class TestChromeWebUIControllerFactory : public ChromeWebUIControllerFactory {
   // Interface to create a new WebUI object.
   class WebUIProvider {
    public:
-    // Create and return a new WebUI object for the |tab_contents| based on the
+    // Create and return a new WebUI object for the |web_contents| based on the
     // |url|.
      virtual content::WebUIController* NewWebUI(content::WebUI* web_ui,
                                                 const GURL& url) = 0;
@@ -64,4 +63,4 @@ class TestChromeWebUIControllerFactory : public ChromeWebUIControllerFactory {
   DISALLOW_COPY_AND_ASSIGN(TestChromeWebUIControllerFactory);
 };
 
-#endif  // CHROME_BROWSER_UI_WEBUI_TEST_CHROME_WEB_UI_FACTORY_H_
+#endif  // CHROME_BROWSER_UI_WEBUI_TEST_CHROME_WEB_UI_CONTROLLER_FACTORY_H_

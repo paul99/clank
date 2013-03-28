@@ -1,9 +1,9 @@
-// Copyright (c) 2011 The Chromium Authors. All rights reserved.
+// Copyright (c) 2012 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 //
 // VideoCaptureHost serves video capture related messages from
-// VideCaptureMessageFilter which lives inside the render process.
+// VideoCaptureMessageFilter which lives inside the render process.
 //
 // This class is owned by BrowserRenderProcessHost, and instantiated on UI
 // thread, but all other operations and method calls happen on IO thread.
@@ -39,23 +39,21 @@
 #include <map>
 
 #include "base/memory/ref_counted.h"
-#include "base/message_loop_helpers.h"
+#include "base/sequenced_task_runner_helpers.h"
 #include "content/browser/renderer_host/media/video_capture_controller.h"
 #include "content/common/content_export.h"
 #include "content/public/browser/browser_message_filter.h"
 #include "ipc/ipc_message.h"
 
 namespace content {
-class ResourceContext;
-}  // namespace content
 
 class CONTENT_EXPORT VideoCaptureHost
-    : public content::BrowserMessageFilter,
+    : public BrowserMessageFilter,
       public VideoCaptureControllerEventHandler {
  public:
-  explicit VideoCaptureHost(const content::ResourceContext* resource_context);
+  VideoCaptureHost();
 
-  // content::BrowserMessageFilter implementation.
+  // BrowserMessageFilter implementation.
   virtual void OnChannelClosing() OVERRIDE;
   virtual void OnDestruct() const OVERRIDE;
   virtual bool OnMessageReceived(const IPC::Message& message,
@@ -73,10 +71,10 @@ class CONTENT_EXPORT VideoCaptureHost
                            int width,
                            int height,
                            int frame_per_second) OVERRIDE;
-  virtual void OnReadyToDelete(const VideoCaptureControllerID& id) OVERRIDE;
+  virtual void OnPaused(const VideoCaptureControllerID& id) OVERRIDE;
 
  private:
-  friend class content::BrowserThread;
+  friend class BrowserThread;
   friend class base::DeleteHelper<VideoCaptureHost>;
   friend class MockVideoCaptureHost;
   friend class VideoCaptureHostTest;
@@ -85,8 +83,8 @@ class CONTENT_EXPORT VideoCaptureHost
 
   // IPC message: Start capture on the VideoCaptureDevice referenced by
   // VideoCaptureParams::session_id. |device_id| is an id created by
-  // VideCaptureMessageFilter to identify a session
-  // between a VideCaptureMessageFilter and a VideoCaptureHost.
+  // VideoCaptureMessageFilter to identify a session
+  // between a VideoCaptureMessageFilter and a VideoCaptureHost.
   void OnStartCapture(int device_id,
                       const media::VideoCaptureParams& params);
   void OnControllerAdded(
@@ -106,44 +104,47 @@ class CONTENT_EXPORT VideoCaptureHost
   // referenced by |device_id|.
   void OnReceiveEmptyBuffer(int device_id, int buffer_id);
 
-
-  // Called on the IO thread when VideoCaptureController have
-  // reported that all DIBs have been returned.
-  void DoDeleteVideoCaptureController(const VideoCaptureControllerID& id);
-
   // Send a newly created buffer to the VideoCaptureMessageFilter.
-  void DoSendNewBuffer(int device_id,
-                       base::SharedMemoryHandle handle,
-                       int length,
-                       int buffer_id);
+  void DoSendNewBufferOnIOThread(
+      const VideoCaptureControllerID& controller_id,
+      base::SharedMemoryHandle handle,
+      int length,
+      int buffer_id);
 
   // Send a filled buffer to the VideoCaptureMessageFilter.
-  void DoSendFilledBuffer(int device_id,
-                          int buffer_id,
-                          base::Time timestamp);
+  void DoSendFilledBufferOnIOThread(
+      const VideoCaptureControllerID& controller_id,
+      int buffer_id,
+      base::Time timestamp);
 
-  // Send a information about frame resolution and frame rate
+  // Send information about frame resolution and frame rate
   // to the VideoCaptureMessageFilter.
-  void DoSendFrameInfo(int device_id,
-                       int width,
-                       int height,
-                       int frame_per_second);
+  void DoSendFrameInfoOnIOThread(
+      const VideoCaptureControllerID& controller_id,
+      int width,
+      int height,
+      int frame_per_second);
 
   // Handle error coming from VideoCaptureDevice.
-  void DoHandleError(int device_id);
+  void DoHandleErrorOnIOThread(const VideoCaptureControllerID& controller_id);
 
-  // Helpers.
-  media_stream::VideoCaptureManager* GetVideoCaptureManager();
+  void DoPausedOnIOThread(const VideoCaptureControllerID& controller_id);
+
+  void DeleteVideoCaptureControllerOnIOThread(
+      const VideoCaptureControllerID& controller_id);
+
+  // Returns the video capture manager. This is a virtual function so that
+  // the unit tests can inject their own MediaStreamManager.
+  virtual VideoCaptureManager* GetVideoCaptureManager();
 
   struct Entry;
   typedef std::map<VideoCaptureControllerID, Entry*> EntryMap;
   // A map of VideoCaptureControllerID to its state and VideoCaptureController.
   EntryMap entries_;
 
-  // Used to get a pointer to VideoCaptureManager to start/stop capture devices.
-  const content::ResourceContext* resource_context_;
-
   DISALLOW_COPY_AND_ASSIGN(VideoCaptureHost);
 };
+
+}  // namespace content
 
 #endif  // CONTENT_BROWSER_RENDERER_HOST_MEDIA_VIDEO_CAPTURE_HOST_H_

@@ -91,7 +91,6 @@ TEST_F(GLES2DecoderTest2, IsBufferInvalidArgsBadSharedMemoryId) {
 }
 
 TEST_F(GLES2DecoderTest2, IsEnabledValidArgs) {
-  EXPECT_CALL(*gl_, IsEnabled(GL_BLEND));
   SpecializedSetup<IsEnabled, 0>(true);
   IsEnabled cmd;
   cmd.Init(GL_BLEND, shared_memory_id_, shared_memory_offset_);
@@ -118,7 +117,6 @@ TEST_F(GLES2DecoderTest2, IsEnabledInvalidArgs0_1) {
 }
 
 TEST_F(GLES2DecoderTest2, IsEnabledInvalidArgsBadSharedMemoryId) {
-  EXPECT_CALL(*gl_, IsEnabled(GL_BLEND)).Times(0);
   SpecializedSetup<IsEnabled, 0>(false);
   IsEnabled cmd;
   cmd.Init(GL_BLEND, kInvalidSharedMemoryId, shared_memory_offset_);
@@ -217,12 +215,20 @@ TEST_F(GLES2DecoderTest2, IsTextureInvalidArgsBadSharedMemoryId) {
 }
 
 TEST_F(GLES2DecoderTest2, LineWidthValidArgs) {
-  EXPECT_CALL(*gl_, LineWidth(1));
+  EXPECT_CALL(*gl_, LineWidth(0.5f));
   SpecializedSetup<LineWidth, 0>(true);
   LineWidth cmd;
-  cmd.Init(1);
+  cmd.Init(0.5f);
   EXPECT_EQ(error::kNoError, ExecuteCmd(cmd));
   EXPECT_EQ(GL_NO_ERROR, GetGLError());
+}
+
+TEST_F(GLES2DecoderTest2, LineWidthInvalidValue0_0) {
+  SpecializedSetup<LineWidth, 0>(false);
+  LineWidth cmd;
+  cmd.Init(0.0f);
+  EXPECT_EQ(error::kNoError, ExecuteCmd(cmd));
+  EXPECT_EQ(GL_INVALID_VALUE, GetGLError());
 }
 
 TEST_F(GLES2DecoderTest2, LinkProgramValidArgs) {
@@ -361,19 +367,19 @@ TEST_F(GLES2DecoderTest2, StencilMaskSeparateValidArgs) {
 }
 
 TEST_F(GLES2DecoderTest2, StencilOpValidArgs) {
-  EXPECT_CALL(*gl_, StencilOp(GL_KEEP, GL_KEEP, GL_KEEP));
+  EXPECT_CALL(*gl_, StencilOp(GL_KEEP, GL_INCR, GL_KEEP));
   SpecializedSetup<StencilOp, 0>(true);
   StencilOp cmd;
-  cmd.Init(GL_KEEP, GL_KEEP, GL_KEEP);
+  cmd.Init(GL_KEEP, GL_INCR, GL_KEEP);
   EXPECT_EQ(error::kNoError, ExecuteCmd(cmd));
   EXPECT_EQ(GL_NO_ERROR, GetGLError());
 }
 
 TEST_F(GLES2DecoderTest2, StencilOpSeparateValidArgs) {
-  EXPECT_CALL(*gl_, StencilOpSeparate(GL_FRONT, GL_KEEP, GL_KEEP, GL_KEEP));
+  EXPECT_CALL(*gl_, StencilOpSeparate(GL_FRONT, GL_INCR, GL_KEEP, GL_KEEP));
   SpecializedSetup<StencilOpSeparate, 0>(true);
   StencilOpSeparate cmd;
-  cmd.Init(GL_FRONT, GL_KEEP, GL_KEEP, GL_KEEP);
+  cmd.Init(GL_FRONT, GL_INCR, GL_KEEP, GL_KEEP);
   EXPECT_EQ(error::kNoError, ExecuteCmd(cmd));
   EXPECT_EQ(GL_NO_ERROR, GetGLError());
 }
@@ -744,10 +750,12 @@ TEST_F(GLES2DecoderTest2, Uniform1fvInvalidArgs2_1) {
 TEST_F(GLES2DecoderTest2, Uniform1fvValidArgsCountTooLarge) {
   EXPECT_CALL(
       *gl_, Uniform1fv(
-          3, 2, reinterpret_cast<const GLfloat*>(shared_memory_address_)));
+          3, 3, reinterpret_cast<const GLfloat*>(shared_memory_address_)));
   SpecializedSetup<Uniform1fv, 0>(true);
   Uniform1fv cmd;
-  cmd.Init(3, 5, shared_memory_id_, shared_memory_offset_);
+  cmd.Init(
+      ProgramManager::MakeFakeLocation(
+          1, 1), 5, shared_memory_id_, shared_memory_offset_);
   EXPECT_EQ(error::kNoError, ExecuteCmd(cmd));
   EXPECT_EQ(GL_NO_ERROR, GetGLError());
 }
@@ -817,10 +825,12 @@ TEST_F(GLES2DecoderTest2, Uniform2fvInvalidArgs2_1) {
 TEST_F(GLES2DecoderTest2, Uniform2fvValidArgsCountTooLarge) {
   EXPECT_CALL(
       *gl_, Uniform2fv(
-          3, 2, reinterpret_cast<const GLfloat*>(shared_memory_address_)));
+          3, 3, reinterpret_cast<const GLfloat*>(shared_memory_address_)));
   SpecializedSetup<Uniform2fv, 0>(true);
   Uniform2fv cmd;
-  cmd.Init(3, 5, shared_memory_id_, shared_memory_offset_);
+  cmd.Init(
+      ProgramManager::MakeFakeLocation(
+          1, 1), 5, shared_memory_id_, shared_memory_offset_);
   EXPECT_EQ(error::kNoError, ExecuteCmd(cmd));
   EXPECT_EQ(GL_NO_ERROR, GetGLError());
 }
@@ -840,7 +850,7 @@ TEST_F(GLES2DecoderTest2, Uniform2fvImmediateValidArgs) {
 }
 
 TEST_F(GLES2DecoderTest2, Uniform2iValidArgs) {
-  EXPECT_CALL(*gl_, Uniform2i(1, 2, 3));
+  EXPECT_CALL(*gl_, Uniform2iv(1, 1, _));
   SpecializedSetup<Uniform2i, 0>(true);
   Uniform2i cmd;
   cmd.Init(1, 2, 3);
@@ -887,10 +897,12 @@ TEST_F(GLES2DecoderTest2, Uniform2ivInvalidArgs2_1) {
 TEST_F(GLES2DecoderTest2, Uniform2ivValidArgsCountTooLarge) {
   EXPECT_CALL(
       *gl_, Uniform2iv(
-          3, 2, reinterpret_cast<const GLint*>(shared_memory_address_)));
+          3, 3, reinterpret_cast<const GLint*>(shared_memory_address_)));
   SpecializedSetup<Uniform2iv, 0>(true);
   Uniform2iv cmd;
-  cmd.Init(3, 5, shared_memory_id_, shared_memory_offset_);
+  cmd.Init(
+      ProgramManager::MakeFakeLocation(
+          1, 1), 5, shared_memory_id_, shared_memory_offset_);
   EXPECT_EQ(error::kNoError, ExecuteCmd(cmd));
   EXPECT_EQ(GL_NO_ERROR, GetGLError());
 }
@@ -957,10 +969,12 @@ TEST_F(GLES2DecoderTest2, Uniform3fvInvalidArgs2_1) {
 TEST_F(GLES2DecoderTest2, Uniform3fvValidArgsCountTooLarge) {
   EXPECT_CALL(
       *gl_, Uniform3fv(
-          3, 2, reinterpret_cast<const GLfloat*>(shared_memory_address_)));
+          3, 3, reinterpret_cast<const GLfloat*>(shared_memory_address_)));
   SpecializedSetup<Uniform3fv, 0>(true);
   Uniform3fv cmd;
-  cmd.Init(3, 5, shared_memory_id_, shared_memory_offset_);
+  cmd.Init(
+      ProgramManager::MakeFakeLocation(
+          1, 1), 5, shared_memory_id_, shared_memory_offset_);
   EXPECT_EQ(error::kNoError, ExecuteCmd(cmd));
   EXPECT_EQ(GL_NO_ERROR, GetGLError());
 }
@@ -980,7 +994,7 @@ TEST_F(GLES2DecoderTest2, Uniform3fvImmediateValidArgs) {
 }
 
 TEST_F(GLES2DecoderTest2, Uniform3iValidArgs) {
-  EXPECT_CALL(*gl_, Uniform3i(1, 2, 3, 4));
+  EXPECT_CALL(*gl_, Uniform3iv(1, 1, _));
   SpecializedSetup<Uniform3i, 0>(true);
   Uniform3i cmd;
   cmd.Init(1, 2, 3, 4);
@@ -1027,10 +1041,12 @@ TEST_F(GLES2DecoderTest2, Uniform3ivInvalidArgs2_1) {
 TEST_F(GLES2DecoderTest2, Uniform3ivValidArgsCountTooLarge) {
   EXPECT_CALL(
       *gl_, Uniform3iv(
-          3, 2, reinterpret_cast<const GLint*>(shared_memory_address_)));
+          3, 3, reinterpret_cast<const GLint*>(shared_memory_address_)));
   SpecializedSetup<Uniform3iv, 0>(true);
   Uniform3iv cmd;
-  cmd.Init(3, 5, shared_memory_id_, shared_memory_offset_);
+  cmd.Init(
+      ProgramManager::MakeFakeLocation(
+          1, 1), 5, shared_memory_id_, shared_memory_offset_);
   EXPECT_EQ(error::kNoError, ExecuteCmd(cmd));
   EXPECT_EQ(GL_NO_ERROR, GetGLError());
 }
@@ -1097,10 +1113,12 @@ TEST_F(GLES2DecoderTest2, Uniform4fvInvalidArgs2_1) {
 TEST_F(GLES2DecoderTest2, Uniform4fvValidArgsCountTooLarge) {
   EXPECT_CALL(
       *gl_, Uniform4fv(
-          3, 2, reinterpret_cast<const GLfloat*>(shared_memory_address_)));
+          3, 3, reinterpret_cast<const GLfloat*>(shared_memory_address_)));
   SpecializedSetup<Uniform4fv, 0>(true);
   Uniform4fv cmd;
-  cmd.Init(3, 5, shared_memory_id_, shared_memory_offset_);
+  cmd.Init(
+      ProgramManager::MakeFakeLocation(
+          1, 1), 5, shared_memory_id_, shared_memory_offset_);
   EXPECT_EQ(error::kNoError, ExecuteCmd(cmd));
   EXPECT_EQ(GL_NO_ERROR, GetGLError());
 }
@@ -1120,7 +1138,7 @@ TEST_F(GLES2DecoderTest2, Uniform4fvImmediateValidArgs) {
 }
 
 TEST_F(GLES2DecoderTest2, Uniform4iValidArgs) {
-  EXPECT_CALL(*gl_, Uniform4i(1, 2, 3, 4, 5));
+  EXPECT_CALL(*gl_, Uniform4iv(1, 1, _));
   SpecializedSetup<Uniform4i, 0>(true);
   Uniform4i cmd;
   cmd.Init(1, 2, 3, 4, 5);
@@ -1167,10 +1185,12 @@ TEST_F(GLES2DecoderTest2, Uniform4ivInvalidArgs2_1) {
 TEST_F(GLES2DecoderTest2, Uniform4ivValidArgsCountTooLarge) {
   EXPECT_CALL(
       *gl_, Uniform4iv(
-          3, 2, reinterpret_cast<const GLint*>(shared_memory_address_)));
+          3, 3, reinterpret_cast<const GLint*>(shared_memory_address_)));
   SpecializedSetup<Uniform4iv, 0>(true);
   Uniform4iv cmd;
-  cmd.Init(3, 5, shared_memory_id_, shared_memory_offset_);
+  cmd.Init(
+      ProgramManager::MakeFakeLocation(
+          1, 1), 5, shared_memory_id_, shared_memory_offset_);
   EXPECT_EQ(error::kNoError, ExecuteCmd(cmd));
   EXPECT_EQ(GL_NO_ERROR, GetGLError());
 }
@@ -1238,11 +1258,13 @@ TEST_F(GLES2DecoderTest2, UniformMatrix2fvInvalidArgs3_1) {
 TEST_F(GLES2DecoderTest2, UniformMatrix2fvValidArgsCountTooLarge) {
   EXPECT_CALL(
       *gl_, UniformMatrix2fv(
-          3, 2, false, reinterpret_cast<const GLfloat*>(
+          3, 3, false, reinterpret_cast<const GLfloat*>(
               shared_memory_address_)));
   SpecializedSetup<UniformMatrix2fv, 0>(true);
   UniformMatrix2fv cmd;
-  cmd.Init(3, 5, false, shared_memory_id_, shared_memory_offset_);
+  cmd.Init(
+      ProgramManager::MakeFakeLocation(
+          1, 1), 5, false, shared_memory_id_, shared_memory_offset_);
   EXPECT_EQ(error::kNoError, ExecuteCmd(cmd));
   EXPECT_EQ(GL_NO_ERROR, GetGLError());
 }
@@ -1323,11 +1345,13 @@ TEST_F(GLES2DecoderTest2, UniformMatrix3fvInvalidArgs3_1) {
 TEST_F(GLES2DecoderTest2, UniformMatrix3fvValidArgsCountTooLarge) {
   EXPECT_CALL(
       *gl_, UniformMatrix3fv(
-          3, 2, false, reinterpret_cast<const GLfloat*>(
+          3, 3, false, reinterpret_cast<const GLfloat*>(
               shared_memory_address_)));
   SpecializedSetup<UniformMatrix3fv, 0>(true);
   UniformMatrix3fv cmd;
-  cmd.Init(3, 5, false, shared_memory_id_, shared_memory_offset_);
+  cmd.Init(
+      ProgramManager::MakeFakeLocation(
+          1, 1), 5, false, shared_memory_id_, shared_memory_offset_);
   EXPECT_EQ(error::kNoError, ExecuteCmd(cmd));
   EXPECT_EQ(GL_NO_ERROR, GetGLError());
 }
@@ -1408,11 +1432,13 @@ TEST_F(GLES2DecoderTest2, UniformMatrix4fvInvalidArgs3_1) {
 TEST_F(GLES2DecoderTest2, UniformMatrix4fvValidArgsCountTooLarge) {
   EXPECT_CALL(
       *gl_, UniformMatrix4fv(
-          3, 2, false, reinterpret_cast<const GLfloat*>(
+          3, 3, false, reinterpret_cast<const GLfloat*>(
               shared_memory_address_)));
   SpecializedSetup<UniformMatrix4fv, 0>(true);
   UniformMatrix4fv cmd;
-  cmd.Init(3, 5, false, shared_memory_id_, shared_memory_offset_);
+  cmd.Init(
+      ProgramManager::MakeFakeLocation(
+          1, 1), 5, false, shared_memory_id_, shared_memory_offset_);
   EXPECT_EQ(error::kNoError, ExecuteCmd(cmd));
   EXPECT_EQ(GL_NO_ERROR, GetGLError());
 }
@@ -1697,22 +1723,26 @@ TEST_F(GLES2DecoderTest2, ViewportInvalidArgs3_0) {
 // TODO(gman): BlitFramebufferEXT
 // TODO(gman): RenderbufferStorageMultisampleEXT
 // TODO(gman): TexStorage2DEXT
-// TODO(gman): SwapBuffers
-// TODO(gman): GetMaxValueInBufferCHROMIUM
-// TODO(gman): GenSharedIdsCHROMIUM
+// TODO(gman): GenQueriesEXT
+// TODO(gman): GenQueriesEXTImmediate
+// TODO(gman): DeleteQueriesEXT
+// TODO(gman): DeleteQueriesEXTImmediate
+// TODO(gman): BeginQueryEXT
 
-// TODO(gman): DeleteSharedIdsCHROMIUM
+// TODO(gman): EndQueryEXT
 
-// TODO(gman): RegisterSharedIdsCHROMIUM
+// TODO(gman): InsertEventMarkerEXT
 
-// TODO(gman): EnableFeatureCHROMIUM
+// TODO(gman): PushGroupMarkerEXT
 
-// TODO(gman): ResizeCHROMIUM
-// TODO(gman): GetRequestableExtensionsCHROMIUM
 
-// TODO(gman): RequestExtensionCHROMIUM
-
-// TODO(gman): GetMultipleIntegervCHROMIUM
-
+TEST_F(GLES2DecoderTest2, PopGroupMarkerEXTValidArgs) {
+  SpecializedSetup<PopGroupMarkerEXT, 0>(true);
+  PopGroupMarkerEXT cmd;
+  cmd.Init();
+  EXPECT_EQ(error::kNoError, ExecuteCmd(cmd));
+  EXPECT_EQ(GL_NO_ERROR, GetGLError());
+}
+// TODO(gman): GenVertexArraysOES
 #endif  // GPU_COMMAND_BUFFER_SERVICE_GLES2_CMD_DECODER_UNITTEST_2_AUTOGEN_H_
 

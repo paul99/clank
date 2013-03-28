@@ -3,16 +3,18 @@
 # found in the LICENSE file.
 
 {
-  'conditions': [
-    ['sysroot!=""', {
-      'variables': {
-        'pkg-config': './pkg-config-wrapper "<(sysroot)"',
-      },
-    }, {
-      'variables': {
+  'variables': {
+    'conditions': [
+      ['sysroot!=""', {
+        'pkg-config': './pkg-config-wrapper "<(sysroot)" "<(target_arch)"',
+      }, {
         'pkg-config': 'pkg-config'
-      },
-    }],
+      }]
+    ],
+
+    'linux_link_libpci%': 0,
+  },
+  'conditions': [
     [ 'os_posix==1 and OS!="mac"', {
       'variables': {
         # We use our own copy of libssl3, although we still need to link against
@@ -24,72 +26,97 @@
         'use_system_ssl%': 1,
       },
     }],
-  ],
-
-
+    [ 'chromeos==0', {
+      # Hide GTK and related dependencies for Chrome OS, so they won't get
+      # added back to Chrome OS. Don't try to use GTK on Chrome OS.
+      'targets': [
+        {
+          'target_name': 'gtk',
+          'type': 'none',
+          'toolsets': ['host', 'target'],
+          'variables': {
+            # gtk requires gmodule, but it does not list it as a dependency
+            # in some misconfigured systems.
+            'gtk_packages': 'gmodule-2.0 gtk+-2.0 gthread-2.0',
+          },
+          'conditions': [
+            ['_toolset=="target"', {
+              'direct_dependent_settings': {
+                'cflags': [
+                  '<!@(<(pkg-config) --cflags <(gtk_packages))',
+                ],
+              },
+              'link_settings': {
+                'ldflags': [
+                  '<!@(<(pkg-config) --libs-only-L --libs-only-other <(gtk_packages))',
+                ],
+                'libraries': [
+                  '<!@(<(pkg-config) --libs-only-l <(gtk_packages))',
+                ],
+              },
+            }, {
+              'direct_dependent_settings': {
+                'cflags': [
+                  '<!@(pkg-config --cflags <(gtk_packages))',
+                ],
+              },
+              'link_settings': {
+                'ldflags': [
+                  '<!@(pkg-config --libs-only-L --libs-only-other <(gtk_packages))',
+                ],
+                'libraries': [
+                  '<!@(pkg-config --libs-only-l <(gtk_packages))',
+                ],
+              },
+            }],
+          ],
+        },
+        {
+          'target_name': 'gtkprint',
+          'type': 'none',
+          'conditions': [
+            ['_toolset=="target"', {
+              'direct_dependent_settings': {
+                'cflags': [
+                  '<!@(<(pkg-config) --cflags gtk+-unix-print-2.0)',
+                ],
+              },
+              'link_settings': {
+                'ldflags': [
+                  '<!@(<(pkg-config) --libs-only-L --libs-only-other gtk+-unix-print-2.0)',
+                ],
+                'libraries': [
+                  '<!@(<(pkg-config) --libs-only-l gtk+-unix-print-2.0)',
+                ],
+              },
+            }],
+          ],
+        },
+        {
+          'target_name': 'gdk',
+          'type': 'none',
+          'conditions': [
+            ['_toolset=="target"', {
+              'direct_dependent_settings': {
+                'cflags': [
+                  '<!@(<(pkg-config) --cflags gdk-2.0)',
+                ],
+              },
+              'link_settings': {
+                'ldflags': [
+                  '<!@(<(pkg-config) --libs-only-L --libs-only-other gdk-2.0)',
+                ],
+                'libraries': [
+                  '<!@(<(pkg-config) --libs-only-l gdk-2.0)',
+                ],
+              },
+            }],
+          ],
+        },
+      ],  # targets
+    }],
+  ],  # conditions
   'targets': [
-    {
-      'target_name': 'gtk',
-      'type': 'none',
-      'toolsets': ['host', 'target'],
-      'conditions': [
-        ['_toolset=="target"', {
-          'direct_dependent_settings': {
-            'cflags': [
-              '<!@(<(pkg-config) --cflags gtk+-2.0 gthread-2.0)',
-            ],
-          },
-          'link_settings': {
-            'ldflags': [
-              '<!@(<(pkg-config) --libs-only-L --libs-only-other gtk+-2.0 gthread-2.0)',
-            ],
-            'libraries': [
-              '<!@(<(pkg-config) --libs-only-l gtk+-2.0 gthread-2.0)',
-            ],
-          },
-        }, {
-          'direct_dependent_settings': {
-            'cflags': [
-              '<!@(pkg-config --cflags gtk+-2.0 gthread-2.0)',
-            ],
-          },
-          'link_settings': {
-            'ldflags': [
-              '<!@(pkg-config --libs-only-L --libs-only-other gtk+-2.0 gthread-2.0)',
-            ],
-            'libraries': [
-              '<!@(pkg-config --libs-only-l gtk+-2.0 gthread-2.0)',
-            ],
-          },
-        }],
-        ['chromeos==1', {
-          'link_settings': {
-            'libraries': [ '-lXtst' ]
-          }
-        }],
-      ],
-    },
-    {
-      'target_name': 'gtkprint',
-      'type': 'none',
-      'conditions': [
-        ['_toolset=="target"', {
-          'direct_dependent_settings': {
-            'cflags': [
-              '<!@(<(pkg-config) --cflags gtk+-unix-print-2.0)',
-            ],
-          },
-          'link_settings': {
-            'ldflags': [
-              '<!@(<(pkg-config) --libs-only-L --libs-only-other gtk+-unix-print-2.0)',
-            ],
-            'libraries': [
-              '<!@(<(pkg-config) --libs-only-l gtk+-unix-print-2.0)',
-            ],
-          },
-        }],
-      ],
-    },
     {
       'target_name': 'ssl',
       'type': 'none',
@@ -190,27 +217,6 @@
       ],
     },
     {
-      'target_name': 'gdk',
-      'type': 'none',
-      'conditions': [
-        ['_toolset=="target"', {
-          'direct_dependent_settings': {
-            'cflags': [
-              '<!@(<(pkg-config) --cflags gdk-2.0)',
-            ],
-          },
-          'link_settings': {
-            'ldflags': [
-              '<!@(<(pkg-config) --libs-only-L --libs-only-other gdk-2.0)',
-            ],
-            'libraries': [
-              '<!@(<(pkg-config) --libs-only-l gdk-2.0)',
-            ],
-          },
-        }],
-      ],
-    },
-    {
       'target_name': 'gconf',
       'type': 'none',
       'conditions': [
@@ -236,9 +242,15 @@
     },
     {
       'target_name': 'gio',
-      'type': 'none',
+      'type': 'static_library',
       'conditions': [
         ['use_gio==1 and _toolset=="target"', {
+          'dependencies': [
+            '../../base/base.gyp:base',
+          ],
+          'cflags': [
+            '<!@(<(pkg-config) --cflags gio-2.0)',
+          ],
           'direct_dependent_settings': {
             'cflags': [
               '<!@(<(pkg-config) --cflags gio-2.0)',
@@ -246,10 +258,8 @@
             'defines': [
               'USE_GIO',
             ],
-            'conditions': [
-              ['linux_link_gsettings==0', {
-                'defines': ['DLOPEN_GSETTINGS'],
-              }],
+            'include_dirs': [
+              '<(SHARED_INTERMEDIATE_DIR)',
             ],
           },
           'link_settings': {
@@ -267,7 +277,109 @@
               }],
             ],
           },
+          'hard_dependency': 1,
+          'actions': [
+            {
+              'variables': {
+                'output_h': '<(SHARED_INTERMEDIATE_DIR)/library_loaders/libgio.h',
+                'output_cc': '<(INTERMEDIATE_DIR)/libgio_loader.cc',
+                'generator': '../../tools/generate_library_loader/generate_library_loader.py',
+              },
+              'action_name': 'generate_libgio_loader',
+              'inputs': [
+                '<(generator)',
+              ],
+              'outputs': [
+                '<(output_h)',
+                '<(output_cc)',
+              ],
+              'action': ['python',
+                         '<(generator)',
+                         '--name', 'LibGioLoader',
+                         '--output-h', '<(output_h)',
+                         '--output-cc', '<(output_cc)',
+                         '--header', '<gio/gio.h>',
+                         # TODO(phajdan.jr): This will no longer be needed
+                         # after switch to Precise, http://crbug.com/158577 .
+                         '--bundled-header', '"build/linux/gsettings.h"',
+                         '--link-directly=<(linux_link_gsettings)',
+                         'g_settings_new',
+                         'g_settings_get_child',
+                         'g_settings_get_string',
+                         'g_settings_get_boolean',
+                         'g_settings_get_int',
+                         'g_settings_get_strv',
+                         'g_settings_list_schemas',
+              ],
+              'message': 'Generating libgio library loader.',
+              'process_outputs_as_sources': 1,
+            },
+          ],
         }],
+      ],
+    },
+    {
+      'target_name': 'libpci',
+      'type': 'static_library',
+      'cflags': [
+        '<!@(<(pkg-config) --cflags libpci)',
+      ],
+      'dependencies': [
+        '../../base/base.gyp:base',
+      ],
+      'direct_dependent_settings': {
+        'include_dirs': [
+          '<(SHARED_INTERMEDIATE_DIR)',
+        ],
+        'conditions': [
+          ['linux_link_libpci==1', {
+            'link_settings': {
+              'ldflags': [
+                '<!@(<(pkg-config) --libs-only-L --libs-only-other libpci)',
+              ],
+              'libraries': [
+                '<!@(<(pkg-config) --libs-only-l libpci)',
+              ],
+            }
+          }],
+        ],
+      },
+      'hard_dependency': 1,
+      'actions': [
+        {
+          'variables': {
+            'output_h': '<(SHARED_INTERMEDIATE_DIR)/library_loaders/libpci.h',
+            'output_cc': '<(INTERMEDIATE_DIR)/libpci_loader.cc',
+            'generator': '../../tools/generate_library_loader/generate_library_loader.py',
+          },
+          'action_name': 'generate_libpci_loader',
+          'inputs': [
+            '<(generator)',
+          ],
+          'outputs': [
+            '<(output_h)',
+            '<(output_cc)',
+          ],
+          'action': ['python',
+                     '<(generator)',
+                     '--name', 'LibPciLoader',
+                     '--output-h', '<(output_h)',
+                     '--output-cc', '<(output_cc)',
+                     '--header', '<pci/pci.h>',
+                     # TODO(phajdan.jr): Report problem to pciutils project
+                     # and get it fixed so that we don't need --use-extern-c.
+                     '--use-extern-c',
+                     '--link-directly=<(linux_link_libpci)',
+                     'pci_alloc',
+                     'pci_init',
+                     'pci_cleanup',
+                     'pci_scan_bus',
+                     'pci_fill_info',
+                     'pci_lookup_name',
+          ],
+          'message': 'Generating libpci library loader.',
+          'process_outputs_as_sources': 1,
+        },
       ],
     },
     {
@@ -473,54 +585,39 @@
       },
     },
     {
-      # TODO(satorux): Remove this once dbus-glib clients are gone.
-      'target_name': 'dbus-glib',
-      'type': 'none',
-      'direct_dependent_settings': {
-        'cflags': [
-          '<!@(<(pkg-config) --cflags dbus-glib-1)',
-        ],
-      },
-      'link_settings': {
-        'ldflags': [
-          '<!@(<(pkg-config) --libs-only-L --libs-only-other dbus-glib-1)',
-        ],
-        'libraries': [
-          '<!@(<(pkg-config) --libs-only-l dbus-glib-1)',
-        ],
-      },
-    },
-    {
       'target_name': 'glib',
       'type': 'none',
       'toolsets': ['host', 'target'],
+      'variables': {
+        'glib_packages': 'glib-2.0 gmodule-2.0 gobject-2.0 gthread-2.0',
+      },
       'conditions': [
         ['_toolset=="target"', {
           'direct_dependent_settings': {
             'cflags': [
-              '<!@(<(pkg-config) --cflags glib-2.0 gobject-2.0 gthread-2.0)',
+              '<!@(<(pkg-config) --cflags <(glib_packages))',
             ],
           },
           'link_settings': {
             'ldflags': [
-              '<!@(<(pkg-config) --libs-only-L --libs-only-other glib-2.0 gobject-2.0 gthread-2.0)',
+              '<!@(<(pkg-config) --libs-only-L --libs-only-other <(glib_packages))',
             ],
             'libraries': [
-              '<!@(<(pkg-config) --libs-only-l glib-2.0 gobject-2.0 gthread-2.0)',
+              '<!@(<(pkg-config) --libs-only-l <(glib_packages))',
             ],
           },
         }, {
           'direct_dependent_settings': {
             'cflags': [
-              '<!@(pkg-config --cflags glib-2.0 gobject-2.0 gthread-2.0)',
+              '<!@(pkg-config --cflags <(glib_packages))',
             ],
           },
           'link_settings': {
             'ldflags': [
-              '<!@(pkg-config --libs-only-L --libs-only-other glib-2.0 gobject-2.0 gthread-2.0)',
+              '<!@(pkg-config --libs-only-L --libs-only-other <(glib_packages))',
             ],
             'libraries': [
-              '<!@(pkg-config --libs-only-l glib-2.0 gobject-2.0 gthread-2.0)',
+              '<!@(pkg-config --libs-only-l <(glib_packages))',
             ],
           },
         }],
@@ -596,30 +693,6 @@
             ],
             'libraries': [
               '<!@(<(pkg-config) --libs-only-l "ibus-1.0 >= <(ibus_min_version)")',
-            ],
-          },
-        }],
-      ],
-    },
-    {
-      'target_name': 'wayland',
-      'type': 'none',
-      'conditions': [
-        ['use_wayland == 1', {
-          'cflags': [
-            '<!@(<(pkg-config) --cflags cairo wayland-client wayland-egl xkbcommon)',
-          ],
-          'direct_dependent_settings': {
-            'cflags': [
-              '<!@(<(pkg-config) --cflags cairo wayland-client wayland-egl xkbcommon)',
-            ],
-          },
-          'link_settings': {
-            'ldflags': [
-              '<!@(<(pkg-config) --libs-only-L --libs-only-other wayland-client wayland-egl xkbcommon)',
-            ],
-            'libraries': [
-              '<!@(<(pkg-config) --libs-only-l wayland-client wayland-egl xkbcommon)',
             ],
           },
         }],

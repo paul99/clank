@@ -4,7 +4,6 @@
 
 #ifndef CHROME_BROWSER_UI_GTK_INFOBARS_INFOBAR_CONTAINER_GTK_H_
 #define CHROME_BROWSER_UI_GTK_INFOBARS_INFOBAR_CONTAINER_GTK_H_
-#pragma once
 
 #include <vector>
 
@@ -38,13 +37,15 @@ typedef struct _GtkWidget GtkWidget;
 // we can't just overlap the widgets.
 class InfoBarContainerGtk : public InfoBarContainer {
  public:
-  InfoBarContainerGtk(InfoBarContainer::Delegate* delegate, Profile* profile);
+  InfoBarContainerGtk(InfoBarContainer::Delegate* delegate,
+                      chrome::search::SearchModel* search_model,
+                      Profile* profile);
   virtual ~InfoBarContainerGtk();
 
   // Get the native widget.
   GtkWidget* widget() const { return container_.get(); }
 
-  // Remove the specified InfoBarDelegate from the selected TabContents. This
+  // Remove the specified InfoBarDelegate from the selected WebContents. This
   // will notify us back and cause us to close the View. This is called from
   // the InfoBar's close button handler.
   void RemoveDelegate(InfoBarDelegate* delegate);

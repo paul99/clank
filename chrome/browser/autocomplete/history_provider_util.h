@@ -4,7 +4,6 @@
 
 #ifndef CHROME_BROWSER_AUTOCOMPLETE_HISTORY_PROVIDER_UTIL_H_
 #define CHROME_BROWSER_AUTOCOMPLETE_HISTORY_PROVIDER_UTIL_H_
-#pragma once
 
 #include <deque>
 #include <vector>
@@ -24,6 +23,11 @@ struct HistoryMatch {
                bool innermost_match);
 
   static bool EqualsGURL(const HistoryMatch& h, const GURL& url);
+
+  // Returns true if url in this HistoryMatch is just a host
+  // (e.g. "http://www.google.com/") and not some other subpage
+  // (e.g. "http://www.google.com/foo.html").
+  bool IsHostOnly() const;
 
   URLRow url_info;
 
@@ -49,21 +53,6 @@ struct HistoryMatch {
 };
 typedef std::deque<HistoryMatch> HistoryMatches;
 
-struct Prefix {
-  Prefix(const string16& prefix, int num_components)
-      : prefix(prefix),
-        num_components(num_components) {}
-
-  string16 prefix;
-
-  // The number of "components" in the prefix.  The scheme is a component,
-  // and the initial "www." or "ftp." is a component.  So "http://foo.com"
-  // and "www.bar.com" each have one component, "ftp://ftp.ftp.com" has two,
-  // and "mysite.com" has none.  This is used to tell whether the user's
-  // input is an innermost match or not.  See comments in HistoryMatch.
-  int num_components;
-};
-typedef std::vector<Prefix> Prefixes;
-}
+}  // namespace history
 
 #endif  // CHROME_BROWSER_AUTOCOMPLETE_HISTORY_PROVIDER_UTIL_H_

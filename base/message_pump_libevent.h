@@ -1,10 +1,9 @@
-// Copyright (c) 2011 The Chromium Authors. All rights reserved.
+// Copyright (c) 2012 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
 #ifndef BASE_MESSAGE_PUMP_LIBEVENT_H_
 #define BASE_MESSAGE_PUMP_LIBEVENT_H_
-#pragma once
 
 #include "base/basictypes.h"
 #include "base/compiler_specific.h"
@@ -39,17 +38,17 @@ class BASE_EXPORT MessagePumpLibevent : public MessagePump {
     virtual ~IOObserver() {}
   };
 
-  class FileDescriptorWatcher;
-
   // Used with WatchFileDescriptor to asynchronously monitor the I/O readiness
   // of a file descriptor.
   class Watcher {
    public:
-    virtual ~Watcher() {}
     // Called from MessageLoop::Run when an FD can be read from/written to
     // without blocking
     virtual void OnFileCanReadWithoutBlocking(int fd) = 0;
     virtual void OnFileCanWriteWithoutBlocking(int fd) = 0;
+
+   protected:
+    virtual ~Watcher() {}
   };
 
   // Object returned by WatchFileDescriptor to manage further watching.
@@ -71,20 +70,19 @@ class BASE_EXPORT MessagePumpLibevent : public MessagePump {
 
     // Called by MessagePumpLibevent, ownership of |e| is transferred to this
     // object.
-    void Init(event* e, bool is_persistent);
+    void Init(event* e);
 
     // Used by MessagePumpLibevent to take ownership of event_.
-    event *ReleaseEvent();
+    event* ReleaseEvent();
 
     void set_pump(MessagePumpLibevent* pump) { pump_ = pump; }
-    MessagePumpLibevent* pump() { return pump_; }
+    MessagePumpLibevent* pump() const { return pump_; }
 
     void set_watcher(Watcher* watcher) { watcher_ = watcher; }
 
     void OnFileCanReadWithoutBlocking(int fd, MessagePumpLibevent* pump);
     void OnFileCanWriteWithoutBlocking(int fd, MessagePumpLibevent* pump);
 
-    bool is_persistent_;  // false if this event is one-shot.
     event* event_;
     MessagePumpLibevent* pump_;
     Watcher* watcher_;
@@ -100,7 +98,6 @@ class BASE_EXPORT MessagePumpLibevent : public MessagePump {
   };
 
   MessagePumpLibevent();
-  virtual ~MessagePumpLibevent();
 
   // Have the current thread's message loop watch for a a situation in which
   // reading/writing to the FD can be performed without blocking.
@@ -116,7 +113,7 @@ class BASE_EXPORT MessagePumpLibevent : public MessagePump {
   // TODO(dkegel): switch to edge-triggered readiness notification
   bool WatchFileDescriptor(int fd,
                            bool persistent,
-                           Mode mode,
+                           int mode,
                            FileDescriptorWatcher *controller,
                            Watcher *delegate);
 
@@ -128,6 +125,9 @@ class BASE_EXPORT MessagePumpLibevent : public MessagePump {
   virtual void Quit() OVERRIDE;
   virtual void ScheduleWork() OVERRIDE;
   virtual void ScheduleDelayedWork(const TimeTicks& delayed_work_time) OVERRIDE;
+
+ protected:
+  virtual ~MessagePumpLibevent();
 
  private:
   friend class MessagePumpLibeventTest;

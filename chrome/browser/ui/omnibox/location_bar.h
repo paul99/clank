@@ -10,12 +10,11 @@
 
 #ifndef CHROME_BROWSER_UI_OMNIBOX_LOCATION_BAR_H_
 #define CHROME_BROWSER_UI_OMNIBOX_LOCATION_BAR_H_
-#pragma once
 
 #include <string>
 
 #include "base/string16.h"
-#include "chrome/browser/instant/instant_delegate.h"
+#include "chrome/common/instant_types.h"
 #include "content/public/common/page_transition_types.h"
 #include "webkit/glue/window_open_disposition.h"
 
@@ -34,8 +33,7 @@ class LocationBar {
 
   // Sets the suggested text to show in the omnibox. This is shown in addition
   // to the current text of the omnibox.
-  virtual void SetSuggestedText(const string16& text,
-                                InstantCompleteBehavior behavior) = 0;
+  virtual void SetInstantSuggestion(const InstantSuggestion& suggestion) = 0;
 
   // Returns the string of text entered in the location bar.
   virtual string16 GetInputString() const = 0;
@@ -68,6 +66,12 @@ class LocationBar {
   // extension is unloaded or crashes.
   virtual void InvalidatePageActions() = 0;
 
+  // Updates the state of the web intents use-another-service button.
+  virtual void UpdateWebIntentsButton() = 0;
+
+  // Updates the state of the button to open a PDF in Adobe Reader.
+  virtual void UpdateOpenPDFInReaderPrompt() = 0;
+
   // Saves the state of the location bar to the specified WebContents, so that
   // it can be restored later. (Done when switching tabs).
   virtual void SaveStateToContents(content::WebContents* contents) = 0;
@@ -76,8 +80,8 @@ class LocationBar {
   virtual void Revert() = 0;
 
   // Returns a pointer to the text entry view.
-  virtual const OmniboxView* location_entry() const = 0;
-  virtual OmniboxView* location_entry() = 0;
+  virtual const OmniboxView* GetLocationEntry() const = 0;
+  virtual OmniboxView* GetLocationEntry() = 0;
 
   // Returns a pointer to the testing interface.
   virtual LocationBarTesting* GetLocationBarForTesting() = 0;
@@ -102,6 +106,13 @@ class LocationBarTesting {
 
   // Simulates a left mouse pressed on the visible page action at |index|.
   virtual void TestPageActionPressed(size_t index) = 0;
+
+  // Simulates a left mouse pressed on the action box decoration, followed by
+  // a menu item selection.
+  virtual void TestActionBoxMenuItemSelected(int command_id) = 0;
+
+  // Returns whether or not the bookmark star decoration is visible.
+  virtual bool GetBookmarkStarVisibility() = 0;
 
  protected:
   virtual ~LocationBarTesting() {}

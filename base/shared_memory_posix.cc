@@ -1,4 +1,4 @@
-// Copyright (c) 2011 The Chromium Authors. All rights reserved.
+// Copyright (c) 2012 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -11,9 +11,11 @@
 #include <unistd.h>
 
 #include "base/file_util.h"
+#include "base/lazy_instance.h"
 #include "base/logging.h"
 #include "base/threading/platform_thread.h"
 #include "base/safe_strerror_posix.h"
+#include "base/synchronization/lock.h"
 #include "base/threading/thread_restrictions.h"
 #include "base/utf_string_conversions.h"
 
@@ -33,6 +35,8 @@ namespace {
 // Paranoia. Semaphores and shared memory segments should live in different
 // namespaces, but who knows what's out there.
 const char kSemaphoreSuffix[] = "-sem";
+
+LazyInstance<Lock>::Leaky g_thread_lock_ = LAZY_INSTANCE_INITIALIZER;
 
 }
 
@@ -94,7 +98,7 @@ void SharedMemory::CloseHandle(const SharedMemoryHandle& handle) {
     DPLOG(ERROR) << "close";
 }
 
-bool SharedMemory::CreateAndMapAnonymous(uint32 size) {
+bool SharedMemory::CreateAndMapAnonymous(size_t size) {
   return CreateAnonymous(size) && Map(size);
 }
 
@@ -108,6 +112,9 @@ bool SharedMemory::CreateAndMapAnonymous(uint32 size) {
 bool SharedMemory::Create(const SharedMemoryCreateOptions& options) {
   DCHECK_EQ(-1, mapped_file_);
   if (options.size == 0) return false;
+
+  if (options.size > static_cast<size_t>(std::numeric_limits<int>::max()))
+    return false;
 
   // This function theoretically can block on the disk, but realistically
   // the temporary files we create will just go into the buffer cache
@@ -149,7 +156,7 @@ bool SharedMemory::Create(const SharedMemoryCreateOptions& options) {
       file_util::CloseFile(fp);
       return false;
     }
-    const uint32 current_size = stat.st_size;
+    const size_t current_size = stat.st_size;
     if (current_size != options.size) {
       if (HANDLE_EINTR(ftruncate(fileno(fp), options.size)) != 0) {
         file_util::CloseFile(fp);
@@ -212,8 +219,11 @@ bool SharedMemory::Open(const std::string& name, bool read_only) {
 
 #endif  // !defined(OS_ANDROID)
 
-bool SharedMemory::Map(uint32 bytes) {
+bool SharedMemory::Map(size_t bytes) {
   if (mapped_file_ == -1)
+    return false;
+
+  if (bytes > static_cast<size_t>(std::numeric_limits<int>::max()))
     return false;
 
 #if defined(OS_ANDROID)
@@ -235,11 +245,15 @@ bool SharedMemory::Map(uint32 bytes) {
   memory_ = mmap(NULL, bytes, PROT_READ | (read_only_ ? 0 : PROT_WRITE),
                  MAP_SHARED, mapped_file_, 0);
 
-  if (memory_)
+  bool mmap_succeeded = memory_ != (void*)-1 && memory_ != NULL;
+  if (mmap_succeeded) {
     mapped_size_ = bytes;
+    DCHECK_EQ(0U, reinterpret_cast<uintptr_t>(memory_) &
+        (SharedMemory::MAP_MINIMUM_ALIGNMENT - 1));
+  } else {
+    memory_ = NULL;
+  }
 
-  bool mmap_succeeded = (memory_ != (void*)-1);
-  DCHECK(mmap_succeeded) << "Call to mmap failed, errno=" << errno;
   return mmap_succeeded;
 }
 
@@ -268,11 +282,13 @@ void SharedMemory::Close() {
 }
 
 void SharedMemory::Lock() {
+  g_thread_lock_.Get().Acquire();
   LockOrUnlockCommon(F_LOCK);
 }
 
 void SharedMemory::Unlock() {
   LockOrUnlockCommon(F_ULOCK);
+  g_thread_lock_.Get().Release();
 }
 
 #if !defined(OS_ANDROID)
@@ -356,7 +372,11 @@ bool SharedMemory::ShareToProcessCommon(ProcessHandle process,
                                         SharedMemoryHandle *new_handle,
                                         bool close_self) {
   const int new_fd = dup(mapped_file_);
-  DCHECK_GE(new_fd, 0);
+  if (new_fd < 0) {
+    DPLOG(ERROR) << "dup() failed.";
+    return false;
+  }
+
   new_handle->fd = new_fd;
   new_handle->auto_close = true;
 

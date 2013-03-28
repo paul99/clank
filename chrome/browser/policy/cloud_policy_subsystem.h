@@ -1,14 +1,12 @@
-// Copyright (c) 2011 The Chromium Authors. All rights reserved.
+// Copyright (c) 2012 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
 #ifndef CHROME_BROWSER_POLICY_CLOUD_POLICY_SUBSYSTEM_H_
 #define CHROME_BROWSER_POLICY_CLOUD_POLICY_SUBSYSTEM_H_
-#pragma once
 
 #include "base/memory/scoped_ptr.h"
-#include "chrome/browser/prefs/pref_change_registrar.h"
-#include "content/public/browser/notification_observer.h"
+#include "base/prefs/public/pref_change_registrar.h"
 #include "net/base/network_change_notifier.h"
 
 class PrefService;
@@ -26,8 +24,7 @@ class PolicyNotifier;
 // policy. It glues together the backend, the policy controller and manages the
 // life cycle of the policy providers.
 class CloudPolicySubsystem
-    : public content::NotificationObserver,
-      public net::NetworkChangeNotifier::IPAddressObserver {
+    : public net::NetworkChangeNotifier::IPAddressObserver {
  public:
   enum PolicySubsystemState {
     UNENROLLED,     // No enrollment attempt has been performed yet.
@@ -46,7 +43,10 @@ class CloudPolicySubsystem
     BAD_DMTOKEN,           // The server rejected the DMToken.
     POLICY_LOCAL_ERROR,    // The policy cache encountered a local error.
     SIGNATURE_MISMATCH,    // The policy cache detected a signature mismatch.
-    BAD_SERIAL_NUMBER      // The serial number of the device is not valid.
+    BAD_SERIAL_NUMBER,     // The serial number of the device is not valid.
+    AUTO_ENROLLMENT_ERROR, // Auto-enrollment is not supported.
+    BAD_ENROLLMENT_MODE,   // The enrollment mode was not recognized.
+    MISSING_LICENSES,      // There are no valid licenses for this domain left.
   };
 
   class Observer {
@@ -69,7 +69,8 @@ class CloudPolicySubsystem
   };
 
   CloudPolicySubsystem(CloudPolicyDataStore* data_store,
-                       CloudPolicyCacheBase* policy_cache);
+                       CloudPolicyCacheBase* policy_cache,
+                       const std::string& device_management_url);
   virtual ~CloudPolicySubsystem();
 
   // Initializes the subsystem. The first network request will only be made
@@ -92,7 +93,11 @@ class CloudPolicySubsystem
 
   // Refreshes the policies retrieved by this subsystem. This triggers new
   // policy fetches if possible, otherwise it keeps the current set of policies.
-  void RefreshPolicies();
+  // If |wait_for_auth_token| is true, then this call will make the policy
+  // refresh wait for a pending auth token fetch, in case it hasn't finished
+  // yet. Otherwise the refresh completes immediately if the auth token isn't
+  // available.
+  void RefreshPolicies(bool wait_for_auth_token);
 
   // Registers cloud policy related prefs.
   static void RegisterPrefs(PrefService* pref_service);
@@ -102,6 +107,8 @@ class CloudPolicySubsystem
 
   // Returns the CloudPolicyCacheBase associated with this CloudPolicySubsystem.
   CloudPolicyCacheBase* GetCloudPolicyCacheBase() const;
+
+  CloudPolicyDataStore* data_store() { return data_store_; }
 
  private:
   friend class TestingCloudPolicySubsystem;
@@ -124,10 +131,7 @@ class CloudPolicySubsystem
   virtual void CreateDeviceTokenFetcher();
   virtual void CreateCloudPolicyController();
 
-  // content::NotificationObserver overrides.
-  virtual void Observe(int type,
-                       const content::NotificationSource& source,
-                       const content::NotificationDetails& details) OVERRIDE;
+  void OnRefreshPrefChanged();
 
   // net::NetworkChangeNotifier::IPAddressObserver:
   virtual void OnIPAddressChanged() OVERRIDE;

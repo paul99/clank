@@ -1,13 +1,11 @@
-// Copyright (c) 2011 The Chromium Authors. All rights reserved.
+// Copyright (c) 2012 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
 #ifndef CONTENT_BROWSER_GEOLOCATION_NETWORK_LOCATION_PROVIDER_H_
 #define CONTENT_BROWSER_GEOLOCATION_NETWORK_LOCATION_PROVIDER_H_
-#pragma once
 
 #include <list>
-#include <string>
 
 #include "base/basictypes.h"
 #include "base/memory/ref_counted.h"
@@ -19,15 +17,14 @@
 #include "content/browser/geolocation/location_provider.h"
 #include "content/browser/geolocation/network_location_request.h"
 #include "content/common/content_export.h"
-#include "content/common/geoposition.h"
+#include "content/public/common/geoposition.h"
 
 namespace content {
 class AccessTokenStore;
-}
+
 
 class NetworkLocationProvider
     : public LocationProviderBase,
-      public RadioDataProvider::ListenerInterface,
       public WifiDataProvider::ListenerInterface,
       public NetworkLocationRequest::ListenerInterface {
  public:
@@ -68,7 +65,7 @@ class NetworkLocationProvider
     CacheAgeList cache_age_list_;  // Oldest first.
   };
 
-  NetworkLocationProvider(content::AccessTokenStore* access_token_store,
+  NetworkLocationProvider(AccessTokenStore* access_token_store,
                           net::URLRequestContextGetter* context,
                           const GURL& url,
                           const string16& access_token);
@@ -79,7 +76,7 @@ class NetworkLocationProvider
   virtual void StopProvider() OVERRIDE;
   virtual void GetPosition(Geoposition *position) OVERRIDE;
   virtual void UpdatePosition() OVERRIDE;
-  virtual void OnPermissionGranted(const GURL& requesting_frame) OVERRIDE;
+  virtual void OnPermissionGranted() OVERRIDE;
 
  private:
   // Satisfies a position request from cache or network.
@@ -91,26 +88,21 @@ class NetworkLocationProvider
   bool IsStarted() const;
 
   // DeviceDataProvider::ListenerInterface implementation.
-  virtual void DeviceDataUpdateAvailable(RadioDataProvider* provider) OVERRIDE;
   virtual void DeviceDataUpdateAvailable(WifiDataProvider* provider) OVERRIDE;
 
   // NetworkLocationRequest::ListenerInterface implementation.
   virtual void LocationResponseAvailable(const Geoposition& position,
                                          bool server_error,
                                          const string16& access_token,
-                                         const RadioData& radio_data,
                                          const WifiData& wifi_data) OVERRIDE;
 
-  scoped_refptr<content::AccessTokenStore> access_token_store_;
+  scoped_refptr<AccessTokenStore> access_token_store_;
 
-  // The device data providers, acquired via global factories.
-  RadioDataProvider* radio_data_provider_;
+  // The wifi data provider, acquired via global factories.
   WifiDataProvider* wifi_data_provider_;
 
-  // The radio and wifi data, flags to indicate if each data set is complete.
-  RadioData radio_data_;
+  // The  wifi data, flags to indicate if the data set is complete.
   WifiData wifi_data_;
-  bool is_radio_data_complete_;
   bool is_wifi_data_complete_;
 
   // The timestamp for the latest device data update.
@@ -123,9 +115,10 @@ class NetworkLocationProvider
   // The current best position estimate.
   Geoposition position_;
 
-  bool is_new_data_available_;
+  // Whether permission has been granted for the provider to operate.
+  bool is_permission_granted_;
 
-  std::string most_recent_authorized_host_;
+  bool is_new_data_available_;
 
   // The network location request object, and the url it uses.
   scoped_ptr<NetworkLocationRequest> request_;
@@ -136,5 +129,7 @@ class NetworkLocationProvider
 
   DISALLOW_COPY_AND_ASSIGN(NetworkLocationProvider);
 };
+
+}  // namespace content
 
 #endif  // CONTENT_BROWSER_GEOLOCATION_NETWORK_LOCATION_PROVIDER_H_

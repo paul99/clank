@@ -1,18 +1,28 @@
-# Copyright (c) 2011 The Chromium Authors. All rights reserved.
+# Copyright (c) 2012 The Chromium Authors. All rights reserved.
 # Use of this source code is governed by a BSD-style license that can be
 # found in the LICENSE file.
 
 {
   'includes': [
-    '../../build/win_precompile.gypi',
-    '../appcache/webkit_appcache.gypi',
-    '../blob/webkit_blob.gypi',
-    '../database/webkit_database.gypi',
-    '../fileapi/webkit_fileapi.gypi',
-    '../glue/webkit_glue.gypi',
-    '../gpu/webkit_gpu.gypi',
-    '../media/webkit_media.gypi',
-    '../quota/webkit_quota.gypi',
-    'webkit_support.gypi',
+    '../user_agent/webkit_user_agent.gypi',
+  ],
+  'conditions': [
+    # TODO(stuartmorgan): All dependencies from code built on iOS to
+    # webkit/ should be removed, at which point this condition can be
+    # removed.
+    ['OS != "ios"', {
+      'includes': [
+        '../../build/win_precompile.gypi',
+        '../appcache/webkit_appcache.gypi',
+        '../base/webkit_base.gypi',
+        '../database/webkit_database.gypi',
+        '../glue/webkit_glue.gypi',
+        '../gpu/webkit_gpu.gypi',
+        '../media/webkit_media.gypi',
+        '../quota/webkit_quota.gypi',
+        '../storage/webkit_storage.gypi',
+        'webkit_support.gypi',
+      ],
+    }],
   ],
 }

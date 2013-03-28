@@ -1,4 +1,4 @@
-// Copyright (c) 2011 The Chromium Authors. All rights reserved.
+// Copyright (c) 2012 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -10,93 +10,76 @@
 
 #ifndef UI_BASE_ACCELERATORS_ACCELERATOR_H_
 #define UI_BASE_ACCELERATORS_ACCELERATOR_H_
-#pragma once
 
+#include "base/memory/scoped_ptr.h"
 #include "base/string16.h"
+#include "ui/base/accelerators/platform_accelerator.h"
+#include "ui/base/events/event_constants.h"
 #include "ui/base/keycodes/keyboard_codes.h"
-#include "ui/base/events.h"
 #include "ui/base/ui_export.h"
 
 namespace ui {
 
-// This is a cross-platform base class for accelerator keys used in menus. It is
-// meant to be subclassed for concrete toolkit implementations.
+class PlatformAccelerator;
+
+// This is a cross-platform class for accelerator keys used in menus.
+// |platform_accelerator| should be used to store platform specific data.
 class UI_EXPORT Accelerator {
  public:
-  Accelerator() : key_code_(ui::VKEY_UNKNOWN), modifiers_(0) {}
+  Accelerator();
+  Accelerator(ui::KeyboardCode keycode, int modifiers);
+  Accelerator(const Accelerator& accelerator);
+  ~Accelerator();
 
-  Accelerator(ui::KeyboardCode keycode, int modifiers)
-      : key_code_(keycode),
-        modifiers_(modifiers) {}
+  Accelerator& operator=(const Accelerator& accelerator);
 
-  Accelerator(const Accelerator& accelerator) {
-    key_code_ = accelerator.key_code_;
-    modifiers_ = accelerator.modifiers_;
-  }
+  // Define the < operator so that the KeyboardShortcut can be used as a key in
+  // a std::map.
+  bool operator <(const Accelerator& rhs) const;
 
-  Accelerator(ui::KeyboardCode keycode,
-              bool shift_pressed, bool ctrl_pressed, bool alt_pressed)
-      : key_code_(keycode),
-        modifiers_(0) {
-    if (shift_pressed)
-      modifiers_ |= ui::EF_SHIFT_DOWN;
-    if (ctrl_pressed)
-      modifiers_ |= ui::EF_CONTROL_DOWN;
-    if (alt_pressed)
-      modifiers_ |= ui::EF_ALT_DOWN;
-  }
+  bool operator ==(const Accelerator& rhs) const;
 
-  virtual ~Accelerator() {}
-
-  Accelerator& operator=(const Accelerator& accelerator) {
-    if (this != &accelerator) {
-      key_code_ = accelerator.key_code_;
-      modifiers_ = accelerator.modifiers_;
-    }
-    return *this;
-  }
-
-  // We define the < operator so that the KeyboardShortcut can be used as a key
-  // in a std::map.
-  bool operator <(const Accelerator& rhs) const {
-    if (key_code_ != rhs.key_code_)
-      return key_code_ < rhs.key_code_;
-    return modifiers_ < rhs.modifiers_;
-  }
-
-  bool operator ==(const Accelerator& rhs) const {
-    return (key_code_ == rhs.key_code_) && (modifiers_ == rhs.modifiers_);
-  }
-
-  bool operator !=(const Accelerator& rhs) const {
-    return !(*this == rhs);
-  }
+  bool operator !=(const Accelerator& rhs) const;
 
   ui::KeyboardCode key_code() const { return key_code_; }
 
+  // Sets the event type if the accelerator should be processed on an event
+  // other than ui::ET_KEY_PRESSED.
+  void set_type(ui::EventType type) { type_ = type; }
+  ui::EventType type() const { return type_; }
+
   int modifiers() const { return modifiers_; }
 
-  bool IsShiftDown() const {
-    return (modifiers_ & ui::EF_SHIFT_DOWN) == ui::EF_SHIFT_DOWN;
-  }
-
-  bool IsCtrlDown() const {
-    return (modifiers_ & ui::EF_CONTROL_DOWN) == ui::EF_CONTROL_DOWN;
-  }
-
-  bool IsAltDown() const {
-    return (modifiers_ & ui::EF_ALT_DOWN) == ui::EF_ALT_DOWN;
-  }
+  bool IsShiftDown() const;
+  bool IsCtrlDown() const;
+  bool IsAltDown() const;
+  bool IsCmdDown() const;
 
   // Returns a string with the localized shortcut if any.
   string16 GetShortcutText() const;
 
+  void set_platform_accelerator(scoped_ptr<PlatformAccelerator> p) {
+    platform_accelerator_ = p.Pass();
+  }
+
+  // This class keeps ownership of the returned object.
+  const PlatformAccelerator* platform_accelerator() const {
+    return platform_accelerator_.get();
+  }
+
+
  protected:
   // The keycode (VK_...).
-  ui::KeyboardCode key_code_;
+  KeyboardCode key_code_;
 
-  // The state of the Shift/Ctrl/Alt keys (platform-dependent).
+  // The event type (usually ui::ET_KEY_PRESSED).
+  EventType type_;
+
+  // The state of the Shift/Ctrl/Alt keys.
   int modifiers_;
+
+  // Stores platform specific data. May be NULL.
+  scoped_ptr<PlatformAccelerator> platform_accelerator_;
 };
 
 // An interface that classes that want to register for keyboard accelerators
@@ -107,7 +90,7 @@ class UI_EXPORT AcceleratorTarget {
   virtual bool AcceleratorPressed(const Accelerator& accelerator) = 0;
 
   // Should return true if the target can handle the accelerator events. The
-  // AcceleratorPressed method is inovked only for targets for which
+  // AcceleratorPressed method is invoked only for targets for which
   // CanHandleAccelerators returns true.
   virtual bool CanHandleAccelerators() const = 0;
 
@@ -115,7 +98,7 @@ class UI_EXPORT AcceleratorTarget {
   virtual ~AcceleratorTarget() {}
 };
 
-// Since acclerator code is one of the few things that can't be cross platform
+// Since accelerator code is one of the few things that can't be cross platform
 // in the chrome UI, separate out just the GetAcceleratorForCommandId() from
 // the menu delegates.
 class AcceleratorProvider {

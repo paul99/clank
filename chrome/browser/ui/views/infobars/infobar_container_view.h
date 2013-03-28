@@ -4,7 +4,6 @@
 
 #ifndef CHROME_BROWSER_UI_VIEWS_INFOBARS_INFOBAR_CONTAINER_VIEW_H_
 #define CHROME_BROWSER_UI_VIEWS_INFOBARS_INFOBAR_CONTAINER_VIEW_H_
-#pragma once
 
 #include "chrome/browser/infobars/infobar_container.h"
 #include "ui/views/accessible_pane_view.h"
@@ -13,12 +12,16 @@
 class InfoBarContainerView : public views::AccessiblePaneView,
                              public InfoBarContainer {
  public:
-  explicit InfoBarContainerView(Delegate* delegate);
+  static const char kViewClassName[];
+
+  explicit InfoBarContainerView(Delegate* delegate,
+                                chrome::search::SearchModel* search_model);
   virtual ~InfoBarContainerView();
 
  private:
   // AccessiblePaneView:
   virtual gfx::Size GetPreferredSize() OVERRIDE;
+  virtual std::string GetClassName() const OVERRIDE;
   virtual void Layout() OVERRIDE;
   virtual void GetAccessibleState(ui::AccessibleViewState* state) OVERRIDE;
 

@@ -6,62 +6,75 @@
 
 #include "base/message_loop_proxy.h"
 #include "net/base/ip_endpoint.h"
+#include "remoting/base/auto_thread_task_runner.h"
+#include "remoting/base/capture_data.h"
 #include "remoting/proto/event.pb.h"
+#include "remoting/protocol/transport.h"
 
 namespace remoting {
 
-MockCapturer::MockCapturer() {}
+MockVideoFrameCapturer::MockVideoFrameCapturer() {}
 
-MockCapturer::~MockCapturer() {}
+MockVideoFrameCapturer::~MockVideoFrameCapturer() {}
 
-MockCurtain::MockCurtain() {}
+MockVideoFrameCapturerDelegate::MockVideoFrameCapturerDelegate() {
+}
 
-MockCurtain::~MockCurtain() {}
+MockVideoFrameCapturerDelegate::~MockVideoFrameCapturerDelegate() {
+}
 
-Curtain* Curtain::Create() {
-  return new MockCurtain();
+void MockVideoFrameCapturerDelegate::OnCursorShapeChanged(
+    scoped_ptr<protocol::CursorShapeInfo> cursor_shape) {
+  // Notify the mock method.
+  OnCursorShapeChangedPtr(cursor_shape.get());
+}
+
+MockDesktopEnvironmentFactory::MockDesktopEnvironmentFactory()
+    : DesktopEnvironmentFactory(NULL, NULL) {
+}
+
+MockDesktopEnvironmentFactory::~MockDesktopEnvironmentFactory() {}
+
+scoped_ptr<DesktopEnvironment> MockDesktopEnvironmentFactory::Create(
+    ClientSession* client) {
+  return scoped_ptr<DesktopEnvironment>(CreatePtr(client));
 }
 
 MockEventExecutor::MockEventExecutor() {}
 
 MockEventExecutor::~MockEventExecutor() {}
 
+void MockEventExecutor::Start(
+    scoped_ptr<protocol::ClipboardStub> client_clipboard) {
+  StartPtr(client_clipboard.get());
+}
+
 MockDisconnectWindow::MockDisconnectWindow() {}
 
 MockDisconnectWindow::~MockDisconnectWindow() {}
 
-DisconnectWindow* DisconnectWindow::Create() {
-  return new MockDisconnectWindow();
+scoped_ptr<DisconnectWindow> DisconnectWindow::Create() {
+  return scoped_ptr<DisconnectWindow>(new MockDisconnectWindow());
 }
 
 MockContinueWindow::MockContinueWindow() {}
 
 MockContinueWindow::~MockContinueWindow() {}
 
-ContinueWindow* ContinueWindow::Create() {
-  return new MockContinueWindow();
+scoped_ptr<ContinueWindow> ContinueWindow::Create() {
+  return scoped_ptr<ContinueWindow>(new MockContinueWindow());
 }
 
 MockLocalInputMonitor::MockLocalInputMonitor() {}
 
 MockLocalInputMonitor::~MockLocalInputMonitor() {}
 
-LocalInputMonitor* LocalInputMonitor::Create() {
-  return new MockLocalInputMonitor();
-}
-
-MockChromotingHostContext::MockChromotingHostContext()
-    : ChromotingHostContext(base::MessageLoopProxy::current()) {
-}
-
-MockChromotingHostContext::~MockChromotingHostContext() {}
-
 MockClientSessionEventHandler::MockClientSessionEventHandler() {}
 
 MockClientSessionEventHandler::~MockClientSessionEventHandler() {}
 
-MockUserAuthenticator::MockUserAuthenticator() {}
+MockHostStatusObserver::MockHostStatusObserver() {}
 
-MockUserAuthenticator::~MockUserAuthenticator() {}
+MockHostStatusObserver::~MockHostStatusObserver() {}
 
 }  // namespace remoting

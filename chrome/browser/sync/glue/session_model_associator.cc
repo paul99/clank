@@ -6,55 +6,67 @@
 
 #include <algorithm>
 #include <set>
-#include <sstream>
 #include <utility>
 
 #include "base/bind.h"
 #include "base/command_line.h"
 #include "base/location.h"
 #include "base/logging.h"
-#include "base/sys_info.h"
-#include "chrome/browser/browser_process.h"
+#include "base/threading/sequenced_worker_pool.h"
+#include "chrome/browser/favicon/favicon_service_factory.h"
 #include "chrome/browser/history/history.h"
+#include "chrome/browser/prefs/pref_service.h"
 #include "chrome/browser/profiles/profile.h"
 #include "chrome/browser/sessions/session_id.h"
-#include "chrome/browser/sessions/session_service_factory.h"
-#include "chrome/browser/sync/api/sync_error.h"
+#include "chrome/browser/sync/glue/device_info.h"
+#include "chrome/browser/sync/glue/synced_device_tracker.h"
 #include "chrome/browser/sync/glue/synced_session.h"
 #include "chrome/browser/sync/glue/synced_tab_delegate.h"
 #include "chrome/browser/sync/glue/synced_window_delegate.h"
-#include "chrome/browser/sync/internal_api/read_node.h"
-#include "chrome/browser/sync/internal_api/read_transaction.h"
-#include "chrome/browser/sync/internal_api/write_node.h"
-#include "chrome/browser/sync/internal_api/write_transaction.h"
 #include "chrome/browser/sync/profile_sync_service.h"
-#include "chrome/browser/sync/protocol/session_specifics.pb.h"
-#include "chrome/browser/sync/syncable/syncable.h"
-#include "chrome/browser/sync/util/get_session_name_task.h"
 #include "chrome/common/chrome_notification_types.h"
 #include "chrome/common/chrome_switches.h"
+#include "chrome/common/pref_names.h"
 #include "chrome/common/url_constants.h"
 #include "content/public/browser/navigation_entry.h"
-#include "content/public/browser/notification_service.h"
 #include "content/public/browser/notification_details.h"
+#include "content/public/browser/notification_service.h"
+#include "sync/api/sync_error.h"
+#include "sync/api/time.h"
+#include "sync/internal_api/public/base/model_type.h"
+#include "sync/internal_api/public/base/model_type_invalidation_map.h"
+#include "sync/internal_api/public/read_node.h"
+#include "sync/internal_api/public/read_transaction.h"
+#include "sync/internal_api/public/write_node.h"
+#include "sync/internal_api/public/write_transaction.h"
+#include "sync/protocol/session_specifics.pb.h"
+#include "sync/syncable/directory.h"
+#include "sync/syncable/read_transaction.h"
+#include "sync/syncable/write_transaction.h"
+#include "ui/gfx/favicon_size.h"
 #if defined(OS_LINUX)
-#include "base/posix_util.h"
+#include "base/linux_util.h"
 #elif defined(OS_WIN)
 #include <windows.h>
 #endif
 
-#if defined(OS_ANDROID)
-#include "chrome/browser/android/device_utils.h"
-#endif
-
 using content::BrowserThread;
 using content::NavigationEntry;
-using syncable::SESSIONS;
+using prefs::kSyncSessionsGUID;
+using syncer::SESSIONS;
 
-#if defined(OS_ANDROID)
-using content::NotificationService;
-using content::Source;
-#endif
+namespace {
+// Given a transaction, returns the GUID-based string that should be used for
+// |current_machine_tag_|.
+std::string GetMachineTagFromTransaction(
+    syncer::WriteTransaction* trans) {
+  syncer::syncable::Directory* dir = trans->GetWrappedWriteTrans()->directory();
+  std::string machine_tag = "session_sync";
+  machine_tag.append(dir->cache_guid());
+  return machine_tag;
+}
+
+}  // namespace
 
 namespace browser_sync {
 
@@ -69,37 +81,47 @@ static const int kMaxSyncNavigationCount = 6;
 // Default number of days without activity after which a session is considered
 // stale and becomes a candidate for garbage collection.
 static const size_t kDefaultStaleSessionThresholdDays = 14;  // 2 weeks.
+
 }  // namespace
 
-SessionModelAssociator::SessionModelAssociator(ProfileSyncService* sync_service)
+SessionModelAssociator::SessionModelAssociator(ProfileSyncService* sync_service,
+    DataTypeErrorHandler* error_handler)
     : tab_pool_(sync_service),
-      local_session_syncid_(sync_api::kInvalidId),
+      local_session_syncid_(syncer::kInvalidId),
       sync_service_(sync_service),
       stale_session_threshold_days_(kDefaultStaleSessionThresholdDays),
       setup_for_test_(false),
       waiting_for_change_(false),
       ALLOW_THIS_IN_INITIALIZER_LIST(test_weak_factory_(this)),
-      profile_(sync_service->profile()) {
+      profile_(sync_service->profile()),
+      pref_service_(profile_->GetPrefs()),
+      error_handler_(error_handler) {
   DCHECK(CalledOnValidThread());
   DCHECK(sync_service_);
   DCHECK(profile_);
-  SetLocalDeviceType();
+  if (pref_service_->FindPreference(kSyncSessionsGUID) == NULL) {
+    pref_service_->RegisterStringPref(kSyncSessionsGUID,
+                                      std::string(),
+                                      PrefService::UNSYNCABLE_PREF);
+  }
 }
 
 SessionModelAssociator::SessionModelAssociator(ProfileSyncService* sync_service,
                                                bool setup_for_test)
     : tab_pool_(sync_service),
-      local_session_syncid_(sync_api::kInvalidId),
+      local_session_syncid_(syncer::kInvalidId),
       sync_service_(sync_service),
       stale_session_threshold_days_(kDefaultStaleSessionThresholdDays),
       setup_for_test_(setup_for_test),
       waiting_for_change_(false),
       ALLOW_THIS_IN_INITIALIZER_LIST(test_weak_factory_(this)),
-      profile_(sync_service->profile()) {
+      profile_(sync_service->profile()),
+      pref_service_(NULL),
+      error_handler_(NULL) {
   DCHECK(CalledOnValidThread());
   DCHECK(sync_service_);
   DCHECK(profile_);
-  SetLocalDeviceType();
+  DCHECK(setup_for_test);
 }
 
 SessionModelAssociator::~SessionModelAssociator() {
@@ -108,7 +130,7 @@ SessionModelAssociator::~SessionModelAssociator() {
 
 bool SessionModelAssociator::InitSyncNodeFromChromeId(
     const std::string& id,
-    sync_api::BaseNode* sync_node) {
+    syncer::BaseNode* sync_node) {
   NOTREACHED();
   return false;
 }
@@ -117,9 +139,9 @@ bool SessionModelAssociator::SyncModelHasUserCreatedNodes(bool* has_nodes) {
   DCHECK(CalledOnValidThread());
   CHECK(has_nodes);
   *has_nodes = false;
-  sync_api::ReadTransaction trans(FROM_HERE, sync_service_->GetUserShare());
-  sync_api::ReadNode root(&trans);
-  if (!root.InitByTagLookup(kSessionsTag)) {
+  syncer::ReadTransaction trans(FROM_HERE, sync_service_->GetUserShare());
+  syncer::ReadNode root(&trans);
+  if (root.InitByTagLookup(kSessionsTag) != syncer::BaseNode::INIT_OK) {
     LOG(ERROR) << kNoSessionsFolderError;
     return false;
   }
@@ -136,10 +158,10 @@ int64 SessionModelAssociator::GetSyncIdFromChromeId(const size_t& id) {
 
 int64 SessionModelAssociator::GetSyncIdFromSessionTag(const std::string& tag) {
   DCHECK(CalledOnValidThread());
-  sync_api::ReadTransaction trans(FROM_HERE, sync_service_->GetUserShare());
-  sync_api::ReadNode node(&trans);
-  if (!node.InitByClientTagLookup(SESSIONS, tag))
-    return sync_api::kInvalidId;
+  syncer::ReadTransaction trans(FROM_HERE, sync_service_->GetUserShare());
+  syncer::ReadNode node(&trans);
+  if (node.InitByClientTagLookup(SESSIONS, tag) != syncer::BaseNode::INIT_OK)
+    return syncer::kInvalidId;
   return node.GetId();
 }
 
@@ -151,33 +173,13 @@ SessionModelAssociator::GetChromeNodeFromSyncId(int64 sync_id) {
 
 bool SessionModelAssociator::InitSyncNodeFromChromeId(
     const size_t& id,
-    sync_api::BaseNode* sync_node) {
+    syncer::BaseNode* sync_node) {
   NOTREACHED();
   return false;
 }
 
-void SessionModelAssociator::SetLocalDeviceType() {
-#if defined(OS_CHROMEOS)
-  local_device_type_ = sync_pb::SessionHeader_DeviceType_TYPE_CROS;
-#elif defined(OS_LINUX)
-  local_device_type_ = sync_pb::SessionHeader_DeviceType_TYPE_LINUX;
-#elif defined(OS_MACOSX)
-  local_device_type_ = sync_pb::SessionHeader_DeviceType_TYPE_MAC;
-#elif defined(OS_WIN)
-  local_device_type_ = sync_pb::SessionHeader_DeviceType_TYPE_WIN;
-#elif defined(OS_ANDROID)
-  if (base::android::IsTabletUi()) {
-    local_device_type_ = sync_pb::SessionHeader_DeviceType_TYPE_TABLET;
-  } else {
-    local_device_type_ = sync_pb::SessionHeader_DeviceType_TYPE_PHONE;
-  }
-#else
-  local_device_type_ = sync_pb::SessionHeader_DeviceType_TYPE_OTHER;
-#endif
-}
-
 bool SessionModelAssociator::AssociateWindows(bool reload_tabs,
-    SyncError* error) {
+                                              syncer::SyncError* error) {
   DCHECK(CalledOnValidThread());
   std::string local_tag = GetCurrentMachineTag();
   sync_pb::SessionSpecifics specifics;
@@ -187,14 +189,13 @@ bool SessionModelAssociator::AssociateWindows(bool reload_tabs,
       synced_session_tracker_.GetSession(local_tag);
   current_session->modified_time = base::Time::Now();
   header_s->set_client_name(current_session_name_);
-  header_s->set_device_type(local_device_type_);
+  header_s->set_device_type(DeviceInfo::GetLocalDeviceType());
 
-  bool failed_association = false;
   synced_session_tracker_.ResetSessionTracking(local_tag);
   std::set<SyncedWindowDelegate*> windows =
       SyncedWindowDelegate::GetSyncedWindowDelegates();
   for (std::set<SyncedWindowDelegate*>::const_iterator i =
-       windows.begin(); i != windows.end(); ++i) {
+           windows.begin(); i != windows.end(); ++i) {
     // Make sure the window has tabs and a viewable window. The viewable window
     // check is necessary because, for example, when a browser is closed the
     // destructor is not necessarily run immediately. This means its possible
@@ -222,31 +223,29 @@ bool SessionModelAssociator::AssociateWindows(bool reload_tabs,
       // Store the order of tabs.
       bool found_tabs = false;
       for (int j = 0; j < (*i)->GetTabCount(); ++j) {
-        const SessionTab* tab;
         SessionID::id_type tab_id = (*i)->GetTabIdAt(j);
 
-        // Any modified tab will have been associated before this was called,
-        // and if necessary added to the synced_session_tracker_. Therefore,
-        // we know that anything not already in the synced_session_tracker_ was
-        // for an invalid tab and can ensure it won't affect the window.
+        if (reload_tabs) {
+          SyncedTabDelegate* tab = (*i)->GetTabAt(j);
+          // It's possible for GetTabAt to return a null tab if it's not in
+          // memory. We can assume this means the tab already existed but hasn't
+          // changed, so no need to reassociate.
+          if (tab && !AssociateTab(*tab, error)) {
+            // Association failed. Either we need to re-associate, or this is an
+            // unrecoverable error.
+            return false;
+          }
+        }
+
+        // If the tab is valid, it would have been added to the tracker either
+        // by the above AssociateTab call (at association time), or by the
+        // change processor calling AssociateTab for all modified tabs.
+        // Therefore, we can key whether this window has valid tabs based on
+        // the tab's presence in the tracker.
+        const SessionTab* tab = NULL;
         if (synced_session_tracker_.LookupSessionTab(local_tag, tab_id, &tab)) {
-          VLOG(1) << "Found " << tab_id << " in local session while reassociating.";
           found_tabs = true;
           window_s.add_tab(tab_id);
-          if (reload_tabs) {
-            SyncedTabDelegate* tab = (*i)->GetTabAt(j);
-            // It's possible for GetTabAt to return a null tab. We can assume
-            // this means the tab already existed but hasn't changed, so no
-            // need to associate.
-            if (tab) {
-              if (!AssociateTab(*tab, error)) {
-                failed_association = true;
-                break;
-              }
-            }
-          }
-        } else {
-          VLOG(1) << "Unknown" << tab_id << " will not be synced.";
         }
       }
       // Only add a window if it contains valid tabs.
@@ -268,15 +267,16 @@ bool SessionModelAssociator::AssociateWindows(bool reload_tabs,
   // Free memory for closed windows and tabs.
   synced_session_tracker_.CleanupSession(local_tag);
 
-  if (failed_association)
-    return false;
-
-  sync_api::WriteTransaction trans(FROM_HERE, sync_service_->GetUserShare());
-  sync_api::WriteNode header_node(&trans);
-  if (!header_node.InitByIdLookup(local_session_syncid_)) {
-    LOG(ERROR) << "Failed to load local session header node. This is likely "
-               << "due to a remote session deleting the local one. "
-               << "Reassociation needed.";
+  syncer::WriteTransaction trans(FROM_HERE, sync_service_->GetUserShare());
+  syncer::WriteNode header_node(&trans);
+  if (header_node.InitByIdLookup(local_session_syncid_) !=
+          syncer::BaseNode::INIT_OK) {
+    if (error) {
+      *error = error_handler_->CreateAndUploadError(
+           FROM_HERE,
+           "Failed to load local session header node.",
+           model_type());
+    }
     return false;
   }
   header_node.SetSessionSpecifics(specifics);
@@ -293,7 +293,8 @@ bool SessionModelAssociator::ShouldSyncWindow(
 }
 
 bool SessionModelAssociator::AssociateTabs(
-    const std::vector<SyncedTabDelegate*>& tabs, SyncError* error) {
+    const std::vector<SyncedTabDelegate*>& tabs,
+    syncer::SyncError* error) {
   DCHECK(CalledOnValidThread());
   for (std::vector<SyncedTabDelegate*>::const_iterator i = tabs.begin();
        i != tabs.end();
@@ -306,40 +307,46 @@ bool SessionModelAssociator::AssociateTabs(
 }
 
 bool SessionModelAssociator::AssociateTab(const SyncedTabDelegate& tab,
-    SyncError* error) {
+                                          syncer::SyncError* error) {
   DCHECK(CalledOnValidThread());
   int64 sync_id;
-  SessionID::id_type id = tab.GetSessionId();
+  SessionID::id_type tab_id = tab.GetSessionId();
   if (tab.IsBeingDestroyed()) {
     // This tab is closing.
-    TabLinksMap::iterator tab_iter = tab_map_.find(id);
+    TabLinksMap::iterator tab_iter = tab_map_.find(tab_id);
     if (tab_iter == tab_map_.end()) {
       // We aren't tracking this tab (for example, sync setting page).
       return true;
     }
     tab_pool_.FreeTabNode(tab_iter->second->sync_id());
-    load_consumer_.CancelAllRequestsForClientData(id);
+
+    // Cancelling kBadTaskId or a finished task ID is a noop.
+    cancelable_task_tracker_.TryCancel(
+        tab_iter->second->favicon_load_task_id());
+
     tab_map_.erase(tab_iter);
     return true;
   }
 
-  if (!ShouldSyncTab(tab)) {
-    VLOG(1) << "Tab " << id << " is not valid";
+  if (!ShouldSyncTab(tab))
     return true;
-  }
 
-  TabLinksMap::iterator tab_map_iter = tab_map_.find(id);
+  TabLinksMap::iterator tab_map_iter = tab_map_.find(tab_id);
   TabLink* tab_link = NULL;
   if (tab_map_iter == tab_map_.end()) {
     // This is a new tab, get a sync node for it.
     sync_id = tab_pool_.GetFreeTabNode();
-    if (sync_id == sync_api::kInvalidId) {
-      LOG(ERROR) << "Received invalid tab node from tab pool. Reassociation "
-                 << "needed.";
+    if (sync_id == syncer::kInvalidId) {
+      if (error) {
+        *error = error_handler_->CreateAndUploadError(
+            FROM_HERE,
+            "Received invalid tab node from tab pool.",
+            model_type());
+      }
       return false;
     }
     tab_link = new TabLink(sync_id, &tab);
-    tab_map_[id] = make_linked_ptr<TabLink>(tab_link);
+    tab_map_[tab_id] = make_linked_ptr<TabLink>(tab_link);
   } else {
     // This tab is already associated with a sync node, reuse it.
     // Note: on some platforms the tab object may have changed, so we ensure
@@ -348,104 +355,121 @@ bool SessionModelAssociator::AssociateTab(const SyncedTabDelegate& tab,
     tab_map_iter->second->set_tab(&tab);
   }
   DCHECK(tab_link);
-  DCHECK_NE(tab_link->sync_id(), sync_api::kInvalidId);
+  DCHECK_NE(tab_link->sync_id(), syncer::kInvalidId);
 
-  DVLOG(1) << "Reloading tab " << id << " from window "
+  DVLOG(1) << "Reloading tab " << tab_id << " from window "
            << tab.GetWindowId();
   return WriteTabContentsToSyncModel(tab_link, error);
 }
 
-bool SessionModelAssociator::WriteTabContentsToSyncModel(TabLink* tab_link,
-                                                         SyncError* error) {
-   DCHECK(CalledOnValidThread());
-  const SyncedTabDelegate& tab = *(tab_link->tab());
-  const SyncedWindowDelegate& window =
-      *SyncedWindowDelegate::FindSyncedWindowDelegateWithId(
-          tab.GetWindowId());
+// static
+GURL SessionModelAssociator::GetCurrentVirtualURL(
+    const SyncedTabDelegate& tab_delegate) {
+  GURL new_url;
+  const int current_index = tab_delegate.GetCurrentEntryIndex();
+  const int pending_index = tab_delegate.GetPendingEntryIndex();
+  const NavigationEntry* current_entry =
+      (current_index == pending_index) ?
+      tab_delegate.GetPendingEntry() :
+      tab_delegate.GetEntryAtIndex(current_index);
+  return current_entry->GetVirtualURL();
+}
+
+bool SessionModelAssociator::WriteTabContentsToSyncModel(
+    TabLink* tab_link,
+    syncer::SyncError* error) {
+  DCHECK(CalledOnValidThread());
+  const SyncedTabDelegate& tab_delegate = *(tab_link->tab());
   int64 sync_id = tab_link->sync_id();
   GURL old_tab_url = tab_link->url();
 
-  // We build a clean session specifics directly from the tab data.
-  sync_pb::SessionSpecifics session_s;
-  session_s.set_session_tag(GetCurrentMachineTag());
-  sync_pb::SessionTab* tab_s = session_s.mutable_tab();
-
-  SessionID::id_type tab_id = tab.GetSessionId();
-  tab_s->set_tab_id(tab_id);
-  tab_s->set_window_id(tab.GetWindowId());
-  const int current_index = tab.GetCurrentEntryIndex();
-  const int min_index = std::max(0,
-                                 current_index - kMaxSyncNavigationCount);
-  const int max_index = std::min(current_index + kMaxSyncNavigationCount,
-                                 tab.GetEntryCount());
-  const int pending_index = tab.GetPendingEntryIndex();
-  tab_s->set_pinned(window.IsTabPinned(&tab));
-  if (tab.HasExtensionAppId()) {
-    tab_s->set_extension_app_id(tab.GetExtensionAppId());
-  }
-  tab_s->mutable_navigation()->Clear();
-  for (int i = min_index; i < max_index; ++i) {
-    const NavigationEntry* entry = (i == pending_index) ?
-       tab.GetPendingEntry() : tab.GetEntryAtIndex(i);
-    DCHECK(entry);
-    if (entry->GetVirtualURL().is_valid()) {
-      if (i == current_index && entry->GetVirtualURL().is_valid()) {
-        tab_link->set_url(entry->GetVirtualURL());
-        DVLOG(1) << "Associating tab " << tab_id << " with sync id " << sync_id
-                 << ", url " << entry->GetVirtualURL().spec()
-                 << " and title " << entry->GetTitle();
-      }
-      TabNavigation tab_nav;
-      tab_nav.SetFromNavigationEntry(*entry);
-      sync_pb::TabNavigation* nav_s = tab_s->add_navigation();
-      PopulateSessionSpecificsNavigation(&tab_nav, nav_s);
-    }
-  }
-  tab_s->set_current_navigation_index(current_index);
-
-  // Convert to a local representation and store in synced session tracker for
-  // bookkeeping purposes.
+  // Load the last stored version of this tab so we can compare changes. If this
+  // is a new tab, session_tab will be a blank/newly created SessionTab object.
   SessionTab* session_tab =
       synced_session_tracker_.GetTab(GetCurrentMachineTag(),
-                                     tab_s->tab_id());
-  synced_session_tracker_.GetSession(GetCurrentMachineTag())->modified_time =
-      base::Time::Now();
-  PopulateSessionTabFromSpecifics(*tab_s,
-                                  base::Time::Now(),
-                                  session_tab);
+                                     tab_delegate.GetSessionId());
 
-  // If the url changed, kick off the favicon load for the new url.
-  bool url_changed = false;
-  if (tab_link->url().is_valid() && tab_link->url() != old_tab_url) {
-    url_changed = true;
+  SetSessionTabFromDelegate(tab_delegate, base::Time::Now(), session_tab);
+
+  const GURL new_url = GetCurrentVirtualURL(tab_delegate);
+  DVLOG(1) << "Local tab " << tab_delegate.GetSessionId()
+           << " now has URL " << new_url.spec();
+
+  // Trigger the favicon load if needed. We do this before opening the write
+  // transaction to avoid jank.
+  tab_link->set_url(new_url);
+  if (new_url != old_tab_url) {
     LoadFaviconForTab(tab_link);
   }
 
-  sync_api::WriteTransaction trans(FROM_HERE, sync_service_->GetUserShare());
-  sync_api::WriteNode tab_node(&trans);
-  if (!tab_node.InitByIdLookup(sync_id)) {
-    LOG(ERROR) << "Failed to look up local tab node " << sync_id << ". "
-               << "This is likely because the local session was deleted by a "
-               << "remote session. Reassociation needed.";
+  // Update our last modified time.
+  synced_session_tracker_.GetSession(GetCurrentMachineTag())->modified_time =
+      base::Time::Now();
+
+  syncer::WriteTransaction trans(FROM_HERE, sync_service_->GetUserShare());
+  syncer::WriteNode tab_node(&trans);
+  if (tab_node.InitByIdLookup(sync_id) != syncer::BaseNode::INIT_OK) {
+    if (error) {
+      *error = error_handler_->CreateAndUploadError(
+          FROM_HERE,
+          "Failed to look up local tab node",
+          model_type());
+    }
     return false;
   }
 
-  // Preserve the existing favicon only if the url didn't change.
-  if (!url_changed) {
-    tab_s->set_favicon(tab_node.GetSessionSpecifics().tab().favicon());
-    tab_s->set_favicon_source(
-        tab_node.GetSessionSpecifics().tab().favicon_source());
-    tab_s->set_favicon_type(
-        tab_node.GetSessionSpecifics().tab().favicon_type());
-  } // else store the empty favicon data back in.
-
-  // Note: we don't need to preserve unknown fields since we're the only ones
-  // who can write to this node (other clients can only delete).
+  sync_pb::SessionTab tab_s = session_tab->ToSyncData();
+  sync_pb::SessionSpecifics specifics = tab_node.GetSessionSpecifics();
+  if (new_url == old_tab_url) {
+    // Load the old specifics and copy over the favicon data if needed.
+    // TODO(zea): store local favicons in the |synced_favicons_| map and use
+    // that instead of reading from sync. This will be necessary to switch to
+    // the new api.
+    tab_s.set_favicon(specifics.tab().favicon());
+    tab_s.set_favicon_source(specifics.tab().favicon_source());
+    tab_s.set_favicon_type(specifics.tab().favicon_type());
+  }
+  // Retain the base SessionSpecifics data (tag, tab_node_id, etc.), and just
+  // write the new SessionTabSpecifics.
+  specifics.mutable_tab()->CopyFrom(tab_s);
 
   // Write into the actual sync model.
-  tab_node.SetSessionSpecifics(session_s);
+  tab_node.SetSessionSpecifics(specifics);
 
   return true;
+}
+
+// static
+void SessionModelAssociator::SetSessionTabFromDelegate(
+    const SyncedTabDelegate& tab_delegate,
+    base::Time mtime,
+    SessionTab* session_tab) {
+  DCHECK(session_tab);
+  session_tab->window_id.set_id(tab_delegate.GetWindowId());
+  session_tab->tab_id.set_id(tab_delegate.GetSessionId());
+  session_tab->tab_visual_index = 0;
+  session_tab->current_navigation_index = tab_delegate.GetCurrentEntryIndex();
+  session_tab->pinned = tab_delegate.IsPinned();
+  session_tab->extension_app_id = tab_delegate.GetExtensionAppId();
+  session_tab->user_agent_override.clear();
+  session_tab->timestamp = mtime;
+  const int current_index = tab_delegate.GetCurrentEntryIndex();
+  const int pending_index = tab_delegate.GetPendingEntryIndex();
+  const int min_index = std::max(0,
+                                 current_index - kMaxSyncNavigationCount);
+  const int max_index = std::min(current_index + kMaxSyncNavigationCount,
+                                 tab_delegate.GetEntryCount());
+  session_tab->navigations.clear();
+  for (int i = min_index; i < max_index; ++i) {
+    const NavigationEntry* entry = (i == pending_index) ?
+       tab_delegate.GetPendingEntry() : tab_delegate.GetEntryAtIndex(i);
+    DCHECK(entry);
+    if (entry->GetVirtualURL().is_valid()) {
+      session_tab->navigations.push_back(
+          TabNavigation::FromNavigationEntry(i, *entry));
+    }
+  }
+  session_tab->session_storage_persistent_id.clear();
 }
 
 void SessionModelAssociator::LoadFaviconForTab(TabLink* tab_link) {
@@ -453,32 +477,36 @@ void SessionModelAssociator::LoadFaviconForTab(TabLink* tab_link) {
   if (!command_line.HasSwitch(switches::kSyncTabFavicons))
     return;
   FaviconService* favicon_service =
-      profile_->GetFaviconService(Profile::EXPLICIT_ACCESS);
+      FaviconServiceFactory::GetForProfile(profile_, Profile::EXPLICIT_ACCESS);
   if (!favicon_service)
     return;
   SessionID::id_type tab_id = tab_link->tab()->GetSessionId();
-  if (tab_link->favicon_load_handle()) {
+  if (tab_link->favicon_load_task_id() != CancelableTaskTracker::kBadTaskId) {
     // We have an outstanding favicon load for this tab. Cancel it.
-    load_consumer_.CancelAllRequestsForClientData(tab_id);
+    // Note. It's also possible we had a failed favicon load so the task ID is
+    // not tracked anymore, then TryCancel is a noop.
+    cancelable_task_tracker_.TryCancel(tab_link->favicon_load_task_id());
   }
   DVLOG(1) << "Triggering favicon load for url " << tab_link->url().spec();
-  FaviconService::Handle handle = favicon_service->GetFaviconForURL(
-      tab_link->url(), history::FAVICON, &load_consumer_,
+
+  CancelableTaskTracker::TaskId id = favicon_service->GetRawFaviconForURL(
+      FaviconService::FaviconForURLParams(
+          profile_, tab_link->url(), history::FAVICON, gfx::kFaviconSize),
+      ui::SCALE_FACTOR_100P,
       base::Bind(&SessionModelAssociator::OnFaviconDataAvailable,
-                 AsWeakPtr()));
-  load_consumer_.SetClientData(favicon_service, handle, tab_id);
-  tab_link->set_favicon_load_handle(handle);
+                 AsWeakPtr(), tab_id),
+      &cancelable_task_tracker_);
+
+  tab_link->set_favicon_load_task_id(id);
 }
 
 void SessionModelAssociator::OnFaviconDataAvailable(
-    FaviconService::Handle handle,
-    history::FaviconData favicon) {
+    SessionID::id_type tab_id,
+    const history::FaviconBitmapResult& bitmap_result) {
   const CommandLine& command_line = *CommandLine::ForCurrentProcess();
   if (!command_line.HasSwitch(switches::kSyncTabFavicons))
     return;
-  SessionID::id_type tab_id =
-      load_consumer_.GetClientData(
-          profile_->GetFaviconService(Profile::EXPLICIT_ACCESS), handle);
+
   TabLinksMap::iterator iter = tab_map_.find(tab_id);
   if (iter == tab_map_.end()) {
     DVLOG(1) << "Ignoring favicon for closed tab " << tab_id;
@@ -491,15 +519,15 @@ void SessionModelAssociator::OnFaviconDataAvailable(
   // been canceled if the url had changed, we know the url must still be
   // up to date.
 
-  if (favicon.is_valid()) {
-    DCHECK_EQ(handle, tab_link->favicon_load_handle());
-    tab_link->set_favicon_load_handle(0);
-    DCHECK_EQ(favicon.icon_type, history::FAVICON);
-    DCHECK_NE(tab_link->sync_id(), sync_api::kInvalidId);
+  if (bitmap_result.is_valid()) {
+    tab_link->set_favicon_load_task_id(CancelableTaskTracker::kBadTaskId);
+    DCHECK_EQ(bitmap_result.icon_type, history::FAVICON);
+    DCHECK_NE(tab_link->sync_id(), syncer::kInvalidId);
     // Load the sync tab node and update the favicon data.
-    sync_api::WriteTransaction trans(FROM_HERE, sync_service_->GetUserShare());
-    sync_api::WriteNode tab_node(&trans);
-    if (!tab_node.InitByIdLookup(tab_link->sync_id())) {
+    syncer::WriteTransaction trans(FROM_HERE, sync_service_->GetUserShare());
+    syncer::WriteNode tab_node(&trans);
+    if (tab_node.InitByIdLookup(tab_link->sync_id()) !=
+            syncer::BaseNode::INIT_OK) {
       LOG(WARNING) << "Failed to load sync tab node for tab id " << tab_id
                    << " and url " << tab_link->url().spec();
       return;
@@ -508,21 +536,21 @@ void SessionModelAssociator::OnFaviconDataAvailable(
         tab_node.GetSessionSpecifics();
     DCHECK(session_specifics.has_tab());
     sync_pb::SessionTab* tab = session_specifics.mutable_tab();
-    if (favicon.image_data->size() > 0) {
+    if (bitmap_result.bitmap_data->size() > 0) {
       DVLOG(1) << "Storing session favicon for "
                << tab_link->url() << " with size "
-               << favicon.image_data->size() << " bytes.";
-      tab->set_favicon(favicon.image_data->front(),
-                       favicon.image_data->size());
+               << bitmap_result.bitmap_data->size() << " bytes.";
+      tab->set_favicon(bitmap_result.bitmap_data->front(),
+                       bitmap_result.bitmap_data->size());
       tab->set_favicon_type(sync_pb::SessionTab::TYPE_WEB_FAVICON);
-      tab->set_favicon_source(favicon.icon_url.spec());
+      tab->set_favicon_source(bitmap_result.icon_url.spec());
     } else {
       LOG(WARNING) << "Null favicon stored for url " << tab_link->url().spec();
     }
     tab_node.SetSessionSpecifics(session_specifics);
   } else {
     // Else the favicon either isn't loaded yet or there is no favicon. We
-    // deliberately don't clear the tab_link's favicon_load_handle so we know
+    // deliberately don't clear the tab_link's favicon_load_task_id so we know
     // that we're still waiting for a favicon. ReceivedFavicons(..) below will
     // trigger another favicon load once/if the favicon for the current url
     // becomes available.
@@ -540,94 +568,18 @@ void SessionModelAssociator::FaviconsUpdated(
   // loads so we don't have to iterate through all tabs comparing urls.
   for (std::set<GURL>::const_iterator i = urls.begin(); i != urls.end(); ++i) {
     for (TabLinksMap::iterator tab_iter = tab_map_.begin();
-         tab_iter != tab_map_.end(); ++tab_iter) {
+         tab_iter != tab_map_.end();
+         ++tab_iter) {
       // Only update the tab's favicon if it doesn't already have one (i.e.
-      // favicon_load_handle is not 0). Otherwise we can get into a situation
-      // where we rewrite tab specifics every time a favicon changes, since some
-      // favicons can in fact be web-controlled/animated.
+      // favicon_load_task_id is not kBadTaskId). Otherwise we can get into a
+      // situation where we rewrite tab specifics every time a favicon changes,
+      // since some favicons can in fact be web-controlled/animated.
       if (tab_iter->second->url() == *i &&
-          tab_iter->second->favicon_load_handle() != 0) {
+          tab_iter->second->favicon_load_task_id() !=
+              CancelableTaskTracker::kBadTaskId) {
         LoadFaviconForTab(tab_iter->second.get());
       }
     }
-  }
-}
-
-// Static
-// TODO(zea): perhaps sync state (scroll position, form entries, etc.) as well?
-// See http://crbug.com/67068.
-void SessionModelAssociator::PopulateSessionSpecificsNavigation(
-    const TabNavigation* navigation,
-    sync_pb::TabNavigation* tab_navigation) {
-  tab_navigation->set_index(navigation->index());
-  tab_navigation->set_virtual_url(navigation->virtual_url().spec());
-  // FIXME(zea): Support referrer policy?
-  tab_navigation->set_referrer(navigation->referrer().url.spec());
-  tab_navigation->set_title(UTF16ToUTF8(navigation->title()));
-  switch (navigation->transition()) {
-    case content::PAGE_TRANSITION_LINK:
-      tab_navigation->set_page_transition(
-        sync_pb::TabNavigation_PageTransition_LINK);
-      break;
-    case content::PAGE_TRANSITION_TYPED:
-      tab_navigation->set_page_transition(
-        sync_pb::TabNavigation_PageTransition_TYPED);
-      break;
-    case content::PAGE_TRANSITION_AUTO_BOOKMARK:
-      tab_navigation->set_page_transition(
-        sync_pb::TabNavigation_PageTransition_AUTO_BOOKMARK);
-      break;
-    case content::PAGE_TRANSITION_AUTO_SUBFRAME:
-      tab_navigation->set_page_transition(
-        sync_pb::TabNavigation_PageTransition_AUTO_SUBFRAME);
-      break;
-    case content::PAGE_TRANSITION_MANUAL_SUBFRAME:
-      tab_navigation->set_page_transition(
-        sync_pb::TabNavigation_PageTransition_MANUAL_SUBFRAME);
-      break;
-    case content::PAGE_TRANSITION_GENERATED:
-      tab_navigation->set_page_transition(
-        sync_pb::TabNavigation_PageTransition_GENERATED);
-      break;
-    case content::PAGE_TRANSITION_START_PAGE:
-      tab_navigation->set_page_transition(
-        sync_pb::TabNavigation_PageTransition_START_PAGE);
-      break;
-    case content::PAGE_TRANSITION_FORM_SUBMIT:
-      tab_navigation->set_page_transition(
-        sync_pb::TabNavigation_PageTransition_FORM_SUBMIT);
-      break;
-    case content::PAGE_TRANSITION_RELOAD:
-      tab_navigation->set_page_transition(
-        sync_pb::TabNavigation_PageTransition_RELOAD);
-      break;
-    case content::PAGE_TRANSITION_KEYWORD:
-      tab_navigation->set_page_transition(
-        sync_pb::TabNavigation_PageTransition_KEYWORD);
-      break;
-    case content::PAGE_TRANSITION_KEYWORD_GENERATED:
-      tab_navigation->set_page_transition(
-        sync_pb::TabNavigation_PageTransition_KEYWORD_GENERATED);
-      break;
-    case content::PAGE_TRANSITION_CHAIN_START:
-      tab_navigation->set_page_transition(
-        sync_pb::TabNavigation_PageTransition_CHAIN_START);
-      break;
-    case content::PAGE_TRANSITION_CHAIN_END:
-      tab_navigation->set_page_transition(
-        sync_pb::TabNavigation_PageTransition_CHAIN_END);
-      break;
-    case content::PAGE_TRANSITION_CLIENT_REDIRECT:
-      tab_navigation->set_navigation_qualifier(
-        sync_pb::TabNavigation_PageTransitionQualifier_CLIENT_REDIRECT);
-      break;
-    case content::PAGE_TRANSITION_SERVER_REDIRECT:
-      tab_navigation->set_navigation_qualifier(
-        sync_pb::TabNavigation_PageTransitionQualifier_SERVER_REDIRECT);
-      break;
-    default:
-      tab_navigation->set_page_transition(
-        sync_pb::TabNavigation_PageTransition_TYPED);
   }
 }
 
@@ -641,90 +593,114 @@ void SessionModelAssociator::Disassociate(int64 sync_id) {
   NOTIMPLEMENTED();
 }
 
-bool SessionModelAssociator::AssociateModels(SyncError* error) {
+syncer::SyncError SessionModelAssociator::AssociateModels(
+    syncer::SyncMergeResult* local_merge_result,
+    syncer::SyncMergeResult* syncer_merge_result) {
   DCHECK(CalledOnValidThread());
+  syncer::SyncError error;
 
   // Ensure that we disassociated properly, otherwise memory might leak.
   DCHECK(synced_session_tracker_.Empty());
   DCHECK_EQ(0U, tab_pool_.capacity());
 
-  local_session_syncid_ = sync_api::kInvalidId;
+  local_session_syncid_ = syncer::kInvalidId;
 
+  scoped_ptr<DeviceInfo> local_device_info(sync_service_->GetLocalDeviceInfo());
+
+#if defined(OS_ANDROID)
+  std::string transaction_tag;
+#endif
   // Read any available foreign sessions and load any session data we may have.
   // If we don't have any local session data in the db, create a header node.
   {
-    sync_api::WriteTransaction trans(FROM_HERE, sync_service_->GetUserShare());
+    syncer::WriteTransaction trans(FROM_HERE, sync_service_->GetUserShare());
 
-    sync_api::ReadNode root(&trans);
-    if (!root.InitByTagLookup(kSessionsTag)) {
-      error->Reset(FROM_HERE, kNoSessionsFolderError, model_type());
-      return false;
+    syncer::ReadNode root(&trans);
+    if (root.InitByTagLookup(syncer::ModelTypeToRootTag(model_type())) !=
+            syncer::BaseNode::INIT_OK) {
+      return error_handler_->CreateAndUploadError(
+          FROM_HERE,
+          kNoSessionsFolderError,
+          model_type());
     }
 
     // Make sure we have a machine tag.
-    if (current_machine_tag_.empty()) {
+    if (current_machine_tag_.empty())
       InitializeCurrentMachineTag(&trans);
-      // The session name is retrieved asynchronously so it might not come back
-      // for the writing of the session. However, we write to the session often
-      // enough (on every navigation) that we'll pick it up quickly.
-      InitializeCurrentSessionName();
+    if (local_device_info.get()) {
+      current_session_name_ = local_device_info->client_name();
+    } else {
+      return error_handler_->CreateAndUploadError(
+          FROM_HERE,
+          "Failed to get device info.",
+          model_type());
     }
     synced_session_tracker_.SetLocalSessionTag(current_machine_tag_);
-    if (!UpdateAssociationsFromSyncModel(root, &trans, error)) {
-      error->Reset(FROM_HERE,
-                   "Failed to update associations from sync",
-                   model_type());
-      return false;
+    if (!UpdateAssociationsFromSyncModel(root, &trans, &error)) {
+      DCHECK(error.IsSet());
+      return error;
     }
 
-    if (local_session_syncid_ == sync_api::kInvalidId) {
+    if (local_session_syncid_ == syncer::kInvalidId) {
       // The sync db didn't have a header node for us, we need to create one.
-      sync_api::WriteNode write_node(&trans);
-      if (!write_node.InitUniqueByCreation(SESSIONS, root,
-                                           current_machine_tag_)) {
-        error->Reset(FROM_HERE,
-                     "Failed to create sessions header sync node.",
-                     model_type());
-        return false;
+      syncer::WriteNode write_node(&trans);
+      syncer::WriteNode::InitUniqueByCreationResult result =
+          write_node.InitUniqueByCreation(SESSIONS, root, current_machine_tag_);
+      if (result != syncer::WriteNode::INIT_SUCCESS) {
+        // If we can't look it up, and we can't create it, chances are there's
+        // a pre-existing node that has encryption issues. But, since we can't
+        // load the item, we can't remove it, and error out at this point.
+        return error_handler_->CreateAndUploadError(
+            FROM_HERE,
+            "Failed to create sessions header sync node.",
+            model_type());
       }
+
+      // Write the initial values to the specifics so that in case of a crash or
+      // error we don't persist a half-written node.
       write_node.SetTitle(UTF8ToWide(current_machine_tag_));
+      sync_pb::SessionSpecifics base_specifics;
+      base_specifics.set_session_tag(current_machine_tag_);
+      sync_pb::SessionHeader* header_s = base_specifics.mutable_header();
+      header_s->set_client_name(current_session_name_);
+      header_s->set_device_type(DeviceInfo::GetLocalDeviceType());
+      write_node.SetSessionSpecifics(base_specifics);
+
       local_session_syncid_ = write_node.GetId();
     }
+#if defined(OS_ANDROID)
+    transaction_tag = GetMachineTagFromTransaction(&trans);
+#endif
   }
+#if defined(OS_ANDROID)
+  // We need to delete foreign sessions after giving up our
+  // syncer::WriteTransaction, since DeleteForeignSession(std::string&) uses
+  // its own syncer::WriteTransaction.
+  if (current_machine_tag_.compare(transaction_tag) != 0)
+    DeleteForeignSession(transaction_tag);
+#endif
 
   // Check if anything has changed on the client side.
-  if (!UpdateSyncModelDataFromClient(error)) {
-    error->Reset(FROM_HERE,
-                 "Failed to update sync model from client.",
-                 model_type());
-    return false;
+  if (!UpdateSyncModelDataFromClient(&error)) {
+    DCHECK(error.IsSet());
+    return error;
   }
 
   DVLOG(1) << "Session models associated.";
-  MessageLoop::current()->PostTask(FROM_HERE,
-      base::Bind(&SessionModelAssociator::NotifySessionAssociationCycleComplete,
-                 base::Unretained(this)));
-
-  return true;
+  DCHECK(!error.IsSet());
+  return error;
 }
 
-void SessionModelAssociator::NotifySessionAssociationCycleComplete() {
-  content::NotificationService::current()->Notify(
-      chrome::NOTIFICATION_SESSION_ASSOCIATION_CYCLE_COMPLETE,
-      content::Source<Profile>(sync_service_->profile()),
-      content::NotificationService::NoDetails());
-}
-
-bool SessionModelAssociator::DisassociateModels(SyncError* error) {
+syncer::SyncError SessionModelAssociator::DisassociateModels() {
   DCHECK(CalledOnValidThread());
   DVLOG(1) << "Disassociating local session " << GetCurrentMachineTag();
   synced_session_tracker_.Clear();
   tab_map_.clear();
   tab_pool_.clear();
-  local_session_syncid_ = sync_api::kInvalidId;
+  local_session_syncid_ = syncer::kInvalidId;
   current_machine_tag_ = "";
   current_session_name_ = "";
-  load_consumer_.CancelAllRequests();
+  cancelable_task_tracker_.TryCancelAll();
   synced_favicons_.clear();
   synced_favicon_pages_.clear();
 
@@ -734,58 +710,29 @@ bool SessionModelAssociator::DisassociateModels(SyncError* error) {
       chrome::NOTIFICATION_FOREIGN_SESSION_DISABLED,
       content::Source<Profile>(sync_service_->profile()),
       content::NotificationService::NoDetails());
-  return true;
+  return syncer::SyncError();
 }
 
 void SessionModelAssociator::InitializeCurrentMachineTag(
-    sync_api::WriteTransaction* trans) {
+    syncer::WriteTransaction* trans) {
   DCHECK(CalledOnValidThread());
-  current_machine_tag_ = "session_sync";
-#if defined(OS_ANDROID)
-  // The clank sync tests simulate multiple clients by running clean instances
-  // of clank on a single device. By using a unique machine tag when sync is
-  // set up for the first time on a device, we ensure that sessions from one
-  // instance of clank are treated as foreign sessions by other instances
-  // If machine_tag_for_test_ is 0, we use the system default. Otherwise,
-  // we use it to initialize the machine tag used by sync.
-  if (machine_tag_for_test_ != 0) {
-    std::stringstream machine_tag_for_test;
-    machine_tag_for_test << machine_tag_for_test_;
-    current_machine_tag_.append(machine_tag_for_test.str());
+  DCHECK(current_machine_tag_.empty());
+  std::string persisted_guid;
+  if (pref_service_)
+    persisted_guid = pref_service_->GetString(kSyncSessionsGUID);
+  if (!persisted_guid.empty()) {
+    current_machine_tag_ = persisted_guid;
+    DVLOG(1) << "Restoring persisted session sync guid: "
+             << persisted_guid;
   } else {
-    const std::string android_id = base::android::GetAndroidId();
-    if (android_id.empty()) {
-      // There are reports that sometimes the android_id can't be read. Those
-      // are supposed to be fixed as of Gingerbread but we use this extra guard
-      // as a fallback.
-      syncable::Directory* dir = trans->GetWrappedWriteTrans()->directory();
-      current_machine_tag_.append(dir->cache_guid());
-    } else {
-      current_machine_tag_.append(android_id);
-    }
+    current_machine_tag_ = GetMachineTagFromTransaction(trans);
+    DVLOG(1) << "Creating session sync guid: " << current_machine_tag_;
+    if (pref_service_)
+      pref_service_->SetString(kSyncSessionsGUID, current_machine_tag_);
   }
-#else
-  syncable::Directory* dir = trans->GetWrappedWriteTrans()->directory();
-  current_machine_tag_.append(dir->cache_guid());
-#endif
-  DVLOG(1) << "Creating machine tag: " << current_machine_tag_;
 
   tab_pool_.set_machine_tag(current_machine_tag_);
 }
-
-void SessionModelAssociator::OnSessionNameInitialized(
-    const std::string& name) {
-  DCHECK(CalledOnValidThread());
-  // Only use the default machine name if it hasn't already been set.
-  if (current_session_name_.empty())
-    current_session_name_ = name;
-}
-
-#if defined(OS_ANDROID)
-void SessionModelAssociator::SetMachineTagForTest(const long tag) {
-  machine_tag_for_test_ = tag;
-}
-#endif
 
 bool SessionModelAssociator::GetSyncedFaviconForPageURL(
     const std::string& url,
@@ -802,89 +749,76 @@ bool SessionModelAssociator::GetSyncedFaviconForPageURL(
   return true;
 }
 
-void SessionModelAssociator::InitializeCurrentSessionName() {
-  DCHECK(CalledOnValidThread());
-  if (setup_for_test_) {
-    OnSessionNameInitialized("TestSessionName");
-  } else {
-    scoped_refptr<GetSessionNameTask> task = new GetSessionNameTask(
-        base::Bind(&SessionModelAssociator::OnSessionNameInitialized,
-                   AsWeakPtr()));
-    BrowserThread::PostTask(
-        BrowserThread::FILE,
-        FROM_HERE,
-        base::Bind(&GetSessionNameTask::GetSessionNameAsync, task.get()));
-  }
-}
-
 bool SessionModelAssociator::UpdateAssociationsFromSyncModel(
-    const sync_api::ReadNode& root,
-    const sync_api::BaseTransaction* trans,
-    SyncError* error) {
+    const syncer::ReadNode& root,
+    syncer::WriteTransaction* trans,
+    syncer::SyncError* error) {
   DCHECK(CalledOnValidThread());
   DCHECK(tab_pool_.empty());
+  DCHECK_EQ(local_session_syncid_, syncer::kInvalidId);
 
   // Iterate through the nodes and associate any foreign sessions.
   int64 id = root.GetFirstChildId();
-  while (id != sync_api::kInvalidId) {
-    sync_api::ReadNode sync_node(trans);
-    if (!sync_node.InitByIdLookup(id)) {
-      LOG(ERROR) << "Failed to fetch sync node for id " << id;
+  while (id != syncer::kInvalidId) {
+    syncer::WriteNode sync_node(trans);
+    if (sync_node.InitByIdLookup(id) != syncer::BaseNode::INIT_OK) {
+      if (error) {
+        *error = error_handler_->CreateAndUploadError(
+            FROM_HERE,
+            "Failed to load sync node",
+            model_type());
+      }
       return false;
     }
+    int64 next_id = sync_node.GetSuccessorId();
 
     const sync_pb::SessionSpecifics& specifics =
         sync_node.GetSessionSpecifics();
     const base::Time& modification_time = sync_node.GetModificationTime();
-    if (specifics.session_tag() != GetCurrentMachineTag()) {
-      if (!AssociateForeignSpecifics(specifics, modification_time)) {
-        return false;
-      }
-    } else if (id != local_session_syncid_) {
+    if (specifics.session_tag().empty()) {
+      // This is a corrupted node. Just delete it.
+      LOG(WARNING) << "Found node with no session tag, deleting.";
+      sync_node.Remove();
+    } else if (specifics.session_tag() != GetCurrentMachineTag()) {
+      AssociateForeignSpecifics(specifics, modification_time);
+    } else {
       // This is previously stored local session information.
-      if (specifics.has_header()) {
-        if (sync_api::kInvalidId != local_session_syncid_) {
-          NOTREACHED();
-          return false;
-        }
-
+      if (specifics.has_header() &&
+          local_session_syncid_ == syncer::kInvalidId) {
         // This is our previous header node, reuse it.
         local_session_syncid_ = id;
         if (specifics.header().has_client_name()) {
           current_session_name_ = specifics.header().client_name();
         }
       } else {
-        if (!specifics.has_tab()) {
-          NOTREACHED();
-          return false;
+        if (specifics.has_header()) {
+          LOG(WARNING) << "Found more than one session header node with local "
+                       << " tag.";
+        } else if (!specifics.has_tab()) {
+          LOG(WARNING) << "Found local node with no header or tag field.";
         }
 
-        // This is a tab node. We want to track these to reuse them in our free
-        // tab node pool. They will be overwritten eventually, so need to do
-        // anything else.
-        tab_pool_.AddTabNode(id);
+        // TODO(zea): fix this once we add support for reassociating
+        // pre-existing tabs with pre-existing tab nodes. We'll need to load
+        // the tab_node_id and ensure the tab_pool_ keeps track of them.
+        sync_node.Remove();
       }
     }
-
-    id = sync_node.GetSuccessorId();
+    id = next_id;
   }
 
   // After updating from sync model all tabid's should be free.
-  if (!tab_pool_.full()) {
-    NOTREACHED();
-    return false;
-  }
-
+  DCHECK(tab_pool_.full());
   return true;
 }
 
-bool SessionModelAssociator::AssociateForeignSpecifics(
+void SessionModelAssociator::AssociateForeignSpecifics(
     const sync_pb::SessionSpecifics& specifics,
     const base::Time& modification_time) {
   DCHECK(CalledOnValidThread());
   std::string foreign_session_tag = specifics.session_tag();
   if (foreign_session_tag == GetCurrentMachineTag() && !setup_for_test_)
-    return false;
+    return;
 
   SyncedSession* foreign_session =
       synced_session_tracker_.GetSession(foreign_session_tag);
@@ -947,7 +881,7 @@ bool SessionModelAssociator::AssociateForeignSpecifics(
     }
 
     // Update SessionTab based on protobuf.
-    PopulateSessionTabFromSpecifics(tab_s, modification_time, tab);
+    tab->SetFromSyncData(tab_s, modification_time);
 
     // Loads the tab favicon, increments the usage counter, and updates
     // synced_favicon_pages_.
@@ -963,11 +897,9 @@ bool SessionModelAssociator::AssociateForeignSpecifics(
     if (foreign_session->modified_time < modification_time)
       foreign_session->modified_time = modification_time;
   } else {
-    NOTREACHED();
-    return false;
+    LOG(WARNING) << "Ignoring foreign session node with missing header/tab "
+                 << "fields and tag " << foreign_session_tag << ".";
   }
-
-  return true;
 }
 
 void SessionModelAssociator::DecrementAndCleanFaviconForURL(
@@ -1017,32 +949,32 @@ bool SessionModelAssociator::DisassociateForeignSession(
 // Static
 void SessionModelAssociator::PopulateSessionHeaderFromSpecifics(
     const sync_pb::SessionHeader& header_specifics,
-    const base::Time& mtime,
+    base::Time mtime,
     SyncedSession* session_header) {
   if (header_specifics.has_client_name()) {
     session_header->session_name = header_specifics.client_name();
   }
   if (header_specifics.has_device_type()) {
     switch (header_specifics.device_type()) {
-      case sync_pb::SessionHeader_DeviceType_TYPE_WIN:
+      case sync_pb::SyncEnums_DeviceType_TYPE_WIN:
         session_header->device_type = SyncedSession::TYPE_WIN;
         break;
-      case sync_pb::SessionHeader_DeviceType_TYPE_MAC:
+      case sync_pb::SyncEnums_DeviceType_TYPE_MAC:
         session_header->device_type = SyncedSession::TYPE_MACOSX;
         break;
-      case sync_pb::SessionHeader_DeviceType_TYPE_LINUX:
+      case sync_pb::SyncEnums_DeviceType_TYPE_LINUX:
         session_header->device_type = SyncedSession::TYPE_LINUX;
         break;
-      case sync_pb::SessionHeader_DeviceType_TYPE_CROS:
+      case sync_pb::SyncEnums_DeviceType_TYPE_CROS:
         session_header->device_type = SyncedSession::TYPE_CHROMEOS;
         break;
-      case sync_pb::SessionHeader_DeviceType_TYPE_PHONE:
+      case sync_pb::SyncEnums_DeviceType_TYPE_PHONE:
         session_header->device_type = SyncedSession::TYPE_PHONE;
         break;
-      case sync_pb::SessionHeader_DeviceType_TYPE_TABLET:
+      case sync_pb::SyncEnums_DeviceType_TYPE_TABLET:
         session_header->device_type = SyncedSession::TYPE_TABLET;
         break;
-      case sync_pb::SessionHeader_DeviceType_TYPE_OTHER:
+      case sync_pb::SyncEnums_DeviceType_TYPE_OTHER:
         // Intentionally fall-through
       default:
         session_header->device_type = SyncedSession::TYPE_OTHER;
@@ -1056,7 +988,7 @@ void SessionModelAssociator::PopulateSessionHeaderFromSpecifics(
 void SessionModelAssociator::PopulateSessionWindowFromSpecifics(
     const std::string& session_tag,
     const sync_pb::SessionWindow& specifics,
-    const base::Time& mtime,
+    base::Time mtime,
     SessionWindow* session_window,
     SyncedSessionTracker* tracker) {
   if (specifics.has_window_id())
@@ -1080,119 +1012,6 @@ void SessionModelAssociator::PopulateSessionWindowFromSpecifics(
                             tab_id,
                             i);
   }
-}
-
-// Static
-void SessionModelAssociator::PopulateSessionTabFromSpecifics(
-    const sync_pb::SessionTab& specifics,
-    const base::Time& mtime,
-    SessionTab* tab) {
-  DCHECK_EQ(tab->tab_id.id(), specifics.tab_id());
-  if (specifics.has_tab_id())
-    tab->tab_id.set_id(specifics.tab_id());
-  if (specifics.has_window_id())
-    tab->window_id.set_id(specifics.window_id());
-  if (specifics.has_tab_visual_index())
-    tab->tab_visual_index = specifics.tab_visual_index();
-  if (specifics.has_current_navigation_index())
-    tab->current_navigation_index = specifics.current_navigation_index();
-  if (specifics.has_pinned())
-    tab->pinned = specifics.pinned();
-  if (specifics.has_extension_app_id())
-    tab->extension_app_id = specifics.extension_app_id();
-  tab->timestamp = mtime;
-  tab->navigations.clear();  // In case we are reusing a previous SessionTab.
-  for (int i = 0; i < specifics.navigation_size(); i++) {
-    AppendSessionTabNavigation(specifics.navigation(i), &tab->navigations);
-  }
-}
-
-// Static
-void SessionModelAssociator::AppendSessionTabNavigation(
-    const sync_pb::TabNavigation& specifics,
-    std::vector<TabNavigation>* navigations) {
-  int index = 0;
-  GURL virtual_url;
-  GURL referrer;
-  string16 title;
-  std::string state;
-  content::PageTransition transition(content::PAGE_TRANSITION_LINK);
-  if (specifics.has_index())
-    index = specifics.index();
-  if (specifics.has_virtual_url()) {
-    GURL gurl(specifics.virtual_url());
-    virtual_url = gurl;
-  }
-  if (specifics.has_referrer()) {
-    GURL gurl(specifics.referrer());
-    referrer = gurl;
-  }
-  if (specifics.has_title())
-    title = UTF8ToUTF16(specifics.title());
-  if (specifics.has_state())
-    state = specifics.state();
-  if (specifics.has_page_transition() ||
-      specifics.has_navigation_qualifier()) {
-    switch (specifics.page_transition()) {
-      case sync_pb::TabNavigation_PageTransition_LINK:
-        transition = content::PAGE_TRANSITION_LINK;
-        break;
-      case sync_pb::TabNavigation_PageTransition_TYPED:
-        transition = content::PAGE_TRANSITION_TYPED;
-        break;
-      case sync_pb::TabNavigation_PageTransition_AUTO_BOOKMARK:
-        transition = content::PAGE_TRANSITION_AUTO_BOOKMARK;
-        break;
-      case sync_pb::TabNavigation_PageTransition_AUTO_SUBFRAME:
-        transition = content::PAGE_TRANSITION_AUTO_SUBFRAME;
-        break;
-      case sync_pb::TabNavigation_PageTransition_MANUAL_SUBFRAME:
-        transition = content::PAGE_TRANSITION_MANUAL_SUBFRAME;
-        break;
-      case sync_pb::TabNavigation_PageTransition_GENERATED:
-        transition = content::PAGE_TRANSITION_GENERATED;
-        break;
-      case sync_pb::TabNavigation_PageTransition_START_PAGE:
-        transition = content::PAGE_TRANSITION_START_PAGE;
-        break;
-      case sync_pb::TabNavigation_PageTransition_FORM_SUBMIT:
-        transition = content::PAGE_TRANSITION_FORM_SUBMIT;
-        break;
-      case sync_pb::TabNavigation_PageTransition_RELOAD:
-        transition = content::PAGE_TRANSITION_RELOAD;
-        break;
-      case sync_pb::TabNavigation_PageTransition_KEYWORD:
-        transition = content::PAGE_TRANSITION_KEYWORD;
-        break;
-      case sync_pb::TabNavigation_PageTransition_KEYWORD_GENERATED:
-        transition = content::PAGE_TRANSITION_KEYWORD_GENERATED;
-        break;
-      case sync_pb::TabNavigation_PageTransition_CHAIN_START:
-        transition = content::PAGE_TRANSITION_CHAIN_START;
-        break;
-      case sync_pb::TabNavigation_PageTransition_CHAIN_END:
-        transition = content::PAGE_TRANSITION_CHAIN_END;
-        break;
-      default:
-        switch (specifics.navigation_qualifier()) {
-          case sync_pb::
-              TabNavigation_PageTransitionQualifier_CLIENT_REDIRECT:
-            transition = content::PAGE_TRANSITION_CLIENT_REDIRECT;
-            break;
-            case sync_pb::
-                TabNavigation_PageTransitionQualifier_SERVER_REDIRECT:
-            transition = content::PAGE_TRANSITION_SERVER_REDIRECT;
-              break;
-            default:
-            transition = content::PAGE_TRANSITION_TYPED;
-        }
-    }
-  }
-  TabNavigation tab_navigation(
-      index, virtual_url,
-      content::Referrer(referrer, WebKit::WebReferrerPolicyDefault), title,
-      state, transition);
-  navigations->insert(navigations->end(), tab_navigation);
 }
 
 void SessionModelAssociator::LoadForeignTabFavicon(
@@ -1233,14 +1052,9 @@ void SessionModelAssociator::LoadForeignTabFavicon(
   synced_favicon_pages_[navigation_url.spec()] = favicon_source.spec();
 }
 
-bool SessionModelAssociator::UpdateSyncModelDataFromClient(SyncError* error) {
+bool SessionModelAssociator::UpdateSyncModelDataFromClient(
+    syncer::SyncError* error) {
   DCHECK(CalledOnValidThread());
-  // TODO(zea): the logic for determining if we want to sync and the loading of
-  // the previous session should go here. We can probably reuse the code for
-  // loading the current session from the old session implementation.
-  // SessionService::SessionCallback callback =
-  //     base::Bind(&SessionModelAssociator::OnGotSession, this);
-  // GetSessionService()->GetCurrentSession(&consumer_, callback);
 
   // Associate all open windows and their tabs.
   return AssociateWindows(true, error);
@@ -1263,21 +1077,29 @@ int64 SessionModelAssociator::TabNodePool::GetFreeTabNode() {
   DCHECK_GT(machine_tag_.length(), 0U);
   if (tab_pool_fp_ == -1) {
     // Tab pool has no free nodes, allocate new one.
-    sync_api::WriteTransaction trans(FROM_HERE, sync_service_->GetUserShare());
-    sync_api::ReadNode root(&trans);
-    if (!root.InitByTagLookup(kSessionsTag)) {
+    syncer::WriteTransaction trans(FROM_HERE, sync_service_->GetUserShare());
+    syncer::ReadNode root(&trans);
+    if (root.InitByTagLookup(kSessionsTag) != syncer::BaseNode::INIT_OK) {
       LOG(ERROR) << kNoSessionsFolderError;
-      return sync_api::kInvalidId;
+      return syncer::kInvalidId;
     }
     size_t tab_node_id = tab_syncid_pool_.size();
     std::string tab_node_tag = TabIdToTag(machine_tag_, tab_node_id);
-    sync_api::WriteNode tab_node(&trans);
-    if (!tab_node.InitUniqueByCreation(SESSIONS, root, tab_node_tag)) {
+    syncer::WriteNode tab_node(&trans);
+    syncer::WriteNode::InitUniqueByCreationResult result =
+        tab_node.InitUniqueByCreation(SESSIONS, root, tab_node_tag);
+    if (result != syncer::WriteNode::INIT_SUCCESS) {
       LOG(ERROR) << "Could not create new node with tag "
                  << tab_node_tag << "!";
-      return sync_api::kInvalidId;
+      return syncer::kInvalidId;
     }
+    // We fill the new node with just enough data so that in case of a crash/bug
+    // we can identify the node as our own on re-association and reuse it.
     tab_node.SetTitle(UTF8ToWide(tab_node_tag));
+    sync_pb::SessionSpecifics specifics;
+    specifics.set_session_tag(machine_tag_);
+    specifics.set_tab_node_id(tab_node_id);
+    tab_node.SetSessionSpecifics(specifics);
 
     // Grow the pool by 1 since we created a new node. We don't actually need
     // to put the node's id in the pool now, since the pool is still empty.
@@ -1300,11 +1122,14 @@ void SessionModelAssociator::TabNodePool::FreeTabNode(int64 sync_id) {
 
 void SessionModelAssociator::AttemptSessionsDataRefresh() const {
   DVLOG(1) << "Triggering sync refresh for sessions datatype.";
-  const syncable::ModelType type = syncable::SESSIONS;
+  const syncer::ModelTypeSet types(syncer::SESSIONS);
+  const syncer::ModelTypeInvalidationMap& invalidation_map =
+      ModelTypeSetToInvalidationMap(types, std::string());
   content::NotificationService::current()->Notify(
-      chrome::NOTIFICATION_SYNC_REFRESH,
+      chrome::NOTIFICATION_SYNC_REFRESH_LOCAL,
       content::Source<Profile>(profile_),
-      content::Details<const syncable::ModelType>(&type));
+      content::Details<const syncer::ModelTypeInvalidationMap>(
+          &invalidation_map));
 }
 
 bool SessionModelAssociator::GetLocalSession(
@@ -1334,7 +1159,13 @@ bool SessionModelAssociator::GetForeignTab(
     const SessionID::id_type tab_id,
     const SessionTab** tab) {
   DCHECK(CalledOnValidThread());
-  return synced_session_tracker_.LookupSessionTab(tag, tab_id, tab);
+  const SessionTab* synced_tab = NULL;
+  bool success = synced_session_tracker_.LookupSessionTab(tag,
+                                                          tab_id,
+                                                          &synced_tab);
+  if (success)
+    *tab = synced_tab;
+  return success;
 }
 
 void SessionModelAssociator::DeleteStaleSessions() {
@@ -1388,16 +1219,16 @@ void SessionModelAssociator::DeleteForeignSession(const std::string& tag) {
     return;
   }
 
-  sync_api::WriteTransaction trans(FROM_HERE, sync_service_->GetUserShare());
-  sync_api::ReadNode root(&trans);
-  if (!root.InitByTagLookup(kSessionsTag)) {
+  syncer::WriteTransaction trans(FROM_HERE, sync_service_->GetUserShare());
+  syncer::ReadNode root(&trans);
+  if (root.InitByTagLookup(kSessionsTag) != syncer::BaseNode::INIT_OK) {
     LOG(ERROR) << kNoSessionsFolderError;
     return;
   }
   int64 id = root.GetFirstChildId();
-  while (id != sync_api::kInvalidId) {
-    sync_api::WriteNode sync_node(&trans);
-    if (!sync_node.InitByIdLookup(id)) {
+  while (id != syncer::kInvalidId) {
+    syncer::WriteNode sync_node(&trans);
+    if (sync_node.InitByIdLookup(id) != syncer::BaseNode::INIT_OK) {
       LOG(ERROR) << "Failed to fetch sync node for id " << id;
       continue;
     }
@@ -1462,7 +1293,7 @@ void SessionModelAssociator::QuitLoopForSubtleTesting() {
 }
 
 void SessionModelAssociator::BlockUntilLocalChangeForTest(
-    int64 timeout_milliseconds) {
+    base::TimeDelta timeout) {
   if (test_weak_factory_.HasWeakPtrs())
     return;
   waiting_for_change_ = true;
@@ -1470,20 +1301,15 @@ void SessionModelAssociator::BlockUntilLocalChangeForTest(
       FROM_HERE,
       base::Bind(&SessionModelAssociator::QuitLoopForSubtleTesting,
                  test_weak_factory_.GetWeakPtr()),
-      base::TimeDelta::FromMilliseconds(timeout_milliseconds));
+      timeout);
 }
 
 bool SessionModelAssociator::CryptoReadyIfNecessary() {
   // We only access the cryptographer while holding a transaction.
-  sync_api::ReadTransaction trans(FROM_HERE, sync_service_->GetUserShare());
-  const syncable::ModelTypeSet encrypted_types =
-      sync_api::GetEncryptedTypes(&trans);
+  syncer::ReadTransaction trans(FROM_HERE, sync_service_->GetUserShare());
+  const syncer::ModelTypeSet encrypted_types = trans.GetEncryptedTypes();
   return !encrypted_types.Has(SESSIONS) ||
          sync_service_->IsCryptographerReady(&trans);
 }
-
-#if defined(OS_ANDROID)
-long SessionModelAssociator::machine_tag_for_test_ = 0;
-#endif
 
 }  // namespace browser_sync

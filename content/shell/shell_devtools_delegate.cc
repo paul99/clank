@@ -4,24 +4,37 @@
 
 #include "content/shell/shell_devtools_delegate.h"
 
-#include <algorithm>
-
+#include "base/bind.h"
 #include "content/public/browser/devtools_http_handler.h"
 #include "content/public/browser/web_contents.h"
+#include "content/public/common/url_constants.h"
+#include "content/shell/shell.h"
 #include "grit/shell_resources.h"
-#include "net/url_request/url_request_context_getter.h"
+#include "net/base/tcp_listen_socket.h"
 #include "ui/base/resource/resource_bundle.h"
+
+#if defined(OS_ANDROID)
+#include "content/public/browser/android/devtools_auth.h"
+#include "net/base/unix_domain_socket_posix.h"
+
+namespace {
+const char kSocketName[] = "content_shell_devtools_remote";
+}
+#endif
 
 namespace content {
 
-ShellDevToolsDelegate::ShellDevToolsDelegate(
-    int port,
-    net::URLRequestContextGetter* context_getter)
-    : content::WebContentsObserver(),
-      context_getter_(context_getter) {
+ShellDevToolsDelegate::ShellDevToolsDelegate(BrowserContext* browser_context,
+                                             int port)
+    : browser_context_(browser_context) {
   devtools_http_handler_ = DevToolsHttpHandler::Start(
-      "127.0.0.1",
-      port,
+#if defined(OS_ANDROID)
+      new net::UnixDomainSocketWithAbstractNamespaceFactory(
+          kSocketName,
+          base::Bind(&CanUserConnectToDevTools)),
+#else
+      new net::TCPListenSocketFactory("127.0.0.1", port),
+#endif
       "",
       this);
 }
@@ -34,41 +47,30 @@ void ShellDevToolsDelegate::Stop() {
   devtools_http_handler_->Stop();
 }
 
-void ShellDevToolsDelegate::WebContentsDestroyed(WebContents* contents) {
-  std::remove(web_contents_list_.begin(), web_contents_list_.end(), contents);
-}
-
-DevToolsHttpHandlerDelegate::InspectableTabs
-ShellDevToolsDelegate::GetInspectableTabs() {
-  DevToolsHttpHandlerDelegate::InspectableTabs tabs;
-  for (std::vector<WebContents*>::iterator it = web_contents_list_.begin();
-       it != web_contents_list_.end(); ++it) {
-    tabs.push_back(*it);
-  }
-  return tabs;
-}
-
 std::string ShellDevToolsDelegate::GetDiscoveryPageHTML() {
   return ResourceBundle::GetSharedInstance().GetRawDataResource(
       IDR_CONTENT_SHELL_DEVTOOLS_DISCOVERY_PAGE).as_string();
-}
-
-net::URLRequestContext*
-ShellDevToolsDelegate::GetURLRequestContext() {
-  return context_getter_->GetURLRequestContext();
 }
 
 bool ShellDevToolsDelegate::BundlesFrontendResources() {
   return true;
 }
 
-std::string ShellDevToolsDelegate::GetFrontendResourcesBaseURL() {
+FilePath ShellDevToolsDelegate::GetDebugFrontendDir() {
+  return FilePath();
+}
+
+std::string ShellDevToolsDelegate::GetPageThumbnailData(const GURL& url) {
   return "";
 }
 
-void ShellDevToolsDelegate::AddWebContents(WebContents* web_contents) {
-  web_contents_list_.push_back(web_contents);
-  Observe(web_contents);
+RenderViewHost* ShellDevToolsDelegate::CreateNewTarget() {
+  Shell* shell = Shell::CreateNewWindow(browser_context_,
+                                        GURL(chrome::kAboutBlankURL),
+                                        NULL,
+                                        MSG_ROUTING_NONE,
+                                        NULL);
+  return shell->web_contents()->GetRenderViewHost();
 }
 
 }  // namespace content

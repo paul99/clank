@@ -4,22 +4,19 @@
 
 #ifndef CONTENT_PUBLIC_BROWSER_BROWSER_CHILD_PROCESS_HOST_ITERATOR_H_
 #define CONTENT_PUBLIC_BROWSER_BROWSER_CHILD_PROCESS_HOST_ITERATOR_H_
-#pragma once
 
 #include <list>
 
 #include "content/common/content_export.h"
 #include "content/public/common/process_type.h"
 
-class BrowserChildProcessHostImpl;
-
 namespace IPC {
 class Message;
 }
 
 namespace content {
-
 class BrowserChildProcessHostDelegate;
+class BrowserChildProcessHostImpl;
 struct ChildProcessData;
 
 // This class allows iteration through either all child processes, or ones of a

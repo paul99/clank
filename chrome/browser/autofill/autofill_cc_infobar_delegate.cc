@@ -1,25 +1,28 @@
-// Copyright (c) 2011 The Chromium Authors. All rights reserved.
+// Copyright (c) 2012 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
 #include "chrome/browser/autofill/autofill_cc_infobar_delegate.h"
 
 #include "base/logging.h"
+#include "chrome/browser/api/infobars/infobar_service.h"
 #include "chrome/browser/autofill/credit_card.h"
 #include "chrome/browser/autofill/personal_data_manager.h"
-#include "chrome/browser/ui/browser.h"
-#include "chrome/browser/ui/browser_list.h"
+#include "chrome/common/url_constants.h"
+#include "content/public/browser/page_navigator.h"
+#include "content/public/browser/web_contents.h"
+#include "content/public/browser/web_contents_delegate.h"
 #include "grit/generated_resources.h"
-#include "grit/theme_resources_standard.h"
+#include "grit/theme_resources.h"
 #include "ui/base/l10n/l10n_util.h"
 #include "ui/base/resource/resource_bundle.h"
 
 AutofillCCInfoBarDelegate::AutofillCCInfoBarDelegate(
-    InfoBarTabHelper* infobar_helper,
+    InfoBarService* infobar_service,
     const CreditCard* credit_card,
     PersonalDataManager* personal_data,
     const AutofillMetrics* metric_logger)
-    : ConfirmInfoBarDelegate(infobar_helper),
+    : ConfirmInfoBarDelegate(infobar_service),
       credit_card_(credit_card),
       personal_data_(personal_data),
       metric_logger_(metric_logger),
@@ -86,13 +89,12 @@ string16 AutofillCCInfoBarDelegate::GetLinkText() const {
 }
 
 bool AutofillCCInfoBarDelegate::LinkClicked(WindowOpenDisposition disposition) {
-#if defined(OS_ANDROID)
-  NOTIMPLEMENTED();
+  owner()->GetWebContents()->GetDelegate()->OpenURLFromTab(
+      owner()->GetWebContents(),
+      content::OpenURLParams(GURL(chrome::kAutofillHelpURL),
+                             content::Referrer(),
+                             NEW_FOREGROUND_TAB,
+                             content::PAGE_TRANSITION_LINK,
+                             false));
   return false;
-#else
-  Browser* browser = BrowserList::GetLastActive();
-  DCHECK(browser);
-  browser->OpenAutofillHelpTabAndActivate();
-  return false;
-#endif
 }

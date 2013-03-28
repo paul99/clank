@@ -1,4 +1,4 @@
-// Copyright (c) 2011 The Chromium Authors. All rights reserved.
+// Copyright (c) 2012 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -10,34 +10,39 @@
 #include "base/utf_string_conversions.h"
 #include "base/values.h"
 #include "content/browser/renderer_host/render_process_host_impl.h"
-#include "content/browser/renderer_host/render_view_host.h"
+#include "content/browser/renderer_host/render_view_host_impl.h"
 #include "content/common/view_messages.h"
 #include "content/public/browser/browser_context.h"
 #include "content/public/browser/browser_thread.h"
 #include "content/public/browser/notification_service.h"
 #include "content/public/browser/notification_types.h"
+#include "content/public/browser/resource_context.h"
 #include "content/public/common/page_zoom.h"
 #include "googleurl/src/gurl.h"
 #include "net/base/net_util.h"
 #include "third_party/WebKit/Source/WebKit/chromium/public/WebView.h"
 
 using WebKit::WebView;
-using content::BrowserThread;
-using content::RenderProcessHost;
+
+static const char* kHostZoomMapKeyName = "content_host_zoom_map";
 
 namespace content {
 
-HostZoomMap* HostZoomMap::Create() {
-  return new HostZoomMapImpl();
+HostZoomMap* HostZoomMap::GetForBrowserContext(BrowserContext* context) {
+  HostZoomMapImpl* rv = static_cast<HostZoomMapImpl*>(
+      context->GetUserData(kHostZoomMapKeyName));
+  if (!rv) {
+    rv = new HostZoomMapImpl();
+    context->SetUserData(kHostZoomMapKeyName, rv);
+  }
+  return rv;
 }
-
-}  // namespace content
 
 HostZoomMapImpl::HostZoomMapImpl()
     : default_zoom_level_(0.0) {
   registrar_.Add(
-      this, content::NOTIFICATION_RENDER_VIEW_HOST_WILL_CLOSE_RENDER_VIEW,
-      content::NotificationService::AllSources());
+      this, NOTIFICATION_RENDER_VIEW_HOST_WILL_CLOSE_RENDER_VIEW,
+      NotificationService::AllSources());
 }
 
 void HostZoomMapImpl::CopyFrom(HostZoomMap* copy_interface) {
@@ -61,13 +66,13 @@ double HostZoomMapImpl::GetZoomLevel(const std::string& host) const {
   return (i == host_zoom_levels_.end()) ? default_zoom_level_ : i->second;
 }
 
-void HostZoomMapImpl::SetZoomLevel(std::string host, double level) {
+void HostZoomMapImpl::SetZoomLevel(const std::string& host, double level) {
   DCHECK(BrowserThread::CurrentlyOn(BrowserThread::UI));
 
   {
     base::AutoLock auto_lock(lock_);
 
-    if (content::ZoomValuesEqual(level, default_zoom_level_))
+    if (ZoomValuesEqual(level, default_zoom_level_))
       host_zoom_levels_.erase(host);
     else
       host_zoom_levels_[host] = level;
@@ -77,16 +82,17 @@ void HostZoomMapImpl::SetZoomLevel(std::string host, double level) {
   for (RenderProcessHost::iterator i(RenderProcessHost::AllHostsIterator());
        !i.IsAtEnd(); i.Advance()) {
     RenderProcessHost* render_process_host = i.GetCurrentValue();
-    if (render_process_host->GetBrowserContext()->GetHostZoomMap() == this) {
+    if (HostZoomMap::GetForBrowserContext(
+            render_process_host->GetBrowserContext()) == this) {
       render_process_host->Send(
           new ViewMsg_SetZoomLevelForCurrentURL(host, level));
     }
   }
 
-  content::NotificationService::current()->Notify(
-      content::NOTIFICATION_ZOOM_LEVEL_CHANGED,
-      content::Source<HostZoomMap>(this),
-      content::Details<const std::string>(&host));
+  NotificationService::current()->Notify(
+      NOTIFICATION_ZOOM_LEVEL_CHANGED,
+      Source<HostZoomMap>(this),
+      Details<const std::string>(&host));
 }
 
 double HostZoomMapImpl::GetDefaultZoomLevel() const {
@@ -139,25 +145,21 @@ void HostZoomMapImpl::SetTemporaryZoomLevel(int render_process_id,
   }
 
   std::string host;
-  content::NotificationService::current()->Notify(
-      content::NOTIFICATION_ZOOM_LEVEL_CHANGED,
-      content::Source<HostZoomMap>(this),
-      content::Details<const std::string>(&host));
+  NotificationService::current()->Notify(
+      NOTIFICATION_ZOOM_LEVEL_CHANGED,
+      Source<HostZoomMap>(this),
+      Details<const std::string>(&host));
 }
 
-void HostZoomMapImpl::Observe(
-    int type,
-    const content::NotificationSource& source,
-    const content::NotificationDetails& details) {
-  DCHECK(BrowserThread::CurrentlyOn(BrowserThread::UI));
-
+void HostZoomMapImpl::Observe(int type,
+                              const NotificationSource& source,
+                              const NotificationDetails& details) {
   switch (type) {
-    case content::NOTIFICATION_RENDER_VIEW_HOST_WILL_CLOSE_RENDER_VIEW: {
+    case NOTIFICATION_RENDER_VIEW_HOST_WILL_CLOSE_RENDER_VIEW: {
       base::AutoLock auto_lock(lock_);
-      int render_view_id =
-          content::Source<RenderViewHost>(source)->routing_id();
+      int render_view_id = Source<RenderViewHost>(source)->GetRoutingID();
       int render_process_id =
-          content::Source<RenderViewHost>(source)->process()->GetID();
+          Source<RenderViewHost>(source)->GetProcess()->GetID();
 
       for (size_t i = 0; i < temporary_zoom_levels_.size(); ++i) {
         if (temporary_zoom_levels_[i].render_process_id == render_process_id &&
@@ -175,3 +177,5 @@ void HostZoomMapImpl::Observe(
 
 HostZoomMapImpl::~HostZoomMapImpl() {
 }
+
+}  // namespace content

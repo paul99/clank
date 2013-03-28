@@ -1,4 +1,4 @@
-// Copyright (c) 2011 The Chromium Authors. All rights reserved.
+// Copyright (c) 2012 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -16,28 +16,31 @@ namespace views {
 ImageView::ImageView()
     : image_size_set_(false),
       horiz_alignment_(CENTER),
-      vert_alignment_(CENTER) {
+      vert_alignment_(CENTER),
+      interactive_(true) {
 }
 
 ImageView::~ImageView() {
 }
 
-void ImageView::SetImage(const SkBitmap& bm) {
-  image_ = bm;
-  PreferredSizeChanged();
+void ImageView::SetImage(const gfx::ImageSkia& img) {
+  gfx::Size pref_size(GetPreferredSize());
+  image_ = img;
+  if (pref_size != GetPreferredSize())
+    PreferredSizeChanged();
   SchedulePaint();
 }
 
-void ImageView::SetImage(const SkBitmap* bm) {
-  if (bm) {
-    SetImage(*bm);
+void ImageView::SetImage(const gfx::ImageSkia* image_skia) {
+  if (image_skia) {
+    SetImage(*image_skia);
   } else {
-    SkBitmap t;
+    gfx::ImageSkia t;
     SetImage(t);
   }
 }
 
-const SkBitmap& ImageView::GetImage() {
+const gfx::ImageSkia& ImageView::GetImage() {
   return image_;
 }
 
@@ -108,7 +111,7 @@ gfx::Point ImageView::ComputeImageOrigin(const gfx::Size& image_size) const {
 void ImageView::OnPaint(gfx::Canvas* canvas) {
   View::OnPaint(canvas);
 
-  if (image_.empty())
+  if (image_.isNull())
     return;
 
   gfx::Rect image_bounds(GetImageBounds());
@@ -117,14 +120,13 @@ void ImageView::OnPaint(gfx::Canvas* canvas) {
 
   if (image_bounds.size() != gfx::Size(image_.width(), image_.height())) {
     // Resize case
-    image_.buildMipMap(false);
     SkPaint paint;
     paint.setFilterBitmap(true);
-    canvas->DrawBitmapInt(image_, 0, 0, image_.width(), image_.height(),
+    canvas->DrawImageInt(image_, 0, 0, image_.width(), image_.height(),
         image_bounds.x(), image_bounds.y(), image_bounds.width(),
         image_bounds.height(), true, paint);
   } else {
-    canvas->DrawBitmapInt(image_, image_bounds.x(), image_bounds.y());
+    canvas->DrawImageInt(image_, image_bounds.x(), image_bounds.y());
   }
 }
 
@@ -169,6 +171,10 @@ bool ImageView::GetTooltipText(const gfx::Point& p, string16* tooltip) const {
 
   *tooltip = GetTooltipText();
   return true;
+}
+
+bool ImageView::HitTestRect(const gfx::Rect& rect) const {
+  return interactive_ ? View::HitTestRect(rect) : false;
 }
 
 }  // namespace views

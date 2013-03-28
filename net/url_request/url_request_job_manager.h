@@ -1,10 +1,9 @@
-// Copyright (c) 2011 The Chromium Authors. All rights reserved.
+// Copyright (c) 2012 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
 #ifndef NET_URL_REQUEST_URL_REQUEST_JOB_MANAGER_H_
 #define NET_URL_REQUEST_URL_REQUEST_JOB_MANAGER_H_
-#pragma once
 
 #include <map>
 #include <string>
@@ -37,18 +36,21 @@ class URLRequestJobManager {
   // Instantiate an URLRequestJob implementation based on the registered
   // interceptors and protocol factories.  This will always succeed in
   // returning a job unless we are--in the extreme case--out of memory.
-  URLRequestJob* CreateJob(URLRequest* request) const;
+  URLRequestJob* CreateJob(URLRequest* request,
+                           NetworkDelegate* network_delegate) const;
 
   // Allows interceptors to hijack the request after examining the new location
   // of a redirect. Returns NULL if no interceptor intervenes.
   URLRequestJob* MaybeInterceptRedirect(URLRequest* request,
-                                             const GURL& location) const;
+                                        NetworkDelegate* network_delegate,
+                                        const GURL& location) const;
 
   // Allows interceptors to hijack the request after examining the response
   // status and headers. This is also called when there is no server response
   // at all to allow interception of failed requests due to network errors.
   // Returns NULL if no interceptor intervenes.
-  URLRequestJob* MaybeInterceptResponse(URLRequest* request) const;
+  URLRequestJob* MaybeInterceptResponse(
+      URLRequest* request, NetworkDelegate* network_delegate) const;
 
   // Returns true if there is a protocol factory registered for the given
   // scheme.  Note: also returns true if there is a built-in handler for the
@@ -64,9 +66,6 @@ class URLRequestJobManager {
   // Register/unregister a request interceptor.
   void RegisterRequestInterceptor(URLRequest::Interceptor* interceptor);
   void UnregisterRequestInterceptor(URLRequest::Interceptor* interceptor);
-
-  void set_enable_file_access(bool enable) { enable_file_access_ = enable; }
-  bool enable_file_access() const { return enable_file_access_; }
 
  private:
   typedef std::map<std::string, URLRequest::ProtocolFactory*> FactoryMap;
@@ -90,7 +89,7 @@ class URLRequestJobManager {
 #else
     // The previous version of this check used GetCurrentThread on Windows to
     // get thread handles to compare. Unfortunately, GetCurrentThread returns
-    // a constant psuedo-handle (0xFFFFFFFE), and therefore IsAllowedThread
+    // a constant pseudo-handle (0xFFFFFFFE), and therefore IsAllowedThread
     // always returned true. The above code that's turned off is the correct
     // code, but causes the tree to turn red because some caller isn't
     // respecting our thread requirements. We're turning off the check for now;
@@ -108,7 +107,6 @@ class URLRequestJobManager {
   mutable base::Lock lock_;
   FactoryMap factories_;
   InterceptorList interceptors_;
-  bool enable_file_access_;
 
   DISALLOW_COPY_AND_ASSIGN(URLRequestJobManager);
 };

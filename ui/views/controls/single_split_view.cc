@@ -1,12 +1,8 @@
-// Copyright (c) 2011 The Chromium Authors. All rights reserved.
+// Copyright (c) 2012 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
 #include "ui/views/controls/single_split_view.h"
-
-#if defined(TOOLKIT_USES_GTK)
-#include <gdk/gdk.h>
-#endif
 
 #include "skia/ext/skia_utils_win.h"
 #include "ui/base/accessibility/accessible_view_state.h"
@@ -14,12 +10,8 @@
 #include "ui/views/background.h"
 #include "ui/views/controls/single_split_view_listener.h"
 
-#if defined(TOOLKIT_USES_GTK)
-#include "ui/gfx/gtk_util.h"
-#endif
-
 #if defined(USE_AURA)
-#include "ui/aura/cursor.h"
+#include "ui/base/cursor/cursor.h"
 #endif
 
 namespace views {
@@ -38,7 +30,8 @@ SingleSplitView::SingleSplitView(View* leading,
     : is_horizontal_(orientation == HORIZONTAL_SPLIT),
       divider_offset_(-1),
       resize_leading_on_bounds_change_(true),
-      listener_(listener) {
+      listener_(listener),
+      leading_bottom_offset_(0) {
   AddChildView(leading);
   AddChildView(trailing);
 #if defined(OS_WIN)
@@ -98,19 +91,16 @@ gfx::Size SingleSplitView::GetPreferredSize() {
   return gfx::Size(width, height);
 }
 
-gfx::NativeCursor SingleSplitView::GetCursor(const MouseEvent& event) {
+gfx::NativeCursor SingleSplitView::GetCursor(const ui::MouseEvent& event) {
   if (!IsPointInDivider(event.location()))
     return gfx::kNullCursor;
 #if defined(USE_AURA)
   return is_horizontal_ ?
-      aura::kCursorEastWestResize : aura::kCursorNorthSouthResize;
+      ui::kCursorEastWestResize : ui::kCursorNorthSouthResize;
 #elif defined(OS_WIN)
   static HCURSOR we_resize_cursor = LoadCursor(NULL, IDC_SIZEWE);
   static HCURSOR ns_resize_cursor = LoadCursor(NULL, IDC_SIZENS);
   return is_horizontal_ ? we_resize_cursor : ns_resize_cursor;
-#elif defined(TOOLKIT_USES_GTK)
-  return gfx::GetCursor(is_horizontal_ ? GDK_SB_H_DOUBLE_ARROW :
-                                         GDK_SB_V_DOUBLE_ARROW);
 #endif
 }
 
@@ -149,7 +139,8 @@ void SingleSplitView::CalculateChildrenBounds(
                   std::max(0, bounds.width() - divider_at - divider_size),
                   bounds.height());
   } else {
-    *leading_bounds = gfx::Rect(0, 0, bounds.width(), divider_at);
+    *leading_bounds = gfx::Rect(
+        0, 0, bounds.width(), divider_at - leading_bottom_offset_);
     *trailing_bounds =
         gfx::Rect(0, divider_at + divider_size, bounds.width(),
                   std::max(0, bounds.height() - divider_at - divider_size));
@@ -160,7 +151,14 @@ void SingleSplitView::SetAccessibleName(const string16& name) {
   accessible_name_ = name;
 }
 
-bool SingleSplitView::OnMousePressed(const MouseEvent& event) {
+void SingleSplitView::SetLeadingBottomOffset(int offset) {
+  if (leading_bottom_offset_ == offset)
+    return;
+  leading_bottom_offset_ = offset;
+  InvalidateLayout();
+}
+
+bool SingleSplitView::OnMousePressed(const ui::MouseEvent& event) {
   if (!IsPointInDivider(event.location()))
     return false;
   drag_info_.initial_mouse_offset = GetPrimaryAxisSize(event.x(), event.y());
@@ -169,7 +167,7 @@ bool SingleSplitView::OnMousePressed(const MouseEvent& event) {
   return true;
 }
 
-bool SingleSplitView::OnMouseDragged(const MouseEvent& event) {
+bool SingleSplitView::OnMouseDragged(const ui::MouseEvent& event) {
   if (child_count() < 2)
     return false;
 
@@ -179,7 +177,8 @@ bool SingleSplitView::OnMouseDragged(const MouseEvent& event) {
     delta_offset *= -1;
   // Honor the minimum size when resizing.
   gfx::Size min = child_at(0)->GetMinimumSize();
-  int new_size = std::max(GetPrimaryAxisSize(min.width(), min.height()),
+  int new_size = std::max(GetPrimaryAxisSize(min.width(),
+                          min.height() + leading_bottom_offset_),
                           drag_info_.initial_divider_offset + delta_offset);
 
   // And don't let the view get bigger than our width.
@@ -221,7 +220,8 @@ bool SingleSplitView::IsPointInDivider(const gfx::Point& p) {
     divider_relative_offset =
         p.x() - child_at(base::i18n::IsRTL() ? 1 : 0)->width();
   } else {
-    divider_relative_offset = p.y() - child_at(0)->height();
+    divider_relative_offset =
+        p.y() - (child_at(0)->height() + leading_bottom_offset_);
   }
   return (divider_relative_offset >= 0 &&
       divider_relative_offset < kDividerSize);

@@ -4,7 +4,6 @@
 
 #ifndef CHROME_BROWSER_UI_CONSTRAINED_WINDOW_H_
 #define CHROME_BROWSER_UI_CONSTRAINED_WINDOW_H_
-#pragma once
 
 #include "build/build_config.h"
 #include "ui/gfx/native_widget_types.h"
@@ -26,6 +25,12 @@ class ConstrainedWindow {
 
   // Sets focus on the Constrained Window.
   virtual void FocusConstrainedWindow();
+
+  // Runs a pulse animation for the constrained window.
+  virtual void PulseConstrainedWindow();
+
+  // Checks if the constrained window can be shown.
+  virtual bool CanShowConstrainedWindow();
 
   // Returns the native window of the constrained window.
   virtual gfx::NativeWindow GetNativeWindow();

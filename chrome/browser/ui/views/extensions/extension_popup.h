@@ -4,11 +4,10 @@
 
 #ifndef CHROME_BROWSER_UI_VIEWS_EXTENSIONS_EXTENSION_POPUP_H_
 #define CHROME_BROWSER_UI_VIEWS_EXTENSIONS_EXTENSION_POPUP_H_
-#pragma once
 
 #include "base/compiler_specific.h"
 #include "chrome/browser/extensions/extension_host.h"
-#include "chrome/browser/ui/views/extensions/extension_view.h"
+#include "chrome/browser/ui/views/extensions/extension_view_views.h"
 #include "content/public/browser/notification_observer.h"
 #include "googleurl/src/gurl.h"
 #include "ui/views/bubble/bubble_delegate.h"
@@ -17,10 +16,15 @@
 class Browser;
 
 class ExtensionPopup : public views::BubbleDelegateView,
-                       public ExtensionView::Container,
+                       public ExtensionViewViews::Container,
                        public content::NotificationObserver,
                        public views::WidgetFocusChangeListener {
  public:
+  enum ShowAction {
+    SHOW,
+    SHOW_AND_INSPECT
+  };
+
   virtual ~ExtensionPopup();
 
   // Create and show a popup with |url| positioned adjacent to |anchor_view|.
@@ -31,8 +35,6 @@ class ExtensionPopup : public views::BubbleDelegateView,
   // by value of |arrow_location| remains fixed during popup resizes.
   // If |arrow_location| is BOTTOM_*, then the popup 'pops up', otherwise
   // the popup 'drops down'.
-  // Pass |inspect_with_devtools| as true to pin the popup open and show the
-  // devtools window for it.
   // The actual display of the popup is delayed until the page contents
   // finish loading in order to minimize UI flashing and resizing.
   static ExtensionPopup* ShowPopup(
@@ -40,17 +42,17 @@ class ExtensionPopup : public views::BubbleDelegateView,
       Browser* browser,
       views::View* anchor_view,
       views::BubbleBorder::ArrowLocation arrow_location,
-      bool inspect_with_devtools);
+      ShowAction show_action);
 
-  ExtensionHost* host() const { return extension_host_.get(); }
+  extensions::ExtensionHost* host() const { return extension_host_.get(); }
 
   // content::NotificationObserver overrides.
   virtual void Observe(int type,
                        const content::NotificationSource& source,
                        const content::NotificationDetails& details) OVERRIDE;
 
-  // ExtensionView::Container overrides.
-  virtual void OnExtensionPreferredSizeChanged(ExtensionView* view) OVERRIDE;
+  // ExtensionViewViews::Container overrides.
+  virtual void OnExtensionSizeChanged(ExtensionViewViews* view) OVERRIDE;
 
   // views::View overrides.
   virtual gfx::Size GetPreferredSize() OVERRIDE;
@@ -67,22 +69,26 @@ class ExtensionPopup : public views::BubbleDelegateView,
 
  private:
   ExtensionPopup(Browser* browser,
-                 ExtensionHost* host,
+                 extensions::ExtensionHost* host,
                  views::View* anchor_view,
                  views::BubbleBorder::ArrowLocation arrow_location,
-                 bool inspect_with_devtools);
+                 ShowAction show_action);
 
   // Show the bubble, focus on its content, and register listeners.
   void ShowBubble();
 
+  void CloseBubble();
+
   // The contained host for the view.
-  scoped_ptr<ExtensionHost> extension_host_;
+  scoped_ptr<extensions::ExtensionHost> extension_host_;
 
   // Flag used to indicate if the pop-up should open a devtools window once
   // it is shown inspecting it.
   bool inspect_with_devtools_;
 
   content::NotificationRegistrar registrar_;
+
+  base::WeakPtrFactory<ExtensionPopup> close_bubble_factory_;
 
   DISALLOW_COPY_AND_ASSIGN(ExtensionPopup);
 };

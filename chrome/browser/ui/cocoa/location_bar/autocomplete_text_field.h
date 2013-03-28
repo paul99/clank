@@ -1,14 +1,12 @@
-// Copyright (c) 2011 The Chromium Authors. All rights reserved.
+// Copyright (c) 2012 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
 #ifndef CHROME_BROWSER_UI_COCOA_AUTOCOMPLETE_TEXT_FIELD_H_
 #define CHROME_BROWSER_UI_COCOA_AUTOCOMPLETE_TEXT_FIELD_H_
-#pragma once
 
 #import <Cocoa/Cocoa.h>
 
-#import "base/mac/cocoa_protocols.h"
 #include "base/memory/scoped_nsobject.h"
 #import "chrome/browser/ui/cocoa/styled_text_field.h"
 #import "chrome/browser/ui/cocoa/url_drop_target.h"
@@ -49,6 +47,14 @@ class AutocompleteTextFieldObserver {
   // Clears the |pboard| and adds the field's current selection.
   // Called when the user does a copy or drag.
   virtual void CopyToPasteboard(NSPasteboard* pboard) = 0;
+
+  // Clears |pboard| and adds the current URL. Specifically used when the user
+  // explicitly requests to copy the URL in cases where extended instant has
+  // overridden the URL with the search terms.
+  virtual void CopyURLToPasteboard(NSPasteboard* pboard) = 0;
+
+  // Returns true if the Copy to URL option should be available.
+  virtual bool ShouldEnableCopyURL() = 0;
 
   // Returns true if the current clipboard text supports paste and go
   // (or paste and search).
@@ -98,6 +104,9 @@ class AutocompleteTextFieldObserver {
   // Called whenever the autocomplete text field is losing focus.
   virtual void OnKillFocus() = 0;
 
+  // Called before the text field handles a mouse down event.
+  virtual void OnMouseDown(NSInteger button_number) = 0;
+
  protected:
   virtual ~AutocompleteTextFieldObserver() {}
 };
@@ -134,7 +143,7 @@ class AutocompleteTextFieldObserver {
 // Updates cursor and tooltip rects depending on the contents of the text field
 // e.g. the security icon should have a default pointer shown on hover instead
 // of an I-beam.
-- (void)updateCursorAndToolTipRects;
+- (void)updateMouseTracking;
 
 // Return the appropriate menu for any decoration under |event|.
 - (NSMenu*)decorationMenuForEvent:(NSEvent*)event;

@@ -4,7 +4,6 @@
 
 #ifndef UI_GFX_BLIT_H_
 #define UI_GFX_BLIT_H_
-#pragma once
 
 #include "ui/gfx/native_widget_types.h"
 #include "ui/base/ui_export.h"
@@ -15,6 +14,7 @@ namespace gfx {
 
 class Point;
 class Rect;
+class Vector2d;
 
 // Blits a rectangle from the source context into the destination context.
 UI_EXPORT void BlitContextToContext(NativeDrawingContext dst_context,
@@ -40,12 +40,12 @@ UI_EXPORT void BlitCanvasToCanvas(SkCanvas *dst_canvas,
                                   SkCanvas *src_canvas,
                                   const Point& src_origin);
 
-// Scrolls the given subset of the given canvas by the given amount.
+// Scrolls the given subset of the given canvas by the given offset.
 // The canvas should not have a clip or a transform applied, since platforms
 // may implement those operations differently.
 UI_EXPORT void ScrollCanvas(SkCanvas* canvas,
                             const Rect& clip,
-                            const Point& amount);
+                            const Vector2d& offset);
 
 }  // namespace gfx
 

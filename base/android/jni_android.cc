@@ -8,14 +8,13 @@
 
 #include "base/android/build_info.h"
 #include "base/android/jni_string.h"
-#include "base/atomicops.h"
 #include "base/lazy_instance.h"
 #include "base/logging.h"
 #include "base/threading/platform_thread.h"
 
 namespace {
 using base::android::GetClass;
-using base::android::GetMethodID;
+using base::android::MethodID;
 using base::android::ScopedJavaLocalRef;
 
 struct MethodIdentifier {
@@ -52,24 +51,26 @@ JavaVM* g_jvm = NULL;
 // that may still be running at shutdown. There is no harm in doing this.
 base::LazyInstance<base::android::ScopedJavaGlobalRef<jobject> >::Leaky
     g_application_context = LAZY_INSTANCE_INITIALIZER;
-base::LazyInstance<MethodIDMap>::Leaky
-    g_method_id_map = LAZY_INSTANCE_INITIALIZER;
+base::LazyInstance<MethodIDMap> g_method_id_map = LAZY_INSTANCE_INITIALIZER;
 
-void SetJavaExceptionInfo(JNIEnv* env, jthrowable java_throwable) {
+std::string GetJavaExceptionInfo(JNIEnv* env, jthrowable java_throwable) {
   ScopedJavaLocalRef<jclass> throwable_clazz =
       GetClass(env, "java/lang/Throwable");
   jmethodID throwable_printstacktrace =
-      GetMethodID(env, throwable_clazz, "printStackTrace",
-                  "(Ljava/io/PrintStream;)V");
+      MethodID::Get<MethodID::TYPE_INSTANCE>(
+          env, throwable_clazz.obj(), "printStackTrace",
+          "(Ljava/io/PrintStream;)V");
 
   // Create an instance of ByteArrayOutputStream.
   ScopedJavaLocalRef<jclass> bytearray_output_stream_clazz =
       GetClass(env, "java/io/ByteArrayOutputStream");
   jmethodID bytearray_output_stream_constructor =
-      GetMethodID(env, bytearray_output_stream_clazz, "<init>", "()V");
+      MethodID::Get<MethodID::TYPE_INSTANCE>(
+          env, bytearray_output_stream_clazz.obj(), "<init>", "()V");
   jmethodID bytearray_output_stream_tostring =
-      GetMethodID(env, bytearray_output_stream_clazz, "toString",
-                  "()Ljava/lang/String;");
+      MethodID::Get<MethodID::TYPE_INSTANCE>(
+          env, bytearray_output_stream_clazz.obj(), "toString",
+          "()Ljava/lang/String;");
   ScopedJavaLocalRef<jobject> bytearray_output_stream(env,
       env->NewObject(bytearray_output_stream_clazz.obj(),
                      bytearray_output_stream_constructor));
@@ -78,8 +79,9 @@ void SetJavaExceptionInfo(JNIEnv* env, jthrowable java_throwable) {
   ScopedJavaLocalRef<jclass> printstream_clazz =
       GetClass(env, "java/io/PrintStream");
   jmethodID printstream_constructor =
-      GetMethodID(env, printstream_clazz, "<init>",
-                  "(Ljava/io/OutputStream;)V");
+      MethodID::Get<MethodID::TYPE_INSTANCE>(
+          env, printstream_clazz.obj(), "<init>",
+          "(Ljava/io/OutputStream;)V");
   ScopedJavaLocalRef<jobject> printstream(env,
       env->NewObject(printstream_clazz.obj(), printstream_constructor,
                      bytearray_output_stream.obj()));
@@ -94,20 +96,19 @@ void SetJavaExceptionInfo(JNIEnv* env, jthrowable java_throwable) {
           env->CallObjectMethod(bytearray_output_stream.obj(),
                                 bytearray_output_stream_tostring)));
 
-  base::android::BuildInfo::GetInstance()->set_java_exception_info(
-      ConvertJavaStringToUTF8(exception_string));
+  return ConvertJavaStringToUTF8(exception_string);
 }
+
 }  // namespace
 
 namespace base {
 namespace android {
 
 JNIEnv* AttachCurrentThread() {
-  if (!g_jvm)
-    return NULL;
+  DCHECK(g_jvm);
   JNIEnv* env = NULL;
   jint ret = g_jvm->AttachCurrentThread(&env, NULL);
-  DCHECK_EQ(ret, JNI_OK);
+  DCHECK_EQ(JNI_OK, ret);
   return env;
 }
 
@@ -139,7 +140,7 @@ ScopedJavaLocalRef<jclass> GetClass(JNIEnv* env, const char* class_name) {
 
 jclass GetUnscopedClass(JNIEnv* env, const char* class_name) {
   jclass clazz = env->FindClass(class_name);
-  CHECK(clazz && !ClearException(env)) << "Failed to find class " << class_name;
+  CHECK(!ClearException(env) && clazz) << "Failed to find class " << class_name;
   return clazz;
 }
 
@@ -154,68 +155,65 @@ bool HasClass(JNIEnv* env, const char* class_name) {
   return true;
 }
 
-jmethodID GetMethodID(JNIEnv* env,
-                      const JavaRef<jclass>& clazz,
-                      const char* method_name,
-                      const char* jni_signature) {
-  // clazz.env() can not be used as that may be from a different thread.
-  return GetMethodID(env, clazz.obj(), method_name, jni_signature);
-}
-
-jmethodID GetMethodID(JNIEnv* env,
-                      jclass clazz,
-                      const char* method_name,
-                      const char* jni_signature) {
-  jmethodID method_id =
+template<MethodID::Type type>
+jmethodID MethodID::Get(JNIEnv* env,
+                        jclass clazz,
+                        const char* method_name,
+                        const char* jni_signature) {
+  jmethodID id = type == TYPE_STATIC ?
+      env->GetStaticMethodID(clazz, method_name, jni_signature) :
       env->GetMethodID(clazz, method_name, jni_signature);
-  CHECK(method_id && !ClearException(env)) << "Failed to find method " <<
-      method_name << " " << jni_signature;
-  return method_id;
+  CHECK(base::android::ClearException(env) || id) <<
+      "Failed to find " <<
+      (type == TYPE_STATIC ? "static " : "") <<
+      "method " << method_name << " " << jni_signature;
+  return id;
 }
 
-jmethodID GetStaticMethodID(JNIEnv* env,
-                            const JavaRef<jclass>& clazz,
-                            const char* method_name,
-                            const char* jni_signature) {
-  return GetStaticMethodID(env, clazz.obj(), method_name,
-      jni_signature);
-}
-
-jmethodID GetStaticMethodID(JNIEnv* env,
+// If |atomic_method_id| set, it'll return immediately. Otherwise, it'll call
+// into ::Get() above. If there's a race, it's ok since the values are the same
+// (and the duplicated effort will happen only once).
+template<MethodID::Type type>
+jmethodID MethodID::LazyGet(JNIEnv* env,
                             jclass clazz,
                             const char* method_name,
-                            const char* jni_signature) {
-  jmethodID method_id =
-      env->GetStaticMethodID(clazz, method_name, jni_signature);
-  CHECK(method_id && !ClearException(env)) << "Failed to find static method " <<
-      method_name << " " << jni_signature;
-  return method_id;
+                            const char* jni_signature,
+                            base::subtle::AtomicWord* atomic_method_id) {
+  COMPILE_ASSERT(sizeof(subtle::AtomicWord) >= sizeof(jmethodID),
+                 AtomicWord_SmallerThan_jMethodID);
+  subtle::AtomicWord value = base::subtle::Acquire_Load(atomic_method_id);
+  if (value)
+    return reinterpret_cast<jmethodID>(value);
+  jmethodID id = MethodID::Get<type>(env, clazz, method_name, jni_signature);
+  base::subtle::Release_Store(
+      atomic_method_id, reinterpret_cast<subtle::AtomicWord>(id));
+  return id;
 }
 
-bool HasMethod(JNIEnv* env,
-               const JavaRef<jclass>& clazz,
-               const char* method_name,
-               const char* jni_signature) {
-  jmethodID method_id =
-      env->GetMethodID(clazz.obj(), method_name, jni_signature);
-  if (!method_id) {
-    ClearException(env);
-    return false;
-  }
-  bool error = ClearException(env);
-  DCHECK(!error);
-  return true;
-}
+// Various template instantiations.
+template jmethodID MethodID::Get<MethodID::TYPE_STATIC>(
+    JNIEnv* env, jclass clazz, const char* method_name,
+    const char* jni_signature);
+
+template jmethodID MethodID::Get<MethodID::TYPE_INSTANCE>(
+    JNIEnv* env, jclass clazz, const char* method_name,
+    const char* jni_signature);
+
+template jmethodID MethodID::LazyGet<MethodID::TYPE_STATIC>(
+    JNIEnv* env, jclass clazz, const char* method_name,
+    const char* jni_signature, base::subtle::AtomicWord* atomic_method_id);
+
+template jmethodID MethodID::LazyGet<MethodID::TYPE_INSTANCE>(
+    JNIEnv* env, jclass clazz, const char* method_name,
+    const char* jni_signature, base::subtle::AtomicWord* atomic_method_id);
 
 jfieldID GetFieldID(JNIEnv* env,
                     const JavaRef<jclass>& clazz,
                     const char* field_name,
                     const char* jni_signature) {
   jfieldID field_id = env->GetFieldID(clazz.obj(), field_name, jni_signature);
-  CHECK(field_id && !ClearException(env)) << "Failed to find field " <<
+  CHECK(!ClearException(env) && field_id) << "Failed to find field " <<
       field_name << " " << jni_signature;
-  bool error = ClearException(env);
-  DCHECK(!error);
   return field_id;
 }
 
@@ -239,10 +237,8 @@ jfieldID GetStaticFieldID(JNIEnv* env,
                           const char* jni_signature) {
   jfieldID field_id =
       env->GetStaticFieldID(clazz.obj(), field_name, jni_signature);
-  CHECK(field_id && !ClearException(env)) << "Failed to find static field " <<
+  CHECK(!ClearException(env) && field_id) << "Failed to find static field " <<
       field_name << " " << jni_signature;
-  bool error = ClearException(env);
-  DCHECK(!error);
   return field_id;
 }
 
@@ -275,7 +271,8 @@ jmethodID GetMethodIDFromClassName(JNIEnv* env,
   }
 
   ScopedJavaLocalRef<jclass> clazz(env, env->FindClass(class_name));
-  jmethodID id = GetMethodID(env, clazz, method, jni_signature);
+  jmethodID id = MethodID::Get<MethodID::TYPE_INSTANCE>(
+      env, clazz.obj(), method, jni_signature);
 
   while (base::subtle::Acquire_CompareAndSwap(&g_method_id_map_lock,
                                               kUnlocked,
@@ -318,7 +315,9 @@ void CheckException(JNIEnv* env) {
   env->ExceptionClear();
 
   // Set the exception_string in BuildInfo so that breakpad can read it.
-  SetJavaExceptionInfo(env, java_throwable);
+  // RVO should avoid any extra copies of the exception string.
+  base::android::BuildInfo::GetInstance()->set_java_exception_info(
+      GetJavaExceptionInfo(env, java_throwable));
 
   // Now, feel good about it and die.
   CHECK(false);

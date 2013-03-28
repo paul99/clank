@@ -12,6 +12,7 @@
 #include "base/md5.h"
 #include "base/memory/scoped_vector.h"
 #include "base/memory/singleton.h"
+#include "base/metrics/histogram.h"
 #include "base/string16.h"
 #include "base/string_number_conversions.h"
 #include "base/threading/thread.h"
@@ -25,13 +26,17 @@
 #include "chrome/browser/ui/webui/chrome_url_data_manager.h"
 #include "chrome/browser/ui/webui/favicon_source.h"
 #include "chrome/browser/ui/webui/ntp/new_tab_ui.h"
+#include "chrome/browser/ui/webui/ntp/ntp_stats.h"
 #include "chrome/browser/ui/webui/ntp/thumbnail_source.h"
 #include "chrome/common/chrome_notification_types.h"
 #include "chrome/common/pref_names.h"
 #include "chrome/common/url_constants.h"
 #include "content/public/browser/browser_thread.h"
+#include "content/public/browser/navigation_controller.h"
+#include "content/public/browser/navigation_entry.h"
 #include "content/public/browser/notification_source.h"
 #include "content/public/browser/user_metrics.h"
+#include "content/public/browser/web_contents.h"
 #include "content/public/browser/web_ui.h"
 #include "googleurl/src/gurl.h"
 #include "grit/chromium_strings.h"
@@ -42,23 +47,41 @@
 using content::UserMetricsAction;
 
 MostVisitedHandler::MostVisitedHandler()
-    : got_first_most_visited_request_(false) {
+    : ALLOW_THIS_IN_INITIALIZER_LIST(weak_ptr_factory_(this)),
+      got_first_most_visited_request_(false),
+      most_visited_viewed_(false),
+      user_action_logged_(false) {
 }
 
 MostVisitedHandler::~MostVisitedHandler() {
+  if (!user_action_logged_ && most_visited_viewed_) {
+    const GURL ntp_url = GURL(chrome::kChromeUINewTabURL);
+    int action_id = NTP_FOLLOW_ACTION_OTHER;
+    content::NavigationEntry* entry =
+        web_ui()->GetWebContents()->GetController().GetActiveEntry();
+    if (entry && (entry->GetURL() != ntp_url)) {
+      action_id =
+          content::PageTransitionStripQualifier(entry->GetTransitionType());
+    }
+
+    UMA_HISTOGRAM_ENUMERATION("NewTabPage.MostVisitedAction", action_id,
+                              NUM_NTP_FOLLOW_ACTIONS);
+  }
 }
 
 void MostVisitedHandler::RegisterMessages() {
   Profile* profile = Profile::FromWebUI(web_ui());
   // Set up our sources for thumbnail and favicon data.
   ThumbnailSource* thumbnail_src = new ThumbnailSource(profile);
-  profile->GetChromeURLDataManager()->AddDataSource(thumbnail_src);
+  ChromeURLDataManager::AddDataSource(profile, thumbnail_src);
 
 #if defined(OS_ANDROID)
-  profile->GetChromeURLDataManager()->AddDataSource(
+  // Register chrome://touch-icon as a data source for touch icons or favicons.
+  ChromeURLDataManager::AddDataSource(profile,
       new FaviconSource(profile, FaviconSource::ANY));
 #endif
-  profile->GetChromeURLDataManager()->AddDataSource(
+  // Register chrome://favicon as a data source for favicons.
+  ChromeURLDataManager::AddDataSource(profile,
       new FaviconSource(profile, FaviconSource::FAVICON));
 
   history::TopSites* ts = profile->GetTopSites();
@@ -84,13 +107,19 @@ void MostVisitedHandler::RegisterMessages() {
 
   // Register ourselves for any most-visited item blacklisting.
   web_ui()->RegisterMessageCallback("blacklistURLFromMostVisited",
-      base::Bind(&MostVisitedHandler::HandleBlacklistURL,
+      base::Bind(&MostVisitedHandler::HandleBlacklistUrl,
                  base::Unretained(this)));
   web_ui()->RegisterMessageCallback("removeURLsFromMostVisitedBlacklist",
-      base::Bind(&MostVisitedHandler::HandleRemoveURLsFromBlacklist,
+      base::Bind(&MostVisitedHandler::HandleRemoveUrlsFromBlacklist,
                  base::Unretained(this)));
   web_ui()->RegisterMessageCallback("clearMostVisitedURLsBlacklist",
       base::Bind(&MostVisitedHandler::HandleClearBlacklist,
+                 base::Unretained(this)));
+  web_ui()->RegisterMessageCallback("mostVisitedAction",
+      base::Bind(&MostVisitedHandler::HandleMostVisitedAction,
+                 base::Unretained(this)));
+  web_ui()->RegisterMessageCallback("mostVisitedSelected",
+      base::Bind(&MostVisitedHandler::HandleMostVisitedSelected,
                  base::Unretained(this)));
 }
 
@@ -108,13 +137,13 @@ void MostVisitedHandler::SendPagesValue() {
   if (pages_value_.get()) {
     Profile* profile = Profile::FromWebUI(web_ui());
     const DictionaryValue* url_blacklist =
-        profile->GetPrefs()->GetDictionary(prefs::kNTPMostVisitedURLsBlacklist);
+        profile->GetPrefs()->GetDictionary(prefs::kNtpMostVisitedURLsBlacklist);
     bool has_blacklisted_urls = !url_blacklist->empty();
     history::TopSites* ts = profile->GetTopSites();
     if (ts)
       has_blacklisted_urls = ts->HasBlacklistedItems();
     base::FundamentalValue has_blacklisted_urls_value(has_blacklisted_urls);
-    web_ui()->CallJavascriptFunction("setMostVisitedPages",
+    web_ui()->CallJavascriptFunction("ntp.setMostVisitedPages",
                                      *(pages_value_.get()),
                                      has_blacklisted_urls_value);
     pages_value_.reset();
@@ -125,18 +154,17 @@ void MostVisitedHandler::StartQueryForMostVisited() {
   history::TopSites* ts = Profile::FromWebUI(web_ui())->GetTopSites();
   if (ts) {
     ts->GetMostVisitedURLs(
-        &topsites_consumer_,
-        base::Bind(&MostVisitedHandler::OnMostVisitedURLsAvailable,
-                   base::Unretained(this)));
+        base::Bind(&MostVisitedHandler::OnMostVisitedUrlsAvailable,
+                   weak_ptr_factory_.GetWeakPtr()));
   }
 }
 
-void MostVisitedHandler::HandleBlacklistURL(const ListValue* args) {
+void MostVisitedHandler::HandleBlacklistUrl(const ListValue* args) {
   std::string url = UTF16ToUTF8(ExtractStringValue(args));
-  BlacklistURL(GURL(url));
+  BlacklistUrl(GURL(url));
 }
 
-void MostVisitedHandler::HandleRemoveURLsFromBlacklist(const ListValue* args) {
+void MostVisitedHandler::HandleRemoveUrlsFromBlacklist(const ListValue* args) {
   DCHECK(args->GetSize() != 0);
 
   for (ListValue::const_iterator iter = args->begin();
@@ -162,6 +190,25 @@ void MostVisitedHandler::HandleClearBlacklist(const ListValue* args) {
     ts->ClearBlacklistedURLs();
 }
 
+void MostVisitedHandler::HandleMostVisitedAction(const base::ListValue* args) {
+  DCHECK(args);
+
+  double action_id;
+  if (!args->GetDouble(0, &action_id))
+    NOTREACHED();
+
+  UMA_HISTOGRAM_ENUMERATION("NewTabPage.MostVisitedAction",
+                            static_cast<int>(action_id),
+                            NUM_NTP_FOLLOW_ACTIONS);
+  most_visited_viewed_ = true;
+  user_action_logged_ = true;
+}
+
+void MostVisitedHandler::HandleMostVisitedSelected(
+    const base::ListValue* args) {
+  most_visited_viewed_ = true;
+}
+
 void MostVisitedHandler::SetPagesValueFromTopSites(
     const history::MostVisitedURLList& data) {
   pages_value_.reset(new ListValue);
@@ -174,14 +221,14 @@ void MostVisitedHandler::SetPagesValueFromTopSites(
       continue;
     }
 
-    NewTabUI::SetURLTitleAndDirection(page_value,
+    NewTabUI::SetUrlTitleAndDirection(page_value,
                                       url.title,
                                       url.url);
     pages_value_->Append(page_value);
   }
 }
 
-void MostVisitedHandler::OnMostVisitedURLsAvailable(
+void MostVisitedHandler::OnMostVisitedUrlsAvailable(
     const history::MostVisitedURLList& data) {
   SetPagesValueFromTopSites(data);
   if (got_first_most_visited_request_) {
@@ -198,22 +245,19 @@ void MostVisitedHandler::Observe(int type,
   StartQueryForMostVisited();
 }
 
-void MostVisitedHandler::BlacklistURL(const GURL& url) {
+void MostVisitedHandler::BlacklistUrl(const GURL& url) {
   history::TopSites* ts = Profile::FromWebUI(web_ui())->GetTopSites();
   if (ts)
     ts->AddBlacklistedURL(url);
   content::RecordAction(UserMetricsAction("MostVisited_UrlBlacklisted"));
 }
 
-std::string MostVisitedHandler::GetDictionaryKeyForURL(const std::string& url) {
+std::string MostVisitedHandler::GetDictionaryKeyForUrl(const std::string& url) {
   return base::MD5String(url);
 }
 
 // static
 void MostVisitedHandler::RegisterUserPrefs(PrefService* prefs) {
-  prefs->RegisterDictionaryPref(prefs::kNTPMostVisitedURLsBlacklist,
-                                PrefService::UNSYNCABLE_PREF);
-  // TODO(estade): remove this.
-  prefs->RegisterDictionaryPref(prefs::kNTPMostVisitedPinnedURLs,
+  prefs->RegisterDictionaryPref(prefs::kNtpMostVisitedURLsBlacklist,
                                 PrefService::UNSYNCABLE_PREF);
 }

@@ -74,6 +74,8 @@
 #elif defined(OS_ANDROID)
 #include <ctype.h>
 #include "base/os_compat_android.h"  // For timegm()
+#elif defined(OS_NACL)
+#include "base/os_compat_nacl.h"  // For timegm()
 #endif
 #include <errno.h>  /* for EINVAL */
 #include <time.h>
@@ -191,7 +193,7 @@ PR_ImplodeTime(const PRExplodedTime *exploded)
 #endif
 }
 
-/*
+/* 
  * The COUNT_LEAPS macro counts the number of leap years passed by
  * till the start of the given year Y.  At the start of the year 4
  * A.D. the number of leap years passed by is 0, while at the start of
@@ -412,7 +414,7 @@ PR_NormalizeTime(PRExplodedTime *time, PRTimeParamFn params)
     /* Recompute yday and wday */
     time->tm_yday = time->tm_mday +
             lastDayOfMonth[IsLeapYear(time->tm_year)][time->tm_month];
-
+	    
     numDays = DAYS_BETWEEN_YEARS(1970, time->tm_year) + time->tm_yday;
     time->tm_wday = (numDays + 4) % 7;
     if (time->tm_wday < 0) {
@@ -1040,9 +1042,10 @@ PR_ParseTimeString(
 
           /* "-" is ignored at the beginning of a token if we have not yet
                  parsed a year (e.g., the second "-" in "30-AUG-1966"), or if
-                 the character after the dash is not a digit. */
-          if (*rest == '-' && ((rest > string && isalpha(rest[-1]) && year < 0)
-              || rest[1] < '0' || rest[1] > '9'))
+                 the character after the dash is not a digit. */         
+          if (*rest == '-' && ((rest > string &&
+              isalpha((unsigned char)rest[-1]) && year < 0) ||
+              rest[1] < '0' || rest[1] > '9'))
                 {
                   rest++;
                   goto SKIP_MORE;
@@ -1129,14 +1132,14 @@ PR_ParseTimeString(
              * time, we call mktime().  However, we need to see if we are
              * on 1-Jan-1970 or before.  If we are, we can't call mktime()
              * because mktime() will crash on win16. In that case, we
-             * calculate zone_offset based on the zone offset at
+             * calculate zone_offset based on the zone offset at 
              * 00:00:00, 2 Jan 1970 GMT, and subtract zone_offset from the
              * date we are parsing to transform the date to GMT.  We also
              * do so if mktime() returns (time_t) -1 (time out of range).
            */
 
           /* month, day, hours, mins and secs are always non-negative
-             so we dont need to worry about them. */
+             so we dont need to worry about them. */  
           if(result->tm_year >= 1970)
                 {
                   PRInt64 usec_per_sec;
@@ -1157,7 +1160,7 @@ PR_ParseTimeString(
                   /*
                    * mktime will return (time_t) -1 if the input is a date
                    * after 23:59:59, December 31, 3000, US Pacific Time (not
-                   * UTC as documented):
+                   * UTC as documented): 
                    * http://msdn.microsoft.com/en-us/library/d1y53h2a(VS.80).aspx
                    * But if the year is 3001, mktime also invokes the invalid
                    * parameter handler, causing the application to crash.  This
@@ -1188,7 +1191,7 @@ PR_ParseTimeString(
                       return PR_SUCCESS;
                     }
                 }
-
+                
                 /* So mktime() can't handle this case.  We assume the
                    zone_offset for the date we are parsing is the same as
                    the zone offset on 00:00:00 2 Jan 1970 GMT. */

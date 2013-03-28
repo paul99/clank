@@ -1,4 +1,4 @@
-// Copyright (c) 2011 The Chromium Authors. All rights reserved.
+// Copyright (c) 2012 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -19,6 +19,7 @@
 #include "base/location.h"
 #include "base/memory/ref_counted.h"
 #include "base/message_loop.h"
+#include "base/metrics/field_trial.h"
 #include "base/pickle.h"
 #include "base/stl_util.h"
 #include "base/string_number_conversions.h"
@@ -27,8 +28,8 @@
 #include "net/base/io_buffer.h"
 #include "net/base/load_flags.h"
 #include "net/base/net_errors.h"
+#include "net/base/upload_data_stream.h"
 #include "net/disk_cache/disk_cache.h"
-#include "net/http/disk_cache_based_ssl_host_info.h"
 #include "net/http/http_cache_transaction.h"
 #include "net/http/http_network_layer.h"
 #include "net/http/http_network_session.h"
@@ -36,42 +37,8 @@
 #include "net/http/http_response_headers.h"
 #include "net/http/http_response_info.h"
 #include "net/http/http_util.h"
-#include "net/socket/ssl_host_info.h"
 
 namespace net {
-
-namespace {
-
-HttpNetworkSession* CreateNetworkSession(
-    HostResolver* host_resolver,
-    CertVerifier* cert_verifier,
-    OriginBoundCertService* origin_bound_cert_service,
-    TransportSecurityState* transport_security_state,
-    ProxyService* proxy_service,
-    SSLHostInfoFactory* ssl_host_info_factory,
-    const std::string& ssl_session_cache_shard,
-    SSLConfigService* ssl_config_service,
-    HttpAuthHandlerFactory* http_auth_handler_factory,
-    NetworkDelegate* network_delegate,
-    HttpServerProperties* http_server_properties,
-    NetLog* net_log) {
-  HttpNetworkSession::Params params;
-  params.host_resolver = host_resolver;
-  params.cert_verifier = cert_verifier;
-  params.origin_bound_cert_service = origin_bound_cert_service;
-  params.transport_security_state = transport_security_state;
-  params.proxy_service = proxy_service;
-  params.ssl_host_info_factory = ssl_host_info_factory;
-  params.ssl_session_cache_shard = ssl_session_cache_shard;
-  params.ssl_config_service = ssl_config_service;
-  params.http_auth_handler_factory = http_auth_handler_factory;
-  params.network_delegate = network_delegate;
-  params.http_server_properties = http_server_properties;
-  params.net_log = net_log;
-  return new HttpNetworkSession(params);
-}
-
-}  // namespace
 
 HttpCache::DefaultBackend::DefaultBackend(CacheType type,
                                           const FilePath& path,
@@ -277,59 +244,13 @@ void HttpCache::MetadataWriter::OnIOComplete(int result) {
 
 //-----------------------------------------------------------------------------
 
-class HttpCache::SSLHostInfoFactoryAdaptor : public SSLHostInfoFactory {
- public:
-  SSLHostInfoFactoryAdaptor(CertVerifier* cert_verifier, HttpCache* http_cache)
-      : cert_verifier_(cert_verifier),
-        http_cache_(http_cache) {
-  }
-
-  virtual SSLHostInfo* GetForHost(const std::string& hostname,
-                                  const SSLConfig& ssl_config) {
-    return new DiskCacheBasedSSLHostInfo(
-        hostname, ssl_config, cert_verifier_, http_cache_);
-  }
-
- private:
-  CertVerifier* const cert_verifier_;
-  HttpCache* const http_cache_;
-};
-
-//-----------------------------------------------------------------------------
-HttpCache::HttpCache(HostResolver* host_resolver,
-                     CertVerifier* cert_verifier,
-                     OriginBoundCertService* origin_bound_cert_service,
-                     TransportSecurityState* transport_security_state,
-                     ProxyService* proxy_service,
-                     const std::string& ssl_session_cache_shard,
-                     SSLConfigService* ssl_config_service,
-                     HttpAuthHandlerFactory* http_auth_handler_factory,
-                     NetworkDelegate* network_delegate,
-                     HttpServerProperties* http_server_properties,
-                     NetLog* net_log,
+HttpCache::HttpCache(const net::HttpNetworkSession::Params& params,
                      BackendFactory* backend_factory)
-    : net_log_(net_log),
+    : net_log_(params.net_log),
       backend_factory_(backend_factory),
       building_backend_(false),
       mode_(NORMAL),
-      ssl_host_info_factory_(new SSLHostInfoFactoryAdaptor(
-          cert_verifier,
-          ALLOW_THIS_IN_INITIALIZER_LIST(this))),
-      network_layer_(
-          new HttpNetworkLayer(
-              CreateNetworkSession(
-                  host_resolver,
-                  cert_verifier,
-                  origin_bound_cert_service,
-                  transport_security_state,
-                  proxy_service,
-                  ssl_host_info_factory_.get(),
-                  ssl_session_cache_shard,
-                  ssl_config_service,
-                  http_auth_handler_factory,
-                  network_delegate,
-                  http_server_properties,
-                  net_log))) {
+      network_layer_(new HttpNetworkLayer(new HttpNetworkSession(params))) {
 }
 
 
@@ -339,9 +260,6 @@ HttpCache::HttpCache(HttpNetworkSession* session,
       backend_factory_(backend_factory),
       building_backend_(false),
       mode_(NORMAL),
-      ssl_host_info_factory_(new SSLHostInfoFactoryAdaptor(
-          session->cert_verifier(),
-          ALLOW_THIS_IN_INITIALIZER_LIST(this))),
       network_layer_(new HttpNetworkLayer(session)) {
 }
 
@@ -435,7 +353,7 @@ void HttpCache::WriteMetadata(const GURL& url,
     CreateBackend(NULL, net::CompletionCallback());
   }
 
-  HttpCache::Transaction* trans = new HttpCache::Transaction(this);
+  HttpCache::Transaction* trans = new HttpCache::Transaction(this, NULL, NULL);
   MetadataWriter* writer = new MetadataWriter(trans);
 
   // The writer will self destruct when done.
@@ -470,14 +388,25 @@ void HttpCache::OnExternalCacheHit(const GURL& url,
   disk_cache_->OnExternalCacheHit(key);
 }
 
-int HttpCache::CreateTransaction(scoped_ptr<HttpTransaction>* trans) {
+void HttpCache::InitializeInfiniteCache(const FilePath& path) {
+  if (base::FieldTrialList::FindFullName("InfiniteCache") != "Yes")
+    return;
+  // To be enabled after everything is fully wired.
+  infinite_cache_.Init(path);
+}
+
+int HttpCache::CreateTransaction(scoped_ptr<HttpTransaction>* trans,
+                                 HttpTransactionDelegate* delegate) {
   // Do lazy initialization of disk cache if needed.
   if (!disk_cache_.get()) {
     // We don't care about the result.
     CreateBackend(NULL, net::CompletionCallback());
   }
 
-  trans->reset(new HttpCache::Transaction(this));
+  InfiniteCacheTransaction* infinite_cache_transaction =
+      infinite_cache_.CreateInfiniteCacheTransaction();
+  trans->reset(new HttpCache::Transaction(this, delegate,
+                                          infinite_cache_transaction));
   return OK;
 }
 
@@ -552,9 +481,10 @@ std::string HttpCache::GenerateCacheKey(const HttpRequestInfo* request) {
   if (mode_ == NORMAL) {
     // No valid URL can begin with numerals, so we should not have to worry
     // about collisions with normal URLs.
-    if (request->upload_data && request->upload_data->identifier()) {
-      url.insert(0, base::StringPrintf("%" PRId64 "/",
-                                       request->upload_data->identifier()));
+    if (request->upload_data_stream &&
+        request->upload_data_stream->identifier()) {
+      url.insert(0, base::StringPrintf(
+          "%" PRId64 "/", request->upload_data_stream->identifier()));
     }
     return url;
   }

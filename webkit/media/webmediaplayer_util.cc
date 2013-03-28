@@ -6,7 +6,7 @@
 
 #include <math.h>
 
-namespace webkit_glue {
+namespace webkit_media {
 
 base::TimeDelta ConvertSecondsToTimestamp(float seconds) {
   float microseconds = seconds * base::Time::kMicrosecondsPerSecond;

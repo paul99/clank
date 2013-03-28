@@ -5,19 +5,22 @@
 #ifndef CONTENT_RENDERER_MEDIA_MEDIA_RENDERER_WEBAUDIODEVICE_IMPL_H_
 #define CONTENT_RENDERER_MEDIA_MEDIA_RENDERER_WEBAUDIODEVICE_IMPL_H_
 
-#include <vector>
-
 #include "base/memory/ref_counted.h"
-#include "content/renderer/media/audio_device.h"
+#include "base/threading/thread_checker.h"
+#include "media/audio/audio_parameters.h"
+#include "media/base/audio_renderer_sink.h"
 #include "third_party/WebKit/Source/WebKit/chromium/public/platform/WebAudioDevice.h"
 #include "third_party/WebKit/Source/WebKit/chromium/public/platform/WebVector.h"
 
-class RendererWebAudioDeviceImpl : public WebKit::WebAudioDevice,
-                                   public AudioDevice::RenderCallback {
+namespace content {
+
+class RendererAudioOutputDevice;
+
+class RendererWebAudioDeviceImpl
+    : public WebKit::WebAudioDevice,
+      public media::AudioRendererSink::RenderCallback {
  public:
-  RendererWebAudioDeviceImpl(size_t buffer_size,
-                             int channels,
-                             double sample_rate,
+  RendererWebAudioDeviceImpl(const media::AudioParameters& params,
                              WebKit::WebAudioDevice::RenderCallback* callback);
   virtual ~RendererWebAudioDeviceImpl();
 
@@ -26,20 +29,32 @@ class RendererWebAudioDeviceImpl : public WebKit::WebAudioDevice,
   virtual void stop();
   virtual double sampleRate();
 
-  // AudioDevice::RenderCallback implementation.
-  virtual size_t Render(const std::vector<float*>& audio_data,
-                        size_t number_of_frames,
-                        size_t audio_delay_milliseconds) OVERRIDE;
-  virtual void OnError() OVERRIDE;
+  // AudioRendererSink::RenderCallback implementation.
+  virtual int Render(media::AudioBus* dest,
+                     int audio_delay_milliseconds) OVERRIDE;
+
+  virtual void RenderIO(media::AudioBus* source,
+                        media::AudioBus* dest,
+                        int audio_delay_milliseconds) OVERRIDE;
+
+  virtual void OnRenderError() OVERRIDE;
 
  private:
-  scoped_refptr<AudioDevice> audio_device_;
-  bool is_running_;
+  const media::AudioParameters params_;
 
   // Weak reference to the callback into WebKit code.
-  WebKit::WebAudioDevice::RenderCallback* client_callback_;
+  WebKit::WebAudioDevice::RenderCallback* const client_callback_;
+
+  // To avoid the need for locking, ensure the control methods of the
+  // WebKit::WebAudioDevice implementation are called on the same thread.
+  base::ThreadChecker thread_checker_;
+
+  // When non-NULL, we are started.  When NULL, we are stopped.
+  scoped_refptr<RendererAudioOutputDevice> output_device_;
 
   DISALLOW_COPY_AND_ASSIGN(RendererWebAudioDeviceImpl);
 };
+
+}  // namespace content
 
 #endif  // CONTENT_RENDERER_MEDIA_MEDIA_RENDERER_WEBAUDIODEVICE_IMPL_H_

@@ -4,22 +4,37 @@
 
 #ifndef UI_VIEWS_CONTROLS_MENU_MENU_SEPARATOR_H_
 #define UI_VIEWS_CONTROLS_MENU_MENU_SEPARATOR_H_
-#pragma once
 
 #include "base/compiler_specific.h"
+#include "ui/base/models/menu_separator_types.h"
 #include "ui/views/view.h"
 
 namespace views {
 
+class MenuItemView;
+
 class MenuSeparator : public View {
  public:
-  MenuSeparator() {}
+  MenuSeparator(MenuItemView* parent, ui::MenuSeparatorType type)
+      : type_(type),
+        parent_menu_item_(parent) {}
 
   // View overrides.
   virtual void OnPaint(gfx::Canvas* canvas) OVERRIDE;
   virtual gfx::Size GetPreferredSize() OVERRIDE;
 
  private:
+#if defined(USE_AURA)
+  void OnPaintAura(gfx::Canvas* canvas);
+  gfx::Size GetPreferredSizeAura();
+#endif
+
+  // The type of the separator.
+  const ui::MenuSeparatorType type_;
+
+  // Our parent.
+  MenuItemView* parent_menu_item_;
+
   DISALLOW_COPY_AND_ASSIGN(MenuSeparator);
 };
 

@@ -14,19 +14,19 @@
 #include "base/utf_string_conversions.h"
 #include "build/build_config.h"
 #include "net/base/net_util.h"
-#include "third_party/npapi/bindings/npruntime.h"
 #include "third_party/WebKit/Source/WebKit/chromium/public/WebBindings.h"
 #include "third_party/WebKit/Source/WebKit/chromium/public/WebKit.h"
+#include "third_party/npapi/bindings/npruntime.h"
 #include "ui/base/ui_base_switches.h"
-#include "ui/gfx/gl/gl_implementation.h"
-#include "ui/gfx/gl/gl_surface.h"
-#include "webkit/glue/webkit_glue.h"
+#include "ui/gl/gl_implementation.h"
+#include "ui/gl/gl_surface.h"
 #include "webkit/plugins/npapi/plugin_instance.h"
 #include "webkit/plugins/npapi/plugin_lib.h"
 #include "webkit/plugins/npapi/plugin_list.h"
 #include "webkit/plugins/npapi/plugin_stream_url.h"
 #include "webkit/plugins/npapi/webplugin_delegate.h"
 #include "webkit/plugins/webplugininfo.h"
+#include "webkit/user_agent/user_agent.h"
 
 #if defined(OS_MACOSX)
 #include "base/mac/mac_util.h"
@@ -54,10 +54,12 @@ static PluginInstance* FindInstance(NPP id) {
 }
 
 #if defined(OS_MACOSX)
-// Returns true if the OS supports shared accelerated surfaces via IOSurface.
-// This is true on Snow Leopard and higher.
-static bool SupportsSharingAcceleratedSurfaces() {
-  if (base::mac::IsOSLeopardOrEarlier())
+// Returns true if Core Animation plugins are supported. This requires that the
+// OS supports shared accelerated surfaces via IOSurface. This is true on Snow
+// Leopard and higher.
+static bool SupportsCoreAnimationPlugins() {
+  if (CommandLine::ForCurrentProcess()->HasSwitch(
+      switches::kDisableCoreAnimationPlugins))
     return false;
   // We also need to be running with desktop GL and not the software
   // OSMesa renderer in order to share accelerated surfaces between
@@ -74,9 +76,7 @@ static bool SupportsSharingAcceleratedSurfaces() {
 }
 
 static bool UsingCompositedCoreAnimationPlugins() {
-  // Temporarily disable composited CA plugins to reduce the
-  // chance of running into issue 117500.
-  return false && !CommandLine::ForCurrentProcess()->HasSwitch(
+  return !CommandLine::ForCurrentProcess()->HasSwitch(
       switches::kDisableCompositedCoreAnimationPlugins);
 }
 #endif
@@ -600,20 +600,6 @@ const char* NPN_UserAgent(NPP id) {
   if (use_mozilla_user_agent)
     return "Mozilla/5.0 (Windows; U; Windows NT 5.1; en-US; rv:1.9a1) "
         "Gecko/20061103 Firefox/2.0a1";
-#elif defined(OS_MACOSX)
-  // Silverlight 4 doesn't handle events correctly unless we claim to be Safari.
-  scoped_refptr<PluginInstance> plugin;
-  if (id)
-    plugin = FindInstance(id);
-  if (plugin.get()) {
-    webkit::WebPluginInfo plugin_info =
-        plugin->plugin_lib()->plugin_info();
-    if (plugin_info.name == ASCIIToUTF16("Silverlight Plug-In") &&
-        StartsWith(plugin_info.version, ASCIIToUTF16("4."), false)) {
-      return "Mozilla/5.0 (Macintosh; U; Intel Mac OS X 10_6_4; en-us) "
-          "AppleWebKit/534.1+ (KHTML, like Gecko) Version/5.0 Safari/533.16";
-    }
-  }
 #endif
 
   return webkit_glue::GetUserAgent(GURL()).c_str();
@@ -759,7 +745,7 @@ NPError NPN_GetValue(NPP id, NPNVariable variable, void* value) {
       rv = NPERR_NO_ERROR;
       break;
     }
-  #if defined(TOOLKIT_USES_GTK)
+  #if defined(TOOLKIT_GTK)
     case NPNVToolkit:
       // Tell them we are GTK2.  (The alternative is GTK 1.2.)
       *reinterpret_cast<int*>(value) = NPNVGtk2;
@@ -800,52 +786,30 @@ NPError NPN_GetValue(NPP id, NPNVariable variable, void* value) {
       rv = NPERR_NO_ERROR;
       break;
     }
-#ifndef NP_NO_QUICKDRAW
-    case NPNVsupportsQuickDrawBool: {
-      // We do not admit to supporting the QuickDraw drawing model. The logic
-      // here is that our QuickDraw plugin support is so rudimentary that we
-      // only want to use it as a fallback to keep plugins from crashing: if a
-      // plugin knows enough to ask, we want them to use CoreGraphics.
-      NPBool* supports_qd = reinterpret_cast<NPBool*>(value);
-      *supports_qd = false;
-      rv = NPERR_NO_ERROR;
-      break;
-    }
-#endif
     case NPNVsupportsCoreGraphicsBool:
-#ifndef NP_NO_CARBON
-    case NPNVsupportsCarbonBool:
-#endif
     case NPNVsupportsCocoaBool: {
-      // we do support these drawing and event models.
+      // These drawing and event models are always supported.
       NPBool* supports_model = reinterpret_cast<NPBool*>(value);
       *supports_model = true;
       rv = NPERR_NO_ERROR;
       break;
     }
+    case NPNVsupportsInvalidatingCoreAnimationBool:
     case NPNVsupportsCoreAnimationBool: {
-      // We only support the Core Animation model on 10.6 and higher
-      // TODO(stuartmorgan): Once existing CA plugins have implemented the
-      // invalidating version, remove support for this one.
       NPBool* supports_model = reinterpret_cast<NPBool*>(value);
-      *supports_model = webkit::npapi::SupportsSharingAcceleratedSurfaces() ?
-          true : false;
+      *supports_model = webkit::npapi::SupportsCoreAnimationPlugins();
       rv = NPERR_NO_ERROR;
       break;
     }
-    case NPNVsupportsInvalidatingCoreAnimationBool: {
-      // The composited code path for this model only works on 10.6 and higher.
-      // The old direct-to-screen code path supports 10.5.
-      NPBool* supports_model = reinterpret_cast<NPBool*>(value);
-      bool composited = webkit::npapi::UsingCompositedCoreAnimationPlugins();
-      *supports_model = composited ?
-          webkit::npapi::SupportsSharingAcceleratedSurfaces() : true;
-      rv = NPERR_NO_ERROR;
-      break;
-    }
+#ifndef NP_NO_CARBON
+    case NPNVsupportsCarbonBool:
+#endif
+#ifndef NP_NO_QUICKDRAW
+    case NPNVsupportsQuickDrawBool:
+#endif
     case NPNVsupportsOpenGLBool: {
-      // This drawing model was never widely supported, and we don't plan to
-      // support it.
+      // These models are never supported. OpenGL was never widely supported,
+      // and QuickDraw and Carbon have been deprecated for quite some time.
       NPBool* supports_model = reinterpret_cast<NPBool*>(value);
       *supports_model = false;
       rv = NPERR_NO_ERROR;
@@ -854,15 +818,15 @@ NPError NPN_GetValue(NPP id, NPNVariable variable, void* value) {
     case NPNVsupportsCompositingCoreAnimationPluginsBool: {
       NPBool* supports_compositing = reinterpret_cast<NPBool*>(value);
       *supports_compositing =
+          webkit::npapi::SupportsCoreAnimationPlugins() &&
           webkit::npapi::UsingCompositedCoreAnimationPlugins();
       rv = NPERR_NO_ERROR;
       break;
     }
     case NPNVsupportsUpdatedCocoaTextInputBool: {
-      // We support the clarifications to the Cocoa IME event spec, but since
-      // IME currently only works on 10.6, only answer true there.
+      // We support the clarifications to the Cocoa IME event spec.
       NPBool* supports_update = reinterpret_cast<NPBool*>(value);
-      *supports_update = base::mac::IsOSSnowLeopardOrLater();
+      *supports_update = true;
       rv = NPERR_NO_ERROR;
       break;
     }
@@ -918,29 +882,22 @@ NPError NPN_SetValue(NPP id, NPPVariable variable, void* value) {
       return NPERR_GENERIC_ERROR;
   #if defined(OS_MACOSX)
     case NPPVpluginDrawingModel: {
-      int model = reinterpret_cast<int>(value);
+      intptr_t model = reinterpret_cast<intptr_t>(value);
       if (model == NPDrawingModelCoreGraphics ||
-          (model == NPDrawingModelInvalidatingCoreAnimation &&
-           (webkit::npapi::SupportsSharingAcceleratedSurfaces() ||
-            !webkit::npapi::UsingCompositedCoreAnimationPlugins())) ||
-          (model == NPDrawingModelCoreAnimation &&
-           webkit::npapi::SupportsSharingAcceleratedSurfaces())) {
+          ((model == NPDrawingModelInvalidatingCoreAnimation ||
+            model == NPDrawingModelCoreAnimation) &&
+           webkit::npapi::SupportsCoreAnimationPlugins())) {
         plugin->set_drawing_model(static_cast<NPDrawingModel>(model));
         return NPERR_NO_ERROR;
       }
       return NPERR_GENERIC_ERROR;
     }
     case NPPVpluginEventModel: {
-      // we support Carbon and Cocoa event models
-      int model = reinterpret_cast<int>(value);
-      switch (model) {
-#ifndef NP_NO_CARBON
-        case NPEventModelCarbon:
-#endif
-        case NPEventModelCocoa:
-          plugin->set_event_model(static_cast<NPEventModel>(model));
-          return NPERR_NO_ERROR;
-          break;
+      // Only the Cocoa event model is supported.
+      intptr_t model = reinterpret_cast<intptr_t>(value);
+      if (model == NPEventModelCocoa) {
+        plugin->set_event_model(static_cast<NPEventModel>(model));
+        return NPERR_NO_ERROR;
       }
       return NPERR_GENERIC_ERROR;
     }

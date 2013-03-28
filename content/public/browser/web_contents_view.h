@@ -4,39 +4,37 @@
 
 #ifndef CONTENT_PUBLIC_BROWSER_WEB_CONTENTS_VIEW_H_
 #define CONTENT_PUBLIC_BROWSER_WEB_CONTENTS_VIEW_H_
-#pragma once
 
 #include <string>
 
 #include "base/basictypes.h"
+#include "base/process_util.h"
 #include "content/common/content_export.h"
-#include "content/public/browser/render_view_host_delegate.h"
 #include "ui/gfx/native_widget_types.h"
 #include "ui/gfx/rect.h"
 #include "ui/gfx/size.h"
 
-class RenderViewHost;
-class RenderWidgetHost;
-class RenderWidgetHostView;
-class TabContents;
+struct WebDropData;
 
 namespace content {
 
+class RenderViewHost;
+class RenderWidgetHost;
+class RenderWidgetHostView;
+
 // The WebContentsView is an interface that is implemented by the platform-
-// dependent web contents views. The TabContents uses this interface to talk to
-// them. View-related messages will also get forwarded directly to this class
-// from RenderViewHost via RenderViewHostDelegate::View.
-class CONTENT_EXPORT WebContentsView
-    : public content::RenderViewHostDelegate::View {
+// dependent web contents views. The WebContents uses this interface to talk to
+// them.
+class CONTENT_EXPORT WebContentsView {
  public:
-  WebContentsView() {}
   virtual ~WebContentsView() {}
 
-  virtual void CreateView(const gfx::Size& initial_size) = 0;
+  virtual void CreateView(
+      const gfx::Size& initial_size, gfx::NativeView context) = 0;
 
   // Sets up the View that holds the rendered web page, receives messages for
   // it and contains page plugins. The host view should be sized to the current
-  // size of the TabContents.
+  // size of the WebContents.
   virtual RenderWidgetHostView* CreateViewForWidget(
       RenderWidgetHost* render_widget_host) = 0;
 
@@ -54,7 +52,7 @@ class CONTENT_EXPORT WebContentsView
 
   // Computes the rectangle for the native widget that contains the contents of
   // the tab in the screen coordinate system.
-  virtual void GetContainerBounds(gfx::Rect *out) const = 0;
+  virtual void GetContainerBounds(gfx::Rect* out) const = 0;
 
   // Helper function for GetContainerBounds. Most callers just want to know the
   // size, and this makes it more clear.
@@ -71,9 +69,7 @@ class CONTENT_EXPORT WebContentsView
   virtual void SetPageTitle(const string16& title) = 0;
 
   // Used to notify the view that a tab has crashed.
-  virtual void OnTabCrashed(base::TerminationStatus status,
-                            int error_code,
-                            const base::ProcessHandle handle) = 0;
+  virtual void OnTabCrashed(base::TerminationStatus status, int error_code) = 0;
 
   // TODO(brettw) this is a hack. It's used in two places at the time of this
   // writing: (1) when render view hosts switch, we need to size the replaced
@@ -82,17 +78,17 @@ class CONTENT_EXPORT WebContentsView
   //
   // (1) will be fixed once interstitials are cleaned up. (2) seems like it
   // should be cleaned up or done some other way, since this works for normal
-  // TabContents without the special code.
+  // WebContents without the special code.
   virtual void SizeContents(const gfx::Size& size) = 0;
 
-  // Invoked when the TabContents is notified that the RenderView has been
+  // Invoked when the WebContents is notified that the RenderView has been
   // fully created.
   virtual void RenderViewCreated(RenderViewHost* host) = 0;
 
   // Sets focus to the native widget for this tab.
   virtual void Focus() = 0;
 
-  // Sets focus to the appropriate element when the tab contents is shown the
+  // Sets focus to the appropriate element when the WebContents is shown the
   // first time.
   virtual void SetInitialFocus() = 0;
 
@@ -103,38 +99,29 @@ class CONTENT_EXPORT WebContentsView
   // invoked, SetInitialFocus is invoked.
   virtual void RestoreFocus() = 0;
 
-  // If we try to close the tab while a drag is in progress, we crash.  These
-  // methods allow the tab contents to determine if a drag is in progress and
-  // postpone the tab closing.
-  virtual bool IsDoingDrag() const = 0;
-  virtual void CancelDragAndCloseTab() = 0;
+  // Returns the current drop data, if any.
+  virtual WebDropData* GetDropData() const = 0;
 
   // If we close the tab while a UI control is in an event-tracking
   // loop, the control may message freed objects and crash.
-  // TabContents::Close() calls IsEventTracking(), and if it returns
+  // WebContents::Close() calls IsEventTracking(), and if it returns
   // true CloseTabAfterEventTracking() is called and the close is not
   // completed.
   virtual bool IsEventTracking() const = 0;
   virtual void CloseTabAfterEventTracking() = 0;
 
   // Get the bounds of the View, relative to the parent.
-  // TODO(beng): Return a rect rather than using an out param.
-  virtual void GetViewBounds(gfx::Rect* out) const = 0;
+  virtual gfx::Rect GetViewBounds() const = 0;
 
-  // ---------------------------------------------------------------------------
-  // Functions for embedders.
-  // TODO(avi): Figure out where these go on the API surface.
-
-  // Installs a native view to cover the visible web contents. Removed by
-  // |RemoveOverlayView|. This is not a transfer of ownership, and the view must
-  // remain valid until removed.
-  virtual void InstallOverlayView(gfx::NativeView view) = 0;
-
-  // Removes the native overlay view installed by |InstallOverlayView|.
-  virtual void RemoveOverlayView() = 0;
-
- private:
-  DISALLOW_COPY_AND_ASSIGN(WebContentsView);
+#if defined(OS_MACOSX)
+  // The web contents view assumes that its view will never be overlapped by
+  // another view (either partially or fully). This allows it to perform
+  // optimizations. If the view is in a view hierarchy where it might be
+  // overlapped by another view, notify the view by calling this with |true|
+  // before it draws for the first time. After the first draw, do not change
+  // this setting.
+  virtual void SetAllowOverlappingViews(bool overlapping) = 0;
+#endif
 };
 
 }  // namespace content

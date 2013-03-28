@@ -1,4 +1,4 @@
-// Copyright (c) 2011 The Chromium Authors. All rights reserved.
+// Copyright (c) 2012 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -8,6 +8,7 @@
 
 #include "base/bind.h"
 #include "base/bind_helpers.h"
+#include "base/memory/weak_ptr.h"
 #include "base/stl_util.h"
 #include "base/string_number_conversions.h"
 #include "base/utf_string_conversions.h"
@@ -18,6 +19,7 @@
 #include "chrome/browser/themes/theme_service_factory.h"
 #include "chrome/browser/ui/browser.h"
 #include "chrome/browser/ui/browser_tab_restore_service_delegate.h"
+#include "chrome/browser/ui/gtk/event_utils.h"
 #include "chrome/browser/ui/gtk/global_menu_bar.h"
 #include "chrome/browser/ui/gtk/gtk_theme_service.h"
 #include "chrome/browser/ui/gtk/gtk_util.h"
@@ -94,6 +96,7 @@ GlobalHistoryMenu::GlobalHistoryMenu(Browser* browser)
     : browser_(browser),
       profile_(browser_->profile()),
       top_sites_(NULL),
+      ALLOW_THIS_IN_INITIALIZER_LIST(weak_ptr_factory_(this)),
       tab_restore_service_(NULL) {
 }
 
@@ -133,9 +136,8 @@ void GlobalHistoryMenu::GetTopSitesData() {
   DCHECK(top_sites_);
 
   top_sites_->GetMostVisitedURLs(
-      &top_sites_consumer_,
       base::Bind(&GlobalHistoryMenu::OnTopSitesReceived,
-                 base::Unretained(this)));
+                 weak_ptr_factory_.GetWeakPtr()));
 }
 
 void GlobalHistoryMenu::OnTopSitesReceived(
@@ -375,7 +377,7 @@ void GlobalHistoryMenu::TabRestoreServiceDestroyed(
 
 void GlobalHistoryMenu::OnRecentlyClosedItemActivated(GtkWidget* sender) {
   WindowOpenDisposition disposition =
-      gtk_util::DispositionForCurrentButtonPressEvent();
+      event_utils::DispositionForCurrentButtonPressEvent();
   HistoryItem* item = HistoryItemForMenuItem(sender);
 
   // If this item can be restored using TabRestoreService, do so. Otherwise,

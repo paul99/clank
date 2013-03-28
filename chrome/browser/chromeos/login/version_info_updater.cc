@@ -4,58 +4,73 @@
 
 #include "chrome/browser/chromeos/login/version_info_updater.h"
 
-#include <string>
 #include <vector>
 
 #include "base/bind.h"
 #include "base/bind_helpers.h"
-#include "base/string16.h"
+#include "base/chromeos/chromeos_version.h"
 #include "base/string_util.h"
 #include "base/stringprintf.h"
 #include "base/utf_string_conversions.h"
 #include "chrome/browser/browser_process.h"
-#include "chrome/browser/chromeos/cros/cros_library.h"
-#include "chrome/browser/chromeos/system/runtime_environment.h"
+#include "chrome/browser/chromeos/settings/cros_settings.h"
+#include "chrome/browser/chromeos/settings/cros_settings_names.h"
 #include "chrome/browser/policy/browser_policy_connector.h"
-#include "chrome/browser/profiles/profile_manager.h"
+#include "chrome/browser/policy/device_cloud_policy_manager_chromeos.h"
+#include "chrome/common/chrome_notification_types.h"
 #include "chrome/common/chrome_version_info.h"
-#include "googleurl/src/gurl.h"
 #include "grit/chromium_strings.h"
 #include "grit/generated_resources.h"
 #include "grit/theme_resources.h"
-#include "third_party/cros_system_api/window_manager/chromeos_wm_ipc_enums.h"
 #include "ui/base/l10n/l10n_util.h"
 #include "ui/base/resource/resource_bundle.h"
 
-#if defined(TOOLKIT_USES_GTK)
-#include "chrome/browser/chromeos/legacy_window_manager/wm_ipc.h"
-#endif
-
 namespace chromeos {
+
+namespace {
+
+const char* kReportingFlags[] = {
+  chromeos::kReportDeviceVersionInfo,
+  chromeos::kReportDeviceActivityTimes,
+  chromeos::kReportDeviceBootMode,
+  chromeos::kReportDeviceLocation,
+};
+
+}
 
 ///////////////////////////////////////////////////////////////////////////////
 // VersionInfoUpdater public:
 
 VersionInfoUpdater::VersionInfoUpdater(Delegate* delegate)
-    : delegate_(delegate) {
+    : cros_settings_(chromeos::CrosSettings::Get()),
+      delegate_(delegate),
+      ALLOW_THIS_IN_INITIALIZER_LIST(weak_pointer_factory_(this)) {
 }
 
 VersionInfoUpdater::~VersionInfoUpdater() {
+  policy::DeviceCloudPolicyManagerChromeOS* policy_manager =
+      g_browser_process->browser_policy_connector()->
+          GetDeviceCloudPolicyManager();
+  if (policy_manager)
+    policy_manager->core()->store()->RemoveObserver(this);
+
+  for (unsigned int i = 0; i < arraysize(kReportingFlags); ++i)
+    cros_settings_->RemoveSettingsObserver(kReportingFlags[i], this);
 }
 
 void VersionInfoUpdater::StartUpdate(bool is_official_build) {
-  if (system::runtime_environment::IsRunningOnChromeOS()) {
+  if (base::chromeos::IsRunningOnChromeOS()) {
     version_loader_.GetVersion(
-        &version_consumer_,
-        base::Bind(&VersionInfoUpdater::OnVersion, base::Unretained(this)),
-        is_official_build ?
-            VersionLoader::VERSION_SHORT_WITH_DATE :
-            VersionLoader::VERSION_FULL);
+        is_official_build ? VersionLoader::VERSION_SHORT_WITH_DATE
+                          : VersionLoader::VERSION_FULL,
+        base::Bind(&VersionInfoUpdater::OnVersion,
+                   weak_pointer_factory_.GetWeakPtr()),
+        &tracker_);
     boot_times_loader_.GetBootTimes(
-        &boot_times_consumer_,
-        base::Bind(is_official_build ? &VersionInfoUpdater::OnBootTimesNoop :
-                                       &VersionInfoUpdater::OnBootTimes,
-                   base::Unretained(this)));
+        base::Bind(is_official_build ? &VersionInfoUpdater::OnBootTimesNoop
+                                     : &VersionInfoUpdater::OnBootTimes,
+                   weak_pointer_factory_.GetWeakPtr()),
+        &tracker_);
   } else {
     UpdateVersionLabel();
   }
@@ -76,22 +91,24 @@ void VersionInfoUpdater::StartUpdate(bool is_official_build) {
     // is already fetched and has finished initialization.
     UpdateEnterpriseInfo();
   }
+
+  policy::DeviceCloudPolicyManagerChromeOS* policy_manager =
+      g_browser_process->browser_policy_connector()->
+          GetDeviceCloudPolicyManager();
+  if (policy_manager) {
+    policy_manager->core()->store()->AddObserver(this);
+
+    // Ensure that we have up-to-date enterprise info in case enterprise policy
+    // is already fetched and has finished initialization.
+    UpdateEnterpriseInfo();
+  }
+
+  // Watch for changes to the reporting flags.
+  for (unsigned int i = 0; i < arraysize(kReportingFlags); ++i)
+    cros_settings_->AddSettingsObserver(kReportingFlags[i], this);
 }
 
 void VersionInfoUpdater::UpdateVersionLabel() {
-#if defined(USE_AURA)
-  // Suffix added to the version string on Aura builds.
-  const char *kAuraSuffix = " Aura";
-#endif
-
-  if (!system::runtime_environment::IsRunningOnChromeOS()) {
-    if (delegate_) {
-      delegate_->OnOSVersionLabelTextUpdated(
-          CrosLibrary::Get()->load_error_string());
-    }
-    return;
-  }
-
   if (version_text_.empty())
     return;
 
@@ -99,26 +116,8 @@ void VersionInfoUpdater::UpdateVersionLabel() {
   std::string label_text = l10n_util::GetStringFUTF8(
       IDS_LOGIN_VERSION_LABEL_FORMAT,
       l10n_util::GetStringUTF16(IDS_PRODUCT_NAME),
-#if defined(USE_AURA)
-      UTF8ToUTF16(version_info.Version() + kAuraSuffix),
-#else
       UTF8ToUTF16(version_info.Version()),
-#endif
       UTF8ToUTF16(version_text_));
-
-  if (!enterprise_domain_text_.empty()) {
-    label_text += ' ';
-    if (enterprise_status_text_.empty()) {
-      label_text += l10n_util::GetStringFUTF8(
-          IDS_LOGIN_MANAGED_BY_LABEL_FORMAT,
-          UTF8ToUTF16(enterprise_domain_text_));
-    } else {
-      label_text += l10n_util::GetStringFUTF8(
-          IDS_LOGIN_MANAGED_BY_WITH_STATUS_LABEL_FORMAT,
-          UTF8ToUTF16(enterprise_domain_text_),
-          UTF8ToUTF16(enterprise_status_text_));
-    }
-  }
 
   // Workaround over incorrect width calculation in old fonts.
   // TODO(glotov): remove the following line when new fonts are used.
@@ -129,59 +128,38 @@ void VersionInfoUpdater::UpdateVersionLabel() {
 }
 
 void VersionInfoUpdater::UpdateEnterpriseInfo() {
-  policy::BrowserPolicyConnector* policy_connector =
-      g_browser_process->browser_policy_connector();
+  SetEnterpriseInfo(
+      g_browser_process->browser_policy_connector()->GetEnterpriseDomain());
+}
 
-  std::string status_text;
-  policy::CloudPolicySubsystem* cloud_policy_subsystem =
-      policy_connector->device_cloud_policy_subsystem();
-  if (cloud_policy_subsystem) {
-    switch (cloud_policy_subsystem->state()) {
-      case policy::CloudPolicySubsystem::UNENROLLED:
-        status_text = l10n_util::GetStringUTF8(
-            IDS_LOGIN_MANAGED_BY_STATUS_PENDING);
-        break;
-      case policy::CloudPolicySubsystem::UNMANAGED:
-      case policy::CloudPolicySubsystem::BAD_GAIA_TOKEN:
-      case policy::CloudPolicySubsystem::LOCAL_ERROR:
-        status_text = l10n_util::GetStringUTF8(
-            IDS_LOGIN_MANAGED_BY_STATUS_LOST_CONNECTION);
-        break;
-      case policy::CloudPolicySubsystem::NETWORK_ERROR:
-        status_text = l10n_util::GetStringUTF8(
-            IDS_LOGIN_MANAGED_BY_STATUS_NETWORK_ERROR);
-        break;
-      case policy::CloudPolicySubsystem::TOKEN_FETCHED:
-      case policy::CloudPolicySubsystem::SUCCESS:
-        break;
+void VersionInfoUpdater::SetEnterpriseInfo(const std::string& domain_name) {
+  if (domain_name != enterprise_domain_text_) {
+    enterprise_domain_text_ = domain_name;
+    UpdateVersionLabel();
+
+    // Update the notification about device status reporting.
+    if (delegate_) {
+      std::string enterprise_info;
+      if (!domain_name.empty()) {
+        enterprise_info = l10n_util::GetStringFUTF8(
+            IDS_DEVICE_OWNED_BY_NOTICE,
+            UTF8ToUTF16(domain_name));
+        delegate_->OnEnterpriseInfoUpdated(enterprise_info);
+      }
     }
   }
-
-  SetEnterpriseInfo(policy_connector->GetEnterpriseDomain(), status_text);
 }
 
-void VersionInfoUpdater::SetEnterpriseInfo(const std::string& domain_name,
-                                       const std::string& status_text) {
-  if (domain_name != enterprise_domain_text_ ||
-      status_text != enterprise_status_text_) {
-    enterprise_domain_text_ = domain_name;
-    enterprise_status_text_ = status_text;
-    UpdateVersionLabel();
-  }
-}
-
-void VersionInfoUpdater::OnVersion(
-    VersionLoader::Handle handle, std::string version) {
-  version_text_.swap(version);
+void VersionInfoUpdater::OnVersion(const std::string& version) {
+  version_text_ = version;
   UpdateVersionLabel();
 }
 
 void VersionInfoUpdater::OnBootTimesNoop(
-    BootTimesLoader::Handle handle, BootTimesLoader::BootTimes boot_times) {
-}
+    const BootTimesLoader::BootTimes& boot_times) {}
 
 void VersionInfoUpdater::OnBootTimes(
-    BootTimesLoader::Handle handle, BootTimesLoader::BootTimes boot_times) {
+    const BootTimesLoader::BootTimes& boot_times) {
   const char* kBootTimesNoChromeExec =
       "Non-firmware boot took %.2f seconds (kernel %.2fs, system %.2fs)";
   const char* kBootTimesChromeExec =
@@ -214,6 +192,24 @@ void VersionInfoUpdater::OnPolicyStateChanged(
     policy::CloudPolicySubsystem::PolicySubsystemState state,
     policy::CloudPolicySubsystem::ErrorDetails error_details) {
   UpdateEnterpriseInfo();
+}
+
+void VersionInfoUpdater::OnStoreLoaded(policy::CloudPolicyStore* store) {
+  UpdateEnterpriseInfo();
+}
+
+void VersionInfoUpdater::OnStoreError(policy::CloudPolicyStore* store) {
+  UpdateEnterpriseInfo();
+}
+
+void VersionInfoUpdater::Observe(
+    int type,
+    const content::NotificationSource& source,
+    const content::NotificationDetails& details) {
+  if (type == chrome::NOTIFICATION_SYSTEM_SETTING_CHANGED)
+    UpdateEnterpriseInfo();
+  else
+    NOTREACHED();
 }
 
 }  // namespace chromeos

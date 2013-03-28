@@ -1,4 +1,4 @@
-// Copyright (c) 2011 The Chromium Authors. All rights reserved.
+// Copyright (c) 2012 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -8,32 +8,47 @@
 #include "base/file_path.h"
 #include "base/memory/scoped_ptr.h"
 #include "base/memory/weak_ptr.h"
-#include "base/message_loop_proxy.h"
 #include "base/platform_file.h"
 #include "base/time.h"
 #include "net/base/file_stream.h"
 #include "net/base/io_buffer.h"
 #include "net/url_request/url_request.h"
+#include "webkit/fileapi/file_system_operation.h"
+#include "webkit/storage/webkit_storage_export.h"
 
 namespace fileapi {
 
-class FileSystemOperation;
+class FileStreamWriter;
 class FileSystemOperationContext;
 class FileSystemQuotaUtil;
 
-class FileWriterDelegate : public net::URLRequest::Delegate {
+class WEBKIT_STORAGE_EXPORT_PRIVATE FileWriterDelegate
+    : public net::URLRequest::Delegate {
  public:
+  enum WriteProgressStatus {
+    SUCCESS_IO_PENDING,
+    SUCCESS_COMPLETED,
+    ERROR_WRITE_STARTED,
+    ERROR_WRITE_NOT_STARTED,
+  };
+
+  typedef base::Callback<void(base::PlatformFileError result,
+                              int64 bytes,
+                              WriteProgressStatus write_status)>
+      DelegateWriteCallback;
+
   FileWriterDelegate(
-      FileSystemOperation* write_operation,
-      int64 offset,
-      scoped_refptr<base::MessageLoopProxy> proxy);
+      const DelegateWriteCallback& write_callback,
+      scoped_ptr<FileStreamWriter> file_writer);
   virtual ~FileWriterDelegate();
 
-  void Start(base::PlatformFile file,
-             net::URLRequest* request);
-  base::PlatformFile file() {
-    return file_;
-  }
+  void Start(scoped_ptr<net::URLRequest> request);
+
+  // Cancels the current write operation.  Returns true if it is ok to
+  // delete this instance immediately.  Otherwise this will call
+  // |write_operation|->DidWrite() with complete=true to let the operation
+  // perform the final cleanup.
+  bool Cancel();
 
   virtual void OnReceivedRedirect(net::URLRequest* request,
                                   const GURL& new_url,
@@ -51,7 +66,8 @@ class FileWriterDelegate : public net::URLRequest::Delegate {
                                int bytes_read) OVERRIDE;
 
  private:
-  void OnGetFileInfoAndCallStartUpdate(
+  void OnGetFileInfoAndStartRequest(
+      scoped_ptr<net::URLRequest> request,
       base::PlatformFileError error,
       const base::PlatformFileInfo& file_info);
   void Read();
@@ -60,24 +76,28 @@ class FileWriterDelegate : public net::URLRequest::Delegate {
   void OnDataWritten(int write_response);
   void OnError(base::PlatformFileError error);
   void OnProgress(int bytes_read, bool done);
+  void OnWriteCancelled(int status);
+  void FlushForCompletion(base::PlatformFileError error,
+                          int bytes_written,
+                          WriteProgressStatus progress_status);
+  void OnFlushed(base::PlatformFileError error,
+                 int bytes_written,
+                 WriteProgressStatus progress_status,
+                 int flush_error);
 
-  FileSystemOperationContext* file_system_operation_context() const;
   FileSystemQuotaUtil* quota_util() const;
+  WriteProgressStatus GetCompletionStatusOnError() const;
 
-  FileSystemOperation* file_system_operation_;
-  base::PlatformFile file_;
-  int64 size_;
-  int64 offset_;
-  scoped_refptr<base::MessageLoopProxy> proxy_;
+  DelegateWriteCallback write_callback_;
+  scoped_ptr<FileStreamWriter> file_stream_writer_;
   base::Time last_progress_event_time_;
+  bool writing_started_;
   int bytes_written_backlog_;
   int bytes_written_;
   int bytes_read_;
-  int64 total_bytes_written_;
-  int64 allowed_bytes_to_write_;
   scoped_refptr<net::IOBufferWithSize> io_buffer_;
-  scoped_ptr<net::FileStream> file_stream_;
-  net::URLRequest* request_;
+  scoped_refptr<net::DrainableIOBuffer> cursor_;
+  scoped_ptr<net::URLRequest> request_;
   base::WeakPtrFactory<FileWriterDelegate> weak_factory_;
 };
 

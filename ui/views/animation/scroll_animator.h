@@ -4,7 +4,6 @@
 
 #ifndef UI_VIEWS_ANIMATION_SCROLL_ANIMATOR_H_
 #define UI_VIEWS_ANIMATION_SCROLL_ANIMATOR_H_
-#pragma once
 
 #include "base/basictypes.h"
 #include "base/memory/scoped_ptr.h"
@@ -19,7 +18,8 @@ namespace views {
 
 class VIEWS_EXPORT ScrollDelegate {
  public:
-  virtual void OnScroll(float dx, float dy) = 0;
+  // Returns true if the content was actually scrolled, false otherwise.
+  virtual bool OnScroll(float dx, float dy) = 0;
 
  protected:
   ~ScrollDelegate() {}

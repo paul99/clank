@@ -4,6 +4,7 @@
 
 #include "chrome/browser/ui/webui/ntp/ntp_resource_cache.h"
 
+#include <string>
 #include <vector>
 
 #include "base/command_line.h"
@@ -12,24 +13,27 @@
 #include "base/string16.h"
 #include "base/string_number_conversions.h"
 #include "base/stringprintf.h"
-#include "base/time.h"
 #include "base/utf_string_conversions.h"
 #include "base/values.h"
-#include "chrome/browser/defaults.h"
+#include "chrome/browser/browser_process.h"
+#include "chrome/browser/first_run/first_run.h"
 #include "chrome/browser/google/google_util.h"
+#include "chrome/browser/policy/browser_policy_connector.h"
 #include "chrome/browser/prefs/pref_service.h"
 #include "chrome/browser/profiles/profile.h"
 #include "chrome/browser/sync/profile_sync_service.h"
 #include "chrome/browser/sync/profile_sync_service_factory.h"
 #include "chrome/browser/themes/theme_service.h"
 #include "chrome/browser/themes/theme_service_factory.h"
+#include "chrome/browser/ui/bookmarks/bookmark_bar_constants.h"
+#include "chrome/browser/ui/search/search.h"
 #include "chrome/browser/ui/webui/chrome_url_data_manager.h"
 #include "chrome/browser/ui/webui/ntp/new_tab_page_handler.h"
 #include "chrome/browser/ui/webui/ntp/new_tab_ui.h"
 #include "chrome/browser/ui/webui/ntp/ntp_login_handler.h"
 #include "chrome/browser/ui/webui/sync_promo/sync_promo_ui.h"
 #include "chrome/browser/ui/webui/sync_setup_handler.h"
-#include "chrome/browser/web_resource/promo_resource_service.h"
+#include "chrome/browser/web_resource/notification_promo.h"
 #include "chrome/common/chrome_notification_types.h"
 #include "chrome/common/chrome_switches.h"
 #include "chrome/common/extensions/extension.h"
@@ -49,16 +53,13 @@
 #include "ui/base/resource/resource_bundle.h"
 #include "ui/base/theme_provider.h"
 #include "ui/gfx/color_utils.h"
+#include "ui/gfx/sys_color_change_listener.h"
 
-#if defined(OS_WIN) || defined(TOOLKIT_VIEWS)
-#include "chrome/browser/ui/views/bookmarks/bookmark_bar_view.h"
-#elif defined(OS_MACOSX)
-#include "chrome/browser/ui/cocoa/bookmarks/bookmark_bar_constants.h"
-#elif defined(OS_POSIX) && !defined(OS_ANDROID)
-#include "chrome/browser/ui/gtk/bookmarks/bookmark_bar_gtk.h"
+
+#if defined(OS_MACOSX)
+#include "chrome/browser/platform_util.h"
 #endif
 
-using base::Time;
 using content::BrowserThread;
 
 namespace {
@@ -108,10 +109,19 @@ std::string SkColorToRGBComponents(SkColor color) {
       SkColorGetB(color));
 }
 
+SkColor GetThemeColor(ui::ThemeProvider* tp, int id) {
+  SkColor color = tp->GetColor(id);
+  // If web contents are being inverted because the system is in high-contrast
+  // mode, any system theme colors we use must be inverted too to cancel out.
+  return gfx::IsInvertedColorScheme() ?
+      color_utils::InvertColor(color) : color;
+}
+
 // Get the CSS string for the background position on the new tab page for the
 // states when the bar is attached or detached.
 std::string GetNewTabBackgroundCSS(const ui::ThemeProvider* theme_provider,
-                                   bool bar_attached) {
+                                   bool bar_attached,
+                                   bool is_ntp_search) {
   int alignment;
   theme_provider->GetDisplayProperty(
       ThemeService::NTP_BACKGROUND_ALIGNMENT, &alignment);
@@ -124,28 +134,26 @@ std::string GetNewTabBackgroundCSS(const ui::ThemeProvider* theme_provider,
     return "-64px";
   }
 
-  if (bar_attached)
+  // For instant extended API i.e. |is_ntp_search| is true, bookmark bar is
+  // always detached at bottom of content view in the y-direction, floating on
+  // top of it in the z-order, and not showing any part of the theme background
+  // image, so the content view should show the entire theme background image as
+  // is, with no vertical offset.
+  if (bar_attached || is_ntp_search)
     return ThemeService::AlignmentToString(alignment);
 
-  // The bar is detached, so we must offset the background by the bar size
-  // if it's a top-aligned bar.
-#if defined(OS_WIN) || defined(TOOLKIT_VIEWS)
-  int offset = browser_defaults::kNewtabBookmarkBarHeight;
-#elif defined(OS_MACOSX)
-  int offset = bookmarks::kNTPBookmarkBarHeight;
-#elif defined(OS_POSIX) && !defined(OS_ANDROID)
-  int offset = BookmarkBarGtk::kBookmarkBarNTPHeight;
-#else
-  int offset = 0;
-#endif
-
   if (alignment & ThemeService::ALIGN_TOP) {
+    // The bar is detached, so we must offset the background by the bar size
+    // if it's a top-aligned bar.
+    int offset = chrome::kNTPBookmarkBarHeight;
+
     if (alignment & ThemeService::ALIGN_LEFT)
-      return "0% " + base::IntToString(-offset) + "px";
+      return "left " + base::IntToString(-offset) + "px";
     else if (alignment & ThemeService::ALIGN_RIGHT)
-      return "100% " + base::IntToString(-offset) + "px";
+      return "right " + base::IntToString(-offset) + "px";
     return "center " + base::IntToString(-offset) + "px";
   }
+
   return ThemeService::AlignmentToString(alignment);
 }
 
@@ -159,63 +167,59 @@ std::string GetNewTabBackgroundTilingCSS(
   return ThemeService::TilingToString(repeat_mode);
 }
 
-// Is the current time within a given date range?
-bool InDateRange(double begin, double end) {
-  Time start_time = Time::FromDoubleT(begin);
-  Time end_time = Time::FromDoubleT(end);
-  return start_time < Time::Now() && end_time > Time::Now();
-}
-
 }  // namespace
 
-NTPResourceCache::NTPResourceCache(Profile* profile) : profile_(profile) {
+NTPResourceCache::NTPResourceCache(Profile* profile)
+    : profile_(profile), is_swipe_tracking_from_scroll_events_enabled_(false) {
   registrar_.Add(this, chrome::NOTIFICATION_BROWSER_THEME_CHANGED,
                  content::Source<ThemeService>(
                      ThemeServiceFactory::GetForProfile(profile)));
   registrar_.Add(this, chrome::NOTIFICATION_PROMO_RESOURCE_STATE_CHANGED,
                  content::NotificationService::AllSources());
-  registrar_.Add(this, chrome::NTP4_INTRO_PREF_CHANGED,
-                 content::NotificationService::AllSources());
+
+  base::Closure callback = base::Bind(&NTPResourceCache::OnPreferenceChanged,
+                                      base::Unretained(this));
 
   // Watch for pref changes that cause us to need to invalidate the HTML cache.
   pref_change_registrar_.Init(profile_->GetPrefs());
-  pref_change_registrar_.Add(prefs::kSyncAcknowledgedSyncTypes, this);
-  pref_change_registrar_.Add(prefs::kShowBookmarkBar, this);
-  pref_change_registrar_.Add(prefs::kNTPShownPage, this);
-  pref_change_registrar_.Add(prefs::kSyncPromoShowNTPBubble, this);
+  pref_change_registrar_.Add(prefs::kSyncAcknowledgedSyncTypes, callback);
+  pref_change_registrar_.Add(prefs::kShowBookmarkBar, callback);
+  pref_change_registrar_.Add(prefs::kNtpShownPage, callback);
+  pref_change_registrar_.Add(prefs::kSyncPromoShowNTPBubble, callback);
 }
 
 NTPResourceCache::~NTPResourceCache() {}
 
-RefCountedMemory* NTPResourceCache::GetNewTabHTML(bool is_incognito) {
+bool NTPResourceCache::NewTabCacheNeedsRefresh() {
+#if defined(OS_MACOSX)
+  // Invalidate if the current value is different from the cached value.
+  bool is_enabled = platform_util::IsSwipeTrackingFromScrollEventsEnabled();
+  if (is_enabled != is_swipe_tracking_from_scroll_events_enabled_) {
+    is_swipe_tracking_from_scroll_events_enabled_ = is_enabled;
+    return true;
+  }
+#endif
+  return false;
+}
+
+base::RefCountedMemory* NTPResourceCache::GetNewTabHTML(bool is_incognito) {
   DCHECK(BrowserThread::CurrentlyOn(BrowserThread::UI));
-#if defined(OS_ANDROID)
-  // Android uses same html/css for incognito NTP and normal NTP
-  if (!new_tab_html_.get())
-    CreateNewTabHTML();
-  return new_tab_html_.get();
-#else
   if (is_incognito) {
     if (!new_tab_incognito_html_.get())
       CreateNewTabIncognitoHTML();
   } else {
-    if (!new_tab_html_.get())
+    // Refresh the cached HTML if necessary.
+    // NOTE: NewTabCacheNeedsRefresh() must be called every time the new tab
+    // HTML is fetched, because it needs to initialize cached values.
+    if (NewTabCacheNeedsRefresh() || !new_tab_html_.get())
       CreateNewTabHTML();
   }
-  return is_incognito ? new_tab_incognito_html_.get()
-                      : new_tab_html_.get();
-#endif
+  return is_incognito ? new_tab_incognito_html_.get() :
+                        new_tab_html_.get();
 }
 
-RefCountedMemory* NTPResourceCache::GetNewTabCSS(bool is_incognito) {
+base::RefCountedMemory* NTPResourceCache::GetNewTabCSS(bool is_incognito) {
   DCHECK(BrowserThread::CurrentlyOn(BrowserThread::UI));
-#if defined(OS_ANDROID)
-  // Android uses same html/css for incognito NTP and normal NTP
-  if (!new_tab_css_.get())
-    CreateNewTabCSS();
-  return new_tab_css_.get();
-#else
-
   if (is_incognito) {
     if (!new_tab_incognito_css_.get())
       CreateNewTabIncognitoCSS();
@@ -223,14 +227,13 @@ RefCountedMemory* NTPResourceCache::GetNewTabCSS(bool is_incognito) {
     if (!new_tab_css_.get())
       CreateNewTabCSS();
   }
-  return is_incognito ? new_tab_incognito_css_.get()
-                      : new_tab_css_.get();
-#endif
+  return is_incognito ? new_tab_incognito_css_.get() :
+                        new_tab_css_.get();
 }
 
 void NTPResourceCache::Observe(int type,
-    const content::NotificationSource& source,
-    const content::NotificationDetails& details) {
+                               const content::NotificationSource& source,
+                               const content::NotificationDetails& details) {
   // Invalidate the cache.
   if (chrome::NOTIFICATION_BROWSER_THEME_CHANGED == type ||
       chrome::NOTIFICATION_PROMO_RESOURCE_STATE_CHANGED == type) {
@@ -238,15 +241,17 @@ void NTPResourceCache::Observe(int type,
     new_tab_html_ = NULL;
     new_tab_incognito_css_ = NULL;
     new_tab_css_ = NULL;
-  } else if (chrome::NOTIFICATION_PREF_CHANGED == type ||
-              chrome::NTP4_INTRO_PREF_CHANGED) {
-    // A change occurred to one of the preferences we care about, so flush the
-    // cache.
-    new_tab_incognito_html_ = NULL;
-    new_tab_html_ = NULL;
   } else {
     NOTREACHED();
   }
+}
+
+void NTPResourceCache::OnPreferenceChanged() {
+  // A change occurred to one of the preferences we care about, so flush the
+  // cache.
+  new_tab_incognito_html_ = NULL;
+  new_tab_html_ = NULL;
+  new_tab_css_ = NULL;
 }
 
 void NTPResourceCache::CreateNewTabIncognitoHTML() {
@@ -262,6 +267,23 @@ void NTPResourceCache::CreateNewTabIncognitoHTML() {
     new_tab_message_ids = IDS_NEW_TAB_GUEST_SESSION_MESSAGE;
     new_tab_html_idr = IDR_GUEST_SESSION_TAB_HTML;
     new_tab_link = kLearnMoreGuestSessionUrl;
+
+    std::string enterprise_domain =
+        g_browser_process->browser_policy_connector()->GetEnterpriseDomain();
+    if (!enterprise_domain.empty()) {
+      // Device is enterprise enrolled.
+      localized_strings.SetString("enterpriseInfoVisible", "true");
+      string16 enterprise_info = l10n_util::GetStringFUTF16(
+          IDS_DEVICE_OWNED_BY_NOTICE,
+          UTF8ToUTF16(enterprise_domain));
+      localized_strings.SetString("enterpriseInfoMessage", enterprise_info);
+      localized_strings.SetString("learnMore",
+          l10n_util::GetStringUTF16(IDS_LEARN_MORE));
+      localized_strings.SetString("enterpriseInfoHintLink",
+          GetUrlWithLang(GURL(chrome::kLearnMoreEnterpriseURL)));
+    } else {
+      localized_strings.SetString("enterpriseInfoVisible", "false");
+    }
   }
 #endif
   localized_strings.SetString("content",
@@ -271,12 +293,10 @@ void NTPResourceCache::CreateNewTabIncognitoHTML() {
       l10n_util::GetStringFUTF16(
           IDS_NEW_TAB_OTR_EXTENSIONS_MESSAGE,
           l10n_util::GetStringUTF16(IDS_PRODUCT_NAME),
-          ASCIIToUTF16(std::string(chrome::kChromeUISettingsURL) +
-                       chrome::kExtensionsSubPage)));
+          ASCIIToUTF16(chrome::kChromeUIExtensionsURL)));
   bool bookmark_bar_attached = profile_->GetPrefs()->GetBoolean(
       prefs::kShowBookmarkBar);
-  localized_strings.SetString("bookmarkbarattached",
-      bookmark_bar_attached ? "true" : "false");
+  localized_strings.SetBoolean("bookmarkbarattached", bookmark_bar_attached);
 
   ChromeURLDataManager::DataSource::SetFontAndTextDirection(&localized_strings);
 
@@ -295,191 +315,155 @@ void NTPResourceCache::CreateNewTabHTML() {
   // (in GetLocalizedValues) and should have more legible names.
   // Show the profile name in the title and most visited labels if the current
   // profile is not the default.
-  DictionaryValue localized_strings;
-  localized_strings.SetString("bookmarkbarattached",
-      profile_->GetPrefs()->GetBoolean(prefs::kShowBookmarkBar) ?
-      "true" : "false");
-#if defined(OS_ANDROID)
-  localized_strings.SetString("hasattribution", "false");
-#else
-  localized_strings.SetString("hasattribution",
+  PrefService* prefs = profile_->GetPrefs();
+  DictionaryValue load_time_data;
+  load_time_data.SetBoolean("bookmarkbarattached",
+      prefs->GetBoolean(prefs::kShowBookmarkBar));
+  load_time_data.SetBoolean("hasattribution",
       ThemeServiceFactory::GetForProfile(profile_)->HasCustomImage(
-          IDR_THEME_NTP_ATTRIBUTION) ?
-      "true" : "false");
-#endif
-  localized_strings.SetString("title",
+          IDR_THEME_NTP_ATTRIBUTION));
+  load_time_data.SetString("title",
       l10n_util::GetStringUTF16(IDS_NEW_TAB_TITLE));
-  localized_strings.SetString("mostvisited",
+  load_time_data.SetString("mostvisited",
       l10n_util::GetStringUTF16(IDS_NEW_TAB_MOST_VISITED));
-  localized_strings.SetString("restoreThumbnailsShort",
+  load_time_data.SetString("suggestions",
+      l10n_util::GetStringUTF16(IDS_NEW_TAB_SUGGESTIONS));
+  load_time_data.SetString("restoreThumbnailsShort",
       l10n_util::GetStringUTF16(IDS_NEW_TAB_RESTORE_THUMBNAILS_SHORT_LINK));
-  localized_strings.SetString("recentlyclosed",
+  load_time_data.SetString("recentlyclosed",
       l10n_util::GetStringUTF16(IDS_NEW_TAB_RECENTLY_CLOSED));
-  localized_strings.SetString("webStoreTitle",
+  load_time_data.SetString("webStoreTitle",
       l10n_util::GetStringUTF16(IDS_EXTENSION_WEB_STORE_TITLE));
-  localized_strings.SetString("closedwindowsingle",
+  load_time_data.SetString("webStoreTitleShort",
+      l10n_util::GetStringUTF16(IDS_EXTENSION_WEB_STORE_TITLE_SHORT));
+  load_time_data.SetString("closedwindowsingle",
       l10n_util::GetStringUTF16(IDS_NEW_TAB_RECENTLY_CLOSED_WINDOW_SINGLE));
-  localized_strings.SetString("closedwindowmultiple",
+  load_time_data.SetString("closedwindowmultiple",
       l10n_util::GetStringUTF16(IDS_NEW_TAB_RECENTLY_CLOSED_WINDOW_MULTIPLE));
-  localized_strings.SetString("attributionintro",
+  load_time_data.SetString("attributionintro",
       l10n_util::GetStringUTF16(IDS_NEW_TAB_ATTRIBUTION_INTRO));
-  localized_strings.SetString("thumbnailremovednotification",
+  load_time_data.SetString("thumbnailremovednotification",
       l10n_util::GetStringUTF16(IDS_NEW_TAB_THUMBNAIL_REMOVED_NOTIFICATION));
-  localized_strings.SetString("undothumbnailremove",
+  load_time_data.SetString("undothumbnailremove",
       l10n_util::GetStringUTF16(IDS_NEW_TAB_UNDO_THUMBNAIL_REMOVE));
-  localized_strings.SetString("removethumbnailtooltip",
+  load_time_data.SetString("removethumbnailtooltip",
       l10n_util::GetStringUTF16(IDS_NEW_TAB_REMOVE_THUMBNAIL_TOOLTIP));
-  localized_strings.SetString("appuninstall",
+  load_time_data.SetString("appuninstall",
       l10n_util::GetStringUTF16(IDS_EXTENSIONS_UNINSTALL));
-  localized_strings.SetString("appoptions",
+  load_time_data.SetString("appoptions",
       l10n_util::GetStringUTF16(IDS_NEW_TAB_APP_OPTIONS));
-  localized_strings.SetString("appdisablenotifications",
+  load_time_data.SetString("appdetails",
+      l10n_util::GetStringUTF16(IDS_NEW_TAB_APP_DETAILS));
+  load_time_data.SetString("appdisablenotifications",
       l10n_util::GetStringUTF16(IDS_NEW_TAB_APP_DISABLE_NOTIFICATIONS));
-  localized_strings.SetString("appcreateshortcut",
+  load_time_data.SetString("appcreateshortcut",
       l10n_util::GetStringUTF16(IDS_NEW_TAB_APP_CREATE_SHORTCUT));
-  localized_strings.SetString("appDefaultPageName",
+  load_time_data.SetString("appDefaultPageName",
       l10n_util::GetStringUTF16(IDS_APP_DEFAULT_PAGE_NAME));
-  localized_strings.SetString("applaunchtypepinned",
+  load_time_data.SetString("applaunchtypepinned",
       l10n_util::GetStringUTF16(IDS_APP_CONTEXT_MENU_OPEN_PINNED));
-  localized_strings.SetString("applaunchtyperegular",
+  load_time_data.SetString("applaunchtyperegular",
       l10n_util::GetStringUTF16(IDS_APP_CONTEXT_MENU_OPEN_REGULAR));
-  localized_strings.SetString("applaunchtypewindow",
+  load_time_data.SetString("applaunchtypewindow",
       l10n_util::GetStringUTF16(IDS_APP_CONTEXT_MENU_OPEN_WINDOW));
-  localized_strings.SetString("applaunchtypefullscreen",
+  load_time_data.SetString("applaunchtypefullscreen",
       l10n_util::GetStringUTF16(IDS_APP_CONTEXT_MENU_OPEN_FULLSCREEN));
-  localized_strings.SetString("syncpromotext",
+  load_time_data.SetString("syncpromotext",
       l10n_util::GetStringUTF16(IDS_SYNC_START_SYNC_BUTTON_LABEL));
-  localized_strings.SetString("syncLinkText",
+  load_time_data.SetString("syncLinkText",
       l10n_util::GetStringUTF16(IDS_SYNC_ADVANCED_OPTIONS));
-  localized_strings.SetString("webStoreLink",
+  load_time_data.SetString("otherSessions",
+      l10n_util::GetStringUTF16(IDS_NEW_TAB_OTHER_SESSIONS_LABEL));
+  load_time_data.SetString("otherSessionsEmpty",
+      l10n_util::GetStringUTF16(IDS_NEW_TAB_OTHER_SESSIONS_EMPTY));
+  load_time_data.SetString("otherSessionsLearnMoreUrl",
+      l10n_util::GetStringUTF16(IDS_NEW_TAB_OTHER_SESSIONS_LEARN_MORE_URL));
+  load_time_data.SetString("learnMore",
+      l10n_util::GetStringUTF16(IDS_LEARN_MORE));
+  load_time_data.SetString("webStoreLink",
       GetUrlWithLang(GURL(extension_urls::GetWebstoreLaunchURL())));
-  localized_strings.SetBoolean("isWebStoreExperimentEnabled",
-      NewTabUI::IsWebStoreExperimentEnabled());
+  load_time_data.SetString("appInstallHintText",
+      l10n_util::GetStringUTF16(IDS_NEW_TAB_APP_INSTALL_HINT_LABEL));
+  load_time_data.SetBoolean("isDiscoveryInNTPEnabled",
+      NewTabUI::IsDiscoveryInNTPEnabled());
+  load_time_data.SetBoolean("showApps", NewTabUI::ShouldShowApps());
+  load_time_data.SetString("collapseSessionMenuItemText",
+      l10n_util::GetStringUTF16(IDS_NEW_TAB_OTHER_SESSIONS_COLLAPSE_SESSION));
+  load_time_data.SetString("expandSessionMenuItemText",
+      l10n_util::GetStringUTF16(IDS_NEW_TAB_OTHER_SESSIONS_EXPAND_SESSION));
+  load_time_data.SetString("restoreSessionMenuItemText",
+      l10n_util::GetStringUTF16(IDS_NEW_TAB_OTHER_SESSIONS_OPEN_ALL));
+  load_time_data.SetString("learn_more",
+      l10n_util::GetStringUTF16(IDS_LEARN_MORE));
+  load_time_data.SetString("tile_grid_screenreader_accessible_description",
+      l10n_util::GetStringUTF16(IDS_NEW_TAB_TILE_GRID_ACCESSIBLE_DESCRIPTION));
+  load_time_data.SetString("page_switcher_change_title",
+      l10n_util::GetStringUTF16(IDS_NEW_TAB_PAGE_SWITCHER_CHANGE_TITLE));
+  load_time_data.SetString("page_switcher_same_title",
+      l10n_util::GetStringUTF16(IDS_NEW_TAB_PAGE_SWITCHER_SAME_TITLE));
+  // On Mac OS X 10.7+, horizontal scrolling can be treated as a back or
+  // forward gesture. Pass through a flag that indicates whether or not that
+  // feature is enabled.
+  load_time_data.SetBoolean("isSwipeTrackingFromScrollEventsEnabled",
+                            is_swipe_tracking_from_scroll_events_enabled_);
 
-#if defined(OS_ANDROID)
-  localized_strings.SetString("opentabslastsynced",
-      l10n_util::GetStringUTF16(IDS_SYNC_NTP_OPEN_TABS_LAST_SYNCED));
-  localized_strings.SetString("elementopeninnewtab",
-      l10n_util::GetStringUTF16(IDS_NEW_TAB_CONTEXT_MENU_OPEN_IN_NEW_TAB));
-  localized_strings.SetString("elementopeninincognitotab",
-      l10n_util::GetStringUTF16(IDS_NEW_TAB_CONTEXT_MENU_OPEN_IN_INCOGNITO_TAB));
-  localized_strings.SetString("elementremove",
-      l10n_util::GetStringUTF16(IDS_NEW_TAB_CONTEXT_MENU_REMOVE));
-  localized_strings.SetString("bookmarkedit",
-      l10n_util::GetStringUTF16(IDS_NEW_TAB_CONTEXT_MENU_EDIT_BOOKMARK));
-  localized_strings.SetString("bookmarkdelete",
-      l10n_util::GetStringUTF16(IDS_NEW_TAB_CONTEXT_MENU_DELETE_BOOKMARK));
-  localized_strings.SetString("bookmarkshortcut",
-      l10n_util::GetStringUTF16(IDS_NEW_TAB_CONTEXT_MENU_BOOKMARK_SHORTCUT));
-  localized_strings.SetString("editfolder",
-      l10n_util::GetStringUTF16(IDS_BOOKMARK_EDIT_FOLDER));
-  localized_strings.SetString("deletefolder",
-        l10n_util::GetStringUTF16(IDS_BOOKMARK_REMOVE_FOLDER));
-  localized_strings.SetString("receivedDocuments",
-      l10n_util::GetStringUTF16(IDS_RECEIVED_DOCUMENTS));
-  localized_strings.SetString("syncPromo",
-      l10n_util::GetStringUTF16(IDS_SYNC_PROMO_DESKTOP_INSTRUCTIONS));
-  localized_strings.SetString("syncEnableSync",
-      l10n_util::GetStringUTF16(IDS_SYNC_ENABLE_SYNC));
-  localized_strings.SetString("bookmarkstitle",
-      l10n_util::GetStringUTF16(IDS_ACCNAME_BOOKMARKS));
-#endif
 #if defined(OS_CHROMEOS)
-  localized_strings.SetString("expandMenu",
+  load_time_data.SetString("expandMenu",
       l10n_util::GetStringUTF16(IDS_NEW_TAB_CLOSE_MENU_EXPAND));
 #endif
 
-  NewTabPageHandler::GetLocalizedValues(profile_, &localized_strings);
+  NewTabPageHandler::GetLocalizedValues(profile_, &load_time_data);
+  NTPLoginHandler::GetLocalizedValues(profile_, &load_time_data);
 
-  // Don't initiate the sync related message passing with the page if the sync
-  // code is not present.
-  if (ProfileSyncServiceFactory::GetInstance()->GetForProfile(profile_))
-    localized_strings.SetString("syncispresent", "true");
-  else
-    localized_strings.SetString("syncispresent", "false");
-
-  ChromeURLDataManager::DataSource::SetFontAndTextDirection(&localized_strings);
+  ChromeURLDataManager::DataSource::SetFontAndTextDirection(&load_time_data);
 
   // Control fade and resize animations.
-  std::string anim =
-      ui::Animation::ShouldRenderRichAnimation() ? "true" : "false";
-  localized_strings.SetString("anim", anim);
+  load_time_data.SetBoolean("anim", ui::Animation::ShouldRenderRichAnimation());
 
   int alignment;
   ui::ThemeProvider* tp = ThemeServiceFactory::GetForProfile(profile_);
-  if (tp) {
-    // TODO(megamerge): who no ThemeServiceFactory?  Is this expected?
-    tp->GetDisplayProperty(ThemeService::NTP_BACKGROUND_ALIGNMENT, &alignment);
-    localized_strings.SetString("themegravity",
-                                (alignment & ThemeService::ALIGN_RIGHT) ? "right" : "");
-  }
+  tp->GetDisplayProperty(ThemeService::NTP_BACKGROUND_ALIGNMENT, &alignment);
+  load_time_data.SetString("themegravity",
+      (alignment & ThemeService::ALIGN_RIGHT) ? "right" : "");
 
-  // If the user has preferences for a start and end time for a custom logo,
-  // and the time now is between these two times, show the custom logo.
-  if (profile_->GetPrefs()->FindPreference(prefs::kNTPCustomLogoStart) &&
-      profile_->GetPrefs()->FindPreference(prefs::kNTPCustomLogoEnd)) {
-    localized_strings.SetString("customlogo",
-        InDateRange(profile_->GetPrefs()->GetDouble(prefs::kNTPCustomLogoStart),
-                    profile_->GetPrefs()->GetDouble(prefs::kNTPCustomLogoEnd)) ?
-        "true" : "false");
+  // Disable the promo if this is the first run, otherwise set the promo string
+  // for display if there is a valid outstanding promo.
+  if (first_run::IsChromeFirstRun()) {
+    NotificationPromo::HandleClosed(profile_,
+                                    NotificationPromo::NTP_NOTIFICATION_PROMO);
   } else {
-    localized_strings.SetString("customlogo", "false");
+    NotificationPromo notification_promo(profile_);
+    notification_promo.InitFromPrefs(NotificationPromo::NTP_NOTIFICATION_PROMO);
+    if (notification_promo.CanShow()) {
+      load_time_data.SetString("notificationPromoText",
+                               notification_promo.promo_text());
+      DVLOG(1) << "Notification promo:" << notification_promo.promo_text();
+    }
+
+    NotificationPromo bubble_promo(profile_);
+    bubble_promo.InitFromPrefs(NotificationPromo::NTP_BUBBLE_PROMO);
+    if (bubble_promo.CanShow()) {
+      load_time_data.SetString("bubblePromoText",
+                               bubble_promo.promo_text());
+      DVLOG(1) << "Bubble promo:" << bubble_promo.promo_text();
+    }
   }
 
-#if !defined(OS_ANDROID)
-  // If the user has preferences for a start and end time for a promo from
-  // the server, and this promo string exists, set the localized string.
-  if (PromoResourceService::CanShowNotificationPromo(profile_)) {
-    localized_strings.SetString("serverpromo",
-        profile_->GetPrefs()->GetString(prefs::kNTPPromoLine));
-  }
-
-#endif
+  // Determine whether to show the menu for accessing tabs on other devices.
+  bool show_other_sessions_menu = !CommandLine::ForCurrentProcess()->HasSwitch(
+      switches::kDisableNTPOtherSessionsMenu);
+  load_time_data.SetBoolean("showOtherSessionsMenu",
+                            show_other_sessions_menu);
+  load_time_data.SetBoolean("isUserSignedIn",
+      !prefs->GetString(prefs::kGoogleServicesUsername).empty());
 
   // Load the new tab page appropriate for this build
-  std::string full_html;
-  (ResourceBundle::GetSharedInstance().
-      GetRawDataResource(IDR_NEW_TAB_4_HTML));
-
-#if !defined(OS_ANDROID)
   base::StringPiece new_tab_html(ResourceBundle::GetSharedInstance().
-      GetRawDataResource(IDR_NEW_TAB_4_HTML));
-  full_html = jstemplate_builder::GetI18nTemplateHtml(new_tab_html,
-                                                      &localized_strings);
-#else
-  base::StringPiece new_tab_html(ResourceBundle::GetSharedInstance().
-      GetRawDataResource(IDR_NEW_TAB_HTML));
-  if (CommandLine::ForCurrentProcess()->HasSwitch(switches::kTabletUi)) {
-    localized_strings.SetString("device", "tablet");
-  } else {
-    localized_strings.SetString("device", "phone");
-  }
-  const char* new_tab_link = kLearnMoreIncognitoUrl;
-  localized_strings.SetString("content",
-      l10n_util::GetStringFUTF16(IDS_NEW_TAB_OTR_MESSAGE,
-                                 GetUrlWithLang(GURL(new_tab_link))));
-
-  // Inject the template data into the HTML so that it is available before any
-  // layout is needed.
-  std::string json_html;
-  jstemplate_builder::AppendJsonHtml(&localized_strings, &json_html);
-
-  static const base::StringPiece template_data_placeholder(
-      "<!-- template data placeholder -->");
-  size_t pos = new_tab_html.find(template_data_placeholder);
-
-  if (pos != base::StringPiece::npos) {
-    full_html.assign(new_tab_html.data(), pos);
-    full_html.append(json_html);
-    size_t after_offset = pos + template_data_placeholder.size();
-    full_html.append(new_tab_html.data() + after_offset,
-                     new_tab_html.size() - after_offset);
-  } else {
-    NOTREACHED();
-    full_html.assign(new_tab_html.data(), new_tab_html.size());
-  }
-#endif
-
+      GetRawDataResource(chrome::search::IsInstantExtendedAPIEnabled(profile_) ?
+                         IDR_NEW_TAB_SEARCH_HTML : IDR_NEW_TAB_4_HTML));
+  jstemplate_builder::UseVersion2 version2;
+  std::string full_html =
+      jstemplate_builder::GetI18nTemplateHtml(new_tab_html, &load_time_data);
   new_tab_html_ = base::RefCountedString::TakeString(&full_html);
 }
 
@@ -489,7 +473,7 @@ void NTPResourceCache::CreateNewTabIncognitoCSS() {
 
   // Get our theme colors
   SkColor color_background =
-      tp->GetColor(ThemeService::COLOR_NTP_BACKGROUND);
+      GetThemeColor(tp, ThemeService::COLOR_NTP_BACKGROUND);
 
   // Generate the replacements.
   std::vector<std::string> subst;
@@ -498,16 +482,18 @@ void NTPResourceCache::CreateNewTabIncognitoCSS() {
   subst.push_back(
       profile_->GetPrefs()->GetString(prefs::kCurrentThemeID));  // $1
 
+  bool is_ntp_search = chrome::search::IsInstantExtendedAPIEnabled(profile_);
+
   // Colors.
   subst.push_back(SkColorToRGBAString(color_background));  // $2
-  subst.push_back(GetNewTabBackgroundCSS(tp, false));  // $3
-  subst.push_back(GetNewTabBackgroundCSS(tp, true));  // $4
+  subst.push_back(GetNewTabBackgroundCSS(tp, false, is_ntp_search));  // $3
+  subst.push_back(GetNewTabBackgroundCSS(tp, true, is_ntp_search));  // $4
   subst.push_back(GetNewTabBackgroundTilingCSS(tp));  // $5
 
   // Get our template.
   static const base::StringPiece new_tab_theme_css(
       ResourceBundle::GetSharedInstance().GetRawDataResource(
-      IDR_NEW_INCOGNITO_TAB_THEME_CSS));
+          IDR_NEW_INCOGNITO_TAB_THEME_CSS));
 
   // Create the string from our template and the replacements.
   std::string full_css = ReplaceStringPlaceholders(
@@ -522,33 +508,33 @@ void NTPResourceCache::CreateNewTabCSS() {
 
   // Get our theme colors
   SkColor color_background =
-      tp->GetColor(ThemeService::COLOR_NTP_BACKGROUND);
-  SkColor color_text = tp->GetColor(ThemeService::COLOR_NTP_TEXT);
-  SkColor color_link = tp->GetColor(ThemeService::COLOR_NTP_LINK);
+      GetThemeColor(tp, ThemeService::COLOR_NTP_BACKGROUND);
+  SkColor color_text = GetThemeColor(tp, ThemeService::COLOR_NTP_TEXT);
+  SkColor color_link = GetThemeColor(tp, ThemeService::COLOR_NTP_LINK);
   SkColor color_link_underline =
-      tp->GetColor(ThemeService::COLOR_NTP_LINK_UNDERLINE);
+      GetThemeColor(tp, ThemeService::COLOR_NTP_LINK_UNDERLINE);
 
   SkColor color_section =
-      tp->GetColor(ThemeService::COLOR_NTP_SECTION);
+      GetThemeColor(tp, ThemeService::COLOR_NTP_SECTION);
   SkColor color_section_text =
-      tp->GetColor(ThemeService::COLOR_NTP_SECTION_TEXT);
+      GetThemeColor(tp, ThemeService::COLOR_NTP_SECTION_TEXT);
   SkColor color_section_link =
-      tp->GetColor(ThemeService::COLOR_NTP_SECTION_LINK);
+      GetThemeColor(tp, ThemeService::COLOR_NTP_SECTION_LINK);
   SkColor color_section_link_underline =
-      tp->GetColor(ThemeService::COLOR_NTP_SECTION_LINK_UNDERLINE);
+      GetThemeColor(tp, ThemeService::COLOR_NTP_SECTION_LINK_UNDERLINE);
   SkColor color_section_header_text =
-      tp->GetColor(ThemeService::COLOR_NTP_SECTION_HEADER_TEXT);
+      GetThemeColor(tp, ThemeService::COLOR_NTP_SECTION_HEADER_TEXT);
   SkColor color_section_header_text_hover =
-      tp->GetColor(ThemeService::COLOR_NTP_SECTION_HEADER_TEXT_HOVER);
+      GetThemeColor(tp, ThemeService::COLOR_NTP_SECTION_HEADER_TEXT_HOVER);
   SkColor color_section_header_rule =
-      tp->GetColor(ThemeService::COLOR_NTP_SECTION_HEADER_RULE);
+      GetThemeColor(tp, ThemeService::COLOR_NTP_SECTION_HEADER_RULE);
   SkColor color_section_header_rule_light =
-      tp->GetColor(ThemeService::COLOR_NTP_SECTION_HEADER_RULE_LIGHT);
+      GetThemeColor(tp, ThemeService::COLOR_NTP_SECTION_HEADER_RULE_LIGHT);
   SkColor color_text_light =
-      tp->GetColor(ThemeService::COLOR_NTP_TEXT_LIGHT);
+      GetThemeColor(tp, ThemeService::COLOR_NTP_TEXT_LIGHT);
 
   SkColor color_header =
-      tp->GetColor(ThemeService::COLOR_NTP_HEADER);
+      GetThemeColor(tp, ThemeService::COLOR_NTP_HEADER);
   // Generate a lighter color for the header gradients.
   color_utils::HSL header_lighter;
   color_utils::SkColorToHSL(color_header, &header_lighter);
@@ -572,10 +558,12 @@ void NTPResourceCache::CreateNewTabCSS() {
   subst.push_back(
       profile_->GetPrefs()->GetString(prefs::kCurrentThemeID));  // $1
 
+  bool is_ntp_search = chrome::search::IsInstantExtendedAPIEnabled(profile_);
+
   // Colors.
   subst.push_back(SkColorToRGBAString(color_background));  // $2
-  subst.push_back(GetNewTabBackgroundCSS(tp, false));  // $3
-  subst.push_back(GetNewTabBackgroundCSS(tp, true));  // $4
+  subst.push_back(GetNewTabBackgroundCSS(tp, false, is_ntp_search));  // $3
+  subst.push_back(GetNewTabBackgroundCSS(tp, true, is_ntp_search));  // $4
   subst.push_back(GetNewTabBackgroundTilingCSS(tp));  // $5
   subst.push_back(SkColorToRGBAString(color_header));  // $6
   subst.push_back(SkColorToRGBAString(color_header_gradient_light));  // $7
@@ -587,9 +575,9 @@ void NTPResourceCache::CreateNewTabCSS() {
   subst.push_back(SkColorToRGBAString(color_section_link));  // $13
   subst.push_back(SkColorToRGBAString(color_link_underline));  // $14
   subst.push_back(SkColorToRGBAString(color_section_link_underline));  // $15
-  subst.push_back(SkColorToRGBAString(color_section_header_text)); // $16
+  subst.push_back(SkColorToRGBAString(color_section_header_text));  // $16
   subst.push_back(SkColorToRGBAString(
-      color_section_header_text_hover)); // $17
+      color_section_header_text_hover));  // $17
   subst.push_back(SkColorToRGBAString(color_section_header_rule));  // $18
   subst.push_back(SkColorToRGBAString(
       color_section_header_rule_light));  // $19
@@ -601,8 +589,8 @@ void NTPResourceCache::CreateNewTabCSS() {
 
   // Get our template.
   static const base::StringPiece new_tab_theme_css(
-      ResourceBundle::GetSharedInstance().GetRawDataResource(
-          IDR_NEW_TAB_4_THEME_CSS));
+      ResourceBundle::GetSharedInstance().GetRawDataResource(is_ntp_search ?
+          IDR_NEW_TAB_SEARCH_THEME_CSS : IDR_NEW_TAB_4_THEME_CSS));
 
   // Create the string from our template and the replacements.
   std::string css_string;

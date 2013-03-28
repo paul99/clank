@@ -4,7 +4,6 @@
 
 #ifndef UI_VIEWS_CONTROLS_TEXTFIELD_NATIVE_TEXTFIELD_WIN_H_
 #define UI_VIEWS_CONTROLS_TEXTFIELD_NATIVE_TEXTFIELD_WIN_H_
-#pragma once
 
 #include <atlbase.h>
 #include <atlapp.h>
@@ -15,10 +14,13 @@
 #include <tom.h>  // For ITextDocument, a COM interface to CRichEditCtrl
 #include <vsstyle.h>
 
+#include "base/memory/scoped_ptr.h"
 #include "base/string16.h"
 #include "base/win/scoped_comptr.h"
 #include "ui/base/models/simple_menu_model.h"
+#include "ui/base/ime/win/tsf_event_router.h"
 #include "ui/gfx/insets.h"
+#include "ui/base/win/extra_sdk_defines.h"
 #include "ui/views/controls/textfield/native_textfield_wrapper.h"
 
 namespace gfx {
@@ -27,7 +29,7 @@ class SelectionModel;
 
 namespace views {
 
-class Menu2;
+class MenuRunner;
 class NativeViewHost;
 class Textfield;
 
@@ -40,9 +42,10 @@ class NativeTextfieldWin
                          CWinTraits<kDefaultEditStyle> >,
       public CRichEditCommands<NativeTextfieldWin>,
       public NativeTextfieldWrapper,
-      public ui::SimpleMenuModel::Delegate {
+      public ui::SimpleMenuModel::Delegate,
+      public ui::TSFEventRouterObserver {
  public:
-  DECLARE_WND_CLASS(L"ViewsTextfieldEdit");
+  DECLARE_WND_SUPERCLASS(L"ViewsTextfieldEdit", MSFTEDIT_CLASS);
 
   explicit NativeTextfieldWin(Textfield* parent);
   ~NativeTextfieldWin();
@@ -62,12 +65,14 @@ class NativeTextfieldWin
   // See the code in textfield.cc that calls this for why this is here.
   void AttachHack();
 
-  // Overridden from NativeTextfieldWrapper:
+  // NativeTextfieldWrapper:
   virtual string16 GetText() const OVERRIDE;
   virtual void UpdateText() OVERRIDE;
   virtual void AppendText(const string16& text) OVERRIDE;
+  virtual void ReplaceSelection(const string16& text) OVERRIDE;
+  virtual base::i18n::TextDirection GetTextDirection() const OVERRIDE;
   virtual string16 GetSelectedText() const OVERRIDE;
-  virtual void SelectAll() OVERRIDE;
+  virtual void SelectAll(bool reversed) OVERRIDE;
   virtual void ClearSelection() OVERRIDE;
   virtual void UpdateBorder() OVERRIDE;
   virtual void UpdateTextColor() OVERRIDE;
@@ -88,8 +93,10 @@ class NativeTextfieldWin
   virtual void GetSelectionModel(gfx::SelectionModel* sel) const OVERRIDE;
   virtual void SelectSelectionModel(const gfx::SelectionModel& sel) OVERRIDE;
   virtual size_t GetCursorPosition() const OVERRIDE;
-  virtual bool HandleKeyPressed(const views::KeyEvent& event) OVERRIDE;
-  virtual bool HandleKeyReleased(const views::KeyEvent& event) OVERRIDE;
+  virtual bool GetCursorEnabled() const OVERRIDE;
+  virtual void SetCursorEnabled(bool enabled) OVERRIDE;
+  virtual bool HandleKeyPressed(const ui::KeyEvent& event) OVERRIDE;
+  virtual bool HandleKeyReleased(const ui::KeyEvent& event) OVERRIDE;
   virtual void HandleFocus() OVERRIDE;
   virtual void HandleBlur() OVERRIDE;
   virtual ui::TextInputClient* GetTextInputClient() OVERRIDE;
@@ -97,14 +104,21 @@ class NativeTextfieldWin
   virtual void ApplyDefaultStyle() OVERRIDE;
   virtual void ClearEditHistory() OVERRIDE;
   virtual int GetFontHeight() OVERRIDE;
+  virtual int GetTextfieldBaseline() const OVERRIDE;
+  virtual void ExecuteTextCommand(int command_id) OVERRIDE;
 
-  // Overridden from ui::SimpleMenuModel::Delegate:
+  // ui::SimpleMenuModel::Delegate:
   virtual bool IsCommandIdChecked(int command_id) const OVERRIDE;
   virtual bool IsCommandIdEnabled(int command_id) const OVERRIDE;
   virtual bool GetAcceleratorForCommandId(
       int command_id,
       ui::Accelerator* accelerator) OVERRIDE;
   virtual void ExecuteCommand(int command_id) OVERRIDE;
+
+  // ui::TSFEventRouterObserver:
+  virtual void OnTextUpdated(const ui::Range& composition_range) OVERRIDE;
+  virtual void OnTSFStartComposition() OVERRIDE;
+  virtual void OnTSFEndComposition() OVERRIDE;
 
   // Update accessibility information.
   void InitializeAccessibilityInfo();
@@ -116,11 +130,14 @@ class NativeTextfieldWin
     MSG_WM_CHAR(OnChar)
     MSG_WM_CONTEXTMENU(OnContextMenu)
     MSG_WM_COPY(OnCopy)
+    MSG_WM_CREATE(OnCreate)
     MSG_WM_CUT(OnCut)
+    MESSAGE_HANDLER_EX(WM_GETOBJECT, OnGetObject)
     MESSAGE_HANDLER_EX(WM_IME_CHAR, OnImeChar)
     MESSAGE_HANDLER_EX(WM_IME_STARTCOMPOSITION, OnImeStartComposition)
     MESSAGE_HANDLER_EX(WM_IME_COMPOSITION, OnImeComposition)
     MESSAGE_HANDLER_EX(WM_IME_ENDCOMPOSITION, OnImeEndComposition)
+    MESSAGE_HANDLER_EX(WM_POINTERDOWN, OnPointerDown)
     MSG_WM_KEYDOWN(OnKeyDown)
     MSG_WM_LBUTTONDBLCLK(OnLButtonDblClk)
     MSG_WM_LBUTTONDOWN(OnLButtonDown)
@@ -134,6 +151,7 @@ class NativeTextfieldWin
     MSG_WM_RBUTTONDOWN(OnNonLButtonDown)
     MSG_WM_PASTE(OnPaste)
     MSG_WM_SETFOCUS(OnSetFocus)
+    MSG_WM_KILLFOCUS(OnKillFocus)
     MSG_WM_SYSCHAR(OnSysChar)  // WM_SYSxxx == WM_xxx with ALT down
     MSG_WM_SYSKEYDOWN(OnKeyDown)
   END_MSG_MAP()
@@ -173,15 +191,18 @@ class NativeTextfieldWin
     DISALLOW_COPY_AND_ASSIGN(ScopedSuspendUndo);
   };
 
-  // message handlers
+  // Message handlers.
   void OnChar(TCHAR key, UINT repeat_count, UINT flags);
   void OnContextMenu(HWND window, const POINT& point);
   void OnCopy();
+  LRESULT OnCreate(const CREATESTRUCTW* create_struct);
   void OnCut();
+  LRESULT OnGetObject(UINT message, WPARAM wparam, LPARAM lparam);
   LRESULT OnImeChar(UINT message, WPARAM wparam, LPARAM lparam);
   LRESULT OnImeStartComposition(UINT message, WPARAM wparam, LPARAM lparam);
   LRESULT OnImeComposition(UINT message, WPARAM wparam, LPARAM lparam);
   LRESULT OnImeEndComposition(UINT message, WPARAM wparam, LPARAM lparam);
+  LRESULT OnPointerDown(UINT message, WPARAM wparam, LPARAM lparam);
   void OnKeyDown(TCHAR key, UINT repeat_count, UINT flags);
   void OnLButtonDblClk(UINT keys, const CPoint& point);
   void OnLButtonDown(UINT keys, const CPoint& point);
@@ -194,6 +215,7 @@ class NativeTextfieldWin
   void OnNonLButtonDown(UINT keys, const CPoint& point);
   void OnPaste();
   void OnSetFocus(HWND hwnd);
+  void OnKillFocus(HWND hwnd);
   void OnSysChar(TCHAR ch, UINT repeat_count, UINT flags);
 
   // Helper function for OnChar() and OnKeyDown() that handles keystrokes that
@@ -233,6 +255,10 @@ class NativeTextfieldWin
   // edit.
   void SetContainsMouse(bool contains_mouse);
 
+  // Handles composition related works on both IMM32 and TSF implementation.
+  void OnImeStartCompositionInternal();
+  void OnImeEndCompositionInternal();
+
   // Getter for the text_object_model_, used by the ScopedFreeze class.  Note
   // that the pointer returned here is only valid as long as the Edit is still
   // alive.
@@ -240,6 +266,8 @@ class NativeTextfieldWin
 
   // Generates the contents of the context menu.
   void BuildContextMenu();
+
+  static HMODULE loaded_libarary_module_;
 
   // The Textfield this object is bound to.
   Textfield* textfield_;
@@ -260,11 +288,9 @@ class NativeTextfieldWin
   // If true, the mouse is over the edit.
   bool contains_mouse_;
 
-  static bool did_load_library_;
-
   // The contents of the context menu for the edit.
   scoped_ptr<ui::SimpleMenuModel> context_menu_contents_;
-  scoped_ptr<Menu2> context_menu_;
+  scoped_ptr<MenuRunner> context_menu_runner_;
 
   // Border insets.
   gfx::Insets content_insets_;
@@ -286,6 +312,8 @@ class NativeTextfieldWin
 
   //  The accessibility state of this object.
   int accessibility_state_;
+
+  scoped_ptr<ui::TSFEventRouter> tsf_event_router_;
 
   DISALLOW_COPY_AND_ASSIGN(NativeTextfieldWin);
 };

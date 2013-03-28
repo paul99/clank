@@ -9,8 +9,10 @@
 
 #include "content/public/browser/render_view_host_observer.h"
 
+namespace content {
 struct FaviconURL;
 class RenderViewHost;
+}
 
 namespace IPC {
 class Message;
@@ -24,9 +26,9 @@ class PrerenderContents;
 class PrerenderRenderViewHostObserver : public content::RenderViewHostObserver {
  public:
   PrerenderRenderViewHostObserver(PrerenderContents* prerender_contents,
-                                  RenderViewHost* render_view_host);
+                                  content::RenderViewHost* render_view_host);
 
-  virtual void RenderViewHostDestroyed(RenderViewHost* rvh) OVERRIDE;
+  virtual void RenderViewHostDestroyed(content::RenderViewHost* rvh) OVERRIDE;
 
   virtual bool OnMessageReceived(const IPC::Message& message) OVERRIDE;
   virtual bool Send(IPC::Message* message) OVERRIDE;
@@ -37,7 +39,7 @@ class PrerenderRenderViewHostObserver : public content::RenderViewHostObserver {
 
  private:
   // Message handlers.
-  void OnUpdateFaviconURL(int32 page_id, const std::vector<FaviconURL>& urls);
+
   void OnMaybeCancelPrerenderForHTML5Media();
   void OnCancelPrerenderForPrinting();
 

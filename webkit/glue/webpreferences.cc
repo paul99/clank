@@ -4,39 +4,43 @@
 
 #include "webkit/glue/webpreferences.h"
 
-#include <unicode/uchar.h>
-
+#include "base/basictypes.h"
 #include "base/string_util.h"
 #include "base/utf_string_conversions.h"
-#include "third_party/WebKit/Source/WebKit/chromium/public/WebCompositor.h"
 #include "third_party/WebKit/Source/WebKit/chromium/public/WebNetworkStateNotifier.h"
 #include "third_party/WebKit/Source/WebKit/chromium/public/WebRuntimeFeatures.h"
 #include "third_party/WebKit/Source/WebKit/chromium/public/WebKit.h"
 #include "third_party/WebKit/Source/WebKit/chromium/public/WebSettings.h"
+#include "third_party/WebKit/Source/WebKit/chromium/public/platform/WebSize.h"
 #include "third_party/WebKit/Source/WebKit/chromium/public/platform/WebString.h"
 #include "third_party/WebKit/Source/WebKit/chromium/public/platform/WebURL.h"
 #include "third_party/WebKit/Source/WebKit/chromium/public/WebView.h"
+#include "unicode/uchar.h"
 #include "webkit/glue/webkit_glue.h"
 
 using WebKit::WebNetworkStateNotifier;
 using WebKit::WebRuntimeFeatures;
 using WebKit::WebSettings;
+using WebKit::WebSize;
 using WebKit::WebString;
 using WebKit::WebURL;
 using WebKit::WebView;
 
+namespace webkit_glue {
+
+// "Zyyy" is the ISO 15924 script code for undetermined script aka Common.
+const char WebPreferences::kCommonScript[] = "Zyyy";
+
 WebPreferences::WebPreferences()
-    : standard_font_family(ASCIIToUTF16("Times New Roman")),
-      fixed_font_family(ASCIIToUTF16("Courier New")),
-      serif_font_family(ASCIIToUTF16("Times New Roman")),
-      sans_serif_font_family(ASCIIToUTF16("Arial")),
-      cursive_font_family(ASCIIToUTF16("Script")),
-      fantasy_font_family(),  // Not sure what to use on Windows.
-      default_font_size(16),
+    : default_font_size(16),
       default_fixed_font_size(13),
       minimum_font_size(0),
       minimum_logical_font_size(6),
       default_encoding("ISO-8859-1"),
+      apply_default_device_scale_factor_in_compositor(false),
+      apply_page_scale_factor_in_compositor(false),
+      per_tile_painting_enabled(false),
+      accelerated_animation_enabled(false),
       javascript_enabled(true),
       web_security_enabled(true),
       javascript_can_open_windows_automatically(true),
@@ -68,50 +72,93 @@ WebPreferences::WebPreferences()
       frame_flattening_enabled(false),
       allow_universal_access_from_file_urls(false),
       allow_file_access_from_file_urls(false),
-#if defined(OS_ANDROID)
-      allow_content_url_access(false),
-      only_allow_file_access_to_android_resources(true),
-      user_gesture_required_for_media_playback(true),
-#endif
       webaudio_enabled(false),
       experimental_webgl_enabled(false),
+      flash_3d_enabled(true),
+      flash_stage3d_enabled(false),
       gl_multisampling_enabled(true),
       privileged_webgl_extensions_enabled(false),
+      webgl_errors_to_console_enabled(true),
       show_composited_layer_borders(false),
       show_composited_layer_tree(false),
       show_fps_counter(false),
+      accelerated_compositing_for_overflow_scroll_enabled(false),
+      accelerated_compositing_for_scrollable_frames_enabled(false),
+      composited_scrolling_for_frames_enabled(false),
+      show_paint_rects(false),
+      render_vsync_enabled(true),
       asynchronous_spell_checking_enabled(true),
       unified_textchecker_enabled(false),
-      threaded_animation_enabled(false),
       accelerated_compositing_enabled(false),
-      threaded_compositing_enabled(false),
       force_compositing_mode(false),
-      allow_webui_compositing(false),
-      composite_to_texture_enabled(false),
       fixed_position_compositing_enabled(false),
-      accelerated_layers_enabled(false),
-      accelerated_animation_enabled(false),
-      accelerated_video_enabled(false),
+      accelerated_compositing_for_3d_transforms_enabled(false),
+      accelerated_compositing_for_animation_enabled(false),
+      accelerated_compositing_for_video_enabled(false),
       accelerated_2d_canvas_enabled(false),
+      deferred_2d_canvas_enabled(false),
+      antialiased_2d_canvas_disabled(false),
       accelerated_painting_enabled(false),
       accelerated_filters_enabled(false),
-      accelerated_plugins_enabled(false),
-      partial_swap_enabled(false),
+      gesture_tap_highlight_enabled(false),
+      accelerated_compositing_for_plugins_enabled(false),
       memory_info_enabled(false),
-      interactive_form_validation_enabled(true),
       fullscreen_enabled(false),
       allow_displaying_insecure_content(true),
       allow_running_insecure_content(false),
-#if defined(OS_ANDROID)
-      font_boosting_version(1),
-      font_scale_factor(1.0f),
-      force_enable_zoom(false),
-#endif
+      password_echo_enabled(false),
       should_print_backgrounds(false),
       enable_scroll_animator(false),
-      hixie76_websocket_protocol_enabled(false),
       visual_word_movement_enabled(false),
-      per_tile_painting_enabled(false) {
+      css_sticky_position_enabled(false),
+      css_shaders_enabled(false),
+      css_variables_enabled(false),
+      css_grid_layout_enabled(false),
+      touch_enabled(false),
+      device_supports_touch(false),
+      device_supports_mouse(true),
+      touch_adjustment_enabled(true),
+      default_tile_width(256),
+      default_tile_height(256),
+      max_untiled_layer_width(512),
+      max_untiled_layer_height(512),
+      fixed_position_creates_stacking_context(false),
+      sync_xhr_in_documents_enabled(true),
+      deferred_image_decoding_enabled(false),
+      number_of_cpu_cores(1),
+#if defined(OS_MACOSX)
+      editing_behavior(EDITING_BEHAVIOR_MAC),
+#elif defined(OS_WIN)
+      editing_behavior(EDITING_BEHAVIOR_WIN),
+#elif defined(OS_POSIX)
+      editing_behavior(EDITING_BEHAVIOR_UNIX),
+#else
+      editing_behavior(EDITING_BEHAVIOR_MAC),
+#endif
+      cookie_enabled(true)
+#if defined(OS_ANDROID)
+      ,
+      text_autosizing_enabled(true),
+      font_scale_factor(1.0f),
+      force_enable_zoom(false),
+      user_gesture_required_for_media_playback(true),
+      supports_multiple_windows(true)
+#endif
+{
+  standard_font_family_map[kCommonScript] =
+      ASCIIToUTF16("Times New Roman");
+  fixed_font_family_map[kCommonScript] =
+      ASCIIToUTF16("Courier New");
+  serif_font_family_map[kCommonScript] =
+      ASCIIToUTF16("Times New Roman");
+  sans_serif_font_family_map[kCommonScript] =
+      ASCIIToUTF16("Arial");
+  cursive_font_family_map[kCommonScript] =
+      ASCIIToUTF16("Script");
+  fantasy_font_family_map[kCommonScript] =
+      ASCIIToUTF16("Impact");
+  pictograph_font_family_map[kCommonScript] =
+      ASCIIToUTF16("Times New Roman");
 }
 
 WebPreferences::~WebPreferences() {
@@ -155,8 +202,36 @@ void setFantasyFontFamilyWrapper(WebSettings* settings,
   settings->setFantasyFontFamily(font, script);
 }
 
+void setPictographFontFamilyWrapper(WebSettings* settings,
+                               const string16& font,
+                               UScriptCode script) {
+  settings->setPictographFontFamily(font, script);
+}
+
 typedef void (*SetFontFamilyWrapper)(
     WebKit::WebSettings*, const string16&, UScriptCode);
+
+// If |scriptCode| is a member of a family of "similar" script codes, returns
+// the script code in that family that is used by WebKit for font selection
+// purposes.  For example, USCRIPT_KATAKANA_OR_HIRAGANA and USCRIPT_JAPANESE are
+// considered equivalent for the purposes of font selection.  WebKit uses the
+// script code USCRIPT_KATAKANA_OR_HIRAGANA.  So, if |scriptCode| is
+// USCRIPT_JAPANESE, the function returns USCRIPT_KATAKANA_OR_HIRAGANA.  WebKit
+// uses different scripts than the ones in Chrome pref names because the version
+// of ICU included on certain ports does not have some of the newer scripts.  If
+// |scriptCode| is not a member of such a family, returns |scriptCode|.
+UScriptCode GetScriptForWebSettings(UScriptCode scriptCode) {
+  switch (scriptCode) {
+  case USCRIPT_HIRAGANA:
+  case USCRIPT_KATAKANA:
+  case USCRIPT_JAPANESE:
+    return USCRIPT_KATAKANA_OR_HIRAGANA;
+  case USCRIPT_KOREAN:
+    return USCRIPT_HANGUL;
+  default:
+    return scriptCode;
+  }
+}
 
 void ApplyFontsFromMap(const WebPreferences::ScriptFontFamilyMap& map,
                        SetFontFamilyWrapper setter,
@@ -164,8 +239,10 @@ void ApplyFontsFromMap(const WebPreferences::ScriptFontFamilyMap& map,
   for (WebPreferences::ScriptFontFamilyMap::const_iterator it = map.begin();
        it != map.end(); ++it) {
     int32 script = u_getPropertyValueEnum(UCHAR_SCRIPT, (it->first).c_str());
-    if (script >= 0 && script < USCRIPT_CODE_LIMIT)
-      (*setter)(settings, it->second, (UScriptCode) script);
+    if (script >= 0 && script < USCRIPT_CODE_LIMIT) {
+      UScriptCode code = static_cast<UScriptCode>(script);
+      (*setter)(settings, it->second, GetScriptForWebSettings(code));
+    }
   }
 }
 
@@ -173,12 +250,6 @@ void ApplyFontsFromMap(const WebPreferences::ScriptFontFamilyMap& map,
 
 void WebPreferences::Apply(WebView* web_view) const {
   WebSettings* settings = web_view->settings();
-  settings->setStandardFontFamily(standard_font_family);
-  settings->setFixedFontFamily(fixed_font_family);
-  settings->setSerifFontFamily(serif_font_family);
-  settings->setSansSerifFontFamily(sans_serif_font_family);
-  settings->setCursiveFontFamily(cursive_font_family);
-  settings->setFantasyFontFamily(fantasy_font_family);
   ApplyFontsFromMap(standard_font_family_map, setStandardFontFamilyWrapper,
                     settings);
   ApplyFontsFromMap(fixed_font_family_map, setFixedFontFamilyWrapper, settings);
@@ -189,11 +260,19 @@ void WebPreferences::Apply(WebView* web_view) const {
                     settings);
   ApplyFontsFromMap(fantasy_font_family_map, setFantasyFontFamilyWrapper,
                     settings);
+  ApplyFontsFromMap(pictograph_font_family_map, setPictographFontFamilyWrapper,
+                    settings);
   settings->setDefaultFontSize(default_font_size);
   settings->setDefaultFixedFontSize(default_fixed_font_size);
   settings->setMinimumFontSize(minimum_font_size);
   settings->setMinimumLogicalFontSize(minimum_logical_font_size);
   settings->setDefaultTextEncodingName(ASCIIToUTF16(default_encoding));
+  settings->setApplyDefaultDeviceScaleFactorInCompositor(
+      apply_default_device_scale_factor_in_compositor);
+  settings->setApplyPageScaleFactorInCompositor(
+      apply_page_scale_factor_in_compositor);
+  settings->setPerTilePaintingEnabled(per_tile_painting_enabled);
+  settings->setAcceleratedAnimationEnabled(accelerated_animation_enabled);
   settings->setJavaScriptEnabled(javascript_enabled);
   settings->setWebSecurityEnabled(web_security_enabled);
   settings->setJavaScriptCanOpenWindowsAutomatically(
@@ -219,10 +298,12 @@ void WebPreferences::Apply(WebView* web_view) const {
   settings->setXSSAuditorEnabled(xss_auditor_enabled);
   settings->setDNSPrefetchingEnabled(dns_prefetching_enabled);
   settings->setLocalStorageEnabled(local_storage_enabled);
+  settings->setSyncXHRInDocumentsEnabled(sync_xhr_in_documents_enabled);
   WebRuntimeFeatures::enableDatabase(databases_enabled);
   settings->setOfflineWebApplicationCacheEnabled(application_cache_enabled);
   settings->setCaretBrowsingEnabled(caret_browsing_enabled);
   settings->setHyperlinkAuditingEnabled(hyperlink_auditing_enabled);
+  settings->setCookieEnabled(cookie_enabled);
 
   // This setting affects the behavior of links in an editable region:
   // clicking the link should select it rather than navigate to it.
@@ -241,16 +322,6 @@ void WebPreferences::Apply(WebView* web_view) const {
   settings->setAllowUniversalAccessFromFileURLs(
       allow_universal_access_from_file_urls);
   settings->setAllowFileAccessFromFileURLs(allow_file_access_from_file_urls);
-
-#if defined(OS_ANDROID)
-  // Apply Android content:// and file:// access restrictions.
-  settings->setAllowContentURLAccess(allow_content_url_access);
-  settings->setOnlyAllowFileAccessToAndroidResources(
-      only_allow_file_access_to_android_resources);
-  // Apply Android media playback restrictions.
-  settings->setMediaPlaybackRequiresUserGesture(
-      user_gesture_required_for_media_playback);
-#endif
 
   // We prevent WebKit from checking if it needs to add a "text direction"
   // submenu to a context menu. it is not only because we don't need the result
@@ -272,6 +343,9 @@ void WebPreferences::Apply(WebView* web_view) const {
   settings->setPrivilegedWebGLExtensionsEnabled(
       privileged_webgl_extensions_enabled);
 
+  // Enable WebGL errors to the JS console if requested.
+  settings->setWebGLErrorsToConsoleEnabled(webgl_errors_to_console_enabled);
+
   // Display colored borders around composited render layers if requested
   // on command line.
   settings->setShowDebugBorders(show_composited_layer_borders);
@@ -279,24 +353,32 @@ void WebPreferences::Apply(WebView* web_view) const {
   // Display an FPS indicator if requested on the command line.
   settings->setShowFPSCounter(show_fps_counter);
 
+  // Enables accelerated compositing for overflow scroll.
+  settings->setAcceleratedCompositingForOverflowScrollEnabled(
+      accelerated_compositing_for_overflow_scroll_enabled);
+
+  // Enables accelerated compositing for scrollable frames if requested on
+  // command line.
+  settings->setAcceleratedCompositingForScrollableFramesEnabled(
+      accelerated_compositing_for_scrollable_frames_enabled);
+
+  // Enables composited scrolling for frames if requested on command line.
+  settings->setCompositedScrollingForFramesEnabled(
+      composited_scrolling_for_frames_enabled);
+
   // Display the current compositor tree as overlay if requested on
   // the command line
   settings->setShowPlatformLayerTree(show_composited_layer_tree);
 
-  settings->setThreadedAnimationEnabled(threaded_animation_enabled);
+  // Display visualization of what has changed on the screen using an
+  // overlay of rects, if requested on the command line.
+  settings->setShowPaintRects(show_paint_rects);
+
+  // Set whether to throttle framerate to Vsync.
+  settings->setRenderVSyncEnabled(render_vsync_enabled);
 
   // Enable gpu-accelerated compositing if requested on the command line.
   settings->setAcceleratedCompositingEnabled(accelerated_compositing_enabled);
-
-#ifndef WEBCOMPOSITOR_HAS_INITIALIZE
-  settings->setUseThreadedCompositor(threaded_compositing_enabled);
-#endif
-
-  // Always enter compositing if requested on the command line.
-  settings->setForceCompositingMode(force_compositing_mode);
-
-  // Enable composite to offscreen texture if requested on the command line.
-  settings->setCompositeToTextureEnabled(composite_to_texture_enabled);
 
   // Enable compositing for fixed position elements if requested
   // on the command line.
@@ -306,31 +388,37 @@ void WebPreferences::Apply(WebView* web_view) const {
   // Enable gpu-accelerated 2d canvas if requested on the command line.
   settings->setAccelerated2dCanvasEnabled(accelerated_2d_canvas_enabled);
 
+  // Enable deferred 2d canvas if requested on the command line.
+  settings->setDeferred2dCanvasEnabled(deferred_2d_canvas_enabled);
+
+  // Disable antialiasing for 2d canvas if requested on the command line.
+  settings->setAntialiased2dCanvasEnabled(!antialiased_2d_canvas_disabled);
+
   // Enable gpu-accelerated painting if requested on the command line.
   settings->setAcceleratedPaintingEnabled(accelerated_painting_enabled);
 
   // Enable gpu-accelerated filters if requested on the command line.
   settings->setAcceleratedFiltersEnabled(accelerated_filters_enabled);
 
+  // Enable gesture tap highlight if requested on the command line.
+  settings->setGestureTapHighlightEnabled(gesture_tap_highlight_enabled);
+
   // Enabling accelerated layers from the command line enabled accelerated
   // 3D CSS, Video, and Animations.
   settings->setAcceleratedCompositingFor3DTransformsEnabled(
-      accelerated_layers_enabled);
+      accelerated_compositing_for_3d_transforms_enabled);
   settings->setAcceleratedCompositingForVideoEnabled(
-      accelerated_video_enabled);
+      accelerated_compositing_for_video_enabled);
   settings->setAcceleratedCompositingForAnimationEnabled(
-      accelerated_animation_enabled);
+      accelerated_compositing_for_animation_enabled);
 
   // Enabling accelerated plugins if specified from the command line.
   settings->setAcceleratedCompositingForPluginsEnabled(
-      accelerated_plugins_enabled);
+      accelerated_compositing_for_plugins_enabled);
 
   // WebGL and accelerated 2D canvas are always gpu composited.
   settings->setAcceleratedCompositingForCanvasEnabled(
       experimental_webgl_enabled || accelerated_2d_canvas_enabled);
-
-  // Enable partial swaps if specified form the command line.
-  settings->setPartialSwapEnabled(partial_swap_enabled);
 
   // Enable memory info reporting to page if requested on the command line.
   settings->setMemoryInfoEnabled(memory_info_enabled);
@@ -348,25 +436,64 @@ void WebPreferences::Apply(WebView* web_view) const {
   // ChromeClient::tabsToLinks which is part of the glue code.
   web_view->setTabsToLinks(tabs_to_links);
 
-  settings->setInteractiveFormValidationEnabled(
-      interactive_form_validation_enabled);
+  settings->setInteractiveFormValidationEnabled(true);
 
   settings->setFullScreenEnabled(fullscreen_enabled);
   settings->setAllowDisplayOfInsecureContent(allow_displaying_insecure_content);
   settings->setAllowRunningOfInsecureContent(allow_running_insecure_content);
-#if defined(OS_ANDROID)
-  settings->setFontBoostingVersion(font_boosting_version);
-  settings->setFontScaleFactor(font_scale_factor);
-  settings->setForceEnableZoom(force_enable_zoom);
-#endif
+  settings->setPasswordEchoEnabled(password_echo_enabled);
   settings->setShouldPrintBackgrounds(should_print_backgrounds);
   settings->setEnableScrollAnimator(enable_scroll_animator);
-  settings->setHixie76WebSocketProtocolEnabled(
-      hixie76_websocket_protocol_enabled);
   settings->setVisualWordMovementEnabled(visual_word_movement_enabled);
 
-  // Enable per-tile painting if requested on the command line.
-  settings->setPerTilePaintingEnabled(per_tile_painting_enabled);
+  settings->setCSSStickyPositionEnabled(css_sticky_position_enabled);
+  settings->setExperimentalCSSCustomFilterEnabled(css_shaders_enabled);
+  settings->setExperimentalCSSVariablesEnabled(css_variables_enabled);
+  settings->setExperimentalCSSGridLayoutEnabled(css_grid_layout_enabled);
+
+  WebRuntimeFeatures::enableTouch(touch_enabled);
+  settings->setDeviceSupportsTouch(device_supports_touch);
+  settings->setDeviceSupportsMouse(device_supports_mouse);
+  settings->setEnableTouchAdjustment(touch_adjustment_enabled);
+
+  settings->setDefaultTileSize(
+      WebSize(default_tile_width, default_tile_height));
+  settings->setMaxUntiledLayerSize(
+      WebSize(max_untiled_layer_width, max_untiled_layer_height));
+
+  settings->setFixedPositionCreatesStackingContext(
+      fixed_position_creates_stacking_context);
+
+  settings->setDeferredImageDecodingEnabled(deferred_image_decoding_enabled);
+
+  settings->setEditingBehavior(
+      static_cast<WebSettings::EditingBehavior>(editing_behavior));
+
+#if defined(OS_ANDROID)
+  settings->setAllowCustomScrollbarInMainFrame(false);
+  settings->setTextAutosizingEnabled(text_autosizing_enabled);
+  settings->setTextAutosizingFontScaleFactor(font_scale_factor);
+  web_view->setIgnoreViewportTagMaximumScale(force_enable_zoom);
+  settings->setAutoZoomFocusedNodeToLegibleScale(true);
+  settings->setDoubleTapToZoomEnabled(true);
+  settings->setMediaPlaybackRequiresUserGesture(
+      user_gesture_required_for_media_playback);
+  settings->setSupportsMultipleWindows(supports_multiple_windows);
+#endif
 
   WebNetworkStateNotifier::setOnLine(is_online);
 }
+
+#define COMPILE_ASSERT_MATCHING_ENUMS(webkit_glue_name, webkit_name)         \
+    COMPILE_ASSERT(                                                          \
+        static_cast<int>(webkit_glue_name) == static_cast<int>(webkit_name), \
+        mismatching_enums)
+
+COMPILE_ASSERT_MATCHING_ENUMS(
+    WebPreferences::EDITING_BEHAVIOR_MAC, WebSettings::EditingBehaviorMac);
+COMPILE_ASSERT_MATCHING_ENUMS(
+    WebPreferences::EDITING_BEHAVIOR_WIN, WebSettings::EditingBehaviorWin);
+COMPILE_ASSERT_MATCHING_ENUMS(
+    WebPreferences::EDITING_BEHAVIOR_UNIX, WebSettings::EditingBehaviorUnix);
+
+}  // namespace webkit_glue

@@ -1,13 +1,13 @@
-// Copyright (c) 2011 The Chromium Authors. All rights reserved.
+// Copyright (c) 2012 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
 #ifndef NET_DISK_CACHE_DISK_CACHE_TEST_BASE_H_
 #define NET_DISK_CACHE_DISK_CACHE_TEST_BASE_H_
-#pragma once
 
 #include "base/basictypes.h"
 #include "base/file_path.h"
+#include "base/files/scoped_temp_dir.h"
 #include "base/memory/scoped_ptr.h"
 #include "base/threading/thread.h"
 #include "net/base/cache_type.h"
@@ -49,6 +49,7 @@ class DiskCacheTest : public PlatformTest {
   FilePath cache_path_;
 
  private:
+  base::ScopedTempDir temp_dir_;
   scoped_ptr<MessageLoop> message_loop_;
 };
 
@@ -129,6 +130,10 @@ class DiskCacheTestWithCache : public DiskCacheTest {
   // Asks the cache to trim an entry from the deleted list. If |empty| is
   // true, the whole list is deleted.
   void TrimDeletedListForTest(bool empty);
+
+  // Makes sure that some time passes before continuing the test. Time::Now()
+  // before and after this method will not be the same.
+  void AddDelay();
 
   // DiskCacheTest:
   virtual void TearDown() OVERRIDE;

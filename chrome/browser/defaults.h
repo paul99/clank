@@ -1,4 +1,4 @@
-// Copyright (c) 2011 The Chromium Authors. All rights reserved.
+// Copyright (c) 2012 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -6,7 +6,6 @@
 
 #ifndef CHROME_BROWSER_DEFAULTS_H_
 #define CHROME_BROWSER_DEFAULTS_H_
-#pragma once
 
 #include "build/build_config.h"
 #include "chrome/browser/prefs/session_startup_pref.h"
@@ -27,9 +26,6 @@ extern const bool kCanToggleSystemTitleBar;
 
 #endif
 
-// The default value for session startup.
-extern const SessionStartupPref::Type kDefaultSessionStartupType;
-
 // Width of mini-tabs.
 extern const int kMiniTabWidth;
 
@@ -43,8 +39,12 @@ extern const bool kBrowserAliveWithNoWindows;
 // bookmarks?
 extern const bool kShowImportOnBookmarkBar;
 
-// Should the exit menu item be shown in the toolbar menu?
+// Whether various menu items are shown.
 extern const bool kShowExitMenuItem;
+extern const bool kShowFeedbackMenuItem;
+extern const bool kShowHelpMenuItemIcon;
+extern const bool kShowSyncSetupMenuItem;
+extern const bool kShowUpgradeMenuItem;
 
 // Does the OS support other browsers? If not, operations such as default
 // browser check are not done.
@@ -71,10 +71,8 @@ extern const bool kAlwaysOpenIncognitoWindow;
 // Should the close button be shown in the Task Manager dialog?
 extern const bool kShowCancelButtonInTaskManager;
 
-// Preferred height of the bookmarks bar when shown on every page and
-// when shown only on the new tab page.
+// Preferred height of the bookmarks bar when shown on every page.
 extern const int kBookmarkBarHeight;
-extern const int kNewtabBookmarkBarHeight;
 
 // ChromiumOS network menu font
 extern const ui::ResourceBundle::FontStyle kAssociatedNetworkFontStyle;
@@ -82,8 +80,13 @@ extern const ui::ResourceBundle::FontStyle kAssociatedNetworkFontStyle;
 // Preferred infobar border padding in pixels.
 extern const int kInfoBarBorderPaddingVertical;
 
-// Default country code during install.
-extern std::string kCountryCodeAtInstall;
+// Last character display for passwords.
+extern const bool kPasswordEchoEnabled;
+
+// Indicates whether session restore should always create a new
+// tabbed browser. This is true every where except on ChromeOS
+// where we want the desktop to show through in this situation.
+extern const bool kAlwaysCreateTabbedBrowserOnSessionRestore;
 
 //=============================================================================
 // Runtime "const" - set only once after parsing command line option and should

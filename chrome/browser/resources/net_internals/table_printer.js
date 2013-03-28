@@ -1,4 +1,4 @@
-// Copyright (c) 2011 The Chromium Authors. All rights reserved.
+// Copyright (c) 2012 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -53,7 +53,7 @@ var TablePrinter = (function() {
     /**
      * Adds a column to the current row, setting its value to cellText.
      *
-     * @returns {!TablePrinterCell} the cell that was added.
+     * @return {!TablePrinterCell} the cell that was added.
      */
     addCell: function(cellText) {
       var r = this.rows_[this.rows_.length - 1];
@@ -73,7 +73,7 @@ var TablePrinter = (function() {
      * Adds a header row, if not already present, and adds a new column to it,
      * setting its contents to |headerText|.
      *
-     * @returns {!TablePrinterCell} the cell that was added.
+     * @return {!TablePrinterCell} the cell that was added.
      */
     addHeaderCell: function(headerText) {
       // Insert empty new row at start of |rows_| if currently no header row.
@@ -108,6 +108,27 @@ var TablePrinter = (function() {
       if (columnIndex >= row.length)
         return null;
       return row[columnIndex];
+    },
+
+    /**
+     * Returns true if searchString can be found entirely within a cell.
+     * Case insensitive.
+     *
+     * @param {string} string String to search for, must be lowercase.
+     * @return {boolean} True if some cell contains searchString.
+     */
+    search: function(searchString) {
+      var numColumns = this.getNumColumns();
+      for (var r = 0; r < this.rows_.length; ++r) {
+        for (var c = 0; c < numColumns; ++c) {
+          var cell = this.getCell_(r, c);
+          if (!cell)
+            continue;
+          if (cell.text.toLowerCase().indexOf(searchString) != -1)
+            return true;
+        }
+      }
+      return false;
     },
 
     /**
@@ -216,7 +237,7 @@ var TablePrinter = (function() {
         var tableTitleRow = addNode(thead, 'tr');
         var tableTitle = addNodeWithText(tableTitleRow, 'th', this.title_);
         tableTitle.colSpan = numColumns;
-        changeClassName(tableTitle, 'title', true);
+        tableTitle.classList.add('title');
       }
 
       // Fill table body, adding header row first, if needed.

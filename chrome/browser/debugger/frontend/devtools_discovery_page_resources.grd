@@ -16,7 +16,6 @@
     <includes>
       <include file="devtools_discovery_page.html"
                name="IDR_DEVTOOLS_DISCOVERY_PAGE_HTML"
-               type="BINDATA"/>
-    </includes>
+               type="BINDATA"/></includes>
   </release>
 </grit>

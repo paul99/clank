@@ -1,5 +1,5 @@
-#!/usr/bin/python2.4
-# Copyright (c) 2006-2008 The Chromium Authors. All rights reserved.
+#!/usr/bin/env python
+# Copyright (c) 2012 The Chromium Authors. All rights reserved.
 # Use of this source code is governed by a BSD-style license that can be
 # found in the LICENSE file.
 
@@ -7,20 +7,18 @@
 '''
 
 import os
-import re
+
 import grit.format.rc_header
 
-from grit.node import base
-from grit import exception
-from grit import util
 from grit import xtb_reader
+from grit.node import base
 
 
 class FileNode(base.Node):
   '''A <file> element.'''
 
   def __init__(self):
-    super(type(self), self).__init__()
+    super(FileNode, self).__init__()
     self.re = None
     self.should_load_ = True
 
@@ -36,8 +34,8 @@ class FileNode(base.Node):
   def MandatoryAttributes(self):
     return ['path', 'lang']
 
-  def RunGatherers(self, recursive=False, debug=False):
-    if not self.should_load_ or not self.SatisfiesOutputCondition():
+  def RunPostSubstitutionGatherer(self, debug=False):
+    if not self.should_load_:
       return
 
     root = self.GetRoot()
@@ -45,14 +43,14 @@ class FileNode(base.Node):
     if hasattr(root, 'defines'):
       defs = root.defines
 
-    xtb_file = file(self.GetFilePath())
+    xtb_file = open(self.ToRealPath(self.GetInputPath()))
     try:
       lang = xtb_reader.Parse(xtb_file,
                               self.UberClique().GenerateXtbParserCallback(
                                 self.attrs['lang'], debug=debug),
                               defs=defs)
     except:
-      print "Exception during parsing of %s" % self.GetFilePath()
+      print "Exception during parsing of %s" % self.GetInputPath()
       raise
     # We special case 'he' and 'iw' because the translation console uses 'iw'
     # and we use 'he'.
@@ -61,8 +59,8 @@ class FileNode(base.Node):
             'reference must contain messages in the language specified\n'
             'by the \'lang\' attribute.')
 
-  def GetFilePath(self):
-    return self.ToRealPath(os.path.expandvars(self.attrs['path']))
+  def GetInputPath(self):
+    return os.path.expandvars(self.attrs['path'])
 
 
 class OutputNode(base.Node):
@@ -72,9 +70,11 @@ class OutputNode(base.Node):
     return ['filename', 'type']
 
   def DefaultAttributes(self):
-    return { 'lang' : '', # empty lang indicates all languages
-             'language_section' : 'neutral' # defines a language neutral section
-             }
+    return {
+      'lang' : '', # empty lang indicates all languages
+      'language_section' : 'neutral', # defines a language neutral section
+      'context' : '',
+    }
 
   def GetType(self):
     return self.attrs['type']
@@ -83,14 +83,19 @@ class OutputNode(base.Node):
     '''Returns the language ID, default 'en'.'''
     return self.attrs['lang']
 
+  def GetContext(self):
+    return self.attrs['context']
+
   def GetFilename(self):
     return self.attrs['filename']
 
   def GetOutputFilename(self):
+    path = None
     if hasattr(self, 'output_filename'):
-      return self.output_filename
+      path = self.output_filename
     else:
-      return self.attrs['filename']
+      path = self.attrs['filename']
+    return os.path.expandvars(path)
 
   def _IsValidChild(self, child):
     return isinstance(child, EmitNode)
@@ -104,12 +109,4 @@ class EmitNode(base.ContentNode):
   def GetEmitType(self):
     '''Returns the emit_type for this node. Default is 'append'.'''
     return self.attrs['emit_type']
-
-  def ItemFormatter(self, t):
-    if t == 'rc_header':
-      return grit.format.rc_header.EmitAppender()
-    else:
-      return super(type(self), self).ItemFormatter(t)
-
-
 

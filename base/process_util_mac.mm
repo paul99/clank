@@ -1,4 +1,4 @@
-// Copyright (c) 2011 The Chromium Authors. All rights reserved.
+// Copyright (c) 2012 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -13,7 +13,6 @@
 #include <mach/mach_vm.h>
 #include <mach/shared_region.h>
 #include <mach/task.h>
-#include <mach-o/dyld.h>
 #include <mach-o/nlist.h>
 #include <malloc/malloc.h>
 #import <objc/runtime.h>
@@ -29,15 +28,16 @@
 #include <string>
 
 #include "base/debug/debugger.h"
-#include "base/eintr_wrapper.h"
 #include "base/file_util.h"
 #include "base/hash_tables.h"
+#include "base/lazy_instance.h"
 #include "base/logging.h"
 #include "base/mac/mac_util.h"
+#include "base/mac/scoped_mach_port.h"
+#include "base/posix/eintr_wrapper.h"
 #include "base/string_util.h"
 #include "base/sys_info.h"
-#include "base/sys_string_conversions.h"
-#include "base/time.h"
+#include "base/threading/thread_local.h"
 #include "third_party/apple_apsl/CFBase.h"
 #include "third_party/apple_apsl/malloc.h"
 #include "third_party/mach_override/mach_override.h"
@@ -469,7 +469,7 @@ mach_port_t ProcessMetrics::TaskForPid(ProcessHandle process) const {
 
 // Bytes committed by the system.
 size_t GetSystemCommitCharge() {
-  host_name_port_t host = mach_host_self();
+  base::mac::ScopedMachPort host(mach_host_self());
   mach_msg_type_number_t count = HOST_VM_INFO_COUNT;
   vm_statistics_data_t data;
   kern_return_t kr = host_statistics(host, HOST_VM_INFO,
@@ -547,13 +547,84 @@ malloc_error_break_t LookUpMallocErrorBreak() {
   return NULL;
 }
 
+// Simple scoper that saves the current value of errno, resets it to 0, and on
+// destruction puts the old value back. This is so that CrMallocErrorBreak can
+// safely test errno free from the effects of other routines.
+class ScopedClearErrno {
+ public:
+  ScopedClearErrno() : old_errno_(errno) {
+    errno = 0;
+  }
+  ~ScopedClearErrno() {
+    if (errno == 0)
+      errno = old_errno_;
+  }
+
+ private:
+  int old_errno_;
+
+  DISALLOW_COPY_AND_ASSIGN(ScopedClearErrno);
+};
+
+// Combines ThreadLocalBoolean with AutoReset.  It would be convenient
+// to compose ThreadLocalPointer<bool> with base::AutoReset<bool>, but that
+// would require allocating some storage for the bool.
+class ThreadLocalBooleanAutoReset {
+ public:
+  ThreadLocalBooleanAutoReset(ThreadLocalBoolean* tlb, bool new_value)
+      : scoped_tlb_(tlb),
+        original_value_(tlb->Get()) {
+    scoped_tlb_->Set(new_value);
+  }
+  ~ThreadLocalBooleanAutoReset() {
+    scoped_tlb_->Set(original_value_);
+  }
+
+ private:
+  ThreadLocalBoolean* scoped_tlb_;
+  bool original_value_;
+
+  DISALLOW_COPY_AND_ASSIGN(ThreadLocalBooleanAutoReset);
+};
+
+base::LazyInstance<ThreadLocalBoolean>::Leaky
+    g_unchecked_malloc = LAZY_INSTANCE_INITIALIZER;
+
+// NOTE(shess): This is called when the malloc library noticed that the heap
+// is fubar.  Avoid calls which will re-enter the malloc library.
 void CrMallocErrorBreak() {
   g_original_malloc_error_break();
+
+  // Out of memory is certainly not heap corruption, and not necessarily
+  // something for which the process should be terminated. Leave that decision
+  // to the OOM killer.  The EBADF case comes up because the malloc library
+  // attempts to log to ASL (syslog) before calling this code, which fails
+  // accessing a Unix-domain socket because of sandboxing.
+  if (errno == ENOMEM || (errno == EBADF && g_unchecked_malloc.Get().Get()))
+    return;
+
   // A unit test checks this error message, so it needs to be in release builds.
-  LOG(ERROR) <<
-      "Terminating process due to a potential for future heap corruption";
-  int* death_ptr = NULL;
-  *death_ptr = 0xf00bad;
+  char buf[1024] =
+      "Terminating process due to a potential for future heap corruption: "
+      "errno=";
+  char errnobuf[] = {
+    '0' + ((errno / 100) % 10),
+    '0' + ((errno / 10) % 10),
+    '0' + (errno % 10),
+    '\000'
+  };
+  COMPILE_ASSERT(ELAST <= 999, errno_too_large_to_encode);
+  strlcat(buf, errnobuf, sizeof(buf));
+  RAW_LOG(ERROR, buf);
+
+  // Crash by writing to NULL+errno to allow analyzing errno from
+  // crash dump info (setting a breakpad key would re-enter the malloc
+  // library).  Max documented errno in intro(2) is actually 102, but
+  // it really just needs to be "small" to stay on the right vm page.
+  const int kMaxErrno = 256;
+  char* volatile death_ptr = NULL;
+  death_ptr += std::min(errno, kMaxErrno);
+  *death_ptr = '!';
 }
 
 }  // namespace
@@ -564,6 +635,12 @@ void EnableTerminationOnHeapCorruption() {
   // by AddressSanitizer.
   return;
 #endif
+
+  // Only override once, otherwise CrMallocErrorBreak() will recurse
+  // to itself.
+  if (g_original_malloc_error_break)
+    return;
+
   malloc_error_break_t malloc_error_break = LookUpMallocErrorBreak();
   if (!malloc_error_break) {
     DLOG(WARNING) << "Could not find malloc_error_break";
@@ -594,6 +671,8 @@ typedef void* (*calloc_type)(struct _malloc_zone_t* zone,
                              size_t size);
 typedef void* (*valloc_type)(struct _malloc_zone_t* zone,
                              size_t size);
+typedef void (*free_type)(struct _malloc_zone_t* zone,
+                          void* ptr);
 typedef void* (*realloc_type)(struct _malloc_zone_t* zone,
                               void* ptr,
                               size_t size);
@@ -604,17 +683,20 @@ typedef void* (*memalign_type)(struct _malloc_zone_t* zone,
 malloc_type g_old_malloc;
 calloc_type g_old_calloc;
 valloc_type g_old_valloc;
+free_type g_old_free;
 realloc_type g_old_realloc;
 memalign_type g_old_memalign;
 
 malloc_type g_old_malloc_purgeable;
 calloc_type g_old_calloc_purgeable;
 valloc_type g_old_valloc_purgeable;
+free_type g_old_free_purgeable;
 realloc_type g_old_realloc_purgeable;
 memalign_type g_old_memalign_purgeable;
 
 void* oom_killer_malloc(struct _malloc_zone_t* zone,
                         size_t size) {
+  ScopedClearErrno clear_errno;
   void* result = g_old_malloc(zone, size);
   if (!result && size)
     debug::BreakDebugger();
@@ -624,6 +706,7 @@ void* oom_killer_malloc(struct _malloc_zone_t* zone,
 void* oom_killer_calloc(struct _malloc_zone_t* zone,
                         size_t num_items,
                         size_t size) {
+  ScopedClearErrno clear_errno;
   void* result = g_old_calloc(zone, num_items, size);
   if (!result && num_items && size)
     debug::BreakDebugger();
@@ -632,15 +715,23 @@ void* oom_killer_calloc(struct _malloc_zone_t* zone,
 
 void* oom_killer_valloc(struct _malloc_zone_t* zone,
                         size_t size) {
+  ScopedClearErrno clear_errno;
   void* result = g_old_valloc(zone, size);
   if (!result && size)
     debug::BreakDebugger();
   return result;
 }
 
+void oom_killer_free(struct _malloc_zone_t* zone,
+                     void* ptr) {
+  ScopedClearErrno clear_errno;
+  g_old_free(zone, ptr);
+}
+
 void* oom_killer_realloc(struct _malloc_zone_t* zone,
                          void* ptr,
                          size_t size) {
+  ScopedClearErrno clear_errno;
   void* result = g_old_realloc(zone, ptr, size);
   if (!result && size)
     debug::BreakDebugger();
@@ -650,6 +741,7 @@ void* oom_killer_realloc(struct _malloc_zone_t* zone,
 void* oom_killer_memalign(struct _malloc_zone_t* zone,
                           size_t alignment,
                           size_t size) {
+  ScopedClearErrno clear_errno;
   void* result = g_old_memalign(zone, alignment, size);
   // Only die if posix_memalign would have returned ENOMEM, since there are
   // other reasons why NULL might be returned (see
@@ -663,6 +755,7 @@ void* oom_killer_memalign(struct _malloc_zone_t* zone,
 
 void* oom_killer_malloc_purgeable(struct _malloc_zone_t* zone,
                                   size_t size) {
+  ScopedClearErrno clear_errno;
   void* result = g_old_malloc_purgeable(zone, size);
   if (!result && size)
     debug::BreakDebugger();
@@ -672,6 +765,7 @@ void* oom_killer_malloc_purgeable(struct _malloc_zone_t* zone,
 void* oom_killer_calloc_purgeable(struct _malloc_zone_t* zone,
                                   size_t num_items,
                                   size_t size) {
+  ScopedClearErrno clear_errno;
   void* result = g_old_calloc_purgeable(zone, num_items, size);
   if (!result && num_items && size)
     debug::BreakDebugger();
@@ -680,15 +774,23 @@ void* oom_killer_calloc_purgeable(struct _malloc_zone_t* zone,
 
 void* oom_killer_valloc_purgeable(struct _malloc_zone_t* zone,
                                   size_t size) {
+  ScopedClearErrno clear_errno;
   void* result = g_old_valloc_purgeable(zone, size);
   if (!result && size)
     debug::BreakDebugger();
   return result;
 }
 
+void oom_killer_free_purgeable(struct _malloc_zone_t* zone,
+                               void* ptr) {
+  ScopedClearErrno clear_errno;
+  g_old_free_purgeable(zone, ptr);
+}
+
 void* oom_killer_realloc_purgeable(struct _malloc_zone_t* zone,
                                    void* ptr,
                                    size_t size) {
+  ScopedClearErrno clear_errno;
   void* result = g_old_realloc_purgeable(zone, ptr, size);
   if (!result && size)
     debug::BreakDebugger();
@@ -698,6 +800,7 @@ void* oom_killer_realloc_purgeable(struct _malloc_zone_t* zone,
 void* oom_killer_memalign_purgeable(struct _malloc_zone_t* zone,
                                     size_t alignment,
                                     size_t size) {
+  ScopedClearErrno clear_errno;
   void* result = g_old_memalign_purgeable(zone, alignment, size);
   // Only die if posix_memalign would have returned ENOMEM, since there are
   // other reasons why NULL might be returned (see
@@ -718,19 +821,19 @@ void oom_killer_new() {
 // === Core Foundation CFAllocators ===
 
 bool CanGetContextForCFAllocator() {
-  return !base::mac::IsOSLaterThanLion();
+  return !base::mac::IsOSLaterThanMountainLion_DontCallThis();
 }
 
 CFAllocatorContext* ContextForCFAllocator(CFAllocatorRef allocator) {
-  if (base::mac::IsOSLeopard() || base::mac::IsOSSnowLeopard()) {
+  if (base::mac::IsOSSnowLeopard()) {
     ChromeCFAllocatorLeopards* our_allocator =
         const_cast<ChromeCFAllocatorLeopards*>(
             reinterpret_cast<const ChromeCFAllocatorLeopards*>(allocator));
     return &our_allocator->_context;
-  } else if (base::mac::IsOSLion()) {
-    ChromeCFAllocatorLion* our_allocator =
-        const_cast<ChromeCFAllocatorLion*>(
-            reinterpret_cast<const ChromeCFAllocatorLion*>(allocator));
+  } else if (base::mac::IsOSLion() || base::mac::IsOSMountainLion()) {
+    ChromeCFAllocatorLions* our_allocator =
+        const_cast<ChromeCFAllocatorLions*>(
+            reinterpret_cast<const ChromeCFAllocatorLions*>(allocator));
     return &our_allocator->_context;
   } else {
     return NULL;
@@ -783,16 +886,13 @@ id oom_killer_allocWithZone(id self, SEL _cmd, NSZone* zone)
 
 }  // namespace
 
-malloc_zone_t* GetPurgeableZone() {
-  // malloc_default_purgeable_zone only exists on >= 10.6. Use dlsym to grab it
-  // at runtime because it may not be present in the SDK used for compilation.
-  typedef malloc_zone_t* (*malloc_default_purgeable_zone_t)(void);
-  malloc_default_purgeable_zone_t malloc_purgeable_zone =
-      reinterpret_cast<malloc_default_purgeable_zone_t>(
-          dlsym(RTLD_DEFAULT, "malloc_default_purgeable_zone"));
-  if (malloc_purgeable_zone)
-    return malloc_purgeable_zone();
-  return NULL;
+void* UncheckedMalloc(size_t size) {
+  if (g_old_malloc) {
+    ScopedClearErrno clear_errno;
+    ThreadLocalBooleanAutoReset flag(g_unchecked_malloc.Pointer(), true);
+    return g_old_malloc(malloc_default_zone(), size);
+  }
+  return malloc(size);
 }
 
 void EnableTerminationOnOutOfMemory() {
@@ -817,16 +917,20 @@ void EnableTerminationOnOutOfMemory() {
         !g_old_valloc_purgeable && !g_old_realloc_purgeable &&
         !g_old_memalign_purgeable) << "Old allocators unexpectedly non-null";
 
+#if !defined(ADDRESS_SANITIZER)
+  // Don't do anything special on OOM for the malloc zones replaced by
+  // AddressSanitizer, as modifying or protecting them may not work correctly.
+
   // See http://trac.webkit.org/changeset/53362/trunk/Tools/DumpRenderTree/mac
   bool zone_allocators_protected = base::mac::IsOSLionOrLater();
 
   ChromeMallocZone* default_zone =
       reinterpret_cast<ChromeMallocZone*>(malloc_default_zone());
   ChromeMallocZone* purgeable_zone =
-      reinterpret_cast<ChromeMallocZone*>(GetPurgeableZone());
+      reinterpret_cast<ChromeMallocZone*>(malloc_default_purgeable_zone());
 
-  vm_address_t page_start_default = NULL;
-  vm_address_t page_start_purgeable = NULL;
+  vm_address_t page_start_default = 0;
+  vm_address_t page_start_purgeable = 0;
   vm_size_t len_default = 0;
   vm_size_t len_purgeable = 0;
   if (zone_allocators_protected) {
@@ -852,13 +956,16 @@ void EnableTerminationOnOutOfMemory() {
   g_old_malloc = default_zone->malloc;
   g_old_calloc = default_zone->calloc;
   g_old_valloc = default_zone->valloc;
+  g_old_free = default_zone->free;
   g_old_realloc = default_zone->realloc;
-  CHECK(g_old_malloc && g_old_calloc && g_old_valloc && g_old_realloc)
+  CHECK(g_old_malloc && g_old_calloc && g_old_valloc && g_old_free &&
+        g_old_realloc)
       << "Failed to get system allocation functions.";
 
   default_zone->malloc = oom_killer_malloc;
   default_zone->calloc = oom_killer_calloc;
   default_zone->valloc = oom_killer_valloc;
+  default_zone->free = oom_killer_free;
   default_zone->realloc = oom_killer_realloc;
 
   if (default_zone->version >= 5) {
@@ -873,14 +980,17 @@ void EnableTerminationOnOutOfMemory() {
     g_old_malloc_purgeable = purgeable_zone->malloc;
     g_old_calloc_purgeable = purgeable_zone->calloc;
     g_old_valloc_purgeable = purgeable_zone->valloc;
+    g_old_free_purgeable = purgeable_zone->free;
     g_old_realloc_purgeable = purgeable_zone->realloc;
     CHECK(g_old_malloc_purgeable && g_old_calloc_purgeable &&
-          g_old_valloc_purgeable && g_old_realloc_purgeable)
+          g_old_valloc_purgeable && g_old_free_purgeable &&
+          g_old_realloc_purgeable)
         << "Failed to get system allocation functions.";
 
     purgeable_zone->malloc = oom_killer_malloc_purgeable;
     purgeable_zone->calloc = oom_killer_calloc_purgeable;
     purgeable_zone->valloc = oom_killer_valloc_purgeable;
+    purgeable_zone->free = oom_killer_free_purgeable;
     purgeable_zone->realloc = oom_killer_realloc_purgeable;
 
     if (purgeable_zone->version >= 5) {
@@ -898,6 +1008,7 @@ void EnableTerminationOnOutOfMemory() {
                PROT_READ);
     }
   }
+#endif
 
   // === C malloc_zone_batch_malloc ===
 
@@ -924,6 +1035,7 @@ void EnableTerminationOnOutOfMemory() {
 
   std::set_new_handler(oom_killer_new);
 
+#ifndef ADDRESS_SANITIZER
   // === Core Foundation CFAllocators ===
 
   // This will not catch allocation done by custom allocators, but will catch
@@ -961,6 +1073,7 @@ void EnableTerminationOnOutOfMemory() {
     NSLog(@"Internals of CFAllocator not known; out-of-memory failures via "
         "CFAllocator will not result in termination. http://crbug.com/45650");
   }
+#endif
 
   // === Cocoa NSObject allocation ===
 

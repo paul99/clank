@@ -1,10 +1,9 @@
-// Copyright (c) 2011 The Chromium Authors. All rights reserved.
+// Copyright (c) 2012 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
 #ifndef CHROME_BROWSER_CHROMEOS_BOOT_TIMES_LOADER_H_
 #define CHROME_BROWSER_CHROMEOS_BOOT_TIMES_LOADER_H_
-#pragma once
 
 #include <set>
 #include <string>
@@ -13,27 +12,24 @@
 #include "base/callback_forward.h"
 #include "base/compiler_specific.h"
 #include "base/time.h"
-#include "chrome/browser/cancelable_request.h"
-#include "content/browser/renderer_host/render_widget_host.h"
+#include "chrome/common/cancelable_task_tracker.h"
 #include "content/public/browser/notification_observer.h"
 #include "content/public/browser/notification_registrar.h"
+#include "content/public/browser/render_widget_host.h"
 
 namespace chromeos {
 
 // BootTimesLoader loads the bootimes of Chrome OS from the file system.
 // Loading is done asynchronously on the file thread. Once loaded,
 // BootTimesLoader calls back to a method of your choice with the boot times.
-// To use BootTimesLoader do the following:
+// To use BootTimesLoader, do the following:
 //
 // . In your class define a member field of type chromeos::BootTimesLoader and
-//   CancelableRequestConsumerBase.
+//   CancelableTaskTracker.
 // . Define the callback method, something like:
-//   void OnBootTimesLoader(chromeos::BootTimesLoader::Handle,
-//                             BootTimesLoader::BootTimes boot_times);
-// . When you want the version invoke: loader.GetBootTimes(&consumer, callback);
-class BootTimesLoader
-    : public CancelableRequestProvider,
-      public content::NotificationObserver {
+//   void OnBootTimesLoaded(const BootTimesLoader::BootTimes& boot_times);
+// . When you want the version invoke: loader.GetBootTimes(callback, &tracker_);
+class BootTimesLoader : public content::NotificationObserver {
  public:
   BootTimesLoader();
   virtual ~BootTimesLoader();
@@ -61,17 +57,14 @@ class BootTimesLoader
                   total(0) {}
   } BootTimes;
 
-  // Signature
-  typedef base::Callback<void(Handle, BootTimes)> GetBootTimesCallback;
-
-  typedef CancelableRequest<GetBootTimesCallback> GetBootTimesRequest;
-
   static BootTimesLoader* Get();
 
+  typedef base::Callback<void(const BootTimes&)> GetBootTimesCallback;
+
   // Asynchronously requests the info.
-  Handle GetBootTimes(
-      CancelableRequestConsumerBase* consumer,
-      const GetBootTimesCallback& callback);
+  CancelableTaskTracker::TaskId GetBootTimes(
+      const GetBootTimesCallback& callback,
+      CancelableTaskTracker* tracker);
 
   // Add a time marker for login. A timeline will be dumped to
   // /tmp/login-times-sent after login is done. If |send_to_uma| is true
@@ -120,7 +113,9 @@ class BootTimesLoader
    public:
     Backend() {}
 
-    void GetBootTimes(const scoped_refptr<GetBootTimesRequest>& request);
+    void GetBootTimesAndRunCallback(
+        const CancelableTaskTracker::IsCanceledCallback& is_canceled_cb,
+        const GetBootTimesCallback& callback);
 
    private:
     friend class base::RefCountedThreadSafe<Backend>;
@@ -139,6 +134,11 @@ class BootTimesLoader
     std::string name() const { return name_; }
     base::Time time() const { return time_; }
     bool send_to_uma() const { return send_to_uma_; }
+
+    // comparitor for sorting
+    bool operator<(const TimeMarker& other) const {
+      return time_ < other.time_;
+    }
 
    private:
     friend class std::vector<TimeMarker>;
@@ -159,7 +159,9 @@ class BootTimesLoader
   static void WriteTimes(const std::string base_name,
                          const std::string uma_name,
                          const std::string uma_prefix,
-                         const std::vector<TimeMarker> login_times);
+                         std::vector<TimeMarker> login_times);
+  static void AddMarker(std::vector<TimeMarker>* vector, TimeMarker marker);
+
   void LoginDone();
 
   // Used to hold the stats at main().
@@ -173,7 +175,7 @@ class BootTimesLoader
 
   std::vector<TimeMarker> login_time_markers_;
   std::vector<TimeMarker> logout_time_markers_;
-  std::set<RenderWidgetHost*> render_widget_hosts_loading_;
+  std::set<content::RenderWidgetHost*> render_widget_hosts_loading_;
 
   DISALLOW_COPY_AND_ASSIGN(BootTimesLoader);
 };

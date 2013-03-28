@@ -1,4 +1,4 @@
-// Copyright (c) 2011 The Chromium Authors. All rights reserved.
+// Copyright (c) 2012 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -12,6 +12,8 @@
 #include "base/sys_string_conversions.h"
 #include "chrome/app/chrome_command_ids.h"  // IDC_HISTORY_MENU
 #import "chrome/browser/app_controller_mac.h"
+#include "chrome/browser/favicon/favicon_service_factory.h"
+#include "chrome/browser/history/history_service_factory.h"
 #include "chrome/browser/history/page_usage_data.h"
 #include "chrome/browser/profiles/profile.h"
 #include "chrome/browser/sessions/session_types.h"
@@ -23,13 +25,13 @@
 #include "content/public/browser/notification_source.h"
 #include "grit/generated_resources.h"
 #include "grit/theme_resources.h"
-#include "grit/theme_resources_standard.h"
 #include "grit/ui_resources.h"
 #include "skia/ext/skia_utils_mac.h"
 #include "third_party/skia/include/core/SkBitmap.h"
 #include "ui/base/l10n/l10n_util.h"
 #include "ui/base/resource/resource_bundle.h"
 #include "ui/gfx/codec/png_codec.h"
+#include "ui/gfx/favicon_size.h"
 #include "ui/gfx/image/image.h"
 #include "ui/gfx/mac/nsimage_cache.h"
 
@@ -54,6 +56,7 @@ const unsigned int kRecentlyClosedCount = 10;
 
 HistoryMenuBridge::HistoryItem::HistoryItem()
    : icon_requested(false),
+     icon_task_id(CancelableTaskTracker::kBadTaskId),
      menu_item(nil),
      session_id(0) {
 }
@@ -62,6 +65,7 @@ HistoryMenuBridge::HistoryItem::HistoryItem(const HistoryItem& copy)
    : title(copy.title),
      url(copy.url),
      icon_requested(false),
+     icon_task_id(CancelableTaskTracker::kBadTaskId),
      menu_item(nil),
      session_id(copy.session_id) {
 }
@@ -82,7 +86,8 @@ HistoryMenuBridge::HistoryMenuBridge(Profile* profile)
     // Check to see if the history service is ready. Because it loads async, it
     // may not be ready when the Bridge is created. If this happens, register
     // for a notification that tells us the HistoryService is ready.
-    HistoryService* hs = profile_->GetHistoryService(Profile::EXPLICIT_ACCESS);
+    HistoryService* hs = HistoryServiceFactory::GetForProfile(
+        profile_, Profile::EXPLICIT_ACCESS);
     if (hs != NULL && hs->BackendLoaded()) {
       history_service_ = hs;
       Init();
@@ -91,16 +96,23 @@ HistoryMenuBridge::HistoryMenuBridge(Profile* profile)
     tab_restore_service_ = TabRestoreServiceFactory::GetForProfile(profile_);
     if (tab_restore_service_) {
       tab_restore_service_->AddObserver(this);
-      tab_restore_service_->LoadTabsFromLastSession();
+      // If the tab entries are already loaded, invoke the observer method to
+      // build the "Recently Closed" section. Otherwise it will be when the
+      // backend loads.
+      if (!tab_restore_service_->IsLoaded())
+        tab_restore_service_->LoadTabsFromLastSession();
+      else
+        TabRestoreServiceChanged(tab_restore_service_);
     }
   }
 
   ResourceBundle& rb = ResourceBundle::GetSharedInstance();
-  default_favicon_.reset([gfx::GetCachedImageWithName(@"nav.pdf") retain]);
+  default_favicon_.reset(
+      rb.GetNativeImageNamed(IDR_DEFAULT_FAVICON).CopyNSImage());
 
   // Set the static icons in the menu.
   NSMenuItem* item = [HistoryMenu() itemWithTag:IDC_SHOW_HISTORY];
-  [item setImage:rb.GetNativeImageNamed(IDR_HISTORY_FAVICON)];
+  [item setImage:rb.GetNativeImageNamed(IDR_HISTORY_FAVICON).ToNSImage()];
 
   // The service is not ready for use yet, so become notified when it does.
   if (!history_service_) {
@@ -117,7 +129,7 @@ HistoryMenuBridge::~HistoryMenuBridge() {
   // Unregister ourselves as observers and notifications.
   DCHECK(profile_);
   if (history_service_) {
-    registrar_.Remove(this, chrome::NOTIFICATION_HISTORY_TYPED_URLS_MODIFIED,
+    registrar_.Remove(this, chrome::NOTIFICATION_HISTORY_URLS_MODIFIED,
                       content::Source<Profile>(profile_));
     registrar_.Remove(this, chrome::NOTIFICATION_HISTORY_URL_VISITED,
                       content::Source<Profile>(profile_));
@@ -146,8 +158,8 @@ void HistoryMenuBridge::Observe(int type,
   // A history service is now ready. Check to see if it's the one for the main
   // profile. If so, perform final initialization.
   if (type == chrome::NOTIFICATION_HISTORY_LOADED) {
-    HistoryService* hs =
-        profile_->GetHistoryService(Profile::EXPLICIT_ACCESS);
+    HistoryService* hs = HistoryServiceFactory::GetForProfile(
+        profile_, Profile::EXPLICIT_ACCESS);
     if (hs != NULL && hs->BackendLoaded()) {
       history_service_ = hs;
       Init();
@@ -368,7 +380,7 @@ NSMenuItem* HistoryMenuBridge::AddItemToMenu(HistoryItem* item,
 }
 
 void HistoryMenuBridge::Init() {
-  registrar_.Add(this, chrome::NOTIFICATION_HISTORY_TYPED_URLS_MODIFIED,
+  registrar_.Add(this, chrome::NOTIFICATION_HISTORY_URLS_MODIFIED,
                  content::Source<Profile>(profile_));
   registrar_.Add(this, chrome::NOTIFICATION_HISTORY_URL_VISITED,
                  content::Source<Profile>(profile_));
@@ -445,49 +457,42 @@ HistoryMenuBridge::HistoryItem* HistoryMenuBridge::HistoryItemForTab(
 
 void HistoryMenuBridge::GetFaviconForHistoryItem(HistoryItem* item) {
   FaviconService* service =
-      profile_->GetFaviconService(Profile::EXPLICIT_ACCESS);
-  FaviconService::Handle handle = service->GetFaviconForURL(
-      item->url, history::FAVICON, &favicon_consumer_,
-      base::Bind(&HistoryMenuBridge::GotFaviconData, base::Unretained(this)));
-  favicon_consumer_.SetClientData(service, handle, item);
-  item->icon_handle = handle;
+      FaviconServiceFactory::GetForProfile(profile_, Profile::EXPLICIT_ACCESS);
+  CancelableTaskTracker::TaskId task_id = service->GetFaviconImageForURL(
+      FaviconService::FaviconForURLParams(profile_,
+                                          item->url,
+                                          history::FAVICON,
+                                          gfx::kFaviconSize),
+      base::Bind(&HistoryMenuBridge::GotFaviconData,
+                 base::Unretained(this),
+                 item),
+      &cancelable_task_tracker_);
+  item->icon_task_id = task_id;
   item->icon_requested = true;
 }
 
-void HistoryMenuBridge::GotFaviconData(FaviconService::Handle handle,
-                                       history::FaviconData favicon) {
+void HistoryMenuBridge::GotFaviconData(
+    HistoryItem* item,
+    const history::FaviconImageResult& image_result) {
   // Since we're going to do Cocoa-y things, make sure this is the main thread.
   DCHECK([NSThread isMainThread]);
 
-  HistoryItem* item =
-      favicon_consumer_.GetClientData(
-          profile_->GetFaviconService(Profile::EXPLICIT_ACCESS), handle);
   DCHECK(item);
   item->icon_requested = false;
-  item->icon_handle = NULL;
+  item->icon_task_id = CancelableTaskTracker::kBadTaskId;
 
-  // Convert the raw data to Skia and then to a NSImage.
-  // TODO(rsesek): Is there an easier way to do this?
-  SkBitmap icon;
-  if (favicon.is_valid() &&
-      gfx::PNGCodec::Decode(favicon.image_data->front(),
-          favicon.image_data->size(), &icon)) {
-    NSImage* image = gfx::SkBitmapToNSImage(icon);
-    if (image) {
-      // The conversion was successful.
-      item->icon.reset([image retain]);
-      [item->menu_item setImage:item->icon.get()];
-    }
+  NSImage* image = image_result.image.AsNSImage();
+  if (image) {
+    item->icon.reset([image retain]);
+    [item->menu_item setImage:item->icon.get()];
   }
 }
 
 void HistoryMenuBridge::CancelFaviconRequest(HistoryItem* item) {
   DCHECK(item);
   if (item->icon_requested) {
-    FaviconService* service =
-        profile_->GetFaviconService(Profile::EXPLICIT_ACCESS);
-    service->CancelRequest(item->icon_handle);
+    cancelable_task_tracker_.TryCancel(item->icon_task_id);
     item->icon_requested = false;
-    item->icon_handle = NULL;
+    item->icon_task_id = CancelableTaskTracker::kBadTaskId;
   }
 }

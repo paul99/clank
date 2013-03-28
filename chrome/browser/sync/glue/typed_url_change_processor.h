@@ -1,17 +1,16 @@
-// Copyright (c) 2011 The Chromium Authors. All rights reserved.
+// Copyright (c) 2012 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
 #ifndef CHROME_BROWSER_SYNC_GLUE_TYPED_URL_CHANGE_PROCESSOR_H_
 #define CHROME_BROWSER_SYNC_GLUE_TYPED_URL_CHANGE_PROCESSOR_H_
-#pragma once
 
 #include "chrome/browser/sync/glue/change_processor.h"
 
 #include "base/basictypes.h"
 #include "base/compiler_specific.h"
 #include "base/memory/scoped_ptr.h"
-#include "base/time.h"
+#include "chrome/browser/sync/glue/data_type_error_handler.h"
 #include "chrome/browser/sync/glue/sync_backend_host.h"
 #include "chrome/browser/sync/glue/typed_url_model_associator.h"
 #include "content/public/browser/notification_observer.h"
@@ -35,10 +34,10 @@ class URLRow;
 
 namespace browser_sync {
 
-class UnrecoverableErrorHandler;
+class DataTypeErrorHandler;
 
 // This class is responsible for taking changes from the history backend and
-// applying them to the sync_api 'syncable' model, and vice versa. All
+// applying them to the sync API 'syncable' model, and vice versa. All
 // operations and use of this class are from the UI thread.
 class TypedUrlChangeProcessor : public ChangeProcessor,
                                 public content::NotificationObserver {
@@ -46,19 +45,20 @@ class TypedUrlChangeProcessor : public ChangeProcessor,
   TypedUrlChangeProcessor(Profile* profile,
                           TypedUrlModelAssociator* model_associator,
                           history::HistoryBackend* history_backend,
-                          UnrecoverableErrorHandler* error_handler);
+                          DataTypeErrorHandler* error_handler);
   virtual ~TypedUrlChangeProcessor();
 
   // content::NotificationObserver implementation.
-  // History -> sync_api model change application.
+  // History -> sync API change application.
   virtual void Observe(int type,
                        const content::NotificationSource& source,
                        const content::NotificationDetails& details) OVERRIDE;
 
-  // sync_api model -> WebDataService change application.
+  // sync API model -> WebDataService change application.
   virtual void ApplyChangesFromSyncModel(
-      const sync_api::BaseTransaction* trans,
-      const sync_api::ImmutableChangeRecordList& changes) OVERRIDE;
+      const syncer::BaseTransaction* trans,
+      int64 model_version,
+      const syncer::ImmutableChangeRecordList& changes) OVERRIDE;
 
   // Commit changes here, after we've released the transaction lock to avoid
   // jank.
@@ -66,7 +66,6 @@ class TypedUrlChangeProcessor : public ChangeProcessor,
 
  protected:
   virtual void StartImpl(Profile* profile) OVERRIDE;
-  virtual void StopImpl() OVERRIDE;
 
  private:
   friend class ScopedStopObserving<TypedUrlChangeProcessor>;
@@ -87,7 +86,7 @@ class TypedUrlChangeProcessor : public ChangeProcessor,
   // new one for the passed |typed_url| if one does not already exist. Returns
   // false and sets an unrecoverable error if the operation failed.
   bool CreateOrUpdateSyncNode(history::URLRow typed_url,
-                              sync_api::WriteTransaction* transaction);
+                              syncer::WriteTransaction* transaction);
 
   // The profile with which we are associated.
   Profile* profile_;
@@ -102,15 +101,13 @@ class TypedUrlChangeProcessor : public ChangeProcessor,
 
   content::NotificationRegistrar notification_registrar_;
 
-  bool observing_;  // True when we should observe notifications.
-
   MessageLoop* expected_loop_;
 
   scoped_ptr<content::NotificationService> notification_service_;
 
   // The set of pending changes that will be written out on the next
   // CommitChangesFromSyncModel() call.
-  TypedUrlModelAssociator::TypedUrlVector pending_new_urls_;
+  history::URLRows pending_new_urls_;
   TypedUrlModelAssociator::TypedUrlUpdateVector pending_updated_urls_;
   std::vector<GURL> pending_deleted_urls_;
   TypedUrlModelAssociator::TypedUrlVisitVector pending_new_visits_;

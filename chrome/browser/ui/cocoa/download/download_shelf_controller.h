@@ -1,23 +1,26 @@
-// Copyright (c) 2011 The Chromium Authors. All rights reserved.
+// Copyright (c) 2012 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
 #import <Cocoa/Cocoa.h>
 
-#import "base/mac/cocoa_protocols.h"
 #include "base/memory/scoped_nsobject.h"
 #include "base/memory/scoped_ptr.h"
 #import "chrome/browser/ui/cocoa/view_resizer.h"
 
 @class AnimatableView;
-class BaseDownloadItemModel;
 class Browser;
 @class BrowserWindowController;
 @class DownloadItemController;
+class DownloadItemModel;
 class DownloadShelf;
 @class DownloadShelfView;
 @class HyperlinkButtonCell;
 @class HoverButton;
+
+namespace content {
+class PageNavigator;
+}
 
 // A controller class that manages the download shelf for one window. It is
 // responsible for the behavior of the shelf itself (showing/hiding, handling
@@ -66,6 +69,9 @@ class DownloadShelf;
 
   // Delegate that handles resizing our view.
   id<ViewResizer> resizeDelegate_;
+
+  // Used for loading pages.
+  content::PageNavigator* navigator_;
 };
 
 - (id)initWithBrowser:(Browser*)browser
@@ -84,7 +90,7 @@ class DownloadShelf;
 // Run when the user clicks the close button on the right side of the shelf.
 - (IBAction)hide:(id)sender;
 
-- (void)addDownloadItem:(BaseDownloadItemModel*)model;
+- (void)addDownloadItem:(DownloadItemModel*)model;
 
 // Remove a download, possibly via clearing browser data.
 - (void)remove:(DownloadItemController*)download;

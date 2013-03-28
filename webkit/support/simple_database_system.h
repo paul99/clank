@@ -1,4 +1,4 @@
-// Copyright (c) 2011 The Chromium Authors. All rights reserved.
+// Copyright (c) 2012 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -6,10 +6,10 @@
 #define WEBKIT_SUPPORT_SIMPLE_DATABASE_SYSTEM_H_
 
 #include "base/file_path.h"
+#include "base/files/scoped_temp_dir.h"
 #include "base/hash_tables.h"
 #include "base/memory/ref_counted.h"
 #include "base/platform_file.h"
-#include "base/scoped_temp_dir.h"
 #include "base/string16.h"
 #include "base/synchronization/lock.h"
 #include "base/threading/thread.h"
@@ -45,7 +45,7 @@ class SimpleDatabaseSystem : public webkit_database::DatabaseTracker::Observer,
   int64 GetFileSize(const string16& vfs_file_name);
   int64 GetSpaceAvailable(const string16& origin_identifier);
 
-  // For use by LayoutTestController, called on the main thread.
+  // For use by testRunner, called on the main thread.
   void ClearAllDatabases();
   void SetDatabaseQuota(int64 quota);
 
@@ -86,7 +86,7 @@ class SimpleDatabaseSystem : public webkit_database::DatabaseTracker::Observer,
   void ThreadCleanup(base::WaitableEvent* done_event);
 
   // Where the tracker database file and per origin database files reside.
-  ScopedTempDir temp_dir_;
+  base::ScopedTempDir temp_dir_;
 
   // All access to the db_tracker (except for its construction) and
   // vfs operations are serialized on a background thread.

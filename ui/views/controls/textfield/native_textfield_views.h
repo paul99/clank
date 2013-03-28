@@ -4,10 +4,10 @@
 
 #ifndef UI_VIEWS_CONTROLS_TEXTFIELD_NATIVE_TEXTFIELD_VIEWS_H_
 #define UI_VIEWS_CONTROLS_TEXTFIELD_NATIVE_TEXTFIELD_VIEWS_H_
-#pragma once
 
 #include "base/memory/weak_ptr.h"
 #include "base/string16.h"
+#include "ui/base/events/event_constants.h"
 #include "ui/base/ime/text_input_client.h"
 #include "ui/base/models/simple_menu_model.h"
 #include "ui/gfx/font.h"
@@ -30,7 +30,6 @@ class Canvas;
 namespace views {
 
 class FocusableBorder;
-class KeyEvent;
 class MenuModelAdapter;
 class MenuRunner;
 
@@ -49,26 +48,33 @@ class VIEWS_EXPORT NativeTextfieldViews : public TouchSelectionClientView,
                                           public ui::TextInputClient,
                                           public TextfieldViewsModel::Delegate {
  public:
+  // Interval over which the cursor/caret blinks.  This represents the full
+  // cycle; the caret is shown for half of this time and hidden for the other
+  // half.
+  static const int kCursorBlinkCycleMs;
+
   explicit NativeTextfieldViews(Textfield* parent);
   virtual ~NativeTextfieldViews();
 
   // View overrides:
-  virtual gfx::NativeCursor GetCursor(const MouseEvent& event) OVERRIDE;
-  virtual bool OnMousePressed(const MouseEvent& event) OVERRIDE;
-  virtual bool OnMouseDragged(const MouseEvent& event) OVERRIDE;
-  virtual void OnMouseReleased(const MouseEvent& event) OVERRIDE;
-  virtual bool OnKeyPressed(const KeyEvent& event) OVERRIDE;
+  virtual gfx::NativeCursor GetCursor(const ui::MouseEvent& event) OVERRIDE;
+  virtual bool OnMousePressed(const ui::MouseEvent& event) OVERRIDE;
+  virtual bool OnMouseDragged(const ui::MouseEvent& event) OVERRIDE;
+  virtual void OnMouseReleased(const ui::MouseEvent& event) OVERRIDE;
+  virtual void OnGestureEvent(ui::GestureEvent* event) OVERRIDE;
+  virtual bool OnKeyPressed(const ui::KeyEvent& event) OVERRIDE;
   virtual bool GetDropFormats(
       int* formats,
       std::set<ui::OSExchangeData::CustomFormat>* custom_formats) OVERRIDE;
   virtual bool CanDrop(const ui::OSExchangeData& data) OVERRIDE;
-  virtual int OnDragUpdated(const DropTargetEvent& event) OVERRIDE;
-  virtual int OnPerformDrop(const DropTargetEvent& event) OVERRIDE;
+  virtual int OnDragUpdated(const ui::DropTargetEvent& event) OVERRIDE;
+  virtual int OnPerformDrop(const ui::DropTargetEvent& event) OVERRIDE;
   virtual void OnDragDone() OVERRIDE;
-  virtual bool OnKeyReleased(const KeyEvent& event) OVERRIDE;
+  virtual bool OnKeyReleased(const ui::KeyEvent& event) OVERRIDE;
   virtual void OnPaint(gfx::Canvas* canvas) OVERRIDE;
   virtual void OnFocus() OVERRIDE;
   virtual void OnBlur() OVERRIDE;
+  virtual void OnNativeThemeChanged(const ui::NativeTheme* theme) OVERRIDE;
 
   // TouchSelectionClientView overrides:
   virtual void SelectRect(const gfx::Point& start,
@@ -76,8 +82,7 @@ class VIEWS_EXPORT NativeTextfieldViews : public TouchSelectionClientView,
 
   // ContextMenuController overrides:
   virtual void ShowContextMenuForView(View* source,
-                                      const gfx::Point& p,
-                                      bool is_mouse_gesture) OVERRIDE;
+                                      const gfx::Point& point) OVERRIDE;
 
   // Overridden from DragController:
   virtual void WriteDragDataForView(View* sender,
@@ -93,8 +98,10 @@ class VIEWS_EXPORT NativeTextfieldViews : public TouchSelectionClientView,
   virtual string16 GetText() const OVERRIDE;
   virtual void UpdateText() OVERRIDE;
   virtual void AppendText(const string16& text) OVERRIDE;
+  virtual void ReplaceSelection(const string16& text) OVERRIDE;
+  virtual base::i18n::TextDirection GetTextDirection() const OVERRIDE;
   virtual string16 GetSelectedText() const OVERRIDE;
-  virtual void SelectAll() OVERRIDE;
+  virtual void SelectAll(bool reversed) OVERRIDE;
   virtual void ClearSelection() OVERRIDE;
   virtual void UpdateBorder() OVERRIDE;
   virtual void UpdateTextColor() OVERRIDE;
@@ -115,8 +122,10 @@ class VIEWS_EXPORT NativeTextfieldViews : public TouchSelectionClientView,
   virtual void GetSelectionModel(gfx::SelectionModel* sel) const OVERRIDE;
   virtual void SelectSelectionModel(const gfx::SelectionModel& sel) OVERRIDE;
   virtual size_t GetCursorPosition() const OVERRIDE;
-  virtual bool HandleKeyPressed(const KeyEvent& e) OVERRIDE;
-  virtual bool HandleKeyReleased(const KeyEvent& e) OVERRIDE;
+  virtual bool GetCursorEnabled() const OVERRIDE;
+  virtual void SetCursorEnabled(bool enabled) OVERRIDE;
+  virtual bool HandleKeyPressed(const ui::KeyEvent& e) OVERRIDE;
+  virtual bool HandleKeyReleased(const ui::KeyEvent& e) OVERRIDE;
   virtual void HandleFocus() OVERRIDE;
   virtual void HandleBlur() OVERRIDE;
   virtual ui::TextInputClient* GetTextInputClient() OVERRIDE;
@@ -124,6 +133,8 @@ class VIEWS_EXPORT NativeTextfieldViews : public TouchSelectionClientView,
   virtual void ApplyDefaultStyle() OVERRIDE;
   virtual void ClearEditHistory() OVERRIDE;
   virtual int GetFontHeight() OVERRIDE;
+  virtual int GetTextfieldBaseline() const OVERRIDE;
+  virtual void ExecuteTextCommand(int command_id) OVERRIDE;
 
   // ui::SimpleMenuModel::Delegate overrides
   virtual bool IsCommandIdChecked(int command_id) const OVERRIDE;
@@ -131,6 +142,8 @@ class VIEWS_EXPORT NativeTextfieldViews : public TouchSelectionClientView,
   virtual bool GetAcceleratorForCommandId(
       int command_id,
       ui::Accelerator* accelerator) OVERRIDE;
+  virtual bool IsItemForCommandIdDynamic(int command_id) const OVERRIDE;
+  virtual string16 GetLabelForCommandId(int command_id) const OVERRIDE;
   virtual void ExecuteCommand(int command_id) OVERRIDE;
 
   // class name of internal
@@ -154,6 +167,8 @@ class VIEWS_EXPORT NativeTextfieldViews : public TouchSelectionClientView,
   virtual ui::TextInputType GetTextInputType() const OVERRIDE;
   virtual bool CanComposeInline() const OVERRIDE;
   virtual gfx::Rect GetCaretBounds() OVERRIDE;
+  virtual bool GetCompositionCharacterBounds(uint32 index,
+                                             gfx::Rect* rect) OVERRIDE;
   virtual bool HasCompositionText() OVERRIDE;
   virtual bool GetTextRange(ui::Range* range) OVERRIDE;
   virtual bool GetCompositionTextRange(ui::Range* range) OVERRIDE;
@@ -165,12 +180,20 @@ class VIEWS_EXPORT NativeTextfieldViews : public TouchSelectionClientView,
   virtual void OnInputMethodChanged() OVERRIDE;
   virtual bool ChangeTextDirectionAndLayoutAlignment(
       base::i18n::TextDirection direction) OVERRIDE;
+  virtual void ExtendSelectionAndDelete(size_t before, size_t after) OVERRIDE;
 
   // Overridden from TextfieldViewsModel::Delegate:
   virtual void OnCompositionTextConfirmedOrCleared() OVERRIDE;
 
   // Returns the TextfieldViewsModel's text/cursor/selection rendering model.
   gfx::RenderText* GetRenderText() const;
+
+  // Converts |text| according to textfield style, e.g. lower case if
+  // |textfield_| has STYLE_LOWERCASE style.
+  string16 GetTextForDisplay(const string16& text);
+
+  // Updates any colors that have not been explicitly set from the theme.
+  void UpdateColorsFromTheme(const ui::NativeTheme* theme);
 
   // A callback function to periodically update the cursor state.
   void UpdateCursor();
@@ -184,7 +207,7 @@ class VIEWS_EXPORT NativeTextfieldViews : public TouchSelectionClientView,
   void PaintTextAndCursor(gfx::Canvas* canvas);
 
   // Handle the keyevent.
-  bool HandleKeyEvent(const KeyEvent& key_event);
+  bool HandleKeyEvent(const ui::KeyEvent& key_event);
 
   // Helper function to call MoveCursorTo on the TextfieldViewsModel.
   bool MoveCursorTo(const gfx::Point& point, bool select);
@@ -197,7 +220,7 @@ class VIEWS_EXPORT NativeTextfieldViews : public TouchSelectionClientView,
   // changed.
   void UpdateAfterChange(bool text_changed, bool cursor_changed);
 
-  // Utility function to prepare the context menu..
+  // Utility function to prepare the context menu.
   void UpdateContextMenu();
 
   // Convenience method to call InputMethod::OnTextInputTypeChanged();
@@ -223,13 +246,17 @@ class VIEWS_EXPORT NativeTextfieldViews : public TouchSelectionClientView,
   bool Paste();
 
   // Tracks the mouse clicks for single/double/triple clicks.
-  void TrackMouseClicks(const MouseEvent& event);
+  void TrackMouseClicks(const ui::MouseEvent& event);
 
   // Handles mouse press events.
-  void HandleMousePressEvent(const MouseEvent& event);
+  void HandleMousePressEvent(const ui::MouseEvent& event);
 
   // Returns true if the current text input type allows access by the IME.
   bool ImeEditingAllowed() const;
+
+  // Returns true if distance between |event| and |last_click_location_|
+  // exceeds the drag threshold.
+  bool ExceededDragThresholdFromLastClickLocation(const ui::MouseEvent& event);
 
   // Checks if a char is ok to be inserted into the textfield. The |ch| is a
   // modified character, i.e., modifiers took effect when generating this char.
@@ -260,7 +287,7 @@ class VIEWS_EXPORT NativeTextfieldViews : public TouchSelectionClientView,
 
   // State variables used to track double and triple clicks.
   size_t aggregated_clicks_;
-  base::Time last_click_time_;
+  base::TimeDelta last_click_time_;
   gfx::Point last_click_location_;
 
   // Context menu and its content list for the textfield.

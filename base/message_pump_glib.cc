@@ -1,4 +1,4 @@
-// Copyright (c) 2011 The Chromium Authors. All rights reserved.
+// Copyright (c) 2012 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -9,14 +9,11 @@
 
 #include <glib.h>
 
-#include "base/eintr_wrapper.h"
 #include "base/logging.h"
+#include "base/posix/eintr_wrapper.h"
 #include "base/threading/platform_thread.h"
 
 namespace {
-
-// We send a byte across a pipe to wakeup the event loop.
-const char kWorkScheduled = '\0';
 
 // Return a timeout suitable for the glib loop, -1 to block forever,
 // 0 to return right away, or a timeout in milliseconds from now.
@@ -164,13 +161,6 @@ MessagePumpGlib::MessagePumpGlib()
   g_source_attach(work_source_, context_);
 }
 
-MessagePumpGlib::~MessagePumpGlib() {
-  g_source_destroy(work_source_);
-  g_source_unref(work_source_);
-  close(wakeup_pipe_read_);
-  close(wakeup_pipe_write_);
-}
-
 void MessagePumpGlib::RunWithDispatcher(Delegate* delegate,
                                         MessagePumpDispatcher* dispatcher) {
 #ifndef NDEBUG
@@ -196,7 +186,7 @@ void MessagePumpGlib::RunWithDispatcher(Delegate* delegate,
   // have done something, assume there is likely something more to do.  This
   // will mean that we don't block on the message pump until there was nothing
   // more to do.  We also set this to true to make sure not to block on the
-  // first iteration of the loop, so RunAllPending() works correctly.
+  // first iteration of the loop, so RunUntilIdle() works correctly.
   bool more_work_is_plausible = true;
 
   // We run our own loop instead of using g_main_loop_quit in one of the
@@ -247,14 +237,19 @@ bool MessagePumpGlib::HandleCheck() {
   if (!state_)  // state_ may be null during tests.
     return false;
 
-  // We should only ever have a single message on the wakeup pipe, since we
-  // are only signaled when the queue went from empty to non-empty.  The glib
-  // poll will tell us whether there was data, so this read shouldn't block.
+  // We usually have a single message on the wakeup pipe, since we are only
+  // signaled when the queue went from empty to non-empty, but there can be
+  // two messages if a task posted a task, hence we read at most two bytes.
+  // The glib poll will tell us whether there was data, so this read
+  // shouldn't block.
   if (wakeup_gpollfd_->revents & G_IO_IN) {
-    char msg;
-    if (HANDLE_EINTR(read(wakeup_pipe_read_, &msg, 1)) != 1 || msg != '!') {
+    char msg[2];
+    const int num_bytes = HANDLE_EINTR(read(wakeup_pipe_read_, msg, 2));
+    if (num_bytes < 1) {
       NOTREACHED() << "Error reading from the wakeup pipe.";
     }
+    DCHECK((num_bytes == 1 && msg[0] == '!') ||
+           (num_bytes == 2 && msg[0] == '!' && msg[1] == '!'));
     // Since we ate the message, we need to record that we have more work,
     // because HandleCheck() may be called without HandleDispatch being called
     // afterwards.
@@ -324,6 +319,13 @@ void MessagePumpGlib::ScheduleDelayedWork(const TimeTicks& delayed_work_time) {
   // adjusted.  This will cause us to try to do work, but that's ok.
   delayed_work_time_ = delayed_work_time;
   ScheduleWork();
+}
+
+MessagePumpGlib::~MessagePumpGlib() {
+  g_source_destroy(work_source_);
+  g_source_unref(work_source_);
+  close(wakeup_pipe_read_);
+  close(wakeup_pipe_write_);
 }
 
 MessagePumpDispatcher* MessagePumpGlib::GetDispatcher() {

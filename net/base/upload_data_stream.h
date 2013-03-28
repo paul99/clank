@@ -4,129 +4,169 @@
 
 #ifndef NET_BASE_UPLOAD_DATA_STREAM_H_
 #define NET_BASE_UPLOAD_DATA_STREAM_H_
-#pragma once
 
-#include "base/memory/scoped_ptr.h"
+#include "base/gtest_prod_util.h"
+#include "base/memory/ref_counted.h"
+#include "base/memory/scoped_vector.h"
+#include "base/memory/weak_ptr.h"
+#include "net/base/completion_callback.h"
 #include "net/base/net_export.h"
-#include "net/base/upload_data.h"
 
 namespace net {
 
-class FileStream;
+class DrainableIOBuffer;
 class IOBuffer;
+class UploadElementReader;
 
+// A class to read all elements from an UploadData object.
 class NET_EXPORT UploadDataStream {
  public:
+  // An enum used to construct chunked data stream.
+  enum Chunked { CHUNKED };
+
+  // Constructs a non-chunked data stream.
+  // |element_readers| is cleared by this ctor.
+  UploadDataStream(ScopedVector<UploadElementReader>* element_readers,
+                   int64 identifier);
+
+  // Constructs a chunked data stream.
+  UploadDataStream(Chunked chunked, int64 identifier);
+
   ~UploadDataStream();
 
-  // Returns a new instance of UploadDataStream if it can be created and
-  // initialized successfully. If not, NULL will be returned and the error
-  // code will be set if the output parameter error_code is not empty.
-  static UploadDataStream* Create(UploadData* upload_data, int* error_code);
+  // Creates UploadDataStream with a reader.
+  static UploadDataStream* CreateWithReader(
+      scoped_ptr<UploadElementReader> reader,
+      int64 identifier);
 
-  // Returns the stream's buffer.
-  IOBuffer* buf() const { return buf_; }
-  // Returns the length of the data in the stream's buffer.
-  size_t buf_len() const { return buf_len_; }
-
-  // TODO(satish): We should ideally have UploadDataStream expose a Read()
-  // method which returns data in a caller provided IOBuffer. That would do away
-  // with this function and make the interface cleaner as well with less memmove
-  // calls.
+  // Initializes the stream. This function must be called before calling any
+  // other method. It is not valid to call any method (other than the
+  // destructor) if Init() returns a failure. This method can be called multiple
+  // times. Calling this method after a Init() success results in resetting the
+  // state.
   //
-  // Returns the size of the stream's buffer pointed by buf().
-  static size_t GetBufferSize();
+  // Does the initialization synchronously and returns the result if possible,
+  // otherwise returns ERR_IO_PENDING and runs the callback with the result.
+  //
+  // Returns OK on success. Returns ERR_UPLOAD_FILE_CHANGED if the expected
+  // file modification time is set (usually not set, but set for sliced
+  // files) and the target file is changed.
+  int Init(const CompletionCallback& callback);
 
-  // Call to indicate that a portion of the stream's buffer was consumed.  This
-  // call modifies the stream's buffer so that it contains the next segment of
-  // the upload data to be consumed.
-  void MarkConsumedAndFillBuffer(size_t num_bytes);
+  // Initializes the stream synchronously.
+  // Use this method only if the thread is IO allowed or the data is in-memory.
+  int InitSync();
 
-  // Sets the callback to be invoked when new chunks are available to upload.
-  void set_chunk_callback(ChunkCallback* callback) {
-    upload_data_->set_chunk_callback(callback);
-  }
+  // When possible, reads up to |buf_len| bytes synchronously from the upload
+  // data stream to |buf| and returns the number of bytes read; otherwise,
+  // returns ERR_IO_PENDING and calls |callback| with the number of bytes read.
+  // Partial reads are allowed. Zero is returned on a call to Read when there
+  // are no remaining bytes in the stream, and IsEof() will return true
+  // hereafter.
+  //
+  // If there's less data to read than we initially observed (i.e. the actual
+  // upload data is smaller than size()), zeros are padded to ensure that
+  // size() bytes can be read, which can happen for TYPE_FILE payloads.
+  int Read(IOBuffer* buf, int buf_len, const CompletionCallback& callback);
+
+  // Reads data always synchronously.
+  // Use this method only if the thread is IO allowed or the data is in-memory.
+  int ReadSync(IOBuffer* buf, int buf_len);
+
+  // Identifies a particular upload instance, which is used by the cache to
+  // formulate a cache key.  This value should be unique across browser
+  // sessions.  A value of 0 is used to indicate an unspecified identifier.
+  int64 identifier() const { return identifier_; }
 
   // Returns the total size of the data stream and the current position.
   // size() is not to be used to determine whether the stream has ended
   // because it is possible for the stream to end before its size is reached,
-  // for example, if the file is truncated.
+  // for example, if the file is truncated. When the data is chunked, size()
+  // always returns zero.
   uint64 size() const { return total_size_; }
   uint64 position() const { return current_position_; }
 
-  bool is_chunked() const { return upload_data_->is_chunked(); }
+  bool is_chunked() const { return is_chunked_; }
+  bool last_chunk_appended() const { return last_chunk_appended_; }
 
-  // Returns whether there is no more data to read, regardless of whether
-  // position < size.
-  bool eof() const { return eof_; }
-
-  // Returns whether the data available in buf() includes the last chunk in a
-  // chunked data stream. This method returns true once the final chunk has been
-  // placed in the IOBuffer returned by buf(), in contrast to eof() which
-  // returns true only after the data in buf() has been consumed.
-  bool IsOnLastChunk() const;
-
-  // Returns true if the upload data in the stream is entirely in memory.
-  bool IsInMemory() const;
-
-  // This method is provided only to be used by unit tests.
-  static void set_merge_chunks(bool merge) { merge_chunks_ = merge; }
-
- private:
-  // Protects from public access since now we have a static creator function
-  // which will do both creation and initialization and might return an error.
-  explicit UploadDataStream(UploadData* upload_data);
-
-  // Fills the buffer with any remaining data and sets eof_ if there was nothing
-  // left to fill the buffer with.
-  // Returns OK if the operation succeeds. Otherwise error code is returned.
-  int FillBuffer();
-
-  // Advances to the next element. Updates the internal states.
-  void AdvanceToNextElement();
+  const ScopedVector<UploadElementReader>& element_readers() const {
+    return element_readers_;
+  }
 
   // Returns true if all data has been consumed from this upload data
   // stream.
   bool IsEOF() const;
 
-  scoped_refptr<UploadData> upload_data_;
+  // Returns true if the upload data in the stream is entirely in memory.
+  bool IsInMemory() const;
 
-  // This buffer is filled with data to be uploaded.  The data to be sent is
-  // always at the front of the buffer.  If we cannot send all of the buffer at
-  // once, then we memmove the remaining portion and back-fill the buffer for
-  // the next "write" call.  buf_len_ indicates how much data is in the buffer.
-  scoped_refptr<IOBuffer> buf_;
-  size_t buf_len_;
+  // Adds the given chunk of bytes to be sent with chunked transfer encoding.
+  void AppendChunk(const char* bytes, int bytes_len, bool is_last_chunk);
+
+ private:
+  friend class SpdyHttpStreamSpdy2Test;
+  friend class SpdyHttpStreamSpdy3Test;
+  friend class SpdyNetworkTransactionSpdy2Test;
+  friend class SpdyNetworkTransactionSpdy3Test;
+
+  // Resets this instance to the uninitialized state.
+  void Reset();
+
+  // Runs Init() for all element readers.
+  // This method is used to implement Init().
+  int InitInternal(int start_index, const CompletionCallback& callback);
+
+  // Resumes initialization and runs callback with the result when necessary.
+  void ResumePendingInit(int start_index,
+                         const CompletionCallback& callback,
+                         int previous_result);
+
+  // Finalizes the initialization process.
+  // This method is used to implement Init().
+  void FinalizeInitialization();
+
+  // Reads data from the element readers.
+  // This method is used to implement Read().
+  int ReadInternal(scoped_refptr<DrainableIOBuffer> buf,
+                   const CompletionCallback& callback);
+
+  // Resumes pending read and calls callback with the result when necessary.
+  void ResumePendingRead(scoped_refptr<DrainableIOBuffer> buf,
+                         const CompletionCallback& callback,
+                         int previous_result);
+
+  // These methods are provided only to be used by unit tests.
+  static void ResetMergeChunks();
+  static void set_merge_chunks(bool merge) { merge_chunks_ = merge; }
+
+  ScopedVector<UploadElementReader> element_readers_;
 
   // Index of the current upload element (i.e. the element currently being
   // read). The index is used as a cursor to iterate over elements in
   // |upload_data_|.
   size_t element_index_;
 
-  // The byte offset into the current element's data buffer if the current
-  // element is a TYPE_BYTES or TYPE_DATA element.
-  size_t element_offset_;
-
-  // A stream to the currently open file, for the current element if the
-  // current element is a TYPE_FILE element.
-  scoped_ptr<FileStream> element_file_stream_;
-
-  // The number of bytes remaining to be read from the currently open file
-  // if the current element is of TYPE_FILE.
-  uint64 element_file_bytes_remaining_;
-
   // Size and current read position within the upload data stream.
+  // |total_size_| is set to zero when the data is chunked.
   uint64 total_size_;
   uint64 current_position_;
 
-  // Whether there is no data left to read.
-  bool eof_;
+  const int64 identifier_;
+
+  const bool is_chunked_;
+  bool last_chunk_appended_;
+
+  // True if the initialization was successful.
+  bool initialized_successfully_;
+
+  // Callback to resume reading chunked data.
+  base::Closure pending_chunked_read_callback_;
+
+  base::WeakPtrFactory<UploadDataStream> weak_ptr_factory_;
 
   // TODO(satish): Remove this once we have a better way to unit test POST
   // requests with chunked uploads.
   static bool merge_chunks_;
-  // The size of the stream's buffer pointed by buf_.
-  static const size_t kBufferSize;
 
   DISALLOW_COPY_AND_ASSIGN(UploadDataStream);
 };

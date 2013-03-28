@@ -6,12 +6,13 @@
 #define CONTENT_GPU_GPU_WATCHDOG_THREAD_H_
 
 #include "base/memory/ref_counted.h"
-#include "base/memory/scoped_ptr.h"
 #include "base/memory/weak_ptr.h"
 #include "base/message_loop.h"
 #include "base/threading/thread.h"
 #include "base/time.h"
 #include "content/common/gpu/gpu_watchdog.h"
+
+namespace content {
 
 // A thread that intermitently sends tasks to a group of watched message loops
 // and deliberately crashes if one of them does not respond after a timeout.
@@ -20,7 +21,6 @@ class GpuWatchdogThread : public base::Thread,
                           public base::RefCountedThreadSafe<GpuWatchdogThread> {
  public:
   explicit GpuWatchdogThread(int timeout);
-  virtual ~GpuWatchdogThread();
 
   // Accessible on watched thread but only modified by watchdog thread.
   bool armed() const { return armed_; }
@@ -34,6 +34,7 @@ class GpuWatchdogThread : public base::Thread,
   virtual void CleanUp() OVERRIDE;
 
  private:
+  friend class base::RefCountedThreadSafe<GpuWatchdogThread>;
 
   // An object of this type intercepts the reception and completion of all tasks
   // on the watched thread and checks whether the watchdog is armed.
@@ -50,12 +51,15 @@ class GpuWatchdogThread : public base::Thread,
     GpuWatchdogThread* watchdog_;
   };
 
+  virtual ~GpuWatchdogThread();
+
   void OnAcknowledge();
   void OnCheck();
   void DeliberatelyTerminateToRecoverFromHang();
-  void Disable();
 
+#if defined(OS_WIN)
   base::TimeDelta GetWatchedThreadTime();
+#endif
 
   MessageLoop* watched_message_loop_;
   base::TimeDelta timeout_;
@@ -73,5 +77,7 @@ class GpuWatchdogThread : public base::Thread,
 
   DISALLOW_COPY_AND_ASSIGN(GpuWatchdogThread);
 };
+
+}  // namespace content
 
 #endif  // CONTENT_GPU_GPU_WATCHDOG_THREAD_H_

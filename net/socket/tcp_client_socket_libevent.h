@@ -1,10 +1,9 @@
-// Copyright (c) 2011 The Chromium Authors. All rights reserved.
+// Copyright (c) 2012 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
 #ifndef NET_SOCKET_TCP_CLIENT_SOCKET_LIBEVENT_H_
 #define NET_SOCKET_TCP_CLIENT_SOCKET_LIBEVENT_H_
-#pragma once
 
 #include "base/memory/ref_counted.h"
 #include "base/memory/scoped_ptr.h"
@@ -47,7 +46,7 @@ class NET_EXPORT_PRIVATE TCPClientSocketLibevent : public StreamSocket,
   virtual void Disconnect() OVERRIDE;
   virtual bool IsConnected() const OVERRIDE;
   virtual bool IsConnectedAndIdle() const OVERRIDE;
-  virtual int GetPeerAddress(AddressList* address) const OVERRIDE;
+  virtual int GetPeerAddress(IPEndPoint* address) const OVERRIDE;
   virtual int GetLocalAddress(IPEndPoint* address) const OVERRIDE;
   virtual const BoundNetLog& NetLog() const OVERRIDE;
   virtual void SetSubresourceSpeculation() OVERRIDE;
@@ -56,6 +55,9 @@ class NET_EXPORT_PRIVATE TCPClientSocketLibevent : public StreamSocket,
   virtual bool UsingTCPFastOpen() const OVERRIDE;
   virtual int64 NumBytesRead() const OVERRIDE;
   virtual base::TimeDelta GetConnectTimeMicros() const OVERRIDE;
+  virtual bool WasNpnNegotiated() const OVERRIDE;
+  virtual NextProto GetNegotiatedProtocol() const OVERRIDE;
+  virtual bool GetSSLInfo(SSLInfo* ssl_info) OVERRIDE;
 
   // Socket implementation.
   // Multiple outstanding requests are not supported.
@@ -68,6 +70,9 @@ class NET_EXPORT_PRIVATE TCPClientSocketLibevent : public StreamSocket,
                     const CompletionCallback& callback) OVERRIDE;
   virtual bool SetReceiveBufferSize(int32 size) OVERRIDE;
   virtual bool SetSendBufferSize(int32 size) OVERRIDE;
+
+  virtual bool SetKeepAlive(bool enable, int delay);
+  virtual bool SetNoDelay(bool no_delay);
 
  private:
   // State machine for connecting the socket.
@@ -83,10 +88,7 @@ class NET_EXPORT_PRIVATE TCPClientSocketLibevent : public StreamSocket,
 
     // MessageLoopForIO::Watcher methods
 
-    virtual void OnFileCanReadWithoutBlocking(int /* fd */) OVERRIDE {
-      if (!socket_->read_callback_.is_null())
-        socket_->DidCompleteRead();
-    }
+    virtual void OnFileCanReadWithoutBlocking(int /* fd */) OVERRIDE;
 
     virtual void OnFileCanWriteWithoutBlocking(int /* fd */) OVERRIDE {}
 
@@ -102,13 +104,7 @@ class NET_EXPORT_PRIVATE TCPClientSocketLibevent : public StreamSocket,
 
     // MessageLoopForIO::Watcher implementation.
     virtual void OnFileCanReadWithoutBlocking(int /* fd */) OVERRIDE {}
-    virtual void OnFileCanWriteWithoutBlocking(int /* fd */) OVERRIDE {
-      if (socket_->waiting_connect()) {
-        socket_->DidCompleteConnect();
-      } else if (!socket_->write_callback_.is_null()) {
-        socket_->DidCompleteWrite();
-      }
-    }
+    virtual void OnFileCanWriteWithoutBlocking(int /* fd */) OVERRIDE;
 
    private:
     TCPClientSocketLibevent* const socket_;
@@ -122,7 +118,7 @@ class NET_EXPORT_PRIVATE TCPClientSocketLibevent : public StreamSocket,
   int DoConnectComplete(int result);
 
   // Helper used by Disconnect(), which disconnects minus the logging and
-  // resetting of current_ai_.
+  // resetting of current_address_index_.
   void DoDisconnect();
 
   void DoReadCallback(int rv);
@@ -154,8 +150,8 @@ class NET_EXPORT_PRIVATE TCPClientSocketLibevent : public StreamSocket,
   // The list of addresses we should try in order to establish a connection.
   AddressList addresses_;
 
-  // Where we are in above list, or NULL if all addrinfos have been tried.
-  const struct addrinfo* current_ai_;
+  // Where we are in above list. Set to -1 if uninitialized.
+  int current_address_index_;
 
   // The socket's libevent wrappers
   MessageLoopForIO::FileDescriptorWatcher read_socket_watcher_;

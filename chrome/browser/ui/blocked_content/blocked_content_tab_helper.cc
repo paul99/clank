@@ -1,4 +1,4 @@
-// Copyright (c) 2011 The Chromium Authors. All rights reserved.
+// Copyright (c) 2012 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -9,22 +9,27 @@
 #include "chrome/browser/content_settings/tab_specific_content_settings.h"
 #include "chrome/browser/profiles/profile.h"
 #include "chrome/browser/ui/blocked_content/blocked_content_container.h"
-#include "chrome/browser/ui/tab_contents/tab_contents_wrapper.h"
-#include "content/browser/renderer_host/render_view_host.h"
+#include "chrome/common/chrome_notification_types.h"
 #include "content/public/browser/navigation_controller.h"
 #include "content/public/browser/navigation_details.h"
 #include "content/public/browser/navigation_entry.h"
+#include "content/public/browser/notification_details.h"
+#include "content/public/browser/notification_service.h"
+#include "content/public/browser/notification_source.h"
+#include "content/public/browser/render_view_host.h"
 #include "content/public/browser/web_contents.h"
+#include "content/public/browser/web_contents_delegate.h"
 
 using content::NavigationEntry;
 
+DEFINE_WEB_CONTENTS_USER_DATA_KEY(BlockedContentTabHelper)
+
 BlockedContentTabHelper::BlockedContentTabHelper(
-    TabContentsWrapper* tab_contents)
-        : content::WebContentsObserver(tab_contents->web_contents()),
-          blocked_contents_(new BlockedContentContainer(tab_contents)),
-          all_contents_blocked_(false),
-          tab_contents_wrapper_(tab_contents),
-          delegate_(NULL) {
+    content::WebContents* web_contents)
+    : content::WebContentsObserver(web_contents),
+      blocked_contents_(new BlockedContentContainer(web_contents)),
+      all_contents_blocked_(false),
+      delegate_(NULL) {
 }
 
 BlockedContentTabHelper::~BlockedContentTabHelper() {
@@ -46,9 +51,18 @@ void BlockedContentTabHelper::DidNavigateMainFrame(
 
 void BlockedContentTabHelper::PopupNotificationVisibilityChanged(
     bool visible) {
-  if (web_contents()->IsBeingDestroyed())
-    return;
-  tab_contents_wrapper_->content_settings()->SetPopupsBlocked(visible);
+  if (!web_contents()->IsBeingDestroyed()) {
+    TabSpecificContentSettings::FromWebContents(web_contents())->
+        SetPopupsBlocked(visible);
+  }
+}
+
+void BlockedContentTabHelper::SendNotification(content::WebContents* contents,
+                                               bool blocked_state) {
+  content::NotificationService::current()->Notify(
+      chrome::NOTIFICATION_CONTENT_BLOCKED_STATE_CHANGED,
+      content::Source<content::WebContents>(contents),
+      content::Details<const bool>(&blocked_state));
 }
 
 void BlockedContentTabHelper::SetAllContentsBlocked(bool value) {
@@ -57,24 +71,28 @@ void BlockedContentTabHelper::SetAllContentsBlocked(bool value) {
 
   all_contents_blocked_ = value;
   if (!all_contents_blocked_ && blocked_contents_->GetBlockedContentsCount()) {
-    std::vector<TabContentsWrapper*> blocked;
+    std::vector<content::WebContents*> blocked;
     blocked_contents_->GetBlockedContents(&blocked);
-    for (size_t i = 0; i < blocked.size(); ++i)
+    for (size_t i = 0; i < blocked.size(); ++i) {
+      SendNotification(blocked[i], false);
       blocked_contents_->LaunchForContents(blocked[i]);
+    }
   }
 }
 
-void BlockedContentTabHelper::AddTabContents(TabContentsWrapper* new_contents,
+void BlockedContentTabHelper::AddWebContents(content::WebContents* new_contents,
                                              WindowOpenDisposition disposition,
                                              const gfx::Rect& initial_pos,
                                              bool user_gesture) {
   if (!blocked_contents_->GetBlockedContentsCount())
     PopupNotificationVisibilityChanged(true);
-  blocked_contents_->AddTabContents(
+  SendNotification(new_contents, true);
+  blocked_contents_->AddWebContents(
       new_contents, disposition, initial_pos, user_gesture);
 }
 
-void BlockedContentTabHelper::AddPopup(TabContentsWrapper* new_contents,
+void BlockedContentTabHelper::AddPopup(content::WebContents* new_contents,
+                                       WindowOpenDisposition disposition,
                                        const gfx::Rect& initial_pos,
                                        bool user_gesture) {
   // A page can't spawn popups (or do anything else, either) until its load
@@ -96,25 +114,32 @@ void BlockedContentTabHelper::AddPopup(TabContentsWrapper* new_contents,
           creator,
           CONTENT_SETTINGS_TYPE_POPUPS,
           "") == CONTENT_SETTING_ALLOW) {
-    web_contents()->AddNewContents(new_contents->web_contents(),
-                                   NEW_POPUP,
-                                   initial_pos,
-                                   true);  // user_gesture
+    content::WebContentsDelegate* delegate = web_contents()->GetDelegate();
+    if (delegate) {
+      delegate->AddNewContents(web_contents(),
+                               new_contents,
+                               disposition,
+                               initial_pos,
+                               true,  // user_gesture
+                               NULL);
+    }
   } else {
-    // Call blocked_contents_->AddTabContents with user_gesture == true
+    // Call blocked_contents_->AddWebContents with user_gesture == true
     // so that the contents will not get blocked again.
-    blocked_contents_->AddTabContents(new_contents,
-                                      NEW_POPUP,
+    SendNotification(new_contents, true);
+    blocked_contents_->AddWebContents(new_contents,
+                                      disposition,
                                       initial_pos,
                                       true);  // user_gesture
-    tab_contents_wrapper_->content_settings()->OnContentBlocked(
-          CONTENT_SETTINGS_TYPE_POPUPS, std::string());
+    TabSpecificContentSettings::FromWebContents(web_contents())->
+        OnContentBlocked(CONTENT_SETTINGS_TYPE_POPUPS, std::string());
   }
 }
 
 void BlockedContentTabHelper::LaunchForContents(
-    TabContentsWrapper* tab_contents) {
-  blocked_contents_->LaunchForContents(tab_contents);
+    content::WebContents* web_contents) {
+  SendNotification(web_contents, false);
+  blocked_contents_->LaunchForContents(web_contents);
   if (!blocked_contents_->GetBlockedContentsCount())
     PopupNotificationVisibilityChanged(false);
 }
@@ -124,6 +149,6 @@ size_t BlockedContentTabHelper::GetBlockedContentsCount() const {
 }
 
 void BlockedContentTabHelper::GetBlockedContents(
-    std::vector<TabContentsWrapper*>* blocked_contents) const {
+    std::vector<content::WebContents*>* blocked_contents) const {
   blocked_contents_->GetBlockedContents(blocked_contents);
 }

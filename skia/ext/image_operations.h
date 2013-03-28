@@ -4,19 +4,8 @@
 
 #ifndef SKIA_EXT_IMAGE_OPERATIONS_H_
 #define SKIA_EXT_IMAGE_OPERATIONS_H_
-#pragma once
 
 #include "third_party/skia/include/core/SkTypes.h"
-
-/*
-  ANDROID/CLANK: SK_API is defined in SkPreConfig.h
-  http://code.google.com/p/skia/source/browse/trunk/include/core/SkPreConfig.h?r=944
-  Android/HC hasn't rolled in that new Skia yet.
-  For non-Windows SK_API is a nop so it really doesn't matter.
-*/
-#if defined(ANDROID) && !defined(SK_API)
-#define SK_API
-#endif
 
 class SkBitmap;
 struct SkIRect;

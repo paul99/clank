@@ -1,10 +1,9 @@
-// Copyright (c) 2011 The Chromium Authors. All rights reserved.
+// Copyright (c) 2012 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
 #ifndef CONTENT_COMMON_CHILD_PROCESS_HOST_IMPL_H_
 #define CONTENT_COMMON_CHILD_PROCESS_HOST_IMPL_H_
-#pragma once
 
 #include <string>
 #include <vector>
@@ -16,14 +15,10 @@
 #include "base/memory/singleton.h"
 #include "base/shared_memory.h"
 #include "base/string16.h"
+#include "ipc/ipc_listener.h"
 #include "content/public/common/child_process_host.h"
 
 class FilePath;
-
-#if defined(OS_ANDROID)
-#include "base/process_util.h"  // for base::environment_vector
-class CommandLine;
-#endif
 
 namespace content {
 class ChildProcessHostDelegate;
@@ -32,13 +27,17 @@ class ChildProcessHostDelegate;
 // messages between the host and the child process. Users are responsible
 // for the actual launching and terminating of the child processes.
 class CONTENT_EXPORT ChildProcessHostImpl : public ChildProcessHost,
-                                            public IPC::Channel::Listener {
+                                            public IPC::Listener {
  public:
   virtual ~ChildProcessHostImpl();
 
+  // This value is guaranteed to never be returned by
+  // GenerateChildProcessUniqueId() below.
+  static int kInvalidChildProcessId;
+
   // Public and static for reuse by RenderMessageFilter.
   static void AllocateSharedMemory(
-      uint32 buffer_size, base::ProcessHandle child_process,
+      size_t buffer_size, base::ProcessHandle child_process,
       base::SharedMemoryHandle* handle);
 
   // Returns a unique ID to identify a child process. On construction, this
@@ -49,18 +48,6 @@ class CONTENT_EXPORT ChildProcessHostImpl : public ChildProcessHost,
   // This function is threadsafe since RenderProcessHost is on the UI thread,
   // but normally this will be used on the IO thread.
   static int GenerateChildProcessUniqueId();
-
-#if defined(OS_ANDROID)
-  static void AppendCommonChildCommandLine(CommandLine* cmd_line);
-
-  // Return the file descriptor and size for accessing system properties as
-  // defined in the environment variable ANDROID_PROPERTY_WORKSPACE.
-  static void GetPropertyWorkspace(int* fd, int* size);
-
-  // Adds any environment variables needed for running the child process to
-  // the given input environment vector.
-  static void FillChildEnvironment(base::environment_vector* env);
-#endif
 
   // ChildProcessHost implementation
   virtual bool Send(IPC::Message* message) OVERRIDE;
@@ -77,7 +64,7 @@ class CONTENT_EXPORT ChildProcessHostImpl : public ChildProcessHost,
 
   explicit ChildProcessHostImpl(ChildProcessHostDelegate* delegate);
 
-  // IPC::Channel::Listener methods:
+  // IPC::Listener methods:
   virtual bool OnMessageReceived(const IPC::Message& msg) OVERRIDE;
   virtual void OnChannelConnected(int32 peer_pid) OVERRIDE;
   virtual void OnChannelError() OVERRIDE;

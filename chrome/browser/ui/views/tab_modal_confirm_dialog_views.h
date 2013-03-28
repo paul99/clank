@@ -1,16 +1,19 @@
-// Copyright (c) 2011 The Chromium Authors. All rights reserved.
+// Copyright (c) 2012 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
 #ifndef CHROME_BROWSER_UI_VIEWS_TAB_MODAL_CONFIRM_DIALOG_VIEWS_H_
 #define CHROME_BROWSER_UI_VIEWS_TAB_MODAL_CONFIRM_DIALOG_VIEWS_H_
-#pragma once
 
+#include "base/basictypes.h"
+#include "base/compiler_specific.h"
+#include "chrome/browser/ui/tab_modal_confirm_dialog.h"
 #include "ui/gfx/native_widget_types.h"
 #include "ui/views/window/dialog_delegate.h"
 
-class TabContentsWrapper;
-class TabModalConfirmDialogDelegate;
+namespace content {
+class WebContents;
+}
 
 namespace views {
 class MessageBoxView;
@@ -21,10 +24,11 @@ class MessageBoxView;
 // To display the dialog, allocate this object on the heap. It will open the
 // dialog from its constructor and then delete itself when the user dismisses
 // the dialog.
-class TabModalConfirmDialogViews : public views::DialogDelegate {
+class TabModalConfirmDialogViews : public TabModalConfirmDialog,
+                                   public views::DialogDelegate {
  public:
   TabModalConfirmDialogViews(TabModalConfirmDialogDelegate* delegate,
-                             TabContentsWrapper* wrapper);
+                             content::WebContents* web_contents);
 
   // views::DialogDelegate:
   virtual string16 GetWindowTitle() const OVERRIDE;
@@ -37,9 +41,14 @@ class TabModalConfirmDialogViews : public views::DialogDelegate {
   virtual views::Widget* GetWidget() OVERRIDE;
   virtual const views::Widget* GetWidget() const OVERRIDE;
   virtual void DeleteDelegate() OVERRIDE;
+  virtual ui::ModalType GetModalType() const OVERRIDE;
 
  private:
   virtual ~TabModalConfirmDialogViews();
+
+  // TabModalConfirmDialog:
+  virtual void AcceptTabModalDialog() OVERRIDE;
+  virtual void CancelTabModalDialog() OVERRIDE;
 
   scoped_ptr<TabModalConfirmDialogDelegate> delegate_;
 

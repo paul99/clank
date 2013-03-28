@@ -1,4 +1,4 @@
-// Copyright (c) 2011 The Chromium Authors. All rights reserved.
+// Copyright (c) 2012 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -6,9 +6,9 @@
 
 #include "base/message_loop.h"
 #include "base/process_util.h"
-#include "base/string16.h"
-#include "base/utf_string_conversions.h"
+#include "base/run_loop.h"
 #include "chrome/browser/shell_integration.h"
+#include "chrome/browser/ui/uninstall_browser_prompt.h"
 #include "chrome/common/chrome_result_codes.h"
 #include "chrome/installer/util/browser_distribution.h"
 #include "chrome/installer/util/shell_util.h"
@@ -17,22 +17,27 @@
 #include "ui/views/controls/button/checkbox.h"
 #include "ui/views/controls/combobox/combobox.h"
 #include "ui/views/controls/label.h"
+#include "ui/views/focus/accelerator_handler.h"
 #include "ui/views/layout/grid_layout.h"
 #include "ui/views/layout/layout_constants.h"
+#include "ui/views/widget/widget.h"
 
-UninstallView::UninstallView(int* user_selection)
+UninstallView::UninstallView(int* user_selection,
+                             const base::Closure& quit_closure,
+                             bool show_delete_profile)
     : confirm_label_(NULL),
+      show_delete_profile_(show_delete_profile),
       delete_profile_(NULL),
       change_default_browser_(NULL),
       browsers_combo_(NULL),
-      browsers_(NULL),
-      user_selection_(*user_selection) {
+      user_selection_(*user_selection),
+      quit_closure_(quit_closure) {
   SetupControls();
 }
 
 UninstallView::~UninstallView() {
   // Exit the message loop we were started with so that uninstall can continue.
-  MessageLoop::current()->Quit();
+  quit_closure_.Run();
 }
 
 void UninstallView::SetupControls() {
@@ -50,26 +55,33 @@ void UninstallView::SetupControls() {
   layout->StartRow(0, column_set_id);
   confirm_label_ = new views::Label(
       l10n_util::GetStringUTF16(IDS_UNINSTALL_VERIFY));
-  confirm_label_->SetHorizontalAlignment(views::Label::ALIGN_LEFT);
+  confirm_label_->SetHorizontalAlignment(gfx::ALIGN_LEFT);
   layout->AddView(confirm_label_);
 
   layout->AddPaddingRow(0, views::kUnrelatedControlVerticalSpacing);
 
   // The "delete profile" check box.
-  ++column_set_id;
-  column_set = layout->AddColumnSet(column_set_id);
-  column_set->AddPaddingColumn(0, views::kRelatedControlHorizontalSpacing);
-  column_set->AddColumn(GridLayout::LEADING, GridLayout::CENTER, 0,
-                        GridLayout::USE_PREF, 0, 0);
-  layout->StartRow(0, column_set_id);
-  delete_profile_ = new views::Checkbox(
-      l10n_util::GetStringUTF16(IDS_UNINSTALL_DELETE_PROFILE));
-  layout->AddView(delete_profile_);
+  if (show_delete_profile_) {
+    ++column_set_id;
+    column_set = layout->AddColumnSet(column_set_id);
+    column_set->AddPaddingColumn(0, views::kPanelHorizIndentation);
+    column_set->AddColumn(GridLayout::LEADING, GridLayout::CENTER, 0,
+                          GridLayout::USE_PREF, 0, 0);
+    layout->StartRow(0, column_set_id);
+    delete_profile_ = new views::Checkbox(
+        l10n_util::GetStringUTF16(IDS_UNINSTALL_DELETE_PROFILE));
+    layout->AddView(delete_profile_);
+  }
 
-  // Set default browser combo box
+  // Set default browser combo box. If the default should not or cannot be
+  // changed, widgets are not shown. We assume here that if Chrome cannot
+  // be set programatically as default, neither can any other browser (for
+  // instance because the OS doesn't permit that).
   BrowserDistribution* dist = BrowserDistribution::GetDistribution();
   if (dist->CanSetAsDefault() &&
-      ShellIntegration::IsDefaultBrowser()) {
+      ShellIntegration::GetDefaultBrowser() == ShellIntegration::IS_DEFAULT &&
+      (ShellIntegration::CanSetAsDefaultBrowser() !=
+          ShellIntegration::SET_DEFAULT_INTERACTIVE)) {
     browsers_.reset(new BrowsersMap());
     ShellUtil::GetRegisteredBrowsers(dist, browsers_.get());
     if (!browsers_->empty()) {
@@ -77,7 +89,7 @@ void UninstallView::SetupControls() {
 
       ++column_set_id;
       column_set = layout->AddColumnSet(column_set_id);
-      column_set->AddPaddingColumn(0, views::kRelatedControlHorizontalSpacing);
+      column_set->AddPaddingColumn(0, views::kPanelHorizIndentation);
       column_set->AddColumn(GridLayout::LEADING, GridLayout::CENTER, 0,
                             GridLayout::USE_PREF, 0, 0);
       column_set->AddPaddingColumn(0, views::kRelatedControlHorizontalSpacing);
@@ -99,15 +111,14 @@ void UninstallView::SetupControls() {
 
 bool UninstallView::Accept() {
   user_selection_ = content::RESULT_CODE_NORMAL_EXIT;
-  if (delete_profile_->checked())
+  if (show_delete_profile_ && delete_profile_->checked())
     user_selection_ = chrome::RESULT_CODE_UNINSTALL_DELETE_PROFILE;
   if (change_default_browser_ && change_default_browser_->checked()) {
-    int index = browsers_combo_->selected_item();
-    BrowsersMap::const_iterator it = browsers_->begin();
-    std::advance(it, index);
+    BrowsersMap::const_iterator i = browsers_->begin();
+    std::advance(i, browsers_combo_->selected_index());
     base::LaunchOptions options;
     options.start_hidden = true;
-    base::LaunchProcess((*it).second, options, NULL);
+    base::LaunchProcess(i->second, options, NULL);
   }
   return true;
 }
@@ -126,7 +137,7 @@ string16 UninstallView::GetDialogButtonLabel(ui::DialogButton button) const {
 }
 
 void UninstallView::ButtonPressed(views::Button* sender,
-                                  const views::Event& event) {
+                                  const ui::Event& event) {
   if (change_default_browser_ == sender) {
     // Disable the browsers combobox if the user unchecks the checkbox.
     DCHECK(browsers_combo_);
@@ -142,14 +153,31 @@ views::View* UninstallView::GetContentsView() {
   return this;
 }
 
-int UninstallView::GetItemCount() {
+int UninstallView::GetItemCount() const {
   DCHECK(!browsers_->empty());
   return browsers_->size();
 }
 
 string16 UninstallView::GetItemAt(int index) {
   DCHECK_LT(index, static_cast<int>(browsers_->size()));
-  BrowsersMap::const_iterator it = browsers_->begin();
-  std::advance(it, index);
-  return WideToUTF16Hack((*it).first);
+  BrowsersMap::const_iterator i = browsers_->begin();
+  std::advance(i, index);
+  return i->first;
 }
+
+namespace chrome {
+
+int ShowUninstallBrowserPrompt(bool show_delete_profile) {
+  DCHECK_EQ(MessageLoop::TYPE_UI, MessageLoop::current()->type());
+  int result = content::RESULT_CODE_NORMAL_EXIT;
+  views::AcceleratorHandler accelerator_handler;
+  base::RunLoop run_loop(&accelerator_handler);
+  UninstallView* view = new UninstallView(&result,
+                                          run_loop.QuitClosure(),
+                                          show_delete_profile);
+  views::Widget::CreateWindow(view)->Show();
+  run_loop.Run();
+  return result;
+}
+
+}  // namespace chrome

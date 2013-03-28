@@ -1,8 +1,16 @@
+/* Copyright (c) 2012 The Chromium Authors. All rights reserved.
+ * Use of this source code is governed by a BSD-style license that can be
+ * found in the LICENSE file. */
+
 #font-settings > section {
   overflow: hidden;
 }
 
-#font-settings input[type="range"] {
+.font-setting-container {
+  display: -webkit-box;
+}
+
+#font-settings input[type='range'] {
   width: 100%;
 }
 
@@ -26,10 +34,10 @@
 }
 
 .font-sample-div {
+  direction: ltr;
   height: 70px;
   overflow: hidden;
   width: 270px;
-  direction: ltr;
 }
 
 .font-settings-huge {

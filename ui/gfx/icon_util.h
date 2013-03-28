@@ -4,7 +4,6 @@
 
 #ifndef UI_GFX_ICON_UTIL_H_
 #define UI_GFX_ICON_UTIL_H_
-#pragma once
 
 #include <windows.h>
 #include <string>
@@ -12,6 +11,8 @@
 
 #include "base/basictypes.h"
 #include "ui/base/ui_export.h"
+#include "ui/gfx/point.h"
+#include "ui/gfx/size.h"
 
 namespace gfx {
 class Size;
@@ -91,6 +92,13 @@ class UI_EXPORT IconUtil {
   // The function returns true on success and false otherwise.
   static bool CreateIconFileFromSkBitmap(const SkBitmap& bitmap,
                                          const FilePath& icon_path);
+
+  // Creates a cursor of the specified size from the DIB passed in.
+  // Returns the cursor on success or NULL on failure.
+  static HICON CreateCursorFromDIB(const gfx::Size& icon_size,
+                                   const gfx::Point& hotspot,
+                                   const void* dib_bits,
+                                   size_t dib_size);
 
  private:
   // The icon format is published in the MSDN but there is no definition of
@@ -200,7 +208,6 @@ class UI_EXPORT IconUtil {
   // A helper function of CreateSkBitmapFromHICON.
   static SkBitmap CreateSkBitmapFromHICONHelper(HICON icon,
                                                 const gfx::Size& s);
-
 
   // Prevent clients from instantiating objects of that class by declaring the
   // ctor/dtor as private.

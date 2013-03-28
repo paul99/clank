@@ -4,19 +4,20 @@
 
 #ifndef CONTENT_RENDERER_ANDROID_PHONE_NUMBER_DETECTOR_H_
 #define CONTENT_RENDERER_ANDROID_PHONE_NUMBER_DETECTOR_H_
-#pragma once
 
-#include "build/build_config.h"  // Needed for OS_ANDROID
-
-#if defined(OS_ANDROID)
-
+#include "base/compiler_specific.h"
+#include "content/common/content_export.h"
 #include "content/renderer/android/content_detector.h"
 
+namespace content {
+
+class PhoneNumberDetectorTest;
+
 // Finds a telephone number in the given content text string.
-class PhoneNumberDetector : public ContentDetector {
+class CONTENT_EXPORT PhoneNumberDetector : public ContentDetector {
  public:
   PhoneNumberDetector();
-  PhoneNumberDetector(const std::string&);
+  explicit PhoneNumberDetector(const std::string& region);
   virtual ~PhoneNumberDetector();
 
  private:
@@ -36,6 +37,6 @@ class PhoneNumberDetector : public ContentDetector {
   DISALLOW_COPY_AND_ASSIGN(PhoneNumberDetector);
 };
 
-#endif  // defined(OS_ANDROID)
+}  // namespace content
 
 #endif  // CONTENT_RENDERER_ANDROID_PHONE_NUMBER_DETECTOR_H_

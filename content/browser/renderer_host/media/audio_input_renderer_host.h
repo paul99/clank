@@ -1,23 +1,18 @@
-// Copyright (c) 2011 The Chromium Authors. All rights reserved.
+// Copyright (c) 2012 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 //
 // AudioInputRendererHost serves audio related requests from audio capturer
 // which lives inside the render process and provide access to audio hardware.
 //
-// OnCreateStream() request is only available in the low latency mode. It will
-// creates a shared memory, a SyncWriter and a AudioInputController for the
-// input stream.
-
-// OnCloseStream() will close the input stream.
+// Create stream sequence (AudioInputController = AIC):
 //
-// Create stream sequence:
-//
-// OnCreateStream -> AudioInputController::CreateLowLatency() ->
-// DoCompleteCreation -> AudioInputMsg_NotifyLowLatencyStreamCreated
+// AudioInputHostMsg_CreateStream -> OnCreateStream -> AIC::CreateLowLatency ->
+//   <- AudioInputMsg_NotifyStreamCreated <- DoCompleteCreation <- OnCreated <-
 //
 // Close stream sequence:
-// OnCloseStream -> AudioInputController::Close
+//
+// AudioInputHostMsg_CloseStream -> OnCloseStream -> AIC::Close ->
 //
 // For the OnStartDevice() request, AudioInputRendererHost starts the device
 // referenced by the session id, and an OnDeviceStarted() callback with the
@@ -43,26 +38,23 @@
 //
 // This class is owned by BrowserRenderProcessHost and instantiated on UI
 // thread. All other operations and method calls happen on IO thread, so we
-// need to be extra careful about the lifetime of this object. AudioManager is a
-// singleton and created in IO thread, audio input streams are also created in
-// the IO thread, so we need to destroy them also in IO thread.
+// need to be extra careful about the lifetime of this object.
 //
-// This implementation supports low latency audio only.
-// For low latency audio, a SyncSocket pair is used to signal buffer readiness
-// without having to route messages using the IO thread.
+// To ensure low latency audio, a SyncSocket pair is used to signal buffer
+// readiness without having to route messages using the IO thread.
 
 #ifndef CONTENT_BROWSER_RENDERER_HOST_MEDIA_AUDIO_INPUT_RENDERER_HOST_H_
 #define CONTENT_BROWSER_RENDERER_HOST_MEDIA_AUDIO_INPUT_RENDERER_HOST_H_
-#pragma once
 
 #include <map>
+#include <string>
 
 #include "base/compiler_specific.h"
 #include "base/gtest_prod_util.h"
 #include "base/memory/ref_counted.h"
 #include "base/memory/scoped_ptr.h"
-#include "base/message_loop_helpers.h"
 #include "base/process.h"
+#include "base/sequenced_task_runner_helpers.h"
 #include "base/shared_memory.h"
 #include "content/browser/renderer_host/media/audio_input_device_manager_event_handler.h"
 #include "content/public/browser/browser_message_filter.h"
@@ -71,44 +63,25 @@
 #include "media/audio/audio_io.h"
 #include "media/audio/simple_sources.h"
 
-namespace content {
-class ResourceContext;
+namespace media {
+class AudioManager;
+class AudioParameters;
 }
 
-class AudioManager;
-struct AudioParameters;
+namespace content {
+class MediaStreamManager;
 
 class CONTENT_EXPORT AudioInputRendererHost
-    : public content::BrowserMessageFilter,
+    : public BrowserMessageFilter,
       public media::AudioInputController::EventHandler,
-      public media_stream::AudioInputDeviceManagerEventHandler {
+      public AudioInputDeviceManagerEventHandler {
  public:
-  struct AudioEntry {
-    AudioEntry();
-    ~AudioEntry();
-
-    // The AudioInputController that manages the audio input stream.
-    scoped_refptr<media::AudioInputController> controller;
-
-    // The audio input stream ID in the render view.
-    int stream_id;
-
-    // Shared memory for transmission of the audio data.
-    base::SharedMemory shared_memory;
-
-    // The synchronous writer to be used by the controller. We have the
-    // ownership of the writer.
-    scoped_ptr<media::AudioInputController::SyncWriter> writer;
-
-    // Set to true after we called Close() for the controller.
-    bool pending_close;
-  };
-
   // Called from UI thread from the owner of this object.
-  explicit AudioInputRendererHost(
-      const content::ResourceContext* resource_context);
+  AudioInputRendererHost(
+      media::AudioManager* audio_manager,
+      MediaStreamManager* media_stream_manager);
 
-  // content::BrowserMessageFilter implementation.
+  // BrowserMessageFilter implementation.
   virtual void OnChannelClosing() OVERRIDE;
   virtual void OnDestruct() const OVERRIDE;
   virtual bool OnMessageReceived(const IPC::Message& message,
@@ -123,15 +96,19 @@ class CONTENT_EXPORT AudioInputRendererHost
                       const uint8* data,
                       uint32 size) OVERRIDE;
 
-  // media_stream::AudioInputDeviceManagerEventHandler implementation.
+  // AudioInputDeviceManagerEventHandler implementation.
   virtual void OnDeviceStarted(int session_id,
                                const std::string& device_id) OVERRIDE;
   virtual void OnDeviceStopped(int session_id) OVERRIDE;
 
  private:
   // TODO(henrika): extend test suite (compare AudioRenderHost)
-  friend class content::BrowserThread;
+  friend class BrowserThread;
   friend class base::DeleteHelper<AudioInputRendererHost>;
+
+  struct AudioEntry;
+  typedef std::map<int, AudioEntry*> AudioEntryMap;
+  typedef std::map<int, int> SessionEntryMap;
 
   virtual ~AudioInputRendererHost();
 
@@ -146,9 +123,13 @@ class CONTENT_EXPORT AudioInputRendererHost
   // successful this object would keep an internal entry of the stream for the
   // required properties.
   void OnCreateStream(int stream_id,
-                      const AudioParameters& params,
-                      bool low_latency,
-                      const std::string& device_id);
+                      const media::AudioParameters& params,
+                      const std::string& device_id,
+                      bool automatic_gain_control);
+
+  // Track that the data for the audio stream referenced by |stream_id| is
+  // consumed by an entity in the render view referenced by |render_view_id|.
+  void OnAssociateStreamWithConsumer(int stream_id, int render_view_id);
 
   // Record the audio input stream referenced by |stream_id|.
   void OnRecordStream(int stream_id);
@@ -159,16 +140,12 @@ class CONTENT_EXPORT AudioInputRendererHost
   // Set the volume of the audio stream referenced by |stream_id|.
   void OnSetVolume(int stream_id, double volume);
 
-  // Get the volume of the audio stream referenced by |stream_id|.
-  void OnGetVolume(int stream_id);
-
   // Complete the process of creating an audio input stream. This will set up
   // the shared memory or shared socket in low latency mode.
   void DoCompleteCreation(media::AudioInputController* controller);
 
   // Send a state change message to the renderer.
   void DoSendRecordingMessage(media::AudioInputController* controller);
-  void DoSendPausedMessage(media::AudioInputController* controller);
 
   // Handle error coming from audio stream.
   void DoHandleError(media::AudioInputController* controller, int error_code);
@@ -182,9 +159,6 @@ class CONTENT_EXPORT AudioInputRendererHost
   // Closes the stream. The stream is then deleted in DeleteEntry() after it
   // is closed.
   void CloseAndDeleteStream(AudioEntry* entry);
-
-  // Called on the audio thread after the audio input stream is closed.
-  void OnStreamClosed(AudioEntry* entry);
 
   // Delete an audio entry and close the related audio stream.
   void DeleteEntry(AudioEntry* entry);
@@ -208,18 +182,21 @@ class CONTENT_EXPORT AudioInputRendererHost
   // Returns 0 if not found.
   int LookupSessionById(int stream_id);
 
-  // Used to get an instance of AudioInputDeviceManager.
-  const content::ResourceContext* resource_context_;
+  // Used to create an AudioInputController.
+  media::AudioManager* audio_manager_;
+
+  // Used to access to AudioInputDeviceManager.
+  MediaStreamManager* media_stream_manager_;
 
   // A map of stream IDs to audio sources.
-  typedef std::map<int, AudioEntry*> AudioEntryMap;
   AudioEntryMap audio_entries_;
 
   // A map of session IDs to audio session sources.
-  typedef std::map<int, int> SessionEntryMap;
   SessionEntryMap session_entries_;
 
   DISALLOW_COPY_AND_ASSIGN(AudioInputRendererHost);
 };
+
+}  // namespace content
 
 #endif  // CONTENT_BROWSER_RENDERER_HOST_MEDIA_AUDIO_INPUT_RENDERER_HOST_H_

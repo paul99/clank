@@ -4,7 +4,6 @@
 
 #ifndef CHROME_BROWSER_CHROMEOS_INPUT_METHOD_INPUT_METHOD_ENGINE_H_
 #define CHROME_BROWSER_CHROMEOS_INPUT_METHOD_INPUT_METHOD_ENGINE_H_
-#pragma once
 
 #include <string>
 #include <vector>
@@ -79,6 +78,11 @@ class InputMethodEngine {
     std::string type;
   };
 
+  struct UsageEntry {
+    std::string title;
+    std::string body;
+  };
+
   struct Candidate {
     Candidate();
     virtual ~Candidate();
@@ -87,6 +91,7 @@ class InputMethodEngine {
     int id;
     std::string label;
     std::string annotation;
+    UsageEntry usage;
     std::vector<Candidate> candidates;
   };
 

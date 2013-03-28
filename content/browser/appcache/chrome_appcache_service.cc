@@ -1,4 +1,4 @@
-// Copyright (c) 2011 The Chromium Authors. All rights reserved.
+// Copyright (c) 2012 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -7,12 +7,13 @@
 #include "base/file_path.h"
 #include "base/file_util.h"
 #include "content/public/browser/content_browser_client.h"
-#include "content/public/browser/notification_service.h"
-#include "content/public/browser/notification_types.h"
+#include "content/public/browser/resource_context.h"
 #include "net/base/net_errors.h"
+#include "net/url_request/url_request_context_getter.h"
+#include "webkit/appcache/appcache_storage_impl.h"
 #include "webkit/quota/quota_manager.h"
 
-using content::BrowserThread;
+namespace content {
 
 ChromeAppCacheService::ChromeAppCacheService(
     quota::QuotaManagerProxy* quota_manager_proxy)
@@ -22,15 +23,21 @@ ChromeAppCacheService::ChromeAppCacheService(
 
 void ChromeAppCacheService::InitializeOnIOThread(
     const FilePath& cache_path,
-    const content::ResourceContext* resource_context,
+    ResourceContext* resource_context,
+    net::URLRequestContextGetter* request_context_getter,
     scoped_refptr<quota::SpecialStoragePolicy> special_storage_policy) {
   DCHECK(BrowserThread::CurrentlyOn(BrowserThread::IO));
 
   cache_path_ = cache_path;
   resource_context_ = resource_context;
-  registrar_.Add(
-      this, content::NOTIFICATION_PURGE_MEMORY,
-      content::NotificationService::AllSources());
+
+  // The |request_context_getter| can be NULL in some unit tests.
+  //
+  // TODO(ajwong): TestProfile is difficult to work with. The
+  // SafeBrowsing tests require that GetRequestContext return NULL
+  // so we can't depend on having a non-NULL value here. See crbug/149783.
+  if (request_context_getter)
+    set_request_context(request_context_getter->GetURLRequestContext());
 
   // Init our base class.
   Initialize(
@@ -42,29 +49,30 @@ void ChromeAppCacheService::InitializeOnIOThread(
   set_special_storage_policy(special_storage_policy);
 }
 
-ChromeAppCacheService::~ChromeAppCacheService() {
-}
-
 bool ChromeAppCacheService::CanLoadAppCache(const GURL& manifest_url,
                                             const GURL& first_party) {
   DCHECK(BrowserThread::CurrentlyOn(BrowserThread::IO));
   // We don't prompt for read access.
-  return content::GetContentClient()->browser()->AllowAppCache(
-      manifest_url, first_party, *resource_context_);
+  return GetContentClient()->browser()->AllowAppCache(
+      manifest_url, first_party, resource_context_);
 }
 
 bool ChromeAppCacheService::CanCreateAppCache(
     const GURL& manifest_url, const GURL& first_party) {
   DCHECK(BrowserThread::CurrentlyOn(BrowserThread::IO));
-  return content::GetContentClient()->browser()->AllowAppCache(
-      manifest_url, first_party, *resource_context_);
+  return GetContentClient()->browser()->AllowAppCache(
+      manifest_url, first_party, resource_context_);
 }
 
-void ChromeAppCacheService::Observe(
-    int type,
-    const content::NotificationSource& source,
-    const content::NotificationDetails& details) {
-  DCHECK(BrowserThread::CurrentlyOn(BrowserThread::IO));
-  DCHECK(type == content::NOTIFICATION_PURGE_MEMORY);
-  PurgeMemory();
+ChromeAppCacheService::~ChromeAppCacheService() {}
+
+void ChromeAppCacheService::DeleteOnCorrectThread() const {
+  if (BrowserThread::IsMessageLoopValid(BrowserThread::IO) &&
+      !BrowserThread::CurrentlyOn(BrowserThread::IO)) {
+    BrowserThread::DeleteSoon(BrowserThread::IO, FROM_HERE, this);
+    return;
+  }
+  delete this;
 }
+
+}  // namespace content

@@ -1,10 +1,9 @@
-// Copyright (c) 2011 The Chromium Authors. All rights reserved.
+// Copyright (c) 2012 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
 #ifndef CHROME_BROWSER_UI_GTK_MENU_GTK_H_
 #define CHROME_BROWSER_UI_GTK_MENU_GTK_H_
-#pragma once
 
 #include <gtk/gtk.h>
 
@@ -12,12 +11,13 @@
 #include <vector>
 
 #include "base/memory/weak_ptr.h"
-#include "chrome/browser/ui/gtk/g_object_weak_ref.h"
 #include "ui/base/gtk/gtk_signal.h"
 #include "ui/base/gtk/gtk_signal_registrar.h"
 #include "ui/gfx/point.h"
 
-class SkBitmap;
+namespace gfx {
+class Image;
+}
 
 namespace ui {
 class ButtonMenuItemModel;
@@ -45,10 +45,10 @@ class MenuGtk {
 
     // Return true if we should override the "gtk-menu-images" system setting
     // when showing image menu items for this menu.
-    virtual bool AlwaysShowIconForCmd(int command_id) const { return false; }
+    virtual bool AlwaysShowIconForCmd(int command_id) const;
 
     // Returns a tinted image used in button in a menu.
-    virtual GtkIconSet* GetIconSetForId(int idr) { return NULL; }
+    virtual GtkIconSet* GetIconSetForId(int idr);
 
     // Returns an icon for the menu item, if available.
     virtual GtkWidget* GetImageForCommandId(int command_id) const;
@@ -66,7 +66,7 @@ class MenuGtk {
   // is the new menu item.
   GtkWidget* AppendMenuItemWithLabel(int command_id, const std::string& label);
   GtkWidget* AppendMenuItemWithIcon(int command_id, const std::string& label,
-                                    const SkBitmap& icon);
+                                    const gfx::Image& icon);
   GtkWidget* AppendCheckMenuItemWithLabel(int command_id,
                                           const std::string& label);
   GtkWidget* AppendSeparator();
@@ -127,7 +127,7 @@ class MenuGtk {
  private:
   // Builds a GtkImageMenuItem.
   GtkWidget* BuildMenuItemWithImage(const std::string& label,
-                                    const SkBitmap& icon);
+                                    const gfx::Image& icon);
 
   GtkWidget* BuildMenuItemWithImage(const std::string& label,
                                     GtkWidget* image);
@@ -164,13 +164,15 @@ class MenuGtk {
   // Focus out event handler for the menu.
   CHROMEGTK_CALLBACK_1(MenuGtk, gboolean, OnMenuFocusOut, GdkEventFocus*);
 
-  // Lets dynamic submenu models know when they have been closed.
-  static void OnSubmenuHidden(GtkWidget* widget, gpointer userdata);
+  // Handles building dynamic submenus on demand when they are shown.
+  CHROMEGTK_CALLBACK_0(MenuGtk, void, OnSubMenuShow);
 
-  // Scheduled by OnSubmenuHidden() to avoid delivering MenuClosed notifications
-  // before ActivatedAt notifications. |menuitem| is the menu item containing
-  // the submenu that was hidden.
-  static void OnSubmenuHiddenCallback(const GObjectWeakRef& menuitem);
+  // Handles trearing down dynamic submenus when they have been closed.
+  CHROMEGTK_CALLBACK_0(MenuGtk, void, OnSubMenuHidden);
+
+  // Scheduled by OnSubMenuHidden() to avoid deleting submenus when hidden
+  // before pending activations within them are delivered.
+  static void OnSubMenuHiddenCallback(GtkWidget* submenu);
 
   // Sets the enable/disabled state and dynamic labels on our menu items.
   static void SetButtonItemInfo(GtkWidget* button, gpointer userdata);

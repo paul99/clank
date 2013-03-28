@@ -4,7 +4,6 @@
 
 #ifndef UI_VIEWS_CONTROLS_NATIVE_NATIVE_VIEW_HOST_AURA_H_
 #define UI_VIEWS_CONTROLS_NATIVE_NATIVE_VIEW_HOST_AURA_H_
-#pragma once
 
 #include "base/basictypes.h"
 #include "base/compiler_specific.h"
@@ -23,7 +22,7 @@ class NativeViewHostAura : public NativeViewHostWrapper,
   virtual ~NativeViewHostAura();
 
   // Overridden from NativeViewHostWrapper:
-  virtual void NativeViewAttached() OVERRIDE;
+  virtual void NativeViewWillAttach() OVERRIDE;
   virtual void NativeViewDetaching(bool destroyed) OVERRIDE;
   virtual void AddedToWidget() OVERRIDE;
   virtual void RemovedFromWidget() OVERRIDE;

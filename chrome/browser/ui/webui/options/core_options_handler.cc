@@ -15,6 +15,7 @@
 #include "chrome/browser/browser_process.h"
 #include "chrome/browser/net/url_fixer_upper.h"
 #include "chrome/browser/profiles/profile.h"
+#include "chrome/browser/ui/options/options_util.h"
 #include "chrome/common/chrome_notification_types.h"
 #include "chrome/common/pref_names.h"
 #include "chrome/common/url_constants.h"
@@ -31,17 +32,46 @@
 
 using content::UserMetricsAction;
 
+namespace options {
+
+namespace {
+
+// Only allow changes to the metrics reporting checkbox if we were succesfully
+// able to change the service.
+bool AllowMetricsReportingChange(const base::Value* to_value) {
+  bool enable;
+  if (!to_value->GetAsBoolean(&enable)) {
+    NOTREACHED();
+    return false;
+  }
+
+  return enable == OptionsUtil::ResolveMetricsReportingEnabled(enable);
+}
+
+}  // namespace
+
 CoreOptionsHandler::CoreOptionsHandler()
     : handlers_host_(NULL) {
 }
 
 CoreOptionsHandler::~CoreOptionsHandler() {}
 
-void CoreOptionsHandler::Initialize() {
-  clear_plugin_lso_data_enabled_.Init(prefs::kClearPluginLSODataEnabled,
-                                      Profile::FromWebUI(web_ui()),
-                                      this);
+void CoreOptionsHandler::InitializeHandler() {
+  Profile* profile = Profile::FromWebUI(web_ui());
+
+  plugin_status_pref_setter_.Init(
+      profile,
+      base::Bind(&CoreOptionsHandler::OnPreferenceChanged,
+                 base::Unretained(this),
+                 profile->GetPrefs()));
+
+  pref_change_filters_[prefs::kMetricsReportingEnabled] =
+      base::Bind(&AllowMetricsReportingChange);
+}
+
+void CoreOptionsHandler::InitializePage() {
   UpdateClearPluginLSOData();
+  UpdatePepperFlashSettingsEnabled();
 }
 
 void CoreOptionsHandler::GetLocalizedValues(
@@ -53,16 +83,8 @@ void CoreOptionsHandler::GetStaticLocalizedValues(
     base::DictionaryValue* localized_strings) {
   DCHECK(localized_strings);
   // Main
-  localized_strings->SetString("title",
+  localized_strings->SetString("optionsPageTitle",
       l10n_util::GetStringUTF16(IDS_SETTINGS_TITLE));
-
-  // Managed prefs
-  localized_strings->SetString("policyManagedPrefsBannerText",
-      l10n_util::GetStringUTF16(IDS_OPTIONS_POLICY_MANAGED_PREFS));
-  localized_strings->SetString("extensionManagedPrefsBannerText",
-      l10n_util::GetStringUTF16(IDS_OPTIONS_EXTENSION_MANAGED_PREFS));
-  localized_strings->SetString("policyAndExtensionManagedPrefsBannerText",
-      l10n_util::GetStringUTF16(IDS_OPTIONS_POLICY_EXTENSION_MANAGED_PREFS));
 
   // Controlled settings bubble.
   localized_strings->SetString("controlledSettingPolicy",
@@ -71,9 +93,16 @@ void CoreOptionsHandler::GetStaticLocalizedValues(
       l10n_util::GetStringUTF16(IDS_OPTIONS_CONTROLLED_SETTING_EXTENSION));
   localized_strings->SetString("controlledSettingRecommended",
       l10n_util::GetStringUTF16(IDS_OPTIONS_CONTROLLED_SETTING_RECOMMENDED));
-  localized_strings->SetString("controlledSettingApplyRecommendation",
+  localized_strings->SetString("controlledSettingHasRecommendation",
       l10n_util::GetStringUTF16(
-          IDS_OPTIONS_CONTROLLED_SETTING_APPLY_RECOMMENDATION));
+          IDS_OPTIONS_CONTROLLED_SETTING_HAS_RECOMMENDATION));
+  localized_strings->SetString("controlledSettingFollowRecommendation",
+      l10n_util::GetStringUTF16(
+          IDS_OPTIONS_CONTROLLED_SETTING_FOLLOW_RECOMMENDATION));
+  localized_strings->SetString("controlledSettingsPolicy",
+      l10n_util::GetStringUTF16(IDS_OPTIONS_CONTROLLED_SETTINGS_POLICY));
+  localized_strings->SetString("controlledSettingsExtension",
+      l10n_util::GetStringUTF16(IDS_OPTIONS_CONTROLLED_SETTINGS_EXTENSION));
 
   // Search
   RegisterTitle(localized_strings, "searchPage", IDS_OPTIONS_SEARCH_PAGE_TITLE);
@@ -98,6 +127,8 @@ void CoreOptionsHandler::GetStaticLocalizedValues(
       l10n_util::GetStringUTF16(IDS_LEARN_MORE));
   localized_strings->SetString("close",
       l10n_util::GetStringUTF16(IDS_CLOSE));
+  localized_strings->SetString("done",
+      l10n_util::GetStringUTF16(IDS_DONE));
 }
 
 void CoreOptionsHandler::Uninitialize() {
@@ -112,22 +143,23 @@ void CoreOptionsHandler::Uninitialize() {
   }
 }
 
-void CoreOptionsHandler::Observe(int type,
-                                 const content::NotificationSource& source,
-                                 const content::NotificationDetails& details) {
-  if (type == chrome::NOTIFICATION_PREF_CHANGED) {
-    std::string* pref_name = content::Details<std::string>(details).ptr();
-    if (*pref_name == prefs::kClearPluginLSODataEnabled) {
-      // This preference is stored in Local State, not in the user preferences.
-      UpdateClearPluginLSOData();
-      return;
-    }
-    NotifyPrefChanged(*pref_name, std::string());
+void CoreOptionsHandler::OnPreferenceChanged(PrefServiceBase* service,
+                                             const std::string& pref_name) {
+  if (pref_name == prefs::kClearPluginLSODataEnabled) {
+    // This preference is stored in Local State, not in the user preferences.
+    UpdateClearPluginLSOData();
+    return;
   }
+  if (pref_name == prefs::kPepperFlashSettingsEnabled) {
+    UpdatePepperFlashSettingsEnabled();
+    return;
+  }
+  NotifyPrefChanged(pref_name, std::string());
 }
 
 void CoreOptionsHandler::RegisterMessages() {
   registrar_.Init(Profile::FromWebUI(web_ui())->GetPrefs());
+  local_state_registrar_.Init(g_browser_process->local_state());
 
   web_ui()->RegisterMessageCallback("coreOptionsInitialize",
       base::Bind(&CoreOptionsHandler::HandleInitialize,
@@ -170,24 +202,48 @@ void CoreOptionsHandler::HandleInitialize(const ListValue* args) {
 }
 
 base::Value* CoreOptionsHandler::FetchPref(const std::string& pref_name) {
-  PrefService* pref_service = Profile::FromWebUI(web_ui())->GetPrefs();
-
-  const PrefService::Preference* pref =
-      pref_service->FindPreference(pref_name.c_str());
-  if (!pref)
-    return base::Value::CreateNullValue();
-
-  return CreateValueForPref(pref, NULL);
+  return CreateValueForPref(pref_name, std::string());
 }
 
 void CoreOptionsHandler::ObservePref(const std::string& pref_name) {
-  registrar_.Add(pref_name.c_str(), this);
+  if (g_browser_process->local_state()->FindPreference(pref_name.c_str())) {
+    local_state_registrar_.Add(
+        pref_name.c_str(),
+        base::Bind(&CoreOptionsHandler::OnPreferenceChanged,
+                   base::Unretained(this),
+                   local_state_registrar_.prefs()));
+  } else {
+    registrar_.Add(
+        pref_name.c_str(),
+        base::Bind(&CoreOptionsHandler::OnPreferenceChanged,
+                   base::Unretained(this),
+                   registrar_.prefs()));
+  }
+}
+
+void CoreOptionsHandler::StopObservingPref(const std::string& pref_name) {
+  if (g_browser_process->local_state()->FindPreference(pref_name.c_str()))
+    local_state_registrar_.Remove(pref_name.c_str());
+  else
+    registrar_.Remove(pref_name.c_str());
 }
 
 void CoreOptionsHandler::SetPref(const std::string& pref_name,
                                  const base::Value* value,
                                  const std::string& metric) {
-  PrefService* pref_service = Profile::FromWebUI(web_ui())->GetPrefs();
+  PrefService* pref_service = FindServiceForPref(pref_name);
+  PrefChangeFilterMap::iterator iter = pref_change_filters_.find(pref_name);
+  if (iter != pref_change_filters_.end()) {
+    // Also check if the pref is user modifiable (don't even try to run the
+    // filter function if the user is not allowed to change the pref).
+    const PrefService::Preference* pref =
+        pref_service->FindPreference(pref_name.c_str());
+    if ((pref && !pref->IsUserModifiable()) || !iter->second.Run(value)) {
+      // Reject the change; remind the page of the true value.
+      NotifyPrefChanged(pref_name, std::string());
+      return;
+    }
+  }
 
   switch (value->GetType()) {
     case base::Value::TYPE_BOOLEAN:
@@ -207,7 +263,7 @@ void CoreOptionsHandler::SetPref(const std::string& pref_name,
 
 void CoreOptionsHandler::ClearPref(const std::string& pref_name,
                                    const std::string& metric) {
-  PrefService* pref_service = Profile::FromWebUI(web_ui())->GetPrefs();
+  PrefService* pref_service = FindServiceForPref(pref_name);
   pref_service->ClearPref(pref_name.c_str());
 
   if (!metric.empty())
@@ -232,48 +288,83 @@ void CoreOptionsHandler::ProcessUserMetric(const base::Value* value,
 void CoreOptionsHandler::NotifyPrefChanged(
     const std::string& pref_name,
     const std::string& controlling_pref_name) {
-  const PrefService* pref_service = Profile::FromWebUI(web_ui())->GetPrefs();
-  const PrefService::Preference* pref =
-      pref_service->FindPreference(pref_name.c_str());
-  if (!pref)
-    return;
-  const PrefService::Preference* controlling_pref =
-      !controlling_pref_name.empty() ?
-          pref_service->FindPreference(controlling_pref_name.c_str()) : NULL;
+  scoped_ptr<base::Value> value(
+      CreateValueForPref(pref_name, controlling_pref_name));
+  DispatchPrefChangeNotification(pref_name, value.Pass());
+}
+
+void CoreOptionsHandler::DispatchPrefChangeNotification(
+    const std::string& name,
+    scoped_ptr<base::Value> value) {
   std::pair<PreferenceCallbackMap::const_iterator,
-            PreferenceCallbackMap::const_iterator> range;
-  range = pref_callback_map_.equal_range(pref_name);
+            PreferenceCallbackMap::const_iterator> range =
+      pref_callback_map_.equal_range(name);
+  ListValue result_value;
+  result_value.Append(new base::StringValue(name.c_str()));
+  result_value.Append(value.release());
   for (PreferenceCallbackMap::const_iterator iter = range.first;
        iter != range.second; ++iter) {
-    const std::wstring& callback_function = iter->second;
-    ListValue result_value;
-    result_value.Append(base::Value::CreateStringValue(pref_name.c_str()));
-    result_value.Append(CreateValueForPref(pref, controlling_pref));
-    web_ui()->CallJavascriptFunction(WideToASCII(callback_function),
-                                     result_value);
+    const std::string& callback_function = iter->second;
+    web_ui()->CallJavascriptFunction(callback_function, result_value);
   }
 }
 
-DictionaryValue* CoreOptionsHandler::CreateValueForPref(
-    const PrefService::Preference* pref,
-    const PrefService::Preference* controlling_pref) {
+base::Value* CoreOptionsHandler::CreateValueForPref(
+    const std::string& pref_name,
+    const std::string& controlling_pref_name) {
+  const PrefService* pref_service = FindServiceForPref(pref_name.c_str());
+  const PrefService::Preference* pref =
+      pref_service->FindPreference(pref_name.c_str());
+  if (!pref) {
+    NOTREACHED();
+    return base::Value::CreateNullValue();
+  }
+  const PrefService::Preference* controlling_pref =
+      pref_service->FindPreference(controlling_pref_name.c_str());
+  if (!controlling_pref)
+    controlling_pref = pref;
+
   DictionaryValue* dict = new DictionaryValue;
   dict->Set("value", pref->GetValue()->DeepCopy());
-  if (!controlling_pref)  // No controlling pref is managing actual pref.
-    controlling_pref = pref;  // This means pref is controlling itself.
-  if (controlling_pref->IsManaged()) {
+  if (controlling_pref->IsManaged())
     dict->SetString("controlledBy", "policy");
-  } else if (controlling_pref->IsExtensionControlled()) {
+  else if (controlling_pref->IsExtensionControlled())
     dict->SetString("controlledBy", "extension");
-  } else if (controlling_pref->IsRecommended()) {
+  else if (controlling_pref->IsRecommended())
     dict->SetString("controlledBy", "recommended");
-  }
+
+  const base::Value* recommended_value =
+      controlling_pref->GetRecommendedValue();
+  if (recommended_value)
+    dict->Set("recommendedValue", recommended_value->DeepCopy());
   dict->SetBoolean("disabled", !controlling_pref->IsUserModifiable());
   return dict;
 }
 
-void CoreOptionsHandler::StopObservingPref(const std::string& path) {
-  registrar_.Remove(path.c_str(), this);
+PrefService* CoreOptionsHandler::FindServiceForPref(
+    const std::string& pref_name) {
+  // Proxy is a peculiar case: on ChromeOS, settings exist in both user
+  // prefs and local state, but chrome://settings should affect only user prefs.
+  // Elsewhere the proxy settings are stored in local state.
+  // See http://crbug.com/157147
+  PrefService* user_prefs = Profile::FromWebUI(web_ui())->GetPrefs();
+  if (pref_name == prefs::kProxy)
+#if defined(OS_CHROMEOS)
+    return user_prefs;
+#else
+    return g_browser_process->local_state();
+#endif
+
+  // Find which PrefService contains the given pref. Pref names should not
+  // be duplicated across services, however if they are, prefer the user's
+  // prefs.
+  if (user_prefs->FindPreference(pref_name.c_str()))
+    return user_prefs;
+
+  if (g_browser_process->local_state()->FindPreference(pref_name.c_str()))
+    return g_browser_process->local_state();
+
+  return user_prefs;
 }
 
 void CoreOptionsHandler::HandleFetchPrefs(const ListValue* args) {
@@ -282,7 +373,7 @@ void CoreOptionsHandler::HandleFetchPrefs(const ListValue* args) {
   DCHECK_GE(static_cast<int>(args->GetSize()), 2);
 
   // Get callback JS function name.
-  base::Value* callback;
+  const base::Value* callback;
   if (!args->Get(0, &callback) || !callback->IsType(base::Value::TYPE_STRING))
     return;
 
@@ -292,7 +383,7 @@ void CoreOptionsHandler::HandleFetchPrefs(const ListValue* args) {
 
   // Get the list of name for prefs to build the response dictionary.
   DictionaryValue result_value;
-  base::Value* list_member;
+  const base::Value* list_member;
 
   for (size_t i = 1; i < args->GetSize(); i++) {
     if (!args->Get(i, &list_member))
@@ -317,13 +408,13 @@ void CoreOptionsHandler::HandleObservePrefs(const ListValue* args) {
   DCHECK_GE(static_cast<int>(args->GetSize()), 2);
 
   // Get preference change callback function name.
-  string16 callback_func_name;
+  std::string callback_func_name;
   if (!args->GetString(0, &callback_func_name))
     return;
 
   // Get all other parameters - pref identifiers.
   for (size_t i = 1; i < args->GetSize(); i++) {
-    base::Value* list_member;
+    const base::Value* list_member;
     if (!args->Get(i, &list_member))
       break;
 
@@ -337,8 +428,7 @@ void CoreOptionsHandler::HandleObservePrefs(const ListValue* args) {
       ObservePref(pref_name);
 
     pref_callback_map_.insert(
-        PreferenceCallbackMap::value_type(pref_name,
-                                          UTF16ToWideHack(callback_func_name)));
+        PreferenceCallbackMap::value_type(pref_name, callback_func_name));
   }
 }
 
@@ -373,7 +463,7 @@ void CoreOptionsHandler::HandleSetPref(const ListValue* args, PrefType type) {
   if (!args->GetString(0, &pref_name))
     return;
 
-  base::Value* value;
+  const base::Value* value;
   if (!args->Get(1, &value))
     return;
 
@@ -388,7 +478,7 @@ void CoreOptionsHandler::HandleSetPref(const ListValue* args, PrefType type) {
       double double_value;
       CHECK(value->GetAsDouble(&double_value));
       int int_value = static_cast<int>(double_value);
-      temp_value.reset(base::Value::CreateIntegerValue(int_value));
+      temp_value.reset(new base::FundamentalValue(int_value));
       value = temp_value.get();
       break;
     }
@@ -402,7 +492,7 @@ void CoreOptionsHandler::HandleSetPref(const ListValue* args, PrefType type) {
       std::string original;
       CHECK(value->GetAsString(&original));
       GURL fixed = URLFixerUpper::FixupURL(original, std::string());
-      temp_value.reset(base::Value::CreateStringValue(fixed.spec()));
+      temp_value.reset(new base::StringValue(fixed.spec()));
       value = temp_value.get();
       break;
     }
@@ -411,9 +501,7 @@ void CoreOptionsHandler::HandleSetPref(const ListValue* args, PrefType type) {
       std::string json_string;
       CHECK(value->GetAsString(&json_string));
       temp_value.reset(
-          base::JSONReader().JsonToValue(json_string,
-                                         false,  // no check_root
-                                         false));  // no trailing comma
+          base::JSONReader::Read(json_string));
       value = temp_value.get();
       CHECK_EQ(base::Value::TYPE_LIST, value->GetType());
       break;
@@ -436,8 +524,10 @@ void CoreOptionsHandler::HandleClearPref(const ListValue* args) {
     return;
 
   std::string metric;
-  if (args->GetSize() > 1)
-    args->GetString(1, &metric);
+  if (args->GetSize() > 1) {
+    if (!args->GetString(1, &metric))
+      NOTREACHED();
+  }
 
   ClearPref(pref_name, metric);
 }
@@ -449,9 +539,17 @@ void CoreOptionsHandler::HandleUserMetricsAction(const ListValue* args) {
 }
 
 void CoreOptionsHandler::UpdateClearPluginLSOData() {
-  scoped_ptr<base::Value> enabled(
-      base::Value::CreateBooleanValue(
-          clear_plugin_lso_data_enabled_.GetValue()));
+  base::FundamentalValue enabled(
+          plugin_status_pref_setter_.IsClearPluginLSODataEnabled());
   web_ui()->CallJavascriptFunction(
-      "OptionsPage.setClearPluginLSODataEnabled", *enabled);
+      "OptionsPage.setClearPluginLSODataEnabled", enabled);
 }
+
+void CoreOptionsHandler::UpdatePepperFlashSettingsEnabled() {
+  base::FundamentalValue enabled(
+          plugin_status_pref_setter_.IsPepperFlashSettingsEnabled());
+  web_ui()->CallJavascriptFunction(
+      "OptionsPage.setPepperFlashSettingsEnabled", enabled);
+}
+
+}  // namespace options

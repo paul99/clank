@@ -5,20 +5,30 @@
 #include "chrome/browser/sync/sync_global_error.h"
 
 #include "chrome/app/chrome_command_ids.h"
+#include "chrome/browser/api/sync/profile_sync_service_observer.h"
 #include "chrome/browser/sync/profile_sync_service.h"
-#include "chrome/browser/sync/profile_sync_service_observer.h"
 #include "chrome/browser/sync/sync_ui_util.h"
-#include "chrome/browser/ui/global_error_service.h"
-#include "chrome/browser/ui/global_error_service_factory.h"
-#include "chrome/common/net/gaia/google_service_auth_error.h"
+#include "chrome/browser/ui/browser.h"
+#include "chrome/browser/ui/browser_commands.h"
+#include "chrome/browser/ui/chrome_pages.h"
+#include "chrome/browser/ui/global_error/global_error_service.h"
+#include "chrome/browser/ui/global_error/global_error_service_factory.h"
+#include "chrome/browser/ui/webui/signin/login_ui_service.h"
+#include "chrome/browser/ui/webui/signin/login_ui_service_factory.h"
+#include "chrome/common/url_constants.h"
+#include "google_apis/gaia/google_service_auth_error.h"
 #include "grit/chromium_strings.h"
 #include "grit/generated_resources.h"
 #include "ui/base/l10n/l10n_util.h"
 
 typedef GoogleServiceAuthError AuthError;
 
-SyncGlobalError::SyncGlobalError(ProfileSyncService* service)
-    : service_(service) {
+SyncGlobalError::SyncGlobalError(ProfileSyncService* service,
+                                 SigninManager* signin)
+    : service_(service),
+      signin_(signin) {
+  DCHECK(service_);
+  DCHECK(signin_);
   OnStateChanged();
 }
 
@@ -49,7 +59,22 @@ string16 SyncGlobalError::MenuItemLabel() {
 }
 
 void SyncGlobalError::ExecuteMenuItem(Browser* browser) {
-  service_->ShowErrorUI();
+#if defined(OS_CHROMEOS)
+  if (service_->GetAuthError().state() != AuthError::NONE) {
+    DLOG(INFO) << "Signing out the user to fix a sync error.";
+    // TODO(beng): seems like this could just call browser::AttemptUserExit().
+    chrome::ExecuteCommand(browser, IDC_EXIT);
+    return;
+  }
+#endif
+  LoginUIService* login_ui = LoginUIServiceFactory::GetForProfile(
+      service_->profile());
+  if (login_ui->current_login_ui()) {
+    login_ui->current_login_ui()->FocusUI();
+    return;
+  }
+  // Need to navigate to the settings page and display the UI.
+  chrome::ShowSettingsSubPage(browser, chrome::kSyncSetupSubPage);
 }
 
 bool SyncGlobalError::HasBubbleView() {
@@ -76,7 +101,7 @@ void SyncGlobalError::OnBubbleViewDidClose(Browser* browser) {
 }
 
 void SyncGlobalError::BubbleViewAcceptButtonPressed(Browser* browser) {
-  service_->ShowErrorUI();
+  ExecuteMenuItem(browser);
 }
 
 void SyncGlobalError::BubbleViewCancelButtonPressed(Browser* browser) {
@@ -88,7 +113,7 @@ void SyncGlobalError::OnStateChanged() {
   string16 bubble_message;
   string16 bubble_accept_label;
   sync_ui_util::GetStatusLabelsForSyncGlobalError(
-      service_, &menu_label, &bubble_message, &bubble_accept_label);
+      service_, *signin_, &menu_label, &bubble_message, &bubble_accept_label);
 
   // All the labels should be empty or all of them non-empty.
   DCHECK((menu_label.empty() && bubble_message.empty() &&

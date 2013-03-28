@@ -10,8 +10,8 @@
 #include "base/string_util.h"
 #include "content/renderer/p2p/host_address_request.h"
 #include "jingle/glue/utils.h"
+#include "net/base/escape.h"
 #include "net/base/ip_endpoint.h"
-#include "ppapi/c/dev/ppb_transport_dev.h"
 #include "third_party/WebKit/Source/WebKit/chromium/public/WebFrame.h"
 #include "third_party/WebKit/Source/WebKit/chromium/public/platform/WebURLError.h"
 #include "third_party/WebKit/Source/WebKit/chromium/public/platform/WebURLLoader.h"
@@ -50,12 +50,22 @@ bool ParsePortNumber(
 
 }  // namespace
 
+P2PPortAllocator::Config::Config()
+    : stun_server_port(0),
+      relay_server_port(0),
+      legacy_relay(true),
+      disable_tcp_transport(false) {
+}
+
+P2PPortAllocator::Config::~Config() {
+}
+
 P2PPortAllocator::P2PPortAllocator(
     WebKit::WebFrame* web_frame,
     P2PSocketDispatcher* socket_dispatcher,
     talk_base::NetworkManager* network_manager,
     talk_base::PacketSocketFactory* socket_factory,
-    const webkit_glue::P2PTransport::Config& config)
+    const Config& config)
     : cricket::BasicPortAllocator(network_manager, socket_factory),
       web_frame_(web_frame),
       socket_dispatcher_(socket_dispatcher),
@@ -69,17 +79,24 @@ P2PPortAllocator::P2PPortAllocator(
 P2PPortAllocator::~P2PPortAllocator() {
 }
 
-cricket::PortAllocatorSession* P2PPortAllocator::CreateSession(
-    const std::string& name,
-    const std::string& session_type) {
-  return new P2PPortAllocatorSession(this, name, session_type);
+cricket::PortAllocatorSession* P2PPortAllocator::CreateSessionInternal(
+    const std::string& content_name,
+    int component,
+    const std::string& ice_username_fragment,
+    const std::string& ice_password) {
+  return new P2PPortAllocatorSession(
+      this, content_name, component, ice_username_fragment, ice_password);
 }
 
 P2PPortAllocatorSession::P2PPortAllocatorSession(
     P2PPortAllocator* allocator,
-    const std::string& name,
-    const std::string& session_type)
-    : cricket::BasicPortAllocatorSession(allocator, name, session_type),
+    const std::string& content_name,
+    int component,
+    const std::string& ice_username_fragment,
+    const std::string& ice_password)
+    : cricket::BasicPortAllocatorSession(
+        allocator, content_name, component,
+        ice_username_fragment, ice_password),
       allocator_(allocator),
       relay_session_attempts_(0),
       relay_udp_port_(0),
@@ -118,29 +135,31 @@ void P2PPortAllocatorSession::didFail(WebKit::WebURLLoader* loader,
   LOG(ERROR) << "Relay session request failed.";
 
   // Retry the request.
-  AllocateRelaySession();
+  AllocateLegacyRelaySession();
 }
 
 void P2PPortAllocatorSession::GetPortConfigurations() {
-  // Add an empty configuration synchronously, so a local connection
-  // can be started immediately.
-  ConfigReady(new cricket::PortConfiguration(
-      talk_base::SocketAddress(), "", "", ""));
+  if (!allocator_->config_.stun_server.empty() &&
+      stun_server_address_.IsNil()) {
+    ResolveStunServerAddress();
+  } else {
+    AddConfig();
+  }
 
-  ResolveStunServerAddress();
-  AllocateRelaySession();
+  if (allocator_->config_.legacy_relay) {
+    AllocateLegacyRelaySession();
+  }
 }
 
 void P2PPortAllocatorSession::ResolveStunServerAddress() {
- if (allocator_->config_.stun_server.empty())
-   return;
+  if (stun_address_request_)
+    return;
 
- DCHECK(!stun_address_request_);
- stun_address_request_ =
-     new P2PHostAddressRequest(allocator_->socket_dispatcher_);
- stun_address_request_->Request(allocator_->config_.stun_server, base::Bind(
-     &P2PPortAllocatorSession::OnStunServerAddress,
-     base::Unretained(this)));
+  stun_address_request_ =
+      new P2PHostAddressRequest(allocator_->socket_dispatcher_);
+  stun_address_request_->Request(allocator_->config_.stun_server, base::Bind(
+      &P2PPortAllocatorSession::OnStunServerAddress,
+      base::Unretained(this)));
 }
 
 void P2PPortAllocatorSession::OnStunServerAddress(
@@ -148,6 +167,8 @@ void P2PPortAllocatorSession::OnStunServerAddress(
   if (address.empty()) {
     LOG(ERROR) << "Failed to resolve STUN server address "
                << allocator_->config_.stun_server;
+    // Allocating local ports on stun failure.
+    AddConfig();
     return;
   }
 
@@ -160,14 +181,9 @@ void P2PPortAllocatorSession::OnStunServerAddress(
   AddConfig();
 }
 
-void P2PPortAllocatorSession::AllocateRelaySession() {
+void P2PPortAllocatorSession::AllocateLegacyRelaySession() {
   if (allocator_->config_.relay_server.empty())
     return;
-
-  if (!allocator_->config_.legacy_relay) {
-    NOTIMPLEMENTED() << " TURN support is not implemented yet.";
-    return;
-  }
 
   if (relay_session_attempts_ > kRelaySessionRetries)
     return;
@@ -178,11 +194,8 @@ void P2PPortAllocatorSession::AllocateRelaySession() {
   WebURLLoaderOptions options;
   options.allowCredentials = false;
 
-  // TODO(sergeyu): Set to CrossOriginRequestPolicyUseAccessControl
-  // when this code can be used by untrusted plugins.
-  // See http://crbug.com/104195 .
   options.crossOriginRequestPolicy =
-      WebURLLoaderOptions::CrossOriginRequestPolicyAllow;
+      WebURLLoaderOptions::CrossOriginRequestPolicyUseAccessControl;
 
   relay_session_request_.reset(
       allocator_->web_frame_->createAssociatedURLLoader(options));
@@ -191,10 +204,14 @@ void P2PPortAllocatorSession::AllocateRelaySession() {
     return;
   }
 
+  std::string url = "https://" + allocator_->config_.relay_server +
+      kCreateRelaySessionURL +
+      "?username=" + net::EscapeUrlEncodedData(username(), true) +
+      "&password=" + net::EscapeUrlEncodedData(password(), true);
+
   WebURLRequest request;
   request.initialize();
-  request.setURL(WebURL(GURL(
-      "https://" + allocator_->config_.relay_server + kCreateRelaySessionURL)));
+  request.setURL(WebURL(GURL(url)));
   request.setAllowStoredCredentials(false);
   request.setCachePolicy(WebURLRequest::ReloadIgnoringCacheData);
   request.setHTTPMethod("GET");
@@ -204,10 +221,8 @@ void P2PPortAllocatorSession::AllocateRelaySession() {
   request.addHTTPHeaderField(
       WebString::fromUTF8("X-Google-Relay-Auth"),
       WebString::fromUTF8(allocator_->config_.relay_password));
-  request.addHTTPHeaderField(WebString::fromUTF8("X-Session-Type"),
-                             WebString::fromUTF8(session_type()));
   request.addHTTPHeaderField(WebString::fromUTF8("X-Stream-Type"),
-                             WebString::fromUTF8(name()));
+                             WebString::fromUTF8("chromoting"));
 
   relay_session_request_->loadAsynchronously(request, this);
 }
@@ -220,8 +235,6 @@ void P2PPortAllocatorSession::ParseRelayResponse() {
     return;
   }
 
-  relay_username_.clear();
-  relay_password_.clear();
   relay_ip_.Clear();
   relay_udp_port_ = 0;
   relay_tcp_port_ = 0;
@@ -236,9 +249,17 @@ void P2PPortAllocatorSession::ParseRelayResponse() {
     TrimWhitespaceASCII(it->second, TRIM_ALL, &value);
 
     if (key == "username") {
-      relay_username_ = value;
+      if (value != username()) {
+        LOG(ERROR) << "When creating relay session received user name "
+            " that was different from the value specified in the query.";
+        return;
+      }
     } else if (key == "password") {
-      relay_password_ = value;
+      if (value != password()) {
+        LOG(ERROR) << "When creating relay session received password "
+            "that was different from the value specified in the query.";
+        return;
+      }
     } else if (key == "relay.ip") {
       relay_ip_.SetIP(value);
       if (relay_ip_.ip() == 0) {
@@ -262,25 +283,50 @@ void P2PPortAllocatorSession::ParseRelayResponse() {
 
 void P2PPortAllocatorSession::AddConfig() {
   cricket::PortConfiguration* config =
-      new cricket::PortConfiguration(stun_server_address_,
-                                     relay_username_, relay_password_, "");
+      new cricket::PortConfiguration(stun_server_address_, "", "");
 
-  if (relay_ip_.ip() != 0) {
-    cricket::PortConfiguration::PortList ports;
-    if (relay_udp_port_ > 0) {
-      talk_base::SocketAddress address(relay_ip_.ip(), relay_udp_port_);
-      ports.push_back(cricket::ProtocolAddress(address, cricket::PROTO_UDP));
+  if (allocator_->config_.legacy_relay) {
+    // Passing empty credentials for legacy google relay.
+    cricket::RelayServerConfig gturn_config(cricket::RELAY_GTURN);
+    if (relay_ip_.ip() != 0) {
+      if (relay_udp_port_ > 0) {
+        talk_base::SocketAddress address(relay_ip_.ip(), relay_udp_port_);
+        gturn_config.ports.push_back(cricket::ProtocolAddress(
+            address, cricket::PROTO_UDP));
+      }
+      if (relay_tcp_port_ > 0 && !allocator_->config_.disable_tcp_transport) {
+        talk_base::SocketAddress address(relay_ip_.ip(), relay_tcp_port_);
+        gturn_config.ports.push_back(cricket::ProtocolAddress(
+            address, cricket::PROTO_TCP));
+      }
+      if (relay_ssltcp_port_ > 0 &&
+          !allocator_->config_.disable_tcp_transport) {
+        talk_base::SocketAddress address(relay_ip_.ip(), relay_ssltcp_port_);
+        gturn_config.ports.push_back(cricket::ProtocolAddress(
+            address, cricket::PROTO_SSLTCP));
+      }
+      if (!gturn_config.ports.empty()) {
+        config->AddRelay(gturn_config);
+      }
     }
-    if (relay_tcp_port_ > 0 && !allocator_->config_.disable_tcp_transport) {
-      talk_base::SocketAddress address(relay_ip_.ip(), relay_tcp_port_);
-      ports.push_back(cricket::ProtocolAddress(address, cricket::PROTO_TCP));
+  } else {
+    if (!(allocator_->config_.relay_username.empty() ||
+          allocator_->config_.relay_server.empty())) {
+      // Adding TURN related information to config.
+      // As per TURN RFC, same turn server should be used for stun as well.
+      // Configuration should have same address for both stun and turn.
+      DCHECK_EQ(allocator_->config_.stun_server,
+                allocator_->config_.relay_server);
+      cricket::RelayServerConfig turn_config(cricket::RELAY_TURN);
+      cricket::RelayCredentials credentials(
+          allocator_->config_.relay_username,
+          allocator_->config_.relay_password);
+      turn_config.credentials = credentials;
+      // Using the stun resolved address if available for TURN.
+      turn_config.ports.push_back(cricket::ProtocolAddress(
+          stun_server_address_, cricket::PROTO_UDP));
+      config->AddRelay(turn_config);
     }
-    if (relay_ssltcp_port_ > 0 && !allocator_->config_.disable_tcp_transport) {
-      talk_base::SocketAddress address(relay_ip_.ip(), relay_ssltcp_port_);
-      ports.push_back(cricket::ProtocolAddress(address, cricket::PROTO_SSLTCP));
-    }
-    if (!ports.empty())
-      config->AddRelay(ports, 0.0f);
   }
   ConfigReady(config);
 }

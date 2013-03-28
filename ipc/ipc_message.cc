@@ -1,15 +1,36 @@
-// Copyright (c) 2006-2008 The Chromium Authors. All rights reserved.
+// Copyright (c) 2012 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
 #include "ipc/ipc_message.h"
 
+#include "base/atomicops.h"
 #include "base/logging.h"
 #include "build/build_config.h"
 
 #if defined(OS_POSIX)
 #include "ipc/file_descriptor_set_posix.h"
 #endif
+
+namespace {
+
+base::subtle::Atomic32 g_ref_num = 0;
+
+// Create a reference number for identifying IPC messages in traces. The return
+// values has the reference number stored in the upper 24 bits, leaving the low
+// 8 bits set to 0 for use as flags.
+inline uint32 GetRefNumUpper24() {
+  base::debug::TraceLog* trace_log = base::debug::TraceLog::GetInstance();
+  int32 pid = trace_log ? trace_log->process_id() : 0;
+  int32 count = base::subtle::NoBarrier_AtomicIncrement(&g_ref_num, 1);
+  // The 24 bit hash is composed of 14 bits of the count and 10 bits of the
+  // Process ID. With the current trace event buffer cap, the 14-bit count did
+  // not appear to wrap during a trace. Note that it is not a big deal if
+  // collisions occur, as this is only used for debugging and trace analysis.
+  return ((pid << 14) | (count & 0x3fff)) << 8;
+}
+
+}  // namespace
 
 namespace IPC {
 
@@ -20,7 +41,8 @@ Message::~Message() {
 
 Message::Message()
     : Pickle(sizeof(Header)) {
-  header()->routing = header()->type = header()->flags = 0;
+  header()->routing = header()->type = 0;
+  header()->flags = GetRefNumUpper24();
 #if defined(OS_POSIX)
   header()->num_fds = 0;
   header()->pad = 0;
@@ -32,7 +54,8 @@ Message::Message(int32 routing_id, uint32 type, PriorityValue priority)
     : Pickle(sizeof(Header)) {
   header()->routing = routing_id;
   header()->type = type;
-  header()->flags = priority;
+  DCHECK((priority & 0xffffff00) == 0);
+  header()->flags = priority | GetRefNumUpper24();
 #if defined(OS_POSIX)
   header()->num_fds = 0;
   header()->pad = 0;
@@ -65,6 +88,15 @@ Message& Message::operator=(const Message& other) {
   file_descriptor_set_ = other.file_descriptor_set_;
 #endif
   return *this;
+}
+
+void Message::SetHeaderValues(int32 routing, uint32 type, uint32 flags) {
+  // This should only be called when the message is already empty.
+  DCHECK(payload_size() == 0);
+
+  header()->routing = routing;
+  header()->type = type;
+  header()->flags = flags;
 }
 
 #ifdef IPC_MESSAGE_LOG_ENABLED
@@ -100,7 +132,7 @@ bool Message::WriteFileDescriptor(const base::FileDescriptor& descriptor) {
   }
 }
 
-bool Message::ReadFileDescriptor(void** iter,
+bool Message::ReadFileDescriptor(PickleIterator* iter,
                                  base::FileDescriptor* descriptor) const {
   int descriptor_index;
   if (!ReadInt(iter, &descriptor_index))
@@ -114,6 +146,10 @@ bool Message::ReadFileDescriptor(void** iter,
   descriptor->auto_close = true;
 
   return descriptor->fd >= 0;
+}
+
+bool Message::HasFileDescriptors() const {
+  return file_descriptor_set_.get() && !file_descriptor_set_->empty();
 }
 
 void Message::EnsureFileDescriptorSet() {

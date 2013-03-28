@@ -6,6 +6,7 @@
 
 #include <list>
 
+#include "base/debug/alias.h"
 #include "base/memory/singleton.h"
 #include "base/string_number_conversions.h"
 #include "base/win/wrapped_window_proc.h"
@@ -15,7 +16,7 @@ namespace ui {
 
 static const DWORD kWindowDefaultChildStyle =
     WS_CHILD | WS_VISIBLE | WS_CLIPCHILDREN | WS_CLIPSIBLINGS;
-static const DWORD kWindowDefaultStyle = WS_OVERLAPPEDWINDOW;
+static const DWORD kWindowDefaultStyle = WS_OVERLAPPEDWINDOW | WS_CLIPCHILDREN;
 static const DWORD kWindowDefaultExStyle = 0;
 
 ///////////////////////////////////////////////////////////////////////////////
@@ -29,79 +30,41 @@ const wchar_t* const WindowImpl::kBaseClassName = L"Chrome_WidgetWin_";
 // WindowImpl class information used for registering unique windows.
 struct ClassInfo {
   UINT style;
-  HBRUSH background;
+  HICON icon;
 
-  explicit ClassInfo(int style)
+  ClassInfo(int style, HICON icon)
       : style(style),
-        background(NULL) {}
+        icon(icon) {}
 
   // Compares two ClassInfos. Returns true if all members match.
   bool Equals(const ClassInfo& other) const {
-    return (other.style == style && other.background == background);
+    return (other.style == style && other.icon == icon);
   }
 };
 
 class ClassRegistrar {
  public:
-  static ClassRegistrar* GetInstance() {
-    return Singleton<ClassRegistrar>::get();
-  }
+  ~ClassRegistrar();
 
-  ~ClassRegistrar() {
-    for (RegisteredClasses::iterator i = registered_classes_.begin();
-         i != registered_classes_.end(); ++i) {
-      if (!UnregisterClass(i->name.c_str(), NULL)) {
-        LOG(ERROR) << "Failed to unregister class " << i->name.c_str()
-                   << ". Error = " << GetLastError();
-      }
-    }
-  }
+  static ClassRegistrar* GetInstance();
 
-  // Puts the name for the class matching |class_info| in |class_name|, creating
-  // a new name if the class is not yet known.
-  // Returns true if this class was already known, false otherwise.
-  bool RetrieveClassName(const ClassInfo& class_info, std::wstring* name) {
-    for (RegisteredClasses::const_iterator i = registered_classes_.begin();
-         i != registered_classes_.end(); ++i) {
-      if (class_info.Equals(i->info)) {
-        name->assign(i->name);
-        return true;
-      }
-    }
-
-    name->assign(string16(WindowImpl::kBaseClassName) +
-        base::IntToString16(registered_count_++));
-    return false;
-  }
-
-  void RegisterClass(const ClassInfo& class_info,
-                     const std::wstring& name,
-                     ATOM atom) {
-    registered_classes_.push_back(RegisteredClass(class_info, name, atom));
-  }
+  // Returns the atom identifying the class matching |class_info|,
+  // creating and registering a new class if the class is not yet known.
+  ATOM RetrieveClassAtom(const ClassInfo& class_info);
 
  private:
   // Represents a registered window class.
   struct RegisteredClass {
-    RegisteredClass(const ClassInfo& info,
-                    const std::wstring& name,
-                    ATOM atom)
-        : info(info),
-          name(name),
-          atom(atom) {
-    }
+    RegisteredClass(const ClassInfo& info, ATOM atom);
 
     // Info used to create the class.
     ClassInfo info;
 
-    // The name given to the window.
-    std::wstring name;
-
-    // The ATOM returned from creating the window.
+    // The atom identifying the window class.
     ATOM atom;
   };
 
-  ClassRegistrar() : registered_count_(0) { }
+  ClassRegistrar();
   friend struct DefaultSingletonTraits<ClassRegistrar>;
 
   typedef std::list<RegisteredClass> RegisteredClasses;
@@ -113,6 +76,56 @@ class ClassRegistrar {
   DISALLOW_COPY_AND_ASSIGN(ClassRegistrar);
 };
 
+ClassRegistrar::~ClassRegistrar() {}
+
+// static
+ClassRegistrar* ClassRegistrar::GetInstance() {
+  return Singleton<ClassRegistrar,
+                   LeakySingletonTraits<ClassRegistrar> >::get();
+}
+
+ATOM ClassRegistrar::RetrieveClassAtom(const ClassInfo& class_info) {
+  for (RegisteredClasses::const_iterator i = registered_classes_.begin();
+       i != registered_classes_.end(); ++i) {
+    if (class_info.Equals(i->info))
+      return i->atom;
+  }
+
+  // No class found, need to register one.
+  string16 name = string16(WindowImpl::kBaseClassName) +
+      base::IntToString16(registered_count_++);
+
+  HBRUSH background = NULL;
+  WNDCLASSEX window_class;
+  base::win::InitializeWindowClass(
+      name.c_str(),
+      &base::win::WrappedWindowProc<WindowImpl::WndProc>,
+      class_info.style,
+      0,
+      0,
+      NULL,
+      reinterpret_cast<HBRUSH>(background + 1),
+      NULL,
+      class_info.icon,
+      class_info.icon,
+      &window_class);
+  HMODULE instance = window_class.hInstance;
+  ATOM atom = RegisterClassEx(&window_class);
+  CHECK(atom) << GetLastError();
+
+  registered_classes_.push_back(RegisteredClass(class_info, atom));
+
+  return atom;
+}
+
+ClassRegistrar::RegisteredClass::RegisteredClass(const ClassInfo& info,
+                                                 ATOM atom)
+    : info(info),
+      atom(atom) {}
+
+ClassRegistrar::ClassRegistrar() : registered_count_(0) { }
+
+
 ///////////////////////////////////////////////////////////////////////////////
 // WindowImpl, public
 
@@ -120,21 +133,31 @@ WindowImpl::WindowImpl()
     : window_style_(0),
       window_ex_style_(kWindowDefaultExStyle),
       class_style_(CS_DBLCLKS),
-      hwnd_(NULL) {
+      hwnd_(NULL),
+      got_create_(false),
+      got_valid_hwnd_(false),
+      destroyed_(NULL) {
 }
 
 WindowImpl::~WindowImpl() {
+  if (destroyed_)
+    *destroyed_ = true;
+  ClearUserData();
 }
 
 void WindowImpl::Init(HWND parent, const gfx::Rect& bounds) {
   if (window_style_ == 0)
     window_style_ = parent ? kWindowDefaultChildStyle : kWindowDefaultStyle;
 
-  // Ensures the parent we have been passed is valid, otherwise CreateWindowEx
-  // will fail.
-  if (parent && !::IsWindow(parent)) {
-    NOTREACHED() << "invalid parent window specified.";
-    parent = NULL;
+  if (parent == HWND_DESKTOP) {
+    // Only non-child windows can have HWND_DESKTOP (0) as their parent.
+    CHECK((window_style_ & WS_CHILD) == 0);
+    parent = GetWindowToParentTo(false);
+  } else if (parent == ::GetDesktopWindow()) {
+    // Any type of window can have the "Desktop Window" as their parent.
+    parent = GetWindowToParentTo(true);
+  } else if (parent != HWND_MESSAGE) {
+    CHECK(::IsWindow(parent));
   }
 
   int x, y, width, height;
@@ -147,14 +170,39 @@ void WindowImpl::Init(HWND parent, const gfx::Rect& bounds) {
     height = bounds.height();
   }
 
-  std::wstring name(GetWindowClassName());
-  hwnd_ = CreateWindowEx(window_ex_style_, name.c_str(), NULL,
-                         window_style_, x, y, width, height,
-                         parent, NULL, NULL, this);
+  ATOM atom = GetWindowClassAtom();
+  bool destroyed = false;
+  destroyed_ = &destroyed;
+  HWND hwnd = CreateWindowEx(window_ex_style_,
+                             reinterpret_cast<wchar_t*>(atom), NULL,
+                             window_style_, x, y, width, height,
+                             parent, NULL, NULL, this);
+  if (!hwnd_ && GetLastError() == 0) {
+    base::debug::Alias(&destroyed);
+    base::debug::Alias(&hwnd);
+    bool got_create = got_create_;
+    base::debug::Alias(&got_create);
+    bool got_valid_hwnd = got_valid_hwnd_;
+    base::debug::Alias(&got_valid_hwnd);
+    WNDCLASSEX class_info;
+    memset(&class_info, 0, sizeof(WNDCLASSEX));
+    class_info.cbSize = sizeof(WNDCLASSEX);
+    BOOL got_class = GetClassInfoEx(GetModuleHandle(NULL),
+                                    reinterpret_cast<wchar_t*>(atom),
+                                    &class_info);
+    base::debug::Alias(&got_class);
+    bool procs_match = got_class && class_info.lpfnWndProc ==
+        base::win::WrappedWindowProc<&WindowImpl::WndProc>;
+    base::debug::Alias(&procs_match);
+    CHECK(false);
+  }
+  if (!destroyed)
+    destroyed_ = NULL;
+
   CheckWindowCreated(hwnd_);
 
   // The window procedure should have set the data for us.
-  CHECK_EQ(this, ui::GetWindowUserData(hwnd_));
+  CHECK_EQ(this, ui::GetWindowUserData(hwnd));
 }
 
 HICON WindowImpl::GetDefaultWindowIcon() const {
@@ -172,6 +220,11 @@ LRESULT WindowImpl::OnWndProc(UINT message, WPARAM w_param, LPARAM l_param) {
   return result;
 }
 
+void WindowImpl::ClearUserData() {
+  if (::IsWindow(hwnd_))
+    ui::SetWindowUserData(hwnd_, NULL);
+}
+
 // static
 LRESULT CALLBACK WindowImpl::WndProc(HWND hwnd,
                                      UINT message,
@@ -183,6 +236,9 @@ LRESULT CALLBACK WindowImpl::WndProc(HWND hwnd,
     DCHECK(window);
     ui::SetWindowUserData(hwnd, window);
     window->hwnd_ = hwnd;
+    window->got_create_ = true;
+    if (hwnd)
+      window->got_valid_hwnd_ = true;
     return TRUE;
   }
 
@@ -194,35 +250,10 @@ LRESULT CALLBACK WindowImpl::WndProc(HWND hwnd,
   return window->OnWndProc(message, w_param, l_param);
 }
 
-std::wstring WindowImpl::GetWindowClassName() {
-  ClassInfo class_info(initial_class_style());
-  std::wstring name;
-  if (ClassRegistrar::GetInstance()->RetrieveClassName(class_info, &name))
-    return name;
-
+ATOM WindowImpl::GetWindowClassAtom() {
   HICON icon = GetDefaultWindowIcon();
-
-  // No class found, need to register one.
-  WNDCLASSEX class_ex = {
-    sizeof(WNDCLASSEX),
-    class_info.style,
-    base::win::WrappedWindowProc<&WindowImpl::WndProc>,
-    0,
-    0,
-    NULL,
-    icon,
-    NULL,
-    reinterpret_cast<HBRUSH>(class_info.background + 1),
-    NULL,
-    name.c_str(),
-    icon
-  };
-  ATOM atom = RegisterClassEx(&class_ex);
-  CHECK(atom) << GetLastError();
-
-  ClassRegistrar::GetInstance()->RegisterClass(class_info, name, atom);
-
-  return name;
+  ClassInfo class_info(initial_class_style(), icon);
+  return ClassRegistrar::GetInstance()->RetrieveClassAtom(class_info);
 }
 
 }  // namespace ui

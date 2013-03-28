@@ -25,6 +25,7 @@ class PPAPI_PROXY_EXPORT ProxyModule {
   // |PpapiPluginMain()| which plugin will be loaded.)
   const std::string& GetFlashCommandLineArgs();
   void SetFlashCommandLineArgs(const std::string& args);
+
  private:
   friend struct DefaultSingletonTraits<ProxyModule>;
 

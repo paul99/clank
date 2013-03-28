@@ -1,4 +1,4 @@
-// Copyright (c) 2009 The Chromium Authors. All rights reserved.
+// Copyright (c) 2012 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -9,6 +9,14 @@
 #include "chrome/browser/notifications/notification.h"
 #include "ui/gfx/rect.h"
 #include "ui/gfx/size.h"
+
+#if !defined(OS_WIN) && !defined(USE_AURA)
+// static
+int BalloonView::GetHorizontalMargin() {
+  // TODO: implement for linux (non-aura) and mac.
+  return 0;
+}
+#endif
 
 Balloon::Balloon(const Notification& notification, Profile* profile,
                  BalloonCollection* collection)
@@ -26,7 +34,7 @@ void Balloon::SetPosition(const gfx::Point& upper_left, bool reposition) {
     balloon_view_->RepositionToBalloon();
 }
 
-void Balloon::SetContentPreferredSize(const gfx::Size& size) {
+void Balloon::ResizeDueToAutoResize(const gfx::Size& size) {
   collection_->ResizeBalloon(this, size);
 }
 
@@ -58,6 +66,10 @@ void Balloon::OnClick() {
 void Balloon::OnClose(bool by_user) {
   notification_->Close(by_user);
   collection_->OnBalloonClosed(this);
+}
+
+void Balloon::OnButtonClick(int button_index) {
+  notification_->ButtonClick(button_index);
 }
 
 void Balloon::CloseByScript() {

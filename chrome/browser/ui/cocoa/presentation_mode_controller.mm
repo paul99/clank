@@ -1,4 +1,4 @@
-// Copyright (c) 2011 The Chromium Authors. All rights reserved.
+// Copyright (c) 2012 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -6,8 +6,10 @@
 
 #include <algorithm>
 
+#include "base/command_line.h"
 #import "base/mac/mac_util.h"
 #import "chrome/browser/ui/cocoa/browser_window_controller.h"
+#include "chrome/common/chrome_switches.h"
 #import "third_party/GTM/AppKit/GTMNSAnimation+Duration.h"
 
 NSString* const kWillEnterFullscreenNotification =
@@ -198,7 +200,7 @@ const CGFloat kFloatingBarVerticalOffset = 22;
   // Disable these notifications on Lion as they cause crashes.
   // TODO(rohitrao): Figure out what happens if a fullscreen window changes
   // monitors on Lion.
-  if (base::mac::IsOSSnowLeopardOrEarlier()) {
+  if (base::mac::IsOSSnowLeopard()) {
     [nc addObserver:self
            selector:@selector(windowDidChangeScreen:)
                name:NSWindowDidChangeScreenNotification
@@ -283,6 +285,9 @@ const CGFloat kFloatingBarVerticalOffset = 22;
 
 - (void)ensureOverlayShownWithAnimation:(BOOL)animate delay:(BOOL)delay {
   if (!inPresentationMode_)
+    return;
+
+  if (CommandLine::ForCurrentProcess()->HasSwitch(switches::kKioskMode))
     return;
 
   if (animate) {
@@ -416,7 +421,7 @@ const CGFloat kFloatingBarVerticalOffset = 22;
 }
 
 - (BOOL)shouldToggleMenuBar {
-  return base::mac::IsOSSnowLeopardOrEarlier() &&
+  return base::mac::IsOSSnowLeopard() &&
          [self isWindowOnPrimaryScreen] &&
          [[browserController_ window] isMainWindow];
 }

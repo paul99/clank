@@ -1,4 +1,4 @@
-// Copyright (c) 2011 The Chromium Authors. All rights reserved.
+// Copyright (c) 2012 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -7,7 +7,6 @@
 
 #ifndef CHROME_BROWSER_CONTENT_SETTINGS_HOST_CONTENT_SETTINGS_MAP_H_
 #define CHROME_BROWSER_CONTENT_SETTINGS_HOST_CONTENT_SETTINGS_MAP_H_
-#pragma once
 
 #include <map>
 #include <string>
@@ -15,13 +14,13 @@
 
 #include "base/basictypes.h"
 #include "base/memory/ref_counted.h"
+#include "base/prefs/public/pref_change_registrar.h"
 #include "base/synchronization/lock.h"
 #include "base/tuple.h"
 #include "chrome/browser/content_settings/content_settings_observer.h"
-#include "chrome/browser/prefs/pref_change_registrar.h"
 #include "chrome/common/content_settings.h"
-#include "chrome/common/content_settings_types.h"
 #include "chrome/common/content_settings_pattern.h"
+#include "chrome/common/content_settings_types.h"
 
 namespace base {
 class Value;
@@ -40,16 +39,23 @@ class HostContentSettingsMap
       public base::RefCountedThreadSafe<HostContentSettingsMap> {
  public:
   enum ProviderType {
-    POLICY_PROVIDER = 0,
-    EXTENSION_PROVIDER = 1,
+    INTERNAL_EXTENSION_PROVIDER = 0,
+    POLICY_PROVIDER,
+    CUSTOM_EXTENSION_PROVIDER,
     PREF_PROVIDER,
     DEFAULT_PROVIDER,
     NUM_PROVIDER_TYPES,
   };
 
   HostContentSettingsMap(PrefService* prefs,
-                         ExtensionService* extension_service,
                          bool incognito);
+
+#if defined(ENABLE_EXTENSIONS)
+  // In some cases, the ExtensionService is not available at the time the
+  // HostContentSettingsMap is constructed. In these cases, we register the
+  // service once it's available.
+  void RegisterExtensionService(ExtensionService* extension_service);
+#endif
 
   static void RegisterUserPrefs(PrefService* prefs);
 
@@ -153,10 +159,15 @@ class HostContentSettingsMap
   // This should only be called on the UI thread.
   void ClearSettingsForOneType(ContentSettingsType content_type);
 
-  static bool IsValueAllowedForType(const base::Value* value,
+  static bool IsValueAllowedForType(PrefService* prefs,
+                                    const base::Value* value,
                                     ContentSettingsType content_type);
-  static bool IsSettingAllowedForType(ContentSetting setting,
+  static bool IsSettingAllowedForType(PrefService* prefs,
+                                      ContentSetting setting,
                                       ContentSettingsType content_type);
+
+  // Returns true if the values for content type are of type dictionary/map.
+  static bool ContentTypeHasCompoundValue(ContentSettingsType type);
 
   // Detaches the HostContentSettingsMap from all Profile-related objects like
   // PrefService. This methods needs to be called before destroying the Profile.
@@ -166,8 +177,8 @@ class HostContentSettingsMap
 
   // content_settings::Observer implementation.
   virtual void OnContentSettingChanged(
-      ContentSettingsPattern primary_pattern,
-      ContentSettingsPattern secondary_pattern,
+      const ContentSettingsPattern& primary_pattern,
+      const ContentSettingsPattern& secondary_pattern,
       ContentSettingsType content_type,
       std::string resource_identifier) OVERRIDE;
 
@@ -177,6 +188,16 @@ class HostContentSettingsMap
   static bool ShouldAllowAllContent(const GURL& primary_url,
                                     const GURL& secondary_url,
                                     ContentSettingsType content_type);
+
+  // Returns the ProviderType associated with the given source string.
+  // TODO(estade): I regret adding this. At the moment there are no legitimate
+  // uses. We should stick to ProviderType rather than string so we don't have
+  // to convert backwards.
+  static ProviderType GetProviderTypeFromSource(const std::string& source);
+
+  bool is_off_the_record() const {
+    return is_off_the_record_;
+  }
 
  private:
   friend class base::RefCountedThreadSafe<HostContentSettingsMap>;
@@ -193,9 +214,8 @@ class HostContentSettingsMap
       ContentSettingsType content_type,
       content_settings::ProviderInterface* provider) const;
 
-  // Various migration methods (old cookie, popup and per-host data gets
-  // migrated to the new format).
-  void MigrateObsoleteCookiePref();
+  // Migrate the Clear on exit pref into equivalent content settings.
+  void MigrateObsoleteClearOnExitPref();
 
   // Adds content settings for |content_type| and |resource_identifier|,
   // provided by |provider|, into |settings|. If |incognito| is true, adds only
@@ -215,10 +235,6 @@ class HostContentSettingsMap
 
   // Whether this settings map is for an OTR session.
   bool is_off_the_record_;
-
-  // Whether we are currently updating preferences, this is used to ignore
-  // notifications from the preferences service that we triggered ourself.
-  bool updating_preferences_;
 
   // Content setting providers.
   ProviderMap content_settings_providers_;

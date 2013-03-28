@@ -1,10 +1,9 @@
-// Copyright (c) 2011 The Chromium Authors. All rights reserved.
+// Copyright (c) 2012 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
 #ifndef CONTENT_BROWSER_RENDERER_HOST_DATABASE_MESSAGE_FILTER_H_
 #define CONTENT_BROWSER_RENDERER_HOST_DATABASE_MESSAGE_FILTER_H_
-#pragma once
 
 #include "base/hash_tables.h"
 #include "base/string16.h"
@@ -13,17 +12,19 @@
 #include "webkit/database/database_tracker.h"
 #include "webkit/quota/quota_types.h"
 
+namespace content {
+
 class DatabaseMessageFilter
-    : public content::BrowserMessageFilter,
+    : public BrowserMessageFilter,
       public webkit_database::DatabaseTracker::Observer {
  public:
   explicit DatabaseMessageFilter(webkit_database::DatabaseTracker* db_tracker);
 
-  // content::BrowserMessageFilter implementation.
+  // BrowserMessageFilter implementation.
   virtual void OnChannelClosing() OVERRIDE;
   virtual void OverrideThreadForMessage(
       const IPC::Message& message,
-      content::BrowserThread::ID* thread) OVERRIDE;
+      BrowserThread::ID* thread) OVERRIDE;
   virtual bool OnMessageReceived(const IPC::Message& message,
                                  bool* message_was_ok) OVERRIDE;
 
@@ -68,6 +69,9 @@ class DatabaseMessageFilter
                           const string16& database_name);
   void OnDatabaseClosed(const string16& origin_identifier,
                         const string16& database_name);
+  void OnHandleSqliteError(const string16& origin_identifier,
+                           const string16& database_name,
+                           int error);
 
   // DatabaseTracker::Observer callbacks (file thread)
   virtual void OnDatabaseSizeChanged(const string16& origin_identifier,
@@ -92,5 +96,7 @@ class DatabaseMessageFilter
   // Keeps track of all DB connections opened by this renderer
   webkit_database::DatabaseConnections database_connections_;
 };
+
+}  // namespace content
 
 #endif  // CONTENT_BROWSER_RENDERER_HOST_DATABASE_MESSAGE_FILTER_H_

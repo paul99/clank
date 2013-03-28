@@ -1,4 +1,4 @@
-// Copyright (c) 2011 The Chromium Authors. All rights reserved.
+// Copyright (c) 2012 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -6,8 +6,8 @@
 
 #include "base/bind.h"
 #include "base/message_loop.h"
-#include "third_party/skia/include/core/SkBitmap.h"
 #include "ui/base/l10n/l10n_util.h"
+#include "ui/gfx/image/image.h"
 
 namespace ui {
 
@@ -16,11 +16,12 @@ const int kSeparatorId = -1;
 struct SimpleMenuModel::Item {
   int command_id;
   string16 label;
-  SkBitmap icon;
+  gfx::Image icon;
   ItemType type;
   int group_id;
   MenuModel* submenu;
   ButtonMenuItemModel* button_model;
+  MenuSeparatorType separator_type;
 };
 
 ////////////////////////////////////////////////////////////////////////////////
@@ -40,7 +41,7 @@ string16 SimpleMenuModel::Delegate::GetLabelForCommandId(int command_id) const {
 }
 
 bool SimpleMenuModel::Delegate::GetIconForCommandId(
-    int command_id, SkBitmap* bitmap) const {
+    int command_id, gfx::Image* image_skia) const {
   return false;
 }
 
@@ -71,7 +72,8 @@ SimpleMenuModel::~SimpleMenuModel() {
 }
 
 void SimpleMenuModel::AddItem(int command_id, const string16& label) {
-  Item item = { command_id, label, SkBitmap(), TYPE_COMMAND, -1, NULL, NULL };
+  Item item = { command_id, label, gfx::Image(), TYPE_COMMAND, -1, NULL,
+                NULL, NORMAL_SEPARATOR };
   AppendItem(item);
 }
 
@@ -79,14 +81,21 @@ void SimpleMenuModel::AddItemWithStringId(int command_id, int string_id) {
   AddItem(command_id, l10n_util::GetStringUTF16(string_id));
 }
 
-void SimpleMenuModel::AddSeparator() {
-  Item item = { kSeparatorId, string16(), SkBitmap(), TYPE_SEPARATOR, -1,
-                NULL, NULL };
+void SimpleMenuModel::AddSeparator(MenuSeparatorType separator_type) {
+#if !defined(USE_AURA)
+  if (separator_type != NORMAL_SEPARATOR) {
+    NOTIMPLEMENTED();
+  }
+#endif
+  DCHECK(items_.empty() || items_.back().type != TYPE_SEPARATOR);
+  Item item = { kSeparatorId, string16(), gfx::Image(), TYPE_SEPARATOR,
+                -1, NULL, NULL , separator_type };
   AppendItem(item);
 }
 
 void SimpleMenuModel::AddCheckItem(int command_id, const string16& label) {
-  Item item = { command_id, label, SkBitmap(), TYPE_CHECK, -1, NULL, NULL };
+  Item item = { command_id, label, gfx::Image(), TYPE_CHECK, -1, NULL,
+                NULL, NORMAL_SEPARATOR };
   AppendItem(item);
 }
 
@@ -96,8 +105,8 @@ void SimpleMenuModel::AddCheckItemWithStringId(int command_id, int string_id) {
 
 void SimpleMenuModel::AddRadioItem(int command_id, const string16& label,
                                    int group_id) {
-  Item item = { command_id, label, SkBitmap(), TYPE_RADIO, group_id, NULL,
-                NULL };
+  Item item = { command_id, label, gfx::Image(), TYPE_RADIO, group_id, NULL,
+                NULL, NORMAL_SEPARATOR };
   AppendItem(item);
 }
 
@@ -106,16 +115,23 @@ void SimpleMenuModel::AddRadioItemWithStringId(int command_id, int string_id,
   AddRadioItem(command_id, l10n_util::GetStringUTF16(string_id), group_id);
 }
 
+void SimpleMenuModel::AddSeparatorIfNecessary(MenuSeparatorType separator_type)
+{
+  if (!items_.empty() && items_.back().type != TYPE_SEPARATOR)
+    AddSeparator(separator_type);
+}
+
 void SimpleMenuModel::AddButtonItem(int command_id,
                                     ButtonMenuItemModel* model) {
-  Item item = { command_id, string16(), SkBitmap(), TYPE_BUTTON_ITEM, -1, NULL,
-                model };
+  Item item = { command_id, string16(), gfx::Image(), TYPE_BUTTON_ITEM, -1,
+                NULL, model, NORMAL_SEPARATOR };
   AppendItem(item);
 }
 
 void SimpleMenuModel::AddSubMenu(int command_id, const string16& label,
                                  MenuModel* model) {
-  Item item = { command_id, label, SkBitmap(), TYPE_SUBMENU, -1, model, NULL };
+  Item item = { command_id, label, gfx::Image(), TYPE_SUBMENU, -1, model,
+                NULL, NORMAL_SEPARATOR };
   AppendItem(item);
 }
 
@@ -126,7 +142,8 @@ void SimpleMenuModel::AddSubMenuWithStringId(int command_id,
 
 void SimpleMenuModel::InsertItemAt(
     int index, int command_id, const string16& label) {
-  Item item = { command_id, label, SkBitmap(), TYPE_COMMAND, -1, NULL, NULL };
+  Item item = { command_id, label, gfx::Image(), TYPE_COMMAND, -1, NULL,
+                NULL, NORMAL_SEPARATOR };
   InsertItemAtIndex(item, index);
 }
 
@@ -135,15 +152,22 @@ void SimpleMenuModel::InsertItemWithStringIdAt(
   InsertItemAt(index, command_id, l10n_util::GetStringUTF16(string_id));
 }
 
-void SimpleMenuModel::InsertSeparatorAt(int index) {
-  Item item = { kSeparatorId, string16(), SkBitmap(), TYPE_SEPARATOR, -1,
-                NULL, NULL };
+void SimpleMenuModel::InsertSeparatorAt(int index,
+                                        MenuSeparatorType separator_type) {
+#if !defined(USE_AURA)
+  if (separator_type != NORMAL_SEPARATOR) {
+    NOTIMPLEMENTED();
+  }
+#endif
+  Item item = { kSeparatorId, string16(), gfx::Image(), TYPE_SEPARATOR,
+                -1, NULL, NULL, separator_type };
   InsertItemAtIndex(item, index);
 }
 
 void SimpleMenuModel::InsertCheckItemAt(
     int index, int command_id, const string16& label) {
-  Item item = { command_id, label, SkBitmap(), TYPE_CHECK, -1, NULL, NULL };
+  Item item = { command_id, label, gfx::Image(), TYPE_CHECK, -1, NULL,
+                NULL, NORMAL_SEPARATOR };
   InsertItemAtIndex(item, index);
 }
 
@@ -155,8 +179,8 @@ void SimpleMenuModel::InsertCheckItemWithStringIdAt(
 
 void SimpleMenuModel::InsertRadioItemAt(
     int index, int command_id, const string16& label, int group_id) {
-  Item item = { command_id, label, SkBitmap(), TYPE_RADIO, group_id, NULL,
-                NULL };
+  Item item = { command_id, label, gfx::Image(), TYPE_RADIO, group_id, NULL,
+                NULL, NORMAL_SEPARATOR };
   InsertItemAtIndex(item, index);
 }
 
@@ -168,7 +192,8 @@ void SimpleMenuModel::InsertRadioItemWithStringIdAt(
 
 void SimpleMenuModel::InsertSubMenuAt(
     int index, int command_id, const string16& label, MenuModel* model) {
-  Item item = { command_id, label, SkBitmap(), TYPE_SUBMENU, -1, model, NULL };
+  Item item = { command_id, label, gfx::Image(), TYPE_SUBMENU, -1, model,
+                NULL, NORMAL_SEPARATOR };
   InsertItemAtIndex(item, index);
 }
 
@@ -178,8 +203,8 @@ void SimpleMenuModel::InsertSubMenuWithStringIdAt(
                   model);
 }
 
-void SimpleMenuModel::SetIcon(int index, const SkBitmap& icon) {
-  items_[index].icon = icon;
+void SimpleMenuModel::SetIcon(int index, const gfx::Image& icon) {
+  items_[ValidateItemIndex(index)].icon = icon;
 }
 
 void SimpleMenuModel::Clear() {
@@ -187,10 +212,9 @@ void SimpleMenuModel::Clear() {
 }
 
 int SimpleMenuModel::GetIndexOfCommandId(int command_id) {
-  std::vector<Item>::iterator itr;
-  for (itr = items_.begin(); itr != items_.end(); itr++) {
-    if ((*itr).command_id == command_id) {
-      return FlipIndex(static_cast<int>(std::distance(items_.begin(), itr)));
+  for (ItemVector::iterator i = items_.begin(); i != items_.end(); ++i) {
+    if (i->command_id == command_id) {
+      return FlipIndex(static_cast<int>(std::distance(items_.begin(), i)));
     }
   }
   return -1;
@@ -200,9 +224,8 @@ int SimpleMenuModel::GetIndexOfCommandId(int command_id) {
 // SimpleMenuModel, MenuModel implementation:
 
 bool SimpleMenuModel::HasIcons() const {
-  for (std::vector<Item>::const_iterator iter = items_.begin();
-       iter != items_.end(); ++iter) {
-    if (!iter->icon.isNull())
+  for (ItemVector::const_iterator i = items_.begin(); i != items_.end(); ++i) {
+    if (!i->icon.IsEmpty())
       return true;
   }
 
@@ -214,17 +237,21 @@ int SimpleMenuModel::GetItemCount() const {
 }
 
 MenuModel::ItemType SimpleMenuModel::GetTypeAt(int index) const {
-  return items_.at(FlipIndex(index)).type;
+  return items_[ValidateItemIndex(FlipIndex(index))].type;
+}
+
+ui::MenuSeparatorType SimpleMenuModel::GetSeparatorTypeAt(int index) const {
+  return items_[ValidateItemIndex(FlipIndex(index))].separator_type;
 }
 
 int SimpleMenuModel::GetCommandIdAt(int index) const {
-  return items_.at(FlipIndex(index)).command_id;
+  return items_[ValidateItemIndex(FlipIndex(index))].command_id;
 }
 
 string16 SimpleMenuModel::GetLabelAt(int index) const {
   if (IsItemDynamicAt(index))
     return delegate_->GetLabelForCommandId(GetCommandIdAt(index));
-  return items_.at(FlipIndex(index)).label;
+  return items_[ValidateItemIndex(FlipIndex(index))].label;
 }
 
 bool SimpleMenuModel::IsItemDynamicAt(int index) const {
@@ -245,21 +272,21 @@ bool SimpleMenuModel::GetAcceleratorAt(int index,
 bool SimpleMenuModel::IsItemCheckedAt(int index) const {
   if (!delegate_)
     return false;
-  int item_index = FlipIndex(index);
-  MenuModel::ItemType item_type = items_[item_index].type;
+  MenuModel::ItemType item_type = GetTypeAt(index);
   return (item_type == TYPE_CHECK || item_type == TYPE_RADIO) ?
       delegate_->IsCommandIdChecked(GetCommandIdAt(index)) : false;
 }
 
 int SimpleMenuModel::GetGroupIdAt(int index) const {
-  return items_.at(FlipIndex(index)).group_id;
+  return items_[ValidateItemIndex(FlipIndex(index))].group_id;
 }
 
-bool SimpleMenuModel::GetIconAt(int index, SkBitmap* icon) {
+bool SimpleMenuModel::GetIconAt(int index, gfx::Image* icon) {
   if (IsItemDynamicAt(index))
     return delegate_->GetIconForCommandId(GetCommandIdAt(index), icon);
 
-  if (items_[index].icon.isNull())
+  ValidateItemIndex(index);
+  if (items_[index].icon.IsEmpty())
     return false;
 
   *icon = items_[index].icon;
@@ -267,21 +294,19 @@ bool SimpleMenuModel::GetIconAt(int index, SkBitmap* icon) {
 }
 
 ButtonMenuItemModel* SimpleMenuModel::GetButtonMenuItemAt(int index) const {
-  return items_.at(FlipIndex(index)).button_model;
+  return items_[ValidateItemIndex(FlipIndex(index))].button_model;
 }
 
 bool SimpleMenuModel::IsEnabledAt(int index) const {
   int command_id = GetCommandIdAt(index);
-  if (!delegate_ || command_id == kSeparatorId ||
-      items_.at(FlipIndex(index)).button_model)
+  if (!delegate_ || command_id == kSeparatorId || GetButtonMenuItemAt(index))
     return true;
   return delegate_->IsCommandIdEnabled(command_id);
 }
 
 bool SimpleMenuModel::IsVisibleAt(int index) const {
   int command_id = GetCommandIdAt(index);
-  if (!delegate_ || command_id == kSeparatorId ||
-      items_.at(FlipIndex(index)).button_model)
+  if (!delegate_ || command_id == kSeparatorId || GetButtonMenuItemAt(index))
     return true;
   return delegate_->IsCommandIdVisible(command_id);
 }
@@ -302,7 +327,7 @@ void SimpleMenuModel::ActivatedAt(int index, int event_flags) {
 }
 
 MenuModel* SimpleMenuModel::GetSubmenuModelAt(int index) const {
-  return items_.at(FlipIndex(index)).submenu;
+  return items_[ValidateItemIndex(FlipIndex(index))].submenu;
 }
 
 void SimpleMenuModel::MenuWillShow() {
@@ -324,6 +349,10 @@ void SimpleMenuModel::SetMenuModelDelegate(
   menu_model_delegate_ = menu_model_delegate;
 }
 
+MenuModelDelegate* SimpleMenuModel::GetMenuModelDelegate() const {
+  return menu_model_delegate_;
+}
+
 void SimpleMenuModel::OnMenuClosed() {
   if (delegate_)
     delegate_->MenuClosed(this);
@@ -335,6 +364,12 @@ int SimpleMenuModel::FlipIndex(int index) const {
 
 ////////////////////////////////////////////////////////////////////////////////
 // SimpleMenuModel, Private:
+
+int SimpleMenuModel::ValidateItemIndex(int index) const {
+  CHECK_GE(index, 0);
+  CHECK_LT(static_cast<size_t>(index), items_.size());
+  return index;
+}
 
 void SimpleMenuModel::AppendItem(const Item& item) {
   ValidateItem(item);

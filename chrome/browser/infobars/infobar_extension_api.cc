@@ -1,4 +1,4 @@
-// Copyright (c) 2011 The Chromium Authors. All rights reserved.
+// Copyright (c) 2012 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -7,19 +7,21 @@
 #include "base/string_number_conversions.h"
 #include "base/string_util.h"
 #include "base/values.h"
+#include "chrome/browser/api/infobars/confirm_infobar_delegate.h"
+#include "chrome/browser/extensions/api/tabs/tabs_constants.h"
 #include "chrome/browser/extensions/extension_host.h"
 #include "chrome/browser/extensions/extension_infobar_delegate.h"
 #include "chrome/browser/extensions/extension_tab_util.h"
-#include "chrome/browser/extensions/extension_tabs_module_constants.h"
+#include "chrome/browser/extensions/window_controller.h"
 #include "chrome/browser/infobars/infobar_tab_helper.h"
-#include "chrome/browser/tab_contents/confirm_infobar_delegate.h"
 #include "chrome/browser/ui/browser.h"
-#include "chrome/browser/ui/tab_contents/tab_contents_wrapper.h"
 #include "chrome/common/extensions/extension.h"
-#include "chrome/common/extensions/extension_error_utils.h"
 #include "chrome/common/url_constants.h"
 #include "content/public/browser/web_contents.h"
+#include "extensions/common/error_utils.h"
 #include "grit/generated_resources.h"
+
+using extensions::Extension;
 
 namespace {
 
@@ -50,27 +52,30 @@ bool ShowInfoBarFunction::RunImpl() {
   GURL url = extension->GetResourceURL(extension->url(), html_path);
 
   Browser* browser = NULL;
-  TabContentsWrapper* tab_contents = NULL;
+  content::WebContents* web_contents = NULL;
   if (!ExtensionTabUtil::GetTabById(
       tab_id,
       profile(),
       include_incognito(),
       &browser,
       NULL,
-      &tab_contents,
+      &web_contents,
       NULL)) {
-    error_ = ExtensionErrorUtils::FormatErrorMessage(
-        extension_tabs_module_constants::kTabNotFoundError,
+    error_ = extensions::ErrorUtils::FormatErrorMessage(
+        extensions::tabs_constants::kTabNotFoundError,
         base::IntToString(tab_id));
     return false;
   }
 
-  tab_contents->infobar_tab_helper()->AddInfoBar(
-      new ExtensionInfoBarDelegate(browser, tab_contents->infobar_tab_helper(),
+  InfoBarTabHelper* infobar_tab_helper =
+      InfoBarTabHelper::FromWebContents(web_contents);
+  infobar_tab_helper->AddInfoBar(
+      new ExtensionInfoBarDelegate(browser, infobar_tab_helper,
                                    GetExtension(), url, height));
 
   // TODO(finnur): Return the actual DOMWindow object. Bug 26463.
-  result_.reset(ExtensionTabUtil::CreateWindowValue(browser, false));
+  DCHECK(browser->extension_window_controller());
+  SetResult(browser->extension_window_controller()->CreateWindowValue());
 
   return true;
 }

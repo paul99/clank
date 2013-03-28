@@ -1,4 +1,4 @@
-// Copyright (c) 2011 The Chromium Authors. All rights reserved.
+// Copyright (c) 2012 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -17,17 +17,20 @@
 #include "base/threading/thread.h"
 #include "base/version.h"
 #include "chrome/browser/extensions/extension_service.h"
+#include "chrome/browser/extensions/extension_system.h"
 #include "chrome/browser/profiles/profile.h"
 #include "chrome/common/chrome_notification_types.h"
 #include "chrome/common/extensions/extension.h"
 #include "chrome/common/extensions/extension_file_util.h"
-#include "chrome/common/extensions/extension_message_bundle.h"
 #include "chrome/common/extensions/extension_resource.h"
 #include "chrome/common/extensions/extension_set.h"
+#include "chrome/common/extensions/message_bundle.h"
 #include "content/public/browser/notification_service.h"
 #include "content/public/browser/render_process_host.h"
 
 using content::BrowserThread;
+
+namespace extensions {
 
 // Helper function to parse greasesmonkey headers
 static bool GetDeclarationValue(const base::StringPiece& line,
@@ -107,9 +110,9 @@ bool UserScriptMaster::ScriptReloader::ParseMetadataHeader(
       } else if (GetDeclarationValue(line, kNameDeclaration, &value)) {
         script->set_name(value);
       } else if (GetDeclarationValue(line, kVersionDeclaration, &value)) {
-        scoped_ptr<Version> version(Version::GetVersionFromString(value));
-        if (version.get())
-          script->set_version(version->GetString());
+        Version version(value);
+        if (version.IsValid())
+          script->set_version(version.GetString());
       } else if (GetDeclarationValue(line, kDescriptionDeclaration, &value)) {
         script->set_description(value);
       } else if (GetDeclarationValue(line, kMatchDeclaration, &value)) {
@@ -161,6 +164,8 @@ void UserScriptMaster::ScriptReloader::StartLoad(
           &UserScriptMaster::ScriptReloader::RunLoad, this, user_scripts));
 }
 
+UserScriptMaster::ScriptReloader::~ScriptReloader() {}
+
 void UserScriptMaster::ScriptReloader::NotifyMaster(
     base::SharedMemory* memory) {
   // The master went away, so these new scripts aren't useful anymore.
@@ -178,7 +183,8 @@ static bool LoadScriptContent(UserScript::File* script_file,
                               const SubstitutionMap* localization_messages) {
   std::string content;
   const FilePath& path = ExtensionResource::GetFilePath(
-      script_file->extension_root(), script_file->relative_path());
+      script_file->extension_root(), script_file->relative_path(),
+      ExtensionResource::SYMLINKS_MUST_RESOLVE_WITHIN_ROOT);
   if (path.empty()) {
     LOG(WARNING) << "Failed to get file path to "
                  << script_file->relative_path().value() << " from "
@@ -193,7 +199,7 @@ static bool LoadScriptContent(UserScript::File* script_file,
   // Localize the content.
   if (localization_messages) {
     std::string error;
-    ExtensionMessageBundle::ReplaceMessagesWithExternalDictionary(
+    MessageBundle::ReplaceMessagesWithExternalDictionary(
         *localization_messages, &content, &error);
     if (!error.empty()) {
       LOG(WARNING) << "Failed to replace messages in script: " << error;
@@ -236,7 +242,7 @@ SubstitutionMap* UserScriptMaster::ScriptReloader::GetLocalizationMessages(
     return NULL;
   }
 
-  return extension_file_util::LoadExtensionMessageBundleSubstitutionMap(
+  return extension_file_util::LoadMessageBundleSubstitutionMap(
       extensions_info_[extension_id].first,
       extension_id,
       extensions_info_[extension_id].second);
@@ -245,7 +251,7 @@ SubstitutionMap* UserScriptMaster::ScriptReloader::GetLocalizationMessages(
 // Pickle user scripts and return pointer to the shared memory.
 static base::SharedMemory* Serialize(const UserScriptList& scripts) {
   Pickle pickle;
-  pickle.WriteSize(scripts.size());
+  pickle.WriteUInt64(scripts.size());
   for (size_t i = 0; i < scripts.size(); i++) {
     const UserScript& script = scripts[i];
     // TODO(aa): This can be replaced by sending content script metadata to
@@ -354,8 +360,8 @@ void UserScriptMaster::Observe(int type,
       extensions_info_[extension->id()] =
           ExtensionSet::ExtensionPathAndDefaultLocale(
               extension->path(), extension->default_locale());
-      bool incognito_enabled = profile_->GetExtensionService()->
-          IsIncognitoEnabled(extension->id());
+      bool incognito_enabled = extensions::ExtensionSystem::Get(profile_)->
+          extension_service()->IsIncognitoEnabled(extension->id());
       const UserScriptList& scripts = extension->content_scripts();
       for (UserScriptList::const_iterator iter = scripts.begin();
            iter != scripts.end(); ++iter) {
@@ -436,3 +442,5 @@ void UserScriptMaster::SendUpdate(content::RenderProcessHost* process,
   if (base::SharedMemory::IsHandleValid(handle_for_process))
     process->Send(new ExtensionMsg_UpdateUserScripts(handle_for_process));
 }
+
+}  // namespace extensions

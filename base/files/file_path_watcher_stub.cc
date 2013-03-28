@@ -1,4 +1,4 @@
-// Copyright (c) 2011 The Chromium Authors. All rights reserved.
+// Copyright (c) 2012 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -15,6 +15,7 @@ namespace {
 class FilePathWatcherImpl : public FilePathWatcher::PlatformDelegate {
  public:
   virtual bool Watch(const FilePath& path,
+                     bool recursive,
                      FilePathWatcher::Delegate* delegate) OVERRIDE {
     return false;
   }
@@ -22,6 +23,9 @@ class FilePathWatcherImpl : public FilePathWatcher::PlatformDelegate {
   virtual void Cancel() OVERRIDE {}
 
   virtual void CancelOnMessageLoopThread() OVERRIDE {}
+
+ protected:
+  virtual ~FilePathWatcherImpl() {}
 };
 
 }  // namespace

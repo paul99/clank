@@ -1,10 +1,9 @@
-// Copyright (c) 2011 The Chromium Authors. All rights reserved.
+// Copyright (c) 2012 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
 #ifndef CHROME_BROWSER_HISTORY_EXPIRE_HISTORY_BACKEND_H_
 #define CHROME_BROWSER_HISTORY_EXPIRE_HISTORY_BACKEND_H_
-#pragma once
 
 #include <queue>
 #include <set>
@@ -86,9 +85,14 @@ class ExpireHistoryBackend {
   void DeleteURLs(const std::vector<GURL>& url);
 
   // Removes all visits to restrict_urls (or all URLs if empty) in the given
-  // time range, updating the URLs accordingly,
+  // time range, updating the URLs accordingly.
   void ExpireHistoryBetween(const std::set<GURL>& restrict_urls,
                             base::Time begin_time, base::Time end_time);
+
+  // Removes all visits to all URLs with the given times, updating the
+  // URLs accordingly.  |times| must be in reverse chronological order
+  // and not contain any duplicates.
+  void ExpireHistoryForTimes(const std::vector<base::Time>& times);
 
   // Removes the given list of visits, updating the URLs accordingly (similar to
   // ExpireHistoryBetween(), but affecting a specific set of visits).
@@ -159,7 +163,7 @@ class ExpireHistoryBackend {
 
   // Deletes all the URLs in the given vector and handles their dependencies.
   // This will delete starred URLs
-  void DeleteURLs(const std::vector<URLRow>& urls,
+  void DeleteURLs(const URLRows& urls,
                   DeleteDependencies* dependencies);
 
   // Expiration involves removing visits, then propagating the visits out from
@@ -195,8 +199,18 @@ class ExpireHistoryBackend {
   // care about favicons so much, so don't want to stop everything if it fails).
   void DeleteFaviconsIfPossible(const std::set<FaviconID>& favicon_id);
 
+  // Enum representing what type of action resulted in the history DB deletion.
+  enum DeletionType {
+    // User initiated the deletion from the History UI.
+    DELETION_USER_INITIATED,
+    // History data was automatically archived due to being more than 90 days
+    // old.
+    DELETION_ARCHIVED
+  };
+
   // Broadcast the URL deleted notification.
-  void BroadcastDeleteNotifications(DeleteDependencies* dependencies);
+  void BroadcastDeleteNotifications(DeleteDependencies* dependencies,
+                                    DeletionType type);
 
   // Schedules a call to DoArchiveIteration.
   void ScheduleArchive();

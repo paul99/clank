@@ -3,41 +3,35 @@
 // found in the LICENSE file.
 
 #include "gpu/command_buffer/service/buffer_manager.h"
+#include <limits>
 #include "base/debug/trace_event.h"
 #include "base/logging.h"
 #include "gpu/command_buffer/common/gles2_cmd_utils.h"
 #include "gpu/command_buffer/service/gles2_cmd_decoder.h"
+#include "gpu/command_buffer/service/memory_tracking.h"
 
 namespace gpu {
 namespace gles2 {
 
-BufferManager::BufferManager()
-    : allow_buffers_on_multiple_targets_(false),
-      mem_represented_(0),
-      last_reported_mem_represented_(1),
+BufferManager::BufferManager(MemoryTracker* memory_tracker)
+    : memory_tracker_(
+          new MemoryTypeTracker(memory_tracker, MemoryTracker::kManaged)),
+      allow_buffers_on_multiple_targets_(false),
       buffer_info_count_(0),
       have_context_(true) {
-  UpdateMemRepresented();
+  memory_tracker_->UpdateMemRepresented();
 }
 
 BufferManager::~BufferManager() {
   DCHECK(buffer_infos_.empty());
-  DCHECK_EQ(buffer_info_count_, 0u);
+  CHECK_EQ(buffer_info_count_, 0u);
 }
 
 void BufferManager::Destroy(bool have_context) {
   have_context_ = have_context;
   buffer_infos_.clear();
-  DCHECK_EQ(0u, mem_represented_);
-  UpdateMemRepresented();
-}
-
-void BufferManager::UpdateMemRepresented() {
-  if (mem_represented_ != last_reported_mem_represented_) {
-    last_reported_mem_represented_ = mem_represented_;
-    TRACE_COUNTER_ID1(
-        "BufferManager", "BufferMemory", this, mem_represented_);
-  }
+  DCHECK_EQ(0u, memory_tracker_->GetMemRepresented());
+  memory_tracker_->UpdateMemRepresented();
 }
 
 void BufferManager::CreateBufferInfo(GLuint client_id, GLuint service_id) {
@@ -67,9 +61,9 @@ void BufferManager::StartTracking(BufferManager::BufferInfo* /* buffer */) {
 }
 
 void BufferManager::StopTracking(BufferManager::BufferInfo* buffer) {
-  mem_represented_ -= buffer->size();
+  memory_tracker_->TrackMemFree(buffer->size());
   --buffer_info_count_;
-  UpdateMemRepresented();
+  memory_tracker_->UpdateMemRepresented();
 }
 
 BufferManager::BufferInfo::BufferInfo(BufferManager* manager, GLuint service_id)
@@ -108,9 +102,18 @@ void BufferManager::BufferInfo::SetInfo(
   }
 }
 
+bool BufferManager::BufferInfo::CheckRange(
+    GLintptr offset, GLsizeiptr size) const {
+  int32 end = 0;
+  return offset >= 0 && size >= 0 &&
+         offset <= std::numeric_limits<int32>::max() &&
+         size <= std::numeric_limits<int32>::max() &&
+         SafeAddInt32(offset, size, &end) && end <= size_;
+}
+
 bool BufferManager::BufferInfo::SetRange(
     GLintptr offset, GLsizeiptr size, const GLvoid * data) {
-  if (offset < 0 || offset + size < offset || offset + size > size_) {
+  if (!CheckRange(offset, size)) {
     return false;
   }
   if (shadowed_) {
@@ -125,7 +128,7 @@ const void* BufferManager::BufferInfo::GetRange(
   if (!shadowed_) {
     return NULL;
   }
-  if (offset < 0 || offset + size < offset || offset + size > size_) {
+  if (!CheckRange(offset, size)) {
     return NULL;
   }
   return shadow_.get() + offset;
@@ -220,12 +223,13 @@ bool BufferManager::GetClientId(GLuint service_id, GLuint* client_id) const {
 void BufferManager::SetInfo(
     BufferManager::BufferInfo* info, GLsizeiptr size, GLenum usage) {
   DCHECK(info);
-  mem_represented_ -= info->size();
+  memory_tracker_->TrackMemFree(info->size());
   info->SetInfo(size,
                 usage,
                 info->target() == GL_ELEMENT_ARRAY_BUFFER ||
                 allow_buffers_on_multiple_targets_);
-  mem_represented_ += info->size();
+  memory_tracker_->TrackMemAlloc(info->size());
+  memory_tracker_->UpdateMemRepresented();
 }
 
 bool BufferManager::SetTarget(BufferManager::BufferInfo* info, GLenum target) {
@@ -242,3 +246,5 @@ bool BufferManager::SetTarget(BufferManager::BufferInfo* info, GLenum target) {
 
 }  // namespace gles2
 }  // namespace gpu
+
+

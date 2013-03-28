@@ -4,7 +4,6 @@
 
 #ifndef CONTENT_SHELL_SHELL_URL_REQUEST_CONTEXT_GETTER_H_
 #define CONTENT_SHELL_SHELL_URL_REQUEST_CONTEXT_GETTER_H_
-#pragma once
 
 #include "base/compiler_specific.h"
 #include "base/file_path.h"
@@ -16,6 +15,8 @@ class MessageLoop;
 
 namespace net {
 class HostResolver;
+class MappedHostResolver;
+class NetworkDelegate;
 class ProxyConfigService;
 class URLRequestContextStorage;
 }
@@ -25,28 +26,31 @@ namespace content {
 class ShellURLRequestContextGetter : public net::URLRequestContextGetter {
  public:
   ShellURLRequestContextGetter(
+      bool ignore_certificate_errors,
       const FilePath& base_path,
       MessageLoop* io_loop,
       MessageLoop* file_loop);
-  virtual ~ShellURLRequestContextGetter();
 
   // net::URLRequestContextGetter implementation.
   virtual net::URLRequestContext* GetURLRequestContext() OVERRIDE;
-  virtual net::CookieStore* DONTUSEME_GetCookieStore() OVERRIDE;
-  virtual scoped_refptr<base::MessageLoopProxy>
-      GetIOMessageLoopProxy() const OVERRIDE;
+  virtual scoped_refptr<base::SingleThreadTaskRunner>
+      GetNetworkTaskRunner() const OVERRIDE;
 
   net::HostResolver* host_resolver();
 
+ protected:
+  virtual ~ShellURLRequestContextGetter();
+
  private:
+  bool ignore_certificate_errors_;
   FilePath base_path_;
   MessageLoop* io_loop_;
   MessageLoop* file_loop_;
 
   scoped_ptr<net::ProxyConfigService> proxy_config_service_;
-
-  scoped_refptr<net::URLRequestContext> url_request_context_;
+  scoped_ptr<net::NetworkDelegate> network_delegate_;
   scoped_ptr<net::URLRequestContextStorage> storage_;
+  scoped_ptr<net::URLRequestContext> url_request_context_;
 
   DISALLOW_COPY_AND_ASSIGN(ShellURLRequestContextGetter);
 };

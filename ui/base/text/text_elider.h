@@ -6,7 +6,6 @@
 
 #ifndef UI_BASE_TEXT_TEXT_ELIDER_H_
 #define UI_BASE_TEXT_TEXT_ELIDER_H_
-#pragma once
 
 #include <string>
 #include <vector>
@@ -25,13 +24,28 @@ namespace ui {
 
 UI_EXPORT extern const char kEllipsis[];
 
+// Elides a well-formed email address (e.g. username@domain.com) to fit into
+// |available_pixel_width| using the specified |font|.
+// This function guarantees that the string returned will contain at least one
+// character, other than the ellipses, on either side of the '@'. If it is
+// impossible to achieve these requirements: only an ellipsis will be returned.
+// If possible: this elides only the username portion of the |email|. Otherwise,
+// the domain is elided in the middle so that it splits the available width
+// equally with the elided username (should the username be short enough that it
+// doesn't need half the available width: the elided domain will occupy that
+// extra width).
+UI_EXPORT string16 ElideEmail(const string16& email,
+                              const gfx::Font& font,
+                              int available_pixel_width);
+
 // This function takes a GURL object and elides it. It returns a string
 // which composed of parts from subdomain, domain, path, filename and query.
 // A "..." is added automatically at the end if the elided string is bigger
-// than the available pixel width. For available pixel width = 0, empty
-// string is returned. |languages| is a comma separted list of ISO 639
-// language codes and is used to determine what characters are understood
-// by a user. It should come from |prefs::kAcceptLanguages|.
+// than the |available_pixel_width|. For |available_pixel_width| == 0, a
+// formatted, but un-elided, string is returned. |languages| is a comma
+// separated list of ISO 639 language codes and is used to determine what
+// characters are understood by a user. It should come from
+// |prefs::kAcceptLanguages|.
 //
 // Note: in RTL locales, if the URL returned by this function is going to be
 // displayed in the UI, then it is likely that the string needs to be marked
@@ -153,18 +167,28 @@ enum WordWrapBehavior {
   WRAP_LONG_WORDS,
 };
 
+// Indicates whether the |available_pixel_width| by |available_pixel_height|
+// rectangle passed to |ElideRectangleText()| had insufficient space to
+// accommodate the given |text|, leading to elision or truncation.
+enum ReformattingResultFlags {
+  INSUFFICIENT_SPACE_HORIZONTAL = 1 << 0,
+  INSUFFICIENT_SPACE_VERTICAL = 1 << 1,
+};
+
 // Reformats |text| into output vector |lines| so that the resulting text fits
 // into an |available_pixel_width| by |available_pixel_height| rectangle with
 // the specified |font|. Input newlines are respected, but lines that are too
 // long are broken into pieces. For words that are too wide to fit on a single
 // line, the wrapping behavior can be specified with the |wrap_behavior| param.
-// Returns |true| if the input had to be truncated (and not just reformatted).
-UI_EXPORT bool ElideRectangleText(const string16& text,
-                                  const gfx::Font& font,
-                                  int available_pixel_width,
-                                  int available_pixel_height,
-                                  WordWrapBehavior wrap_behavior,
-                                  std::vector<string16>* lines);
+// Returns a combination of |ReformattingResultFlags| that indicate whether the
+// given rectangle had insufficient space to accommodate |texŧ|, leading to
+// elision or truncation (and not just reformatting).
+UI_EXPORT int ElideRectangleText(const string16& text,
+                                 const gfx::Font& font,
+                                 int available_pixel_width,
+                                 int available_pixel_height,
+                                 WordWrapBehavior wrap_behavior,
+                                 std::vector<string16>* lines);
 
 // Truncates the string to length characters. This breaks the string at
 // the first word break before length, adding the horizontal ellipsis

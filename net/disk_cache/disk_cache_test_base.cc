@@ -1,4 +1,4 @@
-// Copyright (c) 2011 The Chromium Authors. All rights reserved.
+// Copyright (c) 2012 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -14,7 +14,8 @@
 #include "net/disk_cache/mem_backend_impl.h"
 
 DiskCacheTest::DiskCacheTest() {
-  cache_path_ = GetCacheFilePath();
+  CHECK(temp_dir_.CreateUniqueTempDir());
+  cache_path_ = temp_dir_.path();
   if (!MessageLoop::current())
     message_loop_.reset(new MessageLoopForIO());
 }
@@ -40,7 +41,7 @@ bool DiskCacheTest::CleanupCacheDir() {
 }
 
 void DiskCacheTest::TearDown() {
-  MessageLoop::current()->RunAllPending();
+  MessageLoop::current()->RunUntilIdle();
 }
 
 DiskCacheTestWithCache::DiskCacheTestWithCache()
@@ -213,8 +214,15 @@ void DiskCacheTestWithCache::TrimDeletedListForTest(bool empty) {
                             empty));
 }
 
+void DiskCacheTestWithCache::AddDelay() {
+  base::Time initial = base::Time::Now();
+  while (base::Time::Now() <= initial) {
+    base::PlatformThread::Sleep(base::TimeDelta::FromMilliseconds(1));
+  };
+}
+
 void DiskCacheTestWithCache::TearDown() {
-  MessageLoop::current()->RunAllPending();
+  MessageLoop::current()->RunUntilIdle();
   delete cache_;
   if (cache_thread_.IsRunning())
     cache_thread_.Stop();

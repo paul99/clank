@@ -4,11 +4,10 @@
 
 #ifndef UI_BASE_IME_INPUT_METHOD_BASE_H_
 #define UI_BASE_IME_INPUT_METHOD_BASE_H_
-#pragma once
 
 #include "base/basictypes.h"
 #include "base/compiler_specific.h"
-#include "ui/base/events.h"
+#include "ui/base/events/event_constants.h"
 #include "ui/base/ime/input_method.h"
 #include "ui/base/ui_export.h"
 
@@ -22,7 +21,7 @@ class TextInputClient;
 
 // A helper class providing functionalities shared among ui::InputMethod
 // implementations.
-class UI_EXPORT InputMethodBase : public InputMethod {
+class UI_EXPORT InputMethodBase : NON_EXPORTED_BASE(public InputMethod) {
  public:
   InputMethodBase();
   virtual ~InputMethodBase();

@@ -1,4 +1,4 @@
-// Copyright (c) 2011 The Chromium Authors. All rights reserved.
+// Copyright (c) 2012 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -18,6 +18,8 @@ class StreamSocket;
 namespace remoting {
 namespace protocol {
 
+struct ChannelConfig;
+class ChannelFactory;
 class Session;
 
 // Base class for channel message dispatchers. It's responsible for
@@ -34,7 +36,9 @@ class ChannelDispatcherBase {
 
   // Creates and connects the channel in the specified
   // |session|. Caller retains ownership of the Session.
-  void Init(Session* session, const InitializedCallback& callback);
+  void Init(Session* session,
+            const ChannelConfig& config,
+            const InitializedCallback& callback);
 
   // Returns true if the channel is currently connected.
   bool is_connected() { return channel() != NULL; }
@@ -49,10 +53,10 @@ class ChannelDispatcherBase {
   virtual void OnInitialized() = 0;
 
  private:
-  void OnChannelReady(net::StreamSocket* socket);
+  void OnChannelReady(scoped_ptr<net::StreamSocket> socket);
 
   std::string channel_name_;
-  Session* session_;
+  ChannelFactory* channel_factory_;
   InitializedCallback initialized_callback_;
   scoped_ptr<net::StreamSocket> channel_;
 

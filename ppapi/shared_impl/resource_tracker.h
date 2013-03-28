@@ -1,4 +1,4 @@
-// Copyright (c) 2011 The Chromium Authors. All rights reserved.
+// Copyright (c) 2012 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -10,6 +10,9 @@
 #include "base/basictypes.h"
 #include "base/hash_tables.h"
 #include "base/memory/linked_ptr.h"
+#include "base/memory/weak_ptr.h"
+#include "base/threading/thread_checker.h"
+#include "base/threading/thread_checker_impl.h"
 #include "ppapi/c/pp_instance.h"
 #include "ppapi/c/pp_resource.h"
 #include "ppapi/shared_impl/ppapi_shared_export.h"
@@ -29,6 +32,9 @@ class PPAPI_SHARED_EXPORT ResourceTracker {
 
   void AddRefResource(PP_Resource res);
   void ReleaseResource(PP_Resource res);
+
+  // Releases a reference on the given resource once the message loop returns.
+  void ReleaseResourceSoon(PP_Resource res);
 
   // Notifies the tracker that a new instance has been created. This must be
   // called before creating any resources associated with the instance.
@@ -59,11 +65,11 @@ class PPAPI_SHARED_EXPORT ResourceTracker {
   // the given resource. It's called from the resource destructor.
   virtual void RemoveResource(Resource* object);
 
-  // Calls LastPluginRefWasDeleted on the given resource object and cancels
-  // pending callbacks for the resource.
+ private:
+  // Calls NotifyLastPluginRefWasDeleted on the given resource object and
+  // cancels pending callbacks for the resource.
   void LastPluginRefWasDeleted(Resource* object);
 
- private:
   typedef std::set<PP_Resource> ResourceSet;
 
   struct InstanceData {
@@ -89,6 +95,22 @@ class PPAPI_SHARED_EXPORT ResourceTracker {
   ResourceMap live_resources_;
 
   int32 last_resource_value_;
+
+  base::WeakPtrFactory<ResourceTracker> weak_ptr_factory_;
+
+  // TODO(raymes): We won't need to do thread checks once pepper calls are
+  // allowed off of the main thread.
+  // See http://code.google.com/p/chromium/issues/detail?id=92909.
+#ifdef ENABLE_PEPPER_THREADING
+  base::ThreadCheckerDoNothing thread_checker_;
+#else
+  // TODO(raymes): We've seen plugins (Flash) creating resources from random
+  // threads. Let's always crash for now in this case. Once we have a handle
+  // over how common this is, we can change ThreadCheckerImpl->ThreadChecker
+  // so that we only crash in debug mode. See
+  // https://code.google.com/p/chromium/issues/detail?id=146415.
+  base::ThreadCheckerImpl thread_checker_;
+#endif
 
   DISALLOW_COPY_AND_ASSIGN(ResourceTracker);
 };

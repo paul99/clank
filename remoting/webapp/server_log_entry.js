@@ -60,8 +60,10 @@ remoting.ServerLogEntry.getValueForSessionState = function(state) {
       return 'connected';
     case remoting.ClientSession.State.CLOSED:
       return 'closed';
-    case remoting.ClientSession.State.CONNECTION_FAILED:
+    case remoting.ClientSession.State.FAILED:
       return 'connection-failed';
+    case remoting.ClientSession.State.CONNECTION_DROPPED:
+      return 'connection-dropped';
     default:
       return 'undefined-' + state;
   }
@@ -88,6 +90,8 @@ remoting.ServerLogEntry.getValueForConnectionError =
       return 'incompatible-protocol';
     case remoting.ClientSession.ConnectionError.NETWORK_FAILURE:
       return 'network-failure';
+    case remoting.ClientSession.ConnectionError.UNKNOWN:
+      return 'unknown';
     default:
       return 'unknown-' + connectionError;
   }
@@ -185,7 +189,7 @@ remoting.ServerLogEntry.prototype.toDebugLog = function(indentLevel) {
   for (var key in this.dict) {
     fields.push(key + ': ' + this.dict[key]);
   }
-  remoting.debug.logIndent(indentLevel, fields.join(', '));
+  console.log(Array(indentLevel+1).join("  ") + fields.join(', '));
 };
 
 /**

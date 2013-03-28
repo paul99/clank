@@ -1,4 +1,4 @@
-// Copyright (c) 2011 The Chromium Authors. All rights reserved.
+// Copyright (c) 2012 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -13,6 +13,7 @@
 #include "ppapi/proxy/ppapi_messages.h"
 #include "ppapi/proxy/serialized_var.h"
 #include "ppapi/shared_impl/ppapi_globals.h"
+#include "ppapi/shared_impl/proxy_lock.h"
 #include "ppapi/shared_impl/var_tracker.h"
 
 namespace ppapi {
@@ -20,6 +21,7 @@ namespace proxy {
 
 namespace {
 
+#if !defined(OS_NACL)
 void HandleMessage(PP_Instance instance, PP_Var message_data) {
   HostDispatcher* dispatcher = HostDispatcher::GetForInstance(instance);
   if (!dispatcher || (message_data.type == PP_VARTYPE_OBJECT)) {
@@ -38,6 +40,10 @@ void HandleMessage(PP_Instance instance, PP_Var message_data) {
 static const PPP_Messaging messaging_interface = {
   &HandleMessage
 };
+#else
+// The NaCl plugin doesn't need the host side interface - stub it out.
+static const PPP_Messaging messaging_interface = {};
+#endif  // !defined(OS_NACL)
 
 InterfaceProxy* CreateMessagingProxy(Dispatcher* dispatcher) {
   return new PPP_Messaging_Proxy(dispatcher);
@@ -70,6 +76,9 @@ const InterfaceProxy::Info* PPP_Messaging_Proxy::GetInfo() {
 }
 
 bool PPP_Messaging_Proxy::OnMessageReceived(const IPC::Message& msg) {
+  if (!dispatcher()->IsPlugin())
+    return false;
+
   bool handled = true;
   IPC_BEGIN_MESSAGE_MAP(PPP_Messaging_Proxy, msg)
     IPC_MESSAGE_HANDLER(PpapiMsg_PPPMessaging_HandleMessage,
@@ -85,7 +94,9 @@ void PPP_Messaging_Proxy::OnMsgHandleMessage(
   // SerializedVarReceiveInput will decrement the reference count, but we want
   // to give the recipient a reference.
   PpapiGlobals::Get()->GetVarTracker()->AddRefVar(received_var);
-  ppp_messaging_impl_->HandleMessage(instance, received_var);
+  CallWhileUnlocked(ppp_messaging_impl_->HandleMessage,
+                    instance,
+                    received_var);
 }
 
 }  // namespace proxy

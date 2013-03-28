@@ -1,28 +1,29 @@
-// Copyright (c) 2011 The Chromium Authors. All rights reserved.
+// Copyright (c) 2012 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
 #ifndef CHROME_BROWSER_HISTORY_TOP_SITES_H_
 #define CHROME_BROWSER_HISTORY_TOP_SITES_H_
-#pragma once
 
 #include <list>
 #include <set>
 #include <string>
 #include <utility>
+#include <vector>
 
 #include "base/basictypes.h"
 #include "base/callback.h"
 #include "base/gtest_prod_util.h"
 #include "base/memory/ref_counted.h"
-#include "base/memory/ref_counted_memory.h"
 #include "base/synchronization/lock.h"
 #include "base/time.h"
 #include "base/timer.h"
-#include "chrome/browser/cancelable_request.h"
+#include "chrome/browser/common/cancelable_request.h"
 #include "chrome/browser/history/history.h"
 #include "chrome/browser/history/history_types.h"
 #include "chrome/browser/history/page_usage_data.h"
+#include "chrome/browser/history/top_sites_backend.h"
+#include "chrome/common/cancelable_task_tracker.h"
 #include "chrome/common/thumbnail_score.h"
 #include "googleurl/src/gurl.h"
 #include "third_party/skia/include/core/SkColor.h"
@@ -32,13 +33,13 @@ class FilePath;
 class Profile;
 
 namespace base {
-class DictionaryValue;
+class RefCountedBytes;
+class RefCountedMemory;
 }
 
 namespace history {
 
 class TopSitesCache;
-class TopSitesBackend;
 class TopSitesTest;
 
 // Stores the data for the top "most visited" sites. This includes a cache of
@@ -51,8 +52,7 @@ class TopSitesTest;
 // db using TopSitesBackend.
 class TopSites
     : public base::RefCountedThreadSafe<TopSites>,
-      public content::NotificationObserver,
-      public CancelableRequestProvider {
+      public content::NotificationObserver {
  public:
   explicit TopSites(Profile* profile);
 
@@ -63,26 +63,26 @@ class TopSites
   // was updated. False means either the URL wasn't known to us, or we felt
   // that our current thumbnail was superior to the given one.
   bool SetPageThumbnail(const GURL& url,
-                        gfx::Image* thumbnail,
+                        const gfx::Image& thumbnail,
                         const ThumbnailScore& score);
 
-  // Callback for GetMostVisitedURLs.
-  typedef base::Callback<void(const MostVisitedURLList&)> GetTopSitesCallback;
-  typedef std::set<scoped_refptr<CancelableRequest<GetTopSitesCallback> > >
-      PendingCallbackSet;
+  typedef base::Callback<void(const MostVisitedURLList&)>
+      GetMostVisitedURLsCallback;
+  typedef std::vector<GetMostVisitedURLsCallback> PendingCallbacks;
 
-  // Returns a list of most visited URLs via a callback.
-  // This may be invoked on any thread.
-  // NOTE: the callback is called immediately if we have the data cached.
-  void GetMostVisitedURLs(CancelableRequestConsumer* consumer,
-                          const GetTopSitesCallback& callback);
+  // Returns a list of most visited URLs via a callback. This may be invoked on
+  // any thread.
+  // NOTE: the callback is called immediately if we have the data cached. If
+  // data is not available yet, callback will later be posted to the thread
+  // called this function.
+  void GetMostVisitedURLs(const GetMostVisitedURLsCallback& callback);
 
   // Get a thumbnail for a given page. Returns true iff we have the thumbnail.
   // This may be invoked on any thread.
   // As this method may be invoked on any thread the ref count needs to be
   // incremented before this method returns, so this takes a scoped_refptr*.
   bool GetPageThumbnail(const GURL& url,
-                        scoped_refptr<RefCountedMemory>* bytes);
+                        scoped_refptr<base::RefCountedMemory>* bytes);
 
   // Get a thumbnail score for a given page. Returns true iff we have the
   // thumbnail score.  This may be invoked on any thread. The score will
@@ -126,21 +126,6 @@ class TopSites
   // Clear the blacklist.
   void ClearBlacklistedURLs();
 
-  // Pinned URLs
-
-  // Pin a URL at |index|.
-  void AddPinnedURL(const GURL& url, size_t index);
-
-  // Returns true if a URL is pinned.
-  bool IsURLPinned(const GURL& url);
-
-  // Unpin a URL.
-  void RemovePinnedURL(const GURL& url);
-
-  // Return a URL pinned at |index| via |out|. Returns true if there
-  // is a URL pinned at |index|.
-  bool GetPinnedURLAtIndex(size_t index, GURL* out);
-
   // Shuts down top sites.
   void Shutdown();
 
@@ -173,7 +158,7 @@ class TopSites
   virtual bool IsFull();
 
   // Returns the set of prepopulate pages.
-  static MostVisitedURLList GetPrepopulatePages();
+  MostVisitedURLList GetPrepopulatePages();
 
   struct PrepopulatedPage {
     // The string resource for the url.
@@ -231,19 +216,19 @@ class TopSites
   // reading last known top sites from the DB.
   // Returns true if the thumbnail was set, false if the existing one is better.
   bool SetPageThumbnailNoDB(const GURL& url,
-                            const RefCountedBytes* thumbnail_data,
+                            const base::RefCountedBytes* thumbnail_data,
                             const ThumbnailScore& score);
 
   // A version of SetPageThumbnail that takes RefCountedBytes as
   // returned by HistoryService.
   bool SetPageThumbnailEncoded(const GURL& url,
-                               const RefCountedBytes* thumbnail,
+                               const base::RefCountedBytes* thumbnail,
                                const ThumbnailScore& score);
 
   // Encodes the bitmap to bytes for storage to the db. Returns true if the
   // bitmap was successfully encoded.
-  static bool EncodeBitmap(gfx::Image* bitmap,
-                           scoped_refptr<RefCountedBytes>* bytes);
+  static bool EncodeBitmap(const gfx::Image& bitmap,
+                           scoped_refptr<base::RefCountedBytes>* bytes);
 
   // Removes the cached thumbnail for url. Does nothing if |url| if not cached
   // in |temp_images_|.
@@ -251,7 +236,7 @@ class TopSites
 
   // Add a thumbnail for an unknown url. See temp_thumbnails_map_.
   void AddTemporaryThumbnail(const GURL& url,
-                             const RefCountedBytes* thumbnail,
+                             const base::RefCountedBytes* thumbnail,
                              const ThumbnailScore& score);
 
   // Called by our timer. Starts the query for the most visited sites.
@@ -265,16 +250,10 @@ class TopSites
 
   // Add prepopulated pages: 'welcome to Chrome' and themes gallery to |urls|.
   // Returns true if any pages were added.
-  static bool AddPrepopulatedPages(MostVisitedURLList* urls);
+  bool AddPrepopulatedPages(MostVisitedURLList* urls);
 
-  // Convert pinned_urls_ dictionary to the new format. Use URLs as
-  // dictionary keys.
-  void MigratePinnedURLs();
-
-  // Takes |urls|, produces it's copy in |out| after removing
-  // blacklisted URLs and reordering pinned URLs.
-  void ApplyBlacklistAndPinnedURLs(const MostVisitedURLList& urls,
-                                   MostVisitedURLList* out);
+  // Takes |urls|, produces it's copy in |out| after removing blacklisted URLs.
+  void ApplyBlacklist(const MostVisitedURLList& urls, MostVisitedURLList* out);
 
   // Converts a url into a canonical string representation.
   std::string GetURLString(const GURL& url);
@@ -285,12 +264,6 @@ class TopSites
   // Returns the delay until the next update of history is needed.
   // Uses num_urls_changed
   base::TimeDelta GetUpdateDelay();
-
-  // Executes all of the callbacks in |pending_callbacks|. This is used after
-  // we finish loading if any requests came in before we loaded.
-  static void ProcessPendingCallbacks(
-      const PendingCallbackSet& pending_callbacks,
-      const MostVisitedURLList& urls);
 
   // Implementation of content::NotificationObserver.
   virtual void Observe(int type,
@@ -319,13 +292,12 @@ class TopSites
 
   // Callback after TopSitesBackend has finished migration. This tells history
   // to finish it's side of migration (nuking thumbnails on disk).
-  void OnHistoryMigrationWrittenToDisk(
-      CancelableRequestProvider::Handle handle);
+  void OnHistoryMigrationWrittenToDisk();
 
   // Callback from TopSites with the top sites/thumbnails.
-  void OnGotMostVisitedThumbnails(CancelableRequestProvider::Handle handle,
-                                  scoped_refptr<MostVisitedThumbnails> data,
-                                  bool may_need_history_migration);
+  void OnGotMostVisitedThumbnails(
+      const scoped_refptr<MostVisitedThumbnails>& thumbnails,
+      const bool* need_history_migration);
 
   // Called when history service returns a list of top URLs.
   void OnTopSitesAvailableFromHistory(CancelableRequestProvider::Handle handle,
@@ -349,7 +321,7 @@ class TopSites
   // Need a separate consumer for each CancelableRequestProvider we interact
   // with (HistoryService and TopSitesBackend).
   CancelableRequestConsumer history_consumer_;
-  CancelableRequestConsumer top_sites_consumer_;
+  CancelableTaskTracker cancelable_task_tracker_;
 
   // Timer that asks history for the top sites. This is used to make sure our
   // data stays in sync with history.
@@ -363,10 +335,10 @@ class TopSites
   // The number of URLs changed on the last update.
   size_t last_num_urls_changed_;
 
-  // The map of requests for the top sites list. Can only be
-  // non-empty at startup. After we read the top sites from the DB, we'll
-  // always have a cached list.
-  PendingCallbackSet pending_callbacks_;
+  // The pending requests for the top sites list. Can only be non-empty at
+  // startup. After we read the top sites from the DB, we'll always have a
+  // cached list and be able to run callbacks immediately.
+  PendingCallbacks pending_callbacks_;
 
   // Stores thumbnails for unknown pages. When SetPageThumbnail is
   // called, if we don't know about that URL yet and we don't have
@@ -374,25 +346,14 @@ class TopSites
   // SetTopSites call.
   TempImages temp_images_;
 
-  // Blacklisted and pinned URLs are stored in Preferences.
-
-  // Blacklisted URLs. They are filtered out from the list of Top
-  // Sites when GetMostVisitedURLs is called. Note that we are still
-  // storing all URLs, but filtering on access. It is a dictionary,
-  // key is the URL, value is a dummy value. This is owned by the
-  // PrefService.
-  const base::DictionaryValue* blacklist_;
-
-  // This is a dictionary for the pinned URLs for the the most visited part of
-  // the new tab page. Key is the URL, value is index where it is pinned at (may
-  // be the same as key). This is owned by the PrefService.
-  const base::DictionaryValue* pinned_urls_;
-
   // See description above HistoryLoadState.
   HistoryLoadState history_state_;
 
   // See description above TopSitesLoadState.
   TopSitesLoadState top_sites_state_;
+
+  // URL List of prepopulated page.
+  std::vector<GURL> prepopulated_page_urls_;
 
   // Are we loaded?
   bool loaded_;

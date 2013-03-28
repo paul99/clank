@@ -7,18 +7,9 @@
 
 namespace skia {
 
-#if defined(OS_ANDROID)
-VectorCanvas::VectorCanvas()
-{
+VectorCanvas::VectorCanvas(SkDevice* device)
+    : PlatformCanvas(device) {
 }
-#endif
-
-// Older Skia in Android
-#if !defined(OS_ANDROID)
-VectorCanvas::VectorCanvas(SkDevice* device) {
-  setDevice(device)->unref(); // Created with refcount 1, and setDevice refs.
-}
-#endif
 
 VectorCanvas::~VectorCanvas() {
 }
@@ -44,3 +35,4 @@ bool VectorCanvas::IsTopDeviceVectorial() const {
 }
 
 }  // namespace skia
+

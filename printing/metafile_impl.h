@@ -9,8 +9,6 @@
 #include "printing/emf_win.h"
 #elif defined(OS_MACOSX)
 #include "printing/pdf_metafile_cg_mac.h"
-#elif defined(OS_ANDROID)
-#include "printing/pdf_metafile_android.h"
 #endif
 
 #if !defined(OS_MACOSX) || defined(USE_SKIA)
@@ -30,9 +28,6 @@ typedef PdfMetafileSkia PreviewMetafile;
 typedef PdfMetafileCg NativeMetafile;
 typedef PdfMetafileCg PreviewMetafile;
 #endif
-#elif defined(OS_ANDROID)
-typedef PdfMetafile NativeMetafile;
-typedef PdfMetafile PreviewMetafile;
 #elif defined(OS_POSIX)
 typedef PdfMetafileSkia NativeMetafile;
 typedef PdfMetafileSkia PreviewMetafile;

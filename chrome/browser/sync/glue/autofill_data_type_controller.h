@@ -4,14 +4,13 @@
 
 #ifndef CHROME_BROWSER_SYNC_GLUE_AUTOFILL_DATA_TYPE_CONTROLLER_H__
 #define CHROME_BROWSER_SYNC_GLUE_AUTOFILL_DATA_TYPE_CONTROLLER_H__
-#pragma once
 
 #include <string>
 
 #include "base/compiler_specific.h"
 #include "base/gtest_prod_util.h"
 #include "base/memory/ref_counted.h"
-#include "chrome/browser/sync/glue/new_non_frontend_data_type_controller.h"
+#include "chrome/browser/sync/glue/non_ui_data_type_controller.h"
 #include "content/public/browser/notification_observer.h"
 #include "content/public/browser/notification_registrar.h"
 
@@ -20,18 +19,21 @@ class WebDataService;
 namespace browser_sync {
 
 // A class that manages the startup and shutdown of autofill sync.
-class AutofillDataTypeController : public NewNonFrontendDataTypeController,
+class AutofillDataTypeController : public NonUIDataTypeController,
                                    public content::NotificationObserver {
  public:
   AutofillDataTypeController(
       ProfileSyncComponentsFactory* profile_sync_factory,
       Profile* profile,
       ProfileSyncService* sync_service);
-  virtual ~AutofillDataTypeController();
 
-  // NewNonFrontendDataTypeController implementation.
-  virtual syncable::ModelType type() const OVERRIDE;
-  virtual browser_sync::ModelSafeGroup model_safe_group() const OVERRIDE;
+  // NonUIDataTypeController implementation.
+  virtual syncer::ModelType type() const OVERRIDE;
+  virtual syncer::ModelSafeGroup model_safe_group() const OVERRIDE;
+
+  // NonFrontendDatatypeController override, needed as stop-gap until bug
+  // 163431 is addressed / implemented.
+  virtual void StartAssociating(const StartCallback& start_callback) OVERRIDE;
 
   // content::NotificationObserver implementation.
   virtual void Observe(int notification_type,
@@ -39,23 +41,23 @@ class AutofillDataTypeController : public NewNonFrontendDataTypeController,
                        const content::NotificationDetails& details) OVERRIDE;
 
  protected:
-  // NewNonFrontendDataTypeController implementation.
-  virtual bool StartModels() OVERRIDE;
-  virtual bool StartAssociationAsync() OVERRIDE;
-  virtual base::WeakPtr<SyncableService> GetWeakPtrToSyncableService()
-      const OVERRIDE;
-  virtual void StopModels() OVERRIDE;
-  virtual void StopLocalServiceAsync() OVERRIDE;
-  virtual void RecordUnrecoverableError(
+  virtual ~AutofillDataTypeController();
+
+  // NonUIDataTypeController implementation.
+  virtual bool PostTaskOnBackendThread(
       const tracked_objects::Location& from_here,
-      const std::string& message) OVERRIDE;
-  virtual void RecordAssociationTime(base::TimeDelta time) OVERRIDE;
-  virtual void RecordStartFailure(StartResult result) OVERRIDE;
+      const base::Closure& task) OVERRIDE;
+  virtual bool StartModels() OVERRIDE;
+  virtual void StopModels() OVERRIDE;
 
  private:
   friend class AutofillDataTypeControllerTest;
   FRIEND_TEST_ALL_PREFIXES(AutofillDataTypeControllerTest, StartWDSReady);
   FRIEND_TEST_ALL_PREFIXES(AutofillDataTypeControllerTest, StartWDSNotReady);
+
+  // Self-invoked on the DB thread to call the AutocompleteSyncableService with
+  // an updated value of autofill culling settings.
+  void UpdateAutofillCullingSettings(bool cull_expired_entries);
 
   scoped_refptr<WebDataService> web_data_service_;
   content::NotificationRegistrar notification_registrar_;

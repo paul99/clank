@@ -22,12 +22,7 @@ NativeViewHostAura::~NativeViewHostAura() {
 
 ////////////////////////////////////////////////////////////////////////////////
 // NativeViewHostAura, NativeViewHostWrapper implementation:
-void NativeViewHostAura::NativeViewAttached() {
-  if (host_->native_view()->parent())
-    host_->native_view()->parent()->RemoveChild(host_->native_view());
-  host_->GetWidget()->GetNativeView()->AddChild(host_->native_view());
-  host_->Layout();
-
+void NativeViewHostAura::NativeViewWillAttach() {
   host_->native_view()->AddObserver(this);
 }
 
@@ -35,6 +30,8 @@ void NativeViewHostAura::NativeViewDetaching(bool destroyed) {
   if (!destroyed) {
     host_->native_view()->RemoveObserver(this);
     host_->native_view()->Hide();
+    if (host_->native_view()->parent())
+      Widget::ReparentNativeView(host_->native_view(), NULL);
   }
 }
 
@@ -84,8 +81,9 @@ void NativeViewHostAura::HideWidget() {
 
 void NativeViewHostAura::SetFocus() {
   aura::Window* window = host_->native_view();
-  if (window->GetFocusManager())
-    window->GetFocusManager()->SetFocusedWindow(window);
+  aura::client::FocusClient* client = aura::client::GetFocusClient(window);
+  if (client)
+    client->FocusWindow(window, NULL);
 }
 
 gfx::NativeViewAccessible NativeViewHostAura::GetNativeViewAccessible() {

@@ -1,4 +1,4 @@
-// Copyright (c) 2011 The Chromium Authors. All rights reserved.
+// Copyright (c) 2012 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -17,7 +17,8 @@
 #include "content/browser/geolocation/core_location_provider_mac.h"
 #include "content/browser/geolocation/geolocation_provider.h"
 
-using content::BrowserThread;
+using content::CoreLocationDataProviderMac;
+using content::Geoposition;
 
 // A few required declarations since the CoreLocation headers are not available
 // with the Mac OS X 10.5 SDK.
@@ -82,7 +83,7 @@ enum {
 - (void)dealloc;
 
 // Can be called from any thread since it does not require an NSRunLoop. However
-// it is not threadsafe to receive concurrent calls until after it's first
+// it is not threadsafe to receive concurrent calls until after a first
 // successful call (to avoid |bundle_| being double initialized)
 - (BOOL)locationDataAvailable;
 
@@ -187,6 +188,8 @@ enum {
 
 @end
 
+namespace content {
+
 CoreLocationDataProviderMac::CoreLocationDataProviderMac() {
   if (MessageLoop::current() !=
       GeolocationProvider::GetInstance()->message_loop()) {
@@ -248,3 +251,5 @@ void CoreLocationDataProviderMac::PositionUpdated(Geoposition position) {
   if (provider_)
     provider_->SetPosition(&position);
 }
+
+}  // namespace content

@@ -22,8 +22,6 @@
 #include "ui/gfx/scoped_sk_region.h"
 #elif defined(OS_WIN)
 #include "base/win/scoped_gdi_object.h"
-#elif defined(TOOLKIT_USES_GTK)
-#include "ui/base/gtk/scoped_handle_gtk.h"
 #endif
 
 namespace {
@@ -32,8 +30,6 @@ namespace {
 typedef gfx::ScopedSkRegion ScopedPlatformRegion;
 #elif defined(OS_WIN)
 typedef base::win::ScopedRegion ScopedPlatformRegion;
-#elif defined(TOOLKIT_USES_GTK)
-typedef ui::ScopedRegion ScopedPlatformRegion;
 #endif
 
 }  // namespace
@@ -68,7 +64,7 @@ void DropdownBarHost::Init(views::View* view,
   host_.reset(new views::Widget);
   views::Widget::InitParams params(views::Widget::InitParams::TYPE_CONTROL);
   params.ownership = views::Widget::InitParams::WIDGET_OWNS_NATIVE_WIDGET;
-  params.parent_widget = browser_view_->GetWidget();
+  params.parent = browser_view_->GetWidget()->GetNativeView();
 #if defined(USE_AURA)
   params.transparent = true;
 #endif
@@ -241,9 +237,9 @@ void DropdownBarHost::UpdateWindowEdges(const gfx::Rect& new_pos) {
   // window. Basically, it encompasses only the visible pixels of the
   // concatenated find_dlg_LMR_bg images (where LMR = [left | middle | right]).
   const Path::Point polygon[] = {
-      {0, 0}, {0, 1}, {2, 3}, {2, h - 3}, {4, h - 1},
+      {2, 0}, {3, 1}, {3, h - 2}, {4, h - 1},
         {4, h}, {w+0, h},
-      {w+0, h - 1}, {w+1, h - 1}, {w+3, h - 3}, {w+3, 3}, {w+6, 0}
+      {w+2, h - 1}, {w+3, h - 2}, {w+3, 1}, {w+4, 0}
   };
 
   // Find the largest x and y value in the polygon.
@@ -282,10 +278,10 @@ void DropdownBarHost::UpdateWindowEdges(const gfx::Rect& new_pos) {
     // curved edges that the view will draw to make it look like grows out of
     // the toolbar.
     Path::Point left_curve[] = {
-      {0, y+0}, {0, y+1}, {2, y+3}, {2, y+0}, {0, y+0}
+      {2, y+0}, {3, y+1}, {3, y+0}, {2, y+0}
     };
     Path::Point right_curve[] = {
-      {w+3, y+3}, {w+6, y+0}, {w+3, y+0}, {w+3, y+3}
+      {w+3, y+1}, {w+4, y+0}, {w+3, y+0}, {w+3, y+1}
     };
 
     // Combine the region for the curve on the left with our main region.
@@ -338,14 +334,15 @@ void DropdownBarHost::UpdateWindowEdges(const gfx::Rect& new_pos) {
 
 void DropdownBarHost::RegisterAccelerators() {
   DCHECK(!esc_accel_target_registered_);
-  ui::Accelerator escape(ui::VKEY_ESCAPE, false, false, false);
-  focus_manager_->RegisterAccelerator(escape, this);
+  ui::Accelerator escape(ui::VKEY_ESCAPE, ui::EF_NONE);
+  focus_manager_->RegisterAccelerator(
+      escape, ui::AcceleratorManager::kNormalPriority, this);
   esc_accel_target_registered_ = true;
 }
 
 void DropdownBarHost::UnregisterAccelerators() {
   DCHECK(esc_accel_target_registered_);
-  ui::Accelerator escape(ui::VKEY_ESCAPE, false, false, false);
+  ui::Accelerator escape(ui::VKEY_ESCAPE, ui::EF_NONE);
   focus_manager_->UnregisterAccelerator(escape, this);
   esc_accel_target_registered_ = false;
 }

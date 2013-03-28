@@ -1,4 +1,4 @@
-// Copyright (c) 2011 The Chromium Authors. All rights reserved.
+// Copyright (c) 2012 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -12,7 +12,14 @@
 #include "chrome/browser/chromeos/cros/network_library.h"
 #include "content/public/browser/browser_thread.h"
 
+using content::AccessPointData;
 using content::BrowserThread;
+using content::GenericPollingPolicy;
+using content::PollingPolicyInterface;
+using content::WifiData;
+using content::WifiDataProvider;
+using content::WifiDataProviderCommon;
+using content::WifiDataProviderImplBase;
 
 namespace {
 // The time periods between successive polls of the wifi data.
@@ -215,7 +222,7 @@ void WifiDataProviderChromeOs::ScheduleNextScan(int interval) {
       BrowserThread::UI,
       FROM_HERE,
       base::Bind(&WifiDataProviderChromeOs::DoWifiScanTaskOnUIThread, this),
-      interval);
+      base::TimeDelta::FromMilliseconds(interval));
 }
 
 void WifiDataProviderChromeOs::ScheduleStop() {

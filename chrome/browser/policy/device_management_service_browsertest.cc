@@ -8,9 +8,10 @@
 #include "chrome/browser/policy/cloud_policy_constants.h"
 #include "chrome/browser/policy/device_management_service.h"
 #include "chrome/test/base/in_process_browser_test.h"
-#include "content/public/common/url_fetcher.h"
-#include "net/base/upload_data.h"
+#include "net/base/upload_bytes_element_reader.h"
+#include "net/base/upload_data_stream.h"
 #include "net/test/test_server.h"
+#include "net/url_request/url_fetcher.h"
 #include "net/url_request/url_request.h"
 #include "net/url_request/url_request_test_job.h"
 #include "testing/gmock/include/gmock/gmock.h"
@@ -42,16 +43,23 @@ class CannedResponseInterceptor : public net::URLRequest::Interceptor {
 
   // net::URLRequest::Interceptor overrides.
   virtual net::URLRequestJob* MaybeIntercept(
-      net::URLRequest* request) OVERRIDE {
+      net::URLRequest* request,
+      net::NetworkDelegate* network_delegate) OVERRIDE {
     em::DeviceManagementRequest dm_request;
-    net::UploadData* upload = request->get_upload();
+    const net::UploadDataStream* upload = request->get_upload();
     if (request->url().GetOrigin() == service_url_.GetOrigin() &&
         request->url().path() == service_url_.path() &&
         upload != NULL &&
-        upload->elements()->size() == 1) {
+        upload->element_readers().size() == 1 &&
+        upload->element_readers()[0]->AsBytesReader()) {
       std::string response_data;
-      ConstructResponse(upload->elements()->at(0).bytes(), &response_data);
+      const net::UploadBytesElementReader* bytes_reader =
+          upload->element_readers()[0]->AsBytesReader();
+      ConstructResponse(bytes_reader->bytes(),
+                        bytes_reader->length(),
+                        &response_data);
       return new net::URLRequestTestJob(request,
+                                        network_delegate,
                                         net::URLRequestTestJob::test_headers(),
                                         response_data,
                                         true);
@@ -61,11 +69,11 @@ class CannedResponseInterceptor : public net::URLRequest::Interceptor {
   }
 
  private:
-  void ConstructResponse(const std::vector<char>& request_data,
+  void ConstructResponse(const char* request_data,
+                         uint64 request_data_length,
                          std::string* response_data) {
     em::DeviceManagementRequest request;
-    ASSERT_TRUE(request.ParseFromArray(vector_as_array(&request_data),
-                                       request_data.size()));
+    ASSERT_TRUE(request.ParseFromArray(request_data, request_data_length));
     em::DeviceManagementResponse response;
     if (request.has_register_request()) {
       response.mutable_register_response()->set_device_management_token(
@@ -94,7 +102,7 @@ class DeviceManagementServiceIntegrationTest
                                const em::DeviceManagementResponse&));
 
   std::string InitCannedResponse() {
-    content::URLFetcher::SetEnableInterceptionForTests(true);
+    net::URLFetcher::SetEnableInterceptionForTests(true);
     interceptor_.reset(new CannedResponseInterceptor(GURL(kServiceUrl)));
     return kServiceUrl;
   }
@@ -139,6 +147,7 @@ class DeviceManagementServiceIntegrationTest
     test_server_.reset(
         new net::TestServer(
             net::TestServer::TYPE_HTTP,
+            net::TestServer::kLocalhost,
             FilePath(FILE_PATH_LITERAL("chrome/test/data/policy"))));
     ASSERT_TRUE(test_server_->Start());
   }

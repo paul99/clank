@@ -1,11 +1,11 @@
-// Copyright (c) 2011 The Chromium Authors. All rights reserved.
+// Copyright (c) 2012 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
 #ifndef UI_VIEWS_CONTROLS_SCROLLBAR_BASE_SCROLL_BAR_H_
 #define UI_VIEWS_CONTROLS_SCROLLBAR_BASE_SCROLL_BAR_H_
-#pragma once
 
+#include "ui/views/animation/scroll_animator.h"
 #include "ui/views/context_menu_controller.h"
 #include "ui/views/controls/button/image_button.h"
 #include "ui/views/controls/menu/menu_delegate.h"
@@ -23,6 +23,7 @@ class MenuRunner;
 //
 ///////////////////////////////////////////////////////////////////////////////
 class VIEWS_EXPORT BaseScrollBar : public ScrollBar,
+                                   public ScrollDelegate,
                                    public ContextMenuController,
                                    public MenuDelegate {
  public:
@@ -54,16 +55,19 @@ class VIEWS_EXPORT BaseScrollBar : public ScrollBar,
   void ScrollToThumbPosition(int thumb_position, bool scroll_to_middle);
 
   // Scroll the contents by the specified offset (contents coordinates).
-  void ScrollByContentsOffset(int contents_offset);
+  bool ScrollByContentsOffset(int contents_offset);
 
   // View overrides:
   virtual gfx::Size GetPreferredSize() OVERRIDE = 0;
   virtual void Layout() OVERRIDE = 0;
-  virtual bool OnMousePressed(const MouseEvent& event) OVERRIDE;
-  virtual void OnMouseReleased(const MouseEvent& event) OVERRIDE;
+  virtual bool OnMousePressed(const ui::MouseEvent& event) OVERRIDE;
+  virtual void OnMouseReleased(const ui::MouseEvent& event) OVERRIDE;
   virtual void OnMouseCaptureLost() OVERRIDE;
-  virtual bool OnKeyPressed(const KeyEvent& event) OVERRIDE;
-  virtual bool OnMouseWheel(const MouseWheelEvent& event) OVERRIDE;
+  virtual bool OnKeyPressed(const ui::KeyEvent& event) OVERRIDE;
+  virtual bool OnMouseWheel(const ui::MouseWheelEvent& event) OVERRIDE;
+
+  // ui::EventHandler overrides:
+  virtual void OnGestureEvent(ui::GestureEvent* event) OVERRIDE;
 
   // ScrollBar overrides:
   virtual void Update(int viewport_size,
@@ -72,10 +76,12 @@ class VIEWS_EXPORT BaseScrollBar : public ScrollBar,
   virtual int GetLayoutSize() const OVERRIDE = 0;
   virtual int GetPosition() const OVERRIDE;
 
-  // ContextMenuController overrides.
+  // ScrollDelegate overrides:
+  virtual bool OnScroll(float dx, float dy) OVERRIDE;
+
+  // ContextMenuController overrides:
   virtual void ShowContextMenuForView(View* source,
-                                      const gfx::Point& p,
-                                      bool is_mouse_gesture) OVERRIDE;
+                                      const gfx::Point& point) OVERRIDE;
 
   // Menu::Delegate overrides:
   virtual string16 GetLabel(int id) const OVERRIDE;
@@ -99,6 +105,12 @@ class VIEWS_EXPORT BaseScrollBar : public ScrollBar,
   virtual int GetScrollIncrement(bool is_page, bool is_positive);
 
  private:
+  // Changes to 'pushed' state and starts a timer to scroll repeatedly.
+  void ProcessPressEvent(const ui::LocatedEvent& event);
+
+  // Resets state to 'normal' and stops the repeater.
+  void ResetState();
+
   // Called when the mouse is pressed down in the track area.
   void TrackClicked();
 
@@ -150,6 +162,7 @@ class VIEWS_EXPORT BaseScrollBar : public ScrollBar,
   int context_menu_mouse_position_;
 
   scoped_ptr<MenuRunner> menu_runner_;
+  scoped_ptr<ScrollAnimator> scroll_animator_;
 
   DISALLOW_COPY_AND_ASSIGN(BaseScrollBar);
 };

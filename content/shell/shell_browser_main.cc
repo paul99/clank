@@ -4,93 +4,169 @@
 
 #include "content/shell/shell_browser_main.h"
 
-#include "base/bind.h"
+#include <iostream>
+
 #include "base/command_line.h"
+#include "base/file_path.h"
+#include "base/file_util.h"
+#include "base/files/scoped_temp_dir.h"
+#include "base/logging.h"
+#include "base/memory/scoped_ptr.h"
 #include "base/message_loop.h"
-#include "base/string_number_conversions.h"
-#include "base/threading/thread.h"
+#include "base/sys_string_conversions.h"
 #include "base/threading/thread_restrictions.h"
-#include "content/browser/browser_process_sub_thread.h"
-#include "content/browser/download/download_file_manager.h"
-#include "content/browser/download/save_file_manager.h"
-#include "content/browser/plugin_service_impl.h"
-#include "content/public/common/content_switches.h"
-#include "content/shell/shell.h"
-#include "content/shell/shell_browser_context.h"
-#include "content/shell/shell_content_browser_client.h"
-#include "content/shell/shell_devtools_delegate.h"
-#include "net/base/net_module.h"
-#include "ui/base/clipboard/clipboard.h"
+#include "base/utf_string_conversions.h"
+#include "content/public/browser/browser_main_runner.h"
+#include "content/shell/shell_switches.h"
+#include "content/shell/webkit_test_controller.h"
+#include "net/base/net_util.h"
+#include "webkit/support/webkit_support.h"
 
-namespace content {
+namespace {
 
-static GURL GetStartupURL() {
-  const CommandLine::StringVector& args =
-      CommandLine::ForCurrentProcess()->GetArgs();
-  if (args.empty())
-    return GURL("http://www.google.com/");
-
-  return GURL(args[0]);
-}
-
-ShellBrowserMainParts::ShellBrowserMainParts(
-    const content::MainFunctionParams& parameters)
-    : BrowserMainParts(),
-      devtools_delegate_(NULL) {
-  ShellContentBrowserClient* shell_browser_client =
-      static_cast<ShellContentBrowserClient*>(
-          content::GetContentClient()->browser());
-  shell_browser_client->set_shell_browser_main_parts(this);
-}
-
-ShellBrowserMainParts::~ShellBrowserMainParts() {
-}
-
-int ShellBrowserMainParts::PreCreateThreads() {
-  return 0;
-}
-
-void ShellBrowserMainParts::PreMainMessageLoopRun() {
-  browser_context_.reset(new ShellBrowserContext(this));
-
-  Shell::PlatformInitialize();
-  net::NetModule::SetResourceProvider(Shell::PlatformResourceProvider);
-
-  const CommandLine& command_line = *CommandLine::ForCurrentProcess();
-  if (command_line.HasSwitch(switches::kRemoteDebuggingPort)) {
-    std::string port_str =
-        command_line.GetSwitchValueASCII(switches::kRemoteDebuggingPort);
-    int port;
-    if (base::StringToInt(port_str, &port) && port > 0 && port < 65535) {
-      devtools_delegate_ = new ShellDevToolsDelegate(
-          port,
-          browser_context_->GetRequestContext());
-    } else {
-      DLOG(WARNING) << "Invalid http debugger port number " << port;
-    }
+GURL GetURLForLayoutTest(const std::string& test_name,
+                         FilePath* current_working_directory,
+                         bool* enable_pixel_dumping,
+                         std::string* expected_pixel_hash) {
+  // A test name is formated like file:///path/to/test'--pixel-test'pixelhash
+  std::string path_or_url = test_name;
+  std::string pixel_switch;
+  std::string pixel_hash;
+  std::string::size_type separator_position = path_or_url.find('\'');
+  if (separator_position != std::string::npos) {
+    pixel_switch = path_or_url.substr(separator_position + 1);
+    path_or_url.erase(separator_position);
   }
-
-  Shell::CreateNewWindow(browser_context_.get(),
-                         GetStartupURL(),
-                         NULL,
-                         MSG_ROUTING_NONE,
-                         NULL);
+  separator_position = pixel_switch.find('\'');
+  if (separator_position != std::string::npos) {
+    pixel_hash = pixel_switch.substr(separator_position + 1);
+    pixel_switch.erase(separator_position);
+  }
+  if (enable_pixel_dumping) {
+    *enable_pixel_dumping =
+        (pixel_switch == "--pixel-test" || pixel_switch == "-p");
+  }
+  if (expected_pixel_hash)
+    *expected_pixel_hash = pixel_hash;
+  GURL test_url(path_or_url);
+  if (!(test_url.is_valid() && test_url.has_scheme())) {
+    // We're outside of the message loop here, and this is a test.
+    base::ThreadRestrictions::ScopedAllowIO allow_io;
+#if defined(OS_WIN)
+    std::wstring wide_path_or_url =
+        base::SysNativeMBToWide(path_or_url);
+    FilePath local_file(wide_path_or_url);
+#else
+    FilePath local_file(path_or_url);
+#endif
+    file_util::AbsolutePath(&local_file);
+    test_url = net::FilePathToFileURL(local_file);
+  }
+  FilePath local_path;
+  {
+    // We're outside of the message loop here, and this is a test.
+    base::ThreadRestrictions::ScopedAllowIO allow_io;
+    if (net::FileURLToFilePath(test_url, &local_path)) {
+      file_util::SetCurrentDirectory(local_path.DirName());
+    }
+    if (current_working_directory)
+      file_util::GetCurrentDirectory(current_working_directory);
+  }
+  return test_url;
 }
 
-void ShellBrowserMainParts::PostMainMessageLoopRun() {
-  if (devtools_delegate_)
-    devtools_delegate_->Stop();
-  browser_context_.reset();
-}
-
-bool ShellBrowserMainParts::MainMessageLoopRun(int* result_code) {
-  return false;
-}
-
-ui::Clipboard* ShellBrowserMainParts::GetClipboard() {
-  if (!clipboard_.get())
-    clipboard_.reset(new ui::Clipboard());
-  return clipboard_.get();
+bool GetNextTest(const CommandLine::StringVector& args,
+                 size_t* position,
+                 std::string* test) {
+  if (*position >= args.size())
+    return false;
+  if (args[*position] == FILE_PATH_LITERAL("-"))
+    return !!std::getline(std::cin, *test, '\n');
+#if defined(OS_WIN)
+  *test = WideToUTF8(args[(*position)++]);
+#else
+  *test = args[(*position)++];
+#endif
+  return true;
 }
 
 }  // namespace
+
+// Main routine for running as the Browser process.
+int ShellBrowserMain(const content::MainFunctionParams& parameters) {
+  bool layout_test_mode =
+      CommandLine::ForCurrentProcess()->HasSwitch(switches::kDumpRenderTree);
+  base::ScopedTempDir browser_context_path_for_layout_tests;
+
+  if (layout_test_mode) {
+    CHECK(browser_context_path_for_layout_tests.CreateUniqueTempDir());
+    CHECK(!browser_context_path_for_layout_tests.path().MaybeAsASCII().empty());
+    CommandLine::ForCurrentProcess()->AppendSwitchASCII(
+        switches::kContentShellDataPath,
+        browser_context_path_for_layout_tests.path().MaybeAsASCII());
+  }
+
+  scoped_ptr<content::BrowserMainRunner> main_runner_(
+      content::BrowserMainRunner::Create());
+
+  int exit_code = main_runner_->Initialize(parameters);
+
+  if (exit_code >= 0)
+    return exit_code;
+
+  if (CommandLine::ForCurrentProcess()->HasSwitch(
+        switches::kCheckLayoutTestSysDeps)) {
+    MessageLoop::current()->PostTask(FROM_HERE, MessageLoop::QuitClosure());
+    main_runner_->Run();
+    main_runner_->Shutdown();
+    return 0;
+  }
+
+  if (layout_test_mode) {
+    content::WebKitTestController test_controller;
+    std::string test_string;
+    CommandLine::StringVector args =
+        CommandLine::ForCurrentProcess()->GetArgs();
+    size_t command_line_position = 0;
+    bool ran_at_least_once = false;
+
+#if defined(OS_ANDROID)
+    std::cout << "#READY\n";
+    std::cout.flush();
+#endif
+
+    while (GetNextTest(args, &command_line_position, &test_string)) {
+      if (test_string.empty())
+        continue;
+      if (test_string == "QUIT")
+        break;
+
+      bool enable_pixel_dumps;
+      std::string pixel_hash;
+      FilePath cwd;
+      GURL test_url = GetURLForLayoutTest(
+          test_string, &cwd, &enable_pixel_dumps, &pixel_hash);
+      if (!content::WebKitTestController::Get()->PrepareForLayoutTest(
+              test_url, cwd, enable_pixel_dumps, pixel_hash)) {
+        break;
+      }
+
+      ran_at_least_once = true;
+      main_runner_->Run();
+
+      if (!content::WebKitTestController::Get()->ResetAfterLayoutTest())
+        break;
+    }
+    if (!ran_at_least_once) {
+      MessageLoop::current()->PostTask(FROM_HERE, MessageLoop::QuitClosure());
+      main_runner_->Run();
+    }
+    exit_code = 0;
+  } else {
+    exit_code = main_runner_->Run();
+  }
+
+  main_runner_->Shutdown();
+
+  return exit_code;
+}

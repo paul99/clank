@@ -1,4 +1,4 @@
-// Copyright (c) 2011 The Chromium Authors. All rights reserved.
+// Copyright (c) 2012 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -7,13 +7,14 @@
 #include "base/stl_util.h"
 #include "base/utf_string_conversions.h"
 #include "chrome/browser/bookmarks/bookmark_model.h"
+#include "chrome/browser/bookmarks/bookmark_model_factory.h"
 #include "chrome/browser/bookmarks/bookmark_node_data.h"
 #include "chrome/browser/bookmarks/bookmark_utils.h"
+#include "chrome/browser/event_disposition.h"
 #include "chrome/browser/prefs/pref_service.h"
 #include "chrome/browser/profiles/profile.h"
 #include "chrome/browser/ui/views/bookmarks/bookmark_bar_view.h"
 #include "chrome/browser/ui/views/bookmarks/bookmark_menu_delegate.h"
-#include "chrome/browser/ui/views/event_utils.h"
 #include "chrome/common/pref_names.h"
 #include "content/public/browser/page_navigator.h"
 #include "content/public/browser/user_metrics.h"
@@ -30,13 +31,13 @@ using content::PageNavigator;
 using content::UserMetricsAction;
 using views::MenuItemView;
 
-BookmarkMenuController::BookmarkMenuController(Profile* profile,
+BookmarkMenuController::BookmarkMenuController(Browser* browser,
                                                PageNavigator* page_navigator,
                                                views::Widget* parent,
                                                const BookmarkNode* node,
                                                int start_child_index)
     : menu_delegate_(
-        new BookmarkMenuDelegate(profile, page_navigator, parent, 1)),
+        new BookmarkMenuDelegate(browser, page_navigator, parent, 1)),
       node_(node),
       observer_(NULL),
       for_drop_(false),
@@ -60,7 +61,8 @@ void BookmarkMenuController::RunMenuAt(BookmarkBarView* bookmark_bar,
   gfx::Rect bounds(screen_loc.x(), screen_loc.y(), menu_button->width(),
                    menu_button->height() - 1);
   for_drop_ = for_drop;
-  menu_delegate_->profile()->GetBookmarkModel()->AddObserver(this);
+  BookmarkModelFactory::GetForProfile(
+      menu_delegate_->profile())->AddObserver(this);
   // We only delete ourself after the menu completes, so we can safely ignore
   // the return value.
   ignore_result(menu_runner_->RunMenuAt(menu_delegate_->parent(), menu_button,
@@ -91,12 +93,17 @@ string16 BookmarkMenuController::GetTooltipText(int id,
 }
 
 bool BookmarkMenuController::IsTriggerableEvent(views::MenuItemView* menu,
-                                                const views::MouseEvent& e) {
+                                                const ui::Event& e) {
   return menu_delegate_->IsTriggerableEvent(menu, e);
 }
 
 void BookmarkMenuController::ExecuteCommand(int id, int mouse_event_flags) {
   menu_delegate_->ExecuteCommand(id, mouse_event_flags);
+}
+
+bool BookmarkMenuController::ShouldExecuteCommandWithoutClosingMenu(
+      int id, const ui::Event& e) {
+  return menu_delegate_->ShouldExecuteCommandWithoutClosingMenu(id, e);
 }
 
 bool BookmarkMenuController::GetDropFormats(
@@ -117,14 +124,14 @@ bool BookmarkMenuController::CanDrop(MenuItemView* menu,
 
 int BookmarkMenuController::GetDropOperation(
     MenuItemView* item,
-    const views::DropTargetEvent& event,
+    const ui::DropTargetEvent& event,
     DropPosition* position) {
   return menu_delegate_->GetDropOperation(item, event, position);
 }
 
 int BookmarkMenuController::OnPerformDrop(MenuItemView* menu,
                                           DropPosition position,
-                                          const views::DropTargetEvent& event) {
+                                          const ui::DropTargetEvent& event) {
   int result = menu_delegate_->OnPerformDrop(menu, position, event);
   if (for_drop_)
     delete this;
@@ -164,7 +171,7 @@ views::MenuItemView* BookmarkMenuController::GetSiblingMenu(
   if (!bookmark_bar_ || for_drop_)
     return NULL;
   gfx::Point bookmark_bar_loc(screen_point);
-  views::View::ConvertPointToView(NULL, bookmark_bar_, &bookmark_bar_loc);
+  views::View::ConvertPointToTarget(NULL, bookmark_bar_, &bookmark_bar_loc);
   int start_index;
   const BookmarkNode* node = bookmark_bar_->GetNodeForButtonAtModelIndex(
       bookmark_bar_loc, &start_index);
@@ -188,7 +195,8 @@ void BookmarkMenuController::BookmarkModelChanged() {
 }
 
 BookmarkMenuController::~BookmarkMenuController() {
-  menu_delegate_->profile()->GetBookmarkModel()->RemoveObserver(this);
+  BookmarkModelFactory::GetForProfile(
+      menu_delegate_->profile())->RemoveObserver(this);
   if (observer_)
     observer_->BookmarkMenuDeleted(this);
 }

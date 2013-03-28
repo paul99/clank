@@ -10,55 +10,28 @@
 #include "base/gtest_prod_util.h"
 #include "base/synchronization/condition_variable.h"
 #include "base/synchronization/lock.h"
+#include "base/threading/thread_checker.h"
+#include "media/base/audio_renderer.h"
 #include "media/base/demuxer.h"
-#include "media/base/download_rate_monitor.h"
-#include "media/base/filter_host.h"
 #include "media/base/media_export.h"
 #include "media/base/pipeline_status.h"
-#include "media/base/preload.h"
+#include "media/base/ranges.h"
+#include "media/base/serial_runner.h"
 #include "ui/gfx/size.h"
 
 class MessageLoop;
 
 namespace base {
+class MessageLoopProxy;
 class TimeDelta;
 }
 
 namespace media {
 
-class AudioDecoder;
-class AudioRenderer;
 class Clock;
-class Filter;
 class FilterCollection;
 class MediaLog;
-class VideoDecoder;
 class VideoRenderer;
-
-// TODO(scherkus): this should be moved alongside host interface defintions.
-struct PipelineStatistics {
-  PipelineStatistics()
-      : audio_bytes_decoded(0),
-        video_bytes_decoded(0),
-        video_frames_decoded(0),
-        video_frames_dropped(0) {
-  }
-
-  uint32 audio_bytes_decoded;  // Should be uint64?
-  uint32 video_bytes_decoded;  // Should be uint64?
-  uint32 video_frames_decoded;
-  uint32 video_frames_dropped;
-};
-
-enum NetworkEvent {
-  DOWNLOAD_CONTINUED,
-  DOWNLOAD_PAUSED,
-  CAN_PLAY_THROUGH
-};
-
-// Callback that executes when a network event occurs.
-// The parameter specifies the type of event that is being signalled.
-typedef base::Callback<void(NetworkEvent)> NetworkEventCB;
 
 // Adapter for using asynchronous Pipeline methods in code that wants to run
 // synchronously.  To use, construct an instance of this class and pass the
@@ -93,26 +66,20 @@ class MEDIA_EXPORT PipelineStatusNotification {
 //
 // Here's a state diagram that describes the lifetime of this object.
 //
-//   [ *Created ]                                    [ Stopped ]
-//         | Start()                                      ^
-//         V                       SetError()             |
-//   [ InitXXX (for each filter) ] -------->[ Stopping (for each filter) ]
-//         |                                              ^
-//         V                                              | if Stop
-//   [ Seeking (for each filter) ] <--------[ Flushing (for each filter) ]
-//         |                         if Seek              ^
-//         V                                              |
-//   [ Starting (for each filter) ]                       |
-//         |                                              |
-//         V      Seek()/Stop()                           |
-//   [ Started ] -------------------------> [ Pausing (for each filter) ]
-//         |                                              ^
-//         |   NotifyEnded()             Seek()/Stop()    |
-//         `-------------> [ Ended ] ---------------------'
-//                                                        ^  SetError()
-//                                                        |
-//                                         [ Any State Other Than InitXXX ]
-
+//   [ *Created ]                       [ Any State ]
+//         | Start()                         | Stop() / SetError()
+//         V                                 V
+//   [ InitXXX (for each filter) ]      [ Stopping ]
+//         |                                 |
+//         V                                 V
+//   [ InitPreroll ]                    [ Stopped ]
+//         |
+//         V
+//   [ Starting ] <-- [ Seeking ]
+//         |               ^
+//         V               |
+//   [ Started ] ----------'
+//                 Seek()
 //
 // Initialization is a series of state transitions from "Created" through each
 // filter initialization state.  When all filter initialization states have
@@ -126,70 +93,68 @@ class MEDIA_EXPORT PipelineStatusNotification {
 // "Stopped" state.
 class MEDIA_EXPORT Pipeline
     : public base::RefCountedThreadSafe<Pipeline>,
-      public FilterHost,
       public DemuxerHost {
  public:
+  // Buffering states the pipeline transitions between during playback.
+  // kHaveMetadata:
+  //   Indicates that the following things are known:
+  //   content duration, natural size, start time, and whether the content has
+  //   audio and/or video in supported formats.
+  // kPrerollCompleted:
+  //   All renderers have buffered enough data to satisfy preroll and are ready
+  //   to start playback.
+  enum BufferingState {
+    kHaveMetadata,
+    kPrerollCompleted,
+  };
+
+  typedef base::Callback<void(BufferingState)> BufferingStateCB;
+
   // Constructs a media pipeline that will execute on |message_loop|.
-  Pipeline(MessageLoop* message_loop, MediaLog* media_log);
+  Pipeline(const scoped_refptr<base::MessageLoopProxy>& message_loop,
+           MediaLog* media_log);
 
-  // Build a pipeline to render the given URL using the given filter collection
-  // to construct a filter chain.
+  // Build a pipeline to using the given filter collection to construct a filter
+  // chain, executing |seek_cb| when the initial seek/preroll has completed.
   //
-  // Pipeline initialization is an inherently asynchronous process.  Clients can
-  // either poll the IsInitialized() method (discouraged) or optionally pass in
-  // |start_callback|, which will be executed when initialization completes.
+  // |filter_collection| must be a complete collection containing a demuxer,
+  // audio/video decoders, and audio/video renderers. Failing to do so will
+  // result in a crash.
   //
-  // The following permanent callbacks will be executed as follows:
-  //   |ended_callback| will be executed whenever the media reaches the end.
-  //   |error_callback_| will be executed whenever an error occurs.
-  //   |network_callback_| will be executed whenever there's a network activity.
-  //
-  // These callbacks are only executed after Start() has been called and until
-  // Stop() has completed.
-  //
+  // The following permanent callbacks will be executed as follows up until
+  // Stop() has completed:
+  //   |ended_cb| will be executed whenever the media reaches the end.
+  //   |error_cb| will be executed whenever an error occurs but hasn't
+  //              been reported already through another callback.
+  //   |buffering_state_cb| Optional callback that will be executed whenever the
+  //                    pipeline's buffering state changes.
   // It is an error to call this method after the pipeline has already started.
-  //
-  // TODO(scherkus): remove IsInitialized() and force clients to use callbacks.
   void Start(scoped_ptr<FilterCollection> filter_collection,
-             const std::string& url,
-             const PipelineStatusCB& ended_callback,
-             const PipelineStatusCB& error_callback,
-             const NetworkEventCB& network_callback,
-             const PipelineStatusCB& start_callback);
+             const PipelineStatusCB& ended_cb,
+             const PipelineStatusCB& error_cb,
+             const PipelineStatusCB& seek_cb,
+             const BufferingStateCB& buffering_state_cb);
 
-  // Asynchronously stops the pipeline and resets it to an uninitialized state.
+  // Asynchronously stops the pipeline, executing |stop_cb| when the pipeline
+  // teardown has completed.
   //
-  // If provided, |stop_callback| will be executed when the pipeline has been
-  // completely torn down and reset to an uninitialized state.  It is acceptable
-  // to call Start() again once the callback has finished executing.
-  //
-  // Stop() must be called before destroying the pipeline.  Clients can
-  // determine whether Stop() must be called by checking IsRunning().
-  //
-  // It is an error to call this method if the pipeline has not started.
-  //
-  // TODO(scherkus): ideally clients would destroy the pipeline after calling
-  // Stop() and create a new pipeline as needed.
-  void Stop(const PipelineStatusCB& stop_callback);
+  // Stop() must complete before destroying the pipeline. It it permissible to
+  // call Stop() at any point during the lifetime of the pipeline.
+  void Stop(const base::Closure& stop_cb);
 
-  // Attempt to seek to the position specified by time.  |seek_callback| will be
+  // Attempt to seek to the position specified by time.  |seek_cb| will be
   // executed when the all filters in the pipeline have processed the seek.
   //
-  // Clients are expected to call GetCurrentTime() to check whether the seek
+  // Clients are expected to call GetMediaTime() to check whether the seek
   // succeeded.
   //
   // It is an error to call this method if the pipeline has not started.
-  void Seek(base::TimeDelta time, const PipelineStatusCB& seek_callback);
+  void Seek(base::TimeDelta time, const PipelineStatusCB& seek_cb);
 
   // Returns true if the pipeline has been started via Start().  If IsRunning()
   // returns true, it is expected that Stop() will be called before destroying
   // the pipeline.
   bool IsRunning() const;
-
-  // Returns true if the pipeline has been started and fully initialized to a
-  // point where playback controls will be respected.  Note that it is possible
-  // for a pipeline to be started but not initialized (i.e., an error occurred).
-  bool IsInitialized() const;
 
   // Returns true if the media has audio.
   bool HasAudio() const;
@@ -220,24 +185,16 @@ class MEDIA_EXPORT Pipeline
   // channels proportionately for multi-channel audio streams.
   void SetVolume(float volume);
 
-  // Set the preload value for the pipeline.
-  void SetPreload(Preload preload);
+  // Returns the current media playback time, which progresses from 0 until
+  // GetMediaDuration().
+  base::TimeDelta GetMediaTime() const;
 
-  // Gets the current pipeline time. For a pipeline "time" progresses from 0 to
-  // the end of the media.
-  base::TimeDelta GetCurrentTime() const;
-
-  // Get the approximate amount of playable data buffered so far in micro-
-  // seconds.
-  base::TimeDelta GetBufferedTime();
+  // Get approximate time ranges of buffered media.
+  Ranges<base::TimeDelta> GetBufferedTimeRanges();
 
   // Get the duration of the media in microseconds.  If the duration has not
   // been determined yet, then returns 0.
   base::TimeDelta GetMediaDuration() const;
-
-  // Get the total number of bytes that are buffered on the client and ready to
-  // be played.
-  int64 GetBufferedBytes() const;
 
   // Get the total size of the media file.  If the size has not yet been
   // determined or can not be determined, this value is 0.
@@ -248,21 +205,22 @@ class MEDIA_EXPORT Pipeline
   // be 0.
   void GetNaturalVideoSize(gfx::Size* out_size) const;
 
-  // If this method returns true, that means the data source is a streaming
-  // data source. Seeking may not be possible.
-  bool IsStreaming() const;
-
-  // If this method returns true, that means the data source is local and
-  // the network is not needed.
-  bool IsLocalSource() const;
+  // Return true if loading progress has been made since the last time this
+  // method was called.
+  bool DidLoadingProgress() const;
 
   // Gets the current pipeline statistics.
   PipelineStatistics GetStatistics() const;
 
   void SetClockForTesting(Clock* clock);
+  void SetErrorForTesting(PipelineStatus status);
 
  private:
-  FRIEND_TEST_ALL_PREFIXES(PipelineTest, GetBufferedTime);
+  FRIEND_TEST_ALL_PREFIXES(PipelineTest, GetBufferedTimeRanges);
+  FRIEND_TEST_ALL_PREFIXES(PipelineTest, DisableAudioRenderer);
+  FRIEND_TEST_ALL_PREFIXES(PipelineTest, DisableAudioRendererDuringInit);
+  FRIEND_TEST_ALL_PREFIXES(PipelineTest, EndedCallback);
+  FRIEND_TEST_ALL_PREFIXES(PipelineTest, AudioStreamShorterThanVideo);
   friend class MediaLog;
 
   // Only allow ourselves to be deleted by reference counting.
@@ -273,113 +231,74 @@ class MEDIA_EXPORT Pipeline
   enum State {
     kCreated,
     kInitDemuxer,
-    kInitAudioDecoder,
     kInitAudioRenderer,
-    kInitVideoDecoder,
     kInitVideoRenderer,
-    kPausing,
+    kInitPrerolling,
     kSeeking,
-    kFlushing,
     kStarting,
     kStarted,
-    kEnded,
     kStopping,
     kStopped,
-    kError,
   };
-
-  // Reset the state of the pipeline object to the initial state.  This method
-  // is used by the constructor, and the Stop() method.
-  void ResetState();
 
   // Updates |state_|. All state transitions should use this call.
   void SetState(State next_state);
 
-  // Simple method used to make sure the pipeline is running normally.
-  bool IsPipelineOk();
+  static const char* GetStateString(State state);
+  State GetNextState() const;
 
-  // Helper method to tell whether we are stopped or in error.
-  bool IsPipelineStopped();
-
-  // Helper method to tell whether we are in transition to stop state.
-  bool IsPipelineTearingDown();
-
-  // We could also be delayed by a transition during seek is performed.
-  bool IsPipelineStopPending();
-
-  // Helper method to tell whether we are in transition to seek state.
-  bool IsPipelineSeeking();
-
-  // Helper method to execute callback from Start() and reset
-  // |filter_collection_|. Called when initialization completes
-  // normally or when pipeline is stopped or error occurs during
-  // initialization.
-  void FinishInitialization();
-
-  // Returns true if the given state is one that transitions to a new state
-  // after iterating through each filter.
-  static bool TransientState(State state);
-
-  // Given the current state, returns the next state.
-  State FindNextState(State current);
+  // Helper method that runs & resets |seek_cb_| and resets |seek_timestamp_|
+  // and |seek_pending_|.
+  void FinishSeek();
 
   // DataSourceHost (by way of DemuxerHost) implementation.
   virtual void SetTotalBytes(int64 total_bytes) OVERRIDE;
-  virtual void SetBufferedBytes(int64 buffered_bytes) OVERRIDE;
-  virtual void SetNetworkActivity(bool is_downloading_data) OVERRIDE;
+  virtual void AddBufferedByteRange(int64 start, int64 end) OVERRIDE;
+  virtual void AddBufferedTimeRange(base::TimeDelta start,
+                                    base::TimeDelta end) OVERRIDE;
 
   // DemuxerHost implementaion.
   virtual void SetDuration(base::TimeDelta duration) OVERRIDE;
-  virtual void SetBufferedTime(base::TimeDelta buffered_time) OVERRIDE;
-  virtual void SetCurrentReadPosition(int64 offset) OVERRIDE;
   virtual void OnDemuxerError(PipelineStatus error) OVERRIDE;
 
-  // FilterHost implementation.
-  virtual void SetError(PipelineStatus error) OVERRIDE;
-  virtual base::TimeDelta GetTime() const OVERRIDE;
-  virtual base::TimeDelta GetDuration() const OVERRIDE;
-  virtual void SetTime(base::TimeDelta time) OVERRIDE;
-  virtual void SetNaturalVideoSize(const gfx::Size& size) OVERRIDE;
-  virtual void NotifyEnded() OVERRIDE;
-  virtual void DisableAudioRenderer() OVERRIDE;
+  // Initiates teardown sequence in response to a runtime error.
+  //
+  // Safe to call from any thread.
+  void SetError(PipelineStatus error);
 
-  // Callbacks executed by filters upon completing initialization.
-  void OnFilterInitialize(PipelineStatus status);
+  // Callback executed when the natural size of the video has changed.
+  void OnNaturalVideoSizeChanged(const gfx::Size& size);
 
-  // Callback executed by filters upon completing Play(), Pause(), or Stop().
-  void OnFilterStateTransition();
-
-  // Callback executed by filters upon completing Seek().
-  void OnFilterStateTransitionWithStatus(PipelineStatus status);
-
-  // Callback executed by filters when completing teardown operations.
-  void OnTeardownStateTransition();
+  // Callbacks executed when a renderer has ended.
+  void OnAudioRendererEnded();
+  void OnVideoRendererEnded();
 
   // Callback executed by filters to update statistics.
   void OnUpdateStatistics(const PipelineStatistics& stats);
+
+  // Callback executed by audio renderer when it has been disabled.
+  void OnAudioDisabled();
+
+  // Callback executed by audio renderer to update clock time.
+  void OnAudioTimeUpdate(base::TimeDelta time, base::TimeDelta max_time);
+
+  // Callback executed by video renderer to update clock time.
+  void OnVideoTimeUpdate(base::TimeDelta max_time);
 
   // The following "task" methods correspond to the public methods, but these
   // methods are run as the result of posting a task to the PipelineInternal's
   // message loop.
   void StartTask(scoped_ptr<FilterCollection> filter_collection,
-                 const std::string& url,
-                 const PipelineStatusCB& ended_callback,
-                 const PipelineStatusCB& error_callback,
-                 const NetworkEventCB& network_callback,
-                 const PipelineStatusCB& start_callback);
-
-  // InitializeTask() performs initialization in multiple passes. It is executed
-  // as a result of calling Start() or InitializationComplete() that advances
-  // initialization to the next state. It works as a hub of state transition for
-  // initialization.  One stage communicates its status to the next through
-  // |last_stage_status|.
-  void InitializeTask(PipelineStatus last_stage_status);
+                 const PipelineStatusCB& ended_cb,
+                 const PipelineStatusCB& error_cb,
+                 const PipelineStatusCB& seek_cb,
+                 const BufferingStateCB& buffering_state_cb);
 
   // Stops and destroys all filters, placing the pipeline in the kStopped state.
-  void StopTask(const PipelineStatusCB& stop_callback);
+  void StopTask(const base::Closure& stop_cb);
 
   // Carries out stopping and destroying all filters, placing the pipeline in
-  // the kError state.
+  // the kStopped state.
   void ErrorChangedTask(PipelineStatus error);
 
   // Carries out notifying filters that the playback rate has changed.
@@ -388,60 +307,22 @@ class MEDIA_EXPORT Pipeline
   // Carries out notifying filters that the volume has changed.
   void VolumeChangedTask(float volume);
 
-  // Returns media preload value.
-  virtual Preload GetPreload() const;
-
-  // Carries out notifying filters that the preload value has changed.
-  void PreloadChangedTask(Preload preload);
-
   // Carries out notifying filters that we are seeking to a new timestamp.
-  void SeekTask(base::TimeDelta time, const PipelineStatusCB& seek_callback);
+  void SeekTask(base::TimeDelta time, const PipelineStatusCB& seek_cb);
 
-  // Carries out handling a notification from a filter that it has ended.
-  void NotifyEndedTask();
-
-  // Carries out handling a notification of network event.
-  void NotifyNetworkEventTask(NetworkEvent type);
+  // Handles audio/video ended logic and running |ended_cb_|.
+  void DoAudioRendererEnded();
+  void DoVideoRendererEnded();
+  void RunEndedCallbackIfNeeded();
 
   // Carries out disabling the audio renderer.
-  void DisableAudioRendererTask();
+  void AudioDisabledTask();
 
-  // Carries out advancing to the next filter during Play()/Pause()/Seek().
-  void FilterStateTransitionTask();
-
-  // Carries out advancing to the next teardown operation.
-  void TeardownStateTransitionTask();
-
-  // Carries out stopping filter threads, deleting filters, running
-  // appropriate callbacks, and setting the appropriate pipeline state
-  // depending on whether we performing Stop() or SetError().
-  // Called after all filters have been stopped.
-  void FinishDestroyingFiltersTask();
-
-  // Internal methods used in the implementation of the pipeline thread.  All
-  // of these methods are only called on the pipeline thread.
-
-  // PrepareFilter() creates the filter's thread and injects a FilterHost and
-  // MessageLoop.
-  bool PrepareFilter(scoped_refptr<Filter> filter);
-
-  // The following initialize methods are used to select a specific type of
-  // Filter object from FilterCollection and initialize it asynchronously.
-  void InitializeDemuxer();
-  void OnDemuxerBuilt(PipelineStatus status, Demuxer* demuxer);
-
-  // Returns true if the asynchronous action of creating decoder has started.
-  // Returns false if this method did nothing because the corresponding
-  // audio/video stream does not exist.
-  bool InitializeAudioDecoder(const scoped_refptr<Demuxer>& demuxer);
-  bool InitializeVideoDecoder(const scoped_refptr<Demuxer>& demuxer);
-
-  // Initializes a renderer and connects it with decoder. Returns true if the
-  // asynchronous action of creating renderer has started. Returns
-  // false if this method did nothing because the corresponding audio/video
-  // stream does not exist.
-  bool InitializeAudioRenderer(const scoped_refptr<AudioDecoder>& decoder);
-  bool InitializeVideoRenderer(const scoped_refptr<VideoDecoder>& decoder);
+  // Kicks off initialization for each media object, executing |done_cb| with
+  // the result when completed.
+  void InitializeDemuxer(const PipelineStatusCB& done_cb);
+  void InitializeAudioRenderer(const PipelineStatusCB& done_cb);
+  void InitializeVideoRenderer(const PipelineStatusCB& done_cb);
 
   // Kicks off destroying filters. Called by StopTask() and ErrorChangedTask().
   // When we start to tear down the pipeline, we will consider two cases:
@@ -452,40 +333,39 @@ class MEDIA_EXPORT Pipeline
   // This will remove the race condition during stop between filters.
   void TearDownPipeline();
 
-  // Compute the current time. Assumes that the lock has been acquired by the
-  // caller.
-  base::TimeDelta GetCurrentTime_Locked() const;
+  // Compute the time corresponding to a byte offset.
+  base::TimeDelta TimeForByteOffset_Locked(int64 byte_offset) const;
 
-  // Initiates a Stop() on |demuxer_| & |pipeline_filter_|. |callback|
-  // is called once both objects have been stopped.
-  void DoStop(const base::Closure& callback);
+  void OnStateTransition(PipelineStatus status);
+  void StateTransitionTask(PipelineStatus status);
 
-  // Called when |demuxer_| has stopped. This method calls Stop()
-  // on |pipeline_filter_|.
-  void OnDemuxerStopDone(const base::Closure& callback);
+  // Initiates an asynchronous preroll call sequence executing |done_cb|
+  // with the final status when completed.
+  void DoInitialPreroll(const PipelineStatusCB& done_cb);
 
-  // Initiates a Seek() on the |demuxer_| & |pipeline_filter_|.
-  void DoSeek(base::TimeDelta seek_timestamp);
+  // Initiates an asynchronous pause-flush-seek-preroll call sequence
+  // executing |done_cb| with the final status when completed.
+  //
+  // TODO(scherkus): Prerolling should be separate from seeking so we can report
+  // finer grained ready states (HAVE_CURRENT_DATA vs. HAVE_FUTURE_DATA)
+  // indepentent from seeking.
+  void DoSeek(base::TimeDelta seek_timestamp, const PipelineStatusCB& done_cb);
 
-  // Called when |demuxer_| finishes seeking. If seeking was successful,
-  // then Seek() is called on |pipeline_filter_|.
-  void OnDemuxerSeekDone(base::TimeDelta seek_timestamp,
-                         PipelineStatus status);
+  // Updates playback rate and volume and initiates an asynchronous play call
+  // sequence executing |done_cb| with the final status when completed.
+  void DoPlay(const PipelineStatusCB& done_cb);
+
+  // Initiates an asynchronous pause-flush-stop call sequence executing
+  // |done_cb| when completed.
+  void DoStop(const PipelineStatusCB& done_cb);
+  void OnStopCompleted(PipelineStatus status);
 
   void OnAudioUnderflow();
-
-  // Called when |download_rate_monitor_| believes that the media can
-  // be played through without needing to pause to buffer.
-  void OnCanPlayThrough();
-
-  // Carries out the notification that the media can be played through without
-  // needing to pause to buffer.
-  void NotifyCanPlayThrough();
 
   void StartClockIfWaitingForTimeUpdate_Locked();
 
   // Message loop used to execute pipeline tasks.
-  MessageLoop* message_loop_;
+  scoped_refptr<base::MessageLoopProxy> message_loop_;
 
   // MediaLog to which to log events.
   scoped_refptr<MediaLog> media_log_;
@@ -496,29 +376,13 @@ class MEDIA_EXPORT Pipeline
   // Whether or not the pipeline is running.
   bool running_;
 
-  // Whether or not the pipeline is in transition for a seek operation.
-  bool seek_pending_;
-
-  // Whether or not the pipeline is pending a stop operation.
-  bool stop_pending_;
-
-  // Whether or not the pipeline is perform a stop operation.
-  bool tearing_down_;
-
-  // Whether or not an error triggered the teardown.
-  bool error_caused_teardown_;
-
-  // Whether or not a playback rate change should be done once seeking is done.
-  bool playback_rate_change_pending_;
-
-  // Duration of the media in microseconds.  Set by filters.
-  base::TimeDelta duration_;
-
-  // Amount of available buffered data in microseconds.  Set by filters.
-  base::TimeDelta buffered_time_;
-
   // Amount of available buffered data.  Set by filters.
-  int64 buffered_bytes_;
+  Ranges<int64> buffered_byte_ranges_;
+  Ranges<base::TimeDelta> buffered_time_ranges_;
+
+  // True when AddBufferedByteRange() has been called more recently than
+  // DidLoadingProgress().
+  mutable bool did_loading_progress_;
 
   // Total size of the media.  Set by filters.
   int64 total_bytes_;
@@ -526,31 +390,15 @@ class MEDIA_EXPORT Pipeline
   // Video's natural width and height.  Set by filters.
   gfx::Size natural_size_;
 
-  // Set by the demuxer to indicate whether the data source is a streaming
-  // source.
-  bool streaming_;
-
-  // Indicates whether the data source is local, such as a local media file
-  // from disk or a local webcam stream.
-  bool local_source_;
-
   // Current volume level (from 0.0f to 1.0f).  This value is set immediately
   // via SetVolume() and a task is dispatched on the message loop to notify the
   // filters.
   float volume_;
 
-  // Current value of preload attribute. This value is set immediately via
-  // SetPreload() and a task is dispatched on the message loop to notify the
-  // filters.
-  Preload preload_;
-
   // Current playback rate (>= 0.0f).  This value is set immediately via
   // SetPlaybackRate() and a task is dispatched on the message loop to notify
   // the filters.
   float playback_rate_;
-
-  // Playback rate to set when the current seek has finished.
-  float pending_playback_rate_;
 
   // Reference clock.  Keeps track of current playback time.  Uses system
   // clock and linear interpolation, but can have its time manually set
@@ -569,6 +417,9 @@ class MEDIA_EXPORT Pipeline
   PipelineStatus status_;
 
   // Whether the media contains rendered audio and video streams.
+  // TODO(fischman,scherkus): replace these with checks for
+  // {audio,video}_decoder_ once extraction of {Audio,Video}Decoder from the
+  // Filter heirarchy is done.
   bool has_audio_;
   bool has_video_;
 
@@ -578,68 +429,43 @@ class MEDIA_EXPORT Pipeline
   // Member that tracks the current state.
   State state_;
 
-  // For kSeeking we need to remember where we're seeking between filter
-  // replies.
-  base::TimeDelta seek_timestamp_;
-
-  // For GetCurrentBytes()/SetCurrentBytes() we need to know what byte we are
-  // currently reading.
-  int64 current_bytes_;
+  // Whether we've received the audio/video ended events.
+  bool audio_ended_;
+  bool video_ended_;
 
   // Set to true in DisableAudioRendererTask().
   bool audio_disabled_;
 
-  // Keep track of the maximum buffered position so the buffering appears
-  // smooth.
-  // TODO(vrk): This is a hack.
-  base::TimeDelta max_buffered_time_;
-
-  // Filter collection as passed in by Start().
   scoped_ptr<FilterCollection> filter_collection_;
 
-  // URL for the data source as passed in by Start().
-  std::string url_;
+  // Temporary callback used for Start() and Seek().
+  PipelineStatusCB seek_cb_;
 
-  // Callbacks for various pipeline operations.
-  PipelineStatusCB seek_callback_;
-  PipelineStatusCB stop_callback_;
-  PipelineStatusCB ended_callback_;
-  PipelineStatusCB error_callback_;
-  NetworkEventCB network_callback_;
+  // Temporary callback used for Stop().
+  base::Closure stop_cb_;
 
-  // Reference to the filter(s) that constitute the pipeline.
-  scoped_refptr<Filter> pipeline_filter_;
+  // Permanent callbacks passed in via Start().
+  PipelineStatusCB ended_cb_;
+  PipelineStatusCB error_cb_;
+  BufferingStateCB buffering_state_cb_;
 
-  // Decoder reference used for signalling imminent shutdown.
-  // This is a HACK necessary because WebMediaPlayerImpl::Destroy() holds the
-  // renderer thread loop hostage for until PipelineImpl::Stop() calls its
-  // callback.  http://crbug.com/110228 tracks removing this hack.
-  scoped_refptr<VideoDecoder> video_decoder_;
-
-  // Renderer references used for setting the volume and determining
-  // when playback has finished.
+  // Renderer references used for setting the volume, playback rate, and
+  // determining when playback has finished.
   scoped_refptr<AudioRenderer> audio_renderer_;
   scoped_refptr<VideoRenderer> video_renderer_;
 
   // Demuxer reference used for setting the preload value.
   scoped_refptr<Demuxer> demuxer_;
 
-  // Helper class that stores filter references during pipeline
-  // initialization.
-  class PipelineInitState;
-  scoped_ptr<PipelineInitState> pipeline_init_state_;
-
-  // Statistics.
   PipelineStatistics statistics_;
+
   // Time of pipeline creation; is non-zero only until the pipeline first
   // reaches "kStarted", at which point it is used & zeroed out.
   base::Time creation_time_;
 
-  // Approximates the rate at which the media is being downloaded.
-  DownloadRateMonitor download_rate_monitor_;
+  scoped_ptr<SerialRunner> pending_callbacks_;
 
-  // True if the pipeline is actively downloading bytes, false otherwise.
-  bool is_downloading_data_;
+  base::ThreadChecker thread_checker_;
 
   DISALLOW_COPY_AND_ASSIGN(Pipeline);
 };

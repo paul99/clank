@@ -1,10 +1,9 @@
-// Copyright (c) 2011 The Chromium Authors. All rights reserved.
+// Copyright (c) 2012 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
 #ifndef CHROME_BROWSER_SYNC_GLUE_SESSION_DATA_TYPE_CONTROLLER_H_
 #define CHROME_BROWSER_SYNC_GLUE_SESSION_DATA_TYPE_CONTROLLER_H_
-#pragma once
 
 #include <string>
 
@@ -24,12 +23,11 @@ class SessionDataTypeController : public FrontendDataTypeController,
       ProfileSyncComponentsFactory* profile_sync_factory,
       Profile* profile,
       ProfileSyncService* sync_service);
-  virtual ~SessionDataTypeController();
 
   SessionModelAssociator* GetModelAssociator();
 
   // FrontendDataTypeController implementation.
-  virtual syncable::ModelType type() const OVERRIDE;
+  virtual syncer::ModelType type() const OVERRIDE;
 
   // NotificationObserver interface.
   virtual void Observe(int type,
@@ -37,19 +35,13 @@ class SessionDataTypeController : public FrontendDataTypeController,
                        const content::NotificationDetails& details) OVERRIDE;
 
  private:
+  virtual ~SessionDataTypeController();
+
   // FrontendDataTypeController implementations.
   virtual bool StartModels() OVERRIDE;
   virtual void CleanUpState() OVERRIDE;
   // Datatype specific creation of sync components.
   virtual void CreateSyncComponents() OVERRIDE;
-  // Record unrecoverable errors.
-  virtual void RecordUnrecoverableError(
-      const tracked_objects::Location& from_here,
-      const std::string& message) OVERRIDE;
-  // Record association time.
-  virtual void RecordAssociationTime(base::TimeDelta time) OVERRIDE;
-  // Record causes of start failure.
-  virtual void RecordStartFailure(StartResult result) OVERRIDE;
 
   content::NotificationRegistrar notification_registrar_;
 
@@ -59,3 +51,4 @@ class SessionDataTypeController : public FrontendDataTypeController,
 }  // namespace browser_sync
 
 #endif  // CHROME_BROWSER_SYNC_GLUE_SESSION_DATA_TYPE_CONTROLLER_H_
+

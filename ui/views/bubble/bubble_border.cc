@@ -1,4 +1,4 @@
-// Copyright (c) 2011 The Chromium Authors. All rights reserved.
+// Copyright (c) 2012 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -8,77 +8,156 @@
 
 #include "base/logging.h"
 #include "grit/ui_resources.h"
-#include "grit/ui_resources_standard.h"
-#include "third_party/skia/include/core/SkBitmap.h"
 #include "ui/base/resource/resource_bundle.h"
-#include "ui/gfx/canvas_skia.h"
-#include "ui/gfx/path.h"
+#include "ui/gfx/canvas.h"
+#include "ui/gfx/image/image_skia.h"
+#include "ui/gfx/skia_util.h"
+
+namespace {
+
+// Stroke size in pixels of borders in image assets.
+const int kBorderStrokeSize = 1;
+
+// Border image resource ids.
+const int kShadowImages[] = {
+    IDR_BUBBLE_SHADOW_L,
+    IDR_BUBBLE_SHADOW_TL,
+    IDR_BUBBLE_SHADOW_T,
+    IDR_BUBBLE_SHADOW_TR,
+    IDR_BUBBLE_SHADOW_R,
+    IDR_BUBBLE_SHADOW_BR,
+    IDR_BUBBLE_SHADOW_B,
+    IDR_BUBBLE_SHADOW_BL,
+};
+
+const int kNoShadowImages[] = {
+    IDR_BUBBLE_L,
+    IDR_BUBBLE_TL,
+    IDR_BUBBLE_T,
+    IDR_BUBBLE_TR,
+    IDR_BUBBLE_R,
+    IDR_BUBBLE_BR,
+    IDR_BUBBLE_B,
+    IDR_BUBBLE_BL,
+    IDR_BUBBLE_L_ARROW,
+    IDR_BUBBLE_T_ARROW,
+    IDR_BUBBLE_R_ARROW,
+    IDR_BUBBLE_B_ARROW,
+};
+
+const int kBigShadowImages[] = {
+    IDR_WINDOW_BUBBLE_SHADOW_BIG_LEFT,
+    IDR_WINDOW_BUBBLE_SHADOW_BIG_TOP_LEFT,
+    IDR_WINDOW_BUBBLE_SHADOW_BIG_TOP,
+    IDR_WINDOW_BUBBLE_SHADOW_BIG_TOP_RIGHT,
+    IDR_WINDOW_BUBBLE_SHADOW_BIG_RIGHT,
+    IDR_WINDOW_BUBBLE_SHADOW_BIG_BOTTOM_RIGHT,
+    IDR_WINDOW_BUBBLE_SHADOW_BIG_BOTTOM,
+    IDR_WINDOW_BUBBLE_SHADOW_BIG_BOTTOM_LEFT,
+    IDR_WINDOW_BUBBLE_SHADOW_SPIKE_BIG_LEFT,
+    IDR_WINDOW_BUBBLE_SHADOW_SPIKE_BIG_TOP,
+    IDR_WINDOW_BUBBLE_SHADOW_SPIKE_BIG_RIGHT,
+    IDR_WINDOW_BUBBLE_SHADOW_SPIKE_BIG_BOTTOM,
+};
+
+const int kSmallShadowImages[] = {
+    IDR_WINDOW_BUBBLE_SHADOW_SMALL_LEFT,
+    IDR_WINDOW_BUBBLE_SHADOW_SMALL_TOP_LEFT,
+    IDR_WINDOW_BUBBLE_SHADOW_SMALL_TOP,
+    IDR_WINDOW_BUBBLE_SHADOW_SMALL_TOP_RIGHT,
+    IDR_WINDOW_BUBBLE_SHADOW_SMALL_RIGHT,
+    IDR_WINDOW_BUBBLE_SHADOW_SMALL_BOTTOM_RIGHT,
+    IDR_WINDOW_BUBBLE_SHADOW_SMALL_BOTTOM,
+    IDR_WINDOW_BUBBLE_SHADOW_SMALL_BOTTOM_LEFT,
+    IDR_WINDOW_BUBBLE_SHADOW_SPIKE_SMALL_LEFT,
+    IDR_WINDOW_BUBBLE_SHADOW_SPIKE_SMALL_TOP,
+    IDR_WINDOW_BUBBLE_SHADOW_SPIKE_SMALL_RIGHT,
+    IDR_WINDOW_BUBBLE_SHADOW_SPIKE_SMALL_BOTTOM,
+};
+
+}  // namespace
 
 namespace views {
 
 struct BubbleBorder::BorderImages {
-  BorderImages()
-      : left(NULL),
-        top_left(NULL),
-        top(NULL),
-        top_right(NULL),
-        right(NULL),
-        bottom_right(NULL),
-        bottom(NULL),
-        bottom_left(NULL),
-        left_arrow(NULL),
-        top_arrow(NULL),
-        right_arrow(NULL),
-        bottom_arrow(NULL),
-        border_thickness(0) {
+  BorderImages(const int image_ids[],
+               size_t image_ids_size,
+               int arrow_interior_height,
+               int border_thickness,
+               int corner_radius)
+      : arrow_interior_height(arrow_interior_height),
+        border_thickness(border_thickness),
+        corner_radius(corner_radius) {
+    // Only two possible sizes of image ids array.
+    DCHECK(image_ids_size == 12 || image_ids_size == 8);
+
+    ResourceBundle& rb = ResourceBundle::GetSharedInstance();
+
+    left = *rb.GetImageSkiaNamed(image_ids[0]);
+    top_left = *rb.GetImageSkiaNamed(image_ids[1]);
+    top = *rb.GetImageSkiaNamed(image_ids[2]);
+    top_right = *rb.GetImageSkiaNamed(image_ids[3]);
+    right = *rb.GetImageSkiaNamed(image_ids[4]);
+    bottom_right = *rb.GetImageSkiaNamed(image_ids[5]);
+    bottom = *rb.GetImageSkiaNamed(image_ids[6]);
+    bottom_left = *rb.GetImageSkiaNamed(image_ids[7]);
+
+    if (image_ids_size > 8) {
+      left_arrow = *rb.GetImageSkiaNamed(image_ids[8]);
+      top_arrow = *rb.GetImageSkiaNamed(image_ids[9]);
+      right_arrow = *rb.GetImageSkiaNamed(image_ids[10]);
+      bottom_arrow = *rb.GetImageSkiaNamed(image_ids[11]);
+    }
   }
 
-  SkBitmap* left;
-  SkBitmap* top_left;
-  SkBitmap* top;
-  SkBitmap* top_right;
-  SkBitmap* right;
-  SkBitmap* bottom_right;
-  SkBitmap* bottom;
-  SkBitmap* bottom_left;
-  SkBitmap* left_arrow;
-  SkBitmap* top_arrow;
-  SkBitmap* right_arrow;
-  SkBitmap* bottom_arrow;
+  gfx::ImageSkia left;
+  gfx::ImageSkia top_left;
+  gfx::ImageSkia top;
+  gfx::ImageSkia top_right;
+  gfx::ImageSkia right;
+  gfx::ImageSkia bottom_right;
+  gfx::ImageSkia bottom;
+  gfx::ImageSkia bottom_left;
+
+  gfx::ImageSkia left_arrow;
+  gfx::ImageSkia top_arrow;
+  gfx::ImageSkia right_arrow;
+  gfx::ImageSkia bottom_arrow;
+
+  int arrow_interior_height;  // The height inside the arrow image, in pixels.
   int border_thickness;
+  int corner_radius;
 };
 
 // static
-struct BubbleBorder::BorderImages* BubbleBorder::normal_images_ = NULL;
-struct BubbleBorder::BorderImages* BubbleBorder::shadow_images_ = NULL;
-
-
-// The height inside the arrow image, in pixels.
-static const int kArrowInteriorHeight = 7;
+struct BubbleBorder::BorderImages*
+    BubbleBorder::border_images_[SHADOW_COUNT] = { NULL };
 
 BubbleBorder::BubbleBorder(ArrowLocation arrow_location, Shadow shadow)
     : override_arrow_offset_(0),
       arrow_location_(arrow_location),
+      paint_arrow_(true),
       alignment_(ALIGN_ARROW_TO_MID_ANCHOR),
       background_color_(SK_ColorWHITE) {
+  DCHECK(shadow < SHADOW_COUNT);
   images_ = GetBorderImages(shadow);
 
   // Calculate horizontal and vertical insets for arrow by ensuring that
   // the widest arrow and corner images will have enough room to avoid overlap
   int offset_x =
-      (std::max(images_->top_arrow->width(),
-                images_->bottom_arrow->width()) / 2) +
-      std::max(std::max(images_->top_left->width(),
-                        images_->top_right->width()),
-               std::max(images_->bottom_left->width(),
-                        images_->bottom_right->width()));
+      (std::max(images_->top_arrow.width(),
+                images_->bottom_arrow.width()) / 2) +
+      std::max(std::max(images_->top_left.width(),
+                        images_->top_right.width()),
+               std::max(images_->bottom_left.width(),
+                        images_->bottom_right.width()));
   int offset_y =
-      (std::max(images_->left_arrow->height(),
-                images_->right_arrow->height()) / 2) +
-      std::max(std::max(images_->top_left->height(),
-                        images_->top_right->height()),
-               std::max(images_->bottom_left->height(),
-                        images_->bottom_right->height()));
+      (std::max(images_->left_arrow.height(),
+                images_->right_arrow.height()) / 2) +
+      std::max(std::max(images_->top_left.height(),
+                        images_->top_right.height()),
+               std::max(images_->bottom_left.height(),
+                        images_->bottom_right.height()));
   arrow_offset_ = std::max(offset_x, offset_y);
 }
 
@@ -86,44 +165,56 @@ gfx::Rect BubbleBorder::GetBounds(const gfx::Rect& position_relative_to,
                                   const gfx::Size& contents_size) const {
   // Desired size is size of contents enlarged by the size of the border images.
   gfx::Size border_size(contents_size);
-  gfx::Insets insets;
-  GetInsets(&insets);
+  gfx::Insets insets = GetInsets();
   border_size.Enlarge(insets.width(), insets.height());
 
+  // Ensure the bubble has a minimum size that draws arrows correctly.
+  if (is_arrow_on_horizontal(arrow_location_))
+    border_size.set_width(std::max(border_size.width(), 2 * arrow_offset_));
+  else if (has_arrow(arrow_location_))
+    border_size.set_height(std::max(border_size.height(), 2 * arrow_offset_));
+
   // Screen position depends on the arrow location.
-  // The arrow should overlap the target by some amount since there is space
-  // for shadow between arrow tip and bitmap bounds.
-  const int kArrowOverlap = 3;
+  // The bubble should overlap the target by some amount since there is space
+  // for shadow between arrow tip/bubble border and image bounds.
   int x = position_relative_to.x();
   int y = position_relative_to.y();
   int w = position_relative_to.width();
   int h = position_relative_to.height();
-  int arrow_offset = override_arrow_offset_ ? override_arrow_offset_ :
-                                              arrow_offset_;
+
+  const int arrow_size = images_->arrow_interior_height + kBorderStrokeSize;
+  const int arrow_offset = GetArrowOffset(border_size);
 
   // Calculate bubble x coordinate.
   switch (arrow_location_) {
     case TOP_LEFT:
     case BOTTOM_LEFT:
       x += alignment_ == ALIGN_ARROW_TO_MID_ANCHOR ? w / 2 - arrow_offset :
-           -kArrowOverlap;
+           -(images_->left.width() - kBorderStrokeSize);
       break;
 
     case TOP_RIGHT:
     case BOTTOM_RIGHT:
       x += alignment_ == ALIGN_ARROW_TO_MID_ANCHOR ?
           w / 2 + arrow_offset - border_size.width() + 1 :
-          w - border_size.width() + kArrowOverlap;
+          w - border_size.width() + images_->right.width() - kBorderStrokeSize;
       break;
 
     case LEFT_TOP:
+    case LEFT_CENTER:
     case LEFT_BOTTOM:
-      x += w - kArrowOverlap;
+      x += w - (images_->left_arrow.width() - arrow_size);
       break;
 
     case RIGHT_TOP:
+    case RIGHT_CENTER:
     case RIGHT_BOTTOM:
-      x += kArrowOverlap - border_size.width();
+      x += images_->right_arrow.width() - arrow_size - border_size.width();
+      break;
+
+    case TOP_CENTER:
+    case BOTTOM_CENTER:
+      x +=  w / 2 - arrow_offset;
       break;
 
     case NONE:
@@ -135,26 +226,35 @@ gfx::Rect BubbleBorder::GetBounds(const gfx::Rect& position_relative_to,
   // Calculate bubble y coordinate.
   switch (arrow_location_) {
     case TOP_LEFT:
+    case TOP_CENTER:
     case TOP_RIGHT:
-      y += h - kArrowOverlap;
+      y += h - (images_->top_arrow.height() - arrow_size);
       break;
 
     case BOTTOM_LEFT:
+    case BOTTOM_CENTER:
     case BOTTOM_RIGHT:
-      y += kArrowOverlap - border_size.height();
+      y += images_->bottom_arrow.height() - arrow_size -
+          border_size.height();
       break;
 
     case LEFT_TOP:
     case RIGHT_TOP:
       y += alignment_ == ALIGN_ARROW_TO_MID_ANCHOR ? h / 2 - arrow_offset :
-           -kArrowOverlap;
+           -(images_->top.height() - kBorderStrokeSize);
       break;
 
     case LEFT_BOTTOM:
     case RIGHT_BOTTOM:
       y += alignment_ == ALIGN_ARROW_TO_MID_ANCHOR ?
           h / 2 + arrow_offset - border_size.height() + 1 :
-          h - border_size.height() + kArrowOverlap;
+          h - border_size.height() + images_->bottom.height() -
+              kBorderStrokeSize;
+      break;
+
+    case LEFT_CENTER:
+    case RIGHT_CENTER:
+      y += h / 2 - arrow_offset;
       break;
 
     case NONE:
@@ -169,30 +269,39 @@ gfx::Rect BubbleBorder::GetBounds(const gfx::Rect& position_relative_to,
   return gfx::Rect(x, y, border_size.width(), border_size.height());
 }
 
-void BubbleBorder::GetInsets(gfx::Insets* insets) const {
-  int top = images_->top->height();
-  int bottom = images_->bottom->height();
-  int left = images_->left->width();
-  int right = images_->right->width();
-  switch (arrow_location_) {
+gfx::Insets BubbleBorder::GetInsets() const {
+  return GetInsetsForArrowLocation(arrow_location());
+}
+
+gfx::Insets BubbleBorder::GetInsetsForArrowLocation(
+    ArrowLocation arrow_loc) const {
+  int top = images_->top.height();
+  int bottom = images_->bottom.height();
+  int left = images_->left.width();
+  int right = images_->right.width();
+  switch (arrow_loc) {
     case TOP_LEFT:
+    case TOP_CENTER:
     case TOP_RIGHT:
-      top = std::max(top, images_->top_arrow->height());
+      top = std::max(top, images_->top_arrow.height());
       break;
 
     case BOTTOM_LEFT:
+    case BOTTOM_CENTER:
     case BOTTOM_RIGHT:
-      bottom = std::max(bottom, images_->bottom_arrow->height());
+      bottom = std::max(bottom, images_->bottom_arrow.height());
       break;
 
     case LEFT_TOP:
+    case LEFT_CENTER:
     case LEFT_BOTTOM:
-      left = std::max(left, images_->left_arrow->width());
+      left = std::max(left, images_->left_arrow.width());
       break;
 
     case RIGHT_TOP:
+    case RIGHT_CENTER:
     case RIGHT_BOTTOM:
-      right = std::max(right, images_->right_arrow->width());
+      right = std::max(right, images_->right_arrow.width());
       break;
 
     case NONE:
@@ -200,83 +309,92 @@ void BubbleBorder::GetInsets(gfx::Insets* insets) const {
       // Nothing to do.
       break;
   }
-  insets->Set(top, left, bottom, right);
+  return gfx::Insets(top, left, bottom, right);
 }
 
-int BubbleBorder::border_thickness() const {
+int BubbleBorder::GetBorderThickness() const {
   return images_->border_thickness;
 }
 
-int BubbleBorder::SetArrowOffset(int offset, const gfx::Size& contents_size) {
-  gfx::Size border_size(contents_size);
-  gfx::Insets insets;
-  GetInsets(&insets);
-  border_size.Enlarge(insets.left() + insets.right(),
-                      insets.top() + insets.bottom());
-  offset = std::max(arrow_offset_,
-      std::min(offset, (is_arrow_on_horizontal(arrow_location_) ?
+int BubbleBorder::GetBorderCornerRadius() const {
+  return images_->corner_radius;
+}
+
+int BubbleBorder::GetArrowOffset(const gfx::Size& border_size) const {
+  int arrow_offset = arrow_offset_;
+  if (override_arrow_offset_) {
+    arrow_offset = override_arrow_offset_;
+  } else if (is_arrow_at_center(arrow_location_)) {
+    if (is_arrow_on_horizontal(arrow_location_))
+      arrow_offset = border_size.width() / 2;
+    else
+      arrow_offset = border_size.height() / 2;
+  }
+
+  // |arrow_offset_| contains the minimum offset required to draw border images
+  // correctly. It's defined in terms of number of pixels from the beginning of
+  // the edge. The maximum arrow offset is the edge size - |arrow_offset_|. The
+  // following statement clamps the calculated arrow offset within that range.
+  return std::max(arrow_offset_,
+      std::min(arrow_offset, (is_arrow_on_horizontal(arrow_location_) ?
           border_size.width() : border_size.height()) - arrow_offset_));
-  override_arrow_offset_ = offset;
-  return override_arrow_offset_;
 }
 
 // static
 BubbleBorder::BorderImages* BubbleBorder::GetBorderImages(Shadow shadow) {
-  if (shadow == SHADOW && shadow_images_ == NULL) {
-    ResourceBundle& rb = ResourceBundle::GetSharedInstance();
-    shadow_images_ = new BorderImages();
-    shadow_images_->left = rb.GetBitmapNamed(IDR_BUBBLE_SHADOW_L);
-    shadow_images_->top_left = rb.GetBitmapNamed(IDR_BUBBLE_SHADOW_TL);
-    shadow_images_->top = rb.GetBitmapNamed(IDR_BUBBLE_SHADOW_T);
-    shadow_images_->top_right = rb.GetBitmapNamed(IDR_BUBBLE_SHADOW_TR);
-    shadow_images_->right = rb.GetBitmapNamed(IDR_BUBBLE_SHADOW_R);
-    shadow_images_->bottom_right = rb.GetBitmapNamed(IDR_BUBBLE_SHADOW_BR);
-    shadow_images_->bottom = rb.GetBitmapNamed(IDR_BUBBLE_SHADOW_B);
-    shadow_images_->bottom_left = rb.GetBitmapNamed(IDR_BUBBLE_SHADOW_BL);
-    shadow_images_->left_arrow = new SkBitmap();
-    shadow_images_->top_arrow = new SkBitmap();
-    shadow_images_->right_arrow = new SkBitmap();
-    shadow_images_->bottom_arrow = new SkBitmap();
-    shadow_images_->border_thickness = 10;
-  } else if (shadow == NO_SHADOW && normal_images_ == NULL) {
-    ResourceBundle& rb = ResourceBundle::GetSharedInstance();
-    normal_images_ = new BorderImages();
-    normal_images_->left = rb.GetBitmapNamed(IDR_BUBBLE_L);
-    normal_images_->top_left = rb.GetBitmapNamed(IDR_BUBBLE_TL);
-    normal_images_->top = rb.GetBitmapNamed(IDR_BUBBLE_T);
-    normal_images_->top_right = rb.GetBitmapNamed(IDR_BUBBLE_TR);
-    normal_images_->right = rb.GetBitmapNamed(IDR_BUBBLE_R);
-    normal_images_->bottom_right = rb.GetBitmapNamed(IDR_BUBBLE_BR);
-    normal_images_->bottom = rb.GetBitmapNamed(IDR_BUBBLE_B);
-    normal_images_->bottom_left = rb.GetBitmapNamed(IDR_BUBBLE_BL);
-    normal_images_->left_arrow = rb.GetBitmapNamed(IDR_BUBBLE_L_ARROW);
-    normal_images_->top_arrow = rb.GetBitmapNamed(IDR_BUBBLE_T_ARROW);
-    normal_images_->right_arrow = rb.GetBitmapNamed(IDR_BUBBLE_R_ARROW);
-    normal_images_->bottom_arrow = rb.GetBitmapNamed(IDR_BUBBLE_B_ARROW);
-    normal_images_->border_thickness = 0;
+  CHECK_LT(shadow, SHADOW_COUNT);
+
+  struct BorderImages*& images = border_images_[shadow];
+  if (images)
+    return images;
+
+  switch (shadow) {
+    case SHADOW:
+      images = new BorderImages(kShadowImages,
+                                arraysize(kShadowImages),
+                                0, 10, 4);
+      break;
+    case NO_SHADOW:
+      images = new BorderImages(kNoShadowImages,
+                                arraysize(kNoShadowImages),
+                                7, 0, 4);
+      break;
+    case BIG_SHADOW:
+      images = new BorderImages(kBigShadowImages,
+                                arraysize(kBigShadowImages),
+                                9, 0, 3);
+      break;
+    case SMALL_SHADOW:
+      images = new BorderImages(kSmallShadowImages,
+                                arraysize(kSmallShadowImages),
+                                9, 0, 3);
+      break;
+    case SHADOW_COUNT:
+      NOTREACHED();
+      break;
   }
-  return shadow == SHADOW ? shadow_images_ : normal_images_;
+
+  return images;
 }
 
 BubbleBorder::~BubbleBorder() {}
 
-void BubbleBorder::Paint(const views::View& view, gfx::Canvas* canvas) const {
+void BubbleBorder::Paint(const views::View& view, gfx::Canvas* canvas) {
   // Convenience shorthand variables.
-  const int tl_width = images_->top_left->width();
-  const int tl_height = images_->top_left->height();
-  const int t_height = images_->top->height();
-  const int tr_width = images_->top_right->width();
-  const int tr_height = images_->top_right->height();
-  const int l_width = images_->left->width();
-  const int r_width = images_->right->width();
-  const int br_width = images_->bottom_right->width();
-  const int br_height = images_->bottom_right->height();
-  const int b_height = images_->bottom->height();
-  const int bl_width = images_->bottom_left->width();
-  const int bl_height = images_->bottom_left->height();
+  const int tl_width = images_->top_left.width();
+  const int tl_height = images_->top_left.height();
+  const int t_height = images_->top.height();
+  const int tr_width = images_->top_right.width();
+  const int tr_height = images_->top_right.height();
+  const int l_width = images_->left.width();
+  const int r_width = images_->right.width();
+  const int br_width = images_->bottom_right.width();
+  const int br_height = images_->bottom_right.height();
+  const int b_height = images_->bottom.height();
+  const int bl_width = images_->bottom_left.width();
+  const int bl_height = images_->bottom_left.height();
 
-  gfx::Insets insets;
-  GetInsets(&insets);
+  gfx::Insets insets = GetInsets();
   const int top = insets.top() - t_height;
   const int bottom = view.height() - insets.bottom() + b_height;
   const int left = insets.left() - l_width;
@@ -284,32 +402,33 @@ void BubbleBorder::Paint(const views::View& view, gfx::Canvas* canvas) const {
   const int height = bottom - top;
   const int width = right - left;
 
-  // |arrow_offset| is offset of arrow from the begining of the edge.
-  int arrow_offset = arrow_offset_;
-  if (override_arrow_offset_)
-    arrow_offset = override_arrow_offset_;
-  else if (is_arrow_on_horizontal(arrow_location_) &&
-           !is_arrow_on_left(arrow_location_)) {
-    arrow_offset = view.width() - arrow_offset - 1;
-  } else if (!is_arrow_on_horizontal(arrow_location_) &&
-             !is_arrow_on_top(arrow_location_)) {
-    arrow_offset = view.height() - arrow_offset - 1;
+  const ArrowLocation arrow_location = paint_arrow_ ? arrow_location_ : NONE;
+
+  // |arrow_offset| is offset of arrow from the beginning of the edge.
+  int arrow_offset = GetArrowOffset(view.size());
+  if (!is_arrow_at_center(arrow_location)) {
+    if (is_arrow_on_horizontal(arrow_location) &&
+        !is_arrow_on_left(arrow_location)) {
+      arrow_offset = view.width() - arrow_offset - 1;
+    } else if (!is_arrow_on_horizontal(arrow_location) &&
+               !is_arrow_on_top(arrow_location)) {
+      arrow_offset = view.height() - arrow_offset - 1;
+    }
   }
 
   // Left edge.
-  if (arrow_location_ == LEFT_TOP || arrow_location_ == LEFT_BOTTOM) {
+  if (arrow_location == LEFT_TOP ||
+      arrow_location == LEFT_CENTER ||
+      arrow_location == LEFT_BOTTOM) {
     int start_y = top + tl_height;
     int before_arrow =
-        arrow_offset - start_y - images_->left_arrow->height() / 2;
+        arrow_offset - start_y - images_->left_arrow.height() / 2;
     int after_arrow = height - tl_height - bl_height -
-        images_->left_arrow->height() - before_arrow;
-    int tip_y = start_y + before_arrow + images_->left_arrow->height() / 2;
+        images_->left_arrow.height() - before_arrow;
+    // Shift tip coordinates half pixel so that skia draws the tip correctly.
     DrawArrowInterior(canvas,
-                      false,
-                      images_->left_arrow->width() - kArrowInteriorHeight,
-                      tip_y,
-                      kArrowInteriorHeight,
-                      images_->left_arrow->height() / 2 - 1);
+        images_->left_arrow.width() - images_->arrow_interior_height - 0.5f,
+        start_y + before_arrow + images_->left_arrow.height() / 2 - 0.5f);
     DrawEdgeWithArrow(canvas,
                       false,
                       images_->left,
@@ -318,27 +437,26 @@ void BubbleBorder::Paint(const views::View& view, gfx::Canvas* canvas) const {
                       start_y,
                       before_arrow,
                       after_arrow,
-                      images_->left->width() - images_->left_arrow->width());
+                      images_->left.width() - images_->left_arrow.width());
   } else {
-    canvas->TileImageInt(*images_->left, left, top + tl_height, l_width,
+    canvas->TileImageInt(images_->left, left, top + tl_height, l_width,
                          height - tl_height - bl_height);
   }
 
   // Top left corner.
-  canvas->DrawBitmapInt(*images_->top_left, left, top);
+  canvas->DrawImageInt(images_->top_left, left, top);
 
   // Top edge.
-  if (arrow_location_ == TOP_LEFT || arrow_location_ == TOP_RIGHT) {
+  if (arrow_location == TOP_LEFT ||
+      arrow_location == TOP_CENTER ||
+      arrow_location == TOP_RIGHT) {
     int start_x = left + tl_width;
-    int before_arrow = arrow_offset - start_x - images_->top_arrow->width() / 2;
+    int before_arrow = arrow_offset - start_x - images_->top_arrow.width() / 2;
     int after_arrow = width - tl_width - tr_width -
-        images_->top_arrow->width() - before_arrow;
+        images_->top_arrow.width() - before_arrow;
     DrawArrowInterior(canvas,
-                      true,
-                      start_x + before_arrow + images_->top_arrow->width() / 2,
-                      images_->top_arrow->height() - kArrowInteriorHeight,
-                      1 - images_->top_arrow->width() / 2,
-                      kArrowInteriorHeight);
+        start_x + before_arrow + images_->top_arrow.width() / 2,
+        images_->top_arrow.height() - images_->arrow_interior_height);
     DrawEdgeWithArrow(canvas,
                       true,
                       images_->top,
@@ -347,29 +465,28 @@ void BubbleBorder::Paint(const views::View& view, gfx::Canvas* canvas) const {
                       top,
                       before_arrow,
                       after_arrow,
-                      images_->top->height() - images_->top_arrow->height());
+                      images_->top.height() - images_->top_arrow.height());
   } else {
-    canvas->TileImageInt(*images_->top, left + tl_width, top,
+    canvas->TileImageInt(images_->top, left + tl_width, top,
                          width - tl_width - tr_width, t_height);
   }
 
   // Top right corner.
-  canvas->DrawBitmapInt(*images_->top_right, right - tr_width, top);
+  canvas->DrawImageInt(images_->top_right, right - tr_width, top);
 
   // Right edge.
-  if (arrow_location_ == RIGHT_TOP || arrow_location_ == RIGHT_BOTTOM) {
+  if (arrow_location == RIGHT_TOP ||
+      arrow_location == RIGHT_CENTER ||
+      arrow_location == RIGHT_BOTTOM) {
     int start_y = top + tr_height;
     int before_arrow =
-        arrow_offset - start_y - images_->right_arrow->height() / 2;
+        arrow_offset - start_y - images_->right_arrow.height() / 2;
     int after_arrow = height - tl_height - bl_height -
-        images_->right_arrow->height() - before_arrow;
-    int tip_y = start_y + before_arrow + images_->right_arrow->height() / 2;
+        images_->right_arrow.height() - before_arrow;
+    // Shift tip coordinates half pixel so that skia draws the tip correctly.
     DrawArrowInterior(canvas,
-                      false,
-                      right - r_width + kArrowInteriorHeight,
-                      tip_y,
-                      -kArrowInteriorHeight,
-                      images_->right_arrow->height() / 2 - 1);
+        right - r_width + images_->arrow_interior_height - 0.5f,
+        start_y + before_arrow + images_->right_arrow.height() / 2 - 0.5f);
     DrawEdgeWithArrow(canvas,
                       false,
                       images_->right,
@@ -380,29 +497,27 @@ void BubbleBorder::Paint(const views::View& view, gfx::Canvas* canvas) const {
                       after_arrow,
                       0);
   } else {
-    canvas->TileImageInt(*images_->right, right - r_width, top + tr_height,
+    canvas->TileImageInt(images_->right, right - r_width, top + tr_height,
                          r_width, height - tr_height - br_height);
   }
 
   // Bottom right corner.
-  canvas->DrawBitmapInt(*images_->bottom_right,
-                        right - br_width,
-                        bottom - br_height);
+  canvas->DrawImageInt(images_->bottom_right,
+                       right - br_width,
+                       bottom - br_height);
 
   // Bottom edge.
-  if (arrow_location_ == BOTTOM_LEFT || arrow_location_ == BOTTOM_RIGHT) {
+  if (arrow_location == BOTTOM_LEFT ||
+      arrow_location == BOTTOM_CENTER ||
+      arrow_location == BOTTOM_RIGHT) {
     int start_x = left + bl_width;
     int before_arrow =
-        arrow_offset - start_x - images_->bottom_arrow->width() / 2;
+        arrow_offset - start_x - images_->bottom_arrow.width() / 2;
     int after_arrow = width - bl_width - br_width -
-        images_->bottom_arrow->width() - before_arrow;
-    int tip_x = start_x + before_arrow + images_->bottom_arrow->width() / 2;
+        images_->bottom_arrow.width() - before_arrow;
     DrawArrowInterior(canvas,
-                      true,
-                      tip_x,
-                      bottom - b_height + kArrowInteriorHeight,
-                      1 - images_->bottom_arrow->width() / 2,
-                      -kArrowInteriorHeight);
+        start_x + before_arrow + images_->bottom_arrow.width() / 2,
+        bottom - b_height + images_->arrow_interior_height);
     DrawEdgeWithArrow(canvas,
                       true,
                       images_->bottom,
@@ -413,18 +528,18 @@ void BubbleBorder::Paint(const views::View& view, gfx::Canvas* canvas) const {
                       after_arrow,
                       0);
   } else {
-    canvas->TileImageInt(*images_->bottom, left + bl_width, bottom - b_height,
+    canvas->TileImageInt(images_->bottom, left + bl_width, bottom - b_height,
                          width - bl_width - br_width, b_height);
   }
 
   // Bottom left corner.
-  canvas->DrawBitmapInt(*images_->bottom_left, left, bottom - bl_height);
+  canvas->DrawImageInt(images_->bottom_left, left, bottom - bl_height);
 }
 
 void BubbleBorder::DrawEdgeWithArrow(gfx::Canvas* canvas,
                                      bool is_horizontal,
-                                     SkBitmap* edge,
-                                     SkBitmap* arrow,
+                                     const gfx::ImageSkia& edge,
+                                     const gfx::ImageSkia& arrow,
                                      int start_x,
                                      int start_y,
                                      int before_arrow,
@@ -442,61 +557,63 @@ void BubbleBorder::DrawEdgeWithArrow(gfx::Canvas* canvas,
    *             before_arrow ─┘            └─ after_arrow
    */
   if (before_arrow) {
-    canvas->TileImageInt(*edge, start_x, start_y,
-        is_horizontal ? before_arrow : edge->width(),
-        is_horizontal ? edge->height() : before_arrow);
+    canvas->TileImageInt(edge, start_x, start_y,
+        is_horizontal ? before_arrow : edge.width(),
+        is_horizontal ? edge.height() : before_arrow);
   }
 
-  canvas->DrawBitmapInt(*arrow,
+  canvas->DrawImageInt(arrow,
       start_x + (is_horizontal ? before_arrow : offset),
       start_y + (is_horizontal ? offset : before_arrow));
 
   if (after_arrow) {
-    start_x += (is_horizontal ? before_arrow + arrow->width() : 0);
-    start_y += (is_horizontal ? 0 : before_arrow + arrow->height());
-    canvas->TileImageInt(*edge, start_x, start_y,
-        is_horizontal ? after_arrow : edge->width(),
-        is_horizontal ? edge->height() : after_arrow);
+    start_x += (is_horizontal ? before_arrow + arrow.width() : 0);
+    start_y += (is_horizontal ? 0 : before_arrow + arrow.height());
+    canvas->TileImageInt(edge, start_x, start_y,
+        is_horizontal ? after_arrow : edge.width(),
+        is_horizontal ? edge.height() : after_arrow);
   }
 }
 
 void BubbleBorder::DrawArrowInterior(gfx::Canvas* canvas,
-                                     bool is_horizontal,
-                                     int tip_x,
-                                     int tip_y,
-                                     int shift_x,
-                                     int shift_y) const {
-  /* This function fills the interior of the arrow with background color.
-   * It draws isosceles triangle under semitransparent arrow tip.
-   *
-   * Here's what the parameters mean:
-   *
-   *    ┌──────── |tip_x|
-   * ┌─────┐
-   * │  ▲  │ ──── |tip y|
-   * │∙∙∙∙∙│ ┐
-   * └─────┘ └─── |shift_x| (offset from tip to vertexes of isosceles triangle)
-   *  └────────── |shift_y|
-   */
+                                     float tip_x,
+                                     float tip_y) const {
+  const bool is_horizontal = is_arrow_on_horizontal(arrow_location_);
+  const bool positive_offset = is_horizontal ?
+      is_arrow_on_top(arrow_location_) : is_arrow_on_left(arrow_location_);
+  const int offset_to_next_vertex = positive_offset ?
+      images_->arrow_interior_height : -images_->arrow_interior_height;
+
+  SkPath path;
+  path.incReserve(4);
+  path.moveTo(SkDoubleToScalar(tip_x), SkDoubleToScalar(tip_y));
+  path.lineTo(SkDoubleToScalar(tip_x + offset_to_next_vertex),
+              SkDoubleToScalar(tip_y + offset_to_next_vertex));
+  if (is_horizontal) {
+    path.lineTo(SkDoubleToScalar(tip_x - offset_to_next_vertex),
+                SkDoubleToScalar(tip_y + offset_to_next_vertex));
+  } else {
+    path.lineTo(SkDoubleToScalar(tip_x + offset_to_next_vertex),
+                SkDoubleToScalar(tip_y - offset_to_next_vertex));
+  }
+  path.close();
+
   SkPaint paint;
   paint.setStyle(SkPaint::kFill_Style);
   paint.setColor(background_color_);
-  gfx::Path path;
-  path.incReserve(4);
-  path.moveTo(SkIntToScalar(tip_x), SkIntToScalar(tip_y));
-  path.lineTo(SkIntToScalar(tip_x + shift_x),
-              SkIntToScalar(tip_y + shift_y));
-  if (is_horizontal)
-    path.lineTo(SkIntToScalar(tip_x - shift_x), SkIntToScalar(tip_y + shift_y));
-  else
-    path.lineTo(SkIntToScalar(tip_x + shift_x), SkIntToScalar(tip_y - shift_y));
-  path.close();
-  canvas->GetSkCanvas()->drawPath(path, paint);
+
+  canvas->DrawPath(path, paint);
 }
 
 /////////////////////////
 
 void BubbleBackground::Paint(gfx::Canvas* canvas, views::View* view) const {
+  // Clip out the client bounds to prevent overlapping transparent widgets.
+  if (!border_->client_bounds().IsEmpty()) {
+    SkRect client_rect(gfx::RectToSkRect(border_->client_bounds()));
+    canvas->sk_canvas()->clipRect(client_rect, SkRegion::kDifference_Op);
+  }
+
   // The border of this view creates an anti-aliased round-rect region for the
   // contents, which we need to fill with the background color.
   // NOTE: This doesn't handle an arrow location of "NONE", which has square top
@@ -505,15 +622,12 @@ void BubbleBackground::Paint(gfx::Canvas* canvas, views::View* view) const {
   paint.setAntiAlias(true);
   paint.setStyle(SkPaint::kFill_Style);
   paint.setColor(border_->background_color());
-  gfx::Path path;
+  SkPath path;
   gfx::Rect bounds(view->GetContentsBounds());
-  SkRect rect;
-  rect.set(SkIntToScalar(bounds.x()), SkIntToScalar(bounds.y()),
-           SkIntToScalar(bounds.right()), SkIntToScalar(bounds.bottom()));
-  rect.inset(-border_->border_thickness(), -border_->border_thickness());
-  SkScalar radius = SkIntToScalar(BubbleBorder::GetCornerRadius());
-  path.addRoundRect(rect, radius, radius);
-  canvas->GetSkCanvas()->drawPath(path, paint);
+  bounds.Inset(-border_->GetBorderThickness(), -border_->GetBorderThickness());
+  SkScalar radius = SkIntToScalar(border_->GetBorderCornerRadius());
+  path.addRoundRect(gfx::RectToSkRect(bounds), radius, radius);
+  canvas->DrawPath(path, paint);
 }
 
 }  // namespace views

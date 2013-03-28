@@ -1,10 +1,9 @@
-// Copyright (c) 2011 The Chromium Authors. All rights reserved.
+// Copyright (c) 2012 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
 #ifndef CHROME_BROWSER_UI_VIEWS_CHROME_VIEWS_DELEGATE_H_
 #define CHROME_BROWSER_UI_VIEWS_CHROME_VIEWS_DELEGATE_H_
-#pragma once
 
 #include "base/basictypes.h"
 #include "base/compiler_specific.h"
@@ -18,7 +17,6 @@ class ChromeViewsDelegate : public views::ViewsDelegate {
   virtual ~ChromeViewsDelegate() {}
 
   // Overridden from views::ViewsDelegate:
-  virtual ui::Clipboard* GetClipboard() const OVERRIDE;
   virtual void SaveWindowPlacement(const views::Widget* window,
                                    const std::string& window_name,
                                    const gfx::Rect& bounds,
@@ -40,10 +38,18 @@ class ChromeViewsDelegate : public views::ViewsDelegate {
 #endif
   virtual views::NonClientFrameView* CreateDefaultNonClientFrameView(
       views::Widget* widget) OVERRIDE;
+  virtual bool UseTransparentWindows() const OVERRIDE;
   virtual void AddRef() OVERRIDE;
   virtual void ReleaseRef() OVERRIDE;
-
   virtual int GetDispositionForEvent(int event_flags) OVERRIDE;
+  virtual content::WebContents* CreateWebContents(
+      content::BrowserContext* browser_context,
+      content::SiteInstance* site_instance) OVERRIDE;
+  virtual views::NativeWidget* CreateNativeWidget(
+      views::Widget::InitParams::Type type,
+      views::internal::NativeWidgetDelegate* delegate,
+      gfx::NativeView parent,
+      gfx::NativeView context) OVERRIDE;
 
  private:
   DISALLOW_COPY_AND_ASSIGN(ChromeViewsDelegate);

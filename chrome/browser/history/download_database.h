@@ -4,16 +4,13 @@
 
 #ifndef CHROME_BROWSER_HISTORY_DOWNLOAD_DATABASE_H_
 #define CHROME_BROWSER_HISTORY_DOWNLOAD_DATABASE_H_
-#pragma once
 
-#include <set>
 #include <string>
+#include <vector>
 
 #include "base/threading/platform_thread.h"
-#include "chrome/browser/history/history_types.h"
 #include "sql/meta_table.h"
 
-struct DownloadPersistentStoreInfo;
 class FilePath;
 
 namespace sql {
@@ -22,9 +19,15 @@ class Connection;
 
 namespace history {
 
+struct DownloadRow;
+
 // Maintains a table of downloads.
 class DownloadDatabase {
  public:
+  // The value of |db_handle| indicating that the associated DownloadItem is not
+  // yet persisted.
+  static const int64 kUninitializedHandle;
+
   // Must call InitDownloadTable before using any other functions.
   DownloadDatabase();
   virtual ~DownloadDatabase();
@@ -32,15 +35,13 @@ class DownloadDatabase {
   int next_download_id() const { return next_id_; }
 
   // Get all the downloads from the database.
-  void QueryDownloads(std::vector<DownloadPersistentStoreInfo>* results);
+  void QueryDownloads(
+      std::vector<DownloadRow>* results);
 
   // Update the state of one download. Returns true if successful.
-  // Does not update |url|, |start_time|, |total_bytes|; uses |db_handle| only
+  // Does not update |url|, |start_time|; uses |db_handle| only
   // to select the row in the database table to update.
-  bool UpdateDownload(const DownloadPersistentStoreInfo& data);
-
-  // Update the path of one download. Returns true if successful.
-  bool UpdateDownloadPath(const FilePath& path, DownloadID db_handle);
+  bool UpdateDownload(const DownloadRow& data);
 
   // Fixes state of the download entries. Sometimes entries with IN_PROGRESS
   // state are not updated during browser shutdown (particularly when crashing).
@@ -49,20 +50,24 @@ class DownloadDatabase {
   bool CleanUpInProgressEntries();
 
   // Create a new database entry for one download and return its primary db id.
-  int64 CreateDownload(const DownloadPersistentStoreInfo& info);
+  int64 CreateDownload(const DownloadRow& info);
 
-  // Remove a download from the database.
-  void RemoveDownload(DownloadID db_handle);
+  // Remove |handle| from the database.
+  void RemoveDownload(int64 handle);
 
-  // Remove all completed downloads that started after |remove_begin|
-  // (inclusive) and before |remove_end|. You may use null Time values
-  // to do an unbounded delete in either direction. This function ignores
-  // all downloads that are in progress or are waiting to be cancelled.
-  bool RemoveDownloadsBetween(base::Time remove_begin, base::Time remove_end);
+  int CountDownloads();
 
  protected:
   // Returns the database for the functions in this interface.
   virtual sql::Connection& GetDB() = 0;
+
+  // Returns the meta-table object for the functions in this interface.
+  virtual sql::MetaTable& GetMetaTable() = 0;
+
+  // Returns true if able to successfully rewrite the invalid values for the
+  // |state| field from 3 to 4. Returns false if there was an error fixing the
+  // database. See http://crbug.com/140687
+  bool MigrateDownloadsState();
 
   // Creates the downloads table if needed.
   bool InitDownloadTable();
@@ -72,9 +77,6 @@ class DownloadDatabase {
   bool DropDownloadTable();
 
  private:
-  // TODO(rdsmith): Remove after http://crbug.com/96627 has been resolved.
-  void CheckThread();
-
   bool EnsureColumnExists(const std::string& name, const std::string& type);
 
   bool owning_thread_set_;
@@ -82,7 +84,6 @@ class DownloadDatabase {
 
   int next_id_;
   int next_db_handle_;
-  sql::MetaTable meta_table_;
 
   DISALLOW_COPY_AND_ASSIGN(DownloadDatabase);
 };

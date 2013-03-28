@@ -1,4 +1,4 @@
-# Copyright (c) 2011 The Chromium Authors. All rights reserved.
+# Copyright (c) 2012 The Chromium Authors. All rights reserved.
 # Use of this source code is governed by a BSD-style license that can be
 # found in the LICENSE file.
 
@@ -38,6 +38,8 @@
         '../build/temp_gyp/googleurl.gyp:googleurl',
         '<(DEPTH)/base/base.gyp:base',
         '<(DEPTH)/base/base.gyp:base_i18n',
+        '<(DEPTH)/base/third_party/dynamic_annotations/dynamic_annotations.gyp:dynamic_annotations',
+        '<(DEPTH)/gpu/gpu.gyp:gles2_c_lib',
         '<(DEPTH)/media/media.gyp:media',
         '<(DEPTH)/net/net.gyp:net',
         '<(DEPTH)/skia/skia.gyp:skia',
@@ -45,32 +47,24 @@
         '<(DEPTH)/testing/gtest.gyp:gtest',
         '<(DEPTH)/third_party/WebKit/Source/WebKit/chromium/WebKit.gyp:inspector_resources',
         '<(DEPTH)/third_party/WebKit/Source/WebKit/chromium/WebKit.gyp:webkit',
+        '<(DEPTH)/ui/native_theme/native_theme.gyp:native_theme',
         '<(DEPTH)/v8/tools/gyp/v8.gyp:v8',
-        '<(DEPTH)/webkit/support/webkit_support.gyp:appcache',
-        '<(DEPTH)/webkit/support/webkit_support.gyp:blob',
-        '<(DEPTH)/webkit/support/webkit_support.gyp:database',
-        '<(DEPTH)/webkit/support/webkit_support.gyp:fileapi',
         '<(DEPTH)/webkit/support/webkit_support.gyp:glue',
-        '<(DEPTH)/webkit/support/webkit_support.gyp:quota',
+        '<(DEPTH)/webkit/support/webkit_support.gyp:user_agent',
+        '<(DEPTH)/webkit/support/webkit_support.gyp:webkit_base',
         '<(DEPTH)/webkit/support/webkit_support.gyp:webkit_gpu',
         '<(DEPTH)/webkit/support/webkit_support.gyp:webkit_media',
         '<(DEPTH)/webkit/support/webkit_support.gyp:webkit_resources',
+        '<(DEPTH)/webkit/support/webkit_support.gyp:webkit_storage',
         '<(DEPTH)/webkit/support/webkit_support.gyp:webkit_support_common',
-        '<(DEPTH)/webkit/support/webkit_support.gyp:webkit_user_agent',
       ],
       'sources': [
         'mac/test_shell_webview.h',
         'mac/test_shell_webview.mm',
-        'mac/test_webview_delegate.mm',
-        'mac/webview_host.mm',
-        'mac/webwidget_host.mm',
         'accessibility_ui_element.cc',
         'accessibility_ui_element.h',
         'drop_delegate.cc',
         'drop_delegate.h',
-        'foreground_helper.h',
-        'layout_test_controller.cc',
-        'layout_test_controller.h',
         'mock_spellcheck.cc',
         'mock_spellcheck.h',
         'notification_presenter.cc',
@@ -86,12 +80,10 @@
         'test_shell_devtools_callargs.h',
         'test_shell_devtools_client.cc',
         'test_shell_devtools_client.h',
-        'test_shell_android.cc',
         'test_shell_gtk.cc',
         'test_shell_x11.cc',
         'test_shell_mac.mm',
         'test_shell_platform_delegate.h',
-        'test_shell_platform_delegate_android.cc',
         'test_shell_platform_delegate_gtk.cc',
         'test_shell_platform_delegate_mac.mm',
         'test_shell_platform_delegate_win.cc',
@@ -106,17 +98,17 @@
         'test_shell_webthemeengine.cc',
         'test_webview_delegate.cc',
         'test_webview_delegate.h',
-        'test_webview_delegate_android.cc',
+        'test_webview_delegate_mac.mm',
         'test_webview_delegate_gtk.cc',
         'test_webview_delegate_win.cc',
         'webview_host.h',
-        'webview_host_android.cc',
         'webview_host_gtk.cc',
+        'webview_host_mac.mm',
         'webview_host_win.cc',
         'webwidget_host.h',
         'webwidget_host.cc',
-        'webwidget_host_android.cc',
         'webwidget_host_gtk.cc',
+        'webwidget_host_mac.mm',
         'webwidget_host_win.cc',
       ],
       'export_dependent_settings': [
@@ -124,6 +116,7 @@
         '<(DEPTH)/net/net.gyp:net',
         '<(DEPTH)/third_party/WebKit/Source/WebKit/chromium/WebKit.gyp:webkit',
         '<(DEPTH)/webkit/support/webkit_support.gyp:glue',
+        '<(DEPTH)/webkit/support/webkit_support.gyp:user_agent',
       ],
       'conditions': [
         ['target_arch!="arm"', {
@@ -178,11 +171,11 @@
               'action_name': 'test_shell_repack',
               'variables': {
                 'pak_inputs': [
-                  '<(SHARED_INTERMEDIATE_DIR)/ui/gfx/gfx_resources.pak',
                   '<(SHARED_INTERMEDIATE_DIR)/net/net_resources.pak',
                   '<(SHARED_INTERMEDIATE_DIR)/test_shell/test_shell_resources.pak',
+                  '<(SHARED_INTERMEDIATE_DIR)/ui/ui_resources/ui_resources_100_percent.pak',
                   '<(SHARED_INTERMEDIATE_DIR)/webkit/webkit_chromium_resources.pak',
-                  '<(SHARED_INTERMEDIATE_DIR)/webkit/webkit_resources.pak',
+                  '<(SHARED_INTERMEDIATE_DIR)/webkit/webkit_resources_100_percent.pak',
                   '<(SHARED_INTERMEDIATE_DIR)/webkit/webkit_strings_en-US.pak',
                 ],
               },
@@ -216,8 +209,10 @@
         'test_shell_common',
         '<(DEPTH)/net/net.gyp:net_test_support',
         '<(DEPTH)/skia/skia.gyp:skia',
-#        'pull_in_copy_TestNetscapePlugIn',
+        '<(DEPTH)/third_party/mesa/mesa.gyp:osmesa',
+        'pull_in_copy_TestNetscapePlugIn',
         '<(DEPTH)/tools/imagediff/image_diff.gyp:image_diff',
+        '<(DEPTH)/ui/gl/gl.gyp:gl',
       ],
       'defines': [
         # Technically not a unit test but require functions available only to
@@ -246,9 +241,6 @@
       },
       'conditions': [
         ['OS=="win"', {
-          'dependencies': [
-            'layout_test_helper',
-          ],
           'resource_include_dirs': [
             '<(SHARED_INTERMEDIATE_DIR)/webkit',
           ],
@@ -261,8 +253,8 @@
             # resulting .res files get referenced multiple times.
             '<(SHARED_INTERMEDIATE_DIR)/net/net_resources.rc',
             '<(SHARED_INTERMEDIATE_DIR)/webkit/webkit_chromium_resources.rc',
-            '<(SHARED_INTERMEDIATE_DIR)/webkit/webkit_resources.rc',
             '<(SHARED_INTERMEDIATE_DIR)/webkit/webkit_strings_en-US.rc',
+            '<(SHARED_INTERMEDIATE_DIR)/webkit/webkit_unscaled_resources.rc',
           ],
           'configurations': {
             'Debug_Base': {
@@ -288,24 +280,9 @@
             'test_shell_pak',
           ],
         }],
-        ['OS == "android"', {
-          'ldflags': [ # Huge hack to put a shlib before static libs
-            '<(android_lib)/libandroid_runtime.so',
-          ],
-          'libraries': [
-            '<(android_lib)/libdvm.so',  # Dalvik
-            '<(android_lib)/libEGL.so',
-            '<(android_lib)/libGLESv2.so',
-          ],
-        },{  # OS != "android"
-          'dependencies': [
-            '<(DEPTH)/third_party/mesa/mesa.gyp:osmesa',
-          ],
-        }],
         ['OS=="mac"', {
           'product_name': 'TestShell',
           'dependencies': [
-            'layout_test_helper',
             '<(DEPTH)/third_party/mesa/mesa.gyp:osmesa',
           ],
           'variables': {
@@ -320,7 +297,7 @@
                 'pak_inputs': [
                   '<(SHARED_INTERMEDIATE_DIR)/webkit/webkit_chromium_resources.pak',
                   '<(SHARED_INTERMEDIATE_DIR)/webkit/webkit_strings_en-US.pak',
-                  '<(SHARED_INTERMEDIATE_DIR)/webkit/webkit_resources.pak',
+                  '<(SHARED_INTERMEDIATE_DIR)/webkit/webkit_resources_100_percent.pak',
                 ],
               },
               'inputs': [
@@ -345,8 +322,8 @@
           ],
         }, { # OS != "mac"
           'dependencies': [
-            '<(DEPTH)/ui/ui.gyp:gfx_resources',
             '<(DEPTH)/net/net.gyp:net_resources',
+            '<(DEPTH)/ui/ui.gyp:ui_resources',
             '<(DEPTH)/webkit/support/webkit_support.gyp:webkit_resources',
             '<(DEPTH)/webkit/support/webkit_support.gyp:webkit_strings',
           ]
@@ -354,47 +331,8 @@
       ],
     },
     {
-      'target_name': 'test_shell_skia_tests',
-      'type': 'executable',
-      'variables': {
-        'chromium_code': 1,
-      },
-      'msvs_guid': 'fd446d94-2069-43ae-b179-c53877b86794',
-      'dependencies': [
-        'test_shell_common',
-        '<(DEPTH)/net/net.gyp:net_test_support',
-        '<(DEPTH)/skia/skia.gyp:skia',
-        '<(DEPTH)/testing/gmock.gyp:gmock',
-        '<(DEPTH)/testing/gtest.gyp:gtest',
-      ],
-      'sources': [
-        '../../../skia/ext/canvas_util_unittest.cc',
-        'run_all_tests.cc',
-      ],
-      'conditions': [
-        ['OS=="win"', {
-          'msvs_disabled_warnings': [ 4800 ],
-        }],
-        ['OS=="linux" or OS=="freebsd" or OS=="solaris"', {
-          'conditions': [
-            ['linux_use_tcmalloc==1', {
-              'dependencies': [
-                '<(DEPTH)/base/allocator/allocator.gyp:allocator',
-              ],
-            }],
-          ],
-        }],
-        ['OS == "android"', {
-          'ldflags': [ # Huge hack to put a shlib before static libs
-            '<(android_lib)/libandroid_runtime.so',
-          ],
-          'libraries': [
-            '<(android_lib)/libdvm.so',  # Dalvik
-          ],
-        }],
-      ],
-    },
-    {
+      # TODO(tony): This should be moved to webkit_glue.gypi or
+      # webkit_tests.gypi and named something like test_mock_plugin_list.
       'target_name': 'test_shell_test_support',
       'type': 'static_library',
       'dependencies': [
@@ -414,134 +352,51 @@
       'dependencies': [
         '../build/temp_gyp/googleurl.gyp:googleurl',
         'test_shell_common',
-        'test_shell_test_support',
         '<(DEPTH)/base/base.gyp:test_support_base',
-        '<(DEPTH)/media/media.gyp:media_test_support',
         '<(DEPTH)/net/net.gyp:net',
         '<(DEPTH)/net/net.gyp:net_test_support',
         '<(DEPTH)/ppapi/ppapi_internal.gyp:ppapi_shared',
         '<(DEPTH)/skia/skia.gyp:skia',
         '<(DEPTH)/testing/gmock.gyp:gmock',
         '<(DEPTH)/testing/gtest.gyp:gtest',
-        '<(DEPTH)/third_party/leveldatabase/leveldatabase.gyp:leveldatabase',
         '<(DEPTH)/v8/tools/gyp/v8.gyp:v8',
-        '<(DEPTH)/webkit/support/webkit_support.gyp:webkit_user_agent',
+        '<(DEPTH)/webkit/support/webkit_support.gyp:user_agent',
       ],
       'sources': [
-        '../../../skia/ext/convolver_unittest.cc',
-        '../../../skia/ext/image_operations_unittest.cc',
-        '../../../skia/ext/platform_canvas_unittest.cc',
-        '../../../skia/ext/vector_canvas_unittest.cc',
-        '../../appcache/manifest_parser_unittest.cc',
-        '../../appcache/appcache_unittest.cc',
-        '../../appcache/appcache_database_unittest.cc',
-        '../../appcache/appcache_group_unittest.cc',
-        '../../appcache/appcache_host_unittest.cc',
-        '../../appcache/appcache_quota_client_unittest.cc',
-        '../../appcache/appcache_request_handler_unittest.cc',
-        '../../appcache/appcache_response_unittest.cc',
-        '../../appcache/appcache_service_unittest.cc',
-        '../../appcache/appcache_storage_unittest.cc',
-        '../../appcache/appcache_storage_impl_unittest.cc',
-        '../../appcache/appcache_update_job_unittest.cc',
-        '../../appcache/appcache_url_request_job_unittest.cc',
-        '../../appcache/mock_appcache_policy.h',
-        '../../appcache/mock_appcache_policy.cc',
-        '../../appcache/mock_appcache_service.cc',
-        '../../appcache/mock_appcache_service.h',
-        '../../appcache/mock_appcache_storage.cc',
-        '../../appcache/mock_appcache_storage.h',
-        '../../appcache/mock_appcache_storage_unittest.cc',
-        '../../blob/blob_storage_controller_unittest.cc',
-        '../../blob/blob_url_request_job_unittest.cc',
-        '../../blob/deletable_file_reference_unittest.cc',
-        '../../database/database_connections_unittest.cc',
-        '../../database/database_quota_client_unittest.cc',
-        '../../database/databases_table_unittest.cc',
-        '../../database/database_tracker_unittest.cc',
-        '../../database/database_util_unittest.cc',
-        '../../database/quota_table_unittest.cc',
-        '../../fileapi/file_system_directory_database_unittest.cc',
-        '../../fileapi/file_system_file_util_unittest.cc',
-        '../../fileapi/file_system_mount_point_provider_unittest.cc',
-        '../../fileapi/file_system_operation_unittest.cc',
-        '../../fileapi/file_system_origin_database_unittest.cc',
-        '../../fileapi/file_system_quota_client_unittest.cc',
-        '../../fileapi/file_system_quota_unittest.cc',
-        '../../fileapi/file_system_test_helper.cc',
-        '../../fileapi/file_system_test_helper.h',
-        '../../fileapi/file_system_usage_cache_unittest.cc',
-        '../../fileapi/file_system_util_unittest.cc',
-        '../../fileapi/local_file_util_unittest.cc',
-        '../../fileapi/mock_file_system_options.cc',
-        '../../fileapi/mock_file_system_options.h',
-        '../../fileapi/obfuscated_file_util_unittest.cc',
-        '../../fileapi/quota_file_util_unittest.cc',
-        '../../fileapi/sandbox_mount_point_provider_unittest.cc',
-        '../../fileapi/test_file_set.cc',
-        '../../fileapi/test_file_set.h',
-        '../../fileapi/webfilewriter_base_unittest.cc',
-        '../../glue/bookmarklet_unittest.cc',
-        '../../glue/context_menu_unittest.cc',
         '../../glue/cpp_bound_class_unittest.cc',
         '../../glue/cpp_variant_unittest.cc',
         '../../glue/dom_operations_unittest.cc',
         '../../glue/dom_serializer_unittest.cc',
         '../../glue/glue_serialize_unittest.cc',
-        '../../glue/iframe_redirect_unittest.cc',
-        '../../glue/mimetype_unittest.cc',
         '../../glue/multipart_response_delegate_unittest.cc',
         '../../glue/regular_expression_unittest.cc',
         '../../glue/resource_fetcher_unittest.cc',
+        '../../glue/resource_request_body_unittest.cc',
+        '../../glue/touch_fling_platform_gesture_curve_unittest.cc',
         '../../glue/unittest_test_server.h',
         '../../glue/webcursor_unittest.cc',
-        '../../glue/webframe_unittest.cc',
         '../../glue/webkit_glue_unittest.cc',
-        '../../glue/webview_unittest.cc',
         '../../glue/worker_task_runner_unittest.cc',
-        '../../media/buffered_data_source_unittest.cc',
-        '../../media/buffered_resource_loader_unittest.cc',
-        '../../media/simple_data_source_unittest.cc',
-        '../../media/skcanvas_video_renderer_unittest.cc',
-        '../../media/test_response_generator.cc',
-        '../../media/test_response_generator.h',
         '../../mocks/mock_resource_loader_bridge.h',
         '../../mocks/mock_webframeclient.h',
         '../../mocks/mock_weburlloader.cc',
         '../../mocks/mock_weburlloader.h',
-        '../../plugins/npapi/plugin_group_unittest.cc',
-        '../../plugins/npapi/plugin_lib_unittest.cc',
-        '../../plugins/npapi/plugin_list_unittest.cc',
-        '../../plugins/npapi/webplugin_impl_unittest.cc',
         '../../plugins/ppapi/host_var_tracker_unittest.cc',
+        '../../plugins/ppapi/mock_platform_image_2d.cc',
+        '../../plugins/ppapi/mock_platform_image_2d.h',
         '../../plugins/ppapi/mock_plugin_delegate.cc',
         '../../plugins/ppapi/mock_plugin_delegate.h',
         '../../plugins/ppapi/mock_resource.h',
+        '../../plugins/ppapi/ppb_graphics_2d_impl_unittest.cc',
         '../../plugins/ppapi/ppapi_unittest.cc',
         '../../plugins/ppapi/ppapi_unittest.h',
-        '../../plugins/ppapi/ppb_file_chooser_impl_unittest.cc',
         '../../plugins/ppapi/quota_file_io_unittest.cc',
-        '../../plugins/ppapi/time_conversion_unittest.cc',
-        '../../plugins/ppapi/url_request_info_unittest.cc',
-        '../../quota/mock_quota_manager.cc',
-        '../../quota/mock_quota_manager.h',
-        '../../quota/mock_quota_manager_unittest.cc',
-        '../../quota/mock_special_storage_policy.cc',
-        '../../quota/mock_special_storage_policy.h',
-        '../../quota/mock_storage_client.cc',
-        '../../quota/mock_storage_client.h',
-        '../../quota/quota_database_unittest.cc',
-        '../../quota/quota_manager_unittest.cc',
-        '../../quota/quota_temporary_storage_evictor_unittest.cc',
+        '../../user_agent/user_agent_unittest.cc',
         '../webcore_unit_tests/BMPImageDecoder_unittest.cpp',
         '../webcore_unit_tests/ICOImageDecoder_unittest.cpp',
-        'event_listener_unittest.cc',
         'image_decoder_unittest.cc',
         'image_decoder_unittest.h',
-        'listener_leak_test.cc',
-        'media_leak_test.cc',
         'mock_spellcheck_unittest.cc',
-        'node_leak_test.cc',
         'plugin_tests.cc',
         'run_all_tests.cc',
         'test_shell_test.cc',
@@ -568,10 +423,6 @@
             'test_shell_pak',
             '<(DEPTH)/build/linux/system.gyp:gtk',
           ],
-          'sources!': [
-             # TODO(port)
-            '../../../skia/ext/platform_canvas_unittest.cc',
-          ],
         }],
         ['chromeos==1', {
           'sources': [
@@ -597,16 +448,10 @@
             'image_decoder_unittest.h',
           ],
           'sources': [
-            '../../../skia/ext/skia_utils_mac_unittest.mm',
-            '../../../skia/ext/bitmap_platform_device_mac_unittest.cc',
           ],
         }],
         ['OS=="win"', {
           'msvs_disabled_warnings': [ 4800 ],
-        }, {  # else: OS!=win
-          'sources!': [
-            '../../../skia/ext/vector_canvas_unittest.cc',
-          ],
         }],
         ['os_posix == 1 and OS != "mac"', {
           'conditions': [
@@ -666,6 +511,8 @@
             '../../plugins/npapi/test/plugin_delete_plugin_in_deallocate_test.h',
             '../../plugins/npapi/test/plugin_delete_plugin_in_stream_test.cc',
             '../../plugins/npapi/test/plugin_delete_plugin_in_stream_test.h',
+            '../../plugins/npapi/test/plugin_execute_stream_javascript.cc',
+            '../../plugins/npapi/test/plugin_execute_stream_javascript.h',
             '../../plugins/npapi/test/plugin_get_javascript_url_test.cc',
             '../../plugins/npapi/test/plugin_get_javascript_url_test.h',
             '../../plugins/npapi/test/plugin_get_javascript_url2_test.cc',
@@ -731,12 +578,6 @@
                 ],
               },
             }],
-            ['os_posix == 1 and OS != "mac"', {
-              'sources!': [
-                # Needs simple event record type porting
-                '../../plugins/npapi/test/plugin_windowless_test.cc',
-              ],
-            }],
             ['os_posix == 1 and OS != "mac" and (target_arch == "x64" or target_arch == "arm")', {
               # Shared libraries need -fPIC on x86-64
               'cflags': ['-fPIC']
@@ -794,43 +635,6 @@
             },
           ],
           'includes': [ '../../../build/grit_target.gypi' ],
-        },
-      ],
-    }],
-   ['OS=="win"', {
-      'targets': [
-        {
-          # Helper application that disables ClearType during the
-          # running of the layout tests
-          'target_name': 'layout_test_helper',
-          'type': 'executable',
-          'variables': {
-            'chromium_code': 1,
-          },
-          'sources': [
-            'win/layout_test_helper.cc',
-          ],
-        },
-      ],
-    }],
-   ['OS=="mac"', {
-      'targets': [
-        {
-          # Helper application that manages the color sync profile on mac
-          # for the test shells run by the layout tests.
-          'target_name': 'layout_test_helper',
-          'type': 'executable',
-          'variables': {
-            'chromium_code': 1,
-          },
-          'sources': [
-            'mac/layout_test_helper.mm',
-          ],
-          'link_settings': {
-            'libraries': [
-              '$(SDKROOT)/System/Library/Frameworks/AppKit.framework',
-            ],
-          },
         },
       ],
     }],

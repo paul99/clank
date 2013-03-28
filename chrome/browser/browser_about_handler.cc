@@ -4,6 +4,7 @@
 
 #include "chrome/browser/browser_about_handler.h"
 
+#include <algorithm>
 #include <string>
 
 #include "base/command_line.h"
@@ -12,99 +13,50 @@
 #include "base/string_util.h"
 #include "chrome/browser/net/url_fixer_upper.h"
 #include "chrome/browser/ui/browser_dialogs.h"
-#include "chrome/browser/ui/webui/chrome_url_data_manager.h"
-#include "chrome/common/about_handler.h"
 #include "chrome/common/chrome_switches.h"
 #include "chrome/common/url_constants.h"
-#include "content/browser/gpu/gpu_process_host_ui_shim.h"
-#include "content/browser/sensors/sensors_provider.h"
-
-#if defined(USE_TCMALLOC)
-#include "third_party/tcmalloc/chromium/src/google/malloc_extension.h"
-#endif
-
-#if defined(OS_ANDROID)
-// static
-AboutAndroidApp::Callback AboutAndroidApp::label_getter_ = NULL;
-AboutAndroidApp::Callback AboutAndroidApp::version_name_getter_ = NULL;
-AboutAndroidApp::Callback AboutAndroidApp::version_code_getter_ = NULL;
-
-// static
-void AboutAndroidApp::RegisterGetters(
-    AboutAndroidApp::Callback label_getter,
-    AboutAndroidApp::Callback version_name_getter,
-    AboutAndroidApp::Callback version_code_getter) {
-  label_getter_ = label_getter;
-  version_name_getter_ = version_name_getter;
-  version_code_getter_ = version_code_getter;
-}
-#endif
 
 namespace {
 
 // Add paths here to be included in chrome://chrome-urls (about:about).
 // These paths will also be suggested by BuiltinProvider.
-const char* const kChromePaths[] = {
+const char* const kPaths[] = {
   chrome::kChromeUIAppCacheInternalsHost,
   chrome::kChromeUIBlobInternalsHost,
-#if !defined(ANDROID_BINSIZE_HACK)  // Bookmarks are part of NTP on Android.
-  chrome::kChromeUIBookmarksHost,
-#endif
   chrome::kChromeUICacheHost,
   chrome::kChromeUIChromeURLsHost,
   chrome::kChromeUICrashesHost,
   chrome::kChromeUICreditsHost,
   chrome::kChromeUIDNSHost,
-#if !defined(ANDROID_BINSIZE_HACK)
-  // Downloads are handled by the native download manager on Android.
-  chrome::kChromeUIDownloadsHost,
-  chrome::kChromeUIExtensionsHost,
-#endif
-#if !defined(OS_ANDROID)
-  // TODO(satish): Temporarily disabled, enable after http://b/5820999 is fixed.
   chrome::kChromeUIFlagsHost,
-  // Flash is not available on android.
-  chrome::kChromeUIFlashHost,
-#endif
   chrome::kChromeUIGpuInternalsHost,
-  chrome::kChromeUIHistogramsHost,
-#if !defined(ANDROID_BINSIZE_HACK)
   chrome::kChromeUIHistoryHost,
-#endif
   chrome::kChromeUIIPCHost,
   chrome::kChromeUIMediaInternalsHost,
   chrome::kChromeUIMemoryHost,
   chrome::kChromeUINetInternalsHost,
-  chrome::kChromeUINetworkActionPredictorHost,
   chrome::kChromeUINetworkViewCacheHost,
   chrome::kChromeUINewTabHost,
   chrome::kChromeUIOmniboxHost,
-#if !defined(ANDROID_BINSIZE_HACK)
-  chrome::kChromeUIPluginsHost,
-  chrome::kChromeUIPrintHost,
+  chrome::kChromeUIPredictorsHost,
   chrome::kChromeUIProfilerHost,
   chrome::kChromeUIQuotaInternalsHost,
-#endif
-  chrome::kChromeUISessionsHost,
-#if !defined(ANDROID_BINSIZE_HACK)
-  chrome::kChromeUISettingsHost,
-#endif
+  chrome::kChromeUISignInInternalsHost,
   chrome::kChromeUIStatsHost,
   chrome::kChromeUISyncInternalsHost,
-#if !defined(ANDROID_BINSIZE_HACK)
-  chrome::kChromeUITaskManagerHost,
-#endif
-#if defined(USE_TCMALLOC)
-  chrome::kChromeUITCMallocHost,
-#endif
   chrome::kChromeUITermsHost,
-#if !defined(ANDROID_BINSIZE_HACK)
-  chrome::kChromeUITracingHost,
-#endif
+  chrome::kChromeUIUserActionsHost,
   chrome::kChromeUIVersionHost,
-  chrome::kChromeUIWorkersHost,
 #if defined(OS_ANDROID)
   chrome::kChromeUIWelcomeHost,
+#else
+  chrome::kChromeUIBookmarksHost,
+  chrome::kChromeUIDownloadsHost,
+  chrome::kChromeUIFlashHost,
+  chrome::kChromeUIInspectHost,
+  chrome::kChromeUIPluginsHost,
+  chrome::kChromeUISettingsHost,
+  chrome::kChromeUITracingHost,
 #endif
 #if defined(OS_WIN)
   chrome::kChromeUIConflictsHost,
@@ -114,10 +66,11 @@ const char* const kChromePaths[] = {
   chrome::kChromeUISandboxHost,
 #endif
 #if defined(OS_CHROMEOS)
-  chrome::kChromeUIActiveDownloadsHost,
   chrome::kChromeUIChooseMobileNetworkHost,
   chrome::kChromeUICryptohomeHost,
+  chrome::kChromeUIDiagnosticsHost,
   chrome::kChromeUIDiscardsHost,
+  chrome::kChromeUIDriveInternalsHost,
   chrome::kChromeUIImageBurnerHost,
   chrome::kChromeUIKeyboardOverlayHost,
   chrome::kChromeUILoginHost,
@@ -126,6 +79,19 @@ const char* const kChromePaths[] = {
   chrome::kChromeUIOSCreditsHost,
   chrome::kChromeUIProxySettingsHost,
   chrome::kChromeUISystemInfoHost,
+  chrome::kChromeUITaskManagerHost,
+#endif
+#if !defined(DISABLE_NACL)
+  chrome::kChromeUINaClHost,
+#endif
+#if defined(ENABLE_CONFIGURATION_POLICY)
+  chrome::kChromeUIPolicyHost,
+#endif
+#if defined(ENABLE_EXTENSIONS)
+  chrome::kChromeUIExtensionsHost,
+#endif
+#if defined(ENABLE_PRINTING)
+  chrome::kChromeUIPrintHost,
 #endif
 };
 
@@ -142,16 +108,8 @@ bool WillHandleBrowserAboutURL(GURL* url,
          !url->SchemeIs(chrome::kAboutScheme));
 
   // Only handle chrome://foo/, URLFixerUpper::FixupURL translates about:foo.
-  // TAB_CONTENTS_WEB handles about:blank, which frames are allowed to access.
   if (!url->SchemeIs(chrome::kChromeUIScheme))
     return false;
-
-  // Circumvent processing URLs that the renderer process will handle.
-  if (chrome_about_handler::WillHandle(*url))
-    return false;
-
-  CommandLine* cl = CommandLine::ForCurrentProcess();
-  bool enableUberPage = cl->HasSwitch(switches::kEnableUberPage);
 
   std::string host(url->host());
   std::string path;
@@ -169,24 +127,32 @@ bool WillHandleBrowserAboutURL(GURL* url,
     host = chrome::kChromeUISyncInternalsHost;
   // Redirect chrome://extensions.
   } else if (host == chrome::kChromeUIExtensionsHost) {
-    if (enableUberPage) {
-      host = chrome::kChromeUIUberHost;
-      path = chrome::kChromeUIExtensionsHost + url->path();
-    } else {
-      host = chrome::kChromeUISettingsHost;
-      path = chrome::kExtensionsSubPage;
-    }
+    host = chrome::kChromeUIUberHost;
+    path = chrome::kChromeUIExtensionsHost + url->path();
   // Redirect chrome://settings/extensions.
-  // TODO(csilv): Fix all code paths for this page once Uber page is enabled
-  // permanently.
-  } else if (enableUberPage && host == chrome::kChromeUISettingsHost &&
+  // TODO(csilv): Remove this URL after M22 (legacy URL).
+  } else if (host == chrome::kChromeUISettingsHost &&
       url->path() == std::string("/") + chrome::kExtensionsSubPage) {
     host = chrome::kChromeUIUberHost;
     path = chrome::kChromeUIExtensionsHost;
+  // Redirect chrome://history.
+  } else if (host == chrome::kChromeUIHistoryHost) {
+#if defined(OS_ANDROID)
+    // On Android, redirect directly to chrome://history-frame since
+    // uber page is unsupported.
+    host = chrome::kChromeUIHistoryFrameHost;
+#else
+    host = chrome::kChromeUIUberHost;
+    path = chrome::kChromeUIHistoryHost + url->path();
+#endif
   // Redirect chrome://settings
-  } else if (enableUberPage && host == chrome::kChromeUISettingsHost) {
+  } else if (host == chrome::kChromeUISettingsHost) {
     host = chrome::kChromeUIUberHost;
     path = chrome::kChromeUISettingsHost + url->path();
+  // Redirect chrome://help
+  } else if (host == chrome::kChromeUIHelpHost) {
+    host = chrome::kChromeUIUberHost;
+    path = chrome::kChromeUIHelpHost + url->path();
   }
   GURL::Replacements replacements;
   replacements.SetHostStr(host);
@@ -207,85 +173,18 @@ bool HandleNonNavigationAboutURL(const GURL& url) {
 #if (defined(OS_MACOSX) || defined(OS_WIN)) && defined(IPC_MESSAGE_LOG_ENABLED)
   if (LowerCaseEqualsASCII(url.spec(), chrome::kChromeUIIPCURL)) {
     // Run the dialog. This will re-use the existing one if it's already up.
-    browser::ShowAboutIPCDialog();
+    chrome::ShowAboutIPCDialog();
     return true;
   }
 #endif
 
 #endif  // OFFICIAL_BUILD
 
-  // Handle URLs to crash the browser or wreck the gpu process.
-  if (host == chrome::kChromeUIBrowserCrashHost) {
-    // Induce an intentional crash in the browser process.
-    char* bad = NULL;
-    LOG(WARNING) << "Nothing will print. This is a segfault: " << bad;
-  }
-
-  if (host == chrome::kChromeUIGpuCleanHost) {
-    GpuProcessHostUIShim* shim = GpuProcessHostUIShim::GetOneInstance();
-    if (shim)
-      shim->SimulateRemoveAllContext();
-    return true;
-  }
-
-  if (host == chrome::kChromeUIGpuCrashHost) {
-    GpuProcessHostUIShim* shim = GpuProcessHostUIShim::GetOneInstance();
-    if (shim)
-      shim->SimulateCrash();
-    return true;
-  }
-
-  if (host == chrome::kChromeUIGpuHangHost) {
-    GpuProcessHostUIShim* shim = GpuProcessHostUIShim::GetOneInstance();
-    if (shim)
-      shim->SimulateHang();
-    return true;
-  }
-
-#if defined(OS_CHROMEOS)
-  if (host == chrome::kChromeUIRotateHost) {
-    content::ScreenOrientation change = content::SCREEN_ORIENTATION_TOP;
-    std::string query(url.query());
-    if (query == "left") {
-      change = content::SCREEN_ORIENTATION_LEFT;
-    } else if (query == "right") {
-      change = content::SCREEN_ORIENTATION_RIGHT;
-    } else if (query == "top") {
-      change = content::SCREEN_ORIENTATION_TOP;
-    } else if (query == "bottom") {
-      change = content::SCREEN_ORIENTATION_BOTTOM;
-    } else {
-      NOTREACHED() << "Unknown orientation";
-    }
-    sensors::Provider::GetInstance()->ScreenOrientationChanged(change);
-    return true;
-  }
-#endif
-
   return false;
 }
 
 std::vector<std::string> ChromePaths() {
-  std::vector<std::string> paths;
-  paths.reserve(arraysize(kChromePaths));
-  for (size_t i = 0; i < arraysize(kChromePaths); i++)
-    paths.push_back(kChromePaths[i]);
+  std::vector<std::string> paths(kPaths, kPaths + arraysize(kPaths));
+  std::sort(paths.begin(), paths.end());
   return paths;
 }
-
-#if defined(USE_TCMALLOC)
-// static
-AboutTcmallocOutputs* AboutTcmallocOutputs::GetInstance() {
-  return Singleton<AboutTcmallocOutputs>::get();
-}
-
-AboutTcmallocOutputs::AboutTcmallocOutputs() {}
-
-AboutTcmallocOutputs::~AboutTcmallocOutputs() {}
-
-// Glue between the callback task and the method in the singleton.
-void AboutTcmallocRendererCallback(base::ProcessId pid,
-                                   const std::string& output) {
-  AboutTcmallocOutputs::GetInstance()->RendererCallback(pid, output);
-}
-#endif

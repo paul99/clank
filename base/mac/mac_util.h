@@ -4,7 +4,6 @@
 
 #ifndef BASE_MAC_MAC_UTIL_H_
 #define BASE_MAC_MAC_UTIL_H_
-#pragma once
 
 #include <AvailabilityMacros.h>
 #include <Carbon/Carbon.h>
@@ -127,42 +126,32 @@ BASE_EXPORT bool WasLaunchedAsHiddenLoginItem();
 // "OrLater" variants to those that check for a specific version, unless you
 // know for sure that you need to check for a specific version.
 
-// Leopard is Mac OS X 10.5, Darwin 9.
-BASE_EXPORT bool IsOSLeopard();
-BASE_EXPORT bool IsOSLeopardOrEarlier();
-
 // Snow Leopard is Mac OS X 10.6, Darwin 10.
 BASE_EXPORT bool IsOSSnowLeopard();
-BASE_EXPORT bool IsOSSnowLeopardOrEarlier();
-BASE_EXPORT bool IsOSSnowLeopardOrLater();
 
 // Lion is Mac OS X 10.7, Darwin 11.
 BASE_EXPORT bool IsOSLion();
+BASE_EXPORT bool IsOSLionOrEarlier();
 BASE_EXPORT bool IsOSLionOrLater();
+
+// Mountain Lion is Mac OS X 10.8, Darwin 12.
+BASE_EXPORT bool IsOSMountainLion();
+BASE_EXPORT bool IsOSMountainLionOrLater();
 
 // This should be infrequently used. It only makes sense to use this to avoid
 // codepaths that are very likely to break on future (unreleased, untested,
-// unborn) OS releases.
-BASE_EXPORT bool IsOSLaterThanLion();
+// unborn) OS releases, or to log when the OS is newer than any known version.
+BASE_EXPORT bool IsOSLaterThanMountainLion_DontCallThis();
 
 // When the deployment target is set, the code produced cannot run on earlier
 // OS releases. That enables some of the IsOS* family to be implemented as
 // constant-value inline functions. The MAC_OS_X_VERSION_MIN_REQUIRED macro
 // contains the value of the deployment target.
 
-#if defined(MAC_OS_X_VERSION_10_6) && \
-    MAC_OS_X_VERSION_MIN_REQUIRED >= MAC_OS_X_VERSION_10_6
-#define BASE_MAC_MAC_UTIL_H_INLINED_GE_10_6
-inline bool IsOSLeopard() { return false; }
-inline bool IsOSLeopardOrEarlier() { return false; }
-inline bool IsOSSnowLeopardOrLater() { return true; }
-#endif
-
 #if defined(MAC_OS_X_VERSION_10_7) && \
     MAC_OS_X_VERSION_MIN_REQUIRED >= MAC_OS_X_VERSION_10_7
 #define BASE_MAC_MAC_UTIL_H_INLINED_GE_10_7
 inline bool IsOSSnowLeopard() { return false; }
-inline bool IsOSSnowLeopardOrEarlier() { return false; }
 inline bool IsOSLionOrLater() { return true; }
 #endif
 
@@ -170,7 +159,22 @@ inline bool IsOSLionOrLater() { return true; }
     MAC_OS_X_VERSION_MIN_REQUIRED > MAC_OS_X_VERSION_10_7
 #define BASE_MAC_MAC_UTIL_H_INLINED_GT_10_7
 inline bool IsOSLion() { return false; }
-inline bool IsOSLaterThanLion() { return true; }
+inline bool IsOSLionOrEarlier() { return false; }
+#endif
+
+#if defined(MAC_OS_X_VERSION_10_8) && \
+    MAC_OS_X_VERSION_MIN_REQUIRED >= MAC_OS_X_VERSION_10_8
+#define BASE_MAC_MAC_UTIL_H_INLINED_GE_10_8
+inline bool IsOSMountainLionOrLater() { return true; }
+#endif
+
+#if defined(MAC_OS_X_VERSION_10_8) && \
+    MAC_OS_X_VERSION_MIN_REQUIRED > MAC_OS_X_VERSION_10_8
+#define BASE_MAC_MAC_UTIL_H_INLINED_GT_10_8
+inline bool IsOSMountainLion() { return false; }
+inline bool IsOSLaterThanMountainLion_DontCallThis() {
+  return true;
+}
 #endif
 
 // Retrieve the system's model identifier string from the IOKit registry:

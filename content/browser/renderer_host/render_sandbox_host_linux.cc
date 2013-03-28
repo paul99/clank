@@ -1,4 +1,4 @@
-// Copyright (c) 2011 The Chromium Authors. All rights reserved.
+// Copyright (c) 2012 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -17,27 +17,30 @@
 #include <vector>
 
 #include "base/command_line.h"
-#include "base/eintr_wrapper.h"
-#include "base/posix_util.h"
+#include "base/linux_util.h"
 #include "base/memory/scoped_ptr.h"
 #include "base/memory/singleton.h"
 #include "base/pickle.h"
+#include "base/posix/eintr_wrapper.h"
+#include "base/posix/unix_domain_socket.h"
 #include "base/process_util.h"
 #include "base/shared_memory.h"
 #include "base/string_number_conversions.h"
 #include "base/string_util.h"
 #include "content/common/font_config_ipc_linux.h"
-#include "content/common/sandbox_methods_linux.h"
-#include "content/common/unix_domain_socket_posix.h"
+#include "content/common/sandbox_linux.h"
 #include "content/common/webkitplatformsupport_impl.h"
 #include "skia/ext/SkFontHost_fontconfig_direct.h"
 #include "third_party/npapi/bindings/npapi_extensions.h"
 #include "third_party/WebKit/Source/WebKit/chromium/public/WebKit.h"
 #include "third_party/WebKit/Source/WebKit/chromium/public/linux/WebFontInfo.h"
+#include "ui/gfx/font_render_params_linux.h"
 
 using WebKit::WebCString;
 using WebKit::WebFontInfo;
 using WebKit::WebUChar;
+
+namespace content {
 
 // http://code.google.com/p/chromium/wiki/LinuxSandboxIPC
 
@@ -62,6 +65,21 @@ class SandboxIPCProcess  {
       sandbox_cmd_.push_back(sandbox_cmd);
       sandbox_cmd_.push_back(base::kFindInodeSwitch);
     }
+
+    // FontConfig doesn't provide a standard property to control subpixel
+    // positioning, so we pass the current setting through to WebKit.
+    WebFontInfo::setSubpixelPositioning(
+#if defined(TOOLKIT_GTK)
+        // The GTK implementation of GetDefaultFontRenderParams() uses
+        // GtkSettings, which requires a connection to the X server (as it uses
+        // XSETTINGS).  When running tests, X may not be ready at this point,
+        // though.  GTK doesn't currently provide a way to enable subpixel
+        // positioning, so just pass false here to avoid the issue.
+        false
+#else
+        gfx::GetDefaultWebKitFontRenderParams().subpixel_positioning
+#endif
+        );
   }
 
   ~SandboxIPCProcess();
@@ -124,7 +142,7 @@ class SandboxIPCProcess  {
       return;
 
     Pickle pickle(buf, len);
-    void* iter = NULL;
+    PickleIterator iter(pickle);
 
     int kind;
     if (!pickle.ReadInt(&iter, &kind))
@@ -155,10 +173,10 @@ class SandboxIPCProcess  {
     }
   }
 
-  void HandleFontMatchRequest(int fd, const Pickle& pickle, void* iter,
+  void HandleFontMatchRequest(int fd, const Pickle& pickle, PickleIterator iter,
                               std::vector<int>& fds) {
     bool filefaceid_valid;
-    uint32_t filefaceid;
+    uint32_t filefaceid = 0;
 
     if (!pickle.ReadBool(&iter, &filefaceid_valid))
       return;
@@ -207,7 +225,7 @@ class SandboxIPCProcess  {
     SendRendererReply(fds, reply, -1);
   }
 
-  void HandleFontOpenRequest(int fd, const Pickle& pickle, void* iter,
+  void HandleFontOpenRequest(int fd, const Pickle& pickle, PickleIterator iter,
                              std::vector<int>& fds) {
     uint32_t filefaceid;
     if (!pickle.ReadUInt32(&iter, &filefaceid))
@@ -227,7 +245,8 @@ class SandboxIPCProcess  {
       close(result_fd);
   }
 
-  void HandleGetFontFamilyForChars(int fd, const Pickle& pickle, void* iter,
+  void HandleGetFontFamilyForChars(int fd, const Pickle& pickle,
+                                   PickleIterator iter,
                                    std::vector<int>& fds) {
     // The other side of this call is
     // chrome/renderer/renderer_sandbox_support_linux.cc
@@ -278,7 +297,8 @@ class SandboxIPCProcess  {
     SendRendererReply(fds, reply, -1);
   }
 
-  void HandleGetStyleForStrike(int fd, const Pickle& pickle, void* iter,
+  void HandleGetStyleForStrike(int fd, const Pickle& pickle,
+                               PickleIterator iter,
                                std::vector<int>& fds) {
     std::string family;
     int sizeAndStyle;
@@ -298,12 +318,13 @@ class SandboxIPCProcess  {
     reply.WriteInt(style.useHinting);
     reply.WriteInt(style.hintStyle);
     reply.WriteInt(style.useAntiAlias);
-    reply.WriteInt(style.useSubpixel);
+    reply.WriteInt(style.useSubpixelRendering);
+    reply.WriteInt(style.useSubpixelPositioning);
 
     SendRendererReply(fds, reply, -1);
   }
 
-  void HandleLocaltime(int fd, const Pickle& pickle, void* iter,
+  void HandleLocaltime(int fd, const Pickle& pickle, PickleIterator iter,
                        std::vector<int>& fds) {
     // The other side of this call is in zygote_main_linux.cc
 
@@ -333,7 +354,8 @@ class SandboxIPCProcess  {
     SendRendererReply(fds, reply, -1);
   }
 
-  void HandleGetChildWithInode(int fd, const Pickle& pickle, void* iter,
+  void HandleGetChildWithInode(int fd, const Pickle& pickle,
+                               PickleIterator iter,
                                std::vector<int>& fds) {
     // The other side of this call is in zygote_main_linux.cc
     if (sandbox_cmd_.empty()) {
@@ -365,11 +387,14 @@ class SandboxIPCProcess  {
     SendRendererReply(fds, reply, -1);
   }
 
-  void HandleMakeSharedMemorySegment(int fd, const Pickle& pickle, void* iter,
+  void HandleMakeSharedMemorySegment(int fd, const Pickle& pickle,
+                                     PickleIterator iter,
                                      std::vector<int>& fds) {
     base::SharedMemoryCreateOptions options;
-    if (!pickle.ReadUInt32(&iter, &options.size))
+    uint32_t size;
+    if (!pickle.ReadUInt32(&iter, &size))
       return;
+    options.size = size;
     if (!pickle.ReadBool(&iter, &options.executable))
       return;
     int shm_fd = -1;
@@ -380,7 +405,8 @@ class SandboxIPCProcess  {
     SendRendererReply(fds, reply, shm_fd);
   }
 
-  void HandleMatchWithFallback(int fd, const Pickle& pickle, void* iter,
+  void HandleMatchWithFallback(int fd, const Pickle& pickle,
+                               PickleIterator iter,
                                std::vector<int>& fds) {
     // Unlike the other calls, for which we are an indirection in front of
     // WebKit or Skia, this call is always made via this sandbox helper
@@ -645,7 +671,7 @@ class SandboxIPCProcess  {
   const int browser_socket_;
   scoped_ptr<FontConfigDirect> font_config_;
   std::vector<std::string> sandbox_cmd_;
-  scoped_ptr<content::WebKitPlatformSupportImpl> webkit_platform_support_;
+  scoped_ptr<WebKitPlatformSupportImpl> webkit_platform_support_;
 };
 
 SandboxIPCProcess::~SandboxIPCProcess() {
@@ -656,7 +682,7 @@ SandboxIPCProcess::~SandboxIPCProcess() {
 void SandboxIPCProcess::EnsureWebKitInitialized() {
   if (webkit_platform_support_.get())
     return;
-  webkit_platform_support_.reset(new content::WebKitPlatformSupportImpl);
+  webkit_platform_support_.reset(new WebKitPlatformSupportImpl);
   WebKit::initializeWithoutV8(webkit_platform_support_.get());
 }
 
@@ -724,3 +750,5 @@ RenderSandboxHostLinux::~RenderSandboxHostLinux() {
       PLOG(ERROR) << "close";
   }
 }
+
+}  // namespace content

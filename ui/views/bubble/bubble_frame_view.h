@@ -1,28 +1,26 @@
-// Copyright (c) 2011 The Chromium Authors. All rights reserved.
+// Copyright (c) 2012 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
 #ifndef UI_VIEWS_BUBBLE_BUBBLE_FRAME_VIEW_H_
 #define UI_VIEWS_BUBBLE_BUBBLE_FRAME_VIEW_H_
-#pragma once
 
+#include "base/basictypes.h"
+#include "base/compiler_specific.h"
 #include "base/gtest_prod_util.h"
-#include "third_party/skia/include/core/SkColor.h"
-#include "ui/views/bubble/bubble_border.h"
+#include "ui/gfx/insets.h"
 #include "ui/views/window/non_client_view.h"
 
 namespace views {
 
-class BorderContentsView;
+class BubbleBorder;
 
-//  BubbleFrameView to render BubbleBorder.
-//
-////////////////////////////////////////////////////////////////////////////////
+// This is a NonClientFrameView used to render the BubbleBorder.
 class VIEWS_EXPORT BubbleFrameView : public NonClientFrameView {
  public:
-  BubbleFrameView(BubbleBorder::ArrowLocation arrow_location,
-                  SkColor color,
-                  int margin);
+  // Sets the border to |border|, taking ownership. Important: do not call
+  // set_border() directly to change the border, use SetBubbleBorder() instead.
+  BubbleFrameView(const gfx::Insets& margins, BubbleBorder* border);
   virtual ~BubbleFrameView();
 
   // NonClientFrameView overrides:
@@ -34,6 +32,7 @@ class VIEWS_EXPORT BubbleFrameView : public NonClientFrameView {
                              gfx::Path* window_mask) OVERRIDE {}
   virtual void ResetWindowControls() OVERRIDE {}
   virtual void UpdateWindowIcon() OVERRIDE {}
+  virtual void UpdateWindowTitle() OVERRIDE {}
 
   // View overrides:
   virtual gfx::Size GetPreferredSize() OVERRIDE;
@@ -44,10 +43,12 @@ class VIEWS_EXPORT BubbleFrameView : public NonClientFrameView {
 
   // Given the size of the contents and the rect to point at, returns the bounds
   // of the bubble window. The bubble's arrow location may change if the bubble
-  // does not fit on the monitor and |try_mirroring_arrow| is true.
+  // does not fit on the monitor and |adjust_if_offscreen| is true.
   gfx::Rect GetUpdatedWindowBounds(const gfx::Rect& anchor_rect,
                                    gfx::Size client_size,
-                                   bool try_mirroring_arrow);
+                                   bool adjust_if_offscreen);
+
+  void SetBubbleBorder(BubbleBorder* border);
 
  protected:
   // Returns the bounds for the monitor showing the specified |rect|.
@@ -61,6 +62,11 @@ class VIEWS_EXPORT BubbleFrameView : public NonClientFrameView {
   // if the generated window bounds don't fit in the monitor bounds.
   void MirrorArrowIfOffScreen(bool vertical,
                               const gfx::Rect& anchor_rect,
+                              const gfx::Size& client_size);
+
+  // Adjust the bubble's arrow offsets if the generated window bounds don't fit
+  // in the monitor bounds.
+  void OffsetArrowIfOffScreen(const gfx::Rect& anchor_rect,
                               const gfx::Size& client_size);
 
   // The bubble border.

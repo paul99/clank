@@ -4,7 +4,6 @@
 
 #ifndef UI_VIEWS_IME_INPUT_METHOD_WIN_H_
 #define UI_VIEWS_IME_INPUT_METHOD_WIN_H_
-#pragma once
 
 #include <windows.h>
 
@@ -17,25 +16,34 @@
 #include "ui/views/view.h"
 #include "ui/views/widget/widget.h"
 
+namespace ui {
+class InputMethod;
+}  // namespace ui
+
 namespace views {
 
 // An InputMethod implementation based on Windows IMM32 API.
 class InputMethodWin : public InputMethodBase {
  public:
-  explicit InputMethodWin(internal::InputMethodDelegate* delegate);
+  InputMethodWin(internal::InputMethodDelegate* delegate,
+                 HWND hwnd,
+                 ui::InputMethod* host);
   virtual ~InputMethodWin();
 
   // Overridden from InputMethod:
   virtual void Init(Widget* widget) OVERRIDE;
   virtual void OnFocus() OVERRIDE;
   virtual void OnBlur() OVERRIDE;
-  virtual void DispatchKeyEvent(const KeyEvent& key) OVERRIDE;
+  virtual void DispatchKeyEvent(const ui::KeyEvent& key) OVERRIDE;
   virtual void OnTextInputTypeChanged(View* view) OVERRIDE;
   virtual void OnCaretBoundsChanged(View* view) OVERRIDE;
   virtual void CancelComposition(View* view) OVERRIDE;
   virtual std::string GetInputLocale() OVERRIDE;
   virtual base::i18n::TextDirection GetInputTextDirection() OVERRIDE;
   virtual bool IsActive() OVERRIDE;
+
+  // Overridden from InputMethodBase.
+  virtual ui::TextInputClient* GetTextInputClient() const OVERRIDE;
 
   // Handles IME messages.
   LRESULT OnImeMessages(UINT message, WPARAM wparam, LPARAM lparam,
@@ -70,14 +78,14 @@ class InputMethodWin : public InputMethodBase {
   virtual void OnWillChangeFocus(View* focused_before, View* focused) OVERRIDE;
   virtual void OnDidChangeFocus(View* focused_before, View* focused) OVERRIDE;
 
-  // A helper function to return the Widget's native window.
-  HWND hwnd() const { return widget()->GetNativeView(); }
-
   // Asks the client to confirm current composition text.
   void ConfirmCompositionText();
 
   // Enables or disables the IME according to the current text input type.
   void UpdateIMEState();
+
+  // The HWND this InputMethod is bound to.
+  HWND hwnd_;
 
   // Indicates if the current input locale has an IME.
   bool active_;
@@ -96,6 +104,8 @@ class InputMethodWin : public InputMethodBase {
   // Windows IMM32 wrapper.
   // (See "ui/base/win/ime_input.h" for its details.)
   ui::ImeInput ime_input_;
+
+  ui::InputMethod* const host_;
 
   DISALLOW_COPY_AND_ASSIGN(InputMethodWin);
 };

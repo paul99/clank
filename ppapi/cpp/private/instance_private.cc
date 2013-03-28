@@ -1,4 +1,4 @@
-// Copyright (c) 2011 The Chromium Authors. All rights reserved.
+// Copyright (c) 2012 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -50,14 +50,14 @@ Var InstancePrivate::GetInstanceObject() {
 VarPrivate InstancePrivate::GetWindowObject() {
   if (!has_interface<PPB_Instance_Private>())
     return VarPrivate();
-  return VarPrivate(Var::PassRef(),
+  return VarPrivate(PASS_REF,
       get_interface<PPB_Instance_Private>()->GetWindowObject(pp_instance()));
 }
 
 VarPrivate InstancePrivate::GetOwnerElementObject() {
   if (!has_interface<PPB_Instance_Private>())
     return VarPrivate();
-  return VarPrivate(Var::PassRef(),
+  return VarPrivate(PASS_REF,
       get_interface<PPB_Instance_Private>()->GetOwnerElementObject(
           pp_instance()));
 }
@@ -65,11 +65,11 @@ VarPrivate InstancePrivate::GetOwnerElementObject() {
 VarPrivate InstancePrivate::ExecuteScript(const Var& script, Var* exception) {
   if (!has_interface<PPB_Instance_Private>())
     return VarPrivate();
-  return VarPrivate(Var::PassRef(),
-             get_interface<PPB_Instance_Private>()->ExecuteScript(
-                 pp_instance(),
-                 script.pp_var(),
-                 VarPrivate::OutException(exception).get()));
+  return VarPrivate(PASS_REF,
+      get_interface<PPB_Instance_Private>()->ExecuteScript(
+          pp_instance(),
+          script.pp_var(),
+          VarPrivate::OutException(exception).get()));
 }
 
 }  // namespace pp

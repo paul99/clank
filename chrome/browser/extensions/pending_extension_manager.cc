@@ -2,23 +2,32 @@
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
-#include "base/logging.h"
-#include "base/stl_util.h"
-#include "chrome/browser/extensions/extension_service.h"
 #include "chrome/browser/extensions/pending_extension_manager.h"
-#include "chrome/common/extensions/extension.h"
+
+#include <algorithm>
+
+#include "base/logging.h"
+#include "base/version.h"
+#include "chrome/browser/extensions/extension_service.h"
 #include "content/public/browser/browser_thread.h"
+#include "googleurl/src/gurl.h"
 
 using content::BrowserThread;
 
 namespace {
 
 // Install predicate used by AddFromExternalUpdateUrl().
-bool AlwaysInstall(const Extension& extension) {
+bool AlwaysInstall(const extensions::Extension& extension) {
   return true;
 }
 
+std::string GetVersionString(const Version& version) {
+  return version.IsValid() ? version.GetString() : "invalid";
+}
+
 }  // namespace
+
+namespace extensions {
 
 PendingExtensionManager::PendingExtensionManager(
     const ExtensionServiceInterface& service)
@@ -27,25 +36,59 @@ PendingExtensionManager::PendingExtensionManager(
 
 PendingExtensionManager::~PendingExtensionManager() {}
 
-bool PendingExtensionManager::GetById(
-    const std::string& id,
-    PendingExtensionInfo* out_pending_extension_info) const {
+const PendingExtensionInfo* PendingExtensionManager::GetById(
+    const std::string& id) const {
+  PendingExtensionList::const_iterator iter;
+  for (iter = pending_extension_list_.begin();
+       iter != pending_extension_list_.end();
+       ++iter) {
+    if (id == iter->id())
+      return &(*iter);
+  }
 
-  PendingExtensionMap::const_iterator it = pending_extension_map_.find(id);
-  if (it != pending_extension_map_.end()) {
-    *out_pending_extension_info = it->second;
-    return true;
+  return NULL;
+}
+
+bool PendingExtensionManager::Remove(const std::string& id) {
+  PendingExtensionList::iterator iter;
+  for (iter = pending_extension_list_.begin();
+       iter != pending_extension_list_.end();
+       ++iter) {
+    if (id == iter->id()) {
+      pending_extension_list_.erase(iter);
+      return true;
+    }
   }
 
   return false;
 }
 
-void PendingExtensionManager::Remove(const std::string& id) {
-  pending_extension_map_.erase(id);
+bool PendingExtensionManager::IsIdPending(const std::string& id) const {
+  PendingExtensionList::const_iterator iter;
+  for (iter = pending_extension_list_.begin();
+       iter != pending_extension_list_.end();
+       ++iter) {
+    if (id == iter->id())
+      return true;
+  }
+
+  return false;
 }
 
-bool PendingExtensionManager::IsIdPending(const std::string& id) const {
-  return ContainsKey(pending_extension_map_, id);
+bool PendingExtensionManager::HasPendingExtensions() const {
+  return !pending_extension_list_.empty();
+}
+
+bool PendingExtensionManager::HasPendingExtensionFromSync() const {
+  PendingExtensionList::const_iterator iter;
+  for (iter = pending_extension_list_.begin();
+       iter != pending_extension_list_.end();
+       ++iter) {
+    if (iter->is_from_sync())
+      return true;
+  }
+
+  return false;
 }
 
 bool PendingExtensionManager::AddFromSync(
@@ -72,12 +115,13 @@ bool PendingExtensionManager::AddFromSync(
   const bool kIsFromSync = true;
   const Extension::Location kSyncLocation = Extension::INTERNAL;
 
-  return AddExtensionImpl(id, update_url, should_allow_install,
+  return AddExtensionImpl(id, update_url, Version(), should_allow_install,
                           kIsFromSync, install_silently, kSyncLocation);
 }
 
 bool PendingExtensionManager::AddFromExternalUpdateUrl(
-    const std::string& id, const GURL& update_url,
+    const std::string& id,
+    const GURL& update_url,
     Extension::Location location) {
   CHECK(BrowserThread::CurrentlyOn(BrowserThread::UI));
 
@@ -101,7 +145,7 @@ bool PendingExtensionManager::AddFromExternalUpdateUrl(
     }
   }
 
-  return AddExtensionImpl(id, update_url, &AlwaysInstall,
+  return AddExtensionImpl(id, update_url, Version(), &AlwaysInstall,
                           kIsFromSync, kInstallSilently,
                           location);
 }
@@ -109,8 +153,8 @@ bool PendingExtensionManager::AddFromExternalUpdateUrl(
 
 bool PendingExtensionManager::AddFromExternalFile(
     const std::string& id,
-    Extension::Location install_source) {
-
+    Extension::Location install_source,
+    const Version& version) {
   // TODO(skerner): AddFromSync() checks to see if the extension is
   // installed, but this method assumes that the caller already
   // made sure it is not installed.  Make all AddFrom*() methods
@@ -122,21 +166,20 @@ bool PendingExtensionManager::AddFromExternalFile(
   return AddExtensionImpl(
       id,
       kUpdateUrl,
+      version,
       &AlwaysInstall,
       kIsFromSync,
       kInstallSilently,
       install_source);
-
-  return true;
 }
 
 void PendingExtensionManager::GetPendingIdsForUpdateCheck(
-    std::set<std::string>* out_ids_for_update_check) const {
-  PendingExtensionMap::const_iterator iter;
-  for (iter = pending_extension_map_.begin();
-       iter != pending_extension_map_.end();
+    std::list<std::string>* out_ids_for_update_check) const {
+  PendingExtensionList::const_iterator iter;
+  for (iter = pending_extension_list_.begin();
+       iter != pending_extension_list_.end();
        ++iter) {
-    Extension::Location install_source = iter->second.install_source();
+    Extension::Location install_source = iter->install_source();
 
     // Some install sources read a CRX from the filesystem.  They can
     // not be fetched from an update URL, so don't include them in the
@@ -145,23 +188,29 @@ void PendingExtensionManager::GetPendingIdsForUpdateCheck(
         install_source == Extension::EXTERNAL_REGISTRY)
       continue;
 
-    out_ids_for_update_check->insert(iter->first);
+    out_ids_for_update_check->push_back(iter->id());
   }
 }
 
 bool PendingExtensionManager::AddExtensionImpl(
     const std::string& id,
     const GURL& update_url,
+    const Version& version,
     PendingExtensionInfo::ShouldAllowInstallPredicate should_allow_install,
     bool is_from_sync,
     bool install_silently,
     Extension::Location install_source) {
   CHECK(BrowserThread::CurrentlyOn(BrowserThread::UI));
 
-  // Will add a pending extension record unless this variable is set to false.
-  bool should_add_pending_record = true;
+  PendingExtensionInfo info(id,
+                            update_url,
+                            version,
+                            should_allow_install,
+                            is_from_sync,
+                            install_silently,
+                            install_source);
 
-  if (ContainsKey(pending_extension_map_, id)) {
+  if (const PendingExtensionInfo* pending = GetById(id)) {
     // Bugs in this code will manifest as sporadic incorrect extension
     // locations in situations where multiple install sources run at the
     // same time. For example, on first login to a chrome os machine, an
@@ -169,36 +218,36 @@ bool PendingExtensionManager::AddExtensionImpl(
     // The following logging will help diagnose such issues.
     VLOG(1) << "Extension id " << id
             << " was entered for update more than once."
-            << "  old location: " << pending_extension_map_[id].install_source()
-            << "  new location: " << install_source;
+            << "  old location: " << pending->install_source()
+            << "  new location: " << install_source
+            << "  old version: " << GetVersionString(pending->version())
+            << "  new version: " << GetVersionString(version);
 
-    Extension::Location higher_priority_location =
-        Extension::GetHigherPriorityLocation(
-            install_source, pending_extension_map_[id].install_source());
+    // Never override an existing extension with an older version. Only
+    // extensions from local CRX files have a known version; extensions from an
+    // update URL will get the latest version.
 
-    if (higher_priority_location == install_source) {
-      VLOG(1) << "Overwrite existing record.";
+    // If |pending| has the same or higher precedence than |info| then don't
+    // install |info| over |pending|.
+    if (pending->CompareTo(info) >= 0)
+      return false;
 
-    } else {
-      VLOG(1) << "Keep existing record.";
-      should_add_pending_record = false;
-    }
+    VLOG(1) << "Overwrite existing record.";
+
+    std::replace(pending_extension_list_.begin(),
+                 pending_extension_list_.end(),
+                 *pending,
+                 info);
+  } else {
+    pending_extension_list_.push_back(info);
   }
 
-  if (should_add_pending_record) {
-    pending_extension_map_[id] = PendingExtensionInfo(
-        update_url,
-        should_allow_install,
-        is_from_sync,
-        install_silently,
-        install_source);
-    return true;
-  }
-  return false;
+  return true;
 }
 
 void PendingExtensionManager::AddForTesting(
-    const std::string& id,
     const PendingExtensionInfo& pending_extension_info) {
-  pending_extension_map_[id] = pending_extension_info;
+  pending_extension_list_.push_back(pending_extension_info);
 }
+
+}  // namespace extensions

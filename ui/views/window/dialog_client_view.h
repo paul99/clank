@@ -1,12 +1,11 @@
-// Copyright (c) 2011 The Chromium Authors. All rights reserved.
+// Copyright (c) 2012 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
 #ifndef UI_VIEWS_WINDOW_DIALOG_CLIENT_VIEW_H_
 #define UI_VIEWS_WINDOW_DIALOG_CLIENT_VIEW_H_
-#pragma once
 
-#include "ui/gfx/font.h"
+#include "ui/base/ui_base_types.h"
 #include "ui/views/controls/button/button.h"
 #include "ui/views/focus/focus_manager.h"
 #include "ui/views/window/client_view.h"
@@ -14,7 +13,7 @@
 namespace views {
 
 class DialogDelegate;
-class NativeTextButton;
+class TextButton;
 class Widget;
 namespace internal {
 class RootView;
@@ -36,7 +35,21 @@ class VIEWS_EXPORT DialogClientView : public ClientView,
                                       public ButtonListener,
                                       public FocusChangeListener {
  public:
-  DialogClientView(Widget* widget, View* contents_view);
+  // Parameters for the internal dialog styling.  Default construction
+  // produces parameters for native dialog styling.
+  struct VIEWS_EXPORT StyleParams {
+    StyleParams();
+
+    int button_vedge_margin;
+    int button_hedge_margin;
+    int button_shadow_margin;
+    int button_content_spacing;
+    int related_button_hspacing;
+  };
+
+  DialogClientView(Widget* widget,
+                   View* contents_view,
+                   const StyleParams &params);
   virtual ~DialogClientView();
 
   // Adds the dialog buttons required by the supplied DialogDelegate to the
@@ -54,13 +67,15 @@ class VIEWS_EXPORT DialogClientView : public ClientView,
   void CancelWindow();
 
   // Accessors in case the user wishes to adjust these buttons.
-  NativeTextButton* ok_button() const { return ok_button_; }
-  NativeTextButton* cancel_button() const { return cancel_button_; }
+  TextButton* ok_button() const { return ok_button_; }
+  TextButton* cancel_button() const { return cancel_button_; }
 
-  // Sets the view that is positioned along the bottom of the buttons. The
-  // bottom view is positioned beneath the buttons at the full width of the
-  // dialog. If there is an existing bottom view it is removed and deleted.
-  void SetBottomView(View* bottom_view);
+  // Creates a StyleParams struct in Chrome style (default is native style).
+  static StyleParams GetChromeStyleParams();
+
+  // Returns the number of pixels at the bottom of the dialog which are visually
+  // part of the frame, but are actually rendered by the DialogClientView.
+  int GetBottomMargin();
 
   // Overridden from View:
   virtual void NativeViewHierarchyChanged(
@@ -83,7 +98,6 @@ class VIEWS_EXPORT DialogClientView : public ClientView,
 
  protected:
   // View overrides:
-  virtual void OnPaint(gfx::Canvas* canvas) OVERRIDE;
   virtual void PaintChildren(gfx::Canvas* canvas) OVERRIDE;
   virtual void Layout() OVERRIDE;
   virtual void ViewHierarchyChanged(bool is_add, View* parent,
@@ -93,23 +107,30 @@ class VIEWS_EXPORT DialogClientView : public ClientView,
 
   // ButtonListener implementation:
   virtual void ButtonPressed(Button* sender,
-                             const views::Event& event) OVERRIDE;
+                             const ui::Event& event) OVERRIDE;
 
  private:
+  // Create a dialog button of the appropriate type.
+  TextButton* CreateDialogButton(ui::DialogButton type, const string16& title);
+
   // Paint the size box in the bottom right corner of the window if it is
   // resizable.
   void PaintSizeBox(gfx::Canvas* canvas);
 
-  // Returns the width of the specified dialog button using the correct font.
-  int GetButtonWidth(int button) const;
+  // Returns the greater of ok and cancel button's preferred height.
   int GetButtonsHeight() const;
+
+  // Returns the height of the dialog buttons area, including the spacing
+  // between bottom of contents view and top of buttons, the buttons height,
+  // and the spacing between bottom of buttons to end of the dialog.
+  int GetDialogButtonsAreaHeight() const;
 
   // Position and size various sub-views.
   void LayoutDialogButtons();
   void LayoutContentsView();
 
   // Makes the specified button the default button.
-  void SetDefaultButton(NativeTextButton* button);
+  void SetDefaultButton(TextButton* button);
 
   bool has_dialog_buttons() const { return ok_button_ || cancel_button_; }
 
@@ -125,14 +146,15 @@ class VIEWS_EXPORT DialogClientView : public ClientView,
   // Updates focus listener.
   void UpdateFocusListener();
 
-  static void InitClass();
+  // Parameters for the internal dialog styling.
+  StyleParams style_params_;
 
   // The dialog buttons.
-  NativeTextButton* ok_button_;
-  NativeTextButton* cancel_button_;
+  TextButton* ok_button_;
+  TextButton* cancel_button_;
 
   // The button that is currently the default button if any.
-  NativeTextButton* default_button_;
+  TextButton* default_button_;
 
   // The button-level extra view, NULL unless the dialog delegate supplies one.
   View* extra_view_;
@@ -155,12 +177,6 @@ class VIEWS_EXPORT DialogClientView : public ClientView,
 
   // When ancestor gets changed focus manager gets changed as well.
   FocusManager* saved_focus_manager_;
-
-  // View positioned along the bottom, beneath the buttons.
-  View* bottom_view_;
-
-  // Static resource initialization
-  static gfx::Font* dialog_button_font_;
 
   DISALLOW_COPY_AND_ASSIGN(DialogClientView);
 };

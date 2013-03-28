@@ -1,26 +1,22 @@
-// Copyright (c) 2011 The Chromium Authors. All rights reserved.
+// Copyright (c) 2012 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
 #include "ui/views/controls/menu/menu_scroll_view_container.h"
 
-#if defined(OS_WIN)
-#include <windows.h>
-#include <uxtheme.h>
-#include <Vssym32.h>
-#endif
-
+#include "third_party/skia/include/core/SkPaint.h"
+#include "third_party/skia/include/core/SkPath.h"
 #include "ui/base/accessibility/accessible_view_state.h"
-#include "ui/gfx/canvas_skia.h"
-#include "ui/gfx/color_utils.h"
-#include "ui/gfx/native_theme.h"
+#include "ui/gfx/canvas.h"
+#include "ui/native_theme/native_theme.h"
 #include "ui/views/border.h"
 #include "ui/views/controls/menu/menu_config.h"
 #include "ui/views/controls/menu/menu_controller.h"
 #include "ui/views/controls/menu/menu_item_view.h"
 #include "ui/views/controls/menu/submenu_view.h"
+#include "ui/views/round_rect_painter.h"
 
-using gfx::NativeTheme;
+using ui::NativeTheme;
 
 // Height of the scroll arrow.
 // This goes up to 4 with large fonts, but this is close enough for now.
@@ -46,8 +42,9 @@ class MenuScrollButton : public View {
   }
 
   virtual gfx::Size GetPreferredSize() {
-    return gfx::Size(MenuConfig::instance().scroll_arrow_height * 2 - 1,
-                     pref_height_);
+    return gfx::Size(
+        host_->GetMenuItem()->GetMenuConfig().scroll_arrow_height * 2 - 1,
+        pref_height_);
   }
 
   virtual bool CanDrop(const OSExchangeData& data) {
@@ -55,13 +52,13 @@ class MenuScrollButton : public View {
     return true;  // Always return true so that drop events are targeted to us.
   }
 
-  virtual void OnDragEntered(const DropTargetEvent& event) {
+  virtual void OnDragEntered(const ui::DropTargetEvent& event) {
     DCHECK(host_->GetMenuItem()->GetMenuController());
     host_->GetMenuItem()->GetMenuController()->OnDragEnteredScrollButton(
         host_, is_up_);
   }
 
-  virtual int OnDragUpdated(const DropTargetEvent& event) {
+  virtual int OnDragUpdated(const ui::DropTargetEvent& event) {
     return ui::DragDropTypes::DRAG_NONE;
   }
 
@@ -70,36 +67,46 @@ class MenuScrollButton : public View {
     host_->GetMenuItem()->GetMenuController()->OnDragExitedScrollButton(host_);
   }
 
-  virtual int OnPerformDrop(const DropTargetEvent& event) {
+  virtual int OnPerformDrop(const ui::DropTargetEvent& event) {
     return ui::DragDropTypes::DRAG_NONE;
   }
 
   virtual void OnPaint(gfx::Canvas* canvas) {
-    const MenuConfig& config = MenuConfig::instance();
+    const MenuConfig& config = host_->GetMenuItem()->GetMenuConfig();
 
     // The background.
     gfx::Rect item_bounds(0, 0, width(), height());
     NativeTheme::ExtraParams extra;
     extra.menu_item.is_selected = false;
-    NativeTheme::instance()->Paint(canvas->GetSkCanvas(),
-                                   NativeTheme::kMenuItemBackground,
-                                   NativeTheme::kNormal, item_bounds, extra);
-#if defined(OS_WIN)
-    SkColor arrow_color = color_utils::GetSysSkColor(COLOR_MENUTEXT);
-#else
-    SkColor arrow_color = SK_ColorBLACK;
-#endif
+    GetNativeTheme()->Paint(canvas->sk_canvas(),
+                            NativeTheme::kMenuItemBackground,
+                            NativeTheme::kNormal, item_bounds, extra);
 
     // Then the arrow.
     int x = width() / 2;
     int y = (height() - config.scroll_arrow_height) / 2;
-    int delta_y = 1;
+
+    int x_left = x - config.scroll_arrow_height;
+    int x_right = x + config.scroll_arrow_height;
+    int y_bottom;
+
     if (!is_up_) {
-      delta_y = -1;
-      y += config.scroll_arrow_height;
+      y_bottom = y;
+      y = y_bottom + config.scroll_arrow_height;
+    } else {
+      y_bottom = y + config.scroll_arrow_height;
     }
-    for (int i = 0; i < config.scroll_arrow_height; ++i, --x, y += delta_y)
-      canvas->FillRect(arrow_color, gfx::Rect(x, y, (i * 2) + 1, 1));
+    SkPath path;
+    path.setFillType(SkPath::kWinding_FillType);
+    path.moveTo(SkIntToScalar(x), SkIntToScalar(y));
+    path.lineTo(SkIntToScalar(x_left), SkIntToScalar(y_bottom));
+    path.lineTo(SkIntToScalar(x_right), SkIntToScalar(y_bottom));
+    path.lineTo(SkIntToScalar(x), SkIntToScalar(y));
+    SkPaint paint;
+    paint.setStyle(SkPaint::kFill_Style);
+    paint.setAntiAlias(true);
+    paint.setColor(config.arrow_color);
+    canvas->DrawPath(path, paint);
   }
 
  private:
@@ -165,11 +172,25 @@ MenuScrollViewContainer::MenuScrollViewContainer(SubmenuView* content_view)
   scroll_view_ = new MenuScrollView(content_view);
   AddChildView(scroll_view_);
 
-  set_border(Border::CreateEmptyBorder(
-                 SubmenuView::kSubmenuBorderSize,
-                 SubmenuView::kSubmenuBorderSize,
-                 SubmenuView::kSubmenuBorderSize,
-                 SubmenuView::kSubmenuBorderSize));
+  const MenuConfig& menu_config =
+      content_view_->GetMenuItem()->GetMenuConfig();
+
+  if (NativeTheme::IsNewMenuStyleEnabled()) {
+    set_border(views::Border::CreateBorderPainter(
+        new views::RoundRectPainter(
+            ui::NativeTheme::instance()->GetSystemColor(
+                ui::NativeTheme::kColorId_MenuBorderColor)),
+        gfx::Insets(menu_config.menu_vertical_border_size,
+                    menu_config.menu_horizontal_border_size,
+                    menu_config.menu_vertical_border_size,
+                    menu_config.menu_horizontal_border_size)));
+  } else {
+    set_border(
+        Border::CreateEmptyBorder(menu_config.menu_vertical_border_size,
+                                  menu_config.menu_horizontal_border_size,
+                                  menu_config.menu_vertical_border_size,
+                                  menu_config.menu_horizontal_border_size));
+  }
 }
 
 void MenuScrollViewContainer::OnPaintBackground(gfx::Canvas* canvas) {
@@ -178,16 +199,10 @@ void MenuScrollViewContainer::OnPaintBackground(gfx::Canvas* canvas) {
     return;
   }
 
-#if defined(OS_WIN)
-  HDC dc = canvas->BeginPlatformPaint();
-#endif
   gfx::Rect bounds(0, 0, width(), height());
   NativeTheme::ExtraParams extra;
-  NativeTheme::instance()->Paint(canvas->GetSkCanvas(),
+  GetNativeTheme()->Paint(canvas->sk_canvas(),
       NativeTheme::kMenuPopupBackground, NativeTheme::kNormal, bounds, extra);
-#if defined(OS_WIN)
-  canvas->EndPlatformPaint();
-#endif
 }
 
 void MenuScrollViewContainer::Layout() {

@@ -1,4 +1,4 @@
-// Copyright (c) 2011 The Chromium Authors. All rights reserved.
+// Copyright (c) 2012 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -7,21 +7,75 @@
 #include "base/metrics/histogram.h"
 #include "base/string_util.h"
 #include "content/browser/download/download_resource_handler.h"
-#include "content/browser/download/interrupt_reasons.h"
+#include "content/public/browser/download_interrupt_reasons.h"
+#include "net/http/http_content_disposition.h"
 
-namespace download_stats {
+namespace content {
+
+namespace {
 
 // All possible error codes from the network module. Note that the error codes
 // are all positive (since histograms expect positive sample values).
 const int kAllInterruptReasonCodes[] = {
 #define INTERRUPT_REASON(label, value) (value),
-#include "content/browser/download/interrupt_reason_values.h"
+#include "content/public/browser/download_interrupt_reason_values.h"
 #undef INTERRUPT_REASON
 };
+
+// These values are based on net::HttpContentDisposition::ParseResult values.
+// Values other than HEADER_PRESENT and IS_VALID are only measured if |IS_VALID|
+// is true.
+enum ContentDispositionCountTypes {
+  // Count of downloads which had a Content-Disposition headers. The total
+  // number of downloads is measured by UNTHROTTLED_COUNT.
+  CONTENT_DISPOSITION_HEADER_PRESENT = 0,
+
+  // At least one of 'name', 'filename' or 'filenae*' attributes were valid and
+  // yielded a non-empty filename.
+  CONTENT_DISPOSITION_IS_VALID,
+
+  // The following enum values correspond to
+  // net::HttpContentDisposition::ParseResult.
+  CONTENT_DISPOSITION_HAS_DISPOSITION_TYPE,
+  CONTENT_DISPOSITION_HAS_UNKNOWN_TYPE,
+  CONTENT_DISPOSITION_HAS_NAME,
+  CONTENT_DISPOSITION_HAS_FILENAME,
+  CONTENT_DISPOSITION_HAS_EXT_FILENAME,
+  CONTENT_DISPOSITION_HAS_NON_ASCII_STRINGS,
+  CONTENT_DISPOSITION_HAS_PERCENT_ENCODED_STRINGS,
+  CONTENT_DISPOSITION_HAS_RFC2047_ENCODED_STRINGS,
+
+  // Only have the 'name' attribute is present.
+  CONTENT_DISPOSITION_HAS_NAME_ONLY,
+
+  CONTENT_DISPOSITION_LAST_ENTRY
+};
+
+void RecordContentDispositionCount(ContentDispositionCountTypes type,
+                                   bool record) {
+  if (!record)
+    return;
+  UMA_HISTOGRAM_ENUMERATION(
+      "Download.ContentDisposition", type, CONTENT_DISPOSITION_LAST_ENTRY);
+}
+
+void RecordContentDispositionCountFlag(
+    ContentDispositionCountTypes type,
+    int flags_to_test,
+    net::HttpContentDisposition::ParseResultFlags flag) {
+  RecordContentDispositionCount(type, (flags_to_test & flag) == flag);
+}
+
+} // namespace
 
 void RecordDownloadCount(DownloadCountTypes type) {
   UMA_HISTOGRAM_ENUMERATION(
       "Download.Counts", type, DOWNLOAD_COUNT_TYPES_LAST_ENTRY);
+}
+
+void RecordDownloadSource(DownloadSource source) {
+  UMA_HISTOGRAM_ENUMERATION(
+      "Download.Sources", source, DOWNLOAD_SOURCE_LAST_ENTRY);
 }
 
 void RecordDownloadCompleted(const base::TimeTicks& start, int64 download_len) {
@@ -36,7 +90,7 @@ void RecordDownloadCompleted(const base::TimeTicks& start, int64 download_len) {
                               256);
 }
 
-void RecordDownloadInterrupted(InterruptReason reason,
+void RecordDownloadInterrupted(DownloadInterruptReason reason,
                                int64 received,
                                int64 total) {
   RecordDownloadCount(INTERRUPTED_COUNT);
@@ -247,11 +301,57 @@ void RecordDownloadMimeType(const std::string& mime_type_string) {
                             DOWNLOAD_CONTENT_MAX);
 }
 
+void RecordDownloadContentDisposition(
+    const std::string& content_disposition_string) {
+  if (content_disposition_string.empty())
+    return;
+  net::HttpContentDisposition content_disposition(
+      content_disposition_string, "");
+  int result = content_disposition.parse_result_flags();
+
+  bool is_valid = !content_disposition.filename().empty();
+  RecordContentDispositionCount(CONTENT_DISPOSITION_HEADER_PRESENT, true);
+  RecordContentDispositionCount(CONTENT_DISPOSITION_IS_VALID, is_valid);
+  if (!is_valid)
+    return;
+
+  RecordContentDispositionCountFlag(
+      CONTENT_DISPOSITION_HAS_DISPOSITION_TYPE, result,
+      net::HttpContentDisposition::HAS_DISPOSITION_TYPE);
+  RecordContentDispositionCountFlag(
+      CONTENT_DISPOSITION_HAS_UNKNOWN_TYPE, result,
+      net::HttpContentDisposition::HAS_UNKNOWN_DISPOSITION_TYPE);
+  RecordContentDispositionCountFlag(
+      CONTENT_DISPOSITION_HAS_NAME, result,
+      net::HttpContentDisposition::HAS_NAME);
+  RecordContentDispositionCountFlag(
+      CONTENT_DISPOSITION_HAS_FILENAME, result,
+      net::HttpContentDisposition::HAS_FILENAME);
+  RecordContentDispositionCountFlag(
+      CONTENT_DISPOSITION_HAS_EXT_FILENAME, result,
+      net::HttpContentDisposition::HAS_EXT_FILENAME);
+  RecordContentDispositionCountFlag(
+      CONTENT_DISPOSITION_HAS_NON_ASCII_STRINGS, result,
+      net::HttpContentDisposition::HAS_NON_ASCII_STRINGS);
+  RecordContentDispositionCountFlag(
+      CONTENT_DISPOSITION_HAS_PERCENT_ENCODED_STRINGS, result,
+      net::HttpContentDisposition::HAS_PERCENT_ENCODED_STRINGS);
+  RecordContentDispositionCountFlag(
+      CONTENT_DISPOSITION_HAS_RFC2047_ENCODED_STRINGS, result,
+      net::HttpContentDisposition::HAS_RFC2047_ENCODED_STRINGS);
+
+  RecordContentDispositionCount(
+      CONTENT_DISPOSITION_HAS_NAME_ONLY,
+      (result & (net::HttpContentDisposition::HAS_NAME |
+                 net::HttpContentDisposition::HAS_FILENAME |
+                 net::HttpContentDisposition::HAS_EXT_FILENAME)) ==
+      net::HttpContentDisposition::HAS_NAME);
+}
+
 void RecordFileThreadReceiveBuffers(size_t num_buffers) {
     UMA_HISTOGRAM_CUSTOM_COUNTS(
       "Download.FileThreadReceiveBuffers", num_buffers, 1,
-      DownloadResourceHandler::kLoadsToWrite,
-      DownloadResourceHandler::kLoadsToWrite);
+      100, 100);
 }
 
 void RecordBandwidth(double actual_bandwidth, double potential_bandwidth) {
@@ -274,14 +374,6 @@ void RecordOpen(const base::Time& end, bool first) {
   }
 }
 
-void RecordHistorySize(int size) {
-  UMA_HISTOGRAM_CUSTOM_COUNTS("Download.HistorySize",
-                              size,
-                              0/*min*/,
-                              (1 << 10)/*max*/,
-                              32/*num_buckets*/);
-}
-
 void RecordClearAllSize(int size) {
   UMA_HISTOGRAM_CUSTOM_COUNTS("Download.ClearAllSize",
                               size,
@@ -298,4 +390,48 @@ void RecordOpensOutstanding(int size) {
                               64/*num_buckets*/);
 }
 
-}  // namespace download_stats
+void RecordContiguousWriteTime(base::TimeDelta time_blocked) {
+  UMA_HISTOGRAM_TIMES("Download.FileThreadBlockedTime", time_blocked);
+}
+
+// Record what percentage of the time we have the network flow controlled.
+void RecordNetworkBlockage(base::TimeDelta resource_handler_lifetime,
+                           base::TimeDelta resource_handler_blocked_time) {
+  int percentage = 0;
+  // Avoid division by zero errors.
+  if (resource_handler_blocked_time != base::TimeDelta()) {
+    percentage =
+        resource_handler_blocked_time * 100 / resource_handler_lifetime;
+  }
+
+  UMA_HISTOGRAM_COUNTS_100("Download.ResourceHandlerBlockedPercentage",
+                           percentage);
+}
+
+void RecordFileBandwidth(size_t length,
+                         base::TimeDelta disk_write_time,
+                         base::TimeDelta elapsed_time) {
+  size_t elapsed_time_ms = elapsed_time.InMilliseconds();
+  if (0u == elapsed_time_ms)
+    elapsed_time_ms = 1;
+  size_t disk_write_time_ms = disk_write_time.InMilliseconds();
+  if (0u == disk_write_time_ms)
+    disk_write_time_ms = 1;
+
+  UMA_HISTOGRAM_CUSTOM_COUNTS(
+      "Download.BandwidthOverallBytesPerSecond",
+      (1000 * length / elapsed_time_ms), 1, 50000000, 50);
+  UMA_HISTOGRAM_CUSTOM_COUNTS(
+      "Download.BandwidthDiskBytesPerSecond",
+      (1000 * length / disk_write_time_ms), 1, 50000000, 50);
+  UMA_HISTOGRAM_COUNTS_100("Download.DiskBandwidthUsedPercentage",
+                           disk_write_time_ms * 100 / elapsed_time_ms);
+}
+
+void RecordSavePackageEvent(SavePackageEvent event) {
+  UMA_HISTOGRAM_ENUMERATION("Download.SavePackage",
+                            event,
+                            SAVE_PACKAGE_LAST_ENTRY);
+}
+
+}  // namespace content

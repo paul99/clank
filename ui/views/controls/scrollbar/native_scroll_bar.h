@@ -1,10 +1,9 @@
-// Copyright (c) 2011 The Chromium Authors. All rights reserved.
+// Copyright (c) 2012 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
 #ifndef UI_VIEWS_CONTROLS_SCROLLBAR_NATIVE_SCROLL_BAR_H_
 #define UI_VIEWS_CONTROLS_SCROLLBAR_NATIVE_SCROLL_BAR_H_
-#pragma once
 
 #include <string>
 
@@ -12,6 +11,10 @@
 #include "base/gtest_prod_util.h"
 #include "ui/views/controls/scrollbar/scroll_bar.h"
 #include "ui/views/view.h"
+
+namespace ui {
+class NativeTheme;
+}
 
 namespace views {
 
@@ -29,8 +32,8 @@ class VIEWS_EXPORT NativeScrollBar : public ScrollBar {
   virtual ~NativeScrollBar();
 
   // Return the system sizes.
-  static int GetHorizontalScrollBarHeight();
-  static int GetVerticalScrollBarWidth();
+  static int GetHorizontalScrollBarHeight(const ui::NativeTheme* theme);
+  static int GetVerticalScrollBarWidth(const ui::NativeTheme* theme);
 
  private:
   friend class NativeScrollBarTest;
@@ -45,8 +48,11 @@ class VIEWS_EXPORT NativeScrollBar : public ScrollBar {
   virtual std::string GetClassName() const OVERRIDE;
 
   // Overrideen from View for keyboard UI purpose.
-  virtual bool OnKeyPressed(const KeyEvent& event) OVERRIDE;
-  virtual bool OnMouseWheel(const MouseWheelEvent& e) OVERRIDE;
+  virtual bool OnKeyPressed(const ui::KeyEvent& event) OVERRIDE;
+  virtual bool OnMouseWheel(const ui::MouseWheelEvent& e) OVERRIDE;
+
+  // Overridden from ui::EventHandler.
+  virtual void OnGestureEvent(ui::GestureEvent* event) OVERRIDE;
 
   // Overridden from ScrollBar.
   virtual void Update(int viewport_size,

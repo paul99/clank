@@ -1,4 +1,4 @@
-// Copyright (c) 2011 The Chromium Authors. All rights reserved.
+// Copyright (c) 2012 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -10,18 +10,33 @@
 #include "base/stl_util.h"
 #include "base/utf_string_conversions.h"
 #include "chrome/app/chrome_command_ids.h"
+#include "chrome/browser/background/background_contents_service.h"
+#include "chrome/browser/background/background_contents_service_factory.h"
 #include "chrome/browser/background/background_mode_manager.h"
 #include "chrome/browser/browser_process.h"
 #include "chrome/browser/extensions/extension_prefs.h"
 #include "chrome/browser/extensions/extension_service.h"
-#include "chrome/browser/extensions/image_loading_tracker.h"
+#include "chrome/browser/extensions/extension_system.h"
+#include "chrome/browser/extensions/image_loader.h"
 #include "chrome/browser/profiles/profile.h"
 #include "chrome/common/chrome_notification_types.h"
 #include "chrome/common/extensions/extension.h"
+#include "chrome/common/extensions/extension_constants.h"
+#include "chrome/common/extensions/extension_icon_set.h"
 #include "chrome/common/extensions/extension_resource.h"
+#include "chrome/common/extensions/permissions/permission_set.h"
 #include "content/public/browser/notification_details.h"
 #include "content/public/browser/notification_source.h"
 #include "ui/base/l10n/l10n_util_collator.h"
+#include "ui/gfx/image/image.h"
+#include "ui/gfx/image/image_skia.h"
+
+using extensions::APIPermission;
+using extensions::Extension;
+using extensions::ExtensionList;
+using extensions::PermissionSet;
+using extensions::UnloadedExtensionInfo;
+using extensions::UpdatedExtensionPermissionsInfo;
 
 class ExtensionNameComparator {
  public:
@@ -46,7 +61,7 @@ bool ExtensionNameComparator::operator()(const Extension* x,
 // Background application representation, private to the
 // BackgroundApplicationListModel class.
 class BackgroundApplicationListModel::Application
-  : public ImageLoadingTracker::Observer {
+    : public base::SupportsWeakPtr<Application> {
  public:
   Application(BackgroundApplicationListModel* model,
               const Extension* an_extension);
@@ -54,18 +69,15 @@ class BackgroundApplicationListModel::Application
   virtual ~Application();
 
   // Invoked when a request icon is available.
-  virtual void OnImageLoaded(SkBitmap* image,
-                             const ExtensionResource& resource,
-                             int index);
+  void OnImageLoaded(const gfx::Image& image);
 
   // Uses the FILE thread to request this extension's icon, sized
   // appropriately.
-  void RequestIcon(Extension::Icons size);
+  void RequestIcon(extension_misc::ExtensionIcons size);
 
   const Extension* extension_;
-  scoped_ptr<SkBitmap> icon_;
+  scoped_ptr<gfx::ImageSkia> icon_;
   BackgroundApplicationListModel* model_;
-  ImageLoadingTracker tracker_;
 };
 
 namespace {
@@ -77,8 +89,10 @@ void GetServiceApplications(ExtensionService* service,
        cursor != extensions->end();
        ++cursor) {
     const Extension* extension = *cursor;
-    if (BackgroundApplicationListModel::IsBackgroundApp(*extension))
+    if (BackgroundApplicationListModel::IsBackgroundApp(*extension,
+                                                        service->profile())) {
       applications_result->push_back(extension);
+    }
   }
 
   // Walk the list of terminated extensions also (just because an extension
@@ -88,15 +102,17 @@ void GetServiceApplications(ExtensionService* service,
        cursor != extensions->end();
        ++cursor) {
     const Extension* extension = *cursor;
-    if (BackgroundApplicationListModel::IsBackgroundApp(*extension))
+    if (BackgroundApplicationListModel::IsBackgroundApp(*extension,
+                                                        service->profile())) {
       applications_result->push_back(extension);
+    }
   }
 
   std::string locale = g_browser_process->GetApplicationLocale();
   icu::Locale loc(locale.c_str());
   UErrorCode error = U_ZERO_ERROR;
   scoped_ptr<icu::Collator> collator(icu::Collator::createInstance(loc, error));
-  sort(applications_result->begin(), applications_result->end(),
+  std::sort(applications_result->begin(), applications_result->end(),
        ExtensionNameComparator(collator.get()));
 }
 
@@ -123,26 +139,24 @@ BackgroundApplicationListModel::Application::Application(
     const Extension* extension)
     : extension_(extension),
       icon_(NULL),
-      model_(model),
-      ALLOW_THIS_IN_INITIALIZER_LIST(tracker_(this)) {
+      model_(model) {
 }
 
 void BackgroundApplicationListModel::Application::OnImageLoaded(
-    SkBitmap* image,
-    const ExtensionResource& resource,
-    int index) {
-  if (!image)
+    const gfx::Image& image) {
+  if (image.IsEmpty())
     return;
-  icon_.reset(new SkBitmap(*image));
+  icon_.reset(image.CopyImageSkia());
   model_->SendApplicationDataChangedNotifications(extension_);
 }
 
 void BackgroundApplicationListModel::Application::RequestIcon(
-    Extension::Icons size) {
+    extension_misc::ExtensionIcons size) {
   ExtensionResource resource = extension_->GetIconResource(
       size, ExtensionIconSet::MATCH_BIGGER);
-  tracker_.LoadImage(extension_, resource, gfx::Size(size, size),
-                     ImageLoadingTracker::CACHE);
+  extensions::ImageLoader::Get(model_->profile_)->LoadImageAsync(
+      extension_, resource, gfx::Size(size, size),
+      base::Bind(&Application::OnImageLoaded, AsWeakPtr()));
 }
 
 BackgroundApplicationListModel::~BackgroundApplicationListModel() {
@@ -165,7 +179,11 @@ BackgroundApplicationListModel::BackgroundApplicationListModel(Profile* profile)
   registrar_.Add(this,
                  chrome::NOTIFICATION_EXTENSION_PERMISSIONS_UPDATED,
                  content::Source<Profile>(profile));
-  ExtensionService* service = profile->GetExtensionService();
+  registrar_.Add(this,
+                 chrome::NOTIFICATION_BACKGROUND_CONTENTS_SERVICE_CHANGED,
+                 content::Source<Profile>(profile));
+  ExtensionService* service = extensions::ExtensionSystem::Get(profile)->
+      extension_service();
   if (service && service->is_ready())
     Update();
 }
@@ -176,7 +194,7 @@ void BackgroundApplicationListModel::AddObserver(Observer* observer) {
 
 void BackgroundApplicationListModel::AssociateApplicationData(
     const Extension* extension) {
-  DCHECK(IsBackgroundApp(*extension));
+  DCHECK(IsBackgroundApp(*extension, profile_));
   Application* application = FindApplication(extension);
   if (!application) {
     // App position is used as a dynamic command and so must be less than any
@@ -189,7 +207,7 @@ void BackgroundApplicationListModel::AssociateApplicationData(
     application = new Application(this, extension);
     applications_[extension->id()] = application;
     Update();
-    application->RequestIcon(Extension::EXTENSION_ICON_BITTY);
+    application->RequestIcon(extension_misc::EXTENSION_ICON_BITTY);
   }
 }
 
@@ -217,13 +235,14 @@ BackgroundApplicationListModel::FindApplication(
 }
 
 BackgroundApplicationListModel::Application*
-BackgroundApplicationListModel::FindApplication(const Extension* extension) {
+BackgroundApplicationListModel::FindApplication(
+    const Extension* extension) {
   const std::string& id = extension->id();
   ApplicationMap::iterator found = applications_.find(id);
   return (found == applications_.end()) ? NULL : found->second;
 }
 
-const SkBitmap* BackgroundApplicationListModel::GetIcon(
+const gfx::ImageSkia* BackgroundApplicationListModel::GetIcon(
     const Extension* extension) {
   const Application* application = FindApplication(extension);
   if (application)
@@ -248,8 +267,43 @@ int BackgroundApplicationListModel::GetPosition(
 
 // static
 bool BackgroundApplicationListModel::IsBackgroundApp(
-    const Extension& extension) {
-  return extension.HasAPIPermission(ExtensionAPIPermission::kBackground);
+    const Extension& extension, Profile* profile) {
+  // An extension is a "background app" if it has the "background API"
+  // permission, and meets one of the following criteria:
+  // 1) It is an extension (not a hosted app).
+  // 2) It is a hosted app, and has a background contents registered or in the
+  //    manifest.
+
+  // Not a background app if we don't have the background permission or
+  // the push messaging permission
+  if (!extension.HasAPIPermission(APIPermission::kBackground) &&
+      !extension.HasAPIPermission(APIPermission::kPushMessaging) )
+    return false;
+
+  // Extensions and packaged apps with background permission are always treated
+  // as background apps.
+  if (!extension.is_hosted_app())
+    return true;
+
+  // Hosted apps with manifest-provided background pages are background apps.
+  if (extension.has_background_page())
+    return true;
+
+  BackgroundContentsService* service =
+      BackgroundContentsServiceFactory::GetForProfile(profile);
+  string16 app_id = ASCIIToUTF16(extension.id());
+  // If we have an active or registered background contents for this app, then
+  // it's a background app. This covers the cases where the app has created its
+  // background contents, but it hasn't navigated yet, or the background
+  // contents crashed and hasn't yet been restarted - in both cases we still
+  // want to treat the app as a background app.
+  if (service->GetAppBackgroundContents(app_id) ||
+      service->HasRegisteredBackgroundContents(app_id)) {
+    return true;
+  }
+
+  // Doesn't meet our criteria, so it's not a background app.
+  return false;
 }
 
 void BackgroundApplicationListModel::Observe(
@@ -260,7 +314,8 @@ void BackgroundApplicationListModel::Observe(
     Update();
     return;
   }
-  ExtensionService* service = profile_->GetExtensionService();
+  ExtensionService* service = extensions::ExtensionSystem::Get(profile_)->
+      extension_service();
   if (!service || !service->is_ready())
     return;
 
@@ -279,6 +334,9 @@ void BackgroundApplicationListModel::Observe(
           content::Details<UpdatedExtensionPermissionsInfo>(details)->
               permissions);
       break;
+    case chrome::NOTIFICATION_BACKGROUND_CONTENTS_SERVICE_CHANGED:
+      Update();
+      break;
     default:
       NOTREACHED() << "Received unexpected notification";
   }
@@ -293,14 +351,14 @@ void BackgroundApplicationListModel::SendApplicationDataChangedNotifications(
 void BackgroundApplicationListModel::OnExtensionLoaded(
     const Extension* extension) {
   // We only care about extensions that are background applications
-  if (!IsBackgroundApp(*extension))
+  if (!IsBackgroundApp(*extension, profile_))
     return;
   AssociateApplicationData(extension);
 }
 
 void BackgroundApplicationListModel::OnExtensionUnloaded(
     const Extension* extension) {
-  if (!IsBackgroundApp(*extension))
+  if (!IsBackgroundApp(*extension, profile_))
     return;
   Update();
   DissociateApplicationData(extension);
@@ -309,15 +367,15 @@ void BackgroundApplicationListModel::OnExtensionUnloaded(
 void BackgroundApplicationListModel::OnExtensionPermissionsUpdated(
     const Extension* extension,
     UpdatedExtensionPermissionsInfo::Reason reason,
-    const ExtensionPermissionSet* permissions) {
-  if (permissions->HasAPIPermission(ExtensionAPIPermission::kBackground)) {
+    const PermissionSet* permissions) {
+  if (permissions->HasAPIPermission(APIPermission::kBackground)) {
     switch (reason) {
       case UpdatedExtensionPermissionsInfo::ADDED:
-        DCHECK(IsBackgroundApp(*extension));
+        DCHECK(IsBackgroundApp(*extension, profile_));
         OnExtensionLoaded(extension);
         break;
       case UpdatedExtensionPermissionsInfo::REMOVED:
-        DCHECK(!IsBackgroundApp(*extension));
+        DCHECK(!IsBackgroundApp(*extension, profile_));
         Update();
         DissociateApplicationData(extension);
         break;
@@ -336,7 +394,8 @@ void BackgroundApplicationListModel::RemoveObserver(Observer* observer) {
 // differs from the old list, it generates OnApplicationListChanged events for
 // each observer.
 void BackgroundApplicationListModel::Update() {
-  ExtensionService* service = profile_->GetExtensionService();
+  ExtensionService* service = extensions::ExtensionSystem::Get(profile_)->
+      extension_service();
 
   // Discover current background applications, compare with previous list, which
   // is consistently sorted, and notify observers if they differ.

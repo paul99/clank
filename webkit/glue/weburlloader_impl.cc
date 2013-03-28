@@ -29,12 +29,14 @@
 #include "third_party/WebKit/Source/WebKit/chromium/public/platform/WebURLLoaderClient.h"
 #include "third_party/WebKit/Source/WebKit/chromium/public/platform/WebURLRequest.h"
 #include "third_party/WebKit/Source/WebKit/chromium/public/platform/WebURLResponse.h"
+#include "webkit/base/file_path_string_conversions.h"
 #include "webkit/glue/ftp_directory_listing_response_delegate.h"
 #include "webkit/glue/multipart_response_delegate.h"
 #include "webkit/glue/resource_loader_bridge.h"
-#include "webkit/glue/webkit_glue.h"
+#include "webkit/glue/resource_request_body.h"
 #include "webkit/glue/webkitplatformsupport_impl.h"
 #include "webkit/glue/weburlrequest_extradata_impl.h"
+#include "webkit/glue/weburlresponse_extradata_impl.h"
 
 using base::Time;
 using base::TimeTicks;
@@ -58,6 +60,10 @@ namespace webkit_glue {
 // Utilities ------------------------------------------------------------------
 
 namespace {
+
+const char kThrottledErrorDescription[] =
+    "Request throttled. Visit http://dev.chromium.org/throttling for more "
+    "information.";
 
 class HeaderFlattener : public WebHTTPHeaderVisitor {
  public:
@@ -117,11 +123,11 @@ class HeaderFlattener : public WebHTTPHeaderVisitor {
 bool GetInfoFromDataURL(const GURL& url,
                         ResourceResponseInfo* info,
                         std::string* data,
-                        net::URLRequestStatus* status) {
+                        int* error_code) {
   std::string mime_type;
   std::string charset;
   if (net::DataURL::Parse(url, &mime_type, &charset, data)) {
-    *status = net::URLRequestStatus(net::URLRequestStatus::SUCCESS, 0);
+    *error_code = net::OK;
     // Assure same time for all time fields of data: URLs.
     Time now = Time::Now();
     info->load_timing.base_time = now;
@@ -132,14 +138,13 @@ bool GetInfoFromDataURL(const GURL& url,
     info->mime_type.swap(mime_type);
     info->charset.swap(charset);
     info->security_info.clear();
-    info->content_length = -1;
+    info->content_length = data->length();
     info->encoded_data_length = 0;
 
     return true;
   }
 
-  *status = net::URLRequestStatus(net::URLRequestStatus::FAILED,
-                                  net::ERR_INVALID_URL);
+  *error_code = net::ERR_INVALID_URL;
   return false;
 }
 
@@ -169,7 +174,10 @@ void PopulateURLResponse(
   response->setRemotePort(info.socket_address.port());
   response->setConnectionID(info.connection_id);
   response->setConnectionReused(info.connection_reused);
-  response->setDownloadFilePath(FilePathToWebString(info.download_file_path));
+  response->setDownloadFilePath(
+      webkit_base::FilePathToWebString(info.download_file_path));
+  response->setExtraData(new WebURLResponseExtraDataImpl(
+      info.npn_negotiated_protocol));
 
   const ResourceLoadTimingInfo& timing_info = info.load_timing;
   if (!timing_info.base_time.is_null()) {
@@ -222,6 +230,14 @@ void PopulateURLResponse(
   if (!headers)
     return;
 
+  WebURLResponse::HTTPVersion version = WebURLResponse::Unknown;
+  if (headers->GetHttpVersion() == net::HttpVersion(0, 9))
+    version = WebURLResponse::HTTP_0_9;
+  else if (headers->GetHttpVersion() == net::HttpVersion(1, 0))
+    version = WebURLResponse::HTTP_1_0;
+  else if (headers->GetHttpVersion() == net::HttpVersion(1, 1))
+    version = WebURLResponse::HTTP_1_1;
+  response->setHTTPVersion(version);
   response->setHTTPStatusCode(headers->response_code());
   response->setHTTPStatusText(WebString::fromUTF8(headers->GetStatusText()));
 
@@ -269,7 +285,6 @@ class WebURLLoaderImpl::Context : public base::RefCounted<Context>,
       const WebURLRequest& request,
       ResourceLoaderBridge::SyncLoadResponse* sync_load_response,
       WebKitPlatformSupportImpl* platform);
-  void UpdateRoutingId(int new_routing_id);
 
   // ResourceLoaderBridge::Peer methods:
   virtual void OnUploadProgress(uint64 position, uint64 size);
@@ -284,7 +299,8 @@ class WebURLLoaderImpl::Context : public base::RefCounted<Context>,
                               int data_length,
                               int encoded_data_length);
   virtual void OnReceivedCachedMetadata(const char* data, int len);
-  virtual void OnCompletedRequest(const net::URLRequestStatus& status,
+  virtual void OnCompletedRequest(int error_code,
+                                  bool was_ignored_by_handler,
                                   const std::string& security_info,
                                   const base::TimeTicks& completion_time);
 
@@ -333,11 +349,6 @@ void WebURLLoaderImpl::Context::SetDefersLoading(bool value) {
     bridge_->SetDefersLoading(value);
 }
 
-void WebURLLoaderImpl::Context::UpdateRoutingId(int new_routing_id) {
-  if (bridge_.get())
-    bridge_->UpdateRoutingId(new_routing_id);
-}
-
 void WebURLLoaderImpl::Context::Start(
     const WebURLRequest& request,
     ResourceLoaderBridge::SyncLoadResponse* sync_load_response,
@@ -354,7 +365,7 @@ void WebURLLoaderImpl::Context::Start(
       std::string data;
       GetInfoFromDataURL(sync_load_response->url, sync_load_response,
                          &sync_load_response->data,
-                         &sync_load_response->status);
+                         &sync_load_response->error_code);
     } else {
       AddRef();  // Balanced in OnCompletedRequest
       MessageLoop::current()->PostTask(FROM_HERE,
@@ -435,36 +446,49 @@ void WebURLLoaderImpl::Context::Start(
     const WebHTTPBody& httpBody = request.httpBody();
     size_t i = 0;
     WebHTTPBody::Element element;
+    scoped_refptr<ResourceRequestBody> request_body = new ResourceRequestBody;
     while (httpBody.elementAt(i++, element)) {
       switch (element.type) {
         case WebHTTPBody::Element::TypeData:
           if (!element.data.isEmpty()) {
             // WebKit sometimes gives up empty data to append. These aren't
             // necessary so we just optimize those out here.
-            bridge_->AppendDataToUpload(
+            request_body->AppendBytes(
                 element.data.data(), static_cast<int>(element.data.size()));
           }
           break;
         case WebHTTPBody::Element::TypeFile:
           if (element.fileLength == -1) {
-            bridge_->AppendFileToUpload(
-                WebStringToFilePath(element.filePath));
+            request_body->AppendFileRange(
+                webkit_base::WebStringToFilePath(element.filePath),
+                0, kuint64max, base::Time());
           } else {
-            bridge_->AppendFileRangeToUpload(
-                WebStringToFilePath(element.filePath),
+            request_body->AppendFileRange(
+                webkit_base::WebStringToFilePath(element.filePath),
                 static_cast<uint64>(element.fileStart),
                 static_cast<uint64>(element.fileLength),
                 base::Time::FromDoubleT(element.modificationTime));
           }
           break;
+        case WebHTTPBody::Element::TypeURL: {
+          GURL url = GURL(element.url);
+          DCHECK(url.SchemeIsFileSystem());
+          request_body->AppendFileSystemFileRange(
+              url,
+              static_cast<uint64>(element.fileStart),
+              static_cast<uint64>(element.fileLength),
+              base::Time::FromDoubleT(element.modificationTime));
+          break;
+        }
         case WebHTTPBody::Element::TypeBlob:
-          bridge_->AppendBlobToUpload(GURL(element.blobURL));
+          request_body->AppendBlob(GURL(element.blobURL));
           break;
         default:
           NOTREACHED();
       }
     }
-    bridge_->SetUploadIdentifier(request.httpBody().identifier());
+    request_body->set_identifier(request.httpBody().identifier());
+    bridge_->SetRequestBody(request_body);
   }
 
   if (sync_load_response) {
@@ -564,7 +588,7 @@ void WebURLLoaderImpl::Context::OnReceivedResponse(
 
     std::string mime_type;
     std::string charset;
-    bool had_charset;
+    bool had_charset = false;
     std::string boundary;
     net::HttpUtil::ParseContentType(content_type, &mime_type, &charset,
                                     &had_charset, &boundary);
@@ -614,7 +638,8 @@ void WebURLLoaderImpl::Context::OnReceivedCachedMetadata(
 }
 
 void WebURLLoaderImpl::Context::OnCompletedRequest(
-    const net::URLRequestStatus& status,
+    int error_code,
+    bool was_ignored_by_handler,
     const std::string& security_info,
     const base::TimeTicks& completion_time) {
   if (ftp_listing_delegate_.get()) {
@@ -631,18 +656,14 @@ void WebURLLoaderImpl::Context::OnCompletedRequest(
   completed_bridge_.swap(bridge_);
 
   if (client_) {
-    if (status.status() != net::URLRequestStatus::SUCCESS) {
-      int error_code;
-      if (status.status() == net::URLRequestStatus::HANDLED_EXTERNALLY) {
-        // By marking this request as aborted we insure that we don't navigate
-        // to an error page.
-        error_code = net::ERR_ABORTED;
-      } else {
-        error_code = status.error();
-      }
+    if (error_code != net::OK) {
       WebURLError error;
-      if (error_code == net::ERR_ABORTED)
+      if (error_code == net::ERR_ABORTED) {
         error.isCancellation = true;
+      } else if (error_code == net::ERR_TEMPORARILY_THROTTLED) {
+        error.localizedDescription = WebString::fromUTF8(
+            kThrottledErrorDescription);
+      }
       error.domain = WebString::fromUTF8(net::kErrorDomain);
       error.reason = error_code;
       error.unreachableURL = request_.url();
@@ -670,6 +691,13 @@ bool WebURLLoaderImpl::Context::CanHandleDataURL(const GURL& url) const {
   // reasons as well as to support unit tests, which do not have an underlying
   // ResourceLoaderBridge implementation.
 
+#if defined(OS_ANDROID)
+  // For compatibility reasons on Android we need to expose top-level data://
+  // to the browser.
+  if (request_.targetType() == WebURLRequest::TargetIsMainFrame)
+    return false;
+#endif
+
   if (request_.targetType() != WebURLRequest::TargetIsMainFrame &&
       request_.targetType() != WebURLRequest::TargetIsSubframe)
     return true;
@@ -684,16 +712,17 @@ bool WebURLLoaderImpl::Context::CanHandleDataURL(const GURL& url) const {
 
 void WebURLLoaderImpl::Context::HandleDataURL() {
   ResourceResponseInfo info;
-  net::URLRequestStatus status;
+  int error_code;
   std::string data;
 
-  if (GetInfoFromDataURL(request_.url(), &info, &data, &status)) {
+  if (GetInfoFromDataURL(request_.url(), &info, &data, &error_code)) {
     OnReceivedResponse(info);
     if (!data.empty())
       OnReceivedData(data.data(), data.size(), 0);
   }
 
-  OnCompletedRequest(status, info.security_info, base::TimeTicks::Now());
+  OnCompletedRequest(error_code, false, info.security_info,
+                     base::TimeTicks::Now());
 }
 
 // WebURLLoaderImpl -----------------------------------------------------------
@@ -718,13 +747,11 @@ void WebURLLoaderImpl::loadSynchronously(const WebURLRequest& request,
 
   // TODO(tc): For file loads, we may want to include a more descriptive
   // status code or status text.
-  const net::URLRequestStatus::Status& status =
-      sync_load_response.status.status();
-  if (status != net::URLRequestStatus::SUCCESS &&
-      status != net::URLRequestStatus::HANDLED_EXTERNALLY) {
+  int error_code = sync_load_response.error_code;
+  if (error_code != net::OK) {
     response.setURL(final_url);
     error.domain = WebString::fromUTF8(net::kErrorDomain);
-    error.reason = sync_load_response.status.error();
+    error.reason = error_code;
     error.unreachableURL = final_url;
     return;
   }
@@ -749,10 +776,6 @@ void WebURLLoaderImpl::cancel() {
 
 void WebURLLoaderImpl::setDefersLoading(bool value) {
   context_->SetDefersLoading(value);
-}
-
-void WebURLLoaderImpl::UpdateRoutingId(int new_routing_id) {
-  context_->UpdateRoutingId(new_routing_id);
 }
 
 }  // namespace webkit_glue

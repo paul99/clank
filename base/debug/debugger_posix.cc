@@ -1,14 +1,11 @@
-// Copyright (c) 2011 The Chromium Authors. All rights reserved.
+// Copyright (c) 2012 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
 #include "base/debug/debugger.h"
 #include "build/build_config.h"
 
-#include "build/build_config.h"
-
 #include <errno.h>
-
 #include <fcntl.h>
 #include <stdio.h>
 #include <stdlib.h>
@@ -20,7 +17,7 @@
 #include <string>
 #include <vector>
 
-#if !defined(OS_ANDROID)
+#if !defined(OS_ANDROID) && !defined(OS_NACL)
 #include <execinfo.h>
 #endif
 
@@ -43,9 +40,9 @@
 #include <ostream>
 
 #include "base/basictypes.h"
-#include "base/eintr_wrapper.h"
 #include "base/logging.h"
 #include "base/memory/scoped_ptr.h"
+#include "base/posix/eintr_wrapper.h"
 #include "base/safe_strerror_posix.h"
 #include "base/string_piece.h"
 #include "base/stringprintf.h"
@@ -61,9 +58,20 @@
 namespace base {
 namespace debug {
 
-bool SpawnDebuggerOnProcess(unsigned /* process_id */) {
+bool SpawnDebuggerOnProcess(unsigned process_id) {
+#if OS_ANDROID || OS_NACL
   NOTIMPLEMENTED();
   return false;
+#else
+  const std::string debug_cmd =
+      StringPrintf("xterm -e 'gdb --pid=%u' &", process_id);
+  LOG(WARNING) << "Starting debugger on pid " << process_id
+               << " with command `" << debug_cmd << "`";
+  int ret = system(debug_cmd.c_str());
+  if (ret == -1)
+    return false;
+  return true;
+#endif
 }
 
 #if defined(OS_MACOSX) || defined(OS_BSD)
@@ -71,14 +79,21 @@ bool SpawnDebuggerOnProcess(unsigned /* process_id */) {
 // Based on Apple's recommended method as described in
 // http://developer.apple.com/qa/qa2004/qa1361.html
 bool BeingDebugged() {
+  // NOTE: This code MUST be async-signal safe (it's used by in-process
+  // stack dumping signal handler). NO malloc or stdio is allowed here.
+  //
+  // While some code used below may be async-signal unsafe, note how
+  // the result is cached (see |is_set| and |being_debugged| static variables
+  // right below). If this code is properly warmed-up early
+  // in the start-up process, it should be safe to use later.
+
   // If the process is sandboxed then we can't use the sysctl, so cache the
   // value.
   static bool is_set = false;
   static bool being_debugged = false;
 
-  if (is_set) {
+  if (is_set)
     return being_debugged;
-  }
 
   // Initialize mib, which tells sysctl what info we want.  In this case,
   // we're looking for information about a specific process ID.
@@ -133,6 +148,9 @@ bool BeingDebugged() {
 // can't detach without forking(), and that's not so great.
 // static
 bool BeingDebugged() {
+  // NOTE: This code MUST be async-signal safe (it's used by in-process
+  // stack dumping signal handler). NO malloc or stdio is allowed here.
+
   int status_fd = open("/proc/self/status", O_RDONLY);
   if (status_fd == -1)
     return false;
@@ -201,34 +219,39 @@ bool BeingDebugged() {
 //
 // Use GDB to set |go| to 1 to resume execution.
 #define DEBUG_BREAK() do { \
-  if (!BeingDebugged()) {                               \
-    abort();                                            \
-  } else {                                              \
-    volatile int go = 0;                                \
+  if (!BeingDebugged()) { \
+    abort(); \
+  } else { \
+    volatile int go = 0; \
     while (!go) { \
       base::PlatformThread::Sleep(base::TimeDelta::FromMilliseconds(100)); \
     } \
-  }                                                     \
+  } \
 } while (0)
 #else
 // ARM && !ANDROID
 #define DEBUG_BREAK() asm("bkpt 0")
 #endif
+#elif defined(ARCH_CPU_MIPS_FAMILY)
+#define DEBUG_BREAK() asm("break 2")
 #else
 #define DEBUG_BREAK() asm("int3")
 #endif
 
 void BreakDebugger() {
+  // NOTE: This code MUST be async-signal safe (it's used by in-process
+  // stack dumping signal handler). NO malloc or stdio is allowed here.
+
   DEBUG_BREAK();
 #if defined(OS_ANDROID) && !defined(OFFICIAL_BUILD)
-  // do nothing
-  // For current chrome android development we
-  // debug the release build.
-  // TODO(navabi): fixit?
-#else
-#if defined(NDEBUG)
+  // For Android development we always build release (debug builds are
+  // unmanageably large), so the unofficial build is used for debugging. It is
+  // helpful to be able to insert BreakDebugger() statements in the source,
+  // attach the debugger, inspect the state of the program and then resume it by
+  // setting the 'go' variable above.
+#elif defined(NDEBUG)
+  // Terminate the program after signaling the debug break.
   _exit(1);
-#endif
 #endif
 }
 

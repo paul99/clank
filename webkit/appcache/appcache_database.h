@@ -1,4 +1,4 @@
-// Copyright (c) 2011 The Chromium Authors. All rights reserved.
+// Copyright (c) 2012 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -15,8 +15,8 @@
 #include "base/memory/scoped_ptr.h"
 #include "base/time.h"
 #include "googleurl/src/gurl.h"
-#include "webkit/appcache/appcache_export.h"
 #include "webkit/appcache/appcache_interfaces.h"
+#include "webkit/storage/webkit_storage_export.h"
 
 namespace sql {
 class Connection;
@@ -27,9 +27,9 @@ class StatementID;
 
 namespace appcache {
 
-class APPCACHE_EXPORT AppCacheDatabase {
+class WEBKIT_STORAGE_EXPORT AppCacheDatabase {
  public:
-  struct APPCACHE_EXPORT GroupRecord {
+  struct WEBKIT_STORAGE_EXPORT GroupRecord {
     GroupRecord();
     ~GroupRecord();
 
@@ -40,7 +40,7 @@ class APPCACHE_EXPORT AppCacheDatabase {
     base::Time last_access_time;
   };
 
-  struct APPCACHE_EXPORT CacheRecord {
+  struct WEBKIT_STORAGE_EXPORT CacheRecord {
     CacheRecord()
         : cache_id(0), group_id(0), online_wildcard(false), cache_size(0) {}
 
@@ -61,7 +61,7 @@ class APPCACHE_EXPORT AppCacheDatabase {
     int64 response_size;
   };
 
-  struct APPCACHE_EXPORT NamespaceRecord {
+  struct WEBKIT_STORAGE_EXPORT NamespaceRecord {
     NamespaceRecord();
     ~NamespaceRecord();
 
@@ -169,10 +169,6 @@ class APPCACHE_EXPORT AppCacheDatabase {
       const sql::StatementID& statement_id, const char* sql,
       const std::vector<int64>& ids);
   bool RunUniqueStatementWithInt64Result(const char* sql, int64* result);
-
-  bool PrepareUniqueStatement(const char* sql, sql::Statement* statement);
-  bool PrepareCachedStatement(
-      const sql::StatementID& id, const char* sql, sql::Statement* statement);
 
   bool FindResponseIdsForCacheHelper(
       int64 cache_id, std::vector<int64>* ids_vector,

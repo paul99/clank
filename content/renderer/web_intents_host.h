@@ -4,19 +4,20 @@
 
 #ifndef CONTENT_RENDERER_WEB_INTENTS_HOST_H_
 #define CONTENT_RENDERER_WEB_INTENTS_HOST_H_
-#pragma once
 
 #include <map>
 
 #include "base/memory/scoped_ptr.h"
 #include "content/public/renderer/render_view_observer.h"
+#include "third_party/WebKit/Source/WebKit/chromium/public/WebBlob.h"
+#include "third_party/WebKit/Source/WebKit/chromium/public/WebIntent.h"
 #include "third_party/WebKit/Source/WebKit/chromium/public/platform/WebString.h"
+#include "v8/include/v8.h"
 #include "webkit/glue/web_intent_data.h"
 #include "webkit/glue/web_intent_reply_data.h"
 
-class RenderViewImpl;
-
 namespace WebKit {
+class WebDeliveredIntentClient;
 class WebIntentRequest;
 class WebFrame;
 }
@@ -25,10 +26,13 @@ namespace webkit_glue {
 struct WebIntentData;
 }
 
+namespace content {
+class RenderViewImpl;
+
 // WebIntentsHost is a delegate for Web Intents messages. It is the
 // renderer-side handler for IPC messages delivering the intent payload data
 // and preparing it for access by the service page.
-class WebIntentsHost : public content::RenderViewObserver {
+class WebIntentsHost : public RenderViewObserver {
  public:
   // |render_view| must not be NULL.
   explicit WebIntentsHost(RenderViewImpl* render_view);
@@ -37,13 +41,40 @@ class WebIntentsHost : public content::RenderViewObserver {
   // Called by the RenderView to register a new Web Intent invocation.
   int RegisterWebIntent(const WebKit::WebIntentRequest& request);
 
-  // Called by the bound intent object to register the result from the service
-  // page.
+  // Called into when the delivered intent object gets a postResult call.
   void OnResult(const WebKit::WebString& data);
+  // Called into when the delivered intent object gets a postFailure call.
   void OnFailure(const WebKit::WebString& data);
 
+  // Forwarded from RenderViewImpl. Notification that a new script context was
+  // created within webkit.
+  virtual void DidCreateScriptContext(WebKit::WebFrame* frame,
+                                      v8::Handle<v8::Context> ctx,
+                                      int extension_group,
+                                      int world_id);
+
  private:
-  class BoundDeliveredIntent;
+  // RenderView::Observer implementation.
+  virtual bool OnMessageReceived(const IPC::Message& message) OVERRIDE;
+
+  // Converts incoming intent data to a WebIntent object.
+  WebKit::WebIntent CreateWebIntent(
+      WebKit::WebFrame* frame, const webkit_glue::WebIntentData& intent_data);
+
+  // TODO(gbillock): Do we need various ***ClientRedirect methods to implement
+  // intent cancelling policy? Figure this out.
+
+  // On the service page, handler method for the IntentsMsg_SetWebIntent
+  // message.
+  CONTENT_EXPORT void OnSetIntent(const webkit_glue::WebIntentData& intent);
+
+  // On the client page, handler method for the IntentsMsg_WebIntentReply
+  // message. Forwards |reply| to the registered WebIntentRequest
+  // (found by |intent_id|), where it is dispatched to the client JS callback.
+  void OnWebIntentReply(const webkit_glue::WebIntentReply& reply,
+                        int intent_id);
+
+  friend class WebIntentsHostTest;
 
   // A counter used to assign unique IDs to web intents invocations in this
   // renderer.
@@ -53,31 +84,20 @@ class WebIntentsHost : public content::RenderViewObserver {
   // correctly route any return data.
   std::map<int, WebKit::WebIntentRequest> intent_requests_;
 
-  // RenderView::Observer implementation.
-  virtual bool OnMessageReceived(const IPC::Message& message) OVERRIDE;
-  virtual void DidClearWindowObject(WebKit::WebFrame* frame) OVERRIDE;
-
-  // TODO(gbillock): Do we need various ***ClientRedirect methods to implement
-  // intent cancelling policy? Figure this out.
-
-  // On the service page, handler method for the IntentsMsg_SetWebIntent
-  // message.
-  void OnSetIntent(const webkit_glue::WebIntentData& intent);
-
-  // On the client page, handler method for the IntentsMsg_WebIntentReply
-  // message.
-  void OnWebIntentReply(webkit_glue::WebIntentReplyType reply_type,
-                        const WebKit::WebString& data,
-                        int intent_id);
-
   // Delivered intent data from the caller.
   scoped_ptr<webkit_glue::WebIntentData> intent_;
 
-  // Representation of the intent data as a C++ bound NPAPI object to be
-  // injected into the Javascript context.
-  scoped_ptr<BoundDeliveredIntent> delivered_intent_;
+  // The client object which will receive callback notifications from the
+  // delivered intent.
+  scoped_ptr<WebKit::WebDeliveredIntentClient> delivered_intent_client_;
+
+  // If we deliver a browser-originated blob intent to the client,
+  // this is that Blob.
+  WebKit::WebBlob web_blob_;
 
   DISALLOW_COPY_AND_ASSIGN(WebIntentsHost);
 };
+
+}  // namespace content
 
 #endif  // CONTENT_RENDERER_WEB_INTENTS_HOST_H_

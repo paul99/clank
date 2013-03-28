@@ -6,7 +6,6 @@
 
 #ifndef CHROME_BROWSER_NOTIFICATIONS_BALLOON_COLLECTION_BASE_H_
 #define CHROME_BROWSER_NOTIFICATIONS_BALLOON_COLLECTION_BASE_H_
-#pragma once
 
 #include <deque>
 #include <string>
@@ -16,6 +15,7 @@
 class Balloon;
 class GURL;
 class Notification;
+class Profile;
 
 // This class provides support for implementing a BalloonCollection
 // including the parts common between Chrome UI and ChromeOS UI.
@@ -43,10 +43,18 @@ class BalloonCollectionBase {
   // was found.
   virtual bool CloseAllBySourceOrigin(const GURL& source_origin);
 
+  // Finds all balloons matching the given profile and calls CloseByScript
+  // on them.  Returns true if anything was found.
+  virtual bool CloseAllByProfile(Profile* profile);
+
   // Calls CloseByScript on all balloons.
   virtual void CloseAll();
 
   const Balloons& balloons() const { return balloons_; }
+
+  // Returns the balloon matching the given notification id, or
+  // NULL if there is no matching balloon.
+  Balloon* FindBalloonById(const std::string& notification_id);
 
   // Returns the balloon matching the given notification, or
   // NULL if there is no matching balloon.

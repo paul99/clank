@@ -11,7 +11,8 @@
 #include <sys/utsname.h>
 #endif
 
-#include "base/lazy_instance.h"
+#include <limits>
+
 #include "base/logging.h"
 #include "base/memory/scoped_ptr.h"
 #include "base/path_service.h"
@@ -19,35 +20,36 @@
 #include "base/string_tokenizer.h"
 #include "base/string_util.h"
 #include "base/stringprintf.h"
-#include "base/synchronization/lock.h"
 #include "base/sys_info.h"
-#include "base/sys_string_conversions.h"
 #include "base/utf_string_conversions.h"
 #include "net/base/escape.h"
+#include "net/url_request/url_request.h"
 #include "skia/ext/platform_canvas.h"
 #if defined(OS_MACOSX)
 #include "skia/ext/skia_utils_mac.h"
 #endif
 #include "third_party/skia/include/core/SkBitmap.h"
 #include "third_party/WebKit/Source/WebKit/chromium/public/platform/WebData.h"
-#include "third_party/WebKit/Source/WebKit/chromium/public/WebDevToolsAgent.h"
-#include "third_party/WebKit/Source/WebKit/chromium/public/WebDocument.h"
-#include "third_party/WebKit/Source/WebKit/chromium/public/WebElement.h"
-#include "third_party/WebKit/Source/WebKit/chromium/public/WebFrame.h"
-#include "third_party/WebKit/Source/WebKit/chromium/public/WebGlyphCache.h"
-#include "third_party/WebKit/Source/WebKit/chromium/public/WebHistoryItem.h"
 #include "third_party/WebKit/Source/WebKit/chromium/public/platform/WebImage.h"
-#include "third_party/WebKit/Source/WebKit/chromium/public/WebKit.h"
+#include "third_party/WebKit/Source/WebKit/chromium/public/platform/WebRect.h"
 #include "third_party/WebKit/Source/WebKit/chromium/public/platform/WebSize.h"
 #include "third_party/WebKit/Source/WebKit/chromium/public/platform/WebString.h"
 #include "third_party/WebKit/Source/WebKit/chromium/public/platform/WebVector.h"
+#include "third_party/WebKit/Source/WebKit/chromium/public/WebDevToolsAgent.h"
+#include "third_party/WebKit/Source/WebKit/chromium/public/WebDocument.h"
+#include "third_party/WebKit/Source/WebKit/chromium/public/WebElement.h"
+#include "third_party/WebKit/Source/WebKit/chromium/public/WebFileInfo.h"
+#include "third_party/WebKit/Source/WebKit/chromium/public/WebFrame.h"
+#include "third_party/WebKit/Source/WebKit/chromium/public/WebGlyphCache.h"
+#include "third_party/WebKit/Source/WebKit/chromium/public/WebHistoryItem.h"
+#include "third_party/WebKit/Source/WebKit/chromium/public/WebKit.h"
+#include "third_party/WebKit/Source/WebKit/chromium/public/WebPrintParams.h"
 #include "third_party/WebKit/Source/WebKit/chromium/public/WebView.h"
 #if defined(OS_WIN)
 #include "third_party/WebKit/Source/WebKit/chromium/public/win/WebInputEventFactory.h"
 #endif
 #include "v8/include/v8.h"
 #include "webkit/glue/glue_serialize.h"
-#include "webkit/glue/user_agent.h"
 
 using WebKit::WebCanvas;
 using WebKit::WebData;
@@ -57,6 +59,8 @@ using WebKit::WebFrame;
 using WebKit::WebGlyphCache;
 using WebKit::WebHistoryItem;
 using WebKit::WebImage;
+using WebKit::WebPrintParams;
+using WebKit::WebRect;
 using WebKit::WebSize;
 using WebKit::WebString;
 using WebKit::WebVector;
@@ -82,12 +86,6 @@ bool g_forcefully_terminate_plugin_process = false;
 void SetJavaScriptFlags(const std::string& str) {
 #if WEBKIT_USING_V8
   v8::V8::SetFlagsFromString(str.data(), static_cast<int>(str.size()));
-#endif
-}
-
-void SetDartFlags(const std::string& str) {
-#if WEBKIT_USING_DART
-  WebKit::setDartFlags(str.data(), static_cast<int>(str.size()));
 #endif
 }
 
@@ -117,7 +115,7 @@ string16 DumpFramesAsText(WebFrame* web_frame, bool recursive) {
   if (web_frame->parent() &&
       !web_frame->document().documentElement().isNull()) {
     result.append(ASCIIToUTF16("\n--------\nFrame: '"));
-    result.append(web_frame->name());
+    result.append(web_frame->uniqueName());
     result.append(ASCIIToUTF16("'\n--------\n"));
   }
 
@@ -137,32 +135,18 @@ string16 DumpRenderer(WebFrame* web_frame) {
   return web_frame->renderTreeAsText();
 }
 
-bool CounterValueForElementById(WebFrame* web_frame, const std::string& id,
-                                string16* counter_value) {
-  WebString result =
-      web_frame->counterValueForElementById(WebString::fromUTF8(id));
-  if (result.isNull())
-    return false;
-
-  *counter_value = result;
-  return true;
-}
-
-int PageNumberForElementById(WebFrame* web_frame,
-                             const std::string& id,
-                             float page_width_in_pixels,
-                             float page_height_in_pixels) {
-  return web_frame->pageNumberForElementById(WebString::fromUTF8(id),
-                                             page_width_in_pixels,
-                                             page_height_in_pixels);
-}
-
 int NumberOfPages(WebFrame* web_frame,
                   float page_width_in_pixels,
                   float page_height_in_pixels) {
   WebSize size(static_cast<int>(page_width_in_pixels),
                static_cast<int>(page_height_in_pixels));
-  int number_of_pages = web_frame->printBegin(size);
+
+  WebPrintParams print_params;
+  print_params.paperSize = size;
+  print_params.printContentArea = WebRect(0, 0, size.width, size.height);
+  print_params.printableArea = WebRect(0, 0, size.width, size.height);
+
+  int number_of_pages = web_frame->printBegin(print_params);
   web_frame->printEnd();
   return number_of_pages;
 }
@@ -174,7 +158,7 @@ string16 DumpFrameScrollPosition(WebFrame* web_frame, bool recursive) {
   if (offset.width() > 0 || offset.height() > 0) {
     if (web_frame->parent()) {
       base::StringAppendF(&result_utf8, "frame '%s' ",
-                          UTF16ToUTF8(web_frame->name()).c_str());
+                          UTF16ToUTF8(web_frame->uniqueName()).c_str());
     }
     base::StringAppendF(&result_utf8, "scrolled to %d,%d\n",
                         offset.width(), offset.height());
@@ -288,188 +272,20 @@ bool DecodeImage(const std::string& image_data, SkBitmap* image) {
   return true;
 }
 
-// NOTE: This pair of conversion functions are here instead of in glue_util.cc
-// since that file will eventually die.  This pair of functions will need to
-// remain as the concept of a file-path specific character encoding string type
-// will most likely not make its way into WebKit.
-
-FilePath::StringType WebStringToFilePathString(const WebString& str) {
-#if defined(OS_POSIX)
-  return base::SysWideToNativeMB(UTF16ToWideHack(str));
-#elif defined(OS_WIN)
-  return UTF16ToWideHack(str);
-#endif
-}
-
-WebString FilePathStringToWebString(const FilePath::StringType& str) {
-#if defined(OS_POSIX)
-  return WideToUTF16Hack(base::SysNativeMBToWide(str));
-#elif defined(OS_WIN)
-  return WideToUTF16Hack(str);
-#endif
-}
-
-FilePath WebStringToFilePath(const WebString& str) {
-  return FilePath(WebStringToFilePathString(str));
-}
-
-WebString FilePathToWebString(const FilePath& file_path) {
-  return FilePathStringToWebString(file_path.value());
-}
-
-WebKit::WebFileError PlatformFileErrorToWebFileError(
-    base::PlatformFileError error_code) {
-  switch (error_code) {
-    case base::PLATFORM_FILE_ERROR_NOT_FOUND:
-      return WebKit::WebFileErrorNotFound;
-    case base::PLATFORM_FILE_ERROR_INVALID_OPERATION:
-    case base::PLATFORM_FILE_ERROR_EXISTS:
-    case base::PLATFORM_FILE_ERROR_NOT_EMPTY:
-      return WebKit::WebFileErrorInvalidModification;
-    case base::PLATFORM_FILE_ERROR_NOT_A_DIRECTORY:
-    case base::PLATFORM_FILE_ERROR_NOT_A_FILE:
-      return WebKit::WebFileErrorTypeMismatch;
-    case base::PLATFORM_FILE_ERROR_ACCESS_DENIED:
-      return WebKit::WebFileErrorNoModificationAllowed;
-    case base::PLATFORM_FILE_ERROR_FAILED:
-      return WebKit::WebFileErrorInvalidState;
-    case base::PLATFORM_FILE_ERROR_ABORT:
-      return WebKit::WebFileErrorAbort;
-    case base::PLATFORM_FILE_ERROR_SECURITY:
-      return WebKit::WebFileErrorSecurity;
-    case base::PLATFORM_FILE_ERROR_NO_SPACE:
-      return WebKit::WebFileErrorQuotaExceeded;
-    default:
-      return WebKit::WebFileErrorInvalidModification;
-  }
-}
-
-namespace {
-
-class UserAgentState {
- public:
-  UserAgentState();
-  ~UserAgentState();
-
-  void Set(const std::string& user_agent, bool overriding);
-  const std::string& Get(const GURL& url) const;
-
- private:
-  mutable std::string user_agent_;
-  // The UA string when we're pretending to be Mac Safari or Win Firefox.
-  mutable std::string user_agent_for_spoofing_hack_;
-
-  mutable bool user_agent_requested_;
-  bool user_agent_is_overridden_;
-
-  // This object can be accessed from multiple threads, so use a lock around
-  // accesses to the data members.
-  mutable base::Lock lock_;
-};
-
-UserAgentState::UserAgentState()
-    : user_agent_requested_(false),
-      user_agent_is_overridden_(false) {
-}
-
-UserAgentState::~UserAgentState() {
-}
-
-void UserAgentState::Set(const std::string& user_agent, bool overriding) {
-  base::AutoLock auto_lock(lock_);
-  if (user_agent == user_agent_) {
-    // We allow the user agent to be set multiple times as long as it
-    // is set to the same value, in order to simplify unit testing
-    // given g_user_agent is a global.
-    return;
-  }
-  DCHECK(!user_agent.empty());
-  DCHECK(!user_agent_requested_) << "Setting the user agent after someone has "
-      "already requested it can result in unexpected behavior.";
-  user_agent_is_overridden_ = overriding;
-  user_agent_ = user_agent;
-}
-
-bool IsMicrosoftSiteThatNeedsSpoofingForSilverlight(const GURL& url) {
-#if defined(OS_MACOSX)
-  // The landing page for updating Silverlight gives a confusing experience
-  // in browsers that Silverlight doesn't officially support; spoof as
-  // Safari to reduce the chance that users won't complete updates.
-  // Should be removed if the sniffing is removed: http://crbug.com/88211
-  if (url.host() == "www.microsoft.com" &&
-      StartsWithASCII(url.path(), "/getsilverlight", false)) {
-    return true;
-  }
-#endif
-  return false;
-}
-
-bool IsYahooSiteThatNeedsSpoofingForSilverlight(const GURL& url) {
-#if defined(OS_MACOSX) || defined(OS_WIN)
-  // The following Yahoo! JAPAN pages erroneously judge that Silverlight does
-  // not support Chromium. Until the pages are fixed, spoof the UA.
-  // http://crbug.com/104426
-  if (url.host() == "headlines.yahoo.co.jp" &&
-      StartsWithASCII(url.path(), "/videonews/", true)) {
-    return true;
-  }
-#endif
-#if defined(OS_MACOSX)
-  if ((url.host() == "downloads.yahoo.co.jp" &&
-      StartsWithASCII(url.path(), "/docs/silverlight/", true)) ||
-      url.host() == "gyao.yahoo.co.jp") {
-    return true;
-  }
-#elif defined(OS_WIN)
-  if ((url.host() == "weather.yahoo.co.jp" &&
-        StartsWithASCII(url.path(), "/weather/zoomradar/", true)) ||
-      url.host() == "promotion.shopping.yahoo.co.jp") {
-    return true;
-  }
-#endif
-  return false;
-}
-
-const std::string& UserAgentState::Get(const GURL& url) const {
-  base::AutoLock auto_lock(lock_);
-  user_agent_requested_ = true;
-
-  DCHECK(!user_agent_.empty());
-
-  // Workarounds for sites that use misguided UA sniffing.
-  if (!user_agent_is_overridden_) {
-    if (IsMicrosoftSiteThatNeedsSpoofingForSilverlight(url) ||
-        IsYahooSiteThatNeedsSpoofingForSilverlight(url)) {
-      if (user_agent_for_spoofing_hack_.empty()) {
-#if defined(OS_MACOSX)
-        user_agent_for_spoofing_hack_ =
-            BuildUserAgentFromProduct("Version/5.1.1 Safari/534.51.22");
-#elif defined(OS_WIN)
-        // Pretend to be Firefox. Silverlight doesn't support Win Safari.
-        base::StringAppendF(
-            &user_agent_for_spoofing_hack_,
-            "Mozilla/5.0 (%s) Gecko/20100101 Firefox/8.0",
-            webkit_glue::BuildOSCpuInfo().c_str());
-#endif
-      }
-      DCHECK(!user_agent_for_spoofing_hack_.empty());
-      return user_agent_for_spoofing_hack_;
-    }
-  }
-
-  return user_agent_;
-}
-
-base::LazyInstance<UserAgentState> g_user_agent = LAZY_INSTANCE_INITIALIZER;
-
-}  // namespace
-
-void SetUserAgent(const std::string& user_agent, bool overriding) {
-  g_user_agent.Get().Set(user_agent, overriding);
-}
-
-const std::string& GetUserAgent(const GURL& url) {
-  return g_user_agent.Get().Get(url);
+void PlatformFileInfoToWebFileInfo(
+    const base::PlatformFileInfo& file_info,
+    WebKit::WebFileInfo* web_file_info) {
+  DCHECK(web_file_info);
+  // WebKit now expects NaN as uninitialized/null Date.
+  if (file_info.last_modified.is_null())
+    web_file_info->modificationTime = std::numeric_limits<double>::quiet_NaN();
+  else
+    web_file_info->modificationTime = file_info.last_modified.ToDoubleT();
+  web_file_info->length = file_info.size;
+  if (file_info.is_directory)
+    web_file_info->type = WebKit::WebFileInfo::TypeDirectory;
+  else
+    web_file_info->type = WebKit::WebFileInfo::TypeFile;
 }
 
 void SetForcefullyTerminatePluginProcess(bool value) {
@@ -481,14 +297,7 @@ bool ShouldForcefullyTerminatePluginProcess() {
 }
 
 WebCanvas* ToWebCanvas(skia::PlatformCanvas* canvas) {
-#if WEBKIT_USING_SKIA
   return canvas;
-#elif WEBKIT_USING_CG
-  return skia::GetBitmapContext(skia::GetTopDevice(*canvas));
-#else
-  NOTIMPLEMENTED();
-  return NULL;
-#endif
 }
 
 int GetGlyphPageCount() {
@@ -503,5 +312,26 @@ bool IsInspectorProtocolVersionSupported(const std::string& version) {
   return WebDevToolsAgent::supportsInspectorProtocolVersion(
       WebString::fromUTF8(version));
 }
+
+void ConfigureURLRequestForReferrerPolicy(
+    net::URLRequest* request, WebKit::WebReferrerPolicy referrer_policy) {
+  net::URLRequest::ReferrerPolicy net_referrer_policy =
+      net::URLRequest::CLEAR_REFERRER_ON_TRANSITION_FROM_SECURE_TO_INSECURE;
+  switch (referrer_policy) {
+    case WebKit::WebReferrerPolicyDefault:
+      net_referrer_policy =
+          net::URLRequest::CLEAR_REFERRER_ON_TRANSITION_FROM_SECURE_TO_INSECURE;
+      break;
+
+    case WebKit::WebReferrerPolicyAlways:
+    case WebKit::WebReferrerPolicyNever:
+    case WebKit::WebReferrerPolicyOrigin:
+      net_referrer_policy = net::URLRequest::NEVER_CLEAR_REFERRER;
+      break;
+  }
+  request->set_referrer_policy(net_referrer_policy);
+}
+
+COMPILE_ASSERT(std::numeric_limits<double>::has_quiet_NaN, has_quiet_NaN);
 
 } // namespace webkit_glue

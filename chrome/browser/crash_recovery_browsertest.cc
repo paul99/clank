@@ -1,10 +1,11 @@
-// Copyright (c) 2011 The Chromium Authors. All rights reserved.
+// Copyright (c) 2012 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
 #include "base/file_path.h"
 #include "chrome/browser/ui/browser.h"
-#include "chrome/browser/ui/tab_contents/tab_contents_wrapper.h"
+#include "chrome/browser/ui/browser_commands.h"
+#include "chrome/browser/ui/browser_tabstrip.h"
 #include "chrome/common/url_constants.h"
 #include "chrome/test/base/in_process_browser_test.h"
 #include "chrome/test/base/ui_test_utils.h"
@@ -21,7 +22,7 @@ using content::Referrer;
 namespace {
 
 void SimulateRendererCrash(Browser* browser) {
-  ui_test_utils::WindowedNotificationObserver observer(
+  content::WindowedNotificationObserver observer(
       content::NOTIFICATION_WEB_CONTENTS_DISCONNECTED,
       content::NotificationService::AllSources());
   browser->OpenURL(OpenURLParams(
@@ -49,12 +50,11 @@ IN_PROC_BROWSER_TEST_F(CrashRecoveryBrowserTest, Reload) {
   ASSERT_TRUE(ui_test_utils::GetCurrentTabTitle(browser(),
                                                 &title_before_crash));
   SimulateRendererCrash(browser());
-  ui_test_utils::WindowedNotificationObserver observer(
+  content::WindowedNotificationObserver observer(
       content::NOTIFICATION_LOAD_STOP,
       content::Source<NavigationController>(
-          &browser()->GetSelectedTabContentsWrapper()->web_contents()->
-              GetController()));
-  browser()->Reload(CURRENT_TAB);
+          &chrome::GetActiveWebContents(browser())->GetController()));
+  chrome::Reload(browser(), CURRENT_TAB);
   observer.Wait();
   ASSERT_TRUE(ui_test_utils::GetCurrentTabTitle(browser(),
                                                 &title_after_crash));
@@ -65,7 +65,6 @@ IN_PROC_BROWSER_TEST_F(CrashRecoveryBrowserTest, Reload) {
 // There was an earlier bug (1270510) in process-per-site in which the max page
 // ID of the RenderProcessHost was stale, so the NavigationEntry in the new tab
 // was not committed.  This prevents regression of that bug.
-// http://crbug.com/57158 - Times out sometimes on all platforms.
 IN_PROC_BROWSER_TEST_F(CrashRecoveryBrowserTest, LoadInNewTab) {
   const FilePath::CharType* kTitle2File = FILE_PATH_LITERAL("title2.html");
 
@@ -79,12 +78,11 @@ IN_PROC_BROWSER_TEST_F(CrashRecoveryBrowserTest, LoadInNewTab) {
   ASSERT_TRUE(ui_test_utils::GetCurrentTabTitle(browser(),
                                                 &title_before_crash));
   SimulateRendererCrash(browser());
-  ui_test_utils::WindowedNotificationObserver observer(
+  content::WindowedNotificationObserver observer(
       content::NOTIFICATION_LOAD_STOP,
       content::Source<NavigationController>(
-          &browser()->GetSelectedTabContentsWrapper()->web_contents()->
-              GetController()));
-  browser()->Reload(CURRENT_TAB);
+          &chrome::GetActiveWebContents(browser())->GetController()));
+  chrome::Reload(browser(), CURRENT_TAB);
   observer.Wait();
   ASSERT_TRUE(ui_test_utils::GetCurrentTabTitle(browser(),
                                                 &title_after_crash));

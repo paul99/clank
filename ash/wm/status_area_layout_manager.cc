@@ -1,11 +1,14 @@
-// Copyright (c) 2011 The Chromium Authors. All rights reserved.
+// Copyright (c) 2012 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
 #include "ash/wm/status_area_layout_manager.h"
 
+#include "ash/system/status_area_widget.h"
 #include "ash/wm/shelf_layout_manager.h"
 #include "base/auto_reset.h"
+#include "ui/aura/window.h"
+#include "ui/views/widget/widget.h"
 
 namespace ash {
 namespace internal {
@@ -35,15 +38,30 @@ void StatusAreaLayoutManager::OnWillRemoveWindowFromLayout(
     aura::Window* child) {
 }
 
+void StatusAreaLayoutManager::OnWindowRemovedFromLayout(aura::Window* child) {
+}
+
 void StatusAreaLayoutManager::OnChildWindowVisibilityChanged(
     aura::Window* child, bool visible) {
 }
 
 void StatusAreaLayoutManager::SetChildBounds(
-    aura::Window* child, const gfx::Rect& requested_bounds) {
+    aura::Window* child,
+    const gfx::Rect& requested_bounds) {
+  // Only need to have the shelf do a layout if the child changing is the status
+  // area and the shelf isn't in the process of doing a layout.
+  if (child != shelf_->status_area_widget()->GetNativeView() || in_layout_) {
+    SetChildBoundsDirect(child, requested_bounds);
+    return;
+  }
+
+  // If the size matches, no need to do anything. We don't check the location as
+  // that is managed by the shelf.
+  if (requested_bounds == child->bounds())
+    return;
+
   SetChildBoundsDirect(child, requested_bounds);
-  if (!in_layout_)
-    LayoutStatusArea();
+  LayoutStatusArea();
 }
 
 ////////////////////////////////////////////////////////////////////////////////
@@ -54,7 +72,7 @@ void StatusAreaLayoutManager::LayoutStatusArea() {
   if (shelf_->in_layout())
     return;
 
-  AutoReset<bool> auto_reset_in_layout(&in_layout_, true);
+  base::AutoReset<bool> auto_reset_in_layout(&in_layout_, true);
   shelf_->LayoutShelf();
 }
 

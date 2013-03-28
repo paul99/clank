@@ -1,4 +1,4 @@
-// Copyright (c) 2011 The Chromium Authors. All rights reserved.
+// Copyright (c) 2012 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -25,9 +25,6 @@
 #include "base/file_descriptor_posix.h"
 #endif
 
-using content::BrowserMessageFilter;
-using content::BrowserThread;
-using content::UserMetricsAction;
 using quota::QuotaManager;
 using quota::QuotaManagerProxy;
 using quota::QuotaStatusCode;
@@ -36,6 +33,7 @@ using webkit_database::DatabaseTracker;
 using webkit_database::DatabaseUtil;
 using webkit_database::VfsBackend;
 
+namespace content {
 namespace {
 
 const int kNumDeleteRetries = 2;
@@ -109,6 +107,7 @@ bool DatabaseMessageFilter::OnMessageReceived(
     IPC_MESSAGE_HANDLER(DatabaseHostMsg_Opened, OnDatabaseOpened)
     IPC_MESSAGE_HANDLER(DatabaseHostMsg_Modified, OnDatabaseModified)
     IPC_MESSAGE_HANDLER(DatabaseHostMsg_Closed, OnDatabaseClosed)
+    IPC_MESSAGE_HANDLER(DatabaseHostMsg_HandleSqliteError, OnHandleSqliteError)
     IPC_MESSAGE_UNHANDLED(handled = false)
   IPC_END_MESSAGE_MAP_EX()
   return handled;
@@ -159,7 +158,6 @@ void DatabaseMessageFilter::OnDatabaseOpenFile(const string16& vfs_file_name,
   // process. The original handle is closed, unless we saved it in the
   // database tracker.
   bool auto_close = !db_tracker_->HasSavedIncognitoFileHandle(vfs_file_name);
-  DCHECK_NE(base::kInvalidPlatformFileValue, file_handle);
   IPC::PlatformFileForTransit target_handle =
       IPC::GetFileHandleForProcess(file_handle, peer_handle(), auto_close);
 
@@ -210,7 +208,7 @@ void DatabaseMessageFilter::DatabaseDeleteFile(const string16& vfs_file_name,
           BrowserThread::FILE, FROM_HERE,
           base::Bind(&DatabaseMessageFilter::DatabaseDeleteFile, this,
                      vfs_file_name, sync_dir, reply_msg, reschedule_count - 1),
-          kDelayDeleteRetryMs);
+          base::TimeDelta::FromMilliseconds(kDelayDeleteRetryMs));
       return;
     }
   }
@@ -286,6 +284,13 @@ void DatabaseMessageFilter::OnDatabaseOpened(const string16& origin_identifier,
                                              const string16& description,
                                              int64 estimated_size) {
   DCHECK(BrowserThread::CurrentlyOn(BrowserThread::FILE));
+
+  if (!DatabaseUtil::IsValidOriginIdentifier(origin_identifier)) {
+    RecordAction(UserMetricsAction("BadMessageTerminate_DBMF"));
+    BadMessageReceived();
+    return;
+  }
+
   int64 database_size = 0;
   db_tracker_->DatabaseOpened(origin_identifier, database_name, description,
                               estimated_size, &database_size);
@@ -300,7 +305,7 @@ void DatabaseMessageFilter::OnDatabaseModified(
   DCHECK(BrowserThread::CurrentlyOn(BrowserThread::FILE));
   if (!database_connections_.IsDatabaseOpened(
           origin_identifier, database_name)) {
-    content::RecordAction(UserMetricsAction("BadMessageTerminate_DBMF"));
+    RecordAction(UserMetricsAction("BadMessageTerminate_DBMF"));
     BadMessageReceived();
     return;
   }
@@ -313,13 +318,27 @@ void DatabaseMessageFilter::OnDatabaseClosed(const string16& origin_identifier,
   DCHECK(BrowserThread::CurrentlyOn(BrowserThread::FILE));
   if (!database_connections_.IsDatabaseOpened(
           origin_identifier, database_name)) {
-    content::RecordAction(UserMetricsAction("BadMessageTerminate_DBMF"));
+    RecordAction(UserMetricsAction("BadMessageTerminate_DBMF"));
     BadMessageReceived();
     return;
   }
 
   database_connections_.RemoveConnection(origin_identifier, database_name);
   db_tracker_->DatabaseClosed(origin_identifier, database_name);
+}
+
+void DatabaseMessageFilter::OnHandleSqliteError(
+    const string16& origin_identifier,
+    const string16& database_name,
+    int error) {
+  DCHECK(BrowserThread::CurrentlyOn(BrowserThread::FILE));
+  if (!DatabaseUtil::IsValidOriginIdentifier(origin_identifier)) {
+    RecordAction(UserMetricsAction("BadMessageTerminate_DBMF"));
+    BadMessageReceived();
+    return;
+  }
+
+  db_tracker_->HandleSqliteError(origin_identifier, database_name, error);
 }
 
 void DatabaseMessageFilter::OnDatabaseSizeChanged(
@@ -339,3 +358,5 @@ void DatabaseMessageFilter::OnDatabaseScheduledForDeletion(
   DCHECK(BrowserThread::CurrentlyOn(BrowserThread::FILE));
   Send(new DatabaseMsg_CloseImmediately(origin_identifier, database_name));
 }
+
+}  // namespace content

@@ -12,7 +12,11 @@
 #include "base/synchronization/lock.h"
 #include "googleurl/src/gurl.h"
 #include "media/base/data_source.h"
+#include "media/base/ranges.h"
 #include "webkit/media/buffered_resource_loader.h"
+#include "webkit/media/preload.h"
+
+class MessageLoop;
 
 namespace media {
 class MediaLog;
@@ -20,39 +24,66 @@ class MediaLog;
 
 namespace webkit_media {
 
-// This class may be created on any thread, and is callable from the render
-// thread as well as media-specific threads.
-class BufferedDataSource : public WebDataSource {
+// A data source capable of loading URLs and buffering the data using an
+// in-memory sliding window.
+//
+// BufferedDataSource must be created and initialized on the render thread
+// before being passed to other threads. It may be deleted on any thread.
+class BufferedDataSource : public media::DataSource {
  public:
+  typedef base::Callback<void(bool)> DownloadingCB;
+
+  // |downloading_cb| will be called whenever the downloading/paused state of
+  // the source changes.
   BufferedDataSource(MessageLoop* render_loop,
                      WebKit::WebFrame* frame,
-                     media::MediaLog* media_log);
+                     media::MediaLog* media_log,
+                     const DownloadingCB& downloading_cb);
 
-  virtual ~BufferedDataSource();
+  // Initialize this object using |url| and |cors_mode|, executing |init_cb|
+  // with the result of initialization when it has completed.
+  //
+  // Method called on the render thread.
+  typedef base::Callback<void(bool)> InitializeCB;
+  void Initialize(
+      const GURL& url,
+      BufferedResourceLoader::CORSMode cors_mode,
+      const InitializeCB& init_cb);
+
+  // Adjusts the buffering algorithm based on the given preload value.
+  void SetPreload(Preload preload);
+
+  // Returns true if the media resource has a single origin, false otherwise.
+  // Only valid to call after Initialize() has completed.
+  //
+  // Method called on the render thread.
+  bool HasSingleOrigin();
+
+  // Returns true if the media resource passed a CORS access control check.
+  bool DidPassCORSAccessCheck() const;
+
+  // Cancels initialization, any pending loaders, and any pending read calls
+  // from the demuxer. The caller is expected to release its reference to this
+  // object and never call it again.
+  //
+  // Method called on the render thread.
+  void Abort();
 
   // media::DataSource implementation.
   // Called from demuxer thread.
   virtual void set_host(media::DataSourceHost* host) OVERRIDE;
-  virtual void Stop(const base::Closure& callback) OVERRIDE;
+  virtual void Stop(const base::Closure& closure) OVERRIDE;
   virtual void SetPlaybackRate(float playback_rate) OVERRIDE;
 
-  virtual void Read(
-      int64 position,
-      size_t size,
-      uint8* data,
-      const media::DataSource::ReadCallback& read_callback) OVERRIDE;
+  virtual void Read(int64 position, int size, uint8* data,
+                    const media::DataSource::ReadCB& read_cb) OVERRIDE;
   virtual bool GetSize(int64* size_out) OVERRIDE;
   virtual bool IsStreaming() OVERRIDE;
-  virtual void SetPreload(media::Preload preload) OVERRIDE;
   virtual void SetBitrate(int bitrate) OVERRIDE;
 
-  // webkit_glue::WebDataSource implementation.
-  virtual void Initialize(const GURL& url,
-                          const media::PipelineStatusCB& callback) OVERRIDE;
-  virtual bool HasSingleOrigin() OVERRIDE;
-  virtual void Abort() OVERRIDE;
-
  protected:
+  virtual ~BufferedDataSource();
+
   // A factory method to create a BufferedResourceLoader based on the read
   // parameters. We can override this file to object a mock
   // BufferedResourceLoader for testing.
@@ -63,76 +94,58 @@ class BufferedDataSource : public WebDataSource {
   friend class BufferedDataSourceTest;
 
   // Task posted to perform actual reading on the render thread.
-  void ReadTask(int64 position, int read_size, uint8* read_buffer);
+  void ReadTask();
 
-  // Task posted when Stop() is called. Stops |watch_dog_timer_| and
-  // |loader_|, reset Read() variables, and set |stopped_on_render_loop_|
-  // to signal any remaining tasks to stop.
-  void CleanupTask();
+  // Cancels oustanding callbacks and sets |stop_signal_received_|. Safe to call
+  // from any thread.
+  void StopInternal_Locked();
 
-  // Restart resource loading on render thread.
-  void RestartLoadingTask();
+  // Stops |loader_| if present. Used by Abort() and Stop().
+  void StopLoader();
 
   // This task uses the current playback rate with the previous playback rate
   // to determine whether we are going from pause to play and play to pause,
   // and signals the buffered resource loader accordingly.
   void SetPlaybackRateTask(float playback_rate);
 
-  // This task saves the preload value for the media.
-  void SetPreloadTask(media::Preload preload);
-
   // Tells |loader_| the bitrate of the media.
   void SetBitrateTask(int bitrate);
-
-  // Decides which DeferStrategy to used based on the current state of the
-  // BufferedDataSource.
-  BufferedResourceLoader::DeferStrategy ChooseDeferStrategy();
 
   // The method that performs actual read. This method can only be executed on
   // the render thread.
   void ReadInternal();
 
-  // Calls |read_callback_| and reset all read parameters.
-  void DoneRead_Locked(int error);
+  // BufferedResourceLoader::Start() callback for initial load.
+  void StartCallback(BufferedResourceLoader::Status status);
 
-  // Calls |initialize_cb_| and reset it.
-  void DoneInitialization_Locked(media::PipelineStatus status);
+  // BufferedResourceLoader::Start() callback for subsequent loads (i.e.,
+  // when accessing ranges that are outside initial buffered region).
+  void PartialReadStartCallback(BufferedResourceLoader::Status status);
 
-  // Callback method for |loader_| if URL for the resource requested is using
-  // HTTP protocol. This method is called when response for initial request is
-  // received.
-  void HttpInitialStartCallback(int error);
+  // BufferedResourceLoader callbacks.
+  void ReadCallback(BufferedResourceLoader::Status status, int bytes_read);
+  void LoadingStateChangedCallback(BufferedResourceLoader::LoadingState state);
+  void ProgressCallback(int64 position);
 
-  // Callback method for |loader_| if URL for the resource requested is using
-  // a non-HTTP protocol, e.g. local files. This method is called when response
-  // for initial request is received.
-  void NonHttpInitialStartCallback(int error);
-
-  // Callback method to be passed to BufferedResourceLoader during range
-  // request. Once a resource request has started, this method will be called
-  // with the error code. This method will be executed on the thread
-  // BufferedResourceLoader lives, i.e. render thread.
-  void PartialReadStartCallback(int error);
-
-  // Callback method for making a read request to BufferedResourceLoader.
-  // If data arrives or the request has failed, this method is called with
-  // the error code or the number of bytes read.
-  void ReadCallback(int error);
-
-  // Callback method when a network event is received.
-  void NetworkEventCallback();
+  // Report a buffered byte range [start,end] or queue it for later
+  // reporting if set_host() hasn't been called yet.
+  void ReportOrQueueBufferedBytes(int64 start, int64 end);
 
   void UpdateHostState_Locked();
 
   // URL of the resource requested.
   GURL url_;
+  // crossorigin attribute on the corresponding HTML media element, if any.
+  BufferedResourceLoader::CORSMode cors_mode_;
 
-  // Members for total bytes of the requested object. It is written once on
-  // render thread but may be read from any thread. However reading of this
-  // member is guaranteed to happen after it is first written, so we don't
-  // need to protect it.
+  // The total size of the resource. Set during StartCallback() if the size is
+  // known, otherwise it will remain kPositionNotSpecified until the size is
+  // determined by reaching EOF.
   int64 total_bytes_;
-  int64 buffered_bytes_;
+
+  // Some resources are assumed to be fully buffered (i.e., file://) so we don't
+  // need to report what |loader_| has buffered.
+  bool assume_fully_buffered_;
 
   // This value will be true if this data source can only support streaming.
   // i.e. range request is not supported.
@@ -144,17 +157,13 @@ class BufferedDataSource : public WebDataSource {
   // A resource loader for the media resource.
   scoped_ptr<BufferedResourceLoader> loader_;
 
-  // True if |loader| is downloading data.
-  bool is_downloading_data_;
-
   // Callback method from the pipeline for initialization.
-  media::PipelineStatusCB initialize_cb_;
+  InitializeCB init_cb_;
 
-  // Read parameters received from the Read() method call.
-  media::DataSource::ReadCallback read_callback_;
-  int64 read_position_;
-  int read_size_;
-  uint8* read_buffer_;
+  // Read parameters received from the Read() method call. Must be accessed
+  // under |lock_|.
+  class ReadOperation;
+  scoped_ptr<ReadOperation> read_op_;
 
   // This buffer is intermediate, we use it for BufferedResourceLoader to write
   // to. And when read in BufferedResourceLoader is done, we copy data from
@@ -172,21 +181,11 @@ class BufferedDataSource : public WebDataSource {
   // The message loop of the render thread.
   MessageLoop* render_loop_;
 
-  // Protects |stop_signal_received_|, |stopped_on_render_loop_| and
-  // |initialize_cb_|.
+  // Protects |stop_signal_received_| and |read_op_|.
   base::Lock lock_;
 
-  // Stop signal to suppressing activities. This variable is set on the pipeline
-  // thread and read from the render thread.
+  // Whether we've been told to stop via Abort() or Stop().
   bool stop_signal_received_;
-
-  // This variable is set by CleanupTask() that indicates this object is stopped
-  // on the render thread and work should no longer progress.
-  bool stopped_on_render_loop_;
-
-  // This variable is true when we are in a paused state and false when we
-  // are in a playing state.
-  bool media_is_paused_;
 
   // This variable is true when the user has requested the video to play at
   // least once.
@@ -194,14 +193,7 @@ class BufferedDataSource : public WebDataSource {
 
   // This variable holds the value of the preload attribute for the video
   // element.
-  media::Preload preload_;
-
-  // Keeps track of whether we used a Range header in the initialization
-  // request.
-  bool using_range_request_;
-
-  // Number of cache miss retries left.
-  int cache_miss_retries_left_;
+  Preload preload_;
 
   // Bitrate of the content, 0 if unknown.
   int bitrate_;
@@ -209,7 +201,12 @@ class BufferedDataSource : public WebDataSource {
   // Current playback rate.
   float playback_rate_;
 
+  // Buffered byte ranges awaiting set_host() being called to report to host().
+  media::Ranges<int64> queued_buffered_byte_ranges_;
+
   scoped_refptr<media::MediaLog> media_log_;
+
+  DownloadingCB downloading_cb_;
 
   DISALLOW_COPY_AND_ASSIGN(BufferedDataSource);
 };

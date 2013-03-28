@@ -1,4 +1,4 @@
-// Copyright (c) 2011 The Chromium Authors. All rights reserved.
+// Copyright (c) 2012 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -14,15 +14,17 @@
 #include "base/process_util.h"
 #include "base/string_util.h"
 #include "chrome/browser/tab_contents/tab_util.h"
-#include "content/browser/renderer_host/render_view_host.h"
 #include "content/public/browser/browser_thread.h"
 #include "content/public/browser/render_process_host.h"
+#include "content/public/browser/render_view_host.h"
 #include "content/public/browser/web_contents.h"
 
 using content::BrowserThread;
 using content::OpenURLParams;
 using content::Referrer;
 using content::WebContents;
+
+namespace options {
 
 // Command used to configure GNOME 2 proxy settings.
 const char* kGNOME2ProxyConfigCommand[] = {"gnome-network-properties", NULL};
@@ -108,7 +110,8 @@ void DetectAndStartProxyConfigUtil(int render_process_id,
 
   bool launched = false;
   switch (base::nix::GetDesktopEnvironment(env.get())) {
-    case base::nix::DESKTOP_ENVIRONMENT_GNOME: {
+    case base::nix::DESKTOP_ENVIRONMENT_GNOME:
+    case base::nix::DESKTOP_ENVIRONMENT_UNITY: {
       launched = StartProxyConfigUtil(kGNOME2ProxyConfigCommand);
       if (!launched) {
         // We try this second, even though it's the newer way, because this
@@ -148,7 +151,9 @@ void AdvancedOptionsUtilities::ShowNetworkProxySettings(
   BrowserThread::PostTask(BrowserThread::FILE, FROM_HERE,
       base::Bind(&DetectAndStartProxyConfigUtil,
                  web_contents->GetRenderProcessHost()->GetID(),
-                 web_contents->GetRenderViewHost()->routing_id()));
+                 web_contents->GetRenderViewHost()->GetRoutingID()));
 }
+
+}  // namespace options
 
 #endif  // !defined(OS_CHROMEOS)

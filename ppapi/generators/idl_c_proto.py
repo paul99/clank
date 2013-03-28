@@ -76,10 +76,11 @@ class CGen(object):
   TypeMap = {
     'Array': {
       'in': 'const %s',
-      'inout': '%s*',
+      'inout': '%s',
       'out': '%s*',
       'store': '%s',
-      'return': '%s'
+      'return': '%s',
+      'ref': '%s*'
     },
     'Callspec': {
       'in': '%s',
@@ -95,12 +96,20 @@ class CGen(object):
       'store': '%s',
       'return': '%s'
     },
+    'Interface': {
+      'in': 'const %s*',
+      'inout': '%s*',
+      'out': '%s**',
+      'return': '%s*',
+      'store': '%s*'
+    },
     'Struct': {
       'in': 'const %s*',
       'inout': '%s*',
       'out': '%s*',
       'return': ' %s*',
-      'store': '%s'
+      'store': '%s',
+      'ref': '%s*'
     },
     'blob_t': {
       'in': 'const %s',
@@ -121,6 +130,13 @@ class CGen(object):
       'inout': '%s',
       'out': '%s',
       'return': 'const %s',
+      'store': '%s'
+    },
+    'cstr_t': {
+      'in': '%s',
+      'inout': '%s*',
+      'out': '%s*',
+      'return': '%s',
       'store': '%s'
     },
     'TypeValue': {
@@ -146,6 +162,7 @@ class CGen(object):
   'handle_t': 'int',
   'mem_t': 'void*',
   'str_t': 'char*',
+  'cstr_t': 'const char*',
   'interface_t' : 'const void*'
   }
 
@@ -235,6 +252,7 @@ class CGen(object):
       typeref = node
 
     if typeref is None:
+      node.Error('No type at release %s.' % release)
       raise CGenError('No type for %s' % node)
 
     # If the type is a (BuiltIn) Type then return it's name
@@ -244,8 +262,13 @@ class CGen(object):
       if name is None: name = typeref.GetName()
       name = '%s%s' % (prefix, name)
 
+    # For Interfaces, use the name + version
+    elif typeref.IsA('Interface'):
+      rel = typeref.first_release[release]
+      name = 'struct %s%s' % (prefix, self.GetStructName(typeref, rel, True))
+
     # For structures, preceed with 'struct' or 'union' as appropriate
-    elif typeref.IsA('Interface', 'Struct'):
+    elif typeref.IsA('Struct'):
       if typeref.GetProperty('union'):
         name = 'union %s%s' % (prefix, typeref.GetName())
       else:
@@ -375,9 +398,15 @@ class CGen(object):
 
 
   def Compose(self, rtype, name, arrayspec, callspec, prefix, func_as_ptr,
-              ptr_prefix, include_name):
+              ptr_prefix, include_name, unsized_as_ptr):
     self.LogEnter('Compose: %s %s' % (rtype, name))
     arrayspec = ''.join(arrayspec)
+
+    # Switch unsized array to a ptr. NOTE: Only last element can be unsized.
+    if unsized_as_ptr and arrayspec[-2:] == '[]':
+      prefix +=  '*'
+      arrayspec=arrayspec[:-2]
+
     if not include_name:
       name = prefix + arrayspec
     else:
@@ -388,9 +417,12 @@ class CGen(object):
       params = []
       for ptype, pname, parray, pspec in callspec:
         params.append(self.Compose(ptype, pname, parray, pspec, '', True,
-                                   ptr_prefix='', include_name=True))
+                                   ptr_prefix='', include_name=True,
+                                   unsized_as_ptr=unsized_as_ptr))
       if func_as_ptr:
         name = '(%s*%s)' % (ptr_prefix, name)
+      if not params:
+        params = ['void']
       out = '%s %s(%s)' % (rtype, name, ', '.join(params))
     self.LogExit('Exit Compose: %s' % out)
     return out
@@ -405,22 +437,36 @@ class CGen(object):
   #  include_name - If true, include member name in the signature.
   #                 If false, leave it out. In any case, prefix and ptr_prefix
   #                 are always included.
+  #  include_version - if True, include version in the member name
   #
   def GetSignature(self, node, release, mode, prefix='', func_as_ptr=True,
-                   ptr_prefix='', include_name=True):
+                   ptr_prefix='', include_name=True, include_version=False):
     self.LogEnter('GetSignature %s %s as func=%s' %
                   (node, mode, func_as_ptr))
     rtype, name, arrayspec, callspec = self.GetComponents(node, release, mode)
+    if include_version:
+      name = self.GetStructName(node, release, True)
+
+    # If not a callspec (such as a struct) use a ptr instead of []
+    unsized_as_ptr = not callspec
+
     out = self.Compose(rtype, name, arrayspec, callspec, prefix,
-                       func_as_ptr, ptr_prefix, include_name)
+                       func_as_ptr, ptr_prefix, include_name, unsized_as_ptr)
+
     self.LogExit('Exit GetSignature: %s' % out)
     return out
 
   # Define a Typedef.
   def DefineTypedef(self, node, releases, prefix='', comment=False):
     __pychecker__ = 'unusednames=comment'
-    release = releases[0]
-    out = 'typedef %s;\n' % self.GetSignature(node, release, 'return',
+    build_list = node.GetUniqueReleases(releases)
+
+    # TODO(noelallen) : Bug 157017 finish multiversion support
+    if len(build_list) != 1:
+      node.Error('Can not support multiple versions of node: %s' % build_list)
+    assert len(build_list) == 1
+
+    out = 'typedef %s;\n' % self.GetSignature(node, build_list[0], 'return',
                                               prefix, True)
     self.Log('DefineTypedef: %s' % out)
     return out
@@ -432,6 +478,7 @@ class CGen(object):
     name = '%s%s' % (prefix, node.GetName())
     notypedef = node.GetProperty('notypedef')
     unnamed = node.GetProperty('unnamed')
+
     if unnamed:
       out = 'enum {'
     elif notypedef:
@@ -459,7 +506,10 @@ class CGen(object):
     __pychecker__ = 'unusednames=prefix,comment'
     release = releases[0]
     self.LogEnter('DefineMember %s' % node)
-    out = '%s;' % self.GetSignature(node, release, 'store', '', True)
+    if node.GetProperty('ref'):
+      out = '%s;' % self.GetSignature(node, release, 'ref', '', True)
+    else:
+      out = '%s;' % self.GetSignature(node, release, 'store', '', True)
     self.LogExit('Exit DefineMember')
     return out
 
@@ -497,6 +547,13 @@ class CGen(object):
     out = ''
     build_list = node.GetUniqueReleases(releases)
 
+    # TODO(noelallen) : Bug 157017 finish multiversion support
+    if node.IsA('Struct'):
+      if len(build_list) != 1:
+        node.Error('Can not support multiple versions of node.')
+      assert len(build_list) == 1
+
+
     if node.IsA('Interface'):
       # Build the most recent one versioned, with comments
       out = self.DefineStructInternals(node, build_list[-1],
@@ -527,9 +584,49 @@ class CGen(object):
   #
   # Generate a comment or copyright block
   #
-  def Copyright(self, node, tabs=0):
+  def Copyright(self, node, cpp_style=False):
     lines = node.GetName().split('\n')
-    return CommentLines(lines, tabs)
+    if cpp_style:
+      return '//' + '\n//'.join(filter(lambda f: f != '', lines)) + '\n'
+    return CommentLines(lines)
+
+
+  def Indent(self, data, tabs=0):
+    """Handles indentation and 80-column line wrapping."""
+    tab = '  ' * tabs
+    lines = []
+    for line in data.split('\n'):
+      # Add indentation
+      line = tab + line
+      if len(line) <= 80:
+        lines.append(line.rstrip())
+      else:
+        left = line.rfind('(') + 1
+        args = line[left:].split(',')
+        orig_args = args
+        orig_left = left
+        # Try to split on '(arg1)' or '(arg1, arg2)', not '()'
+        while args[0][0] == ')':
+          left = line.rfind('(', 0, left - 1) + 1
+          if left == 0:  # No more parens, take the original option
+            args = orig_args
+            left = orig_left
+            break
+          args = line[left:].split(',')
+
+        line_max = 0
+        for arg in args:
+          if len(arg) > line_max: line_max = len(arg)
+
+        if left + line_max >= 80:
+          indent = '%s    ' % tab
+          args =  (',\n%s' % indent).join([arg.strip() for arg in args])
+          lines.append('%s\n%s%s' % (line[:left], indent, args))
+        else:
+          indent = ' ' * (left - 1)
+          args =  (',\n%s' % indent).join(args)
+          lines.append('%s%s' % (line[:left], args))
+    return '\n'.join(lines)
 
 
   # Define a top level object.
@@ -561,30 +658,10 @@ class CGen(object):
       out += comment_txt
     out += define_txt
 
-    tab = '  ' * tabs
-    lines = []
-    for line in out.split('\n'):
-      # Add indentation
-      line = tab + line
-      if len(line) > 80:
-        left = line.rfind('(') + 1
-        args = line[left:].split(',')
-        line_max = 0
-        for arg in args:
-          if len(arg) > line_max: line_max = len(arg)
-
-        if left + line_max >= 80:
-          space = '%s    ' % tab
-          args =  (',\n%s' % space).join([arg.strip() for arg in args])
-          lines.append('%s\n%s%s' % (line[:left], space, args))
-        else:
-          space = ' ' * (left - 1)
-          args =  (',\n%s' % space).join(args)
-          lines.append('%s%s' % (line[:left], args))
-      else:
-        lines.append(line.rstrip())
+    indented_out = self.Indent(out, tabs)
     self.LogExit('Exit Define')
-    return '\n'.join(lines)
+    return indented_out
+
 
 # Clean a string representing an object definition and return then string
 # as a single space delimited set of tokens.
@@ -611,7 +688,8 @@ def TestFile(filenode):
     outstr = CleanString(outstr)
 
     if instr != outstr:
-      ErrOut.Log('Failed match of\n>>%s<<\n>>%s<<\nto:' % (instr, outstr))
+      ErrOut.Log('Failed match of\n>>%s<<\nto:\n>>%s<<\nFor:\n' %
+                 (instr, outstr))
       node.Dump(1, comments=True)
       errors += 1
   return errors
@@ -641,20 +719,20 @@ def TestFiles(filenames):
     InfoOut.Log('Passed generator test.')
   return total_errs
 
-def Main(args):
+def main(args):
   filenames = ParseOptions(args)
   if GetOption('test'):
     return TestFiles(filenames)
   ast = ParseFiles(filenames)
+  cgen = CGen()
   for f in ast.GetListOf('File'):
     if f.GetProperty('ERRORS') > 0:
       print 'Skipping %s' % f.GetName()
       continue
-    print DefineDepends(node)
     for node in f.GetChildren()[2:]:
-      print Define(node, comment=True, prefix='tst_')
+      print cgen.Define(node, comment=True, prefix='tst_')
 
 
 if __name__ == '__main__':
-  sys.exit(Main(sys.argv[1:]))
+  sys.exit(main(sys.argv[1:]))
 

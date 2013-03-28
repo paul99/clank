@@ -1,32 +1,33 @@
-// Copyright (c) 2011 The Chromium Authors. All rights reserved.
+// Copyright (c) 2012 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
 #ifndef CONTENT_WORKER_WEBSHAREDWORKER_STUB_H_
 #define CONTENT_WORKER_WEBSHAREDWORKER_STUB_H_
-#pragma once
 
 #include "base/memory/scoped_ptr.h"
 #include "content/worker/websharedworkerclient_proxy.h"
 #include "content/worker/worker_webapplicationcachehost_impl.h"
 #include "googleurl/src/gurl.h"
-#include "ipc/ipc_channel.h"
+#include "ipc/ipc_listener.h"
 #include "third_party/WebKit/Source/WebKit/chromium/public/WebSharedWorker.h"
 
 namespace WebKit {
 class WebSharedWorker;
 }
 
+namespace content {
+
 class SharedWorkerDevToolsAgent;
 
 // This class creates a WebSharedWorker, and translates incoming IPCs to the
 // appropriate WebSharedWorker APIs.
-class WebSharedWorkerStub : public IPC::Channel::Listener {
+class WebSharedWorkerStub : public IPC::Listener {
  public:
   WebSharedWorkerStub(const string16& name, int route_id,
                       const WorkerAppCacheInitInfo& appcache_init_info);
 
-  // IPC::Channel::Listener implementation.
+  // IPC::Listener implementation.
   virtual bool OnMessageReceived(const IPC::Message& message) OVERRIDE;
   virtual void OnChannelError() OVERRIDE;
 
@@ -77,5 +78,7 @@ class WebSharedWorkerStub : public IPC::Channel::Listener {
 
   DISALLOW_COPY_AND_ASSIGN(WebSharedWorkerStub);
 };
+
+}  // namespace content
 
 #endif  // CONTENT_WORKER_WEBSHAREDWORKER_STUB_H_

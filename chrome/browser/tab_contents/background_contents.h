@@ -4,7 +4,6 @@
 
 #ifndef CHROME_BROWSER_TAB_CONTENTS_BACKGROUND_CONTENTS_H_
 #define CHROME_BROWSER_TAB_CONTENTS_BACKGROUND_CONTENTS_H_
-#pragma once
 
 #include <string>
 
@@ -21,7 +20,7 @@ namespace content {
 class SiteInstance;
 };
 
-// This class consumes TabContents. It can host a renderer, but does not
+// This class consumes WebContents. It can host a renderer, but does not
 // have any visible display.
 class BackgroundContents : public content::WebContentsDelegate,
                            public content::WebContentsObserver,
@@ -31,11 +30,13 @@ class BackgroundContents : public content::WebContentsDelegate,
    public:
     // Called by AddNewContents(). Asks the delegate to attach the opened
     // WebContents to a suitable container (e.g. browser) or to show it if it's
-    // a popup window.
+    // a popup window. If |was_blocked| is non-NULL, then |*was_blocked| will be
+    // set to true if the popup gets blocked, and left unchanged otherwise.
     virtual void AddWebContents(content::WebContents* new_contents,
                                 WindowOpenDisposition disposition,
                                 const gfx::Rect& initial_pos,
-                                bool user_gesture) = 0;
+                                bool user_gesture,
+                                bool* was_blocked) = 0;
 
    protected:
     virtual ~Delegate() {}
@@ -58,7 +59,8 @@ class BackgroundContents : public content::WebContentsDelegate,
                               content::WebContents* new_contents,
                               WindowOpenDisposition disposition,
                               const gfx::Rect& initial_pos,
-                              bool user_gesture) OVERRIDE;
+                              bool user_gesture,
+                              bool* was_blocked) OVERRIDE;
 
   // content::WebContentsObserver implementation:
   virtual void RenderViewGone(base::TerminationStatus status) OVERRIDE;

@@ -4,6 +4,7 @@
 
 #include "ui/base/win/shell.h"
 
+#include <dwmapi.h>
 #include <shellapi.h>
 #include <shlobj.h>  // Must be before propkey.
 #include <propkey.h>
@@ -11,6 +12,7 @@
 #include "base/file_path.h"
 #include "base/native_library.h"
 #include "base/string_util.h"
+#include "base/win/metro.h"
 #include "base/win/scoped_comptr.h"
 #include "base/win/win_util.h"
 #include "base/win/windows_version.h"
@@ -20,11 +22,15 @@ namespace win {
 
 namespace {
 
-void SetAppIdAndIconForWindow(const string16& app_id,
-                              const string16& app_icon,
-                              HWND hwnd) {
-  // This functionality is only available on Win7+.
-  if (base::win::GetVersion() < base::win::VERSION_WIN7)
+void SetAppDetailsForWindow(const string16& app_id,
+                            const string16& app_icon,
+                            const string16& relaunch_command,
+                            const string16& relaunch_display_name,
+                            HWND hwnd) {
+  // This functionality is only available on Win7+. It also doesn't make sense
+  // to do this for Chrome Metro.
+  if (base::win::GetVersion() < base::win::VERSION_WIN7 ||
+      base::win::IsMetroProcess())
     return;
   base::win::ScopedComPtr<IPropertyStore> pps;
   HRESULT result = SHGetPropertyStoreForWindow(
@@ -36,40 +42,19 @@ void SetAppIdAndIconForWindow(const string16& app_id,
       base::win::SetStringValueForPropertyStore(
           pps, PKEY_AppUserModel_RelaunchIconResource, app_icon.c_str());
     }
+    if (!relaunch_command.empty()) {
+      base::win::SetStringValueForPropertyStore(
+          pps, PKEY_AppUserModel_RelaunchCommand, relaunch_command.c_str());
+    }
+    if (!relaunch_display_name.empty()) {
+      base::win::SetStringValueForPropertyStore(
+          pps, PKEY_AppUserModel_RelaunchDisplayNameResource,
+          relaunch_display_name.c_str());
+    }
   }
 }
 
 }  // namespace
-
-// Open an item via a shell execute command. Error code checking and casting
-// explanation: http://msdn2.microsoft.com/en-us/library/ms647732.aspx
-bool OpenItemViaShell(const FilePath& full_path) {
-  HINSTANCE h = ::ShellExecuteW(
-      NULL, NULL, full_path.value().c_str(), NULL,
-      full_path.DirName().value().c_str(), SW_SHOWNORMAL);
-
-  LONG_PTR error = reinterpret_cast<LONG_PTR>(h);
-  if (error > 32)
-    return true;
-
-  if ((error == SE_ERR_NOASSOC))
-    return OpenItemWithExternalApp(full_path.value());
-  return false;
-}
-
-bool OpenItemViaShellNoZoneCheck(const FilePath& full_path) {
-  SHELLEXECUTEINFO sei = { sizeof(sei) };
-  sei.fMask = SEE_MASK_NOZONECHECKS | SEE_MASK_FLAG_DDEWAIT;
-  sei.nShow = SW_SHOWNORMAL;
-  sei.lpVerb = NULL;
-  sei.lpFile = full_path.value().c_str();
-  if (::ShellExecuteExW(&sei))
-    return true;
-  LONG_PTR error = reinterpret_cast<LONG_PTR>(sei.hInstApp);
-  if (error == SE_ERR_NOASSOC)
-    return OpenItemWithExternalApp(full_path.value());
-  return false;
-}
 
 // Show the Windows "Open With" dialog box to ask the user to pick an app to
 // open the file with.
@@ -82,12 +67,59 @@ bool OpenItemWithExternalApp(const string16& full_path) {
   return (TRUE == ::ShellExecuteExW(&sei));
 }
 
+bool OpenAnyViaShell(const string16& full_path,
+                     const string16& directory,
+                     const string16& args,
+                     DWORD mask) {
+  SHELLEXECUTEINFO sei = { sizeof(sei) };
+  sei.fMask = mask;
+  sei.nShow = SW_SHOWNORMAL;
+  sei.lpFile = full_path.c_str();
+  sei.lpDirectory = directory.c_str();
+  if (!args.empty())
+    sei.lpParameters = args.c_str();
+
+  if (::ShellExecuteExW(&sei))
+    return true;
+  if (::GetLastError() == ERROR_NO_ASSOCIATION)
+    return OpenItemWithExternalApp(full_path);
+  return false;
+}
+
+bool OpenItemViaShell(const FilePath& full_path) {
+  return OpenAnyViaShell(full_path.value(), full_path.DirName().value(),
+                         string16(), 0);
+}
+
+bool OpenItemViaShellNoZoneCheck(const FilePath& full_path) {
+  return OpenAnyViaShell(full_path.value(), string16(), string16(),
+                         SEE_MASK_NOZONECHECKS | SEE_MASK_FLAG_DDEWAIT);
+}
+
 void SetAppIdForWindow(const string16& app_id, HWND hwnd) {
-  SetAppIdAndIconForWindow(app_id, string16(), hwnd);
+  SetAppDetailsForWindow(app_id, string16(), string16(), string16(), hwnd);
 }
 
 void SetAppIconForWindow(const string16& app_icon, HWND hwnd) {
-  SetAppIdAndIconForWindow(string16(), app_icon, hwnd);
+  SetAppDetailsForWindow(string16(), app_icon, string16(), string16(), hwnd);
+}
+
+void SetRelaunchDetailsForWindow(const string16& relaunch_command,
+                                 const string16& display_name,
+                                 HWND hwnd) {
+  SetAppDetailsForWindow(string16(),
+                         string16(),
+                         relaunch_command,
+                         display_name,
+                         hwnd);
+}
+
+bool IsAeroGlassEnabled() {
+  if (base::win::GetVersion() < base::win::VERSION_VISTA)
+    return false;
+  // If composition is not enabled, we behave like on XP.
+  BOOL enabled = FALSE;
+  return SUCCEEDED(DwmIsCompositionEnabled(&enabled)) && enabled;
 }
 
 }  // namespace win

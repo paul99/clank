@@ -1,4 +1,4 @@
-// Copyright (c) 2011 The Chromium Authors. All rights reserved.
+// Copyright (c) 2012 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -11,10 +11,10 @@
 #include "base/values.h"
 #include "chrome/browser/browser_process.h"
 #include "chrome/browser/chromeos/cros/cros_library.h"
+#include "chrome/browser/chromeos/input_method/input_method_configuration.h"
 #include "chrome/browser/chromeos/input_method/input_method_manager.h"
 #include "chrome/browser/chromeos/input_method/input_method_util.h"
 #include "chrome/browser/chromeos/login/language_switch_menu.h"
-#include "chrome/browser/chromeos/status/input_method_menu.h"
 #include "chrome/browser/ui/webui/chromeos/login/oobe_ui.h"
 #include "chrome/browser/ui/webui/options/chromeos/cros_language_options_handler.h"
 #include "content/public/browser/web_ui.h"
@@ -25,14 +25,7 @@
 #include "ui/views/layout/fill_layout.h"
 #include "ui/views/widget/widget.h"
 
-#if defined(TOOLKIT_USES_GTK)
-#include "chrome/browser/chromeos/legacy_window_manager/wm_ipc.h"
-#endif
-
 namespace {
-
-// Network screen id.
-const char kNetworkScreen[] = "connect";
 
 // JS API callbacks names.
 const char kJsApiNetworkOnExit[] = "networkOnExit";
@@ -52,6 +45,8 @@ NetworkScreenHandler::NetworkScreenHandler()
 }
 
 NetworkScreenHandler::~NetworkScreenHandler() {
+  if (screen_)
+    screen_->OnActorDestroyed(this);
 }
 
 // NetworkScreenHandler, NetworkScreenActor implementation: --------------------
@@ -69,7 +64,7 @@ void NetworkScreenHandler::Show() {
     return;
   }
 
-  ShowScreen(kNetworkScreen, NULL);
+  ShowScreen(OobeUI::kScreenOobeNetwork, NULL);
 }
 
 void NetworkScreenHandler::Hide() {
@@ -82,7 +77,7 @@ void NetworkScreenHandler::ShowError(const string16& message) {
 }
 
 void NetworkScreenHandler::ClearErrors() {
-  web_ui()->CallJavascriptFunction("oobe.NetworkScreen.clearErrors");
+  web_ui()->CallJavascriptFunction("cr.ui.Oobe.clearErrors");
 }
 
 void NetworkScreenHandler::ShowConnectingStatus(
@@ -115,12 +110,16 @@ void NetworkScreenHandler::EnableContinue(bool enabled) {
 
 void NetworkScreenHandler::GetLocalizedStrings(
     base::DictionaryValue* localized_strings) {
+  localized_strings->SetString("networkScreenGreeting",
+      l10n_util::GetStringUTF16(IDS_WELCOME_SCREEN_GREETING));
   localized_strings->SetString("networkScreenTitle",
       l10n_util::GetStringUTF16(IDS_WELCOME_SCREEN_TITLE));
   localized_strings->SetString("selectLanguage",
       l10n_util::GetStringUTF16(IDS_LANGUAGE_SELECTION_SELECT));
   localized_strings->SetString("selectKeyboard",
       l10n_util::GetStringUTF16(IDS_KEYBOARD_SELECTION_SELECT));
+  localized_strings->SetString("selectNetwork",
+      l10n_util::GetStringUTF16(IDS_NETWORK_SELECTION_SELECT));
   localized_strings->SetString("proxySettings",
       l10n_util::GetStringUTF16(IDS_OPTIONS_PROXIES_CONFIGURE_BUTTON));
   localized_strings->SetString("continueButton",
@@ -154,7 +153,8 @@ void NetworkScreenHandler::RegisterMessages() {
 
 void NetworkScreenHandler::HandleOnExit(const ListValue* args) {
   ClearErrors();
-  screen_->OnContinuePressed();
+  if (screen_)
+    screen_->OnContinuePressed();
 }
 
 void NetworkScreenHandler::HandleOnLanguageChanged(const ListValue* args) {
@@ -162,6 +162,10 @@ void NetworkScreenHandler::HandleOnLanguageChanged(const ListValue* args) {
   std::string locale;
   if (!args->GetString(0, &locale))
     NOTREACHED();
+
+  const std::string app_locale = g_browser_process->GetApplicationLocale();
+  if (app_locale == locale)
+    return;
 
   // TODO(altimofeev): make language change async.
   LanguageSwitchMenu::SwitchLanguageAndEnableKeyboardLayouts(locale);
@@ -180,18 +184,18 @@ void NetworkScreenHandler::HandleOnInputMethodChanged(const ListValue* args) {
   std::string id;
   if (!args->GetString(0, &id))
     NOTREACHED();
-  input_method::InputMethodManager::GetInstance()->ChangeInputMethod(id);
+  input_method::GetInputMethodManager()->ChangeInputMethod(id);
 }
 
 ListValue* NetworkScreenHandler::GetLanguageList() {
   const std::string app_locale = g_browser_process->GetApplicationLocale();
   input_method::InputMethodManager* manager =
-      input_method::InputMethodManager::GetInstance();
+      input_method::GetInputMethodManager();
   // GetSupportedInputMethods() never returns NULL.
   scoped_ptr<input_method::InputMethodDescriptors> descriptors(
       manager->GetSupportedInputMethods());
   ListValue* languages_list =
-      CrosLanguageOptionsHandler::GetLanguageList(*descriptors);
+      options::CrosLanguageOptionsHandler::GetLanguageList(*descriptors);
   for (size_t i = 0; i < languages_list->GetSize(); ++i) {
     DictionaryValue* language_info = NULL;
     if (!languages_list->GetDictionary(i, &language_info))
@@ -219,17 +223,20 @@ ListValue* NetworkScreenHandler::GetLanguageList() {
 ListValue* NetworkScreenHandler::GetInputMethods() {
   ListValue* input_methods_list = new ListValue;
   input_method::InputMethodManager* manager =
-      input_method::InputMethodManager::GetInstance();
+      input_method::GetInputMethodManager();
+  input_method::InputMethodUtil* util = manager->GetInputMethodUtil();
   scoped_ptr<input_method::InputMethodDescriptors> input_methods(
       manager->GetActiveInputMethods());
-  std::string current_input_method_id = manager->current_input_method().id();
+  std::string current_input_method_id = manager->GetCurrentInputMethod().id();
   for (size_t i = 0; i < input_methods->size(); ++i) {
+    const std::string ime_id = input_methods->at(i).id();
     DictionaryValue* input_method = new DictionaryValue;
-    input_method->SetString("value", input_methods->at(i).id());
+    input_method->SetString("value", ime_id);
     input_method->SetString(
-        "title", InputMethodMenu::GetTextForMenu(input_methods->at(i)));
+        "title",
+        util->GetInputMethodLongName(input_methods->at(i)));
     input_method->SetBoolean("selected",
-        input_methods->at(i).id() == current_input_method_id);
+        ime_id == current_input_method_id);
     input_methods_list->Append(input_method);
   }
   return input_methods_list;

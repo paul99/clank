@@ -1,16 +1,19 @@
-// Copyright (c) 2011 The Chromium Authors. All rights reserved.
+// Copyright (c) 2012 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
 #include "base/utf_string_conversions.h"
+#include "chrome/browser/extensions/api/permissions/permissions_api.h"
 #include "chrome/browser/extensions/extension_apitest.h"
 #include "chrome/browser/extensions/extension_service.h"
 #include "chrome/browser/ui/browser.h"
+#include "chrome/browser/ui/browser_tabstrip.h"
 #include "chrome/common/chrome_notification_types.h"
 #include "chrome/common/chrome_switches.h"
 #include "chrome/common/extensions/extension.h"
 #include "chrome/test/base/ui_test_utils.h"
 #include "content/public/browser/web_contents.h"
+#include "content/public/test/browser_test_utils.h"
 #include "googleurl/src/gurl.h"
 #include "net/base/mock_host_resolver.h"
 
@@ -42,7 +45,13 @@ IN_PROC_BROWSER_TEST_F(ExtensionApiTest, ContentScriptFragmentNavigation) {
   ASSERT_TRUE(RunExtensionTest(extension_name)) << message_;
 }
 
-IN_PROC_BROWSER_TEST_F(ExtensionApiTest, ContentScriptIsolatedWorlds) {
+// Times out on Linux: http://crbug.com/163097
+#if defined(OS_LINUX)
+#define MAYBE_ContentScriptIsolatedWorlds DISABLED_ContentScriptIsolatedWorlds
+#else
+#define MAYBE_ContentScriptIsolatedWorlds ContentScriptIsolatedWorlds
+#endif
+IN_PROC_BROWSER_TEST_F(ExtensionApiTest, MAYBE_ContentScriptIsolatedWorlds) {
   // This extension runs various bits of script and tests that they all run in
   // the same isolated world.
   ASSERT_TRUE(StartTestServer());
@@ -80,11 +89,26 @@ IN_PROC_BROWSER_TEST_F(ExtensionApiTest, ContentScriptViewSource) {
   ASSERT_TRUE(RunExtensionTest("content_scripts/view_source")) << message_;
 }
 
+// crbug.com/126257 -- content scripts should not get injected into other
+// extensions.
+IN_PROC_BROWSER_TEST_F(ExtensionApiTest, ContentScriptOtherExtensions) {
+  host_resolver()->AddRule("a.com", "127.0.0.1");
+  ASSERT_TRUE(StartTestServer());
+  // First, load extension that sets up content script.
+  ASSERT_TRUE(RunExtensionTest("content_scripts/other_extensions/injector"))
+      << message_;
+  // Then load targeted extension to make sure its content isn't changed.
+  ASSERT_TRUE(RunExtensionTest("content_scripts/other_extensions/victim"))
+      << message_;
+}
+
+// crbug.com/120762
 IN_PROC_BROWSER_TEST_F(
-    ExtensionApiTest, ContentScriptStylesInjectedIntoExistingRenderers) {
+    ExtensionApiTest,
+    DISABLED_ContentScriptStylesInjectedIntoExistingRenderers) {
   ASSERT_TRUE(StartTestServer());
 
-  ui_test_utils::WindowedNotificationObserver signal(
+  content::WindowedNotificationObserver signal(
       chrome::NOTIFICATION_USER_SCRIPTS_UPDATED,
       content::Source<Profile>(browser()->profile()));
 
@@ -99,8 +123,8 @@ IN_PROC_BROWSER_TEST_F(
 
   // And check that its styles were affected by the styles that just got loaded.
   bool styles_injected;
-  ASSERT_TRUE(ui_test_utils::ExecuteJavaScriptAndExtractBool(
-      browser()->GetSelectedWebContents()->GetRenderViewHost(), L"",
+  ASSERT_TRUE(content::ExecuteJavaScriptAndExtractBool(
+      chrome::GetActiveWebContents(browser())->GetRenderViewHost(), L"",
       L"window.domAutomationController.send("
       L"document.defaultView.getComputedStyle(document.body, null)."
       L"getPropertyValue('background-color') == 'rgb(255, 0, 0)')",
@@ -108,7 +132,8 @@ IN_PROC_BROWSER_TEST_F(
   ASSERT_TRUE(styles_injected);
 }
 
-IN_PROC_BROWSER_TEST_F(ExtensionApiTest, ContentScriptCSSLocalization) {
+IN_PROC_BROWSER_TEST_F(ExtensionApiTest,
+                       ContentScriptCSSLocalization) {
   ASSERT_TRUE(StartTestServer());
   ASSERT_TRUE(RunExtensionTest("content_scripts/css_l10n")) << message_;
 }
@@ -116,9 +141,7 @@ IN_PROC_BROWSER_TEST_F(ExtensionApiTest, ContentScriptCSSLocalization) {
 IN_PROC_BROWSER_TEST_F(ExtensionApiTest, ContentScriptExtensionAPIs) {
   ASSERT_TRUE(StartTestServer());
 
-  CommandLine::ForCurrentProcess()->AppendSwitch(
-      switches::kEnableExperimentalExtensionApis);
-  const Extension* extension = LoadExtension(
+  const extensions::Extension* extension = LoadExtension(
       test_data_dir_.AppendASCII("content_scripts/extension_api"));
 
   ResultCatcher catcher;
@@ -137,4 +160,17 @@ IN_PROC_BROWSER_TEST_F(ExtensionApiTest, ContentScriptExtensionAPIs) {
       browser(), extension->GetResourceURL("fire_event.html"),
       NEW_FOREGROUND_TAB, ui_test_utils::BROWSER_TEST_NONE);
   EXPECT_TRUE(catcher.GetNextResult());
+}
+
+IN_PROC_BROWSER_TEST_F(ExtensionApiTest, ContentScriptPermissionsApi) {
+  RequestPermissionsFunction::SetIgnoreUserGestureForTests(true);
+  RequestPermissionsFunction::SetAutoConfirmForTests(true);
+  host_resolver()->AddRule("*.com", "127.0.0.1");
+  ASSERT_TRUE(StartTestServer());
+  ASSERT_TRUE(RunExtensionTest("content_scripts/permissions")) << message_;
+}
+
+IN_PROC_BROWSER_TEST_F(ExtensionApiTest, ContentScriptBypassPageCSP) {
+  ASSERT_TRUE(StartTestServer());
+  ASSERT_TRUE(RunExtensionTest("content_scripts/bypass_page_csp")) << message_;
 }

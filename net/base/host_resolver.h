@@ -1,10 +1,9 @@
-// Copyright (c) 2011 The Chromium Authors. All rights reserved.
+// Copyright (c) 2012 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
 #ifndef NET_BASE_HOST_RESOLVER_H_
 #define NET_BASE_HOST_RESOLVER_H_
-#pragma once
 
 #include <string>
 
@@ -15,6 +14,10 @@
 #include "net/base/net_export.h"
 #include "net/base/net_util.h"
 #include "net/base/request_priority.h"
+
+namespace base {
+class Value;
+}
 
 namespace net {
 
@@ -35,6 +38,21 @@ class NetLog;
 // goes out of scope).
 class NET_EXPORT HostResolver {
  public:
+  // |max_concurrent_resolves| is how many resolve requests will be allowed to
+  // run in parallel. Pass HostResolver::kDefaultParallelism to choose a
+  // default value.
+  // |max_retry_attempts| is the maximum number of times we will retry for host
+  // resolution. Pass HostResolver::kDefaultRetryAttempts to choose a default
+  // value.
+  // |enable_caching| controls whether a HostCache is used.
+  struct NET_EXPORT Options {
+    Options();
+
+    size_t max_concurrent_resolves;
+    size_t max_retry_attempts;
+    bool enable_caching;
+  };
+
   // The parameters for doing a Resolve(). A hostname and port are required,
   // the rest are optional (and have reasonable defaults).
   class NET_EXPORT RequestInfo {
@@ -93,14 +111,13 @@ class NET_EXPORT HostResolver {
   // Opaque type used to cancel a request.
   typedef void* RequestHandle;
 
-  // This value can be passed into CreateSystemHostResolver as the
+  // This value can be passed into CreateSystemResolver as the
   // |max_concurrent_resolves| parameter. It will select a default level of
   // concurrency.
   static const size_t kDefaultParallelism = 0;
 
-  // This value can be passed into CreateSystemHostResolver as the
-  // |max_retry_attempts| parameter. This is the maximum number of times we
-  // will retry for host resolution.
+  // This value can be passed into CreateSystemResolver as the
+  // |max_retry_attempts| parameter.
   static const size_t kDefaultRetryAttempts = -1;
 
   // If any completion callbacks are pending when the resolver is destroyed,
@@ -132,10 +149,10 @@ class NET_EXPORT HostResolver {
                       RequestHandle* out_req,
                       const BoundNetLog& net_log) = 0;
 
-  // Resolves the given hostname (or IP address literal) out of cache
-  // only.  This is guaranteed to complete synchronously.  This acts like
-  // |Resolve()| if the hostname is IP literal or cached value exists.
-  // Otherwise, ERR_DNS_CACHE_MISS is returned.
+  // Resolves the given hostname (or IP address literal) out of cache or HOSTS
+  // file (if enabled) only. This is guaranteed to complete synchronously.
+  // This acts like |Resolve()| if the hostname is IP literal, or cached value
+  // or HOSTS entry exists. Otherwise, ERR_DNS_CACHE_MISS is returned.
   virtual int ResolveFromCache(const RequestInfo& info,
                                AddressList* addresses,
                                const BoundNetLog& net_log) = 0;
@@ -157,9 +174,27 @@ class NET_EXPORT HostResolver {
   // address family to IPv4 iff IPv6 is not supported.
   virtual void ProbeIPv6Support();
 
+  // Enable or disable the built-in asynchronous DnsClient.
+  virtual void SetDnsClientEnabled(bool enabled);
+
   // Returns the HostResolverCache |this| uses, or NULL if there isn't one.
   // Used primarily to clear the cache and for getting debug information.
   virtual HostCache* GetHostCache();
+
+  // Returns the current DNS configuration |this| is using, as a Value, or NULL
+  // if it's configured to always use the system host resolver.  Caller takes
+  // ownership of the returned Value.
+  virtual base::Value* GetDnsConfigAsValue() const;
+
+  // Creates a HostResolver implementation that queries the underlying system.
+  // (Except if a unit-test has changed the global HostResolverProc using
+  // ScopedHostResolverProc to intercept requests to the system).
+  static scoped_ptr<HostResolver> CreateSystemResolver(
+      const Options& options,
+      NetLog* net_log);
+
+  // As above, but uses default parameters.
+  static scoped_ptr<HostResolver> CreateDefaultResolver(NetLog* net_log);
 
  protected:
   HostResolver();
@@ -168,25 +203,6 @@ class NET_EXPORT HostResolver {
   DISALLOW_COPY_AND_ASSIGN(HostResolver);
 };
 
-// Creates a HostResolver implementation that queries the underlying system.
-// (Except if a unit-test has changed the global HostResolverProc using
-// ScopedHostResolverProc to intercept requests to the system).
-// |max_concurrent_resolves| is how many resolve requests will be allowed to
-// run in parallel. Pass HostResolver::kDefaultParallelism to choose a
-// default value.
-// |max_retry_attempts| is the maximum number of times we will retry for host
-// resolution. Pass HostResolver::kDefaultRetryAttempts to choose a default
-// value.
-NET_EXPORT HostResolver* CreateSystemHostResolver(
-    size_t max_concurrent_resolves,
-    size_t max_retry_attempts,
-    NetLog* net_log);
-
-// Creates a HostResolver implementation that sends actual DNS queries to
-// the specified DNS server and parses response and returns results.
-NET_EXPORT HostResolver* CreateAsyncHostResolver(size_t max_concurrent_resolves,
-                                                 const IPAddressNumber& dns_ip,
-                                                 NetLog* net_log);
 }  // namespace net
 
 #endif  // NET_BASE_HOST_RESOLVER_H_

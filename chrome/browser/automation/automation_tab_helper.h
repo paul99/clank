@@ -1,18 +1,18 @@
-// Copyright (c) 2011 The Chromium Authors. All rights reserved.
+// Copyright (c) 2012 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
 #ifndef CHROME_BROWSER_AUTOMATION_AUTOMATION_TAB_HELPER_H_
 #define CHROME_BROWSER_AUTOMATION_AUTOMATION_TAB_HELPER_H_
-#pragma once
 
 #include <set>
 #include <vector>
 
 #include "base/basictypes.h"
-#include "base/observer_list.h"
 #include "base/memory/weak_ptr.h"
+#include "base/observer_list.h"
 #include "content/public/browser/web_contents_observer.h"
+#include "content/public/browser/web_contents_user_data.h"
 
 class AutomationTabHelper;
 
@@ -34,11 +34,11 @@ class TabEventObserver {
   // TODO(kkania): Track other types of scheduled navigations.
 
   // Called when the tab that had no pending loads now has a new pending
-  // load. |tab_contents| will always be valid.
+  // load. |web_contents| will always be valid.
   virtual void OnFirstPendingLoad(content::WebContents* web_contents) { }
 
   // Called when the tab that had one or more pending loads now has no
-  // pending loads. |tab_contents| will always be valid.
+  // pending loads. |web_contents| will always be valid.
   //
   // This method will always be called if |OnFirstPendingLoad| was called.
   virtual void OnNoMorePendingLoads(content::WebContents* web_contents) { }
@@ -77,9 +77,9 @@ class TabEventObserver {
 // from the renderer. Broadcasts tab events to |TabEventObserver|s.
 class AutomationTabHelper
     : public content::WebContentsObserver,
-      public base::SupportsWeakPtr<AutomationTabHelper> {
+      public base::SupportsWeakPtr<AutomationTabHelper>,
+      public content::WebContentsUserData<AutomationTabHelper> {
  public:
-  explicit AutomationTabHelper(content::WebContents* web_contents);
   virtual ~AutomationTabHelper();
 
   void AddObserver(TabEventObserver* observer);
@@ -88,11 +88,19 @@ class AutomationTabHelper
   // Snapshots the entire page without resizing.
   void SnapshotEntirePage();
 
+#if !defined(NO_TCMALLOC) && (defined(OS_LINUX) || defined(OS_CHROMEOS))
+  // Dumps a heap profile.
+  void HeapProfilerDump(const std::string& reason);
+#endif  // !defined(NO_TCMALLOC) && (defined(OS_LINUX) || defined(OS_CHROMEOS))
+
   // Returns true if the tab is loading or the tab is scheduled to load
   // immediately. Note that scheduled loads may be canceled.
   bool has_pending_loads() const;
 
  private:
+  explicit AutomationTabHelper(content::WebContents* web_contents);
+  friend class content::WebContentsUserData<AutomationTabHelper>;
+
   friend class AutomationTabHelperTest;
 
   void OnSnapshotEntirePageACK(
@@ -101,8 +109,10 @@ class AutomationTabHelper
       const std::string& error_msg);
 
   // content::WebContentsObserver implementation.
-  virtual void DidStartLoading() OVERRIDE;
-  virtual void DidStopLoading() OVERRIDE;
+  virtual void DidStartLoading(
+      content::RenderViewHost* render_view_host) OVERRIDE;
+  virtual void DidStopLoading(
+      content::RenderViewHost* render_view_host) OVERRIDE;
   virtual void RenderViewGone(base::TerminationStatus status) OVERRIDE;
   virtual void WebContentsDestroyed(
       content::WebContents* web_contents) OVERRIDE;

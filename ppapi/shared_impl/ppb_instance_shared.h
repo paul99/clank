@@ -13,22 +13,31 @@
 namespace ppapi {
 
 class PPAPI_SHARED_EXPORT PPB_Instance_Shared
-    : NON_EXPORTED_BASE(public thunk::PPB_Instance_FunctionAPI) {
+    : NON_EXPORTED_BASE(public thunk::PPB_Instance_API) {
  public:
   virtual ~PPB_Instance_Shared();
 
   // Implementation of some shared PPB_Instance_FunctionAPI functions.
   virtual void Log(PP_Instance instance,
-                   PP_LogLevel_Dev log_level,
+                   PP_LogLevel log_level,
                    PP_Var value) OVERRIDE;
   virtual void LogWithSource(PP_Instance instance,
-                             PP_LogLevel_Dev log_level,
+                             PP_LogLevel log_level,
                              PP_Var source,
                              PP_Var value) OVERRIDE;
 
   // Error checks the given resquest to Request[Filtering]InputEvents. Returns
   // PP_OK if the given classes are all valid, PP_ERROR_NOTSUPPORTED if not.
   int32_t ValidateRequestInputEvents(bool is_filtering, uint32_t event_classes);
+
+  bool ValidateSetCursorParams(PP_MouseCursor_Type type,
+                               PP_Resource image,
+                               const PP_Point* hot_spot);
+
+  // The length of text to request as a surrounding context of selection.
+  // For now, the value is copied from the one with render_view_impl.cc.
+  // TODO(kinaba) implement a way to dynamically sync the requirement.
+  static const int kExtraCharsForTextInput;
 };
 
 }  // namespace ppapi

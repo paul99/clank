@@ -1,4 +1,4 @@
-// Copyright (c) 2011 The Chromium Authors. All rights reserved.
+// Copyright (c) 2012 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -9,7 +9,6 @@
 #include "chrome/browser/download/download_util.h"
 #import "chrome/browser/themes/theme_service.h"
 #import "chrome/browser/ui/cocoa/download/background_theme.h"
-#import "chrome/browser/ui/cocoa/image_utils.h"
 #import "chrome/browser/ui/cocoa/themed_window.h"
 #include "content/public/browser/download_item.h"
 #include "content/public/browser/download_manager.h"
@@ -72,10 +71,10 @@ NSTimeInterval kShowStatusDuration = 0.3;
 NSTimeInterval kHideStatusDuration = 0.3;
 
 // Duration of the 'download complete' animation, in seconds.
-const int kCompleteAnimationDuration = 2.5;
+const CGFloat kCompleteAnimationDuration = 2.5;
 
 // Duration of the 'download interrupted' animation, in seconds.
-const int kInterruptedAnimationDuration = 2.5;
+const CGFloat kInterruptedAnimationDuration = 2.5;
 
 using content::DownloadItem;
 
@@ -162,7 +161,7 @@ using content::DownloadItem;
   [super dealloc];
 }
 
-- (void)setStateFromDownload:(BaseDownloadItemModel*)downloadModel {
+- (void)setStateFromDownload:(DownloadItemModel*)downloadModel {
   // Set the name of the download.
   downloadPath_ = downloadModel->download()->GetFileNameToReportUser();
 
@@ -213,7 +212,7 @@ using content::DownloadItem;
       break;
     case DownloadItem::IN_PROGRESS:
       percentDone_ = downloadModel->download()->IsPaused() ?
-          -1 : downloadModel->download()->PercentComplete();
+          -1 : downloadModel->PercentComplete();
       break;
     default:
       NOTREACHED();
@@ -390,7 +389,7 @@ using content::DownloadItem;
   if (![self secondaryTitle] || statusAlpha_ <= 0)
     return;
 
-  CGFloat textWidth = innerFrame.size.width -
+  CGFloat textWidth = NSWidth(innerFrame) -
       (kTextPosLeft + kTextPaddingRight + kDropdownAreaWidth);
   NSString* secondaryText = [self elideStatus:textWidth];
   NSColor* secondaryColor =
@@ -422,7 +421,7 @@ using content::DownloadItem;
   NSRect drawFrame = NSInsetRect(cellFrame, 1.5, 1.5);
   NSRect innerFrame = NSInsetRect(cellFrame, 2, 2);
 
-  const float radius = 5;
+  const float radius = 3;
   NSWindow* window = [controlView window];
   BOOL active = [window isKeyWindow] || [window isMainWindow];
 
@@ -492,7 +491,7 @@ using content::DownloadItem;
 
 - (void)drawInteriorWithFrame:(NSRect)cellFrame inView:(NSView*)controlView {
   // Draw title
-  CGFloat textWidth = cellFrame.size.width -
+  CGFloat textWidth = NSWidth(cellFrame) -
       (kTextPosLeft + kTextPaddingRight + kDropdownAreaWidth);
   [self setTitle:[self elideTitle:textWidth]];
 
@@ -555,7 +554,8 @@ using content::DownloadItem;
                   fromRect:NSZeroRect
                  operation:NSCompositeSourceOver
                   fraction:[self isEnabled] ? 1.0 : 0.5
-              neverFlipped:YES];
+            respectFlipped:YES
+                     hints:nil];
 
   // Separator between button and popup parts
   CGFloat lx = NSMaxX(cellFrame) - kDropdownAreaWidth + 0.5;

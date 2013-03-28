@@ -11,6 +11,7 @@
 
 #include "base/basictypes.h"
 #include "base/file_path.h"
+#include "base/memory/scoped_ptr.h"
 #include "base/memory/weak_ptr.h"
 #include "googleurl/src/gurl.h"
 #include "third_party/WebKit/Source/WebKit/chromium/public/WebPlugin.h"
@@ -23,8 +24,13 @@
 #include "webkit/plugins/npapi/webplugin.h"
 #include "webkit/plugins/webkit_plugins_export.h"
 
+namespace cc {
+class IOSurfaceLayer;
+}
+
 namespace WebKit {
 class WebFrame;
+class WebLayer;
 class WebPluginContainer;
 class WebURLResponse;
 class WebURLLoader;
@@ -89,13 +95,15 @@ class WEBKIT_PLUGINS_EXPORT WebPluginImpl :
   virtual void didFailLoadingFrameRequest(
       const WebKit::WebURL& url, void* notify_data,
       const WebKit::WebURLError& error);
+  virtual bool isPlaceholder() OVERRIDE;
 
   // WebPlugin implementation:
   virtual void SetWindow(gfx::PluginWindowHandle window) OVERRIDE;
   virtual void SetAcceptsInputEvents(bool accepts) OVERRIDE;
   virtual void WillDestroyWindow(gfx::PluginWindowHandle window) OVERRIDE;
 #if defined(OS_WIN)
-  void SetWindowlessPumpEvent(HANDLE pump_messages_event) { }
+  void SetWindowlessData(HANDLE pump_messages_event,
+                         gfx::NativeViewId dummy_activation_window) { }
   void ReparentPluginWindow(HWND window, HWND parent) { }
   void ReportExecutableMemory(size_t size) { }
 #endif
@@ -113,6 +121,8 @@ class WEBKIT_PLUGINS_EXPORT WebPluginImpl :
                                  const GURL& first_party_for_cookies) OVERRIDE;
   virtual void URLRedirectResponse(bool allow, int resource_id) OVERRIDE;
 #if defined(OS_MACOSX)
+  virtual WebPluginAcceleratedSurface* GetAcceleratedSurface(
+      gfx::GpuPreference gpu_preference) OVERRIDE;
   virtual void AcceleratedPluginEnabledRendering() OVERRIDE;
   virtual void AcceleratedPluginAllocatedIOSurface(int32 width,
                                                    int32 height,
@@ -270,6 +280,8 @@ class WEBKIT_PLUGINS_EXPORT WebPluginImpl :
   int32 next_io_surface_width_;
   int32 next_io_surface_height_;
   uint32 next_io_surface_id_;
+  scoped_refptr<cc::IOSurfaceLayer> io_surface_layer_;
+  scoped_ptr<WebKit::WebLayer> web_layer_;
 #endif
   bool accepts_input_events_;
   base::WeakPtr<WebPluginPageDelegate> page_delegate_;

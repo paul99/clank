@@ -1,4 +1,4 @@
-// Copyright (c) 2011 The Chromium Authors. All rights reserved.
+// Copyright (c) 2012 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -7,33 +7,26 @@
 #include <string>
 #include <vector>
 
-#include "base/file_util.h"
 #include "base/memory/scoped_ptr.h"
 #include "base/message_loop.h"
 #include "base/process_util.h"
 #include "base/string_util.h"
 #include "third_party/WebKit/Source/WebKit/chromium/public/WebInputEvent.h"
 #include "webkit/glue/webkit_glue.h"
-#include "webkit/plugins/npapi/plugin_constants_win.h"
 #include "webkit/plugins/npapi/plugin_instance.h"
 #include "webkit/plugins/npapi/plugin_lib.h"
-#include "webkit/plugins/npapi/plugin_list.h"
 #include "webkit/plugins/npapi/plugin_stream_url.h"
 
 using WebKit::WebCursorInfo;
-using WebKit::WebKeyboardEvent;
 using WebKit::WebInputEvent;
-using WebKit::WebMouseEvent;
 
 namespace webkit {
 namespace npapi {
 
 WebPluginDelegateImpl* WebPluginDelegateImpl::Create(
     const FilePath& filename,
-    const std::string& mime_type,
-    gfx::PluginWindowHandle containing_view) {
-  scoped_refptr<PluginLib> plugin_lib(
-      PluginLib::CreatePluginLib(filename));
+    const std::string& mime_type) {
+  scoped_refptr<PluginLib> plugin_lib(PluginLib::CreatePluginLib(filename));
   if (plugin_lib.get() == NULL)
     return NULL;
 
@@ -41,9 +34,8 @@ WebPluginDelegateImpl* WebPluginDelegateImpl::Create(
   if (err != NPERR_NO_ERROR)
     return NULL;
 
-  scoped_refptr<PluginInstance> instance(
-      plugin_lib->CreateInstance(mime_type));
-  return new WebPluginDelegateImpl(containing_view, instance.get());
+  scoped_refptr<PluginInstance> instance(plugin_lib->CreateInstance(mime_type));
+  return new WebPluginDelegateImpl(instance.get());
 }
 
 void WebPluginDelegateImpl::PluginDestroyed() {
@@ -88,20 +80,17 @@ bool WebPluginDelegateImpl::Initialize(
 
   creation_succeeded_ = instance_->Start(
       url, argn.get(), argv.get(), argc, load_manually);
-  if (!creation_succeeded_)
+  if (!creation_succeeded_) {
+    VLOG(1) << "Couldn't start plug-in instance";
     return false;
+  }
 
   windowless_ = instance_->windowless();
   if (!windowless_) {
-    if (!WindowedCreatePlugin())
+    if (!WindowedCreatePlugin()) {
+      VLOG(1) << "Couldn't create windowed plug-in";
       return false;
-  } else {
-    // For windowless plugins we should set the containing window handle
-    // as the instance window handle. This is what Safari does. Not having
-    // a valid window handle causes subtle bugs with plugins which retrieve
-    // the window handle and validate the same. The window handle can be
-    // retrieved via NPN_GetValue of NPNVnetscapeWindow.
-    instance_->set_window_handle(parent_);
+    }
   }
 
   bool should_load = PlatformInitialize();

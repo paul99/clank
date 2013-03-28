@@ -24,6 +24,10 @@ const CGFloat kShieldWidth = kShieldRadius * 2;
 // The height of the shield.
 const CGFloat kShieldHeight = 140;
 
+// Additional height that is added to kShieldHeight when the gesture is
+// considered complete.
+const CGFloat kShieldHeightCompletionAdjust = 10;
+
 // The amount of |gestureAmount| at which AppKit considers the gesture
 // completed. This was derived more via art than science.
 const CGFloat kGestureCompleteProgress = 0.3;
@@ -34,16 +38,16 @@ const CGFloat kGestureCompleteProgress = 0.3;
 @interface HistoryOverlayView : NSView {
  @private
   HistoryOverlayMode mode_;
-  CGFloat progress_;
+  CGFloat shieldAlpha_;
 }
-@property(nonatomic) CGFloat progress;
+@property(nonatomic) CGFloat shieldAlpha;
 - (id)initWithMode:(HistoryOverlayMode)mode
              image:(NSImage*)image;
 @end
 
 @implementation HistoryOverlayView
 
-@synthesize progress = progress_;
+@synthesize shieldAlpha = shieldAlpha_;
 
 - (id)initWithMode:(HistoryOverlayMode)mode
              image:(NSImage*)image {
@@ -60,18 +64,15 @@ const CGFloat kGestureCompleteProgress = 0.3;
     scoped_nsobject<NSImageView> imageView(
         [[NSImageView alloc] initWithFrame:arrowRect]);
     [imageView setImage:image];
+    [imageView setAutoresizingMask:NSViewMinYMargin | NSViewMaxYMargin];
     [self addSubview:imageView];
   }
   return self;
 }
 
 - (void)drawRect:(NSRect)dirtyRect {
-  NSRect ovalRect = NSMakeRect(0, 0, kShieldWidth, kShieldHeight);
-  NSBezierPath* path = [NSBezierPath bezierPathWithOvalInRect:ovalRect];
-  NSColor* fillColor =
-      // Clamp the minimum ligtness to be 0.666.
-      [NSColor colorWithCalibratedWhite:std::min(2.0/3.0 - progress_, 2.0/3.0)
-                                  alpha:0.85];
+  NSBezierPath* path = [NSBezierPath bezierPathWithOvalInRect:self.bounds];
+  NSColor* fillColor = [NSColor colorWithCalibratedWhite:0 alpha:shieldAlpha_];
   [fillColor set];
   [path fill];
 }
@@ -91,6 +92,11 @@ const CGFloat kGestureCompleteProgress = 0.3;
   return self;
 }
 
+- (void)dealloc {
+  [self.view removeFromSuperview];
+  [super dealloc];
+}
+
 - (void)loadView {
   const gfx::Image& image =
       ui::ResourceBundle::GetSharedInstance().GetNativeImageNamed(
@@ -108,9 +114,24 @@ const CGFloat kGestureCompleteProgress = 0.3;
   // being completed.
   gestureAmount = std::abs(gestureAmount) / kGestureCompleteProgress;
 
+  // When tracking the gesture, the height is constant and the alpha value
+  // changes from [0.25, 0.65].
+  CGFloat height = kShieldHeight;
+  CGFloat shieldAlpha = std::min(static_cast<CGFloat>(0.65),
+                                 std::max(gestureAmount,
+                                          static_cast<CGFloat>(0.25)));
+
+  // When the gesture is very likely to be completed (90% in this case), grow
+  // the semicircle's height and lock the alpha to 0.75.
+  if (gestureAmount > 0.9) {
+    height += kShieldHeightCompletionAdjust;
+    shieldAlpha = 0.75;
+  }
+
   // Compute the new position based on the progress.
   NSRect frame = self.view.frame;
-  frame.origin.y = (NSHeight(parentFrame) / 2) - (kShieldHeight / 2);
+  frame.size.height = height;
+  frame.origin.y = (NSHeight(parentFrame) / 2) - (height / 2);
 
   CGFloat width = std::min(kShieldRadius * gestureAmount, kShieldRadius);
   if (mode_ == kHistoryOverlayModeForward)
@@ -119,7 +140,7 @@ const CGFloat kGestureCompleteProgress = 0.3;
     frame.origin.x = NSMinX(parentFrame) - kShieldWidth + width;
 
   self.view.frame = frame;
-  [contentView_ setProgress:gestureAmount];
+  [contentView_ setShieldAlpha:shieldAlpha];
   [contentView_ setNeedsDisplay:YES];
 }
 
@@ -132,7 +153,7 @@ const CGFloat kGestureCompleteProgress = 0.3;
 }
 
 - (void)dismiss {
-  const CGFloat kFadeOutDurationSeconds = 0.2;
+  const CGFloat kFadeOutDurationSeconds = 0.4;
 
   NSView* overlay = self.view;
 
@@ -148,7 +169,9 @@ const CGFloat kGestureCompleteProgress = 0.3;
 }
 
 - (void)animationDidStop:(CAAnimation*)theAnimation finished:(BOOL)finished {
-  [self.view removeFromSuperview];
+  // Destroy the CAAnimation and its strong reference to its delegate (this
+  // class).
+  [self.view setAnimations:nil];
 }
 
 @end

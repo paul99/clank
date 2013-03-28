@@ -1,10 +1,9 @@
-// Copyright (c) 2011 The Chromium Authors. All rights reserved.
+// Copyright (c) 2012 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
 #ifndef CHROME_BROWSER_UI_WEBUI_OPTIONS_IMPORT_DATA_HANDLER_H_
 #define CHROME_BROWSER_UI_WEBUI_OPTIONS_IMPORT_DATA_HANDLER_H_
-#pragma once
 
 #include "base/basictypes.h"
 #include "base/compiler_specific.h"
@@ -17,6 +16,8 @@
 class ImporterHost;
 class ImporterList;
 
+namespace options {
+
 // Chrome personal stuff import data overlay UI handler.
 class ImportDataHandler : public OptionsPageUIHandler,
                           public importer::ImporterListObserver,
@@ -28,7 +29,8 @@ class ImportDataHandler : public OptionsPageUIHandler,
   // OptionsPageUIHandler:
   virtual void GetLocalizedValues(
       base::DictionaryValue* localized_strings) OVERRIDE;
-  virtual void Initialize() OVERRIDE;
+  virtual void InitializeHandler() OVERRIDE;
+  virtual void InitializePage() OVERRIDE;
 
   // WebUIMessageHandler:
   virtual void RegisterMessages() OVERRIDE;
@@ -55,5 +57,7 @@ class ImportDataHandler : public OptionsPageUIHandler,
 
   DISALLOW_COPY_AND_ASSIGN(ImportDataHandler);
 };
+
+}  // namespace options
 
 #endif  // CHROME_BROWSER_UI_WEBUI_OPTIONS_IMPORT_DATA_HANDLER_H_

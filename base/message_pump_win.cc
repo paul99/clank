@@ -1,4 +1,4 @@
-// Copyright (c) 2011 The Chromium Authors. All rights reserved.
+// Copyright (c) 2012 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -6,9 +6,22 @@
 
 #include <math.h>
 
+#include "base/debug/trace_event.h"
 #include "base/message_loop.h"
 #include "base/metrics/histogram.h"
+#include "base/process_util.h"
 #include "base/win/wrapped_window_proc.h"
+
+namespace {
+
+enum MessageLoopProblems {
+  MESSAGE_POST_ERROR,
+  COMPLETION_POST_ERROR,
+  SET_TIMER_ERROR,
+  MESSAGE_LOOP_PROBLEM_MAX,
+};
+
+}  // namespace
 
 namespace base {
 
@@ -38,7 +51,7 @@ void MessagePumpWin::DidProcessMessage(const MSG& msg) {
 }
 
 void MessagePumpWin::RunWithDispatcher(
-    Delegate* delegate, Dispatcher* dispatcher) {
+    Delegate* delegate, MessagePumpDispatcher* dispatcher) {
   RunState s;
   s.delegate = delegate;
   s.dispatcher = dispatcher;
@@ -82,13 +95,15 @@ int MessagePumpWin::GetCurrentDelay() const {
 //-----------------------------------------------------------------------------
 // MessagePumpForUI public:
 
-MessagePumpForUI::MessagePumpForUI() {
+MessagePumpForUI::MessagePumpForUI()
+    : instance_(NULL),
+      message_filter_(new MessageFilter) {
   InitMessageWnd();
 }
 
 MessagePumpForUI::~MessagePumpForUI() {
   DestroyWindow(message_hwnd_);
-  UnregisterClass(kWndClass, GetModuleHandle(NULL));
+  UnregisterClass(kWndClass, instance_);
 }
 
 void MessagePumpForUI::ScheduleWork() {
@@ -96,7 +111,22 @@ void MessagePumpForUI::ScheduleWork() {
     return;  // Someone else continued the pumping.
 
   // Make sure the MessagePump does some work for us.
-  PostMessage(message_hwnd_, kMsgHaveWork, reinterpret_cast<WPARAM>(this), 0);
+  BOOL ret = PostMessage(message_hwnd_, kMsgHaveWork,
+                         reinterpret_cast<WPARAM>(this), 0);
+  if (ret)
+    return;  // There was room in the Window Message queue.
+
+  // We have failed to insert a have-work message, so there is a chance that we
+  // will starve tasks/timers while sitting in a nested message loop.  Nested
+  // loops only look at Windows Message queues, and don't look at *our* task
+  // queues, etc., so we might not get a time slice in such. :-(
+  // We could abort here, but the fear is that this failure mode is plausibly
+  // common (queue is full, of about 2000 messages), so we'll do a near-graceful
+  // recovery.  Nested loops are pretty transient (we think), so this will
+  // probably be recoverable.
+  InterlockedExchange(&have_work_, 0);  // Clarify that we didn't really insert.
+  UMA_HISTOGRAM_ENUMERATION("Chrome.MessageLoopProblem", MESSAGE_POST_ERROR,
+                            MESSAGE_LOOP_PROBLEM_MAX);
 }
 
 void MessagePumpForUI::ScheduleDelayedWork(const TimeTicks& delayed_work_time) {
@@ -129,7 +159,15 @@ void MessagePumpForUI::ScheduleDelayedWork(const TimeTicks& delayed_work_time) {
 
   // Create a WM_TIMER event that will wake us up to check for any pending
   // timers (in case we are running within a nested, external sub-pump).
-  SetTimer(message_hwnd_, reinterpret_cast<UINT_PTR>(this), delay_msec, NULL);
+  BOOL ret = SetTimer(message_hwnd_, reinterpret_cast<UINT_PTR>(this),
+                      delay_msec, NULL);
+  if (ret)
+    return;
+  // If we can't set timers, we are in big trouble... but cross our fingers for
+  // now.
+  // TODO(jar): If we don't see this error, use a CHECK() here instead.
+  UMA_HISTOGRAM_ENUMERATION("Chrome.MessageLoopProblem", SET_TIMER_ERROR,
+                            MESSAGE_LOOP_PROBLEM_MAX);
 }
 
 void MessagePumpForUI::PumpOutPendingPaintMessages() {
@@ -230,17 +268,16 @@ void MessagePumpForUI::DoRunLoop() {
 }
 
 void MessagePumpForUI::InitMessageWnd() {
-  HINSTANCE hinst = GetModuleHandle(NULL);
-
   WNDCLASSEX wc = {0};
   wc.cbSize = sizeof(wc);
   wc.lpfnWndProc = base::win::WrappedWindowProc<WndProcThunk>;
-  wc.hInstance = hinst;
+  wc.hInstance = base::GetModuleFromAddress(wc.lpfnWndProc);
   wc.lpszClassName = kWndClass;
+  instance_ = wc.hInstance;
   RegisterClassEx(&wc);
 
   message_hwnd_ =
-      CreateWindow(kWndClass, 0, 0, 0, 0, 0, 0, HWND_MESSAGE, 0, hinst, 0);
+      CreateWindow(kWndClass, 0, 0, 0, 0, 0, 0, HWND_MESSAGE, 0, instance_, 0);
   DCHECK(message_hwnd_);
 }
 
@@ -260,16 +297,17 @@ void MessagePumpForUI::WaitForWork() {
     // If a parent child relationship exists between windows across threads
     // then their thread inputs are implicitly attached.
     // This causes the MsgWaitForMultipleObjectsEx API to return indicating
-    // that messages are ready for processing (specifically mouse messages
-    // intended for the child window. Occurs if the child window has capture)
-    // The subsequent PeekMessages call fails to return any messages thus
+    // that messages are ready for processing (Specifically, mouse messages
+    // intended for the child window may appear if the child window has
+    // capture).
+    // The subsequent PeekMessages call may fail to return any messages thus
     // causing us to enter a tight loop at times.
     // The WaitMessage call below is a workaround to give the child window
-    // sometime to process its input messages.
+    // some time to process its input messages.
     MSG msg = {0};
     DWORD queue_status = GetQueueStatus(QS_MOUSE);
     if (HIWORD(queue_status) & QS_MOUSE &&
-       !PeekMessage(&msg, NULL, WM_MOUSEFIRST, WM_MOUSELAST, PM_NOREMOVE)) {
+        !PeekMessage(&msg, NULL, WM_MOUSEFIRST, WM_MOUSELAST, PM_NOREMOVE)) {
       WaitMessage();
     }
     return;
@@ -326,13 +364,15 @@ bool MessagePumpForUI::ProcessNextWindowsMessage() {
     sent_messages_in_queue = true;
 
   MSG msg;
-  if (PeekMessage(&msg, NULL, 0, 0, PM_REMOVE))
+  if (message_filter_->DoPeekMessage(&msg, NULL, 0, 0, PM_REMOVE))
     return ProcessMessageHelper(msg);
 
   return sent_messages_in_queue;
 }
 
 bool MessagePumpForUI::ProcessMessageHelper(const MSG& msg) {
+  TRACE_EVENT1("base", "MessagePumpForUI::ProcessMessageHelper",
+               "message", msg.message);
   if (WM_QUIT == msg.message) {
     // Repost the QUIT message so that it will be retrieved by the primary
     // GetMessage() loop.
@@ -350,12 +390,14 @@ bool MessagePumpForUI::ProcessMessageHelper(const MSG& msg) {
 
   WillProcessMessage(msg);
 
-  if (state_->dispatcher) {
-    if (!state_->dispatcher->Dispatch(msg))
-      state_->should_quit = true;
-  } else {
-    TranslateMessage(&msg);
-    DispatchMessage(&msg);
+  if (!message_filter_->ProcessMessage(msg)) {
+    if (state_->dispatcher) {
+      if (!state_->dispatcher->Dispatch(msg))
+        state_->should_quit = true;
+    } else {
+      TranslateMessage(&msg);
+      DispatchMessage(&msg);
+    }
   }
 
   DidProcessMessage(msg);
@@ -382,7 +424,8 @@ bool MessagePumpForUI::ProcessPumpReplacementMessage() {
     have_message = PeekMessage(&msg, NULL, WM_PAINT, WM_PAINT, PM_REMOVE) ||
                    PeekMessage(&msg, NULL, WM_TIMER, WM_TIMER, PM_REMOVE);
   } else {
-    have_message = (0 != PeekMessage(&msg, NULL, 0, 0, PM_REMOVE));
+    have_message = !!message_filter_->DoPeekMessage(&msg, NULL, 0, 0,
+                                                    PM_REMOVE);
   }
 
   DCHECK(!have_message || kMsgHaveWork != msg.message ||
@@ -404,6 +447,11 @@ bool MessagePumpForUI::ProcessPumpReplacementMessage() {
   return ProcessMessageHelper(msg);
 }
 
+void MessagePumpForUI::SetMessageFilter(
+    scoped_ptr<MessageFilter> message_filter) {
+  message_filter_ = message_filter.Pass();
+}
+
 //-----------------------------------------------------------------------------
 // MessagePumpForIO public:
 
@@ -420,7 +468,13 @@ void MessagePumpForIO::ScheduleWork() {
   BOOL ret = PostQueuedCompletionStatus(port_, 0,
                                         reinterpret_cast<ULONG_PTR>(this),
                                         reinterpret_cast<OVERLAPPED*>(this));
-  DCHECK(ret);
+  if (ret)
+    return;  // Post worked perfectly.
+
+  // See comment in MessagePumpForUI::ScheduleWork() for this error recovery.
+  InterlockedExchange(&have_work_, 0);  // Clarify that we didn't succeed.
+  UMA_HISTOGRAM_ENUMERATION("Chrome.MessageLoopProblem", COMPLETION_POST_ERROR,
+                            MESSAGE_LOOP_PROBLEM_MAX);
 }
 
 void MessagePumpForIO::ScheduleDelayedWork(const TimeTicks& delayed_work_time) {
@@ -432,9 +486,24 @@ void MessagePumpForIO::ScheduleDelayedWork(const TimeTicks& delayed_work_time) {
 
 void MessagePumpForIO::RegisterIOHandler(HANDLE file_handle,
                                          IOHandler* handler) {
-  ULONG_PTR key = reinterpret_cast<ULONG_PTR>(handler);
+  ULONG_PTR key = HandlerToKey(handler, true);
   HANDLE port = CreateIoCompletionPort(file_handle, port_, key, 1);
   DPCHECK(port);
+}
+
+bool MessagePumpForIO::RegisterJobObject(HANDLE job_handle,
+                                         IOHandler* handler) {
+  // Job object notifications use the OVERLAPPED pointer to carry the message
+  // data. Mark the completion key correspondingly, so we will not try to
+  // convert OVERLAPPED* to IOContext*.
+  ULONG_PTR key = HandlerToKey(handler, false);
+  JOBOBJECT_ASSOCIATE_COMPLETION_PORT info;
+  info.CompletionKey = reinterpret_cast<void*>(key);
+  info.CompletionPort = port_;
+  return SetInformationJobObject(job_handle,
+                                 JobObjectAssociateCompletionPortInformation,
+                                 &info,
+                                 sizeof(info)) != FALSE;
 }
 
 //-----------------------------------------------------------------------------
@@ -503,12 +572,16 @@ bool MessagePumpForIO::WaitForIOCompletion(DWORD timeout, IOHandler* filter) {
       return true;
   }
 
-  if (item.context->handler) {
+  // If |item.has_valid_io_context| is false then |item.context| does not point
+  // to a context structure, and so should not be dereferenced, although it may
+  // still hold valid non-pointer data.
+  if (!item.has_valid_io_context || item.context->handler) {
     if (filter && item.handler != filter) {
       // Save this item for later
       completed_io_.push_back(item);
     } else {
-      DCHECK_EQ(item.context->handler, item.handler);
+      DCHECK(!item.has_valid_io_context ||
+             (item.context->handler == item.handler));
       WillProcessIOEvent();
       item.handler->OnIOCompleted(item.context, item.bytes_transfered,
                                   item.error);
@@ -534,7 +607,7 @@ bool MessagePumpForIO::GetIOItem(DWORD timeout, IOItem* item) {
     item->bytes_transfered = 0;
   }
 
-  item->handler = reinterpret_cast<IOHandler*>(key);
+  item->handler = KeyToHandler(key, &item->has_valid_io_context);
   item->context = reinterpret_cast<IOContext*>(overlapped);
   return true;
 }
@@ -578,6 +651,30 @@ void MessagePumpForIO::WillProcessIOEvent() {
 
 void MessagePumpForIO::DidProcessIOEvent() {
   FOR_EACH_OBSERVER(IOObserver, io_observers_, DidProcessIOEvent());
+}
+
+// static
+ULONG_PTR MessagePumpForIO::HandlerToKey(IOHandler* handler,
+                                         bool has_valid_io_context) {
+  ULONG_PTR key = reinterpret_cast<ULONG_PTR>(handler);
+
+  // |IOHandler| is at least pointer-size aligned, so the lowest two bits are
+  // always cleared. We use the lowest bit to distinguish completion keys with
+  // and without the associated |IOContext|.
+  DCHECK((key & 1) == 0);
+
+  // Mark the completion key as context-less.
+  if (!has_valid_io_context)
+    key = key | 1;
+  return key;
+}
+
+// static
+MessagePumpForIO::IOHandler* MessagePumpForIO::KeyToHandler(
+    ULONG_PTR key,
+    bool* has_valid_io_context) {
+  *has_valid_io_context = ((key & 1) == 0);
+  return reinterpret_cast<IOHandler*>(key & ~static_cast<ULONG_PTR>(1));
 }
 
 }  // namespace base

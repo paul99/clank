@@ -6,11 +6,11 @@
 #include "crypto/nss_util_internal.h"
 
 #include <nss.h>
+#include <pk11pub.h>
 #include <plarena.h>
 #include <prerror.h>
 #include <prinit.h>
 #include <prtime.h>
-#include <pk11pub.h>
 #include <secmod.h>
 
 #if defined(OS_LINUX)
@@ -23,18 +23,18 @@
 
 #include <vector>
 
+#include "base/debug/alias.h"
 #include "base/environment.h"
 #include "base/file_path.h"
 #include "base/file_util.h"
+#include "base/files/scoped_temp_dir.h"
 #include "base/lazy_instance.h"
 #include "base/logging.h"
 #include "base/memory/scoped_ptr.h"
 #include "base/native_library.h"
-#include "base/scoped_temp_dir.h"
 #include "base/stringprintf.h"
 #include "base/threading/thread_restrictions.h"
 #include "build/build_config.h"
-#include "crypto/scoped_nss_types.h"
 
 #if defined(OS_CHROMEOS)
 #include "crypto/symmetric_key.h"
@@ -212,9 +212,8 @@ class NSPRInitSingleton {
   ~NSPRInitSingleton() {
     PL_ArenaFinish();
     PRStatus prstatus = PR_Cleanup();
-    if (prstatus != PR_SUCCESS) {
+    if (prstatus != PR_SUCCESS)
       LOG(ERROR) << "PR_Cleanup failed; was NSPR initialized on wrong thread?";
-    }
   }
 };
 
@@ -224,7 +223,19 @@ base::LazyInstance<NSPRInitSingleton>::Leaky
 // This is a LazyInstance so that it will be deleted automatically when the
 // unittest exits.  NSSInitSingleton is a LeakySingleton, so it would not be
 // deleted if it were a regular member.
-base::LazyInstance<ScopedTempDir> g_test_nss_db_dir = LAZY_INSTANCE_INITIALIZER;
+base::LazyInstance<base::ScopedTempDir> g_test_nss_db_dir =
+    LAZY_INSTANCE_INITIALIZER;
+
+// Force a crash with error info on NSS_NoDB_Init failure.
+void CrashOnNSSInitFailure() {
+  int nss_error = PR_GetError();
+  int os_error = PR_GetOSError();
+  base::debug::Alias(&nss_error);
+  base::debug::Alias(&os_error);
+  LOG(ERROR) << "Error initializing NSS without a persistent database: "
+             << GetNSSErrorMessage();
+  LOG(FATAL) << "nss_error=" << nss_error << ", os_error=" << os_error;
+}
 
 class NSSInitSingleton {
  public:
@@ -245,61 +256,56 @@ class NSSInitSingleton {
     }
   }
 
-  void EnableTPMTokenForNSS(TPMTokenInfoDelegate* info_delegate) {
-    CHECK(info_delegate);
-    tpm_token_info_delegate_.reset(info_delegate);
+  void EnableTPMTokenForNSS() {
+    tpm_token_enabled_for_nss_ = true;
   }
 
-  // This is called whenever we want to make sure Chaps is
-  // properly loaded, because it can fail shortly after the initial
-  // login while the PINs are being initialized, and we want to retry
-  // if this happens.
-  bool EnsureTPMTokenReady() {
+  bool InitializeTPMToken(const std::string& token_name,
+                          const std::string& user_pin) {
     // If EnableTPMTokenForNSS hasn't been called, return false.
-    if (tpm_token_info_delegate_.get() == NULL)
+    if (!tpm_token_enabled_for_nss_)
       return false;
 
     // If everything is already initialized, then return true.
     if (chaps_module_ && tpm_slot_)
       return true;
 
-    if (tpm_token_info_delegate_->IsTokenReady()) {
-      // This tries to load the Chaps module so NSS can talk to the hardware
-      // TPM.
-      if (!chaps_module_) {
-        chaps_module_ = LoadModule(
-            kChapsModuleName,
-            kChapsPath,
-            // trustOrder=100 -- means it'll select this as the most
-            //   trusted slot for the mechanisms it provides.
-            // slotParams=... -- selects RSA as the only mechanism, and only
-            //   asks for the password when necessary (instead of every
-            //   time, or after a timeout).
-            "trustOrder=100 slotParams=(1={slotFlags=[RSA] askpw=only})");
-      }
-      if (chaps_module_) {
-        // If this gets set, then we'll use the TPM for certs with
-        // private keys, otherwise we'll fall back to the software
-        // implementation.
-        tpm_slot_ = GetTPMSlot();
-        return tpm_slot_ != NULL;
-      }
+    tpm_token_name_ = token_name;
+    tpm_user_pin_ = user_pin;
+
+    // This tries to load the Chaps module so NSS can talk to the hardware
+    // TPM.
+    if (!chaps_module_) {
+      chaps_module_ = LoadModule(
+          kChapsModuleName,
+          kChapsPath,
+          // For more details on these parameters, see:
+          // https://developer.mozilla.org/en/PKCS11_Module_Specs
+          // slotFlags=[PublicCerts] -- Certificates and public keys can be
+          //   read from this slot without requiring a call to C_Login.
+          // askpw=only -- Only authenticate to the token when necessary.
+          "NSS=\"slotParams=(0={slotFlags=[PublicCerts] askpw=only})\"");
+    }
+    if (chaps_module_){
+      // If this gets set, then we'll use the TPM for certs with
+      // private keys, otherwise we'll fall back to the software
+      // implementation.
+      tpm_slot_ = GetTPMSlot();
+
+      return tpm_slot_ != NULL;
     }
     return false;
   }
 
-  bool IsTPMTokenAvailable() {
-    if (tpm_token_info_delegate_.get() == NULL)
-      return false;
-    return tpm_token_info_delegate_->IsTokenAvailable();
-  }
-
   void GetTPMTokenInfo(std::string* token_name, std::string* user_pin) {
-    if (tpm_token_info_delegate_.get() == NULL) {
+    if (!tpm_token_enabled_for_nss_) {
       LOG(ERROR) << "GetTPMTokenInfo called before TPM Token is ready.";
       return;
     }
-    tpm_token_info_delegate_->GetTokenInfo(token_name, user_pin);
+    if (token_name)
+      *token_name = tpm_token_name_;
+    if (user_pin)
+      *user_pin = tpm_user_pin_;
   }
 
   bool IsTPMTokenReady() {
@@ -382,10 +388,8 @@ class NSSInitSingleton {
       return PK11_ReferenceSlot(test_slot_);
 
 #if defined(OS_CHROMEOS)
-    // Make sure that if EnableTPMTokenForNSS has been called that we
-    // have successfully loaded Chaps.
-    if (tpm_token_info_delegate_.get() != NULL) {
-      if (EnsureTPMTokenReady()) {
+    if (tpm_token_enabled_for_nss_) {
+      if (IsTPMTokenReady()) {
         return PK11_ReferenceSlot(tpm_slot_);
       } else {
         // If we were supposed to get the hardware token, but were
@@ -417,7 +421,8 @@ class NSSInitSingleton {
   friend struct base::DefaultLazyInstanceTraits<NSSInitSingleton>;
 
   NSSInitSingleton()
-      : chaps_module_(NULL),
+      : tpm_token_enabled_for_nss_(false),
+        chaps_module_(NULL),
         software_slot_(NULL),
         test_slot_(NULL),
         tpm_slot_(NULL),
@@ -457,9 +462,12 @@ class NSSInitSingleton {
     if (nodb_init) {
       status = NSS_NoDB_Init(NULL);
       if (status != SECSuccess) {
-        LOG(ERROR) << "Error initializing NSS without a persistent "
-                      "database: " << GetNSSErrorMessage();
+        CrashOnNSSInitFailure();
+        return;
       }
+#if defined(OS_IOS)
+      root_ = InitDefaultRootCerts();
+#endif  // defined(OS_IOS)
     } else {
 #if defined(USE_NSS)
       FilePath database_dir = GetInitialConfigDirectory();
@@ -488,8 +496,7 @@ class NSSInitSingleton {
         VLOG(1) << "Initializing NSS without a persistent database.";
         status = NSS_NoDB_Init(NULL);
         if (status != SECSuccess) {
-          LOG(ERROR) << "Error initializing NSS without a persistent "
-                        "database: " << GetNSSErrorMessage();
+          CrashOnNSSInitFailure();
           return;
         }
       }
@@ -511,6 +518,12 @@ class NSSInitSingleton {
       root_ = InitDefaultRootCerts();
 #endif  // defined(USE_NSS)
     }
+
+    // Disable MD5 certificate signatures. (They are disabled by default in
+    // NSS 3.14.)
+    NSS_SetAlgorithmPolicy(SEC_OID_MD5, 0, NSS_USE_ALG_IN_CERT_SIGNATURE);
+    NSS_SetAlgorithmPolicy(SEC_OID_PKCS1_MD5_WITH_RSA_ENCRYPTION,
+                           0, NSS_USE_ALG_IN_CERT_SIGNATURE);
   }
 
   // NOTE(willchan): We don't actually execute this code since we leak NSS to
@@ -546,7 +559,7 @@ class NSSInitSingleton {
     }
   }
 
-#if defined(USE_NSS)
+#if defined(USE_NSS) || defined(OS_IOS)
   // Load nss's built-in root certs.
   SECMODModule* InitDefaultRootCerts() {
     SECMODModule* root = LoadModule("Root Certs", "libnssckbi.so", NULL);
@@ -602,10 +615,9 @@ class NSSInitSingleton {
   // If this is set to true NSS is forced to be initialized without a DB.
   static bool force_nodb_init_;
 
-#if defined(OS_CHROMEOS)
-  scoped_ptr<TPMTokenInfoDelegate> tpm_token_info_delegate_;
-#endif
-
+  bool tpm_token_enabled_for_nss_;
+  std::string tpm_token_name_;
+  std::string tpm_user_pin_;
   SECMODModule* chaps_module_;
   PK11SlotInfo* software_slot_;
   PK11SlotInfo* test_slot_;
@@ -624,7 +636,6 @@ bool NSSInitSingleton::force_nodb_init_ = false;
 
 base::LazyInstance<NSSInitSingleton>::Leaky
     g_nss_singleton = LAZY_INSTANCE_INITIALIZER;
-
 }  // namespace
 
 #if defined(USE_NSS)
@@ -637,6 +648,17 @@ void EarlySetupForNSSInit() {
 
 void EnsureNSPRInit() {
   g_nspr_singleton.Get();
+}
+
+void InitNSSSafely() {
+  // We might fork, but we haven't loaded any security modules.
+  DisableNSSForkCheck();
+  // If we're sandboxed, we shouldn't be able to open user security modules,
+  // but it's more correct to tell NSS to not even try.
+  // Loading user security modules would have security implications.
+  ForceNSSNoDBInit();
+  // Initialize NSS.
+  EnsureNSSInit();
 }
 
 void EnsureNSSInit() {
@@ -709,8 +731,14 @@ bool CheckNSSVersion(const char* version) {
 }
 
 #if defined(USE_NSS)
-bool OpenTestNSSDB() {
-  return g_nss_singleton.Get().OpenTestNSSDB();
+ScopedTestNSSDB::ScopedTestNSSDB()
+  : is_open_(g_nss_singleton.Get().OpenTestNSSDB()) {
+}
+
+ScopedTestNSSDB::~ScopedTestNSSDB() {
+  // TODO(mattm): Close the dababase once NSS 3.14 is required,
+  // which fixes https://bugzilla.mozilla.org/show_bug.cgi?id=588269
+  // Resource leaks are suppressed. http://crbug.com/156433 .
 }
 
 base::Lock* GetNSSWriteLock() {
@@ -746,27 +774,21 @@ void OpenPersistentNSSDB() {
   g_nss_singleton.Get().OpenPersistentNSSDB();
 }
 
-TPMTokenInfoDelegate::TPMTokenInfoDelegate() {}
-TPMTokenInfoDelegate::~TPMTokenInfoDelegate() {}
-
-void EnableTPMTokenForNSS(TPMTokenInfoDelegate* info_delegate) {
-  g_nss_singleton.Get().EnableTPMTokenForNSS(info_delegate);
+void EnableTPMTokenForNSS() {
+  g_nss_singleton.Get().EnableTPMTokenForNSS();
 }
 
 void GetTPMTokenInfo(std::string* token_name, std::string* user_pin) {
   g_nss_singleton.Get().GetTPMTokenInfo(token_name, user_pin);
 }
 
-bool IsTPMTokenAvailable() {
-  return g_nss_singleton.Get().IsTPMTokenAvailable();
-}
-
 bool IsTPMTokenReady() {
   return g_nss_singleton.Get().IsTPMTokenReady();
 }
 
-bool EnsureTPMTokenReady() {
-  return g_nss_singleton.Get().EnsureTPMTokenReady();
+bool InitializeTPMToken(const std::string& token_name,
+                        const std::string& user_pin) {
+  return g_nss_singleton.Get().InitializeTPMToken(token_name, user_pin);
 }
 
 SymmetricKey* GetSupplementalUserKey() {

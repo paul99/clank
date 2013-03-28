@@ -1,67 +1,56 @@
-// Copyright (c) 2011 The Chromium Authors. All rights reserved.
+// Copyright 2012 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
 #include "chrome/browser/instant/instant_unload_handler.h"
 
-#include "chrome/browser/ui/browser.h"
+#include <algorithm>
+
+#include "base/message_loop.h"
 #include "chrome/browser/ui/browser_navigator.h"
-#include "chrome/browser/ui/tab_contents/tab_contents_wrapper.h"
-#include "content/browser/renderer_host/render_view_host.h"
+#include "content/public/browser/render_view_host.h"
 #include "content/public/browser/web_contents.h"
 #include "content/public/browser/web_contents_delegate.h"
 
-using content::WebContents;
-
-// TabContentsDelegate implementation. This owns the TabContents supplied to the
+// WebContentsDelegate implementation. This owns the WebContents supplied to the
 // constructor.
-class InstantUnloadHandler::TabContentsDelegateImpl
+class InstantUnloadHandler::WebContentsDelegateImpl
     : public content::WebContentsDelegate {
  public:
-  TabContentsDelegateImpl(InstantUnloadHandler* handler,
-                          TabContentsWrapper* tab_contents,
+  WebContentsDelegateImpl(InstantUnloadHandler* handler,
+                          content::WebContents* contents,
                           int index)
       : handler_(handler),
-        tab_contents_(tab_contents),
+        contents_(contents),
         index_(index) {
-    tab_contents->web_contents()->SetDelegate(this);
+    contents->SetDelegate(this);
   }
-
-  ~TabContentsDelegateImpl() {
-  }
-
-  // Releases ownership of the TabContentsWrapper to the caller.
-  TabContentsWrapper* ReleaseTab() {
-    TabContentsWrapper* tab = tab_contents_.release();
-    tab->web_contents()->SetDelegate(NULL);
-    return tab;
-  }
-
-  // See description above field.
-  int index() const { return index_; }
 
   // content::WebContentsDelegate overrides:
-  virtual void WillRunBeforeUnloadConfirm() {
-    handler_->Activate(this);
+  virtual void WillRunBeforeUnloadConfirm() OVERRIDE {
+    content::WebContents* contents = contents_.release();
+    contents->SetDelegate(NULL);
+    handler_->Activate(this, contents, index_);
   }
 
-  virtual bool ShouldSuppressDialogs() {
+  virtual bool ShouldSuppressDialogs() OVERRIDE {
     return true;  // Return true so dialogs are suppressed.
   }
 
-  virtual void CloseContents(WebContents* source) OVERRIDE {
+  virtual void CloseContents(content::WebContents* source) OVERRIDE {
+    contents_->SetDelegate(NULL);
     handler_->Destroy(this);
   }
 
  private:
-  InstantUnloadHandler* handler_;
-  scoped_ptr<TabContentsWrapper> tab_contents_;
+  InstantUnloadHandler* const handler_;
+  scoped_ptr<content::WebContents> contents_;
 
-  // The index |tab_contents_| was originally at. If we add the tab back we add
-  // it at this index.
+  // The index |contents_| was originally at. If we add the tab back we add it
+  // at this index.
   const int index_;
 
-  DISALLOW_COPY_AND_ASSIGN(TabContentsDelegateImpl);
+  DISALLOW_COPY_AND_ASSIGN(WebContentsDelegateImpl);
 };
 
 InstantUnloadHandler::InstantUnloadHandler(Browser* browser)
@@ -71,46 +60,48 @@ InstantUnloadHandler::InstantUnloadHandler(Browser* browser)
 InstantUnloadHandler::~InstantUnloadHandler() {
 }
 
-void InstantUnloadHandler::RunUnloadListenersOrDestroy(TabContentsWrapper* tab,
-                                                       int index) {
-  if (!tab->web_contents()->NeedToFireBeforeUnload()) {
-    // Tab doesn't have any before unload listeners and can be safely deleted.
-    delete tab;
+void InstantUnloadHandler::RunUnloadListenersOrDestroy(
+    content::WebContents* contents,
+    int index) {
+  DCHECK(!contents->GetDelegate());
+
+  if (!contents->NeedToFireBeforeUnload()) {
+    // Tab doesn't have any beforeunload listeners and can be safely deleted.
+    // However, the tab object should not be deleted immediately because when we
+    // get here from BrowserInstantController::TabDeactivated, other tab
+    // observers may still expect to interact with the tab before the event has
+    // finished propagating.
+    MessageLoop::current()->DeleteSoon(FROM_HERE, contents);
     return;
   }
 
   // Tab has before unload listener. Install a delegate and fire the before
   // unload listener.
-  TabContentsDelegateImpl* delegate =
-      new TabContentsDelegateImpl(this, tab, index);
-  delegates_.push_back(delegate);
-  // TODO: decide if we really want false here. false is used for tab closes,
-  // and is needed so that the tab correctly closes but it doesn't really match
-  // what's logically happening.
-  tab->web_contents()->GetRenderViewHost()->FirePageBeforeUnload(false);
+  delegates_.push_back(new WebContentsDelegateImpl(this, contents, index));
+  contents->GetRenderViewHost()->FirePageBeforeUnload(false);
 }
 
-void InstantUnloadHandler::Activate(TabContentsDelegateImpl* delegate) {
-  // Take ownership of the TabContents from the delegate.
-  TabContentsWrapper* tab = delegate->ReleaseTab();
-  browser::NavigateParams params(browser_, tab);
+void InstantUnloadHandler::Activate(WebContentsDelegateImpl* delegate,
+                                    content::WebContents* contents,
+                                    int index) {
+  chrome::NavigateParams params(browser_, contents);
   params.disposition = NEW_FOREGROUND_TAB;
-  params.tabstrip_index = delegate->index();
+  params.tabstrip_index = index;
 
   // Remove (and delete) the delegate.
-  ScopedVector<TabContentsDelegateImpl>::iterator i =
-      std::find(delegates_.begin(), delegates_.end(), delegate);
-  DCHECK(i != delegates_.end());
-  delegates_.erase(i);
-  delegate = NULL;
+  Destroy(delegate);
 
   // Add the tab back in.
-  browser::Navigate(&params);
+  chrome::Navigate(&params);
 }
 
-void InstantUnloadHandler::Destroy(TabContentsDelegateImpl* delegate) {
-  ScopedVector<TabContentsDelegateImpl>::iterator i =
+void InstantUnloadHandler::Destroy(WebContentsDelegateImpl* delegate) {
+  ScopedVector<WebContentsDelegateImpl>::iterator i =
       std::find(delegates_.begin(), delegates_.end(), delegate);
   DCHECK(i != delegates_.end());
-  delegates_.erase(i);
+
+  // The delegate's method is a caller on the stack, so schedule the deletion
+  // for later.
+  delegates_.weak_erase(i);
+  MessageLoop::current()->DeleteSoon(FROM_HERE, delegate);
 }

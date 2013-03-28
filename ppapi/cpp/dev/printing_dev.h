@@ -1,4 +1,4 @@
-// Copyright (c) 2011 The Chromium Authors. All rights reserved.
+// Copyright (c) 2012 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -6,6 +6,8 @@
 #define PPAPI_CPP_DEV_PRINTING_DEV_H_
 
 #include "ppapi/c/dev/ppp_printing_dev.h"
+#include "ppapi/cpp/completion_callback.h"
+#include "ppapi/cpp/instance_handle.h"
 #include "ppapi/cpp/resource.h"
 
 namespace pp {
@@ -14,7 +16,7 @@ class Instance;
 
 // You would typically use this either via inheritance on your instance or
 // by composition: see find_dev.h for an example.
-class Printing_Dev {
+class Printing_Dev : public Resource {
  public:
   // The instance parameter must outlive this class.
   explicit Printing_Dev(Instance* instance);
@@ -29,8 +31,17 @@ class Printing_Dev {
   virtual void PrintEnd() = 0;
   virtual bool IsPrintScalingDisabled() = 0;
 
+  // PPB_Printing_Dev functions.
+  // Returns true if the browser supports the required PPB_Printing_Dev
+  // interface.
+  static bool IsAvailable();
+
+  // Get the default print settings and store them in the output of |callback|.
+  int32_t GetDefaultPrintSettings(
+      const CompletionCallbackWithOutput<PP_PrintSettings_Dev>& callback) const;
+
  private:
-  Instance* associated_instance_;
+  InstanceHandle associated_instance_;
 };
 
 }  // namespace pp

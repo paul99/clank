@@ -4,7 +4,6 @@
 
 #ifndef CHROME_BROWSER_UI_WEBUI_ABOUT_UI_H_
 #define CHROME_BROWSER_UI_WEBUI_ABOUT_UI_H_
-#pragma once
 
 #include <string>
 
@@ -50,5 +49,15 @@ class AboutUI : public content::WebUIController {
  private:
   DISALLOW_COPY_AND_ASSIGN(AboutUI);
 };
+
+namespace about_ui {
+
+// Helper functions
+void AppendHeader(std::string* output, int refresh,
+                  const std::string& unescaped_title);
+void AppendBody(std::string *output);
+void AppendFooter(std::string *output);
+
+}  // namespace about_ui
 
 #endif  // CHROME_BROWSER_UI_WEBUI_ABOUT_UI_H_

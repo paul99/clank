@@ -9,6 +9,7 @@
 
 #include "base/memory/ref_counted.h"
 #include "base/observer_list.h"
+#include "webkit/storage/webkit_storage_export.h"
 
 class GURL;
 
@@ -20,7 +21,7 @@ namespace quota {
 // is currently installed in the extensions system.
 // The IsSomething() methods must be thread-safe, however Observers should
 // only be notified, added, and removed on the IO thead.
-class SpecialStoragePolicy
+class WEBKIT_STORAGE_EXPORT SpecialStoragePolicy
     : public base::RefCountedThreadSafe<SpecialStoragePolicy> {
  public:
   class Observer {
@@ -37,6 +38,9 @@ class SpecialStoragePolicy
 
   // Unlimited storage is not subject to 'quotas'.
   virtual bool IsStorageUnlimited(const GURL& origin) = 0;
+
+  // Installed apps have access to the size of the remaining disk capacity.
+  virtual bool IsInstalledApp(const GURL& origin) = 0;
 
   // Checks if extension identified with |extension_id| is registered as
   // file handler.

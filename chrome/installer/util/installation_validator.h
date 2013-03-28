@@ -1,18 +1,17 @@
-// Copyright (c) 2011 The Chromium Authors. All rights reserved.
+// Copyright (c) 2012 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
 #ifndef CHROME_INSTALLER_UTIL_INSTALLATION_VALIDATOR_H_
 #define CHROME_INSTALLER_UTIL_INSTALLATION_VALIDATOR_H_
-#pragma once
 
 #include <map>
-#include <string>
 #include <utility>
 #include <vector>
 
 #include "base/basictypes.h"
 #include "base/compiler_specific.h"
+#include "base/string16.h"
 #include "chrome/installer/util/browser_distribution.h"
 
 class CommandLine;
@@ -37,6 +36,7 @@ class InstallationValidator {
       CHROME_FRAME_SINGLE     = 0x04,
       CHROME_FRAME_MULTI      = 0x08,
       CHROME_FRAME_READY_MODE = 0x10,
+      CHROME_APP_HOST         = 0x20,
     };
   };  // class ProductBits
 
@@ -59,6 +59,23 @@ class InstallationValidator {
         ProductBits::CHROME_FRAME_MULTI | ProductBits::CHROME_MULTI,
     CHROME_FRAME_READY_MODE_CHROME_MULTI =
         ProductBits::CHROME_FRAME_READY_MODE | ProductBits::CHROME_MULTI,
+    CHROME_APP_HOST =
+        ProductBits::CHROME_APP_HOST,
+    CHROME_APP_HOST_CHROME_FRAME_SINGLE =
+        ProductBits::CHROME_APP_HOST | ProductBits::CHROME_FRAME_SINGLE,
+    CHROME_APP_HOST_CHROME_FRAME_SINGLE_CHROME_MULTI =
+        ProductBits::CHROME_APP_HOST | ProductBits::CHROME_FRAME_SINGLE |
+        ProductBits::CHROME_MULTI,
+    CHROME_APP_HOST_CHROME_FRAME_MULTI =
+        ProductBits::CHROME_APP_HOST | ProductBits::CHROME_FRAME_MULTI,
+    CHROME_APP_HOST_CHROME_FRAME_MULTI_CHROME_MULTI =
+        ProductBits::CHROME_APP_HOST | ProductBits::CHROME_FRAME_MULTI |
+        ProductBits::CHROME_MULTI,
+    CHROME_APP_HOST_CHROME_MULTI =
+        ProductBits::CHROME_APP_HOST | ProductBits::CHROME_MULTI,
+    CHROME_APP_HOST_CHROME_MULTI_CHROME_FRAME_READY_MODE =
+        ProductBits::CHROME_APP_HOST | ProductBits::CHROME_MULTI |
+        ProductBits::CHROME_FRAME_READY_MODE,
   };
 
   // Validates |machine_state| at user or system level, returning true if valid.
@@ -80,7 +97,7 @@ class InstallationValidator {
   typedef void (*CommandValidatorFn)(const ProductContext& ctx,
                                      const AppCommand& command,
                                      bool* is_valid);
-  typedef std::map<std::wstring, CommandValidatorFn> CommandExpectations;
+  typedef std::map<string16, CommandValidatorFn> CommandExpectations;
 
   // An interface to product-specific validation rules.
   class ProductRules {
@@ -88,17 +105,13 @@ class InstallationValidator {
     virtual ~ProductRules() { }
     virtual BrowserDistribution::Type distribution_type() const = 0;
     virtual void AddUninstallSwitchExpectations(
-        const InstallationState& machine_state,
-        bool system_install,
-        const ProductState& product_state,
+        const ProductContext& ctx,
         SwitchExpectations* expectations) const = 0;
     virtual void AddRenameSwitchExpectations(
-        const InstallationState& machine_state,
-        bool system_install,
-        const ProductState& product_state,
+        const ProductContext& ctx,
         SwitchExpectations* expectations) const = 0;
     // Return true if the rules allow usagestats setting.
-    virtual bool UsageStatsAllowed(const ProductState& product_state) const = 0;
+    virtual bool UsageStatsAllowed(const ProductContext& ctx) const = 0;
   };
 
   // Validation rules for the Chrome browser.
@@ -106,17 +119,12 @@ class InstallationValidator {
    public:
     virtual BrowserDistribution::Type distribution_type() const OVERRIDE;
     virtual void AddUninstallSwitchExpectations(
-        const InstallationState& machine_state,
-        bool system_install,
-        const ProductState& product_state,
+        const ProductContext& ctx,
         SwitchExpectations* expectations) const OVERRIDE;
     virtual void AddRenameSwitchExpectations(
-        const InstallationState& machine_state,
-        bool system_install,
-        const ProductState& product_state,
+        const ProductContext& ctx,
         SwitchExpectations* expectations) const OVERRIDE;
-    virtual bool UsageStatsAllowed(
-        const ProductState& product_state) const OVERRIDE;
+    virtual bool UsageStatsAllowed(const ProductContext& ctx) const OVERRIDE;
   };
 
   // Validation rules for Chrome Frame.
@@ -124,17 +132,25 @@ class InstallationValidator {
    public:
     virtual BrowserDistribution::Type distribution_type() const OVERRIDE;
     virtual void AddUninstallSwitchExpectations(
-        const InstallationState& machine_state,
-        bool system_install,
-        const ProductState& product_state,
+        const ProductContext& ctx,
         SwitchExpectations* expectations) const OVERRIDE;
     virtual void AddRenameSwitchExpectations(
-        const InstallationState& machine_state,
-        bool system_install,
-        const ProductState& product_state,
+        const ProductContext& ctx,
         SwitchExpectations* expectations) const OVERRIDE;
-    virtual bool UsageStatsAllowed(
-        const ProductState& product_state) const OVERRIDE;
+    virtual bool UsageStatsAllowed(const ProductContext& ctx) const OVERRIDE;
+  };
+
+  // Validation rules for Chrome App Host.
+  class ChromeAppHostRules : public ProductRules {
+   public:
+    virtual BrowserDistribution::Type distribution_type() const OVERRIDE;
+    virtual void AddUninstallSwitchExpectations(
+        const ProductContext& ctx,
+        SwitchExpectations* expectations) const OVERRIDE;
+    virtual void AddRenameSwitchExpectations(
+        const ProductContext& ctx,
+        SwitchExpectations* expectations) const OVERRIDE;
+    virtual bool UsageStatsAllowed(const ProductContext& ctx) const OVERRIDE;
   };
 
   // Validation rules for the multi-install Chrome binaries.
@@ -142,20 +158,27 @@ class InstallationValidator {
    public:
     virtual BrowserDistribution::Type distribution_type() const OVERRIDE;
     virtual void AddUninstallSwitchExpectations(
-        const InstallationState& machine_state,
-        bool system_install,
-        const ProductState& product_state,
+        const ProductContext& ctx,
         SwitchExpectations* expectations) const OVERRIDE;
     virtual void AddRenameSwitchExpectations(
-        const InstallationState& machine_state,
-        bool system_install,
-        const ProductState& product_state,
+        const ProductContext& ctx,
         SwitchExpectations* expectations) const OVERRIDE;
-    virtual bool UsageStatsAllowed(
-        const ProductState& product_state) const OVERRIDE;
+    virtual bool UsageStatsAllowed(const ProductContext& ctx) const OVERRIDE;
   };
 
   struct ProductContext {
+    ProductContext(const InstallationState& machine_state_in,
+                   bool system_install_in,
+                   const ProductState& state_in,
+                   const ProductRules& rules_in)
+        : machine_state(machine_state_in),
+          system_install(system_install_in),
+          dist(BrowserDistribution::GetSpecificDistribution(
+              rules_in.distribution_type())),
+          state(state_in),
+          rules(rules_in) {
+    }
+
     const InstallationState& machine_state;
     bool system_install;
     BrowserDistribution* dist;
@@ -163,9 +186,20 @@ class InstallationValidator {
     const ProductRules& rules;
   };
 
+  static void ValidateOnOsUpgradeCommand(const ProductContext& ctx,
+                                         const AppCommand& command,
+                                         bool* is_valid);
+  static void ValidateInstallAppCommand(const ProductContext& ctx,
+                                        const AppCommand& command,
+                                        bool* is_valid);
   static void ValidateQuickEnableCfCommand(const ProductContext& ctx,
                                            const AppCommand& command,
                                            bool* is_valid);
+  static void ValidateQuickEnableApplicationHostCommand(
+    const ProductContext& ctx,
+    const AppCommand& command,
+    bool* is_valid);
+
   static void ValidateAppCommandExpectations(
       const ProductContext& ctx,
       const CommandExpectations& expectations,

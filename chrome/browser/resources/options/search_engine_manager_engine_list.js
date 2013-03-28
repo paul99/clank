@@ -1,11 +1,13 @@
-// Copyright (c) 2011 The Chromium Authors. All rights reserved.
+// Copyright (c) 2012 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
 cr.define('options.search_engines', function() {
-  const InlineEditableItemList = options.InlineEditableItemList;
-  const InlineEditableItem = options.InlineEditableItem;
-  const ListSelectionController = cr.ui.ListSelectionController;
+  /** @const */ var ControlledSettingIndicator =
+                    options.ControlledSettingIndicator;
+  /** @const */ var InlineEditableItemList = options.InlineEditableItemList;
+  /** @const */ var InlineEditableItem = options.InlineEditableItem;
+  /** @const */ var ListSelectionController = cr.ui.ListSelectionController;
 
   /**
    * Creates a new search engine list item.
@@ -67,25 +69,25 @@ cr.define('options.search_engines', function() {
      */
     currentlyValid_: false,
 
-    /** @inheritDoc */
+    /** @override */
     decorate: function() {
       InlineEditableItem.prototype.decorate.call(this);
 
       var engine = this.searchEngine_;
 
-      if (engine['modelIndex'] == '-1') {
+      if (engine.modelIndex == '-1') {
         this.isPlaceholder = true;
-        engine['name'] = '';
-        engine['keyword'] = '';
-        engine['url'] = '';
+        engine.name = '';
+        engine.keyword = '';
+        engine.url = '';
       }
 
       this.currentlyValid_ = !this.isPlaceholder;
 
-      if (engine['default'])
+      if (engine.default)
         this.classList.add('default');
 
-      this.deletable = engine['canBeRemoved'];
+      this.deletable = engine.canBeRemoved;
 
       // Construct the name column.
       var nameColEl = this.ownerDocument.createElement('div');
@@ -96,23 +98,25 @@ cr.define('options.search_engines', function() {
       // Add the favicon.
       var faviconDivEl = this.ownerDocument.createElement('div');
       faviconDivEl.className = 'favicon';
-      var imgEl = this.ownerDocument.createElement('img');
-      imgEl.src = 'chrome://favicon/iconurl/' + engine['iconURL'];
-      faviconDivEl.appendChild(imgEl);
+      if (!this.isPlaceholder) {
+        faviconDivEl.style.backgroundImage =
+            url('chrome://favicon/iconurl@' + window.devicePixelRatio + 'x/' +
+                engine.iconURL);
+      }
       nameColEl.appendChild(faviconDivEl);
 
-      var nameEl = this.createEditableTextCell(engine['displayName']);
+      var nameEl = this.createEditableTextCell(engine.displayName);
       nameEl.classList.add('weakrtl');
       nameColEl.appendChild(nameEl);
 
       // Then the keyword column.
-      var keywordEl = this.createEditableTextCell(engine['keyword']);
+      var keywordEl = this.createEditableTextCell(engine.keyword);
       keywordEl.className = 'keyword-column';
       keywordEl.classList.add('weakrtl');
       this.contentElement.appendChild(keywordEl);
 
       // And the URL column.
-      var urlEl = this.createEditableTextCell(engine['url']);
+      var urlEl = this.createEditableTextCell(engine.url);
       var urlWithButtonEl = this.ownerDocument.createElement('div');
       urlWithButtonEl.appendChild(urlEl);
       urlWithButtonEl.className = 'url-column';
@@ -120,13 +124,13 @@ cr.define('options.search_engines', function() {
       this.contentElement.appendChild(urlWithButtonEl);
       // Add the Make Default button. Temporary until drag-and-drop re-ordering
       // is implemented. When this is removed, remove the extra div above.
-      if (engine['canBeDefault']) {
+      if (engine.canBeDefault) {
         var makeDefaultButtonEl = this.ownerDocument.createElement('button');
-        makeDefaultButtonEl.className = 'raw-button custom-appearance';
+        makeDefaultButtonEl.className = 'custom-appearance list-inline-button';
         makeDefaultButtonEl.textContent =
-            templateData.makeDefaultSearchEngineButton;
+            loadTimeData.getString('makeDefaultSearchEngineButton');
         makeDefaultButtonEl.onclick = function(e) {
-          chrome.send('managerSetDefaultSearchEngine', [engine['modelIndex']]);
+          chrome.send('managerSetDefaultSearchEngine', [engine.modelIndex]);
         };
         // Don't select the row when clicking the button.
         makeDefaultButtonEl.onmousedown = function(e) {
@@ -138,48 +142,57 @@ cr.define('options.search_engines', function() {
       // Do final adjustment to the input fields.
       this.nameField_ = nameEl.querySelector('input');
       // The editable field uses the raw name, not the display name.
-      this.nameField_.value = engine['name'];
+      this.nameField_.value = engine.name;
       this.keywordField_ = keywordEl.querySelector('input');
       this.urlField_ = urlEl.querySelector('input');
 
-      if (engine['urlLocked'])
+      if (engine.urlLocked)
         this.urlField_.disabled = true;
 
       if (this.isPlaceholder) {
         this.nameField_.placeholder =
-            localStrings.getString('searchEngineTableNamePlaceholder');
+            loadTimeData.getString('searchEngineTableNamePlaceholder');
         this.keywordField_.placeholder =
-            localStrings.getString('searchEngineTableKeywordPlaceholder');
+            loadTimeData.getString('searchEngineTableKeywordPlaceholder');
         this.urlField_.placeholder =
-            localStrings.getString('searchEngineTableURLPlaceholder');
+            loadTimeData.getString('searchEngineTableURLPlaceholder');
       }
 
-      var fields = [ this.nameField_, this.keywordField_, this.urlField_ ];
+      var fields = [this.nameField_, this.keywordField_, this.urlField_];
         for (var i = 0; i < fields.length; i++) {
         fields[i].oninput = this.startFieldValidation_.bind(this);
       }
 
       // Listen for edit events.
-      if (engine['canBeEdited']) {
+      if (engine.canBeEdited) {
         this.addEventListener('edit', this.onEditStarted_.bind(this));
         this.addEventListener('canceledit', this.onEditCancelled_.bind(this));
         this.addEventListener('commitedit', this.onEditCommitted_.bind(this));
       } else {
         this.editable = false;
+        this.querySelector('.row-delete-button').hidden = true;
+        var indicator = ControlledSettingIndicator();
+        indicator.setAttribute('setting', 'search-engine');
+        // Create a synthetic pref change event decorated as
+        // CoreOptionsHandler::CreateValueForPref() does.
+        var event = new cr.Event(this.contentType);
+        event.value = { controlledBy: 'policy' };
+        indicator.handlePrefChange(event);
+        this.appendChild(indicator);
       }
     },
 
-    /** @inheritDoc */
+    /** @override */
     get currentInputIsValid() {
       return !this.waitingForValidation_ && this.currentlyValid_;
     },
 
-    /** @inheritDoc */
+    /** @override */
     get hasBeenEdited() {
       var engine = this.searchEngine_;
-      return this.nameField_.value != engine['name'] ||
-             this.keywordField_.value != engine['keyword'] ||
-             this.urlField_.value != engine['url'];
+      return this.nameField_.value != engine.name ||
+             this.keywordField_.value != engine.keyword ||
+             this.urlField_.value != engine.url;
     },
 
     /**
@@ -188,7 +201,7 @@ cr.define('options.search_engines', function() {
      * @private
      */
     onEditStarted_: function(e) {
-      var editIndex = this.searchEngine_['modelIndex'];
+      var editIndex = this.searchEngine_.modelIndex;
       chrome.send('editSearchEngine', [String(editIndex)]);
       this.startFieldValidation_();
     },
@@ -213,7 +226,7 @@ cr.define('options.search_engines', function() {
 
       // The name field has been automatically set to match the display name,
       // but it should use the raw name instead.
-      this.nameField_.value = this.searchEngine_['name'];
+      this.nameField_.value = this.searchEngine_.name;
       this.currentlyValid_ = !this.isPlaceholder;
     },
 
@@ -224,9 +237,9 @@ cr.define('options.search_engines', function() {
      * @return {array} The current input field values.
      */
     getInputFieldValues_: function() {
-      return [ this.nameField_.value,
-               this.keywordField_.value,
-               this.urlField_.value ];
+      return [this.nameField_.value,
+              this.keywordField_.value,
+              this.urlField_.value];
     },
 
     /**
@@ -236,7 +249,7 @@ cr.define('options.search_engines', function() {
     startFieldValidation_: function() {
       this.waitingForValidation_ = true;
       var args = this.getInputFieldValues_();
-      args.push(this.searchEngine_['modelIndex']);
+      args.push(this.searchEngine_.modelIndex);
       chrome.send('checkSearchEngineInfoValidity', args);
     },
 
@@ -248,29 +261,28 @@ cr.define('options.search_engines', function() {
       this.waitingForValidation_ = false;
       // TODO(stuartmorgan): Implement the full validation UI with
       // checkmark/exclamation mark icons and tooltips showing the errors.
-      if (validity['name']) {
+      if (validity.name) {
         this.nameField_.setCustomValidity('');
       } else {
         this.nameField_.setCustomValidity(
-            templateData.editSearchEngineInvalidTitleToolTip);
+            loadTimeData.getString('editSearchEngineInvalidTitleToolTip'));
       }
 
-      if (validity['keyword']) {
+      if (validity.keyword) {
         this.keywordField_.setCustomValidity('');
       } else {
         this.keywordField_.setCustomValidity(
-            templateData.editSearchEngineInvalidKeywordToolTip);
+            loadTimeData.getString('editSearchEngineInvalidKeywordToolTip'));
       }
 
-      if (validity['url']) {
+      if (validity.url) {
         this.urlField_.setCustomValidity('');
       } else {
         this.urlField_.setCustomValidity(
-            templateData.editSearchEngineInvalidURLToolTip);
+            loadTimeData.getString('editSearchEngineInvalidURLToolTip'));
       }
 
-      this.currentlyValid_ = validity['name'] && validity['keyword'] &&
-          validity['url'];
+      this.currentlyValid_ = validity.name && validity.keyword && validity.url;
     },
   };
 
@@ -279,14 +291,14 @@ cr.define('options.search_engines', function() {
   SearchEngineList.prototype = {
     __proto__: InlineEditableItemList.prototype,
 
-    /** @inheritDoc */
+    /** @override */
     createItem: function(searchEngine) {
       return new SearchEngineListItem(searchEngine);
     },
 
-    /** @inheritDoc */
+    /** @override */
     deleteItemAtIndex: function(index) {
-      var modelIndex = this.dataModel.item(index)['modelIndex']
+      var modelIndex = this.dataModel.item(index).modelIndex;
       chrome.send('removeSearchEngine', [String(modelIndex)]);
     },
 
@@ -302,7 +314,7 @@ cr.define('options.search_engines', function() {
       if (!currentSelection)
         return;
       var listItem = this.getListItem(currentSelection);
-      if (listItem.editing && currentSelection['modelIndex'] == modelIndex)
+      if (listItem.editing && currentSelection.modelIndex == modelIndex)
         listItem.validationComplete(validity);
     },
   };

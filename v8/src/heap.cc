@@ -42,11 +42,13 @@
 #include "natives.h"
 #include "objects-visiting.h"
 #include "objects-visiting-inl.h"
+#include "once.h"
 #include "runtime-profiler.h"
 #include "scopeinfo.h"
 #include "snapshot.h"
 #include "store-buffer.h"
 #include "v8threads.h"
+#include "v8utils.h"
 #include "vm-state-inl.h"
 #if V8_TARGET_ARCH_ARM && !V8_INTERPRETED_REGEXP
 #include "regexp-macro-assembler.h"
@@ -59,9 +61,6 @@
 
 namespace v8 {
 namespace internal {
-
-
-static Mutex* gc_initializer_mutex = OS::CreateMutex();
 
 
 Heap::Heap()
@@ -98,6 +97,8 @@ Heap::Heap()
       always_allocate_scope_depth_(0),
       linear_allocation_scope_depth_(0),
       contexts_disposed_(0),
+      global_ic_age_(0),
+      flush_monomorphic_ics_(false),
       scan_on_scavenge_pages_(0),
       new_space_(this),
       old_pointer_space_(NULL),
@@ -110,12 +111,12 @@ Heap::Heap()
       gc_post_processing_depth_(0),
       ms_count_(0),
       gc_count_(0),
+      remembered_unmapped_pages_index_(0),
       unflattened_strings_length_(0),
 #ifdef DEBUG
       allocation_allowed_(true),
       allocation_timeout_(0),
       disallow_allocation_failure_(false),
-      debug_utils_(NULL),
 #endif  // DEBUG
       new_space_high_promotion_mode_active_(false),
       old_gen_promotion_limit_(kMinimumPromotionLimit),
@@ -135,10 +136,12 @@ Heap::Heap()
       tracer_(NULL),
       young_survivors_after_last_gc_(0),
       high_survival_rate_period_length_(0),
+      low_survival_rate_period_length_(0),
       survival_rate_(0),
       previous_survival_rate_trend_(Heap::STABLE),
       survival_rate_trend_(Heap::STABLE),
       max_gc_pause_(0),
+      total_gc_time_ms_(0),
       max_alive_after_gc_(0),
       min_in_mutator_(kMaxInt),
       alive_after_last_gc_(0),
@@ -149,14 +152,14 @@ Heap::Heap()
       number_idle_notifications_(0),
       last_idle_notification_gc_count_(0),
       last_idle_notification_gc_count_init_(false),
-      idle_notification_will_schedule_next_gc_(false),
       mark_sweeps_since_idle_round_started_(0),
       ms_count_at_last_idle_notification_(0),
       gc_count_at_last_idle_gc_(0),
       scavenges_since_last_idle_round_(kIdleScavengeThreshold),
       promotion_queue_(this),
       configured_(false),
-      chunks_queued_for_free_(NULL) {
+      chunks_queued_for_free_(NULL),
+      relocation_mutex_(NULL) {
   // Allow build-time customization of the max semispace size. Building
   // V8 with snapshots and a non-default max semispace size is much
   // easier if you can define it as part of the build environment.
@@ -174,9 +177,14 @@ Heap::Heap()
   }
 
   memset(roots_, 0, sizeof(roots_[0]) * kRootListLength);
-  global_contexts_list_ = NULL;
+  native_contexts_list_ = NULL;
   mark_compact_collector_.heap_ = this;
   external_string_table_.heap_ = this;
+  // Put a dummy entry in the remembered pages so we can find the list the
+  // minidump even if there are no real unmapped pages.
+  RememberUnmappedPage(NULL, false);
+
+  ClearObjectStats(true);
 }
 
 
@@ -203,6 +211,20 @@ intptr_t Heap::CommittedMemory() {
       cell_space_->CommittedMemory() +
       lo_space_->Size();
 }
+
+
+size_t Heap::CommittedPhysicalMemory() {
+  if (!HasBeenSetUp()) return 0;
+
+  return new_space_.CommittedPhysicalMemory() +
+      old_pointer_space_->CommittedPhysicalMemory() +
+      old_data_space_->CommittedPhysicalMemory() +
+      code_space_->CommittedPhysicalMemory() +
+      map_space_->CommittedPhysicalMemory() +
+      cell_space_->CommittedPhysicalMemory() +
+      lo_space_->CommittedPhysicalMemory();
+}
+
 
 intptr_t Heap::CommittedMemoryExecutable() {
   if (!HasBeenSetUp()) return 0;
@@ -244,9 +266,14 @@ int Heap::GcSafeSizeOfOldObject(HeapObject* object) {
 GarbageCollector Heap::SelectGarbageCollector(AllocationSpace space,
                                               const char** reason) {
   // Is global GC requested?
-  if (space != NEW_SPACE || FLAG_gc_global) {
+  if (space != NEW_SPACE) {
     isolate_->counters()->gc_compactor_caused_by_request()->Increment();
     *reason = "GC in old space requested";
+    return MARK_COMPACTOR;
+  }
+
+  if (FLAG_gc_global || (FLAG_stress_compaction && (gc_count_ & 1) != 0)) {
+    *reason = "GC in old space forced by flags";
     return MARK_COMPACTOR;
   }
 
@@ -313,48 +340,59 @@ void Heap::ReportStatisticsBeforeGC() {
 
 void Heap::PrintShortHeapStatistics() {
   if (!FLAG_trace_gc_verbose) return;
-  PrintF("Memory allocator,   used: %8" V8_PTR_PREFIX "d"
-             ", available: %8" V8_PTR_PREFIX "d\n",
-         isolate_->memory_allocator()->Size(),
-         isolate_->memory_allocator()->Available());
-  PrintF("New space,          used: %8" V8_PTR_PREFIX "d"
-             ", available: %8" V8_PTR_PREFIX "d\n",
-         Heap::new_space_.Size(),
-         new_space_.Available());
-  PrintF("Old pointers,       used: %8" V8_PTR_PREFIX "d"
-             ", available: %8" V8_PTR_PREFIX "d"
-             ", waste: %8" V8_PTR_PREFIX "d\n",
-         old_pointer_space_->Size(),
-         old_pointer_space_->Available(),
-         old_pointer_space_->Waste());
-  PrintF("Old data space,     used: %8" V8_PTR_PREFIX "d"
-             ", available: %8" V8_PTR_PREFIX "d"
-             ", waste: %8" V8_PTR_PREFIX "d\n",
-         old_data_space_->Size(),
-         old_data_space_->Available(),
-         old_data_space_->Waste());
-  PrintF("Code space,         used: %8" V8_PTR_PREFIX "d"
-             ", available: %8" V8_PTR_PREFIX "d"
-             ", waste: %8" V8_PTR_PREFIX "d\n",
-         code_space_->Size(),
-         code_space_->Available(),
-         code_space_->Waste());
-  PrintF("Map space,          used: %8" V8_PTR_PREFIX "d"
-             ", available: %8" V8_PTR_PREFIX "d"
-             ", waste: %8" V8_PTR_PREFIX "d\n",
-         map_space_->Size(),
-         map_space_->Available(),
-         map_space_->Waste());
-  PrintF("Cell space,         used: %8" V8_PTR_PREFIX "d"
-             ", available: %8" V8_PTR_PREFIX "d"
-             ", waste: %8" V8_PTR_PREFIX "d\n",
-         cell_space_->Size(),
-         cell_space_->Available(),
-         cell_space_->Waste());
-  PrintF("Large object space, used: %8" V8_PTR_PREFIX "d"
-             ", available: %8" V8_PTR_PREFIX "d\n",
-         lo_space_->Size(),
-         lo_space_->Available());
+  PrintPID("Memory allocator,   used: %6" V8_PTR_PREFIX "d KB"
+               ", available: %6" V8_PTR_PREFIX "d KB\n",
+           isolate_->memory_allocator()->Size() / KB,
+           isolate_->memory_allocator()->Available() / KB);
+  PrintPID("New space,          used: %6" V8_PTR_PREFIX "d KB"
+               ", available: %6" V8_PTR_PREFIX "d KB"
+               ", committed: %6" V8_PTR_PREFIX "d KB\n",
+           new_space_.Size() / KB,
+           new_space_.Available() / KB,
+           new_space_.CommittedMemory() / KB);
+  PrintPID("Old pointers,       used: %6" V8_PTR_PREFIX "d KB"
+               ", available: %6" V8_PTR_PREFIX "d KB"
+               ", committed: %6" V8_PTR_PREFIX "d KB\n",
+           old_pointer_space_->SizeOfObjects() / KB,
+           old_pointer_space_->Available() / KB,
+           old_pointer_space_->CommittedMemory() / KB);
+  PrintPID("Old data space,     used: %6" V8_PTR_PREFIX "d KB"
+               ", available: %6" V8_PTR_PREFIX "d KB"
+               ", committed: %6" V8_PTR_PREFIX "d KB\n",
+           old_data_space_->SizeOfObjects() / KB,
+           old_data_space_->Available() / KB,
+           old_data_space_->CommittedMemory() / KB);
+  PrintPID("Code space,         used: %6" V8_PTR_PREFIX "d KB"
+               ", available: %6" V8_PTR_PREFIX "d KB"
+               ", committed: %6" V8_PTR_PREFIX "d KB\n",
+           code_space_->SizeOfObjects() / KB,
+           code_space_->Available() / KB,
+           code_space_->CommittedMemory() / KB);
+  PrintPID("Map space,          used: %6" V8_PTR_PREFIX "d KB"
+               ", available: %6" V8_PTR_PREFIX "d KB"
+               ", committed: %6" V8_PTR_PREFIX "d KB\n",
+           map_space_->SizeOfObjects() / KB,
+           map_space_->Available() / KB,
+           map_space_->CommittedMemory() / KB);
+  PrintPID("Cell space,         used: %6" V8_PTR_PREFIX "d KB"
+               ", available: %6" V8_PTR_PREFIX "d KB"
+               ", committed: %6" V8_PTR_PREFIX "d KB\n",
+           cell_space_->SizeOfObjects() / KB,
+           cell_space_->Available() / KB,
+           cell_space_->CommittedMemory() / KB);
+  PrintPID("Large object space, used: %6" V8_PTR_PREFIX "d KB"
+               ", available: %6" V8_PTR_PREFIX "d KB"
+               ", committed: %6" V8_PTR_PREFIX "d KB\n",
+           lo_space_->SizeOfObjects() / KB,
+           lo_space_->Available() / KB,
+           lo_space_->CommittedMemory() / KB);
+  PrintPID("All spaces,         used: %6" V8_PTR_PREFIX "d KB"
+               ", available: %6" V8_PTR_PREFIX "d KB"
+               ", committed: %6" V8_PTR_PREFIX "d KB\n",
+           this->SizeOfObjects() / KB,
+           this->Available() / KB,
+           this->CommittedMemory() / KB);
+  PrintPID("Total time spent in GC  : %d ms\n", total_gc_time_ms_);
 }
 
 
@@ -381,24 +419,30 @@ void Heap::GarbageCollectionPrologue() {
   ClearJSFunctionResultCaches();
   gc_count_++;
   unflattened_strings_length_ = 0;
+
+  if (FLAG_flush_code && FLAG_flush_code_incrementally) {
+    mark_compact_collector()->EnableCodeFlushing(true);
+  }
+
+#ifdef VERIFY_HEAP
+  if (FLAG_verify_heap) {
+    Verify();
+  }
+#endif
+
 #ifdef DEBUG
   ASSERT(allocation_allowed_ && gc_state_ == NOT_IN_GC);
   allow_allocation(false);
 
-  if (FLAG_verify_heap) {
-    Verify();
-  }
-
   if (FLAG_gc_verbose) Print();
-#endif  // DEBUG
 
-#if defined(DEBUG)
   ReportStatisticsBeforeGC();
 #endif  // DEBUG
 
   LiveObjectList::GCPrologue();
   store_buffer()->GCPrologue();
 }
+
 
 intptr_t Heap::SizeOfObjects() {
   intptr_t total = 0;
@@ -409,17 +453,34 @@ intptr_t Heap::SizeOfObjects() {
   return total;
 }
 
+
+void Heap::RepairFreeListsAfterBoot() {
+  PagedSpaces spaces;
+  for (PagedSpace* space = spaces.next();
+       space != NULL;
+       space = spaces.next()) {
+    space->RepairFreeListsAfterBoot();
+  }
+}
+
+
 void Heap::GarbageCollectionEpilogue() {
   store_buffer()->GCEpilogue();
   LiveObjectList::GCEpilogue();
-#ifdef DEBUG
-  allow_allocation(true);
-  ZapFromSpace();
 
+  // In release mode, we only zap the from space under heap verification.
+  if (Heap::ShouldZapGarbage()) {
+    ZapFromSpace();
+  }
+
+#ifdef VERIFY_HEAP
   if (FLAG_verify_heap) {
     Verify();
   }
+#endif
 
+#ifdef DEBUG
+  allow_allocation(true);
   if (FLAG_print_global_handles) isolate_->global_handles()->Print();
   if (FLAG_print_handles) PrintHandles();
   if (FLAG_gc_verbose) Print();
@@ -433,6 +494,56 @@ void Heap::GarbageCollectionEpilogue() {
       symbol_table()->Capacity());
   isolate_->counters()->number_of_symbols()->Set(
       symbol_table()->NumberOfElements());
+
+  if (CommittedMemory() > 0) {
+    isolate_->counters()->external_fragmentation_total()->AddSample(
+        static_cast<int>(100 - (SizeOfObjects() * 100.0) / CommittedMemory()));
+
+    isolate_->counters()->heap_fraction_map_space()->AddSample(
+        static_cast<int>(
+            (map_space()->CommittedMemory() * 100.0) / CommittedMemory()));
+    isolate_->counters()->heap_fraction_cell_space()->AddSample(
+        static_cast<int>(
+            (cell_space()->CommittedMemory() * 100.0) / CommittedMemory()));
+
+    isolate_->counters()->heap_sample_total_committed()->AddSample(
+        static_cast<int>(CommittedMemory() / KB));
+    isolate_->counters()->heap_sample_total_used()->AddSample(
+        static_cast<int>(SizeOfObjects() / KB));
+    isolate_->counters()->heap_sample_map_space_committed()->AddSample(
+        static_cast<int>(map_space()->CommittedMemory() / KB));
+    isolate_->counters()->heap_sample_cell_space_committed()->AddSample(
+        static_cast<int>(cell_space()->CommittedMemory() / KB));
+  }
+
+#define UPDATE_COUNTERS_FOR_SPACE(space)                                       \
+  isolate_->counters()->space##_bytes_available()->Set(                        \
+      static_cast<int>(space()->Available()));                                 \
+  isolate_->counters()->space##_bytes_committed()->Set(                        \
+      static_cast<int>(space()->CommittedMemory()));                           \
+  isolate_->counters()->space##_bytes_used()->Set(                             \
+      static_cast<int>(space()->SizeOfObjects()));
+#define UPDATE_FRAGMENTATION_FOR_SPACE(space)                                  \
+  if (space()->CommittedMemory() > 0) {                                        \
+    isolate_->counters()->external_fragmentation_##space()->AddSample(         \
+        static_cast<int>(100 -                                                 \
+            (space()->SizeOfObjects() * 100.0) / space()->CommittedMemory())); \
+  }
+#define UPDATE_COUNTERS_AND_FRAGMENTATION_FOR_SPACE(space)                     \
+  UPDATE_COUNTERS_FOR_SPACE(space)                                             \
+  UPDATE_FRAGMENTATION_FOR_SPACE(space)
+
+  UPDATE_COUNTERS_FOR_SPACE(new_space)
+  UPDATE_COUNTERS_AND_FRAGMENTATION_FOR_SPACE(old_pointer_space)
+  UPDATE_COUNTERS_AND_FRAGMENTATION_FOR_SPACE(old_data_space)
+  UPDATE_COUNTERS_AND_FRAGMENTATION_FOR_SPACE(code_space)
+  UPDATE_COUNTERS_AND_FRAGMENTATION_FOR_SPACE(map_space)
+  UPDATE_COUNTERS_AND_FRAGMENTATION_FOR_SPACE(cell_space)
+  UPDATE_COUNTERS_AND_FRAGMENTATION_FOR_SPACE(lo_space)
+#undef UPDATE_COUNTERS_FOR_SPACE
+#undef UPDATE_FRAGMENTATION_FOR_SPACE
+#undef UPDATE_COUNTERS_AND_FRAGMENTATION_FOR_SPACE
+
 #if defined(DEBUG)
   ReportStatisticsAfterGC();
 #endif  // DEBUG
@@ -467,14 +578,7 @@ void Heap::CollectAllAvailableGarbage(const char* gc_reason) {
   mark_compact_collector()->SetFlags(kMakeHeapIterableMask |
                                      kReduceMemoryFootprintMask);
   isolate_->compilation_cache()->Clear();
-#if defined(ANDROID)
-  // TODO(merge): To whom doing merge: This is temporary. Please remove this
-  // change if the return value of CollectGarbage() is adaptive to the time
-  // spent in GC and the amount of memory reclaimed.
-  const int kMaxNumberOfAttempts = 1;
-#else
   const int kMaxNumberOfAttempts = 7;
-#endif
   for (int attempt = 0; attempt < kMaxNumberOfAttempts; attempt++) {
     if (!CollectGarbage(OLD_POINTER_SPACE, MARK_COMPACTOR, gc_reason, NULL)) {
       break;
@@ -511,15 +615,21 @@ bool Heap::CollectGarbage(AllocationSpace space,
   }
 
   if (collector == MARK_COMPACTOR &&
-      !mark_compact_collector()->PreciseSweepingRequired() &&
+      !mark_compact_collector()->abort_incremental_marking() &&
       !incremental_marking()->IsStopped() &&
       !incremental_marking()->should_hurry() &&
       FLAG_incremental_marking_steps) {
-    if (FLAG_trace_incremental_marking) {
-      PrintF("[IncrementalMarking] Delaying MarkSweep.\n");
+    // Make progress in incremental marking.
+    const intptr_t kStepSizeWhenDelayedByScavenge = 1 * MB;
+    incremental_marking()->Step(kStepSizeWhenDelayedByScavenge,
+                                IncrementalMarking::NO_GC_VIA_STACK_GUARD);
+    if (!incremental_marking()->IsComplete()) {
+      if (FLAG_trace_incremental_marking) {
+        PrintF("[IncrementalMarking] Delaying MarkSweep.\n");
+      }
+      collector = SCAVENGER;
+      collector_reason = "incremental marking delaying mark-sweep";
     }
-    collector = SCAVENGER;
-    collector_reason = "incremental marking delaying mark-sweep";
   }
 
   bool next_gc_likely_to_collect_more = false;
@@ -533,22 +643,24 @@ bool Heap::CollectGarbage(AllocationSpace space,
     // Tell the tracer which collector we've selected.
     tracer.set_collector(collector);
 
-    HistogramTimer* rate = (collector == SCAVENGER)
-        ? isolate_->counters()->gc_scavenger()
-        : isolate_->counters()->gc_compactor();
-    rate->Start();
-    next_gc_likely_to_collect_more =
-        PerformGarbageCollection(collector, &tracer);
-    rate->Stop();
+    {
+      HistogramTimerScope histogram_timer_scope(
+          (collector == SCAVENGER) ? isolate_->counters()->gc_scavenger()
+                                   : isolate_->counters()->gc_compactor());
+      next_gc_likely_to_collect_more =
+          PerformGarbageCollection(collector, &tracer);
+    }
 
     GarbageCollectionEpilogue();
   }
 
-  ASSERT(collector == SCAVENGER || incremental_marking()->IsStopped());
-  if (incremental_marking()->IsStopped()) {
-    if (incremental_marking()->WorthActivating() && NextGCIsLikelyToBeFull()) {
-      incremental_marking()->Start();
-    }
+  // Start incremental marking for the next cycle. The heap snapshot
+  // generator needs incremental marking to stay off after it aborted.
+  if (!mark_compact_collector()->abort_incremental_marking() &&
+      incremental_marking()->IsStopped() &&
+      incremental_marking()->WorthActivating() &&
+      NextGCIsLikelyToBeFull()) {
+    incremental_marking()->Start();
   }
 
   return next_gc_likely_to_collect_more;
@@ -565,7 +677,7 @@ void Heap::PerformScavenge() {
 }
 
 
-#ifdef DEBUG
+#ifdef VERIFY_HEAP
 // Helper class for verifying the symbol table.
 class SymbolTableVerifier : public ObjectVisitor {
  public:
@@ -574,84 +686,68 @@ class SymbolTableVerifier : public ObjectVisitor {
     for (Object** p = start; p < end; p++) {
       if ((*p)->IsHeapObject()) {
         // Check that the symbol is actually a symbol.
-        ASSERT((*p)->IsTheHole() || (*p)->IsUndefined() || (*p)->IsSymbol());
+        CHECK((*p)->IsTheHole() || (*p)->IsUndefined() || (*p)->IsSymbol());
       }
     }
   }
 };
-#endif  // DEBUG
 
 
 static void VerifySymbolTable() {
-#ifdef DEBUG
   SymbolTableVerifier verifier;
   HEAP->symbol_table()->IterateElements(&verifier);
-#endif  // DEBUG
+}
+#endif  // VERIFY_HEAP
+
+
+static bool AbortIncrementalMarkingAndCollectGarbage(
+    Heap* heap,
+    AllocationSpace space,
+    const char* gc_reason = NULL) {
+  heap->mark_compact_collector()->SetFlags(Heap::kAbortIncrementalMarkingMask);
+  bool result = heap->CollectGarbage(space, gc_reason);
+  heap->mark_compact_collector()->SetFlags(Heap::kNoGCFlags);
+  return result;
 }
 
 
 void Heap::ReserveSpace(
-    int new_space_size,
-    int pointer_space_size,
-    int data_space_size,
-    int code_space_size,
-    int map_space_size,
-    int cell_space_size,
-    int large_object_size) {
-  NewSpace* new_space = Heap::new_space();
-  PagedSpace* old_pointer_space = Heap::old_pointer_space();
-  PagedSpace* old_data_space = Heap::old_data_space();
-  PagedSpace* code_space = Heap::code_space();
-  PagedSpace* map_space = Heap::map_space();
-  PagedSpace* cell_space = Heap::cell_space();
-  LargeObjectSpace* lo_space = Heap::lo_space();
+    int *sizes,
+    Address *locations_out) {
   bool gc_performed = true;
   int counter = 0;
   static const int kThreshold = 20;
   while (gc_performed && counter++ < kThreshold) {
     gc_performed = false;
-    if (!new_space->ReserveSpace(new_space_size)) {
-      Heap::CollectGarbage(NEW_SPACE,
-                           "failed to reserve space in the new space");
-      gc_performed = true;
-    }
-    if (!old_pointer_space->ReserveSpace(pointer_space_size)) {
-      Heap::CollectGarbage(OLD_POINTER_SPACE,
-                           "failed to reserve space in the old pointer space");
-      gc_performed = true;
-    }
-    if (!(old_data_space->ReserveSpace(data_space_size))) {
-      Heap::CollectGarbage(OLD_DATA_SPACE,
-                           "failed to reserve space in the old data space");
-      gc_performed = true;
-    }
-    if (!(code_space->ReserveSpace(code_space_size))) {
-      Heap::CollectGarbage(CODE_SPACE,
-                           "failed to reserve space in the code space");
-      gc_performed = true;
-    }
-    if (!(map_space->ReserveSpace(map_space_size))) {
-      Heap::CollectGarbage(MAP_SPACE,
-                           "failed to reserve space in the map space");
-      gc_performed = true;
-    }
-    if (!(cell_space->ReserveSpace(cell_space_size))) {
-      Heap::CollectGarbage(CELL_SPACE,
-                           "failed to reserve space in the cell space");
-      gc_performed = true;
-    }
-    // We add a slack-factor of 2 in order to have space for a series of
-    // large-object allocations that are only just larger than the page size.
-    large_object_size *= 2;
-    // The ReserveSpace method on the large object space checks how much
-    // we can expand the old generation.  This includes expansion caused by
-    // allocation in the other spaces.
-    large_object_size += cell_space_size + map_space_size + code_space_size +
-        data_space_size + pointer_space_size;
-    if (!(lo_space->ReserveSpace(large_object_size))) {
-      Heap::CollectGarbage(LO_SPACE,
-                           "failed to reserve space in the large object space");
-      gc_performed = true;
+    ASSERT(NEW_SPACE == FIRST_PAGED_SPACE - 1);
+    for (int space = NEW_SPACE; space <= LAST_PAGED_SPACE; space++) {
+      if (sizes[space] != 0) {
+        MaybeObject* allocation;
+        if (space == NEW_SPACE) {
+          allocation = new_space()->AllocateRaw(sizes[space]);
+        } else {
+          allocation = paged_space(space)->AllocateRaw(sizes[space]);
+        }
+        FreeListNode* node;
+        if (!allocation->To<FreeListNode>(&node)) {
+          if (space == NEW_SPACE) {
+            Heap::CollectGarbage(NEW_SPACE,
+                                 "failed to reserve space in the new space");
+          } else {
+            AbortIncrementalMarkingAndCollectGarbage(
+                this,
+                static_cast<AllocationSpace>(space),
+                "failed to reserve space in paged space");
+          }
+          gc_performed = true;
+          break;
+        } else {
+          // Mark with a free list node, in case we have a GC before
+          // deserializing.
+          node->set_size(this, sizes[space]);
+          locations_out[space] = node->address();
+        }
+      }
     }
   }
 
@@ -679,7 +775,7 @@ void Heap::EnsureFromSpaceIsCommitted() {
 void Heap::ClearJSFunctionResultCaches() {
   if (isolate_->bootstrapper()->IsActive()) return;
 
-  Object* context = global_contexts_list_;
+  Object* context = native_contexts_list_;
   while (!context->IsUndefined()) {
     // Get the caches for this context. GC can happen when the context
     // is not fully initialized, so the caches can be undefined.
@@ -706,7 +802,7 @@ void Heap::ClearNormalizedMapCaches() {
     return;
   }
 
-  Object* context = global_contexts_list_;
+  Object* context = native_contexts_list_;
   while (!context->IsUndefined()) {
     // GC can happen when the context is not fully initialized,
     // so the cache can be undefined.
@@ -758,9 +854,12 @@ bool Heap::PerformGarbageCollection(GarbageCollector collector,
     PROFILE(isolate_, CodeMovingGCEvent());
   }
 
+#ifdef VERIFY_HEAP
   if (FLAG_verify_heap) {
     VerifySymbolTable();
   }
+#endif
+
   if (collector == MARK_COMPACTOR && global_gc_prologue_callback_) {
     ASSERT(!allocation_allowed_);
     GCTracer::Scope scope(tracer, GCTracer::Scope::EXTERNAL);
@@ -796,7 +895,7 @@ bool Heap::PerformGarbageCollection(GarbageCollector collector,
 
     UpdateSurvivalRateTrend(start_new_space_size);
 
-    size_of_old_gen_at_last_old_space_gc_ = PromotedSpaceSize();
+    size_of_old_gen_at_last_old_space_gc_ = PromotedSpaceSizeOfObjects();
 
     if (high_survival_rate_during_scavenges &&
         IsStableOrIncreasingSurvivalTrend()) {
@@ -835,8 +934,8 @@ bool Heap::PerformGarbageCollection(GarbageCollector collector,
     // have to limit maximal capacity of the young generation.
     new_space_high_promotion_mode_active_ = true;
     if (FLAG_trace_gc) {
-      PrintF("Limited new space size due to high promotion rate: %d MB\n",
-             new_space_.InitialCapacity() / MB);
+      PrintPID("Limited new space size due to high promotion rate: %d MB\n",
+               new_space_.InitialCapacity() / MB);
     }
   } else if (new_space_high_promotion_mode_active_ &&
       IsStableOrDecreasingSurvivalTrend() &&
@@ -846,8 +945,8 @@ bool Heap::PerformGarbageCollection(GarbageCollector collector,
     // to grow again.
     new_space_high_promotion_mode_active_ = false;
     if (FLAG_trace_gc) {
-      PrintF("Unlimited new space size due to low promotion rate: %d MB\n",
-             new_space_.MaximumCapacity() / MB);
+      PrintPID("Unlimited new space size due to low promotion rate: %d MB\n",
+               new_space_.MaximumCapacity() / MB);
     }
   }
 
@@ -858,11 +957,16 @@ bool Heap::PerformGarbageCollection(GarbageCollector collector,
 
   isolate_->counters()->objs_since_last_young()->Set(0);
 
+  // Callbacks that fire after this point might trigger nested GCs and
+  // restart incremental marking, the assertion can't be moved down.
+  ASSERT(collector == SCAVENGER || incremental_marking()->IsStopped());
+
   gc_post_processing_depth_++;
   { DisableAssertNoAllocation allow_allocation;
     GCTracer::Scope scope(tracer, GCTracer::Scope::EXTERNAL);
     next_gc_likely_to_collect_more =
-        isolate_->global_handles()->PostGarbageCollectionProcessing(collector);
+        isolate_->global_handles()->PostGarbageCollectionProcessing(
+            collector, tracer);
   }
   gc_post_processing_depth_--;
 
@@ -887,9 +991,12 @@ bool Heap::PerformGarbageCollection(GarbageCollector collector,
     GCTracer::Scope scope(tracer, GCTracer::Scope::EXTERNAL);
     global_gc_epilogue_callback_();
   }
+
+#ifdef VERIFY_HEAP
   if (FLAG_verify_heap) {
     VerifySymbolTable();
   }
+#endif
 
   return next_gc_likely_to_collect_more;
 }
@@ -916,7 +1023,7 @@ void Heap::MarkCompact(GCTracer* tracer) {
 
   contexts_disposed_ = 0;
 
-  isolate_->set_context_exit_happened(false);
+  flush_monomorphic_ics_ = false;
 }
 
 
@@ -926,14 +1033,14 @@ void Heap::MarkCompactPrologue() {
   isolate_->keyed_lookup_cache()->Clear();
   isolate_->context_slot_cache()->Clear();
   isolate_->descriptor_lookup_cache()->Clear();
-  StringSplitCache::Clear(string_split_cache());
+  RegExpResultsCache::Clear(string_split_cache());
+  RegExpResultsCache::Clear(regexp_multiple_cache());
 
   isolate_->compilation_cache()->MarkCompactPrologue();
 
   CompletelyClearInstanceofCache();
 
-  // TODO(1605) select heuristic for flushing NumberString cache with
-  // FlushNumberStringCache
+  FlushNumberStringCache();
   if (FLAG_cleanup_code_caches_at_gc) {
     polymorphic_code_cache()->set_cache(undefined_value());
   }
@@ -972,7 +1079,7 @@ class ScavengeVisitor: public ObjectVisitor {
 };
 
 
-#ifdef DEBUG
+#ifdef VERIFY_HEAP
 // Visitor class to verify pointers in code or data space do not point into
 // new space.
 class VerifyNonPointerSpacePointersVisitor: public ObjectVisitor {
@@ -980,7 +1087,7 @@ class VerifyNonPointerSpacePointersVisitor: public ObjectVisitor {
   void VisitPointers(Object** start, Object**end) {
     for (Object** current = start; current < end; current++) {
       if ((*current)->IsHeapObject()) {
-        ASSERT(!HEAP->InNewSpace(HeapObject::cast(*current)));
+        CHECK(!HEAP->InNewSpace(HeapObject::cast(*current)));
       }
     }
   }
@@ -1005,7 +1112,7 @@ static void VerifyNonPointerSpacePointers() {
       object->Iterate(&v);
   }
 }
-#endif
+#endif  // VERIFY_HEAP
 
 
 void Heap::CheckNewSpaceExpansionCriteria() {
@@ -1121,8 +1228,31 @@ void PromotionQueue::RelocateQueueHead() {
 }
 
 
+class ScavengeWeakObjectRetainer : public WeakObjectRetainer {
+ public:
+  explicit ScavengeWeakObjectRetainer(Heap* heap) : heap_(heap) { }
+
+  virtual Object* RetainAs(Object* object) {
+    if (!heap_->InFromSpace(object)) {
+      return object;
+    }
+
+    MapWord map_word = HeapObject::cast(object)->map_word();
+    if (map_word.IsForwardingAddress()) {
+      return map_word.ToForwardingAddress();
+    }
+    return NULL;
+  }
+
+ private:
+  Heap* heap_;
+};
+
+
 void Heap::Scavenge() {
-#ifdef DEBUG
+  RelocationLock relocation_lock(this);
+
+#ifdef VERIFY_HEAP
   if (FLAG_verify_heap) VerifyNonPointerSpacePointers();
 #endif
 
@@ -1188,20 +1318,33 @@ void Heap::Scavenge() {
 
   // Copy objects reachable from cells by scavenging cell values directly.
   HeapObjectIterator cell_iterator(cell_space_);
-  for (HeapObject* cell = cell_iterator.Next();
-       cell != NULL; cell = cell_iterator.Next()) {
-    if (cell->IsJSGlobalPropertyCell()) {
-      Address value_address =
-          reinterpret_cast<Address>(cell) +
-          (JSGlobalPropertyCell::kValueOffset - kHeapObjectTag);
+  for (HeapObject* heap_object = cell_iterator.Next();
+       heap_object != NULL;
+       heap_object = cell_iterator.Next()) {
+    if (heap_object->IsJSGlobalPropertyCell()) {
+      JSGlobalPropertyCell* cell = JSGlobalPropertyCell::cast(heap_object);
+      Address value_address = cell->ValueAddress();
       scavenge_visitor.VisitPointer(reinterpret_cast<Object**>(value_address));
     }
   }
 
-  // Scavenge object reachable from the global contexts list directly.
-  scavenge_visitor.VisitPointer(BitCast<Object**>(&global_contexts_list_));
+  // Copy objects reachable from the code flushing candidates list.
+  MarkCompactCollector* collector = mark_compact_collector();
+  if (collector->is_code_flushing_enabled()) {
+    collector->code_flusher()->IteratePointersToFromSpace(&scavenge_visitor);
+  }
+
+  // Scavenge object reachable from the native contexts list directly.
+  scavenge_visitor.VisitPointer(BitCast<Object**>(&native_contexts_list_));
 
   new_space_front = DoScavenge(&scavenge_visitor, new_space_front);
+
+  while (isolate()->global_handles()->IterateObjectGroups(
+      &scavenge_visitor, &IsUnscavengedHeapObject)) {
+    new_space_front = DoScavenge(&scavenge_visitor, new_space_front);
+  }
+  isolate()->global_handles()->RemoveObjectGroups();
+
   isolate_->global_handles()->IdentifyNewSpaceWeakIndependentHandles(
       &IsUnscavengedHeapObject);
   isolate_->global_handles()->IterateNewSpaceWeakIndependentRoots(
@@ -1214,8 +1357,13 @@ void Heap::Scavenge() {
   promotion_queue_.Destroy();
 
   LiveObjectList::UpdateReferencesForScavengeGC();
-  isolate()->runtime_profiler()->UpdateSamplesAfterScavenge();
+  if (!FLAG_watch_ic_patching) {
+    isolate()->runtime_profiler()->UpdateSamplesAfterScavenge();
+  }
   incremental_marking()->UpdateMarkingDequeAfterScavenge();
+
+  ScavengeWeakObjectRetainer weak_object_retainer(this);
+  ProcessWeakReferences(&weak_object_retainer);
 
   ASSERT(new_space_front == new_space_.top());
 
@@ -1254,9 +1402,11 @@ String* Heap::UpdateNewSpaceReferenceInExternalStringTableEntry(Heap* heap,
 
 void Heap::UpdateNewSpaceReferencesInExternalStringTable(
     ExternalStringTableUpdaterCallback updater_func) {
+#ifdef VERIFY_HEAP
   if (FLAG_verify_heap) {
     external_string_table_.Verify();
   }
+#endif
 
   if (external_string_table_.new_space_strings_.is_empty()) return;
 
@@ -1303,7 +1453,8 @@ void Heap::UpdateReferencesInExternalStringTable(
 
 static Object* ProcessFunctionWeakReferences(Heap* heap,
                                              Object* function,
-                                             WeakObjectRetainer* retainer) {
+                                             WeakObjectRetainer* retainer,
+                                             bool record_slots) {
   Object* undefined = heap->undefined_value();
   Object* head = undefined;
   JSFunction* tail = NULL;
@@ -1320,6 +1471,12 @@ static Object* ProcessFunctionWeakReferences(Heap* heap,
         // Subsequent elements in the list.
         ASSERT(tail != NULL);
         tail->set_next_function_link(retain);
+        if (record_slots) {
+          Object** next_function =
+              HeapObject::RawField(tail, JSFunction::kNextFunctionLinkOffset);
+          heap->mark_compact_collector()->RecordSlot(
+              next_function, next_function, retain);
+        }
       }
       // Retained function is new tail.
       candidate_function = reinterpret_cast<JSFunction*>(retain);
@@ -1347,7 +1504,16 @@ void Heap::ProcessWeakReferences(WeakObjectRetainer* retainer) {
   Object* undefined = undefined_value();
   Object* head = undefined;
   Context* tail = NULL;
-  Object* candidate = global_contexts_list_;
+  Object* candidate = native_contexts_list_;
+
+  // We don't record weak slots during marking or scavenges.
+  // Instead we do it once when we complete mark-compact cycle.
+  // Note that write barrier has no effect if we are already in the middle of
+  // compacting mark-sweep cycle and we have to record slots manually.
+  bool record_slots =
+      gc_state() == MARK_COMPACT &&
+      mark_compact_collector()->is_compacting();
+
   while (candidate != undefined) {
     // Check whether to keep the candidate in the list.
     Context* candidate_context = reinterpret_cast<Context*>(candidate);
@@ -1363,6 +1529,14 @@ void Heap::ProcessWeakReferences(WeakObjectRetainer* retainer) {
                             Context::NEXT_CONTEXT_LINK,
                             retain,
                             UPDATE_WRITE_BARRIER);
+
+        if (record_slots) {
+          Object** next_context =
+              HeapObject::RawField(
+                  tail, FixedArray::SizeFor(Context::NEXT_CONTEXT_LINK));
+          mark_compact_collector()->RecordSlot(
+              next_context, next_context, retain);
+        }
       }
       // Retained context is new tail.
       candidate_context = reinterpret_cast<Context*>(retain);
@@ -1375,11 +1549,19 @@ void Heap::ProcessWeakReferences(WeakObjectRetainer* retainer) {
           ProcessFunctionWeakReferences(
               this,
               candidate_context->get(Context::OPTIMIZED_FUNCTIONS_LIST),
-              retainer);
+              retainer,
+              record_slots);
       candidate_context->set_unchecked(this,
                                        Context::OPTIMIZED_FUNCTIONS_LIST,
                                        function_list_head,
                                        UPDATE_WRITE_BARRIER);
+      if (record_slots) {
+        Object** optimized_functions =
+            HeapObject::RawField(
+                tail, FixedArray::SizeFor(Context::OPTIMIZED_FUNCTIONS_LIST));
+        mark_compact_collector()->RecordSlot(
+            optimized_functions, optimized_functions, function_list_head);
+      }
     }
 
     // Move to next element in the list.
@@ -1395,20 +1577,28 @@ void Heap::ProcessWeakReferences(WeakObjectRetainer* retainer) {
   }
 
   // Update the head of the list of contexts.
-  global_contexts_list_ = head;
+  native_contexts_list_ = head;
 }
 
 
 void Heap::VisitExternalResources(v8::ExternalResourceVisitor* visitor) {
   AssertNoAllocation no_allocation;
 
-  class VisitorAdapter : public ObjectVisitor {
+  // Both the external string table and the symbol table may contain
+  // external strings, but neither lists them exhaustively, nor is the
+  // intersection set empty.  Therefore we iterate over the external string
+  // table first, ignoring symbols, and then over the symbol table.
+
+  class ExternalStringTableVisitorAdapter : public ObjectVisitor {
    public:
-    explicit VisitorAdapter(v8::ExternalResourceVisitor* visitor)
-        : visitor_(visitor) {}
+    explicit ExternalStringTableVisitorAdapter(
+        v8::ExternalResourceVisitor* visitor) : visitor_(visitor) {}
     virtual void VisitPointers(Object** start, Object** end) {
       for (Object** p = start; p < end; p++) {
-        if ((*p)->IsExternalString()) {
+        // Visit non-symbol external strings,
+        // since symbols are listed in the symbol table.
+        if (!(*p)->IsSymbol()) {
+          ASSERT((*p)->IsExternalString());
           visitor_->VisitExternalString(Utils::ToLocal(
               Handle<String>(String::cast(*p))));
         }
@@ -1416,8 +1606,28 @@ void Heap::VisitExternalResources(v8::ExternalResourceVisitor* visitor) {
     }
    private:
     v8::ExternalResourceVisitor* visitor_;
-  } visitor_adapter(visitor);
-  external_string_table_.Iterate(&visitor_adapter);
+  } external_string_table_visitor(visitor);
+
+  external_string_table_.Iterate(&external_string_table_visitor);
+
+  class SymbolTableVisitorAdapter : public ObjectVisitor {
+   public:
+    explicit SymbolTableVisitorAdapter(
+        v8::ExternalResourceVisitor* visitor) : visitor_(visitor) {}
+    virtual void VisitPointers(Object** start, Object** end) {
+      for (Object** p = start; p < end; p++) {
+        if ((*p)->IsExternalString()) {
+          ASSERT((*p)->IsSymbol());
+          visitor_->VisitExternalString(Utils::ToLocal(
+              Handle<String>(String::cast(*p))));
+        }
+      }
+    }
+   private:
+    v8::ExternalResourceVisitor* visitor_;
+  } symbol_table_visitor(visitor);
+
+  symbol_table()->IterateElements(&symbol_table_visitor);
 }
 
 
@@ -1479,6 +1689,27 @@ Address Heap::DoScavenge(ObjectVisitor* scavenge_visitor,
 }
 
 
+STATIC_ASSERT((FixedDoubleArray::kHeaderSize & kDoubleAlignmentMask) == 0);
+
+
+INLINE(static HeapObject* EnsureDoubleAligned(Heap* heap,
+                                              HeapObject* object,
+                                              int size));
+
+static HeapObject* EnsureDoubleAligned(Heap* heap,
+                                       HeapObject* object,
+                                       int size) {
+  if ((OffsetFrom(object->address()) & kDoubleAlignmentMask) != 0) {
+    heap->CreateFillerObjectAt(object->address(), kPointerSize);
+    return HeapObject::FromAddress(object->address() + kPointerSize);
+  } else {
+    heap->CreateFillerObjectAt(object->address() + size - kPointerSize,
+                               kPointerSize);
+    return object;
+  }
+}
+
+
 enum LoggingAndProfiling {
   LOGGING_AND_PROFILING_ENABLED,
   LOGGING_AND_PROFILING_DISABLED
@@ -1493,14 +1724,14 @@ template<MarksHandling marks_handling,
 class ScavengingVisitor : public StaticVisitorBase {
  public:
   static void Initialize() {
-    table_.Register(kVisitSeqAsciiString, &EvacuateSeqAsciiString);
+    table_.Register(kVisitSeqOneByteString, &EvacuateSeqOneByteString);
     table_.Register(kVisitSeqTwoByteString, &EvacuateSeqTwoByteString);
     table_.Register(kVisitShortcutCandidate, &EvacuateShortcutCandidate);
     table_.Register(kVisitByteArray, &EvacuateByteArray);
     table_.Register(kVisitFixedArray, &EvacuateFixedArray);
     table_.Register(kVisitFixedDoubleArray, &EvacuateFixedDoubleArray);
 
-    table_.Register(kVisitGlobalContext,
+    table_.Register(kVisitNativeContext,
                     &ObjectEvacuationStrategy<POINTER_OBJECT>::
                         template VisitSpecialized<Context::kSize>);
 
@@ -1586,7 +1817,7 @@ class ScavengingVisitor : public StaticVisitorBase {
       RecordCopiedObject(heap, target);
       HEAP_PROFILE(heap, ObjectMoveEvent(source->address(), target->address()));
       Isolate* isolate = heap->isolate();
-      if (isolate->logger()->is_logging() ||
+      if (isolate->logger()->is_logging_code_events() ||
           CpuProfiler::is_profiling(isolate)) {
         if (target->IsSharedFunctionInfo()) {
           PROFILE(isolate, SharedFunctionInfoMoveEvent(
@@ -1602,7 +1833,10 @@ class ScavengingVisitor : public StaticVisitorBase {
     }
   }
 
-  template<ObjectContents object_contents, SizeRestriction size_restriction>
+
+  template<ObjectContents object_contents,
+           SizeRestriction size_restriction,
+           int alignment>
   static inline void EvacuateObject(Map* map,
                                     HeapObject** slot,
                                     HeapObject* object,
@@ -1611,25 +1845,36 @@ class ScavengingVisitor : public StaticVisitorBase {
                 (object_size <= Page::kMaxNonCodeHeapObjectSize));
     SLOW_ASSERT(object->Size() == object_size);
 
+    int allocation_size = object_size;
+    if (alignment != kObjectAlignment) {
+      ASSERT(alignment == kDoubleAlignment);
+      allocation_size += kPointerSize;
+    }
+
     Heap* heap = map->GetHeap();
     if (heap->ShouldBePromoted(object->address(), object_size)) {
       MaybeObject* maybe_result;
 
       if ((size_restriction != SMALL) &&
-          (object_size > Page::kMaxNonCodeHeapObjectSize)) {
-        maybe_result = heap->lo_space()->AllocateRaw(object_size,
+          (allocation_size > Page::kMaxNonCodeHeapObjectSize)) {
+        maybe_result = heap->lo_space()->AllocateRaw(allocation_size,
                                                      NOT_EXECUTABLE);
       } else {
         if (object_contents == DATA_OBJECT) {
-          maybe_result = heap->old_data_space()->AllocateRaw(object_size);
+          maybe_result = heap->old_data_space()->AllocateRaw(allocation_size);
         } else {
-          maybe_result = heap->old_pointer_space()->AllocateRaw(object_size);
+          maybe_result =
+              heap->old_pointer_space()->AllocateRaw(allocation_size);
         }
       }
 
       Object* result = NULL;  // Initialization to please compiler.
       if (maybe_result->ToObject(&result)) {
         HeapObject* target = HeapObject::cast(result);
+
+        if (alignment != kObjectAlignment) {
+          target = EnsureDoubleAligned(heap, target, allocation_size);
+        }
 
         // Order is important: slot might be inside of the target if target
         // was allocated over a dead object and slot comes from the store
@@ -1638,17 +1883,26 @@ class ScavengingVisitor : public StaticVisitorBase {
         MigrateObject(heap, object, target, object_size);
 
         if (object_contents == POINTER_OBJECT) {
-          heap->promotion_queue()->insert(target, object_size);
+          if (map->instance_type() == JS_FUNCTION_TYPE) {
+            heap->promotion_queue()->insert(
+                target, JSFunction::kNonWeakFieldsEndOffset);
+          } else {
+            heap->promotion_queue()->insert(target, object_size);
+          }
         }
 
         heap->tracer()->increment_promoted_objects_size(object_size);
         return;
       }
     }
-    MaybeObject* allocation = heap->new_space()->AllocateRaw(object_size);
+    MaybeObject* allocation = heap->new_space()->AllocateRaw(allocation_size);
     heap->promotion_queue()->SetNewLimit(heap->new_space()->top());
     Object* result = allocation->ToObjectUnchecked();
     HeapObject* target = HeapObject::cast(result);
+
+    if (alignment != kObjectAlignment) {
+      target = EnsureDoubleAligned(heap, target, allocation_size);
+    }
 
     // Order is important: slot might be inside of the target if target
     // was allocated over a dead object and slot comes from the store
@@ -1685,7 +1939,7 @@ class ScavengingVisitor : public StaticVisitorBase {
                                         HeapObject** slot,
                                         HeapObject* object) {
     int object_size = FixedArray::BodyDescriptor::SizeOf(map, object);
-    EvacuateObject<POINTER_OBJECT, UNKNOWN_SIZE>(map,
+    EvacuateObject<POINTER_OBJECT, UNKNOWN_SIZE, kObjectAlignment>(map,
                                                  slot,
                                                  object,
                                                  object_size);
@@ -1697,10 +1951,11 @@ class ScavengingVisitor : public StaticVisitorBase {
                                               HeapObject* object) {
     int length = reinterpret_cast<FixedDoubleArray*>(object)->length();
     int object_size = FixedDoubleArray::SizeFor(length);
-    EvacuateObject<DATA_OBJECT, UNKNOWN_SIZE>(map,
-                                              slot,
-                                              object,
-                                              object_size);
+    EvacuateObject<DATA_OBJECT, UNKNOWN_SIZE, kDoubleAlignment>(
+        map,
+        slot,
+        object,
+        object_size);
   }
 
 
@@ -1708,16 +1963,18 @@ class ScavengingVisitor : public StaticVisitorBase {
                                        HeapObject** slot,
                                        HeapObject* object) {
     int object_size = reinterpret_cast<ByteArray*>(object)->ByteArraySize();
-    EvacuateObject<DATA_OBJECT, UNKNOWN_SIZE>(map, slot, object, object_size);
+    EvacuateObject<DATA_OBJECT, UNKNOWN_SIZE, kObjectAlignment>(
+        map, slot, object, object_size);
   }
 
 
-  static inline void EvacuateSeqAsciiString(Map* map,
+  static inline void EvacuateSeqOneByteString(Map* map,
                                             HeapObject** slot,
                                             HeapObject* object) {
-    int object_size = SeqAsciiString::cast(object)->
-        SeqAsciiStringSize(map->instance_type());
-    EvacuateObject<DATA_OBJECT, UNKNOWN_SIZE>(map, slot, object, object_size);
+    int object_size = SeqOneByteString::cast(object)->
+        SeqOneByteStringSize(map->instance_type());
+    EvacuateObject<DATA_OBJECT, UNKNOWN_SIZE, kObjectAlignment>(
+        map, slot, object, object_size);
   }
 
 
@@ -1726,7 +1983,8 @@ class ScavengingVisitor : public StaticVisitorBase {
                                               HeapObject* object) {
     int object_size = SeqTwoByteString::cast(object)->
         SeqTwoByteStringSize(map->instance_type());
-    EvacuateObject<DATA_OBJECT, UNKNOWN_SIZE>(map, slot, object, object_size);
+    EvacuateObject<DATA_OBJECT, UNKNOWN_SIZE, kObjectAlignment>(
+        map, slot, object, object_size);
   }
 
 
@@ -1769,7 +2027,8 @@ class ScavengingVisitor : public StaticVisitorBase {
     }
 
     int object_size = ConsString::kSize;
-    EvacuateObject<POINTER_OBJECT, SMALL>(map, slot, object, object_size);
+    EvacuateObject<POINTER_OBJECT, SMALL, kObjectAlignment>(
+        map, slot, object, object_size);
   }
 
   template<ObjectContents object_contents>
@@ -1779,14 +2038,16 @@ class ScavengingVisitor : public StaticVisitorBase {
     static inline void VisitSpecialized(Map* map,
                                         HeapObject** slot,
                                         HeapObject* object) {
-      EvacuateObject<object_contents, SMALL>(map, slot, object, object_size);
+      EvacuateObject<object_contents, SMALL, kObjectAlignment>(
+          map, slot, object, object_size);
     }
 
     static inline void Visit(Map* map,
                              HeapObject** slot,
                              HeapObject* object) {
       int object_size = map->instance_size();
-      EvacuateObject<object_contents, SMALL>(map, slot, object, object_size);
+      EvacuateObject<object_contents, SMALL, kObjectAlignment>(
+          map, slot, object, object_size);
     }
   };
 
@@ -1864,9 +2125,8 @@ void Heap::ScavengeObjectSlow(HeapObject** p, HeapObject* object) {
 MaybeObject* Heap::AllocatePartialMap(InstanceType instance_type,
                                       int instance_size) {
   Object* result;
-  { MaybeObject* maybe_result = AllocateRawMap();
-    if (!maybe_result->ToObject(&result)) return maybe_result;
-  }
+  MaybeObject* maybe_result = AllocateRawMap();
+  if (!maybe_result->ToObject(&result)) return maybe_result;
 
   // Map::cast cannot be used due to uninitialized map field.
   reinterpret_cast<Map*>(result)->set_map(raw_unchecked_meta_map());
@@ -1879,6 +2139,9 @@ MaybeObject* Heap::AllocatePartialMap(InstanceType instance_type,
   reinterpret_cast<Map*>(result)->set_unused_property_fields(0);
   reinterpret_cast<Map*>(result)->set_bit_field(0);
   reinterpret_cast<Map*>(result)->set_bit_field2(0);
+  int bit_field3 = Map::EnumLengthBits::encode(Map::kInvalidEnumCache) |
+                   Map::OwnsDescriptors::encode(true);
+  reinterpret_cast<Map*>(result)->set_bit_field3(bit_field3);
   return result;
 }
 
@@ -1887,9 +2150,8 @@ MaybeObject* Heap::AllocateMap(InstanceType instance_type,
                                int instance_size,
                                ElementsKind elements_kind) {
   Object* result;
-  { MaybeObject* maybe_result = AllocateRawMap();
-    if (!maybe_result->ToObject(&result)) return maybe_result;
-  }
+  MaybeObject* maybe_result = AllocateRawMap();
+  if (!maybe_result->To(&result)) return maybe_result;
 
   Map* map = reinterpret_cast<Map*>(result);
   map->set_map_no_write_barrier(meta_map());
@@ -1901,30 +2163,26 @@ MaybeObject* Heap::AllocateMap(InstanceType instance_type,
   map->set_instance_size(instance_size);
   map->set_inobject_properties(0);
   map->set_pre_allocated_property_fields(0);
-  map->init_instance_descriptors();
   map->set_code_cache(empty_fixed_array(), SKIP_WRITE_BARRIER);
-  map->set_prototype_transitions(empty_fixed_array(), SKIP_WRITE_BARRIER);
+  map->init_back_pointer(undefined_value());
   map->set_unused_property_fields(0);
+  map->set_instance_descriptors(empty_descriptor_array());
   map->set_bit_field(0);
   map->set_bit_field2(1 << Map::kIsExtensible);
+  int bit_field3 = Map::EnumLengthBits::encode(Map::kInvalidEnumCache) |
+                   Map::OwnsDescriptors::encode(true);
+  map->set_bit_field3(bit_field3);
   map->set_elements_kind(elements_kind);
 
-  // If the map object is aligned fill the padding area with Smi 0 objects.
-  if (Map::kPadStart < Map::kSize) {
-    memset(reinterpret_cast<byte*>(map) + Map::kPadStart - kHeapObjectTag,
-           0,
-           Map::kSize - Map::kPadStart);
-  }
   return map;
 }
 
 
 MaybeObject* Heap::AllocateCodeCache() {
-  Object* result;
-  { MaybeObject* maybe_result = AllocateStruct(CODE_CACHE_TYPE);
-    if (!maybe_result->ToObject(&result)) return maybe_result;
+  CodeCache* code_cache;
+  { MaybeObject* maybe_code_cache = AllocateStruct(CODE_CACHE_TYPE);
+    if (!maybe_code_cache->To(&code_cache)) return maybe_code_cache;
   }
-  CodeCache* code_cache = CodeCache::cast(result);
   code_cache->set_default_cache(empty_fixed_array(), SKIP_WRITE_BARRIER);
   code_cache->set_normal_type_cache(undefined_value(), SKIP_WRITE_BARRIER);
   return code_cache;
@@ -1937,15 +2195,35 @@ MaybeObject* Heap::AllocatePolymorphicCodeCache() {
 
 
 MaybeObject* Heap::AllocateAccessorPair() {
-  Object* result;
-  { MaybeObject* maybe_result = AllocateStruct(ACCESSOR_PAIR_TYPE);
-    if (!maybe_result->ToObject(&result)) return maybe_result;
+  AccessorPair* accessors;
+  { MaybeObject* maybe_accessors = AllocateStruct(ACCESSOR_PAIR_TYPE);
+    if (!maybe_accessors->To(&accessors)) return maybe_accessors;
   }
-  AccessorPair* accessors = AccessorPair::cast(result);
-  // Later we will have to distinguish between undefined and the hole...
-  // accessors->set_getter(the_hole_value(), SKIP_WRITE_BARRIER);
-  // accessors->set_setter(the_hole_value(), SKIP_WRITE_BARRIER);
+  accessors->set_getter(the_hole_value(), SKIP_WRITE_BARRIER);
+  accessors->set_setter(the_hole_value(), SKIP_WRITE_BARRIER);
   return accessors;
+}
+
+
+MaybeObject* Heap::AllocateTypeFeedbackInfo() {
+  TypeFeedbackInfo* info;
+  { MaybeObject* maybe_info = AllocateStruct(TYPE_FEEDBACK_INFO_TYPE);
+    if (!maybe_info->To(&info)) return maybe_info;
+  }
+  info->initialize_storage();
+  info->set_type_feedback_cells(TypeFeedbackCells::cast(empty_fixed_array()),
+                                SKIP_WRITE_BARRIER);
+  return info;
+}
+
+
+MaybeObject* Heap::AllocateAliasedArgumentsEntry(int aliased_context_slot) {
+  AliasedArgumentsEntry* entry;
+  { MaybeObject* maybe_entry = AllocateStruct(ALIASED_ARGUMENTS_ENTRY_TYPE);
+    if (!maybe_entry->To(&entry)) return maybe_entry;
+  }
+  entry->set_aliased_context_slot(aliased_context_slot);
+  return entry;
 }
 
 
@@ -2020,17 +2298,17 @@ bool Heap::CreateInitialMaps() {
   set_empty_descriptor_array(DescriptorArray::cast(obj));
 
   // Fix the instance_descriptors for the existing maps.
-  meta_map()->init_instance_descriptors();
   meta_map()->set_code_cache(empty_fixed_array());
-  meta_map()->set_prototype_transitions(empty_fixed_array());
+  meta_map()->init_back_pointer(undefined_value());
+  meta_map()->set_instance_descriptors(empty_descriptor_array());
 
-  fixed_array_map()->init_instance_descriptors();
   fixed_array_map()->set_code_cache(empty_fixed_array());
-  fixed_array_map()->set_prototype_transitions(empty_fixed_array());
+  fixed_array_map()->init_back_pointer(undefined_value());
+  fixed_array_map()->set_instance_descriptors(empty_descriptor_array());
 
-  oddball_map()->init_instance_descriptors();
   oddball_map()->set_code_cache(empty_fixed_array());
-  oddball_map()->set_prototype_transitions(empty_fixed_array());
+  oddball_map()->init_back_pointer(undefined_value());
+  oddball_map()->set_instance_descriptors(empty_descriptor_array());
 
   // Fix prototype object for existing maps.
   meta_map()->set_prototype(null_value());
@@ -2232,9 +2510,22 @@ bool Heap::CreateInitialMaps() {
         AllocateMap(FIXED_ARRAY_TYPE, kVariableSizeSentinel);
     if (!maybe_obj->ToObject(&obj)) return false;
   }
-  Map* global_context_map = Map::cast(obj);
-  global_context_map->set_visitor_id(StaticVisitorBase::kVisitGlobalContext);
-  set_global_context_map(global_context_map);
+  set_module_context_map(Map::cast(obj));
+
+  { MaybeObject* maybe_obj =
+        AllocateMap(FIXED_ARRAY_TYPE, kVariableSizeSentinel);
+    if (!maybe_obj->ToObject(&obj)) return false;
+  }
+  set_global_context_map(Map::cast(obj));
+
+  { MaybeObject* maybe_obj =
+        AllocateMap(FIXED_ARRAY_TYPE, kVariableSizeSentinel);
+    if (!maybe_obj->ToObject(&obj)) return false;
+  }
+  Map* native_context_map = Map::cast(obj);
+  native_context_map->set_dictionary_map(true);
+  native_context_map->set_visitor_id(StaticVisitorBase::kVisitNativeContext);
+  set_native_context_map(native_context_map);
 
   { MaybeObject* maybe_obj = AllocateMap(SHARED_FUNCTION_INFO_TYPE,
                                          SharedFunctionInfo::kAlignedSize);
@@ -2247,6 +2538,14 @@ bool Heap::CreateInitialMaps() {
     if (!maybe_obj->ToObject(&obj)) return false;
   }
   set_message_object_map(Map::cast(obj));
+
+  Map* external_map;
+  { MaybeObject* maybe_obj =
+        AllocateMap(JS_OBJECT_TYPE, JSObject::kHeaderSize + kPointerSize);
+    if (!maybe_obj->To(&external_map)) return false;
+  }
+  external_map->set_is_extensible(false);
+  set_external_map(external_map);
 
   ASSERT(!InNewSpace(empty_fixed_array()));
   return true;
@@ -2323,7 +2622,7 @@ bool Heap::CreateApiObjects() {
   // bottleneck to trap the Smi-only -> fast elements transition, and there
   // appears to be no benefit for optimize this case.
   Map* new_neander_map = Map::cast(obj);
-  new_neander_map->set_elements_kind(FAST_ELEMENTS);
+  new_neander_map->set_elements_kind(TERMINAL_FAST_ELEMENTS_KIND);
   set_neander_map(new_neander_map);
 
   { MaybeObject* maybe_obj = AllocateJSObjectFromMap(neander_map());
@@ -2466,7 +2765,7 @@ bool Heap::CreateInitialObjects() {
   set_termination_exception(obj);
 
   // Allocate the empty string.
-  { MaybeObject* maybe_obj = AllocateRawAsciiString(0, TENURED);
+  { MaybeObject* maybe_obj = AllocateRawOneByteString(0, TENURED);
     if (!maybe_obj->ToObject(&obj)) return false;
   }
   set_empty_string(String::cast(obj));
@@ -2486,7 +2785,7 @@ bool Heap::CreateInitialObjects() {
   // hash code in place. The hash code for the hidden_symbol is zero to ensure
   // that it will always be at the first entry in property descriptors.
   { MaybeObject* maybe_obj =
-        AllocateSymbol(CStrVector(""), 0, String::kZeroHash);
+        AllocateSymbol(CStrVector(""), 0, String::kEmptyStringHash);
     if (!maybe_obj->ToObject(&obj)) return false;
   }
   hidden_symbol_ = String::cast(obj);
@@ -2534,7 +2833,10 @@ bool Heap::CreateInitialObjects() {
   }
   set_intrinsic_function_names(StringDictionary::cast(obj));
 
-  if (InitializeNumberStringCache()->IsFailure()) return false;
+  { MaybeObject* maybe_obj = AllocateInitialNumberStringCache();
+    if (!maybe_obj->ToObject(&obj)) return false;
+  }
+  set_number_string_cache(FixedArray::cast(obj));
 
   // Allocate cache for single character ASCII strings.
   { MaybeObject* maybe_obj =
@@ -2544,17 +2846,32 @@ bool Heap::CreateInitialObjects() {
   set_single_character_string_cache(FixedArray::cast(obj));
 
   // Allocate cache for string split.
-  { MaybeObject* maybe_obj =
-        AllocateFixedArray(StringSplitCache::kStringSplitCacheSize, TENURED);
+  { MaybeObject* maybe_obj = AllocateFixedArray(
+      RegExpResultsCache::kRegExpResultsCacheSize, TENURED);
     if (!maybe_obj->ToObject(&obj)) return false;
   }
   set_string_split_cache(FixedArray::cast(obj));
+
+  { MaybeObject* maybe_obj = AllocateFixedArray(
+      RegExpResultsCache::kRegExpResultsCacheSize, TENURED);
+    if (!maybe_obj->ToObject(&obj)) return false;
+  }
+  set_regexp_multiple_cache(FixedArray::cast(obj));
 
   // Allocate cache for external strings pointing to native source code.
   { MaybeObject* maybe_obj = AllocateFixedArray(Natives::GetBuiltinsCount());
     if (!maybe_obj->ToObject(&obj)) return false;
   }
   set_natives_source_cache(FixedArray::cast(obj));
+
+  // Allocate object to hold object observation state.
+  { MaybeObject* maybe_obj = AllocateMap(JS_OBJECT_TYPE, JSObject::kHeaderSize);
+    if (!maybe_obj->ToObject(&obj)) return false;
+  }
+  { MaybeObject* maybe_obj = AllocateJSObjectFromMap(Map::cast(obj));
+    if (!maybe_obj->ToObject(&obj)) return false;
+  }
+  set_observation_state(JSObject::cast(obj));
 
   // Handling of script id generation is in FACTORY->NewScript.
   set_last_script_id(undefined_value());
@@ -2575,86 +2892,166 @@ bool Heap::CreateInitialObjects() {
 }
 
 
-Object* StringSplitCache::Lookup(
-    FixedArray* cache, String* string, String* pattern) {
-  if (!string->IsSymbol() || !pattern->IsSymbol()) return Smi::FromInt(0);
-  uint32_t hash = string->Hash();
-  uint32_t index = ((hash & (kStringSplitCacheSize - 1)) &
+bool Heap::RootCanBeWrittenAfterInitialization(Heap::RootListIndex root_index) {
+  RootListIndex writable_roots[] = {
+    kStoreBufferTopRootIndex,
+    kStackLimitRootIndex,
+    kInstanceofCacheFunctionRootIndex,
+    kInstanceofCacheMapRootIndex,
+    kInstanceofCacheAnswerRootIndex,
+    kCodeStubsRootIndex,
+    kNonMonomorphicCacheRootIndex,
+    kPolymorphicCodeCacheRootIndex,
+    kLastScriptIdRootIndex,
+    kEmptyScriptRootIndex,
+    kRealStackLimitRootIndex,
+    kArgumentsAdaptorDeoptPCOffsetRootIndex,
+    kConstructStubDeoptPCOffsetRootIndex,
+    kGetterStubDeoptPCOffsetRootIndex,
+    kSetterStubDeoptPCOffsetRootIndex,
+    kSymbolTableRootIndex,
+  };
+
+  for (unsigned int i = 0; i < ARRAY_SIZE(writable_roots); i++) {
+    if (root_index == writable_roots[i])
+      return true;
+  }
+  return false;
+}
+
+
+Object* RegExpResultsCache::Lookup(Heap* heap,
+                                   String* key_string,
+                                   Object* key_pattern,
+                                   ResultsCacheType type) {
+  FixedArray* cache;
+  if (!key_string->IsSymbol()) return Smi::FromInt(0);
+  if (type == STRING_SPLIT_SUBSTRINGS) {
+    ASSERT(key_pattern->IsString());
+    if (!key_pattern->IsSymbol()) return Smi::FromInt(0);
+    cache = heap->string_split_cache();
+  } else {
+    ASSERT(type == REGEXP_MULTIPLE_INDICES);
+    ASSERT(key_pattern->IsFixedArray());
+    cache = heap->regexp_multiple_cache();
+  }
+
+  uint32_t hash = key_string->Hash();
+  uint32_t index = ((hash & (kRegExpResultsCacheSize - 1)) &
       ~(kArrayEntriesPerCacheEntry - 1));
-  if (cache->get(index + kStringOffset) == string &&
-      cache->get(index + kPatternOffset) == pattern) {
+  if (cache->get(index + kStringOffset) == key_string &&
+      cache->get(index + kPatternOffset) == key_pattern) {
     return cache->get(index + kArrayOffset);
   }
-  index = ((index + kArrayEntriesPerCacheEntry) & (kStringSplitCacheSize - 1));
-  if (cache->get(index + kStringOffset) == string &&
-      cache->get(index + kPatternOffset) == pattern) {
+  index =
+      ((index + kArrayEntriesPerCacheEntry) & (kRegExpResultsCacheSize - 1));
+  if (cache->get(index + kStringOffset) == key_string &&
+      cache->get(index + kPatternOffset) == key_pattern) {
     return cache->get(index + kArrayOffset);
   }
   return Smi::FromInt(0);
 }
 
 
-void StringSplitCache::Enter(Heap* heap,
-                             FixedArray* cache,
-                             String* string,
-                             String* pattern,
-                             FixedArray* array) {
-  if (!string->IsSymbol() || !pattern->IsSymbol()) return;
-  uint32_t hash = string->Hash();
-  uint32_t index = ((hash & (kStringSplitCacheSize - 1)) &
+void RegExpResultsCache::Enter(Heap* heap,
+                               String* key_string,
+                               Object* key_pattern,
+                               FixedArray* value_array,
+                               ResultsCacheType type) {
+  FixedArray* cache;
+  if (!key_string->IsSymbol()) return;
+  if (type == STRING_SPLIT_SUBSTRINGS) {
+    ASSERT(key_pattern->IsString());
+    if (!key_pattern->IsSymbol()) return;
+    cache = heap->string_split_cache();
+  } else {
+    ASSERT(type == REGEXP_MULTIPLE_INDICES);
+    ASSERT(key_pattern->IsFixedArray());
+    cache = heap->regexp_multiple_cache();
+  }
+
+  uint32_t hash = key_string->Hash();
+  uint32_t index = ((hash & (kRegExpResultsCacheSize - 1)) &
       ~(kArrayEntriesPerCacheEntry - 1));
   if (cache->get(index + kStringOffset) == Smi::FromInt(0)) {
-    cache->set(index + kStringOffset, string);
-    cache->set(index + kPatternOffset, pattern);
-    cache->set(index + kArrayOffset, array);
+    cache->set(index + kStringOffset, key_string);
+    cache->set(index + kPatternOffset, key_pattern);
+    cache->set(index + kArrayOffset, value_array);
   } else {
     uint32_t index2 =
-        ((index + kArrayEntriesPerCacheEntry) & (kStringSplitCacheSize - 1));
+        ((index + kArrayEntriesPerCacheEntry) & (kRegExpResultsCacheSize - 1));
     if (cache->get(index2 + kStringOffset) == Smi::FromInt(0)) {
-      cache->set(index2 + kStringOffset, string);
-      cache->set(index2 + kPatternOffset, pattern);
-      cache->set(index2 + kArrayOffset, array);
+      cache->set(index2 + kStringOffset, key_string);
+      cache->set(index2 + kPatternOffset, key_pattern);
+      cache->set(index2 + kArrayOffset, value_array);
     } else {
       cache->set(index2 + kStringOffset, Smi::FromInt(0));
       cache->set(index2 + kPatternOffset, Smi::FromInt(0));
       cache->set(index2 + kArrayOffset, Smi::FromInt(0));
-      cache->set(index + kStringOffset, string);
-      cache->set(index + kPatternOffset, pattern);
-      cache->set(index + kArrayOffset, array);
+      cache->set(index + kStringOffset, key_string);
+      cache->set(index + kPatternOffset, key_pattern);
+      cache->set(index + kArrayOffset, value_array);
     }
   }
-  if (array->length() < 100) {  // Limit how many new symbols we want to make.
-    for (int i = 0; i < array->length(); i++) {
-      String* str = String::cast(array->get(i));
+  // If the array is a reasonably short list of substrings, convert it into a
+  // list of symbols.
+  if (type == STRING_SPLIT_SUBSTRINGS && value_array->length() < 100) {
+    for (int i = 0; i < value_array->length(); i++) {
+      String* str = String::cast(value_array->get(i));
       Object* symbol;
       MaybeObject* maybe_symbol = heap->LookupSymbol(str);
       if (maybe_symbol->ToObject(&symbol)) {
-        array->set(i, symbol);
+        value_array->set(i, symbol);
       }
     }
   }
-  array->set_map_no_write_barrier(heap->fixed_cow_array_map());
+  // Convert backing store to a copy-on-write array.
+  value_array->set_map_no_write_barrier(heap->fixed_cow_array_map());
 }
 
 
-void StringSplitCache::Clear(FixedArray* cache) {
-  for (int i = 0; i < kStringSplitCacheSize; i++) {
+void RegExpResultsCache::Clear(FixedArray* cache) {
+  for (int i = 0; i < kRegExpResultsCacheSize; i++) {
     cache->set(i, Smi::FromInt(0));
   }
 }
 
 
-MaybeObject* Heap::InitializeNumberStringCache() {
-  // Compute the size of the number string cache based on the max heap size.
-  // max_semispace_size_ == 512 KB => number_string_cache_size = 32.
-  // max_semispace_size_ ==   8 MB => number_string_cache_size = 16KB.
-  int number_string_cache_size = max_semispace_size_ / 512;
-  number_string_cache_size = Max(32, Min(16*KB, number_string_cache_size));
-  Object* obj;
+MaybeObject* Heap::AllocateInitialNumberStringCache() {
   MaybeObject* maybe_obj =
-      AllocateFixedArray(number_string_cache_size * 2, TENURED);
-  if (maybe_obj->ToObject(&obj)) set_number_string_cache(FixedArray::cast(obj));
+      AllocateFixedArray(kInitialNumberStringCacheSize * 2, TENURED);
   return maybe_obj;
+}
+
+
+int Heap::FullSizeNumberStringCacheLength() {
+  // Compute the size of the number string cache based on the max newspace size.
+  // The number string cache has a minimum size based on twice the initial cache
+  // size to ensure that it is bigger after being made 'full size'.
+  int number_string_cache_size = max_semispace_size_ / 512;
+  number_string_cache_size = Max(kInitialNumberStringCacheSize * 2,
+                                 Min(0x4000, number_string_cache_size));
+  // There is a string and a number per entry so the length is twice the number
+  // of entries.
+  return number_string_cache_size * 2;
+}
+
+
+void Heap::AllocateFullSizeNumberStringCache() {
+  // The idea is to have a small number string cache in the snapshot to keep
+  // boot-time memory usage down.  If we expand the number string cache already
+  // while creating the snapshot then that didn't work out.
+  ASSERT(!Serializer::enabled() || FLAG_extra_code != NULL);
+  MaybeObject* maybe_obj =
+      AllocateFixedArray(FullSizeNumberStringCacheLength(), TENURED);
+  Object* new_cache;
+  if (maybe_obj->ToObject(&new_cache)) {
+    // We don't bother to repopulate the cache with entries from the old cache.
+    // It will be repopulated soon enough with new strings.
+    set_number_string_cache(FixedArray::cast(new_cache));
+  }
+  // If allocation fails then we just return without doing anything.  It is only
+  // a cache, so best effort is OK here.
 }
 
 
@@ -2703,11 +3100,17 @@ void Heap::SetNumberStringCache(Object* number, String* string) {
   int mask = (number_string_cache()->length() >> 1) - 1;
   if (number->IsSmi()) {
     hash = smi_get_hash(Smi::cast(number)) & mask;
-    number_string_cache()->set(hash * 2, Smi::cast(number));
   } else {
     hash = double_get_hash(number->Number()) & mask;
-    number_string_cache()->set(hash * 2, number);
   }
+  if (number_string_cache()->get(hash * 2) != undefined_value() &&
+      number_string_cache()->length() != FullSizeNumberStringCacheLength()) {
+    // The first time we have a hash collision, we move to the full sized
+    // number string cache.
+    AllocateFullSizeNumberStringCache();
+    return;
+  }
+  number_string_cache()->set(hash * 2, number);
   number_string_cache()->set(hash * 2 + 1, string);
 }
 
@@ -2734,7 +3137,7 @@ MaybeObject* Heap::NumberToString(Object* number,
   }
 
   Object* js_string;
-  MaybeObject* maybe_js_string = AllocateStringFromAscii(CStrVector(str));
+  MaybeObject* maybe_js_string = AllocateStringFromOneByte(CStrVector(str));
   if (maybe_js_string->ToObject(&js_string)) {
     SetNumberStringCache(number, String::cast(js_string));
   }
@@ -2826,6 +3229,7 @@ MaybeObject* Heap::AllocateSharedFunctionInfo(Object* name) {
   share->set_name(name);
   Code* illegal = isolate_->builtins()->builtin(Builtins::kIllegal);
   share->set_code(illegal);
+  share->ClearOptimizedCodeMap();
   share->set_scope_info(ScopeInfo::Empty());
   Code* construct_stub =
       isolate_->builtins()->builtin(Builtins::kJSConstructStubGeneric);
@@ -2837,7 +3241,9 @@ MaybeObject* Heap::AllocateSharedFunctionInfo(Object* name) {
   share->set_inferred_name(empty_string(), SKIP_WRITE_BARRIER);
   share->set_initial_map(undefined_value(), SKIP_WRITE_BARRIER);
   share->set_this_property_assignments(undefined_value(), SKIP_WRITE_BARRIER);
-  share->set_deopt_counter(Smi::FromInt(FLAG_deopt_every_n_times));
+  share->set_ast_node_count(0);
+  share->set_stress_deopt_counter(FLAG_deopt_every_n_times);
+  share->set_counters(0);
 
   // Set integer fields (smi or int, depending on the architecture).
   share->set_length(0);
@@ -2869,6 +3275,7 @@ MaybeObject* Heap::AllocateJSMessageObject(String* type,
   }
   JSMessageObject* message = JSMessageObject::cast(result);
   message->set_properties(Heap::empty_fixed_array(), SKIP_WRITE_BARRIER);
+  message->initialize_elements();
   message->set_elements(Heap::empty_fixed_array(), SKIP_WRITE_BARRIER);
   message->set_type(type);
   message->set_arguments(arguments);
@@ -2904,10 +3311,10 @@ MUST_USE_RESULT static inline MaybeObject* MakeOrFindTwoCharacterString(
   } else if ((c1 | c2) <= String::kMaxAsciiCharCodeU) {  // We can do this
     ASSERT(IsPowerOf2(String::kMaxAsciiCharCodeU + 1));  // because of this.
     Object* result;
-    { MaybeObject* maybe_result = heap->AllocateRawAsciiString(2);
+    { MaybeObject* maybe_result = heap->AllocateRawOneByteString(2);
       if (!maybe_result->ToObject(&result)) return maybe_result;
     }
-    char* dest = SeqAsciiString::cast(result)->GetChars();
+    char* dest = SeqOneByteString::cast(result)->GetChars();
     dest[0] = c1;
     dest[1] = c2;
     return result;
@@ -2946,8 +3353,8 @@ MaybeObject* Heap::AllocateConsString(String* first, String* second) {
     return MakeOrFindTwoCharacterString(this, c1, c2);
   }
 
-  bool first_is_ascii = first->IsAsciiRepresentation();
-  bool second_is_ascii = second->IsAsciiRepresentation();
+  bool first_is_ascii = first->IsOneByteRepresentation();
+  bool second_is_ascii = second->IsOneByteRepresentation();
   bool is_ascii = first_is_ascii && second_is_ascii;
 
   // Make sure that an out of memory exception is thrown if the length
@@ -2977,35 +3384,35 @@ MaybeObject* Heap::AllocateConsString(String* first, String* second) {
     ASSERT(second->IsFlat());
     if (is_ascii) {
       Object* result;
-      { MaybeObject* maybe_result = AllocateRawAsciiString(length);
+      { MaybeObject* maybe_result = AllocateRawOneByteString(length);
         if (!maybe_result->ToObject(&result)) return maybe_result;
       }
       // Copy the characters into the new object.
-      char* dest = SeqAsciiString::cast(result)->GetChars();
+      char* dest = SeqOneByteString::cast(result)->GetChars();
       // Copy first part.
       const char* src;
       if (first->IsExternalString()) {
         src = ExternalAsciiString::cast(first)->GetChars();
       } else {
-        src = SeqAsciiString::cast(first)->GetChars();
+        src = SeqOneByteString::cast(first)->GetChars();
       }
       for (int i = 0; i < first_length; i++) *dest++ = src[i];
       // Copy second part.
       if (second->IsExternalString()) {
         src = ExternalAsciiString::cast(second)->GetChars();
       } else {
-        src = SeqAsciiString::cast(second)->GetChars();
+        src = SeqOneByteString::cast(second)->GetChars();
       }
       for (int i = 0; i < second_length; i++) *dest++ = src[i];
       return result;
     } else {
       if (is_ascii_data_in_two_byte_string) {
         Object* result;
-        { MaybeObject* maybe_result = AllocateRawAsciiString(length);
+        { MaybeObject* maybe_result = AllocateRawOneByteString(length);
           if (!maybe_result->ToObject(&result)) return maybe_result;
         }
         // Copy the characters into the new object.
-        char* dest = SeqAsciiString::cast(result)->GetChars();
+        char* dest = SeqOneByteString::cast(result)->GetChars();
         String::WriteToFlat(first, dest, 0, first_length);
         String::WriteToFlat(second, dest + first_length, 0, second_length);
         isolate_->counters()->string_add_runtime_ext_to_ascii()->Increment();
@@ -3072,17 +3479,17 @@ MaybeObject* Heap::AllocateSubString(String* buffer,
     // WriteToFlat takes care of the case when an indirect string has a
     // different encoding from its underlying string.  These encodings may
     // differ because of externalization.
-    bool is_ascii = buffer->IsAsciiRepresentation();
+    bool is_ascii = buffer->IsOneByteRepresentation();
     { MaybeObject* maybe_result = is_ascii
-                                  ? AllocateRawAsciiString(length, pretenure)
+                                  ? AllocateRawOneByteString(length, pretenure)
                                   : AllocateRawTwoByteString(length, pretenure);
       if (!maybe_result->ToObject(&result)) return maybe_result;
     }
     String* string_result = String::cast(result);
     // Copy the characters into the new object.
     if (is_ascii) {
-      ASSERT(string_result->IsAsciiRepresentation());
-      char* dest = SeqAsciiString::cast(string_result)->GetChars();
+      ASSERT(string_result->IsOneByteRepresentation());
+      char* dest = SeqOneByteString::cast(string_result)->GetChars();
       String::WriteToFlat(buffer, dest, start, end);
     } else {
       ASSERT(string_result->IsTwoByteRepresentation());
@@ -3093,7 +3500,7 @@ MaybeObject* Heap::AllocateSubString(String* buffer,
   }
 
   ASSERT(buffer->IsFlat());
-#if DEBUG
+#if VERIFY_HEAP
   if (FLAG_verify_heap) {
     buffer->StringVerify();
   }
@@ -3106,7 +3513,7 @@ MaybeObject* Heap::AllocateSubString(String* buffer,
   // indirect ASCII string is pointing to a two-byte string, the two-byte char
   // codes of the underlying string must still fit into ASCII (because
   // externalization must not change char codes).
-  { Map* map = buffer->IsAsciiRepresentation()
+  { Map* map = buffer->IsOneByteRepresentation()
                  ? sliced_ascii_string_map()
                  : sliced_string_map();
     MaybeObject* maybe_result = Allocate(map, NEW_SPACE);
@@ -3144,6 +3551,8 @@ MaybeObject* Heap::AllocateExternalStringFromAscii(
     isolate()->context()->mark_out_of_memory();
     return Failure::OutOfMemoryException();
   }
+
+  ASSERT(String::IsAscii(resource->data(), static_cast<int>(length)));
 
   Map* map = external_ascii_string_map();
   Object* result;
@@ -3308,17 +3717,27 @@ MaybeObject* Heap::CreateCode(const CodeDesc& desc,
   MaybeObject* maybe_result;
   // Large code objects and code objects which should stay at a fixed address
   // are allocated in large object space.
-  if (obj_size > code_space()->AreaSize() || immovable) {
+  HeapObject* result;
+  bool force_lo_space = obj_size > code_space()->AreaSize();
+  if (force_lo_space) {
     maybe_result = lo_space_->AllocateRaw(obj_size, EXECUTABLE);
   } else {
     maybe_result = code_space_->AllocateRaw(obj_size);
   }
+  if (!maybe_result->To<HeapObject>(&result)) return maybe_result;
 
-  Object* result;
-  if (!maybe_result->ToObject(&result)) return maybe_result;
+  if (immovable && !force_lo_space &&
+      // Objects on the first page of each space are never moved.
+      !code_space_->FirstPage()->Contains(result->address())) {
+    // Discard the first code allocation, which was on a page where it could be
+    // moved.
+    CreateFillerObjectAt(result->address(), obj_size);
+    maybe_result = lo_space_->AllocateRaw(obj_size, EXECUTABLE);
+    if (!maybe_result->To<HeapObject>(&result)) return maybe_result;
+  }
 
   // Initialize the object
-  HeapObject::cast(result)->set_map_no_write_barrier(code_map());
+  result->set_map_no_write_barrier(code_map());
   Code* code = Code::cast(result);
   ASSERT(!isolate_->code_range()->exists() ||
       isolate_->code_range()->contains(code->address()));
@@ -3329,8 +3748,11 @@ MaybeObject* Heap::CreateCode(const CodeDesc& desc,
     code->set_check_type(RECEIVER_MAP_CHECK);
   }
   code->set_deoptimization_data(empty_fixed_array(), SKIP_WRITE_BARRIER);
+  code->InitializeTypeFeedbackInfoNoWriteBarrier(undefined_value());
   code->set_handler_table(empty_fixed_array(), SKIP_WRITE_BARRIER);
   code->set_gc_metadata(Smi::FromInt(0));
+  code->set_ic_age(global_ic_age_);
+  code->set_prologue_offset(kPrologueOffsetNotSet);
   // Allow self references to created code object by patching the handle to
   // point to the newly allocated Code object.
   if (!self_reference.is_null()) {
@@ -3343,7 +3765,7 @@ MaybeObject* Heap::CreateCode(const CodeDesc& desc,
   // through the self_reference parameter.
   code->CopyFrom(desc);
 
-#ifdef DEBUG
+#ifdef VERIFY_HEAP
   if (FLAG_verify_heap) {
     code->Verify();
   }
@@ -3425,7 +3847,7 @@ MaybeObject* Heap::CopyCode(Code* code, Vector<byte> reloc_info) {
       isolate_->code_range()->contains(code->address()));
   new_code->Relocate(new_addr - old_addr);
 
-#ifdef DEBUG
+#ifdef VERIFY_HEAP
   if (FLAG_verify_heap) {
     code->Verify();
   }
@@ -3472,29 +3894,27 @@ MaybeObject* Heap::AllocateFunctionPrototype(JSFunction* function) {
   // from the function's context, since the function can be from a
   // different context.
   JSFunction* object_function =
-      function->context()->global_context()->object_function();
+      function->context()->native_context()->object_function();
 
   // Each function prototype gets a copy of the object function map.
   // This avoid unwanted sharing of maps between prototypes of different
   // constructors.
   Map* new_map;
   ASSERT(object_function->has_initial_map());
-  { MaybeObject* maybe_map =
-        object_function->initial_map()->CopyDropTransitions();
-    if (!maybe_map->To<Map>(&new_map)) return maybe_map;
-  }
+  MaybeObject* maybe_map = object_function->initial_map()->Copy();
+  if (!maybe_map->To(&new_map)) return maybe_map;
+
   Object* prototype;
-  { MaybeObject* maybe_prototype = AllocateJSObjectFromMap(new_map);
-    if (!maybe_prototype->ToObject(&prototype)) return maybe_prototype;
-  }
+  MaybeObject* maybe_prototype = AllocateJSObjectFromMap(new_map);
+  if (!maybe_prototype->ToObject(&prototype)) return maybe_prototype;
+
   // When creating the prototype for the function we must set its
   // constructor to the function.
-  Object* result;
-  { MaybeObject* maybe_result =
-        JSObject::cast(prototype)->SetLocalPropertyIgnoreAttributes(
-            constructor_symbol(), function, DONT_ENUM);
-    if (!maybe_result->ToObject(&result)) return maybe_result;
-  }
+  MaybeObject* maybe_failure =
+      JSObject::cast(prototype)->SetLocalPropertyIgnoreAttributes(
+          constructor_symbol(), function, DONT_ENUM);
+  if (maybe_failure->IsFailure()) return maybe_failure;
+
   return prototype;
 }
 
@@ -3524,12 +3944,12 @@ MaybeObject* Heap::AllocateArgumentsObject(Object* callee, int length) {
       !JSFunction::cast(callee)->shared()->is_classic_mode();
   if (strict_mode_callee) {
     boilerplate =
-        isolate()->context()->global_context()->
+        isolate()->context()->native_context()->
             strict_mode_arguments_boilerplate();
     arguments_object_size = kArgumentsObjectSizeStrict;
   } else {
     boilerplate =
-        isolate()->context()->global_context()->arguments_boilerplate();
+        isolate()->context()->native_context()->arguments_boilerplate();
     arguments_object_size = kArgumentsObjectSize;
   }
 
@@ -3568,7 +3988,7 @@ MaybeObject* Heap::AllocateArgumentsObject(Object* callee, int length) {
 
   // Check the state of the object
   ASSERT(JSObject::cast(result)->HasFastProperties());
-  ASSERT(JSObject::cast(result)->HasFastElements());
+  ASSERT(JSObject::cast(result)->HasFastObjectElements());
 
   return result;
 }
@@ -3595,25 +4015,22 @@ MaybeObject* Heap::AllocateInitialMap(JSFunction* fun) {
   // suggested by the function.
   int instance_size = fun->shared()->CalculateInstanceSize();
   int in_object_properties = fun->shared()->CalculateInObjectProperties();
-  Object* map_obj;
-  { MaybeObject* maybe_map_obj = AllocateMap(JS_OBJECT_TYPE, instance_size);
-    if (!maybe_map_obj->ToObject(&map_obj)) return maybe_map_obj;
-  }
+  Map* map;
+  MaybeObject* maybe_map = AllocateMap(JS_OBJECT_TYPE, instance_size);
+  if (!maybe_map->To(&map)) return maybe_map;
 
   // Fetch or allocate prototype.
   Object* prototype;
   if (fun->has_instance_prototype()) {
     prototype = fun->instance_prototype();
   } else {
-    { MaybeObject* maybe_prototype = AllocateFunctionPrototype(fun);
-      if (!maybe_prototype->ToObject(&prototype)) return maybe_prototype;
-    }
+    MaybeObject* maybe_prototype = AllocateFunctionPrototype(fun);
+    if (!maybe_prototype->To(&prototype)) return maybe_prototype;
   }
-  Map* map = Map::cast(map_obj);
   map->set_inobject_properties(in_object_properties);
   map->set_unused_property_fields(in_object_properties);
   map->set_prototype(prototype);
-  ASSERT(map->has_fast_elements());
+  ASSERT(map->has_fast_object_elements());
 
   // If the function has only simple this property assignments add
   // field descriptors for these to the initial map as the object
@@ -3628,21 +4045,17 @@ MaybeObject* Heap::AllocateInitialMap(JSFunction* fun) {
       fun->shared()->ForbidInlineConstructor();
     } else {
       DescriptorArray* descriptors;
-      { MaybeObject* maybe_descriptors_obj = DescriptorArray::Allocate(count);
-        if (!maybe_descriptors_obj->To<DescriptorArray>(&descriptors)) {
-          return maybe_descriptors_obj;
-        }
-      }
+      MaybeObject* maybe_descriptors = DescriptorArray::Allocate(count);
+      if (!maybe_descriptors->To(&descriptors)) return maybe_descriptors;
+
       DescriptorArray::WhitenessWitness witness(descriptors);
       for (int i = 0; i < count; i++) {
         String* name = fun->shared()->GetThisPropertyAssignmentName(i);
         ASSERT(name->IsSymbol());
-        FieldDescriptor field(name, i, NONE);
-        field.SetEnumerationIndex(i);
+        FieldDescriptor field(name, i, NONE, i + 1);
         descriptors->Set(i, &field, witness);
       }
-      descriptors->SetNextEnumerationIndex(count);
-      descriptors->SortUnchecked(witness);
+      descriptors->Sort();
 
       // The descriptors may contain duplicates because the compiler does not
       // guarantee the uniqueness of property names (it would have required
@@ -3651,7 +4064,7 @@ MaybeObject* Heap::AllocateInitialMap(JSFunction* fun) {
       if (HasDuplicates(descriptors)) {
         fun->shared()->ForbidInlineConstructor();
       } else {
-        map->set_instance_descriptors(descriptors);
+        map->InitializeDescriptors(descriptors);
         map->set_pre_allocated_property_fields(count);
         map->set_unused_property_fields(in_object_properties - count);
       }
@@ -3730,8 +4143,7 @@ MaybeObject* Heap::AllocateJSObjectFromMap(Map* map, PretenureFlag pretenure) {
   InitializeJSObjectFromMap(JSObject::cast(obj),
                             FixedArray::cast(properties),
                             map);
-  ASSERT(JSObject::cast(obj)->HasFastSmiOnlyElements() ||
-         JSObject::cast(obj)->HasFastElements());
+  ASSERT(JSObject::cast(obj)->HasFastElements());
   return obj;
 }
 
@@ -3748,14 +4160,88 @@ MaybeObject* Heap::AllocateJSObject(JSFunction* constructor,
     Map::cast(initial_map)->set_constructor(constructor);
   }
   // Allocate the object based on the constructors initial map.
-  MaybeObject* result =
-      AllocateJSObjectFromMap(constructor->initial_map(), pretenure);
+  MaybeObject* result = AllocateJSObjectFromMap(
+      constructor->initial_map(), pretenure);
 #ifdef DEBUG
   // Make sure result is NOT a global object if valid.
   Object* non_failure;
   ASSERT(!result->ToObject(&non_failure) || !non_failure->IsGlobalObject());
 #endif
   return result;
+}
+
+
+MaybeObject* Heap::AllocateJSModule(Context* context, ScopeInfo* scope_info) {
+  // Allocate a fresh map. Modules do not have a prototype.
+  Map* map;
+  MaybeObject* maybe_map = AllocateMap(JS_MODULE_TYPE, JSModule::kSize);
+  if (!maybe_map->To(&map)) return maybe_map;
+  // Allocate the object based on the map.
+  JSModule* module;
+  MaybeObject* maybe_module = AllocateJSObjectFromMap(map, TENURED);
+  if (!maybe_module->To(&module)) return maybe_module;
+  module->set_context(context);
+  module->set_scope_info(scope_info);
+  return module;
+}
+
+
+MaybeObject* Heap::AllocateJSArrayAndStorage(
+    ElementsKind elements_kind,
+    int length,
+    int capacity,
+    ArrayStorageAllocationMode mode,
+    PretenureFlag pretenure) {
+  ASSERT(capacity >= length);
+  MaybeObject* maybe_array = AllocateJSArray(elements_kind, pretenure);
+  JSArray* array;
+  if (!maybe_array->To(&array)) return maybe_array;
+
+  if (capacity == 0) {
+    array->set_length(Smi::FromInt(0));
+    array->set_elements(empty_fixed_array());
+    return array;
+  }
+
+  FixedArrayBase* elms;
+  MaybeObject* maybe_elms = NULL;
+  if (IsFastDoubleElementsKind(elements_kind)) {
+    if (mode == DONT_INITIALIZE_ARRAY_ELEMENTS) {
+      maybe_elms = AllocateUninitializedFixedDoubleArray(capacity);
+    } else {
+      ASSERT(mode == INITIALIZE_ARRAY_ELEMENTS_WITH_HOLE);
+      maybe_elms = AllocateFixedDoubleArrayWithHoles(capacity);
+    }
+  } else {
+    ASSERT(IsFastSmiOrObjectElementsKind(elements_kind));
+    if (mode == DONT_INITIALIZE_ARRAY_ELEMENTS) {
+      maybe_elms = AllocateUninitializedFixedArray(capacity);
+    } else {
+      ASSERT(mode == INITIALIZE_ARRAY_ELEMENTS_WITH_HOLE);
+      maybe_elms = AllocateFixedArrayWithHoles(capacity);
+    }
+  }
+  if (!maybe_elms->To(&elms)) return maybe_elms;
+
+  array->set_elements(elms);
+  array->set_length(Smi::FromInt(length));
+  return array;
+}
+
+
+MaybeObject* Heap::AllocateJSArrayWithElements(
+    FixedArrayBase* elements,
+    ElementsKind elements_kind,
+    int length,
+    PretenureFlag pretenure) {
+  MaybeObject* maybe_array = AllocateJSArray(elements_kind, pretenure);
+  JSArray* array;
+  if (!maybe_array->To(&array)) return maybe_array;
+
+  array->set_elements(elements);
+  array->set_length(Smi::FromInt(length));
+  array->ValidateElements();
+  return array;
 }
 
 
@@ -3808,6 +4294,7 @@ MaybeObject* Heap::AllocateJSFunctionProxy(Object* handler,
 MaybeObject* Heap::AllocateGlobalObject(JSFunction* constructor) {
   ASSERT(constructor->has_initial_map());
   Map* map = constructor->initial_map();
+  ASSERT(map->is_dictionary_map());
 
   // Make sure no field properties are described in the initial map.
   // This guarantees us that normalizing the properties does not
@@ -3825,50 +4312,44 @@ MaybeObject* Heap::AllocateGlobalObject(JSFunction* constructor) {
   int initial_size = map->instance_type() == JS_GLOBAL_OBJECT_TYPE ? 64 : 512;
 
   // Allocate a dictionary object for backing storage.
-  Object* obj;
-  { MaybeObject* maybe_obj =
-        StringDictionary::Allocate(
-            map->NumberOfDescribedProperties() * 2 + initial_size);
-    if (!maybe_obj->ToObject(&obj)) return maybe_obj;
-  }
-  StringDictionary* dictionary = StringDictionary::cast(obj);
+  StringDictionary* dictionary;
+  MaybeObject* maybe_dictionary =
+      StringDictionary::Allocate(
+          map->NumberOfOwnDescriptors() * 2 + initial_size);
+  if (!maybe_dictionary->To(&dictionary)) return maybe_dictionary;
 
   // The global object might be created from an object template with accessors.
   // Fill these accessors into the dictionary.
   DescriptorArray* descs = map->instance_descriptors();
   for (int i = 0; i < descs->number_of_descriptors(); i++) {
-    PropertyDetails details(descs->GetDetails(i));
+    PropertyDetails details = descs->GetDetails(i);
     ASSERT(details.type() == CALLBACKS);  // Only accessors are expected.
-    PropertyDetails d =
-        PropertyDetails(details.attributes(), CALLBACKS, details.index());
+    PropertyDetails d = PropertyDetails(details.attributes(),
+                                        CALLBACKS,
+                                        details.descriptor_index());
     Object* value = descs->GetCallbacksObject(i);
-    { MaybeObject* maybe_value = AllocateJSGlobalPropertyCell(value);
-      if (!maybe_value->ToObject(&value)) return maybe_value;
-    }
+    MaybeObject* maybe_value = AllocateJSGlobalPropertyCell(value);
+    if (!maybe_value->ToObject(&value)) return maybe_value;
 
-    Object* result;
-    { MaybeObject* maybe_result = dictionary->Add(descs->GetKey(i), value, d);
-      if (!maybe_result->ToObject(&result)) return maybe_result;
-    }
-    dictionary = StringDictionary::cast(result);
+    MaybeObject* maybe_added = dictionary->Add(descs->GetKey(i), value, d);
+    if (!maybe_added->To(&dictionary)) return maybe_added;
   }
 
   // Allocate the global object and initialize it with the backing store.
-  { MaybeObject* maybe_obj = Allocate(map, OLD_POINTER_SPACE);
-    if (!maybe_obj->ToObject(&obj)) return maybe_obj;
-  }
-  JSObject* global = JSObject::cast(obj);
+  JSObject* global;
+  MaybeObject* maybe_global = Allocate(map, OLD_POINTER_SPACE);
+  if (!maybe_global->To(&global)) return maybe_global;
+
   InitializeJSObjectFromMap(global, dictionary, map);
 
   // Create a new map for the global object.
-  { MaybeObject* maybe_obj = map->CopyDropDescriptors();
-    if (!maybe_obj->ToObject(&obj)) return maybe_obj;
-  }
-  Map* new_map = Map::cast(obj);
+  Map* new_map;
+  MaybeObject* maybe_map = map->CopyDropDescriptors();
+  if (!maybe_map->To(&new_map)) return maybe_map;
+  new_map->set_dictionary_map(true);
 
   // Set up the global object as a normalized object.
   global->set_map(new_map);
-  global->map()->clear_instance_descriptors();
   global->set_properties(dictionary);
 
   // Make sure result is a global object with properties in dictionary.
@@ -3997,7 +4478,7 @@ MaybeObject* Heap::ReinitializeJSReceiver(
     map->set_function_with_prototype(true);
     InitializeFunction(JSFunction::cast(object), shared, the_hole_value());
     JSFunction::cast(object)->set_context(
-        isolate()->context()->global_context());
+        isolate()->context()->native_context());
   }
 
   // Put in filler if the new object is smaller than the old.
@@ -4036,39 +4517,40 @@ MaybeObject* Heap::ReinitializeJSGlobalProxy(JSFunction* constructor,
 }
 
 
-MaybeObject* Heap::AllocateStringFromAscii(Vector<const char> string,
+MaybeObject* Heap::AllocateStringFromOneByte(Vector<const char> string,
                                            PretenureFlag pretenure) {
-  if (string.length() == 1) {
+  int length = string.length();
+  if (length == 1) {
     return Heap::LookupSingleCharacterStringFromCode(string[0]);
   }
   Object* result;
   { MaybeObject* maybe_result =
-        AllocateRawAsciiString(string.length(), pretenure);
+        AllocateRawOneByteString(string.length(), pretenure);
     if (!maybe_result->ToObject(&result)) return maybe_result;
   }
 
   // Copy the characters into the new object.
-  SeqAsciiString* string_result = SeqAsciiString::cast(result);
-  for (int i = 0; i < string.length(); i++) {
-    string_result->SeqAsciiStringSet(i, string[i]);
-  }
+  CopyChars(SeqOneByteString::cast(result)->GetChars(), string.start(), length);
   return result;
 }
 
 
 MaybeObject* Heap::AllocateStringFromUtf8Slow(Vector<const char> string,
+                                              int non_ascii_start,
                                               PretenureFlag pretenure) {
-  // V8 only supports characters in the Basic Multilingual Plane.
-  const uc32 kMaxSupportedChar = 0xFFFF;
-  // Count the number of characters in the UTF-8 string and check if
-  // it is an ASCII string.
+  // Continue counting the number of characters in the UTF-8 string, starting
+  // from the first non-ascii character or word.
+  int chars = non_ascii_start;
   Access<UnicodeCache::Utf8Decoder>
       decoder(isolate_->unicode_cache()->utf8_decoder());
-  decoder->Reset(string.start(), string.length());
-  int chars = 0;
+  decoder->Reset(string.start() + non_ascii_start, string.length() - chars);
   while (decoder->has_more()) {
-    decoder->GetNext();
-    chars++;
+    uint32_t r = decoder->GetNext();
+    if (r <= unibrow::Utf16::kMaxNonSurrogateCharCode) {
+      chars++;
+    } else {
+      chars += 2;
+    }
   }
 
   Object* result;
@@ -4077,12 +4559,17 @@ MaybeObject* Heap::AllocateStringFromUtf8Slow(Vector<const char> string,
   }
 
   // Convert and copy the characters into the new object.
-  String* string_result = String::cast(result);
+  SeqTwoByteString* twobyte = SeqTwoByteString::cast(result);
   decoder->Reset(string.start(), string.length());
-  for (int i = 0; i < chars; i++) {
-    uc32 r = decoder->GetNext();
-    if (r > kMaxSupportedChar) { r = unibrow::Utf8::kBadChar; }
-    string_result->Set(i, r);
+  int i = 0;
+  while (i < chars) {
+    uint32_t r = decoder->GetNext();
+    if (r > unibrow::Utf16::kMaxNonSurrogateCharCode) {
+      twobyte->SeqTwoByteStringSet(i++, unibrow::Utf16::LeadSurrogate(r));
+      twobyte->SeqTwoByteStringSet(i++, unibrow::Utf16::TrailSurrogate(r));
+    } else {
+      twobyte->SeqTwoByteStringSet(i++, r);
+    }
   }
   return result;
 }
@@ -4091,20 +4578,18 @@ MaybeObject* Heap::AllocateStringFromUtf8Slow(Vector<const char> string,
 MaybeObject* Heap::AllocateStringFromTwoByte(Vector<const uc16> string,
                                              PretenureFlag pretenure) {
   // Check if the string is an ASCII string.
-  MaybeObject* maybe_result;
-  if (String::IsAscii(string.start(), string.length())) {
-    maybe_result = AllocateRawAsciiString(string.length(), pretenure);
-  } else {  // It's not an ASCII string.
-    maybe_result = AllocateRawTwoByteString(string.length(), pretenure);
-  }
   Object* result;
-  if (!maybe_result->ToObject(&result)) return maybe_result;
+  int length = string.length();
+  const uc16* start = string.start();
 
-  // Copy the characters into the new object, which may be either ASCII or
-  // UTF-16.
-  String* string_result = String::cast(result);
-  for (int i = 0; i < string.length(); i++) {
-    string_result->Set(i, string[i]);
+  if (String::IsAscii(start, length)) {
+    MaybeObject* maybe_result = AllocateRawOneByteString(length, pretenure);
+    if (!maybe_result->ToObject(&result)) return maybe_result;
+    CopyChars(SeqOneByteString::cast(result)->GetChars(), start, length);
+  } else {  // It's not an ASCII string.
+    MaybeObject* maybe_result = AllocateRawTwoByteString(length, pretenure);
+    if (!maybe_result->ToObject(&result)) return maybe_result;
+    CopyChars(SeqTwoByteString::cast(result)->GetChars(), start, length);
   }
   return result;
 }
@@ -4139,7 +4624,7 @@ MaybeObject* Heap::AllocateInternalSymbol(unibrow::CharacterStream* buffer,
                                           uint32_t hash_field) {
   ASSERT(chars >= 0);
   // Ensure the chars matches the number of characters in the buffer.
-  ASSERT(static_cast<unsigned>(chars) == buffer->Length());
+  ASSERT(static_cast<unsigned>(chars) == buffer->Utf16Length());
   // Determine whether the string is ASCII.
   bool is_ascii = true;
   while (buffer->has_more()) {
@@ -4155,11 +4640,11 @@ MaybeObject* Heap::AllocateInternalSymbol(unibrow::CharacterStream* buffer,
   Map* map;
 
   if (is_ascii) {
-    if (chars > SeqAsciiString::kMaxLength) {
+    if (chars > SeqOneByteString::kMaxLength) {
       return Failure::OutOfMemoryException();
     }
     map = ascii_symbol_map();
-    size = SeqAsciiString::SizeFor(chars);
+    size = SeqOneByteString::SizeFor(chars);
   } else {
     if (chars > SeqTwoByteString::kMaxLength) {
       return Failure::OutOfMemoryException();
@@ -4185,20 +4670,28 @@ MaybeObject* Heap::AllocateInternalSymbol(unibrow::CharacterStream* buffer,
   ASSERT_EQ(size, answer->Size());
 
   // Fill in the characters.
-  for (int i = 0; i < chars; i++) {
-    answer->Set(i, buffer->GetNext());
+  int i = 0;
+  while (i < chars) {
+    uint32_t character = buffer->GetNext();
+    if (character > unibrow::Utf16::kMaxNonSurrogateCharCode) {
+      answer->Set(i++, unibrow::Utf16::LeadSurrogate(character));
+      answer->Set(i++, unibrow::Utf16::TrailSurrogate(character));
+    } else {
+      answer->Set(i++, character);
+    }
   }
   return answer;
 }
 
 
-MaybeObject* Heap::AllocateRawAsciiString(int length, PretenureFlag pretenure) {
-  if (length < 0 || length > SeqAsciiString::kMaxLength) {
+MaybeObject* Heap::AllocateRawOneByteString(int length,
+                                            PretenureFlag pretenure) {
+  if (length < 0 || length > SeqOneByteString::kMaxLength) {
     return Failure::OutOfMemoryException();
   }
 
-  int size = SeqAsciiString::SizeFor(length);
-  ASSERT(size <= SeqAsciiString::kMaxSize);
+  int size = SeqOneByteString::SizeFor(length);
+  ASSERT(size <= SeqOneByteString::kMaxSize);
 
   AllocationSpace space = (pretenure == TENURED) ? OLD_DATA_SPACE : NEW_SPACE;
   AllocationSpace retry_space = OLD_DATA_SPACE;
@@ -4225,6 +4718,16 @@ MaybeObject* Heap::AllocateRawAsciiString(int length, PretenureFlag pretenure) {
   String::cast(result)->set_length(length);
   String::cast(result)->set_hash_field(String::kEmptyHashField);
   ASSERT_EQ(size, HeapObject::cast(result)->Size());
+
+#ifdef VERIFY_HEAP
+  if (FLAG_verify_heap) {
+    // Initialize string's content to ensure ASCII-ness (character range 0-127)
+    // as required when verifying the heap.
+    char* dest = SeqOneByteString::cast(result)->GetChars();
+    memset(dest, 0x0F, length * kCharSize);
+  }
+#endif
+
   return result;
 }
 
@@ -4262,6 +4765,25 @@ MaybeObject* Heap::AllocateRawTwoByteString(int length,
   String::cast(result)->set_hash_field(String::kEmptyHashField);
   ASSERT_EQ(size, HeapObject::cast(result)->Size());
   return result;
+}
+
+
+MaybeObject* Heap::AllocateJSArray(
+    ElementsKind elements_kind,
+    PretenureFlag pretenure) {
+  Context* native_context = isolate()->context()->native_context();
+  JSFunction* array_function = native_context->array_function();
+  Map* map = array_function->initial_map();
+  Object* maybe_map_array = native_context->js_array_maps();
+  if (!maybe_map_array->IsUndefined()) {
+    Object* maybe_transitioned_map =
+        FixedArray::cast(maybe_map_array)->get(elements_kind);
+    if (!maybe_transitioned_map->IsUndefined()) {
+      map = Map::cast(maybe_transitioned_map);
+    }
+  }
+
+  return AllocateJSObjectFromMap(map, pretenure);
 }
 
 
@@ -4453,17 +4975,38 @@ MaybeObject* Heap::AllocateEmptyFixedDoubleArray() {
 MaybeObject* Heap::AllocateUninitializedFixedDoubleArray(
     int length,
     PretenureFlag pretenure) {
-  if (length == 0) return empty_fixed_double_array();
+  if (length == 0) return empty_fixed_array();
 
-  Object* obj;
-  { MaybeObject* maybe_obj = AllocateRawFixedDoubleArray(length, pretenure);
-    if (!maybe_obj->ToObject(&obj)) return maybe_obj;
+  Object* elements_object;
+  MaybeObject* maybe_obj = AllocateRawFixedDoubleArray(length, pretenure);
+  if (!maybe_obj->ToObject(&elements_object)) return maybe_obj;
+  FixedDoubleArray* elements =
+      reinterpret_cast<FixedDoubleArray*>(elements_object);
+
+  elements->set_map_no_write_barrier(fixed_double_array_map());
+  elements->set_length(length);
+  return elements;
+}
+
+
+MaybeObject* Heap::AllocateFixedDoubleArrayWithHoles(
+    int length,
+    PretenureFlag pretenure) {
+  if (length == 0) return empty_fixed_array();
+
+  Object* elements_object;
+  MaybeObject* maybe_obj = AllocateRawFixedDoubleArray(length, pretenure);
+  if (!maybe_obj->ToObject(&elements_object)) return maybe_obj;
+  FixedDoubleArray* elements =
+      reinterpret_cast<FixedDoubleArray*>(elements_object);
+
+  for (int i = 0; i < length; ++i) {
+    elements->set_the_hole(i);
   }
 
-  reinterpret_cast<FixedDoubleArray*>(obj)->set_map_no_write_barrier(
-      fixed_double_array_map());
-  FixedDoubleArray::cast(obj)->set_length(length);
-  return obj;
+  elements->set_map_no_write_barrier(fixed_double_array_map());
+  elements->set_length(length);
+  return elements;
 }
 
 
@@ -4476,6 +5019,11 @@ MaybeObject* Heap::AllocateRawFixedDoubleArray(int length,
   AllocationSpace space =
       (pretenure == TENURED) ? OLD_DATA_SPACE : NEW_SPACE;
   int size = FixedDoubleArray::SizeFor(length);
+
+#ifndef V8_HOST_ARCH_64_BIT
+  size += kPointerSize;
+#endif
+
   if (space == NEW_SPACE && size > kMaxObjectSizeInNewSpace) {
     // Too big for new space.
     space = LO_SPACE;
@@ -4488,7 +5036,12 @@ MaybeObject* Heap::AllocateRawFixedDoubleArray(int length,
   AllocationSpace retry_space =
       (size <= Page::kMaxNonCodeHeapObjectSize) ? OLD_DATA_SPACE : LO_SPACE;
 
-  return AllocateRaw(size, space, retry_space);
+  HeapObject* object;
+  { MaybeObject* maybe_object = AllocateRaw(size, space, retry_space);
+    if (!maybe_object->To<HeapObject>(&object)) return maybe_object;
+  }
+
+  return EnsureDoubleAligned(this, object, size);
 }
 
 
@@ -4504,17 +5057,51 @@ MaybeObject* Heap::AllocateHashTable(int length, PretenureFlag pretenure) {
 }
 
 
-MaybeObject* Heap::AllocateGlobalContext() {
+MaybeObject* Heap::AllocateNativeContext() {
   Object* result;
   { MaybeObject* maybe_result =
-        AllocateFixedArray(Context::GLOBAL_CONTEXT_SLOTS);
+        AllocateFixedArray(Context::NATIVE_CONTEXT_SLOTS);
+    if (!maybe_result->ToObject(&result)) return maybe_result;
+  }
+  Context* context = reinterpret_cast<Context*>(result);
+  context->set_map_no_write_barrier(native_context_map());
+  context->set_js_array_maps(undefined_value());
+  ASSERT(context->IsNativeContext());
+  ASSERT(result->IsContext());
+  return result;
+}
+
+
+MaybeObject* Heap::AllocateGlobalContext(JSFunction* function,
+                                         ScopeInfo* scope_info) {
+  Object* result;
+  { MaybeObject* maybe_result =
+        AllocateFixedArray(scope_info->ContextLength(), TENURED);
     if (!maybe_result->ToObject(&result)) return maybe_result;
   }
   Context* context = reinterpret_cast<Context*>(result);
   context->set_map_no_write_barrier(global_context_map());
+  context->set_closure(function);
+  context->set_previous(function->context());
+  context->set_extension(scope_info);
+  context->set_global_object(function->context()->global_object());
   ASSERT(context->IsGlobalContext());
   ASSERT(result->IsContext());
-  return result;
+  return context;
+}
+
+
+MaybeObject* Heap::AllocateModuleContext(ScopeInfo* scope_info) {
+  Object* result;
+  { MaybeObject* maybe_result =
+        AllocateFixedArray(scope_info->ContextLength(), TENURED);
+    if (!maybe_result->ToObject(&result)) return maybe_result;
+  }
+  Context* context = reinterpret_cast<Context*>(result);
+  context->set_map_no_write_barrier(module_context_map());
+  // Instance link will be set later.
+  context->set_extension(Smi::FromInt(0));
+  return context;
 }
 
 
@@ -4528,8 +5115,8 @@ MaybeObject* Heap::AllocateFunctionContext(int length, JSFunction* function) {
   context->set_map_no_write_barrier(function_context_map());
   context->set_closure(function);
   context->set_previous(function->context());
-  context->set_extension(NULL);
-  context->set_global(function->context()->global());
+  context->set_extension(Smi::FromInt(0));
+  context->set_global_object(function->context()->global_object());
   return context;
 }
 
@@ -4549,7 +5136,7 @@ MaybeObject* Heap::AllocateCatchContext(JSFunction* function,
   context->set_closure(function);
   context->set_previous(previous);
   context->set_extension(name);
-  context->set_global(previous->global());
+  context->set_global_object(previous->global_object());
   context->set(Context::THROWN_OBJECT_INDEX, thrown_object);
   return context;
 }
@@ -4567,7 +5154,7 @@ MaybeObject* Heap::AllocateWithContext(JSFunction* function,
   context->set_closure(function);
   context->set_previous(previous);
   context->set_extension(extension);
-  context->set_global(previous->global());
+  context->set_global_object(previous->global_object());
   return context;
 }
 
@@ -4585,7 +5172,7 @@ MaybeObject* Heap::AllocateBlockContext(JSFunction* function,
   context->set_closure(function);
   context->set_previous(previous);
   context->set_extension(scope_info);
-  context->set_global(previous->global());
+  context->set_global_object(previous->global_object());
   return context;
 }
 
@@ -4596,6 +5183,20 @@ MaybeObject* Heap::AllocateScopeInfo(int length) {
   if (!maybe_scope_info->To(&scope_info)) return maybe_scope_info;
   scope_info->set_map_no_write_barrier(scope_info_map());
   return scope_info;
+}
+
+
+MaybeObject* Heap::AllocateExternal(void* value) {
+  Foreign* foreign;
+  { MaybeObject* maybe_result = AllocateForeign(static_cast<Address>(value));
+    if (!maybe_result->To(&foreign)) return maybe_result;
+  }
+  JSObject* external;
+  { MaybeObject* maybe_result = AllocateJSObjectFromMap(external_map());
+    if (!maybe_result->To(&external)) return maybe_result;
+  }
+  external->SetInternalField(0, foreign);
+  return external;
 }
 
 
@@ -4637,11 +5238,66 @@ void Heap::EnsureHeapIsIterable() {
 }
 
 
+void Heap::AdvanceIdleIncrementalMarking(intptr_t step_size) {
+  incremental_marking()->Step(step_size,
+                              IncrementalMarking::NO_GC_VIA_STACK_GUARD);
+
+  if (incremental_marking()->IsComplete()) {
+    bool uncommit = false;
+    if (gc_count_at_last_idle_gc_ == gc_count_) {
+      // No GC since the last full GC, the mutator is probably not active.
+      isolate_->compilation_cache()->Clear();
+      uncommit = true;
+    }
+    CollectAllGarbage(kNoGCFlags, "idle notification: finalize incremental");
+    gc_count_at_last_idle_gc_ = gc_count_;
+    if (uncommit) {
+      new_space_.Shrink();
+      UncommitFromSpace();
+    }
+  }
+}
+
+
 bool Heap::IdleNotification(int hint) {
-  if (hint >= 1000) return IdleGlobalGC();
-  if (contexts_disposed_ > 0 || !FLAG_incremental_marking ||
-      FLAG_expose_gc || Serializer::enabled()) {
-    return true;
+  // Hints greater than this value indicate that
+  // the embedder is requesting a lot of GC work.
+  const int kMaxHint = 1000;
+  // Minimal hint that allows to do full GC.
+  const int kMinHintForFullGC = 100;
+  intptr_t size_factor = Min(Max(hint, 20), kMaxHint) / 4;
+  // The size factor is in range [5..250]. The numbers here are chosen from
+  // experiments. If you changes them, make sure to test with
+  // chrome/performance_ui_tests --gtest_filter="GeneralMixMemoryTest.*
+  intptr_t step_size =
+      size_factor * IncrementalMarking::kAllocatedThreshold;
+
+  if (contexts_disposed_ > 0) {
+    if (hint >= kMaxHint) {
+      // The embedder is requesting a lot of GC work after context disposal,
+      // we age inline caches so that they don't keep objects from
+      // the old context alive.
+      AgeInlineCaches();
+    }
+    int mark_sweep_time = Min(TimeMarkSweepWouldTakeInMs(), 1000);
+    if (hint >= mark_sweep_time && !FLAG_expose_gc &&
+        incremental_marking()->IsStopped()) {
+      HistogramTimerScope scope(isolate_->counters()->gc_context());
+      CollectAllGarbage(kReduceMemoryFootprintMask,
+                        "idle notification: contexts disposed");
+    } else {
+      AdvanceIdleIncrementalMarking(step_size);
+      contexts_disposed_ = 0;
+    }
+    // After context disposal there is likely a lot of garbage remaining, reset
+    // the idle notification counters in order to trigger more incremental GCs
+    // on subsequent idle notifications.
+    StartIdleRound();
+    return false;
+  }
+
+  if (!FLAG_incremental_marking || FLAG_expose_gc || Serializer::enabled()) {
+    return IdleGlobalGC();
   }
 
   // By doing small chunks of GC work in each IdleNotification,
@@ -4653,9 +5309,6 @@ bool Heap::IdleNotification(int hint) {
   // 3. many lazy sweep steps.
   // Use mark-sweep-compact events to count incremental GCs in a round.
 
-  intptr_t size_factor = Min(Max(hint, 30), 1000) / 10;
-  // The size factor is in range [3..100].
-  intptr_t step_size = size_factor * IncrementalMarking::kAllocatedThreshold;
 
   if (incremental_marking()->IsStopped()) {
     if (!IsSweepingComplete() &&
@@ -4676,37 +5329,29 @@ bool Heap::IdleNotification(int hint) {
   mark_sweeps_since_idle_round_started_ += new_mark_sweeps;
   ms_count_at_last_idle_notification_ = ms_count_;
 
-  if (mark_sweeps_since_idle_round_started_ >= kMaxMarkSweepsInIdleRound) {
+  int remaining_mark_sweeps = kMaxMarkSweepsInIdleRound -
+                              mark_sweeps_since_idle_round_started_;
+
+  if (remaining_mark_sweeps <= 0) {
     FinishIdleRound();
     return true;
   }
 
   if (incremental_marking()->IsStopped()) {
-    if (hint < 1000 && !WorthStartingGCWhenIdle()) {
-      FinishIdleRound();
-      return true;
+    // If there are no more than two GCs left in this idle round and we are
+    // allowed to do a full GC, then make those GCs full in order to compact
+    // the code space.
+    // TODO(ulan): Once we enable code compaction for incremental marking,
+    // we can get rid of this special case and always start incremental marking.
+    if (remaining_mark_sweeps <= 2 && hint >= kMinHintForFullGC) {
+      CollectAllGarbage(kReduceMemoryFootprintMask,
+                        "idle notification: finalize idle round");
+    } else {
+      incremental_marking()->Start();
     }
-    incremental_marking()->Start();
   }
-
-  // This flag prevents incremental marking from requesting GC via stack guard
-  idle_notification_will_schedule_next_gc_ = true;
-  incremental_marking()->Step(step_size);
-  idle_notification_will_schedule_next_gc_ = false;
-
-  if (incremental_marking()->IsComplete()) {
-    bool uncommit = false;
-    if (gc_count_at_last_idle_gc_ == gc_count_) {
-      // No GC since the last full GC, the mutator is probably not active.
-      isolate_->compilation_cache()->Clear();
-      uncommit = true;
-    }
-    CollectAllGarbage(kNoGCFlags, "idle notification: finalize incremental");
-    gc_count_at_last_idle_gc_ = gc_count_;
-    if (uncommit) {
-      new_space_.Shrink();
-      UncommitFromSpace();
-    }
+  if (!incremental_marking()->IsStopped()) {
+    AdvanceIdleIncrementalMarking(step_size);
   }
   return false;
 }
@@ -4740,13 +5385,7 @@ bool Heap::IdleGlobalGC() {
   }
 
   if (number_idle_notifications_ == kIdlesBeforeScavenge) {
-    if (contexts_disposed_ > 0) {
-      HistogramTimerScope scope(isolate_->counters()->gc_context());
-      CollectAllGarbage(kReduceMemoryFootprintMask,
-                        "idle notification: contexts disposed");
-    } else {
-      CollectGarbage(NEW_SPACE, "idle notification");
-    }
+    CollectGarbage(NEW_SPACE, "idle notification");
     new_space_.Shrink();
     last_idle_notification_gc_count_ = gc_count_;
   } else if (number_idle_notifications_ == kIdlesBeforeMarkSweep) {
@@ -4765,23 +5404,6 @@ bool Heap::IdleGlobalGC() {
     last_idle_notification_gc_count_ = gc_count_;
     number_idle_notifications_ = 0;
     finished = true;
-  } else if (contexts_disposed_ > 0) {
-    if (FLAG_expose_gc) {
-      contexts_disposed_ = 0;
-    } else {
-      HistogramTimerScope scope(isolate_->counters()->gc_context());
-      CollectAllGarbage(kReduceMemoryFootprintMask,
-                        "idle notification: contexts disposed");
-      last_idle_notification_gc_count_ = gc_count_;
-    }
-    // If this is the first idle notification, we reset the
-    // notification count to avoid letting idle notifications for
-    // context disposal garbage collections start a potentially too
-    // aggressive idle GC cycle.
-    if (number_idle_notifications_ <= 1) {
-      number_idle_notifications_ = 0;
-      uncommit = false;
-    }
   } else if (number_idle_notifications_ > kIdlesBeforeMarkCompact) {
     // If we have received more than kIdlesBeforeMarkCompact idle
     // notifications we do not perform any cleanup because we don't
@@ -4789,11 +5411,6 @@ bool Heap::IdleGlobalGC() {
     finished = true;
   }
 
-  // Make sure that we have no pending context disposals and
-  // conditionally uncommit from space.
-  // Take into account that we might have decided to delay full collection
-  // because incremental marking is in progress.
-  ASSERT((contexts_disposed_ == 0) || !incremental_marking()->IsStopped());
   if (uncommit) UncommitFromSpace();
 
   return finished;
@@ -4909,9 +5526,9 @@ bool Heap::InSpace(Address addr, AllocationSpace space) {
 }
 
 
-#ifdef DEBUG
+#ifdef VERIFY_HEAP
 void Heap::Verify() {
-  ASSERT(HasBeenSetUp());
+  CHECK(HasBeenSetUp());
 
   store_buffer()->Verify();
 
@@ -4930,8 +5547,7 @@ void Heap::Verify() {
 
   lo_space_->Verify();
 }
-
-#endif  // DEBUG
+#endif
 
 
 MaybeObject* Heap::LookupSymbol(Vector<const char> string) {
@@ -4964,7 +5580,7 @@ MaybeObject* Heap::LookupAsciiSymbol(Vector<const char> string) {
 }
 
 
-MaybeObject* Heap::LookupAsciiSymbol(Handle<SeqAsciiString> string,
+MaybeObject* Heap::LookupAsciiSymbol(Handle<SeqOneByteString> string,
                                      int from,
                                      int length) {
   Object* symbol = NULL;
@@ -5024,7 +5640,6 @@ bool Heap::LookupSymbolIfExists(String* string, String** symbol) {
 }
 
 
-#ifdef DEBUG
 void Heap::ZapFromSpace() {
   NewSpacePageIterator it(new_space_.FromSpaceStart(),
                           new_space_.FromSpaceEnd());
@@ -5037,7 +5652,6 @@ void Heap::ZapFromSpace() {
     }
   }
 }
-#endif  // DEBUG
 
 
 void Heap::IterateAndMarkPointersToFromSpace(Address start,
@@ -5287,6 +5901,7 @@ void Heap::IterateStrongRoots(ObjectVisitor* v, VisitMode mode) {
 
   // Iterate over local handles in handle scopes.
   isolate_->handle_scope_implementer()->Iterate(v);
+  isolate_->IterateDeferredHandles(v);
   v->Synchronize(VisitorSynchronization::kHandleScope);
 
   // Iterate over the builtin code objects and code stubs in the
@@ -5340,12 +5955,17 @@ bool Heap::ConfigureHeap(int max_semispace_size,
                          intptr_t max_executable_size) {
   if (HasBeenSetUp()) return false;
 
+  if (FLAG_stress_compaction) {
+    // This will cause more frequent GCs when stressing.
+    max_semispace_size_ = Page::kPageSize;
+  }
+
   if (max_semispace_size > 0) {
     if (max_semispace_size < Page::kPageSize) {
       max_semispace_size = Page::kPageSize;
       if (FLAG_trace_gc) {
-        PrintF("Max semispace size cannot be less than %dkbytes\n",
-               Page::kPageSize >> 10);
+        PrintPID("Max semispace size cannot be less than %dkbytes\n",
+                 Page::kPageSize >> 10);
       }
     }
     max_semispace_size_ = max_semispace_size;
@@ -5360,8 +5980,8 @@ bool Heap::ConfigureHeap(int max_semispace_size,
     if (max_semispace_size_ > reserved_semispace_size_) {
       max_semispace_size_ = reserved_semispace_size_;
       if (FLAG_trace_gc) {
-        PrintF("Max semispace size cannot be more than %dkbytes\n",
-               reserved_semispace_size_ >> 10);
+        PrintPID("Max semispace size cannot be more than %dkbytes\n",
+                 reserved_semispace_size_ >> 10);
       }
     }
   } else {
@@ -5386,7 +6006,7 @@ bool Heap::ConfigureHeap(int max_semispace_size,
   max_semispace_size_ = RoundUpToPowerOf2(max_semispace_size_);
   reserved_semispace_size_ = RoundUpToPowerOf2(reserved_semispace_size_);
   initial_semispace_size_ = Min(initial_semispace_size_, max_semispace_size_);
-  external_allocation_limit_ = 10 * max_semispace_size_;
+  external_allocation_limit_ = 16 * max_semispace_size_;
 
   // The old generation is paged and needs at least one page for each space.
   int paged_space_count = LAST_PAGED_SPACE - FIRST_PAGED_SPACE + 1;
@@ -5412,15 +6032,15 @@ void Heap::RecordStats(HeapStats* stats, bool take_snapshot) {
   *stats->end_marker = HeapStats::kEndMarker;
   *stats->new_space_size = new_space_.SizeAsInt();
   *stats->new_space_capacity = static_cast<int>(new_space_.Capacity());
-  *stats->old_pointer_space_size = old_pointer_space_->Size();
+  *stats->old_pointer_space_size = old_pointer_space_->SizeOfObjects();
   *stats->old_pointer_space_capacity = old_pointer_space_->Capacity();
-  *stats->old_data_space_size = old_data_space_->Size();
+  *stats->old_data_space_size = old_data_space_->SizeOfObjects();
   *stats->old_data_space_capacity = old_data_space_->Capacity();
-  *stats->code_space_size = code_space_->Size();
+  *stats->code_space_size = code_space_->SizeOfObjects();
   *stats->code_space_capacity = code_space_->Capacity();
-  *stats->map_space_size = map_space_->Size();
+  *stats->map_space_size = map_space_->SizeOfObjects();
   *stats->map_space_capacity = map_space_->Capacity();
-  *stats->cell_space_size = cell_space_->Size();
+  *stats->cell_space_size = cell_space_->SizeOfObjects();
   *stats->cell_space_capacity = cell_space_->Capacity();
   *stats->lo_space_size = lo_space_->Size();
   isolate_->global_handles()->RecordStats(stats);
@@ -5444,16 +6064,6 @@ void Heap::RecordStats(HeapStats* stats, bool take_snapshot) {
 }
 
 
-intptr_t Heap::PromotedSpaceSize() {
-  return old_pointer_space_->Size()
-      + old_data_space_->Size()
-      + code_space_->Size()
-      + map_space_->Size()
-      + cell_space_->Size()
-      + lo_space_->Size();
-}
-
-
 intptr_t Heap::PromotedSpaceSizeOfObjects() {
   return old_pointer_space_->SizeOfObjects()
       + old_data_space_->SizeOfObjects()
@@ -5464,183 +6074,25 @@ intptr_t Heap::PromotedSpaceSizeOfObjects() {
 }
 
 
-int Heap::PromotedExternalMemorySize() {
+intptr_t Heap::PromotedExternalMemorySize() {
   if (amount_of_external_allocated_memory_
       <= amount_of_external_allocated_memory_at_last_global_gc_) return 0;
   return amount_of_external_allocated_memory_
       - amount_of_external_allocated_memory_at_last_global_gc_;
 }
 
-#ifdef DEBUG
 
-// Tags 0, 1, and 3 are used. Use 2 for marking visited HeapObject.
-static const int kMarkTag = 2;
+V8_DECLARE_ONCE(initialize_gc_once);
 
-
-class HeapDebugUtils {
- public:
-  explicit HeapDebugUtils(Heap* heap)
-    : search_for_any_global_(false),
-      search_target_(NULL),
-      found_target_(false),
-      object_stack_(20),
-      heap_(heap) {
-  }
-
-  class MarkObjectVisitor : public ObjectVisitor {
-   public:
-    explicit MarkObjectVisitor(HeapDebugUtils* utils) : utils_(utils) { }
-
-    void VisitPointers(Object** start, Object** end) {
-      // Copy all HeapObject pointers in [start, end)
-      for (Object** p = start; p < end; p++) {
-        if ((*p)->IsHeapObject())
-          utils_->MarkObjectRecursively(p);
-      }
-    }
-
-    HeapDebugUtils* utils_;
-  };
-
-  void MarkObjectRecursively(Object** p) {
-    if (!(*p)->IsHeapObject()) return;
-
-    HeapObject* obj = HeapObject::cast(*p);
-
-    Object* map = obj->map();
-
-    if (!map->IsHeapObject()) return;  // visited before
-
-    if (found_target_) return;  // stop if target found
-    object_stack_.Add(obj);
-    if ((search_for_any_global_ && obj->IsJSGlobalObject()) ||
-        (!search_for_any_global_ && (obj == search_target_))) {
-      found_target_ = true;
-      return;
-    }
-
-    // not visited yet
-    Map* map_p = reinterpret_cast<Map*>(HeapObject::cast(map));
-
-    Address map_addr = map_p->address();
-
-    obj->set_map_no_write_barrier(reinterpret_cast<Map*>(map_addr + kMarkTag));
-
-    MarkObjectRecursively(&map);
-
-    MarkObjectVisitor mark_visitor(this);
-
-    obj->IterateBody(map_p->instance_type(), obj->SizeFromMap(map_p),
-                     &mark_visitor);
-
-    if (!found_target_)  // don't pop if found the target
-      object_stack_.RemoveLast();
-  }
-
-
-  class UnmarkObjectVisitor : public ObjectVisitor {
-   public:
-    explicit UnmarkObjectVisitor(HeapDebugUtils* utils) : utils_(utils) { }
-
-    void VisitPointers(Object** start, Object** end) {
-      // Copy all HeapObject pointers in [start, end)
-      for (Object** p = start; p < end; p++) {
-        if ((*p)->IsHeapObject())
-          utils_->UnmarkObjectRecursively(p);
-      }
-    }
-
-    HeapDebugUtils* utils_;
-  };
-
-
-  void UnmarkObjectRecursively(Object** p) {
-    if (!(*p)->IsHeapObject()) return;
-
-    HeapObject* obj = HeapObject::cast(*p);
-
-    Object* map = obj->map();
-
-    if (map->IsHeapObject()) return;  // unmarked already
-
-    Address map_addr = reinterpret_cast<Address>(map);
-
-    map_addr -= kMarkTag;
-
-    ASSERT_TAG_ALIGNED(map_addr);
-
-    HeapObject* map_p = HeapObject::FromAddress(map_addr);
-
-    obj->set_map_no_write_barrier(reinterpret_cast<Map*>(map_p));
-
-    UnmarkObjectRecursively(reinterpret_cast<Object**>(&map_p));
-
-    UnmarkObjectVisitor unmark_visitor(this);
-
-    obj->IterateBody(Map::cast(map_p)->instance_type(),
-                     obj->SizeFromMap(Map::cast(map_p)),
-                     &unmark_visitor);
-  }
-
-
-  void MarkRootObjectRecursively(Object** root) {
-    if (search_for_any_global_) {
-      ASSERT(search_target_ == NULL);
-    } else {
-      ASSERT(search_target_->IsHeapObject());
-    }
-    found_target_ = false;
-    object_stack_.Clear();
-
-    MarkObjectRecursively(root);
-    UnmarkObjectRecursively(root);
-
-    if (found_target_) {
-      PrintF("=====================================\n");
-      PrintF("====        Path to object       ====\n");
-      PrintF("=====================================\n\n");
-
-      ASSERT(!object_stack_.is_empty());
-      for (int i = 0; i < object_stack_.length(); i++) {
-        if (i > 0) PrintF("\n     |\n     |\n     V\n\n");
-        Object* obj = object_stack_[i];
-        obj->Print();
-      }
-      PrintF("=====================================\n");
-    }
-  }
-
-  // Helper class for visiting HeapObjects recursively.
-  class MarkRootVisitor: public ObjectVisitor {
-   public:
-    explicit MarkRootVisitor(HeapDebugUtils* utils) : utils_(utils) { }
-
-    void VisitPointers(Object** start, Object** end) {
-      // Visit all HeapObject pointers in [start, end)
-      for (Object** p = start; p < end; p++) {
-        if ((*p)->IsHeapObject())
-          utils_->MarkRootObjectRecursively(p);
-      }
-    }
-
-    HeapDebugUtils* utils_;
-  };
-
-  bool search_for_any_global_;
-  Object* search_target_;
-  bool found_target_;
-  List<Object*> object_stack_;
-  Heap* heap_;
-
-  friend class Heap;
-};
-
-#endif
+static void InitializeGCOnce() {
+  InitializeScavengingVisitorsTables();
+  NewSpaceScavenger::Initialize();
+  MarkCompactCollector::Initialize();
+}
 
 bool Heap::SetUp(bool create_heap_objects) {
 #ifdef DEBUG
   allocation_timeout_ = FLAG_gc_interval;
-  debug_utils_ = new HeapDebugUtils(this);
 #endif
 
   // Initialize heap spaces and initial maps and objects. Whenever something
@@ -5655,15 +6107,7 @@ bool Heap::SetUp(bool create_heap_objects) {
     if (!ConfigureHeapDefault()) return false;
   }
 
-  gc_initializer_mutex->Lock();
-  static bool initialized_gc = false;
-  if (!initialized_gc) {
-      initialized_gc = true;
-      InitializeScavengingVisitorsTables();
-      NewSpaceScavenger::Initialize();
-      MarkCompactCollector::Initialize();
-  }
-  gc_initializer_mutex->Unlock();
+  CallOnce(&initialize_gc_once, &InitializeGCOnce);
 
   MarkMapPointersAsEncoded(false);
 
@@ -5710,10 +6154,7 @@ bool Heap::SetUp(bool create_heap_objects) {
   if (!code_space_->SetUp()) return false;
 
   // Initialize map space.
-  map_space_ = new MapSpace(this,
-                            max_old_generation_size_,
-                            FLAG_max_map_space_pages,
-                            MAP_SPACE);
+  map_space_ = new MapSpace(this, max_old_generation_size_, MAP_SPACE);
   if (map_space_ == NULL) return false;
   if (!map_space_->SetUp()) return false;
 
@@ -5748,13 +6189,15 @@ bool Heap::SetUp(bool create_heap_objects) {
     // Create initial objects
     if (!CreateInitialObjects()) return false;
 
-    global_contexts_list_ = undefined_value();
+    native_contexts_list_ = undefined_value();
   }
 
   LOG(isolate_, IntPtrTEvent("heap-capacity", Capacity()));
   LOG(isolate_, IntPtrTEvent("heap-available", Available()));
 
   store_buffer()->SetUp();
+
+  if (FLAG_parallel_recompilation) relocation_mutex_ = OS::CreateMutex();
 
   return true;
 }
@@ -5778,11 +6221,18 @@ void Heap::SetStackLimits() {
 
 
 void Heap::TearDown() {
+#ifdef VERIFY_HEAP
+  if (FLAG_verify_heap) {
+    Verify();
+  }
+#endif
+
   if (FLAG_print_cumulative_gc_stat) {
     PrintF("\n\n");
     PrintF("gc_count=%d ", gc_count_);
     PrintF("mark_sweep_count=%d ", ms_count_);
     PrintF("max_gc_pause=%d ", get_max_gc_pause());
+    PrintF("total_gc_time=%d ", total_gc_time_ms_);
     PrintF("min_in_mutator=%d ", get_min_in_mutator());
     PrintF("max_alive_after_gc=%" V8_PTR_PREFIX "d ",
            get_max_alive_after_gc());
@@ -5836,10 +6286,7 @@ void Heap::TearDown() {
 
   isolate_->memory_allocator()->TearDown();
 
-#ifdef DEBUG
-  delete debug_utils_;
-  debug_utils_ = NULL;
-#endif
+  delete relocation_mutex_;
 }
 
 
@@ -6253,7 +6700,7 @@ void PathTracer::TracePathFrom(Object** root) {
   ASSERT((search_target_ == kAnyGlobalObject) ||
          search_target_->IsHeapObject());
   found_target_in_trace_ = false;
-  object_stack_.Clear();
+  Reset();
 
   MarkVisitor mark_visitor(this);
   MarkRecursively(root, &mark_visitor);
@@ -6265,8 +6712,8 @@ void PathTracer::TracePathFrom(Object** root) {
 }
 
 
-static bool SafeIsGlobalContext(HeapObject* obj) {
-  return obj->map() == obj->GetHeap()->raw_unchecked_global_context_map();
+static bool SafeIsNativeContext(HeapObject* obj) {
+  return obj->map() == obj->GetHeap()->raw_unchecked_native_context_map();
 }
 
 
@@ -6288,7 +6735,7 @@ void PathTracer::MarkRecursively(Object** p, MarkVisitor* mark_visitor) {
     return;
   }
 
-  bool is_global_context = SafeIsGlobalContext(obj);
+  bool is_native_context = SafeIsNativeContext(obj);
 
   // not visited yet
   Map* map_p = reinterpret_cast<Map*>(HeapObject::cast(map));
@@ -6298,7 +6745,7 @@ void PathTracer::MarkRecursively(Object** p, MarkVisitor* mark_visitor) {
   obj->set_map_no_write_barrier(reinterpret_cast<Map*>(map_addr + kMarkTag));
 
   // Scan the object body.
-  if (is_global_context && (visit_mode_ == VISIT_ONLY_STRONG)) {
+  if (is_native_context && (visit_mode_ == VISIT_ONLY_STRONG)) {
     // This is specialized to scan Context's properly.
     Object** start = reinterpret_cast<Object**>(obj->address() +
                                                 Context::kHeaderSize);
@@ -6357,11 +6804,7 @@ void PathTracer::ProcessResults() {
     for (int i = 0; i < object_stack_.length(); i++) {
       if (i > 0) PrintF("\n     |\n     |\n     V\n\n");
       Object* obj = object_stack_[i];
-#ifdef OBJECT_PRINT
       obj->Print();
-#else
-      obj->ShortPrint();
-#endif
     }
     PrintF("=====================================\n");
   }
@@ -6370,6 +6813,15 @@ void PathTracer::ProcessResults() {
 
 
 #ifdef DEBUG
+// Triggers a depth-first traversal of reachable objects from one
+// given root object and finds a path to a specific heap object and
+// prints it.
+void Heap::TracePathToObjectFrom(Object* target, Object* root) {
+  PathTracer tracer(target, PathTracer::FIND_ALL, VISIT_ALL);
+  tracer.VisitPointer(&root);
+}
+
+
 // Triggers a depth-first traversal of reachable objects from roots
 // and finds a path to a specific heap object and prints it.
 void Heap::TracePathToObject(Object* target) {
@@ -6406,18 +6858,23 @@ GCTracer::GCTracer(Heap* heap,
                    const char* gc_reason,
                    const char* collector_reason)
     : start_time_(0.0),
-      start_size_(0),
+      start_object_size_(0),
+      start_memory_size_(0),
       gc_count_(0),
       full_gc_count_(0),
       allocated_since_last_gc_(0),
       spent_in_mutator_(0),
       promoted_objects_size_(0),
+      nodes_died_in_new_space_(0),
+      nodes_copied_in_new_space_(0),
+      nodes_promoted_(0),
       heap_(heap),
       gc_reason_(gc_reason),
       collector_reason_(collector_reason) {
   if (!FLAG_trace_gc && !FLAG_print_cumulative_gc_stat) return;
   start_time_ = OS::TimeCurrentMillis();
-  start_size_ = heap_->SizeOfObjects();
+  start_object_size_ = heap_->SizeOfObjects();
+  start_memory_size_ = heap_->isolate()->memory_allocator()->Size();
 
   for (int i = 0; i < Scope::kNumberOfScopes; i++) {
     scopes_[i] = 0;
@@ -6455,6 +6912,7 @@ GCTracer::~GCTracer() {
 
   // Update cumulative GC statistics if required.
   if (FLAG_print_cumulative_gc_stat) {
+    heap_->total_gc_time_ms_ += time;
     heap_->max_gc_pause_ = Max(heap_->max_gc_pause_, time);
     heap_->max_alive_after_gc_ = Max(heap_->max_alive_after_gc_,
                                      heap_->alive_after_last_gc_);
@@ -6462,15 +6920,26 @@ GCTracer::~GCTracer() {
       heap_->min_in_mutator_ = Min(heap_->min_in_mutator_,
                                    static_cast<int>(spent_in_mutator_));
     }
+  } else if (FLAG_trace_gc_verbose) {
+    heap_->total_gc_time_ms_ += time;
   }
+
+  if (collector_ == SCAVENGER && FLAG_trace_gc_ignore_scavenger) return;
+
+  PrintPID("%8.0f ms: ", heap_->isolate()->time_millis_since_init());
 
   if (!FLAG_trace_gc_nvp) {
     int external_time = static_cast<int>(scopes_[Scope::EXTERNAL]);
 
-    PrintF("%s %.1f -> %.1f MB, ",
+    double end_memory_size_mb =
+        static_cast<double>(heap_->isolate()->memory_allocator()->Size()) / MB;
+
+    PrintF("%s %.1f (%.1f) -> %.1f (%.1f) MB, ",
            CollectorString(),
-           static_cast<double>(start_size_) / MB,
-           SizeOfHeapObjects());
+           static_cast<double>(start_object_size_) / MB,
+           static_cast<double>(start_memory_size_) / MB,
+           SizeOfHeapObjects(),
+           end_memory_size_mb);
 
     if (external_time > 0) PrintF("%d / ", external_time);
     PrintF("%d ms", time);
@@ -6499,9 +6968,7 @@ GCTracer::~GCTracer() {
     PrintF(".\n");
   } else {
     PrintF("pause=%d ", time);
-    PrintF("mutator=%d ",
-           static_cast<int>(spent_in_mutator_));
-
+    PrintF("mutator=%d ", static_cast<int>(spent_in_mutator_));
     PrintF("gc=");
     switch (collector_) {
       case SCAVENGER:
@@ -6533,7 +7000,7 @@ GCTracer::~GCTracer() {
     PrintF("misc_compaction=%d ",
            static_cast<int>(scopes_[Scope::MC_UPDATE_MISC_POINTERS]));
 
-    PrintF("total_size_before=%" V8_PTR_PREFIX "d ", start_size_);
+    PrintF("total_size_before=%" V8_PTR_PREFIX "d ", start_object_size_);
     PrintF("total_size_after=%" V8_PTR_PREFIX "d ", heap_->SizeOfObjects());
     PrintF("holes_size_before=%" V8_PTR_PREFIX "d ",
            in_free_list_or_wasted_before_gc_);
@@ -6541,6 +7008,9 @@ GCTracer::~GCTracer() {
 
     PrintF("allocated=%" V8_PTR_PREFIX "d ", allocated_since_last_gc_);
     PrintF("promoted=%" V8_PTR_PREFIX "d ", promoted_objects_size_);
+    PrintF("nodes_died_in_new=%d ", nodes_died_in_new_space_);
+    PrintF("nodes_copied_in_new=%d ", nodes_copied_in_new_space_);
+    PrintF("nodes_promoted=%d ", nodes_promoted_);
 
     if (collector_ == SCAVENGER) {
       PrintF("stepscount=%d ", steps_count_since_last_gc_);
@@ -6548,6 +7018,7 @@ GCTracer::~GCTracer() {
     } else {
       PrintF("stepscount=%d ", steps_count_);
       PrintF("stepstook=%d ", static_cast<int>(steps_took_));
+      PrintF("longeststep=%.f ", longest_step_);
     }
 
     PrintF("\n");
@@ -6628,7 +7099,7 @@ void KeyedLookupCache::Clear() {
 
 
 void DescriptorLookupCache::Clear() {
-  for (int index = 0; index < kLength; index++) keys_[index].array = NULL;
+  for (int index = 0; index < kLength; index++) keys_[index].source = NULL;
 }
 
 
@@ -6668,7 +7139,7 @@ void TranscendentalCache::Clear() {
 void ExternalStringTable::CleanUp() {
   int last = 0;
   for (int i = 0; i < new_space_strings_.length(); ++i) {
-    if (new_space_strings_[i] == heap_->raw_unchecked_the_hole_value()) {
+    if (new_space_strings_[i] == heap_->the_hole_value()) {
       continue;
     }
     if (heap_->InNewSpace(new_space_strings_[i])) {
@@ -6680,16 +7151,18 @@ void ExternalStringTable::CleanUp() {
   new_space_strings_.Rewind(last);
   last = 0;
   for (int i = 0; i < old_space_strings_.length(); ++i) {
-    if (old_space_strings_[i] == heap_->raw_unchecked_the_hole_value()) {
+    if (old_space_strings_[i] == heap_->the_hole_value()) {
       continue;
     }
     ASSERT(!heap_->InNewSpace(old_space_strings_[i]));
     old_space_strings_[last++] = old_space_strings_[i];
   }
   old_space_strings_.Rewind(last);
+#ifdef VERIFY_HEAP
   if (FLAG_verify_heap) {
     Verify();
   }
+#endif
 }
 
 
@@ -6750,6 +7223,80 @@ void Heap::FreeQueuedChunks() {
     isolate_->memory_allocator()->Free(chunk);
   }
   chunks_queued_for_free_ = NULL;
+}
+
+
+void Heap::RememberUnmappedPage(Address page, bool compacted) {
+  uintptr_t p = reinterpret_cast<uintptr_t>(page);
+  // Tag the page pointer to make it findable in the dump file.
+  if (compacted) {
+    p ^= 0xc1ead & (Page::kPageSize - 1);  // Cleared.
+  } else {
+    p ^= 0x1d1ed & (Page::kPageSize - 1);  // I died.
+  }
+  remembered_unmapped_pages_[remembered_unmapped_pages_index_] =
+      reinterpret_cast<Address>(p);
+  remembered_unmapped_pages_index_++;
+  remembered_unmapped_pages_index_ %= kRememberedUnmappedPages;
+}
+
+
+void Heap::ClearObjectStats(bool clear_last_time_stats) {
+  memset(object_counts_, 0, sizeof(object_counts_));
+  memset(object_sizes_, 0, sizeof(object_sizes_));
+  if (clear_last_time_stats) {
+    memset(object_counts_last_time_, 0, sizeof(object_counts_last_time_));
+    memset(object_sizes_last_time_, 0, sizeof(object_sizes_last_time_));
+  }
+}
+
+
+static LazyMutex checkpoint_object_stats_mutex = LAZY_MUTEX_INITIALIZER;
+
+
+void Heap::CheckpointObjectStats() {
+  ScopedLock lock(checkpoint_object_stats_mutex.Pointer());
+  Counters* counters = isolate()->counters();
+#define ADJUST_LAST_TIME_OBJECT_COUNT(name)                                    \
+  counters->count_of_##name()->Increment(                                      \
+      static_cast<int>(object_counts_[name]));                                 \
+  counters->count_of_##name()->Decrement(                                      \
+      static_cast<int>(object_counts_last_time_[name]));                       \
+  counters->size_of_##name()->Increment(                                       \
+      static_cast<int>(object_sizes_[name]));                                  \
+  counters->size_of_##name()->Decrement(                                       \
+      static_cast<int>(object_sizes_last_time_[name]));
+  INSTANCE_TYPE_LIST(ADJUST_LAST_TIME_OBJECT_COUNT)
+#undef ADJUST_LAST_TIME_OBJECT_COUNT
+  int index;
+#define ADJUST_LAST_TIME_OBJECT_COUNT(name)               \
+  index = FIRST_CODE_KIND_SUB_TYPE + Code::name;          \
+  counters->count_of_CODE_TYPE_##name()->Increment(       \
+      static_cast<int>(object_counts_[index]));           \
+  counters->count_of_CODE_TYPE_##name()->Decrement(       \
+      static_cast<int>(object_counts_last_time_[index])); \
+  counters->size_of_CODE_TYPE_##name()->Increment(        \
+      static_cast<int>(object_sizes_[index]));            \
+  counters->size_of_CODE_TYPE_##name()->Decrement(        \
+      static_cast<int>(object_sizes_last_time_[index]));
+  CODE_KIND_LIST(ADJUST_LAST_TIME_OBJECT_COUNT)
+#undef ADJUST_LAST_TIME_OBJECT_COUNT
+#define ADJUST_LAST_TIME_OBJECT_COUNT(name)               \
+  index = FIRST_FIXED_ARRAY_SUB_TYPE + name;              \
+  counters->count_of_FIXED_ARRAY_##name()->Increment(     \
+      static_cast<int>(object_counts_[index]));           \
+  counters->count_of_FIXED_ARRAY_##name()->Decrement(     \
+      static_cast<int>(object_counts_last_time_[index])); \
+  counters->size_of_FIXED_ARRAY_##name()->Increment(      \
+      static_cast<int>(object_sizes_[index]));            \
+  counters->size_of_FIXED_ARRAY_##name()->Decrement(      \
+      static_cast<int>(object_sizes_last_time_[index]));
+  FIXED_ARRAY_SUB_INSTANCE_TYPE_LIST(ADJUST_LAST_TIME_OBJECT_COUNT)
+#undef ADJUST_LAST_TIME_OBJECT_COUNT
+
+  memcpy(object_counts_last_time_, object_counts_, sizeof(object_counts_));
+  memcpy(object_sizes_last_time_, object_sizes_, sizeof(object_sizes_));
+  ClearObjectStats();
 }
 
 } }  // namespace v8::internal

@@ -1,4 +1,4 @@
-// Copyright (c) 2011 The Chromium Authors. All rights reserved.
+// Copyright (c) 2012 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -8,12 +8,14 @@
 #include "base/time.h"
 #include "base/logging.h"
 
-#include "jni/touch_point_jni.h"
+#include "jni/TouchPoint_jni.h"
+
+using WebKit::WebTouchEvent;
+using WebKit::WebTouchPoint;
+
+namespace {
 
 void MaybeAddTouchPoint(JNIEnv* env, jobject pt, WebKit::WebTouchEvent& event) {
-  using WebKit::WebTouchEvent;
-  using WebKit::WebTouchPoint;
-
   WebTouchPoint::State state = static_cast<WebTouchPoint::State>(
       Java_TouchPoint_getState(env, pt));
   if (state == WebTouchPoint::StateUndefined)
@@ -38,15 +40,16 @@ void MaybeAddTouchPoint(JNIEnv* env, jobject pt, WebKit::WebTouchEvent& event) {
   wtp.screenPosition = wtp.position;
   wtp.force = Java_TouchPoint_getPressure(env, pt);
 
-  // TODO(clank) WebKit stores touch point size as a pair of radii, which
+  // TODO(djsollen): WebKit stores touch point size as a pair of radii, which
   // are integers.  We receive touch point size from Android as a float
-  // between 0 and 1.  We interpret 'size' as an elliptical area.  We convert
-  // to a radius and then scale up to avoid truncating away all of the data.
-  // W3C spec is for the radii to be in units of screen pixels.  Need to change.
+  // between 0 and 1 and interpret 'size' as an elliptical area.  We convert
+  // size to a radius and then scale up to avoid truncating away all of the
+  // data. W3C spec is for the radii to be in units of screen pixels. Need to
+  // change.
   const static double PI = 3.1415926;
   const static double SCALE_FACTOR = 1024.0;
-  const int radius =
-    (int)((sqrt(Java_TouchPoint_getSize(env, pt)) / PI) * SCALE_FACTOR);
+  const int radius = static_cast<int>(
+      (sqrt(Java_TouchPoint_getSize(env, pt)) / PI) * SCALE_FACTOR);
   wtp.radiusX = radius;
   wtp.radiusY = radius;
   // Since our radii are equal, a rotation angle doesn't mean anything.
@@ -57,14 +60,15 @@ void MaybeAddTouchPoint(JNIEnv* env, jobject pt, WebKit::WebTouchEvent& event) {
   ++(event.touchesLength);
 }
 
-void TouchPoint::BuildWebTouchEvent(JNIEnv* env, jint type, jlong time,
-    jobjectArray pts, WebKit::WebTouchEvent& event) {
-  using WebKit::WebTouchEvent;
-  using WebKit::WebTouchPoint;
+}  // namespace
 
+namespace content {
+
+void TouchPoint::BuildWebTouchEvent(JNIEnv* env, jint type, jlong time_ms,
+    jobjectArray pts, WebKit::WebTouchEvent& event) {
   event.type = static_cast<WebTouchEvent::Type>(type);
   event.timeStampSeconds =
-      static_cast<double>(time) / base::Time::kMillisecondsPerSecond;
+      static_cast<double>(time_ms) / base::Time::kMillisecondsPerSecond;
   int arrayLength = env->GetArrayLength(pts);
   // Loop until either all of the input points have been consumed or the output
   // array has been filled
@@ -76,8 +80,6 @@ void TouchPoint::BuildWebTouchEvent(JNIEnv* env, jint type, jlong time,
   }
   DCHECK_GT(event.touchesLength, 0U);
 }
-
-// ----------------------------------------------------------------------------
 
 static void RegisterConstants(JNIEnv* env) {
    Java_TouchPoint_initializeConstants(
@@ -95,15 +97,12 @@ static void RegisterConstants(JNIEnv* env) {
 }
 
 bool RegisterTouchPoint(JNIEnv* env) {
-  if (!base::android::HasClass(env, kTouchPointClassPath)) {
-    DLOG(ERROR) << "Unable to find class TouchPoint!";
-    return false;
-  }
-
-  if (RegisterNativesImpl(env) < 0)
+  if (!RegisterNativesImpl(env))
     return false;
 
   RegisterConstants(env);
 
   return true;
 }
+
+}  // namespace content

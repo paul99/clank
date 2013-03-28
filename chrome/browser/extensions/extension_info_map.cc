@@ -1,4 +1,4 @@
-// Copyright (c) 2011 The Chromium Authors. All rights reserved.
+// Copyright (c) 2012 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -8,8 +8,10 @@
 #include "chrome/common/extensions/extension_set.h"
 #include "chrome/common/url_constants.h"
 #include "content/public/browser/browser_thread.h"
+#include "extensions/common/constants.h"
 
 using content::BrowserThread;
+using extensions::Extension;
 
 namespace {
 
@@ -18,7 +20,7 @@ void CheckOnValidThread() {
 }
 
 }  // namespace
-#ifndef OS_ANDROID
+
 struct ExtensionInfoMap::ExtraData {
   // When the extension was installed.
   base::Time install_time;
@@ -29,21 +31,12 @@ struct ExtensionInfoMap::ExtraData {
   ExtraData();
   ~ExtraData();
 };
-#endif
 
+ExtensionInfoMap::ExtraData::ExtraData() : incognito_enabled(false) {}
 
-ExtensionInfoMap::ExtraData::ExtraData() : incognito_enabled(false) {
-}
+ExtensionInfoMap::ExtraData::~ExtraData() {}
 
-ExtensionInfoMap::ExtraData::~ExtraData() {
-}
-
-
-ExtensionInfoMap::ExtensionInfoMap() {
-}
-
-ExtensionInfoMap::~ExtensionInfoMap() {
-}
+ExtensionInfoMap::ExtensionInfoMap() {}
 
 const extensions::ProcessMap& ExtensionInfoMap::process_map() const {
   return process_map_;
@@ -101,7 +94,7 @@ bool ExtensionInfoMap::IsIncognitoEnabled(
   return false;
 }
 
-bool ExtensionInfoMap::CanCrossIncognito(const Extension* extension) {
+bool ExtensionInfoMap::CanCrossIncognito(const Extension* extension) const {
   // This is duplicated from ExtensionService :(.
   return IsIncognitoEnabled(extension->id()) &&
       !extension->incognito_split_mode();
@@ -132,10 +125,12 @@ void ExtensionInfoMap::UnregisterAllExtensionsInProcess(int process_id) {
 
 bool ExtensionInfoMap::SecurityOriginHasAPIPermission(
     const GURL& origin, int process_id,
-    ExtensionAPIPermission::ID permission) const {
-  if (origin.SchemeIs(chrome::kExtensionScheme)) {
+    extensions::APIPermission::ID permission) const {
+  if (origin.SchemeIs(extensions::kExtensionScheme)) {
     const std::string& id = origin.host();
-    return extensions_.GetByID(id)->HasAPIPermission(permission) &&
+    const Extension* extension = extensions_.GetByID(id);
+    CHECK(extension != NULL);
+    return extension->HasAPIPermission(permission) &&
         process_map_.Contains(id, process_id);
   }
 
@@ -148,4 +143,18 @@ bool ExtensionInfoMap::SecurityOriginHasAPIPermission(
     }
   }
   return false;
+}
+
+ExtensionsQuotaService* ExtensionInfoMap::GetQuotaService() {
+  CheckOnValidThread();
+  if (!quota_service_.get())
+    quota_service_.reset(new ExtensionsQuotaService());
+  return quota_service_.get();
+}
+
+ExtensionInfoMap::~ExtensionInfoMap() {
+  if (quota_service_.get()) {
+    BrowserThread::DeleteSoon(BrowserThread::IO, FROM_HERE,
+                              quota_service_.release());
+  }
 }

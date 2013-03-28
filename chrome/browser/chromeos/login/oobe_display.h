@@ -4,7 +4,6 @@
 
 #ifndef CHROME_BROWSER_CHROMEOS_LOGIN_OOBE_DISPLAY_H_
 #define CHROME_BROWSER_CHROMEOS_LOGIN_OOBE_DISPLAY_H_
-#pragma once
 
 #include <string>
 
@@ -15,6 +14,7 @@ namespace chromeos {
 class EnterpriseEnrollmentScreenActor;
 class EulaScreenActor;
 class NetworkScreenActor;
+class ResetScreenActor;
 class UpdateScreenActor;
 class UserImageScreenActor;
 // TODO(altimofeev): use real actors instead
@@ -40,6 +40,7 @@ class OobeDisplay {
   virtual EulaScreenActor* GetEulaScreenActor() = 0;
   virtual EnterpriseEnrollmentScreenActor*
       GetEnterpriseEnrollmentScreenActor() = 0;
+  virtual ResetScreenActor* GetResetScreenActor() = 0;
   virtual UserImageScreenActor* GetUserImageScreenActor() = 0;
   // TODO(altimofeev): use real actors instead.
   virtual ViewScreenDelegate* GetRegistrationScreenActor() = 0;

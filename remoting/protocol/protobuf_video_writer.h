@@ -1,4 +1,4 @@
-// Copyright (c) 2011 The Chromium Authors. All rights reserved.
+// Copyright (c) 2012 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -10,11 +10,8 @@
 #include "base/compiler_specific.h"
 #include "base/memory/ref_counted.h"
 #include "base/memory/scoped_ptr.h"
+#include "remoting/protocol/buffered_socket_writer.h"
 #include "remoting/protocol/video_writer.h"
-
-namespace base {
-class MessageLoopProxy;
-}  // namespace base
 
 namespace net {
 class StreamSocket;
@@ -23,12 +20,12 @@ class StreamSocket;
 namespace remoting {
 namespace protocol {
 
-class BufferedSocketWriter;
+class ChannelFactory;
 class Session;
 
 class ProtobufVideoWriter : public VideoWriter {
  public:
-  ProtobufVideoWriter(base::MessageLoopProxy* message_loop);
+  ProtobufVideoWriter();
   virtual ~ProtobufVideoWriter();
 
   // VideoWriter interface.
@@ -38,21 +35,18 @@ class ProtobufVideoWriter : public VideoWriter {
   virtual bool is_connected() OVERRIDE;
 
   // VideoStub interface.
-  virtual void ProcessVideoPacket(const VideoPacket* packet,
+  virtual void ProcessVideoPacket(scoped_ptr<VideoPacket> packet,
                                   const base::Closure& done) OVERRIDE;
-  virtual int GetPendingPackets() OVERRIDE;
 
  private:
-  void OnChannelReady(net::StreamSocket* socket);
-
-  Session* session_;
+  void OnChannelReady(scoped_ptr<net::StreamSocket> socket);
 
   InitializedCallback initialized_callback_;
 
-  // TODO(sergeyu): Remove |channel_| and let |buffered_writer_| own it.
+  ChannelFactory* channel_factory_;
   scoped_ptr<net::StreamSocket> channel_;
 
-  scoped_refptr<BufferedSocketWriter> buffered_writer_;
+  BufferedSocketWriter buffered_writer_;
 
   DISALLOW_COPY_AND_ASSIGN(ProtobufVideoWriter);
 };

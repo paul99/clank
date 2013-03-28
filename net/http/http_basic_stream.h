@@ -1,4 +1,4 @@
-// Copyright (c) 2011 The Chromium Authors. All rights reserved.
+// Copyright (c) 2012 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 //
@@ -8,12 +8,10 @@
 
 #ifndef NET_HTTP_HTTP_BASIC_STREAM_H_
 #define NET_HTTP_HTTP_BASIC_STREAM_H_
-#pragma once
 
 #include <string>
 
 #include "base/basictypes.h"
-#include "base/memory/scoped_ptr.h"
 #include "net/http/http_stream.h"
 
 namespace net {
@@ -26,7 +24,6 @@ struct HttpRequestInfo;
 class HttpRequestHeaders;
 class HttpStreamParser;
 class IOBuffer;
-class UploadDataStream;
 
 class HttpBasicStream : public HttpStream {
  public:
@@ -45,11 +42,10 @@ class HttpBasicStream : public HttpStream {
                                const CompletionCallback& callback) OVERRIDE;
 
   virtual int SendRequest(const HttpRequestHeaders& headers,
-                          UploadDataStream* request_body,
                           HttpResponseInfo* response,
                           const CompletionCallback& callback) OVERRIDE;
 
-  virtual uint64 GetUploadProgress() const OVERRIDE;
+  virtual UploadProgress GetUploadProgress() const OVERRIDE;
 
   virtual int ReadResponseHeaders(const CompletionCallback& callback) OVERRIDE;
 

@@ -4,9 +4,12 @@
 
 #ifndef CHROME_BROWSER_CHROMEOS_LOGIN_USER_IMAGE_SCREEN_ACTOR_H_
 #define CHROME_BROWSER_CHROMEOS_LOGIN_USER_IMAGE_SCREEN_ACTOR_H_
-#pragma once
 
 class SkBitmap;
+
+namespace gfx {
+class ImageSkia;
+}
 
 namespace chromeos {
 
@@ -18,12 +21,8 @@ class UserImageScreenActor {
    public:
     virtual ~Delegate() {}
 
-    // Called when UI needs to stop video capture.
-    virtual void StopCamera() = 0;
-    // Called when UI needs to start video capture.
-    virtual void StartCamera() = 0;
     // Called when user accepts photo as login user image.
-    virtual void OnPhotoTaken(const SkBitmap& image) = 0;
+    virtual void OnPhotoTaken(const gfx::ImageSkia& image) = 0;
     // Called when user accepts Profile image as login user image.
     virtual void OnProfileImageSelected() = 0;
     // Called when user accepts one of the default images as login user
@@ -50,23 +49,11 @@ class UserImageScreenActor {
   // Selects image with the index specified.
   virtual void SelectImage(int index) = 0;
 
-  // Updates video frame if capturing is in process.
-  virtual void UpdateVideoFrame(const SkBitmap& frame) = 0;
-
-  // Shows error instead of video frame if camera is not initialized.
-  virtual void ShowCameraError() = 0;
-
-  // Shows initialization throbber telling that camera is initializing.
-  virtual void ShowCameraInitializing() = 0;
-
   // Starts camera presence check.
   virtual void CheckCameraPresence() = 0;
 
-  // Indicates if the capturing is in progress or not.
-  virtual bool IsCapturing() const = 0;
-
   // Inserts profile image in the list for user to select.
-  virtual void AddProfileImage(const SkBitmap& image) {}
+  virtual void AddProfileImage(const gfx::ImageSkia& image) {}
 
   // Indicates that there is no custom profile image for the user.
   virtual void OnProfileImageAbsent() {}

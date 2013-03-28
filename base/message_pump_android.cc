@@ -1,4 +1,4 @@
-// Copyright (c) 2011 The Chromium Authors. All rights reserved.
+// Copyright (c) 2012 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -10,13 +10,13 @@
 #include "base/android/scoped_java_ref.h"
 #include "base/lazy_instance.h"
 #include "base/logging.h"
-#include "jni/system_message_handler_jni.h"
+#include "base/run_loop.h"
+#include "base/time.h"
+#include "jni/SystemMessageHandler_jni.h"
 
 using base::android::ScopedJavaLocalRef;
 
 namespace {
-
-const char kClassPathName[] = "org/chromium/base/SystemMessageHandler";
 
 base::LazyInstance<base::android::ScopedJavaGlobalRef<jobject> >
     g_system_message_handler_obj = LAZY_INSTANCE_INITIALIZER;
@@ -63,7 +63,7 @@ static jboolean DoRunLoopOnce(JNIEnv* env, jobject obj, jint native_delegate) {
 namespace base {
 
 MessagePumpForUI::MessagePumpForUI()
-    : state_(NULL) {
+    : run_loop_(NULL) {
 }
 
 MessagePumpForUI::~MessagePumpForUI() {
@@ -75,23 +75,19 @@ void MessagePumpForUI::Run(Delegate* delegate) {
 }
 
 void MessagePumpForUI::Start(Delegate* delegate) {
-  state_ = new MessageLoop::AutoRunState(MessageLoop::current());
+  run_loop_ = new base::RunLoop();
+  // Since the RunLoop was just created above, BeforeRun should be guaranteed to
+  // return true (it only returns false if the RunLoop has been Quit already).
+  if (!run_loop_->BeforeRun())
+    NOTREACHED();
 
   DCHECK(g_system_message_handler_obj.Get().is_null());
 
   JNIEnv* env = base::android::AttachCurrentThread();
   DCHECK(env);
 
-  ScopedJavaLocalRef<jclass> clazz =
-      base::android::GetClass(env, kClassPathName);
-  jmethodID constructor =
-      base::android::GetMethodID(env, clazz, "<init>", "(I)V");
-  ScopedJavaLocalRef<jobject> client(env,
-      env->NewObject(clazz.obj(), constructor, delegate));
-  DCHECK(!client.is_null());
-  base::android::CheckException(env);
-
-  g_system_message_handler_obj.Get().Reset(client);
+  g_system_message_handler_obj.Get().Reset(
+      Java_SystemMessageHandler_create(env, reinterpret_cast<jint>(delegate)));
 }
 
 void MessagePumpForUI::Quit() {
@@ -104,15 +100,15 @@ void MessagePumpForUI::Quit() {
     g_system_message_handler_obj.Get().Reset();
   }
 
-  if (state_) {
-    delete state_;
-    state_ = NULL;
+  if (run_loop_) {
+    run_loop_->AfterRun();
+    delete run_loop_;
+    run_loop_ = NULL;
   }
 }
 
 void MessagePumpForUI::ScheduleWork() {
-  if (g_system_message_handler_obj.Get().is_null())
-    return;
+  DCHECK(!g_system_message_handler_obj.Get().is_null());
 
   JNIEnv* env = base::android::AttachCurrentThread();
   DCHECK(env);
@@ -122,8 +118,7 @@ void MessagePumpForUI::ScheduleWork() {
 }
 
 void MessagePumpForUI::ScheduleDelayedWork(const TimeTicks& delayed_work_time) {
-  if (g_system_message_handler_obj.Get().is_null())
-    return;
+  DCHECK(!g_system_message_handler_obj.Get().is_null());
 
   JNIEnv* env = base::android::AttachCurrentThread();
   DCHECK(env);
@@ -136,8 +131,8 @@ void MessagePumpForUI::ScheduleDelayedWork(const TimeTicks& delayed_work_time) {
       g_system_message_handler_obj.Get().obj(), millis);
 }
 
-// Register native methods
-bool RegisterSystemMessageHandler(JNIEnv* env) {
+// static
+bool MessagePumpForUI::RegisterBindings(JNIEnv* env) {
   return RegisterNativesImpl(env);
 }
 

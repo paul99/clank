@@ -5,7 +5,6 @@
 #include "chrome/browser/prefs/pref_service.h"
 
 #include <algorithm>
-#include <string>
 
 #include "base/bind.h"
 #include "base/command_line.h"
@@ -14,6 +13,9 @@
 #include "base/logging.h"
 #include "base/message_loop.h"
 #include "base/metrics/histogram.h"
+#include "base/prefs/default_pref_store.h"
+#include "base/prefs/json_pref_store.h"
+#include "base/prefs/overlay_user_pref_store.h"
 #include "base/stl_util.h"
 #include "base/string_number_conversions.h"
 #include "base/string_util.h"
@@ -23,20 +25,20 @@
 #include "chrome/browser/extensions/extension_pref_store.h"
 #include "chrome/browser/policy/configuration_policy_pref_store.h"
 #include "chrome/browser/prefs/command_line_pref_store.h"
-#include "chrome/browser/prefs/default_pref_store.h"
-#include "chrome/browser/prefs/overlay_user_pref_store.h"
 #include "chrome/browser/prefs/pref_model_associator.h"
 #include "chrome/browser/prefs/pref_notifier_impl.h"
+#include "chrome/browser/prefs/pref_service_observer.h"
 #include "chrome/browser/prefs/pref_value_store.h"
+#include "chrome/browser/profiles/profile.h"
 #include "chrome/browser/ui/prefs/prefs_tab_helper.h"
 #include "chrome/browser/ui/profile_error_dialog.h"
-#include "chrome/common/json_pref_store.h"
 #include "chrome/common/pref_names.h"
 #include "content/public/browser/browser_thread.h"
 #include "grit/chromium_strings.h"
 #include "grit/generated_resources.h"
 #include "ui/base/l10n/l10n_util.h"
 
+using content::BrowserContext;
 using content::BrowserThread;
 
 namespace {
@@ -114,10 +116,17 @@ class ReadErrorHandler : public PersistentPrefStore::ReadErrorDelegate {
 
 }  // namespace
 
+PrefServiceBase* PrefServiceBase::FromBrowserContext(BrowserContext* context) {
+  return static_cast<Profile*>(context)->GetPrefs();
+}
+
 // static
-PrefService* PrefService::CreatePrefService(const FilePath& pref_filename,
-                                            PrefStore* extension_prefs,
-                                            bool async) {
+PrefService* PrefService::CreatePrefService(
+    const FilePath& pref_filename,
+    base::SequencedTaskRunner* pref_io_task_runner,
+    policy::PolicyService* policy_service,
+    PrefStore* extension_prefs,
+    bool async) {
   using policy::ConfigurationPolicyPrefStore;
 
 #if defined(OS_LINUX)
@@ -134,26 +143,21 @@ PrefService* PrefService::CreatePrefService(const FilePath& pref_filename,
 #endif
 
 #if defined(ENABLE_CONFIGURATION_POLICY)
-  ConfigurationPolicyPrefStore* managed_platform =
-      ConfigurationPolicyPrefStore::CreateManagedPlatformPolicyPrefStore();
-  ConfigurationPolicyPrefStore* managed_cloud =
-      ConfigurationPolicyPrefStore::CreateManagedCloudPolicyPrefStore();
-  ConfigurationPolicyPrefStore* recommended_platform =
-      ConfigurationPolicyPrefStore::CreateRecommendedPlatformPolicyPrefStore();
-  ConfigurationPolicyPrefStore* recommended_cloud =
-      ConfigurationPolicyPrefStore::CreateRecommendedCloudPolicyPrefStore();
+  ConfigurationPolicyPrefStore* managed =
+      ConfigurationPolicyPrefStore::CreateMandatoryPolicyPrefStore(
+          policy_service);
+  ConfigurationPolicyPrefStore* recommended =
+      ConfigurationPolicyPrefStore::CreateRecommendedPolicyPrefStore(
+          policy_service);
 #else
-  ConfigurationPolicyPrefStore* managed_platform = NULL;
-  ConfigurationPolicyPrefStore* managed_cloud = NULL;
-  ConfigurationPolicyPrefStore* recommended_platform = NULL;
-  ConfigurationPolicyPrefStore* recommended_cloud = NULL;
+  ConfigurationPolicyPrefStore* managed = NULL;
+  ConfigurationPolicyPrefStore* recommended = NULL;
 #endif  // ENABLE_CONFIGURATION_POLICY
 
   CommandLinePrefStore* command_line =
       new CommandLinePrefStore(CommandLine::ForCurrentProcess());
   JsonPrefStore* user = new JsonPrefStore(
-      pref_filename,
-      BrowserThread::GetMessageLoopProxyForThread(BrowserThread::FILE));
+      pref_filename, pref_io_task_runner);
   DefaultPrefStore* default_pref_store = new DefaultPrefStore();
 
   PrefNotifierImpl* pref_notifier = new PrefNotifierImpl();
@@ -162,13 +166,11 @@ PrefService* PrefService::CreatePrefService(const FilePath& pref_filename,
   return new PrefService(
       pref_notifier,
       new PrefValueStore(
-          managed_platform,
-          managed_cloud,
+          managed,
           extension_prefs,
           command_line,
           user,
-          recommended_platform,
-          recommended_cloud,
+          recommended,
           default_pref_store,
           pref_sync_associator,
           pref_notifier),
@@ -188,44 +190,16 @@ PrefService* PrefService::CreateIncognitoPrefService(
   return new PrefService(
       pref_notifier,
       pref_value_store_->CloneAndSpecialize(
-          NULL,  // managed_platform_prefs
-          NULL,  // managed_cloud_prefs
+          NULL,  // managed
           incognito_extension_prefs,
           NULL,  // command_line_prefs
           incognito_pref_store,
-          NULL,  // recommended_platform_prefs
-          NULL,  // recommended_cloud_prefs
+          NULL,  // recommended
           default_store_.get(),
           NULL,  // pref_sync_associator
           pref_notifier),
       incognito_pref_store,
       default_store_.get(),
-      NULL,
-      false);
-}
-
-PrefService* PrefService::CreatePrefServiceWithPerTabPrefStore() {
-  pref_service_forked_ = true;
-  PrefNotifierImpl* pref_notifier = new PrefNotifierImpl();
-  OverlayUserPrefStore* per_tab_pref_store =
-      new OverlayUserPrefStore(user_pref_store_.get());
-  PrefsTabHelper::InitPerTabUserPrefStore(per_tab_pref_store);
-  DefaultPrefStore* default_store = new DefaultPrefStore();
-  return new PrefService(
-      pref_notifier,
-      pref_value_store_->CloneAndSpecialize(
-          NULL,  // managed_platform_prefs
-          NULL,  // managed_cloud_prefs
-          NULL,  // extension_prefs
-          NULL,  // command_line_prefs
-          per_tab_pref_store,
-          NULL,  // recommended_platform_prefs
-          NULL,  // recommended_cloud_prefs
-          default_store,
-          NULL,
-          pref_notifier),
-      per_tab_pref_store,
-      default_store,
       NULL,
       false);
 }
@@ -250,14 +224,13 @@ PrefService::PrefService(PrefNotifierImpl* pref_notifier,
 
 PrefService::~PrefService() {
   DCHECK(CalledOnValidThread());
-  STLDeleteContainerPointers(prefs_.begin(), prefs_.end());
-  prefs_.clear();
 
   // Reset pointers so accesses after destruction reliably crash.
   pref_value_store_.reset();
   user_pref_store_ = NULL;
   default_store_ = NULL;
   pref_sync_associator_.reset();
+  pref_notifier_.reset();
 }
 
 void PrefService::InitFromStorage(bool async) {
@@ -282,6 +255,23 @@ bool PrefService::ReloadPersistentPrefs() {
 void PrefService::CommitPendingWrite() {
   DCHECK(CalledOnValidThread());
   user_pref_store_->CommitPendingWrite();
+}
+
+void PrefService::AddObserver(PrefServiceObserver* observer) {
+  observer_list_.AddObserver(observer);
+}
+
+void PrefService::RemoveObserver(PrefServiceObserver* observer) {
+  observer_list_.RemoveObserver(observer);
+}
+
+bool PrefService::IsSyncing() {
+  return pref_sync_associator_.get() &&
+      pref_sync_associator_->models_associated();
+}
+
+void PrefService::OnIsSyncingChanged() {
+  FOR_EACH_OBSERVER(PrefServiceObserver, observer_list_, OnIsSyncingChanged());
 }
 
 namespace {
@@ -566,17 +556,27 @@ void PrefService::RegisterInt64Pref(const char* path,
       sync_status);
 }
 
+void PrefService::RegisterUint64Pref(const char* path,
+                                     uint64 default_value,
+                                     PrefSyncStatus sync_status) {
+  DCHECK(IsProfilePrefService(this));
+  RegisterPreference(
+      path,
+      Value::CreateStringValue(base::Uint64ToString(default_value)),
+      sync_status);
+}
+
 bool PrefService::GetBoolean(const char* path) const {
   DCHECK(CalledOnValidThread());
 
   bool result = false;
 
-  const Preference* pref = FindPreference(path);
-  if (!pref) {
+  const base::Value* value = GetPreferenceValue(path);
+  if (!value) {
     NOTREACHED() << "Trying to read an unregistered pref: " << path;
     return result;
   }
-  bool rv = pref->GetValue()->GetAsBoolean(&result);
+  bool rv = value->GetAsBoolean(&result);
   DCHECK(rv);
   return result;
 }
@@ -586,12 +586,12 @@ int PrefService::GetInteger(const char* path) const {
 
   int result = 0;
 
-  const Preference* pref = FindPreference(path);
-  if (!pref) {
+  const base::Value* value = GetPreferenceValue(path);
+  if (!value) {
     NOTREACHED() << "Trying to read an unregistered pref: " << path;
     return result;
   }
-  bool rv = pref->GetValue()->GetAsInteger(&result);
+  bool rv = value->GetAsInteger(&result);
   DCHECK(rv);
   return result;
 }
@@ -601,12 +601,12 @@ double PrefService::GetDouble(const char* path) const {
 
   double result = 0.0;
 
-  const Preference* pref = FindPreference(path);
-  if (!pref) {
+  const base::Value* value = GetPreferenceValue(path);
+  if (!value) {
     NOTREACHED() << "Trying to read an unregistered pref: " << path;
     return result;
   }
-  bool rv = pref->GetValue()->GetAsDouble(&result);
+  bool rv = value->GetAsDouble(&result);
   DCHECK(rv);
   return result;
 }
@@ -616,12 +616,12 @@ std::string PrefService::GetString(const char* path) const {
 
   std::string result;
 
-  const Preference* pref = FindPreference(path);
-  if (!pref) {
+  const base::Value* value = GetPreferenceValue(path);
+  if (!value) {
     NOTREACHED() << "Trying to read an unregistered pref: " << path;
     return result;
   }
-  bool rv = pref->GetValue()->GetAsString(&result);
+  bool rv = value->GetAsString(&result);
   DCHECK(rv);
   return result;
 }
@@ -631,12 +631,12 @@ FilePath PrefService::GetFilePath(const char* path) const {
 
   FilePath result;
 
-  const Preference* pref = FindPreference(path);
-  if (!pref) {
+  const base::Value* value = GetPreferenceValue(path);
+  if (!value) {
     NOTREACHED() << "Trying to read an unregistered pref: " << path;
     return FilePath(result);
   }
-  bool rv = base::GetValueAsFilePath(*pref->GetValue(), &result);
+  bool rv = base::GetValueAsFilePath(*value, &result);
   DCHECK(rv);
   return result;
 }
@@ -651,9 +651,7 @@ DictionaryValue* PrefService::GetPreferenceValues() const {
   DictionaryValue* out = new DictionaryValue;
   DefaultPrefStore::const_iterator i = default_store_->begin();
   for (; i != default_store_->end(); ++i) {
-    const Preference* pref = FindPreference(i->first.c_str());
-    DCHECK(pref);
-    const Value* value = pref->GetValue();
+    const Value* value = GetPreferenceValue(i->first);
     DCHECK(value);
     out->Set(i->first, value->DeepCopy());
   }
@@ -663,20 +661,34 @@ DictionaryValue* PrefService::GetPreferenceValues() const {
 const PrefService::Preference* PrefService::FindPreference(
     const char* pref_name) const {
   DCHECK(CalledOnValidThread());
-  Preference p(this, pref_name, Value::TYPE_NULL);
-  PreferenceSet::const_iterator it = prefs_.find(&p);
-  if (it != prefs_.end())
-    return *it;
+  PreferenceMap::iterator it = prefs_map_.find(pref_name);
+  if (it != prefs_map_.end())
+    return &(it->second);
   const base::Value::Type type = default_store_->GetType(pref_name);
   if (type == Value::TYPE_NULL)
     return NULL;
-  Preference* new_pref = new Preference(this, pref_name, type);
-  prefs_.insert(new_pref);
-  return new_pref;
+  it = prefs_map_.insert(
+      std::make_pair(pref_name, Preference(this, pref_name, type))).first;
+  return &(it->second);
 }
 
 bool PrefService::ReadOnly() const {
   return user_pref_store_->ReadOnly();
+}
+
+PrefService::PrefInitializationStatus PrefService::GetInitializationStatus()
+    const {
+  if (!user_pref_store_->IsInitializationComplete())
+    return INITIALIZATION_STATUS_WAITING;
+
+  switch (user_pref_store_->GetReadError()) {
+    case PersistentPrefStore::PREF_READ_ERROR_NONE:
+      return INITIALIZATION_STATUS_SUCCESS;
+    case PersistentPrefStore::PREF_READ_ERROR_NO_FILE:
+      return INITIALIZATION_STATUS_CREATED_NEW_PROFILE;
+    default:
+      return INITIALIZATION_STATUS_ERROR;
+  }
 }
 
 bool PrefService::IsManagedPreference(const char* pref_name) const {
@@ -684,15 +696,19 @@ bool PrefService::IsManagedPreference(const char* pref_name) const {
   return pref && pref->IsManaged();
 }
 
+bool PrefService::IsUserModifiablePreference(const char* pref_name) const {
+  const Preference* pref = FindPreference(pref_name);
+  return pref && pref->IsUserModifiable();
+}
+
 const DictionaryValue* PrefService::GetDictionary(const char* path) const {
   DCHECK(CalledOnValidThread());
 
-  const Preference* pref = FindPreference(path);
-  if (!pref) {
+  const Value* value = GetPreferenceValue(path);
+  if (!value) {
     NOTREACHED() << "Trying to read an unregistered pref: " << path;
     return NULL;
   }
-  const Value* value = pref->GetValue();
   if (value->GetType() != Value::TYPE_DICTIONARY) {
     NOTREACHED();
     return NULL;
@@ -700,15 +716,48 @@ const DictionaryValue* PrefService::GetDictionary(const char* path) const {
   return static_cast<const DictionaryValue*>(value);
 }
 
-const ListValue* PrefService::GetList(const char* path) const {
+const base::Value* PrefService::GetUserPrefValue(const char* path) const {
   DCHECK(CalledOnValidThread());
 
   const Preference* pref = FindPreference(path);
   if (!pref) {
+    NOTREACHED() << "Trying to get an unregistered pref: " << path;
+    return NULL;
+  }
+
+  // Look for an existing preference in the user store. If it doesn't
+  // exist, return NULL.
+  base::Value* value = NULL;
+  if (!user_pref_store_->GetMutableValue(path, &value))
+    return NULL;
+
+  if (!value->IsType(pref->GetType())) {
+    NOTREACHED() << "Pref value type doesn't match registered type.";
+    return NULL;
+  }
+
+  return value;
+}
+
+const base::Value* PrefService::GetDefaultPrefValue(const char* path) const {
+  DCHECK(CalledOnValidThread());
+  // Lookup the preference in the default store.
+  const base::Value* value = NULL;
+  if (!default_store_->GetValue(path, &value)) {
+    NOTREACHED() << "Default value missing for pref: " << path;
+    return NULL;
+  }
+  return value;
+}
+
+const ListValue* PrefService::GetList(const char* path) const {
+  DCHECK(CalledOnValidThread());
+
+  const Value* value = GetPreferenceValue(path);
+  if (!value) {
     NOTREACHED() << "Trying to read an unregistered pref: " << path;
     return NULL;
   }
-  const Value* value = pref->GetValue();
   if (value->GetType() != Value::TYPE_LIST) {
     NOTREACHED();
     return NULL;
@@ -716,14 +765,16 @@ const ListValue* PrefService::GetList(const char* path) const {
   return static_cast<const ListValue*>(value);
 }
 
-void PrefService::AddPrefObserver(const char* path,
-                                  content::NotificationObserver* obs) {
+void PrefService::AddPrefObserver(const char* path, PrefObserver* obs) {
   pref_notifier_->AddPrefObserver(path, obs);
 }
 
-void PrefService::RemovePrefObserver(const char* path,
-                                     content::NotificationObserver* obs) {
+void PrefService::RemovePrefObserver(const char* path, PrefObserver* obs) {
   pref_notifier_->RemovePrefObserver(path, obs);
+}
+
+void PrefService::AddPrefInitObserver(base::Callback<void(bool)> obs) {
+  pref_notifier_->AddInitObserver(obs);
 }
 
 void PrefService::RegisterPreference(const char* path,
@@ -734,14 +785,28 @@ void PrefService::RegisterPreference(const char* path,
   // The main code path takes ownership, but most don't. We'll be safe.
   scoped_ptr<Value> scoped_value(default_value);
 
-  if (FindPreference(path)) {
-    NOTREACHED() << "Tried to register duplicate pref " << path;
-    return;
-  }
+  CHECK(!FindPreference(path)) << "Tried to register duplicate pref " << path;
 
   base::Value::Type orig_type = default_value->GetType();
   DCHECK(orig_type != Value::TYPE_NULL && orig_type != Value::TYPE_BINARY) <<
          "invalid preference type: " << orig_type;
+
+  // For ListValue and DictionaryValue with non empty default, empty value
+  // for |path| needs to be persisted in |user_pref_store_|. So that
+  // non empty default is not used when user sets an empty ListValue or
+  // DictionaryValue.
+  bool needs_empty_value = false;
+  if (orig_type == base::Value::TYPE_LIST) {
+    const base::ListValue* list = NULL;
+    if (default_value->GetAsList(&list) && !list->empty())
+      needs_empty_value = true;
+  } else if (orig_type == base::Value::TYPE_DICTIONARY) {
+    const base::DictionaryValue* dict = NULL;
+    if (default_value->GetAsDictionary(&dict) && !dict->empty())
+      needs_empty_value = true;
+  }
+  if (needs_empty_value)
+    user_pref_store_->MarkNeedsEmptyValue(path);
 
   // Hand off ownership.
   default_store_->SetDefaultValue(path, scoped_value.release());
@@ -754,15 +819,11 @@ void PrefService::RegisterPreference(const char* path,
 void PrefService::UnregisterPreference(const char* path) {
   DCHECK(CalledOnValidThread());
 
-  Preference p(this, path, Value::TYPE_NULL);
-  PreferenceSet::iterator it = prefs_.find(&p);
-  if (it == prefs_.end()) {
-    NOTREACHED() << "Trying to unregister an unregistered pref: " << path;
-    return;
-  }
+  PreferenceMap::iterator it = prefs_map_.find(path);
+  CHECK(it != prefs_map_.end()) << "Trying to unregister an unregistered pref: "
+                                << path;
 
-  delete *it;
-  prefs_.erase(it);
+  prefs_map_.erase(it);
   default_store_->RemoveDefaultValue(path);
   if (pref_sync_associator_.get() &&
       pref_sync_associator_->IsPrefRegistered(path)) {
@@ -812,17 +873,38 @@ void PrefService::SetInt64(const char* path, int64 value) {
 int64 PrefService::GetInt64(const char* path) const {
   DCHECK(CalledOnValidThread());
 
-  const Preference* pref = FindPreference(path);
-  if (!pref) {
+  const Value* value = GetPreferenceValue(path);
+  if (!value) {
     NOTREACHED() << "Trying to read an unregistered pref: " << path;
     return 0;
   }
   std::string result("0");
-  bool rv = pref->GetValue()->GetAsString(&result);
+  bool rv = value->GetAsString(&result);
   DCHECK(rv);
 
   int64 val;
   base::StringToInt64(result, &val);
+  return val;
+}
+
+void PrefService::SetUint64(const char* path, uint64 value) {
+  SetUserPrefValue(path, Value::CreateStringValue(base::Uint64ToString(value)));
+}
+
+uint64 PrefService::GetUint64(const char* path) const {
+  DCHECK(CalledOnValidThread());
+
+  const Value* value = GetPreferenceValue(path);
+  if (!value) {
+    NOTREACHED() << "Trying to read an unregistered pref: " << path;
+    return 0;
+  }
+  std::string result("0");
+  bool rv = value->GetAsString(&result);
+  DCHECK(rv);
+
+  uint64 val;
+  base::StringToUint64(result, &val);
   return val;
 }
 
@@ -844,8 +926,7 @@ Value* PrefService::GetMutableUserPref(const char* path,
   // Look for an existing preference in the user store. If it doesn't
   // exist or isn't the correct type, create a new user preference.
   Value* value = NULL;
-  if (user_pref_store_->GetMutableValue(path, &value)
-          != PersistentPrefStore::READ_OK ||
+  if (!user_pref_store_->GetMutableValue(path, &value) ||
       !value->IsType(type)) {
     if (type == Value::TYPE_DICTIONARY) {
       value = new DictionaryValue;
@@ -882,7 +963,7 @@ void PrefService::SetUserPrefValue(const char* path, Value* new_value) {
   user_pref_store_->SetValue(path, owned_value.release());
 }
 
-SyncableService* PrefService::GetSyncableService() {
+syncer::SyncableService* PrefService::GetSyncableService() {
   return pref_sync_associator_.get();
 }
 
@@ -907,22 +988,31 @@ PrefService::Preference::Preference(const PrefService* service,
   DCHECK(service);
 }
 
+const std::string PrefService::Preference::name() const {
+  return name_;
+}
+
 base::Value::Type PrefService::Preference::GetType() const {
   return type_;
 }
 
 const Value* PrefService::Preference::GetValue() const {
+  const Value* result= pref_service_->GetPreferenceValue(name_);
+  DCHECK(result) << "Must register pref before getting its value";
+  return result;
+}
+
+const Value* PrefService::Preference::GetRecommendedValue() const {
   DCHECK(pref_service_->FindPreference(name_.c_str())) <<
       "Must register pref before getting its value";
 
   const Value* found_value = NULL;
-  if (pref_value_store()->GetValue(name_, type_, &found_value)) {
+  if (pref_value_store()->GetRecommendedValue(name_, type_, &found_value)) {
     DCHECK(found_value->IsType(type_));
     return found_value;
   }
 
-  // Every registered preference has at least a default value.
-  NOTREACHED() << "no valid value found for registered pref " << name_;
+  // The pref has no recommended value.
   return NULL;
 }
 
@@ -960,4 +1050,21 @@ bool PrefService::Preference::IsUserModifiable() const {
 
 bool PrefService::Preference::IsExtensionModifiable() const {
   return pref_value_store()->PrefValueExtensionModifiable(name_.c_str());
+}
+
+const base::Value* PrefService::GetPreferenceValue(
+    const std::string& path) const {
+  DCHECK(CalledOnValidThread());
+  const base::Value::Type type = default_store_->GetType(path);
+  if (type == Value::TYPE_NULL)
+    return NULL;
+  const Value* found_value = NULL;
+  if (pref_value_store_->GetValue(path, type, &found_value)) {
+    DCHECK(found_value->IsType(type));
+    return found_value;
+  }
+
+  // Every registered preference has at least a default value.
+  NOTREACHED() << "no valid value found for registered pref " << path;
+  return NULL;
 }

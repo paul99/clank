@@ -228,7 +228,7 @@ bool Module::Write(std::ostream &stream, bool cfi) {
        func_it != functions_.end(); ++func_it) {
     Function *func = *func_it;
     stream << "FUNC " << hex
-           << func->address << " "
+           << (func->address - load_address_) << " "
            << func->size << " "
            << func->parameter_size << " "
            << func->name << dec << endl;
@@ -238,7 +238,7 @@ bool Module::Write(std::ostream &stream, bool cfi) {
     for (vector<Line>::iterator line_it = func->lines.begin();
          line_it != func->lines.end(); ++line_it) {
       stream << hex
-             << line_it->address << " "
+             << (line_it->address - load_address_) << " "
              << line_it->size << " "
              << dec
              << line_it->number << " "
@@ -253,7 +253,7 @@ bool Module::Write(std::ostream &stream, bool cfi) {
        extern_it != externs_.end(); ++extern_it) {
     Extern *ext = *extern_it;
     stream << "PUBLIC " << hex
-           << ext->address << " 0 "
+           << (ext->address - load_address_) << " 0 "
            << ext->name << dec << endl;
     if (!stream.good())
       return ReportError();
@@ -266,7 +266,7 @@ bool Module::Write(std::ostream &stream, bool cfi) {
          frame_it != stack_frame_entries_.end(); ++frame_it) {
       StackFrameEntry *entry = *frame_it;
       stream << "STACK CFI INIT " << hex
-             << entry->address << " "
+             << (entry->address - load_address_) << " "
              << entry->size << " " << dec;
       if (!stream.good()
           || !WriteRuleMap(entry->initial_rules, stream))
@@ -278,7 +278,7 @@ bool Module::Write(std::ostream &stream, bool cfi) {
       for (RuleChangeMap::const_iterator delta_it = entry->rule_changes.begin();
            delta_it != entry->rule_changes.end(); ++delta_it) {
         stream << "STACK CFI " << hex
-               << delta_it->first << " " << dec;
+               << (delta_it->first - load_address_) << " " << dec;
         if (!stream.good()
             || !WriteRuleMap(delta_it->second, stream))
           return ReportError();

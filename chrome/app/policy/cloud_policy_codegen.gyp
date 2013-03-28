@@ -15,6 +15,13 @@
         '<(policy_out_dir)/policy/policy_constants.cc',
     'protobuf_decoder_path':
         '<(policy_out_dir)/policy/cloud_policy_generated.cc',
+    # This is the "full" protobuf, which defines one protobuf message per
+    # policy. It is also the format currently used by the server.
+    'chrome_settings_proto_path':
+        '<(policy_out_dir)/policy/chrome_settings.proto',
+    # This protobuf is equivalent to chrome_settings.proto but shares messages
+    # for policies of the same type, so that less classes have to be generated
+    # and compiled.
     'cloud_policy_proto_path': '<(policy_out_dir)/policy/cloud_policy.proto',
     'proto_path_substr': 'chrome/browser/policy/proto',
     'proto_rel_path': '<(DEPTH)/<(proto_path_substr)',
@@ -33,6 +40,7 @@
             '<(policy_constant_header_path)',
             '<(policy_constant_source_path)',
             '<(protobuf_decoder_path)',
+            '<(chrome_settings_proto_path)',
             '<(cloud_policy_proto_path)',
           ],
           'action_name': 'generate_policy_source',
@@ -41,8 +49,9 @@
             '<@(generate_policy_source_script_path)',
             '--policy-constants-header=<(policy_constant_header_path)',
             '--policy-constants-source=<(policy_constant_source_path)',
-            '--policy-protobuf=<(cloud_policy_proto_path)',
-            '--protobuf-decoder=<(protobuf_decoder_path)',
+            '--chrome-settings-protobuf=<(chrome_settings_proto_path)',
+            '--cloud-policy-protobuf=<(cloud_policy_proto_path)',
+            '--cloud-policy-decoder=<(protobuf_decoder_path)',
             '<(OS)',
             '<(chromeos)',
             'policy_templates.json',
@@ -59,78 +68,54 @@
     },
     {
       'target_name': 'cloud_policy_proto_compile',
-      'type': 'none',
-      'actions': [
-        {
-          'action_name': 'compile_generated_proto',
-          'inputs': [
-            '<(PRODUCT_DIR)/<(EXECUTABLE_PREFIX)protoc<(EXECUTABLE_SUFFIX)',
-            '<(policy_out_dir)/policy/cloud_policy.proto',
-          ],
-          'outputs': [
-            '<(PRODUCT_DIR)/pyproto/device_management_pb/cloud_policy_pb2.py',
-            '<(protoc_out_dir)/<(proto_path_substr)/cloud_policy.pb.h',
-            '<(protoc_out_dir)/<(proto_path_substr)/cloud_policy.pb.cc',
-          ],
-          'action': [
-            '<(PRODUCT_DIR)/<(EXECUTABLE_PREFIX)protoc<(EXECUTABLE_SUFFIX)',
-            '--proto_path=<(policy_out_dir)/policy',
-            '<(policy_out_dir)/policy/cloud_policy.proto',
-            '--cpp_out=<(protoc_out_dir)/<(proto_path_substr)',
-            '--python_out=<(PRODUCT_DIR)/pyproto/device_management_pb',
-          ],
-          'message': 'Compiling generated cloud policy protobuf',
-        },
+      'type': 'static_library',
+      'sources': [
+        '<(cloud_policy_proto_path)',
       ],
+      'variables': {
+        'proto_in_dir': '<(policy_out_dir)/policy',
+        'proto_out_dir': '<(proto_path_substr)',
+      },
       'dependencies': [
-        '<(DEPTH)/third_party/protobuf/protobuf.gyp:protoc#host',
         'cloud_policy_code_generate',
       ],
-      'direct_dependent_settings': {
-        'include_dirs': [
-          '<(protoc_out_dir)',
-        ]
-      },
+      'includes': [ '../../../build/protoc.gypi' ],
     },
     {
-      'target_name': 'cloud_policy_backend_header_compile',
-      'type': 'none',
+      # This target builds the "full" protobuf, used for tests only.
+      'target_name': 'chrome_settings_proto_compile',
+      'type': 'static_library',
+      'sources': [
+        '<(chrome_settings_proto_path)',
+      ],
+      'variables': {
+        'proto_in_dir': '<(policy_out_dir)/policy',
+        'proto_out_dir': '<(proto_path_substr)',
+      },
+      'dependencies': [
+        'cloud_policy_code_generate',
+        'cloud_policy_proto_compile',
+      ],
+      'includes': [ '../../../build/protoc.gypi' ],
+    },
+    {
+      'target_name': 'policy_proto_compile',
+      'type': 'static_library',
       'sources': [
         '<(proto_rel_path)/chrome_device_policy.proto',
         '<(proto_rel_path)/device_management_backend.proto',
         '<(proto_rel_path)/device_management_local.proto',
+        '<(proto_rel_path)/install_attributes.proto',
         '<(proto_rel_path)/old_generic_format.proto',
       ],
-      'rules': [
-        {
-          'rule_name': 'gen_proto',
-          'extension': 'proto',
-          'inputs': [
-            '<(PRODUCT_DIR)/<(EXECUTABLE_PREFIX)protoc<(EXECUTABLE_SUFFIX)',
-          ],
-          'outputs': [
-            '<(PRODUCT_DIR)/pyproto/device_management_pb/<(RULE_INPUT_ROOT)_pb2.py',
-            '<(protoc_out_dir)/<(proto_path_substr)/<(RULE_INPUT_ROOT).pb.h',
-            '<(protoc_out_dir)/<(proto_path_substr)/<(RULE_INPUT_ROOT).pb.cc',
-          ],
-          'action': [
-            '<(PRODUCT_DIR)/<(EXECUTABLE_PREFIX)protoc<(EXECUTABLE_SUFFIX)',
-            '--proto_path=<(proto_rel_path)',
-            '<(proto_rel_path)/<(RULE_INPUT_NAME)',
-            '--cpp_out=<(protoc_out_dir)/<(proto_path_substr)',
-            '--python_out=<(PRODUCT_DIR)/pyproto/device_management_pb',
-          ],
-          'message': 'Generating C++ and Python code from <(RULE_INPUT_PATH)',
-        },
-      ],
-      'dependencies': [
-        '<(DEPTH)/third_party/protobuf/protobuf.gyp:protoc#host',
-      ],
-      'direct_dependent_settings': {
-        'include_dirs': [
-          '<(protoc_out_dir)',
-        ]
+      'variables': {
+        'proto_in_dir': '<(proto_rel_path)',
+        'proto_out_dir': '<(proto_path_substr)',
       },
+      'dependencies': [
+        'cloud_policy_code_generate',
+      ],
+      'includes': [ '../../../build/protoc.gypi' ],
     },
     {
       'target_name': 'policy',
@@ -146,12 +131,6 @@
         '<(policy_constant_header_path)',
         '<(policy_constant_source_path)',
         '<(protobuf_decoder_path)',
-        '<(protoc_out_dir)/<(proto_path_substr)/cloud_policy.pb.h',
-        '<(protoc_out_dir)/<(proto_path_substr)/cloud_policy.pb.cc',
-        '<(protoc_out_dir)/<(proto_path_substr)/old_generic_format.pb.h',
-        '<(protoc_out_dir)/<(proto_path_substr)/old_generic_format.pb.cc',
-        '<(DEPTH)/chrome/browser/policy/policy_map.h',
-        '<(DEPTH)/chrome/browser/policy/policy_map.cc',
       ],
       'include_dirs': [
         '<(DEPTH)',
@@ -159,9 +138,24 @@
       'dependencies': [
         'cloud_policy_code_generate',
         'cloud_policy_proto_compile',
-        'cloud_policy_backend_header_compile',
+        'policy_proto_compile',
         '<(DEPTH)/base/base.gyp:base',
         '<(DEPTH)/third_party/protobuf/protobuf.gyp:protobuf_lite',
+      ],
+    },
+    {
+      'target_name': 'policy_test_support',
+      'type': 'none',
+      'hard_dependency': 1,
+      'direct_dependent_settings': {
+        'include_dirs': [
+          '<(policy_out_dir)',
+          '<(protoc_out_dir)',
+        ],
+      },
+      'dependencies': [
+        'policy',
+        'chrome_settings_proto_compile',
       ],
     },
   ],

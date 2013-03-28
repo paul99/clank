@@ -1,4 +1,4 @@
-// Copyright (c) 2011 The Chromium Authors. All rights reserved.
+// Copyright (c) 2012 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -8,7 +8,12 @@
 #include "base/lazy_instance.h"
 #include "base/third_party/dynamic_annotations/dynamic_annotations.h"
 #include "base/threading/thread_local.h"
+#include "base/threading/thread_restrictions.h"
 #include "base/synchronization/waitable_event.h"
+
+#if defined(OS_WIN)
+#include "base/win/scoped_com_initializer.h"
+#endif
 
 namespace base {
 
@@ -44,8 +49,13 @@ struct Thread::StartupData {
 };
 
 Thread::Thread(const char* name)
-    : started_(false),
+    :
+#if defined(OS_WIN)
+      com_status_(NONE),
+#endif
+      started_(false),
       stopping_(false),
+      running_(false),
       startup_data_(NULL),
       thread_(0),
       message_loop_(NULL),
@@ -58,11 +68,20 @@ Thread::~Thread() {
 }
 
 bool Thread::Start() {
-  return StartWithOptions(Options());
+  Options options;
+#if defined(OS_WIN)
+  if (com_status_ == STA)
+    options.message_loop_type = MessageLoop::TYPE_UI;
+#endif
+  return StartWithOptions(options);
 }
 
 bool Thread::StartWithOptions(const Options& options) {
   DCHECK(!message_loop_);
+#if defined(OS_WIN)
+  DCHECK((com_status_ != STA) ||
+      (options.message_loop_type == MessageLoop::TYPE_UI));
+#endif
 
   SetThreadWasQuitProperly(false);
 
@@ -76,6 +95,7 @@ bool Thread::StartWithOptions(const Options& options) {
   }
 
   // Wait for the thread to start and initialize message_loop_
+  base::ThreadRestrictions::ScopedAllowWait allow_wait;
   startup_data.event.Wait();
 
   // set it to NULL so we don't keep a pointer to some object on the stack.
@@ -87,7 +107,7 @@ bool Thread::StartWithOptions(const Options& options) {
 }
 
 void Thread::Stop() {
-  if (!thread_was_started())
+  if (!started_)
     return;
 
   StopSoon();
@@ -122,6 +142,10 @@ void Thread::StopSoon() {
   message_loop_->PostTask(FROM_HERE, base::Bind(&ThreadQuitHelper));
 }
 
+bool Thread::IsRunning() const {
+  return running_;
+}
+
 void Thread::Run(MessageLoop* message_loop) {
   message_loop->Run();
 }
@@ -150,18 +174,33 @@ void Thread::ThreadMain() {
     message_loop.set_thread_name(name_);
     message_loop_ = &message_loop;
 
+#if defined(OS_WIN)
+    scoped_ptr<win::ScopedCOMInitializer> com_initializer;
+    if (com_status_ != NONE) {
+      com_initializer.reset((com_status_ == STA) ?
+          new win::ScopedCOMInitializer() :
+          new win::ScopedCOMInitializer(win::ScopedCOMInitializer::kMTA));
+    }
+#endif
+
     // Let the thread do extra initialization.
     // Let's do this before signaling we are started.
     Init();
 
+    running_ = true;
     startup_data_->event.Signal();
     // startup_data_ can't be touched anymore since the starting thread is now
     // unlocked.
 
     Run(message_loop_);
+    running_ = false;
 
     // Let the thread do extra cleanup.
     CleanUp();
+
+#if defined(OS_WIN)
+    com_initializer.reset();
+#endif
 
     // Assert that MessageLoop::Quit was called by ThreadQuitHelper.
     DCHECK(GetThreadWasQuitProperly());
@@ -169,7 +208,6 @@ void Thread::ThreadMain() {
     // We can't receive messages anymore.
     message_loop_ = NULL;
   }
-  thread_id_ = kInvalidThreadId;
 }
 
 }  // namespace base

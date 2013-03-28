@@ -54,7 +54,7 @@
 //   }
 //
 //   {
-//     scoped_ptr<Foo> ptr(new Foo("yay"));  // ptr manages Foo("yay)"
+//     scoped_ptr<Foo> ptr(new Foo("yay"));  // ptr manages Foo("yay").
 //     TakesOwnership(ptr.Pass());           // ptr no longer owns Foo("yay").
 //     scoped_ptr<Foo> ptr2 = CreateFoo();   // ptr2 owns the return Foo.
 //     scoped_ptr<Foo> ptr3 =                // ptr3 now owns what was in ptr2.
@@ -86,7 +86,6 @@
 
 #ifndef BASE_MEMORY_SCOPED_PTR_H_
 #define BASE_MEMORY_SCOPED_PTR_H_
-#pragma once
 
 // This is an implementation designed to match the anticipated future TR2
 // implementation of the scoped_ptr class, and its closely-related brethren,
@@ -96,8 +95,30 @@
 #include <stddef.h>
 #include <stdlib.h>
 
+#include "base/basictypes.h"
 #include "base/compiler_specific.h"
 #include "base/move.h"
+#include "base/template_util.h"
+
+namespace base {
+
+namespace subtle {
+class RefCountedBase;
+class RefCountedThreadSafeBase;
+}  // namespace subtle
+
+namespace internal {
+
+template <typename T> struct IsNotRefCounted {
+  enum {
+    value = !base::is_convertible<T*, base::subtle::RefCountedBase*>::value &&
+        !base::is_convertible<T*, base::subtle::RefCountedThreadSafeBase*>::
+            value
+  };
+};
+
+}  // namespace internal
+}  // namespace base
 
 // A scoped_ptr<T> is like a T*, except that the destructor of scoped_ptr<T>
 // automatically deletes the pointer it holds (if any).
@@ -111,6 +132,9 @@
 template <class C>
 class scoped_ptr {
   MOVE_ONLY_TYPE_FOR_CPP_03(scoped_ptr, RValue)
+
+  COMPILE_ASSERT(base::internal::IsNotRefCounted<C>::value,
+                 C_is_refcounted_type_and_needs_scoped_refptr);
 
  public:
 
@@ -128,7 +152,9 @@ class scoped_ptr {
   scoped_ptr(scoped_ptr<U> other) : ptr_(other.release()) { }
 
   // Constructor.  Move constructor for C++03 move emulation of this type.
-  scoped_ptr(RValue& other) : ptr_(other.release()) { }
+  scoped_ptr(RValue rvalue)
+      : ptr_(rvalue.object->release()) {
+  }
 
   // Destructor.  If there is a C object, delete it.
   // We don't need to test ptr_ == NULL because C++ does that for us.
@@ -146,8 +172,8 @@ class scoped_ptr {
   }
 
   // operator=.  Move operator= for C++03 move emulation of this type.
-  scoped_ptr& operator=(RValue& rhs) {
-    swap(rhs);
+  scoped_ptr& operator=(RValue rhs) {
+    swap(*rhs->object);
     return *this;
   }
 
@@ -173,6 +199,11 @@ class scoped_ptr {
     return ptr_;
   }
   C* get() const { return ptr_; }
+
+  // Allow scoped_ptr<C> to be used in boolean expressions, but not
+  // implicitly convertible to a real bool (which is dangerous).
+  typedef C* scoped_ptr::*Testable;
+  operator Testable() const { return ptr_ ? &scoped_ptr::ptr_ : NULL; }
 
   // Comparison operators.
   // These return whether two scoped_ptr refer to the same object, not just to
@@ -254,7 +285,9 @@ class scoped_array {
   explicit scoped_array(C* p = NULL) : array_(p) { }
 
   // Constructor.  Move constructor for C++03 move emulation of this type.
-  scoped_array(RValue& other) : array_(other.release()) { }
+  scoped_array(RValue rvalue)
+      : array_(rvalue.object->release()) {
+  }
 
   // Destructor.  If there is a C object, delete it.
   // We don't need to test ptr_ == NULL because C++ does that for us.
@@ -264,8 +297,8 @@ class scoped_array {
   }
 
   // operator=.  Move operator= for C++03 move emulation of this type.
-  scoped_array& operator=(RValue& rhs) {
-    swap(rhs);
+  scoped_array& operator=(RValue rhs) {
+    swap(*rhs.object);
     return *this;
   }
 
@@ -293,6 +326,11 @@ class scoped_array {
   C* get() const {
     return array_;
   }
+
+  // Allow scoped_array<C> to be used in boolean expressions, but not
+  // implicitly convertible to a real bool (which is dangerous).
+  typedef C* scoped_array::*Testable;
+  operator Testable() const { return array_ ? &scoped_array::array_ : NULL; }
 
   // Comparison operators.
   // These return whether two scoped_array refer to the same object, not just to
@@ -371,7 +409,9 @@ class scoped_ptr_malloc {
   explicit scoped_ptr_malloc(C* p = NULL): ptr_(p) {}
 
   // Constructor.  Move constructor for C++03 move emulation of this type.
-  scoped_ptr_malloc(RValue& other) : ptr_(other.release()) { }
+  scoped_ptr_malloc(RValue rvalue)
+      : ptr_(rvalue.object->release()) {
+  }
 
   // Destructor.  If there is a C object, call the Free functor.
   ~scoped_ptr_malloc() {
@@ -379,8 +419,8 @@ class scoped_ptr_malloc {
   }
 
   // operator=.  Move operator= for C++03 move emulation of this type.
-  scoped_ptr_malloc& operator=(RValue& rhs) {
-    swap(rhs);
+  scoped_ptr_malloc& operator=(RValue rhs) {
+    swap(*rhs.object);
     return *this;
   }
 
@@ -411,6 +451,11 @@ class scoped_ptr_malloc {
   C* get() const {
     return ptr_;
   }
+
+  // Allow scoped_ptr_malloc<C> to be used in boolean expressions, but not
+  // implicitly convertible to a real bool (which is dangerous).
+  typedef C* scoped_ptr_malloc::*Testable;
+  operator Testable() const { return ptr_ ? &scoped_ptr_malloc::ptr_ : NULL; }
 
   // Comparison operators.
   // These return whether a scoped_ptr_malloc and a plain pointer refer
@@ -466,6 +511,14 @@ bool operator==(C* p, const scoped_ptr_malloc<C, FP>& b) {
 template<class C, class FP> inline
 bool operator!=(C* p, const scoped_ptr_malloc<C, FP>& b) {
   return p != b.get();
+}
+
+// A function to convert T* into scoped_ptr<T>
+// Doing e.g. make_scoped_ptr(new FooBarBaz<type>(arg)) is a shorter notation
+// for scoped_ptr<FooBarBaz<type> >(new FooBarBaz<type>(arg))
+template <typename T>
+scoped_ptr<T> make_scoped_ptr(T* ptr) {
+  return scoped_ptr<T>(ptr);
 }
 
 #endif  // BASE_MEMORY_SCOPED_PTR_H_
