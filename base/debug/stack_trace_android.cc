@@ -10,6 +10,10 @@
 
 #include "base/logging.h"
 
+#ifdef __MIPSEL__
+#define SIGSTKFLT SIGSEGV
+#endif
+
 namespace base {
 namespace debug {
 

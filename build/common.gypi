@@ -910,6 +910,9 @@
     # arm_neon==0).
     'arm_fpu%': 'vfpv3',
 
+    # Default arch variant for MIPS.
+    'mips_arch_variant%': 'mips32r2',
+
     # Set ARM float abi compilation flag.
     'arm_float_abi%': 'softfp',
 
@@ -1135,6 +1138,12 @@
               'android_gdbserver%': '<(android_ndk_root)/prebuilt/android-arm/gdbserver/gdbserver',
               'android_ndk_sysroot%': '<(android_ndk_root)/platforms/android-9/arch-arm',
               'android_toolchain%': '<(android_ndk_root)/toolchains/arm-linux-androideabi-4.6/prebuilt/<(host_os)-<(android_host_arch)/bin',
+            }],
+            ['target_arch == "mipsel"', {
+              'android_app_abi%': 'mips',
+              'android_gdbserver%': '<(android_ndk_root)/prebuilt/android-mips/gdbserver/gdbserver',
+              'android_ndk_sysroot%': '<(android_ndk_root)/platforms/android-9/arch-mips',
+              'android_toolchain%': '<(android_ndk_root)/toolchains/mipsel-linux-android-4.6/prebuilt/<(host_os)-x86/bin',
             }],
           ],
         },
@@ -2504,6 +2513,14 @@
                   '-Wl,--gc-sections',
                 ],
               }],
+              ['target_arch == "mipsel"', {
+                'android_app_abi%': 'mips',
+                'android_ndk_sysroot%': '<(android_ndk_root)/platforms/android-9/arch-mips',
+              }],
+              ['target_arch == "mips"', {
+                'android_app_abi%': 'mips',
+                'android_ndk_sysroot%': '<(android_ndk_root)/platforms/android-9/arch-mips',
+              }],
             ],
           },
           'Release_Base': {
@@ -2755,6 +2772,30 @@
                       }],
                     ],
                   }],
+                ],
+              }],
+            ],
+          }],
+          ['target_arch=="mipsel"', {
+            'target_conditions': [
+              ['_toolset=="target"', {
+                'conditions': [
+                  ['mips_arch_variant=="mips32r2"', {
+                    'defines': ['_MIPS_ARCH_MIPS32R2',],
+                    'cflags': ['-mips32r2', '-Wa,-mips32r2'],
+                  }, {
+                    'cflags': ['-mips32', '-Wa,-mips32'],
+                  }],
+                ],
+                'cflags': [
+                  '-EL',
+                  '-mhard-float',
+                ],
+                'ldflags': [
+                  '-EL',
+                ],
+                'cflags_cc': [
+                  '-Wno-uninitialized',
                 ],
               }],
             ],
@@ -3220,6 +3261,12 @@
                     'ldflags': [
                       '-L<(android_ndk_root)/sources/cxx-stl/stlport/libs/armeabi',
                       '-L<(android_ndk_root)/sources/cxx-stl/gnu-libstdc++/4.6/libs/armeabi',
+                    ],
+                  }],
+                  ['target_arch=="mipsel"', {
+                    'ldflags': [
+                      '-L<(android_ndk_root)/sources/cxx-stl/stlport/libs/mips',
+                      '-L<(android_ndk_root)/sources/cxx-stl/gnu-libstdc++/4.6/libs/mips'
                     ],
                   }],
                   ['target_arch=="ia32"', {
