@@ -30,10 +30,10 @@
       'sources': [
         # This file must always be included in the shared_library step to en sure
         # JNI_OnLoad is exported.
-        '../chrome/app/android/chrome_jni_onload.cc',
+        #'../chrome/app/android/chrome_jni_onload.cc',
       ],
       'libraries': [
-        '<(PRODUCT_DIR)/libchrome_android_prebuilt.a',
+        #'<(PRODUCT_DIR)/libchrome_android_prebuilt.a',
       ],
       'conditions': [
         ['host_os=="linux"', {
