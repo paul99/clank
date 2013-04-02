@@ -7,6 +7,7 @@
 #include <string>
 
 #include "base/message_loop.h"
+#include "base/prefs/pref_service.h"
 #include "chrome/browser/browsing_data/mock_browsing_data_appcache_helper.h"
 #include "chrome/browser/browsing_data/mock_browsing_data_cookie_helper.h"
 #include "chrome/browser/browsing_data/mock_browsing_data_database_helper.h"

@@ -21,6 +21,7 @@
 #include "ui/aura/client/activation_change_observer.h"
 #include "ui/aura/client/activation_delegate.h"
 #include "ui/aura/client/focus_change_observer.h"
+#include "ui/aura/root_window_observer.h"
 #include "ui/aura/window_delegate.h"
 #include "ui/base/ime/text_input_client.h"
 #include "ui/compositor/compositor.h"
@@ -54,6 +55,7 @@ class RenderWidgetHostViewAura
       public ui::CompositorObserver,
       public ui::TextInputClient,
       public gfx::DisplayObserver,
+      public aura::RootWindowObserver,
       public aura::WindowDelegate,
       public aura::client::ActivationDelegate,
       public aura::client::ActivationChangeObserver,
@@ -61,6 +63,33 @@ class RenderWidgetHostViewAura
       public ImageTransportFactoryObserver,
       public base::SupportsWeakPtr<RenderWidgetHostViewAura> {
  public:
+  // Used to notify whenever the paint-content of the view changes.
+  class PaintObserver {
+   public:
+    PaintObserver() {}
+    virtual ~PaintObserver() {}
+
+    // This is called when painting of the page is completed.
+    virtual void OnPaintComplete() = 0;
+
+    // This is called when compositor painting of the page is completed.
+    virtual void OnCompositingComplete() = 0;
+
+    // This is called when the contents for compositor painting changes.
+    virtual void OnUpdateCompositorContent() = 0;
+
+    // This is called loading the page has completed.
+    virtual void OnPageLoadComplete() = 0;
+
+    // This is called when the view is destroyed, so that the observer can
+    // perform any necessary clean-up.
+    virtual void OnViewDestroyed() = 0;
+  };
+
+  void set_paint_observer(PaintObserver* observer) {
+    paint_observer_ = observer;
+  }
+
   // RenderWidgetHostView implementation.
   virtual void InitAsChild(gfx::NativeView parent_view) OVERRIDE;
   virtual RenderWidgetHost* GetRenderWidgetHost() const OVERRIDE;
@@ -110,16 +139,17 @@ class RenderWidgetHostViewAura
                                 size_t offset,
                                 const ui::Range& range) OVERRIDE;
   virtual void SelectionBoundsChanged(
-      const gfx::Rect& start_rect,
-      WebKit::WebTextDirection start_direction,
-      const gfx::Rect& end_rect,
-      WebKit::WebTextDirection end_direction) OVERRIDE;
+      const ViewHostMsg_SelectionBounds_Params& params) OVERRIDE;
   virtual BackingStore* AllocBackingStore(const gfx::Size& size) OVERRIDE;
   virtual void CopyFromCompositingSurface(
       const gfx::Rect& src_subrect,
       const gfx::Size& dst_size,
-      const base::Callback<void(bool)>& callback,
-      skia::PlatformBitmap* output) OVERRIDE;
+      const base::Callback<void(bool, const SkBitmap&)>& callback) OVERRIDE;
+  virtual void CopyFromCompositingSurfaceToVideoFrame(
+      const gfx::Rect& src_subrect,
+      const scoped_refptr<media::VideoFrame>& target,
+      const base::Callback<void(bool)>& callback) OVERRIDE;
+  virtual bool CanCopyToVideoFrame() const OVERRIDE;
   virtual void OnAcceleratedCompositingStateChange() OVERRIDE;
   virtual void AcceleratedSurfaceBuffersSwapped(
       const GpuHostMsg_AcceleratedSurfaceBuffersSwapped_Params& params_in_pixel,
@@ -129,8 +159,6 @@ class RenderWidgetHostViewAura
       int gpu_host_id) OVERRIDE;
   virtual void AcceleratedSurfaceSuspend() OVERRIDE;
   virtual bool HasAcceleratedSurface(const gfx::Size& desired_size) OVERRIDE;
-  virtual void AcceleratedSurfaceNew(uint64 surface_id,
-                                     const std::string& mailbox_name) OVERRIDE;
   virtual void AcceleratedSurfaceRelease() OVERRIDE;
   virtual void GetScreenInfo(WebKit::WebScreenInfo* results) OVERRIDE;
   virtual gfx::Rect GetBoundsInRootWindow() OVERRIDE;
@@ -214,6 +242,10 @@ class RenderWidgetHostViewAura
   virtual void OnWindowFocused(aura::Window* gained_focus,
                                aura::Window* lost_focus) OVERRIDE;
 
+  // Overridden from aura::RootWindowObserver:
+  virtual void OnRootWindowMoved(const aura::RootWindow* root,
+                                 const gfx::Point& new_origin) OVERRIDE;
+
  protected:
   friend class RenderWidgetHostView;
 
@@ -269,13 +301,11 @@ class RenderWidgetHostViewAura
 
   struct BufferPresentedParams {
     BufferPresentedParams(int route_id,
-                          int gpu_host_id,
-                          uint64 surface_handle);
+                          int gpu_host_id);
     ~BufferPresentedParams();
 
     int32 route_id;
     int gpu_host_id;
-    uint64 surface_handle;
     scoped_refptr<ui::Texture> texture_to_produce;
   };
 
@@ -283,10 +313,10 @@ class RenderWidgetHostViewAura
   // that we have presented the accelerated surface buffer.
   static void InsertSyncPointAndACK(const BufferPresentedParams& params);
 
-  // Called when window_ gets added to a new window tree.
-  void AddingToRootWindow();
+  // Called after |window_| is parented to a RootWindow.
+  void AddedToRootWindow();
 
-  // Called when window_ is removed from the window tree.
+  // Called prior to removing |window_| from a RootWindow.
   void RemovingFromRootWindow();
 
   // Called after commit for the last reference to the texture going away
@@ -297,7 +327,8 @@ class RenderWidgetHostViewAura
   // AdjustSurfaceProtection.
   static void CopyFromCompositingSurfaceFinished(
       base::WeakPtr<RenderWidgetHostViewAura> render_widget_host_view,
-      const base::Callback<void(bool)>& callback,
+      const SkBitmap& bitmap,
+      const base::Callback<void(bool, const SkBitmap&)>& callback,
       bool result);
 
   ui::Compositor* GetCompositor();
@@ -310,6 +341,7 @@ class RenderWidgetHostViewAura
 
   bool SwapBuffersPrepare(const gfx::Rect& surface_rect,
                           const gfx::Rect& damage_rect,
+                          const std::string& mailbox_name,
                           BufferPresentedParams* params);
 
   void SwapBuffersCompleted(const BufferPresentedParams& params);
@@ -350,9 +382,9 @@ class RenderWidgetHostViewAura
   ui::TextInputType text_input_type_;
   bool can_compose_inline_;
 
-  // Rectangles before and after the selection.
-  gfx::Rect selection_start_rect_;
-  gfx::Rect selection_end_rect_;
+  // Rectangles for the selection anchor and focus.
+  gfx::Rect selection_anchor_rect_;
+  gfx::Rect selection_focus_rect_;
 
   // The current composition character bounds.
   std::vector<gfx::Rect> composition_character_bounds_;
@@ -368,10 +400,8 @@ class RenderWidgetHostViewAura
 
   std::vector<base::Closure> on_compositing_did_commit_callbacks_;
 
-  std::map<uint64, scoped_refptr<ui::Texture> > image_transport_clients_;
-
-  // The identifier of the current frontbuffer.
-  uint64 current_surface_;
+  // The current frontbuffer texture.
+  scoped_refptr<ui::Texture> current_surface_;
 
   // The damage in the previously presented buffer.
   SkRegion previous_damage_;
@@ -439,11 +469,10 @@ class RenderWidgetHostViewAura
   };
   CanLockCompositorState can_lock_compositor_;
 
-  // Frames receveived with an unregistered surface_handle.
-  size_t consecutive_bad_frames_received_;
-
-  // Whether the last frame received used an unregistered surface handle.
-  bool last_frame_was_bad_;
+  // An observer to notify that the paint content of the view has changed. The
+  // observer is not owned by the view, and must remove itself as an oberver
+  // when it is being destroyed.
+  PaintObserver* paint_observer_;
 
   DISALLOW_COPY_AND_ASSIGN(RenderWidgetHostViewAura);
 };

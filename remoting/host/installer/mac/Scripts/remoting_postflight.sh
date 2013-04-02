@@ -13,21 +13,25 @@ PLIST=/Library/LaunchAgents/org.chromium.chromoting.plist
 PAM_CONFIG=/etc/pam.d/chrome-remote-desktop
 ENABLED_FILE="$HELPERTOOLS/$NAME.me2me_enabled"
 ENABLED_FILE_BACKUP="$ENABLED_FILE.backup"
+LOG_FILE=/var/log/org.chromium.chromoting.log
 
 KSADMIN=/Library/Google/GoogleSoftwareUpdate/GoogleSoftwareUpdate.bundle/Contents/MacOS/ksadmin
 KSUPDATE=https://tools.google.com/service/update2
 KSPID=com.google.chrome_remote_desktop
 KSPVERSION=@@VERSION@@
 
-trap onexit ERR
+trap on_error ERR
 
-function onexit {
-  # Log an error but don't report an install failure if this script has errors.
-  logger An error occurred while launching the service
-  exit 0
+function on_error {
+  logger An error occurred during Chrome Remote Desktop setup.
+  exit 1
 }
 
 logger Running Chrome Remote Desktop postflight script @@VERSION@@
+
+# Register a ticket with Keystone to keep this package up to date.
+$KSADMIN --register --productid "$KSPID" --version "$KSPVERSION" \
+    --xcpath "$PLIST" --url "$KSUPDATE"
 
 # If there is a backup _enabled file, re-enable the service.
 if [[ -f "$ENABLED_FILE_BACKUP" ]]; then
@@ -60,6 +64,14 @@ else
   logger PAM config has local edits. Not updating.
 fi
 
+# Create the log file (if this isn't created ahead of time
+# then directing output from the service there won't work).
+# Make sure admins have write privileges (CRD users are
+# typically admins)
+touch "$LOG_FILE"
+chown :admin "$LOG_FILE"
+chmod 660 "$LOG_FILE"
+
 # Load the service.
 # The launchctl command we'd like to run:
 #   launchctl load -w -S Aqua $PLIST
@@ -75,6 +87,3 @@ USERID=$2
 if [[ -n "$USERNAME" && -n "$USERID" ]]; then
   launchctl bsexec "$USERID" sudo -u "$USERNAME" launchctl load -w -S Aqua "$PLIST"
 fi
-
-# Register a ticket with Keystone so we're updated.
-$KSADMIN --register --productid "$KSPID" --version "$KSPVERSION" --xcpath "$PLIST" --url "$KSUPDATE"

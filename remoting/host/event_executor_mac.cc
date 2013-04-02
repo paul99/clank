@@ -14,9 +14,11 @@
 #include "base/mac/scoped_cftyperef.h"
 #include "base/memory/ref_counted.h"
 #include "base/single_thread_task_runner.h"
+#include "media/video/capture/screen/mac/desktop_configuration.h"
 #include "remoting/host/clipboard.h"
 #include "remoting/proto/internal.pb.h"
 #include "remoting/protocol/message_decoder.h"
+#include "skia/ext/skia_utils_mac.h"
 #include "third_party/skia/include/core/SkPoint.h"
 #include "third_party/skia/include/core/SkRect.h"
 
@@ -35,13 +37,9 @@ using protocol::MouseEvent;
 
 // skia/ext/skia_utils_mac.h only defines CGRectToSkRect().
 SkIRect CGRectToSkIRect(const CGRect& rect) {
-  SkIRect sk_rect = {
-    SkScalarRound(rect.origin.x),
-    SkScalarRound(rect.origin.y),
-    SkScalarRound(rect.origin.x + rect.size.width),
-    SkScalarRound(rect.origin.y + rect.size.height)
-  };
-  return sk_rect;
+  SkIRect result;
+  gfx::CGRectToSkRect(rect).round(&result);
+  return result;
 }
 
 // A class to generate events on Mac.
@@ -63,21 +61,20 @@ class EventExecutorMac : public EventExecutor {
       scoped_ptr<protocol::ClipboardStub> client_clipboard) OVERRIDE;
 
  private:
-  // The actual implementation resides in EventExecutorWin::Core class.
-  class Core : public base::RefCountedThreadSafe<Core>, public EventExecutor {
+  // The actual implementation resides in EventExecutorMac::Core class.
+  class Core : public base::RefCountedThreadSafe<Core> {
    public:
     explicit Core(scoped_refptr<base::SingleThreadTaskRunner> task_runner);
 
-    // ClipboardStub interface.
-    virtual void InjectClipboardEvent(const ClipboardEvent& event) OVERRIDE;
+    // Mirrors the ClipboardStub interface.
+    void InjectClipboardEvent(const ClipboardEvent& event);
 
-    // InputStub interface.
-    virtual void InjectKeyEvent(const KeyEvent& event) OVERRIDE;
-    virtual void InjectMouseEvent(const MouseEvent& event) OVERRIDE;
+    // Mirrors the InputStub interface.
+    void InjectKeyEvent(const KeyEvent& event);
+    void InjectMouseEvent(const MouseEvent& event);
 
-    // EventExecutor interface.
-    virtual void Start(
-        scoped_ptr<protocol::ClipboardStub> client_clipboard) OVERRIDE;
+    // Mirrors the EventExecutor interface.
+    void Start(scoped_ptr<protocol::ClipboardStub> client_clipboard);
 
     void Stop();
 
@@ -190,30 +187,25 @@ void EventExecutorMac::Core::InjectMouseEvent(const MouseEvent& event) {
     // Set the mouse position assuming single-monitor.
     mouse_pos_ = SkIPoint::Make(event.x(), event.y());
 
-    // Determine how many active displays there are.
-    CGDisplayCount display_count;
-    CGError error = CGGetActiveDisplayList(0, NULL, &display_count);
-    CHECK_EQ(error, CGDisplayNoErr);
+    // Fetch the desktop configuration.
+    // TODO(wez): Optimize this out, or at least only enumerate displays in
+    // response to display-changed events. VideoFrameCapturer's VideoFrames
+    // could be augmented to include native cursor coordinates for use by
+    // MouseClampingFilter, removing the need for translation here.
+    media::MacDesktopConfiguration desktop_config =
+        media::MacDesktopConfiguration::GetCurrent(
+            media::MacDesktopConfiguration::TopLeftOrigin);
 
-    if (display_count > 1) {
-      // Determine the bounding box of the displays, to get the top-left origin.
-      std::vector<CGDirectDisplayID> display_ids(display_count);
-      error = CGGetActiveDisplayList(display_count, &display_ids[0],
-                                     &display_count);
-      CHECK_EQ(error, CGDisplayNoErr);
-      CHECK_EQ(display_count, display_ids.size());
+    // Translate the mouse position into desktop coordinates.
+    mouse_pos_ += SkIPoint::Make(desktop_config.pixel_bounds.left(),
+                                 desktop_config.pixel_bounds.top());
 
-      SkIRect desktop_bounds = SkIRect::MakeEmpty();
-      for (unsigned int d = 0; d < display_count; ++d) {
-        CGRect display_bounds = CGDisplayBounds(display_ids[d]);
-        desktop_bounds.join(CGRectToSkIRect(display_bounds));
-      }
+    // Convert from pixel to Density Independent Pixel coordinates.
+    mouse_pos_ = SkIPoint::Make(
+        SkScalarRound(mouse_pos_.x() / desktop_config.dip_to_pixel_scale),
+        SkScalarRound(mouse_pos_.y() / desktop_config.dip_to_pixel_scale));
 
-      // Adjust the injected mouse event position.
-      mouse_pos_ += SkIPoint::Make(desktop_bounds.left(), desktop_bounds.top());
-    }
-
-    VLOG(3) << "Moving mouse to " << event.x() << "," << event.y();
+    VLOG(3) << "Moving mouse to " << mouse_pos_.x() << "," << mouse_pos_.y();
   }
   if (event.has_button() && event.has_button_down()) {
     if (event.button() >= 1 && event.button() <= 3) {
@@ -257,18 +249,8 @@ void EventExecutorMac::Core::InjectMouseEvent(const MouseEvent& event) {
     base::mac::ScopedCFTypeRef<CGEventRef> event(
         CGEventCreateScrollWheelEvent(
             NULL, kCGScrollEventUnitPixel, 2, delta_y, delta_x));
-    if (event)
-      CGEventPost(kCGHIDEventTap, event);
-  } else if (event.has_wheel_offset_x() && event.has_wheel_offset_y()) {
-    int dx = event.wheel_offset_x();
-    int dy = event.wheel_offset_y();
-    // Note that |dy| (the vertical wheel) is the primary wheel.
-#pragma clang diagnostic push
-#pragma clang diagnostic ignored "-Wdeprecated-declarations"
-    error = CGPostScrollWheelEvent(2, dy, dx);
-#pragma clang diagnostic pop
-    if (error != kCGErrorSuccess) {
-      LOG(WARNING) << "CGPostScrollWheelEvent error " << error;
+    if (event) {
+      CGEventPost(kCGSessionEventTap, event);
     }
   }
 }

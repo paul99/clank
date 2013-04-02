@@ -741,6 +741,7 @@
     'gcc_compile_flags': [],
     'pnacl_compile_flags': [],
     'variables': {
+      'disable_pnacl%': 0,
       'build_pnacl_newlib': 0,
       'nlib_target': '',
       'extra_deps_pnacl_newlib': [],
@@ -771,7 +772,7 @@
       ],
     },
     'target_conditions': [
-      ['nexe_target!="" and build_pnacl_newlib!=0', {
+      ['nexe_target!="" and disable_pnacl==0 and build_pnacl_newlib!=0', {
         'variables': {
             'out_pnacl_newlib_x86_32_nexe%': '<(PRODUCT_DIR)/>(nexe_target)_pnacl_newlib_x32.nexe',
             'out_pnacl_newlib_x86_64_nexe%': '<(PRODUCT_DIR)/>(nexe_target)_pnacl_newlib_x64.nexe',
@@ -824,7 +825,9 @@
                 'msvs_cygwin_shell': 0,
                 'description': 'translating >(out_pnacl_newlib_x86_32_nexe)',
                 'inputs': [
-                  '<(DEPTH)/native_client/build/build_nexe.py',
+                  # Having this in the input somehow causes devenv warnings
+                  # when building pnacl browser tests.
+                  # '<(DEPTH)/native_client/build/build_nexe.py',
                   '>(out_pnacl_newlib)',
                 ],
                 'outputs': [ '>(out_pnacl_newlib_x86_32_nexe)' ],
@@ -847,7 +850,9 @@
                 'msvs_cygwin_shell': 0,
                 'description': 'translating >(out_pnacl_newlib_x86_64_nexe)',
                 'inputs': [
-                  '<(DEPTH)/native_client/build/build_nexe.py',
+                  # Having this in the input somehow causes devenv warnings
+                  # when building pnacl browser tests.
+                  # '<(DEPTH)/native_client/build/build_nexe.py',
                   '>(out_pnacl_newlib)',
                 ],
                 'outputs': [ '>(out_pnacl_newlib_x86_64_nexe)' ],
@@ -870,7 +875,9 @@
                 'msvs_cygwin_shell': 0,
                 'description': 'translating >(out_pnacl_newlib_arm_nexe)',
                 'inputs': [
-                  '<(DEPTH)/native_client/build/build_nexe.py',
+                 # Having this in the input somehow causes devenv warnings
+                 # when building pnacl browser tests.
+                 # '<(DEPTH)/native_client/build/build_nexe.py',
                   '>(out_pnacl_newlib)',
                 ],
                 'outputs': [ '>(out_pnacl_newlib_arm_nexe)' ],
@@ -889,7 +896,7 @@
             }],
           ],
       }],
-      ['nlib_target!="" and build_pnacl_newlib!=0', {
+      ['nlib_target!="" and disable_pnacl==0 and build_pnacl_newlib!=0', {
         'variables': {
           'tool_name': 'pnacl_newlib',
           'inst_dir': '<(SHARED_INTERMEDIATE_DIR)/tc_pnacl_newlib',

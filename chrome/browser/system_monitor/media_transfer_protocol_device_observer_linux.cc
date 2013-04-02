@@ -6,16 +6,14 @@
 
 #include "base/file_path.h"
 #include "base/stl_util.h"
-#include "base/string_number_conversions.h"
 #include "base/string_split.h"
+#include "base/strings/string_number_conversions.h"
 #include "base/utf_string_conversions.h"
-#include "chrome/browser/media_transfer_protocol/mtp_storage_info.pb.h"
 #include "chrome/browser/system_monitor/media_storage_util.h"
 #include "chrome/browser/system_monitor/removable_device_constants.h"
+#include "device/media_transfer_protocol/mtp_storage_info.pb.h"
 
 namespace chrome {
-
-using base::SystemMonitor;
 
 namespace {
 
@@ -101,8 +99,8 @@ void GetStorageInfo(const std::string& storage_name,
                     string16* label,
                     std::string* location) {
   DCHECK(!storage_name.empty());
-  MediaTransferProtocolManager* mtp_manager =
-      MediaTransferProtocolManager::GetInstance();
+  device::MediaTransferProtocolManager* mtp_manager =
+      device::MediaTransferProtocolManager::GetInstance();
   const MtpStorageInfo* storage_info =
       mtp_manager->GetStorageInfo(storage_name);
 
@@ -128,8 +126,8 @@ MediaTransferProtocolDeviceObserverLinux()
   DCHECK(!g_mtp_device_observer);
   g_mtp_device_observer = this;
 
-  MediaTransferProtocolManager* mtp_manager =
-      MediaTransferProtocolManager::GetInstance();
+  device::MediaTransferProtocolManager* mtp_manager =
+      device::MediaTransferProtocolManager::GetInstance();
   mtp_manager->AddObserver(this);
   EnumerateStorages();
 }
@@ -138,9 +136,10 @@ MediaTransferProtocolDeviceObserverLinux()
 MediaTransferProtocolDeviceObserverLinux::
 MediaTransferProtocolDeviceObserverLinux(
     GetStorageInfoFunc get_storage_info_func)
-    : get_storage_info_func_(get_storage_info_func) {
+    : get_storage_info_func_(get_storage_info_func),
+      notifications_(NULL) {
   // In unit tests, we don't have a media transfer protocol manager.
-  DCHECK(!MediaTransferProtocolManager::GetInstance());
+  DCHECK(!device::MediaTransferProtocolManager::GetInstance());
   DCHECK(!g_mtp_device_observer);
   g_mtp_device_observer = this;
 }
@@ -150,8 +149,8 @@ MediaTransferProtocolDeviceObserverLinux::
   DCHECK_EQ(this, g_mtp_device_observer);
   g_mtp_device_observer = NULL;
 
-  MediaTransferProtocolManager* mtp_manager =
-      MediaTransferProtocolManager::GetInstance();
+  device::MediaTransferProtocolManager* mtp_manager =
+      device::MediaTransferProtocolManager::GetInstance();
   if (mtp_manager)
     mtp_manager->RemoveObserver(this);
 }
@@ -164,12 +163,12 @@ MediaTransferProtocolDeviceObserverLinux::GetInstance() {
 }
 
 bool MediaTransferProtocolDeviceObserverLinux::GetStorageInfoForPath(
-    const FilePath& path,
-    SystemMonitor::RemovableStorageInfo* storage_info) const {
+    const base::FilePath& path,
+    RemovableStorageNotifications::StorageInfo* storage_info) const {
   if (!path.IsAbsolute())
     return false;
 
-  std::vector<FilePath::StringType> path_components;
+  std::vector<base::FilePath::StringType> path_components;
   path.GetComponents(&path_components);
   if (path_components.size() < 2)
     return false;
@@ -187,14 +186,16 @@ bool MediaTransferProtocolDeviceObserverLinux::GetStorageInfoForPath(
   return true;
 }
 
-// MediaTransferProtocolManager::Observer override.
+void MediaTransferProtocolDeviceObserverLinux::SetNotifications(
+    RemovableStorageNotifications::Receiver* notifications) {
+  notifications_ = notifications;
+}
+
+// device::MediaTransferProtocolManager::Observer override.
 void MediaTransferProtocolDeviceObserverLinux::StorageChanged(
     bool is_attached,
     const std::string& storage_name) {
   DCHECK(!storage_name.empty());
-
-  SystemMonitor* system_monitor = SystemMonitor::Get();
-  DCHECK(system_monitor);
 
   // New storage is attached.
   if (is_attached) {
@@ -211,26 +212,25 @@ void MediaTransferProtocolDeviceObserverLinux::StorageChanged(
 
     DCHECK(!ContainsKey(storage_map_, location));
 
-    SystemMonitor::RemovableStorageInfo storage_info(device_id, device_name,
-                                                     location);
+    RemovableStorageNotifications::StorageInfo storage_info(
+        device_id, device_name, location);
     storage_map_[location] = storage_info;
-    system_monitor->ProcessRemovableStorageAttached(device_id, device_name,
-                                                    location);
+    notifications_->ProcessAttach(device_id, device_name, location);
   } else {
     // Existing storage is detached.
     StorageLocationToInfoMap::iterator it =
         storage_map_.find(GetDeviceLocationFromStorageName(storage_name));
     if (it == storage_map_.end())
       return;
-    system_monitor->ProcessRemovableStorageDetached(it->second.device_id);
+    notifications_->ProcessDetach(it->second.device_id);
     storage_map_.erase(it);
   }
 }
 
 void MediaTransferProtocolDeviceObserverLinux::EnumerateStorages() {
   typedef std::vector<std::string> StorageList;
-  MediaTransferProtocolManager* mtp_manager =
-      MediaTransferProtocolManager::GetInstance();
+  device::MediaTransferProtocolManager* mtp_manager =
+      device::MediaTransferProtocolManager::GetInstance();
   StorageList storages = mtp_manager->GetStorages();
   for (StorageList::const_iterator storage_iter = storages.begin();
        storage_iter != storages.end(); ++storage_iter) {

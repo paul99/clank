@@ -34,10 +34,12 @@ namespace {
 // process.
 const int kTransportInfoSendDelayMs = 2;
 
-// How long we should wait for a response from the other end. This
-// value is used for all requests include |session-initiate| and
-// |transport-info|.
-const int kMessageResponseTimeoutSeconds = 10;
+// How long we should wait for a response from the other end. This value is used
+// for all requests except |transport-info|.
+const int kDefaultMessageTimeout = 10;
+
+// Timeout for the transport-info messages.
+const int kTransportInfoTimeout = 10 * 60;
 
 // Name of the multiplexed channel.
 const char kMuxChannelName[] = "mux";
@@ -68,6 +70,8 @@ JingleSession::~JingleSession() {
   channel_multiplexer_.reset();
   STLDeleteContainerPointers(pending_requests_.begin(),
                              pending_requests_.end());
+  STLDeleteContainerPointers(transport_info_requests_.begin(),
+                             transport_info_requests_.end());
   STLDeleteContainerPairSecondPointers(channels_.begin(), channels_.end());
   session_manager_->SessionDestroyed(this);
 }
@@ -287,10 +291,9 @@ void JingleSession::SendMessage(const JingleMessage& message) {
       message.ToXml(),
       base::Bind(&JingleSession::OnMessageResponse,
                  base::Unretained(this), message.action));
-  if (request.get()) {
-    request->SetTimeout(
-        base::TimeDelta::FromSeconds(kMessageResponseTimeoutSeconds));
-    pending_requests_.push_back(request.release());
+  if (request) {
+    request->SetTimeout(base::TimeDelta::FromSeconds(kDefaultMessageTimeout));
+    pending_requests_.insert(request.release());
   } else {
     LOG(ERROR) << "Failed to send a "
                << JingleMessage::GetActionName(message.action) << " message";
@@ -302,11 +305,16 @@ void JingleSession::OnMessageResponse(
     IqRequest* request,
     const buzz::XmlElement* response) {
   std::string type_str = JingleMessage::GetActionName(request_type);
-  CleanupPendingRequests(request);
 
+  // Delete the request from the list of pending requests.
+  pending_requests_.erase(request);
+  delete request;
+
+  // |response| will be NULL if the request timed out.
   if (!response) {
     LOG(ERROR) << type_str << " request timed out.";
     CloseInternal(SIGNALING_TIMEOUT);
+    return;
   } else {
     const std::string& type = response->Attr(buzz::QName("", "type"));
     if (type != "result") {
@@ -330,29 +338,50 @@ void JingleSession::OnMessageResponse(
   }
 }
 
-void JingleSession::CleanupPendingRequests(IqRequest* request) {
-  DCHECK(!pending_requests_.empty());
-  DCHECK(request);
+void JingleSession::SendTransportInfo() {
+  JingleMessage message(peer_jid_, JingleMessage::TRANSPORT_INFO, session_id_);
+  message.candidates.swap(pending_candidates_);
 
-  // This method is called whenever a response to |request| is
-  // received. Here we delete that request and all requests that were
-  // sent before it. The idea here is that if we send messages A, B
-  // and C and then suddenly receive response to C then it means that
-  // either A and B messages or the corresponding response messages
-  // were somehow lost. E.g. that may happen when the client switches
-  // from one network to another. The best way to handle that case is
-  // to ignore errors and timeouts for A and B by deleting the
+  scoped_ptr<IqRequest> request = session_manager_->iq_sender()->SendIq(
+      message.ToXml(),
+      base::Bind(&JingleSession::OnTransportInfoResponse,
+                 base::Unretained(this)));
+  if (request) {
+    request->SetTimeout(base::TimeDelta::FromSeconds(kTransportInfoTimeout));
+    transport_info_requests_.push_back(request.release());
+  } else {
+    LOG(ERROR) << "Failed to send a transport-info message";
+  }
+}
+
+void JingleSession::OnTransportInfoResponse(IqRequest* request,
+                                            const buzz::XmlElement* response) {
+  DCHECK(!transport_info_requests_.empty());
+
+  // Consider transport-info requests sent before this one lost and delete
   // corresponding IqRequest objects.
-  while (!pending_requests_.empty() && pending_requests_.front() != request) {
-    delete pending_requests_.front();
-    pending_requests_.pop_front();
+  while (transport_info_requests_.front() != request) {
+    delete transport_info_requests_.front();
+    transport_info_requests_.pop_front();
   }
 
   // Delete the |request| itself.
-  DCHECK_EQ(request, pending_requests_.front());
+  DCHECK_EQ(request, transport_info_requests_.front());
   delete request;
-  if (!pending_requests_.empty())
-    pending_requests_.pop_front();
+  transport_info_requests_.pop_front();
+
+  // Ignore transport-info timeouts.
+  if (!response) {
+    LOG(ERROR) << "transport-info request has timed out.";
+    return;
+  }
+
+  const std::string& type = response->Attr(buzz::QName("", "type"));
+  if (type != "result") {
+    LOG(ERROR) << "Received error in response to transport-info message: \""
+               << response->Str() << "\". Terminating the session.";
+    CloseInternal(PEER_IS_OFFLINE);
+  }
 }
 
 void JingleSession::OnIncomingMessage(const JingleMessage& message,
@@ -537,12 +566,6 @@ void JingleSession::ProcessAuthenticationStep() {
     CloseInternal(AuthRejectionReasonToErrorCode(
         authenticator_->rejection_reason()));
   }
-}
-
-void JingleSession::SendTransportInfo() {
-  JingleMessage message(peer_jid_, JingleMessage::TRANSPORT_INFO, session_id_);
-  message.candidates.swap(pending_candidates_);
-  SendMessage(message);
 }
 
 void JingleSession::CloseInternal(ErrorCode error) {

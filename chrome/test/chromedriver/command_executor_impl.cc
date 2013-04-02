@@ -9,14 +9,19 @@
 #include "base/message_loop.h"
 #include "base/message_loop_proxy.h"
 #include "base/values.h"
-#include "chrome/test/chromedriver/chrome_launcher_impl.h"
+#include "chrome/test/chromedriver/command_names.h"
 #include "chrome/test/chromedriver/commands.h"
-#include "chrome/test/chromedriver/net/sync_websocket_factory.h"
+#include "chrome/test/chromedriver/element_commands.h"
 #include "chrome/test/chromedriver/net/url_request_context_getter.h"
 #include "chrome/test/chromedriver/session.h"
-#include "chrome/test/chromedriver/session_command.h"
+#include "chrome/test/chromedriver/session_commands.h"
 #include "chrome/test/chromedriver/session_map.h"
 #include "chrome/test/chromedriver/status.h"
+#include "chrome/test/chromedriver/window_commands.h"
+
+#if defined(OS_MACOSX)
+#include "base/mac/scoped_nsautorelease_pool.h"
+#endif
 
 CommandExecutorImpl::CommandExecutorImpl()
     : io_thread_("ChromeDriver IO") {}
@@ -24,15 +29,89 @@ CommandExecutorImpl::CommandExecutorImpl()
 CommandExecutorImpl::~CommandExecutorImpl() {}
 
 void CommandExecutorImpl::Init() {
+#if defined(OS_MACOSX)
+  base::mac::ScopedNSAutoreleasePool autorelease_pool;
+#endif
   base::Thread::Options options(MessageLoop::TYPE_IO, 0);
   CHECK(io_thread_.StartWithOptions(options));
   context_getter_ = new URLRequestContextGetter(
       io_thread_.message_loop_proxy());
-  launcher_.reset(new ChromeLauncherImpl(
-      context_getter_,
-      CreateSyncWebSocketFactory(context_getter_)));
+  socket_factory_ = CreateSyncWebSocketFactory(context_getter_);
 
-  // Session commands.
+  // Commands which require an element id.
+  typedef std::map<std::string, ElementCommand> ElementCommandMap;
+  ElementCommandMap element_command_map;
+  element_command_map[CommandNames::kFindChildElement] =
+      base::Bind(&ExecuteFindChildElement, 50);
+  element_command_map[CommandNames::kFindChildElements] =
+      base::Bind(&ExecuteFindChildElements, 50);
+  element_command_map[CommandNames::kHoverOverElement] =
+      base::Bind(&ExecuteHoverOverElement);
+  element_command_map[CommandNames::kClickElement] =
+      base::Bind(&ExecuteClickElement);
+  element_command_map[CommandNames::kClearElement] =
+      base::Bind(&ExecuteClearElement);
+  element_command_map[CommandNames::kSendKeysToElement] =
+      base::Bind(&ExecuteSendKeysToElement);
+
+  // Commands which require a window.
+  typedef std::map<std::string, WindowCommand> WindowCommandMap;
+  WindowCommandMap window_command_map;
+  // Wrap ElementCommand into WindowCommand.
+  for (ElementCommandMap::const_iterator it = element_command_map.begin();
+       it != element_command_map.end(); ++it) {
+    window_command_map[it->first] =
+        base::Bind(&ExecuteElementCommand, it->second);
+  }
+  window_command_map[CommandNames::kGet] = base::Bind(&ExecuteGet);
+  window_command_map[CommandNames::kExecuteScript] =
+      base::Bind(&ExecuteExecuteScript);
+  window_command_map[CommandNames::kSwitchToFrame] =
+      base::Bind(&ExecuteSwitchToFrame);
+  window_command_map[CommandNames::kGetTitle] =
+      base::Bind(&ExecuteGetTitle);
+  window_command_map[CommandNames::kFindElement] =
+      base::Bind(&ExecuteFindElement, 50);
+  window_command_map[CommandNames::kFindElements] =
+      base::Bind(&ExecuteFindElements, 50);
+  window_command_map[CommandNames::kGetCurrentUrl] =
+      base::Bind(&ExecuteGetCurrentUrl);
+  window_command_map[CommandNames::kGoBack] =
+      base::Bind(&ExecuteGoBack);
+  window_command_map[CommandNames::kGoForward] =
+      base::Bind(&ExecuteGoForward);
+  window_command_map[CommandNames::kRefresh] =
+      base::Bind(&ExecuteRefresh);
+  window_command_map[CommandNames::kMouseMoveTo] =
+      base::Bind(&ExecuteMouseMoveTo);
+  window_command_map[CommandNames::kMouseClick] =
+      base::Bind(&ExecuteMouseClick);
+  window_command_map[CommandNames::kMouseButtonDown] =
+      base::Bind(&ExecuteMouseButtonDown);
+  window_command_map[CommandNames::kMouseButtonUp] =
+      base::Bind(&ExecuteMouseButtonUp);
+  window_command_map[CommandNames::kMouseDoubleClick] =
+      base::Bind(&ExecuteMouseDoubleClick);
+
+  // Commands which require a session.
+  typedef std::map<std::string, SessionCommand> SessionCommandMap;
+  SessionCommandMap session_command_map;
+  // Wrap WindowCommand into SessionCommand.
+  for (WindowCommandMap::const_iterator it = window_command_map.begin();
+       it != window_command_map.end(); ++it) {
+    session_command_map[it->first] =
+        base::Bind(&ExecuteWindowCommand, it->second);
+  }
+  session_command_map[CommandNames::kQuit] =
+      base::Bind(&ExecuteQuit, &session_map_);
+  session_command_map[CommandNames::kGetCurrentWindowHandle] =
+      base::Bind(&ExecuteGetCurrentWindowHandle);
+  session_command_map[CommandNames::kGetWindowHandles] =
+      base::Bind(&ExecuteGetWindowHandles);
+  session_command_map[CommandNames::kSetTimeout] =
+      base::Bind(&ExecuteSetTimeout);
+
+  // Wrap SessionCommand into non-session Command.
   base::Callback<Status(
       const SessionCommand&,
       const base::DictionaryValue&,
@@ -41,19 +120,22 @@ void CommandExecutorImpl::Init() {
       std::string*)> execute_session_command = base::Bind(
           &ExecuteSessionCommand,
           &session_map_);
-  command_map_.Set("get", base::Bind(execute_session_command,
-      base::Bind(&ExecuteGet)));
-  command_map_.Set("executeScript", base::Bind(execute_session_command,
-      base::Bind(&ExecuteExecuteScript)));
-  Command quit_command = base::Bind(execute_session_command,
-      base::Bind(&ExecuteQuit, &session_map_));
-  command_map_.Set("quit", quit_command);
-
-  // Non-session commands.
-  command_map_.Set("newSession",
-      base::Bind(&ExecuteNewSession, &session_map_, launcher_.get()));
-  command_map_.Set("quitAll",
-      base::Bind(&ExecuteQuitAll, quit_command, &session_map_));
+  for (SessionCommandMap::const_iterator it = session_command_map.begin();
+       it != session_command_map.end(); ++it) {
+    command_map_.Set(it->first,
+                     base::Bind(execute_session_command, it->second));
+  }
+  command_map_.Set(CommandNames::kStatus, base::Bind(&ExecuteGetStatus));
+  command_map_.Set(
+      CommandNames::kNewSession,
+      base::Bind(&ExecuteNewSession, &session_map_, context_getter_,
+                 socket_factory_));
+  command_map_.Set(
+      CommandNames::kQuitAll,
+      base::Bind(&ExecuteQuitAll,
+                 base::Bind(execute_session_command,
+                            base::Bind(&ExecuteQuit, &session_map_)),
+                 &session_map_));
 }
 
 void CommandExecutorImpl::ExecuteCommand(
@@ -63,6 +145,9 @@ void CommandExecutorImpl::ExecuteCommand(
     StatusCode* status_code,
     scoped_ptr<base::Value>* value,
     std::string* out_session_id) {
+#if defined(OS_MACOSX)
+  base::mac::ScopedNSAutoreleasePool autorelease_pool;
+#endif
   Command cmd;
   Status status(kOk);
   if (command_map_.Get(name, &cmd)) {

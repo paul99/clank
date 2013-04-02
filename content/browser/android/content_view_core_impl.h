@@ -7,7 +7,6 @@
 
 #include <vector>
 
-#include "base/android/jni_android.h"
 #include "base/android/jni_helper.h"
 #include "base/basictypes.h"
 #include "base/compiler_specific.h"
@@ -58,6 +57,7 @@ class ContentViewCoreImpl : public ContentViewCore,
   virtual unsigned int GetScaledContentTexture(
       float scale,
       gfx::Size* out_size) OVERRIDE;
+  virtual float GetDpiScale() const OVERRIDE;
 
   // --------------------------------------------------------------------------
   // Methods called from Java via JNI
@@ -133,6 +133,12 @@ class ContentViewCoreImpl : public ContentViewCore,
                  jint x,
                  jint y,
                  jboolean disambiguation_popup_tap);
+  void LongTap(JNIEnv* env,
+               jobject obj,
+               jlong time_ms,
+               jint x,
+               jint y,
+               jboolean disambiguation_popup_tap);
   void PinchBegin(JNIEnv* env, jobject obj, jlong time_ms, jint x, jint y);
   void PinchEnd(JNIEnv* env, jobject obj, jlong time_ms);
   void PinchBy(JNIEnv* env,
@@ -152,13 +158,17 @@ class ContentViewCoreImpl : public ContentViewCore,
   void GoBack(JNIEnv* env, jobject obj);
   void GoForward(JNIEnv* env, jobject obj);
   void GoToOffset(JNIEnv* env, jobject obj, jint offset);
+  void GoToNavigationIndex(JNIEnv* env, jobject obj, jint index);
   void StopLoading(JNIEnv* env, jobject obj);
   void Reload(JNIEnv* env, jobject obj);
   void CancelPendingReload(JNIEnv* env, jobject obj);
   void ContinuePendingReload(JNIEnv* env, jobject obj);
   jboolean NeedsReload(JNIEnv* env, jobject obj);
   void ClearHistory(JNIEnv* env, jobject obj);
-  jint EvaluateJavaScript(JNIEnv* env, jobject obj, jstring script);
+  void EvaluateJavaScript(JNIEnv* env,
+                          jobject obj,
+                          jstring script,
+                          jobject callback);
   int GetNativeImeAdapter(JNIEnv* env, jobject obj);
   void SetFocus(JNIEnv* env, jobject obj, jboolean focused);
   void ScrollFocusedEditableNodeIntoView(JNIEnv* env, jobject obj);
@@ -180,9 +190,15 @@ class ContentViewCoreImpl : public ContentViewCore,
                               jobject obj,
                               jobject object,
                               jstring name,
-                              jclass safe_annotation_clazz);
+                              jclass safe_annotation_clazz,
+                              jobject retained_object_set);
   void RemoveJavascriptInterface(JNIEnv* env, jobject obj, jstring name);
   int GetNavigationHistory(JNIEnv* env, jobject obj, jobject context);
+  void GetDirectedNavigationHistory(JNIEnv* env,
+                                    jobject obj,
+                                    jobject context,
+                                    jboolean is_forward,
+                                    jint max_entries);
   void UpdateVSyncParameters(JNIEnv* env, jobject obj, jlong timebase_micros,
                              jlong interval_micros);
   jboolean PopulateBitmapFromCompositor(JNIEnv* env,
@@ -190,6 +206,7 @@ class ContentViewCoreImpl : public ContentViewCore,
                                         jobject jbitmap);
   void SetSize(JNIEnv* env, jobject obj, jint width, jint height);
   jboolean IsRenderWidgetHostViewReady(JNIEnv* env, jobject obj);
+  void ExitFullscreen(JNIEnv* env, jobject obj);
 
   void ShowInterstitialPage(JNIEnv* env,
                             jobject obj,
@@ -222,15 +239,16 @@ class ContentViewCoreImpl : public ContentViewCore,
                         int selection_start, int selection_end,
                         int composition_start, int composition_end,
                         bool show_ime_if_needed);
+  void ProcessImeBatchStateAck(bool is_begin);
   void SetTitle(const string16& title);
+  void OnBackgroundColorChanged(SkColor color);
 
   bool HasFocus();
   void ConfirmTouchEvent(InputEventAckState ack_result);
   void HasTouchEventHandlers(bool need_touch_events);
   void OnSelectionChanged(const std::string& text);
   void OnSelectionBoundsChanged(
-      const gfx::Rect& start_rect, base::i18n::TextDirection start_dir,
-      const gfx::Rect& end_rect, base::i18n::TextDirection end_dir);
+      const ViewHostMsg_SelectionBounds_Params& params);
 
   void StartContentIntent(const GURL& content_url);
 
@@ -240,16 +258,12 @@ class ContentViewCoreImpl : public ContentViewCore,
   void ShowDisambiguationPopup(
       const gfx::Rect& target_rect, const SkBitmap& zoomed_bitmap);
 
-  // Creates a java-side smooth scroller. Used by
-  // chrome.gpuBenchmarking.smoothScrollBy.
-  base::android::ScopedJavaLocalRef<jobject> CreateSmoothScroller(
-      bool scroll_down, int mouse_event_x, int mouse_event_y);
-
   // --------------------------------------------------------------------------
   // Methods called from native code
   // --------------------------------------------------------------------------
 
-  gfx::Rect GetBounds() const;
+  gfx::Size GetPhysicalSize() const;
+  gfx::Size GetDIPSize() const;
 
   void AttachLayer(scoped_refptr<cc::Layer> layer);
   void RemoveLayer(scoped_refptr<cc::Layer> layer);
@@ -278,12 +292,13 @@ class ContentViewCoreImpl : public ContentViewCore,
 
   int GetTouchPadding();
 
-  float DpiScale() const;
   WebKit::WebGestureEvent MakeGestureEvent(WebKit::WebInputEvent::Type type,
                                            long time_ms, int x, int y) const;
   void UpdateVSyncFlagOnInputEvent(WebKit::WebInputEvent* event) const;
 
   void DeleteScaledSnapshotTexture();
+
+  void SendGestureEvent(const WebKit::WebGestureEvent& event);
 
   struct JavaObject;
   JavaObject* java_object_;

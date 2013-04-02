@@ -16,11 +16,11 @@
 #include "base/memory/weak_ptr.h"
 #include "base/observer_list.h"
 #include "base/timer.h"
-#include "chrome/browser/chromeos/cros/cros_network_functions.h"
 #include "chrome/browser/chromeos/cros/network_constants.h"
 #include "chrome/browser/chromeos/cros/network_ui_data.h"
+#include "chromeos/network/network_ip_config.h"
+#include "chromeos/network/network_util.h"
 #include "chromeos/network/onc/onc_constants.h"
-#include "googleurl/src/gurl.h"
 
 namespace base {
 class DictionaryValue;
@@ -340,8 +340,8 @@ class Network {
     void SetDisconnected() {
       network_->set_disconnected();
     }
-    void SetConnectionStarted(bool connection_started) {
-      network_->set_connection_started(connection_started);
+    void SetUserConnectState(UserConnectState user_connect_state) {
+      network_->set_user_connect_state(user_connect_state);
     }
 
    private:
@@ -374,7 +374,10 @@ class Network {
   bool connected() const { return IsConnectedState(state_); }
   bool connecting_or_connected() const { return connecting() || connected(); }
   // True when a user-initiated connection attempt is in progress
-  bool connection_started() const { return connection_started_; }
+  bool connection_started() const {
+    return user_connect_state_ == USER_CONNECT_STARTED;
+  }
+  UserConnectState user_connect_state() const { return user_connect_state_; }
   bool failed() const { return state_ == STATE_FAILURE; }
   bool disconnected() const { return IsDisconnectedState(state_); }
   bool ready() const { return state_ == STATE_READY; }
@@ -539,7 +542,6 @@ class Network {
   friend class NetworkParser;
   friend class NativeNetworkParser;
   friend class NativeVirtualNetworkParser;
-  friend class OncNetworkParser;
   friend class OncWifiNetworkParser;
   friend class OncVirtualNetworkParser;
   // We reach directly into the network for testing purposes.
@@ -548,12 +550,6 @@ class Network {
   NETWORK_LIBRARY_IMPL_FRIENDS;
 
   FRIEND_TEST_ALL_PREFIXES(NetworkLibraryTest, GetUserExpandedValue);
-  FRIEND_TEST_ALL_PREFIXES(OncNetworkParserTest,
-                           TestLoadWifiCertificatePattern);
-  FRIEND_TEST_ALL_PREFIXES(OncNetworkParserTest,
-                           TestLoadVPNCertificatePattern);
-  FRIEND_TEST_ALL_PREFIXES(OncNetworkParserTest,
-                           TestNoCertificatePatternForDevicePolicy);
   FRIEND_TEST_ALL_PREFIXES(NetworkLibraryStubTest, NetworkConnectOncWifi);
   FRIEND_TEST_ALL_PREFIXES(NetworkLibraryStubTest, NetworkConnectOncVPN);
 
@@ -585,7 +581,9 @@ class Network {
     state_ = STATE_IDLE;
   }
   void set_connectable(bool connectable) { connectable_ = connectable; }
-  void set_connection_started(bool started) { connection_started_ = started; }
+  void set_user_connect_state(UserConnectState user_connect_state) {
+    user_connect_state_ = user_connect_state;
+  }
   void set_is_active(bool is_active) { is_active_ = is_active; }
   void set_added(bool added) { added_ = added; }
   void set_auto_connect(bool auto_connect) { auto_connect_ = auto_connect; }
@@ -624,7 +622,7 @@ class Network {
   ConnectionState state_;
   ConnectionError error_;
   bool connectable_;
-  bool connection_started_;
+  UserConnectState user_connect_state_;
   bool is_active_;
   int priority_;  // determines order in network list.
   bool auto_connect_;
@@ -742,13 +740,10 @@ class VirtualNetwork : public Network {
   // parsers.
   friend class NativeNetworkParser;
   friend class NativeVirtualNetworkParser;
-  friend class OncNetworkParser;
   friend class OncVirtualNetworkParser;
 
   // This allows the implementation classes access to privates.
   NETWORK_LIBRARY_IMPL_FRIENDS;
-
-  FRIEND_TEST_ALL_PREFIXES(OncNetworkParserTest, TestLoadVPNCertificatePattern);
 
   // Use these functions at your peril.  They are used by the various
   // parsers to set state, and really shouldn't be used by anything else
@@ -879,6 +874,7 @@ class CellularNetwork : public WirelessNetwork {
   // Starts device activation process. Returns false if the device state does
   // not permit activation.
   virtual bool StartActivation();
+  virtual void CompleteActivation();
 
   bool activate_over_non_cellular_network() const {
     return activate_over_non_cellular_network_;
@@ -894,6 +890,7 @@ class CellularNetwork : public WirelessNetwork {
   const std::string& operator_name() const { return operator_name_; }
   const std::string& operator_code() const { return operator_code_; }
   const std::string& operator_country() const { return operator_country_; }
+  bool out_of_credits() const { return out_of_credits_; }
   const std::string& payment_url() const { return payment_url_; }
   const std::string& usage_url() const { return usage_url_; }
   const std::string& post_data() const { return post_data_; }
@@ -913,8 +910,6 @@ class CellularNetwork : public WirelessNetwork {
   // Returns whether the network needs to be activated.
   bool NeedsActivation() const;
 
-  // Return a URL for account info page.
-  GURL GetAccountInfoUrl() const;
   // Return a string representation of network technology.
   std::string GetNetworkTechnologyString() const;
   // Return a string representation of activation state.
@@ -963,6 +958,9 @@ class CellularNetwork : public WirelessNetwork {
   void set_operator_country(const std::string& operator_country) {
     operator_country_ = operator_country;
   }
+  void set_out_of_credits(bool out_of_credits) {
+    out_of_credits_ = out_of_credits;
+  }
   void set_payment_url(const std::string& payment_url) {
     payment_url_ = payment_url;
   }
@@ -979,6 +977,7 @@ class CellularNetwork : public WirelessNetwork {
   }
 
   bool activate_over_non_cellular_network_;
+  bool out_of_credits_;
   ActivationState activation_state_;
   NetworkTechnology network_technology_;
   NetworkRoamingState roaming_state_;
@@ -1584,14 +1583,6 @@ class NetworkLibrary {
   // Request a scan for new wifi networks.
   virtual void RequestNetworkScan() = 0;
 
-  // Reads out the results of the last wifi scan. These results are not
-  // pre-cached in the library, so the call may block whilst the results are
-  // read over IPC.
-  // Returns false if an error occurred in reading the results. Note that
-  // a true return code only indicates the result set was successfully read,
-  // it does not imply a scan has successfully completed yet.
-  virtual bool GetWifiAccessPoints(WifiAccessPointVector* result) = 0;
-
   // TODO(joth): Add GetCellTowers to retrieve a CellTowerVector.
 
   // Return true if a profile matching |type| is loaded.
@@ -1719,6 +1710,15 @@ class NetworkLibrary {
                                const std::string& gateway,
                                const std::string& name_servers,
                                int dhcp_usage_mask) = 0;
+
+  // Requests the service properties associated with |service_path|. Calls
+  // |callback| with the properties when competed.
+  typedef base::Callback<void(const std::string& service_path,
+                              const base::DictionaryValue* properties)>
+      NetworkServicePropertiesCallback;
+  virtual void RequestNetworkServiceProperties(
+      const std::string& service_path,
+      const NetworkServicePropertiesCallback& callback) = 0;
 
   // This will connect to a preferred network if the currently connected
   // network is not preferred. This should be called when the active profile

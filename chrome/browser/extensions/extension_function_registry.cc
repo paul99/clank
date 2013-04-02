@@ -5,70 +5,35 @@
 #include "chrome/browser/extensions/extension_function_registry.h"
 
 #include "chrome/browser/accessibility/accessibility_extension_api.h"
-#include "chrome/browser/bookmarks/bookmark_manager_extension_api.h"
 #include "chrome/browser/extensions/api/app/app_api.h"
-#include "chrome/browser/extensions/api/bookmarks/bookmark_api.h"
+#include "chrome/browser/extensions/api/bookmark_manager_private/bookmark_manager_private_api.h"
 #include "chrome/browser/extensions/api/browsing_data/browsing_data_api.h"
-#include "chrome/browser/extensions/api/cloud_print_private/cloud_print_private_api.h"
 #include "chrome/browser/extensions/api/commands/commands.h"
-#include "chrome/browser/extensions/api/content_settings/content_settings_api.h"
-#include "chrome/browser/extensions/api/context_menu/context_menu_api.h"
-#include "chrome/browser/extensions/api/cookies/cookies_api.h"
-#include "chrome/browser/extensions/api/debugger/debugger_api.h"
-#include "chrome/browser/extensions/api/declarative/declarative_api.h"
-#include "chrome/browser/extensions/api/extension_action/extension_browser_actions_api.h"
-#include "chrome/browser/extensions/api/extension_action/extension_page_actions_api.h"
-#include "chrome/browser/extensions/api/extension_action/extension_script_badge_api.h"
-#include "chrome/browser/extensions/api/font_settings/font_settings_api.h"
-#include "chrome/browser/extensions/api/history/history_api.h"
-#include "chrome/browser/extensions/api/identity/identity_api.h"
-#include "chrome/browser/extensions/api/i18n/i18n_api.h"
 #include "chrome/browser/extensions/api/idle/idle_api.h"
 #include "chrome/browser/extensions/api/managed_mode/managed_mode_api.h"
-#include "chrome/browser/extensions/api/management/management_api.h"
 #include "chrome/browser/extensions/api/metrics/metrics.h"
 #include "chrome/browser/extensions/api/module/module.h"
 #include "chrome/browser/extensions/api/omnibox/omnibox_api.h"
-#include "chrome/browser/extensions/api/page_capture/page_capture_api.h"
-#include "chrome/browser/extensions/api/permissions/permissions_api.h"
 #include "chrome/browser/extensions/api/preference/preference_api.h"
-#include "chrome/browser/extensions/api/record/record_api.h"
 #include "chrome/browser/extensions/api/runtime/runtime_api.h"
-#include "chrome/browser/extensions/api/serial/serial_api.h"
-#include "chrome/browser/extensions/api/socket/socket_api.h"
-#include "chrome/browser/extensions/api/tabs/execute_code_in_tab_function.h"
-#include "chrome/browser/extensions/api/tabs/tabs.h"
 #include "chrome/browser/extensions/api/test/test_api.h"
 #include "chrome/browser/extensions/api/top_sites/top_sites_api.h"
-#include "chrome/browser/extensions/api/web_navigation/web_navigation_api.h"
 #include "chrome/browser/extensions/api/web_request/web_request_api.h"
 #include "chrome/browser/extensions/api/web_socket_proxy_private/web_socket_proxy_private_api.h"
 #include "chrome/browser/extensions/api/webstore_private/webstore_private_api.h"
-#include "chrome/browser/extensions/settings/settings_api.h"
 #include "chrome/browser/extensions/system/system_api.h"
 #include "chrome/browser/infobars/infobar_extension_api.h"
 #include "chrome/browser/rlz/rlz_extension_api.h"
-#include "chrome/browser/speech/extension_api/tts_engine_extension_api.h"
-#include "chrome/browser/speech/extension_api/tts_extension_api.h"
-#include "chrome/browser/speech/speech_input_extension_api.h"
 #include "chrome/common/extensions/api/generated_api.h"
-
-#if defined(TOOLKIT_VIEWS)
-#include "chrome/browser/extensions/api/input/input.h"
-#endif
 
 #if defined(OS_CHROMEOS)
 #include "chrome/browser/chromeos/extensions/echo_private_api.h"
-#include "chrome/browser/chromeos/extensions/file_browser_handler_api.h"
-#include "chrome/browser/chromeos/extensions/file_browser_private_api.h"
 #include "chrome/browser/chromeos/extensions/info_private_api.h"
-#include "chrome/browser/chromeos/extensions/input_method_api.h"
+#include "chrome/browser/chromeos/extensions/media_player_api.h"
 #include "chrome/browser/chromeos/extensions/power/power_api.h"
 #include "chrome/browser/chromeos/extensions/wallpaper_private_api.h"
-#include "chrome/browser/chromeos/media/media_player_extension_api.h"
-#include "chrome/browser/extensions/api/input_ime/input_ime_api.h"
 #include "chrome/browser/extensions/api/terminal/terminal_private_api.h"
-#endif
+#endif  // defined(OS_CHROMEOS)
 
 // static
 ExtensionFunctionRegistry* ExtensionFunctionRegistry::GetInstance() {
@@ -87,63 +52,8 @@ void ExtensionFunctionRegistry::ResetFunctions() {
 
   // Register all functions here.
 
-  // Windows
-  RegisterFunction<GetWindowFunction>();
-  RegisterFunction<GetCurrentWindowFunction>();
-  RegisterFunction<GetLastFocusedWindowFunction>();
-  RegisterFunction<GetAllWindowsFunction>();
-  RegisterFunction<CreateWindowFunction>();
-  RegisterFunction<UpdateWindowFunction>();
-  RegisterFunction<RemoveWindowFunction>();
-
-  // Tabs
-  RegisterFunction<CaptureVisibleTabFunction>();
-  RegisterFunction<CreateTabFunction>();
-  RegisterFunction<DetectTabLanguageFunction>();
-  RegisterFunction<DuplicateTabFunction>();
-  RegisterFunction<GetAllTabsInWindowFunction>();
-  RegisterFunction<GetCurrentTabFunction>();
-  RegisterFunction<GetSelectedTabFunction>();
-  RegisterFunction<GetTabFunction>();
-  RegisterFunction<HighlightTabsFunction>();
-  RegisterFunction<MoveTabsFunction>();
-  RegisterFunction<QueryTabsFunction>();
-  RegisterFunction<ReloadTabFunction>();
-  RegisterFunction<RemoveTabsFunction>();
-  RegisterFunction<TabsExecuteScriptFunction>();
-  RegisterFunction<TabsInsertCSSFunction>();
-  RegisterFunction<UpdateTabFunction>();
-
-  // Page Actions.
-  RegisterFunction<EnablePageActionsFunction>();
-  RegisterFunction<DisablePageActionsFunction>();
-  RegisterFunction<PageActionShowFunction>();
-  RegisterFunction<PageActionHideFunction>();
-  RegisterFunction<PageActionSetIconFunction>();
-  RegisterFunction<PageActionSetTitleFunction>();
-  RegisterFunction<PageActionSetPopupFunction>();
-  RegisterFunction<PageActionGetTitleFunction>();
-  RegisterFunction<PageActionGetPopupFunction>();
-
-  // Browser Actions.
-  RegisterFunction<BrowserActionSetIconFunction>();
-  RegisterFunction<BrowserActionSetTitleFunction>();
-  RegisterFunction<BrowserActionSetBadgeTextFunction>();
-  RegisterFunction<BrowserActionSetBadgeBackgroundColorFunction>();
-  RegisterFunction<BrowserActionSetPopupFunction>();
-  RegisterFunction<BrowserActionGetTitleFunction>();
-  RegisterFunction<BrowserActionGetBadgeTextFunction>();
-  RegisterFunction<BrowserActionGetBadgeBackgroundColorFunction>();
-  RegisterFunction<BrowserActionGetPopupFunction>();
-  RegisterFunction<BrowserActionEnableFunction>();
-  RegisterFunction<BrowserActionDisableFunction>();
-
-  // Script Badges.
-  RegisterFunction<ScriptBadgeGetAttentionFunction>();
-  RegisterFunction<ScriptBadgeGetPopupFunction>();
-  RegisterFunction<ScriptBadgeSetPopupFunction>();
-
   // Browsing Data.
+  RegisterFunction<BrowsingDataSettingsFunction>();
   RegisterFunction<RemoveBrowsingDataFunction>();
   RegisterFunction<RemoveAppCacheFunction>();
   RegisterFunction<RemoveCacheFunction>();
@@ -158,52 +68,25 @@ void ExtensionFunctionRegistry::ResetFunctions() {
   RegisterFunction<RemovePasswordsFunction>();
   RegisterFunction<RemoveWebSQLFunction>();
 
-  // Bookmarks.
-  RegisterFunction<extensions::GetBookmarksFunction>();
-  RegisterFunction<extensions::GetBookmarkChildrenFunction>();
-  RegisterFunction<extensions::GetBookmarkRecentFunction>();
-  RegisterFunction<extensions::GetBookmarkTreeFunction>();
-  RegisterFunction<extensions::GetBookmarkSubTreeFunction>();
-  RegisterFunction<extensions::ImportBookmarksFunction>();
-  RegisterFunction<extensions::ExportBookmarksFunction>();
-  RegisterFunction<extensions::SearchBookmarksFunction>();
-  RegisterFunction<extensions::RemoveBookmarkFunction>();
-  RegisterFunction<extensions::RemoveTreeBookmarkFunction>();
-  RegisterFunction<extensions::CreateBookmarkFunction>();
-  RegisterFunction<extensions::MoveBookmarkFunction>();
-  RegisterFunction<extensions::UpdateBookmarkFunction>();
-
   // Infobars.
   RegisterFunction<ShowInfoBarFunction>();
 
   // BookmarkManager
-  RegisterFunction<CopyBookmarkManagerFunction>();
-  RegisterFunction<CutBookmarkManagerFunction>();
-  RegisterFunction<PasteBookmarkManagerFunction>();
-  RegisterFunction<CanPasteBookmarkManagerFunction>();
-  RegisterFunction<SortChildrenBookmarkManagerFunction>();
-  RegisterFunction<BookmarkManagerGetStringsFunction>();
-  RegisterFunction<StartDragBookmarkManagerFunction>();
-  RegisterFunction<DropBookmarkManagerFunction>();
-  RegisterFunction<GetSubtreeBookmarkManagerFunction>();
-  RegisterFunction<CanEditBookmarkManagerFunction>();
-  RegisterFunction<CanOpenNewWindowsBookmarkFunction>();
-
-  // History
-  RegisterFunction<extensions::AddUrlHistoryFunction>();
-  RegisterFunction<extensions::DeleteAllHistoryFunction>();
-  RegisterFunction<extensions::DeleteRangeHistoryFunction>();
-  RegisterFunction<extensions::DeleteUrlHistoryFunction>();
-  RegisterFunction<extensions::GetMostVisitedHistoryFunction>();
-  RegisterFunction<extensions::GetVisitsHistoryFunction>();
-  RegisterFunction<extensions::SearchHistoryFunction>();
+  RegisterFunction<extensions::CopyBookmarkManagerFunction>();
+  RegisterFunction<extensions::CutBookmarkManagerFunction>();
+  RegisterFunction<extensions::PasteBookmarkManagerFunction>();
+  RegisterFunction<extensions::CanPasteBookmarkManagerFunction>();
+  RegisterFunction<extensions::SortChildrenBookmarkManagerFunction>();
+  RegisterFunction<extensions::BookmarkManagerGetStringsFunction>();
+  RegisterFunction<extensions::StartDragBookmarkManagerFunction>();
+  RegisterFunction<extensions::DropBookmarkManagerFunction>();
+  RegisterFunction<extensions::GetSubtreeBookmarkManagerFunction>();
+  RegisterFunction<extensions::CanEditBookmarkManagerFunction>();
+  RegisterFunction<extensions::CanOpenNewWindowsBookmarkFunction>();
 
   // Idle
   RegisterFunction<extensions::IdleQueryStateFunction>();
   RegisterFunction<extensions::IdleSetDetectionIntervalFunction>();
-
-  // I18N.
-  RegisterFunction<GetAcceptLanguagesFunction>();
 
   // Metrics.
   RegisterFunction<extensions::MetricsRecordUserActionFunction>();
@@ -224,13 +107,6 @@ void ExtensionFunctionRegistry::ResetFunctions() {
   RegisterFunction<RlzClearProductStateFunction>();
 #endif
 
-  // Cookies.
-  RegisterFunction<extensions::GetCookieFunction>();
-  RegisterFunction<extensions::GetAllCookiesFunction>();
-  RegisterFunction<extensions::SetCookieFunction>();
-  RegisterFunction<extensions::RemoveCookieFunction>();
-  RegisterFunction<extensions::GetAllCookieStoresFunction>();
-
   // Test.
   RegisterFunction<extensions::TestNotifyPassFunction>();
   RegisterFunction<extensions::TestFailFunction>();
@@ -240,59 +116,16 @@ void ExtensionFunctionRegistry::ResetFunctions() {
   RegisterFunction<extensions::TestSendMessageFunction>();
   RegisterFunction<extensions::TestGetConfigFunction>();
 
-  // Record.
-  RegisterFunction<extensions::CaptureURLsFunction>();
-  RegisterFunction<extensions::ReplayURLsFunction>();
-
   // Accessibility.
   RegisterFunction<GetFocusedControlFunction>();
   RegisterFunction<SetAccessibilityEnabledFunction>();
   RegisterFunction<GetAlertsForTabFunction>();
 
-  // Text-to-speech.
-  RegisterFunction<ExtensionTtsEngineSendTtsEventFunction>();
-  RegisterFunction<ExtensionTtsGetVoicesFunction>();
-  RegisterFunction<ExtensionTtsIsSpeakingFunction>();
-  RegisterFunction<ExtensionTtsSpeakFunction>();
-  RegisterFunction<ExtensionTtsStopSpeakingFunction>();
-
-  // Commands.
-  RegisterFunction<GetAllCommandsFunction>();
-
-  // Context Menus.
-  RegisterFunction<extensions::CreateContextMenuFunction>();
-  RegisterFunction<extensions::UpdateContextMenuFunction>();
-  RegisterFunction<extensions::RemoveContextMenuFunction>();
-  RegisterFunction<extensions::RemoveAllContextMenusFunction>();
-
   // Omnibox.
   RegisterFunction<extensions::OmniboxSendSuggestionsFunction>();
   RegisterFunction<extensions::OmniboxSetDefaultSuggestionFunction>();
 
-#if defined(ENABLE_INPUT_SPEECH)
-  // Speech input.
-  RegisterFunction<StartSpeechInputFunction>();
-  RegisterFunction<StopSpeechInputFunction>();
-  RegisterFunction<IsRecordingSpeechInputFunction>();
-#endif
-
-#if defined(TOOLKIT_VIEWS)
-  // Input.
-  RegisterFunction<extensions::SendKeyboardEventInputFunction>();
-#endif
-
 #if defined(OS_CHROMEOS)
-  // IME
-  RegisterFunction<extensions::SetCompositionFunction>();
-  RegisterFunction<extensions::ClearCompositionFunction>();
-  RegisterFunction<extensions::CommitTextFunction>();
-  RegisterFunction<extensions::SetCandidateWindowPropertiesFunction>();
-  RegisterFunction<extensions::SetCandidatesFunction>();
-  RegisterFunction<extensions::SetCursorPositionFunction>();
-  RegisterFunction<extensions::SetMenuItemsFunction>();
-  RegisterFunction<extensions::UpdateMenuItemsFunction>();
-  RegisterFunction<extensions::KeyEventHandled>();
-
   // Power
   RegisterFunction<extensions::power::RequestKeepAwakeFunction>();
   RegisterFunction<extensions::power::ReleaseKeepAwakeFunction>();
@@ -303,15 +136,6 @@ void ExtensionFunctionRegistry::ResetFunctions() {
   RegisterFunction<extensions::EnterManagedModeFunction>();
   RegisterFunction<extensions::GetPolicyFunction>();
   RegisterFunction<extensions::SetPolicyFunction>();
-
-  // Management.
-  RegisterFunction<GetAllExtensionsFunction>();
-  RegisterFunction<GetExtensionByIdFunction>();
-  RegisterFunction<GetPermissionWarningsByIdFunction>();
-  RegisterFunction<GetPermissionWarningsByManifestFunction>();
-  RegisterFunction<LaunchAppFunction>();
-  RegisterFunction<SetEnabledFunction>();
-  RegisterFunction<UninstallFunction>();
 
   // Extension module.
   RegisterFunction<extensions::SetUpdateUrlDataFunction>();
@@ -326,15 +150,11 @@ void ExtensionFunctionRegistry::ResetFunctions() {
   RegisterFunction<extensions::BeginInstallWithManifestFunction>();
   RegisterFunction<extensions::CompleteInstallFunction>();
   RegisterFunction<extensions::GetWebGLStatusFunction>();
-
-  // WebNavigation.
-  RegisterFunction<extensions::GetFrameFunction>();
-  RegisterFunction<extensions::GetAllFramesFunction>();
+  RegisterFunction<extensions::GetIsLauncherEnabledFunction>();
 
   // WebRequest.
   RegisterFunction<WebRequestAddEventListener>();
   RegisterFunction<WebRequestEventHandled>();
-  RegisterFunction<WebRequestHandlerBehaviorChanged>();
 
   // Preferences.
   RegisterFunction<extensions::GetPreferenceFunction>();
@@ -346,53 +166,11 @@ void ExtensionFunctionRegistry::ResetFunctions() {
   // Device Customization.
   RegisterFunction<extensions::GetChromeosInfoFunction>();
 
-  // FileBrowserPrivate functions.
-  // TODO(jamescook): Expose these on non-ChromeOS platforms so we can use
-  // the extension-based file picker on Aura. crbug.com/97424
-  RegisterFunction<CancelFileDialogFunction>();
-  RegisterFunction<ExecuteTasksFileBrowserFunction>();
-  RegisterFunction<SetDefaultTaskFileBrowserFunction>();
-  RegisterFunction<FileDialogStringsFunction>();
-  RegisterFunction<GetFileTasksFileBrowserFunction>();
-  RegisterFunction<GetVolumeMetadataFunction>();
-  RegisterFunction<RequestLocalFileSystemFunction>();
-  RegisterFunction<AddFileWatchBrowserFunction>();
-  RegisterFunction<RemoveFileWatchBrowserFunction>();
-  RegisterFunction<SelectFileFunction>();
-  RegisterFunction<SelectFilesFunction>();
-  RegisterFunction<AddMountFunction>();
-  RegisterFunction<RemoveMountFunction>();
-  RegisterFunction<GetMountPointsFunction>();
-  RegisterFunction<GetSizeStatsFunction>();
-  RegisterFunction<FormatDeviceFunction>();
-  RegisterFunction<ViewFilesFunction>();
-  RegisterFunction<ToggleFullscreenFunction>();
-  RegisterFunction<IsFullscreenFunction>();
-  RegisterFunction<GetDriveFilePropertiesFunction>();
-  RegisterFunction<PinDriveFileFunction>();
-  RegisterFunction<GetFileLocationsFunction>();
-  RegisterFunction<GetDriveFilesFunction>();
-  RegisterFunction<GetFileTransfersFunction>();
-  RegisterFunction<CancelFileTransfersFunction>();
-  RegisterFunction<TransferFileFunction>();
-  RegisterFunction<GetPreferencesFunction>();
-  RegisterFunction<SetPreferencesFunction>();
-  RegisterFunction<SearchDriveFunction>();
-  RegisterFunction<ClearDriveCacheFunction>();
-  RegisterFunction<ReloadDriveFunction>();
-  RegisterFunction<GetNetworkConnectionStateFunction>();
-  RegisterFunction<RequestDirectoryRefreshFunction>();
-  RegisterFunction<SetLastModifiedFunction>();
-  RegisterFunction<ZipSelectionFunction>();
-
-  // FileBrowserHandler.
-  RegisterFunction<FileHandlerSelectFileFunction>();
-
   // Mediaplayer
-  RegisterFunction<PlayMediaplayerFunction>();
-  RegisterFunction<GetPlaylistMediaplayerFunction>();
-  RegisterFunction<SetWindowHeightMediaplayerFunction>();
-  RegisterFunction<CloseWindowMediaplayerFunction>();
+  RegisterFunction<extensions::PlayMediaplayerFunction>();
+  RegisterFunction<extensions::GetPlaylistMediaplayerFunction>();
+  RegisterFunction<extensions::SetWindowHeightMediaplayerFunction>();
+  RegisterFunction<extensions::CloseWindowMediaplayerFunction>();
 
   // WallpaperManagerPrivate functions.
   RegisterFunction<WallpaperStringsFunction>();
@@ -405,11 +183,10 @@ void ExtensionFunctionRegistry::ResetFunctions() {
   RegisterFunction<WallpaperSaveThumbnailFunction>();
   RegisterFunction<WallpaperGetOfflineWallpaperListFunction>();
 
-  // InputMethod
-  RegisterFunction<extensions::GetInputMethodFunction>();
-
   // Echo
   RegisterFunction<GetRegistrationCodeFunction>();
+  RegisterFunction<GetOobeTimestampFunction>();
+  RegisterFunction<CheckAllowRedeemOffersFunction>();
 
   // Terminal
   RegisterFunction<OpenTerminalProcessFunction>();
@@ -423,82 +200,16 @@ void ExtensionFunctionRegistry::ResetFunctions() {
       extensions::WebSocketProxyPrivateGetPassportForTCPFunction>();
   RegisterFunction<extensions::WebSocketProxyPrivateGetURLForTCPFunction>();
 
-  // Debugger
-  RegisterFunction<AttachDebuggerFunction>();
-  RegisterFunction<DetachDebuggerFunction>();
-  RegisterFunction<SendCommandDebuggerFunction>();
-
-  // Settings
-  RegisterFunction<extensions::GetSettingsFunction>();
-  RegisterFunction<extensions::SetSettingsFunction>();
-  RegisterFunction<extensions::RemoveSettingsFunction>();
-  RegisterFunction<extensions::ClearSettingsFunction>();
-  RegisterFunction<extensions::GetBytesInUseSettingsFunction>();
-
-  // Content settings.
-  RegisterFunction<extensions::GetResourceIdentifiersFunction>();
-  RegisterFunction<extensions::ClearContentSettingsFunction>();
-  RegisterFunction<extensions::GetContentSettingFunction>();
-  RegisterFunction<extensions::SetContentSettingFunction>();
-
-  // Font settings.
-  RegisterFunction<extensions::GetFontListFunction>();
-  RegisterFunction<extensions::ClearFontFunction>();
-  RegisterFunction<extensions::GetFontFunction>();
-  RegisterFunction<extensions::SetFontFunction>();
-  RegisterFunction<extensions::ClearDefaultFontSizeFunction>();
-  RegisterFunction<extensions::GetDefaultFontSizeFunction>();
-  RegisterFunction<extensions::SetDefaultFontSizeFunction>();
-  RegisterFunction<extensions::ClearDefaultFixedFontSizeFunction>();
-  RegisterFunction<extensions::GetDefaultFixedFontSizeFunction>();
-  RegisterFunction<extensions::SetDefaultFixedFontSizeFunction>();
-  RegisterFunction<extensions::ClearMinimumFontSizeFunction>();
-  RegisterFunction<extensions::GetMinimumFontSizeFunction>();
-  RegisterFunction<extensions::SetMinimumFontSizeFunction>();
-
-  // CloudPrint settings.
-  RegisterFunction<extensions::CloudPrintSetupConnectorFunction>();
-  RegisterFunction<extensions::CloudPrintGetHostNameFunction>();
-  RegisterFunction<extensions::CloudPrintGetPrintersFunction>();
-
   // Experimental App API.
   RegisterFunction<extensions::AppNotifyFunction>();
   RegisterFunction<extensions::AppClearAllNotificationsFunction>();
 
-  // Permissions
-  RegisterFunction<ContainsPermissionsFunction>();
-  RegisterFunction<GetAllPermissionsFunction>();
-  RegisterFunction<RemovePermissionsFunction>();
-  RegisterFunction<RequestPermissionsFunction>();
-
-  // PageCapture
-  RegisterFunction<extensions::PageCaptureSaveAsMHTMLFunction>();
-
   // TopSites
   RegisterFunction<extensions::GetTopSitesFunction>();
-
-  // Serial
-  RegisterFunction<extensions::SerialOpenFunction>();
-  RegisterFunction<extensions::SerialCloseFunction>();
-  RegisterFunction<extensions::SerialReadFunction>();
-  RegisterFunction<extensions::SerialWriteFunction>();
-
-  // Sockets
-  RegisterFunction<extensions::SocketCreateFunction>();
-  RegisterFunction<extensions::SocketDestroyFunction>();
-  RegisterFunction<extensions::SocketConnectFunction>();
-  RegisterFunction<extensions::SocketDisconnectFunction>();
-  RegisterFunction<extensions::SocketReadFunction>();
-  RegisterFunction<extensions::SocketWriteFunction>();
 
   // System
   RegisterFunction<extensions::GetIncognitoModeAvailabilityFunction>();
   RegisterFunction<extensions::GetUpdateStatusFunction>();
-
-  // Net
-  RegisterFunction<extensions::AddRulesFunction>();
-  RegisterFunction<extensions::RemoveRulesFunction>();
-  RegisterFunction<extensions::GetRulesFunction>();
 
   // Runtime
   RegisterFunction<extensions::RuntimeGetBackgroundPageFunction>();
@@ -524,7 +235,7 @@ bool ExtensionFunctionRegistry::OverrideFunction(
   if (iter == factories_.end()) {
     return false;
   } else {
-    iter->second = factory;
+    iter->second.factory_ = factory;
     return true;
   }
 }
@@ -533,7 +244,18 @@ ExtensionFunction* ExtensionFunctionRegistry::NewFunction(
     const std::string& name) {
   FactoryMap::iterator iter = factories_.find(name);
   DCHECK(iter != factories_.end());
-  ExtensionFunction* function = iter->second();
+  ExtensionFunction* function = iter->second.factory_();
   function->set_name(name);
+  function->set_histogram_value(iter->second.histogram_value_);
   return function;
+}
+
+ExtensionFunctionRegistry::FactoryEntry::FactoryEntry()
+    : factory_(0), histogram_value_(extensions::functions::UNKNOWN) {
+}
+
+ExtensionFunctionRegistry::FactoryEntry::FactoryEntry(
+    ExtensionFunctionFactory factory,
+    extensions::functions::HistogramValue histogram_value)
+    : factory_(factory), histogram_value_(histogram_value) {
 }

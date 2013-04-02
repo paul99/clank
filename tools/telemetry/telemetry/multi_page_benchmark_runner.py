@@ -7,9 +7,11 @@ import logging
 import os
 import sys
 
-from telemetry import all_page_interactions # pylint: disable=W0611
+from telemetry import all_page_actions # pylint: disable=W0611
+from telemetry import block_page_benchmark_results
 from telemetry import browser_finder
 from telemetry import browser_options
+from telemetry import csv_page_benchmark_results
 from telemetry import discover
 from telemetry import multi_page_benchmark
 from telemetry import page_runner
@@ -34,11 +36,15 @@ def Main(benchmark_dir):
   options = browser_options.BrowserOptions()
   parser = options.CreateParser('%prog [options] <benchmark> <page_set>')
 
+  page_runner.PageRunner.AddCommandLineOptions(parser)
   parser.add_option('--output-format',
                     dest='output_format',
                     default='csv',
-                    help='Output format. Can be "csv" or "terminal-block". '
+                    help='Output format. Can be "csv" or "block". '
                     'Defaults to "%default".')
+  parser.add_option('-o', '--output',
+                    dest='output_file',
+                    help='Redirects output to a file. Defaults to stdout.')
 
   benchmark = None
   if benchmark_name is not None:
@@ -66,13 +72,23 @@ def Main(benchmark_dir):
 Use --browser=list to figure out which are available.\n"""
     sys.exit(1)
 
+  if not options.output_file:
+    output_file = sys.stdout
+  elif options.output_file == '-':
+    output_file = sys.stdout
+  else:
+    output_file = open(os.path.expanduser(options.output_file), 'w')
+
   if options.output_format == 'csv':
-    results = multi_page_benchmark.CsvBenchmarkResults(csv.writer(sys.stdout))
-  elif options.output_format == 'terminal-block':
-    results = multi_page_benchmark.TerminalBlockBenchmarkResults(sys.stdout)
+    results = csv_page_benchmark_results.CsvPageBenchmarkResults(
+      csv.writer(output_file),
+      benchmark.results_are_the_same_on_every_page)
+  elif options.output_format in ('block', 'terminal-block'):
+    results = block_page_benchmark_results.BlockPageBenchmarkResults(
+      output_file)
   else:
     raise Exception('Invalid --output-format value: "%s". Valid values are '
-                    '"csv" and "terminal-block".'
+                    '"csv" and "block".'
                     % options.output_format)
 
   with page_runner.PageRunner(ps) as runner:

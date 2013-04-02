@@ -11,10 +11,10 @@ import sys
 import time
 
 from pylib import android_commands
-from pylib import python_test_base
-from pylib import python_test_sharder
-from pylib import test_options_parser
-from pylib import test_result
+from pylib.base import test_result
+from pylib.host_driven import python_test_base
+from pylib.host_driven import python_test_sharder
+from pylib.utils import test_options_parser
 
 
 class MonkeyTest(python_test_base.PythonTestBase):
@@ -108,7 +108,10 @@ def DispatchPythonTests(options):
   sharder = python_test_sharder.PythonTestSharder(
       attached_devices, available_tests, options)
   result = sharder.RunShardedTests()
-  result.LogFull('Monkey', 'Monkey', options.build_type, available_tests)
+  result.LogFull(
+      test_type='Monkey',
+      test_package='Monkey',
+      build_type=options.build_type)
   result.PrintAnnotation()
 
 

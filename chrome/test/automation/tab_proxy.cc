@@ -369,7 +369,7 @@ bool TabProxy::OverrideEncoding(const std::string& encoding) {
   return succeeded;
 }
 
-bool TabProxy::CaptureEntirePageAsPNG(const FilePath& path) {
+bool TabProxy::CaptureEntirePageAsPNG(const base::FilePath& path) {
   if (!is_valid())
     return false;
 
@@ -426,6 +426,10 @@ void TabProxy::Copy() {
 
 void TabProxy::Paste() {
   sender_->Send(new AutomationMsg_Paste(handle_));
+}
+
+void TabProxy::SimulateKeyPress(ui::KeyboardCode key) {
+  sender_->Send(new AutomationMsg_KeyPress(handle_, key));
 }
 
 void TabProxy::ReloadAsync() {

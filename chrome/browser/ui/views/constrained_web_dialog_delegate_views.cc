@@ -32,21 +32,13 @@ class ConstrainedWebDialogDelegateViews
       views::WebView* view)
       : ConstrainedWebDialogDelegateBase(
             browser_context, delegate, tab_delegate),
-        view_(view) {
-    WebContents* web_contents = GetWebContents();
-    if (tab_delegate) {
-      set_override_tab_delegate(tab_delegate);
-      web_contents->SetDelegate(tab_delegate);
-    } else {
-      web_contents->SetDelegate(this);
-    }
-  }
+        view_(view) {}
 
   virtual ~ConstrainedWebDialogDelegateViews() {}
 
   // WebDialogWebContentsDelegate interface.
   virtual void CloseContents(WebContents* source) OVERRIDE {
-    GetWindow()->CloseConstrainedWindow();
+    GetWindow()->CloseWebContentsModalDialog();
   }
 
   // contents::WebContentsDelegate
@@ -79,7 +71,7 @@ class ConstrainedWebDialogDelegateViewViews
       WebDialogWebContentsDelegate* tab_delegate);
   virtual ~ConstrainedWebDialogDelegateViewViews();
 
-  void set_window(ConstrainedWindow* window) {
+  void set_window(WebContentsModalDialog* window) {
     return impl_->set_window(window);
   }
 
@@ -97,7 +89,7 @@ class ConstrainedWebDialogDelegateViewViews
   virtual void ReleaseWebContentsOnDialogClose() OVERRIDE {
     return impl_->ReleaseWebContentsOnDialogClose();
   }
-  virtual ConstrainedWindow* GetWindow() OVERRIDE {
+  virtual WebContentsModalDialog* GetWindow() OVERRIDE {
     return impl_->GetWindow();
   }
   virtual WebContents* GetWebContents() OVERRIDE {
@@ -151,7 +143,7 @@ class ConstrainedWebDialogDelegateViewViews
       const ui::Accelerator& accelerator) OVERRIDE {
     // Pressing ESC closes the dialog.
     DCHECK_EQ(ui::VKEY_ESCAPE, accelerator.key_code());
-    GetWindow()->CloseConstrainedWindow();
+    GetWindow()->CloseWebContentsModalDialog();
     return true;
   }
   virtual gfx::Size GetPreferredSize() OVERRIDE {
@@ -183,7 +175,6 @@ ConstrainedWebDialogDelegateViewViews::ConstrainedWebDialogDelegateViewViews(
   SetWebContents(GetWebContents());
 
   // Pressing ESC closes the dialog.
-  set_allow_accelerators(true);
   AddAccelerator(ui::Accelerator(ui::VKEY_ESCAPE, ui::EF_NONE));
 }
 
@@ -198,8 +189,8 @@ ConstrainedWebDialogDelegate* CreateConstrainedWebDialog(
   ConstrainedWebDialogDelegateViewViews* constrained_delegate =
       new ConstrainedWebDialogDelegateViewViews(
           browser_context, delegate, tab_delegate);
-  ConstrainedWindow* constrained_window =
-      new ConstrainedWindowViews(web_contents, constrained_delegate);
-  constrained_delegate->set_window(constrained_window);
+  WebContentsModalDialog* web_contents_modal_dialog =
+      ConstrainedWindowViews::Create(web_contents, constrained_delegate);
+  constrained_delegate->set_window(web_contents_modal_dialog);
   return constrained_delegate;
 }

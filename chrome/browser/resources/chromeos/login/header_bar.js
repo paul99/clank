@@ -89,12 +89,6 @@ cr.define('login', function() {
 
       $('pod-row').loadLastWallpaper();
 
-      // TODO(ygorshenin@): workaround for crbug.com/164832.
-      // Must be deleted as a part of
-      // https://codereview.chromium.org/11565011/.
-      $('error-message').onBeforeHide();
-      $('error-message').showOfflineMessage(false);
-
       Oobe.showScreen({id: SCREEN_ACCOUNT_PICKER});
       Oobe.resetSigninUI(true);
     },
@@ -164,11 +158,19 @@ cr.define('login', function() {
       var gaiaIsActive = (this.signinUIState_ == SIGNIN_UI_STATE.GAIA_SIGNIN);
       var accountPickerIsActive =
           (this.signinUIState_ == SIGNIN_UI_STATE.ACCOUNT_PICKER);
+      var managedUserCreationIsActive =
+          (this.signinUIState_ == SIGNIN_UI_STATE.MANAGED_USER_CREATION);
+      var wrongHWIDWarningIsActive =
+          (this.signinUIState_ == SIGNIN_UI_STATE.WRONG_HWID_WARNING);
 
       $('add-user-button').hidden = !accountPickerIsActive;
       $('cancel-add-user-button').hidden = accountPickerIsActive ||
-          !this.allowCancel_;
-      $('guest-user-header-bar-item').hidden = gaiaIsActive || !this.showGuest_;
+          !this.allowCancel_ ||
+          wrongHWIDWarningIsActive;
+      $('guest-user-header-bar-item').hidden = gaiaIsActive ||
+          managedUserCreationIsActive ||
+          !this.showGuest_ ||
+          wrongHWIDWarningIsActive;
       $('add-user-header-bar-item').hidden =
           $('add-user-button').hidden && $('cancel-add-user-button').hidden;
     },

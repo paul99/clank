@@ -11,7 +11,6 @@
 #include "chrome/test/base/ui_test_utils.h"
 #include "chromeos/disks/mock_disk_mount_manager.h"
 #include "content/public/browser/browser_context.h"
-#include "content/public/browser/browser_thread.h"
 #include "content/public/browser/storage_partition.h"
 #include "webkit/fileapi/file_system_context.h"
 #include "webkit/fileapi/file_system_mount_point_provider.h"
@@ -153,8 +152,7 @@ TestMountPoint kTestMountPoints[] = {
 class ExtensionFileBrowserPrivateApiTest : public ExtensionApiTest {
  public:
   ExtensionFileBrowserPrivateApiTest()
-      : disk_mount_manager_mock_(NULL),
-        test_mount_point_("/tmp") {
+      : disk_mount_manager_mock_(NULL) {
     InitMountPoints();
   }
 
@@ -184,13 +182,6 @@ class ExtensionFileBrowserPrivateApiTest : public ExtensionApiTest {
     disk_mount_manager_mock_ = NULL;
 
     ExtensionApiTest::TearDownInProcessBrowserTestFixture();
-  }
-
-  void AddTmpMountPoint() {
-    fileapi::ExternalFileSystemMountPointProvider* provider =
-        BrowserContext::GetDefaultStoragePartition(browser()->profile())->
-            GetFileSystemContext()->external_provider();
-    provider->AddLocalMountPoint(test_mount_point_);
   }
 
  private:
@@ -233,7 +224,6 @@ class ExtensionFileBrowserPrivateApiTest : public ExtensionApiTest {
                 kTestDisks[disk_info_index].is_hidden
             )
         ));
-
       }
     }
   }
@@ -249,15 +239,11 @@ class ExtensionFileBrowserPrivateApiTest : public ExtensionApiTest {
   chromeos::disks::MockDiskMountManager* disk_mount_manager_mock_;
   DiskMountManager::DiskMap volumes_;
   DiskMountManager::MountPointMap mount_points_;
-
- private:
-  FilePath test_mount_point_;
 };
 
 IN_PROC_BROWSER_TEST_F(ExtensionFileBrowserPrivateApiTest, FileBrowserMount) {
   // We will call fileBrowserPrivate.unmountVolume once. To test that method, we
   // check that UnmountPath is really called with the same value.
-  AddTmpMountPoint();
   EXPECT_CALL(*disk_mount_manager_mock_, UnmountPath(_, _))
       .Times(0);
   EXPECT_CALL(*disk_mount_manager_mock_,

@@ -10,6 +10,7 @@ Keeps a local cache.
 
 import ctypes
 import hashlib
+import httplib
 import json
 import logging
 import logging.handlers
@@ -154,7 +155,7 @@ def _set_write_bit(path, read_only):
 
 def make_writable(root, read_only):
   """Toggle the writable bit on a directory tree."""
-  assert os.path.isabs(root)
+  assert os.path.isabs(root), root
   for dirpath, dirnames, filenames in os.walk(root, topdown=True):
     for filename in filenames:
       _set_write_bit(os.path.join(dirpath, filename), read_only)
@@ -307,67 +308,153 @@ def fix_python_path(cmd):
   return out
 
 
-class WorkerThread(threading.Thread):
-  """Keeps the results of each task in a thread-local outputs variable."""
-  def __init__(self, tasks, *args, **kwargs):
-    super(WorkerThread, self).__init__(*args, **kwargs)
-    self._tasks = tasks
-    self.outputs = []
-    self.exceptions = []
-
-    self.daemon = True
-    self.start()
-
-  def run(self):
-    """Runs until a None task is queued."""
-    while True:
-      task = self._tasks.get()
-      if task is None:
-        # We're done.
-        return
-      try:
-        func, args, kwargs = task
-        self.outputs.append(func(*args, **kwargs))
-      except Exception, e:
-        logging.error('Caught exception! %s' % e)
-        self.exceptions.append(sys.exc_info())
-      finally:
-        self._tasks.task_done()
-
-
 class ThreadPool(object):
   """Implements a multithreaded worker pool oriented for mapping jobs with
   thread-local result storage.
+
+  Arguments:
+  - initial_threads: Number of threads to start immediately. Can be 0 if it is
+    uncertain that threads will be needed.
+  - max_threads: Maximum number of threads that will be started when all the
+                 threads are busy working. Often the number of CPU cores.
+  - queue_size: Maximum number of tasks to buffer in the queue. 0 for unlimited
+                queue. A non-zero value may make add_task() blocking.
   """
-  QUEUE_CLASS = Queue.Queue
+  QUEUE_CLASS = Queue.PriorityQueue
 
-  def __init__(self, num_threads, queue_size=0):
-    logging.debug('Creating ThreadPool')
+  def __init__(self, initial_threads, max_threads, queue_size):
+    logging.debug(
+        'ThreadPool(%d, %d, %d)', initial_threads, max_threads, queue_size)
+    assert initial_threads <= max_threads
+    # Update this check once 256 cores CPU are common.
+    assert max_threads <= 256
+
     self.tasks = self.QUEUE_CLASS(queue_size)
-    self._workers = [
-      WorkerThread(self.tasks, name='worker-%d' % i)
-      for i in range(num_threads)
-    ]
+    self._max_threads = max_threads
 
-  def add_task(self, func, *args, **kwargs):
+    # Mutables.
+    self._num_of_added_tasks_lock = threading.Lock()
+    self._num_of_added_tasks = 0
+    self._outputs_exceptions_cond = threading.Condition()
+    self._outputs = []
+    self._exceptions = []
+    # Number of threads in wait state.
+    self._ready_lock = threading.Lock()
+    self._ready = 0
+    self._workers_lock = threading.Lock()
+    self._workers = []
+    for _ in range(initial_threads):
+      self._add_worker()
+
+  def _add_worker(self):
+    """Adds one worker thread if there isn't too many. Thread-safe."""
+    # Better to take the lock two times than hold it for too long.
+    with self._workers_lock:
+      if len(self._workers) >= self._max_threads:
+        return False
+    worker = threading.Thread(target=self._run)
+    with self._workers_lock:
+      if len(self._workers) >= self._max_threads:
+        return False
+      self._workers.append(worker)
+    worker.daemon = True
+    worker.start()
+
+  def add_task(self, priority, func, *args, **kwargs):
     """Adds a task, a function to be executed by a worker.
 
-    The function's return value will be stored in the the worker's thread local
-    outputs list.
+    |priority| can adjust the priority of the task versus others. Lower priority
+    takes precedence.
+
+    Returns the index of the item added, e.g. the total number of enqueued items
+    up to now.
     """
-    self.tasks.put((func, args, kwargs))
+    assert isinstance(priority, int)
+    assert callable(func)
+    with self._ready_lock:
+      start_new_worker = not self._ready
+    with self._num_of_added_tasks_lock:
+      self._num_of_added_tasks += 1
+      index = self._num_of_added_tasks
+    self.tasks.put((priority, index, func, args, kwargs))
+    if start_new_worker:
+      self._add_worker()
+    return index
+
+  def _run(self):
+    """Worker thread loop. Runs until a None task is queued."""
+    while True:
+      try:
+        with self._ready_lock:
+          self._ready += 1
+        task = self.tasks.get()
+      finally:
+        with self._ready_lock:
+          self._ready -= 1
+      try:
+        if task is None:
+          # We're done.
+          return
+        _priority, _index, func, args, kwargs = task
+        out = func(*args, **kwargs)
+        if out is not None:
+          self._outputs_exceptions_cond.acquire()
+          try:
+            self._outputs.append(out)
+            self._outputs_exceptions_cond.notifyAll()
+          finally:
+            self._outputs_exceptions_cond.release()
+      except Exception as e:
+        logging.warning('Caught exception: %s', e)
+        exc_info = sys.exc_info()
+        self._outputs_exceptions_cond.acquire()
+        try:
+          self._exceptions.append(exc_info)
+          self._outputs_exceptions_cond.notifyAll()
+        finally:
+          self._outputs_exceptions_cond.release()
+      finally:
+        self.tasks.task_done()
 
   def join(self):
-    """Extracts all the results from each threads unordered."""
+    """Extracts all the results from each threads unordered.
+
+    Call repeatedly to extract all the exceptions if desired.
+
+    Note: will wait for all work items to be done before returning an exception.
+    To get an exception early, use get_one_result().
+    """
+    # TODO(maruel): Stop waiting as soon as an exception is caught.
     self.tasks.join()
-    out = []
-    # Look for exceptions.
-    for w in self._workers:
-      if w.exceptions:
-        raise w.exceptions[0][0], w.exceptions[0][1], w.exceptions[0][2]
-      out.extend(w.outputs)
-      w.outputs = []
+    self._outputs_exceptions_cond.acquire()
+    try:
+      if self._exceptions:
+        e = self._exceptions.pop(0)
+        raise e[0], e[1], e[2]
+      out = self._outputs
+      self._outputs = []
+    finally:
+      self._outputs_exceptions_cond.release()
     return out
+
+  def get_one_result(self):
+    """Returns the next item that was generated or raises an exception if one
+    occured.
+
+    Warning: this function will hang if there is no work item left. Use join
+    instead.
+    """
+    self._outputs_exceptions_cond.acquire()
+    try:
+      while True:
+        if self._exceptions:
+          e = self._exceptions.pop(0)
+          raise e[0], e[1], e[2]
+        if self._outputs:
+          return self._outputs.pop(0)
+        self._outputs_exceptions_cond.wait()
+    finally:
+      self._outputs_exceptions_cond.release()
 
   def close(self):
     """Closes all the threads."""
@@ -436,40 +523,13 @@ class Remote(object):
   def __init__(self, destination_root):
     # Function to fetch a remote object or upload to a remote location..
     self._do_item = self.get_file_handler(destination_root)
-    # Contains tuple(priority, index, obj, destination).
-    self._queue = Queue.PriorityQueue()
-    # Contains tuple(priority, index, obj).
+    # Contains tuple(priority, obj).
     self._done = Queue.PriorityQueue()
-
-    # Contains generated exceptions that haven't been handled yet.
-    self._exceptions = Queue.Queue()
-
-    # To keep FIFO ordering in self._queue. It is assumed xrange's iterator is
-    # thread-safe.
-    self._next_index = xrange(0, 1<<30).__iter__().next
-
-    # Control access to the following member.
-    self._ready_lock = threading.Lock()
-    # Number of threads in wait state.
-    self._ready = 0
-
-    # Control access to the following member.
-    self._workers_lock = threading.Lock()
-    self._workers = []
-    for _ in range(self.INITIAL_WORKERS):
-      self._add_worker()
+    self._pool = ThreadPool(self.INITIAL_WORKERS, self.MAX_WORKERS, 0)
 
   def join(self):
     """Blocks until the queue is empty."""
-    self._queue.join()
-
-  def next_exception(self):
-    """Returns the next unhandled exception, or None if there is
-    no exception."""
-    try:
-      return self._exceptions.get_nowait()
-    except Queue.Empty:
-      return None
+    return self._pool.join()
 
   def add_item(self, priority, obj, dest, size):
     """Retrieves an object from the remote data store.
@@ -479,73 +539,37 @@ class Remote(object):
     Thread-safe.
     """
     assert (priority & self.INTERNAL_PRIORITY_BITS) == 0
-    self._add_to_queue(priority, obj, dest, size)
+    return self._add_item(priority, obj, dest, size)
 
-  def get_result(self):
-    """Returns the next file that was successfully fetched."""
-    r = self._done.get()
-    if r[0] == -1:
-      # It's an exception.
-      raise r[2][0], r[2][1], r[2][2]
-    return r[2]
+  def _add_item(self, priority, obj, dest, size):
+    assert isinstance(obj, basestring), obj
+    assert isinstance(dest, basestring), dest
+    assert size is None or isinstance(size, int), size
+    return self._pool.add_task(
+        priority, self._task_executer, priority, obj, dest, size)
 
-  def _add_to_queue(self, priority, obj, dest, size):
-    with self._ready_lock:
-      start_new_worker = not self._ready
-    self._queue.put((priority, self._next_index(), obj, dest, size))
-    if start_new_worker:
-      self._add_worker()
+  def get_one_result(self):
+    return self._pool.get_one_result()
 
-  def _add_worker(self):
-    """Add one worker thread if there isn't too many. Thread-safe."""
-    with self._workers_lock:
-      if len(self._workers) >= self.MAX_WORKERS:
-        return False
-      worker = threading.Thread(target=self._run)
-      self._workers.append(worker)
-    worker.daemon = True
-    worker.start()
-
-  def _step_done(self, result):
-    """Worker helper function"""
-    self._done.put(result)
-    self._queue.task_done()
-    if result[0] == -1:
-      self._exceptions.put(sys.exc_info())
-
-  def _run(self):
-    """Worker thread loop."""
-    while True:
-      try:
-        with self._ready_lock:
-          self._ready += 1
-        item = self._queue.get()
-      finally:
-        with self._ready_lock:
-          self._ready -= 1
-      if not item:
+  def _task_executer(self, priority, obj, dest, size):
+    """Wraps self._do_item to trap and retry on IOError exceptions."""
+    try:
+      self._do_item(obj, dest)
+      if size and not valid_file(dest, size):
+        download_size = os.stat(dest).st_size
+        os.remove(dest)
+        raise IOError('File incorrect size after download of %s. Got %s and '
+                      'expected %s' % (obj, download_size, size))
+      # TODO(maruel): Technically, we'd want to have an output queue to be a
+      # PriorityQueue.
+      return obj
+    except IOError as e:
+      logging.debug('Caught IOError: %s', e)
+      # Retry a few times, lowering the priority.
+      if (priority & self.INTERNAL_PRIORITY_BITS) < self.RETRIES:
+        self._add_item(priority + 1, obj, dest, size)
         return
-      priority, index, obj, dest, size = item
-      try:
-        self._do_item(obj, dest)
-        if size and not valid_file(dest, size):
-          download_size = os.stat(dest).st_size
-          os.remove(dest)
-          raise IOError('File incorrect size after download of %s. Got %s and '
-                        'expected %s' % (obj, download_size, size))
-      except IOError:
-        # Retry a few times, lowering the priority.
-        if (priority & self.INTERNAL_PRIORITY_BITS) < self.RETRIES:
-          self._add_to_queue(priority + 1, obj, dest, size)
-          self._queue.task_done()
-          continue
-        # Transfers the exception back. It has maximum priority.
-        self._step_done((-1, 0, sys.exc_info()))
-      except:
-        # Transfers the exception back. It has maximum priority.
-        self._step_done((-1, 0, sys.exc_info()))
-      else:
-        self._step_done((priority, index, obj))
+      raise
 
   def get_file_handler(self, file_or_url):  # pylint: disable=R0201
     """Returns a object to retrieve objects from a remote."""
@@ -569,6 +593,11 @@ class Remote(object):
           # Ensure that all the data was properly decompressed.
           uncompressed_data = decompressor.flush()
           assert not uncompressed_data
+        except IOError:
+          logging.error('Encountered an exception with (%s, %s)' % (item, dest))
+          raise
+        except httplib.HTTPException as e:
+          raise IOError('Encountered an HTTPException.\n%s' % e)
         except zlib.error as e:
           # Log the first bytes to see if it's uncompressed data.
           logging.warning('%r', e[:512])
@@ -580,6 +609,9 @@ class Remote(object):
 
     def copy_file(item, dest):
       source = os.path.join(file_or_url, item)
+      if source == dest:
+        logging.info('Source and destination are the same, no action required')
+        return
       logging.debug('copy_file(%s, %s)', source, dest)
       shutil.copy(source, dest)
     return copy_file
@@ -599,6 +631,36 @@ class CachePolicies(object):
     self.max_cache_size = max_cache_size
     self.min_free_space = min_free_space
     self.max_items = max_items
+
+
+class NoCache(object):
+  """This class is intended to be usable everywhere the Cache class is.
+  Instead of downloading to a cache, all files are downloaded to the target
+  directory and then moved to where they are needed.
+  """
+
+  def __init__(self, target_directory, remote):
+    self.target_directory = target_directory
+    self.remote = remote
+
+  def retrieve(self, priority, item, size):
+    """Get the request file."""
+    self.remote.add_item(priority, item, self.path(item), size)
+    self.remote.get_one_result()
+
+  def wait_for(self, items):
+    """Download the first item of the given list if it is missing."""
+    item = items.iterkeys().next()
+
+    if not os.path.exists(self.path(item)):
+      self.remote.add_item(Remote.MED, item, self.path(item), UNKNOWN_FILE_SIZE)
+      downloaded = self.remote.get_one_result()
+      assert downloaded == item
+
+    return item
+
+  def path(self, item):
+    return os.path.join(self.target_directory, item)
 
 
 class Cache(object):
@@ -817,7 +879,7 @@ class Cache(object):
     #     len(self._remote._queue) + len(self._remote.done))
     # There is no lock-free way to verify that.
     while self._pending_queue:
-      item = self.remote.get_result()
+      item = self.remote.get_one_result()
       self._pending_queue.remove(item)
       self._add(item, True)
       if item in items:
@@ -985,6 +1047,118 @@ class Settings(object):
     self.read_only = self.read_only or False
 
 
+def create_directories(base_directory, files):
+  """Creates the directory structure needed by the given list of files."""
+  logging.debug('create_directories(%s, %d)', base_directory, len(files))
+  # Creates the tree of directories to create.
+  directories = set(os.path.dirname(f) for f in files)
+  for item in list(directories):
+    while item:
+      directories.add(item)
+      item = os.path.dirname(item)
+  for d in sorted(directories):
+    if d:
+      os.mkdir(os.path.join(base_directory, d))
+
+
+def create_links(base_directory, files):
+  """Creates any links needed by the given set of files."""
+  for filepath, properties in files:
+    if 'link' not in properties:
+      continue
+    outfile = os.path.join(base_directory, filepath)
+    # symlink doesn't exist on Windows. So the 'link' property should
+    # never be specified for windows .isolated file.
+    os.symlink(properties['l'], outfile)  # pylint: disable=E1101
+    if 'm' in properties:
+      lchmod = getattr(os, 'lchmod', None)
+      if lchmod:
+        lchmod(outfile, properties['m'])
+
+
+def setup_commands(base_directory, cwd, cmd):
+  """Correctly adjusts and then returns the required working directory
+  and command needed to run the test.
+  """
+  assert not os.path.isabs(cwd), 'The cwd must be a relative path, got %s' % cwd
+  cwd = os.path.join(base_directory, cwd)
+  if not os.path.isdir(cwd):
+    os.makedirs(cwd)
+
+  # Ensure paths are correctly separated on windows.
+  cmd[0] = cmd[0].replace('/', os.path.sep)
+  cmd = fix_python_path(cmd)
+
+  return cwd, cmd
+
+
+def generate_remaining_files(files):
+  """Generates a dictionary of all the remaining files to be downloaded."""
+  remaining = {}
+  for filepath, props in files:
+    if 'h' in props:
+      remaining.setdefault(props['h'], []).append((filepath, props))
+
+  return remaining
+
+
+def download_test_data(isolated_hash, target_directory, remote):
+  """Downloads the dependencies to the given directory."""
+  if not os.path.exists(target_directory):
+    os.makedirs(target_directory)
+
+  settings = Settings()
+  no_cache = NoCache(target_directory, Remote(remote))
+
+  # Download all the isolated files.
+  with Profiler('GetIsolateds') as _prof:
+    settings.load(no_cache, isolated_hash)
+
+  if not settings.command:
+    print >> sys.stderr, 'No command to run'
+    return 1
+
+  with Profiler('GetRest') as _prof:
+    create_directories(target_directory, settings.files)
+    create_links(target_directory, settings.files.iteritems())
+
+    cwd, cmd = setup_commands(target_directory, settings.relative_cwd,
+                              settings.command[:])
+
+    remaining = generate_remaining_files(settings.files.iteritems())
+
+    # Now block on the remaining files to be downloaded and mapped.
+    logging.info('Retrieving remaining files')
+    last_update = time.time()
+    while remaining:
+      obj = no_cache.wait_for(remaining)
+      files = remaining.pop(obj)
+
+      for i, (filepath, properties) in enumerate(files):
+        outfile = os.path.join(target_directory, filepath)
+        logging.info(no_cache.path(obj))
+
+        if i + 1 == len(files):
+          os.rename(no_cache.path(obj), outfile)
+        else:
+          shutil.copyfile(no_cache.path(obj), outfile)
+
+        if 'm' in properties:
+          # It's not set on Windows.
+          os.chmod(outfile, properties['m'])
+
+      if time.time() - last_update > DELAY_BETWEEN_UPDATES_IN_SECS:
+        logging.info('%d files remaining...' % len(remaining))
+        last_update = time.time()
+
+  print('.isolated files successfully downloaded and setup in %s' %
+        target_directory)
+  print('To run this test please run the command %s from the directory %s' %
+        (cmd, cwd))
+
+  return 0
+
+
 def run_tha_test(isolated_hash, cache_dir, remote, policies):
   """Downloads the dependencies in the cache, hardlinks them into a temporary
   directory and runs the executable.
@@ -1009,46 +1183,13 @@ def run_tha_test(isolated_hash, cache_dir, remote, policies):
         return 1
 
       with Profiler('GetRest') as _prof:
-        logging.debug('Creating directories')
-        # Creates the tree of directories to create.
-        directories = set(os.path.dirname(f) for f in settings.files)
-        for item in list(directories):
-          while item:
-            directories.add(item)
-            item = os.path.dirname(item)
-        for d in sorted(directories):
-          if d:
-            os.mkdir(os.path.join(outdir, d))
-
-        # Creates the links if necessary.
-        for filepath, properties in settings.files.iteritems():
-          if 'link' not in properties:
-            continue
-          outfile = os.path.join(outdir, filepath)
-          # symlink doesn't exist on Windows. So the 'link' property should
-          # never be specified for windows .isolated file.
-          os.symlink(properties['l'], outfile)  # pylint: disable=E1101
-          if 'm' in properties:
-            # It's not set on Windows.
-            lchmod = getattr(os, 'lchmod', None)
-            if lchmod:
-              lchmod(outfile, properties['m'])
-
-        # Remaining files to be processed.
-        # Note that files could still be not be downloaded yet here.
-        remaining = dict()
-        for filepath, props in settings.files.iteritems():
-          if 'h' in props:
-            remaining.setdefault(props['h'], []).append((filepath, props))
+        create_directories(outdir, settings.files)
+        create_links(outdir, settings.files.iteritems())
+        remaining = generate_remaining_files(settings.files.iteritems())
 
         # Do bookkeeping while files are being downloaded in the background.
-        cwd = os.path.join(outdir, settings.relative_cwd)
-        if not os.path.isdir(cwd):
-          os.makedirs(cwd)
-        cmd = settings.command[:]
-        # Ensure paths are correctly separated on windows.
-        cmd[0] = cmd[0].replace('/', os.path.sep)
-        cmd = fix_python_path(cmd)
+        cwd, cmd = setup_commands(outdir, settings.relative_cwd,
+                                  settings.command[:])
 
         # Now block on the remaining files to be downloaded and mapped.
         logging.info('Retrieving remaining files')
@@ -1091,6 +1232,13 @@ def main():
       '-v', '--verbose', action='count', default=0, help='Use multiple times')
   parser.add_option('--no-run', action='store_true', help='Skip the run part')
 
+  group = optparse.OptionGroup(parser, 'Download')
+  group.add_option(
+      '--download', metavar='DEST',
+      help='Downloads files to DEST and returns without running, instead of '
+           'downloading and then running from a temporary directory.')
+  parser.add_option_group(group)
+
   group = optparse.OptionGroup(parser, 'Data source')
   group.add_option(
       '-s', '--isolated',
@@ -1105,7 +1253,10 @@ def main():
   parser.add_option_group(group)
 
   group.add_option(
-      '-r', '--remote', metavar='URL', help='Remote where to get the items')
+      '-r', '--remote', metavar='URL',
+      default=
+          'https://isolateserver.appspot.com/content/retrieve/default-gzip/',
+      help='Remote where to get the items. Defaults to %default')
   group = optparse.OptionGroup(parser, 'Cache management')
   group.add_option(
       '--cache',
@@ -1156,25 +1307,28 @@ def main():
   if bool(options.isolated) == bool(options.hash):
     logging.debug('One and only one of --isolated or --hash is required.')
     parser.error('One and only one of --isolated or --hash is required.')
-  if not options.remote:
-    logging.debug('--remote is required.')
-    parser.error('--remote is required.')
   if args:
     logging.debug('Unsupported args %s' % ' '.join(args))
     parser.error('Unsupported args %s' % ' '.join(args))
 
+  options.cache = os.path.abspath(options.cache)
   policies = CachePolicies(
       options.max_cache_size, options.min_free_space, options.max_items)
-  try:
-    return run_tha_test(
-        options.isolated or options.hash,
-        os.path.abspath(options.cache),
-        options.remote,
-        policies)
-  except Exception, e:
-    # Make sure any exception is logged.
-    logging.exception(e)
-    return 1
+
+  if options.download:
+    return download_test_data(options.isolated or options.hash,
+                              options.download, options.remote)
+  else:
+    try:
+      return run_tha_test(
+          options.isolated or options.hash,
+          options.cache,
+          options.remote,
+          policies)
+    except Exception, e:
+      # Make sure any exception is logged.
+      logging.exception(e)
+      return 1
 
 
 if __name__ == '__main__':

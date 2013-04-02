@@ -7,12 +7,14 @@
 
 #include <string>
 
+#include "base/callback_forward.h"
 #include "base/memory/scoped_ptr.h"
 
 namespace base {
 class DictionaryValue;
 }
 
+class DevToolsEventListener;
 class Status;
 
 // A DevTools client of a single DevTools debugger.
@@ -26,6 +28,11 @@ class DevToolsClient {
       const std::string& method,
       const base::DictionaryValue& params,
       scoped_ptr<base::DictionaryValue>* result) = 0;
+
+  virtual void AddListener(DevToolsEventListener* listener) = 0;
+
+  typedef base::Callback<bool()> ConditionalFunc;
+  virtual Status HandleEventsUntil(const ConditionalFunc& conditional_func) = 0;
 };
 
 #endif  // CHROME_TEST_CHROMEDRIVER_DEVTOOLS_CLIENT_H_

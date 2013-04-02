@@ -30,18 +30,19 @@ class BrowserTest(unittest.TestCase):
     browser_to_create = browser_finder.FindBrowser(options)
     with browser_to_create.Create() as b:
       t = b.tabs[0]
-      t.page.Navigate('http://www.google.com/')
+      t.Navigate('http://www.google.com/')
       t.WaitForDocumentReadyStateToBeInteractiveOrBetter()
-      self.assertEquals(t.runtime.Evaluate('navigator.userAgent'), 'telemetry')
+      self.assertEquals(t.EvaluateJavaScript('navigator.userAgent'),
+                        'telemetry')
 
   def testVersionDetection(self):
     options = options_for_unittests.GetCopy()
     browser_to_create = browser_finder.FindBrowser(options)
     with browser_to_create.Create() as b:
       # pylint: disable=W0212
-      self.assertGreater(b._backend._inspector_protocol_version, 0)
-      self.assertGreater(b._backend._chrome_branch_number, 0)
-      self.assertGreater(b._backend._webkit_base_revision, 0)
+      self.assertTrue(b._browser_backend._inspector_protocol_version > 0)
+      self.assertTrue(b._browser_backend._chrome_branch_number > 0)
+      self.assertTrue(b._browser_backend._webkit_base_revision > 0)
 
   def testNewCloseTab(self):
     options = options_for_unittests.GetCopy()
@@ -59,3 +60,10 @@ class BrowserTest(unittest.TestCase):
       new_tab.Close()
       self.assertEquals(1, len(b.tabs))
       self.assertEquals(existing_tab.url, existing_tab_url)
+
+  def testMultipleTabCalls(self):
+    options = options_for_unittests.GetCopy()
+    browser_to_create = browser_finder.FindBrowser(options)
+    with browser_to_create.Create() as b:
+      b.tabs[0].Navigate('http://www.google.com/')
+      b.tabs[0].WaitForDocumentReadyStateToBeInteractiveOrBetter()

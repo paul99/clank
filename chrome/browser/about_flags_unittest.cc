@@ -2,7 +2,8 @@
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
-#include "base/string_number_conversions.h"
+#include "base/prefs/pref_registry_simple.h"
+#include "base/strings/string_number_conversions.h"
 #include "base/utf_string_conversions.h"
 #include "base/values.h"
 #include "chrome/browser/about_flags.h"
@@ -86,8 +87,7 @@ static Experiment kExperiments[] = {
 class AboutFlagsTest : public ::testing::Test {
  protected:
   AboutFlagsTest() {
-    prefs_.RegisterListPref(prefs::kEnabledLabsExperiments,
-                            PrefService::UNSYNCABLE_PREF);
+    prefs_.registry()->RegisterListPref(prefs::kEnabledLabsExperiments);
     testing::ClearState();
   }
 
@@ -107,7 +107,7 @@ class AboutFlagsTest : public ::testing::Test {
     testing::SetExperiments(NULL, 0);
   }
 
-  TestingPrefService prefs_;
+  TestingPrefServiceSimple prefs_;
 };
 
 TEST_F(AboutFlagsTest, ChangeNeedsRestart) {
@@ -261,7 +261,7 @@ TEST_F(AboutFlagsTest, CheckValues) {
   std::string switch2_with_equals = std::string("--") +
                                     std::string(kSwitch2) +
                                     std::string("=");
-#if defined(OS_WIN)            
+#if defined(OS_WIN)
   EXPECT_NE(std::wstring::npos,
             command_line.GetCommandLineString().find(
                 ASCIIToWide(switch2_with_equals)));

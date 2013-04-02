@@ -17,13 +17,13 @@ class View;
 class Widget;
 namespace test {
 
-void CreateChildModalParent();
+void CreateChildModalParent(gfx::NativeView context);
 
 class ChildModalParent : public WidgetDelegateView,
                          public ButtonListener,
                          public WidgetObserver {
  public:
-  ChildModalParent();
+  ChildModalParent(gfx::NativeView context);
   virtual ~ChildModalParent();
 
   void ShowChild();
@@ -48,7 +48,7 @@ class ChildModalParent : public WidgetDelegateView,
                              const ui::Event& event) OVERRIDE;
 
   // Overridden from WidgetObserver:
-  virtual void OnWidgetClosing(Widget* widget) OVERRIDE;
+  virtual void OnWidgetDestroying(Widget* widget) OVERRIDE;
 
   // The button to toggle showing and hiding the child window. The child window
   // does not block input to this button.

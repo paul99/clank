@@ -86,9 +86,11 @@ class MockSyncEventObserver : public SyncEventObserver {
                void(const GURL& app_origin,
                     SyncServiceState state,
                     const std::string& description));
-  MOCK_METHOD2(OnFileSynced,
+  MOCK_METHOD4(OnFileSynced,
                void(const fileapi::FileSystemURL& url,
-                    fileapi::SyncOperationResult result));
+                    fileapi::SyncFileStatus status,
+                    fileapi::SyncAction action,
+                    SyncDirection direction));
 };
 
 ACTION_P3(NotifyStateAndCallback,
@@ -108,15 +110,15 @@ ACTION_P(MockStatusCallback, status) {
       FROM_HERE, base::Bind(arg3, status));
 }
 
-ACTION_P3(MockSyncOperationCallback, status, url, operation_type) {
+ACTION_P2(MockSyncFileCallback, status, url) {
   base::MessageLoopProxy::current()->PostTask(
-      FROM_HERE, base::Bind(arg1, status, url, operation_type));
+      FROM_HERE, base::Bind(arg1, status, url));
 }
 
 class SyncFileSystemServiceTest : public testing::Test {
  protected:
   SyncFileSystemServiceTest() {}
-  ~SyncFileSystemServiceTest() {}
+  virtual ~SyncFileSystemServiceTest() {}
 
   virtual void SetUp() OVERRIDE {
     thread_helper_.SetUp();
@@ -130,15 +132,18 @@ class SyncFileSystemServiceTest : public testing::Test {
     remote_service_ = new StrictMock<MockRemoteFileSyncService>;
     sync_service_.reset(new SyncFileSystemService(&profile_));
 
-    // Disables auto sync by default.
-    sync_service_->set_auto_sync_enabled(false);
-
     EXPECT_CALL(*mock_remote_service(),
-                AddObserver(sync_service_.get())).Times(1);
+                AddServiceObserver(sync_service_.get())).Times(1);
+    EXPECT_CALL(*mock_remote_service(),
+                AddFileStatusObserver(sync_service_.get())).Times(1);
 
     sync_service_->Initialize(
         make_scoped_ptr(local_service_),
         scoped_ptr<RemoteFileSyncService>(remote_service_));
+
+    // Disable auto sync by default.
+    EXPECT_CALL(*mock_remote_service(), SetSyncEnabled(false)).Times(1);
+    sync_service_->SetSyncEnabledForTesting(false);
 
     file_system_->SetUp();
   }
@@ -162,7 +167,6 @@ class SyncFileSystemServiceTest : public testing::Test {
         file_system_->file_system_context(),
         kServiceName, GURL(kOrigin),
         AssignAndQuitCallback(&run_loop, &status));
-
     run_loop.Run();
 
     EXPECT_EQ(fileapi::SYNC_STATUS_OK, status);
@@ -189,7 +193,7 @@ class SyncFileSystemServiceTest : public testing::Test {
     StrictMock<MockSyncEventObserver> event_observer;
     sync_service_->AddSyncEventObserver(&event_observer);
 
-    sync_service_->set_auto_sync_enabled(true);
+    EnableSync();
 
     EXPECT_CALL(*mock_remote_service(),
                 RegisterOriginForTrackingChanges(GURL(kOrigin), _))
@@ -208,7 +212,6 @@ class SyncFileSystemServiceTest : public testing::Test {
         .WillRepeatedly(RecordState(&actual_states));
 
     SyncStatusCode actual_status = fileapi::SYNC_STATUS_UNKNOWN;
-
     base::RunLoop run_loop;
     sync_service_->InitializeForApp(
         file_system_->file_system_context(),
@@ -230,8 +233,13 @@ class SyncFileSystemServiceTest : public testing::Test {
     return remote_service_;
   }
 
-  TestingProfile profile_;
+  void EnableSync() {
+    EXPECT_CALL(*mock_remote_service(), SetSyncEnabled(true)).Times(1);
+    sync_service_->SetSyncEnabledForTesting(true);
+  }
+
   MultiThreadTestHelper thread_helper_;
+  TestingProfile profile_;
   scoped_ptr<fileapi::CannedSyncableFileSystem> file_system_;
 
   // Their ownerships are transferred to SyncFileSystemService.
@@ -287,155 +295,13 @@ TEST_F(SyncFileSystemServiceTest, InitializeForAppWithError) {
       0);
 }
 
-TEST_F(SyncFileSystemServiceTest, GetConflictFilesWithoutInitialize) {
-  EXPECT_EQ(base::PLATFORM_FILE_OK, file_system_->OpenFileSystem());
-
-  {
-    base::RunLoop run_loop;
-    FileSystemURLSet returned_files;
-    SyncStatusCode status = fileapi::SYNC_STATUS_UNKNOWN;
-    sync_service_->GetConflictFiles(
-        GURL(kOrigin), kServiceName,
-        base::Bind(&AssignValueAndQuit<FileSystemURLSet>,
-                   &run_loop, &status, &returned_files));
-    run_loop.Run();
-
-    EXPECT_EQ(fileapi::SYNC_STATUS_NOT_INITIALIZED, status);
-  }
-
-  {
-    base::RunLoop run_loop;
-    fileapi::ConflictFileInfo actual_file_info;
-    SyncStatusCode status = fileapi::SYNC_STATUS_UNKNOWN;
-    sync_service_->GetConflictFileInfo(
-        GURL(kOrigin), kServiceName, URL("foo"),
-        base::Bind(&AssignValueAndQuit<fileapi::ConflictFileInfo>,
-                   &run_loop, &status, &actual_file_info));
-    run_loop.Run();
-
-    EXPECT_EQ(fileapi::SYNC_STATUS_NOT_INITIALIZED, status);
-  }
-}
-
-TEST_F(SyncFileSystemServiceTest, GetConflictFiles) {
-  InitializeApp();
-
-  // 1. Sets up (conflicting) files.
-  struct {
-    FileSystemURL url;
-    SyncFileMetadata local_metadata;
-    SyncFileMetadata remote_metadata;
-  } files[] = {
-    { URL("file1"),
-      SyncFileMetadata(fileapi::SYNC_FILE_TYPE_FILE,
-                       10, base::Time::FromDoubleT(1)),
-      SyncFileMetadata(fileapi::SYNC_FILE_TYPE_FILE,
-                       12, base::Time::FromDoubleT(2)),
-    },
-    { URL("dir"),
-      SyncFileMetadata(fileapi::SYNC_FILE_TYPE_DIRECTORY,
-                       0, base::Time::FromDoubleT(3)),
-      SyncFileMetadata(fileapi::SYNC_FILE_TYPE_DIRECTORY,
-                       0, base::Time::FromDoubleT(4)),
-    },
-    { URL("dir/foo"),
-      SyncFileMetadata(fileapi::SYNC_FILE_TYPE_DIRECTORY,
-                       0, base::Time::FromDoubleT(5)),
-      SyncFileMetadata(fileapi::SYNC_FILE_TYPE_FILE,
-                       200, base::Time::FromDoubleT(6)),
-    },
-  };
-
-  for (size_t i = 0; i < ARRAYSIZE_UNSAFE(files); ++i) {
-    // Set up local files/directories.
-    switch (files[i].local_metadata.file_type) {
-      case fileapi::SYNC_FILE_TYPE_FILE:
-        EXPECT_EQ(base::PLATFORM_FILE_OK,
-                  file_system_->CreateFile(files[i].url));
-        EXPECT_EQ(base::PLATFORM_FILE_OK,
-                  file_system_->TruncateFile(files[i].url,
-                                             files[i].local_metadata.size));
-        break;
-      case fileapi::SYNC_FILE_TYPE_DIRECTORY:
-        EXPECT_EQ(base::PLATFORM_FILE_OK,
-                  file_system_->CreateDirectory(files[i].url));
-        break;
-      case fileapi::SYNC_FILE_TYPE_UNKNOWN:
-        FAIL();
-    }
-    EXPECT_EQ(base::PLATFORM_FILE_OK,
-              file_system_->TouchFile(files[i].url, base::Time(),
-                                      files[i].local_metadata.last_modified));
-
-    // Registers remote file information (mock).
-    mock_remote_service()->add_conflict_file(
-        files[i].url, files[i].remote_metadata);
-  }
-
-  // 2. Test GetConflictFiles.
-  EXPECT_CALL(*mock_remote_service(),
-              GetConflictFiles(GURL(kOrigin), _)).Times(1);
-
-  base::RunLoop run_loop;
-  FileSystemURLSet returned_files;
-  SyncStatusCode status = fileapi::SYNC_STATUS_UNKNOWN;
-  sync_service_->GetConflictFiles(
-      GURL(kOrigin), kServiceName,
-      base::Bind(&AssignValueAndQuit<FileSystemURLSet>,
-                 &run_loop, &status, &returned_files));
-  run_loop.Run();
-
-  ASSERT_EQ(ARRAYSIZE_UNSAFE(files), returned_files.size());
-  for (size_t i = 0; i < returned_files.size(); ++i)
-    ASSERT_TRUE(ContainsKey(returned_files, files[i].url));
-
-  // 3. Test GetConflictFileInfo.
-  EXPECT_CALL(*mock_remote_service(),
-              GetRemoteFileMetadata(_, _)).Times(3);
-
-  for (size_t i = 0; i < returned_files.size(); ++i) {
-    SCOPED_TRACE(testing::Message() << files[i].url.DebugString());
-
-    base::RunLoop run_loop;
-    fileapi::ConflictFileInfo actual_file_info;
-    SyncStatusCode status = fileapi::SYNC_STATUS_UNKNOWN;
-    sync_service_->GetConflictFileInfo(
-        GURL(kOrigin), kServiceName, files[i].url,
-        base::Bind(&AssignValueAndQuit<fileapi::ConflictFileInfo>,
-                   &run_loop, &status, &actual_file_info));
-    run_loop.Run();
-
-    EXPECT_EQ(fileapi::SYNC_STATUS_OK, status);
-
-    EXPECT_EQ(files[i].local_metadata.file_type,
-              actual_file_info.local_metadata.file_type);
-    EXPECT_EQ(files[i].local_metadata.size,
-              actual_file_info.local_metadata.size);
-
-    // Touch doesn't change the modified_date or GetMetadata doesn't return
-    // correct modified date for directories.
-    // TODO(kinuko,tzik): Investigate this.
-    if (files[i].local_metadata.file_type == fileapi::SYNC_FILE_TYPE_FILE) {
-      EXPECT_EQ(files[i].local_metadata.last_modified,
-                actual_file_info.local_metadata.last_modified);
-    }
-
-    EXPECT_EQ(files[i].remote_metadata.file_type,
-              actual_file_info.remote_metadata.file_type);
-    EXPECT_EQ(files[i].remote_metadata.size,
-              actual_file_info.remote_metadata.size);
-    EXPECT_EQ(files[i].remote_metadata.last_modified,
-              actual_file_info.remote_metadata.last_modified);
-  }
-}
-
 TEST_F(SyncFileSystemServiceTest, SimpleLocalSyncFlow) {
   InitializeApp();
 
   StrictMock<MockSyncStatusObserver> status_observer;
   StrictMock<MockLocalChangeProcessor> local_change_processor;
 
-  sync_service_->set_auto_sync_enabled(true);
+  EnableSync();
   file_system_->file_system_context()->sync_context()->
       set_mock_notify_changes_duration_in_sec(0);
   file_system_->AddSyncStatusObserver(&status_observer);
@@ -474,7 +340,7 @@ TEST_F(SyncFileSystemServiceTest, SimpleLocalSyncFlow) {
 TEST_F(SyncFileSystemServiceTest, SimpleRemoteSyncFlow) {
   InitializeApp();
 
-  sync_service_->set_auto_sync_enabled(true);
+  EnableSync();
 
   base::RunLoop run_loop;
 
@@ -496,7 +362,7 @@ TEST_F(SyncFileSystemServiceTest, SimpleSyncFlowWithFileBusy) {
 
   StrictMock<MockLocalChangeProcessor> local_change_processor;
 
-  sync_service_->set_auto_sync_enabled(true);
+  EnableSync();
   file_system_->file_system_context()->sync_context()->
       set_mock_notify_changes_duration_in_sec(0);
 
@@ -516,9 +382,8 @@ TEST_F(SyncFileSystemServiceTest, SimpleSyncFlowWithFileBusy) {
 
     // Return with SYNC_STATUS_FILE_BUSY once.
     EXPECT_CALL(*mock_remote_service(), ProcessRemoteChange(_, _))
-        .WillOnce(MockSyncOperationCallback(fileapi::SYNC_STATUS_FILE_BUSY,
-                                            kFile,
-                                            fileapi::SYNC_OPERATION_NONE));
+        .WillOnce(MockSyncFileCallback(fileapi::SYNC_STATUS_FILE_BUSY,
+                                       kFile));
 
     // ProcessRemoteChange should be called again when the becomes
     // not busy.

@@ -1,4 +1,4 @@
-// Copyright (c) 2012 The Chromium Authors. All rights reserved.
+// Copyright 2012 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 //
@@ -18,6 +18,7 @@
 #include "base/compiler_specific.h"
 #include "base/memory/scoped_ptr.h"
 #include "base/threading/non_thread_safe.h"
+#include "sync/base/sync_export.h"
 #include "sync/internal_api/public/base/model_type.h"
 #include "sync/internal_api/public/util/weak_handle.h"
 #include "sync/notifier/invalidation_state_tracker.h"
@@ -33,7 +34,7 @@ namespace syncer {
 
 // This class must live on the IO thread.
 // TODO(dcheng): Think of a name better than InvalidationInvalidator.
-class InvalidationNotifier
+class SYNC_EXPORT_PRIVATE InvalidationNotifier
     : public Invalidator,
       public SyncInvalidationListener::Delegate,
       public base::NonThreadSafe {
@@ -56,7 +57,6 @@ class InvalidationNotifier
   virtual void UnregisterHandler(InvalidationHandler* handler) OVERRIDE;
   virtual InvalidatorState GetInvalidatorState() const OVERRIDE;
   virtual void SetUniqueId(const std::string& unique_id) OVERRIDE;
-  virtual void SetStateDeprecated(const std::string& state) OVERRIDE;
   virtual void UpdateCredentials(
       const std::string& email, const std::string& token) OVERRIDE;
   virtual void SendInvalidation(
@@ -95,9 +95,7 @@ class InvalidationNotifier
   std::string client_id_;
 
   // The initial bootstrap data to pass to |invalidation_listener_|.
-  // TODO(tim): This should be made const once migration is completed for bug
-  // 124140.
-  std::string invalidation_bootstrap_data_;
+  const std::string invalidation_bootstrap_data_;
 
   // The invalidation listener.
   SyncInvalidationListener invalidation_listener_;

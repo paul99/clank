@@ -6,6 +6,7 @@ import json
 import logging
 import os
 import subprocess
+import sys
 import tempfile
 import time
 
@@ -31,7 +32,7 @@ class AndroidBrowserBackend(browser_backend.BrowserBackend):
     self._devtools_remote_port = devtools_remote_port
 
     # Kill old browser.
-    self._adb.KillAll(self._package)
+    self._adb.CloseApplication(self._package)
     self._adb.KillAll('device_forwarder')
     self._adb.Forward('tcp:%d' % self._port, self._devtools_remote_port)
 
@@ -67,7 +68,7 @@ class AndroidBrowserBackend(browser_backend.BrowserBackend):
       self._adb.Push(f.name, cmdline_file)
 
     # Force devtools protocol on, if not already done.
-    if not is_content_shell:
+    if not is_content_shell and self._adb.IsRootEnabled():
       # Make sure we can find the apps' prefs file
       app_data_dir = '/data/data/%s' % self._package
       prefs_file = (app_data_dir +
@@ -127,6 +128,13 @@ class AndroidBrowserBackend(browser_backend.BrowserBackend):
     try:
       self._WaitForBrowserToComeUp()
       self._PostBrowserStartupInitialization()
+    except browser_gone_exception.BrowserGoneException:
+      logging.critical('Failed to connect to browser.')
+      if not self._adb.IsRootEnabled():
+        logging.critical(
+          'Ensure web debugging is enabled in Chrome at '
+          '"Settings > Developer tools > Enable USB Web debugging".')
+      sys.exit(1)
     except:
       import traceback
       traceback.print_exc()
@@ -142,12 +150,17 @@ class AndroidBrowserBackend(browser_backend.BrowserBackend):
     self.Close()
 
   def Close(self):
+    super(AndroidBrowserBackend, self).Close()
+
     self._adb.RunShellCommand('rm %s' % self._cmdline_file)
-    self._adb.KillAll(self._package)
+    self._adb.CloseApplication(self._package)
 
   def IsBrowserRunning(self):
     pids = self._adb.ExtractPid(self._package)
     return len(pids) != 0
+
+  def GetRemotePort(self, local_port):
+    return local_port
 
   def GetStandardOutput(self):
     # If we can find symbols and there is a stack, output the symbolized stack.
@@ -174,5 +187,5 @@ class AndroidBrowserBackend(browser_backend.BrowserBackend):
     # Otherwise, just return the last 100 lines of logcat.
     return '\n'.join(self._adb.RunShellCommand('logcat -d -t 100'))
 
-  def CreateForwarder(self, *ports):
-    return adb_commands.Forwarder(self._adb, *ports)
+  def CreateForwarder(self, *port_pairs):
+    return adb_commands.Forwarder(self._adb, *port_pairs)

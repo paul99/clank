@@ -5,10 +5,10 @@ import os
 import unittest
 
 from telemetry import browser_finder
-from telemetry import multi_page_benchmark
 from telemetry import options_for_unittests
 from telemetry import page_runner
 from telemetry import page as page_module
+from telemetry import page_benchmark_results
 from telemetry import page_set
 
 class MultiPageBenchmarkUnitTestBase(unittest.TestCase):
@@ -21,19 +21,16 @@ class MultiPageBenchmarkUnitTestBase(unittest.TestCase):
 
   def CreatePageSet(self, test_filename):
     base_dir = os.path.dirname(__file__)
-    page = page_module.Page(test_filename, base_dir=base_dir)
-    setattr(page, 'scrolling', {'action': 'scrolling_interaction'})
-    ps = page_set.PageSet(base_dir=base_dir)
+    ps = page_set.PageSet(file_path=os.path.join(base_dir, 'foo.json'))
+    page = page_module.Page(test_filename, ps, base_dir=base_dir)
+    setattr(page, 'smoothness', {'action': 'scrolling_action'})
     ps.pages.append(page)
     return ps
 
-  def CustomizeOptionsForTest(self, options):
-    """Override to customize default options."""
-    pass
-
-  def RunBenchmark(self, benchmark, ps):
+  def RunBenchmark(self, benchmark, ps, options=None):
     """Runs a benchmark against a pageset, returning the rows its outputs."""
-    options = options_for_unittests.GetCopy()
+    if options is None:
+      options = options_for_unittests.GetCopy()
     assert options
     temp_parser = options.CreateParser()
     benchmark.AddCommandLineOptions(temp_parser)
@@ -44,10 +41,9 @@ class MultiPageBenchmarkUnitTestBase(unittest.TestCase):
       setattr(options, k, v)
 
     benchmark.CustomizeBrowserOptions(options)
-    self.CustomizeOptionsForTest(options)
     possible_browser = browser_finder.FindBrowser(options)
 
-    results = multi_page_benchmark.BenchmarkResults()
+    results = page_benchmark_results.PageBenchmarkResults()
     with page_runner.PageRunner(ps) as runner:
       runner.Run(options, possible_browser, benchmark, results)
     return results

@@ -9,6 +9,7 @@
 #include "base/bind.h"
 #include "base/callback.h"
 #include "base/command_line.h"
+#include "base/debug/trace_event.h"
 #include "base/i18n/rtl.h"
 #include "base/utf_string_conversions.h"
 #include "base/values.h"
@@ -17,12 +18,12 @@
 #include "chrome/browser/chromeos/login/base_login_display_host.h"
 #include "chrome/browser/chromeos/login/proxy_settings_dialog.h"
 #include "chrome/browser/chromeos/login/webui_login_display.h"
-#include "chrome/browser/media/media_stream_devices_controller.h"
 #include "chrome/browser/password_manager/password_manager.h"
 #include "chrome/browser/password_manager/password_manager_delegate_impl.h"
 #include "chrome/browser/profiles/profile_manager.h"
 #include "chrome/browser/renderer_preferences_util.h"
-#include "chrome/browser/ui/constrained_window_tab_helper.h"
+#include "chrome/browser/ui/media_stream_infobar_delegate.h"
+#include "chrome/browser/ui/web_contents_modal_dialog_manager.h"
 #include "chrome/browser/ui/webui/chromeos/login/oobe_ui.h"
 #include "chrome/common/chrome_notification_types.h"
 #include "chrome/common/chrome_switches.h"
@@ -69,7 +70,7 @@ class SnifferObserver : public content::RenderViewHostObserver {
   virtual ~SnifferObserver() {}
 
   // IPC::Listener implementation.
-  virtual bool OnMessageReceived(const IPC::Message& message) {
+  virtual bool OnMessageReceived(const IPC::Message& message) OVERRIDE {
     bool handled = true;
     IPC_BEGIN_MESSAGE_MAP(SnifferObserver, message)
       IPC_MESSAGE_HANDLER(ChromeViewHostMsg_FrameLoadingError, OnError)
@@ -81,7 +82,7 @@ class SnifferObserver : public content::RenderViewHostObserver {
  private:
   void OnError(int error) {
     base::FundamentalValue error_value(error);
-    webui_->CallJavascriptFunction("login.ErrorMessageScreen.onFrameError",
+    webui_->CallJavascriptFunction("login.GaiaSigninScreen.onFrameError",
                                    error_value);
   }
 
@@ -161,7 +162,7 @@ void WebUILoginView::Init(views::Widget* login_window) {
       web_contents, PasswordManagerDelegateImpl::FromWebContents(web_contents));
 
   // LoginHandlerViews uses a constrained window for the password manager view.
-  ConstrainedWindowTabHelper::CreateForWebContents(web_contents);
+  WebContentsModalDialogManager::CreateForWebContents(web_contents);
 
   web_contents->SetDelegate(this);
   renderer_preferences_util::UpdateFromSystemSettings(
@@ -280,6 +281,7 @@ void WebUILoginView::AboutToRequestFocusFromTabTraversal(bool reverse) {
   // Return the focus to the web contents.
   webui_login_->web_contents()->FocusThroughTabTraversal(reverse);
   GetWidget()->Activate();
+  webui_login_->web_contents()->Focus();
 }
 
 void WebUILoginView::Observe(int type,
@@ -353,14 +355,9 @@ bool WebUILoginView::TakeFocus(content::WebContents* source, bool reverse) {
 
 void WebUILoginView::RequestMediaAccessPermission(
     WebContents* web_contents,
-    const content::MediaStreamRequest* request,
+    const content::MediaStreamRequest& request,
     const content::MediaResponseCallback& callback) {
-  Profile* profile =
-      Profile::FromBrowserContext(web_contents->GetBrowserContext());
-
-  scoped_ptr<MediaStreamDevicesController> controller(
-      new MediaStreamDevicesController(profile, request, callback));
-  if (!controller->DismissInfoBarAndTakeActionOnSettings())
+  if (MediaStreamInfoBarDelegate::Create(web_contents, request, callback))
     NOTREACHED() << "Media stream not allowed for WebUI";
 }
 
@@ -370,7 +367,7 @@ void WebUILoginView::OnLoginPromptVisible() {
     LOG(INFO) << "Login WebUI >> not emitting signal, hidden: " << is_hidden_;
     return;
   }
-
+  TRACE_EVENT0("chromeos", "WebUILoginView::OnLoginPromoptVisible");
   if (should_emit_login_prompt_visible_) {
     LOG(INFO) << "Login WebUI >> login-prompt-visible";
     chromeos::DBusThreadManager::Get()->GetSessionManagerClient()->

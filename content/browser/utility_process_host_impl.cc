@@ -12,6 +12,7 @@
 #include "content/browser/browser_child_process_host_impl.h"
 #include "content/common/child_process_host_impl.h"
 #include "content/common/utility_messages.h"
+#include "content/public/browser/browser_thread.h"
 #include "content/public/browser/content_browser_client.h"
 #include "content/public/browser/utility_process_host_client.h"
 #include "content/public/common/content_switches.h"
@@ -69,7 +70,7 @@ void UtilityProcessHostImpl::EndBatchMode()  {
   Send(new UtilityMsg_BatchMode_Finished());
 }
 
-void UtilityProcessHostImpl::SetExposedDir(const FilePath& dir) {
+void UtilityProcessHostImpl::SetExposedDir(const base::FilePath& dir) {
   exposed_dir_ = dir;
 }
 
@@ -79,6 +80,10 @@ void UtilityProcessHostImpl::DisableSandbox() {
 
 void UtilityProcessHostImpl::EnableZygote() {
   use_linux_zygote_ = true;
+}
+
+const ChildProcessData& UtilityProcessHostImpl::GetData() {
+  return process_->GetData();
 }
 
 #if defined(OS_POSIX)
@@ -120,7 +125,7 @@ bool UtilityProcessHostImpl::StartProcess() {
     child_flags = ChildProcessHost::CHILD_NORMAL;
 #endif
 
-  FilePath exe_path = ChildProcessHost::GetChildPath(child_flags);
+  base::FilePath exe_path = ChildProcessHost::GetChildPath(child_flags);
   if (exe_path.empty()) {
     NOTREACHED() << "Unable to get utility process binary name.";
     return false;

@@ -163,13 +163,13 @@ void LogUMAHistogramEnumeration(const std::string& name,
   // We can't use the UMA_HISTOGRAM_ENUMERATION macro here because the histogram
   // name can vary over the duration of the program.
   // Note that this leaks memory; that is expected behavior.
-  base::Histogram* counter =
+  base::HistogramBase* counter =
       base::LinearHistogram::FactoryGet(
           name,
           1,
           boundary_value,
           boundary_value + 1,
-          base::Histogram::kUmaTargetedHistogramFlag);
+          base::HistogramBase::kUmaTargetedHistogramFlag);
   counter->Add(sample);
 }
 
@@ -206,7 +206,7 @@ void LogServerExperimentId(const std::string& histogram_name,
   ServerExperiment metric = UNKNOWN_EXPERIMENT;
 
   const std::string default_experiment_name =
-      FormStructure(FormData()).server_experiment_id();
+      FormStructure(FormData(), std::string()).server_experiment_id();
   if (experiment_id.empty())
     metric = NO_EXPERIMENT;
   else if (experiment_id == "ar06")
@@ -258,6 +258,13 @@ void AutofillMetrics::LogCreditCardInfoBarMetric(InfoBarMetric metric) const {
   DCHECK(metric < NUM_INFO_BAR_METRICS);
 
   UMA_HISTOGRAM_ENUMERATION("Autofill.CreditCardInfoBar", metric,
+                            NUM_INFO_BAR_METRICS);
+}
+
+void AutofillMetrics::LogAutocheckoutInfoBarMetric(InfoBarMetric metric) const {
+  DCHECK(metric < NUM_INFO_BAR_METRICS);
+
+  UMA_HISTOGRAM_ENUMERATION("Autofill.AutocheckoutInfoBar", metric,
                             NUM_INFO_BAR_METRICS);
 }
 

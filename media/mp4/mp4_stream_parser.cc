@@ -23,7 +23,8 @@ namespace mp4 {
 // TODO(xhwang): Figure out the init data type appropriately once it's spec'ed.
 static const char kMp4InitDataType[] = "video/mp4";
 
-MP4StreamParser::MP4StreamParser(bool has_sbr)
+MP4StreamParser::MP4StreamParser(const std::set<int>& audio_object_types,
+                                 bool has_sbr)
     : state_(kWaitingForInit),
       moof_head_(0),
       mdat_tail_(0),
@@ -31,6 +32,7 @@ MP4StreamParser::MP4StreamParser(bool has_sbr)
       has_video_(false),
       audio_track_id_(0),
       video_track_id_(0),
+      audio_object_types_(audio_object_types),
       has_sbr_(has_sbr),
       is_audio_track_encrypted_(false),
       is_video_track_encrypted_(false) {
@@ -198,18 +200,43 @@ bool MP4StreamParser::ParseMoov(BoxReader* reader) {
       if (!(entry.format == FOURCC_MP4A ||
             (entry.format == FOURCC_ENCA &&
              entry.sinf.format.format == FOURCC_MP4A))) {
-        LOG(ERROR) << "Unsupported audio format.";
+        MEDIA_LOG(log_cb_) << "Unsupported audio format 0x"
+                           << std::hex << entry.format << " in stsd box.";
         return false;
       }
-      // Check if it is MPEG4 AAC defined in ISO 14496 Part 3.
-      if (entry.esds.object_type != kISO_14496_3) {
-        LOG(ERROR) << "Unsupported audio object type.";
+
+      int audio_type = entry.esds.object_type;
+      DVLOG(1) << "audio_type " << std::hex << audio_type;
+      if (audio_object_types_.find(audio_type) == audio_object_types_.end()) {
+        MEDIA_LOG(log_cb_) << "audio object type 0x" << std::hex << audio_type
+                           << " does not match what is specified in the"
+                           << " mimetype.";
+        return false;
+      }
+
+      // Check if it is MPEG4 AAC defined in ISO 14496 Part 3 or
+      // supported MPEG2 AAC varients.
+      if (audio_type != kISO_14496_3 && audio_type != kISO_13818_7_AAC_LC) {
+        MEDIA_LOG(log_cb_) << "Unsupported audio object type 0x" << std::hex
+                           << audio_type << " in esds.";
+        return false;
+      }
+
+      SampleFormat sample_format;
+      if (entry.samplesize == 8) {
+        sample_format = kSampleFormatU8;
+      } else if (entry.samplesize == 16) {
+        sample_format = kSampleFormatS16;
+      } else if (entry.samplesize == 32) {
+        sample_format = kSampleFormatS32;
+      } else {
+        LOG(ERROR) << "Unsupported sample size.";
         return false;
       }
 
       is_audio_track_encrypted_ = entry.sinf.info.track_encryption.is_encrypted;
       DVLOG(1) << "is_audio_track_encrypted_: " << is_audio_track_encrypted_;
-      audio_config.Initialize(kCodecAAC, entry.samplesize,
+      audio_config.Initialize(kCodecAAC, sample_format,
                               aac.channel_layout(),
                               aac.GetOutputSamplesPerSecond(has_sbr_),
                               NULL, 0, is_audio_track_encrypted_, false);
@@ -225,7 +252,8 @@ bool MP4StreamParser::ParseMoov(BoxReader* reader) {
       if (!(entry.format == FOURCC_AVC1 ||
             (entry.format == FOURCC_ENCV &&
              entry.sinf.format.format == FOURCC_AVC1))) {
-        LOG(ERROR) << "Unsupported video format.";
+        MEDIA_LOG(log_cb_) << "Unsupported video format 0x"
+                           << std::hex << entry.format << " in stsd box.";
         return false;
       }
 

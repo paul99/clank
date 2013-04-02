@@ -8,6 +8,7 @@
 
 #include "base/file_path.h"
 #include "base/memory/scoped_ptr.h"
+#include "base/values.h"
 #include "chrome/browser/extensions/extension_service_unittest.h"
 #include "chrome/browser/extensions/extension_sorting.h"
 #include "chrome/test/base/testing_profile.h"
@@ -42,10 +43,10 @@ class AppsModelBuilderTest : public ExtensionServiceTestBase {
     // Load "app_list" extensions test profile.
     // The test profile has 4 extensions:
     // 1 dummy extension, 2 packaged extension apps and 1 hosted extension app.
-    FilePath source_install_dir = data_dir_
+    base::FilePath source_install_dir = data_dir_
         .AppendASCII("app_list")
         .AppendASCII("Extensions");
-    FilePath pref_path = source_install_dir
+    base::FilePath pref_path = source_install_dir
         .DirName()
         .AppendASCII("Preferences");
     InitializeInstalledExtensionService(pref_path, source_install_dir);
@@ -76,12 +77,25 @@ TEST_F(AppsModelBuilderTest, DisableAndEnable) {
 
   service_->DisableExtension(kHostedAppId,
                              extensions::Extension::DISABLE_NONE);
-  EXPECT_EQ(std::string("Packaged App 1,Packaged App 2"),
+  EXPECT_EQ(std::string("Packaged App 1,Packaged App 2,Hosted App"),
             GetModelContent(model.get()));
 
   service_->EnableExtension(kHostedAppId);
   EXPECT_EQ(std::string("Packaged App 1,Packaged App 2,Hosted App"),
             GetModelContent(model.get()));
+}
+
+TEST_F(AppsModelBuilderTest, Uninstall) {
+  scoped_ptr<app_list::AppListModel::Apps> model(
+      new app_list::AppListModel::Apps);
+  AppsModelBuilder builder(profile_.get(), model.get(), NULL);
+  builder.Build();
+
+  service_->UninstallExtension(kPackagedApp2Id, false, NULL);
+  EXPECT_EQ(std::string("Packaged App 1,Hosted App"),
+            GetModelContent(model.get()));
+
+  loop_.RunUntilIdle();
 }
 
 TEST_F(AppsModelBuilderTest, OrdinalPrefsChange) {
@@ -130,4 +144,24 @@ TEST_F(AppsModelBuilderTest, OnExtensionMoved) {
   service_->OnExtensionMoved(kHostedAppId, std::string(), kPackagedApp1Id);
   EXPECT_EQ(std::string("Hosted App,Packaged App 1,Packaged App 2"),
             GetModelContent(model.get()));
+}
+
+TEST_F(AppsModelBuilderTest, InvalidOrdinal) {
+  // Creates a no-ordinal case.
+  ExtensionSorting* sorting = service_->extension_prefs()->extension_sorting();
+  sorting->ClearOrdinals(kPackagedApp1Id);
+
+  // Creates an corrupted ordinal case.
+  ExtensionScopedPrefs* scoped_prefs = service_->extension_prefs();
+  scoped_prefs->UpdateExtensionPref(
+      kHostedAppId,
+      "page_ordinal",
+      base::Value::CreateStringValue("a corrupted ordinal"));
+
+  scoped_ptr<app_list::AppListModel::Apps> model(
+      new app_list::AppListModel::Apps);
+  AppsModelBuilder builder(profile_.get(), model.get(), NULL);
+
+  // This should not assert or crash.
+  builder.Build();
 }

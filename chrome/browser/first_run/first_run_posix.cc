@@ -5,7 +5,9 @@
 #include "chrome/browser/first_run/first_run.h"
 
 #include "base/path_service.h"
+#include "base/prefs/pref_service.h"
 #include "base/utf_string_conversions.h"
+#include "chrome/browser/browser_process.h"
 #include "chrome/browser/first_run/first_run_internal.h"
 #include "chrome/browser/importer/importer_host.h"
 #include "chrome/browser/importer/importer_list.h"
@@ -14,6 +16,8 @@
 #include "chrome/browser/profiles/profile_manager.h"
 #include "chrome/common/chrome_constants.h"
 #include "chrome/common/chrome_paths.h"
+#include "chrome/common/pref_names.h"
+#include "chrome/installer/util/google_update_settings.h"
 #include "chrome/installer/util/master_preferences.h"
 #include "chrome/installer/util/master_preferences_constants.h"
 
@@ -61,8 +65,20 @@ class ImportEndedObserver : public importer::ImporterProgressObserver {
 namespace first_run {
 namespace internal {
 
-bool GetFirstRunSentinelFilePath(FilePath* path) {
-  FilePath first_run_sentinel;
+void DoPostImportPlatformSpecificTasks() {
+#if !defined(OS_CHROMEOS)
+  // If stats reporting was turned on by the first run dialog then toggle
+  // the pref (on Windows, the download is tagged with enable/disable stats so
+  // this is POSIX-specific).
+  if (GoogleUpdateSettings::GetCollectStatsConsent()) {
+    g_browser_process->local_state()->SetBoolean(
+        prefs::kMetricsReportingEnabled, true);
+  }
+#endif
+}
+
+bool GetFirstRunSentinelFilePath(base::FilePath* path) {
+  base::FilePath first_run_sentinel;
 
   if (!PathService::Get(chrome::DIR_USER_DATA, &first_run_sentinel))
     return false;
@@ -110,7 +126,7 @@ void SetImportPreferencesAndLaunchImport(
       &import_bookmarks_path);
   if (!import_bookmarks_path.empty()) {
     // There are bookmarks to import from a file.
-    FilePath path = FilePath::FromWStringHack(UTF8ToWide(
+    base::FilePath path = base::FilePath::FromWStringHack(UTF8ToWide(
         import_bookmarks_path));
     if (!ImportBookmarks(path)) {
       LOG(WARNING) << "silent bookmark import failed";

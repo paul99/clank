@@ -28,6 +28,7 @@
 #include "chrome/browser/task_manager/task_manager.h"
 #include "chrome/common/chrome_notification_types.h"
 #include "chrome/common/chrome_switches.h"
+#include "chrome/common/extensions/api/i18n/default_locale_handler.h"
 #include "chrome/common/extensions/extension.h"
 #include "chrome/common/extensions/extension_file_util.h"
 #include "chrome/common/extensions/extension_messages.h"
@@ -40,7 +41,7 @@
 #include "content/public/common/process_type.h"
 #include "extensions/common/constants.h"
 #include "googleurl/src/gurl.h"
-#include "third_party/WebKit/Source/WebKit/chromium/public/platform/WebString.h"
+#include "third_party/WebKit/Source/Platform/chromium/public/WebString.h"
 #include "third_party/WebKit/Source/WebKit/chromium/public/WebSecurityOrigin.h"
 #include "webkit/plugins/npapi/plugin_list.h"
 
@@ -173,16 +174,16 @@ net::HostResolver* ChromeRenderMessageFilter::GetHostResolver() {
 }
 
 #if !defined(DISABLE_NACL)
-void ChromeRenderMessageFilter::OnLaunchNaCl(const GURL& manifest_url,
-                                             int render_view_id,
-                                             uint32 permission_bits,
-                                             int socket_count,
-                                             IPC::Message* reply_msg) {
-  NaClProcessHost* host = new NaClProcessHost(manifest_url,
-                                              render_view_id,
-                                              permission_bits,
-                                              off_the_record_);
-  host->Launch(this, socket_count, reply_msg, extension_info_map_);
+void ChromeRenderMessageFilter::OnLaunchNaCl(
+    const nacl::NaClLaunchParams& launch_params,
+    IPC::Message* reply_msg) {
+  NaClProcessHost* host = new NaClProcessHost(
+      GURL(launch_params.manifest_url),
+      launch_params.render_view_id,
+      launch_params.permission_bits,
+      launch_params.uses_irt,
+      off_the_record_);
+  host->Launch(this, reply_msg, extension_info_map_);
 }
 
 void ChromeRenderMessageFilter::OnGetReadonlyPnaclFd(
@@ -315,37 +316,30 @@ void ChromeRenderMessageFilter::OpenChannelToExtensionOnUIThread(
 }
 
 void ChromeRenderMessageFilter::OnOpenChannelToNativeApp(
-    int routing_id, const std::string& source_extension_id,
+    int routing_id,
+    const std::string& source_extension_id,
     const std::string& native_app_name,
-    const std::string& channel_name,
-    const std::string& connect_message, int* port_id) {
+    int* port_id) {
   int port2_id;
   extensions::MessageService::AllocatePortIdPair(port_id, &port2_id);
 
   BrowserThread::PostTask(
       BrowserThread::UI, FROM_HERE,
       base::Bind(&ChromeRenderMessageFilter::OpenChannelToNativeAppOnUIThread,
-                 this,
-                 routing_id,
-                 port2_id,
-                 source_extension_id,
-                 native_app_name,
-                 channel_name,
-                 connect_message));
+                 this, routing_id, port2_id, source_extension_id,
+                 native_app_name));
 }
 
 void ChromeRenderMessageFilter::OpenChannelToNativeAppOnUIThread(
     int source_routing_id,
     int receiver_port_id,
     const std::string& source_extension_id,
-    const std::string& native_app_name,
-    const std::string& channel_name,
-    const std::string& connect_message) {
+    const std::string& native_app_name) {
   DCHECK(BrowserThread::CurrentlyOn(BrowserThread::UI));
   extensions::ExtensionSystem::Get(profile_)->message_service()->
       OpenChannelToNativeApp(
           render_process_id_, source_routing_id, receiver_port_id,
-          source_extension_id, native_app_name, channel_name, connect_message);
+          source_extension_id, native_app_name);
 }
 
 void ChromeRenderMessageFilter::OnOpenChannelToTab(
@@ -378,11 +372,11 @@ void ChromeRenderMessageFilter::OnGetExtensionMessageBundle(
     const std::string& extension_id, IPC::Message* reply_msg) {
   const extensions::Extension* extension =
       extension_info_map_->extensions().GetByID(extension_id);
-  FilePath extension_path;
+  base::FilePath extension_path;
   std::string default_locale;
   if (extension) {
     extension_path = extension->path();
-    default_locale = extension->default_locale();
+    default_locale = extensions::LocaleInfo::GetDefaultLocale(extension);
   }
 
   BrowserThread::PostTask(
@@ -393,7 +387,7 @@ void ChromeRenderMessageFilter::OnGetExtensionMessageBundle(
 }
 
 void ChromeRenderMessageFilter::OnGetExtensionMessageBundleOnFileThread(
-    const FilePath& extension_path,
+    const base::FilePath& extension_path,
     const std::string& extension_id,
     const std::string& default_locale,
     IPC::Message* reply_msg) {

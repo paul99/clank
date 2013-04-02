@@ -5,6 +5,7 @@
 #include "content/browser/web_contents/navigation_controller_impl.h"
 
 #include "base/bind.h"
+#include "base/command_line.h"
 #include "base/file_util.h"
 #include "base/logging.h"
 #include "base/string_number_conversions.h"  // Temporary
@@ -28,15 +29,20 @@
 #include "content/public/browser/navigation_details.h"
 #include "content/public/browser/notification_service.h"
 #include "content/public/browser/notification_types.h"
+#include "content/public/browser/render_widget_host.h"
+#include "content/public/browser/render_widget_host_view.h"
 #include "content/public/browser/storage_partition.h"
 #include "content/public/browser/user_metrics.h"
 #include "content/public/browser/web_contents_delegate.h"
 #include "content/public/common/content_client.h"
 #include "content/public/common/content_constants.h"
+#include "content/public/common/content_switches.h"
 #include "content/public/common/url_constants.h"
 #include "net/base/escape.h"
 #include "net/base/mime_util.h"
 #include "net/base/net_util.h"
+#include "skia/ext/platform_canvas.h"
+#include "ui/gfx/codec/png_codec.h"
 #include "webkit/glue/glue_serialize.h"
 
 namespace content {
@@ -213,7 +219,8 @@ NavigationControllerImpl::NavigationControllerImpl(
       needs_reload_(false),
       is_initial_navigation_(true),
       pending_reload_(NO_RELOAD),
-      get_timestamp_callback_(base::Bind(&base::Time::Now)) {
+      get_timestamp_callback_(base::Bind(&base::Time::Now)),
+      ALLOW_THIS_IN_INITIALIZER_LIST(take_screenshot_factory_(this)) {
   DCHECK(browser_context_);
 }
 
@@ -436,11 +443,12 @@ NavigationEntry* NavigationControllerImpl::GetLastCommittedEntry() const {
 }
 
 bool NavigationControllerImpl::CanViewSource() const {
-  bool is_supported_mime_type = net::IsSupportedNonImageMimeType(
-      web_contents_->GetContentsMimeType().c_str());
+  const std::string& mime_type = web_contents_->GetContentsMimeType();
+  bool is_viewable_mime_type = net::IsSupportedNonImageMimeType(mime_type) &&
+      !net::IsSupportedMediaMimeType(mime_type);
   NavigationEntry* active_entry = GetActiveEntry();
   return active_entry && !active_entry->IsViewSourceMode() &&
-    is_supported_mime_type && !web_contents_->GetInterstitialPage();
+      is_viewable_mime_type && !web_contents_->GetInterstitialPage();
 }
 
 int NavigationControllerImpl::GetLastCommittedEntryIndex() const {
@@ -467,9 +475,155 @@ NavigationEntry* NavigationControllerImpl::GetEntryAtOffset(
 }
 
 int NavigationControllerImpl::GetIndexForOffset(int offset) const {
-  return (transient_entry_index_ != -1) ?
-             transient_entry_index_ + offset :
-             last_committed_entry_index_ + offset;
+  return GetCurrentEntryIndex() + offset;
+}
+
+void NavigationControllerImpl::TakeScreenshot() {
+  static bool overscroll_enabled = CommandLine::ForCurrentProcess()->
+      HasSwitch(switches::kEnableOverscrollHistoryNavigation);
+  if (!overscroll_enabled)
+    return;
+
+  NavigationEntryImpl* entry =
+      NavigationEntryImpl::FromNavigationEntry(GetLastCommittedEntry());
+  if (!entry)
+    return;
+
+  RenderViewHost* render_view_host = web_contents_->GetRenderViewHost();
+  if (!static_cast<RenderViewHostImpl*>
+      (render_view_host)->overscroll_controller()) {
+    return;
+  }
+  content::RenderWidgetHostView* view = render_view_host->GetView();
+  if (!view)
+    return;
+
+  if (!take_screenshot_callback_.is_null())
+    take_screenshot_callback_.Run(render_view_host);
+
+  render_view_host->CopyFromBackingStore(gfx::Rect(),
+      view->GetViewBounds().size(),
+      base::Bind(&NavigationControllerImpl::OnScreenshotTaken,
+                 take_screenshot_factory_.GetWeakPtr(),
+                 entry->GetUniqueID()));
+}
+
+void NavigationControllerImpl::OnScreenshotTaken(
+    int unique_id,
+    bool success,
+    const SkBitmap& bitmap) {
+  NavigationEntryImpl* entry = NULL;
+  for (NavigationEntries::iterator i = entries_.begin();
+       i != entries_.end();
+       ++i) {
+    if ((*i)->GetUniqueID() == unique_id) {
+      entry = (*i).get();
+      break;
+    }
+  }
+
+  if (!entry) {
+    LOG(ERROR) << "Invalid entry with unique id: " << unique_id;
+    return;
+  }
+
+  if (!success || bitmap.empty() || bitmap.isNull()) {
+    ClearScreenshot(entry);
+    return;
+  }
+
+  std::vector<unsigned char> data;
+  if (gfx::PNGCodec::EncodeBGRASkBitmap(bitmap, true, &data)) {
+    entry->SetScreenshotPNGData(data);
+    PurgeScreenshotsIfNecessary();
+  } else {
+    ClearScreenshot(entry);
+  }
+}
+
+bool NavigationControllerImpl::ClearScreenshot(NavigationEntryImpl* entry) {
+  if (!entry->screenshot())
+    return false;
+
+  entry->SetScreenshotPNGData(std::vector<unsigned char>());
+  return true;
+}
+
+void NavigationControllerImpl::PurgeScreenshotsIfNecessary() {
+  // Allow only a certain number of entries to keep screenshots.
+  const int kMaxScreenshots = 10;
+  int screenshot_count = GetScreenshotCount();
+  if (screenshot_count < kMaxScreenshots)
+    return;
+
+  const int current = GetCurrentEntryIndex();
+  const int num_entries = GetEntryCount();
+  int available_slots = kMaxScreenshots;
+  if (NavigationEntryImpl::FromNavigationEntry(
+          GetEntryAtIndex(current))->screenshot())
+    --available_slots;
+
+  // Keep screenshots closer to the current navigation entry, and purge the ones
+  // that are farther away from it. So in each step, look at the entries at
+  // each offset on both the back and forward history, and start counting them
+  // to make sure that the correct number of screenshots are kept in memory.
+  // Note that it is possible for some entries to be missing screenshots (e.g.
+  // when taking the screenshot failed for some reason). So there may be a state
+  // where there are a lot of entries in the back history, but none of them has
+  // any screenshot. In such cases, keep the screenshots for |kMaxScreenshots|
+  // entries in the forward history list.
+  int back = current - 1;
+  int forward = current + 1;
+  while (available_slots > 0 && (back >= 0 || forward < num_entries)) {
+    if (back >= 0) {
+      NavigationEntryImpl* entry = NavigationEntryImpl::FromNavigationEntry(
+          GetEntryAtIndex(back));
+      if (entry->screenshot())
+        --available_slots;
+      --back;
+    }
+
+    if (available_slots > 0 && forward < num_entries) {
+      NavigationEntryImpl* entry = NavigationEntryImpl::FromNavigationEntry(
+          GetEntryAtIndex(forward));
+      if (entry->screenshot())
+        --available_slots;
+      ++forward;
+    }
+  }
+
+  // Purge any screenshot at |back| or lower indices, and |forward| or higher
+  // indices.
+
+  while (screenshot_count > kMaxScreenshots && back >= 0) {
+    NavigationEntryImpl* entry = NavigationEntryImpl::FromNavigationEntry(
+        GetEntryAtIndex(back));
+    if (ClearScreenshot(entry))
+      --screenshot_count;
+    --back;
+  }
+
+  while (screenshot_count > kMaxScreenshots && forward < num_entries) {
+    NavigationEntryImpl* entry = NavigationEntryImpl::FromNavigationEntry(
+        GetEntryAtIndex(forward));
+    if (ClearScreenshot(entry))
+      --screenshot_count;
+    ++forward;
+  }
+  CHECK_GE(screenshot_count, 0);
+  CHECK_LE(screenshot_count, kMaxScreenshots);
+}
+
+int NavigationControllerImpl::GetScreenshotCount() const {
+  int count = 0;
+  for (NavigationEntries::const_iterator it = entries_.begin();
+       it != entries_.end(); ++it) {
+    NavigationEntryImpl* entry =
+        NavigationEntryImpl::FromNavigationEntry(it->get());
+    if (entry->screenshot())
+      count++;
+  }
+  return count;
 }
 
 bool NavigationControllerImpl::CanGoBack() const {
@@ -692,7 +846,6 @@ void NavigationControllerImpl::DocumentLoadedInFrame() {
 bool NavigationControllerImpl::RendererDidNavigate(
     const ViewHostMsg_FrameNavigate_Params& params,
     LoadCommittedDetails* details) {
-
   // Save the previous state before we clobber it.
   if (GetLastCommittedEntry()) {
     details->previous_url = GetLastCommittedEntry()->GetURL();
@@ -1286,6 +1439,16 @@ void NavigationControllerImpl::PruneAllButActive() {
   }
 }
 
+// Implemented here and not in NavigationEntry because this controller caches
+// the total number of screen shots across all entries.
+void NavigationControllerImpl::ClearAllScreenshots() {
+  for (NavigationEntries::iterator it = entries_.begin();
+       it != entries_.end();
+       ++it)
+    ClearScreenshot(it->get());
+  DCHECK_EQ(GetScreenshotCount(), 0);
+}
+
 void NavigationControllerImpl::SetSessionStorageNamespace(
     const std::string& partition_id,
     SessionStorageNamespace* session_storage_namespace) {
@@ -1615,6 +1778,11 @@ void NavigationControllerImpl::InsertEntriesFrom(
 void NavigationControllerImpl::SetGetTimestampCallbackForTest(
     const base::Callback<base::Time()>& get_timestamp_callback) {
   get_timestamp_callback_ = get_timestamp_callback;
+}
+
+void NavigationControllerImpl::SetTakeScreenshotCallbackForTest(
+    const base::Callback<void(RenderViewHost*)>& take_screenshot_callback) {
+  take_screenshot_callback_ = take_screenshot_callback;
 }
 
 }  // namespace content

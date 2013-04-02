@@ -46,6 +46,12 @@ uint64_t CpuFeatures::supported_ = CpuFeatures::kDefaultCpuFeatures;
 uint64_t CpuFeatures::found_by_runtime_probing_ = 0;
 
 
+ExternalReference ExternalReference::cpu_features() {
+  ASSERT(CpuFeatures::initialized_);
+  return ExternalReference(&CpuFeatures::supported_);
+}
+
+
 void CpuFeatures::Probe() {
   ASSERT(supported_ == CpuFeatures::kDefaultCpuFeatures);
 #ifdef DEBUG
@@ -110,7 +116,7 @@ void CpuFeatures::Probe() {
     __ or_(rdi, rcx);
 
     // Get the sahf supported flag, from CPUID(0x80000001)
-    __ movq(rax, 0x80000001, RelocInfo::NONE);
+    __ movq(rax, 0x80000001, RelocInfo::NONE64);
     __ cpuid();
   }
   supported_ = kDefaultCpuFeatures;
@@ -173,7 +179,7 @@ void RelocInfo::PatchCodeWithCall(Address target, int guard_bytes) {
 #endif
 
   // Patch the code.
-  patcher.masm()->movq(r10, target, RelocInfo::NONE);
+  patcher.masm()->movq(r10, target, RelocInfo::NONE64);
   patcher.masm()->call(r10);
 
   // Check that the size of the code generated is as expected.
@@ -201,7 +207,8 @@ void RelocInfo::PatchCode(byte* instructions, int instruction_count) {
 // -----------------------------------------------------------------------------
 // Register constants.
 
-const int Register::kRegisterCodeByAllocationIndex[kNumAllocatableRegisters] = {
+const int
+    Register::kRegisterCodeByAllocationIndex[kMaxNumAllocatableRegisters] = {
   // rax, rbx, rdx, rcx, rdi, r8, r9, r11, r14, r15
   0, 3, 2, 1, 7, 8, 9, 11, 14, 15
 };
@@ -1497,13 +1504,12 @@ void Assembler::movq(Register dst, void* value, RelocInfo::Mode rmode) {
 
 void Assembler::movq(Register dst, int64_t value, RelocInfo::Mode rmode) {
   // Non-relocatable values might not need a 64-bit representation.
-  if (rmode == RelocInfo::NONE) {
-    // Sadly, there is no zero or sign extending move for 8-bit immediates.
-    if (is_int32(value)) {
-      movq(dst, Immediate(static_cast<int32_t>(value)));
-      return;
-    } else if (is_uint32(value)) {
+  if (RelocInfo::IsNone(rmode)) {
+    if (is_uint32(value)) {
       movl(dst, Immediate(static_cast<int32_t>(value)));
+      return;
+    } else if (is_int32(value)) {
+      movq(dst, Immediate(static_cast<int32_t>(value)));
       return;
     }
     // Value cannot be represented by 32 bits, so do a full 64 bit immediate
@@ -1557,11 +1563,11 @@ void Assembler::movl(const Operand& dst, Label* src) {
 void Assembler::movq(Register dst, Handle<Object> value, RelocInfo::Mode mode) {
   // If there is no relocation info, emit the value of the handle efficiently
   // (possibly using less that 8 bytes for the value).
-  if (mode == RelocInfo::NONE) {
+  if (RelocInfo::IsNone(mode)) {
     // There is no possible reason to store a heap pointer without relocation
     // info, so it must be a smi.
     ASSERT(value->IsSmi());
-    movq(dst, reinterpret_cast<int64_t>(*value), RelocInfo::NONE);
+    movq(dst, reinterpret_cast<int64_t>(*value), RelocInfo::NONE64);
   } else {
     EnsureSpace ensure_space(this);
     ASSERT(value->IsHeapObject());
@@ -1642,6 +1648,15 @@ void Assembler::movzxwl(Register dst, const Operand& src) {
   emit(0x0F);
   emit(0xB7);
   emit_operand(dst, src);
+}
+
+
+void Assembler::movzxwl(Register dst, Register src) {
+  EnsureSpace ensure_space(this);
+  emit_optional_rex_32(dst, src);
+  emit(0x0F);
+  emit(0xB7);
+  emit_modrm(dst, src);
 }
 
 
@@ -2994,7 +3009,7 @@ void Assembler::dd(uint32_t data) {
 // Relocation information implementations.
 
 void Assembler::RecordRelocInfo(RelocInfo::Mode rmode, intptr_t data) {
-  ASSERT(rmode != RelocInfo::NONE);
+  ASSERT(!RelocInfo::IsNone(rmode));
   // Don't record external references unless the heap will be serialized.
   if (rmode == RelocInfo::EXTERNAL_REFERENCE) {
 #ifdef DEBUG

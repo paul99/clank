@@ -44,14 +44,6 @@ namespace content {
 
 namespace {
 
-// A multiplier for slow tests. We generally avoid multiplying
-// test timeouts by any constants. Here it is used as last resort
-// to implement the SLOW_ test prefix.
-const int kSlowTestTimeoutMultiplier = 5;
-
-// Tests with this prefix have a longer timeout, see above.
-const char kSlowTestPrefix[] = "SLOW_";
-
 // Tests with this prefix run before the same test without it, and use the same
 // profile. i.e. Foo.PRE_Test runs and then Foo.Test. This allows writing tests
 // that span browser restarts.
@@ -307,19 +299,6 @@ bool MatchesFilter(const std::string& name, const std::string& filter) {
   }
 }
 
-base::TimeDelta GetTestTerminationTimeout(const std::string& test_name,
-                                          base::TimeDelta default_timeout) {
-  base::TimeDelta timeout = default_timeout;
-
-  // Make it possible for selected tests to request a longer timeout.
-  // Generally tests should really avoid doing too much, and splitting
-  // a test instead of using SLOW prefix is strongly preferred.
-  if (test_name.find(kSlowTestPrefix) != std::string::npos)
-    timeout *= kSlowTestTimeoutMultiplier;
-
-  return timeout;
-}
-
 int RunTestInternal(const testing::TestCase* test_case,
                     const std::string& test_name,
                     CommandLine* command_line,
@@ -378,12 +357,11 @@ int RunTestInternal(const testing::TestCase* test_case,
   if (!base::LaunchProcess(new_cmd_line, options, &process_handle))
     return -1;
 
-  base::TimeDelta timeout = GetTestTerminationTimeout(
-      test_name, default_timeout);
-
   int exit_code = 0;
-  if (!base::WaitForExitCodeWithTimeout(process_handle, &exit_code, timeout)) {
-    LOG(ERROR) << "Test timeout (" << timeout.InMilliseconds()
+  if (!base::WaitForExitCodeWithTimeout(process_handle,
+                                        &exit_code,
+                                        default_timeout)) {
+    LOG(ERROR) << "Test timeout (" << default_timeout.InMilliseconds()
                << " ms) exceeded for " << test_name;
 
     if (was_timeout)
@@ -443,10 +421,6 @@ int RunTest(TestLauncherDelegate* launcher_delegate,
        iter != switches.end(); ++iter) {
     new_cmd_line.AppendSwitchNative((*iter).first, (*iter).second);
   }
-
-  // Do not let the child ignore failures.  We need to propagate the
-  // failure status back to the parent.
-  new_cmd_line.AppendSwitch(base::TestSuite::kStrictFailureHandling);
 
   base::ScopedTempDir temp_dir;
   // Create a new data dir and pass it to the child.
@@ -545,7 +519,7 @@ bool RunTests(TestLauncherDelegate* launcher_delegate,
         continue;
       }
 
-      base::Time start_time = base::Time::Now();
+      base::TimeTicks start_time = base::TimeTicks::Now();
       ++test_run_count;
       bool was_timeout = false;
       int exit_code = RunTest(launcher_delegate,
@@ -555,22 +529,18 @@ bool RunTests(TestLauncherDelegate* launcher_delegate,
                               &was_timeout);
       if (exit_code == 0) {
         // Test passed.
-        printer.OnTestEnd(test_info->name(), test_case->name(), true, false,
-                          false,
-                          (base::Time::Now() - start_time).InMillisecondsF());
+        printer.OnTestEnd(
+            test_info->name(), test_case->name(), true, false,
+            false,
+            (base::TimeTicks::Now() - start_time).InMillisecondsF());
       } else {
         failed_tests.push_back(test_name);
 
         bool ignore_failure = false;
-
-        // Never ignore crashes or hangs/timeouts, they are serious and should
-        // always be visible.
-        if (exit_code != -1 && !was_timeout)
-          ignore_failure = base::TestSuite::ShouldIgnoreFailure(*test_info);
-
-        printer.OnTestEnd(test_info->name(), test_case->name(), true, true,
-                          ignore_failure,
-                          (base::Time::Now() - start_time).InMillisecondsF());
+        printer.OnTestEnd(
+            test_info->name(), test_case->name(), true, true,
+            ignore_failure,
+            (base::TimeTicks::Now() - start_time).InMillisecondsF());
         if (ignore_failure)
           ignored_tests.insert(test_name);
 

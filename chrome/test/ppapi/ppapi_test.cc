@@ -15,7 +15,6 @@
 #include "chrome/browser/api/infobars/confirm_infobar_delegate.h"
 #include "chrome/browser/content_settings/host_content_settings_map.h"
 #include "chrome/browser/infobars/infobar.h"
-#include "chrome/browser/infobars/infobar_tab_helper.h"
 #include "chrome/browser/profiles/profile.h"
 #include "chrome/browser/ui/browser.h"
 #include "chrome/browser/ui/browser_tabstrip.h"
@@ -35,7 +34,6 @@
 #include "content/public/test/browser_test_utils.h"
 #include "net/base/net_util.h"
 #include "net/base/test_data_directory.h"
-#include "net/test/test_server.h"
 #include "ppapi/shared_impl/ppapi_switches.h"
 #include "ui/gl/gl_switches.h"
 #include "webkit/plugins/plugin_switches.h"
@@ -142,7 +140,7 @@ void PPAPITestBase::SetUpOnMainThread() {
 }
 
 GURL PPAPITestBase::GetTestFileUrl(const std::string& test_case) {
-  FilePath test_path;
+  base::FilePath test_path;
   EXPECT_TRUE(PathService::Get(base::DIR_SOURCE_ROOT, &test_path));
   test_path = test_path.Append(FILE_PATH_LITERAL("ppapi"));
   test_path = test_path.Append(FILE_PATH_LITERAL("tests"));
@@ -172,33 +170,59 @@ void PPAPITestBase::RunTestAndReload(const std::string& test_case) {
 }
 
 void PPAPITestBase::RunTestViaHTTP(const std::string& test_case) {
-  FilePath document_root;
+  base::FilePath document_root;
   ASSERT_TRUE(ui_test_utils::GetRelativeBuildDirectory(&document_root));
-  RunHTTPTestServer(document_root, test_case, "");
+  base::FilePath http_document_root;
+  ASSERT_TRUE(ui_test_utils::GetRelativeBuildDirectory(&http_document_root));
+  net::TestServer http_server(net::TestServer::TYPE_HTTP,
+                              net::TestServer::kLocalhost,
+                              document_root);
+  ASSERT_TRUE(http_server.Start());
+  RunTestURL(GetTestURL(http_server, test_case, ""));
 }
 
 void PPAPITestBase::RunTestWithSSLServer(const std::string& test_case) {
-  FilePath document_root;
-  ASSERT_TRUE(ui_test_utils::GetRelativeBuildDirectory(&document_root));
-  net::TestServer test_server(net::TestServer::TYPE_HTTPS,
-                              net::BaseTestServer::SSLOptions(),
-                              document_root);
-  ASSERT_TRUE(test_server.Start());
-  uint16_t port = test_server.host_port_pair().port();
-  RunHTTPTestServer(document_root, test_case,
-                    StringPrintf("ssl_server_port=%d", port));
+  base::FilePath http_document_root;
+  ASSERT_TRUE(ui_test_utils::GetRelativeBuildDirectory(&http_document_root));
+  net::TestServer http_server(net::TestServer::TYPE_HTTP,
+                              net::TestServer::kLocalhost,
+                              http_document_root);
+  net::TestServer ssl_server(net::TestServer::TYPE_HTTPS,
+                             net::BaseTestServer::SSLOptions(),
+                             http_document_root);
+  // Start the servers in parallel.
+  ASSERT_TRUE(http_server.StartInBackground());
+  ASSERT_TRUE(ssl_server.StartInBackground());
+  // Wait until they are both finished before continuing.
+  ASSERT_TRUE(http_server.BlockUntilStarted());
+  ASSERT_TRUE(ssl_server.BlockUntilStarted());
+
+  uint16_t port = ssl_server.host_port_pair().port();
+  RunTestURL(GetTestURL(http_server,
+                        test_case,
+                        StringPrintf("ssl_server_port=%d", port)));
 }
 
 void PPAPITestBase::RunTestWithWebSocketServer(const std::string& test_case) {
-  net::TestServer server(net::TestServer::TYPE_WS,
-                         net::TestServer::kLocalhost,
-                         net::GetWebSocketTestDataDirectory());
-  ASSERT_TRUE(server.Start());
-  uint16_t port = server.host_port_pair().port();
-  FilePath http_document_root;
+  base::FilePath http_document_root;
   ASSERT_TRUE(ui_test_utils::GetRelativeBuildDirectory(&http_document_root));
-  RunHTTPTestServer(http_document_root, test_case,
-                    StringPrintf("websocket_port=%d", port));
+  net::TestServer http_server(net::TestServer::TYPE_HTTP,
+                              net::TestServer::kLocalhost,
+                              http_document_root);
+  net::TestServer ws_server(net::TestServer::TYPE_WS,
+                            net::TestServer::kLocalhost,
+                            net::GetWebSocketTestDataDirectory());
+  // Start the servers in parallel.
+  ASSERT_TRUE(http_server.StartInBackground());
+  ASSERT_TRUE(ws_server.StartInBackground());
+  // Wait until they are both finished before continuing.
+  ASSERT_TRUE(http_server.BlockUntilStarted());
+  ASSERT_TRUE(ws_server.BlockUntilStarted());
+
+  uint16_t port = ws_server.host_port_pair().port();
+  RunTestURL(GetTestURL(http_server,
+                        test_case,
+                        StringPrintf("websocket_port=%d", port)));
 }
 
 void PPAPITestBase::RunTestIfAudioOutputAvailable(
@@ -237,20 +261,15 @@ void PPAPITestBase::RunTestURL(const GURL& test_url) {
   EXPECT_STREQ("PASS", handler.message().c_str());
 }
 
-void PPAPITestBase::RunHTTPTestServer(
-    const FilePath& document_root,
+GURL PPAPITestBase::GetTestURL(
+    const net::TestServer& http_server,
     const std::string& test_case,
     const std::string& extra_params) {
-  net::TestServer test_server(net::TestServer::TYPE_HTTP,
-                              net::TestServer::kLocalhost,
-                              document_root);
-  ASSERT_TRUE(test_server.Start());
   std::string query = BuildQuery("files/test_case.html?", test_case);
   if (!extra_params.empty())
     query = StringPrintf("%s&%s", query.c_str(), extra_params.c_str());
 
-  GURL url = test_server.GetURL(query);
-  RunTestURL(url);
+  return http_server.GetURL(query);
 }
 
 PPAPITest::PPAPITest() {
@@ -262,12 +281,12 @@ void PPAPITest::SetUpCommandLine(CommandLine* command_line) {
   // Append the switch to register the pepper plugin.
   // library name = <out dir>/<test_name>.<library_extension>
   // MIME type = application/x-ppapi-<test_name>
-  FilePath plugin_dir;
+  base::FilePath plugin_dir;
   EXPECT_TRUE(PathService::Get(base::DIR_MODULE, &plugin_dir));
 
-  FilePath plugin_lib = plugin_dir.Append(library_name);
+  base::FilePath plugin_lib = plugin_dir.Append(library_name);
   EXPECT_TRUE(file_util::PathExists(plugin_lib));
-  FilePath::StringType pepper_plugin = plugin_lib.value();
+  base::FilePath::StringType pepper_plugin = plugin_lib.value();
   pepper_plugin.append(FILE_PATH_LITERAL(";application/x-ppapi-tests"));
   command_line->AppendSwitchNative(switches::kRegisterPepperPlugins,
                                    pepper_plugin);
@@ -292,7 +311,7 @@ void OutOfProcessPPAPITest::SetUpCommandLine(CommandLine* command_line) {
 void PPAPINaClTest::SetUpCommandLine(CommandLine* command_line) {
   PPAPITestBase::SetUpCommandLine(command_line);
 
-  FilePath plugin_lib;
+  base::FilePath plugin_lib;
   EXPECT_TRUE(PathService::Get(chrome::FILE_NACL_PLUGIN, &plugin_lib));
   EXPECT_TRUE(file_util::PathExists(plugin_lib));
 
@@ -319,7 +338,7 @@ void PPAPINaClTestDisallowedSockets::SetUpCommandLine(
     CommandLine* command_line) {
   PPAPITestBase::SetUpCommandLine(command_line);
 
-  FilePath plugin_lib;
+  base::FilePath plugin_lib;
   EXPECT_TRUE(PathService::Get(chrome::FILE_NACL_PLUGIN, &plugin_lib));
   EXPECT_TRUE(file_util::PathExists(plugin_lib));
 

@@ -73,9 +73,19 @@ void NaClSignalContextGetCurrentThread(const struct NaClSignalContext *sig_ctx,
                                        int *is_untrusted,
                                        struct NaClAppThread **result_thread) {
 #if NACL_ARCH(NACL_BUILD_ARCH) == NACL_x86 && NACL_BUILD_SUBARCH == 32
-  /* For x86-32, if %cs does not match, it is untrusted code. */
+  /*
+   * For x86-32, if %cs does not match, it is untrusted code.
+   *
+   * Note that this check may not be valid on Mac OS X, because
+   * thread_get_state() does not return the value of NaClGetGlobalCs()
+   * for a thread suspended inside a syscall.
+   * TODO(mseaborn): Don't define this function on Mac OS X.  We can
+   * compile this conditionally when NaCl's POSIX signal handler is no
+   * longer built for Mac.
+   * See https://code.google.com/p/nativeclient/issues/detail?id=2664
+   */
   *is_untrusted = (NaClGetGlobalCs() != sig_ctx->cs);
-  *result_thread = nacl_thread[sig_ctx->gs >> 3];
+  *result_thread = NaClAppThreadGetFromIndex(sig_ctx->gs >> 3);
 #elif (NACL_ARCH(NACL_BUILD_ARCH) == NACL_x86 && NACL_BUILD_SUBARCH == 64) || \
       NACL_ARCH(NACL_BUILD_ARCH) == NACL_arm || \
       NACL_ARCH(NACL_BUILD_ARCH) == NACL_mips
@@ -84,7 +94,8 @@ void NaClSignalContextGetCurrentThread(const struct NaClSignalContext *sig_ctx,
     *is_untrusted = 0;
     *result_thread = NULL;
   } else {
-    struct NaClAppThread *thread = nacl_thread[current_thread_index];
+    struct NaClAppThread *thread =
+        NaClAppThreadGetFromIndex(current_thread_index);
     /*
      * Get the address of an arbitrary local, stack-allocated variable,
      * just for the purpose of doing a sanity check.
@@ -113,6 +124,18 @@ void NaClSignalContextGetCurrentThread(const struct NaClSignalContext *sig_ctx,
 #else
 # error Unsupported architecture
 #endif
+
+  /*
+   * Trusted code could accidentally jump into sandbox address space,
+   * so don't rely on prog_ctr on its own for determining whether a
+   * crash comes from untrusted code.  We don't want to restore
+   * control to an untrusted exception handler if trusted code
+   * crashes.
+   */
+  if (*is_untrusted &&
+      ((*result_thread)->suspend_state & NACL_APP_THREAD_UNTRUSTED) == 0) {
+    *is_untrusted = 0;
+  }
 }
 
 /*
@@ -121,11 +144,44 @@ void NaClSignalContextGetCurrentThread(const struct NaClSignalContext *sig_ctx,
  * Like NaClSignalContextGetCurrentThread(), this should only be
  * called from the thread in which the signal occurred.
  */
-int NaClSignalContextIsUntrusted(const struct NaClSignalContext *sig_ctx) {
+int NaClSignalContextIsUntrustedForCurrentThread(
+    const struct NaClSignalContext *sig_ctx) {
   struct NaClAppThread *thread_unused;
   int is_untrusted;
   NaClSignalContextGetCurrentThread(sig_ctx, &is_untrusted, &thread_unused);
   return is_untrusted;
+}
+
+/*
+ * This function takes the register state (sig_ctx) for a thread
+ * (natp) that has been suspended and returns whether the thread was
+ * suspended while executing untrusted code.
+ */
+int NaClSignalContextIsUntrusted(struct NaClAppThread *natp,
+                                 const struct NaClSignalContext *sig_ctx) {
+  uint32_t prog_ctr;
+
+#if NACL_ARCH(NACL_BUILD_ARCH) == NACL_x86 && NACL_BUILD_SUBARCH == 32
+  /*
+   * Note that we do not check "sig_ctx != NaClGetGlobalCs()".  On Mac
+   * OS X, if a thread is suspended while in a syscall,
+   * thread_get_state() returns cs=0x7 rather than cs=0x17 (the normal
+   * cs value for trusted code).
+   */
+  if (sig_ctx->cs != natp->user.cs)
+    return 0;
+#elif (NACL_ARCH(NACL_BUILD_ARCH) == NACL_x86 && NACL_BUILD_SUBARCH == 64) || \
+      NACL_ARCH(NACL_BUILD_ARCH) == NACL_arm || \
+      NACL_ARCH(NACL_BUILD_ARCH) == NACL_mips
+  if (!NaClIsUserAddr(natp->nap, sig_ctx->prog_ctr))
+    return 0;
+#else
+# error Unsupported architecture
+#endif
+
+  prog_ctr = (uint32_t) sig_ctx->prog_ctr;
+  return (prog_ctr < NACL_TRAMPOLINE_START ||
+          prog_ctr >= NACL_TRAMPOLINE_END);
 }
 
 enum NaClSignalResult NaClSignalHandleNone(int signal, void *ctx) {
@@ -144,7 +200,7 @@ enum NaClSignalResult NaClSignalHandleUntrusted(int signal, void *ctx) {
    * simulate normal OS behavior
    */
   NaClSignalContextFromHandler(&sig_ctx, ctx);
-  if (NaClSignalContextIsUntrusted(&sig_ctx)) {
+  if (NaClSignalContextIsUntrustedForCurrentThread(&sig_ctx)) {
     SNPRINTF(tmp, sizeof(tmp), "\n** Signal %d from untrusted code: "
              "pc=%" NACL_PRIxNACL_REG "\n", signal, sig_ctx.prog_ctr);
     NaClSignalErrorMessage(tmp);

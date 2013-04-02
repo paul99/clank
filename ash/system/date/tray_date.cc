@@ -19,6 +19,9 @@
 #include "base/utf_string_conversions.h"
 #include "grit/ash_resources.h"
 #include "grit/ash_strings.h"
+#include "third_party/icu/public/i18n/unicode/datefmt.h"
+#include "third_party/icu/public/i18n/unicode/fieldpos.h"
+#include "third_party/icu/public/i18n/unicode/fmtable.h"
 #include "third_party/skia/include/core/SkRect.h"
 #include "ui/base/l10n/l10n_util.h"
 #include "ui/base/resource/resource_bundle.h"
@@ -34,9 +37,6 @@
 #include "ui/views/painter.h"
 #include "ui/views/view.h"
 #include "ui/views/widget/widget.h"
-#include "unicode/datefmt.h"
-#include "unicode/fieldpos.h"
-#include "unicode/fmtable.h"
 
 namespace {
 
@@ -145,7 +145,8 @@ TrayDate::~TrayDate() {
 views::View* TrayDate::CreateTrayView(user::LoginStatus status) {
   CHECK(time_tray_ == NULL);
   ClockLayout clock_layout =
-      system_tray()->shelf_alignment() == SHELF_ALIGNMENT_BOTTOM ?
+      (system_tray()->shelf_alignment() == SHELF_ALIGNMENT_BOTTOM ||
+       system_tray()->shelf_alignment() == SHELF_ALIGNMENT_TOP) ?
           HORIZONTAL_CLOCK : VERTICAL_CLOCK;
   time_tray_ = new tray::TimeView(clock_layout);
   views::View* view = new TrayItemView(this);
@@ -176,8 +177,9 @@ void TrayDate::UpdateAfterLoginStatusChange(user::LoginStatus status) {
 
 void TrayDate::UpdateAfterShelfAlignmentChange(ShelfAlignment alignment) {
   if (time_tray_) {
-    ClockLayout clock_layout = alignment == SHELF_ALIGNMENT_BOTTOM ?
-        HORIZONTAL_CLOCK : VERTICAL_CLOCK;
+    ClockLayout clock_layout = (alignment == SHELF_ALIGNMENT_BOTTOM ||
+        alignment == SHELF_ALIGNMENT_TOP) ?
+            HORIZONTAL_CLOCK : VERTICAL_CLOCK;
     time_tray_->UpdateClockLayout(clock_layout);
   }
 }

@@ -8,6 +8,7 @@
 #include "base/bind.h"
 #include "base/command_line.h"
 #include "base/message_loop.h"
+#include "base/prefs/pref_service.h"
 #include "base/string_util.h"
 #include "base/utf_string_conversions.h"
 #include "base/values.h"
@@ -19,7 +20,6 @@
 #include "chrome/browser/notifications/desktop_notification_service.h"
 #include "chrome/browser/notifications/notification.h"
 #include "chrome/browser/notifications/notification_ui_manager.h"
-#include "chrome/browser/prefs/pref_service.h"
 #include "chrome/browser/prefs/scoped_user_pref_update.h"
 #include "chrome/browser/profiles/profile.h"
 #include "chrome/browser/ui/browser.h"
@@ -29,8 +29,8 @@
 #include "chrome/common/chrome_notification_types.h"
 #include "chrome/common/chrome_switches.h"
 #include "chrome/common/extensions/extension.h"
-#include "chrome/common/extensions/extension_icon_set.h"
 #include "chrome/common/extensions/extension_constants.h"
+#include "chrome/common/extensions/extension_icon_set.h"
 #include "chrome/common/pref_names.h"
 #include "content/public/browser/notification_service.h"
 #include "content/public/browser/site_instance.h"
@@ -65,6 +65,7 @@ class CrashNotificationDelegate : public NotificationDelegate {
                             const Extension* extension)
       : profile_(profile),
         is_hosted_app_(extension->is_hosted_app()),
+        is_platform_app_(extension->is_platform_app()),
         extension_id_(extension->id()) {
   }
 
@@ -83,6 +84,9 @@ class CrashNotificationDelegate : public NotificationDelegate {
           BackgroundContentsServiceFactory::GetForProfile(profile_);
       if (!service->GetAppBackgroundContents(ASCIIToUTF16(extension_id_)))
         service->LoadBackgroundContentsForExtension(profile_, extension_id_);
+    } else if (is_platform_app_) {
+      extensions::ExtensionSystem::Get(profile_)->extension_service()->
+          RestartExtension(extension_id_);
     } else {
       extensions::ExtensionSystem::Get(profile_)->extension_service()->
           ReloadExtension(extension_id_);
@@ -106,6 +110,7 @@ class CrashNotificationDelegate : public NotificationDelegate {
 
   Profile* profile_;
   bool is_hosted_app_;
+  bool is_platform_app_;
   std::string extension_id_;
 
   DISALLOW_COPY_AND_ASSIGN(CrashNotificationDelegate);

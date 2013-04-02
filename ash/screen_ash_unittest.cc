@@ -25,20 +25,26 @@ TEST_F(ScreenAshTest, Bounds) {
   Shell::GetPrimaryRootWindowController()->SetShelfAutoHideBehavior(
       ash::SHELF_AUTO_HIDE_BEHAVIOR_ALWAYS);
 
-  views::Widget* primary =
-      views::Widget::CreateWindowWithBounds(NULL, gfx::Rect(10, 10, 100, 100));
+  views::Widget* primary = views::Widget::CreateWindowWithContextAndBounds(
+      NULL, CurrentContext(), gfx::Rect(10, 10, 100, 100));
   primary->Show();
-  views::Widget* secondary =
-      views::Widget::CreateWindowWithBounds(NULL, gfx::Rect(610, 10, 100, 100));
+  views::Widget* secondary = views::Widget::CreateWindowWithContextAndBounds(
+      NULL, CurrentContext(), gfx::Rect(610, 10, 100, 100));
   secondary->Show();
 
   // Maximized bounds
   EXPECT_EQ("0,0 600x597",
             ScreenAsh::GetMaximizedWindowBoundsInParent(
                 primary->GetNativeView()).ToString());
-  EXPECT_EQ("0,0 500x500",
-            ScreenAsh::GetMaximizedWindowBoundsInParent(
-                secondary->GetNativeView()).ToString());
+  if (Shell::IsLauncherPerDisplayEnabled()) {
+    EXPECT_EQ("0,0 500x452",
+              ScreenAsh::GetMaximizedWindowBoundsInParent(
+                  secondary->GetNativeView()).ToString());
+  } else {
+    EXPECT_EQ("0,0 500x500",
+              ScreenAsh::GetMaximizedWindowBoundsInParent(
+                  secondary->GetNativeView()).ToString());
+  }
 
   // Display bounds
   EXPECT_EQ("0,0 600x600",
@@ -52,19 +58,25 @@ TEST_F(ScreenAshTest, Bounds) {
   EXPECT_EQ("0,0 600x597",
             ScreenAsh::GetDisplayWorkAreaBoundsInParent(
                 primary->GetNativeView()).ToString());
-  EXPECT_EQ("0,0 500x500",
-            ScreenAsh::GetDisplayWorkAreaBoundsInParent(
-                secondary->GetNativeView()).ToString());
+  if (Shell::IsLauncherPerDisplayEnabled()) {
+    EXPECT_EQ("0,0 500x452",
+              ScreenAsh::GetDisplayWorkAreaBoundsInParent(
+                  secondary->GetNativeView()).ToString());
+  } else {
+    EXPECT_EQ("0,0 500x500",
+              ScreenAsh::GetDisplayWorkAreaBoundsInParent(
+                  secondary->GetNativeView()).ToString());
+  }
 }
 
 TEST_F(ScreenAshTest, ConvertRect) {
   UpdateDisplay("600x600,500x500");
 
-  views::Widget* primary =
-      views::Widget::CreateWindowWithBounds(NULL, gfx::Rect(10, 10, 100, 100));
+  views::Widget* primary = views::Widget::CreateWindowWithContextAndBounds(
+      NULL, CurrentContext(), gfx::Rect(10, 10, 100, 100));
   primary->Show();
-  views::Widget* secondary =
-      views::Widget::CreateWindowWithBounds(NULL, gfx::Rect(610, 10, 100, 100));
+  views::Widget* secondary = views::Widget::CreateWindowWithContextAndBounds(
+      NULL, CurrentContext(), gfx::Rect(610, 10, 100, 100));
   secondary->Show();
 
   EXPECT_EQ(

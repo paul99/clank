@@ -44,11 +44,14 @@ int Deoptimizer::patch_size() {
 }
 
 
-void Deoptimizer::DeoptimizeFunction(JSFunction* function) {
-  HandleScope scope;
+void Deoptimizer::DeoptimizeFunctionWithPreparedFunctionList(
+    JSFunction* function) {
+  Isolate* isolate = function->GetIsolate();
+  HandleScope scope(isolate);
   AssertNoAllocation no_allocation;
 
-  if (!function->IsOptimized()) return;
+  ASSERT(function->IsOptimized());
+  ASSERT(function->FunctionsInFunctionListShareSameCode());
 
   // The optimized code is going to be patched, so we cannot use it
   // any more.  Play safe and reset the whole cache.
@@ -77,12 +80,12 @@ void Deoptimizer::DeoptimizeFunction(JSFunction* function) {
     // this is optimized code, so we don't have to have a predictable size.
     int call_size_in_bytes =
         MacroAssembler::CallSizeNotPredictableCodeSize(deopt_entry,
-                                                       RelocInfo::NONE);
+                                                       RelocInfo::NONE32);
     int call_size_in_words = call_size_in_bytes / Assembler::kInstrSize;
     ASSERT(call_size_in_bytes % Assembler::kInstrSize == 0);
     ASSERT(call_size_in_bytes <= patch_size());
     CodePatcher patcher(call_address, call_size_in_words);
-    patcher.masm()->Call(deopt_entry, RelocInfo::NONE);
+    patcher.masm()->Call(deopt_entry, RelocInfo::NONE32);
     ASSERT(prev_call_address == NULL ||
            call_address >= prev_call_address + patch_size());
     ASSERT(call_address + patch_size() <= code->instruction_end());
@@ -90,8 +93,6 @@ void Deoptimizer::DeoptimizeFunction(JSFunction* function) {
     prev_call_address = call_address;
 #endif
   }
-
-  Isolate* isolate = code->GetIsolate();
 
   // Add the deoptimizing code to the list.
   DeoptimizingCodeListNode* node = new DeoptimizingCodeListNode(code);
@@ -212,7 +213,7 @@ static int LookupBailoutId(DeoptimizationInputData* data, BailoutId ast_id) {
 
 void Deoptimizer::DoComputeOsrOutputFrame() {
   DeoptimizationInputData* data = DeoptimizationInputData::cast(
-      optimized_code_->deoptimization_data());
+      compiled_code_->deoptimization_data());
   unsigned ast_id = data->OsrAstId()->value();
 
   int bailout_id = LookupBailoutId(data, BailoutId(ast_id));
@@ -246,7 +247,7 @@ void Deoptimizer::DoComputeOsrOutputFrame() {
   unsigned input_frame_size = input_->GetFrameSize();
   ASSERT(fixed_size + height_in_bytes == input_frame_size);
 
-  unsigned stack_slot_size = optimized_code_->stack_slots() * kPointerSize;
+  unsigned stack_slot_size = compiled_code_->stack_slots() * kPointerSize;
   unsigned outgoing_height = data->ArgumentsStackHeight(bailout_id)->value();
   unsigned outgoing_size = outgoing_height * kPointerSize;
   unsigned output_frame_size = fixed_size + stack_slot_size + outgoing_size;
@@ -338,7 +339,7 @@ void Deoptimizer::DoComputeOsrOutputFrame() {
 
     unsigned pc_offset = data->OsrPcOffset()->value();
     uint32_t pc = reinterpret_cast<uint32_t>(
-        optimized_code_->entry() + pc_offset);
+        compiled_code_->entry() + pc_offset);
     output_[0]->SetPc(pc);
   }
   Code* continuation = isolate_->builtins()->builtin(Builtins::kNotifyOSR);
@@ -451,6 +452,144 @@ void Deoptimizer::DoComputeArgumentsAdaptorFrame(TranslationIterator* iterator,
 }
 
 
+void Deoptimizer::DoCompiledStubFrame(TranslationIterator* iterator,
+                                      int frame_index) {
+  //
+  //               FROM                                  TO
+  //    |          ....           |          |          ....           |
+  //    +-------------------------+          +-------------------------+
+  //    | JSFunction continuation |          | JSFunction continuation |
+  //    +-------------------------+          +-------------------------+
+  // |  |   saved frame (fp)      |          |   saved frame (fp)      |
+  // |  +=========================+<-fp      +=========================+<-fp
+  // |  |   JSFunction context    |          |   JSFunction context    |
+  // v  +-------------------------+          +-------------------------|
+  //    |   COMPILED_STUB marker  |          |   STUB_FAILURE marker   |
+  //    +-------------------------+          +-------------------------+
+  //    |                         |          |   caller args.length_   |
+  //    | ...                     |          +-------------------------+
+  //    |                         |          |  caller args.arguments_ |
+  //    |-------------------------|<-sp      +-------------------------+
+  //                                         |  caller args pointer    |
+  //                                         +-------------------------+
+  //                                         |  caller stack param 1   |
+  //      parameters in registers            +-------------------------+
+  //       and spilled to stack              |           ....          |
+  //                                         +-------------------------+
+  //                                         |  caller stack param n   |
+  //                                         +-------------------------+<-sp
+  //                                         r0 = number of parameters
+  //                                         r1 = failure handler address
+  //                                         fp = saved frame
+  //                                         cp = JSFunction context
+  //
+
+  ASSERT(compiled_code_->kind() == Code::COMPILED_STUB);
+  int major_key = compiled_code_->major_key();
+  CodeStubInterfaceDescriptor* descriptor =
+      isolate_->code_stub_interface_descriptor(major_key);
+
+  // The output frame must have room for all pushed register parameters
+  // and the standard stack frame slots.
+  int output_frame_size = StandardFrameConstants::kFixedFrameSize +
+      kPointerSize * descriptor->register_param_count_;
+
+  // Include space for an argument object to the callee and optionally
+  // the space to pass the argument object to the stub failure handler.
+  output_frame_size += sizeof(Arguments) + kPointerSize;
+
+  FrameDescription* output_frame =
+      new(output_frame_size) FrameDescription(output_frame_size, 0);
+  ASSERT(frame_index == 0);
+  output_[frame_index] = output_frame;
+  Code* notify_failure =
+      isolate_->builtins()->builtin(Builtins::kNotifyStubFailure);
+  output_frame->SetState(Smi::FromInt(FullCodeGenerator::NO_REGISTERS));
+  output_frame->SetContinuation(
+      reinterpret_cast<intptr_t>(notify_failure->entry()));
+
+  Code* trampoline = NULL;
+  int extra = descriptor->extra_expression_stack_count_;
+  StubFailureTrampolineStub(extra).FindCodeInCache(&trampoline, isolate_);
+  ASSERT(trampoline != NULL);
+  output_frame->SetPc(reinterpret_cast<intptr_t>(
+      trampoline->instruction_start()));
+  unsigned input_frame_size = input_->GetFrameSize();
+
+  intptr_t frame_ptr = input_->GetRegister(fp.code());
+
+  // JSFunction continuation
+  intptr_t input_frame_offset = input_frame_size - kPointerSize;
+  intptr_t output_frame_offset = output_frame_size - kPointerSize;
+  intptr_t value = input_->GetFrameSlot(input_frame_offset);
+  output_frame->SetFrameSlot(output_frame_offset, value);
+
+  // saved frame ptr
+  input_frame_offset -= kPointerSize;
+  value = input_->GetFrameSlot(input_frame_offset);
+  output_frame_offset -= kPointerSize;
+  output_frame->SetFrameSlot(output_frame_offset, value);
+
+  // Restore context
+  input_frame_offset -= kPointerSize;
+  value = input_->GetFrameSlot(input_frame_offset);
+  output_frame->SetRegister(cp.code(), value);
+  output_frame_offset -= kPointerSize;
+  output_frame->SetFrameSlot(output_frame_offset, value);
+
+  // Internal frame markers
+  output_frame_offset -= kPointerSize;
+  value = reinterpret_cast<intptr_t>(
+      Smi::FromInt(StackFrame::STUB_FAILURE_TRAMPOLINE));
+  output_frame->SetFrameSlot(output_frame_offset, value);
+
+  int caller_arg_count = 0;
+  if (descriptor->stack_parameter_count_ != NULL) {
+    caller_arg_count =
+        input_->GetRegister(descriptor->stack_parameter_count_->code());
+  }
+
+  // Build the Arguments object for the caller's parameters and a pointer to it.
+  output_frame_offset -= kPointerSize;
+  value = frame_ptr + StandardFrameConstants::kCallerSPOffset +
+      (caller_arg_count - 1) * kPointerSize;
+  output_frame->SetFrameSlot(output_frame_offset, value);
+
+  output_frame->SetFrameSlot(output_frame_offset, value);
+  output_frame_offset -= kPointerSize;
+  output_frame->SetFrameSlot(output_frame_offset, caller_arg_count);
+
+  value = frame_ptr - (output_frame_size - output_frame_offset) -
+      StandardFrameConstants::kMarkerOffset;
+  output_frame_offset -= kPointerSize;
+  output_frame->SetFrameSlot(output_frame_offset, value);
+
+  // Copy the register parameters to the failure frame.
+  for (int i = 0; i < descriptor->register_param_count_; ++i) {
+    output_frame_offset -= kPointerSize;
+    DoTranslateCommand(iterator, 0, output_frame_offset);
+  }
+
+  for (int i = 0; i < DwVfpRegister::kMaxNumRegisters; ++i) {
+    double double_value = input_->GetDoubleRegister(i);
+    output_frame->SetDoubleRegister(i, double_value);
+  }
+
+  output_frame->SetRegister(fp.code(), frame_ptr);
+  output_frame->SetFp(frame_ptr);
+
+  ApiFunction function(descriptor->deoptimization_handler_);
+  ExternalReference xref(&function, ExternalReference::BUILTIN_CALL, isolate_);
+  intptr_t handler = reinterpret_cast<intptr_t>(xref.address());
+  int params = descriptor->register_param_count_;
+  if (descriptor->stack_parameter_count_ != NULL) {
+    params++;
+  }
+  output_frame->SetRegister(r0.code(), params);
+  output_frame->SetRegister(r1.code(), handler);
+}
+
+
 void Deoptimizer::DoComputeConstructStubFrame(TranslationIterator* iterator,
                                               int frame_index) {
   Builtins* builtins = isolate_->builtins();
@@ -504,7 +643,7 @@ void Deoptimizer::DoComputeConstructStubFrame(TranslationIterator* iterator,
   output_frame->SetFrameSlot(output_offset, value);
   intptr_t fp_value = top_address + output_offset;
   output_frame->SetFp(fp_value);
-  if (FLAG_trace_deopt) {
+  if (trace_) {
     PrintF("    0x%08x: [top + %d] <- 0x%08x ; caller's fp\n",
            fp_value, output_offset, value);
   }
@@ -513,7 +652,7 @@ void Deoptimizer::DoComputeConstructStubFrame(TranslationIterator* iterator,
   output_offset -= kPointerSize;
   value = output_[frame_index - 1]->GetContext();
   output_frame->SetFrameSlot(output_offset, value);
-  if (FLAG_trace_deopt) {
+  if (trace_) {
     PrintF("    0x%08x: [top + %d] <- 0x%08x ; context\n",
            top_address + output_offset, output_offset, value);
   }
@@ -522,7 +661,7 @@ void Deoptimizer::DoComputeConstructStubFrame(TranslationIterator* iterator,
   output_offset -= kPointerSize;
   value = reinterpret_cast<intptr_t>(Smi::FromInt(StackFrame::CONSTRUCT));
   output_frame->SetFrameSlot(output_offset, value);
-  if (FLAG_trace_deopt) {
+  if (trace_) {
     PrintF("    0x%08x: [top + %d] <- 0x%08x ; function (construct sentinel)\n",
            top_address + output_offset, output_offset, value);
   }
@@ -531,7 +670,7 @@ void Deoptimizer::DoComputeConstructStubFrame(TranslationIterator* iterator,
   output_offset -= kPointerSize;
   value = reinterpret_cast<intptr_t>(construct_stub);
   output_frame->SetFrameSlot(output_offset, value);
-  if (FLAG_trace_deopt) {
+  if (trace_) {
     PrintF("    0x%08x: [top + %d] <- 0x%08x ; code object\n",
            top_address + output_offset, output_offset, value);
   }
@@ -540,7 +679,7 @@ void Deoptimizer::DoComputeConstructStubFrame(TranslationIterator* iterator,
   output_offset -= kPointerSize;
   value = reinterpret_cast<uint32_t>(Smi::FromInt(height - 1));
   output_frame->SetFrameSlot(output_offset, value);
-  if (FLAG_trace_deopt) {
+  if (trace_) {
     PrintF("    0x%08x: [top + %d] <- 0x%08x ; argc (%d)\n",
            top_address + output_offset, output_offset, value, height - 1);
   }
@@ -549,7 +688,7 @@ void Deoptimizer::DoComputeConstructStubFrame(TranslationIterator* iterator,
   output_offset -= kPointerSize;
   value = reinterpret_cast<intptr_t>(function);
   output_frame->SetFrameSlot(output_offset, value);
-  if (FLAG_trace_deopt) {
+  if (trace_) {
     PrintF("    0x%08x: [top + %d] <- 0x%08x ; constructor function\n",
            top_address + output_offset, output_offset, value);
   }
@@ -559,7 +698,7 @@ void Deoptimizer::DoComputeConstructStubFrame(TranslationIterator* iterator,
   output_offset -= kPointerSize;
   value = output_frame->GetFrameSlot(output_frame_size - kPointerSize);
   output_frame->SetFrameSlot(output_offset, value);
-  if (FLAG_trace_deopt) {
+  if (trace_) {
     PrintF("    0x%08x: [top + %d] <- 0x%08x ; allocated receiver\n",
            top_address + output_offset, output_offset, value);
   }
@@ -583,7 +722,7 @@ void Deoptimizer::DoComputeAccessorStubFrame(TranslationIterator* iterator,
   unsigned height = 0;
   unsigned height_in_bytes = height * kPointerSize;
   const char* kind = is_setter_stub_frame ? "setter" : "getter";
-  if (FLAG_trace_deopt) {
+  if (trace_) {
     PrintF("  translating %s stub => height=%u\n", kind, height_in_bytes);
   }
 
@@ -616,7 +755,7 @@ void Deoptimizer::DoComputeAccessorStubFrame(TranslationIterator* iterator,
   output_offset -= kPointerSize;
   intptr_t callers_pc = output_[frame_index - 1]->GetPc();
   output_frame->SetFrameSlot(output_offset, callers_pc);
-  if (FLAG_trace_deopt) {
+  if (trace_) {
     PrintF("    0x%08" V8PRIxPTR ": [top + %u] <- 0x%08" V8PRIxPTR
            " ; caller's pc\n",
            top_address + output_offset, output_offset, callers_pc);
@@ -628,7 +767,7 @@ void Deoptimizer::DoComputeAccessorStubFrame(TranslationIterator* iterator,
   output_frame->SetFrameSlot(output_offset, value);
   intptr_t fp_value = top_address + output_offset;
   output_frame->SetFp(fp_value);
-  if (FLAG_trace_deopt) {
+  if (trace_) {
     PrintF("    0x%08" V8PRIxPTR ": [top + %u] <- 0x%08" V8PRIxPTR
            " ; caller's fp\n",
            fp_value, output_offset, value);
@@ -638,7 +777,7 @@ void Deoptimizer::DoComputeAccessorStubFrame(TranslationIterator* iterator,
   output_offset -= kPointerSize;
   value = output_[frame_index - 1]->GetContext();
   output_frame->SetFrameSlot(output_offset, value);
-  if (FLAG_trace_deopt) {
+  if (trace_) {
     PrintF("    0x%08" V8PRIxPTR ": [top + %u] <- 0x%08" V8PRIxPTR
            " ; context\n",
            top_address + output_offset, output_offset, value);
@@ -648,7 +787,7 @@ void Deoptimizer::DoComputeAccessorStubFrame(TranslationIterator* iterator,
   output_offset -= kPointerSize;
   value = reinterpret_cast<intptr_t>(Smi::FromInt(StackFrame::INTERNAL));
   output_frame->SetFrameSlot(output_offset, value);
-  if (FLAG_trace_deopt) {
+  if (trace_) {
     PrintF("    0x%08" V8PRIxPTR ": [top + %u] <- 0x%08" V8PRIxPTR
            " ; function (%s sentinel)\n",
            top_address + output_offset, output_offset, value, kind);
@@ -662,7 +801,7 @@ void Deoptimizer::DoComputeAccessorStubFrame(TranslationIterator* iterator,
   Code* accessor_stub = isolate_->builtins()->builtin(name);
   value = reinterpret_cast<intptr_t>(accessor_stub);
   output_frame->SetFrameSlot(output_offset, value);
-  if (FLAG_trace_deopt) {
+  if (trace_) {
     PrintF("    0x%08" V8PRIxPTR ": [top + %u] <- 0x%08" V8PRIxPTR
            " ; code object\n",
            top_address + output_offset, output_offset, value);
@@ -708,7 +847,7 @@ void Deoptimizer::DoComputeJSFrame(TranslationIterator* iterator,
   }
   unsigned height = iterator->Next();
   unsigned height_in_bytes = height * kPointerSize;
-  if (FLAG_trace_deopt) {
+  if (trace_) {
     PrintF("  translating ");
     function->PrintName();
     PrintF(" => node=%d, height=%d\n", node_id.ToInt(), height_in_bytes);
@@ -772,7 +911,7 @@ void Deoptimizer::DoComputeJSFrame(TranslationIterator* iterator,
     value = output_[frame_index - 1]->GetPc();
   }
   output_frame->SetFrameSlot(output_offset, value);
-  if (FLAG_trace_deopt) {
+  if (trace_) {
     PrintF("    0x%08x: [top + %d] <- 0x%08x ; caller's pc\n",
            top_address + output_offset, output_offset, value);
   }
@@ -795,7 +934,7 @@ void Deoptimizer::DoComputeJSFrame(TranslationIterator* iterator,
   if (is_topmost) {
     output_frame->SetRegister(fp.code(), fp_value);
   }
-  if (FLAG_trace_deopt) {
+  if (trace_) {
     PrintF("    0x%08x: [top + %d] <- 0x%08x ; caller's fp\n",
            fp_value, output_offset, value);
   }
@@ -813,7 +952,7 @@ void Deoptimizer::DoComputeJSFrame(TranslationIterator* iterator,
   output_frame->SetFrameSlot(output_offset, value);
   output_frame->SetContext(value);
   if (is_topmost) output_frame->SetRegister(cp.code(), value);
-  if (FLAG_trace_deopt) {
+  if (trace_) {
     PrintF("    0x%08x: [top + %d] <- 0x%08x ; context\n",
            top_address + output_offset, output_offset, value);
   }
@@ -826,7 +965,7 @@ void Deoptimizer::DoComputeJSFrame(TranslationIterator* iterator,
   // input frame.
   ASSERT(!is_bottommost || input_->GetFrameSlot(input_offset) == value);
   output_frame->SetFrameSlot(output_offset, value);
-  if (FLAG_trace_deopt) {
+  if (trace_) {
     PrintF("    0x%08x: [top + %d] <- 0x%08x ; function\n",
            top_address + output_offset, output_offset, value);
   }
@@ -878,7 +1017,7 @@ void Deoptimizer::FillInputFrame(Address tos, JavaScriptFrame* frame) {
   }
   input_->SetRegister(sp.code(), reinterpret_cast<intptr_t>(frame->sp()));
   input_->SetRegister(fp.code(), reinterpret_cast<intptr_t>(frame->fp()));
-  for (int i = 0; i < DoubleRegister::kNumAllocatableRegisters; i++) {
+  for (int i = 0; i < DoubleRegister::NumAllocatableRegisters(); i++) {
     input_->SetDoubleRegister(i, 0.0);
   }
 
@@ -898,7 +1037,6 @@ void Deoptimizer::EntryGenerator::Generate() {
 
   Isolate* isolate = masm()->isolate();
 
-  CpuFeatures::Scope scope(VFP3);
   // Save all general purpose registers before messing with them.
   const int kNumberOfRegisters = Register::kNumRegisters;
 
@@ -906,23 +1044,25 @@ void Deoptimizer::EntryGenerator::Generate() {
   RegList restored_regs = kJSCallerSaved | kCalleeSaved | ip.bit();
 
   const int kDoubleRegsSize =
-      kDoubleSize * DwVfpRegister::kNumAllocatableRegisters;
+      kDoubleSize * DwVfpRegister::kMaxNumAllocatableRegisters;
 
-  // Save all VFP registers before messing with them.
-  DwVfpRegister first = DwVfpRegister::FromAllocationIndex(0);
-  DwVfpRegister last =
-      DwVfpRegister::FromAllocationIndex(
-          DwVfpRegister::kNumAllocatableRegisters - 1);
-  ASSERT(last.code() > first.code());
-  ASSERT((last.code() - first.code()) ==
-      (DwVfpRegister::kNumAllocatableRegisters - 1));
-#ifdef DEBUG
-  for (int i = 0; i <= (DwVfpRegister::kNumAllocatableRegisters - 1); i++) {
-    ASSERT((DwVfpRegister::FromAllocationIndex(i).code() <= last.code()) &&
-           (DwVfpRegister::FromAllocationIndex(i).code() >= first.code()));
+  if (CpuFeatures::IsSupported(VFP2)) {
+    CpuFeatures::Scope scope(VFP2);
+    // Save all allocatable VFP registers before messing with them.
+    ASSERT(kDoubleRegZero.code() == 14);
+    ASSERT(kScratchDoubleReg.code() == 15);
+
+    // Check CPU flags for number of registers, setting the Z condition flag.
+    __ CheckFor32DRegs(ip);
+
+    // Push registers d0-d13, and possibly d16-d31, on the stack.
+    // If d16-d31 are not pushed, decrease the stack pointer instead.
+    __ vstm(db_w, sp, d16, d31, ne);
+    __ sub(sp, sp, Operand(16 * kDoubleSize), LeaveCC, eq);
+    __ vstm(db_w, sp, d0, d13);
+  } else {
+    __ sub(sp, sp, Operand(kDoubleRegsSize));
   }
-#endif
-  __ vstm(db_w, sp, first, last);
 
   // Push all 16 registers (needed to populate FrameDescription::registers_).
   // TODO(1588) Note that using pc with stm is deprecated, so we should perhaps
@@ -939,7 +1079,7 @@ void Deoptimizer::EntryGenerator::Generate() {
   // address for lazy deoptimization) and compute the fp-to-sp delta in
   // register r4.
   if (type() == EAGER) {
-    __ mov(r3, Operand(0));
+    __ mov(r3, Operand::Zero());
     // Correct one word for bailout id.
     __ add(r4, sp, Operand(kSavedRegistersAreaSize + (1 * kPointerSize)));
   } else if (type() == OSR) {
@@ -981,14 +1121,17 @@ void Deoptimizer::EntryGenerator::Generate() {
     __ str(r2, MemOperand(r1, offset));
   }
 
-  // Copy VFP registers to
-  // double_registers_[DoubleRegister::kNumAllocatableRegisters]
-  int double_regs_offset = FrameDescription::double_registers_offset();
-  for (int i = 0; i < DwVfpRegister::kNumAllocatableRegisters; ++i) {
-    int dst_offset = i * kDoubleSize + double_regs_offset;
-    int src_offset = i * kDoubleSize + kNumberOfRegisters * kPointerSize;
-    __ vldr(d0, sp, src_offset);
-    __ vstr(d0, r1, dst_offset);
+  if (CpuFeatures::IsSupported(VFP2)) {
+    CpuFeatures::Scope scope(VFP2);
+    // Copy VFP registers to
+    // double_registers_[DoubleRegister::kMaxNumAllocatableRegisters]
+    int double_regs_offset = FrameDescription::double_registers_offset();
+    for (int i = 0; i < DwVfpRegister::kMaxNumAllocatableRegisters; ++i) {
+      int dst_offset = i * kDoubleSize + double_regs_offset;
+      int src_offset = i * kDoubleSize + kNumberOfRegisters * kPointerSize;
+      __ vldr(d0, sp, src_offset);
+      __ vstr(d0, r1, dst_offset);
+    }
   }
 
   // Remove the bailout id, eventually return address, and the saved registers
@@ -1009,10 +1152,13 @@ void Deoptimizer::EntryGenerator::Generate() {
   // frame description.
   __ add(r3,  r1, Operand(FrameDescription::frame_content_offset()));
   Label pop_loop;
+  Label pop_loop_header;
+  __ b(&pop_loop_header);
   __ bind(&pop_loop);
   __ pop(r4);
   __ str(r4, MemOperand(r3, 0));
   __ add(r3, r3, Operand(sizeof(uint32_t)));
+  __ bind(&pop_loop_header);
   __ cmp(r2, sp);
   __ b(ne, &pop_loop);
 
@@ -1029,26 +1175,48 @@ void Deoptimizer::EntryGenerator::Generate() {
   __ pop(r0);  // Restore deoptimizer object (class Deoptimizer).
 
   // Replace the current (input) frame with the output frames.
-  Label outer_push_loop, inner_push_loop;
-  // Outer loop state: r0 = current "FrameDescription** output_",
+  Label outer_push_loop, inner_push_loop,
+      outer_loop_header, inner_loop_header;
+  // Outer loop state: r4 = current "FrameDescription** output_",
   // r1 = one past the last FrameDescription**.
   __ ldr(r1, MemOperand(r0, Deoptimizer::output_count_offset()));
-  __ ldr(r0, MemOperand(r0, Deoptimizer::output_offset()));  // r0 is output_.
-  __ add(r1, r0, Operand(r1, LSL, 2));
+  __ ldr(r4, MemOperand(r0, Deoptimizer::output_offset()));  // r4 is output_.
+  __ add(r1, r4, Operand(r1, LSL, 2));
+  __ jmp(&outer_loop_header);
   __ bind(&outer_push_loop);
   // Inner loop state: r2 = current FrameDescription*, r3 = loop index.
-  __ ldr(r2, MemOperand(r0, 0));  // output_[ix]
+  __ ldr(r2, MemOperand(r4, 0));  // output_[ix]
   __ ldr(r3, MemOperand(r2, FrameDescription::frame_size_offset()));
+  __ jmp(&inner_loop_header);
   __ bind(&inner_push_loop);
   __ sub(r3, r3, Operand(sizeof(uint32_t)));
   __ add(r6, r2, Operand(r3));
   __ ldr(r7, MemOperand(r6, FrameDescription::frame_content_offset()));
   __ push(r7);
-  __ cmp(r3, Operand(0));
+  __ bind(&inner_loop_header);
+  __ cmp(r3, Operand::Zero());
   __ b(ne, &inner_push_loop);  // test for gt?
-  __ add(r0, r0, Operand(kPointerSize));
-  __ cmp(r0, r1);
+  __ add(r4, r4, Operand(kPointerSize));
+  __ bind(&outer_loop_header);
+  __ cmp(r4, r1);
   __ b(lt, &outer_push_loop);
+
+  if (CpuFeatures::IsSupported(VFP2)) {
+    CpuFeatures::Scope scope(VFP2);
+    // Check CPU flags for number of registers, setting the Z condition flag.
+    __ CheckFor32DRegs(ip);
+
+    __ ldr(r1, MemOperand(r0, Deoptimizer::input_offset()));
+    int src_offset = FrameDescription::double_registers_offset();
+    for (int i = 0; i < DwVfpRegister::kMaxNumRegisters; ++i) {
+      if (i == kDoubleRegZero.code()) continue;
+      if (i == kScratchDoubleReg.code()) continue;
+
+      const DwVfpRegister reg = DwVfpRegister::from_code(i);
+      __ vldr(reg, r1, src_offset, i < 16 ? al : ne);
+      src_offset += kDoubleSize;
+    }
+  }
 
   // Push state, pc, and continuation from the last output frame.
   if (type() != OSR) {

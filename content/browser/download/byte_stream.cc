@@ -16,14 +16,6 @@ namespace {
 typedef std::deque<std::pair<scoped_refptr<net::IOBuffer>, size_t> >
 ContentVector;
 
-// The fraction of the buffer that must be ready to send on the input
-// before we ship data to the output.
-static const int kFractionBufferBeforeSending = 3;
-
-// The fraction of the buffer that must have been consumed on the output
-// before we update the input window.
-static const int kFractionReadBeforeWindowUpdate = 3;
-
 class ByteStreamReaderImpl;
 
 // A poor man's weak pointer; a RefCountedThreadSafe boolean that can be
@@ -280,7 +272,7 @@ void ByteStreamWriterImpl::PostToPeer(
           &ByteStreamReaderImpl::TransferData,
           peer_lifetime_flag_,
           peer_,
-          base::Passed(transfer_buffer.Pass()),
+          base::Passed(&transfer_buffer),
           buffer_size,
           complete,
           status));
@@ -410,6 +402,14 @@ void ByteStreamReaderImpl::MaybeUpdateInput() {
 }
 
 }  // namespace
+
+// The fraction of the buffer that must be ready to send on the input
+// before we ship data to the output.
+const int ByteStreamWriter::kFractionBufferBeforeSending = 3;
+
+// The fraction of the buffer that must have been consumed on the output
+// before we update the input window.
+const int ByteStreamReader::kFractionReadBeforeWindowUpdate = 3;
 
 ByteStreamReader::~ByteStreamReader() { }
 

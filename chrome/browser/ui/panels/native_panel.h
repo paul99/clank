@@ -6,6 +6,7 @@
 #define CHROME_BROWSER_UI_PANELS_NATIVE_PANEL_H_
 
 #include "chrome/browser/ui/panels/panel.h"
+#include "chrome/browser/ui/panels/panel_constants.h"
 #include "ui/gfx/native_widget_types.h"
 
 class NativePanelTesting;
@@ -41,7 +42,7 @@ class NativePanel {
   virtual void DeactivatePanel() = 0;
   virtual bool IsPanelActive() const = 0;
   virtual void PreventActivationByOS(bool prevent_activation) = 0;
-  virtual gfx::NativeWindow GetNativePanelHandle() = 0;
+  virtual gfx::NativeWindow GetNativePanelWindow() = 0;
   virtual void UpdatePanelTitleBar() = 0;
   virtual void UpdatePanelLoadingAnimations(bool should_animate) = 0;
   virtual void NotifyPanelOnUserChangedTheme() = 0;
@@ -77,6 +78,9 @@ class NativePanel {
 
   // Updates the visibility of the minimize and restore buttons.
   virtual void UpdatePanelMinimizeRestoreButtonVisibility() = 0;
+
+  // Sets how the panel window displays its 4 corners, rounded or not.
+  virtual void SetWindowCornerStyle(panel::CornerStyle corner_style) = 0;
 
   // Create testing interface for native panel. (Keep this last to separate
   // it from regular API.)
@@ -114,10 +118,15 @@ class NativePanelTesting {
   // Verifies, on a deepest possible level, if the native panel is really
   // showing a correct app icon (taskbar icon).
   virtual bool VerifyAppIcon() const = 0;
+  // Verifies, on a deepest possible level, if the native panel is really
+  // minimized by the system.
+  virtual bool VerifySystemMinimizeState() const = 0;
 
   virtual bool IsWindowSizeKnown() const = 0;
   virtual bool IsAnimatingBounds() const = 0;
   virtual bool IsButtonVisible(panel::TitlebarButtonType button_type) const = 0;
+
+  virtual panel::CornerStyle GetWindowCornerStyle() const = 0;
 };
 
 #endif  // CHROME_BROWSER_UI_PANELS_NATIVE_PANEL_H_

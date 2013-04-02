@@ -47,14 +47,14 @@ cr.define('ntp', function() {
      * button.
      * @override
      */
-    showMenu: function() {
+    showMenu: function(shouldSetFocus) {
       if (this.needsRebuild_) {
         this.menu.textContent = '';
         this.dataItems_.forEach(this.addItem_, this);
         this.needsRebuild_ = false;
       }
 
-      MenuButton.prototype.showMenu.call(this);
+      MenuButton.prototype.showMenu.apply(this, arguments);
     },
 
     /**
@@ -83,7 +83,7 @@ cr.define('ntp', function() {
         a.title = data.tabs.map(function(tab) { return tab.title; }).join('\n');
       } else {
         a.href = data.url;
-        a.style.backgroundImage = url(getFaviconURL(data.url));
+        a.style.backgroundImage = getFaviconImageSet(data.url);
         a.textContent = data.title;
       }
 
@@ -102,12 +102,9 @@ cr.define('ntp', function() {
                       orig.metaKey,
                       orig.shiftKey];
         chrome.send('reopenTab', params);
-
-        // We are likely deleted by this point!
-        e.stopPropagation();
-        e.preventDefault();
       }
       a.addEventListener('activate', onActivated);
+      a.addEventListener('click', function(e) { e.preventDefault(); });
 
       this.menu.appendChild(a);
       cr.ui.decorate(a, MenuItem);

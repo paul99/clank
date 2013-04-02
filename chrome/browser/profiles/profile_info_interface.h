@@ -20,13 +20,13 @@ class ProfileInfoInterface {
   virtual size_t GetNumberOfProfiles() const = 0;
 
   virtual size_t GetIndexOfProfileWithPath(
-      const FilePath& profile_path) const = 0;
+      const base::FilePath& profile_path) const = 0;
 
   virtual string16 GetNameOfProfileAtIndex(size_t index) const = 0;
 
   virtual string16 GetShortcutNameOfProfileAtIndex(size_t index) const = 0;
 
-  virtual FilePath GetPathOfProfileAtIndex(size_t index) const = 0;
+  virtual base::FilePath GetPathOfProfileAtIndex(size_t index) const = 0;
 
   virtual string16 GetUserNameOfProfileAtIndex(size_t index) const = 0;
 
@@ -48,6 +48,8 @@ class ProfileInfoInterface {
 
   // Checks if the GAIA picture should be used as the profile's avatar icon.
   virtual bool IsUsingGAIAPictureOfProfileAtIndex(size_t index) const = 0;
+
+  virtual bool ProfileIsManagedAtIndex(size_t index) const = 0;
 
  protected:
   virtual ~ProfileInfoInterface() {}

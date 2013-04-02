@@ -39,9 +39,11 @@ class CC_EXPORT OutputSurface : public WebKit::WebCompositorOutputSurface {
 
   struct Capabilities {
     Capabilities()
-        : has_parent_compositor(false) {}
+        : has_parent_compositor(false),
+          max_frames_pending(0) {}
 
     bool has_parent_compositor;
+    int max_frames_pending;
   };
 
   virtual const Capabilities& Capabilities() const = 0;
@@ -54,8 +56,13 @@ class CC_EXPORT OutputSurface : public WebKit::WebCompositorOutputSurface {
   virtual SoftwareOutputDevice* SoftwareDevice() const = 0;
 
   // Sends frame data to the parent compositor. This should only be called when
-  // capabilities().has_parent_compositor.
-  virtual void SendFrameToParentCompositor(const CompositorFrame&) {}
+  // capabilities().has_parent_compositor. The implementation may destroy or
+  // steal the contents of the CompositorFrame passed in.
+  virtual void SendFrameToParentCompositor(CompositorFrame*) = 0;
+
+  // Notifies frame-rate smoothness preference. If true, all non-critical
+  // processing should be stopped, or lowered in priority.
+  virtual void UpdateSmoothnessTakesPriority(bool prefer_smoothness) {}
 };
 
 }  // namespace cc

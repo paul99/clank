@@ -16,6 +16,7 @@
 #include "chrome/browser/content_settings/content_settings_origin_identifier_value_map.h"
 
 class PrefService;
+class PrefRegistrySyncable;
 
 namespace content_settings {
 
@@ -24,7 +25,7 @@ class PolicyProvider : public ObservableProvider {
  public:
   explicit PolicyProvider(PrefService* prefs);
   virtual ~PolicyProvider();
-  static void RegisterUserPrefs(PrefService* prefs);
+  static void RegisterUserPrefs(PrefRegistrySyncable* registry);
 
   // ProviderInterface implementations.
   virtual RuleIterator* GetRuleIterator(

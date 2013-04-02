@@ -11,14 +11,13 @@
 #import "base/mac/cocoa_protocols.h"
 #include "base/memory/scoped_nsobject.h"
 #include "base/memory/scoped_ptr.h"
-#import "chrome/browser/chrome_browser_application_mac.h"
 #include "chrome/browser/ui/cocoa/bookmarks/bookmark_bar_bridge.h"
 #import "chrome/browser/ui/cocoa/bookmarks/bookmark_bar_constants.h"
 #import "chrome/browser/ui/cocoa/bookmarks/bookmark_bar_state.h"
 #import "chrome/browser/ui/cocoa/bookmarks/bookmark_bar_toolbar_view.h"
 #import "chrome/browser/ui/cocoa/bookmarks/bookmark_button.h"
 #include "chrome/browser/ui/cocoa/tabs/tab_strip_model_observer_bridge.h"
-#include "webkit/glue/window_open_disposition.h"
+#include "ui/base/window_open_disposition.h"
 
 @class BookmarkBarController;
 @class BookmarkBarFolderController;
@@ -149,13 +148,12 @@ willAnimateFromState:(BookmarkBar::State)oldState
                      BookmarkBarToolbarViewController,
                      BookmarkButtonDelegate,
                      BookmarkButtonControllerProtocol,
-                     CrApplicationEventHookProtocol,
                      NSUserInterfaceValidations,
                      NSDraggingDestination> {
  @private
   // The state of the bookmark bar. If an animation is running, this is set to
   // the "destination" and |lastState_| is set to the "original" state.
-  BookmarkBar::State state_;
+  BookmarkBar::State currentState_;
 
   // The "original" state of the bookmark bar if an animation is running.
   BookmarkBar::State lastState_;
@@ -208,9 +206,9 @@ willAnimateFromState:(BookmarkBar::State)oldState
   // window closes the controller gets autoreleased).
   BookmarkBarFolderController* folderController_;
 
-  // Are watching for a "click outside" or other event which would
-  // signal us to close the bookmark bar folder menus?
-  BOOL watchingForExitEvent_;
+  // The event tap that allows monitoring of all events, to properly close with
+  // a click outside the bounds of the window.
+  id exitEventTap_;
 
   IBOutlet BookmarkBarView* buttonView_;  // Contains 'no items' text fields.
   IBOutlet BookmarkButton* offTheSideButton_;  // aka the chevron.
@@ -254,9 +252,13 @@ willAnimateFromState:(BookmarkBar::State)oldState
   // or a folder menu.
   BOOL showFolderMenus_;
 
-  // Set to YES to prevent any node animations. Useful for unit testing so that
-  // incomplete animations do not cause valgrind complaints.
-  BOOL ignoreAnimations_;
+  // If YES then state changes (for example, from hidden to shown) are animated.
+  // This is turned off for instant extended and for unit tests.
+  BOOL stateAnimationsEnabled_;
+
+  // If YES then changes inside the bookmark bar (for example, removing a
+  // bookmark) are animated. This is turned off for unit tests.
+  BOOL innerContentAnimationsEnabled_;
 
   // YES if there is a possible drop about to happen in the bar.
   BOOL hasInsertionPos_;
@@ -269,11 +271,13 @@ willAnimateFromState:(BookmarkBar::State)oldState
   BOOL isEmpty_;
 }
 
-@property(readonly, nonatomic) BookmarkBar::State state;
+@property(readonly, nonatomic) BookmarkBar::State currentState;
 @property(readonly, nonatomic) BookmarkBar::State lastState;
 @property(readonly, nonatomic) BOOL isAnimationRunning;
 @property(assign, nonatomic) id<BookmarkBarControllerDelegate> delegate;
 @property(readonly, nonatomic) BOOL isEmpty;
+@property(assign, nonatomic) BOOL stateAnimationsEnabled;
+@property(assign, nonatomic) BOOL innerContentAnimationsEnabled;
 
 // Initializes the bookmark bar controller with the given browser
 // profile and delegates.
@@ -409,8 +413,6 @@ willAnimateFromState:(BookmarkBar::State)oldState
 - (NSMenu *)menuForFolderNode:(const BookmarkNode*)node;
 - (NSMenu*)buttonContextMenu;
 - (void)setButtonContextMenu:(id)menu;
-// Set to YES in order to prevent animations.
-- (void)setIgnoreAnimations:(BOOL)ignore;
 @end
 
 #endif  // CHROME_BROWSER_UI_COCOA_BOOKMARKS_BOOKMARK_BAR_CONTROLLER_H_

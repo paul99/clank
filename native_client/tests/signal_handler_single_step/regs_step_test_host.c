@@ -5,6 +5,7 @@
  */
 
 #include <signal.h>
+#include <string.h>
 
 #include "native_client/src/include/nacl_assert.h"
 #include "native_client/src/include/portability_io.h"
@@ -23,6 +24,7 @@
 #include "native_client/src/trusted/service_runtime/nacl_syscall_handlers.h"
 #include "native_client/src/trusted/service_runtime/nacl_valgrind_hooks.h"
 #include "native_client/src/trusted/service_runtime/sel_ldr.h"
+#include "native_client/src/trusted/service_runtime/thread_suspension_unwind.h"
 #include "native_client/tests/common/register_set.h"
 #include "native_client/tests/signal_handler_single_step/step_test_common.h"
 
@@ -53,11 +55,11 @@ static int g_call_count = 0;
 static int g_in_untrusted_code = 0;
 static int g_context_switch_count = 0;
 static struct NaClAppThread *g_natp;
-static struct NaClSignalContext *g_expected_regs;
+static struct RegsTestShm *g_test_shm;
 
 
 static int32_t TestSyscall(struct NaClAppThread *natp) {
-  NaClCopyInDropLock(natp->nap);
+  NaClCopyDropLock(natp->nap);
 
   if (g_call_count == 0) {
     g_natp = natp;
@@ -79,6 +81,9 @@ static enum NaClSignalResult TrapSignalHandler(int signal, void *ucontext) {
   uint32_t prog_ctr;
   int is_inside_trampoline;
   int is_untrusted;
+  char buf[100];
+  int len;
+  struct NaClSignalContext *expected_regs = &g_test_shm->expected_regs;
 
   if (signal != SIGTRAP) {
     SignalSafeLogStringLiteral("Error: Received unexpected signal\n");
@@ -102,12 +107,20 @@ static enum NaClSignalResult TrapSignalHandler(int signal, void *ucontext) {
    */
   is_inside_trampoline = (prog_ctr >= NACL_TRAMPOLINE_START &&
                           prog_ctr < NACL_TRAMPOLINE_END);
-  is_untrusted = (NaClSignalContextIsUntrusted(&context) &&
+  is_untrusted = (NaClSignalContextIsUntrustedForCurrentThread(&context) &&
                   !is_inside_trampoline);
   if (g_in_untrusted_code != is_untrusted) {
     g_context_switch_count++;
     g_in_untrusted_code = is_untrusted;
   }
+
+  if (!*(uint32_t *) NaClUserToSys(g_natp->nap,
+                                   (uintptr_t) g_test_shm->regs_should_match))
+    return NACL_SIGNAL_RETURN;
+
+  len = snprintf(buf, sizeof(buf), "prog_ctr=0x%"NACL_PRIxNACL_REG": ",
+                 context.prog_ctr);
+  SignalSafeWrite(buf, len);
 
   if (is_untrusted) {
     SignalSafeLogStringLiteral("Untrusted context\n");
@@ -117,18 +130,26 @@ static enum NaClSignalResult TrapSignalHandler(int signal, void *ucontext) {
      * Untrusted code executes a small loop for calling the syscall,
      * so there are multiple values that prog_ctr can have here.
      */
-    context.prog_ctr = g_expected_regs->prog_ctr;
-    RegsAssertEqual(g_expected_regs, &context);
+    context.prog_ctr = expected_regs->prog_ctr;
+    RegsAssertEqual(&context, expected_regs);
   } else if ((g_natp->suspend_state & NACL_APP_THREAD_TRUSTED) != 0) {
     SignalSafeLogStringLiteral("Trusted (syscall) context\n");
     NaClThreadContextToSignalContext(&g_natp->user, &context);
-    RegsAssertEqual(g_expected_regs, &context);
+    RegsAssertEqual(&context, expected_regs);
   } else {
-    SignalSafeLogStringLiteral("Inside a context switch\n");
-    /*
-     * TODO(mseaborn): We should be able to reconstruct untrusted
-     * registers here.
-     */
+    enum NaClUnwindCase unwind_case = 0;
+    const char *str;
+
+    SignalSafeLogStringLiteral("Inside a context switch: ");
+
+    NaClGetRegistersForContextSwitch(g_natp, &context, &unwind_case);
+
+    str = NaClUnwindCaseToString(unwind_case);
+    CHECK(str != NULL);
+    SignalSafeWrite(str, strlen(str));
+    SignalSafeLogStringLiteral("\n");
+
+    RegsAssertEqual(&context, expected_regs);
   }
   return NACL_SIGNAL_RETURN;
 }
@@ -163,11 +184,11 @@ int main(int argc, char **argv) {
    * address to the guest program so that it can write a register
    * snapshot for us to compare against.
    */
-  mmap_addr = NaClCommonSysMmapIntern(
-      &app, NULL, sizeof(*g_expected_regs),
+  mmap_addr = NaClSysMmapIntern(
+      &app, NULL, sizeof(*g_test_shm),
       NACL_ABI_PROT_READ | NACL_ABI_PROT_WRITE,
       NACL_ABI_MAP_PRIVATE | NACL_ABI_MAP_ANONYMOUS, -1, 0);
-  g_expected_regs = (struct NaClSignalContext *) NaClUserToSys(&app, mmap_addr);
+  g_test_shm = (struct RegsTestShm *) NaClUserToSys(&app, mmap_addr);
   SNPRINTF(arg_string, sizeof(arg_string), "0x%x", (unsigned int) mmap_addr);
 
   CHECK(NaClCreateMainThread(&app, 2, args, NULL));

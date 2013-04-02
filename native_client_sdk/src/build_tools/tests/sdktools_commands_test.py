@@ -40,18 +40,19 @@ class TestCommands(SdkToolsTestCase):
     # gave it.
     return manifest.GetBundle(bundle_name)
 
-  def _MakeDummyArchive(self, bundle_name):
+  def _MakeDummyArchive(self, bundle_name, tarname=None, filename='dummy.txt'):
+    tarname = (tarname or bundle_name) + '.tar.bz2'
     temp_dir = tempfile.mkdtemp(prefix='archive')
     try:
-      dummy_path = os.path.join(temp_dir, 'dummy.txt')
+      dummy_path = os.path.join(temp_dir, filename)
       with open(dummy_path, 'w') as stream:
         stream.write('Dummy stuff for %s' % (bundle_name,))
 
       # Build the tarfile directly into the server's directory.
-      tar_path = os.path.join(self.basedir, bundle_name + '.tar.bz2')
+      tar_path = os.path.join(self.basedir, tarname)
       tarstream = tarfile.open(tar_path, 'w:bz2')
       try:
-        tarstream.add(dummy_path, os.path.join(bundle_name, 'dummy.txt'))
+        tarstream.add(dummy_path, os.path.join(bundle_name, filename))
       finally:
         tarstream.close()
 
@@ -222,6 +223,44 @@ class TestCommands(SdkToolsTestCase):
     output = self._Run(['update', 'foobar'])
     self.assertTrue('unknown bundle' in output)
 
+  def testUpdateRecommended(self):
+    """The update command should update only recommended bundles when run
+    without args.
+    """
+    bundle = self._AddDummyBundle(self.manifest, 'pepper_26')
+    bundle.recommended = 'yes'
+    self._WriteManifest()
+    output = self._Run(['update'])
+    self.assertTrue(os.path.exists(
+        os.path.join(self.basedir, 'nacl_sdk', 'pepper_26', 'dummy.txt')))
+
+  def testUpdateCanary(self):
+    """The update command should create the correct directory name for repath'd
+    bundles.
+    """
+    bundle = self._AddDummyBundle(self.manifest, 'pepper_26')
+    bundle.name = 'pepper_canary'
+    self._WriteManifest()
+    output = self._Run(['update'])
+    self.assertTrue(os.path.exists(
+        os.path.join(self.basedir, 'nacl_sdk', 'pepper_canary', 'dummy.txt')))
+
+  def testUpdateMultiArchive(self):
+    """The update command should include download/untar multiple archives
+    specified in the bundle.
+    """
+    bundle = self._AddDummyBundle(self.manifest, 'pepper_26')
+    archive2 = self._MakeDummyArchive('pepper_26', tarname='pepper_26_more',
+                                      filename='dummy2.txt')
+    archive2.host_os = 'all'
+    bundle.AddArchive(archive2)
+    self._WriteManifest()
+    output = self._Run(['update'])
+    self.assertTrue(os.path.exists(
+        os.path.join(self.basedir, 'nacl_sdk', 'pepper_26', 'dummy.txt')))
+    self.assertTrue(os.path.exists(
+        os.path.join(self.basedir, 'nacl_sdk', 'pepper_26', 'dummy2.txt')))
+
 
 if __name__ == '__main__':
-  sys.exit(unittest.main())
+  unittest.main()

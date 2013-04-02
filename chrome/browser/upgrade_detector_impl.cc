@@ -12,8 +12,8 @@
 #include "base/memory/scoped_ptr.h"
 #include "base/memory/singleton.h"
 #include "base/path_service.h"
-#include "base/string_number_conversions.h"
 #include "base/string_util.h"
+#include "base/strings/string_number_conversions.h"
 #include "base/time.h"
 #include "base/utf_string_conversions.h"
 #include "chrome/common/chrome_switches.h"
@@ -83,7 +83,7 @@ void DetectUpgradeTask(const base::Closure& upgrade_detected_task,
   // Get the version of the currently *installed* instance of Chrome,
   // which might be newer than the *running* instance if we have been
   // upgraded in the background.
-  FilePath exe_path;
+  base::FilePath exe_path;
   if (!PathService::Get(base::DIR_EXE, &exe_path)) {
     NOTREACHED() << "Failed to find executable path";
     return;

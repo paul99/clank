@@ -14,6 +14,7 @@ class RootWindow;
 }
 
 namespace ui {
+class Event;
 class MenuModel;
 }
 
@@ -31,8 +32,11 @@ class ASH_EXPORT LauncherDelegate {
   virtual void OnBrowserShortcutClicked(int event_flags) = 0;
 
   // Invoked when the user clicks on a window entry in the launcher.
-  // |event_flags| is the flags of the click event.
-  virtual void ItemClicked(const LauncherItem& item, int event_flags) = 0;
+  // |event| is the click event. The |event| is dispatched by a view
+  // and has an instance of |views::View| as the event target
+  // but not |aura::Window|.
+  virtual void ItemClicked(const LauncherItem& item,
+                           const ui::Event& event) = 0;
 
   // Returns the resource id of the image to show on the browser shortcut
   // button.
@@ -46,6 +50,16 @@ class ASH_EXPORT LauncherDelegate {
   // menu. The caller takes ownership of the returned model.
   virtual ui::MenuModel* CreateContextMenu(const LauncherItem& item,
                                            aura::RootWindow* root_window) = 0;
+
+  // Returns the application menu model for the specified item. There are three
+  // possible return values:
+  //  - A return of NULL indicates that no menu is wanted for this item.
+  //  - A return of a menu with one item means that only the name of the
+  //    application/item was added and there are no active applications.
+  //    Note: This is useful for hover menus which also show context help.
+  //  - A list containing the title and the active list of items.
+  // The caller takes ownership of the returned model.
+  virtual ui::MenuModel* CreateApplicationMenu(const LauncherItem& item) = 0;
 
   // Returns the id of the item associated with the specified window, or 0 if
   // there isn't one.

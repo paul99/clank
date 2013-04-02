@@ -399,7 +399,7 @@ TEST_F(ShillDeviceClientTest, Reset) {
   // Set expectations.
   MockClosure mock_closure;
   MockErrorCallback mock_error_callback;
-  PrepareForMethodCall("Reset",
+  PrepareForMethodCall(shill::kResetFunction,
                        base::Bind(&ExpectNoArgument),
                        response.get());
   EXPECT_CALL(mock_closure, Run()).Times(1);

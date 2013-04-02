@@ -2,15 +2,16 @@
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
+#include "chrome/browser/tab_contents/render_view_context_menu.h"
+
 #include <algorithm>
 #include <set>
 #include <utility>
 
-#include "chrome/browser/tab_contents/render_view_context_menu.h"
-
 #include "base/command_line.h"
 #include "base/logging.h"
 #include "base/metrics/histogram.h"
+#include "base/prefs/pref_service.h"
 #include "base/prefs/public/pref_member.h"
 #include "base/stl_util.h"
 #include "base/string_util.h"
@@ -21,8 +22,7 @@
 #include "chrome/browser/autocomplete/autocomplete_classifier_factory.h"
 #include "chrome/browser/autocomplete/autocomplete_match.h"
 #include "chrome/browser/browser_process.h"
-#include "chrome/browser/chrome_plugin_service_filter.h"
-#include "chrome/browser/debugger/devtools_window.h"
+#include "chrome/browser/devtools/devtools_window.h"
 #include "chrome/browser/download/download_service.h"
 #include "chrome/browser/download/download_service_factory.h"
 #include "chrome/browser/download/download_util.h"
@@ -30,10 +30,10 @@
 #include "chrome/browser/extensions/extension_service.h"
 #include "chrome/browser/extensions/extension_system.h"
 #include "chrome/browser/google/google_util.h"
+#include "chrome/browser/plugins/chrome_plugin_service_filter.h"
 #include "chrome/browser/prefs/incognito_mode_prefs.h"
-#include "chrome/browser/prefs/pref_service.h"
 #include "chrome/browser/printing/print_preview_context_menu_observer.h"
-#include "chrome/browser/printing/print_preview_tab_controller.h"
+#include "chrome/browser/printing/print_preview_dialog_controller.h"
 #include "chrome/browser/printing/print_view_manager.h"
 #include "chrome/browser/profiles/profile.h"
 #include "chrome/browser/profiles/profile_io_data.h"
@@ -121,7 +121,7 @@ namespace {
 WindowOpenDisposition ForceNewTabDispositionFromEventFlags(
     int event_flags) {
   WindowOpenDisposition disposition =
-      chrome::DispositionFromEventFlags(event_flags);
+      ui::DispositionFromEventFlags(event_flags);
   return disposition == CURRENT_TAB ? NEW_FOREGROUND_TAB : disposition;
 }
 
@@ -487,8 +487,11 @@ void RenderViewContextMenu::InitMenu() {
   else if (has_selection)
     AppendCopyItem();
 
-  if (has_selection)
+  if (has_selection) {
+    if (!IsDevToolsURL(params_.page_url))
+      AppendPrintItem();
     AppendSearchProvider();
+  }
 
   if (!IsDevToolsURL(params_.page_url))
     AppendAllExtensionItems();
@@ -532,17 +535,14 @@ void RenderViewContextMenu::AppendPlatformAppItems() {
 
   int index = 0;
   extension_items_.AppendExtensionItems(platform_app->id(),
-                                     PrintableSelectionText(), &index);
+                                        PrintableSelectionText(), &index);
 
   // Add dev tools for unpacked extensions.
-  if (platform_app->location() == Extension::LOAD ||
+  if (platform_app->location() == extensions::Manifest::LOAD ||
       CommandLine::ForCurrentProcess()->HasSwitch(
           switches::kDebugPackedApps)) {
     // Add a separator if there are any items already in the menu.
-    if (menu_model_.GetItemCount() &&
-        menu_model_.GetTypeAt(menu_model_.GetItemCount() - 1) !=
-            ui::MenuModel::TYPE_SEPARATOR)
-      menu_model_.AddSeparator(ui::NORMAL_SEPARATOR);
+    menu_model_.AddSeparator(ui::NORMAL_SEPARATOR);
 
     menu_model_.AddItemWithStringId(IDC_CONTENT_CONTEXT_RELOAD_PACKAGED_APP,
                                     IDS_CONTENT_CONTEXT_RELOAD_PACKAGED_APP);
@@ -646,8 +646,7 @@ void RenderViewContextMenu::AppendDeveloperItems() {
 
   // In the DevTools popup menu, "developer items" is normally the only
   // section, so omit the separator there.
-  if (menu_model_.GetItemCount() > 0)
-    menu_model_.AddSeparator(ui::NORMAL_SEPARATOR);
+  menu_model_.AddSeparator(ui::NORMAL_SEPARATOR);
   menu_model_.AddItemWithStringId(IDC_CONTENT_CONTEXT_INSPECTELEMENT,
                                   IDS_CONTENT_CONTEXT_INSPECTELEMENT);
 }
@@ -743,8 +742,7 @@ void RenderViewContextMenu::AppendPluginItems() {
   }
 
   if (params_.media_flags & WebContextMenuData::MediaCanRotate) {
-    if (menu_model_.GetItemCount() > 0)
-      menu_model_.AddSeparator(ui::NORMAL_SEPARATOR);
+    menu_model_.AddSeparator(ui::NORMAL_SEPARATOR);
     menu_model_.AddItemWithStringId(IDC_CONTENT_CONTEXT_ROTATECW,
                                     IDS_CONTENT_CONTEXT_ROTATECW);
     menu_model_.AddItemWithStringId(IDC_CONTENT_CONTEXT_ROTATECCW,
@@ -803,6 +801,14 @@ void RenderViewContextMenu::AppendFrameItems() {
 void RenderViewContextMenu::AppendCopyItem() {
   menu_model_.AddItemWithStringId(IDC_CONTENT_CONTEXT_COPY,
                                   IDS_CONTENT_CONTEXT_COPY);
+}
+
+void RenderViewContextMenu::AppendPrintItem() {
+  if (profile_->GetPrefs()->GetBoolean(prefs::kPrintingEnabled) &&
+      (params_.media_type == WebContextMenuData::MediaTypeNone ||
+       params_.media_flags & WebContextMenuData::MediaCanPrint)) {
+    menu_model_.AddItemWithStringId(IDC_PRINT, IDS_CONTENT_CONTEXT_PRINT);
+  }
 }
 
 void RenderViewContextMenu::AppendSearchProvider() {
@@ -1143,7 +1149,7 @@ bool RenderViewContextMenu::IsCommandIdEnabled(int id) const {
       return (params_.media_flags & WebContextMenuData::MediaCanSave) &&
           url.is_valid() && ProfileIOData::IsHandledProtocol(url.scheme()) &&
           // Do not save the preview PDF on the print preview page.
-          !(printing::PrintPreviewTabController::IsPrintPreviewURL(url));
+          !(printing::PrintPreviewDialogController::IsPrintPreviewURL(url));
     }
 
     case IDC_CONTENT_CONTEXT_OPENAVNEWTAB:
@@ -1563,7 +1569,7 @@ void RenderViewContextMenu::ExecuteCommand(int id, int event_flags) {
         if (profile_->GetPrefs()->GetBoolean(prefs::kPrintPreviewDisabled)) {
           print_view_manager->PrintNow();
         } else {
-          print_view_manager->PrintPreviewNow();
+          print_view_manager->PrintPreviewNow(!params_.selection_text.empty());
         }
       } else {
         rvh->Send(new PrintMsg_PrintNodeUnderContextMenu(rvh->GetRoutingID()));
@@ -1593,8 +1599,9 @@ void RenderViewContextMenu::ExecuteCommand(int id, int event_flags) {
       NavigationEntry* nav_entry = controller->GetActiveEntry();
       Browser* browser =
           chrome::FindBrowserWithWebContents(source_web_contents_);
-      chrome::ShowPageInfo(browser, source_web_contents_, nav_entry->GetURL(),
-                           nav_entry->GetSSL(), true);
+      chrome::ShowWebsiteSettings(browser, source_web_contents_,
+                                  nav_entry->GetURL(), nav_entry->GetSSL(),
+                                  true);
       break;
     }
 
@@ -1634,8 +1641,9 @@ void RenderViewContextMenu::ExecuteCommand(int id, int event_flags) {
     case IDC_CONTENT_CONTEXT_VIEWFRAMEINFO: {
       Browser* browser = chrome::FindBrowserWithWebContents(
           source_web_contents_);
-      chrome::ShowPageInfo(browser, source_web_contents_, params_.frame_url,
-                           params_.security_info, false);
+      chrome::ShowWebsiteSettings(browser, source_web_contents_,
+                                  params_.frame_url, params_.security_info,
+                                  false);
       break;
     }
 

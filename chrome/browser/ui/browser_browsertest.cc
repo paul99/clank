@@ -7,6 +7,7 @@
 #include "base/bind.h"
 #include "base/compiler_specific.h"
 #include "base/file_path.h"
+#include "base/prefs/pref_service.h"
 #include "base/sys_info.h"
 #include "base/utf_string_conversions.h"
 #include "chrome/app/chrome_command_ids.h"
@@ -48,11 +49,10 @@
 #include "chrome/test/base/in_process_browser_test.h"
 #include "chrome/test/base/ui_test_utils.h"
 #include "content/public/browser/favicon_status.h"
+#include "content/public/browser/host_zoom_map.h"
 #include "content/public/browser/interstitial_page.h"
 #include "content/public/browser/interstitial_page_delegate.h"
 #include "content/public/browser/navigation_entry.h"
-#include "content/public/browser/notification_service.h"
-#include "content/public/browser/notification_source.h"
 #include "content/public/browser/render_process_host.h"
 #include "content/public/browser/render_view_host.h"
 #include "content/public/browser/render_widget_host_view.h"
@@ -99,13 +99,14 @@ const char* kBeforeUnloadHTML =
 const char* kOpenNewBeforeUnloadPage =
     "w=window.open(); w.onbeforeunload=function(e){return 'foo'};";
 
-const FilePath::CharType* kBeforeUnloadFile =
+const base::FilePath::CharType* kBeforeUnloadFile =
     FILE_PATH_LITERAL("beforeunload.html");
 
-const FilePath::CharType* kTitle1File = FILE_PATH_LITERAL("title1.html");
-const FilePath::CharType* kTitle2File = FILE_PATH_LITERAL("title2.html");
+const base::FilePath::CharType* kTitle1File = FILE_PATH_LITERAL("title1.html");
+const base::FilePath::CharType* kTitle2File = FILE_PATH_LITERAL("title2.html");
 
-const FilePath::CharType kDocRoot[] = FILE_PATH_LITERAL("chrome/test/data");
+const base::FilePath::CharType kDocRoot[] =
+    FILE_PATH_LITERAL("chrome/test/data");
 
 // Given a page title, returns the expected window caption string.
 string16 WindowCaptionFromPageTitle(const string16& page_title) {
@@ -140,7 +141,7 @@ class MockTabStripModelObserver : public TabStripModelObserver {
 
   virtual void TabClosingAt(TabStripModel* tab_strip_model,
                             WebContents* contents,
-                            int index) {
+                            int index) OVERRIDE {
     ++closing_count_;
   }
 
@@ -228,9 +229,10 @@ class BrowserTest : public ExtensionBrowserTest {
 // Launch the app on a page with no title, check that the app title was set
 // correctly.
 IN_PROC_BROWSER_TEST_F(BrowserTest, NoTitle) {
-  ui_test_utils::NavigateToURL(browser(),
-      ui_test_utils::GetTestUrl(FilePath(FilePath::kCurrentDirectory),
-                                FilePath(kTitle1File)));
+  ui_test_utils::NavigateToURL(
+      browser(), ui_test_utils::GetTestUrl(
+                     base::FilePath(base::FilePath::kCurrentDirectory),
+                     base::FilePath(kTitle1File)));
   EXPECT_EQ(LocaleWindowCaptionFromPageTitle(ASCIIToUTF16("title1.html")),
             browser()->GetWindowTitleForCurrentTab());
   string16 tab_title;
@@ -241,9 +243,10 @@ IN_PROC_BROWSER_TEST_F(BrowserTest, NoTitle) {
 // Launch the app, navigate to a page with a title, check that the app title
 // was set correctly.
 IN_PROC_BROWSER_TEST_F(BrowserTest, Title) {
-  ui_test_utils::NavigateToURL(browser(),
-      ui_test_utils::GetTestUrl(FilePath(FilePath::kCurrentDirectory),
-                                FilePath(kTitle2File)));
+  ui_test_utils::NavigateToURL(
+      browser(), ui_test_utils::GetTestUrl(
+                     base::FilePath(base::FilePath::kCurrentDirectory),
+                     base::FilePath(kTitle2File)));
   const string16 test_title(ASCIIToUTF16("Title Of Awesomeness"));
   EXPECT_EQ(LocaleWindowCaptionFromPageTitle(test_title),
             browser()->GetWindowTitleForCurrentTab());
@@ -253,21 +256,21 @@ IN_PROC_BROWSER_TEST_F(BrowserTest, Title) {
 }
 
 IN_PROC_BROWSER_TEST_F(BrowserTest, JavascriptAlertActivatesTab) {
-  GURL url(ui_test_utils::GetTestUrl(FilePath(FilePath::kCurrentDirectory),
-                                     FilePath(kTitle1File)));
+  GURL url(ui_test_utils::GetTestUrl(base::FilePath(
+      base::FilePath::kCurrentDirectory), base::FilePath(kTitle1File)));
   ui_test_utils::NavigateToURL(browser(), url);
   AddTabAtIndex(0, url, content::PAGE_TRANSITION_TYPED);
-  EXPECT_EQ(2, browser()->tab_count());
-  EXPECT_EQ(0, browser()->active_index());
-  WebContents* second_tab = chrome::GetWebContentsAt(browser(), 1);
+  EXPECT_EQ(2, browser()->tab_strip_model()->count());
+  EXPECT_EQ(0, browser()->tab_strip_model()->active_index());
+  WebContents* second_tab = browser()->tab_strip_model()->GetWebContentsAt(1);
   ASSERT_TRUE(second_tab);
   second_tab->GetRenderViewHost()->ExecuteJavascriptInWebFrame(
       string16(),
       ASCIIToUTF16("alert('Activate!');"));
   AppModalDialog* alert = ui_test_utils::WaitForAppModalDialog();
   alert->CloseModalDialog();
-  EXPECT_EQ(2, browser()->tab_count());
-  EXPECT_EQ(1, browser()->active_index());
+  EXPECT_EQ(2, browser()->tab_strip_model()->count());
+  EXPECT_EQ(1, browser()->tab_strip_model()->active_index());
 }
 
 
@@ -285,8 +288,8 @@ IN_PROC_BROWSER_TEST_F(BrowserTest, JavascriptAlertActivatesTab) {
 // Warning: this test can take >30 seconds when running on a slow (low
 // memory?) Mac builder.
 IN_PROC_BROWSER_TEST_F(BrowserTest, MAYBE_ThirtyFourTabs) {
-  GURL url(ui_test_utils::GetTestUrl(FilePath(FilePath::kCurrentDirectory),
-                                     FilePath(kTitle2File)));
+  GURL url(ui_test_utils::GetTestUrl(base::FilePath(
+      base::FilePath::kCurrentDirectory), base::FilePath(kTitle2File)));
 
   // There is one initial tab.
   const int kTabCount = 34;
@@ -294,7 +297,7 @@ IN_PROC_BROWSER_TEST_F(BrowserTest, MAYBE_ThirtyFourTabs) {
     chrome::AddSelectedTabWithURL(browser(), url,
                                   content::PAGE_TRANSITION_TYPED);
   }
-  EXPECT_EQ(kTabCount, browser()->tab_count());
+  EXPECT_EQ(kTabCount, browser()->tab_strip_model()->count());
 
   // See GetMaxRendererProcessCount() in
   // content/browser/renderer_host/render_process_host_impl.cc
@@ -323,10 +326,11 @@ IN_PROC_BROWSER_TEST_F(BrowserTest, ReloadThenCancelBeforeUnload) {
   chrome::Reload(browser(), CURRENT_TAB);
   AppModalDialog* alert = ui_test_utils::WaitForAppModalDialog();
   alert->CloseModalDialog();
-  EXPECT_FALSE(chrome::GetActiveWebContents(browser())->IsLoading());
+  EXPECT_FALSE(
+      browser()->tab_strip_model()->GetActiveWebContents()->IsLoading());
 
   // Clear the beforeunload handler so the test can easily exit.
-  chrome::GetActiveWebContents(browser())->GetRenderViewHost()->
+  browser()->tab_strip_model()->GetActiveWebContents()->GetRenderViewHost()->
       ExecuteJavascriptInWebFrame(string16(),
                                   ASCIIToUTF16("onbeforeunload=null;"));
 }
@@ -334,8 +338,8 @@ IN_PROC_BROWSER_TEST_F(BrowserTest, ReloadThenCancelBeforeUnload) {
 // Test for crbug.com/80401.  Canceling a before unload dialog should reset
 // the URL to the previous page's URL.
 IN_PROC_BROWSER_TEST_F(BrowserTest, CancelBeforeUnloadResetsURL) {
-  GURL url(ui_test_utils::GetTestUrl(FilePath(FilePath::kCurrentDirectory),
-                                     FilePath(kBeforeUnloadFile)));
+  GURL url(ui_test_utils::GetTestUrl(base::FilePath(
+      base::FilePath::kCurrentDirectory), base::FilePath(kBeforeUnloadFile)));
   ui_test_utils::NavigateToURL(browser(), url);
 
   // Navigate to a page that triggers a cross-site transition.
@@ -351,12 +355,13 @@ IN_PROC_BROWSER_TEST_F(BrowserTest, CancelBeforeUnloadResetsURL) {
   // Cancel the dialog.
   AppModalDialog* alert = ui_test_utils::WaitForAppModalDialog();
   alert->CloseModalDialog();
-  EXPECT_FALSE(chrome::GetActiveWebContents(browser())->IsLoading());
+  EXPECT_FALSE(
+      browser()->tab_strip_model()->GetActiveWebContents()->IsLoading());
 
   // Verify there are no pending history items after the dialog is cancelled.
   // (see crbug.com/93858)
-  NavigationEntry* entry = chrome::GetActiveWebContents(browser())->
-      GetController().GetPendingEntry();
+  NavigationEntry* entry = browser()->tab_strip_model()->
+      GetActiveWebContents()->GetController().GetPendingEntry();
   EXPECT_EQ(NULL, entry);
 
   // Wait for the ShouldClose_ACK to arrive.  We can detect it by waiting for
@@ -365,7 +370,7 @@ IN_PROC_BROWSER_TEST_F(BrowserTest, CancelBeforeUnloadResetsURL) {
   EXPECT_EQ(url, browser()->toolbar_model()->GetURL());
 
   // Clear the beforeunload handler so the test can easily exit.
-  chrome::GetActiveWebContents(browser())->GetRenderViewHost()->
+  browser()->tab_strip_model()->GetActiveWebContents()->GetRenderViewHost()->
       ExecuteJavascriptInWebFrame(string16(),
                                   ASCIIToUTF16("onbeforeunload=null;"));
 }
@@ -382,14 +387,14 @@ IN_PROC_BROWSER_TEST_F(BrowserTest, CancelBeforeUnloadResetsURL) {
 // Test for crbug.com/11647.  A page closed with window.close() should not have
 // two beforeunload dialogs shown.
 IN_PROC_BROWSER_TEST_F(BrowserTest, MAYBE_SingleBeforeUnloadAfterWindowClose) {
-  chrome::GetActiveWebContents(browser())->GetRenderViewHost()->
+  browser()->tab_strip_model()->GetActiveWebContents()->GetRenderViewHost()->
       ExecuteJavascriptInWebFrame(string16(),
                                   ASCIIToUTF16(kOpenNewBeforeUnloadPage));
 
   // Close the new window with JavaScript, which should show a single
   // beforeunload dialog.  Then show another alert, to make it easy to verify
   // that a second beforeunload dialog isn't shown.
-  chrome::GetWebContentsAt(browser(), 0)->GetRenderViewHost()->
+  browser()->tab_strip_model()->GetWebContentsAt(0)->GetRenderViewHost()->
       ExecuteJavascriptInWebFrame(string16(),
                                   ASCIIToUTF16("w.close(); alert('bar');"));
   AppModalDialog* alert = ui_test_utils::WaitForAppModalDialog();
@@ -522,14 +527,14 @@ IN_PROC_BROWSER_TEST_F(BrowserTest, NullOpenerRedirectForksProcess) {
   ASSERT_TRUE(test_server()->Start());
   net::TestServer https_test_server(net::TestServer::TYPE_HTTPS,
                                     net::TestServer::kLocalhost,
-                                    FilePath(kDocRoot));
+                                    base::FilePath(kDocRoot));
   ASSERT_TRUE(https_test_server.Start());
   GURL http_url(test_server()->GetURL("files/title1.html"));
   GURL https_url(https_test_server.GetURL(""));
 
   // Start with an http URL.
   ui_test_utils::NavigateToURL(browser(), http_url);
-  WebContents* oldtab = chrome::GetActiveWebContents(browser());
+  WebContents* oldtab = browser()->tab_strip_model()->GetActiveWebContents();
   content::RenderProcessHost* process = oldtab->GetRenderProcessHost();
 
   // Now open a tab to a blank page, set its opener to null, and redirect it
@@ -551,8 +556,8 @@ IN_PROC_BROWSER_TEST_F(BrowserTest, NullOpenerRedirectForksProcess) {
 
   // Wait for popup window to appear and finish navigating.
   popup_observer.Wait();
-  ASSERT_EQ(2, browser()->tab_count());
-  WebContents* newtab = chrome::GetActiveWebContents(browser());
+  ASSERT_EQ(2, browser()->tab_strip_model()->count());
+  WebContents* newtab = browser()->tab_strip_model()->GetActiveWebContents();
   EXPECT_TRUE(newtab);
   EXPECT_NE(oldtab, newtab);
   nav_observer.Wait();
@@ -585,8 +590,8 @@ IN_PROC_BROWSER_TEST_F(BrowserTest, NullOpenerRedirectForksProcess) {
 
   // Wait for popup window to appear and finish navigating.
   popup_observer2.Wait();
-  ASSERT_EQ(3, browser()->tab_count());
-  WebContents* newtab2 = chrome::GetActiveWebContents(browser());
+  ASSERT_EQ(3, browser()->tab_strip_model()->count());
+  WebContents* newtab2 = browser()->tab_strip_model()->GetActiveWebContents();
   EXPECT_TRUE(newtab2);
   EXPECT_NE(oldtab, newtab2);
   nav_observer2.Wait();
@@ -611,14 +616,14 @@ IN_PROC_BROWSER_TEST_F(BrowserTest, OtherRedirectsDontForkProcess) {
   ASSERT_TRUE(test_server()->Start());
   net::TestServer https_test_server(net::TestServer::TYPE_HTTPS,
                                     net::TestServer::kLocalhost,
-                                    FilePath(kDocRoot));
+                                    base::FilePath(kDocRoot));
   ASSERT_TRUE(https_test_server.Start());
   GURL http_url(test_server()->GetURL("files/title1.html"));
   GURL https_url(https_test_server.GetURL(""));
 
   // Start with an http URL.
   ui_test_utils::NavigateToURL(browser(), http_url);
-  WebContents* oldtab = chrome::GetActiveWebContents(browser());
+  WebContents* oldtab = browser()->tab_strip_model()->GetActiveWebContents();
   content::RenderProcessHost* process = oldtab->GetRenderProcessHost();
 
   // Now open a tab to a blank page, set its opener to null, and redirect it
@@ -639,8 +644,8 @@ IN_PROC_BROWSER_TEST_F(BrowserTest, OtherRedirectsDontForkProcess) {
 
   // Wait for popup window to appear and finish navigating.
   popup_observer.Wait();
-  ASSERT_EQ(2, browser()->tab_count());
-  WebContents* newtab = chrome::GetActiveWebContents(browser());
+  ASSERT_EQ(2, browser()->tab_strip_model()->count());
+  WebContents* newtab = browser()->tab_strip_model()->GetActiveWebContents();
   EXPECT_TRUE(newtab);
   EXPECT_NE(oldtab, newtab);
   nav_observer.Wait();
@@ -677,9 +682,10 @@ IN_PROC_BROWSER_TEST_F(BrowserTest, OtherRedirectsDontForkProcess) {
 // with time deltas measured locally.
 IN_PROC_BROWSER_TEST_F(BrowserTest, RenderIdleTime) {
   base::TimeTicks start = base::TimeTicks::Now();
-  ui_test_utils::NavigateToURL(browser(),
-      ui_test_utils::GetTestUrl(FilePath(FilePath::kCurrentDirectory),
-                                FilePath(kTitle1File)));
+  ui_test_utils::NavigateToURL(
+      browser(), ui_test_utils::GetTestUrl(
+                     base::FilePath(base::FilePath::kCurrentDirectory),
+                     base::FilePath(kTitle1File)));
   content::RenderProcessHost::iterator it(
       content::RenderProcessHost::AllHostsIterator());
   for (; !it.IsAtEnd(); it.Advance()) {
@@ -699,9 +705,10 @@ IN_PROC_BROWSER_TEST_F(BrowserTest, CommandCreateAppShortcutFile) {
   CommandUpdater* command_updater =
       browser()->command_controller()->command_updater();
 
-  static const FilePath::CharType* kEmptyFile = FILE_PATH_LITERAL("empty.html");
-  GURL file_url(ui_test_utils::GetTestUrl(FilePath(FilePath::kCurrentDirectory),
-                                          FilePath(kEmptyFile)));
+  static const base::FilePath::CharType* kEmptyFile =
+      FILE_PATH_LITERAL("empty.html");
+  GURL file_url(ui_test_utils::GetTestUrl(base::FilePath(
+      base::FilePath::kCurrentDirectory), base::FilePath(kEmptyFile)));
   ASSERT_TRUE(file_url.SchemeIs(chrome::kFileScheme));
   ui_test_utils::NavigateToURL(browser(), file_url);
   EXPECT_TRUE(command_updater->IsCommandEnabled(IDC_CREATE_SHORTCUTS));
@@ -724,7 +731,7 @@ IN_PROC_BROWSER_TEST_F(BrowserTest, CommandCreateAppShortcutHttps) {
 
   net::TestServer test_server(net::TestServer::TYPE_HTTPS,
                               net::TestServer::kLocalhost,
-                              FilePath(kDocRoot));
+                              base::FilePath(kDocRoot));
   ASSERT_TRUE(test_server.Start());
   GURL https_url(test_server.GetURL("/"));
   ASSERT_TRUE(https_url.SchemeIs(chrome::kHttpsScheme));
@@ -738,7 +745,7 @@ IN_PROC_BROWSER_TEST_F(BrowserTest, CommandCreateAppShortcutFtp) {
 
   net::TestServer test_server(net::TestServer::TYPE_FTP,
                               net::TestServer::kLocalhost,
-                              FilePath(kDocRoot));
+                              base::FilePath(kDocRoot));
   ASSERT_TRUE(test_server.Start());
   GURL ftp_url(test_server.GetURL(""));
   ASSERT_TRUE(ftp_url.SchemeIs(chrome::kFtpScheme));
@@ -775,11 +782,11 @@ IN_PROC_BROWSER_TEST_F(BrowserTest, DISABLED_ConvertTabToAppShortcut) {
   GURL http_url(test_server()->GetURL(""));
   ASSERT_TRUE(http_url.SchemeIs(chrome::kHttpScheme));
 
-  ASSERT_EQ(1, browser()->tab_count());
-  WebContents* initial_tab = chrome::GetWebContentsAt(browser(), 0);
+  ASSERT_EQ(1, browser()->tab_strip_model()->count());
+  WebContents* initial_tab = browser()->tab_strip_model()->GetWebContentsAt(0);
   WebContents* app_tab = chrome::AddSelectedTabWithURL(
       browser(), http_url, content::PAGE_TRANSITION_TYPED);
-  ASSERT_EQ(2, browser()->tab_count());
+  ASSERT_EQ(2, browser()->tab_strip_model()->count());
   ASSERT_EQ(1u, chrome::GetBrowserCount(browser()->profile()));
 
   // Normal tabs should accept load drops.
@@ -802,13 +809,13 @@ IN_PROC_BROWSER_TEST_F(BrowserTest, DISABLED_ConvertTabToAppShortcut) {
   ASSERT_TRUE(app_browser);
 
   // Check that the tab contents is in the new browser, and not in the old.
-  ASSERT_EQ(1, browser()->tab_count());
-  ASSERT_EQ(initial_tab, chrome::GetWebContentsAt(browser(), 0));
+  ASSERT_EQ(1, browser()->tab_strip_model()->count());
+  ASSERT_EQ(initial_tab, browser()->tab_strip_model()->GetWebContentsAt(0));
 
   // Check that the appliaction browser has a single tab, and that tab contains
   // the content that we app-ified.
-  ASSERT_EQ(1, app_browser->tab_count());
-  ASSERT_EQ(app_tab, chrome::GetWebContentsAt(app_browser, 0));
+  ASSERT_EQ(1, app_browser->tab_strip_model()->count());
+  ASSERT_EQ(app_tab, app_browser->tab_strip_model()->GetWebContentsAt(0));
 
   // Normal tabs should accept load drops.
   EXPECT_TRUE(initial_tab->GetMutableRendererPrefs()->can_accept_load_drops);
@@ -829,8 +836,8 @@ IN_PROC_BROWSER_TEST_F(BrowserTest,
 
   ui_test_utils::NavigateToURL(browser(), url);
 
-  NavigationEntry* entry = chrome::GetActiveWebContents(browser())->
-      GetController().GetActiveEntry();
+  NavigationEntry* entry = browser()->tab_strip_model()->
+      GetActiveWebContents()->GetController().GetActiveEntry();
   EXPECT_EQ(expected_favicon_url.spec(), entry->GetFavicon().url.spec());
 }
 
@@ -842,26 +849,32 @@ IN_PROC_BROWSER_TEST_F(BrowserTest,
 #endif
 // Test that an icon can be changed from JS.
 IN_PROC_BROWSER_TEST_F(BrowserTest, MAYBE_FaviconChange) {
-  static const FilePath::CharType* kFile =
+  static const base::FilePath::CharType* kFile =
       FILE_PATH_LITERAL("onload_change_favicon.html");
-  GURL file_url(ui_test_utils::GetTestUrl(FilePath(FilePath::kCurrentDirectory),
-                                          FilePath(kFile)));
+  GURL file_url(ui_test_utils::GetTestUrl(base::FilePath(
+      base::FilePath::kCurrentDirectory), base::FilePath(kFile)));
   ASSERT_TRUE(file_url.SchemeIs(chrome::kFileScheme));
   ui_test_utils::NavigateToURL(browser(), file_url);
 
-  NavigationEntry* entry = chrome::GetActiveWebContents(browser())->
-      GetController().GetActiveEntry();
-  static const FilePath::CharType* kIcon =
+  NavigationEntry* entry = browser()->tab_strip_model()->
+      GetActiveWebContents()->GetController().GetActiveEntry();
+  static const base::FilePath::CharType* kIcon =
       FILE_PATH_LITERAL("test1.png");
-  GURL expected_favicon_url(
-      ui_test_utils::GetTestUrl(FilePath(FilePath::kCurrentDirectory),
-                                         FilePath(kIcon)));
+  GURL expected_favicon_url(ui_test_utils::GetTestUrl(base::FilePath(
+      base::FilePath::kCurrentDirectory), base::FilePath(kIcon)));
   EXPECT_EQ(expected_favicon_url.spec(), entry->GetFavicon().url.spec());
 }
 
+// http://crbug.com/172336
+#if defined(OS_WIN)
+#define MAYBE_TabClosingWhenRemovingExtension \
+    DISABLED_TabClosingWhenRemovingExtension
+#else
+#define MAYBE_TabClosingWhenRemovingExtension TabClosingWhenRemovingExtension
+#endif
 // Makes sure TabClosing is sent when uninstalling an extension that is an app
 // tab.
-IN_PROC_BROWSER_TEST_F(BrowserTest, TabClosingWhenRemovingExtension) {
+IN_PROC_BROWSER_TEST_F(BrowserTest, MAYBE_TabClosingWhenRemovingExtension) {
   ASSERT_TRUE(test_server()->Start());
   host_resolver()->AddRule("www.example.com", "127.0.0.1");
   GURL url(test_server()->GetURL("empty.html"));
@@ -897,7 +910,7 @@ IN_PROC_BROWSER_TEST_F(BrowserTest, TabClosingWhenRemovingExtension) {
   model->RemoveObserver(&observer);
 
   // There should only be one tab now.
-  ASSERT_EQ(1, browser()->tab_count());
+  ASSERT_EQ(1, browser()->tab_strip_model()->count());
 }
 
 #if !defined(OS_MACOSX)
@@ -915,7 +928,7 @@ IN_PROC_BROWSER_TEST_F(BrowserTest, AppIdSwitch) {
 
   chrome::startup::IsFirstRun first_run = first_run::IsChromeFirstRun() ?
       chrome::startup::IS_FIRST_RUN : chrome::startup::IS_NOT_FIRST_RUN;
-  StartupBrowserCreatorImpl launch(FilePath(), command_line, first_run);
+  StartupBrowserCreatorImpl launch(base::FilePath(), command_line, first_run);
   ASSERT_TRUE(launch.OpenApplicationWindow(browser()->profile(), NULL));
 
   // Check that the new browser has an app name.
@@ -949,7 +962,8 @@ IN_PROC_BROWSER_TEST_F(BrowserTest, PageLanguageDetection) {
   AddTabAtIndex(0, GURL(test_server()->GetURL("files/english_page.html")),
                 content::PAGE_TRANSITION_TYPED);
 
-  WebContents* current_web_contents = chrome::GetActiveWebContents(browser());
+  WebContents* current_web_contents =
+      browser()->tab_strip_model()->GetActiveWebContents();
   TranslateTabHelper* translate_tab_helper =
       TranslateTabHelper::FromWebContents(current_web_contents);
   content::Source<WebContents> source(current_web_contents);
@@ -1022,7 +1036,7 @@ IN_PROC_BROWSER_TEST_F(BrowserTest, RestorePinnedTabs) {
   CommandLine dummy(CommandLine::NO_PROGRAM);
   chrome::startup::IsFirstRun first_run = first_run::IsChromeFirstRun() ?
       chrome::startup::IS_FIRST_RUN : chrome::startup::IS_NOT_FIRST_RUN;
-  StartupBrowserCreatorImpl launch(FilePath(), dummy, first_run);
+  StartupBrowserCreatorImpl launch(base::FilePath(), dummy, first_run);
   launch.profile_ = browser()->profile();
   launch.ProcessStartupURLs(std::vector<GURL>());
 
@@ -1041,7 +1055,7 @@ IN_PROC_BROWSER_TEST_F(BrowserTest, RestorePinnedTabs) {
 
   // We should get back an additional tab for the app, and another for the
   // default home page.
-  ASSERT_EQ(3, new_browser->tab_count());
+  ASSERT_EQ(3, new_browser->tab_strip_model()->count());
 
   // Make sure the state matches.
   TabStripModel* new_model = new_browser->tab_strip_model();
@@ -1083,10 +1097,9 @@ IN_PROC_BROWSER_TEST_F(BrowserTest, OpenAppWindowLikeNtp) {
   const Extension* extension_app = GetExtension();
 
   // Launch it in a window, as AppLauncherHandler::HandleLaunchApp() would.
-  WebContents* app_window = application_launch::OpenApplication(
-      application_launch::LaunchParams(browser()->profile(), extension_app,
-                                       extension_misc::LAUNCH_WINDOW,
-                                       NEW_WINDOW));
+  WebContents* app_window = chrome::OpenApplication(
+      chrome::AppLaunchParams(browser()->profile(), extension_app,
+                              extension_misc::LAUNCH_WINDOW, NEW_WINDOW));
   ASSERT_TRUE(app_window);
 
   // Apps launched in a window from the NTP have an extensions tab helper but
@@ -1156,14 +1169,16 @@ IN_PROC_BROWSER_TEST_F(BrowserTest, ForwardDisabledOnForward) {
   GURL blank_url(chrome::kAboutBlankURL);
   ui_test_utils::NavigateToURL(browser(), blank_url);
 
-  ui_test_utils::NavigateToURL(browser(),
-      ui_test_utils::GetTestUrl(FilePath(FilePath::kCurrentDirectory),
-                                FilePath(kTitle1File)));
+  ui_test_utils::NavigateToURL(
+      browser(), ui_test_utils::GetTestUrl(
+                     base::FilePath(base::FilePath::kCurrentDirectory),
+                     base::FilePath(kTitle1File)));
 
   content::WindowedNotificationObserver back_nav_load_observer(
       content::NOTIFICATION_LOAD_STOP,
       content::Source<NavigationController>(
-          &chrome::GetActiveWebContents(browser())->GetController()));
+          &browser()->tab_strip_model()->GetActiveWebContents()->
+              GetController()));
   chrome::GoBack(browser(), CURRENT_TAB);
   back_nav_load_observer.Wait();
   CommandUpdater* command_updater =
@@ -1173,7 +1188,8 @@ IN_PROC_BROWSER_TEST_F(BrowserTest, ForwardDisabledOnForward) {
   content::WindowedNotificationObserver forward_nav_load_observer(
       content::NOTIFICATION_LOAD_STOP,
       content::Source<NavigationController>(
-          &chrome::GetActiveWebContents(browser())->GetController()));
+          &browser()->tab_strip_model()->GetActiveWebContents()->
+              GetController()));
   chrome::GoForward(browser(), CURRENT_TAB);
   // This check will happen before the navigation completes, since the browser
   // won't process the renderer's response until the Wait() call below.
@@ -1310,6 +1326,15 @@ IN_PROC_BROWSER_TEST_F(BrowserTest,
   EXPECT_FALSE(command_updater->IsCommandEnabled(IDC_IMPORT_SETTINGS));
 }
 
+namespace {
+
+void OnZoomLevelChanged(const base::Closure& callback,
+                        const std::string& host) {
+  callback.Run();
+}
+
+}  // namespace
+
 #if defined(OS_WIN)
 // Flakes regularly on Windows XP
 // http://crbug.com/146040
@@ -1318,35 +1343,56 @@ IN_PROC_BROWSER_TEST_F(BrowserTest,
 #define MAYBE_PageZoom PageZoom
 #endif
 IN_PROC_BROWSER_TEST_F(BrowserTest, MAYBE_PageZoom) {
-  WebContents* contents = chrome::GetActiveWebContents(browser());
+  WebContents* contents = browser()->tab_strip_model()->GetActiveWebContents();
   bool enable_plus, enable_minus;
 
-  content::WindowedNotificationObserver zoom_in_observer(
-      content::NOTIFICATION_ZOOM_LEVEL_CHANGED,
-      content::NotificationService::AllSources());
-  chrome::Zoom(browser(), content::PAGE_ZOOM_IN);
-  zoom_in_observer.Wait();
-  EXPECT_EQ(contents->GetZoomPercent(&enable_plus, &enable_minus), 110);
-  EXPECT_TRUE(enable_plus);
-  EXPECT_TRUE(enable_minus);
+  {
+    scoped_refptr<content::MessageLoopRunner> loop_runner(
+        new content::MessageLoopRunner);
+    content::HostZoomMap::ZoomLevelChangedCallback callback(
+        base::Bind(&OnZoomLevelChanged, loop_runner->QuitClosure()));
+    content::HostZoomMap::GetForBrowserContext(
+        browser()->profile())->AddZoomLevelChangedCallback(callback);
+    chrome::Zoom(browser(), content::PAGE_ZOOM_IN);
+    loop_runner->Run();
+    content::HostZoomMap::GetForBrowserContext(
+        browser()->profile())->RemoveZoomLevelChangedCallback(callback);
+    EXPECT_EQ(contents->GetZoomPercent(&enable_plus, &enable_minus), 110);
+    EXPECT_TRUE(enable_plus);
+    EXPECT_TRUE(enable_minus);
+  }
 
-  content::WindowedNotificationObserver zoom_reset_observer(
-      content::NOTIFICATION_ZOOM_LEVEL_CHANGED,
-      content::NotificationService::AllSources());
-  chrome::Zoom(browser(), content::PAGE_ZOOM_RESET);
-  zoom_reset_observer.Wait();
-  EXPECT_EQ(contents->GetZoomPercent(&enable_plus, &enable_minus), 100);
-  EXPECT_TRUE(enable_plus);
-  EXPECT_TRUE(enable_minus);
+  {
+    scoped_refptr<content::MessageLoopRunner> loop_runner(
+        new content::MessageLoopRunner);
+    content::HostZoomMap::ZoomLevelChangedCallback callback(
+        base::Bind(&OnZoomLevelChanged, loop_runner->QuitClosure()));
+    content::HostZoomMap::GetForBrowserContext(
+        browser()->profile())->AddZoomLevelChangedCallback(callback);
+    chrome::Zoom(browser(), content::PAGE_ZOOM_RESET);
+    loop_runner->Run();
+    content::HostZoomMap::GetForBrowserContext(
+        browser()->profile())->RemoveZoomLevelChangedCallback(callback);
+    EXPECT_EQ(contents->GetZoomPercent(&enable_plus, &enable_minus), 100);
+    EXPECT_TRUE(enable_plus);
+    EXPECT_TRUE(enable_minus);
+  }
 
-  content::WindowedNotificationObserver zoom_out_observer(
-      content::NOTIFICATION_ZOOM_LEVEL_CHANGED,
-      content::NotificationService::AllSources());
-  chrome::Zoom(browser(), content::PAGE_ZOOM_OUT);
-  zoom_out_observer.Wait();
-  EXPECT_EQ(contents->GetZoomPercent(&enable_plus, &enable_minus), 90);
-  EXPECT_TRUE(enable_plus);
-  EXPECT_TRUE(enable_minus);
+  {
+    scoped_refptr<content::MessageLoopRunner> loop_runner(
+        new content::MessageLoopRunner);
+    content::HostZoomMap::ZoomLevelChangedCallback callback(
+        base::Bind(&OnZoomLevelChanged, loop_runner->QuitClosure()));
+    content::HostZoomMap::GetForBrowserContext(
+        browser()->profile())->AddZoomLevelChangedCallback(callback);
+    chrome::Zoom(browser(), content::PAGE_ZOOM_OUT);
+    loop_runner->Run();
+    content::HostZoomMap::GetForBrowserContext(
+        browser()->profile())->RemoveZoomLevelChangedCallback(callback);
+    EXPECT_EQ(contents->GetZoomPercent(&enable_plus, &enable_minus), 90);
+    EXPECT_TRUE(enable_plus);
+    EXPECT_TRUE(enable_minus);
+  }
 
   chrome::Zoom(browser(), content::PAGE_ZOOM_RESET);
 }
@@ -1364,7 +1410,7 @@ IN_PROC_BROWSER_TEST_F(BrowserTest, InterstitialCommandDisable) {
   EXPECT_TRUE(command_updater->IsCommandEnabled(IDC_SAVE_PAGE));
   EXPECT_TRUE(command_updater->IsCommandEnabled(IDC_ENCODING_MENU));
 
-  WebContents* contents = chrome::GetActiveWebContents(browser());
+  WebContents* contents = browser()->tab_strip_model()->GetActiveWebContents();
 
   content::WindowedNotificationObserver interstitial_observer(
       content::NOTIFICATION_INTERSTITIAL_ATTACHED,
@@ -1394,7 +1440,7 @@ IN_PROC_BROWSER_TEST_F(BrowserTest, InterstitialCommandDisable) {
 }
 
 IN_PROC_BROWSER_TEST_F(BrowserTest, InterstitialCloseTab) {
-  WebContents* contents = chrome::GetActiveWebContents(browser());
+  WebContents* contents = browser()->tab_strip_model()->GetActiveWebContents();
 
   content::WindowedNotificationObserver interstitial_observer(
       content::NOTIFICATION_INTERSTITIAL_ATTACHED,
@@ -1442,7 +1488,8 @@ IN_PROC_BROWSER_TEST_F(BrowserTest, UserGesturesReported) {
   // Regression test for http://crbug.com/110707.  Also tests that a user
   // gesture is sent when a normal navigation (via e.g. the omnibox) is
   // performed.
-  WebContents* web_contents = chrome::GetActiveWebContents(browser());
+  WebContents* web_contents =
+      browser()->tab_strip_model()->GetActiveWebContents();
   MockWebContentsObserver mock_observer(web_contents);
 
   ASSERT_TRUE(test_server()->Start());
@@ -1479,13 +1526,13 @@ IN_PROC_BROWSER_TEST_F(BrowserTest2, NoTabsInPopups) {
   chrome::RegisterAppPrefs(L"Test");
 
   // We start with a normal browser with one tab.
-  EXPECT_EQ(1, browser()->tab_count());
+  EXPECT_EQ(1, browser()->tab_strip_model()->count());
 
   // Open a popup browser with a single blank foreground tab.
   Browser* popup_browser = new Browser(
       Browser::CreateParams(Browser::TYPE_POPUP, browser()->profile()));
   chrome::AddBlankTabAt(popup_browser, -1, true);
-  EXPECT_EQ(1, popup_browser->tab_count());
+  EXPECT_EQ(1, popup_browser->tab_strip_model()->count());
 
   // Now try opening another tab in the popup browser.
   AddTabWithURLParams params1(url, content::PAGE_TRANSITION_TYPED);
@@ -1493,16 +1540,16 @@ IN_PROC_BROWSER_TEST_F(BrowserTest2, NoTabsInPopups) {
   EXPECT_EQ(popup_browser, params1.target);
 
   // The popup should still only have one tab.
-  EXPECT_EQ(1, popup_browser->tab_count());
+  EXPECT_EQ(1, popup_browser->tab_strip_model()->count());
 
   // The normal browser should now have two.
-  EXPECT_EQ(2, browser()->tab_count());
+  EXPECT_EQ(2, browser()->tab_strip_model()->count());
 
   // Open an app frame browser with a single blank foreground tab.
   Browser* app_browser = new Browser(Browser::CreateParams::CreateForApp(
       L"Test", browser()->profile(), false));
   chrome::AddBlankTabAt(app_browser, -1, true);
-  EXPECT_EQ(1, app_browser->tab_count());
+  EXPECT_EQ(1, app_browser->tab_strip_model()->count());
 
   // Now try opening another tab in the app browser.
   AddTabWithURLParams params2(GURL(chrome::kAboutBlankURL),
@@ -1511,16 +1558,16 @@ IN_PROC_BROWSER_TEST_F(BrowserTest2, NoTabsInPopups) {
   EXPECT_EQ(app_browser, params2.target);
 
   // The popup should still only have one tab.
-  EXPECT_EQ(1, app_browser->tab_count());
+  EXPECT_EQ(1, app_browser->tab_strip_model()->count());
 
   // The normal browser should now have three.
-  EXPECT_EQ(3, browser()->tab_count());
+  EXPECT_EQ(3, browser()->tab_strip_model()->count());
 
   // Open an app frame popup browser with a single blank foreground tab.
   Browser* app_popup_browser = new Browser(Browser::CreateParams::CreateForApp(
       L"Test", browser()->profile(), false));
   chrome::AddBlankTabAt(app_popup_browser, -1, true);
-  EXPECT_EQ(1, app_popup_browser->tab_count());
+  EXPECT_EQ(1, app_popup_browser->tab_strip_model()->count());
 
   // Now try opening another tab in the app popup browser.
   AddTabWithURLParams params3(GURL(chrome::kAboutBlankURL),
@@ -1529,10 +1576,10 @@ IN_PROC_BROWSER_TEST_F(BrowserTest2, NoTabsInPopups) {
   EXPECT_EQ(app_popup_browser, params3.target);
 
   // The popup should still only have one tab.
-  EXPECT_EQ(1, app_popup_browser->tab_count());
+  EXPECT_EQ(1, app_popup_browser->tab_strip_model()->count());
 
   // The normal browser should now have four.
-  EXPECT_EQ(4, browser()->tab_count());
+  EXPECT_EQ(4, browser()->tab_strip_model()->count());
 
   // Close the additional browsers.
   popup_browser->tab_strip_model()->CloseAllTabs();
@@ -1543,17 +1590,20 @@ IN_PROC_BROWSER_TEST_F(BrowserTest2, NoTabsInPopups) {
 
 IN_PROC_BROWSER_TEST_F(BrowserTest, WindowOpenClose) {
   GURL url = ui_test_utils::GetTestUrl(
-      FilePath(), FilePath().AppendASCII("window.close.html"));
+      base::FilePath(), base::FilePath().AppendASCII("window.close.html"));
 
   string16 title = ASCIIToUTF16("Title Of Awesomeness");
   content::TitleWatcher title_watcher(
-      chrome::GetActiveWebContents(browser()), title);
+      browser()->tab_strip_model()->GetActiveWebContents(), title);
   ui_test_utils::NavigateToURLBlockUntilNavigationsComplete(browser(), url, 2);
   EXPECT_EQ(title, title_watcher.WaitAndGetTitle());
 }
 
 // GTK doesn't use the Browser's fullscreen state.
-#if !defined(TOOLKIT_GTK)
+// TODO(linux_aura) http://crbug.com/163931
+// Mac disabled: http://crbug.com/169820
+#if !defined(TOOLKIT_GTK) && !defined(OS_MACOSX) && \
+    !(defined(OS_LINUX) && !defined(OS_CHROMEOS) && defined(USE_AURA))
 IN_PROC_BROWSER_TEST_F(BrowserTest, FullscreenBookmarkBar) {
   chrome::ToggleBookmarkBar(browser());
   EXPECT_EQ(BookmarkBar::SHOW, browser()->bookmark_bar_state());
@@ -1571,7 +1621,7 @@ class ShowModalDialogTest : public BrowserTest {
  public:
   ShowModalDialogTest() {}
 
-  virtual void SetUpCommandLine(CommandLine* command_line) {
+  virtual void SetUpCommandLine(CommandLine* command_line) OVERRIDE {
     command_line->AppendSwitch(switches::kDisablePopupBlocking);
   }
 };
@@ -1580,11 +1630,11 @@ IN_PROC_BROWSER_TEST_F(ShowModalDialogTest, BasicTest) {
   // This navigation should show a modal dialog that will be immediately
   // closed, but the fact that it was shown should be recorded.
   GURL url = ui_test_utils::GetTestUrl(
-      FilePath(), FilePath().AppendASCII("showmodaldialog.html"));
+      base::FilePath(), base::FilePath().AppendASCII("showmodaldialog.html"));
 
   string16 expected_title(ASCIIToUTF16("SUCCESS"));
   content::TitleWatcher title_watcher(
-      chrome::GetActiveWebContents(browser()), expected_title);
+      browser()->tab_strip_model()->GetActiveWebContents(), expected_title);
   ui_test_utils::NavigateToURL(browser(), url);
 
   // Verify that we set a mark on successful dialog show.
@@ -1593,11 +1643,12 @@ IN_PROC_BROWSER_TEST_F(ShowModalDialogTest, BasicTest) {
 
 IN_PROC_BROWSER_TEST_F(BrowserTest, DisallowFileUrlUniversalAccessTest) {
   GURL url = ui_test_utils::GetTestUrl(
-      FilePath(), FilePath().AppendASCII("fileurl_universalaccess.html"));
+      base::FilePath(),
+      base::FilePath().AppendASCII("fileurl_universalaccess.html"));
 
   string16 expected_title(ASCIIToUTF16("Disallowed"));
   content::TitleWatcher title_watcher(
-      chrome::GetActiveWebContents(browser()), expected_title);
+      browser()->tab_strip_model()->GetActiveWebContents(), expected_title);
   title_watcher.AlsoWaitForTitle(ASCIIToUTF16("Allowed"));
   ui_test_utils::NavigateToURL(browser(), url);
   ASSERT_EQ(expected_title, title_watcher.WaitAndGetTitle());
@@ -1607,13 +1658,14 @@ class KioskModeTest : public BrowserTest {
  public:
   KioskModeTest() {}
 
-  virtual void SetUpCommandLine(CommandLine* command_line) {
+  virtual void SetUpCommandLine(CommandLine* command_line) OVERRIDE {
     command_line->AppendSwitch(switches::kKioskMode);
   }
 };
 
-#if defined(OS_MACOSX)
+#if defined(OS_MACOSX) || (defined(OS_LINUX) && !defined(OS_CHROMEOS) && defined(USE_AURA))
 // http://crbug.com/103912
+// TODO(linux_aura) http://crbug.com/163931
 #define MAYBE_EnableKioskModeTest DISABLED_EnableKioskModeTest
 #else
 #define MAYBE_EnableKioskModeTest EnableKioskModeTest
@@ -1633,7 +1685,7 @@ class LaunchBrowserWithNonAsciiUserDatadir : public BrowserTest {
 
   virtual void SetUpCommandLine(CommandLine* command_line) OVERRIDE {
     ASSERT_TRUE(temp_dir_.CreateUniqueTempDir());
-    FilePath tmp_profile = temp_dir_.path().AppendASCII("tmp_profile");
+    base::FilePath tmp_profile = temp_dir_.path().AppendASCII("tmp_profile");
     tmp_profile = tmp_profile.Append(L"Test Chrome G\u00E9raldine");
 
     ASSERT_TRUE(file_util::CreateDirectory(tmp_profile));
@@ -1656,7 +1708,7 @@ class RunInBackgroundTest : public BrowserTest {
  public:
   RunInBackgroundTest() {}
 
-  virtual void SetUpCommandLine(CommandLine* command_line) {
+  virtual void SetUpCommandLine(CommandLine* command_line) OVERRIDE {
     command_line->AppendSwitch(switches::kKeepAliveForTest);
   }
 };
@@ -1686,7 +1738,7 @@ class NoStartupWindowTest : public BrowserTest {
  public:
   NoStartupWindowTest() {}
 
-  virtual void SetUpCommandLine(CommandLine* command_line) {
+  virtual void SetUpCommandLine(CommandLine* command_line) OVERRIDE {
     command_line->AppendSwitch(switches::kNoStartupWindow);
     command_line->AppendSwitch(switches::kKeepAliveForTest);
   }
@@ -1728,9 +1780,9 @@ class AppModeTest : public BrowserTest {
  public:
   AppModeTest() {}
 
-  virtual void SetUpCommandLine(CommandLine* command_line) {
+  virtual void SetUpCommandLine(CommandLine* command_line) OVERRIDE {
     GURL url = ui_test_utils::GetTestUrl(
-       FilePath(), FilePath().AppendASCII("title1.html"));
+       base::FilePath(), base::FilePath().AppendASCII("title1.html"));
     command_line->AppendSwitchASCII(switches::kApp, url.spec());
   }
 };
@@ -1745,7 +1797,7 @@ IN_PROC_BROWSER_TEST_F(AppModeTest, EnableAppModeTest) {
 // Confirm about:version contains some expected content.
 IN_PROC_BROWSER_TEST_F(BrowserTest, AboutVersion) {
   ui_test_utils::NavigateToURL(browser(), GURL(chrome::kAboutVersionURL));
-  WebContents* tab = chrome::GetActiveWebContents(browser());
+  WebContents* tab = browser()->tab_strip_model()->GetActiveWebContents();
   ASSERT_GT(ui_test_utils::FindInPage(tab, ASCIIToUTF16("WebKit"), true, true,
                                       NULL, NULL),
             0);
@@ -1757,7 +1809,8 @@ IN_PROC_BROWSER_TEST_F(BrowserTest, AboutVersion) {
             0);
 }
 
-static const FilePath::CharType* kTestDir = FILE_PATH_LITERAL("click_modifier");
+static const base::FilePath::CharType* kTestDir =
+    FILE_PATH_LITERAL("click_modifier");
 static const char kFirstPageTitle[] = "First window";
 static const char kSecondPageTitle[] = "New window!";
 
@@ -1769,16 +1822,16 @@ class ClickModifierTest : public InProcessBrowserTest {
   // Returns a url that opens a new window or tab when clicked, via javascript.
   GURL GetWindowOpenURL() {
     return ui_test_utils::GetTestUrl(
-      FilePath(kTestDir),
-      FilePath(FILE_PATH_LITERAL("window_open.html")));
+      base::FilePath(kTestDir),
+      base::FilePath(FILE_PATH_LITERAL("window_open.html")));
   }
 
   // Returns a url that follows a simple link when clicked, unless affected by
   // modifiers.
   GURL GetHrefURL() {
     return ui_test_utils::GetTestUrl(
-      FilePath(kTestDir),
-      FilePath(FILE_PATH_LITERAL("href.html")));
+      base::FilePath(kTestDir),
+      base::FilePath(FILE_PATH_LITERAL("href.html")));
   }
 
   string16 getFirstPageTitle() {
@@ -1800,14 +1853,16 @@ class ClickModifierTest : public InProcessBrowserTest {
                WindowOpenDisposition disposition) {
     ui_test_utils::NavigateToURL(browser, url);
     EXPECT_EQ(1u, chrome::GetBrowserCount(browser->profile()));
-    EXPECT_EQ(1, browser->tab_count());
-    content::WebContents* web_contents = chrome::GetActiveWebContents(browser);
+    EXPECT_EQ(1, browser->tab_strip_model()->count());
+    content::WebContents* web_contents =
+        browser->tab_strip_model()->GetActiveWebContents();
     EXPECT_EQ(url, web_contents->GetURL());
 
     if (disposition == CURRENT_TAB) {
+      content::WebContents* web_contents =
+          browser->tab_strip_model()->GetActiveWebContents();
       NavigationController* controller =
-          chrome::GetActiveWebContents(browser) ?
-          &chrome::GetActiveWebContents(browser)->GetController() : NULL;
+          web_contents ? &web_contents->GetController() : NULL;
       content::TestNavigationObserver same_tab_observer(
           content::Source<NavigationController>(controller),
           NULL,
@@ -1818,7 +1873,7 @@ class ClickModifierTest : public InProcessBrowserTest {
           base::Bind(&content::RunThisRunLoop, base::Unretained(&run_loop)),
           content::GetQuitTaskForRunLoop(&run_loop));
       EXPECT_EQ(1u, chrome::GetBrowserCount(browser->profile()));
-      EXPECT_EQ(1, browser->tab_count());
+      EXPECT_EQ(1, browser->tab_strip_model()->count());
       EXPECT_EQ(getSecondPageTitle(), web_contents->GetTitle());
       return;
     }
@@ -1835,8 +1890,8 @@ class ClickModifierTest : public InProcessBrowserTest {
     }
 
     EXPECT_EQ(1u, chrome::GetBrowserCount(browser->profile()));
-    EXPECT_EQ(2, browser->tab_count());
-    web_contents = chrome::GetActiveWebContents(browser);
+    EXPECT_EQ(2, browser->tab_strip_model()->count());
+    web_contents = browser->tab_strip_model()->GetActiveWebContents();
     WaitForLoadStop(web_contents);
     if (disposition == NEW_FOREGROUND_TAB) {
       EXPECT_EQ(getSecondPageTitle(), web_contents->GetTitle());

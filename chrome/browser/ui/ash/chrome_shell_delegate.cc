@@ -4,25 +4,27 @@
 
 #include "chrome/browser/ui/ash/chrome_shell_delegate.h"
 
+#include "ash/ash_switches.h"
 #include "ash/host/root_window_host_factory.h"
 #include "ash/launcher/launcher_types.h"
 #include "ash/magnifier/magnifier_constants.h"
 #include "ash/system/tray/system_tray_delegate.h"
-#include "ash/wm/stacking_controller.h"
+#include "ash/wm/window_properties.h"
 #include "ash/wm/window_util.h"
 #include "base/bind.h"
 #include "base/command_line.h"
+#include "base/prefs/pref_service.h"
+#include "base/utf_string_conversions.h"
+#include "chrome/browser/app_mode/app_mode_utils.h"
 #include "chrome/browser/chromeos/accessibility/magnification_manager.h"
 #include "chrome/browser/chromeos/login/screen_locker.h"
 #include "chrome/browser/extensions/api/terminal/terminal_extension_helper.h"
 #include "chrome/browser/lifetime/application_lifetime.h"
-#include "chrome/browser/prefs/pref_service.h"
 #include "chrome/browser/profiles/profile_manager.h"
 #include "chrome/browser/sessions/tab_restore_service.h"
 #include "chrome/browser/sessions/tab_restore_service_factory.h"
 #include "chrome/browser/ui/app_list/app_list_view_delegate.h"
 #include "chrome/browser/ui/ash/app_list/app_list_controller_ash.h"
-#include "chrome/browser/ui/ash/caps_lock_handler.h"
 #include "chrome/browser/ui/ash/launcher/chrome_launcher_controller.h"
 #include "chrome/browser/ui/ash/launcher/launcher_context_menu.h"
 #include "chrome/browser/ui/ash/user_action_handler.h"
@@ -49,12 +51,15 @@
 
 #if defined(OS_CHROMEOS)
 #include "ash/keyboard_overlay/keyboard_overlay_view.h"
+#include "ash/system/tray/system_tray_notifier.h"
 #include "base/chromeos/chromeos_version.h"
 #include "chrome/browser/chromeos/accessibility/accessibility_util.h"
 #include "chrome/browser/chromeos/background/ash_user_wallpaper_delegate.h"
+#include "chrome/browser/chromeos/cros/cros_library.h"
+#include "chrome/browser/chromeos/cros/network_library.h"
+#include "chrome/browser/chromeos/extensions/file_manager_util.h"
+#include "chrome/browser/chromeos/extensions/media_player_api.h"
 #include "chrome/browser/chromeos/extensions/media_player_event_router.h"
-#include "chrome/browser/chromeos/input_method/input_method_configuration.h"
-#include "chrome/browser/chromeos/input_method/input_method_manager.h"
 #include "chrome/browser/chromeos/login/user_manager.h"
 #include "chrome/browser/chromeos/login/webui_login_display_host.h"
 #include "chrome/browser/chromeos/system/ash_system_tray_delegate.h"
@@ -72,7 +77,7 @@ Browser* GetTargetBrowser() {
   Browser* browser = chrome::FindBrowserWithWindow(ash::wm::GetActiveWindow());
   if (browser)
     return browser;
-  return browser::FindOrCreateTabbedBrowser(
+  return chrome::FindOrCreateTabbedBrowser(
       ProfileManager::GetDefaultProfileOrOffTheRecord(),
       chrome::HOST_DESKTOP_TYPE_ASH);
 }
@@ -210,16 +215,28 @@ void ChromeShellDelegate::ToggleMaximized() {
     return;
   }
   ash::wm::ToggleMaximizedWindow(window);
+  if (CommandLine::ForCurrentProcess()->
+        HasSwitch(ash::switches::kAshImmersiveMode)) {
+    // Experiment with automatically entering immersive mode when the user
+    // presses the F4 maximize key.
+    window->SetProperty(ash::internal::kImmersiveModeKey,
+                        ash::wm::IsWindowMaximized(window));
+  }
 }
 
-void ChromeShellDelegate::OpenFileManager() {
+void ChromeShellDelegate::OpenFileManager(bool as_dialog) {
 #if defined(OS_CHROMEOS)
-  Browser* browser =
-      chrome::FindBrowserWithWindow(ash::wm::GetActiveWindow());
-  // Open the select file dialog only if there is an active browser where the
-  // selected file is displayed.
-  if (browser) {
-    browser->OpenFile();
+  if (as_dialog) {
+    Browser* browser =
+        chrome::FindBrowserWithWindow(ash::wm::GetActiveWindow());
+    // Open the select file dialog only if there is an active browser where the
+    // selected file is displayed.
+    if (browser) {
+      browser->OpenFile();
+      return;
+    }
+  } else {
+    file_manager_util::OpenFileBrowser();
   }
 #endif
 }
@@ -245,6 +262,29 @@ void ChromeShellDelegate::OpenCrosh() {
 
 void ChromeShellDelegate::OpenMobileSetup(const std::string& service_path) {
 #if defined(OS_CHROMEOS)
+  chromeos::NetworkLibrary* cros =
+      chromeos::CrosLibrary::Get()->GetNetworkLibrary();
+  const chromeos::CellularNetwork* cellular =
+      cros->FindCellularNetworkByPath(service_path);
+  if (cellular && !cellular->activated() &&
+      cellular->activate_over_non_cellular_network() &&
+      (!cros->connected_network() || !cros->connected_network()->online())) {
+    chromeos::NetworkTechnology technology = cellular->network_technology();
+    ash::NetworkObserver::NetworkType network_type =
+        (technology == chromeos::NETWORK_TECHNOLOGY_LTE ||
+         technology == chromeos::NETWORK_TECHNOLOGY_LTE_ADVANCED)
+        ? ash::NetworkObserver::NETWORK_CELLULAR_LTE
+        : ash::NetworkObserver::NETWORK_CELLULAR;
+    ash::Shell::GetInstance()->system_tray_notifier()->NotifySetNetworkMessage(
+        NULL,
+        ash::NetworkObserver::ERROR_CONNECT_FAILED,
+        network_type,
+        l10n_util::GetStringUTF16(IDS_NETWORK_ACTIVATION_ERROR_TITLE),
+        l10n_util::GetStringFUTF16(IDS_NETWORK_ACTIVATION_NEEDS_CONNECTION,
+                                   UTF8ToUTF16((cellular->name()))),
+        std::vector<string16>());
+    return;
+  }
   MobileSetupDialog::Show(service_path);
 #endif
 }
@@ -304,7 +344,7 @@ void ChromeShellDelegate::ShowKeyboardOverlay() {
 }
 
 void ChromeShellDelegate::ShowTaskManager() {
-  Browser* browser = browser::FindOrCreateTabbedBrowser(
+  Browser* browser = chrome::FindOrCreateTabbedBrowser(
       ProfileManager::GetDefaultProfileOrOffTheRecord(),
       chrome::HOST_DESKTOP_TYPE_ASH);
   chrome::OpenTaskManager(browser, false);
@@ -358,19 +398,35 @@ void ChromeShellDelegate::ToggleHighContrast() {
 #endif
 }
 
+bool ChromeShellDelegate::IsMagnifierEnabled() const {
+#if defined(OS_CHROMEOS)
+  DCHECK(chromeos::MagnificationManager::Get());
+  return chromeos::MagnificationManager::Get()->IsMagnifierEnabled();
+#else
+  return false;
+#endif
+}
+
 ash::MagnifierType ChromeShellDelegate::GetMagnifierType() const {
 #if defined(OS_CHROMEOS)
   DCHECK(chromeos::MagnificationManager::Get());
   return chromeos::MagnificationManager::Get()->GetMagnifierType();
 #else
-  return ash::MAGNIFIER_OFF;
+  return ash::kDefaultMagnifierType;
 #endif
 }
 
-void ChromeShellDelegate::SetMagnifier(ash::MagnifierType type) {
+void ChromeShellDelegate::SetMagnifierEnabled(bool enabled) {
 #if defined(OS_CHROMEOS)
   DCHECK(chromeos::MagnificationManager::Get());
-  return chromeos::MagnificationManager::Get()->SetMagnifier(type);
+  return chromeos::MagnificationManager::Get()->SetMagnifierEnabled(enabled);
+#endif
+}
+
+void ChromeShellDelegate::SetMagnifierType(ash::MagnifierType type) {
+#if defined(OS_CHROMEOS)
+  DCHECK(chromeos::MagnificationManager::Get());
+  return chromeos::MagnificationManager::Get()->SetMagnifierType(type);
 #endif
 }
 
@@ -396,7 +452,8 @@ app_list::AppListViewDelegate*
   DCHECK(ash::Shell::HasInstance());
   // Shell will own the created delegate, and the delegate will own
   // the controller.
-  return new AppListViewDelegate(new AppListControllerDelegateAsh());
+  Profile* profile = ProfileManager::GetDefaultProfileOrOffTheRecord();
+  return new AppListViewDelegate(new AppListControllerDelegateAsh(), profile);
 }
 
 ash::LauncherDelegate* ChromeShellDelegate::CreateLauncherDelegate(
@@ -427,16 +484,6 @@ ash::UserWallpaperDelegate* ChromeShellDelegate::CreateUserWallpaperDelegate() {
 #endif
 }
 
-ash::CapsLockDelegate* ChromeShellDelegate::CreateCapsLockDelegate() {
-#if defined(OS_CHROMEOS)
-  chromeos::input_method::XKeyboard* xkeyboard =
-      chromeos::input_method::GetInputMethodManager()->GetXKeyboard();
-  return new CapsLockHandler(xkeyboard);
-#else
-  return new CapsLockHandler;
-#endif
-}
-
 aura::client::UserActionClient* ChromeShellDelegate::CreateUserActionClient() {
   return new UserActionHandler;
 }
@@ -448,41 +495,6 @@ void ChromeShellDelegate::OpenFeedbackPage() {
 void ChromeShellDelegate::RecordUserMetricsAction(
     ash::UserMetricsAction action) {
   switch (action) {
-    case ash::UMA_ACCEL_MAXIMIZE_RESTORE_F4:
-      content::RecordAction(
-          content::UserMetricsAction("Accel_Maximize_Restore_F4"));
-      break;
-    case ash::UMA_ACCEL_PREVWINDOW_TAB:
-      content::RecordAction(content::UserMetricsAction("Accel_PrevWindow_Tab"));
-      break;
-    case ash::UMA_ACCEL_NEXTWINDOW_TAB:
-      content::RecordAction(content::UserMetricsAction("Accel_NextWindow_Tab"));
-      break;
-    case ash::UMA_ACCEL_PREVWINDOW_F5:
-      content::RecordAction(content::UserMetricsAction("Accel_PrevWindow_F5"));
-      break;
-    case ash::UMA_ACCEL_NEXTWINDOW_F5:
-      content::RecordAction(content::UserMetricsAction("Accel_NextWindow_F5"));
-      break;
-    case ash::UMA_ACCEL_NEWTAB_T:
-      content::RecordAction(content::UserMetricsAction("Accel_NewTab_T"));
-      break;
-    case ash::UMA_ACCEL_SEARCH_LWIN:
-      content::RecordAction(content::UserMetricsAction("Accel_Search_LWin"));
-      break;
-    case ash::UMA_MOUSE_DOWN:
-      content::RecordAction(content::UserMetricsAction("Mouse_Down"));
-      break;
-    case ash::UMA_TOUCHSCREEN_TAP_DOWN:
-      content::RecordAction(content::UserMetricsAction("Touchscreen_Down"));
-      break;
-    case ash::UMA_LAUNCHER_CLICK_ON_APPLIST_BUTTON:
-      content::RecordAction(
-          content::UserMetricsAction("Launcher_ClickOnApplistButton"));
-      break;
-    case ash::UMA_LAUNCHER_CLICK_ON_APP:
-      content::RecordAction(content::UserMetricsAction("Launcher_ClickOnApp"));
-      break;
     case ash::UMA_ACCEL_KEYBOARD_BRIGHTNESS_DOWN_F6:
       content::RecordAction(
           content::UserMetricsAction("Accel_KeyboardBrightnessDown_F6"));
@@ -491,24 +503,88 @@ void ChromeShellDelegate::RecordUserMetricsAction(
       content::RecordAction(
           content::UserMetricsAction("Accel_KeyboardBrightnessUp_F7"));
       break;
+    case ash::UMA_ACCEL_MAXIMIZE_RESTORE_F4:
+      content::RecordAction(
+          content::UserMetricsAction("Accel_Maximize_Restore_F4"));
+      break;
+    case ash::UMA_ACCEL_NEWTAB_T:
+      content::RecordAction(content::UserMetricsAction("Accel_NewTab_T"));
+      break;
+    case ash::UMA_ACCEL_NEXTWINDOW_F5:
+      content::RecordAction(content::UserMetricsAction("Accel_NextWindow_F5"));
+      break;
+    case ash::UMA_ACCEL_NEXTWINDOW_TAB:
+      content::RecordAction(content::UserMetricsAction("Accel_NextWindow_Tab"));
+      break;
+    case ash::UMA_ACCEL_PREVWINDOW_F5:
+      content::RecordAction(content::UserMetricsAction("Accel_PrevWindow_F5"));
+      break;
+    case ash::UMA_ACCEL_PREVWINDOW_TAB:
+      content::RecordAction(content::UserMetricsAction("Accel_PrevWindow_Tab"));
+      break;
+    case ash::UMA_ACCEL_SEARCH_LWIN:
+      content::RecordAction(content::UserMetricsAction("Accel_Search_LWin"));
+      break;
+    case ash::UMA_MAXIMIZE_BUTTON_MAXIMIZE:
+      content::RecordAction(content::UserMetricsAction("MaxButton_Maximize"));
+      break;
+    case ash::UMA_MAXIMIZE_BUTTON_MAXIMIZE_LEFT:
+      content::RecordAction(content::UserMetricsAction("MaxButton_MaxLeft"));
+      break;
+    case ash::UMA_MAXIMIZE_BUTTON_MAXIMIZE_RIGHT:
+      content::RecordAction(content::UserMetricsAction("MaxButton_MaxRight"));
+      break;
+    case ash::UMA_MAXIMIZE_BUTTON_MINIMIZE:
+      content::RecordAction(content::UserMetricsAction("MaxButton_Minimize"));
+      break;
+    case ash::UMA_MAXIMIZE_BUTTON_RESTORE:
+      content::RecordAction(content::UserMetricsAction("MaxButton_Restore"));
+      break;
+    case ash::UMA_MAXIMIZE_BUTTON_SHOW_BUBBLE:
+      content::RecordAction(content::UserMetricsAction("MaxButton_ShowBubble"));
+      break;
+    case ash::UMA_LAUNCHER_CLICK_ON_APP:
+      content::RecordAction(content::UserMetricsAction("Launcher_ClickOnApp"));
+      break;
+    case ash::UMA_LAUNCHER_CLICK_ON_APPLIST_BUTTON:
+      content::RecordAction(
+          content::UserMetricsAction("Launcher_ClickOnApplistButton"));
+      break;
+    case ash::UMA_MOUSE_DOWN:
+      content::RecordAction(content::UserMetricsAction("Mouse_Down"));
+      break;
+    case ash::UMA_TOGGLE_MAXIMIZE_CAPTION_CLICK:
+      content::RecordAction(
+          content::UserMetricsAction("Caption_ClickTogglesMaximize"));
+      break;
+    case ash::UMA_TOGGLE_MAXIMIZE_CAPTION_GESTURE:
+      content::RecordAction(
+          content::UserMetricsAction("Caption_GestureTogglesMaximize"));
+      break;
+    case ash::UMA_TOUCHSCREEN_TAP_DOWN:
+      content::RecordAction(content::UserMetricsAction("Touchscreen_Down"));
+      break;
   }
 }
 
 void ChromeShellDelegate::HandleMediaNextTrack() {
 #if defined(OS_CHROMEOS)
-  ExtensionMediaPlayerEventRouter::GetInstance()->NotifyNextTrack();
+  extensions::MediaPlayerAPI::Get(GetTargetBrowser()->profile())->
+      media_player_event_router()->NotifyNextTrack();
 #endif
 }
 
 void ChromeShellDelegate::HandleMediaPlayPause() {
 #if defined(OS_CHROMEOS)
-  ExtensionMediaPlayerEventRouter::GetInstance()->NotifyTogglePlayState();
+  extensions::MediaPlayerAPI::Get(GetTargetBrowser()->profile())->
+      media_player_event_router()->NotifyTogglePlayState();
 #endif
 }
 
 void ChromeShellDelegate::HandleMediaPrevTrack() {
 #if defined(OS_CHROMEOS)
-  ExtensionMediaPlayerEventRouter::GetInstance()->NotifyPrevTrack();
+  extensions::MediaPlayerAPI::Get(GetTargetBrowser()->profile())->
+      media_player_event_router()->NotifyPrevTrack();
 #endif
 }
 
@@ -538,11 +614,11 @@ double ChromeShellDelegate::GetSavedScreenMagnifierScale() {
 
 ui::MenuModel* ChromeShellDelegate::CreateContextMenu(aura::RootWindow* root) {
   DCHECK(launcher_delegate_);
-  return new LauncherContextMenu(launcher_delegate_, root);
-}
+  // Don't show context menu for exclusive app runtime mode.
+  if (chrome::IsRunningInAppMode())
+    return NULL;
 
-aura::client::StackingClient* ChromeShellDelegate::CreateStackingClient() {
-  return new ash::StackingController;
+  return new LauncherContextMenu(launcher_delegate_, root);
 }
 
 ash::RootWindowHostFactory* ChromeShellDelegate::CreateRootWindowHostFactory() {

@@ -4,8 +4,9 @@
 
 #include "chrome/browser/ui/browser_instant_controller.h"
 
+#include "base/prefs/pref_service.h"
 #include "chrome/browser/extensions/extension_service.h"
-#include "chrome/browser/prefs/pref_service.h"
+#include "chrome/browser/prefs/pref_registry_syncable.h"
 #include "chrome/browser/profiles/profile.h"
 #include "chrome/browser/themes/theme_service.h"
 #include "chrome/browser/themes/theme_service_factory.h"
@@ -19,6 +20,7 @@
 #include "chrome/browser/ui/webui/ntp/app_launcher_handler.h"
 #include "chrome/common/chrome_notification_types.h"
 #include "chrome/common/pref_names.h"
+#include "chrome/common/url_constants.h"
 #include "content/public/browser/notification_service.h"
 #include "grit/theme_resources.h"
 #include "ui/gfx/color_utils.h"
@@ -39,14 +41,17 @@ namespace chrome {
 BrowserInstantController::BrowserInstantController(Browser* browser)
     : browser_(browser),
       instant_(ALLOW_THIS_IN_INITIALIZER_LIST(this),
-               chrome::search::IsInstantExtendedAPIEnabled(browser->profile()),
-               browser->profile()->IsOffTheRecord()),
+               chrome::search::IsInstantExtendedAPIEnabled(profile())),
       instant_unload_handler_(browser),
       initialized_theme_info_(false),
       theme_area_height_(0) {
-  profile_pref_registrar_.Init(browser_->profile()->GetPrefs());
+  profile_pref_registrar_.Init(profile()->GetPrefs());
   profile_pref_registrar_.Add(
-      GetInstantPrefName(browser_->profile()),
+      GetInstantPrefName(profile()),
+      base::Bind(&BrowserInstantController::ResetInstant,
+                 base::Unretained(this)));
+  profile_pref_registrar_.Add(
+      prefs::kSearchSuggestEnabled,
       base::Bind(&BrowserInstantController::ResetInstant,
                  base::Unretained(this)));
   ResetInstant();
@@ -56,7 +61,7 @@ BrowserInstantController::BrowserInstantController(Browser* browser)
   // Listen for theme installation.
   registrar_.Add(this, chrome::NOTIFICATION_BROWSER_THEME_CHANGED,
                  content::Source<ThemeService>(
-                     ThemeServiceFactory::GetForProfile(browser_->profile())));
+                     ThemeServiceFactory::GetForProfile(profile())));
 #endif  // defined(ENABLE_THEMES)
 }
 
@@ -69,13 +74,60 @@ bool BrowserInstantController::IsInstantEnabled(Profile* profile) {
          profile->GetPrefs()->GetBoolean(GetInstantPrefName(profile));
 }
 
-void BrowserInstantController::RegisterUserPrefs(PrefService* prefs) {
-  prefs->RegisterBooleanPref(prefs::kInstantConfirmDialogShown, false,
-                             PrefService::SYNCABLE_PREF);
-  prefs->RegisterBooleanPref(prefs::kInstantExtendedEnabled, true,
-                             PrefService::SYNCABLE_PREF);
-  prefs->RegisterBooleanPref(prefs::kInstantEnabled, false,
-                             PrefService::SYNCABLE_PREF);
+void BrowserInstantController::RegisterUserPrefs(
+    PrefService* prefs,
+    PrefRegistrySyncable* registry) {
+  // TODO(joi): Get rid of the need for PrefService param above.
+  registry->RegisterBooleanPref(prefs::kInstantConfirmDialogShown, false,
+                                PrefRegistrySyncable::SYNCABLE_PREF);
+  registry->RegisterBooleanPref(prefs::kInstantEnabled, false,
+                                PrefRegistrySyncable::SYNCABLE_PREF);
+
+  search::InstantExtendedDefault instant_extended_default_setting =
+      search::GetInstantExtendedDefaultSetting();
+
+  bool instant_extended_value = true;
+  switch (instant_extended_default_setting) {
+    case search::INSTANT_FORCE_ON:
+      break;
+    case search::INSTANT_USE_EXISTING:
+      instant_extended_value = prefs->GetBoolean(prefs::kInstantEnabled);
+      break;
+    case search::INSTANT_FORCE_OFF:
+      instant_extended_value = false;
+      break;
+  }
+
+  registry->RegisterBooleanPref(prefs::kInstantExtendedEnabled,
+                                instant_extended_value,
+                                PrefRegistrySyncable::SYNCABLE_PREF);
+}
+
+bool BrowserInstantController::MaybeSwapInInstantNTPContents(
+    const GURL& url,
+    content::WebContents* source_contents,
+    content::WebContents** target_contents) {
+  if (url != GURL(chrome::kChromeUINewTabURL))
+    return false;
+
+  scoped_ptr<content::WebContents> instant_ntp = instant_.ReleaseNTPContents();
+  if (!instant_ntp)
+    return false;
+
+  *target_contents = instant_ntp.get();
+  instant_ntp->GetController().PruneAllButActive();
+  if (source_contents) {
+    instant_ntp->GetController().CopyStateFromAndPrune(
+        &source_contents->GetController());
+    ReplaceWebContentsAt(
+        browser_->tab_strip_model()->GetIndexOfWebContents(source_contents),
+        instant_ntp.Pass());
+  } else {
+    // If |source_contents| is NULL, then the caller is responsible for
+    // inserting instant_ntp into the tabstrip and will take ownership.
+    ignore_result(instant_ntp.release());
+  }
+  return true;
 }
 
 bool BrowserInstantController::OpenInstant(WindowOpenDisposition disposition) {
@@ -93,29 +145,41 @@ bool BrowserInstantController::OpenInstant(WindowOpenDisposition disposition) {
       INSTANT_COMMIT_PRESSED_ENTER : INSTANT_COMMIT_PRESSED_ALT_ENTER);
 }
 
-void BrowserInstantController::CommitInstant(content::WebContents* preview,
-                                             bool in_new_tab) {
+Profile* BrowserInstantController::profile() const {
+  return browser_->profile();
+}
+
+void BrowserInstantController::CommitInstant(
+    scoped_ptr<content::WebContents> preview,
+    bool in_new_tab) {
+  if (profile()->GetExtensionService()->IsInstalledApp(preview->GetURL())) {
+    AppLauncherHandler::RecordAppLaunchType(
+        extension_misc::APP_LAUNCH_OMNIBOX_INSTANT);
+  }
   if (in_new_tab) {
     // TabStripModel takes ownership of |preview|.
-    browser_->tab_strip_model()->AddWebContents(preview, -1,
+    browser_->tab_strip_model()->AddWebContents(preview.release(), -1,
         instant_.last_transition_type(), TabStripModel::ADD_ACTIVE);
   } else {
-    int index = browser_->tab_strip_model()->active_index();
-    DCHECK_NE(TabStripModel::kNoTab, index);
-    content::WebContents* active_tab =
-        browser_->tab_strip_model()->GetWebContentsAt(index);
-    // TabStripModel takes ownership of |preview|.
-    browser_->tab_strip_model()->ReplaceWebContentsAt(index, preview);
-    // InstantUnloadHandler takes ownership of |active_tab|.
-    instant_unload_handler_.RunUnloadListenersOrDestroy(active_tab, index);
-
-    GURL url = preview->GetURL();
-    DCHECK(browser_->profile()->GetExtensionService());
-    if (browser_->profile()->GetExtensionService()->IsInstalledApp(url)) {
-      AppLauncherHandler::RecordAppLaunchType(
-          extension_misc::APP_LAUNCH_OMNIBOX_INSTANT);
-    }
+    ReplaceWebContentsAt(
+        browser_->tab_strip_model()->active_index(),
+        preview.Pass());
   }
+}
+
+void BrowserInstantController::ReplaceWebContentsAt(
+    int index,
+    scoped_ptr<content::WebContents> new_contents) {
+  DCHECK_NE(TabStripModel::kNoTab, index);
+  content::WebContents* old_contents =
+      browser_->tab_strip_model()->GetWebContentsAt(index);
+  // TabStripModel takes ownership of |new_contents|.
+  browser_->tab_strip_model()->ReplaceWebContentsAt(
+      index, new_contents.release());
+  // TODO(samarth): use scoped_ptr instead of comments to document ownership
+  // transfer.
+  // InstantUnloadHandler takes ownership of |old_contents|.
+  instant_unload_handler_.RunUnloadListenersOrDestroy(old_contents, index);
 }
 
 void BrowserInstantController::SetInstantSuggestion(
@@ -160,7 +224,7 @@ void BrowserInstantController::UpdateThemeInfoForPreview() {
   // Initialize |theme_info| if necessary.
   // |OnThemeChanged| also updates theme area height if necessary.
   if (!initialized_theme_info_)
-    OnThemeChanged(ThemeServiceFactory::GetForProfile(browser_->profile()));
+    OnThemeChanged(ThemeServiceFactory::GetForProfile(profile()));
   else
     OnThemeChanged(NULL);
 }
@@ -180,7 +244,11 @@ void BrowserInstantController::SetMarginSize(int start, int end) {
 }
 
 void BrowserInstantController::ResetInstant() {
-  instant_.SetInstantEnabled(IsInstantEnabled(browser_->profile()));
+  bool instant_enabled = IsInstantEnabled(profile());
+  bool use_local_preview_only = profile()->IsOffTheRecord() ||
+      (!instant_enabled &&
+       !profile()->GetPrefs()->GetBoolean(prefs::kSearchSuggestEnabled));
+  instant_.SetInstantEnabled(instant_enabled, use_local_preview_only);
 }
 
 ////////////////////////////////////////////////////////////////////////////////

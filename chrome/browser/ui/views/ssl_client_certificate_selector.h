@@ -33,7 +33,7 @@ class TextButton;
 }
 
 class CertificateSelectorTableModel;
-class ConstrainedWindow;
+class WebContentsModalDialog;
 
 class SSLClientCertificateSelector : public SSLClientAuthObserver,
                                      public views::DialogDelegateView,
@@ -62,7 +62,6 @@ class SSLClientCertificateSelector : public SSLClientAuthObserver,
   virtual bool Cancel() OVERRIDE;
   virtual bool Accept() OVERRIDE;
   virtual views::View* GetInitiallyFocusedView() OVERRIDE;
-  virtual views::View* GetContentsView() OVERRIDE;
   virtual views::View* GetExtraView() OVERRIDE;
   virtual ui::ModalType GetModalType() const OVERRIDE;
 
@@ -82,7 +81,7 @@ class SSLClientCertificateSelector : public SSLClientAuthObserver,
 
   content::WebContents* web_contents_;
 
-  ConstrainedWindow* window_;
+  WebContentsModalDialog* window_;
   views::TableView* table_;
   views::TextButton* view_cert_button_;
   views::View* view_cert_button_container_;

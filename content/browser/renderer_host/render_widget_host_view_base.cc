@@ -243,8 +243,8 @@ void RenderWidgetHostViewBase::MovePluginWindowsHelper(
         // PluginProcessHost to destroy the intermediate HWNDs.
         cur_parent = ReparentWindow(window, parent);
         ::ShowWindow(window, SW_SHOW);  // Window was created hidden.
-      } else {
-        CHECK(IsPluginWrapperWindow(cur_parent));
+      } else if (!IsPluginWrapperWindow(cur_parent)) {
+        continue;  // Race if plugin process is shutting down.
       }
 
       // We move the intermediate parent window which doesn't result in cross-
@@ -353,6 +353,10 @@ RenderWidgetHostViewBase::~RenderWidgetHostViewBase() {
   DCHECK(!mouse_locked_);
 }
 
+bool RenderWidgetHostViewBase::OnMessageReceived(const IPC::Message& msg){
+  return false;
+}
+
 void RenderWidgetHostViewBase::SetBackground(const SkBitmap& background) {
   background_ = background;
 }
@@ -424,7 +428,7 @@ void RenderWidgetHostViewBase::UpdateScreenInfo(gfx::NativeView view) {
   current_device_scale_factor_ = display.device_scale_factor();
   if (impl)
     impl->NotifyScreenInfoChanged();
-}
+  }
 
 SmoothScrollGesture* RenderWidgetHostViewBase::CreateSmoothScrollGesture(
     bool scroll_down, int pixels_to_scroll, int mouse_event_x,

@@ -51,10 +51,6 @@ class RegistrarInvalidator : public Invalidator {
     // Do nothing.
   }
 
-  virtual void SetStateDeprecated(const std::string& state) OVERRIDE {
-    // Do nothing.
-  }
-
   virtual void UpdateCredentials(
       const std::string& email, const std::string& token) OVERRIDE {
     // Do nothing.
@@ -104,14 +100,9 @@ class RegistrarInvalidatorTestDelegate {
   }
 
   void TriggerOnIncomingInvalidation(
-      const ObjectIdInvalidationMap& invalidation_map,
-      IncomingInvalidationSource source) {
+      const ObjectIdInvalidationMap& invalidation_map) {
     invalidator_->GetRegistrar()->DispatchInvalidationsToHandlers(
-        invalidation_map, source);
-  }
-
-  static bool InvalidatorHandlesDeprecatedState() {
-    return false;
+        invalidation_map);
   }
 
  private:
@@ -130,6 +121,7 @@ class InvalidatorRegistrarTest : public testing::Test {};
 // When we expect a death via CHECK(), we can't match against the
 // CHECK() message since they are removed in official builds.
 
+#if GTEST_HAS_DEATH_TEST
 // Having registered handlers on destruction should cause a CHECK.
 TEST_F(InvalidatorRegistrarTest, RegisteredHandlerOnDestruction) {
   scoped_ptr<InvalidatorRegistrar> registrar(new InvalidatorRegistrar());
@@ -168,6 +160,7 @@ TEST_F(InvalidatorRegistrarTest, MultipleRegistration) {
   registrar.UnregisterHandler(&handler2);
   registrar.UnregisterHandler(&handler1);
 }
+#endif  // GTEST_HAS_DEATH_TEST
 
 }  // namespace
 

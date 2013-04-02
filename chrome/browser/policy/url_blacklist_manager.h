@@ -15,13 +15,18 @@
 #include "base/memory/scoped_ptr.h"
 #include "base/memory/weak_ptr.h"
 #include "base/prefs/public/pref_change_registrar.h"
-#include "chrome/common/extensions/matcher/url_matcher.h"
+#include "extensions/common/matcher/url_matcher.h"
 
 class GURL;
 class PrefService;
+class PrefRegistrySyncable;
 
 namespace base {
 class ListValue;
+}
+
+namespace net {
+class URLRequest;
 }
 
 namespace policy {
@@ -47,6 +52,9 @@ class URLBlacklist {
 
   // Returns true if the URL is blocked.
   bool IsURLBlocked(const GURL& url) const;
+
+  // Returns the number of items in the list.
+  size_t Size() const;
 
   // Returns true if the URL has a standard scheme. Only URLs with standard
   // schemes are filtered.
@@ -125,12 +133,19 @@ class URLBlacklistManager {
   // from the IO thread.
   bool IsURLBlocked(const GURL& url) const;
 
+  // Returns true if |request| is blocked by the current blacklist.
+  // Only main frame and sub frame requests may be blocked; other sub resources
+  // or background downloads (e.g. extensions updates, sync, etc) are not
+  // filtered. The sync signin page is also not filtered.
+  // Must be called from the IO thread.
+  bool IsRequestBlocked(const net::URLRequest& request) const;
+
   // Replaces the current blacklist. Must be called on the IO thread.
   // Virtual for testing.
   virtual void SetBlacklist(scoped_ptr<URLBlacklist> blacklist);
 
   // Registers the preferences related to blacklisting in the given PrefService.
-  static void RegisterPrefs(PrefService* pref_service);
+  static void RegisterUserPrefs(PrefRegistrySyncable* registry);
 
  protected:
   // Used to delay updating the blacklist while the preferences are

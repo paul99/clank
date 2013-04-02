@@ -1,5 +1,5 @@
 #!/usr/bin/env python
-# Copyright (c) 2012 The Native Client Authors. All rights reserved.
+# Copyright (c) 2012 The Chromium Authors. All rights reserved.
 # Use of this source code is governed by a BSD-style license that can be
 # found in the LICENSE file.
 
@@ -17,17 +17,21 @@ import subprocess
 import sys
 
 
-TOOL_PATH = os.path.dirname(os.path.abspath(__file__))
+SCRIPT_DIR = os.path.dirname(os.path.abspath(__file__))
+
+
+if sys.version_info < (2, 6, 0):
+  sys.stderr.write("python 2.6 or later is required run this script\n")
+  sys.exit(1)
 
 
 def ErrOut(text):
   sys.stderr.write(text + '\n')
   sys.exit(1)
-  
 
 
 def GetSDKPath():
-  return os.getenv('NACL_SDK_ROOT', os.path.dirname(TOOL_PATH))
+  return os.getenv('NACL_SDK_ROOT', os.path.dirname(SCRIPT_DIR))
 
 
 def GetPlatform():
@@ -62,6 +66,8 @@ def GetSystemArch(platform):
       pobj = subprocess.Popen(['uname', '-m'], stdout= subprocess.PIPE)
       arch = pobj.communicate()[0]
       arch = arch.split()[0]
+      if arch.startswith('arm'):
+        arch = 'arm'
     except Exception:
       arch = None
   return arch
@@ -85,6 +91,8 @@ def GetChromeArch(platform):
       arch = pobj.communicate()[0]
       file_format = re.compile(r'(file format) ([a-zA-Z0-9_\-]+)')
       arch = file_format.search(arch).group(2)
+      if 'arm' in arch:
+        return 'arm'
       if '64' in arch:
         return 'x86_64'
       return 'x86_32'

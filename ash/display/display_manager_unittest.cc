@@ -81,7 +81,7 @@ class DisplayManagerTest : public test::AshTestBase,
   }
 
   // aura::WindowObserver overrides:
-  virtual void OnWindowDestroying(aura::Window* window) {
+  virtual void OnWindowDestroying(aura::Window* window) OVERRIDE {
     ASSERT_EQ(Shell::GetPrimaryRootWindow(), window);
     root_window_destroyed_ = true;
   }
@@ -392,7 +392,17 @@ TEST_F(DisplayManagerTest, TestNativeDisplaysChanged) {
   EXPECT_EQ(2U, display_manager()->GetNumDisplays());
 }
 
-TEST_F(DisplayManagerTest, TestNativeDisplaysChangedNoInternal) {
+#if defined(OS_WIN)
+// This test currently fails on Win8/Metro as it picks up the actual
+// display size. http://crbug.com/154081
+#define MAYBE_TestNativeDisplaysChangedNoInternal \
+        DISABLED_TestNativeDisplaysChangedNoInternal
+#else
+#define MAYBE_TestNativeDisplaysChangedNoInternal \
+        TestNativeDisplaysChangedNoInternal
+#endif
+
+TEST_F(DisplayManagerTest, MAYBE_TestNativeDisplaysChangedNoInternal) {
   EXPECT_EQ(1U, display_manager()->GetNumDisplays());
 
   // Don't change the display info if all displays are disconnected.
@@ -512,6 +522,34 @@ TEST_F(DisplayManagerTest, NativeDisplaysChangedAfterPrimaryChange) {
   EXPECT_EQ("-500,0 500x500",
             FindDisplayForId(internal_display_id).bounds().ToString());
   EXPECT_EQ("0,0 100x100", FindDisplayForId(10).bounds().ToString());
+}
+
+TEST_F(DisplayManagerTest, AutomaticOverscanInsets) {
+  UpdateDisplay("200x200,400x400");
+
+  std::vector<gfx::Display> displays;
+  displays.push_back(*display_manager()->GetDisplayAt(0));
+  displays.push_back(*display_manager()->GetDisplayAt(1));
+  int64 id = displays[1].id();
+  display_manager()->SetHasOverscanFlagForTest(id, true);
+
+  display_manager()->OnNativeDisplaysChanged(displays);
+  // It has overscan insets, although SetOverscanInsets() isn't called.
+  EXPECT_EQ("11,211 380x380",
+            display_manager()->GetDisplayAt(1)->bounds_in_pixel().ToString());
+
+  // If custom overscan insets is specified, the specified value is used.
+  display_manager()->SetOverscanInsets(id, gfx::Insets(5, 6, 7, 8));
+  display_manager()->OnNativeDisplaysChanged(displays);
+  EXPECT_EQ("7,206 386x388",
+            display_manager()->GetDisplayAt(1)->bounds_in_pixel().ToString());
+
+  // Do not overscan even though it has 'has_overscan' flag, if the custom
+  // insets is empty.
+  display_manager()->SetOverscanInsets(id, gfx::Insets());
+  display_manager()->OnNativeDisplaysChanged(displays);
+  EXPECT_EQ("1,201 400x400",
+            display_manager()->GetDisplayAt(1)->bounds_in_pixel().ToString());
 }
 
 }  // namespace internal

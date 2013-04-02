@@ -28,14 +28,13 @@
 #if defined(OS_WIN) && !defined(USE_ASH) && !defined(USE_AURA)
 #include "base/win/windows_version.h"
 #include "chrome/browser/shell_integration.h"
-#include "chrome/browser/ui/panels/taskbar_window_thumbnailer_win.h"
+#include "chrome/browser/ui/views/panels/taskbar_window_thumbnailer_win.h"
 #include "ui/base/win/shell.h"
 #include "ui/gfx/icon_util.h"
 #endif
 
-#if defined(OS_WIN) && defined(USE_AURA)
-#include "ui/aura/root_window.h"
-#include "ui/aura/window.h"
+#if defined(OS_WIN)
+#include "chrome/browser/ui/views/hwnd_util.h"
 #endif
 
 namespace {
@@ -99,10 +98,12 @@ class NativePanelTestingWin : public NativePanelTesting {
   virtual bool VerifyDrawingAttention() const OVERRIDE;
   virtual bool VerifyActiveState(bool is_active) OVERRIDE;
   virtual bool VerifyAppIcon() const OVERRIDE;
+  virtual bool VerifySystemMinimizeState() const OVERRIDE;
   virtual bool IsWindowSizeKnown() const OVERRIDE;
   virtual bool IsAnimatingBounds() const OVERRIDE;
   virtual bool IsButtonVisible(
       panel::TitlebarButtonType button_type) const OVERRIDE;
+  virtual panel::CornerStyle GetWindowCornerStyle() const OVERRIDE;
 
   PanelView* panel_view_;
 };
@@ -151,7 +152,7 @@ bool NativePanelTestingWin::VerifyAppIcon() const {
   if (base::win::GetVersion() < base::win::VERSION_WIN7)
     return true;
 
-  HWND native_window = panel_view_->GetNativePanelHandle();
+  HWND native_window = panel_view_->GetNativePanelWindow();
   HICON app_icon = reinterpret_cast<HICON>(
       ::SendMessage(native_window, WM_GETICON, ICON_BIG, 0L));
   if (!app_icon)
@@ -160,6 +161,30 @@ bool NativePanelTestingWin::VerifyAppIcon() const {
   return bitmap.get() &&
          bitmap->width() == panel::kPanelAppIconSize &&
          bitmap->height() == panel::kPanelAppIconSize;
+#else
+  return true;
+#endif
+}
+
+bool NativePanelTestingWin::VerifySystemMinimizeState() const {
+#if defined(OS_WIN) && !defined(USE_AURA)
+  HWND native_window = panel_view_->GetNativePanelWindow();
+  WINDOWPLACEMENT placement;
+  if (!::GetWindowPlacement(native_window, &placement))
+    return false;
+  if (placement.showCmd == SW_MINIMIZE || placement.showCmd == SW_SHOWMINIMIZED)
+    return true;
+
+  // If the panel window has owner window, as in stacked mode, check its owner
+  // window. Note that owner window, instead of parent window, is returned
+  // though GWL_HWNDPARENT contains 'parent'.
+  HWND owner_window =
+      reinterpret_cast<HWND>(::GetWindowLongPtr(native_window,
+                                                GWLP_HWNDPARENT));
+  if (!owner_window || !::GetWindowPlacement(owner_window, &placement))
+    return false;
+  return placement.showCmd == SW_MINIMIZE ||
+         placement.showCmd == SW_SHOWMINIMIZED;
 #else
   return true;
 #endif
@@ -188,6 +213,10 @@ bool NativePanelTestingWin::IsButtonVisible(
       NOTREACHED();
   }
   return false;
+}
+
+panel::CornerStyle NativePanelTestingWin::GetWindowCornerStyle() const {
+  return panel_view_->GetFrameView()->corner_style();
 }
 
 }  // namespace
@@ -416,10 +445,13 @@ bool PanelView::IsPanelActive() const {
 
 void PanelView::PreventActivationByOS(bool prevent_activation) {
 #if defined(OS_WIN) && !defined(USE_ASH) && !defined(USE_AURA)
-  // Set the flags "NoActivate" and "AppWindow" to make sure
-  // the minimized panels do not get activated by the OS, but
-  // do appear in the taskbar and Alt-Tab menu.
-  int value_to_change = WS_EX_NOACTIVATE | WS_EX_APPWINDOW;
+  // Set the flags "NoActivate" to make sure the minimized panels do not get
+  // activated by the OS. In addition, set "AppWindow" to make sure the
+  // minimized panels do appear in the taskbar and Alt-Tab menu if it is not
+  // in a stack.
+  int value_to_change = WS_EX_NOACTIVATE;
+  if (!panel_->stack())
+    value_to_change |= WS_EX_APPWINDOW;
   if (prevent_activation)
     UpdateWindowAttribute(GWL_EXSTYLE, value_to_change, 0, false);
   else
@@ -427,7 +459,7 @@ void PanelView::PreventActivationByOS(bool prevent_activation) {
 #endif
 }
 
-gfx::NativeWindow PanelView::GetNativePanelHandle() {
+gfx::NativeWindow PanelView::GetNativePanelWindow() {
   return window_->GetNativeWindow();
 }
 
@@ -524,6 +556,10 @@ void PanelView::UpdatePanelMinimizeRestoreButtonVisibility() {
   GetFrameView()->UpdateTitlebarMinimizeRestoreButtonVisibility();
 }
 
+void PanelView::SetWindowCornerStyle(panel::CornerStyle corner_style) {
+  GetFrameView()->SetWindowCornerStyle(corner_style);
+}
+
 void PanelView::PanelExpansionStateChanging(Panel::ExpansionState old_state,
                                             Panel::ExpansionState new_state) {
 #if defined(OS_WIN) && !defined(USE_ASH) && !defined(USE_AURA)
@@ -555,7 +591,8 @@ void PanelView::PanelExpansionStateChanging(Panel::ExpansionState old_state,
                      RDW_NOCHILDREN | RDW_INVALIDATE | RDW_UPDATENOW);
     }
 
-    thumbnailer_->Start();
+    std::vector<HWND> snapshot_hwnds;
+    thumbnailer_->Start(snapshot_hwnds);
   } else {
     force_to_paint_as_inactive_ = false;
     thumbnailer_->Stop();
@@ -735,7 +772,7 @@ bool PanelView::AcceleratorPressed(const ui::Accelerator& accelerator) {
   return panel_->ExecuteCommandIfEnabled(iter->second);
 }
 
-void PanelView::OnWidgetClosing(views::Widget* widget) {
+void PanelView::OnWidgetDestroying(views::Widget* widget) {
   window_ = NULL;
 }
 
@@ -743,13 +780,8 @@ void PanelView::OnWidgetActivationChanged(views::Widget* widget, bool active) {
 #if defined(OS_WIN)
   // The panel window is in focus (actually accepting keystrokes) if it is
   // active and belongs to a foreground application.
-#if !defined(USE_AURA)
-  bool focused = active && widget->GetNativeWindow() == ::GetForegroundWindow();
-#else  // USE_AURA
   bool focused = active &&
-      widget->GetNativeView()->GetRootWindow()->GetAcceleratedWidget() ==
-          ::GetForegroundWindow();
-#endif
+      chrome::HWNDForWidget(widget) == ::GetForegroundWindow();
 #else
   NOTIMPLEMENTED();
   bool focused = active;
@@ -768,6 +800,7 @@ void PanelView::OnWidgetActivationChanged(views::Widget* widget, bool active) {
   // When the user clicks on the minimized panel, the panel expansion will be
   // done when we process the mouse button pressed message.
   if (focused_ && panel_->IsMinimized() &&
+      panel_->collection()->type() == PanelCollection::DOCKED &&
       gfx::Screen::GetScreenFor(widget->GetNativeWindow())->
           GetWindowAtCursorScreenPoint() != widget->GetNativeWindow()) {
     panel_->Restore();
@@ -876,13 +909,7 @@ void PanelView::UpdateWindowAttribute(int attribute_index,
                                       int attribute_value_to_set,
                                       int attribute_value_to_reset,
                                       bool update_frame) {
-  HWND native_window;
-#if defined(USE_AURA)
-  native_window =
-      window_->GetNativeWindow()->GetRootWindow()->GetAcceleratedWidget();
-#else
-  native_window = window_->GetNativeWindow();
-#endif
+  HWND native_window = chrome::HWNDForWidget(window_);
   int value = ::GetWindowLong(native_window, attribute_index);
   int expected_value = value;
   if (attribute_value_to_set)

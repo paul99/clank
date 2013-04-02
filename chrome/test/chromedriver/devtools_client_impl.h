@@ -5,9 +5,12 @@
 #ifndef CHROME_TEST_CHROMEDRIVER_DEVTOOLS_CLIENT_IMPL_H_
 #define CHROME_TEST_CHROMEDRIVER_DEVTOOLS_CLIENT_IMPL_H_
 
+#include <list>
+#include <map>
 #include <string>
 
 #include "base/basictypes.h"
+#include "base/callback.h"
 #include "base/compiler_specific.h"
 #include "base/memory/scoped_ptr.h"
 #include "chrome/test/chromedriver/devtools_client.h"
@@ -18,6 +21,31 @@ namespace base {
 class DictionaryValue;
 }
 
+namespace internal {
+
+enum InspectorMessageType {
+  kEventMessageType = 0,
+  kCommandResponseMessageType
+};
+
+struct InspectorEvent {
+  InspectorEvent();
+  ~InspectorEvent();
+  std::string method;
+  scoped_ptr<base::DictionaryValue> params;
+};
+
+struct InspectorCommandResponse {
+  InspectorCommandResponse();
+  ~InspectorCommandResponse();
+  int id;
+  std::string error;
+  scoped_ptr<base::DictionaryValue> result;
+};
+
+}  // namespace internal
+
+class DevToolsEventListener;
 class Status;
 class SyncWebSocket;
 
@@ -25,7 +53,20 @@ class DevToolsClientImpl : public DevToolsClient {
  public:
   DevToolsClientImpl(const SyncWebSocketFactory& factory,
                      const std::string& url);
+
+  typedef base::Callback<bool(
+      const std::string&,
+      int,
+      internal::InspectorMessageType*,
+      internal::InspectorEvent*,
+      internal::InspectorCommandResponse*)> ParserFunc;
+  DevToolsClientImpl(const SyncWebSocketFactory& factory,
+                     const std::string& url,
+                     const ParserFunc& parser_func);
+
   virtual ~DevToolsClientImpl();
+
+  void SetParserFuncForTesting(const ParserFunc& parser_func);
 
   // Overridden from DevToolsClient:
   virtual Status SendCommand(const std::string& method,
@@ -34,18 +75,46 @@ class DevToolsClientImpl : public DevToolsClient {
       const std::string& method,
       const base::DictionaryValue& params,
       scoped_ptr<base::DictionaryValue>* result) OVERRIDE;
+  virtual void AddListener(DevToolsEventListener* listener) OVERRIDE;
+  virtual Status HandleEventsUntil(
+      const ConditionalFunc& conditional_func) OVERRIDE;
 
  private:
   Status SendCommandInternal(
       const std::string& method,
       const base::DictionaryValue& params,
       scoped_ptr<base::DictionaryValue>* result);
+  Status ReceiveCommandResponse(
+      int command_id,
+      scoped_ptr<base::DictionaryValue>* result);
+  Status ReceiveNextMessage(
+      int expected_id,
+      internal::InspectorMessageType* type,
+      internal::InspectorEvent* event,
+      internal::InspectorCommandResponse* response);
+  virtual Status NotifyEventListeners(const std::string& method,
+                                      const base::DictionaryValue& params);
   scoped_ptr<SyncWebSocket> socket_;
   GURL url_;
+  ParserFunc parser_func_;
+  std::list<DevToolsEventListener*> listeners_;
+  typedef std::map<int, base::DictionaryValue*> ResponseMap;
+  ResponseMap cmd_response_map_;
   bool connected_;
   int next_id_;
 
   DISALLOW_COPY_AND_ASSIGN(DevToolsClientImpl);
 };
+
+namespace internal {
+
+bool ParseInspectorMessage(
+    const std::string& message,
+    int expected_id,
+    InspectorMessageType* type,
+    InspectorEvent* event,
+    InspectorCommandResponse* command_response);
+
+}  // namespace internal
 
 #endif  // CHROME_TEST_CHROMEDRIVER_DEVTOOLS_CLIENT_IMPL_H_

@@ -185,6 +185,11 @@ SyncSchedulerImpl::~SyncSchedulerImpl() {
   StopImpl(base::Closure());
 }
 
+void SyncSchedulerImpl::OnJobDestroyed(SyncSessionJob* job) {
+  // TODO(tim): Bug 165561 investigation.
+  CHECK(!pending_nudge_ || pending_nudge_ != job);
+}
+
 void SyncSchedulerImpl::OnCredentialsUpdated() {
   DCHECK_EQ(MessageLoop::current(), sync_loop_);
 
@@ -322,6 +327,7 @@ bool SyncSchedulerImpl::ScheduleConfiguration(
   DCHECK(IsConfigRelatedUpdateSourceValue(params.source));
   DCHECK_EQ(CONFIGURATION_MODE, mode_);
   DCHECK(!params.ready_task.is_null());
+  CHECK(started_) << "Scheduler must be running to configure.";
   SDVLOG(2) << "Reconfiguring syncer.";
 
   // Only one configuration is allowed at a time. Verify we're not waiting
@@ -352,6 +358,7 @@ bool SyncSchedulerImpl::ScheduleConfiguration(
         session.Pass(),
         params,
         FROM_HERE));
+    job->set_destruction_observer(weak_ptr_factory_.GetWeakPtr());
     bool succeeded = DoSyncSessionJob(job.Pass());
 
     // If we failed, the job would have been saved as the pending configure
@@ -431,7 +438,7 @@ SyncSchedulerImpl::JobProcessDecision SyncSchedulerImpl::DecideOnJob(
     // Note that there may already be such an event if we're in a WaitInterval,
     // so we can retry it then.
     if (!requested_types.Empty() && throttled_types.HasAll(requested_types))
-      return SAVE;
+      return DROP;  // TODO(tim): Don't drop. http://crbug.com/177659
   }
 
   if (wait_interval_.get())
@@ -513,7 +520,7 @@ void SyncSchedulerImpl::HandleSaveJobDecision(scoped_ptr<SyncSessionJob> job) {
   if (wait_interval_.get() && !wait_interval_->pending_configure_job) {
     // This job should be made the new canary.
     if (is_nudge) {
-      pending_nudge_ = job_to_save.get();
+      set_pending_nudge(job_to_save.get());
     } else {
       SDVLOG(2) << "Saving a configuration job";
       DCHECK_EQ(job->purpose(), SyncSessionJob::CONFIGURATION);
@@ -525,7 +532,7 @@ void SyncSchedulerImpl::HandleSaveJobDecision(scoped_ptr<SyncSessionJob> job) {
       if (pending_nudge_) {
         // Pre-empt the nudge canary and abandon the old nudge (owned by task).
         unscheduled_nudge_storage_ = pending_nudge_->CloneAndAbandon();
-        pending_nudge_ = unscheduled_nudge_storage_.get();
+        set_pending_nudge(unscheduled_nudge_storage_.get());
       }
       wait_interval_->pending_configure_job = job_to_save.get();
     }
@@ -542,7 +549,7 @@ void SyncSchedulerImpl::HandleSaveJobDecision(scoped_ptr<SyncSessionJob> job) {
   DCHECK(is_nudge);
   // There may or may not be a pending_configure_job. Either way this nudge
   // is unschedulable.
-  pending_nudge_ = job_to_save.get();
+  set_pending_nudge(job_to_save.get());
   unscheduled_nudge_storage_ = job_to_save.Pass();
 }
 
@@ -600,6 +607,12 @@ void SyncSchedulerImpl::ScheduleNudgeImpl(
   DCHECK_EQ(MessageLoop::current(), sync_loop_);
   DCHECK(!invalidation_map.empty()) << "Nudge scheduled for no types!";
 
+  if (!started_) {
+    SDVLOG_LOC(nudge_location, 2)
+        << "Dropping nudge, scheduler is not running.";
+    return;
+  }
+
   SDVLOG_LOC(nudge_location, 2)
       << "In ScheduleNudgeImpl with delay "
       << delay.InMilliseconds() << " ms, "
@@ -616,7 +629,7 @@ void SyncSchedulerImpl::ScheduleNudgeImpl(
       CreateSyncSession(info).Pass(),
       ConfigurationParams(),
       nudge_location));
-
+  job->set_destruction_observer(weak_ptr_factory_.GetWeakPtr());
   JobProcessDecision decision = DecideOnJob(*job);
   SDVLOG(2) << "Should run "
             << SyncSessionJob::GetPurposeString(job->purpose())
@@ -647,8 +660,8 @@ void SyncSchedulerImpl::ScheduleNudgeImpl(
     // was previously unscheduled and giving it wings, so take care to reset
     // unscheduled nudge storage.
     job = pending_nudge_->CloneAndAbandon();
-    unscheduled_nudge_storage_.reset();
     pending_nudge_ = NULL;
+    unscheduled_nudge_storage_.reset();
     // It's also possible we took a canary job, since we allow one nudge
     // per backoff interval.
     DCHECK(!wait_interval_ || !wait_interval_->had_nudge);
@@ -725,7 +738,7 @@ void SyncSchedulerImpl::ScheduleSyncSessionJob(
     SDVLOG_LOC(loc, 2) << "Resetting pending_nudge to ";
     DCHECK(!pending_nudge_ || pending_nudge_->session() ==
            job->session());
-    pending_nudge_ = job.get();
+    set_pending_nudge(job.get());
   }
 
   PostDelayedTask(loc, "DoSyncSessionJob",
@@ -751,6 +764,11 @@ bool SyncSchedulerImpl::DoSyncSessionJob(scoped_ptr<SyncSessionJob> job) {
     // and update any disabled or modified entries in the job.
     job->mutable_session()->RebaseRoutingInfoWithLatest(
         session_context_->routing_info(), session_context_->workers());
+  }
+
+  if (!job->session()) {
+    SDVLOG(2) << "Dropping abandoned job";
+    return false;  // Fix for crbug.com/190085.
   }
 
   base::AutoReset<bool> protector(&no_scheduling_allowed_, true);
@@ -831,6 +849,11 @@ bool SyncSchedulerImpl::FinishSyncSessionJob(scoped_ptr<SyncSessionJob> job,
   return succeeded;
 }
 
+void SyncSchedulerImpl::set_pending_nudge(SyncSessionJob* job) {
+  job->set_destruction_observer(weak_ptr_factory_.GetWeakPtr());
+  pending_nudge_ = job;
+}
+
 void SyncSchedulerImpl::ScheduleNextSync(
     scoped_ptr<SyncSessionJob> finished_job, bool succeeded) {
   DCHECK_EQ(MessageLoop::current(), sync_loop_);
@@ -857,7 +880,7 @@ void SyncSchedulerImpl::ScheduleNextSync(
     // any job through while in WaitInterval::THROTTLED).
     scoped_ptr<SyncSessionJob> clone = finished_job->Clone();
     if (clone->purpose() == SyncSessionJob::NUDGE)
-      pending_nudge_ = clone.get();
+      set_pending_nudge(clone.get());
     else if (clone->purpose() == SyncSessionJob::CONFIGURATION)
       wait_interval_->pending_configure_job = clone.get();
     else
@@ -893,7 +916,7 @@ void SyncSchedulerImpl::ScheduleNextSync(
     DCHECK(!pending_nudge_);
 
     scoped_ptr<SyncSessionJob> new_job = finished_job->Clone();
-    pending_nudge_ = new_job.get();
+    set_pending_nudge(new_job.get());
     RestartWaiting(new_job.Pass());
   } else {
     // Either this is the first failure or a consecutive failure after our
@@ -975,7 +998,7 @@ void SyncSchedulerImpl::HandleContinuationError(
     // should be null.
     DCHECK(wait_interval_->pending_configure_job == NULL);
     DCHECK(!pending_nudge_);
-    pending_nudge_ = new_job.get();
+    set_pending_nudge(new_job.get());
   }
 
   RestartWaiting(new_job.Pass());
@@ -998,6 +1021,8 @@ void SyncSchedulerImpl::StopImpl(const base::Closure& callback) {
   weak_ptr_factory_.InvalidateWeakPtrs();
   wait_interval_.reset();
   poll_timer_.Stop();
+  pending_nudge_ = NULL;
+  unscheduled_nudge_storage_.reset();
   if (started_) {
     started_ = false;
   }
@@ -1049,7 +1074,7 @@ scoped_ptr<SyncSessionJob> SyncSchedulerImpl::TakePendingJobForCurrentMode() {
   } else if (mode_ == NORMAL_MODE && pending_nudge_) {
     SDVLOG(2) << "Found pending nudge job";
     candidate = pending_nudge_->CloneAndAbandon();
-    pending_nudge_ = candidate.get();
+    set_pending_nudge(candidate.get());
     unscheduled_nudge_storage_.reset();
   }
   // If we took a job and there's a wait interval, we took the pending canary.
@@ -1081,6 +1106,7 @@ void SyncSchedulerImpl::PollTimerCallback() {
                                                     s.Pass(),
                                                     ConfigurationParams(),
                                                     FROM_HERE));
+  job->set_destruction_observer(weak_ptr_factory_.GetWeakPtr());
   ScheduleSyncSessionJob(job.Pass());
 }
 

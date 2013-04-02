@@ -840,7 +840,7 @@ TEST_F(ViewTest, DISABLED_Painting) {
 TEST_F(ViewTest, RemoveNotification) {
   ViewStorage* vs = ViewStorage::GetInstance();
   Widget* widget = new Widget;
-  widget->Init(Widget::InitParams(Widget::InitParams::TYPE_POPUP));
+  widget->Init(CreateParams(Widget::InitParams::TYPE_POPUP));
   View* root_view = widget->GetRootView();
 
   View* v1 = new View;
@@ -935,10 +935,10 @@ class HitTestView : public View {
 
  protected:
   // Overridden from View:
-  virtual bool HasHitTestMask() const {
+  virtual bool HasHitTestMask() const OVERRIDE {
     return has_hittest_mask_;
   }
-  virtual void GetHitTestMask(gfx::Path* mask) const {
+  virtual void GetHitTestMask(gfx::Path* mask) const OVERRIDE {
     DCHECK(has_hittest_mask_);
     DCHECK(mask);
 
@@ -1558,7 +1558,6 @@ TEST_F(ViewTest, DISABLED_RerouteMouseWheelTest) {
 class MockMenuModel : public ui::MenuModel {
  public:
   MOCK_CONST_METHOD0(HasIcons, bool());
-  MOCK_CONST_METHOD1(GetFirstItemIndex, int(gfx::NativeMenu native_menu));
   MOCK_CONST_METHOD0(GetItemCount, int());
   MOCK_CONST_METHOD1(GetTypeAt, ItemType(int index));
   MOCK_CONST_METHOD1(GetSeparatorTypeAt, ui::MenuSeparatorType(int index));
@@ -1665,7 +1664,6 @@ class TestDialog : public DialogDelegate, public ButtonListener {
   void ExpectShowDropMenu() {
     if (mock_menu_model_) {
       EXPECT_CALL(*mock_menu_model_, HasIcons());
-      EXPECT_CALL(*mock_menu_model_, GetFirstItemIndex(_));
       EXPECT_CALL(*mock_menu_model_, GetItemCount());
       EXPECT_CALL(*mock_menu_model_, MenuClosed());
     }
@@ -1898,9 +1896,10 @@ class TestNativeViewHierarchy : public View {
   TestNativeViewHierarchy() {
   }
 
-  virtual void NativeViewHierarchyChanged(bool attached,
-                                          gfx::NativeView native_view,
-                                          internal::RootView* root_view) {
+  virtual void NativeViewHierarchyChanged(
+      bool attached,
+      gfx::NativeView native_view,
+      internal::RootView* root_view) OVERRIDE {
     NotificationInfo info;
     info.attached = attached;
     info.native_view = native_view;
@@ -1922,7 +1921,8 @@ class TestChangeNativeViewHierarchy {
     view_test_ = view_test;
     native_host_ = new NativeViewHost();
     host_ = new Widget;
-    Widget::InitParams params(Widget::InitParams::TYPE_POPUP);
+    Widget::InitParams params =
+        view_test->CreateParams(Widget::InitParams::TYPE_POPUP);
     params.bounds = gfx::Rect(0, 0, 500, 300);
     host_->Init(params);
     host_->GetRootView()->AddChildView(native_host_);
@@ -2034,7 +2034,7 @@ class TransformPaintView : public TestView {
   gfx::Rect scheduled_paint_rect() const { return scheduled_paint_rect_; }
 
   // Overridden from View:
-  virtual void SchedulePaintInRect(const gfx::Rect& rect) {
+  virtual void SchedulePaintInRect(const gfx::Rect& rect) OVERRIDE {
     gfx::Rect xrect = ConvertRectToParent(rect);
     scheduled_paint_rect_.Union(xrect);
   }
@@ -2272,10 +2272,10 @@ class VisibleBoundsView : public View {
 
  private:
   // Overridden from View:
-  virtual bool NeedsNotificationWhenVisibleBoundsChange() const {
+  virtual bool NeedsNotificationWhenVisibleBoundsChange() const OVERRIDE {
      return true;
   }
-  virtual void OnVisibleBoundsChanged() {
+  virtual void OnVisibleBoundsChanged() OVERRIDE {
     received_notification_ = true;
   }
 
@@ -2897,7 +2897,7 @@ class TestLayerAnimator : public ui::LayerAnimator {
   virtual void SetBounds(const gfx::Rect& bounds) OVERRIDE;
 
  protected:
-  ~TestLayerAnimator() { }
+  virtual ~TestLayerAnimator() { }
 
  private:
   gfx::Rect last_bounds_;

@@ -5,6 +5,7 @@
 #include "content/public/common/url_constants.h"
 
 #include "content/common/savable_url_schemes.h"
+#include "googleurl/src/gurl.h"
 
 namespace chrome {
 
@@ -30,18 +31,28 @@ const char kSwappedOutScheme[] = "swappedout";
 const char kViewSourceScheme[] = "view-source";
 
 const char kAboutBlankURL[] = "about:blank";
+const char kAboutSrcDocURL[] = "about:srcdoc";
 const char kChromeUIAppCacheInternalsHost[] = "appcache-internals";
 const char kChromeUIBlobInternalsHost[] = "blob-internals";
 const char kChromeUIBrowserCrashHost[] = "inducebrowsercrashforrealz";
-const char kChromeUINetworkViewCacheHost[] = "view-http-cache";
-const char kChromeUITcmallocHost[] = "tcmalloc";
+const char kChromeUIDevToolsHost[] = "devtools";
+const char kChromeUIGpuHost[] = "gpu";
 const char kChromeUIHistogramHost[] = "histograms";
+const char kChromeUIMediaInternalsHost[] = "media-internals";
+const char kChromeUINetworkViewCacheHost[] = "view-http-cache";
+const char kChromeUIResourcesHost[] = "resources";
+const char kChromeUITcmallocHost[] = "tcmalloc";
+const char kChromeUITracingHost[] = "tracing";
+const char kChromeUIWebRTCInternalsHost[] = "webrtc-internals";
+
 const char kChromeUICrashURL[] = "chrome://crash";
 const char kChromeUIGpuCleanURL[] = "chrome://gpuclean";
 const char kChromeUIGpuCrashURL[] = "chrome://gpucrash";
 const char kChromeUIGpuHangURL[] = "chrome://gpuhang";
 const char kChromeUIHangURL[] = "chrome://hang";
 const char kChromeUIKillURL[] = "chrome://kill";
+const char kChromeUIPpapiFlashCrashURL[] = "chrome://ppapiflashcrash";
+const char kChromeUIPpapiFlashHangURL[] = "chrome://ppapiflashhang";
 
 }  // namespace chrome
 
@@ -63,6 +74,15 @@ const char kSwappedOutURL[] = "swappedout://";
 
 const char* const* GetSavableSchemes() {
   return GetSavableSchemesInternal();
+}
+
+bool HasWebUIScheme(const GURL& url) {
+  return
+#if !defined(OS_IOS)
+         url.SchemeIs(chrome::kChromeDevToolsScheme) ||
+         url.SchemeIs(chrome::kChromeInternalScheme) ||
+#endif
+         url.SchemeIs(chrome::kChromeUIScheme);
 }
 
 }  // namespace content

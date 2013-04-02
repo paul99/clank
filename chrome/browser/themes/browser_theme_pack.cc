@@ -15,6 +15,7 @@
 #include "base/utf_string_conversions.h"
 #include "base/values.h"
 #include "chrome/browser/themes/theme_service.h"
+#include "chrome/common/extensions/api/themes/theme_handler.h"
 #include "content/public/browser/browser_thread.h"
 #include "grit/theme_resources.h"
 #include "grit/ui_resources.h"
@@ -325,7 +326,7 @@ const int kPreloadIDs[] = {
 };
 
 // Returns a piece of memory with the contents of the file |path|.
-base::RefCountedMemory* ReadFileData(const FilePath& path) {
+base::RefCountedMemory* ReadFileData(const base::FilePath& path) {
   if (!path.empty()) {
     net::FileStream file(NULL);
     int flags = base::PLATFORM_FILE_OPEN | base::PLATFORM_FILE_READ;
@@ -454,15 +455,17 @@ scoped_refptr<BrowserThemePack> BrowserThemePack::BuildFromExtension(
 
   scoped_refptr<BrowserThemePack> pack(new BrowserThemePack);
   pack->BuildHeader(extension);
-  pack->BuildTintsFromJSON(extension->GetThemeTints());
-  pack->BuildColorsFromJSON(extension->GetThemeColors());
-  pack->BuildDisplayPropertiesFromJSON(extension->GetThemeDisplayProperties());
+  pack->BuildTintsFromJSON(extensions::ThemeInfo::GetThemeTints(extension));
+  pack->BuildColorsFromJSON(extensions::ThemeInfo::GetThemeColors(extension));
+  pack->BuildDisplayPropertiesFromJSON(
+      extensions::ThemeInfo::GetThemeDisplayProperties(extension));
 
   // Builds the images. (Image building is dependent on tints).
   FilePathMap file_paths;
-  pack->ParseImageNamesFromJSON(extension->GetThemeImages(),
-                                extension->path(),
-                                &file_paths);
+  pack->ParseImageNamesFromJSON(
+      extensions::ThemeInfo::GetThemeImages(extension),
+      extension->path(),
+      &file_paths);
   pack->BuildSourceImagesArray(file_paths);
 
   if (!pack->LoadRawBitmapsTo(file_paths, &pack->images_on_ui_thread_))
@@ -488,7 +491,7 @@ scoped_refptr<BrowserThemePack> BrowserThemePack::BuildFromExtension(
 
 // static
 scoped_refptr<BrowserThemePack> BrowserThemePack::BuildFromDataPack(
-    const FilePath& path, const std::string& expected_id) {
+    const base::FilePath& path, const std::string& expected_id) {
   DCHECK(BrowserThread::CurrentlyOn(BrowserThread::UI));
   // Allow IO on UI thread due to deep-seated theme design issues.
   // (see http://crbug.com/80206)
@@ -553,7 +556,7 @@ scoped_refptr<BrowserThemePack> BrowserThemePack::BuildFromDataPack(
   return pack;
 }
 
-bool BrowserThemePack::WriteToDisk(const FilePath& path) const {
+bool BrowserThemePack::WriteToDisk(const base::FilePath& path) const {
   // Add resources for each of the property arrays.
   RawDataForWriting resources;
   resources[kHeaderID] = base::StringPiece(
@@ -950,7 +953,7 @@ void BrowserThemePack::BuildDisplayPropertiesFromJSON(
 
 void BrowserThemePack::ParseImageNamesFromJSON(
     DictionaryValue* images_value,
-    const FilePath& images_path,
+    const base::FilePath& images_path,
     FilePathMap* file_paths) const {
   if (!images_value)
     return;
@@ -1013,7 +1016,8 @@ bool BrowserThemePack::LoadRawBitmapsTo(
       SkBitmap bitmap;
       if (gfx::PNGCodec::Decode(raw_data->front(), raw_data->size(),
                                 &bitmap)) {
-        (*image_cache)[prs_id] = new gfx::Image(bitmap);
+        (*image_cache)[prs_id] =
+            new gfx::Image(gfx::ImageSkia::CreateFrom1xBitmap(bitmap));
       } else {
         NOTREACHED() << "Unable to decode theme image resource " << it->first;
       }

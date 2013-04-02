@@ -14,9 +14,18 @@
 #
 # By default we will build a Debug configuration using the GCC newlib toolcahin
 # to override this, specify TOOLCHAIN=newlib|glibc or CONFIG=Debug|Release on
-# the make command-line or in this file prior to including common.mk
+# the make command-line or in this file prior to including common.mk.  The
+# toolchain we use by default will be the first valid one listed
+VALID_TOOLCHAINS:=newlib glibc
+
 #
-include common.mk
+# Get pepper directory for toolchain and includes.
+#
+# If NACL_SDK_ROOT is not set, then assume it can be found relative to
+# to this Makefile.
+#
+NACL_SDK_ROOT?=$(abspath $(CURDIR)/../..)
+include $(NACL_SDK_ROOT)/tools/common.mk
 
 
 #
@@ -39,11 +48,20 @@ SOURCES=hello_world.c
 # order should be symbol reference followed by symbol definition, with direct
 # sources to the link (object files) are left most.  In this case:
 #    hello_world -> ppapi_main -> ppapi_cpp -> ppapi -> pthread -> libc
-# Notice that pthread and libc are implied and come last through standard
-# compiler/link switches, for example -pthread.
-# 
-LIBS=ppapi_main nacl_mounts ppapi_cpp ppapi
+# Notice that libc is implied and come last through standard compiler/link
+# switches.
+#
+# We break this list down into two parts, the set we need to rebuild (DEPS)
+# and the set we do not.
+#
+DEPS=ppapi_main nacl_io
+LIBS=$(DEPS) ppapi_cpp ppapi pthread
 
+
+#
+# Use the library dependency macro for each dependency
+#
+$(foreach dep,$(DEPS),$(eval $(call DEPEND_RULE,$(dep))))
 
 #
 # Use the compile macro for each source.
@@ -53,7 +71,7 @@ $(foreach src,$(SOURCES),$(eval $(call COMPILE_RULE,$(src))))
 #
 # Use the link macro for this target on the list of sources.
 #
-$(eval $(call LINK_RULE,$(TARGET),$(SOURCES),$(LIBS)))
+$(eval $(call LINK_RULE,$(TARGET),$(SOURCES),$(LIBS),$(DEPS)))
 
 #
 # Specify the NMF to be created with no additional arugments.

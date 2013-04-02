@@ -5,12 +5,10 @@
 #include "chrome/browser/ui/views/toolbar_view.h"
 
 #include "base/i18n/number_formatting.h"
+#include "base/prefs/pref_service.h"
 #include "base/utf_string_conversions.h"
 #include "chrome/app/chrome_command_ids.h"
 #include "chrome/browser/command_updater.h"
-#include "chrome/browser/event_disposition.h"
-#include "chrome/browser/infobars/infobar_tab_helper.h"
-#include "chrome/browser/prefs/pref_service.h"
 #include "chrome/browser/profiles/profile.h"
 #include "chrome/browser/themes/theme_service.h"
 #include "chrome/browser/ui/browser.h"
@@ -29,6 +27,7 @@
 #include "chrome/browser/ui/views/browser_actions_container.h"
 #include "chrome/browser/ui/views/extensions/disabled_extensions_view.h"
 #include "chrome/browser/ui/views/frame/browser_view.h"
+#include "chrome/browser/ui/views/home_button.h"
 #include "chrome/browser/ui/views/location_bar/page_action_image_view.h"
 #include "chrome/browser/ui/views/location_bar/star_view.h"
 #include "chrome/browser/ui/views/wrench_menu.h"
@@ -49,6 +48,7 @@
 #include "ui/base/layout.h"
 #include "ui/base/resource/resource_bundle.h"
 #include "ui/base/theme_provider.h"
+#include "ui/base/window_open_disposition.h"
 #include "ui/gfx/canvas.h"
 #include "ui/gfx/image/canvas_image_source.h"
 #include "ui/views/controls/button/button_dropdown.h"
@@ -85,13 +85,11 @@ const int kRightEdgeSpacing = 2;
 // The buttons to the left of the omnibox are close together.
 const int kButtonSpacing = 0;
 
-#if defined(USE_ASH)
 // Ash doesn't use a rounded content area and its top edge has an extra shadow.
-const int kContentShadowHeight = 2;
-#else
-// Windows uses a rounded content area with no shadow in the assets.
+const int kContentShadowHeightAsh = 2;
+
+// Non-ash uses a rounded content area with no shadow in the assets.
 const int kContentShadowHeight = 0;
-#endif
 
 const int kPopupTopSpacingNonGlass = 3;
 const int kPopupBottomSpacingNonGlass = 2;
@@ -109,7 +107,6 @@ int location_bar_vert_spacing() {
   static int value = -1;
   if (value == -1) {
     switch (ui::GetDisplayLayout()) {
-      case ui::LAYOUT_ASH:
       case ui::LAYOUT_DESKTOP:
         value = ToolbarView::kVertSpacing;
         break;
@@ -131,11 +128,11 @@ class BadgeImageSource: public gfx::CanvasImageSource {
         badge_(badge) {
   }
 
-  ~BadgeImageSource() {
+  virtual ~BadgeImageSource() {
   }
 
   // Overridden from gfx::CanvasImageSource:
-  void Draw(gfx::Canvas* canvas) OVERRIDE {
+  virtual void Draw(gfx::Canvas* canvas) OVERRIDE {
     canvas->DrawImageInt(icon_, 0, 0);
     canvas->DrawImageInt(badge_, icon_.width() - badge_.width(),
                          kBadgeTopMargin);
@@ -247,7 +244,7 @@ void ToolbarView::Init() {
   reload_->SetAccessibleName(l10n_util::GetStringUTF16(IDS_ACCNAME_RELOAD));
   reload_->set_id(VIEW_ID_RELOAD_BUTTON);
 
-  home_ = new views::ImageButton(this);
+  home_ = new HomeImageButton(this, browser_);
   home_->set_triggerable_event_flags(ui::EF_LEFT_MOUSE_BUTTON |
                                      ui::EF_MIDDLE_MOUSE_BUTTON);
   home_->set_tag(IDC_HOME);
@@ -463,11 +460,11 @@ ToolbarView::GetContentSettingBubbleModelDelegate() {
   return browser_->content_setting_bubble_model_delegate();
 }
 
-void ToolbarView::ShowPageInfo(content::WebContents* web_contents,
-                          const GURL& url,
-                          const content::SSLStatus& ssl,
-                          bool show_history) {
-  chrome::ShowPageInfo(browser_, web_contents, url, ssl, show_history);
+void ToolbarView::ShowWebsiteSettings(content::WebContents* web_contents,
+                                      const GURL& url,
+                                      const content::SSLStatus& ssl,
+                                      bool show_history) {
+  chrome::ShowWebsiteSettings(browser_, web_contents, url, ssl, show_history);
 }
 
 views::Widget* ToolbarView::CreateViewsBubble(
@@ -518,7 +515,7 @@ void ToolbarView::ButtonPressed(views::Button* sender,
                                 const ui::Event& event) {
   int command = sender->tag();
   WindowOpenDisposition disposition =
-      chrome::DispositionFromEventFlags(event.flags());
+      ui::DispositionFromEventFlags(event.flags());
   if ((disposition == CURRENT_TAB) &&
       ((command == IDC_BACK) || (command == IDC_FORWARD))) {
     // Forcibly reset the location bar, since otherwise it won't discard any
@@ -597,6 +594,10 @@ bool ToolbarView::GetAcceleratorForCommandId(int command_id,
     case IDC_TASK_MANAGER:
       *accelerator = ui::Accelerator(ui::VKEY_ESCAPE, ui::EF_SHIFT_DOWN);
       return true;
+    case IDC_FEEDBACK:
+      *accelerator = ui::Accelerator(ui::VKEY_I,
+                                     ui::EF_SHIFT_DOWN | ui::EF_ALT_DOWN);
+      return true;
 #endif
   }
   // Else, we retrieve the accelerator information from the frame.
@@ -617,15 +618,10 @@ gfx::Size ToolbarView::GetPreferredSize() {
         location_bar_->GetPreferredSize().width() +
         browser_actions_->GetPreferredSize().width() +
         app_menu_->GetPreferredSize().width() + kRightEdgeSpacing;
-
-    CR_DEFINE_STATIC_LOCAL(gfx::ImageSkia, normal_background, ());
-    if (normal_background.isNull()) {
-      ui::ResourceBundle& rb = ui::ResourceBundle::GetSharedInstance();
-      normal_background = *rb.GetImageSkiaNamed(IDR_CONTENT_TOP_CENTER);
-    }
-
+    gfx::ImageSkia* normal_background =
+        GetThemeProvider()->GetImageSkiaNamed(IDR_CONTENT_TOP_CENTER);
     return gfx::Size(min_width,
-                     normal_background.height() - kContentShadowHeight);
+                     normal_background->height() - content_shadow_height());
   }
 
   int vertical_spacing = PopupTopSpacing() +
@@ -720,7 +716,7 @@ void ToolbarView::Layout() {
 bool ToolbarView::HitTestRect(const gfx::Rect& rect) const {
   // Don't take hits in our top shadow edge.  Let them fall through to the
   // tab strip above us.
-  if (rect.y() < kContentShadowHeight)
+  if (rect.y() < content_shadow_height())
     return false;
   // Otherwise let our superclass take care of it.
   return AccessiblePaneView::HitTestRect(rect);
@@ -907,4 +903,9 @@ void ToolbarView::UpdateAppMenuState() {
 void ToolbarView::OnShowHomeButtonChanged() {
   Layout();
   SchedulePaint();
+}
+
+int ToolbarView::content_shadow_height() const {
+  return browser_->host_desktop_type() == chrome::HOST_DESKTOP_TYPE_ASH ?
+      kContentShadowHeightAsh : kContentShadowHeight;
 }

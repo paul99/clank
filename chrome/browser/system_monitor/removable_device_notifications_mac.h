@@ -10,13 +10,12 @@
 
 #include "base/mac/scoped_cftyperef.h"
 #include "base/memory/ref_counted.h"
-#include "base/system_monitor/system_monitor.h"
 #include "chrome/browser/system_monitor/disk_info_mac.h"
 #include "chrome/browser/system_monitor/removable_storage_notifications.h"
 
 namespace chrome {
 
-// This class posts notifications to base::SystemMonitor when a new disk
+// This class posts notifications to listeners when a new disk
 // is attached, removed, or changed.
 class RemovableDeviceNotificationsMac
     : public RemovableStorageNotifications,
@@ -34,8 +33,8 @@ class RemovableDeviceNotificationsMac
   void UpdateDisk(const DiskInfoMac& info, UpdateType update_type);
 
   virtual bool GetDeviceInfoForPath(
-      const FilePath& path,
-      base::SystemMonitor::RemovableStorageInfo* device_info) const OVERRIDE;
+      const base::FilePath& path,
+      StorageInfo* device_info) const OVERRIDE;
 
   // Returns the storage size of the device present at |location|. If the
   // device information is unavailable, returns zero. |location| must be a
@@ -53,7 +52,7 @@ class RemovableDeviceNotificationsMac
                                              void *context);
 
   bool ShouldPostNotificationForDisk(const DiskInfoMac& info) const;
-  bool FindDiskWithMountPoint(const FilePath& mount_point,
+  bool FindDiskWithMountPoint(const base::FilePath& mount_point,
                               DiskInfoMac* info) const;
 
   base::mac::ScopedCFTypeRef<DASessionRef> session_;

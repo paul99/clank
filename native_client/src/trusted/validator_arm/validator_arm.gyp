@@ -43,11 +43,16 @@
         'address_set.cc',
         'actual_classes.cc',
         'baseline_classes.cc',
-        'cpuid_arm.c',
         'inst_classes.cc',
         'model.cc',
+        'arm_helpers.cc',
         'validator.cc',
-        'gen/arm32_decode.cc'
+        'gen/arm32_decode.cc',
+        'gen/arm32_decode_actuals_1.cc',
+        'gen/arm32_decode_actuals_2.cc'
+      ],
+      'dependencies': [
+        '<(DEPTH)/native_client/src/trusted/cpu_features/cpu_features.gyp:cpu_features'
       ],
     },
     # ----------------------------------------------------------------------

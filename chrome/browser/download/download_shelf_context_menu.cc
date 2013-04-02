@@ -21,23 +21,31 @@
 using content::DownloadItem;
 using extensions::Extension;
 
-DownloadShelfContextMenu::~DownloadShelfContextMenu() {}
+DownloadShelfContextMenu::~DownloadShelfContextMenu() {
+  DetachFromDownloadItem();
+}
 
 DownloadShelfContextMenu::DownloadShelfContextMenu(
-    DownloadItemModel* download_model,
+    DownloadItem* download_item,
     content::PageNavigator* navigator)
-    : download_model_(download_model),
-      download_item_(download_model->download()),
+    : download_item_(download_item),
       navigator_(navigator) {
+  DCHECK(download_item_);
+  download_item_->AddObserver(this);
 }
 
 ui::SimpleMenuModel* DownloadShelfContextMenu::GetMenuModel() {
   ui::SimpleMenuModel* model = NULL;
+
+  if (!download_item_)
+    return NULL;
+
+  DownloadItemModel download_model(download_item_);
   // We shouldn't be opening a context menu for a dangerous download, unless it
   // is a malicious download.
-  DCHECK(!download_model_->IsDangerous() || download_model_->IsMalicious());
+  DCHECK(!download_model.IsDangerous() || download_model.IsMalicious());
 
-  if (download_model_->IsMalicious())
+  if (download_model.IsMalicious())
     model = GetMaliciousMenuModel();
   else if (download_item_->IsComplete())
     model = GetFinishedMenuModel();
@@ -49,22 +57,21 @@ ui::SimpleMenuModel* DownloadShelfContextMenu::GetMenuModel() {
 }
 
 bool DownloadShelfContextMenu::IsCommandIdEnabled(int command_id) const {
+  if (!download_item_)
+    return false;
+
   switch (static_cast<ContextMenuCommands>(command_id)) {
     case SHOW_IN_FOLDER:
-      return download_item_->CanShowInFolder() &&
-          !download_item_->IsTemporary();
+      return download_item_->CanShowInFolder();
     case OPEN_WHEN_COMPLETE:
-      return download_item_->CanShowInFolder() &&
-          !download_item_->IsTemporary() &&
-          (!download_crx_util::IsExtensionDownload(*download_item_) ||
-           download_item_->IsComplete());
+      return download_item_->CanOpenDownload() &&
+          !download_crx_util::IsExtensionDownload(*download_item_);
     case ALWAYS_OPEN_TYPE:
       // For temporary downloads, the target filename might be a temporary
       // filename. Don't base an "Always open" decision based on it. Also
       // exclude extensions.
       return download_item_->CanOpenDownload() &&
-          !download_crx_util::IsExtensionDownload(*download_item_) &&
-          !download_item_->IsTemporary();
+          !download_crx_util::IsExtensionDownload(*download_item_);
     case CANCEL:
       return download_item_->IsPartialDownload();
     case TOGGLE_PAUSE:
@@ -79,6 +86,9 @@ bool DownloadShelfContextMenu::IsCommandIdEnabled(int command_id) const {
 }
 
 bool DownloadShelfContextMenu::IsCommandIdChecked(int command_id) const {
+  if (!download_item_)
+    return false;
+
   switch (command_id) {
     case OPEN_WHEN_COMPLETE:
       return download_item_->GetOpenWhenComplete() ||
@@ -92,6 +102,9 @@ bool DownloadShelfContextMenu::IsCommandIdChecked(int command_id) const {
 }
 
 void DownloadShelfContextMenu::ExecuteCommand(int command_id) {
+  if (!download_item_)
+    return;
+
   switch (static_cast<ContextMenuCommands>(command_id)) {
     case SHOW_IN_FOLDER:
       download_item_->ShowDownloadInShell();
@@ -102,7 +115,7 @@ void DownloadShelfContextMenu::ExecuteCommand(int command_id) {
     case ALWAYS_OPEN_TYPE: {
       DownloadPrefs* prefs = DownloadPrefs::FromBrowserContext(
           download_item_->GetBrowserContext());
-      FilePath path = download_item_->GetUserVerifiedFilePath();
+      base::FilePath path = download_item_->GetUserVerifiedFilePath();
       if (!IsCommandIdChecked(ALWAYS_OPEN_TYPE))
         prefs->EnableAutoOpenBasedOnExtension(path);
       else
@@ -110,14 +123,18 @@ void DownloadShelfContextMenu::ExecuteCommand(int command_id) {
       break;
     }
     case CANCEL:
-      download_model_->CancelTask();
+      download_item_->Cancel(true /* Cancelled by user */);
       break;
     case TOGGLE_PAUSE:
       // It is possible for the download to complete before the user clicks the
       // menu item, recheck if the download is in progress state before toggling
       // pause.
-      if (download_item_->IsPartialDownload())
-        download_item_->TogglePause();
+      if (download_item_->IsPartialDownload()) {
+        if (download_item_->IsPaused())
+          download_item_->Resume();
+        else
+          download_item_->Pause();
+      }
       break;
     case DISCARD:
       download_item_->Delete(DownloadItem::DELETE_DUE_TO_USER_DISCARD);
@@ -169,18 +186,17 @@ string16 DownloadShelfContextMenu::GetLabelForCommandId(int command_id) const {
     case SHOW_IN_FOLDER:
       return l10n_util::GetStringUTF16(IDS_DOWNLOAD_MENU_SHOW);
     case OPEN_WHEN_COMPLETE:
-      if (download_item_->IsInProgress())
+      if (download_item_ && download_item_->IsInProgress())
         return l10n_util::GetStringUTF16(IDS_DOWNLOAD_MENU_OPEN_WHEN_COMPLETE);
       return l10n_util::GetStringUTF16(IDS_DOWNLOAD_MENU_OPEN);
     case ALWAYS_OPEN_TYPE:
       return l10n_util::GetStringUTF16(IDS_DOWNLOAD_MENU_ALWAYS_OPEN_TYPE);
     case CANCEL:
       return l10n_util::GetStringUTF16(IDS_DOWNLOAD_MENU_CANCEL);
-    case TOGGLE_PAUSE: {
-      if (download_item_->IsPaused())
+    case TOGGLE_PAUSE:
+      if (download_item_ && download_item_->IsPaused())
         return l10n_util::GetStringUTF16(IDS_DOWNLOAD_MENU_RESUME_ITEM);
       return l10n_util::GetStringUTF16(IDS_DOWNLOAD_MENU_PAUSE_ITEM);
-    }
     case DISCARD:
       return l10n_util::GetStringUTF16(IDS_DOWNLOAD_MENU_DISCARD);
     case KEEP:
@@ -193,6 +209,19 @@ string16 DownloadShelfContextMenu::GetLabelForCommandId(int command_id) const {
   }
   NOTREACHED();
   return string16();
+}
+
+void DownloadShelfContextMenu::DetachFromDownloadItem() {
+  if (!download_item_)
+    return;
+
+  download_item_->RemoveObserver(this);
+  download_item_ = NULL;
+}
+
+void DownloadShelfContextMenu::OnDownloadDestroyed(DownloadItem* download) {
+  DCHECK(download_item_ == download);
+  DetachFromDownloadItem();
 }
 
 ui::SimpleMenuModel* DownloadShelfContextMenu::GetInProgressMenuModel() {

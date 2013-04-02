@@ -88,7 +88,7 @@ void HungPagesTableModel::InitForWebContents(WebContents* hung_contents) {
       tab_observers_.push_back(new WebContentsObserverImpl(this,
                                                            hung_contents));
     }
-    for (TabContentsIterator it; !it.done(); ++it) {
+    for (TabContentsIterator it; !it.done(); it.Next()) {
       if (*it != hung_contents &&
           it->GetRenderProcessHost() == hung_contents->GetRenderProcessHost())
         tab_observers_.push_back(new WebContentsObserverImpl(this, *it));
@@ -100,7 +100,7 @@ void HungPagesTableModel::InitForWebContents(WebContents* hung_contents) {
 }
 
 ///////////////////////////////////////////////////////////////////////////////
-// HungPagesTableModel, views::GroupTableModel implementation:
+// HungPagesTableModel, ui::TableModel implementation:
 
 int HungPagesTableModel::RowCount() {
   return static_cast<int>(tab_observers_.size());
@@ -128,8 +128,8 @@ void HungPagesTableModel::SetObserver(ui::TableModelObserver* observer) {
   observer_ = observer;
 }
 
-void HungPagesTableModel::GetGroupRangeForItem(int item,
-                                               views::GroupRange* range) {
+void HungPagesTableModel::GetGroupRange(int model_index,
+                                        views::GroupRange* range) {
   DCHECK(range);
   range->start = 0;
   range->length = RowCount();
@@ -320,10 +320,6 @@ bool HungRendererDialogView::Accept(bool window_closing) {
   return true;
 }
 
-views::View* HungRendererDialogView::GetContentsView() {
-  return this;
-}
-
 ///////////////////////////////////////////////////////////////////////////////
 // HungRendererDialogView, views::ButtonListener implementation:
 
@@ -371,9 +367,10 @@ void HungRendererDialogView::Init() {
   hung_pages_table_model_.reset(new HungPagesTableModel(this));
   std::vector<ui::TableColumn> columns;
   columns.push_back(ui::TableColumn());
-  hung_pages_table_ = new views::GroupTableView(
+  hung_pages_table_ = new views::TableView(
       hung_pages_table_model_.get(), columns, views::ICON_AND_TEXT, true,
-      false, true, false);
+      false, true);
+  hung_pages_table_->SetGrouper(hung_pages_table_model_.get());
 
   CreateKillButtonView();
 

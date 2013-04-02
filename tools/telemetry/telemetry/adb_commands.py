@@ -78,6 +78,15 @@ class AdbCommands(object):
     """
     return self._adb.RunShellCommand(command, timeout_time, log_result)
 
+  def CloseApplication(self, package):
+    """Attempt to close down the application, using increasing violence.
+
+    Args:
+      package: Name of the process to kill off, e.g.
+      com.google.android.apps.chrome
+    """
+    self._adb.CloseApplication(package)
+
   def KillAll(self, process):
     """Android version of killall, connected via adb.
 
@@ -149,14 +158,10 @@ class Forwarder(object):
   def __init__(self, adb, *port_pairs):
     assert HasForwarder()
     tool = valgrind_tools.BaseTool()
-    self._host_port = port_pairs[0][0]
+    self._host_port = port_pairs[0].local_port
 
-    new_port_pairs = []
-    for port_pair in port_pairs:
-      if port_pair[1] is None:
-        new_port_pairs.append((port_pair[0], port_pair[0]))
-      else:
-        new_port_pairs.append(port_pair)
+    new_port_pairs = [(port_pair.local_port, port_pair.remote_port)
+                      for port_pair in port_pairs]
 
     buildtype = 'Debug'
     if HasForwarder('Release'):

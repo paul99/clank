@@ -4,8 +4,6 @@
 
 #include "content/common/gpu/media/avc_config_record_builder.h"
 
-#include <limits>
-
 #include "base/logging.h"
 #include "content/common/gpu/media/h264_parser.h"
 
@@ -33,32 +31,26 @@ bool AVCConfigRecordBuilder::ProcessNALU(
   } else if (nalu.nal_unit_type >= 1 && nalu.nal_unit_type <= 5) {
     // Ready to build the AVC decoder configuration record once the first slice
     // type is encountered.
-    return BuildConfigRecord(config_record);
+    *config_record = BuildConfigRecord();
+    return true;
   }
   // Effectively skip this NALU by returning success.
   return true;
 }
 
-bool AVCConfigRecordBuilder::BuildConfigRecord(
-    std::vector<uint8>* config_record) {
+std::vector<uint8> AVCConfigRecordBuilder::BuildConfigRecord() {
   // 5 bytes for AVC record header. 1 byte for the number of SPS units.
   // 1 byte for the number of PPS units.
-  size_t record_size = 7;
+  int record_size = 7;
   for (NALUVector::const_iterator it = sps_nalus_.begin();
        it != sps_nalus_.end(); ++it) {
     // Plus 2 bytes to store the SPS size.
-    size_t size = (*it)->size() + 2;
-    if (std::numeric_limits<size_t>::max() - size <= record_size)
-      return false;
-    record_size += size;
+    record_size += (*it)->size() + 2;
   }
   for (NALUVector::const_iterator it = pps_nalus_.begin();
        it != pps_nalus_.end(); ++it) {
     // Plus 2 bytes to store the PPS size.
-    size_t size = (*it)->size() + 2;
-    if (std::numeric_limits<size_t>::max() - size <= record_size)
-      return false;
-    record_size += size;
+    record_size += (*it)->size() + 2;
   }
   std::vector<uint8> extra_data(record_size);
 
@@ -74,7 +66,7 @@ bool AVCConfigRecordBuilder::BuildConfigRecord(
 
   // TODO(sail): There's no way to get the NALU length field size from the
   // SPS and PPS data. Just assume 4 for now.
-  const size_t kNALULengthFieldSize = 4;
+  const int kNALULengthFieldSize = 4;
 
   // The first 6 bits are reserved and must be 1. Last two bits are the
   // NALU field size minus 1.
@@ -83,7 +75,7 @@ bool AVCConfigRecordBuilder::BuildConfigRecord(
   // The first 3 bits are reserved and must be 1. Last 5 bits are the
   // number of SPS units.
   extra_data[5] = 0xe0 | (sps_nalus_.size() & 0x1f);
-  size_t index = 6;
+  int index = 6;
   if (!sps_nalus_.empty())
     index += CopyNALUsToConfigRecord(sps_nalus_, &extra_data[index]);
 
@@ -92,13 +84,12 @@ bool AVCConfigRecordBuilder::BuildConfigRecord(
   if (!pps_nalus_.empty())
     CopyNALUsToConfigRecord(pps_nalus_, &extra_data[index]);
 
-  *config_record = extra_data;
-  return true;
+  return extra_data;
 }
 
-size_t AVCConfigRecordBuilder::CopyNALUsToConfigRecord(const NALUVector& nalus,
-                                                       uint8* record_buffer) {
-  size_t index = 0;
+int AVCConfigRecordBuilder::CopyNALUsToConfigRecord(const NALUVector& nalus,
+                                                    uint8* record_buffer) {
+  int index = 0;
   for (NALUVector::const_iterator it = nalus.begin();
        it != nalus.end(); ++it) {
     // High byte of the NALU size.

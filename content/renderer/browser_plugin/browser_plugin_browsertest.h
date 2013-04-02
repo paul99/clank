@@ -13,7 +13,7 @@
 #include "content/renderer/browser_plugin/mock_browser_plugin_manager.h"
 #include "content/renderer/render_view_impl.h"
 #include "testing/gtest/include/gtest/gtest.h"
-#include "third_party/WebKit/Source/WebKit/chromium/public/platform/WebSize.h"
+#include "third_party/WebKit/Source/Platform/chromium/public/WebSize.h"
 #include "third_party/WebKit/Source/WebKit/chromium/public/WebView.h"
 
 class RenderThreadImpl;
@@ -33,6 +33,7 @@ class BrowserPluginTest : public RenderViewTest {
   }
   std::string ExecuteScriptAndReturnString(const std::string& script);
   int ExecuteScriptAndReturnInt(const std::string& script);
+  bool ExecuteScriptAndReturnBool(const std::string& script, bool* result);
  private:
   ContentRendererClient content_renderer_client_;
 };

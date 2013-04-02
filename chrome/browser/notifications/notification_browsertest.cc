@@ -13,9 +13,8 @@
 #include "base/stringprintf.h"
 #include "base/utf_string_conversions.h"
 #include "chrome/browser/api/infobars/confirm_infobar_delegate.h"
-#include "chrome/browser/api/infobars/infobar_delegate.h"
+#include "chrome/browser/api/infobars/infobar_service.h"
 #include "chrome/browser/browser_process.h"
-#include "chrome/browser/infobars/infobar_tab_helper.h"
 #include "chrome/browser/notifications/balloon.h"
 #include "chrome/browser/notifications/balloon_collection.h"
 #include "chrome/browser/notifications/balloon_host.h"
@@ -44,7 +43,7 @@
 #include "net/base/net_util.h"
 #include "net/test/test_server.h"
 #include "testing/gtest/include/gtest/gtest.h"
-#include "webkit/glue/window_open_disposition.h"
+#include "ui/base/window_open_disposition.h"
 
 namespace {
 
@@ -248,11 +247,11 @@ void NotificationsTest::AllowAllOrigins() {
 }
 
 void NotificationsTest::VerifyInfobar(const Browser* browser, int index) {
-  InfoBarTabHelper* infobar_helper = InfoBarTabHelper::FromWebContents(
+  InfoBarService* infobar_service = InfoBarService::FromWebContents(
       browser->tab_strip_model()->GetWebContentsAt(index));
 
-  ASSERT_EQ(1U, infobar_helper->GetInfoBarCount());
-  InfoBarDelegate* infobar = infobar_helper->GetInfoBarDelegateAt(0);
+  ASSERT_EQ(1U, infobar_service->GetInfoBarCount());
+  InfoBarDelegate* infobar = infobar_service->GetInfoBarDelegateAt(0);
   ConfirmInfoBarDelegate* confirm_infobar = infobar->AsConfirmInfoBarDelegate();
   ASSERT_TRUE(confirm_infobar);
   int buttons = confirm_infobar->GetButtons();
@@ -273,10 +272,9 @@ std::string NotificationsTest::CreateNotification(
 
   NotificationBalloonChangeObserver observer;
   std::string result;
-  bool success = content::ExecuteJavaScriptAndExtractString(
-      browser->tab_strip_model()->GetActiveWebContents()->GetRenderViewHost(),
-      L"",
-      UTF8ToWide(script),
+  bool success = content::ExecuteScriptAndExtractString(
+      browser->tab_strip_model()->GetActiveWebContents(),
+      script,
       &result);
   if (success && result != "-1" && wait_for_new_balloon)
     success = observer.Wait();
@@ -294,16 +292,15 @@ std::string NotificationsTest::CreateSimpleNotification(
 }
 
 bool NotificationsTest::RequestPermissionAndWait(Browser* browser) {
-  InfoBarTabHelper* infobar_helper = InfoBarTabHelper::FromWebContents(
+  InfoBarService* infobar_service = InfoBarService::FromWebContents(
       browser->tab_strip_model()->GetActiveWebContents());
   content::WindowedNotificationObserver observer(
       chrome::NOTIFICATION_TAB_CONTENTS_INFOBAR_ADDED,
-      content::Source<InfoBarTabHelper>(infobar_helper));
+      content::Source<InfoBarService>(infobar_service));
   std::string result;
-  bool success = content::ExecuteJavaScriptAndExtractString(
-      browser->tab_strip_model()->GetActiveWebContents()->GetRenderViewHost(),
-      L"",
-      L"requestPermission();",
+  bool success = content::ExecuteScriptAndExtractString(
+      browser->tab_strip_model()->GetActiveWebContents(),
+      "requestPermission();",
       &result);
   if (!success || result != "1")
     return false;
@@ -320,10 +317,9 @@ bool NotificationsTest::CancelNotification(
 
   NotificationBalloonChangeObserver observer;
   std::string result;
-  bool success = content::ExecuteJavaScriptAndExtractString(
-      browser->tab_strip_model()->GetActiveWebContents()->GetRenderViewHost(),
-      L"",
-      UTF8ToWide(script),
+  bool success = content::ExecuteScriptAndExtractString(
+      browser->tab_strip_model()->GetActiveWebContents(),
+      script,
       &result);
   if (!success || result != "1")
     return false;
@@ -335,28 +331,29 @@ bool NotificationsTest::PerformActionOnInfobar(
     InfobarAction action,
     int infobar_index,
     int tab_index) {
-  InfoBarTabHelper* infobar_helper = InfoBarTabHelper::FromWebContents(
+  InfoBarService* infobar_service = InfoBarService::FromWebContents(
       browser->tab_strip_model()->GetWebContentsAt(tab_index));
 
-  InfoBarDelegate* infobar = infobar_helper->GetInfoBarDelegateAt(
-      infobar_index);
+  InfoBarDelegate* infobar =
+      infobar_service->GetInfoBarDelegateAt(infobar_index);
   switch (action) {
-    case DISMISS: {
+    case DISMISS:
       infobar->InfoBarDismissed();
-      infobar_helper->RemoveInfoBar(infobar);
+      infobar_service->RemoveInfoBar(infobar);
       return true;
-    }
+
     case ALLOW: {
       ConfirmInfoBarDelegate* confirm_bar = infobar->AsConfirmInfoBarDelegate();
       if (confirm_bar->Accept()) {
-        infobar_helper->RemoveInfoBar(infobar);
+        infobar_service->RemoveInfoBar(infobar);
         return true;
       }
     }
+
     case DENY: {
       ConfirmInfoBarDelegate* confirm_bar = infobar->AsConfirmInfoBarDelegate();
       if (confirm_bar->Cancel()) {
-        infobar_helper->RemoveInfoBar(infobar);
+        infobar_service->RemoveInfoBar(infobar);
         return true;
       }
     }
@@ -412,14 +409,13 @@ IN_PROC_BROWSER_TEST_F(NotificationsTest, TestUserGestureInfobar) {
   // Request permission by calling request() while eval'ing an inline script;
   // That's considered a user gesture to webkit, and should produce an infobar.
   bool result;
-  ASSERT_TRUE(content::ExecuteJavaScriptAndExtractBool(
-      browser()->tab_strip_model()->GetActiveWebContents()->GetRenderViewHost(),
-      L"",
-      L"window.domAutomationController.send(request());",
+  ASSERT_TRUE(content::ExecuteScriptAndExtractBool(
+      browser()->tab_strip_model()->GetActiveWebContents(),
+      "window.domAutomationController.send(request());",
       &result));
   EXPECT_TRUE(result);
 
-  EXPECT_EQ(1U, InfoBarTabHelper::FromWebContents(
+  EXPECT_EQ(1U, InfoBarService::FromWebContents(
       browser()->tab_strip_model()->GetWebContentsAt(0))->GetInfoBarCount());
 }
 
@@ -432,7 +428,7 @@ IN_PROC_BROWSER_TEST_F(NotificationsTest, TestNoUserGestureInfobar) {
       test_server()->GetURL(
           "files/notifications/notifications_request_inline.html"));
 
-  EXPECT_EQ(0U, InfoBarTabHelper::FromWebContents(
+  EXPECT_EQ(0U, InfoBarService::FromWebContents(
       browser()->tab_strip_model()->GetWebContentsAt(0))->GetInfoBarCount());
 }
 
@@ -558,7 +554,7 @@ IN_PROC_BROWSER_TEST_F(NotificationsTest, TestAllowNotificationsFromAllSites) {
   EXPECT_NE("-1", result);
 
   ASSERT_EQ(1, GetNotificationCount());
-  EXPECT_EQ(0U, InfoBarTabHelper::FromWebContents(
+  EXPECT_EQ(0U, InfoBarService::FromWebContents(
       browser()->tab_strip_model()->GetWebContentsAt(0))->GetInfoBarCount());
 }
 
@@ -617,7 +613,7 @@ IN_PROC_BROWSER_TEST_F(NotificationsTest, TestDenyAndThenAllowDomain) {
   EXPECT_NE("-1", result);
 
   ASSERT_EQ(1, GetNotificationCount());
-  EXPECT_EQ(0U, InfoBarTabHelper::FromWebContents(
+  EXPECT_EQ(0U, InfoBarService::FromWebContents(
       browser()->tab_strip_model()->GetWebContentsAt(0))->GetInfoBarCount());
 }
 
@@ -675,7 +671,16 @@ IN_PROC_BROWSER_TEST_F(NotificationsTest, TestExitBrowserWithInfobar) {
   ASSERT_TRUE(RequestPermissionAndWait(browser()));
 }
 
-IN_PROC_BROWSER_TEST_F(NotificationsTest, TestCrashTabWithPermissionInfobar) {
+// Times out on Windows and Linux. http://crbug.com/168976
+#if defined(OS_WIN) || defined(OS_LINUX)
+#define MAYBE_TestCrashTabWithPermissionInfobar \
+    DISABLED_TestCrashTabWithPermissionInfobar
+#else
+#define MAYBE_TestCrashTabWithPermissionInfobar \
+    TestCrashTabWithPermissionInfobar
+#endif
+IN_PROC_BROWSER_TEST_F(NotificationsTest,
+                       MAYBE_TestCrashTabWithPermissionInfobar) {
   // Test crashing the tab with permission infobar doesn't crash Chrome.
   ui_test_utils::NavigateToURLWithDisposition(
       browser(),
@@ -725,8 +730,8 @@ IN_PROC_BROWSER_TEST_F(NotificationsTest, TestCloseTabWithPermissionInfobar) {
   content::WindowedNotificationObserver observer(
       content::NOTIFICATION_WEB_CONTENTS_DESTROYED,
       content::NotificationService::AllSources());
-  chrome::CloseWebContents(browser(),
-                           browser()->tab_strip_model()->GetWebContentsAt(0));
+  browser()->tab_strip_model()->CloseWebContentsAt(0,
+                                                   TabStripModel::CLOSE_NONE);
   observer.Wait();
 }
 

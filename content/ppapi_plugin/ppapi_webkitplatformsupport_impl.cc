@@ -13,18 +13,18 @@
 #include "content/common/child_process_messages.h"
 #include "content/common/child_thread.h"
 #include "ppapi/proxy/plugin_globals.h"
-#include "third_party/WebKit/Source/WebKit/chromium/public/platform/WebString.h"
+#include "third_party/WebKit/Source/Platform/chromium/public/WebString.h"
 
 #if defined(OS_WIN)
-#include "third_party/WebKit/Source/WebKit/chromium/public/platform/win/WebSandboxSupport.h"
+#include "third_party/WebKit/Source/Platform/chromium/public/win/WebSandboxSupport.h"
 #elif defined(OS_MACOSX)
-#include "third_party/WebKit/Source/WebKit/chromium/public/platform/mac/WebSandboxSupport.h"
+#include "third_party/WebKit/Source/Platform/chromium/public/mac/WebSandboxSupport.h"
 #elif defined(OS_POSIX)
 #if !defined(OS_ANDROID)
 #include "content/common/child_process_sandbox_support_impl_linux.h"
 #endif
-#include "third_party/WebKit/Source/WebKit/chromium/public/platform/linux/WebFontFamily.h"
-#include "third_party/WebKit/Source/WebKit/chromium/public/platform/linux/WebSandboxSupport.h"
+#include "third_party/WebKit/Source/Platform/chromium/public/linux/WebFontFamily.h"
+#include "third_party/WebKit/Source/Platform/chromium/public/linux/WebSandboxSupport.h"
 
 #endif
 
@@ -36,7 +36,8 @@ typedef struct CGFont* CGFontRef;
 
 namespace content {
 
-class PpapiWebKitPlatformSupportImpl::SandboxSupport : public WebSandboxSupport {
+class PpapiWebKitPlatformSupportImpl::SandboxSupport
+    : public WebSandboxSupport {
  public:
   virtual ~SandboxSupport() {}
 
@@ -179,7 +180,8 @@ unsigned long long PpapiWebKitPlatformSupportImpl::visitedLinkHash(
   return 0;
 }
 
-bool PpapiWebKitPlatformSupportImpl::isLinkVisited(unsigned long long link_hash) {
+bool PpapiWebKitPlatformSupportImpl::isLinkVisited(
+    unsigned long long link_hash) {
   NOTREACHED();
   return false;
 }
@@ -204,7 +206,8 @@ WebKit::WebString PpapiWebKitPlatformSupportImpl::cookies(
   return WebKit::WebString();
 }
 
-void PpapiWebKitPlatformSupportImpl::prefetchHostName(const WebKit::WebString&) {
+void PpapiWebKitPlatformSupportImpl::prefetchHostName(
+    const WebKit::WebString&) {
   NOTREACHED();
 }
 

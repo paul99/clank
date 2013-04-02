@@ -14,6 +14,10 @@ import sys
 import time
 import zipfile
 
+if sys.version_info < (2, 6, 0):
+  sys.stderr.write("python 2.6 or later is required run this script\n")
+  sys.exit(1)
+
 
 def IncludeFiles(filters, files):
   """Filter files based on inclusion lists
@@ -129,7 +133,7 @@ def Copy(args):
   src_list = []
   for src in srcs:
     files = glob.glob(src)
-    if len(files) == 0:
+    if not files:
       raise OSError('cp: no such file or directory: ' + src)
     if files:
       src_list.extend(files)
@@ -255,11 +259,10 @@ def Remove(args):
   try:
     for pattern in files:
       dst_files = glob.glob(pattern)
-      # Ignore non existing files when using force
-      if len(dst_files) == 0 and options.force:
-        print "rm: Skipping " + pattern
-        continue
-      elif len(dst_files) == 0:
+      if not dst_files:
+        # Ignore non existing files when using force
+        if options.force:
+          continue
         raise OSError('rm: no such file or directory: ' + pattern)
 
       for dst in dst_files:
@@ -359,7 +362,7 @@ def Zip(args):
   src_files = []
   for src_arg in src_args:
     globbed_src_args = glob.glob(src_arg)
-    if len(globbed_src_args) == 0:
+    if not globbed_src_args:
       if not options.quiet:
         print 'zip warning: name not matched: %s' % (src_arg,)
 
@@ -465,12 +468,50 @@ def Zip(args):
   return 0
 
 
+def Which(args):
+  """A Unix style which.
+
+  Looks for all arguments in the PATH environment variable, and prints their
+  path if they are executable files.
+
+  Note: If you pass an argument with a path to which, it will just test if it
+  is executable, not if it is in the path.
+  """
+  parser = optparse.OptionParser(usage='usage: which args...')
+  _, files = parser.parse_args(args)
+  if not files:
+    return 0
+
+  env_path = os.environ.get('PATH', '')
+  paths = env_path.split(os.pathsep)
+
+  def IsExecutableFile(path):
+    return os.path.isfile(path) and os.access(path, os.X_OK)
+
+  retval = 0
+  for filename in files:
+    if os.path.sep in filename:
+      if IsExecutableFile(filename):
+        print filename
+        continue
+
+    for path in paths:
+      filepath = os.path.join(path, filename)
+      if IsExecutableFile(filepath):
+        print os.path.abspath(os.path.join(path, filename))
+        break
+    else:
+      retval = 1
+  return retval
+
+
 FuncMap = {
   'cp': Copy,
   'mkdir': Mkdir,
   'mv': Move,
   'rm': Remove,
   'zip': Zip,
+  'which': Which,
 }
 
 

@@ -24,16 +24,16 @@
 #include "chrome/installer/util/google_update_settings.h"
 #include "content/public/browser/notification_observer.h"
 #include "content/public/browser/notification_registrar.h"
+#include "content/public/browser/user_metrics.h"
 #include "net/url_request/url_fetcher_delegate.h"
 
 #if defined(OS_CHROMEOS)
 #include "chrome/browser/chromeos/external_metrics.h"
 #endif
 
-class BookmarkModel;
-class BookmarkNode;
 class MetricsReportingScheduler;
 class PrefService;
+class PrefRegistrySimple;
 class Profile;
 class TemplateURLService;
 
@@ -123,7 +123,7 @@ class MetricsService
 
   // At startup, prefs needs to be called with a list of all the pref names and
   // types we'll be using.
-  static void RegisterPrefs(PrefService* local_state);
+  static void RegisterPrefs(PrefRegistrySimple* registry);
 
   // Set up notifications which indicate that a user is performing work. This is
   // useful to allow some features to sleep, until the machine becomes active,
@@ -179,7 +179,7 @@ class MetricsService
   bool recording_active() const;
   bool reporting_active() const;
 
-  void LogPluginLoadingError(const FilePath& plugin_path);
+  void LogPluginLoadingError(const base::FilePath& plugin_path);
 
   // Redundant test to ensure that we are notified of a clean exit.
   // This value should be true when process has completed shutdown.
@@ -234,6 +234,8 @@ class MetricsService
   // loading profiler data.
   void OnInitTaskGotGoogleUpdateData(
       const GoogleUpdateMetrics& google_update_metrics);
+
+  void OnUserAction(const std::string& action);
 
   // TrackingSynchronizerObserver:
   virtual void ReceivedProfilerData(
@@ -360,16 +362,6 @@ class MetricsService
   // Records that the browser was shut down cleanly.
   void LogCleanShutdown();
 
-  // Set the value in preferences for the number of bookmarks and folders
-  // in node. The pref key for the number of bookmarks in num_bookmarks_key and
-  // the pref key for number of folders in num_folders_key.
-  void LogBookmarks(const BookmarkNode* node,
-                    const char* num_bookmarks_key,
-                    const char* num_folders_key);
-
-  // Sets preferences for the number of bookmarks in model.
-  void LogBookmarks(BookmarkModel* model);
-
   // Records a child process related notification.  These are recorded to an
   // in-object buffer because these notifications are sent on page load, and we
   // don't want to slow that down.
@@ -397,9 +389,7 @@ class MetricsService
                        const content::NotificationDetails& details);
 
   // Checks whether a notification can be logged.
-  bool CanLogNotification(int type,
-                          const content::NotificationSource& source,
-                          const content::NotificationDetails& details);
+  bool CanLogNotification();
 
   // Sets the value of the specified path in prefs and schedules a save.
   void RecordBooleanPrefValue(const char* path, bool value);
@@ -407,6 +397,8 @@ class MetricsService
   // Returns true if process of type |type| should be counted as a plugin
   // process, and false otherwise.
   static bool IsPluginProcess(content::ProcessType type);
+
+  content::ActionCallback action_callback_;
 
   content::NotificationRegistrar registrar_;
 

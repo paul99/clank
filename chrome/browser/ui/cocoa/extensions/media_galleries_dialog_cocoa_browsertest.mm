@@ -5,9 +5,10 @@
 #include "chrome/browser/ui/cocoa/extensions/media_galleries_dialog_cocoa.h"
 
 #include "chrome/browser/media_gallery/media_galleries_dialog_controller_mock.h"
-#include "chrome/browser/ui/browser_tabstrip.h"
+#include "chrome/browser/ui/browser.h"
 #include "chrome/browser/ui/cocoa/constrained_window/constrained_window_alert.h"
-#include "chrome/browser/ui/constrained_window_tab_helper.h"
+#include "chrome/browser/ui/tabs/tab_strip_model.h"
+#include "chrome/browser/ui/web_contents_modal_dialog_manager.h"
 #include "chrome/test/base/in_process_browser_test.h"
 #include "content/public/test/test_utils.h"
 #include "testing/gtest/include/gtest/gtest.h"
@@ -26,7 +27,8 @@ class MediaGalleriesDialogBrowserTest : public InProcessBrowserTest {
 IN_PROC_BROWSER_TEST_F(MediaGalleriesDialogBrowserTest, Close) {
   NiceMock<MediaGalleriesDialogControllerMock> controller;
 
-  content::WebContents* web_contents = chrome::GetActiveWebContents(browser());
+  content::WebContents* web_contents =
+      browser()->tab_strip_model()->GetActiveWebContents();
   EXPECT_CALL(controller, web_contents()).
       WillRepeatedly(Return(web_contents));
 
@@ -40,9 +42,11 @@ IN_PROC_BROWSER_TEST_F(MediaGalleriesDialogBrowserTest, Close) {
   scoped_nsobject<NSWindow> window([[dialog->alert_ window] retain]);
   EXPECT_TRUE([window isVisible]);
 
-  ConstrainedWindowTabHelper* constrained_window_tab_helper =
-      ConstrainedWindowTabHelper::FromWebContents(web_contents);
-  constrained_window_tab_helper->CloseConstrainedWindows();
+  WebContentsModalDialogManager* web_contents_modal_dialog_manager =
+      WebContentsModalDialogManager::FromWebContents(web_contents);
+  WebContentsModalDialogManager::TestApi test_api(
+      web_contents_modal_dialog_manager);
+  test_api.CloseAllDialogs();
   EXPECT_FALSE([window isVisible]);
 }
 

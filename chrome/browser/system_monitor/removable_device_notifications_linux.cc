@@ -16,8 +16,8 @@
 #include "base/file_path.h"
 #include "base/metrics/histogram.h"
 #include "base/stl_util.h"
-#include "base/string_number_conversions.h"
 #include "base/string_util.h"
+#include "base/strings/string_number_conversions.h"
 #include "base/system_monitor/system_monitor.h"
 #include "base/utf_string_conversions.h"
 #include "chrome/browser/system_monitor/media_device_notifications_utils.h"
@@ -30,9 +30,6 @@ namespace chrome {
 using content::BrowserThread;
 
 namespace {
-
-static RemovableDeviceNotificationsLinux*
-    g_removable_device_notifications_linux = NULL;
 
 // List of file systems we care about.
 const char* const kKnownFileSystems[] = {
@@ -64,10 +61,10 @@ const char kVendorID[] = "ID_VENDOR_ID";
 // (mount point, mount device)
 // A mapping from mount point to mount device, as extracted from the mtab
 // file.
-typedef std::map<FilePath, FilePath> MountPointDeviceMap;
+typedef std::map<base::FilePath, base::FilePath> MountPointDeviceMap;
 
 // Reads mtab file entries into |mtab|.
-void ReadMtab(const FilePath& mtab_path,
+void ReadMtab(const base::FilePath& mtab_path,
               const std::set<std::string>& interesting_file_systems,
               MountPointDeviceMap* mtab) {
   mtab->clear();
@@ -86,7 +83,7 @@ void ReadMtab(const FilePath& mtab_path,
     if (!ContainsKey(interesting_file_systems, entry.mnt_type))
       continue;
 
-    (*mtab)[FilePath(entry.mnt_dir)] = FilePath(entry.mnt_fsname);
+    (*mtab)[base::FilePath(entry.mnt_dir)] = base::FilePath(entry.mnt_fsname);
   }
   endmntent(fp);
 }
@@ -118,7 +115,7 @@ void RecordGetDeviceInfoResult(bool result) {
 
 // Returns the storage partition size of the device specified by |device_path|.
 // If the requested information is unavailable, returns 0.
-uint64 GetDeviceStorageSize(const FilePath& device_path,
+uint64 GetDeviceStorageSize(const base::FilePath& device_path,
                             struct udev_device* device) {
   // sysfs provides the device size in units of 512-byte blocks.
   const std::string partition_size = udev_device_get_sysattr_value(
@@ -165,7 +162,7 @@ string16 GetDeviceName(struct udev_device* device) {
 // Get the device information using udev library.
 // On success, returns true and fill in |unique_id|, |name|, |removable| and
 // |partition_size_in_bytes|.
-void GetDeviceInfo(const FilePath& device_path,
+void GetDeviceInfo(const base::FilePath& device_path,
                    std::string* unique_id,
                    string16* name,
                    bool* removable,
@@ -229,28 +226,22 @@ void GetDeviceInfo(const FilePath& device_path,
 }  // namespace
 
 RemovableDeviceNotificationsLinux::RemovableDeviceNotificationsLinux(
-    const FilePath& path)
+    const base::FilePath& path)
     : initialized_(false),
       mtab_path_(path),
       get_device_info_func_(&GetDeviceInfo) {
-  DCHECK(!g_removable_device_notifications_linux);
-  g_removable_device_notifications_linux = this;
 }
 
 RemovableDeviceNotificationsLinux::RemovableDeviceNotificationsLinux(
-    const FilePath& path,
+    const base::FilePath& path,
     GetDeviceInfoFunc get_device_info_func)
     : initialized_(false),
       mtab_path_(path),
       get_device_info_func_(get_device_info_func) {
-  DCHECK(!g_removable_device_notifications_linux);
-  g_removable_device_notifications_linux = this;
 }
 
 RemovableDeviceNotificationsLinux::~RemovableDeviceNotificationsLinux() {
   DCHECK(BrowserThread::CurrentlyOn(BrowserThread::FILE));
-  DCHECK_EQ(this, g_removable_device_notifications_linux);
-  g_removable_device_notifications_linux = NULL;
 }
 
 void RemovableDeviceNotificationsLinux::Init() {
@@ -266,12 +257,12 @@ void RemovableDeviceNotificationsLinux::Init() {
 }
 
 bool RemovableDeviceNotificationsLinux::GetDeviceInfoForPath(
-    const FilePath& path,
-    base::SystemMonitor::RemovableStorageInfo* device_info) const {
+    const base::FilePath& path,
+    StorageInfo* device_info) const {
   if (!path.IsAbsolute())
     return false;
 
-  FilePath current = path;
+  base::FilePath current = path;
   while (!ContainsKey(mount_info_map_, current) && current != current.DirName())
     current = current.DirName();
 
@@ -290,13 +281,14 @@ bool RemovableDeviceNotificationsLinux::GetDeviceInfoForPath(
 uint64 RemovableDeviceNotificationsLinux::GetStorageSize(
     const std::string& location) const {
   MountMap::const_iterator mount_info = mount_info_map_.find(
-      FilePath(location));
+      base::FilePath(location));
   return (mount_info != mount_info_map_.end()) ?
       mount_info->second.partition_size_in_bytes : 0;
 }
 
-void RemovableDeviceNotificationsLinux::OnFilePathChanged(const FilePath& path,
-                                                          bool error) {
+void RemovableDeviceNotificationsLinux::OnFilePathChanged(
+    const base::FilePath& path,
+    bool error) {
   if (path != mtab_path_) {
     // This cannot happen unless FilePathWatcher is buggy. Just ignore this
     // notification and do nothing.
@@ -343,12 +335,12 @@ void RemovableDeviceNotificationsLinux::UpdateMtab() {
 
   // Check existing mtab entries for unaccounted mount points.
   // These mount points must have been removed in the new mtab.
-  std::list<FilePath> mount_points_to_erase;
-  std::list<FilePath> multiple_mounted_devices_needing_reattachment;
+  std::list<base::FilePath> mount_points_to_erase;
+  std::list<base::FilePath> multiple_mounted_devices_needing_reattachment;
   for (MountMap::const_iterator old_iter = mount_info_map_.begin();
        old_iter != mount_info_map_.end(); ++old_iter) {
-    const FilePath& mount_point = old_iter->first;
-    const FilePath& mount_device = old_iter->second.mount_device;
+    const base::FilePath& mount_point = old_iter->first;
+    const base::FilePath& mount_device = old_iter->second.mount_device;
     MountPointDeviceMap::iterator new_iter = new_mtab.find(mount_point);
     // |mount_point| not in |new_mtab| or |mount_device| is no longer mounted at
     // |mount_point|.
@@ -361,8 +353,7 @@ void RemovableDeviceNotificationsLinux::UpdateMtab() {
       if (MediaStorageUtil::IsRemovableDevice(old_iter->second.device_id)) {
         DCHECK(has_priority != priority->second.end());
         if (has_priority->second) {
-          base::SystemMonitor::Get()->ProcessRemovableStorageDetached(
-              old_iter->second.device_id);
+          receiver()->ProcessDetach(old_iter->second.device_id);
         }
         if (priority->second.size() > 1)
           multiple_mounted_devices_needing_reattachment.push_back(mount_device);
@@ -377,7 +368,8 @@ void RemovableDeviceNotificationsLinux::UpdateMtab() {
   // Erase the |mount_info_map_| entries afterwards. Erasing in the loop above
   // using the iterator is slightly more efficient, but more tricky, since
   // calling std::map::erase() on an iterator invalidates it.
-  for (std::list<FilePath>::const_iterator it = mount_points_to_erase.begin();
+  for (std::list<base::FilePath>::const_iterator it =
+           mount_points_to_erase.begin();
        it != mount_points_to_erase.end();
        ++it) {
     mount_info_map_.erase(*it);
@@ -386,27 +378,27 @@ void RemovableDeviceNotificationsLinux::UpdateMtab() {
   // For any multiply mounted device where the mount that we had notified
   // got detached, send a notification of attachment for one of the other
   // mount points.
-  for (std::list<FilePath>::const_iterator it =
+  for (std::list<base::FilePath>::const_iterator it =
            multiple_mounted_devices_needing_reattachment.begin();
        it != multiple_mounted_devices_needing_reattachment.end();
        ++it) {
     ReferencedMountPoint::iterator first_mount_point_info =
         mount_priority_map_.find(*it)->second.begin();
-    const FilePath& mount_point = first_mount_point_info->first;
+    const base::FilePath& mount_point = first_mount_point_info->first;
     first_mount_point_info->second = true;
 
     const MountPointInfo& mount_info =
         mount_info_map_.find(mount_point)->second;
     DCHECK(MediaStorageUtil::IsRemovableDevice(mount_info.device_id));
-    base::SystemMonitor::Get()->ProcessRemovableStorageAttached(
+    receiver()->ProcessAttach(
         mount_info.device_id, mount_info.device_name, mount_point.value());
   }
 
   // Check new mtab entries against existing ones.
   for (MountPointDeviceMap::iterator new_iter = new_mtab.begin();
        new_iter != new_mtab.end(); ++new_iter) {
-    const FilePath& mount_point = new_iter->first;
-    const FilePath& mount_device = new_iter->second;
+    const base::FilePath& mount_point = new_iter->first;
+    const base::FilePath& mount_device = new_iter->second;
     MountMap::iterator old_iter = mount_info_map_.find(mount_point);
     if (old_iter == mount_info_map_.end() ||
         old_iter->second.mount_device != mount_device) {
@@ -418,11 +410,11 @@ void RemovableDeviceNotificationsLinux::UpdateMtab() {
 }
 
 void RemovableDeviceNotificationsLinux::AddNewMount(
-    const FilePath& mount_device, const FilePath& mount_point) {
+    const base::FilePath& mount_device, const base::FilePath& mount_point) {
   MountPriorityMap::iterator priority =
       mount_priority_map_.find(mount_device);
   if (priority != mount_priority_map_.end()) {
-    const FilePath& other_mount_point = priority->second.begin()->first;
+    const base::FilePath& other_mount_point = priority->second.begin()->first;
     priority->second[mount_point] = false;
     mount_info_map_[mount_point] =
         mount_info_map_.find(other_mount_point)->second;
@@ -464,16 +456,10 @@ void RemovableDeviceNotificationsLinux::AddNewMount(
   mount_priority_map_[mount_device][mount_point] = removable;
 
   if (removable) {
-    base::SystemMonitor::Get()->ProcessRemovableStorageAttached(
+    receiver()->ProcessAttach(
         device_id, GetDisplayNameForDevice(partition_size_in_bytes, name),
         mount_point.value());
   }
-}
-
-// static
-RemovableStorageNotifications* RemovableStorageNotifications::GetInstance() {
-  DCHECK(g_removable_device_notifications_linux != NULL);
-  return g_removable_device_notifications_linux;
 }
 
 }  // namespace chrome

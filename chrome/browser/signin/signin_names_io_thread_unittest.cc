@@ -39,7 +39,7 @@ SigninNamesOnIOThreadTest::SigninNamesOnIOThreadTest()
     : ui_thread_(content::BrowserThread::UI, &message_loop_),
       io_thread_(content::BrowserThread::IO, &message_loop_),
       testing_profile_manager_(
-          static_cast<TestingBrowserProcess*>(g_browser_process)) {
+          TestingBrowserProcess::GetGlobal()) {
 }
 
 void SigninNamesOnIOThreadTest::SetUp() {
@@ -69,13 +69,13 @@ void SigninNamesOnIOThreadTest::SimulateSignout(const string16& email) {
 void SigninNamesOnIOThreadTest::AddNewProfile(const string16& name,
                                               const string16& email) {
   ProfileInfoCache* cache = testing_profile_manager_.profile_info_cache();
-  const FilePath& user_data_dir = cache->GetUserDataDir();
+  const base::FilePath& user_data_dir = cache->GetUserDataDir();
 #if defined(OS_POSIX)
-  const FilePath profile_dir = user_data_dir.Append(UTF16ToUTF8(name));
+  const base::FilePath profile_dir = user_data_dir.Append(UTF16ToUTF8(name));
 #else
-  const FilePath profile_dir = user_data_dir.Append(name);
+  const base::FilePath profile_dir = user_data_dir.Append(name);
 #endif
-  cache->AddProfileToCache(profile_dir, name, email, 0);
+  cache->AddProfileToCache(profile_dir, name, email, 0, false);
 }
 
 }  // namespace

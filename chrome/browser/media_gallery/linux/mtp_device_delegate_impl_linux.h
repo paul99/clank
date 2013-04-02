@@ -15,9 +15,8 @@
 #include "webkit/fileapi/file_system_file_util.h"
 #include "webkit/fileapi/media/mtp_device_delegate.h"
 
-class FilePath;
-
 namespace base {
+class FilePath;
 class SequencedTaskRunner;
 }
 
@@ -52,16 +51,15 @@ class MTPDeviceDelegateImplLinux : public fileapi::MTPDeviceDelegate {
 
   // MTPDeviceDelegate:
   virtual base::PlatformFileError GetFileInfo(
-      const FilePath& file_path,
+      const base::FilePath& file_path,
       base::PlatformFileInfo* file_info) OVERRIDE;
   virtual scoped_ptr<fileapi::FileSystemFileUtil::AbstractFileEnumerator>
-      CreateFileEnumerator(const FilePath& root,
+      CreateFileEnumerator(const base::FilePath& root,
                            bool recursive) OVERRIDE;
   virtual base::PlatformFileError CreateSnapshotFile(
-      const FilePath& device_file_path,
-      const FilePath& local_path,
+      const base::FilePath& device_file_path,
+      const base::FilePath& local_path,
       base::PlatformFileInfo* file_info) OVERRIDE;
-  virtual base::SequencedTaskRunner* GetMediaTaskRunner() OVERRIDE;
   virtual void CancelPendingTasksAndDeleteDelegate() OVERRIDE;
 
   // Stores the registered file system device path value. This path does not

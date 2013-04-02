@@ -16,6 +16,7 @@
 #include "sync/protocol/app_specifics.pb.h"
 #include "sync/protocol/autofill_specifics.pb.h"
 #include "sync/protocol/bookmark_specifics.pb.h"
+#include "sync/protocol/dictionary_specifics.pb.h"
 #include "sync/protocol/encryption.pb.h"
 #include "sync/protocol/experiments_specifics.pb.h"
 #include "sync/protocol/extension_setting_specifics.pb.h"
@@ -24,10 +25,12 @@
 #include "sync/protocol/nigori_specifics.pb.h"
 #include "sync/protocol/password_specifics.pb.h"
 #include "sync/protocol/preference_specifics.pb.h"
+#include "sync/protocol/priority_preference_specifics.pb.h"
 #include "sync/protocol/proto_enum_conversions.h"
 #include "sync/protocol/search_engine_specifics.pb.h"
 #include "sync/protocol/session_specifics.pb.h"
 #include "sync/protocol/sync.pb.h"
+#include "sync/protocol/synced_notification_specifics.pb.h"
 #include "sync/protocol/theme_specifics.pb.h"
 #include "sync/protocol/typed_url_specifics.pb.h"
 
@@ -169,7 +172,7 @@ DictionaryValue* TabNavigationToValue(
   SET_ENUM(page_transition, GetPageTransitionString);
   SET_ENUM(redirect_type, GetPageTransitionRedirectTypeString);
   SET_INT32(unique_id);
-  SET_INT64(timestamp);
+  SET_INT64(timestamp_msec);
   SET_BOOL(navigation_forward_back);
   SET_BOOL(navigation_from_address_bar);
   SET_BOOL(navigation_home_page);
@@ -209,6 +212,8 @@ base::DictionaryValue* GlobalIdDirectiveToValue(
     const sync_pb::GlobalIdDirective& proto) {
   DictionaryValue* value = new DictionaryValue();
   SET_INT64_REP(global_id);
+  SET_INT64(start_time_usec);
+  SET_INT64(end_time_usec);
   return value;
 }
 
@@ -219,6 +224,9 @@ base::DictionaryValue* TimeRangeDirectiveToValue(
   SET_INT64(end_time_usec);
   return value;
 }
+
+// TODO(petewil): I will need new functions here for the SyncedNotifications
+// subtypes.
 
 DictionaryValue* AppNotificationToValue(
     const sync_pb::AppNotification& proto) {
@@ -295,6 +303,14 @@ DictionaryValue* BookmarkSpecificsToValue(
   return value;
 }
 
+DictionaryValue* PriorityPreferenceSpecificsToValue(
+    const sync_pb::PriorityPreferenceSpecifics& proto) {
+  DictionaryValue* value = new DictionaryValue();
+  SET_STR(name);
+  SET_STR(value);
+  return value;
+}
+
 DictionaryValue* DeviceInfoSpecificsToValue(
     const sync_pb::DeviceInfoSpecifics& proto) {
   DictionaryValue* value = new DictionaryValue();
@@ -303,6 +319,13 @@ DictionaryValue* DeviceInfoSpecificsToValue(
   SET_ENUM(device_type, GetDeviceTypeString);
   SET_STR(sync_user_agent);
   SET_STR(chrome_version);
+  return value;
+}
+
+base::DictionaryValue* DictionarySpecificsToValue(
+    const sync_pb::DictionarySpecifics& proto) {
+  DictionaryValue* value = new DictionaryValue();
+  SET_STR(word);
   return value;
 }
 
@@ -359,6 +382,7 @@ DictionaryValue* NigoriSpecificsToValue(
   SET_BOOL(encrypt_app_settings);
   SET_BOOL(encrypt_apps);
   SET_BOOL(encrypt_search_engines);
+  SET_BOOL(encrypt_dictionary);
   SET_BOOL(encrypt_everything);
   SET_BOOL(sync_tab_favicons);
   SET_ENUM(passphrase_type, PassphraseTypeString);
@@ -383,6 +407,13 @@ DictionaryValue* PreferenceSpecificsToValue(
   return value;
 }
 
+DictionaryValue* SyncedNotificationSpecificsToValue(
+    const sync_pb::SyncedNotificationSpecifics& proto) {
+  DictionaryValue* value = new DictionaryValue();
+  // TODO(petewil): Adjust this once we add actual types in protobuf.
+  return value;
+}
+
 DictionaryValue* SearchEngineSpecificsToValue(
     const sync_pb::SearchEngineSpecifics& proto) {
   DictionaryValue* value = new DictionaryValue();
@@ -402,6 +433,7 @@ DictionaryValue* SearchEngineSpecificsToValue(
   SET_INT64(last_modified);
   SET_STR(sync_guid);
   SET_STR_REP(alternate_urls);
+  SET_STR(search_terms_replacement_key);
   return value;
 }
 
@@ -447,6 +479,7 @@ DictionaryValue* EntitySpecificsToValue(
   SET_FIELD(autofill_profile, AutofillProfileSpecificsToValue);
   SET_FIELD(bookmark, BookmarkSpecificsToValue);
   SET_FIELD(device_info, DeviceInfoSpecificsToValue);
+  SET_FIELD(dictionary, DictionarySpecificsToValue);
   SET_FIELD(experiments, ExperimentsSpecificsToValue);
   SET_FIELD(extension, ExtensionSpecificsToValue);
   SET_FIELD(extension_setting, ExtensionSettingSpecificsToValue);
@@ -454,8 +487,10 @@ DictionaryValue* EntitySpecificsToValue(
   SET_FIELD(nigori, NigoriSpecificsToValue);
   SET_FIELD(password, PasswordSpecificsToValue);
   SET_FIELD(preference, PreferenceSpecificsToValue);
+  SET_FIELD(priority_preference, PriorityPreferenceSpecificsToValue);
   SET_FIELD(search_engine, SearchEngineSpecificsToValue);
   SET_FIELD(session, SessionSpecificsToValue);
+  SET_FIELD(synced_notification, SyncedNotificationSpecificsToValue);
   SET_FIELD(theme, ThemeSpecificsToValue);
   SET_FIELD(typed_url, TypedUrlSpecificsToValue);
   return value;
@@ -516,6 +551,7 @@ DictionaryValue* CommitMessageToValue(
              SyncEntitiesToValue(proto.entries(), include_specifics));
   SET_STR(cache_guid);
   SET_REP(extensions_activity, ChromiumExtensionActivityToValue);
+  SET(config_params, ClientConfigParamsToValue);
   return value;
 }
 
@@ -695,6 +731,13 @@ base::DictionaryValue* SyncCycleCompletedEventInfoToValue(
   SET_INT32(num_updates_downloaded);
   SET_INT32(num_reflected_updates_downloaded);
   SET(caller_info, GetUpdatesCallerInfoToValue);
+  return value;
+}
+
+base::DictionaryValue* ClientConfigParamsToValue(
+    const sync_pb::ClientConfigParams& proto) {
+  DictionaryValue* value = new DictionaryValue();
+  SET_INT32_REP(enabled_type_ids);
   return value;
 }
 

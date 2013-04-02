@@ -8,7 +8,10 @@
       'LIBS': ['ppapi', 'pthread']
     }
   ],
-  'DATA': ['example.js'],
+  'DATA': [
+    'Makefile',
+    'example.js',
+  ],
   'DEST': 'examples',
   'NAME': 'hello_world',
   'TITLE': 'Hello World.',
@@ -21,4 +24,3 @@ JavaScript which will display it as an alert.""",
   'FOCUS': 'Basic HTML, JavaScript, and module architecture.',
   'GROUP': 'Tools'
 }
-

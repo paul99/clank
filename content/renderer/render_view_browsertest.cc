@@ -7,7 +7,6 @@
 #include "base/shared_memory.h"
 #include "base/string_util.h"
 #include "base/utf_string_conversions.h"
-#include "content/common/intents_messages.h"
 #include "content/common/view_messages.h"
 #include "content/public/browser/native_web_keyboard_event.h"
 #include "content/public/browser/web_ui_controller_factory.h"
@@ -20,12 +19,11 @@
 #include "content/test/mock_keyboard.h"
 #include "net/base/net_errors.h"
 #include "testing/gtest/include/gtest/gtest.h"
-#include "third_party/WebKit/Source/WebKit/chromium/public/platform/WebData.h"
-#include "third_party/WebKit/Source/WebKit/chromium/public/platform/WebHTTPBody.h"
-#include "third_party/WebKit/Source/WebKit/chromium/public/platform/WebString.h"
-#include "third_party/WebKit/Source/WebKit/chromium/public/platform/WebURLError.h"
+#include "third_party/WebKit/Source/Platform/chromium/public/WebData.h"
+#include "third_party/WebKit/Source/Platform/chromium/public/WebHTTPBody.h"
+#include "third_party/WebKit/Source/Platform/chromium/public/WebString.h"
+#include "third_party/WebKit/Source/Platform/chromium/public/WebURLError.h"
 #include "third_party/WebKit/Source/WebKit/chromium/public/WebHistoryItem.h"
-#include "third_party/WebKit/Source/WebKit/chromium/public/WebIntentServiceInfo.h"
 #include "third_party/WebKit/Source/WebKit/chromium/public/WebView.h"
 #include "third_party/WebKit/Source/WebKit/chromium/public/WebWindowFeatures.h"
 #include "ui/base/keycodes/keyboard_codes.h"
@@ -59,6 +57,7 @@ using WebKit::WebURLError;
 namespace content  {
 
 namespace {
+
 #if defined(USE_AURA) && defined(USE_X11)
 // Converts MockKeyboard::Modifiers to ui::EventFlags.
 int ConvertMockKeyboardModifier(MockKeyboard::Modifiers modifiers) {
@@ -95,43 +94,15 @@ class WebUITestWebUIControllerFactory : public WebUIControllerFactory {
   }
   virtual bool UseWebUIForURL(BrowserContext* browser_context,
                               const GURL& url) const OVERRIDE {
-    return GetContentClient()->HasWebUIScheme(url);
+    return HasWebUIScheme(url);
   }
   virtual bool UseWebUIBindingsForURL(BrowserContext* browser_context,
                                       const GURL& url) const OVERRIDE {
-    return GetContentClient()->HasWebUIScheme(url);
-  }
-  virtual bool IsURLAcceptableForWebUI(
-      BrowserContext* browser_context,
-      const GURL& url,
-      bool data_urls_allowed) const OVERRIDE {
-    return false;
+    return HasWebUIScheme(url);
   }
 };
 
-class WebUITestClient : public ShellContentClient {
- public:
-  WebUITestClient() {
-  }
-
-  virtual bool HasWebUIScheme(const GURL& url) const OVERRIDE {
-    return url.SchemeIs(chrome::kChromeUIScheme);
-  }
-};
-
-class WebUITestBrowserClient : public ShellContentBrowserClient {
- public:
-  WebUITestBrowserClient() {}
-
-  virtual WebUIControllerFactory* GetWebUIControllerFactory() OVERRIDE {
-    return &factory_;
-  }
-
- private:
-  WebUITestWebUIControllerFactory factory_;
-};
-
-}
+}  // namespace
 
 class RenderViewImplTest : public RenderViewTest {
  public:
@@ -153,7 +124,8 @@ class RenderViewImplTest : public RenderViewTest {
     // Retrieve the Unicode character for the given tuple (keyboard-layout,
     // key-code, and modifiers).
     // Exit when a keyboard-layout driver cannot assign a Unicode character to
-    // the tuple to prevent sending an invalid key code to the RenderView object.
+    // the tuple to prevent sending an invalid key code to the RenderView
+    // object.
     CHECK(mock_keyboard_.get());
     CHECK(output);
     int length = mock_keyboard_->GetCharacters(layout, key_code, modifiers,
@@ -340,14 +312,8 @@ TEST_F(RenderViewImplTest, OnNavigationHttpPost) {
 }
 
 TEST_F(RenderViewImplTest, DecideNavigationPolicy) {
-  WebUITestClient client;
-  WebUITestBrowserClient browser_client;
-  ContentClient* old_client = GetContentClient();
-  ContentBrowserClient* old_browser_client = GetContentClient()->browser();
-
-  SetContentClient(&client);
-  GetContentClient()->set_browser_for_testing(&browser_client);
-  client.set_renderer_for_testing(old_client->renderer());
+  WebUITestWebUIControllerFactory factory;
+  WebUIControllerFactory::RegisterFactory(&factory);
 
   // Navigations to normal HTTP URLs can be handled locally.
   WebKit::WebURLRequest request(GURL("http://foo.com"));
@@ -382,9 +348,6 @@ TEST_F(RenderViewImplTest, DecideNavigationPolicy) {
       WebKit::WebNavigationPolicyNewForegroundTab,
       false);
   EXPECT_EQ(WebKit::WebNavigationPolicyIgnore, policy);
-
-  GetContentClient()->set_browser_for_testing(old_browser_client);
-  SetContentClient(old_client);
 }
 
 TEST_F(RenderViewImplTest, DecideNavigationPolicyForWebUI) {
@@ -578,7 +541,8 @@ TEST_F(RenderViewImplTest, ReloadWhileSwappedOut) {
 
 // Test that we get the correct UpdateState message when we go back twice
 // quickly without committing.  Regression test for http://crbug.com/58082.
-TEST_F(RenderViewImplTest, LastCommittedUpdateState) {
+// Disabled: http://crbug.com/157357 .
+TEST_F(RenderViewImplTest,  DISABLED_LastCommittedUpdateState) {
   // Load page A.
   LoadHTML("<div>Page A</div>");
 
@@ -1617,30 +1581,6 @@ TEST_F(RenderViewImplTest, SetHistoryLengthAndPrune) {
   EXPECT_EQ(expected_page_id_2, view()->history_page_ids_[3]);
 }
 
-TEST_F(RenderViewImplTest, FindTitleForIntentsPage) {
-  view()->set_send_content_state_immediately(true);
-  LoadHTML("<html><head><title>title</title>"
-           "<intent action=\"a\" type=\"t\"></intent></head></html>");
-  WebKit::WebIntentServiceInfo service;
-  service.setAction(ASCIIToUTF16("a"));
-  service.setType(ASCIIToUTF16("t"));
-  view()->registerIntentService(GetMainFrame(), service);
-  ProcessPendingMessages();
-
-  EXPECT_TRUE(render_thread_->sink().GetUniqueMessageMatching(
-      IntentsHostMsg_RegisterIntentService::ID));
-  const IPC::Message* msg = render_thread_->sink().GetUniqueMessageMatching(
-      IntentsHostMsg_RegisterIntentService::ID);
-  ASSERT_TRUE(msg);
-  webkit_glue::WebIntentServiceData service_data;
-  bool user_gesture = true;
-  IntentsHostMsg_RegisterIntentService::Read(msg, &service_data, &user_gesture);
-  EXPECT_EQ(ASCIIToUTF16("a"), service_data.action);
-  EXPECT_EQ(ASCIIToUTF16("t"), service_data.type);
-  EXPECT_EQ(ASCIIToUTF16("title"), service_data.title);
-  EXPECT_FALSE(user_gesture);
-}
-
 TEST_F(RenderViewImplTest, ContextMenu) {
   LoadHTML("<div>Page A</div>");
 
@@ -1819,7 +1759,7 @@ TEST_F(RenderViewImplTest, SetEditableSelectionAndComposition) {
   ExecuteJavaScript("document.getElementById('test1').focus();");
   view()->OnSetEditableSelectionOffsets(4, 8);
   const std::vector<WebKit::WebCompositionUnderline> empty_underline;
-  view()->OnSetCompositionFromExistingText(7,10, empty_underline);
+  view()->OnSetCompositionFromExistingText(7, 10, empty_underline);
   WebKit::WebTextInputInfo info = view()->webview()->textInputInfo();
   EXPECT_EQ(4, info.selectionStart);
   EXPECT_EQ(8, info.selectionEnd);
@@ -1854,6 +1794,32 @@ TEST_F(RenderViewImplTest, OnExtendSelectionAndDelete) {
   EXPECT_EQ("abuvwxyz", info.value);
   EXPECT_EQ(2, info.selectionStart);
   EXPECT_EQ(2, info.selectionEnd);
+}
+
+// Test that the navigating specific frames works correctly.
+TEST_F(RenderViewImplTest, NavigateFrame) {
+  // Load page A.
+  LoadHTML("hello <iframe srcdoc='fail' name='frame'></iframe>");
+
+  // Navigate the frame only.
+  ViewMsg_Navigate_Params nav_params;
+  nav_params.url = GURL("data:text/html,world");
+  nav_params.navigation_type = ViewMsg_Navigate_Type::NORMAL;
+  nav_params.transition = PAGE_TRANSITION_TYPED;
+  nav_params.current_history_list_length = 1;
+  nav_params.current_history_list_offset = 0;
+  nav_params.pending_history_list_offset = 1;
+  nav_params.page_id = -1;
+  nav_params.frame_to_navigate = "frame";
+  view()->OnNavigate(nav_params);
+  ProcessPendingMessages();
+
+  // Copy the document content to std::wstring and compare with the
+  // expected result.
+  const int kMaxOutputCharacters = 256;
+  std::wstring output = UTF16ToWideHack(
+      GetMainFrame()->contentAsText(kMaxOutputCharacters));
+  EXPECT_EQ(output, L"hello \n\nworld");
 }
 
 }  // namespace content

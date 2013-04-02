@@ -8,11 +8,11 @@
 #include "base/bind_helpers.h"
 #include "base/logging.h"
 #include "base/values.h"
-#include "content/browser/disposition_utils.h"
-#include "content/browser/webui/web_ui_impl.h"
+#include "content/public/browser/web_ui.h"
 #include "content/public/browser/web_contents.h"
+#include "ui/base/window_open_disposition.h"
 
-using content::OpenURLParams;
+namespace content {
 
 GenericHandler::GenericHandler() {
 }
@@ -45,15 +45,15 @@ void GenericHandler::HandleNavigateToUrl(const ListValue* args) {
   CHECK(button == 0.0 || button == 1.0);
   bool middle_button = (button == 1.0);
 
-  WindowOpenDisposition disposition =
-      disposition_utils::DispositionFromClick(middle_button, alt_key, ctrl_key,
-                                              meta_key, shift_key);
+  WindowOpenDisposition disposition = ui::DispositionFromClick(
+      middle_button, alt_key, ctrl_key, meta_key, shift_key);
   if (disposition == CURRENT_TAB && target_string == "_blank")
     disposition = NEW_FOREGROUND_TAB;
 
   web_ui()->GetWebContents()->OpenURL(OpenURLParams(
-      GURL(url_string), content::Referrer(), disposition,
-      content::PAGE_TRANSITION_LINK, false));
+      GURL(url_string), Referrer(), disposition, PAGE_TRANSITION_LINK, false));
 
   // This may delete us!
 }
+
+}  // namespace content

@@ -94,6 +94,10 @@ gfx::Font NativeWidgetAura::GetWindowTitleFont() {
 // NativeWidgetAura, internal::NativeWidgetPrivate implementation:
 
 void NativeWidgetAura::InitNativeWidget(const Widget::InitParams& params) {
+  // Aura needs to know which desktop (Ash or regular) will manage this widget.
+  // See Widget::InitParams::context for details.
+  DCHECK(params.parent || params.context);
+
   ownership_ = params.ownership;
 
   window_->set_user_data(this);
@@ -136,15 +140,8 @@ void NativeWidgetAura::InitNativeWidget(const Widget::InitParams& params) {
   if (parent) {
     parent->AddChild(window_);
   } else {
-    // TODO(erg): Once I've threaded context through chrome, uncomment this
-    // check, which currently fails on the NULL == NULL case.
-    //
-    // DCHECK_NE(params.GetParent(), params.context);
-
-    // TODO(erg): Remove this NULL check once we've made everything in views
-    // actually pass us a context.
-    aura::RootWindow* root_window = context ? context->GetRootWindow() : NULL;
-    window_->SetDefaultParentByRootWindow(root_window, window_bounds);
+    window_->SetDefaultParentByRootWindow(context->GetRootWindow(),
+                                          window_bounds);
   }
 
   // Wait to set the bounds until we have a parent. That way we can know our
@@ -594,7 +591,7 @@ void NativeWidgetAura::SetCursor(gfx::NativeCursor cursor) {
 void NativeWidgetAura::ClearNativeFocus() {
   aura::client::FocusClient* client = aura::client::GetFocusClient(window_);
   if (window_ && client && window_->Contains(client->GetFocusedWindow()))
-    client->FocusWindow(window_, NULL);
+    client->ResetFocusWithinActiveWindow(window_);
 }
 
 gfx::Rect NativeWidgetAura::GetWorkAreaBoundsInScreen() const {
@@ -799,18 +796,6 @@ void NativeWidgetAura::OnMouseEvent(ui::MouseEvent* event) {
 }
 
 void NativeWidgetAura::OnScrollEvent(ui::ScrollEvent* event) {
-  if (event->type() == ui::ET_SCROLL) {
-    delegate_->OnScrollEvent(event);
-    if (event->handled())
-      return;
-
-    // Convert unprocessed scroll events into wheel events.
-    ui::MouseWheelEvent mwe(*static_cast<ui::ScrollEvent*>(event));
-    delegate_->OnMouseEvent(&mwe);
-    if (mwe.handled())
-      event->SetHandled();
-    return;
-  }
   delegate_->OnScrollEvent(event);
 }
 

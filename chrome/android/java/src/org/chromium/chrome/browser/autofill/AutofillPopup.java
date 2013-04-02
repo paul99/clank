@@ -24,6 +24,7 @@ import java.util.ArrayList;
 
 import org.chromium.chrome.R;
 import org.chromium.content.browser.ContainerViewDelegate;
+import org.chromium.ui.gfx.DeviceDisplayInfo;
 import org.chromium.ui.gfx.NativeWindow;
 
 /**
@@ -57,17 +58,15 @@ public class AutofillPopup extends ListPopupWindow implements AdapterView.OnItem
      */
     public interface AutofillPopupDelegate {
         /**
-         * Confirms the dismissal of the java AutofillPopup object.
+         * Requests the controller to hide AutofillPopup.
          */
-        public void dismissed();
+        public void requestHide();
 
         /**
          * Handles the selection of an Autofill suggestion from an AutofillPopup.
          * @param listIndex The index of the selected Autofill suggestion.
-         * @param value The value of the selected Autofill suggestion.
-         * @param uniqueId The unique id of the selected Autofill suggestion.
          */
-        public void suggestionSelected(int listIndex, String value, int uniqueId);
+        public void suggestionSelected(int listIndex);
     }
 
     // ListPopupWindow needs an anchor view to determine it's size and position.  We create a view
@@ -152,7 +151,9 @@ public class AutofillPopup extends ListPopupWindow implements AdapterView.OnItem
      * @param height The height of the anchor view.
      */
     public void setAnchorRect(float x, float y, float width, float height) {
-        mAnchorRect = new Rect((int) x, (int) y, (int) (x + width), (int) (y + height));
+        float scale = (float) DeviceDisplayInfo.create(mNativeWindow.getContext()).getDIPScale();
+        mAnchorRect = new Rect(Math.round(x * scale), Math.round(y * scale),
+                Math.round((x + width) * scale), Math.round((y + height) * scale));
     }
 
     /**
@@ -174,14 +175,21 @@ public class AutofillPopup extends ListPopupWindow implements AdapterView.OnItem
         mAnchorView.setSize(mAnchorRect, getDesiredWidth(suggestions));
     }
 
+
     /**
-     * Dismisses the popup and calls to mAutofillCallback.dismissed().
+     * Overrides the default dismiss behavior to request the controller to dismiss the view.
      */
     @Override
     public void dismiss() {
+        mAutofillCallback.requestHide();
+    }
+
+    /**
+     * Hides the popup and removes the anchor view from the ContainerView.
+     */
+    public void hide() {
         super.dismiss();
         mContainerViewDelegate.removeViewFromContainerView(mAnchorView);
-        mAutofillCallback.dismissed();
     }
 
     /**
@@ -223,14 +231,7 @@ public class AutofillPopup extends ListPopupWindow implements AdapterView.OnItem
 
     @Override
     public void onItemClick(AdapterView<?> parent, View view, int position, long id) {
-        try {
-            ListAdapter adapter = (ListAdapter) parent.getAdapter();
-            AutofillSuggestion data = (AutofillSuggestion) adapter.getItem(position);
-            mAutofillCallback.suggestionSelected(position, data.mName, data.mUniqueId);
-        } catch (ClassCastException e) {
-            Log.w("AutofillWindow", "error in onItemClick", e);
-            assert false;
-        }
+        mAutofillCallback.suggestionSelected(position);
     }
 
 }

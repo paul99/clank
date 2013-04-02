@@ -8,8 +8,9 @@
 #include "chrome/browser/extensions/extension_system.h"
 
 class CommandLine;
-class FilePath;
+
 namespace base {
+class FilePath;
 class Time;
 }
 
@@ -27,7 +28,7 @@ class TestExtensionSystem : public ExtensionSystem {
   // Creates an ExtensionService initialized with the testing profile and
   // returns it.
   ExtensionService* CreateExtensionService(const CommandLine* command_line,
-                                           const FilePath& install_directory,
+                                           const base::FilePath& install_directory,
                                            bool autoupdate_enabled);
 
   // Creates an ExtensionProcessManager. If not invoked, the
@@ -48,6 +49,8 @@ class TestExtensionSystem : public ExtensionSystem {
   virtual ExtensionProcessManager* process_manager() OVERRIDE;
   virtual AlarmManager* alarm_manager() OVERRIDE;
   virtual StateStore* state_store() OVERRIDE;
+  virtual StateStore* rules_store() OVERRIDE;
+  virtual ExtensionPrefs* extension_prefs() OVERRIDE;
   virtual ShellWindowGeometryCache* shell_window_geometry_cache() OVERRIDE;
   virtual ExtensionInfoMap* info_map() OVERRIDE;
   virtual LazyBackgroundTaskQueue* lazy_background_task_queue() OVERRIDE;

@@ -235,12 +235,12 @@ class ProxyConfigServiceImplTestBase : public TESTBASE {
       : ui_thread_(BrowserThread::UI, &loop_),
         io_thread_(BrowserThread::IO, &loop_) {}
 
-  virtual void Init(PrefService* pref_service) {
+  virtual void Init(TestingPrefServiceSimple* pref_service) {
     ASSERT_TRUE(pref_service);
     DBusThreadManager::Initialize();
-    PrefProxyConfigTrackerImpl::RegisterPrefs(pref_service);
-    ProxyConfigServiceImpl::RegisterPrefs(pref_service);
-    proxy_config_service_.reset(new ChromeProxyConfigService(NULL, true));
+    PrefProxyConfigTrackerImpl::RegisterPrefs(pref_service->registry());
+    ProxyConfigServiceImpl::RegisterPrefs(pref_service->registry());
+    proxy_config_service_.reset(new ChromeProxyConfigService(NULL));
     config_service_impl_.reset(new ProxyConfigServiceImpl(pref_service));
     config_service_impl_->SetChromeProxyConfigService(
         proxy_config_service_.get());
@@ -340,7 +340,7 @@ class ProxyConfigServiceImplTest
     Init(&pref_service_);
   }
 
-  TestingPrefService pref_service_;
+  TestingPrefServiceSimple pref_service_;
 };
 
 TEST_F(ProxyConfigServiceImplTest, NetworkProxy) {

@@ -25,7 +25,8 @@ const SkColor DetachableToolbarView::kMiddleDividerColor =
 void DetachableToolbarView::PaintBackgroundAttachedMode(
     gfx::Canvas* canvas,
     views::View* view,
-    const gfx::Point& background_origin) {
+    const gfx::Point& background_origin,
+    chrome::HostDesktopType host_desktop_type) {
   ui::ThemeProvider* tp = view->GetThemeProvider();
   canvas->FillRect(view->GetLocalBounds(),
                    tp->GetColor(ThemeService::COLOR_TOOLBAR));
@@ -33,18 +34,21 @@ void DetachableToolbarView::PaintBackgroundAttachedMode(
                        background_origin.x(), background_origin.y(), 0, 0,
                        view->width(), view->height());
 #if defined(USE_ASH)
-  // Ash provides additional lightening at the edges of the toolbar.
-  gfx::ImageSkia* toolbar_left = tp->GetImageSkiaNamed(IDR_TOOLBAR_SHADE_LEFT);
-  canvas->TileImageInt(*toolbar_left,
-                       0, 0,
-                       0, 0,
-                       toolbar_left->width(), view->height());
-  gfx::ImageSkia* toolbar_right =
-      tp->GetImageSkiaNamed(IDR_TOOLBAR_SHADE_RIGHT);
-  canvas->TileImageInt(*toolbar_right,
-                       0, 0,
-                       view->width() - toolbar_right->width(), 0,
-                       toolbar_right->width(), view->height());
+  if (host_desktop_type == chrome::HOST_DESKTOP_TYPE_ASH) {
+    // Ash provides additional lightening at the edges of the toolbar.
+    gfx::ImageSkia* toolbar_left =
+        tp->GetImageSkiaNamed(IDR_TOOLBAR_SHADE_LEFT);
+    canvas->TileImageInt(*toolbar_left,
+                         0, 0,
+                         0, 0,
+                         toolbar_left->width(), view->height());
+    gfx::ImageSkia* toolbar_right =
+        tp->GetImageSkiaNamed(IDR_TOOLBAR_SHADE_RIGHT);
+    canvas->TileImageInt(*toolbar_right,
+                         0, 0,
+                         view->width() - toolbar_right->width(), 0,
+                         toolbar_right->width(), view->height());
+  }
 #endif
 }
 
@@ -65,20 +69,12 @@ void DetachableToolbarView::CalculateContentArea(
 // static
 void DetachableToolbarView::PaintHorizontalBorder(gfx::Canvas* canvas,
                                                   DetachableToolbarView* view) {
-  PaintHorizontalBorderWithColor(canvas, view,
-      ThemeService::GetDefaultColor(ThemeService::COLOR_TOOLBAR_SEPARATOR));
-}
-
-// static
-void DetachableToolbarView::PaintHorizontalBorderWithColor(
-    gfx::Canvas* canvas,
-    DetachableToolbarView* view,
-    SkColor border_color) {
   // Border can be at the top or at the bottom of the view depending on whether
   // the view (bar/shelf) is attached or detached.
   int thickness = views::NonClientFrameView::kClientEdgeThickness;
   int y = view->IsDetached() ? 0 : (view->height() - thickness);
-  canvas->FillRect(gfx::Rect(0, y, view->width(), thickness), border_color);
+  canvas->FillRect(gfx::Rect(0, y, view->width(), thickness),
+      ThemeService::GetDefaultColor(ThemeService::COLOR_TOOLBAR_SEPARATOR));
 }
 
 // static

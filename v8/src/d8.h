@@ -277,11 +277,11 @@ class Shell : public i::AllStatic {
   static int RunMain(Isolate* isolate, int argc, char* argv[]);
   static int Main(int argc, char* argv[]);
   static void Exit(int exit_code);
+  static void OnExit();
 
 #ifndef V8_SHARED
   static Handle<Array> GetCompletions(Handle<String> text,
                                       Handle<String> full);
-  static void OnExit();
   static int* LookupCounter(const char* name);
   static void* CreateHistogram(const char* name,
                                int min,
@@ -381,7 +381,7 @@ class Shell : public i::AllStatic {
   static i::Mutex* context_mutex_;
 
   static Counter* GetCounter(const char* name, bool is_histogram);
-  static void InstallUtilityScript();
+  static void InstallUtilityScript(Isolate* isolate);
 #endif  // V8_SHARED
   static void Initialize(Isolate* isolate);
   static void InitializeDebugger(Isolate* isolate);
@@ -404,7 +404,9 @@ class Shell : public i::AllStatic {
   static Handle<Value> CreateExternalArray(const Arguments& args,
                                            ExternalArrayType type,
                                            int32_t element_size);
-  static void ExternalArrayWeakCallback(Persistent<Value> object, void* data);
+  static void ExternalArrayWeakCallback(Isolate* isolate,
+                                        Persistent<Value> object,
+                                        void* data);
 };
 
 

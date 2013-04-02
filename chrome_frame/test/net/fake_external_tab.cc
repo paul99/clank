@@ -20,6 +20,8 @@
 #include "base/memory/scoped_ptr.h"
 #include "base/path_service.h"
 #include "base/prefs/json_pref_store.h"
+#include "base/prefs/pref_registry_simple.h"
+#include "base/prefs/pref_service.h"
 #include "base/string_piece.h"
 #include "base/string_util.h"
 #include "base/stringprintf.h"
@@ -33,7 +35,6 @@
 #include "chrome/browser/automation/automation_provider_list.h"
 #include "chrome/browser/chrome_content_browser_client.h"
 #include "chrome/browser/prefs/browser_prefs.h"
-#include "chrome/browser/prefs/pref_service.h"
 #include "chrome/browser/prefs/proxy_config_dictionary.h"
 #include "chrome/browser/process_singleton.h"
 #include "chrome/browser/profiles/profile_manager.h"
@@ -192,6 +193,11 @@ void FilterDisabledTests() {
     // Temporarily disabled because they needs user input (login dialog).
     "URLRequestTestHTTP.BasicAuth",
     "URLRequestTestHTTP.BasicAuthWithCookies",
+
+    // ChromeFrame does not support load timing.
+    "URLRequestTestHTTP.BasicAuthLoadTiming",
+    "URLRequestTestHTTP.GetTestLoadTiming",
+    "URLRequestTestHTTP.RedirectLoadTiming",
 
     // HTTPS tests temporarily disabled due to the certificate error dialog.
     // TODO(tommi): The tests currently fail though, so need to fix.
@@ -481,7 +487,7 @@ void FakeExternalTab::Initialize() {
   TestTimeouts::Initialize();
 
   // Load Chrome.dll as our resource dll.
-  FilePath dll;
+  base::FilePath dll;
   PathService::Get(base::DIR_MODULE, &dll);
   dll = dll.Append(chrome::kBrowserResourcesDll);
   HMODULE res_mod = ::LoadLibraryExW(dll.value().c_str(),
@@ -498,7 +504,7 @@ void FakeExternalTab::Initialize() {
   cmd->AppendSwitch(switches::kDisableWebResources);
   cmd->AppendSwitch(switches::kSingleProcess);
 
-  FilePath local_state_path;
+  base::FilePath local_state_path;
   CHECK(PathService::Get(chrome::FILE_LOCAL_STATE, &local_state_path));
   scoped_refptr<base::SequencedTaskRunner> local_state_task_runner =
       JsonPrefStore::GetTaskRunnerForFile(local_state_path,
@@ -511,12 +517,18 @@ void FakeExternalTab::Initialize() {
 
   content::RenderProcessHost::SetRunRendererInProcess(true);
 
-  browser_process_->local_state()->RegisterBooleanPref(
-      prefs::kMetricsReportingEnabled, false);
+  // TODO(joi): Registration should be done up front via browser_prefs.cc
+  scoped_refptr<PrefRegistrySimple> registry = static_cast<PrefRegistrySimple*>(
+      browser_process_->local_state()->DeprecatedGetPrefRegistry());
+  if (!browser_process_->local_state()->FindPreference(
+          prefs::kMetricsReportingEnabled)) {
+    registry->RegisterBooleanPref(prefs::kMetricsReportingEnabled, false);
+  }
 }
 
 void FakeExternalTab::InitializePostThreadsCreated() {
-  FilePath profile_path(ProfileManager::GetDefaultProfileDir(user_data()));
+  base::FilePath profile_path(
+      ProfileManager::GetDefaultProfileDir(user_data()));
   Profile* profile =
       g_browser_process->profile_manager()->GetProfile(profile_path);
 }
@@ -702,9 +714,9 @@ void CFUrlRequestUnittestRunner::TakeDownBrowser() {
 }
 
 void CFUrlRequestUnittestRunner::InitializeLogging() {
-  FilePath exe;
+  base::FilePath exe;
   PathService::Get(base::FILE_EXE, &exe);
-  FilePath log_filename = exe.ReplaceExtension(FILE_PATH_LITERAL("log"));
+  base::FilePath log_filename = exe.ReplaceExtension(FILE_PATH_LITERAL("log"));
   logging::InitLogging(
       log_filename.value().c_str(),
       logging::LOG_TO_BOTH_FILE_AND_SYSTEM_DEBUG_LOG,
@@ -733,7 +745,7 @@ void CFUrlRequestUnittestRunner::StartInitializationTimeout() {
 void CFUrlRequestUnittestRunner::OnInitializationTimeout() {
   LOG(ERROR) << "Failed to start Chrome Frame in the host browser.";
 
-  FilePath snapshot;
+  base::FilePath snapshot;
   if (ui_test_utils::SaveScreenSnapshotToDesktop(&snapshot))
     LOG(ERROR) << "Screen snapshot saved to " << snapshot.value();
 
@@ -773,12 +785,12 @@ int CFUrlRequestUnittestRunner::PreCreateThreads() {
 }
 
 bool CFUrlRequestUnittestRunner::ProcessSingletonNotificationCallback(
-    const CommandLine& command_line, const FilePath& current_directory) {
+    const CommandLine& command_line, const base::FilePath& current_directory) {
   std::string channel_id = command_line.GetSwitchValueASCII(
       switches::kAutomationClientChannelID);
   EXPECT_FALSE(channel_id.empty());
 
-  Profile* profile = g_browser_process->profile_manager()->GetDefaultProfile(
+  Profile* profile = g_browser_process->profile_manager()->GetLastUsedProfile(
       fake_chrome_->user_data());
 
   AutomationProviderList* list = g_browser_process->GetAutomationProviderList();

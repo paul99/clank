@@ -10,7 +10,7 @@ import org.chromium.base.PathUtils;
 import org.chromium.base.ThreadUtils;
 import org.chromium.content.app.LibraryLoader;
 import org.chromium.content.browser.AndroidBrowserProcess;
-import org.chromium.content.browser.ResourceExtractor;
+import org.chromium.content.common.ProcessInitException;
 
 /**
  * Wrapper for the steps needed to initialize the java and native sides of webview chromium.
@@ -31,7 +31,11 @@ public abstract class AwBrowserProcess {
     public static void loadLibrary() {
         PathUtils.setPrivateDataDirectorySuffix(PRIVATE_DATA_DIRECTORY_SUFFIX);
         LibraryLoader.setLibraryToLoad(NATIVE_LIBRARY);
-        LibraryLoader.ensureInitialized();
+        try {
+            LibraryLoader.loadNow();
+        } catch (ProcessInitException e) {
+            throw new RuntimeException("Cannot load WebView", e);
+        }
     }
 
     /**
@@ -46,8 +50,13 @@ public abstract class AwBrowserProcess {
         ThreadUtils.runOnUiThreadBlocking(new Runnable() {
             @Override
             public void run() {
-                AndroidBrowserProcess.initContentViewProcess(context,
-                        AndroidBrowserProcess.MAX_RENDERERS_SINGLE_PROCESS);
+                try {
+                    LibraryLoader.ensureInitialized();
+                    AndroidBrowserProcess.init(context,
+                            AndroidBrowserProcess.MAX_RENDERERS_SINGLE_PROCESS);
+                } catch (ProcessInitException e) {
+                    throw new RuntimeException("Cannot initialize WebView", e);
+                }
             }
         });
     }

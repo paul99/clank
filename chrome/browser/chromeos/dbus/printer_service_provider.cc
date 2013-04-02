@@ -47,7 +47,7 @@ void ActivateContents(Browser* browser, content::WebContents* contents) {
 }
 
 Browser* ActivateAndGetBrowserForUrl(GURL url) {
-  for (TabContentsIterator it; !it.done(); ++it) {
+  for (TabContentsIterator it; !it.done(); it.Next()) {
     if (it->GetURL() == url) {
       ActivateContents(it.browser(), *it);
       return it.browser();
@@ -73,8 +73,8 @@ void FindOrOpenCloudPrintPage(const std::string& /* vendor */,
 
   Browser* browser = ActivateAndGetBrowserForUrl(url);
   if (!browser) {
-    browser = browser::FindOrCreateTabbedBrowser(profile,
-                                                 chrome::HOST_DESKTOP_TYPE_ASH);
+    browser = chrome::FindOrCreateTabbedBrowser(profile,
+                                                chrome::HOST_DESKTOP_TYPE_ASH);
     if (!browser)
       return;
     UMA_HISTOGRAM_ENUMERATION("PrinterService.PrinterServiceEvent",

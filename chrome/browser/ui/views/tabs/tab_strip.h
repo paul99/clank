@@ -27,7 +27,11 @@ class StackedTabStripLayout;
 class Tab;
 class TabDragController;
 class TabStripController;
-class TabStripSelectionModel;
+class TabStripObserver;
+
+namespace ui {
+class ListSelectionModel;
+}
 
 namespace views {
 class ImageView;
@@ -55,6 +59,10 @@ class TabStrip : public views::View,
 
   explicit TabStrip(TabStripController* controller);
   virtual ~TabStrip();
+
+  // Add and remove observers to changes within this TabStrip.
+  void AddObserver(TabStripObserver* observer);
+  void RemoveObserver(TabStripObserver* observer);
 
   // Sets the layout type. If |adjust_layout| is true the layout type changes
   // based on whether the user uses a mouse or touch device with the tabstrip.
@@ -97,8 +105,8 @@ class TabStrip : public views::View,
 
   // Invoked when the selection changes from |old_selection| to
   // |new_selection|.
-  void SetSelection(const TabStripSelectionModel& old_selection,
-                    const TabStripSelectionModel& new_selection);
+  void SetSelection(const ui::ListSelectionModel& old_selection,
+                    const ui::ListSelectionModel& new_selection);
 
   // Invoked when the title of a tab changes and the tab isn't loading.
   void TabTitleChangedNotLoading(int model_index);
@@ -159,11 +167,19 @@ class TabStrip : public views::View,
   // Returns the new tab button. This is never NULL.
   views::View* newtab_button();
 
-  // Sets a painting style with a "light bar" at the top representing open tabs.
+  // Sets a painting style with miniature "tab indicator" rectangles at the top.
   void SetImmersiveStyle(bool enable);
 
+  // Returns true if Tabs in this TabStrip are currently changing size or
+  // position.
+  bool IsAnimating() const;
+
+  // Stops any ongoing animations. If |layout| is true and an animation is
+  // ongoing this does a layout.
+  void StopAnimating(bool layout);
+
   // TabController overrides:
-  virtual const TabStripSelectionModel& GetSelectionModel() OVERRIDE;
+  virtual const ui::ListSelectionModel& GetSelectionModel() OVERRIDE;
   virtual bool SupportsMultipleSelection() OVERRIDE;
   virtual void SelectTab(Tab* tab) OVERRIDE;
   virtual void ExtendSelectionTo(Tab* tab) OVERRIDE;
@@ -178,7 +194,7 @@ class TabStrip : public views::View,
   virtual void MaybeStartDrag(
       Tab* tab,
       const ui::LocatedEvent& event,
-      const TabStripSelectionModel& original_selection) OVERRIDE;
+      const ui::ListSelectionModel& original_selection) OVERRIDE;
   virtual void ContinueDrag(views::View* view,
                             const gfx::Point& location) OVERRIDE;
   virtual bool EndDrag(EndDragReason reason) OVERRIDE;
@@ -248,7 +264,10 @@ class TabStrip : public views::View,
   // Used during a drop session of a url. Tracks the position of the drop as
   // well as a window used to highlight where the drop occurs.
   struct DropInfo {
-    DropInfo(int index, bool drop_before, bool paint_down);
+    DropInfo(int drop_index,
+             bool drop_before,
+             bool point_down,
+             views::Widget* context);
     ~DropInfo();
 
     // Index of the tab to drop on. If drop_before is true, the drop should
@@ -289,10 +308,6 @@ class TabStrip : public views::View,
   // Schedules the animations and bounds changes necessary for a remove tab
   // animation.
   void ScheduleRemoveTabAnimation(Tab* tab);
-
-  // Stops any ongoing animations. If |layout| is true and an animation is
-  // ongoing this does a layout.
-  void StopAnimating(bool layout);
 
   // Animates all the views to their ideal bounds.
   // NOTE: this does *not* invoke GenerateIdealBounds, it uses the bounds
@@ -444,10 +459,6 @@ class TabStrip : public views::View,
 
   // -- Animations ------------------------------------------------------------
 
-  // Returns true if Tabs in this TabStrip are currently changing size or
-  // position.
-  bool IsAnimating() const;
-
   // Invoked prior to starting a new animation.
   void PrepareForAnimation();
 
@@ -591,6 +602,10 @@ class TabStrip : public views::View,
 
   // True if tabs are painted as rectangular light-bars.
   bool immersive_style_;
+
+  // Our observers.
+  typedef ObserverList<TabStripObserver> TabStripObservers;
+  TabStripObservers observers_;
 
   DISALLOW_COPY_AND_ASSIGN(TabStrip);
 };

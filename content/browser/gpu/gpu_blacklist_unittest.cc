@@ -37,7 +37,7 @@ class GpuBlacklistTest : public testing::Test {
   }
 
  protected:
-  void SetUp() {
+  virtual void SetUp() {
     gpu_info_.gpu.vendor_id = kNvidiaVendorId;
     gpu_info_.gpu.device_id = 0x0640;
     gpu_info_.driver_vendor = "NVIDIA";
@@ -51,7 +51,7 @@ class GpuBlacklistTest : public testing::Test {
     gpu_info_.performance_stats.overall = 5.0;
   }
 
-  void TearDown() {
+  virtual void TearDown() {
   }
 
  private:
@@ -59,7 +59,7 @@ class GpuBlacklistTest : public testing::Test {
 };
 
 TEST_F(GpuBlacklistTest, CurrentBlacklistValidation) {
-  FilePath data_file;
+  base::FilePath data_file;
   ASSERT_TRUE(PathService::Get(base::DIR_SOURCE_ROOT, &data_file));
   data_file =
       data_file.Append(FILE_PATH_LITERAL("content"))

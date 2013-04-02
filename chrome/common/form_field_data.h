@@ -12,7 +12,7 @@
 // Stores information about a field in a form.
 struct FormFieldData {
   FormFieldData();
-  virtual ~FormFieldData();
+  ~FormFieldData();
 
   // Equality tests for identity which does not include |value| or
   // |is_autofilled|.
@@ -20,7 +20,7 @@ struct FormFieldData {
   // ids.
   bool operator==(const FormFieldData& field) const;
   bool operator!=(const FormFieldData& field) const;
-  // Comparsion operator exposed for STL map. Uses label, then name to sort.
+  // Comparison operator exposed for STL map. Uses label, then name to sort.
   bool operator<(const FormFieldData& field) const;
 
   string16 label;
@@ -30,6 +30,8 @@ struct FormFieldData {
   std::string autocomplete_attribute;
   size_t max_length;
   bool is_autofilled;
+  bool is_checked;
+  bool is_checkable;
   bool is_focusable;
   bool should_autocomplete;
 
@@ -53,6 +55,8 @@ std::ostream& operator<<(std::ostream& os, const FormFieldData& field);
     EXPECT_EQ(expected.autocomplete_attribute, actual.autocomplete_attribute); \
     EXPECT_EQ(expected.max_length, actual.max_length); \
     EXPECT_EQ(expected.is_autofilled, actual.is_autofilled); \
+    EXPECT_EQ(expected.is_checked, actual.is_checked); \
+    EXPECT_EQ(expected.is_checkable, actual.is_checkable); \
   } while (0)
 
 #endif  // CHROME_COMMON_FORM_FIELD_DATA_H_

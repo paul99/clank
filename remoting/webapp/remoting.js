@@ -10,32 +10,43 @@ var remoting = remoting || {};
 /** @type {remoting.HostSession} */ remoting.hostSession = null;
 
 /**
- * @enum {string} All error messages from messages.json
+ * Show the authorization consent UI and register a one-shot event handler to
+ * continue the authorization process.
+ *
+ * @param {function():void} authContinue Callback to invoke when the user
+ *     clicks "Continue".
  */
-remoting.Error = {
-  NO_RESPONSE: /*i18n-content*/'ERROR_NO_RESPONSE',
-  INVALID_ACCESS_CODE: /*i18n-content*/'ERROR_INVALID_ACCESS_CODE',
-  MISSING_PLUGIN: /*i18n-content*/'ERROR_MISSING_PLUGIN',
-  AUTHENTICATION_FAILED: /*i18n-content*/'ERROR_AUTHENTICATION_FAILED',
-  HOST_IS_OFFLINE: /*i18n-content*/'ERROR_HOST_IS_OFFLINE',
-  INCOMPATIBLE_PROTOCOL: /*i18n-content*/'ERROR_INCOMPATIBLE_PROTOCOL',
-  BAD_PLUGIN_VERSION: /*i18n-content*/'ERROR_BAD_PLUGIN_VERSION',
-  NETWORK_FAILURE: /*i18n-content*/'ERROR_NETWORK_FAILURE',
-  HOST_OVERLOAD: /*i18n-content*/'ERROR_HOST_OVERLOAD',
-  UNEXPECTED: /*i18n-content*/'ERROR_UNEXPECTED',
-  SERVICE_UNAVAILABLE: /*i18n-content*/'ERROR_SERVICE_UNAVAILABLE',
-  NOT_AUTHENTICATED: /*i18n-content*/'ERROR_NOT_AUTHENTICATED',
-  INVALID_HOST_DOMAIN: /*i18n-content*/'ERROR_INVALID_HOST_DOMAIN'
-};
+function consentRequired_(authContinue) {
+  /** @type {HTMLElement} */
+  var dialog = document.getElementById('auth-dialog');
+  /** @type {HTMLElement} */
+  var button = document.getElementById('auth-button');
+  var consentGranted = function(event) {
+    dialog.hidden = true;
+    button.removeEventListener('click', consentGranted, false);
+    authContinue();
+  };
+  dialog.hidden = false;
+  button.addEventListener('click', consentGranted, false);
+}
 
 /**
  * Entry point for app initialization.
  */
 remoting.init = function() {
+  // TODO(jamiewalch): Remove this when we migrate to apps v2
+  // (http://crbug.com/ 134213).
+  remoting.initMockStorage();
+
   remoting.logExtensionInfoAsync_();
   l10n.localize();
   // Create global objects.
+  remoting.settings = new remoting.Settings();
   remoting.oauth2 = new remoting.OAuth2();
+  // TODO(jamiewalch): Reinstate this when we migrate to apps v2
+  // (http://crbug.com/ 134213).
+  // remoting.identity = new remoting.Identity(consentRequired_);
+  remoting.identity = remoting.oauth2;
   remoting.stats = new remoting.ConnectionStats(
       document.getElementById('statistics'));
   remoting.formatIq = new remoting.FormatIq();
@@ -47,17 +58,13 @@ remoting.init = function() {
   remoting.toolbar = new remoting.Toolbar(
       document.getElementById('session-toolbar'));
   remoting.clipboard = new remoting.Clipboard();
-  remoting.suspendMonitor = new remoting.SuspendMonitor(
-      function() {
-        if (remoting.clientSession) {
-          remoting.clientSession.logErrors(false);
-        }
-      }
-  );
+  var sandbox = /** @type {HTMLIFrameElement} */
+      document.getElementById('wcs-sandbox');
+  remoting.wcsSandbox = new remoting.WcsSandboxContainer(sandbox.contentWindow);
 
-  remoting.oauth2.getEmail(remoting.onEmail, remoting.showErrorMessage);
+  remoting.identity.getEmail(remoting.onEmail, remoting.showErrorMessage);
 
-  remoting.showOrHideIt2MeUi();
+  remoting.showOrHideIT2MeUi();
   remoting.showOrHideMe2MeUi();
 
   // The plugin's onFocus handler sends a paste command to |window|, because
@@ -75,18 +82,31 @@ remoting.init = function() {
     button.disabled = true;
   }
 
-  // Parse URL parameters.
-  var urlParams = getUrlParameters_();
-  if ('mode' in urlParams) {
-    if (urlParams['mode'] == 'me2me') {
-      var hostId = urlParams['hostId'];
-      remoting.connectMe2Me(hostId, true);
-      return;
+  var onLoad = function() {
+    // Parse URL parameters.
+    var urlParams = getUrlParameters_();
+    if ('mode' in urlParams) {
+      if (urlParams['mode'] == 'me2me') {
+        var hostId = urlParams['hostId'];
+        remoting.connectMe2Me(hostId);
+        return;
+      }
     }
+    // No valid URL parameters, start up normally.
+    remoting.initDaemonUi();
   }
+  remoting.hostList.load(onLoad);
 
-  // No valid URL parameters, start up normally.
-  remoting.initDaemonUi();
+  // Show the tab-type warnings if necessary.
+  /** @param {boolean} windowed */
+  var onIsWindowed = function(isWindowed) {
+    if (!isWindowed &&
+        navigator.platform.indexOf('Mac') == -1) {
+      document.getElementById('startup-mode-box-me2me').hidden = false;
+      document.getElementById('startup-mode-box-it2me').hidden = false;
+    }
+  };
+  isWindowed_(onIsWindowed);
 };
 
 /**
@@ -102,13 +122,16 @@ remoting.onEmail = function(email) {
   document.getElementById('get-started-me2me').disabled = false;
 };
 
-// initDaemonUi is called if the app is not starting up in session mode, and
-// also if the user cancels pin entry or the connection in session mode.
-remoting.initDaemonUi = function () {
+/** initDaemonUi is called if the app is not starting up in session mode, and
+ * also if the user cancels pin entry or the connection in session mode. */
+remoting.initDaemonUi = function() {
   remoting.hostController = new remoting.HostController();
   document.getElementById('share-button').disabled =
       !remoting.hostController.isPluginSupported();
-  remoting.setMode(getAppStartupMode_());
+  remoting.setMode(remoting.AppMode.HOME);
+  if (!remoting.oauth2.isAuthenticated()) {
+    document.getElementById('auth-dialog').hidden = false;
+  }
   remoting.hostSetupDialog =
       new remoting.HostSetupDialog(remoting.hostController);
   // Display the cached host list, then asynchronously update and re-display it.
@@ -129,7 +152,7 @@ remoting.updateLocalHostState = function() {
     remoting.hostList.display();
   };
   remoting.hostController.getLocalHostStateAndId(onHostState);
-}
+};
 
 /**
  * Log information about the current extension.
@@ -154,14 +177,15 @@ remoting.logExtensionInfoAsync_ = function() {
 };
 
 /**
- * If an It2Me client or host is active then prompt the user before closing.
+ * If an IT2Me client or host is active then prompt the user before closing.
  * If a Me2Me client is active then don't bother, since closing the window is
  * the more intuitive way to end a Me2Me session, and re-connecting is easy.
  *
  * @return {?string} The prompt string if a connection is active.
  */
 remoting.promptClose = function() {
-  if (remoting.currentConnectionType == remoting.ClientSession.Mode.ME2ME) {
+  if (!remoting.clientSession ||
+      remoting.clientSession.mode == remoting.ClientSession.Mode.ME2ME) {
     return null;
   }
   switch (remoting.currentMode) {
@@ -177,14 +201,16 @@ remoting.promptClose = function() {
 };
 
 /**
- * Sign the user out of Chromoting by clearing the OAuth refresh token.
+ * Sign the user out of Chromoting by clearing (and revoking, if possible) the
+ * OAuth refresh token.
  *
- * Also clear all localStorage, to avoid leaking information.
+ * Also clear all local storage, to avoid leaking information.
  */
 remoting.signOut = function() {
   remoting.oauth2.clear();
-  window.localStorage.clear();
-  remoting.setMode(remoting.AppMode.UNAUTHENTICATED);
+  remoting.storage.local.clear();
+  remoting.setMode(remoting.AppMode.HOME);
+  document.getElementById('auth-dialog').hidden = false;
 };
 
 /**
@@ -226,18 +252,6 @@ function pluginGotCopy_(eventUncast) {
 }
 
 /**
- * Gets the major-mode that this application should start up in.
- *
- * @return {remoting.AppMode} The mode to start in.
- */
-function getAppStartupMode_() {
-  if (!remoting.oauth2.isAuthenticated()) {
-    return remoting.AppMode.UNAUTHENTICATED;
-  }
-  return remoting.AppMode.HOME;
-}
-
-/**
  * Returns whether Host mode is supported on this platform.
  *
  * @return {boolean} True if Host mode is supported.
@@ -276,7 +290,7 @@ function jsonParseSafe(jsonString) {
  * Return the current time as a formatted string suitable for logging.
  *
  * @return {string} The current time, formatted as [mmdd/hhmmss.xyz]
-*/
+ */
 remoting.timestamp = function() {
   /**
    * @param {number} num A number.
@@ -314,3 +328,24 @@ remoting.showErrorMessage = function(error) {
   document.getElementById('token-refresh-other-error').hidden = auth_failed;
   remoting.setMode(remoting.AppMode.TOKEN_REFRESH_FAILED);
 };
+
+/**
+ * Determine whether or not the app is running in a window.
+ * @param {function(boolean):void} callback Callback to receive whether or not
+ *     the current tab is running in windowed mode.
+ */
+function isWindowed_(callback) {
+  /** @param {chrome.Window} win The current window. */
+  var windowCallback = function(win) {
+    callback(win.type == 'popup');
+  };
+  /** @param {chrome.Tab} tab The current tab. */
+  var tabCallback = function(tab) {
+    if (tab.pinned) {
+      callback(false);
+    } else {
+      chrome.windows.get(tab.windowId, null, windowCallback);
+    }
+  };
+  chrome.tabs.getCurrent(tabCallback);
+}

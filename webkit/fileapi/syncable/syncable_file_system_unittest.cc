@@ -31,7 +31,7 @@ class SyncableFileSystemTest : public testing::Test {
                      base::MessageLoopProxy::current()),
         weak_factory_(ALLOW_THIS_IN_INITIALIZER_LIST(this)) {}
 
-  void SetUp() {
+  virtual void SetUp() {
     file_system_.SetUp();
 
     sync_context_ = new LocalFileSyncContext(base::MessageLoopProxy::current(),
@@ -40,7 +40,7 @@ class SyncableFileSystemTest : public testing::Test {
               file_system_.MaybeInitializeFileSystemContext(sync_context_));
   }
 
-  void TearDown() {
+  virtual void TearDown() {
     if (sync_context_)
       sync_context_->ShutdownOnUIThread();
     sync_context_ = NULL;
@@ -243,7 +243,7 @@ TEST_F(SyncableFileSystemTest, DisableDirectoryOperations) {
   // Set up another (non-syncable) local file system.
   LocalFileSystemTestOriginHelper other_file_system_(GURL("http://foo.com/"),
                                                      kFileSystemTypeTemporary);
-  other_file_system_.SetUp(file_system_.file_system_context(), NULL);
+  other_file_system_.SetUp(file_system_.file_system_context());
 
   // Create directory '/a' and file '/a/b' in the other file system.
   const FileSystemURL kSrcDir = other_file_system_.CreateURLFromUTF8("/a");
@@ -268,7 +268,7 @@ TEST_F(SyncableFileSystemTest, DisableDirectoryOperations) {
 
   // Now try copying the directory into the syncable file system, which should
   // fail if directory operation is disabled. (http://crbug.com/161442)
-  EXPECT_EQ(base::PLATFORM_FILE_ERROR_INVALID_OPERATION,
+  EXPECT_NE(base::PLATFORM_FILE_OK,
             file_system_.Copy(kSrcDir, URL("dest")));
 
   other_file_system_.TearDown();

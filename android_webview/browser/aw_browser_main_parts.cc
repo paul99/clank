@@ -37,11 +37,10 @@ void AwBrowserMainParts::PreEarlyInitialization() {
   net::NetworkChangeNotifier::SetFactory(
       new net::NetworkChangeNotifierFactoryAndroid());
   content::Compositor::InitializeWithFlags(
-      UseCompositorDirectDraw() ?
-          content::Compositor::DIRECT_CONTEXT_ON_DRAW_THREAD : 0);
+      content::Compositor::DIRECT_CONTEXT_ON_DRAW_THREAD);
 
   // Android WebView does not use default MessageLoop. It has its own
-  // Android specific MessageLoop. ALso see MainMessageLoopRun.
+  // Android specific MessageLoop. Also see MainMessageLoopRun.
   DCHECK(!main_message_loop_.get());
   main_message_loop_.reset(new MessageLoop(MessageLoop::TYPE_UI));
   MessageLoopForUI::current()->Start();
@@ -62,7 +61,7 @@ int AwBrowserMainParts::PreCreateThreads() {
   // that, seed the ResourceBundle instance with a non-string, locale
   // independant pak. Until we no longer rely on paks for strings,
   // load an extra data pack separately that has the strings in it.
-  FilePath pak_path;
+  base::FilePath pak_path;
   PathService::Get(ui::DIR_RESOURCE_PAKS_ANDROID, &pak_path);
   ui::ResourceBundle::GetSharedInstance().AddDataPackFromPath(
       pak_path.AppendASCII("webviewchromium_strings.pak"),
@@ -72,6 +71,10 @@ int AwBrowserMainParts::PreCreateThreads() {
       ui::SCALE_FACTOR_NONE);
 
   return content::RESULT_CODE_NORMAL_EXIT;
+}
+
+void AwBrowserMainParts::PreMainMessageLoopRun() {
+  browser_context_->PreMainMessageLoopRun();
 }
 
 bool AwBrowserMainParts::MainMessageLoopRun(int* result_code) {

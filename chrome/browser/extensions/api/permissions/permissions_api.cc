@@ -6,7 +6,8 @@
 
 #include "base/memory/scoped_ptr.h"
 #include "chrome/browser/extensions/api/permissions/permissions_api_helpers.h"
-#include "chrome/browser/extensions/extension_service.h"
+#include "chrome/browser/extensions/extension_prefs.h"
+#include "chrome/browser/extensions/extension_system.h"
 #include "chrome/browser/extensions/permissions_updater.h"
 #include "chrome/browser/profiles/profile.h"
 #include "chrome/common/chrome_notification_types.h"
@@ -21,6 +22,8 @@ using extensions::api::permissions::Permissions;
 using extensions::APIPermission;
 using extensions::APIPermissionSet;
 using extensions::ErrorUtils;
+using extensions::ExtensionPrefs;
+using extensions::ExtensionSystem;
 using extensions::PermissionSet;
 using extensions::PermissionsInfo;
 using extensions::PermissionsUpdater;
@@ -52,11 +55,15 @@ bool ignore_user_gesture_for_tests = false;
 
 }  // namespace
 
-bool ContainsPermissionsFunction::RunImpl() {
+bool PermissionsContainsFunction::RunImpl() {
   scoped_ptr<Contains::Params> params(Contains::Params::Create(*args_));
+  EXTENSION_FUNCTION_VALIDATE(params);
 
+  ExtensionPrefs* prefs = ExtensionSystem::Get(profile_)->extension_prefs();
   scoped_refptr<PermissionSet> permissions =
-      helpers::UnpackPermissionSet(params->permissions, &error_);
+      helpers::UnpackPermissionSet(params->permissions,
+                                   prefs->AllowFileAccess(extension_->id()),
+                                   &error_);
   if (!permissions.get())
     return false;
 
@@ -65,19 +72,22 @@ bool ContainsPermissionsFunction::RunImpl() {
   return true;
 }
 
-bool GetAllPermissionsFunction::RunImpl() {
+bool PermissionsGetAllFunction::RunImpl() {
   scoped_ptr<Permissions> permissions =
       helpers::PackPermissionSet(GetExtension()->GetActivePermissions());
   results_ = GetAll::Results::Create(*permissions);
   return true;
 }
 
-bool RemovePermissionsFunction::RunImpl() {
+bool PermissionsRemoveFunction::RunImpl() {
   scoped_ptr<Remove::Params> params(Remove::Params::Create(*args_));
-  EXTENSION_FUNCTION_VALIDATE(params.get());
+  EXTENSION_FUNCTION_VALIDATE(params);
 
+  ExtensionPrefs* prefs = ExtensionSystem::Get(profile_)->extension_prefs();
   scoped_refptr<PermissionSet> permissions =
-      helpers::UnpackPermissionSet(params->permissions, &error_);
+      helpers::UnpackPermissionSet(params->permissions,
+                                   prefs->AllowFileAccess(extension_->id()),
+                                   &error_);
   if (!permissions.get())
     return false;
 
@@ -110,19 +120,19 @@ bool RemovePermissionsFunction::RunImpl() {
 }
 
 // static
-void RequestPermissionsFunction::SetAutoConfirmForTests(bool should_proceed) {
+void PermissionsRequestFunction::SetAutoConfirmForTests(bool should_proceed) {
   auto_confirm_for_tests = should_proceed ? PROCEED : ABORT;
 }
 
 // static
-void RequestPermissionsFunction::SetIgnoreUserGestureForTests(
+void PermissionsRequestFunction::SetIgnoreUserGestureForTests(
     bool ignore) {
   ignore_user_gesture_for_tests = ignore;
 }
 
-RequestPermissionsFunction::RequestPermissionsFunction() {}
+PermissionsRequestFunction::PermissionsRequestFunction() {}
 
-void RequestPermissionsFunction::InstallUIProceed() {
+void PermissionsRequestFunction::InstallUIProceed() {
   PermissionsUpdater perms_updater(profile());
   perms_updater.AddPermissions(GetExtension(), requested_permissions_.get());
 
@@ -132,16 +142,17 @@ void RequestPermissionsFunction::InstallUIProceed() {
   Release();  // Balanced in RunImpl().
 }
 
-void RequestPermissionsFunction::InstallUIAbort(bool user_initiated) {
-  results_ = Request::Results::Create(false);
+void PermissionsRequestFunction::InstallUIAbort(bool user_initiated) {
   SendResponse(true);
 
   Release();  // Balanced in RunImpl().
 }
 
-RequestPermissionsFunction::~RequestPermissionsFunction() {}
+PermissionsRequestFunction::~PermissionsRequestFunction() {}
 
-bool RequestPermissionsFunction::RunImpl() {
+bool PermissionsRequestFunction::RunImpl() {
+  results_ = Request::Results::Create(false);
+
   if (!user_gesture() && !ignore_user_gesture_for_tests) {
     error_ = kUserGestureRequiredError;
     return false;
@@ -150,13 +161,14 @@ bool RequestPermissionsFunction::RunImpl() {
   scoped_ptr<Request::Params> params(Request::Params::Create(*args_));
   EXTENSION_FUNCTION_VALIDATE(params.get());
 
+  ExtensionPrefs* prefs = ExtensionSystem::Get(profile_)->extension_prefs();
+
   requested_permissions_ =
-      helpers::UnpackPermissionSet(params->permissions, &error_);
+      helpers::UnpackPermissionSet(params->permissions,
+                                   prefs->AllowFileAccess(extension_->id()),
+                                   &error_);
   if (!requested_permissions_.get())
     return false;
-
-  extensions::ExtensionPrefs* prefs =
-      profile()->GetExtensionService()->extension_prefs();
 
   // Make sure they're only requesting permissions supported by this API.
   APIPermissionSet apis = requested_permissions_->apis();

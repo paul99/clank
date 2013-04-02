@@ -31,7 +31,7 @@ namespace {
 // driver will use the same value.
 // This value also has to be kept in sync with the value in
 // chromeos/display/output_configurator.cc. See crbug.com/130188
-const unsigned int kHighDensityDIPThreshold = 160;
+const unsigned int kHighDensityDPIThreshold = 160;
 
 // 1 inch in mm.
 const float kInchInMm = 25.4f;
@@ -84,21 +84,12 @@ DisplayChangeObserverX11::DisplayChangeObserverX11()
       xrandr_event_base_(0) {
   int error_base_ignored;
   XRRQueryExtension(xdisplay_, &xrandr_event_base_, &error_base_ignored);
-  base::MessagePumpAuraX11::Current()->AddDispatcherForRootWindow(this);
 }
 
 DisplayChangeObserverX11::~DisplayChangeObserverX11() {
-  base::MessagePumpAuraX11::Current()->RemoveDispatcherForRootWindow(this);
 }
 
-bool DisplayChangeObserverX11::Dispatch(const base::NativeEvent& event) {
-  if (event->type - xrandr_event_base_ == RRScreenChangeNotify) {
-    NotifyDisplayChange();
-  }
-  return true;
-}
-
-void DisplayChangeObserverX11::NotifyDisplayChange() {
+void DisplayChangeObserverX11::OnDisplayModeChanged() {
   XRRScreenResources* screen_resources =
       XRRGetScreenResources(xdisplay_, x_root_window_);
   std::map<XID, XRRCrtcInfo*> crtc_info_map;
@@ -143,7 +134,7 @@ void DisplayChangeObserverX11::NotifyDisplayChange() {
     float device_scale_factor = 1.0f;
     if (!ShouldIgnoreSize(output_info) &&
         (kInchInMm * mode->width / output_info->mm_width) >
-        kHighDensityDIPThreshold) {
+        kHighDensityDPIThreshold) {
       device_scale_factor = 2.0f;
     }
     displays.back().SetScaleAndBounds(

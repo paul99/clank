@@ -7,7 +7,9 @@
 #include <vector>
 
 #include "ash/ash_constants.h"
+#include "ash/root_window_controller.h"
 #include "ash/shell.h"
+#include "ash/shell_window_ids.h"
 #include "ash/wm/activation_controller.h"
 #include "ash/wm/window_properties.h"
 #include "ui/aura/client/activation_client.h"
@@ -66,11 +68,26 @@ bool CanMaximizeWindow(const aura::Window* window) {
   return window->GetProperty(aura::client::kCanMaximizeKey);
 }
 
+bool CanMinimizeWindow(const aura::Window* window) {
+  internal::RootWindowController* controller =
+      internal::RootWindowController::ForWindow(window);
+  if (!controller)
+    return false;
+  aura::Window* lockscreen = controller->GetContainer(
+      internal::kShellWindowId_LockScreenContainersContainer);
+  if (lockscreen->Contains(window))
+    return false;
+
+  return true;
+}
+
 bool CanResizeWindow(const aura::Window* window) {
   return window->GetProperty(aura::client::kCanResizeKey);
 }
 
 bool CanSnapWindow(aura::Window* window) {
+  if (!CanResizeWindow(window))
+    return false;
   // If a window has a maximum size defined, snapping may make it too big.
   return window->delegate() ? window->delegate()->GetMaximumSize().IsEmpty() :
                               true;

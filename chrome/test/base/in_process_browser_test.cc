@@ -11,7 +11,7 @@
 #include "base/file_util.h"
 #include "base/lazy_instance.h"
 #include "base/path_service.h"
-#include "base/string_number_conversions.h"
+#include "base/strings/string_number_conversions.h"
 #include "base/test/test_file_util.h"
 #include "chrome/browser/browser_process.h"
 #include "chrome/browser/google/google_util.h"
@@ -79,13 +79,13 @@ InProcessBrowserTest::InProcessBrowserTest()
   // what it would be if Chrome was running, because it is used to fork renderer
   // processes, on Linux at least (failure to do so will cause a browser_test to
   // be run instead of a renderer).
-  FilePath chrome_path;
+  base::FilePath chrome_path;
   CHECK(PathService::Get(base::FILE_EXE, &chrome_path));
   chrome_path = chrome_path.DirName();
   chrome_path = chrome_path.Append(chrome::kBrowserProcessExecutablePath);
   CHECK(PathService::Override(base::FILE_EXE, chrome_path));
 #endif  // defined(OS_MACOSX)
-  CreateTestServer(FilePath(FILE_PATH_LITERAL("chrome/test/data")));
+  CreateTestServer(base::FilePath(FILE_PATH_LITERAL("chrome/test/data")));
 }
 
 InProcessBrowserTest::~InProcessBrowserTest() {
@@ -122,7 +122,7 @@ void InProcessBrowserTest::SetUp() {
 
 #if defined(OS_CHROMEOS)
   // Make sure that the log directory exists.
-  FilePath log_dir = logging::GetSessionLogFile(*command_line).DirName();
+  base::FilePath log_dir = logging::GetSessionLogFile(*command_line).DirName();
   file_util::CreateDirectory(log_dir);
 #endif  // defined(OS_CHROMEOS)
 
@@ -155,7 +155,8 @@ void InProcessBrowserTest::SetUp() {
       captive_portal::CaptivePortalService::DISABLED_FOR_TESTING);
 #endif
 
-  chrome_browser_net::NetErrorTabHelper::set_enabled_for_testing(false);
+  chrome_browser_net::NetErrorTabHelper::set_state_for_testing(
+      chrome_browser_net::NetErrorTabHelper::TESTING_FORCE_DISABLED);
 
   google_util::SetMockLinkDoctorBaseURLForTesting();
 
@@ -172,7 +173,7 @@ void InProcessBrowserTest::PrepareTestCommandLine(CommandLine* command_line) {
 #if defined(OS_MACOSX)
   // Explicitly set the path of the binary used for child processes, otherwise
   // they'll try to use browser_tests which doesn't contain ChromeMain.
-  FilePath subprocess_path;
+  base::FilePath subprocess_path;
   PathService::Get(base::FILE_EXE, &subprocess_path);
   // Recreate the real environment, run the helper within the app bundle.
   subprocess_path = subprocess_path.DirName().DirName();
@@ -194,7 +195,7 @@ void InProcessBrowserTest::PrepareTestCommandLine(CommandLine* command_line) {
 
 bool InProcessBrowserTest::CreateUserDataDirectory() {
   CommandLine* command_line = CommandLine::ForCurrentProcess();
-  FilePath user_data_dir =
+  base::FilePath user_data_dir =
       command_line->GetSwitchValuePath(switches::kUserDataDir);
   if (user_data_dir.empty()) {
     if (temp_user_data_dir_.CreateUniqueTempDir() &&
@@ -305,7 +306,7 @@ CommandLine InProcessBrowserTest::GetCommandLineForRelaunch() {
   }
 #endif
 
-  FilePath user_data_dir;
+  base::FilePath user_data_dir;
   PathService::Get(chrome::DIR_USER_DATA, &user_data_dir);
   new_command_line.AppendSwitchPath(switches::kUserDataDir, user_data_dir);
 
@@ -327,7 +328,13 @@ void InProcessBrowserTest::RunTestOnMainThreadLoop() {
 
   if (!BrowserList::empty()) {
     browser_ = *BrowserList::begin();
-    content::WaitForLoadStop(chrome::GetActiveWebContents(browser_));
+#if defined(USE_ASH)
+    // There are cases where windows get created maximized by default.
+    if (browser_->window()->IsMaximized())
+      browser_->window()->Restore();
+#endif
+    content::WaitForLoadStop(
+        browser_->tab_strip_model()->GetActiveWebContents());
   }
 
   // Pump any pending events that were created as a result of creating a

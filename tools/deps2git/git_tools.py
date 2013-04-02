@@ -156,11 +156,11 @@ def CreateLessThanOrEqualRegex(number):
   return regex
 
 
-def Search(git_repo, svn_rev, is_mirror):
+def Search(git_repo, svn_rev, is_mirror, refspec='FETCH_HEAD'):
   """Return the Git commit id matching the given SVN revision."""
   regex = CreateLessThanOrEqualRegex(svn_rev)
   (_, output) = Git(git_repo, ('log -E --grep=".*git-svn-id:.*@%s " '
-                               '-1 --format=%%H FETCH_HEAD') % regex,
+                               '-1 --format=%%H %s') % (regex, refspec),
                     is_mirror)
   if output != '':
     output = output.splitlines()[0]

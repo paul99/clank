@@ -74,7 +74,7 @@ cr.define('login', function() {
      * @param {string} data Screen init payload.
      */
     onBeforeShow: function(data) {
-      chrome.send('loginUIStateChanged', ['pod-row', true]);
+      chrome.send('loginUIStateChanged', ['account-picker', true]);
       $('login-header-bar').signinUIState = SIGNIN_UI_STATE.ACCOUNT_PICKER;
       chrome.send('hideCaptivePortal');
       var podRow = $('pod-row');
@@ -102,14 +102,14 @@ cr.define('login', function() {
       // $('pod-row').startInitAnimation();
 
       chrome.send('accountPickerReady');
-      chrome.send('loginVisible', ['pod-row']);
+      chrome.send('loginVisible', ['account-picker']);
     },
 
     /**
      * Event handler that is invoked just before the frame is hidden.
      */
     onBeforeHide: function() {
-      chrome.send('loginUIStateChanged', ['pod-row', false]);
+      chrome.send('loginUIStateChanged', ['account-picker', false]);
       $('login-header-bar').signinUIState = SIGNIN_UI_STATE.HIDDEN;
       $('pod-row').handleHide();
     },
@@ -127,7 +127,9 @@ cr.define('login', function() {
                                           error);
         return;
       }
-      if (loginAttempts > MAX_LOGIN_ATTEMPTS_IN_POD) {
+      // Show web authentication if this is not a locally managed user.
+      if (loginAttempts > MAX_LOGIN_ATTEMPTS_IN_POD &&
+          !activatedPod.user.locallyManagedUser) {
         activatedPod.showSigninUI();
       } else {
         // We want bubble's arrow to point to the first letter of input.

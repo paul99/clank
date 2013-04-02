@@ -4,7 +4,7 @@
 
 #include "cc/texture_copier.h"
 
-#include "cc/test/fake_web_graphics_context_3d.h"
+#include "cc/test/test_web_graphics_context_3d.h"
 #include "testing/gmock/include/gmock/gmock.h"
 #include "testing/gtest/include/gtest/gtest.h"
 #include "third_party/khronos/GLES2/gl2.h"
@@ -17,7 +17,7 @@ using testing::_;
 namespace cc {
 namespace {
 
-class MockContext : public FakeWebGraphicsContext3D {
+class MockContext : public TestWebGraphicsContext3D {
 public:
     MOCK_METHOD2(bindFramebuffer, void(WGC3Denum, WebGLId));
     MOCK_METHOD3(texParameteri, void(WGC3Denum target, WGC3Denum pname, WGC3Dint param));
@@ -54,8 +54,8 @@ TEST(TextureCopierTest, testDrawArraysCopy)
         EXPECT_CALL(*mockContext, enable(GL_SCISSOR_TEST));
     }
 
-    int sourceTextureId = 1;
-    int destTextureId = 2;
+    int sourceTextureId = mockContext->createTexture();
+    int destTextureId = mockContext->createTexture();
     gfx::Size size(256, 128);
     scoped_ptr<AcceleratedTextureCopier> copier(AcceleratedTextureCopier::create(mockContext.get(), false));
     TextureCopier::Parameters copy = { sourceTextureId, destTextureId, size };

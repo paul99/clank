@@ -23,7 +23,7 @@ namespace policy {
 // last value read takes precedence in case of policy key collisions.
 class ConfigDirPolicyLoader : public AsyncPolicyLoader {
  public:
-  ConfigDirPolicyLoader(const FilePath& config_dir, PolicyScope scope);
+  ConfigDirPolicyLoader(const base::FilePath& config_dir, PolicyScope scope);
   virtual ~ConfigDirPolicyLoader();
 
   // AsyncPolicyLoader implementation.
@@ -33,7 +33,7 @@ class ConfigDirPolicyLoader : public AsyncPolicyLoader {
 
  private:
   // Loads the policy files at |path| into the |bundle|, with the given |level|.
-  void LoadFromPath(const FilePath& path,
+  void LoadFromPath(const base::FilePath& path,
                     PolicyLevel level,
                     PolicyBundle* bundle);
 
@@ -43,18 +43,18 @@ class ConfigDirPolicyLoader : public AsyncPolicyLoader {
                            PolicyBundle* bundle);
 
   // Callback for the FilePathWatchers.
-  void OnFileUpdated(const FilePath& path, bool error);
+  void OnFileUpdated(const base::FilePath& path, bool error);
 
   // The directory containing the policy files.
-  FilePath config_dir_;
+  base::FilePath config_dir_;
 
   // Policies loaded by this provider will have this scope.
   PolicyScope scope_;
 
   // Watchers for events on the mandatory and recommended subdirectories of
   // |config_dir_|.
-  base::files::FilePathWatcher mandatory_watcher_;
-  base::files::FilePathWatcher recommended_watcher_;
+  base::FilePathWatcher mandatory_watcher_;
+  base::FilePathWatcher recommended_watcher_;
 
   DISALLOW_COPY_AND_ASSIGN(ConfigDirPolicyLoader);
 };

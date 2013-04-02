@@ -1,4 +1,4 @@
-// Copyright (c) 2012 The Chromium Authors. All rights reserved.
+// Copyright 2012 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 //
@@ -14,7 +14,7 @@
 #include "sync/test/engine/test_id_factory.h"
 #include "sync/protocol/bookmark_specifics.pb.h"
 #include "sync/syncable/directory.h"
-#include "sync/syncable/write_transaction.h"
+#include "sync/syncable/syncable_write_transaction.h"
 #include "sync/test/engine/test_id_factory.h"
 #include "testing/gtest/include/gtest/gtest.h"
 
@@ -405,8 +405,10 @@ void MockConnectionManager::ProcessGetUpdates(
 
   // Verify that the GetUpdates filter sent by the Syncer matches the test
   // expectation.
-  for (int i = FIRST_REAL_MODEL_TYPE; i < MODEL_TYPE_COUNT; ++i) {
-    ModelType model_type = ModelTypeFromInt(i);
+  ModelTypeSet protocol_types = ProtocolTypes();
+  for (ModelTypeSet::Iterator iter = protocol_types.First(); iter.Good();
+       iter.Inc()) {
+    ModelType model_type = iter.Get();
     sync_pb::DataTypeProgressMarker const* progress_marker =
         GetProgressMarkerForType(gu.from_progress_marker(), model_type);
     EXPECT_EQ(expected_filter_.Has(model_type), (progress_marker != NULL))
@@ -454,7 +456,7 @@ void MockConnectionManager::ProcessGetUpdates(
 
   // Fill the keystore key if requested.
   if (gu.need_encryption_key())
-    response->mutable_get_updates()->set_encryption_key(keystore_key_);
+    response->mutable_get_updates()->add_encryption_keys(keystore_key_);
 
   update_queue_.pop_front();
 

@@ -115,7 +115,6 @@ class MockNetworkLibrary : public NetworkLibrary {
 
   MOCK_METHOD0(RequestNetworkScan, void(void));
   MOCK_CONST_METHOD1(HasProfileType, bool(NetworkProfileType));
-  MOCK_METHOD1(GetWifiAccessPoints, bool(WifiAccessPointVector*));
   MOCK_CONST_METHOD1(CanConnectToNetwork, bool(const Network*));
   MOCK_METHOD1(RefreshIPConfig, void(Network*));
   MOCK_METHOD1(ConnectToWifiNetwork, void(WifiNetwork*));
@@ -189,6 +188,9 @@ class MockNetworkLibrary : public NetworkLibrary {
                                      const std::string&,
                                      const std::string&,
                                      int));
+  MOCK_METHOD2(RequestNetworkServiceProperties,
+               void(const std::string&,
+                    const NetworkServicePropertiesCallback&));
   MOCK_METHOD0(SwitchToPreferredNetwork, void(void));
   MOCK_METHOD4(LoadOncNetworks, bool(const std::string&,
                                      const std::string&,

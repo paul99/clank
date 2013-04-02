@@ -10,18 +10,30 @@
 
 namespace message_center {
 
+struct Notification;
+
 // A simple view for a notification entry (icon + message + buttons).
 class MessageSimpleView : public MessageView {
  public:
   MessageSimpleView(NotificationList::Delegate* list_delegate,
-                    const NotificationList::Notification& notification);
+                    const Notification& notification);
   virtual ~MessageSimpleView();
 
-  // MessageView
+  // Overridden from MessageView:
   virtual void SetUpView() OVERRIDE;
+  virtual void ButtonPressed(views::Button* sender,
+                             const ui::Event& event) OVERRIDE;
 
  protected:
+  // Overridden from views::View:
+  virtual gfx::Size GetPreferredSize() OVERRIDE;
+  virtual void Layout() OVERRIDE;
+
   MessageSimpleView();
+
+ private:
+  scoped_ptr<views::ImageButton> old_style_close_button_;
+  scoped_ptr<views::View> content_view_;
 
   DISALLOW_COPY_AND_ASSIGN(MessageSimpleView);
 };

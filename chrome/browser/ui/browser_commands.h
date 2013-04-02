@@ -7,10 +7,10 @@
 
 #include <string>
 
-#include "chrome/browser/debugger/devtools_toggle_action.h"
+#include "chrome/browser/devtools/devtools_toggle_action.h"
 #include "chrome/browser/ui/host_desktop.h"
 #include "content/public/common/page_zoom.h"
-#include "webkit/glue/window_open_disposition.h"
+#include "ui/base/window_open_disposition.h"
 
 class Browser;
 class CommandObserver;
@@ -48,7 +48,8 @@ Browser* OpenEmptyWindow(Profile* profile);
 Browser* OpenEmptyWindow(Profile* profile, HostDesktopType desktop_type);
 
 // Opens a new window with the tabs from |profile|'s TabRestoreService.
-void OpenWindowWithRestoredTabs(Profile* profile);
+void OpenWindowWithRestoredTabs(Profile* profile,
+                                HostDesktopType host_desktop_type);
 
 // Opens the specified URL in a new browser window in an incognito session on
 // the desktop specified by |desktop_type|. If there is already an existing
@@ -99,11 +100,11 @@ void TogglePagePinnedToStartScreen(Browser* browser);
 void SavePage(Browser* browser);
 bool CanSavePage(const Browser* browser);
 void ShowFindBar(Browser* browser);
-void ShowPageInfo(Browser* browser,
-                  content::WebContents* web_contents,
-                  const GURL& url,
-                  const content::SSLStatus& ssl,
-                  bool show_history);
+void ShowWebsiteSettings(Browser* browser,
+                         content::WebContents* web_contents,
+                         const GURL& url,
+                         const content::SSLStatus& ssl,
+                         bool show_history);
 void ShowChromeToMobileBubble(Browser* browser);
 void Print(Browser* browser);
 bool CanPrint(const Browser* browser);

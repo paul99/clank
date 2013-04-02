@@ -6,6 +6,9 @@
 
 #include "chrome/browser/google/google_util.h"
 #include "chrome/browser/profiles/profile.h"
+#include "chrome/browser/search_engines/template_url.h"
+#include "chrome/browser/search_engines/template_url_service.h"
+#include "chrome/browser/search_engines/template_url_service_factory.h"
 #include "chrome/browser/ui/search/search.h"
 #include "chrome/common/url_constants.h"
 #include "content/public/browser/navigation_controller.h"
@@ -15,7 +18,7 @@
 #include "content/public/browser/notification_types.h"
 #include "content/public/browser/web_contents.h"
 
-DEFINE_WEB_CONTENTS_USER_DATA_KEY(chrome::search::SearchTabHelper)
+DEFINE_WEB_CONTENTS_USER_DATA_KEY(chrome::search::SearchTabHelper);
 
 namespace {
 
@@ -24,10 +27,32 @@ bool IsNTP(const GURL& url) {
          url.host() == chrome::kChromeUINewTabHost;
 }
 
-bool IsSearchEnabled(content::WebContents* web_contents) {
-  Profile* profile =
-      Profile::FromBrowserContext(web_contents->GetBrowserContext());
+Profile* ProfileFromWebContents(const content::WebContents* web_contents) {
+  return Profile::FromBrowserContext(web_contents->GetBrowserContext());
+}
+
+bool IsSearchEnabled(Profile* profile) {
   return chrome::search::IsInstantExtendedAPIEnabled(profile);
+}
+
+
+bool IsSearchResults(const GURL& url, Profile* profile) {
+  if (chrome::search::IsForcedInstantURL(url))
+    return true;
+
+  // Profile can be NULL in unit tests.
+  TemplateURLService* template_url_service =
+      TemplateURLServiceFactory::GetForProfile(profile);
+  if (!template_url_service)
+    return false;
+
+  TemplateURL* template_url = template_url_service->GetDefaultSearchProvider();
+  if (!template_url)
+    return false;
+
+  string16 result;
+  return template_url->HasSearchTermsReplacementKey(url) &&
+      template_url->ExtractSearchTermsFromURL(url, &result) && !result.empty();
 }
 
 }  // namespace
@@ -36,8 +61,7 @@ namespace chrome {
 namespace search {
 
 SearchTabHelper::SearchTabHelper(content::WebContents* web_contents)
-    : WebContentsObserver(web_contents),
-      is_search_enabled_(IsSearchEnabled(web_contents)),
+    : is_search_enabled_(IsSearchEnabled(ProfileFromWebContents(web_contents))),
       user_input_in_progress_(false),
       model_(web_contents) {
   if (!is_search_enabled_)
@@ -71,19 +95,6 @@ void SearchTabHelper::NavigationEntryUpdated() {
   UpdateModelBasedOnURL(web_contents()->GetURL());
 }
 
-void SearchTabHelper::NavigateToPendingEntry(
-    const GURL& url,
-    content::NavigationController::ReloadType reload_type) {
-  if (!is_search_enabled_)
-    return;
-
-  // NTP mode changes are initiated at "pending", all others are initiated
-  // when "committed".  This is because NTP is rendered natively so is faster
-  // to render than the web contents and we need to coordinate the animations.
-  if (IsNTP(url))
-    UpdateModelBasedOnURL(url);
-}
-
 void SearchTabHelper::Observe(
     int type,
     const content::NotificationSource& source,
@@ -91,10 +102,7 @@ void SearchTabHelper::Observe(
   DCHECK_EQ(content::NOTIFICATION_NAV_ENTRY_COMMITTED, type);
   content::LoadCommittedDetails* committed_details =
       content::Details<content::LoadCommittedDetails>(details).ptr();
-  // See comment in |NavigateToPendingEntry()| about why |!IsNTP()| is used.
-  if (!IsNTP(committed_details->entry->GetURL())) {
-    UpdateModelBasedOnURL(committed_details->entry->GetURL());
-  }
+  UpdateModelBasedOnURL(committed_details->entry->GetVirtualURL());
 }
 
 void SearchTabHelper::UpdateModelBasedOnURL(const GURL& url) {
@@ -103,7 +111,7 @@ void SearchTabHelper::UpdateModelBasedOnURL(const GURL& url) {
   if (IsNTP(url)) {
     type = Mode::MODE_NTP;
     origin = Mode::ORIGIN_NTP;
-  } else if (google_util::IsInstantExtendedAPIGoogleSearchUrl(url.spec())) {
+  } else if (IsSearchResults(url, ProfileFromWebContents(web_contents()))) {
     type = Mode::MODE_SEARCH_RESULTS;
     origin = Mode::ORIGIN_SEARCH;
   }

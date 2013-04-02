@@ -6,14 +6,13 @@
 
 #include "base/callback.h"
 #include "base/json/json_writer.h"
+#include "base/lazy_instance.h"
 #include "base/message_loop.h"
 #include "base/metrics/histogram.h"
-#include "base/string_number_conversions.h"
+#include "base/strings/string_number_conversions.h"
 #include "base/utf_string_conversions.h"
 #include "base/values.h"
-
 #include "chrome/browser/extensions/api/processes/processes_api_constants.h"
-#include "chrome/browser/extensions/api/processes/processes_api_factory.h"
 #include "chrome/browser/extensions/api/tabs/tabs_constants.h"
 #include "chrome/browser/extensions/event_router.h"
 #include "chrome/browser/extensions/extension_function_registry.h"
@@ -24,7 +23,6 @@
 #include "chrome/browser/profiles/profile.h"
 #include "chrome/browser/task_manager/task_manager.h"
 #include "chrome/common/chrome_notification_types.h"
-#include "content/public/browser/browser_thread.h"
 #include "content/public/browser/notification_details.h"
 #include "content/public/browser/notification_service.h"
 #include "content/public/browser/notification_source.h"
@@ -504,9 +502,17 @@ void ProcessesAPI::Shutdown() {
   ExtensionSystem::Get(profile_)->event_router()->UnregisterObserver(this);
 }
 
+static base::LazyInstance<ProfileKeyedAPIFactory<ProcessesAPI> >
+g_factory = LAZY_INSTANCE_INITIALIZER;
+
+// static
+ProfileKeyedAPIFactory<ProcessesAPI>* ProcessesAPI::GetFactoryInstance() {
+  return &g_factory.Get();
+}
+
 // static
 ProcessesAPI* ProcessesAPI::Get(Profile* profile) {
-  return ProcessesAPIFactory::GetForProfile(profile);
+  return ProfileKeyedAPIFactory<ProcessesAPI>::GetForProfile(profile);
 }
 
 ProcessesEventRouter* ProcessesAPI::processes_event_router() {

@@ -4,11 +4,11 @@
 
 #include "webkit/glue/web_intent_data.h"
 
+#include "third_party/WebKit/Source/Platform/chromium/public/WebString.h"
+#include "third_party/WebKit/Source/Platform/chromium/public/WebURL.h"
+#include "third_party/WebKit/Source/Platform/chromium/public/WebVector.h"
 #include "third_party/WebKit/Source/WebKit/chromium/public/WebIntent.h"
 #include "third_party/WebKit/Source/WebKit/chromium/public/WebMessagePortChannel.h"
-#include "third_party/WebKit/Source/WebKit/chromium/public/platform/WebString.h"
-#include "third_party/WebKit/Source/WebKit/chromium/public/platform/WebURL.h"
-#include "third_party/WebKit/Source/WebKit/chromium/public/platform/WebVector.h"
 
 using WebKit::WebString;
 using WebKit::WebURL;
@@ -61,7 +61,7 @@ WebIntentData::WebIntentData(const string16& action_in,
 
 WebIntentData::WebIntentData(const string16& action_in,
                              const string16& type_in,
-                             const FilePath& blob_file_in,
+                             const base::FilePath& blob_file_in,
                              int64 blob_length_in)
     : action(action_in),
       type(type_in),

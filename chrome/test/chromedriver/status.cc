@@ -11,16 +11,34 @@ const char* DefaultMessageForStatusCode(StatusCode code) {
   switch (code) {
     case kOk:
       return "ok";
+    case kNoSuchElement:
+      return "no such element";
     case kUnknownCommand:
       return "unknown command";
+    case kStaleElementReference:
+      return "stale element reference";
+    case kElementNotVisible:
+      return "element not visible";
+    case kInvalidElementState:
+      return "invalid element state";
     case kUnknownError:
       return "unknown error";
+    case kXPathLookupError:
+      return "xpath lookup error";
+    case kNoSuchWindow:
+      return "no such window";
+    case kInvalidSelector:
+      return "invalid selector";
     case kSessionNotCreatedException:
       return "session not created exception";
     case kNoSuchSession:
       return "no such session";
+    case kNoSuchFrame:
+      return "no such frame";
     case kChromeNotReachable:
       return "chrome not reachable";
+    case kDisconnected:
+      return "disconnected";
     default:
       return "<unknown>";
   }

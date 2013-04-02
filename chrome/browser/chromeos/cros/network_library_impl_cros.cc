@@ -15,6 +15,8 @@
 #include "chrome/browser/chromeos/cros/native_network_parser.h"
 #include "chrome/browser/chromeos/settings/cros_settings.h"
 #include "chrome/common/chrome_switches.h"
+#include "chromeos/network/cros_network_functions.h"
+#include "chromeos/network/network_util.h"
 #include "content/public/browser/browser_thread.h"
 #include "third_party/cros_system_api/dbus/service_constants.h"
 
@@ -470,12 +472,6 @@ void NetworkLibraryImplCros::RequestNetworkScan() {
                  weak_ptr_factory_.GetWeakPtr()));
 }
 
-bool NetworkLibraryImplCros::GetWifiAccessPoints(
-    WifiAccessPointVector* result) {
-  CHECK(BrowserThread::CurrentlyOn(BrowserThread::UI));
-  return CrosGetWifiAccessPoints(result);
-}
-
 void NetworkLibraryImplCros::RefreshIPConfig(Network* network) {
   DCHECK(network);
   CrosRequestNetworkDeviceProperties(
@@ -628,6 +624,12 @@ void NetworkLibraryImplCros::SetIPParameters(const std::string& service_path,
                  weak_ptr_factory_.GetWeakPtr(), info);
 
   CrosRequestNetworkServiceProperties(service_path, callback);
+}
+
+void NetworkLibraryImplCros::RequestNetworkServiceProperties(
+    const std::string& service_path,
+    const NetworkServicePropertiesCallback& callback) {
+  chromeos::CrosRequestNetworkServiceProperties(service_path, callback);
 }
 
 /////////////////////////////////////////////////////////////////////////////
@@ -1295,7 +1297,7 @@ void NetworkLibraryImplCros::SetIPParametersCallback(
       VLOG(2) << "Clearing " << shill::kStaticIPPrefixlenProperty;
     }
   } else {
-    int prefixlen = CrosNetmaskToPrefixLength(info.netmask);
+    int prefixlen = network_util::NetmaskToPrefixLength(info.netmask);
     if (prefixlen == -1) {
       VLOG(1) << "IPConfig prefix length is invalid for netmask "
               << info.netmask;

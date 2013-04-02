@@ -90,10 +90,17 @@ class VIEWS_EXPORT MenuItemView : public View {
 
   // Where the menu should be anchored to for non-RTL languages.  The
   // opposite position will be used if base::i18n:IsRTL() is true.
+  // The BUBBLE flags are used when the menu should get enclosed by a bubble.
+  // Note that BUBBLE flags should only be used with menus which have no
+  // children.
   enum AnchorPosition {
     TOPLEFT,
     TOPRIGHT,
-    BOTTOMCENTER
+    BOTTOMCENTER,
+    BUBBLE_LEFT,
+    BUBBLE_RIGHT,
+    BUBBLE_ABOVE,
+    BUBBLE_BELOW
   };
 
   // Where the menu should be drawn, above or below the bounds (when
@@ -139,6 +146,9 @@ class VIEWS_EXPORT MenuItemView : public View {
 
   // X-coordinate of where the label starts.
   static int label_start() { return label_start_; }
+
+  // Returns if a given |anchor| is a bubble or not.
+  static bool IsBubble(MenuItemView::AnchorPosition anchor);
 
   // Returns the accessible name to be used with screen readers. Mnemonics are
   // removed and the menu item accelerator text is appended.
@@ -205,8 +215,7 @@ class VIEWS_EXPORT MenuItemView : public View {
                                        const gfx::ImageSkia& icon);
 
   // Creates a menu item for the specified entry in the model and appends it as
-  // a child. |index| should be offset by GetFirstItemIndex() before calling
-  // this function.
+  // a child.
   MenuItemView* AppendMenuItemFromModel(ui::MenuModel* model,
                                         int index,
                                         int id);
@@ -297,6 +306,7 @@ class VIEWS_EXPORT MenuItemView : public View {
   void set_has_icons(bool has_icons) {
     has_icons_ = has_icons;
   }
+  bool has_icons() const { return has_icons_; }
 
   // Returns the descendant with the specified command.
   MenuItemView* GetMenuItemByID(int id);
@@ -435,6 +445,9 @@ class VIEWS_EXPORT MenuItemView : public View {
   // Returns the max icon width; recurses over submenus.
   int GetMaxIconViewWidth() const;
 
+  // Returns true if the menu has items with a checkbox or a radio button.
+  bool HasChecksOrRadioButtons() const;
+
   // The delegate. This is only valid for the root menu item. You shouldn't
   // use this directly, instead use GetDelegate() which walks the tree as
   // as necessary.
@@ -503,6 +516,11 @@ class VIEWS_EXPORT MenuItemView : public View {
   // Margins in pixels.
   int top_margin_;
   int bottom_margin_;
+
+  // Horizontal icon margins in pixels, which can differ between MenuItems.
+  // These values will be set in the layout process.
+  int left_icon_margin_;
+  int right_icon_margin_;
 
   // |menu_position_| is the requested position with respect to the bounds.
   // |actual_menu_position_| is used by the controller to cache the

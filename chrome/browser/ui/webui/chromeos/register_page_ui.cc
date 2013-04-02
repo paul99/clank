@@ -24,10 +24,9 @@
 #include "chrome/browser/chromeos/system/statistics_provider.h"
 #include "chrome/browser/chromeos/version_loader.h"
 #include "chrome/browser/profiles/profile.h"
-#include "chrome/browser/ui/webui/chrome_url_data_manager.h"
 #include "chrome/common/cancelable_task_tracker.h"
 #include "chrome/common/url_constants.h"
-#include "content/public/browser/browser_thread.h"
+#include "content/public/browser/url_data_source.h"
 #include "content/public/browser/web_contents.h"
 #include "content/public/browser/web_ui.h"
 #include "content/public/browser/web_ui_message_handler.h"
@@ -96,21 +95,25 @@ static std::string GetConnectionType() {
 
 }  // namespace
 
-class RegisterPageUIHTMLSource : public ChromeURLDataManager::DataSource {
+class RegisterPageUIHTMLSource : public content::URLDataSource {
  public:
   RegisterPageUIHTMLSource();
 
-  // Called when the network layer has requested a resource underneath
-  // the path we registered.
-  virtual void StartDataRequest(const std::string& path,
-                                bool is_incognito,
-                                int request_id);
-  virtual std::string GetMimeType(const std::string&) const {
+  // content::URLDataSource implementation.
+  virtual std::string GetSource() OVERRIDE;
+  virtual void StartDataRequest(
+      const std::string& path,
+      bool is_incognito,
+      const content::URLDataSource::GotDataCallback& callback) OVERRIDE;
+  virtual std::string GetMimeType(const std::string&) const OVERRIDE {
     return "text/html";
+  }
+  virtual bool ShouldAddContentSecurityPolicy() const OVERRIDE {
+    return false;
   }
 
  private:
-  ~RegisterPageUIHTMLSource() {}
+  virtual ~RegisterPageUIHTMLSource() {}
 
   DISALLOW_COPY_AND_ASSIGN(RegisterPageUIHTMLSource);
 };
@@ -156,19 +159,23 @@ class RegisterPageHandler : public WebUIMessageHandler,
 //
 ////////////////////////////////////////////////////////////////////////////////
 
-RegisterPageUIHTMLSource::RegisterPageUIHTMLSource()
-    : DataSource(chrome::kChromeUIRegisterPageHost, MessageLoop::current()) {
+RegisterPageUIHTMLSource::RegisterPageUIHTMLSource() {
 }
 
-void RegisterPageUIHTMLSource::StartDataRequest(const std::string& path,
-                                                bool is_incognito,
-                                                int request_id) {
+std::string RegisterPageUIHTMLSource::GetSource() {
+  return chrome::kChromeUIRegisterPageHost;
+}
+
+void RegisterPageUIHTMLSource::StartDataRequest(
+    const std::string& path,
+    bool is_incognito,
+    const content::URLDataSource::GotDataCallback& callback) {
   // Make sure that chrome://register is available only during
   // OOBE wizard lifetime and when device has not been registered yet.
   if (!chromeos::WizardController::default_controller() ||
       chromeos::WizardController::IsDeviceRegistered()) {
     scoped_refptr<base::RefCountedBytes> empty_bytes(new base::RefCountedBytes);
-    SendResponse(request_id, empty_bytes);
+    callback.Run(empty_bytes);
     return;
   }
 
@@ -176,7 +183,7 @@ void RegisterPageUIHTMLSource::StartDataRequest(const std::string& path,
       ResourceBundle::GetSharedInstance().LoadDataResourceBytes(
           IDR_HOST_REGISTRATION_PAGE_HTML));
 
-  SendResponse(request_id, html_bytes);
+  callback.Run(html_bytes);
 }
 
 ////////////////////////////////////////////////////////////////////////////////
@@ -287,5 +294,5 @@ RegisterPageUI::RegisterPageUI(content::WebUI* web_ui)
 
   // Set up the chrome://register/ source.
   Profile* profile = Profile::FromWebUI(web_ui);
-  ChromeURLDataManager::AddDataSource(profile, html_source);
+  content::URLDataSource::Add(profile, html_source);
 }

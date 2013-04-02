@@ -15,6 +15,7 @@
 #include "base/message_loop.h"
 #include "base/stl_util.h"
 #include "base/time.h"
+#include "base/utf_string_conversions.h"
 #include "chrome/browser/sessions/session_types_test_helper.h"
 #include "chrome/browser/signin/signin_manager.h"
 #include "chrome/browser/signin/signin_manager_factory.h"
@@ -26,6 +27,8 @@
 #include "chrome/browser/sync/glue/session_model_associator.h"
 #include "chrome/browser/sync/glue/sync_backend_host.h"
 #include "chrome/browser/sync/glue/synced_device_tracker.h"
+#include "chrome/browser/sync/glue/synced_tab_delegate.h"
+#include "chrome/browser/sync/glue/tab_node_pool.h"
 #include "chrome/browser/sync/profile_sync_components_factory_mock.h"
 #include "chrome/browser/sync/profile_sync_service_factory.h"
 #include "chrome/browser/sync/profile_sync_test_util.h"
@@ -205,9 +208,9 @@ class ProfileSyncServiceSessionTest
         content::NotificationService::AllSources());
   }
 
-  void Observe(int type,
+  virtual void Observe(int type,
       const content::NotificationSource& source,
-      const content::NotificationDetails& details) {
+      const content::NotificationDetails& details) OVERRIDE {
     switch (type) {
       case chrome::NOTIFICATION_FOREIGN_SESSION_UPDATED:
         notified_of_update_ = true;
@@ -271,7 +274,7 @@ class ProfileSyncServiceSessionTest
     EXPECT_CALL(*factory, CreateSessionSyncComponents(_, _)).
         WillOnce(Return(ProfileSyncComponentsFactory::SyncComponents(
             model_associator_, change_processor_)));
-    EXPECT_CALL(*factory, CreateDataTypeManager(_, _, _, _)).
+    EXPECT_CALL(*factory, CreateDataTypeManager(_, _, _, _, _)).
         WillOnce(ReturnNewDataTypeManager());
 
     TokenServiceFactory::GetForProfile(profile())->IssueAuthTokenForTest(
@@ -346,9 +349,17 @@ TEST_F(ProfileSyncServiceSessionTest, WriteSessionToNode) {
   ASSERT_EQ(0, header_s.window_size());
 }
 
+// Crashes sometimes on Windows, particularly XP.
+// See http://crbug.com/174951
+#if defined(OS_WIN)
+#define MAYBE_WriteFilledSessionToNode DISABLED_WriteFilledSessionToNode
+#else
+#define MAYBE_WriteFilledSessionToNode WriteFilledSessionToNode
+#endif  // defined(OS_WIN)
+
 // Test that we can fill this machine's session, write it to a node,
 // and then retrieve it.
-TEST_F(ProfileSyncServiceSessionTest, WriteFilledSessionToNode) {
+TEST_F(ProfileSyncServiceSessionTest, MAYBE_WriteFilledSessionToNode) {
   CreateRootHelper create_root(this);
   ASSERT_TRUE(StartSyncService(create_root.callback(), false));
   ASSERT_TRUE(create_root.success());
@@ -938,9 +949,17 @@ TEST_F(ProfileSyncServiceSessionTest, StaleSessionRefresh) {
   VerifySyncedSession(tag, session_reference, *(foreign_sessions[0]));
 }
 
+// Crashes sometimes on Windows, particularly XP.
+// See http://crbug.com/174951
+#if defined(OS_WIN)
+#define MAYBE_ValidTabs DISABLED_ValidTabs
+#else
+#define MAYBE_ValidTabs ValidTabs
+#endif  // defined(OS_WIN)
+
 // Test that tabs with nothing but "chrome://*" and "file://*" navigations are
 // not be synced.
-TEST_F(ProfileSyncServiceSessionTest, ValidTabs) {
+TEST_F(ProfileSyncServiceSessionTest, MAYBE_ValidTabs) {
   CreateRootHelper create_root(this);
   ASSERT_TRUE(StartSyncService(create_root.callback(), false));
   ASSERT_TRUE(create_root.success());
@@ -1130,7 +1149,7 @@ TEST_F(ProfileSyncServiceSessionTest, MissingLocalTabNode) {
   ASSERT_FALSE(error.IsSet());
   {
     // Delete the first sync tab node.
-    std::string tab_tag = SessionModelAssociator::TabIdToTag(local_tag, 0);
+    std::string tab_tag = TabNodePool::TabIdToTag(local_tag, 0);
 
     syncer::WriteTransaction trans(FROM_HERE, sync_service_->GetUserShare());
     syncer::ReadNode root(&trans);

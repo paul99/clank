@@ -6,12 +6,13 @@
 
 #include "base/bind.h"
 #include "base/file_util.h"
-#include "base/file_util_proxy.h"
+#include "base/files/file_util_proxy.h"
 #include "base/logging.h"
 #include "base/message_loop_proxy.h"
 #include "base/platform_file.h"
 #include "base/threading/thread_restrictions.h"
 #include "content/browser/loader/resource_dispatcher_host_impl.h"
+#include "content/public/browser/browser_thread.h"
 #include "content/public/common/resource_response.h"
 #include "net/base/file_stream.h"
 #include "net/base/io_buffer.h"
@@ -45,7 +46,7 @@ class DependentIOBuffer : public net::WrappedIOBuffer {
   scoped_refptr<net::IOBuffer> backing_;
 };
 
-}
+}  // namespace
 
 namespace content {
 
@@ -163,7 +164,7 @@ bool RedirectToFileResourceHandler::OnResponseCompleted(
 void RedirectToFileResourceHandler::DidCreateTemporaryFile(
     base::PlatformFileError /*error_code*/,
     base::PassPlatformFile file_handle,
-    const FilePath& file_path) {
+    const base::FilePath& file_path) {
   deletable_file_ = ShareableFileReference::GetOrCreate(
       file_path, ShareableFileReference::DELETE_ON_FINAL_RELEASE,
       BrowserThread::GetMessageLoopProxyForThread(BrowserThread::FILE));

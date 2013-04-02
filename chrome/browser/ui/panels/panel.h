@@ -9,10 +9,10 @@
 
 #include "base/gtest_prod_util.h"
 #include "base/memory/scoped_ptr.h"
+#include "base/memory/weak_ptr.h"
 #include "base/string16.h"
 #include "chrome/browser/command_updater.h"
 #include "chrome/browser/command_updater_delegate.h"
-#include "chrome/browser/extensions/image_loading_tracker.h"
 #include "chrome/browser/sessions/session_id.h"
 #include "chrome/browser/ui/base_window.h"
 #include "chrome/browser/ui/panels/panel_constants.h"
@@ -27,6 +27,7 @@ class PanelCollection;
 class PanelHost;
 class PanelManager;
 class Profile;
+class StackedPanelCollection;
 
 namespace content {
 class WebContents;
@@ -49,8 +50,7 @@ class WindowController;
 //   other Panels. For example deleting a panel would rearrange other panels.
 class Panel : public BaseWindow,
               public CommandUpdaterDelegate,
-              public content::NotificationObserver,
-              public ImageLoadingTracker::Observer {
+              public content::NotificationObserver {
  public:
   enum ExpansionState {
     // The panel is fully expanded with both title-bar and the client-area.
@@ -88,6 +88,8 @@ class Panel : public BaseWindow,
   CommandUpdater* command_updater();
   Profile* profile() const;
 
+  const extensions::Extension* GetExtension() const;
+
   // Returns web contents of the panel, if any. There may be none if web
   // contents have not been added to the panel yet.
   content::WebContents* GetWebContents() const;
@@ -109,10 +111,10 @@ class Panel : public BaseWindow,
 
   int TitleOnlyHeight() const;
 
-  // Returns true if the panel can be minimized or restored, depending on the
-  // collection the panel is in.
-  bool CanMinimize() const;
-  bool CanRestore() const;
+  // Returns true if the panel can show minimize or restore button in its
+  // titlebar, depending on its state.
+  bool CanShowMinimizeButton() const;
+  bool CanShowRestoreButton() const;
 
   // BaseWindow overrides.
   virtual bool IsActive() const OVERRIDE;
@@ -175,6 +177,8 @@ class Panel : public BaseWindow,
   void set_collection(PanelCollection* new_collection) {
     collection_ = new_collection;
   }
+
+  StackedPanelCollection* stack() const;
 
   ExpansionState expansion_state() const { return expansion_state_; }
   const gfx::Size& min_size() const { return min_size_; }
@@ -295,6 +299,12 @@ class Panel : public BaseWindow,
   // Updates UI to reflect that the web cotents receives the focus.
   void WebContentsFocused(content::WebContents* contents);
 
+  // Moves the panel by delta instantly.
+  void MoveByInstantly(const gfx::Vector2d& delta_origin);
+
+  // Applies |corner_style| to the panel window.
+  void SetWindowCornerStyle(panel::CornerStyle corner_style);
+
  protected:
   // Panel can only be created using PanelManager::CreatePanel() or subclass.
   // |app_name| is the default title for Panels when the page content does not
@@ -314,18 +324,13 @@ class Panel : public BaseWindow,
     CUSTOM_MAX_SIZE
   };
 
-  // ImageLoadingTracker::Observer implementation.
-  virtual void OnImageLoaded(const gfx::Image& image,
-                             const std::string& extension_id,
-                             int index) OVERRIDE;
+  void OnImageLoaded(const gfx::Image& image);
 
   // Initialize state for all supported commands.
   void InitCommandState();
 
   // Configures the renderer for auto resize (if auto resize is enabled).
   void ConfigureAutoResize(content::WebContents* web_contents);
-
-  const extensions::Extension* GetExtension() const;
 
   // Load the app's image, firing a load state change when loaded.
   void UpdateAppIcon();
@@ -384,11 +389,10 @@ class Panel : public BaseWindow,
   scoped_ptr<extensions::WindowController> extension_window_controller_;
   scoped_ptr<PanelHost> panel_host_;
 
-  // Used for loading app_icon_.
-  scoped_ptr<ImageLoadingTracker> app_icon_loader_;
-
   // Icon showed in the task bar.
   gfx::Image app_icon_;
+
+  base::WeakPtrFactory<Panel> image_loader_ptr_factory_;
 
   DISALLOW_COPY_AND_ASSIGN(Panel);
 };

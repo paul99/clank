@@ -8,32 +8,34 @@
 #include <dbt.h>
 #include <fileapi.h>
 
-#include "base/string_number_conversions.h"
+#include "base/bind_helpers.h"
+#include "base/stl_util.h"
 #include "base/string_util.h"
+#include "base/strings/string_number_conversions.h"
 #include "base/utf_string_conversions.h"
 #include "chrome/browser/system_monitor/media_device_notifications_utils.h"
 #include "chrome/browser/system_monitor/media_storage_util.h"
 #include "content/public/browser/browser_thread.h"
 
-using base::SystemMonitor;
 using content::BrowserThread;
 
 namespace {
 
 const DWORD kMaxPathBufLen = MAX_PATH + 1;
 
-bool IsRemovable(const char16* mount_point) {
-  if (GetDriveType(mount_point) != DRIVE_REMOVABLE)
+bool IsRemovable(const string16& mount_point) {
+  if (GetDriveType(mount_point.c_str()) != DRIVE_REMOVABLE)
     return false;
 
   // We don't consider floppy disks as removable, so check for that.
   string16 device = mount_point;
-  if (EndsWith(device, L"\\", false))
-    device = device.substr(0, device.length() - 1);
-  char16 device_path[kMaxPathBufLen];
-  if (!QueryDosDevice(device.c_str(), device_path, kMaxPathBufLen))
+  if (EndsWith(mount_point, L"\\", false))
+    device = mount_point.substr(0, device.length() - 1);
+  string16 device_path;
+  if (!QueryDosDevice(device.c_str(), WriteInto(&device_path, kMaxPathBufLen),
+                      kMaxPathBufLen))
     return true;
-  return string16(device_path).find(L"Floppy") == string16::npos;
+  return device_path.find(L"Floppy") == string16::npos;
 }
 
 // Returns 0 if the devicetype is not volume.
@@ -45,13 +47,6 @@ uint32 GetVolumeBitMaskFromBroadcastHeader(LPARAM data) {
   return 0;
 }
 
-FilePath DriveNumberToFilePath(int drive_number) {
-  DCHECK_LT(drive_number, 26);
-  string16 path(L"_:\\");
-  path[0] = L'A' + drive_number;
-  return FilePath(path);
-}
-
 // Returns true if |data| represents a logical volume structure.
 bool IsLogicalVolumeStructure(LPARAM data) {
   DEV_BROADCAST_HDR* broadcast_hdr =
@@ -61,63 +56,234 @@ bool IsLogicalVolumeStructure(LPARAM data) {
 }
 
 // Gets mass storage device information given a |device_path|. On success,
-// returns true and fills in |device_location|, |unique_id|, |name| and
+// returns true and fills in |device_location|, |unique_id|, |name|, and
 // |removable|.
 // The following msdn blog entry is helpful for understanding disk volumes
 // and how they are treated in Windows:
 // http://blogs.msdn.com/b/adioltean/archive/2005/04/16/408947.aspx.
-bool GetDeviceDetails(const FilePath& device_path, string16* device_location,
-    std::string* unique_id, string16* name, bool* removable) {
-  char16 mount_point[kMaxPathBufLen];
-  if (!GetVolumePathName(device_path.value().c_str(), mount_point,
+bool GetDeviceDetails(const base::FilePath& device_path,
+                      string16* device_location,
+                      std::string* unique_id,
+                      string16* name,
+                      bool* removable) {
+  string16 mount_point;
+  if (!GetVolumePathName(device_path.value().c_str(),
+                         WriteInto(&mount_point, kMaxPathBufLen),
                          kMaxPathBufLen)) {
     return false;
   }
+
+  if (removable)
+    *removable = IsRemovable(mount_point);
+
   if (device_location)
-    *device_location = string16(mount_point);
+    *device_location = mount_point;
 
   if (unique_id) {
-    char16 guid[kMaxPathBufLen];
-    if (!GetVolumeNameForVolumeMountPoint(mount_point, guid, kMaxPathBufLen))
+    string16 guid;
+    if (!GetVolumeNameForVolumeMountPoint(mount_point.c_str(),
+                                          WriteInto(&guid, kMaxPathBufLen),
+                                          kMaxPathBufLen)) {
       return false;
+    }
     // In case it has two GUID's (see above mentioned blog), do it again.
-    if (!GetVolumeNameForVolumeMountPoint(guid, guid, kMaxPathBufLen))
+    if (!GetVolumeNameForVolumeMountPoint(guid.c_str(),
+                                          WriteInto(&guid, kMaxPathBufLen),
+                                          kMaxPathBufLen)) {
       return false;
-    WideToUTF8(guid, wcslen(guid), unique_id);
+    }
+    *unique_id = UTF16ToUTF8(guid);
   }
 
   if (name)
     *name = device_path.LossyDisplayName();
 
-  if (removable)
-    *removable = IsRemovable(mount_point);
-
   return true;
+}
+
+// Returns a vector of all the removable mass storage devices that are
+// connected.
+std::vector<base::FilePath> GetAttachedDevices() {
+  std::vector<base::FilePath> result;
+  string16 volume_name;
+  HANDLE find_handle = FindFirstVolume(WriteInto(&volume_name, kMaxPathBufLen),
+                                       kMaxPathBufLen);
+  if (find_handle == INVALID_HANDLE_VALUE)
+    return result;
+
+  while (true) {
+    string16 volume_path;
+    DWORD return_count;
+    if (GetVolumePathNamesForVolumeName(volume_name.c_str(),
+                                        WriteInto(&volume_path, kMaxPathBufLen),
+                                        kMaxPathBufLen, &return_count)) {
+      if (IsRemovable(volume_path))
+        result.push_back(base::FilePath(volume_path));
+    } else {
+      DPLOG(ERROR);
+    }
+    if (!FindNextVolume(find_handle, WriteInto(&volume_name, kMaxPathBufLen),
+                        kMaxPathBufLen)) {
+      if (GetLastError() != ERROR_NO_MORE_FILES)
+        DPLOG(ERROR);
+      break;
+    }
+  }
+
+  FindVolumeClose(find_handle);
+  return result;
 }
 
 }  // namespace
 
 namespace chrome {
 
-VolumeMountWatcherWin::VolumeMountWatcherWin() {
+const int kWorkerPoolNumThreads = 3;
+const char* kWorkerPoolNamePrefix = "DeviceInfoPool";
+
+VolumeMountWatcherWin::VolumeMountWatcherWin()
+    : weak_factory_(this),
+      notifications_(NULL) {
+  get_attached_devices_callback_ = base::Bind(&GetAttachedDevices);
+  get_device_details_callback_ = base::Bind(&GetDeviceDetails);
+
+  device_info_worker_pool_ = new base::SequencedWorkerPool(
+      kWorkerPoolNumThreads, kWorkerPoolNamePrefix);
+  task_runner_ =
+      device_info_worker_pool_->GetSequencedTaskRunnerWithShutdownBehavior(
+          device_info_worker_pool_->GetSequenceToken(),
+          base::SequencedWorkerPool::CONTINUE_ON_SHUTDOWN);
 }
 
+// static
+base::FilePath VolumeMountWatcherWin::DriveNumberToFilePath(int drive_number) {
+  if (drive_number < 0 || drive_number > 25)
+    return base::FilePath();
+  string16 path(L"_:\\");
+  path[0] = L'A' + drive_number;
+  return base::FilePath(path);
+}
+
+// In order to get all the weak pointers created on the UI thread, and doing
+// synchronous Windows calls in the worker pool, this kicks off a chain of
+// events which will
+// a) Enumerate attached devices
+// b) Create weak pointers for which to send completion signals from
+// c) Retrieve metadata on the volumes and then
+// d) Notify that metadata to listeners.
 void VolumeMountWatcherWin::Init() {
+  DCHECK(BrowserThread::CurrentlyOn(BrowserThread::UI));
+
   // When VolumeMountWatcherWin is created, the message pumps are not running
   // so a posted task from the constructor would never run. Therefore, do all
   // the initializations here.
-  //
-  // This should call AddExistingDevicesOnFileThread. The call is disabled
-  // until a fix for http://crbug.com/155910 can land.
-  // BrowserThread::PostTask(BrowserThread::FILE, FROM_HERE, base::Bind(
-  //     &VolumeMountWatcherWin::AddExistingDevicesOnFileThread, this));
+  // Disabled pending resolution of http://crbug.com/173953
+  // task_runner_->PostTask(FROM_HERE, base::Bind(
+  //     &FindExistingDevicesAndAdd, get_attached_devices_callback_,
+  //     weak_factory_.GetWeakPtr()));
+
+  // This task is a mystery. Without it, the ToastCrasher test fails, but
+  // it isn't clear why. Need to move pool creation later?
+  task_runner_->PostTask(FROM_HERE, base::Bind(&base::DoNothing));
+
 }
 
-bool VolumeMountWatcherWin::GetDeviceInfo(const FilePath& device_path,
+// static
+void VolumeMountWatcherWin::FindExistingDevicesAndAdd(
+    base::Callback<std::vector<base::FilePath>(void)>
+        get_attached_devices_callback,
+    base::WeakPtr<chrome::VolumeMountWatcherWin> volume_watcher) {
+  std::vector<base::FilePath> removable_devices =
+      get_attached_devices_callback.Run();
+
+  BrowserThread::PostTask(BrowserThread::UI, FROM_HERE, base::Bind(
+      &chrome::VolumeMountWatcherWin::AddDevicesOnUIThread,
+      volume_watcher, removable_devices));
+}
+
+void VolumeMountWatcherWin::AddDevicesOnUIThread(
+    std::vector<base::FilePath> removable_devices) {
+  DCHECK(BrowserThread::CurrentlyOn(BrowserThread::UI));
+
+  for (size_t i = 0; i < removable_devices.size(); i++) {
+    if (ContainsKey(pending_device_checks_, removable_devices[i]))
+      continue;
+    pending_device_checks_.insert(removable_devices[i]);
+    task_runner_->PostTask(FROM_HERE,
+                           base::Bind(&RetrieveInfoForDeviceAndAdd,
+                                      removable_devices[i],
+                                      get_device_details_callback_,
+                                      weak_factory_.GetWeakPtr()));
+  }
+}
+
+// static
+void VolumeMountWatcherWin::RetrieveInfoForDeviceAndAdd(
+    const base::FilePath& device_path,
+    base::Callback<bool(const base::FilePath&, string16*, std::string*,
+                        string16*, bool*)> get_device_details_callback,
+    base::WeakPtr<chrome::VolumeMountWatcherWin> volume_watcher) {
+  string16 device_location;
+  std::string unique_id;
+  string16 device_name;
+  bool removable;
+  if (!get_device_details_callback.Run(device_path, &device_location,
+                                       &unique_id, &device_name, &removable)) {
+    BrowserThread::PostTask(BrowserThread::UI, FROM_HERE, base::Bind(
+        &chrome::VolumeMountWatcherWin::DeviceCheckComplete,
+        volume_watcher, device_path));
+    return;
+  }
+
+  chrome::MediaStorageUtil::Type type =
+      chrome::MediaStorageUtil::REMOVABLE_MASS_STORAGE_NO_DCIM;
+  if (chrome::IsMediaDevice(device_path.value()))
+    type = chrome::MediaStorageUtil::REMOVABLE_MASS_STORAGE_WITH_DCIM;
+  std::string device_id =
+      chrome::MediaStorageUtil::MakeDeviceId(type, unique_id);
+
+  chrome::VolumeMountWatcherWin::MountPointInfo info;
+  info.device_id = device_id;
+  info.location = device_location;
+  info.unique_id = unique_id;
+  info.name = device_name;
+  info.removable = removable;
+
+  BrowserThread::PostTask(BrowserThread::UI, FROM_HERE, base::Bind(
+      &chrome::VolumeMountWatcherWin::HandleDeviceAttachEventOnUIThread,
+      volume_watcher, device_path, info));
+}
+
+void VolumeMountWatcherWin::DeviceCheckComplete(
+    const base::FilePath& device_path) {
+  DCHECK(BrowserThread::CurrentlyOn(BrowserThread::UI));
+  pending_device_checks_.erase(device_path);
+}
+
+
+bool VolumeMountWatcherWin::GetDeviceInfo(const base::FilePath& device_path,
     string16* device_location, std::string* unique_id, string16* name,
-    bool* removable) {
-  return GetDeviceDetails(device_path, device_location, unique_id, name,
-                          removable);
+    bool* removable) const {
+  base::FilePath path(device_path);
+  MountPointDeviceMetadataMap::const_iterator iter =
+      device_metadata_.find(path.value());
+  while (iter == device_metadata_.end() && path.DirName() != path) {
+    path = path.DirName();
+    iter = device_metadata_.find(path.value());
+  }
+
+  // If the requested device hasn't been scanned yet,
+  // synchronously get the device info.
+  if (iter == device_metadata_.end()) {
+    return get_device_details_callback_.Run(device_path, device_location,
+                                            unique_id, name, removable);
+  }
+
+  *device_location = iter->second.location;
+  *unique_id = iter->second.unique_id;
+  *name = iter->second.name;
+  *removable = iter->second.removable;
+  return true;
 }
 
 void VolumeMountWatcherWin::OnWindowMessage(UINT event_type, LPARAM data) {
@@ -126,11 +292,13 @@ void VolumeMountWatcherWin::OnWindowMessage(UINT event_type, LPARAM data) {
     case DBT_DEVICEARRIVAL: {
       if (IsLogicalVolumeStructure(data)) {
         DWORD unitmask = GetVolumeBitMaskFromBroadcastHeader(data);
+        std::vector<base::FilePath> paths;
         for (int i = 0; unitmask; ++i, unitmask >>= 1) {
           if (!(unitmask & 0x01))
             continue;
-          AddNewDevice(DriveNumberToFilePath(i));
+          paths.push_back(DriveNumberToFilePath(i));
         }
+        AddDevicesOnUIThread(paths);
       }
       break;
     }
@@ -148,102 +316,49 @@ void VolumeMountWatcherWin::OnWindowMessage(UINT event_type, LPARAM data) {
   }
 }
 
+void VolumeMountWatcherWin::SetNotifications(
+    RemovableStorageNotifications::Receiver* notifications) {
+  notifications_ = notifications;
+}
+
 VolumeMountWatcherWin::~VolumeMountWatcherWin() {
+  weak_factory_.InvalidateWeakPtrs();
 }
 
-std::vector<FilePath> VolumeMountWatcherWin::GetAttachedDevices() {
-  std::vector<FilePath> result;
-  char16 volume_name[kMaxPathBufLen];
-  HANDLE find_handle = FindFirstVolume(volume_name, kMaxPathBufLen);
-  if (find_handle == INVALID_HANDLE_VALUE)
-    return result;
-
-  while (true) {
-    char16 volume_path[kMaxPathBufLen];
-    DWORD return_count;
-    if (GetVolumePathNamesForVolumeName(volume_name, volume_path,
-                                        kMaxPathBufLen, &return_count)) {
-      if (IsRemovable(volume_path))
-        result.push_back(FilePath(volume_path));
-    } else {
-      DPLOG(ERROR);
-    }
-    if (!FindNextVolume(find_handle, volume_name, kMaxPathBufLen)) {
-      if (GetLastError() != ERROR_NO_MORE_FILES)
-        DPLOG(ERROR);
-      break;
-    }
-  }
-
-  FindVolumeClose(find_handle);
-  return result;
-}
-
-void VolumeMountWatcherWin::AddNewDevice(const FilePath& device_path) {
-  std::string unique_id;
-  string16 device_name;
-  bool removable;
-  if (!GetDeviceInfo(device_path, NULL, &unique_id, &device_name, &removable))
-    return;
-
-  if (!removable)
-    return;
-
-  BrowserThread::PostTask(
-      BrowserThread::FILE, FROM_HERE,
-      base::Bind(&VolumeMountWatcherWin::CheckDeviceTypeOnFileThread, this,
-                 unique_id, device_name, device_path));
-}
-
-void VolumeMountWatcherWin::AddExistingDevicesOnFileThread() {
-  DCHECK(BrowserThread::CurrentlyOn(BrowserThread::FILE));
-  std::vector<FilePath> removable_devices = GetAttachedDevices();
-  for (size_t i = 0; i < removable_devices.size(); i++)
-    AddNewDevice(removable_devices[i]);
-}
-
-void VolumeMountWatcherWin::CheckDeviceTypeOnFileThread(
-    const std::string& unique_id, const string16& device_name,
-    const FilePath& device) {
-  DCHECK(BrowserThread::CurrentlyOn(BrowserThread::FILE));
-
-  MediaStorageUtil::Type type =
-      MediaStorageUtil::REMOVABLE_MASS_STORAGE_NO_DCIM;
-  if (IsMediaDevice(device.value()))
-    type = MediaStorageUtil::REMOVABLE_MASS_STORAGE_WITH_DCIM;
-  std::string device_id = MediaStorageUtil::MakeDeviceId(type, unique_id);
-
-  BrowserThread::PostTask(BrowserThread::UI, FROM_HERE, base::Bind(
-      &VolumeMountWatcherWin::HandleDeviceAttachEventOnUIThread, this,
-      device_id, device_name, device.value()));
-}
 
 void VolumeMountWatcherWin::HandleDeviceAttachEventOnUIThread(
-    const std::string& device_id, const string16& device_name,
-    const string16& device_location) {
+    const base::FilePath& device_path,
+    const MountPointInfo& info) {
   DCHECK(BrowserThread::CurrentlyOn(BrowserThread::UI));
 
-  device_ids_[device_location] = device_id;
-  SystemMonitor* monitor = SystemMonitor::Get();
-  if (monitor) {
-    monitor->ProcessRemovableStorageAttached(device_id, device_name,
-                                             device_location);
+  device_metadata_[device_path.value()] = info;
+
+  DeviceCheckComplete(device_path);
+
+  // Don't call removable storage observers for fixed volumes.
+  if (!info.removable)
+    return;
+
+  if (notifications_) {
+    string16 display_name = GetDisplayNameForDevice(0, info.name);
+    notifications_->ProcessAttach(info.device_id, display_name,
+                                  device_path.value());
   }
 }
 
 void VolumeMountWatcherWin::HandleDeviceDetachEventOnUIThread(
     const string16& device_location) {
   DCHECK(BrowserThread::CurrentlyOn(BrowserThread::UI));
-  MountPointDeviceIdMap::const_iterator device_info =
-      device_ids_.find(device_location);
-  // If the devices isn't type removable (like a CD), it won't be there.
-  if (device_info == device_ids_.end())
+
+  MountPointDeviceMetadataMap::const_iterator device_info =
+      device_metadata_.find(device_location);
+  // If the device isn't type removable (like a CD), it won't be there.
+  if (device_info == device_metadata_.end())
     return;
 
-  SystemMonitor* monitor = SystemMonitor::Get();
-  if (monitor)
-    monitor->ProcessRemovableStorageDetached(device_info->second);
-  device_ids_.erase(device_info);
+  if (notifications_)
+    notifications_->ProcessDetach(device_info->second.device_id);
+  device_metadata_.erase(device_info);
 }
 
 }  // namespace chrome

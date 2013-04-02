@@ -7,9 +7,9 @@
 #include "base/file_path.h"
 #include "base/logging.h"
 #include "media/base/android/media_player_bridge.h"
+#include "media/base/video_frame.h"
 #include "net/base/mime_util.h"
 #include "third_party/WebKit/Source/WebKit/chromium/public/WebMediaPlayerClient.h"
-#include "webkit/media/android/stream_texture_factory_android.h"
 #include "webkit/media/android/webmediaplayer_manager_android.h"
 #include "webkit/media/webmediaplayer_util.h"
 #include "webkit/media/webvideoframe_impl.h"
@@ -350,15 +350,36 @@ void WebMediaPlayerAndroid::OnPlayerReleased() {
 }
 
 void WebMediaPlayerAndroid::ReleaseMediaResources() {
-  // Pause the media player first.
-  pause();
-  client_->playbackStateChanged();
-
+  switch (network_state_) {
+    // Pause the media player and inform WebKit if the player is in a good
+    // shape.
+    case WebMediaPlayer::NetworkStateIdle:
+    case WebMediaPlayer::NetworkStateLoading:
+    case WebMediaPlayer::NetworkStateLoaded:
+      pause();
+      client_->playbackStateChanged();
+      break;
+    // If a WebMediaPlayer instance has entered into one of these states,
+    // the internal network state in HTMLMediaElement could be set to empty.
+    // And calling playbackStateChanged() could get this object deleted.
+    case WebMediaPlayer::NetworkStateEmpty:
+    case WebMediaPlayer::NetworkStateFormatError:
+    case WebMediaPlayer::NetworkStateNetworkError:
+    case WebMediaPlayer::NetworkStateDecodeError:
+      break;
+  }
   ReleaseResourcesInternal();
   OnPlayerReleased();
 }
 
 void WebMediaPlayerAndroid::WillDestroyCurrentMessageLoop() {
+  if (manager_)
+    manager_->UnregisterMediaPlayer(player_id_);
+  Detach();
+  main_loop_ = NULL;
+}
+
+void WebMediaPlayerAndroid::Detach() {
   Destroy();
 
   if (stream_id_) {
@@ -368,11 +389,7 @@ void WebMediaPlayerAndroid::WillDestroyCurrentMessageLoop() {
 
   video_frame_.reset();
 
-  if (manager_)
-    manager_->UnregisterMediaPlayer(player_id_);
-
   manager_ = NULL;
-  main_loop_ = NULL;
 }
 
 void WebMediaPlayerAndroid::ReallocateVideoFrame() {
@@ -386,9 +403,9 @@ void WebMediaPlayerAndroid::ReallocateVideoFrame() {
 }
 
 WebVideoFrame* WebMediaPlayerAndroid::getCurrentFrame() {
-  if (stream_texture_proxy_.get() && !stream_texture_proxy_->IsInitialized()
+  if (stream_texture_proxy_.get() && !stream_texture_proxy_->IsBoundToThread()
       && stream_id_) {
-    stream_texture_proxy_->Initialize(
+    stream_texture_proxy_->BindToCurrentThread(
         stream_id_, video_frame_->width(), video_frame_->height());
   }
 

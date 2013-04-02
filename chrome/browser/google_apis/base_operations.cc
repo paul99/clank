@@ -5,8 +5,8 @@
 #include "chrome/browser/google_apis/base_operations.h"
 
 #include "base/json/json_reader.h"
-#include "base/string_number_conversions.h"
 #include "base/stringprintf.h"
+#include "base/strings/string_number_conversions.h"
 #include "base/task_runner_util.h"
 #include "base/threading/sequenced_worker_pool.h"
 #include "base/values.h"
@@ -28,6 +28,11 @@ const char kGDataVersionHeader[] = "GData-Version: 3.0";
 
 // Maximum number of attempts for re-authentication per operation.
 const int kMaxReAuthenticateAttemptsPerOperation = 1;
+
+// Template for initiate upload of both GData WAPI and Drive API v2.
+const char kUploadContentType[] = "X-Upload-Content-Type: ";
+const char kUploadContentLength[] = "X-Upload-Content-Length: ";
+const char kUploadResponseLocation[] = "location";
 
 // Parse JSON string to base::Value object.
 scoped_ptr<base::Value> ParseJsonOnBlockingPool(const std::string& json) {
@@ -95,7 +100,7 @@ UrlFetchOperationBase::UrlFetchOperationBase(
     OperationRegistry* registry,
     net::URLRequestContextGetter* url_request_context_getter,
     OperationType type,
-    const FilePath& path)
+    const base::FilePath& path)
     : OperationRegistry::Operation(registry, type, path),
       url_request_context_getter_(url_request_context_getter),
       re_authenticate_count_(0),
@@ -119,11 +124,18 @@ void UrlFetchOperationBase::Start(const std::string& access_token,
   re_authenticate_callback_ = callback;
 
   GURL url = GetURL();
-  DCHECK(!url.is_empty());
+  if (url.is_empty()) {
+    // Error is found on generating the url. Send the error message to the
+    // callback, and then return immediately without trying to connect
+    // to the server.
+    RunCallbackOnPrematureFailure(GDATA_OTHER_ERROR);
+    return;
+  }
   DVLOG(1) << "URL: " << url.spec();
 
+  URLFetcher::RequestType request_type = GetRequestType();
   url_fetcher_.reset(
-      URLFetcher::Create(url, GetRequestType(), this));
+      URLFetcher::Create(url, request_type, this));
   url_fetcher_->SetRequestContext(url_request_context_getter_);
   // Always set flags to neither send nor save cookies.
   url_fetcher_->SetLoadFlags(
@@ -157,6 +169,18 @@ void UrlFetchOperationBase::Start(const std::string& access_token,
   std::string upload_content;
   if (GetContentData(&upload_content_type, &upload_content)) {
     url_fetcher_->SetUploadData(upload_content_type, upload_content);
+  } else {
+    // Even if there is no content data, UrlFetcher requires to set empty
+    // upload data string for POST, PUT and PATCH methods, explicitly.
+    // It is because that most requests of those methods have non-empty
+    // body, and UrlFetcher checks whether it is actually not forgotten.
+    if (request_type == URLFetcher::POST ||
+        request_type == URLFetcher::PUT ||
+        request_type == URLFetcher::PATCH) {
+      // Set empty upload content-type and upload content, so that
+      // the request will have no "Content-type: " header and no content.
+      url_fetcher_->SetUploadData("", "");
+    }
   }
 
   // Register to operation registry.
@@ -234,9 +258,6 @@ void UrlFetchOperationBase::NotifyStartToOperationRegistry() {
 void UrlFetchOperationBase::OnAuthFailed(GDataErrorCode code) {
   RunCallbackOnPrematureFailure(code);
 
-  // Notify authentication failed.
-  NotifyAuthFailed(code);
-
   // Check if this failed before we even started fetching. If so, register
   // for start so we can properly unregister with finish.
   if (!started_)
@@ -253,7 +274,6 @@ base::WeakPtr<AuthenticatedOperationInterface>
 UrlFetchOperationBase::GetWeakPtr() {
   return weak_ptr_factory_.GetWeakPtr();
 }
-
 
 //============================ EntryActionOperation ============================
 
@@ -297,6 +317,8 @@ void GetDataOperation::ParseResponse(GDataErrorCode fetch_error_code,
                                      const std::string& data) {
   DCHECK(BrowserThread::CurrentlyOn(BrowserThread::UI));
 
+  VLOG(1) << "JSON received from " << GetURL().spec() << ": "
+          << data.size() << " bytes";
   ParseJson(data,
             base::Bind(&GetDataOperation::OnDataParsed,
                        weak_ptr_factory_.GetWeakPtr(),
@@ -348,6 +370,157 @@ void GetDataOperation::RunCallbackOnSuccess(GDataErrorCode fetch_error_code,
                                             scoped_ptr<base::Value> value) {
   DCHECK(BrowserThread::CurrentlyOn(BrowserThread::UI));
   callback_.Run(fetch_error_code, value.Pass());
+}
+
+//========================= InitiateUploadOperationBase ========================
+
+InitiateUploadParams::InitiateUploadParams(
+    UploadMode upload_mode,
+    const std::string& title,
+    const std::string& content_type,
+    int64 content_length,
+    const GURL& upload_location,
+    const base::FilePath& drive_file_path,
+    const std::string& etag)
+    : upload_mode(upload_mode),
+      title(title),
+      content_type(content_type),
+      content_length(content_length),
+      upload_location(upload_location),
+      drive_file_path(drive_file_path),
+      etag(etag) {
+}
+
+InitiateUploadParams::~InitiateUploadParams() {
+}
+
+InitiateUploadOperationBase::InitiateUploadOperationBase(
+    OperationRegistry* registry,
+    net::URLRequestContextGetter* url_request_context_getter,
+    const InitiateUploadCallback& callback,
+    const base::FilePath& drive_file_path,
+    const std::string& content_type,
+    int64 content_length)
+    : UrlFetchOperationBase(registry,
+                            url_request_context_getter,
+                            OPERATION_UPLOAD,
+                            drive_file_path),
+      callback_(callback),
+      drive_file_path_(drive_file_path),
+      content_type_(content_type),
+      content_length_(content_length) {
+  DCHECK(!callback_.is_null());
+  DCHECK(!content_type_.empty());
+  DCHECK_GE(content_length_, 0);
+}
+
+InitiateUploadOperationBase::~InitiateUploadOperationBase() {}
+
+void InitiateUploadOperationBase::ProcessURLFetchResults(
+    const URLFetcher* source) {
+  GDataErrorCode code = GetErrorCode(source);
+
+  std::string upload_location;
+  if (code == HTTP_SUCCESS) {
+    // Retrieve value of the first "Location" header.
+    source->GetResponseHeaders()->EnumerateHeader(NULL,
+                                                  kUploadResponseLocation,
+                                                  &upload_location);
+  }
+  VLOG(1) << "Got response for [" << drive_file_path_.value()
+          << "]: code=" << code
+          << ", location=[" << upload_location << "]";
+
+  callback_.Run(code, GURL(upload_location));
+  OnProcessURLFetchResultsComplete(code == HTTP_SUCCESS);
+}
+
+void InitiateUploadOperationBase::NotifySuccessToOperationRegistry() {
+  NotifySuspend();
+}
+
+void InitiateUploadOperationBase::RunCallbackOnPrematureFailure(
+    GDataErrorCode code) {
+  callback_.Run(code, GURL());
+}
+
+std::vector<std::string>
+InitiateUploadOperationBase::GetExtraRequestHeaders() const {
+  std::vector<std::string> headers;
+  headers.push_back(kUploadContentType + content_type_);
+  headers.push_back(
+      kUploadContentLength + base::Int64ToString(content_length_));
+  return headers;
+}
+
+//============================ DownloadFileOperation ===========================
+
+DownloadFileOperation::DownloadFileOperation(
+    OperationRegistry* registry,
+    net::URLRequestContextGetter* url_request_context_getter,
+    const DownloadActionCallback& download_action_callback,
+    const GetContentCallback& get_content_callback,
+    const GURL& download_url,
+    const base::FilePath& drive_file_path,
+    const base::FilePath& output_file_path)
+    : UrlFetchOperationBase(registry,
+                            url_request_context_getter,
+                            OPERATION_DOWNLOAD,
+                            drive_file_path),
+      download_action_callback_(download_action_callback),
+      get_content_callback_(get_content_callback),
+      download_url_(download_url) {
+  DCHECK(!download_action_callback_.is_null());
+  // get_content_callback may be null.
+
+  // Make sure we download the content into a temp file.
+  if (output_file_path.empty())
+    set_save_temp_file(true);
+  else
+    set_output_file_path(output_file_path);
+}
+
+DownloadFileOperation::~DownloadFileOperation() {}
+
+// Overridden from UrlFetchOperationBase.
+GURL DownloadFileOperation::GetURL() const {
+  return download_url_;
+}
+
+void DownloadFileOperation::OnURLFetchDownloadProgress(const URLFetcher* source,
+                                                       int64 current,
+                                                       int64 total) {
+  NotifyProgress(current, total);
+}
+
+bool DownloadFileOperation::ShouldSendDownloadData() {
+  return !get_content_callback_.is_null();
+}
+
+void DownloadFileOperation::OnURLFetchDownloadData(
+    const URLFetcher* source,
+    scoped_ptr<std::string> download_data) {
+  if (!get_content_callback_.is_null())
+    get_content_callback_.Run(HTTP_SUCCESS, download_data.Pass());
+}
+
+void DownloadFileOperation::ProcessURLFetchResults(const URLFetcher* source) {
+  GDataErrorCode code = GetErrorCode(source);
+
+  // Take over the ownership of the the downloaded temp file.
+  base::FilePath temp_file;
+  if (code == HTTP_SUCCESS &&
+      !source->GetResponseAsFilePath(true,  // take_ownership
+                                     &temp_file)) {
+    code = GDATA_FILE_ERROR;
+  }
+
+  download_action_callback_.Run(code, temp_file);
+  OnProcessURLFetchResultsComplete(code == HTTP_SUCCESS);
+}
+
+void DownloadFileOperation::RunCallbackOnPrematureFailure(GDataErrorCode code) {
+  download_action_callback_.Run(code, base::FilePath());
 }
 
 }  // namespace google_apis

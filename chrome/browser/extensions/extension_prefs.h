@@ -24,6 +24,7 @@
 class ExtensionPrefValueMap;
 class ExtensionSorting;
 class PrefService;
+class PrefRegistrySyncable;
 
 namespace extensions {
 class ExtensionPrefsUninstallExtension;
@@ -93,7 +94,7 @@ class ExtensionPrefs : public ContentSettingsStore::Observer,
   // Does not take ownership of |prefs| and |extension_pref_value_map|.
   static scoped_ptr<ExtensionPrefs> Create(
       PrefService* prefs,
-      const FilePath& root_dir,
+      const base::FilePath& root_dir,
       ExtensionPrefValueMap* extension_pref_value_map,
       bool extensions_disabled);
 
@@ -101,7 +102,7 @@ class ExtensionPrefs : public ContentSettingsStore::Observer,
   // Use this as needed for testing.
   static scoped_ptr<ExtensionPrefs> Create(
       PrefService* prefs,
-      const FilePath& root_dir,
+      const base::FilePath& root_dir,
       ExtensionPrefValueMap* extension_pref_value_map,
       bool extensions_disabled,
       scoped_ptr<TimeProvider> time_provider);
@@ -144,7 +145,7 @@ class ExtensionPrefs : public ContentSettingsStore::Observer,
 
   // Called when an extension is uninstalled, so that prefs get cleaned up.
   void OnExtensionUninstalled(const std::string& extension_id,
-                              const Extension::Location& location,
+                              const Manifest::Location& location,
                               bool external_uninstall);
 
   // Called to change the extension's state when it is enabled/disabled.
@@ -191,10 +192,10 @@ class ExtensionPrefs : public ContentSettingsStore::Observer,
   void UpdateManifest(const Extension* extension);
 
   // Returns extension path based on extension ID, or empty FilePath on error.
-  FilePath GetExtensionPath(const std::string& extension_id);
+  base::FilePath GetExtensionPath(const std::string& extension_id);
 
   // Returns base extensions install directory.
-  const FilePath& install_directory() const { return install_directory_; }
+  const base::FilePath& install_directory() const { return install_directory_; }
 
   // Returns whether the extension with |id| has its blacklist bit set.
   //
@@ -203,9 +204,6 @@ class ExtensionPrefs : public ContentSettingsStore::Observer,
   // sources of blacklist information, such as safebrowsing. You probably want
   // to use Blacklist::GetBlacklistedIDs rather than this method.
   bool IsExtensionBlacklisted(const std::string& id) const;
-
-  // Based on extension id, checks prefs to see if it is orphaned.
-  bool IsExtensionOrphaned(const std::string& id);
 
   // Increment the count of how many times we prompted the user to acknowledge
   // the given extension, and return the new count.
@@ -222,10 +220,6 @@ class ExtensionPrefs : public ContentSettingsStore::Observer,
   // Whether the user has acknowledged a blacklisted extension.
   bool IsBlacklistedExtensionAcknowledged(const std::string& extension_id);
   void AcknowledgeBlacklistedExtension(const std::string& extension_id);
-
-  // Whether the user has acknowledged an orphaned extension.
-  bool IsOrphanedExtensionAcknowledged(const std::string& extension_id);
-  void AcknowledgeOrphanedExtension(const std::string& extension_id);
 
   // Returns true if the extension notification code has already run for the
   // first time for this profile. Currently we use this flag to mean that any
@@ -485,7 +479,7 @@ class ExtensionPrefs : public ContentSettingsStore::Observer,
   // found.
   base::Time GetInstallTime(const std::string& extension_id) const;
 
-  static void RegisterUserPrefs(PrefService* prefs);
+  static void RegisterUserPrefs(PrefRegistrySyncable* registry);
 
   ContentSettingsStore* content_settings_store() {
     return content_settings_store_.get();
@@ -522,7 +516,7 @@ class ExtensionPrefs : public ContentSettingsStore::Observer,
 
   // See the Create methods.
   ExtensionPrefs(PrefService* prefs,
-                 const FilePath& root_dir,
+                 const base::FilePath& root_dir,
                  ExtensionPrefValueMap* extension_pref_value_map,
                  scoped_ptr<TimeProvider> time_provider);
 
@@ -644,7 +638,7 @@ class ExtensionPrefs : public ContentSettingsStore::Observer,
   PrefService* prefs_;
 
   // Base extensions install directory.
-  FilePath install_directory_;
+  base::FilePath install_directory_;
 
   // Weak pointer, owned by Profile.
   ExtensionPrefValueMap* extension_pref_value_map_;

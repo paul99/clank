@@ -315,7 +315,8 @@ void SystemTray::DestroyNotificationBubble() {
 
 int SystemTray::GetTrayXOffset(SystemTrayItem* item) const {
   // Don't attempt to align the arrow if the shelf is on the left or right.
-  if (shelf_alignment() != SHELF_ALIGNMENT_BOTTOM)
+  if (shelf_alignment() != SHELF_ALIGNMENT_BOTTOM &&
+      shelf_alignment() != SHELF_ALIGNMENT_TOP)
     return TrayBubbleView::InitParams::kArrowDefaultOffset;
 
   std::map<SystemTrayItem*, views::View*>::const_iterator it =
@@ -362,6 +363,7 @@ void SystemTray::ShowItems(const std::vector<SystemTrayItem*>& items,
                                            kTrayPopupMinWidth,
                                            kTrayPopupMaxWidth);
     init_params.can_activate = can_activate;
+    init_params.close_on_deactivate = false;
     if (detailed) {
       // This is the case where a volume control or brightness control bubble
       // is created.
@@ -371,6 +373,9 @@ void SystemTray::ShowItems(const std::vector<SystemTrayItem*>& items,
       init_params.arrow_color = kHeaderBackgroundColorDark;
     }
     init_params.arrow_offset = arrow_offset;
+    // For Volume and Brightness we don't want to show an arrow when
+    // they are shown in a bubble by themselves.
+    init_params.hide_arrow = items.size() == 1 && items[0]->ShouldHideArrow();
     SystemTrayBubble* bubble = new SystemTrayBubble(this, items, bubble_type);
     system_bubble_.reset(new internal::SystemBubbleWrapper(bubble));
     system_bubble_->InitView(this, tray_container(), &init_params);
@@ -390,36 +395,16 @@ void SystemTray::ShowItems(const std::vector<SystemTrayItem*>& items,
 }
 
 void SystemTray::UpdateNotificationBubble() {
-  // Only show the notification buble if we have notifications and we are not
-  // showing the default bubble.
-  if (notification_items_.empty() ||
-      HasSystemBubbleType(SystemTrayBubble::BUBBLE_TYPE_DEFAULT)) {
+  // Only show the notification buble if we have notifications.
+  if (notification_items_.empty()) {
     DestroyNotificationBubble();
     return;
   }
   // Destroy the existing bubble before constructing a new one.
   notification_bubble_.reset();
   SystemTrayBubble* notification_bubble;
-  if (HasSystemBubbleType(SystemTrayBubble::BUBBLE_TYPE_DETAILED)) {
-    // Skip notifications for any currently displayed detailed item.
-    std::vector<SystemTrayItem*> items;
-    for (std::vector<SystemTrayItem*>::iterator iter =
-             notification_items_.begin();
-         iter != notification_items_.end(); ++ iter) {
-      if (*iter != detailed_item_)
-        items.push_back(*iter);
-    }
-    if (items.empty()) {
-      DestroyNotificationBubble();
-      return;
-    }
-    notification_bubble = new SystemTrayBubble(
-        this, items, SystemTrayBubble::BUBBLE_TYPE_NOTIFICATION);
-  } else {
-    // Show all notifications.
-    notification_bubble = new SystemTrayBubble(
-        this, notification_items_, SystemTrayBubble::BUBBLE_TYPE_NOTIFICATION);
-  }
+  notification_bubble = new SystemTrayBubble(
+      this, notification_items_, SystemTrayBubble::BUBBLE_TYPE_NOTIFICATION);
   views::View* anchor;
   TrayBubbleView::AnchorType anchor_type;
   if (system_bubble_.get()) {
@@ -541,7 +526,8 @@ bool SystemTray::PerformAction(const ui::Event& event) {
     if (event.IsMouseEvent() || event.type() == ui::ET_GESTURE_TAP) {
       const ui::LocatedEvent& located_event =
           static_cast<const ui::LocatedEvent&>(event);
-      if (shelf_alignment() == SHELF_ALIGNMENT_BOTTOM) {
+      if (shelf_alignment() == SHELF_ALIGNMENT_BOTTOM ||
+          shelf_alignment() == SHELF_ALIGNMENT_TOP) {
         gfx::Point point(located_event.x(), 0);
         ConvertPointToWidget(this, &point);
         arrow_offset = point.x();

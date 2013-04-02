@@ -16,9 +16,14 @@
 #include "net/socket/ssl_client_socket.h"
 #include "net/socket/client_socket_handle.h"
 
+// Avoid including misc OpenSSL headers, i.e.:
+// <openssl/bio.h>
 typedef struct bio_st BIO;
+// <openssl/evp.h>
 typedef struct evp_pkey_st EVP_PKEY;
+// <openssl/ssl.h>
 typedef struct ssl_st SSL;
+// <openssl/x509.h>
 typedef struct x509_st X509;
 
 namespace net {
@@ -147,8 +152,10 @@ class SSLClientSocketOpenSSL : public SSLClientSocket {
 
   // Stores client authentication information between ClientAuthHandler and
   // GetSSLCertRequestInfo calls.
-  std::vector<scoped_refptr<X509Certificate> > client_certs_;
   bool client_auth_cert_needed_;
+  // List of DER-encoded X.509 DistinguishedName of certificate authorities
+  // allowed by the server.
+  std::vector<std::string> cert_authorities_;
 
   CertVerifier* const cert_verifier_;
   scoped_ptr<SingleRequestCertVerifier> verifier_;

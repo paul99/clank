@@ -18,10 +18,14 @@
 #include "base/threading/non_thread_safe.h"
 #include "base/timer.h"
 #include "chrome/browser/sync_file_system/drive_file_sync_client.h"
+#include "chrome/browser/sync_file_system/drive_metadata_store.h"
 #include "chrome/browser/sync_file_system/local_change_processor.h"
 #include "chrome/browser/sync_file_system/remote_file_sync_service.h"
+#include "sync/notifier/invalidation_handler.h"
 #include "webkit/fileapi/syncable/file_change.h"
 #include "webkit/fileapi/syncable/sync_callbacks.h"
+
+class ExtensionService;
 
 namespace google_apis {
 class ResourceList;
@@ -33,15 +37,14 @@ class Location;
 
 namespace sync_file_system {
 
-class DriveMetadataStore;
-
 // Maintains remote file changes.
 // Owned by SyncFileSystemService (which is a per-profile object).
 class DriveFileSyncService
     : public RemoteFileSyncService,
       public LocalChangeProcessor,
       public DriveFileSyncClientObserver,
-      public base::NonThreadSafe {
+      public base::NonThreadSafe,
+      public syncer::InvalidationHandler {
  public:
   static const char kServiceName[];
 
@@ -51,13 +54,14 @@ class DriveFileSyncService
   // Creates DriveFileSyncClient instance for testing.
   // |metadata_store| must be initialized beforehand.
   static scoped_ptr<DriveFileSyncService> CreateForTesting(
-      const FilePath& base_dir,
+      Profile* profile,
+      const base::FilePath& base_dir,
       scoped_ptr<DriveFileSyncClient> sync_client,
       scoped_ptr<DriveMetadataStore> metadata_store);
 
   // RemoteFileSyncService overrides.
-  virtual void AddObserver(Observer* observer) OVERRIDE;
-  virtual void RemoveObserver(Observer* observer) OVERRIDE;
+  virtual void AddServiceObserver(Observer* observer) OVERRIDE;
+  virtual void AddFileStatusObserver(FileStatusObserver* observer) OVERRIDE;
   virtual void RegisterOriginForTrackingChanges(
       const GURL& origin,
       const fileapi::SyncStatusCallback& callback) OVERRIDE;
@@ -66,28 +70,32 @@ class DriveFileSyncService
       const fileapi::SyncStatusCallback& callback) OVERRIDE;
   virtual void ProcessRemoteChange(
       RemoteChangeProcessor* processor,
-      const fileapi::SyncOperationCallback& callback) OVERRIDE;
+      const fileapi::SyncFileCallback& callback) OVERRIDE;
   virtual LocalChangeProcessor* GetLocalChangeProcessor() OVERRIDE;
   virtual bool IsConflicting(const fileapi::FileSystemURL& url) OVERRIDE;
-  virtual void GetConflictFiles(
-      const GURL& origin,
-      const fileapi::SyncFileSetCallback& callback) OVERRIDE;
   virtual void GetRemoteFileMetadata(
       const fileapi::FileSystemURL& url,
       const fileapi::SyncFileMetadataCallback& callback) OVERRIDE;
   virtual RemoteServiceState GetCurrentState() const OVERRIDE;
   virtual const char* GetServiceName() const OVERRIDE;
+  virtual void SetSyncEnabled(bool enabled) OVERRIDE;
 
   // LocalChangeProcessor overrides.
   virtual void ApplyLocalChange(
       const fileapi::FileChange& change,
-      const FilePath& local_file_path,
+      const base::FilePath& local_file_path,
       const fileapi::FileSystemURL& url,
       const fileapi::SyncStatusCallback& callback) OVERRIDE;
 
   // DriveFileSyncClientObserver overrides.
   virtual void OnAuthenticated() OVERRIDE;
   virtual void OnNetworkConnected() OVERRIDE;
+
+  // syncer::InvalidationHandler implementation.
+  virtual void OnInvalidatorStateChange(
+      syncer::InvalidatorState state) OVERRIDE;
+  virtual void OnIncomingInvalidation(
+      const syncer::ObjectIdInvalidationMap& invalidation_map) OVERRIDE;
 
  private:
   friend class DriveFileSyncServiceTest;
@@ -121,6 +129,7 @@ class DriveFileSyncService
   struct RemoteChange {
     int64 changestamp;
     std::string resource_id;
+    std::string md5_checksum;
     RemoteSyncType sync_type;
     fileapi::FileSystemURL url;
     fileapi::FileChange change;
@@ -129,6 +138,7 @@ class DriveFileSyncService
     RemoteChange();
     RemoteChange(int64 changestamp,
                  const std::string& resource_id,
+                 const std::string& md5_checksum,
                  RemoteSyncType sync_type,
                  const fileapi::FileSystemURL& url,
                  const fileapi::FileChange& change,
@@ -140,10 +150,10 @@ class DriveFileSyncService
     bool operator()(const RemoteChange& left, const RemoteChange& right);
   };
 
-  // TODO(tzik): Consider using std::pair<FilePath, FileType> as the key below
-  // to support directories and custom conflict handling.
-  typedef std::map<FilePath, RemoteChange> PathToChange;
-  typedef std::map<GURL, PathToChange> URLToChange;
+  // TODO(tzik): Consider using std::pair<base::FilePath, FileType> as the key
+  // below to support directories and custom conflict handling.
+  typedef std::map<base::FilePath, RemoteChange> PathToChangeMap;
+  typedef std::map<GURL, PathToChangeMap> OriginToChangesMap;
 
   // Task types; used for task token handling.
   enum TaskType {
@@ -167,7 +177,8 @@ class DriveFileSyncService
     LOCAL_SYNC_OPERATION_FAIL,
   };
 
-  DriveFileSyncService(const FilePath& base_dir,
+  DriveFileSyncService(Profile* profile,
+                       const base::FilePath& base_dir,
                        scoped_ptr<DriveFileSyncClient> sync_client,
                        scoped_ptr<DriveMetadataStore> metadata_store);
 
@@ -230,6 +241,8 @@ class DriveFileSyncService
   void DidInitializeMetadataStore(scoped_ptr<TaskToken> token,
                                   fileapi::SyncStatusCode status,
                                   bool created);
+  void UnregisterInactiveExtensionsIds();
+
   void GetSyncRootDirectory(scoped_ptr<TaskToken> token,
                             const fileapi::SyncStatusCallback& callback);
   void DidGetSyncRootDirectory(scoped_ptr<TaskToken> token,
@@ -305,13 +318,14 @@ class DriveFileSyncService
                           int64 changestamp,
                           RemoteSyncType sync_type);
   bool AppendFetchChange(const GURL& origin,
-                         const FilePath& path,
+                         const base::FilePath& path,
                          const std::string& resource_id);
   bool AppendRemoteChangeInternal(const GURL& origin,
-                                  const FilePath& path,
+                                  const base::FilePath& path,
                                   bool is_deleted,
                                   const std::string& resource_id,
                                   int64 changestamp,
+                                  const std::string& remote_file_md5,
                                   RemoteSyncType sync_type);
   void RemoveRemoteChange(const fileapi::FileSystemURL& url);
   void MaybeMarkAsIncrementalSyncOrigin(const GURL& origin);
@@ -325,7 +339,19 @@ class DriveFileSyncService
   fileapi::SyncStatusCode GDataErrorCodeToSyncStatusCodeWrapper(
       google_apis::GDataErrorCode error) const;
 
-  FilePath temporary_file_dir_;
+  base::FilePath temporary_file_dir_;
+
+  // May start batch sync or incremental sync.
+  // This immediately returns if:
+  // - Another task is running (i.e. task_ is null), or
+  // - The service state is DISABLED.
+  //
+  // This calls:
+  // - StartBatchSyncForOrigin() if it has any pending batch sync origins, or
+  // - FetchChangesForIncrementalSync() otherwise.
+  //
+  // These two methods are called only from this method.
+  void MaybeStartFetchChanges();
 
   void FetchChangesForIncrementalSync();
   void DidFetchChangesForIncrementalSync(
@@ -335,18 +361,33 @@ class DriveFileSyncService
       scoped_ptr<google_apis::ResourceList> changes);
   bool GetOriginForEntry(const google_apis::ResourceEntry& entry, GURL* origin);
   void SchedulePolling();
+  void OnPollingTimerFired();
+  void UpdatePollingDelay(int64 new_delay_sec);
+  void RegisterDriveNotifications();
+  void SetPushNotificationEnabled(syncer::InvalidatorState state);
 
   scoped_ptr<DriveMetadataStore> metadata_store_;
   scoped_ptr<DriveFileSyncClient> sync_client_;
 
+  Profile* profile_;
   fileapi::SyncStatusCode last_operation_status_;
-  RemoteServiceState state_;
   std::deque<base::Closure> pending_tasks_;
+
+  // The current remote service state. This does NOT reflect the
+  // sync_enabled_ flag, while GetCurrentState() DOES reflect the flag
+  // value (i.e. it returns REMOTE_SERVICE_DISABLED when sync_enabled_
+  // is false even if state_ is REMOTE_SERVICE_OK).
+  RemoteServiceState state_;
+
+  // Indicates if sync is enabled or not. This flag can be turned on or
+  // off by SetSyncEnabled() method.  To start synchronization
+  // this needs to be true and state_ needs to be REMOTE_SERVICE_OK.
+  bool sync_enabled_;
 
   int64 largest_fetched_changestamp_;
 
   PendingChangeQueue pending_changes_;
-  URLToChange url_to_change_;
+  OriginToChangesMap origin_to_changes_map_;
 
   std::set<GURL> pending_batch_sync_origins_;
 
@@ -357,11 +398,30 @@ class DriveFileSyncService
   // NotifyTaskDone when the task finished.
   scoped_ptr<TaskToken> token_;
 
+  // True when Drive File Sync Service is registered for Drive notifications.
+  bool push_notification_registered_;
+  // True once the first drive notification is received with OK state.
+  bool push_notification_enabled_;
+  // Timer to trigger fetching changes for incremental sync.
   base::OneShotTimer<DriveFileSyncService> polling_timer_;
+  // If polling_delay_seconds_ is negative (<0) the timer won't start.
   int64 polling_delay_seconds_;
-  bool polling_enabled_;
 
-  ObserverList<Observer> observers_;
+  // Is set to true when there's a fair possibility that we have some
+  // remote changes that haven't been fetched yet.
+  //
+  // This flag is set when:
+  // - This gets invalidation notification,
+  // - The service is authenticated or becomes online, and
+  // - The polling timer is fired.
+  //
+  // This flag is cleared when:
+  // - A batch or incremental sync has been started, and
+  // - When all pending batch sync tasks have been finished.
+  bool may_have_unfetched_changes_;
+
+  ObserverList<Observer> service_observers_;
+  ObserverList<FileStatusObserver> file_status_observers_;
 
   // Use WeakPtrFactory instead of SupportsWeakPtr to revoke the weak pointer
   // in |token_|.

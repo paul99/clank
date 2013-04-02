@@ -5,7 +5,7 @@
 #include "content/browser/loader/sync_resource_handler.h"
 
 #include "base/logging.h"
-#include "content/browser/debugger/devtools_netlog_observer.h"
+#include "content/browser/devtools/devtools_netlog_observer.h"
 #include "content/browser/loader/resource_dispatcher_host_impl.h"
 #include "content/browser/loader/resource_message_filter.h"
 #include "content/common/resource_messages.h"
@@ -125,6 +125,13 @@ bool SyncResourceHandler::OnResponseCompleted(
   filter_->Send(result_message_);
   result_message_ = NULL;
   return true;
+}
+
+void SyncResourceHandler::OnDataDownloaded(
+    int request_id,
+    int bytes_downloaded) {
+  // Sync requests don't involve ResourceMsg_DataDownloaded messages
+  // being sent back to renderers as progress is made.
 }
 
 }  // namespace content

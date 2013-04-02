@@ -15,8 +15,9 @@ class GURL;
 
 namespace sync_file_system {
 
-class RemoteChangeProcessor;
+class FileStatusObserver;
 class LocalChangeProcessor;
+class RemoteChangeProcessor;
 
 enum RemoteServiceState {
   // Remote service is up and running, or has not seen any errors yet.
@@ -39,8 +40,8 @@ enum RemoteServiceState {
   // they may fail (with recoverable error code).
   REMOTE_SERVICE_AUTHENTICATION_REQUIRED,
 
-  // Remote service is disabled due to unrecoverable errors, e.g.
-  // local database corruption.
+  // Remote service is disabled by configuration change or due to some
+  // unrecoverable errors, e.g. local database corruption.
   // Any new requests will immediately fail when the service is in
   // this state.
   REMOTE_SERVICE_DISABLED,
@@ -76,8 +77,9 @@ class RemoteFileSyncService {
   RemoteFileSyncService() {}
   virtual ~RemoteFileSyncService() {}
 
-  virtual void AddObserver(Observer* observer) = 0;
-  virtual void RemoveObserver(Observer* observer) = 0;
+  // Adds and removes observers.
+  virtual void AddServiceObserver(Observer* observer) = 0;
+  virtual void AddFileStatusObserver(FileStatusObserver* observer) = 0;
 
   // Registers |origin| to track remote side changes for the |origin|.
   // Upon completion, invokes |callback|.
@@ -102,7 +104,7 @@ class RemoteFileSyncService {
   // the control to the sync engine).
   virtual void ProcessRemoteChange(
       RemoteChangeProcessor* processor,
-      const fileapi::SyncOperationCallback& callback) = 0;
+      const fileapi::SyncFileCallback& callback) = 0;
 
   // Returns a LocalChangeProcessor that applies a local change to the remote
   // storage backed by this service.
@@ -110,13 +112,6 @@ class RemoteFileSyncService {
 
   // Returns true if the file |url| is marked conflicted in the remote service.
   virtual bool IsConflicting(const fileapi::FileSystemURL& url) = 0;
-
-  // TODO(kinuko,tzik): Clean up unused interface methods when we fix
-  // the manual conflict resolution API.
-  // Returns a list of conflicting files for the given origin.
-  virtual void GetConflictFiles(
-      const GURL& origin,
-      const fileapi::SyncFileSetCallback& callback) = 0;
 
   // Returns the metadata of a remote file pointed by |url|.
   virtual void GetRemoteFileMetadata(
@@ -129,6 +124,14 @@ class RemoteFileSyncService {
 
   // Returns the service name that backs this remote_file_sync_service.
   virtual const char* GetServiceName() const = 0;
+
+  // Enables or disables the background sync.
+  // Setting this to false should disable the synchronization (and make
+  // the service state to REMOTE_SERVICE_DISABLED), while setting this to
+  // true does not necessarily mean the service is actually turned on
+  // (for example if Chrome is offline the service state will become
+  // REMOTE_SERVICE_TEMPORARY_UNAVAILABLE).
+  virtual void SetSyncEnabled(bool enabled) = 0;
 
  private:
   DISALLOW_COPY_AND_ASSIGN(RemoteFileSyncService);

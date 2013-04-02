@@ -9,6 +9,7 @@
 #include "base/bind.h"
 #include "base/environment.h"
 #include "base/utf_string_conversions.h"
+#include "chrome/browser/extensions/image_loader.h"
 #include "chrome/browser/profiles/profile.h"
 #include "chrome/browser/shell_integration.h"
 #include "chrome/browser/shell_integration_linux.h"
@@ -39,8 +40,16 @@ using extensions::Extension;
 
 namespace {
 
+// Maximum size (in pixels) of the icon when the shortcut is saved.
+// Apps usually have 128x128 icons, this value is much larger because if there
+// happens to be a bigger icon, we want to use it.
+const int kShortcutIconSizePixels = 1024;
+
 // Size (in pixels) of the icon preview.
 const int kIconPreviewSizePixels = 32;
+
+// Minimum width (in pixels) of the shortcut description label.
+const int kDescriptionLabelMinimumWidthPixels = 200;
 
 // Height (in lines) of the shortcut description label.
 const int kDescriptionLabelHeightLines = 3;
@@ -85,12 +94,10 @@ void CreateApplicationShortcutsDialogGtk::CreateIconPixBuf(
       static_cast<GdkPixbuf*>(g_object_ref(image.ToGdkPixbuf()));
   int pixbuf_width = gdk_pixbuf_get_width(pixbuf);
   int pixbuf_height = gdk_pixbuf_get_height(pixbuf);
-  if (pixbuf_width == pixbuf_height && pixbuf_width < kIconPreviewSizePixels) {
+  if (pixbuf_width == pixbuf_height) {
     // Only scale the pixbuf if it's a square (for simplicity).
     // Generally it should be square, if it's a favicon or app icon.
-    // Use the highest quality interpolation. The scaling is
-    // going to have low quality anyway, because the initial image
-    // is likely small.
+    // Use the highest quality interpolation.
     favicon_pixbuf_ = gdk_pixbuf_scale_simple(pixbuf,
                                               kIconPreviewSizePixels,
                                               kIconPreviewSizePixels,
@@ -150,6 +157,10 @@ void CreateApplicationShortcutsDialogGtk::CreateDialogBox(GtkWindow* parent) {
       IDS_CREATE_SHORTCUTS_DIALOG_WIDTH_CHARS, -1, &label_width, NULL);
   label_width -= ui::kControlSpacing * 3 +
       gdk_pixbuf_get_width(favicon_pixbuf_);
+  // Enforce a minimum width, so that very large icons do not cause the label
+  // width to shrink to unreadable size, or become negative (which would crash).
+  if (label_width < kDescriptionLabelMinimumWidthPixels)
+    label_width = kDescriptionLabelMinimumWidthPixels;
   gtk_util::SetLabelWidth(description_label, label_width);
 
   std::string description(UTF16ToUTF8(shortcut_info_.description));
@@ -316,37 +327,26 @@ CreateChromeApplicationShortcutsDialogGtk::
         const Extension* app)
       : CreateApplicationShortcutsDialogGtk(parent),
         app_(app),
-        profile_path_(profile->GetPath()),
-        ALLOW_THIS_IN_INITIALIZER_LIST(tracker_(this))  {
+        profile_path_(profile->GetPath())  {
 
   // Get shortcut information now, it's needed for our UI.
   web_app::UpdateShortcutInfoForApp(*app, profile, &shortcut_info_);
 
-  // Get the icon.
-  const gfx::Size max_size(kIconPreviewSizePixels, kIconPreviewSizePixels);
+  // Get the largest icon available less than the maximum size.
+  const gfx::Size max_size(kShortcutIconSizePixels, kShortcutIconSizePixels);
   ExtensionResource icon_resource = app_->GetIconResource(
-      kIconPreviewSizePixels, ExtensionIconSet::MATCH_BIGGER);
+      kShortcutIconSizePixels, ExtensionIconSet::MATCH_SMALLER);
 
-  // If no icon exists that is the desired size or larger, get the
-  // largest icon available:
-  if (icon_resource.empty())
-    icon_resource = app_->GetIconResource(
-        kIconPreviewSizePixels, ExtensionIconSet::MATCH_SMALLER);
-
-  // Note that tracker_.LoadImage() can call OnImageLoaded() before it returns,
-  // if the image is cached.  This is very rare.  Do not do anything after
-  // calling LoadImage() that OnImageLoaded() depends on.
-  tracker_.LoadImage(app_,
-                     icon_resource,
-                     max_size,
-                     ImageLoadingTracker::DONT_CACHE);
+  // Load icon asynchronously
+  extensions::ImageLoader* loader = extensions::ImageLoader::Get(profile);
+  loader->LoadImageAsync(app_, icon_resource, max_size,
+      base::Bind(&CreateChromeApplicationShortcutsDialogGtk::OnImageLoaded,
+                 this));
 }
 
-// Called by tracker_ when the app's icon is loaded.
+// Called when the app's icon is loaded.
 void CreateChromeApplicationShortcutsDialogGtk::OnImageLoaded(
-    const gfx::Image& image,
-    const std::string& extension_id,
-    int index) {
+    const gfx::Image& image) {
   if (image.IsEmpty()) {
     shortcut_info_.favicon =
         ResourceBundle::GetSharedInstance().GetImageNamed(IDR_APP_DEFAULT_ICON);

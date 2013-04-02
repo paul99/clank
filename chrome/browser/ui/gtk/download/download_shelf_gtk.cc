@@ -179,8 +179,8 @@ content::PageNavigator* DownloadShelfGtk::GetNavigator() {
   return browser_;
 }
 
-void DownloadShelfGtk::DoAddDownload(DownloadItemModel* download_model) {
-  download_items_.push_back(new DownloadItemGtk(this, download_model));
+void DownloadShelfGtk::DoAddDownload(DownloadItem* download) {
+  download_items_.push_back(new DownloadItemGtk(this, download));
 }
 
 bool DownloadShelfGtk::IsShowing() const {
@@ -205,7 +205,7 @@ void DownloadShelfGtk::DoClose() {
   browser_->UpdateDownloadShelfVisibility(false);
   int num_in_progress = 0;
   for (size_t i = 0; i < download_items_.size(); ++i) {
-    if (download_items_[i]->get_download()->IsInProgress())
+    if (download_items_[i]->download()->IsInProgress())
       ++num_in_progress;
   }
   download_util::RecordShelfClose(
@@ -225,12 +225,11 @@ void DownloadShelfGtk::Closed() {
   // When the close animation is complete, remove all completed downloads.
   size_t i = 0;
   while (i < download_items_.size()) {
-    DownloadItem* download = download_items_[i]->get_download();
+    DownloadItem* download = download_items_[i]->download();
     bool is_transfer_done = download->IsComplete() ||
                             download->IsCancelled() ||
                             download->IsInterrupted();
-    if (is_transfer_done &&
-        download->GetSafetyState() != DownloadItem::DANGEROUS) {
+    if (is_transfer_done && !download->IsDangerous()) {
       RemoveDownloadItem(download_items_[i]);
     } else {
       // We set all remaining items as "opened", so that the shelf will auto-
@@ -316,7 +315,7 @@ void DownloadShelfGtk::OnButtonClick(GtkWidget* button) {
 void DownloadShelfGtk::AutoCloseIfPossible() {
   for (std::vector<DownloadItemGtk*>::iterator iter = download_items_.begin();
        iter != download_items_.end(); ++iter) {
-    if (!(*iter)->get_download()->GetOpened())
+    if (!(*iter)->download()->GetOpened())
       return;
   }
 

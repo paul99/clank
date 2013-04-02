@@ -9,11 +9,9 @@
 #include "base/memory/singleton.h"
 #include "content/public/browser/render_view_host.h"
 #include "content/public/browser/web_contents.h"
-#include "content/public/browser/web_intents_dispatcher.h"
 #include "content/public/common/url_constants.h"
 #include "content/public/common/bindings_policy.h"
 #include "ui/gfx/rect.h"
-#include "webkit/glue/web_intent_data.h"
 
 namespace content {
 
@@ -55,11 +53,15 @@ void WebContentsDelegate::BeforeUnloadFired(WebContents* web_contents,
   *proceed_to_fire_unload = true;
 }
 
+bool WebContentsDelegate::ShouldFocusLocationBarByDefault(WebContents* source) {
+  return false;
+}
+
 bool WebContentsDelegate::ShouldFocusPageAfterCrash() {
   return true;
 }
 
-bool WebContentsDelegate::TakeFocus(WebContents* soruce, bool reverse) {
+bool WebContentsDelegate::TakeFocus(WebContents* source, bool reverse) {
   return false;
 }
 
@@ -121,7 +123,7 @@ bool WebContentsDelegate::ShouldCreateWebContents(
   return true;
 }
 
-JavaScriptDialogCreator* WebContentsDelegate::GetJavaScriptDialogCreator() {
+JavaScriptDialogManager* WebContentsDelegate::GetJavaScriptDialogManager() {
   return NULL;
 }
 
@@ -135,14 +137,6 @@ content::ColorChooser* WebContentsDelegate::OpenColorChooser(
     int color_chooser_id,
     SkColor color) {
   return NULL;
-}
-
-void WebContentsDelegate::WebIntentDispatch(
-    WebContents* web_contents,
-    WebIntentsDispatcher* intents_dispatcher) {
-  // The caller passes this method ownership of the |intents_dispatcher|, but
-  // this empty implementation will not use it, so we delete it immediately.
-  delete intents_dispatcher;
 }
 
 bool WebContentsDelegate::RequestPpapiBrokerPermission(

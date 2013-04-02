@@ -10,6 +10,7 @@
 #include "base/memory/ref_counted.h"
 #include "base/memory/scoped_ptr.h"
 #include "base/threading/non_thread_safe.h"
+#include "base/threading/platform_thread.h"
 #include "base/time.h"
 #include "cc/output_surface.h"
 #include "cc/software_output_device.h"
@@ -44,8 +45,11 @@ class CompositorOutputSurface
   virtual const struct Capabilities& Capabilities() const OVERRIDE;
   virtual WebKit::WebGraphicsContext3D* Context3D() const OVERRIDE;
   virtual cc::SoftwareOutputDevice* SoftwareDevice() const OVERRIDE;
-  virtual void SendFrameToParentCompositor(
-      const cc::CompositorFrame&) OVERRIDE;
+  virtual void SendFrameToParentCompositor(cc::CompositorFrame*) OVERRIDE;
+
+  // TODO(epenner): This seems out of place here and would be a better fit
+  // int CompositorThread after it is fully refactored (http://crbug/170828)
+  virtual void UpdateSmoothnessTakesPriority(bool prefer_smoothness) OVERRIDE;
 
  private:
   class CompositorOutputSurfaceProxy :
@@ -80,6 +84,8 @@ class CompositorOutputSurface
   struct Capabilities capabilities_;
   scoped_ptr<WebKit::WebGraphicsContext3D> context3D_;
   scoped_ptr<cc::SoftwareOutputDevice> software_device_;
+  bool prefers_smoothness_;
+  base::PlatformThreadId main_thread_id_;
 };
 
 }  // namespace content

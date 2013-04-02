@@ -1,4 +1,4 @@
-// Copyright (c) 2012 The Chromium Authors. All rights reserved.
+// Copyright 2012 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -6,11 +6,11 @@
 
 #include "sync/test/engine/test_syncable_utils.h"
 
-#include "sync/syncable/base_transaction.h"
 #include "sync/syncable/directory.h"
 #include "sync/syncable/entry.h"
 #include "sync/syncable/mutable_entry.h"
-#include "sync/syncable/write_transaction.h"
+#include "sync/syncable/syncable_base_transaction.h"
+#include "sync/syncable/syncable_write_transaction.h"
 #include "sync/test/engine/test_id_factory.h"
 
 using std::string;
@@ -71,6 +71,7 @@ void CreateTypeRoot(WriteTransaction* trans,
   std::string tag_name = syncer::ModelTypeToRootTag(type);
   syncable::MutableEntry node(trans,
                               syncable::CREATE,
+                              type,
                               TestIdFactory::root(),
                               tag_name);
   DCHECK(node.good());

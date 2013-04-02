@@ -2,7 +2,9 @@
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
-#include <sys/prctl.h>
+#include <pthread.h>
+#include <sched.h>
+#include <sys/syscall.h>
 #include <sys/utsname.h>
 
 #include <ostream>
@@ -10,16 +12,25 @@
 #include "base/memory/scoped_ptr.h"
 #include "sandbox/linux/seccomp-bpf/bpf_tests.h"
 #include "sandbox/linux/seccomp-bpf/syscall.h"
+#include "sandbox/linux/seccomp-bpf/trap.h"
 #include "sandbox/linux/seccomp-bpf/verifier.h"
 #include "sandbox/linux/services/broker_process.h"
+#include "sandbox/linux/services/linux_syscalls.h"
 #include "testing/gtest/include/gtest/gtest.h"
+
+// Workaround for Android's prctl.h file.
+#if !defined(PR_CAPBSET_READ)
+#define PR_CAPBSET_READ 23
+#define PR_CAPBSET_DROP 24
+#endif
 
 using namespace playground2;
 using sandbox::BrokerProcess;
 
 namespace {
 
-const int kExpectedReturnValue = 42;
+const int  kExpectedReturnValue   = 42;
+const char kSandboxDebuggingEnv[] = "CHROME_SANDBOX_DEBUGGING";
 
 // This test should execute no matter whether we have kernel support. So,
 // we make it a TEST() instead of a BPF_TEST().
@@ -292,6 +303,7 @@ ErrorCode GreyListedPolicy(int sysno, void *aux) {
   // expect any messages on "stderr". So, temporarily disable messages. The
   // BPF_TEST() is guaranteed to turn messages back on, after the policy
   // function has completed.
+  setenv(kSandboxDebuggingEnv, "t", 0);
   Die::SuppressInfoMessages(true);
 
   // Some system calls must always be allowed, if our policy wants to make
@@ -331,6 +343,19 @@ BPF_TEST(SandboxBpf, GreyListedPolicy,
   BPF_ASSERT(*name);
 }
 
+SANDBOX_TEST(SandboxBpf, EnableUnsafeTrapsInSigSysHandler) {
+  // Disabling warning messages that could confuse our test framework.
+  setenv(kSandboxDebuggingEnv, "t", 0);
+  Die::SuppressInfoMessages(true);
+
+  unsetenv(kSandboxDebuggingEnv);
+  SANDBOX_ASSERT(Trap::EnableUnsafeTrapsInSigSysHandler() == false);
+  setenv(kSandboxDebuggingEnv, "", 1);
+  SANDBOX_ASSERT(Trap::EnableUnsafeTrapsInSigSysHandler() == false);
+  setenv(kSandboxDebuggingEnv, "t", 1);
+  SANDBOX_ASSERT(Trap::EnableUnsafeTrapsInSigSysHandler() == true);
+}
+
 intptr_t PrctlHandler(const struct arch_seccomp_data& args, void *) {
   if (args.args[0] == PR_CAPBSET_DROP &&
       static_cast<int>(args.args[1]) == -1) {
@@ -343,6 +368,7 @@ intptr_t PrctlHandler(const struct arch_seccomp_data& args, void *) {
 }
 
 ErrorCode PrctlPolicy(int sysno, void *aux) {
+  setenv(kSandboxDebuggingEnv, "t", 0);
   Die::SuppressInfoMessages(true);
 
   if (sysno == __NR_prctl) {
@@ -384,6 +410,7 @@ intptr_t AllowRedirectedSyscall(const struct arch_seccomp_data& args, void *) {
 }
 
 ErrorCode RedirectAllSyscallsPolicy(int sysno, void *aux) {
+  setenv(kSandboxDebuggingEnv, "t", 0);
   Die::SuppressInfoMessages(true);
 
   // Some system calls must always be allowed, if our policy wants to make
@@ -444,19 +471,21 @@ BPF_TEST(SandboxBpf, SigMask, RedirectAllSyscallsPolicy) {
   // entirely in the kernel.
   sigset_t mask0, mask1, mask2;
 
-  // Call sigprocmask() to verify that SIGUSR1 wasn't blocked, if we didn't
+  // Call sigprocmask() to verify that SIGUSR2 wasn't blocked, if we didn't
   // change the mask (it shouldn't have been, as it isn't blocked by default
   // in POSIX).
+  //
+  // Use SIGUSR2 because Android seems to use SIGUSR1 for some purpose.
   sigemptyset(&mask0);
   BPF_ASSERT(!sigprocmask(SIG_BLOCK, &mask0, &mask1));
-  BPF_ASSERT(!sigismember(&mask1, SIGUSR1));
+  BPF_ASSERT(!sigismember(&mask1, SIGUSR2));
 
   // Try again, and this time we verify that we can block it. This
   // requires a second call to sigprocmask().
-  sigaddset(&mask0, SIGUSR1);
+  sigaddset(&mask0, SIGUSR2);
   BPF_ASSERT(!sigprocmask(SIG_BLOCK, &mask0, NULL));
   BPF_ASSERT(!sigprocmask(SIG_BLOCK, NULL, &mask2));
-  BPF_ASSERT( sigismember(&mask2, SIGUSR1));
+  BPF_ASSERT( sigismember(&mask2, SIGUSR2));
 }
 
 BPF_TEST(SandboxBpf, UnsafeTrapWithErrno, RedirectAllSyscallsPolicy) {
@@ -959,5 +988,58 @@ BPF_DEATH_TEST(SandboxBpf, EqualityWithNegative64bitArguments,
   BPF_ASSERT(SandboxSyscall(__NR_uname, 0xFFFFFFFF00000000ll) == -1);
 }
 #endif
+
+intptr_t PthreadTrapHandler(const struct arch_seccomp_data& args, void *aux) {
+  printf("Clone() was called with unexpected arguments\n"
+         "  nr: %d\n"
+         "  0: 0x%llX\n"
+         "  1: 0x%llX\n"
+         "  2: 0x%llX\n"
+         "  3: 0x%llX\n"
+         "  4: 0x%llX\n"
+         "  5: 0x%llX\n",
+         args.nr,
+         (long long)args.args[0],  (long long)args.args[1],
+         (long long)args.args[2],  (long long)args.args[2],
+         (long long)args.args[4],  (long long)args.args[5]);
+  return -EPERM;
+}
+
+ErrorCode PthreadPolicy(int sysno, void *aux) {
+  if (!Sandbox::IsValidSyscallNumber(sysno)) {
+    // FIXME: we should really not have to do that in a trivial policy
+    return ErrorCode(ENOSYS);
+  } else if (sysno == __NR_clone) {
+    // We have seen two different valid combinations of flags. Glibc
+    // uses the more modern flags, sets the TLS from the call to clone(), and
+    // uses futexes to monitor threads. Android's C run-time library, doesn't
+    // do any of this, but it sets the obsolete (and no-op) CLONE_DETACHED.
+    return Sandbox::Cond(0, ErrorCode::TP_32BIT, ErrorCode::OP_EQUAL,
+                         CLONE_VM|CLONE_FS|CLONE_FILES|CLONE_SIGHAND|
+                         CLONE_THREAD|CLONE_SYSVSEM|CLONE_SETTLS|
+                         CLONE_PARENT_SETTID|CLONE_CHILD_CLEARTID,
+                         ErrorCode(ErrorCode::ERR_ALLOWED),
+           Sandbox::Cond(0, ErrorCode::TP_32BIT, ErrorCode::OP_EQUAL,
+                         CLONE_VM|CLONE_FS|CLONE_FILES|CLONE_SIGHAND|
+                         CLONE_THREAD|CLONE_SYSVSEM|CLONE_DETACHED,
+                         ErrorCode(ErrorCode::ERR_ALLOWED),
+                         Sandbox::Trap(PthreadTrapHandler, aux)));
+  } else {
+    return ErrorCode(ErrorCode::ERR_ALLOWED);
+  }
+}
+
+static void *ThreadFnc(void *arg) {
+  ++*reinterpret_cast<int *>(arg);
+  return NULL;
+}
+
+BPF_TEST(SandboxBpf, Pthread, PthreadPolicy) {
+  pthread_t thread;
+  int thread_ran = 0;
+  BPF_ASSERT(!pthread_create(&thread, NULL, ThreadFnc, &thread_ran));
+  BPF_ASSERT(!pthread_join(thread, NULL));
+  BPF_ASSERT(thread_ran);
+}
 
 } // namespace

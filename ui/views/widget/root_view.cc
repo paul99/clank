@@ -139,6 +139,30 @@ void RootView::DispatchScrollEvent(ui::ScrollEvent* event) {
        v && v != this && !event->stopped_propagation(); v = v->parent()) {
     v->OnScrollEvent(event);
   }
+
+  if (event->handled() || event->type() != ui::ET_SCROLL)
+    return;
+
+  // Convert unprocessed scroll events into mouse-wheel events. Note that
+  // wheel events are normally sent to the focused view. However, if the focused
+  // view does not process these wheel events, then dispatch them to the view
+  // under the cursor.
+  ui::MouseWheelEvent wheel(*event);
+  if (OnMouseWheel(wheel)) {
+    event->SetHandled();
+  } else {
+    View* focused_view =
+        GetFocusManager() ? GetFocusManager()->GetFocusedView() : NULL;
+    View* v = GetEventHandlerForPoint(wheel.location());
+    if (v != focused_view) {
+      for (; v && v != this; v = v->parent()) {
+        if (v->OnMouseWheel(wheel)) {
+          event->SetHandled();
+          break;
+        }
+      }
+    }
+  }
 }
 
 void RootView::DispatchTouchEvent(ui::TouchEvent* event) {
@@ -262,6 +286,17 @@ void RootView::DispatchGestureEvent(ui::GestureEvent* event) {
     }
 
     return;
+  }
+
+  // If there was no handler for a SCROLL_BEGIN event, then subsequent scroll
+  // events are not dispatched to any views.
+  switch (event->type()) {
+    case ui::ET_GESTURE_SCROLL_UPDATE:
+    case ui::ET_GESTURE_SCROLL_END:
+    case ui::ET_SCROLL_FLING_START:
+      return;
+    default:
+      break;
   }
 
   // Walk up the tree until we find a view that wants the gesture event.
@@ -463,6 +498,12 @@ void RootView::OnMouseReleased(const ui::MouseEvent& event) {
   if (mouse_pressed_handler_) {
     ui::MouseEvent mouse_released(event, static_cast<View*>(this),
                                   mouse_pressed_handler_);
+    // TODO(sadrul|oshima): This is tentative solution to pass target
+    // to LauncherDelegate::ItemClicked. Remove this once crbug.com/173235
+    // is implemented.
+    ui::Event::DispatcherApi api(&mouse_released);
+    api.set_target(this);
+
     // We allow the view to delete us from ProcessMouseReleased. As such,
     // configure state such that we're done first, then call View.
     View* mouse_pressed_handler = mouse_pressed_handler_;

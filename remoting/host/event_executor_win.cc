@@ -50,21 +50,20 @@ class EventExecutorWin : public EventExecutor {
 
  private:
   // The actual implementation resides in EventExecutorWin::Core class.
-  class Core : public base::RefCountedThreadSafe<Core>, public EventExecutor {
+  class Core : public base::RefCountedThreadSafe<Core> {
    public:
     Core(scoped_refptr<base::SingleThreadTaskRunner> main_task_runner,
          scoped_refptr<base::SingleThreadTaskRunner> ui_task_runner);
 
-    // ClipboardStub interface.
-    virtual void InjectClipboardEvent(const ClipboardEvent& event) OVERRIDE;
+    // Mirrors the ClipboardStub interface.
+    void InjectClipboardEvent(const ClipboardEvent& event);
 
-    // InputStub interface.
-    virtual void InjectKeyEvent(const KeyEvent& event) OVERRIDE;
-    virtual void InjectMouseEvent(const MouseEvent& event) OVERRIDE;
+    // Mirrors the InputStub interface.
+    void InjectKeyEvent(const KeyEvent& event);
+    void InjectMouseEvent(const MouseEvent& event);
 
-    // EventExecutor interface.
-    virtual void Start(
-        scoped_ptr<protocol::ClipboardStub> client_clipboard) OVERRIDE;
+    // Mirrors the EventExecutor interface.
+    void Start(scoped_ptr<protocol::ClipboardStub> client_clipboard);
 
     void Stop();
 
@@ -248,9 +247,6 @@ void EventExecutorWin::Core::HandleMouse(const MouseEvent& event) {
   if (event.has_wheel_delta_x() && event.has_wheel_delta_y()) {
     wheel_delta_x = static_cast<int>(event.wheel_delta_x());
     wheel_delta_y = static_cast<int>(event.wheel_delta_y());
-  } else if (event.has_wheel_offset_x() && event.has_wheel_offset_y()) {
-    wheel_delta_x = event.wheel_offset_x() * WHEEL_DELTA;
-    wheel_delta_y = event.wheel_offset_y() * WHEEL_DELTA;
   }
 
   if (wheel_delta_x != 0 || wheel_delta_y != 0) {

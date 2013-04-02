@@ -9,17 +9,17 @@
 
 #include "base/command_line.h"
 #include "base/string16.h"
-#include "base/string_number_conversions.h"
 #include "base/string_split.h"
 #include "base/string_util.h"
+#include "base/strings/string_number_conversions.h"
 #include "base/utf_string_conversions.h"
 #include "chrome/browser/browser_process.h"
 #include "chrome/browser/google/google_url_tracker.h"
 #include "chrome/common/chrome_switches.h"
-#include "chrome/common/net/url_util.h"
 #include "chrome/installer/util/google_update_settings.h"
 #include "googleurl/src/gurl.h"
 #include "net/base/registry_controlled_domains/registry_controlled_domain.h"
+#include "net/base/url_util.h"
 
 #if defined(OS_MACOSX)
 #include "chrome/browser/mac/keystone_glue.h"
@@ -86,7 +86,7 @@ GURL AppendGoogleLocaleParam(const GURL& url) {
   std::string locale = g_browser_process->GetApplicationLocale();
   if (locale == "nb")
     locale = "no";
-  return chrome_common_net::AppendQueryParameter(url, "hl", locale);
+  return net::AppendQueryParameter(url, "hl", locale);
 }
 
 std::string StringAppendGoogleLocaleParam(const std::string& url) {
@@ -105,8 +105,8 @@ GURL AppendGoogleTLDParam(Profile* profile, const GURL& url) {
     NOTREACHED();
     return url;
   }
-  return chrome_common_net::AppendQueryParameter(
-      url, "sd", google_domain.substr(first_dot + 1));
+  return net::AppendQueryParameter(url, "sd",
+                                   google_domain.substr(first_dot + 1));
 }
 
 #if defined(OS_WIN)

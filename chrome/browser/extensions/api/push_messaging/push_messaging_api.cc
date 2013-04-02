@@ -7,15 +7,16 @@
 #include <set>
 
 #include "base/bind.h"
+#include "base/lazy_instance.h"
 #include "base/logging.h"
-#include "base/string_number_conversions.h"
+#include "base/strings/string_number_conversions.h"
 #include "base/values.h"
-#include "chrome/browser/extensions/api/push_messaging/push_messaging_api_factory.h"
 #include "chrome/browser/extensions/api/push_messaging/push_messaging_invalidation_handler.h"
 #include "chrome/browser/extensions/event_names.h"
 #include "chrome/browser/extensions/event_router.h"
 #include "chrome/browser/extensions/extension_service.h"
 #include "chrome/browser/extensions/extension_system.h"
+#include "chrome/browser/extensions/extension_system_factory.h"
 #include "chrome/browser/profiles/profile.h"
 #include "chrome/browser/signin/token_service.h"
 #include "chrome/browser/signin/token_service_factory.h"
@@ -47,39 +48,9 @@ namespace glue = api::push_messaging;
 
 PushMessagingEventRouter::PushMessagingEventRouter(Profile* profile)
     : profile_(profile) {
-  ProfileSyncService* pss = ProfileSyncServiceFactory::GetForProfile(profile_);
-  // This may be NULL; for example, for the ChromeOS guest user. In these cases,
-  // just return without setting up anything, since it won't work anyway.
-  if (!pss)
-    return;
-
-  const ExtensionSet* extensions =
-      ExtensionSystem::Get(profile_)->extension_service()->extensions();
-  std::set<std::string> push_messaging_extensions;
-  for (ExtensionSet::const_iterator it = extensions->begin();
-       it != extensions->end(); ++it) {
-    const Extension* extension = *it;
-    if (extension->HasAPIPermission(APIPermission::kPushMessaging)) {
-      push_messaging_extensions.insert(extension->id());
-    }
-  }
-  handler_.reset(new PushMessagingInvalidationHandler(
-      pss, this, push_messaging_extensions));
-
-  // Register for extension load/unload as well, so we can update any
-  // registrations as appropriate.
-  registrar_.Add(this, chrome::NOTIFICATION_EXTENSION_LOADED,
-                 content::Source<Profile>(profile_->GetOriginalProfile()));
-  registrar_.Add(this, chrome::NOTIFICATION_EXTENSION_UNLOADED,
-                 content::Source<Profile>(profile_->GetOriginalProfile()));
 }
 
 PushMessagingEventRouter::~PushMessagingEventRouter() {}
-
-void PushMessagingEventRouter::SetMapperForTest(
-    scoped_ptr<PushMessagingInvalidationMapper> mapper) {
-  handler_ = mapper.Pass();
-}
 
 void PushMessagingEventRouter::TriggerMessageForTest(
     const std::string& extension_id,
@@ -101,31 +72,6 @@ void PushMessagingEventRouter::OnMessage(const std::string& extension_id,
   event->restrict_to_profile = profile_;
   ExtensionSystem::Get(profile_)->event_router()->DispatchEventToExtension(
       extension_id, event.Pass());
-}
-
-void PushMessagingEventRouter::Observe(
-    int type,
-    const content::NotificationSource& source,
-    const content::NotificationDetails& details) {
-  switch (type) {
-    case chrome::NOTIFICATION_EXTENSION_LOADED: {
-      const Extension* extension = content::Details<Extension>(details).ptr();
-      if (extension->HasAPIPermission(APIPermission::kPushMessaging)) {
-        handler_->RegisterExtension(extension->id());
-      }
-      break;
-    }
-    case chrome::NOTIFICATION_EXTENSION_UNLOADED: {
-      const Extension* extension =
-          content::Details<UnloadedExtensionInfo>(details)->extension;
-      if (extension->HasAPIPermission(APIPermission::kPushMessaging)) {
-        handler_->UnregisterExtension(extension->id());
-      }
-      break;
-    }
-    default:
-      NOTREACHED();
-  }
 }
 
 // GetChannelId class functions
@@ -221,9 +167,6 @@ void PushMessagingGetChannelIdFunction::OnLoginUIClosed(
 void PushMessagingGetChannelIdFunction::ReportResult(
     const std::string& gaia_id, const std::string& error_string) {
   DCHECK(BrowserThread::CurrentlyOn(BrowserThread::UI));
-  // Unpack the status and GaiaId parameters, and use it to build the
-  // channel ID here.
-  std::string channel_id(gaia_id);
 
   BuildAndSendResult(gaia_id, error_string);
 
@@ -281,8 +224,11 @@ void PushMessagingGetChannelIdFunction::OnObfuscatedGaiaIdFetchFailure(
   ReportResult(std::string(), error_text);
 }
 
-PushMessagingAPI::PushMessagingAPI(Profile* profile)
-    : push_messaging_event_router_(new PushMessagingEventRouter(profile)) {
+PushMessagingAPI::PushMessagingAPI(Profile* profile) : profile_(profile) {
+  registrar_.Add(this, chrome::NOTIFICATION_EXTENSION_LOADED,
+                 content::Source<Profile>(profile_->GetOriginalProfile()));
+  registrar_.Add(this, chrome::NOTIFICATION_EXTENSION_UNLOADED,
+                 content::Source<Profile>(profile_->GetOriginalProfile()));
 }
 
 PushMessagingAPI::~PushMessagingAPI() {
@@ -290,15 +236,68 @@ PushMessagingAPI::~PushMessagingAPI() {
 
 // static
 PushMessagingAPI* PushMessagingAPI::Get(Profile* profile) {
-  return PushMessagingAPIFactory::GetForProfile(profile);
+  return ProfileKeyedAPIFactory<PushMessagingAPI>::GetForProfile(profile);
 }
 
 void PushMessagingAPI::Shutdown() {
-  push_messaging_event_router_.reset();
+  event_router_.reset();
+  handler_.reset();
 }
 
-PushMessagingEventRouter* PushMessagingAPI::GetEventRouterForTest() {
-  return push_messaging_event_router_.get();
+static base::LazyInstance<ProfileKeyedAPIFactory<PushMessagingAPI> >
+g_factory = LAZY_INSTANCE_INITIALIZER;
+
+// static
+ProfileKeyedAPIFactory<PushMessagingAPI>*
+PushMessagingAPI::GetFactoryInstance() {
+  return &g_factory.Get();
+}
+
+void PushMessagingAPI::Observe(int type,
+                               const content::NotificationSource& source,
+                               const content::NotificationDetails& details) {
+  ProfileSyncService* pss = ProfileSyncServiceFactory::GetForProfile(profile_);
+  // This may be NULL; for example, for the ChromeOS guest user. In these cases,
+  // just return without setting up anything, since it won't work anyway.
+  if (!pss)
+    return;
+
+  if (!event_router_)
+    event_router_.reset(new PushMessagingEventRouter(profile_));
+  if (!handler_) {
+    handler_.reset(new PushMessagingInvalidationHandler(
+        pss, event_router_.get()));
+  }
+  switch (type) {
+    case chrome::NOTIFICATION_EXTENSION_LOADED: {
+      const Extension* extension = content::Details<Extension>(details).ptr();
+      if (extension->HasAPIPermission(APIPermission::kPushMessaging)) {
+        handler_->RegisterExtension(extension->id());
+      }
+      break;
+    }
+    case chrome::NOTIFICATION_EXTENSION_UNLOADED: {
+      const Extension* extension =
+          content::Details<UnloadedExtensionInfo>(details)->extension;
+      if (extension->HasAPIPermission(APIPermission::kPushMessaging)) {
+        handler_->UnregisterExtension(extension->id());
+      }
+      break;
+    }
+    default:
+      NOTREACHED();
+  }
+}
+
+void PushMessagingAPI::SetMapperForTest(
+    scoped_ptr<PushMessagingInvalidationMapper> mapper) {
+  handler_ = mapper.Pass();
+}
+
+template <>
+void ProfileKeyedAPIFactory<PushMessagingAPI>::DeclareFactoryDependencies() {
+  DependsOn(ExtensionSystemFactory::GetInstance());
+  DependsOn(ProfileSyncServiceFactory::GetInstance());
 }
 
 }  // namespace extensions

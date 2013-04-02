@@ -233,6 +233,13 @@ class Gdb(object):
     AssertEquals(status, '*stopped')
     return items
 
+  def ResumeAndExpectStop(self, resume_command, expected_stop_reason):
+    stop_info = self.ResumeCommand(resume_command)
+    if 'reason' not in stop_info or stop_info['reason'] != expected_stop_reason:
+      raise AssertionError(
+          'GDB reported stop reason %r but we expected %r (full info is %r)'
+          % (stop_info.get('reason'), expected_stop_reason, stop_info))
+
   def Quit(self):
     status, items = self._GetResultRecord(self._SendRequest('-gdb-exit'))
     AssertEquals(status, '^exit')
@@ -240,17 +247,21 @@ class Gdb(object):
   def Eval(self, expression):
     return self.Command('-data-evaluate-expression ' + expression)['value']
 
+  def LoadManifestFile(self):
+    assert self._manifest_file is not None
+    # gdb uses bash-like escaping which removes slashes from Windows paths.
+    self.Command('nacl-manifest ' + FilenameToUnix(self._manifest_file))
+
   def Connect(self):
     self._GetResponse()
     if self._options.irt is not None:
       self.Command('nacl-irt ' + FilenameToUnix(self._options.irt))
     if self._options.ld_so is not None:
-      # gdb uses bash-like escaping which removes slashes from Windows paths.
-      manifest_file = GenerateManifest(self._options.output_dir,
-                                       self._options.nexe,
-                                       self._options.ld_so,
-                                       self._name)
-      self.Command('nacl-manifest ' + FilenameToUnix(manifest_file))
+      self._manifest_file = GenerateManifest(self._options.output_dir,
+                                             self._options.nexe,
+                                             self._options.ld_so,
+                                             self._name)
+      self.LoadManifestFile()
       self.Command('set breakpoint pending on')
     else:
       self.Command('file ' + FilenameToUnix(self._options.nexe))

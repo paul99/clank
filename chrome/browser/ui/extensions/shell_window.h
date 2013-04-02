@@ -8,7 +8,6 @@
 #include "base/memory/scoped_ptr.h"
 #include "chrome/browser/extensions/extension_function_dispatcher.h"
 #include "chrome/browser/extensions/extension_keybinding_registry.h"
-#include "chrome/browser/extensions/image_loading_tracker.h"
 #include "chrome/browser/sessions/session_id.h"
 #include "chrome/browser/ui/base_window.h"
 #include "content/public/browser/notification_observer.h"
@@ -41,7 +40,6 @@ class ShellWindow : public content::NotificationObserver,
                     public content::WebContentsDelegate,
                     public content::WebContentsObserver,
                     public ExtensionFunctionDispatcher::Delegate,
-                    public ImageLoadingTracker::Observer,
                     public extensions::ExtensionKeybindingRegistry::Delegate {
  public:
   enum WindowType {
@@ -60,10 +58,12 @@ class ShellWindow : public content::NotificationObserver,
 
     WindowType window_type;
     Frame frame;
+    bool transparent_background;  // Only supported on ash.
 
     // Specify the initial content bounds of the window (excluding any window
-    // decorations). INT_MIN designates 'unspecified' for any coordinate, and
-    // should be replaced with a default value.
+    // decorations). INT_MIN designates 'unspecified' for the position
+    // components, and 0 for the size components. When unspecified, they should
+    // be replaced with a default value.
     gfx::Rect bounds;
 
     gfx::Size minimum_size;
@@ -100,6 +100,11 @@ class ShellWindow : public content::NotificationObserver,
   NativeAppWindow* GetBaseWindow();
   gfx::NativeWindow GetNativeWindow();
 
+  // This will return a slightly smaller icon then the app_icon to be used in
+  // application lists. It is the responsibility of the caller to delete the
+  // returned image after use.
+  gfx::Image* GetAppListIcon();
+
   // NativeAppWindows should call this to determine what the window's title
   // is on startup and from within UpdateWindowTitle().
   virtual string16 GetTitle() const;
@@ -134,9 +139,6 @@ class ShellWindow : public content::NotificationObserver,
   // content::WebContentsDelegate implementation.
   virtual void CloseContents(content::WebContents* contents) OVERRIDE;
   virtual bool ShouldSuppressDialogs() OVERRIDE;
-  virtual void WebIntentDispatch(
-      content::WebContents* web_contents,
-      content::WebIntentsDispatcher* intents_dispatcher) OVERRIDE;
   virtual void RunFileChooser(
       content::WebContents* tab,
       const content::FileChooserParams& params) OVERRIDE;
@@ -152,7 +154,7 @@ class ShellWindow : public content::NotificationObserver,
       const content::WebContents* source) const OVERRIDE;
   virtual void RequestMediaAccessPermission(
       content::WebContents* web_contents,
-      const content::MediaStreamRequest* request,
+      const content::MediaStreamRequest& request,
       const content::MediaResponseCallback& callback) OVERRIDE;
   virtual content::WebContents* OpenURLFromTab(
       content::WebContents* source,
@@ -196,10 +198,7 @@ class ShellWindow : public content::NotificationObserver,
   // Load the app's image, firing a load state change when loaded.
   void UpdateExtensionAppIcon();
 
-  // ImageLoadingTracker::Observer implementation.
-  virtual void OnImageLoaded(const gfx::Image& image,
-                             const std::string& extension_id,
-                             int index) OVERRIDE;
+  void OnImageLoaded(const gfx::Image& image);
 
   // extensions::ExtensionKeybindingRegistry::Delegate implementation.
   virtual extensions::ActiveTabPermissionGranter*
@@ -208,7 +207,6 @@ class ShellWindow : public content::NotificationObserver,
   // Callback from web_contents()->DownloadFavicon.
   void DidDownloadFavicon(int id,
                           const GURL& image_url,
-                          bool errored,
                           int requested_size,
                           const std::vector<SkBitmap>& bitmaps);
 
@@ -232,9 +230,6 @@ class ShellWindow : public content::NotificationObserver,
   // Icon shown in the task bar.
   gfx::Image app_icon_;
 
-  // Used for loading app_icon_ from the extension.
-  scoped_ptr<ImageLoadingTracker> app_icon_loader_;
-
   // Icon URL to be used for setting the app icon. If not empty, app_icon_ will
   // be fetched and set using this URL.
   GURL app_icon_url_;
@@ -242,6 +237,8 @@ class ShellWindow : public content::NotificationObserver,
   scoped_ptr<NativeAppWindow> native_app_window_;
 
   base::WeakPtrFactory<ShellWindow> weak_ptr_factory_;
+
+  base::WeakPtrFactory<ShellWindow> image_loader_ptr_factory_;
 
   DISALLOW_COPY_AND_ASSIGN(ShellWindow);
 };

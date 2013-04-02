@@ -13,7 +13,10 @@
 #include "chrome/browser/extensions/webstore_standalone_installer.h"
 #include "chrome/browser/profiles/profile.h"
 #include "chrome/common/chrome_switches.h"
+#include "chrome/common/extensions/api/i18n/default_locale_handler.h"
 #include "chrome/common/extensions/extension.h"
+#include "chrome/common/extensions/extension_manifest_constants.h"
+#include "chrome/common/extensions/manifest_handler.h"
 #include "content/public/browser/web_contents.h"
 #include "ipc/ipc_message.h"
 
@@ -27,10 +30,14 @@ void PrintPackExtensionMessage(const std::string& message) {
 
 namespace extensions {
 
-StartupHelper::StartupHelper() : pack_job_succeeded_(false) {}
+StartupHelper::StartupHelper() : pack_job_succeeded_(false) {
+  ManifestHandler::Register(extension_manifest_keys::kDefaultLocale,
+                            make_linked_ptr(new DefaultLocaleHandler));
+}
 
-void StartupHelper::OnPackSuccess(const FilePath& crx_path,
-                                  const FilePath& output_private_key_path) {
+void StartupHelper::OnPackSuccess(
+    const base::FilePath& crx_path,
+    const base::FilePath& output_private_key_path) {
   pack_job_succeeded_ = true;
   PrintPackExtensionMessage(
       UTF16ToUTF8(
@@ -48,8 +55,9 @@ bool StartupHelper::PackExtension(const CommandLine& cmd_line) {
     return false;
 
   // Input Paths.
-  FilePath src_dir = cmd_line.GetSwitchValuePath(switches::kPackExtension);
-  FilePath private_key_path;
+  base::FilePath src_dir =
+      cmd_line.GetSwitchValuePath(switches::kPackExtension);
+  base::FilePath private_key_path;
   if (cmd_line.HasSwitch(switches::kPackExtensionKey)) {
     private_key_path = cmd_line.GetSwitchValuePath(switches::kPackExtensionKey);
   }
@@ -139,7 +147,9 @@ bool StartupHelper::InstallFromWebstore(const CommandLine& cmd_line,
           web_contents.get(),
           id,
           WebstoreStandaloneInstaller::DO_NOT_REQUIRE_VERIFIED_SITE,
-          WebstoreStandaloneInstaller::STANDARD_PROMPT,
+          cmd_line.HasSwitch(switches::kForceAppMode) ?
+              WebstoreStandaloneInstaller::SKIP_PROMPT :
+              WebstoreStandaloneInstaller::STANDARD_PROMPT ,
           GURL(),
           callback));
   installer->set_skip_post_install_ui(true);

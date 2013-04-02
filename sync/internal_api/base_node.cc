@@ -6,8 +6,6 @@
 
 #include <stack>
 
-#include "base/base64.h"
-#include "base/sha1.h"
 #include "base/string_number_conversions.h"
 #include "base/utf_string_conversions.h"
 #include "base/values.h"
@@ -64,21 +62,6 @@ static void ServerNameToSyncAPIName(const std::string& server_name,
 BaseNode::BaseNode() : password_data_(new sync_pb::PasswordSpecificsData) {}
 
 BaseNode::~BaseNode() {}
-
-std::string BaseNode::GenerateSyncableHash(
-    ModelType model_type, const std::string& client_tag) {
-  // Blank PB with just the field in it has termination symbol,
-  // handy for delimiter.
-  sync_pb::EntitySpecifics serialized_type;
-  AddDefaultFieldValue(model_type, &serialized_type);
-  std::string hash_input;
-  serialized_type.AppendToString(&hash_input);
-  hash_input.append(client_tag);
-
-  std::string encode_output;
-  CHECK(base::Base64Encode(base::SHA1HashString(hash_input), &encode_output));
-  return encode_output;
-}
 
 bool BaseNode::DecryptIfNecessary() {
   if (!GetEntry()->Get(syncable::UNIQUE_SERVER_TAG).empty())
@@ -212,14 +195,14 @@ bool BaseNode::HasChildren() const {
 }
 
 int64 BaseNode::GetPredecessorId() const {
-  syncable::Id id_string = GetEntry()->Get(syncable::PREV_ID);
+  syncable::Id id_string = GetEntry()->GetPredecessorId();
   if (id_string.IsRoot())
     return kInvalidId;
   return IdToMetahandle(GetTransaction()->GetWrappedTrans(), id_string);
 }
 
 int64 BaseNode::GetSuccessorId() const {
-  syncable::Id id_string = GetEntry()->Get(syncable::NEXT_ID);
+  syncable::Id id_string = GetEntry()->GetSuccessorId();
   if (id_string.IsRoot())
     return kInvalidId;
   return IdToMetahandle(GetTransaction()->GetWrappedTrans(), id_string);
@@ -259,7 +242,7 @@ int BaseNode::GetTotalNodeCount() const {
     syncable::Id child_id;
     if (dir->GetFirstChildId(trans, id, &child_id) && !child_id.IsRoot())
       stack.push(IdToMetahandle(trans, child_id));
-    syncable::Id successor_id = entry.Get(syncable::NEXT_ID);
+    syncable::Id successor_id = entry.GetSuccessorId();
     if (!successor_id.IsRoot())
       stack.push(IdToMetahandle(trans, successor_id));
   }
@@ -358,6 +341,12 @@ const sync_pb::DeviceInfoSpecifics& BaseNode::GetDeviceInfoSpecifics() const {
 const sync_pb::ExperimentsSpecifics& BaseNode::GetExperimentsSpecifics() const {
   DCHECK_EQ(GetModelType(), EXPERIMENTS);
   return GetEntitySpecifics().experiments();
+}
+
+const sync_pb::PriorityPreferenceSpecifics&
+    BaseNode::GetPriorityPreferenceSpecifics() const {
+  DCHECK_EQ(GetModelType(), PRIORITY_PREFERENCES);
+  return GetEntitySpecifics().priority_preference();
 }
 
 const sync_pb::EntitySpecifics& BaseNode::GetEntitySpecifics() const {

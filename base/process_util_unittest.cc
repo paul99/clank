@@ -19,6 +19,7 @@
 #include "base/test/test_timeouts.h"
 #include "base/third_party/dynamic_annotations/dynamic_annotations.h"
 #include "base/threading/platform_thread.h"
+#include "base/threading/thread.h"
 #include "base/utf_string_conversions.h"
 #include "testing/gtest/include/gtest/gtest.h"
 #include "testing/multiprocess_func_list.h"
@@ -441,7 +442,7 @@ TEST_F(ProcessUtilTest, CalcFreeMemory) {
 
   // Allocate 20M and check again. It should have gone down.
   const int kAllocMB = 20;
-  scoped_array<char> alloc(new char[kAllocMB * 1024 * 1024]);
+  scoped_ptr<char[]> alloc(new char[kAllocMB * 1024 * 1024]);
   size_t expected_total = free_mem1.total - kAllocMB;
   size_t expected_largest = free_mem1.largest;
 
@@ -613,7 +614,7 @@ int ProcessUtilTest::CountOpenFDsInChild() {
       HANDLE_EINTR(read(fds[0], &num_open_files, sizeof(num_open_files)));
   CHECK_EQ(bytes_read, static_cast<ssize_t>(sizeof(num_open_files)));
 
-#if defined(THREAD_SANITIZER)
+#if defined(THREAD_SANITIZER) || defined(USE_HEAPCHECKER)
   // Compiler-based ThreadSanitizer makes this test slow.
   CHECK(base::WaitForSingleProcess(handle, base::TimeDelta::FromSeconds(3)));
 #else
@@ -944,6 +945,24 @@ TEST_F(ProcessUtilTest, ParseProcStatCPU) {
 
   EXPECT_EQ(0, base::ParseProcStatCPU(kSelfStat));
 }
+
+TEST_F(ProcessUtilTest, GetNumberOfThreads) {
+  const base::ProcessHandle current = base::GetCurrentProcessHandle();
+  const int initial_threads = base::GetNumberOfThreads(current);
+  ASSERT_GT(initial_threads, 0);
+  const int kNumAdditionalThreads = 10;
+  {
+    scoped_ptr<base::Thread> my_threads[kNumAdditionalThreads];
+    for (int i = 0; i < kNumAdditionalThreads; ++i) {
+      my_threads[i].reset(new base::Thread("GetNumberOfThreadsTest"));
+      my_threads[i]->Start();
+      ASSERT_EQ(base::GetNumberOfThreads(current), initial_threads + 1 + i);
+    }
+  }
+  // The Thread destructor will stop them.
+  ASSERT_EQ(initial_threads, base::GetNumberOfThreads(current));
+}
+
 #endif  // defined(OS_LINUX) || defined(OS_ANDROID)
 
 // TODO(port): port those unit tests.

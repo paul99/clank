@@ -55,9 +55,6 @@ class EnrollmentDialogView : public views::DialogDelegateView {
   // views::View overrides
   virtual gfx::Size GetPreferredSize() OVERRIDE;
 
-  // views::Widget overrides
-  virtual views::View* GetContentsView() OVERRIDE;
-
  private:
   EnrollmentDialogView(const std::string& network_name,
                        Profile* profile,
@@ -111,8 +108,8 @@ int EnrollmentDialogView::GetDialogButtons() const {
 bool EnrollmentDialogView::Accept() {
   // TODO(beng): use Navigate().
   // Navigate to the target URI in a browser tab.
-  Browser* browser = browser::FindTabbedBrowser(profile_, false,
-                                                chrome::HOST_DESKTOP_TYPE_ASH);
+  Browser* browser = chrome::FindTabbedBrowser(profile_, false,
+                                               chrome::HOST_DESKTOP_TYPE_ASH);
   if (!browser) {
     // Couldn't find a tabbed browser: create one.
     browser = new Browser(
@@ -143,10 +140,6 @@ string16 EnrollmentDialogView::GetWindowTitle() const {
 
 gfx::Size EnrollmentDialogView::GetPreferredSize() {
   return gfx::Size(kDefaultWidth, kDefaultHeight);
-}
-
-views::View* EnrollmentDialogView::GetContentsView() {
-  return this;
 }
 
 void EnrollmentDialogView::InitDialog() {

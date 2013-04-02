@@ -36,7 +36,7 @@ class ProfileManager : public base::NonThreadSafe,
  public:
   typedef base::Callback<void(Profile*, Profile::CreateStatus)> CreateCallback;
 
-  explicit ProfileManager(const FilePath& user_data_dir);
+  explicit ProfileManager(const base::FilePath& user_data_dir);
   virtual ~ProfileManager();
 
 #if defined(ENABLE_SESSION_SERVICE)
@@ -52,7 +52,7 @@ class ProfileManager : public base::NonThreadSafe,
   // ProfileManager if it doesn't already exist.  This method returns NULL if
   // the profile doesn't exist and we can't create it.
   // The profile used can be overridden by using --login-profile on cros.
-  Profile* GetDefaultProfile(const FilePath& user_data_dir);
+  Profile* GetDefaultProfile(const base::FilePath& user_data_dir);
 
   // DEPRECATED: DO NOT USE unless in ChromeOS.
   // Same as instance method but provides the default user_data_dir as well.
@@ -66,7 +66,7 @@ class ProfileManager : public base::NonThreadSafe,
   // Returns a profile for a specific profile directory within the user data
   // dir. This will return an existing profile it had already been created,
   // otherwise it will create and manage it.
-  Profile* GetProfile(const FilePath& profile_dir);
+  Profile* GetProfile(const base::FilePath& profile_dir);
 
   // Returns total number of profiles available on this machine.
   size_t GetNumberOfProfiles();
@@ -74,10 +74,11 @@ class ProfileManager : public base::NonThreadSafe,
   // Explicit asynchronous creation of a profile located at |profile_path|.
   // If the profile has already been created then callback is called
   // immediately. Should be called on the UI thread.
-  void CreateProfileAsync(const FilePath& profile_path,
+  void CreateProfileAsync(const base::FilePath& profile_path,
                           const CreateCallback& callback,
                           const string16& name,
-                          const string16& icon_url);
+                          const string16& icon_url,
+                          bool is_managed);
 
   // Initiates default profile creation. If default profile has already been
   // created then the callback is called immediately. Should be called on the
@@ -90,22 +91,27 @@ class ProfileManager : public base::NonThreadSafe,
 
   // Returns the directory where the first created profile is stored,
   // relative to the user data directory currently in use..
-  FilePath GetInitialProfileDir();
+  base::FilePath GetInitialProfileDir();
 
   // Get the Profile last used (the Profile to which owns the most recently
   // focused window) with this Chrome build. If no signed profile has been
   // stored in Local State, hand back the Default profile.
-  Profile* GetLastUsedProfile(const FilePath& user_data_dir);
+  Profile* GetLastUsedProfile(const base::FilePath& user_data_dir);
 
   // Same as instance method but provides the default user_data_dir as well.
   static Profile* GetLastUsedProfile();
+
+  // Get the path of the last used profile, or if that's undefined, the default
+  // profile.
+  base::FilePath GetLastUsedProfileDir(const base::FilePath& user_data_dir);
 
   // Get the Profiles which are currently open, i.e., have open browsers, or
   // were open the last time Chrome was running. The Profiles appear in the
   // order they were opened. The last used profile will be on the list, but its
   // index on the list will depend on when it was opened (it is not necessarily
   // the last one).
-  std::vector<Profile*> GetLastOpenedProfiles(const FilePath& user_data_dir);
+  std::vector<Profile*> GetLastOpenedProfiles(
+      const base::FilePath& user_data_dir);
 
   // Same as instance method but provides the default user_data_dir as well.
   static std::vector<Profile*> GetLastOpenedProfiles();
@@ -139,15 +145,16 @@ class ProfileManager : public base::NonThreadSafe,
 
   // Returns the path to the default profile directory, based on the given
   // user data directory.
-  static FilePath GetDefaultProfileDir(const FilePath& user_data_dir);
+  static base::FilePath GetDefaultProfileDir(
+      const base::FilePath& user_data_dir);
 
   // Returns the path to the preferences file given the user profile directory.
-  static FilePath GetProfilePrefsPath(const FilePath& profile_dir);
+  static base::FilePath GetProfilePrefsPath(const base::FilePath& profile_dir);
 
   // If a profile with the given path is currently managed by this object,
   // return a pointer to the corresponding Profile object;
   // otherwise return NULL.
-  Profile* GetProfileByPath(const FilePath& path) const;
+  Profile* GetProfileByPath(const base::FilePath& path) const;
 
   // Activates a window for |profile| on the desktop specified by
   // |desktop_type|. If no such window yet exists, or if |always_create| is
@@ -176,14 +183,18 @@ class ProfileManager : public base::NonThreadSafe,
   // Directories are named "profile_1", "profile_2", etc., in sequence of
   // creation. (Because directories can be removed, however, it may be the case
   // that at some point the list of numbered profiles is not continuous.)
+  // |callback| may be invoked multiple times (for CREATE_STATUS_INITIALIZED
+  // and CREATE_STATUS_CREATED) so binding parameters with bind::Passed() is
+  // prohibited.
   static void CreateMultiProfileAsync(
       const string16& name,
       const string16& icon_url,
       const CreateCallback& callback,
-      chrome::HostDesktopType desktop_type);
+      chrome::HostDesktopType desktop_type,
+      bool is_managed);
 
   // Register multi-profile related preferences in Local State.
-  static void RegisterPrefs(PrefService* prefs);
+  static void RegisterPrefs(PrefRegistrySimple* registry);
 
   // Returns a ProfileInfoCache object which can be used to get information
   // about profiles without having to load them from disk.
@@ -194,7 +205,7 @@ class ProfileManager : public base::NonThreadSafe,
   ProfileShortcutManager* profile_shortcut_manager();
 
   // Schedules the profile at the given path to be deleted on shutdown.
-  void ScheduleProfileForDeletion(const FilePath& profile_dir,
+  void ScheduleProfileForDeletion(const base::FilePath& profile_dir,
                                   chrome::HostDesktopType desktop_type);
 
   // Checks if multiple profiles is enabled.
@@ -208,7 +219,7 @@ class ProfileManager : public base::NonThreadSafe,
   // for testing. If |addToCache|, add to ProfileInfoCache as well.
   void RegisterTestingProfile(Profile* profile, bool addToCache);
 
-  const FilePath& user_data_dir() const { return user_data_dir_; }
+  const base::FilePath& user_data_dir() const { return user_data_dir_; }
 
  protected:
   // Does final initial actions.
@@ -219,12 +230,12 @@ class ProfileManager : public base::NonThreadSafe,
   // Creates a new profile by calling into the profile's profile creation
   // method. Virtual so that unittests can return a TestingProfile instead
   // of the Profile's result.
-  virtual Profile* CreateProfileHelper(const FilePath& path);
+  virtual Profile* CreateProfileHelper(const base::FilePath& path);
 
   // Creates a new profile asynchronously by calling into the profile's
   // asynchronous profile creation method. Virtual so that unittests can return
   // a TestingProfile instead of the Profile's result.
-  virtual Profile* CreateProfileAsyncHelper(const FilePath& path,
+  virtual Profile* CreateProfileAsyncHelper(const base::FilePath& path,
                                             Delegate* delegate);
 
  private:
@@ -263,9 +274,9 @@ class ProfileManager : public base::NonThreadSafe,
 
   // Returns ProfileInfo associated with given |path|, registred earlier with
   // RegisterProfile.
-  ProfileInfo* GetProfileInfoByPath(const FilePath& path) const;
+  ProfileInfo* GetProfileInfoByPath(const base::FilePath& path) const;
 
-  typedef std::pair<FilePath, string16> ProfilePathAndName;
+  typedef std::pair<base::FilePath, string16> ProfilePathAndName;
   typedef std::vector<ProfilePathAndName> ProfilePathAndNames;
   ProfilePathAndNames GetSortedProfilesFromDirectoryMap();
 
@@ -288,7 +299,7 @@ class ProfileManager : public base::NonThreadSafe,
   // Lack of side effects:
   // This function doesn't actually create the directory or touch the file
   // system.
-  FilePath GenerateNextProfileDirectoryPath();
+  base::FilePath GenerateNextProfileDirectoryPath();
 
   void RunCallbacks(const std::vector<CreateCallback>& callbacks,
                     Profile* profile,
@@ -297,7 +308,7 @@ class ProfileManager : public base::NonThreadSafe,
   content::NotificationRegistrar registrar_;
 
   // The path to the user data directory (DIR_USER_DATA).
-  const FilePath user_data_dir_;
+  const base::FilePath user_data_dir_;
 
   // Indicates that a user has logged in and that the profile specified
   // in the --login-profile command line argument should be used as the
@@ -310,7 +321,7 @@ class ProfileManager : public base::NonThreadSafe,
   // Maps profile path to ProfileInfo (if profile has been created). Use
   // RegisterProfile() to add into this map. This map owns all loaded profile
   // objects in a running instance of Chrome.
-  typedef std::map<FilePath, linked_ptr<ProfileInfo> > ProfilesInfoMap;
+  typedef std::map<base::FilePath, linked_ptr<ProfileInfo> > ProfilesInfoMap;
   ProfilesInfoMap profiles_info_;
 
   // Object to cache various information about profiles. Contains information
@@ -354,7 +365,7 @@ class ProfileManager : public base::NonThreadSafe,
 // profile. This one is useful in unittests.
 class ProfileManagerWithoutInit : public ProfileManager {
  public:
-  explicit ProfileManagerWithoutInit(const FilePath& user_data_dir);
+  explicit ProfileManagerWithoutInit(const base::FilePath& user_data_dir);
 
  protected:
   virtual void DoFinalInitForServices(Profile*, bool) OVERRIDE {}

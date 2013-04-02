@@ -15,7 +15,7 @@
 #include "base/memory/ref_counted_memory.h"
 #include "base/metrics/histogram.h"
 #include "base/path_service.h"
-#include "base/string_number_conversions.h"
+#include "base/strings/string_number_conversions.h"
 #include "base/utf_string_conversions.h"
 #include "base/win/metro.h"
 #include "chrome/browser/favicon/favicon_tab_helper.h"
@@ -34,7 +34,7 @@
 #include "ui/gfx/rect.h"
 #include "ui/gfx/size.h"
 
-DEFINE_WEB_CONTENTS_USER_DATA_KEY(MetroPinTabHelper)
+DEFINE_WEB_CONTENTS_USER_DATA_KEY(MetroPinTabHelper);
 
 namespace {
 
@@ -51,15 +51,15 @@ string16 GenerateTileId(const string16& url_str) {
 }
 
 // Get the path of the directory to store the tile logos in.
-FilePath GetTileImagesDir() {
-  FilePath tile_images_dir;
+base::FilePath GetTileImagesDir() {
+  base::FilePath tile_images_dir;
   if (!PathService::Get(chrome::DIR_USER_DATA, &tile_images_dir))
-    return FilePath();
+    return base::FilePath();
 
   tile_images_dir = tile_images_dir.Append(L"TileImages");
   if (!file_util::DirectoryExists(tile_images_dir) &&
       !file_util::CreateDirectory(tile_images_dir))
-    return FilePath();
+    return base::FilePath();
 
   return tile_images_dir;
 }
@@ -67,64 +67,40 @@ FilePath GetTileImagesDir() {
 // For the given |image| and |tile_id|, try to create a site specific logo in
 // |logo_dir|. The path of any created logo is returned in |logo_path|. Return
 // value indicates whether a site specific logo was created.
-bool CreateSiteSpecificLogo(const gfx::ImageSkia& image,
+bool CreateSiteSpecificLogo(const SkBitmap& bitmap,
                             const string16& tile_id,
-                            const FilePath& logo_dir,
-                            FilePath* logo_path) {
+                            const base::FilePath& logo_dir,
+                            base::FilePath* logo_path) {
   const int kLogoWidth = 120;
   const int kLogoHeight = 120;
   const int kBoxWidth = 40;
   const int kBoxHeight = 40;
   const int kCaptionHeight = 20;
   const double kBoxFade = 0.75;
-  const int kColorMeanDarknessLimit = 100;
-  const int kColorMeanLightnessLimit = 650;
 
-  if (image.isNull())
+  if (bitmap.isNull())
     return false;
 
-  // First paint the image onto an opaque background to get rid of transparency.
-  // White is used as it will be disregarded in the mean calculation because of
-  // lightness limit.
+  // Fill the tile logo with the dominant color of the favicon bitmap.
+  SkColor dominant_color = color_utils::CalculateKMeanColorOfBitmap(bitmap);
   SkPaint paint;
-  paint.setColor(SK_ColorWHITE);
-  gfx::Canvas favicon_canvas(gfx::Size(image.width(), image.height()),
-                             ui::SCALE_FACTOR_100P, true);
-  favicon_canvas.DrawRect(gfx::Rect(0, 0, image.width(), image.height()),
-                          paint);
-  favicon_canvas.DrawImageInt(image, 0, 0);
-
-  // Fill the tile logo with the average color from bitmap. To do this we need
-  // to work out the 'average color' which is calculated using PNG encoded data
-  // of the bitmap.
-  std::vector<unsigned char> icon_png;
-  if (!gfx::PNGCodec::EncodeBGRASkBitmap(
-          favicon_canvas.ExtractImageRep().sk_bitmap(), false, &icon_png)) {
-    return false;
-  }
-
-  scoped_refptr<base::RefCountedStaticMemory> icon_mem(
-      new base::RefCountedStaticMemory(&icon_png.front(), icon_png.size()));
-  color_utils::GridSampler sampler;
-  SkColor mean_color = color_utils::CalculateKMeanColorOfPNG(
-      icon_mem, kColorMeanDarknessLimit, kColorMeanLightnessLimit, &sampler);
-  paint.setColor(mean_color);
+  paint.setColor(dominant_color);
   gfx::Canvas canvas(gfx::Size(kLogoWidth, kLogoHeight), ui::SCALE_FACTOR_100P,
                      true);
   canvas.DrawRect(gfx::Rect(0, 0, kLogoWidth, kLogoHeight), paint);
 
   // Now paint a faded square for the favicon to go in.
   color_utils::HSL shift = {-1, -1, kBoxFade};
-  paint.setColor(color_utils::HSLShift(mean_color, shift));
+  paint.setColor(color_utils::HSLShift(dominant_color, shift));
   int box_left = (kLogoWidth - kBoxWidth) / 2;
   int box_top = (kLogoHeight - kCaptionHeight - kBoxHeight) / 2;
   canvas.DrawRect(gfx::Rect(box_left, box_top, kBoxWidth, kBoxHeight), paint);
 
   // Now paint the favicon into the tile, leaving some room at the bottom for
   // the caption.
-  int left = (kLogoWidth - image.width()) / 2;
-  int top = (kLogoHeight - kCaptionHeight - image.height()) / 2;
-  canvas.DrawImageInt(image, left, top);
+  int left = (kLogoWidth - bitmap.width()) / 2;
+  int top = (kLogoHeight - kCaptionHeight - bitmap.height()) / 2;
+  canvas.DrawImageInt(gfx::ImageSkia::CreateFrom1xBitmap(bitmap), left, top);
 
   SkBitmap logo_bitmap = canvas.ExtractImageRep().sk_bitmap();
   std::vector<unsigned char> logo_png;
@@ -144,14 +120,14 @@ bool CreateSiteSpecificLogo(const gfx::ImageSkia& image,
 // its tile image cache.)
 // The path to the logo is returned in |logo_path|, with the return value
 // indicating success.
-bool GetPathToBackupLogo(const FilePath& logo_dir,
-                         FilePath* logo_path) {
+bool GetPathToBackupLogo(const base::FilePath& logo_dir,
+                         base::FilePath* logo_path) {
   const wchar_t kDefaultLogoFileName[] = L"SecondaryTile.png";
   *logo_path = logo_dir.Append(kDefaultLogoFileName);
   if (file_util::PathExists(*logo_path))
     return true;
 
-  FilePath default_logo_path;
+  base::FilePath default_logo_path;
   if (!PathService::Get(base::DIR_MODULE, &default_logo_path))
     return false;
 
@@ -178,7 +154,7 @@ class PinPageTaskRunner : public base::RefCountedThreadSafe<PinPageTaskRunner> {
   // which case the backup tile image will be used.
   PinPageTaskRunner(const string16& title,
                     const string16& url,
-                    const gfx::ImageSkia& favicon);
+                    const SkBitmap& favicon);
 
   void Run();
   void RunOnFileThread();
@@ -189,7 +165,7 @@ class PinPageTaskRunner : public base::RefCountedThreadSafe<PinPageTaskRunner> {
   // Details of the page being pinned.
   const string16 title_;
   const string16 url_;
-  gfx::ImageSkia favicon_;
+  SkBitmap favicon_;
 
   friend class base::RefCountedThreadSafe<PinPageTaskRunner>;
   DISALLOW_COPY_AND_ASSIGN(PinPageTaskRunner);
@@ -197,7 +173,7 @@ class PinPageTaskRunner : public base::RefCountedThreadSafe<PinPageTaskRunner> {
 
 PinPageTaskRunner::PinPageTaskRunner(const string16& title,
                                      const string16& url,
-                                     const gfx::ImageSkia& favicon)
+                                     const SkBitmap& favicon)
     : title_(title),
       url_(url),
       favicon_(favicon) {}
@@ -215,13 +191,13 @@ void PinPageTaskRunner::RunOnFileThread() {
   DCHECK(content::BrowserThread::CurrentlyOn(content::BrowserThread::FILE));
 
   string16 tile_id = GenerateTileId(url_);
-  FilePath logo_dir = GetTileImagesDir();
+  base::FilePath logo_dir = GetTileImagesDir();
   if (logo_dir.empty()) {
     LOG(ERROR) << "Could not create directory to store tile image.";
     return;
   }
 
-  FilePath logo_path;
+  base::FilePath logo_path;
   if (!CreateSiteSpecificLogo(favicon_, tile_id, logo_dir, &logo_path) &&
       !GetPathToBackupLogo(logo_dir, &logo_path)) {
     LOG(ERROR) << "Count not get path to logo tile.";
@@ -258,7 +234,7 @@ class MetroPinTabHelper::FaviconChooser {
   FaviconChooser(MetroPinTabHelper* helper,
                  const string16& title,
                  const string16& url,
-                 const gfx::ImageSkia& history_image);
+                 const SkBitmap& history_bitmap);
 
   ~FaviconChooser() {}
 
@@ -269,7 +245,6 @@ class MetroPinTabHelper::FaviconChooser {
   // Update the |best_candidate_| with the newly downloaded favicons provided.
   void UpdateCandidate(int id,
                        const GURL& image_url,
-                       bool errored,
                        int requested_size,
                        const std::vector<SkBitmap>& bitmaps);
 
@@ -284,7 +259,7 @@ class MetroPinTabHelper::FaviconChooser {
   const string16 url_;
 
   // The best candidate we have so far for the current pin operation.
-  gfx::ImageSkia best_candidate_;
+  SkBitmap best_candidate_;
 
   // Outstanding favicon download requests.
   std::set<int> in_progress_requests_;
@@ -296,11 +271,11 @@ MetroPinTabHelper::FaviconChooser::FaviconChooser(
     MetroPinTabHelper* helper,
     const string16& title,
     const string16& url,
-    const gfx::ImageSkia& history_image)
+    const SkBitmap& history_bitmap)
         : helper_(helper),
           title_(title),
           url_(url),
-          best_candidate_(history_image) {}
+          best_candidate_(history_bitmap) {}
 
 void MetroPinTabHelper::FaviconChooser::UseChosenCandidate() {
   DCHECK(content::BrowserThread::CurrentlyOn(content::BrowserThread::UI));
@@ -313,7 +288,6 @@ void MetroPinTabHelper::FaviconChooser::UseChosenCandidate() {
 void MetroPinTabHelper::FaviconChooser::UpdateCandidate(
     int id,
     const GURL& image_url,
-    bool errored,
     int requested_size,
     const std::vector<SkBitmap>& bitmaps) {
   const int kMaxIconSize = 32;
@@ -328,30 +302,28 @@ void MetroPinTabHelper::FaviconChooser::UpdateCandidate(
   in_progress_requests_.erase(iter);
 
   // Process the bitmaps, keeping the one that is best so far.
-   if (!errored) {
-    for (std::vector<SkBitmap>::const_iterator iter = bitmaps.begin();
-         iter != bitmaps.end();
-         ++iter) {
+  for (std::vector<SkBitmap>::const_iterator iter = bitmaps.begin();
+       iter != bitmaps.end();
+       ++iter) {
 
-      // If the new bitmap is too big, ignore it.
-      if (iter->height() > kMaxIconSize || iter->width() > kMaxIconSize)
-        continue;
+    // If the new bitmap is too big, ignore it.
+    if (iter->height() > kMaxIconSize || iter->width() > kMaxIconSize)
+      continue;
 
-      // If we don't have a best candidate yet, this is better so just grab it.
-      if (best_candidate_.isNull()) {
-        best_candidate_ = *gfx::ImageSkia(*iter).DeepCopy().get();
-        continue;
-      }
-
-      // If it is smaller than our best one so far, ignore it.
-      if (iter->height() <= best_candidate_.height() ||
-          iter->width() <= best_candidate_.width()) {
-        continue;
-      }
-
-      // Othewise it is our new best candidate.
-      best_candidate_ = *gfx::ImageSkia(*iter).DeepCopy().get();
+    // If we don't have a best candidate yet, this is better so just grab it.
+    if (best_candidate_.isNull()) {
+      best_candidate_ = *iter;
+      continue;
     }
+
+    // If it is smaller than our best one so far, ignore it.
+    if (iter->height() <= best_candidate_.height() ||
+        iter->width() <= best_candidate_.width()) {
+      continue;
+    }
+
+    // Othewise it is our new best candidate.
+    best_candidate_ = *iter;
   }
 
   // If there are no more outstanding requests, pin the page on the FILE thread.
@@ -405,11 +377,14 @@ void MetroPinTabHelper::TogglePinnedToStartScreen() {
   string16 url_str = UTF8ToUTF16(url.spec());
   string16 title = web_contents()->GetTitle();
   // TODO(oshima): Use scoped_ptr::Pass to pass it to other thread.
-  gfx::ImageSkia favicon;
+  SkBitmap favicon;
   FaviconTabHelper* favicon_tab_helper = FaviconTabHelper::FromWebContents(
       web_contents());
-  if (favicon_tab_helper->FaviconIsValid())
-    favicon = *favicon_tab_helper->GetFavicon().AsImageSkia().DeepCopy().get();
+  if (favicon_tab_helper->FaviconIsValid()) {
+    // Only the 1x bitmap data is needed.
+    favicon = favicon_tab_helper->GetFavicon().AsImageSkia().GetRepresentation(
+        ui::SCALE_FACTOR_100P).sk_bitmap();
+  }
 
   favicon_chooser_.reset(new FaviconChooser(this, title, url_str, favicon));
 
@@ -452,12 +427,10 @@ void MetroPinTabHelper::DidUpdateFaviconURL(
 void MetroPinTabHelper::DidDownloadFavicon(
     int id,
     const GURL& image_url,
-    bool errored,
     int requested_size,
     const std::vector<SkBitmap>& bitmaps) {
   if (favicon_chooser_.get()) {
-    favicon_chooser_->UpdateCandidate(id, image_url, errored,
-                                      requested_size, bitmaps);
+    favicon_chooser_->UpdateCandidate(id, image_url, requested_size, bitmaps);
   }
 }
 

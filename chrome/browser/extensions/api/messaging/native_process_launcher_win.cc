@@ -9,15 +9,16 @@
 #include "base/logging.h"
 #include "base/process_util.h"
 #include "base/stringprintf.h"
-#include "base/string_number_conversions.h"
+#include "base/strings/string_number_conversions.h"
 
 namespace extensions {
 
+// static
 bool NativeProcessLauncher::LaunchNativeProcess(
-    const FilePath& path,
+    const base::FilePath& path,
     base::ProcessHandle* native_process_handle,
-    NativeMessageProcessHost::FileHandle* read_file,
-    NativeMessageProcessHost::FileHandle* write_file) const {
+    base::PlatformFile* read_file,
+    base::PlatformFile* write_file) {
   NOTREACHED();
   return false;
 }

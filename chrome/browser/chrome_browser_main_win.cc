@@ -16,9 +16,7 @@
 #include "base/memory/scoped_ptr.h"
 #include "base/path_service.h"
 #include "base/scoped_native_library.h"
-#include "base/string_number_conversions.h"
-#include "base/threading/sequenced_worker_pool.h"
-#include "base/time.h"
+#include "base/strings/string_number_conversions.h"
 #include "base/utf_string_conversions.h"
 #include "base/win/metro.h"
 #include "base/win/text_services_message_filter.h"
@@ -43,7 +41,6 @@
 #include "chrome/installer/util/install_util.h"
 #include "chrome/installer/util/l10n_string_util.h"
 #include "chrome/installer/util/shell_util.h"
-#include "content/public/browser/browser_thread.h"
 #include "content/public/common/main_function_params.h"
 #include "grit/app_locale_settings.h"
 #include "grit/chromium_strings.h"
@@ -138,25 +135,22 @@ int DoUninstallTasks(bool chrome_still_running) {
     VLOG(1) << "Executing uninstall actions";
     if (!first_run::RemoveSentinel())
       VLOG(1) << "Failed to delete sentinel file.";
-    // We want to remove user level shortcuts and we only care about the ones
-    // created by us and not by the installer so |alternate| is false.
-    BrowserDistribution* dist = BrowserDistribution::GetDistribution();
-    FilePath chrome_exe;
+    base::FilePath chrome_exe;
     if (PathService::Get(base::FILE_EXE, &chrome_exe)) {
       ShellUtil::ShortcutLocation user_shortcut_locations[] = {
         ShellUtil::SHORTCUT_LOCATION_DESKTOP,
         ShellUtil::SHORTCUT_LOCATION_QUICK_LAUNCH,
         ShellUtil::SHORTCUT_LOCATION_START_MENU,
       };
+      BrowserDistribution* dist = BrowserDistribution::GetDistribution();
       for (size_t i = 0; i < arraysize(user_shortcut_locations); ++i) {
-        if (!ShellUtil::RemoveShortcut(
-                user_shortcut_locations[i], dist, chrome_exe.value(),
-                ShellUtil::CURRENT_USER, NULL)) {
+        if (!ShellUtil::RemoveShortcut(user_shortcut_locations[i], dist,
+                                       chrome_exe, ShellUtil::CURRENT_USER,
+                                       NULL)) {
           VLOG(1) << "Failed to delete shortcut at location "
                   << user_shortcut_locations[i];
         }
       }
-      // TODO(rlp): Cleanup profiles shortcuts.
     } else {
       NOTREACHED();
     }
@@ -230,26 +224,6 @@ void ChromeBrowserMainPartsWin::PreMainMessageLoopRun() {
   removable_device_notifications_window_->Init();
 }
 
-void ChromeBrowserMainPartsWin::PreInteractiveFirstRunInit() {
-  // Trigger the Active Setup command for system-level Chromes to finish
-  // configuring this user's install (e.g. per-user shortcuts).
-  // Delay the task slightly to give Chrome launch I/O priority while also
-  // making sure shortcuts are created promptly to avoid annoying the user by
-  // re-creating shortcuts he previously deleted.
-  static const int64 kTiggerActiveSetupDelaySeconds = 5;
-  FilePath chrome_exe;
-  if (!PathService::Get(base::FILE_EXE, &chrome_exe)) {
-    NOTREACHED();
-  } else if (!InstallUtil::IsPerUserInstall(chrome_exe.value().c_str())) {
-    content::BrowserThread::GetBlockingPool()->PostDelayedTask(
-        FROM_HERE,
-        base::Bind(&InstallUtil::TriggerActiveSetupCommand),
-        base::TimeDelta::FromSeconds(kTiggerActiveSetupDelaySeconds));
-  }
-
-  ChromeBrowserMainParts::PreInteractiveFirstRunInit();
-}
-
 void ChromeBrowserMainPartsWin::ShowMissingLocaleMessageBox() {
   ui::MessageBox(NULL, ASCIIToUTF16(chrome_browser::kMissingLocaleDataMessage),
                  ASCIIToUTF16(chrome_browser::kMissingLocaleDataTitle),
@@ -294,7 +268,7 @@ void ChromeBrowserMainPartsWin::PrepareRestartOnCrashEnviroment(
 void ChromeBrowserMainPartsWin::RegisterApplicationRestart(
     const CommandLine& parsed_command_line) {
   DCHECK(base::win::GetVersion() >= base::win::VERSION_VISTA);
-  base::ScopedNativeLibrary library(FilePath(L"kernel32.dll"));
+  base::ScopedNativeLibrary library(base::FilePath(L"kernel32.dll"));
   // Get the function pointer for RegisterApplicationRestart.
   RegisterApplicationRestartProc register_application_restart =
       static_cast<RegisterApplicationRestartProc>(
@@ -361,11 +335,11 @@ bool ChromeBrowserMainPartsWin::CheckMachineLevelInstall() {
   Version version;
   InstallUtil::GetChromeVersion(dist, true, &version);
   if (version.IsValid()) {
-    FilePath exe_path;
+    base::FilePath exe_path;
     PathService::Get(base::DIR_EXE, &exe_path);
     std::wstring exe = exe_path.value();
-    FilePath user_exe_path(installer::GetChromeInstallPath(false, dist));
-    if (FilePath::CompareEqualIgnoreCase(exe, user_exe_path.value())) {
+    base::FilePath user_exe_path(installer::GetChromeInstallPath(false, dist));
+    if (base::FilePath::CompareEqualIgnoreCase(exe, user_exe_path.value())) {
       bool is_metro = base::win::IsMetroProcess();
       if (!is_metro) {
         // The dialog cannot be shown in Win8 Metro as doing so hangs Chrome on
@@ -381,13 +355,26 @@ bool ChromeBrowserMainPartsWin::CheckMachineLevelInstall() {
       CommandLine uninstall_cmd(
           InstallUtil::GetChromeUninstallCmd(false, dist->GetType()));
       if (!uninstall_cmd.GetProgram().empty()) {
+        uninstall_cmd.AppendSwitch(installer::switches::kSelfDestruct);
         uninstall_cmd.AppendSwitch(installer::switches::kForceUninstall);
         uninstall_cmd.AppendSwitch(
             installer::switches::kDoNotRemoveSharedItems);
-        base::LaunchOptions launch_options;
+
+        const base::FilePath setup_exe(uninstall_cmd.GetProgram());
+        const string16 params(uninstall_cmd.GetArgumentsString());
+
+        SHELLEXECUTEINFO sei = { sizeof(sei) };
+        sei.fMask = SEE_MASK_NOASYNC;
+        sei.nShow = SW_SHOWNORMAL;
+        sei.lpFile = setup_exe.value().c_str();
+        sei.lpParameters = params.c_str();
+        // On Windows 8 SEE_MASK_FLAG_LOG_USAGE is necessary to guarantee we
+        // flip to the Desktop when launching.
         if (is_metro)
-          launch_options.force_breakaway_from_job_ = true;
-        base::LaunchProcess(uninstall_cmd, launch_options, NULL);
+          sei.fMask |= SEE_MASK_FLAG_LOG_USAGE;
+
+        if (!::ShellExecuteEx(&sei))
+          DPCHECK(false);
       }
       return true;
     }

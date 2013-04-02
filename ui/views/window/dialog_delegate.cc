@@ -4,19 +4,54 @@
 
 #include "ui/views/window/dialog_delegate.h"
 
+#include "base/command_line.h"
 #include "base/logging.h"
+#include "ui/base/ui_base_switches.h"
+#include "ui/views/bubble/bubble_border.h"
+#include "ui/views/bubble/bubble_frame_view.h"
 #include "ui/views/controls/button/text_button.h"
 #include "ui/views/widget/widget.h"
+#include "ui/views/widget/widget_observer.h"
 #include "ui/views/window/dialog_client_view.h"
 
 namespace views {
 
+namespace {
+
+// Create a widget to host the dialog.
+Widget* CreateDialogWidgetImpl(DialogDelegateView* dialog_delegate_view,
+                               gfx::NativeWindow context,
+                               gfx::NativeWindow parent) {
+  views::Widget* widget = new views::Widget;
+  views::Widget::InitParams params;
+  params.delegate = dialog_delegate_view;
+  if (DialogDelegate::UseNewStyle()) {
+    // TODO(msw): Avoid Windows native controls or support dialog transparency
+    //            with a separate border Widget, like BubbleDelegateView.
+    params.transparent = views::View::get_use_acceleration_when_possible();
+    params.remove_standard_frame = true;
+  }
+  params.context = context;
+  params.parent = parent;
+  params.top_level = true;
+  widget->Init(params);
+  return widget;
+}
+
+}  // namespace
+
+
 ////////////////////////////////////////////////////////////////////////////////
 // DialogDelegate:
 
-DialogDelegate* DialogDelegate::AsDialogDelegate() { return this; }
-
 DialogDelegate::~DialogDelegate() {
+}
+
+// static
+bool DialogDelegate::UseNewStyle() {
+  static const bool use_new_style = CommandLine::ForCurrentProcess()->HasSwitch(
+      switches::kEnableNewDialogStyle);
+  return use_new_style;
 }
 
 int DialogDelegate::GetDialogButtons() const {
@@ -45,10 +80,6 @@ bool DialogDelegate::IsDialogButtonVisible(ui::DialogButton button) const {
   return true;
 }
 
-bool DialogDelegate::UseChromeStyle() const {
-  return false;
-}
-
 bool DialogDelegate::AreAcceleratorsEnabled(ui::DialogButton button) {
   return true;
 }
@@ -59,6 +90,10 @@ View* DialogDelegate::GetExtraView() {
 
 bool DialogDelegate::GetSizeExtraViewHeightToButtons() {
   return false;
+}
+
+View* DialogDelegate::GetFootnoteView() {
+  return NULL;
 }
 
 bool DialogDelegate::Cancel() {
@@ -93,12 +128,30 @@ View* DialogDelegate::GetInitiallyFocusedView() {
   return NULL;
 }
 
-ClientView* DialogDelegate::CreateClientView(Widget* widget) {
-  DialogClientView::StyleParams params = UseChromeStyle() ?
-      DialogClientView::GetChromeStyleParams() :
-      DialogClientView::StyleParams();
+DialogDelegate* DialogDelegate::AsDialogDelegate() {
+  return this;
+}
 
-  return new DialogClientView(widget, GetContentsView(), params);
+ClientView* DialogDelegate::CreateClientView(Widget* widget) {
+  return new DialogClientView(widget, GetContentsView());
+}
+
+NonClientFrameView* DialogDelegate::CreateNonClientFrameView(Widget* widget) {
+  return UseNewStyle() ? CreateNewStyleFrameView(widget) :
+                         WidgetDelegate::CreateNonClientFrameView(widget);
+}
+
+// static
+NonClientFrameView* DialogDelegate::CreateNewStyleFrameView(Widget* widget) {
+  BubbleFrameView* frame = new BubbleFrameView(gfx::Insets(20, 20, 20, 20));
+  const SkColor color = widget->GetNativeTheme()->GetSystemColor(
+      ui::NativeTheme::kColorId_DialogBackground);
+  frame->SetBubbleBorder(
+      new BubbleBorder(BubbleBorder::FLOAT, BubbleBorder::SMALL_SHADOW, color));
+  frame->SetTitle(widget->widget_delegate()->GetWindowTitle());
+  frame->SetShowCloseButton(true);
+  frame->set_can_drag(true);
+  return frame;
 }
 
 const DialogClientView* DialogDelegate::GetDialogClientView() const {
@@ -117,9 +170,21 @@ ui::AccessibilityTypes::Role DialogDelegate::GetAccessibleWindowRole() const {
 // DialogDelegateView:
 
 DialogDelegateView::DialogDelegateView() {
+  // A WidgetDelegate should be deleted on DeleteDelegate.
+  set_owned_by_client();
 }
 
-DialogDelegateView::~DialogDelegateView() {
+DialogDelegateView::~DialogDelegateView() {}
+
+// static
+Widget* DialogDelegateView::CreateDialogWidget(DialogDelegateView* dialog,
+                                               gfx::NativeWindow context,
+                                               gfx::NativeWindow parent) {
+  return CreateDialogWidgetImpl(dialog, context, parent);
+}
+
+void DialogDelegateView::DeleteDelegate() {
+  delete this;
 }
 
 Widget* DialogDelegateView::GetWidget() {
@@ -128,6 +193,10 @@ Widget* DialogDelegateView::GetWidget() {
 
 const Widget* DialogDelegateView::GetWidget() const {
   return View::GetWidget();
+}
+
+View* DialogDelegateView::GetContentsView() {
+  return this;
 }
 
 }  // namespace views

@@ -161,6 +161,11 @@ class SYNC_EXPORT BaseNode {
   // data.  Can only be called if GetModelType() == EXPERIMENTS.
   const sync_pb::ExperimentsSpecifics& GetExperimentsSpecifics() const;
 
+  // Getter specific to the PRIORITY_PREFERENCE datatype. Returns protobuf
+  // data.  Can only be called if GetModelType() == PRIORITY_PREFERENCE.
+  const sync_pb::PriorityPreferenceSpecifics&
+      GetPriorityPreferenceSpecifics() const;
+
   const sync_pb::EntitySpecifics& GetEntitySpecifics() const;
 
   // Returns the local external ID associated with the node.
@@ -200,11 +205,6 @@ class SYNC_EXPORT BaseNode {
  protected:
   BaseNode();
   virtual ~BaseNode();
-  // The server has a size limit on client tags, so we generate a fixed length
-  // hash locally. This also ensures that ModelTypes have unique namespaces.
-  static std::string GenerateSyncableHash(
-      ModelType model_type,
-      const std::string& client_tag);
 
   // Determines whether part of the entry is encrypted, and if so attempts to
   // decrypt it. Unless decryption is necessary and fails, this will always

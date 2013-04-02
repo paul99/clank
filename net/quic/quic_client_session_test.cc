@@ -17,15 +17,16 @@ namespace net {
 namespace test {
 namespace {
 
+const char kServerHostname[] = "www.example.com";
+
 class QuicClientSessionTest : public ::testing::Test {
  protected:
   QuicClientSessionTest()
       : guid_(1),
         connection_(new PacketSavingConnection(guid_, IPEndPoint())),
-        session_(connection_, NULL, NULL) {
+        session_(connection_, NULL, NULL, kServerHostname) {
   }
 
- protected:
   QuicGuid guid_;
   PacketSavingConnection* connection_;
   QuicClientSession session_;
@@ -36,7 +37,9 @@ class QuicClientSessionTest : public ::testing::Test {
 TEST_F(QuicClientSessionTest, CryptoConnectSendsCorrectData) {
   EXPECT_EQ(ERR_IO_PENDING, session_.CryptoConnect(callback_.callback()));
   ASSERT_EQ(1u, connection_->packets_.size());
-  scoped_ptr<QuicPacket> chlo(ConstructHandshakePacket(guid_, kCHLO));
+  scoped_ptr<QuicPacket> chlo(ConstructClientHelloPacket(
+      guid_, connection_->clock(), connection_->random_generator(),
+      kServerHostname));
   CompareQuicDataWithHexError("CHLO", connection_->packets_[0], chlo.get());
 }
 
@@ -52,6 +55,7 @@ TEST_F(QuicClientSessionTest, CryptoConnectSendsCompletesAfterSHLO) {
 TEST_F(QuicClientSessionTest, MaxNumConnections) {
   // Initialize crypto before the client session will create a stream.
   ASSERT_EQ(ERR_IO_PENDING, session_.CryptoConnect(callback_.callback()));
+  // Simulate the server crypto handshake.
   CryptoHandshakeMessage server_message;
   server_message.tag = kSHLO;
   session_.GetCryptoStream()->OnHandshakeMessage(server_message);

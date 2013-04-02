@@ -17,7 +17,7 @@
 class BookmarkModel;
 class BookmarkNode;
 class Browser;
-class PrefServiceBase;
+class PrefRegistrySyncable;
 class Profile;
 
 namespace content {
@@ -96,10 +96,6 @@ void PasteFromClipboard(BookmarkModel* model,
 // Returns true if the user can copy from the pasteboard.
 bool CanPasteFromClipboard(const BookmarkNode* node);
 
-// Returns a name for the given URL. Used for drags into bookmark areas when
-// the source doesn't specify a title.
-string16 GetNameForURL(const GURL& url);
-
 // Returns a vector containing up to |max_count| of the most recently modified
 // folders. This never returns an empty vector.
 std::vector<const BookmarkNode*> GetMostRecentlyModifiedFolders(
@@ -164,7 +160,7 @@ const BookmarkNode* ApplyEditsWithPossibleFolderChange(
     const GURL& new_url);
 
 // Register user preferences for BookmarksBar.
-void RegisterUserPrefs(PrefServiceBase* prefs);
+void RegisterUserPrefs(PrefRegistrySyncable* registry);
 
 // Returns the parent for newly created folders/bookmarks. If |selection| has
 // one element and it is a folder, |selection[0]| is returned, otherwise
@@ -185,13 +181,6 @@ void AddIfNotBookmarked(BookmarkModel* model,
 
 // Removes all bookmarks for the given |url|.
 void RemoveAllBookmarks(BookmarkModel* model, const GURL& url);
-
-// Number of bookmarks we'll open before prompting the user to see if they
-// really want to open all.
-//
-// NOTE: treat this as a const. It is not const as various tests change the
-// value.
-extern int num_urls_before_prompting;
 
 // This enum is used for the Bookmarks.EntryPoint histogram.
 enum BookmarkEntryPoint {

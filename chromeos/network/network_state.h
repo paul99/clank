@@ -28,21 +28,23 @@ class CHROMEOS_EXPORT NetworkState : public ManagedState {
   const std::string& technology() const { return technology_; }
   const std::string& ip_address() const { return ip_address_; }
   const std::string& device_path() const { return device_path_; }
-  const std::string& state() const { return state_; }
+  const std::string& connection_state() const { return connection_state_; }
   const std::string& error() const { return error_; }
   const std::string& activation_state() const { return activation_state_; }
   const std::string& roaming() const { return roaming_; }
   int signal_strength() const { return signal_strength_; }
+  bool cellular_out_of_credits() const { return cellular_out_of_credits_; }
 
   bool IsConnectedState() const;
   bool IsConnectingState() const;
 
   // Helpers (used e.g. when a state is cached)
-  static bool StateIsConnected(const std::string& state);
-  static bool StateIsConnecting(const std::string& state);
+  static bool StateIsConnected(const std::string& connection_state);
+  static bool StateIsConnecting(const std::string& connection_state);
 
  private:
   friend class NetworkStateHandler;
+  friend class NetworkChangeNotifierChromeosUpdateTest;
 
   // Called by NetworkStateHandler when the ip config changes.
   void set_ip_address(const std::string& ip_address) {
@@ -53,7 +55,7 @@ class CHROMEOS_EXPORT NetworkState : public ManagedState {
   std::string security_;
   std::string device_path_;
   std::string ip_address_;
-  std::string state_;
+  std::string connection_state_;
   std::string error_;
   // Wireless properties
   int signal_strength_;
@@ -61,6 +63,7 @@ class CHROMEOS_EXPORT NetworkState : public ManagedState {
   std::string technology_;
   std::string activation_state_;
   std::string roaming_;
+  bool cellular_out_of_credits_;
 
   DISALLOW_COPY_AND_ASSIGN(NetworkState);
 };

@@ -10,10 +10,11 @@
 #include "base/bind_helpers.h"
 #include "base/location.h"
 #include "base/logging.h"
+#include "base/prefs/pref_registry_simple.h"
+#include "base/prefs/pref_service.h"
 #include "base/prefs/public/pref_service_base.h"
 #include "chrome/browser/browser_process.h"
 #include "chrome/browser/lifetime/application_lifetime.h"
-#include "chrome/browser/prefs/pref_service.h"
 #include "chrome/common/pref_names.h"
 
 namespace chromeos {
@@ -38,8 +39,8 @@ class SessionLengthLimiterDelegateImpl : public SessionLengthLimiter::Delegate {
   SessionLengthLimiterDelegateImpl();
   virtual ~SessionLengthLimiterDelegateImpl();
 
-  virtual const base::Time GetCurrentTime() const;
-  virtual void StopSession();
+  virtual const base::Time GetCurrentTime() const OVERRIDE;
+  virtual void StopSession() OVERRIDE;
 
  private:
   DISALLOW_COPY_AND_ASSIGN(SessionLengthLimiterDelegateImpl);
@@ -65,13 +66,9 @@ SessionLengthLimiter::Delegate::~Delegate() {
 }
 
 // static
-void SessionLengthLimiter::RegisterPrefs(PrefService* local_state) {
-  local_state->RegisterInt64Pref(prefs::kSessionStartTime,
-                                 0,
-                                 PrefService::UNSYNCABLE_PREF);
-  local_state->RegisterIntegerPref(prefs::kSessionLengthLimit,
-                                   0,
-                                   PrefService::UNSYNCABLE_PREF);
+void SessionLengthLimiter::RegisterPrefs(PrefRegistrySimple* registry) {
+  registry->RegisterInt64Pref(prefs::kSessionStartTime, 0);
+  registry->RegisterIntegerPref(prefs::kSessionLengthLimit, 0);
 }
 
 SessionLengthLimiter::SessionLengthLimiter(Delegate* delegate,

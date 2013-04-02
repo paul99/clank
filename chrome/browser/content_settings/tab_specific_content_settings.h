@@ -191,7 +191,6 @@ class TabSpecificContentSettings
     pending_protocol_handler_ = ProtocolHandler::EmptyProtocolHandler();
   }
 
-
   // Sets the previous protocol handler which will be replaced by the
   // pending protocol handler.
   void set_previous_protocol_handler(const ProtocolHandler& handler) {
@@ -230,6 +229,10 @@ class TabSpecificContentSettings
     load_plugins_link_enabled_ = enabled;
   }
 
+  // Called to indicate whether access to the Pepper broker was allowed or
+  // blocked.
+  void SetPepperBrokerAllowed(bool allowed);
+
   // content::WebContentsObserver overrides.
   virtual void RenderViewForInterstitialPageCreated(
       content::RenderViewHost* render_view_host) OVERRIDE;
@@ -243,6 +246,7 @@ class TabSpecificContentSettings
       bool is_main_frame,
       const GURL& validated_url,
       bool is_error_page,
+      bool is_iframe_srcdoc,
       content::RenderViewHost* render_view_host) OVERRIDE;
   virtual void AppCacheAccessed(const GURL& manifest_url,
                                 bool blocked_by_policy) OVERRIDE;
@@ -250,6 +254,7 @@ class TabSpecificContentSettings
   // Message handlers. Public for testing.
   void OnContentBlocked(ContentSettingsType type,
                         const std::string& resource_identifier);
+  void OnContentAccessed(ContentSettingsType type);
 
   // These methods are invoked on the UI thread by the static functions above.
   // Public for testing.
@@ -277,6 +282,9 @@ class TabSpecificContentSettings
   void OnGeolocationPermissionSet(const GURL& requesting_frame,
                                   bool allowed);
 
+  // This method is called when a media stream is accessed.
+  void OnMediaStreamAccessed();
+
   // Adds the given |SiteDataObserver|. The |observer| is notified when a
   // locale shared object, like for example a cookie, is accessed.
   void AddSiteDataObserver(SiteDataObserver* observer);
@@ -290,8 +298,6 @@ class TabSpecificContentSettings
 
   void AddBlockedResource(ContentSettingsType content_type,
                           const std::string& resource_identifier);
-
-  void OnContentAccessed(ContentSettingsType type);
 
   // content::NotificationObserver implementation.
   virtual void Observe(int type,

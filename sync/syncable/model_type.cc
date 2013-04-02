@@ -27,6 +27,10 @@ namespace syncer {
 
 void AddDefaultFieldValue(ModelType datatype,
                           sync_pb::EntitySpecifics* specifics) {
+  if (!ProtocolTypes().Has(datatype)) {
+    NOTREACHED() << "Only protocol types have field values.";
+    return;
+  }
   switch (datatype) {
     case BOOKMARKS:
       specifics->mutable_bookmark();
@@ -76,11 +80,20 @@ void AddDefaultFieldValue(ModelType datatype,
     case HISTORY_DELETE_DIRECTIVES:
       specifics->mutable_history_delete_directive();
       break;
+    case SYNCED_NOTIFICATIONS:
+      specifics->mutable_synced_notification();
+      break;
     case DEVICE_INFO:
       specifics->mutable_device_info();
       break;
     case EXPERIMENTS:
       specifics->mutable_experiments();
+      break;
+    case PRIORITY_PREFERENCES:
+      specifics->mutable_priority_preference();
+      break;
+    case DICTIONARY:
+      specifics->mutable_dictionary();
       break;
     default:
       NOTREACHED() << "No known extension for model type.";
@@ -88,15 +101,20 @@ void AddDefaultFieldValue(ModelType datatype,
 }
 
 ModelType GetModelTypeFromSpecificsFieldNumber(int field_number) {
-  for (int i = FIRST_REAL_MODEL_TYPE; i < MODEL_TYPE_COUNT; ++i) {
-    ModelType model_type = ModelTypeFromInt(i);
-    if (GetSpecificsFieldNumberFromModelType(model_type) == field_number)
-      return model_type;
+  ModelTypeSet protocol_types = ProtocolTypes();
+  for (ModelTypeSet::Iterator iter = protocol_types.First(); iter.Good();
+       iter.Inc()) {
+    if (GetSpecificsFieldNumberFromModelType(iter.Get()) == field_number)
+      return iter.Get();
   }
   return UNSPECIFIED;
 }
 
 int GetSpecificsFieldNumberFromModelType(ModelType model_type) {
+  if (!ProtocolTypes().Has(model_type)) {
+    NOTREACHED() << "Only protocol types have field values.";
+    return 0;
+  }
   switch (model_type) {
     case BOOKMARKS:
       return sync_pb::EntitySpecifics::kBookmarkFieldNumber;
@@ -145,11 +163,19 @@ int GetSpecificsFieldNumberFromModelType(ModelType model_type) {
       break;
     case HISTORY_DELETE_DIRECTIVES:
       return sync_pb::EntitySpecifics::kHistoryDeleteDirectiveFieldNumber;
+    case SYNCED_NOTIFICATIONS:
+      return sync_pb::EntitySpecifics::kSyncedNotificationFieldNumber;
     case DEVICE_INFO:
       return sync_pb::EntitySpecifics::kDeviceInfoFieldNumber;
       break;
     case EXPERIMENTS:
       return sync_pb::EntitySpecifics::kExperimentsFieldNumber;
+      break;
+    case PRIORITY_PREFERENCES:
+      return sync_pb::EntitySpecifics::kPriorityPreferenceFieldNumber;
+      break;
+    case DICTIONARY:
+      return sync_pb::EntitySpecifics::kDictionaryFieldNumber;
       break;
     default:
       NOTREACHED() << "No known extension for model type.";
@@ -246,11 +272,20 @@ ModelType GetModelTypeFromSpecifics(const sync_pb::EntitySpecifics& specifics) {
   if (specifics.has_history_delete_directive())
     return HISTORY_DELETE_DIRECTIVES;
 
+  if (specifics.has_synced_notification())
+    return SYNCED_NOTIFICATIONS;
+
   if (specifics.has_device_info())
     return DEVICE_INFO;
 
   if (specifics.has_experiments())
     return EXPERIMENTS;
+
+  if (specifics.has_priority_preference())
+    return PRIORITY_PREFERENCES;
+
+  if (specifics.has_dictionary())
+    return DICTIONARY;
 
   return UNSPECIFIED;
 }
@@ -259,8 +294,17 @@ bool ShouldMaintainPosition(ModelType model_type) {
   return model_type == BOOKMARKS;
 }
 
+ModelTypeSet ProtocolTypes() {
+  ModelTypeSet set = ModelTypeSet::All();
+  set.RemoveAll(ProxyTypes());
+  return set;
+}
+
 ModelTypeSet UserTypes() {
   ModelTypeSet set;
+  // TODO(sync): We should be able to build the actual enumset's internal
+  // bitset value here at compile time, rather than performing an iteration
+  // every time.
   for (int i = FIRST_USER_MODEL_TYPE; i <= LAST_USER_MODEL_TYPE; ++i) {
     set.Put(ModelTypeFromInt(i));
   }
@@ -271,15 +315,33 @@ ModelTypeSet EncryptableUserTypes() {
   ModelTypeSet encryptable_user_types = UserTypes();
   // We never encrypt history delete directives.
   encryptable_user_types.Remove(HISTORY_DELETE_DIRECTIVES);
+  // Synced notifications are not encrypted since the server must see changes.
+  encryptable_user_types.Remove(SYNCED_NOTIFICATIONS);
+  // Proxy types have no sync representation and are therefore not encrypted.
+  // Note however that proxy types map to one or more protocol types, which
+  // may or may not be encrypted themselves.
+  encryptable_user_types.RemoveAll(ProxyTypes());
   return encryptable_user_types;
 }
 
 ModelTypeSet ControlTypes() {
   ModelTypeSet set;
+  // TODO(sync): We should be able to build the actual enumset's internal
+  // bitset value here at compile time, rather than performing an iteration
+  // every time.
   for (int i = FIRST_CONTROL_MODEL_TYPE; i <= LAST_CONTROL_MODEL_TYPE; ++i) {
     set.Put(ModelTypeFromInt(i));
   }
 
+  // TODO(albertb): Re-enable this when the server supports it.
+  set.Remove(PRIORITY_PREFERENCES);
+
+  return set;
+}
+
+ModelTypeSet ProxyTypes() {
+  ModelTypeSet set;
+  // TODO(zea): add a TABS type here.
   return set;
 }
 
@@ -328,10 +390,16 @@ const char* ModelTypeToString(ModelType model_type) {
       return "App Notifications";
     case HISTORY_DELETE_DIRECTIVES:
       return "History Delete Directives";
+    case SYNCED_NOTIFICATIONS:
+      return "Synced Notifications";
     case DEVICE_INFO:
       return "Device Info";
     case EXPERIMENTS:
       return "Experiments";
+    case PRIORITY_PREFERENCES:
+      return "Priority Preferences";
+    case DICTIONARY:
+      return "Dictionary";
     default:
       break;
   }
@@ -399,10 +467,16 @@ ModelType ModelTypeFromString(const std::string& model_type_string) {
     return APP_NOTIFICATIONS;
   else if (model_type_string == "History Delete Directives")
     return HISTORY_DELETE_DIRECTIVES;
+  else if (model_type_string == "Synced Notifications")
+    return SYNCED_NOTIFICATIONS;
   else if (model_type_string == "Device Info")
     return DEVICE_INFO;
   else if (model_type_string == "Experiments")
     return EXPERIMENTS;
+  else if (model_type_string == "Priority Preferences")
+    return PRIORITY_PREFERENCES;
+  else if (model_type_string == "Dictionary")
+    return DICTIONARY;
   else
     NOTREACHED() << "No known model type corresponding to "
                  << model_type_string << ".";
@@ -439,6 +513,8 @@ ModelTypeSet ModelTypeSetFromValue(const base::ListValue& value) {
 
 // TODO(zea): remove all hardcoded tags in model associators and have them use
 // this instead.
+// NOTE: Proxy types should return empty strings (so that we don't NOTREACHED
+// in tests when we verify they have no root node).
 std::string ModelTypeToRootTag(ModelType type) {
   switch (type) {
     case BOOKMARKS:
@@ -473,10 +549,16 @@ std::string ModelTypeToRootTag(ModelType type) {
       return "google_chrome_app_notifications";
     case HISTORY_DELETE_DIRECTIVES:
       return "google_chrome_history_delete_directives";
+    case SYNCED_NOTIFICATIONS:
+      return "google_chrome_synced_notifications";
     case DEVICE_INFO:
       return "google_chrome_device_info";
     case EXPERIMENTS:
       return "google_chrome_experiments";
+    case PRIORITY_PREFERENCES:
+      return "google_chrome_priority_preferences";
+    case DICTIONARY:
+      return "google_chrome_dictionary";
     default:
       break;
   }
@@ -485,7 +567,8 @@ std::string ModelTypeToRootTag(ModelType type) {
 }
 
 // TODO(akalin): Figure out a better way to do these mappings.
-
+// Note: Do not include proxy types in this list. They should never receive
+// or trigger notifications.
 namespace {
 const char kBookmarkNotificationType[] = "BOOKMARK";
 const char kPreferenceNotificationType[] = "PREFERENCE";
@@ -504,8 +587,11 @@ const char kAutofillProfileNotificationType[] = "AUTOFILL_PROFILE";
 const char kAppNotificationNotificationType[] = "APP_NOTIFICATION";
 const char kHistoryDeleteDirectiveNotificationType[] =
     "HISTORY_DELETE_DIRECTIVE";
+const char kSyncedNotificationType[] = "SYNCED_NOTIFICATION";
 const char kDeviceInfoNotificationType[] = "DEVICE_INFO";
 const char kExperimentsNotificationType[] = "EXPERIMENTS";
+const char kPriorityPreferenceNotificationType[] = "PRIORITY_PREFERENCE";
+const char kDictionaryNotificationType[] = "DICTIONARY";
 }  // namespace
 
 bool RealModelTypeToNotificationType(ModelType model_type,
@@ -558,11 +644,21 @@ bool RealModelTypeToNotificationType(ModelType model_type,
       return true;
     case HISTORY_DELETE_DIRECTIVES:
       *notification_type = kHistoryDeleteDirectiveNotificationType;
+      return true;
+    case SYNCED_NOTIFICATIONS:
+      *notification_type = kSyncedNotificationType;
+      return true;
     case DEVICE_INFO:
       *notification_type = kDeviceInfoNotificationType;
       return true;
     case EXPERIMENTS:
       *notification_type = kExperimentsNotificationType;
+      return true;
+    case PRIORITY_PREFERENCES:
+      *notification_type = kPriorityPreferenceNotificationType;
+      return true;
+    case DICTIONARY:
+      *notification_type = kDictionaryNotificationType;
       return true;
     default:
       break;
@@ -620,8 +716,21 @@ bool NotificationTypeToRealModelType(const std::string& notification_type,
     return true;
   } else if (notification_type == kHistoryDeleteDirectiveNotificationType) {
     *model_type = HISTORY_DELETE_DIRECTIVES;
+    return true;
+  } else if (notification_type == kSyncedNotificationType) {
+    *model_type = SYNCED_NOTIFICATIONS;
+    return true;
   } else if (notification_type == kDeviceInfoNotificationType) {
     *model_type = DEVICE_INFO;;
+    return true;
+  } else if (notification_type == kExperimentsNotificationType) {
+    *model_type = EXPERIMENTS;
+    return true;
+  } else if (notification_type == kPriorityPreferenceNotificationType) {
+    *model_type = PRIORITY_PREFERENCES;
+    return true;
+  } else if (notification_type == kDictionaryNotificationType) {
+    *model_type = DICTIONARY;
     return true;
   }
   *model_type = UNSPECIFIED;

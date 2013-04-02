@@ -20,7 +20,7 @@ class ShaderManagerTest : public testing::Test {
   ShaderManagerTest() {
   }
 
-  ~ShaderManagerTest() {
+  virtual ~ShaderManagerTest() {
     manager_.Destroy(false);
   }
 
@@ -159,6 +159,9 @@ TEST_F(ShaderManagerTest, GetInfo) {
       .WillRepeatedly(ReturnRef(attrib_map));
   EXPECT_CALL(shader_translator, uniform_map())
       .WillRepeatedly(ReturnRef(uniform_map));
+  ShaderTranslator::NameMap name_map;
+  EXPECT_CALL(shader_translator, name_map())
+      .WillRepeatedly(ReturnRef(name_map));
   // Check we can create shader.
   ShaderManager::ShaderInfo* info1 = manager_.CreateShaderInfo(
       kClient1Id, kService1Id, kShader1Type);

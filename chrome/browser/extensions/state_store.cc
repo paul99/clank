@@ -15,7 +15,7 @@ namespace {
 
 // Delay, in seconds, before we should open the State Store database. We
 // defer it to avoid slowing down startup. See http://crbug.com/161848
-const int kInitDelaySeconds = 5;
+const int kInitDelaySeconds = 1;
 
 std::string GetFullKey(const std::string& extension_id,
                        const std::string& key) {
@@ -60,28 +60,34 @@ void StateStore::DelayedTaskQueue::SetReady() {
   pending_tasks_.clear();
 }
 
-StateStore::StateStore(Profile* profile, const FilePath& db_path)
-    : task_queue_(new DelayedTaskQueue()) {
+StateStore::StateStore(Profile* profile,
+                       const base::FilePath& db_path,
+                       bool deferred_load)
+    : db_path_(db_path), task_queue_(new DelayedTaskQueue()) {
   registrar_.Add(this, chrome::NOTIFICATION_EXTENSION_INSTALLED,
                  content::Source<Profile>(profile));
   registrar_.Add(this, chrome::NOTIFICATION_EXTENSION_UNINSTALLED,
                  content::Source<Profile>(profile));
 
-  MessageLoop::current()->PostDelayedTask(FROM_HERE,
-      base::Bind(&StateStore::Init, AsWeakPtr(), db_path),
-      base::TimeDelta::FromSeconds(kInitDelaySeconds));
+  if (deferred_load) {
+    // Don't Init until the first page is loaded.
+    registrar_.Add(this, content::NOTIFICATION_LOAD_COMPLETED_MAIN_FRAME,
+                   content::NotificationService::
+                       AllBrowserContextsAndSources());
+  } else {
+    Init();
+  }
 }
 
 StateStore::StateStore(Profile* profile, ValueStore* value_store)
-    : store_(value_store),
-      task_queue_(new DelayedTaskQueue()) {
+    : store_(value_store), task_queue_(new DelayedTaskQueue()) {
   registrar_.Add(this, chrome::NOTIFICATION_EXTENSION_INSTALLED,
                  content::Source<Profile>(profile));
   registrar_.Add(this, chrome::NOTIFICATION_EXTENSION_UNINSTALLED,
                  content::Source<Profile>(profile));
 
   // This constructor is for testing. No need to delay Init.
-  Init(FilePath());
+  Init();
 }
 
 StateStore::~StateStore() {
@@ -105,36 +111,51 @@ void StateStore::SetExtensionValue(
     scoped_ptr<base::Value> value) {
   task_queue_->InvokeWhenReady(
       base::Bind(&ValueStoreFrontend::Set, base::Unretained(&store_),
-                 GetFullKey(extension_id, key), base::Passed(value.Pass())));
+                 GetFullKey(extension_id, key), base::Passed(&value)));
+}
+
+void StateStore::RemoveExtensionValue(const std::string& extension_id,
+                                      const std::string& key) {
+  task_queue_->InvokeWhenReady(
+      base::Bind(&ValueStoreFrontend::Remove, base::Unretained(&store_),
+                 GetFullKey(extension_id, key)));
 }
 
 void StateStore::Observe(int type,
                          const content::NotificationSource& source,
                          const content::NotificationDetails& details) {
-  std::string extension_id;
-
   switch (type) {
     case chrome::NOTIFICATION_EXTENSION_INSTALLED:
     case chrome::NOTIFICATION_EXTENSION_UNINSTALLED:
-      extension_id = content::Details<const Extension>(details).ptr()->id();
+      RemoveKeysForExtension(
+          content::Details<const Extension>(details).ptr()->id());
+      break;
+    case content::NOTIFICATION_LOAD_COMPLETED_MAIN_FRAME:
+      registrar_.Remove(this, content::NOTIFICATION_LOAD_COMPLETED_MAIN_FRAME,
+                        content::NotificationService::AllSources());
+      MessageLoop::current()->PostDelayedTask(FROM_HERE,
+          base::Bind(&StateStore::Init, AsWeakPtr()),
+          base::TimeDelta::FromSeconds(kInitDelaySeconds));
       break;
     default:
       NOTREACHED();
       return;
   }
+}
 
+void StateStore::Init() {
+  if (!db_path_.empty())
+    store_.Init(db_path_);
+  task_queue_->SetReady();
+}
+
+void StateStore::RemoveKeysForExtension(const std::string& extension_id) {
   for (std::set<std::string>::iterator key = registered_keys_.begin();
        key != registered_keys_.end(); ++key) {
     task_queue_->InvokeWhenReady(
         base::Bind(&ValueStoreFrontend::Remove, base::Unretained(&store_),
                    GetFullKey(extension_id, *key)));
   }
-}
-
-void StateStore::Init(const FilePath& db_path) {
-  if (!db_path.empty())
-    store_.Init(db_path);
-  task_queue_->SetReady();
 }
 
 }  // namespace extensions

@@ -5,7 +5,7 @@
 #include "chrome/browser/tab_contents/spelling_bubble_model.h"
 
 #include "base/logging.h"
-#include "chrome/browser/prefs/pref_service.h"
+#include "base/prefs/pref_service.h"
 #include "chrome/browser/profiles/profile.h"
 #include "chrome/common/pref_names.h"
 #include "chrome/common/url_constants.h"
@@ -21,8 +21,11 @@ using content::Referrer;
 using content::WebContents;
 
 SpellingBubbleModel::SpellingBubbleModel(Profile* profile,
-                                         WebContents* web_contents)
-    : profile_(profile), web_contents_(web_contents) {
+                                         WebContents* web_contents,
+                                         bool include_autocorrect)
+    : profile_(profile),
+      web_contents_(web_contents),
+      include_autocorrect_(include_autocorrect) {
 }
 
 SpellingBubbleModel::~SpellingBubbleModel() {
@@ -51,6 +54,8 @@ void SpellingBubbleModel::Accept() {
   PrefService* pref = profile_->GetPrefs();
   DCHECK(pref);
   pref->SetBoolean(prefs::kSpellCheckUseSpellingService, true);
+  if (include_autocorrect_)
+    pref->SetBoolean(prefs::kEnableAutoSpellCorrect, true);
 }
 
 void SpellingBubbleModel::Cancel() {

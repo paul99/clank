@@ -9,6 +9,8 @@
 #include "ash/system/chromeos/network/network_observer.h"
 #include "ash/system/tray/system_tray.h"
 #include "ash/system/tray/system_tray_notifier.h"
+#include "base/prefs/pref_registry_simple.h"
+#include "base/prefs/pref_service.h"
 #include "base/utf_string_conversions.h"
 #include "chrome/browser/browser_process.h"
 #include "chrome/browser/chromeos/cros/cros_library.h"
@@ -16,7 +18,6 @@
 #include "chrome/browser/chromeos/login/helper.h"
 #include "chrome/browser/chromeos/login/user_manager.h"
 #include "chrome/browser/chromeos/mobile_config.h"
-#include "chrome/browser/prefs/pref_service.h"
 #include "chrome/browser/profiles/profile.h"
 #include "chrome/browser/profiles/profile_manager.h"
 #include "chrome/browser/ui/browser.h"
@@ -127,9 +128,9 @@ DataPromoNotification::~DataPromoNotification() {
   CloseNotification();
 }
 
-void DataPromoNotification::RegisterPrefs(PrefService* local_state) {
+void DataPromoNotification::RegisterPrefs(PrefRegistrySimple* registry) {
   // Carrier deal notification shown count defaults to 0.
-  local_state->RegisterIntegerPref(prefs::kCarrierDealPromoShown, 0);
+  registry->RegisterIntegerPref(prefs::kCarrierDealPromoShown, 0);
 }
 
 void DataPromoNotification::ShowOptionalMobileDataPromoNotification(

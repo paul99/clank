@@ -39,11 +39,11 @@ class CONTENT_EXPORT AVCConfigRecordBuilder {
 
   bool ProcessSPS(H264Parser* parser, const H264NALU& nalu);
   bool ProcessPPS(H264Parser* parser, const H264NALU& nalu);
-  bool BuildConfigRecord(std::vector<uint8>* config_record);
+  std::vector<uint8> BuildConfigRecord();
 
   // Copies data from |nalus| into |record_buffer|. Returns the number of bytes
   // that were written.
-  size_t CopyNALUsToConfigRecord(const NALUVector& nalus, uint8* record_buffer);
+  int CopyNALUsToConfigRecord(const NALUVector& nalus, uint8* record_buffer);
 
   // Data for each SPS.
   NALUVector sps_nalus_;

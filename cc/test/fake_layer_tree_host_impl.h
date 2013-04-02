@@ -14,13 +14,19 @@ namespace cc {
 class FakeLayerTreeHostImpl : public LayerTreeHostImpl {
  public:
   FakeLayerTreeHostImpl(Proxy* proxy);
+  FakeLayerTreeHostImpl(const LayerTreeSettings& settings, Proxy* proxy);
   virtual ~FakeLayerTreeHostImpl();
 
-  using LayerTreeHostImpl::resetNeedsUpdateDrawPropertiesForTesting;
+  void forcePrepareToDraw() {
+    LayerTreeHostImpl::FrameData frameData;
+    prepareToDraw(frameData);
+    didDrawAllLayers(frameData);
+  }
+
+  using LayerTreeHostImpl::activatePendingTree;
 
  private:
   FakeLayerTreeHostImplClient client_;
-  LayerTreeSettings settings_;
 };
 
 }  // namespace cc

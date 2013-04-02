@@ -6,7 +6,7 @@
 
 #include "base/bind.h"
 #include "base/command_line.h"
-#include "chrome/browser/prefs/pref_service.h"
+#include "base/prefs/pref_registry_simple.h"
 #include "chrome/browser/lifetime/application_lifetime.h"
 #include "chrome/browser/ui/browser_otr_state.h"
 #include "chrome/common/chrome_notification_types.h"
@@ -32,9 +32,9 @@ bool UseTestingIntervals() {
 }
 
 // static
-void UpgradeDetector::RegisterPrefs(PrefService* prefs) {
-  prefs->RegisterBooleanPref(prefs::kRestartLastSessionOnShutdown, false);
-  prefs->RegisterBooleanPref(prefs::kWasRestarted, false);
+void UpgradeDetector::RegisterPrefs(PrefRegistrySimple* registry) {
+  registry->RegisterBooleanPref(prefs::kRestartLastSessionOnShutdown, false);
+  registry->RegisterBooleanPref(prefs::kWasRestarted, false);
 }
 
 int UpgradeDetector::GetIconResourceID(UpgradeNotificationIconType type) {

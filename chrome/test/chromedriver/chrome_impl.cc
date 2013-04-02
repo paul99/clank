@@ -4,10 +4,9 @@
 
 #include "chrome/test/chromedriver/chrome_impl.h"
 
+#include <list>
+
 #include "base/json/json_reader.h"
-#include "base/json/json_writer.h"
-#include "base/logging.h"
-#include "base/process_util.h"
 #include "base/stringprintf.h"
 #include "base/threading/platform_thread.h"
 #include "base/time.h"
@@ -17,92 +16,84 @@
 #include "chrome/test/chromedriver/net/sync_websocket_impl.h"
 #include "chrome/test/chromedriver/net/url_request_context_getter.h"
 #include "chrome/test/chromedriver/status.h"
+#include "chrome/test/chromedriver/web_view_impl.h"
 #include "googleurl/src/gurl.h"
-#include "third_party/webdriver/atoms.h"
 
 namespace {
 
 Status FetchPagesInfo(URLRequestContextGetter* context_getter,
                       int port,
-                      std::list<std::string>* debugger_urls) {
-  std::string url = base::StringPrintf(
-      "http://127.0.0.1:%d/json", port);
+                      std::list<std::string>* page_ids) {
+  std::string url = base::StringPrintf("http://127.0.0.1:%d/json", port);
   std::string data;
   if (!FetchUrl(GURL(url), context_getter, &data))
     return Status(kChromeNotReachable);
-  return internal::ParsePagesInfo(data, debugger_urls);
+  return internal::ParsePagesInfo(data, page_ids);
 }
 
 }  // namespace
 
-ChromeImpl::ChromeImpl(base::ProcessHandle process,
-                       URLRequestContextGetter* context_getter,
-                       base::ScopedTempDir* user_data_dir,
+ChromeImpl::ChromeImpl(URLRequestContextGetter* context_getter,
                        int port,
                        const SyncWebSocketFactory& socket_factory)
-    : process_(process),
-      context_getter_(context_getter),
+    : context_getter_(context_getter),
       port_(port),
-      socket_factory_(socket_factory) {
-  if (user_data_dir->IsValid()) {
-    CHECK(user_data_dir_.Set(user_data_dir->Take()));
-  }
-}
+      socket_factory_(socket_factory) {}
 
 ChromeImpl::~ChromeImpl() {
-  base::CloseProcessHandle(process_);
+  web_view_map_.clear();
+}
+
+Status ChromeImpl::GetWebViews(std::list<WebView*>* web_views) {
+  std::list<std::string> ids;
+  Status status = FetchPagesInfo(context_getter_, port_, &ids);
+  if (status.IsError())
+    return status;
+
+  std::list<WebView*> internal_web_views;
+  for (std::list<std::string>::const_iterator it = ids.begin();
+       it != ids.end(); ++it) {
+    WebViewMap::const_iterator found = web_view_map_.find(*it);
+    if (found != web_view_map_.end()) {
+      internal_web_views.push_back(found->second.get());
+      continue;
+    }
+
+    std::string ws_url = base::StringPrintf(
+        "ws://127.0.0.1:%d/devtools/page/%s", port_, it->c_str());
+    web_view_map_[*it] = make_linked_ptr(new WebViewImpl(
+        *it, new DevToolsClientImpl(socket_factory_, ws_url)));
+    internal_web_views.push_back(web_view_map_[*it].get());
+  }
+
+  web_views->swap(internal_web_views);
+  return Status(kOk);
 }
 
 Status ChromeImpl::Init() {
   base::Time deadline = base::Time::Now() + base::TimeDelta::FromSeconds(20);
-  std::list<std::string> debugger_urls;
+  std::list<std::string> page_ids;
   while (base::Time::Now() < deadline) {
-    FetchPagesInfo(context_getter_, port_, &debugger_urls);
-    if (debugger_urls.empty())
+    FetchPagesInfo(context_getter_, port_, &page_ids);
+    if (page_ids.empty())
       base::PlatformThread::Sleep(base::TimeDelta::FromMilliseconds(100));
     else
       break;
   }
-  if (debugger_urls.empty())
+  if (page_ids.empty())
     return Status(kUnknownError, "unable to discover open pages");
-  client_.reset(new DevToolsClientImpl(socket_factory_, debugger_urls.front()));
+
   return Status(kOk);
 }
 
-Status ChromeImpl::Load(const std::string& url) {
-  base::DictionaryValue params;
-  params.SetString("url", url);
-  return client_->SendCommand("Page.navigate", params);
-}
-
-Status ChromeImpl::EvaluateScript(const std::string& expression,
-                                  scoped_ptr<base::Value>* result) {
-  return internal::EvaluateScript(client_.get(), expression, result);
-}
-
-Status ChromeImpl::CallFunction(const std::string& function,
-                                const base::ListValue& args,
-                                scoped_ptr<base::Value>* result) {
-  std::string json;
-  base::JSONWriter::Write(&args, &json);
-  std::string expression = base::StringPrintf(
-      "(%s).apply(null, [%s, %s])",
-      webdriver::atoms::asString(webdriver::atoms::EXECUTE_SCRIPT).c_str(),
-      function.c_str(),
-      json.c_str());
-  return EvaluateScript(expression, result);
-}
-
-Status ChromeImpl::Quit() {
-  if (!base::KillProcess(process_, 0, true))
-    return Status(kUnknownError, "cannot kill Chrome");
-  return Status(kOk);
+int ChromeImpl::GetPort() const {
+  return port_;
 }
 
 namespace internal {
 
 Status ParsePagesInfo(const std::string& data,
-                      std::list<std::string>* debugger_urls) {
+                      std::list<std::string>* page_ids) {
   scoped_ptr<base::Value> value(base::JSONReader::Read(data));
   if (!value.get())
     return Status(kUnknownError, "DevTools returned invalid JSON");
@@ -110,63 +101,22 @@ Status ParsePagesInfo(const std::string& data,
   if (!value->GetAsList(&list))
     return Status(kUnknownError, "DevTools did not return list");
 
-  std::list<std::string> internal_urls;
+  std::list<std::string> ids;
   for (size_t i = 0; i < list->GetSize(); ++i) {
     base::DictionaryValue* info;
     if (!list->GetDictionary(i, &info))
       return Status(kUnknownError, "DevTools contains non-dictionary item");
-    std::string debugger_url;
-    if (!info->GetString("webSocketDebuggerUrl", &debugger_url))
-      return Status(kUnknownError, "DevTools did not include debugger URL");
-    internal_urls.push_back(debugger_url);
+    std::string type;
+    if (!info->GetString("type", &type))
+      return Status(kUnknownError, "DevTools did not include type");
+    if (type != "page")
+      continue;
+    std::string id;
+    if (!info->GetString("id", &id))
+      return Status(kUnknownError, "DevTools did not include id");
+    ids.push_back(id);
   }
-  debugger_urls->swap(internal_urls);
-  return Status(kOk);
-}
-
-Status EvaluateScript(DevToolsClient* client,
-                      const std::string& expression,
-                      scoped_ptr<base::Value>* result) {
-  base::DictionaryValue params;
-  params.SetString("expression", expression);
-  params.SetBoolean("returnByValue", true);
-  scoped_ptr<base::DictionaryValue> cmd_result;
-  Status status = client->SendCommandAndGetResult(
-      "Runtime.evaluate", params, &cmd_result);
-  if (status.IsError())
-    return status;
-
-  bool was_thrown;
-  if (!cmd_result->GetBoolean("wasThrown", &was_thrown))
-    return Status(kUnknownError, "Runtime.evaluate missing 'wasThrown'");
-  if (was_thrown) {
-    std::string description = "unknown";
-    cmd_result->GetString("result.description", &description);
-    return Status(kUnknownError,
-                  "Runtime.evaluate threw exception: " + description);
-  }
-
-  std::string type;
-  if (!cmd_result->GetString("result.type", &type))
-    return Status(kUnknownError, "Runtime.evaluate missing result.type");
-
-  if (type == "undefined") {
-    result->reset(base::Value::CreateNullValue());
-  } else {
-    int status_code;
-    if (!cmd_result->GetInteger("result.value.status", &status_code)) {
-      return Status(kUnknownError,
-                    "Runtime.evaluate missing result.value.status");
-    }
-    if (status_code != kOk)
-      return Status(static_cast<StatusCode>(status_code));
-    base::Value* unscoped_value;
-    if (!cmd_result->Get("result.value.value", &unscoped_value)) {
-      return Status(kUnknownError,
-                    "Runtime.evaluate missing result.value.value");
-    }
-    result->reset(unscoped_value->DeepCopy());
-  }
+  page_ids->swap(ids);
   return Status(kOk);
 }
 

@@ -6,6 +6,9 @@
 
 #include "grit/ui_resources.h"
 #include "ui/base/resource/resource_bundle.h"
+#include "ui/message_center/notification.h"
+#include "ui/message_center/notification_list.h"
+#include "ui/views/background.h"
 #include "ui/views/controls/button/image_button.h"
 #include "ui/views/controls/image_view.h"
 #include "ui/views/controls/label.h"
@@ -19,32 +22,64 @@ const SkColor kNotificationReadColor = SkColorSetRGB(0xfa, 0xfa, 0xfa);
 
 MessageSimpleView::MessageSimpleView(
     NotificationList::Delegate* list_delegate,
-    const NotificationList::Notification& notification)
+    const Notification& notification)
     : MessageView(list_delegate, notification) {
+  views::ImageButton* close = new views::ImageButton(this);
+  close->SetImage(
+      views::CustomButton::STATE_NORMAL,
+      ResourceBundle::GetSharedInstance().GetImageSkiaNamed(IDR_MESSAGE_CLOSE));
+  close->SetImageAlignment(views::ImageButton::ALIGN_CENTER,
+                           views::ImageButton::ALIGN_MIDDLE);
+  old_style_close_button_.reset(close);
 }
 
 MessageSimpleView::~MessageSimpleView() {
+  // old_style_close_button_ has to be cleared before content_view_ is cleared.
+  // Otherwise, resetting content_view_ will delete old_style_close_button_ so
+  // a double-free happens.
+  old_style_close_button_.reset();
+  content_view_.reset();
+}
+
+void MessageSimpleView::Layout() {
+  if (content_view_) {
+    gfx::Rect contents_bounds = GetContentsBounds();
+    content_view_->SetBoundsRect(contents_bounds);
+  }
+}
+
+gfx::Size MessageSimpleView::GetPreferredSize() {
+  if (!content_view_)
+    return gfx::Size();
+  gfx::Size size = content_view_->GetPreferredSize();
+  if (border()) {
+    gfx::Insets border_insets = border()->GetInsets();
+    size.Enlarge(border_insets.width(), border_insets.height());
+  }
+  return size;
 }
 
 void MessageSimpleView::SetUpView() {
-  SkColor bg_color = notification_.is_read ?
-      kNotificationReadColor : kNotificationColor;
-  set_background(views::Background::CreateSolidBackground(bg_color));
-
   views::ImageView* icon = new views::ImageView;
   icon->SetImageSize(
       gfx::Size(kWebNotificationIconSize, kWebNotificationIconSize));
-  icon->SetImage(notification_.image);
+  icon->SetImage(notification().primary_icon);
 
-  views::Label* title = new views::Label(notification_.title);
+  views::Label* title = new views::Label(notification().title);
   title->SetHorizontalAlignment(gfx::ALIGN_LEFT);
   title->SetFont(title->font().DeriveFont(0, gfx::Font::BOLD));
-  views::Label* message = new views::Label(notification_.message);
+  views::Label* message = new views::Label(notification().message);
   message->SetHorizontalAlignment(gfx::ALIGN_LEFT);
   message->SetMultiLine(true);
 
-  views::GridLayout* layout = new views::GridLayout(this);
-  SetLayoutManager(layout);
+  SkColor bg_color = notification().is_read ?
+      kNotificationReadColor : kNotificationColor;
+  content_view_.reset(new views::View);
+  content_view_->set_background(
+      views::Background::CreateSolidBackground(bg_color));
+  AddChildView(content_view_.get());
+  views::GridLayout* layout = new views::GridLayout(content_view_.get());
+  content_view_->SetLayoutManager(layout);
 
   views::ColumnSet* columns = layout->AddColumnSet(0);
 
@@ -62,7 +97,7 @@ void MessageSimpleView::SetUpView() {
   // Notification message text.
   const int message_width = kWebNotificationWidth - kWebNotificationIconSize -
       kWebNotificationButtonWidth - (padding_width * 3) -
-      (scroller_ ? scroller_->GetScrollBarWidth() : 0);
+      (scroller() ? scroller()->GetScrollBarWidth() : 0);
   columns->AddColumn(views::GridLayout::FILL, views::GridLayout::FILL,
                      100, /* resize percent */
                      views::GridLayout::FIXED,
@@ -84,12 +119,18 @@ void MessageSimpleView::SetUpView() {
   layout->StartRow(0, 0);
   layout->AddView(icon, 1, 2);
   layout->AddView(title, 1, 1);
-  layout->AddView(close_button_, 1, 1);
+  layout->AddView(old_style_close_button_.get(), 1, 1);
 
   layout->StartRow(0, 0);
   layout->SkipColumns(2);
   layout->AddView(message, 1, 1);
   layout->AddPaddingRow(0, kPaddingBetweenItems);
+}
+
+void MessageSimpleView::ButtonPressed(views::Button* sender,
+                                      const ui::Event& event) {
+  bool close = (sender == old_style_close_button_.get());
+  MessageView::ButtonPressed(close ? close_button() : sender, event);
 }
 
 }  // namespace message_center

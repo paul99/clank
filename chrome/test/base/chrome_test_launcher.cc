@@ -32,6 +32,11 @@
 #include "ui/views/focus/accelerator_handler.h"
 #endif
 
+#if defined(USE_AURA)
+#include "chrome/test/base/ui_controls.h"
+#include "chrome/test/base/ui_controls_aura.h"
+#endif
+
 const char kEmptyTestName[] = "InProcessBrowserTest.Empty";
 
 class ChromeTestLauncherDelegate : public content::TestLauncherDelegate {
@@ -48,7 +53,7 @@ class ChromeTestLauncherDelegate : public content::TestLauncherDelegate {
   }
 
   virtual bool AdjustChildProcessCommandLine(
-      CommandLine* command_line, const FilePath& temp_data_dir) OVERRIDE {
+      CommandLine* command_line, const base::FilePath& temp_data_dir) OVERRIDE {
     CommandLine new_command_line(command_line->GetProgram());
     CommandLine::SwitchMap switches = command_line->GetSwitches();
 
@@ -80,7 +85,7 @@ class ChromeTestLauncherDelegate : public content::TestLauncherDelegate {
 #endif
   }
 
-  virtual void PostRunMessageLoop() {
+  virtual void PostRunMessageLoop() OVERRIDE {
 #if !defined(USE_AURA) && defined(TOOLKIT_VIEWS)
     if (content::BrowserThread::CurrentlyOn(content::BrowserThread::UI)) {
       DCHECK_EQ(handlers_.empty(), false);
@@ -118,6 +123,20 @@ int main(int argc, char** argv) {
 #if defined(OS_MACOSX)
   chrome_browser_application_mac::RegisterBrowserCrApp();
 #endif
+
+// Only allow ui_controls to be used in interactive_ui_tests, since they depend
+// on focus and can't be sharded.
+#if defined(INTERACTIVE_TESTS)
+
+#if defined(OS_CHROMEOS)
+  ui_controls::InstallUIControlsAura(ui_controls::CreateAshUIControls());
+#elif defined(USE_AURA)
+  // TODO(win_ash): when running interactive_ui_tests for Win Ash, use above.
+  ui_controls::InstallUIControlsAura(ui_controls::CreateUIControlsAura(NULL));
+#endif
+
+#endif
+
   ChromeTestLauncherDelegate launcher_delegate;
   return content::LaunchTests(&launcher_delegate, argc, argv);
 }

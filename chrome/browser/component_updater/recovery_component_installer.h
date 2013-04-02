@@ -11,7 +11,8 @@ class PrefService;
 // Component update registration for the recovery component. The job of the
 // recovery component is to repair the chrome installation or repair the Google
 // update installation. This is a last resort safety mechanism.
-void RegisterRecoveryComponent(ComponentUpdateService* cus, PrefService* prefs);
+void RegisterRecoveryComponent(ComponentUpdateService* cus,
+                               PrefService* prefs);
 
 #endif  // CHROME_BROWSER_COMPONENT_UPDATER_RECOVERY_COMPONENT_INSTALLER_H_
 

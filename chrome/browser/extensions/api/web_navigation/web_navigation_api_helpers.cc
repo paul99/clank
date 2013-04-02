@@ -7,7 +7,7 @@
 #include "chrome/browser/extensions/api/web_navigation/web_navigation_api_helpers.h"
 
 #include "base/json/json_writer.h"
-#include "base/string_number_conversions.h"
+#include "base/strings/string_number_conversions.h"
 #include "base/time.h"
 #include "base/values.h"
 #include "chrome/browser/extensions/api/web_navigation/web_navigation_api_constants.h"
@@ -15,10 +15,10 @@
 #include "chrome/browser/extensions/extension_system.h"
 #include "chrome/browser/extensions/extension_tab_util.h"
 #include "chrome/browser/profiles/profile.h"
-#include "chrome/common/extensions/event_filtering_info.h"
 #include "content/public/browser/render_process_host.h"
 #include "content/public/browser/render_view_host.h"
 #include "content/public/browser/web_contents.h"
+#include "extensions/common/event_filtering_info.h"
 #include "net/base/net_errors.h"
 
 namespace extensions {
@@ -97,15 +97,9 @@ void DispatchOnCommitted(const char* event_name,
   dict->SetInteger(keys::kProcessIdKey,
                    web_contents->GetRenderViewHost()->GetProcess()->GetID());
   dict->SetInteger(keys::kFrameIdKey, GetFrameId(is_main_frame, frame_id));
-  const char *transition_type_as_string =
-      content::PageTransitionGetCoreTransitionString(transition_type);
-  // See http://crbug.com/166166. If you trigger this, please add repro steps
-  // to the bug (or at least report what transition_type you saw).
-  DCHECK(transition_type_as_string)
-      << "Navigation with invalid transition type " << transition_type;
   dict->SetString(
       keys::kTransitionTypeKey,
-      transition_type_as_string ? transition_type_as_string : "unknown");
+      content::PageTransitionGetCoreTransitionString(transition_type));
   ListValue* qualifiers = new ListValue();
   if (transition_type & content::PAGE_TRANSITION_CLIENT_REDIRECT)
     qualifiers->Append(Value::CreateStringValue("client_redirect"));

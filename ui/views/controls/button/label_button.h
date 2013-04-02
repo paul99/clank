@@ -60,6 +60,9 @@ class VIEWS_EXPORT LabelButton : public CustomButton,
   bool native_theme() const { return native_theme_; }
   void SetNativeTheme(bool native_theme);
 
+  // Overridden from View:
+  virtual gfx::Size GetPreferredSize() OVERRIDE;
+
  private:
   FRIEND_TEST_ALL_PREFIXES(LabelButtonTest, Init);
   FRIEND_TEST_ALL_PREFIXES(LabelButtonTest, Label);
@@ -67,15 +70,13 @@ class VIEWS_EXPORT LabelButton : public CustomButton,
   FRIEND_TEST_ALL_PREFIXES(LabelButtonTest, LabelAndImage);
   FRIEND_TEST_ALL_PREFIXES(LabelButtonTest, Font);
 
-  // Resets the colors from the NativeTheme. If |reset_all| is true all colors
-  // are reset, otherwise only those not explicitly set are changed.
-  void ResetColorsFromNativeTheme(bool reset_all);
+  // Resets colors from the NativeTheme, explicitly set colors are unchanged.
+  void ResetColorsFromNativeTheme();
 
   // Overridden from CustomButton:
   virtual void StateChanged() OVERRIDE;
 
   // Overridden from View:
-  virtual gfx::Size GetPreferredSize() OVERRIDE;
   virtual void Layout() OVERRIDE;
   virtual std::string GetClassName() const OVERRIDE;
   virtual void ChildPreferredSizeChanged(View* child) OVERRIDE;

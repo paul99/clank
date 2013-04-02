@@ -4,6 +4,7 @@
 
 #include "chrome/browser/policy/configuration_policy_handler.h"
 
+#include <algorithm>
 #include <string>
 
 #include "base/file_path.h"
@@ -12,8 +13,8 @@
 #include "base/prefs/pref_value_map.h"
 #include "base/stl_util.h"
 #include "base/string16.h"
-#include "base/string_number_conversions.h"
 #include "base/string_util.h"
+#include "base/strings/string_number_conversions.h"
 #include "chrome/browser/download/download_util.h"
 #include "chrome/browser/extensions/external_policy_loader.h"
 #include "chrome/browser/policy/configuration_policy_pref_store.h"
@@ -92,6 +93,9 @@ const DefaultSearchSimplePolicyHandlerEntry kDefaultSearchPolicyMap[] = {
   { key::kDefaultSearchProviderAlternateURLs,
     prefs::kDefaultSearchProviderAlternateURLs,
     Value::TYPE_LIST },
+  { key::kDefaultSearchProviderSearchTermsReplacementKey,
+    prefs::kDefaultSearchProviderSearchTermsReplacementKey,
+    Value::TYPE_STRING },
 };
 
 // List of entries determining which proxy policies can be specified, depending
@@ -209,6 +213,59 @@ bool TypeCheckingPolicyHandler::CheckAndGetValue(const PolicyMap& policies,
   return true;
 }
 
+// IntRangePolicyHandlerBase implementation ------------------------------------
+
+IntRangePolicyHandlerBase::IntRangePolicyHandlerBase(
+    const char* policy_name,
+    int min,
+    int max,
+    bool clamp)
+    : TypeCheckingPolicyHandler(policy_name, base::Value::TYPE_INTEGER),
+      min_(min),
+      max_(max),
+      clamp_(clamp) {
+}
+
+bool IntRangePolicyHandlerBase::CheckPolicySettings(const PolicyMap& policies,
+                                                    PolicyErrorMap* errors) {
+  const base::Value* value;
+  return CheckAndGetValue(policies, errors, &value) &&
+      EnsureInRange(value, NULL, errors);
+}
+
+IntRangePolicyHandlerBase::~IntRangePolicyHandlerBase() {
+}
+
+bool IntRangePolicyHandlerBase::EnsureInRange(const base::Value* input,
+                                              int* output,
+                                              PolicyErrorMap* errors) {
+  if (!input)
+    return true;
+
+  int value;
+  if (!input->GetAsInteger(&value)) {
+    NOTREACHED();
+    return false;
+  }
+
+  if (value < min_ || value > max_) {
+    if (errors) {
+      errors->AddError(policy_name(),
+                       IDS_POLICY_OUT_OF_RANGE_ERROR,
+                       base::IntToString(value));
+    }
+
+    if (!clamp_)
+      return false;
+
+    value = std::min(std::max(value, min_), max_);
+  }
+
+  if (output)
+    *output = value;
+  return true;
+}
+
 // StringToIntEnumListPolicyHandler implementation -----------------------------
 
 StringToIntEnumListPolicyHandler::StringToIntEnumListPolicyHandler(
@@ -282,6 +339,56 @@ bool StringToIntEnumListPolicyHandler::Convert(const base::Value* input,
   }
 
   return true;
+}
+
+// IntRangePolicyHandler implementation ----------------------------------------
+
+IntRangePolicyHandler::IntRangePolicyHandler(const char* policy_name,
+                                             const char* pref_path,
+                                             int min,
+                                             int max,
+                                             bool clamp)
+    : IntRangePolicyHandlerBase(policy_name, min, max, clamp),
+      pref_path_(pref_path) {
+}
+
+IntRangePolicyHandler::~IntRangePolicyHandler() {
+}
+
+void IntRangePolicyHandler::ApplyPolicySettings(const PolicyMap& policies,
+                                                PrefValueMap* prefs) {
+  const base::Value* value = policies.GetValue(policy_name());
+  int value_in_range;
+  if (value && EnsureInRange(value, &value_in_range, NULL)) {
+    prefs->SetValue(pref_path_,
+                    base::Value::CreateIntegerValue(value_in_range));
+  }
+}
+
+// IntPercentageToDoublePolicyHandler implementation ---------------------------
+
+IntPercentageToDoublePolicyHandler::IntPercentageToDoublePolicyHandler(
+    const char* policy_name,
+    const char* pref_path,
+    int min,
+    int max,
+    bool clamp)
+    : IntRangePolicyHandlerBase(policy_name, min, max, clamp),
+      pref_path_(pref_path) {
+}
+
+IntPercentageToDoublePolicyHandler::~IntPercentageToDoublePolicyHandler() {
+}
+
+void IntPercentageToDoublePolicyHandler::ApplyPolicySettings(
+    const PolicyMap& policies,
+    PrefValueMap* prefs) {
+  const base::Value* value = policies.GetValue(policy_name());
+  int percentage;
+  if (value && EnsureInRange(value, &percentage, NULL)) {
+    prefs->SetValue(pref_path_, base::Value::CreateDoubleValue(
+        static_cast<double>(percentage) / 100.));
+  }
 }
 
 // ExtensionListPolicyHandler implementation -----------------------------------
@@ -585,11 +692,11 @@ DownloadDirPolicyHandler::~DownloadDirPolicyHandler() {
 void DownloadDirPolicyHandler::ApplyPolicySettings(const PolicyMap& policies,
                                                    PrefValueMap* prefs) {
   const Value* value = policies.GetValue(policy_name());
-  FilePath::StringType string_value;
+  base::FilePath::StringType string_value;
   if (!value || !value->GetAsString(&string_value))
     return;
 
-  FilePath::StringType expanded_value =
+  base::FilePath::StringType expanded_value =
       policy::path_parser::ExpandPathVariables(string_value);
   // Make sure the path isn't empty, since that will point to an undefined
   // location; the default location is used instead in that case.
@@ -617,9 +724,9 @@ DiskCacheDirPolicyHandler::~DiskCacheDirPolicyHandler() {
 void DiskCacheDirPolicyHandler::ApplyPolicySettings(const PolicyMap& policies,
                                                     PrefValueMap* prefs) {
   const Value* value = policies.GetValue(policy_name());
-  FilePath::StringType string_value;
+  base::FilePath::StringType string_value;
   if (value && value->GetAsString(&string_value)) {
-    FilePath::StringType expanded_value =
+    base::FilePath::StringType expanded_value =
         policy::path_parser::ExpandPathVariables(string_value);
     prefs->SetValue(prefs::kDiskCacheDir,
                     Value::CreateStringValue(expanded_value));
@@ -825,6 +932,8 @@ void DefaultSearchPolicyHandler::ApplyPolicySettings(const PolicyMap& policies,
     prefs->SetString(prefs::kDefaultSearchProviderInstantURL, std::string());
     prefs->SetValue(prefs::kDefaultSearchProviderAlternateURLs,
                     new ListValue());
+    prefs->SetString(prefs::kDefaultSearchProviderSearchTermsReplacementKey,
+                     std::string());
   } else {
     // The search URL is required.  The other entries are optional.  Just make
     // sure that they are all specified via policy, so that the regular prefs
@@ -842,6 +951,8 @@ void DefaultSearchPolicyHandler::ApplyPolicySettings(const PolicyMap& policies,
       EnsureStringPrefExists(prefs, prefs::kDefaultSearchProviderKeyword);
       EnsureStringPrefExists(prefs, prefs::kDefaultSearchProviderInstantURL);
       EnsureListPrefExists(prefs, prefs::kDefaultSearchProviderAlternateURLs);
+      EnsureStringPrefExists(prefs,
+          prefs::kDefaultSearchProviderSearchTermsReplacementKey);
 
       // For the name and keyword, default to the host if not specified.  If
       // there is no host (file: URLs?  Not sure), use "_" to guarantee that the

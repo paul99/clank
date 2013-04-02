@@ -83,6 +83,20 @@ util.getFileErrorString = function(code) {
 };
 
 /**
+ * @param {string} str String to escape.
+ * @return {string} Escaped string.
+ */
+util.htmlEscape = function(str) {
+  return str.replace(/[<>&]/g, function(entity) {
+    switch (entity) {
+      case '<': return '&lt;';
+      case '>': return '&gt;';
+      case '&': return '&amp;';
+    }
+  });
+};
+
+/**
  * @param {string} str String to unescape.
  * @return {string} Unescaped string.
  */
@@ -113,7 +127,7 @@ util.recurseAndResolveEntries = function(entries, recurse, successCallback) {
   var fileEntries = [];
   var fileBytes = 0;
 
-  function pathCompare(a, b) {
+  var pathCompare = function(a, b) {
     if (a.fullPath > b.fullPath)
       return 1;
 
@@ -121,15 +135,15 @@ util.recurseAndResolveEntries = function(entries, recurse, successCallback) {
       return -1;
 
     return 0;
-  }
+  };
 
-  function parentPath(path) {
+  var parentPath = function(path) {
     return path.substring(0, path.lastIndexOf('/'));
-  }
+  };
 
   // We invoke this after each async callback to see if we've received all
   // the expected callbacks.  If so, we're done.
-  function areWeThereYet() {
+  var areWeThereYet = function() {
     if (pendingSubdirectories == 0 && pendingFiles == 0) {
       var result = {
         dirEntries: dirEntries.sort(pathCompare),
@@ -141,9 +155,9 @@ util.recurseAndResolveEntries = function(entries, recurse, successCallback) {
         successCallback(result);
       }
     }
-  }
+  };
 
-  function tallyEntry(entry, originalSourcePath) {
+  var tallyEntry = function(entry, originalSourcePath) {
     entry.originalSourcePath = originalSourcePath;
     if (entry.isDirectory) {
       dirEntries.push(entry);
@@ -159,9 +173,9 @@ util.recurseAndResolveEntries = function(entries, recurse, successCallback) {
         areWeThereYet();
       });
     }
-  }
+  };
 
-  function recurseDirectory(dirEntry, originalSourcePath) {
+  var recurseDirectory = function(dirEntry, originalSourcePath) {
     pendingSubdirectories++;
 
     util.forEachDirEntry(dirEntry, function(entry) {
@@ -173,7 +187,7 @@ util.recurseAndResolveEntries = function(entries, recurse, successCallback) {
           tallyEntry(entry, originalSourcePath);
         }
     });
-  }
+  };
 
   for (var i = 0; i < entries.length; i++) {
     tallyEntry(entries[i], parentPath(entries[i].fullPath));
@@ -192,11 +206,11 @@ util.recurseAndResolveEntries = function(entries, recurse, successCallback) {
 util.forEachDirEntry = function(dirEntry, callback) {
   var reader;
 
-  function onError(err) {
+  var onError = function(err) {
     console.error('Failed to read  dir entries at ' + dirEntry.fullPath);
-  }
+  };
 
-  function onReadSome(results) {
+  var onReadSome = function(results) {
     if (results.length == 0)
       return callback(null);
 
@@ -217,13 +231,13 @@ util.forEachDirEntry = function(dirEntry, callback) {
  * @param {function(Array.<Entry>)} callback List of entries passed to callback.
  */
 util.readDirectory = function(root, path, callback) {
-  function onError(e) {
+  var onError = function(e) {
     callback([], e);
-  }
+  };
   root.getDirectory(path, {create: false}, function(entry) {
     var reader = entry.createReader();
     var r = [];
-    function readNext() {
+    var readNext = function() {
       reader.readEntries(function(results) {
         if (results.length == 0) {
           callback(r, null);
@@ -232,7 +246,7 @@ util.readDirectory = function(root, path, callback) {
         r.push.apply(r, results);
         readNext();
       }, onError);
-    }
+    };
     readNext();
   }, onError);
 };
@@ -263,11 +277,11 @@ util.getDirectories = function(dirEntry, params, paths, successCallback,
   // Copy the params array, since we're going to destroy it.
   params = [].slice.call(params);
 
-  function onComplete() {
+  var onComplete = function() {
     successCallback(null);
-  }
+  };
 
-  function getNextDirectory() {
+  var getNextDirectory = function() {
     var path = paths.shift();
     if (!path)
       return onComplete();
@@ -282,7 +296,7 @@ util.getDirectories = function(dirEntry, params, paths, successCallback,
         errorCallback(err);
         getNextDirectory();
       });
-  }
+  };
 
   getNextDirectory();
 };
@@ -312,11 +326,11 @@ util.getFiles = function(dirEntry, params, paths, successCallback,
   // Copy the params array, since we're going to destroy it.
   params = [].slice.call(params);
 
-  function onComplete() {
+  var onComplete = function() {
     successCallback(null);
-  }
+  };
 
-  function getNextFile() {
+  var getNextFile = function() {
     var path = paths.shift();
     if (!path)
       return onComplete();
@@ -331,7 +345,7 @@ util.getFiles = function(dirEntry, params, paths, successCallback,
         errorCallback(err);
         getNextFile();
       });
-  }
+  };
 
   getNextFile();
 };
@@ -382,10 +396,10 @@ util.getOrCreateFile = function(root, path, successCallback, errorCallback) {
   var dirname = null;
   var basename = null;
 
-  function onDirFound(dirEntry) {
+  var onDirFound = function(dirEntry) {
     dirEntry.getFile(basename, { create: true },
                      successCallback, errorCallback);
-  }
+  };
 
   var i = path.lastIndexOf('/');
   if (i > -1) {
@@ -415,7 +429,7 @@ util.getOrCreateDirectory = function(root, path, successCallback,
                                      errorCallback) {
   var names = path.split('/');
 
-  function getOrCreateNextName(dir) {
+  var getOrCreateNextName = function(dir) {
     if (!names.length)
       return successCallback(dir);
 
@@ -426,7 +440,7 @@ util.getOrCreateDirectory = function(root, path, successCallback,
 
     dir.getDirectory(name, { create: true }, getOrCreateNextName,
                      errorCallback);
-  }
+  };
 
   getOrCreateNextName(root);
 };
@@ -445,61 +459,61 @@ util.removeFileOrDirectory = function(entry, onSuccess, onError) {
 };
 
 /**
- * Units table for bytesToSi.
- * Note: changing this requires some code change in bytesToSi.
- * Note: these values are localized in file_manager.js.
- */
-util.UNITS = ['KB', 'MB', 'GB', 'TB', 'PB'];
-
-/**
- * Scale table for bytesToSi.
- */
-util.SCALE = [Math.pow(2, 10),
-              Math.pow(2, 20),
-              Math.pow(2, 30),
-              Math.pow(2, 40),
-              Math.pow(2, 50)];
-
-/**
- * Convert a number of bytes into an appropriate International System of
- * Units (SI) representation, using the correct number separators.
+ * Convert a number of bytes into a human friendly format, using the correct
+ * number separators.
  *
  * @param {number} bytes The number of bytes.
  * @return {string} Localized string.
  */
-util.bytesToSi = function(bytes) {
-  function str(n, u) {
+util.bytesToString = function(bytes) {
+  // Translation identifiers for size units.
+  var UNITS = ['SIZE_BYTES',
+               'SIZE_KB',
+               'SIZE_MB',
+               'SIZE_GB',
+               'SIZE_TB',
+               'SIZE_PB'];
+
+  // Minimum values for the units above.
+  var STEPS = [0,
+               Math.pow(2, 10),
+               Math.pow(2, 20),
+               Math.pow(2, 30),
+               Math.pow(2, 40),
+               Math.pow(2, 50)];
+
+  var str = function(n, u) {
     // TODO(rginda): Switch to v8Locale's number formatter when it's
     // available.
-    return n.toLocaleString() + ' ' + u;
-  }
+    return strf(u, n.toLocaleString());
+  };
 
-  function fmt(s, u) {
+  var fmt = function(s, u) {
     var rounded = Math.round(bytes / s * 10) / 10;
     return str(rounded, u);
-  }
+  };
 
-  // Less than 1KB is displayed like '0.8 KB'.
-  if (bytes < util.SCALE[0]) {
-    return fmt(util.SCALE[0], util.UNITS[0]);
+  // Less than 1KB is displayed like '80 bytes'.
+  if (bytes < STEPS[1]) {
+    return str(bytes, UNITS[0]);
   }
 
   // Up to 1MB is displayed as rounded up number of KBs.
-  if (bytes < util.SCALE[1]) {
-    var rounded = Math.ceil(bytes / util.SCALE[0]);
-    return str(rounded, util.UNITS[0]);
+  if (bytes < STEPS[2]) {
+    var rounded = Math.ceil(bytes / STEPS[1]);
+    return str(rounded, UNITS[1]);
   }
 
   // This loop index is used outside the loop if it turns out |bytes|
   // requires the largest unit.
   var i;
 
-  for (i = 1; i < util.UNITS.length - 1; i++) {
-    if (bytes < util.SCALE[i + 1])
-      return fmt(util.SCALE[i], util.UNITS[i]);
+  for (i = 2 /* MB */; i < UNITS.length - 1; i++) {
+    if (bytes < STEPS[i + 1])
+      return fmt(STEPS[i], UNITS[i]);
   }
 
-  return fmt(util.SCALE[i], util.UNITS[i]);
+  return fmt(STEPS[i], UNITS[i]);
 };
 
 /**
@@ -536,16 +550,16 @@ if (!Blob.prototype.slice) {
  * @param {function(FileError)} onError Error handler.
  */
 util.writeBlobToFile = function(entry, blob, onSuccess, onError) {
-  function truncate(writer) {
+  var truncate = function(writer) {
     writer.onerror = onError;
     writer.onwriteend = write.bind(null, writer);
     writer.truncate(0);
-  }
+  };
 
-  function write(writer) {
+  var write = function(writer) {
     writer.onwriteend = onSuccess;
     writer.write(blob);
-  }
+  };
 
   entry.createWriter(truncate, onError);
 };
@@ -651,12 +665,12 @@ util.forEachEntryInTree = function(root, callback, max_depth, opt_filter) {
   var pending = 0;
   var cancelled = false;
 
-  function maybeDone() {
+  var maybeDone = function() {
     if (pending == 0 && !cancelled)
       callback(null);
-  }
+  };
 
-  function readEntry(entry, depth) {
+  var readEntry = function(entry, depth) {
     if (cancelled) return;
     if (opt_filter && !opt_filter(entry)) return;
 
@@ -679,7 +693,7 @@ util.forEachEntryInTree = function(root, callback, max_depth, opt_filter) {
         readEntry(childEntry, depth + 1);
       }
     });
-  }
+  };
 
   readEntry(root, 0);
 };
@@ -746,9 +760,9 @@ util.updateAppState = function(replace, path, opt_param) {
   //TODO(kaznacheev): Fix replaceState for component extensions. Currently it
   //does not replace the content of the address bar.
   if (replace)
-    history.replaceState(undefined, path, newLocation);
+    window.history.replaceState(undefined, path, newLocation);
   else
-    history.pushState(undefined, path, newLocation);
+    window.history.pushState(undefined, path, newLocation);
 };
 
 /**
@@ -935,10 +949,10 @@ util.loadScripts = function(urls, onload) {
     onload();
     return;
   }
-  function done() {
+  var done = function() {
     if (--countdown == 0)
       onload();
-  }
+  };
   while (urls.length) {
     var script = document.createElement('script');
     script.src = urls.shift();
@@ -965,11 +979,11 @@ util.__defineGetter__('storage', function() {
   StorageArea.prototype.set = function(items, opt_callback) {
     var changes = {};
     for (var i in items) {
-      changes[i] = {oldValue: localStorage[i], newValue: items[i]};
-      localStorage[i] = items[i];
+      changes[i] = {oldValue: window.localStorage[i], newValue: items[i]};
+      window.localStorage[i] = items[i];
     }
     if (opt_callback)
-      callback();
+      opt_callback();
     for (var i = 0; i < listeners.length; i++) {
       listeners[i](changes, this.type_);
     }
@@ -978,7 +992,7 @@ util.__defineGetter__('storage', function() {
   StorageArea.prototype.get = function(keys, callback) {
     if (!callback) {
       // Since key is optionsl it's the callback.
-      keys(localStorage);
+      keys(window.localStorage);
       return;
     }
     if (typeof(keys) == 'string')
@@ -986,7 +1000,7 @@ util.__defineGetter__('storage', function() {
     var result = {};
     for (var i = 0; i < keys.length; i++) {
       var key = keys[i];
-      result[key] = localStorage[key];
+      result[key] = window.localStorage[key];
     }
     callback(result);
   };

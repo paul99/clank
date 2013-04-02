@@ -4,11 +4,12 @@
 
 #include "base/bind.h"
 #include "base/callback.h"
+#include "base/prefs/mock_pref_change_callback.h"
+#include "base/prefs/pref_notifier_impl.h"
 #include "base/prefs/pref_observer.h"
-#include "chrome/browser/prefs/mock_pref_change_callback.h"
-#include "chrome/browser/prefs/pref_notifier_impl.h"
-#include "chrome/browser/prefs/pref_service.h"
-#include "chrome/browser/prefs/pref_value_store.h"
+#include "base/prefs/pref_registry_simple.h"
+#include "base/prefs/pref_service.h"
+#include "base/prefs/pref_value_store.h"
 #include "chrome/common/chrome_notification_types.h"
 #include "chrome/test/base/testing_pref_service.h"
 #include "testing/gmock/include/gmock/gmock.h"
@@ -93,15 +94,11 @@ class PrefObserverMock : public PrefObserver {
 class PrefNotifierTest : public testing::Test {
  protected:
   virtual void SetUp() {
-    pref_service_.RegisterBooleanPref(kChangedPref,
-                                      true,
-                                      PrefService::UNSYNCABLE_PREF);
-    pref_service_.RegisterBooleanPref(kUnchangedPref,
-                                      true,
-                                      PrefService::UNSYNCABLE_PREF);
+    pref_service_.registry()->RegisterBooleanPref(kChangedPref, true);
+    pref_service_.registry()->RegisterBooleanPref(kUnchangedPref, true);
   }
 
-  TestingPrefService pref_service_;
+  TestingPrefServiceSimple pref_service_;
 
   PrefObserverMock obs1_;
   PrefObserverMock obs2_;

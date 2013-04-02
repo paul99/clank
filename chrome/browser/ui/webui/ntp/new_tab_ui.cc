@@ -15,18 +15,19 @@
 #include "base/lazy_instance.h"
 #include "base/memory/singleton.h"
 #include "base/metrics/histogram.h"
-#include "base/string_number_conversions.h"
+#include "base/prefs/pref_service.h"
+#include "base/strings/string_number_conversions.h"
 #include "base/threading/thread.h"
 #include "base/utf_string_conversions.h"
 #include "chrome/browser/defaults.h"
-#include "chrome/browser/prefs/pref_service.h"
+#include "chrome/browser/extensions/app_launcher.h"
+#include "chrome/browser/prefs/pref_registry_syncable.h"
 #include "chrome/browser/profiles/profile.h"
 #include "chrome/browser/sessions/session_types.h"
 #include "chrome/browser/sync/profile_sync_service.h"
 #include "chrome/browser/themes/theme_service.h"
 #include "chrome/browser/themes/theme_service_factory.h"
 #include "chrome/browser/ui/browser.h"
-#include "chrome/browser/ui/webui/chrome_url_data_manager.h"
 #include "chrome/browser/ui/webui/metrics_handler.h"
 #include "chrome/browser/ui/webui/ntp/favicon_webui_handler.h"
 #include "chrome/browser/ui/webui/ntp/foreign_session_handler.h"
@@ -43,6 +44,7 @@
 #include "content/public/browser/browser_thread.h"
 #include "content/public/browser/notification_service.h"
 #include "content/public/browser/render_view_host.h"
+#include "content/public/browser/url_data_source.h"
 #include "content/public/browser/user_metrics.h"
 #include "content/public/browser/web_contents.h"
 #include "content/public/browser/web_ui.h"
@@ -115,8 +117,7 @@ NewTabUI::NewTabUI(content::WebUI* web_ui)
     if (NewTabUI::IsDiscoveryInNTPEnabled())
       web_ui->AddMessageHandler(new SuggestionsHandler());
     // Android doesn't have a sync promo/username on NTP.
-    if (GetProfile()->IsSyncAccessible())
-      web_ui->AddMessageHandler(new NewTabPageSyncHandler());
+    web_ui->AddMessageHandler(new NewTabPageSyncHandler());
 
     // Or apps.
     if (ShouldShowApps()) {
@@ -161,7 +162,7 @@ NewTabUI::NewTabUI(content::WebUI* web_ui)
   // tests immediately deletes it, so html_source should not be accessed after
   // this call.
   Profile* profile = GetProfile();
-  ChromeURLDataManager::AddDataSource(profile, html_source);
+  content::URLDataSource::Add(profile, html_source);
 
   pref_change_registrar_.Init(GetProfile()->GetPrefs());
   pref_change_registrar_.Add(prefs::kShowBookmarkBar,
@@ -276,31 +277,30 @@ void NewTabUI::InitializeCSSCaches() {
 #if defined(ENABLE_THEMES)
   Profile* profile = GetProfile();
   ThemeSource* theme = new ThemeSource(profile);
-  ChromeURLDataManager::AddDataSource(profile, theme);
+  content::URLDataSource::Add(profile, theme);
 #endif
 }
 
 // static
-void NewTabUI::RegisterUserPrefs(PrefService* prefs) {
+void NewTabUI::RegisterUserPrefs(PrefRegistrySyncable* registry) {
 #if !defined(OS_ANDROID)
-  AppLauncherHandler::RegisterUserPrefs(prefs);
-  NewTabPageHandler::RegisterUserPrefs(prefs);
+  AppLauncherHandler::RegisterUserPrefs(registry);
+  NewTabPageHandler::RegisterUserPrefs(registry);
   if (NewTabUI::IsDiscoveryInNTPEnabled())
-    SuggestionsHandler::RegisterUserPrefs(prefs);
+    SuggestionsHandler::RegisterUserPrefs(registry);
 #endif
-  MostVisitedHandler::RegisterUserPrefs(prefs);
-  browser_sync::ForeignSessionHandler::RegisterUserPrefs(prefs);
+  MostVisitedHandler::RegisterUserPrefs(registry);
+  browser_sync::ForeignSessionHandler::RegisterUserPrefs(registry);
 }
 
 // static
 bool NewTabUI::ShouldShowApps() {
-#if defined(USE_ASH) || defined(OS_ANDROID)
+#if defined(OS_ANDROID)
   // Ash shows apps in app list thus should not show apps page in NTP4.
   // Android does not have apps.
   return false;
 #else
-  return !CommandLine::ForCurrentProcess()->HasSwitch(
-      switches::kShowAppListShortcut);
+  return !extensions::IsAppLauncherEnabled();
 #endif
 }
 
@@ -362,13 +362,17 @@ Profile* NewTabUI::GetProfile() const {
 // NewTabHTMLSource
 
 NewTabUI::NewTabHTMLSource::NewTabHTMLSource(Profile* profile)
-    : DataSource(chrome::kChromeUINewTabHost, MessageLoop::current()),
-      profile_(profile) {
+    : profile_(profile) {
 }
 
-void NewTabUI::NewTabHTMLSource::StartDataRequest(const std::string& path,
-                                                  bool is_incognito,
-                                                  int request_id) {
+std::string NewTabUI::NewTabHTMLSource::GetSource() {
+  return chrome::kChromeUINewTabHost;
+}
+
+void NewTabUI::NewTabHTMLSource::StartDataRequest(
+    const std::string& path,
+    bool is_incognito,
+    const content::URLDataSource::GotDataCallback& callback) {
   DCHECK(BrowserThread::CurrentlyOn(BrowserThread::UI));
 
   std::map<std::string, std::pair<std::string, int> >::iterator it =
@@ -379,7 +383,7 @@ void NewTabUI::NewTabHTMLSource::StartDataRequest(const std::string& path,
             ResourceBundle::GetSharedInstance().LoadDataResourceBytes(
                 it->second.second) :
             new base::RefCountedStaticMemory);
-    SendResponse(request_id, resource_bytes);
+    callback.Run(resource_bytes);
     return;
   }
 
@@ -401,7 +405,7 @@ void NewTabUI::NewTabHTMLSource::StartDataRequest(const std::string& path,
       NTPResourceCacheFactory::GetForProfile(profile_)->
       GetNewTabHTML(is_incognito));
 
-  SendResponse(request_id, html_bytes);
+  callback.Run(html_bytes);
 }
 
 std::string NewTabUI::NewTabHTMLSource::GetMimeType(const std::string& resource)
@@ -414,6 +418,10 @@ std::string NewTabUI::NewTabHTMLSource::GetMimeType(const std::string& resource)
 }
 
 bool NewTabUI::NewTabHTMLSource::ShouldReplaceExistingSource() const {
+  return false;
+}
+
+bool NewTabUI::NewTabHTMLSource::ShouldAddContentSecurityPolicy() const {
   return false;
 }
 

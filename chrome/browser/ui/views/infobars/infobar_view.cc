@@ -56,7 +56,7 @@ const int InfoBarView::kButtonButtonSpacing = 10;
 const int InfoBarView::kEndOfLabelSpacing = 16;
 const int InfoBarView::kHorizontalPadding = 6;
 
-InfoBarView::InfoBarView(InfoBarTabHelper* owner, InfoBarDelegate* delegate)
+InfoBarView::InfoBarView(InfoBarService* owner, InfoBarDelegate* delegate)
     : InfoBar(owner, delegate),
       icon_(NULL),
       close_button_(NULL) {
@@ -146,7 +146,7 @@ views::TextButton* InfoBarView::CreateTextButton(
           icon_info.hIcon, gfx::Size(GetSystemMetrics(SM_CXSMICON),
                                      GetSystemMetrics(SM_CYSMICON))));
       if (icon.get())
-        text_button->SetIcon(gfx::ImageSkia(*icon));
+        text_button->SetIcon(gfx::ImageSkia::CreateFrom1xBitmap(*icon));
       DestroyIcon(icon_info.hIcon);
     }
   }

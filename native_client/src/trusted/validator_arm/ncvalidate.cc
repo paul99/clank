@@ -13,7 +13,7 @@
 #include "native_client/src/shared/platform/nacl_check.h"
 #include "native_client/src/shared/platform/nacl_log.h"
 #include "native_client/src/trusted/service_runtime/nacl_config.h"
-#include "native_client/src/trusted/validator_arm/cpuid_arm.h"
+#include "native_client/src/trusted/cpu_features/arch/arm/cpu_arm.h"
 #include "native_client/src/trusted/validator_arm/model.h"
 #include "native_client/src/trusted/validator_arm/validator.h"
 #include "native_client/src/trusted/validator/ncvalidate.h"
@@ -87,8 +87,11 @@ static NaClValidationStatus ValidatorCopyArm(
   CheckAddressOverflow(data_old, size);
   CheckAddressOverflow(data_new, size);
 
-  CodeSegment dest_code(data_old, guest_addr, size);
-  CodeSegment source_code(data_new, guest_addr, size);
+  // guest_addr should always be within 4GB, so static casts should not cause
+  // any problems here. They are needed to shut up VC compiler.
+  CHECK(guest_addr <= std::numeric_limits<uint32_t>::max());
+  CodeSegment dest_code(data_old, static_cast<uint32_t>(guest_addr), size);
+  CodeSegment source_code(data_new, static_cast<uint32_t>(guest_addr), size);
   EarlyExitProblemSink sink;
   SfiValidator validator(
       kBytesPerBundle,
@@ -117,8 +120,9 @@ static NaClValidationStatus ValidatorCodeReplacementArm(
   CheckAddressOverflow(data_old, size);
   CheckAddressOverflow(data_new, size);
 
-  CodeSegment new_code(data_new, guest_addr, size);
-  CodeSegment old_code(data_old, guest_addr, size);
+  CHECK(guest_addr <= std::numeric_limits<uint32_t>::max());
+  CodeSegment new_code(data_new, static_cast<uint32_t>(guest_addr), size);
+  CodeSegment old_code(data_old, static_cast<uint32_t>(guest_addr), size);
   EarlyExitProblemSink sink;
   SfiValidator validator(
       kBytesPerBundle,
@@ -181,8 +185,13 @@ static NaClValidationStatus ApplyValidatorArm(
   if (readonly_text)
     return NaClValidationFailedNotImplemented;
 
-  return ((0 == NCValidateSegment(data, guest_addr, size, cpu_features))
-           ? NaClValidationSucceeded : NaClValidationFailed);
+  CHECK(guest_addr <= std::numeric_limits<uint32_t>::max());
+  return (NCValidateSegment(data,
+                            static_cast<uint32_t>(guest_addr),
+                            size,
+                            cpu_features) == 0)
+         ? NaClValidationSucceeded
+         : NaClValidationFailed;
 }
 
 static struct NaClValidatorInterface validator = {

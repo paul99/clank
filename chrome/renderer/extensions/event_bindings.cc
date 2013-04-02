@@ -13,7 +13,6 @@
 #include "base/message_loop.h"
 #include "chrome/common/extensions/extension_messages.h"
 #include "chrome/common/extensions/extension_set.h"
-#include "chrome/common/extensions/event_filter.h"
 #include "chrome/common/extensions/value_counter.h"
 #include "chrome/common/url_constants.h"
 #include "chrome/common/view_type.h"
@@ -26,13 +25,14 @@
 #include "chrome/renderer/extensions/user_script_slave.h"
 #include "content/public/renderer/render_thread.h"
 #include "content/public/renderer/v8_value_converter.h"
+#include "extensions/common/event_filter.h"
 #include "googleurl/src/gurl.h"
 #include "grit/renderer_resources.h"
+#include "third_party/WebKit/Source/Platform/chromium/public/WebURL.h"
+#include "third_party/WebKit/Source/Platform/chromium/public/WebURLRequest.h"
 #include "third_party/WebKit/Source/WebKit/chromium/public/WebDocument.h"
 #include "third_party/WebKit/Source/WebKit/chromium/public/WebFrame.h"
 #include "third_party/WebKit/Source/WebKit/chromium/public/WebSecurityOrigin.h"
-#include "third_party/WebKit/Source/WebKit/chromium/public/platform/WebURL.h"
-#include "third_party/WebKit/Source/WebKit/chromium/public/platform/WebURLRequest.h"
 #include "third_party/WebKit/Source/WebKit/chromium/public/WebView.h"
 #include "v8/include/v8.h"
 
@@ -72,7 +72,6 @@ base::LazyInstance<extensions::EventFilter> g_event_filter =
 // TODO(koz): Merge this into EventBindings.
 class ExtensionImpl : public ChromeV8Extension {
  public:
-
   explicit ExtensionImpl(Dispatcher* dispatcher)
       : ChromeV8Extension(dispatcher) {
     RouteStaticFunction("AttachEvent", &AttachEvent);
@@ -82,7 +81,7 @@ class ExtensionImpl : public ChromeV8Extension {
     RouteStaticFunction("MatchAgainstEventFilter", &MatchAgainstEventFilter);
   }
 
-  ~ExtensionImpl() {}
+  virtual ~ExtensionImpl() {}
 
   // Attach an event name to an object.
   static v8::Handle<v8::Value> AttachEvent(const v8::Arguments& args) {

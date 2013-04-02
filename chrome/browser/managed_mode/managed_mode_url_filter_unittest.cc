@@ -10,42 +10,21 @@
 #include "googleurl/src/gurl.h"
 #include "testing/gtest/include/gtest/gtest.h"
 
-namespace {
-
-class FailClosureHelper : public base::RefCountedThreadSafe<FailClosureHelper> {
+class ManagedModeURLFilterTest : public ::testing::Test,
+                                 public ManagedModeURLFilter::Observer {
  public:
-  explicit FailClosureHelper(const base::Closure& cb) : closure_runner_(cb) {}
-
-  void Fail() {
-    FAIL();
+  ManagedModeURLFilterTest() : filter_(new ManagedModeURLFilter) {
+    filter_->SetDefaultFilteringBehavior(ManagedModeURLFilter::BLOCK);
+    filter_->AddObserver(this);
   }
 
- private:
-  friend class base::RefCountedThreadSafe<FailClosureHelper>;
+  virtual ~ManagedModeURLFilterTest() {
+    filter_->RemoveObserver(this);
+  }
 
-  virtual ~FailClosureHelper() {}
-
-  base::ScopedClosureRunner closure_runner_;
-};
-
-// Returns a closure that FAILs when it is called. As soon as the closure is
-// destroyed (because the last reference to it is dropped), |continuation| is
-// called.
-base::Closure FailClosure(const base::Closure& continuation) {
-  scoped_refptr<FailClosureHelper> helper = new FailClosureHelper(continuation);
-  return base::Bind(&FailClosureHelper::Fail, helper);
-}
-
-}  // namespace
-
-class ManagedModeURLFilterTest : public ::testing::Test {
- public:
-  ManagedModeURLFilterTest() {}
-  virtual ~ManagedModeURLFilterTest() {}
-
-  virtual void SetUp() OVERRIDE {
-    filter_.reset(new ManagedModeURLFilter);
-    filter_->SetDefaultFilteringBehavior(ManagedModeURLFilter::BLOCK);
+  // ManagedModeURLFilter::Observer:
+  virtual void OnSiteListUpdated() OVERRIDE {
+    run_loop_.Quit();
   }
 
  protected:
@@ -56,14 +35,14 @@ class ManagedModeURLFilterTest : public ::testing::Test {
 
   MessageLoop message_loop_;
   base::RunLoop run_loop_;
-  scoped_ptr<ManagedModeURLFilter> filter_;
+  scoped_refptr<ManagedModeURLFilter> filter_;
 };
 
 TEST_F(ManagedModeURLFilterTest, Basic) {
   std::vector<std::string> list;
   // Allow domain and all subdomains, for any filtered scheme.
   list.push_back("google.com");
-  filter_->SetFromPatterns(list, run_loop_.QuitClosure());
+  filter_->SetFromPatterns(list);
   run_loop_.Run();
 
   EXPECT_TRUE(IsURLWhitelisted("http://google.com"));
@@ -85,21 +64,12 @@ TEST_F(ManagedModeURLFilterTest, Inactive) {
 
   std::vector<std::string> list;
   list.push_back("google.com");
-  filter_->SetFromPatterns(list, run_loop_.QuitClosure());
+  filter_->SetFromPatterns(list);
   run_loop_.Run();
 
   // If the filter is inactive, every URL should be whitelisted.
   EXPECT_TRUE(IsURLWhitelisted("http://google.com"));
   EXPECT_TRUE(IsURLWhitelisted("https://www.example.com"));
-}
-
-TEST_F(ManagedModeURLFilterTest, Shutdown) {
-  std::vector<std::string> list;
-  list.push_back("google.com");
-  filter_->SetFromPatterns(list, FailClosure(run_loop_.QuitClosure()));
-  // Destroy the filter before we set the URLMatcher.
-  filter_.reset();
-  run_loop_.Run();
 }
 
 TEST_F(ManagedModeURLFilterTest, Scheme) {
@@ -108,7 +78,7 @@ TEST_F(ManagedModeURLFilterTest, Scheme) {
   list.push_back("http://secure.com");
   list.push_back("ftp://secure.com");
   list.push_back("ws://secure.com");
-  filter_->SetFromPatterns(list, run_loop_.QuitClosure());
+  filter_->SetFromPatterns(list);
   run_loop_.Run();
 
   EXPECT_TRUE(IsURLWhitelisted("http://secure.com"));
@@ -126,7 +96,7 @@ TEST_F(ManagedModeURLFilterTest, Path) {
   std::vector<std::string> list;
   // Filter only a certain path prefix.
   list.push_back("path.to/ruin");
-  filter_->SetFromPatterns(list, run_loop_.QuitClosure());
+  filter_->SetFromPatterns(list);
   run_loop_.Run();
 
   EXPECT_TRUE(IsURLWhitelisted("http://path.to/ruin"));
@@ -141,7 +111,7 @@ TEST_F(ManagedModeURLFilterTest, PathAndScheme) {
   std::vector<std::string> list;
   // Filter only a certain path prefix and scheme.
   list.push_back("https://s.aaa.com/path");
-  filter_->SetFromPatterns(list, run_loop_.QuitClosure());
+  filter_->SetFromPatterns(list);
   run_loop_.Run();
 
   EXPECT_TRUE(IsURLWhitelisted("https://s.aaa.com/path"));
@@ -157,7 +127,7 @@ TEST_F(ManagedModeURLFilterTest, Host) {
   std::vector<std::string> list;
   // Filter only a certain hostname, without subdomains.
   list.push_back(".www.example.com");
-  filter_->SetFromPatterns(list, run_loop_.QuitClosure());
+  filter_->SetFromPatterns(list);
   run_loop_.Run();
 
   EXPECT_TRUE(IsURLWhitelisted("http://www.example.com"));
@@ -169,7 +139,7 @@ TEST_F(ManagedModeURLFilterTest, IPAddress) {
   std::vector<std::string> list;
   // Filter an ip address.
   list.push_back("123.123.123.123");
-  filter_->SetFromPatterns(list, run_loop_.QuitClosure());
+  filter_->SetFromPatterns(list);
   run_loop_.Run();
 
   EXPECT_TRUE(IsURLWhitelisted("http://123.123.123.123/"));

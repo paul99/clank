@@ -5,11 +5,11 @@
 #include "chrome/browser/ui/views/extensions/disabled_extensions_view.h"
 
 #include "base/metrics/histogram.h"
-#include "base/string_number_conversions.h"
+#include "base/prefs/pref_service.h"
+#include "base/strings/string_number_conversions.h"
 #include "base/utf_string_conversions.h"
 #include "chrome/browser/extensions/extension_service.h"
 #include "chrome/browser/extensions/extension_system.h"
-#include "chrome/browser/prefs/pref_service.h"
 #include "chrome/browser/profiles/profile.h"
 #include "chrome/browser/ui/browser.h"
 #include "chrome/browser/ui/singleton_tabs.h"
@@ -25,8 +25,8 @@
 #include "ui/base/resource/resource_bundle.h"
 #include "ui/views/bubble/bubble_border.h"
 #include "ui/views/controls/button/text_button.h"
-#include "ui/views/controls/label.h"
 #include "ui/views/controls/image_view.h"
+#include "ui/views/controls/label.h"
 #include "ui/views/controls/link.h"
 #include "ui/views/layout/grid_layout.h"
 #include "ui/views/layout/layout_constants.h"
@@ -85,10 +85,6 @@ DisabledExtensionsView::DisabledExtensionsView(
   set_close_on_deactivate(false);
   set_move_with_anchor(true);
   set_close_on_esc(true);
-
-  // TODO(finnur): Until http://crbug.com/165808 is fixed, we need to turn off
-  // the shadow because it causes the bubble to overlap the window border.
-  set_shadow(views::BubbleBorder::NO_SHADOW);
 
   // Compensate for built-in vertical padding in the anchor view's image.
   set_anchor_insets(gfx::Insets(5, 0, 5, 0));

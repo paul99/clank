@@ -22,12 +22,13 @@
 namespace {
 
 // Retrieves the executable and profile paths on the FILE thread.
-void GetFilePaths(const FilePath& profile_path,
+void GetFilePaths(const base::FilePath& profile_path,
                   string16* exec_path_out,
                   string16* profile_path_out) {
   DCHECK(content::BrowserThread::CurrentlyOn(content::BrowserThread::FILE));
 
-  FilePath executable_path = CommandLine::ForCurrentProcess()->GetProgram();
+  base::FilePath executable_path =
+      CommandLine::ForCurrentProcess()->GetProgram();
   if (file_util::AbsolutePath(&executable_path)) {
     *exec_path_out = executable_path.LossyDisplayName();
   } else {
@@ -35,7 +36,7 @@ void GetFilePaths(const FilePath& profile_path,
         l10n_util::GetStringUTF16(IDS_ABOUT_VERSION_PATH_NOTFOUND);
   }
 
-  FilePath profile_path_copy(profile_path);
+  base::FilePath profile_path_copy(profile_path);
   if (!profile_path.empty() && file_util::AbsolutePath(&profile_path_copy)) {
     *profile_path_out = profile_path.LossyDisplayName();
   } else {
@@ -61,11 +62,13 @@ void VersionHandler::RegisterMessages() {
 }
 
 void VersionHandler::HandleRequestVersionInfo(const ListValue* args) {
+#if defined(ENABLE_PLUGINS)
   // The Flash version information is needed in the response, so make sure
   // the plugins are loaded.
   content::PluginService::GetInstance()->GetPlugins(
       base::Bind(&VersionHandler::OnGotPlugins,
           weak_ptr_factory_.GetWeakPtr()));
+#endif
 
   // Grab the executable path on the FILE thread. It is returned in
   // OnGotFilePaths.
@@ -124,9 +127,9 @@ void VersionHandler::OnGotFilePaths(string16* executable_path_data,
   web_ui()->CallJavascriptFunction("returnFilePaths", exec_path, profile_path);
 }
 
+#if defined(ENABLE_PLUGINS)
 void VersionHandler::OnGotPlugins(
     const std::vector<webkit::WebPluginInfo>& plugins) {
-#if !defined(OS_ANDROID)
   // Obtain the version of the first enabled Flash plugin.
   std::vector<webkit::WebPluginInfo> info_array;
   content::PluginService::GetInstance()->GetPluginInfoArray(
@@ -146,5 +149,5 @@ void VersionHandler::OnGotPlugins(
 
   StringValue arg(flash_version);
   web_ui()->CallJavascriptFunction("returnFlashVersion", arg);
-#endif
 }
+#endif  // defined(ENABLE_PLUGINS)

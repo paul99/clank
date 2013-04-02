@@ -42,7 +42,7 @@ class DockedPanelCollection :
   // one that is transitioning from another grouping of panels.
   virtual void AddPanel(Panel* panel,
                         PositioningMask positioning_mask) OVERRIDE;
-  virtual void RemovePanel(Panel* panel) OVERRIDE;
+  virtual void RemovePanel(Panel* pane, RemovalReason reasonl) OVERRIDE;
   virtual void CloseAll() OVERRIDE;
   virtual void ResizePanelWindow(
       Panel* panel,
@@ -57,25 +57,19 @@ class DockedPanelCollection :
   virtual void ActivatePanel(Panel* panel) OVERRIDE;
   virtual void MinimizePanel(Panel* panel) OVERRIDE;
   virtual void RestorePanel(Panel* panel) OVERRIDE;
-  virtual void MinimizeAll() OVERRIDE;
-  virtual void RestoreAll() OVERRIDE;
-  virtual bool CanMinimizePanel(const Panel* panel) const OVERRIDE;
+  virtual void OnMinimizeButtonClicked(Panel* panel,
+                                       panel::ClickModifier modifier) OVERRIDE;
+  virtual void OnRestoreButtonClicked(Panel* panel,
+                                      panel::ClickModifier modifier) OVERRIDE;
+  virtual bool CanShowMinimizeButton(const Panel* panel) const OVERRIDE;
+  virtual bool CanShowRestoreButton(const Panel* panel) const OVERRIDE;
   virtual bool IsPanelMinimized(const Panel* panel) const OVERRIDE;
   virtual void SavePanelPlacement(Panel* panel) OVERRIDE;
   virtual void RestorePanelToSavedPlacement() OVERRIDE;
   virtual void DiscardSavedPanelPlacement() OVERRIDE;
-  virtual void StartDraggingPanelWithinCollection(Panel* panel) OVERRIDE;
-  virtual void DragPanelWithinCollection(
-      Panel* panel,
-      const gfx::Point& target_position) OVERRIDE;
-  virtual void EndDraggingPanelWithinCollection(Panel* panel,
-                                                bool aborted) OVERRIDE;
-  virtual void ClearDraggingStateWhenPanelClosed() OVERRIDE;
   virtual void UpdatePanelOnCollectionChange(Panel* panel) OVERRIDE;
+  virtual void OnPanelExpansionStateChanged(Panel* panel) OVERRIDE;
   virtual void OnPanelActiveStateChanged(Panel* panel) OVERRIDE;
-
-  // Invoked when a panel's expansion state changes.
-  void OnPanelExpansionStateChanged(Panel* panel);
 
   // Returns true if we should bring up the titlebars, given the current mouse
   // point.
@@ -119,6 +113,8 @@ class DockedPanelCollection :
 #endif
 
  private:
+  friend class DockedPanelDragHandler;
+
   enum TitlebarAction {
     NO_ACTION,
     BRING_UP,
@@ -148,15 +144,15 @@ class DockedPanelCollection :
   // Keep track of the minimized panels to control mouse watching.
   void UpdateMinimizedPanelCount();
 
+  // Minimizes or restores all panels in the collection.
+  void MinimizeAll();
+  void RestoreAll();
+
   // Makes sure the panel's bounds reflect its expansion state and the
   // panel is aligned at the bottom of the screen. Does not touch the x
   // coordinate.
   void AdjustPanelBoundsPerExpansionState(Panel* panel,
       gfx::Rect* panel_bounds);
-
-  // Help functions to drag the given panel.
-  void DragLeft(Panel* dragging_panel);
-  void DragRight(Panel* dragging_panel);
 
   // Does the real job of bringing up or down the titlebars.
   void DoBringUpOrDownTitlebars(bool bring_up);
@@ -177,10 +173,6 @@ class DockedPanelCollection :
   bool are_titlebars_up_;
 
   bool minimizing_all_;  // True while minimizing all panels.
-
-  // Referring to current position in |panels_| where the dragging panel
-  // resides.
-  Panels::iterator dragging_panel_current_iterator_;
 
   // Delayed transitions support. Sometimes transitions between minimized and
   // title-only states are delayed, for better usability with Taskbars/Docks.

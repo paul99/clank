@@ -11,10 +11,10 @@
 #include "base/callback.h"
 #include "base/memory/scoped_ptr.h"
 #include "base/string16.h"
-#include "base/system_monitor/system_monitor.h"
 #include "chrome/browser/media_gallery/media_galleries_preferences.h"
-#include "ui/base/dialogs/select_file_dialog.h"
+#include "chrome/browser/system_monitor/removable_storage_observer.h"
 #include "ui/gfx/native_widget_types.h"
+#include "ui/shell_dialogs/select_file_dialog.h"
 
 namespace content {
 class WebContents;
@@ -49,7 +49,7 @@ class MediaGalleriesDialog {
 // the dialog and owns itself.
 class MediaGalleriesDialogController
     : public ui::SelectFileDialog::Listener,
-      public base::SystemMonitor::DevicesChangedObserver {
+      public RemovableStorageObserver {
  public:
   // A fancy pair.
   struct GalleryPermission {
@@ -97,16 +97,15 @@ class MediaGalleriesDialogController
   typedef std::list<GalleryPermission> NewGalleryPermissions;
 
   // SelectFileDialog::Listener implementation:
-  virtual void FileSelected(const FilePath& path,
+  virtual void FileSelected(const base::FilePath& path,
                             int index,
                             void* params) OVERRIDE;
 
-  // base::SystemMonitor::DevicesChangedObserver implementation:
+  // RemovableStorageObserver implementation:
   virtual void OnRemovableStorageAttached(
-      const std::string& id,
-      const string16& name,
-      const FilePath::StringType& location) OVERRIDE;
-  virtual void OnRemovableStorageDetached(const std::string& id) OVERRIDE;
+      const RemovableStorageNotifications::StorageInfo& info) OVERRIDE;
+  virtual void OnRemovableStorageDetached(
+      const RemovableStorageNotifications::StorageInfo& info) OVERRIDE;
 
   // Populates |known_galleries_|.
   void InitializePermissions();
@@ -115,7 +114,7 @@ class MediaGalleriesDialogController
   void SavePermissions();
 
   // Update the model and view when a device is attached or detached.
-  void UpdateGalleryOnDeviceEvent(const std::string& device_id, bool attached);
+  void UpdateGalleriesOnDeviceEvent(const std::string& device_id);
 
   // The web contents from which the request originated.
   content::WebContents* web_contents_;

@@ -6,9 +6,10 @@
 
 #include "base/message_loop.h"
 #include "base/synchronization/waitable_event.h"
-#include "base/system_monitor/system_monitor.h"
 #include "base/utf_string_conversions.h"
 #include "chrome/browser/system_monitor/media_storage_util.h"
+#include "chrome/browser/system_monitor/removable_storage_notifications.h"
+#include "chrome/browser/system_monitor/test_removable_storage_notifications.h"
 #include "content/public/browser/browser_thread.h"
 #include "content/public/test/test_browser_thread.h"
 #include "testing/gtest/include/gtest/gtest.h"
@@ -24,7 +25,17 @@ const char kImageCaptureDeviceId[] = "ic:xyz";
 
 }  // namespace
 
-typedef testing::Test MediaStorageUtilTest;
+class MediaStorageUtilTest : public testing::Test {
+ public:
+  void ProcessAttach(const std::string& id,
+                     const string16& name,
+                     const base::FilePath::StringType& location) {
+    notifications_.ProcessAttach(id, name, location);
+  }
+
+ private:
+  chrome::test::TestRemovableStorageNotifications notifications_;
+};
 
 // Test to verify |MediaStorageUtil::MakeDeviceId| functionality using a sample
 // mtp device unique id.
@@ -55,23 +66,15 @@ TEST_F(MediaStorageUtilTest, TestImageCaptureDeviceId) {
 
 TEST_F(MediaStorageUtilTest, CanCreateFileSystemForImageCapture) {
   EXPECT_TRUE(MediaStorageUtil::CanCreateFileSystem(kImageCaptureDeviceId,
-                                                    FilePath()));
+                                                    base::FilePath()));
   EXPECT_FALSE(MediaStorageUtil::CanCreateFileSystem(
-      "dcim:xyz", FilePath(FILE_PATH_LITERAL("relative"))));
+      "dcim:xyz", base::FilePath(FILE_PATH_LITERAL("relative"))));
   EXPECT_FALSE(MediaStorageUtil::CanCreateFileSystem(
-      "dcim:xyz", FilePath(FILE_PATH_LITERAL("../refparent"))));
+      "dcim:xyz", base::FilePath(FILE_PATH_LITERAL("../refparent"))));
 }
 
 TEST_F(MediaStorageUtilTest, DetectDeviceFiltered) {
   MessageLoop loop;
-#if defined(OS_MACOSX)
-  // This needs to happen before SystemMonitor's ctor.
-  base::SystemMonitor::AllocateSystemIOPorts();
-#endif
-  // Installs global. Required MessageLoop.
-  // On Mac, requires AllocateSystemIOPorts.
-  base::SystemMonitor monitor;
-
   content::TestBrowserThread file_thread(content::BrowserThread::FILE, &loop);
 
   MediaStorageUtil::DeviceIdSet devices;
@@ -84,9 +87,8 @@ TEST_F(MediaStorageUtilTest, DetectDeviceFiltered) {
   event.Wait();
   EXPECT_FALSE(devices.find(kImageCaptureDeviceId) != devices.end());
 
-  base::SystemMonitor::Get()->ProcessRemovableStorageAttached(
-      kImageCaptureDeviceId, ASCIIToUTF16("name"),
-      FILE_PATH_LITERAL("/location"));
+  ProcessAttach(kImageCaptureDeviceId, ASCIIToUTF16("name"),
+                FILE_PATH_LITERAL("/location"));
   devices.insert(kImageCaptureDeviceId);
   event.Reset();
   MediaStorageUtil::FilterAttachedDevices(&devices,

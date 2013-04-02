@@ -33,6 +33,7 @@
 #include "ash/system/status_area_widget.h"
 #include "ash/system/tray/system_tray.h"
 #include "ash/system/tray/system_tray_delegate.h"
+#include "ash/system/web_notification/web_notification_tray.h"
 #include "ash/touch/touch_observer_hud.h"
 #include "ash/volume_control_delegate.h"
 #include "ash/wm/partial_screenshot_view.h"
@@ -99,8 +100,8 @@ bool HandleLock() {
   return true;
 }
 
-bool HandleFileManager() {
-  Shell::GetInstance()->delegate()->OpenFileManager();
+bool HandleFileManager(bool as_dialog) {
+  Shell::GetInstance()->delegate()->OpenFileManager(as_dialog);
   return true;
 }
 
@@ -146,11 +147,9 @@ bool HandleRotateWindows() {
     // rotation and position. Use replace so we only enqueue one at a time.
     target->layer()->GetAnimator()->
         set_preemption_strategy(ui::LayerAnimator::REPLACE_QUEUED_ANIMATIONS);
-    scoped_ptr<ui::LayerAnimationSequence> screen_rotation(
+    target->layer()->GetAnimator()->ScheduleAnimation(
         new ui::LayerAnimationSequence(
             new ash::ScreenRotation(360, target->layer())));
-    target->layer()->GetAnimator()->StartAnimation(
-        screen_rotation.release());
   }
   return true;
 }
@@ -273,8 +272,15 @@ bool HandlePrintViewHierarchy() {
 
 void PrintWindowHierarchy(aura::Window* window, int indent) {
   std::string indent_str(indent, ' ');
-  DLOG(INFO) << indent_str << window->name() << " type " << window->type()
-      << (wm::IsActiveWindow(window) ? "active" : "");
+  std::string name(window->name());
+  if (name.empty())
+    name = "\"\"";
+  DLOG(INFO) << indent_str << name << " (" << window << ")"
+             << " type=" << window->type()
+             << (wm::IsActiveWindow(window) ? " [active] " : " ")
+             << (window->IsVisible() ? " visible " : " ")
+             << window->bounds().ToString();
+
   for (size_t i = 0; i < window->children().size(); ++i)
     PrintWindowHierarchy(window->children()[i], indent + 3);
 }
@@ -285,9 +291,7 @@ bool HandlePrintWindowHierarchy() {
       Shell::GetAllRootWindowControllers();
   for (size_t i = 0; i < controllers.size(); ++i) {
     DLOG(INFO) << "RootWindow " << i << ":";
-    aura::Window* container = controllers[i]->GetContainer(
-        internal::kShellWindowId_DefaultContainer);
-    PrintWindowHierarchy(container, 0);
+    PrintWindowHierarchy(controllers[i]->root_window(), 0);
   }
   return true;
 }
@@ -464,8 +468,10 @@ bool AcceleratorController::PerformAction(int action,
       return true;
     case LOCK_SCREEN:
       return HandleLock();
-    case OPEN_FILE_MANAGER_DIALOG:
-      return HandleFileManager();
+    case OPEN_FILE_DIALOG:
+      return HandleFileManager(true /* as_dialog */);
+    case OPEN_FILE_MANAGER:
+      return HandleFileManager(false /* as_dialog */);
     case OPEN_CROSH:
       return HandleCrosh();
     case SWAP_PRIMARY_DISPLAY:
@@ -615,7 +621,7 @@ bool AcceleratorController::PerformAction(int action,
     case SHOW_OAK:
       if (CommandLine::ForCurrentProcess()->HasSwitch(
               switches::kAshEnableOak)) {
-        oak::ShowOakWindow();
+        oak::ShowOakWindowWithContext(Shell::GetPrimaryRootWindow());
         return true;
       }
       break;
@@ -626,6 +632,21 @@ bool AcceleratorController::PerformAction(int action,
           Shell::GetPrimaryRootWindowController();
       if (!controller->GetSystemTray()->HasSystemBubble())
         controller->GetSystemTray()->ShowDefaultView(BUBBLE_CREATE_NEW);
+      break;
+    }
+    case SHOW_MESSAGE_CENTER_BUBBLE: {
+      internal::RootWindowController* controller =
+          Shell::IsLauncherPerDisplayEnabled() ?
+          internal::RootWindowController::ForActiveRootWindow() :
+          Shell::GetPrimaryRootWindowController();
+      internal::StatusAreaWidget* status_area_widget =
+          controller->status_area_widget();
+      if (status_area_widget) {
+        WebNotificationTray* notification_tray =
+            status_area_widget->web_notification_tray();
+        if (notification_tray->visible())
+          notification_tray->ShowMessageCenterBubble();
+      }
       break;
     }
     case SHOW_TASK_MANAGER:
@@ -712,7 +733,7 @@ bool AcceleratorController::PerformAction(int action,
       // Disable the shortcut for minimizing full screen window due to
       // crbug.com/131709, which is a crashing issue related to minimizing
       // full screen pepper window.
-      if (!wm::IsWindowFullscreen(window)) {
+      if (!wm::IsWindowFullscreen(window) && wm::CanMinimizeWindow(window)) {
         wm::MinimizeWindow(window);
         return true;
       }
@@ -793,18 +814,21 @@ void AcceleratorController::SetBrightnessControlDelegate(
     scoped_ptr<BrightnessControlDelegate> brightness_control_delegate) {
   // Install brightness control delegate only when internal
   // display exists.
-  if (Shell::GetInstance()->display_manager()->HasInternalDisplay())
-    brightness_control_delegate_.swap(brightness_control_delegate);
+  if (Shell::GetInstance()->display_manager()->HasInternalDisplay() ||
+      CommandLine::ForCurrentProcess()->HasSwitch(
+          switches::kAshEnableBrightnessControl)) {
+    brightness_control_delegate_ = brightness_control_delegate.Pass();
+  }
 }
 
 void AcceleratorController::SetImeControlDelegate(
     scoped_ptr<ImeControlDelegate> ime_control_delegate) {
-  ime_control_delegate_.swap(ime_control_delegate);
+  ime_control_delegate_ = ime_control_delegate.Pass();
 }
 
 void AcceleratorController::SetScreenshotDelegate(
     scoped_ptr<ScreenshotDelegate> screenshot_delegate) {
-  screenshot_delegate_.swap(screenshot_delegate);
+  screenshot_delegate_ = screenshot_delegate.Pass();
 }
 
 ////////////////////////////////////////////////////////////////////////////////

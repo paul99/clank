@@ -18,12 +18,10 @@
 #   'includes': ['path/to/this/gypi/file'],
 # }
 #
-# Note that this assumes that there's an ant buildfile <package_name>_apk.xml in
-# java_in_dir. So, if you have package_name="content_shell" and
+# If you have package_name="content_shell" and
 # java_in_dir="content/shell/android/java" you should have a directory structure
 # like:
 #
-# content/shell/android/java/content_shell_apk.xml
 # content/shell/android/java/src/org/chromium/base/Foo.java
 # content/shell/android/java/src/org/chromium/base/Bar.java
 #
@@ -41,8 +39,8 @@
 #    each directory in additional_res_dirs.
 #  additional_src_dirs - Additional directories with .java files to be compiled
 #    and included in the output of this target.
-#  asset_location - The directory where assets are located (default:
-#    <PRODUCT_DIR>/<package_name>/assets).
+#  asset_location - The absolute path to the directory where assets are located
+#    (default: <(ant_build_out)/<(package_name)/assets).
 #  generated_src_dirs - Same as additional_src_dirs except used for .java files
 #    that are generated at build time. This should be set automatically by a
 #    target's dependencies. The .java files in these directories are not
@@ -53,12 +51,12 @@
 #    dependencies from being re-included.
 #  native_libs_paths - The path to any native library to be included in this
 #    target. This should be a path in <(SHARED_LIB_DIR). A stripped copy of
-#    the library will be included in the apk and symbolic links to the
-#    unstripped copy will be added to <(android_product_out) to enable native
-#    debugging.
+#    the library will be included in the apk.
 #  resource_dir - The directory for resources.
 #  R_package - A custom Java package to generate the resource file R.java in.
 #    By default, the package given in AndroidManifest.xml will be used.
+#  java_strings_grd - The name of the grd file from which to generate localized
+#    strings.xml files, if any.
 
 {
   'variables': {
@@ -78,6 +76,8 @@
     'additional_res_dirs': [],
     'additional_res_packages': [],
     'is_test_apk%': 0,
+    'java_strings_grd%': '',
+    'grit_grd_file%': '',
   },
   'sources': [
       '<@(native_libs_paths)'
@@ -111,6 +111,36 @@
       ],
     },
   ],
+  'conditions': [
+    ['R_package != ""', {
+      'variables': {
+        # We generate R.java in package R_package (in addition to the package
+        # listed in the AndroidManifest.xml, which is unavoidable).
+        'additional_res_dirs': ['<(DEPTH)/build/android/ant/empty/res'],
+        'additional_res_packages': ['<(R_package)'],
+        'additional_R_text_files': ['<(PRODUCT_DIR)/<(package_name)/R.txt'],
+      },
+    }],
+    ['java_strings_grd != ""', {
+      'variables': {
+        'out_res_dir': '<(SHARED_INTERMEDIATE_DIR)/<(package_name)_apk/res',
+        'additional_res_dirs': ['<(out_res_dir)'],
+        # grit_grd_file is used by grit_action.gypi, included below.
+        'grit_grd_file': '<(java_in_dir)/strings/<(java_strings_grd)',
+      },
+      'actions': [
+        {
+          'action_name': 'generate_localized_strings_xml',
+          'variables': {
+            'grit_out_dir': '<(out_res_dir)',
+            # resource_ids is unneeded since we don't generate .h headers.
+            'grit_resource_ids': '',
+          },
+          'includes': ['../build/grit_action.gypi'],
+        },
+      ],
+    }],
+  ],
   'actions': [
     {
       'action_name': 'ant_<(package_name)_apk',
@@ -131,6 +161,14 @@
         ['resource_dir!=""', {
           'inputs': ['<!@(find <(java_in_dir)/<(resource_dir) -name "*")']
         }],
+        ['java_strings_grd != ""', {
+          'inputs': [
+            # TODO(newt): replace this with .../values/strings.xml once
+            # the English strings.xml is generated as well? That would be
+            # simpler and faster and should be equivalent.
+            '<!@pymod_do_main(grit_info <@(grit_defines) --outputs "<(out_res_dir)" <(grit_grd_file))',
+          ],
+        }],
         ['is_test_apk == 1', {
           'variables': {
             'additional_res_dirs=': [],
@@ -145,7 +183,7 @@
         '<(PRODUCT_DIR)/apks/<(apk_name).apk',
       ],
       'action': [
-        'ant',
+        'ant', '-quiet',
         '-DAPP_ABI=<(android_app_abi)',
         '-DANDROID_GDBSERVER=<(android_gdbserver)',
         '-DANDROID_SDK=<(android_sdk)',
@@ -165,6 +203,7 @@
         '-DJAR_NAME=<(jar_name)',
         '-DPACKAGE_NAME=<(package_name)',
         '-DRESOURCE_DIR=<(resource_dir)',
+        '-DADDITIONAL_R_TEXT_FILES=>(additional_R_text_files)',
         '-DADDITIONAL_RES_DIRS=>(additional_res_dirs)',
         '-DADDITIONAL_RES_PACKAGES=>(additional_res_packages)',
         '-DAPP_MANIFEST_VERSION_NAME=<(app_manifest_version_name)',
@@ -181,15 +220,5 @@
         '<(CONFIGURATION_NAME)',
       ]
     },
-  ],
-  'conditions': [
-    ['R_package != ""', {
-      'variables': {
-        # We generate R.java in package R_package (in addition to the package
-        # listed in the AndroidManifest.xml, which is unavoidable).
-        'additional_res_dirs': ['<(DEPTH)/build/android/ant/empty/res'],
-        'additional_res_packages': ['<(R_package)'],
-      },
-    }],
   ],
 }

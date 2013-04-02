@@ -106,10 +106,20 @@ LinuxSandbox* LinuxSandbox::GetInstance() {
   return instance;
 }
 
+#if defined(ADDRESS_SANITIZER) && defined(OS_LINUX)
+// ASan API call to notify the tool the sandbox is going to be turned on.
+extern "C" void __sanitizer_sandbox_on_notify(void *reserved);
+#endif
+
 void LinuxSandbox::PreinitializeSandboxBegin() {
   CHECK(!pre_initialized_);
   seccomp_legacy_supported_ = false;
   seccomp_bpf_supported_ = false;
+#if defined(ADDRESS_SANITIZER) && defined(OS_LINUX)
+  // ASan needs to open some resources before the sandbox is enabled.
+  // This should not fork, not launch threads, not open a directory.
+  __sanitizer_sandbox_on_notify(/*reserved*/NULL);
+#endif
 #if defined(SECCOMP_SANDBOX)
   if (IsSeccompLegacyDesired()) {
     proc_fd_ = open("/proc", O_DIRECTORY | O_RDONLY);
@@ -200,7 +210,7 @@ bool LinuxSandbox::IsSingleThreaded() const {
   // Possibly racy, but it's ok because this is more of a debug check to catch
   // new threaded situations arising during development.
   int num_threads = file_util::CountFilesCreatedAfter(
-      FilePath("/proc/self/task"),
+      base::FilePath("/proc/self/task"),
       base::Time::UnixEpoch());
 
   // We pass the test if we don't know ( == 0), because the setuid sandbox

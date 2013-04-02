@@ -9,13 +9,15 @@
 #include "base/memory/weak_ptr.h"
 #include "base/message_loop.h"
 #include "base/path_service.h"
-#include "base/string_number_conversions.h"
+#include "base/strings/string_number_conversions.h"
 #include "chrome/browser/extensions/extension_service.h"
 #include "chrome/browser/profiles/profile.h"
 #include "chrome/browser/ui/browser.h"
+#include "chrome/browser/ui/panels/detached_panel_collection.h"
 #include "chrome/browser/ui/panels/native_panel.h"
 #include "chrome/browser/ui/panels/panel_collection.h"
 #include "chrome/browser/ui/panels/panel_mouse_watcher.h"
+#include "chrome/browser/ui/panels/stacked_panel_collection.h"
 #include "chrome/browser/ui/panels/test_panel_active_state_observer.h"
 #include "chrome/browser/ui/panels/test_panel_mouse_watcher.h"
 #include "chrome/common/chrome_notification_types.h"
@@ -181,7 +183,7 @@ void MockDisplaySettingsProviderImpl::SetDesktopBarThickness(
 
 }  // namespace
 
-const FilePath::CharType* BasePanelBrowserTest::kTestDir =
+const base::FilePath::CharType* BasePanelBrowserTest::kTestDir =
     FILE_PATH_LITERAL("panels");
 
 BasePanelBrowserTest::BasePanelBrowserTest()
@@ -210,6 +212,7 @@ bool BasePanelBrowserTest::SkipTestIfCompizWM() {
 
 void BasePanelBrowserTest::SetUpCommandLine(CommandLine* command_line) {
   command_line->AppendSwitch(switches::kEnablePanels);
+  command_line->AppendSwitch(switches::kEnablePanelStacking);
 }
 
 void BasePanelBrowserTest::SetUpOnMainThread() {
@@ -375,14 +378,27 @@ Panel* BasePanelBrowserTest::CreateDockedPanel(const std::string& name,
 Panel* BasePanelBrowserTest::CreateDetachedPanel(const std::string& name,
                                                  const gfx::Rect& bounds) {
   Panel* panel = CreatePanelWithBounds(name, bounds);
-  panel->manager()->MovePanelToCollection(panel,
-                                          PanelCollection::DETACHED,
-                                          PanelCollection::DEFAULT_POSITION);
+  PanelManager* panel_manager = panel->manager();
+  panel_manager->MovePanelToCollection(panel,
+                                       panel_manager->detached_collection(),
+                                       PanelCollection::DEFAULT_POSITION);
   EXPECT_EQ(PanelCollection::DETACHED, panel->collection()->type());
   // The panel is first created as docked panel, which ignores the specified
   // origin in |bounds|. We need to reposition the panel after it becomes
   // detached.
   panel->SetPanelBounds(bounds);
+  WaitForBoundsAnimationFinished(panel);
+  return panel;
+}
+
+Panel* BasePanelBrowserTest::CreateStackedPanel(const std::string& name,
+                                                const gfx::Rect& bounds,
+                                                StackedPanelCollection* stack) {
+  Panel* panel = CreateDetachedPanel(name, bounds);
+  panel->manager()->MovePanelToCollection(panel,
+                                          stack,
+                                          PanelCollection::DEFAULT_POSITION);
+  EXPECT_EQ(PanelCollection::STACKED, panel->collection()->type());
   WaitForBoundsAnimationFinished(panel);
   return panel;
 }
@@ -394,13 +410,13 @@ NativePanelTesting* BasePanelBrowserTest::CreateNativePanelTesting(
 }
 
 scoped_refptr<Extension> BasePanelBrowserTest::CreateExtension(
-    const FilePath::StringType& path,
-    Extension::Location location,
+    const base::FilePath::StringType& path,
+    extensions::Manifest::Location location,
     const DictionaryValue& extra_value) {
 #if defined(OS_WIN)
-  FilePath full_path(FILE_PATH_LITERAL("c:\\"));
+  base::FilePath full_path(FILE_PATH_LITERAL("c:\\"));
 #else
-  FilePath full_path(FILE_PATH_LITERAL("/"));
+  base::FilePath full_path(FILE_PATH_LITERAL("/"));
 #endif
   full_path = full_path.Append(path);
 

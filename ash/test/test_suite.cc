@@ -17,6 +17,10 @@
 #include "ash/test/test_suite_init.h"
 #endif
 
+#if defined(OS_WIN)
+#include "base/win/windows_version.h"
+#endif
+
 namespace ash {
 namespace test {
 

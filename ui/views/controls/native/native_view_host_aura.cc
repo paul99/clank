@@ -18,6 +18,8 @@ NativeViewHostAura::NativeViewHostAura(NativeViewHost* host)
 }
 
 NativeViewHostAura::~NativeViewHostAura() {
+  if (host_->native_view())
+    host_->native_view()->RemoveObserver(this);
 }
 
 ////////////////////////////////////////////////////////////////////////////////
@@ -83,7 +85,7 @@ void NativeViewHostAura::SetFocus() {
   aura::Window* window = host_->native_view();
   aura::client::FocusClient* client = aura::client::GetFocusClient(window);
   if (client)
-    client->FocusWindow(window, NULL);
+    client->FocusWindow(window);
 }
 
 gfx::NativeViewAccessible NativeViewHostAura::GetNativeViewAccessible() {

@@ -65,7 +65,7 @@ const GUID kContentShellProviderName = {
 #endif
 
 void InitLogging() {
-  FilePath log_filename;
+  base::FilePath log_filename;
   PathService::Get(base::DIR_EXE, &log_filename);
   log_filename = log_filename.AppendASCII("content_shell.log");
   logging::InitLogging(
@@ -94,16 +94,17 @@ bool ShellMainDelegate::BasicStartupComplete(int* exit_code) {
 #endif
 
   InitLogging();
-  if (CommandLine::ForCurrentProcess()->HasSwitch(switches::kDumpRenderTree)) {
-    CommandLine::ForCurrentProcess()->AppendSwitch(
-        switches::kAllowFileAccessFromFiles);
-    CommandLine::ForCurrentProcess()->AppendSwitchASCII(
+  CommandLine& command_line = *CommandLine::ForCurrentProcess();
+  if (command_line.HasSwitch(switches::kDumpRenderTree)) {
+    command_line.AppendSwitch(switches::kAllowFileAccessFromFiles);
+    command_line.AppendSwitchASCII(
         switches::kUseGL, gfx::kGLImplementationOSMesaName);
-    CommandLine::ForCurrentProcess()->AppendSwitch(
-        switches::kIgnoreGpuBlacklist);
-    CommandLine::ForCurrentProcess()->AppendSwitch(
-        switches::kEnableExperimentalWebKitFeatures);
-    CommandLine::ForCurrentProcess()->AppendSwitch(switches::kEnableCssShaders);
+    command_line.AppendSwitch(switches::kIgnoreGpuBlacklist);
+    command_line.AppendSwitch(switches::kEnableExperimentalWebKitFeatures);
+    command_line.AppendSwitch(switches::kEnableCssShaders);
+    if (command_line.HasSwitch(switches::kEnableSoftwareCompositing))
+      command_line.AppendSwitch(switches::kEnableSoftwareCompositingGLAdapter);
+
     net::CookieMonster::EnableFileScheme();
     if (!WebKitTestPlatformInitialize()) {
       if (exit_code)
@@ -157,11 +158,11 @@ void ShellMainDelegate::InitializeResourceBundle() {
   }
 #endif
 
-  FilePath pak_file;
+  base::FilePath pak_file;
 #if defined(OS_MACOSX)
   pak_file = GetResourcesPakFilePath();
 #else
-  FilePath pak_dir;
+  base::FilePath pak_dir;
 
 #if defined(OS_ANDROID)
   bool got_path = PathService::Get(base::DIR_ANDROID_APP_DATA, &pak_dir);

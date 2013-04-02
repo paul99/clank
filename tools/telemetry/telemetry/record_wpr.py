@@ -3,10 +3,12 @@
 # Use of this source code is governed by a BSD-style license that can be
 # found in the LICENSE file.
 import logging
+import os
 import sys
+import tempfile
 import time
 
-from telemetry import all_page_interactions # pylint: disable=W0611
+from telemetry import all_page_actions # pylint: disable=W0611
 from telemetry import browser_finder
 from telemetry import browser_options
 from telemetry import discover
@@ -21,41 +23,42 @@ class RecordPage(page_test.PageTest):
     # This class overwrites PageTest.Run, so that the test method name is not
     # really used (except for throwing an exception if it doesn't exist).
     super(RecordPage, self).__init__('Run')
-    self._interaction_names = set(
-        [benchmark().interaction_name_to_run
+    self._action_names = set(
+        [benchmark().action_name_to_run
          for benchmark in benchmarks.values()
-         if benchmark().interaction_name_to_run])
+         if benchmark().action_name_to_run])
 
   def CanRunForPage(self, page):
-    return not not self._InteractionsForPage(page)
+    return not not self._ActionsForPage(page)
 
   def CustomizeBrowserOptionsForPage(self, page, options):
-    for interaction in self._InteractionsForPage(page):
-      interaction.CustomizeBrowserOptions(options)
+    for action in self._ActionsForPage(page):
+      action.CustomizeBrowserOptions(options)
 
   def Run(self, options, page, tab, results):
     # When recording, sleep to catch any resources that load post-onload.
     time.sleep(3)
 
-    # Run the interactions for all benchmarks. Reload the page between
-    # interactions.
+    # Run the actions for all benchmarks. Reload the page between
+    # actions.
     should_reload = False
-    for interaction in self._InteractionsForPage(page):
+    for action in self._ActionsForPage(page):
       if should_reload:
-        tab.page.Navigate(page.url)
+        tab.Navigate(page.url)
         tab.WaitForDocumentReadyStateToBeComplete()
-      interaction.PerformInteraction(page, tab)
+      action.WillRunAction(page, tab)
+      action.RunAction(page, tab)
       should_reload = True
 
-  def _InteractionsForPage(self, page):
-    interactions = []
-    for interaction_name in self._interaction_names:
-      if not hasattr(page, interaction_name):
+  def _ActionsForPage(self, page):
+    actions = []
+    for action_name in self._action_names:
+      if not hasattr(page, action_name):
         continue
-      interaction_data = getattr(page, interaction_name)
-      interactions.append(all_page_interactions.FindClassWithName(
-          interaction_data['action'])(interaction_data))
-    return interactions
+      action_data = getattr(page, action_name)
+      actions.append(all_page_actions.FindClassWithName(
+          action_data['action'])(action_data))
+    return actions
 
 
 def Main(benchmark_dir):
@@ -63,6 +66,7 @@ def Main(benchmark_dir):
                                  multi_page_benchmark.MultiPageBenchmark)
   options = browser_options.BrowserOptions()
   parser = options.CreateParser('%prog <page_set>')
+  page_runner.PageRunner.AddCommandLineOptions(parser)
 
   recorder = RecordPage(benchmarks)
   recorder.AddCommandLineOptions(parser)
@@ -75,6 +79,11 @@ def Main(benchmark_dir):
 
   ps = page_set.PageSet.FromFile(args[0])
 
+  # Set the archive path to something temporary.
+  temp_target_wpr_file_path = tempfile.mkstemp()[1]
+  ps.wpr_archive_info.AddNewTemporaryRecording(temp_target_wpr_file_path)
+
+  # Do the actual recording.
   options.wpr_mode = wpr_modes.WPR_RECORD
   recorder.CustomizeBrowserOptions(options)
   possible_browser = browser_finder.FindBrowser(options)
@@ -86,11 +95,23 @@ Use --browser=list to figure out which are available.\n"""
   with page_runner.PageRunner(ps) as runner:
     runner.Run(options, possible_browser, recorder, results)
 
-  if len(results.page_failures):
+  if results.page_failures:
+    logging.warning('Some pages failed. The recording has not been updated for '
+                    'these pages.')
     logging.warning('Failed pages: %s', '\n'.join(
         [failure['page'].url for failure in results.page_failures]))
 
-  if len(results.skipped_pages):
+  if results.skipped_pages:
+    logging.warning('Some pages were skipped. The recording has not been '
+                    'updated for these pages.')
     logging.warning('Skipped pages: %s', '\n'.join(
         [skipped['page'].url for skipped in results.skipped_pages]))
+
+  if results.page_successes:
+    # Update the metadata for the pages which were recorded.
+    ps.wpr_archive_info.AddRecordedPages(
+        [page['page'] for page in results.page_successes])
+  else:
+    os.remove(temp_target_wpr_file_path)
+
   return min(255, len(results.page_failures))

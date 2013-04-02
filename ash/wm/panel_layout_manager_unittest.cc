@@ -6,16 +6,23 @@
 
 #include "ash/ash_switches.h"
 #include "ash/launcher/launcher.h"
+#include "ash/launcher/launcher_button.h"
+#include "ash/launcher/launcher_model.h"
+#include "ash/launcher/launcher_view.h"
+#include "ash/screen_ash.h"
 #include "ash/shell.h"
 #include "ash/shell_window_ids.h"
 #include "ash/test/ash_test_base.h"
 #include "ash/test/launcher_view_test_api.h"
+#include "ash/test/shell_test_api.h"
 #include "ash/test/test_launcher_delegate.h"
 #include "ash/wm/window_util.h"
 #include "base/basictypes.h"
 #include "base/command_line.h"
 #include "base/compiler_specific.h"
 #include "ui/aura/client/aura_constants.h"
+#include "ui/aura/root_window.h"
+#include "ui/aura/test/event_generator.h"
 #include "ui/aura/test/test_windows.h"
 #include "ui/aura/window.h"
 #include "ui/views/corewm/corewm_switches.h"
@@ -26,14 +33,14 @@ namespace internal {
 
 using aura::test::WindowIsAbove;
 
-class PanelLayoutManagerTest : public ash::test::AshTestBase {
+class PanelLayoutManagerTest : public test::AshTestBase {
  public:
   PanelLayoutManagerTest() {}
   virtual ~PanelLayoutManagerTest() {}
 
   virtual void SetUp() OVERRIDE {
-    ash::test::AshTestBase::SetUp();
-    ASSERT_TRUE(ash::test::TestLauncherDelegate::instance());
+    test::AshTestBase::SetUp();
+    ASSERT_TRUE(test::TestLauncherDelegate::instance());
 
     launcher_view_test_.reset(new test::LauncherViewTestAPI(
         Launcher::ForPrimaryDisplay()->GetLauncherViewForTest()));
@@ -50,8 +57,8 @@ class PanelLayoutManagerTest : public ash::test::AshTestBase {
         aura::client::WINDOW_TYPE_PANEL,
         0,
         bounds);
-    ash::test::TestLauncherDelegate* launcher_delegate =
-        ash::test::TestLauncherDelegate::instance();
+    test::TestLauncherDelegate* launcher_delegate =
+        test::TestLauncherDelegate::instance();
     launcher_delegate->AddLauncherItem(window);
     PanelLayoutManager* manager =
         static_cast<PanelLayoutManager*>(GetPanelContainer()->layout_manager());
@@ -62,7 +69,7 @@ class PanelLayoutManagerTest : public ash::test::AshTestBase {
   aura::Window* GetPanelContainer() {
     return Shell::GetContainer(
         Shell::GetPrimaryRootWindow(),
-        ash::internal::kShellWindowId_PanelContainer);
+        internal::kShellWindowId_PanelContainer);
   }
 
   void GetCalloutWidget(views::Widget** widget) {
@@ -71,6 +78,20 @@ class PanelLayoutManagerTest : public ash::test::AshTestBase {
     ASSERT_TRUE(manager);
     ASSERT_TRUE(manager->callout_widget());
     *widget = manager->callout_widget();
+  }
+
+  void PanelInScreen(aura::Window* panel) {
+    gfx::Rect panel_bounds = panel->GetBoundsInRootWindow();
+    gfx::Point root_point = gfx::Point(panel_bounds.x(), panel_bounds.y());
+    gfx::Display display = ScreenAsh::FindDisplayContainingPoint(root_point);
+
+    gfx::Rect panel_bounds_in_screen = panel->GetBoundsInScreen();
+    gfx::Point screen_bottom_right = gfx::Point(
+        panel_bounds_in_screen.right(),
+        panel_bounds_in_screen.bottom());
+    gfx::Rect display_bounds = display.bounds();
+    EXPECT_TRUE(screen_bottom_right.x() < display_bounds.width() &&
+                screen_bottom_right.y() < display_bounds.height());
   }
 
   void PanelsNotOverlapping(aura::Window* panel1, aura::Window* panel2) {
@@ -128,6 +149,27 @@ class PanelLayoutManagerTest : public ash::test::AshTestBase {
 
   test::LauncherViewTestAPI* launcher_view_test() {
     return launcher_view_test_.get();
+  }
+
+  // Clicks the launcher items on |launcher_view| that is
+  /// associated with given |window|.
+  void ClickLauncherItemForWindow(LauncherView* launcher_view,
+                                  aura::Window* window) {
+    test::LauncherViewTestAPI test_api(launcher_view);
+    test_api.SetAnimationDuration(1);
+
+    LauncherModel* model =
+        test::ShellTestApi(Shell::GetInstance()).launcher_model();
+    test::TestLauncherDelegate* launcher_delegate =
+        test::TestLauncherDelegate::instance();
+    int index = model->ItemIndexByID(launcher_delegate->GetIDByWindow(window));
+    gfx::Rect bounds = test_api.GetButton(index)->GetBoundsInScreen();
+
+    aura::test::EventGenerator& event_generator = GetEventGenerator();
+    event_generator.MoveMouseTo(bounds.CenterPoint());
+    event_generator.ClickLeftButton();
+
+    test_api.RunMessageLoopUntilAnimationsDone();
   }
 
  private:
@@ -284,6 +326,15 @@ TEST_F(PanelLayoutManagerTest, SplitView) {
   EXPECT_NO_FATAL_FAILURE(PanelsNotOverlapping(w1.get(), w2.get()));
 }
 
+TEST_F(PanelLayoutManagerTest, SplitViewOverlapWhenLarge) {
+  gfx::Rect bounds(0, 0, 600, 201);
+  scoped_ptr<aura::Window> w1(CreatePanelWindow(bounds));
+  scoped_ptr<aura::Window> w2(CreatePanelWindow(bounds));
+
+  EXPECT_NO_FATAL_FAILURE(PanelInScreen(w1.get()));
+  EXPECT_NO_FATAL_FAILURE(PanelInScreen(w2.get()));
+}
+
 TEST_F(PanelLayoutManagerTest, FanWindows) {
   gfx::Rect bounds(0, 0, 201, 201);
   scoped_ptr<aura::Window> w1(CreatePanelWindow(bounds));
@@ -322,6 +373,73 @@ TEST_F(PanelLayoutManagerTest, MinimizeRestorePanel) {
   wm::ActivateWindow(window.get());
   RunAllPendingInMessageLoop();
   EXPECT_TRUE(IsCalloutVisible());
+}
+
+TEST_F(PanelLayoutManagerTest, PanelMoveBetweenMultipleDisplays) {
+  // Keep the displays wide so that launchers have enough
+  // spaces for launcher buttons.
+  UpdateDisplay("500x400,500x400");
+  Shell::RootWindowList root_windows = Shell::GetAllRootWindows();
+
+  scoped_ptr<aura::Window> p1_d1(CreatePanelWindow(gfx::Rect(0, 0, 50, 50)));
+  scoped_ptr<aura::Window> p2_d1(CreatePanelWindow(gfx::Rect(0, 0, 50, 50)));
+  scoped_ptr<aura::Window> p1_d2(CreatePanelWindow(gfx::Rect(500, 0, 50, 50)));
+  scoped_ptr<aura::Window> p2_d2(CreatePanelWindow(gfx::Rect(500, 0, 50, 50)));
+
+  LauncherView* launcher_view_1st =
+      Launcher::ForPrimaryDisplay()->GetLauncherViewForTest();
+  LauncherView* launcher_view_2nd =
+      Launcher::ForWindow(root_windows[1])->GetLauncherViewForTest();
+
+  EXPECT_EQ(root_windows[0], p1_d1->GetRootWindow());
+  EXPECT_EQ(root_windows[0], p2_d1->GetRootWindow());
+  EXPECT_EQ(root_windows[1], p1_d2->GetRootWindow());
+  EXPECT_EQ(root_windows[1], p2_d2->GetRootWindow());
+
+  EXPECT_EQ(internal::kShellWindowId_PanelContainer, p1_d1->parent()->id());
+  EXPECT_EQ(internal::kShellWindowId_PanelContainer, p2_d1->parent()->id());
+  EXPECT_EQ(internal::kShellWindowId_PanelContainer, p1_d2->parent()->id());
+  EXPECT_EQ(internal::kShellWindowId_PanelContainer, p2_d2->parent()->id());
+
+  // Test a panel on 1st display.
+  // Clicking on the same display has no effect.
+  ClickLauncherItemForWindow(launcher_view_1st, p1_d1.get());
+  EXPECT_EQ(root_windows[0], p1_d1->GetRootWindow());
+  EXPECT_EQ(root_windows[0], p2_d1->GetRootWindow());
+  EXPECT_EQ(root_windows[1], p1_d2->GetRootWindow());
+  EXPECT_EQ(root_windows[1], p1_d2->GetRootWindow());
+  EXPECT_FALSE(root_windows[1]->GetBoundsInScreen().Contains(
+      p1_d1->GetBoundsInScreen()));
+
+  // Test if clicking on another display moves the panel to
+  // that display.
+  ClickLauncherItemForWindow(launcher_view_2nd, p1_d1.get());
+  EXPECT_EQ(root_windows[1], p1_d1->GetRootWindow());
+  EXPECT_EQ(root_windows[0], p2_d1->GetRootWindow());
+  EXPECT_EQ(root_windows[1], p1_d2->GetRootWindow());
+  EXPECT_EQ(root_windows[1], p2_d2->GetRootWindow());
+  EXPECT_TRUE(root_windows[1]->GetBoundsInScreen().Contains(
+      p1_d1->GetBoundsInScreen()));
+
+  // Test a panel on 2nd display.
+  // Clicking on the same display has no effect.
+  ClickLauncherItemForWindow(launcher_view_2nd, p1_d2.get());
+  EXPECT_EQ(root_windows[1], p1_d1->GetRootWindow());
+  EXPECT_EQ(root_windows[0], p2_d1->GetRootWindow());
+  EXPECT_EQ(root_windows[1], p1_d2->GetRootWindow());
+  EXPECT_EQ(root_windows[1], p2_d2->GetRootWindow());
+  EXPECT_TRUE(root_windows[1]->GetBoundsInScreen().Contains(
+      p1_d2->GetBoundsInScreen()));
+
+  // Test if clicking on another display moves the panel to
+  // that display.
+  ClickLauncherItemForWindow(launcher_view_1st, p1_d2.get());
+  EXPECT_EQ(root_windows[1], p1_d1->GetRootWindow());
+  EXPECT_EQ(root_windows[0], p2_d1->GetRootWindow());
+  EXPECT_EQ(root_windows[0], p1_d2->GetRootWindow());
+  EXPECT_EQ(root_windows[1], p2_d2->GetRootWindow());
+  EXPECT_TRUE(root_windows[0]->GetBoundsInScreen().Contains(
+      p1_d2->GetBoundsInScreen()));
 }
 
 }  // namespace internal

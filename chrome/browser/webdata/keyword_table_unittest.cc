@@ -9,7 +9,7 @@
 #include "base/files/scoped_temp_dir.h"
 #include "base/path_service.h"
 #include "base/stl_util.h"
-#include "base/string_number_conversions.h"
+#include "base/strings/string_number_conversions.h"
 #include "base/time.h"
 #include "base/utf_string_conversions.h"
 #include "chrome/browser/search_engines/template_url.h"
@@ -33,7 +33,7 @@ class KeywordTableTest : public testing::Test {
     file_ = temp_dir_.path().AppendASCII("TestWebDatabase");
   }
 
-  FilePath file_;
+  base::FilePath file_;
   base::ScopedTempDir temp_dir_;
 
  private:
@@ -43,7 +43,7 @@ class KeywordTableTest : public testing::Test {
 
 TEST_F(KeywordTableTest, Keywords) {
   WebDatabase db;
-  ASSERT_EQ(sql::INIT_OK, db.Init(file_));
+  ASSERT_EQ(sql::INIT_OK, db.Init(file_, std::string()));
   KeywordTable* keyword_table = db.GetKeywordTable();
 
   TemplateURLData keyword;
@@ -101,7 +101,7 @@ TEST_F(KeywordTableTest, Keywords) {
 
 TEST_F(KeywordTableTest, KeywordMisc) {
   WebDatabase db;
-  ASSERT_EQ(sql::INIT_OK, db.Init(file_));
+  ASSERT_EQ(sql::INIT_OK, db.Init(file_, std::string()));
   KeywordTable* keyword_table = db.GetKeywordTable();
 
   EXPECT_EQ(kInvalidTemplateURLID, keyword_table->GetDefaultSearchProviderID());
@@ -135,7 +135,7 @@ TEST_F(KeywordTableTest, KeywordMisc) {
 
 TEST_F(KeywordTableTest, GetTableContents) {
   WebDatabase db;
-  ASSERT_EQ(sql::INIT_OK, db.Init(file_));
+  ASSERT_EQ(sql::INIT_OK, db.Init(file_, std::string()));
   KeywordTable* keyword_table = db.GetKeywordTable();
 
   TemplateURLData keyword;
@@ -152,6 +152,7 @@ TEST_F(KeywordTableTest, GetTableContents) {
   keyword.sync_guid = "1234-5678-90AB-CDEF";
   keyword.alternate_urls.push_back("a_url1");
   keyword.alternate_urls.push_back("a_url2");
+  keyword.search_terms_replacement_key = "espv";
   EXPECT_TRUE(keyword_table->AddKeyword(keyword));
 
   keyword.SetKeyword(ASCIIToUTF16("url"));
@@ -162,10 +163,11 @@ TEST_F(KeywordTableTest, GetTableContents) {
   keyword.prepopulate_id = 5;
   keyword.sync_guid = "FEDC-BA09-8765-4321";
   keyword.alternate_urls.clear();
+  keyword.search_terms_replacement_key.clear();
   EXPECT_TRUE(keyword_table->AddKeyword(keyword));
 
   const char kTestContents[] = "1short_namekeywordhttp://favicon.url/"
-      "http://url/1001url20001234-5678-90AB-CDEF[\"a_url1\",\"a_url2\"]"
+      "http://url/1001url20001234-5678-90AB-CDEF[\"a_url1\",\"a_url2\"]espv"
       "2short_nameurlhttp://favicon.url/http://url/1http://originating.url/00"
       "Shift_JIS1url250http://instant2/0FEDC-BA09-8765-4321[]";
 
@@ -177,7 +179,7 @@ TEST_F(KeywordTableTest, GetTableContents) {
 
 TEST_F(KeywordTableTest, GetTableContentsOrdering) {
   WebDatabase db;
-  ASSERT_EQ(sql::INIT_OK, db.Init(file_));
+  ASSERT_EQ(sql::INIT_OK, db.Init(file_, std::string()));
   KeywordTable* keyword_table = db.GetKeywordTable();
 
   TemplateURLData keyword;
@@ -194,6 +196,7 @@ TEST_F(KeywordTableTest, GetTableContentsOrdering) {
   keyword.sync_guid = "1234-5678-90AB-CDEF";
   keyword.alternate_urls.push_back("a_url1");
   keyword.alternate_urls.push_back("a_url2");
+  keyword.search_terms_replacement_key = "espv";
   EXPECT_TRUE(keyword_table->AddKeyword(keyword));
 
   keyword.SetKeyword(ASCIIToUTF16("url"));
@@ -204,13 +207,14 @@ TEST_F(KeywordTableTest, GetTableContentsOrdering) {
   keyword.prepopulate_id = 5;
   keyword.sync_guid = "FEDC-BA09-8765-4321";
   keyword.alternate_urls.clear();
+  keyword.search_terms_replacement_key.clear();
   EXPECT_TRUE(keyword_table->AddKeyword(keyword));
 
   const char kTestContents[] = "1short_nameurlhttp://favicon.url/http://url/1"
       "http://originating.url/00Shift_JIS1url250http://instant2/0"
       "FEDC-BA09-8765-4321[]"
       "2short_namekeywordhttp://favicon.url/http://url/1001"
-      "url20001234-5678-90AB-CDEF[\"a_url1\",\"a_url2\"]";
+      "url20001234-5678-90AB-CDEF[\"a_url1\",\"a_url2\"]espv";
 
   std::string contents;
   EXPECT_TRUE(keyword_table->GetTableContents("keywords",
@@ -220,7 +224,7 @@ TEST_F(KeywordTableTest, GetTableContentsOrdering) {
 
 TEST_F(KeywordTableTest, UpdateKeyword) {
   WebDatabase db;
-  ASSERT_EQ(sql::INIT_OK, db.Init(file_));
+  ASSERT_EQ(sql::INIT_OK, db.Init(file_, std::string()));
   KeywordTable* keyword_table = db.GetKeywordTable();
 
   TemplateURLData keyword;
@@ -263,7 +267,7 @@ TEST_F(KeywordTableTest, UpdateKeyword) {
 
 TEST_F(KeywordTableTest, KeywordWithNoFavicon) {
   WebDatabase db;
-  ASSERT_EQ(sql::INIT_OK, db.Init(file_));
+  ASSERT_EQ(sql::INIT_OK, db.Init(file_, std::string()));
   KeywordTable* keyword_table = db.GetKeywordTable();
 
   TemplateURLData keyword;
@@ -289,7 +293,7 @@ TEST_F(KeywordTableTest, KeywordWithNoFavicon) {
 
 TEST_F(KeywordTableTest, SanitizeURLs) {
   WebDatabase db;
-  ASSERT_EQ(sql::INIT_OK, db.Init(file_));
+  ASSERT_EQ(sql::INIT_OK, db.Init(file_, std::string()));
   KeywordTable* keyword_table = db.GetKeywordTable();
 
   TemplateURLData keyword;

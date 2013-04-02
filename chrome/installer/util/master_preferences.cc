@@ -11,6 +11,7 @@
 #include "base/logging.h"
 #include "base/path_service.h"
 #include "base/string_util.h"
+#include "chrome/common/env_vars.h"
 #include "chrome/installer/util/master_preferences_constants.h"
 #include "chrome/installer/util/util_constants.h"
 #include "googleurl/src/gurl.h"
@@ -94,7 +95,7 @@ MasterPreferences::MasterPreferences(const CommandLine& cmd_line)
   InitializeFromCommandLine(cmd_line);
 }
 
-MasterPreferences::MasterPreferences(const FilePath& prefs_path)
+MasterPreferences::MasterPreferences(const base::FilePath& prefs_path)
     : distribution_(NULL),
       preferences_read_from_file_(false),
       chrome_(true),
@@ -104,12 +105,11 @@ MasterPreferences::MasterPreferences(const FilePath& prefs_path)
       multi_install_(false) {
   std::string json_data;
   // Failure to read the file is ignored as |json_data| will be the empty string
-  // and the remainder of this MasterPreferences objet should still be
+  // and the remainder of this MasterPreferences object should still be
   // initialized as best as possible.
-  if (!file_util::ReadFileToString(prefs_path, &json_data)) {
-    LOG(ERROR) << "Failed to read master_preferences file at "
-               << prefs_path.value()
-               << ". Falling back to default preferences.";
+  if (file_util::PathExists(prefs_path) &&
+      !file_util::ReadFileToString(prefs_path, &json_data)) {
+    LOG(ERROR) << "Failed to read preferences from " << prefs_path.value();
   }
   if (InitializeFromString(json_data))
     preferences_read_from_file_ = true;
@@ -132,7 +132,7 @@ MasterPreferences::~MasterPreferences() {
 void MasterPreferences::InitializeFromCommandLine(const CommandLine& cmd_line) {
 #if defined(OS_WIN)
   if (cmd_line.HasSwitch(installer::switches::kInstallerData)) {
-    FilePath prefs_path(cmd_line.GetSwitchValuePath(
+    base::FilePath prefs_path(cmd_line.GetSwitchValuePath(
         installer::switches::kInstallerData));
     this->MasterPreferences::MasterPreferences(prefs_path);
   } else {
@@ -201,7 +201,7 @@ void MasterPreferences::InitializeFromCommandLine(const CommandLine& cmd_line) {
   scoped_ptr<base::Environment> env(base::Environment::Create());
   if (env != NULL) {
     std::string is_machine_var;
-    env->GetVar(kGoogleUpdateIsMachineEnvVar, &is_machine_var);
+    env->GetVar(env_vars::kGoogleUpdateIsMachineEnvVar, &is_machine_var);
     if (!is_machine_var.empty() && is_machine_var[0] == '1') {
       VLOG(1) << "Taking system-level from environment.";
       name.assign(installer::master_preferences::kDistroDict);
@@ -219,9 +219,10 @@ void MasterPreferences::InitializeFromCommandLine(const CommandLine& cmd_line) {
 }
 
 bool MasterPreferences::InitializeFromString(const std::string& json_data) {
-  bool data_is_valid = true;
-  master_dictionary_.reset(ParseDistributionPreferences(json_data));
+  if (!json_data.empty())
+    master_dictionary_.reset(ParseDistributionPreferences(json_data));
 
+  bool data_is_valid = true;
   if (!master_dictionary_.get()) {
     master_dictionary_.reset(new DictionaryValue());
     data_is_valid = false;

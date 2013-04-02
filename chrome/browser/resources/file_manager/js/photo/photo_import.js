@@ -281,8 +281,10 @@ PhotoImport.prototype.decorateGridItem_ = function(li, entry) {
   box.className = 'img-container';
   this.metadataCache_.get(entry, 'thumbnail|filesystem',
       function(metadata) {
-        new ThumbnailLoader(entry.toURL(), metadata).
-            load(box, false /* fit, not fill*/);
+        new ThumbnailLoader(entry.toURL(),
+                            ThumbnailLoader.LoaderType.IMAGE,
+                            metadata).
+            load(box, ThumbnailLoader.FillMode.FIT);
       });
   frame.appendChild(box);
 

@@ -8,6 +8,7 @@
 #include "grit/generated_resources.h"
 #include "grit/locale_settings.h"
 #include "ui/base/l10n/l10n_util.h"
+#include "ui/base/resource/resource_bundle.h"
 #include "ui/views/controls/button/checkbox.h"
 #include "ui/views/controls/button/text_button.h"
 #include "ui/views/controls/label.h"
@@ -23,13 +24,6 @@ namespace chrome {
 typedef MediaGalleriesDialogController::KnownGalleryPermissions
     GalleryPermissions;
 
-namespace {
-
-// Heading font size correction.
-const int kHeadingFontSizeDelta = 1;
-
-}  // namespace
-
 MediaGalleriesDialogViews::MediaGalleriesDialogViews(
     MediaGalleriesDialogController* controller)
     : controller_(controller),
@@ -43,7 +37,7 @@ MediaGalleriesDialogViews::MediaGalleriesDialogViews(
 
   // Ownership of |contents_| is handed off by this call. |window_| will take
   // care of deleting itself after calling DeleteDelegate().
-  window_ = new ConstrainedWindowViews(controller->web_contents(), this);
+  window_ = ConstrainedWindowViews::Create(controller->web_contents(), this);
 }
 
 MediaGalleriesDialogViews::~MediaGalleriesDialogViews() {}
@@ -67,8 +61,8 @@ void MediaGalleriesDialogViews::InitChildViews() {
 
   // Header text.
   views::Label* header = new views::Label(controller_->GetHeader());
-  header->SetFont(header->font().DeriveFont(kHeadingFontSizeDelta,
-                                            gfx::Font::BOLD));
+  ui::ResourceBundle& rb = ui::ResourceBundle::GetSharedInstance();
+  header->SetFont(rb.GetFont(ui::ResourceBundle::MediumFont));
   header->SetHorizontalAlignment(gfx::ALIGN_LEFT);
   layout->StartRow(0, column_set_id);
   layout->AddView(header);
@@ -114,18 +108,20 @@ bool MediaGalleriesDialogViews::AddOrUpdateGallery(
     bool permitted) {
   string16 label =
       MediaGalleriesDialogController::GetGalleryDisplayName(*gallery);
+  string16 tooltip_text =
+      MediaGalleriesDialogController::GetGalleryTooltip(*gallery);
   CheckboxMap::iterator iter = checkbox_map_.find(gallery);
   if (iter != checkbox_map_.end()) {
     views::Checkbox* checkbox = iter->second;
     checkbox->SetChecked(permitted);
     checkbox->SetText(label);
+    checkbox->SetTooltipText(tooltip_text);
     return false;
   }
 
   views::Checkbox* checkbox = new views::Checkbox(label);
   checkbox->set_listener(this);
-  checkbox->SetTooltipText(
-      MediaGalleriesDialogController::GetGalleryTooltip(*gallery));
+  checkbox->SetTooltipText(tooltip_text);
   checkbox_container_->AddChildView(checkbox);
   checkbox->SetChecked(permitted);
   checkbox_map_[gallery] = checkbox;

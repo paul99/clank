@@ -4,9 +4,16 @@
  * found in the LICENSE file.
  */
 
+#include "native_client/src/trusted/service_runtime/arch/arm/sel_ldr_arm.h"
 #include "native_client/src/trusted/service_runtime/nacl_config.h"
 
-.text
+        /*
+         * This is code, but it is not code that is actually part of the
+         * program/library being linked.  Marking it as read-only data
+         * instead ensures that nothing like linker code-rewriting will
+         * be applied to this code.
+         */
+        NACL_RODATA
 
 /*
  * Assembly code template.
@@ -60,7 +67,7 @@ DEFINE_GLOBAL_HIDDEN_IDENTIFIER(NaCl_trampoline_seg_code):
   blx r0
 
   /* NORETURN */
-  NACL_HALT
+  .word NACL_HALT_WORD
 DEFINE_GLOBAL_HIDDEN_IDENTIFIER(NaCl_trampoline_syscall_seg_addr):
   /* a DATA item will be patched in here */
   .word   0

@@ -13,7 +13,9 @@
 #include "base/time.h"
 #include "base/timer.h"
 #include "ui/gfx/image/image_skia.h"
+#include "ui/gfx/native_widget_types.h"
 #include "ui/message_center/message_center_export.h"
+#include "ui/message_center/notification.h"
 #include "ui/notifications/notification_types.h"
 
 namespace base {
@@ -25,42 +27,6 @@ namespace message_center {
 // A helper class to manage the list of notifications.
 class MESSAGE_CENTER_EXPORT NotificationList {
  public:
-  struct MESSAGE_CENTER_EXPORT NotificationItem {
-    string16 title;
-    string16 message;
-    NotificationItem(string16 title, string16 message)
-        : title(title),
-          message(message) {}
-  };
-
-  struct MESSAGE_CENTER_EXPORT Notification {
-    Notification();
-    virtual ~Notification();
-
-    ui::notifications::NotificationType type;
-    std::string id;
-    string16 title;
-    string16 message;
-    string16 display_source;
-    std::string extension_id;
-
-    // Begin unpacked values from optional_fields
-    int priority;
-    base::Time timestamp;
-    gfx::ImageSkia second_image;
-    int unread_count;
-    string16 button_one_title;
-    string16 button_two_title;
-    string16 expanded_message;
-    string16 image_url;
-    std::vector<NotificationItem> items;
-    // End unpacked values
-
-    gfx::ImageSkia image;
-    bool is_read;  // True if this has been seen in the message center
-    bool shown_as_popup;  // True if this has been shown as a popup notification
-  };
-
   typedef std::list<Notification> Notifications;
 
   class MESSAGE_CENTER_EXPORT Delegate {
@@ -76,8 +42,11 @@ class MESSAGE_CENTER_EXPORT NotificationList {
     virtual void DisableNotificationByExtension(const std::string& id) = 0;
     virtual void DisableNotificationByUrl(const std::string& id) = 0;
 
-    // Requests the Delegate to the settings dialog.
+    // Requests the Delegate to show the settings page.
     virtual void ShowNotificationSettings(const std::string& id) = 0;
+
+    // Requests the Delegate to show the settings dialog.
+    virtual void ShowNotificationSettingsDialog(gfx::NativeView context) = 0;
 
     // Called when a notification is clicked on.
     virtual void OnNotificationClicked(const std::string& id) = 0;
@@ -124,8 +93,17 @@ class MESSAGE_CENTER_EXPORT NotificationList {
   void SendRemoveNotificationsByExtension(const std::string& id);
 
   // Returns true if the notification exists and was updated.
-  bool SetNotificationImage(const std::string& id,
+  bool SetNotificationIcon(const std::string& notification_id,
+                           const gfx::ImageSkia& image);
+
+  // Returns true if the notification exists and was updated.
+  bool SetNotificationImage(const std::string& notification_id,
                             const gfx::ImageSkia& image);
+
+  // Returns true if the notification and button exist and were updated.
+  bool SetNotificationButtonIcon(const std::string& notification_id,
+                                 int button_index,
+                                 const gfx::ImageSkia& image);
 
   bool HasNotification(const std::string& id);
 
@@ -139,6 +117,11 @@ class MESSAGE_CENTER_EXPORT NotificationList {
 
   // Marks the popups for the |priority| as shown.
   void MarkPopupsAsShown(int priority);
+
+  // Marks a specific popup item as shown. Set |mark_notification_as_read| to
+  // true in case marking the notification as read too.
+  void MarkSinglePopupAsShown(const std::string& id,
+                              bool mark_notification_as_read);
 
   bool quiet_mode() const { return quiet_mode_; }
 
@@ -172,8 +155,8 @@ class MESSAGE_CENTER_EXPORT NotificationList {
   // as a popup. kMaxVisiblePopupNotifications are used to limit the number of
   // notifications for the default priority.
   void GetPopupIterators(int priority,
-                         Notifications::iterator& first,
-                         Notifications::iterator& last);
+                         Notifications::iterator* first,
+                         Notifications::iterator* last);
 
   // Given a dictionary of optional notification fields (or NULL), unpacks all
   // recognized values into the given Notification struct. We assume prior

@@ -4,7 +4,7 @@
 
 #include "cc/layer_animation_controller.h"
 
-#include "cc/active_animation.h"
+#include "cc/animation.h"
 #include "cc/animation_curve.h"
 #include "cc/test/animation_test_common.h"
 #include "testing/gmock/include/gmock/gmock.h"
@@ -19,145 +19,159 @@ void expectTranslateX(double translateX, const gfx::Transform& matrix)
     EXPECT_FLOAT_EQ(translateX, matrix.matrix().getDouble(0, 3));
 }
 
-scoped_ptr<ActiveAnimation> createActiveAnimation(scoped_ptr<AnimationCurve> curve, int id, ActiveAnimation::TargetProperty property)
+scoped_ptr<Animation> createAnimation(scoped_ptr<AnimationCurve> curve, int id, Animation::TargetProperty property)
 {
-    return ActiveAnimation::create(curve.Pass(), 0, id, property);
+    return Animation::create(curve.Pass(), 0, id, property);
 }
 
 TEST(LayerAnimationControllerTest, syncNewAnimation)
 {
-    FakeLayerAnimationControllerClient dummyImpl;
-    scoped_ptr<LayerAnimationController> controllerImpl(LayerAnimationController::create(&dummyImpl));
-    FakeLayerAnimationControllerClient dummy;
-    scoped_ptr<LayerAnimationController> controller(LayerAnimationController::create(&dummy));
+    FakeLayerAnimationValueObserver dummyImpl;
+    scoped_refptr<LayerAnimationController> controllerImpl(LayerAnimationController::create(0));
+    controllerImpl->addObserver(&dummyImpl);
+    FakeLayerAnimationValueObserver dummy;
+    scoped_refptr<LayerAnimationController> controller(LayerAnimationController::create(0));
+    controller->addObserver(&dummy);
 
-    EXPECT_FALSE(controllerImpl->getActiveAnimation(0, ActiveAnimation::Opacity));
+    EXPECT_FALSE(controllerImpl->getAnimation(0, Animation::Opacity));
 
     addOpacityTransitionToController(*controller, 1, 0, 1, false);
 
     controller->pushAnimationUpdatesTo(controllerImpl.get());
 
-    EXPECT_TRUE(controllerImpl->getActiveAnimation(0, ActiveAnimation::Opacity));
-    EXPECT_EQ(ActiveAnimation::WaitingForTargetAvailability, controllerImpl->getActiveAnimation(0, ActiveAnimation::Opacity)->runState());
+    EXPECT_TRUE(controllerImpl->getAnimation(0, Animation::Opacity));
+    EXPECT_EQ(Animation::WaitingForTargetAvailability, controllerImpl->getAnimation(0, Animation::Opacity)->runState());
 }
 
 // If an animation is started on the impl thread before it is ticked on the main
 // thread, we must be sure to respect the synchronized start time.
 TEST(LayerAnimationControllerTest, doNotClobberStartTimes)
 {
-    FakeLayerAnimationControllerClient dummyImpl;
-    scoped_ptr<LayerAnimationController> controllerImpl(LayerAnimationController::create(&dummyImpl));
-    FakeLayerAnimationControllerClient dummy;
-    scoped_ptr<LayerAnimationController> controller(LayerAnimationController::create(&dummy));
+    FakeLayerAnimationValueObserver dummyImpl;
+    scoped_refptr<LayerAnimationController> controllerImpl(LayerAnimationController::create(0));
+    controllerImpl->addObserver(&dummyImpl);
+    FakeLayerAnimationValueObserver dummy;
+    scoped_refptr<LayerAnimationController> controller(LayerAnimationController::create(0));
+    controller->addObserver(&dummy);
 
-    EXPECT_FALSE(controllerImpl->getActiveAnimation(0, ActiveAnimation::Opacity));
+    EXPECT_FALSE(controllerImpl->getAnimation(0, Animation::Opacity));
 
     addOpacityTransitionToController(*controller, 1, 0, 1, false);
 
     controller->pushAnimationUpdatesTo(controllerImpl.get());
 
-    EXPECT_TRUE(controllerImpl->getActiveAnimation(0, ActiveAnimation::Opacity));
-    EXPECT_EQ(ActiveAnimation::WaitingForTargetAvailability, controllerImpl->getActiveAnimation(0, ActiveAnimation::Opacity)->runState());
+    EXPECT_TRUE(controllerImpl->getAnimation(0, Animation::Opacity));
+    EXPECT_EQ(Animation::WaitingForTargetAvailability, controllerImpl->getAnimation(0, Animation::Opacity)->runState());
 
     AnimationEventsVector events;
-    controllerImpl->animate(1, &events);
+    controllerImpl->animate(1);
+    controllerImpl->updateState(&events);
 
     // Synchronize the start times.
     EXPECT_EQ(1u, events.size());
     controller->OnAnimationStarted(events[0]);
-    EXPECT_EQ(controller->getActiveAnimation(0, ActiveAnimation::Opacity)->startTime(), controllerImpl->getActiveAnimation(0, ActiveAnimation::Opacity)->startTime());
+    EXPECT_EQ(controller->getAnimation(0, Animation::Opacity)->startTime(), controllerImpl->getAnimation(0, Animation::Opacity)->startTime());
 
     // Start the animation on the main thread. Should not affect the start time.
-    controller->animate(1.5, 0);
-    EXPECT_EQ(controller->getActiveAnimation(0, ActiveAnimation::Opacity)->startTime(), controllerImpl->getActiveAnimation(0, ActiveAnimation::Opacity)->startTime());
+    controller->animate(1.5);
+    controller->updateState(0);
+    EXPECT_EQ(controller->getAnimation(0, Animation::Opacity)->startTime(), controllerImpl->getAnimation(0, Animation::Opacity)->startTime());
 }
 
 TEST(LayerAnimationControllerTest, syncPauseAndResume)
 {
-    FakeLayerAnimationControllerClient dummyImpl;
-    scoped_ptr<LayerAnimationController> controllerImpl(LayerAnimationController::create(&dummyImpl));
-    FakeLayerAnimationControllerClient dummy;
-    scoped_ptr<LayerAnimationController> controller(LayerAnimationController::create(&dummy));
+    FakeLayerAnimationValueObserver dummyImpl;
+    scoped_refptr<LayerAnimationController> controllerImpl(LayerAnimationController::create(0));
+    controllerImpl->addObserver(&dummyImpl);
+    FakeLayerAnimationValueObserver dummy;
+    scoped_refptr<LayerAnimationController> controller(LayerAnimationController::create(0));
+    controller->addObserver(&dummy);
 
-    EXPECT_FALSE(controllerImpl->getActiveAnimation(0, ActiveAnimation::Opacity));
+    EXPECT_FALSE(controllerImpl->getAnimation(0, Animation::Opacity));
 
     addOpacityTransitionToController(*controller, 1, 0, 1, false);
 
     controller->pushAnimationUpdatesTo(controllerImpl.get());
 
-    EXPECT_TRUE(controllerImpl->getActiveAnimation(0, ActiveAnimation::Opacity));
-    EXPECT_EQ(ActiveAnimation::WaitingForTargetAvailability, controllerImpl->getActiveAnimation(0, ActiveAnimation::Opacity)->runState());
+    EXPECT_TRUE(controllerImpl->getAnimation(0, Animation::Opacity));
+    EXPECT_EQ(Animation::WaitingForTargetAvailability, controllerImpl->getAnimation(0, Animation::Opacity)->runState());
 
     // Start the animations on each controller.
     AnimationEventsVector events;
-    controllerImpl->animate(0, &events);
-    controller->animate(0, 0);
-    EXPECT_EQ(ActiveAnimation::Running, controllerImpl->getActiveAnimation(0, ActiveAnimation::Opacity)->runState());
-    EXPECT_EQ(ActiveAnimation::Running, controller->getActiveAnimation(0, ActiveAnimation::Opacity)->runState());
+    controllerImpl->animate(0);
+    controllerImpl->updateState(&events);
+    controller->animate(0);
+    controller->updateState(0);
+    EXPECT_EQ(Animation::Running, controllerImpl->getAnimation(0, Animation::Opacity)->runState());
+    EXPECT_EQ(Animation::Running, controller->getAnimation(0, Animation::Opacity)->runState());
 
     // Pause the main-thread animation.
     controller->suspendAnimations(1);
-    EXPECT_EQ(ActiveAnimation::Paused, controller->getActiveAnimation(0, ActiveAnimation::Opacity)->runState());
+    EXPECT_EQ(Animation::Paused, controller->getAnimation(0, Animation::Opacity)->runState());
 
     // The pause run state change should make it to the impl thread controller.
     controller->pushAnimationUpdatesTo(controllerImpl.get());
-    EXPECT_EQ(ActiveAnimation::Paused, controllerImpl->getActiveAnimation(0, ActiveAnimation::Opacity)->runState());
+    EXPECT_EQ(Animation::Paused, controllerImpl->getAnimation(0, Animation::Opacity)->runState());
 
     // Resume the main-thread animation.
     controller->resumeAnimations(2);
-    EXPECT_EQ(ActiveAnimation::Running, controller->getActiveAnimation(0, ActiveAnimation::Opacity)->runState());
+    EXPECT_EQ(Animation::Running, controller->getAnimation(0, Animation::Opacity)->runState());
 
     // The pause run state change should make it to the impl thread controller.
     controller->pushAnimationUpdatesTo(controllerImpl.get());
-    EXPECT_EQ(ActiveAnimation::Running, controllerImpl->getActiveAnimation(0, ActiveAnimation::Opacity)->runState());
+    EXPECT_EQ(Animation::Running, controllerImpl->getAnimation(0, Animation::Opacity)->runState());
 }
 
 TEST(LayerAnimationControllerTest, doNotSyncFinishedAnimation)
 {
-    FakeLayerAnimationControllerClient dummyImpl;
-    scoped_ptr<LayerAnimationController> controllerImpl(LayerAnimationController::create(&dummyImpl));
-    FakeLayerAnimationControllerClient dummy;
-    scoped_ptr<LayerAnimationController> controller(LayerAnimationController::create(&dummy));
+    FakeLayerAnimationValueObserver dummyImpl;
+    scoped_refptr<LayerAnimationController> controllerImpl(LayerAnimationController::create(0));
+    controllerImpl->addObserver(&dummyImpl);
+    FakeLayerAnimationValueObserver dummy;
+    scoped_refptr<LayerAnimationController> controller(LayerAnimationController::create(0));
+    controller->addObserver(&dummy);
 
-    EXPECT_FALSE(controllerImpl->getActiveAnimation(0, ActiveAnimation::Opacity));
+    EXPECT_FALSE(controllerImpl->getAnimation(0, Animation::Opacity));
 
     int animationId = addOpacityTransitionToController(*controller, 1, 0, 1, false);
 
     controller->pushAnimationUpdatesTo(controllerImpl.get());
 
-    EXPECT_TRUE(controllerImpl->getActiveAnimation(0, ActiveAnimation::Opacity));
-    EXPECT_EQ(ActiveAnimation::WaitingForTargetAvailability, controllerImpl->getActiveAnimation(0, ActiveAnimation::Opacity)->runState());
+    EXPECT_TRUE(controllerImpl->getAnimation(0, Animation::Opacity));
+    EXPECT_EQ(Animation::WaitingForTargetAvailability, controllerImpl->getAnimation(0, Animation::Opacity)->runState());
 
     // Notify main thread controller that the animation has started.
-    AnimationEvent animationStartedEvent(AnimationEvent::Started, 0, 0, ActiveAnimation::Opacity, 0);
+    AnimationEvent animationStartedEvent(AnimationEvent::Started, 0, 0, Animation::Opacity, 0);
     controller->OnAnimationStarted(animationStartedEvent);
 
     // Force animation to complete on impl thread.
     controllerImpl->removeAnimation(animationId);
 
-    EXPECT_FALSE(controllerImpl->getActiveAnimation(animationId, ActiveAnimation::Opacity));
+    EXPECT_FALSE(controllerImpl->getAnimation(animationId, Animation::Opacity));
 
     controller->pushAnimationUpdatesTo(controllerImpl.get());
 
     // Even though the main thread has a 'new' animation, it should not be pushed because the animation has already completed on the impl thread.
-    EXPECT_FALSE(controllerImpl->getActiveAnimation(animationId, ActiveAnimation::Opacity));
+    EXPECT_FALSE(controllerImpl->getAnimation(animationId, Animation::Opacity));
 }
 
 // Tests that transitioning opacity from 0 to 1 works as expected.
 TEST(LayerAnimationControllerTest, TrivialTransition)
 {
     scoped_ptr<AnimationEventsVector> events(make_scoped_ptr(new AnimationEventsVector));
-    FakeLayerAnimationControllerClient dummy;
-    scoped_ptr<LayerAnimationController> controller(
-        LayerAnimationController::create(&dummy));
+    FakeLayerAnimationValueObserver dummy;
+    scoped_refptr<LayerAnimationController> controller(LayerAnimationController::create(0));
+    controller->addObserver(&dummy);
 
-    scoped_ptr<ActiveAnimation> toAdd(createActiveAnimation(make_scoped_ptr(new FakeFloatTransition(1, 0, 1)).PassAs<AnimationCurve>(), 1, ActiveAnimation::Opacity));
+    scoped_ptr<Animation> toAdd(createAnimation(make_scoped_ptr(new FakeFloatTransition(1, 0, 1)).PassAs<AnimationCurve>(), 1, Animation::Opacity));
 
     controller->addAnimation(toAdd.Pass());
-    controller->animate(0, events.get());
+    controller->animate(0);
+    controller->updateState(events.get());
     EXPECT_TRUE(controller->hasActiveAnimation());
     EXPECT_EQ(0, dummy.opacity());
-    controller->animate(1, events.get());
+    controller->animate(1);
+    controller->updateState(events.get());
     EXPECT_EQ(1, dummy.opacity());
     EXPECT_FALSE(controller->hasActiveAnimation());
 }
@@ -166,28 +180,32 @@ TEST(LayerAnimationControllerTest, TrivialTransition)
 TEST(LayerAnimationControllerTest, AnimationsWaitingForStartTimeDoNotFinishIfTheyWaitLongerToStartThanTheirDuration)
 {
     scoped_ptr<AnimationEventsVector> events(make_scoped_ptr(new AnimationEventsVector));
-    FakeLayerAnimationControllerClient dummy;
-    scoped_ptr<LayerAnimationController> controller(
-        LayerAnimationController::create(&dummy));
+    FakeLayerAnimationValueObserver dummy;
+    scoped_refptr<LayerAnimationController> controller(LayerAnimationController::create(0));
+    controller->addObserver(&dummy);
 
-    scoped_ptr<ActiveAnimation> toAdd(createActiveAnimation(make_scoped_ptr(new FakeFloatTransition(1, 0, 1)).PassAs<AnimationCurve>(), 1, ActiveAnimation::Opacity));
+    scoped_ptr<Animation> toAdd(createAnimation(make_scoped_ptr(new FakeFloatTransition(1, 0, 1)).PassAs<AnimationCurve>(), 1, Animation::Opacity));
     toAdd->setNeedsSynchronizedStartTime(true);
 
     // We should pause at the first keyframe indefinitely waiting for that animation to start.
     controller->addAnimation(toAdd.Pass());
-    controller->animate(0, events.get());
+    controller->animate(0);
+    controller->updateState(events.get());
     EXPECT_TRUE(controller->hasActiveAnimation());
     EXPECT_EQ(0, dummy.opacity());
-    controller->animate(1, events.get());
+    controller->animate(1);
+    controller->updateState(events.get());
     EXPECT_TRUE(controller->hasActiveAnimation());
     EXPECT_EQ(0, dummy.opacity());
-    controller->animate(2, events.get());
+    controller->animate(2);
+    controller->updateState(events.get());
     EXPECT_TRUE(controller->hasActiveAnimation());
     EXPECT_EQ(0, dummy.opacity());
 
     // Send the synchronized start time.
-    controller->OnAnimationStarted(AnimationEvent(AnimationEvent::Started, 0, 1, ActiveAnimation::Opacity, 2));
-    controller->animate(5, events.get());
+    controller->OnAnimationStarted(AnimationEvent(AnimationEvent::Started, 0, 1, Animation::Opacity, 2));
+    controller->animate(5);
+    controller->updateState(events.get());
     EXPECT_EQ(1, dummy.opacity());
     EXPECT_FALSE(controller->hasActiveAnimation());
 }
@@ -196,20 +214,23 @@ TEST(LayerAnimationControllerTest, AnimationsWaitingForStartTimeDoNotFinishIfThe
 TEST(LayerAnimationControllerTest, TrivialQueuing)
 {
     scoped_ptr<AnimationEventsVector> events(make_scoped_ptr(new AnimationEventsVector));
-    FakeLayerAnimationControllerClient dummy;
-    scoped_ptr<LayerAnimationController> controller(
-        LayerAnimationController::create(&dummy));
+    FakeLayerAnimationValueObserver dummy;
+    scoped_refptr<LayerAnimationController> controller(LayerAnimationController::create(0));
+    controller->addObserver(&dummy);
 
-    controller->addAnimation(createActiveAnimation(make_scoped_ptr(new FakeFloatTransition(1, 0, 1)).PassAs<AnimationCurve>(), 1, ActiveAnimation::Opacity));
-    controller->addAnimation(createActiveAnimation(make_scoped_ptr(new FakeFloatTransition(1, 1, 0.5)).PassAs<AnimationCurve>(), 2, ActiveAnimation::Opacity));
+    controller->addAnimation(createAnimation(make_scoped_ptr(new FakeFloatTransition(1, 0, 1)).PassAs<AnimationCurve>(), 1, Animation::Opacity));
+    controller->addAnimation(createAnimation(make_scoped_ptr(new FakeFloatTransition(1, 1, 0.5)).PassAs<AnimationCurve>(), 2, Animation::Opacity));
 
-    controller->animate(0, events.get());
+    controller->animate(0);
+    controller->updateState(events.get());
     EXPECT_TRUE(controller->hasActiveAnimation());
     EXPECT_EQ(0, dummy.opacity());
-    controller->animate(1, events.get());
+    controller->animate(1);
+    controller->updateState(events.get());
     EXPECT_TRUE(controller->hasActiveAnimation());
     EXPECT_EQ(1, dummy.opacity());
-    controller->animate(2, events.get());
+    controller->animate(2);
+    controller->updateState(events.get());
     EXPECT_EQ(0.5, dummy.opacity());
     EXPECT_FALSE(controller->hasActiveAnimation());
 }
@@ -218,24 +239,27 @@ TEST(LayerAnimationControllerTest, TrivialQueuing)
 TEST(LayerAnimationControllerTest, Interrupt)
 {
     scoped_ptr<AnimationEventsVector> events(make_scoped_ptr(new AnimationEventsVector));
-    FakeLayerAnimationControllerClient dummy;
-    scoped_ptr<LayerAnimationController> controller(
-        LayerAnimationController::create(&dummy));
-    controller->addAnimation(createActiveAnimation(make_scoped_ptr(new FakeFloatTransition(1, 0, 1)).PassAs<AnimationCurve>(), 1, ActiveAnimation::Opacity));
-    controller->animate(0, events.get());
+    FakeLayerAnimationValueObserver dummy;
+    scoped_refptr<LayerAnimationController> controller(LayerAnimationController::create(0));
+    controller->addObserver(&dummy);
+    controller->addAnimation(createAnimation(make_scoped_ptr(new FakeFloatTransition(1, 0, 1)).PassAs<AnimationCurve>(), 1, Animation::Opacity));
+    controller->animate(0);
+    controller->updateState(events.get());
     EXPECT_TRUE(controller->hasActiveAnimation());
     EXPECT_EQ(0, dummy.opacity());
 
-    scoped_ptr<ActiveAnimation> toAdd(createActiveAnimation(make_scoped_ptr(new FakeFloatTransition(1, 1, 0.5)).PassAs<AnimationCurve>(), 2, ActiveAnimation::Opacity));
-    toAdd->setRunState(ActiveAnimation::WaitingForNextTick, 0);
+    scoped_ptr<Animation> toAdd(createAnimation(make_scoped_ptr(new FakeFloatTransition(1, 1, 0.5)).PassAs<AnimationCurve>(), 2, Animation::Opacity));
+    toAdd->setRunState(Animation::WaitingForNextTick, 0);
     controller->addAnimation(toAdd.Pass());
 
     // Since the animation was in the WaitingForNextTick state, it should start right in
     // this call to animate.
-    controller->animate(0.5, events.get());
+    controller->animate(0.5);
+    controller->updateState(events.get());
     EXPECT_TRUE(controller->hasActiveAnimation());
     EXPECT_EQ(1, dummy.opacity());
-    controller->animate(1.5, events.get());
+    controller->animate(1.5);
+    controller->updateState(events.get());
     EXPECT_EQ(0.5, dummy.opacity());
     EXPECT_FALSE(controller->hasActiveAnimation());
 }
@@ -244,23 +268,26 @@ TEST(LayerAnimationControllerTest, Interrupt)
 TEST(LayerAnimationControllerTest, ScheduleTogetherWhenAPropertyIsBlocked)
 {
     scoped_ptr<AnimationEventsVector> events(make_scoped_ptr(new AnimationEventsVector));
-    FakeLayerAnimationControllerClient dummy;
-    scoped_ptr<LayerAnimationController> controller(
-        LayerAnimationController::create(&dummy));
+    FakeLayerAnimationValueObserver dummy;
+    scoped_refptr<LayerAnimationController> controller(LayerAnimationController::create(0));
+    controller->addObserver(&dummy);
 
-    controller->addAnimation(createActiveAnimation(make_scoped_ptr(new FakeTransformTransition(1)).PassAs<AnimationCurve>(), 1, ActiveAnimation::Transform));
-    controller->addAnimation(createActiveAnimation(make_scoped_ptr(new FakeTransformTransition(1)).PassAs<AnimationCurve>(), 2, ActiveAnimation::Transform));
-    controller->addAnimation(createActiveAnimation(make_scoped_ptr(new FakeFloatTransition(1, 0, 1)).PassAs<AnimationCurve>(), 2, ActiveAnimation::Opacity));
+    controller->addAnimation(createAnimation(make_scoped_ptr(new FakeTransformTransition(1)).PassAs<AnimationCurve>(), 1, Animation::Transform));
+    controller->addAnimation(createAnimation(make_scoped_ptr(new FakeTransformTransition(1)).PassAs<AnimationCurve>(), 2, Animation::Transform));
+    controller->addAnimation(createAnimation(make_scoped_ptr(new FakeFloatTransition(1, 0, 1)).PassAs<AnimationCurve>(), 2, Animation::Opacity));
 
-    controller->animate(0, events.get());
+    controller->animate(0);
+    controller->updateState(events.get());
     EXPECT_EQ(0, dummy.opacity());
     EXPECT_TRUE(controller->hasActiveAnimation());
-    controller->animate(1, events.get());
+    controller->animate(1);
+    controller->updateState(events.get());
     // Should not have started the float transition yet.
     EXPECT_TRUE(controller->hasActiveAnimation());
     EXPECT_EQ(0, dummy.opacity());
     // The float animation should have started at time 1 and should be done.
-    controller->animate(2, events.get());
+    controller->animate(2);
+    controller->updateState(events.get());
     EXPECT_EQ(1, dummy.opacity());
     EXPECT_FALSE(controller->hasActiveAnimation());
 }
@@ -271,28 +298,31 @@ TEST(LayerAnimationControllerTest, ScheduleTogetherWhenAPropertyIsBlocked)
 TEST(LayerAnimationControllerTest, ScheduleTogetherWithAnAnimWaiting)
 {
     scoped_ptr<AnimationEventsVector> events(make_scoped_ptr(new AnimationEventsVector));
-    FakeLayerAnimationControllerClient dummy;
-    scoped_ptr<LayerAnimationController> controller(
-        LayerAnimationController::create(&dummy));
+    FakeLayerAnimationValueObserver dummy;
+    scoped_refptr<LayerAnimationController> controller(LayerAnimationController::create(0));
+    controller->addObserver(&dummy);
 
-    controller->addAnimation(createActiveAnimation(make_scoped_ptr(new FakeTransformTransition(2)).PassAs<AnimationCurve>(), 1, ActiveAnimation::Transform));
-    controller->addAnimation(createActiveAnimation(make_scoped_ptr(new FakeFloatTransition(1, 0, 1)).PassAs<AnimationCurve>(), 1, ActiveAnimation::Opacity));
-    controller->addAnimation(createActiveAnimation(make_scoped_ptr(new FakeFloatTransition(1, 1, 0.5)).PassAs<AnimationCurve>(), 2, ActiveAnimation::Opacity));
+    controller->addAnimation(createAnimation(make_scoped_ptr(new FakeTransformTransition(2)).PassAs<AnimationCurve>(), 1, Animation::Transform));
+    controller->addAnimation(createAnimation(make_scoped_ptr(new FakeFloatTransition(1, 0, 1)).PassAs<AnimationCurve>(), 1, Animation::Opacity));
+    controller->addAnimation(createAnimation(make_scoped_ptr(new FakeFloatTransition(1, 1, 0.5)).PassAs<AnimationCurve>(), 2, Animation::Opacity));
 
     // Animations with id 1 should both start now.
-    controller->animate(0, events.get());
+    controller->animate(0);
+    controller->updateState(events.get());
     EXPECT_TRUE(controller->hasActiveAnimation());
     EXPECT_EQ(0, dummy.opacity());
     // The opacity animation should have finished at time 1, but the group
     // of animations with id 1 don't finish until time 2 because of the length
     // of the transform animation.
-    controller->animate(2, events.get());
+    controller->animate(2);
+    controller->updateState(events.get());
     // Should not have started the float transition yet.
     EXPECT_TRUE(controller->hasActiveAnimation());
     EXPECT_EQ(1, dummy.opacity());
 
     // The second opacity animation should start at time 2 and should be done by time 3
-    controller->animate(3, events.get());
+    controller->animate(3);
+    controller->updateState(events.get());
     EXPECT_EQ(0.5, dummy.opacity());
     EXPECT_FALSE(controller->hasActiveAnimation());
 }
@@ -301,22 +331,25 @@ TEST(LayerAnimationControllerTest, ScheduleTogetherWithAnAnimWaiting)
 TEST(LayerAnimationControllerTest, ScheduleAnimation)
 {
     scoped_ptr<AnimationEventsVector> events(make_scoped_ptr(new AnimationEventsVector));
-    FakeLayerAnimationControllerClient dummy;
-    scoped_ptr<LayerAnimationController> controller(
-        LayerAnimationController::create(&dummy));
+    FakeLayerAnimationValueObserver dummy;
+    scoped_refptr<LayerAnimationController> controller(LayerAnimationController::create(0));
+    controller->addObserver(&dummy);
 
-    scoped_ptr<ActiveAnimation> toAdd(createActiveAnimation(make_scoped_ptr(new FakeFloatTransition(1, 0, 1)).PassAs<AnimationCurve>(), 1, ActiveAnimation::Opacity));
-    toAdd->setRunState(ActiveAnimation::WaitingForStartTime, 0);
+    scoped_ptr<Animation> toAdd(createAnimation(make_scoped_ptr(new FakeFloatTransition(1, 0, 1)).PassAs<AnimationCurve>(), 1, Animation::Opacity));
+    toAdd->setRunState(Animation::WaitingForStartTime, 0);
     toAdd->setStartTime(1);
     controller->addAnimation(toAdd.Pass());
 
-    controller->animate(0, events.get());
+    controller->animate(0);
+    controller->updateState(events.get());
     EXPECT_TRUE(controller->hasActiveAnimation());
     EXPECT_EQ(0, dummy.opacity());
-    controller->animate(1, events.get());
+    controller->animate(1);
+    controller->updateState(events.get());
     EXPECT_TRUE(controller->hasActiveAnimation());
     EXPECT_EQ(0, dummy.opacity());
-    controller->animate(2, events.get());
+    controller->animate(2);
+    controller->updateState(events.get());
     EXPECT_EQ(1, dummy.opacity());
     EXPECT_FALSE(controller->hasActiveAnimation());
 }
@@ -325,28 +358,32 @@ TEST(LayerAnimationControllerTest, ScheduleAnimation)
 TEST(LayerAnimationControllerTest, ScheduledAnimationInterruptsRunningAnimation)
 {
     scoped_ptr<AnimationEventsVector> events(make_scoped_ptr(new AnimationEventsVector));
-    FakeLayerAnimationControllerClient dummy;
-    scoped_ptr<LayerAnimationController> controller(
-        LayerAnimationController::create(&dummy));
+    FakeLayerAnimationValueObserver dummy;
+    scoped_refptr<LayerAnimationController> controller(LayerAnimationController::create(0));
+    controller->addObserver(&dummy);
 
-    controller->addAnimation(createActiveAnimation(make_scoped_ptr(new FakeFloatTransition(2, 0, 1)).PassAs<AnimationCurve>(), 1, ActiveAnimation::Opacity));
+    controller->addAnimation(createAnimation(make_scoped_ptr(new FakeFloatTransition(2, 0, 1)).PassAs<AnimationCurve>(), 1, Animation::Opacity));
 
-    scoped_ptr<ActiveAnimation> toAdd(createActiveAnimation(make_scoped_ptr(new FakeFloatTransition(1, 0.5, 0)).PassAs<AnimationCurve>(), 2, ActiveAnimation::Opacity));
-    toAdd->setRunState(ActiveAnimation::WaitingForStartTime, 0);
+    scoped_ptr<Animation> toAdd(createAnimation(make_scoped_ptr(new FakeFloatTransition(1, 0.5, 0)).PassAs<AnimationCurve>(), 2, Animation::Opacity));
+    toAdd->setRunState(Animation::WaitingForStartTime, 0);
     toAdd->setStartTime(1);
     controller->addAnimation(toAdd.Pass());
 
     // First 2s opacity transition should start immediately.
-    controller->animate(0, events.get());
+    controller->animate(0);
+    controller->updateState(events.get());
     EXPECT_TRUE(controller->hasActiveAnimation());
     EXPECT_EQ(0, dummy.opacity());
-    controller->animate(0.5, events.get());
+    controller->animate(0.5);
+    controller->updateState(events.get());
     EXPECT_TRUE(controller->hasActiveAnimation());
     EXPECT_EQ(0.25, dummy.opacity());
-    controller->animate(1, events.get());
+    controller->animate(1);
+    controller->updateState(events.get());
     EXPECT_TRUE(controller->hasActiveAnimation());
     EXPECT_EQ(0.5, dummy.opacity());
-    controller->animate(2, events.get());
+    controller->animate(2);
+    controller->updateState(events.get());
     EXPECT_EQ(0, dummy.opacity());
     EXPECT_FALSE(controller->hasActiveAnimation());
 }
@@ -356,34 +393,39 @@ TEST(LayerAnimationControllerTest, ScheduledAnimationInterruptsRunningAnimation)
 TEST(LayerAnimationControllerTest, ScheduledAnimationInterruptsRunningAnimationWithAnimInQueue)
 {
     scoped_ptr<AnimationEventsVector> events(make_scoped_ptr(new AnimationEventsVector));
-    FakeLayerAnimationControllerClient dummy;
-    scoped_ptr<LayerAnimationController> controller(
-        LayerAnimationController::create(&dummy));
+    FakeLayerAnimationValueObserver dummy;
+    scoped_refptr<LayerAnimationController> controller(LayerAnimationController::create(0));
+    controller->addObserver(&dummy);
 
-    controller->addAnimation(createActiveAnimation(make_scoped_ptr(new FakeFloatTransition(2, 0, 1)).PassAs<AnimationCurve>(), 1, ActiveAnimation::Opacity));
+    controller->addAnimation(createAnimation(make_scoped_ptr(new FakeFloatTransition(2, 0, 1)).PassAs<AnimationCurve>(), 1, Animation::Opacity));
 
-    scoped_ptr<ActiveAnimation> toAdd(createActiveAnimation(make_scoped_ptr(new FakeFloatTransition(2, 0.5, 0)).PassAs<AnimationCurve>(), 2, ActiveAnimation::Opacity));
-    toAdd->setRunState(ActiveAnimation::WaitingForStartTime, 0);
+    scoped_ptr<Animation> toAdd(createAnimation(make_scoped_ptr(new FakeFloatTransition(2, 0.5, 0)).PassAs<AnimationCurve>(), 2, Animation::Opacity));
+    toAdd->setRunState(Animation::WaitingForStartTime, 0);
     toAdd->setStartTime(1);
     controller->addAnimation(toAdd.Pass());
 
-    controller->addAnimation(createActiveAnimation(make_scoped_ptr(new FakeFloatTransition(1, 0, 0.75)).PassAs<AnimationCurve>(), 3, ActiveAnimation::Opacity));
+    controller->addAnimation(createAnimation(make_scoped_ptr(new FakeFloatTransition(1, 0, 0.75)).PassAs<AnimationCurve>(), 3, Animation::Opacity));
 
     // First 2s opacity transition should start immediately.
-    controller->animate(0, events.get());
+    controller->animate(0);
+    controller->updateState(events.get());
     EXPECT_TRUE(controller->hasActiveAnimation());
     EXPECT_EQ(0, dummy.opacity());
-    controller->animate(0.5, events.get());
+    controller->animate(0.5);
+    controller->updateState(events.get());
     EXPECT_TRUE(controller->hasActiveAnimation());
     EXPECT_EQ(0.25, dummy.opacity());
     EXPECT_TRUE(controller->hasActiveAnimation());
-    controller->animate(1, events.get());
+    controller->animate(1);
+    controller->updateState(events.get());
     EXPECT_TRUE(controller->hasActiveAnimation());
     EXPECT_EQ(0.5, dummy.opacity());
-    controller->animate(3, events.get());
+    controller->animate(3);
+    controller->updateState(events.get());
     EXPECT_TRUE(controller->hasActiveAnimation());
     EXPECT_EQ(0, dummy.opacity());
-    controller->animate(4, events.get());
+    controller->animate(4);
+    controller->updateState(events.get());
     EXPECT_EQ(0.75, dummy.opacity());
     EXPECT_FALSE(controller->hasActiveAnimation());
 }
@@ -392,35 +434,42 @@ TEST(LayerAnimationControllerTest, ScheduledAnimationInterruptsRunningAnimationW
 TEST(LayerAnimationControllerTest, TrivialLooping)
 {
     scoped_ptr<AnimationEventsVector> events(make_scoped_ptr(new AnimationEventsVector));
-    FakeLayerAnimationControllerClient dummy;
-    scoped_ptr<LayerAnimationController> controller(
-        LayerAnimationController::create(&dummy));
+    FakeLayerAnimationValueObserver dummy;
+    scoped_refptr<LayerAnimationController> controller(LayerAnimationController::create(0));
+    controller->addObserver(&dummy);
 
-    scoped_ptr<ActiveAnimation> toAdd(createActiveAnimation(make_scoped_ptr(new FakeFloatTransition(1, 0, 1)).PassAs<AnimationCurve>(), 1, ActiveAnimation::Opacity));
+    scoped_ptr<Animation> toAdd(createAnimation(make_scoped_ptr(new FakeFloatTransition(1, 0, 1)).PassAs<AnimationCurve>(), 1, Animation::Opacity));
     toAdd->setIterations(3);
     controller->addAnimation(toAdd.Pass());
 
-    controller->animate(0, events.get());
+    controller->animate(0);
+    controller->updateState(events.get());
     EXPECT_TRUE(controller->hasActiveAnimation());
     EXPECT_EQ(0, dummy.opacity());
-    controller->animate(1.25, events.get());
+    controller->animate(1.25);
+    controller->updateState(events.get());
     EXPECT_TRUE(controller->hasActiveAnimation());
     EXPECT_EQ(0.25, dummy.opacity());
-    controller->animate(1.75, events.get());
+    controller->animate(1.75);
+    controller->updateState(events.get());
     EXPECT_TRUE(controller->hasActiveAnimation());
     EXPECT_EQ(0.75, dummy.opacity());
-    controller->animate(2.25, events.get());
+    controller->animate(2.25);
+    controller->updateState(events.get());
     EXPECT_TRUE(controller->hasActiveAnimation());
     EXPECT_EQ(0.25, dummy.opacity());
-    controller->animate(2.75, events.get());
+    controller->animate(2.75);
+    controller->updateState(events.get());
     EXPECT_TRUE(controller->hasActiveAnimation());
     EXPECT_EQ(0.75, dummy.opacity());
-    controller->animate(3, events.get());
+    controller->animate(3);
+    controller->updateState(events.get());
     EXPECT_FALSE(controller->hasActiveAnimation());
     EXPECT_EQ(1, dummy.opacity());
 
     // Just be extra sure.
-    controller->animate(4, events.get());
+    controller->animate(4);
+    controller->updateState(events.get());
     EXPECT_EQ(1, dummy.opacity());
 }
 
@@ -428,34 +477,39 @@ TEST(LayerAnimationControllerTest, TrivialLooping)
 TEST(LayerAnimationControllerTest, InfiniteLooping)
 {
     scoped_ptr<AnimationEventsVector> events(make_scoped_ptr(new AnimationEventsVector));
-    FakeLayerAnimationControllerClient dummy;
-    scoped_ptr<LayerAnimationController> controller(
-        LayerAnimationController::create(&dummy));
+    FakeLayerAnimationValueObserver dummy;
+    scoped_refptr<LayerAnimationController> controller(LayerAnimationController::create(0));
+    controller->addObserver(&dummy);
 
     const int id = 1;
-    scoped_ptr<ActiveAnimation> toAdd(createActiveAnimation(make_scoped_ptr(new FakeFloatTransition(1, 0, 1)).PassAs<AnimationCurve>(), id, ActiveAnimation::Opacity));
+    scoped_ptr<Animation> toAdd(createAnimation(make_scoped_ptr(new FakeFloatTransition(1, 0, 1)).PassAs<AnimationCurve>(), id, Animation::Opacity));
     toAdd->setIterations(-1);
     controller->addAnimation(toAdd.Pass());
 
-    controller->animate(0, events.get());
+    controller->animate(0);
+    controller->updateState(events.get());
     EXPECT_TRUE(controller->hasActiveAnimation());
     EXPECT_EQ(0, dummy.opacity());
-    controller->animate(1.25, events.get());
+    controller->animate(1.25);
+    controller->updateState(events.get());
     EXPECT_TRUE(controller->hasActiveAnimation());
     EXPECT_EQ(0.25, dummy.opacity());
-    controller->animate(1.75, events.get());
+    controller->animate(1.75);
+    controller->updateState(events.get());
     EXPECT_TRUE(controller->hasActiveAnimation());
     EXPECT_EQ(0.75, dummy.opacity());
 
-    controller->animate(1073741824.25, events.get());
+    controller->animate(1073741824.25);
+    controller->updateState(events.get());
     EXPECT_TRUE(controller->hasActiveAnimation());
     EXPECT_EQ(0.25, dummy.opacity());
-    controller->animate(1073741824.75, events.get());
+    controller->animate(1073741824.75);
+    controller->updateState(events.get());
     EXPECT_TRUE(controller->hasActiveAnimation());
     EXPECT_EQ(0.75, dummy.opacity());
 
-    EXPECT_TRUE(controller->getActiveAnimation(id, ActiveAnimation::Opacity));
-    controller->getActiveAnimation(id, ActiveAnimation::Opacity)->setRunState(ActiveAnimation::Aborted, 0.75);
+    EXPECT_TRUE(controller->getAnimation(id, Animation::Opacity));
+    controller->getAnimation(id, Animation::Opacity)->setRunState(Animation::Aborted, 0.75);
     EXPECT_FALSE(controller->hasActiveAnimation());
     EXPECT_EQ(0.75, dummy.opacity());
 }
@@ -464,34 +518,39 @@ TEST(LayerAnimationControllerTest, InfiniteLooping)
 TEST(LayerAnimationControllerTest, PauseResume)
 {
     scoped_ptr<AnimationEventsVector> events(make_scoped_ptr(new AnimationEventsVector));
-    FakeLayerAnimationControllerClient dummy;
-    scoped_ptr<LayerAnimationController> controller(
-        LayerAnimationController::create(&dummy));
+    FakeLayerAnimationValueObserver dummy;
+    scoped_refptr<LayerAnimationController> controller(LayerAnimationController::create(0));
+    controller->addObserver(&dummy);
 
     const int id = 1;
-    controller->addAnimation(createActiveAnimation(make_scoped_ptr(new FakeFloatTransition(1, 0, 1)).PassAs<AnimationCurve>(), id, ActiveAnimation::Opacity));
+    controller->addAnimation(createAnimation(make_scoped_ptr(new FakeFloatTransition(1, 0, 1)).PassAs<AnimationCurve>(), id, Animation::Opacity));
 
-    controller->animate(0, events.get());
+    controller->animate(0);
+    controller->updateState(events.get());
     EXPECT_TRUE(controller->hasActiveAnimation());
     EXPECT_EQ(0, dummy.opacity());
-    controller->animate(0.5, events.get());
+    controller->animate(0.5);
+    controller->updateState(events.get());
     EXPECT_TRUE(controller->hasActiveAnimation());
     EXPECT_EQ(0.5, dummy.opacity());
 
-    EXPECT_TRUE(controller->getActiveAnimation(id, ActiveAnimation::Opacity));
-    controller->getActiveAnimation(id, ActiveAnimation::Opacity)->setRunState(ActiveAnimation::Paused, 0.5);
+    EXPECT_TRUE(controller->getAnimation(id, Animation::Opacity));
+    controller->getAnimation(id, Animation::Opacity)->setRunState(Animation::Paused, 0.5);
 
-    controller->animate(1024, events.get());
+    controller->animate(1024);
+    controller->updateState(events.get());
     EXPECT_TRUE(controller->hasActiveAnimation());
     EXPECT_EQ(0.5, dummy.opacity());
 
-    EXPECT_TRUE(controller->getActiveAnimation(id, ActiveAnimation::Opacity));
-    controller->getActiveAnimation(id, ActiveAnimation::Opacity)->setRunState(ActiveAnimation::Running, 1024);
+    EXPECT_TRUE(controller->getAnimation(id, Animation::Opacity));
+    controller->getAnimation(id, Animation::Opacity)->setRunState(Animation::Running, 1024);
 
-    controller->animate(1024.25, events.get());
+    controller->animate(1024.25);
+    controller->updateState(events.get());
     EXPECT_TRUE(controller->hasActiveAnimation());
     EXPECT_EQ(0.75, dummy.opacity());
-    controller->animate(1024.5, events.get());
+    controller->animate(1024.5);
+    controller->updateState(events.get());
     EXPECT_FALSE(controller->hasActiveAnimation());
     EXPECT_EQ(1, dummy.opacity());
 }
@@ -499,48 +558,54 @@ TEST(LayerAnimationControllerTest, PauseResume)
 TEST(LayerAnimationControllerTest, AbortAGroupedAnimation)
 {
     scoped_ptr<AnimationEventsVector> events(make_scoped_ptr(new AnimationEventsVector));
-    FakeLayerAnimationControllerClient dummy;
-    scoped_ptr<LayerAnimationController> controller(
-        LayerAnimationController::create(&dummy));
+    FakeLayerAnimationValueObserver dummy;
+    scoped_refptr<LayerAnimationController> controller(LayerAnimationController::create(0));
+    controller->addObserver(&dummy);
 
     const int id = 1;
-    controller->addAnimation(createActiveAnimation(make_scoped_ptr(new FakeTransformTransition(1)).PassAs<AnimationCurve>(), id, ActiveAnimation::Transform));
-    controller->addAnimation(createActiveAnimation(make_scoped_ptr(new FakeFloatTransition(2, 0, 1)).PassAs<AnimationCurve>(), id, ActiveAnimation::Opacity));
-    controller->addAnimation(createActiveAnimation(make_scoped_ptr(new FakeFloatTransition(1, 1, 0.75)).PassAs<AnimationCurve>(), 2, ActiveAnimation::Opacity));
+    controller->addAnimation(createAnimation(make_scoped_ptr(new FakeTransformTransition(1)).PassAs<AnimationCurve>(), id, Animation::Transform));
+    controller->addAnimation(createAnimation(make_scoped_ptr(new FakeFloatTransition(2, 0, 1)).PassAs<AnimationCurve>(), id, Animation::Opacity));
+    controller->addAnimation(createAnimation(make_scoped_ptr(new FakeFloatTransition(1, 1, 0.75)).PassAs<AnimationCurve>(), 2, Animation::Opacity));
 
-    controller->animate(0, events.get());
+    controller->animate(0);
+    controller->updateState(events.get());
     EXPECT_TRUE(controller->hasActiveAnimation());
     EXPECT_EQ(0, dummy.opacity());
-    controller->animate(1, events.get());
+    controller->animate(1);
+    controller->updateState(events.get());
     EXPECT_TRUE(controller->hasActiveAnimation());
     EXPECT_EQ(0.5, dummy.opacity());
 
-    EXPECT_TRUE(controller->getActiveAnimation(id, ActiveAnimation::Opacity));
-    controller->getActiveAnimation(id, ActiveAnimation::Opacity)->setRunState(ActiveAnimation::Aborted, 1);
-    controller->animate(1, events.get());
+    EXPECT_TRUE(controller->getAnimation(id, Animation::Opacity));
+    controller->getAnimation(id, Animation::Opacity)->setRunState(Animation::Aborted, 1);
+    controller->animate(1);
+    controller->updateState(events.get());
     EXPECT_TRUE(controller->hasActiveAnimation());
     EXPECT_EQ(1, dummy.opacity());
-    controller->animate(2, events.get());
+    controller->animate(2);
+    controller->updateState(events.get());
     EXPECT_TRUE(!controller->hasActiveAnimation());
     EXPECT_EQ(0.75, dummy.opacity());
 }
 
 TEST(LayerAnimationControllerTest, ForceSyncWhenSynchronizedStartTimeNeeded)
 {
-    FakeLayerAnimationControllerClient dummyImpl;
-    scoped_ptr<LayerAnimationController> controllerImpl(LayerAnimationController::create(&dummyImpl));
+    FakeLayerAnimationValueObserver dummyImpl;
+    scoped_refptr<LayerAnimationController> controllerImpl(LayerAnimationController::create(0));
+    controllerImpl->addObserver(&dummyImpl);
     scoped_ptr<AnimationEventsVector> events(make_scoped_ptr(new AnimationEventsVector));
-    FakeLayerAnimationControllerClient dummy;
-    scoped_ptr<LayerAnimationController> controller(
-        LayerAnimationController::create(&dummy));
+    FakeLayerAnimationValueObserver dummy;
+    scoped_refptr<LayerAnimationController> controller(LayerAnimationController::create(0));
+    controller->addObserver(&dummy);
 
-    scoped_ptr<ActiveAnimation> toAdd(createActiveAnimation(make_scoped_ptr(new FakeFloatTransition(2, 0, 1)).PassAs<AnimationCurve>(), 0, ActiveAnimation::Opacity));
+    scoped_ptr<Animation> toAdd(createAnimation(make_scoped_ptr(new FakeFloatTransition(2, 0, 1)).PassAs<AnimationCurve>(), 0, Animation::Opacity));
     toAdd->setNeedsSynchronizedStartTime(true);
     controller->addAnimation(toAdd.Pass());
 
-    controller->animate(0, 0);
+    controller->animate(0);
+    controller->updateState(events.get());
     EXPECT_TRUE(controller->hasActiveAnimation());
-    ActiveAnimation* activeAnimation = controller->getActiveAnimation(0, ActiveAnimation::Opacity);
+    Animation* activeAnimation = controller->getAnimation(0, Animation::Opacity);
     EXPECT_TRUE(activeAnimation);
     EXPECT_TRUE(activeAnimation->needsSynchronizedStartTime());
 
@@ -548,9 +613,47 @@ TEST(LayerAnimationControllerTest, ForceSyncWhenSynchronizedStartTimeNeeded)
 
     controller->pushAnimationUpdatesTo(controllerImpl.get());
 
-    activeAnimation = controllerImpl->getActiveAnimation(0, ActiveAnimation::Opacity);
+    activeAnimation = controllerImpl->getAnimation(0, Animation::Opacity);
     EXPECT_TRUE(activeAnimation);
-    EXPECT_EQ(ActiveAnimation::WaitingForTargetAvailability, activeAnimation->runState());
+    EXPECT_EQ(Animation::WaitingForTargetAvailability, activeAnimation->runState());
+}
+
+// Tests that skipping a call to updateState works as expected.
+TEST(LayerAnimationControllerTest, SkipUpdateState)
+{
+    scoped_ptr<AnimationEventsVector> events(make_scoped_ptr(new AnimationEventsVector));
+    FakeLayerAnimationValueObserver dummy;
+    scoped_refptr<LayerAnimationController> controller(LayerAnimationController::create(0));
+    controller->addObserver(&dummy);
+
+    controller->addAnimation(createAnimation(make_scoped_ptr(new FakeTransformTransition(1)).PassAs<AnimationCurve>(), 1, Animation::Transform));
+
+    controller->animate(0);
+    controller->updateState(events.get());
+
+    controller->addAnimation(createAnimation(make_scoped_ptr(new FakeFloatTransition(1, 0, 1)).PassAs<AnimationCurve>(), 2, Animation::Opacity));
+
+    // Animate but don't updateState.
+    controller->animate(1);
+
+    controller->animate(2);
+    events.reset(new AnimationEventsVector);
+    controller->updateState(events.get());
+
+    // Should have one Started event and one Finished event.
+    EXPECT_EQ(2, events->size());
+    EXPECT_NE((*events)[0].type, (*events)[1].type);
+
+    // The float transition should still be at its starting point.
+    EXPECT_TRUE(controller->hasActiveAnimation());
+    EXPECT_EQ(0, dummy.opacity());
+
+    controller->animate(3);
+    controller->updateState(events.get());
+
+    // The float tranisition should now be done.
+    EXPECT_EQ(1, dummy.opacity());
+    EXPECT_FALSE(controller->hasActiveAnimation());
 }
 
 }  // namespace

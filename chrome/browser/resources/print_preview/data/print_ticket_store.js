@@ -152,6 +152,22 @@ cr.define('print_preview', function() {
         this.documentInfo_, this.destinationStore_);
 
     /**
+     * Print CSS backgrounds ticket item.
+     * @type {!print_preview.ticket_items.CssBackground}
+     * @private
+     */
+    this.cssBackground_ =
+        new print_preview.ticket_items.CssBackground(this.documentInfo_);
+
+    /**
+     * Print selection only ticket item.
+     * @type {!print_preview.ticket_items.SelectionOnly}
+     * @private
+     */
+    this.selectionOnly_ =
+        new print_preview.ticket_items.SelectionOnly(this.documentInfo_);
+
+    /**
      * Keeps track of event listeners for the print ticket store.
      * @type {!EventTracker}
      * @private
@@ -268,18 +284,26 @@ cr.define('print_preview', function() {
      * @param {string} decimalDelimeter Delimeter of the decimal point.
      * @param {!print_preview.MeasurementSystem.UnitType} unitType Type of unit
      *     of the local measurement system.
+     * @param {boolean} documentHasSelection Whether the document has selected
+     *     content.
+     * @param {boolean} selectionOnly Whether only selected content should be
+     *     printed.
      */
     init: function(
         isDocumentModifiable,
         documentTitle,
         thousandsDelimeter,
         decimalDelimeter,
-        unitType) {
+        unitType,
+        documentHasSelection,
+        selectionOnly) {
 
       this.documentInfo_.isModifiable = isDocumentModifiable;
       this.documentInfo_.title = documentTitle;
       this.measurementSystem_.setSystem(
           thousandsDelimeter, decimalDelimeter, unitType);
+      this.documentInfo_.documentHasSelection = documentHasSelection;
+      this.selectionOnly_.updateValue(selectionOnly);
 
       // Initialize ticket with user's previous values.
       this.marginsType_.updateValue(this.appState_.marginsType);
@@ -289,6 +313,7 @@ cr.define('print_preview', function() {
       this.headerFooter_.updateValue(this.appState_.isHeaderFooterEnabled);
       this.landscape_.updateValue(this.appState_.isLandscapeEnabled);
       this.collate_.updateValue(this.appState_.isCollateEnabled);
+      this.cssBackground_.updateValue(this.appState_.isCssBackgroundEnabled);
     },
 
     /** @return {boolean} Whether the ticket store has the copies capability. */
@@ -604,6 +629,61 @@ cr.define('print_preview', function() {
     updateFitToPage: function(isFitToPageEnabled) {
       if (this.fitToPage_.getValue() != isFitToPageEnabled) {
         this.fitToPage_.updateValue(isFitToPageEnabled);
+        cr.dispatchSimpleEvent(this, PrintTicketStore.EventType.TICKET_CHANGE);
+      }
+    },
+
+    /**
+     * @return {boolean} Whether the print CSS backgrounds capability is
+     *     available.
+     */
+    hasCssBackgroundCapability: function() {
+      return this.cssBackground_.isCapabilityAvailable();
+    },
+
+    /**
+     * @return {boolean} Whether the print CSS backgrounds capability is
+     *     enabled.
+     */
+    isCssBackgroundEnabled: function() {
+      return this.cssBackground_.getValue();
+    },
+
+    /**
+     * @param {boolean} isCssBackgroundEnabled Whether to enable the
+     *     print CSS backgrounds capability.
+     */
+    updateCssBackground: function(isCssBackgroundEnabled) {
+      if (this.cssBackground_.getValue() != isCssBackgroundEnabled) {
+        this.cssBackground_.updateValue(isCssBackgroundEnabled);
+        this.appState_.persistIsCssBackgroundEnabled(isCssBackgroundEnabled);
+        cr.dispatchSimpleEvent(this, PrintTicketStore.EventType.TICKET_CHANGE);
+      }
+    },
+
+    /**
+     * @return {boolean} Whether the print selection only capability is
+     *     available.
+     */
+    hasSelectionOnlyCapability: function() {
+      return this.selectionOnly_.isCapabilityAvailable();
+    },
+
+    /**
+     * @return {boolean} Whether the print selection only capability is
+     *     enabled.
+     */
+    isSelectionOnlyEnabled: function() {
+      return this.selectionOnly_.getValue();
+    },
+
+    /**
+     * @param {boolean} isSelectionOnlyEnabled Whether to enable the
+     *     print selection only capability.
+     */
+    updateSelectionOnly: function(isSelectionOnlyEnabled) {
+      if (this.selectionOnly_.getValue() != isSelectionOnlyEnabled) {
+        this.selectionOnly_.updateValue(isSelectionOnlyEnabled);
         cr.dispatchSimpleEvent(this, PrintTicketStore.EventType.TICKET_CHANGE);
       }
     },

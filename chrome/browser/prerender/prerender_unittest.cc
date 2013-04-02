@@ -290,7 +290,7 @@ class PrerenderTest : public testing::Test {
         switches::kPrerenderFromOmniboxSwitchValueEnabled);
   }
 
-  ~PrerenderTest() {
+  virtual ~PrerenderTest() {
     prerender_link_manager_->OnChannelClosing(kDefaultChildId);
     prerender_link_manager_->Shutdown();
     prerender_manager_->Shutdown();
@@ -408,6 +408,21 @@ TEST_F(PrerenderTest, ExpireTest) {
   prerender_manager()->AdvanceTimeTicks(
       prerender_manager()->config().time_to_live + TimeDelta::FromSeconds(1));
   ASSERT_EQ(null, prerender_manager()->FindEntry(url));
+}
+
+// Ensure that we don't launch prerenders of bad urls (in this case, a mailto:
+// url)
+TEST_F(PrerenderTest, BadURLTest) {
+  GURL url("mailto:test@gmail.com");
+  DummyPrerenderContents* prerender_contents =
+      prerender_manager()->CreateNextPrerenderContents(
+          url,
+          FINAL_STATUS_UNSUPPORTED_SCHEME);
+  EXPECT_FALSE(AddSimplePrerender(url));
+  EXPECT_FALSE(prerender_contents->prerendering_has_started());
+  EXPECT_TRUE(IsEmptyPrerenderLinkManager());
+  DummyPrerenderContents* null = NULL;
+  EXPECT_EQ(null, prerender_manager()->FindEntry(url));
 }
 
 // When the user navigates away from a page, the prerenders it launched should
@@ -1329,7 +1344,7 @@ TEST_F(PrerenderTest, LinkManagerWaitToLaunchNotLaunched) {
   GURL first_url("http://www.myexample.com");
   DummyPrerenderContents* prerender_contents =
       prerender_manager()->CreateNextPrerenderContents(
-          first_url, FINAL_STATUS_TIMED_OUT);
+          first_url, FINAL_STATUS_USED);
   EXPECT_TRUE(AddSimplePrerender(first_url));
 
   GURL second_url("http://www.neverlaunched.com");

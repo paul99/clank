@@ -12,8 +12,8 @@
 #include "base/debug/trace_event.h"
 #include "base/environment.h"
 #include "base/nix/xdg_util.h"
+#include "base/prefs/pref_service.h"
 #include "base/stl_util.h"
-#include "chrome/browser/prefs/pref_service.h"
 #include "chrome/browser/profiles/profile.h"
 #include "chrome/browser/themes/theme_service_factory.h"
 #include "chrome/browser/ui/browser.h"
@@ -311,7 +311,8 @@ gfx::Image GtkThemeService::GetImageNamed(int id) const {
     return *it->second;
 
   if (use_gtk_ && IsOverridableImage(id)) {
-    gfx::Image* image = new gfx::Image(GenerateGtkThemeBitmap(id));
+    gfx::Image* image = new gfx::Image(gfx::ImageSkia::CreateFrom1xBitmap(
+        GenerateGtkThemeBitmap(id)));
     gtk_images_[id] = image;
     return *image;
   }

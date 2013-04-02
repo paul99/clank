@@ -47,6 +47,116 @@
 namespace v8 {
 namespace internal {
 
+// CpuFeatures keeps track of which features are supported by the target CPU.
+// Supported features must be enabled by a Scope before use.
+class CpuFeatures : public AllStatic {
+ public:
+  // Detect features of the target CPU. Set safe defaults if the serializer
+  // is enabled (snapshots must be portable).
+  static void Probe();
+
+  // Check whether a feature is supported by the target CPU.
+  static bool IsSupported(CpuFeature f) {
+    ASSERT(initialized_);
+    if (f == VFP3 && !FLAG_enable_vfp3) return false;
+    if (f == VFP2 && !FLAG_enable_vfp2) return false;
+    if (f == SUDIV && !FLAG_enable_sudiv) return false;
+    if (f == UNALIGNED_ACCESSES && !FLAG_enable_unaligned_accesses) {
+      return false;
+    }
+    if (f == VFP32DREGS && !FLAG_enable_32dregs) return false;
+    return (supported_ & (1u << f)) != 0;
+  }
+
+#ifdef DEBUG
+  // Check whether a feature is currently enabled.
+  static bool IsEnabled(CpuFeature f) {
+    ASSERT(initialized_);
+    Isolate* isolate = Isolate::UncheckedCurrent();
+    if (isolate == NULL) {
+      // When no isolate is available, work as if we're running in
+      // release mode.
+      return IsSupported(f);
+    }
+    unsigned enabled = static_cast<unsigned>(isolate->enabled_cpu_features());
+    return (enabled & (1u << f)) != 0;
+  }
+#endif
+
+  // Enable a specified feature within a scope.
+  class Scope BASE_EMBEDDED {
+#ifdef DEBUG
+
+   public:
+    explicit Scope(CpuFeature f) {
+      unsigned mask = 1u << f;
+      // VFP2 and ARMv7 are implied by VFP3.
+      if (f == VFP3) mask |= 1u << VFP2 | 1u << ARMv7;
+      ASSERT(CpuFeatures::IsSupported(f));
+      ASSERT(!Serializer::enabled() ||
+             (CpuFeatures::found_by_runtime_probing_ & mask) == 0);
+      isolate_ = Isolate::UncheckedCurrent();
+      old_enabled_ = 0;
+      if (isolate_ != NULL) {
+        old_enabled_ = static_cast<unsigned>(isolate_->enabled_cpu_features());
+        isolate_->set_enabled_cpu_features(old_enabled_ | mask);
+      }
+    }
+    ~Scope() {
+      ASSERT_EQ(Isolate::UncheckedCurrent(), isolate_);
+      if (isolate_ != NULL) {
+        isolate_->set_enabled_cpu_features(old_enabled_);
+      }
+    }
+
+   private:
+    Isolate* isolate_;
+    unsigned old_enabled_;
+#else
+
+   public:
+    explicit Scope(CpuFeature f) {}
+#endif
+  };
+
+  class TryForceFeatureScope BASE_EMBEDDED {
+   public:
+    explicit TryForceFeatureScope(CpuFeature f)
+        : old_supported_(CpuFeatures::supported_) {
+      if (CanForce()) {
+        CpuFeatures::supported_ |= (1u << f);
+      }
+    }
+
+    ~TryForceFeatureScope() {
+      if (CanForce()) {
+        CpuFeatures::supported_ = old_supported_;
+      }
+    }
+
+   private:
+    static bool CanForce() {
+      // It's only safe to temporarily force support of CPU features
+      // when there's only a single isolate, which is guaranteed when
+      // the serializer is enabled.
+      return Serializer::enabled();
+    }
+
+    const unsigned old_supported_;
+  };
+
+ private:
+#ifdef DEBUG
+  static bool initialized_;
+#endif
+  static unsigned supported_;
+  static unsigned found_by_runtime_probing_;
+
+  friend class ExternalReference;
+  DISALLOW_COPY_AND_ASSIGN(CpuFeatures);
+};
+
+
 // CPU Registers.
 //
 // 1) We would prefer to use an enum, but enum values are assignment-
@@ -71,21 +181,24 @@ namespace internal {
 // Core register
 struct Register {
   static const int kNumRegisters = 16;
-  static const int kNumAllocatableRegisters = 8;
+  static const int kMaxNumAllocatableRegisters = 8;
   static const int kSizeInBytes = 4;
+  static const int kGPRsPerNonVFP2Double = 2;
+
+  inline static int NumAllocatableRegisters();
 
   static int ToAllocationIndex(Register reg) {
-    ASSERT(reg.code() < kNumAllocatableRegisters);
+    ASSERT(reg.code() < kMaxNumAllocatableRegisters);
     return reg.code();
   }
 
   static Register FromAllocationIndex(int index) {
-    ASSERT(index >= 0 && index < kNumAllocatableRegisters);
+    ASSERT(index >= 0 && index < kMaxNumAllocatableRegisters);
     return from_code(index);
   }
 
   static const char* AllocationIndexToString(int index) {
-    ASSERT(index >= 0 && index < kNumAllocatableRegisters);
+    ASSERT(index >= 0 && index < kMaxNumAllocatableRegisters);
     const char* const names[] = {
       "r0",
       "r1",
@@ -165,7 +278,6 @@ const Register sp  = { kRegister_sp_Code };
 const Register lr  = { kRegister_lr_Code };
 const Register pc  = { kRegister_pc_Code };
 
-
 // Single word VFP register.
 struct SwVfpRegister {
   bool is_valid() const { return 0 <= code_ && code_ < 32; }
@@ -190,52 +302,36 @@ struct SwVfpRegister {
 
 // Double word VFP register.
 struct DwVfpRegister {
-  static const int kNumRegisters = 16;
+  static const int kMaxNumRegisters = 32;
   // A few double registers are reserved: one as a scratch register and one to
   // hold 0.0, that does not fit in the immediate field of vmov instructions.
   //  d14: 0.0
   //  d15: scratch register.
   static const int kNumReservedRegisters = 2;
-  static const int kNumAllocatableRegisters = kNumRegisters -
+  static const int kMaxNumAllocatableRegisters = kMaxNumRegisters -
       kNumReservedRegisters;
 
+  // Note: the number of registers can be different at snapshot and run-time.
+  // Any code included in the snapshot must be able to run both with 16 or 32
+  // registers.
+  inline static int NumRegisters();
+  inline static int NumAllocatableRegisters();
+
   inline static int ToAllocationIndex(DwVfpRegister reg);
-
-  static DwVfpRegister FromAllocationIndex(int index) {
-    ASSERT(index >= 0 && index < kNumAllocatableRegisters);
-    return from_code(index);
-  }
-
-  static const char* AllocationIndexToString(int index) {
-    ASSERT(index >= 0 && index < kNumAllocatableRegisters);
-    const char* const names[] = {
-      "d0",
-      "d1",
-      "d2",
-      "d3",
-      "d4",
-      "d5",
-      "d6",
-      "d7",
-      "d8",
-      "d9",
-      "d10",
-      "d11",
-      "d12",
-      "d13"
-    };
-    return names[index];
-  }
+  static const char* AllocationIndexToString(int index);
+  inline static DwVfpRegister FromAllocationIndex(int index);
 
   static DwVfpRegister from_code(int code) {
     DwVfpRegister r = { code };
     return r;
   }
 
-  // Supporting d0 to d15, can be later extended to d31.
-  bool is_valid() const { return 0 <= code_ && code_ < 16; }
+  bool is_valid() const {
+    return 0 <= code_ && code_ < kMaxNumRegisters;
+  }
   bool is(DwVfpRegister reg) const { return code_ == reg.code_; }
   SwVfpRegister low() const {
+    ASSERT(code_ < 16);
     SwVfpRegister reg;
     reg.code_ = code_ * 2;
 
@@ -243,6 +339,7 @@ struct DwVfpRegister {
     return reg;
   }
   SwVfpRegister high() const {
+    ASSERT(code_ < 16);
     SwVfpRegister reg;
     reg.code_ = (code_ * 2) + 1;
 
@@ -322,6 +419,25 @@ const DwVfpRegister d12 = { 12 };
 const DwVfpRegister d13 = { 13 };
 const DwVfpRegister d14 = { 14 };
 const DwVfpRegister d15 = { 15 };
+const DwVfpRegister d16 = { 16 };
+const DwVfpRegister d17 = { 17 };
+const DwVfpRegister d18 = { 18 };
+const DwVfpRegister d19 = { 19 };
+const DwVfpRegister d20 = { 20 };
+const DwVfpRegister d21 = { 21 };
+const DwVfpRegister d22 = { 22 };
+const DwVfpRegister d23 = { 23 };
+const DwVfpRegister d24 = { 24 };
+const DwVfpRegister d25 = { 25 };
+const DwVfpRegister d26 = { 26 };
+const DwVfpRegister d27 = { 27 };
+const DwVfpRegister d28 = { 28 };
+const DwVfpRegister d29 = { 29 };
+const DwVfpRegister d30 = { 30 };
+const DwVfpRegister d31 = { 31 };
+
+const Register sfpd_lo  = { kRegister_r6_Code };
+const Register sfpd_hi  = { kRegister_r7_Code };
 
 // Aliases for double registers.  Defined using #define instead of
 // "static const DwVfpRegister&" because Clang complains otherwise when a
@@ -399,7 +515,7 @@ class Operand BASE_EMBEDDED {
  public:
   // immediate
   INLINE(explicit Operand(int32_t immediate,
-         RelocInfo::Mode rmode = RelocInfo::NONE));
+         RelocInfo::Mode rmode = RelocInfo::NONE32));
   INLINE(static Operand Zero()) {
     return Operand(static_cast<int32_t>(0));
   }
@@ -497,114 +613,6 @@ class MemOperand BASE_EMBEDDED {
 
   friend class Assembler;
 };
-
-// CpuFeatures keeps track of which features are supported by the target CPU.
-// Supported features must be enabled by a Scope before use.
-class CpuFeatures : public AllStatic {
- public:
-  // Detect features of the target CPU. Set safe defaults if the serializer
-  // is enabled (snapshots must be portable).
-  static void Probe();
-
-  // Check whether a feature is supported by the target CPU.
-  static bool IsSupported(CpuFeature f) {
-    ASSERT(initialized_);
-    if (f == VFP3 && !FLAG_enable_vfp3) return false;
-    if (f == VFP2 && !FLAG_enable_vfp2) return false;
-    if (f == SUDIV && !FLAG_enable_sudiv) return false;
-    if (f == UNALIGNED_ACCESSES && !FLAG_enable_unaligned_accesses) {
-      return false;
-    }
-    return (supported_ & (1u << f)) != 0;
-  }
-
-#ifdef DEBUG
-  // Check whether a feature is currently enabled.
-  static bool IsEnabled(CpuFeature f) {
-    ASSERT(initialized_);
-    Isolate* isolate = Isolate::UncheckedCurrent();
-    if (isolate == NULL) {
-      // When no isolate is available, work as if we're running in
-      // release mode.
-      return IsSupported(f);
-    }
-    unsigned enabled = static_cast<unsigned>(isolate->enabled_cpu_features());
-    return (enabled & (1u << f)) != 0;
-  }
-#endif
-
-  // Enable a specified feature within a scope.
-  class Scope BASE_EMBEDDED {
-#ifdef DEBUG
-
-   public:
-    explicit Scope(CpuFeature f) {
-      unsigned mask = 1u << f;
-      // VFP2 and ARMv7 are implied by VFP3.
-      if (f == VFP3) mask |= 1u << VFP2 | 1u << ARMv7;
-      ASSERT(CpuFeatures::IsSupported(f));
-      ASSERT(!Serializer::enabled() ||
-             (CpuFeatures::found_by_runtime_probing_ & mask) == 0);
-      isolate_ = Isolate::UncheckedCurrent();
-      old_enabled_ = 0;
-      if (isolate_ != NULL) {
-        old_enabled_ = static_cast<unsigned>(isolate_->enabled_cpu_features());
-        isolate_->set_enabled_cpu_features(old_enabled_ | mask);
-      }
-    }
-    ~Scope() {
-      ASSERT_EQ(Isolate::UncheckedCurrent(), isolate_);
-      if (isolate_ != NULL) {
-        isolate_->set_enabled_cpu_features(old_enabled_);
-      }
-    }
-
-   private:
-    Isolate* isolate_;
-    unsigned old_enabled_;
-#else
-
-   public:
-    explicit Scope(CpuFeature f) {}
-#endif
-  };
-
-  class TryForceFeatureScope BASE_EMBEDDED {
-   public:
-    explicit TryForceFeatureScope(CpuFeature f)
-        : old_supported_(CpuFeatures::supported_) {
-      if (CanForce()) {
-        CpuFeatures::supported_ |= (1u << f);
-      }
-    }
-
-    ~TryForceFeatureScope() {
-      if (CanForce()) {
-        CpuFeatures::supported_ = old_supported_;
-      }
-    }
-
-   private:
-    static bool CanForce() {
-      // It's only safe to temporarily force support of CPU features
-      // when there's only a single isolate, which is guaranteed when
-      // the serializer is enabled.
-      return Serializer::enabled();
-    }
-
-    const unsigned old_supported_;
-  };
-
- private:
-#ifdef DEBUG
-  static bool initialized_;
-#endif
-  static unsigned supported_;
-  static unsigned found_by_runtime_probing_;
-
-  DISALLOW_COPY_AND_ASSIGN(CpuFeatures);
-};
-
 
 extern const Instr kMovLrPc;
 extern const Instr kLdrPCMask;
@@ -994,10 +1002,7 @@ class Assembler : public AssemblerBase {
             LFlag l = Short);  // v5 and above
 
   // Support for VFP.
-  // All these APIs support S0 to S31 and D0 to D15.
-  // Currently these APIs do not support extended D registers, i.e, D16 to D31.
-  // However, some simple modifications can allow
-  // these APIs to support D16 to D31.
+  // All these APIs support S0 to S31 and D0 to D31.
 
   void vldr(const DwVfpRegister dst,
             const Register base,
@@ -1064,6 +1069,10 @@ class Assembler : public AssemblerBase {
             const Condition cond = al);
   void vmov(const DwVfpRegister dst,
             const DwVfpRegister src,
+            const Condition cond = al);
+  void vmov(const DwVfpRegister dst,
+            int index,
+            const Register src,
             const Condition cond = al);
   void vmov(const DwVfpRegister dst,
             const Register src1,
@@ -1291,8 +1300,11 @@ class Assembler : public AssemblerBase {
   static bool IsBranch(Instr instr);
   static int GetBranchOffset(Instr instr);
   static bool IsLdrRegisterImmediate(Instr instr);
+  static bool IsVldrDRegisterImmediate(Instr instr);
   static int GetLdrRegisterImmediateOffset(Instr instr);
+  static int GetVldrDRegisterImmediateOffset(Instr instr);
   static Instr SetLdrRegisterImmediateOffset(Instr instr, int offset);
+  static Instr SetVldrDRegisterImmediateOffset(Instr instr, int offset);
   static bool IsStrRegisterImmediate(Instr instr);
   static Instr SetStrRegisterImmediateOffset(Instr instr, int offset);
   static bool IsAddRegisterImmediate(Instr instr);
@@ -1307,6 +1319,7 @@ class Assembler : public AssemblerBase {
   static bool IsStrRegFpNegOffset(Instr instr);
   static bool IsLdrRegFpNegOffset(Instr instr);
   static bool IsLdrPcImmediateOffset(Instr instr);
+  static bool IsVldrDPcImmediateOffset(Instr instr);
   static bool IsTstImmediate(Instr instr);
   static bool IsCmpRegister(Instr instr);
   static bool IsCmpImmediate(Instr instr);
@@ -1317,12 +1330,13 @@ class Assembler : public AssemblerBase {
   static bool IsMovW(Instr instr);
 
   // Constants in pools are accessed via pc relative addressing, which can
-  // reach +/-4KB thereby defining a maximum distance between the instruction
-  // and the accessed constant.
-  static const int kMaxDistToPool = 4*KB;
-  static const int kMaxNumPendingRelocInfo = kMaxDistToPool/kInstrSize;
-  STATIC_ASSERT((kConstantPoolLengthMaxMask & kMaxNumPendingRelocInfo) ==
-                kMaxNumPendingRelocInfo);
+  // reach +/-4KB for integer PC-relative loads and +/-1KB for floating-point
+  // PC-relative loads, thereby defining a maximum distance between the
+  // instruction and the accessed constant.
+  static const int kMaxDistToIntPool = 4*KB;
+  static const int kMaxDistToFPPool = 1*KB;
+  // All relocations could be integer, it therefore acts as the limit.
+  static const int kMaxNumPendingRelocInfo = kMaxDistToIntPool/kInstrSize;
 
   // Postpone the generation of the constant pool for the specified number of
   // instructions.
@@ -1362,7 +1376,9 @@ class Assembler : public AssemblerBase {
     if (--const_pool_blocked_nesting_ == 0) {
       // Check the constant pool hasn't been blocked for too long.
       ASSERT((num_pending_reloc_info_ == 0) ||
-             (pc_offset() < (first_const_pool_use_ + kMaxDistToPool)));
+             (pc_offset() < (first_const_pool_use_ + kMaxDistToIntPool)));
+      ASSERT((num_pending_64_bit_reloc_info_ == 0) ||
+             (pc_offset() < (first_const_pool_use_ + kMaxDistToFPPool)));
       // Two cases:
       //  * no_const_pool_before_ >= next_buffer_check_ and the emission is
       //    still blocked
@@ -1405,13 +1421,6 @@ class Assembler : public AssemblerBase {
   static const int kCheckPoolInterval = kCheckPoolIntervalInst * kInstrSize;
 
 
-  // Average distance beetween a constant pool and the first instruction
-  // accessing the constant pool. Longer distance should result in less I-cache
-  // pollution.
-  // In practice the distance will be smaller since constant pool emission is
-  // forced after function return and sometimes after unconditional branches.
-  static const int kAvgDistToPool = kMaxDistToPool - kCheckPoolInterval;
-
   // Emission of the constant pool may be blocked in some code sequences.
   int const_pool_blocked_nesting_;  // Block emission if this is not zero.
   int no_const_pool_before_;  // Block emission before this pc offset.
@@ -1436,6 +1445,9 @@ class Assembler : public AssemblerBase {
   RelocInfo pending_reloc_info_[kMaxNumPendingRelocInfo];
   // number of pending reloc info entries in the buffer
   int num_pending_reloc_info_;
+  // Number of pending reloc info entries included above which also happen to
+  // be 64-bit.
+  int num_pending_64_bit_reloc_info_;
 
   // The bound position, before this we cannot do instruction elimination.
   int last_bound_pos_;
@@ -1472,6 +1484,8 @@ class Assembler : public AssemblerBase {
   // Record reloc info for current pc_
   void RecordRelocInfo(RelocInfo::Mode rmode, intptr_t data = 0,
                        UseConstantPoolMode mode = USE_CONSTANT_POOL);
+  void RecordRelocInfo(double data);
+  void RecordRelocInfoConstantPoolEntryHelper(const RelocInfo& rinfo);
 
   friend class RegExpMacroAssemblerARM;
   friend class RelocInfo;

@@ -15,17 +15,20 @@
 #include "chrome/browser/google_apis/gdata_errorcode.h"
 #include "chrome/browser/google_apis/gdata_wapi_parser.h"
 
-class FilePath;
 class GURL;
+
+namespace base {
+class FilePath;
+}
 
 namespace google_apis {
 class DriveServiceInterface;
-struct ResumeUploadResponse;
+struct UploadRangeResponse;
 
 // Callback to be invoked once the upload has completed.
 typedef base::Callback<void(DriveUploadError error,
-                            const FilePath& drive_path,
-                            const FilePath& file_path,
+                            const base::FilePath& drive_path,
+                            const base::FilePath& file_path,
                             scoped_ptr<ResourceEntry> resource_entry)>
     UploadCompletionCallback;
 
@@ -55,8 +58,8 @@ class DriveUploaderInterface {
   //   Called when an upload is done regardless of it was successful or not.
   //   Must not be null.
   virtual void UploadNewFile(const GURL& upload_location,
-                             const FilePath& drive_file_path,
-                             const FilePath& local_file_path,
+                             const base::FilePath& drive_file_path,
+                             const base::FilePath& local_file_path,
                              const std::string& title,
                              const std::string& content_type,
                              const UploadCompletionCallback& callback) = 0;
@@ -64,10 +67,16 @@ class DriveUploaderInterface {
   // Uploads an existing file (a file that already exists on Drive).
   //
   // See comments at UploadNewFile() about common parameters.
+  //
+  // etag:
+  //   Expected ETag for the destination file. If it does not match, the upload
+  //   fails with UPLOAD_ERROR_CONFLICT.
+  //   If |etag| is empty, the test is skipped.
   virtual void UploadExistingFile(const GURL& upload_location,
-                                  const FilePath& drive_file_path,
-                                  const FilePath& local_file_path,
+                                  const base::FilePath& drive_file_path,
+                                  const base::FilePath& local_file_path,
                                   const std::string& content_type,
+                                  const std::string& etag,
                                   const UploadCompletionCallback& callback) = 0;
 };
 
@@ -78,16 +87,17 @@ class DriveUploader : public DriveUploaderInterface {
 
   // DriveUploaderInterface overrides.
   virtual void UploadNewFile(const GURL& upload_location,
-                             const FilePath& drive_file_path,
-                             const FilePath& local_file_path,
+                             const base::FilePath& drive_file_path,
+                             const base::FilePath& local_file_path,
                              const std::string& title,
                              const std::string& content_type,
                              const UploadCompletionCallback& callback) OVERRIDE;
   virtual void UploadExistingFile(
       const GURL& upload_location,
-      const FilePath& drive_file_path,
-      const FilePath& local_file_path,
+      const base::FilePath& drive_file_path,
+      const base::FilePath& local_file_path,
       const std::string& content_type,
+      const std::string& etag,
       const UploadCompletionCallback& callback) OVERRIDE;
 
  private:
@@ -119,9 +129,9 @@ class DriveUploader : public DriveUploaderInterface {
                     int bytes_to_send);
 
   // DriveService callback for ResumeUpload.
-  void OnResumeUploadResponseReceived(
+  void OnUploadRangeResponseReceived(
       scoped_ptr<UploadFileInfo> upload_file_info,
-      const ResumeUploadResponse& response,
+      const UploadRangeResponse& response,
       scoped_ptr<ResourceEntry> entry);
 
   // Handle failed uploads.

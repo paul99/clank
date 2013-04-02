@@ -1,4 +1,5 @@
 include_rules = [
+  "+media/video/capture/screen",
   "+net/base",
   "+net/ftp",
   "+net/http",

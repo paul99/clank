@@ -24,6 +24,7 @@ class BrowserOptions(optparse.Values):
 
     self.dont_override_profile = False
     self.extra_browser_args = []
+    self.extra_wpr_args = []
     self.show_stdout = False
 
     self.cros_remote = None
@@ -34,6 +35,9 @@ class BrowserOptions(optparse.Values):
 
     self.trace_dir = None
     self.verbosity = 0
+
+    self.page_filter = None
+    self.page_filter_exclude = None
 
   def Copy(self):
     return copy.deepcopy(self)
@@ -83,6 +87,10 @@ class BrowserOptions(optparse.Values):
     group.add_option('--extra-browser-args',
         dest='extra_browser_args_as_string',
         help='Additional arguments to pass to the browser when it starts')
+    group.add_option('--extra-wpr-args',
+        dest='extra_wpr_args_as_string',
+        help=('Additional arguments to pass to Web Page Replay. '
+              'See third_party/webpagereplay/replay.py for usage.'))
     group.add_option('--show-stdout',
         action='store_true',
         help='When possible, will display the stdout of the process')
@@ -96,10 +104,11 @@ class BrowserOptions(optparse.Values):
     group.add_option('--pageset-repeat', dest='pageset_repeat', default=1,
         help='Number of times to repeat the entire pageset ' +
         'before finishing.')
-    group.add_option('--test-shuffle', action='store_true', dest='test_shuffle',
+    group.add_option('--pageset-shuffle', action='store_true',
+        dest='pageset_shuffle',
         help='Shuffle the order of pages within a pageset.')
-    group.add_option('--test-shuffle-order-file',
-        dest='test_shuffle_order_file', default=None,
+    group.add_option('--pageset-shuffle-order-file',
+        dest='pageset_shuffle_order_file', default=None,
         help='Filename of an output of a previously run test on the current ' +
         'pageset. The tests will run in the same order again, overriding ' +
         'what is specified by --page-repeat and --pageset-repeat.')
@@ -147,6 +156,11 @@ class BrowserOptions(optparse.Values):
           self.extra_browser_args_as_string) # pylint: disable=E1101
         self.extra_browser_args.extend(tmp)
         delattr(self, 'extra_browser_args_as_string')
+      if self.extra_wpr_args_as_string: # pylint: disable=E1101
+        tmp = shlex.split(
+          self.extra_wpr_args_as_string) # pylint: disable=E1101
+        self.extra_wpr_args.extend(tmp)
+        delattr(self, 'extra_wpr_args_as_string')
       return ret
     parser.parse_args = ParseArgs
     return parser

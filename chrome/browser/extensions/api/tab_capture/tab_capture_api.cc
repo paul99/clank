@@ -13,7 +13,7 @@
 #include "chrome/browser/extensions/api/tab_capture/tab_capture_registry_factory.h"
 #include "chrome/browser/extensions/browser_event_router.h"
 #include "chrome/browser/extensions/event_names.h"
-#include "chrome/browser/extensions/extension_tab_id_map.h"
+#include "chrome/browser/extensions/extension_renderer_state.h"
 #include "chrome/browser/sessions/session_tab_helper.h"
 #include "chrome/browser/ui/browser.h"
 #include "chrome/browser/ui/browser_finder.h"
@@ -117,7 +117,7 @@ bool TabCaptureCaptureFunction::RunImpl() {
           std::make_pair(render_process_id, routing_id),
           TabCaptureRegistry::TabCaptureRequest(
               GetExtension()->id(), tab_id,
-              tab_capture::TAB_CAPTURE_TAB_CAPTURE_STATE_NONE))) {
+              tab_capture::TAB_CAPTURE_STATE_NONE))) {
     error_ = kCapturingSameTab;
     return false;
   }

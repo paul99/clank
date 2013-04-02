@@ -8,17 +8,19 @@
 #include "base/files/scoped_temp_dir.h"
 #include "base/memory/scoped_ptr.h"
 #include "base/path_service.h"
+#include "base/prefs/pref_service.h"
 #include "base/run_loop.h"
 #include "base/stringprintf.h"
 #include "chrome/browser/browser_process.h"
 #include "chrome/browser/policy/browser_policy_connector.h"
 #include "chrome/browser/policy/cloud_policy_client.h"
 #include "chrome/browser/policy/cloud_policy_constants.h"
-#include "chrome/browser/policy/cloud_policy_data_store.h"
+#include "chrome/browser/policy/mock_cloud_policy_client.h"
 #include "chrome/browser/policy/policy_map.h"
 #include "chrome/browser/policy/policy_service.h"
 #include "chrome/browser/policy/proto/chrome_settings.pb.h"
 #include "chrome/browser/policy/proto/cloud_policy.pb.h"
+#include "chrome/browser/policy/test_utils.h"
 #include "chrome/browser/profiles/profile.h"
 #include "chrome/browser/ui/browser.h"
 #include "chrome/common/chrome_notification_types.h"
@@ -53,16 +55,6 @@ namespace em = enterprise_management;
 namespace policy {
 
 namespace {
-
-class MockCloudPolicyClientObserver : public CloudPolicyClient::Observer {
- public:
-  MockCloudPolicyClientObserver() {}
-  virtual ~MockCloudPolicyClientObserver() {}
-
-  MOCK_METHOD1(OnPolicyFetched, void(CloudPolicyClient*));
-  MOCK_METHOD1(OnRegistrationStateChanged, void(CloudPolicyClient*));
-  MOCK_METHOD1(OnClientError, void(CloudPolicyClient*));
-};
 
 const char* GetTestUser() {
 #if defined(OS_CHROMEOS)
@@ -108,90 +100,17 @@ std::string GetTestPolicy() {
                             GetTestUser());
 }
 
-#if defined(OS_CHROMEOS)
-void SetUpOldStackBeforeCreatingBrowser() {
-  CommandLine* command_line = CommandLine::ForCurrentProcess();
-  command_line->AppendSwitch(switches::kDisableCloudPolicyService);
-}
-
-void SetUpOldStackAfterCreatingBrowser(Browser* browser) {
-  // Flush the token cache loading.
-  content::RunAllPendingInMessageLoop(content::BrowserThread::FILE);
-  content::RunAllPendingInMessageLoop();
-  // Set a fake gaia token.
-  BrowserPolicyConnector* connector =
-      g_browser_process->browser_policy_connector();
-  CloudPolicyDataStore* store = connector->GetUserCloudPolicyDataStore();
-  ASSERT_TRUE(store);
-  store->SetupForTesting("", "bogus", GetTestUser(), "bogus", true);
-}
-#endif
-
-void SetUpNewStackBeforeCreatingBrowser() {
-  CommandLine* command_line = CommandLine::ForCurrentProcess();
-  command_line->AppendSwitch(switches::kLoadCloudPolicyOnSignin);
-}
-
-void SetUpNewStackAfterCreatingBrowser(Browser* browser) {
-  BrowserPolicyConnector* connector =
-      g_browser_process->browser_policy_connector();
-  connector->ScheduleServiceInitialization(0);
-
-#if defined(OS_CHROMEOS)
-  UserCloudPolicyManagerChromeOS* policy_manager =
-      connector->GetUserCloudPolicyManager();
-  ASSERT_TRUE(policy_manager);
-#else
-  // Mock a signed-in user. This is used by the UserCloudPolicyStore to pass the
-  // username to the UserCloudPolicyValidator.
-  SigninManager* signin_manager =
-      SigninManagerFactory::GetForProfile(browser->profile());
-  ASSERT_TRUE(signin_manager);
-  signin_manager->SetAuthenticatedUsername(GetTestUser());
-
-  UserCloudPolicyManager* policy_manager =
-      UserCloudPolicyManagerFactory::GetForProfile(browser->profile());
-  ASSERT_TRUE(policy_manager);
-  policy_manager->Connect(g_browser_process->local_state(),
-                          connector->device_management_service());
-#endif  // defined(OS_CHROMEOS)
-
-  ASSERT_TRUE(policy_manager->core()->client());
-  base::RunLoop run_loop;
-  MockCloudPolicyClientObserver observer;
-  EXPECT_CALL(observer, OnRegistrationStateChanged(_)).WillOnce(
-      InvokeWithoutArgs(&run_loop, &base::RunLoop::Quit));
-  policy_manager->core()->client()->AddObserver(&observer);
-
-  // Give a bogus OAuth token to the |policy_manager|. This should make its
-  // CloudPolicyClient fetch the DMToken.
-  policy_manager->RegisterClient("bogus");
-  run_loop.Run();
-  Mock::VerifyAndClearExpectations(&observer);
-  policy_manager->core()->client()->RemoveObserver(&observer);
-}
-
-struct TestSetup {
-  TestSetup(void (*before)(), void (*after)(Browser*))
-      : SetUpBeforeCreatingBrowser(before),
-        SetUpAfterCreatingBrowser(after) {}
-
-  void (*SetUpBeforeCreatingBrowser)();
-  void (*SetUpAfterCreatingBrowser)(Browser*);
-};
-
 }  // namespace
 
 // Tests the cloud policy stack(s).
-class CloudPolicyTest : public InProcessBrowserTest,
-                        public testing::WithParamInterface<TestSetup> {
+class CloudPolicyTest : public InProcessBrowserTest {
  protected:
   CloudPolicyTest() {}
   virtual ~CloudPolicyTest() {}
 
   virtual void SetUpInProcessBrowserTestFixture() OVERRIDE {
     // The TestServer wants the docroot as a path relative to the source dir.
-    FilePath source;
+    base::FilePath source;
     ASSERT_TRUE(PathService::Get(base::DIR_SOURCE_ROOT, &source));
     ASSERT_TRUE(temp_dir_.CreateUniqueTempDirUnderPath(source));
     ASSERT_NO_FATAL_FAILURE(SetServerPolicy(GetEmptyPolicy()));
@@ -207,27 +126,49 @@ class CloudPolicyTest : public InProcessBrowserTest,
 
     CommandLine* command_line = CommandLine::ForCurrentProcess();
     command_line->AppendSwitchASCII(switches::kDeviceManagementUrl, url);
-
-    const TestSetup& setup = GetParam();
-    setup.SetUpBeforeCreatingBrowser();
   }
 
   virtual void SetUpOnMainThread() OVERRIDE {
-    // Checks that no policies have been loaded by the other providers before
-    // setting up the cloud connection. Other policies configured in the test
-    // machine will interfere with these tests.
-    const PolicyMap& map = g_browser_process->policy_service()->GetPolicies(
-        POLICY_DOMAIN_CHROME, "");
-    if (!map.empty()) {
-      base::DictionaryValue dict;
-      for (PolicyMap::const_iterator it = map.begin(); it != map.end(); ++it)
-        dict.SetWithoutPathExpansion(it->first, it->second.value->DeepCopy());
-      ADD_FAILURE()
-          << "There are pre-existing policies in this machine that will "
-          << "interfere with these tests. Policies found: " << dict;
-    }
+    ASSERT_TRUE(PolicyServiceIsEmpty(g_browser_process->policy_service()))
+        << "Pre-existing policies in this machine will make this test fail.";
 
-    GetParam().SetUpAfterCreatingBrowser(browser());
+    BrowserPolicyConnector* connector =
+        g_browser_process->browser_policy_connector();
+    connector->ScheduleServiceInitialization(0);
+
+#if defined(OS_CHROMEOS)
+    UserCloudPolicyManagerChromeOS* policy_manager =
+        connector->GetUserCloudPolicyManager();
+    ASSERT_TRUE(policy_manager);
+#else
+    // Mock a signed-in user. This is used by the UserCloudPolicyStore to pass
+    // the username to the UserCloudPolicyValidator.
+    SigninManager* signin_manager =
+        SigninManagerFactory::GetForProfile(browser()->profile());
+    ASSERT_TRUE(signin_manager);
+    signin_manager->SetAuthenticatedUsername(GetTestUser());
+
+    UserCloudPolicyManager* policy_manager =
+        UserCloudPolicyManagerFactory::GetForProfile(browser()->profile());
+    ASSERT_TRUE(policy_manager);
+    policy_manager->Connect(g_browser_process->local_state(),
+                            UserCloudPolicyManager::CreateCloudPolicyClient(
+                                connector->device_management_service()).Pass());
+#endif  // defined(OS_CHROMEOS)
+
+    ASSERT_TRUE(policy_manager->core()->client());
+    base::RunLoop run_loop;
+    MockCloudPolicyClientObserver observer;
+    EXPECT_CALL(observer, OnRegistrationStateChanged(_)).WillOnce(
+        InvokeWithoutArgs(&run_loop, &base::RunLoop::Quit));
+    policy_manager->core()->client()->AddObserver(&observer);
+
+    // Give a bogus OAuth token to the |policy_manager|. This should make its
+    // CloudPolicyClient fetch the DMToken.
+    policy_manager->RegisterClient("bogus");
+    run_loop.Run();
+    Mock::VerifyAndClearExpectations(&observer);
+    policy_manager->core()->client()->RemoveObserver(&observer);
   }
 
   void SetServerPolicy(const std::string& policy) {
@@ -241,7 +182,7 @@ class CloudPolicyTest : public InProcessBrowserTest,
   scoped_ptr<net::TestServer> test_server_;
 };
 
-IN_PROC_BROWSER_TEST_P(CloudPolicyTest, FetchPolicy) {
+IN_PROC_BROWSER_TEST_F(CloudPolicyTest, FetchPolicy) {
   PolicyService* policy_service = browser()->profile()->GetPolicyService();
   {
     base::RunLoop run_loop;
@@ -250,8 +191,8 @@ IN_PROC_BROWSER_TEST_P(CloudPolicyTest, FetchPolicy) {
   }
 
   PolicyMap empty;
-  EXPECT_TRUE(
-      empty.Equals(policy_service->GetPolicies(POLICY_DOMAIN_CHROME, "")));
+  EXPECT_TRUE(empty.Equals(policy_service->GetPolicies(
+      PolicyNamespace(POLICY_DOMAIN_CHROME, std::string()))));
 
   ASSERT_NO_FATAL_FAILURE(SetServerPolicy(GetTestPolicy()));
   PolicyMap expected;
@@ -273,25 +214,9 @@ IN_PROC_BROWSER_TEST_P(CloudPolicyTest, FetchPolicy) {
     policy_service->RefreshPolicies(run_loop.QuitClosure());
     run_loop.Run();
   }
-  EXPECT_TRUE(
-      expected.Equals(policy_service->GetPolicies(POLICY_DOMAIN_CHROME, "")));
+  EXPECT_TRUE(expected.Equals(policy_service->GetPolicies(
+      PolicyNamespace(POLICY_DOMAIN_CHROME, std::string()))));
 }
-
-#if defined(OS_CHROMEOS)
-INSTANTIATE_TEST_CASE_P(
-    OldStackCloudPolicyTest,
-    CloudPolicyTest,
-    testing::Values(
-        TestSetup(SetUpOldStackBeforeCreatingBrowser,
-                  SetUpOldStackAfterCreatingBrowser)));
-#endif
-
-INSTANTIATE_TEST_CASE_P(
-    NewStackCloudPolicyTest,
-    CloudPolicyTest,
-    testing::Values(
-        TestSetup(SetUpNewStackBeforeCreatingBrowser,
-                  SetUpNewStackAfterCreatingBrowser)));
 
 TEST(CloudPolicyProtoTest, VerifyProtobufEquivalence) {
   // There are 2 protobufs that can be used for user cloud policy:

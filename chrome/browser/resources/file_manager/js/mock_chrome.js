@@ -228,19 +228,14 @@ chrome.fileBrowserPrivate = {
     console.log('executing task: ' + taskId + ': ' + urlList.length + ' urls');
     var parts = taskId.split('|');
     taskId = parts[parts.length - 1];
-    function createEntry(url) {
+    var createEntry = function(url) {
       return {
         toURL: function() { return url; }
       };
-    }
+    };
     chrome.fileBrowserHandler.onExecute.notify(
         taskId, {entries: urlList.map(createEntry)});
   },
-
-  /**
-   * Event fired on mount and unmount operations.
-   */
-  onDiskChanged: new MockEventSource(),
 
   mountPoints_: [
     {
@@ -292,7 +287,7 @@ chrome.fileBrowserPrivate = {
   addMount: function(source, type, options, callback) {
     chrome.fileBrowserPrivate.requestLocalFileSystem(function(filesystem) {
       var path =
-          (type == 'gdata') ?
+          (type == 'drive') ?
           '/drive' :
           ('/archive/archive' + (++chrome.fileBrowserPrivate.archiveCount_));
       callback(source);
@@ -333,7 +328,7 @@ chrome.fileBrowserPrivate = {
         break;
       }
     }
-    function notify(status) {
+    var notify = function(status) {
       chrome.fileBrowserPrivate.onMountCompleted.notify({
         eventType: 'unmount',
         status: status,
@@ -342,7 +337,7 @@ chrome.fileBrowserPrivate = {
       });
     }
 
-    webkitResolveLocalFileSystemURL(sourceUrl, function(entry) {
+    window.webkitResolveLocalFileSystemURL(sourceUrl, function(entry) {
       util.removeFileOrDirectory(
           entry,
           util.flog('Deleted a mock mount at ' + entry.fullPath,
@@ -363,15 +358,15 @@ chrome.fileBrowserPrivate = {
   getVolumeMetadata: function(url, callback) {
     var metadata = {};
     var urlLocalPath = chrome.fileBrowserPrivate.fileUrlToLocalPath_(url);
-    function urlStartsWith(path) {
+    var urlStartsWith = function(path) {
       return urlLocalPath && urlLocalPath.indexOf(path) == 0;
-    }
+    };
     if (urlStartsWith('/removable')) {
       metadata.deviceType = urlLocalPath.split('-').pop();
       if (urlLocalPath.indexOf('readonly') != -1) {
         metadata.isReadOnly = true;
       }
-    } else if (urlStartsWith('/gdata')) {
+    } else if (urlStartsWith('/drive')) {
       metadata.deviceType = 'network';
     } else {
       metadata.deviceType = 'file';
@@ -406,7 +401,7 @@ chrome.fileBrowserPrivate = {
 
   getPreferences: function(callback) {
     setTimeout(callback, 0, cloneShallow(
-        chrome.fileBrowserPrivate.gdataPreferences_));
+        chrome.fileBrowserPrivate.drivePreferences_));
   },
 
   setPreferences: function(preferences) {
@@ -421,9 +416,9 @@ chrome.fileBrowserPrivate = {
     online: true
   },
 
-  onNetworkConnectionChanged: new MockEventSource(),
+  onDriveConnectionStatusChanged: new MockEventSource(),
 
-  getNetworkConnectionState: function(callback) {
+  getDriveConnectionState: function(callback) {
     setTimeout(callback, 0, cloneShallow(
         chrome.fileBrowserPrivate.networkConnectionState_));
   },
@@ -473,7 +468,7 @@ chrome.fileBrowserPrivate = {
       CHROMEOS_RELEASE_BOARD: 'stumpy',
 
       DRIVE_DIRECTORY_LABEL: 'Google Drive',
-      ENABLE_GDATA: true,
+      ENABLE_DRIVE: true,
       PDF_VIEW_ENABLED: true,
 
       ROOT_DIRECTORY_LABEL: 'Files',
@@ -481,11 +476,12 @@ chrome.fileBrowserPrivate = {
       DOWNLOADS_DIRECTORY_WARNING: "&lt;strong&gt;Caution:&lt;/strong&gt; These files are temporary and may be automatically deleted to free up disk space.  &lt;a href='javascript://'&gt;Learn More&lt;/a&gt;",
       NAME_COLUMN_LABEL: 'Name',
       SIZE_COLUMN_LABEL: 'Size',
-      SIZE_KB: 'KB',
-      SIZE_MB: 'MB',
-      SIZE_GB: 'GB',
-      SIZE_TB: 'TB',
-      SIZE_PB: 'PB',
+      SIZE_BYTES: '$ bytes',
+      SIZE_KB: '$ KB',
+      SIZE_MB: '$ MB',
+      SIZE_GB: '$ GB',
+      SIZE_TB: '$ TB',
+      SIZE_PB: '$ PB',
       TYPE_COLUMN_LABEL: 'Type',
       DATE_COLUMN_LABEL: 'Date modified',
       PREVIEW_COLUMN_LABEL: 'Preview',
@@ -505,6 +501,7 @@ chrome.fileBrowserPrivate = {
       NEW_FOLDER_BUTTON_LABEL: 'New folder',
       FILENAME_LABEL: 'File Name',
       PREPARING_LABEL: 'Preparing',
+      DRAGGING_MULTIPLE_ITEMS: '$1 items',
 
       DIMENSIONS_LABEL: 'Dimensions',
       DIMENSIONS_FORMAT: '$1 x $2',
@@ -554,7 +551,8 @@ chrome.fileBrowserPrivate = {
       GALLERY_READONLY_WARNING: '$1 is read only. Edited images will be saved in the Downloads folder.',
       GALLERY_IMAGE_ERROR: 'This file could not be displayed',
       GALLERY_IMAGE_TOO_BIG_ERROR: 'This file is too large to be opened.',
-      GALLERY_VIDEO_ERROR: 'This file could not be played',
+      GALLERY_VIDEO_ERROR: 'This file could not be played.',
+      GALLERY_VIDEO_DECODING_ERROR: 'An error occurred. Click to restart from the beginning.',
 
       GALLERY_ITEMS_SELECTED: '$1 items selected',
       GALLERY_NO_IMAGES: 'No images in this directory.',
@@ -586,6 +584,7 @@ chrome.fileBrowserPrivate = {
       CUT_BUTTON_LABEL: 'Cut',
 
       OPEN_WITH_BUTTON_LABEL: 'Open with...',
+      ZIP_SELECTION_BUTTON_LABEL: 'Zip selection',
 
       UNMOUNT_FAILED: 'Unable to eject: $1',
       UNMOUNT_DEVICE_BUTTON_LABEL: 'Eject device',
@@ -597,11 +596,8 @@ chrome.fileBrowserPrivate = {
       DRIVE_SHOW_HOSTED_FILES_OPTION: 'Show Google Docs files',
       DRIVE_CLEAR_LOCAL_CACHE: 'Clear local cache',
       DRIVE_RELOAD: 'Reload',
-      DRIVE_WAITING_FOR_SPACE_INFO: 'Waiting for space info...',
-      DRIVE_FAILED_SPACE_INFO: 'Failed to retrieve space info',
       DRIVE_BUY_MORE_SPACE: 'Buy more storage...',
       DRIVE_VISIT_DRIVE_GOOGLE_COM: 'Go to drive.google.com...',
-      DRIVE_SPACE_AVAILABLE: '$1 left',
 
       DRIVE_BUY_MORE_SPACE_LINK: 'Buy more storage',
       DRIVE_SPACE_AVAILABLE_LONG: 'Google Drive space left: $1.',
@@ -676,7 +672,6 @@ chrome.fileBrowserPrivate = {
       SELECT_OPEN_MULTI_FILE_TITLE: 'Select one or more files',
       SELECT_SAVEAS_FILE_TITLE: 'Save file as',
 
-      COMPUTING_SELECTION: 'Computing selection...',
       MANY_FILES_SELECTED: '$1 files selected',
       MANY_DIRECTORIES_SELECTED: '$1 folders selected',
       MANY_ENTRIES_SELECTED: '$1 items selected',
@@ -743,6 +738,12 @@ chrome.fileBrowserPrivate = {
       TIME_YESTERDAY: 'Yesterday $1',
 
       ALL_FILES_FILTER: 'All files',
+
+      SPACE_AVAILABLE: '$1 left',
+      WAITING_FOR_SPACE_INFO: 'Waiting for space info...',
+      FAILED_SPACE_INFO: 'Failed to retrieve space info',
+
+      HELP_LINK_LABEL: 'Help',
 
       DEFAULT_ACTION_LABEL: '(default)',
       ASH: true,

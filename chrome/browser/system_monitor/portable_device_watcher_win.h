@@ -14,19 +14,21 @@
 #include "base/memory/ref_counted.h"
 #include "base/memory/weak_ptr.h"
 #include "base/string16.h"
-#include "base/system_monitor/system_monitor.h"
+#include "chrome/browser/system_monitor/removable_storage_notifications.h"
 
 namespace base {
 class SequencedTaskRunner;
 }
 
-class FilePath;
-
 namespace chrome {
 
+namespace test {
+class TestPortableDeviceWatcherWin;
+}
+
 // This class watches the portable device mount points and sends notifications
-// to base::SystemMonitor about the attached/detached media transfer protocol
-// (MTP) devices. This is a singleton class instantiated by
+// about the attached/detached media transfer protocol (MTP) devices.
+// This is a singleton class instantiated by
 // RemovableDeviceNotificationsWindowWin. This class is created, destroyed and
 // operates on the UI thread, except for long running tasks it spins off to a
 // SequencedTaskRunner.
@@ -38,7 +40,10 @@ class PortableDeviceWatcherWin {
     DeviceStorageObject(const string16& temporary_id,
                         const std::string& persistent_id);
 
-    // Storage object temporary identifier, e.g. "s10001".
+    // Storage object temporary identifier, e.g. "s10001". This string ID
+    // uniquely identifies the object on the device. This ID need not be
+    // persistent across sessions. This ID is obtained from WPD_OBJECT_ID
+    // property.
     string16 object_temporary_id;
 
     // Storage object persistent identifier,
@@ -60,6 +65,8 @@ class PortableDeviceWatcherWin {
   };
   typedef std::vector<DeviceDetails> Devices;
 
+  // TODO(gbillock): Change to take the device notifications object as
+  // an argument.
   PortableDeviceWatcherWin();
   virtual ~PortableDeviceWatcherWin();
 
@@ -68,15 +75,32 @@ class PortableDeviceWatcherWin {
   void Init(HWND hwnd);
 
   // Processes DEV_BROADCAST_DEVICEINTERFACE messages and triggers a
-  // SystemMonitor notification if appropriate.
+  // notification if appropriate.
   void OnWindowMessage(UINT event_type, LPARAM data);
 
+  // Gets the information of the MTP storage specified by |storage_device_id|.
+  // On success, returns true and fills in |device_location| with device
+  // interface details and |storage_object_id| with storage object temporary
+  // identifier.
+  virtual bool GetMTPStorageInfoFromDeviceId(
+      const std::string& storage_device_id,
+      string16* device_location,
+      string16* storage_object_id) const;
+
+  // Constructs and returns a storage path from storage unique identifier.
+  static string16 GetStoragePathFromStorageId(
+      const std::string& storage_unique_id);
+
+  // Set the volume notifications object to be used when new
+  // devices are found.
+  void SetNotifications(RemovableStorageNotifications::Receiver* notifications);
+
  private:
-  friend class TestPortableDeviceWatcherWin;
+  friend class test::TestPortableDeviceWatcherWin;
 
   // Key: MTP device storage unique id.
   // Value: Metadata for the given storage.
-  typedef std::map<std::string, base::SystemMonitor::RemovableStorageInfo>
+  typedef std::map<std::string, RemovableStorageNotifications::StorageInfo>
       MTPStorageMap;
 
   // Key: MTP device plug and play ID string.
@@ -85,13 +109,13 @@ class PortableDeviceWatcherWin {
 
   // Helpers to enumerate existing MTP storage devices.
   virtual void EnumerateAttachedDevices();
-  virtual void OnDidEnumerateAttachedDevices(const Devices* devices,
-                                             const bool result);
+  void OnDidEnumerateAttachedDevices(const Devices* devices,
+                                     const bool result);
 
   // Helpers to handle device attach event.
   virtual void HandleDeviceAttachEvent(const string16& pnp_device_id);
-  virtual void OnDidHandleDeviceAttachEvent(
-      const DeviceDetails* device_details, const bool result);
+  void OnDidHandleDeviceAttachEvent(const DeviceDetails* device_details,
+                                    const bool result);
 
   // Handles the detach event of the device specified by |pnp_device_id|.
   void HandleDeviceDetachEvent(const string16& pnp_device_id);
@@ -111,6 +135,9 @@ class PortableDeviceWatcherWin {
 
   // Used by |media_task_runner_| to create cancelable callbacks.
   base::WeakPtrFactory<PortableDeviceWatcherWin> weak_ptr_factory_;
+
+  // The notifications object to use to signal newly attached devices.
+  RemovableStorageNotifications::Receiver* storage_notifications_;
 
   DISALLOW_COPY_AND_ASSIGN(PortableDeviceWatcherWin);
 };

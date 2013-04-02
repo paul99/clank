@@ -14,6 +14,7 @@
 #include "chrome/common/extensions/api/extension_api.h"
 #include "chrome/common/extensions/extension.h"
 #include "chrome/common/extensions/extension_messages.h"
+#include "chrome/common/extensions/manifest.h"
 #include "chrome/common/extensions/permissions/permission_set.h"
 #include "chrome/common/url_constants.h"
 #include "chrome/common/view_type.h"
@@ -24,6 +25,7 @@
 #include "chrome/renderer/extensions/app_window_custom_bindings.h"
 #include "chrome/renderer/extensions/chrome_v8_context.h"
 #include "chrome/renderer/extensions/chrome_v8_extension.h"
+#include "chrome/renderer/extensions/content_watcher.h"
 #include "chrome/renderer/extensions/context_menus_custom_bindings.h"
 #include "chrome/renderer/extensions/event_bindings.h"
 #include "chrome/renderer/extensions/extension_custom_bindings.h"
@@ -54,14 +56,14 @@
 #include "content/public/renderer/render_thread.h"
 #include "content/public/renderer/render_view.h"
 #include "grit/renderer_resources.h"
+#include "third_party/WebKit/Source/Platform/chromium/public/WebString.h"
+#include "third_party/WebKit/Source/Platform/chromium/public/WebURLRequest.h"
 #include "third_party/WebKit/Source/WebKit/chromium/public/WebDataSource.h"
 #include "third_party/WebKit/Source/WebKit/chromium/public/WebDocument.h"
 #include "third_party/WebKit/Source/WebKit/chromium/public/WebFrame.h"
 #include "third_party/WebKit/Source/WebKit/chromium/public/WebScopedUserGesture.h"
 #include "third_party/WebKit/Source/WebKit/chromium/public/WebSecurityPolicy.h"
 #include "third_party/WebKit/Source/WebKit/chromium/public/WebView.h"
-#include "third_party/WebKit/Source/WebKit/chromium/public/platform/WebString.h"
-#include "third_party/WebKit/Source/WebKit/chromium/public/platform/WebURLRequest.h"
 #include "ui/base/layout.h"
 #include "ui/base/resource/resource_bundle.h"
 #include "v8/include/v8.h"
@@ -89,7 +91,8 @@ static const char kOnSuspendCanceledEvent[] = "runtime.onSuspendCanceled";
 
 class ChromeHiddenNativeHandler : public NativeHandler {
  public:
-  ChromeHiddenNativeHandler() {
+  explicit ChromeHiddenNativeHandler(v8::Isolate* isolate)
+      : NativeHandler(isolate) {
     RouteFunction("GetChromeHidden",
         base::Bind(&ChromeHiddenNativeHandler::GetChromeHidden,
                    base::Unretained(this)));
@@ -102,7 +105,8 @@ class ChromeHiddenNativeHandler : public NativeHandler {
 
 class PrintNativeHandler : public NativeHandler {
  public:
-  PrintNativeHandler() {
+  explicit PrintNativeHandler(v8::Isolate* isolate)
+      : NativeHandler(isolate) {
     RouteFunction("Print",
         base::Bind(&PrintNativeHandler::Print,
                    base::Unretained(this)));
@@ -236,7 +240,8 @@ class ProcessInfoNativeHandler : public ChromeV8Extension {
 
 class LoggingNativeHandler : public NativeHandler {
  public:
-  LoggingNativeHandler() {
+  explicit LoggingNativeHandler(v8::Isolate* isolate)
+      : NativeHandler(isolate) {
     RouteFunction("DCHECK",
         base::Bind(&LoggingNativeHandler::Dcheck,
                    base::Unretained(this)));
@@ -314,7 +319,8 @@ static v8::Handle<v8::Object> GetOrCreateChrome(
 }  // namespace
 
 Dispatcher::Dispatcher()
-    : is_webkit_initialized_(false),
+    : content_watcher_(new ContentWatcher(this)),
+      is_webkit_initialized_(false),
       webrequest_adblock_(false),
       webrequest_adblock_plus_(false),
       webrequest_other_(false),
@@ -363,6 +369,8 @@ bool Dispatcher::OnControlMessageReceived(const IPC::Message& message) {
     IPC_MESSAGE_HANDLER(ExtensionMsg_ShouldUnload, OnShouldUnload)
     IPC_MESSAGE_HANDLER(ExtensionMsg_Unload, OnUnload)
     IPC_MESSAGE_HANDLER(ExtensionMsg_CancelUnload, OnCancelUnload)
+    IPC_MESSAGE_FORWARD(ExtensionMsg_WatchPages,
+                        content_watcher_.get(), ContentWatcher::OnWatchPages)
     IPC_MESSAGE_UNHANDLED(handled = false)
   IPC_END_MESSAGE_MAP()
 
@@ -504,6 +512,8 @@ void Dispatcher::OnUnloaded(const std::string& id) {
   // changed origin whitelist.
   user_script_slave_->RemoveIsolatedWorld(id);
 
+  v8_context_set_.OnExtensionUnloaded(id);
+
   // We don't do anything with existing platform-app stylesheets. They will
   // stay resident, but the URL pattern corresponding to the unloaded
   // extension's URL just won't match anything anymore.
@@ -564,6 +574,8 @@ void Dispatcher::RegisterNativeHandlers(ModuleSystem* module_system,
   module_system->RegisterNativeHandler("setIcon",
       scoped_ptr<NativeHandler>(
           new SetIconNatives(this, request_sender_.get())));
+  module_system->RegisterNativeHandler("contentWatcherNative",
+                                       content_watcher_->MakeNatives());
 
   // Natives used by multiple APIs.
   module_system->RegisterNativeHandler("file_system_natives",
@@ -618,11 +630,13 @@ void Dispatcher::PopulateSourceMap() {
   source_map_.RegisterSource("apitest", IDR_EXTENSION_APITEST_JS);
 
   // Libraries.
+  source_map_.RegisterSource("contentWatcher", IDR_CONTENT_WATCHER_JS);
   source_map_.RegisterSource("lastError", IDR_LAST_ERROR_JS);
   source_map_.RegisterSource("schemaUtils", IDR_SCHEMA_UTILS_JS);
   source_map_.RegisterSource("sendRequest", IDR_SEND_REQUEST_JS);
   source_map_.RegisterSource("setIcon", IDR_SET_ICON_JS);
   source_map_.RegisterSource("utils", IDR_UTILS_JS);
+  source_map_.RegisterSource("entryIdManager", IDR_ENTRY_ID_MANAGER);
 
   // Custom bindings.
   source_map_.RegisterSource("app", IDR_APP_CUSTOM_BINDINGS_JS);
@@ -635,6 +649,8 @@ void Dispatcher::PopulateSourceMap() {
                              IDR_CONTENT_SETTINGS_CUSTOM_BINDINGS_JS);
   source_map_.RegisterSource("contextMenus",
                              IDR_CONTEXT_MENUS_CUSTOM_BINDINGS_JS);
+  source_map_.RegisterSource("declarativeContent",
+                             IDR_DECLARATIVE_CONTENT_CUSTOM_BINDINGS_JS);
   source_map_.RegisterSource("declarativeWebRequest",
                              IDR_DECLARATIVE_WEBREQUEST_CUSTOM_BINDINGS_JS);
   source_map_.RegisterSource(
@@ -751,18 +767,19 @@ void Dispatcher::DidCreateScriptContext(
 
   RegisterNativeHandlers(module_system.get(), context);
 
+  v8::Isolate* isolate = v8_context->GetIsolate();
   module_system->RegisterNativeHandler("chrome_hidden",
-      scoped_ptr<NativeHandler>(new ChromeHiddenNativeHandler()));
+      scoped_ptr<NativeHandler>(new ChromeHiddenNativeHandler(isolate)));
   module_system->RegisterNativeHandler("print",
-      scoped_ptr<NativeHandler>(new PrintNativeHandler()));
+      scoped_ptr<NativeHandler>(new PrintNativeHandler(isolate)));
   module_system->RegisterNativeHandler("lazy_background_page",
       scoped_ptr<NativeHandler>(new LazyBackgroundPageNativeHandler(this)));
   module_system->RegisterNativeHandler("logging",
-      scoped_ptr<NativeHandler>(new LoggingNativeHandler()));
+      scoped_ptr<NativeHandler>(new LoggingNativeHandler(isolate)));
 
   int manifest_version = extension ? extension->manifest_version() : 1;
   bool send_request_disabled =
-      (extension && extension->location() == Extension::LOAD &&
+      (extension && extension->location() == Manifest::LOAD &&
        extension->has_lazy_background_page());
   module_system->RegisterNativeHandler("process",
       scoped_ptr<NativeHandler>(new ProcessInfoNativeHandler(
@@ -786,9 +803,7 @@ void Dispatcher::DidCreateScriptContext(
     case Feature::BLESSED_EXTENSION_CONTEXT:
     case Feature::UNBLESSED_EXTENSION_CONTEXT:
     case Feature::CONTENT_SCRIPT_CONTEXT: {
-      CHECK(extension);
-      if (!extension->is_platform_app())
-        module_system->Require("miscellaneous_bindings");
+      module_system->Require("miscellaneous_bindings");
       module_system->Require("schema_generated_bindings");
       module_system->Require("apitest");
 
@@ -868,6 +883,8 @@ void Dispatcher::DidCreateDocumentElement(WebKit::WebFrame* frame) {
             GetRawDataResource(IDR_PLATFORM_APP_CSS)),
         WebDocument::UserStyleUserLevel);
   }
+
+  content_watcher_->DidCreateDocumentElement(frame);
 }
 
 void Dispatcher::OnActivateExtension(const std::string& extension_id) {

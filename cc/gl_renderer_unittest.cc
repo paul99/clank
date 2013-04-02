@@ -11,9 +11,9 @@
 #include "cc/test/fake_impl_proxy.h"
 #include "cc/test/fake_layer_tree_host_impl.h"
 #include "cc/test/fake_output_surface.h"
-#include "cc/test/fake_web_graphics_context_3d.h"
 #include "cc/test/render_pass_test_common.h"
 #include "cc/test/render_pass_test_utils.h"
+#include "cc/test/test_web_graphics_context_3d.h"
 #include "testing/gmock/include/gmock/gmock.h"
 #include "testing/gtest/include/gtest/gtest.h"
 #include "third_party/khronos/GLES2/gl2.h"
@@ -31,7 +31,7 @@ using testing::Mock;
 namespace cc {
 namespace {
 
-class FrameCountingMemoryAllocationSettingContext : public FakeWebGraphicsContext3D {
+class FrameCountingMemoryAllocationSettingContext : public TestWebGraphicsContext3D {
 public:
     FrameCountingMemoryAllocationSettingContext() : m_frame(0) { }
 
@@ -72,8 +72,7 @@ public:
         RenderPass::Id renderPassId = m_rootLayer->renderSurface()->renderPassId();
         scoped_ptr<RenderPass> rootRenderPass = RenderPass::Create();
         rootRenderPass->SetNew(renderPassId, gfx::Rect(), gfx::Rect(), gfx::Transform());
-        m_renderPassesInDrawOrder.push_back(rootRenderPass.get());
-        m_renderPasses.set(renderPassId, rootRenderPass.Pass());
+        m_renderPassesInDrawOrder.push_back(rootRenderPass.Pass());
     }
 
     // RendererClient methods.
@@ -95,7 +94,6 @@ public:
 
     RenderPass* rootRenderPass() { return m_renderPassesInDrawOrder.back(); }
     RenderPassList& renderPassesInDrawOrder() { return m_renderPassesInDrawOrder; }
-    RenderPassIdHashMap& renderPasses() { return m_renderPasses; }
 
     size_t memoryAllocationLimitBytes() const { return m_memoryAllocationLimitBytes; }
 
@@ -106,7 +104,6 @@ private:
     bool* m_lastCallWasSetVisibility;
     scoped_ptr<LayerImpl> m_rootLayer;
     RenderPassList m_renderPassesInDrawOrder;
-    RenderPassIdHashMap m_renderPasses;
     size_t m_memoryAllocationLimitBytes;
 };
 
@@ -218,7 +215,7 @@ TEST_F(GLRendererTest, DiscardedBackbufferIsRecreatedForScopeDuration)
     EXPECT_EQ(1, m_mockClient.setFullRootLayerDamageCount());
 
     m_renderer.setVisible(true);
-    m_renderer.drawFrame(m_mockClient.renderPassesInDrawOrder(), m_mockClient.renderPasses());
+    m_renderer.drawFrame(m_mockClient.renderPassesInDrawOrder());
     EXPECT_FALSE(m_renderer.isBackbufferDiscarded());
 
     swapBuffers();
@@ -233,7 +230,7 @@ TEST_F(GLRendererTest, FramebufferDiscardedAfterReadbackWhenNotVisible)
     EXPECT_EQ(1, m_mockClient.setFullRootLayerDamageCount());
 
     char pixels[4];
-    m_renderer.drawFrame(m_mockClient.renderPassesInDrawOrder(), m_mockClient.renderPasses());
+    m_renderer.drawFrame(m_mockClient.renderPassesInDrawOrder());
     EXPECT_FALSE(m_renderer.isBackbufferDiscarded());
 
     m_renderer.getFramebufferPixels(pixels, gfx::Rect(0, 0, 1, 1));
@@ -241,7 +238,7 @@ TEST_F(GLRendererTest, FramebufferDiscardedAfterReadbackWhenNotVisible)
     EXPECT_EQ(2, m_mockClient.setFullRootLayerDamageCount());
 }
 
-class ForbidSynchronousCallContext : public FakeWebGraphicsContext3D {
+class ForbidSynchronousCallContext : public TestWebGraphicsContext3D {
 public:
     ForbidSynchronousCallContext() { }
 
@@ -251,7 +248,7 @@ public:
     virtual WGC3Dint getAttribLocation(WebGLId program, const WGC3Dchar* name) { ADD_FAILURE(); return 0; }
     virtual void getBooleanv(WGC3Denum pname, WGC3Dboolean* value) { ADD_FAILURE(); }
     virtual void getBufferParameteriv(WGC3Denum target, WGC3Denum pname, WGC3Dint* value) { ADD_FAILURE(); }
-    virtual Attributes getContextAttributes() { ADD_FAILURE(); return m_attrs; }
+    virtual Attributes getContextAttributes() { ADD_FAILURE(); return attributes_; }
     virtual WGC3Denum getError() { ADD_FAILURE(); return 0; }
     virtual void getFloatv(WGC3Denum pname, WGC3Dfloat* value) { ADD_FAILURE(); }
     virtual void getFramebufferAttachmentParameteriv(WGC3Denum target, WGC3Denum attachment, WGC3Denum pname, WGC3Dint* value) { ADD_FAILURE(); }
@@ -318,7 +315,7 @@ TEST(GLRendererTest2, initializationDoesNotMakeSynchronousCalls)
     EXPECT_TRUE(renderer.initialize());
 }
 
-class LoseContextOnFirstGetContext : public FakeWebGraphicsContext3D {
+class LoseContextOnFirstGetContext : public TestWebGraphicsContext3D {
 public:
     LoseContextOnFirstGetContext()
         : m_contextLost(false)
@@ -361,7 +358,7 @@ TEST(GLRendererTest2, initializationWithQuicklyLostContextDoesNotAssert)
     renderer.initialize();
 }
 
-class ContextThatDoesNotSupportMemoryManagmentExtensions : public FakeWebGraphicsContext3D {
+class ContextThatDoesNotSupportMemoryManagmentExtensions : public TestWebGraphicsContext3D {
 public:
     ContextThatDoesNotSupportMemoryManagmentExtensions() { }
 
@@ -385,7 +382,7 @@ TEST(GLRendererTest2, initializationWithoutGpuMemoryManagerExtensionSupportShoul
     EXPECT_GT(mockClient.memoryAllocationLimitBytes(), 0ul);
 }
 
-class ClearCountingContext : public FakeWebGraphicsContext3D {
+class ClearCountingContext : public TestWebGraphicsContext3D {
 public:
     ClearCountingContext() : m_clear(0) { }
 
@@ -412,7 +409,7 @@ TEST(GLRendererTest2, opaqueBackground)
 
     EXPECT_TRUE(renderer.initialize());
 
-    renderer.drawFrame(mockClient.renderPassesInDrawOrder(), mockClient.renderPasses());
+    renderer.drawFrame(mockClient.renderPassesInDrawOrder());
 
     // On DEBUG builds, render passes with opaque background clear to blue to
     // easily see regions that were not drawn on the screen.
@@ -435,12 +432,12 @@ TEST(GLRendererTest2, transparentBackground)
 
     EXPECT_TRUE(renderer.initialize());
 
-    renderer.drawFrame(mockClient.renderPassesInDrawOrder(), mockClient.renderPasses());
+    renderer.drawFrame(mockClient.renderPassesInDrawOrder());
 
     EXPECT_EQ(1, context->clearCount());
 }
 
-class VisibilityChangeIsLastCallTrackingContext : public FakeWebGraphicsContext3D {
+class VisibilityChangeIsLastCallTrackingContext : public TestWebGraphicsContext3D {
 public:
     VisibilityChangeIsLastCallTrackingContext()
         : m_lastCallWasSetVisibility(0)
@@ -492,12 +489,12 @@ TEST(GLRendererTest2, visibilityChangeIsLastCall)
     context->setLastCallWasSetVisibilityPointer(&lastCallWasSetVisiblity);
     mockClient.setLastCallWasSetVisibilityPointer(&lastCallWasSetVisiblity);
     renderer.setVisible(true);
-    renderer.drawFrame(mockClient.renderPassesInDrawOrder(), mockClient.renderPasses());
+    renderer.drawFrame(mockClient.renderPassesInDrawOrder());
     renderer.setVisible(false);
     EXPECT_TRUE(lastCallWasSetVisiblity);
 }
 
-class TextureStateTrackingContext : public FakeWebGraphicsContext3D {
+class TextureStateTrackingContext : public TestWebGraphicsContext3D {
 public:
     TextureStateTrackingContext()
         : m_activeTexture(GL_INVALID_ENUM)
@@ -541,7 +538,7 @@ TEST(GLRendererTest2, activeTextureState)
     cc::RenderPass::Id id(1, 1);
     scoped_ptr<TestRenderPass> pass = TestRenderPass::Create();
     pass->SetNew(id, gfx::Rect(0, 0, 100, 100), gfx::Rect(0, 0, 100, 100), gfx::Transform());
-    pass->AppendOneOfEveryQuadType(resourceProvider.get());
+    pass->AppendOneOfEveryQuadType(resourceProvider.get(), RenderPass::Id(2, 1));
 
     // Set up expected texture filter state transitions that match the quads
     // created in AppendOneOfEveryQuadType().
@@ -549,7 +546,7 @@ TEST(GLRendererTest2, activeTextureState)
     {
         InSequence sequence;
 
-        // yuv_quad is drawn with the default filter.
+        // yuv_quad is drawn with the default linear filter.
         EXPECT_CALL(*context, drawElements(_, _, _, _));
 
         // tile_quad is drawn with GL_NEAREST because it is not transformed or
@@ -559,8 +556,6 @@ TEST(GLRendererTest2, activeTextureState)
         EXPECT_CALL(*context, drawElements(_, _, _, _));
 
         // transformed_tile_quad uses GL_LINEAR.
-        EXPECT_CALL(*context, texParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_LINEAR));
-        EXPECT_CALL(*context, texParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_LINEAR));
         EXPECT_CALL(*context, drawElements(_, _, _, _));
 
         // scaled_tile_quad also uses GL_LINEAR.
@@ -586,10 +581,10 @@ TEST(GLRendererTest2, activeTextureState)
 
 class NoClearRootRenderPassFakeClient : public FakeRendererClient {
 public:
-    virtual bool shouldClearRootRenderPass() const { return false; }
+    virtual bool shouldClearRootRenderPass() const OVERRIDE { return false; }
 };
 
-class NoClearRootRenderPassMockContext : public FakeWebGraphicsContext3D {
+class NoClearRootRenderPassMockContext : public TestWebGraphicsContext3D {
 public:
     MOCK_METHOD1(clear, void(WGC3Dbitfield mask));
     MOCK_METHOD4(drawElements, void(WGC3Denum mode, WGC3Dsizei count, WGC3Denum type, WGC3Dintptr offset));
@@ -605,7 +600,8 @@ TEST(GLRendererTest2, shouldClearRootRenderPass)
     EXPECT_TRUE(renderer.initialize());
 
     gfx::Rect viewportRect(mockClient.deviceViewportSize());
-    ScopedPtrVector<RenderPass> renderPasses;
+    ScopedPtrVector<RenderPass>& renderPasses = mockClient.renderPassesInDrawOrder();
+    renderPasses.clear();
 
     RenderPass::Id rootPassId(1, 0);
     TestRenderPass* rootPass = addRenderPass(renderPasses, rootPassId, viewportRect, gfx::Transform());
@@ -616,12 +612,6 @@ TEST(GLRendererTest2, shouldClearRootRenderPass)
     addQuad(childPass, viewportRect, SK_ColorBLUE);
 
     addRenderPassQuad(rootPass, childPass);
-
-    mockClient.renderPassesInDrawOrder().clear();
-    mockClient.renderPassesInDrawOrder().push_back(childPass);
-    mockClient.renderPassesInDrawOrder().push_back(rootPass);
-    mockClient.renderPasses().set(rootPassId, renderPasses.take(0));
-    mockClient.renderPasses().set(childPassId, renderPasses.take(1));
 
     // First render pass is not the root one, clearing should happen.
     EXPECT_CALL(*mockContext, clear(GL_COLOR_BUFFER_BIT))
@@ -640,10 +630,68 @@ TEST(GLRendererTest2, shouldClearRootRenderPass)
         .After(firstRenderPass);
 
     renderer.decideRenderPassAllocationsForFrame(mockClient.renderPassesInDrawOrder());
-    renderer.drawFrame(mockClient.renderPassesInDrawOrder(), mockClient.renderPasses());
+    renderer.drawFrame(mockClient.renderPassesInDrawOrder());
 
     // In multiple render passes all but the root pass should clear the framebuffer.
     Mock::VerifyAndClearExpectations(&mockContext);
+}
+
+class ScissorTestOnClearCheckingContext : public TestWebGraphicsContext3D {
+public:
+    ScissorTestOnClearCheckingContext() : m_scissorEnabled(false) { }
+
+    virtual void clear(WGC3Dbitfield)
+    {
+        EXPECT_FALSE(m_scissorEnabled);
+    }
+
+    virtual void enable(WGC3Denum cap)
+    {
+        if (cap == GL_SCISSOR_TEST)
+            m_scissorEnabled = true;
+    }
+
+    virtual void disable(WGC3Denum cap)
+    {
+        if (cap == GL_SCISSOR_TEST)
+            m_scissorEnabled = false;
+    }
+
+private:
+    bool m_scissorEnabled;
+};
+
+TEST(GLRendererTest2, scissorTestWhenClearing) {
+    FakeRendererClient mockClient;
+    scoped_ptr<OutputSurface> outputSurface(FakeOutputSurface::Create3d(scoped_ptr<WebKit::WebGraphicsContext3D>(new ScissorTestOnClearCheckingContext)));
+    scoped_ptr<ResourceProvider> resourceProvider(ResourceProvider::create(outputSurface.get()));
+    FakeRendererGL renderer(&mockClient, outputSurface.get(), resourceProvider.get());
+    EXPECT_TRUE(renderer.initialize());
+    EXPECT_FALSE(renderer.capabilities().usingPartialSwap);
+
+    gfx::Rect viewportRect(mockClient.deviceViewportSize());
+    ScopedPtrVector<RenderPass>& renderPasses = mockClient.renderPassesInDrawOrder();
+    renderPasses.clear();
+
+    gfx::Rect grandChildRect(25, 25);
+    RenderPass::Id grandChildPassId(3, 0);
+    TestRenderPass* grandChildPass = addRenderPass(renderPasses, grandChildPassId, grandChildRect, gfx::Transform());
+    addClippedQuad(grandChildPass, grandChildRect, SK_ColorYELLOW);
+
+    gfx::Rect childRect(50, 50);
+    RenderPass::Id childPassId(2, 0);
+    TestRenderPass* childPass = addRenderPass(renderPasses, childPassId, childRect, gfx::Transform());
+    addQuad(childPass, childRect, SK_ColorBLUE);
+
+    RenderPass::Id rootPassId(1, 0);
+    TestRenderPass* rootPass = addRenderPass(renderPasses, rootPassId, viewportRect, gfx::Transform());
+    addQuad(rootPass, viewportRect, SK_ColorGREEN);
+
+    addRenderPassQuad(rootPass, childPass);
+    addRenderPassQuad(childPass, grandChildPass);
+
+    renderer.decideRenderPassAllocationsForFrame(mockClient.renderPassesInDrawOrder());
+    renderer.drawFrame(mockClient.renderPassesInDrawOrder());
 }
 
 }  // namespace

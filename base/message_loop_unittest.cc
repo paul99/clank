@@ -10,6 +10,7 @@
 #include "base/logging.h"
 #include "base/memory/ref_counted.h"
 #include "base/message_loop.h"
+#include "base/pending_task.h"
 #include "base/posix/eintr_wrapper.h"
 #include "base/run_loop.h"
 #include "base/thread_task_runner_handle.h"
@@ -146,7 +147,7 @@ void RunTest_PostTask_SEH(MessageLoop::Type message_loop_type) {
 static void SlowFunc(TimeDelta pause, int* quit_counter) {
     PlatformThread::Sleep(pause);
     if (--(*quit_counter) == 0)
-      MessageLoop::current()->Quit();
+      MessageLoop::current()->QuitWhenIdle();
 }
 
 // This function records the time when Run was called in a Time object, which is
@@ -326,7 +327,7 @@ void RunTest_PostDelayedTask_SharedTimer(
   // and then run all pending to force them both to have run.  This is just
   // encouraging flakiness if there is any.
   PlatformThread::Sleep(TimeDelta::FromMilliseconds(100));
-  loop.RunUntilIdle();
+  base::RunLoop().RunUntilIdle();
 
   EXPECT_TRUE(run_time1.is_null());
   EXPECT_FALSE(run_time2.is_null());
@@ -341,7 +342,7 @@ void SubPumpFunc() {
     TranslateMessage(&msg);
     DispatchMessage(&msg);
   }
-  MessageLoop::current()->Quit();
+  MessageLoop::current()->QuitWhenIdle();
 }
 
 void RunTest_PostDelayedTask_SharedTimer_SubPump() {
@@ -382,7 +383,7 @@ void RunTest_PostDelayedTask_SharedTimer_SubPump() {
   // and then run all pending to force them both to have run.  This is just
   // encouraging flakiness if there is any.
   PlatformThread::Sleep(TimeDelta::FromMilliseconds(100));
-  loop.RunUntilIdle();
+  base::RunLoop().RunUntilIdle();
 
   EXPECT_TRUE(run_time.is_null());
 }
@@ -459,7 +460,7 @@ void NestingFunc(int* depth) {
     MessageLoop::current()->SetNestableTasksAllowed(true);
     MessageLoop::current()->Run();
   }
-  MessageLoop::current()->Quit();
+  MessageLoop::current()->QuitWhenIdle();
 }
 
 #if defined(OS_WIN)
@@ -502,7 +503,7 @@ class Crasher : public base::RefCounted<Crasher> {
 #error "needs architecture support"
 #endif
 
-    MessageLoop::current()->Quit();
+    MessageLoop::current()->QuitWhenIdle();
   }
   // Points the bad array to a valid memory location.
   static void FixError() {
@@ -726,7 +727,7 @@ void RecursiveSlowFunc(TaskList* order, int cookie, int depth,
 
 void QuitFunc(TaskList* order, int cookie) {
   order->RecordStart(QUITMESSAGELOOP, cookie);
-  MessageLoop::current()->Quit();
+  MessageLoop::current()->QuitWhenIdle();
   order->RecordEnd(QUITMESSAGELOOP, cookie);
 }
 
@@ -992,7 +993,7 @@ void FuncThatPumps(TaskList* order, int cookie) {
   order->RecordStart(PUMPS, cookie);
   {
     MessageLoop::ScopedNestableTaskAllower allow(MessageLoop::current());
-    MessageLoop::current()->RunUntilIdle();
+    base::RunLoop().RunUntilIdle();
   }
   order->RecordEnd(PUMPS, cookie);
 }
@@ -1800,16 +1801,16 @@ class DummyTaskObserver : public MessageLoop::TaskObserver {
 
   virtual ~DummyTaskObserver() {}
 
-  virtual void WillProcessTask(TimeTicks time_posted) OVERRIDE {
+  virtual void WillProcessTask(const base::PendingTask& pending_task) OVERRIDE {
     num_tasks_started_++;
-    EXPECT_TRUE(time_posted != TimeTicks());
+    EXPECT_TRUE(pending_task.time_posted != TimeTicks());
     EXPECT_LE(num_tasks_started_, num_tasks_);
     EXPECT_EQ(num_tasks_started_, num_tasks_processed_ + 1);
   }
 
-  virtual void DidProcessTask(TimeTicks time_posted) OVERRIDE {
+  virtual void DidProcessTask(const base::PendingTask& pending_task) OVERRIDE {
     num_tasks_processed_++;
-    EXPECT_TRUE(time_posted != TimeTicks());
+    EXPECT_TRUE(pending_task.time_posted != TimeTicks());
     EXPECT_LE(num_tasks_started_, num_tasks_);
     EXPECT_EQ(num_tasks_started_, num_tasks_processed_);
   }
@@ -1899,10 +1900,10 @@ namespace {
 class QuitDelegate : public MessageLoopForIO::Watcher {
  public:
   virtual void OnFileCanWriteWithoutBlocking(int fd) OVERRIDE {
-    MessageLoop::current()->Quit();
+    MessageLoop::current()->QuitWhenIdle();
   }
   virtual void OnFileCanReadWithoutBlocking(int fd) OVERRIDE {
-    MessageLoop::current()->Quit();
+    MessageLoop::current()->QuitWhenIdle();
   }
 };
 

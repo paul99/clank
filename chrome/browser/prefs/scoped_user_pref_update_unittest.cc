@@ -2,8 +2,9 @@
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
+#include "base/prefs/mock_pref_change_callback.h"
 #include "base/prefs/public/pref_change_registrar.h"
-#include "chrome/browser/prefs/mock_pref_change_callback.h"
+#include "chrome/browser/prefs/pref_registry_syncable.h"
 #include "chrome/browser/prefs/scoped_user_pref_update.h"
 #include "chrome/test/base/testing_pref_service.h"
 #include "testing/gmock/include/gmock/gmock.h"
@@ -15,11 +16,13 @@ using testing::Mock;
 class ScopedUserPrefUpdateTest : public testing::Test {
  public:
   ScopedUserPrefUpdateTest() : observer_(&prefs_) {}
-  ~ScopedUserPrefUpdateTest() {}
+  virtual ~ScopedUserPrefUpdateTest() {}
 
  protected:
   virtual void SetUp() {
-    prefs_.RegisterDictionaryPref(kPref, PrefService::UNSYNCABLE_PREF);
+    prefs_.registry()->RegisterDictionaryPref(
+        kPref,
+        PrefRegistrySyncable::UNSYNCABLE_PREF);
     registrar_.Init(&prefs_);
     registrar_.Add(kPref, observer_.GetCallback());
   }
@@ -28,7 +31,7 @@ class ScopedUserPrefUpdateTest : public testing::Test {
   static const char kKey[];
   static const char kValue[];
 
-  TestingPrefService prefs_;
+  TestingPrefServiceSyncable prefs_;
   MockPrefChangeCallback observer_;
   PrefChangeRegistrar registrar_;
 };

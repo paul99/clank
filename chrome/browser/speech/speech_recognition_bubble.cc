@@ -81,7 +81,7 @@ SpeechRecognitionBubbleImages::SpeechRecognitionBubbleImages() {
   empty_spinner.allocPixels();
   empty_spinner.eraseRGB(255, 255, 255);
   // |empty_spinner| has solid color. Pixel doubling a solid color is ok.
-  warm_up_.push_back(gfx::ImageSkia(empty_spinner));
+  warm_up_.push_back(gfx::ImageSkia::CreateFrom1xBitmap(empty_spinner));
 
   for (gfx::Rect src_rect(frame_size, frame_size);
        src_rect.x() < spinner_image->width();
@@ -237,7 +237,7 @@ void SpeechRecognitionBubbleBase::DrawVolumeOverlay(SkCanvas* canvas,
       image.GetRepresentation(scale_factor_).sk_bitmap(), 0, 0);
   buffer_canvas.restore();
   SkPaint multiply_paint;
-  multiply_paint.setXfermode(SkXfermode::Create(SkXfermode::kMultiply_Mode));
+  multiply_paint.setXfermode(SkXfermode::Create(SkXfermode::kModulate_Mode));
   buffer_canvas.drawBitmap(
       g_images.Get().mic_mask()->GetRepresentation(scale_factor_).sk_bitmap(),
       -clip_right, 0, &multiply_paint);

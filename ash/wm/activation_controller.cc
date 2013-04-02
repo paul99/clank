@@ -329,7 +329,7 @@ void ActivationController::ActivateWindowWithEvent(aura::Window* window,
   if (window &&
       !window->Contains(aura::client::GetFocusClient(window)->
           GetFocusedWindow())) {
-    aura::client::GetFocusClient(window)->FocusWindow(window, event);
+    aura::client::GetFocusClient(window)->FocusWindow(window);
   }
 
   if (window) {
@@ -379,8 +379,9 @@ aura::Window* ActivationController::GetTopmostWindowToActivate(
   aura::Window* window = NULL;
   for (; !window && current_container_index < arraysize(kWindowContainerIds);
        current_container_index++) {
-    aura::Window::Windows containers =
-        Shell::GetAllContainers(kWindowContainerIds[current_container_index]);
+    aura::Window::Windows containers = Shell::GetContainersFromAllRootWindows(
+        kWindowContainerIds[current_container_index],
+        root);
     for (aura::Window::Windows::const_iterator iter = containers.begin();
          iter != containers.end() && !window; ++iter) {
       window = GetTopmostWindowToActivateInContainer((*iter), ignore);
@@ -423,7 +424,7 @@ void ActivationController::FocusWindowWithEvent(const ui::Event* event) {
   window = delegate_->WillFocusWindow(window);
   if (GetActiveWindow() != window) {
     aura::client::GetFocusClient(window)->FocusWindow(
-        FindFocusableWindowFor(window), event);
+        FindFocusableWindowFor(window));
   }
 }
 

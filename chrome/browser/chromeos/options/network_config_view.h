@@ -63,7 +63,6 @@ class NetworkConfigView : public views::DialogDelegateView,
 
   // views::WidgetDelegate methods.
   virtual ui::ModalType GetModalType() const OVERRIDE;
-  virtual views::View* GetContentsView() OVERRIDE;
 
   // views::View overrides.
   virtual void GetAccessibleState(ui::AccessibleViewState* state) OVERRIDE;
@@ -90,6 +89,9 @@ class NetworkConfigView : public views::DialogDelegateView,
   // Login dialog for new/hidden networks.
   explicit NetworkConfigView(ConnectionType type);
   virtual ~NetworkConfigView();
+
+  // Creates and shows a dialog containing this view.
+  void ShowDialog(gfx::NativeWindow parent);
 
   // Creates an "Advanced" button in the lower-left corner of the dialog.
   void CreateAdvancedButton();

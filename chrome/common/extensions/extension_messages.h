@@ -5,11 +5,14 @@
 // IPC messages for extensions.
 // Multiply-included message file, hence no include guard.
 
+#include <string>
+#include <vector>
+
 #include "base/shared_memory.h"
 #include "base/values.h"
-#include "chrome/common/extensions/draggable_region.h"
 #include "chrome/common/extensions/extension.h"
 #include "chrome/common/extensions/permissions/bluetooth_device_permission_data.h"
+#include "chrome/common/extensions/permissions/media_galleries_permission_data.h"
 #include "chrome/common/extensions/permissions/permission_set.h"
 #include "chrome/common/extensions/permissions/socket_permission_data.h"
 #include "chrome/common/extensions/permissions/usb_device_permission_data.h"
@@ -17,6 +20,7 @@
 #include "chrome/common/web_apps.h"
 #include "content/public/common/common_param_traits.h"
 #include "content/public/common/socket_permission_request.h"
+#include "extensions/common/draggable_region.h"
 #include "extensions/common/url_pattern.h"
 #include "extensions/common/url_pattern_set.h"
 #include "googleurl/src/gurl.h"
@@ -82,6 +86,9 @@ IPC_STRUCT_BEGIN(ExtensionMsg_ExecuteCode_Params)
   // Whether to execute code in the main world (as opposed to an isolated
   // world).
   IPC_STRUCT_MEMBER(bool, in_main_world)
+
+  // Whether the request is coming from a <webview>.
+  IPC_STRUCT_MEMBER(bool, is_web_view)
 IPC_STRUCT_END()
 
 IPC_STRUCT_TRAITS_BEGIN(WebApplicationInfo::IconInfo)
@@ -128,6 +135,10 @@ IPC_STRUCT_TRAITS_BEGIN(extensions::UsbDevicePermissionData)
   IPC_STRUCT_TRAITS_MEMBER(product_id())
 IPC_STRUCT_TRAITS_END()
 
+IPC_STRUCT_TRAITS_BEGIN(extensions::MediaGalleriesPermissionData)
+  IPC_STRUCT_TRAITS_MEMBER(permission())
+IPC_STRUCT_TRAITS_END()
+
 // Singly-included section for custom IPC traits.
 #ifndef CHROME_COMMON_EXTENSIONS_EXTENSION_MESSAGES_H_
 #define CHROME_COMMON_EXTENSIONS_EXTENSION_MESSAGES_H_
@@ -152,11 +163,11 @@ struct ExtensionMsg_Loaded_Params {
   linked_ptr<DictionaryValue> manifest;
 
   // The location the extension was installed from.
-  extensions::Extension::Location location;
+  extensions::Manifest::Location location;
 
   // The path the extension was loaded from. This is used in the renderer only
   // to generate the extension ID for extensions that are loaded unpacked.
-  FilePath path;
+  base::FilePath path;
 
   // The extension's active permissions.
   extensions::APIPermissionSet apis;
@@ -389,6 +400,13 @@ IPC_MESSAGE_ROUTED2(ExtensionMsg_AddMessageToConsole,
 // Notify the renderer that its window has closed.
 IPC_MESSAGE_ROUTED0(ExtensionMsg_AppWindowClosed)
 
+// Notify the renderer that an extension wants notifications when certain
+// searches match the active page.  This message replaces the old set of
+// searches, and triggers ExtensionHostMsg_OnWatchedPageChange messages from
+// each tab to keep the browser updated about changes.
+IPC_MESSAGE_CONTROL1(ExtensionMsg_WatchPages,
+                     std::vector<std::string> /* CSS selectors */)
+
 // Messages sent from the renderer to the browser.
 
 // A renderer sends this message when an extension process starts an API
@@ -455,12 +473,10 @@ IPC_SYNC_MESSAGE_CONTROL4_1(ExtensionHostMsg_OpenChannelToExtension,
                             std::string /* channel_name */,
                             int /* port_id */)
 
-IPC_SYNC_MESSAGE_CONTROL5_1(ExtensionHostMsg_OpenChannelToNativeApp,
+IPC_SYNC_MESSAGE_CONTROL3_1(ExtensionHostMsg_OpenChannelToNativeApp,
                             int /* routing_id */,
                             std::string /* source_extension_id */,
                             std::string /* native_app_name */,
-                            std::string /* channel_name */,
-                            std::string /* connection_message */,
                             int /* port_id */)
 
 // Get a port handle to the given tab.  The handle can be used for sending
@@ -571,3 +587,14 @@ IPC_MESSAGE_CONTROL1(ExtensionHostMsg_ResumeRequests, int /* route_id */)
 // Sent by the renderer when the draggable regions are updated.
 IPC_MESSAGE_ROUTED1(ExtensionHostMsg_UpdateDraggableRegions,
                     std::vector<extensions::DraggableRegion> /* regions */)
+
+// Notifies the browser process that a tab has started or stopped matching
+// certain conditions.  This message is sent in response to several events:
+//
+// * ExtensionMsg_WatchPages was received, updating the set of conditions.
+// * A new page is loaded.  This will be sent after ViewHostMsg_FrameNavigate.
+//   Currently this only fires for the main frame.
+// * Something changed on an existing frame causing the set of matching searches
+//   to change.
+IPC_MESSAGE_ROUTED1(ExtensionHostMsg_OnWatchedPageChange,
+                    std::vector<std::string> /* Matching CSS selectors */)

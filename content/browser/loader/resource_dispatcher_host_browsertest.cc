@@ -31,7 +31,7 @@ class ResourceDispatcherHostBrowserTest : public ContentBrowserTest,
 
  protected:
   virtual void SetUpOnMainThread() OVERRIDE {
-    FilePath path = GetTestFilePath("", "");
+    base::FilePath path = GetTestFilePath("", "");
     BrowserThread::PostTask(
         BrowserThread::IO, FROM_HERE,
         base::Bind(&URLRequestMockHTTPJob::AddUrlHandler, path));
@@ -47,12 +47,9 @@ class ResourceDispatcherHostBrowserTest : public ContentBrowserTest,
       got_downloads_ = !!manager->InProgressCount();
   }
 
-  RenderViewHost* render_view_host() {
-    return shell()->web_contents()->GetRenderViewHost();
-  }
-
   GURL GetMockURL(const std::string& file) {
-    return URLRequestMockHTTPJob::GetMockUrl(FilePath().AppendASCII(file));
+    return URLRequestMockHTTPJob::GetMockUrl(
+        base::FilePath().AppendASCII(file));
   }
 
   void CheckTitleTest(const GURL& url,
@@ -69,7 +66,7 @@ class ResourceDispatcherHostBrowserTest : public ContentBrowserTest,
     ShellAddedObserver new_shell_observer;
 
     // Create dynamic popup.
-    if (!ExecuteJavaScript(render_view_host(), L"", L"OpenPopup();"))
+    if (!ExecuteScript(shell()->web_contents(), "OpenPopup();"))
       return false;
 
     Shell* new_shell = new_shell_observer.GetShell();
@@ -165,10 +162,9 @@ IN_PROC_BROWSER_TEST_F(ResourceDispatcherHostBrowserTest, SyncXMLHttpRequest) {
 
   // Let's check the XMLHttpRequest ran successfully.
   bool success = false;
-  EXPECT_TRUE(ExecuteJavaScriptAndExtractBool(
-      shell()->web_contents()->GetRenderViewHost(),
-      L"",
-      L"window.domAutomationController.send(DidSyncRequestSucceed());",
+  EXPECT_TRUE(ExecuteScriptAndExtractBool(
+      shell()->web_contents(),
+      "window.domAutomationController.send(DidSyncRequestSucceed());",
       &success));
   EXPECT_TRUE(success);
 }
@@ -183,10 +179,9 @@ IN_PROC_BROWSER_TEST_F(ResourceDispatcherHostBrowserTest,
 
   // Let's check the XMLHttpRequest ran successfully.
   bool success = false;
-  EXPECT_TRUE(ExecuteJavaScriptAndExtractBool(
-      shell()->web_contents()->GetRenderViewHost(),
-      L"",
-      L"window.domAutomationController.send(DidSucceed());",
+  EXPECT_TRUE(ExecuteScriptAndExtractBool(
+      shell()->web_contents(),
+      "window.domAutomationController.send(DidSucceed());",
       &success));
   EXPECT_TRUE(success);
 }
@@ -346,9 +341,10 @@ IN_PROC_BROWSER_TEST_F(ResourceDispatcherHostBrowserTest,
   std::string redirect_script = "window.location='" +
       test_url.possibly_invalid_spec() + "';" +
       "window.domAutomationController.send(true);";
-  EXPECT_TRUE(ExecuteJavaScriptAndExtractBool(
-      shell()->web_contents()->GetRenderViewHost(),
-      L"", ASCIIToWide(redirect_script), &success));
+  EXPECT_TRUE(ExecuteScriptAndExtractBool(
+      shell()->web_contents(),
+      redirect_script,
+      &success));
   EXPECT_EQ(expected_title16, title_watcher.WaitAndGetTitle());
 }
 

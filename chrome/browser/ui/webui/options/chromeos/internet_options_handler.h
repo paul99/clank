@@ -9,7 +9,6 @@
 
 #include "base/compiler_specific.h"
 #include "chrome/browser/chromeos/cros/network_constants.h"
-#include "chrome/browser/chromeos/cros/network_ip_config.h"
 #include "chrome/browser/chromeos/cros/network_library.h"
 #include "chrome/browser/chromeos/cros/network_ui_data.h"
 #include "chrome/browser/ui/webui/options/options_ui.h"
@@ -81,8 +80,9 @@ class InternetOptionsHandler
   // be NULL.
   void DoConnect(chromeos::Network* network);
 
-  void SetActivationButtonVisibility(
+  void SetCellularButtonsVisibility(
       const chromeos::CellularNetwork* cellular,
+      const chromeos::NetworkDevice* device,
       base::DictionaryValue* dictionary,
       const std::string& carrier_id);
 
@@ -114,9 +114,7 @@ class InternetOptionsHandler
   void ToggleAirplaneModeCallback(const ListValue* args);
 
   // Populates the ui with the details of the given device path. This forces
-  // an overlay to be displayed in the UI.
-  void PopulateDictionaryDetails(const chromeos::Network* network);
-  // This is the second half of PopulateDictionaryDetails after the asynchronous
+  // an overlay to be displayed in the UI. Called after the asynchronous
   // request for Shill's service properties.
   void PopulateDictionaryDetailsCallback(
       const std::string& service_path,
@@ -126,6 +124,8 @@ class InternetOptionsHandler
       base::DictionaryValue* shill_properties,
       const chromeos::NetworkIPConfigVector& ipconfigs,
       const std::string& hardware_address);
+  void PopulateConnectionDetails(const chromeos::Network* network,
+                                 base::DictionaryValue* dictionary);
   void PopulateWifiDetails(const chromeos::WifiNetwork* wifi,
                            base::DictionaryValue* dictionary);
   void PopulateWimaxDetails(const chromeos::WimaxNetwork* wimax,
@@ -149,8 +149,11 @@ class InternetOptionsHandler
   void FillNetworkInfo(base::DictionaryValue* dictionary);
   // Refreshes the display of network information.
   void RefreshNetworkData();
+  // Updates the display of network connection information for the details page
+  // if it's up.
+  void UpdateConnectionData(const chromeos::Network* network);
   // Updates the carrier change status.
-  void UpdateCarrier(bool success);
+  void UpdateCarrier();
   // Adds observers for wireless networks, if any, so that we can dynamically
   // display the correct icon for that network's signal strength and, in the
   // case of cellular networks, network technology and roaming status.

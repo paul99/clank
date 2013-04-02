@@ -7,9 +7,12 @@
 #include <limits>
 
 #include "base/command_line.h"
+#include "base/logging.h"
 #include "base/process_util.h"
 #include "base/rand_util.h"
 #include "base/stringprintf.h"
+#include "base/threading/platform_thread.h"
+#include "base/time.h"
 #include "base/utf_string_conversions.h"
 #include "content/common/child_process.h"
 #include "content/common/child_process_messages.h"
@@ -30,6 +33,7 @@
 #include "ppapi/proxy/plugin_globals.h"
 #include "ppapi/proxy/ppapi_messages.h"
 #include "ppapi/proxy/interface_list.h"
+#include "ppapi/shared_impl/api_id.h"
 #include "third_party/WebKit/Source/WebKit/chromium/public/WebKit.h"
 #include "ui/base/ui_base_switches.h"
 #include "webkit/plugins/plugin_switches.h"
@@ -52,12 +56,37 @@ namespace content {
 typedef int32_t (*InitializeBrokerFunc)
     (PP_ConnectInstance_Func* connect_instance_func);
 
+PpapiThread::DispatcherMessageListener::DispatcherMessageListener(
+    PpapiThread* owner) : owner_(owner) {
+}
+
+PpapiThread::DispatcherMessageListener::~DispatcherMessageListener() {
+}
+
+bool PpapiThread::DispatcherMessageListener::OnMessageReceived(
+    const IPC::Message& msg) {
+  // The first parameter should be a plugin dispatcher ID.
+  PickleIterator iter(msg);
+  uint32 id = 0;
+  if (!msg.ReadUInt32(&iter, &id)) {
+    NOTREACHED();
+    return false;
+  }
+  std::map<uint32, ppapi::proxy::PluginDispatcher*>::iterator dispatcher =
+      owner_->plugin_dispatchers_.find(id);
+  if (dispatcher != owner_->plugin_dispatchers_.end())
+    return dispatcher->second->OnMessageReceived(msg);
+
+  return false;
+}
+
 PpapiThread::PpapiThread(const CommandLine& command_line, bool is_broker)
     : is_broker_(is_broker),
       connect_instance_func_(NULL),
       local_pp_module_(
           base::RandInt(0, std::numeric_limits<PP_Module>::max())),
-      next_plugin_dispatcher_id_(1) {
+      next_plugin_dispatcher_id_(1),
+      ALLOW_THIS_IN_INITIALIZER_LIST(dispatcher_message_listener_(this)) {
   ppapi::proxy::PluginGlobals* globals = ppapi::proxy::PluginGlobals::Get();
   globals->set_plugin_proxy_delegate(this);
   globals->set_command_line(
@@ -67,6 +96,19 @@ PpapiThread::PpapiThread(const CommandLine& command_line, bool is_broker)
 
   webkit_platform_support_.reset(new PpapiWebKitPlatformSupportImpl);
   WebKit::initialize(webkit_platform_support_.get());
+
+  // Register interfaces that expect messages from the browser process. Please
+  // note that only those InterfaceProxy-based ones require registration.
+  AddRoute(ppapi::API_ID_PPB_TCPSERVERSOCKET_PRIVATE,
+           &dispatcher_message_listener_);
+  AddRoute(ppapi::API_ID_PPB_TCPSOCKET_PRIVATE,
+           &dispatcher_message_listener_);
+  AddRoute(ppapi::API_ID_PPB_UDPSOCKET_PRIVATE,
+           &dispatcher_message_listener_);
+  AddRoute(ppapi::API_ID_PPB_HOSTRESOLVER_PRIVATE,
+           &dispatcher_message_listener_);
+  AddRoute(ppapi::API_ID_PPB_NETWORKMANAGER_PRIVATE,
+           &dispatcher_message_listener_);
 }
 
 PpapiThread::~PpapiThread() {
@@ -74,6 +116,16 @@ PpapiThread::~PpapiThread() {
   if (plugin_entry_points_.shutdown_module)
     plugin_entry_points_.shutdown_module();
   WebKit::shutdown();
+
+#if defined(OS_MACOSX)
+  // TODO(shess): <http://crbug.com/172319> is about how modules
+  // cannot be unloaded when Objective-C is involved.  interaction
+  // between the Objective-C runtime and module unloading.  Leaking
+  // the module here to work around this, a later CL should autodetect
+  // the problem and leak in NativeLibrary.
+  if (is_broker_)
+    library_.Release();
+#endif
 
 #if defined(OS_WIN)
   if (permissions_.HasPermission(ppapi::PERMISSION_FLASH))
@@ -89,45 +141,21 @@ bool PpapiThread::Send(IPC::Message* msg) {
   return sync_message_filter()->Send(msg);
 }
 
-// The "regular" ChildThread implements this function and does some standard
-// dispatching, then uses the message router. We don't actually need any of
-// this so this function just overrides that one.
-//
 // Note that this function is called only for messages from the channel to the
 // browser process. Messages from the renderer process are sent via a different
 // channel that ends up at Dispatcher::OnMessageReceived.
-bool PpapiThread::OnMessageReceived(const IPC::Message& msg) {
+bool PpapiThread::OnControlMessageReceived(const IPC::Message& msg) {
+  bool handled = true;
   IPC_BEGIN_MESSAGE_MAP(PpapiThread, msg)
-    IPC_MESSAGE_HANDLER(PpapiMsg_LoadPlugin, OnMsgLoadPlugin)
-    IPC_MESSAGE_HANDLER(PpapiMsg_CreateChannel, OnMsgCreateChannel)
-
-    IPC_MESSAGE_HANDLER(PpapiPluginMsg_ResourceReply, OnMsgResourceReply)
-
-    IPC_MESSAGE_HANDLER_GENERIC(PpapiMsg_PPBTCPServerSocket_ListenACK,
-                                OnPluginDispatcherMessageReceived(msg))
-    IPC_MESSAGE_HANDLER_GENERIC(PpapiMsg_PPBTCPServerSocket_AcceptACK,
-                                OnPluginDispatcherMessageReceived(msg))
-    IPC_MESSAGE_HANDLER_GENERIC(PpapiMsg_PPBTCPSocket_ConnectACK,
-                                OnPluginDispatcherMessageReceived(msg))
-    IPC_MESSAGE_HANDLER_GENERIC(PpapiMsg_PPBTCPSocket_SSLHandshakeACK,
-                                OnPluginDispatcherMessageReceived(msg))
-    IPC_MESSAGE_HANDLER_GENERIC(PpapiMsg_PPBTCPSocket_ReadACK,
-                                OnPluginDispatcherMessageReceived(msg))
-    IPC_MESSAGE_HANDLER_GENERIC(PpapiMsg_PPBTCPSocket_WriteACK,
-                                OnPluginDispatcherMessageReceived(msg))
-    IPC_MESSAGE_HANDLER_GENERIC(PpapiMsg_PPBUDPSocket_RecvFromACK,
-                                OnPluginDispatcherMessageReceived(msg))
-    IPC_MESSAGE_HANDLER_GENERIC(PpapiMsg_PPBUDPSocket_SendToACK,
-                                OnPluginDispatcherMessageReceived(msg))
-    IPC_MESSAGE_HANDLER_GENERIC(PpapiMsg_PPBUDPSocket_BindACK,
-                                OnPluginDispatcherMessageReceived(msg))
-    IPC_MESSAGE_HANDLER_GENERIC(PpapiMsg_PPBHostResolver_ResolveACK,
-                                OnPluginDispatcherMessageReceived(msg))
-    IPC_MESSAGE_HANDLER_GENERIC(PpapiMsg_PPBNetworkMonitor_NetworkList,
-                                OnPluginDispatcherMessageReceived(msg))
-    IPC_MESSAGE_HANDLER(PpapiMsg_SetNetworkState, OnMsgSetNetworkState)
+    IPC_MESSAGE_HANDLER(PpapiMsg_LoadPlugin, OnLoadPlugin)
+    IPC_MESSAGE_HANDLER(PpapiMsg_CreateChannel, OnCreateChannel)
+    IPC_MESSAGE_HANDLER(PpapiMsg_SetNetworkState, OnSetNetworkState)
+    IPC_MESSAGE_HANDLER(PpapiMsg_Crash, OnCrash)
+    IPC_MESSAGE_HANDLER(PpapiMsg_Hang, OnHang)
+    IPC_MESSAGE_HANDLER(PpapiPluginMsg_ResourceReply, OnResourceReply)
+    IPC_MESSAGE_UNHANDLED(handled = false)
   IPC_END_MESSAGE_MAP()
-  return true;
+  return handled;
 }
 
 void PpapiThread::OnChannelConnected(int32 peer_pid) {
@@ -207,8 +235,8 @@ void PpapiThread::Unregister(uint32 plugin_dispatcher_id) {
   plugin_dispatchers_.erase(plugin_dispatcher_id);
 }
 
-void PpapiThread::OnMsgLoadPlugin(const FilePath& path,
-                                  const ppapi::PpapiPermissions& permissions) {
+void PpapiThread::OnLoadPlugin(const base::FilePath& path,
+                               const ppapi::PpapiPermissions& permissions) {
   SavePluginName(path);
 
   // This must be set before calling into the plugin so it can get the
@@ -219,7 +247,7 @@ void PpapiThread::OnMsgLoadPlugin(const FilePath& path,
   // Trusted Pepper plugins may be "internal", i.e. built-in to the browser
   // binary.  If we're being asked to load such a plugin (e.g. the Chromoting
   // client) then fetch the entry points from the embedder, rather than a DLL.
-  std::vector<content::PepperPluginInfo> plugins;
+  std::vector<PepperPluginInfo> plugins;
   GetContentClient()->AddPepperPlugins(&plugins);
   for (size_t i = 0; i < plugins.size(); ++i) {
     if (plugins[i].is_internal && plugins[i].path == path) {
@@ -334,9 +362,9 @@ void PpapiThread::OnMsgLoadPlugin(const FilePath& path,
   library_.Reset(library.Release());
 }
 
-void PpapiThread::OnMsgCreateChannel(base::ProcessId renderer_pid,
-                                     int renderer_child_id,
-                                     bool incognito) {
+void PpapiThread::OnCreateChannel(base::ProcessId renderer_pid,
+                                  int renderer_child_id,
+                                  bool incognito) {
   IPC::ChannelHandle channel_handle;
 
   if (!plugin_entry_points_.get_interface ||  // Plugin couldn't be loaded.
@@ -349,14 +377,14 @@ void PpapiThread::OnMsgCreateChannel(base::ProcessId renderer_pid,
   Send(new PpapiHostMsg_ChannelCreated(channel_handle));
 }
 
-void PpapiThread::OnMsgResourceReply(
+void PpapiThread::OnResourceReply(
     const ppapi::proxy::ResourceMessageReplyParams& reply_params,
     const IPC::Message& nested_msg) {
   ppapi::proxy::PluginDispatcher::DispatchResourceReply(reply_params,
                                                         nested_msg);
 }
 
-void PpapiThread::OnMsgSetNetworkState(bool online) {
+void PpapiThread::OnSetNetworkState(bool online) {
   // Note the browser-process side shouldn't send us these messages in the
   // first unless the plugin has dev permissions, so we don't need to check
   // again here. We don't want random plugins depending on this dev interface.
@@ -368,18 +396,16 @@ void PpapiThread::OnMsgSetNetworkState(bool online) {
     ns->SetOnLine(PP_FromBool(online));
 }
 
-void PpapiThread::OnPluginDispatcherMessageReceived(const IPC::Message& msg) {
-  // The first parameter should be a plugin dispatcher ID.
-  PickleIterator iter(msg);
-  uint32 id = 0;
-  if (!msg.ReadUInt32(&iter, &id)) {
-    NOTREACHED();
-    return;
-  }
-  std::map<uint32, ppapi::proxy::PluginDispatcher*>::iterator dispatcher =
-      plugin_dispatchers_.find(id);
-  if (dispatcher != plugin_dispatchers_.end())
-    dispatcher->second->OnMessageReceived(msg);
+void PpapiThread::OnCrash() {
+  // Intentionally crash upon the request of the browser.
+  volatile int* null_pointer = NULL;
+  *null_pointer = 0;
+}
+
+void PpapiThread::OnHang() {
+  // Intentionally hang upon the request of the browser.
+  for (;;)
+    base::PlatformThread::Sleep(base::TimeDelta::FromSeconds(1));
 }
 
 bool PpapiThread::SetupRendererChannel(base::ProcessId renderer_pid,
@@ -434,7 +460,7 @@ bool PpapiThread::SetupRendererChannel(base::ProcessId renderer_pid,
   return true;
 }
 
-void PpapiThread::SavePluginName(const FilePath& path) {
+void PpapiThread::SavePluginName(const base::FilePath& path) {
   ppapi::proxy::PluginGlobals::Get()->set_plugin_name(
       path.BaseName().AsUTF8Unsafe());
 

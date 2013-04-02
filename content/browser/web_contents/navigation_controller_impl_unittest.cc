@@ -13,7 +13,7 @@
 #include "base/utf_string_conversions.h"
 //  These are only used for commented out tests.  If someone wants to enable
 //  them, they should be moved to chrome first.
-//  #include "chrome/browser/history/history.h"
+//  #include "chrome/browser/history/history_service.h"
 //  #include "chrome/browser/profiles/profile_manager.h"
 //  #include "chrome/browser/sessions/session_service.h"
 //  #include "chrome/browser/sessions/session_service_factory.h"
@@ -35,6 +35,7 @@
 #include "content/public/test/mock_render_process_host.h"
 #include "content/public/test/test_notification_tracker.h"
 #include "net/base/net_util.h"
+#include "skia/ext/platform_canvas.h"
 #include "testing/gtest/include/gtest/gtest.h"
 #include "webkit/glue/glue_serialize.h"
 
@@ -48,7 +49,7 @@ gfx::Image CreateImage(SkColor color) {
   bitmap.setConfig(SkBitmap::kARGB_8888_Config, 1, 1);
   bitmap.allocPixels();
   bitmap.eraseColor(color);
-  return gfx::Image(bitmap);
+  return gfx::Image::CreateFrom1xBitmap(bitmap);
 }
 
 // Returns true if images |a| and |b| have the same pixel data.
@@ -165,7 +166,7 @@ class TestWebContentsDelegate : public WebContentsDelegate {
 
   // Keep track of whether the tab has notified us of a navigation state change.
   virtual void NavigationStateChanged(const WebContents* source,
-                                      unsigned changed_flags) {
+                                      unsigned changed_flags) OVERRIDE {
     navigation_state_change_count_++;
   }
 
@@ -1043,7 +1044,10 @@ TEST_F(NavigationControllerTest, Back) {
   EXPECT_TRUE(controller.GetLastCommittedEntry());
   EXPECT_TRUE(controller.GetPendingEntry());
   EXPECT_FALSE(controller.CanGoBack());
+  EXPECT_FALSE(controller.CanGoToOffset(-1));
   EXPECT_TRUE(controller.CanGoForward());
+  EXPECT_TRUE(controller.CanGoToOffset(1));
+  EXPECT_FALSE(controller.CanGoToOffset(2));  // Cannot go foward 2 steps.
 
   // Timestamp for entry 1 should be on or after that of entry 0.
   EXPECT_FALSE(controller.GetEntryAtIndex(0)->GetTimestamp().is_null());
@@ -1060,7 +1064,10 @@ TEST_F(NavigationControllerTest, Back) {
   EXPECT_TRUE(controller.GetLastCommittedEntry());
   EXPECT_FALSE(controller.GetPendingEntry());
   EXPECT_FALSE(controller.CanGoBack());
+  EXPECT_FALSE(controller.CanGoToOffset(-1));
   EXPECT_TRUE(controller.CanGoForward());
+  EXPECT_TRUE(controller.CanGoToOffset(1));
+  EXPECT_FALSE(controller.CanGoToOffset(2));  // Cannot go foward 2 steps.
 
   // Timestamp for entry 0 should be on or after that of entry 1
   // (since we went back to it).
@@ -1221,7 +1228,10 @@ TEST_F(NavigationControllerTest, Forward) {
   EXPECT_TRUE(controller.GetLastCommittedEntry());
   EXPECT_TRUE(controller.GetPendingEntry());
   EXPECT_TRUE(controller.CanGoBack());
+  EXPECT_TRUE(controller.CanGoToOffset(-1));
+  EXPECT_FALSE(controller.CanGoToOffset(-2));  // Cannot go back 2 steps.
   EXPECT_FALSE(controller.CanGoForward());
+  EXPECT_FALSE(controller.CanGoToOffset(1));
 
   // Timestamp for entry 0 should be on or after that of entry 1
   // (since we went back to it).
@@ -1239,7 +1249,10 @@ TEST_F(NavigationControllerTest, Forward) {
   EXPECT_TRUE(controller.GetLastCommittedEntry());
   EXPECT_FALSE(controller.GetPendingEntry());
   EXPECT_TRUE(controller.CanGoBack());
+  EXPECT_TRUE(controller.CanGoToOffset(-1));
+  EXPECT_FALSE(controller.CanGoToOffset(-2));  // Cannot go back 2 steps.
   EXPECT_FALSE(controller.CanGoForward());
+  EXPECT_FALSE(controller.CanGoToOffset(1));
 
   // Timestamp for entry 1 should be on or after that of entry 0
   // (since we went forward to it).
@@ -1837,7 +1850,7 @@ class PrunedListener : public NotificationObserver {
 
   virtual void Observe(int type,
                        const NotificationSource& source,
-                       const NotificationDetails& details) {
+                       const NotificationDetails& details) OVERRIDE {
     if (type == NOTIFICATION_NAV_LIST_PRUNED) {
       notification_count_++;
       details_ = *(Details<PrunedDetails>(details).ptr());
@@ -3006,6 +3019,97 @@ TEST_F(NavigationControllerTest, BackNavigationDoesNotClearFavicon) {
   EXPECT_TRUE(DoImagesMatch(favicon_image, entry->GetFavicon().image));
 }
 
+// The test crashes on android: http://crbug.com/170449
+#if defined(OS_ANDROID)
+#define MAYBE_PurgeScreenshot DISABLED_PurgeScreenshot
+#else
+#define MAYBE_PurgeScreenshot PurgeScreenshot
+#endif
+// Tests that screenshot are purged correctly.
+TEST_F(NavigationControllerTest, MAYBE_PurgeScreenshot) {
+  NavigationControllerImpl& controller = controller_impl();
+
+  // Prepare some data to use as screenshot for each navigation.
+  SkBitmap bitmap;
+  bitmap.setConfig(SkBitmap::kARGB_8888_Config, 1, 1);
+  ASSERT_TRUE(bitmap.allocPixels());
+  bitmap.eraseRGB(0, 0, 0);
+  NavigationEntryImpl* entry;
+
+  // Navigate enough times to make sure that some screenshots are purged.
+  for (int i = 0; i < 12; ++i) {
+    const GURL url(base::StringPrintf("http://foo%d/", i));
+    NavigateAndCommit(url);
+    EXPECT_EQ(i, controller.GetCurrentEntryIndex());
+
+    entry = NavigationEntryImpl::FromNavigationEntry(
+        controller.GetEntryAtIndex(i));
+    controller.OnScreenshotTaken(entry->GetUniqueID(), true, bitmap);
+    EXPECT_TRUE(entry->screenshot());
+  }
+  NavigateAndCommit(GURL("https://foo/"));
+  EXPECT_EQ(13, controller.GetEntryCount());
+  entry = NavigationEntryImpl::FromNavigationEntry(
+      controller.GetEntryAtIndex(11));
+  controller.OnScreenshotTaken(entry->GetUniqueID(), true, bitmap);
+
+  for (int i = 0; i < 2; ++i) {
+    entry = NavigationEntryImpl::FromNavigationEntry(
+        controller.GetEntryAtIndex(i));
+    EXPECT_FALSE(entry->screenshot()) << "Screenshot " << i << " not purged";
+  }
+
+  for (int i = 2; i < controller.GetEntryCount() - 1; ++i) {
+    entry = NavigationEntryImpl::FromNavigationEntry(
+        controller.GetEntryAtIndex(i));
+    EXPECT_TRUE(entry->screenshot()) << "Screenshot not found for " << i;
+  }
+
+  // Navigate to index 5 and then try to assign screenshot to all entries.
+  controller.GoToIndex(5);
+  contents()->CommitPendingNavigation();
+  EXPECT_EQ(5, controller.GetCurrentEntryIndex());
+  for (int i = 0; i < controller.GetEntryCount() - 1; ++i) {
+    entry = NavigationEntryImpl::FromNavigationEntry(
+        controller.GetEntryAtIndex(i));
+    controller.OnScreenshotTaken(entry->GetUniqueID(), true, bitmap);
+  }
+
+  for (int i = 10; i <= 12; ++i) {
+    entry = NavigationEntryImpl::FromNavigationEntry(
+        controller.GetEntryAtIndex(i));
+    EXPECT_FALSE(entry->screenshot()) << "Screenshot " << i << " not purged";
+    controller.OnScreenshotTaken(entry->GetUniqueID(), true, bitmap);
+  }
+
+  // Navigate to index 7 and assign screenshot to all entries.
+  controller.GoToIndex(7);
+  contents()->CommitPendingNavigation();
+  EXPECT_EQ(7, controller.GetCurrentEntryIndex());
+  for (int i = 0; i < controller.GetEntryCount() - 1; ++i) {
+    entry = NavigationEntryImpl::FromNavigationEntry(
+        controller.GetEntryAtIndex(i));
+    controller.OnScreenshotTaken(entry->GetUniqueID(), true, bitmap);
+  }
+
+  for (int i = 0; i < 2; ++i) {
+    entry = NavigationEntryImpl::FromNavigationEntry(
+        controller.GetEntryAtIndex(i));
+    EXPECT_FALSE(entry->screenshot()) << "Screenshot " << i << " not purged";
+  }
+
+  // Clear all screenshots.
+  EXPECT_EQ(13, controller.GetEntryCount());
+  EXPECT_EQ(10, controller.GetScreenshotCount());
+  controller.ClearAllScreenshots();
+  EXPECT_EQ(0, controller.GetScreenshotCount());
+  for (int i = 0; i < controller.GetEntryCount(); ++i) {
+    entry = NavigationEntryImpl::FromNavigationEntry(
+        controller.GetEntryAtIndex(i));
+    EXPECT_FALSE(entry->screenshot()) << "Screenshot " << i << " not cleared";
+  }
+}
+
 /* TODO(brettw) These test pass on my local machine but fail on the XP buildbot
    (but not Vista) cleaning up the directory after they run.
    This should be fixed.
@@ -3101,7 +3205,7 @@ class NavigationControllerHistoryTest : public NavigationControllerTest {
 
  private:
   ProfileManager* profile_manager_;
-  FilePath test_dir_;
+  base::FilePath test_dir_;
 };
 
 // A basic test case. Navigates to a single url, and make sure the history

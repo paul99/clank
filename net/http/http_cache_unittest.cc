@@ -552,6 +552,29 @@ TEST(HttpCache, SimpleGETNoDiskCache2) {
   EXPECT_FALSE(cache.http_cache()->GetCurrentBackend());
 }
 
+// Tests that IOBuffers are not referenced after IO completes.
+TEST(HttpCache, ReleaseBuffer) {
+  MockHttpCache cache;
+
+  // Write to the cache.
+  RunTransactionTest(cache.http_cache(), kSimpleGET_Transaction);
+
+  MockHttpRequest request(kSimpleGET_Transaction);
+  scoped_ptr<net::HttpTransaction> trans;
+  int rv = cache.http_cache()->CreateTransaction(&trans, NULL);
+  ASSERT_EQ(net::OK, rv);
+
+  const int kBufferSize = 10;
+  scoped_refptr<net::IOBuffer> buffer(new net::IOBuffer(kBufferSize));
+  net::ReleaseBufferCompletionCallback cb(buffer);
+
+  rv = trans->Start(&request, cb.callback(), net::BoundNetLog());
+  EXPECT_EQ(net::OK, cb.GetResult(rv));
+
+  rv = trans->Read(buffer, kBufferSize, cb.callback());
+  EXPECT_EQ(kBufferSize, cb.GetResult(rv));
+}
+
 TEST(HttpCache, SimpleGETWithDiskFailures) {
   MockHttpCache cache;
 
@@ -1712,6 +1735,139 @@ TEST(HttpCache, ETagGET_ConditionalRequest_304) {
   EXPECT_EQ(1, cache.disk_cache()->create_count());
 }
 
+class RevalidationServer {
+ public:
+  RevalidationServer() {
+    s_etag_used_ = false;
+    s_last_modified_used_ = false;
+  }
+
+  bool EtagUsed() { return s_etag_used_; }
+  bool LastModifiedUsed() { return s_last_modified_used_; }
+
+  static void Handler(const net::HttpRequestInfo* request,
+                      std::string* response_status,
+                      std::string* response_headers,
+                      std::string* response_data);
+
+ private:
+  static bool s_etag_used_;
+  static bool s_last_modified_used_;
+};
+bool RevalidationServer::s_etag_used_ = false;
+bool RevalidationServer::s_last_modified_used_ = false;
+
+void RevalidationServer::Handler(const net::HttpRequestInfo* request,
+                                 std::string* response_status,
+                                 std::string* response_headers,
+                                 std::string* response_data) {
+  if (request->extra_headers.HasHeader(net::HttpRequestHeaders::kIfNoneMatch))
+      s_etag_used_ = true;
+
+  if (request->extra_headers.HasHeader(
+          net::HttpRequestHeaders::kIfModifiedSince)) {
+      s_last_modified_used_ = true;
+  }
+
+  if (s_etag_used_ || s_last_modified_used_) {
+    response_status->assign("HTTP/1.1 304 Not Modified");
+    response_headers->assign(kTypicalGET_Transaction.response_headers);
+    response_data->clear();
+  } else {
+    response_status->assign(kTypicalGET_Transaction.status);
+    response_headers->assign(kTypicalGET_Transaction.response_headers);
+    response_data->assign(kTypicalGET_Transaction.data);
+  }
+}
+
+// Tests revalidation after a vary match.
+TEST(HttpCache, SimpleGET_LoadValidateCache_VaryMatch) {
+  MockHttpCache cache;
+
+  // Write to the cache.
+  MockTransaction transaction(kTypicalGET_Transaction);
+  transaction.request_headers = "Foo: bar\n";
+  transaction.response_headers =
+      "Date: Wed, 28 Nov 2007 09:40:09 GMT\n"
+      "Last-Modified: Wed, 28 Nov 2007 00:40:09 GMT\n"
+      "Etag: \"foopy\"\n"
+      "Cache-Control: max-age=0\n"
+      "Vary: Foo\n";
+  AddMockTransaction(&transaction);
+  RunTransactionTest(cache.http_cache(), transaction);
+
+  // Read from the cache.
+  RevalidationServer server;
+  transaction.handler = server.Handler;
+  RunTransactionTest(cache.http_cache(), transaction);
+
+  EXPECT_TRUE(server.EtagUsed());
+  EXPECT_TRUE(server.LastModifiedUsed());
+  EXPECT_EQ(2, cache.network_layer()->transaction_count());
+  EXPECT_EQ(1, cache.disk_cache()->open_count());
+  EXPECT_EQ(1, cache.disk_cache()->create_count());
+  RemoveMockTransaction(&transaction);
+}
+
+// Tests revalidation after a vary mismatch if etag is present.
+TEST(HttpCache, SimpleGET_LoadValidateCache_VaryMismatch) {
+  MockHttpCache cache;
+
+  // Write to the cache.
+  MockTransaction transaction(kTypicalGET_Transaction);
+  transaction.request_headers = "Foo: bar\n";
+  transaction.response_headers =
+      "Date: Wed, 28 Nov 2007 09:40:09 GMT\n"
+      "Last-Modified: Wed, 28 Nov 2007 00:40:09 GMT\n"
+      "Etag: \"foopy\"\n"
+      "Cache-Control: max-age=0\n"
+      "Vary: Foo\n";
+  AddMockTransaction(&transaction);
+  RunTransactionTest(cache.http_cache(), transaction);
+
+  // Read from the cache and revalidate the entry.
+  RevalidationServer server;
+  transaction.handler = server.Handler;
+  transaction.request_headers = "Foo: none\n";
+  RunTransactionTest(cache.http_cache(), transaction);
+
+  EXPECT_TRUE(server.EtagUsed());
+  EXPECT_FALSE(server.LastModifiedUsed());
+  EXPECT_EQ(2, cache.network_layer()->transaction_count());
+  EXPECT_EQ(1, cache.disk_cache()->open_count());
+  EXPECT_EQ(1, cache.disk_cache()->create_count());
+  RemoveMockTransaction(&transaction);
+}
+
+// Tests lack of revalidation after a vary mismatch and no etag.
+TEST(HttpCache, SimpleGET_LoadDontValidateCache_VaryMismatch) {
+  MockHttpCache cache;
+
+  // Write to the cache.
+  MockTransaction transaction(kTypicalGET_Transaction);
+  transaction.request_headers = "Foo: bar\n";
+  transaction.response_headers =
+      "Date: Wed, 28 Nov 2007 09:40:09 GMT\n"
+      "Last-Modified: Wed, 28 Nov 2007 00:40:09 GMT\n"
+      "Cache-Control: max-age=0\n"
+      "Vary: Foo\n";
+  AddMockTransaction(&transaction);
+  RunTransactionTest(cache.http_cache(), transaction);
+
+  // Read from the cache and don't revalidate the entry.
+  RevalidationServer server;
+  transaction.handler = server.Handler;
+  transaction.request_headers = "Foo: none\n";
+  RunTransactionTest(cache.http_cache(), transaction);
+
+  EXPECT_FALSE(server.EtagUsed());
+  EXPECT_FALSE(server.LastModifiedUsed());
+  EXPECT_EQ(2, cache.network_layer()->transaction_count());
+  EXPECT_EQ(1, cache.disk_cache()->open_count());
+  EXPECT_EQ(1, cache.disk_cache()->create_count());
+  RemoveMockTransaction(&transaction);
+}
+
 static void ETagGet_UnconditionalRequest_Handler(
     const net::HttpRequestInfo* request,
     std::string* response_status,
@@ -2388,12 +2544,39 @@ TEST(HttpCache, SimplePOST_WithRanges) {
 }
 
 // Tests that a POST is cached separately from a previously cached GET.
-TEST(HttpCache, SimplePOST_Invalidate) {
+TEST(HttpCache, SimplePOST_SeparateCache) {
   MockHttpCache cache;
 
-  MockTransaction transaction(kSimplePOST_Transaction);
-  transaction.method = "GET";
+  ScopedVector<net::UploadElementReader> element_readers;
+  element_readers.push_back(new net::UploadBytesElementReader("hello", 5));
+  net::UploadDataStream upload_data_stream(&element_readers, 1);
 
+  MockTransaction transaction(kSimplePOST_Transaction);
+  MockHttpRequest req1(transaction);
+  req1.upload_data_stream = &upload_data_stream;
+
+  RunTransactionTestWithRequest(cache.http_cache(), transaction, req1, NULL);
+
+  EXPECT_EQ(1, cache.network_layer()->transaction_count());
+  EXPECT_EQ(0, cache.disk_cache()->open_count());
+  EXPECT_EQ(1, cache.disk_cache()->create_count());
+
+  transaction.method = "GET";
+  MockHttpRequest req2(transaction);
+
+  RunTransactionTestWithRequest(cache.http_cache(), transaction, req2, NULL);
+
+  EXPECT_EQ(2, cache.network_layer()->transaction_count());
+  EXPECT_EQ(0, cache.disk_cache()->open_count());
+  EXPECT_EQ(2, cache.disk_cache()->create_count());
+}
+
+// Tests that a successful POST invalidates a previously cached GET.
+TEST(HttpCache, SimplePOST_Invalidate_205) {
+  MockHttpCache cache;
+
+  MockTransaction transaction(kSimpleGET_Transaction);
+  AddMockTransaction(&transaction);
   MockHttpRequest req1(transaction);
 
   // Attempt to populate the cache.
@@ -2408,6 +2591,7 @@ TEST(HttpCache, SimplePOST_Invalidate) {
   net::UploadDataStream upload_data_stream(&element_readers, 1);
 
   transaction.method = "POST";
+  transaction.status = "HTTP/1.1 205 No Content";
   MockHttpRequest req2(transaction);
   req2.upload_data_stream = &upload_data_stream;
 
@@ -2416,6 +2600,51 @@ TEST(HttpCache, SimplePOST_Invalidate) {
   EXPECT_EQ(2, cache.network_layer()->transaction_count());
   EXPECT_EQ(0, cache.disk_cache()->open_count());
   EXPECT_EQ(2, cache.disk_cache()->create_count());
+
+  RunTransactionTestWithRequest(cache.http_cache(), transaction, req1, NULL);
+
+  EXPECT_EQ(3, cache.network_layer()->transaction_count());
+  EXPECT_EQ(0, cache.disk_cache()->open_count());
+  EXPECT_EQ(3, cache.disk_cache()->create_count());
+  RemoveMockTransaction(&transaction);
+}
+
+// Tests that we don't invalidate entries as a result of a failed POST.
+TEST(HttpCache, SimplePOST_DontInvalidate_100) {
+  MockHttpCache cache;
+
+  MockTransaction transaction(kSimpleGET_Transaction);
+  AddMockTransaction(&transaction);
+  MockHttpRequest req1(transaction);
+
+  // Attempt to populate the cache.
+  RunTransactionTestWithRequest(cache.http_cache(), transaction, req1, NULL);
+
+  EXPECT_EQ(1, cache.network_layer()->transaction_count());
+  EXPECT_EQ(0, cache.disk_cache()->open_count());
+  EXPECT_EQ(1, cache.disk_cache()->create_count());
+
+  ScopedVector<net::UploadElementReader> element_readers;
+  element_readers.push_back(new net::UploadBytesElementReader("hello", 5));
+  net::UploadDataStream upload_data_stream(&element_readers, 1);
+
+  transaction.method = "POST";
+  transaction.status = "HTTP/1.1 100 Continue";
+  MockHttpRequest req2(transaction);
+  req2.upload_data_stream = &upload_data_stream;
+
+  RunTransactionTestWithRequest(cache.http_cache(), transaction, req2, NULL);
+
+  EXPECT_EQ(2, cache.network_layer()->transaction_count());
+  EXPECT_EQ(0, cache.disk_cache()->open_count());
+  EXPECT_EQ(2, cache.disk_cache()->create_count());
+
+  RunTransactionTestWithRequest(cache.http_cache(), transaction, req1, NULL);
+
+  EXPECT_EQ(2, cache.network_layer()->transaction_count());
+  EXPECT_EQ(1, cache.disk_cache()->open_count());
+  EXPECT_EQ(2, cache.disk_cache()->create_count());
+  RemoveMockTransaction(&transaction);
 }
 
 // Tests that we do not cache the response of a PUT.
@@ -2475,6 +2704,82 @@ TEST(HttpCache, SimplePUT_Invalidate) {
   EXPECT_EQ(2, cache.disk_cache()->create_count());
 }
 
+// Tests that we invalidate entries as a result of a PUT.
+TEST(HttpCache, SimplePUT_Invalidate_305) {
+  MockHttpCache cache;
+
+  MockTransaction transaction(kSimpleGET_Transaction);
+  AddMockTransaction(&transaction);
+  MockHttpRequest req1(transaction);
+
+  // Attempt to populate the cache.
+  RunTransactionTestWithRequest(cache.http_cache(), transaction, req1, NULL);
+
+  EXPECT_EQ(1, cache.network_layer()->transaction_count());
+  EXPECT_EQ(0, cache.disk_cache()->open_count());
+  EXPECT_EQ(1, cache.disk_cache()->create_count());
+
+  ScopedVector<net::UploadElementReader> element_readers;
+  element_readers.push_back(new net::UploadBytesElementReader("hello", 5));
+  net::UploadDataStream upload_data_stream(&element_readers, 0);
+
+  transaction.method = "PUT";
+  transaction.status = "HTTP/1.1 305 Use Proxy";
+  MockHttpRequest req2(transaction);
+  req2.upload_data_stream = &upload_data_stream;
+
+  RunTransactionTestWithRequest(cache.http_cache(), transaction, req2, NULL);
+
+  EXPECT_EQ(2, cache.network_layer()->transaction_count());
+  EXPECT_EQ(1, cache.disk_cache()->open_count());
+  EXPECT_EQ(1, cache.disk_cache()->create_count());
+
+  RunTransactionTestWithRequest(cache.http_cache(), transaction, req1, NULL);
+
+  EXPECT_EQ(3, cache.network_layer()->transaction_count());
+  EXPECT_EQ(1, cache.disk_cache()->open_count());
+  EXPECT_EQ(2, cache.disk_cache()->create_count());
+  RemoveMockTransaction(&transaction);
+}
+
+// Tests that we don't invalidate entries as a result of a failed PUT.
+TEST(HttpCache, SimplePUT_DontInvalidate_404) {
+  MockHttpCache cache;
+
+  MockTransaction transaction(kSimpleGET_Transaction);
+  AddMockTransaction(&transaction);
+  MockHttpRequest req1(transaction);
+
+  // Attempt to populate the cache.
+  RunTransactionTestWithRequest(cache.http_cache(), transaction, req1, NULL);
+
+  EXPECT_EQ(1, cache.network_layer()->transaction_count());
+  EXPECT_EQ(0, cache.disk_cache()->open_count());
+  EXPECT_EQ(1, cache.disk_cache()->create_count());
+
+  ScopedVector<net::UploadElementReader> element_readers;
+  element_readers.push_back(new net::UploadBytesElementReader("hello", 5));
+  net::UploadDataStream upload_data_stream(&element_readers, 0);
+
+  transaction.method = "PUT";
+  transaction.status = "HTTP/1.1 404 Not Found";
+  MockHttpRequest req2(transaction);
+  req2.upload_data_stream = &upload_data_stream;
+
+  RunTransactionTestWithRequest(cache.http_cache(), transaction, req2, NULL);
+
+  EXPECT_EQ(2, cache.network_layer()->transaction_count());
+  EXPECT_EQ(1, cache.disk_cache()->open_count());
+  EXPECT_EQ(1, cache.disk_cache()->create_count());
+
+  RunTransactionTestWithRequest(cache.http_cache(), transaction, req1, NULL);
+
+  EXPECT_EQ(2, cache.network_layer()->transaction_count());
+  EXPECT_EQ(2, cache.disk_cache()->open_count());
+  EXPECT_EQ(1, cache.disk_cache()->create_count());
+  RemoveMockTransaction(&transaction);
+}
+
 // Tests that we do not cache the response of a DELETE.
 TEST(HttpCache, SimpleDELETE_Miss) {
   MockHttpCache cache;
@@ -2530,6 +2835,71 @@ TEST(HttpCache, SimpleDELETE_Invalidate) {
   EXPECT_EQ(3, cache.network_layer()->transaction_count());
   EXPECT_EQ(1, cache.disk_cache()->open_count());
   EXPECT_EQ(2, cache.disk_cache()->create_count());
+}
+
+// Tests that we invalidate entries as a result of a DELETE.
+TEST(HttpCache, SimpleDELETE_Invalidate_301) {
+  MockHttpCache cache;
+
+  MockTransaction transaction(kSimpleGET_Transaction);
+  AddMockTransaction(&transaction);
+
+  // Attempt to populate the cache.
+  RunTransactionTest(cache.http_cache(), transaction);
+
+  EXPECT_EQ(1, cache.network_layer()->transaction_count());
+  EXPECT_EQ(0, cache.disk_cache()->open_count());
+  EXPECT_EQ(1, cache.disk_cache()->create_count());
+
+  transaction.method = "DELETE";
+  transaction.status = "HTTP/1.1 301 Moved Permanently ";
+
+  RunTransactionTest(cache.http_cache(), transaction);
+
+  EXPECT_EQ(2, cache.network_layer()->transaction_count());
+  EXPECT_EQ(1, cache.disk_cache()->open_count());
+  EXPECT_EQ(1, cache.disk_cache()->create_count());
+
+  transaction.method = "GET";
+  RunTransactionTest(cache.http_cache(), transaction);
+
+  EXPECT_EQ(3, cache.network_layer()->transaction_count());
+  EXPECT_EQ(1, cache.disk_cache()->open_count());
+  EXPECT_EQ(2, cache.disk_cache()->create_count());
+  RemoveMockTransaction(&transaction);
+}
+
+// Tests that we don't invalidate entries as a result of a failed DELETE.
+TEST(HttpCache, SimpleDELETE_DontInvalidate_416) {
+  MockHttpCache cache;
+
+  MockTransaction transaction(kSimpleGET_Transaction);
+  AddMockTransaction(&transaction);
+
+  // Attempt to populate the cache.
+  RunTransactionTest(cache.http_cache(), transaction);
+
+  EXPECT_EQ(1, cache.network_layer()->transaction_count());
+  EXPECT_EQ(0, cache.disk_cache()->open_count());
+  EXPECT_EQ(1, cache.disk_cache()->create_count());
+
+  transaction.method = "DELETE";
+  transaction.status = "HTTP/1.1 416 Requested Range Not Satisfiable";
+
+  RunTransactionTest(cache.http_cache(), transaction);
+
+  EXPECT_EQ(2, cache.network_layer()->transaction_count());
+  EXPECT_EQ(1, cache.disk_cache()->open_count());
+  EXPECT_EQ(1, cache.disk_cache()->create_count());
+
+  transaction.method = "GET";
+  transaction.status = "HTTP/1.1 200 OK";
+  RunTransactionTest(cache.http_cache(), transaction);
+
+  EXPECT_EQ(2, cache.network_layer()->transaction_count());
+  EXPECT_EQ(2, cache.disk_cache()->open_count());
+  EXPECT_EQ(1, cache.disk_cache()->create_count());
+  RemoveMockTransaction(&transaction);
 }
 
 TEST(HttpCache, RangeGET_SkipsCache) {

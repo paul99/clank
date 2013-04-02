@@ -11,7 +11,10 @@
       'target_name': 'device_bluetooth',
       'type': 'static_library',
       'dependencies': [
+          '../base/base.gyp:base',
+          '../base/third_party/dynamic_annotations/dynamic_annotations.gyp:dynamic_annotations',
           '../chrome/chrome_resources.gyp:chrome_strings',
+          '../net/net.gyp:net',
           '../third_party/libxml/libxml.gyp:libxml',
           '../ui/ui.gyp:ui'
       ],
@@ -30,14 +33,22 @@
         'bluetooth/bluetooth_device_chromeos.h',
         'bluetooth/bluetooth_device_win.cc',
         'bluetooth/bluetooth_device_win.h',
+        'bluetooth/bluetooth_init_win.cc',
+        'bluetooth/bluetooth_init_win.h',
         'bluetooth/bluetooth_out_of_band_pairing_data.h',
         'bluetooth/bluetooth_service_record.cc',
         'bluetooth/bluetooth_service_record.h',
+        'bluetooth/bluetooth_service_record_chromeos.cc',
+        'bluetooth/bluetooth_service_record_chromeos.h',
+        'bluetooth/bluetooth_service_record_win.cc',
+        'bluetooth/bluetooth_service_record_win.h',
         'bluetooth/bluetooth_socket.h',
         'bluetooth/bluetooth_socket_chromeos.cc',
         'bluetooth/bluetooth_socket_chromeos.h',
         'bluetooth/bluetooth_socket_win.cc',
         'bluetooth/bluetooth_socket_win.h',
+        'bluetooth/bluetooth_task_manager_win.cc',
+        'bluetooth/bluetooth_task_manager_win.h',
         'bluetooth/bluetooth_utils.cc',
         'bluetooth/bluetooth_utils.h',
       ],
@@ -125,7 +136,6 @@
         'device_bluetooth_mocks',
         'device_usb',
         '../base/base.gyp:test_support_base',
-        '../content/content.gyp:test_support_content',
         '../testing/gmock.gyp:gmock',
         '../testing/gtest.gyp:gtest',
       ],
@@ -133,10 +143,10 @@
         'bluetooth/bluetooth_adapter_chromeos_unittest.cc',
         'bluetooth/bluetooth_adapter_devices_chromeos_unittest.cc',
         'bluetooth/bluetooth_adapter_win_unittest.cc',
-        'bluetooth/bluetooth_service_record_unittest.cc',
+        'bluetooth/bluetooth_service_record_chromeos_unittest.cc',
+        'bluetooth/bluetooth_service_record_win_unittest.cc',
+        'bluetooth/bluetooth_task_manager_win_unittest.cc',
         'bluetooth/bluetooth_utils_unittest.cc',
-        'test/device_test_suite.cc',
-        'test/device_test_suite.h',
         'test/run_all_unittests.cc',
         'usb/usb_ids_unittest.cc',
       ],
@@ -148,7 +158,65 @@
             '../dbus/dbus.gyp:dbus',
           ]
         }],
+        ['os_posix == 1 and OS != "mac" and OS != "android" and OS != "ios"', {
+          'conditions': [
+            ['linux_use_tcmalloc == 1', {
+              'dependencies': [
+                '../base/allocator/allocator.gyp:allocator',
+              ],
+            }],
+          ],
+        }],
       ],
     },
+  ],
+  'conditions': [
+    ['OS=="linux"', {
+      'targets': [
+        {
+          # Protobuf compiler / generator for the MtpFileEntry and
+          # MtpFileEntries protocol buffers.
+          'target_name': 'mtp_file_entry_proto',
+          'type': 'static_library',
+          'sources': [
+            '../third_party/cros_system_api/dbus/mtp_file_entry.proto',
+          ],
+          'variables': {
+            'proto_in_dir': '../third_party/cros_system_api/dbus',
+            'proto_out_dir': 'device/media_transfer_protocol',
+          },
+          'includes': ['../build/protoc.gypi'],
+        },
+        {
+          # Protobuf compiler / generator for the MtpStorageInfo protocol
+          # buffer.
+          'target_name': 'mtp_storage_info_proto',
+          'type': 'static_library',
+          'sources': [
+            '../third_party/cros_system_api/dbus/mtp_storage_info.proto',
+          ],
+          'variables': {
+            'proto_in_dir': '../third_party/cros_system_api/dbus',
+            'proto_out_dir': 'device/media_transfer_protocol',
+          },
+          'includes': ['../build/protoc.gypi'],
+        },
+        {
+          'target_name': 'device_media_transfer_protocol',
+          'type': 'static_library',
+          'dependencies': [
+            '../build/linux/system.gyp:dbus',
+            'mtp_file_entry_proto',
+            'mtp_storage_info_proto',
+          ],
+          'sources': [
+            'media_transfer_protocol/media_transfer_protocol_daemon_client.cc',
+            'media_transfer_protocol/media_transfer_protocol_daemon_client.h',
+            'media_transfer_protocol/media_transfer_protocol_manager.cc',
+            'media_transfer_protocol/media_transfer_protocol_manager.h',
+          ],
+        },
+      ],
+    }],
   ],
 }

@@ -16,15 +16,16 @@ import android.os.RemoteException;
 import android.util.Log;
 import android.view.Surface;
 
-import java.util.ArrayList;
-
 import org.chromium.base.CalledByNative;
 import org.chromium.base.JNINamespace;
-import org.chromium.content.app.ContentMain;
 import org.chromium.content.browser.SandboxedProcessConnection;
 import org.chromium.content.common.ISandboxedProcessCallback;
 import org.chromium.content.common.ISandboxedProcessService;
+import org.chromium.content.browser.SandboxedProcessLauncher;
+import org.chromium.content.common.ProcessInitException;
 import org.chromium.content.common.SurfaceCallback;
+
+import java.util.ArrayList;
 
 /**
  * This is the base class for sandboxed services; the SandboxedProcessService0, 1.. etc
@@ -124,7 +125,12 @@ public class SandboxedProcessService extends Service {
                         }
                     }
                     LibraryLoader.setLibraryToLoad(mNativeLibraryName);
-                    LibraryLoader.loadNow();
+                    try {
+                        LibraryLoader.loadNow();
+                    } catch (ProcessInitException e) {
+                        Log.e(TAG, "Failed to load native library, exiting sandboxed process", e);
+                        return;
+                    }
                     synchronized (mSandboxMainThread) {
                         while (mCommandLineParams == null) {
                             mSandboxMainThread.wait();
@@ -152,6 +158,8 @@ public class SandboxedProcessService extends Service {
                     ContentMain.start();
                     nativeExitSandboxedProcess();
                 } catch (InterruptedException e) {
+                    Log.w(TAG, MAIN_THREAD_NAME + " startup failed: " + e);
+                } catch (ProcessInitException e) {
                     Log.w(TAG, MAIN_THREAD_NAME + " startup failed: " + e);
                 }
             }

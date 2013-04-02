@@ -14,14 +14,16 @@
 // The feeds are located in chrome/test/data/chromeos/drive/.
 var kDirectoryPath = 'drive/Folder';
 var kFileName = 'File.aBc';
-var kExpectedContents = 'hello, world!';
-var kWriteOffset = 12;
+// The drive service returns "x"s of the file size defined in the JSON file.
+// The file size for File.aBc is set to 13.
+var kExpectedContents = 'xxxxxxxxxxxxx';
+var kWriteOffset = 13;
 var kWriteData = '!!!';
-var kExpectedAfterWrite = 'hello, world!!!';
+var kExpectedAfterWrite = 'xxxxxxxxxxxxx!!!';
 var kTruncateShortLength = 5;
-var kExpectedAfterTruncateShort = 'hello';
+var kExpectedAfterTruncateShort = 'xxxxx';
 var kTruncateLongLength = 7;
-var kExpectedAfterTruncateLong = 'hello\0\0';
+var kExpectedAfterTruncateLong = 'xxxxx\0\0';
 var kNewDirectoryPath = 'drive/FolderNew';
 var kFileManagerExtensionId = 'hhaomjibdihmijegdhdafkllkbggdgoj';
 
@@ -116,7 +118,7 @@ TestRunner.prototype.runExecuteReadTask = function() {
   // Add listener to be invoked when filesystem handler extension sends us
   // response.
   this.listener_ = this.onHandlerRequest_.bind(this);
-  chrome.extension.onMessageExternal.addListener(this.listener_);
+  chrome.runtime.onMessageExternal.addListener(this.listener_);
 
   var self = this;
   var fileURL = this.fileEntry_.toURL();
@@ -185,7 +187,7 @@ TestRunner.prototype.runCancelTest = function(fileName, type) {
 TestRunner.prototype.onHandlerRequest_ =
     function(request, sender, sendResponse) {
   // We don't have to listen for a response anymore.
-  chrome.extension.onMessageExternal.removeListener(this.listener_);
+  chrome.runtime.onMessageExternal.removeListener(this.listener_);
 
   this.verifyHandlerRequest(request,
       chrome.test.succeed,

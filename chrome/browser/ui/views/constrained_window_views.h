@@ -6,7 +6,7 @@
 #define CHROME_BROWSER_UI_VIEWS_CONSTRAINED_WINDOW_VIEWS_H_
 
 #include "base/compiler_specific.h"
-#include "chrome/browser/ui/constrained_window.h"
+#include "chrome/browser/ui/web_contents_modal_dialog.h"
 #include "ui/gfx/native_widget_types.h"
 #include "ui/gfx/rect.h"
 #include "ui/views/widget/widget.h"
@@ -23,74 +23,37 @@ class NonClientFrameView;
 class WidgetDelegate;
 }
 
-class NativeConstrainedWindowDelegate {
- public:
-  virtual ~NativeConstrainedWindowDelegate() {}
-
-  // Called after the NativeConstrainedWindow has been destroyed and is about to
-  // be deleted.
-  virtual void OnNativeConstrainedWindowDestroyed() = 0;
-
-  // Called when the NativeConstrainedWindow is clicked on when inactive.
-  virtual void OnNativeConstrainedWindowMouseActivate() = 0;
-
-  virtual views::internal::NativeWidgetDelegate* AsNativeWidgetDelegate() = 0;
-};
-
-class NativeConstrainedWindow {
- public:
-  virtual ~NativeConstrainedWindow() {}
-
-  // Creates a platform-specific implementation of NativeConstrainedWindow.
-  static NativeConstrainedWindow* CreateNativeConstrainedWindow(
-      NativeConstrainedWindowDelegate* delegate);
-
-  virtual views::NativeWidget* AsNativeWidget() = 0;
-};
-
 ///////////////////////////////////////////////////////////////////////////////
 // ConstrainedWindowViews
 //
-//  A ConstrainedWindow implementation that implements a Constrained Window as
-//  a child HWND with a custom window frame. The ConstrainedWindowViews owns
+//  A WebContentsModalDialog implementation that implements the dialog as a
+//  child HWND with a custom window frame. The ConstrainedWindowViews owns
 //  itself and will be deleted soon after being closed.
 //
 class ConstrainedWindowViews : public views::Widget,
-                               public ConstrainedWindow,
-                               public NativeConstrainedWindowDelegate {
+                               public WebContentsModalDialog {
  public:
-  ConstrainedWindowViews(content::WebContents* web_contents,
+  ConstrainedWindowViews(gfx::NativeView parent,
+                         bool off_the_record,
                          views::WidgetDelegate* widget_delegate);
   virtual ~ConstrainedWindowViews();
 
-  // Returns the WebContents that constrains this Constrained Window.
-  content::WebContents* owner() const { return web_contents_; }
-
-  // Overridden from ConstrainedWindow:
-  virtual void ShowConstrainedWindow() OVERRIDE;
-  virtual void CloseConstrainedWindow() OVERRIDE;
-  virtual void FocusConstrainedWindow() OVERRIDE;
+  // Overridden from WebContentsModalDialog:
+  virtual void ShowWebContentsModalDialog() OVERRIDE;
+  virtual void CloseWebContentsModalDialog() OVERRIDE;
+  virtual void FocusWebContentsModalDialog() OVERRIDE;
+  virtual void PulseWebContentsModalDialog() OVERRIDE;
   virtual gfx::NativeWindow GetNativeWindow() OVERRIDE;
 
-  // Default insets for the dialog:
-  static gfx::Insets GetDefaultInsets();
+  // Factory function for the class (temporary).
+  static ConstrainedWindowViews* Create(content::WebContents* web_contents,
+                                        views::WidgetDelegate* widget_delegate);
 
  private:
-  void NotifyTabHelperWillClose();
-
   // Overridden from views::Widget:
   virtual views::NonClientFrameView* CreateNonClientFrameView() OVERRIDE;
 
-  // Overridden from NativeConstrainedWindowDelegate:
-  virtual void OnNativeConstrainedWindowDestroyed() OVERRIDE;
-  virtual void OnNativeConstrainedWindowMouseActivate() OVERRIDE;
-  virtual views::internal::NativeWidgetDelegate*
-      AsNativeWidgetDelegate() OVERRIDE;
-  virtual int GetNonClientComponent(const gfx::Point& point) OVERRIDE;
-
-  content::WebContents* web_contents_;
-
-  NativeConstrainedWindow* native_constrained_window_;
+  bool off_the_record_;
 
   DISALLOW_COPY_AND_ASSIGN(ConstrainedWindowViews);
 };

@@ -19,6 +19,7 @@
 #include "base/utf_string_conversions.h"
 #include "base/win/scoped_co_mem.h"
 #include "base/win/scoped_comptr.h"
+#include "base/win/scoped_propvariant.h"
 #include "chrome/browser/system_monitor/media_storage_util.h"
 #include "chrome/browser/system_monitor/removable_device_constants.h"
 #include "content/public/browser/browser_thread.h"
@@ -282,21 +283,26 @@ bool GetRemovableStorageObjectIds(
     return false;
 
   for (DWORD index = 0; index < num_storage_obj_ids; ++index) {
-    PROPVARIANT object_id = {0};
-    PropVariantInit(&object_id);
-    hr = storage_ids->GetAt(index, &object_id);
-    if (SUCCEEDED(hr) && (object_id.pwszVal != NULL) &&
-        (object_id.vt == VT_LPWSTR)) {
-      storage_object_ids->push_back(object_id.pwszVal);
+    base::win::ScopedPropVariant object_id;
+    hr = storage_ids->GetAt(index, object_id.Receive());
+    if (SUCCEEDED(hr) && object_id.get().vt == VT_LPWSTR &&
+        object_id.get().pwszVal != NULL) {
+      storage_object_ids->push_back(object_id.get().pwszVal);
     }
-    PropVariantClear(&object_id);
   }
   return true;
 }
 
-// Returns true if the portable device is mounted on a volume. |device_name|
-// specifies the name of the device.
-bool IsVolumeMountedPortableDevice(const string16& device_name) {
+// Returns true if the portable device belongs to a mass storage class.
+// |pnp_device_id| specifies the plug and play device id.
+// |device_name| specifies the name of the device.
+bool IsMassStoragePortableDevice(const string16& pnp_device_id,
+                                 const string16& device_name) {
+  // Based on testing, if the pnp device id starts with "\\?\wpdbusenumroot#",
+  // then the attached device belongs to a mass storage class.
+  if (StartsWith(pnp_device_id, L"\\\\?\\wpdbusenumroot#", false))
+    return true;
+
   // If the device is a volume mounted device, |device_name| will be
   // the volume name.
   return ((device_name.length() >= 2) && (device_name[1] == L':') &&
@@ -366,7 +372,7 @@ bool GetDeviceInfoOnBlockingThread(
   DCHECK(!pnp_device_id.empty());
   device_details->name = GetDeviceNameOnBlockingThread(portable_device_manager,
                                                        pnp_device_id);
-  if (IsVolumeMountedPortableDevice(device_details->name))
+  if (IsMassStoragePortableDevice(pnp_device_id, device_details->name))
     return false;
 
   device_details->location = pnp_device_id;
@@ -408,8 +414,7 @@ bool EnumerateAttachedDevicesOnBlockingThread(
   if (FAILED(hr))
     return false;
 
-  scoped_array<char16*> pnp_device_ids(new char16*[pnp_device_count]);
-  ZeroMemory(pnp_device_ids.get(), pnp_device_count);
+  scoped_ptr<char16*[]> pnp_device_ids(new char16*[pnp_device_count]);
   hr = portable_device_mgr->GetDevices(pnp_device_ids.get(), &pnp_device_count);
   if (FAILED(hr))
     return false;
@@ -419,6 +424,7 @@ bool EnumerateAttachedDevicesOnBlockingThread(
     if (GetDeviceInfoOnBlockingThread(
         portable_device_mgr, pnp_device_ids[index], &device_details))
       devices->push_back(device_details);
+    CoTaskMemFree(pnp_device_ids[index]);
   }
   return !devices->empty();
 }
@@ -440,14 +446,6 @@ bool HandleDeviceAttachedEventOnBlockingThread(
   portable_device_mgr->RefreshDeviceList();
   return GetDeviceInfoOnBlockingThread(portable_device_mgr, pnp_device_id,
                                        device_details);
-}
-
-// Constructs and returns a storage path from storage unique identifier.
-string16 GetStoragePathFromStorageId(const std::string& storage_unique_id) {
-  // Construct a dummy device path using the storage name. This is only used
-  // for registering the device media file system.
-  DCHECK(!storage_unique_id.empty());
-  return UTF8ToUTF16("\\\\" + storage_unique_id);
 }
 
 // Registers |hwnd| to receive portable device notification details. On success,
@@ -480,6 +478,7 @@ PortableDeviceWatcherWin::DeviceStorageObject::DeviceStorageObject(
 
 PortableDeviceWatcherWin::PortableDeviceWatcherWin()
     : notifications_(NULL),
+      storage_notifications_(NULL),
       ALLOW_THIS_IN_INITIALIZER_LIST(weak_ptr_factory_(this)) {
 }
 
@@ -507,6 +506,49 @@ void PortableDeviceWatcherWin::OnWindowMessage(UINT event_type, LPARAM data) {
     HandleDeviceAttachEvent(device_id);
   else if (event_type == DBT_DEVICEREMOVECOMPLETE)
     HandleDeviceDetachEvent(device_id);
+}
+
+bool PortableDeviceWatcherWin::GetMTPStorageInfoFromDeviceId(
+    const std::string& storage_device_id,
+    string16* device_location,
+    string16* storage_object_id) const {
+  DCHECK(content::BrowserThread::CurrentlyOn(content::BrowserThread::UI));
+  DCHECK(device_location);
+  DCHECK(storage_object_id);
+  MTPStorageMap::const_iterator storage_map_iter =
+      storage_map_.find(storage_device_id);
+  if (storage_map_iter == storage_map_.end())
+    return false;
+
+  MTPDeviceMap::const_iterator device_iter =
+      device_map_.find(storage_map_iter->second.location);
+  if (device_iter == device_map_.end())
+    return false;
+  const StorageObjects& storage_objects = device_iter->second;
+  for (StorageObjects::const_iterator storage_object_iter =
+       storage_objects.begin(); storage_object_iter != storage_objects.end();
+       ++storage_object_iter) {
+    if (storage_device_id == storage_object_iter->object_persistent_id) {
+      *device_location = storage_map_iter->second.location;
+      *storage_object_id = storage_object_iter->object_temporary_id;
+      return true;
+    }
+  }
+  return false;
+}
+
+// static
+string16 PortableDeviceWatcherWin::GetStoragePathFromStorageId(
+    const std::string& storage_unique_id) {
+  // Construct a dummy device path using the storage name. This is only used
+  // for registering the device media file system.
+  DCHECK(!storage_unique_id.empty());
+  return UTF8ToUTF16("\\\\" + storage_unique_id);
+}
+
+void PortableDeviceWatcherWin::SetNotifications(
+    RemovableStorageNotifications::Receiver* notifications) {
+  storage_notifications_ = notifications;
 }
 
 void PortableDeviceWatcherWin::EnumerateAttachedDevices() {
@@ -558,8 +600,6 @@ void PortableDeviceWatcherWin::OnDidHandleDeviceAttachEvent(
   const string16& name = device_details->name;
   const string16& location = device_details->location;
   DCHECK(!ContainsKey(device_map_, location));
-  base::SystemMonitor* system_monitor = base::SystemMonitor::Get();
-  DCHECK(system_monitor);
   for (StorageObjects::const_iterator storage_iter = storage_objects.begin();
        storage_iter != storage_objects.end(); ++storage_iter) {
     const std::string& storage_id = storage_iter->object_persistent_id;
@@ -575,11 +615,13 @@ void PortableDeviceWatcherWin::OnDidHandleDeviceAttachEvent(
     // partition identifier to the storage name. E.g.: "Nexus 7 (s10001)"
     string16 storage_name(name + L" (" + storage_iter->object_temporary_id +
         L')');
-    storage_map_[storage_id] =
-        base::SystemMonitor::RemovableStorageInfo(storage_id, storage_name,
-                                                  location);
-    system_monitor->ProcessRemovableStorageAttached(
-        storage_id, storage_name, GetStoragePathFromStorageId(storage_id));
+    storage_map_[storage_id] = RemovableStorageNotifications::StorageInfo(
+        storage_id, storage_name, location);
+    if (storage_notifications_) {
+      storage_notifications_->ProcessAttach(
+          storage_id, storage_name,
+          GetStoragePathFromStorageId(storage_id));
+    }
   }
   device_map_[location] = storage_objects;
 }
@@ -591,9 +633,6 @@ void PortableDeviceWatcherWin::HandleDeviceDetachEvent(
   if (device_iter == device_map_.end())
     return;
 
-  base::SystemMonitor* system_monitor = base::SystemMonitor::Get();
-  DCHECK(system_monitor);
-
   const StorageObjects& storage_objects = device_iter->second;
   for (StorageObjects::const_iterator storage_object_iter =
        storage_objects.begin(); storage_object_iter != storage_objects.end();
@@ -601,8 +640,8 @@ void PortableDeviceWatcherWin::HandleDeviceDetachEvent(
     std::string storage_id = storage_object_iter->object_persistent_id;
     MTPStorageMap::iterator storage_map_iter = storage_map_.find(storage_id);
     DCHECK(storage_map_iter != storage_map_.end());
-    system_monitor->ProcessRemovableStorageDetached(
-        storage_map_iter->second.device_id);
+    if (storage_notifications_)
+      storage_notifications_->ProcessDetach(storage_map_iter->second.device_id);
     storage_map_.erase(storage_map_iter);
   }
   device_map_.erase(device_iter);

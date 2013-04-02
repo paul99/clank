@@ -7,35 +7,40 @@
 #include <algorithm>
 #include <string>
 #include <vector>
+
 #include "base/bind.h"
 #include "base/bind_helpers.h"
 #include "base/i18n/time_formatting.h"
 #include "base/memory/scoped_vector.h"
-#include "base/string_number_conversions.h"
+#include "base/prefs/pref_service.h"
+#include "base/strings/string_number_conversions.h"
 #include "base/utf_string_conversions.h"
 #include "base/values.h"
-#include "chrome/browser/prefs/pref_service.h"
+#include "chrome/browser/prefs/pref_registry_syncable.h"
 #include "chrome/browser/prefs/scoped_user_pref_update.h"
 #include "chrome/browser/profiles/profile.h"
 #include "chrome/browser/sessions/session_restore.h"
 #include "chrome/browser/sync/profile_sync_service.h"
 #include "chrome/browser/sync/profile_sync_service_factory.h"
-
-#if !defined(OS_ANDROID)
-#include "chrome/browser/ui/search/other_device_menu_controller.h"
-#endif
-
+#include "chrome/browser/ui/host_desktop.h"
 #include "chrome/browser/ui/webui/ntp/new_tab_ui.h"
 #include "chrome/browser/ui/webui/session_favicon_source.h"
-#include "chrome/browser/ui/webui/web_ui_util.h"
 #include "chrome/common/chrome_notification_types.h"
 #include "chrome/common/pref_names.h"
 #include "chrome/common/time_format.h"
 #include "chrome/common/url_constants.h"
 #include "content/public/browser/notification_service.h"
 #include "content/public/browser/notification_source.h"
+#include "content/public/browser/url_data_source.h"
+#include "content/public/browser/web_contents.h"
+#include "content/public/browser/web_ui.h"
 #include "grit/generated_resources.h"
 #include "ui/base/l10n/l10n_util.h"
+#include "ui/webui/web_ui_util.h"
+
+#if !defined(OS_ANDROID)
+#include "chrome/browser/ui/search/other_device_menu_controller.h"
+#endif
 
 namespace browser_sync {
 
@@ -56,9 +61,9 @@ ForeignSessionHandler::ForeignSessionHandler() {
 }
 
 // static
-void ForeignSessionHandler::RegisterUserPrefs(PrefService* prefs) {
-  prefs->RegisterDictionaryPref(prefs::kNtpCollapsedForeignSessions,
-                                PrefService::UNSYNCABLE_PREF);
+void ForeignSessionHandler::RegisterUserPrefs(PrefRegistrySyncable* registry) {
+  registry->RegisterDictionaryPref(prefs::kNtpCollapsedForeignSessions,
+                                   PrefRegistrySyncable::UNSYNCABLE_PREF);
 }
 
 // static
@@ -109,8 +114,11 @@ void ForeignSessionHandler::OpenForeignSessionWindows(
       window_num == kInvalidId ?
       std::vector<const SessionWindow*>::const_iterator(windows.end()) :
       iter_begin + 1;
+  chrome::HostDesktopType host_desktop_type =
+      chrome::GetHostDesktopTypeForNativeView(
+          web_ui->GetWebContents()->GetNativeView());
   SessionRestore::RestoreForeignSessionWindows(
-      Profile::FromWebUI(web_ui), iter_begin, iter_end);
+      Profile::FromWebUI(web_ui), host_desktop_type, iter_begin, iter_end);
 }
 
 // static
@@ -185,8 +193,7 @@ void ForeignSessionHandler::Init() {
                  content::Source<Profile>(profile));
 
   // Add the data source for synced favicons.
-  ChromeURLDataManager::AddDataSource(profile,
-      new SessionFaviconSource(profile));
+  content::URLDataSource::Add(profile, new SessionFaviconSource(profile));
 }
 
 void ForeignSessionHandler::Observe(
@@ -318,8 +325,7 @@ void ForeignSessionHandler::HandleOpenForeignSession(const ListValue* args) {
   }
 
   if (tab_id != kInvalidId) {
-    WindowOpenDisposition disposition =
-        web_ui_util::GetDispositionFromClick(args, 3);
+    WindowOpenDisposition disposition = webui::GetDispositionFromClick(args, 3);
     OpenForeignSessionTab(
         web_ui(), session_string_value, window_num, tab_id, disposition);
   } else {

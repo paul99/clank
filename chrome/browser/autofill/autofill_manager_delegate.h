@@ -5,6 +5,9 @@
 #ifndef CHROME_BROWSER_AUTOFILL_AUTOFILL_MANAGER_DELEGATE_H_
 #define CHROME_BROWSER_AUTOFILL_AUTOFILL_MANAGER_DELEGATE_H_
 
+#include "base/callback_forward.h"
+#include "ui/gfx/native_widget_types.h"
+
 namespace autofill {
 class PasswordGenerator;
 }
@@ -12,16 +15,22 @@ class PasswordGenerator;
 namespace content {
 class BrowserContext;
 struct PasswordForm;
+struct SSLStatus;
 }
 
 namespace gfx {
 class Rect;
+class RectF;
 }
 
+class FormStructure;
+class GURL;
 class InfoBarService;
 class PrefServiceBase;
 class Profile;
 class ProfileSyncServiceBase;
+
+struct FormData;
 
 namespace autofill {
 
@@ -70,6 +79,27 @@ class AutofillManagerDelegate {
       const gfx::Rect& bounds,
       const content::PasswordForm& form,
       autofill::PasswordGenerator* generator) = 0;
+
+  // Causes the Autocheckout bubble UI to be displayed. |bounding_box| is the
+  // anchor for the bubble. |native_view| is the parent view of the bubble.
+  // |callback| is run if the bubble is accepted.
+  virtual void ShowAutocheckoutBubble(
+      const gfx::RectF& bounding_box,
+      const gfx::NativeView& native_view,
+      const base::Closure& callback) = 0;
+
+  // Causes the dialog for request autocomplete feature to be shown.
+  virtual void ShowRequestAutocompleteDialog(
+      const FormData& form,
+      const GURL& source_url,
+      const content::SSLStatus& ssl_status,
+      const base::Callback<void(const FormStructure*)>& callback) = 0;
+
+  // Called when the dialog for request autocomplete closes.
+  virtual void RequestAutocompleteDialogClosed() = 0;
+
+  // Updates the Autocheckout progress bar. |value| must be in [0.0, 1.0].
+  virtual void UpdateProgressBar(double value) = 0;
 };
 
 }  // namespace autofill

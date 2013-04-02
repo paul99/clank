@@ -8,12 +8,17 @@
 #include "base/basictypes.h"
 #include "base/memory/ref_counted.h"
 #include "base/memory/scoped_ptr.h"
-#include "base/system_monitor/system_monitor.h"
 #include "chrome/browser/system_monitor/removable_storage_notifications.h"
 
+namespace base {
 class FilePath;
+}
 
 namespace chrome {
+
+namespace test {
+class TestRemovableDeviceNotificationsWindowWin;
+}
 
 class PortableDeviceWatcherWin;
 class VolumeMountWatcherWin;
@@ -30,17 +35,19 @@ class RemovableDeviceNotificationsWindowWin
   // Must be called after the file thread is created.
   void Init();
 
-  // Finds the device that contains |path| and populates |device_info|.
-  // Returns false if unable to find the device.
+  // RemovableStorageNotifications:
   virtual bool GetDeviceInfoForPath(
-      const FilePath& path,
-      base::SystemMonitor::RemovableStorageInfo* device_info) const OVERRIDE;
-
+      const base::FilePath& path,
+      StorageInfo* device_info) const OVERRIDE;
   virtual uint64 GetStorageSize(const std::string& location) const OVERRIDE;
+  virtual bool GetMTPStorageInfoFromDeviceId(
+      const std::string& storage_device_id,
+      string16* device_location,
+      string16* storage_object_id) const OVERRIDE;
 
  private:
   class PortableDeviceNotifications;
-  friend class TestRemovableDeviceNotificationsWindowWin;
+  friend class test::TestRemovableDeviceNotificationsWindowWin;
 
   // To support unit tests, this constructor takes |volume_mount_watcher| and
   // |portable_device_watcher| objects. These params are either constructed in
@@ -52,7 +59,7 @@ class RemovableDeviceNotificationsWindowWin
   // Gets the removable storage information given a |device_path|. On success,
   // returns true and fills in |device_location|, |unique_id|, |name| and
   // |removable|.
-  bool GetDeviceInfo(const FilePath& device_path,
+  bool GetDeviceInfo(const base::FilePath& device_path,
                      string16* device_location,
                      std::string* unique_id,
                      string16* name,
@@ -74,7 +81,7 @@ class RemovableDeviceNotificationsWindowWin
   HWND window_;
 
   // The volume mount point watcher, used to manage the mounted devices.
-  scoped_refptr<VolumeMountWatcherWin> volume_mount_watcher_;
+  scoped_ptr<VolumeMountWatcherWin> volume_mount_watcher_;
 
   // The portable device watcher, used to manage media transfer protocol
   // devices.

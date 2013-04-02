@@ -1,7 +1,6 @@
 // Copyright (c) 2012 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
-
 #ifndef CONTENT_SHELL_SHELL_H_
 #define CONTENT_SHELL_SHELL_H_
 
@@ -17,6 +16,7 @@
 #include "content/public/browser/web_contents_delegate.h"
 #include "ipc/ipc_channel.h"
 #include "ui/gfx/native_widget_types.h"
+#include "ui/gfx/size.h"
 
 #if defined(TOOLKIT_GTK)
 #include <gtk/gtk.h>
@@ -26,14 +26,14 @@ typedef struct _GtkToolItem GtkToolItem;
 #elif defined(OS_ANDROID)
 #include "base/android/scoped_java_ref.h"
 #elif defined(USE_AURA)
+#if defined(OS_CHROMEOS)
+namespace content {
+class MinimalAsh;
+}
+#endif
 namespace views {
 class Widget;
 class ViewsDelegate;
-}
-namespace aura {
-namespace client {
-class StackingClient;
-}
 }
 #endif
 
@@ -41,7 +41,8 @@ class GURL;
 namespace content {
 
 class BrowserContext;
-class ShellJavaScriptDialogCreator;
+class ShellDevToolsFrontend;
+class ShellJavaScriptDialogManager;
 class SiteInstance;
 class WebContents;
 
@@ -62,13 +63,13 @@ class Shell : public WebContentsDelegate,
   void CloseDevTools();
 
   // Do one time initialization at application startup.
-  static void PlatformInitialize();
+  static void Initialize();
 
   static Shell* CreateNewWindow(BrowserContext* browser_context,
                                 const GURL& url,
                                 SiteInstance* site_instance,
                                 int routing_id,
-                                WebContents* base_web_contents);
+                                const gfx::Size& initial_size);
 
   // Returns the Shell object corresponding to the given RenderViewHost.
   static Shell* FromRenderViewHost(RenderViewHost* rvh);
@@ -121,7 +122,7 @@ class Shell : public WebContentsDelegate,
                                   WebContents* new_contents) OVERRIDE;
   virtual void DidNavigateMainFramePostCommit(
       WebContents* web_contents) OVERRIDE;
-  virtual JavaScriptDialogCreator* GetJavaScriptDialogCreator() OVERRIDE;
+  virtual JavaScriptDialogManager* GetJavaScriptDialogManager() OVERRIDE;
 #if defined(OS_MACOSX)
   virtual void HandleKeyboardEvent(
       WebContents* source,
@@ -145,6 +146,9 @@ class Shell : public WebContentsDelegate,
 
   // Helper to create a new Shell given a newly created WebContents.
   static Shell* CreateShell(WebContents* web_contents);
+
+  // Helper for one time initialization of application
+  static void PlatformInitialize(const gfx::Size& default_window_size);
 
   // All the methods that begin with Platform need to be implemented by the
   // platform specific Shell implementation.
@@ -203,11 +207,11 @@ class Shell : public WebContentsDelegate,
                      GObject*, guint, GdkModifierType);
 #endif
 
-  scoped_ptr<ShellJavaScriptDialogCreator> dialog_creator_;
+  scoped_ptr<ShellJavaScriptDialogManager> dialog_manager_;
 
   scoped_ptr<WebContents> web_contents_;
 
-  Shell* dev_tools_;
+  ShellDevToolsFrontend* devtools_frontend_;
 
   bool is_fullscreen_;
 
@@ -236,11 +240,15 @@ class Shell : public WebContentsDelegate,
 #elif defined(OS_ANDROID)
   base::android::ScopedJavaGlobalRef<jobject> java_object_;
 #elif defined(USE_AURA)
-  static aura::client::StackingClient* stacking_client_;
+#if defined(OS_CHROMEOS)
+  static content::MinimalAsh* minimal_ash_;
+#endif
   static views::ViewsDelegate* views_delegate_;
 
   views::Widget* window_widget_;
 #endif
+
+  bool headless_;
 
   // A container of all the open windows. We use a vector so we can keep track
   // of ordering.

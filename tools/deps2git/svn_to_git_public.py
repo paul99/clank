@@ -46,6 +46,12 @@ def SvnUrlToGitUrl(path, svn_url):
   if svn_url == '/trunk/deps/frame_rate/content':
     return (path, GIT_HOST + 'chromium/frame_rate/content.git')
 
+  if svn_url == 'svn://svn.chromium.org/boto':
+    return (path, GIT_HOST + 'external/boto.git')
+
+  if svn_url == 'svn://svn.chromium.org/gsutil/trunk/src':
+    return (path, GIT_HOST + 'external/gsutil/src.git')
+
   if svn_url == 'svn://svn.chromium.org/jsoncpp/trunk/jsoncpp':
     return (path, GIT_HOST + 'external/jsoncpp/jsoncpp.git')
 

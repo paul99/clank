@@ -7,18 +7,19 @@
 #include <algorithm>
 
 #include "base/utf_string_conversions.h"
+#include "chrome/app/chrome_command_ids.h"
 #include "chrome/browser/browser_process.h"
 #include "chrome/browser/profiles/avatar_menu_model.h"
 #include "chrome/browser/profiles/profile_info_cache.h"
 #include "chrome/browser/profiles/profile_info_util.h"
 #include "chrome/browser/profiles/profile_manager.h"
 #include "chrome/browser/ui/browser.h"
+#include "chrome/browser/ui/browser_commands.h"
 #include "grit/generated_resources.h"
 #include "grit/theme_resources.h"
 #include "ui/base/l10n/l10n_util.h"
 #include "ui/base/resource/resource_bundle.h"
 #include "ui/gfx/canvas.h"
-#include "ui/gfx/font.h"
 #include "ui/gfx/image/canvas_image_source.h"
 #include "ui/gfx/image/image.h"
 #include "ui/views/controls/button/custom_button.h"
@@ -27,6 +28,7 @@
 #include "ui/views/controls/label.h"
 #include "ui/views/controls/link.h"
 #include "ui/views/controls/separator.h"
+#include "ui/views/widget/widget.h"
 
 namespace {
 
@@ -69,10 +71,10 @@ class BadgeImageSource: public gfx::CanvasImageSource {
                    const gfx::Size& icon_size,
                    const gfx::ImageSkia& badge);
 
-  ~BadgeImageSource();
+  virtual ~BadgeImageSource();
 
   // Overridden from CanvasImageSource:
-  void Draw(gfx::Canvas* canvas) OVERRIDE;
+  virtual void Draw(gfx::Canvas* canvas) OVERRIDE;
 
  private:
   gfx::Size ComputeSize(const gfx::ImageSkia& icon,
@@ -245,20 +247,18 @@ ProfileItemView::ProfileItemView(const AvatarMenuModel::Item& item,
 
   // Add a label to show the profile name.
   ui::ResourceBundle& rb = ui::ResourceBundle::GetSharedInstance();
-  const gfx::Font base_font = rb.GetFont(ui::ResourceBundle::BaseFont);
-  const int style = item_.active ? gfx::Font::BOLD : 0;
-  const int kNameFontDelta = 1;
   name_label_ = new views::Label(item_.name,
-                                 base_font.DeriveFont(kNameFontDelta, style));
+                                 rb.GetFont(item_.active ?
+                                            ui::ResourceBundle::BoldFont :
+                                            ui::ResourceBundle::BaseFont));
   name_label_->SetHorizontalAlignment(gfx::ALIGN_LEFT);
   AddChildView(name_label_);
 
   // Add a label to show the sync state.
-  const int kStateFontDelta = -1;
   sync_state_label_ = new views::Label(item_.sync_state);
   if (item_.signed_in)
     sync_state_label_->SetElideBehavior(views::Label::ELIDE_AS_EMAIL);
-  sync_state_label_->SetFont(base_font.DeriveFont(kStateFontDelta));
+  sync_state_label_->SetFont(rb.GetFont(ui::ResourceBundle::SmallFont));
   sync_state_label_->SetHorizontalAlignment(gfx::ALIGN_LEFT);
   sync_state_label_->SetEnabled(false);
   AddChildView(sync_state_label_);
@@ -387,6 +387,38 @@ bool ProfileItemView::IsHighlighted() {
 
 // AvatarMenuBubbleView -------------------------------------------------------
 
+// static
+AvatarMenuBubbleView* AvatarMenuBubbleView::avatar_bubble_ = NULL;
+
+// static
+void AvatarMenuBubbleView::ShowBubble(
+    views::View* anchor_view,
+    views::BubbleBorder::ArrowLocation arrow_location,
+    views::BubbleBorder::BubbleAlignment border_alignment,
+    const gfx::Rect& anchor_rect,
+    Browser* browser) {
+  if (IsShowing())
+    return;
+
+  DCHECK(chrome::IsCommandEnabled(browser, IDC_SHOW_AVATAR_MENU));
+  avatar_bubble_ = new AvatarMenuBubbleView(
+      anchor_view, arrow_location, anchor_rect, browser);
+  views::BubbleDelegateView::CreateBubble(avatar_bubble_);
+  avatar_bubble_->SetAlignment(border_alignment);
+  avatar_bubble_->Show();
+}
+
+// static
+bool AvatarMenuBubbleView::IsShowing() {
+  return avatar_bubble_ != NULL;
+}
+
+// static
+void AvatarMenuBubbleView::Hide() {
+  if (IsShowing())
+    avatar_bubble_->GetWidget()->Close();
+}
+
 AvatarMenuBubbleView::AvatarMenuBubbleView(
     views::View* anchor_view,
     views::BubbleBorder::ArrowLocation arrow_location,
@@ -487,7 +519,7 @@ void AvatarMenuBubbleView::ButtonPressed(views::Button* sender,
       // Clicking on the active profile shouldn't do anything.
       if (!item_view->item().active) {
         avatar_menu_model_->SwitchToProfile(
-            i, chrome::DispositionFromEventFlags(event.flags()) == NEW_WINDOW);
+            i, ui::DispositionFromEventFlags(event.flags()) == NEW_WINDOW);
       }
       break;
     }
@@ -496,7 +528,7 @@ void AvatarMenuBubbleView::ButtonPressed(views::Button* sender,
 
 void AvatarMenuBubbleView::LinkClicked(views::Link* source, int event_flags) {
   if (source == add_profile_link_) {
-    avatar_menu_model_->AddNewProfile();
+    avatar_menu_model_->AddNewProfile(ProfileMetrics::ADD_NEW_USER_ICON);
     return;
   }
 
@@ -518,6 +550,11 @@ void AvatarMenuBubbleView::Init() {
   OnAvatarMenuModelChanged(avatar_menu_model_.get());
   AddAccelerator(ui::Accelerator(ui::VKEY_DOWN, ui::EF_NONE));
   AddAccelerator(ui::Accelerator(ui::VKEY_UP, ui::EF_NONE));
+}
+
+void AvatarMenuBubbleView::WindowClosing() {
+  DCHECK_EQ(avatar_bubble_, this);
+  avatar_bubble_ = NULL;
 }
 
 void AvatarMenuBubbleView::OnAvatarMenuModelChanged(

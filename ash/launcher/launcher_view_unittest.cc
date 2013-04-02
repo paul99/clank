@@ -14,13 +14,16 @@
 #include "ash/launcher/launcher_tooltip_manager.h"
 #include "ash/root_window_controller.h"
 #include "ash/shell.h"
+#include "ash/shell_window_ids.h"
 #include "ash/test/ash_test_base.h"
 #include "ash/test/launcher_view_test_api.h"
+#include "ash/test/shell_test_api.h"
 #include "ash/test/test_launcher_delegate.h"
 #include "base/basictypes.h"
 #include "base/compiler_specific.h"
 #include "base/memory/scoped_ptr.h"
 #include "grit/ash_resources.h"
+#include "ui/aura/root_window.h"
 #include "ui/aura/test/aura_test_base.h"
 #include "ui/aura/window.h"
 #include "ui/base/events/event.h"
@@ -94,6 +97,10 @@ class LauncherViewIconObserverTest : public ash::test::AshTestBase {
     return launcher_view_test_.get();
   }
 
+  Launcher* LauncherForSecondaryDisplay() {
+    return Launcher::ForWindow(Shell::GetAllRootWindows()[1]);
+  }
+
  private:
   scoped_ptr<TestLauncherIconObserver> observer_;
   scoped_ptr<LauncherViewTestAPI> launcher_view_test_;
@@ -109,6 +116,7 @@ TEST_F(LauncherViewIconObserverTest, AddRemove) {
   views::Widget::InitParams params(views::Widget::InitParams::TYPE_WINDOW);
   params.ownership = views::Widget::InitParams::WIDGET_OWNS_NATIVE_WIDGET;
   params.bounds = gfx::Rect(0, 0, 200, 200);
+  params.context = CurrentContext();
 
   scoped_ptr<views::Widget> widget(new views::Widget());
   widget->Init(params);
@@ -122,6 +130,39 @@ TEST_F(LauncherViewIconObserverTest, AddRemove) {
   launcher_view_test()->RunMessageLoopUntilAnimationsDone();
   EXPECT_TRUE(observer()->change_notified());
   observer()->Reset();
+}
+
+// Make sure creating/deleting an window on one displays notifies a
+// launcher on external display as well as one on primary.
+TEST_F(LauncherViewIconObserverTest, AddRemoveWithMultipleDisplays) {
+  UpdateDisplay("400x400,400x400");
+  TestLauncherIconObserver second_observer(LauncherForSecondaryDisplay());
+
+  ash::test::TestLauncherDelegate* launcher_delegate =
+      ash::test::TestLauncherDelegate::instance();
+  ASSERT_TRUE(launcher_delegate);
+
+  views::Widget::InitParams params(views::Widget::InitParams::TYPE_WINDOW);
+  params.ownership = views::Widget::InitParams::WIDGET_OWNS_NATIVE_WIDGET;
+  params.bounds = gfx::Rect(0, 0, 200, 200);
+  params.context = CurrentContext();
+
+  scoped_ptr<views::Widget> widget(new views::Widget());
+  widget->Init(params);
+  launcher_delegate->AddLauncherItem(widget->GetNativeWindow());
+  launcher_view_test()->RunMessageLoopUntilAnimationsDone();
+  EXPECT_TRUE(observer()->change_notified());
+  EXPECT_TRUE(second_observer.change_notified());
+  observer()->Reset();
+  second_observer.Reset();
+
+  widget->GetNativeWindow()->parent()->RemoveChild(widget->GetNativeWindow());
+  launcher_view_test()->RunMessageLoopUntilAnimationsDone();
+  EXPECT_TRUE(observer()->change_notified());
+  EXPECT_TRUE(second_observer.change_notified());
+
+  observer()->Reset();
+  second_observer.Reset();
 }
 
 TEST_F(LauncherViewIconObserverTest, BoundsChanged) {
@@ -139,59 +180,27 @@ TEST_F(LauncherViewIconObserverTest, BoundsChanged) {
 ////////////////////////////////////////////////////////////////////////////////
 // LauncherView tests.
 
-class MockLauncherDelegate : public ash::LauncherDelegate {
- public:
-  MockLauncherDelegate() {}
-  virtual ~MockLauncherDelegate() {}
-
-  // LauncherDelegate overrides:
-  virtual void OnBrowserShortcutClicked(int event_flags) OVERRIDE {}
-  virtual void ItemClicked(const ash::LauncherItem& item,
-                           int event_flags) OVERRIDE {}
-  virtual int GetBrowserShortcutResourceId() OVERRIDE {
-    return IDR_AURA_LAUNCHER_BROWSER_SHORTCUT;
-  }
-  virtual string16 GetTitle(const ash::LauncherItem& item) OVERRIDE {
-    return string16();
-  }
-  virtual ui::MenuModel* CreateContextMenu(
-      const ash::LauncherItem& item,
-      aura::RootWindow* root_window) OVERRIDE {
-    return NULL;
-  }
-  virtual ash::LauncherID GetIDByWindow(aura::Window* window) OVERRIDE {
-    NOTREACHED();
-    return -1;
-  }
-  virtual bool IsDraggable(const ash::LauncherItem& item) OVERRIDE {
-    return true;
-  }
-};
-
 class LauncherViewTest : public AshTestBase {
  public:
-  LauncherViewTest() {}
+  LauncherViewTest() : model_(NULL), launcher_view_(NULL) {}
   virtual ~LauncherViewTest() {}
 
   virtual void SetUp() OVERRIDE {
     AshTestBase::SetUp();
+    test::ShellTestApi test_api(Shell::GetInstance());
+    model_ = test_api.launcher_model();
+    Launcher* launcher = Launcher::ForPrimaryDisplay();
+    launcher_view_ = launcher->GetLauncherViewForTest();
 
-    model_.reset(new LauncherModel);
-
-    launcher_view_.reset(new internal::LauncherView(
-        model_.get(),
-        &delegate_,
-        Shell::GetPrimaryRootWindowController()->shelf()));
-    launcher_view_->Init();
     // The bounds should be big enough for 4 buttons + overflow chevron.
     launcher_view_->SetBounds(0, 0, 500, 50);
 
-    test_api_.reset(new LauncherViewTestAPI(launcher_view_.get()));
+    test_api_.reset(new LauncherViewTestAPI(launcher_view_));
     test_api_->SetAnimationDuration(1);  // Speeds up animation for test.
   }
 
   virtual void TearDown() OVERRIDE {
-    launcher_view_.reset();
+    test_api_.reset();
     AshTestBase::TearDown();
   }
 
@@ -289,7 +298,7 @@ class LauncherViewTest : public AshTestBase {
                             int button_index,
                             int destination_index) {
     // Add kExpectedAppIndex to each button index to allow default icons.
-    internal::LauncherButtonHost* button_host = launcher_view_.get();
+    internal::LauncherButtonHost* button_host = launcher_view_;
 
     // Mouse down.
     views::View* button =
@@ -335,9 +344,9 @@ class LauncherViewTest : public AshTestBase {
     launcher_view_->tooltip_manager()->ShowInternal();
   }
 
-  MockLauncherDelegate delegate_;
-  scoped_ptr<LauncherModel> model_;
-  scoped_ptr<internal::LauncherView> launcher_view_;
+  LauncherModel* model_;
+  internal::LauncherView* launcher_view_;
+
   scoped_ptr<LauncherViewTestAPI> test_api_;
 
  private:
@@ -423,7 +432,9 @@ TEST_F(LauncherViewTest, AddPanelHidesTabbedBrowser) {
   EXPECT_TRUE(GetButtonByID(last_visible)->visible());
 }
 
-TEST_F(LauncherViewTest, PanelsHideLast) {
+// When there are more panels then browsers we should hide panels rather
+// than browsers.
+TEST_F(LauncherViewTest, BrowserHidesExcessPanels) {
   ASSERT_EQ(test_api_->GetLastVisibleIndex() + 1,
             test_api_->GetButtonCount());
 
@@ -434,6 +445,7 @@ TEST_F(LauncherViewTest, PanelsHideLast) {
   EXPECT_TRUE(GetButtonByID(browser)->visible());
   EXPECT_TRUE(GetButtonByID(first_panel)->visible());
 
+  // Add panels until there is an overflow.
   LauncherID last_panel = first_panel;
   int items_added = 0;
   while (!test_api_->IsOverflowButtonVisible()) {
@@ -442,8 +454,21 @@ TEST_F(LauncherViewTest, PanelsHideLast) {
     ASSERT_LT(items_added, 10000);
   }
 
+  // The first panel should now be hidden by the new browsers needing space.
+  EXPECT_FALSE(GetButtonByID(first_panel)->visible());
   EXPECT_TRUE(GetButtonByID(last_panel)->visible());
-  EXPECT_TRUE(GetButtonByID(first_panel)->visible());
+  EXPECT_TRUE(GetButtonByID(browser)->visible());
+
+  // Adding browsers should eventually begin to hide browsers. We will add
+  // browsers until either the last panel or browser is hidden.
+  items_added = 0;
+  while (GetButtonByID(browser)->visible() &&
+         GetButtonByID(last_panel)->visible()) {
+    browser = AddTabbedBrowser();
+    ++items_added;
+    ASSERT_LT(items_added, 10000);
+  }
+  EXPECT_TRUE(GetButtonByID(last_panel)->visible());
   EXPECT_FALSE(GetButtonByID(browser)->visible());
 }
 
@@ -532,7 +557,7 @@ TEST_F(LauncherViewTest, AddButtonQuickly) {
 // Check that model changes are handled correctly while a launcher icon is being
 // dragged.
 TEST_F(LauncherViewTest, ModelChangesWhileDragging) {
-  internal::LauncherButtonHost* button_host = launcher_view_.get();
+  internal::LauncherButtonHost* button_host = launcher_view_;
 
   std::vector<std::pair<LauncherID, views::View*> > id_map;
   SetupForDragTest(&id_map);
@@ -576,7 +601,7 @@ TEST_F(LauncherViewTest, ModelChangesWhileDragging) {
 
 // Check that 2nd drag from the other pointer would be ignored.
 TEST_F(LauncherViewTest, SimultaneousDrag) {
-  internal::LauncherButtonHost* button_host = launcher_view_.get();
+  internal::LauncherButtonHost* button_host = launcher_view_;
 
   std::vector<std::pair<LauncherID, views::View*> > id_map;
   SetupForDragTest(&id_map);
@@ -672,7 +697,7 @@ TEST_F(LauncherViewTest, LauncherTooltipTest) {
   internal::LauncherButton* app_button = GetButtonByID(app_button_id);
   internal::LauncherButton* tab_button = GetButtonByID(tab_button_id);
 
-  internal::LauncherButtonHost* button_host = launcher_view_.get();
+  internal::LauncherButtonHost* button_host = launcher_view_;
   internal::LauncherTooltipManager* tooltip_manager =
       launcher_view_->tooltip_manager();
 

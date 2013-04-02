@@ -7,8 +7,8 @@
 #include "chrome/browser/chromeos/drive/drive.pb.h"
 #include "chrome/browser/chromeos/drive/drive_cache.h"
 #include "chrome/browser/chromeos/drive/drive_file_system_util.h"
+#include "chrome/browser/chromeos/drive/drive_scheduler.h"
 #include "chrome/browser/chromeos/drive/file_system/operation_observer.h"
-#include "chrome/browser/google_apis/drive_service_interface.h"
 #include "content/public/browser/browser_thread.h"
 
 using content::BrowserThread;
@@ -23,22 +23,24 @@ void EmptyFileOperationCallback(DriveFileError error) {}
 }  // namespace
 
 RemoveOperation::RemoveOperation(
-    google_apis::DriveServiceInterface* drive_service,
+    DriveScheduler* drive_scheduler,
     DriveCache* cache,
     DriveResourceMetadata* metadata,
     OperationObserver* observer)
-  : drive_service_(drive_service),
+  : drive_scheduler_(drive_scheduler),
     cache_(cache),
     metadata_(metadata),
     observer_(observer),
     weak_ptr_factory_(ALLOW_THIS_IN_INITIALIZER_LIST(this)) {
+  DCHECK(BrowserThread::CurrentlyOn(BrowserThread::UI));
 }
 
 RemoveOperation::~RemoveOperation() {
+  DCHECK(BrowserThread::CurrentlyOn(BrowserThread::UI));
 }
 
 void RemoveOperation::Remove(
-    const FilePath& file_path,
+    const base::FilePath& file_path,
     bool is_recursive,
     const FileOperationCallback& callback) {
   DCHECK(BrowserThread::CurrentlyOn(BrowserThread::UI));
@@ -66,15 +68,8 @@ void RemoveOperation::RemoveAfterGetEntryInfo(
   }
   DCHECK(entry_proto.get());
 
-  // The edit URL can be empty for non-editable files (such as files shared with
-  // read-only privilege).
-  if (entry_proto->edit_url().empty()) {
-    callback.Run(DRIVE_FILE_ERROR_ACCESS_DENIED);
-    return;
-  }
-
-  drive_service_->DeleteResource(
-      GURL(entry_proto->edit_url()),
+  drive_scheduler_->DeleteResource(
+      entry_proto->resource_id(),
       base::Bind(&RemoveOperation::RemoveResourceLocally,
                  weak_ptr_factory_.GetWeakPtr(),
                  callback,
@@ -106,7 +101,7 @@ void RemoveOperation::RemoveResourceLocally(
 void RemoveOperation::NotifyDirectoryChanged(
     const FileOperationCallback& callback,
     DriveFileError error,
-    const FilePath& directory_path) {
+    const base::FilePath& directory_path) {
   DCHECK(BrowserThread::CurrentlyOn(BrowserThread::UI));
   DCHECK(!callback.is_null());
 

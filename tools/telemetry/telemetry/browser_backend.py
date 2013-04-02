@@ -7,119 +7,28 @@ import httplib
 import socket
 import json
 import re
-import weakref
+import sys
 
 from telemetry import browser_gone_exception
-from telemetry import tab
+from telemetry import options_for_unittests
+from telemetry import tab_list_backend
 from telemetry import tracing_backend
 from telemetry import user_agent
 from telemetry import util
 from telemetry import wpr_modes
 from telemetry import wpr_server
 
-
-class BrowserConnectionGoneException(
-    browser_gone_exception.BrowserGoneException):
-  pass
-
-
-class TabController(object):
-  def __init__(self, browser, browser_backend):
-    self._browser = browser
-    self._browser_backend = browser_backend
-
-    # Stores web socket debugger URLs in iteration order.
-    self._tab_list = []
-    # Maps debugger URLs to Tab objects.
-    self._tab_dict = weakref.WeakValueDictionary()
-
-    self._UpdateTabList()
-
-  def New(self, timeout=None):
-    self._browser_backend.Request('new', timeout=timeout)
-    return self[-1]
-
-  def DoesDebuggerUrlExist(self, url):
-    self._UpdateTabList()
-    return url in self._tab_list
-
-  def CloseTab(self, debugger_url, timeout=None):
-    # TODO(dtu): crbug.com/160946, allow closing the last tab on some platforms.
-    # For now, just create a new tab before closing the last tab.
-    if len(self) <= 1:
-      self.New()
-
-    tab_id = debugger_url.split('/')[-1]
-    try:
-      response = self._browser_backend.Request('close/%s' % tab_id,
-                                               timeout=timeout)
-    except urllib2.HTTPError:
-      raise Exception('Unable to close tab, tab id not found: %s' % tab_id)
-    assert response == 'Target is closing'
-
-    util.WaitFor(lambda: not self._FindTabInfo(debugger_url), timeout=5)
-    self._UpdateTabList()
-
-  def GetTabUrl(self, debugger_url):
-    tab_info = self._FindTabInfo(debugger_url)
-    assert tab_info is not None
-    return tab_info['url']
-
-  def __iter__(self):
-    self._UpdateTabList()
-    return self._tab_list.__iter__()
-
-  def __len__(self):
-    self._UpdateTabList()
-    return len(self._tab_list)
-
-  def __getitem__(self, index):
-    self._UpdateTabList()
-    # This dereference will propagate IndexErrors.
-    debugger_url = self._tab_list[index]
-    # Lazily get/create a Tab object.
-    tab_object = self._tab_dict.get(debugger_url)
-    if not tab_object:
-      tab_object = tab.Tab(self._browser, self, debugger_url)
-      self._tab_dict[debugger_url] = tab_object
-    return tab_object
-
-  def _ListTabs(self, timeout=None):
-    try:
-      data = self._browser_backend.Request('', timeout=timeout)
-      all_contexts = json.loads(data)
-      tabs = [ctx for ctx in all_contexts
-              if not ctx['url'].startswith('chrome-extension://')]
-      return tabs
-    except (socket.error, httplib.BadStatusLine, urllib2.URLError):
-      if not self._browser_backend.IsBrowserRunning():
-        raise browser_gone_exception.BrowserGoneException()
-      raise BrowserConnectionGoneException()
-
-  def _UpdateTabList(self):
-    def GetDebuggerUrl(tab_info):
-      if 'webSocketDebuggerUrl' not in tab_info:
-        return None
-      return tab_info['webSocketDebuggerUrl']
-    new_tab_list = map(GetDebuggerUrl, self._ListTabs())
-    self._tab_list = [t for t in self._tab_list if t in new_tab_list]
-    self._tab_list += [t for t in new_tab_list if t not in self._tab_list]
-
-  def _FindTabInfo(self, debugger_url):
-    for tab_info in self._ListTabs():
-      if tab_info.get('webSocketDebuggerUrl') == debugger_url:
-        return tab_info
-    return None
-
-
 class BrowserBackend(object):
   """A base class for browser backends. Provides basic functionality
   once a remote-debugger port has been established."""
+
+  WEBPAGEREPLAY_HOST = '127.0.0.1'
+
   def __init__(self, is_content_shell, options):
-    self.tabs = None
     self.browser_type = options.browser_type
     self.is_content_shell = is_content_shell
     self.options = options
+    self._browser = None
     self._port = None
 
     self._inspector_protocol_version = 0
@@ -127,8 +36,29 @@ class BrowserBackend(object):
     self._webkit_base_revision = 0
     self._tracing_backend = None
 
+    self.webpagereplay_local_http_port = util.GetAvailableLocalPort()
+    self.webpagereplay_local_https_port = util.GetAvailableLocalPort()
+    self.webpagereplay_remote_http_port = self.webpagereplay_local_http_port
+    self.webpagereplay_remote_https_port = self.webpagereplay_local_https_port
+
+    if options.dont_override_profile and not options_for_unittests.AreSet():
+      sys.stderr.write('Warning: Not overriding profile. This can cause '
+                       'unexpected effects due to profile-specific settings, '
+                       'such as about:flags settings, cookies, and '
+                       'extensions.\n')
+    self._tab_list_backend = tab_list_backend.TabListBackend(self)
+
   def SetBrowser(self, browser):
-    self.tabs = TabController(browser, self)
+    self._browser = browser
+    self._tab_list_backend.Init()
+
+  @property
+  def browser(self):
+    return self._browser
+
+  @property
+  def tab_list_backend(self):
+    return self._tab_list_backend
 
   def GetBrowserStartupArgs(self):
     args = []
@@ -137,7 +67,10 @@ class BrowserBackend(object):
     args.append('--metrics-recording-only')
     args.append('--no-first-run')
     if self.options.wpr_mode != wpr_modes.WPR_OFF:
-      args.extend(wpr_server.CHROME_FLAGS)
+      args.extend(wpr_server.GetChromeFlags(
+          self.WEBPAGEREPLAY_HOST,
+          self.webpagereplay_remote_http_port,
+          self.webpagereplay_remote_https_port))
     args.extend(user_agent.GetChromeUserAgentArgumentFromType(
         self.options.browser_user_agent_type))
     return args
@@ -165,12 +98,25 @@ class BrowserBackend(object):
     resp = json.loads(data)
     if 'Protocol-Version' in resp:
       self._inspector_protocol_version = resp['Protocol-Version']
-      mU = re.search('Chrome/\d+\.\d+\.(\d+)\.\d+ Safari', resp['User-Agent'])
-      mW = re.search('\((trunk)?\@(\d+)\)', resp['WebKit-Version'])
-      if mU:
-        self._chrome_branch_number = int(mU.group(1))
-      if mW:
-        self._webkit_base_revision = int(mW.group(2))
+      if 'Browser' in resp:
+        branch_number_match = re.search('Chrome/\d+\.\d+\.(\d+)\.\d+',
+                                        resp['Browser'])
+      else:
+        branch_number_match = re.search(
+            'Chrome/\d+\.\d+\.(\d+)\.\d+ (Mobile )?Safari',
+            resp['User-Agent'])
+      webkit_version_match = re.search('\((trunk)?\@(\d+)\)',
+                                       resp['WebKit-Version'])
+
+      if branch_number_match:
+        self._chrome_branch_number = int(branch_number_match.group(1))
+      else:
+        # Content Shell returns '' for Browser, for now we have to
+        # fall-back and assume branch 1025.
+        self._chrome_branch_number = 1025
+
+      if webkit_version_match:
+        self._webkit_base_revision = int(webkit_version_match.group(2))
       return
 
     # Detection has failed: assume 18.0.1025.168 ~= Chrome Android.
@@ -186,27 +132,37 @@ class BrowserBackend(object):
     return req.read()
 
   @property
+  def chrome_branch_number(self):
+    return self._chrome_branch_number
+
+  @property
   def supports_tab_control(self):
     return self._chrome_branch_number >= 1303
 
   @property
   def supports_tracing(self):
-    return True
+    return self.is_content_shell or self._chrome_branch_number >= 1385
 
   def StartTracing(self):
-    self._tracing_backend = tracing_backend.TracingBackend(self._port)
+    if self._tracing_backend is None:
+      self._tracing_backend = tracing_backend.TracingBackend(self._port)
     self._tracing_backend.BeginTracing()
 
   def StopTracing(self):
-    self._tracing_backend.EndTracingAsync()
+    self._tracing_backend.EndTracing()
 
-  def GetTrace(self):
-    def IsTracingRunning(self):
-      return not self._tracing_backend.HasCompleted()
-    util.WaitFor(lambda: not IsTracingRunning(self), 10)
-    return self._tracing_backend.GetTraceAndReset()
+  def GetTraceResultAndReset(self):
+    return self._tracing_backend.GetTraceResultAndReset()
 
-  def CreateForwarder(self, host_port):
+  def GetRemotePort(self, _):
+    return util.GetAvailableLocalPort()
+
+  def Close(self):
+    if self._tracing_backend:
+      self._tracing_backend.Close()
+      self._tracing_backend = None
+
+  def CreateForwarder(self, *port_pairs):
     raise NotImplementedError()
 
   def IsBrowserRunning(self):

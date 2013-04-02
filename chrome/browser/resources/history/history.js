@@ -12,12 +12,6 @@
 // measured in milliseconds.
 /** @const */ var BROWSING_GAP_TIME = 15 * 60 * 1000;
 
-function createElementWithClassName(type, className) {
-  var elm = document.createElement(type);
-  elm.className = className;
-  return elm;
-}
-
 // TODO(glen): Get rid of these global references, replace with a controller
 //     or just make the classes own more of the page.
 var historyModel;
@@ -42,7 +36,7 @@ MenuButton.createDropDownArrows();
  * @param {boolean} continued Whether this visit is on the same day as the
  *     visit before it.
  * @param {HistoryModel} model The model object this entry belongs to.
- * @param {Number} id The identifier for the entry.
+ * @param {number} id The identifier for the entry.
  * @constructor
  */
 function Visit(result, continued, model, id) {
@@ -53,9 +47,11 @@ function Visit(result, continued, model, id) {
   this.snippet_ = result.snippet || '';
   this.id_ = id;
 
-  this.changed = false;
+  this.isRendered = false;  // Has the visit already been rendered on the page?
 
-  this.isRendered = false;
+  // Holds the timestamps of duplicates of this visit (visits to the same URL on
+  // the same day).
+  this.duplicateTimestamps_ = [];
 
   // All the date information is public so that owners can compare properties of
   // two items easily.
@@ -75,12 +71,27 @@ function Visit(result, continued, model, id) {
 // Visit, public: -------------------------------------------------------------
 
 /**
+ * Records the timestamp of another visit to the same URL as this visit.
+ * @param {Number} timestamp The timestamp to add.
+ */
+Visit.prototype.addDuplicateTimestamp = function(timestamp) {
+  this.duplicateTimestamps_.push(timestamp);
+};
+
+/**
  * Returns a dom structure for a browse page result or a search page result.
- * @param {boolean} searchResultFlag Indicates whether the result is a search
- *     result or not.
+ * @param {Object} propertyBag A bag of configuration properties, false by
+ * default:
+ *  - isSearchResult: Whether or not the result is a search result.
+ *  - addTitleFavicon: Whether or not the favicon should be added.
+ *  - useMonthDate: Whether or not the full date should be inserted (used for
+ * monthly view).
  * @return {Node} A DOM node to represent the history entry or search result.
  */
-Visit.prototype.getResultDOM = function(searchResultFlag) {
+Visit.prototype.getResultDOM = function(propertyBag) {
+  var isSearchResult = propertyBag.isSearchResult || false;
+  var addTitleFavicon = propertyBag.addTitleFavicon || false;
+  var useMonthDate = propertyBag.useMonthDate || false;
   var node = createElementWithClassName('li', 'entry');
   var time = createElementWithClassName('div', 'time');
   var entryBox = createElementWithClassName('label', 'entry-box');
@@ -119,9 +130,9 @@ Visit.prototype.getResultDOM = function(searchResultFlag) {
   // Prevent clicks on the drop down from affecting the checkbox.
   dropDown.addEventListener('click', function(e) { e.preventDefault(); });
 
-  // We use a wrapper div so that the entry contents will be shinkwrapped.
+  // We use a wrapper div so that the entry contents will be shrinkwrapped.
   entryBox.appendChild(time);
-  entryBox.appendChild(this.getTitleDOM_());
+  entryBox.appendChild(this.getTitleDOM_(addTitleFavicon));
   entryBox.appendChild(domain);
   entryBox.appendChild(dropDown);
 
@@ -135,13 +146,16 @@ Visit.prototype.getResultDOM = function(searchResultFlag) {
 
   node.appendChild(entryBox);
 
-  if (searchResultFlag) {
+  if (isSearchResult) {
     time.appendChild(document.createTextNode(this.dateShort));
     var snippet = createElementWithClassName('div', 'snippet');
     this.addHighlightedText_(snippet,
                              this.snippet_,
                              this.model_.getSearchText());
     node.appendChild(snippet);
+  } else if (useMonthDate) {
+    // Show the day instead of the time.
+    time.appendChild(document.createTextNode(this.dateShort));
   } else {
     time.appendChild(document.createTextNode(this.dateTimeOfDay));
   }
@@ -161,7 +175,8 @@ Visit.prototype.getResultDOM = function(searchResultFlag) {
  * @private
  */
 Visit.prototype.getDomainFromURL_ = function(url) {
-  var domain = url.replace(/^.+:\/\//, '').match(/[^/]+/);
+  // TODO(sergiu): Extract the domain from the C++ side and send it here.
+  var domain = url.replace(/^.+?:\/\//, '').match(/[^/]+/);
   return domain ? domain[0] : '';
 };
 
@@ -197,13 +212,18 @@ Visit.prototype.addHighlightedText_ = function(node, content, highlightText) {
 };
 
 /**
- * @return {DOMObject} DOM representation for the title block.
+ * Returns the DOM element containing a link on the title of the URL for the
+ * current visit. Optionally sets the favicon as well.
+ * @param {boolean} addFavicon Whether to add a favicon or not.
+ * @return {Element} DOM representation for the title block.
  * @private
  */
-Visit.prototype.getTitleDOM_ = function() {
+Visit.prototype.getTitleDOM_ = function(addFavicon) {
   var node = createElementWithClassName('div', 'title');
-  node.style.backgroundImage = url(getFaviconURL(this.url_));
-  node.style.backgroundSize = '16px';
+  if (addFavicon) {
+    node.style.backgroundImage = getFaviconImageSet(this.url_);
+    node.style.backgroundSize = '16px';
+  }
 
   var link = document.createElement('a');
   link.href = this.url_;
@@ -224,6 +244,15 @@ Visit.prototype.getTitleDOM_ = function() {
   }
 
   return node;
+};
+
+/**
+ * Set the favicon for an element.
+ * @param {Element} el The DOM element to which to add the icon.
+ * @private
+ */
+Visit.prototype.addFaviconToElement_ = function(el) {
+  el.style.backgroundImage = getFaviconImageSet(this.url_);
 };
 
 /**
@@ -292,6 +321,13 @@ function HistoryModel() {
 
 // HistoryModel, Public: ------------------------------------------------------
 
+/** @enum {number} */
+HistoryModel.Range = {
+  ALL_TIME: 0,
+  WEEK: 1,
+  MONTH: 2
+};
+
 /**
  * Sets our current view that is called when the history model changes.
  * @param {HistoryView} view The view to set our current view to.
@@ -302,8 +338,8 @@ HistoryModel.prototype.setView = function(view) {
 
 /**
  * Start a new search - this will clear out our model.
- * @param {String} searchText The text to search for
- * @param {Number} opt_page The page to view - this is mostly used when setting
+ * @param {string} searchText The text to search for
+ * @param {number} opt_page The page to view - this is mostly used when setting
  *     up an initial view, use #requestPage otherwise.
  */
 HistoryModel.prototype.setSearchText = function(searchText, opt_page) {
@@ -314,19 +350,34 @@ HistoryModel.prototype.setSearchText = function(searchText, opt_page) {
 };
 
 /**
+ * Clear the search text.
+ */
+HistoryModel.prototype.clearSearchText = function() {
+  this.searchText_ = '';
+};
+
+/**
  * Reload our model with the current parameters.
  */
 HistoryModel.prototype.reload = function() {
+  // Save user-visible state, clear the model, and restore the state.
   var search = this.searchText_;
   var page = this.requestedPage_;
+  var range = this.rangeInDays_;
+  var offset = this.offset_;
+  var groupByDomain = this.groupByDomain_;
+
   this.clearModel_();
   this.searchText_ = search;
   this.requestedPage_ = page;
+  this.rangeInDays_ = range;
+  this.offset_ = offset;
+  this.groupByDomain_ = groupByDomain;
   this.queryHistory_();
 };
 
 /**
- * @return {String} The current search text.
+ * @return {string} The current search text.
  */
 HistoryModel.prototype.getSearchText = function() {
   return this.searchText_;
@@ -335,7 +386,7 @@ HistoryModel.prototype.getSearchText = function() {
 /**
  * Tell the model that the view will want to see the current page. When
  * the data becomes available, the model will call the view back.
- * @param {Number} page The page we want to view.
+ * @param {number} page The page we want to view.
  */
 HistoryModel.prototype.requestPage = function(page) {
   this.requestedPage_ = page;
@@ -353,10 +404,12 @@ HistoryModel.prototype.addResults = function(info, results) {
   this.inFlight_ = false;
   this.isQueryFinished_ = info.finished;
   this.queryCursor_ = info.cursor;
+  this.queryStartTime = info.queryStartTime;
+  this.queryEndTime = info.queryEndTime;
 
-  // If there are no results, or they're not for the current search term,
-  // there's nothing more to do.
-  if (!results || !results.length || info.term != this.searchText_)
+  // If the results are not for the current search term then there is nothing
+  // more to do.
+  if (info.term != this.searchText_)
     return;
 
   // If necessary, sort the results from newest to oldest.
@@ -374,11 +427,18 @@ HistoryModel.prototype.addResults = function(info, results) {
     // latest visit from that day.
     if (!isSameDay)
       this.urlsFromLastSeenDay_ = {};
-    else if (thisResult.url in this.urlsFromLastSeenDay_)
-      continue;
-    this.urlsFromLastSeenDay_[thisResult.url] = thisResult.time;
 
-    this.visits_.push(new Visit(thisResult, isSameDay, this, this.last_id_++));
+    // Only create a new Visit object for the first visit to a URL on a
+    // particular day.
+    var visit = this.urlsFromLastSeenDay_[thisResult.url];
+    if (visit) {
+      // Record the timestamp of the duplicate visit.
+      visit.addDuplicateTimestamp(thisResult.timestamp);
+      continue;
+    }
+    visit = new Visit(thisResult, isSameDay, this, this.nextVisitId_++);
+    this.urlsFromLastSeenDay_[thisResult.url] = visit;
+    this.visits_.push(visit);
     this.changed = true;
     lastDay = thisDay;
   }
@@ -387,7 +447,7 @@ HistoryModel.prototype.addResults = function(info, results) {
 };
 
 /**
- * @return {Number} The number of visits in the model.
+ * @return {number} The number of visits in the model.
  */
 HistoryModel.prototype.getSize = function() {
   return this.visits_.length;
@@ -395,8 +455,8 @@ HistoryModel.prototype.getSize = function() {
 
 /**
  * Get a list of visits between specified index positions.
- * @param {Number} start The start index
- * @param {Number} end The end index
+ * @param {number} start The start index
+ * @param {number} end The end index
  * @return {Array.<Visit>} A list of visits
  */
 HistoryModel.prototype.getNumberedRange = function(start, end) {
@@ -412,6 +472,39 @@ HistoryModel.prototype.hasMoreResults = function() {
       !this.isQueryFinished_;
 };
 
+// Getter and setter for HistoryModel.rangeInDays_.
+Object.defineProperty(HistoryModel.prototype, 'rangeInDays', {
+  get: function() {
+    return this.rangeInDays_;
+  },
+  set: function(range) {
+    this.rangeInDays_ = range;
+  }
+});
+
+/**
+ * Getter and setter for HistoryModel.offset_. The offset moves the current
+ * query 'window' |range| days behind. As such for range set to WEEK an offset
+ * of 0 refers to the last 7 days, an offset of 1 refers to the 7 day period
+ * that ended 7 days ago, etc. For MONTH an offset of 0 refers to the current
+ * calendar month, 1 to the previous one, etc.
+ */
+Object.defineProperty(HistoryModel.prototype, 'offset', {
+  get: function() {
+    return this.offset_;
+  },
+  set: function(offset) {
+    this.offset_ = offset;
+  }
+});
+
+// Setter for HistoryModel.requestedPage_.
+Object.defineProperty(HistoryModel.prototype, 'requestedPage', {
+  set: function(page) {
+    this.requestedPage_ = page;
+  }
+});
+
 // HistoryModel, Private: -----------------------------------------------------
 
 /**
@@ -421,15 +514,23 @@ HistoryModel.prototype.hasMoreResults = function() {
 HistoryModel.prototype.clearModel_ = function() {
   this.inFlight_ = false;  // Whether a query is inflight.
   this.searchText_ = '';
+  // Flag to show that the results are grouped by domain or not.
+  this.groupByDomain_ = false;
 
   this.visits_ = [];  // Date-sorted list of visits (most recent first).
-  this.last_id_ = 0;
+  this.nextVisitId_ = 0;
   selectionAnchor = -1;
 
   // The page that the view wants to see - we only fetch slightly past this
   // point. If the view requests a page that we don't have data for, we try
   // to fetch it and call back when we're done.
   this.requestedPage_ = 0;
+
+  // The range of history to view or search over.
+  this.rangeInDays_ = HistoryModel.Range.ALL_TIME;
+
+  // Skip |offset_| * weeks/months from the begining.
+  this.offset_ = 0;
 
   // Keeps track of whether or not there are more results available than are
   // currently held in |this.visits_|.
@@ -451,22 +552,23 @@ HistoryModel.prototype.clearModel_ = function() {
 /**
  * Figure out if we need to do more queries to fill the currently requested
  * page. If we think we can fill the page, call the view and let it know
- * we're ready to show something.
+ * we're ready to show something. This only applies to the daily time-based
+ * view.
  * @private
  */
 HistoryModel.prototype.updateSearch_ = function() {
-  var doneLoading =
-      this.canFillPage_(this.requestedPage_) || this.isQueryFinished_;
+  var doneLoading = this.rangeInDays_ != HistoryModel.Range.ALL_TIME ||
+                    this.isQueryFinished_ ||
+                    this.canFillPage_(this.requestedPage_);
 
-  // Try to fetch more results if the current page isn't full.
-  if (!doneLoading && !this.inFlight_)
+  // Try to fetch more results if more results can arrive and the page is not
+  // full.
+  if (!doneLoading && !this.inFlight_) {
     this.queryHistory_();
-
-  // If we have any data for the requested page, show it.
-  if (this.changed && this.haveDataForPage_(this.requestedPage_)) {
-    this.view_.onModelReady();
-    this.changed = false;
   }
+
+  // Show the result or a message if no results were returned.
+  this.view_.onModelReady(doneLoading);
 };
 
 /**
@@ -474,25 +576,19 @@ HistoryModel.prototype.updateSearch_ = function() {
  * @private
  */
 HistoryModel.prototype.queryHistory_ = function() {
-  var endTime = 0;
-
-  // If there are already some visits, pick up the previous query where it
-  // left off.
-  if (this.visits_.length > 0) {
-    var lastVisit = this.visits_.slice(-1)[0];
-    endTime = lastVisit.date.getTime();
-    cursor = this.queryCursor_;
-  }
+  var max_results =
+      (this.rangeInDays_ == HistoryModel.Range.ALL_TIME) ? RESULTS_PER_PAGE : 0;
 
   $('loading-spinner').hidden = false;
   this.inFlight_ = true;
   chrome.send('queryHistory',
-      [this.searchText_, endTime, this.queryCursor_, RESULTS_PER_PAGE]);
+      [this.searchText_, this.offset_, this.rangeInDays_, this.queryCursor_,
+       max_results]);
 };
 
 /**
  * Check to see if we have data for the given page.
- * @param {Number} page The page number.
+ * @param {number} page The page number.
  * @return {boolean} Whether we have any data for the given page.
  * @private
  */
@@ -502,12 +598,29 @@ HistoryModel.prototype.haveDataForPage_ = function(page) {
 
 /**
  * Check to see if we have data to fill the given page.
- * @param {Number} page The page number.
+ * @param {number} page The page number.
  * @return {boolean} Whether we have data to fill the page.
  * @private
  */
 HistoryModel.prototype.canFillPage_ = function(page) {
   return ((page + 1) * RESULTS_PER_PAGE <= this.getSize());
+};
+
+/**
+ * Enables or disables grouping by domain.
+ * @param {boolean} groupByDomain New groupByDomain_ value.
+ */
+HistoryModel.prototype.setGroupByDomain = function(groupByDomain) {
+  this.groupByDomain_ = groupByDomain;
+  this.offset_ = 0;
+};
+
+/**
+ * Gets whether we are grouped by domain.
+ * @return {boolean} Whether the results are grouped by domain.
+ */
+HistoryModel.prototype.getGroupByDomain = function() {
+  return this.groupByDomain_;
 };
 
 ///////////////////////////////////////////////////////////////////////////////
@@ -548,6 +661,34 @@ function HistoryView(model) {
   $('older-button').addEventListener('click', function() {
     self.setPage(self.pageIndex_ + 1);
   });
+
+  // Add handlers for the range options.
+  $('timeframe-filter').addEventListener('change', function(e) {
+    self.setRangeInDays(parseInt(e.target.value, 10));
+  });
+
+  $('display-filter-sites').addEventListener('click', function(e) {
+    self.setGroupByDomain($('display-filter-sites').checked);
+  });
+
+  $('range-previous').addEventListener('click', function(e) {
+    if (self.getRangeInDays() == HistoryModel.Range.ALL_TIME)
+      self.setPage(self.pageIndex_ + 1);
+    else
+      self.setOffset(self.getOffset() + 1);
+  });
+  $('range-next').addEventListener('click', function(e) {
+    if (self.getRangeInDays() == HistoryModel.Range.ALL_TIME)
+      self.setPage(self.pageIndex_ - 1);
+    else
+      self.setOffset(self.getOffset() - 1);
+  });
+  $('range-today').addEventListener('click', function(e) {
+    if (self.getRangeInDays() == HistoryModel.Range.ALL_TIME)
+      self.setPage(0);
+    else
+      self.setOffset(0);
+  });
 }
 
 // HistoryView, public: -------------------------------------------------------
@@ -561,7 +702,25 @@ HistoryView.prototype.setSearch = function(term, opt_page) {
   this.pageIndex_ = parseInt(opt_page || 0, 10);
   window.scrollTo(0, 0);
   this.model_.setSearchText(term, this.pageIndex_);
-  pageState.setUIState(term, this.pageIndex_);
+  pageState.setUIState(term, this.pageIndex_, this.model_.getGroupByDomain(),
+                       this.getRangeInDays(), this.getOffset());
+};
+
+/**
+ * Enable or disable results as being grouped by domain.
+ * @param {boolean} groupedByDomain Whether to group by domain or not.
+ */
+HistoryView.prototype.setGroupByDomain = function(groupedByDomain) {
+  // Group by domain is not currently supported for search results, so reset
+  // the search term if there was one.
+  this.model_.clearSearchText();
+  this.model_.setGroupByDomain(groupedByDomain);
+  this.model_.reload();
+  pageState.setUIState(this.model_.getSearchText(),
+                       this.pageIndex_,
+                       this.model_.getGroupByDomain(),
+                       this.getRangeInDays(),
+                       this.getOffset());
 };
 
 /**
@@ -581,7 +740,11 @@ HistoryView.prototype.setPage = function(page) {
   this.pageIndex_ = parseInt(page, 10);
   window.scrollTo(0, 0);
   this.model_.requestPage(page);
-  pageState.setUIState(this.model_.getSearchText(), this.pageIndex_);
+  pageState.setUIState(this.model_.getSearchText(),
+                       this.pageIndex_,
+                       this.model_.getGroupByDomain(),
+                       this.getRangeInDays(),
+                       this.getOffset());
 };
 
 /**
@@ -592,11 +755,61 @@ HistoryView.prototype.getPage = function() {
 };
 
 /**
+ * Set the current range for grouped results.
+ * @param {string} range The number of days to which the range should be set.
+ */
+HistoryView.prototype.setRangeInDays = function(range) {
+  // Set the range, offset and reset the page
+  this.model_.rangeInDays = range;
+  this.model_.offset = 0;
+  this.pageIndex_ = 0;
+  if (range == HistoryModel.Range.ALL_TIME)
+    this.model_.requestedPage = 0;
+  this.model_.reload();
+  pageState.setUIState(this.model_.getSearchText(), this.pageIndex_,
+      this.model_.getGroupByDomain(), range, this.getOffset());
+};
+
+/**
+ * Get the current range in days.
+ * @return {number} Current range in days from the model.
+ */
+HistoryView.prototype.getRangeInDays = function() {
+  return this.model_.rangeInDays;
+};
+
+/**
+ * Set the current offset for grouped results.
+ * @param {number} offset Offset to set.
+ */
+HistoryView.prototype.setOffset = function(offset) {
+  // If there is another query already in flight wait for that to complete.
+  if (this.model_.inFlight_)
+    return;
+  this.model_.offset = offset;
+  this.model_.reload();
+  pageState.setUIState(this.model_.getSearchText(),
+                       this.pageIndex_,
+                       this.model_.getGroupByDomain(),
+                       this.getRangeInDays(),
+                       this.getOffset());
+};
+
+/**
+ * Get the current offset.
+ * @return {number} Current offset from the model.
+ */
+HistoryView.prototype.getOffset = function() {
+  return this.model_.offset;
+};
+
+/**
  * Callback for the history model to let it know that it has data ready for us
  * to view.
+ * @param {boolean} doneLoading Whether the current request is complete.
  */
-HistoryView.prototype.onModelReady = function() {
-  this.displayResults_();
+HistoryView.prototype.onModelReady = function(doneLoading) {
+  this.displayResults_(doneLoading);
   this.updateNavBar_();
 };
 
@@ -635,15 +848,187 @@ HistoryView.prototype.setVisitRendered_ = function(visit) {
 };
 
 /**
- * Update the page with results.
+ * Generates and adds the grouped visits DOM for a certain domain. This
+ * includes the clickable arrow and domain name and the visit entries for
+ * that domain.
+ * @param {Element} results DOM object to which to add the elements.
+ * @param {string} domain Current domain name.
+ * @param {Array} domainVisits Array of visits for this domain.
  * @private
  */
-HistoryView.prototype.displayResults_ = function() {
-  var rangeStart = this.pageIndex_ * RESULTS_PER_PAGE;
-  var rangeEnd = rangeStart + RESULTS_PER_PAGE;
-  var results = this.model_.getNumberedRange(rangeStart, rangeEnd);
+HistoryView.prototype.getGroupedVisitsDOM_ = function(
+    results, domain, domainVisits) {
+  // Add a new domain entry.
+  var siteResults = results.appendChild(
+      createElementWithClassName('li', 'site-entry'));
+  // Make a wrapper that will contain the arrow, the favicon and the domain.
+  var siteDomainWrapper = siteResults.appendChild(
+      createElementWithClassName('div', 'site-domain-wrapper'));
+  var siteArrow = siteDomainWrapper.appendChild(
+      createElementWithClassName('div', 'site-domain-arrow collapse'));
+  siteArrow.textContent = '►';
+  var siteDomain = siteDomainWrapper.appendChild(
+      createElementWithClassName('div', 'site-domain'));
+  var numberOfVisits = createElementWithClassName('span', 'number-visits');
+  numberOfVisits.textContent = loadTimeData.getStringF('numbervisits',
+                                                       domainVisits.length);
+  var domainElement = document.createElement('span');
+  domainElement.textContent = domain;
+  siteDomain.appendChild(domainElement);
+  siteDomain.appendChild(numberOfVisits);
+  siteResults.appendChild(siteDomainWrapper);
+  var resultsList = siteResults.appendChild(
+      createElementWithClassName('ol', 'site-results'));
 
+  domainVisits[0].addFaviconToElement_(siteDomain);
+
+  siteDomainWrapper.addEventListener('click', toggleHandler);
+  // Collapse until it gets toggled.
+  resultsList.style.height = 0;
+
+  // Add the results for each of the domain.
+  var isMonthGroupedResult = this.getRangeInDays() == HistoryModel.Range.MONTH;
+  for (var j = 0, visit; visit = domainVisits[j]; j++) {
+    resultsList.appendChild(visit.getResultDOM({
+      useMonthDate: isMonthGroupedResult
+    }));
+    this.setVisitRendered_(visit);
+  }
+};
+
+/**
+ * Enables or disables the time range buttons.
+ * @private
+ */
+HistoryView.prototype.updateRangeButtons_ = function() {
+  // The enabled state for the previous, today and next buttons.
+  var previousState = false;
+  var todayState = false;
+  var nextState = false;
+  var usePage = (this.getRangeInDays() == HistoryModel.Range.ALL_TIME);
+
+  // Use pagination for most recent visits, offset otherwise.
+  // TODO(sergiu): Maybe send just one variable in the future.
+  if (usePage) {
+    if (this.getPage() != 0) {
+      nextState = true;
+      todayState = true;
+    }
+    previousState = this.model_.hasMoreResults();
+  } else {
+    if (this.getOffset() != 0) {
+      nextState = true;
+      todayState = true;
+    }
+    previousState = !this.model_.isQueryFinished_;
+  }
+
+  $('range-previous').disabled = !previousState;
+  $('range-today').disabled = !todayState;
+  $('range-next').disabled = !nextState;
+};
+
+/**
+ * Groups visits by domain, sorting them by the number of visits.
+ * @param {Array} visits Visits received from the query results.
+ * @param {Element} results Object where the results are added to.
+ * @private
+ */
+HistoryView.prototype.groupVisitsByDomain_ = function(visits, results) {
+  var visitsByDomain = {};
+  var domains = [];
+
+  // Group the visits into a dictionary and generate a list of domains.
+  for (var i = 0, visit; visit = visits[i]; i++) {
+    var domain = visit.getDomainFromURL_(visit.url_);
+    if (!visitsByDomain[domain]) {
+      visitsByDomain[domain] = [];
+      domains.push(domain);
+    }
+    visitsByDomain[domain].push(visit);
+  }
+  var sortByVisits = function(a, b) {
+    return visitsByDomain[b].length - visitsByDomain[a].length;
+  };
+  domains.sort(sortByVisits);
+
+  for (var i = 0, domain; domain = domains[i]; i++)
+    this.getGroupedVisitsDOM_(results, domain, visitsByDomain[domain]);
+};
+
+/**
+ * Adds the results for a month.
+ * @param {Array} visits Visits returned by the query.
+ * @param {Element} parentElement Element to which to add the results to.
+ * @private
+ */
+HistoryView.prototype.addMonthResults_ = function(visits, parentElement) {
+  if (visits.length == 0)
+    return;
+
+  var monthResults = parentElement.appendChild(
+      createElementWithClassName('ol', 'month-results'));
+  this.groupVisitsByDomain_(visits, monthResults);
+};
+
+/**
+ * Adds the results for a certain day. This includes a title with the day of
+ * the results and the results themselves, grouped or not.
+ * @param {Array} visits Visits returned by the query.
+ * @param {Element} parentElement Element to which to add the results to.
+ * @private
+ */
+HistoryView.prototype.addDayResults_ = function(visits, parentElement) {
+  if (visits.length == 0)
+    return;
+
+  var firstVisit = visits[0];
+  var day = parentElement.appendChild(createElementWithClassName('h3', 'day'));
+  day.appendChild(document.createTextNode(firstVisit.dateRelativeDay));
+  if (firstVisit.continued) {
+    day.appendChild(document.createTextNode(' ' +
+                                            loadTimeData.getString('cont')));
+  }
+  var dayResults = parentElement.appendChild(
+      createElementWithClassName('ol', 'day-results'));
+
+  if (this.model_.getGroupByDomain()) {
+    this.groupVisitsByDomain_(visits, dayResults);
+  } else {
+    var lastTime;
+
+    for (var i = 0, visit; visit = visits[i]; i++) {
+      // If enough time has passed between visits, indicate a gap in browsing.
+      var thisTime = visit.date.getTime();
+      if (lastTime && lastTime - thisTime > BROWSING_GAP_TIME)
+        dayResults.appendChild(createElementWithClassName('li', 'gap'));
+
+      // Insert the visit into the DOM.
+      dayResults.appendChild(visit.getResultDOM({ addTitleFavicon: true }));
+      this.setVisitRendered_(visit);
+
+      lastTime = thisTime;
+    }
+  }
+};
+
+/**
+ * Update the page with results.
+ * @param {boolean} doneLoading Whether the current request is complete.
+ * @private
+ */
+HistoryView.prototype.displayResults_ = function(doneLoading) {
+  // Either show a page of results received for the all time results or all the
+  // received results for the weekly and monthly view.
+  var results = this.model_.visits_;
+  if (this.getRangeInDays() == HistoryModel.Range.ALL_TIME) {
+    var rangeStart = this.pageIndex_ * RESULTS_PER_PAGE;
+    var rangeEnd = rangeStart + RESULTS_PER_PAGE;
+    results = this.model_.getNumberedRange(rangeStart, rangeEnd);
+  }
   var searchText = this.model_.getSearchText();
+  var groupByDomain = this.model_.getGroupByDomain();
+
   if (searchText) {
     // Add a header for the search results, if there isn't already one.
     if (!this.resultDiv_.querySelector('h3')) {
@@ -654,14 +1039,17 @@ HistoryView.prototype.displayResults_ = function() {
     }
 
     var searchResults = createElementWithClassName('ol', 'search-results');
-    if (results.length == 0) {
-      var noResults = document.createElement('div');
-      noResults.textContent = loadTimeData.getString('noresults');
-      searchResults.appendChild(noResults);
+    if (results.length == 0 && doneLoading) {
+      var noSearchResults = document.createElement('div');
+      noSearchResults.textContent = loadTimeData.getString('nosearchresults');
+      searchResults.appendChild(noSearchResults);
     } else {
       for (var i = 0, visit; visit = results[i]; i++) {
         if (!visit.isRendered) {
-          searchResults.appendChild(visit.getResultDOM(true));
+          searchResults.appendChild(visit.getResultDOM({
+            isSearchResult: true,
+            addTitleFavicon: true
+          }));
           this.setVisitRendered_(visit);
         }
       }
@@ -669,41 +1057,54 @@ HistoryView.prototype.displayResults_ = function() {
     this.resultDiv_.appendChild(searchResults);
   } else {
     var resultsFragment = document.createDocumentFragment();
-    var lastTime = Math.infinity;
-    var dayResults;
 
-    for (var i = 0, visit; visit = results[i]; i++) {
-      if (visit.isRendered)
-        continue;
-
-      var thisTime = visit.date.getTime();
-
-      // Break across day boundaries and insert gaps for browsing pauses.
-      // Create a dayResults element to contain results for each day.
-      if ((i == 0 && visit.continued) || !visit.continued) {
-        // It's the first visit of the day, or the day is continued from
-        // the previous page. Create a header for the day on the current page.
-        var day = createElementWithClassName('h3', 'day');
-        day.appendChild(document.createTextNode(visit.dateRelativeDay));
-        if (visit.continued) {
-          day.appendChild(document.createTextNode(' ' +
-              loadTimeData.getString('cont')));
-        }
-
-        resultsFragment.appendChild(day);
-        dayResults = createElementWithClassName('ol', 'day-results');
-        resultsFragment.appendChild(dayResults);
-      } else if (dayResults && lastTime - thisTime > BROWSING_GAP_TIME) {
-        dayResults.appendChild(createElementWithClassName('li', 'gap'));
-      }
-      lastTime = thisTime;
-
-      // Add the entry to the appropriate day.
-      dayResults.appendChild(visit.getResultDOM(false));
-      this.setVisitRendered_(visit);
+    if (this.getRangeInDays() != HistoryModel.Range.ALL_TIME) {
+      // If this is a time range result add some text that shows what is the
+      // time range for the results the user is viewing.
+      var timeFrame = resultsFragment.appendChild(
+          createElementWithClassName('h2', 'timeframe'));
+      // TODO(sergiu): Figure the best way to show this for the first day of
+      // the month.
+      timeFrame.appendChild(document.createTextNode(loadTimeData.getStringF(
+          'historyinterval',
+          this.model_.queryStartTime,
+          this.model_.queryEndTime)));
     }
+
+    if (results.length == 0 && doneLoading) {
+      var noResults = resultsFragment.appendChild(
+          document.createElement('div'));
+      noResults.textContent = loadTimeData.getString('noresults');
+      this.resultDiv_.appendChild(resultsFragment);
+      this.updateNavBar_();
+      return;
+    }
+
+    if (this.getRangeInDays() == HistoryModel.Range.MONTH &&
+        groupByDomain) {
+      // Group everything together in the month view.
+      this.addMonthResults_(results, resultsFragment);
+    } else {
+      var dayStart = 0;
+      var dayEnd = 0;
+      // Go through all of the visits and process them in chunks of one day.
+      while (dayEnd < results.length) {
+        // Skip over the ones that are already rendered.
+        while (dayStart < results.length && results[dayStart].isRendered)
+          ++dayStart;
+        var dayEnd = dayStart + 1;
+        while (dayEnd < results.length && results[dayEnd].continued)
+          ++dayEnd;
+
+        this.addDayResults_(
+            results.slice(dayStart, dayEnd), resultsFragment, groupByDomain);
+      }
+    }
+
+    // Add all the days and their visits to the page.
     this.resultDiv_.appendChild(resultsFragment);
   }
+  this.updateNavBar_();
 };
 
 /**
@@ -711,9 +1112,12 @@ HistoryView.prototype.displayResults_ = function() {
  * @private
  */
 HistoryView.prototype.updateNavBar_ = function() {
+  this.updateRangeButtons_();
   $('newest-button').hidden = this.pageIndex_ == 0;
   $('newer-button').hidden = this.pageIndex_ == 0;
-  $('older-button').hidden = !this.model_.hasMoreResults();
+  $('older-button').hidden =
+      this.model_.rangeInDays_ != HistoryModel.Range.ALL_TIME ||
+      !this.model_.hasMoreResults();
 };
 
 ///////////////////////////////////////////////////////////////////////////////
@@ -741,10 +1145,17 @@ function PageState(model, view) {
   //     public model and view.
   this.checker_ = setInterval((function(state_obj) {
     var hashData = state_obj.getHashData();
+    var isGroupedByDomain = (hashData.g == 'true');
     if (hashData.q != state_obj.model.getSearchText()) {
       state_obj.view.setSearch(hashData.q, parseInt(hashData.p, 10));
     } else if (parseInt(hashData.p, 10) != state_obj.view.getPage()) {
       state_obj.view.setPage(hashData.p);
+    } else if (isGroupedByDomain != state_obj.view.model_.getGroupByDomain()) {
+      state_obj.view.setGroupByDomain(isGroupedByDomain);
+    } else if (parseInt(hashData.r, 10) != state_obj.model.rangeInDays) {
+      state_obj.view.setRangeInDays(parseInt(hashData.r, 10));
+    } else if (parseInt(hashData.o, 10) != state_obj.model.offset) {
+      state_obj.view.setOffset(parseInt(hashData.o, 10));
     }
   }), 50, this);
 }
@@ -761,12 +1172,14 @@ PageState.prototype.getHashData = function() {
   var result = {
     e: 0,
     q: '',
-    p: 0
+    p: 0,
+    g: false,
+    r: 0,
+    o: 0
   };
 
-  if (!window.location.hash) {
+  if (!window.location.hash)
     return result;
-  }
 
   var hashSplit = window.location.hash.substr(1).split('&');
   for (var i = 0; i < hashSplit.length; i++) {
@@ -784,31 +1197,50 @@ PageState.prototype.getHashData = function() {
  * session history so the back button cycles through hash states, which
  * are then picked up by our listener.
  * @param {string} term The current search string.
- * @param {string} page The page currently being viewed.
+ * @param {number} page The page currently being viewed.
+ * @param {boolean} grouped Whether the results are grouped or not.
+ * @param {HistoryModel.Range} range The range to view or search over.
+ * @param {number} offset Set the begining of the query to the specific offset.
  */
-PageState.prototype.setUIState = function(term, page) {
+PageState.prototype.setUIState = function(term, page, grouped, range, offset) {
   // Make sure the form looks pretty.
   $('search-field').value = term;
-  var currentHash = this.getHashData();
-  if (currentHash.q != term || currentHash.p != page) {
-    window.location.hash = PageState.getHashString(term, page);
+  $('display-filter-sites').checked = grouped;
+  var hash = this.getHashData();
+  if (hash.q != term || hash.p != page || hash.g != grouped ||
+      hash.r != range || hash.o != offset) {
+    window.location.hash = PageState.getHashString(
+        term, page, grouped, range, offset);
   }
 };
 
 /**
  * Static method to get the hash string for a specified state
  * @param {string} term The current search string.
- * @param {string} page The page currently being viewed.
+ * @param {number} page The page currently being viewed.
+ * @param {boolean} grouped Whether the results are grouped or not.
+ * @param {HistoryModel.Range} range The range to view or search over.
+ * @param {number} offset Set the begining of the query to the specific offset.
  * @return {string} The string to be used in a hash.
  */
-PageState.getHashString = function(term, page) {
+PageState.getHashString = function(term, page, grouped, range, offset) {
+  // Omit elements that are empty.
   var newHash = [];
-  if (term) {
+
+  if (term)
     newHash.push('q=' + encodeURIComponent(term));
-  }
-  if (page != undefined) {
+
+  if (page)
     newHash.push('p=' + page);
-  }
+
+  if (grouped)
+    newHash.push('g=' + grouped);
+
+  if (range)
+    newHash.push('r=' + range);
+
+  if (offset)
+    newHash.push('o=' + offset);
 
   return newHash.join('&');
 };
@@ -846,6 +1278,11 @@ function load() {
     activeVisit = null;
   });
 
+  // Only show the controls if the command line switch is activated.
+  if (loadTimeData.getBoolean('groupByDomain')) {
+    $('filter-controls').hidden = false;
+  }
+
   var title = loadTimeData.getString('title');
   uber.invokeMethodOnParent('setTitle', {title: title});
 
@@ -858,7 +1295,7 @@ function load() {
 /**
  * TODO(glen): Get rid of this function.
  * Set the history view to a specified page.
- * @param {String} term The string to search for
+ * @param {string} term The string to search for
  */
 function setSearch(term) {
   if (historyView) {
@@ -918,7 +1355,7 @@ function reloadHistory() {
  * Collect IDs from the checked checkboxes and send to Chrome for deletion.
  */
 function removeItems() {
-  var checked = document.querySelectorAll(
+  var checked = $('results-display').querySelectorAll(
       'input[type=checkbox]:checked:not([disabled])');
   var urls = [];
   var disabledItems = [];
@@ -1032,6 +1469,31 @@ function removeEntryFromView(entry) {
   if (nextEntry && nextEntry.className == 'gap' &&
       previousEntry && previousEntry.className == 'gap') {
     removeNode(nextEntry);
+  }
+}
+
+/**
+ * Toggles an element in the grouped history.
+ * @param {Element} e The element which was clicked on.
+ */
+function toggleHandler(e) {
+  var innerResultList = e.currentTarget.parentElement.querySelector(
+      '.site-results');
+  var innerArrow = e.currentTarget.parentElement.querySelector(
+      '.site-domain-arrow');
+  if (innerArrow.classList.contains('collapse')) {
+    innerResultList.style.height = 'auto';
+    // -webkit-transition does not work on height:auto elements so first set
+    // the height to auto so that it is computed and then set it to the
+    // computed value in pixels so the transition works properly.
+    var height = innerResultList.clientHeight;
+    innerResultList.style.height = height + 'px';
+    innerArrow.classList.remove('collapse');
+    innerArrow.classList.add('expand');
+  } else {
+    innerResultList.style.height = 0;
+    innerArrow.classList.remove('expand');
+    innerArrow.classList.add('collapse');
   }
 }
 

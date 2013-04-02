@@ -42,7 +42,7 @@ struct SpdyHeaderInfo {
   SpdyPriority priority;
   SpdyControlFlags control_flags;
   bool compressed;
-  SpdyStatusCodes status;
+  SpdyRstStreamStatus status;
   const char* data;
   uint32 data_length;
   SpdyDataFlags data_flags;
@@ -136,13 +136,13 @@ SpdyFrame* ConstructSpdyControlFrame(const char* const extra_headers[],
 SpdyFrame* ConstructSpdyControlFrame(const char* const extra_headers[],
                                      int extra_header_count,
                                      bool compressed,
-                                     int stream_id,
+                                     SpdyStreamId stream_id,
                                      RequestPriority request_priority,
                                      SpdyControlType type,
                                      SpdyControlFlags flags,
                                      const char* const* kHeaders,
                                      int kHeadersSize,
-                                     int associated_stream_id);
+                                     SpdyStreamId associated_stream_id);
 
 // Construct an expected SPDY reply string.
 // |extra_headers| are the extra header-value pairs, which typically
@@ -179,7 +179,7 @@ SpdyFrame* ConstructSpdyWindowUpdate(SpdyStreamId, uint32 delta_window_size);
 // Construct a SPDY RST_STREAM frame.
 // Returns the constructed frame.  The caller takes ownership of the frame.
 SpdyFrame* ConstructSpdyRstStream(SpdyStreamId stream_id,
-                                  SpdyStatusCodes status);
+                                  SpdyRstStreamStatus status);
 
 // Construct a single SPDY header entry, for validation.
 // |extra_headers| are the extra header-value pairs.
@@ -199,7 +199,7 @@ int ConstructSpdyHeader(const char* const extra_headers[],
 // Returns a SpdyFrame.
 SpdyFrame* ConstructSpdyGet(const char* const url,
                             bool compressed,
-                            int stream_id,
+                            SpdyStreamId stream_id,
                             RequestPriority request_priority);
 
 // Constructs a standard SPDY GET SYN packet, optionally compressed.
@@ -368,6 +368,7 @@ struct SpdySessionDependencies {
   bool enable_ip_pooling;
   bool enable_compression;
   bool enable_ping;
+  bool enable_user_alternate_protocol_ports;
   SpdySession::TimeFunc time_func;
   std::string trusted_spdy_proxy;
   NetLog* net_log;

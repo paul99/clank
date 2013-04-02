@@ -4,13 +4,13 @@
 
 #include "chrome/browser/ui/webui/chromeos/about_network.h"
 
+#include "ash/ash_switches.h"
 #include "base/command_line.h"
-#include "base/string_number_conversions.h"
+#include "base/strings/string_number_conversions.h"
 #include "base/utf_string_conversions.h"
 #include "chrome/browser/chromeos/cros/cros_library.h"
 #include "chrome/browser/chromeos/cros/network_library.h"
 #include "chrome/browser/ui/webui/about_ui.h"
-#include "chromeos/chromeos_switches.h"
 #include "chromeos/network/network_event_log.h"
 #include "chromeos/network/network_state.h"
 #include "chromeos/network/network_state_handler.h"
@@ -78,9 +78,10 @@ std::string NetworkToHtmlTableHeader(const Network* network) {
       WrapWithTH("Name") +
       WrapWithTH("Active") +
       WrapWithTH("State");
+  if (network->type() != TYPE_ETHERNET)
+    str += WrapWithTH("Auto-Connect");
   if (network->type() == TYPE_WIFI ||
       network->type() == TYPE_CELLULAR) {
-    str += WrapWithTH("Auto-Connect");
     str += WrapWithTH("Strength");
   }
   if (network->type() == TYPE_WIFI) {
@@ -113,11 +114,12 @@ std::string NetworkToHtmlTableRow(const Network* network) {
       WrapWithTD(network->name()) +
       WrapWithTD(base::IntToString(network->is_active())) +
       WrapWithTD(network->GetStateString());
+  if (network->type() != TYPE_ETHERNET)
+    str += WrapWithTD(base::IntToString(network->auto_connect()));
   if (network->type() == TYPE_WIFI ||
       network->type() == TYPE_CELLULAR) {
     const WirelessNetwork* wireless =
         static_cast<const WirelessNetwork*>(network);
-    str += WrapWithTD(base::IntToString(wireless->auto_connect()));
     str += WrapWithTD(base::IntToString(wireless->strength()));
   }
   if (network->type() == TYPE_WIFI) {
@@ -242,7 +244,7 @@ std::string NetworkStateToHtmlTableRow(const NetworkState* network) {
   std::string str =
       WrapWithTD(network->name()) +
       WrapWithTD(network->type()) +
-      WrapWithTD(network->state()) +
+      WrapWithTD(network->connection_state()) +
       WrapWithTD(network->path()) +
       WrapWithTD(network->ip_address()) +
       WrapWithTD(network->security()) +
@@ -283,7 +285,7 @@ std::string AboutNetwork(const std::string& query) {
   if (network_event_log::IsInitialized())
     output += GetHeaderEventLogInfo();
   if (CommandLine::ForCurrentProcess()->HasSwitch(
-          switches::kEnableNewNetworkHandlers)) {
+          ash::switches::kAshEnableNewNetworkStatusArea)) {
     output += GetNetworkStateHtmlInfo();
   } else {
     output += GetCrosNetworkHtmlInfo();

@@ -15,11 +15,11 @@
 #include "sql/meta_table.h"
 #include "sql/statement.h"
 
-class FilePath;
 struct ThumbnailScore;
 class SkBitmap;
 
 namespace base {
+class FilePath;
 class RefCountedMemory;
 class Time;
 }
@@ -47,7 +47,7 @@ class ThumbnailDatabase {
 
   // Must be called after creation but before any other methods are called.
   // When not INIT_OK, no other functions should be called.
-  sql::InitStatus Init(const FilePath& db_name,
+  sql::InitStatus Init(const base::FilePath& db_name,
                        const HistoryPublisher* history_publisher,
                        URLDatabase* url_database);
 
@@ -56,7 +56,7 @@ class ThumbnailDatabase {
   // |db| is the database to open.
   // |db_name| is a path to the database file.
   static sql::InitStatus OpenDatabase(sql::Connection* db,
-                                      const FilePath& db_name);
+                                      const base::FilePath& db_name);
 
   // Transactions on the database.
   void BeginTransaction();
@@ -308,8 +308,8 @@ class ThumbnailDatabase {
   bool NeedsMigrationToTopSites();
 
   // Renames the database file and drops the Thumbnails table.
-  bool RenameAndDropThumbnails(const FilePath& old_db_file,
-                               const FilePath& new_db_file);
+  bool RenameAndDropThumbnails(const base::FilePath& old_db_file,
+                               const base::FilePath& new_db_file);
 
  private:
   friend class ExpireHistoryBackend;
@@ -381,13 +381,8 @@ class ThumbnailDatabase {
   // with no index).
   bool InitIconMappingIndex();
 
-  // For the purpose of determining how widespread crbug.com/151841 is, log in a
-  // UMA histogram if the |favicons| database is missing a column. This is
-  // important because the SQLite error code from running SQL statements against
-  // a database with missing columns is SQLITE_ERROR which is not unique enough
-  // to act upon.
-  // TODO(pkotwicz): remove this function once crbug.com/151841 is resolved.
-  void LogIfFaviconDBStructureIncorrect();
+  // Returns true if the |favicons| database is missing a column.
+  bool IsFaviconDBStructureIncorrect();
 
   // Adds a mapping between the given page_url and icon_id; The mapping will be
   // added to temp_icon_mapping table if is_temporary is true.

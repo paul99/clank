@@ -22,7 +22,7 @@ cr.define('options', function() {
     __proto__: options.OptionsPage.prototype,
 
     // State variables.
-    syncSetupCompleted: false,
+    signedIn: false,
 
     /**
      * Keeps track of whether |onShowHomeButtonChanged_| has been called. See
@@ -80,7 +80,7 @@ cr.define('options', function() {
       this.updateSyncState_(loadTimeData.getValue('syncData'));
 
       $('start-stop-sync').onclick = function(event) {
-        if (self.syncSetupCompleted)
+        if (self.signedIn)
           SyncSetupOverlay.showStopSyncingUI();
         else if (cr.isChromeOS)
           SyncSetupOverlay.showSetupUIWithoutLogin();
@@ -178,8 +178,14 @@ cr.define('options', function() {
         profilesList.addEventListener('change',
             this.setProfileViewButtonsStatus_);
         $('profiles-create').onclick = function(event) {
-          chrome.send('createProfileInfo');
+          ManageProfileOverlay.showCreateDialog();
         };
+        if (OptionsPage.isSettingsApp()) {
+          $('profiles-app-list-switch').onclick = function(event) {
+            var selectedProfile = self.getSelectedProfileItem_();
+            chrome.send('switchAppListProfile', [selectedProfile.filePath]);
+          };
+        }
         $('profiles-manage').onclick = function(event) {
           ManageProfileOverlay.showManageDialog();
         };
@@ -241,6 +247,7 @@ cr.define('options', function() {
         OptionsPage.navigateToPage('clearBrowserData');
         chrome.send('coreOptionsUserMetricsAction', ['Options_ClearData']);
       };
+      $('privacyClearDataButton').hidden = OptionsPage.isSettingsApp();
       // 'metricsReportingEnabled' element is only present on Chrome branded
       // builds.
       if ($('metricsReportingEnabled')) {
@@ -404,6 +411,16 @@ cr.define('options', function() {
           chrome.send('highContrastChange',
                       [$('accessibility-high-contrast-check').checked]);
         };
+
+        // Disable the magnifier-type dropdown list when the magnifier is
+        // disabled.
+        Preferences.getInstance().addEventListener(
+            'settings.a11y.screen_magnifier',
+            function(event) {
+              $('accessibility-screen-magnifier-type-select').setDisabled(
+                  'magnifier-is-disabled', !event.value.value);
+            });
+
       }
 
       // Display management section (CrOS only).
@@ -648,22 +665,29 @@ cr.define('options', function() {
      * @private
      */
     updateSyncState_: function(syncData) {
-      if (!syncData.syncSystemEnabled) {
+      if (!syncData.signinAllowed) {
         $('sync-section').hidden = true;
         return;
       }
 
       $('sync-section').hidden = false;
-      this.syncSetupCompleted = syncData.setupCompleted;
-      $('customize-sync').hidden = !syncData.setupCompleted;
+      this.signedIn = syncData.signedIn;
+      // Display the "setup sync" button if we're signed in and sync is not
+      // managed/disabled.
+      $('customize-sync').hidden = !syncData.signedIn ||
+          syncData.managed || !syncData.syncSystemEnabled;
 
       var startStopButton = $('start-stop-sync');
-      startStopButton.disabled = syncData.managed ||
-          syncData.setupInProgress;
+      // Disable the "start/stop syncing" if we're currently signing in, or
+      // if we're already signed in and signout is not allowed.
+      startStopButton.disabled = syncData.setupInProgress ||
+          !syncData.signoutAllowed;
+      if (!syncData.signoutAllowed)
+        $('start-stop-sync-indicator').setAttribute('controlled-by', 'policy');
       startStopButton.hidden =
           syncData.setupCompleted && cr.isChromeOS;
       startStopButton.textContent =
-          syncData.setupCompleted ?
+          syncData.signedIn ?
               loadTimeData.getString('syncButtonTextStop') :
           syncData.setupInProgress ?
               loadTimeData.getString('syncButtonTextInProgress') :
@@ -677,8 +701,10 @@ cr.define('options', function() {
       $('sync-status').hidden = !statusSet;
 
       $('sync-action-link').textContent = syncData.actionLinkText;
+      // Don't show the action link if it is empty or undefined.
       $('sync-action-link').hidden = syncData.actionLinkText.length == 0;
-      $('sync-action-link').disabled = syncData.managed;
+      $('sync-action-link').disabled = syncData.managed ||
+                                       !syncData.syncSystemEnabled;
 
       // On Chrome OS, sign out the user and sign in again to get fresh
       // credentials on auth errors.
@@ -908,6 +934,10 @@ cr.define('options', function() {
       else
         $('profiles-manage').title = '';
       $('profiles-delete').disabled = !hasSelection && !hasSingleProfile;
+      if (OptionsPage.isSettingsApp()) {
+        $('profiles-app-list-switch').disabled = !hasSelection ||
+            selectedProfile.isCurrentProfile;
+      }
       var importData = $('import-data');
       if (importData) {
         importData.disabled = $('import-data').disabled = hasSelection &&
@@ -925,10 +955,13 @@ cr.define('options', function() {
       var hasSingleProfile = numProfiles == 1;
       $('profiles-list').hidden = hasSingleProfile;
       $('profiles-single-message').hidden = !hasSingleProfile;
-      $('profiles-manage').hidden = hasSingleProfile;
+      $('profiles-manage').hidden =
+          hasSingleProfile || OptionsPage.isSettingsApp();
       $('profiles-delete').textContent = hasSingleProfile ?
           loadTimeData.getString('profilesDeleteSingle') :
           loadTimeData.getString('profilesDelete');
+      if (OptionsPage.isSettingsApp())
+        $('profiles-app-list-switch').hidden = hasSingleProfile;
     },
 
     /**
@@ -1126,10 +1159,12 @@ cr.define('options', function() {
      * Set the enabled state for the proxy settings button.
      * @private
      */
-    setupProxySettingsSection_: function(disabled, label) {
+    setupProxySettingsSection_: function(disabled, extensionControlled) {
       if (!cr.isChromeOS) {
         $('proxiesConfigureButton').disabled = disabled;
-        $('proxiesLabel').textContent = label;
+        $('proxiesLabel').textContent =
+            loadTimeData.getString(extensionControlled ?
+                'proxiesLabelExtension' : 'proxiesLabelSystem');
       }
     },
 

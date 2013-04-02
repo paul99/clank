@@ -66,7 +66,7 @@ Version GetAppVersionFromRegistry(const wchar_t* app_guid) {
 // Calls setup.exe to update App Host, using the system-level setup.exe.
 bool LaunchAppHostUpdate() {
   // Get the path to the setup.exe.
-  FilePath setup_exe(
+  base::FilePath setup_exe(
       chrome_launcher_support::GetSetupExeForInstallationLevel(
           chrome_launcher_support::SYSTEM_LEVEL_INSTALLATION));
   if (setup_exe.empty()) {
@@ -92,10 +92,10 @@ void EnsureAppHostUpToDate() {
     return;  // Not an error: System-level Chrome might not be installed.
   Version app_host_version(GetAppHostVersion());
   if (app_host_version.CompareTo(new_version) < 0) {
-    LOG(INFO) << "Updating App Host from " << app_host_version.GetString()
+    LOG(INFO) << "Updating App Launcher from " << app_host_version.GetString()
               << " to " << new_version.GetString();
     if (!LaunchAppHostUpdate())
-      LOG(ERROR) << "Failed to launch App Host update.";
+      LOG(ERROR) << "Failed to launch App Launcher update.";
   }
 }
 

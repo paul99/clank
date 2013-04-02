@@ -12,10 +12,10 @@
 #include "cc/test/fake_layer_tree_host_impl.h"
 #include "cc/test/geometry_test_utils.h"
 #include "testing/gtest/include/gtest/gtest.h"
+#include "third_party/WebKit/Source/Platform/chromium/public/WebFilterOperation.h"
+#include "third_party/WebKit/Source/Platform/chromium/public/WebFilterOperations.h"
 #include "third_party/skia/include/effects/SkBlurImageFilter.h"
 #include "ui/gfx/quad_f.h"
-#include <public/WebFilterOperation.h>
-#include <public/WebFilterOperations.h>
 
 using namespace WebKit;
 
@@ -32,7 +32,7 @@ void executeCalculateDrawProperties(LayerImpl* root, std::vector<LayerImpl*>& re
     ASSERT_TRUE(root->renderSurface());
     ASSERT_FALSE(renderSurfaceLayerList.size());
 
-    LayerTreeHostCommon::calculateDrawProperties(root, root->bounds(), 1, 1, dummyMaxTextureSize, false, renderSurfaceLayerList);
+    LayerTreeHostCommon::calculateDrawProperties(root, root->bounds(), 1, 1, dummyMaxTextureSize, false, renderSurfaceLayerList, false);
 }
 
 void clearDamageForAllSurfaces(LayerImpl* layer)
@@ -341,7 +341,7 @@ TEST_F(DamageTrackerTest, verifyDamageForPerspectiveClippedLayer)
     gfx::Transform transform;
     transform.Translate3d(500, 500, 0);
     transform.ApplyPerspectiveDepth(1);
-    MathUtil::rotateEulerAngles(&transform, 0, 45, 0);
+    transform.RotateAboutYAxis(45);
     transform.Translate3d(-50, -50, 0);
 
     // Set up the child

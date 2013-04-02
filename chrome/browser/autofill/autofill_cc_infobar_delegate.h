@@ -11,7 +11,7 @@
 #include "base/string16.h"
 #include "chrome/browser/api/infobars/confirm_infobar_delegate.h"
 #include "chrome/browser/autofill/autofill_metrics.h"
-#include "webkit/glue/window_open_disposition.h"
+#include "ui/base/window_open_disposition.h"
 
 class CreditCard;
 class PersonalDataManager;
@@ -24,22 +24,37 @@ struct LoadCommittedDetails;
 // card information gathered from a form submission.
 class AutofillCCInfoBarDelegate : public ConfirmInfoBarDelegate {
  public:
+  // Creates an autofill credit card delegate and adds it to |infobar_service|.
+  static void Create(InfoBarService* infobar_service,
+                     const CreditCard* credit_card,
+                     PersonalDataManager* personal_data,
+                     const AutofillMetrics* metric_logger);
+
+#if defined(UNIT_TEST)
+  static scoped_ptr<ConfirmInfoBarDelegate> Create(
+      const CreditCard* credit_card,
+      PersonalDataManager* personal_data,
+      const AutofillMetrics* metric_logger) {
+    return scoped_ptr<ConfirmInfoBarDelegate>(new AutofillCCInfoBarDelegate(
+        NULL, credit_card, personal_data, metric_logger));
+  }
+#endif
+
+ private:
   AutofillCCInfoBarDelegate(InfoBarService* infobar_service,
                             const CreditCard* credit_card,
                             PersonalDataManager* personal_data,
                             const AutofillMetrics* metric_logger);
-
- private:
   virtual ~AutofillCCInfoBarDelegate();
 
   void LogUserAction(AutofillMetrics::InfoBarMetric user_action);
 
   // ConfirmInfoBarDelegate:
-  virtual bool ShouldExpire(
-      const content::LoadCommittedDetails& details) const OVERRIDE;
   virtual void InfoBarDismissed() OVERRIDE;
   virtual gfx::Image* GetIcon() const OVERRIDE;
   virtual Type GetInfoBarType() const OVERRIDE;
+  virtual bool ShouldExpireInternal(
+      const content::LoadCommittedDetails& details) const OVERRIDE;
   virtual string16 GetMessageText() const OVERRIDE;
   virtual string16 GetButtonLabel(InfoBarButton button) const OVERRIDE;
   virtual bool Accept() OVERRIDE;

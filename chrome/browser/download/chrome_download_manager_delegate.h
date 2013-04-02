@@ -50,7 +50,7 @@ class ChromeDownloadManagerDelegate
   // Callback type used with ChooseDownloadPath(). The callback should be
   // invoked with the user-selected path as the argument. If the file selection
   // was canceled, the argument should be the empty path.
-  typedef base::Callback<void(const FilePath&)> FileSelectedCallback;
+  typedef base::Callback<void(const base::FilePath&)> FileSelectedCallback;
 
   explicit ChromeDownloadManagerDelegate(Profile* profile);
 
@@ -68,7 +68,8 @@ class ChromeDownloadManagerDelegate
       const content::DownloadTargetCallback& callback) OVERRIDE;
   virtual content::WebContents*
       GetAlternativeWebContentsToNotifyForDownload() OVERRIDE;
-  virtual bool ShouldOpenFileBasedOnExtension(const FilePath& path) OVERRIDE;
+  virtual bool ShouldOpenFileBasedOnExtension(
+      const base::FilePath& path) OVERRIDE;
   virtual bool ShouldCompleteDownload(
       content::DownloadItem* item,
       const base::Closure& complete_callback) OVERRIDE;
@@ -77,15 +78,20 @@ class ChromeDownloadManagerDelegate
       const content::DownloadOpenDelayedCallback& callback) OVERRIDE;
   virtual bool GenerateFileHash() OVERRIDE;
   virtual void GetSaveDir(content::BrowserContext* browser_context,
-                          FilePath* website_save_dir,
-                          FilePath* download_save_dir,
+                          base::FilePath* website_save_dir,
+                          base::FilePath* download_save_dir,
                           bool* skip_dir_check) OVERRIDE;
   virtual void ChooseSavePath(
       content::WebContents* web_contents,
-      const FilePath& suggested_path,
-      const FilePath::StringType& default_extension,
+      const base::FilePath& suggested_path,
+      const base::FilePath::StringType& default_extension,
       bool can_save_as_complete,
       const content::SavePackagePathPickedCallback& callback) OVERRIDE;
+  virtual void OpenDownload(content::DownloadItem* download) OVERRIDE;
+  virtual void ShowDownloadInShell(content::DownloadItem* download) OVERRIDE;
+  virtual void CheckForFileExistence(
+      content::DownloadItem* download,
+      const content::CheckForFileExistenceCallback& callback) OVERRIDE;
 
   // Clears the last directory chosen by the user in response to a file chooser
   // prompt. Called when clearing recent history.
@@ -107,7 +113,7 @@ class ChromeDownloadManagerDelegate
   // user action initiated the download, and whether the user has explicitly
   // marked the file type as "auto open". Protected virtual for testing.
   virtual bool IsDangerousFile(const content::DownloadItem& download,
-                               const FilePath& suggested_path,
+                               const base::FilePath& suggested_path,
                                bool visited_referrer_before);
 
   // Obtains a path reservation by calling
@@ -115,8 +121,8 @@ class ChromeDownloadManagerDelegate
   // testing.
   virtual void GetReservedPath(
       content::DownloadItem& download,
-      const FilePath& target_path,
-      const FilePath& default_download_path,
+      const base::FilePath& target_path,
+      const base::FilePath& default_download_path,
       bool should_uniquify_path,
       const DownloadPathReservationTracker::ReservedPathCallback& callback);
 
@@ -126,7 +132,7 @@ class ChromeDownloadManagerDelegate
   // selected full path. If the user cancels the dialog, then an empty FilePath
   // will be passed into |callback|. Protected virtual for testing.
   virtual void ChooseDownloadPath(content::DownloadItem* item,
-                                  const FilePath& suggested_path,
+                                  const base::FilePath& suggested_path,
                                   const FileSelectedCallback& callback);
 
   // So that test classes that inherit from this for override purposes
@@ -175,12 +181,12 @@ class ChromeDownloadManagerDelegate
       bool should_prompt,
       bool is_forced_path,
       content::DownloadDangerType danger_type,
-      const FilePath& unverified_path);
+      const base::FilePath& unverified_path);
 #endif
 
   // Determine the intermediate path to use for |target_path|. |danger_type|
   // specifies the danger level of the download.
-  FilePath GetIntermediatePath(const FilePath& target_path,
+  base::FilePath GetIntermediatePath(const base::FilePath& target_path,
                                content::DownloadDangerType danger_type);
 
   // Called on the UI thread once a reserved path is available. Updates the
@@ -191,7 +197,7 @@ class ChromeDownloadManagerDelegate
       const content::DownloadTargetCallback& callback,
       bool should_prompt,
       content::DownloadDangerType danger_type,
-      const FilePath& reserved_path,
+      const base::FilePath& reserved_path,
       bool reserved_path_verified);
 
   // Called on the UI thread once the final target path is available.
@@ -200,14 +206,7 @@ class ChromeDownloadManagerDelegate
       const content::DownloadTargetCallback& callback,
       content::DownloadItem::TargetDisposition disposition,
       content::DownloadDangerType danger_type,
-      const FilePath& target_path);
-
-  // Check policy of whether we should open this download with a web intents
-  // dispatch.
-  bool ShouldOpenWithWebIntents(const content::DownloadItem* item);
-
-  // Open the given item with a web intent dispatch.
-  void OpenWithWebIntent(const content::DownloadItem* item);
+      const base::FilePath& target_path);
 
   // Internal gateways for ShouldCompleteDownload().
   bool IsDownloadReadyForCompletion(
@@ -246,7 +245,7 @@ class ChromeDownloadManagerDelegate
 
   // The directory most recently chosen by the user in response to a Save As
   // dialog for a regular download.
-  FilePath last_download_path_;
+  base::FilePath last_download_path_;
 
   DISALLOW_COPY_AND_ASSIGN(ChromeDownloadManagerDelegate);
 };

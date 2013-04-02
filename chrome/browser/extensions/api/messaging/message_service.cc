@@ -162,7 +162,7 @@ void MessageService::OpenChannelToExtension(
   std::string tab_json = "null";
   if (source_contents) {
     scoped_ptr<DictionaryValue> tab_value(ExtensionTabUtil::CreateTabValue(
-        source_contents, ExtensionTabUtil::INCLUDE_PRIVACY_SENSITIVE_FIELDS));
+        source_contents));
     base::JSONWriter::Write(tab_value.get(), &tab_json);
   }
 
@@ -187,9 +187,7 @@ void MessageService::OpenChannelToNativeApp(
     int source_routing_id,
     int receiver_port_id,
     const std::string& source_extension_id,
-    const std::string& native_app_name,
-    const std::string& channel_name,
-    const std::string& connect_message) {
+    const std::string& native_app_name) {
   content::RenderProcessHost* source =
       content::RenderProcessHost::FromID(source_process_id);
   if (!source)
@@ -202,7 +200,7 @@ void MessageService::OpenChannelToNativeApp(
   std::string tab_json = "null";
   if (source_contents) {
     scoped_ptr<DictionaryValue> tab_value(ExtensionTabUtil::CreateTabValue(
-        source_contents, ExtensionTabUtil::INCLUDE_PRIVACY_SENSITIVE_FIELDS));
+        source_contents));
     base::JSONWriter::Write(tab_value.get(), &tab_json);
   }
 
@@ -210,34 +208,11 @@ void MessageService::OpenChannelToNativeApp(
   channel->opener.reset(new ExtensionMessagePort(source, MSG_ROUTING_CONTROL,
                                                  source_extension_id));
 
-  NativeMessageProcessHost::MessageType type =
-      channel_name == "chrome.extension.sendNativeMessage" ?
-      NativeMessageProcessHost::TYPE_SEND_MESSAGE_REQUEST :
-      NativeMessageProcessHost::TYPE_CONNECT;
-
-  content::BrowserThread::PostTask(
-      content::BrowserThread::FILE,
-      FROM_HERE,
-      base::Bind(&NativeMessageProcessHost::Create,
-                 base::WeakPtr<NativeMessageProcessHost::Client>(
-                    weak_factory_.GetWeakPtr()),
-                 native_app_name, connect_message, receiver_port_id,
-                 type,
-                 base::Bind(&MessageService::FinalizeOpenChannelToNativeApp,
-                            weak_factory_.GetWeakPtr(),
-                            receiver_port_id,
-                            channel_name,
-                            base::Passed(&channel),
-                            tab_json)));
-}
-
-void MessageService::FinalizeOpenChannelToNativeApp(
-    int receiver_port_id,
-    const std::string& channel_name,
-    scoped_ptr<MessageChannel> channel,
-    const std::string& tab_json,
-    NativeMessageProcessHost::ScopedHost native_process) {
-  DCHECK(content::BrowserThread::CurrentlyOn(content::BrowserThread::UI));
+  scoped_ptr<NativeMessageProcessHost> native_process =
+      NativeMessageProcessHost::Create(
+          base::WeakPtr<NativeMessageProcessHost::Client>(
+              weak_factory_.GetWeakPtr()),
+          native_app_name, receiver_port_id);
 
   // Abandon the channel
   if (!native_process.get()) {
@@ -287,7 +262,7 @@ void MessageService::OpenChannelToTab(
   std::string tab_json = "null";
   if (source_contents) {
     scoped_ptr<DictionaryValue> tab_value(ExtensionTabUtil::CreateTabValue(
-        source_contents, ExtensionTabUtil::INCLUDE_PRIVACY_SENSITIVE_FIELDS));
+        source_contents));
     base::JSONWriter::Write(tab_value.get(), &tab_json);
   }
 

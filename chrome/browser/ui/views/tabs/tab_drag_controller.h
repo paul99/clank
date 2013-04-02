@@ -12,16 +12,19 @@
 #include "base/timer.h"
 #include "chrome/browser/ui/tabs/dock_info.h"
 #include "chrome/browser/ui/tabs/tab_strip_model_observer.h"
-#include "chrome/browser/ui/tabs/tab_strip_selection_model.h"
 #include "chrome/browser/ui/views/tabs/tab_strip_types.h"
 #include "content/public/browser/notification_observer.h"
 #include "content/public/browser/notification_registrar.h"
 #include "content/public/browser/web_contents_delegate.h"
+#include "ui/base/models/list_selection_model.h"
 #include "ui/gfx/rect.h"
 #include "ui/views/widget/widget_observer.h"
 
 namespace gfx {
 class Screen;
+}
+namespace ui {
+class ListSelectionModel;
 }
 namespace views {
 class View;
@@ -32,7 +35,6 @@ class Tab;
 struct TabRendererData;
 class TabStrip;
 class TabStripModel;
-class TabStripSelectionModel;
 
 // TabDragController is responsible for managing the tab dragging session. When
 // the user presses the mouse on a tab a new TabDragController is created and
@@ -71,6 +73,12 @@ class TabDragController : public content::WebContentsDelegate,
     REORDER
   };
 
+  // Indicates the event source that initiated the drag.
+  enum EventSource {
+    EVENT_SOURCE_MOUSE,
+    EVENT_SOURCE_TOUCH,
+  };
+
   // Amount above or below the tabstrip the user has to drag before detaching.
   static const int kTouchVerticalDetachMagnetism;
   static const int kVerticalDetachMagnetism;
@@ -91,9 +99,10 @@ class TabDragController : public content::WebContentsDelegate,
             const std::vector<Tab*>& tabs,
             const gfx::Point& mouse_offset,
             int source_tab_offset,
-            const TabStripSelectionModel& initial_selection_model,
+            const ui::ListSelectionModel& initial_selection_model,
             DetachBehavior detach_behavior,
-            MoveBehavior move_behavior);
+            MoveBehavior move_behavior,
+            EventSource event_source);
 
   // Returns true if there is a drag underway and the drag is attached to
   // |tab_strip|.
@@ -228,8 +237,8 @@ class TabDragController : public content::WebContentsDelegate,
                               bool* was_blocked) OVERRIDE;
   virtual void LoadingStateChanged(content::WebContents* source) OVERRIDE;
   virtual bool ShouldSuppressDialogs() OVERRIDE;
-  virtual content::JavaScriptDialogCreator*
-      GetJavaScriptDialogCreator() OVERRIDE;
+  virtual content::JavaScriptDialogManager*
+      GetJavaScriptDialogManager() OVERRIDE;
 
   // Overridden from content::NotificationObserver:
   virtual void Observe(int type,
@@ -467,6 +476,8 @@ class TabDragController : public content::WebContentsDelegate,
   // Handles registering for notifications.
   content::NotificationRegistrar registrar_;
 
+  EventSource event_source_;
+
   // The TabStrip the drag originated from.
   TabStrip* source_tabstrip_;
 
@@ -497,10 +508,7 @@ class TabDragController : public content::WebContentsDelegate,
   // detached window is created at the right location.
   gfx::Point mouse_offset_;
 
-  // Offset of the mouse relative to the source tab.
-  int source_tab_offset_;
-
-  // Ratio of the x-coordinate of the |source_tab_offset_| to the width of the
+  // Ratio of the x-coordinate of the |source_tab_offset| to the width of the
   // tab. Not used for vertical tabs.
   float offset_to_width_ratio_;
 
@@ -561,10 +569,10 @@ class TabDragController : public content::WebContentsDelegate,
 
   // The selection model before the drag started. See comment above Init() for
   // details.
-  TabStripSelectionModel initial_selection_model_;
+  ui::ListSelectionModel initial_selection_model_;
 
   // The selection model of |attached_tabstrip_| before the tabs were attached.
-  TabStripSelectionModel selection_model_before_attach_;
+  ui::ListSelectionModel selection_model_before_attach_;
 
   // Initial x-coordinates of the tabs when the drag started. Only used for
   // touch mode.

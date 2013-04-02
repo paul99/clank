@@ -104,6 +104,7 @@ var SourceEntry = (function() {
             this.description_ = e.params.host_and_port;
           break;
         case EventSourceType.SOCKET:
+        case EventSourceType.PROXY_CLIENT_SOCKET:
           // Use description of parent source, if any.
           if (e.params.source_dependency != undefined) {
             var parentId = e.params.source_dependency.id;
@@ -202,10 +203,14 @@ var SourceEntry = (function() {
           return e;
       }
       if (this.entries_.length >= 2) {
-        if (this.entries_[0].type == EventType.SOCKET_POOL_CONNECT_JOB ||
-            this.entries_[1].type == EventType.UDP_CONNECT) {
+        // Needed for compatability with log dumps prior to M26.
+        // TODO(mmenke):  Remove this.
+        if (this.entries_[0].type == EventType.SOCKET_POOL_CONNECT_JOB &&
+            this.entries_[0].params == undefined) {
           return this.entries_[1];
         }
+        if (this.entries_[1].type == EventType.UDP_CONNECT)
+          return this.entries_[1];
         if (this.entries_[0].type == EventType.REQUEST_ALIVE &&
             this.entries_[0].params == undefined) {
           var start_index = 1;

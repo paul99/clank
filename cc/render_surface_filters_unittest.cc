@@ -4,10 +4,9 @@
 
 #include "cc/render_surface_filters.h"
 
-#include "cc/test/compositor_fake_web_graphics_context_3d.h"
 #include "testing/gtest/include/gtest/gtest.h"
-#include <public/WebFilterOperation.h>
-#include <public/WebFilterOperations.h>
+#include "third_party/WebKit/Source/Platform/chromium/public/WebFilterOperation.h"
+#include "third_party/WebKit/Source/Platform/chromium/public/WebFilterOperations.h"
 
 using namespace WebKit;
 
@@ -56,9 +55,17 @@ TEST(RenderSurfaceFiltersTest, testColorMatrixFiltersCombined)
     EXPECT_TRUE(isCombined(WebFilterOperation::createOpacityFilter(0.5)));
     EXPECT_TRUE(isCombined(WebFilterOperation::createOpacityFilter(1)));
 
-    // Several filters should never combine: brightness(amount > 0), blur, drop-shadow.
-    EXPECT_FALSE(isCombined(WebFilterOperation::createBrightnessFilter(0.5)));
-    EXPECT_FALSE(isCombined(WebFilterOperation::createBrightnessFilter(1)));
+    // Brightness combines when amount <= 1
+    EXPECT_TRUE(isCombined(WebFilterOperation::createBrightnessFilter(0.5)));
+    EXPECT_TRUE(isCombined(WebFilterOperation::createBrightnessFilter(1)));
+    EXPECT_FALSE(isCombined(WebFilterOperation::createBrightnessFilter(1.5)));
+
+    // SaturatingBrightness combines only when amount == 0
+    EXPECT_TRUE(isCombined(WebFilterOperation::createSaturatingBrightnessFilter(0)));
+    EXPECT_FALSE(isCombined(WebFilterOperation::createSaturatingBrightnessFilter(0.5)));
+    EXPECT_FALSE(isCombined(WebFilterOperation::createSaturatingBrightnessFilter(1)));
+
+    // Several filters should never combine: blur, drop-shadow.
     EXPECT_FALSE(isCombined(WebFilterOperation::createBlurFilter(3)));
     EXPECT_FALSE(isCombined(WebFilterOperation::createDropShadowFilter(WebPoint(2, 2), 3, 0xffffffff)));
 
@@ -103,8 +110,8 @@ TEST(RenderSurfaceFiltersTest, testColorMatrixFiltersCombined)
 
 TEST(RenderSurfaceFiltersTest, testOptimize)
 {
-    WebFilterOperation combines(WebFilterOperation::createBrightnessFilter(0));
-    WebFilterOperation doesntCombine(WebFilterOperation::createBrightnessFilter(1));
+    WebFilterOperation combines(WebFilterOperation::createBrightnessFilter(1));
+    WebFilterOperation doesntCombine(WebFilterOperation::createBrightnessFilter(1.5));
 
     WebFilterOperations filters;
     WebFilterOperations optimized = RenderSurfaceFilters::optimize(filters);

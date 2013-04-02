@@ -2,6 +2,7 @@
 # Use of this source code is governed by a BSD-style license that can be
 # found in the LICENSE file.
 import inspect
+import socket
 import time
 
 class TimeoutException(Exception):
@@ -30,3 +31,38 @@ def WaitFor(condition,
       raise TimeoutException('Timed out while waiting %ds for %s.' %
                              (timeout, condition_string))
     time.sleep(poll_interval)
+
+def FindElementAndPerformAction(tab, text, callback_code):
+  """JavaScript snippet for finding an element with a given text on a page."""
+  code = """
+      (function() {
+        var callback_function = """ + callback_code + """;
+        function _findElement(element, text) {
+          if (element.innerHTML == text) {
+            callback_function
+            return element;
+          }
+          for (var i in element.childNodes) {
+            var found = _findElement(element.childNodes[i], text);
+            if (found)
+              return found;
+          }
+          return null;
+        }
+        var _element = _findElement(document, \"""" + text + """\");
+        return callback_function(_element);
+      })();"""
+  return tab.EvaluateJavaScript(code)
+
+class PortPair(object):
+  def __init__(self, local_port, remote_port):
+    self.local_port = local_port
+    self.remote_port = remote_port
+
+def GetAvailableLocalPort():
+  tmp = socket.socket()
+  tmp.bind(('', 0))
+  port = tmp.getsockname()[1]
+  tmp.close()
+
+  return port

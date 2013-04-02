@@ -16,6 +16,7 @@
 #include "sync/notifier/invalidation_state_tracker.h"
 
 class PrefService;
+class PrefRegistrySyncable;
 
 namespace base {
 class DictionaryValue;
@@ -34,7 +35,8 @@ class InvalidatorStorage : public base::SupportsWeakPtr<InvalidatorStorage>,
  public:
   // |pref_service| may be NULL (for unit tests), but in that case no setter
   // methods should be called. Does not own |pref_service|.
-  explicit InvalidatorStorage(PrefService* pref_service);
+  explicit InvalidatorStorage(PrefService* pref_service,
+                              PrefRegistrySyncable* registry);
   virtual ~InvalidatorStorage();
 
   // Erases invalidation versions and state stored on disk.
@@ -47,7 +49,8 @@ class InvalidatorStorage : public base::SupportsWeakPtr<InvalidatorStorage>,
                                        int64 max_version,
                                        const std::string& payload) OVERRIDE;
   virtual void Forget(const syncer::ObjectIdSet& ids) OVERRIDE;
-  // TODO(tim): These are not yet used. Bug 124140.
+  virtual void SetInvalidatorClientId(const std::string& client_id) OVERRIDE;
+  virtual std::string GetInvalidatorClientId() const OVERRIDE;
   virtual void SetBootstrapData(const std::string& data) OVERRIDE;
   virtual std::string GetBootstrapData() const OVERRIDE;
   virtual void GenerateAckHandles(
@@ -89,7 +92,7 @@ class InvalidatorStorage : public base::SupportsWeakPtr<InvalidatorStorage>,
 
   // Code for migrating from old MaxInvalidationVersions pref, which was a map
   // from sync types to max invalidation versions.
-  void MigrateMaxInvalidationVersionsPref();
+  void MigrateMaxInvalidationVersionsPref(PrefRegistrySyncable* registry);
   static void DeserializeMap(const base::DictionaryValue* max_versions_dict,
                              syncer::InvalidationStateMap* map);
 

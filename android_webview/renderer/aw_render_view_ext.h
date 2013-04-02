@@ -7,8 +7,11 @@
 
 #include "base/basictypes.h"
 #include "base/compiler_specific.h"
+#include "base/memory/weak_ptr.h"
 #include "content/public/renderer/render_view_observer.h"
+#include "skia/ext/refptr.h"
 #include "third_party/WebKit/Source/WebKit/chromium/public/WebPermissionClient.h"
+#include "third_party/skia/include/core/SkPicture.h"
 
 namespace WebKit {
 
@@ -27,6 +30,9 @@ class AwRenderViewExt : public content::RenderViewObserver,
  public:
   static void RenderViewCreated(content::RenderView* render_view);
 
+  // Required to be public by IPC_MESSAGE_HANDLER for sync messages.
+  using content::RenderViewObserver::Send;
+
  private:
   AwRenderViewExt(content::RenderView* render_view);
   virtual ~AwRenderViewExt();
@@ -40,6 +46,12 @@ class AwRenderViewExt : public content::RenderViewObserver,
   void OnDocumentHasImagesRequest(int id);
 
   void OnDoHitTest(int view_x, int view_y);
+
+  void OnEnableCapturePictureCallback(bool enable);
+
+  void OnPictureUpdate(skia::RefPtr<SkPicture> picture);
+
+  void OnCapturePictureSync();
 
   // WebKit::WebPermissionClient implementation.
   virtual bool allowImage(WebKit::WebFrame* frame,

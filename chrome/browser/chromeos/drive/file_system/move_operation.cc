@@ -7,8 +7,8 @@
 #include "chrome/browser/chromeos/drive/drive.pb.h"
 #include "chrome/browser/chromeos/drive/drive_cache.h"
 #include "chrome/browser/chromeos/drive/drive_file_system_util.h"
+#include "chrome/browser/chromeos/drive/drive_scheduler.h"
 #include "chrome/browser/chromeos/drive/file_system/operation_observer.h"
-#include "chrome/browser/google_apis/drive_service_interface.h"
 #include "content/public/browser/browser_thread.h"
 
 using content::BrowserThread;
@@ -17,20 +17,22 @@ namespace drive {
 namespace file_system {
 
 MoveOperation::MoveOperation(
-    google_apis::DriveServiceInterface* drive_service,
+    DriveScheduler* drive_scheduler,
     DriveResourceMetadata* metadata,
     OperationObserver* observer)
-  : drive_service_(drive_service),
+  : drive_scheduler_(drive_scheduler),
     metadata_(metadata),
     observer_(observer),
     weak_ptr_factory_(ALLOW_THIS_IN_INITIALIZER_LIST(this)) {
+  DCHECK(BrowserThread::CurrentlyOn(BrowserThread::UI));
 }
 
 MoveOperation::~MoveOperation() {
+  DCHECK(BrowserThread::CurrentlyOn(BrowserThread::UI));
 }
 
-void MoveOperation::Move(const FilePath& src_file_path,
-                         const FilePath& dest_file_path,
+void MoveOperation::Move(const base::FilePath& src_file_path,
+                         const base::FilePath& dest_file_path,
                          const FileOperationCallback& callback) {
   DCHECK(BrowserThread::CurrentlyOn(BrowserThread::UI));
   DCHECK(!callback.is_null());
@@ -45,7 +47,7 @@ void MoveOperation::Move(const FilePath& src_file_path,
 }
 
 void MoveOperation::MoveAfterGetEntryInfoPair(
-    const FilePath& dest_file_path,
+    const base::FilePath& dest_file_path,
     const FileOperationCallback& callback,
     scoped_ptr<EntryInfoPairResult> result) {
   DCHECK(BrowserThread::CurrentlyOn(BrowserThread::UI));
@@ -67,8 +69,8 @@ void MoveOperation::MoveAfterGetEntryInfoPair(
   }
 
   // If the file/directory is moved to the same directory, just rename it.
-  const FilePath& src_file_path = result->first.path;
-  const FilePath& dest_parent_path = result->second.path;
+  const base::FilePath& src_file_path = result->first.path;
+  const base::FilePath& dest_parent_path = result->second.path;
   DCHECK_EQ(dest_parent_path.value(), dest_file_path.DirName().value());
   if (src_file_path.DirName() == dest_parent_path) {
     FileMoveCallback final_file_path_update_callback =
@@ -111,16 +113,16 @@ void MoveOperation::MoveAfterGetEntryInfoPair(
 
 void MoveOperation::OnFilePathUpdated(const FileOperationCallback& callback,
                                         DriveFileError error,
-                                        const FilePath& /* file_path */) {
+                                        const base::FilePath& /* file_path */) {
   DCHECK(BrowserThread::CurrentlyOn(BrowserThread::UI));
   DCHECK(!callback.is_null());
 
   callback.Run(error);
 }
 
-void MoveOperation::Rename(const FilePath& file_path,
-                             const FilePath::StringType& new_name,
-                             const FileMoveCallback& callback) {
+void MoveOperation::Rename(const base::FilePath& file_path,
+                           const base::FilePath::StringType& new_name,
+                           const FileMoveCallback& callback) {
   DCHECK(BrowserThread::CurrentlyOn(BrowserThread::UI));
   DCHECK(!callback.is_null());
 
@@ -142,8 +144,8 @@ void MoveOperation::Rename(const FilePath& file_path,
 }
 
 void MoveOperation::RenameAfterGetEntryInfo(
-    const FilePath& file_path,
-    const FilePath::StringType& new_name,
+    const base::FilePath& file_path,
+    const base::FilePath::StringType& new_name,
     const FileMoveCallback& callback,
     DriveFileError error,
     scoped_ptr<DriveEntryProto> entry_proto) {
@@ -159,26 +161,19 @@ void MoveOperation::RenameAfterGetEntryInfo(
   // Drop the .g<something> extension from |new_name| if the file being
   // renamed is a hosted document and |new_name| has the same .g<something>
   // extension as the file.
-  FilePath::StringType file_name = new_name;
+  base::FilePath::StringType file_name = new_name;
   if (entry_proto->has_file_specific_info() &&
       entry_proto->file_specific_info().is_hosted_document()) {
-    FilePath new_file(file_name);
+    base::FilePath new_file(file_name);
     if (new_file.Extension() ==
         entry_proto->file_specific_info().document_extension()) {
       file_name = new_file.RemoveExtension().value();
     }
   }
 
-  // The edit URL can be empty for non-editable files (such as files shared with
-  // read-only privilege).
-  if (entry_proto->edit_url().empty()) {
-    callback.Run(DRIVE_FILE_ERROR_ACCESS_DENIED, file_path);
-    return;
-  }
-
-  drive_service_->RenameResource(
-      GURL(entry_proto->edit_url()),
-      file_name,
+  drive_scheduler_->RenameResource(
+      entry_proto->resource_id(),
+      base::FilePath(file_name).AsUTF8Unsafe(),
       base::Bind(&MoveOperation::RenameEntryLocally,
                  weak_ptr_factory_.GetWeakPtr(),
                  file_path,
@@ -187,8 +182,8 @@ void MoveOperation::RenameAfterGetEntryInfo(
 }
 
 void MoveOperation::RenameEntryLocally(
-    const FilePath& file_path,
-    const FilePath::StringType& new_name,
+    const base::FilePath& file_path,
+    const base::FilePath::StringType& new_name,
     const FileMoveCallback& callback,
     google_apis::GDataErrorCode status) {
   DCHECK(BrowserThread::CurrentlyOn(BrowserThread::UI));
@@ -196,7 +191,7 @@ void MoveOperation::RenameEntryLocally(
 
   const DriveFileError error = util::GDataToDriveFileError(status);
   if (error != DRIVE_FILE_OK) {
-    callback.Run(error, FilePath());
+    callback.Run(error, base::FilePath());
     return;
   }
 
@@ -211,7 +206,7 @@ void MoveOperation::RenameEntryLocally(
 void MoveOperation::RemoveEntryFromDirectory(
     const FileMoveCallback& callback,
     DriveFileError error,
-    const FilePath& file_path) {
+    const base::FilePath& file_path) {
   DCHECK(BrowserThread::CurrentlyOn(BrowserThread::UI));
   DCHECK(!callback.is_null());
 
@@ -231,7 +226,7 @@ void MoveOperation::RemoveEntryFromDirectoryAfterEntryInfoPair(
   DCHECK(!callback.is_null());
   DCHECK(result.get());
 
-  const FilePath& file_path = result->first.path;
+  const base::FilePath& file_path = result->first.path;
   if (result->first.error != DRIVE_FILE_OK) {
     callback.Run(result->first.error, file_path);
     return;
@@ -249,13 +244,13 @@ void MoveOperation::RemoveEntryFromDirectoryAfterEntryInfoPair(
   }
 
   // The entry is moved to the root directory.
-  drive_service_->RemoveResourceFromDirectory(
-      GURL(dir_proto->content_url()),
+  drive_scheduler_->RemoveResourceFromDirectory(
+      dir_proto->resource_id(),
       entry_proto->resource_id(),
       base::Bind(&MoveOperation::MoveEntryToDirectory,
                  weak_ptr_factory_.GetWeakPtr(),
                  file_path,
-                 FilePath(kDriveRootDirectory),
+                 base::FilePath(kDriveRootDirectory),
                  base::Bind(&MoveOperation::NotifyAndRunFileMoveCallback,
                             weak_ptr_factory_.GetWeakPtr(),
                             callback)));
@@ -263,10 +258,10 @@ void MoveOperation::RemoveEntryFromDirectoryAfterEntryInfoPair(
 
 // TODO(zork): Share with CopyOperation.
 // See: crbug.com/150050
-void MoveOperation::AddEntryToDirectory(const FilePath& directory_path,
+void MoveOperation::AddEntryToDirectory(const base::FilePath& directory_path,
                                         const FileOperationCallback& callback,
                                         DriveFileError error,
-                                        const FilePath& file_path) {
+                                        const base::FilePath& file_path) {
   DCHECK(BrowserThread::CurrentlyOn(BrowserThread::UI));
   DCHECK(!callback.is_null());
 
@@ -304,11 +299,11 @@ void MoveOperation::AddEntryToDirectoryAfterGetEntryInfoPair(
     return;
   }
 
-  const FilePath& file_path = result->first.path;
-  const FilePath& dir_path = result->second.path;
-  drive_service_->AddResourceToDirectory(
-      GURL(dir_proto->content_url()),
-      GURL(src_proto->edit_url()),
+  const base::FilePath& file_path = result->first.path;
+  const base::FilePath& dir_path = result->second.path;
+  drive_scheduler_->AddResourceToDirectory(
+      dir_proto->resource_id(),
+      src_proto->resource_id(),
       base::Bind(&MoveOperation::MoveEntryToDirectory,
                  weak_ptr_factory_.GetWeakPtr(),
                  file_path,
@@ -321,8 +316,8 @@ void MoveOperation::AddEntryToDirectoryAfterGetEntryInfoPair(
 // TODO(zork): Share with CopyOperation.
 // See: crbug.com/150050
 void MoveOperation::MoveEntryToDirectory(
-    const FilePath& file_path,
-    const FilePath& directory_path,
+    const base::FilePath& file_path,
+    const base::FilePath& directory_path,
     const FileMoveCallback& callback,
     google_apis::GDataErrorCode status) {
   DCHECK(BrowserThread::CurrentlyOn(BrowserThread::UI));
@@ -330,7 +325,7 @@ void MoveOperation::MoveEntryToDirectory(
 
   const DriveFileError error = util::GDataToDriveFileError(status);
   if (error != DRIVE_FILE_OK) {
-    callback.Run(error, FilePath());
+    callback.Run(error, base::FilePath());
     return;
   }
 
@@ -342,7 +337,7 @@ void MoveOperation::MoveEntryToDirectory(
 void MoveOperation::NotifyAndRunFileOperationCallback(
     const FileOperationCallback& callback,
     DriveFileError error,
-    const FilePath& moved_file_path) {
+    const base::FilePath& moved_file_path) {
   DCHECK(BrowserThread::CurrentlyOn(BrowserThread::UI));
   DCHECK(!callback.is_null());
 
@@ -355,7 +350,7 @@ void MoveOperation::NotifyAndRunFileOperationCallback(
 void MoveOperation::NotifyAndRunFileMoveCallback(
     const FileMoveCallback& callback,
     DriveFileError error,
-    const FilePath& moved_file_path) {
+    const base::FilePath& moved_file_path) {
   DCHECK(BrowserThread::CurrentlyOn(BrowserThread::UI));
   DCHECK(!callback.is_null());
 

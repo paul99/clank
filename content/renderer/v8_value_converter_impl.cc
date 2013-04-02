@@ -10,7 +10,7 @@
 #include "base/memory/scoped_ptr.h"
 #include "base/values.h"
 #include "third_party/WebKit/Source/WebKit/chromium/public/WebArrayBuffer.h"
-#include "third_party/WebKit/Source/WebKit/chromium/public/platform/WebArrayBufferView.h"
+#include "third_party/WebKit/Source/WebKit/chromium/public/WebArrayBufferView.h"
 #include "v8/include/v8.h"
 
 using base::BinaryValue;
@@ -134,13 +134,9 @@ v8::Handle<v8::Value> V8ValueConverterImpl::ToV8Object(
     const DictionaryValue* val) const {
   v8::Handle<v8::Object> result(v8::Object::New());
 
-  for (DictionaryValue::key_iterator iter = val->begin_keys();
-       iter != val->end_keys(); ++iter) {
-    const Value* child = NULL;
-    CHECK(val->GetWithoutPathExpansion(*iter, &child));
-
-    const std::string& key = *iter;
-    v8::Handle<v8::Value> child_v8 = ToV8ValueImpl(child);
+  for (DictionaryValue::Iterator iter(*val); !iter.IsAtEnd(); iter.Advance()) {
+    const std::string& key = iter.key();
+    v8::Handle<v8::Value> child_v8 = ToV8ValueImpl(&iter.value());
     CHECK(!child_v8.IsEmpty());
 
     v8::TryCatch try_catch;

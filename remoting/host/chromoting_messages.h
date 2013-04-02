@@ -6,6 +6,7 @@
 #define REMOTING_HOST_CHROMOTING_MESSAGES_H_
 
 #include "ipc/ipc_platform_file.h"
+#include "media/video/capture/screen/mouse_cursor_shape.h"
 #include "third_party/skia/include/core/SkPoint.h"
 #include "third_party/skia/include/core/SkRect.h"
 #include "third_party/skia/include/core/SkSize.h"
@@ -39,7 +40,7 @@ IPC_MESSAGE_CONTROL1(ChromotingDaemonNetworkMsg_TerminalDisconnected,
 
 // Notifies the network process that |terminal_id| is now attached to
 // a desktop integration process. |desktop_process| is the handle of the desktop
-// process |desktop_pipe| is the client end of the desktop-to-network pipe
+// process. |desktop_pipe| is the client end of the desktop-to-network pipe
 // opened.
 //
 // Windows only: |desktop_pipe| has to be duplicated from the desktop process
@@ -47,7 +48,7 @@ IPC_MESSAGE_CONTROL1(ChromotingDaemonNetworkMsg_TerminalDisconnected,
 // the sender.
 IPC_MESSAGE_CONTROL3(ChromotingDaemonNetworkMsg_DesktopAttached,
                      int /* terminal_id */,
-                     IPC::PlatformFileForTransit /* desktop_process */,
+                     base::ProcessHandle /* desktop_process */,
                      IPC::PlatformFileForTransit /* desktop_pipe */)
 
 //-----------------------------------------------------------------------------
@@ -127,7 +128,13 @@ IPC_STRUCT_TRAITS_BEGIN(SkISize)
   IPC_STRUCT_TRAITS_MEMBER(fHeight)
 IPC_STRUCT_TRAITS_END()
 
-// Serialized CaptureData structure.
+IPC_STRUCT_TRAITS_BEGIN(media::MouseCursorShape)
+  IPC_STRUCT_TRAITS_MEMBER(size)
+  IPC_STRUCT_TRAITS_MEMBER(hotspot)
+  IPC_STRUCT_TRAITS_MEMBER(data)
+IPC_STRUCT_TRAITS_END()
+
+// Serialized media::ScreenCaptureData structure.
 IPC_STRUCT_BEGIN(SerializedCapturedData)
   // ID of the shared memory buffer containing the pixels.
   IPC_STRUCT_MEMBER(int, shared_buffer_id)
@@ -140,9 +147,6 @@ IPC_STRUCT_BEGIN(SerializedCapturedData)
 
   // Dimentions of the buffer in pixels.
   IPC_STRUCT_MEMBER(SkISize, dimensions)
-
-  // Pixel format.
-  IPC_STRUCT_MEMBER(int32, pixel_format)
 
   // Time spent in capture. Unit is in milliseconds.
   IPC_STRUCT_MEMBER(int, capture_time_ms)
@@ -159,17 +163,29 @@ IPC_MESSAGE_CONTROL1(ChromotingDesktopNetworkMsg_CaptureCompleted,
                      SerializedCapturedData /* capture_data */ )
 
 // Carries a cursor share update from the desktop session agent to the client.
-// |serialized_cursor_shape| is a serialized protocol::CursorShapeInfo.
 IPC_MESSAGE_CONTROL1(ChromotingDesktopNetworkMsg_CursorShapeChanged,
-                     std::string /* serialized_cursor_shape */ )
+                     media::MouseCursorShape /* cursor_shape */ )
 
 // Carries a clipboard event from the desktop session agent to the client.
 // |serialized_event| is a serialized protocol::ClipboardEvent.
 IPC_MESSAGE_CONTROL1(ChromotingDesktopNetworkMsg_InjectClipboardEvent,
                      std::string /* serialized_event */ )
 
+// Requests the network process to terminate the client session.
+IPC_MESSAGE_CONTROL0(ChromotingDesktopNetworkMsg_DisconnectSession)
+
+// Carries an audio packet from the desktop session agent to the client.
+// |serialized_packet| is a serialized AudioPacket.
+IPC_MESSAGE_CONTROL1(ChromotingDesktopNetworkMsg_AudioPacket,
+                     std::string /* serialized_packet */ )
+
 //-----------------------------------------------------------------------------
 // Chromoting messages sent from the network to the desktop process.
+
+// Passes the client session data to the desktop session agent and starts it.
+// This must be the first message received from the host.
+IPC_MESSAGE_CONTROL1(ChromotingNetworkDesktopMsg_StartSessionAgent,
+                     std::string /* authenticated_jid */ )
 
 // Notifies the desktop process that the shared memory buffer has been mapped to
 // the memory of the network process and so it can be safely dropped by

@@ -158,6 +158,7 @@ extern const char kMsi[];
 extern const char kMultiInstall[];
 extern const char kNewSetupExe[];
 extern const char kOnOsUpgrade[];
+extern const char kQueryEULAAcceptance[];
 extern const char kRegisterChromeBrowser[];
 extern const char kRegisterChromeBrowserSuffix[];
 extern const char kRegisterDevChrome[];
@@ -165,6 +166,7 @@ extern const char kRegisterURLProtocol[];
 extern const char kRenameChromeExe[];
 extern const char kRemoveChromeRegistration[];
 extern const char kRunAsAdmin[];
+extern const char kSelfDestruct[];
 extern const char kSystemLevel[];
 extern const char kUninstall[];
 extern const char kUpdateSetupExe[];
@@ -190,6 +192,7 @@ extern const wchar_t kChromeOldExe[];
 extern const wchar_t kChromeNewExe[];
 extern const wchar_t kCmdInstallApp[];
 extern const wchar_t kCmdOnOsUpgrade[];
+extern const wchar_t kCmdQueryEULAAcceptance[];
 extern const wchar_t kCmdQuickEnableApplicationHost[];
 extern const wchar_t kCmdQuickEnableCf[];
 extern const wchar_t kDelegateExecuteExe[];
@@ -216,9 +219,6 @@ extern const wchar_t kInstallerExtraCode1[];
 extern const wchar_t kInstallerResult[];
 extern const wchar_t kInstallerResultUIString[];
 extern const wchar_t kInstallerSuccessLaunchCmdLine[];
-
-// Google Update named environment variable that implies kSystemLevel.
-extern const char kGoogleUpdateIsMachineEnvVar[];
 
 // Product options.
 extern const wchar_t kOptionMultiInstall[];

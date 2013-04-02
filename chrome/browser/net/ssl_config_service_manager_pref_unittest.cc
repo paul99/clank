@@ -7,6 +7,7 @@
 #include "base/command_line.h"
 #include "base/memory/ref_counted.h"
 #include "base/message_loop.h"
+#include "base/prefs/pref_registry_simple.h"
 #include "base/prefs/testing_pref_store.h"
 #include "base/values.h"
 #include "chrome/browser/content_settings/host_content_settings_map.h"
@@ -60,8 +61,8 @@ class SSLConfigServiceManagerPrefTest : public testing::Test {
 
 // Test channel id with no user prefs.
 TEST_F(SSLConfigServiceManagerPrefTest, ChannelIDWithoutUserPrefs) {
-  TestingPrefService local_state;
-  SSLConfigServiceManager::RegisterPrefs(&local_state);
+  TestingPrefServiceSimple local_state;
+  SSLConfigServiceManager::RegisterPrefs(local_state.registry());
   local_state.SetUserPref(prefs::kEnableOriginBoundCerts,
                           Value::CreateBooleanValue(false));
 
@@ -86,13 +87,14 @@ TEST_F(SSLConfigServiceManagerPrefTest, ChannelIDWithoutUserPrefs) {
 
 // Test channel id with user prefs.
 TEST_F(SSLConfigServiceManagerPrefTest, ChannelIDWithUserPrefs) {
-  TestingPrefService local_state;
-  SSLConfigServiceManager::RegisterPrefs(&local_state);
+  TestingPrefServiceSimple local_state;
+  SSLConfigServiceManager::RegisterPrefs(local_state.registry());
   local_state.SetUserPref(prefs::kEnableOriginBoundCerts,
                           Value::CreateBooleanValue(false));
 
   TestingProfile testing_profile;
-  TestingPrefService* user_prefs = testing_profile.GetTestingPrefService();
+  TestingPrefServiceSyncable* user_prefs =
+      testing_profile.GetTestingPrefService();
   SetCookiePref(&testing_profile, CONTENT_SETTING_BLOCK);
   user_prefs->SetUserPref(prefs::kBlockThirdPartyCookies,
                           Value::CreateBooleanValue(true));
@@ -150,8 +152,8 @@ TEST_F(SSLConfigServiceManagerPrefTest, ChannelIDWithUserPrefs) {
 // Test that cipher suites can be disabled. "Good" refers to the fact that
 // every value is expected to be successfully parsed into a cipher suite.
 TEST_F(SSLConfigServiceManagerPrefTest, GoodDisabledCipherSuites) {
-  TestingPrefService local_state;
-  SSLConfigServiceManager::RegisterPrefs(&local_state);
+  TestingPrefServiceSimple local_state;
+  SSLConfigServiceManager::RegisterPrefs(local_state.registry());
 
   scoped_ptr<SSLConfigServiceManager> config_manager(
       SSLConfigServiceManager::CreateDefaultManager(&local_state, NULL));
@@ -185,8 +187,8 @@ TEST_F(SSLConfigServiceManagerPrefTest, GoodDisabledCipherSuites) {
 // there are one or more non-cipher suite strings in the preference. They
 // should be ignored.
 TEST_F(SSLConfigServiceManagerPrefTest, BadDisabledCipherSuites) {
-  TestingPrefService local_state;
-  SSLConfigServiceManager::RegisterPrefs(&local_state);
+  TestingPrefServiceSimple local_state;
+  SSLConfigServiceManager::RegisterPrefs(local_state.registry());
 
   scoped_ptr<SSLConfigServiceManager> config_manager(
       SSLConfigServiceManager::CreateDefaultManager(&local_state, NULL));
@@ -225,9 +227,10 @@ TEST_F(SSLConfigServiceManagerPrefTest, NoCommandLinePrefs) {
 
   PrefServiceMockBuilder builder;
   builder.WithUserPrefs(local_state_store.get());
-  scoped_ptr<PrefService> local_state(builder.Create());
+  scoped_refptr<PrefRegistrySimple> registry = new PrefRegistrySimple;
+  scoped_ptr<PrefService> local_state(builder.Create(registry));
 
-  SSLConfigServiceManager::RegisterPrefs(local_state.get());
+  SSLConfigServiceManager::RegisterPrefs(registry);
 
   scoped_ptr<SSLConfigServiceManager> config_manager(
       SSLConfigServiceManager::CreateDefaultManager(local_state.get(), NULL));
@@ -268,9 +271,10 @@ TEST_F(SSLConfigServiceManagerPrefTest, CommandLinePrefs) {
   PrefServiceMockBuilder builder;
   builder.WithUserPrefs(local_state_store.get());
   builder.WithCommandLine(&command_line);
-  scoped_ptr<PrefService> local_state(builder.Create());
+  scoped_refptr<PrefRegistrySimple> registry = new PrefRegistrySimple;
+  scoped_ptr<PrefService> local_state(builder.Create(registry));
 
-  SSLConfigServiceManager::RegisterPrefs(local_state.get());
+  SSLConfigServiceManager::RegisterPrefs(registry);
 
   scoped_ptr<SSLConfigServiceManager> config_manager(
       SSLConfigServiceManager::CreateDefaultManager(local_state.get(), NULL));

@@ -8,8 +8,9 @@
 #include "base/bind.h"
 #include "base/message_loop.h"
 #include "base/message_loop_proxy.h"
-#include "base/string_number_conversions.h"
+#include "base/prefs/pref_service.h"
 #include "base/string_util.h"
+#include "base/strings/string_number_conversions.h"
 #include "chrome/common/pref_names.h"
 #include "chrome/test/base/testing_pref_service.h"
 #include "sync/internal_api/public/base/invalidation_test_util.h"
@@ -47,7 +48,7 @@ class InvalidatorStorageTest : public testing::Test {
         kAutofillId_(kChromeSyncSourceId, "AUTOFILL") {}
 
  protected:
-  TestingPrefService pref_service_;
+  TestingPrefServiceSyncable pref_service_;
 
   const invalidation::ObjectId kBookmarksId_;
   const invalidation::ObjectId kPreferencesId_;
@@ -60,7 +61,7 @@ class InvalidatorStorageTest : public testing::Test {
 // Set invalidation states for various keys and verify that they are written and
 // read back correctly.
 TEST_F(InvalidatorStorageTest, SetMaxVersionAndPayload) {
-  InvalidatorStorage storage(&pref_service_);
+  InvalidatorStorage storage(&pref_service_, pref_service_.registry());
 
   InvalidationStateMap expected_states;
   EXPECT_EQ(expected_states, storage.GetAllInvalidationStates());
@@ -87,7 +88,7 @@ TEST_F(InvalidatorStorageTest, SetMaxVersionAndPayload) {
 
 // Forgetting an entry should cause that entry to be deleted.
 TEST_F(InvalidatorStorageTest, Forget) {
-  InvalidatorStorage storage(&pref_service_);
+  InvalidatorStorage storage(&pref_service_, pref_service_.registry());
   EXPECT_TRUE(storage.GetAllInvalidationStates().empty());
 
   InvalidationStateMap expected_states;
@@ -106,15 +107,20 @@ TEST_F(InvalidatorStorageTest, Forget) {
   EXPECT_EQ(expected_states, storage.GetAllInvalidationStates());
 }
 
-// Clearing the storage should erase all version map entries and the bootstrap
-// data.
+// Clearing the storage should erase all version map entries, bootstrap data,
+// and the client ID.
 TEST_F(InvalidatorStorageTest, Clear) {
-  InvalidatorStorage storage(&pref_service_);
+  InvalidatorStorage storage(&pref_service_, pref_service_.registry());
   EXPECT_TRUE(storage.GetAllInvalidationStates().empty());
   EXPECT_TRUE(storage.GetBootstrapData().empty());
+  EXPECT_TRUE(storage.GetInvalidatorClientId().empty());
+
+  storage.SetInvalidatorClientId("fake_id");
+  EXPECT_EQ("fake_id", storage.GetInvalidatorClientId());
 
   storage.SetBootstrapData("test");
   EXPECT_EQ("test", storage.GetBootstrapData());
+
   {
     InvalidationStateMap expected_states;
     expected_states[kAppNotificationsId_].version = 3;
@@ -126,6 +132,7 @@ TEST_F(InvalidatorStorageTest, Clear) {
 
   EXPECT_TRUE(storage.GetAllInvalidationStates().empty());
   EXPECT_TRUE(storage.GetBootstrapData().empty());
+  EXPECT_TRUE(storage.GetInvalidatorClientId().empty());
 }
 
 TEST_F(InvalidatorStorageTest, SerializeEmptyMap) {
@@ -381,7 +388,7 @@ TEST_F(InvalidatorStorageTest, MigrateLegacyPreferences) {
   legacy_dict->SetString(base::IntToString(syncer::BOOKMARKS), "32");
   legacy_dict->SetString(base::IntToString(syncer::PREFERENCES), "54");
   pref_service_.SetUserPref(prefs::kSyncMaxInvalidationVersions, legacy_dict);
-  InvalidatorStorage storage(&pref_service_);
+  InvalidatorStorage storage(&pref_service_, pref_service_.registry());
 
   // Legacy pref should be cleared.
   const base::DictionaryValue* dict =
@@ -400,8 +407,16 @@ TEST_F(InvalidatorStorageTest, MigrateLegacyPreferences) {
   EXPECT_EQ(54, map[kPreferencesId_].version);
 }
 
+TEST_F(InvalidatorStorageTest, SetGetNotifierClientId) {
+  InvalidatorStorage storage(&pref_service_, pref_service_.registry());
+  const std::string client_id("fK6eDzAIuKqx9A4+93bljg==");
+
+  storage.SetInvalidatorClientId(client_id);
+  EXPECT_EQ(client_id, storage.GetInvalidatorClientId());
+}
+
 TEST_F(InvalidatorStorageTest, SetGetBootstrapData) {
-  InvalidatorStorage storage(&pref_service_);
+  InvalidatorStorage storage(&pref_service_, pref_service_.registry());
   const std::string mess("n\0tK\0\0l\344", 8);
   ASSERT_FALSE(IsStringUTF8(mess));
 
@@ -412,7 +427,7 @@ TEST_F(InvalidatorStorageTest, SetGetBootstrapData) {
 // Test that we correctly generate ack handles, acknowledge them, and persist
 // them.
 TEST_F(InvalidatorStorageTest, GenerateAckHandlesAndAcknowledge) {
-  InvalidatorStorage storage(&pref_service_);
+  InvalidatorStorage storage(&pref_service_, pref_service_.registry());
   syncer::ObjectIdSet ids;
   InvalidationStateMap state_map;
   syncer::AckHandleMap ack_handle_map;

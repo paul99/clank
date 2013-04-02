@@ -133,12 +133,12 @@ struct BubbleBorder::BorderImages {
 struct BubbleBorder::BorderImages*
     BubbleBorder::border_images_[SHADOW_COUNT] = { NULL };
 
-BubbleBorder::BubbleBorder(ArrowLocation arrow_location, Shadow shadow)
+BubbleBorder::BubbleBorder(ArrowLocation arrow, Shadow shadow, SkColor color)
     : override_arrow_offset_(0),
-      arrow_location_(arrow_location),
+      arrow_location_(arrow),
       paint_arrow_(true),
       alignment_(ALIGN_ARROW_TO_MID_ANCHOR),
-      background_color_(SK_ColorWHITE) {
+      background_color_(color) {
   DCHECK(shadow < SHADOW_COUNT);
   images_ = GetBorderImages(shadow);
 
@@ -367,7 +367,7 @@ BubbleBorder::BorderImages* BubbleBorder::GetBorderImages(Shadow shadow) {
     case SMALL_SHADOW:
       images = new BorderImages(kSmallShadowImages,
                                 arraysize(kSmallShadowImages),
-                                9, 0, 3);
+                                6, 0, 3);
       break;
     case SHADOW_COUNT:
       NOTREACHED();
@@ -402,19 +402,19 @@ void BubbleBorder::Paint(const views::View& view, gfx::Canvas* canvas) {
   const int height = bottom - top;
   const int width = right - left;
 
-  const ArrowLocation arrow_location = paint_arrow_ ? arrow_location_ : NONE;
-
   // |arrow_offset| is offset of arrow from the beginning of the edge.
   int arrow_offset = GetArrowOffset(view.size());
-  if (!is_arrow_at_center(arrow_location)) {
-    if (is_arrow_on_horizontal(arrow_location) &&
-        !is_arrow_on_left(arrow_location)) {
+  if (!is_arrow_at_center(arrow_location_)) {
+    if (is_arrow_on_horizontal(arrow_location_) &&
+        !is_arrow_on_left(arrow_location_)) {
       arrow_offset = view.width() - arrow_offset - 1;
-    } else if (!is_arrow_on_horizontal(arrow_location) &&
-               !is_arrow_on_top(arrow_location)) {
+    } else if (!is_arrow_on_horizontal(arrow_location_) &&
+               !is_arrow_on_top(arrow_location_)) {
       arrow_offset = view.height() - arrow_offset - 1;
     }
   }
+
+  const ArrowLocation arrow_location = paint_arrow_ ? arrow_location_ : NONE;
 
   // Left edge.
   if (arrow_location == LEFT_TOP ||

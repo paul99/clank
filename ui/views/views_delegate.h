@@ -98,21 +98,14 @@ class VIEWS_EXPORT ViewsDelegate {
   virtual void AddRef() = 0;
   virtual void ReleaseRef() = 0;
 
-  // Converts ui::Event::flags to a WindowOpenDisposition.
-  virtual int GetDispositionForEvent(int event_flags) = 0;
-
   // Creates a web contents. This will return NULL unless overriden.
   virtual content::WebContents* CreateWebContents(
       content::BrowserContext* browser_context,
       content::SiteInstance* site_instance) = 0;
 
-  // Creates a NativeWidget implementation. Returning NULL means Widget will
-  // create a default implementation for the platform.
-  virtual NativeWidget* CreateNativeWidget(
-      Widget::InitParams::Type type,
-      internal::NativeWidgetDelegate* delegate,
-      gfx::NativeView parent,
-      gfx::NativeView context) = 0;
+  // Gives the platform a chance to modify the properties of a Widget.
+  virtual void OnBeforeWidgetInit(Widget::InitParams* params,
+                            internal::NativeWidgetDelegate* delegate) = 0;
 };
 
 }  // namespace views

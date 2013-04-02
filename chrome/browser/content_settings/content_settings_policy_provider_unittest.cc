@@ -10,10 +10,10 @@
 #include "base/command_line.h"
 #include "base/memory/scoped_ptr.h"
 #include "base/message_loop.h"
+#include "base/prefs/pref_service.h"
 #include "chrome/browser/content_settings/content_settings_mock_observer.h"
 #include "chrome/browser/content_settings/content_settings_rule.h"
 #include "chrome/browser/content_settings/content_settings_utils.h"
-#include "chrome/browser/prefs/pref_service.h"
 #include "chrome/common/chrome_switches.h"
 #include "chrome/common/pref_names.h"
 #include "chrome/common/url_constants.h"
@@ -47,7 +47,7 @@ class PolicyProviderTest : public testing::Test {
 
 TEST_F(PolicyProviderTest, DefaultGeolocationContentSetting) {
   TestingProfile profile;
-  TestingPrefService* prefs = profile.GetTestingPrefService();
+  TestingPrefServiceSyncable* prefs = profile.GetTestingPrefService();
   PolicyProvider provider(prefs);
 
   Rules rules;
@@ -81,7 +81,7 @@ TEST_F(PolicyProviderTest, DefaultGeolocationContentSetting) {
 
 TEST_F(PolicyProviderTest, ManagedDefaultContentSettings) {
   TestingProfile profile;
-  TestingPrefService* prefs = profile.GetTestingPrefService();
+  TestingPrefServiceSyncable* prefs = profile.GetTestingPrefService();
   PolicyProvider provider(prefs);
 
   prefs->SetManagedPref(prefs::kManagedDefaultPluginsSetting,
@@ -108,7 +108,7 @@ TEST_F(PolicyProviderTest, ManagedDefaultContentSettings) {
 // if the managed setting is removed.
 TEST_F(PolicyProviderTest, ObserveManagedSettingsChange) {
   TestingProfile profile;
-  TestingPrefService* prefs = profile.GetTestingPrefService();
+  TestingPrefServiceSyncable* prefs = profile.GetTestingPrefService();
   PolicyProvider provider(prefs);
 
   MockObserver mock_observer;
@@ -135,7 +135,7 @@ TEST_F(PolicyProviderTest, ObserveManagedSettingsChange) {
 
 TEST_F(PolicyProviderTest, GettingManagedContentSettings) {
   TestingProfile profile;
-  TestingPrefService* prefs = profile.GetTestingPrefService();
+  TestingPrefServiceSyncable* prefs = profile.GetTestingPrefService();
 
   ListValue* value = new ListValue();
   value->Append(Value::CreateStringValue("[*.]google.com"));
@@ -193,7 +193,7 @@ TEST_F(PolicyProviderTest, GettingManagedContentSettings) {
 
 TEST_F(PolicyProviderTest, ResourceIdentifier) {
   TestingProfile profile;
-  TestingPrefService* prefs = profile.GetTestingPrefService();
+  TestingPrefServiceSyncable* prefs = profile.GetTestingPrefService();
 
   ListValue* value = new ListValue();
   value->Append(Value::CreateStringValue("[*.]google.com"));
@@ -227,7 +227,7 @@ TEST_F(PolicyProviderTest, ResourceIdentifier) {
 
 TEST_F(PolicyProviderTest, AutoSelectCertificateList) {
   TestingProfile profile;
-  TestingPrefService* prefs = profile.GetTestingPrefService();
+  TestingPrefServiceSyncable* prefs = profile.GetTestingPrefService();
 
   PolicyProvider provider(prefs);
   GURL google_url("https://mail.google.com");

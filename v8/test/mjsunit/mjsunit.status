@@ -40,6 +40,9 @@ regress/regress-524: SKIP
 # Skip long running test in debug and allow it to timeout in release mode.
 # regress/regress-524: (PASS || TIMEOUT), SKIP if $mode == debug
 
+# Deferred stack trace formatting is temporarily disabled.
+stack-traces-gc: PASS || FAIL
+
 ##############################################################################
 # Too slow in debug mode with --stress-opt
 compiler/regress-stacktrace-methods: PASS, SKIP if $mode == debug
@@ -68,6 +71,7 @@ json-recursive: PASS, (PASS || FAIL) if $mode == debug
 ##############################################################################
 # Skip long running test that times out in debug mode.
 regress/regress-crbug-160010: PASS, SKIP if $mode == debug
+generated-transition-stub: PASS, SKIP if $mode == debug
 
 ##############################################################################
 # This test sets the umask on a per-process basis and hence cannot be
@@ -75,6 +79,14 @@ regress/regress-crbug-160010: PASS, SKIP if $mode == debug
 # On android there is no /tmp directory.
 d8-os: PASS, SKIP if ($isolates || $arch == android_arm || $arch == android_ia32)
 tools/tickprocessor: PASS, SKIP if ($arch == android_arm || $arch == android_ia32)
+
+##############################################################################
+# This test is the same as math-floor-of-div for non ARM architectures.
+math-floor-of-div-nosudiv: PASS, SKIP if ($arch != arm && $arch != android_arm)
+
+##############################################################################
+# Long running test that reproduces memory leak and should be run manually.
+regress/regress-2073: SKIP
 
 ##############################################################################
 [ $arch == arm || $arch == android_arm ]

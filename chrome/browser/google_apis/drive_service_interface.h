@@ -17,31 +17,10 @@ class Profile;
 
 namespace google_apis {
 
+class AppList;
 class AccountMetadataFeed;
 class ResourceList;
 class OperationRegistry;
-
-// Document export format.
-enum DocumentExportFormat {
-  PDF,     // Portable Document Format. (all documents)
-  PNG,     // Portable Networks Graphic Image Format (all documents)
-  HTML,    // HTML Format (text documents and spreadsheets).
-  TXT,     // Text file (text documents and presentations).
-  DOC,     // Word (text documents only).
-  ODT,     // Open Document Format (text documents only).
-  RTF,     // Rich Text Format (text documents only).
-  ZIP,     // ZIP archive (text documents only). Contains the images (if any)
-           // used in the document as well as a .html file containing the
-           // document's text.
-  JPEG,    // JPEG (drawings only).
-  SVG,     // Scalable Vector Graphics Image Format (drawings only).
-  PPT,     // Powerpoint (presentations only).
-  XLS,     // Excel (spreadsheets only).
-  CSV,     // Excel (spreadsheets only).
-  ODS,     // Open Document Spreadsheet (spreadsheets only).
-  TSV,     // Tab Separated Value (spreadsheets only). Only the first worksheet
-           // is returned in TSV by default.
-};
 
 // Observer interface for DriveServiceInterface.
 class DriveServiceObserver {
@@ -52,8 +31,8 @@ class DriveServiceObserver {
   // Called when an operation started, made some progress, or finished.
   virtual void OnProgressUpdate(const OperationProgressStatusList& list) {}
 
-  // Called when GData authentication failed.
-  virtual void OnAuthenticationFailed(GDataErrorCode error) {}
+  // Called when the refresh token was found to be invalid.
+  virtual void OnRefreshTokenInvalid() {}
 
  protected:
   virtual ~DriveServiceObserver() {}
@@ -73,6 +52,11 @@ typedef base::Callback<void(GDataErrorCode error,
 typedef base::Callback<void(GDataErrorCode error,
                             scoped_ptr<AccountMetadataFeed> account_metadata)>
     GetAccountMetadataCallback;
+
+// Callback used for GetApplicationInfo().
+typedef base::Callback<void(GDataErrorCode erro,
+                            scoped_ptr<AppList> app_list)>
+    GetAppListCallback;
 
 // Callback used for AuthorizeApp(). |open_url| is used to open the target
 // file with the authorized app.
@@ -108,7 +92,7 @@ class DriveServiceInterface {
 
   // Cancels ongoing operation for a given virtual |file_path|. Returns true if
   // the operation was found and canceled.
-  virtual bool CancelForFilePath(const FilePath& file_path) = 0;
+  virtual bool CancelForFilePath(const base::FilePath& file_path) = 0;
 
   // Obtains the list of currently active operations.
   virtual OperationProgressStatusList GetProgressStatusList() const = 0;
@@ -121,7 +105,16 @@ class DriveServiceInterface {
   // True if OAuth2 refresh token is present.
   virtual bool HasRefreshToken() const = 0;
 
+  // Clears OAuth2 access token.
+  virtual void ClearAccessToken() = 0;
+
+  // Clears OAuth2 refresh token.
+  virtual void ClearRefreshToken() = 0;
+
   // Document access:
+
+  // Returns the resource id for the root directory.
+  virtual std::string GetRootResourceId() const = 0;
 
   // Fetches a feed from |feed_url|. If this URL is empty, the call will fetch
   // from the default URL. When |start_changestamp| is 0, the default behavior
@@ -164,23 +157,16 @@ class DriveServiceInterface {
   // Gets the application information from the server.
   // Upon completion, invokes |callback| with results on the calling thread.
   // |callback| must not be null.
-  virtual void GetApplicationInfo(const GetDataCallback& callback) = 0;
+  virtual void GetAppList(const GetAppListCallback& callback) = 0;
 
-  // Deletes a resource identified by its |edit_url|.
+  // Deletes a resource identified by its |resource_id|.
+  // If |etag| is not empty and did not match, the deletion fails with
+  // HTTP_PRECONDITION error.
   // Upon completion, invokes |callback| with results on the calling thread.
   // |callback| must not be null.
-  virtual void DeleteResource(const GURL& edit_url,
+  virtual void DeleteResource(const std::string& resource_id,
+                              const std::string& etag,
                               const EntryActionCallback& callback) = 0;
-
-  // Downloads a document identified by its |content_url| in a given |format|.
-  // Upon completion, invokes |callback| with results on the calling thread.
-  // |callback| must not be null.
-  virtual void DownloadHostedDocument(
-      const FilePath& virtual_path,
-      const FilePath& local_cache_path,
-      const GURL& content_url,
-      DocumentExportFormat format,
-      const DownloadActionCallback& callback) = 0;
 
   // Makes a copy of a hosted document identified by its |resource_id|.
   // The copy is named as the UTF-8 encoded |new_name| and is not added to any
@@ -190,47 +176,47 @@ class DriveServiceInterface {
   // |callback| must not be null.
   virtual void CopyHostedDocument(
       const std::string& resource_id,
-      const FilePath::StringType& new_name,
+      const std::string& new_name,
       const GetResourceEntryCallback& callback) = 0;
 
-  // Renames a document or collection identified by its |edit_url|
+  // Renames a document or collection identified by its |resource_id|
   // to the UTF-8 encoded |new_name|. Upon completion,
   // invokes |callback| with results on the calling thread.
   // |callback| must not be null.
-  virtual void RenameResource(const GURL& edit_url,
-                              const FilePath::StringType& new_name,
+  virtual void RenameResource(const std::string& resource_id,
+                              const std::string& new_name,
                               const EntryActionCallback& callback) = 0;
 
   // Adds a resource (document, file, or collection) identified by its
-  // |edit_url| to a collection with a content link |parent_content_url|.
+  // |resource_id| to a collection represented by the |parent_resource_id|.
   // Upon completion, invokes |callback| with results on the calling thread.
   // |callback| must not be null.
-  virtual void AddResourceToDirectory(const GURL& parent_content_url,
-                                      const GURL& edit_url,
+  virtual void AddResourceToDirectory(const std::string& parent_resource_id,
+                                      const std::string& resource_id,
                                       const EntryActionCallback& callback) = 0;
 
   // Removes a resource (document, file, collection) identified by its
-  // |resource_id| from a collection with a content link
-  // |parent_content_url|. Upon completion, invokes |callback| with
-  // results on the calling thread.
+  // |resource_id| from a collection represented by the |parent_resource_id|.
+  // Upon completion, invokes |callback| with results on the calling thread.
   // |callback| must not be null.
   virtual void RemoveResourceFromDirectory(
-      const GURL& parent_content_url,
+      const std::string& parent_resource_id,
       const std::string& resource_id,
       const EntryActionCallback& callback) = 0;
 
   // Adds new collection with |directory_name| under parent directory
-  // identified with |parent_content_url|. If |parent_content_url| is empty,
-  // the new collection will be created in the root. Upon completion,
-  // invokes |callback| and passes newly created entry on the calling thread.
+  // identified with |parent_resource_id|. |parent_resource_id| can be the
+  // value returned by GetRootResourceId to represent the root directory.
+  // Upon completion, invokes |callback| and passes newly created entry on
+  // the calling thread.
   // This function cannot be named as "CreateDirectory" as it conflicts with
   // a macro on Windows.
   // |callback| must not be null.
-  virtual void AddNewDirectory(const GURL& parent_content_url,
-                               const FilePath::StringType& directory_name,
+  virtual void AddNewDirectory(const std::string& parent_resource_id,
+                               const std::string& directory_name,
                                const GetResourceEntryCallback& callback) = 0;
 
-  // Downloads a file identified by its |content_url|. The downloaded file will
+  // Downloads a file from |download_url|. The downloaded file will
   // be stored at |local_cache_path| location. Upon completion, invokes
   // |download_action_callback| with results on the calling thread.
   // If |get_content_callback| is not empty,
@@ -240,9 +226,9 @@ class DriveServiceInterface {
   // |download_action_callback| must not be null.
   // |get_content_callback| may be null.
   virtual void DownloadFile(
-      const FilePath& virtual_path,
-      const FilePath& local_cache_path,
-      const GURL& content_url,
+      const base::FilePath& virtual_path,
+      const base::FilePath& local_cache_path,
+      const GURL& download_url,
       const DownloadActionCallback& download_action_callback,
       const GetContentCallback& get_content_callback) = 0;
 
@@ -254,7 +240,18 @@ class DriveServiceInterface {
   // Resumes uploading of a document/file on the calling thread.
   // |callback| must not be null.
   virtual void ResumeUpload(const ResumeUploadParams& params,
-                            const ResumeUploadCallback& callback) = 0;
+                            const UploadRangeCallback& callback) = 0;
+
+  // Gets the current status of the uploading to |upload_url| from the server.
+  // |upload_mode|, |drive_file_path| and |content_length| should be set to
+  // the same value which is used for ResumeUpload.
+  // |callback| must not be null.
+  virtual void GetUploadStatus(
+      UploadMode upload_mode,
+      const base::FilePath& drive_file_path,
+      const GURL& upload_url,
+      int64 content_length,
+      const UploadRangeCallback& callback) = 0;
 
   // Authorizes a Drive app with the id |app_id| to open the given file.
   // Upon completion, invokes |callback| with the link to open the file with

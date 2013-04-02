@@ -9,19 +9,18 @@
 #include "base/bind.h"
 #include "base/bind_helpers.h"
 #include "base/memory/ref_counted_memory.h"
+#include "base/prefs/pref_registry_simple.h"
 #include "base/utf_string_conversions.h"
 #include "base/values.h"
 #include "chrome/browser/about_flags.h"
 #include "chrome/browser/browser_process.h"
 #include "chrome/browser/lifetime/application_lifetime.h"
-#include "chrome/browser/prefs/pref_service.h"
 #include "chrome/browser/profiles/profile.h"
-#include "chrome/browser/ui/webui/chrome_url_data_manager.h"
-#include "chrome/browser/ui/webui/chrome_web_ui_data_source.h"
 #include "chrome/common/pref_names.h"
 #include "chrome/common/url_constants.h"
 #include "content/public/browser/web_contents.h"
 #include "content/public/browser/web_ui.h"
+#include "content/public/browser/web_ui_data_source.h"
 #include "content/public/browser/web_ui_message_handler.h"
 #include "grit/browser_resources.h"
 #include "grit/chromium_strings.h"
@@ -41,10 +40,11 @@ using content::WebUIMessageHandler;
 
 namespace {
 
-ChromeWebUIDataSource* CreateFlagsUIHTMLSource() {
-  ChromeWebUIDataSource* source =
-      new ChromeWebUIDataSource(chrome::kChromeUIFlagsHost);
+content::WebUIDataSource* CreateFlagsUIHTMLSource() {
+  content::WebUIDataSource* source =
+      content::WebUIDataSource::Create(chrome::kChromeUIFlagsHost);
 
+  source->SetUseJsonJSFormatV2();
   source->AddLocalizedString("flagsLongTitle", IDS_FLAGS_LONG_TITLE);
   source->AddLocalizedString("flagsTableTitle", IDS_FLAGS_TABLE_TITLE);
   source->AddLocalizedString("flagsNoExperimentsAvailable",
@@ -64,8 +64,8 @@ ChromeWebUIDataSource* CreateFlagsUIHTMLSource() {
   source->AddString("ownerUserId", UTF8ToUTF16(owner));
 #endif
 
-  source->set_json_path("strings.js");
-  source->add_resource_path("flags.js", IDR_FLAGS_JS);
+  source->SetJsonPath("strings.js");
+  source->AddResourcePath("flags.js", IDR_FLAGS_JS);
 
   int idr = IDR_FLAGS_HTML;
 #if defined (OS_CHROMEOS)
@@ -73,7 +73,7 @@ ChromeWebUIDataSource* CreateFlagsUIHTMLSource() {
       base::chromeos::IsRunningOnChromeOS())
     idr = IDR_FLAGS_HTML_WARNING;
 #endif
-  source->set_default_resource(idr);
+  source->SetDefaultResource(idr);
   return source;
 }
 
@@ -162,7 +162,7 @@ FlagsUI::FlagsUI(content::WebUI* web_ui) : WebUIController(web_ui) {
 
   // Set up the about:flags source.
   Profile* profile = Profile::FromWebUI(web_ui);
-  ChromeURLDataManager::AddDataSource(profile, CreateFlagsUIHTMLSource());
+  content::WebUIDataSource::Add(profile, CreateFlagsUIHTMLSource());
 }
 
 // static
@@ -173,6 +173,6 @@ base::RefCountedMemory* FlagsUI::GetFaviconResourceBytes(
 }
 
 // static
-void FlagsUI::RegisterPrefs(PrefService* prefs) {
-  prefs->RegisterListPref(prefs::kEnabledLabsExperiments);
+void FlagsUI::RegisterPrefs(PrefRegistrySimple* registry) {
+  registry->RegisterListPref(prefs::kEnabledLabsExperiments);
 }

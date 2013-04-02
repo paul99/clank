@@ -2,18 +2,22 @@
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
+#include <algorithm>
+#include <map>
+
 #include "base/bind.h"
 #include "base/file_path.h"
 #include "base/file_util.h"
-#include "base/json/json_reader.h"
 #include "base/message_loop_proxy.h"
-#include "base/string_number_conversions.h"
 #include "base/string_split.h"
 #include "base/stringprintf.h"
+#include "base/strings/string_number_conversions.h"
 #include "chrome/browser/google_apis/gdata_wapi_operations.h"
 #include "chrome/browser/google_apis/gdata_wapi_parser.h"
 #include "chrome/browser/google_apis/gdata_wapi_url_generator.h"
 #include "chrome/browser/google_apis/operation_registry.h"
+#include "chrome/browser/google_apis/test_server/http_request.h"
+#include "chrome/browser/google_apis/test_server/http_response.h"
 #include "chrome/browser/google_apis/test_server/http_server.h"
 #include "chrome/browser/google_apis/test_util.h"
 #include "chrome/browser/profiles/profile.h"
@@ -29,39 +33,7 @@ namespace {
 
 const char kTestGDataAuthToken[] = "testtoken";
 const char kTestUserAgent[] = "test-user-agent";
-
-// Copies the results from GetDataCallback and quit the message loop.
-void CopyResultsFromGetDataCallbackAndQuit(
-    GDataErrorCode* out_result_code,
-    scoped_ptr<base::Value>* out_result_data,
-    GDataErrorCode result_code,
-    scoped_ptr<base::Value> result_data) {
-  *out_result_code = result_code;
-  *out_result_data = result_data.Pass();
-  MessageLoop::current()->Quit();
-}
-
-// Copies the results from DownloadActionCallback and quit the message loop.
-// The contents of the download cache file are copied to a string, and the
-// file is removed.
-void CopyResultsFromDownloadActionCallbackAndQuit(
-    GDataErrorCode* out_result_code,
-    std::string* contents,
-    GDataErrorCode result_code,
-    const FilePath& cache_file_path) {
-  *out_result_code = result_code;
-  file_util::ReadFileToString(cache_file_path, contents);
-  file_util::Delete(cache_file_path, false);
-  MessageLoop::current()->Quit();
-}
-
-// Copies the result from EntryActionCallback and quit the message loop.
-void CopyResultFromEntryActionCallbackAndQuit(
-    GDataErrorCode* out_result_code,
-    GDataErrorCode result_code) {
-  *out_result_code = result_code;
-  MessageLoop::current()->Quit();
-}
+const char kTestETag[] = "test_etag";
 
 // Copies the result from InitiateUploadCallback and quit the message loop.
 void CopyResultFromInitiateUploadCallbackAndQuit(
@@ -75,38 +47,14 @@ void CopyResultFromInitiateUploadCallbackAndQuit(
 }
 
 // Copies the result from ResumeUploadCallback and quit the message loop.
-void CopyResultFromResumeUploadCallbackAndQuit(
-    ResumeUploadResponse* out_response,
+void CopyResultFromUploadRangeCallbackAndQuit(
+    UploadRangeResponse* out_response,
     scoped_ptr<ResourceEntry>* out_new_entry,
-    const ResumeUploadResponse& response,
+    const UploadRangeResponse& response,
     scoped_ptr<ResourceEntry> new_entry) {
   *out_response = response;
   *out_new_entry = new_entry.Pass();
   MessageLoop::current()->Quit();
-}
-
-// Returns true if |json_data| equals to JSON data in |expected_json_file_path|.
-bool VerifyJsonData(const FilePath& expected_json_file_path,
-                    const base::Value* json_data) {
-  std::string expected_contents;
-  if (!file_util::ReadFileToString(expected_json_file_path, &expected_contents))
-    return false;
-
-  scoped_ptr<base::Value> expected_data(
-      base::JSONReader::Read(expected_contents));
-  return base::Value::Equals(expected_data.get(), json_data);
-}
-
-// Removes |prefix| from |input| and stores the result in |output|. Returns
-// true if the prefix is removed.
-bool RemovePrefix(const std::string& input,
-                  const std::string& prefix,
-                  std::string* output) {
-  if (!StartsWithASCII(input, prefix, true /* case sensitive */))
-    return false;
-
-  *output = input.substr(prefix.size());
-  return true;
 }
 
 // Parses a value of Content-Range header, which looks like
@@ -121,7 +69,7 @@ bool ParseContentRangeHeader(const std::string& value,
   DCHECK(length);
 
   std::string remaining;
-  if (!RemovePrefix(value, "bytes ", &remaining))
+  if (!test_util::RemovePrefix(value, "bytes ", &remaining))
     return false;
 
   std::vector<std::string> parts;
@@ -140,13 +88,6 @@ bool ParseContentRangeHeader(const std::string& value,
 
   return (base::StringToInt64(parts[0], start_position) &&
           base::StringToInt64(parts[1], end_position));
-}
-
-// Does nothing for ReAuthenticateCallback(). This function should not be
-// reached as there won't be any authentication failures in the test.
-void DoNothingForReAuthenticateCallback(
-    AuthenticatedOperationInterface* /* operation */) {
-  NOTREACHED();
 }
 
 class GDataWapiOperationsTest : public testing::Test {
@@ -168,8 +109,9 @@ class GDataWapiOperationsTest : public testing::Test {
 
     ASSERT_TRUE(test_server_.InitializeAndWaitUntilReady());
     test_server_.RegisterRequestHandler(
-        base::Bind(&GDataWapiOperationsTest::HandleDownloadRequest,
-                   base::Unretained(this)));
+        base::Bind(&test_util::HandleDownloadRequest,
+                   test_server_.base_url(),
+                   base::Unretained(&http_request_)));
     test_server_.RegisterRequestHandler(
         base::Bind(&GDataWapiOperationsTest::HandleResourceFeedRequest,
                    base::Unretained(this)));
@@ -184,7 +126,7 @@ class GDataWapiOperationsTest : public testing::Test {
                    base::Unretained(this)));
 
     url_generator_.reset(new GDataWapiUrlGenerator(
-        GDataWapiUrlGenerator::GetBaseUrlForTesting(test_server_.port())));
+        test_util::GetBaseUrlForTesting(test_server_.port())));
   }
 
   virtual void TearDown() OVERRIDE {
@@ -193,26 +135,6 @@ class GDataWapiOperationsTest : public testing::Test {
   }
 
  protected:
-  // Returns a temporary file path suitable for storing the cache file.
-  FilePath GetTestCachedFilePath(const FilePath& file_name) {
-    return profile_->GetPath().Append(file_name);
-  }
-
-  // Handles a request for downloading a file. Reads a file from the test
-  // directory and returns the content.
-  scoped_ptr<test_server::HttpResponse> HandleDownloadRequest(
-      const test_server::HttpRequest& request) {
-    http_request_ = request;
-
-    const GURL absolute_url = test_server_.GetURL(request.relative_url);
-    std::string remaining_path;
-    if (!RemovePrefix(absolute_url.path(), "/files/", &remaining_path))
-      return scoped_ptr<test_server::HttpResponse>();
-
-    return test_util::CreateHttpResponseFromFile(
-        test_util::GetTestFilePath(remaining_path));
-  }
-
   // Handles a request for fetching a resource feed.
   scoped_ptr<test_server::HttpResponse> HandleResourceFeedRequest(
       const test_server::HttpRequest& request) {
@@ -229,9 +151,9 @@ class GDataWapiOperationsTest : public testing::Test {
           test_util::GetTestFilePath("gdata/file_entry.json"));
     }
 
-    if (!RemovePrefix(absolute_url.path(),
-                      "/feeds/default/private/full/",
-                      &remaining_path)) {
+    if (!test_util::RemovePrefix(absolute_url.path(),
+                                 "/feeds/default/private/full/",
+                                 &remaining_path)) {
       return scoped_ptr<test_server::HttpResponse>();
     }
 
@@ -253,14 +175,15 @@ class GDataWapiOperationsTest : public testing::Test {
 
         return test_util::CreateHttpResponseFromFile(
             test_util::GetTestFilePath("gdata/file_entry.json"));
-      } else if (resource_id == "folder:root" &&
+      } else if (resource_id == "folder:root/contents" &&
                  request.method == test_server::METHOD_POST) {
         // This is a request for creating a directory in the root directory.
         // TODO(satorux): we should generate valid JSON data for the newly
         // created directory but for now, just return "directory_entry.json"
         return test_util::CreateHttpResponseFromFile(
             test_util::GetTestFilePath("gdata/directory_entry.json"));
-      } else if (resource_id == "folder:root/file:2_file_resource_id" &&
+      } else if (resource_id ==
+                 "folder:root/contents/file:2_file_resource_id" &&
                  request.method == test_server::METHOD_DELETE) {
         // This is a request for deleting a file from the root directory.
         // TODO(satorux): Investigate what's returned from the server, and
@@ -301,6 +224,16 @@ class GDataWapiOperationsTest : public testing::Test {
         "/feeds/upload/create-session/default/private/full/file:foo") {
       scoped_ptr<test_server::HttpResponse> http_response(
           new test_server::HttpResponse);
+
+      std::map<std::string, std::string>::const_iterator found =
+          request.headers.find("If-Match");
+      if (found != request.headers.end() &&
+          found->second != "*" &&
+          found->second != kTestETag) {
+        http_response->set_code(test_server::PRECONDITION);
+        return http_response.Pass();
+      }
+
       http_response->set_code(test_server::SUCCESS);
       GURL upload_url;
       // POST is used for a new file, and PUT is used for an existing file.
@@ -403,11 +336,11 @@ TEST_F(GDataWapiOperationsTest, GetResourceListOperation_DefaultFeed) {
       "",  // search string
       false,  // shared with me
       "",  // directory resource ID
-      base::Bind(&CopyResultsFromGetDataCallbackAndQuit,
+      base::Bind(&test_util::CopyResultsFromGetDataCallbackAndQuit,
                  &result_code,
                  &result_data));
   operation->Start(kTestGDataAuthToken, kTestUserAgent,
-                   base::Bind(&DoNothingForReAuthenticateCallback));
+                   base::Bind(&test_util::DoNothingForReAuthenticateCallback));
   MessageLoop::current()->Run();
 
   EXPECT_EQ(HTTP_SUCCESS, result_code);
@@ -415,8 +348,7 @@ TEST_F(GDataWapiOperationsTest, GetResourceListOperation_DefaultFeed) {
   EXPECT_EQ("/feeds/default/private/full/-/mine?v=3&alt=json&showfolders=true"
             "&max-results=500&include-installed-apps=true",
             http_request_.relative_url);
-  ASSERT_TRUE(result_data);
-  EXPECT_TRUE(VerifyJsonData(
+  EXPECT_TRUE(test_util::VerifyJsonData(
       test_util::GetTestFilePath("gdata/root_feed.json"),
       result_data.get()));
 }
@@ -434,11 +366,11 @@ TEST_F(GDataWapiOperationsTest, GetResourceListOperation_ValidFeed) {
       "",  // search string
       false,  // shared with me
       "",  // directory resource ID
-      base::Bind(&CopyResultsFromGetDataCallbackAndQuit,
+      base::Bind(&test_util::CopyResultsFromGetDataCallbackAndQuit,
                  &result_code,
                  &result_data));
   operation->Start(kTestGDataAuthToken, kTestUserAgent,
-                   base::Bind(&DoNothingForReAuthenticateCallback));
+                   base::Bind(&test_util::DoNothingForReAuthenticateCallback));
   MessageLoop::current()->Run();
 
   EXPECT_EQ(HTTP_SUCCESS, result_code);
@@ -446,8 +378,7 @@ TEST_F(GDataWapiOperationsTest, GetResourceListOperation_ValidFeed) {
   EXPECT_EQ("/files/gdata/root_feed.json?v=3&alt=json&showfolders=true"
             "&max-results=500&include-installed-apps=true",
             http_request_.relative_url);
-  ASSERT_TRUE(result_data);
-  EXPECT_TRUE(VerifyJsonData(
+  EXPECT_TRUE(test_util::VerifyJsonData(
       test_util::GetTestFilePath("gdata/root_feed.json"),
       result_data.get()));
 }
@@ -467,11 +398,11 @@ TEST_F(GDataWapiOperationsTest, GetResourceListOperation_InvalidFeed) {
       "",  // search string
       false,  // shared with me
       "",  // directory resource ID
-      base::Bind(&CopyResultsFromGetDataCallbackAndQuit,
+      base::Bind(&test_util::CopyResultsFromGetDataCallbackAndQuit,
                  &result_code,
                  &result_data));
   operation->Start(kTestGDataAuthToken, kTestUserAgent,
-                   base::Bind(&DoNothingForReAuthenticateCallback));
+                   base::Bind(&test_util::DoNothingForReAuthenticateCallback));
   MessageLoop::current()->Run();
 
   EXPECT_EQ(GDATA_PARSE_ERROR, result_code);
@@ -491,11 +422,11 @@ TEST_F(GDataWapiOperationsTest, GetResourceEntryOperation_ValidResourceId) {
       request_context_getter_.get(),
       *url_generator_,
       "file:2_file_resource_id",  // resource ID
-      base::Bind(&CopyResultsFromGetDataCallbackAndQuit,
+      base::Bind(&test_util::CopyResultsFromGetDataCallbackAndQuit,
                  &result_code,
                  &result_data));
   operation->Start(kTestGDataAuthToken, kTestUserAgent,
-                   base::Bind(&DoNothingForReAuthenticateCallback));
+                   base::Bind(&test_util::DoNothingForReAuthenticateCallback));
   MessageLoop::current()->Run();
 
   EXPECT_EQ(HTTP_SUCCESS, result_code);
@@ -503,8 +434,7 @@ TEST_F(GDataWapiOperationsTest, GetResourceEntryOperation_ValidResourceId) {
   EXPECT_EQ("/feeds/default/private/full/file%3A2_file_resource_id"
             "?v=3&alt=json",
             http_request_.relative_url);
-  ASSERT_TRUE(result_data);
-  EXPECT_TRUE(VerifyJsonData(
+  EXPECT_TRUE(test_util::VerifyJsonData(
       test_util::GetTestFilePath("gdata/file_entry.json"),
       result_data.get()));
 }
@@ -518,11 +448,11 @@ TEST_F(GDataWapiOperationsTest, GetResourceEntryOperation_InvalidResourceId) {
       request_context_getter_.get(),
       *url_generator_,
       "<invalid>",  // resource ID
-      base::Bind(&CopyResultsFromGetDataCallbackAndQuit,
+      base::Bind(&test_util::CopyResultsFromGetDataCallbackAndQuit,
                  &result_code,
                  &result_data));
   operation->Start(kTestGDataAuthToken, kTestUserAgent,
-                   base::Bind(&DoNothingForReAuthenticateCallback));
+                   base::Bind(&test_util::DoNothingForReAuthenticateCallback));
   MessageLoop::current()->Run();
 
   EXPECT_EQ(HTTP_NOT_FOUND, result_code);
@@ -540,72 +470,20 @@ TEST_F(GDataWapiOperationsTest, GetAccountMetadataOperation) {
       &operation_registry_,
       request_context_getter_.get(),
       *url_generator_,
-      base::Bind(&CopyResultsFromGetDataCallbackAndQuit,
+      base::Bind(&test_util::CopyResultsFromGetDataCallbackAndQuit,
                  &result_code,
                  &result_data));
   operation->Start(kTestGDataAuthToken, kTestUserAgent,
-                   base::Bind(&DoNothingForReAuthenticateCallback));
+                   base::Bind(&test_util::DoNothingForReAuthenticateCallback));
   MessageLoop::current()->Run();
 
   EXPECT_EQ(HTTP_SUCCESS, result_code);
   EXPECT_EQ(test_server::METHOD_GET, http_request_.method);
   EXPECT_EQ("/feeds/metadata/default?v=3&alt=json&include-installed-apps=true",
             http_request_.relative_url);
-  EXPECT_TRUE(VerifyJsonData(
+  EXPECT_TRUE(test_util::VerifyJsonData(
       test_util::GetTestFilePath("gdata/account_metadata.json"),
       result_data.get()));
-}
-
-TEST_F(GDataWapiOperationsTest, DownloadFileOperation_ValidFile) {
-  GDataErrorCode result_code = GDATA_OTHER_ERROR;
-  std::string contents;
-  DownloadFileOperation* operation = new DownloadFileOperation(
-      &operation_registry_,
-      request_context_getter_.get(),
-      base::Bind(&CopyResultsFromDownloadActionCallbackAndQuit,
-                 &result_code,
-                 &contents),
-      GetContentCallback(),
-      test_server_.GetURL("/files/gdata/testfile.txt"),
-      FilePath::FromUTF8Unsafe("/dummy/gdata/testfile.txt"),
-      GetTestCachedFilePath(FilePath::FromUTF8Unsafe("cached_testfile.txt")));
-  operation->Start(kTestGDataAuthToken, kTestUserAgent,
-                   base::Bind(&DoNothingForReAuthenticateCallback));
-  MessageLoop::current()->Run();
-
-  EXPECT_EQ(HTTP_SUCCESS, result_code);
-  EXPECT_EQ(test_server::METHOD_GET, http_request_.method);
-  EXPECT_EQ("/files/gdata/testfile.txt", http_request_.relative_url);
-
-  const FilePath expected_path =
-      test_util::GetTestFilePath("gdata/testfile.txt");
-  std::string expected_contents;
-  file_util::ReadFileToString(expected_path, &expected_contents);
-  EXPECT_EQ(expected_contents, contents);
-}
-
-TEST_F(GDataWapiOperationsTest, DownloadFileOperation_NonExistentFile) {
-  GDataErrorCode result_code = GDATA_OTHER_ERROR;
-  std::string contents;
-  DownloadFileOperation* operation = new DownloadFileOperation(
-      &operation_registry_,
-      request_context_getter_.get(),
-      base::Bind(&CopyResultsFromDownloadActionCallbackAndQuit,
-                 &result_code,
-                 &contents),
-      GetContentCallback(),
-      test_server_.GetURL("/files/gdata/no-such-file.txt"),
-      FilePath::FromUTF8Unsafe("/dummy/gdata/no-such-file.txt"),
-      GetTestCachedFilePath(
-          FilePath::FromUTF8Unsafe("cache_no-such-file.txt")));
-  operation->Start(kTestGDataAuthToken, kTestUserAgent,
-                   base::Bind(&DoNothingForReAuthenticateCallback));
-  MessageLoop::current()->Run();
-
-  EXPECT_EQ(HTTP_NOT_FOUND, result_code);
-  EXPECT_EQ(test_server::METHOD_GET, http_request_.method);
-  EXPECT_EQ("/files/gdata/no-such-file.txt", http_request_.relative_url);
-  // Do not verify the not found message.
 }
 
 TEST_F(GDataWapiOperationsTest, DeleteResourceOperation) {
@@ -614,20 +492,46 @@ TEST_F(GDataWapiOperationsTest, DeleteResourceOperation) {
   DeleteResourceOperation* operation = new DeleteResourceOperation(
       &operation_registry_,
       request_context_getter_.get(),
-      base::Bind(&CopyResultFromEntryActionCallbackAndQuit,
+      *url_generator_,
+      base::Bind(&test_util::CopyResultFromEntryActionCallbackAndQuit,
                  &result_code),
-      test_server_.GetURL(
-          "/feeds/default/private/full/file:2_file_resource_id"));
+      "file:2_file_resource_id",
+      "");
 
   operation->Start(kTestGDataAuthToken, kTestUserAgent,
-                   base::Bind(&DoNothingForReAuthenticateCallback));
+                   base::Bind(&test_util::DoNothingForReAuthenticateCallback));
   MessageLoop::current()->Run();
 
   EXPECT_EQ(HTTP_SUCCESS, result_code);
   EXPECT_EQ(test_server::METHOD_DELETE, http_request_.method);
-  EXPECT_EQ("/feeds/default/private/full/file:2_file_resource_id?v=3&alt=json",
-            http_request_.relative_url);
+  EXPECT_EQ(
+      "/feeds/default/private/full/file%3A2_file_resource_id?v=3&alt=json",
+      http_request_.relative_url);
   EXPECT_EQ("*", http_request_.headers["If-Match"]);
+}
+
+TEST_F(GDataWapiOperationsTest, DeleteResourceOperationWithETag) {
+  GDataErrorCode result_code = GDATA_OTHER_ERROR;
+
+  DeleteResourceOperation* operation = new DeleteResourceOperation(
+      &operation_registry_,
+      request_context_getter_.get(),
+      *url_generator_,
+      base::Bind(&test_util::CopyResultFromEntryActionCallbackAndQuit,
+                 &result_code),
+      "file:2_file_resource_id",
+      "etag");
+
+  operation->Start(kTestGDataAuthToken, kTestUserAgent,
+                   base::Bind(&test_util::DoNothingForReAuthenticateCallback));
+  MessageLoop::current()->Run();
+
+  EXPECT_EQ(HTTP_SUCCESS, result_code);
+  EXPECT_EQ(test_server::METHOD_DELETE, http_request_.method);
+  EXPECT_EQ(
+      "/feeds/default/private/full/file%3A2_file_resource_id?v=3&alt=json",
+      http_request_.relative_url);
+  EXPECT_EQ("etag", http_request_.headers["If-Match"]);
 }
 
 TEST_F(GDataWapiOperationsTest, CreateDirectoryOperation) {
@@ -639,19 +543,19 @@ TEST_F(GDataWapiOperationsTest, CreateDirectoryOperation) {
       &operation_registry_,
       request_context_getter_.get(),
       *url_generator_,
-      base::Bind(&CopyResultsFromGetDataCallbackAndQuit,
+      base::Bind(&test_util::CopyResultsFromGetDataCallbackAndQuit,
                  &result_code,
                  &result_data),
-      test_server_.GetURL("/feeds/default/private/full/folder%3Aroot"),
-      FILE_PATH_LITERAL("new directory"));
+      "folder:root",
+      "new directory");
 
   operation->Start(kTestGDataAuthToken, kTestUserAgent,
-                   base::Bind(&DoNothingForReAuthenticateCallback));
+                   base::Bind(&test_util::DoNothingForReAuthenticateCallback));
   MessageLoop::current()->Run();
 
   EXPECT_EQ(HTTP_SUCCESS, result_code);
   EXPECT_EQ(test_server::METHOD_POST, http_request_.method);
-  EXPECT_EQ("/feeds/default/private/full/folder%3Aroot?v=3&alt=json",
+  EXPECT_EQ("/feeds/default/private/full/folder%3Aroot/contents?v=3&alt=json",
             http_request_.relative_url);
   EXPECT_EQ("application/atom+xml", http_request_.headers["Content-Type"]);
 
@@ -674,14 +578,14 @@ TEST_F(GDataWapiOperationsTest, CopyHostedDocumentOperation) {
       &operation_registry_,
       request_context_getter_.get(),
       *url_generator_,
-      base::Bind(&CopyResultsFromGetDataCallbackAndQuit,
+      base::Bind(&test_util::CopyResultsFromGetDataCallbackAndQuit,
                  &result_code,
                  &result_data),
       "document:5_document_resource_id",  // source resource ID
-      FILE_PATH_LITERAL("New Document"));
+      "New Document");
 
   operation->Start(kTestGDataAuthToken, kTestUserAgent,
-                   base::Bind(&DoNothingForReAuthenticateCallback));
+                   base::Bind(&test_util::DoNothingForReAuthenticateCallback));
   MessageLoop::current()->Run();
 
   EXPECT_EQ(HTTP_SUCCESS, result_code);
@@ -706,20 +610,21 @@ TEST_F(GDataWapiOperationsTest, RenameResourceOperation) {
   RenameResourceOperation* operation = new RenameResourceOperation(
       &operation_registry_,
       request_context_getter_.get(),
-      base::Bind(&CopyResultFromEntryActionCallbackAndQuit,
+      *url_generator_,
+      base::Bind(&test_util::CopyResultFromEntryActionCallbackAndQuit,
                  &result_code),
-      test_server_.GetURL(
-          "/feeds/default/private/full/file:2_file_resource_id"),
-      FILE_PATH_LITERAL("New File"));
+      "file:2_file_resource_id",
+      "New File");
 
   operation->Start(kTestGDataAuthToken, kTestUserAgent,
-                   base::Bind(&DoNothingForReAuthenticateCallback));
+                   base::Bind(&test_util::DoNothingForReAuthenticateCallback));
   MessageLoop::current()->Run();
 
   EXPECT_EQ(HTTP_SUCCESS, result_code);
   EXPECT_EQ(test_server::METHOD_PUT, http_request_.method);
-  EXPECT_EQ("/feeds/default/private/full/file:2_file_resource_id?v=3&alt=json",
-            http_request_.relative_url);
+  EXPECT_EQ(
+      "/feeds/default/private/full/file%3A2_file_resource_id?v=3&alt=json",
+      http_request_.relative_url);
   EXPECT_EQ("application/atom+xml", http_request_.headers["Content-Type"]);
   EXPECT_EQ("*", http_request_.headers["If-Match"]);
 
@@ -739,7 +644,7 @@ TEST_F(GDataWapiOperationsTest, AuthorizeAppOperation_ValidFeed) {
   AuthorizeAppOperation* operation = new AuthorizeAppOperation(
       &operation_registry_,
       request_context_getter_.get(),
-      base::Bind(&CopyResultsFromGetDataCallbackAndQuit,
+      base::Bind(&test_util::CopyResultsFromGetDataCallbackAndQuit,
                  &result_code,
                  &result_data),
       test_server_.GetURL(
@@ -747,7 +652,7 @@ TEST_F(GDataWapiOperationsTest, AuthorizeAppOperation_ValidFeed) {
       "APP_ID");
 
   operation->Start(kTestGDataAuthToken, kTestUserAgent,
-                   base::Bind(&DoNothingForReAuthenticateCallback));
+                   base::Bind(&test_util::DoNothingForReAuthenticateCallback));
   MessageLoop::current()->Run();
 
   EXPECT_EQ(HTTP_SUCCESS, result_code);
@@ -774,14 +679,14 @@ TEST_F(GDataWapiOperationsTest, AuthorizeAppOperation_InvalidFeed) {
   AuthorizeAppOperation* operation = new AuthorizeAppOperation(
       &operation_registry_,
       request_context_getter_.get(),
-      base::Bind(&CopyResultsFromGetDataCallbackAndQuit,
+      base::Bind(&test_util::CopyResultsFromGetDataCallbackAndQuit,
                  &result_code,
                  &result_data),
       test_server_.GetURL("/files/gdata/testfile.txt"),
       "APP_ID");
 
   operation->Start(kTestGDataAuthToken, kTestUserAgent,
-                   base::Bind(&DoNothingForReAuthenticateCallback));
+                   base::Bind(&test_util::DoNothingForReAuthenticateCallback));
   MessageLoop::current()->Run();
 
   EXPECT_EQ(GDATA_PARSE_ERROR, result_code);
@@ -809,19 +714,18 @@ TEST_F(GDataWapiOperationsTest, AddResourceToDirectoryOperation) {
           &operation_registry_,
           request_context_getter_.get(),
           *url_generator_,
-          base::Bind(&CopyResultFromEntryActionCallbackAndQuit,
+          base::Bind(&test_util::CopyResultFromEntryActionCallbackAndQuit,
                      &result_code),
-          test_server_.GetURL("/feeds/default/private/full/folder%3Aroot"),
-          test_server_.GetURL(
-              "/feeds/default/private/full/file:2_file_resource_id"));
+          "folder:root",
+          "file:2_file_resource_id");
 
   operation->Start(kTestGDataAuthToken, kTestUserAgent,
-                   base::Bind(&DoNothingForReAuthenticateCallback));
+                   base::Bind(&test_util::DoNothingForReAuthenticateCallback));
   MessageLoop::current()->Run();
 
   EXPECT_EQ(HTTP_SUCCESS, result_code);
   EXPECT_EQ(test_server::METHOD_POST, http_request_.method);
-  EXPECT_EQ("/feeds/default/private/full/folder%3Aroot?v=3&alt=json",
+  EXPECT_EQ("/feeds/default/private/full/folder%3Aroot/contents?v=3&alt=json",
             http_request_.relative_url);
   EXPECT_EQ("application/atom+xml", http_request_.headers["Content-Type"]);
 
@@ -829,7 +733,7 @@ TEST_F(GDataWapiOperationsTest, AddResourceToDirectoryOperation) {
   EXPECT_EQ("<?xml version=\"1.0\"?>\n"
             "<entry xmlns=\"http://www.w3.org/2005/Atom\">\n"
             " <id>http://127.0.0.1:8040/feeds/default/private/full/"
-            "file:2_file_resource_id</id>\n"
+            "file%3A2_file_resource_id</id>\n"
             "</entry>\n",
             http_request_.content);
 }
@@ -843,51 +747,50 @@ TEST_F(GDataWapiOperationsTest, RemoveResourceFromDirectoryOperation) {
           &operation_registry_,
           request_context_getter_.get(),
           *url_generator_,
-          base::Bind(&CopyResultFromEntryActionCallbackAndQuit,
+          base::Bind(&test_util::CopyResultFromEntryActionCallbackAndQuit,
                      &result_code),
-          test_server_.GetURL("/feeds/default/private/full/folder%3Aroot"),
+          "folder:root",
           "file:2_file_resource_id");
 
   operation->Start(kTestGDataAuthToken, kTestUserAgent,
-                   base::Bind(&DoNothingForReAuthenticateCallback));
+                   base::Bind(&test_util::DoNothingForReAuthenticateCallback));
   MessageLoop::current()->Run();
 
   EXPECT_EQ(HTTP_SUCCESS, result_code);
   // DELETE method should be used, without the body content.
   EXPECT_EQ(test_server::METHOD_DELETE, http_request_.method);
-  EXPECT_EQ("/feeds/default/private/full/folder%3Aroot/"
+  EXPECT_EQ("/feeds/default/private/full/folder%3Aroot/contents/"
             "file%3A2_file_resource_id?v=3&alt=json",
             http_request_.relative_url);
   EXPECT_EQ("*", http_request_.headers["If-Match"]);
   EXPECT_FALSE(http_request_.has_content);
 }
 
-// This test exercises InitiateUploadOperation and ResumeUploadOperation for
-// a scenario of uploading a new file.
+// This test exercises InitiateUploadNewFileOperation and
+// ResumeUploadOperation for a scenario of uploading a new file.
 TEST_F(GDataWapiOperationsTest, UploadNewFile) {
   const std::string kUploadContent = "hello";
   GDataErrorCode result_code = GDATA_OTHER_ERROR;
   GURL upload_url;
 
   // 1) Get the upload URL for uploading a new file.
-  InitiateUploadParams initiate_params(
-      UPLOAD_NEW_FILE,
-      "New file",
-      "text/plain",
-      kUploadContent.size(),
-      test_server_.GetURL("/feeds/upload/create-session/default/private/full"),
-      FilePath::FromUTF8Unsafe("drive/newfile.txt"));
+  InitiateUploadNewFileOperation* initiate_operation =
+      new InitiateUploadNewFileOperation(
+          &operation_registry_,
+          request_context_getter_.get(),
+          base::Bind(&CopyResultFromInitiateUploadCallbackAndQuit,
+                     &result_code,
+                     &upload_url),
+          base::FilePath::FromUTF8Unsafe("drive/newfile.txt"),
+          "text/plain",
+          kUploadContent.size(),
+          test_server_.GetURL(
+              "/feeds/upload/create-session/default/private/full"),
+          "New file");
 
-  InitiateUploadOperation* initiate_operation = new InitiateUploadOperation(
-      &operation_registry_,
-      request_context_getter_.get(),
-      base::Bind(&CopyResultFromInitiateUploadCallbackAndQuit,
-                 &result_code,
-                 &upload_url),
-      initiate_params);
-
-  initiate_operation->Start(kTestGDataAuthToken, kTestUserAgent,
-                            base::Bind(&DoNothingForReAuthenticateCallback));
+  initiate_operation->Start(
+      kTestGDataAuthToken, kTestUserAgent,
+      base::Bind(&test_util::DoNothingForReAuthenticateCallback));
   MessageLoop::current()->Run();
 
   EXPECT_EQ(HTTP_SUCCESS, result_code);
@@ -915,26 +818,27 @@ TEST_F(GDataWapiOperationsTest, UploadNewFile) {
   ResumeUploadParams resume_params(
       UPLOAD_NEW_FILE,
       0,  // start_position
-      kUploadContent.size(), // end_position (exclusive)
+      kUploadContent.size(),  // end_position (exclusive)
       kUploadContent.size(),  // content_length,
       "text/plain",  // content_type
       buffer,
       upload_url,
-      FilePath::FromUTF8Unsafe("drive/newfile.txt"));
+      base::FilePath::FromUTF8Unsafe("drive/newfile.txt"));
 
-  ResumeUploadResponse response;
+  UploadRangeResponse response;
   scoped_ptr<ResourceEntry> new_entry;
 
   ResumeUploadOperation* resume_operation = new ResumeUploadOperation(
       &operation_registry_,
       request_context_getter_.get(),
-      base::Bind(&CopyResultFromResumeUploadCallbackAndQuit,
+      base::Bind(&CopyResultFromUploadRangeCallbackAndQuit,
                  &response,
                  &new_entry),
       resume_params);
 
-  resume_operation->Start(kTestGDataAuthToken, kTestUserAgent,
-                          base::Bind(&DoNothingForReAuthenticateCallback));
+  resume_operation->Start(
+      kTestGDataAuthToken, kTestUserAgent,
+      base::Bind(&test_util::DoNothingForReAuthenticateCallback));
   MessageLoop::current()->Run();
 
   // METHOD_PUT should be used to upload data.
@@ -957,9 +861,9 @@ TEST_F(GDataWapiOperationsTest, UploadNewFile) {
   EXPECT_EQ(-1, response.end_position_received);
 }
 
-// This test exercises InitiateUploadOperation and ResumeUploadOperation for
-// a scenario of uploading a new *large* file, which requires multiple requests
-// of ResumeUploadOperation.
+// This test exercises InitiateUploadNewFileOperation and ResumeUploadOperation
+// for a scenario of uploading a new *large* file, which requires multiple
+// requests of ResumeUploadOperation.
 TEST_F(GDataWapiOperationsTest, UploadNewLargeFile) {
   const size_t kMaxNumBytes = 10;
   // This is big enough to cause multiple requests of ResumeUploadOperation
@@ -969,24 +873,23 @@ TEST_F(GDataWapiOperationsTest, UploadNewLargeFile) {
   GURL upload_url;
 
   // 1) Get the upload URL for uploading a new file.
-  InitiateUploadParams initiate_params(
-      UPLOAD_NEW_FILE,
-      "New file",
-      "text/plain",
-      kUploadContent.size(),
-      test_server_.GetURL("/feeds/upload/create-session/default/private/full"),
-      FilePath::FromUTF8Unsafe("drive/newfile.txt"));
+  InitiateUploadNewFileOperation* initiate_operation =
+      new InitiateUploadNewFileOperation(
+          &operation_registry_,
+          request_context_getter_.get(),
+          base::Bind(&CopyResultFromInitiateUploadCallbackAndQuit,
+                     &result_code,
+                     &upload_url),
+          base::FilePath::FromUTF8Unsafe("drive/newfile.txt"),
+          "text/plain",
+          kUploadContent.size(),
+          test_server_.GetURL(
+              "/feeds/upload/create-session/default/private/full"),
+          "New file");
 
-  InitiateUploadOperation* initiate_operation = new InitiateUploadOperation(
-      &operation_registry_,
-      request_context_getter_.get(),
-      base::Bind(&CopyResultFromInitiateUploadCallbackAndQuit,
-                 &result_code,
-                 &upload_url),
-      initiate_params);
-
-  initiate_operation->Start(kTestGDataAuthToken, kTestUserAgent,
-                            base::Bind(&DoNothingForReAuthenticateCallback));
+  initiate_operation->Start(
+      kTestGDataAuthToken, kTestUserAgent,
+      base::Bind(&test_util::DoNothingForReAuthenticateCallback));
   MessageLoop::current()->Run();
 
   EXPECT_EQ(HTTP_SUCCESS, result_code);
@@ -1032,21 +935,22 @@ TEST_F(GDataWapiOperationsTest, UploadNewLargeFile) {
         "text/plain",  // content_type
         buffer,
         upload_url,
-        FilePath::FromUTF8Unsafe("drive/newfile.txt"));
+        base::FilePath::FromUTF8Unsafe("drive/newfile.txt"));
 
-    ResumeUploadResponse response;
+    UploadRangeResponse response;
     scoped_ptr<ResourceEntry> new_entry;
 
     ResumeUploadOperation* resume_operation = new ResumeUploadOperation(
         &operation_registry_,
         request_context_getter_.get(),
-        base::Bind(&CopyResultFromResumeUploadCallbackAndQuit,
+        base::Bind(&CopyResultFromUploadRangeCallbackAndQuit,
                    &response,
                    &new_entry),
         resume_params);
 
-    resume_operation->Start(kTestGDataAuthToken, kTestUserAgent,
-                            base::Bind(&DoNothingForReAuthenticateCallback));
+    resume_operation->Start(
+        kTestGDataAuthToken, kTestUserAgent,
+        base::Bind(&test_util::DoNothingForReAuthenticateCallback));
     MessageLoop::current()->Run();
 
     // METHOD_PUT should be used to upload data.
@@ -1082,8 +986,8 @@ TEST_F(GDataWapiOperationsTest, UploadNewLargeFile) {
   EXPECT_EQ(kUploadContent.size(), num_bytes_consumed);
 }
 
-// This test exercises InitiateUploadOperation and ResumeUploadOperation for
-// a scenario of uploading a new *empty* file.
+// This test exercises InitiateUploadNewFileOperation and ResumeUploadOperation
+// for a scenario of uploading a new *empty* file.
 //
 // The test is almost identical to UploadNewFile. The only difference is the
 // expectation for the Content-Range header.
@@ -1093,24 +997,23 @@ TEST_F(GDataWapiOperationsTest, UploadNewEmptyFile) {
   GURL upload_url;
 
   // 1) Get the upload URL for uploading a new file.
-  InitiateUploadParams initiate_params(
-      UPLOAD_NEW_FILE,
-      "New file",
-      "text/plain",
-      kUploadContent.size(),
-      test_server_.GetURL("/feeds/upload/create-session/default/private/full"),
-      FilePath::FromUTF8Unsafe("drive/newfile.txt"));
+  InitiateUploadNewFileOperation* initiate_operation =
+      new InitiateUploadNewFileOperation(
+          &operation_registry_,
+          request_context_getter_.get(),
+          base::Bind(&CopyResultFromInitiateUploadCallbackAndQuit,
+                     &result_code,
+                     &upload_url),
+          base::FilePath::FromUTF8Unsafe("drive/newfile.txt"),
+          "text/plain",
+          kUploadContent.size(),
+          test_server_.GetURL(
+              "/feeds/upload/create-session/default/private/full"),
+          "New file");
 
-  InitiateUploadOperation* initiate_operation = new InitiateUploadOperation(
-      &operation_registry_,
-      request_context_getter_.get(),
-      base::Bind(&CopyResultFromInitiateUploadCallbackAndQuit,
-                 &result_code,
-                 &upload_url),
-      initiate_params);
-
-  initiate_operation->Start(kTestGDataAuthToken, kTestUserAgent,
-                            base::Bind(&DoNothingForReAuthenticateCallback));
+  initiate_operation->Start(
+      kTestGDataAuthToken, kTestUserAgent,
+      base::Bind(&test_util::DoNothingForReAuthenticateCallback));
   MessageLoop::current()->Run();
 
   EXPECT_EQ(HTTP_SUCCESS, result_code);
@@ -1138,26 +1041,27 @@ TEST_F(GDataWapiOperationsTest, UploadNewEmptyFile) {
   ResumeUploadParams resume_params(
       UPLOAD_NEW_FILE,
       0,  // start_position
-      kUploadContent.size(), // end_position (exclusive)
+      kUploadContent.size(),  // end_position (exclusive)
       kUploadContent.size(),  // content_length,
       "text/plain",  // content_type
       buffer,
       upload_url,
-      FilePath::FromUTF8Unsafe("drive/newfile.txt"));
+      base::FilePath::FromUTF8Unsafe("drive/newfile.txt"));
 
-  ResumeUploadResponse response;
+  UploadRangeResponse response;
   scoped_ptr<ResourceEntry> new_entry;
 
   ResumeUploadOperation* resume_operation = new ResumeUploadOperation(
       &operation_registry_,
       request_context_getter_.get(),
-      base::Bind(&CopyResultFromResumeUploadCallbackAndQuit,
+      base::Bind(&CopyResultFromUploadRangeCallbackAndQuit,
                  &response,
                  &new_entry),
       resume_params);
 
-  resume_operation->Start(kTestGDataAuthToken, kTestUserAgent,
-                          base::Bind(&DoNothingForReAuthenticateCallback));
+  resume_operation->Start(
+      kTestGDataAuthToken, kTestUserAgent,
+      base::Bind(&test_util::DoNothingForReAuthenticateCallback));
   MessageLoop::current()->Run();
 
   // METHOD_PUT should be used to upload data.
@@ -1178,33 +1082,31 @@ TEST_F(GDataWapiOperationsTest, UploadNewEmptyFile) {
   EXPECT_EQ(-1, response.end_position_received);
 }
 
-// This test exercises InitiateUploadOperation and ResumeUploadOperation for
-// a scenario of updating an existing file.
+// This test exercises InitiateUploadExistingFileOperation and
+// ResumeUploadOperation for a scenario of updating an existing file.
 TEST_F(GDataWapiOperationsTest, UploadExistingFile) {
   const std::string kUploadContent = "hello";
   GDataErrorCode result_code = GDATA_OTHER_ERROR;
   GURL upload_url;
 
   // 1) Get the upload URL for uploading an existing file.
-  InitiateUploadParams initiate_params(
-      UPLOAD_EXISTING_FILE,
-      "Existing file",
-      "text/plain",
-      kUploadContent.size(),
-      test_server_.GetURL(
-          "/feeds/upload/create-session/default/private/full/file:foo"),
-      FilePath::FromUTF8Unsafe("drive/existingfile.txt"));
+  InitiateUploadExistingFileOperation* initiate_operation =
+      new InitiateUploadExistingFileOperation(
+          &operation_registry_,
+          request_context_getter_.get(),
+          base::Bind(&CopyResultFromInitiateUploadCallbackAndQuit,
+                     &result_code,
+                     &upload_url),
+          base::FilePath::FromUTF8Unsafe("drive/existingfile.txt"),
+          "text/plain",
+          kUploadContent.size(),
+          test_server_.GetURL(
+              "/feeds/upload/create-session/default/private/full/file:foo"),
+          "" /* etag */);
 
-  InitiateUploadOperation* initiate_operation = new InitiateUploadOperation(
-      &operation_registry_,
-      request_context_getter_.get(),
-      base::Bind(&CopyResultFromInitiateUploadCallbackAndQuit,
-                 &result_code,
-                 &upload_url),
-      initiate_params);
-
-  initiate_operation->Start(kTestGDataAuthToken, kTestUserAgent,
-                            base::Bind(&DoNothingForReAuthenticateCallback));
+  initiate_operation->Start(
+      kTestGDataAuthToken, kTestUserAgent,
+      base::Bind(&test_util::DoNothingForReAuthenticateCallback));
   MessageLoop::current()->Run();
 
   EXPECT_EQ(HTTP_SUCCESS, result_code);
@@ -1225,32 +1127,34 @@ TEST_F(GDataWapiOperationsTest, UploadExistingFile) {
   // requires a body)
   EXPECT_TRUE(http_request_.has_content);
   EXPECT_EQ("", http_request_.content);
+  EXPECT_EQ("*", http_request_.headers["If-Match"]);
 
   // 2) Upload the content to the upload URL.
   scoped_refptr<net::IOBuffer> buffer = new net::StringIOBuffer(kUploadContent);
   ResumeUploadParams resume_params(
       UPLOAD_EXISTING_FILE,
       0,  // start_position
-      kUploadContent.size(), // end_position (exclusive)
+      kUploadContent.size(),  // end_position (exclusive)
       kUploadContent.size(),  // content_length,
       "text/plain",  // content_type
       buffer,
       upload_url,
-      FilePath::FromUTF8Unsafe("drive/existingfile.txt"));
+      base::FilePath::FromUTF8Unsafe("drive/existingfile.txt"));
 
-  ResumeUploadResponse response;
+  UploadRangeResponse response;
   scoped_ptr<ResourceEntry> new_entry;
 
   ResumeUploadOperation* resume_operation = new ResumeUploadOperation(
       &operation_registry_,
       request_context_getter_.get(),
-      base::Bind(&CopyResultFromResumeUploadCallbackAndQuit,
+      base::Bind(&CopyResultFromUploadRangeCallbackAndQuit,
                  &response,
                  &new_entry),
       resume_params);
 
-  resume_operation->Start(kTestGDataAuthToken, kTestUserAgent,
-                          base::Bind(&DoNothingForReAuthenticateCallback));
+  resume_operation->Start(
+      kTestGDataAuthToken, kTestUserAgent,
+      base::Bind(&test_util::DoNothingForReAuthenticateCallback));
   MessageLoop::current()->Run();
 
   // METHOD_PUT should be used to upload data.
@@ -1271,6 +1175,148 @@ TEST_F(GDataWapiOperationsTest, UploadExistingFile) {
   // The start and end positions should be set to -1, if an upload is complete.
   EXPECT_EQ(-1, response.start_position_received);
   EXPECT_EQ(-1, response.end_position_received);
+}
+
+// This test exercises InitiateUploadExistingFileOperation and
+// ResumeUploadOperation for a scenario of updating an existing file.
+TEST_F(GDataWapiOperationsTest, UploadExistingFileWithETag) {
+  const std::string kUploadContent = "hello";
+  GDataErrorCode result_code = GDATA_OTHER_ERROR;
+  GURL upload_url;
+
+  // 1) Get the upload URL for uploading an existing file.
+  InitiateUploadExistingFileOperation* initiate_operation =
+      new InitiateUploadExistingFileOperation(
+          &operation_registry_,
+          request_context_getter_.get(),
+          base::Bind(&CopyResultFromInitiateUploadCallbackAndQuit,
+                     &result_code,
+                     &upload_url),
+          base::FilePath::FromUTF8Unsafe("drive/existingfile.txt"),
+          "text/plain",
+          kUploadContent.size(),
+          test_server_.GetURL(
+              "/feeds/upload/create-session/default/private/full/file:foo"),
+          kTestETag);
+
+  initiate_operation->Start(
+      kTestGDataAuthToken, kTestUserAgent,
+      base::Bind(&test_util::DoNothingForReAuthenticateCallback));
+  MessageLoop::current()->Run();
+
+  EXPECT_EQ(HTTP_SUCCESS, result_code);
+  EXPECT_EQ(test_server_.GetURL("/upload_existing_file"), upload_url);
+  // For updating an existing file, METHOD_PUT should be used.
+  EXPECT_EQ(test_server::METHOD_PUT, http_request_.method);
+  // convert=false should be passed as files should be uploaded as-is.
+  EXPECT_EQ("/feeds/upload/create-session/default/private/full/file:foo"
+            "?convert=false&v=3&alt=json",
+            http_request_.relative_url);
+  // Even though the body is empty, the content type should be set to
+  // "text/plain".
+  EXPECT_EQ("text/plain", http_request_.headers["Content-Type"]);
+  EXPECT_EQ("text/plain", http_request_.headers["X-Upload-Content-Type"]);
+  EXPECT_EQ(base::Int64ToString(kUploadContent.size()),
+            http_request_.headers["X-Upload-Content-Length"]);
+  // For updating an existing file, an empty body should be attached (PUT
+  // requires a body)
+  EXPECT_TRUE(http_request_.has_content);
+  EXPECT_EQ("", http_request_.content);
+  EXPECT_EQ(kTestETag, http_request_.headers["If-Match"]);
+
+  // 2) Upload the content to the upload URL.
+  scoped_refptr<net::IOBuffer> buffer = new net::StringIOBuffer(kUploadContent);
+  ResumeUploadParams resume_params(
+      UPLOAD_EXISTING_FILE,
+      0,  // start_position
+      kUploadContent.size(),  // end_position (exclusive)
+      kUploadContent.size(),  // content_length,
+      "text/plain",  // content_type
+      buffer,
+      upload_url,
+      base::FilePath::FromUTF8Unsafe("drive/existingfile.txt"));
+
+  UploadRangeResponse response;
+  scoped_ptr<ResourceEntry> new_entry;
+
+  ResumeUploadOperation* resume_operation = new ResumeUploadOperation(
+      &operation_registry_,
+      request_context_getter_.get(),
+      base::Bind(&CopyResultFromUploadRangeCallbackAndQuit,
+                 &response,
+                 &new_entry),
+      resume_params);
+
+  resume_operation->Start(
+      kTestGDataAuthToken, kTestUserAgent,
+      base::Bind(&test_util::DoNothingForReAuthenticateCallback));
+  MessageLoop::current()->Run();
+
+  // METHOD_PUT should be used to upload data.
+  EXPECT_EQ(test_server::METHOD_PUT, http_request_.method);
+  // Request should go to the upload URL.
+  EXPECT_EQ(upload_url.path(), http_request_.relative_url);
+  // Content-Range header should be added.
+  EXPECT_EQ("bytes 0-" +
+            base::Int64ToString(kUploadContent.size() -1) + "/" +
+            base::Int64ToString(kUploadContent.size()),
+            http_request_.headers["Content-Range"]);
+  // The upload content should be set in the HTTP request.
+  EXPECT_TRUE(http_request_.has_content);
+  EXPECT_EQ(kUploadContent, http_request_.content);
+
+  // Check the response.
+  EXPECT_EQ(HTTP_SUCCESS, response.code);  // Because it's an existing file.
+  // The start and end positions should be set to -1, if an upload is complete.
+  EXPECT_EQ(-1, response.start_position_received);
+  EXPECT_EQ(-1, response.end_position_received);
+}
+
+// This test exercises InitiateUploadExistingFileOperation for a scenario of
+// confliction on updating an existing file.
+TEST_F(GDataWapiOperationsTest, UploadExistingFileWithETagConflict) {
+  const std::string kUploadContent = "hello";
+  const std::string kWrongETag = "wrong_etag";
+  GDataErrorCode result_code = GDATA_OTHER_ERROR;
+  GURL upload_url;
+
+  InitiateUploadExistingFileOperation* initiate_operation =
+      new InitiateUploadExistingFileOperation(
+          &operation_registry_,
+          request_context_getter_.get(),
+          base::Bind(&CopyResultFromInitiateUploadCallbackAndQuit,
+                     &result_code,
+                     &upload_url),
+          base::FilePath::FromUTF8Unsafe("drive/existingfile.txt"),
+          "text/plain",
+          kUploadContent.size(),
+          test_server_.GetURL(
+              "/feeds/upload/create-session/default/private/full/file:foo"),
+          kWrongETag);
+
+  initiate_operation->Start(
+      kTestGDataAuthToken, kTestUserAgent,
+      base::Bind(&test_util::DoNothingForReAuthenticateCallback));
+  MessageLoop::current()->Run();
+
+  EXPECT_EQ(HTTP_PRECONDITION, result_code);
+  // For updating an existing file, METHOD_PUT should be used.
+  EXPECT_EQ(test_server::METHOD_PUT, http_request_.method);
+  // convert=false should be passed as files should be uploaded as-is.
+  EXPECT_EQ("/feeds/upload/create-session/default/private/full/file:foo"
+            "?convert=false&v=3&alt=json",
+            http_request_.relative_url);
+  // Even though the body is empty, the content type should be set to
+  // "text/plain".
+  EXPECT_EQ("text/plain", http_request_.headers["Content-Type"]);
+  EXPECT_EQ("text/plain", http_request_.headers["X-Upload-Content-Type"]);
+  EXPECT_EQ(base::Int64ToString(kUploadContent.size()),
+            http_request_.headers["X-Upload-Content-Length"]);
+  // For updating an existing file, an empty body should be attached (PUT
+  // requires a body)
+  EXPECT_TRUE(http_request_.has_content);
+  EXPECT_EQ("", http_request_.content);
+  EXPECT_EQ(kWrongETag, http_request_.headers["If-Match"]);
 }
 
 }  // namespace google_apis

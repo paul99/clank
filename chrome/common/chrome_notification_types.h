@@ -76,6 +76,12 @@ enum NotificationType {
   // Source<ThemeService>. There are no details.
   NOTIFICATION_BROWSER_THEME_CHANGED,
 
+#if defined(USE_AURA)
+  // The user has changed the fling curve configuration.
+  // Source<GesturePrefsObserver>. There are no details.
+  NOTIFICATION_BROWSER_FLING_CURVE_PARAMETERS_CHANGED,
+#endif  // defined(USE_AURA)
+
   // Sent when the renderer returns focus to the browser, as part of focus
   // traversal. The source is the browser, there are no details.
   NOTIFICATION_FOCUS_RETURNED_TO_BROWSER,
@@ -119,25 +125,24 @@ enum NotificationType {
   // is the dialog.
   NOTIFICATION_APP_MODAL_DIALOG_SHOWN,
 
-  // This message is sent when a new InfoBar has been added to a
-  // InfoBarTabHelper.  The source is a Source<InfoBarTabHelper> with a
-  // pointer to the InfoBarTabHelper the InfoBar was added to.  The details
-  // is a Details<InfoBarDelegate> with a pointer to the delegate that was
-  // added.
+  // This message is sent when a new InfoBar has been added to an
+  // InfoBarService.  The source is a Source<InfoBarService> with a pointer to
+  // the InfoBarService the InfoBar was added to.  The details is a
+  // Details<InfoBarDelegate> with a pointer to the delegate that was added.
   NOTIFICATION_TAB_CONTENTS_INFOBAR_ADDED,
 
-  // This message is sent when an InfoBar is about to be removed from a
-  // InfoBarTabHelper.  The source is a Source<InfoBarTabHelper> with a
-  // pointer to the InfoBarTabHelper the InfoBar was removed from.  The
-  // details is a Details<std::pair<InfoBarDelegate*, bool> > with a pointer
-  // to the removed delegate and whether the removal should be animated.
+  // This message is sent when an InfoBar is about to be removed from an
+  // InfoBarService.  The source is a Source<InfoBarService> with a pointer to
+  // the InfoBarService the InfoBar was removed from.  The details is a
+  // Details<std::pair<InfoBarDelegate*, bool> > with a pointer to the removed
+  // delegate and whether the removal should be animated.
   NOTIFICATION_TAB_CONTENTS_INFOBAR_REMOVED,
 
-  // This message is sent when an InfoBar is replacing another infobar in a
-  // InfoBarTabHelper.  The source is a Source<InfoBarTabHelper> with a
-  // pointer to the InfoBarTabHelper the InfoBar was removed from.  The
-  // details is a Details<std::pair<InfoBarDelegate*, InfoBarDelegate*> > with
-  // pointers to the old and new delegates, respectively.
+  // This message is sent when an InfoBar is replacing another infobar in an
+  // InfoBarService.  The source is a Source<InfoBarService> with a pointer to
+  // the InfoBarService the InfoBar was removed from.  The details is a
+  // Details<std::pair<InfoBarDelegate*, InfoBarDelegate*> > with pointers to
+  // the old and new delegates, respectively.
   NOTIFICATION_TAB_CONTENTS_INFOBAR_REPLACED,
 
   // This is sent when an externally hosted tab is closed.  No details are
@@ -173,10 +178,10 @@ enum NotificationType {
   // invoked on.
   NOTIFICATION_TAB_CONTENTS_APPLICATION_EXTENSION_CHANGED,
 
-  // Notification posted when the element that is focused and currently accepts
-  // keyboard input inside the webpage has been touched.  The source is the
-  // RenderViewHost and the details are not used.
-  NOTIFICATION_FOCUSED_EDITABLE_NODE_TOUCHED,
+  // Notification posted when the element that is focused has been touched. A
+  // bool parameter is passed in this notification which indicates if this node
+  // accepts. The source is the RenderViewHost.
+  NOTIFICATION_FOCUSED_NODE_TOUCHED,
 
   // Tabs --------------------------------------------------------------------
 
@@ -1102,9 +1107,13 @@ enum NotificationType {
   // containing the committed preview.
   NOTIFICATION_INSTANT_COMMITTED,
 
-  // Sent when the Instant loader determines whether the page supports the
+  // Sent when the Instant Controller determines whether the overlay supports
+  // the Instant API or not.
+  NOTIFICATION_INSTANT_OVERLAY_SUPPORT_DETERMINED,
+
+  // Sent when the Instant Controller determines whether the NTP supports the
   // Instant API or not.
-  NOTIFICATION_INSTANT_SUPPORT_DETERMINED,
+  NOTIFICATION_INSTANT_NTP_SUPPORT_DETERMINED,
 
   // Sent when the CaptivePortalService checks if we're behind a captive portal.
   // The Source is the Profile the CaptivePortalService belongs to, and the
@@ -1233,6 +1242,12 @@ enum NotificationType {
   // is a boolean: true if the content is entering the blocked state, false
   // if it is leaving.
   NOTIFICATION_CONTENT_BLOCKED_STATE_CHANGED,
+
+  // Session Restore --------------------------------------------------------
+
+  // Sent when synchronous (startup) session restore completes. No details or
+  // source.
+  NOTIFICATION_SESSION_RESTORE_DONE,
 
   // Note:-
   // Currently only Content and Chrome define and use notifications.

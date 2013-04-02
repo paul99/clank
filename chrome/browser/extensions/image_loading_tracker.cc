@@ -28,6 +28,7 @@
 
 using content::BrowserThread;
 using extensions::Extension;
+using extensions::Manifest;
 
 namespace {
 
@@ -115,7 +116,7 @@ class ImageLoadingTracker::ImageLoader
 
     // Read the file from disk.
     std::string file_contents;
-    FilePath path = image_info.resource.GetFilePath();
+    base::FilePath path = image_info.resource.GetFilePath();
     if (path.empty() || !file_util::ReadFileToString(path, &file_contents)) {
       ReportBack(NULL, image_info, gfx::Size(), id);
       return;
@@ -306,7 +307,7 @@ void ImageLoadingTracker::LoadImages(
       loader_ = new ImageLoader(this);
 
     int resource_id = -1;
-    if (extension->location() == Extension::COMPONENT &&
+    if (extension->location() == Manifest::COMPONENT &&
         extensions::ImageLoader::IsComponentExtensionResource(
             extension->path(), it->resource.relative_path(), &resource_id)) {
       loader_->LoadResource(*it, id, resource_id);

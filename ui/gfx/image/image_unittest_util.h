@@ -22,12 +22,17 @@ typedef NSImage* PlatformImage;
 #elif defined(TOOLKIT_GTK)
 typedef GdkPixbuf* PlatformImage;
 #else
-typedef const SkBitmap PlatformImage;
+typedef gfx::ImageSkia PlatformImage;
 #endif
 
-void SetSupportedScaleFactorsTo1xAnd2x();
+std::vector<ui::ScaleFactor> Get1xAnd2xScaleFactors();
 
+// Create a bitmap of |width|x|height|.
 const SkBitmap CreateBitmap(int width, int height);
+
+// Creates an ImageSkia of |width|x|height| DIP with bitmap data for an
+// arbitrary scale factor.
+gfx::ImageSkia CreateImageSkia(int width, int height);
 
 // Returns PNG encoded bytes for a bitmap of |edge_size|x|edge_size|.
 scoped_refptr<base::RefCountedMemory> CreatePNGBytes(int edge_size);
@@ -72,7 +77,7 @@ PlatformImage ToPlatformType(const gfx::Image& image);
 PlatformImage CopyPlatformType(const gfx::Image& image);
 
 SkColor GetPlatformImageColor(PlatformImage image, int x, int y);
-void CheckColor(SkColor color, bool is_red);
+void CheckColors(SkColor color1, SkColor color2);
 void CheckIsTransparent(SkColor color);
 
 bool IsPlatformImageValid(PlatformImage image);

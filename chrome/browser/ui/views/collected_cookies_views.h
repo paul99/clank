@@ -14,7 +14,7 @@
 #include "ui/views/controls/tree/tree_view_controller.h"
 #include "ui/views/window/dialog_delegate.h"
 
-class ConstrainedWindow;
+class WebContentsModalDialog;
 class CookieInfoView;
 class CookiesTreeModel;
 class InfobarView;
@@ -50,7 +50,6 @@ class CollectedCookiesViews : public views::DialogDelegateView,
   virtual string16 GetDialogButtonLabel(ui::DialogButton button) const OVERRIDE;
   virtual void DeleteDelegate() OVERRIDE;
   virtual bool Cancel() OVERRIDE;
-  virtual views::View* GetContentsView() OVERRIDE;
   virtual ui::ModalType GetModalType() const OVERRIDE;
 
   // views::ButtonListener:
@@ -90,7 +89,7 @@ class CollectedCookiesViews : public views::DialogDelegateView,
 
   content::NotificationRegistrar registrar_;
 
-  ConstrainedWindow* window_;
+  WebContentsModalDialog* window_;
 
   // The web contents.
   content::WebContents* web_contents_;

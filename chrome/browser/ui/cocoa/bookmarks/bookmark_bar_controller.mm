@@ -7,6 +7,7 @@
 #include "base/mac/bundle_locations.h"
 #include "base/mac/mac_util.h"
 #include "base/metrics/histogram.h"
+#include "base/prefs/pref_service.h"
 #include "base/sys_string_conversions.h"
 #include "chrome/browser/bookmarks/bookmark_editor.h"
 #include "chrome/browser/bookmarks/bookmark_model.h"
@@ -14,14 +15,12 @@
 #include "chrome/browser/bookmarks/bookmark_utils.h"
 #include "chrome/browser/extensions/extension_service.h"
 #include "chrome/browser/prefs/incognito_mode_prefs.h"
-#include "chrome/browser/prefs/pref_service.h"
 #include "chrome/browser/profiles/profile.h"
 #import "chrome/browser/themes/theme_service.h"
 #import "chrome/browser/themes/theme_service_factory.h"
 #include "chrome/browser/ui/bookmarks/bookmark_utils.h"
 #include "chrome/browser/ui/browser.h"
 #include "chrome/browser/ui/browser_list.h"
-#include "chrome/browser/ui/browser_tabstrip.h"
 #include "chrome/browser/ui/chrome_pages.h"
 #import "chrome/browser/ui/cocoa/background_gradient_view.h"
 #import "chrome/browser/ui/cocoa/bookmarks/bookmark_bar_bridge.h"
@@ -46,6 +45,7 @@
 #import "chrome/browser/ui/cocoa/view_resizer.h"
 #include "chrome/browser/ui/search/search.h"
 #include "chrome/browser/ui/search/search_ui.h"
+#include "chrome/browser/ui/tabs/tab_strip_model.h"
 #include "chrome/browser/ui/webui/ntp/app_launcher_handler.h"
 #include "chrome/common/extensions/extension_constants.h"
 #include "chrome/common/pref_names.h"
@@ -58,7 +58,6 @@
 #include "ui/base/l10n/l10n_util_mac.h"
 #include "ui/base/resource/resource_bundle.h"
 #include "ui/gfx/image/image.h"
-#include "ui/gfx/mac/nsimage_cache.h"
 
 using content::OpenURLParams;
 using content::Referrer;
@@ -220,17 +219,18 @@ void RecordAppLaunch(Profile* profile, GURL url) {
 - (void)setNodeForBarMenu;
 - (void)watchForExitEvent:(BOOL)watch;
 - (void)resetAllButtonPositionsWithAnimation:(BOOL)animate;
-- (BOOL)animationEnabled;
 
 @end
 
 @implementation BookmarkBarController
 
-@synthesize state = state_;
+@synthesize currentState = currentState_;
 @synthesize lastState = lastState_;
 @synthesize isAnimationRunning = isAnimationRunning_;
 @synthesize delegate = delegate_;
 @synthesize isEmpty = isEmpty_;
+@synthesize stateAnimationsEnabled = stateAnimationsEnabled_;
+@synthesize innerContentAnimationsEnabled = innerContentAnimationsEnabled_;
 
 - (id)initWithBrowser:(Browser*)browser
          initialWidth:(CGFloat)initialWidth
@@ -238,7 +238,7 @@ void RecordAppLaunch(Profile* profile, GURL url) {
        resizeDelegate:(id<ViewResizer>)resizeDelegate {
   if ((self = [super initWithNibName:@"BookmarkBar"
                               bundle:base::mac::FrameworkBundle()])) {
-    state_ = BookmarkBar::HIDDEN;
+    currentState_ = BookmarkBar::HIDDEN;
     lastState_ = BookmarkBar::HIDDEN;
 
     browser_ = browser;
@@ -255,10 +255,8 @@ void RecordAppLaunch(Profile* profile, GURL url) {
     defaultImage_.reset(
         rb.GetNativeImageNamed(IDR_DEFAULT_FAVICON).CopyNSImage());
 
-    // Disable animations if the detached bookmark bar will be shown at the
-    // bottom of the new tab page.
-    if ([self shouldShowAtBottomWhenDetached])
-      ignoreAnimations_ = YES;
+    innerContentAnimationsEnabled_ = YES;
+    stateAnimationsEnabled_ = YES;
 
     // Register for theme changes, bookmark button pulsing, ...
     NSNotificationCenter* defaultCenter = [NSNotificationCenter defaultCenter];
@@ -277,12 +275,6 @@ void RecordAppLaunch(Profile* profile, GURL url) {
     [[self animatableView] setResizeDelegate:resizeDelegate];
   }
   return self;
-}
-
-// Can be overridden in a test subclass if a simplistic test is being confused
-// by asynchronous animation or is running needlessly slow.
-- (BOOL)animationEnabled {
-  return YES;
 }
 
 - (void)pulseBookmarkNotification:(NSNotification*)notification {
@@ -357,6 +349,9 @@ void RecordAppLaunch(Profile* profile, GURL url) {
   [[self view] setFrame:NSMakeRect(0, 0, initialWidth_, 0)];
 
   // Complete init of the "off the side" button, as much as we can.
+  ResourceBundle& rb = ResourceBundle::GetSharedInstance();
+  [offTheSideButton_ setImage:
+        rb.GetNativeImageNamed(IDR_BOOKMARK_BAR_CHEVRONS).ToNSImage()];
   [offTheSideButton_.draggableButton setDraggable:NO];
   [offTheSideButton_.draggableButton setActsOnMouseDown:YES];
 
@@ -639,7 +634,7 @@ void RecordAppLaunch(Profile* profile, GURL url) {
 
 - (IBAction)openBookmark:(id)sender {
   BOOL isMenuItem = [[sender cell] isFolderButtonCell];
-  BOOL animate = isMenuItem && [self animationEnabled];
+  BOOL animate = isMenuItem && innerContentAnimationsEnabled_;
   if (animate)
     [self doMenuFlashOnSeparateThread:sender];
   DCHECK([sender respondsToSelector:@selector(bookmarkNode)]);
@@ -812,8 +807,9 @@ void RecordAppLaunch(Profile* profile, GURL url) {
     parent = bookmarkModel_->bookmark_bar_node();
   GURL url;
   string16 title;
-  chrome::GetURLAndTitleToBookmark(chrome::GetActiveWebContents(browser_),
-                                   &url, &title);
+  chrome::GetURLAndTitleToBookmark(
+      browser_->tab_strip_model()->GetActiveWebContents(),
+      &url, &title);
   BookmarkEditor::Show([[self view] window],
                        browser_->profile(),
                        BookmarkEditor::EditDetails::AddNodeInFolder(
@@ -923,7 +919,7 @@ void RecordAppLaunch(Profile* profile, GURL url) {
 // Main menubar observation code, so we can know to close our fake menus if the
 // user clicks on the actual menubar, as multiple unconnected menus sharing
 // the screen looks weird.
-// Needed because the hookForEvent method doesn't see the click on the menubar.
+// Needed because the local event monitor doesn't see the click on the menubar.
 
 // Gets called when the menubar is clicked.
 - (void)begunTracking:(NSNotification *)notification {
@@ -956,20 +952,24 @@ void RecordAppLaunch(Profile* profile, GURL url) {
 // "click outside" these windows to detect when they logically lose
 // focus.
 - (void)watchForExitEvent:(BOOL)watch {
-  BrowserCrApplication* app = static_cast<BrowserCrApplication*>(
-      [BrowserCrApplication sharedApplication]);
   if (watch) {
-    if (!watchingForExitEvent_) {
-      [app addEventHook:self];
+    if (!exitEventTap_) {
+      exitEventTap_ = [NSEvent
+          addLocalMonitorForEventsMatchingMask:NSAnyEventMask
+          handler:^NSEvent* (NSEvent* event) {
+              if ([self isEventAnExitEvent:event])
+                [self closeFolderAndStopTrackingMenus];
+              return event;
+          }];
       [self startObservingMenubar];
     }
   } else {
-    if (watchingForExitEvent_) {
-      [app removeEventHook:self];
+    if (exitEventTap_) {
+      [NSEvent removeMonitor:exitEventTap_];
+      exitEventTap_ = nil;
       [self stopObservingMenubar];
     }
   }
-  watchingForExitEvent_ = watch;
 }
 
 // Keep the "no items" label centered in response to a frame size change.
@@ -986,7 +986,7 @@ void RecordAppLaunch(Profile* profile, GURL url) {
 
 // (Private)
 - (void)showBookmarkBarWithAnimation:(BOOL)animate {
-  if (animate && !ignoreAnimations_) {
+  if (animate && stateAnimationsEnabled_) {
     // If |-doBookmarkBarAnimation| does the animation, we're done.
     if ([self doBookmarkBarAnimation])
       return;
@@ -1165,7 +1165,7 @@ void RecordAppLaunch(Profile* profile, GURL url) {
   if (!barIsEnabled_)
     return 0;
 
-  switch (state_) {
+  switch (currentState_) {
     case BookmarkBar::SHOW:
       return bookmarks::kBookmarkBarHeight;
     case BookmarkBar::DETACHED:
@@ -1264,7 +1264,7 @@ void RecordAppLaunch(Profile* profile, GURL url) {
 - (void)updateNoItemContainerVisibility {
   BOOL hideNoItemWarning = !isEmpty_ ||
       ([self shouldShowAtBottomWhenDetached] &&
-       state_ == BookmarkBar::DETACHED);
+       currentState_ == BookmarkBar::DETACHED);
   [[buttonView_ noItemContainer] setHidden:hideNoItemWarning];
 }
 
@@ -1450,7 +1450,7 @@ void RecordAppLaunch(Profile* profile, GURL url) {
   //  - no animation is running; or
   //  - an animation is running and |animate| is YES ([*] if it's NO, we'd want
   //    to cancel the animation and jump to the final state).
-  if ((nextState == state_) && (!isAnimationRunning || animate))
+  if ((nextState == currentState_) && (!isAnimationRunning || animate))
     return;
 
   // If an animation is running, we want to finalize it. Otherwise we'd have to
@@ -1464,17 +1464,17 @@ void RecordAppLaunch(Profile* profile, GURL url) {
     }
 
     // If we're in case [*] above, we can stop here.
-    if (nextState == state_)
+    if (nextState == currentState_)
       return;
   }
 
   // Now update with the new state change.
-  lastState_ = state_;
-  state_ = nextState;
+  lastState_ = currentState_;
+  currentState_ = nextState;
   isAnimationRunning_ = YES;
 
   // Animate only if told to and if bar is enabled.
-  if (animate && !ignoreAnimations_ && barIsEnabled_) {
+  if (animate && stateAnimationsEnabled_ && barIsEnabled_) {
     [self closeAllBookmarkFolders];
     // Take care of any animation cases we know how to handle.
 
@@ -1485,7 +1485,7 @@ void RecordAppLaunch(Profile* profile, GURL url) {
                              andState:BookmarkBar::DETACHED]) {
       [delegate_ bookmarkBar:self
         willAnimateFromState:lastState_
-                     toState:state_];
+                     toState:currentState_];
       [self showBookmarkBarWithAnimation:YES];
       return;
     }
@@ -1503,7 +1503,7 @@ void RecordAppLaunch(Profile* profile, GURL url) {
 - (void)updateState:(BookmarkBar::State)newState
          changeType:(BookmarkBar::AnimateChangeType)changeType {
   BOOL animate = changeType == BookmarkBar::ANIMATE_STATE_CHANGE &&
-                 !ignoreAnimations_;
+                 stateAnimationsEnabled_;
   [self moveToState:newState withAnimation:animate];
 }
 
@@ -1512,13 +1512,13 @@ void RecordAppLaunch(Profile* profile, GURL url) {
   // We promise that our delegate that the variables will be finalized before
   // the call to |-bookmarkBar:didChangeFromState:toState:|.
   BookmarkBar::State oldState = lastState_;
-  lastState_ = state_;
+  lastState_ = currentState_;
   isAnimationRunning_ = NO;
 
   // Notify our delegate.
   [delegate_ bookmarkBar:self
       didChangeFromState:oldState
-                 toState:state_];
+                 toState:currentState_];
 
   // Update ourselves visually.
   [self updateVisibility];
@@ -2088,7 +2088,6 @@ static BOOL ValueInRangeInclusive(CGFloat low, CGFloat value, CGFloat high) {
 // hypothetical drop with the new button having a left edge of |where|.
 // Gets called only by our view.
 - (void)setDropInsertionPos:(CGFloat)where {
-  BOOL animate = [self animationEnabled];
   if (!hasInsertionPos_ || where != insertionPos_) {
     insertionPos_ = where;
     hasInsertionPos_ = YES;
@@ -2112,7 +2111,7 @@ static BOOL ValueInRangeInclusive(CGFloat low, CGFloat value, CGFloat high) {
       if (left > insertionPos_)
         buttonFrame.origin.x += paddingWidth;
       left += bookmarks::kBookmarkHorizontalPadding;
-      if (animate)
+      if (innerContentAnimationsEnabled_)
         [[button animator] setFrame:buttonFrame];
       else
         [button setFrame:buttonFrame];
@@ -2125,7 +2124,7 @@ static BOOL ValueInRangeInclusive(CGFloat low, CGFloat value, CGFloat high) {
 // This is generally useful, so is called from various places internally.
 - (void)resetAllButtonPositionsWithAnimation:(BOOL)animate {
   CGFloat left = bookmarks::kBookmarkHorizontalPadding;
-  animate &= [self animationEnabled];
+  animate &= innerContentAnimationsEnabled_;
 
   for (NSButton* button in buttons_.get()) {
     // Hidden buttons get no space.
@@ -2286,26 +2285,26 @@ static BOOL ValueInRangeInclusive(CGFloat low, CGFloat value, CGFloat high) {
 // (BookmarkBarState protocol)
 - (BOOL)isVisible {
   if ([self shouldShowAtBottomWhenDetached] &&
-      state_ == BookmarkBar::DETACHED &&
+      currentState_ == BookmarkBar::DETACHED &&
       [self currentTabContentsHeight] <
           chrome::search::kMinContentHeightForBottomBookmarkBar) {
     return NO;
   }
 
-  return barIsEnabled_ && (state_ == BookmarkBar::SHOW ||
-                           state_ == BookmarkBar::DETACHED ||
+  return barIsEnabled_ && (currentState_ == BookmarkBar::SHOW ||
+                           currentState_ == BookmarkBar::DETACHED ||
                            lastState_ == BookmarkBar::SHOW ||
                            lastState_ == BookmarkBar::DETACHED);
 }
 
 // (BookmarkBarState protocol)
 - (BOOL)isInState:(BookmarkBar::State)state {
-  return state_ == state && ![self isAnimationRunning];
+  return currentState_ == state && ![self isAnimationRunning];
 }
 
 // (BookmarkBarState protocol)
 - (BOOL)isAnimatingToState:(BookmarkBar::State)state {
-  return state_ == state && [self isAnimationRunning];
+  return currentState_ == state && [self isAnimationRunning];
 }
 
 // (BookmarkBarState protocol)
@@ -2317,7 +2316,7 @@ static BOOL ValueInRangeInclusive(CGFloat low, CGFloat value, CGFloat high) {
 - (BOOL)isAnimatingFromState:(BookmarkBar::State)fromState
                      toState:(BookmarkBar::State)toState {
   return lastState_ == fromState &&
-         state_ == toState &&
+         currentState_ == toState &&
          [self isAnimationRunning];
 }
 
@@ -2357,7 +2356,7 @@ static BOOL ValueInRangeInclusive(CGFloat low, CGFloat value, CGFloat high) {
 }
 
 - (BOOL)shouldShowAtBottomWhenDetached {
-  return chrome::search::IsInstantExtendedAPIEnabled(browser_->profile());
+  return NO;
 }
 
 #pragma mark BookmarkButtonDelegate Protocol
@@ -2800,7 +2799,7 @@ static BOOL ValueInRangeInclusive(CGFloat low, CGFloat value, CGFloat high) {
       // If we are deleting a button whose folder is currently open, close it!
       [self closeAllBookmarkFolders];
     }
-    if (animate && !ignoreAnimations_ && [self isVisible] &&
+    if (animate && innerContentAnimationsEnabled_ && [self isVisible] &&
         [[self browserWindow] isMainWindow]) {
       NSPoint poofPoint = [oldButton screenLocationForRemoveAnimation];
       NSShowAnimationEffect(NSAnimationEffectDisappearingItemDefault, poofPoint,
@@ -2830,14 +2829,6 @@ static BOOL ValueInRangeInclusive(CGFloat low, CGFloat value, CGFloat high) {
   return [folderController_ controllerForNode:node];
 }
 
-#pragma mark BookmarkButtonControllerProtocol
-
-// NOT an override of a standard Cocoa call made to NSViewControllers.
-- (void)hookForEvent:(NSEvent*)theEvent {
-  if ([self isEventAnExitEvent:theEvent])
-    [self closeFolderAndStopTrackingMenus];
-}
-
 #pragma mark TestingAPI Only
 
 - (NSMenu*)buttonContextMenu {
@@ -2848,10 +2839,6 @@ static BOOL ValueInRangeInclusive(CGFloat low, CGFloat value, CGFloat high) {
 // to minimize touching the object passed in (likely a mock).
 - (void)setButtonContextMenu:(id)menu {
   buttonContextMenu_ = menu;
-}
-
-- (void)setIgnoreAnimations:(BOOL)ignore {
-  ignoreAnimations_ = ignore;
 }
 
 @end

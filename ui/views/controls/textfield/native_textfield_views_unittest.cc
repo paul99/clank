@@ -129,22 +129,22 @@ class NativeTextfieldViewsTest : public ViewsTestBase,
 
   // TextfieldController:
   virtual void ContentsChanged(Textfield* sender,
-                               const string16& new_contents) {
+                               const string16& new_contents) OVERRIDE {
     ASSERT_NE(last_contents_, new_contents);
     last_contents_ = new_contents;
   }
 
   virtual bool HandleKeyEvent(Textfield* sender,
-                              const ui::KeyEvent& key_event) {
+                              const ui::KeyEvent& key_event) OVERRIDE {
     // TODO(oshima): figure out how to test the keystroke.
     return false;
   }
 
-  virtual void OnBeforeUserAction(Textfield* sender) {
+  virtual void OnBeforeUserAction(Textfield* sender) OVERRIDE {
     ++on_before_user_action_;
   }
 
-  virtual void OnAfterUserAction(Textfield* sender) {
+  virtual void OnAfterUserAction(Textfield* sender) OVERRIDE {
     ++on_after_user_action_;
   }
 
@@ -871,13 +871,13 @@ TEST_F(NativeTextfieldViewsTest, DragAndDrop_AcceptDrop) {
 
   // Ensure that textfields do not accept non-OSExchangeData::STRING types.
   ui::OSExchangeData bad_data;
-  bad_data.SetFilename(FilePath(FILE_PATH_LITERAL("x")));
+  bad_data.SetFilename(base::FilePath(FILE_PATH_LITERAL("x")));
 #if defined(OS_WIN)
   ui::OSExchangeData::CustomFormat fmt = CF_BITMAP;
   bad_data.SetPickledData(fmt, Pickle());
-  bad_data.SetFileContents(FilePath(L"x"), "x");
+  bad_data.SetFileContents(base::FilePath(L"x"), "x");
   bad_data.SetHtml(string16(ASCIIToUTF16("x")), GURL("x.org"));
-  ui::OSExchangeData::DownloadFileInfo download(FilePath(), NULL);
+  ui::OSExchangeData::DownloadFileInfo download(base::FilePath(), NULL);
   bad_data.SetDownloadFileInfo(download);
 #endif
   EXPECT_FALSE(textfield_view_->CanDrop(bad_data));
@@ -1306,19 +1306,42 @@ TEST_F(NativeTextfieldViewsTest, UndoRedoTest) {
   EXPECT_STR_EQ("", textfield_->text());
   SendKeyEvent(ui::VKEY_Y, false, true);
   EXPECT_STR_EQ("", textfield_->text());
+}
 
-  // Insert
+TEST_F(NativeTextfieldViewsTest, CopyPasteShortcuts) {
+  InitTextfield(Textfield::STYLE_DEFAULT);
+  // Ensure [Ctrl]+[c] copies and [Ctrl]+[v] pastes.
+  textfield_->SetText(ASCIIToUTF16("abc"));
+  textfield_->SelectAll(false);
+  SendKeyEvent(ui::VKEY_C, false, true);
+  EXPECT_STR_EQ("abc", string16(GetClipboardText()));
+  SendKeyEvent(ui::VKEY_HOME);
+  SendKeyEvent(ui::VKEY_V, false, true);
+  EXPECT_STR_EQ("abcabc", textfield_->text());
+
+  // Ensure [Ctrl]+[Insert] copies and [Shift]+[Insert] pastes.
   textfield_->SetText(ASCIIToUTF16("123"));
+  textfield_->SelectAll(false);
+  SendKeyEvent(ui::VKEY_INSERT, false, true);
+  EXPECT_STR_EQ("123", string16(GetClipboardText()));
+  SendKeyEvent(ui::VKEY_HOME);
+  SendKeyEvent(ui::VKEY_INSERT, true, false);
+  EXPECT_STR_EQ("123123", textfield_->text());
+  // Ensure [Ctrl]+[Shift]+[Insert] is a no-op.
+  textfield_->SelectAll(false);
+  SendKeyEvent(ui::VKEY_INSERT, true, true);
+  EXPECT_STR_EQ("123", string16(GetClipboardText()));
+  EXPECT_STR_EQ("123123", textfield_->text());
+}
+
+TEST_F(NativeTextfieldViewsTest, OvertypeMode) {
+  InitTextfield(Textfield::STYLE_DEFAULT);
+  // Overtype mode should be disabled (no-op [Insert]).
+  textfield_->SetText(ASCIIToUTF16("2"));
   SendKeyEvent(ui::VKEY_HOME);
   SendKeyEvent(ui::VKEY_INSERT);
-  SendKeyEvent(ui::VKEY_A);
-  EXPECT_STR_EQ("a23", textfield_->text());
-  SendKeyEvent(ui::VKEY_B);
-  EXPECT_STR_EQ("ab3", textfield_->text());
-  SendKeyEvent(ui::VKEY_Z, false, true);
-  EXPECT_STR_EQ("123", textfield_->text());
-  SendKeyEvent(ui::VKEY_Y, false, true);
-  EXPECT_STR_EQ("ab3", textfield_->text());
+  SendKeyEvent(ui::VKEY_1, false, false);
+  EXPECT_STR_EQ("12", textfield_->text());
 }
 
 TEST_F(NativeTextfieldViewsTest, TextCursorDisplayTest) {

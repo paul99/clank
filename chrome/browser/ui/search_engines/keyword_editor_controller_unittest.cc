@@ -36,19 +36,19 @@ class KeywordEditorControllerTest : public testing::Test,
     Init(false);
   }
 
-  virtual void OnModelChanged() {
+  virtual void OnModelChanged() OVERRIDE {
     model_changed_count_++;
   }
 
-  virtual void OnItemsChanged(int start, int length) {
+  virtual void OnItemsChanged(int start, int length) OVERRIDE {
     items_changed_count_++;
   }
 
-  virtual void OnItemsAdded(int start, int length) {
+  virtual void OnItemsAdded(int start, int length) OVERRIDE {
     added_count_++;
   }
 
-  virtual void OnItemsRemoved(int start, int length) {
+  virtual void OnItemsRemoved(int start, int length) OVERRIDE {
     removed_count_++;
   }
 
@@ -68,7 +68,7 @@ class KeywordEditorControllerTest : public testing::Test,
 
   void SimulateDefaultSearchIsManaged(const std::string& url) {
     ASSERT_FALSE(url.empty());
-    TestingPrefService* service = profile_->GetTestingPrefService();
+    TestingPrefServiceSyncable* service = profile_->GetTestingPrefService();
     service->SetManagedPref(prefs::kDefaultSearchProviderEnabled,
                             new base::FundamentalValue(true));
     service->SetManagedPref(prefs::kDefaultSearchProviderSearchURL,

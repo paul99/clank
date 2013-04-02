@@ -11,10 +11,10 @@
 class IncognitoModePrefsTest : public testing::Test {
  protected:
   virtual void SetUp() {
-    IncognitoModePrefs::RegisterUserPrefs(&prefs_);
+    IncognitoModePrefs::RegisterUserPrefs(prefs_.registry());
   }
 
-  TestingPrefService prefs_;
+  TestingPrefServiceSyncable prefs_;
 };
 
 TEST_F(IncognitoModePrefsTest, IntToAvailability) {

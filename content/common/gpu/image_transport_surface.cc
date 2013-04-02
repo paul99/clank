@@ -2,8 +2,6 @@
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
-#if defined(ENABLE_GPU)
-
 #include "content/common/gpu/image_transport_surface.h"
 
 #include "base/bind.h"
@@ -15,51 +13,15 @@
 #include "content/common/gpu/gpu_command_buffer_stub.h"
 #include "content/common/gpu/gpu_messages.h"
 #include "gpu/command_buffer/service/gpu_scheduler.h"
-#include "ui/gl/gl_switches.h"
 #include "ui/gl/gl_implementation.h"
+#include "ui/gl/gl_switches.h"
+#include "ui/gl/vsync_provider.h"
 
 namespace content {
 
 ImageTransportSurface::ImageTransportSurface() {}
 
 ImageTransportSurface::~ImageTransportSurface() {}
-
-void ImageTransportSurface::GetRegionsToCopy(
-    const gfx::Rect& previous_damage_rect,
-    const gfx::Rect& new_damage_rect,
-    std::vector<gfx::Rect>* regions) {
-  gfx::Rect intersection =
-      gfx::IntersectRects(previous_damage_rect, new_damage_rect);
-
-  if (intersection.IsEmpty()) {
-    regions->push_back(previous_damage_rect);
-    return;
-  }
-
-  // Top (above the intersection).
-  regions->push_back(gfx::Rect(previous_damage_rect.x(),
-      previous_damage_rect.y(),
-      previous_damage_rect.width(),
-      intersection.y() - previous_damage_rect.y()));
-
-  // Left (of the intersection).
-  regions->push_back(gfx::Rect(previous_damage_rect.x(),
-      intersection.y(),
-      intersection.x() - previous_damage_rect.x(),
-      intersection.height()));
-
-  // Right (of the intersection).
-  regions->push_back(gfx::Rect(intersection.right(),
-      intersection.y(),
-      previous_damage_rect.right() - intersection.right(),
-      intersection.height()));
-
-  // Bottom (below the intersection).
-  regions->push_back(gfx::Rect(previous_damage_rect.x(),
-      intersection.bottom(),
-      previous_damage_rect.width(),
-      previous_damage_rect.bottom() - intersection.bottom()));
-}
 
 ImageTransportHelper::ImageTransportHelper(ImageTransportSurface* surface,
                                            GpuChannelManager* manager,
@@ -100,13 +62,6 @@ bool ImageTransportHelper::OnMessageReceived(const IPC::Message& message) {
     IPC_MESSAGE_UNHANDLED(handled = false)
   IPC_END_MESSAGE_MAP()
   return handled;
-}
-
-void ImageTransportHelper::SendAcceleratedSurfaceNew(
-    GpuHostMsg_AcceleratedSurfaceNew_Params params) {
-  params.surface_id = stub_->surface_id();
-  params.route_id = route_id_;
-  manager_->Send(new GpuHostMsg_AcceleratedSurfaceNew(params));
 }
 
 void ImageTransportHelper::SendAcceleratedSurfaceBuffersSwapped(
@@ -213,26 +168,11 @@ void ImageTransportHelper::OnResizeViewACK() {
 }
 
 void ImageTransportHelper::Resize(gfx::Size size) {
-  // On windows, the surface is recreated and, in case the newly allocated
-  // surface happens to have the same address, it should be invalidated on the
-  // decoder so that future calls to MakeCurrent do not early out on the
-  // assumption that neither the context or surface have actually changed.
-#if defined(OS_WIN)
-  if (handle_ != NULL)
-    Decoder()->ReleaseCurrent();
-#endif
-
   surface_->OnResize(size);
 
 #if defined(OS_ANDROID)
-  manager_->gpu_memory_manager()->ScheduleManage(true);
-#endif
-
-#if defined(OS_WIN)
-  if (handle_ != NULL) {
-    Decoder()->MakeCurrent();
-    SetSwapInterval(Decoder()->GetGLContext());
-  }
+  manager_->gpu_memory_manager()->ScheduleManage(
+      GpuMemoryManager::kScheduleManageNow);
 #endif
 }
 
@@ -243,7 +183,9 @@ PassThroughImageTransportSurface::PassThroughImageTransportSurface(
     bool transport)
     : GLSurfaceAdapter(surface),
       transport_(transport),
-      did_set_swap_interval_(false) {
+      did_set_swap_interval_(false),
+      did_unschedule_(false),
+      is_swap_buffers_pending_(false) {
   helper_.reset(new ImageTransportHelper(this,
                                          manager,
                                          stub,
@@ -260,19 +202,30 @@ void PassThroughImageTransportSurface::Destroy() {
   GLSurfaceAdapter::Destroy();
 }
 
+bool PassThroughImageTransportSurface::DeferDraws() {
+  if (is_swap_buffers_pending_) {
+    DCHECK(!did_unschedule_);
+    did_unschedule_ = true;
+    helper_->SetScheduled(false);
+    return true;
+  }
+  return false;
+}
+
 bool PassThroughImageTransportSurface::SwapBuffers() {
   bool result = gfx::GLSurfaceAdapter::SwapBuffers();
   SendVSyncUpdateIfAvailable();
 
   if (transport_) {
+    DCHECK(!is_swap_buffers_pending_);
+    is_swap_buffers_pending_ = true;
+
     // Round trip to the browser UI thread, for throttling, by sending a dummy
     // SwapBuffers message.
     GpuHostMsg_AcceleratedSurfaceBuffersSwapped_Params params;
     params.surface_handle = 0;
     params.size = surface()->GetSize();
     helper_->SendAcceleratedSurfaceBuffersSwapped(params);
-
-    helper_->SetScheduled(false);
   }
   return result;
 }
@@ -283,6 +236,9 @@ bool PassThroughImageTransportSurface::PostSubBuffer(
   SendVSyncUpdateIfAvailable();
 
   if (transport_) {
+    DCHECK(!is_swap_buffers_pending_);
+    is_swap_buffers_pending_ = true;
+
     // Round trip to the browser UI thread, for throttling, by sending a dummy
     // PostSubBuffer message.
     GpuHostMsg_AcceleratedSurfacePostSubBuffer_Params params;
@@ -310,7 +266,12 @@ bool PassThroughImageTransportSurface::OnMakeCurrent(gfx::GLContext* context) {
 void PassThroughImageTransportSurface::OnBufferPresented(
     const AcceleratedSurfaceMsg_BufferPresented_Params& /* params */) {
   DCHECK(transport_);
-  helper_->SetScheduled(true);
+  DCHECK(is_swap_buffers_pending_);
+  is_swap_buffers_pending_ = false;
+  if (did_unschedule_) {
+    did_unschedule_ = false;
+    helper_->SetScheduled(true);
+  }
 }
 
 void PassThroughImageTransportSurface::OnResizeViewACK() {
@@ -338,11 +299,12 @@ gfx::Size PassThroughImageTransportSurface::GetSize() {
 PassThroughImageTransportSurface::~PassThroughImageTransportSurface() {}
 
 void PassThroughImageTransportSurface::SendVSyncUpdateIfAvailable() {
-  GetVSyncParameters(
+  gfx::VSyncProvider* vsync_provider = GetVSyncProvider();
+  if (vsync_provider) {
+    vsync_provider->GetVSyncParameters(
       base::Bind(&ImageTransportHelper::SendUpdateVSyncParameters,
                  helper_->AsWeakPtr()));
+  }
 }
 
 }  // namespace content
-
-#endif  // defined(ENABLE_GPU)

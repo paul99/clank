@@ -20,8 +20,8 @@
 #include "content/browser/appcache/chrome_appcache_service.h"
 #include "content/browser/browser_child_process_host_impl.h"
 #include "content/browser/child_process_security_policy_impl.h"
-#include "content/browser/debugger/worker_devtools_manager.h"
-#include "content/browser/debugger/worker_devtools_message_filter.h"
+#include "content/browser/devtools/worker_devtools_manager.h"
+#include "content/browser/devtools/worker_devtools_message_filter.h"
 #include "content/browser/fileapi/fileapi_message_filter.h"
 #include "content/browser/in_process_webkit/indexed_db_dispatcher_host.h"
 #include "content/browser/mime_registry_message_filter.h"
@@ -69,7 +69,7 @@ class URLRequestContextSelector
   virtual ~URLRequestContextSelector() {}
 
   virtual net::URLRequestContext* GetRequestContext(
-      ResourceType::Type resource_type) {
+      ResourceType::Type resource_type) OVERRIDE {
     if (resource_type == ResourceType::MEDIA)
       return media_url_request_context_->GetURLRequestContext();
     return url_request_context_->GetURLRequestContext();
@@ -136,7 +136,7 @@ bool WorkerProcessHost::Init(int render_process_id) {
   int flags = ChildProcessHost::CHILD_NORMAL;
 #endif
 
-  FilePath exe_path = ChildProcessHost::GetChildPath(flags);
+  base::FilePath exe_path = ChildProcessHost::GetChildPath(flags);
   if (exe_path.empty())
     return false;
 
@@ -191,7 +191,7 @@ bool WorkerProcessHost::Init(int render_process_id) {
 
   process_->Launch(
 #if defined(OS_WIN)
-      FilePath(),
+      base::FilePath(),
 #elif defined(OS_POSIX)
       use_zygote,
       base::EnvironmentVector(),
@@ -218,6 +218,7 @@ void WorkerProcessHost::CreateMessageFilters(int render_process_id) {
       process_->GetData().id, PROCESS_TYPE_WORKER, resource_context_,
       partition_.appcache_service(),
       blob_storage_context,
+      partition_.filesystem_context(),
       new URLRequestContextSelector(url_request_context,
                                     media_url_request_context));
   process_->GetHost()->AddFilter(resource_message_filter);
@@ -491,7 +492,7 @@ void WorkerProcessHost::UpdateTitle() {
     display_title += *i;
   }
 
-  process_->SetName(ASCIIToUTF16(display_title));
+  process_->SetName(UTF8ToUTF16(display_title));
 }
 
 void WorkerProcessHost::DocumentDetached(WorkerMessageFilter* filter,

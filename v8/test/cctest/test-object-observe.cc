@@ -30,6 +30,7 @@
 #include "cctest.h"
 
 using namespace v8;
+namespace i = v8::internal;
 
 namespace {
 // Need to create a new isolate when FLAG_harmony_observation is on.
@@ -277,4 +278,157 @@ TEST(GlobalObjectObservation) {
     CHECK(global_proxy->StrictEquals(CompileRun("records3[0].object")));
   }
   CHECK_EQ(3, CompileRun("records.length")->Int32Value());
+}
+
+
+struct RecordExpectation {
+  Handle<Value> object;
+  const char* type;
+  const char* name;
+  Handle<Value> old_value;
+};
+
+// TODO(adamk): Use this helper elsewhere in this file.
+static void ExpectRecords(Handle<Value> records,
+                          const RecordExpectation expectations[],
+                          int num) {
+  CHECK(records->IsArray());
+  Handle<Array> recordArray = records.As<Array>();
+  CHECK_EQ(num, static_cast<int>(recordArray->Length()));
+  for (int i = 0; i < num; ++i) {
+    Handle<Value> record = recordArray->Get(i);
+    CHECK(record->IsObject());
+    Handle<Object> recordObj = record.As<Object>();
+    CHECK(expectations[i].object->StrictEquals(
+        recordObj->Get(String::New("object"))));
+    CHECK(String::New(expectations[i].type)->Equals(
+        recordObj->Get(String::New("type"))));
+    CHECK(String::New(expectations[i].name)->Equals(
+        recordObj->Get(String::New("name"))));
+    if (!expectations[i].old_value.IsEmpty()) {
+      CHECK(expectations[i].old_value->Equals(
+          recordObj->Get(String::New("oldValue"))));
+    }
+  }
+}
+
+#define EXPECT_RECORDS(records, expectations) \
+    ExpectRecords(records, expectations, ARRAY_SIZE(expectations))
+
+TEST(APITestBasicMutation) {
+  HarmonyIsolate isolate;
+  HandleScope scope;
+  LocalContext context;
+  Handle<Object> obj = Handle<Object>::Cast(CompileRun(
+      "var records = [];"
+      "var obj = {};"
+      "function observer(r) { [].push.apply(records, r); };"
+      "Object.observe(obj, observer);"
+      "obj"));
+  obj->Set(String::New("foo"), Number::New(1));
+  obj->Set(1, Number::New(2));
+  // ForceSet should work just as well as Set
+  obj->ForceSet(String::New("foo"), Number::New(3));
+  obj->ForceSet(Number::New(1), Number::New(4));
+  // Setting an indexed element via the property setting method
+  obj->Set(Number::New(1), Number::New(5));
+  // Setting with a non-String, non-uint32 key
+  obj->Set(Number::New(1.1), Number::New(6), DontDelete);
+  obj->Delete(String::New("foo"));
+  obj->Delete(1);
+  obj->ForceDelete(Number::New(1.1));
+
+  // Force delivery
+  // TODO(adamk): Should the above set methods trigger delivery themselves?
+  CompileRun("void 0");
+  CHECK_EQ(9, CompileRun("records.length")->Int32Value());
+  const RecordExpectation expected_records[] = {
+    { obj, "new", "foo", Handle<Value>() },
+    { obj, "new", "1", Handle<Value>() },
+    { obj, "updated", "foo", Number::New(1) },
+    { obj, "updated", "1", Number::New(2) },
+    { obj, "updated", "1", Number::New(4) },
+    { obj, "new", "1.1", Handle<Value>() },
+    { obj, "deleted", "foo", Number::New(3) },
+    { obj, "deleted", "1", Number::New(5) },
+    { obj, "deleted", "1.1", Number::New(6) }
+  };
+  EXPECT_RECORDS(CompileRun("records"), expected_records);
+}
+
+TEST(HiddenPrototypeObservation) {
+  HarmonyIsolate isolate;
+  HandleScope scope;
+  LocalContext context;
+  Handle<FunctionTemplate> tmpl = FunctionTemplate::New();
+  tmpl->SetHiddenPrototype(true);
+  tmpl->InstanceTemplate()->Set(String::New("foo"), Number::New(75));
+  Handle<Object> proto = tmpl->GetFunction()->NewInstance();
+  Handle<Object> obj = Object::New();
+  obj->SetPrototype(proto);
+  context->Global()->Set(String::New("obj"), obj);
+  context->Global()->Set(String::New("proto"), proto);
+  CompileRun(
+      "var records;"
+      "function observer(r) { records = r; };"
+      "Object.observe(obj, observer);"
+      "obj.foo = 41;"  // triggers a notification
+      "proto.foo = 42;");  // does not trigger a notification
+  const RecordExpectation expected_records[] = {
+    { obj, "updated", "foo", Number::New(75) }
+  };
+  EXPECT_RECORDS(CompileRun("records"), expected_records);
+  obj->SetPrototype(Null());
+  CompileRun("obj.foo = 43");
+  const RecordExpectation expected_records2[] = {
+    { obj, "new", "foo", Handle<Value>() }
+  };
+  EXPECT_RECORDS(CompileRun("records"), expected_records2);
+  obj->SetPrototype(proto);
+  CompileRun(
+      "Object.observe(proto, observer);"
+      "proto.bar = 1;"
+      "Object.unobserve(obj, observer);"
+      "obj.foo = 44;");
+  const RecordExpectation expected_records3[] = {
+    { proto, "new", "bar", Handle<Value>() }
+    // TODO(adamk): The below record should be emitted since proto is observed
+    // and has been modified. Not clear if this happens in practice.
+    // { proto, "updated", "foo", Number::New(43) }
+  };
+  EXPECT_RECORDS(CompileRun("records"), expected_records3);
+}
+
+
+static int NumberOfElements(i::Handle<i::JSWeakMap> map) {
+  return i::ObjectHashTable::cast(map->table())->NumberOfElements();
+}
+
+
+TEST(ObservationWeakMap) {
+  HarmonyIsolate isolate;
+  HandleScope scope;
+  LocalContext context;
+  CompileRun(
+      "var obj = {};"
+      "Object.observe(obj, function(){});"
+      "Object.getNotifier(obj);"
+      "obj = null;");
+  i::Handle<i::JSObject> observation_state = FACTORY->observation_state();
+  i::Handle<i::JSWeakMap> observerInfoMap =
+      i::Handle<i::JSWeakMap>::cast(
+          i::GetProperty(observation_state, "observerInfoMap"));
+  i::Handle<i::JSWeakMap> objectInfoMap =
+      i::Handle<i::JSWeakMap>::cast(
+          i::GetProperty(observation_state, "objectInfoMap"));
+  i::Handle<i::JSWeakMap> notifierTargetMap =
+      i::Handle<i::JSWeakMap>::cast(
+          i::GetProperty(observation_state, "notifierTargetMap"));
+  CHECK_EQ(1, NumberOfElements(observerInfoMap));
+  CHECK_EQ(1, NumberOfElements(objectInfoMap));
+  CHECK_EQ(1, NumberOfElements(notifierTargetMap));
+  HEAP->CollectAllGarbage(i::Heap::kAbortIncrementalMarkingMask);
+  CHECK_EQ(0, NumberOfElements(observerInfoMap));
+  CHECK_EQ(0, NumberOfElements(objectInfoMap));
+  CHECK_EQ(0, NumberOfElements(notifierTargetMap));
 }

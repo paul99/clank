@@ -18,7 +18,7 @@
 #include "googleurl/src/gurl.h"
 #include "ui/gfx/rect.h"
 
-class PrefService;
+class PrefRegistrySimple;
 
 namespace base {
 class DictionaryValue;
@@ -34,9 +34,11 @@ class NetworkScreen;
 class OobeDisplay;
 class RegistrationScreen;
 class ResetScreen;
+class TermsOfServiceScreen;
 class UpdateScreen;
 class UserImageScreen;
 class WizardScreen;
+class WrongHWIDScreen;
 
 // Class that manages control flow between wizard screens. Wizard controller
 // interacts with screen controllers to move the user between screens.
@@ -60,9 +62,10 @@ class WizardController : public ScreenObserver {
     return default_controller_;
   }
 
-  // Whether the user image selection step should be skipped.
-  static bool skip_user_image_selection() {
-    return skip_user_image_selection_;
+  // Whether to skip any screens that may normally be shown after login
+  // (registration, Terms of Service, user image selection).
+  static bool skip_post_login_screens() {
+    return skip_post_login_screens_;
   }
 
   // Returns true if EULA has been accepted.
@@ -99,10 +102,11 @@ class WizardController : public ScreenObserver {
   static void SetInitialLocale(const std::string& locale);
 
   // Registers OOBE preferences.
-  static void RegisterPrefs(PrefService* local_state);
+  static void RegisterPrefs(PrefRegistrySimple* registry);
 
-  // Marks user image screen to be always skipped after login.
-  static void SkipImageSelectionForTesting();
+  // Skips any screens that may normally be shown after login (registration,
+  // Terms of Service, user image selection).
+  static void SkipPostLoginScreensForTesting();
 
   // Shows the first screen defined by |first_screen_name| or by default
   // if the parameter is empty. Takes ownership of |screen_parameters|.
@@ -137,6 +141,8 @@ class WizardController : public ScreenObserver {
   HTMLPageScreen* GetHTMLPageScreen();
   EnterpriseEnrollmentScreen* GetEnterpriseEnrollmentScreen();
   ResetScreen* GetResetScreen();
+  TermsOfServiceScreen* GetTermsOfServiceScreen();
+  WrongHWIDScreen* GetWrongHWIDScreen();
 
   // Returns a pointer to the current screen or NULL if there's no such
   // screen.
@@ -156,6 +162,8 @@ class WizardController : public ScreenObserver {
   static const char kHTMLPageScreenName[];
   static const char kEnterpriseEnrollmentScreenName[];
   static const char kResetScreenName[];
+  static const char kTermsOfServiceScreenName[];
+  static const char kWrongHWIDScreenName[];
 
  private:
   // Show specific screen.
@@ -167,6 +175,8 @@ class WizardController : public ScreenObserver {
   void ShowHTMLPageScreen();
   void ShowEnterpriseEnrollmentScreen();
   void ShowResetScreen();
+  void ShowTermsOfServiceScreen();
+  void ShowWrongHWIDScreen();
 
   // Shows images login screen.
   void ShowLoginScreen();
@@ -189,7 +199,10 @@ class WizardController : public ScreenObserver {
   void OnEnterpriseEnrollmentDone();
   void OnEnterpriseAutoEnrollmentDone();
   void OnResetCanceled();
+  void OnWrongHWIDWarningSkipped();
   void OnOOBECompleted();
+  void OnTermsOfServiceDeclined();
+  void OnTermsOfServiceAccepted();
 
   // Loads brand code on I/O enabled thread and stores to Local State.
   void LoadBrandCodeFromFile();
@@ -228,7 +241,9 @@ class WizardController : public ScreenObserver {
   // Logs in the specified user via default login screen.
   void Login(const std::string& username, const std::string& password);
 
-  static bool skip_user_image_selection_;
+  // Whether to skip any screens that may normally be shown after login
+  // (registration, Terms of Service, user image selection).
+  static bool skip_post_login_screens_;
 
   static bool zero_delay_enabled_;
 
@@ -242,6 +257,8 @@ class WizardController : public ScreenObserver {
   scoped_ptr<HTMLPageScreen> html_page_screen_;
   scoped_ptr<EnterpriseEnrollmentScreen>
       enterprise_enrollment_screen_;
+  scoped_ptr<TermsOfServiceScreen> terms_of_service_screen_;
+  scoped_ptr<WrongHWIDScreen> wrong_hwid_screen_;
 
   // Screen that's currently active.
   WizardScreen* current_screen_;

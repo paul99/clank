@@ -5,13 +5,14 @@
 #ifndef CHROME_BROWSER_UI_WEBUI_NTP_APP_LAUNCHER_HANDLER_H_
 #define CHROME_BROWSER_UI_WEBUI_NTP_APP_LAUNCHER_HANDLER_H_
 
+#include <set>
 #include <string>
 
 #include "base/memory/scoped_ptr.h"
 #include "base/prefs/public/pref_change_registrar.h"
-#include "chrome/browser/extensions/extension_install_prompt.h"
 #include "chrome/browser/extensions/extension_uninstall_dialog.h"
 #include "chrome/browser/favicon/favicon_service.h"
+#include "chrome/browser/ui/extensions/extension_enable_flow_delegate.h"
 #include "chrome/common/cancelable_task_tracker.h"
 #include "chrome/common/extensions/extension.h"
 #include "chrome/common/extensions/extension_constants.h"
@@ -20,8 +21,10 @@
 #include "content/public/browser/web_ui_message_handler.h"
 #include "sync/api/string_ordinal.h"
 
+class ExtensionEnableFlow;
 class ExtensionService;
 class PrefChangeRegistrar;
+class PrefRegistrySyncable;
 class Profile;
 
 namespace extensions {
@@ -31,7 +34,7 @@ class AppNotification;
 // The handler for Javascript messages related to the "apps" view.
 class AppLauncherHandler : public content::WebUIMessageHandler,
                            public ExtensionUninstallDialog::Delegate,
-                           public ExtensionInstallPrompt::Delegate,
+                           public ExtensionEnableFlowDelegate,
                            public content::NotificationObserver {
  public:
   explicit AppLauncherHandler(ExtensionService* extension_service);
@@ -102,7 +105,7 @@ class AppLauncherHandler : public content::WebUIMessageHandler,
   void HandleSetNotificationsDisabled(const base::ListValue* args);
 
   // Register app launcher preferences.
-  static void RegisterUserPrefs(PrefServiceBase* pref_service);
+  static void RegisterUserPrefs(PrefRegistrySyncable* registry);
 
   // Records the given type of app launch for UMA.
   static void RecordAppLaunchType(extension_misc::AppLaunchBucket bucket);
@@ -141,17 +144,13 @@ class AppLauncherHandler : public content::WebUIMessageHandler,
   virtual void ExtensionUninstallAccepted() OVERRIDE;
   virtual void ExtensionUninstallCanceled() OVERRIDE;
 
-  // ExtensionInstallPrompt::Delegate:
-  virtual void InstallUIProceed() OVERRIDE;
-  virtual void InstallUIAbort(bool user_initiated) OVERRIDE;
+  // ExtensionEnableFlowDelegate:
+  virtual void ExtensionEnableFlowFinished() OVERRIDE;
+  virtual void ExtensionEnableFlowAborted(bool user_initiated) OVERRIDE;
 
   // Returns the ExtensionUninstallDialog object for this class, creating it if
   // needed.
   ExtensionUninstallDialog* GetExtensionUninstallDialog();
-
-  // Returns the ExtensionInstallPrompt object for this class, creating it if
-  // needed.
-  ExtensionInstallPrompt* GetExtensionInstallPrompt();
 
   // Continuation for installing a bookmark app after favicon lookup.
   void OnFaviconForApp(scoped_ptr<AppInstallInfo> install_info,
@@ -176,13 +175,14 @@ class AppLauncherHandler : public content::WebUIMessageHandler,
   // Used to show confirmation UI for uninstalling extensions in incognito mode.
   scoped_ptr<ExtensionUninstallDialog> extension_uninstall_dialog_;
 
-  // Used to show confirmation UI for enabling extensions in incognito mode.
-  scoped_ptr<ExtensionInstallPrompt> extension_install_ui_;
+  // Used to show confirmation UI for enabling extensions.
+  scoped_ptr<ExtensionEnableFlow> extension_enable_flow_;
 
   // The ids of apps to show on the NTP.
   std::set<std::string> visible_apps_;
 
-  // The id of the extension we are prompting the user about.
+  // The id of the extension we are prompting the user about (either enable or
+  // uninstall).
   std::string extension_id_prompting_;
 
   // When true, we ignore changes to the underlying data rather than immediately

@@ -11,7 +11,7 @@
 #include "base/i18n/case_conversion.h"
 #include "base/i18n/string_search.h"
 #include "base/metrics/histogram.h"
-#include "base/prefs/public/pref_service_base.h"
+#include "base/prefs/pref_service.h"
 #include "base/string16.h"
 #include "base/time.h"
 #include "base/utf_string_conversions.h"
@@ -19,14 +19,13 @@
 #include "chrome/browser/bookmarks/bookmark_model_factory.h"
 #include "chrome/browser/bookmarks/bookmark_node_data.h"
 #include "chrome/browser/history/query_parser.h"
+#include "chrome/browser/prefs/pref_registry_syncable.h"
 #include "chrome/browser/profiles/profile.h"
 #include "chrome/common/pref_names.h"
 #include "content/public/browser/user_metrics.h"
-#include "grit/ui_strings.h"
 #include "net/base/net_util.h"
 #include "ui/base/dragdrop/drag_drop_types.h"
 #include "ui/base/events/event.h"
-#include "ui/base/l10n/l10n_util.h"
 #include "ui/base/models/tree_node_iterator.h"
 
 using base::Time;
@@ -118,8 +117,6 @@ bool g_bookmark_bar_view_animations_disabled = false;
 }  // namespace
 
 namespace bookmark_utils {
-
-int num_urls_before_prompting = 15;
 
 int PreferredDropOperation(int source_operations, int operations) {
   int common_ops = (source_operations & operations);
@@ -276,14 +273,6 @@ bool CanPasteFromClipboard(const BookmarkNode* node) {
   if (!node)
     return false;
   return BookmarkNodeData::ClipboardContainsBookmarks();
-}
-
-string16 GetNameForURL(const GURL& url) {
-  if (url.is_valid()) {
-    return net::GetSuggestedFilename(url, "", "", "", "", std::string());
-  } else {
-    return l10n_util::GetStringUTF16(IDS_APP_UNTITLED_SHORTCUT_FILE_NAME);
-  }
 }
 
 // This is used with a tree iterator to skip subtrees which are not visible.
@@ -443,13 +432,13 @@ const BookmarkNode* ApplyEditsWithPossibleFolderChange(
   return node;
 }
 
-void RegisterUserPrefs(PrefServiceBase* prefs) {
-  prefs->RegisterBooleanPref(prefs::kShowBookmarkBar,
-                             false,
-                             PrefServiceBase::SYNCABLE_PREF);
-  prefs->RegisterBooleanPref(prefs::kEditBookmarksEnabled,
-                             true,
-                             PrefServiceBase::UNSYNCABLE_PREF);
+void RegisterUserPrefs(PrefRegistrySyncable* registry) {
+  registry->RegisterBooleanPref(prefs::kShowBookmarkBar,
+                                false,
+                                PrefRegistrySyncable::SYNCABLE_PREF);
+  registry->RegisterBooleanPref(prefs::kEditBookmarksEnabled,
+                                true,
+                                PrefRegistrySyncable::UNSYNCABLE_PREF);
 }
 
 const BookmarkNode* GetParentForNewNodes(

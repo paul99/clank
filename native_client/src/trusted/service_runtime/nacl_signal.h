@@ -124,11 +124,6 @@ void NaClSignalHandlerInit(void);
 void NaClSignalHandlerFini(void);
 
 /*
- * Assert that no signal handlers are registered.
- */
-void NaClSignalAssertNoHandlers(void);
-
-/*
  * Provides a signal safe method to write to stderr.
  */
 ssize_t NaClSignalErrorMessage(const char *str);
@@ -163,11 +158,11 @@ void NaClSignalContextToHandler(void *raw_ctx,
                                 const struct NaClSignalContext *sig_ctx);
 
 
-/*
- * Return non-zero if the signal context is currently executing in an
- * untrusted environment.
- */
-int NaClSignalContextIsUntrusted(const struct NaClSignalContext *sig_ctx);
+int NaClSignalContextIsUntrustedForCurrentThread(
+    const struct NaClSignalContext *sig_ctx);
+
+int NaClSignalContextIsUntrusted(struct NaClAppThread *natp,
+                                 const struct NaClSignalContext *sig_ctx);
 
 void NaClSignalContextGetCurrentThread(const struct NaClSignalContext *sig_ctx,
                                        int *is_untrusted,

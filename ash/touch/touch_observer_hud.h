@@ -50,7 +50,7 @@ class ASH_EXPORT TouchObserverHUD : public ui::EventHandler,
   virtual void OnTouchEvent(ui::TouchEvent* event) OVERRIDE;
 
   // Overridden from views::WidgetObserver:
-  virtual void OnWidgetClosing(views::Widget* widget) OVERRIDE;
+  virtual void OnWidgetDestroying(views::Widget* widget) OVERRIDE;
 
   static const int kMaxTouchPoints = 32;
 
@@ -59,6 +59,7 @@ class ASH_EXPORT TouchObserverHUD : public ui::EventHandler,
   views::View* label_container_;
   views::Label* touch_labels_[kMaxTouchPoints];
   gfx::Point touch_positions_[kMaxTouchPoints];
+  float touch_radius_[kMaxTouchPoints];
   ui::EventType touch_status_[kMaxTouchPoints];
 
   DISALLOW_COPY_AND_ASSIGN(TouchObserverHUD);

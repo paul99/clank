@@ -9,10 +9,10 @@
 
 #include "base/command_line.h"
 #include "base/i18n/rtl.h"
+#include "base/prefs/pref_service.h"
 #include "base/stl_util.h"
 #include "base/utf_string_conversions.h"
 #include "chrome/app/chrome_command_ids.h"
-#include "chrome/browser/alternate_nav_url_fetcher.h"
 #include "chrome/browser/command_updater.h"
 #include "chrome/browser/defaults.h"
 #include "chrome/browser/extensions/api/omnibox/omnibox_api.h"
@@ -20,7 +20,6 @@
 #include "chrome/browser/extensions/script_bubble_controller.h"
 #include "chrome/browser/extensions/tab_helper.h"
 #include "chrome/browser/favicon/favicon_tab_helper.h"
-#include "chrome/browser/prefs/pref_service.h"
 #include "chrome/browser/profiles/profile.h"
 #include "chrome/browser/search_engines/template_url.h"
 #include "chrome/browser/search_engines/template_url_service.h"
@@ -28,9 +27,10 @@
 #include "chrome/browser/ui/browser.h"
 #include "chrome/browser/ui/browser_finder.h"
 #include "chrome/browser/ui/browser_instant_controller.h"
-#include "chrome/browser/ui/browser_tabstrip.h"
+#include "chrome/browser/ui/omnibox/alternate_nav_url_fetcher.h"
 #include "chrome/browser/ui/omnibox/location_bar_util.h"
 #include "chrome/browser/ui/omnibox/omnibox_popup_model.h"
+#include "chrome/browser/ui/tabs/tab_strip_model.h"
 #include "chrome/browser/ui/view_ids.h"
 #include "chrome/browser/ui/views/bookmarks/bookmark_prompt_view.h"
 #include "chrome/browser/ui/views/browser_dialogs.h"
@@ -39,6 +39,8 @@
 #include "chrome/browser/ui/views/location_bar/content_setting_image_view.h"
 #include "chrome/browser/ui/views/location_bar/ev_bubble_view.h"
 #include "chrome/browser/ui/views/location_bar/keyword_hint_view.h"
+#include "chrome/browser/ui/views/location_bar/location_bar_layout.h"
+#include "chrome/browser/ui/views/location_bar/location_bar_separator_view.h"
 #include "chrome/browser/ui/views/location_bar/location_icon_view.h"
 #include "chrome/browser/ui/views/location_bar/open_pdf_in_reader_view.h"
 #include "chrome/browser/ui/views/location_bar/page_action_image_view.h"
@@ -46,7 +48,6 @@
 #include "chrome/browser/ui/views/location_bar/script_bubble_icon_view.h"
 #include "chrome/browser/ui/views/location_bar/selected_keyword_view.h"
 #include "chrome/browser/ui/views/location_bar/star_view.h"
-#include "chrome/browser/ui/views/location_bar/web_intents_button_view.h"
 #include "chrome/browser/ui/views/location_bar/zoom_bubble_view.h"
 #include "chrome/browser/ui/views/location_bar/zoom_view.h"
 #include "chrome/browser/ui/views/omnibox/omnibox_view_views.h"
@@ -75,6 +76,7 @@
 #include "ui/views/border.h"
 #include "ui/views/button_drag_utils.h"
 #include "ui/views/controls/label.h"
+#include "ui/views/layout/layout_constants.h"
 #include "ui/views/widget/widget.h"
 
 #if defined(OS_WIN)
@@ -177,11 +179,12 @@ LocationBarView::LocationBarView(Browser* browser,
       selected_keyword_view_(NULL),
       suggested_text_view_(NULL),
       keyword_hint_view_(NULL),
+      search_token_view_(NULL),
+      search_token_separator_view_(NULL),
       zoom_view_(NULL),
       open_pdf_in_reader_view_(NULL),
       script_bubble_icon_view_(NULL),
       star_view_(NULL),
-      web_intents_button_view_(NULL),
       action_box_button_view_(NULL),
       mode_(mode),
       show_focus_rect_(false),
@@ -230,17 +233,15 @@ void LocationBarView::Init() {
     font_ = font_.DeriveFont(-1);
 
   location_icon_view_ = new LocationIconView(this);
-  AddChildView(location_icon_view_);
-  location_icon_view_->SetVisible(true);
   location_icon_view_->set_drag_controller(this);
+  AddChildView(location_icon_view_);
 
   ev_bubble_view_ =
       new EVBubbleView(kEVBubbleBackgroundImages, IDR_OMNIBOX_HTTPS_VALID,
                        GetColor(ToolbarModel::EV_SECURE, SECURITY_TEXT),
                        this);
-  AddChildView(ev_bubble_view_);
-  ev_bubble_view_->SetVisible(false);
   ev_bubble_view_->set_drag_controller(this);
+  AddChildView(ev_bubble_view_);
 
   // URL edit field.
   // View container for URL edit field.
@@ -255,14 +256,18 @@ void LocationBarView::Init() {
       kSelectedKeywordBackgroundImages, IDR_KEYWORD_SEARCH_MAGNIFIER,
       GetColor(ToolbarModel::NONE, TEXT),
       profile_);
-  AddChildView(selected_keyword_view_);
   selected_keyword_view_->SetFont(font_);
-  selected_keyword_view_->SetVisible(false);
+  AddChildView(selected_keyword_view_);
 
   keyword_hint_view_ = new KeywordHintView(profile_, this);
-  AddChildView(keyword_hint_view_);
-  keyword_hint_view_->SetVisible(false);
   keyword_hint_view_->SetFont(font_);
+  AddChildView(keyword_hint_view_);
+
+  search_token_view_ = new views::Label(string16(), font_);
+  search_token_view_->SetAutoColorReadabilityEnabled(false);
+  AddChildView(search_token_view_);
+  search_token_separator_view_ = new LocationBarSeparatorView();
+  AddChildView(search_token_separator_view_);
 
   for (int i = 0; i < CONTENT_SETTINGS_NUM_TYPES; ++i) {
     ContentSettingImageView* content_blocked_view =
@@ -271,41 +276,36 @@ void LocationBarView::Init() {
                                     font_,
                                     GetColor(ToolbarModel::NONE, TEXT));
     content_setting_views_.push_back(content_blocked_view);
-    AddChildView(content_blocked_view);
     content_blocked_view->SetVisible(false);
+    AddChildView(content_blocked_view);
   }
 
   zoom_view_ = new ZoomView(model_, delegate_);
   zoom_view_->set_id(VIEW_ID_ZOOM_BUTTON);
   AddChildView(zoom_view_);
 
-  web_intents_button_view_ =
-      new WebIntentsButtonView(this, kWIBubbleBackgroundImages, font_,
-                               GetColor(ToolbarModel::NONE, TEXT));
-  AddChildView(web_intents_button_view_);
-
   open_pdf_in_reader_view_ = new OpenPDFInReaderView(this);
   AddChildView(open_pdf_in_reader_view_);
 
   script_bubble_icon_view_ = new ScriptBubbleIconView(delegate());
-  AddChildView(script_bubble_icon_view_);
   script_bubble_icon_view_->SetVisible(false);
+  AddChildView(script_bubble_icon_view_);
 
   if (browser_defaults::bookmarks_enabled && (mode_ == NORMAL)) {
     // Note: condition above means that the star icon is hidden in popups and in
     // the app launcher.
     star_view_ = new StarView(command_updater_);
-    AddChildView(star_view_);
     star_view_->SetVisible(true);
+    AddChildView(star_view_);
   }
   if (extensions::FeatureSwitch::action_box()->IsEnabled() &&
       mode_ == NORMAL && browser_) {
+    if (star_view_)
+      star_view_->SetVisible(false);
+
     action_box_button_view_ = new ActionBoxButtonView(browser_,
         gfx::Point(kNormalHorizontalEdgeThickness, kVerticalEdgeThickness));
     AddChildView(action_box_button_view_);
-
-    if (star_view_)
-      star_view_->SetVisible(false);
   }
 
   registrar_.Add(this,
@@ -411,7 +411,6 @@ void LocationBarView::Update(const WebContents* tab_for_state_restoring) {
   RefreshZoomView();
   RefreshPageActionViews();
   RefreshScriptBubble();
-  web_intents_button_view_->Update(GetWebContents());
   open_pdf_in_reader_view_->Update(
       model_->GetInputInProgress() ? NULL : GetWebContents());
 
@@ -423,6 +422,30 @@ void LocationBarView::Update(const WebContents* tab_for_state_restoring) {
                                          star_enabled);
   if (star_view_ && !extensions::FeatureSwitch::action_box()->IsEnabled())
     star_view_->SetVisible(star_enabled);
+
+  if (action_box_button_view_)
+    action_box_button_view_->SetVisible(!model_->GetInputInProgress());
+
+  string16 search_provider;
+  if (!model_->GetInputInProgress() &&
+      model_->WouldReplaceSearchURLWithSearchTerms()) {
+    const TemplateURL* template_url =
+        TemplateURLServiceFactory::GetForProfile(profile_)->
+            GetDefaultSearchProvider();
+    if (template_url && !template_url->short_name().empty()) {
+      search_provider = l10n_util::GetStringFUTF16(
+          IDS_OMNIBOX_SEARCH_TOKEN_TEXT, template_url->short_name());
+      search_token_view_->SetBackgroundColor(GetColor(
+          model_->GetSecurityLevel(), LocationBarView::BACKGROUND));
+      SkColor text_color = GetColor(
+          model_->GetSecurityLevel(), LocationBarView::DEEMPHASIZED_TEXT);
+      search_token_view_->SetEnabledColor(text_color);
+      search_token_separator_view_->set_separator_color(
+          SkColorSetA(text_color, 64));  // 25% alpha.
+    }
+  }
+  // If |search_provider| is empty, |search_token_view_| is hidden.
+  search_token_view_->SetText(search_provider);
 
   // Don't Update in app launcher mode so that the location entry does not show
   // a URL or security background.
@@ -462,13 +485,6 @@ void LocationBarView::InvalidatePageActions() {
         content::Source<LocationBar>(this),
         content::NotificationService::NoDetails());
   }
-}
-
-void LocationBarView::UpdateWebIntentsButton() {
-  web_intents_button_view_->Update(GetWebContents());
-
-  Layout();
-  SchedulePaint();
 }
 
 void LocationBarView::UpdateOpenPDFInReaderPrompt() {
@@ -550,8 +566,8 @@ void LocationBarView::ZoomChangedForActiveTab(bool can_show_bubble) {
   Layout();
   SchedulePaint();
 
-  if (can_show_bubble && zoom_view_->visible())
-    ZoomBubbleView::ShowBubble(zoom_view_, delegate_->GetWebContents(), true);
+  if (can_show_bubble && zoom_view_->visible() && delegate_->GetWebContents())
+    ZoomBubbleView::ShowBubble(delegate_->GetWebContents(), true);
 }
 
 void LocationBarView::RefreshZoomView() {
@@ -640,8 +656,6 @@ void LocationBarView::Layout() {
   // TODO(jhawkins): Remove once crbug.com/101994 is fixed.
   CHECK(location_icon_view_);
 
-  // TODO(sky): baseline layout.
-  int location_y = kVerticalEdgeThickness;
   // In some cases (e.g. fullscreen mode) we may have 0 height.  We still want
   // to position our child views in this case, because other things may be
   // positioned relative to them (e.g. the "bookmark added" bubble if the user
@@ -660,96 +674,34 @@ void LocationBarView::Layout() {
   const int kEdgeEditPadding = GetEdgeItemPadding() - kEditInternalSpace;
   const int kBubbleVerticalPadding = (mode_ == POPUP) ?
       -1 : kBubbleHorizontalPadding;
+  // The largest fraction of the omnibox that can be taken by resizable
+  // bubble decorations such as the EV_SECURE decoration.
+  const double kMaxBubbleFraction = 0.5;
+  const int kBubbleLocationY = kVerticalEdgeThickness + kBubbleVerticalPadding;
 
-  // Start by reserving the padding at the right edge.
-  int entry_width = width() - kEdgeThickness;
-  // No need for edge item padding with action box as it fills
-  // all the area on the right.
-  if (!action_box_button_view_)
-    entry_width -= GetEdgeItemPadding();
+  LocationBarLayout left_decorations(LocationBarLayout::LEFT_EDGE,
+                                     kItemEditPadding, kEdgeEditPadding);
+  LocationBarLayout right_decorations(LocationBarLayout::RIGHT_EDGE,
+                                      kItemEditPadding, kEdgeEditPadding);
 
-  // |location_icon_view_| is visible except when |ev_bubble_view_| or
-  // |selected_keyword_view_| are visible.
-  int location_icon_width = 0;
-  int ev_bubble_width = 0;
+  selected_keyword_view_->SetVisible(false);
   location_icon_view_->SetVisible(false);
   ev_bubble_view_->SetVisible(false);
+  keyword_hint_view_->SetVisible(false);
+  search_token_view_->SetVisible(false);
+  search_token_separator_view_->SetVisible(false);
 
   const string16 keyword(location_entry_->model()->keyword());
   const bool is_keyword_hint(location_entry_->model()->is_keyword_hint());
-  const bool show_selected_keyword = !keyword.empty() && !is_keyword_hint;
+  const bool show_search_token = !search_token_view_->text().empty();
+  const bool show_selected_keyword = !keyword.empty() && !is_keyword_hint &&
+      !show_search_token;
+  const bool show_keyword_hint = !keyword.empty() && is_keyword_hint &&
+      !show_search_token;
   if (show_selected_keyword) {
-    // Assume the keyword might be hidden.
-    entry_width -= (kEdgeThickness + kEdgeEditPadding);
-  } else if (model_->GetSecurityLevel() == ToolbarModel::EV_SECURE) {
-    ev_bubble_view_->SetVisible(true);
-    ev_bubble_view_->SetLabel(model_->GetEVCertName());
-    ev_bubble_width = ev_bubble_view_->GetPreferredSize().width();
-    // We'll adjust this width and take it out of |entry_width| below.
-  } else {
-    location_icon_view_->SetVisible(true);
-    location_icon_width = location_icon_view_->GetPreferredSize().width();
-    entry_width -= (kEdgeThickness + GetEdgeItemPadding() +
-                    location_icon_width + kItemEditPadding);
-  }
-
-  if (action_box_button_view_) {
-    action_box_button_view_->SetVisible(true);
-    entry_width -= action_box_button_view_->width() + GetItemPadding();
-  }
-  if (star_view_ && star_view_->visible())
-    entry_width -= star_view_->GetPreferredSize().width() + GetItemPadding();
-
-  if (script_bubble_icon_view_ && script_bubble_icon_view_->visible()) {
-    entry_width -= script_bubble_icon_view_->GetPreferredSize().width() +
-                   GetItemPadding();
-  }
-
-  if (open_pdf_in_reader_view_ && open_pdf_in_reader_view_->visible()) {
-    entry_width -= open_pdf_in_reader_view_->GetPreferredSize().width() +
-        GetItemPadding();
-  }
-  for (PageActionViews::const_iterator i(page_action_views_.begin());
-       i != page_action_views_.end(); ++i) {
-    if ((*i)->visible())
-      entry_width -= ((*i)->GetPreferredSize().width() + GetItemPadding());
-  }
-  if (zoom_view_->visible())
-    entry_width -= zoom_view_->GetPreferredSize().width() + GetItemPadding();
-  for (ContentSettingViews::const_iterator i(content_setting_views_.begin());
-       i != content_setting_views_.end(); ++i) {
-    if ((*i)->visible())
-      entry_width -= ((*i)->GetPreferredSize().width() + GetItemPadding());
-  }
-  if (web_intents_button_view_->visible()) {
-    entry_width -= web_intents_button_view_->GetPreferredSize().width() +
-        GetItemPadding();
-  }
-  // The gap between the edit and whatever is to its right is shortened.
-  entry_width += kEditInternalSpace;
-
-  // Size the EV bubble after taking star/page actions/content settings out of
-  // |entry_width| so we won't take too much space.
-  if (ev_bubble_width) {
-    // Try to elide the bubble to be no larger than half the total available
-    // space, but never elide it any smaller than 150 px.
-    static const int kMinElidedBubbleWidth = 150;
-    static const double kMaxBubbleFraction = 0.5;
-    const int total_padding =
-        kEdgeThickness + kBubbleHorizontalPadding + kItemEditPadding;
-    ev_bubble_width = std::min(ev_bubble_width, std::max(kMinElidedBubbleWidth,
-        static_cast<int>((entry_width - total_padding) * kMaxBubbleFraction)));
-    entry_width -= (total_padding + ev_bubble_width);
-  }
-
-  const int max_edit_width = location_entry_->GetMaxEditWidth(entry_width);
-  if (max_edit_width < 0)
-    return;
-
-  const bool show_keyword_hint = !keyword.empty() && is_keyword_hint;
-  selected_keyword_view_->SetVisible(show_selected_keyword);
-  keyword_hint_view_->SetVisible(show_keyword_hint);
-  if (show_selected_keyword) {
+    left_decorations.AddDecoration(
+        kBubbleLocationY, 0, true, 0, kBubbleHorizontalPadding,
+        GetItemPadding(), 0, selected_keyword_view_);
     if (selected_keyword_view_->keyword() != keyword) {
       selected_keyword_view_->SetKeyword(keyword);
       const TemplateURL* template_url =
@@ -767,140 +719,91 @@ void LocationBarView::Layout() {
         selected_keyword_view_->set_is_extension_icon(false);
       }
     }
-  } else if (show_keyword_hint) {
-    if (keyword_hint_view_->keyword() != keyword)
-      keyword_hint_view_->SetKeyword(keyword);
-  }
-
-  // Lay out items to the right of the edit field.
-  int offset = width() - kEdgeThickness;
-  if (action_box_button_view_) {
-    offset -= action_box_button_view_->width();
-    action_box_button_view_->SetPosition(
-        gfx::Point(offset,
-                   kVerticalEdgeThickness -
-                       ActionBoxButtonView::kBorderOverlap));
-    offset -= GetItemPadding();
+  } else if (model_->GetSecurityLevel() == ToolbarModel::EV_SECURE) {
+    ev_bubble_view_->SetLabel(model_->GetEVCertName());
+    left_decorations.AddDecoration(
+        kBubbleLocationY, 0, false, kMaxBubbleFraction,
+        kBubbleHorizontalPadding, GetItemPadding(), 0, ev_bubble_view_);
   } else {
-    offset -= GetEdgeItemPadding();
+    left_decorations.AddDecoration(
+        location_height, location_icon_view_->GetBuiltInHorizontalPadding(),
+        location_icon_view_);
   }
 
+  if (action_box_button_view_ && action_box_button_view_->visible()) {
+    right_decorations.AddDecoration(
+        kVerticalEdgeThickness - ActionBoxButtonView::kBorderOverlap, 0, false,
+        0, 0, 0, 0, action_box_button_view_);
+  }
   if (star_view_ && star_view_->visible()) {
-    offset += star_view_->GetBuiltInHorizontalPadding();
-    int star_width = star_view_->GetPreferredSize().width();
-    offset -= star_width;
-    star_view_->SetBounds(offset, location_y, star_width, location_height);
-    offset -= GetItemPadding() - star_view_->GetBuiltInHorizontalPadding();
+    right_decorations.AddDecoration(
+        location_height, star_view_->GetBuiltInHorizontalPadding(),
+        star_view_);
   }
-
   if (script_bubble_icon_view_ && script_bubble_icon_view_->visible()) {
-    offset += script_bubble_icon_view_->GetBuiltInHorizontalPadding();
-    int width = script_bubble_icon_view_->GetPreferredSize().width();
-    offset -= width;
-    script_bubble_icon_view_->SetBounds(
-        offset, location_y, width, location_height);
-    offset -= GetItemPadding() -
-        script_bubble_icon_view_->GetBuiltInHorizontalPadding();
+    right_decorations.AddDecoration(
+        location_height,
+        script_bubble_icon_view_->GetBuiltInHorizontalPadding(),
+        script_bubble_icon_view_);
   }
-
   if (open_pdf_in_reader_view_ && open_pdf_in_reader_view_->visible()) {
-    offset += open_pdf_in_reader_view_->GetBuiltInHorizontalPadding();
-    int icon_width = open_pdf_in_reader_view_->GetPreferredSize().width();
-    offset -= icon_width;
-    open_pdf_in_reader_view_->SetBounds(offset, location_y,
-                                        icon_width, location_height);
-    offset -= GetItemPadding() -
-        open_pdf_in_reader_view_->GetBuiltInHorizontalPadding();
+    right_decorations.AddDecoration(
+        location_height,
+        open_pdf_in_reader_view_->GetBuiltInHorizontalPadding(),
+        open_pdf_in_reader_view_);
   }
-
   for (PageActionViews::const_iterator i(page_action_views_.begin());
        i != page_action_views_.end(); ++i) {
     if ((*i)->visible()) {
-      offset += (*i)->GetBuiltInHorizontalPadding();
-      int page_action_width = (*i)->GetPreferredSize().width();
-      offset -= page_action_width;
-      (*i)->SetBounds(offset, location_y, page_action_width, location_height);
-      offset -= GetItemPadding() - (*i)->GetBuiltInHorizontalPadding();
+      right_decorations.AddDecoration(
+          location_height, (*i)->GetBuiltInHorizontalPadding(), (*i));
     }
   }
-
-  if (zoom_view_->visible()) {
-    int zoom_width = zoom_view_->GetPreferredSize().width();
-    offset -= zoom_width;
-    zoom_view_->SetBounds(offset, location_y, zoom_width, location_height);
-    offset -= GetItemPadding();
-  }
-
-  // We use a reverse_iterator here because we're laying out the views from
-  // right to left but in the vector they're ordered left to right.
+  if (zoom_view_->visible())
+    right_decorations.AddDecoration(location_height, 0, zoom_view_);
   for (ContentSettingViews::const_reverse_iterator
        i(content_setting_views_.rbegin()); i != content_setting_views_.rend();
        ++i) {
     if ((*i)->visible()) {
-      offset += (*i)->GetBuiltInHorizontalPadding();
-      int content_blocked_width = (*i)->GetPreferredSize().width();
-      offset -= content_blocked_width;
-      (*i)->SetBounds(offset, location_y + kBubbleVerticalPadding,
-                      content_blocked_width, (*i)->GetPreferredSize().height());
-      offset -= GetItemPadding() - (*i)->GetBuiltInHorizontalPadding();
+      right_decorations.AddDecoration(
+          kBubbleLocationY, 0, false, 0, GetEdgeItemPadding(), GetItemPadding(),
+          (*i)->GetBuiltInHorizontalPadding(), (*i));
     }
   }
-
-  // Now the web intents button.
-  if (web_intents_button_view_->visible()) {
-    offset += web_intents_button_view_->GetBuiltInHorizontalPadding();
-    int width = web_intents_button_view_->GetPreferredSize().width();
-    offset -= width;
-    web_intents_button_view_->SetBounds(
-        offset, location_y + kBubbleVerticalPadding, width,
-        web_intents_button_view_->GetPreferredSize().height());
-    offset -= GetItemPadding() -
-              web_intents_button_view_->GetBuiltInHorizontalPadding();
+  if (show_keyword_hint) {
+    right_decorations.AddDecoration(
+        kVerticalEdgeThickness, 0, true, 0, GetEdgeItemPadding(),
+        GetItemPadding(), 0, keyword_hint_view_);
+    if (keyword_hint_view_->keyword() != keyword)
+      keyword_hint_view_->SetKeyword(keyword);
+  }
+  if (show_search_token) {
+    right_decorations.AddSeparator(kVerticalEdgeThickness, location_height,
+        GetItemPadding(), search_token_separator_view_);
+    // This must be the last item in the right decorations list, otherwise
+    // right_decorations.set_item_padding() makes no sense.
+    right_decorations.AddDecoration(
+        kVerticalEdgeThickness, location_height, true, 0, GetEdgeItemPadding(),
+        GetItemPadding() * 2, 0, search_token_view_);
+    right_decorations.set_item_edit_padding(
+        views::kUnrelatedControlLargeHorizontalSpacing);
   }
 
-  // Now lay out items to the left of the edit field.
-  if (location_icon_view_->visible()) {
-    location_icon_view_->SetBounds(
-        kEdgeThickness + GetEdgeItemPadding() -
-        location_icon_view_->GetBuiltInHorizontalPadding(),
-        location_y, location_icon_width, location_height);
-    offset = location_icon_view_->bounds().right() + kItemEditPadding -
-        location_icon_view_->GetBuiltInHorizontalPadding();
-  } else if (ev_bubble_view_->visible()) {
-    ev_bubble_view_->SetBounds(kEdgeThickness + kBubbleHorizontalPadding,
-        location_y + kBubbleVerticalPadding, ev_bubble_width,
-        ev_bubble_view_->GetPreferredSize().height());
-    offset = ev_bubble_view_->bounds().right() + kItemEditPadding;
-  } else {
-    offset = kEdgeThickness +
-        (show_selected_keyword ? kBubbleHorizontalPadding : kEdgeEditPadding);
-  }
+  // Perform layout.
+  int full_width = width() - 2 * kEdgeThickness;
+  int entry_width = full_width;
+  left_decorations.LayoutPass1(&entry_width);
+  right_decorations.LayoutPass1(&entry_width);
+  left_decorations.LayoutPass2(&entry_width);
+  right_decorations.LayoutPass2(&entry_width);
 
-  // Now lay out the edit field and views that autocollapse to give it more
-  // room.
-  gfx::Rect location_bounds(offset, location_y, entry_width, location_height);
-  if (show_selected_keyword) {
-    selected_keyword_view_->SetBounds(0, location_y + kBubbleVerticalPadding,
-        0, selected_keyword_view_->GetPreferredSize().height());
-    LayoutView(selected_keyword_view_, kItemEditPadding,
-               AvailableWidth(max_edit_width), true, &location_bounds);
-    location_bounds.set_x(selected_keyword_view_->visible() ?
-        (offset + selected_keyword_view_->width() + kItemEditPadding) :
-        (kEdgeThickness + kEdgeEditPadding));
-  } else if (show_keyword_hint) {
-    keyword_hint_view_->SetBounds(0, location_y, 0, location_height);
-    // Tricky: |entry_width| has already been enlarged by |kEditInternalSpace|.
-    // But if we add a trailing view, it needs to have that enlargement be to
-    // its left.  So we undo the enlargement, then include it in the padding for
-    // the added view.
-    location_bounds.Inset(0, 0, kEditInternalSpace, 0);
-    LayoutView(keyword_hint_view_, kItemEditPadding,
-               AvailableWidth(max_edit_width), false, &location_bounds);
-    if (!keyword_hint_view_->visible()) {
-      // Put back the enlargement that we undid above.
-      location_bounds.Inset(0, 0, -kEditInternalSpace, 0);
-    }
-  }
+  int available_width = entry_width - location_entry_->TextWidth();
+  // The bounds must be wide enough for all the decorations to fit.
+  gfx::Rect location_bounds(kEdgeThickness, kVerticalEdgeThickness,
+                            std::max(full_width, full_width - entry_width),
+                            location_height);
+  left_decorations.LayoutPass3(&location_bounds, &available_width);
+  right_decorations.LayoutPass3(&location_bounds, &available_width);
 
   // Layout out the suggested text view right aligned to the location
   // entry. Only show the suggested text if we can fit the text from one
@@ -908,16 +811,15 @@ void LocationBarView::Layout() {
   // suggested text. If we can't it means either the suggested text is too big,
   // or the user has scrolled.
 
-  // TODO(sky): We could potentially combine this with the previous step to
-  // force using minimum size if necessary, but currently the chance of showing
-  // keyword hints and suggested text is minimal and we're not confident this
-  // is the right approach for suggested text.
+  // TODO(sky): We could potentially adjust this to take into account suggested
+  // text to force using minimum size if necessary, but currently the chance of
+  // showing keyword hints and suggested text is minimal and we're not confident
+  // this is the right approach for suggested text.
   if (suggested_text_view_) {
     // TODO(sky): need to layout when the user changes caret position.
     int suggested_text_width =
         suggested_text_view_->GetPreferredSize().width();
-    int vis_text_width = location_entry_->WidthOfTextAfterCursor();
-    if (vis_text_width + suggested_text_width > entry_width) {
+    if (suggested_text_width > available_width) {
       // Hide the suggested text if the user has scrolled or we can't fit all
       // the suggested text.
       suggested_text_view_->SetBounds(0, 0, 0, 0);
@@ -928,8 +830,9 @@ void LocationBarView::Layout() {
       // the text ends up shifting to the left.
       location_needed_width++;
 #endif
-      location_bounds.set_width(std::min(location_needed_width,
-                                         entry_width - suggested_text_width));
+      location_bounds.set_width(
+          std::min(location_needed_width,
+          location_bounds.width() - suggested_text_width));
       // TODO(sky): figure out why this needs the -1.
       suggested_text_view_->SetBounds(location_bounds.right() - 1,
                                       location_bounds.y(),
@@ -1130,29 +1033,6 @@ WebContents* LocationBarView::GetWebContents() const {
   return delegate_->GetWebContents();
 }
 
-int LocationBarView::AvailableWidth(int location_bar_width) {
-  return location_bar_width - location_entry_->TextWidth();
-}
-
-void LocationBarView::LayoutView(views::View* view,
-                                 int padding,
-                                 int available_width,
-                                 bool leading,
-                                 gfx::Rect* bounds) {
-  DCHECK(view && bounds);
-  gfx::Size view_size = view->GetPreferredSize();
-  if ((view_size.width() + padding) > available_width)
-    view_size = view->GetMinimumSize();
-  int desired_width = view_size.width() + padding;
-  view->SetVisible(desired_width < bounds->width());
-  if (view->visible()) {
-    view->SetBounds(
-        leading ? bounds->x() : (bounds->right() - view_size.width()),
-        view->y(), view_size.width(), view->height());
-    bounds->set_width(bounds->width() - desired_width);
-  }
-}
-
 void LocationBarView::RefreshContentSettingViews() {
   for (ContentSettingViews::const_iterator i(content_setting_views_.begin());
        i != content_setting_views_.end(); ++i) {
@@ -1218,7 +1098,7 @@ void LocationBarView::RefreshPageActionViews() {
 
   if (!page_action_views_.empty() && contents) {
     Browser* browser = chrome::FindBrowserWithWebContents(contents);
-    GURL url = chrome::GetActiveWebContents(browser)->GetURL();
+    GURL url = browser->tab_strip_model()->GetActiveWebContents()->GetURL();
 
     for (PageActionViews::const_iterator i(page_action_views_.begin());
          i != page_action_views_.end(); ++i) {

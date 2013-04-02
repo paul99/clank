@@ -10,6 +10,8 @@
 
 namespace chromeos {
 
+class CrosNetworkWatcher;
+
 class NetworkLibraryImplCros : public NetworkLibraryImplBase  {
  public:
   NetworkLibraryImplCros();
@@ -62,7 +64,6 @@ class NetworkLibraryImplCros : public NetworkLibraryImplBase  {
   virtual void ResetModem() OVERRIDE;
   virtual bool IsCellularAlwaysInRoaming() OVERRIDE;
   virtual void RequestNetworkScan() OVERRIDE;
-  virtual bool GetWifiAccessPoints(WifiAccessPointVector* result) OVERRIDE;
 
   virtual void RefreshIPConfig(Network* network) OVERRIDE;
 
@@ -87,6 +88,9 @@ class NetworkLibraryImplCros : public NetworkLibraryImplBase  {
                                const std::string& gateway,
                                const std::string& name_servers,
                                int dhcp_usage_mask) OVERRIDE;
+  virtual void RequestNetworkServiceProperties(
+      const std::string& service_path,
+      const NetworkServicePropertiesCallback& callback) OVERRIDE;
 
   //////////////////////////////////////////////////////////////////////////////
   // Callbacks.

@@ -11,7 +11,6 @@
 #include "chrome/browser/api/infobars/confirm_infobar_delegate.h"
 #include "chrome/browser/media/media_stream_devices_controller.h"
 
-class InfoBarTabHelper;
 
 // This class configures an infobar shown when a page requests access to a
 // user's microphone and/or video camera.  The user is shown a message asking
@@ -20,12 +19,16 @@ class InfoBarTabHelper;
 // to them.
 class MediaStreamInfoBarDelegate : public ConfirmInfoBarDelegate {
  public:
-  // MediaStreamInfoBarDelegate takes the ownership of the |controller|.
-  MediaStreamInfoBarDelegate(
-      InfoBarTabHelper* tab_helper,
-      MediaStreamDevicesController* controller);
-
   virtual ~MediaStreamInfoBarDelegate();
+
+  // Handles a permission request (in |request|) for |web_contents|.  If this
+  // involves prompting the user, creates a media stream delegate, then checks
+  // for an existing infobar for |web_contents| and replaces it if found, or
+  // just adds the new infobar otherwise.  Returns whether an infobar was
+  // created.
+  static bool Create(content::WebContents* web_contents,
+                     const content::MediaStreamRequest& request,
+                     const content::MediaResponseCallback& callback);
 
   // ConfirmInfoBarDelegate:
   virtual void InfoBarDismissed() OVERRIDE;
@@ -40,6 +43,11 @@ class MediaStreamInfoBarDelegate : public ConfirmInfoBarDelegate {
   virtual bool LinkClicked(WindowOpenDisposition disposition) OVERRIDE;
 
  private:
+  // MediaStreamInfoBarDelegate takes the ownership of the |controller|.
+  MediaStreamInfoBarDelegate(
+      InfoBarService* infobar_service,
+      MediaStreamDevicesController* controller);
+
   scoped_ptr<MediaStreamDevicesController> controller_;
 
   DISALLOW_COPY_AND_ASSIGN(MediaStreamInfoBarDelegate);

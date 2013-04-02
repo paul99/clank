@@ -13,12 +13,15 @@ struct FormData;
 struct FormFieldData;
 
 namespace WebKit {
+class WebDocument;
 class WebFormElement;
 class WebFormControlElement;
 class WebInputElement;
 }
 
 namespace autofill {
+
+struct WebElementDescriptor;
 
 // A bit field mask for form or form element requirements.
 enum RequirementsMask {
@@ -52,9 +55,21 @@ bool IsTextInput(const WebKit::WebInputElement* element);
 // Returns true if |element| is a select element.
 bool IsSelectElement(const WebKit::WebFormControlElement& element);
 
+// Returns true if |element| is a checkbox or a radio button element.
+bool IsCheckableElement(const WebKit::WebInputElement* element);
+
+// Returns true if |element| is one of the input element types that can be
+// autofilled. {Text, Radiobutton, Checkbox}.
+bool IsAutofillableInputElement(const WebKit::WebInputElement* element);
+
 // Returns the form's |name| attribute if non-empty; otherwise the form's |id|
 // attribute.
 const string16 GetFormIdentifier(const WebKit::WebFormElement& form);
+
+// Returns true if the element specified by |click_element| was successfully
+// clicked.
+bool ClickElement(const WebKit::WebDocument& document,
+                  const WebElementDescriptor& element_descriptor);
 
 // Fills |autofillable_elements| with all the auto-fillable form control
 // elements in |form_element|.

@@ -43,15 +43,11 @@ class CCMessagesTest : public testing::Test {
     EXPECT_EQ(a->has_transparent_background, b->has_transparent_background);
     EXPECT_EQ(a->has_occlusion_from_outside_target_surface,
               b->has_occlusion_from_outside_target_surface);
-    EXPECT_EQ(a->filters, b->filters);
-    EXPECT_EQ(a->filter, b->filter);
-    EXPECT_EQ(a->background_filters, b->background_filters);
   }
 
   void Compare(const SharedQuadState* a, const SharedQuadState* b) {
     EXPECT_EQ(a->content_to_target_transform, b->content_to_target_transform);
     EXPECT_EQ(a->visible_content_rect, b->visible_content_rect);
-    EXPECT_EQ(a->clipped_rect_in_target, b->clipped_rect_in_target);
     EXPECT_EQ(a->clip_rect, b->clip_rect);
     EXPECT_EQ(a->is_clipped, b->is_clipped);
     EXPECT_EQ(a->opacity, b->opacity);
@@ -130,6 +126,9 @@ class CCMessagesTest : public testing::Test {
     EXPECT_EQ(a->contents_changed_since_last_frame,
               b->contents_changed_since_last_frame);
     EXPECT_EQ(a->mask_uv_rect.ToString(), b->mask_uv_rect.ToString());
+    EXPECT_EQ(a->filters, b->filters);
+    EXPECT_EQ(a->filter, b->filter);
+    EXPECT_EQ(a->background_filters, b->background_filters);
   }
 
   void Compare(const SolidColorDrawQuad* a, const SolidColorDrawQuad* b) {
@@ -144,7 +143,12 @@ class CCMessagesTest : public testing::Test {
   void Compare(const TextureDrawQuad* a, const TextureDrawQuad* b) {
     EXPECT_EQ(a->resource_id, b->resource_id);
     EXPECT_EQ(a->premultiplied_alpha, b->premultiplied_alpha);
-    EXPECT_EQ(a->uv_rect, b->uv_rect);
+    EXPECT_EQ(a->uv_top_left, b->uv_top_left);
+    EXPECT_EQ(a->uv_bottom_right, b->uv_bottom_right);
+    EXPECT_EQ(a->vertex_opacity[0], b->vertex_opacity[0]);
+    EXPECT_EQ(a->vertex_opacity[1], b->vertex_opacity[1]);
+    EXPECT_EQ(a->vertex_opacity[2], b->vertex_opacity[2]);
+    EXPECT_EQ(a->vertex_opacity[3], b->vertex_opacity[3]);
     EXPECT_EQ(a->flipped, b->flipped);
   }
 
@@ -196,11 +200,18 @@ TEST_F(CCMessagesTest, AllQuads) {
   gfx::Size arbitrary_size3(75, 1281);
   gfx::RectF arbitrary_rectf1(4.2f, -922.1f, 15.6f, 29.5f);
   gfx::SizeF arbitrary_sizef1(15.2f, 104.6f);
+  gfx::PointF arbitrary_pointf1(31.4f, 15.9f);
+  gfx::PointF arbitrary_pointf2(26.5f, -35.8f);
   float arbitrary_float1 = 0.7f;
   float arbitrary_float2 = 0.3f;
   float arbitrary_float3 = 0.9f;
+  float arbitrary_float_array[4] = {3.5f, 6.2f, 9.3f, 12.3f};
   bool arbitrary_bool1 = true;
   bool arbitrary_bool2 = false;
+  bool arbitrary_bool3 = true;
+  bool arbitrary_bool4 = true;
+  bool arbitrary_bool5 = false;
+  bool arbitrary_bool6 = true;
   int arbitrary_int = 5;
   SkColor arbitrary_color = SkColorSetARGB(25, 36, 47, 58);
   IOSurfaceDrawQuad::Orientation arbitrary_orientation =
@@ -238,7 +249,6 @@ TEST_F(CCMessagesTest, AllQuads) {
   shared_state1_in->SetAll(arbitrary_matrix,
                            arbitrary_rect1,
                            arbitrary_rect2,
-                           arbitrary_rect3,
                            arbitrary_bool1,
                            arbitrary_float1);
   scoped_ptr<SharedQuadState> shared_state1_cmp = shared_state1_in->Copy();
@@ -290,7 +300,10 @@ TEST_F(CCMessagesTest, AllQuads) {
                         arbitrary_bool2,
                         arbitrary_resourceid,
                         arbitrary_rect1,
-                        arbitrary_rectf1);
+                        arbitrary_rectf1,
+                        arbitrary_filters1,
+                        arbitrary_filter, // TODO(piman): not serialized.
+                        arbitrary_filters2);
   scoped_ptr<RenderPassDrawQuad> renderpass_cmp = renderpass_in->Copy(
       renderpass_in->shared_quad_state, renderpass_in->render_pass_id);
 
@@ -298,7 +311,6 @@ TEST_F(CCMessagesTest, AllQuads) {
   shared_state2_in->SetAll(arbitrary_matrix,
                            arbitrary_rect2,
                            arbitrary_rect3,
-                           arbitrary_rect1,
                            arbitrary_bool1,
                            arbitrary_float2);
   scoped_ptr<SharedQuadState> shared_state2_cmp = shared_state2_in->Copy();
@@ -307,7 +319,6 @@ TEST_F(CCMessagesTest, AllQuads) {
   shared_state3_in->SetAll(arbitrary_matrix,
                            arbitrary_rect3,
                            arbitrary_rect1,
-                           arbitrary_rect2,
                            arbitrary_bool1,
                            arbitrary_float3);
   scoped_ptr<SharedQuadState> shared_state3_cmp = shared_state3_in->Copy();
@@ -335,6 +346,38 @@ TEST_F(CCMessagesTest, AllQuads) {
   scoped_ptr<DrawQuad> streamvideo_cmp = streamvideo_in->Copy(
       streamvideo_in->shared_quad_state);
 
+  scoped_ptr<TextureDrawQuad> texture_in = TextureDrawQuad::Create();
+  texture_in->SetAll(shared_state1_in.get(),
+                     arbitrary_rect2,
+                     arbitrary_rect3,
+                     arbitrary_rect1,
+                     arbitrary_bool1,
+                     arbitrary_resourceid,
+                     arbitrary_bool2,
+                     arbitrary_pointf1,
+                     arbitrary_pointf2,
+                     arbitrary_float_array,
+                     arbitrary_bool3);
+  scoped_ptr<DrawQuad> texture_cmp = texture_in->Copy(
+      texture_in->shared_quad_state);
+
+  scoped_ptr<TileDrawQuad> tile_in = TileDrawQuad::Create();
+  tile_in->SetAll(shared_state1_in.get(),
+                  arbitrary_rect2,
+                  arbitrary_rect3,
+                  arbitrary_rect1,
+                  arbitrary_bool1,
+                  arbitrary_resourceid,
+                  arbitrary_rectf1,
+                  arbitrary_size1,
+                  arbitrary_bool2,
+                  arbitrary_bool3,
+                  arbitrary_bool4,
+                  arbitrary_bool5,
+                  arbitrary_bool6);
+  scoped_ptr<DrawQuad> tile_cmp = tile_in->Copy(
+      tile_in->shared_quad_state);
+
   scoped_ptr<YUVVideoDrawQuad> yuvvideo_in =
       YUVVideoDrawQuad::Create();
   yuvvideo_in->SetAll(shared_state1_in.get(),
@@ -355,21 +398,20 @@ TEST_F(CCMessagesTest, AllQuads) {
                   arbitrary_rectf1,
                   arbitrary_matrix,
                   arbitrary_bool1,
-                  arbitrary_bool2,
-                  arbitrary_filters1,
-                  arbitrary_filter, // TODO(danakj): filter is not serialized.
-                  arbitrary_filters2);
+                  arbitrary_bool2);
 
-  pass_in->shared_quad_state_list.append(shared_state1_in.Pass());
-  pass_in->quad_list.append(checkerboard_in.PassAs<DrawQuad>());
-  pass_in->quad_list.append(debugborder_in.PassAs<DrawQuad>());
-  pass_in->quad_list.append(iosurface_in.PassAs<DrawQuad>());
-  pass_in->quad_list.append(renderpass_in.PassAs<DrawQuad>());
-  pass_in->shared_quad_state_list.append(shared_state2_in.Pass());
-  pass_in->shared_quad_state_list.append(shared_state3_in.Pass());
-  pass_in->quad_list.append(solidcolor_in.PassAs<DrawQuad>());
-  pass_in->quad_list.append(streamvideo_in.PassAs<DrawQuad>());
-  pass_in->quad_list.append(yuvvideo_in.PassAs<DrawQuad>());
+  pass_in->shared_quad_state_list.push_back(shared_state1_in.Pass());
+  pass_in->quad_list.push_back(checkerboard_in.PassAs<DrawQuad>());
+  pass_in->quad_list.push_back(debugborder_in.PassAs<DrawQuad>());
+  pass_in->quad_list.push_back(iosurface_in.PassAs<DrawQuad>());
+  pass_in->quad_list.push_back(renderpass_in.PassAs<DrawQuad>());
+  pass_in->shared_quad_state_list.push_back(shared_state2_in.Pass());
+  pass_in->shared_quad_state_list.push_back(shared_state3_in.Pass());
+  pass_in->quad_list.push_back(solidcolor_in.PassAs<DrawQuad>());
+  pass_in->quad_list.push_back(streamvideo_in.PassAs<DrawQuad>());
+  pass_in->quad_list.push_back(texture_in.PassAs<DrawQuad>());
+  pass_in->quad_list.push_back(tile_in.PassAs<DrawQuad>());
+  pass_in->quad_list.push_back(yuvvideo_in.PassAs<DrawQuad>());
 
   scoped_ptr<RenderPass> pass_cmp = RenderPass::Create();
   pass_cmp->SetAll(arbitrary_id,
@@ -377,33 +419,32 @@ TEST_F(CCMessagesTest, AllQuads) {
                    arbitrary_rectf1,
                    arbitrary_matrix,
                    arbitrary_bool1,
-                   arbitrary_bool2,
-                   arbitrary_filters1,
-                   arbitrary_filter, // TODO(danakj): filter is not serialized.
-                   arbitrary_filters2);
+                   arbitrary_bool2);
 
-  pass_cmp->shared_quad_state_list.append(shared_state1_cmp.Pass());
-  pass_cmp->quad_list.append(checkerboard_cmp.PassAs<DrawQuad>());
-  pass_cmp->quad_list.append(debugborder_cmp.PassAs<DrawQuad>());
-  pass_cmp->quad_list.append(iosurface_cmp.PassAs<DrawQuad>());
-  pass_cmp->quad_list.append(renderpass_cmp.PassAs<DrawQuad>());
-  pass_cmp->shared_quad_state_list.append(shared_state2_cmp.Pass());
-  pass_cmp->shared_quad_state_list.append(shared_state3_cmp.Pass());
-  pass_cmp->quad_list.append(solidcolor_cmp.PassAs<DrawQuad>());
-  pass_cmp->quad_list.append(streamvideo_cmp.PassAs<DrawQuad>());
-  pass_cmp->quad_list.append(yuvvideo_cmp.PassAs<DrawQuad>());
+  pass_cmp->shared_quad_state_list.push_back(shared_state1_cmp.Pass());
+  pass_cmp->quad_list.push_back(checkerboard_cmp.PassAs<DrawQuad>());
+  pass_cmp->quad_list.push_back(debugborder_cmp.PassAs<DrawQuad>());
+  pass_cmp->quad_list.push_back(iosurface_cmp.PassAs<DrawQuad>());
+  pass_cmp->quad_list.push_back(renderpass_cmp.PassAs<DrawQuad>());
+  pass_cmp->shared_quad_state_list.push_back(shared_state2_cmp.Pass());
+  pass_cmp->shared_quad_state_list.push_back(shared_state3_cmp.Pass());
+  pass_cmp->quad_list.push_back(solidcolor_cmp.PassAs<DrawQuad>());
+  pass_cmp->quad_list.push_back(streamvideo_cmp.PassAs<DrawQuad>());
+  pass_cmp->quad_list.push_back(texture_cmp.PassAs<DrawQuad>());
+  pass_cmp->quad_list.push_back(tile_cmp.PassAs<DrawQuad>());
+  pass_cmp->quad_list.push_back(yuvvideo_cmp.PassAs<DrawQuad>());
 
   // Make sure the in and cmp RenderPasses match.
   Compare(pass_cmp.get(), pass_in.get());
   ASSERT_EQ(3u, pass_in->shared_quad_state_list.size());
-  ASSERT_EQ(7u, pass_in->quad_list.size());
+  ASSERT_EQ(9u, pass_in->quad_list.size());
   for (size_t i = 0; i < 3; ++i) {
     Compare(pass_cmp->shared_quad_state_list[i],
             pass_in->shared_quad_state_list[i]);
   }
-  for (size_t i = 0; i < 7; ++i)
+  for (size_t i = 0; i < pass_in->quad_list.size(); ++i)
     Compare(pass_cmp->quad_list[i], pass_in->quad_list[i]);
-  for (size_t i = 1; i < 7; ++i) {
+  for (size_t i = 1; i < pass_in->quad_list.size(); ++i) {
     bool same_shared_quad_state_cmp =
         pass_cmp->quad_list[i]->shared_quad_state ==
         pass_cmp->quad_list[i - 1]->shared_quad_state;
@@ -415,7 +456,7 @@ TEST_F(CCMessagesTest, AllQuads) {
 
   DelegatedFrameData frame_in;
   frame_in.size = arbitrary_size1;
-  frame_in.render_pass_list.append(pass_in.Pass());
+  frame_in.render_pass_list.push_back(pass_in.Pass());
 
   IPC::ParamTraits<DelegatedFrameData>::Write(&msg, frame_in);
 
@@ -427,17 +468,18 @@ TEST_F(CCMessagesTest, AllQuads) {
   EXPECT_EQ(arbitrary_size1, frame_out.size);
 
   // Make sure the out and cmp RenderPasses match.
-  scoped_ptr<RenderPass> pass_out = frame_out.render_pass_list.take(0);
+  scoped_ptr<RenderPass> pass_out = frame_out.render_pass_list.take(
+      frame_out.render_pass_list.begin());
   Compare(pass_cmp.get(), pass_out.get());
   ASSERT_EQ(3u, pass_out->shared_quad_state_list.size());
-  ASSERT_EQ(7u, pass_out->quad_list.size());
+  ASSERT_EQ(9u, pass_out->quad_list.size());
   for (size_t i = 0; i < 3; ++i) {
     Compare(pass_cmp->shared_quad_state_list[i],
             pass_out->shared_quad_state_list[i]);
   }
-  for (size_t i = 0; i < 7; ++i)
+  for (size_t i = 0; i < pass_out->quad_list.size(); ++i)
     Compare(pass_cmp->quad_list[i], pass_out->quad_list[i]);
-  for (size_t i = 1; i < 7; ++i) {
+  for (size_t i = 1; i < pass_out->quad_list.size(); ++i) {
     bool same_shared_quad_state_cmp =
         pass_cmp->quad_list[i]->shared_quad_state ==
         pass_cmp->quad_list[i - 1]->shared_quad_state;

@@ -4,6 +4,7 @@
 
 #include "content/browser/web_contents/navigation_entry_impl.h"
 
+#include "base/metrics/histogram.h"
 #include "base/string_util.h"
 #include "base/utf_string_conversions.h"
 #include "content/public/common/content_constants.h"
@@ -269,6 +270,39 @@ void NavigationEntryImpl::SetCanLoadLocalResources(bool allow) {
 
 bool NavigationEntryImpl::GetCanLoadLocalResources() const {
   return can_load_local_resources_;
+}
+
+void NavigationEntryImpl::SetFrameToNavigate(const std::string& frame_name) {
+  frame_to_navigate_ = frame_name;
+}
+
+const std::string& NavigationEntryImpl::GetFrameToNavigate() const {
+  return frame_to_navigate_;
+}
+
+void NavigationEntryImpl::SetExtraData(const std::string& key,
+                                       const string16& data) {
+  extra_data_[key] = data;
+}
+
+bool NavigationEntryImpl::GetExtraData(const std::string& key,
+                                       string16* data) const {
+  std::map<std::string, string16>::const_iterator iter = extra_data_.find(key);
+  if (iter == extra_data_.end())
+    return false;
+  *data = iter->second;
+  return true;
+}
+
+void NavigationEntryImpl::ClearExtraData(const std::string& key) {
+  extra_data_.erase(key);
+}
+
+void NavigationEntryImpl::SetScreenshotPNGData(
+    const std::vector<unsigned char>& png_data) {
+  screenshot_ = png_data.empty() ? NULL : new base::RefCountedBytes(png_data);
+  if (screenshot_)
+    UMA_HISTOGRAM_MEMORY_KB("Overscroll.ScreenshotSize", screenshot_->size());
 }
 
 }  // namespace content

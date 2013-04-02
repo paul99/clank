@@ -18,10 +18,10 @@
 #include "base/message_loop_proxy.h"
 #include "base/process.h"
 #include "base/process_util.h"
-#include "base/string_number_conversions.h"
 #include "base/string_split.h"
 #include "base/string_util.h"
 #include "base/stringprintf.h"
+#include "base/strings/string_number_conversions.h"
 #include "base/synchronization/waitable_event.h"
 #include "base/test/test_timeouts.h"
 #include "base/threading/platform_thread.h"
@@ -321,7 +321,7 @@ Error* Session::SendKeys(const string16& keys) {
 
 Error* Session::DragAndDropFilePaths(
     const Point& location,
-    const std::vector<FilePath::StringType>& paths) {
+    const std::vector<base::FilePath::StringType>& paths) {
   Error* error = NULL;
   RunSessionTask(base::Bind(
       &Automation::DragAndDropFilePaths,
@@ -1173,7 +1173,7 @@ Error* Session::WaitForAllViewsToStopLoading() {
 }
 
 Error* Session::InstallExtension(
-    const FilePath& path, std::string* extension_id) {
+    const base::FilePath& path, std::string* extension_id) {
   Error* error = NULL;
   RunSessionTask(base::Bind(
       &Automation::InstallExtension,
@@ -1428,7 +1428,7 @@ const Logger& Session::logger() const {
   return logger_;
 }
 
-const FilePath& Session::temp_dir() const {
+const base::FilePath& Session::temp_dir() const {
   return temp_dir_.path();
 }
 
@@ -1538,22 +1538,9 @@ void Session::SendKeysOnSessionThread(const string16& keys,
     return;
   }
   for (size_t i = 0; i < key_events.size(); ++i) {
-    if (capabilities_.native_events) {
-      // The automation provider will generate up/down events for us, we
-      // only need to call it once as compared to the WebKeyEvent method.
-      // Hence we filter events by their types, keeping only rawkeydown.
-      if (key_events[i].type != automation::kRawKeyDownType)
-        continue;
-      automation_->SendNativeKeyEvent(
-          current_target_.view_id,
-          key_events[i].key_code,
-          key_events[i].modifiers,
-          error);
-    } else {
-      automation_->SendWebKeyEvent(
-          current_target_.view_id,
-          key_events[i], error);
-    }
+    automation_->SendWebKeyEvent(
+        current_target_.view_id,
+        key_events[i], error);
     if (*error) {
       std::string details = base::StringPrintf(
           "Failed to send key event. Event details:\n"
@@ -1845,7 +1832,7 @@ Error* Session::GetScreenShot(std::string* png) {
                      "Could not create temp directory for screenshot");
   }
 
-  FilePath path = screenshots_dir.path().AppendASCII("screen");
+  base::FilePath path = screenshots_dir.path().AppendASCII("screen");
   RunSessionTask(base::Bind(
       &Automation::CaptureEntirePageAsPNG,
       base::Unretained(automation_.get()),
@@ -1937,21 +1924,17 @@ Error* Session::InitForWebsiteTesting() {
 }
 
 Error* Session::SetPrefs() {
-  DictionaryValue::key_iterator iter = capabilities_.prefs->begin_keys();
-  for (; iter != capabilities_.prefs->end_keys(); ++iter) {
-    Value* value;
-    capabilities_.prefs->GetWithoutPathExpansion(*iter, &value);
-    Error* error = SetPreference(*iter, true /* is_user_pref */,
-                                 value->DeepCopy());
+  for (DictionaryValue::Iterator iter(*capabilities_.prefs); !iter.IsAtEnd();
+       iter.Advance()) {
+    Error* error = SetPreference(iter.key(), true /* is_user_pref */,
+                                 iter.value().DeepCopy());
     if (error)
       return error;
   }
-  iter = capabilities_.local_state->begin_keys();
-  for (; iter != capabilities_.local_state->end_keys(); ++iter) {
-    Value* value;
-    capabilities_.local_state->GetWithoutPathExpansion(*iter, &value);
-    Error* error = SetPreference(*iter, false /* is_user_pref */,
-                                 value->DeepCopy());
+  for (DictionaryValue::Iterator iter(*capabilities_.local_state);
+       !iter.IsAtEnd(); iter.Advance()) {
+    Error* error = SetPreference(iter.key(), false /* is_user_pref */,
+                                 iter.value().DeepCopy());
     if (error)
       return error;
   }

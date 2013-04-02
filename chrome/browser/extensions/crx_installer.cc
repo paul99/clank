@@ -16,9 +16,9 @@
 #include "base/sequenced_task_runner.h"
 #include "base/string_util.h"
 #include "base/stringprintf.h"
+#include "base/threading/sequenced_worker_pool.h"
 #include "base/threading/thread_restrictions.h"
 #include "base/time.h"
-#include "base/threading/sequenced_worker_pool.h"
 #include "base/utf_string_conversions.h"
 #include "base/version.h"
 #include "chrome/browser/browser_process.h"
@@ -89,7 +89,7 @@ CrxInstaller::CrxInstaller(
     ExtensionInstallPrompt* client,
     const WebstoreInstaller::Approval* approval)
     : install_directory_(frontend_weak->install_directory()),
-      install_source_(Extension::INTERNAL),
+      install_source_(Manifest::INTERNAL),
       approved_(false),
       extensions_enabled_(frontend_weak->extensions_enabled()),
       delete_source_(false),
@@ -99,6 +99,7 @@ CrxInstaller::CrxInstaller(
       client_(client),
       apps_require_extension_mime_type_(false),
       allow_silent_install_(false),
+      bypass_blacklist_for_test_(false),
       install_cause_(extension_misc::INSTALL_CAUSE_UNSET),
       creation_flags_(Extension::NO_FLAGS),
       off_store_install_allow_reason_(OffStoreInstallDisallowed),
@@ -139,7 +140,7 @@ CrxInstaller::~CrxInstaller() {
   }
 }
 
-void CrxInstaller::InstallCrx(const FilePath& source_file) {
+void CrxInstaller::InstallCrx(const base::FilePath& source_file) {
   source_file_ = source_file;
 
   scoped_refptr<SandboxedUnpacker> unpacker(
@@ -158,7 +159,7 @@ void CrxInstaller::InstallCrx(const FilePath& source_file) {
     NOTREACHED();
 }
 
-void CrxInstaller::InstallUserScript(const FilePath& source_file,
+void CrxInstaller::InstallUserScript(const base::FilePath& source_file,
                                      const GURL& download_url) {
   DCHECK(!download_url.is_empty());
 
@@ -194,7 +195,8 @@ void CrxInstaller::InstallWebApp(const WebApplicationInfo& web_app) {
 }
 
 void CrxInstaller::ConvertWebAppOnFileThread(
-    const WebApplicationInfo& web_app, const FilePath& install_directory) {
+    const WebApplicationInfo& web_app,
+    const base::FilePath& install_directory) {
   string16 error;
   scoped_refptr<Extension> extension(
       ConvertWebAppToExtension(web_app, base::Time::Now(), install_directory));
@@ -243,7 +245,7 @@ CrxInstallerError CrxInstaller::AllowInstall(const Extension* extension) {
   // TODO(pamg): After ManagementPolicy refactoring is complete, remove this
   // and other uses of install_source_ that are no longer needed now that the
   // SandboxedUnpacker sets extension->location.
-  if (extension->is_theme() || Extension::IsExternalLocation(install_source_))
+  if (extension->is_theme() || Manifest::IsExternalLocation(install_source_))
     return CrxInstallerError();
 
   if (!extensions_enabled_) {
@@ -342,7 +344,7 @@ void CrxInstaller::OnUnpackFailure(const string16& error_message) {
   DCHECK(installer_task_runner_->RunsTasksOnCurrentThread());
 
   UMA_HISTOGRAM_ENUMERATION("Extensions.UnpackFailureInstallSource",
-                            install_source(), Extension::NUM_LOCATIONS);
+                            install_source(), Manifest::NUM_LOCATIONS);
 
   UMA_HISTOGRAM_ENUMERATION("Extensions.UnpackFailureInstallCause",
                             install_cause(),
@@ -351,14 +353,14 @@ void CrxInstaller::OnUnpackFailure(const string16& error_message) {
   ReportFailureFromFileThread(CrxInstallerError(error_message));
 }
 
-void CrxInstaller::OnUnpackSuccess(const FilePath& temp_dir,
-                                   const FilePath& extension_dir,
+void CrxInstaller::OnUnpackSuccess(const base::FilePath& temp_dir,
+                                   const base::FilePath& extension_dir,
                                    const DictionaryValue* original_manifest,
                                    const Extension* extension) {
   DCHECK(installer_task_runner_->RunsTasksOnCurrentThread());
 
   UMA_HISTOGRAM_ENUMERATION("Extensions.UnpackSuccessInstallSource",
-                            install_source(), Extension::NUM_LOCATIONS);
+                            install_source(), Manifest::NUM_LOCATIONS);
 
 
   UMA_HISTOGRAM_ENUMERATION("Extensions.UnpackSuccessInstallCause",
@@ -485,7 +487,7 @@ void CrxInstaller::InstallUIAbort(bool user_initiated) {
                   content::Source<CrxInstaller>(this),
                   content::NotificationService::NoDetails());
 
-  NotifyCrxInstallComplete(NULL);
+  NotifyCrxInstallComplete(false);
 
   Release();  // balanced in ConfirmInstall().
 
@@ -515,7 +517,7 @@ void CrxInstaller::CompleteInstall() {
     "Extensions.CrxInstallDirPathLength",
         install_directory_.value().length(), 0, 500, 100);
 
-  FilePath version_dir = extension_file_util::InstallExtension(
+  base::FilePath version_dir = extension_file_util::InstallExtension(
       unpacked_extension_root_,
       extension_->id(),
       extension_->VersionString(),
@@ -546,7 +548,7 @@ void CrxInstaller::CompleteInstall() {
   if (extension_) {
     ReportSuccessFromFileThread();
   } else {
-    LOG(ERROR) << error << " " << extension_id << " " << download_url_.spec();
+    LOG(ERROR) << error << " " << extension_id << " " << download_url_;
     ReportFailureFromFileThread(CrxInstallerError(UTF8ToUTF16(error)));
   }
 
@@ -581,7 +583,7 @@ void CrxInstaller::ReportFailureFromUIThread(const CrxInstallerError& error) {
   if (client_)
     client_->OnInstallFailure(error);
 
-  NotifyCrxInstallComplete(NULL);
+  NotifyCrxInstallComplete(false);
 
   // Delete temporary files.
   CleanupTempFiles();
@@ -625,22 +627,43 @@ void CrxInstaller::ReportSuccessFromUIThread() {
     perms_updater.GrantActivePermissions(extension_, record_oauth2_grant_);
   }
 
-  // Tell the frontend about the installation and hand off ownership of
-  // extension_ to it.
-  frontend_weak_->OnExtensionInstalled(extension_,
-                                       page_ordinal_,
-                                       has_requirement_errors_,
-                                       install_wait_for_idle_);
-
-  NotifyCrxInstallComplete(extension_.get());
-
-  extension_ = NULL;
-
-  // We're done. We don't post any more tasks to ourselves so we are deleted
-  // soon.
+  // Install the extension if it's not blacklisted, but notify either way.
+  base::Closure on_success =
+      base::Bind(&ExtensionService::OnExtensionInstalled,
+                 frontend_weak_,
+                 extension_,
+                 page_ordinal_,
+                 has_requirement_errors_,
+                 install_wait_for_idle_);
+  if (bypass_blacklist_for_test_) {
+    HandleIsBlacklistedResponse(on_success, false);
+  } else {
+    ExtensionSystem::Get(profile_)->blacklist()->IsBlacklisted(
+        extension_->id(),
+        base::Bind(&CrxInstaller::HandleIsBlacklistedResponse,
+                   this,
+                   on_success));
+  }
 }
 
-void CrxInstaller::NotifyCrxInstallComplete(const Extension* extension) {
+void CrxInstaller::HandleIsBlacklistedResponse(
+    const base::Closure& on_success,
+    bool is_blacklisted) {
+  if (is_blacklisted) {
+    string16 error =
+        l10n_util::GetStringFUTF16(IDS_EXTENSION_IS_BLACKLISTED,
+                                   UTF8ToUTF16(extension_->name()));
+    make_scoped_ptr(ExtensionInstallUI::Create(profile()))->OnInstallFailure(
+        extensions::CrxInstallerError(error));
+    // Show error via reporter to make tests happy.
+    ExtensionErrorReporter::GetInstance()->ReportError(error, false);  // quiet
+  } else {
+    on_success.Run();
+  }
+  NotifyCrxInstallComplete(!is_blacklisted);
+}
+
+void CrxInstaller::NotifyCrxInstallComplete(bool success) {
   // Some users (such as the download shelf) need to know when a
   // CRXInstaller is done.  Listening for the EXTENSION_* events
   // is problematic because they don't know anything about the
@@ -649,7 +672,11 @@ void CrxInstaller::NotifyCrxInstallComplete(const Extension* extension) {
   content::NotificationService::current()->Notify(
       chrome::NOTIFICATION_CRX_INSTALLER_DONE,
       content::Source<CrxInstaller>(this),
-      content::Details<const Extension>(extension));
+      content::Details<const Extension>(success ? extension_.get() : NULL));
+
+  // We're done. We don't post any more tasks to ourselves so we are deleted
+  // soon.
+  extension_ = NULL;
 }
 
 void CrxInstaller::CleanupTempFiles() {
@@ -665,12 +692,12 @@ void CrxInstaller::CleanupTempFiles() {
   // Delete the temp directory and crx file as necessary.
   if (!temp_dir_.value().empty()) {
     extension_file_util::DeleteFile(temp_dir_, true);
-    temp_dir_ = FilePath();
+    temp_dir_ = base::FilePath();
   }
 
   if (delete_source_ && !source_file_.value().empty()) {
     extension_file_util::DeleteFile(source_file_, false);
-    source_file_ = FilePath();
+    source_file_ = base::FilePath();
   }
 }
 

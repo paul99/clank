@@ -6,17 +6,16 @@
 
 #include "base/auto_reset.h"
 #include "base/command_line.h"
+#include "base/prefs/pref_service.h"
 #include "chrome/browser/browser_process.h"
 #include "chrome/browser/extensions/tab_helper.h"
 #include "chrome/browser/favicon/favicon_tab_helper.h"
-#include "chrome/browser/prefs/pref_service.h"
 #include "chrome/browser/profiles/profile.h"
 #include "chrome/browser/ui/browser.h"
 #include "chrome/browser/ui/browser_tabstrip.h"
 #include "chrome/browser/ui/tabs/tab_menu_model.h"
 #include "chrome/browser/ui/tabs/tab_strip_model.h"
 #include "chrome/browser/ui/tabs/tab_strip_model_delegate.h"
-#include "chrome/browser/ui/tabs/tab_strip_selection_model.h"
 #include "chrome/browser/ui/tabs/tab_utils.h"
 #include "chrome/browser/ui/views/tabs/tab.h"
 #include "chrome/browser/ui/views/tabs/tab_renderer_data.h"
@@ -29,6 +28,7 @@
 #include "content/public/browser/user_metrics.h"
 #include "content/public/browser/web_contents.h"
 #include "ui/base/layout.h"
+#include "ui/base/models/list_selection_model.h"
 #include "ui/views/controls/menu/menu_item_view.h"
 #include "ui/views/controls/menu/menu_model_adapter.h"
 #include "ui/views/controls/menu/menu_runner.h"
@@ -220,7 +220,7 @@ bool BrowserTabStripController::IsTabPinned(Tab* tab) const {
   return IsTabPinned(tabstrip_->GetModelIndexOfTab(tab));
 }
 
-const TabStripSelectionModel& BrowserTabStripController::GetSelectionModel() {
+const ui::ListSelectionModel& BrowserTabStripController::GetSelectionModel() {
   return model_->selection_model();
 }
 
@@ -380,7 +380,7 @@ void BrowserTabStripController::TabDetachedAt(WebContents* contents,
 
 void BrowserTabStripController::TabSelectionChanged(
     TabStripModel* tab_strip_model,
-    const TabStripSelectionModel& old_model) {
+    const ui::ListSelectionModel& old_model) {
   tabstrip_->SetSelection(old_model, model_->selection_model());
 }
 

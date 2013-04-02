@@ -5,10 +5,10 @@
 #ifndef CHROME_BROWSER_UI_BROWSER_TABSTRIP_H_
 #define CHROME_BROWSER_UI_BROWSER_TABSTRIP_H_
 
-#include "content/public/common/page_transition_types.h"
 #include "content/public/browser/navigation_controller.h"
 #include "content/public/browser/web_contents.h"
-#include "webkit/glue/window_open_disposition.h"
+#include "content/public/common/page_transition_types.h"
+#include "ui/base/window_open_disposition.h"
 
 class Browser;
 class GURL;
@@ -23,10 +23,6 @@ class Rect;
 }
 
 namespace chrome {
-
-content::WebContents* GetActiveWebContents(const Browser* browser);
-
-content::WebContents* GetWebContentsAt(const Browser* browser, int index);
 
 // Adds a blank tab to the tab strip of the specified browser; an |index| of -1
 // means to append it to the end of the tab strip.
@@ -50,7 +46,12 @@ void AddWebContents(Browser* browser,
                     const gfx::Rect& initial_pos,
                     bool user_gesture,
                     bool* was__blocked);
-void CloseWebContents(Browser* browser, content::WebContents* contents);
+
+// Closes the specified WebContents in the specified Browser. If
+// |add_to_history| is true, an entry in the historical tab database is created.
+void CloseWebContents(Browser* browser,
+                      content::WebContents* contents,
+                      bool add_to_history);
 
 }  // namespace chrome
 

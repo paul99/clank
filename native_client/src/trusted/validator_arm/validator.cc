@@ -633,7 +633,7 @@ bool SfiValidator::ValidateSegmentPair(const CodeSegment& old_code,
   // bundle-aligned. This invariant is checked in the validator's C
   // interface and it therefore not checked again.
   NACL_COMPILE_TIME_ASSERT((nacl_arm_dec::kArm32InstSize / CHAR_BIT) == 4);
-  for (uintptr_t va = old_code.begin_addr();
+  for (uint32_t va = old_code.begin_addr();
        va != old_code.end_addr();
        va += nacl_arm_dec::kArm32InstSize / CHAR_BIT) {
     Instruction old_insn = old_code[va];
@@ -834,6 +834,8 @@ bool SfiValidator::validate_branches(const vector<CodeSegment>& segments,
   return complete_success;
 }
 
+// TODO(jfb) Combine this with each instruction's safety(), exposed as a new API
+//           function. It'll make testing easier, e.g. TP use in the huge tests.
 bool SfiValidator::apply_patterns(const DecodedInstruction& inst,
     ProblemSink* out) {
   // Single-instruction patterns. Should return PATTERN_SAFE if the

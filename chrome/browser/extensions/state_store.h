@@ -8,6 +8,7 @@
 #include <set>
 #include <string>
 
+#include "base/file_path.h"
 #include "base/memory/weak_ptr.h"
 #include "chrome/browser/value_store/value_store_frontend.h"
 #include "content/public/browser/notification_observer.h"
@@ -24,7 +25,10 @@ class StateStore
  public:
   typedef ValueStoreFrontend::ReadCallback ReadCallback;
 
-  StateStore(Profile* profile, const FilePath& db_path);
+  // If |deferred_load| is true, we won't load the database until the first
+  // page has been loaded.
+  StateStore(Profile* profile, const base::FilePath& db_path,
+             bool deferred_load);
   // This variant is useful for testing (using a mock ValueStore).
   StateStore(Profile* profile, ValueStore* store);
   virtual ~StateStore();
@@ -44,6 +48,10 @@ class StateStore
                          const std::string& key,
                          scoped_ptr<base::Value> value);
 
+  // Removes a value for a given extension and key.
+  void RemoveExtensionValue(const std::string& extension_id,
+                            const std::string& key);
+
  private:
   class DelayedTaskQueue;
 
@@ -52,7 +60,13 @@ class StateStore
                        const content::NotificationSource& source,
                        const content::NotificationDetails& details) OVERRIDE;
 
-  void Init(const FilePath& db_path);
+  void Init();
+
+  // Removes all keys registered for the given extension.
+  void RemoveKeysForExtension(const std::string& extension_id);
+
+  // Path to our database, on disk. Empty during testing.
+  base::FilePath db_path_;
 
   // The store that holds our key/values.
   ValueStoreFrontend store_;

@@ -2,6 +2,8 @@
 # Use of this source code is governed by a BSD-style license that can be
 # found in the LICENSE file.
 
+import logging
+
 from telemetry import multi_page_benchmark
 from telemetry import util
 
@@ -10,10 +12,10 @@ class SpaceportBenchmark(multi_page_benchmark.MultiPageBenchmark):
     options.extra_browser_args.extend(['--disable-gpu-vsync'])
 
   def MeasurePage(self, _, tab, results):
-    util.WaitFor(lambda: tab.runtime.Evaluate(
+    util.WaitFor(lambda: tab.EvaluateJavaScript(
         '!document.getElementById("start-performance-tests").disabled'), 60)
 
-    tab.runtime.Execute("""
+    tab.ExecuteJavaScript("""
         window.__results = {};
         window.console.log = function(str) {
             if (!str) return;
@@ -25,13 +27,18 @@ class SpaceportBenchmark(multi_page_benchmark.MultiPageBenchmark):
     """)
 
     js_get_results = 'JSON.stringify(window.__results)'
+    num_tests_complete = [0]  # A list to work around closure issue.
     def _IsDone():
       num_tests_in_benchmark = 24
-      result_dict = eval(tab.runtime.Evaluate(js_get_results))
-      return num_tests_in_benchmark == len(result_dict)
-    util.WaitFor(_IsDone, 1200)
+      num_results = len(eval(tab.EvaluateJavaScript(js_get_results)))
+      if num_results > num_tests_complete[0]:
+        num_tests_complete[0] = num_results
+        logging.info('Completed benchmark %d of %d' % (num_tests_complete[0],
+                                                       num_tests_in_benchmark))
+      return num_tests_complete[0] >= num_tests_in_benchmark
+    util.WaitFor(_IsDone, 1200, poll_interval=5)
 
-    result_dict = eval(tab.runtime.Evaluate(js_get_results))
+    result_dict = eval(tab.EvaluateJavaScript(js_get_results))
     for key in result_dict:
       chart, trace = key.split('.', 1)
       results.Add(trace, 'objects (bigger is better)', float(result_dict[key]),

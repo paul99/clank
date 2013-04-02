@@ -5,9 +5,9 @@
 #include "chrome/browser/chromeos/input_method/input_method_persistence.h"
 
 #include "base/command_line.h"
+#include "base/prefs/pref_service.h"
 #include "chrome/browser/chromeos/input_method/mock_input_method_manager.h"
 #include "chrome/browser/chromeos/language_preferences.h"
-#include "chrome/browser/prefs/pref_service.h"
 #include "chrome/browser/profiles/profile_manager.h"
 #include "chrome/common/chrome_switches.h"
 #include "chrome/common/pref_names.h"
@@ -30,9 +30,7 @@ const char kProfileName[] = "input_method_test";
 class InputMethodPersistenceTest : public testing::Test {
  protected:
   InputMethodPersistenceTest()
-      : mock_profile_manager_(
-          static_cast<TestingBrowserProcess*>(g_browser_process)) {
-  }
+      : mock_profile_manager_(TestingBrowserProcess::GetGlobal()) {}
 
   virtual void SetUp() OVERRIDE {
     // Set up a profile that will be returned by
@@ -60,7 +58,7 @@ class InputMethodPersistenceTest : public testing::Test {
                   language_prefs::kPreferredKeyboardLayout));
   }
 
-  TestingPrefService* mock_user_prefs_;
+  TestingPrefServiceSyncable* mock_user_prefs_;
   MockInputMethodManager mock_manager_;
   TestingProfileManager mock_profile_manager_;
 };

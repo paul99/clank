@@ -4,13 +4,13 @@
 
 package org.chromium.content.app;
 
-import android.os.AsyncTask;
-import android.os.Handler;
 import android.text.TextUtils;
 import android.util.Log;
 
 import org.chromium.base.JNINamespace;
 import org.chromium.content.common.CommandLine;
+import org.chromium.content.common.ProcessInitException;
+import org.chromium.content.common.ResultCodes;
 import org.chromium.content.common.TraceEvent;
 
 /**
@@ -56,17 +56,11 @@ public class LibraryLoader {
         return sLibrary;
     }
 
-    @Deprecated
-    public static void loadAndInitSync() {
-        // TODO(joth): remove in next patch.
-        ensureInitialized();
-    }
-
     /**
      *  This method blocks until the library is fully loaded and initialized;
      *  must be called on the thread that the native will call its "main" thread.
      */
-    public static void ensureInitialized() {
+    public static void ensureInitialized() throws ProcessInitException {
         checkThreadUsage();
         if (sInitialized) {
             // Already initialized, nothing to do.
@@ -77,35 +71,30 @@ public class LibraryLoader {
     }
 
     /**
-     * @throws UnsatisfiedLinkError if the library is not yet initialized.
-     */
-    public static void checkIsReady() {
-        if (!sInitialized) {
-            throw new UnsatisfiedLinkError(sLibrary + " is not initialized");
-        }
-    }
-
-    /**
      * Loads the library and blocks until the load completes. The caller is responsible
      * for subsequently calling ensureInitialized().
      * May be called on any thread, but should only be called once. Note the thread
      * this is called on will be the thread that runs the native code's static initializers.
      * See the comment in doInBackground() for more considerations on this.
      *
-     * @return Whether the native library was successfully loaded.
+     * @throws ProcessInitException if the native library failed to load.
      */
-    public static void loadNow() {
+    public static void loadNow() throws ProcessInitException {
         if (sLibrary == null) {
             assert false : "No library specified to load.  Call setLibraryToLoad before first.";
         }
-        synchronized (sLoadedLock) {
-            if (!sLoaded) {
-                assert !sInitialized;
-                Log.i(TAG, "loading: " + sLibrary);
-                System.loadLibrary(sLibrary);
-                Log.i(TAG, "loaded: " + sLibrary);
-                sLoaded = true;
+        try {
+            synchronized (sLoadedLock) {
+                if (!sLoaded) {
+                    assert !sInitialized;
+                    Log.i(TAG, "loading: " + sLibrary);
+                    System.loadLibrary(sLibrary);
+                    Log.i(TAG, "loaded: " + sLibrary);
+                    sLoaded = true;
+                }
             }
+        } catch (UnsatisfiedLinkError e) {
+            throw new ProcessInitException(ResultCodes.RESULT_CODE_NATIVE_LIBRARY_LOAD_FAILED, e);
         }
     }
 
@@ -116,14 +105,15 @@ public class LibraryLoader {
      * @param initCommandLine The command line arguments that native command line will
      * be initialized with.
      */
-    static void initializeOnMainThread(String[] initCommandLine) {
+    static void initializeOnMainThread(String[] initCommandLine) throws ProcessInitException {
         checkThreadUsage();
         if (sInitialized) {
             return;
         }
-        if (!nativeLibraryLoadedOnMainThread(initCommandLine)) {
+        int resultCode = nativeLibraryLoadedOnMainThread(initCommandLine);
+        if (resultCode != 0) {
             Log.e(TAG, "error calling nativeLibraryLoadedOnMainThread");
-            throw new UnsatisfiedLinkError();
+            throw new ProcessInitException(resultCode);
         }
         // From this point on, native code is ready to use and checkIsReady()
         // shouldn't complain from now on (and in fact, it's used by the
@@ -133,7 +123,7 @@ public class LibraryLoader {
         TraceEvent.setEnabledToMatchNative();
     }
 
-    static private void initializeOnMainThread() {
+    static private void initializeOnMainThread() throws ProcessInitException {
         checkThreadUsage();
         if (!sInitialized) {
             initializeOnMainThread(CommandLine.getJavaSwitchesOrNull());
@@ -166,5 +156,7 @@ public class LibraryLoader {
     // This is the only method that is registered during System.loadLibrary, as it
     // may happen on a different thread. We then call it on the main thread to register
     // everything else.
-    private static native boolean nativeLibraryLoadedOnMainThread(String[] initCommandLine);
+    // Return 0 on success, otherwise return the error code from
+    // content/public/common/result_codes.h.
+    private static native int nativeLibraryLoadedOnMainThread(String[] initCommandLine);
 }

@@ -8,12 +8,12 @@
 
 #include "base/bind.h"
 #include "base/bind_helpers.h"
+#include "base/prefs/pref_service.h"
 #include "base/string_split.h"
 #include "base/string_util.h"
 #include "base/utf_string_conversions.h"
 #include "base/values.h"
 #include "chrome/browser/net/chrome_url_request_context.h"
-#include "chrome/browser/prefs/pref_service.h"
 #include "chrome/browser/profiles/profile.h"
 #include "chrome/browser/signin/signin_manager.h"
 #include "chrome/browser/signin/signin_manager_factory.h"
@@ -67,9 +67,8 @@ NewTabPageSyncHandler::MessageType
 void NewTabPageSyncHandler::RegisterMessages() {
   sync_service_ = ProfileSyncServiceFactory::GetInstance()->GetForProfile(
       Profile::FromWebUI(web_ui()));
-  DCHECK(sync_service_);  // This shouldn't get called by an incognito NTP.
-  DCHECK(!sync_service_->IsManaged());  // And neither if sync is managed.
-  sync_service_->AddObserver(this);
+  if (sync_service_)
+    sync_service_->AddObserver(this);
 
   web_ui()->RegisterMessageCallback("GetSyncMessage",
       base::Bind(&NewTabPageSyncHandler::HandleGetSyncMessage,
@@ -124,14 +123,13 @@ void NewTabPageSyncHandler::BuildAndSendSyncStatus() {
 
 void NewTabPageSyncHandler::HandleSyncLinkClicked(const ListValue* args) {
   DCHECK(!waiting_for_initial_page_load_);
-  DCHECK(sync_service_);
-  if (!sync_service_->IsSyncEnabled())
+  if (!sync_service_ || !sync_service_->IsSyncEnabled())
     return;
   Browser* browser =
       chrome::FindBrowserWithWebContents(web_ui()->GetWebContents());
   if (!browser || browser->IsAttemptingToCloseBrowser())
     return;
-  chrome::ShowSyncSetup(browser, SyncPromoUI::SOURCE_NTP_LINK);
+  chrome::ShowBrowserSignin(browser, SyncPromoUI::SOURCE_NTP_LINK);
 
   if (sync_service_->HasSyncSetupCompleted()) {
     string16 user = UTF8ToUTF16(SigninManagerFactory::GetForProfile(

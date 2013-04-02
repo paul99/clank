@@ -1,4 +1,3 @@
-#!/usr/bin/env python
 # Copyright (c) 2012 The Chromium Authors. All rights reserved.
 # Use of this source code is governed by a BSD-style license that can be
 # found in the LICENSE file.
@@ -22,5 +21,5 @@ class SkPicturePrinter(multi_page_benchmark.MultiPageBenchmark):
     outpath = os.path.abspath(outpath)
     # Replace win32 path separator char '\' with '\\'.
     js = _JS.format(outpath.replace('\\', '\\\\'))
-    tab.runtime.Evaluate(js)
+    tab.EvaluateJavaScript(js)
     results.Add('output_path', 'path', outpath)

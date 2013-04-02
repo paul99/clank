@@ -4,18 +4,18 @@
 
 #include "chrome/browser/ui/window_sizer/window_sizer.h"
 
-#include "base/compiler_specific.h"
 #include "base/command_line.h"
+#include "base/compiler_specific.h"
+#include "base/prefs/pref_service.h"
 #include "chrome/browser/browser_process.h"
-#include "chrome/browser/prefs/pref_service.h"
 #include "chrome/browser/profiles/profile.h"
 #include "chrome/browser/ui/ash/ash_init.h"
 #include "chrome/browser/ui/browser.h"
 #include "chrome/browser/ui/browser_list.h"
 #include "chrome/browser/ui/browser_window.h"
 #include "chrome/browser/ui/browser_window_state.h"
-#include "chrome/common/pref_names.h"
 #include "chrome/common/chrome_switches.h"
+#include "chrome/common/pref_names.h"
 #include "ui/gfx/screen.h"
 
 // Minimum height of the visible part of a window.
@@ -53,9 +53,10 @@ class DefaultStateProvider : public WindowSizer::StateProvider {
   }
 
   // Overridden from WindowSizer::StateProvider:
-  virtual bool GetPersistentState(gfx::Rect* bounds,
-                                  gfx::Rect* work_area,
-                                  ui::WindowShowState* show_state) const {
+  virtual bool GetPersistentState(
+      gfx::Rect* bounds,
+      gfx::Rect* work_area,
+      ui::WindowShowState* show_state) const OVERRIDE {
     DCHECK(bounds);
     DCHECK(show_state);
 
@@ -97,7 +98,7 @@ class DefaultStateProvider : public WindowSizer::StateProvider {
 
   virtual bool GetLastActiveWindowState(
       gfx::Rect* bounds,
-      ui::WindowShowState* show_state) const {
+      ui::WindowShowState* show_state) const OVERRIDE {
     DCHECK(show_state);
     // Applications are always restored with the same position.
     if (!app_name_.empty())
@@ -198,16 +199,23 @@ void WindowSizer::DetermineWindowBoundsAndShowState(
   *show_state = GetWindowDefaultShowState();
   *bounds = specified_bounds;
   if (bounds->IsEmpty()) {
-    if (GetBoundsOverride(specified_bounds, bounds, show_state))
+#if defined(USE_ASH)
+    // See if ash should decide the window placement.
+    // TODO(beng): insufficient but currently necessary.
+    // http://crbug.com/133312
+    if (chrome::ShouldOpenAshOnStartup() &&
+        GetBoundsOverrideAsh(bounds, show_state))
+      return;
+#endif
+    // See if there's last active window's placement information.
+    if (GetLastWindowBounds(bounds, show_state))
       return;
     // See if there's saved placement information.
-    if (!GetLastWindowBounds(bounds, show_state)) {
-      if (!GetSavedWindowBounds(bounds, show_state)) {
-        // No saved placement, figure out some sensible default size based on
-        // the user's screen size.
-        GetDefaultWindowBounds(bounds);
-      }
-    }
+    if (GetSavedWindowBounds(bounds, show_state))
+      return;
+    // No saved placement, figure out some sensible default size based on
+    // the user's screen size.
+    GetDefaultWindowBounds(bounds);
   } else {
     // In case that there was a bound given we need to make sure that it is
     // visible and fits on the screen.
@@ -364,18 +372,6 @@ void WindowSizer::AdjustBoundsToBeVisibleOnMonitorContaining(
   bounds->set_y(std::max(min_y, std::min(max_y, bounds->y())));
   bounds->set_x(std::max(min_x, std::min(max_x, bounds->x())));
 #endif  // defined(OS_MACOSX)
-}
-
-bool WindowSizer::GetBoundsOverride(
-    const gfx::Rect& specified_bounds,
-    gfx::Rect* bounds,
-    ui::WindowShowState* show_state) const {
-#if defined(USE_ASH)
-  // TODO(beng): insufficient but currently necessary. http://crbug.com/133312
-  if (chrome::ShouldOpenAshOnStartup())
-    return GetBoundsOverrideAsh(specified_bounds, bounds, show_state);
-#endif
-  return false;
 }
 
 ui::WindowShowState WindowSizer::GetWindowDefaultShowState() const {

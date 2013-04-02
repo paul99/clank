@@ -10,10 +10,6 @@
 
 class LocationBarView;
 
-namespace views {
-class MouseEvent;
-}
-
 // EVBubbleView displays the EV Bubble in the LocationBarView.
 class EVBubbleView : public IconLabelBubbleView {
  public:
@@ -24,6 +20,7 @@ class EVBubbleView : public IconLabelBubbleView {
   virtual ~EVBubbleView();
 
   // Overridden from View.
+  virtual gfx::Size GetMinimumSize() OVERRIDE;
   virtual bool OnMousePressed(const ui::MouseEvent& event) OVERRIDE;
   virtual void OnMouseReleased(const ui::MouseEvent& event) OVERRIDE;
 

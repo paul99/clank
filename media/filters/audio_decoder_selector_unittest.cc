@@ -31,9 +31,11 @@ class AudioDecoderSelectorTest : public ::testing::Test {
 
   AudioDecoderSelectorTest()
       : clear_audio_config_(
-            kCodecVorbis, 16, CHANNEL_LAYOUT_STEREO, 44100, NULL, 0, false),
+            kCodecVorbis, kSampleFormatPlanarF32, CHANNEL_LAYOUT_STEREO, 44100,
+            NULL, 0, false),
         encrypted_audio_config_(
-            kCodecVorbis, 16, CHANNEL_LAYOUT_STEREO, 44100, NULL, 0, true),
+            kCodecVorbis, kSampleFormatPlanarF32, CHANNEL_LAYOUT_STEREO, 44100,
+            NULL, 0, true),
         demuxer_stream_(new StrictMock<MockDemuxerStream>()),
         decryptor_(new NiceMock<MockDecryptor>()),
         decoder_1_(new StrictMock<MockAudioDecoder>()),
@@ -108,7 +110,7 @@ class AudioDecoderSelectorTest : public ::testing::Test {
   AudioDecoderConfig encrypted_audio_config_;
   scoped_refptr<StrictMock<MockDemuxerStream> > demuxer_stream_;
   // Use NiceMock since we don't care about most of calls on the decryptor, e.g.
-  // RegisterKeyAddedCB().
+  // RegisterNewKeyCB().
   scoped_ptr<NiceMock<MockDecryptor> > decryptor_;
   scoped_refptr<StrictMock<MockAudioDecoder> > decoder_1_;
   scoped_refptr<StrictMock<MockAudioDecoder> > decoder_2_;

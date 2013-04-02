@@ -12,9 +12,9 @@
 #include "base/metrics/histogram.h"
 #include "base/sequenced_task_runner_helpers.h"
 #include "base/stl_util.h"
-#include "base/string_number_conversions.h"
 #include "base/string_util.h"
 #include "base/stringprintf.h"
+#include "base/strings/string_number_conversions.h"
 #include "base/threading/sequenced_worker_pool.h"
 #include "base/time.h"
 #include "chrome/browser/safe_browsing/safe_browsing_service.h"
@@ -50,11 +50,11 @@ const char DownloadProtectionService::kDownloadRequestUrl[] =
     "https://sb-ssl.google.com/safebrowsing/clientreport/download";
 
 namespace {
-bool IsArchiveFile(const FilePath& file) {
+bool IsArchiveFile(const base::FilePath& file) {
   return file.MatchesExtension(FILE_PATH_LITERAL(".zip"));
 }
 
-bool IsBinaryFile(const FilePath& file) {
+bool IsBinaryFile(const base::FilePath& file) {
   return (
       // Executable extensions for MS Windows.
       file.MatchesExtension(FILE_PATH_LITERAL(".bas")) ||
@@ -77,7 +77,8 @@ bool IsBinaryFile(const FilePath& file) {
       IsArchiveFile(file));
 }
 
-ClientDownloadRequest::DownloadType GetDownloadType(const FilePath& file) {
+ClientDownloadRequest::DownloadType GetDownloadType(
+    const base::FilePath& file) {
   DCHECK(IsBinaryFile(file));
   if (file.MatchesExtension(FILE_PATH_LITERAL(".apk")))
     return ClientDownloadRequest::ANDROID_APK;
@@ -116,7 +117,7 @@ enum MaliciousExtensionType {
   EXTENSION_MAX,
 };
 
-MaliciousExtensionType GetExtensionType(const FilePath& f) {
+MaliciousExtensionType GetExtensionType(const base::FilePath& f) {
   if (f.MatchesExtension(FILE_PATH_LITERAL(".exe"))) return EXTENSION_EXE;
   if (f.MatchesExtension(FILE_PATH_LITERAL(".msi"))) return EXTENSION_MSI;
   if (f.MatchesExtension(FILE_PATH_LITERAL(".cab"))) return EXTENSION_CAB;
@@ -140,7 +141,7 @@ MaliciousExtensionType GetExtensionType(const FilePath& f) {
   return EXTENSION_OTHER;
 }
 
-void RecordFileExtensionType(const FilePath& file) {
+void RecordFileExtensionType(const base::FilePath& file) {
   UMA_HISTOGRAM_ENUMERATION("SBClientDownload.DownloadExtensions",
                             GetExtensionType(file),
                             EXTENSION_MAX);
@@ -465,6 +466,9 @@ class DownloadProtectionService::CheckClientDownloadRequest
       } else if (response.verdict() == ClientDownloadResponse::UNCOMMON) {
         reason = REASON_DOWNLOAD_UNCOMMON;
         result = UNCOMMON;
+      } else if (response.verdict() == ClientDownloadResponse::DANGEROUS_HOST) {
+        reason = REASON_DOWNLOAD_DANGEROUS_HOST;
+        result = DANGEROUS_HOST;
       } else {
         LOG(DFATAL) << "Unknown download response verdict: "
                     << response.verdict();
@@ -566,7 +570,7 @@ class DownloadProtectionService::CheckClientDownloadRequest
                   << info_.local_file.value();
           continue;
         }
-        const FilePath& file = reader.current_entry_info()->file_path();
+        const base::FilePath& file = reader.current_entry_info()->file_path();
         if (IsBinaryFile(file)) {
           // Don't consider an archived archive to be executable, but record
           // a histogram.

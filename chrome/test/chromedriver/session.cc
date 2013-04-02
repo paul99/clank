@@ -5,11 +5,15 @@
 #include "chrome/test/chromedriver/session.h"
 
 #include "chrome/test/chromedriver/chrome.h"
+#include "chrome/test/chromedriver/status.h"
 
-Session::Session(const std::string& id) : id(id) {}
+Session::Session(const std::string& id)
+    : id(id), mouse_position(0, 0), implicit_wait(0), page_load_timeout(0),
+      script_timeout(0) {}
 
 Session::Session(const std::string& id, scoped_ptr<Chrome> chrome)
-    : id(id), chrome(chrome.Pass()) {}
+    : id(id), chrome(chrome.Pass()), mouse_position(0, 0), implicit_wait(0),
+      page_load_timeout(0), script_timeout(0) {}
 
 Session::~Session() {}
 

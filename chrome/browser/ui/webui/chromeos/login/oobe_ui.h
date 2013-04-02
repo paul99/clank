@@ -46,9 +46,13 @@ class OobeUI : public OobeDisplay,
     SCREEN_OOBE_ENROLLMENT,
     SCREEN_GAIA_SIGNIN,
     SCREEN_ACCOUNT_PICKER,
+    SCREEN_ERROR_MESSAGE,
     SCREEN_USER_IMAGE_PICKER,
-    SCREEN_TMP_ERROR,
+    SCREEN_TPM_ERROR,
     SCREEN_PASSWORD_CHANGED,
+    SCREEN_CREATE_MANAGED_USER,
+    SCREEN_TERMS_OF_SERVICE,
+    SCREEN_WRONG_HWID,
     SCREEN_UNKNOWN
   };
 
@@ -59,9 +63,13 @@ class OobeUI : public OobeDisplay,
   static const char kScreenOobeEnrollment[];
   static const char kScreenGaiaSignin[];
   static const char kScreenAccountPicker[];
+  static const char kScreenErrorMessage[];
   static const char kScreenUserImagePicker[];
   static const char kScreenTpmError[];
   static const char kScreenPasswordChanged[];
+  static const char kScreenManagedUserCreation[];
+  static const char kScreenTermsOfService[];
+  static const char kScreenWrongHWID[];
 
   explicit OobeUI(content::WebUI* web_ui);
   virtual ~OobeUI();
@@ -75,9 +83,12 @@ class OobeUI : public OobeDisplay,
   virtual EnterpriseEnrollmentScreenActor* GetEnterpriseEnrollmentScreenActor()
       OVERRIDE;
   virtual ResetScreenActor* GetResetScreenActor() OVERRIDE;
+  virtual TermsOfServiceScreenActor*
+      GetTermsOfServiceScreenActor() OVERRIDE;
   virtual UserImageScreenActor* GetUserImageScreenActor() OVERRIDE;
   virtual ViewScreenDelegate* GetRegistrationScreenActor() OVERRIDE;
   virtual ViewScreenDelegate* GetHTMLPageScreenActor() OVERRIDE;
+  virtual WrongHWIDScreenActor* GetWrongHWIDScreenActor() OVERRIDE;
 
   // Collects localized strings from the owned handlers.
   void GetLocalizedStrings(base::DictionaryValue* localized_strings);
@@ -100,11 +111,13 @@ class OobeUI : public OobeDisplay,
   // Resets the delegate set in ShowSigninScreen.
   void ResetSigninScreenHandlerDelegate();
 
-  Screen current_screen() { return current_screen_; }
+  Screen current_screen() const { return current_screen_; }
+
+  const std::string& GetScreenName(Screen screen) const;
 
  private:
-  // Initializes |screen_map_| structure.
-  void InitializeScreenMap();
+  // Initializes |screen_ids_| and |screen_names_| structures.
+  void InitializeScreenMaps();
 
   void AddScreenHandler(BaseScreenHandler* handler);
 
@@ -124,6 +137,7 @@ class OobeUI : public OobeDisplay,
   EulaScreenActor* eula_screen_actor_;
   EnterpriseEnrollmentScreenActor* enterprise_enrollment_screen_actor_;
   ResetScreenActor* reset_screen_actor_;
+  WrongHWIDScreenActor* wrong_hwid_screen_actor_;
 
   // Reference to ErrorScreenHandler that handles error screen
   // requests and forward calls from native code to JS side.
@@ -132,6 +146,8 @@ class OobeUI : public OobeDisplay,
   // Reference to SigninScreenHandler that handles sign-in screen requests and
   // forward calls from native code to JS side.
   SigninScreenHandler* signin_screen_handler_;
+
+  TermsOfServiceScreenActor* terms_of_service_screen_actor_;
   UserImageScreenActor* user_image_screen_actor_;
 
   std::vector<BaseScreenHandler*> handlers_;  // Non-owning pointers.
@@ -139,8 +155,11 @@ class OobeUI : public OobeDisplay,
   // Id of the current oobe/login screen.
   Screen current_screen_;
 
-  // Maps JS screens names to screen id.
-  std::map<std::string, Screen> screen_map_;
+  // Maps JS screen names to screen ids.
+  std::map<std::string, Screen> screen_ids_;
+
+  // Maps screen ids to JS screen names.
+  std::vector<std::string> screen_names_;
 
   DISALLOW_COPY_AND_ASSIGN(OobeUI);
 };

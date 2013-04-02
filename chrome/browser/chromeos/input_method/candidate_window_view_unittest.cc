@@ -22,11 +22,6 @@ const char* kSampleCandidate[] = {
   "Sample Candidate 2",
   "Sample Candidate 3"
 };
-const char* kSampleLabel[] = {
-  "Sample Label 1",
-  "Sample Label 2",
-  "Sample Label 3"
-};
 const char* kSampleAnnotation[] = {
   "Sample Annotation 1",
   "Sample Annotation 2",
@@ -43,25 +38,24 @@ const char* kSampleDescriptionBody[] = {
   "Sample Description Body 3",
 };
 
-void ClearInputMethodLookupTable(size_t page_size,
-                                 InputMethodLookupTable* table) {
-  table->visible = false;
-  table->cursor_absolute_index = 0;
-  table->page_size = page_size;
-  table->candidates.clear();
-  table->orientation = InputMethodLookupTable::kVertical;
-  table->labels.clear();
-  table->annotations.clear();
+void InitIBusLookupTable(size_t page_size,
+                         IBusLookupTable* table) {
+  table->set_cursor_position(0);
+  table->set_page_size(page_size);
+  table->mutable_candidates()->clear();
+  table->set_orientation(IBusLookupTable::VERTICAL);
 }
 
 void InitIBusLookupTableWithCandidatesFilled(size_t page_size,
-                                             InputMethodLookupTable* table) {
-  ClearInputMethodLookupTable(page_size, table);
+                                             IBusLookupTable* table) {
+  InitIBusLookupTable(page_size, table);
   for (size_t i = 0; i < page_size; ++i) {
-    table->candidates.push_back(
-        base::StringPrintf("value %lld", static_cast<unsigned long long>(i)));
-    table->labels.push_back(
-        base::StringPrintf("%lld", static_cast<unsigned long long>(i)));
+    IBusLookupTable::Entry entry;
+    entry.value = base::StringPrintf("value %lld",
+                                     static_cast<unsigned long long>(i));
+    entry.label = base::StringPrintf("%lld",
+                                     static_cast<unsigned long long>(i));
+    table->mutable_candidates()->push_back(entry);
   }
 }
 
@@ -79,148 +73,6 @@ class CandidateWindowViewTest : public views::ViewsTestBase {
   }
 };
 
-TEST_F(CandidateWindowViewTest, ShouldUpdateCandidateViewsTest) {
-  // This test verifies the process of judging update lookup-table or not.
-  // This judgement is handled by ShouldUpdateCandidateViews, which returns true
-  // if update is necessary and vice versa.
-  InputMethodLookupTable old_table;
-  InputMethodLookupTable new_table;
-
-  const size_t kPageSize = 10;
-
-  ClearInputMethodLookupTable(kPageSize, &old_table);
-  ClearInputMethodLookupTable(kPageSize, &new_table);
-
-  old_table.visible = true;
-  old_table.cursor_absolute_index = 0;
-  old_table.page_size = 1;
-  old_table.candidates.clear();
-  old_table.orientation = InputMethodLookupTable::kVertical;
-  old_table.labels.clear();
-  old_table.annotations.clear();
-
-  new_table = old_table;
-
-  EXPECT_FALSE(CandidateWindowView::ShouldUpdateCandidateViews(old_table,
-                                                               new_table));
-
-  new_table.visible = false;
-  // Visibility would be ignored.
-  EXPECT_FALSE(CandidateWindowView::ShouldUpdateCandidateViews(old_table,
-                                                               new_table));
-  new_table = old_table;
-  new_table.candidates.push_back(kSampleCandidate[0]);
-  old_table.candidates.push_back(kSampleCandidate[0]);
-  EXPECT_FALSE(CandidateWindowView::ShouldUpdateCandidateViews(old_table,
-                                                               new_table));
-  new_table.labels.push_back(kSampleLabel[0]);
-  old_table.labels.push_back(kSampleLabel[0]);
-  EXPECT_FALSE(CandidateWindowView::ShouldUpdateCandidateViews(old_table,
-                                                               new_table));
-  new_table.annotations.push_back(kSampleAnnotation[0]);
-  old_table.annotations.push_back(kSampleAnnotation[0]);
-  EXPECT_FALSE(CandidateWindowView::ShouldUpdateCandidateViews(old_table,
-                                                               new_table));
-
-  InputMethodLookupTable::Description description;
-  description.title = kSampleDescriptionTitle[0];
-  description.body = kSampleDescriptionBody[0];
-
-  new_table.descriptions.push_back(description);
-  old_table.descriptions.push_back(description);
-  EXPECT_FALSE(CandidateWindowView::ShouldUpdateCandidateViews(old_table,
-                                                               new_table));
-
-  new_table.cursor_absolute_index = 1;
-  EXPECT_TRUE(CandidateWindowView::ShouldUpdateCandidateViews(old_table,
-                                                              new_table));
-  new_table = old_table;
-
-  new_table.page_size = 2;
-  EXPECT_TRUE(CandidateWindowView::ShouldUpdateCandidateViews(old_table,
-                                                              new_table));
-  new_table = old_table;
-
-  new_table.orientation = InputMethodLookupTable::kHorizontal;
-  EXPECT_TRUE(CandidateWindowView::ShouldUpdateCandidateViews(old_table,
-                                                              new_table));
-
-  new_table = old_table;
-  new_table.candidates.push_back(kSampleCandidate[1]);
-  EXPECT_TRUE(CandidateWindowView::ShouldUpdateCandidateViews(old_table,
-                                                              new_table));
-  old_table.candidates.push_back(kSampleCandidate[2]);
-  EXPECT_TRUE(CandidateWindowView::ShouldUpdateCandidateViews(old_table,
-                                                              new_table));
-  new_table.candidates.clear();
-  EXPECT_TRUE(CandidateWindowView::ShouldUpdateCandidateViews(old_table,
-                                                              new_table));
-  new_table.candidates.push_back(kSampleCandidate[1]);
-  old_table.candidates.clear();
-  EXPECT_TRUE(CandidateWindowView::ShouldUpdateCandidateViews(old_table,
-                                                              new_table));
-
-  new_table = old_table;
-  new_table.labels.push_back(kSampleLabel[1]);
-  EXPECT_TRUE(CandidateWindowView::ShouldUpdateCandidateViews(old_table,
-                                                              new_table));
-  old_table.labels.push_back(kSampleLabel[2]);
-  EXPECT_TRUE(CandidateWindowView::ShouldUpdateCandidateViews(old_table,
-                                                              new_table));
-  new_table.labels.clear();
-  EXPECT_TRUE(CandidateWindowView::ShouldUpdateCandidateViews(old_table,
-                                                              new_table));
-  new_table.labels.push_back(kSampleLabel[1]);
-  old_table.labels.clear();
-  EXPECT_TRUE(CandidateWindowView::ShouldUpdateCandidateViews(old_table,
-                                                              new_table));
-
-  new_table = old_table;
-  new_table.annotations.push_back(kSampleAnnotation[1]);
-  EXPECT_TRUE(CandidateWindowView::ShouldUpdateCandidateViews(old_table,
-                                                              new_table));
-  old_table.annotations.push_back(kSampleAnnotation[2]);
-  EXPECT_TRUE(CandidateWindowView::ShouldUpdateCandidateViews(old_table,
-                                                              new_table));
-  new_table.annotations.clear();
-  EXPECT_TRUE(CandidateWindowView::ShouldUpdateCandidateViews(old_table,
-                                                              new_table));
-  new_table.annotations.push_back(kSampleAnnotation[1]);
-  old_table.annotations.clear();
-  EXPECT_TRUE(CandidateWindowView::ShouldUpdateCandidateViews(old_table,
-                                                              new_table));
-
-  new_table = old_table;
-  new_table.annotations.push_back(kSampleDescriptionTitle[1]);
-  EXPECT_TRUE(CandidateWindowView::ShouldUpdateCandidateViews(old_table,
-                                                              new_table));
-  old_table.annotations.push_back(kSampleDescriptionTitle[2]);
-  EXPECT_TRUE(CandidateWindowView::ShouldUpdateCandidateViews(old_table,
-                                                              new_table));
-  new_table.annotations.clear();
-  EXPECT_TRUE(CandidateWindowView::ShouldUpdateCandidateViews(old_table,
-                                                              new_table));
-  new_table.annotations.push_back(kSampleDescriptionTitle[1]);
-  old_table.annotations.clear();
-  EXPECT_TRUE(CandidateWindowView::ShouldUpdateCandidateViews(old_table,
-                                                              new_table));
-
-  new_table = old_table;
-  new_table.annotations.push_back(kSampleDescriptionBody[1]);
-  EXPECT_TRUE(CandidateWindowView::ShouldUpdateCandidateViews(old_table,
-                                                              new_table));
-  old_table.annotations.push_back(kSampleDescriptionBody[2]);
-  EXPECT_TRUE(CandidateWindowView::ShouldUpdateCandidateViews(old_table,
-                                                              new_table));
-  new_table.annotations.clear();
-  EXPECT_TRUE(CandidateWindowView::ShouldUpdateCandidateViews(old_table,
-                                                              new_table));
-  new_table.annotations.push_back(kSampleDescriptionBody[1]);
-  old_table.annotations.clear();
-  EXPECT_TRUE(CandidateWindowView::ShouldUpdateCandidateViews(old_table,
-                                                              new_table));
-}
-
 TEST_F(CandidateWindowViewTest, SelectCandidateAtTest) {
   views::Widget* widget = new views::Widget;
   views::Widget::InitParams params =
@@ -231,34 +83,33 @@ TEST_F(CandidateWindowViewTest, SelectCandidateAtTest) {
   candidate_window_view.Init();
 
   // Set 9 candidates.
-  InputMethodLookupTable table_large;
+  IBusLookupTable table_large;
   const int table_large_size = 9;
   InitIBusLookupTableWithCandidatesFilled(table_large_size, &table_large);
-  table_large.cursor_absolute_index = table_large_size - 1;
+  table_large.set_cursor_position(table_large_size - 1);
   candidate_window_view.UpdateCandidates(table_large);
   // Select the last candidate.
   candidate_window_view.SelectCandidateAt(table_large_size - 1);
 
   // Reduce the number of candidates to 3.
-  InputMethodLookupTable table_small;
+  IBusLookupTable table_small;
   const int table_small_size = 3;
   InitIBusLookupTableWithCandidatesFilled(table_small_size, &table_small);
-  table_small.cursor_absolute_index = table_small_size - 1;
- // Make sure the test doesn't crash if the candidate table reduced its size.
+  table_small.set_cursor_position(table_small_size - 1);
+  // Make sure the test doesn't crash if the candidate table reduced its size.
   // (crbug.com/174163)
   candidate_window_view.UpdateCandidates(table_small);
- candidate_window_view.SelectCandidateAt(table_small_size - 1);
+  candidate_window_view.SelectCandidateAt(table_small_size - 1);
 }
 
 TEST_F(CandidateWindowViewTest, ShortcutSettingTest) {
   const char* kEmptyLabel = "";
-  const char* kDefaultVerticalLabel[] = { "1", "2", "3" };
-  const char* kDefaultHorizontalLabel[] = { "1.", "2.", "3." };
   const char* kCustomizedLabel[] = { "a", "s", "d" };
   const char* kExpectedHorizontalCustomizedLabel[] = { "a.", "s.", "d." };
 
   views::Widget* widget = new views::Widget;
-  views::Widget::InitParams params(views::Widget::InitParams::TYPE_WINDOW);
+  views::Widget::InitParams params =
+      CreateParams(views::Widget::InitParams::TYPE_WINDOW);
   widget->Init(params);
 
   CandidateWindowView candidate_window_view(widget);
@@ -268,55 +119,27 @@ TEST_F(CandidateWindowViewTest, ShortcutSettingTest) {
     SCOPED_TRACE("candidate_views allocation test");
     const size_t kMaxPageSize = 16;
     for (size_t i = 1; i < kMaxPageSize; ++i) {
-      InputMethodLookupTable table;
-      ClearInputMethodLookupTable(i, &table);
+      IBusLookupTable table;
+      InitIBusLookupTable(i, &table);
       candidate_window_view.UpdateCandidates(table);
       EXPECT_EQ(i, candidate_window_view.candidate_views_.size());
     }
   }
   {
-    SCOPED_TRACE("Empty labels expects default label(vertical)");
-    const size_t kPageSize = 3;
-    InputMethodLookupTable table;
-    ClearInputMethodLookupTable(kPageSize, &table);
-
-    table.orientation = InputMethodLookupTable::kVertical;
-    for (size_t i = 0; i < kPageSize; ++i) {
-      table.candidates.push_back(kSampleCandidate[i]);
-      table.annotations.push_back(kSampleAnnotation[i]);
-      InputMethodLookupTable::Description description;
-      description.title = kSampleDescriptionTitle[i];
-      description.body = kSampleDescriptionBody[i];
-      table.descriptions.push_back(description);
-    }
-
-    table.labels.clear();
-
-    candidate_window_view.UpdateCandidates(table);
-
-    ASSERT_EQ(kPageSize, candidate_window_view.candidate_views_.size());
-    for (size_t i = 0; i < kPageSize; ++i) {
-      ExpectLabels(kDefaultVerticalLabel[i],
-                   kSampleCandidate[i],
-                   kSampleAnnotation[i],
-                   candidate_window_view.candidate_views_[i]);
-    }
-  }
-  {
     SCOPED_TRACE("Empty string for each labels expects empty labels(vertical)");
     const size_t kPageSize = 3;
-    InputMethodLookupTable table;
-    ClearInputMethodLookupTable(kPageSize, &table);
+    IBusLookupTable table;
+    InitIBusLookupTable(kPageSize, &table);
 
-    table.orientation = InputMethodLookupTable::kVertical;
+    table.set_orientation(IBusLookupTable::VERTICAL);
     for (size_t i = 0; i < kPageSize; ++i) {
-      table.candidates.push_back(kSampleCandidate[i]);
-      table.annotations.push_back(kSampleAnnotation[i]);
-      InputMethodLookupTable::Description description;
-      description.title = kSampleDescriptionTitle[i];
-      description.body = kSampleDescriptionBody[i];
-      table.descriptions.push_back(description);
-      table.labels.push_back(kEmptyLabel);
+      IBusLookupTable::Entry entry;
+      entry.value = kSampleCandidate[i];
+      entry.annotation = kSampleAnnotation[i];
+      entry.description_title = kSampleDescriptionTitle[i];
+      entry.description_body = kSampleDescriptionBody[i];
+      entry.label = kEmptyLabel;
+      table.mutable_candidates()->push_back(entry);
     }
 
     candidate_window_view.UpdateCandidates(table);
@@ -328,49 +151,21 @@ TEST_F(CandidateWindowViewTest, ShortcutSettingTest) {
     }
   }
   {
-    SCOPED_TRACE("Empty labels expects default label(horizontal)");
-    const size_t kPageSize = 3;
-    InputMethodLookupTable table;
-    ClearInputMethodLookupTable(kPageSize, &table);
-
-    table.orientation = InputMethodLookupTable::kHorizontal;
-    for (size_t i = 0; i < kPageSize; ++i) {
-      table.candidates.push_back(kSampleCandidate[i]);
-      table.annotations.push_back(kSampleAnnotation[i]);
-      InputMethodLookupTable::Description description;
-      description.title = kSampleDescriptionTitle[i];
-      description.body = kSampleDescriptionBody[i];
-      table.descriptions.push_back(description);
-    }
-
-    table.labels.clear();
-
-    candidate_window_view.UpdateCandidates(table);
-
-    ASSERT_EQ(kPageSize, candidate_window_view.candidate_views_.size());
-    for (size_t i = 0; i < kPageSize; ++i) {
-      ExpectLabels(kDefaultHorizontalLabel[i],
-                   kSampleCandidate[i],
-                   kSampleAnnotation[i],
-                   candidate_window_view.candidate_views_[i]);
-    }
-  }
-  {
     SCOPED_TRACE(
         "Empty string for each labels expect empty labels(horizontal)");
     const size_t kPageSize = 3;
-    InputMethodLookupTable table;
-    ClearInputMethodLookupTable(kPageSize, &table);
+    IBusLookupTable table;
+    InitIBusLookupTable(kPageSize, &table);
 
-    table.orientation = InputMethodLookupTable::kHorizontal;
+    table.set_orientation(IBusLookupTable::HORIZONTAL);
     for (size_t i = 0; i < kPageSize; ++i) {
-      table.candidates.push_back(kSampleCandidate[i]);
-      table.annotations.push_back(kSampleAnnotation[i]);
-      InputMethodLookupTable::Description description;
-      description.title = kSampleDescriptionTitle[i];
-      description.body = kSampleDescriptionBody[i];
-      table.descriptions.push_back(description);
-      table.labels.push_back(kEmptyLabel);
+      IBusLookupTable::Entry entry;
+      entry.value = kSampleCandidate[i];
+      entry.annotation = kSampleAnnotation[i];
+      entry.description_title = kSampleDescriptionTitle[i];
+      entry.description_body = kSampleDescriptionBody[i];
+      entry.label = kEmptyLabel;
+      table.mutable_candidates()->push_back(entry);
     }
 
     candidate_window_view.UpdateCandidates(table);
@@ -385,18 +180,18 @@ TEST_F(CandidateWindowViewTest, ShortcutSettingTest) {
   {
     SCOPED_TRACE("Vertical customized label case");
     const size_t kPageSize = 3;
-    InputMethodLookupTable table;
-    ClearInputMethodLookupTable(kPageSize, &table);
+    IBusLookupTable table;
+    InitIBusLookupTable(kPageSize, &table);
 
-    table.orientation = InputMethodLookupTable::kVertical;
+    table.set_orientation(IBusLookupTable::VERTICAL);
     for (size_t i = 0; i < kPageSize; ++i) {
-      table.candidates.push_back(kSampleCandidate[i]);
-      table.annotations.push_back(kSampleAnnotation[i]);
-      InputMethodLookupTable::Description description;
-      description.title = kSampleDescriptionTitle[i];
-      description.body = kSampleDescriptionBody[i];
-      table.descriptions.push_back(description);
-      table.labels.push_back(kCustomizedLabel[i]);
+      IBusLookupTable::Entry entry;
+      entry.value = kSampleCandidate[i];
+      entry.annotation = kSampleAnnotation[i];
+      entry.description_title = kSampleDescriptionTitle[i];
+      entry.description_body = kSampleDescriptionBody[i];
+      entry.label = kCustomizedLabel[i];
+      table.mutable_candidates()->push_back(entry);
     }
 
     candidate_window_view.UpdateCandidates(table);
@@ -413,18 +208,18 @@ TEST_F(CandidateWindowViewTest, ShortcutSettingTest) {
   {
     SCOPED_TRACE("Horizontal customized label case");
     const size_t kPageSize = 3;
-    InputMethodLookupTable table;
-    ClearInputMethodLookupTable(kPageSize, &table);
+    IBusLookupTable table;
+    InitIBusLookupTable(kPageSize, &table);
 
-    table.orientation = InputMethodLookupTable::kHorizontal;
+    table.set_orientation(IBusLookupTable::HORIZONTAL);
     for (size_t i = 0; i < kPageSize; ++i) {
-      table.candidates.push_back(kSampleCandidate[i]);
-      table.annotations.push_back(kSampleAnnotation[i]);
-      InputMethodLookupTable::Description description;
-      description.title = kSampleDescriptionTitle[i];
-      description.body = kSampleDescriptionBody[i];
-      table.descriptions.push_back(description);
-      table.labels.push_back(kCustomizedLabel[i]);
+      IBusLookupTable::Entry entry;
+      entry.value = kSampleCandidate[i];
+      entry.annotation = kSampleAnnotation[i];
+      entry.description_title = kSampleDescriptionTitle[i];
+      entry.description_body = kSampleDescriptionBody[i];
+      entry.label = kCustomizedLabel[i];
+      table.mutable_candidates()->push_back(entry);
     }
 
     candidate_window_view.UpdateCandidates(table);
@@ -445,8 +240,8 @@ TEST_F(CandidateWindowViewTest, ShortcutSettingTest) {
 
 TEST_F(CandidateWindowViewTest, DoNotChangeRowHeightWithLabelSwitchTest) {
   const size_t kPageSize = 10;
-  InputMethodLookupTable table;
-  InputMethodLookupTable no_shortcut_table;
+  IBusLookupTable table;
+  IBusLookupTable no_shortcut_table;
 
   const char kSampleCandidate1[] = "Sample String 1";
   const char kSampleCandidate2[] = "\xE3\x81\x82";  // multi byte string.
@@ -464,36 +259,40 @@ TEST_F(CandidateWindowViewTest, DoNotChangeRowHeightWithLabelSwitchTest) {
   // We should NOT manually free widget by default, otherwise double free will
   // be occurred. So, we should instantiate widget class with "new" operation.
   views::Widget* widget = new views::Widget;
-  views::Widget::InitParams params(views::Widget::InitParams::TYPE_WINDOW);
+  views::Widget::InitParams params =
+      CreateParams(views::Widget::InitParams::TYPE_WINDOW);
   widget->Init(params);
 
   CandidateWindowView candidate_window_view(widget);
   candidate_window_view.Init();
 
   // Create LookupTable object.
-  ClearInputMethodLookupTable(kPageSize, &table);
-  table.visible = true;
-  table.cursor_absolute_index = 0;
-  table.page_size = 3;
-  table.candidates.clear();
-  table.orientation = InputMethodLookupTable::kVertical;
-  table.labels.clear();
-  table.annotations.clear();
+  InitIBusLookupTable(kPageSize, &table);
 
-  table.candidates.push_back(kSampleCandidate1);
-  table.candidates.push_back(kSampleCandidate2);
-  table.candidates.push_back(kSampleCandidate3);
+  table.set_cursor_position(0);
+  table.set_page_size(3);
+  table.mutable_candidates()->clear();
+  table.set_orientation(IBusLookupTable::VERTICAL);
+  no_shortcut_table.CopyFrom(table);
 
-  table.labels.push_back(kSampleShortcut1);
-  table.labels.push_back(kSampleShortcut2);
-  table.labels.push_back(kSampleShortcut3);
+  IBusLookupTable::Entry entry;
+  entry.value = kSampleCandidate1;
+  entry.annotation = kSampleAnnotation1;
+  table.mutable_candidates()->push_back(entry);
+  entry.label = kSampleShortcut1;
+  no_shortcut_table.mutable_candidates()->push_back(entry);
 
-  table.annotations.push_back(kSampleAnnotation1);
-  table.annotations.push_back(kSampleAnnotation2);
-  table.annotations.push_back(kSampleAnnotation3);
+  entry.value = kSampleCandidate2;
+  entry.annotation = kSampleAnnotation2;
+  table.mutable_candidates()->push_back(entry);
+  entry.label = kSampleShortcut2;
+  no_shortcut_table.mutable_candidates()->push_back(entry);
 
-  no_shortcut_table = table;
-  no_shortcut_table.labels.clear();
+  entry.value = kSampleCandidate3;
+  entry.annotation = kSampleAnnotation3;
+  table.mutable_candidates()->push_back(entry);
+  entry.label = kSampleShortcut3;
+  no_shortcut_table.mutable_candidates()->push_back(entry);
 
   int before_height = 0;
 

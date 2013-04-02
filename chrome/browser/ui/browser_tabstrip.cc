@@ -18,14 +18,6 @@
 
 namespace chrome {
 
-content::WebContents* GetActiveWebContents(const Browser* browser) {
-  return browser->tab_strip_model()->GetActiveWebContents();
-}
-
-content::WebContents* GetWebContentsAt(const Browser* browser, int index) {
-  return browser->tab_strip_model()->GetWebContentsAt(index);
-}
-
 void AddBlankTabAt(Browser* browser, int index, bool foreground) {
   // TODO(scottmg): http://crbug.com/128578
   // This is necessary because WebContentsViewAura doesn't have enough context
@@ -108,15 +100,19 @@ void AddWebContents(Browser* browser,
   Navigate(&params);
 }
 
-void CloseWebContents(Browser* browser, content::WebContents* contents) {
+void CloseWebContents(Browser* browser,
+                      content::WebContents* contents,
+                      bool add_to_history) {
   int index = browser->tab_strip_model()->GetIndexOfWebContents(contents);
   if (index == TabStripModel::kNoTab) {
     NOTREACHED() << "CloseWebContents called for tab not in our strip";
     return;
   }
+
   browser->tab_strip_model()->CloseWebContentsAt(
       index,
-      TabStripModel::CLOSE_CREATE_HISTORICAL_TAB);
+      add_to_history ? TabStripModel::CLOSE_CREATE_HISTORICAL_TAB
+                     : TabStripModel::CLOSE_NONE);
 }
 
 }  // namespace chrome

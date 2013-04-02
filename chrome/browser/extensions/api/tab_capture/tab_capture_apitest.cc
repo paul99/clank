@@ -22,10 +22,25 @@ class TabCaptureApiTest : public ExtensionApiTest {
 
 }  // namespace
 
-IN_PROC_BROWSER_TEST_F(TabCaptureApiTest, TabCapture) {
+IN_PROC_BROWSER_TEST_F(TabCaptureApiTest, ApiTests) {
   extensions::FeatureSwitch::ScopedOverride tab_capture(
       extensions::FeatureSwitch::tab_capture(), true);
-  ASSERT_TRUE(RunExtensionTest("tab_capture/experimental")) << message_;
+  ASSERT_TRUE(RunExtensionSubtest("tab_capture/experimental",
+                                  "api_tests.html")) << message_;
+}
+
+#if defined(OS_WIN) || defined(OS_MACOSX)
+// See http://crbug.com/174640
+#define MAYBE_EndToEnd DISABLED_EndToEnd
+#else
+#define MAYBE_EndToEnd EndToEnd
+#endif
+
+IN_PROC_BROWSER_TEST_F(TabCaptureApiTest, MAYBE_EndToEnd) {
+  extensions::FeatureSwitch::ScopedOverride tab_capture(
+      extensions::FeatureSwitch::tab_capture(), true);
+  ASSERT_TRUE(RunExtensionSubtest("tab_capture/experimental",
+                                  "end_to_end.html")) << message_;
 }
 
 IN_PROC_BROWSER_TEST_F(TabCaptureApiTest, TabCapturePermissionsTestFlagOn) {

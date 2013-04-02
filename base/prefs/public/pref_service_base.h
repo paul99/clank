@@ -18,6 +18,10 @@
 
 #include "base/values.h"
 
+namespace base {
+class FilePath;
+}
+
 namespace content {
 class BrowserContext;
 }
@@ -26,7 +30,6 @@ namespace subtle {
 class PrefMemberBase;
 }
 
-class FilePath;
 class PrefObserver;
 
 class PrefServiceBase {
@@ -35,14 +38,6 @@ class PrefServiceBase {
   static PrefServiceBase* FromBrowserContext(content::BrowserContext* context);
 
   virtual ~PrefServiceBase() {}
-
-  // Enum used when registering preferences to determine if it should be synced
-  // or not. This is only used for profile prefs, not local state prefs.
-  // See the Register*Pref methods for profile prefs below.
-  enum PrefSyncStatus {
-    UNSYNCABLE_PREF,
-    SYNCABLE_PREF
-  };
 
   // Interface to a single preference.
   class Preference {
@@ -112,93 +107,6 @@ class PrefServiceBase {
   // value can be changed by the user.
   virtual bool IsUserModifiablePreference(const char* pref_name) const = 0;
 
-  // Make the PrefService aware of a pref.
-  // TODO(zea): split local state and profile prefs into their own subclasses.
-  // ---------- Local state prefs  ----------
-  virtual void RegisterBooleanPref(const char* path,
-                                   bool default_value) = 0;
-  virtual void RegisterIntegerPref(const char* path,
-                                   int default_value) = 0;
-  virtual void RegisterDoublePref(const char* path,
-                                  double default_value) = 0;
-  virtual void RegisterStringPref(const char* path,
-                                  const std::string& default_value) = 0;
-  virtual void RegisterFilePathPref(const char* path,
-                                    const FilePath& default_value) = 0;
-  virtual void RegisterListPref(const char* path) = 0;
-  virtual void RegisterDictionaryPref(const char* path) = 0;
-  // These take ownership of the default_value:
-  virtual void RegisterListPref(const char* path,
-                                base::ListValue* default_value) = 0;
-  virtual void RegisterDictionaryPref(
-      const char* path, base::DictionaryValue* default_value) = 0;
-  // These variants use a default value from the locale dll instead.
-  virtual void RegisterLocalizedBooleanPref(
-      const char* path, int locale_default_message_id) = 0;
-  virtual void RegisterLocalizedIntegerPref(
-      const char* path, int locale_default_message_id) = 0;
-  virtual void RegisterLocalizedDoublePref(
-      const char* path, int locale_default_message_id) = 0;
-  virtual void RegisterLocalizedStringPref(
-      const char* path, int locale_default_message_id) = 0;
-  virtual void RegisterInt64Pref(const char* path,
-                                 int64 default_value) = 0;
-
-  //  ---------- Profile prefs  ----------
-  // Profile prefs must specify whether the pref should be synchronized across
-  // machines or not (see PrefSyncStatus enum above).
-  virtual void RegisterBooleanPref(const char* path,
-                                   bool default_value,
-                                   PrefSyncStatus sync_status) = 0;
-  virtual void RegisterIntegerPref(const char* path,
-                                   int default_value,
-                                   PrefSyncStatus sync_status) = 0;
-  virtual void RegisterDoublePref(const char* path,
-                                  double default_value,
-                                  PrefSyncStatus sync_status) = 0;
-  virtual void RegisterStringPref(const char* path,
-                                  const std::string& default_value,
-                                  PrefSyncStatus sync_status) = 0;
-  virtual void RegisterFilePathPref(const char* path,
-                                    const FilePath& default_value,
-                                    PrefSyncStatus sync_status) = 0;
-  virtual void RegisterListPref(const char* path,
-                                PrefSyncStatus sync_status) = 0;
-  virtual void RegisterDictionaryPref(const char* path,
-                                      PrefSyncStatus sync_status) = 0;
-  // These take ownership of the default_value:
-  virtual void RegisterListPref(const char* path,
-                                base::ListValue* default_value,
-                                PrefSyncStatus sync_status) = 0;
-  virtual void RegisterDictionaryPref(const char* path,
-                                      base::DictionaryValue* default_value,
-                                      PrefSyncStatus sync_status) = 0;
-  // These variants use a default value from the locale dll instead.
-  virtual void RegisterLocalizedBooleanPref(
-      const char* path,
-      int locale_default_message_id,
-      PrefSyncStatus sync_status) = 0;
-  virtual void RegisterLocalizedIntegerPref(
-      const char* path,
-      int locale_default_message_id,
-      PrefSyncStatus sync_status) = 0;
-  virtual void RegisterLocalizedDoublePref(
-      const char* path,
-      int locale_default_message_id,
-      PrefSyncStatus sync_status) = 0;
-  virtual void RegisterLocalizedStringPref(
-      const char* path,
-      int locale_default_message_id,
-      PrefSyncStatus sync_status) = 0;
-  virtual void RegisterInt64Pref(const char* path,
-                                 int64 default_value,
-                                 PrefSyncStatus sync_status) = 0;
-  virtual void RegisterUint64Pref(const char* path,
-                                  uint64 default_value,
-                                  PrefSyncStatus sync_status) = 0;
-  // Unregisters a preference.
-  virtual void UnregisterPreference(const char* path) = 0;
-
   // Look up a preference.  Returns NULL if the preference is not
   // registered.
   virtual const Preference* FindPreference(const char* pref_name) const = 0;
@@ -210,7 +118,7 @@ class PrefServiceBase {
   virtual int GetInteger(const char* path) const = 0;
   virtual double GetDouble(const char* path) const = 0;
   virtual std::string GetString(const char* path) const = 0;
-  virtual FilePath GetFilePath(const char* path) const = 0;
+  virtual base::FilePath GetFilePath(const char* path) const = 0;
 
   // Returns the branch if it exists, or the registered default value otherwise.
   // Note that |path| must point to a registered preference. In that case, these
@@ -232,7 +140,7 @@ class PrefServiceBase {
   virtual void SetInteger(const char* path, int value) = 0;
   virtual void SetDouble(const char* path, double value) = 0;
   virtual void SetString(const char* path, const std::string& value) = 0;
-  virtual void SetFilePath(const char* path, const FilePath& value) = 0;
+  virtual void SetFilePath(const char* path, const base::FilePath& value) = 0;
 
   // Int64 helper methods that actually store the given value as a string.
   // Note that if obtaining the named value via GetDictionary or GetList, the

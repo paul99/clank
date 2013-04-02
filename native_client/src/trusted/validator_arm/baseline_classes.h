@@ -198,6 +198,34 @@ class CondAdvSIMDOp : public CoprocessorOp {
   NACL_DISALLOW_COPY_AND_ASSIGN(CondAdvSIMDOp);
 };
 
+// Models VCVT (between floating-point and fixed-point, Floating-point).
+// +--------+--..--+--+------+--+--+--+--------+------+--+--+--+--+--+--------+
+// |31302928|27..23|22|212019|18|17|16|15141312|1110 9| 8| 7| 6| 5| 4| 3 2 1 0|
+// +--------+--.. -+--+------+--+--+--+--------+------+--+--+--+--+--+--------+
+// |  cond  |      | D|      |op|  | U|   Vd   |      |sf|sx|  | i|  |  imm4  |
+// +--------+--..- +--+------+--+--+--+--------+------+--+--+--+--+--+--------+
+// size := if sx == '0' then 16 else 32.
+// frac_bits := size - imm4:i;
+// if frac_bits < 0 then UNPREDICTABLE;
+class VcvtPtAndFixedPoint_FloatingPoint: public CondVfpOp {
+ public:
+    // Interaces for components of instruction.
+  static const Imm4Bits0To3Interface imm4;
+  static const Imm1Bit5Interface i_bit;
+  static const Imm1Bit7Interface sx;
+  static const FlagBit8Interface sf;
+  static const RegBits12To15Interface vd;
+  static const Imm1Bit16Interface u_bit;
+  static const Imm1Bit18Interface op;
+  static const Imm1Bit22Interface d_bit;
+
+  VcvtPtAndFixedPoint_FloatingPoint() {}
+  virtual SafetyLevel safety(Instruction i) const;
+
+ private:
+  NACL_DISALLOW_COPY_AND_ASSIGN(VcvtPtAndFixedPoint_FloatingPoint);
+};
+
 // Models a move of an immediate 12 value to the corresponding
 // bits in the APSR.
 // MSR<c> <spec_reg>, #<const>
@@ -279,6 +307,7 @@ class BranchImmediate24 : public ClassDecoder {
   BranchImmediate24() {}
   virtual SafetyLevel safety(Instruction i) const;
   virtual RegisterList defs(Instruction i) const;
+  virtual RegisterList uses(Instruction i) const;
   virtual bool is_relative_branch(Instruction i) const;
   virtual int32_t branch_target_offset(Instruction i) const;
 
@@ -441,6 +470,41 @@ class Unary1RegisterImmediateOpPc : public ClassDecoder {
   NACL_DISALLOW_COPY_AND_ASSIGN(Unary1RegisterImmediateOpPc);
 };
 
+// Models a 1-register unary operation with two immediate 5 values
+// defining a bit range.
+// Op<c> Rd, #lsb, #width
+// +--------+--------------+----------+--------+----------+--------------+
+// |31302928|27262524232221|2019181716|15141312|1110 9 8 7| 6 5 4 3 2 1 0|
+// +--------+--------------+----------+--------+----------+--------------+
+// |  cond  |              |    msb   |   Rd   |   lsb    |              |
+// +--------+--------------+----------+--------+----------+--------------+
+// Definitions
+//    Rd = The destination register.
+//    lsb = The least significant bit to be modified.
+//    msb = lsb + width - 1 - The most significant bit to be modified
+//    width = msb - lsb + 1 - The number of bits to be modified.
+//
+// If Rd is R15 or msbit < lsbit, the instruction is unpredictable.
+// NaCl disallows writing to PC to cause a jump.
+// Note: Currently, only implements bfc.
+class Unary1RegisterBitRangeMsbGeLsb : public ClassDecoder {
+ public:
+  // Interface for components of the instruction.
+  static const Imm5Bits7To11Interface lsb;
+  static const RegBits12To15Interface d;
+  static const Imm5Bits16To20Interface msb;
+  static const ConditionBits28To31Interface cond;
+
+  // Methods for class.
+  Unary1RegisterBitRangeMsbGeLsb() : ClassDecoder() {}
+  virtual SafetyLevel safety(Instruction i) const;
+  virtual RegisterList defs(Instruction i) const;
+  virtual RegisterList uses(Instruction i) const;
+
+ private:
+  NACL_DISALLOW_COPY_AND_ASSIGN(Unary1RegisterBitRangeMsbGeLsb);
+};
+
 // Models a 2-register binary operation with two immediate values
 // defining a bit range.
 // Op<c> Rd, Rn, #<lsb>, #width
@@ -471,6 +535,7 @@ class Binary2RegisterBitRangeMsbGeLsb : public ClassDecoder {
   Binary2RegisterBitRangeMsbGeLsb() {}
   virtual SafetyLevel safety(Instruction i) const;
   virtual RegisterList defs(Instruction i) const;
+  virtual RegisterList uses(Instruction i) const;
 
  private:
   NACL_DISALLOW_COPY_AND_ASSIGN(Binary2RegisterBitRangeMsbGeLsb);
@@ -508,6 +573,7 @@ class Binary2RegisterBitRangeNotRnIsPcBitfieldExtract : public ClassDecoder {
   Binary2RegisterBitRangeNotRnIsPcBitfieldExtract() {}
   virtual SafetyLevel safety(Instruction i) const;
   virtual RegisterList defs(Instruction i) const;
+  virtual RegisterList uses(Instruction i) const;
 
  private:
   NACL_DISALLOW_COPY_AND_ASSIGN(
@@ -677,18 +743,6 @@ class Unary2RegisterOpNotRmIsPc : public Unary2RegisterOp {
 
  private:
   NACL_DISALLOW_COPY_AND_ASSIGN(Unary2RegisterOpNotRmIsPc);
-};
-
-// Unary2RegisterOpNotRmIsPc where the conditions flags are not set, even
-// though bit S may be true.
-class Unary2RegisterOpNotRmIsPcNoCondUpdates
-    : public Unary2RegisterOpNotRmIsPc {
- public:
-  Unary2RegisterOpNotRmIsPcNoCondUpdates() {}
-  virtual RegisterList defs(Instruction i) const;
-
- private:
-  NACL_DISALLOW_COPY_AND_ASSIGN(Unary2RegisterOpNotRmIsPcNoCondUpdates);
 };
 
 // Models a 2 register immediate shifted unary operation of the form:
@@ -1052,6 +1106,7 @@ class PreloadRegisterImm12Op : public ClassDecoder {
   PreloadRegisterImm12Op() : ClassDecoder() {}
   virtual SafetyLevel safety(Instruction i) const;
   virtual RegisterList defs(Instruction i) const;
+  virtual RegisterList uses(Instruction i) const;
   virtual Register base_address_register(Instruction i) const;
   virtual bool is_literal_load(Instruction i) const;
 
@@ -1088,6 +1143,7 @@ class PreloadRegisterPairOp : public ClassDecoder {
   PreloadRegisterPairOp() : ClassDecoder() {}
   virtual SafetyLevel safety(Instruction i) const;
   virtual RegisterList defs(Instruction i) const;
+  virtual RegisterList uses(Instruction i) const;
   virtual Register base_address_register(Instruction i) const;
 
  private:
@@ -1234,6 +1290,7 @@ class LoadRegisterList : public LoadStoreRegisterList {
   LoadRegisterList() {}
   virtual SafetyLevel safety(Instruction i) const;
   virtual RegisterList defs(Instruction i) const;
+  virtual RegisterList uses(Instruction i) const;
 
  private:
   NACL_DISALLOW_COPY_AND_ASSIGN(LoadRegisterList);
@@ -1246,6 +1303,7 @@ class StoreRegisterList : public LoadStoreRegisterList {
  public:
   StoreRegisterList() {}
   virtual SafetyLevel safety(Instruction i) const;
+  virtual RegisterList uses(Instruction i) const;
 
  private:
   NACL_DISALLOW_COPY_AND_ASSIGN(StoreRegisterList);
@@ -1311,6 +1369,7 @@ class LoadStoreVectorRegisterList : public LoadStoreVectorOp {
   LoadStoreVectorRegisterList() {}
   virtual SafetyLevel safety(Instruction i) const;
   virtual RegisterList defs(Instruction i) const;
+  virtual RegisterList uses(Instruction i) const;
   virtual bool base_address_register_writeback_small_immediate(
       Instruction i) const;
 
@@ -1355,6 +1414,7 @@ class StoreVectorRegisterList : public LoadStoreVectorRegisterList {
 class LoadStoreVectorRegister : public LoadStoreVectorOp {
  public:
   LoadStoreVectorRegister() {}
+  virtual RegisterList uses(Instruction i) const;
 
  private:
   NACL_DISALLOW_COPY_AND_ASSIGN(LoadStoreVectorRegister);
@@ -1889,6 +1949,7 @@ class Unary2RegisterImmedShiftedOp : public ClassDecoder {
   Unary2RegisterImmedShiftedOp() : ClassDecoder() {}
   virtual SafetyLevel safety(Instruction i) const;
   virtual RegisterList defs(Instruction i) const;
+  virtual RegisterList uses(Instruction i) const;
 
   // The immediate value stored in the instruction.
   uint32_t ImmediateValue(const Instruction& i) const {
@@ -1897,18 +1958,6 @@ class Unary2RegisterImmedShiftedOp : public ClassDecoder {
 
  private:
   NACL_DISALLOW_COPY_AND_ASSIGN(Unary2RegisterImmedShiftedOp);
-};
-
-// Implements a Unary2RegisterImmedShiftedOp with the constraint
-// that if either Rm or Rd is Pc, the instruction is unpredictable.
-class Unary2RegisterImmedShiftedOpRegsNotPc
-    : public Unary2RegisterImmedShiftedOp {
- public:
-  Unary2RegisterImmedShiftedOpRegsNotPc() {}
-  virtual SafetyLevel safety(Instruction i) const;
-
- private:
-  NACL_DISALLOW_COPY_AND_ASSIGN(Unary2RegisterImmedShiftedOpRegsNotPc);
 };
 
 // Models a 2-register immediate-shifted unary operation with saturation
@@ -1947,6 +1996,7 @@ class Unary2RegisterSatImmedShiftedOp : public ClassDecoder {
   Unary2RegisterSatImmedShiftedOp() {}
   virtual SafetyLevel safety(Instruction i) const;
   virtual RegisterList defs(Instruction i) const;
+  virtual RegisterList uses(Instruction i) const;
 
  private:
   NACL_DISALLOW_COPY_AND_ASSIGN(Unary2RegisterSatImmedShiftedOp);
@@ -1989,67 +2039,6 @@ class Unary3RegisterShiftedOp : public ClassDecoder {
 
  private:
   NACL_DISALLOW_COPY_AND_ASSIGN(Unary3RegisterShiftedOp);
-};
-
-// Models a 3-register immediate-shifted binary operation of the form:
-// Op(S)<c> <Rd>, <Rn>, <Rm> {,<shift>}
-// +--------+--------------+--+--------+--------+----------+----+--+--------+
-// |31302928|27262524232221|20|19181716|15141312|1110 9 8 7| 6 5| 4| 3 2 1 0|
-// +--------+--------------+--+--------+--------+----------+----+--+--------+
-// |  cond  |              | S|   Rn   |   Rd   |   imm5   |type|  |   Rm   |
-// +--------+--------------+--+--------+--------+----------+----+--+--------+
-// Definitions:
-//    Rd - The destination register.
-//    Rn - The first operand register.
-//    Rm - The second operand that is (optionally) shifted.
-//    shift = DecodeImmShift(type, imm5) is the amount to shift.
-//
-// NaCl disallows writing to PC to cause a jump.
-//
-// Implements:
-//    ADC(register) A1 A8-16  -- Shouldn't parse when Rd=15 and S=1.
-//    ADD(register) A1 A8-24  -- Shouldn't parse when Rd=15 and S=1, or Rn=13.
-//    AND(register) A1 A8-36  -- Shouldn't parse when Rd=15 and S=1.
-//    BIC(register) A1 A8-52  -- Shouldn't parse when Rd=15 and S=1.
-//    EOR(register) A1 A8-96  -- Shouldn't parse when Rd=15 and S=1.
-//    ORR(register) A1 A8-230 -- Shouldn't parse when Rd=15 and S=1.
-//    RSB(register) A1 A8-286 -- Shouldn't parse when Rd=15 and S=1.
-//    RSC(register) A1 A8-292 -- Shouldn't parse when Rd=15 and S=1.
-//    SBC(register) A1 A8-304 -- Shouldn't parse when Rd=15 and S=1.
-//    SUB(register) A1 A8-422 -- Shouldn't parse when Rd=15 and S=1, or Rn=13.
-class Binary3RegisterImmedShiftedOp : public ClassDecoder {
- public:
-  // Interfaces for components in the instruction.
-  static const RegBits0To3Interface m;
-  static const ShiftTypeBits5To6Interface shift_type;
-  static const Imm5Bits7To11Interface imm;
-  static const RegBits12To15Interface d;
-  static const RegBits16To19Interface n;
-  static const UpdatesConditionsBit20Interface conditions;
-  static const ConditionBits28To31Interface cond;
-
-  // Methods for class.
-  Binary3RegisterImmedShiftedOp() : ClassDecoder() {}
-  virtual SafetyLevel safety(Instruction i) const;
-  virtual RegisterList defs(Instruction i) const;
-  // The shift value to use.
-  uint32_t ShiftValue(const Instruction& i) const {
-    return shift_type.DecodeImmShift(i, imm.value(i));
-  }
- private:
-  NACL_DISALLOW_COPY_AND_ASSIGN(Binary3RegisterImmedShiftedOp);
-};
-
-// Implements a Binary3RegisterImmedShiftedOp with the constraint
-// that if either Rn, Rm, or Rd is Pc, the instruction is unpredictable.
-class Binary3RegisterImmedShiftedOpRegsNotPc
-    : public Binary3RegisterImmedShiftedOp {
- public:
-  Binary3RegisterImmedShiftedOpRegsNotPc() {}
-  virtual SafetyLevel safety(Instruction i) const;
-
- private:
-  NACL_DISALLOW_COPY_AND_ASSIGN(Binary3RegisterImmedShiftedOpRegsNotPc);
 };
 
 // Models a 4-register-shifted binary operation of the form:
@@ -3072,6 +3061,7 @@ class VfpUsesRegOp : public CondVfpOp {
   VfpUsesRegOp() {}
   virtual SafetyLevel safety(Instruction i) const;
   virtual RegisterList defs(Instruction i) const;
+  virtual RegisterList uses(Instruction i) const;
 
  private:
   NACL_DISALLOW_COPY_AND_ASSIGN(VfpUsesRegOp);
@@ -3097,7 +3087,6 @@ class VfpMrsOp : public CondVfpOp {
 
   // Methods for class.
   VfpMrsOp() {}
-  virtual SafetyLevel safety(Instruction i) const;
   virtual RegisterList defs(Instruction i) const;
 
  private:
@@ -3130,6 +3119,7 @@ class MoveVfpRegisterOp : public CondVfpOp {
   MoveVfpRegisterOp() {}
   virtual SafetyLevel safety(Instruction i) const;
   virtual RegisterList defs(Instruction i) const;
+  virtual RegisterList uses(Instruction i) const;
 
  private:
   NACL_DISALLOW_COPY_AND_ASSIGN(MoveVfpRegisterOp);
@@ -3162,6 +3152,7 @@ class MoveDoubleVfpRegisterOp : public MoveVfpRegisterOp {
   MoveDoubleVfpRegisterOp() {}
   virtual SafetyLevel safety(Instruction i) const;
   virtual RegisterList defs(Instruction i) const;
+  virtual RegisterList uses(Instruction i) const;
   static bool IsSinglePrecision(Instruction i) { return !i.Bit(8); }
 
  private:
@@ -3194,6 +3185,7 @@ class DuplicateToAdvSIMDRegisters : public CondAdvSIMDOp {
   // Methods for class
   DuplicateToAdvSIMDRegisters() {}
   virtual SafetyLevel safety(Instruction i) const;
+  virtual RegisterList uses(Instruction i) const;
 
   uint32_t be_value(const Instruction& i) const {
     return (b.value(i) << 1) | e.value(i);

@@ -1,4 +1,4 @@
-// Copyright (c) 2012 The Chromium Authors. All rights reserved.
+// Copyright 2012 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -9,6 +9,7 @@
 #include <vector>
 
 #include "net/base/network_change_notifier.h"
+#include "sync/base/sync_export.h"
 #include "sync/engine/all_status.h"
 #include "sync/engine/net/server_connection_manager.h"
 #include "sync/engine/sync_engine_event.h"
@@ -46,7 +47,7 @@ class SyncSessionContext;
 //
 // Unless stated otherwise, all methods of SyncManager should be called on the
 // same thread.
-class SyncManagerImpl :
+class SYNC_EXPORT_PRIVATE SyncManagerImpl :
     public SyncManager,
     public net::NetworkChangeNotifier::IPAddressObserver,
     public net::NetworkChangeNotifier::ConnectionTypeObserver,
@@ -63,7 +64,7 @@ class SyncManagerImpl :
 
   // SyncManager implementation.
   virtual void Init(
-      const FilePath& database_location,
+      const base::FilePath& database_location,
       const WeakHandle<JsEventHandler>& event_handler,
       const std::string& sync_server_and_path,
       int sync_server_port,
@@ -100,6 +101,7 @@ class SyncManagerImpl :
   virtual void ConfigureSyncer(
       ConfigureReason reason,
       ModelTypeSet types_to_config,
+      ModelTypeSet failed_types,
       const ModelSafeRoutingInfo& new_routing_info,
       const base::Closure& ready_task,
       const base::Closure& retry_task) OVERRIDE;
@@ -175,8 +177,10 @@ class SyncManagerImpl :
   // InvalidationHandler implementation.
   virtual void OnInvalidatorStateChange(InvalidatorState state) OVERRIDE;
   virtual void OnIncomingInvalidation(
-      const ObjectIdInvalidationMap& invalidation_map,
-      IncomingInvalidationSource source) OVERRIDE;
+      const ObjectIdInvalidationMap& invalidation_map) OVERRIDE;
+
+  // Handle explicit requests to fetch updates for the given types.
+  virtual void RefreshTypes(ModelTypeSet types) OVERRIDE;
 
   // These OnYYYChanged() methods are only called by our NetworkChangeNotifier.
   // Called when IP address of primary interface changes.
@@ -237,7 +241,8 @@ class SyncManagerImpl :
   // Purge those types from |previously_enabled_types| that are no longer
   // enabled in |currently_enabled_types|.
   bool PurgeDisabledTypes(ModelTypeSet previously_enabled_types,
-                          ModelTypeSet currently_enabled_types);
+                          ModelTypeSet currently_enabled_types,
+                          ModelTypeSet failed_types);
 
   void RequestNudgeForDataTypes(
       const tracked_objects::Location& nudge_location,
@@ -285,7 +290,7 @@ class SyncManagerImpl :
 
   syncable::Directory* directory();
 
-  FilePath database_path_;
+  base::FilePath database_path_;
 
   const std::string name_;
 

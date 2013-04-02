@@ -269,6 +269,9 @@ bool SendNavigateToURLJSONRequest(
   DictionaryValue reply_dict;
   if (!SendAutomationJSONRequest(sender, dict, &reply_dict, error))
     return false;
+  // We don't expect a navigation result for asynchronous navigations.
+  if (navigation_count == 0)
+    return true;
   int response = 0;
   if (!reply_dict.GetInteger("result", &response))
     return false;
@@ -348,7 +351,7 @@ bool SendReloadJSONRequest(
 bool SendCaptureEntirePageJSONRequest(
     AutomationMessageSender* sender,
     const WebViewLocator& locator,
-    const FilePath& path,
+    const base::FilePath& path,
     Error* error) {
   DictionaryValue dict;
   dict.SetString("command", "CaptureEntirePage");
@@ -674,7 +677,7 @@ bool SendDragAndDropFilePathsJSONRequest(
     const WebViewLocator& locator,
     int x,
     int y,
-    const std::vector<FilePath::StringType>& paths,
+    const std::vector<base::FilePath::StringType>& paths,
     Error* error) {
   DictionaryValue dict;
   dict.SetString("command", "DragAndDropFilePaths");
@@ -782,7 +785,7 @@ bool SendGetChromeDriverAutomationVersion(
 
 bool SendInstallExtensionJSONRequest(
     AutomationMessageSender* sender,
-    const FilePath& path,
+    const base::FilePath& path,
     bool with_ui,
     std::string* extension_id,
     Error* error) {

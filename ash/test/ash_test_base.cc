@@ -9,16 +9,20 @@
 
 #include "ash/display/display_controller.h"
 #include "ash/display/display_manager.h"
+#include "ash/screen_ash.h"
 #include "ash/shell.h"
 #include "ash/test/display_manager_test_api.h"
 #include "ash/test/test_shell_delegate.h"
+#include "ash/wm/coordinate_conversion.h"
 #include "base/command_line.h"
 #include "base/run_loop.h"
 #include "content/public/test/web_contents_tester.h"
 #include "ui/aura/aura_switches.h"
 #include "ui/aura/client/aura_constants.h"
+#include "ui/aura/client/screen_position_client.h"
 #include "ui/aura/env.h"
 #include "ui/aura/root_window.h"
+#include "ui/aura/test/event_generator.h"
 #include "ui/aura/test/test_window_delegate.h"
 #include "ui/aura/window_delegate.h"
 #include "ui/base/ime/text_input_test_support.h"
@@ -27,11 +31,40 @@
 #include "ui/gfx/screen.h"
 
 #if defined(OS_WIN)
+#include "ash/test/test_metro_viewer_process_host.h"
+#include "base/win/windows_version.h"
+#include "ui/aura/remote_root_window_host_win.h"
 #include "ui/aura/root_window_host_win.h"
 #endif
 
 namespace ash {
 namespace test {
+namespace {
+
+class AshEventGeneratorDelegate : public aura::test::EventGeneratorDelegate {
+ public:
+  AshEventGeneratorDelegate() {}
+  virtual ~AshEventGeneratorDelegate() {}
+
+  // aura::test::EventGeneratorDelegate overrides:
+  virtual aura::RootWindow* GetRootWindowAt(
+      const gfx::Point& point_in_screen) const OVERRIDE {
+    gfx::Screen* screen = Shell::GetInstance()->screen();
+    gfx::Display display = screen->GetDisplayNearestPoint(point_in_screen);
+    return Shell::GetInstance()->display_controller()->
+        GetRootWindowForDisplayId(display.id());
+  }
+
+  virtual aura::client::ScreenPositionClient* GetScreenPositionClient(
+      const aura::Window* window) const OVERRIDE {
+    return aura::client::GetScreenPositionClient(window->GetRootWindow());
+  }
+
+ private:
+  DISALLOW_COPY_AND_ASSIGN(AshEventGeneratorDelegate);
+};
+
+}  // namespace
 
 content::WebContents* AshTestViewsDelegate::CreateWebContents(
     content::BrowserContext* browser_context,
@@ -40,7 +73,8 @@ content::WebContents* AshTestViewsDelegate::CreateWebContents(
                                                            site_instance);
 }
 
-AshTestBase::AshTestBase() : test_shell_delegate_(NULL) {
+AshTestBase::AshTestBase()
+    : test_shell_delegate_(NULL) {
 }
 
 AshTestBase::~AshTestBase() {
@@ -57,6 +91,7 @@ void AshTestBase::SetUp() {
   // Disable animations during tests.
   ui::LayerAnimator::set_disable_animations_for_test(true);
   ui::TextInputTestSupport::Initialize();
+
   // Creates Shell and hook with Desktop.
   test_shell_delegate_ = new TestShellDelegate;
   ash::Shell::CreateInstance(test_shell_delegate_);
@@ -66,11 +101,29 @@ void AshTestBase::SetUp() {
   // interfere test expectations.
   Shell::GetPrimaryRootWindow()->MoveCursorTo(gfx::Point(-1000, -1000));
   Shell::GetInstance()->cursor_manager()->EnableMouseEvents();
+
+#if defined(OS_WIN)
+  if (base::win::GetVersion() >= base::win::VERSION_WIN8) {
+    metro_viewer_host_.reset(new TestMetroViewerProcessHost("viewer"));
+    ASSERT_TRUE(
+        metro_viewer_host_->LaunchImmersiveChromeAndWaitForConnection());
+    aura::RemoteRootWindowHostWin* root_window_host =
+        aura::RemoteRootWindowHostWin::Instance();
+    ASSERT_TRUE(root_window_host != NULL);
+  }
+#endif
 }
 
 void AshTestBase::TearDown() {
   // Flush the message loop to finish pending release tasks.
   RunAllPendingInMessageLoop();
+
+#if defined(OS_WIN)
+  if (base::win::GetVersion() >= base::win::VERSION_WIN8) {
+    // Check that our viewer connection is still established.
+    ASSERT_FALSE(metro_viewer_host_->closed_unexpectedly());
+  }
+#endif
 
   // Tear down the shell.
   Shell::DeleteInstance();
@@ -78,7 +131,18 @@ void AshTestBase::TearDown() {
   ui::TextInputTestSupport::Shutdown();
 #if defined(OS_WIN)
   aura::test::SetUsePopupAsRootWindowForTest(false);
+  // Kill the viewer process if we spun one up.
+  metro_viewer_host_.reset();
 #endif
+  event_generator_.reset();
+}
+
+aura::test::EventGenerator& AshTestBase::GetEventGenerator() {
+  if (!event_generator_.get()) {
+    event_generator_.reset(
+        new aura::test::EventGenerator(new AshEventGeneratorDelegate()));
+  }
+  return *event_generator_.get();
 }
 
 void AshTestBase::ChangeDisplayConfig(float scale,
@@ -95,6 +159,14 @@ void AshTestBase::UpdateDisplay(const std::string& display_specs) {
   DisplayManagerTestApi display_manager_test_api(
       Shell::GetInstance()->display_manager());
   display_manager_test_api.UpdateDisplay(display_specs);
+}
+
+aura::RootWindow* AshTestBase::CurrentContext() {
+  aura::RootWindow* root_window = Shell::GetActiveRootWindow();
+  if (!root_window)
+    root_window = Shell::GetPrimaryRootWindow();
+  DCHECK(root_window);
+  return root_window;
 }
 
 aura::Window* AshTestBase::CreateTestWindowInShellWithId(int id) {
@@ -133,9 +205,20 @@ aura::Window* AshTestBase::CreateTestWindowInShellWithDelegateAndType(
   window->set_id(id);
   window->SetType(type);
   window->Init(ui::LAYER_TEXTURED);
-  window->SetBounds(bounds);
   window->Show();
-  SetDefaultParentByPrimaryRootWindow(window);
+
+  if (bounds.IsEmpty()) {
+    SetDefaultParentByPrimaryRootWindow(window);
+  } else {
+    gfx::Display display =
+      ash::Shell::GetInstance()->display_manager()->GetDisplayMatching(bounds);
+    aura::RootWindow* root = ash::Shell::GetInstance()->display_controller()->
+        GetRootWindowForDisplayId(display.id());
+    gfx::Point origin = bounds.origin();
+    wm::ConvertPointFromScreen(root, &origin);
+    window->SetBounds(gfx::Rect(origin, bounds.size()));
+    window->SetDefaultParentByRootWindow(root, bounds);
+  }
   window->SetProperty(aura::client::kCanMaximizeKey, true);
   return window;
 }

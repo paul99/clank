@@ -296,7 +296,7 @@ SpdyFrame* ConstructSpdyWindowUpdate(
 // Construct a SPDY RST_STREAM frame.
 // Returns the constructed frame.  The caller takes ownership of the frame.
 SpdyFrame* ConstructSpdyRstStream(SpdyStreamId stream_id,
-                                  SpdyStatusCodes status) {
+                                  SpdyRstStreamStatus status) {
   BufferedSpdyFramer framer(3, false);
   return framer.CreateRstStream(stream_id, status);
 }
@@ -365,13 +365,13 @@ SpdyFrame* ConstructSpdyControlFrame(const char* const extra_headers[],
 SpdyFrame* ConstructSpdyControlFrame(const char* const extra_headers[],
                                      int extra_header_count,
                                      bool compressed,
-                                     int stream_id,
+                                     SpdyStreamId stream_id,
                                      RequestPriority request_priority,
                                      SpdyControlType type,
                                      SpdyControlFlags flags,
                                      const char* const* kHeaders,
                                      int kHeadersSize,
-                                     int associated_stream_id) {
+                                     SpdyStreamId associated_stream_id) {
   const SpdyHeaderInfo kSynStartHeader = {
     type,                         // Kind = Syn
     stream_id,                    // Stream ID
@@ -381,7 +381,7 @@ SpdyFrame* ConstructSpdyControlFrame(const char* const extra_headers[],
     0,                            // Credential Slot
     flags,                        // Control Flags
     compressed,                   // Compressed
-    INVALID,                      // Status
+    RST_STREAM_INVALID,           // Status
     NULL,                         // Data
     0,                            // Length
     DATA_FLAG_NONE                // Data Flags
@@ -400,7 +400,7 @@ SpdyFrame* ConstructSpdyControlFrame(const char* const extra_headers[],
 // Returns a SpdyFrame.
 SpdyFrame* ConstructSpdyGet(const char* const url,
                             bool compressed,
-                            int stream_id,
+                            SpdyStreamId stream_id,
                             RequestPriority request_priority) {
   const SpdyHeaderInfo kSynStartHeader = {
     SYN_STREAM,                   // Kind = Syn
@@ -411,7 +411,7 @@ SpdyFrame* ConstructSpdyGet(const char* const url,
     0,                            // Credential Slot
     CONTROL_FLAG_FIN,             // Control Flags
     compressed,                   // Compressed
-    INVALID,                      // Status
+    RST_STREAM_INVALID,           // Status
     NULL,                         // Data
     0,                            // Length
     DATA_FLAG_NONE                // Data Flags
@@ -904,6 +904,7 @@ SpdySessionDependencies::SpdySessionDependencies()
       enable_ip_pooling(true),
       enable_compression(false),
       enable_ping(false),
+      enable_user_alternate_protocol_ports(false),
       initial_recv_window_size(kSpdyStreamInitialWindowSize),
       time_func(&base::TimeTicks::Now),
       net_log(NULL) {
@@ -928,6 +929,7 @@ SpdySessionDependencies::SpdySessionDependencies(ProxyService* proxy_service)
       enable_ip_pooling(true),
       enable_compression(false),
       enable_ping(false),
+      enable_user_alternate_protocol_ports(false),
       initial_recv_window_size(kSpdyStreamInitialWindowSize),
       time_func(&base::TimeTicks::Now),
       net_log(NULL) {}
@@ -970,6 +972,8 @@ net::HttpNetworkSession::Params SpdySessionDependencies::CreateSessionParams(
   params.http_server_properties = &session_deps->http_server_properties;
   params.enable_spdy_compression = session_deps->enable_compression;
   params.enable_spdy_ping_based_connection_checking = session_deps->enable_ping;
+  params.enable_user_alternate_protocol_ports =
+      session_deps->enable_user_alternate_protocol_ports;
   params.spdy_default_protocol = kProtoSPDY3;
   params.spdy_initial_recv_window_size = session_deps->initial_recv_window_size;
   params.time_func = session_deps->time_func;
@@ -1020,7 +1024,7 @@ const SpdyHeaderInfo MakeSpdyHeader(SpdyControlType type) {
     0,                            // Credential Slot
     CONTROL_FLAG_FIN,       // Control Flags
     false,                        // Compressed
-    INVALID,                // Status
+    RST_STREAM_INVALID,           // Status
     NULL,                         // Data
     0,                            // Length
     DATA_FLAG_NONE          // Data Flags

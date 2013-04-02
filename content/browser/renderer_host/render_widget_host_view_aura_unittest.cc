@@ -20,6 +20,7 @@
 #include "ui/aura/window.h"
 #include "ui/aura/window_observer.h"
 #include "ui/base/events/event.h"
+#include "ui/base/events/event_utils.h"
 #include "ui/base/ui_base_types.h"
 
 namespace content {
@@ -45,7 +46,7 @@ class TestWindowObserver : public aura::WindowObserver {
   bool destroyed() const { return destroyed_; }
 
   // aura::WindowObserver overrides:
-  virtual void OnWindowDestroyed(aura::Window* window) {
+  virtual void OnWindowDestroyed(aura::Window* window) OVERRIDE {
     CHECK_EQ(window, window_);
     destroyed_ = true;
     window_ = NULL;
@@ -173,12 +174,18 @@ TEST_F(RenderWidgetHostViewAuraTest, TouchEventState) {
   widget_host_->OnMessageReceived(ViewHostMsg_HasTouchEventHandlers(0, false));
   EXPECT_FALSE(widget_host_->ShouldForwardTouchEvent());
 
-  ui::TouchEvent press(ui::ET_TOUCH_PRESSED, gfx::Point(30, 30), 0,
-      base::Time::NowFromSystemTime() - base::Time());
-  ui::TouchEvent move(ui::ET_TOUCH_MOVED, gfx::Point(20, 20), 0,
-      base::Time::NowFromSystemTime() - base::Time());
-  ui::TouchEvent release(ui::ET_TOUCH_RELEASED, gfx::Point(20, 20), 0,
-      base::Time::NowFromSystemTime() - base::Time());
+  ui::TouchEvent press(ui::ET_TOUCH_PRESSED,
+                       gfx::Point(30, 30),
+                       0,
+                       ui::EventTimeForNow());
+  ui::TouchEvent move(ui::ET_TOUCH_MOVED,
+                      gfx::Point(20, 20),
+                      0,
+                      ui::EventTimeForNow());
+  ui::TouchEvent release(ui::ET_TOUCH_RELEASED,
+                         gfx::Point(20, 20),
+                         0,
+                         ui::EventTimeForNow());
 
   view_->OnTouchEvent(&press);
   EXPECT_FALSE(press.handled());
@@ -261,12 +268,18 @@ TEST_F(RenderWidgetHostViewAuraTest, TouchEventSyncAsync) {
   widget_host_->OnMessageReceived(ViewHostMsg_HasTouchEventHandlers(0, true));
   EXPECT_TRUE(widget_host_->ShouldForwardTouchEvent());
 
-  ui::TouchEvent press(ui::ET_TOUCH_PRESSED, gfx::Point(30, 30), 0,
-      base::Time::NowFromSystemTime() - base::Time());
-  ui::TouchEvent move(ui::ET_TOUCH_MOVED, gfx::Point(20, 20), 0,
-      base::Time::NowFromSystemTime() - base::Time());
-  ui::TouchEvent release(ui::ET_TOUCH_RELEASED, gfx::Point(20, 20), 0,
-      base::Time::NowFromSystemTime() - base::Time());
+  ui::TouchEvent press(ui::ET_TOUCH_PRESSED,
+                       gfx::Point(30, 30),
+                       0,
+                       ui::EventTimeForNow());
+  ui::TouchEvent move(ui::ET_TOUCH_MOVED,
+                      gfx::Point(20, 20),
+                      0,
+                      ui::EventTimeForNow());
+  ui::TouchEvent release(ui::ET_TOUCH_RELEASED,
+                         gfx::Point(20, 20),
+                         0,
+                         ui::EventTimeForNow());
 
   view_->OnTouchEvent(&press);
   EXPECT_TRUE(press.stopped_propagation());

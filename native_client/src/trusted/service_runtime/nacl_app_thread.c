@@ -7,6 +7,9 @@
 /*
  * NaCl Server Runtime user thread state.
  */
+
+#include <string.h>
+
 #include "native_client/src/shared/platform/aligned_malloc.h"
 #include "native_client/src/shared/platform/nacl_check.h"
 #include "native_client/src/shared/platform/nacl_exit.h"
@@ -21,10 +24,10 @@
 #include "native_client/src/trusted/service_runtime/nacl_syscall_common.h"
 
 
-void WINAPI NaClThreadLauncher(void *state) {
+void WINAPI NaClAppThreadLauncher(void *state) {
   struct NaClAppThread *natp = (struct NaClAppThread *) state;
   uint32_t thread_idx;
-  NaClLog(4, "NaClThreadLauncher: entered\n");
+  NaClLog(4, "NaClAppThreadLauncher: entered\n");
 
   NaClSignalStackRegister(natp->signal_stack);
 
@@ -37,7 +40,6 @@ void WINAPI NaClThreadLauncher(void *state) {
   CHECK(0 < thread_idx);
   CHECK(thread_idx < NACL_THREAD_MAX);
   NaClTlsSetIdx(thread_idx);
-  nacl_thread[thread_idx] = natp;
   nacl_user[thread_idx] = &natp->user;
 #if NACL_WINDOWS
   nacl_thread_ids[thread_idx] = GetCurrentThreadId();
@@ -89,6 +91,17 @@ void NaClAppThreadTeardown(struct NaClAppThread *natp) {
   NaClLog(3, "NaClAppThreadTeardown(0x%08"NACL_PRIxPTR")\n",
           (uintptr_t) natp);
   nap = natp->nap;
+  if (NULL != nap->debug_stub_callbacks) {
+    NaClLog(3, " notifying the debug stub of the thread exit\n");
+    /*
+     * This must happen before deallocating the ID natp->thread_num.
+     * We have the invariant that debug stub lock should be acquired before
+     * nap->threads_mu lock. Hence we must not hold threads_mu lock while
+     * calling debug stub hooks.
+     */
+    nap->debug_stub_callbacks->thread_exit_hook(natp);
+  }
+
   NaClLog(3, " getting thread table lock\n");
   NaClXMutexLock(&nap->threads_mu);
   NaClLog(3, " getting thread lock\n");
@@ -107,15 +120,10 @@ void NaClAppThreadTeardown(struct NaClAppThread *natp) {
    * particular, thread_idx 0 is never used.
    */
   nacl_user[thread_idx] = NULL;
-  nacl_thread[thread_idx] = NULL;
 #if NACL_WINDOWS
   nacl_thread_ids[thread_idx] = 0;
 #endif
-  if (NULL != nap->debug_stub_callbacks) {
-    NaClLog(3, " notifying the debug stub of the thread exit\n");
-    /* This must happen before deallocating the ID natp->thread_num. */
-    nap->debug_stub_callbacks->thread_exit_hook(natp);
-  }
+
   NaClLog(3, " removing thread from thread table\n");
   /* Deallocate the ID natp->thread_num. */
   NaClRemoveThreadMu(nap, natp->thread_num);
@@ -141,7 +149,6 @@ struct NaClAppThread *NaClAppThreadMake(struct NaClApp *nap,
                                         uint32_t       user_tls1,
                                         uint32_t       user_tls2) {
   struct NaClAppThread *natp;
-  int rv;
   uint32_t tls_idx;
 
   natp = NaClAlignedMalloc(sizeof *natp, __alignof(struct NaClAppThread));
@@ -158,6 +165,8 @@ struct NaClAppThread *NaClAppThreadMake(struct NaClApp *nap,
    */
   natp->nap = nap;
   natp->thread_num = -1;  /* illegal index */
+  natp->host_thread_is_defined = 0;
+  memset(&natp->host_thread, 0, sizeof(natp->host_thread));
 
   /*
    * Even though we don't know what segment base/range should gs/r9/nacl_tls_idx
@@ -198,16 +207,8 @@ struct NaClAppThread *NaClAppThreadMake(struct NaClApp *nap,
   natp->fault_signal = 0;
 
   natp->dynamic_delete_generation = 0;
+  return natp;
 
-  rv = NaClThreadCtor(&natp->thread,
-                      NaClThreadLauncher,
-                      (void *) natp,
-                      NACL_KERN_STACK_SIZE);
-  if (rv != 0) {
-    return natp; /* Success */
-  }
-
-  NaClMutexDtor(&natp->suspend_mu);
  cleanup_mu:
   NaClMutexDtor(&natp->mu);
   if (NULL != natp->signal_stack) {
@@ -220,14 +221,46 @@ struct NaClAppThread *NaClAppThreadMake(struct NaClApp *nap,
 }
 
 
+int NaClAppThreadSpawn(struct NaClApp *nap,
+                       uintptr_t      usr_entry,
+                       uintptr_t      usr_stack_ptr,
+                       uint32_t       user_tls1,
+                       uint32_t       user_tls2) {
+  struct NaClAppThread *natp = NaClAppThreadMake(nap, usr_entry, usr_stack_ptr,
+                                                 user_tls1, user_tls2);
+  if (natp == NULL) {
+    return 0;
+  }
+  /*
+   * We set host_thread_is_defined assuming, for now, that
+   * NaClThreadCtor() will succeed.
+   */
+  natp->host_thread_is_defined = 1;
+  if (!NaClThreadCtor(&natp->host_thread, NaClAppThreadLauncher, (void *) natp,
+                      NACL_KERN_STACK_SIZE)) {
+    /*
+     * No other thread saw the NaClAppThread, so it is OK that
+     * host_thread was not initialized despite host_thread_is_defined
+     * being set.
+     */
+    natp->host_thread_is_defined = 0;
+    NaClAppThreadDelete(natp);
+    return 0;
+  }
+  return 1;
+}
+
+
 void NaClAppThreadDelete(struct NaClAppThread *natp) {
   /*
    * the thread must not be still running, else this crashes the system
    */
 
+  if (natp->host_thread_is_defined) {
+    NaClThreadDtor(&natp->host_thread);
+  }
   free(natp->suspended_registers);
   NaClMutexDtor(&natp->suspend_mu);
-  NaClThreadDtor(&natp->thread);
   NaClSignalStackFree(natp->signal_stack);
   natp->signal_stack = NULL;
   NaClTlsFree(natp);

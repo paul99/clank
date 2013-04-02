@@ -32,6 +32,8 @@ var tests = [
   [testCreateKeysInStores, 1,     1000,  1],
 // Create many large items in a single object store.
   [testCreateKeysInStores, 1000,   1,    10000],
+// Read one item per transaction.
+  [testRandomReadsAndWrites, 1000, 1, 0, 1000, kDontUseIndex],
 // Read a few random items in each of many transactions.
   [testRandomReadsAndWrites, 1000,  5,    0,  100, kDontUseIndex],
 // Read many random items in each of a few transactions.
@@ -218,13 +220,15 @@ function testRandomReadsAndWrites(
     indexName = "index";
   var testName = getDisplayName(arguments);
   var objectStoreNames = ["store"];
+  var getKey = getSimpleKey;
+  var getValue = useIndexForReads ? getIndexableValue : getSimpleValue;
 
   automation.setStatus("Creating database.");
   var options;
   if (useIndexForReads) {
     options = [{
       indexName: indexName,
-      indexKeyPath: "",
+      indexKeyPath: "id",
       indexIsUnique: false,
       indexIsMultiEntry: false,
     }];
@@ -252,9 +256,9 @@ function testRandomReadsAndWrites(
 
   function batchFunc(transaction) {
     getRandomValues(transaction, objectStoreNames, numReadsPerTransaction,
-        numKeys, indexName);
+        numKeys, indexName, getKey);
     putRandomValues(transaction, objectStoreNames, numWritesPerTransaction,
-        numKeys);
+        numKeys, getKey, getValue);
   }
 }
 
@@ -267,10 +271,12 @@ function testReadCache(numTransactions, useIndexForReads, onTestComplete) {
     indexName = "index";
   var testName = getDisplayName(arguments);
   var objectStoreNames = ["store"];
+  var getKey = getSimpleKey;
+  var getValue = useIndexForReads ? getIndexableValue : getSimpleValue;
   var keys = [];
 
   for (var i=0; i < numReadsPerTransaction; ++i) {
-    keys.push(getSimpleKey(Math.floor(Math.random() * numKeys)));
+    keys.push(getKey(Math.floor(Math.random() * numKeys)));
   }
 
   automation.setStatus("Creating database.");
@@ -278,7 +284,7 @@ function testReadCache(numTransactions, useIndexForReads, onTestComplete) {
   if (useIndexForReads) {
     options = [{
       indexName: indexName,
-      indexKeyPath: "",
+      indexKeyPath: "id",
       indexIsUnique: false,
       indexIsMultiEntry: false,
     }];
@@ -289,8 +295,8 @@ function testReadCache(numTransactions, useIndexForReads, onTestComplete) {
     automation.setStatus("Setting up test database.");
     var transaction = getTransaction(db, objectStoreNames, "readwrite",
         function() { onSetupComplete(db); });
-    putLinearValues(transaction, objectStoreNames, numKeys, getSimpleKey,
-        function () { return "test value"; });
+    putLinearValues(transaction, objectStoreNames, numKeys, getKey,
+        getValue);
   }
 
   var completionFunc;
@@ -396,7 +402,7 @@ function testCursorReadsAndRandomWrites(
       // setting up bounds from k to k+n with n>0 works.  Without this reversal,
       // the upper bound is below the lower bound.
       return getBackwardIndexKey(numKeys - i);
-    }
+    };
   }
 
   automation.setStatus("Creating database.");
@@ -514,11 +520,13 @@ function testWalkingMultipleCursors(numCursors, onTestComplete) {
   var testName = getDisplayName(arguments);
   var objectStoreNames = ["input store"];
   var indexName = "index name";
+  var getKey = getSimpleKey;
+  var getValue = getIndexableValue;
 
   automation.setStatus("Creating database.");
   var options = [{
     indexName: indexName,
-    indexKeyPath: "",
+    indexKeyPath: "id",
     indexIsUnique: false,
     indexIsMultiEntry: false,
   }];
@@ -531,15 +539,15 @@ function testWalkingMultipleCursors(numCursors, onTestComplete) {
     // This loop adds the same value numHitsPerKey times for each key.
     for (var i = 0; i < numHitsPerKey; ++i) {
       putLinearValues(transaction, objectStoreNames, numKeys, getKeyFunc(i),
-          getSimpleValue);
+          getValue);
     }
   }
   // While the value is the same each time through the putLinearValues loop, we
   // want the key to keep increaasing for each copy.
   function getKeyFunc(k) {
     return function(i) {
-      return getSimpleKey(k * numKeys + i);
-    }
+      return getKey(k * numKeys + i);
+    };
   }
   var completionFunc;
   function onSetupComplete(db) {
@@ -587,7 +595,7 @@ function testWalkingMultipleCursors(numCursors, onTestComplete) {
             continueCursorIndex %= numCursors;
           }
         }
-      }
+      };
     }
   }
   function verifyComplete() {

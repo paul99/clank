@@ -11,15 +11,20 @@
 #error "Media file system is not supported for this platform."
 #endif
 
+#include "base/callback_forward.h"
 #include "base/file_path.h"
 #include "webkit/fileapi/media/mtp_device_delegate.h"
+
+namespace base {
+class SequencedTaskRunner;
+}
 
 namespace chrome {
 
 typedef base::Callback<void(fileapi::MTPDeviceDelegate*)>
     CreateMTPDeviceDelegateCallback;
 
-void CreateMTPDeviceDelegate(const FilePath::StringType& device_location,
+void CreateMTPDeviceDelegate(const base::FilePath::StringType& device_location,
                              base::SequencedTaskRunner* media_task_runner,
                              const CreateMTPDeviceDelegateCallback& callback);
 

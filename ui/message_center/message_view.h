@@ -5,6 +5,7 @@
 #ifndef UI_MESSAGE_CENTER_MESSAGE_VIEW_H_
 #define UI_MESSAGE_CENTER_MESSAGE_VIEW_H_
 
+#include "ui/message_center/notification.h"
 #include "ui/message_center/notification_list.h"
 #include "ui/views/controls/button/button.h"
 #include "ui/views/controls/slide_out_view.h"
@@ -22,14 +23,14 @@ const int kPaddingBetweenItems = 10;
 const int kPaddingHorizontal = 18;
 const int kWebNotificationButtonWidth = 32;
 const int kWebNotificationIconSize = 40;
-const int kWebNotificationWidth = 320;
+const int kWebNotificationWidth = 300;
 
 // An abstract class that forms the basis of a view for a notification entry.
 class MessageView : public views::SlideOutView,
                     public views::ButtonListener {
  public:
   MessageView(NotificationList::Delegate* list_delegate,
-              const NotificationList::Notification& notification);
+              const Notification& notification);
 
   virtual ~MessageView();
 
@@ -58,9 +59,15 @@ class MessageView : public views::SlideOutView,
   // Overridden from views::SlideOutView.
   virtual void OnSlideOut() OVERRIDE;
 
+  NotificationList::Delegate* list_delegate() { return list_delegate_; }
+  Notification& notification() { return notification_; }
+  views::ImageButton* close_button() { return close_button_.get(); }
+  views::ScrollView* scroller() { return scroller_; }
+
+ private:
   NotificationList::Delegate* list_delegate_;
-  NotificationList::Notification notification_;
-  views::ImageButton* close_button_;
+  Notification notification_;
+  scoped_ptr<views::ImageButton> close_button_;
 
   views::ScrollView* scroller_;
 

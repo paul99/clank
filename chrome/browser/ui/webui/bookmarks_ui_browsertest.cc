@@ -32,13 +32,15 @@ class BookmarksTest : public InProcessBrowserTest {
   void AssertIsBookmarksPage(content::WebContents* tab) {
     GURL url;
     std::string out;
-    ASSERT_TRUE(content::ExecuteJavaScriptAndExtractString(
-        tab->GetRenderViewHost(), L"",
-        L"domAutomationController.send(location.protocol)", &out));
+    ASSERT_TRUE(content::ExecuteScriptAndExtractString(
+        tab,
+        "domAutomationController.send(location.protocol)",
+        &out));
     ASSERT_EQ("chrome-extension:", out);
-    ASSERT_TRUE(content::ExecuteJavaScriptAndExtractString(
-        tab->GetRenderViewHost(), L"",
-        L"domAutomationController.send(location.pathname)", &out));
+    ASSERT_TRUE(content::ExecuteScriptAndExtractString(
+        tab,
+        "domAutomationController.send(location.pathname)",
+        &out));
     ASSERT_EQ("/main.html", out);
   }
 };
@@ -61,8 +63,8 @@ IN_PROC_BROWSER_TEST_F(BookmarksTest, CommandOpensBookmarksTab) {
 IN_PROC_BROWSER_TEST_F(BookmarksTest, CommandAgainGoesBackToBookmarksTab) {
   ui_test_utils::NavigateToURL(
       browser(),
-      ui_test_utils::GetTestUrl(FilePath(),
-                                FilePath().AppendASCII("simple.html")));
+      ui_test_utils::GetTestUrl(base::FilePath(),
+                                base::FilePath().AppendASCII("simple.html")));
   ASSERT_EQ(1, browser()->tab_strip_model()->count());
 
   // Bring up the bookmarks manager tab.
@@ -87,7 +89,7 @@ IN_PROC_BROWSER_TEST_F(BookmarksTest, TwoCommandsOneTab) {
   chrome::ShowBookmarkManager(browser());
   navigation_observer.Wait();
 
-  ASSERT_EQ(1, browser()->tab_count());
+  ASSERT_EQ(1, browser()->tab_strip_model()->count());
 }
 
 IN_PROC_BROWSER_TEST_F(BookmarksTest, BookmarksLoaded) {

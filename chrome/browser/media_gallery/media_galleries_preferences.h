@@ -11,10 +11,11 @@
 
 #include "base/basictypes.h"
 #include "base/file_path.h"
+#include "base/observer_list.h"
 #include "base/string16.h"
 #include "chrome/browser/profiles/profile_keyed_service.h"
 
-class PrefService;
+class PrefRegistrySyncable;
 class Profile;
 
 namespace base {
@@ -48,7 +49,7 @@ struct MediaGalleryPrefInfo {
   ~MediaGalleryPrefInfo();
 
   // The absolute path of the gallery.
-  FilePath AbsolutePath() const;
+  base::FilePath AbsolutePath() const;
 
   // The ID that identifies this gallery in this Profile.
   MediaGalleryPrefId pref_id;
@@ -61,7 +62,7 @@ struct MediaGalleryPrefInfo {
   std::string device_id;
 
   // The root of the gallery, relative to the root of the device.
-  FilePath path;
+  base::FilePath path;
 
   // The type of gallery.
   Type type;
@@ -75,28 +76,51 @@ typedef std::set<MediaGalleryPrefId> MediaGalleryPrefIdSet;
 // user profile.
 class MediaGalleriesPreferences : public ProfileKeyedService {
  public:
+  class GalleryChangeObserver {
+    public:
+     virtual void OnGalleryChanged(MediaGalleriesPreferences* pref) {}
+
+    protected:
+     virtual ~GalleryChangeObserver();
+  };
+
   explicit MediaGalleriesPreferences(Profile* profile);
   virtual ~MediaGalleriesPreferences();
+
+  void AddGalleryChangeObserver(GalleryChangeObserver* observer);
+  void RemoveGalleryChangeObserver(GalleryChangeObserver* observer);
 
   // Lookup a media gallery and fill in information about it and return true.
   // If the media gallery does not already exist, fill in as much of the
   // MediaGalleryPrefInfo struct as we can and return false.
   // TODO(vandebo) figure out if we want this to be async, in which case:
-  // void LookUpGalleryByPath(FilePath&path, callback(const MediaGalleryInfo&))
-  bool LookUpGalleryByPath(const FilePath& path,
+  // void LookUpGalleryByPath(base::FilePath& path,
+  //                          callback(const MediaGalleryInfo&))
+  bool LookUpGalleryByPath(const base::FilePath& path,
                            MediaGalleryPrefInfo* gallery) const;
 
   MediaGalleryPrefIdSet LookUpGalleriesByDeviceId(
       const std::string& device_id) const;
 
+  // Returns the absolute file path of the gallery specified by the
+  // |gallery_id|. Returns an empty file path if the |gallery_id| is invalid.
+  // Set |include_unpermitted_galleries| to true to get the file path of the
+  // gallery to which this |extension| has no access permission.
+  base::FilePath LookUpGalleryPathForExtension(
+      MediaGalleryPrefId gallery_id,
+      const extensions::Extension* extension,
+      bool include_unpermitted_galleries);
+
   // Teaches the registry about a new gallery.
+  // Returns the gallery's pref id.
   MediaGalleryPrefId AddGallery(const std::string& device_id,
                                 const string16& display_name,
-                                const FilePath& relative_path,
+                                const base::FilePath& relative_path,
                                 bool user_added);
 
   // Teach the registry about a user added registry simply from the path.
-  MediaGalleryPrefId AddGalleryByPath(const FilePath& path);
+  // Returns the gallery's pref id.
+  MediaGalleryPrefId AddGalleryByPath(const base::FilePath& path);
 
   // Removes the gallery identified by |id| from the store.
   void ForgetGalleryById(MediaGalleryPrefId id);
@@ -115,7 +139,7 @@ class MediaGalleriesPreferences : public ProfileKeyedService {
   // ProfileKeyedService implementation:
   virtual void Shutdown() OVERRIDE;
 
-  static void RegisterUserPrefs(PrefService* prefs);
+  static void RegisterUserPrefs(PrefRegistrySyncable* registry);
 
   // Returns true if the media gallery preferences system has ever been used
   // for this profile. To be exact, it checks if a gallery has ever been added
@@ -127,10 +151,16 @@ class MediaGalleriesPreferences : public ProfileKeyedService {
       DeviceIdPrefIdsMap;
 
   // Populates the default galleries if this is a fresh profile.
-  void MaybeAddDefaultGalleries();
+  void AddDefaultGalleriesIfFreshProfile();
 
-  // Builds |remembered_galleries_| from the persistent store.
-  void InitFromPrefs();
+  // Builds |known_galleries_| from the persistent store.
+  // Notifies GalleryChangeObservers if |notify_observers| is true.
+  void InitFromPrefs(bool notify_observers);
+
+  // Notifies |gallery_change_observers_| about changes in |known_galleries_|.
+  void NotifyChangeObservers();
+
+  extensions::ExtensionPrefs* GetExtensionPrefs() const;
 
   // The profile that owns |this|.
   Profile* profile_;
@@ -139,9 +169,10 @@ class MediaGalleriesPreferences : public ProfileKeyedService {
   MediaGalleriesPrefInfoMap known_galleries_;
 
   // A mapping from device id to the set of gallery pref ids on that device.
+  // All pref ids in |device_map_| are also in |known_galleries_|.
   DeviceIdPrefIdsMap device_map_;
 
-  extensions::ExtensionPrefs* GetExtensionPrefs() const;
+  ObserverList<GalleryChangeObserver> gallery_change_observers_;
 
   DISALLOW_COPY_AND_ASSIGN(MediaGalleriesPreferences);
 };

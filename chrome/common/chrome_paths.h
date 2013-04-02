@@ -72,12 +72,9 @@ enum {
   FILE_RECORDED_SCRIPT,         // Full path to the script.log file that
                                 // contains recorded browser events for
                                 // playback.
-  FILE_FLASH_PLUGIN,            // Full path to the internal Flash plugin file.
-                                // Querying this path will succeed no matter the
-                                // file exists or not.
-  FILE_FLASH_PLUGIN_EXISTING,   // Full path to the internal Flash plugin file.
-                                // Querying this path will fail if the file
-                                // doesn't exist.
+  FILE_FLASH_PLUGIN,            // Full path to the internal NPAPI Flash plugin
+                                // file. Querying this path will succeed no
+                                // matter the file exists or not.
   FILE_PEPPER_FLASH_PLUGIN,     // Full path to the bundled Pepper Flash plugin
                                 // file.
   FILE_PDF_PLUGIN,              // Full path to the internal PDF plugin file.
@@ -103,8 +100,15 @@ enum {
                                 // wallpapers reside.
   DIR_CHROMEOS_WALLPAPER_THUMBNAILS,  // Directory where downloaded chromeos
                                       // wallpaper thumbnails reside.
+  DIR_CHROMEOS_CUSTOM_WALLPAPERS,     // Directory where custom wallpapers
+                                      // reside.
   FILE_DEFAULT_APP_ORDER,       // Full path to the json file that defines the
                                 // default app order.
+#endif
+#if defined(ENABLE_MANAGED_USERS)
+  DIR_MANAGED_USERS_DEFAULT_APPS,  // Directory where installer places .crx
+                                   // files to be installed when managed user
+                                   // session starts.
 #endif
 
   // Valid only in development environment; TODO(darin): move these

@@ -8,6 +8,7 @@
 #include "base/location.h"
 #include "base/message_loop_proxy.h"
 #include "base/run_loop.h"
+#include "base/stl_util.h"
 #include "base/threading/thread.h"
 #include "chrome/browser/sync_file_system/local_file_sync_service.h"
 #include "chrome/browser/sync_file_system/mock_local_change_processor.h"
@@ -106,7 +107,7 @@ class LocalFileSyncServiceTest
  protected:
   LocalFileSyncServiceTest() : num_changes_(0) {}
 
-  ~LocalFileSyncServiceTest() {}
+  virtual ~LocalFileSyncServiceTest() {}
 
   virtual void SetUp() OVERRIDE {
     ASSERT_TRUE(temp_dir_.CreateUniqueTempDir());
@@ -146,7 +147,7 @@ class LocalFileSyncServiceTest
   }
 
   // LocalChangeObserver overrides.
-  virtual void OnLocalChangeAvailable(int64 num_changes) {
+  virtual void OnLocalChangeAvailable(int64 num_changes) OVERRIDE {
     num_changes_ = num_changes;
   }
 
@@ -168,7 +169,7 @@ class LocalFileSyncServiceTest
   }
 
   SyncStatusCode ApplyRemoteChange(const FileChange& change,
-                                   const FilePath& local_path,
+                                   const base::FilePath& local_path,
                                    const FileSystemURL& url) {
     base::RunLoop run_loop;
     SyncStatusCode sync_status = fileapi::SYNC_STATUS_UNKNOWN;
@@ -203,7 +204,7 @@ TEST_F(LocalFileSyncServiceTest, RemoteSyncStepsSimple) {
   const char kTestFileData[] = "0123456789";
   const int kTestFileDataSize = static_cast<int>(arraysize(kTestFileData) - 1);
 
-  FilePath local_path;
+  base::FilePath local_path;
   ASSERT_TRUE(file_util::CreateTemporaryFileInDir(temp_dir_.path(),
                                                   &local_path));
   ASSERT_EQ(kTestFileDataSize,
@@ -236,7 +237,7 @@ TEST_F(LocalFileSyncServiceTest, RemoteSyncStepsSimple) {
   change = FileChange(FileChange::FILE_CHANGE_ADD_OR_UPDATE,
                       fileapi::SYNC_FILE_TYPE_DIRECTORY);
   EXPECT_EQ(fileapi::SYNC_STATUS_OK,
-            ApplyRemoteChange(change, FilePath(), kDir));
+            ApplyRemoteChange(change, base::FilePath(), kDir));
 
   // Verify the directory.
   EXPECT_EQ(base::PLATFORM_FILE_OK,
@@ -253,7 +254,7 @@ TEST_F(LocalFileSyncServiceTest, RemoteSyncStepsSimple) {
   change = FileChange(FileChange::FILE_CHANGE_DELETE,
                       fileapi::SYNC_FILE_TYPE_UNKNOWN);
   EXPECT_EQ(fileapi::SYNC_STATUS_OK,
-            ApplyRemoteChange(change, FilePath(), kDir));
+            ApplyRemoteChange(change, base::FilePath(), kDir));
 
   // Now the directory must have deleted.
   EXPECT_EQ(base::PLATFORM_FILE_ERROR_NOT_FOUND,
@@ -277,7 +278,16 @@ TEST_F(LocalFileSyncServiceTest, LocalChangeObserver) {
   EXPECT_EQ(2, num_changes_);
 }
 
-TEST_F(LocalFileSyncServiceTest, LocalChangeObserverMultipleContexts) {
+#if defined(OS_WIN)
+// Flaky: http://crbug.com/171487
+#define MAYBE_LocalChangeObserverMultipleContexts\
+    DISABLED_LocalChangeObserverMultipleContexts
+#else
+#define MAYBE_LocalChangeObserverMultipleContexts\
+    LocalChangeObserverMultipleContexts
+#endif
+
+TEST_F(LocalFileSyncServiceTest, MAYBE_LocalChangeObserverMultipleContexts) {
   const char kOrigin2[] = "http://foo";
   fileapi::CannedSyncableFileSystem file_system2(
       GURL(kOrigin2), kServiceName,
@@ -331,7 +341,7 @@ TEST_F(LocalFileSyncServiceTest, ProcessLocalChange_CreateFile) {
 
   // Retrieve the expected platform_path.
   base::PlatformFileInfo info;
-  FilePath platform_path;
+  base::FilePath platform_path;
   EXPECT_EQ(base::PLATFORM_FILE_OK,
             file_system_->GetMetadata(kFile, &info, &platform_path));
 
@@ -556,5 +566,151 @@ TEST_F(LocalFileSyncServiceTest, RecordFakeChange) {
 
 // TODO(kinuko): Add tests for multiple file changes and multiple
 // FileSystemContexts.
+
+// Unit test for OriginChangeMap ---------------------------------------------
+
+class OriginChangeMapTest : public testing::Test {
+ protected:
+  OriginChangeMapTest() {}
+  virtual ~OriginChangeMapTest() {}
+
+  bool NextOriginToProcess(GURL* origin) {
+    return map_.NextOriginToProcess(origin);
+  }
+
+  int64 GetTotalChangeCount() const {
+    return map_.GetTotalChangeCount();
+  }
+
+  void SetOriginChangeCount(const GURL& origin, int64 changes) {
+    map_.SetOriginChangeCount(origin, changes);
+  }
+
+  void SetOriginEnabled(const GURL& origin, bool enabled) {
+    map_.SetOriginEnabled(origin, enabled);
+  }
+
+  LocalFileSyncService::OriginChangeMap map_;
+};
+
+TEST_F(OriginChangeMapTest, Basic) {
+  const GURL kOrigin1("chrome-extension://foo");
+  const GURL kOrigin2("chrome-extension://bar");
+  const GURL kOrigin3("chrome-extension://baz");
+
+  ASSERT_EQ(0, GetTotalChangeCount());
+
+  SetOriginChangeCount(kOrigin1, 1);
+  SetOriginChangeCount(kOrigin2, 2);
+
+  ASSERT_EQ(1 + 2, GetTotalChangeCount());
+
+  SetOriginChangeCount(kOrigin3, 4);
+
+  ASSERT_EQ(1 + 2 + 4, GetTotalChangeCount());
+
+  const GURL kOrigins[] = { kOrigin1, kOrigin2, kOrigin3 };
+  std::set<GURL> all_origins;
+  all_origins.insert(kOrigins, kOrigins + ARRAYSIZE_UNSAFE(kOrigins));
+
+  GURL origin;
+  while (!all_origins.empty()) {
+    ASSERT_TRUE(NextOriginToProcess(&origin));
+    ASSERT_TRUE(ContainsKey(all_origins, origin));
+    all_origins.erase(origin);
+  }
+
+  // Set kOrigin2's change count 0.
+  SetOriginChangeCount(kOrigin2, 0);
+  ASSERT_EQ(1 + 4, GetTotalChangeCount());
+
+  // kOrigin2 won't return this time.
+  all_origins.insert(kOrigin1);
+  all_origins.insert(kOrigin3);
+  while (!all_origins.empty()) {
+    ASSERT_TRUE(NextOriginToProcess(&origin));
+    ASSERT_TRUE(ContainsKey(all_origins, origin));
+    all_origins.erase(origin);
+  }
+
+  // Calling NextOriginToProcess() again will just return
+  // the same set of origins (as far as we don't change the
+  // change count).
+  all_origins.insert(kOrigin1);
+  all_origins.insert(kOrigin3);
+  while (!all_origins.empty()) {
+    ASSERT_TRUE(NextOriginToProcess(&origin));
+    ASSERT_TRUE(ContainsKey(all_origins, origin));
+    all_origins.erase(origin);
+  }
+
+  // Set kOrigin2's change count 8.
+  SetOriginChangeCount(kOrigin2, 8);
+  ASSERT_EQ(1 + 4 + 8, GetTotalChangeCount());
+
+  all_origins.insert(kOrigins, kOrigins + ARRAYSIZE_UNSAFE(kOrigins));
+  while (!all_origins.empty()) {
+    ASSERT_TRUE(NextOriginToProcess(&origin));
+    ASSERT_TRUE(ContainsKey(all_origins, origin));
+    all_origins.erase(origin);
+  }
+}
+
+TEST_F(OriginChangeMapTest, WithDisabled) {
+  const GURL kOrigin1("chrome-extension://foo");
+  const GURL kOrigin2("chrome-extension://bar");
+  const GURL kOrigin3("chrome-extension://baz");
+  const GURL kOrigins[] = { kOrigin1, kOrigin2, kOrigin3 };
+
+  ASSERT_EQ(0, GetTotalChangeCount());
+
+  SetOriginChangeCount(kOrigin1, 1);
+  SetOriginChangeCount(kOrigin2, 2);
+  SetOriginChangeCount(kOrigin3, 4);
+
+  ASSERT_EQ(1 + 2 + 4, GetTotalChangeCount());
+
+  std::set<GURL> all_origins;
+  all_origins.insert(kOrigins, kOrigins + ARRAYSIZE_UNSAFE(kOrigins));
+
+  GURL origin;
+  while (!all_origins.empty()) {
+    ASSERT_TRUE(NextOriginToProcess(&origin));
+    ASSERT_TRUE(ContainsKey(all_origins, origin));
+    all_origins.erase(origin);
+  }
+
+  SetOriginEnabled(kOrigin2, false);
+  ASSERT_EQ(1 + 4, GetTotalChangeCount());
+
+  // kOrigin2 won't return this time.
+  all_origins.insert(kOrigin1);
+  all_origins.insert(kOrigin3);
+  while (!all_origins.empty()) {
+    ASSERT_TRUE(NextOriginToProcess(&origin));
+    ASSERT_TRUE(ContainsKey(all_origins, origin));
+    all_origins.erase(origin);
+  }
+
+  // kOrigin1 and kOrigin2 are now disabled.
+  SetOriginEnabled(kOrigin1, false);
+  ASSERT_EQ(4, GetTotalChangeCount());
+
+  ASSERT_TRUE(NextOriginToProcess(&origin));
+  ASSERT_EQ(kOrigin3, origin);
+
+  // Re-enable kOrigin2.
+  SetOriginEnabled(kOrigin2, true);
+  ASSERT_EQ(2 + 4, GetTotalChangeCount());
+
+  // kOrigin1 won't return this time.
+  all_origins.insert(kOrigin2);
+  all_origins.insert(kOrigin3);
+  while (!all_origins.empty()) {
+    ASSERT_TRUE(NextOriginToProcess(&origin));
+    ASSERT_TRUE(ContainsKey(all_origins, origin));
+    all_origins.erase(origin);
+  }
+}
 
 }  // namespace sync_file_system

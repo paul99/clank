@@ -55,7 +55,7 @@ static GURL GetStartupURL() {
   if (url.is_valid() && url.has_scheme())
     return url;
 
-  return net::FilePathToFileURL(FilePath(args[0]));
+  return net::FilePathToFileURL(base::FilePath(args[0]));
 }
 
 base::StringPiece PlatformResourceProvider(int key) {
@@ -106,7 +106,7 @@ void ShellBrowserMainParts::PreMainMessageLoopRun() {
   browser_context_.reset(new ShellBrowserContext(false));
   off_the_record_browser_context_.reset(new ShellBrowserContext(true));
 
-  Shell::PlatformInitialize();
+  Shell::Initialize();
   net::NetModule::SetResourceProvider(PlatformResourceProvider);
 
   int port = 0;
@@ -134,7 +134,7 @@ void ShellBrowserMainParts::PreMainMessageLoopRun() {
                            GetStartupURL(),
                            NULL,
                            MSG_ROUTING_NONE,
-                           NULL);
+                           gfx::Size());
   }
 
   if (parameters_.ui_task) {

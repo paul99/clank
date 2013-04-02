@@ -5,8 +5,6 @@
 #ifndef CONTENT_COMMON_GPU_IMAGE_TRANSPORT_SURFACE_H_
 #define CONTENT_COMMON_GPU_IMAGE_TRANSPORT_SURFACE_H_
 
-#if defined(ENABLE_GPU)
-
 #include <vector>
 
 #include "base/callback.h"
@@ -23,7 +21,6 @@
 #include "ui/surface/transport_dib.h"
 
 struct AcceleratedSurfaceMsg_BufferPresented_Params;
-struct GpuHostMsg_AcceleratedSurfaceNew_Params;
 struct GpuHostMsg_AcceleratedSurfaceBuffersSwapped_Params;
 struct GpuHostMsg_AcceleratedSurfacePostSubBuffer_Params;
 struct GpuHostMsg_AcceleratedSurfaceRelease_Params;
@@ -75,13 +72,6 @@ class ImageTransportSurface {
   virtual gfx::Size GetSize() = 0;
 
  protected:
-  // Used by certain implements of PostSubBuffer to determine
-  // how much needs to be copied between frames.
-  void GetRegionsToCopy(const gfx::Rect& previous_damage_rect,
-                        const gfx::Rect& new_damage_rect,
-                        std::vector<gfx::Rect>* regions);
-
- protected:
   virtual ~ImageTransportSurface();
 
  private:
@@ -107,8 +97,6 @@ class ImageTransportHelper
 
   // Helper send functions. Caller fills in the surface specific params
   // like size and surface id. The helper fills in the rest.
-  void SendAcceleratedSurfaceNew(
-      GpuHostMsg_AcceleratedSurfaceNew_Params params);
   void SendAcceleratedSurfaceBuffersSwapped(
       GpuHostMsg_AcceleratedSurfaceBuffersSwapped_Params params);
   void SendAcceleratedSurfacePostSubBuffer(
@@ -175,6 +163,7 @@ class PassThroughImageTransportSurface
   // GLSurface implementation.
   virtual bool Initialize() OVERRIDE;
   virtual void Destroy() OVERRIDE;
+  virtual bool DeferDraws() OVERRIDE;
   virtual bool SwapBuffers() OVERRIDE;
   virtual bool PostSubBuffer(int x, int y, int width, int height) OVERRIDE;
   virtual bool OnMakeCurrent(gfx::GLContext* context) OVERRIDE;
@@ -198,12 +187,12 @@ class PassThroughImageTransportSurface
   gfx::Size new_size_;
   bool transport_;
   bool did_set_swap_interval_;
+  bool did_unschedule_;
+  bool is_swap_buffers_pending_;
 
   DISALLOW_COPY_AND_ASSIGN(PassThroughImageTransportSurface);
 };
 
 }  // namespace content
-
-#endif  // defined(ENABLE_GPU)
 
 #endif  // CONTENT_COMMON_GPU_IMAGE_TRANSPORT_SURFACE_H_

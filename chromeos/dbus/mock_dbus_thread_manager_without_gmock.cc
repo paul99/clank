@@ -114,12 +114,6 @@ ShillManagerClient*
   return NULL;
 }
 
-ShillNetworkClient*
-    MockDBusThreadManagerWithoutGMock::GetShillNetworkClient() {
-  NOTIMPLEMENTED();
-  return NULL;
-}
-
 ShillProfileClient*
     MockDBusThreadManagerWithoutGMock::GetShillProfileClient() {
   NOTIMPLEMENTED();
@@ -165,8 +159,8 @@ PowerManagerClient* MockDBusThreadManagerWithoutGMock::GetPowerManagerClient() {
   return NULL;
 }
 
-RootPowerManagerClient*
-MockDBusThreadManagerWithoutGMock::GetRootPowerManagerClient() {
+PowerPolicyController*
+MockDBusThreadManagerWithoutGMock::GetPowerPolicyController() {
   NOTIMPLEMENTED();
   return NULL;
 }
@@ -226,8 +220,7 @@ void MockDBusThreadManagerWithoutGMock::RemoveIBusEngineService(
     const dbus::ObjectPath& object_path) {
 }
 
-ibus::IBusPanelService*
-    MockDBusThreadManagerWithoutGMock::GetIBusPanelService() {
+IBusPanelService* MockDBusThreadManagerWithoutGMock::GetIBusPanelService() {
   return mock_ibus_panel_service_.get();
 }
 

@@ -16,7 +16,7 @@
 #include "sandbox/win/src/sandbox.h"
 #include "skia/ext/skia_sandbox_support_win.h"
 #include "skia/ext/vector_platform_device_emf_win.h"
-#include "unicode/timezone.h"
+#include "third_party/icu/public/i18n/unicode/timezone.h"
 
 namespace content {
 namespace {
@@ -32,8 +32,7 @@ void SkiaPreCacheFont(const LOGFONT& logfont) {
 void SkiaPreCacheFontCharacters(const LOGFONT& logfont,
                                 const wchar_t* text,
                                 unsigned int text_length) {
-  content::RenderThreadImpl* render_thread_impl =
-      content::RenderThreadImpl::current();
+  RenderThreadImpl* render_thread_impl = RenderThreadImpl::current();
   if (render_thread_impl) {
     render_thread_impl->PreCacheFontCharacters(logfont,
                                                string16(text, text_length));

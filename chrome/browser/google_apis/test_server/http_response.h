@@ -16,9 +16,11 @@ namespace test_server {
 enum ResponseCode {
   SUCCESS = 200,
   CREATED = 201,
+  NO_CONTENT = 204,
   MOVED = 301,
   RESUME_INCOMPLETE = 308,
   NOT_FOUND = 404,
+  PRECONDITION = 412,
   ACCESS_DENIED = 500,
 };
 

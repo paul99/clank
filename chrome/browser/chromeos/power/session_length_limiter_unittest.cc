@@ -14,7 +14,7 @@
 #include "base/memory/ref_counted.h"
 #include "base/memory/scoped_ptr.h"
 #include "base/single_thread_task_runner.h"
-#include "base/string_number_conversions.h"
+#include "base/strings/string_number_conversions.h"
 #include "base/thread_task_runner_handle.h"
 #include "base/time.h"
 #include "base/values.h"
@@ -98,9 +98,8 @@ class SessionLengthLimiterTest : public testing::Test {
   }
 
   virtual void SetUp() {
-    static_cast<TestingBrowserProcess*>(g_browser_process)->
-        SetLocalState(&local_state_);
-    SessionLengthLimiter::RegisterPrefs(&local_state_);
+    TestingBrowserProcess::GetGlobal()->SetLocalState(&local_state_);
+    SessionLengthLimiter::RegisterPrefs(local_state_.registry());
 
     delegate_ = new NiceMock<MockSessionLengthLimiterDelegate>;
     ON_CALL(*delegate_, GetCurrentTime())
@@ -115,7 +114,7 @@ class SessionLengthLimiterTest : public testing::Test {
   }
 
   virtual void TearDown() {
-    static_cast<TestingBrowserProcess*>(g_browser_process)->SetLocalState(NULL);
+    TestingBrowserProcess::GetGlobal()->SetLocalState(NULL);
   }
 
   void SetSessionStartTimePref(int64 session_start_time) {
@@ -176,7 +175,7 @@ class SessionLengthLimiterTest : public testing::Test {
     return now_;
   }
 
-  TestingPrefService local_state_;
+  TestingPrefServiceSimple local_state_;
   MockSessionLengthLimiterDelegate* delegate_;  // Owned by
                                                 // session_length_limiter_.
   scoped_refptr<ImmediateSingleThreadTaskRunner> runner_;

@@ -12,10 +12,12 @@
 #include "base/compiler_specific.h"
 #include "base/debug/leak_tracker.h"
 #include "base/logging.h"
+#include "base/prefs/pref_registry_simple.h"
+#include "base/prefs/pref_service.h"
 #include "base/stl_util.h"
-#include "base/string_number_conversions.h"
 #include "base/string_split.h"
 #include "base/string_util.h"
+#include "base/strings/string_number_conversions.h"
 #include "base/threading/thread.h"
 #include "base/threading/worker_pool.h"
 #include "build/build_config.h"
@@ -35,7 +37,6 @@
 #include "chrome/browser/net/sdch_dictionary_fetcher.h"
 #include "chrome/browser/net/spdyproxy/http_auth_handler_spdyproxy.h"
 #include "chrome/browser/policy/policy_service.h"
-#include "chrome/browser/prefs/pref_service.h"
 #include "chrome/common/chrome_switches.h"
 #include "chrome/common/pref_names.h"
 #include "content/public/browser/browser_thread.h"
@@ -68,6 +69,10 @@
 
 #if defined(USE_NSS) || defined(OS_IOS)
 #include "net/ocsp/nss_ocsp.h"
+#endif
+
+#if !defined(OS_IOS) && !defined(OS_ANDROID)
+#include "net/proxy/proxy_resolver_v8.h"
 #endif
 
 #if defined(OS_CHROMEOS)
@@ -246,7 +251,7 @@ class IOThread::LoggingNetworkChangeObserver
     net::NetworkChangeNotifier::AddNetworkChangeObserver(this);
   }
 
-  ~LoggingNetworkChangeObserver() {
+  virtual ~LoggingNetworkChangeObserver() {
     net::NetworkChangeNotifier::RemoveIPAddressObserver(this);
     net::NetworkChangeNotifier::RemoveConnectionTypeObserver(this);
     net::NetworkChangeNotifier::RemoveNetworkChangeObserver(this);
@@ -350,7 +355,9 @@ IOThread::Globals::Globals()
       ignore_certificate_errors(false),
       http_pipelining_enabled(false),
       testing_fixed_http_port(0),
-      testing_fixed_https_port(0) {}
+      testing_fixed_https_port(0),
+      enable_user_alternate_protocol_ports(false) {
+}
 
 IOThread::Globals::~Globals() {}
 
@@ -367,9 +374,17 @@ IOThread::IOThread(
       sdch_manager_(NULL),
       is_spdy_disabled_by_policy_(false),
       ALLOW_THIS_IN_INITIALIZER_LIST(weak_factory_(this)) {
+#if !defined(OS_IOS) && !defined(OS_ANDROID)
+  net::ProxyResolverV8::RememberDefaultIsolate();
+#endif
   // We call RegisterPrefs() here (instead of inside browser_prefs.cc) to make
   // sure that everything is initialized in the right order.
-  RegisterPrefs(local_state);
+  //
+  // TODO(joi): See if we can fix so it does get registered from
+  // browser_prefs::RegisterLocalState.
+  PrefRegistrySimple* registry = static_cast<PrefRegistrySimple*>(
+      local_state->DeprecatedGetPrefRegistry());
+  RegisterPrefs(registry);
   auth_schemes_ = local_state->GetString(prefs::kAuthSchemes);
   negotiate_disable_cname_lookup_ = local_state->GetBoolean(
       prefs::kDisableAuthNegotiateCnameLookup);
@@ -398,8 +413,8 @@ IOThread::IOThread(
 
 #if defined(ENABLE_CONFIGURATION_POLICY)
   is_spdy_disabled_by_policy_ = policy_service->GetPolicies(
-      policy::POLICY_DOMAIN_CHROME,
-      std::string()).Get(policy::key::kDisableSpdy) != NULL;
+      policy::PolicyNamespace(policy::POLICY_DOMAIN_CHROME, std::string())).Get(
+          policy::key::kDisableSpdy) != NULL;
 #endif  // ENABLE_CONFIGURATION_POLICY
 
   BrowserThread::SetDelegate(BrowserThread::IO, this);
@@ -410,8 +425,7 @@ IOThread::~IOThread() {
   // be multiply constructed.
   BrowserThread::SetDelegate(BrowserThread::IO, NULL);
 
-  if (pref_proxy_config_tracker_.get())
-    pref_proxy_config_tracker_->DetachFromPrefService();
+  pref_proxy_config_tracker_->DetachFromPrefService();
   DCHECK(!globals_);
 }
 
@@ -475,9 +489,13 @@ void IOThread::Init() {
   globals_->cert_verifier.reset(net::CertVerifier::CreateDefault());
   globals_->transport_security_state.reset(new net::TransportSecurityState());
   globals_->ssl_config_service = GetSSLConfigService();
-  if (command_line.HasSwitch(switches::kSpdyProxyOrigin)) {
-    spdyproxy_origin_ =
-        command_line.GetSwitchValueASCII(switches::kSpdyProxyOrigin);
+  if (command_line.HasSwitch(switches::kSpdyProxyAuthOrigin)) {
+    spdyproxy_auth_origin_ =
+        command_line.GetSwitchValueASCII(switches::kSpdyProxyAuthOrigin);
+  } else {
+#if defined(SPDY_PROXY_AUTH_ORIGIN)
+    spdyproxy_auth_origin_ = SPDY_PROXY_AUTH_ORIGIN;
+#endif
   }
   globals_->http_auth_handler_factory.reset(CreateDefaultAuthHandlerFactory(
       globals_->host_resolver.get()));
@@ -503,8 +521,6 @@ void IOThread::Init() {
   }
   if (command_line.HasSwitch(switches::kIgnoreCertificateErrors))
     globals_->ignore_certificate_errors = true;
-  if (command_line.HasSwitch(switches::kEnableHttpPipelining))
-    globals_->http_pipelining_enabled = true;
   if (command_line.HasSwitch(switches::kTestingFixedHttpPort)) {
     globals_->testing_fixed_http_port =
         GetSwitchValueAsInt(command_line, switches::kTestingFixedHttpPort);
@@ -513,12 +529,21 @@ void IOThread::Init() {
     globals_->testing_fixed_https_port =
         GetSwitchValueAsInt(command_line, switches::kTestingFixedHttpsPort);
   }
+  if (command_line.HasSwitch(switches::kEnableQuic)) {
+    globals_->enable_quic.set(true);
+  }
   if (command_line.HasSwitch(switches::kOriginPortToForceQuicOn)) {
     globals_->origin_port_to_force_quic_on.set(
         GetSwitchValueAsInt(command_line,
                             switches::kOriginPortToForceQuicOn));
   }
-
+  if (command_line.HasSwitch(switches::kUseSpdyOverQuic)) {
+    globals_->use_spdy_over_quic.set(true);
+  }
+  if (command_line.HasSwitch(
+          switches::kEnableUserAlternateProtocolPorts)) {
+    globals_->enable_user_alternate_protocol_ports = true;
+  }
   InitializeNetworkOptions(command_line);
 
   net::HttpNetworkSession::Params session_params;
@@ -720,21 +745,21 @@ void IOThread::EnableSpdy(const std::string& mode) {
 }
 
 // static
-void IOThread::RegisterPrefs(PrefService* local_state) {
-  local_state->RegisterStringPref(prefs::kAuthSchemes,
-                                  "basic,digest,ntlm,negotiate,"
-                                  "spdyproxy");
-  local_state->RegisterBooleanPref(prefs::kDisableAuthNegotiateCnameLookup,
-                                   false);
-  local_state->RegisterBooleanPref(prefs::kEnableAuthNegotiatePort, false);
-  local_state->RegisterStringPref(prefs::kAuthServerWhitelist, "");
-  local_state->RegisterStringPref(prefs::kAuthNegotiateDelegateWhitelist, "");
-  local_state->RegisterStringPref(prefs::kGSSAPILibraryName, "");
-  local_state->RegisterStringPref(prefs::kSpdyProxyOrigin, "");
-  local_state->RegisterBooleanPref(prefs::kEnableReferrers, true);
-  local_state->RegisterInt64Pref(prefs::kHttpReceivedContentLength, 0);
-  local_state->RegisterInt64Pref(prefs::kHttpOriginalContentLength, 0);
-  local_state->RegisterBooleanPref(
+void IOThread::RegisterPrefs(PrefRegistrySimple* registry) {
+  registry->RegisterStringPref(prefs::kAuthSchemes,
+                               "basic,digest,ntlm,negotiate,"
+                               "spdyproxy");
+  registry->RegisterBooleanPref(prefs::kDisableAuthNegotiateCnameLookup,
+                                false);
+  registry->RegisterBooleanPref(prefs::kEnableAuthNegotiatePort, false);
+  registry->RegisterStringPref(prefs::kAuthServerWhitelist, "");
+  registry->RegisterStringPref(prefs::kAuthNegotiateDelegateWhitelist, "");
+  registry->RegisterStringPref(prefs::kGSSAPILibraryName, "");
+  registry->RegisterStringPref(prefs::kSpdyProxyAuthOrigin, "");
+  registry->RegisterBooleanPref(prefs::kEnableReferrers, true);
+  registry->RegisterInt64Pref(prefs::kHttpReceivedContentLength, 0);
+  registry->RegisterInt64Pref(prefs::kHttpOriginalContentLength, 0);
+  registry->RegisterBooleanPref(
       prefs::kBuiltInDnsClientEnabled,
       chrome_browser_net::ConfigureAsyncDnsFieldTrial());
 }
@@ -763,8 +788,8 @@ net::HttpAuthHandlerFactory* IOThread::CreateDefaultAuthHandlerFactory(
           resolver, gssapi_library_name_, negotiate_disable_cname_lookup_,
           negotiate_enable_port_));
 
-  if (!spdyproxy_origin_.empty()) {
-    GURL origin_url(spdyproxy_origin_);
+  if (!spdyproxy_auth_origin_.empty()) {
+    GURL origin_url(spdyproxy_auth_origin_);
     if (origin_url.is_valid()) {
       registry_factory->RegisterSchemeFactory(
           "spdyproxy",
@@ -772,7 +797,7 @@ net::HttpAuthHandlerFactory* IOThread::CreateDefaultAuthHandlerFactory(
     } else {
       LOG(WARNING) << "Skipping creation of SpdyProxy auth handler since "
                    << "authorized origin is invalid: "
-                   << spdyproxy_origin_;
+                   << spdyproxy_auth_origin_;
     }
   }
 
@@ -822,8 +847,12 @@ void IOThread::InitializeNetworkSessionParams(
       &params->enable_spdy_ping_based_connection_checking);
   globals_->spdy_default_protocol.CopyToIfSet(
       &params->spdy_default_protocol);
+  globals_->enable_quic.CopyToIfSet(&params->enable_quic);
   globals_->origin_port_to_force_quic_on.CopyToIfSet(
       &params->origin_port_to_force_quic_on);
+  globals_->use_spdy_over_quic.CopyToIfSet(&params->use_spdy_over_quic);
+  params->enable_user_alternate_protocol_ports =
+      globals_->enable_user_alternate_protocol_ports;
 }
 
 net::SSLConfigService* IOThread::GetSSLConfigService() {
@@ -844,14 +873,10 @@ void IOThread::InitSystemRequestContext() {
   // If we're in unit_tests, IOThread may not be run.
   if (!BrowserThread::IsMessageLoopValid(BrowserThread::IO))
     return;
-  bool wait_for_first_update = (pref_proxy_config_tracker_.get() != NULL);
   ChromeProxyConfigService* proxy_config_service =
-      ProxyServiceFactory::CreateProxyConfigService(wait_for_first_update);
+      ProxyServiceFactory::CreateProxyConfigService();
   system_proxy_config_service_.reset(proxy_config_service);
-  if (pref_proxy_config_tracker_.get()) {
-    pref_proxy_config_tracker_->SetChromeProxyConfigService(
-        proxy_config_service);
-  }
+  pref_proxy_config_tracker_->SetChromeProxyConfigService(proxy_config_service);
   system_url_request_context_getter_ =
       new SystemURLRequestContextGetter(this);
   // Safe to post an unretained this pointer, since IOThread is

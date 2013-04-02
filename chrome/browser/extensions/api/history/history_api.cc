@@ -8,15 +8,16 @@
 #include "base/bind_helpers.h"
 #include "base/callback.h"
 #include "base/json/json_writer.h"
+#include "base/lazy_instance.h"
 #include "base/memory/scoped_ptr.h"
 #include "base/message_loop.h"
-#include "base/string_number_conversions.h"
+#include "base/strings/string_number_conversions.h"
 #include "base/time.h"
 #include "base/utf_string_conversions.h"
 #include "base/values.h"
 #include "chrome/browser/extensions/event_router.h"
 #include "chrome/browser/extensions/extension_system.h"
-#include "chrome/browser/history/history.h"
+#include "chrome/browser/history/history_service.h"
 #include "chrome/browser/history/history_service_factory.h"
 #include "chrome/browser/history/history_types.h"
 #include "chrome/browser/history/visit_filter.h"
@@ -212,6 +213,14 @@ void HistoryAPI::Shutdown() {
   ExtensionSystem::Get(profile_)->event_router()->UnregisterObserver(this);
 }
 
+static base::LazyInstance<ProfileKeyedAPIFactory<HistoryAPI> >
+g_factory = LAZY_INSTANCE_INITIALIZER;
+
+// static
+ProfileKeyedAPIFactory<HistoryAPI>* HistoryAPI::GetFactoryInstance() {
+  return &g_factory.Get();
+}
+
 void HistoryAPI::OnListenerAdded(const EventListenerInfo& details) {
   history_event_router_.reset(new HistoryEventRouter(profile_));
   ExtensionSystem::Get(profile_)->event_router()->UnregisterObserver(this);
@@ -268,7 +277,7 @@ void HistoryFunctionWithCallback::SendResponseToCallback() {
   Release();  // Balanced in RunImpl().
 }
 
-bool GetMostVisitedHistoryFunction::RunAsyncImpl() {
+bool HistoryGetMostVisitedFunction::RunAsyncImpl() {
   scoped_ptr<GetMostVisited::Params> params =
       GetMostVisited::Params::Create(*args_);
   EXTENSION_FUNCTION_VALIDATE(params.get());
@@ -288,12 +297,12 @@ bool GetMostVisitedHistoryFunction::RunAsyncImpl() {
   HistoryService* hs =
       HistoryServiceFactory::GetForProfile(profile(), Profile::EXPLICIT_ACCESS);
   hs->QueryFilteredURLs(max_results, filter, false, &cancelable_consumer_,
-      base::Bind(&GetMostVisitedHistoryFunction::QueryComplete,
+      base::Bind(&HistoryGetMostVisitedFunction::QueryComplete,
                  base::Unretained(this)));
   return true;
 }
 
-void GetMostVisitedHistoryFunction::QueryComplete(
+void HistoryGetMostVisitedFunction::QueryComplete(
     CancelableRequestProvider::Handle handle,
     const history::FilteredURLList& data) {
   std::vector<linked_ptr<MostVisitedItem> > results;
@@ -308,7 +317,7 @@ void GetMostVisitedHistoryFunction::QueryComplete(
   SendAsyncResponse();
 }
 
-bool GetVisitsHistoryFunction::RunAsyncImpl() {
+bool HistoryGetVisitsFunction::RunAsyncImpl() {
   scoped_ptr<GetVisits::Params> params(GetVisits::Params::Create(*args_));
   EXTENSION_FUNCTION_VALIDATE(params.get());
 
@@ -322,13 +331,13 @@ bool GetVisitsHistoryFunction::RunAsyncImpl() {
   hs->QueryURL(url,
                true,  // Retrieve full history of a URL.
                &cancelable_consumer_,
-               base::Bind(&GetVisitsHistoryFunction::QueryComplete,
+               base::Bind(&HistoryGetVisitsFunction::QueryComplete,
                           base::Unretained(this)));
 
   return true;
 }
 
-void GetVisitsHistoryFunction::QueryComplete(
+void HistoryGetVisitsFunction::QueryComplete(
     HistoryService::Handle request_service,
     bool success,
     const history::URLRow* url_row,
@@ -347,7 +356,7 @@ void GetVisitsHistoryFunction::QueryComplete(
   SendAsyncResponse();
 }
 
-bool SearchHistoryFunction::RunAsyncImpl() {
+bool HistorySearchFunction::RunAsyncImpl() {
   scoped_ptr<Search::Params> params(Search::Params::Create(*args_));
   EXTENSION_FUNCTION_VALIDATE(params.get());
 
@@ -368,13 +377,13 @@ bool SearchHistoryFunction::RunAsyncImpl() {
       HistoryServiceFactory::GetForProfile(profile(),
                                            Profile::EXPLICIT_ACCESS);
   hs->QueryHistory(search_text, options, &cancelable_consumer_,
-                   base::Bind(&SearchHistoryFunction::SearchComplete,
+                   base::Bind(&HistorySearchFunction::SearchComplete,
                               base::Unretained(this)));
 
   return true;
 }
 
-void SearchHistoryFunction::SearchComplete(
+void HistorySearchFunction::SearchComplete(
     HistoryService::Handle request_handle,
     history::QueryResults* results) {
   HistoryItemList history_item_vec;
@@ -391,7 +400,7 @@ void SearchHistoryFunction::SearchComplete(
   SendAsyncResponse();
 }
 
-bool AddUrlHistoryFunction::RunImpl() {
+bool HistoryAddUrlFunction::RunImpl() {
   scoped_ptr<AddUrl::Params> params(AddUrl::Params::Create(*args_));
   EXTENSION_FUNCTION_VALIDATE(params.get());
 
@@ -408,7 +417,7 @@ bool AddUrlHistoryFunction::RunImpl() {
   return true;
 }
 
-bool DeleteUrlHistoryFunction::RunImpl() {
+bool HistoryDeleteUrlFunction::RunImpl() {
   scoped_ptr<DeleteUrl::Params> params(DeleteUrl::Params::Create(*args_));
   EXTENSION_FUNCTION_VALIDATE(params.get());
 
@@ -425,7 +434,7 @@ bool DeleteUrlHistoryFunction::RunImpl() {
   return true;
 }
 
-bool DeleteRangeHistoryFunction::RunAsyncImpl() {
+bool HistoryDeleteRangeFunction::RunAsyncImpl() {
   scoped_ptr<DeleteRange::Params> params(DeleteRange::Params::Create(*args_));
   EXTENSION_FUNCTION_VALIDATE(params.get());
 
@@ -440,18 +449,18 @@ bool DeleteRangeHistoryFunction::RunAsyncImpl() {
       restrict_urls,
       start_time,
       end_time,
-      base::Bind(&DeleteRangeHistoryFunction::DeleteComplete,
+      base::Bind(&HistoryDeleteRangeFunction::DeleteComplete,
                  base::Unretained(this)),
       &task_tracker_);
 
   return true;
 }
 
-void DeleteRangeHistoryFunction::DeleteComplete() {
+void HistoryDeleteRangeFunction::DeleteComplete() {
   SendAsyncResponse();
 }
 
-bool DeleteAllHistoryFunction::RunAsyncImpl() {
+bool HistoryDeleteAllFunction::RunAsyncImpl() {
   std::set<GURL> restrict_urls;
   HistoryService* hs =
       HistoryServiceFactory::GetForProfile(profile(),
@@ -460,14 +469,14 @@ bool DeleteAllHistoryFunction::RunAsyncImpl() {
       restrict_urls,
       base::Time::UnixEpoch(),     // From the beginning of the epoch.
       base::Time::Now(),           // To the current time.
-      base::Bind(&DeleteAllHistoryFunction::DeleteComplete,
+      base::Bind(&HistoryDeleteAllFunction::DeleteComplete,
                  base::Unretained(this)),
       &task_tracker_);
 
   return true;
 }
 
-void DeleteAllHistoryFunction::DeleteComplete() {
+void HistoryDeleteAllFunction::DeleteComplete() {
   SendAsyncResponse();
 }
 

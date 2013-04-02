@@ -25,8 +25,8 @@
 #include "base/message_loop.h"
 #include "base/metrics/histogram.h"
 #include "base/string_number_conversions.h"
+#include "base/strings/utf_offset_string_conversions.h"
 #include "base/time.h"
-#include "base/utf_offset_string_conversions.h"
 #include "base/utf_string_conversions.h"
 #include "content/browser/accessibility/browser_accessibility_gtk.h"
 #include "content/browser/renderer_host/backing_store_gtk.h"
@@ -224,11 +224,6 @@ class RenderWidgetHostViewGtkWidget {
         host_view->is_fullscreen_;
     if (should_close_on_escape && GDK_Escape == event->keyval) {
       host_view->host_->Shutdown();
-    } else if (host_view->host_ &&
-               host_view->host_->KeyPressListenersHandleEvent(
-                   NativeWebKeyboardEvent(reinterpret_cast<GdkEvent*>(
-                       event)))) {
-      return TRUE;
     } else {
       // Send key event to input method.
       host_view->im_context_->ProcessKeyEvent(event);
@@ -883,27 +878,29 @@ void RenderWidgetHostViewGtk::Destroy() {
     gdk_display_keyboard_ungrab(display, GDK_CURRENT_TIME);
   }
 
-  // If this is a popup or fullscreen widget, then we need to destroy the window
-  // that we created to hold it.
-  if (IsPopup() || is_fullscreen_) {
-    GtkWidget* window = gtk_widget_get_parent(view_.get());
+  if (view_.get()) {
+    // If this is a popup or fullscreen widget, then we need to destroy the
+    // window that we created to hold it.
+    if (IsPopup() || is_fullscreen_) {
+      GtkWidget* window = gtk_widget_get_parent(view_.get());
 
-    ui::ActiveWindowWatcherX::RemoveObserver(this);
+      ui::ActiveWindowWatcherX::RemoveObserver(this);
 
-    // Disconnect the destroy handler so that we don't try to shutdown twice.
-    if (is_fullscreen_)
-      g_signal_handler_disconnect(window, destroy_handler_id_);
+      // Disconnect the destroy handler so that we don't try to shutdown twice.
+      if (is_fullscreen_)
+        g_signal_handler_disconnect(window, destroy_handler_id_);
 
-    gtk_widget_destroy(window);
+      gtk_widget_destroy(window);
+    }
+
+    // Remove |view_| from all containers now, so nothing else can hold a
+    // reference to |view_|'s widget except possibly a gtk signal handler if
+    // this code is currently executing within the context of a gtk signal
+    // handler.  Note that |view_| is still alive after this call.  It will be
+    // deallocated in the destructor.
+    // See http://crbug.com/11847 for details.
+    gtk_widget_destroy(view_.get());
   }
-
-  // Remove |view_| from all containers now, so nothing else can hold a
-  // reference to |view_|'s widget except possibly a gtk signal handler if
-  // this code is currently executing within the context of a gtk signal
-  // handler.  Note that |view_| is still alive after this call.  It will be
-  // deallocated in the destructor.
-  // See http://crbug.com/11847 for details.
-  gtk_widget_destroy(view_.get());
 
   // The RenderWidgetHost's destruction led here, so don't call it.
   host_ = NULL;
@@ -952,11 +949,9 @@ void RenderWidgetHostViewGtk::SelectionChanged(const string16& text,
 }
 
 void RenderWidgetHostViewGtk::SelectionBoundsChanged(
-    const gfx::Rect& start_rect,
-    WebKit::WebTextDirection start_direction,
-    const gfx::Rect& end_rect,
-    WebKit::WebTextDirection end_direction) {
-  im_context_->UpdateCaretBounds(gfx::UnionRects(start_rect, end_rect));
+    const ViewHostMsg_SelectionBounds_Params& params) {
+  im_context_->UpdateCaretBounds(
+      gfx::UnionRects(params.anchor_rect, params.focus_rect));
 }
 
 GdkEventButton* RenderWidgetHostViewGtk::GetLastMouseDown() {
@@ -1025,26 +1020,40 @@ BackingStore* RenderWidgetHostViewGtk::AllocBackingStore(
 void RenderWidgetHostViewGtk::CopyFromCompositingSurface(
     const gfx::Rect& src_subrect,
     const gfx::Size& /* dst_size */,
-    const base::Callback<void(bool)>& callback,
-    skia::PlatformBitmap* output) {
-  base::ScopedClosureRunner scoped_callback_runner(base::Bind(callback, false));
+    const base::Callback<void(bool, const SkBitmap&)>& callback) {
+  base::ScopedClosureRunner scoped_callback_runner(
+      base::Bind(callback, false, SkBitmap()));
 
-  gfx::Rect src_subrect_in_view = src_subrect;
-  src_subrect_in_view.Offset(GetViewBounds().OffsetFromOrigin());
+  XID parent_window = ui::GetParentWindow(compositing_surface_);
+  if (parent_window == None)
+    return;
 
-  ui::XScopedImage image(XGetImage(ui::GetXDisplay(), ui::GetX11RootWindow(),
-                                   src_subrect_in_view.x(),
-                                   src_subrect_in_view.y(),
-                                   src_subrect_in_view.width(),
-                                   src_subrect_in_view.height(),
+  // Get the window offset with respect to its parent.
+  XWindowAttributes attr;
+  if (!XGetWindowAttributes(ui::GetXDisplay(), compositing_surface_, &attr))
+    return;
+
+  gfx::Rect src_subrect_in_parent(src_subrect);
+  src_subrect_in_parent.Offset(attr.x, attr.y);
+
+  ui::XScopedImage image(XGetImage(ui::GetXDisplay(), parent_window,
+                                   src_subrect_in_parent.x(),
+                                   src_subrect_in_parent.y(),
+                                   src_subrect_in_parent.width(),
+                                   src_subrect_in_parent.height(),
                                    AllPlanes, ZPixmap));
   if (!image.get())
     return;
 
-  if (!output->Allocate(src_subrect.width(), src_subrect.height(), true))
+  SkBitmap bitmap;
+  bitmap.setConfig(SkBitmap::kARGB_8888_Config,
+                   image->width,
+                   image->height,
+                   image->bytes_per_line);
+  if (!bitmap.allocPixels())
     return;
+  bitmap.setIsOpaque(true);
 
-  const SkBitmap& bitmap = output->GetBitmap();
   const size_t bitmap_size = bitmap.getSize();
   DCHECK_EQ(bitmap_size,
             static_cast<size_t>(image->height * image->bytes_per_line));
@@ -1052,14 +1061,25 @@ void RenderWidgetHostViewGtk::CopyFromCompositingSurface(
   memcpy(pixels, image->data, bitmap_size);
 
   scoped_callback_runner.Release();
-  callback.Run(true);
+  callback.Run(true, bitmap);
+}
+
+void RenderWidgetHostViewGtk::CopyFromCompositingSurfaceToVideoFrame(
+      const gfx::Rect& src_subrect,
+      const scoped_refptr<media::VideoFrame>& target,
+      const base::Callback<void(bool)>& callback) {
+  NOTIMPLEMENTED();
+  callback.Run(false);
+}
+
+bool RenderWidgetHostViewGtk::CanCopyToVideoFrame() const {
+  return false;
 }
 
 void RenderWidgetHostViewGtk::AcceleratedSurfaceBuffersSwapped(
     const GpuHostMsg_AcceleratedSurfaceBuffersSwapped_Params& params,
     int gpu_host_id) {
    AcceleratedSurfaceMsg_BufferPresented_Params ack_params;
-   ack_params.surface_handle = params.surface_handle;
    ack_params.sync_point = 0;
    RenderWidgetHostImpl::AcknowledgeBufferPresent(
       params.route_id, gpu_host_id, ack_params);
@@ -1069,7 +1089,6 @@ void RenderWidgetHostViewGtk::AcceleratedSurfacePostSubBuffer(
     const GpuHostMsg_AcceleratedSurfacePostSubBuffer_Params& params,
     int gpu_host_id) {
    AcceleratedSurfaceMsg_BufferPresented_Params ack_params;
-   ack_params.surface_handle = params.surface_handle;
    ack_params.sync_point = 0;
    RenderWidgetHostImpl::AcknowledgeBufferPresent(
       params.route_id, gpu_host_id, ack_params);
@@ -1267,12 +1286,12 @@ void RenderWidgetHostViewGtk::GetScreenInfo(WebScreenInfo* results) {
 gfx::Rect RenderWidgetHostViewGtk::GetBoundsInRootWindow() {
   GtkWidget* toplevel = gtk_widget_get_toplevel(view_.get());
   if (!toplevel)
-    return gfx::Rect();
+    return GetViewBounds();
 
   GdkRectangle frame_extents;
   GdkWindow* gdk_window = gtk_widget_get_window(toplevel);
   if (!gdk_window)
-    return gfx::Rect();
+    return GetViewBounds();
 
   gdk_window_get_frame_extents(gdk_window, &frame_extents);
   return gfx::Rect(frame_extents.x, frame_extents.y,
@@ -1390,7 +1409,7 @@ bool RenderWidgetHostViewGtk::RetrieveSurrounding(std::string* text,
     return true;
   }
 
-  *text = UTF16ToUTF8AndAdjustOffset(
+  *text = base::UTF16ToUTF8AndAdjustOffset(
       base::StringPiece16(selection_text_), &offset);
   if (offset == string16::npos) {
     NOTREACHED() << "Invalid offset in UTF16 string.";

@@ -44,6 +44,8 @@ class %(class_name)s {
 
   bool Load(const std::string& library_name) WARN_UNUSED_RESULT;
 
+  bool loaded() const { return loaded_; }
+
 %(member_decls)s
 
  private:
@@ -97,7 +99,7 @@ bool %(class_name)s::Load(const std::string& library_name) {
   }
 
 #if defined(%(unique_prefix)s_DLOPEN)
-  library_ = base::LoadNativeLibrary(FilePath(library_name), NULL);
+  library_ = base::LoadNativeLibrary(base::FilePath(library_name), NULL);
   if (!library_)
     return false;
 #endif

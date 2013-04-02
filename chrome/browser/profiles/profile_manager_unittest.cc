@@ -16,7 +16,7 @@
 #include "chrome/browser/bookmarks/bookmark_model_factory.h"
 #include "chrome/browser/browser_process.h"
 #include "chrome/browser/extensions/event_router_forwarder.h"
-#include "chrome/browser/history/history.h"
+#include "chrome/browser/history/history_service.h"
 #include "chrome/browser/history/history_service_factory.h"
 #include "chrome/browser/io_thread.h"
 #include "chrome/browser/prefs/browser_prefs.h"
@@ -56,11 +56,12 @@ namespace testing {
 
 class ProfileManager : public ::ProfileManagerWithoutInit {
  public:
-  explicit ProfileManager(const FilePath& user_data_dir)
+  explicit ProfileManager(const base::FilePath& user_data_dir)
       : ::ProfileManagerWithoutInit(user_data_dir) {}
 
  protected:
-  virtual Profile* CreateProfileHelper(const FilePath& file_path) OVERRIDE {
+  virtual Profile* CreateProfileHelper(
+      const base::FilePath& file_path) OVERRIDE {
     if (!file_util::PathExists(file_path)) {
       if (!file_util::CreateDirectory(file_path))
         return NULL;
@@ -68,7 +69,7 @@ class ProfileManager : public ::ProfileManagerWithoutInit {
     return new TestingProfile(file_path, NULL);
   }
 
-  virtual Profile* CreateProfileAsyncHelper(const FilePath& path,
+  virtual Profile* CreateProfileAsyncHelper(const base::FilePath& path,
                                             Delegate* delegate) OVERRIDE {
     // This is safe while all file operations are done on the FILE thread.
     BrowserThread::PostTask(
@@ -90,7 +91,7 @@ class ProfileManagerTest : public testing::Test {
   };
 
   ProfileManagerTest()
-      : local_state_(static_cast<TestingBrowserProcess*>(g_browser_process)),
+      : local_state_(TestingBrowserProcess::GetGlobal()),
         extension_event_router_forwarder_(new extensions::EventRouterForwarder),
         ui_thread_(BrowserThread::UI, &message_loop_),
         db_thread_(BrowserThread::DB, &message_loop_),
@@ -101,14 +102,13 @@ class ProfileManagerTest : public testing::Test {
     base::SystemMonitor::AllocateSystemIOPorts();
 #endif
     system_monitor_dummy_.reset(new base::SystemMonitor);
-    static_cast<TestingBrowserProcess*>(g_browser_process)->SetIOThread(
-        &io_thread_);
+    TestingBrowserProcess::GetGlobal()->SetIOThread(&io_thread_);
   }
 
   virtual void SetUp() {
     // Create a new temporary directory, and store the path
     ASSERT_TRUE(temp_dir_.CreateUniqueTempDir());
-    static_cast<TestingBrowserProcess*>(g_browser_process)->SetProfileManager(
+    TestingBrowserProcess::GetGlobal()->SetProfileManager(
         new testing::ProfileManager(temp_dir_.path()));
 
 #if defined(OS_CHROMEOS)
@@ -118,8 +118,7 @@ class ProfileManagerTest : public testing::Test {
   }
 
   virtual void TearDown() {
-    static_cast<TestingBrowserProcess*>(g_browser_process)->SetProfileManager(
-        NULL);
+    TestingBrowserProcess::GetGlobal()->SetProfileManager(NULL);
     message_loop_.RunUntilIdle();
   }
 
@@ -147,7 +146,7 @@ class ProfileManagerTest : public testing::Test {
 };
 
 TEST_F(ProfileManagerTest, GetProfile) {
-  FilePath dest_path = temp_dir_.path();
+  base::FilePath dest_path = temp_dir_.path();
   dest_path = dest_path.Append(FILE_PATH_LITERAL("New Profile"));
 
   ProfileManager* profile_manager = g_browser_process->profile_manager();
@@ -161,8 +160,8 @@ TEST_F(ProfileManagerTest, GetProfile) {
 }
 
 TEST_F(ProfileManagerTest, DefaultProfileDir) {
-  FilePath expected_default =
-      FilePath().AppendASCII(chrome::kInitialProfile);
+  base::FilePath expected_default =
+      base::FilePath().AppendASCII(chrome::kInitialProfile);
   EXPECT_EQ(
       expected_default.value(),
       g_browser_process->profile_manager()->GetInitialProfileDir().value());
@@ -176,8 +175,8 @@ TEST_F(ProfileManagerTest, LoggedInProfileDir) {
 
   cl->AppendSwitchASCII(switches::kLoginProfile, profile_dir);
 
-  FilePath expected_default =
-      FilePath().AppendASCII(chrome::kInitialProfile);
+  base::FilePath expected_default =
+      base::FilePath().AppendASCII(chrome::kInitialProfile);
   ProfileManager* profile_manager = g_browser_process->profile_manager();
   EXPECT_EQ(expected_default.value(),
             profile_manager->GetInitialProfileDir().value());
@@ -185,7 +184,7 @@ TEST_F(ProfileManagerTest, LoggedInProfileDir) {
   profile_manager->Observe(chrome::NOTIFICATION_LOGIN_USER_CHANGED,
                            content::NotificationService::AllSources(),
                            content::NotificationService::NoDetails());
-  FilePath expected_logged_in(profile_dir);
+  base::FilePath expected_logged_in(profile_dir);
   EXPECT_EQ(expected_logged_in.value(),
             profile_manager->GetInitialProfileDir().value());
   VLOG(1) << temp_dir_.path().Append(
@@ -195,10 +194,10 @@ TEST_F(ProfileManagerTest, LoggedInProfileDir) {
 #endif
 
 TEST_F(ProfileManagerTest, CreateAndUseTwoProfiles) {
-  FilePath dest_path1 = temp_dir_.path();
+  base::FilePath dest_path1 = temp_dir_.path();
   dest_path1 = dest_path1.Append(FILE_PATH_LITERAL("New Profile 1"));
 
-  FilePath dest_path2 = temp_dir_.path();
+  base::FilePath dest_path2 = temp_dir_.path();
   dest_path2 = dest_path2.Append(FILE_PATH_LITERAL("New Profile 2"));
 
   ProfileManager* profile_manager = g_browser_process->profile_manager();
@@ -227,8 +226,7 @@ TEST_F(ProfileManagerTest, CreateAndUseTwoProfiles) {
   // Make sure any pending tasks run before we destroy the profiles.
   message_loop_.RunUntilIdle();
 
-  static_cast<TestingBrowserProcess*>(g_browser_process)->SetProfileManager(
-      NULL);
+  TestingBrowserProcess::GetGlobal()->SetProfileManager(NULL);
 
   // Make sure history cleans up correctly.
   message_loop_.RunUntilIdle();
@@ -240,8 +238,9 @@ MATCHER(NotFail, "Profile creation failure status is not reported.") {
 }
 
 // Tests asynchronous profile creation mechanism.
+// Crashes: http://crbug.com/89421
 TEST_F(ProfileManagerTest, DISABLED_CreateProfileAsync) {
-  FilePath dest_path =
+  base::FilePath dest_path =
       temp_dir_.path().Append(FILE_PATH_LITERAL("New Profile"));
 
   MockObserver mock_observer;
@@ -250,7 +249,8 @@ TEST_F(ProfileManagerTest, DISABLED_CreateProfileAsync) {
 
   g_browser_process->profile_manager()->CreateProfileAsync(dest_path,
       base::Bind(&MockObserver::OnProfileCreated,
-                 base::Unretained(&mock_observer)), string16(), string16());
+                 base::Unretained(&mock_observer)),
+      string16(), string16(), false);
 
   message_loop_.RunUntilIdle();
 }
@@ -262,7 +262,7 @@ MATCHER(SameNotNull, "The same non-NULL value for all calls.") {
 }
 
 TEST_F(ProfileManagerTest, CreateProfileAsyncMultipleRequests) {
-  FilePath dest_path =
+  base::FilePath dest_path =
       temp_dir_.path().Append(FILE_PATH_LITERAL("New Profile"));
 
   g_created_profile = NULL;
@@ -282,23 +282,23 @@ TEST_F(ProfileManagerTest, CreateProfileAsyncMultipleRequests) {
   profile_manager->CreateProfileAsync(dest_path,
       base::Bind(&MockObserver::OnProfileCreated,
                  base::Unretained(&mock_observer1)),
-                 string16(), string16());
+                 string16(), string16(), false);
   profile_manager->CreateProfileAsync(dest_path,
       base::Bind(&MockObserver::OnProfileCreated,
                  base::Unretained(&mock_observer2)),
-                 string16(), string16());
+                 string16(), string16(), false);
   profile_manager->CreateProfileAsync(dest_path,
       base::Bind(&MockObserver::OnProfileCreated,
                  base::Unretained(&mock_observer3)),
-                 string16(), string16());
+                 string16(), string16(), false);
 
   message_loop_.RunUntilIdle();
 }
 
 TEST_F(ProfileManagerTest, CreateProfilesAsync) {
-  FilePath dest_path1 =
+  base::FilePath dest_path1 =
       temp_dir_.path().Append(FILE_PATH_LITERAL("New Profile 1"));
-  FilePath dest_path2 =
+  base::FilePath dest_path2 =
       temp_dir_.path().Append(FILE_PATH_LITERAL("New Profile 2"));
 
   MockObserver mock_observer;
@@ -309,10 +309,12 @@ TEST_F(ProfileManagerTest, CreateProfilesAsync) {
 
   profile_manager->CreateProfileAsync(dest_path1,
       base::Bind(&MockObserver::OnProfileCreated,
-                 base::Unretained(&mock_observer)), string16(), string16());
+                 base::Unretained(&mock_observer)),
+                 string16(), string16(), false);
   profile_manager->CreateProfileAsync(dest_path2,
       base::Bind(&MockObserver::OnProfileCreated,
-                 base::Unretained(&mock_observer)), string16(), string16());
+                 base::Unretained(&mock_observer)),
+                 string16(), string16(), false);
 
   message_loop_.RunUntilIdle();
 }
@@ -332,11 +334,11 @@ TEST_F(ProfileManagerTest, AutoloadProfilesWithBackgroundApps) {
 
   EXPECT_EQ(0u, cache.GetNumberOfProfiles());
   cache.AddProfileToCache(cache.GetUserDataDir().AppendASCII("path_1"),
-                          ASCIIToUTF16("name_1"), string16(), 0);
+                          ASCIIToUTF16("name_1"), string16(), 0, false);
   cache.AddProfileToCache(cache.GetUserDataDir().AppendASCII("path_2"),
-                          ASCIIToUTF16("name_2"), string16(), 0);
+                          ASCIIToUTF16("name_2"), string16(), 0, false);
   cache.AddProfileToCache(cache.GetUserDataDir().AppendASCII("path_3"),
-                          ASCIIToUTF16("name_3"), string16(), 0);
+                          ASCIIToUTF16("name_3"), string16(), 0, false);
   cache.SetBackgroundStatusOfProfileAtIndex(0, true);
   cache.SetBackgroundStatusOfProfileAtIndex(2, true);
   EXPECT_EQ(3u, cache.GetNumberOfProfiles());
@@ -354,9 +356,9 @@ TEST_F(ProfileManagerTest, DoNotAutoloadProfilesIfBackgroundModeOff) {
 
   EXPECT_EQ(0u, cache.GetNumberOfProfiles());
   cache.AddProfileToCache(cache.GetUserDataDir().AppendASCII("path_1"),
-                          ASCIIToUTF16("name_1"), string16(), 0);
+                          ASCIIToUTF16("name_1"), string16(), 0, false);
   cache.AddProfileToCache(cache.GetUserDataDir().AppendASCII("path_2"),
-                          ASCIIToUTF16("name_2"), string16(), 0);
+                          ASCIIToUTF16("name_2"), string16(), 0, false);
   cache.SetBackgroundStatusOfProfileAtIndex(0, false);
   cache.SetBackgroundStatusOfProfileAtIndex(1, true);
   EXPECT_EQ(2u, cache.GetNumberOfProfiles());
@@ -367,7 +369,7 @@ TEST_F(ProfileManagerTest, DoNotAutoloadProfilesIfBackgroundModeOff) {
 }
 
 TEST_F(ProfileManagerTest, InitProfileUserPrefs) {
-  FilePath dest_path = temp_dir_.path();
+  base::FilePath dest_path = temp_dir_.path();
   dest_path = dest_path.Append(FILE_PATH_LITERAL("New Profile"));
 
   ProfileManager* profile_manager = g_browser_process->profile_manager();
@@ -393,7 +395,7 @@ TEST_F(ProfileManagerTest, InitProfileUserPrefs) {
 // Tests that a new profile's entry in the profile info cache is setup with the
 // same values that are in the profile prefs.
 TEST_F(ProfileManagerTest, InitProfileInfoCacheForAProfile) {
-  FilePath dest_path = temp_dir_.path();
+  base::FilePath dest_path = temp_dir_.path();
   dest_path = dest_path.Append(FILE_PATH_LITERAL("New Profile"));
 
   ProfileManager* profile_manager = g_browser_process->profile_manager();
@@ -420,10 +422,10 @@ TEST_F(ProfileManagerTest, InitProfileInfoCacheForAProfile) {
 #if !defined(OS_ANDROID)
 // There's no Browser object on Android.
 TEST_F(ProfileManagerTest, LastOpenedProfiles) {
-  FilePath dest_path1 = temp_dir_.path();
+  base::FilePath dest_path1 = temp_dir_.path();
   dest_path1 = dest_path1.Append(FILE_PATH_LITERAL("New Profile 1"));
 
-  FilePath dest_path2 = temp_dir_.path();
+  base::FilePath dest_path2 = temp_dir_.path();
   dest_path2 = dest_path2.Append(FILE_PATH_LITERAL("New Profile 2"));
 
   ProfileManager* profile_manager = g_browser_process->profile_manager();
@@ -484,10 +486,10 @@ TEST_F(ProfileManagerTest, LastOpenedProfiles) {
 }
 
 TEST_F(ProfileManagerTest, LastOpenedProfilesAtShutdown) {
-  FilePath dest_path1 = temp_dir_.path();
+  base::FilePath dest_path1 = temp_dir_.path();
   dest_path1 = dest_path1.Append(FILE_PATH_LITERAL("New Profile 1"));
 
-  FilePath dest_path2 = temp_dir_.path();
+  base::FilePath dest_path2 = temp_dir_.path();
   dest_path2 = dest_path2.Append(FILE_PATH_LITERAL("New Profile 2"));
 
   ProfileManager* profile_manager = g_browser_process->profile_manager();
@@ -533,9 +535,9 @@ TEST_F(ProfileManagerTest, LastOpenedProfilesAtShutdown) {
 }
 
 TEST_F(ProfileManagerTest, LastOpenedProfilesDoesNotContainIncognito) {
-  FilePath dest_path1 = temp_dir_.path();
+  base::FilePath dest_path1 = temp_dir_.path();
   dest_path1 = dest_path1.Append(FILE_PATH_LITERAL("New Profile 1"));
-  FilePath dest_path2 = temp_dir_.path();
+  base::FilePath dest_path2 = temp_dir_.path();
   dest_path2 = dest_path2.Append(FILE_PATH_LITERAL("New Profile 2"));
 
   ProfileManager* profile_manager = g_browser_process->profile_manager();

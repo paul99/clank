@@ -26,15 +26,14 @@ namespace fileapi {
 class LocalFileUtilTest : public testing::Test {
  public:
   LocalFileUtilTest()
-      : local_file_util_(new LocalFileUtil()) {
-  }
+      : test_helper_(GURL("http://foo/"), kFileSystemTypeTest) {}
 
-  void SetUp() {
+  virtual void SetUp() {
     ASSERT_TRUE(data_dir_.CreateUniqueTempDir());
-    test_helper_.SetUp(data_dir_.path(), FileUtil());
+    test_helper_.SetUp(data_dir_.path());
   }
 
-  void TearDown() {
+  virtual void TearDown() {
     test_helper_.TearDown();
   }
 
@@ -45,14 +44,14 @@ class LocalFileUtilTest : public testing::Test {
   }
 
   LocalFileUtil* FileUtil() {
-    return local_file_util_.get();
+    return static_cast<LocalFileUtil*>(test_helper_.file_util());
   }
 
   FileSystemURL Path(const std::string& file_name) {
     return test_helper_.CreateURLFromUTF8(file_name);
   }
 
-  FilePath LocalPath(const char *file_name) {
+  base::FilePath LocalPath(const char *file_name) {
     return test_helper_.GetLocalPathFromASCII(file_name);
   }
 

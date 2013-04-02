@@ -33,7 +33,6 @@ class Window;
 namespace client {
 class ActivationClient;
 class FocusClient;
-class StackingClient;
 class UserActionClient;
 }
 }
@@ -62,6 +61,10 @@ class ShadowController;
 class VisibilityController;
 class WindowModalityController;
 }
+}
+
+namespace message_center {
+class MessageCenter;
 }
 
 namespace ash {
@@ -102,6 +105,7 @@ class DisplayManager;
 class DragDropController;
 class EventClientImpl;
 class EventRewriterEventFilter;
+class EventTransformationHandler;
 class FocusCycler;
 class MouseCursorEventFilter;
 class OutputConfiguratorAnimation;
@@ -187,8 +191,11 @@ class ASH_EXPORT Shell
                                           int container_id);
 
   // Returns the list of containers that match |container_id| in
-  // all root windows.
-  static std::vector<aura::Window*> GetAllContainers(int container_id);
+  // all root windows. If |priority_root| is given, the container
+  // in the |priority_root| will be inserted at the top of the list.
+  static std::vector<aura::Window*> GetContainersFromAllRootWindows(
+      int container_id,
+      aura::RootWindow* priority_root);
 
   // True if "launcher per display" feature  is enabled.
   static bool IsLauncherPerDisplayEnabled();
@@ -317,6 +324,9 @@ class ASH_EXPORT Shell
   internal::MouseCursorEventFilter* mouse_cursor_filter() {
     return mouse_cursor_filter_.get();
   }
+  internal::EventTransformationHandler* event_transformation_handler() {
+    return event_transformation_handler_.get();
+  }
   CursorManager* cursor_manager() { return &cursor_manager_; }
 
   ShellDelegate* delegate() { return delegate_.get(); }
@@ -425,11 +435,12 @@ class ASH_EXPORT Shell
   }
 #endif  // defined(OS_CHROMEOS)
 
- aura::client::StackingClient* stacking_client();
+  RootWindowHostFactory* root_window_host_factory() {
+    return root_window_host_factory_.get();
+  }
 
- RootWindowHostFactory* root_window_host_factory() {
-   return root_window_host_factory_.get();
- }
+  // MessageCenter is a global list of currently displayed notifications.
+  message_center::MessageCenter* message_center();
 
  private:
   FRIEND_TEST_ALL_PREFIXES(ExtendedDesktopTest, TestCursor);
@@ -507,7 +518,6 @@ class ASH_EXPORT Shell
 
   scoped_ptr<internal::AppListController> app_list_controller_;
 
-  scoped_ptr<aura::client::StackingClient> stacking_client_;
   scoped_ptr<internal::ActivationController> activation_controller_;
   scoped_ptr<internal::CaptureController> capture_controller_;
   scoped_ptr<internal::DragDropController> drag_drop_controller_;
@@ -535,6 +545,8 @@ class ASH_EXPORT Shell
   scoped_ptr<internal::ScreenPositionController> screen_position_controller_;
   scoped_ptr<internal::SystemModalContainerEventFilter> modality_filter_;
   scoped_ptr<internal::EventClientImpl> event_client_;
+  scoped_ptr<internal::EventTransformationHandler>
+      event_transformation_handler_;
   scoped_ptr<RootWindowHostFactory> root_window_host_factory_;
 
   // An event filter that rewrites or drops an event.
@@ -570,6 +582,8 @@ class ASH_EXPORT Shell
   // Receives output change events and udpates the display manager.
   scoped_ptr<internal::DisplayChangeObserverX11> display_change_observer_;
 #endif  // defined(OS_CHROMEOS)
+
+  scoped_ptr<message_center::MessageCenter> message_center_;
 
   CursorManager cursor_manager_;
 

@@ -32,7 +32,7 @@ class FileSystemFileUtilTest : public testing::Test {
   FileSystemFileUtilTest() {
   }
 
-  void SetUp() {
+  virtual void SetUp() {
   }
 
   FileSystemOperationContext* NewContext(
@@ -51,16 +51,16 @@ class FileSystemFileUtilTest : public testing::Test {
       bool copy) {
     base::ScopedTempDir base_dir;
     ASSERT_TRUE(base_dir.CreateUniqueTempDir());
-    scoped_ptr<ObfuscatedFileUtil> file_util(
-        new ObfuscatedFileUtil(base_dir.path()));
     LocalFileSystemTestOriginHelper src_helper(src_origin, src_type);
     src_helper.SetUp(base_dir.path(),
                      false,  // unlimited quota
-                     NULL,  // quota::QuotaManagerProxy
-                     file_util.get());
+                     NULL);  // quota::QuotaManagerProxy
 
     LocalFileSystemTestOriginHelper dest_helper(dest_origin, dest_type);
-    dest_helper.SetUp(src_helper.file_system_context(), file_util.get());
+    dest_helper.SetUp(src_helper.file_system_context());
+
+    ObfuscatedFileUtil* file_util = static_cast<ObfuscatedFileUtil*>(
+        src_helper.file_util());
 
     // Set up all the source data.
     scoped_ptr<FileSystemOperationContext> context;
@@ -116,7 +116,7 @@ class FileSystemFileUtilTest : public testing::Test {
           dest_root.path().Append(test_case.path));
 
       base::PlatformFileInfo dest_file_info;
-      FilePath data_path;
+      base::FilePath data_path;
       context.reset(NewContext(&dest_helper));
       EXPECT_EQ(base::PLATFORM_FILE_OK,
           file_util->GetFileInfo(
@@ -140,7 +140,7 @@ class FileSystemFileUtilTest : public testing::Test {
       FileSystemURL url = src_root.WithPath(
           src_root.path().Append(test_case.path));
       base::PlatformFileInfo src_file_info;
-      FilePath data_path;
+      base::FilePath data_path;
       context.reset(NewContext(&src_helper));
       base::PlatformFileError expected_result;
       if (copy)

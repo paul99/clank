@@ -50,6 +50,7 @@ class StreamTextureManagerAndroid;
 
 namespace content {
 class GpuChannelManager;
+struct GpuRenderingStats;
 class GpuWatchdog;
 class SyncPointMessageFilter;
 
@@ -161,8 +162,8 @@ class GpuChannel : public IPC::Listener,
   void OnCreateOffscreenCommandBuffer(
       const gfx::Size& size,
       const GPUCreateCommandBufferConfig& init_params,
-      IPC::Message* reply_message);
-  void OnDestroyCommandBuffer(int32 route_id, IPC::Message* reply_message);
+      int32* route_id);
+  void OnDestroyCommandBuffer(int32 route_id);
 
 #if defined(OS_ANDROID)
   // Register the StreamTextureProxy class with the gpu process so that all
@@ -179,7 +180,7 @@ class GpuChannel : public IPC::Listener,
 
   // Collect rendering stats.
   void OnCollectRenderingStatsForSurface(
-      int32 surface_id, IPC::Message* reply_message);
+      int32 surface_id, GpuRenderingStats* stats);
 
   // Decrement the count of unhandled IPC messages and defer preemption.
   void MessageProcessed();

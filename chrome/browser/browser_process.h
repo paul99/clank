@@ -29,6 +29,7 @@ class IntranetRedirectDetector;
 class IOThread;
 class MetricsService;
 class NotificationUIManager;
+class PrefRegistrySimple;
 class PrefService;
 class Profile;
 class ProfileManager;
@@ -55,6 +56,12 @@ namespace extensions {
 class EventRouterForwarder;
 }
 
+#if defined(ENABLE_MESSAGE_CENTER)
+namespace message_center {
+class MessageCenter;
+}
+#endif
+
 namespace net {
 class URLRequestContextGetter;
 }
@@ -71,7 +78,7 @@ class PrerenderTracker;
 namespace printing {
 class BackgroundPrintingManager;
 class PrintJobManager;
-class PrintPreviewTabController;
+class PrintPreviewDialogController;
 }
 
 namespace safe_browsing {
@@ -111,6 +118,11 @@ class BrowserProcess {
 
   // Returns the manager for desktop notifications.
   virtual NotificationUIManager* notification_ui_manager() = 0;
+
+#if defined(ENABLE_MESSAGE_CENTER)
+  // MessageCenter is a global list of currently displayed notifications.
+  virtual message_center::MessageCenter* message_center() = 0;
+#endif
 
   // Returns the state object for the thread that we perform I/O
   // coordination on (network requests, communication with renderers,
@@ -152,8 +164,8 @@ class BrowserProcess {
   virtual bool IsShuttingDown() = 0;
 
   virtual printing::PrintJobManager* print_job_manager() = 0;
-  virtual printing::PrintPreviewTabController*
-      print_preview_tab_controller() = 0;
+  virtual printing::PrintPreviewDialogController*
+      print_preview_dialog_controller() = 0;
   virtual printing::BackgroundPrintingManager*
       background_printing_manager() = 0;
 

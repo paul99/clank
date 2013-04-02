@@ -26,7 +26,8 @@
 #include "chrome/browser/browser_process.h"
 #include "chrome/browser/defaults.h"
 #include "chrome/browser/net/chrome_cookie_notification_details.h"
-#include "chrome/browser/prefs/pref_service.h"
+#include "chrome/browser/prefs/pref_registry_syncable.h"
+#include "chrome/browser/prefs/pref_service_syncable.h"
 #include "chrome/browser/profiles/profile.h"
 #include "chrome/browser/signin/signin_manager.h"
 #include "chrome/browser/signin/signin_manager_factory.h"
@@ -73,6 +74,10 @@
 #include "sync/notifier/invalidator_state.h"
 #include "sync/util/cryptographer.h"
 #include "ui/base/l10n/l10n_util.h"
+
+#if defined(OS_ANDROID)
+#include "sync/internal_api/public/read_transaction.h"
+#endif
 
 using browser_sync::ChangeProcessor;
 using browser_sync::DataTypeController;
@@ -133,7 +138,10 @@ ProfileSyncService::ProfileSyncService(ProfileSyncComponentsFactory* factory,
       profile_(profile),
       // |profile| may be NULL in unit tests.
       sync_prefs_(profile_ ? profile_->GetPrefs() : NULL),
-      invalidator_storage_(profile_ ? profile_->GetPrefs(): NULL),
+      invalidator_storage_(
+          profile_ ? profile_->GetPrefs(): NULL,
+          profile_ ? static_cast<PrefRegistrySyncable*>(
+              profile_->GetPrefs()->DeprecatedGetPrefRegistry()) : NULL),
       sync_service_url_(kDevServerUrl),
       is_first_time_sync_configure_(false),
       backend_initialized_(false),
@@ -162,6 +170,8 @@ ProfileSyncService::ProfileSyncService(ProfileSyncComponentsFactory* factory,
       channel == chrome::VersionInfo::CHANNEL_BETA) {
     sync_service_url_ = GURL(kSyncServerUrl);
   }
+  if (signin_)
+    signin_->signin_global_error()->AddProvider(this);
 }
 
 ProfileSyncService::~ProfileSyncService() {
@@ -185,6 +195,19 @@ bool ProfileSyncService::IsSyncTokenAvailable() {
     return false;
   return token_service->HasTokenForService(GaiaConstants::kSyncService);
 }
+#if defined(OS_ANDROID)
+bool ProfileSyncService::ShouldEnablePasswordSyncForAndroid() const {
+  const syncer::ModelTypeSet registered_types = GetRegisteredDataTypes();
+  const syncer::ModelTypeSet preferred_types =
+      sync_prefs_.GetPreferredDataTypes(registered_types);
+  if (!preferred_types.Has(syncer::PASSWORDS))
+    return false;
+  // On Android we do not want to prompt user to enter a passphrase. If
+  // passwords cannot be decrypted we just disable them.
+  syncer::ReadTransaction trans(FROM_HERE, GetUserShare());
+  return IsCryptographerReady(&trans);
+}
+#endif
 
 void ProfileSyncService::Initialize() {
   DCHECK(!invalidator_registrar_.get());
@@ -299,6 +322,9 @@ void ProfileSyncService::RegisterAuthNotifications() {
                  content::Source<TokenService>(token_service));
   registrar_.Add(this,
                  chrome::NOTIFICATION_GOOGLE_SIGNIN_SUCCESSFUL,
+                 content::Source<Profile>(profile_));
+  registrar_.Add(this,
+                 chrome::NOTIFICATION_GOOGLE_SIGNED_OUT,
                  content::Source<Profile>(profile_));
 }
 
@@ -523,7 +549,7 @@ void ProfileSyncService::EmitInvalidationForTest(
 
   const syncer::ObjectIdInvalidationMap& invalidation_map =
       ObjectIdSetToInvalidationMap(notify_ids, payload);
-  OnIncomingInvalidation(invalidation_map, syncer::REMOTE_INVALIDATION);
+  OnIncomingInvalidation(invalidation_map);
 }
 
 void ProfileSyncService::Shutdown() {
@@ -531,6 +557,9 @@ void ProfileSyncService::Shutdown() {
   // Reset |invalidator_registrar_| first so that ShutdownImpl cannot
   // use it.
   invalidator_registrar_.reset();
+
+  if (signin_)
+    signin_->signin_global_error()->RemoveProvider(this);
 
   ShutdownImpl(false);
 }
@@ -590,7 +619,9 @@ void ProfileSyncService::ShutdownImpl(bool sync_disabled) {
   encrypt_everything_ = false;
   encrypted_types_ = syncer::SyncEncryptionHandler::SensitiveTypes();
   passphrase_required_reason_ = syncer::REASON_PASSPHRASE_NOT_REQUIRED;
-  last_auth_error_ = AuthError::None();
+  // Revert to "no auth error".
+  if (last_auth_error_.state() != GoogleServiceAuthError::NONE)
+    UpdateAuthErrorState(GoogleServiceAuthError::None());
 
   if (sync_global_error_.get()) {
     GlobalErrorServiceFactory::GetForProfile(profile_)->RemoveGlobalError(
@@ -607,13 +638,6 @@ void ProfileSyncService::DisableForUser() {
   invalidator_storage_.Clear();
   ClearUnrecoverableError();
   ShutdownImpl(true);
-
-  // TODO(atwilson): Don't call SignOut() on *any* platform - move this into
-  // the UI layer if needed (sync activity should never result in the user
-  // being logged out of all chrome services).
-  if (!auto_start_enabled_ && !signin_->GetAuthenticatedUsername().empty())
-    signin_->SignOut();
-
   NotifyObservers();
 }
 
@@ -728,10 +752,8 @@ void ProfileSyncService::OnInvalidatorStateChange(
 }
 
 void ProfileSyncService::OnIncomingInvalidation(
-    const syncer::ObjectIdInvalidationMap& invalidation_map,
-    syncer::IncomingInvalidationSource source) {
-  invalidator_registrar_->DispatchInvalidationsToHandlers(invalidation_map,
-                                                          source);
+    const syncer::ObjectIdInvalidationMap& invalidation_map) {
+  invalidator_registrar_->DispatchInvalidationsToHandlers(invalidation_map);
 }
 
 void ProfileSyncService::OnBackendInitialized(
@@ -907,6 +929,12 @@ void ProfileSyncService::OnExperimentsChanged(
                                       true);
   }
 
+  if (experiments.full_history_sync) {
+    about_flags::SetExperimentEnabled(g_browser_process->local_state(),
+                                      syncer::kFullHistorySyncFlag,
+                                      true);
+  }
+
   current_experiments_ = experiments;
 }
 
@@ -914,7 +942,11 @@ void ProfileSyncService::UpdateAuthErrorState(const AuthError& error) {
   is_auth_in_progress_ = false;
   last_auth_error_ = error;
 
-  // Fan the notification out to interested UI-thread components.
+  // Fan the notification out to interested UI-thread components. Notify the
+  // SigninGlobalError first so it reflects the latest auth state before we
+  // notify observers.
+  if (signin())
+    signin()->signin_global_error()->AuthStatusChanged();
   NotifyObservers();
 }
 
@@ -952,6 +984,9 @@ void ProfileSyncService::OnStopSyncingPermanently() {
   UpdateAuthErrorState(AuthError(AuthError::SERVICE_UNAVAILABLE));
   sync_prefs_.SetStartSuppressed(true);
   DisableForUser();
+  // If signout is allowed, signout the user on a dashboard clear.
+  if (!auto_start_enabled_)  // Skip signout on ChromeOS/Android.
+    signin_->SignOut();
 }
 
 void ProfileSyncService::OnPassphraseRequired(
@@ -977,16 +1012,26 @@ void ProfileSyncService::OnPassphraseRequired(
 
 void ProfileSyncService::OnPassphraseAccepted() {
   DVLOG(1) << "Received OnPassphraseAccepted.";
-  // If we are not using an explicit passphrase, and we have a cache of the gaia
-  // password, use it for encryption at this point.
-  DCHECK(cached_passphrase_.empty()) <<
-      "Passphrase no longer required but there is still a cached passphrase";
+
+  // If the pending keys were resolved via keystore, it's possible we never
+  // consumed our cached passphrase. Clear it now.
+  if (!cached_passphrase_.empty())
+    cached_passphrase_.clear();
 
   // Reset passphrase_required_reason_ since we know we no longer require the
   // passphrase. We do this here rather than down in ResolvePassphraseRequired()
   // because that can be called by OnPassphraseRequired() if no encrypted data
   // types are enabled, and we don't want to clobber the true passphrase error.
   passphrase_required_reason_ = syncer::REASON_PASSPHRASE_NOT_REQUIRED;
+
+#if defined(OS_ANDROID)
+  // Re-enable passwords if we have disabled them.
+  if (failed_datatypes_handler_.GetFailedTypes().Has(syncer::PASSWORDS) &&
+      ShouldEnablePasswordSyncForAndroid()) {
+    // Clear the data type errors.
+    failed_datatypes_handler_.OnUserChoseDatatypes();
+  }
+#endif
 
   // Make sure the data types that depend on the passphrase are started at
   // this time.
@@ -1215,6 +1260,10 @@ const AuthError& ProfileSyncService::GetAuthError() const {
   return last_auth_error_;
 }
 
+GoogleServiceAuthError ProfileSyncService::GetAuthStatus() const {
+  return GetAuthError();
+}
+
 bool ProfileSyncService::FirstSetupInProgress() const {
   return !HasSyncSetupCompleted() && setup_in_progress_;
 }
@@ -1288,6 +1337,7 @@ void ProfileSyncService::UpdateSelectedTypesHistogram(
     syncer::PASSWORDS,
     syncer::PREFERENCES,
     syncer::SESSIONS,
+    syncer::SYNCED_NOTIFICATIONS,
     syncer::THEMES,
     syncer::TYPED_URLS
   };
@@ -1301,11 +1351,12 @@ void ProfileSyncService::UpdateSelectedTypesHistogram(
     browser_sync::user_selectable_type::PASSWORDS,
     browser_sync::user_selectable_type::PREFERENCES,
     browser_sync::user_selectable_type::SESSIONS,
+    browser_sync::user_selectable_type::SYNCED_NOTIFICATIONS,
     browser_sync::user_selectable_type::THEMES,
     browser_sync::user_selectable_type::TYPED_URLS
   };
 
-  COMPILE_ASSERT(20 == syncer::MODEL_TYPE_COUNT, UpdateCustomConfigHistogram);
+  COMPILE_ASSERT(23 == syncer::MODEL_TYPE_COUNT, UpdateCustomConfigHistogram);
   COMPILE_ASSERT(arraysize(model_types) ==
                  browser_sync::user_selectable_type::SELECTABLE_DATATYPE_COUNT,
                  UpdateCustomConfigHistogram);
@@ -1437,7 +1488,8 @@ void ProfileSyncService::ConfigureDataTypeManager() {
         factory_->CreateDataTypeManager(debug_info_listener_,
                                         backend_.get(),
                                         &data_type_controllers_,
-                                        this));
+                                        this,
+                                        &failed_datatypes_handler_));
 
     // We create the migrator at the same time.
     migrator_.reset(
@@ -1447,6 +1499,13 @@ void ProfileSyncService::ConfigureDataTypeManager() {
             base::Bind(&ProfileSyncService::StartSyncingWithServer,
                        base::Unretained(this))));
   }
+
+#if defined(OS_ANDROID)
+  if (GetPreferredDataTypes().Has(syncer::PASSWORDS) &&
+      !ShouldEnablePasswordSyncForAndroid()) {
+    DisableBrokenDatatype(syncer::PASSWORDS, FROM_HERE, "Not supported.");
+  }
+#endif
 
   const syncer::ModelTypeSet types = GetPreferredDataTypes();
   if (IsPassphraseRequiredForDecryption()) {
@@ -1728,8 +1787,8 @@ void ProfileSyncService::Observe(int type,
       const GoogleServiceSigninSuccessDetails* successful =
           content::Details<const GoogleServiceSigninSuccessDetails>(
               details).ptr();
-      DCHECK(!successful->password.empty());
-      if (!sync_prefs_.IsStartSuppressed()) {
+      if (!sync_prefs_.IsStartSuppressed() &&
+          !successful->password.empty()) {
         cached_passphrase_ = successful->password;
         // Try to consume the passphrase we just cached. If the sync backend
         // is not running yet, the passphrase will remain cached until the
@@ -1782,6 +1841,10 @@ void ProfileSyncService::Observe(int type,
         TryStart();
       break;
     }
+    case chrome::NOTIFICATION_GOOGLE_SIGNED_OUT:
+      // Disable sync if the user is signed out.
+      DisableForUser();
+      break;
     default: {
       NOTREACHED();
     }
@@ -1835,6 +1898,10 @@ bool ProfileSyncService::ShouldPushChanges() {
 void ProfileSyncService::StopAndSuppress() {
   sync_prefs_.SetStartSuppressed(true);
   ShutdownImpl(false);
+}
+
+bool ProfileSyncService::IsStartSuppressed() const {
+  return sync_prefs_.IsStartSuppressed();
 }
 
 void ProfileSyncService::UnsuppressAndStart() {

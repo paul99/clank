@@ -37,22 +37,22 @@ class ConnectionTesterDelegate : public ConnectionTester::Delegate {
        completed_connection_test_suite_count_(0) {
   }
 
-  virtual void OnStartConnectionTestSuite() {
+  virtual void OnStartConnectionTestSuite() OVERRIDE {
     start_connection_test_suite_count_++;
   }
 
   virtual void OnStartConnectionTestExperiment(
-      const ConnectionTester::Experiment& experiment) {
+      const ConnectionTester::Experiment& experiment) OVERRIDE {
     start_connection_test_experiment_count_++;
   }
 
   virtual void OnCompletedConnectionTestExperiment(
       const ConnectionTester::Experiment& experiment,
-      int result) {
+      int result) OVERRIDE {
     completed_connection_test_experiment_count_++;
   }
 
-  virtual void OnCompletedConnectionTestSuite() {
+  virtual void OnCompletedConnectionTestSuite() OVERRIDE {
     completed_connection_test_suite_count_++;
     MessageLoop::current()->Quit();
   }
@@ -92,7 +92,7 @@ class ConnectionTesterTest : public PlatformTest {
         test_server_(net::TestServer::TYPE_HTTP,
                      net::TestServer::kLocalhost,
                      // Nothing is read in this directory.
-                     FilePath(FILE_PATH_LITERAL("chrome"))),
+                     base::FilePath(FILE_PATH_LITERAL("chrome"))),
         proxy_script_fetcher_context_(new net::URLRequestContext) {
     InitializeRequestContext();
   }

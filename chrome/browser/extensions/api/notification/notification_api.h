@@ -7,7 +7,6 @@
 
 #include "base/memory/ref_counted.h"
 #include "chrome/browser/extensions/api/api_function.h"
-#include "chrome/browser/extensions/api/api_resource_manager.h"
 #include "chrome/browser/extensions/extension_function.h"
 #include "chrome/common/extensions/api/experimental_notification.h"
 
@@ -15,24 +14,65 @@
 
 namespace extensions {
 
-class ApiResourceEventNotifier;
+class NotificationApiFunction : public ApiFunction {
+ protected:
+  NotificationApiFunction();
+  virtual ~NotificationApiFunction();
 
-class NotificationShowFunction : public ApiFunction {
+  void CreateNotification(
+      const std::string& id,
+      api::experimental_notification::NotificationOptions* options);
+};
+
+class NotificationCreateFunction : public NotificationApiFunction {
  public:
-  NotificationShowFunction();
+  NotificationCreateFunction();
 
   // UIThreadExtensionFunction:
   virtual bool RunImpl() OVERRIDE;
 
  protected:
-  virtual ~NotificationShowFunction();
+  virtual ~NotificationCreateFunction();
 
  private:
-  scoped_ptr<api::experimental_notification::Show::Params> params_;
-  int src_id_;
-  ApiResourceEventNotifier* event_notifier_;
+  scoped_ptr<api::experimental_notification::Create::Params> params_;
 
-  DECLARE_EXTENSION_FUNCTION_NAME("experimental.notification.show")
+  DECLARE_EXTENSION_FUNCTION("experimental.notification.create",
+                             EXPERIMENTAL_NOTIFICATION_CREATE)
+};
+
+class NotificationUpdateFunction : public NotificationApiFunction {
+ public:
+  NotificationUpdateFunction();
+
+  // UIThreadExtensionFunction:
+  virtual bool RunImpl() OVERRIDE;
+
+ protected:
+  virtual ~NotificationUpdateFunction();
+
+ private:
+  scoped_ptr<api::experimental_notification::Update::Params> params_;
+
+  DECLARE_EXTENSION_FUNCTION("experimental.notification.update",
+                             EXPERIMENTAL_NOTIFICATION_UPDATE)
+};
+
+class NotificationDeleteFunction : public NotificationApiFunction {
+ public:
+  NotificationDeleteFunction();
+
+  // UIThreadExtensionFunction:
+  virtual bool RunImpl() OVERRIDE;
+
+ protected:
+  virtual ~NotificationDeleteFunction();
+
+ private:
+  scoped_ptr<api::experimental_notification::Delete::Params> params_;
+
+  DECLARE_EXTENSION_FUNCTION("experimental.notification.delete",
+                             EXPERIMENTAL_NOTIFICATION_DELETE)
 };
 
 }  // namespace extensions

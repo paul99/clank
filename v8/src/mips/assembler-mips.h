@@ -72,20 +72,23 @@ namespace internal {
 // Core register.
 struct Register {
   static const int kNumRegisters = v8::internal::kNumRegisters;
-  static const int kNumAllocatableRegisters = 14;  // v0 through t7.
+  static const int kMaxNumAllocatableRegisters = 14;  // v0 through t7.
   static const int kSizeInBytes = 4;
+  static const int kGPRsPerNonFPUDouble = 2;
+
+  inline static int NumAllocatableRegisters();
 
   static int ToAllocationIndex(Register reg) {
     return reg.code() - 2;  // zero_reg and 'at' are skipped.
   }
 
   static Register FromAllocationIndex(int index) {
-    ASSERT(index >= 0 && index < kNumAllocatableRegisters);
+    ASSERT(index >= 0 && index < kMaxNumAllocatableRegisters);
     return from_code(index + 2);  // zero_reg and 'at' are skipped.
   }
 
   static const char* AllocationIndexToString(int index) {
-    ASSERT(index >= 0 && index < kNumAllocatableRegisters);
+    ASSERT(index >= 0 && index < kMaxNumAllocatableRegisters);
     const char* const names[] = {
       "v0",
       "v1",
@@ -186,7 +189,7 @@ Register ToRegister(int num);
 
 // Coprocessor register.
 struct FPURegister {
-  static const int kNumRegisters = v8::internal::kNumFPURegisters;
+  static const int kMaxNumRegisters = v8::internal::kNumFPURegisters;
 
   // TODO(plind): Warning, inconsistent numbering here. kNumFPURegisters refers
   // to number of 32-bit FPU regs, but kNumAllocatableRegisters refers to
@@ -197,36 +200,17 @@ struct FPURegister {
   //  f28: 0.0
   //  f30: scratch register.
   static const int kNumReservedRegisters = 2;
-  static const int kNumAllocatableRegisters = kNumRegisters / 2 -
+  static const int kMaxNumAllocatableRegisters = kMaxNumRegisters / 2 -
       kNumReservedRegisters;
 
-
+  inline static int NumRegisters();
+  inline static int NumAllocatableRegisters();
   inline static int ToAllocationIndex(FPURegister reg);
+  static const char* AllocationIndexToString(int index);
 
   static FPURegister FromAllocationIndex(int index) {
-    ASSERT(index >= 0 && index < kNumAllocatableRegisters);
+    ASSERT(index >= 0 && index < kMaxNumAllocatableRegisters);
     return from_code(index * 2);
-  }
-
-  static const char* AllocationIndexToString(int index) {
-    ASSERT(index >= 0 && index < kNumAllocatableRegisters);
-    const char* const names[] = {
-      "f0",
-      "f2",
-      "f4",
-      "f6",
-      "f8",
-      "f10",
-      "f12",
-      "f14",
-      "f16",
-      "f18",
-      "f20",
-      "f22",
-      "f24",
-      "f26"
-    };
-    return names[index];
   }
 
   static FPURegister from_code(int code) {
@@ -234,7 +218,7 @@ struct FPURegister {
     return r;
   }
 
-  bool is_valid() const { return 0 <= code_ && code_ < kNumFPURegisters ; }
+  bool is_valid() const { return 0 <= code_ && code_ < kMaxNumRegisters ; }
   bool is(FPURegister creg) const { return code_ == creg.code_; }
   FPURegister low() const {
     // Find low reg of a Double-reg pair, which is the reg itself.
@@ -316,6 +300,9 @@ const FPURegister f29 = { 29 };
 const FPURegister f30 = { 30 };
 const FPURegister f31 = { 31 };
 
+const Register sfpd_lo  = { kRegister_t6_Code };
+const Register sfpd_hi  = { kRegister_t7_Code };
+
 // Register aliases.
 // cp is assumed to be a callee saved register.
 // Defined using #define instead of "static const Register&" because Clang
@@ -361,7 +348,7 @@ class Operand BASE_EMBEDDED {
  public:
   // Immediate.
   INLINE(explicit Operand(int32_t immediate,
-         RelocInfo::Mode rmode = RelocInfo::NONE));
+         RelocInfo::Mode rmode = RelocInfo::NONE32));
   INLINE(explicit Operand(const ExternalReference& f));
   INLINE(explicit Operand(const char* s));
   INLINE(explicit Operand(Object** opp));
@@ -503,6 +490,7 @@ class CpuFeatures : public AllStatic {
   static unsigned supported_;
   static unsigned found_by_runtime_probing_;
 
+  friend class ExternalReference;
   DISALLOW_COPY_AND_ASSIGN(CpuFeatures);
 };
 
@@ -818,6 +806,7 @@ class Assembler : public AssemblerBase {
   void add_d(FPURegister fd, FPURegister fs, FPURegister ft);
   void sub_d(FPURegister fd, FPURegister fs, FPURegister ft);
   void mul_d(FPURegister fd, FPURegister fs, FPURegister ft);
+  void madd_d(FPURegister fd, FPURegister fr, FPURegister fs, FPURegister ft);
   void div_d(FPURegister fd, FPURegister fs, FPURegister ft);
   void abs_d(FPURegister fd, FPURegister fs);
   void mov_d(FPURegister fd, FPURegister fs);
@@ -1153,6 +1142,13 @@ class Assembler : public AssemblerBase {
 
   void GenInstrRegister(Opcode opcode,
                         SecondaryField fmt,
+                        FPURegister ft,
+                        FPURegister fs,
+                        FPURegister fd,
+                        SecondaryField func = NULLSF);
+
+  void GenInstrRegister(Opcode opcode,
+                        FPURegister fr,
                         FPURegister ft,
                         FPURegister fs,
                         FPURegister fd,

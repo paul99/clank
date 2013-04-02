@@ -42,19 +42,13 @@ IPC_STRUCT_BEGIN(GPUCreateCommandBufferConfig)
   IPC_STRUCT_MEMBER(gfx::GpuPreference, gpu_preference)
 IPC_STRUCT_END()
 
-IPC_STRUCT_BEGIN(GpuHostMsg_AcceleratedSurfaceNew_Params)
-  IPC_STRUCT_MEMBER(int32, surface_id)
-  IPC_STRUCT_MEMBER(uint64, surface_handle)
-  IPC_STRUCT_MEMBER(std::string, mailbox_name)
-  IPC_STRUCT_MEMBER(int32, route_id)
-IPC_STRUCT_END()
-
 #undef IPC_MESSAGE_EXPORT
 #define IPC_MESSAGE_EXPORT CONTENT_EXPORT
 IPC_STRUCT_BEGIN(GpuHostMsg_AcceleratedSurfaceBuffersSwapped_Params)
   IPC_STRUCT_MEMBER(int32, surface_id)
   IPC_STRUCT_MEMBER(uint64, surface_handle)
   IPC_STRUCT_MEMBER(int32, route_id)
+  IPC_STRUCT_MEMBER(std::string, mailbox_name)
   IPC_STRUCT_MEMBER(gfx::Size, size)
 #if defined(OS_MACOSX)
   IPC_STRUCT_MEMBER(gfx::PluginWindowHandle, window)
@@ -71,6 +65,7 @@ IPC_STRUCT_BEGIN(GpuHostMsg_AcceleratedSurfacePostSubBuffer_Params)
   IPC_STRUCT_MEMBER(int, y)
   IPC_STRUCT_MEMBER(int, width)
   IPC_STRUCT_MEMBER(int, height)
+  IPC_STRUCT_MEMBER(std::string, mailbox_name)
   IPC_STRUCT_MEMBER(gfx::Size, surface_size)
 #if defined(OS_MACOSX)
   IPC_STRUCT_MEMBER(gfx::PluginWindowHandle, window)
@@ -83,7 +78,7 @@ IPC_STRUCT_BEGIN(GpuHostMsg_AcceleratedSurfaceRelease_Params)
 IPC_STRUCT_END()
 
 IPC_STRUCT_BEGIN(AcceleratedSurfaceMsg_BufferPresented_Params)
-  IPC_STRUCT_MEMBER(uint64, surface_handle)
+  IPC_STRUCT_MEMBER(std::string, mailbox_name)
   IPC_STRUCT_MEMBER(uint32, sync_point)
 IPC_STRUCT_END()
 
@@ -167,6 +162,8 @@ IPC_STRUCT_TRAITS_END()
 
 IPC_STRUCT_TRAITS_BEGIN(content::GPUVideoMemoryUsageStats)
   IPC_STRUCT_TRAITS_MEMBER(process_map)
+  IPC_STRUCT_TRAITS_MEMBER(bytes_allocated)
+  IPC_STRUCT_TRAITS_MEMBER(bytes_allocated_historical_max)
 IPC_STRUCT_TRAITS_END()
 
 IPC_STRUCT_TRAITS_BEGIN(content::GPUMemoryUmaStats)
@@ -358,13 +355,6 @@ IPC_MESSAGE_CONTROL3(GpuHostMsg_ResizeView,
                      int32 /* route_id */,
                      gfx::Size /* size */)
 
-// This message is sent from the GPU process to the browser to notify about a
-// new or resized surface in the GPU.  The browser allocates any resources
-// needed for it on its end and replies with an ACK containing any shared
-// resources/identifiers to be used in the GPU.
-IPC_MESSAGE_CONTROL1(GpuHostMsg_AcceleratedSurfaceNew,
-                     GpuHostMsg_AcceleratedSurfaceNew_Params)
-
 // Same as above with a rect of the part of the surface that changed.
 IPC_MESSAGE_CONTROL1(GpuHostMsg_AcceleratedSurfaceBuffersSwapped,
                      GpuHostMsg_AcceleratedSurfaceBuffersSwapped_Params)
@@ -478,13 +468,9 @@ IPC_MESSAGE_ROUTED1(GpuStreamTextureMsg_MatrixChanged,
 // Initialize a command buffer with the given number of command entries.
 // Returns the shared memory handle for the command buffer mapped to the
 // calling process.
-IPC_SYNC_MESSAGE_ROUTED0_1(GpuCommandBufferMsg_Initialize,
+IPC_SYNC_MESSAGE_ROUTED1_1(GpuCommandBufferMsg_Initialize,
+                           base::SharedMemoryHandle /* shared_state */,
                            bool /* result */)
-
-// Sets the shared memory buffer used to hold the CommandBufferSharedState,
-// used to transmit the current state.
-IPC_SYNC_MESSAGE_ROUTED1_0(GpuCommandBufferMsg_SetSharedStateBuffer,
-                           int32 /* shm_id */)
 
 // Sets the shared memory buffer used for commands.
 IPC_SYNC_MESSAGE_ROUTED1_0(GpuCommandBufferMsg_SetGetBuffer,
@@ -522,24 +508,16 @@ IPC_MESSAGE_ROUTED0(GpuCommandBufferMsg_Rescheduled)
 IPC_MESSAGE_ROUTED1(GpuCommandBufferMsg_ConsoleMsg,
                     GPUCommandBufferConsoleMessage /* msg */)
 
-// Create a shared memory transfer buffer. Returns an id that can be used to
-// identify the transfer buffer from a comment.
-IPC_SYNC_MESSAGE_ROUTED2_1(GpuCommandBufferMsg_CreateTransferBuffer,
-                           uint32 /* size */,
-                           int32 /* id_request (-1 means any) */,
-                           int32 /* id */)
-
 // Register an existing shared memory transfer buffer. Returns an id that can be
 // used to identify the transfer buffer from a command buffer.
-IPC_SYNC_MESSAGE_ROUTED3_1(GpuCommandBufferMsg_RegisterTransferBuffer,
-                           base::SharedMemoryHandle /* transfer_buffer */,
-                           uint32 /* size */,
-                           int32 /* id_request (-1 means any) */,
-                           int32 /* id */)
+IPC_MESSAGE_ROUTED3(GpuCommandBufferMsg_RegisterTransferBuffer,
+                    int32 /* id */,
+                    base::SharedMemoryHandle /* transfer_buffer */,
+                    uint32 /* size */)
 
 // Destroy a previously created transfer buffer.
-IPC_SYNC_MESSAGE_ROUTED1_0(GpuCommandBufferMsg_DestroyTransferBuffer,
-                           int32 /* id */)
+IPC_MESSAGE_ROUTED1(GpuCommandBufferMsg_DestroyTransferBuffer,
+                    int32 /* id */)
 
 // Get the shared memory handle for a transfer buffer mapped to the callers
 // process.
@@ -556,24 +534,6 @@ IPC_SYNC_MESSAGE_ROUTED1_1(GpuCommandBufferMsg_CreateVideoDecoder,
 // Release all resources held by the named hardware video decoder.
 IPC_SYNC_MESSAGE_ROUTED1_0(GpuCommandBufferMsg_DestroyVideoDecoder,
                            int /* route_id */)
-
-// Send from command buffer stub to proxy when window is invalid and must be
-// repainted.
-IPC_MESSAGE_ROUTED0(GpuCommandBufferMsg_NotifyRepaint)
-
-// Tells the GPU process to resize an offscreen frame buffer.
-IPC_MESSAGE_ROUTED1(GpuCommandBufferMsg_ResizeOffscreenFrameBuffer,
-                    gfx::Size /* size */)
-
-#if defined(OS_MACOSX)
-// On Mac OS X the GPU plugin must be offscreen, because there is no
-// true cross-process window hierarchy. For this reason we must send
-// resize events explicitly to the command buffer stub so it can
-// reallocate its backing store and send the new one back to the
-// browser. This message is currently used only on 10.6 and later.
-IPC_MESSAGE_ROUTED1(GpuCommandBufferMsg_SetWindowSize,
-                    gfx::Size /* size */)
-#endif
 
 // Tells the proxy that there was an error and the command buffer had to be
 // destroyed for some reason.

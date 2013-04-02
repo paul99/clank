@@ -109,6 +109,9 @@ string16 InterruptReasonStatusMessage(int reason) {
     case content::DOWNLOAD_INTERRUPT_REASON_FILE_SECURITY_CHECK_FAILED:
       string_id = IDS_DOWNLOAD_INTERRUPTED_STATUS_SECURITY_CHECK_FAILED;
       break;
+    case content::DOWNLOAD_INTERRUPT_REASON_FILE_TOO_SHORT:
+      string_id = IDS_DOWNLOAD_INTERRUPTED_STATUS_FILE_TOO_SHORT;
+      break;
     case content::DOWNLOAD_INTERRUPT_REASON_NETWORK_FAILED:
       string_id = IDS_DOWNLOAD_INTERRUPTED_STATUS_NETWORK_ERROR;
       break;
@@ -171,6 +174,9 @@ string16 InterruptReasonMessage(int reason) {
     case content::DOWNLOAD_INTERRUPT_REASON_FILE_SECURITY_CHECK_FAILED:
       string_id = IDS_DOWNLOAD_INTERRUPTED_DESCRIPTION_SECURITY_CHECK_FAILED;
       break;
+    case content::DOWNLOAD_INTERRUPT_REASON_FILE_TOO_SHORT:
+      string_id = IDS_DOWNLOAD_INTERRUPTED_DESCRIPTION_FILE_TOO_SHORT;
+      break;
     case content::DOWNLOAD_INTERRUPT_REASON_NETWORK_FAILED:
       string_id = IDS_DOWNLOAD_INTERRUPTED_DESCRIPTION_NETWORK_ERROR;
       break;
@@ -216,10 +222,6 @@ DownloadItemModel::DownloadItemModel(DownloadItem* download)
 }
 
 DownloadItemModel::~DownloadItemModel() {
-}
-
-void DownloadItemModel::CancelTask() {
-  download_->Cancel(true /* update history service */);
 }
 
 string16 DownloadItemModel::GetInterruptReasonText() const {
@@ -300,6 +302,7 @@ string16 DownloadItemModel::GetWarningText(const gfx::Font& font,
       }
 
     case content::DOWNLOAD_DANGER_TYPE_DANGEROUS_CONTENT:
+    case content::DOWNLOAD_DANGER_TYPE_DANGEROUS_HOST:
       return l10n_util::GetStringFUTF16(
           IDS_PROMPT_MALICIOUS_DOWNLOAD_CONTENT,
           ui::ElideFilename(download_->GetFileNameToReportUser(),
@@ -313,6 +316,7 @@ string16 DownloadItemModel::GetWarningText(const gfx::Font& font,
 
     case content::DOWNLOAD_DANGER_TYPE_NOT_DANGEROUS:
     case content::DOWNLOAD_DANGER_TYPE_MAYBE_DANGEROUS_CONTENT:
+    case content::DOWNLOAD_DANGER_TYPE_USER_VALIDATED:
     case content::DOWNLOAD_DANGER_TYPE_MAX:
       NOTREACHED();
   }
@@ -348,7 +352,7 @@ int DownloadItemModel::PercentComplete() const {
 }
 
 bool DownloadItemModel::IsDangerous() const {
-  return download_->GetSafetyState() == DownloadItem::DANGEROUS;
+  return download_->IsDangerous();
 }
 
 bool DownloadItemModel::IsMalicious() const {
@@ -358,10 +362,12 @@ bool DownloadItemModel::IsMalicious() const {
     case content::DOWNLOAD_DANGER_TYPE_DANGEROUS_URL:
     case content::DOWNLOAD_DANGER_TYPE_DANGEROUS_CONTENT:
     case content::DOWNLOAD_DANGER_TYPE_UNCOMMON_CONTENT:
+    case content::DOWNLOAD_DANGER_TYPE_DANGEROUS_HOST:
       return true;
 
     case content::DOWNLOAD_DANGER_TYPE_NOT_DANGEROUS:
     case content::DOWNLOAD_DANGER_TYPE_MAYBE_DANGEROUS_CONTENT:
+    case content::DOWNLOAD_DANGER_TYPE_USER_VALIDATED:
     case content::DOWNLOAD_DANGER_TYPE_MAX:
       // We shouldn't get any of these due to the IsDangerous() test above.
       NOTREACHED();
@@ -371,6 +377,35 @@ bool DownloadItemModel::IsMalicious() const {
   }
   NOTREACHED();
   return false;
+}
+
+bool DownloadItemModel::ShouldRemoveFromShelfWhenComplete() const {
+  // If the download was already opened automatically, it should be removed.
+  if (download_->GetAutoOpened())
+    return true;
+
+  // If the download is interrupted or cancelled, it should not be removed.
+  if (download_->IsInterrupted() || download_->IsCancelled())
+    return false;
+
+  // If the download is dangerous or malicious, we should display a warning on
+  // the shelf until the user accepts the download.
+  if (IsDangerous())
+    return false;
+
+  // If the download is an extension, temporary, or will be opened
+  // automatically, then it should be removed from the shelf on completion.
+  // TODO(asanka): The logic for deciding opening behavior should be in a
+  //               central location. http://crbug.com/167702
+  return (download_crx_util::IsExtensionDownload(*download_) ||
+          download_->IsTemporary() ||
+          download_->GetOpenWhenComplete() ||
+          download_->ShouldOpenFileBasedOnExtension());
+}
+
+bool DownloadItemModel::ShouldShowDownloadStartedAnimation() const {
+  return !download_->IsSavePackageDownload() &&
+      !download_crx_util::IsExtensionDownload(*download_);
 }
 
 bool DownloadItemModel::ShouldShowInShelf() const {

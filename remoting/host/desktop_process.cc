@@ -16,6 +16,7 @@
 #include "remoting/base/auto_thread.h"
 #include "remoting/base/auto_thread_task_runner.h"
 #include "remoting/host/chromoting_messages.h"
+#include "remoting/host/desktop_environment.h"
 #include "remoting/host/desktop_session_agent.h"
 
 namespace remoting {
@@ -32,6 +33,12 @@ DesktopProcess::DesktopProcess(
 DesktopProcess::~DesktopProcess() {
   DCHECK(!daemon_channel_);
   DCHECK(!desktop_agent_);
+}
+
+DesktopEnvironmentFactory& DesktopProcess::desktop_environment_factory() {
+  DCHECK(caller_task_runner_->BelongsToCurrentThread());
+
+  return *desktop_environment_factory_;
 }
 
 void DesktopProcess::OnNetworkProcessDisconnected() {
@@ -73,8 +80,26 @@ void DesktopProcess::OnChannelError() {
   caller_task_runner_ = NULL;
 }
 
-bool DesktopProcess::Start() {
+bool DesktopProcess::Start(
+    scoped_ptr<DesktopEnvironmentFactory> desktop_environment_factory) {
   DCHECK(caller_task_runner_->BelongsToCurrentThread());
+  DCHECK(!desktop_environment_factory_);
+  DCHECK(desktop_environment_factory);
+
+  desktop_environment_factory_ = desktop_environment_factory.Pass();
+
+  // Launch the audio capturing thread.
+  scoped_refptr<AutoThreadTaskRunner> audio_task_runner;
+#if defined(OS_WIN)
+  // On Windows the AudioCapturer requires COM, so we run a single-threaded
+  // apartment, which requires a UI thread.
+  audio_task_runner = AutoThread::CreateWithLoopAndComInitTypes(
+      "ChromotingAudioThread", caller_task_runner_, MessageLoop::TYPE_UI,
+      AutoThread::COM_INIT_STA);
+#else // !defined(OS_WIN)
+  audio_task_runner = AutoThread::CreateWithType(
+      "ChromotingAudioThread", caller_task_runner_, MessageLoop::TYPE_IO);
+#endif // !defined(OS_WIN)
 
   // Launch the input thread.
   scoped_refptr<AutoThreadTaskRunner> input_task_runner =
@@ -91,7 +116,8 @@ bool DesktopProcess::Start() {
       AutoThread::Create("Video capture thread", caller_task_runner_);
 
   // Create a desktop agent.
-  desktop_agent_ = DesktopSessionAgent::Create(caller_task_runner_,
+  desktop_agent_ = DesktopSessionAgent::Create(audio_task_runner,
+                                               caller_task_runner_,
                                                input_task_runner,
                                                io_task_runner,
                                                video_capture_task_runner);

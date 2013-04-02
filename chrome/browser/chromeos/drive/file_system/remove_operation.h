@@ -11,11 +11,13 @@
 #include "chrome/browser/chromeos/drive/drive_resource_metadata.h"
 #include "chrome/browser/google_apis/gdata_errorcode.h"
 
-class FilePath;
 class GURL;
 
+namespace base {
+class FilePath;
+}
+
 namespace google_apis {
-class DriveServiceInterface;
 }
 
 namespace drive {
@@ -23,6 +25,7 @@ namespace drive {
 class DriveCache;
 class DriveEntryProto;
 class DriveFileSystem;
+class DriveScheduler;
 
 namespace file_system {
 
@@ -33,7 +36,7 @@ class OperationObserver;
 // metadata to reflect the new state.
 class RemoveOperation {
  public:
-  RemoveOperation(google_apis::DriveServiceInterface* drive_service,
+  RemoveOperation(DriveScheduler* drive_scheduler,
                   DriveCache* cache,
                   DriveResourceMetadata* metadata,
                   OperationObserver* observer);
@@ -42,7 +45,7 @@ class RemoveOperation {
   // Perform the remove operation on the file at drive path |file_path|.
   // Invokes |callback| when finished with the result of the operation.
   // |callback| must not be null.
-  virtual void Remove(const FilePath& file_path,
+  virtual void Remove(const base::FilePath& file_path,
                       bool is_recursive,
                       const FileOperationCallback& callback);
 
@@ -67,9 +70,9 @@ class RemoveOperation {
   void NotifyDirectoryChanged(
       const FileOperationCallback& callback,
       DriveFileError error,
-      const FilePath& directory_path);
+      const base::FilePath& directory_path);
 
-  google_apis::DriveServiceInterface* drive_service_;
+  DriveScheduler* drive_scheduler_;
   DriveCache* cache_;
   DriveResourceMetadata* metadata_;
   OperationObserver* observer_;

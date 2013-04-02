@@ -88,7 +88,7 @@ class PermissionsUpdaterTest : public ExtensionServiceTestBase {
 };
 
 scoped_refptr<Extension> LoadManifest(std::string* error) {
-  FilePath path;
+  base::FilePath path;
   PathService::Get(chrome::DIR_TEST_DATA, &path);
   path = path.AppendASCII("extensions")
       .AppendASCII("api_test")
@@ -102,7 +102,7 @@ scoped_refptr<Extension> LoadManifest(std::string* error) {
     return NULL;
 
   scoped_refptr<Extension> extension = Extension::Create(
-      path.DirName(), Extension::INTERNAL,
+      path.DirName(), Manifest::INTERNAL,
       *static_cast<DictionaryValue*>(result.get()), Extension::NO_FLAGS, error);
   return extension;
 }

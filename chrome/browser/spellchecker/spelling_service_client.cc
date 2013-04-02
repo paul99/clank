@@ -8,27 +8,33 @@
 #include "base/json/json_reader.h"
 #include "base/json/string_escape.h"
 #include "base/logging.h"
+#include "base/metrics/field_trial.h"
+#include "base/prefs/pref_service.h"
 #include "base/string_util.h"
 #include "base/stringprintf.h"
 #include "base/utf_string_conversions.h"
 #include "base/values.h"
-#include "chrome/browser/prefs/pref_service.h"
 #include "chrome/browser/profiles/profile.h"
 #include "chrome/common/chrome_switches.h"
 #include "chrome/common/pref_names.h"
 #include "chrome/common/spellcheck_result.h"
-#include "content/public/browser/browser_thread.h"
 #include "google_apis/google_api_keys.h"
 #include "net/base/load_flags.h"
 #include "net/url_request/url_fetcher.h"
-#include "unicode/uloc.h"
+#include "third_party/icu/public/common/unicode/uloc.h"
 
 // Use the public URL to the Spelling service on Chromium.
 #ifndef SPELLING_SERVICE_URL
 #define SPELLING_SERVICE_URL "https://www.googleapis.com/rpc"
 #endif
 
-SpellingServiceClient::SpellingServiceClient() : tag_(0) {
+namespace {
+// Constants for the spellcheck field trial.
+const char kSpellcheckFieldTrialName[] = "Spellcheck";
+const char kSpellcheckFieldTrialSuggestionsGroupName[] = "Suggestions";
+}  // namespace
+
+SpellingServiceClient::SpellingServiceClient() {
 }
 
 SpellingServiceClient::~SpellingServiceClient() {
@@ -36,7 +42,6 @@ SpellingServiceClient::~SpellingServiceClient() {
 
 bool SpellingServiceClient::RequestTextCheck(
     Profile* profile,
-    int tag,
     ServiceType type,
     const string16& text,
     const TextCheckCompleteCallback& callback) {
@@ -77,10 +82,10 @@ bool SpellingServiceClient::RequestTextCheck(
       "\"text\":\"%s\","
       "\"language\":\"%s\","
       "\"originCountry\":\"%s\","
-      "\"key\":\"%s\""
+      "\"key\":%s"
       "}"
       "}";
-  std::string api_key = google_apis::GetAPIKey();
+  std::string api_key = base::GetDoubleQuotedJson(google_apis::GetAPIKey());
   std::string request = base::StringPrintf(
       kSpellingRequest,
       type,
@@ -97,7 +102,6 @@ bool SpellingServiceClient::RequestTextCheck(
   fetcher_->SetLoadFlags(
       net::LOAD_DO_NOT_SEND_COOKIES | net::LOAD_DO_NOT_SAVE_COOKIES);
   fetcher_->Start();
-  tag_ = tag;
   text_ = text;
   callback_ = callback;
   return true;
@@ -105,8 +109,11 @@ bool SpellingServiceClient::RequestTextCheck(
 
 bool SpellingServiceClient::IsAvailable(Profile* profile, ServiceType type) {
   const PrefService* pref = profile->GetPrefs();
+  // If prefs don't allow spellchecking or if the profile is off the record,
+  // the spelling service should be unavailable.
   if (!pref->GetBoolean(prefs::kEnableContinuousSpellcheck) ||
-      !pref->GetBoolean(prefs::kSpellCheckUseSpellingService))
+      !pref->GetBoolean(prefs::kSpellCheckUseSpellingService) ||
+      profile->IsOffTheRecord())
     return false;
 
   // If the locale for spelling has not been set, the user has not decided to
@@ -118,7 +125,7 @@ bool SpellingServiceClient::IsAvailable(Profile* profile, ServiceType type) {
   // If we do not have the spelling service enabled, then we are only available
   // for SUGGEST.
   const CommandLine* command_line = CommandLine::ForCurrentProcess();
-  if (!command_line->HasSwitch(switches::kUseSpellingService))
+  if (command_line->HasSwitch(switches::kUseSpellingSuggestions))
     return type == SUGGEST;
 
   // Finally, if all options are available, we only enable only SUGGEST
@@ -128,8 +135,15 @@ bool SpellingServiceClient::IsAvailable(Profile* profile, ServiceType type) {
   // all languages SPELLCHECK covers.
   bool language_available = !locale.compare(0, 2, "en");
   if (language_available) {
-    // Either SUGGEST or SPELLCHECK are allowed.
-    return true;
+    // Either SUGGEST or SPELLCHECK are normally allowed.
+    // Run the field trial for users who would normally have the service
+    // available.
+    if (base::FieldTrialList::FindFullName(kSpellcheckFieldTrialName) ==
+        kSpellcheckFieldTrialSuggestionsGroupName) {
+      return type == SUGGEST;
+    } else {
+      return type == SPELLCHECK;
+    }
   } else {
     // Only SUGGEST is allowed.
     return type == SUGGEST;
@@ -146,7 +160,7 @@ void SpellingServiceClient::OnURLFetchComplete(
     source->GetResponseAsString(&data);
     success = ParseResponse(data, &results);
   }
-  callback_.Run(tag_, success, text_, results);
+  callback_.Run(success, text_, results);
 }
 
 net::URLFetcher* SpellingServiceClient::CreateURLFetcher(const GURL& url) {

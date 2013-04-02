@@ -10,7 +10,8 @@
 
 namespace extensions {
 
-using api::experimental_system_info_display::DisplayUnitInfo;
+using api::system_info_display::Bounds;
+using api::system_info_display::DisplayUnitInfo;
 
 class MockDisplayInfoProvider : public DisplayInfoProvider {
  public:
@@ -19,37 +20,40 @@ class MockDisplayInfoProvider : public DisplayInfoProvider {
     for (int i = 0; i < 2; i++) {
       linked_ptr<DisplayUnitInfo> unit(new DisplayUnitInfo());
       unit->id = "DISPLAY";
-      unit->index = i;
+      unit->name = "DISPLAY NAME";
       unit->is_primary = i == 0 ? true : false;
-      unit->avail_top = 0;
-      unit->avail_left = 0;
-      unit->avail_width = 960;
-      unit->avail_height = 720;
-      unit->color_depth = 32;
-      unit->pixel_depth = 32;
-      unit->height = 1280;
-      unit->width = 720;
-      unit->absolute_top_offset = 0;
-      unit->absolute_left_offset = 1280;
-      unit->dpi_x = 96;
-      unit->dpi_y = 96;
+      unit->is_internal = i == 0 ? true : false;
+      unit->is_enabled = true;
+      unit->dpi_x = 96.0;
+      unit->dpi_y = 96.0;
+      unit->bounds.left = 0;
+      unit->bounds.top = 0;
+      unit->bounds.width = 1280;
+      unit->bounds.height = 720;
+      unit->work_area.left = 0;
+      unit->work_area.top = 0;
+      unit->work_area.width = 960;
+      unit->work_area.height = 720;
       info->push_back(unit);
     }
     return true;
   }
+ private:
+  virtual ~MockDisplayInfoProvider() {}
+
 };
 
 class SystemInfoDisplayApiTest: public ExtensionApiTest {
  public:
   SystemInfoDisplayApiTest() {}
-  ~SystemInfoDisplayApiTest() {}
+  virtual ~SystemInfoDisplayApiTest() {}
 
   virtual void SetUpCommandLine(CommandLine* command_line) OVERRIDE {
     ExtensionApiTest::SetUpCommandLine(command_line);
     command_line->AppendSwitch(switches::kEnableExperimentalExtensionApis);
   }
 
-  virtual void SetUpInProcessBrowserTestFixture() {
+  virtual void SetUpInProcessBrowserTestFixture() OVERRIDE {
     ExtensionApiTest::SetUpInProcessBrowserTestFixture();
     message_loop_.reset(new MessageLoop(MessageLoop::TYPE_UI));
   }
@@ -60,7 +64,8 @@ class SystemInfoDisplayApiTest: public ExtensionApiTest {
 
 IN_PROC_BROWSER_TEST_F(SystemInfoDisplayApiTest, Display) {
   // The |provider| will be owned by the singleton instance.
-  MockDisplayInfoProvider* provider = new MockDisplayInfoProvider();
+  scoped_refptr<MockDisplayInfoProvider> provider =
+      new MockDisplayInfoProvider();
   DisplayInfoProvider::InitializeForTesting(provider);
   ASSERT_TRUE(RunPlatformAppTest("systeminfo/display")) << message_;
 }

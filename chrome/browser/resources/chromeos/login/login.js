@@ -33,6 +33,7 @@ cr.define('cr.ui', function() {
    */
   Oobe.initialize = function() {
     DisplayManager.initialize();
+    oobe.WrongHWIDScreen.register();
     login.AccountPickerScreen.register();
     login.GaiaSigninScreen.register();
     oobe.OAuthEnrollmentScreen.register();
@@ -41,6 +42,8 @@ cr.define('cr.ui', function() {
     login.ErrorMessageScreen.register();
     login.TPMErrorMessageScreen.register();
     login.PasswordChangedScreen.register();
+    login.ManagedUserCreationScreen.register();
+    oobe.TermsOfServiceScreen.register();
 
     cr.ui.Bubble.decorate($('bubble'));
     login.HeaderBar.decorate($('login-header-bar'));
@@ -64,6 +67,13 @@ cr.define('cr.ui', function() {
    */
   Oobe.showScreen = function(screen) {
     Oobe.getInstance().showScreen(screen);
+  };
+
+  /**
+   * Shows the previous screen of workflow.
+   */
+  Oobe.goBack = function() {
+    Oobe.getInstance().goBack();
   };
 
   /**
@@ -153,6 +163,13 @@ cr.define('cr.ui', function() {
   };
 
   /**
+   * Shows dialog to create managed user.
+   */
+  Oobe.showManagedUserCreationScreen = function() {
+    DisplayManager.showManagedUserCreationScreen();
+  };
+
+  /**
    * Shows TPM error screen.
    */
   Oobe.showTpmError = function() {
@@ -217,6 +234,39 @@ cr.define('cr.ui', function() {
    */
   Oobe.forceLockedUserPodFocus = function() {
     login.AccountPickerScreen.forceLockedUserPodFocus();
+  };
+
+  /**
+   * Sets the domain name whose Terms of Service are being shown on the Terms of
+   * Service screen.
+   * @param {string} domain The domain name.
+   */
+  Oobe.setTermsOfServiceDomain = function(domain) {
+    oobe.TermsOfServiceScreen.setDomain(domain);
+  };
+
+  /**
+   * Displays an error message on the Terms of Service screen. Called when the
+   * download of the Terms of Service has failed.
+   */
+  Oobe.setTermsOfServiceLoadError = function() {
+    $('terms-of-service').classList.remove('tos-loading');
+    $('terms-of-service').classList.add('error');
+  };
+
+  /**
+   * Displays the given |termsOfService| on the Terms of Service screen.
+   * @param {string} termsOfService The terms of service, as plain text.
+   */
+  Oobe.setTermsOfService = function(termsOfService) {
+    oobe.TermsOfServiceScreen.setTermsOfService(termsOfService);
+  };
+
+  /**
+   * Clears password field in user-pod.
+   */
+  Oobe.clearUserPodPassword = function() {
+    DisplayManager.clearUserPodPassword();
   };
 
   // Export

@@ -7,7 +7,7 @@
 #include "base/stl_util.h"
 #include "base/synchronization/lock.h"
 #include "chrome/browser/usb/usb_service.h"
-#include "third_party/libusb/libusb.h"
+#include "third_party/libusb/src/libusb/libusb.h"
 
 namespace {
 
@@ -277,10 +277,8 @@ void UsbDevice::IsochronousTransfer(const TransferDirection direction,
   CheckDevice();
 
   const uint64 total_length = packets * packet_length;
-  if (total_length > length) {
-    callback.Run(USB_TRANSFER_LENGTH_SHORT, NULL, 0);
-    return;
-  }
+  CHECK(packets <= length && total_length <= length) <<
+      "transfer length is too small";
 
   struct libusb_transfer* const transfer = libusb_alloc_transfer(packets);
   const uint8 new_endpoint = ConvertTransferDirection(direction) | endpoint;

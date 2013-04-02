@@ -9,15 +9,17 @@
 #include "chrome/browser/api/sync/profile_sync_service_observer.h"
 #include "chrome/browser/command_updater.h"
 #include "chrome/browser/command_updater_delegate.h"
+#include "chrome/browser/profiles/profile_info_cache_observer.h"
 #include "chrome/browser/sessions/tab_restore_service_observer.h"
 #include "chrome/browser/ui/tabs/tab_strip_model_observer.h"
 #include "content/public/browser/notification_observer.h"
 #include "content/public/browser/notification_registrar.h"
-#include "webkit/glue/window_open_disposition.h"
+#include "ui/base/window_open_disposition.h"
 
 class Browser;
 class BrowserWindow;
 class Profile;
+class ProfileManager;
 
 namespace content {
 struct NativeWebKeyboardEvent;
@@ -27,11 +29,11 @@ namespace chrome {
 
 class BrowserCommandController : public CommandUpdaterDelegate,
                                  public content::NotificationObserver,
+                                 public ProfileInfoCacheObserver,
                                  public TabStripModelObserver,
-                                 public TabRestoreServiceObserver,
-                                 public ProfileSyncServiceObserver {
+                                 public TabRestoreServiceObserver {
  public:
-  explicit BrowserCommandController(Browser* browser);
+  BrowserCommandController(Browser* browser, ProfileManager* profile_manager);
   virtual ~BrowserCommandController();
 
   CommandUpdater* command_updater() { return &command_updater_; }
@@ -63,6 +65,18 @@ class BrowserCommandController : public CommandUpdaterDelegate,
   void PrintingStateChanged();
   void LoadingStateChanged(bool is_loading, bool force);
 
+  // Shared state updating: these functions are static and public to share with
+  // outside code.
+
+  // Updates the open-file state.
+  static void UpdateOpenFileState(CommandUpdater* command_updater);
+
+  // Update commands whose state depends on incognito mode availability and that
+  // only depend on the profile.
+  static void UpdateSharedCommandsForIncognitoAvailability(
+      CommandUpdater* command_updater,
+      Profile* profile);
+
  private:
   enum FullScreenMode {
     // Not in fullscreen mode.
@@ -86,6 +100,16 @@ class BrowserCommandController : public CommandUpdaterDelegate,
                        const content::NotificationSource& source,
                        const content::NotificationDetails& details) OVERRIDE;
 
+  // Overridden from ProfileInfoCacheObserver:
+  virtual void OnProfileAdded(const base::FilePath& profile_path) OVERRIDE;
+  virtual void OnProfileWillBeRemoved(
+      const base::FilePath& profile_path) OVERRIDE;
+  virtual void OnProfileWasRemoved(const base::FilePath& profile_path,
+                                   const string16& profile_name) OVERRIDE;
+  virtual void OnProfileNameChanged(const base::FilePath& profile_path,
+                                    const string16& old_profile_name) OVERRIDE;
+  virtual void OnProfileAvatarChanged(const base::FilePath& profile_path) OVERRIDE;
+
   // Overridden from TabStripModelObserver:
   virtual void TabInsertedAt(content::WebContents* contents,
                              int index,
@@ -102,9 +126,6 @@ class BrowserCommandController : public CommandUpdaterDelegate,
   // Overridden from TabRestoreServiceObserver:
   virtual void TabRestoreServiceChanged(TabRestoreService* service) OVERRIDE;
   virtual void TabRestoreServiceDestroyed(TabRestoreService* service) OVERRIDE;
-
-  // Overridden from ProfileSyncServiceObserver:
-  virtual void OnStateChanged() OVERRIDE;
 
   // Returns true if the regular Chrome UI (not the fullscreen one and
   // not the single-tab one) is shown. Used for updating window command states
@@ -151,9 +172,6 @@ class BrowserCommandController : public CommandUpdaterDelegate,
   // Updates the save-page-as command state.
   void UpdateSaveAsState();
 
-  // Updates the open-file state (Mac Only).
-  void UpdateOpenFileState();
-
   // Ask the Reload/Stop button to change its icon, and update the Stop command
   // state.  |is_loading| is true if the current WebContents is loading.
   // |force| is true if the button should change its icon immediately.
@@ -171,6 +189,8 @@ class BrowserCommandController : public CommandUpdaterDelegate,
   inline Profile* profile();
 
   Browser* browser_;
+
+  ProfileManager* profile_manager_;
 
   // The CommandUpdater that manages the browser window commands.
   CommandUpdater command_updater_;

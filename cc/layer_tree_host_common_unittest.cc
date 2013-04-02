@@ -6,9 +6,11 @@
 
 #include "cc/content_layer.h"
 #include "cc/content_layer_client.h"
+#include "cc/heads_up_display_layer_impl.h"
 #include "cc/layer.h"
 #include "cc/layer_animation_controller.h"
 #include "cc/layer_impl.h"
+#include "cc/layer_tree_impl.h"
 #include "cc/math_util.h"
 #include "cc/proxy.h"
 #include "cc/single_thread_proxy.h"
@@ -70,7 +72,7 @@ void executeCalculateDrawProperties(LayerImpl* rootLayer, float deviceScaleFacto
 
     // We are probably not testing what is intended if the rootLayer bounds are empty.
     DCHECK(!rootLayer->bounds().IsEmpty());
-    LayerTreeHostCommon::calculateDrawProperties(rootLayer, deviceViewportSize, deviceScaleFactor, pageScaleFactor, dummyMaxTextureSize, canUseLCDText, dummyRenderSurfaceLayerList);
+    LayerTreeHostCommon::calculateDrawProperties(rootLayer, deviceViewportSize, deviceScaleFactor, pageScaleFactor, dummyMaxTextureSize, canUseLCDText, dummyRenderSurfaceLayerList, false);
 }
 
 scoped_ptr<LayerImpl> createTreeForFixedPositionTests(LayerTreeHostImpl* hostImpl)
@@ -103,13 +105,44 @@ public:
     {
     }
 
-    virtual bool drawsContent() const OVERRIDE { return true; }
+    virtual bool drawsContent() const OVERRIDE;
 
 private:
     virtual ~LayerWithForcedDrawsContent()
     {
     }
 };
+
+class LayerCanClipSelf : public Layer {
+public:
+    LayerCanClipSelf()
+        : Layer()
+    {
+    }
+
+    virtual bool drawsContent() const OVERRIDE;
+    virtual bool canClipSelf() const OVERRIDE;
+
+private:
+    virtual ~LayerCanClipSelf()
+    {
+    }
+};
+
+bool LayerWithForcedDrawsContent::drawsContent() const
+{
+    return true;
+}
+
+bool LayerCanClipSelf::drawsContent() const
+{
+    return true;
+}
+
+bool LayerCanClipSelf::canClipSelf() const
+{
+    return true;
+}
 
 class MockContentLayerClient : public ContentLayerClient {
 public:
@@ -225,6 +258,58 @@ TEST(LayerTreeHostCommonTest, verifyTransformsForSingleLayer)
     EXPECT_TRANSFORMATION_MATRIX_EQ(expectedResult, layer->screenSpaceTransform());
 }
 
+TEST(LayerTreeHostCommonTest, verifyTransformsAboutScrollOffset)
+{
+    const gfx::Vector2d kScrollOffset(50, 100);
+    const gfx::Vector2dF kScrollDelta(2.34f, 5.67f);
+    const gfx::PointF kScrollLayerPosition(-kScrollOffset.x(), -kScrollOffset.y());
+    const float kPageScale = 0.888f;
+    const float kDeviceScale = 1.666f;
+
+    FakeImplProxy proxy;
+    FakeLayerTreeHostImpl hostImpl(&proxy);
+
+    gfx::Transform identityMatrix;
+    scoped_ptr<LayerImpl> sublayerScopedPtr(LayerImpl::create(hostImpl.activeTree(), 1));
+    LayerImpl* sublayer = sublayerScopedPtr.get();
+    sublayer->setContentsScale(kPageScale * kDeviceScale, kPageScale * kDeviceScale);
+    setLayerPropertiesForTesting(sublayer, identityMatrix, identityMatrix, gfx::Point(0, 0), gfx::PointF(0, 0), gfx::Size(500, 500), false);
+
+    scoped_ptr<LayerImpl> scrollLayerScopedPtr(LayerImpl::create(hostImpl.activeTree(), 2));
+    LayerImpl* scrollLayer = scrollLayerScopedPtr.get();
+    setLayerPropertiesForTesting(scrollLayer, identityMatrix, identityMatrix, gfx::PointF(0, 0), kScrollLayerPosition, gfx::Size(10, 20), false);
+    scrollLayer->setScrollable(true);
+    scrollLayer->setScrollOffset(kScrollOffset);
+    scrollLayer->setScrollDelta(kScrollDelta);
+    gfx::Transform implTransform;
+    implTransform.Scale(kPageScale, kPageScale);
+    scrollLayer->setImplTransform(implTransform);
+    scrollLayer->addChild(sublayerScopedPtr.Pass());
+
+    scoped_ptr<LayerImpl> root(LayerImpl::create(hostImpl.activeTree(), 3));
+    setLayerPropertiesForTesting(root.get(), identityMatrix, identityMatrix, gfx::PointF(0, 0), gfx::PointF(0, 0), gfx::Size(3, 4), false);
+    root->addChild(scrollLayerScopedPtr.Pass());
+
+    executeCalculateDrawProperties(root.get(), kDeviceScale, kPageScale);
+    gfx::Transform expectedTransform = identityMatrix;
+    gfx::PointF subLayerScreenPosition = kScrollLayerPosition - kScrollDelta;
+    subLayerScreenPosition.Scale(kPageScale * kDeviceScale);
+    expectedTransform.Translate(MathUtil::Round(subLayerScreenPosition.x()), MathUtil::Round(subLayerScreenPosition.y()));
+    EXPECT_TRANSFORMATION_MATRIX_EQ(expectedTransform, sublayer->drawTransform());
+    EXPECT_TRANSFORMATION_MATRIX_EQ(expectedTransform, sublayer->screenSpaceTransform());
+
+    gfx::Transform arbitraryTranslate;
+    const float kTranslateX = 10.6f;
+    const float kTranslateY = 20.6f;
+    arbitraryTranslate.Translate(kTranslateX, kTranslateY);
+    setLayerPropertiesForTesting(scrollLayer, arbitraryTranslate, identityMatrix, gfx::PointF(0, 0), kScrollLayerPosition, gfx::Size(10, 20), false);
+    executeCalculateDrawProperties(root.get(), kDeviceScale, kPageScale);
+    expectedTransform.MakeIdentity();
+    expectedTransform.Translate(MathUtil::Round(kTranslateX * kPageScale * kDeviceScale + subLayerScreenPosition.x()),
+                                MathUtil::Round(kTranslateY * kPageScale * kDeviceScale + subLayerScreenPosition.y()));
+    EXPECT_TRANSFORMATION_MATRIX_EQ(expectedTransform, sublayer->drawTransform());
+}
+
 TEST(LayerTreeHostCommonTest, verifyTransformsForSimpleHierarchy)
 {
     gfx::Transform identityMatrix;
@@ -282,12 +367,11 @@ TEST(LayerTreeHostCommonTest, verifyTransformsForSimpleHierarchy)
     //         But then, the child also does not preserve3D. When it gives its hierarchy to the grandChild, it should be flattened to 2D.
     gfx::Transform parentSublayerMatrix;
     parentSublayerMatrix.Scale3d(10, 10, 3.3);
-    gfx::Transform parentTranslationToCenter;
-    parentTranslationToCenter.Translate(5, 6);
-    // Sublayer matrix is applied to the center of the parent layer.
+    // Sublayer matrix is applied to the anchor point of the parent layer.
     parentCompositeTransform = parentTranslationToAnchor * parentLayerTransform * inverse(parentTranslationToAnchor)
-            * parentTranslationToCenter * parentSublayerMatrix * inverse(parentTranslationToCenter);
-    gfx::Transform flattenedCompositeTransform = MathUtil::to2dTransform(parentCompositeTransform);
+            * parentTranslationToAnchor * parentSublayerMatrix * inverse(parentTranslationToAnchor);
+    gfx::Transform flattenedCompositeTransform = parentCompositeTransform;
+    flattenedCompositeTransform.FlattenTo2d();
     setLayerPropertiesForTesting(parent.get(), parentLayerTransform, parentSublayerMatrix, gfx::PointF(0.25, 0.25), gfx::PointF(0, 0), gfx::Size(10, 12), false);
     setLayerPropertiesForTesting(child.get(), identityMatrix, identityMatrix, gfx::PointF(0, 0), gfx::PointF(0, 0), gfx::Size(16, 18), false);
     setLayerPropertiesForTesting(grandChild.get(), identityMatrix, identityMatrix, gfx::PointF(0, 0), gfx::PointF(0, 0), gfx::Size(76, 78), false);
@@ -333,11 +417,10 @@ TEST(LayerTreeHostCommonTest, verifyTransformsForSingleRenderSurface)
     parentTranslationToAnchor.Translate(25, 30);
     gfx::Transform parentSublayerMatrix;
     parentSublayerMatrix.Scale3d(0.9, 1, 3.3);
-    gfx::Transform parentTranslationToCenter;
-    parentTranslationToCenter.Translate(50, 60);
+
     gfx::Transform parentCompositeTransform = parentTranslationToAnchor * parentLayerTransform * inverse(parentTranslationToAnchor)
-            * parentTranslationToCenter * parentSublayerMatrix * inverse(parentTranslationToCenter);
-    gfx::Vector2dF parentCompositeScale = MathUtil::computeTransform2dScaleComponents(parentCompositeTransform, 1.f);
+            * parentTranslationToAnchor * parentSublayerMatrix * inverse(parentTranslationToAnchor);
+    gfx::Vector2dF parentCompositeScale = MathUtil::computeTransform2dScaleComponents(parentCompositeTransform, 1.0f);
     gfx::Transform surfaceSublayerTransform;
     surfaceSublayerTransform.Scale(parentCompositeScale.x(), parentCompositeScale.y());
     gfx::Transform surfaceSublayerCompositeTransform = parentCompositeTransform * inverse(surfaceSublayerTransform);
@@ -367,6 +450,120 @@ TEST(LayerTreeHostCommonTest, verifyTransformsForSingleRenderSurface)
     EXPECT_TRANSFORMATION_MATRIX_EQ(surfaceSublayerCompositeTransform, child->renderTarget()->renderSurface()->screenSpaceTransform());
 }
 
+TEST(LayerTreeHostCommonTest, verifySublayerTransformWithAnchorPoint)
+{
+    // crbug.com/157961 - we were always applying the sublayer transform about
+    // the center of the layer, rather than the anchor point.
+
+    scoped_refptr<Layer> root = Layer::create();
+    scoped_refptr<Layer> parent = Layer::create();
+    scoped_refptr<LayerWithForcedDrawsContent> child = make_scoped_refptr(new LayerWithForcedDrawsContent());
+    root->addChild(parent);
+    parent->addChild(child);
+
+    gfx::Transform identityMatrix;
+    gfx::Transform parentSublayerMatrix;
+    parentSublayerMatrix.ApplyPerspectiveDepth(2.0);
+    gfx::PointF parentAnchorPoint(0.2f, 0.8f);
+
+    setLayerPropertiesForTesting(root.get(), identityMatrix, identityMatrix, gfx::PointF(0, 0), gfx::PointF(0, 0), gfx::Size(1, 2), false);
+    setLayerPropertiesForTesting(parent.get(), identityMatrix, parentSublayerMatrix, parentAnchorPoint, gfx::PointF(0, 0), gfx::Size(100, 100), false);
+    setLayerPropertiesForTesting(child.get(), identityMatrix, identityMatrix, gfx::PointF(0, 0), gfx::PointF(0, 0), gfx::Size(10, 10), false);
+    executeCalculateDrawProperties(root.get());
+
+    gfx::Transform expectedChildDrawTransform;
+    expectedChildDrawTransform.Translate(20, 80);
+    expectedChildDrawTransform.ApplyPerspectiveDepth(2.0);
+    expectedChildDrawTransform.Translate(-20, -80);
+    EXPECT_TRANSFORMATION_MATRIX_EQ(expectedChildDrawTransform, child->drawTransform());
+}
+
+
+TEST(LayerTreeHostCommonTest, verifySeparateRenderTargetRequirementWithClipping)
+{
+    scoped_refptr<Layer> root = Layer::create();
+    scoped_refptr<Layer> parent = Layer::create();
+    scoped_refptr<Layer> child = Layer::create();
+    scoped_refptr<Layer> grandChild = make_scoped_refptr(new LayerCanClipSelf());
+    root->addChild(parent);
+    parent->addChild(child);
+    child->addChild(grandChild);
+    parent->setMasksToBounds(true);
+    child->setMasksToBounds(true);
+
+    gfx::Transform identityMatrix;
+    gfx::Transform parentLayerTransform;
+    gfx::Transform parentSublayerMatrix;
+    gfx::Transform childLayerMatrix;
+
+    // No render surface should exist yet.
+    EXPECT_FALSE(root->renderSurface());
+    EXPECT_FALSE(parent->renderSurface());
+    EXPECT_FALSE(child->renderSurface());
+    EXPECT_FALSE(grandChild->renderSurface());
+
+    // One-time setup of root layer
+    parentLayerTransform.Scale3d(1, 0.9, 1);
+    parentSublayerMatrix.Scale3d(0.9, 1, 3.3);
+    childLayerMatrix.Rotate(20);
+
+    setLayerPropertiesForTesting(root.get(), identityMatrix, identityMatrix, gfx::PointF(0, 0), gfx::PointF(0, 0), gfx::Size(1, 2), false);
+    setLayerPropertiesForTesting(parent.get(), parentLayerTransform, parentSublayerMatrix, gfx::PointF(0.25, 0.25), gfx::PointF(0, 0), gfx::Size(100, 120), false);
+    setLayerPropertiesForTesting(child.get(), childLayerMatrix, identityMatrix, gfx::PointF(0, 0), gfx::PointF(0, 0), gfx::Size(16, 18), false);
+    setLayerPropertiesForTesting(grandChild.get(), identityMatrix, identityMatrix, gfx::PointF(0, 0), gfx::PointF(0, 0), gfx::Size(8, 10), false);
+
+    executeCalculateDrawProperties(root.get());
+
+    // Render surfaces should have been created according to clipping rules now (grandchild can clip self).
+    EXPECT_TRUE(root->renderSurface());
+    EXPECT_FALSE(parent->renderSurface());
+    EXPECT_FALSE(child->renderSurface());
+    EXPECT_FALSE(grandChild->renderSurface());
+}
+
+TEST(LayerTreeHostCommonTest, verifySeparateRenderTargetRequirementWithoutClipping)
+{
+    scoped_refptr<Layer> root = Layer::create();
+    scoped_refptr<Layer> parent = Layer::create();
+    scoped_refptr<Layer> child = Layer::create();
+    // This layer cannot clip itself, a feature we are testing here.
+    scoped_refptr<Layer> grandChild = make_scoped_refptr(new LayerWithForcedDrawsContent());
+    root->addChild(parent);
+    parent->addChild(child);
+    child->addChild(grandChild);
+    parent->setMasksToBounds(true);
+    child->setMasksToBounds(true);
+
+    gfx::Transform identityMatrix;
+    gfx::Transform parentLayerTransform;
+    gfx::Transform parentSublayerMatrix;
+    gfx::Transform childLayerMatrix;
+
+    // No render surface should exist yet.
+    EXPECT_FALSE(root->renderSurface());
+    EXPECT_FALSE(parent->renderSurface());
+    EXPECT_FALSE(child->renderSurface());
+    EXPECT_FALSE(grandChild->renderSurface());
+
+    // One-time setup of root layer
+    parentLayerTransform.Scale3d(1, 0.9, 1);
+    parentSublayerMatrix.Scale3d(0.9, 1, 3.3);
+    childLayerMatrix.Rotate(20);
+
+    setLayerPropertiesForTesting(root.get(), identityMatrix, identityMatrix, gfx::PointF(0, 0), gfx::PointF(0, 0), gfx::Size(1, 2), false);
+    setLayerPropertiesForTesting(parent.get(), parentLayerTransform, parentSublayerMatrix, gfx::PointF(0.25, 0.25), gfx::PointF(0, 0), gfx::Size(100, 120), false);
+    setLayerPropertiesForTesting(child.get(), childLayerMatrix, identityMatrix, gfx::PointF(0, 0), gfx::PointF(0, 0), gfx::Size(16, 18), false);
+    setLayerPropertiesForTesting(grandChild.get(), identityMatrix, identityMatrix, gfx::PointF(0, 0), gfx::PointF(0, 0), gfx::Size(8, 10), false);
+
+    executeCalculateDrawProperties(root.get());
+
+    // Render surfaces should have been created according to clipping rules now (grandchild can't clip self).
+    EXPECT_TRUE(root->renderSurface());
+    EXPECT_FALSE(parent->renderSurface());
+    EXPECT_TRUE(child->renderSurface());
+    EXPECT_FALSE(grandChild->renderSurface());
+}
+
 TEST(LayerTreeHostCommonTest, verifyTransformsForReplica)
 {
     scoped_refptr<Layer> root = Layer::create();
@@ -392,12 +589,8 @@ TEST(LayerTreeHostCommonTest, verifyTransformsForReplica)
     parentTranslationToAnchor.Translate(2.5, 3);
     gfx::Transform parentSublayerMatrix;
     parentSublayerMatrix.Scale3d(10, 10, 3.3);
-    gfx::Transform parentTranslationToCenter;
-    parentTranslationToCenter.Translate(5, 6);
     gfx::Transform parentCompositeTransform = parentTranslationToAnchor * parentLayerTransform * inverse(parentTranslationToAnchor)
-            * parentTranslationToCenter * parentSublayerMatrix * inverse(parentTranslationToCenter);
-    gfx::Transform childTranslationToCenter;
-    childTranslationToCenter.Translate(8, 9);
+            * parentTranslationToAnchor * parentSublayerMatrix * inverse(parentTranslationToAnchor);
     gfx::Transform replicaLayerTransform;
     replicaLayerTransform.Scale3d(3, 3, 1);
     gfx::Vector2dF parentCompositeScale = MathUtil::computeTransform2dScaleComponents(parentCompositeTransform, 1.f);
@@ -472,8 +665,6 @@ TEST(LayerTreeHostCommonTest, verifyTransformsForRenderSurfaceHierarchy)
     // y component has a translation by 1 for every ancestor, which indicates the "depth" of the layer in the hierarchy.
     gfx::Transform translationToAnchor;
     translationToAnchor.Translate(2.5, 0);
-    gfx::Transform translationToCenter;
-    translationToCenter.Translate(5, 5);
     gfx::Transform layerTransform;
     layerTransform.Translate(1, 1);
     gfx::Transform sublayerTransform;
@@ -482,7 +673,7 @@ TEST(LayerTreeHostCommonTest, verifyTransformsForRenderSurfaceHierarchy)
     replicaLayerTransform.Scale3d(-2, 5, 1);
 
     gfx::Transform A = translationToAnchor * layerTransform * inverse(translationToAnchor);
-    gfx::Transform B = translationToCenter * sublayerTransform * inverse(translationToCenter);
+    gfx::Transform B = translationToAnchor * sublayerTransform * inverse(translationToAnchor);
     gfx::Transform R = A * translationToAnchor * replicaLayerTransform * inverse(translationToAnchor);
 
     gfx::Vector2dF surface1ParentTransformScale = MathUtil::computeTransform2dScaleComponents(A * B, 1.f);
@@ -616,7 +807,7 @@ TEST(LayerTreeHostCommonTest, verifyTransformsForFlatteningLayer)
     scoped_refptr<LayerWithForcedDrawsContent> grandChild = make_scoped_refptr(new LayerWithForcedDrawsContent());
 
     gfx::Transform rotationAboutYAxis;
-    MathUtil::rotateEulerAngles(&rotationAboutYAxis, 0, 30, 0);
+    rotationAboutYAxis.RotateAboutYAxis(30);
 
     const gfx::Transform identityMatrix;
     setLayerPropertiesForTesting(root.get(), identityMatrix, identityMatrix, gfx::PointF(), gfx::PointF(), gfx::Size(100, 100), false);
@@ -635,7 +826,9 @@ TEST(LayerTreeHostCommonTest, verifyTransformsForFlatteningLayer)
     gfx::Transform expectedChildDrawTransform = rotationAboutYAxis;
     gfx::Transform expectedChildScreenSpaceTransform = rotationAboutYAxis;
     gfx::Transform expectedGrandChildDrawTransform = rotationAboutYAxis; // draws onto child's renderSurface
-    gfx::Transform expectedGrandChildScreenSpaceTransform = MathUtil::to2dTransform(rotationAboutYAxis) * rotationAboutYAxis;
+    gfx::Transform flattenedRotationAboutY = rotationAboutYAxis;
+    flattenedRotationAboutY.FlattenTo2d();
+    gfx::Transform expectedGrandChildScreenSpaceTransform = flattenedRotationAboutY * rotationAboutYAxis;
 
     executeCalculateDrawProperties(root.get());
 
@@ -911,7 +1104,7 @@ TEST(LayerTreeHostCommonTest, verifyScrollCompensationForFixedPositionLayerWithD
     LayerImpl* greatGrandChild = grandChild->children()[0];
 
     gfx::Transform rotationAboutZ;
-    MathUtil::rotateEulerAngles(&rotationAboutZ, 0, 0, 90);
+    rotationAboutZ.RotateAboutZAxis(90);
 
     child->setIsContainerForFixedPositionLayers(true);
     child->setTransform(rotationAboutZ);
@@ -973,7 +1166,7 @@ TEST(LayerTreeHostCommonTest, verifyScrollCompensationForFixedPositionLayerWithM
     LayerImpl* greatGrandChild = grandChild->children()[0];
 
     gfx::Transform rotationAboutZ;
-    MathUtil::rotateEulerAngles(&rotationAboutZ, 0, 0, 90);
+    rotationAboutZ.RotateAboutZAxis(90);
 
     child->setIsContainerForFixedPositionLayers(true);
     child->setTransform(rotationAboutZ);
@@ -1041,7 +1234,7 @@ TEST(LayerTreeHostCommonTest, verifyScrollCompensationForFixedPositionLayerWithI
     greatGrandChild->setDrawsContent(true);
 
     gfx::Transform rotationAboutZ;
-    MathUtil::rotateEulerAngles(&rotationAboutZ, 0, 0, 90);
+    rotationAboutZ.RotateAboutZAxis(90);
     grandChild->setTransform(rotationAboutZ);
 
     // Case 1: scrollDelta of 0, 0
@@ -1131,7 +1324,7 @@ TEST(LayerTreeHostCommonTest, verifyScrollCompensationForFixedPositionLayerWithM
     // clip away layers that we want to test.
     gfx::Transform rotationAboutZ;
     rotationAboutZ.Translate(50, 50);
-    MathUtil::rotateEulerAngles(&rotationAboutZ, 0, 0, 90);
+    rotationAboutZ.RotateAboutZAxis(90);
     rotationAboutZ.Translate(-50, -50);
     grandChild->setTransform(rotationAboutZ);
     greatGrandChild->setTransform(rotationAboutZ);
@@ -1302,7 +1495,7 @@ TEST(LayerTreeHostCommonTest, verifyScrollCompensationForFixedPositionLayerThatH
     LayerImpl* grandChild = child->children()[0];
 
     gfx::Transform rotationByZ;
-    MathUtil::rotateEulerAngles(&rotationByZ, 0, 0, 90);
+    rotationByZ.RotateAboutZAxis(90);
 
     root->setTransform(rotationByZ);
     grandChild->setFixedToContainerLayer(true);
@@ -1700,23 +1893,10 @@ TEST(LayerTreeHostCommonTest, verifyAnimationsForRenderSurfaceHierarchy)
     renderSurface1->setForceRenderSurface(true);
     renderSurface2->setForceRenderSurface(true);
 
-    // Put an animated opacity on the render surface.
-    addOpacityTransitionToController(*renderSurface1->layerAnimationController(), 10, 1, 0, false);
-
-    // Also put an animated opacity on a layer without descendants.
-    addOpacityTransitionToController(*grandChildOfRoot->layerAnimationController(), 10, 1, 0, false);
-
     gfx::Transform layerTransform;
     layerTransform.Translate(1, 1);
     gfx::Transform sublayerTransform;
     sublayerTransform.Scale3d(10, 1, 1);
-
-    // Put a transform animation on the render surface.
-    addAnimatedTransformToController(*renderSurface2->layerAnimationController(), 10, 30, 0);
-
-    // Also put transform animations on grandChildOfRoot, and grandChildOfRS2
-    addAnimatedTransformToController(*grandChildOfRoot->layerAnimationController(), 10, 30, 0);
-    addAnimatedTransformToController(*grandChildOfRS2->layerAnimationController(), 10, 30, 0);
 
     setLayerPropertiesForTesting(parent.get(), layerTransform, sublayerTransform, gfx::PointF(0.25, 0), gfx::PointF(2.5, 0), gfx::Size(10, 10), false);
     setLayerPropertiesForTesting(renderSurface1.get(), layerTransform, sublayerTransform, gfx::PointF(0.25, 0), gfx::PointF(2.5, 0), gfx::Size(10, 10), false);
@@ -1727,6 +1907,19 @@ TEST(LayerTreeHostCommonTest, verifyAnimationsForRenderSurfaceHierarchy)
     setLayerPropertiesForTesting(grandChildOfRoot.get(), layerTransform, sublayerTransform, gfx::PointF(0.25, 0), gfx::PointF(2.5, 0), gfx::Size(10, 10), false);
     setLayerPropertiesForTesting(grandChildOfRS1.get(), layerTransform, sublayerTransform, gfx::PointF(0.25, 0), gfx::PointF(2.5, 0), gfx::Size(10, 10), false);
     setLayerPropertiesForTesting(grandChildOfRS2.get(), layerTransform, sublayerTransform, gfx::PointF(0.25, 0), gfx::PointF(2.5, 0), gfx::Size(10, 10), false);
+
+    // Put an animated opacity on the render surface.
+    addOpacityTransitionToController(*renderSurface1->layerAnimationController(), 10, 1, 0, false);
+
+    // Also put an animated opacity on a layer without descendants.
+    addOpacityTransitionToController(*grandChildOfRoot->layerAnimationController(), 10, 1, 0, false);
+
+    // Put a transform animation on the render surface.
+    addAnimatedTransformToController(*renderSurface2->layerAnimationController(), 10, 30, 0);
+
+    // Also put transform animations on grandChildOfRoot, and grandChildOfRS2
+    addAnimatedTransformToController(*grandChildOfRoot->layerAnimationController(), 10, 30, 0);
+    addAnimatedTransformToController(*grandChildOfRS2->layerAnimationController(), 10, 30, 0);
 
     executeCalculateDrawProperties(parent.get());
 
@@ -1929,7 +2122,7 @@ TEST(LayerTreeHostCommonTest, verifyVisibleRectFor3dOrthographicTransform)
 
     // Case 1: Orthographic projection of a layer rotated about y-axis by 45 degrees, should be fully contained in the renderSurface.
     layerToSurfaceTransform.MakeIdentity();
-    MathUtil::rotateEulerAngles(&layerToSurfaceTransform, 0, 45, 0);
+    layerToSurfaceTransform.RotateAboutYAxis(45);
     gfx::Rect expected = gfx::Rect(gfx::Point(0, 0), gfx::Size(100, 100));
     gfx::Rect actual = LayerTreeHostCommon::calculateVisibleRect(targetSurfaceRect, layerContentRect, layerToSurfaceTransform);
     EXPECT_RECT_EQ(expected, actual);
@@ -1940,7 +2133,7 @@ TEST(LayerTreeHostCommonTest, verifyVisibleRectFor3dOrthographicTransform)
     double halfWidthOfRotatedLayer = (100 / sqrt(2.0)) * 0.5; // 100 is the un-rotated layer width; divided by sqrt(2) is the rotated width.
     layerToSurfaceTransform.MakeIdentity();
     layerToSurfaceTransform.Translate(-halfWidthOfRotatedLayer, 0);
-    MathUtil::rotateEulerAngles(&layerToSurfaceTransform, 0, 45, 0); // rotates about the left edge of the layer
+    layerToSurfaceTransform.RotateAboutYAxis(45); // rotates about the left edge of the layer
     expected = gfx::Rect(gfx::Point(50, 0), gfx::Size(50, 100)); // right half of the layer.
     actual = LayerTreeHostCommon::calculateVisibleRect(targetSurfaceRect, layerContentRect, layerToSurfaceTransform);
     EXPECT_RECT_EQ(expected, actual);
@@ -2001,7 +2194,7 @@ TEST(LayerTreeHostCommonTest, verifyVisibleRectFor3dOrthographicIsNotClippedBehi
     // center of the layer.
     layerToSurfaceTransform.MakeIdentity();
     layerToSurfaceTransform.Translate(50, 0);
-    MathUtil::rotateEulerAngles(&layerToSurfaceTransform, 0, 45, 0);
+    layerToSurfaceTransform.RotateAboutYAxis(45);
     layerToSurfaceTransform.Translate(-50, 0);
 
     gfx::Rect expected = gfx::Rect(gfx::Point(0, 0), gfx::Size(100, 100));
@@ -2028,7 +2221,7 @@ TEST(LayerTreeHostCommonTest, verifyVisibleRectFor3dPerspectiveWhenClippedByW)
     layerToSurfaceTransform.MakeIdentity();
     layerToSurfaceTransform.ApplyPerspectiveDepth(1);
     layerToSurfaceTransform.Translate3d(-2, 0, 1);
-    MathUtil::rotateEulerAngles(&layerToSurfaceTransform, 0, 45, 0);
+    layerToSurfaceTransform.RotateAboutYAxis(45);
 
     // Sanity check that this transform does indeed cause w < 0 when applying the
     // transform, otherwise this code is not testing the intended scenario.
@@ -2057,8 +2250,8 @@ TEST(LayerTreeHostCommonTest, verifyVisibleRectForPerspectiveUnprojection)
     layerToSurfaceTransform.MakeIdentity();
     layerToSurfaceTransform.ApplyPerspectiveDepth(1);
     layerToSurfaceTransform.Translate3d(0, 0, -5);
-    MathUtil::rotateEulerAngles(&layerToSurfaceTransform, 0, 45, 0);
-    MathUtil::rotateEulerAngles(&layerToSurfaceTransform, 80, 0, 0);
+    layerToSurfaceTransform.RotateAboutYAxis(45);
+    layerToSurfaceTransform.RotateAboutXAxis(80);
 
     // Sanity check that un-projection does indeed cause w < 0, otherwise this code is not
     // testing the intended scenario.
@@ -2796,7 +2989,7 @@ TEST(LayerTreeHostCommonTest, verifyHitTestingForSingleLayer)
 
     std::vector<LayerImpl*> renderSurfaceLayerList;
     int dummyMaxTextureSize = 512;
-    LayerTreeHostCommon::calculateDrawProperties(root.get(), root->bounds(), 1, 1, dummyMaxTextureSize, false, renderSurfaceLayerList);
+    LayerTreeHostCommon::calculateDrawProperties(root.get(), root->bounds(), 1, 1, dummyMaxTextureSize, false, renderSurfaceLayerList, false);
 
     // Sanity check the scenario we just created.
     ASSERT_EQ(1u, renderSurfaceLayerList.size());
@@ -2812,6 +3005,57 @@ TEST(LayerTreeHostCommonTest, verifyHitTestingForSingleLayer)
     EXPECT_FALSE(resultLayer);
 
     // Hit testing for a point inside should return the root layer.
+    testPoint = gfx::Point(1, 1);
+    resultLayer = LayerTreeHostCommon::findLayerThatIsHitByPoint(testPoint, renderSurfaceLayerList);
+    ASSERT_TRUE(resultLayer);
+    EXPECT_EQ(12345, resultLayer->id());
+
+    testPoint = gfx::Point(99, 99);
+    resultLayer = LayerTreeHostCommon::findLayerThatIsHitByPoint(testPoint, renderSurfaceLayerList);
+    ASSERT_TRUE(resultLayer);
+    EXPECT_EQ(12345, resultLayer->id());
+}
+
+TEST(LayerTreeHostCommonTest, verifyHitTestingForSingleLayerAndHud)
+{
+    FakeImplProxy proxy;
+    FakeLayerTreeHostImpl hostImpl(&proxy);
+    scoped_ptr<LayerImpl> root = LayerImpl::create(hostImpl.activeTree(), 12345);
+    scoped_ptr<HeadsUpDisplayLayerImpl> hud = HeadsUpDisplayLayerImpl::create(hostImpl.activeTree(), 11111);
+
+    gfx::Transform identityMatrix;
+    gfx::PointF anchor(0.f, 0.f);
+    gfx::PointF position(0.f, 0.f);
+    gfx::Size bounds(100, 100);
+    setLayerPropertiesForTesting(root.get(), identityMatrix, identityMatrix, anchor, position, bounds, false);
+    root->setDrawsContent(true);
+
+    // Create hud and add it as a child of root.
+    gfx::Size hudBounds(200, 200);
+    setLayerPropertiesForTesting(hud.get(), identityMatrix, identityMatrix, anchor, position, hudBounds, false);
+    hud->setDrawsContent(true);
+
+    hostImpl.activeTree()->set_hud_layer(hud.get());
+    root->addChild(hud.PassAs<LayerImpl>());
+
+    std::vector<LayerImpl*> renderSurfaceLayerList;
+    int dummyMaxTextureSize = 512;
+    LayerTreeHostCommon::calculateDrawProperties(root.get(), hudBounds, 1, 1, dummyMaxTextureSize, false, renderSurfaceLayerList, false);
+
+    // Sanity check the scenario we just created.
+    ASSERT_EQ(1u, renderSurfaceLayerList.size());
+    ASSERT_EQ(2u, root->renderSurface()->layerList().size());
+
+    // Hit testing for a point inside HUD, but outside root should return null
+    gfx::Point testPoint(101, 101);
+    LayerImpl* resultLayer = LayerTreeHostCommon::findLayerThatIsHitByPoint(testPoint, renderSurfaceLayerList);
+    EXPECT_FALSE(resultLayer);
+
+    testPoint = gfx::Point(-1, -1);
+    resultLayer = LayerTreeHostCommon::findLayerThatIsHitByPoint(testPoint, renderSurfaceLayerList);
+    EXPECT_FALSE(resultLayer);
+
+    // Hit testing for a point inside should return the root layer, never the HUD layer.
     testPoint = gfx::Point(1, 1);
     resultLayer = LayerTreeHostCommon::findLayerThatIsHitByPoint(testPoint, renderSurfaceLayerList);
     ASSERT_TRUE(resultLayer);
@@ -2845,7 +3089,7 @@ TEST(LayerTreeHostCommonTest, verifyHitTestingForUninvertibleTransform)
 
     std::vector<LayerImpl*> renderSurfaceLayerList;
     int dummyMaxTextureSize = 512;
-    LayerTreeHostCommon::calculateDrawProperties(root.get(), root->bounds(), 1, 1, dummyMaxTextureSize, false, renderSurfaceLayerList);
+    LayerTreeHostCommon::calculateDrawProperties(root.get(), root->bounds(), 1, 1, dummyMaxTextureSize, false, renderSurfaceLayerList, false);
 
     // Sanity check the scenario we just created.
     ASSERT_EQ(1u, renderSurfaceLayerList.size());
@@ -2899,7 +3143,7 @@ TEST(LayerTreeHostCommonTest, verifyHitTestingForSinglePositionedLayer)
 
     std::vector<LayerImpl*> renderSurfaceLayerList;
     int dummyMaxTextureSize = 512;
-    LayerTreeHostCommon::calculateDrawProperties(root.get(), root->bounds(), 1, 1, dummyMaxTextureSize, false, renderSurfaceLayerList);
+    LayerTreeHostCommon::calculateDrawProperties(root.get(), root->bounds(), 1, 1, dummyMaxTextureSize, false, renderSurfaceLayerList, false);
 
     // Sanity check the scenario we just created.
     ASSERT_EQ(1u, renderSurfaceLayerList.size());
@@ -2936,7 +3180,7 @@ TEST(LayerTreeHostCommonTest, verifyHitTestingForSingleRotatedLayer)
     gfx::Transform identityMatrix;
     gfx::Transform rotation45DegreesAboutCenter;
     rotation45DegreesAboutCenter.Translate(50, 50);
-    MathUtil::rotateEulerAngles(&rotation45DegreesAboutCenter, 0, 0, 45);
+    rotation45DegreesAboutCenter.RotateAboutZAxis(45);
     rotation45DegreesAboutCenter.Translate(-50, -50);
     gfx::PointF anchor(0, 0);
     gfx::PointF position(0, 0);
@@ -2946,7 +3190,7 @@ TEST(LayerTreeHostCommonTest, verifyHitTestingForSingleRotatedLayer)
 
     std::vector<LayerImpl*> renderSurfaceLayerList;
     int dummyMaxTextureSize = 512;
-    LayerTreeHostCommon::calculateDrawProperties(root.get(), root->bounds(), 1, 1, dummyMaxTextureSize, false, renderSurfaceLayerList);
+    LayerTreeHostCommon::calculateDrawProperties(root.get(), root->bounds(), 1, 1, dummyMaxTextureSize, false, renderSurfaceLayerList, false);
 
     // Sanity check the scenario we just created.
     ASSERT_EQ(1u, renderSurfaceLayerList.size());
@@ -3002,7 +3246,7 @@ TEST(LayerTreeHostCommonTest, verifyHitTestingForSinglePerspectiveLayer)
 
     std::vector<LayerImpl*> renderSurfaceLayerList;
     int dummyMaxTextureSize = 512;
-    LayerTreeHostCommon::calculateDrawProperties(root.get(), root->bounds(), 1, 1, dummyMaxTextureSize, false, renderSurfaceLayerList);
+    LayerTreeHostCommon::calculateDrawProperties(root.get(), root->bounds(), 1, 1, dummyMaxTextureSize, false, renderSurfaceLayerList, false);
 
     // Sanity check the scenario we just created.
     ASSERT_EQ(1u, renderSurfaceLayerList.size());
@@ -3067,7 +3311,7 @@ TEST(LayerTreeHostCommonTest, verifyHitTestingForSingleLayerWithScaledContents)
 
     std::vector<LayerImpl*> renderSurfaceLayerList;
     int dummyMaxTextureSize = 512;
-    LayerTreeHostCommon::calculateDrawProperties(root.get(), root->bounds(), 1, 1, dummyMaxTextureSize, false, renderSurfaceLayerList);
+    LayerTreeHostCommon::calculateDrawProperties(root.get(), root->bounds(), 1, 1, dummyMaxTextureSize, false, renderSurfaceLayerList, false);
 
     // Sanity check the scenario we just created.
     // The visibleContentRect for testLayer is actually 100x100, even though its layout size is 50x50, positioned at 25x25.
@@ -3131,7 +3375,7 @@ TEST(LayerTreeHostCommonTest, verifyHitTestingForSimpleClippedLayer)
 
     std::vector<LayerImpl*> renderSurfaceLayerList;
     int dummyMaxTextureSize = 512;
-    LayerTreeHostCommon::calculateDrawProperties(root.get(), root->bounds(), 1, 1, dummyMaxTextureSize, false, renderSurfaceLayerList);
+    LayerTreeHostCommon::calculateDrawProperties(root.get(), root->bounds(), 1, 1, dummyMaxTextureSize, false, renderSurfaceLayerList, false);
 
     // Sanity check the scenario we just created.
     ASSERT_EQ(1u, renderSurfaceLayerList.size());
@@ -3195,7 +3439,7 @@ TEST(LayerTreeHostCommonTest, verifyHitTestingForMultiClippedRotatedLayer)
         child->setMasksToBounds(true);
 
         gfx::Transform rotation45DegreesAboutCorner;
-        MathUtil::rotateEulerAngles(&rotation45DegreesAboutCorner, 0, 0, 45);
+        rotation45DegreesAboutCorner.RotateAboutZAxis(45);
 
         position = gfx::PointF(0, 0); // remember, positioned with respect to its parent which is already at 10, 10
         bounds = gfx::Size(200, 200); // to ensure it covers at least sqrt(2) * 100.
@@ -3205,9 +3449,9 @@ TEST(LayerTreeHostCommonTest, verifyHitTestingForMultiClippedRotatedLayer)
         // Rotates about the center of the layer
         gfx::Transform rotatedLeafTransform;
         rotatedLeafTransform.Translate(-10, -10); // cancel out the grandParent's position
-        MathUtil::rotateEulerAngles(&rotatedLeafTransform, 0, 0, -45); // cancel out the corner 45-degree rotation of the parent.
+        rotatedLeafTransform.RotateAboutZAxis(-45); // cancel out the corner 45-degree rotation of the parent.
         rotatedLeafTransform.Translate(50, 50);
-        MathUtil::rotateEulerAngles(&rotatedLeafTransform, 0, 0, 45);
+        rotatedLeafTransform.RotateAboutZAxis(45);
         rotatedLeafTransform.Translate(-50, -50);
         position = gfx::PointF(0, 0);
         bounds = gfx::Size(100, 100);
@@ -3221,7 +3465,7 @@ TEST(LayerTreeHostCommonTest, verifyHitTestingForMultiClippedRotatedLayer)
 
     std::vector<LayerImpl*> renderSurfaceLayerList;
     int dummyMaxTextureSize = 512;
-    LayerTreeHostCommon::calculateDrawProperties(root.get(), root->bounds(), 1, 1, dummyMaxTextureSize, false, renderSurfaceLayerList);
+    LayerTreeHostCommon::calculateDrawProperties(root.get(), root->bounds(), 1, 1, dummyMaxTextureSize, false, renderSurfaceLayerList, false);
 
     // Sanity check the scenario we just created.
     // The grandChild is expected to create a renderSurface because it masksToBounds and is not axis aligned.
@@ -3303,7 +3547,7 @@ TEST(LayerTreeHostCommonTest, verifyHitTestingForNonClippingIntermediateLayer)
 
     std::vector<LayerImpl*> renderSurfaceLayerList;
     int dummyMaxTextureSize = 512;
-    LayerTreeHostCommon::calculateDrawProperties(root.get(), root->bounds(), 1, 1, dummyMaxTextureSize, false, renderSurfaceLayerList);
+    LayerTreeHostCommon::calculateDrawProperties(root.get(), root->bounds(), 1, 1, dummyMaxTextureSize, false, renderSurfaceLayerList, false);
 
     // Sanity check the scenario we just created.
     ASSERT_EQ(1u, renderSurfaceLayerList.size());
@@ -3383,7 +3627,7 @@ TEST(LayerTreeHostCommonTest, verifyHitTestingForMultipleLayers)
 
     std::vector<LayerImpl*> renderSurfaceLayerList;
     int dummyMaxTextureSize = 512;
-    LayerTreeHostCommon::calculateDrawProperties(root.get(), root->bounds(), 1, 1, dummyMaxTextureSize, false, renderSurfaceLayerList);
+    LayerTreeHostCommon::calculateDrawProperties(root.get(), root->bounds(), 1, 1, dummyMaxTextureSize, false, renderSurfaceLayerList, false);
 
     // Sanity check the scenario we just created.
     ASSERT_TRUE(child1);
@@ -3491,7 +3735,7 @@ TEST(LayerTreeHostCommonTest, verifyHitTestingForMultipleLayerLists)
 
     std::vector<LayerImpl*> renderSurfaceLayerList;
     int dummyMaxTextureSize = 512;
-    LayerTreeHostCommon::calculateDrawProperties(root.get(), root->bounds(), 1, 1, dummyMaxTextureSize, false, renderSurfaceLayerList);
+    LayerTreeHostCommon::calculateDrawProperties(root.get(), root->bounds(), 1, 1, dummyMaxTextureSize, false, renderSurfaceLayerList, false);
 
     // Sanity check the scenario we just created.
     ASSERT_TRUE(child1);
@@ -3577,7 +3821,7 @@ TEST(LayerTreeHostCommonTest, verifyHitCheckingTouchHandlerRegionsForSingleLayer
 
     std::vector<LayerImpl*> renderSurfaceLayerList;
     int dummyMaxTextureSize = 512;
-    LayerTreeHostCommon::calculateDrawProperties(root.get(), root->bounds(), 1, 1, dummyMaxTextureSize, false, renderSurfaceLayerList);
+    LayerTreeHostCommon::calculateDrawProperties(root.get(), root->bounds(), 1, 1, dummyMaxTextureSize, false, renderSurfaceLayerList, false);
 
     // Sanity check the scenario we just created.
     ASSERT_EQ(1u, renderSurfaceLayerList.size());
@@ -3643,7 +3887,7 @@ TEST(LayerTreeHostCommonTest, verifyHitCheckingTouchHandlerRegionsForUninvertibl
 
     std::vector<LayerImpl*> renderSurfaceLayerList;
     int dummyMaxTextureSize = 512;
-    LayerTreeHostCommon::calculateDrawProperties(root.get(), root->bounds(), 1, 1, dummyMaxTextureSize, false, renderSurfaceLayerList);
+    LayerTreeHostCommon::calculateDrawProperties(root.get(), root->bounds(), 1, 1, dummyMaxTextureSize, false, renderSurfaceLayerList, false);
 
     // Sanity check the scenario we just created.
     ASSERT_EQ(1u, renderSurfaceLayerList.size());
@@ -3699,7 +3943,7 @@ TEST(LayerTreeHostCommonTest, verifyHitCheckingTouchHandlerRegionsForSinglePosit
 
     std::vector<LayerImpl*> renderSurfaceLayerList;
     int dummyMaxTextureSize = 512;
-    LayerTreeHostCommon::calculateDrawProperties(root.get(), root->bounds(), 1, 1, dummyMaxTextureSize, false, renderSurfaceLayerList);
+    LayerTreeHostCommon::calculateDrawProperties(root.get(), root->bounds(), 1, 1, dummyMaxTextureSize, false, renderSurfaceLayerList, false);
 
     // Sanity check the scenario we just created.
     ASSERT_EQ(1u, renderSurfaceLayerList.size());
@@ -3771,7 +4015,7 @@ TEST(LayerTreeHostCommonTest, verifyHitCheckingTouchHandlerRegionsForSingleLayer
 
     std::vector<LayerImpl*> renderSurfaceLayerList;
     int dummyMaxTextureSize = 512;
-    LayerTreeHostCommon::calculateDrawProperties(root.get(), root->bounds(), 1, 1, dummyMaxTextureSize, false, renderSurfaceLayerList);
+    LayerTreeHostCommon::calculateDrawProperties(root.get(), root->bounds(), 1, 1, dummyMaxTextureSize, false, renderSurfaceLayerList, false);
 
     // Sanity check the scenario we just created.
     // The visibleContentRect for testLayer is actually 100x100, even though its layout size is 50x50, positioned at 25x25.
@@ -3847,7 +4091,7 @@ TEST(LayerTreeHostCommonTest, verifyHitCheckingTouchHandlerRegionsForSingleLayer
     pageScaleTransform.Scale(pageScaleFactor, pageScaleFactor);
     root->setImplTransform(pageScaleTransform); // Applying the pageScaleFactor through implTransform.
     gfx::Size scaledBoundsForRoot = gfx::ToCeiledSize(gfx::ScaleSize(root->bounds(), deviceScaleFactor * pageScaleFactor));
-    LayerTreeHostCommon::calculateDrawProperties(root.get(), scaledBoundsForRoot, deviceScaleFactor, 1, dummyMaxTextureSize, false, renderSurfaceLayerList);
+    LayerTreeHostCommon::calculateDrawProperties(root.get(), scaledBoundsForRoot, deviceScaleFactor, 1, dummyMaxTextureSize, false, renderSurfaceLayerList, false);
 
     // Sanity check the scenario we just created.
     // The visibleContentRect for testLayer is actually 100x100, even though its layout size is 50x50, positioned at 25x25.
@@ -3931,7 +4175,7 @@ TEST(LayerTreeHostCommonTest, verifyHitCheckingTouchHandlerRegionsForSimpleClipp
 
     std::vector<LayerImpl*> renderSurfaceLayerList;
     int dummyMaxTextureSize = 512;
-    LayerTreeHostCommon::calculateDrawProperties(root.get(), root->bounds(), 1, 1, dummyMaxTextureSize, false, renderSurfaceLayerList);
+    LayerTreeHostCommon::calculateDrawProperties(root.get(), root->bounds(), 1, 1, dummyMaxTextureSize, false, renderSurfaceLayerList, false);
 
     // Sanity check the scenario we just created.
     ASSERT_EQ(1u, renderSurfaceLayerList.size());
@@ -3972,12 +4216,15 @@ public:
 
     virtual void calculateContentsScale(
         float idealContentsScale,
+        bool animatingTransformToScreen,
         float* contentsScaleX,
         float* contentsScaleY,
         gfx::Size* contentBounds) OVERRIDE
     {
-      Layer::calculateContentsScale(
+        // Skip over the ContentLayer to the base Layer class.
+        Layer::calculateContentsScale(
             idealContentsScale,
+            animatingTransformToScreen,
             contentsScaleX,
             contentsScaleY,
             contentBounds);

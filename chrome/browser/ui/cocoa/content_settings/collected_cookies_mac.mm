@@ -9,7 +9,9 @@
 #include "base/mac/bundle_locations.h"
 #import "base/mac/mac_util.h"
 #include "base/message_loop.h"
+#include "base/prefs/pref_service.h"
 #include "base/sys_string_conversions.h"
+#include "chrome/browser/api/infobars/infobar_service.h"
 #include "chrome/browser/browsing_data/browsing_data_appcache_helper.h"
 #include "chrome/browser/browsing_data/browsing_data_cookie_helper.h"
 #include "chrome/browser/browsing_data/browsing_data_database_helper.h"
@@ -20,8 +22,6 @@
 #include "chrome/browser/content_settings/cookie_settings.h"
 #include "chrome/browser/content_settings/local_shared_objects_container.h"
 #include "chrome/browser/content_settings/tab_specific_content_settings.h"
-#include "chrome/browser/infobars/infobar_tab_helper.h"
-#include "chrome/browser/prefs/pref_service.h"
 #include "chrome/browser/profiles/profile.h"
 #include "chrome/browser/ui/browser_dialogs.h"
 #import "chrome/browser/ui/cocoa/constrained_window/constrained_window_custom_sheet.h"
@@ -96,11 +96,11 @@ void CollectedCookiesMac::Observe(int type,
                                   const content::NotificationSource& source,
                                   const content::NotificationDetails& details) {
   DCHECK(type == chrome::NOTIFICATION_COLLECTED_COOKIES_SHOWN);
-  window_->CloseConstrainedWindow();
+  window_->CloseWebContentsModalDialog();
 }
 
 void CollectedCookiesMac::PerformClose() {
-  window_->CloseConstrainedWindow();
+  window_->CloseWebContentsModalDialog();
 }
 
 void CollectedCookiesMac::OnConstrainedWindowClosed(
@@ -214,10 +214,8 @@ void CollectedCookiesMac::OnConstrainedWindowClosed(
 
 - (void)windowWillClose:(NSNotification*)notif {
   if (contentSettingsChanged_) {
-    InfoBarTabHelper* infobarTabHelper =
-        InfoBarTabHelper::FromWebContents(webContents_);
-    infobarTabHelper->AddInfoBar(
-        new CollectedCookiesInfoBarDelegate(infobarTabHelper));
+    CollectedCookiesInfoBarDelegate::Create(
+        InfoBarService::FromWebContents(webContents_));
   }
   [allowedOutlineView_ setDelegate:nil];
   [blockedOutlineView_ setDelegate:nil];

@@ -6,13 +6,14 @@
   'dependencies': [
     '../base/base.gyp:base',
     '../build/temp_gyp/googleurl.gyp:googleurl',
+    '../components/components_tracing.gyp:tracing',
     '../media/media.gyp:media',
     '../net/net.gyp:net',
     '../skia/skia.gyp:skia',
     '../third_party/icu/icu.gyp:icuuc',
+    '../ui/ui.gyp:shell_dialogs',
     '../ui/ui.gyp:ui',
     '../webkit/support/webkit_support.gyp:user_agent',
-    'content_components_tracing.gyp:tracing',
   ],
   'include_dirs': [
     '..',
@@ -77,6 +78,7 @@
     'public/common/resource_dispatcher_delegate.h',
     'public/common/resource_response.h',
     'public/common/result_codes.h',
+    'public/common/result_codes_list.h',
     'public/common/sandbox_init.cc',
     'public/common/sandbox_init.h',
     'public/common/sandbox_linux.h',
@@ -110,8 +112,10 @@
     'common/android/command_line.h',
     'common/android/common_jni_registrar.cc',
     'common/android/common_jni_registrar.h',
-    'common/android/device_info.cc',
-    'common/android/device_info.h',
+    'common/android/device_telephony_info.cc',
+    'common/android/device_telephony_info.h',
+    'common/android/hash_set.cc',
+    'common/android/hash_set.h',
     'common/android/surface_callback.cc',
     'common/android/surface_callback.h',
     'common/android/surface_texture_bridge.cc',
@@ -223,6 +227,9 @@
     'common/gpu/gpu_memory_allocation.h',
     'common/gpu/gpu_memory_manager.cc',
     'common/gpu/gpu_memory_manager.h',
+    'common/gpu/gpu_memory_manager_client.cc',
+    'common/gpu/gpu_memory_manager_client.h',
+    'common/gpu/gpu_memory_tracking.cc',
     'common/gpu/gpu_memory_tracking.h',
     'common/gpu/gpu_memory_uma_stats.h',
     'common/gpu/gpu_messages.h',
@@ -276,15 +283,8 @@
     'common/indexed_db/proxy_webidbdatabase_impl.h',
     'common/indexed_db/proxy_webidbfactory_impl.cc',
     'common/indexed_db/proxy_webidbfactory_impl.h',
-    'common/indexed_db/proxy_webidbindex_impl.cc',
-    'common/indexed_db/proxy_webidbindex_impl.h',
-    'common/indexed_db/proxy_webidbobjectstore_impl.cc',
-    'common/indexed_db/proxy_webidbobjectstore_impl.h',
-    'common/indexed_db/proxy_webidbtransaction_impl.cc',
-    'common/indexed_db/proxy_webidbtransaction_impl.h',
     'common/inter_process_time_ticks_converter.cc',
     'common/inter_process_time_ticks_converter.h',
-    'common/intents_messages.h',
     'common/java_bridge_messages.h',
     'common/mac/attributed_string_coder.h',
     'common/mac/attributed_string_coder.mm',
@@ -475,6 +475,11 @@
       'dependencies': [
         '../ppapi/ppapi_internal.gyp:ppapi_shared',
       ],
+    }, {  # enable_plugins == 0
+      'sources!': [
+        'common/pepper_plugin_registry.cc',
+        'common/pepper_plugin_registry.h',
+      ],
     }],
     ['enable_gpu==1', {
       'dependencies': [
@@ -486,6 +491,8 @@
         '../media/media.gyp:media',
       ],
       'sources': [
+        'common/gpu/media/exynos_video_decode_accelerator.cc',
+        'common/gpu/media/exynos_video_decode_accelerator.h',
         'common/gpu/media/gles2_texture_to_egl_image_translator.cc',
         'common/gpu/media/gles2_texture_to_egl_image_translator.h',
         'common/gpu/media/omx_video_decode_accelerator.cc',
@@ -523,7 +530,6 @@
       'link_settings': {
         'libraries': [
            '-ld3d9.lib',
-           '-ld3dx9.lib',
            '-ldxva2.lib',
            '-lstrmiids.lib',
            '-lmf.lib',
@@ -532,10 +538,8 @@
         ],
         'msvs_settings': {
           'VCLinkerTool': {
-            'AdditionalLibraryDirectories': ['$(DXSDK_DIR)/lib/x86'],
             'DelayLoadDLLs': [
               'd3d9.dll',
-              'd3dx9_43.dll',
               'dxva2.dll',
               'mf.dll',
               'mfplat.dll',
@@ -549,7 +553,6 @@
       ],
       'include_dirs': [
         '<(DEPTH)/third_party/angle/include',
-        '$(DXSDK_DIR)/include',
       ],
     }],
     ['OS=="win" and directxsdk_exists=="True"', {
@@ -573,6 +576,7 @@
         '<(output)',
         '<(PRODUCT_DIR)',
         ],
+        'msvs_cygwin_shell': 1,
       },
      ]
     }],

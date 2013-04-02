@@ -79,6 +79,72 @@ using content::RenderViewHost;
 #define TEST_PPAPI_NACL_WITH_SSL_SERVER(test_name)
 #define TEST_PPAPI_NACL_VIA_HTTP_WITH_WS(test_name)
 #define TEST_PPAPI_NACL_VIA_HTTP_WITH_AUDIO_OUTPUT(test_name)
+#elif defined(OS_WIN)  // http://crbug.com/162094
+
+#define TEST_PPAPI_NACL_VIA_HTTP(test_name) \
+    IN_PROC_BROWSER_TEST_F(PPAPINaClNewlibTest, test_name) { \
+      RunTestViaHTTP(STRIP_PREFIXES(test_name)); \
+    } \
+    IN_PROC_BROWSER_TEST_F(PPAPINaClGLibcTest, DISABLED_##test_name) { \
+      RunTestViaHTTP(STRIP_PREFIXES(test_name)); \
+    }
+
+#define TEST_PPAPI_NACL_VIA_HTTP_DISALLOWED_SOCKETS(test_name) \
+    IN_PROC_BROWSER_TEST_F(PPAPINaClTestDisallowedSockets, test_name) { \
+      RunTestViaHTTP(STRIP_PREFIXES(test_name)); \
+    }
+
+#define TEST_PPAPI_NACL_WITH_SSL_SERVER(test_name) \
+    IN_PROC_BROWSER_TEST_F(PPAPINaClNewlibTest, test_name) { \
+      RunTestWithSSLServer(STRIP_PREFIXES(test_name)); \
+    } \
+    IN_PROC_BROWSER_TEST_F(PPAPINaClGLibcTest, DISABLED_##test_name) { \
+      RunTestWithSSLServer(STRIP_PREFIXES(test_name)); \
+    }
+
+#define TEST_PPAPI_NACL_VIA_HTTP_WITH_WS(test_name) \
+    IN_PROC_BROWSER_TEST_F(PPAPINaClNewlibTest, test_name) { \
+      RunTestWithWebSocketServer(STRIP_PREFIXES(test_name)); \
+    } \
+    IN_PROC_BROWSER_TEST_F(PPAPINaClGLibcTest, DISABLED_##test_name) { \
+      RunTestWithWebSocketServer(STRIP_PREFIXES(test_name)); \
+    }
+
+#define TEST_PPAPI_NACL_VIA_HTTP_WITH_AUDIO_OUTPUT(test_name) \
+    IN_PROC_BROWSER_TEST_F(PPAPINaClNewlibTest, test_name) { \
+      RunTestViaHTTPIfAudioOutputAvailable(STRIP_PREFIXES(test_name)); \
+    } \
+    IN_PROC_BROWSER_TEST_F(PPAPINaClGLibcTest, DISABLED_##test_name) { \
+      RunTestViaHTTPIfAudioOutputAvailable(STRIP_PREFIXES(test_name)); \
+    }
+#elif defined(ARCH_CPU_ARM_FAMILY)
+// NaCl glibc tests are not included in ARM as there is no glibc support
+// on ARM today.
+#define TEST_PPAPI_NACL_VIA_HTTP(test_name) \
+    IN_PROC_BROWSER_TEST_F(PPAPINaClNewlibTest, test_name) { \
+      RunTestViaHTTP(STRIP_PREFIXES(test_name)); \
+    }
+
+#define TEST_PPAPI_NACL_VIA_HTTP_DISALLOWED_SOCKETS(test_name) \
+    IN_PROC_BROWSER_TEST_F(PPAPINaClTestDisallowedSockets, test_name) { \
+      RunTestViaHTTP(STRIP_PREFIXES(test_name)); \
+    }
+
+#define TEST_PPAPI_NACL_WITH_SSL_SERVER(test_name) \
+    IN_PROC_BROWSER_TEST_F(PPAPINaClNewlibTest, test_name) { \
+      RunTestWithSSLServer(STRIP_PREFIXES(test_name)); \
+    }
+
+#define TEST_PPAPI_NACL_VIA_HTTP_WITH_WS(test_name) \
+    IN_PROC_BROWSER_TEST_F(PPAPINaClNewlibTest, test_name) { \
+      RunTestWithWebSocketServer(STRIP_PREFIXES(test_name)); \
+    }
+
+#define TEST_PPAPI_NACL_VIA_HTTP_WITH_AUDIO_OUTPUT(test_name) \
+    IN_PROC_BROWSER_TEST_F(PPAPINaClNewlibTest, test_name) { \
+      RunTestViaHTTPIfAudioOutputAvailable(STRIP_PREFIXES(test_name)); \
+    }
+
 #else
 
 // NaCl based PPAPI tests
@@ -312,12 +378,6 @@ TEST_PPAPI_IN_PROCESS_WITH_SSL_SERVER(TCPSocketPrivateTrusted)
 // UDPSocketPrivate tests.
 // UDPSocketPrivate_Broadcast is disabled for OSX because it requires
 // root permissions on OSX 10.7+.
-TEST_PPAPI_IN_PROCESS_VIA_HTTP(UDPSocketPrivate_Connect)
-TEST_PPAPI_IN_PROCESS_VIA_HTTP(UDPSocketPrivate_ConnectFailure)
-#if !defined(OS_MACOSX)
-TEST_PPAPI_IN_PROCESS_VIA_HTTP(UDPSocketPrivate_Broadcast)
-#endif  // !defined(OS_MACOSX)
-TEST_PPAPI_IN_PROCESS_VIA_HTTP(UDPSocketPrivate_SetSocketFeatureErrors)
 TEST_PPAPI_OUT_OF_PROCESS_VIA_HTTP(UDPSocketPrivate_Connect)
 TEST_PPAPI_OUT_OF_PROCESS_VIA_HTTP(UDPSocketPrivate_ConnectFailure)
 #if !defined(OS_MACOSX)
@@ -400,24 +460,27 @@ TEST_PPAPI_OUT_OF_PROCESS_VIA_HTTP(URLLoader_AuditURLRedirect)
 TEST_PPAPI_OUT_OF_PROCESS_VIA_HTTP(URLLoader_AbortCalls)
 TEST_PPAPI_OUT_OF_PROCESS_VIA_HTTP(URLLoader_UntendedLoad)
 
-TEST_PPAPI_NACL_VIA_HTTP(URLLoader_BasicGET)
+// These tests are failing a lot on Win 7 bots: http://crbug.com/167150
+TEST_PPAPI_NACL_VIA_HTTP(DISABLED_URLLoader_BasicGET)
+// Note this one that never failed - can it provide a clue to the failures of
+// the others?
 TEST_PPAPI_NACL_VIA_HTTP(URLLoader_BasicPOST)
-TEST_PPAPI_NACL_VIA_HTTP(URLLoader_BasicFilePOST)
-TEST_PPAPI_NACL_VIA_HTTP(URLLoader_BasicFileRangePOST)
-TEST_PPAPI_NACL_VIA_HTTP(URLLoader_CompoundBodyPOST)
-TEST_PPAPI_NACL_VIA_HTTP(URLLoader_EmptyDataPOST)
-TEST_PPAPI_NACL_VIA_HTTP(URLLoader_BinaryDataPOST)
-TEST_PPAPI_NACL_VIA_HTTP(URLLoader_CustomRequestHeader)
-TEST_PPAPI_NACL_VIA_HTTP(URLLoader_FailsBogusContentLength)
-TEST_PPAPI_NACL_VIA_HTTP(URLLoader_StreamToFile)
-TEST_PPAPI_NACL_VIA_HTTP(URLLoader_UntrustedSameOriginRestriction)
-TEST_PPAPI_NACL_VIA_HTTP(URLLoader_UntrustedCrossOriginRequest)
-TEST_PPAPI_NACL_VIA_HTTP(URLLoader_UntrustedJavascriptURLRestriction)
-TEST_PPAPI_NACL_VIA_HTTP(URLLoader_UntrustedHttpRequests)
-TEST_PPAPI_NACL_VIA_HTTP(URLLoader_FollowURLRedirect)
-TEST_PPAPI_NACL_VIA_HTTP(URLLoader_AuditURLRedirect)
-TEST_PPAPI_NACL_VIA_HTTP(URLLoader_AbortCalls)
-TEST_PPAPI_NACL_VIA_HTTP(URLLoader_UntendedLoad)
+TEST_PPAPI_NACL_VIA_HTTP(DISABLED_URLLoader_BasicFilePOST)
+TEST_PPAPI_NACL_VIA_HTTP(DISABLED_URLLoader_BasicFileRangePOST)
+TEST_PPAPI_NACL_VIA_HTTP(DISABLED_URLLoader_CompoundBodyPOST)
+TEST_PPAPI_NACL_VIA_HTTP(DISABLED_URLLoader_EmptyDataPOST)
+TEST_PPAPI_NACL_VIA_HTTP(DISABLED_URLLoader_BinaryDataPOST)
+TEST_PPAPI_NACL_VIA_HTTP(DISABLED_URLLoader_CustomRequestHeader)
+TEST_PPAPI_NACL_VIA_HTTP(DISABLED_URLLoader_FailsBogusContentLength)
+TEST_PPAPI_NACL_VIA_HTTP(DISABLED_URLLoader_StreamToFile)
+TEST_PPAPI_NACL_VIA_HTTP(DISABLED_URLLoader_UntrustedSameOriginRestriction)
+TEST_PPAPI_NACL_VIA_HTTP(DISABLED_URLLoader_UntrustedCrossOriginRequest)
+TEST_PPAPI_NACL_VIA_HTTP(DISABLED_URLLoader_UntrustedJavascriptURLRestriction)
+TEST_PPAPI_NACL_VIA_HTTP(DISABLED_URLLoader_UntrustedHttpRequests)
+TEST_PPAPI_NACL_VIA_HTTP(DISABLED_URLLoader_FollowURLRedirect)
+TEST_PPAPI_NACL_VIA_HTTP(DISABLED_URLLoader_AuditURLRedirect)
+TEST_PPAPI_NACL_VIA_HTTP(DISABLED_URLLoader_AbortCalls)
+TEST_PPAPI_NACL_VIA_HTTP(DISABLED_URLLoader_UntendedLoad)
 
 // URLRequestInfo tests.
 TEST_PPAPI_IN_PROCESS_VIA_HTTP(URLRequest_CreateAndIsURLRequestInfo)
@@ -426,7 +489,7 @@ TEST_PPAPI_OUT_OF_PROCESS_VIA_HTTP(URLRequest_CreateAndIsURLRequestInfo)
 // Timing out on Windows. http://crbug.com/129571
 #if defined(OS_WIN)
 #define MAYBE_URLRequest_CreateAndIsURLRequestInfo \
-  FLAKY_URLRequest_CreateAndIsURLRequestInfo
+  DISABLED_URLRequest_CreateAndIsURLRequestInfo
 #else
 #define MAYBE_URLRequest_CreateAndIsURLRequestInfo \
     URLRequest_CreateAndIsURLRequestInfo
@@ -435,7 +498,8 @@ TEST_PPAPI_NACL_VIA_HTTP(MAYBE_URLRequest_CreateAndIsURLRequestInfo)
 
 TEST_PPAPI_IN_PROCESS_VIA_HTTP(URLRequest_SetProperty)
 TEST_PPAPI_OUT_OF_PROCESS_VIA_HTTP(URLRequest_SetProperty)
-TEST_PPAPI_NACL_VIA_HTTP(URLRequest_SetProperty)
+// http://crbug.com/167150
+TEST_PPAPI_NACL_VIA_HTTP(DISABLED_URLRequest_SetProperty)
 TEST_PPAPI_IN_PROCESS_VIA_HTTP(URLRequest_AppendDataToBody)
 TEST_PPAPI_OUT_OF_PROCESS_VIA_HTTP(URLRequest_AppendDataToBody)
 TEST_PPAPI_NACL_VIA_HTTP(URLRequest_AppendDataToBody)
@@ -502,9 +566,10 @@ TEST_PPAPI_OUT_OF_PROCESS(PostMessage_NonMainThread)
 #endif
 TEST_PPAPI_NACL_VIA_HTTP(PostMessage_SendInInit)
 TEST_PPAPI_NACL_VIA_HTTP(PostMessage_SendingData)
-TEST_PPAPI_NACL_VIA_HTTP(SLOW_PostMessage_SendingArrayBuffer)
+TEST_PPAPI_NACL_VIA_HTTP(PostMessage_SendingArrayBuffer)
 TEST_PPAPI_NACL_VIA_HTTP(PostMessage_MessageEvent)
-TEST_PPAPI_NACL_VIA_HTTP(PostMessage_NoHandler)
+// http://crbug.com/167150
+TEST_PPAPI_NACL_VIA_HTTP(DISABLED_PostMessage_NoHandler)
 
 #if defined(OS_WIN)
 // Flaky: http://crbug.com/111209
@@ -526,6 +591,7 @@ TEST_PPAPI_IN_PROCESS(VideoDecoder)
 TEST_PPAPI_OUT_OF_PROCESS(VideoDecoder)
 
 TEST_PPAPI_IN_PROCESS_VIA_HTTP(FileIO_Open)
+TEST_PPAPI_IN_PROCESS_VIA_HTTP(FileIO_OpenDirectory)
 TEST_PPAPI_IN_PROCESS_VIA_HTTP(FileIO_AbortCalls)
 TEST_PPAPI_IN_PROCESS_VIA_HTTP(FileIO_ParallelReads)
 TEST_PPAPI_IN_PROCESS_VIA_HTTP(FileIO_ParallelWrites)
@@ -553,13 +619,6 @@ TEST_PPAPI_OUT_OF_PROCESS_VIA_HTTP(FileIO_WillWriteWillSetLength)
 #define MAYBE_FileIO_ParallelReads FileIO_ParallelReads
 #endif
 
-// PPAPINaclTest.FileIO_TouchQuery is flaky on Windows. http://crbug.com/130349
-#if defined(OS_WIN)
-#define MAYBE_NACL_FileIO_TouchQuery DISABLED_FileIO_TouchQuery
-#else
-#define MAYBE_NACL_FileIO_TouchQuery FileIO_TouchQuery
-#endif
-
 // PPAPINaclTest.FileIO_AbortCalls is often flaky on Windows.
 // http://crbug.com/160034
 #if defined(OS_WIN)
@@ -571,9 +630,10 @@ TEST_PPAPI_OUT_OF_PROCESS_VIA_HTTP(FileIO_WillWriteWillSetLength)
 TEST_PPAPI_NACL_VIA_HTTP(FileIO_Open)
 TEST_PPAPI_NACL_VIA_HTTP(MAYBE_FileIO_AbortCalls)
 TEST_PPAPI_NACL_VIA_HTTP(MAYBE_FileIO_ParallelReads)
-TEST_PPAPI_NACL_VIA_HTTP(FileIO_ParallelWrites)
+// http://crbug.com/167150
+TEST_PPAPI_NACL_VIA_HTTP(DISABLED_FileIO_ParallelWrites)
 TEST_PPAPI_NACL_VIA_HTTP(FileIO_NotAllowMixedReadWrite)
-TEST_PPAPI_NACL_VIA_HTTP(MAYBE_NACL_FileIO_TouchQuery)
+TEST_PPAPI_NACL_VIA_HTTP(FileIO_TouchQuery)
 TEST_PPAPI_NACL_VIA_HTTP(FileIO_ReadWriteSetLength)
 TEST_PPAPI_NACL_VIA_HTTP(FileIO_ReadToArrayWriteSetLength)
 // The following test requires PPB_FileIO_Trusted, not available in NaCl.
@@ -675,10 +735,8 @@ TEST_PPAPI_NACL_VIA_HTTP(NetworkMonitorPrivate_ListObserver)
 
 TEST_PPAPI_IN_PROCESS(Flash_SetInstanceAlwaysOnTop)
 TEST_PPAPI_IN_PROCESS(Flash_GetCommandLineArgs)
-TEST_PPAPI_IN_PROCESS(Flash_GetSetting)
 TEST_PPAPI_OUT_OF_PROCESS(Flash_SetInstanceAlwaysOnTop)
 TEST_PPAPI_OUT_OF_PROCESS(Flash_GetCommandLineArgs)
-TEST_PPAPI_OUT_OF_PROCESS(Flash_GetSetting)
 
 // NaCl based PPAPI tests with WebSocket server
 TEST_PPAPI_IN_PROCESS(WebSocket_IsWebSocket)
@@ -892,10 +950,6 @@ TEST_PPAPI_OUT_OF_PROCESS(Printing)
 // PPB_MessageLoop is only supported out-of-process.
 // TODO(dmichael): Enable for NaCl with the IPC proxy. crbug.com/116317
 TEST_PPAPI_OUT_OF_PROCESS(MessageLoop_Basics)
-// Note to sheriffs: MessageLoop_Post starts a thread, which has a history of
-// slowness, particularly on Windows XP. If this test times out, please try
-// marking it SLOW_ before disabling.
-//    - dmichael
 // MessageLoop_Post starts a thread so only run it if pepper threads are
 // enabled.
 #ifdef ENABLE_PEPPER_THREADING
@@ -905,6 +959,7 @@ TEST_PPAPI_OUT_OF_PROCESS(MessageLoop_Post)
 // Going forward, Flash APIs will only work out-of-process.
 TEST_PPAPI_OUT_OF_PROCESS(Flash_GetLocalTimeZoneOffset)
 TEST_PPAPI_OUT_OF_PROCESS(Flash_GetProxyForURL)
+TEST_PPAPI_OUT_OF_PROCESS(Flash_GetSetting)
 TEST_PPAPI_OUT_OF_PROCESS(Flash_SetCrashData)
 TEST_PPAPI_OUT_OF_PROCESS(FlashClipboard)
 TEST_PPAPI_OUT_OF_PROCESS(FlashFile)

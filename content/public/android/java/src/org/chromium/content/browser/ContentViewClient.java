@@ -35,6 +35,21 @@ public class ContentViewClient {
     }
 
     /**
+     * Called whenever the background color of the page changes as notified by WebKit.
+     * @param color The new ARGB color of the page background.
+     */
+    public void onBackgroundColorChanged(int color) {
+    }
+
+    /**
+     * Notifies that the content size has changed.
+     * @param width The width of the content.
+     * @param height The height of the content.
+     */
+    public void onContentSizeChanged(int width, int height) {
+    }
+
+    /**
       * Lets client listen on the scaling changes on delayed, throttled
       * and best-effort basis. Used for WebView.onScaleChanged.
       */
@@ -93,12 +108,12 @@ public class ContentViewClient {
     }
 
     /**
-     * A callback invoked after the JavaScript code passed to evaluateJavaScript
-     * has finished execution.
-     * Used in automation tests.
-     * @hide
+     * Notified when a change to the IME was requested.
+     *
+     * @param requestShow Whether the IME was requested to be shown (may already be showing
+     *                    though).
      */
-    public void onEvaluateJavaScriptResult(int id, String jsonResult) {
+    public void onImeStateChangeRequested(boolean requestShow) {
     }
 
     // TODO (dtrainor): Should expose getScrollX/Y from ContentView or make

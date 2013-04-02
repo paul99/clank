@@ -16,6 +16,7 @@
 #include "ui/gfx/canvas.h"
 #include "ui/native_theme/native_theme.h"
 #include "ui/views/corewm/compound_event_filter.h"
+#include "ui/views/corewm/corewm_switches.h"
 #include "ui/views/corewm/input_method_event_filter.h"
 #include "ui/views/drag_utils.h"
 #include "ui/views/ime/input_method.h"
@@ -283,8 +284,12 @@ void DesktopNativeWidgetAura::SetAccessibleState(
 }
 
 void DesktopNativeWidgetAura::InitModalType(ui::ModalType modal_type) {
-  // We should never be asked to create a DesktopNativeWidgetAura that is modal.
-  DCHECK_EQ(ui::MODAL_TYPE_NONE, modal_type);
+  // 99% of the time, we should not be asked to create a
+  // DesktopNativeWidgetAura that is modal. The case where this breaks down is
+  // when there are no browser windows and a background extension tries to
+  // display a simple alert dialog. (This case was masked because we used to
+  // have a hidden RootWindow which was the parent of these modal dialogs; they
+  // weren't displayed to the user.)
 }
 
 gfx::Rect DesktopNativeWidgetAura::GetWindowBoundsInScreen() const {
@@ -322,6 +327,8 @@ void DesktopNativeWidgetAura::SetShape(gfx::NativeRegion shape) {
 
 void DesktopNativeWidgetAura::Close() {
   desktop_root_window_host_->Close();
+  if (window_)
+    window_->SuppressPaint();
 }
 
 void DesktopNativeWidgetAura::CloseNow() {
@@ -330,10 +337,13 @@ void DesktopNativeWidgetAura::CloseNow() {
 
 void DesktopNativeWidgetAura::Show() {
   desktop_root_window_host_->AsRootWindowHost()->Show();
+  window_->Show();
 }
 
 void DesktopNativeWidgetAura::Hide() {
   desktop_root_window_host_->AsRootWindowHost()->Hide();
+  if (window_)
+    window_->Hide();
 }
 
 void DesktopNativeWidgetAura::ShowMaximizedWithBounds(
@@ -428,7 +438,7 @@ void DesktopNativeWidgetAura::SetCursor(gfx::NativeCursor cursor) {
 
 void DesktopNativeWidgetAura::ClearNativeFocus() {
   desktop_root_window_host_->ClearNativeFocus();
-  aura::client::GetFocusClient(window_)->FocusWindow(window_, NULL);
+  aura::client::GetFocusClient(window_)->ResetFocusWithinActiveWindow(window_);
 }
 
 gfx::Rect DesktopNativeWidgetAura::GetWorkAreaBoundsInScreen() const {
@@ -513,7 +523,7 @@ void DesktopNativeWidgetAura::OnDeviceScaleFactorChanged(
 }
 
 void DesktopNativeWidgetAura::OnWindowDestroying() {
-  native_widget_delegate_->OnNativeWidgetDestroying();
+  // The DesktopRootWindowHost implementation sends OnNativeWidgetDestroying().
 }
 
 void DesktopNativeWidgetAura::OnWindowDestroyed() {
@@ -623,22 +633,27 @@ void DesktopNativeWidgetAura::OnWindowActivated(aura::Window* gained_active,
     restore_focus_on_activate_ = false;
     GetWidget()->GetFocusManager()->RestoreFocusedView();
   } else if (lost_active == window_ && GetWidget()->HasFocusManager()) {
-    // If we're losing focus to a window that is a top level (such as a bubble)
-    // store the focus. Such a window shares the same RootWindowHost, so that
-    // such a change won't trigger an activation change (which calls
-    // StoreFocusedView()). Without this the focused view is never told it lost
-    // focus.
-    aura::Window* focused_window =
+    bool store_focused_view = corewm::UseFocusControllerOnDesktop();
+    if (!store_focused_view) {
+      // If we're losing focus to a window that is a top level (such as a
+      // bubble) store the focus. Such a window shares the same
+      // RootWindowHost, so that such a change won't trigger an activation
+      // change (which calls StoreFocusedView()). Without this the focused
+      // view is never told it lost focus.
+      aura::Window* focused_window =
         aura::client::GetFocusClient(window_)->GetFocusedWindow();
-    if (focused_window && focused_window != window_) {
-      Widget* focused_widget = Widget::GetWidgetForNativeWindow(focused_window);
-      if (focused_widget && focused_widget != GetWidget() &&
-          focused_widget->is_top_level()) {
-        DCHECK(!restore_focus_on_activate_);
-        restore_focus_on_activate_ = true;
-        // Pass in false so that ClearNativeFocus() isn't invoked.
-        GetWidget()->GetFocusManager()->StoreFocusedView(false);
+      if (focused_window && focused_window != window_) {
+        Widget* focused_widget =
+            Widget::GetWidgetForNativeWindow(focused_window);
+        store_focused_view = focused_widget && focused_widget != GetWidget() &&
+            focused_widget->is_top_level();
       }
+    }
+    if (store_focused_view) {
+      DCHECK(!restore_focus_on_activate_);
+      restore_focus_on_activate_ = true;
+      // Pass in false so that ClearNativeFocus() isn't invoked.
+      GetWidget()->GetFocusManager()->StoreFocusedView(false);
     }
   }
 }

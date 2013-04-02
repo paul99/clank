@@ -6,22 +6,21 @@
 
 #include "base/bind.h"
 #include "base/memory/scoped_ptr.h"
+#include "base/prefs/pref_service.h"
 #include "base/utf_string_conversions.h"
 #include "base/values.h"
 #include "base/version.h"
-#include "chrome/browser/chrome_plugin_service_filter.h"
 #include "chrome/browser/lifetime/application_lifetime.h"
+#include "chrome/browser/plugins/chrome_plugin_service_filter.h"
 #include "chrome/browser/plugins/plugin_finder.h"
 #include "chrome/browser/plugins/plugin_metadata.h"
 #include "chrome/browser/plugins/plugin_prefs.h"
-#include "chrome/browser/prefs/pref_service.h"
 #include "chrome/browser/profiles/profile.h"
 #include "chrome/browser/renderer_preferences_util.h"
 #include "chrome/browser/tab_contents/tab_util.h"
 #include "chrome/browser/ui/pdf/open_pdf_in_reader_prompt_delegate.h"
 #include "chrome/browser/ui/pdf/pdf_tab_helper.h"
 #include "chrome/common/chrome_content_client.h"
-#include "chrome/common/jstemplate_builder.h"
 #include "chrome/common/pref_names.h"
 #include "content/public/browser/interstitial_page.h"
 #include "content/public/browser/interstitial_page_delegate.h"
@@ -39,6 +38,7 @@
 #include "ui/base/l10n/l10n_util.h"
 #include "ui/base/resource/resource_bundle.h"
 #include "ui/gfx/image/image.h"
+#include "ui/webui/jstemplate_builder.h"
 
 #if defined(OS_WIN)
 #include "base/win/metro.h"
@@ -194,7 +194,7 @@ class PDFUnsupportedFeatureInterstitial
     base::StringPiece html(ResourceBundle::GetSharedInstance().
                            GetRawDataResource(IDR_READER_OUT_OF_DATE_HTML));
 
-    return jstemplate_builder::GetI18nTemplateHtml(html, &strings);
+    return webui::GetI18nTemplateHtml(html, &strings);
   }
 
   virtual void CommandReceived(const std::string& command) OVERRIDE {

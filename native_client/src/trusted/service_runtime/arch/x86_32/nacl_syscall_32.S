@@ -46,7 +46,8 @@
          * are still using a stack in untrusted memory, and we need to
          * figure out the per-thread secure stack first.
          */
-DEFINE_GLOBAL_HIDDEN_IDENTIFIER(NaClSyscallSeg):
+MACRO(syscallseg)
+MACROENTRY
         cld
         xor     %eax, %eax
         movw    %gs, %ax
@@ -62,15 +63,14 @@ DEFINE_GLOBAL_HIDDEN_IDENTIFIER(NaClSyscallSeg):
          * jump into this code.
          */
         movl    %eax, %edx
-        andl    $7, %edx  /* extract TI and RPL fields */
-        cmpl    $7, %edx  /* make sure it's LDT, ring 3 */
+        andl    MACROIMMED(7), %edx  /* extract TI and RPL fields */
+        cmpl    MACROIMMED(7), %edx  /* make sure it's LDT, ring 3 */
         jne     1f
-        shr     $3, %eax
+        shr     MACROIMMED(3), %eax
         test    %eax, %eax  /* zero is illegal (and default) */
         jz      1f
 
-        movl    0(%ecx), %edx
-        movl    0(%edx,%eax,4), %edx
+        movl    (%ecx,%eax,4), %edx
         test    %edx, %edx
         jz      1f
 
@@ -94,6 +94,16 @@ DEFINE_GLOBAL_HIDDEN_IDENTIFIER(NaClSyscallSeg):
         fnstcw  NACL_THREAD_CONTEXT_OFFSET_FCW(%edx)
         fldcw   NACL_THREAD_CONTEXT_OFFSET_SYS_FCW(%edx)
 
+.if MACROARG2
+        /*
+         * Save the SSE control word.  Then reload the system default
+         * state to use while running trusted code.
+         */
+        stmxcsr NACL_THREAD_CONTEXT_OFFSET_MXCSR(%edx)
+        ldmxcsr NACL_THREAD_CONTEXT_OFFSET_SYS_MXCSR(%edx)
+.endif
+DEFINE_GLOBAL_HIDDEN_IDENTIFIER(MACROARG3): /* NaClSyscallSegRegsSaved */
+
         /*
          * We do not save segment registers, which untrusted code is
          * powerless to change.
@@ -115,12 +125,20 @@ DEFINE_GLOBAL_HIDDEN_IDENTIFIER(NaClSyscallSeg):
 
         /* 'lss' sets %ss as well as %esp */
         lss     NACL_THREAD_CONTEXT_OFFSET_TRUSTED_STACK_PTR(%edx), %esp
-        push    %eax
+        push    %edx
         call    IDENTIFIER(NaClSyscallCSegHook)
         /*
          * If stack usage in the above code changes, modify initial %esp
          * computation -- see nacl_switch_to_app.c:NaClStartThreadInApp.
          */
-DEFINE_GLOBAL_HIDDEN_IDENTIFIER(NaClSyscallThreadCaptureFault):
+DEFINE_GLOBAL_HIDDEN_IDENTIFIER(MACROARG4): /* NaClSyscallThreadCaptureFault */
 1:      hlt
         /* noret */
+ENDMACRO
+
+        /*
+         * Note that long lines are required here because "\" does not
+         * work in the Windows build.
+         */
+        syscallseg NaClSyscallSegNoSSE, 0, NaClSyscallSegRegsSavedNoSSE, NaClSyscallThreadCaptureFaultNoSSE
+        syscallseg NaClSyscallSegSSE, 1, NaClSyscallSegRegsSavedSSE, NaClSyscallThreadCaptureFaultSSE

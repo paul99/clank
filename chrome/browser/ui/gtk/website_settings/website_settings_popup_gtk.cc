@@ -5,18 +5,18 @@
 #include "chrome/browser/ui/gtk/website_settings/website_settings_popup_gtk.h"
 
 #include "base/i18n/rtl.h"
-#include "base/string_number_conversions.h"
+#include "base/strings/string_number_conversions.h"
 #include "base/utf_string_conversions.h"
+#include "chrome/browser/api/infobars/infobar_service.h"
 #include "chrome/browser/certificate_viewer.h"
-#include "chrome/browser/infobars/infobar_tab_helper.h"
 #include "chrome/browser/ui/browser.h"
 #include "chrome/browser/ui/browser_list.h"
 #include "chrome/browser/ui/gtk/browser_toolbar_gtk.h"
 #include "chrome/browser/ui/gtk/browser_window_gtk.h"
 #include "chrome/browser/ui/gtk/collected_cookies_gtk.h"
 #include "chrome/browser/ui/gtk/gtk_chrome_link_button.h"
-#include "chrome/browser/ui/gtk/gtk_util.h"
 #include "chrome/browser/ui/gtk/gtk_theme_service.h"
+#include "chrome/browser/ui/gtk/gtk_util.h"
 #include "chrome/browser/ui/gtk/location_bar_view_gtk.h"
 #include "chrome/browser/ui/gtk/nine_box.h"
 #include "chrome/browser/ui/gtk/website_settings/permission_selector.h"
@@ -166,9 +166,6 @@ InternalPageInfoPopupGtk::InternalPageInfoPopupGtk(
   gtk_widget_show_all(contents);
 
   // Create the bubble.
-  BubbleGtk::ArrowLocationGtk arrow_location = base::i18n::IsRTL() ?
-      BubbleGtk::ARROW_LOCATION_TOP_RIGHT :
-      BubbleGtk::ARROW_LOCATION_TOP_LEFT;
   BrowserWindowGtk* browser_window =
       BrowserWindowGtk::GetBrowserWindowForNativeWindow(parent);
   GtkWidget* anchor = browser_window->
@@ -176,7 +173,7 @@ InternalPageInfoPopupGtk::InternalPageInfoPopupGtk(
   bubble_ = BubbleGtk::Show(anchor,
                             NULL,  // |rect|
                             contents,
-                            arrow_location,
+                            BubbleGtk::ANCHOR_TOP_LEFT,
                             BubbleGtk::MATCH_SYSTEM_THEME |
                                 BubbleGtk::POPUP_WINDOW |
                                 BubbleGtk::GRAB_INPUT,
@@ -239,13 +236,10 @@ WebsiteSettingsPopupGtk::WebsiteSettingsPopupGtk(
 
   InitContents();
 
-  BubbleGtk::ArrowLocationGtk arrow_location = base::i18n::IsRTL() ?
-      BubbleGtk::ARROW_LOCATION_TOP_RIGHT :
-      BubbleGtk::ARROW_LOCATION_TOP_LEFT;
   bubble_ = BubbleGtk::Show(anchor_,
                             NULL,  // |rect|
                             contents_,
-                            arrow_location,
+                            BubbleGtk::ANCHOR_TOP_LEFT,
                             BubbleGtk::MATCH_SYSTEM_THEME |
                                 BubbleGtk::POPUP_WINDOW |
                                 BubbleGtk::GRAB_INPUT,
@@ -258,11 +252,11 @@ WebsiteSettingsPopupGtk::WebsiteSettingsPopupGtk(
 
   TabSpecificContentSettings* content_settings =
       TabSpecificContentSettings::FromWebContents(web_contents);
-  InfoBarTabHelper* infobar_tab_helper =
-      InfoBarTabHelper::FromWebContents(web_contents);
+  InfoBarService* infobar_service =
+      InfoBarService::FromWebContents(web_contents);
   presenter_.reset(new WebsiteSettings(this, profile,
                                        content_settings,
-                                       infobar_tab_helper,
+                                       infobar_service,
                                        url, ssl,
                                        content::CertStore::GetInstance()));
 }

@@ -19,7 +19,7 @@ class ThemeServiceTest : public ExtensionServiceTestBase {
   ThemeServiceTest() {}
   virtual ~ThemeServiceTest() {}
 
-  scoped_refptr<extensions::Extension> MakeThemeExtension(FilePath path) {
+  scoped_refptr<extensions::Extension> MakeThemeExtension(base::FilePath path) {
     DictionaryValue source;
     source.SetString(extension_manifest_keys::kName, "theme");
     source.Set(extension_manifest_keys::kTheme, new DictionaryValue());
@@ -28,14 +28,14 @@ class ThemeServiceTest : public ExtensionServiceTestBase {
     std::string error;
     scoped_refptr<extensions::Extension> extension =
         extensions::Extension::Create(
-            path, extensions::Extension::EXTERNAL_PREF_DOWNLOAD,
+            path, extensions::Manifest::EXTERNAL_PREF_DOWNLOAD,
             source, extensions::Extension::NO_FLAGS, &error);
     EXPECT_TRUE(extension);
     EXPECT_EQ("", error);
     return extension;
   }
 
-  void SetUp() {
+  virtual void SetUp() {
     InitializeEmptyExtensionService();
   }
 };

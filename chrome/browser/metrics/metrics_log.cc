@@ -4,6 +4,7 @@
 
 #include "chrome/browser/metrics/metrics_log.h"
 
+#include <algorithm>
 #include <string>
 #include <vector>
 
@@ -12,9 +13,11 @@
 #include "base/lazy_instance.h"
 #include "base/memory/scoped_ptr.h"
 #include "base/perftimer.h"
+#include "base/prefs/pref_registry_simple.h"
+#include "base/prefs/pref_service.h"
 #include "base/profiler/alternate_timer.h"
-#include "base/string_number_conversions.h"
 #include "base/string_util.h"
+#include "base/strings/string_number_conversions.h"
 #include "base/sys_info.h"
 #include "base/third_party/nspr/prtime.h"
 #include "base/time.h"
@@ -26,8 +29,8 @@
 #include "chrome/browser/autocomplete/autocomplete_provider.h"
 #include "chrome/browser/autocomplete/autocomplete_result.h"
 #include "chrome/browser/browser_process.h"
+#include "chrome/browser/google/google_util.h"
 #include "chrome/browser/plugins/plugin_prefs.h"
-#include "chrome/browser/prefs/pref_service.h"
 #include "chrome/browser/profiles/profile_manager.h"
 #include "chrome/common/chrome_version_info.h"
 #include "chrome/common/logging_chrome.h"
@@ -42,7 +45,6 @@
 #include "content/public/common/content_client.h"
 #include "content/public/common/gpu_info.h"
 #include "googleurl/src/gurl.h"
-#include "net/base/network_change_notifier.h"
 #include "ui/gfx/screen.h"
 #include "webkit/plugins/webplugininfo.h"
 
@@ -61,6 +63,7 @@ extern "C" IMAGE_DOS_HEADER __ImageBase;
 
 using content::GpuDataManager;
 using metrics::OmniboxEventProto;
+using metrics::PerfDataProto;
 using metrics::ProfilerEventProto;
 using metrics::SystemProfileProto;
 using tracked_objects::ProcessDataSnapshot;
@@ -264,66 +267,45 @@ void ProductDataToProto(const GoogleUpdateSettings::ProductData& product_data,
 }
 #endif
 
-}  // namespace
-
-class MetricsLog::NetworkObserver
-    : public net::NetworkChangeNotifier::ConnectionTypeObserver {
- public:
-  NetworkObserver() : connection_type_is_ambiguous_(false) {
-    net::NetworkChangeNotifier::AddConnectionTypeObserver(this);
-    Reset();
-  }
-  virtual ~NetworkObserver() {
-    net::NetworkChangeNotifier::RemoveConnectionTypeObserver(this);
-  }
-
-  void Reset() {
-    connection_type_is_ambiguous_ = false;
-    connection_type_ = net::NetworkChangeNotifier::GetConnectionType();
-  }
-
-  // ConnectionTypeObserver:
-  virtual void OnConnectionTypeChanged(
-      net::NetworkChangeNotifier::ConnectionType type) OVERRIDE {
-    if (type == net::NetworkChangeNotifier::CONNECTION_NONE)
-      return;
-    if (type != connection_type_ &&
-        connection_type_ != net::NetworkChangeNotifier::CONNECTION_NONE) {
-      connection_type_is_ambiguous_ = true;
-    }
-    connection_type_ = type;
-  }
-
-  bool connection_type_is_ambiguous() const {
-    return connection_type_is_ambiguous_;
-  }
-
-  SystemProfileProto::Network::ConnectionType connection_type() const {
-    switch (connection_type_) {
-      case net::NetworkChangeNotifier::CONNECTION_NONE:
-      case net::NetworkChangeNotifier::CONNECTION_UNKNOWN:
-        return SystemProfileProto::Network::CONNECTION_UNKNOWN;
-      case net::NetworkChangeNotifier::CONNECTION_ETHERNET:
-        return SystemProfileProto::Network::CONNECTION_ETHERNET;
-      case net::NetworkChangeNotifier::CONNECTION_WIFI:
-        return SystemProfileProto::Network::CONNECTION_WIFI;
-      case net::NetworkChangeNotifier::CONNECTION_2G:
-        return SystemProfileProto::Network::CONNECTION_2G;
-      case net::NetworkChangeNotifier::CONNECTION_3G:
-        return SystemProfileProto::Network::CONNECTION_3G;
-      case net::NetworkChangeNotifier::CONNECTION_4G:
-        return SystemProfileProto::Network::CONNECTION_4G;
-    }
-    NOTREACHED();
-    return SystemProfileProto::Network::CONNECTION_UNKNOWN;
-  }
-
- private:
-  bool connection_type_is_ambiguous_;
-  net::NetworkChangeNotifier::ConnectionType connection_type_;
-
-  DISALLOW_COPY_AND_ASSIGN(NetworkObserver);
+#if defined(OS_WIN)
+struct ScreenDPIInformation{
+  double max_dpi_x;
+  double max_dpi_y;
 };
+
+// Called once for each connected monitor.
+BOOL CALLBACK GetMonitorDPICallback(HMONITOR, HDC hdc, LPRECT, LPARAM dwData) {
+  const double kMillimetersPerInch = 25.4;
+  ScreenDPIInformation* screen_info =
+      reinterpret_cast<ScreenDPIInformation*>(dwData);
+  // Size of screen, in mm.
+  DWORD size_x = GetDeviceCaps(hdc, HORZSIZE);
+  DWORD size_y = GetDeviceCaps(hdc, VERTSIZE);
+  double dpi_x = (size_x > 0) ?
+      GetDeviceCaps(hdc, HORZRES) / (size_x / kMillimetersPerInch) : 0;
+  double dpi_y = (size_y > 0) ?
+      GetDeviceCaps(hdc, VERTRES) / (size_y / kMillimetersPerInch) : 0;
+  screen_info->max_dpi_x = std::max(dpi_x, screen_info->max_dpi_x);
+  screen_info->max_dpi_y = std::max(dpi_y, screen_info->max_dpi_y);
+  return TRUE;
+}
+
+void WriteScreenDPIInformationProto(SystemProfileProto::Hardware* hardware) {
+  HDC desktop_dc = GetDC(NULL);
+  if (desktop_dc) {
+    ScreenDPIInformation si = {0,0};
+    if (EnumDisplayMonitors(desktop_dc, NULL, GetMonitorDPICallback,
+            reinterpret_cast<LPARAM>(&si))) {
+      hardware->set_max_dpi_x(si.max_dpi_x);
+      hardware->set_max_dpi_y(si.max_dpi_y);
+    }
+    ReleaseDC(GetDesktopWindow(), desktop_dc);
+  }
+}
+
+#endif  // defined(OS_WIN)
+
+}  // namespace
 
 GoogleUpdateMetrics::GoogleUpdateMetrics() : is_system_install(false) {}
 
@@ -333,14 +315,13 @@ static base::LazyInstance<std::string>::Leaky
   g_version_extension = LAZY_INSTANCE_INITIALIZER;
 
 MetricsLog::MetricsLog(const std::string& client_id, int session_id)
-    : MetricsLogBase(client_id, session_id, MetricsLog::GetVersionString()),
-      network_observer_(new NetworkObserver()) {}
+    : MetricsLogBase(client_id, session_id, MetricsLog::GetVersionString()) {}
 
 MetricsLog::~MetricsLog() {}
 
 // static
-void MetricsLog::RegisterPrefs(PrefService* local_state) {
-  local_state->RegisterListPref(prefs::kStabilityPluginStats);
+void MetricsLog::RegisterPrefs(PrefRegistrySimple* registry) {
+  registry->RegisterListPref(prefs::kStabilityPluginStats);
 }
 
 // static
@@ -401,7 +382,6 @@ void MetricsLog::RecordIncrementalStabilityElements(
     OPEN_ELEMENT_FOR_SCOPE("stability");  // Minimal set of stability elements.
     WriteRequiredStabilityAttributes(pref);
     WriteRealtimeStabilityAttributes(pref);
-
     WritePluginStabilityElements(plugin_list, pref);
   }
 }
@@ -494,6 +474,8 @@ void MetricsLog::WritePluginStabilityElements(
     return;
 
   OPEN_ELEMENT_FOR_SCOPE("plugins");
+
+#if defined(ENABLE_PLUGINS)
   SystemProfileProto::Stability* stability =
       uma_proto()->mutable_system_profile()->mutable_stability();
   PluginPrefs* plugin_prefs = GetPluginPrefs();
@@ -566,6 +548,7 @@ void MetricsLog::WritePluginStabilityElements(
     plugin_stability->set_crash_count(crashes);
     plugin_stability->set_loading_error_count(loading_errors);
   }
+#endif  // defined(ENABLE_PLUGINS)
 
   pref->ClearPref(prefs::kStabilityPluginStats);
 }
@@ -665,9 +648,10 @@ void MetricsLog::WritePluginList(
     bool write_as_xml) {
   DCHECK(!locked());
 
-  PluginPrefs* plugin_prefs = GetPluginPrefs();
-
   OPEN_ELEMENT_FOR_SCOPE("plugins");
+
+#if defined(ENABLE_PLUGINS)
+  PluginPrefs* plugin_prefs = GetPluginPrefs();
   SystemProfileProto* system_profile = uma_proto()->mutable_system_profile();
   for (std::vector<webkit::WebPluginInfo>::const_iterator iter =
            plugin_list.begin();
@@ -699,6 +683,7 @@ void MetricsLog::WritePluginList(
       SetPluginInfo(*iter, plugin_prefs, plugin);
     }
   }
+#endif  // defined(ENABLE_PLUGINS)
 }
 
 void MetricsLog::WriteInstallElement() {
@@ -778,28 +763,17 @@ void MetricsLog::RecordEnvironment(
 
   {
     OPEN_ELEMENT_FOR_SCOPE("bookmarks");
-    int num_bookmarks_on_bookmark_bar =
-        pref->GetInteger(prefs::kNumBookmarksOnBookmarkBar);
-    int num_folders_on_bookmark_bar =
-        pref->GetInteger(prefs::kNumFoldersOnBookmarkBar);
-    int num_bookmarks_in_other_bookmarks_folder =
-        pref->GetInteger(prefs::kNumBookmarksInOtherBookmarkFolder);
-    int num_folders_in_other_bookmarks_folder =
-        pref->GetInteger(prefs::kNumFoldersInOtherBookmarkFolder);
     {
       OPEN_ELEMENT_FOR_SCOPE("bookmarklocation");
       WriteAttribute("name", "full-tree");
-      WriteIntAttribute("foldercount",
-          num_folders_on_bookmark_bar + num_folders_in_other_bookmarks_folder);
-      WriteIntAttribute("itemcount",
-          num_bookmarks_on_bookmark_bar +
-          num_bookmarks_in_other_bookmarks_folder);
+      WriteIntAttribute("foldercount", 0);
+      WriteIntAttribute("itemcount", 0);
     }
     {
       OPEN_ELEMENT_FOR_SCOPE("bookmarklocation");
       WriteAttribute("name", "toolbar");
-      WriteIntAttribute("foldercount", num_folders_on_bookmark_bar);
-      WriteIntAttribute("itemcount", num_bookmarks_on_bookmark_bar);
+      WriteIntAttribute("foldercount", 0);
+      WriteIntAttribute("itemcount", 0);
     }
   }
 
@@ -818,6 +792,11 @@ void MetricsLog::RecordEnvironmentProto(
     const std::vector<webkit::WebPluginInfo>& plugin_list,
     const GoogleUpdateMetrics& google_update_metrics) {
   SystemProfileProto* system_profile = uma_proto()->mutable_system_profile();
+
+  std::string brand_code;
+  if (google_util::GetBrand(&brand_code))
+    system_profile->set_brand_code(brand_code);
+
   int enabled_date;
   bool success = base::StringToInt(GetMetricsEnabledDate(GetPrefService()),
                                    &enabled_date);
@@ -836,9 +815,13 @@ void MetricsLog::RecordEnvironmentProto(
 
   SystemProfileProto::Network* network = system_profile->mutable_network();
   network->set_connection_type_is_ambiguous(
-      network_observer_->connection_type_is_ambiguous());
-  network->set_connection_type(network_observer_->connection_type());
-  network_observer_->Reset();
+      network_observer_.connection_type_is_ambiguous());
+  network->set_connection_type(network_observer_.connection_type());
+  network->set_wifi_phy_layer_protocol_is_ambiguous(
+      network_observer_.wifi_phy_layer_protocol_is_ambiguous());
+  network->set_wifi_phy_layer_protocol(
+      network_observer_.wifi_phy_layer_protocol());
+  network_observer_.Reset();
 
   SystemProfileProto::OS* os = system_profile->mutable_os();
   std::string os_name = base::SysInfo::OperatingSystemName();
@@ -879,6 +862,10 @@ void MetricsLog::RecordEnvironmentProto(
   hardware->set_primary_screen_scale_factor(GetScreenDeviceScaleFactor());
   hardware->set_screen_count(GetScreenCount());
 
+#if defined(OS_WIN)
+  WriteScreenDPIInformationProto(hardware);
+#endif
+
   WriteGoogleUpdateProto(google_update_metrics);
 
   bool write_as_xml = false;
@@ -887,6 +874,12 @@ void MetricsLog::RecordEnvironmentProto(
   std::vector<ActiveGroupId> field_trial_ids;
   GetFieldTrialIds(&field_trial_ids);
   WriteFieldTrials(field_trial_ids, system_profile);
+
+#if defined(OS_CHROMEOS)
+  PerfDataProto perf_data_proto;
+  if (perf_provider_.GetPerfData(&perf_data_proto))
+    uma_proto()->add_perf_data()->Swap(&perf_data_proto);
+#endif
 }
 
 void MetricsLog::RecordProfilerData(
@@ -1002,8 +995,8 @@ void MetricsLog::RecordOmniboxOpenedURL(const AutocompleteLog& log) {
     WriteIntAttribute("numterms", num_terms);
     WriteIntAttribute("selectedindex", static_cast<int>(log.selected_index));
     WriteIntAttribute("completedlength",
-                      log.inline_autocompleted_length != string16::npos ?
-                      static_cast<int>(log.inline_autocompleted_length) : 0);
+                      log.completed_length != string16::npos ?
+                      static_cast<int>(log.completed_length) : 0);
     if (log.elapsed_time_since_user_first_modified_omnibox !=
         base::TimeDelta::FromMilliseconds(-1)) {
       // Only upload the typing duration if it is set/valid.
@@ -1039,8 +1032,8 @@ void MetricsLog::RecordOmniboxOpenedURL(const AutocompleteLog& log) {
   omnibox_event->set_just_deleted_text(log.just_deleted_text);
   omnibox_event->set_num_typed_terms(num_terms);
   omnibox_event->set_selected_index(log.selected_index);
-  if (log.inline_autocompleted_length != string16::npos)
-    omnibox_event->set_completed_length(log.inline_autocompleted_length);
+  if (log.completed_length != string16::npos)
+    omnibox_event->set_completed_length(log.completed_length);
   if (log.elapsed_time_since_user_first_modified_omnibox !=
       base::TimeDelta::FromMilliseconds(-1)) {
     // Only upload the typing duration if it is set/valid.

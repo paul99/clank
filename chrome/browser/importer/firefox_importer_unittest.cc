@@ -141,16 +141,16 @@ class FirefoxObserver : public ProfileWriter,
     EXPECT_EQ(arraysize(kFirefox2Keywords), keyword_count_);
   }
 
-  virtual bool BookmarkModelIsLoaded() const {
+  virtual bool BookmarkModelIsLoaded() const OVERRIDE {
     // Profile is ready for writing.
     return true;
   }
 
-  virtual bool TemplateURLServiceIsLoaded() const {
+  virtual bool TemplateURLServiceIsLoaded() const OVERRIDE {
     return true;
   }
 
-  virtual void AddPasswordForm(const content::PasswordForm& form) {
+  virtual void AddPasswordForm(const content::PasswordForm& form) OVERRIDE {
     PasswordInfo p = kFirefox2Passwords[password_count_];
     EXPECT_EQ(p.origin, form.origin.spec());
     EXPECT_EQ(p.realm, form.signon_realm);
@@ -164,7 +164,7 @@ class FirefoxObserver : public ProfileWriter,
   }
 
   virtual void AddHistoryPage(const history::URLRows& page,
-                              history::VisitSource visit_source) {
+                              history::VisitSource visit_source) OVERRIDE {
     ASSERT_EQ(1U, page.size());
     EXPECT_EQ("http://en-us.www.mozilla.com/", page[0].url().spec());
     EXPECT_EQ(ASCIIToUTF16("Firefox Updated"), page[0].title());
@@ -182,7 +182,7 @@ class FirefoxObserver : public ProfileWriter,
   }
 
   virtual void AddKeywords(ScopedVector<TemplateURL> template_urls,
-                           bool unique_on_host_and_path) {
+                           bool unique_on_host_and_path) OVERRIDE {
     for (size_t i = 0; i < template_urls.size(); ++i) {
       // The order might not be deterministic, look in the expected list for
       // that template URL.
@@ -201,11 +201,12 @@ class FirefoxObserver : public ProfileWriter,
     }
   }
 
-  void AddFavicons(const std::vector<history::ImportedFaviconUsage>& favicons) {
+  virtual void AddFavicons(
+      const std::vector<history::ImportedFaviconUsage>& favicons) OVERRIDE {
   }
 
  private:
-  ~FirefoxObserver() {}
+  virtual ~FirefoxObserver() {}
 
   size_t bookmark_count_;
   size_t history_count_;
@@ -286,16 +287,16 @@ class Firefox3Observer : public ProfileWriter,
       EXPECT_EQ(arraysize(kFirefox3Keywords), keyword_count_);
   }
 
-  virtual bool BookmarkModelIsLoaded() const {
+  virtual bool BookmarkModelIsLoaded() const OVERRIDE {
     // Profile is ready for writing.
     return true;
   }
 
-  virtual bool TemplateURLServiceIsLoaded() const {
+  virtual bool TemplateURLServiceIsLoaded() const OVERRIDE {
     return true;
   }
 
-  virtual void AddPasswordForm(const content::PasswordForm& form) {
+  virtual void AddPasswordForm(const content::PasswordForm& form) OVERRIDE {
     PasswordInfo p = kFirefox3Passwords[password_count_];
     EXPECT_EQ(p.origin, form.origin.spec());
     EXPECT_EQ(p.realm, form.signon_realm);
@@ -309,7 +310,7 @@ class Firefox3Observer : public ProfileWriter,
   }
 
   virtual void AddHistoryPage(const history::URLRows& page,
-                              history::VisitSource visit_source) {
+                              history::VisitSource visit_source) OVERRIDE {
     ASSERT_EQ(3U, page.size());
     EXPECT_EQ("http://www.google.com/", page[0].url().spec());
     EXPECT_EQ(ASCIIToUTF16("Google"), page[0].title());
@@ -331,8 +332,8 @@ class Firefox3Observer : public ProfileWriter,
     }
   }
 
-  void AddKeywords(ScopedVector<TemplateURL> template_urls,
-                   bool unique_on_host_and_path) {
+  virtual void AddKeywords(ScopedVector<TemplateURL> template_urls,
+                           bool unique_on_host_and_path) OVERRIDE {
     for (size_t i = 0; i < template_urls.size(); ++i) {
       // The order might not be deterministic, look in the expected list for
       // that template URL.
@@ -351,11 +352,12 @@ class Firefox3Observer : public ProfileWriter,
     }
   }
 
-  void AddFavicons(const std::vector<history::ImportedFaviconUsage>& favicons) {
+  virtual void AddFavicons(
+      const std::vector<history::ImportedFaviconUsage>& favicons) OVERRIDE {
   }
 
  private:
-  ~Firefox3Observer() {}
+  virtual ~Firefox3Observer() {}
 
   size_t bookmark_count_;
   size_t history_count_;
@@ -371,7 +373,7 @@ class FirefoxProfileImporterTest : public ImporterTest {
   virtual void SetUp() OVERRIDE {
     ImporterTest::SetUp();
     // Creates a new profile in a new subdirectory in the temp directory.
-    FilePath test_path = temp_dir_.path().AppendASCII("ImporterTest");
+    base::FilePath test_path = temp_dir_.path().AppendASCII("ImporterTest");
     file_util::Delete(test_path, true);
     file_util::CreateDirectory(test_path);
     profile_path_ = test_path.AppendASCII("profile");
@@ -383,7 +385,7 @@ class FirefoxProfileImporterTest : public ImporterTest {
                              importer::ImporterProgressObserver* observer,
                              ProfileWriter* writer,
                              bool import_search_plugins) {
-    FilePath data_path;
+    base::FilePath data_path;
     ASSERT_TRUE(PathService::Get(chrome::DIR_TEST_DATA, &data_path));
     data_path = data_path.AppendASCII(profile_dir);
     ASSERT_TRUE(file_util::CopyDirectory(data_path, profile_path_, true));
@@ -391,7 +393,7 @@ class FirefoxProfileImporterTest : public ImporterTest {
     data_path = data_path.AppendASCII("firefox3_nss");
     ASSERT_TRUE(file_util::CopyDirectory(data_path, profile_path_, false));
 
-    FilePath search_engine_path = app_path_;
+    base::FilePath search_engine_path = app_path_;
     search_engine_path = search_engine_path.AppendASCII("searchplugins");
     file_util::CreateDirectory(search_engine_path);
     if (import_search_plugins) {
@@ -422,12 +424,12 @@ class FirefoxProfileImporterTest : public ImporterTest {
     loop->Run();
   }
 
-  FilePath profile_path_;
-  FilePath app_path_;
+  base::FilePath profile_path_;
+  base::FilePath app_path_;
 };
 
 TEST_F(FirefoxProfileImporterTest, MAYBE(Firefox2Importer)) {
-  FilePath data_path;
+  base::FilePath data_path;
   ASSERT_TRUE(PathService::Get(chrome::DIR_TEST_DATA, &data_path));
   data_path = data_path.AppendASCII("firefox2_profile");
   ASSERT_TRUE(file_util::CopyDirectory(data_path, profile_path_, true));
@@ -435,7 +437,7 @@ TEST_F(FirefoxProfileImporterTest, MAYBE(Firefox2Importer)) {
   data_path = data_path.AppendASCII("firefox2_nss");
   ASSERT_TRUE(file_util::CopyDirectory(data_path, profile_path_, false));
 
-  FilePath search_engine_path = app_path_;
+  base::FilePath search_engine_path = app_path_;
   search_engine_path = search_engine_path.AppendASCII("searchplugins");
   file_util::CreateDirectory(search_engine_path);
   ASSERT_TRUE(PathService::Get(chrome::DIR_TEST_DATA, &data_path));
@@ -486,14 +488,14 @@ TEST_F(FirefoxProfileImporterTest, MAYBE(Firefox35Importer)) {
 // to run in a separate process, so we use a proxy object so we can share the
 // same test between platforms.
 TEST(FirefoxImporterTest, Firefox2NSS3Decryptor) {
-  FilePath nss_path;
+  base::FilePath nss_path;
   ASSERT_TRUE(PathService::Get(chrome::DIR_TEST_DATA, &nss_path));
 #ifdef OS_MACOSX
   nss_path = nss_path.AppendASCII("firefox2_nss_mac");
 #else
   nss_path = nss_path.AppendASCII("firefox2_nss");
 #endif  // !OS_MACOSX
-  FilePath db_path;
+  base::FilePath db_path;
   ASSERT_TRUE(PathService::Get(chrome::DIR_TEST_DATA, &db_path));
   db_path = db_path.AppendASCII("firefox2_profile");
 
@@ -511,14 +513,14 @@ TEST(FirefoxImporterTest, Firefox2NSS3Decryptor) {
 }
 
 TEST(FirefoxImporterTest, Firefox3NSS3Decryptor) {
-  FilePath nss_path;
+  base::FilePath nss_path;
   ASSERT_TRUE(PathService::Get(chrome::DIR_TEST_DATA, &nss_path));
 #ifdef OS_MACOSX
   nss_path = nss_path.AppendASCII("firefox3_nss_mac");
 #else
   nss_path = nss_path.AppendASCII("firefox3_nss");
 #endif  // !OS_MACOSX
-  FilePath db_path;
+  base::FilePath db_path;
   ASSERT_TRUE(PathService::Get(chrome::DIR_TEST_DATA, &db_path));
   db_path = db_path.AppendASCII("firefox3_profile");
 
@@ -652,12 +654,12 @@ TEST(FirefoxImporterTest, Firefox2BookmarkParse) {
 }
 
 TEST(FirefoxImporterTest, Firefox2BookmarkFileImport) {
-  FilePath path;
+  base::FilePath path;
   ASSERT_TRUE(PathService::Get(chrome::DIR_TEST_DATA, &path));
   path = path.AppendASCII("firefox2_importer");
 
   // Import all bookmarks from a file which include an empty folder entry.
-  FilePath empty_folder_path = path.AppendASCII("empty_folder.html");
+  base::FilePath empty_folder_path = path.AppendASCII("empty_folder.html");
   std::set<GURL> default_urls;
   Firefox2Importer* importer = new Firefox2Importer();
   importer->AddRef();
@@ -724,7 +726,7 @@ TEST(FirefoxImporterTest, Firefox2BookmarkFileImport) {
   }
 
   // Import Epiphany bookmarks from a file
-  FilePath epiphany_path = path.AppendASCII("epiphany.html");
+  base::FilePath epiphany_path = path.AppendASCII("epiphany.html");
   bookmarks.clear();
   default_urls.clear();
   importer->ImportBookmarksFile(epiphany_path, default_urls,

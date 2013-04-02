@@ -158,7 +158,7 @@ WebstoreStandaloneInstaller::WebstoreStandaloneInstaller(
     : content::WebContentsObserver(web_contents),
       id_(webstore_item_id),
       require_verified_site_(require_verified_site == REQUIRE_VERIFIED_SITE),
-      use_inline_prompt_(prompt_type == INLINE_PROMPT),
+      prompt_type_(prompt_type),
       requestor_url_(requestor_url),
       callback_(callback),
       skip_post_install_ui_(false),
@@ -168,7 +168,7 @@ WebstoreStandaloneInstaller::WebstoreStandaloneInstaller(
 }
 
 void WebstoreStandaloneInstaller::BeginInstall() {
-  AddRef(); // Balanced in CompleteInstall or WebContentsDestroyed.
+  AddRef();  // Balanced in CompleteInstall or WebContentsDestroyed.
 
   if (!Extension::IdIsValid(id_)) {
     CompleteInstall(kInvalidWebstoreItemId);
@@ -319,7 +319,7 @@ void WebstoreStandaloneInstaller::OnWebstoreResponseParseSuccess(
       this,
       id_,
       manifest,
-      "", // We don't have any icon data.
+      "",  // We don't have any icon data.
       icon_url,
       Profile::FromBrowserContext(web_contents()->GetBrowserContext())->
           GetRequestContext());
@@ -347,13 +347,17 @@ void WebstoreStandaloneInstaller::OnWebstoreParseSuccess(
   manifest_.reset(manifest);
   icon_ = icon;
 
-  Profile* profile = Profile::FromBrowserContext(
-      web_contents()->GetBrowserContext());
-  ExtensionInstallPrompt::PromptType prompt_type = use_inline_prompt_ ?
-      ExtensionInstallPrompt::INLINE_INSTALL_PROMPT :
-      ExtensionInstallPrompt::INSTALL_PROMPT;
-  ExtensionInstallPrompt::Prompt prompt(profile, prompt_type);
-  if (use_inline_prompt_) {
+  if (prompt_type_ == SKIP_PROMPT) {
+    InstallUIProceed();
+    return;
+  }
+
+  ExtensionInstallPrompt::PromptType prompt_type =
+      prompt_type_ == INLINE_PROMPT ?
+          ExtensionInstallPrompt::INLINE_INSTALL_PROMPT :
+          ExtensionInstallPrompt::INSTALL_PROMPT;
+  ExtensionInstallPrompt::Prompt prompt(prompt_type);
+  if (prompt_type_ == INLINE_PROMPT) {
     prompt.SetInlineInstallWebstoreData(localized_user_count_,
                                         average_rating_,
                                         rating_count_);
@@ -373,7 +377,10 @@ void WebstoreStandaloneInstaller::OnWebstoreParseSuccess(
   }
 
   install_ui_.reset(new ExtensionInstallPrompt(web_contents()));
-  install_ui_->ConfirmStandaloneInstall(this, dummy_extension_, &icon_, prompt);
+  install_ui_->ConfirmStandaloneInstall(this,
+                                        dummy_extension_,
+                                        &icon_,
+                                        prompt);
   // Control flow finishes up in InstallUIProceed or InstallUIAbort.
 }
 
@@ -420,7 +427,7 @@ void WebstoreStandaloneInstaller::WebContentsDestroyed(
   // Abort any in-progress fetches.
   if (webstore_data_url_fetcher_.get()) {
     webstore_data_url_fetcher_.reset();
-    Release(); // Matches the AddRef in BeginInstall.
+    Release();  // Matches the AddRef in BeginInstall.
   }
 }
 
@@ -442,7 +449,7 @@ void WebstoreStandaloneInstaller::CompleteInstall(const std::string& error) {
   if (!callback_.is_null())
     callback_.Run(error.empty(), error);
 
-  Release(); // Matches the AddRef in BeginInstall.
+  Release();  // Matches the AddRef in BeginInstall.
 }
 
 // static

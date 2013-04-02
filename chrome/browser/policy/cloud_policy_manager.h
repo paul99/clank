@@ -10,6 +10,7 @@
 #include "base/basictypes.h"
 #include "base/compiler_specific.h"
 #include "base/prefs/public/pref_member.h"
+#include "chrome/browser/policy/cloud_policy_constants.h"
 #include "chrome/browser/policy/cloud_policy_core.h"
 #include "chrome/browser/policy/cloud_policy_store.h"
 #include "chrome/browser/policy/configuration_policy_provider.h"
@@ -26,7 +27,8 @@ namespace policy {
 class CloudPolicyManager : public ConfigurationPolicyProvider,
                            public CloudPolicyStore::Observer {
  public:
-  explicit CloudPolicyManager(CloudPolicyStore* cloud_policy_store);
+  CloudPolicyManager(const PolicyNamespaceKey& policy_ns_key,
+                     CloudPolicyStore* cloud_policy_store);
   virtual ~CloudPolicyManager();
 
   CloudPolicyCore* core() { return &core_; }
@@ -34,7 +36,7 @@ class CloudPolicyManager : public ConfigurationPolicyProvider,
 
   // ConfigurationPolicyProvider:
   virtual void Shutdown() OVERRIDE;
-  virtual bool IsInitializationComplete() const OVERRIDE;
+  virtual bool IsInitializationComplete(PolicyDomain domain) const OVERRIDE;
   virtual void RefreshPolicies() OVERRIDE;
 
   // CloudPolicyStore::Observer:

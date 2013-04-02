@@ -2,6 +2,7 @@
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
+#include "base/prefs/pref_service.h"
 #include "base/utf_string_conversions.h"
 #include "chrome/browser/browser_process.h"
 #include "chrome/browser/notifications/balloon.h"
@@ -9,9 +10,10 @@
 #include "chrome/browser/notifications/balloon_notification_ui_manager.h"
 #include "chrome/browser/notifications/desktop_notification_service.h"
 #include "chrome/browser/notifications/notification.h"
-#include "chrome/browser/prefs/pref_service.h"
 #include "chrome/browser/ui/browser.h"
 #include "chrome/browser/ui/panels/base_panel_browser_test.h"
+#include "chrome/browser/ui/panels/detached_panel_collection.h"
+#include "chrome/browser/ui/panels/docked_panel_collection.h"
 #include "chrome/browser/ui/panels/panel.h"
 #include "chrome/browser/ui/panels/panel_manager.h"
 #include "chrome/common/pref_names.h"
@@ -241,16 +243,18 @@ IN_PROC_BROWSER_TEST_F(PanelAndDesktopNotificationTest, DetachAndAttachPanel) {
 
   // Detach the panel. Expect that the notification balloon moves down to its
   // original position.
-  panel_manager->MovePanelToCollection(
-      panel, PanelCollection::DETACHED, PanelCollection::DEFAULT_POSITION);
+  panel_manager->MovePanelToCollection(panel,
+                                       panel_manager->detached_collection(),
+                                       PanelCollection::DEFAULT_POSITION);
   MessageLoopForUI::current()->RunUntilIdle();
   EXPECT_EQ(PanelCollection::DETACHED, panel->collection()->type());
   EXPECT_EQ(original_balloon_bottom, GetBalloonBottomPosition(balloon));
 
   // Reattach the panel. Expect that the notification balloon moves above the
   // panel.
-  panel_manager->MovePanelToCollection(
-      panel, PanelCollection::DOCKED, PanelCollection::DEFAULT_POSITION);
+  panel_manager->MovePanelToCollection(panel,
+                                       panel_manager->docked_collection(),
+                                       PanelCollection::DEFAULT_POSITION);
   MessageLoopForUI::current()->RunUntilIdle();
   EXPECT_EQ(PanelCollection::DOCKED, panel->collection()->type());
   EXPECT_EQ(balloon_bottom_after_panel_created,
@@ -259,7 +263,13 @@ IN_PROC_BROWSER_TEST_F(PanelAndDesktopNotificationTest, DetachAndAttachPanel) {
   panel_manager->CloseAll();
 }
 
-IN_PROC_BROWSER_TEST_F(PanelAndDesktopNotificationTest, ResizePanel) {
+#if defined(OS_WIN)
+// Fails on windows. http://crbug.com/171940
+#define MAYBE_ResizePanel DISABLED_ResizePanel
+#else
+#define MAYBE_ResizePanel ResizePanel
+#endif
+IN_PROC_BROWSER_TEST_F(PanelAndDesktopNotificationTest, MAYBE_ResizePanel) {
   PanelManager* panel_manager = PanelManager::GetInstance();
   Balloon* balloon = CreateBalloon();
 

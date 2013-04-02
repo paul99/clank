@@ -10,7 +10,7 @@
 #import "chrome/browser/ui/cocoa/constrained_window/constrained_window_sheet.h"
 #import "chrome/browser/ui/cocoa/constrained_window/constrained_window_sheet_controller.h"
 #import "chrome/browser/ui/cocoa/tabs/tab_strip_controller.h"
-#include "chrome/browser/ui/constrained_window_tab_helper.h"
+#include "chrome/browser/ui/web_contents_modal_dialog_manager.h"
 #include "content/public/browser/browser_thread.h"
 #include "content/public/browser/notification_source.h"
 #include "content/public/browser/notification_types.h"
@@ -27,9 +27,9 @@ ConstrainedWindowMac::ConstrainedWindowMac(
       pending_show_(false) {
   DCHECK(web_contents);
   DCHECK(sheet_.get());
-  ConstrainedWindowTabHelper* constrained_window_tab_helper =
-      ConstrainedWindowTabHelper::FromWebContents(web_contents);
-  constrained_window_tab_helper->AddConstrainedDialog(this);
+  WebContentsModalDialogManager* web_contents_modal_dialog_manager =
+      WebContentsModalDialogManager::FromWebContents(web_contents);
+  web_contents_modal_dialog_manager->AddDialog(this);
 
   registrar_.Add(this,
                  content::NOTIFICATION_WEB_CONTENTS_VISIBILITY_CHANGED,
@@ -40,7 +40,7 @@ ConstrainedWindowMac::~ConstrainedWindowMac() {
   CHECK(content::BrowserThread::CurrentlyOn(content::BrowserThread::UI));
 }
 
-void ConstrainedWindowMac::ShowConstrainedWindow() {
+void ConstrainedWindowMac::ShowWebContentsModalDialog() {
   NSWindow* parent_window = GetParentWindow();
   NSView* parent_view = GetSheetParentViewForWebContents(web_contents_);
   if (!parent_window || !parent_view) {
@@ -54,21 +54,24 @@ void ConstrainedWindowMac::ShowConstrainedWindow() {
   [controller showSheet:sheet_ forParentView:parent_view];
 }
 
-void ConstrainedWindowMac::CloseConstrainedWindow() {
+void ConstrainedWindowMac::CloseWebContentsModalDialog() {
   // This function may be called even if the constrained window was never shown.
   // Unset |pending_show_| to prevent the window from being reshown.
   pending_show_ = false;
 
   [[ConstrainedWindowSheetController controllerForSheet:sheet_]
       closeSheet:sheet_];
-  ConstrainedWindowTabHelper* constrained_window_tab_helper =
-      ConstrainedWindowTabHelper::FromWebContents(web_contents_);
-  constrained_window_tab_helper->WillClose(this);
+  WebContentsModalDialogManager* web_contents_modal_dialog_manager =
+      WebContentsModalDialogManager::FromWebContents(web_contents_);
+  web_contents_modal_dialog_manager->WillClose(this);
   if (delegate_)
     delegate_->OnConstrainedWindowClosed(this);
 }
 
-void ConstrainedWindowMac::PulseConstrainedWindow() {
+void ConstrainedWindowMac::FocusWebContentsModalDialog() {
+}
+
+void ConstrainedWindowMac::PulseWebContentsModalDialog() {
   [[ConstrainedWindowSheetController controllerForSheet:sheet_]
       pulseSheet:sheet_];
 }
@@ -76,13 +79,6 @@ void ConstrainedWindowMac::PulseConstrainedWindow() {
 gfx::NativeWindow ConstrainedWindowMac::GetNativeWindow() {
   NOTREACHED();
   return nil;
-}
-
-bool ConstrainedWindowMac::CanShowConstrainedWindow() {
-  Browser* browser = chrome::FindBrowserWithWebContents(web_contents_);
-  if (!browser)
-    return true;
-  return !browser->window()->IsInstantTabShowing();
 }
 
 void ConstrainedWindowMac::Observe(
@@ -96,7 +92,7 @@ void ConstrainedWindowMac::Observe(
 
   if (pending_show_) {
     pending_show_ = false;
-    ShowConstrainedWindow();
+    ShowWebContentsModalDialog();
   }
 }
 

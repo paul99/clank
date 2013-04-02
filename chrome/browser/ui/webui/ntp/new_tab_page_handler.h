@@ -5,24 +5,24 @@
 #ifndef CHROME_BROWSER_UI_WEBUI_NTP_NEW_TAB_PAGE_HANDLER_H_
 #define CHROME_BROWSER_UI_WEBUI_NTP_NEW_TAB_PAGE_HANDLER_H_
 
+#include "base/memory/weak_ptr.h"
 #include "base/values.h"
 #include "chrome/common/chrome_notification_types.h"
 #include "content/public/browser/web_ui_message_handler.h"
 
-class PrefService;
+class PrefRegistrySimple;
+class PrefRegistrySyncable;
 class Profile;
 
 // Handler for general New Tab Page functionality that does not belong in a
 // more specialized handler.
-class NewTabPageHandler : public content::WebUIMessageHandler {
+class NewTabPageHandler : public content::WebUIMessageHandler,
+                          public base::SupportsWeakPtr<NewTabPageHandler> {
  public:
   NewTabPageHandler();
 
   // Register NTP per-profile preferences.
-  static void RegisterUserPrefs(PrefService* prefs);
-
-  // Register NTP profile-independent preferences.
-  static void RegisterPrefs(PrefService* prefs);
+  static void RegisterUserPrefs(PrefRegistrySyncable* registry);
 
   // Registers values (strings etc.) for the page.
   static void GetLocalizedValues(Profile* profile, DictionaryValue* values);
@@ -56,6 +56,12 @@ class NewTabPageHandler : public content::WebUIMessageHandler {
 
   // Callback for "logTimeToClick".
   void HandleLogTimeToClick(const base::ListValue* args);
+
+  // Callback for the "getShouldShowApps" message.
+  void HandleGetShouldShowApps(const base::ListValue* args);
+
+  // Callback from extensions::UpdateIsAppLauncherEnabled().
+  void GotIsAppLauncherEnabled(bool is_enabled);
 
   // Tracks the number of times the user has switches pages (for UMA).
   size_t page_switch_count_;

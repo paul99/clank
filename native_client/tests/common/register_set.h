@@ -285,7 +285,7 @@ extern const uint8_t kX86FlagBits[5];
 #endif
 
 /* Initialize the register set with arbitrary test data. */
-void RegsFillTestValues(struct NaClSignalContext *regs);
+void RegsFillTestValues(struct NaClSignalContext *regs, int seed);
 
 /* Adjust registers to follow the sandbox's constraints. */
 void RegsApplySandboxConstraints(struct NaClSignalContext *regs);
@@ -296,5 +296,12 @@ void RegsAssertEqual(const struct NaClSignalContext *actual,
 
 /* Zero out registers that are clobbered by function calls. */
 void RegsUnsetNonCalleeSavedRegisters(struct NaClSignalContext *regs);
+
+/*
+ * For a function called with register state |regs|, extract the first
+ * argument.  This is useful for a function entry point defined by
+ * REGS_SAVER_FUNC.
+ */
+uintptr_t RegsGetArg1(const struct NaClSignalContext *regs);
 
 #endif

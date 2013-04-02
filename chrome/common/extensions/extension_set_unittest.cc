@@ -19,9 +19,9 @@ scoped_refptr<Extension> CreateTestExtension(const std::string& name,
                                              const std::string& launch_url,
                                              const std::string& extent) {
 #if defined(OS_WIN)
-  FilePath path(FILE_PATH_LITERAL("c:\\"));
+  base::FilePath path(FILE_PATH_LITERAL("c:\\"));
 #else
-  FilePath path(FILE_PATH_LITERAL("/"));
+  base::FilePath path(FILE_PATH_LITERAL("/"));
 #endif
   path = path.AppendASCII(name);
 
@@ -40,7 +40,7 @@ scoped_refptr<Extension> CreateTestExtension(const std::string& name,
 
   std::string error;
   scoped_refptr<Extension> extension(
-      Extension::Create(path, Extension::INTERNAL, manifest,
+      Extension::Create(path, extensions::Manifest::INTERNAL, manifest,
                         Extension::NO_FLAGS, &error));
   EXPECT_TRUE(extension.get()) << error;
   return extension;

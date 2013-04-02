@@ -11,9 +11,11 @@
 #include <string>
 
 #include "base/logging.h"
+#include "base/utf_string_conversions.h"
 #include "base/version.h"
 #include "chrome/common/chrome_switches.h"
 #include "chrome/installer/util/browser_distribution.h"
+#include "chrome/installer/util/google_update_constants.h"
 #include "chrome/installer/util/helper.h"
 #include "chrome/installer/util/installation_state.h"
 
@@ -188,25 +190,61 @@ const InstallationValidator::InstallationType
   CHROME_APP_HOST_CHROME_MULTI_CHROME_FRAME_READY_MODE,
 };
 
+void InstallationValidator::ValidateAppCommandFlags(
+    const ProductContext& ctx,
+    const AppCommand& app_cmd,
+    const std::set<string16>& flags_exp,
+    const string16& name,
+    bool* is_valid) {
+  const struct {
+    const string16 exp_key;
+    bool val;
+    const char* msg;
+  } check_list[] = {
+    {google_update::kRegSendsPingsField,
+         app_cmd.sends_pings(),
+         "be configured to send pings"},
+    {google_update::kRegWebAccessibleField,
+         app_cmd.is_web_accessible(),
+         "be web accessible"},
+    {google_update::kRegAutoRunOnOSUpgradeField,
+         app_cmd.is_auto_run_on_os_upgrade(),
+         "be marked to run on OS upgrade"},
+    {google_update::kRegRunAsUserField,
+         app_cmd.is_run_as_user(),
+         "be marked to run as user"},
+  };
+  for (int i = 0; i < arraysize(check_list); ++i) {
+    bool expected = flags_exp.find(check_list[i].exp_key) != flags_exp.end();
+    if (check_list[i].val != expected) {
+      *is_valid = false;
+      LOG(ERROR) << ctx.dist->GetAppShortCutName() << ": "
+                 << name << " command should " << (expected ? "" : "not ")
+                 << check_list[i].msg << ".";
+    }
+  }
+}
+
 // Validates the "install-application" Google Update product command.
 void InstallationValidator::ValidateInstallAppCommand(
     const ProductContext& ctx,
-    const AppCommand& command,
+    const AppCommand& app_cmd,
     bool* is_valid) {
   DCHECK(is_valid);
 
-  CommandLine the_command(CommandLine::FromString(command.command_line()));
+  CommandLine cmd_line(CommandLine::FromString(app_cmd.command_line()));
+  string16 name(kCmdInstallApp);
 
-  FilePath expected_path(
+  base::FilePath expected_path(
       installer::GetChromeInstallPath(ctx.system_install, ctx.dist)
       .Append(installer::kChromeAppHostExe));
 
-  if (!FilePath::CompareEqualIgnoreCase(expected_path.value(),
-                                        the_command.GetProgram().value())) {
+  if (!base::FilePath::CompareEqualIgnoreCase(expected_path.value(),
+                                              cmd_line.GetProgram().value())) {
     *is_valid = false;
-    LOG(ERROR) << "install-application command's path is not "
+    LOG(ERROR) << name << "'s path is not "
                << expected_path.value() << ": "
-               << the_command.GetProgram().value();
+               << cmd_line.GetProgram().value();
   }
 
   SwitchExpectations expected;
@@ -215,31 +253,26 @@ void InstallationValidator::ValidateInstallAppCommand(
       std::make_pair(std::string(::switches::kInstallFromWebstore),
                      true));
 
-  ValidateCommandExpectations(ctx, the_command, expected, "install application",
-                              is_valid);
+  ValidateCommandExpectations(ctx, cmd_line, expected, name, is_valid);
 
-  if (!command.sends_pings()) {
-    *is_valid = false;
-    LOG(ERROR) << "install-application command is not configured to send "
-               << "pings.";
-  }
-
-  if (!command.is_web_accessible()) {
-    *is_valid = false;
-    LOG(ERROR) << "install-application command is not web accessible.";
-  }
+  std::set<string16> flags_exp;
+  flags_exp.insert(google_update::kRegSendsPingsField);
+  flags_exp.insert(google_update::kRegWebAccessibleField);
+  flags_exp.insert(google_update::kRegRunAsUserField);
+  ValidateAppCommandFlags(ctx, app_cmd, flags_exp, name, is_valid);
 }
 
 // Validates the "on-os-upgrade" Google Update internal command.
 void InstallationValidator::ValidateOnOsUpgradeCommand(
     const ProductContext& ctx,
-    const AppCommand& command,
+    const AppCommand& app_cmd,
     bool* is_valid) {
   DCHECK(is_valid);
 
-  CommandLine the_command(CommandLine::FromString(command.command_line()));
+  CommandLine cmd_line(CommandLine::FromString(app_cmd.command_line()));
+  string16 name(kCmdOnOsUpgrade);
 
-  ValidateSetupPath(ctx, the_command.GetProgram(), "on os upgrade", is_valid);
+  ValidateSetupPath(ctx, cmd_line.GetProgram(), name, is_valid);
 
   SwitchExpectations expected;
   expected.push_back(std::make_pair(std::string(switches::kOnOsUpgrade), true));
@@ -251,35 +284,50 @@ void InstallationValidator::ValidateOnOsUpgradeCommand(
   expected.push_back(std::make_pair(std::string(switches::kChrome),
                                     ctx.state.is_multi_install()));
 
-  ValidateCommandExpectations(ctx, the_command, expected, "on os upgrade",
-                              is_valid);
+  ValidateCommandExpectations(ctx, cmd_line, expected, name, is_valid);
 
-  if (!command.is_auto_run_on_os_upgrade()) {
-    *is_valid = false;
-    LOG(ERROR) << "On-os-upgrade command is not marked to run on OS upgrade.";
-  }
+  std::set<string16> flags_exp;
+  flags_exp.insert(google_update::kRegAutoRunOnOSUpgradeField);
+  ValidateAppCommandFlags(ctx, app_cmd, flags_exp, name, is_valid);
+}
 
-  if (command.sends_pings()) {
-    *is_valid = false;
-    LOG(ERROR) << "On-os-upgrade command should not be able to send pings.";
-  }
+// Validates the "query-eula-acceptance" Google Update product command.
+void InstallationValidator::ValidateQueryEULAAcceptanceCommand(
+    const ProductContext& ctx,
+    const AppCommand& app_cmd,
+    bool* is_valid) {
+  DCHECK(is_valid);
 
-  if (command.is_web_accessible()) {
-    *is_valid = false;
-    LOG(ERROR) << "On-os-upgrade command should not be web accessible.";
-  }
+  CommandLine cmd_line(CommandLine::FromString(app_cmd.command_line()));
+  string16 name(kCmdQueryEULAAcceptance);
+
+  ValidateSetupPath(ctx, cmd_line.GetProgram(), name, is_valid);
+
+  SwitchExpectations expected;
+  expected.push_back(std::make_pair(std::string(switches::kQueryEULAAcceptance),
+                                    true));
+  expected.push_back(std::make_pair(std::string(switches::kSystemLevel),
+                                    ctx.system_install));
+
+  ValidateCommandExpectations(ctx, cmd_line, expected, name, is_valid);
+
+  std::set<string16> flags_exp;
+  flags_exp.insert(google_update::kRegWebAccessibleField);
+  flags_exp.insert(google_update::kRegRunAsUserField);
+  ValidateAppCommandFlags(ctx, app_cmd, flags_exp, name, is_valid);
 }
 
 // Validates the "quick-enable-cf" Google Update product command.
 void InstallationValidator::ValidateQuickEnableCfCommand(
     const ProductContext& ctx,
-    const AppCommand& command,
+    const AppCommand& app_cmd,
     bool* is_valid) {
   DCHECK(is_valid);
 
-  CommandLine the_command(CommandLine::FromString(command.command_line()));
+  CommandLine cmd_line(CommandLine::FromString(app_cmd.command_line()));
+  string16 name(kCmdQuickEnableCf);
 
-  ValidateSetupPath(ctx, the_command.GetProgram(), "quick enable cf", is_valid);
+  ValidateSetupPath(ctx, cmd_line.GetProgram(), name, is_valid);
 
   SwitchExpectations expected;
 
@@ -290,33 +338,25 @@ void InstallationValidator::ValidateQuickEnableCfCommand(
   expected.push_back(std::make_pair(std::string(switches::kMultiInstall),
                                     ctx.state.is_multi_install()));
 
-  ValidateCommandExpectations(ctx, the_command, expected, "quick enable cf",
-                              is_valid);
+  ValidateCommandExpectations(ctx, cmd_line, expected, name, is_valid);
 
-  if (!command.sends_pings()) {
-    *is_valid = false;
-    LOG(ERROR) << "Quick-enable-cf command is not configured to send pings.";
-  }
-
-  if (!command.is_web_accessible()) {
-    *is_valid = false;
-    LOG(ERROR) << "Quick-enable-cf command is not web accessible.";
-  }
+  std::set<string16> flags_exp;
+  flags_exp.insert(google_update::kRegSendsPingsField);
+  flags_exp.insert(google_update::kRegWebAccessibleField);
+  ValidateAppCommandFlags(ctx, app_cmd, flags_exp, name, is_valid);
 }
 
 // Validates the "quick-enable-application-host" Google Update product command.
 void InstallationValidator::ValidateQuickEnableApplicationHostCommand(
     const ProductContext& ctx,
-    const AppCommand& command,
+    const AppCommand& app_cmd,
     bool* is_valid) {
   DCHECK(is_valid);
 
-  CommandLine the_command(CommandLine::FromString(command.command_line()));
+  CommandLine cmd_line(CommandLine::FromString(app_cmd.command_line()));
+  string16 name(kCmdQuickEnableApplicationHost);
 
-  ValidateSetupPath(ctx,
-                    the_command.GetProgram(),
-                    "quick enable application host",
-                    is_valid);
+  ValidateSetupPath(ctx, cmd_line.GetProgram(), name, is_valid);
 
   SwitchExpectations expected;
 
@@ -329,23 +369,13 @@ void InstallationValidator::ValidateQuickEnableApplicationHostCommand(
   expected.push_back(std::make_pair(
       std::string(switches::kEnsureGoogleUpdatePresent), true));
 
-  ValidateCommandExpectations(ctx,
-                              the_command,
-                              expected,
-                              "quick enable application host",
-                              is_valid);
+  ValidateCommandExpectations(ctx, cmd_line, expected, name, is_valid);
 
-  if (!command.sends_pings()) {
-    *is_valid = false;
-    LOG(ERROR) << "Quick-enable-application-host command is not configured to "
-               << "send pings.";
-  }
-
-  if (!command.is_web_accessible()) {
-    *is_valid = false;
-    LOG(ERROR) << "Quick-enable-application-host command is not web "
-               << "accessible.";
-  }
+  std::set<string16> flags_exp;
+  flags_exp.insert(google_update::kRegSendsPingsField);
+  flags_exp.insert(google_update::kRegWebAccessibleField);
+  flags_exp.insert(google_update::kRegRunAsUserField);
+  ValidateAppCommandFlags(ctx, app_cmd, flags_exp, name, is_valid);
 }
 
 // Validates a product's set of Google Update product commands against a
@@ -410,6 +440,8 @@ void InstallationValidator::ValidateBinariesCommands(
 
     expectations[kCmdQuickEnableApplicationHost] =
         &ValidateQuickEnableApplicationHostCommand;
+
+    expectations[kCmdQueryEULAAcceptance] = &ValidateQueryEULAAcceptanceCommand;
   }
 
   ValidateAppCommandExpectations(ctx, expectations, is_valid);
@@ -483,7 +515,7 @@ void InstallationValidator::ValidateBinaries(
   if (app_host_state != NULL) {
     if (!app_host_state->is_multi_install()) {
       *is_valid = false;
-      LOG(ERROR) << "Chrome App Host is installed in non-multi mode.";
+      LOG(ERROR) << "Chrome App Launcher is installed in non-multi mode.";
     }
     if (!channel.IsAppHost() && !channel.IsAppLauncher()) {
       *is_valid = false;
@@ -520,7 +552,7 @@ void InstallationValidator::ValidateBinaries(
   if (cf_state != NULL && app_host_state == NULL && chrome_state == NULL &&
       !cf_state->is_multi_install()) {
     *is_valid = false;
-    LOG(ERROR) << "Chrome Binaries are present without Chrome nor App Host "
+    LOG(ERROR) << "Chrome Binaries are present without Chrome nor App Launcher "
                << "yet Chrome Frame is not multi-install.";
   }
 
@@ -535,8 +567,8 @@ void InstallationValidator::ValidateBinaries(
 
 // Validates the path to |setup_exe| for the product described by |ctx|.
 void InstallationValidator::ValidateSetupPath(const ProductContext& ctx,
-                                              const FilePath& setup_exe,
-                                              const char* purpose,
+                                              const base::FilePath& setup_exe,
+                                              const string16& purpose,
                                               bool* is_valid) {
   DCHECK(is_valid);
 
@@ -546,14 +578,14 @@ void InstallationValidator::ValidateSetupPath(const ProductContext& ctx,
         BrowserDistribution::CHROME_BINARIES);
   }
 
-  FilePath expected_path = installer::GetChromeInstallPath(ctx.system_install,
-                                                           bins_dist);
+  base::FilePath expected_path = installer::GetChromeInstallPath(
+      ctx.system_install, bins_dist);
   expected_path = expected_path
       .AppendASCII(ctx.state.version().GetString())
       .Append(installer::kInstallerDir)
       .Append(installer::kSetupExe);
-  if (!FilePath::CompareEqualIgnoreCase(expected_path.value(),
-                                        setup_exe.value())) {
+  if (!base::FilePath::CompareEqualIgnoreCase(expected_path.value(),
+                                              setup_exe.value())) {
     *is_valid = false;
     LOG(ERROR) << ctx.dist->GetAppShortCutName() << " path to " << purpose
                << " is not " << expected_path.value() << ": "
@@ -566,7 +598,7 @@ void InstallationValidator::ValidateCommandExpectations(
     const ProductContext& ctx,
     const CommandLine& command,
     const SwitchExpectations& expected,
-    const char* source,
+    const string16& source,
     bool* is_valid) {
   for (SwitchExpectations::size_type i = 0, size = expected.size(); i < size;
        ++i) {
@@ -586,11 +618,12 @@ void InstallationValidator::ValidateCommandExpectations(
 // the product described by |ctx|
 void InstallationValidator::ValidateUninstallCommand(const ProductContext& ctx,
                                                      const CommandLine& command,
-                                                     const char* source,
+                                                     const string16& source,
                                                      bool* is_valid) {
   DCHECK(is_valid);
 
-  ValidateSetupPath(ctx, command.GetProgram(), "uninstaller", is_valid);
+  ValidateSetupPath(ctx, command.GetProgram(), ASCIIToUTF16("uninstaller"),
+                    is_valid);
 
   const bool is_multi_install = ctx.state.is_multi_install();
   SwitchExpectations expected;
@@ -612,8 +645,9 @@ void InstallationValidator::ValidateRenameCommand(const ProductContext& ctx,
   DCHECK(!ctx.state.rename_cmd().empty());
 
   CommandLine command = CommandLine::FromString(ctx.state.rename_cmd());
+  string16 name(ASCIIToUTF16("in-use renamer"));
 
-  ValidateSetupPath(ctx, command.GetProgram(), "in-use renamer", is_valid);
+  ValidateSetupPath(ctx, command.GetProgram(), name, is_valid);
 
   SwitchExpectations expected;
 
@@ -625,8 +659,7 @@ void InstallationValidator::ValidateRenameCommand(const ProductContext& ctx,
                                     ctx.state.is_multi_install()));
   ctx.rules.AddRenameSwitchExpectations(ctx, &expected);
 
-  ValidateCommandExpectations(ctx, command, expected, "in-use renamer",
-                              is_valid);
+  ValidateCommandExpectations(ctx, command, expected, name, is_valid);
 }
 
 // Validates the "opv" and "cmd" values for the product described in |ctx|.
@@ -754,7 +787,8 @@ void InstallationValidator::ValidateProduct(
   ProductContext ctx(machine_state, system_install, product_state, rules);
 
   ValidateUninstallCommand(ctx, ctx.state.uninstall_command(),
-                           "Google Update uninstall command", is_valid);
+                           ASCIIToUTF16("Google Update uninstall command"),
+                           is_valid);
 
   ValidateOldVersionValues(ctx, is_valid);
 
@@ -823,11 +857,12 @@ bool InstallationValidator::ValidateInstallationTypeForState(
                     chrome_app_host_rules, &rock_on);
     *type = static_cast<InstallationType>(*type | ProductBits::CHROME_APP_HOST);
     if (system_level) {
-      LOG(ERROR) << "Chrome App Host must not be installed at system level.";
+      LOG(ERROR) <<
+          "Chrome App Launcher must not be installed at system level.";
       rock_on = false;
     }
     if (!product_state->is_multi_install()) {
-      LOG(ERROR) << "Chrome App Host must always be multi-install.";
+      LOG(ERROR) << "Chrome App Launcher must always be multi-install.";
       rock_on = false;
     }
   }

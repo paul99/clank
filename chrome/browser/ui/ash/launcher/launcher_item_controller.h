@@ -8,9 +8,13 @@
 #include "ash/launcher/launcher_types.h"
 #include "base/basictypes.h"
 #include "base/compiler_specific.h"
+#include "base/memory/scoped_vector.h"
 #include "base/string16.h"
 
 class ChromeLauncherController;
+class ChromeLauncherAppMenuItem;
+
+typedef ScopedVector<ChromeLauncherAppMenuItem> ChromeLauncherAppMenuItems;
 
 namespace aura {
 class Window;
@@ -72,10 +76,15 @@ class LauncherItemController {
   // windows associated with the item:
   // * One window: toggles the minimize state.
   // * Multiple windows: cycles the active window.
-  virtual void Clicked() = 0;
+  // The |event| is dispatched by a view, therefore the type of the
+  // event's target is |views::View|.
+  virtual void Clicked(const ui::Event& event) = 0;
 
   // Called when the controlled item is removed from the launcher.
   virtual void OnRemoved() = 0;
+
+  // Called to retrieve the list of running applications.
+  virtual ChromeLauncherAppMenuItems GetApplicationList() = 0;
 
   // Helper function to get the ash::LauncherItemType for the item type.
   ash::LauncherItemType GetLauncherItemType() const;

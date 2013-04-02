@@ -10,11 +10,13 @@
 #include "chrome/common/chrome_switches.h"
 #include "chrome/common/extensions/extension.h"
 #include "chrome/common/extensions/extension_set.h"
+#include "chrome/common/extensions/manifest_url_handler.h"
+#include "chrome/common/extensions/web_accessible_resources_handler.h"
 #include "chrome/common/url_constants.h"
 #include "content/public/common/page_transition_types.h"
 #include "extensions/common/constants.h"
 #include "googleurl/src/gurl.h"
-#include "third_party/WebKit/Source/WebKit/chromium/public/platform/WebString.h"
+#include "third_party/WebKit/Source/Platform/chromium/public/WebString.h"
 #include "third_party/WebKit/Source/WebKit/chromium/public/WebConsoleMessage.h"
 #include "third_party/WebKit/Source/WebKit/chromium/public/WebDocument.h"
 #include "third_party/WebKit/Source/WebKit/chromium/public/WebFrame.h"
@@ -50,9 +52,10 @@ bool ResourceRequestPolicy::CanRequestResource(
     return false;
   }
 
-  // Disallow loading of extension resources which are not explicitely listed
+  // Disallow loading of extension resources which are not explicitly listed
   // as web accessible if the manifest version is 2 or greater.
-  if (!extension->IsResourceWebAccessible(resource_url.path()) &&
+  if (!WebAccessibleResourcesInfo::IsResourceWebAccessible(
+          extension, resource_url.path()) &&
       !CommandLine::ForCurrentProcess()->HasSwitch(
           switches::kDisableExtensionsResourceWhitelist)) {
     GURL frame_url = frame->document().url();
@@ -68,7 +71,7 @@ bool ResourceRequestPolicy::CanRequestResource(
     // - devtools (chrome-extension:// URLs are loaded into frames of devtools
     //     to support the devtools extension APIs)
     bool is_dev_tools = page_url.SchemeIs(chrome::kChromeDevToolsScheme) &&
-        !extension->devtools_url().is_empty();
+                        !ManifestURL::GetDevToolsPage(extension).is_empty();
     bool transition_allowed =
         !content::PageTransitionIsWebTriggerable(transition_type);
     // - unreachable web page error page (to allow showing the icon of the

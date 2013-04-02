@@ -15,6 +15,7 @@
 #include "base/utf_string_conversions.h"
 #include "grit/app_locale_settings.h"
 #include "grit/ui_strings.h"
+#include "third_party/icu/public/common/unicode/uchar.h"
 #include "third_party/skia/include/core/SkColor.h"
 #include "ui/base/clipboard/clipboard.h"
 #include "ui/base/dragdrop/drag_drop_types.h"
@@ -39,7 +40,6 @@
 #include "ui/views/ime/input_method.h"
 #include "ui/views/metrics.h"
 #include "ui/views/widget/widget.h"
-#include "unicode/uchar.h"
 
 #if defined(USE_AURA)
 #include "ui/base/cursor/cursor.h"
@@ -94,10 +94,13 @@ NativeTextfieldViews::~NativeTextfieldViews() {
 bool NativeTextfieldViews::OnMousePressed(const ui::MouseEvent& event) {
   OnBeforeUserAction();
   TrackMouseClicks(event);
-  // TODO: Remove once NativeTextfield implementations are consolidated to
-  // Textfield.
-  if (!textfield_->OnMousePressed(event))
+
+  TextfieldController* controller = textfield_->GetController();
+  if (!(controller && controller->HandleMouseEvent(textfield_, event)) &&
+      !textfield_->OnMousePressed(event)) {
     HandleMousePressEvent(event);
+  }
+
   OnAfterUserAction();
   return true;
 }
@@ -426,12 +429,17 @@ void NativeTextfieldViews::UpdateBorder() {
   }
 }
 
-void NativeTextfieldViews::UpdateTextColor() {
-  gfx::StyleRange default_style(GetRenderText()->default_style());
-  default_style.foreground = textfield_->GetTextColor();
-  GetRenderText()->set_default_style(default_style);
-  GetRenderText()->ApplyDefaultStyle();
+void NativeTextfieldViews::UpdateBorderColor() {
+  if (textfield_->use_default_border_color())
+    text_border_->UseDefaultColor();
+  else
+    text_border_->SetColor(textfield_->border_color());
+
   SchedulePaint();
+}
+
+void NativeTextfieldViews::UpdateTextColor() {
+  SetColor(textfield_->GetTextColor());
 }
 
 void NativeTextfieldViews::UpdateBackgroundColor() {
@@ -684,13 +692,25 @@ void NativeTextfieldViews::ExecuteCommand(int command_id) {
   OnAfterUserAction();
 }
 
-void NativeTextfieldViews::ApplyStyleRange(const gfx::StyleRange& style) {
-  GetRenderText()->ApplyStyleRange(style);
+void NativeTextfieldViews::SetColor(SkColor value) {
+  GetRenderText()->SetColor(value);
   SchedulePaint();
 }
 
-void NativeTextfieldViews::ApplyDefaultStyle() {
-  GetRenderText()->ApplyDefaultStyle();
+void NativeTextfieldViews::ApplyColor(SkColor value, const ui::Range& range) {
+  GetRenderText()->ApplyColor(value, range);
+  SchedulePaint();
+}
+
+void NativeTextfieldViews::SetStyle(gfx::TextStyle style, bool value) {
+  GetRenderText()->SetStyle(style, value);
+  SchedulePaint();
+}
+
+void NativeTextfieldViews::ApplyStyle(gfx::TextStyle style,
+                                      bool value,
+                                      const ui::Range& range) {
+  GetRenderText()->ApplyStyle(style, value, range);
   SchedulePaint();
 }
 
@@ -1063,8 +1083,10 @@ bool NativeTextfieldViews::HandleKeyEvent(const ui::KeyEvent& key_event) {
         text_changed = true;
         break;
       case ui::VKEY_INSERT:
-        GetRenderText()->ToggleInsertMode();
-        cursor_changed = true;
+        if (control && !shift)
+          Copy();
+        else if (shift && !control)
+          cursor_changed = text_changed = Paste();
         break;
       default:
         break;
@@ -1245,6 +1267,7 @@ void NativeTextfieldViews::HandleMousePressEvent(const ui::MouseEvent& event) {
           MoveCursorTo(event.location(), event.IsShiftDown());
         break;
       case 1:
+        MoveCursorTo(event.location(), false);
         model_->SelectWord();
         OnCaretBoundsChanged();
         break;

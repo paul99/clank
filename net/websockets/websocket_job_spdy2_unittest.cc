@@ -119,7 +119,7 @@ class MockSocketStreamDelegate : public net::SocketStream::Delegate {
     if (!on_received_data_.is_null())
       on_received_data_.Run();
   }
-  virtual void OnClose(net::SocketStream* socket) {
+  virtual void OnClose(net::SocketStream* socket) OVERRIDE {
     if (!on_close_.is_null())
       on_close_.Run();
   }
@@ -406,9 +406,13 @@ class WebSocketJobSpdy2Test : public PlatformTest {
 
     websocket_->InitSocketStream(socket_.get());
     websocket_->set_context(context_.get());
+    // MockHostResolver resolves all hosts to 127.0.0.1; however, when we create
+    // a WebSocketJob purely to block another one in a throttling test, we don't
+    // perform a real connect. In that case, the following address is used
+    // instead.
     IPAddressNumber ip;
     ParseIPLiteralToNumber("127.0.0.1", &ip);
-    websocket_->addresses_ = AddressList::CreateFromIPAddress(ip, 0);
+    websocket_->addresses_ = AddressList::CreateFromIPAddress(ip, 80);
   }
   void SkipToConnecting() {
     websocket_->state_ = WebSocketJob::CONNECTING;

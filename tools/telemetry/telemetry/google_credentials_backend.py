@@ -6,6 +6,10 @@ from telemetry import form_based_credentials_backend
 
 class GoogleCredentialsBackend(
     form_based_credentials_backend.FormBasedCredentialsBackend):
+  def IsAlreadyLoggedIn(self, tab):
+    return tab.EvaluateJavaScript(
+        'document.getElementById("gb")!== null')
+
   @property
   def credentials_type(self):
     return 'google'
@@ -15,7 +19,7 @@ class GoogleCredentialsBackend(
     return 'https://accounts.google.com/'
 
   @property
-  def form_id(self):
+  def login_form_id(self):
     return 'gaia_loginform'
 
   @property

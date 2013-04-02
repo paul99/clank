@@ -14,6 +14,7 @@
 #include "chrome/browser/ui/browser_commands.h"
 #include "chrome/browser/ui/browser_finder.h"
 #include "chrome/browser/ui/browser_list.h"
+#include "chrome/browser/ui/tabs/tab_strip_model.h"
 #include "chrome/common/chrome_notification_types.h"
 #include "chrome/common/chrome_switches.h"
 #include "chrome/common/extensions/manifest.h"
@@ -41,13 +42,13 @@ Browser* FindOtherBrowser(Browser* browser) {
 
 class ExtensionManagementApiTest : public ExtensionApiTest {
  public:
-  virtual void SetUpCommandLine(CommandLine* command_line) {
+  virtual void SetUpCommandLine(CommandLine* command_line) OVERRIDE {
     ExtensionApiTest::SetUpCommandLine(command_line);
     command_line->AppendSwitch(switches::kEnablePanels);
   }
 
   virtual void LoadExtensions() {
-    FilePath basedir = test_data_dir_.AppendASCII("management");
+    base::FilePath basedir = test_data_dir_.AppendASCII("management");
 
     // Load 4 enabled items.
     LoadNamedExtension(basedir, "enabled_extension");
@@ -76,16 +77,16 @@ class ExtensionManagementApiTest : public ExtensionApiTest {
   }
 
  protected:
-  void LoadNamedExtension(const FilePath& path,
+  void LoadNamedExtension(const base::FilePath& path,
                           const std::string& name) {
     const Extension* extension = LoadExtension(path.AppendASCII(name));
     ASSERT_TRUE(extension);
     extension_ids_[name] = extension->id();
   }
 
-  void InstallNamedExtension(const FilePath& path,
+  void InstallNamedExtension(const base::FilePath& path,
                              const std::string& name,
-                             Extension::Location install_source) {
+                             Manifest::Location install_source) {
     const Extension* extension = InstallExtension(path.AppendASCII(name), 1,
                                                   install_source);
     ASSERT_TRUE(extension);
@@ -99,17 +100,24 @@ class ExtensionManagementApiTest : public ExtensionApiTest {
 IN_PROC_BROWSER_TEST_F(ExtensionManagementApiTest, Basics) {
   LoadExtensions();
 
-  FilePath basedir = test_data_dir_.AppendASCII("management");
-  InstallNamedExtension(basedir, "internal_extension", Extension::INTERNAL);
+  base::FilePath basedir = test_data_dir_.AppendASCII("management");
+  InstallNamedExtension(basedir, "internal_extension", Manifest::INTERNAL);
   InstallNamedExtension(basedir, "external_extension",
-                        Extension::EXTERNAL_PREF);
+                        Manifest::EXTERNAL_PREF);
   InstallNamedExtension(basedir, "admin_extension",
-                        Extension::EXTERNAL_POLICY_DOWNLOAD);
+                        Manifest::EXTERNAL_POLICY_DOWNLOAD);
 
   ASSERT_TRUE(RunExtensionSubtest("management/test", "basics.html"));
 }
 
-IN_PROC_BROWSER_TEST_F(ExtensionManagementApiTest, Uninstall) {
+// Disabled: http://crbug.com/174411
+#if defined(OS_WIN)
+#define MAYBE_Uninstall DISABLED_Uninstall
+#else
+#define MAYBE_Uninstall Uninstall
+#endif
+
+IN_PROC_BROWSER_TEST_F(ExtensionManagementApiTest, MAYBE_Uninstall) {
   LoadExtensions();
   ASSERT_TRUE(RunExtensionSubtest("management/test", "uninstall.html"));
 }
@@ -222,7 +230,7 @@ IN_PROC_BROWSER_TEST_F(ExtensionManagementApiTest, LaunchTabApp) {
   // Code below assumes that the test starts with a single browser window
   // hosting one tab.
   ASSERT_EQ(1u, chrome::GetBrowserCount(browser()->profile()));
-  ASSERT_EQ(1, browser()->tab_count());
+  ASSERT_EQ(1, browser()->tab_strip_model()->count());
 
   // Load an app with app.launch.container = "tab".
   std::string app_id;
@@ -231,7 +239,7 @@ IN_PROC_BROWSER_TEST_F(ExtensionManagementApiTest, LaunchTabApp) {
 
   // Check that the app opened in a new tab of the existing browser.
   ASSERT_EQ(1u, chrome::GetBrowserCount(browser()->profile()));
-  ASSERT_EQ(2, browser()->tab_count());
+  ASSERT_EQ(2, browser()->tab_strip_model()->count());
 
   // Unload the extension.
   UninstallExtension(app_id);
@@ -253,7 +261,7 @@ IN_PROC_BROWSER_TEST_F(ExtensionManagementApiTest, LaunchTabApp) {
   // App windows are not yet implemented on mac os.  We should fall back
   // to a normal tab.
   ASSERT_EQ(1u, chrome::GetBrowserCount(browser()->profile()));
-  ASSERT_EQ(2, browser()->tab_count());
+  ASSERT_EQ(2, browser()->tab_strip_model()->count());
 #else
   // Find the app's browser.  Opening in a new window will create
   // a new browser.

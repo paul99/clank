@@ -17,6 +17,7 @@ import urllib2
 import zlib
 
 import run_isolated
+import run_test_cases
 
 
 # The maximum number of upload attempts to try when uploading a single file.
@@ -24,6 +25,9 @@ MAX_UPLOAD_ATTEMPTS = 5
 
 # The minimum size of files to upload directly to the blobstore.
 MIN_SIZE_FOR_DIRECT_BLOBSTORE = 20 * 1024
+
+# The number of files to check the isolate server for each query.
+ITEMS_PER_CONTAINS_QUERY = 500
 
 # A list of already compressed extension types that should not receive any
 # compression before being uploaded.
@@ -142,6 +146,8 @@ def upload_hash_content_to_blobstore(generate_upload_url, hash_key, content):
     hash_contents: The contents to upload.
   """
   logging.debug('Generating url to directly upload file to blobstore')
+  assert isinstance(hash_key, str), hash_key
+  assert isinstance(content, str), (hash_key, content)
   upload_url = url_open(generate_upload_url, None).read()
 
   if not upload_url:
@@ -156,10 +162,12 @@ def upload_hash_content_to_blobstore(generate_upload_url, hash_key, content):
 class UploadRemote(run_isolated.Remote):
   def __init__(self, namespace, *args, **kwargs):
     super(UploadRemote, self).__init__(*args, **kwargs)
-    self.namespace = namespace
+    self.namespace = str(namespace)
 
   def get_file_handler(self, base_url):
+    base_url = str(base_url)
     def upload_file(content, hash_key):
+      hash_key = str(hash_key)
       content_url = base_url.rstrip('/') + '/content/'
       if len(content) > MIN_SIZE_FOR_DIRECT_BLOBSTORE:
         upload_hash_content_to_blobstore(
@@ -173,13 +181,12 @@ class UploadRemote(run_isolated.Remote):
     return upload_file
 
 
-def update_files_to_upload(query_url, queries, files_to_upload):
+def update_files_to_upload(query_url, queries, upload):
   """Queries the server to see which files from this batch already exist there.
 
   Arguments:
     queries: The hash files to potential upload to the server.
-    files_to_upload: Any new files that need to be upload are added to
-                     this list.
+    upload: Any new files that need to be upload are sent to this function.
   """
   body = ''.join(
       (binascii.unhexlify(meta_data['h']) for (_, meta_data) in queries))
@@ -194,7 +201,7 @@ def update_files_to_upload(query_url, queries, files_to_upload):
   hit = 0
   for i in range(len(response)):
     if response[i] == chr(0):
-      files_to_upload.append(queries[i])
+      upload(queries[i])
     else:
       hit += 1
   logging.info('Queried %d files, %d cache hit', len(queries), hit)
@@ -227,6 +234,23 @@ def zip_and_trigger_upload(infile, metadata, upload_function):
   hash_data.close()
 
 
+def process_items(contains_hash_url, infiles, zip_and_upload):
+  """Generates the list of files that need to be uploaded and send them to
+  zip_and_upload.
+
+  Some may already be on the server.
+  """
+  next_queries = []
+  items = ((k, v) for k, v in infiles.iteritems() if 's' in v)
+  for relfile, metadata in sorted(items, key=lambda x: -x[1]['s']):
+    next_queries.append((relfile, metadata))
+    if len(next_queries) == ITEMS_PER_CONTAINS_QUERY:
+      update_files_to_upload(contains_hash_url, next_queries, zip_and_upload)
+      next_queries = []
+  if next_queries:
+    update_files_to_upload(contains_hash_url, next_queries, zip_and_upload)
+
+
 def upload_sha1_tree(base_url, indir, infiles, namespace):
   """Uploads the given tree to the given url.
 
@@ -241,51 +265,42 @@ def upload_sha1_tree(base_url, indir, infiles, namespace):
   logging.info('upload tree(base_url=%s, indir=%s, files=%d)' %
                (base_url, indir, len(infiles)))
 
-  # Generate the list of files that need to be uploaded (since some may already
-  # be on the server.
-  base_url = base_url.rstrip('/')
-  contains_hash_url = base_url + '/content/contains/' + namespace
-  to_upload = []
-  next_queries = []
-  for relfile, metadata in infiles.iteritems():
-    if 'l' in metadata:
-      # Skip links when uploading.
-      continue
-
-    next_queries.append((relfile, metadata))
-    if len(next_queries) == 1000:
-      update_files_to_upload(contains_hash_url, next_queries, to_upload)
-      next_queries = []
-
-  if next_queries:
-    update_files_to_upload(contains_hash_url, next_queries, to_upload)
-
-  # Zip the required files and then upload them.
-  # TODO(csharp): use num_processors().
-  zipping_pool = run_isolated.ThreadPool(num_threads=4)
+  # Create a pool of workers to zip and upload any files missing from
+  # the server.
+  num_threads = run_test_cases.num_processors()
+  zipping_pool = run_isolated.ThreadPool(num_threads, num_threads, 0)
   remote_uploader = UploadRemote(namespace, base_url)
-  for relfile, metadata in to_upload:
+
+  # Starts the zip and upload process for a given query. The query is assumed
+  # to be in the format (relfile, metadata).
+  uploaded = []
+  def zip_and_upload(query):
+    relfile, metadata = query
     infile = os.path.join(indir, relfile)
-    zipping_pool.add_task(zip_and_trigger_upload, infile, metadata,
+    zipping_pool.add_task(0, zip_and_trigger_upload, infile, metadata,
                           remote_uploader.add_item)
+    uploaded.append(query)
+
+  contains_hash_url = '%s/content/contains/%s' % (
+      base_url.rstrip('/'), namespace)
+  process_items(contains_hash_url, infiles, zip_and_upload)
+
   logging.info('Waiting for all files to finish zipping')
   zipping_pool.join()
   logging.info('All files zipped.')
 
   logging.info('Waiting for all files to finish uploading')
+  # Will raise if any exception occurred.
   remote_uploader.join()
   logging.info('All files are uploaded')
 
-  exception = remote_uploader.next_exception()
-  if exception:
-    raise exception[0], exception[1], exception[2]
   total = len(infiles)
   total_size = sum(metadata.get('s', 0) for metadata in infiles.itervalues())
   logging.info(
       'Total:      %6d, %9.1fkb',
       total,
       sum(m.get('s', 0) for m in infiles.itervalues()) / 1024.)
-  cache_hit = set(infiles.iterkeys()) - set(x[0] for x in to_upload)
+  cache_hit = set(infiles.iterkeys()) - set(x[0] for x in uploaded)
   cache_hit_size = sum(infiles[i].get('s', 0) for i in cache_hit)
   logging.info(
       'cache hit:  %6d, %9.1fkb, %6.2f%% files, %6.2f%% size',
@@ -293,7 +308,7 @@ def upload_sha1_tree(base_url, indir, infiles, namespace):
       cache_hit_size / 1024.,
       len(cache_hit) * 100. / total,
       cache_hit_size * 100. / total_size if total_size else 0)
-  cache_miss = to_upload
+  cache_miss = uploaded
   cache_miss_size = sum(infiles[i[0]].get('s', 0) for i in cache_miss)
   logging.info(
       'cache miss: %6d, %9.1fkb, %6.2f%% files, %6.2f%% size',

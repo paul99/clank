@@ -16,8 +16,8 @@
 #include "base/memory/scoped_ptr.h"
 #include "base/memory/singleton.h"
 #include "base/nix/xdg_util.h"
-#include "base/string_split.h"
 #include "base/string_util.h"
+#include "base/strings/string_split.h"
 #include "base/synchronization/lock.h"
 #include "base/third_party/xdg_mime/xdgmime.h"
 #include "base/threading/thread_restrictions.h"
@@ -160,13 +160,12 @@ class IconTheme {
 
   // store the subdirs of this theme and array index of |info_array_|.
   std::map<std::string, int> subdirs_;
-  scoped_array<SubDirInfo> info_array_;  // List of sub-directories.
+  scoped_ptr<SubDirInfo[]> info_array_;  // List of sub-directories.
   std::string inherits_;  // Name of the theme this one inherits from.
 };
 
 IconTheme::IconTheme(const std::string& name)
-  : index_theme_loaded_(false),
-    info_array_(NULL) {
+    : index_theme_loaded_(false) {
   base::ThreadRestrictions::AssertIOAllowed();
   // Iterate on all icon directories to find directories of the specified
   // theme and load the first encountered index.theme.

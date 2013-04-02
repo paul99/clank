@@ -12,10 +12,11 @@
 #include "base/command_line.h"
 #include "base/memory/scoped_ptr.h"
 #include "base/metrics/histogram.h"
+#include "base/prefs/pref_service.h"
 #include "chrome/browser/content_settings/content_settings_rule.h"
 #include "chrome/browser/content_settings/content_settings_utils.h"
 #include "chrome/browser/content_settings/host_content_settings_map.h"
-#include "chrome/browser/prefs/pref_service.h"
+#include "chrome/browser/prefs/pref_registry_syncable.h"
 #include "chrome/browser/prefs/scoped_user_pref_update.h"
 #include "chrome/common/chrome_notification_types.h"
 #include "chrome/common/chrome_switches.h"
@@ -71,13 +72,13 @@ namespace content_settings {
 //
 
 // static
-void PrefProvider::RegisterUserPrefs(PrefService* prefs) {
-  prefs->RegisterIntegerPref(
+void PrefProvider::RegisterUserPrefs(PrefRegistrySyncable* registry) {
+  registry->RegisterIntegerPref(
       prefs::kContentSettingsVersion,
       ContentSettingsPattern::kContentSettingsPatternVersion,
-      PrefService::UNSYNCABLE_PREF);
-  prefs->RegisterDictionaryPref(prefs::kContentSettingsPatternPairs,
-                                PrefService::SYNCABLE_PREF);
+      PrefRegistrySyncable::UNSYNCABLE_PREF);
+  registry->RegisterDictionaryPref(prefs::kContentSettingsPatternPairs,
+                                   PrefRegistrySyncable::SYNCABLE_PREF);
 }
 
 PrefProvider::PrefProvider(PrefService* prefs,
@@ -386,6 +387,9 @@ void PrefProvider::ReadContentSettingsFromPref(bool overwrite) {
   // Convert all Unicode patterns into punycode form, then read.
   CanonicalizeContentSettingsExceptions(mutable_settings);
 
+  size_t cookies_block_exception_count = 0;
+  size_t cookies_allow_exception_count = 0;
+  size_t cookies_session_only_exception_count = 0;
   for (DictionaryValue::key_iterator i(mutable_settings->begin_keys());
        i != mutable_settings->end_keys(); ++i) {
     const std::string& pattern_str(*i);
@@ -456,9 +460,32 @@ void PrefProvider::ReadContentSettingsFromPref(bool overwrite) {
                             content_type,
                             ResourceIdentifier(""),
                             value);
+        if (content_type == CONTENT_SETTINGS_TYPE_COOKIES) {
+          ContentSetting s = ValueToContentSetting(value);
+          switch (s) {
+            case CONTENT_SETTING_ALLOW :
+              ++cookies_allow_exception_count;
+              break;
+            case CONTENT_SETTING_BLOCK :
+              ++cookies_block_exception_count;
+              break;
+            case CONTENT_SETTING_SESSION_ONLY :
+              ++cookies_session_only_exception_count;
+              break;
+            default:
+              NOTREACHED();
+              break;
+          }
+        }
       }
     }
   }
+  UMA_HISTOGRAM_COUNTS("ContentSettings.NumberOfBlockCookiesExceptions",
+                       cookies_block_exception_count);
+  UMA_HISTOGRAM_COUNTS("ContentSettings.NumberOfAllowCookiesExceptions",
+                       cookies_allow_exception_count);
+  UMA_HISTOGRAM_COUNTS("ContentSettings.NumberOfSessionOnlyCookiesExceptions",
+                       cookies_session_only_exception_count);
 }
 
 void PrefProvider::OnContentSettingsPatternPairsChanged() {

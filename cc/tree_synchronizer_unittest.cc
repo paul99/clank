@@ -76,21 +76,22 @@ private:
 
 class FakeLayerAnimationController : public LayerAnimationController {
 public:
-    static scoped_ptr<FakeLayerAnimationController> create(LayerAnimationControllerClient* client)
+    static scoped_refptr<LayerAnimationController> create()
     {
-        return make_scoped_ptr(new FakeLayerAnimationController(client));
+        return static_cast<LayerAnimationController*>(new FakeLayerAnimationController);
     }
 
     bool synchronizedAnimations() const { return m_synchronizedAnimations; }
 
 private:
-    explicit FakeLayerAnimationController(LayerAnimationControllerClient* client)
-        : LayerAnimationController(client)
+    FakeLayerAnimationController()
+        : LayerAnimationController(1)
         , m_synchronizedAnimations(false)
-    {
-    }
+    { }
 
-    virtual void pushAnimationUpdatesTo(LayerAnimationController* controllerImpl)
+    virtual ~FakeLayerAnimationController() { }
+
+    virtual void pushAnimationUpdatesTo(LayerAnimationController* controllerImpl) OVERRIDE
     {
         LayerAnimationController::pushAnimationUpdatesTo(controllerImpl);
         m_synchronizedAnimations = true;
@@ -142,7 +143,7 @@ protected:
 // return a null tree.
 TEST_F(TreeSynchronizerTest, syncNullTree)
 {
-    scoped_ptr<LayerImpl> layerImplTreeRoot = TreeSynchronizer::synchronizeTrees(0, scoped_ptr<LayerImpl>(), m_hostImpl.activeTree());
+    scoped_ptr<LayerImpl> layerImplTreeRoot = TreeSynchronizer::synchronizeTrees(static_cast<Layer*>(NULL), scoped_ptr<LayerImpl>(), m_hostImpl.activeTree());
 
     EXPECT_TRUE(!layerImplTreeRoot.get());
 }
@@ -171,6 +172,9 @@ TEST_F(TreeSynchronizerTest, syncSimpleTreeReusingLayers)
     scoped_ptr<LayerImpl> layerImplTreeRoot = TreeSynchronizer::synchronizeTrees(layerTreeRoot.get(), scoped_ptr<LayerImpl>(), m_hostImpl.activeTree());
     expectTreesAreIdentical(layerTreeRoot.get(), layerImplTreeRoot.get(), m_hostImpl.activeTree());
 
+    // We have to push properties to pick up the destruction list pointer.
+    TreeSynchronizer::pushProperties(layerTreeRoot.get(), layerImplTreeRoot.get());
+
     // Add a new layer to the Layer side
     layerTreeRoot->children()[0]->addChild(MockLayer::create(&layerImplDestructionList));
     // Remove one.
@@ -198,6 +202,10 @@ TEST_F(TreeSynchronizerTest, syncSimpleTreeAndTrackStackingOrderChange)
     layerTreeRoot->addChild(child2);
     scoped_ptr<LayerImpl> layerImplTreeRoot = TreeSynchronizer::synchronizeTrees(layerTreeRoot.get(), scoped_ptr<LayerImpl>(), m_hostImpl.activeTree());
     expectTreesAreIdentical(layerTreeRoot.get(), layerImplTreeRoot.get(), m_hostImpl.activeTree());
+
+    // We have to push properties to pick up the destruction list pointer.
+    TreeSynchronizer::pushProperties(layerTreeRoot.get(), layerImplTreeRoot.get());
+
     layerImplTreeRoot->resetAllChangeTrackingForSubtree();
 
     // re-insert the layer and sync again.
@@ -205,6 +213,8 @@ TEST_F(TreeSynchronizerTest, syncSimpleTreeAndTrackStackingOrderChange)
     layerTreeRoot->addChild(child2);
     layerImplTreeRoot = TreeSynchronizer::synchronizeTrees(layerTreeRoot.get(), layerImplTreeRoot.Pass(), m_hostImpl.activeTree());
     expectTreesAreIdentical(layerTreeRoot.get(), layerImplTreeRoot.get(), m_hostImpl.activeTree());
+
+    TreeSynchronizer::pushProperties(layerTreeRoot.get(), layerImplTreeRoot.get());
 
     // Check that the impl thread properly tracked the change.
     EXPECT_FALSE(layerImplTreeRoot->layerPropertyChanged());
@@ -230,6 +240,8 @@ TEST_F(TreeSynchronizerTest, syncSimpleTreeAndProperties)
 
     scoped_ptr<LayerImpl> layerImplTreeRoot = TreeSynchronizer::synchronizeTrees(layerTreeRoot.get(), scoped_ptr<LayerImpl>(), m_hostImpl.activeTree());
     expectTreesAreIdentical(layerTreeRoot.get(), layerImplTreeRoot.get(), m_hostImpl.activeTree());
+
+    TreeSynchronizer::pushProperties(layerTreeRoot.get(), layerImplTreeRoot.get());
 
     // Check that the property values we set on the Layer tree are reflected in the LayerImpl tree.
     gfx::PointF rootLayerImplPosition = layerImplTreeRoot->position();
@@ -267,6 +279,9 @@ TEST_F(TreeSynchronizerTest, reuseLayerImplsAfterStructuralChange)
     scoped_ptr<LayerImpl> layerImplTreeRoot = TreeSynchronizer::synchronizeTrees(layerTreeRoot.get(), scoped_ptr<LayerImpl>(), m_hostImpl.activeTree());
     expectTreesAreIdentical(layerTreeRoot.get(), layerImplTreeRoot.get(), m_hostImpl.activeTree());
 
+    // We have to push properties to pick up the destruction list pointer.
+    TreeSynchronizer::pushProperties(layerTreeRoot.get(), layerImplTreeRoot.get());
+
     // Now restructure the tree to look like this:
     // root --- D ---+--- A
     //               |
@@ -303,6 +318,9 @@ TEST_F(TreeSynchronizerTest, syncSimpleTreeThenDestroy)
 
     scoped_ptr<LayerImpl> layerImplTreeRoot = TreeSynchronizer::synchronizeTrees(oldLayerTreeRoot.get(), scoped_ptr<LayerImpl>(), m_hostImpl.activeTree());
     expectTreesAreIdentical(oldLayerTreeRoot.get(), layerImplTreeRoot.get(), m_hostImpl.activeTree());
+
+    // We have to push properties to pick up the destruction list pointer.
+    TreeSynchronizer::pushProperties(oldLayerTreeRoot.get(), layerImplTreeRoot.get());
 
     // Remove all children on the Layer side.
     oldLayerTreeRoot->removeAllChildren();
@@ -370,12 +388,12 @@ TEST_F(TreeSynchronizerTest, synchronizeAnimations)
 
     scoped_refptr<Layer> layerTreeRoot = Layer::create();
 
-    FakeLayerAnimationControllerClient dummy;
-    layerTreeRoot->setLayerAnimationController(FakeLayerAnimationController::create(&dummy).PassAs<LayerAnimationController>());
+    layerTreeRoot->setLayerAnimationController(FakeLayerAnimationController::create());
 
     EXPECT_FALSE(static_cast<FakeLayerAnimationController*>(layerTreeRoot->layerAnimationController())->synchronizedAnimations());
 
     scoped_ptr<LayerImpl> layerImplTreeRoot = TreeSynchronizer::synchronizeTrees(layerTreeRoot.get(), scoped_ptr<LayerImpl>(), m_hostImpl.activeTree());
+    TreeSynchronizer::pushProperties(layerTreeRoot.get(), layerImplTreeRoot.get());
     layerImplTreeRoot = TreeSynchronizer::synchronizeTrees(layerTreeRoot.get(), layerImplTreeRoot.Pass(), m_hostImpl.activeTree());
 
     EXPECT_TRUE(static_cast<FakeLayerAnimationController*>(layerTreeRoot->layerAnimationController())->synchronizedAnimations());

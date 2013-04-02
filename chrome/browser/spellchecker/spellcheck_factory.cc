@@ -4,8 +4,9 @@
 
 #include "chrome/browser/spellchecker/spellcheck_factory.h"
 
+#include "base/prefs/pref_service.h"
 #include "chrome/browser/browser_process.h"
-#include "chrome/browser/prefs/pref_service.h"
+#include "chrome/browser/prefs/pref_registry_syncable.h"
 #include "chrome/browser/profiles/profile.h"
 #include "chrome/browser/profiles/profile_dependency_manager.h"
 #include "chrome/browser/spellchecker/spellcheck_service.h"
@@ -45,23 +46,25 @@ ProfileKeyedService* SpellcheckServiceFactory::BuildServiceInstanceFor(
   return spellcheck;
 }
 
-void SpellcheckServiceFactory::RegisterUserPrefs(PrefService* user_prefs) {
+void SpellcheckServiceFactory::RegisterUserPrefs(
+    PrefRegistrySyncable* user_prefs) {
   // TODO(estade): IDS_SPELLCHECK_DICTIONARY should be an ASCII string.
-  user_prefs->RegisterLocalizedStringPref(prefs::kSpellCheckDictionary,
-                                          IDS_SPELLCHECK_DICTIONARY,
-                                          PrefService::UNSYNCABLE_PREF);
+  user_prefs->RegisterLocalizedStringPref(
+      prefs::kSpellCheckDictionary,
+      IDS_SPELLCHECK_DICTIONARY,
+      PrefRegistrySyncable::UNSYNCABLE_PREF);
   user_prefs->RegisterBooleanPref(prefs::kSpellCheckConfirmDialogShown,
                                   false,
-                                  PrefService::UNSYNCABLE_PREF);
+                                  PrefRegistrySyncable::UNSYNCABLE_PREF);
   user_prefs->RegisterBooleanPref(prefs::kSpellCheckUseSpellingService,
                                   false,
-                                  PrefService::UNSYNCABLE_PREF);
+                                  PrefRegistrySyncable::UNSYNCABLE_PREF);
   user_prefs->RegisterBooleanPref(prefs::kEnableContinuousSpellcheck,
                                   true,
-                                  PrefService::SYNCABLE_PREF);
+                                  PrefRegistrySyncable::SYNCABLE_PREF);
   user_prefs->RegisterBooleanPref(prefs::kEnableAutoSpellCorrect,
-                                  true,
-                                  PrefService::UNSYNCABLE_PREF);
+                                  false,
+                                  PrefRegistrySyncable::SYNCABLE_PREF);
 }
 
 bool SpellcheckServiceFactory::ServiceRedirectedInIncognito() const {

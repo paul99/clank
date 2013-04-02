@@ -83,7 +83,7 @@ bool ShouldHighlightNetwork(const chromeos::Network* network) {
 // browser window with an empty tab and returns it.
 Browser* GetAppropriateBrowser() {
   DCHECK(chromeos::UserManager::Get()->IsSessionStarted());
-  return browser::FindOrCreateTabbedBrowser(
+  return chrome::FindOrCreateTabbedBrowser(
       ProfileManager::GetDefaultProfileOrOffTheRecord(),
       chrome::HOST_DESKTOP_TYPE_ASH);
 }
@@ -433,7 +433,7 @@ void NetworkMenuModel::ActivatedAt(int index) {
     if (active_vpn)
       cros->DisconnectFromNetwork(active_vpn);
   } else if (flags & FLAG_VIEW_ACCOUNT) {
-    Browser* browser = browser::FindOrCreateTabbedBrowser(
+    Browser* browser = chrome::FindOrCreateTabbedBrowser(
         ProfileManager::GetDefaultProfileOrOffTheRecord(),
         chrome::HOST_DESKTOP_TYPE_ASH);
     chrome::ShowSingletonTab(browser, GURL(top_up_url_));
@@ -981,7 +981,8 @@ void NetworkMenu::DoConnect(Network* network) {
     }
   } else if (network->type() == TYPE_CELLULAR) {
     CellularNetwork* cellular = static_cast<CellularNetwork*>(network);
-    if (cellular->activation_state() != ACTIVATION_STATE_ACTIVATED) {
+    if (cellular->activation_state() != ACTIVATION_STATE_ACTIVATED ||
+        cellular->out_of_credits()) {
       ActivateCellular(cellular);
     } else {
       cros->ConnectToCellularNetwork(cellular);
@@ -1026,10 +1027,11 @@ void NetworkMenu::ConnectToNetwork(Network* network) {
 
     case TYPE_CELLULAR: {
       CellularNetwork* cell = static_cast<CellularNetwork*>(network);
-      if (cell->NeedsActivation()) {
+      if (cell->NeedsActivation() || cell->out_of_credits()) {
         ActivateCellular(cell);
-      } else if (cell->connecting_or_connected()) {
-        // Cellular network is connecting or connected,
+      } else if (cell->connecting_or_connected() ||
+                 cell->activation_state() == ACTIVATION_STATE_ACTIVATING) {
+        // Cellular network is connecting, connected, or activating,
         // so we show the config settings for the cellular network.
         ShowTabbedNetworkSettings(cell);
       } else {

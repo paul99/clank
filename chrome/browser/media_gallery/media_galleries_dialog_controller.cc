@@ -10,6 +10,7 @@
 #include "chrome/browser/media_gallery/media_file_system_registry.h"
 #include "chrome/browser/profiles/profile.h"
 #include "chrome/browser/system_monitor/media_storage_util.h"
+#include "chrome/browser/system_monitor/removable_storage_notifications.h"
 #include "chrome/browser/ui/chrome_select_file_policy.h"
 #include "chrome/common/chrome_paths.h"
 #include "chrome/common/extensions/extension.h"
@@ -28,8 +29,8 @@ bool IsAttachedDevice(const std::string& device_id) {
   if (!MediaStorageUtil::IsRemovableDevice(device_id))
     return false;
 
-  std::vector<base::SystemMonitor::RemovableStorageInfo> removable_storages =
-      base::SystemMonitor::Get()->GetAttachedRemovableStorage();
+  std::vector<RemovableStorageNotifications::StorageInfo> removable_storages =
+      RemovableStorageNotifications::GetInstance()->GetAttachedStorage();
   for (size_t i = 0; i < removable_storages.size(); ++i) {
     if (removable_storages[i].device_id == device_id)
       return true;
@@ -54,9 +55,10 @@ MediaGalleriesDialogController::MediaGalleriesDialogController(
 
   dialog_.reset(MediaGalleriesDialog::Create(this));
 
-  base::SystemMonitor* monitor = base::SystemMonitor::Get();
-  if (monitor)
-    monitor->AddDevicesChangedObserver(this);
+  RemovableStorageNotifications* notifications =
+      RemovableStorageNotifications::GetInstance();
+  if (notifications)
+    notifications->AddObserver(this);
 }
 
 MediaGalleriesDialogController::MediaGalleriesDialogController()
@@ -65,9 +67,10 @@ MediaGalleriesDialogController::MediaGalleriesDialogController()
       preferences_(NULL) {}
 
 MediaGalleriesDialogController::~MediaGalleriesDialogController() {
-  base::SystemMonitor* monitor = base::SystemMonitor::Get();
-  if (monitor)
-    monitor->RemoveDevicesChangedObserver(this);
+  RemovableStorageNotifications* notifications =
+      RemovableStorageNotifications::GetInstance();
+  if (notifications)
+    notifications->RemoveObserver(this);
 
   if (select_folder_dialog_.get())
     select_folder_dialog_->ListenerDestroyed();
@@ -113,7 +116,7 @@ bool MediaGalleriesDialogController::HasPermittedGalleries() const {
 }
 
 void MediaGalleriesDialogController::OnAddFolderClicked() {
-  FilePath user_data_dir;
+  base::FilePath user_data_dir;
   PathService::Get(chrome::DIR_USER_DATA, &user_data_dir);
   select_folder_dialog_ =
       ui::SelectFileDialog::Create(this, new ChromeSelectFilePolicy(NULL));
@@ -166,7 +169,7 @@ content::WebContents* MediaGalleriesDialogController::web_contents() {
   return web_contents_;
 }
 
-void MediaGalleriesDialogController::FileSelected(const FilePath& path,
+void MediaGalleriesDialogController::FileSelected(const base::FilePath& path,
                                                   int /*index*/,
                                                   void* /*params*/) {
   // Try to find it in |known_galleries_|.
@@ -204,15 +207,13 @@ void MediaGalleriesDialogController::FileSelected(const FilePath& path,
 }
 
 void MediaGalleriesDialogController::OnRemovableStorageAttached(
-    const std::string& id,
-    const string16& /*name*/,
-    const FilePath::StringType& /*location*/) {
-  UpdateGalleryOnDeviceEvent(id, true /* attached */);
+    const RemovableStorageNotifications::StorageInfo& info) {
+  UpdateGalleriesOnDeviceEvent(info.device_id);
 }
 
 void MediaGalleriesDialogController::OnRemovableStorageDetached(
-    const std::string& id) {
-  UpdateGalleryOnDeviceEvent(id, false /* detached */);
+    const RemovableStorageNotifications::StorageInfo& info) {
+  UpdateGalleriesOnDeviceEvent(info.device_id);
 }
 
 void MediaGalleriesDialogController::InitializePermissions() {
@@ -257,29 +258,19 @@ void MediaGalleriesDialogController::SavePermissions() {
   }
 }
 
-void MediaGalleriesDialogController::UpdateGalleryOnDeviceEvent(
-    const std::string& device_id, bool attached) {
-  GalleryPermission* gallery = NULL;
+void MediaGalleriesDialogController::UpdateGalleriesOnDeviceEvent(
+    const std::string& device_id) {
   for (KnownGalleryPermissions::iterator iter = known_galleries_.begin();
        iter != known_galleries_.end(); ++iter) {
-    if (iter->second.pref_info.device_id == device_id) {
-      gallery = &iter->second;
-      break;
-    }
+    if (iter->second.pref_info.device_id == device_id)
+      dialog_->UpdateGallery(&iter->second.pref_info, iter->second.allowed);
   }
 
-  if (!gallery) {
-    for (NewGalleryPermissions::iterator iter = new_galleries_.begin();
-         iter != new_galleries_.end(); ++iter) {
-      if (iter->pref_info.device_id == device_id) {
-        gallery = &(*iter);
-        break;
-      }
-    }
+  for (NewGalleryPermissions::iterator iter = new_galleries_.begin();
+       iter != new_galleries_.end(); ++iter) {
+    if (iter->pref_info.device_id == device_id)
+      dialog_->UpdateGallery(&iter->pref_info, iter->allowed);
   }
-
-  if (gallery)
-    dialog_->UpdateGallery(&gallery->pref_info, gallery->allowed);
 }
 
 // MediaGalleries dialog -------------------------------------------------------

@@ -15,10 +15,11 @@
 #include "base/prefs/public/pref_member.h"
 #include "base/timer.h"
 #include "build/build_config.h"
-#include "chrome/browser/debugger/devtools_window.h"
+#include "chrome/browser/devtools/devtools_window.h"
 #include "chrome/browser/extensions/extension_keybinding_registry.h"
 #include "chrome/browser/infobars/infobar_container.h"
 #include "chrome/browser/ui/browser_window.h"
+#include "chrome/browser/ui/host_desktop.h"
 #include "chrome/browser/ui/tabs/tab_strip_model_observer.h"
 #include "ui/base/gtk/gtk_signal.h"
 #include "ui/base/ui_base_types.h"
@@ -39,6 +40,7 @@ class GlobalMenuBar;
 class InfoBarContainerGtk;
 class InstantPreviewControllerGtk;
 class LocationBar;
+class PrefRegistrySyncable;
 class PrefService;
 class StatusBubbleGtk;
 class TabContentsContainerGtk;
@@ -133,6 +135,7 @@ class BrowserWindowGtk
   virtual void ShowChromeToMobileBubble() OVERRIDE;
 #if defined(ENABLE_ONE_CLICK_SIGNIN)
   virtual void ShowOneClickSigninBubble(
+      OneClickSigninBubbleType type,
       const StartSyncCallback& start_sync_callback) OVERRIDE;
 #endif
   virtual bool IsDownloadShelfVisible() const OVERRIDE;
@@ -141,10 +144,6 @@ class BrowserWindowGtk
   virtual void UserChangedTheme() OVERRIDE;
   virtual int GetExtraRenderViewHeight() const OVERRIDE;
   virtual void WebContentsFocused(content::WebContents* contents) OVERRIDE;
-  virtual void ShowPageInfo(content::WebContents* web_contents,
-                            const GURL& url,
-                            const content::SSLStatus& ssl,
-                            bool show_history) OVERRIDE;
   virtual void ShowWebsiteSettings(Profile* profile,
                                    content::WebContents* web_contents,
                                    const GURL& url,
@@ -163,7 +162,6 @@ class BrowserWindowGtk
   virtual void Copy() OVERRIDE;
   virtual void Paste() OVERRIDE;
   virtual gfx::Rect GetInstantBounds() OVERRIDE;
-  virtual bool IsInstantTabShowing() OVERRIDE;
   virtual WindowOpenDisposition GetDispositionForPopupBounds(
       const gfx::Rect& bounds) OVERRIDE;
   virtual FindBar* CreateFindBar() OVERRIDE;
@@ -250,7 +248,8 @@ class BrowserWindowGtk
   // Returns the tab we're currently displaying in the tab contents container.
   content::WebContents* GetDisplayedTab();
 
-  static void RegisterUserPrefs(PrefService* prefs);
+  static void RegisterUserPrefs(PrefService* prefs,
+                                PrefRegistrySyncable* registry);
 
   // Tells GTK that the toolbar area is invalidated and needs redrawing. We
   // have this method as a hack because GTK doesn't queue the toolbar area for
@@ -290,23 +289,26 @@ class BrowserWindowGtk
   // Invalidate window to force repaint.
   void InvalidateWindow();
 
-  // Top level window.
+  // Top level window. NULL after the window starts closing.
   GtkWindow* window_;
   // Determines whether window was shown.
   bool window_has_shown_;
   // GtkAlignment that holds the interior components of the chromium window.
-  // This is used to draw the custom frame border and content shadow.
+  // This is used to draw the custom frame border and content shadow. Owned by
+  // window_.
   GtkWidget* window_container_;
   // VBox that holds everything (tabs, toolbar, bookmarks bar, tab contents).
+  // Owned by window_container_.
   GtkWidget* window_vbox_;
-  // VBox that holds everything below the toolbar.
+  // VBox that holds everything below the toolbar. Owned by
+  // render_area_floating_container_.
   GtkWidget* render_area_vbox_;
   // Floating container that holds the render area. It is needed to position
-  // the findbar.
+  // the findbar. Owned by render_area_event_box_.
   GtkWidget* render_area_floating_container_;
-  // EventBox that holds render_area_floating_container_.
+  // EventBox that holds render_area_floating_container_. Owned by window_vbox_.
   GtkWidget* render_area_event_box_;
-  // Border between toolbar and render area.
+  // Border between toolbar and render area. Owned by render_area_vbox_.
   GtkWidget* toolbar_border_;
 
   scoped_ptr<Browser> browser_;
@@ -526,9 +528,11 @@ class BrowserWindowGtk
   DevToolsWindow* devtools_window_;
 
   // Split pane containing the contents_container_ and the devtools_container_.
+  // Owned by contents_vsplit_.
   GtkWidget* contents_hsplit_;
 
   // Split pane containing the contents_hsplit_ and the devtools_container_.
+  // Owned by render_area_vbox_.
   GtkWidget* contents_vsplit_;
 
   // The tab strip.  Always non-NULL.

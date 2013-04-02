@@ -15,8 +15,8 @@
 #include "chrome/browser/search_engines/template_url_service_observer.h"
 #include "chrome/browser/shell_integration.h"
 #include "chrome/browser/ui/webui/options/options_ui.h"
-#include "ui/base/dialogs/select_file_dialog.h"
 #include "ui/base/models/table_model_observer.h"
+#include "ui/shell_dialogs/select_file_dialog.h"
 
 #if defined(OS_CHROMEOS)
 #include "chrome/browser/chromeos/system/pointer_device_observer.h"
@@ -77,7 +77,7 @@ class BrowserOptionsHandler
   void OnCloudPrintPrefsChanged();
 
   // SelectFileDialog::Listener implementation
-  virtual void FileSelected(const FilePath& path,
+  virtual void FileSelected(const base::FilePath& path,
                             int index,
                             void* params) OVERRIDE;
 
@@ -104,8 +104,8 @@ class BrowserOptionsHandler
   // thread (see CheckAutoLaunchCallback). A weak pointer to this is passed in
   // as a parameter to avoid the need to lock between this function and the
   // destructor. |profile_path| is the full path to the current profile.
-  void CheckAutoLaunch(base::WeakPtr<BrowserOptionsHandler> weak_this,
-                       const FilePath& profile_path);
+  static void CheckAutoLaunch(base::WeakPtr<BrowserOptionsHandler> weak_this,
+                              const base::FilePath& profile_path);
 
   // Sets up (on the UI thread) the necessary bindings for toggling auto-launch
   // (if the user is part of the auto-launch and makes sure the HTML UI knows
@@ -140,11 +140,6 @@ class BrowserOptionsHandler
 
   // Asynchronously opens a new browser window to create a new profile.
   void CreateProfile(const base::ListValue* args);
-
-  // Generates a DictionaryValue object that represents a new profile's
-  // name and icon.
-  // |args| is not used.
-  void CreateProfileInfo(const base::ListValue* args);
 
   void ObserveThemeChanged();
   void ThemesReset(const base::ListValue* args);
@@ -231,7 +226,6 @@ class BrowserOptionsHandler
   // ("true" or "false").
   void SpokenFeedbackChangeCallback(const base::ListValue* args);
   void HighContrastChangeCallback(const base::ListValue* args);
-  void ScreenMagnifierChangeCallback(const base::ListValue* args);
   void VirtualKeyboardChangeCallback(const base::ListValue* args);
 
   // Called when the user confirmed factory reset. Chrome will
@@ -275,10 +269,8 @@ class BrowserOptionsHandler
 
   TemplateURLService* template_url_service_;  // Weak.
 
-  // Used to get |weak_ptr_| to self for use on the File thread.
-  base::WeakPtrFactory<BrowserOptionsHandler> weak_ptr_factory_for_file_;
-  // Used to post update tasks to the UI thread.
-  base::WeakPtrFactory<BrowserOptionsHandler> weak_ptr_factory_for_ui_;
+  // Used to get WeakPtr to self for use on the UI thread.
+  base::WeakPtrFactory<BrowserOptionsHandler> weak_ptr_factory_;
 
   // True if the multiprofiles switch is enabled.
   bool multiprofile_;

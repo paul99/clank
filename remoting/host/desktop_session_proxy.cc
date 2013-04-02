@@ -7,13 +7,18 @@
 #include "base/compiler_specific.h"
 #include "base/logging.h"
 #include "base/platform_file.h"
+#include "base/process_util.h"
 #include "base/single_thread_task_runner.h"
 #include "ipc/ipc_channel_proxy.h"
 #include "ipc/ipc_message_macros.h"
-#include "remoting/base/capture_data.h"
+#include "media/video/capture/screen/screen_capture_data.h"
 #include "remoting/host/audio_capturer.h"
 #include "remoting/host/chromoting_messages.h"
+#include "remoting/host/client_session.h"
+#include "remoting/host/ipc_audio_capturer.h"
+#include "remoting/host/ipc_event_executor.h"
 #include "remoting/host/ipc_video_frame_capturer.h"
+#include "remoting/proto/audio.pb.h"
 #include "remoting/proto/control.pb.h"
 #include "remoting/proto/event.pb.h"
 
@@ -25,11 +30,47 @@ namespace remoting {
 
 DesktopSessionProxy::DesktopSessionProxy(
     scoped_refptr<base::SingleThreadTaskRunner> caller_task_runner,
-    scoped_refptr<base::SingleThreadTaskRunner> video_capture_task_runner)
+    scoped_refptr<base::SingleThreadTaskRunner> io_task_runner,
+    const std::string& client_jid,
+    const base::Closure& disconnect_callback)
     : caller_task_runner_(caller_task_runner),
-      video_capture_task_runner_(video_capture_task_runner),
+      io_task_runner_(io_task_runner),
+      audio_capturer_(NULL),
+      client_jid_(client_jid),
+      disconnect_callback_(disconnect_callback),
+      desktop_process_(base::kNullProcessHandle),
       pending_capture_frame_requests_(0),
       video_capturer_(NULL) {
+  DCHECK(caller_task_runner_->BelongsToCurrentThread());
+  DCHECK(!client_jid_.empty());
+  DCHECK(!disconnect_callback_.is_null());
+}
+
+scoped_ptr<AudioCapturer> DesktopSessionProxy::CreateAudioCapturer(
+    scoped_refptr<base::SingleThreadTaskRunner> audio_task_runner) {
+  DCHECK(caller_task_runner_->BelongsToCurrentThread());
+  DCHECK(!audio_capture_task_runner_.get());
+
+  audio_capture_task_runner_ = audio_task_runner;
+  return scoped_ptr<AudioCapturer>(new IpcAudioCapturer(this));
+}
+
+scoped_ptr<EventExecutor> DesktopSessionProxy::CreateEventExecutor(
+    scoped_refptr<base::SingleThreadTaskRunner> input_task_runner,
+    scoped_refptr<base::SingleThreadTaskRunner> ui_task_runner) {
+  DCHECK(caller_task_runner_->BelongsToCurrentThread());
+
+  return scoped_ptr<EventExecutor>(new IpcEventExecutor(this));
+}
+
+scoped_ptr<media::ScreenCapturer> DesktopSessionProxy::CreateVideoCapturer(
+    scoped_refptr<base::SingleThreadTaskRunner> capture_task_runner,
+    scoped_refptr<base::SingleThreadTaskRunner> encode_task_runner) {
+  DCHECK(caller_task_runner_->BelongsToCurrentThread());
+  DCHECK(!video_capture_task_runner_.get());
+
+  video_capture_task_runner_ = capture_task_runner;
+  return scoped_ptr<media::ScreenCapturer>(new IpcVideoFrameCapturer(this));
 }
 
 bool DesktopSessionProxy::OnMessageReceived(const IPC::Message& message) {
@@ -37,6 +78,8 @@ bool DesktopSessionProxy::OnMessageReceived(const IPC::Message& message) {
 
   bool handled = true;
   IPC_BEGIN_MESSAGE_MAP(DesktopSessionProxy, message)
+    IPC_MESSAGE_HANDLER(ChromotingDesktopNetworkMsg_AudioPacket,
+                        OnAudioPacket)
     IPC_MESSAGE_HANDLER(ChromotingDesktopNetworkMsg_CaptureCompleted,
                         OnCaptureCompleted)
     IPC_MESSAGE_HANDLER(ChromotingDesktopNetworkMsg_CursorShapeChanged,
@@ -47,6 +90,8 @@ bool DesktopSessionProxy::OnMessageReceived(const IPC::Message& message) {
                         OnReleaseSharedBuffer)
     IPC_MESSAGE_HANDLER(ChromotingDesktopNetworkMsg_InjectClipboardEvent,
                         OnInjectClipboardEvent)
+    IPC_MESSAGE_HANDLER(ChromotingDesktopNetworkMsg_DisconnectSession,
+                        DisconnectSession);
   IPC_END_MESSAGE_MAP()
 
   return handled;
@@ -61,19 +106,23 @@ void DesktopSessionProxy::OnChannelConnected(int32 peer_pid) {
 void DesktopSessionProxy::OnChannelError() {
   DCHECK(caller_task_runner_->BelongsToCurrentThread());
 
-  Disconnect();
+  DetachFromDesktop();
 }
 
-bool DesktopSessionProxy::Connect(IPC::PlatformFileForTransit desktop_process,
-                                  IPC::PlatformFileForTransit desktop_pipe) {
+bool DesktopSessionProxy::AttachToDesktop(
+    base::ProcessHandle desktop_process,
+    IPC::PlatformFileForTransit desktop_pipe) {
   DCHECK(caller_task_runner_->BelongsToCurrentThread());
+  DCHECK(!client_jid_.empty());
   DCHECK(!desktop_channel_);
+  DCHECK_EQ(desktop_process_, base::kNullProcessHandle);
+  DCHECK(!disconnect_callback_.is_null());
+
+  desktop_process_ = desktop_process;
 
 #if defined(OS_WIN)
   // On Windows: |desktop_process| is a valid handle, but |desktop_pipe| needs
   // to be duplicated from the desktop process.
-  desktop_process_.Set(desktop_process);
-
   base::win::ScopedHandle pipe;
   if (!DuplicateHandle(desktop_process_, desktop_pipe, GetCurrentProcess(),
                        pipe.Receive(), 0, FALSE, DUPLICATE_SAME_ACCESS)) {
@@ -82,48 +131,114 @@ bool DesktopSessionProxy::Connect(IPC::PlatformFileForTransit desktop_process,
     return false;
   }
 
-  // Connect to the desktop process.
-  desktop_channel_.reset(new IPC::ChannelProxy(IPC::ChannelHandle(pipe),
-                                               IPC::Channel::MODE_CLIENT,
-                                               this,
-                                               caller_task_runner_));
+  IPC::ChannelHandle desktop_channel_handle(pipe);
+
 #elif defined(OS_POSIX)
-  // On posix: both |desktop_process| and |desktop_pipe| are valid file
-  // descriptors.
-  DCHECK(desktop_process.auto_close);
+  // On posix: |desktop_pipe| is a valid file descriptor.
   DCHECK(desktop_pipe.auto_close);
 
-  base::ClosePlatformFile(desktop_process.fd);
+  IPC::ChannelHandle desktop_channel_handle("", desktop_pipe);
 
-  // Connect to the desktop process.
-  desktop_channel_.reset(new IPC::ChannelProxy(
-      IPC::ChannelHandle("", desktop_pipe),
-      IPC::Channel::MODE_CLIENT,
-      this,
-      caller_task_runner_));
 #else
 #error Unsupported platform.
 #endif
 
+  // Connect to the desktop process.
+  desktop_channel_.reset(new IPC::ChannelProxy(desktop_channel_handle,
+                                               IPC::Channel::MODE_CLIENT,
+                                               this,
+                                               io_task_runner_));
+
+  // Pass ID of the client (which is authenticated at this point) to the desktop
+  // session agent and start the agent.
+  SendToDesktop(new ChromotingNetworkDesktopMsg_StartSessionAgent(client_jid_));
   return true;
 }
 
-void DesktopSessionProxy::Disconnect() {
+void DesktopSessionProxy::DetachFromDesktop() {
   DCHECK(caller_task_runner_->BelongsToCurrentThread());
 
   desktop_channel_.reset();
 
-#if defined(OS_WIN)
-  desktop_process_.Close();
-#endif  // defined(OS_WIN)
+  if (desktop_process_ != base::kNullProcessHandle) {
+    base::CloseProcessHandle(desktop_process_);
+    desktop_process_ = base::kNullProcessHandle;
+  }
 
   shared_buffers_.clear();
 
   // Generate fake responses to keep the video capturer in sync.
   while (pending_capture_frame_requests_) {
     --pending_capture_frame_requests_;
-    PostCaptureCompleted(scoped_refptr<CaptureData>());
+    PostCaptureCompleted(scoped_refptr<media::ScreenCaptureData>());
   }
+}
+
+void DesktopSessionProxy::StartAudioCapturer(IpcAudioCapturer* audio_capturer) {
+  DCHECK(audio_capture_task_runner_->BelongsToCurrentThread());
+  DCHECK(audio_capturer_ == NULL);
+
+  audio_capturer_ = audio_capturer;
+}
+
+void DesktopSessionProxy::StopAudioCapturer() {
+  DCHECK(audio_capture_task_runner_->BelongsToCurrentThread());
+
+  audio_capturer_ = NULL;
+}
+
+void DesktopSessionProxy::InvalidateRegion(const SkRegion& invalid_region) {
+  if (!caller_task_runner_->BelongsToCurrentThread()) {
+    caller_task_runner_->PostTask(
+        FROM_HERE, base::Bind(&DesktopSessionProxy::InvalidateRegion, this,
+                              invalid_region));
+    return;
+  }
+
+  if (desktop_channel_) {
+    std::vector<SkIRect> invalid_rects;
+    for (SkRegion::Iterator i(invalid_region); !i.done(); i.next())
+      invalid_rects.push_back(i.rect());
+
+    SendToDesktop(
+        new ChromotingNetworkDesktopMsg_InvalidateRegion(invalid_rects));
+  }
+}
+
+void DesktopSessionProxy::CaptureFrame() {
+  if (!caller_task_runner_->BelongsToCurrentThread()) {
+    caller_task_runner_->PostTask(
+        FROM_HERE, base::Bind(&DesktopSessionProxy::CaptureFrame, this));
+    return;
+  }
+
+  if (desktop_channel_) {
+    ++pending_capture_frame_requests_;
+    SendToDesktop(new ChromotingNetworkDesktopMsg_CaptureFrame());
+  } else {
+    PostCaptureCompleted(scoped_refptr<media::ScreenCaptureData>());
+  }
+}
+
+void DesktopSessionProxy::StartVideoCapturer(
+    IpcVideoFrameCapturer* video_capturer) {
+  DCHECK(video_capture_task_runner_->BelongsToCurrentThread());
+  DCHECK(video_capturer_ == NULL);
+
+  video_capturer_ = video_capturer;
+}
+
+void DesktopSessionProxy::StopVideoCapturer() {
+  DCHECK(video_capture_task_runner_->BelongsToCurrentThread());
+
+  video_capturer_ = NULL;
+}
+
+void DesktopSessionProxy::DisconnectSession() {
+  DCHECK(caller_task_runner_->BelongsToCurrentThread());
+
+  // Disconnect the client session if it hasn't been disconnected yet.
+  disconnect_callback_.Run();
 }
 
 void DesktopSessionProxy::InjectClipboardEvent(
@@ -173,51 +288,15 @@ void DesktopSessionProxy::StartEventExecutor(
   client_clipboard_ = client_clipboard.Pass();
 }
 
-void DesktopSessionProxy::InvalidateRegion(const SkRegion& invalid_region) {
-  if (!caller_task_runner_->BelongsToCurrentThread()) {
-    caller_task_runner_->PostTask(
-        FROM_HERE, base::Bind(&DesktopSessionProxy::InvalidateRegion, this,
-                              invalid_region));
-    return;
-  }
-
-  std::vector<SkIRect> invalid_rects;
-  for (SkRegion::Iterator i(invalid_region); !i.done(); i.next())
-    invalid_rects.push_back(i.rect());
-
-  SendToDesktop(
-      new ChromotingNetworkDesktopMsg_InvalidateRegion(invalid_rects));
-}
-
-void DesktopSessionProxy::CaptureFrame() {
-  if (!caller_task_runner_->BelongsToCurrentThread()) {
-    caller_task_runner_->PostTask(
-        FROM_HERE, base::Bind(&DesktopSessionProxy::CaptureFrame, this));
-    return;
-  }
-
-  ++pending_capture_frame_requests_;
-  SendToDesktop(new ChromotingNetworkDesktopMsg_CaptureFrame());
-}
-
-void DesktopSessionProxy::StartVideoCapturer(
-    IpcVideoFrameCapturer* video_capturer) {
-  DCHECK(video_capture_task_runner_->BelongsToCurrentThread());
-  DCHECK(video_capturer_ == NULL);
-
-  video_capturer_ = video_capturer;
-}
-
-void DesktopSessionProxy::StopVideoCapturer() {
-  DCHECK(video_capture_task_runner_->BelongsToCurrentThread());
-
-  video_capturer_ = NULL;
-}
-
 DesktopSessionProxy::~DesktopSessionProxy() {
+  if (desktop_process_ != base::kNullProcessHandle) {
+    base::CloseProcessHandle(desktop_process_);
+    desktop_process_ = base::kNullProcessHandle;
+  }
 }
 
-scoped_refptr<SharedBuffer> DesktopSessionProxy::GetSharedBuffer(int id) {
+scoped_refptr<media::SharedBuffer> DesktopSessionProxy::GetSharedBuffer(
+    int id) {
   DCHECK(caller_task_runner_->BelongsToCurrentThread());
 
   SharedBuffers::const_iterator i = shared_buffers_.find(id);
@@ -225,8 +304,22 @@ scoped_refptr<SharedBuffer> DesktopSessionProxy::GetSharedBuffer(int id) {
     return i->second;
   } else {
     LOG(ERROR) << "Failed to find the shared buffer " << id;
-    return scoped_refptr<SharedBuffer>();
+    return scoped_refptr<media::SharedBuffer>();
   }
+}
+
+void DesktopSessionProxy::OnAudioPacket(const std::string& serialized_packet) {
+  DCHECK(caller_task_runner_->BelongsToCurrentThread());
+
+  // Parse the serialized audio packet. No further validation is done since
+  // the message was send by more privileged process.
+  scoped_ptr<AudioPacket> packet(new AudioPacket());
+  if (!packet->ParseFromString(serialized_packet)) {
+    LOG(ERROR) << "Failed to parse AudioPacket.";
+    return;
+  }
+
+  PostAudioPacket(packet.Pass());
 }
 
 void DesktopSessionProxy::OnCreateSharedBuffer(
@@ -235,12 +328,12 @@ void DesktopSessionProxy::OnCreateSharedBuffer(
     uint32 size) {
   DCHECK(caller_task_runner_->BelongsToCurrentThread());
 
-  scoped_refptr<SharedBuffer> shared_buffer;
+  scoped_refptr<media::SharedBuffer> shared_buffer;
 
 #if defined(OS_WIN)
-  shared_buffer = new SharedBuffer(id, handle, desktop_process_, size);
+  shared_buffer = new media::SharedBuffer(id, handle, desktop_process_, size);
 #elif defined(OS_POSIX)
-  shared_buffer = new SharedBuffer(id, handle, size);
+  shared_buffer = new media::SharedBuffer(id, handle, size);
 #else
 #error Unsupported platform.
 #endif
@@ -282,18 +375,15 @@ void DesktopSessionProxy::OnCaptureCompleted(
 
   // Assume that |serialized_data| is well formed because it was received from
   // a more privileged process.
-  scoped_refptr<CaptureData> capture_data;
-  scoped_refptr<SharedBuffer> shared_buffer =
+  scoped_refptr<media::ScreenCaptureData> capture_data;
+  scoped_refptr<media::SharedBuffer> shared_buffer =
       GetSharedBuffer(serialized_data.shared_buffer_id);
   CHECK(shared_buffer);
 
-  DataPlanes planes;
-  planes.data[0] = reinterpret_cast<uint8*>(shared_buffer->ptr());
-  planes.strides[0] = serialized_data.bytes_per_row;
-
-  capture_data = new CaptureData(
-      planes, serialized_data.dimensions,
-      static_cast<media::VideoFrame::Format>(serialized_data.pixel_format));
+  capture_data = new media::ScreenCaptureData(
+      reinterpret_cast<uint8*>(shared_buffer->ptr()),
+      serialized_data.bytes_per_row,
+      serialized_data.dimensions);
   capture_data->set_capture_time_ms(serialized_data.capture_time_ms);
   capture_data->set_client_sequence_number(
       serialized_data.client_sequence_number);
@@ -301,9 +391,9 @@ void DesktopSessionProxy::OnCaptureCompleted(
   capture_data->set_shared_buffer(shared_buffer);
 
   if (!serialized_data.dirty_region.empty()) {
-      capture_data->mutable_dirty_region().setRects(
-          &serialized_data.dirty_region[0],
-          serialized_data.dirty_region.size());
+    capture_data->mutable_dirty_region().setRects(
+        &serialized_data.dirty_region[0],
+        serialized_data.dirty_region.size());
   }
 
   --pending_capture_frame_requests_;
@@ -311,35 +401,41 @@ void DesktopSessionProxy::OnCaptureCompleted(
 }
 
 void DesktopSessionProxy::OnCursorShapeChanged(
-    const std::string& serialized_cursor_shape) {
+    const media::MouseCursorShape& cursor_shape) {
   DCHECK(caller_task_runner_->BelongsToCurrentThread());
-
-  scoped_ptr<protocol::CursorShapeInfo> cursor_shape(
-      new protocol::CursorShapeInfo());
-  if (!cursor_shape->ParseFromString(serialized_cursor_shape)) {
-    LOG(ERROR) << "Failed to parse protocol::CursorShapeInfo.";
-    return;
-  }
-
-  PostCursorShape(cursor_shape.Pass());
+  PostCursorShape(scoped_ptr<media::MouseCursorShape>(
+      new media::MouseCursorShape(cursor_shape)));
 }
 
 void DesktopSessionProxy::OnInjectClipboardEvent(
     const std::string& serialized_event) {
   DCHECK(caller_task_runner_->BelongsToCurrentThread());
 
-  protocol::ClipboardEvent event;
-  if (!event.ParseFromString(serialized_event)) {
-    LOG(ERROR) << "Failed to parse protocol::ClipboardEvent.";
+  if (client_clipboard_) {
+    protocol::ClipboardEvent event;
+    if (!event.ParseFromString(serialized_event)) {
+      LOG(ERROR) << "Failed to parse protocol::ClipboardEvent.";
+      return;
+    }
+
+    client_clipboard_->InjectClipboardEvent(event);
+  }
+}
+
+void DesktopSessionProxy::PostAudioPacket(scoped_ptr<AudioPacket> packet) {
+  if (!audio_capture_task_runner_->BelongsToCurrentThread()) {
+    audio_capture_task_runner_->PostTask(
+        FROM_HERE, base::Bind(&DesktopSessionProxy::PostAudioPacket,
+                              this, base::Passed(&packet)));
     return;
   }
 
-  client_clipboard_->InjectClipboardEvent(event);
+  if (audio_capturer_)
+    audio_capturer_->OnAudioPacket(packet.Pass());
 }
 
-
 void DesktopSessionProxy::PostCaptureCompleted(
-    scoped_refptr<CaptureData> capture_data) {
+    scoped_refptr<media::ScreenCaptureData> capture_data) {
   if (!video_capture_task_runner_->BelongsToCurrentThread()) {
     video_capture_task_runner_->PostTask(
         FROM_HERE, base::Bind(&DesktopSessionProxy::PostCaptureCompleted,
@@ -352,7 +448,7 @@ void DesktopSessionProxy::PostCaptureCompleted(
 }
 
 void DesktopSessionProxy::PostCursorShape(
-    scoped_ptr<protocol::CursorShapeInfo> cursor_shape) {
+    scoped_ptr<media::MouseCursorShape> cursor_shape) {
   if (!video_capture_task_runner_->BelongsToCurrentThread()) {
     video_capture_task_runner_->PostTask(
         FROM_HERE, base::Bind(&DesktopSessionProxy::PostCursorShape,

@@ -12,7 +12,7 @@
 #include "base/shared_memory.h"
 #include "chrome/browser/browser_process.h"
 #include "chrome/browser/printing/print_job_manager.h"
-#include "chrome/browser/printing/print_preview_tab_controller.h"
+#include "chrome/browser/printing/print_preview_dialog_controller.h"
 #include "chrome/browser/printing/print_view_manager.h"
 #include "chrome/browser/printing/printer_query.h"
 #include "chrome/browser/ui/webui/print_preview/print_preview_ui.h"
@@ -27,7 +27,7 @@
 using content::BrowserThread;
 using content::WebContents;
 
-DEFINE_WEB_CONTENTS_USER_DATA_KEY(printing::PrintPreviewMessageHandler)
+DEFINE_WEB_CONTENTS_USER_DATA_KEY(printing::PrintPreviewMessageHandler);
 
 namespace {
 
@@ -55,9 +55,8 @@ base::RefCountedBytes* GetDataFromHandle(base::SharedMemoryHandle handle,
     return NULL;
   }
 
-  char* preview_data = static_cast<char*>(shared_buf->memory());
-  std::vector<unsigned char> data(data_size);
-  memcpy(&data[0], preview_data, data_size);
+  unsigned char* data_begin = static_cast<unsigned char*>(shared_buf->memory());
+  std::vector<unsigned char> data(data_begin, data_begin + data_size);
   return base::RefCountedBytes::TakeVector(&data);
 }
 
@@ -75,8 +74,8 @@ PrintPreviewMessageHandler::~PrintPreviewMessageHandler() {
 }
 
 WebContents* PrintPreviewMessageHandler::GetPrintPreviewTab() {
-  PrintPreviewTabController* tab_controller =
-      PrintPreviewTabController::GetInstance();
+  PrintPreviewDialogController* tab_controller =
+      PrintPreviewDialogController::GetInstance();
   if (!tab_controller)
     return NULL;
 
@@ -91,14 +90,13 @@ PrintPreviewUI* PrintPreviewMessageHandler::GetPrintPreviewUI() {
 }
 
 void PrintPreviewMessageHandler::OnRequestPrintPreview(
-    bool source_is_modifiable, bool webnode_only) {
-  if (webnode_only) {
+    const PrintHostMsg_RequestPrintPreview_Params& params) {
+  if (params.webnode_only) {
     printing::PrintViewManager::FromWebContents(web_contents())->
         PrintPreviewForWebNode();
   }
-  PrintPreviewTabController::PrintPreview(web_contents());
-  PrintPreviewUI::SetSourceIsModifiable(GetPrintPreviewTab(),
-                                        source_is_modifiable);
+  PrintPreviewDialogController::PrintPreview(web_contents());
+  PrintPreviewUI::SetInitialParams(GetPrintPreviewTab(), params);
 }
 
 void PrintPreviewMessageHandler::OnDidGetPreviewPageCount(
@@ -167,7 +165,7 @@ void PrintPreviewMessageHandler::OnMetafileReadyForPrinting(
   // needs updating to accept the RefCountedMemory* base class.
   base::RefCountedBytes* data_bytes =
       GetDataFromHandle(params.metafile_data_handle, params.data_size);
-  if (!data_bytes)
+  if (!data_bytes || !data_bytes->size())
     return;
 
   print_preview_ui->SetPrintPreviewDataForIndex(COMPLETE_PREVIEW_DOCUMENT_INDEX,

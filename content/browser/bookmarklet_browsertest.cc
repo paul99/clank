@@ -22,10 +22,9 @@ class BookmarkletTest : public ContentBrowserTest {
 
   std::string GetBodyText() {
     std::string body_text;
-    EXPECT_TRUE(ExecuteJavaScriptAndExtractString(
-        shell()->web_contents()->GetRenderViewHost(),
-        L"",
-        L"window.domAutomationController.send(document.body.innerText);",
+    EXPECT_TRUE(ExecuteScriptAndExtractString(
+        shell()->web_contents(),
+        "window.domAutomationController.send(document.body.innerText);",
         &body_text));
     return body_text;
   }

@@ -6,8 +6,8 @@
 
 #import <QTKit/QTKit.h>
 
+#include "base/debug/crash_logging.h"
 #include "base/logging.h"
-#include "base/mac/crash_logging.h"
 #include "base/mac/scoped_nsexception_enabler.h"
 #include "media/video/capture/mac/video_capture_device_mac.h"
 #include "media/video/capture/video_capture_device.h"
@@ -106,7 +106,7 @@
 
     // This key can be used to check if video capture code was related to a
     // particular crash.
-    base::mac::SetCrashKeyValue(@"VideoCaptureDeviceQTKit", @"OpenedDevice");
+    base::debug::SetCrashKeyValue("VideoCaptureDeviceQTKit", "OpenedDevice");
 
     return YES;
   } else {
@@ -230,6 +230,9 @@
     // but VideoCaptureController::OnIncomingCapturedFrame() requires
     // it to do so.  Plumbing things through is intrusive, for now
     // just deliver an adjusted buffer.
+    // TODO(nick): This workaround could probably be eliminated by using
+    // VideoCaptureController::OnIncomingCapturedVideoFrame, which supports
+    // pitches.
     UInt8* addressToPass = static_cast<UInt8*>(baseAddress);
     size_t expectedBytesPerRow = frameWidth_ * 4;
     if (bytesPerRow > expectedBytesPerRow) {

@@ -13,6 +13,7 @@
 #include "base/logging.h"
 #include "base/message_loop.h"
 #include "base/metrics/histogram.h"
+#include "base/prefs/pref_service.h"
 #include "base/string_util.h"
 #include "base/stringprintf.h"
 #include "base/utf_string_conversions.h"
@@ -34,13 +35,11 @@
 #include "chrome/browser/chromeos/system/statistics_provider.h"
 #include "chrome/browser/google/google_util.h"
 #include "chrome/browser/policy/policy_service.h"
-#include "chrome/browser/prefs/pref_service.h"
 #include "chrome/browser/prefs/session_startup_pref.h"
 #include "chrome/browser/profiles/profile_manager.h"
 #include "chrome/common/chrome_notification_types.h"
 #include "chrome/common/chrome_switches.h"
 #include "chrome/common/chrome_version_info.h"
-#include "chrome/common/net/url_util.h"
 #include "chrome/common/pref_names.h"
 #include "chrome/common/url_constants.h"
 #include "chromeos/dbus/dbus_thread_manager.h"
@@ -50,6 +49,7 @@
 #include "content/public/browser/notification_service.h"
 #include "content/public/browser/notification_types.h"
 #include "content/public/browser/user_metrics.h"
+#include "google_apis/gaia/gaia_auth_util.h"
 #include "google_apis/gaia/google_service_auth_error.h"
 #include "grit/generated_resources.h"
 #include "net/http/http_auth_cache.h"
@@ -63,9 +63,6 @@
 namespace chromeos {
 
 namespace {
-
-// Url for setting up sync authentication.
-const char kSettingsSyncLoginURL[] = "chrome://settings/personal";
 
 // Major version where we still show GSG as "Release Notes" after the update.
 const long int kReleaseNotesTargetRelease = 19;
@@ -82,15 +79,6 @@ const char kGetStartedWebUrl[] =
 
 // Getting started guide application window size.
 const char kGSGAppWindowSize[] = "820,600";
-
-// Parameter to be added to GetStarted URL that contains board.
-const char kGetStartedBoardParam[] = "board";
-
-// Parameter to be added to GetStarted URL
-// when first user signs in for the first time (OOBE case).
-const char kGetStartedOwnerParam[] = "owner";
-const char kGetStartedOwnerParamValue[] = "true";
-const char kGetStartedInitialLocaleParam[] = "initial_locale";
 
 // URL for account creation.
 const char kCreateAccountURL[] =
@@ -152,7 +140,6 @@ ExistingUserController::ExistingUserController(LoginDisplayHost* host)
       num_login_attempts_(0),
       cros_settings_(CrosSettings::Get()),
       weak_factory_(this),
-      is_owner_login_(false),
       offline_failed_(false),
       is_login_in_progress_(false),
       password_changed_(false),
@@ -315,12 +302,38 @@ void ExistingUserController::CreateAccount() {
   LoginAsGuest();
 }
 
+void ExistingUserController::CreateLocallyManagedUser(
+    const string16& display_name,
+    const std::string& password) {
+  // TODO(nkostylev): Check that policy allows creation of such account type.
+  if (display_name.empty())
+    return;
+
+  // Disable clicking on other windows.
+  login_display_->SetUIEnabled(false);
+
+  LoginPerformer::Delegate* delegate = this;
+  if (login_performer_delegate_.get())
+    delegate = login_performer_delegate_.get();
+  // Only one instance of LoginPerformer should exist at a time.
+  login_performer_.reset(NULL);
+  login_performer_.reset(new LoginPerformer(delegate));
+  is_login_in_progress_ = true;
+  login_performer_->
+      CreateLocallyManagedUser(display_name, password);
+  // TODO(nkostylev): A11y message.
+}
+
 void ExistingUserController::CompleteLogin(const std::string& username,
                                            const std::string& password) {
   if (!host_) {
     // Complete login event was generated already from UI. Ignore notification.
     return;
   }
+
+  // Disable UI while loading user profile.
+  login_display_->SetUIEnabled(false);
+
   if (!time_init_.is_null()) {
     base::TimeDelta delta = base::Time::Now() - time_init_;
     UMA_HISTOGRAM_MEDIUM_TIMES("Login.PromptToCompleteLoginTime", delta);
@@ -329,9 +342,23 @@ void ExistingUserController::CompleteLogin(const std::string& username,
 
   host_->OnCompleteLogin();
 
+  // Do an ownership check now to avoid auto-enrolling if the device has
+  // already been owned.
+  DeviceSettingsService::Get()->GetOwnershipStatusAsync(
+      base::Bind(&ExistingUserController::CompleteLoginInternal,
+                 weak_factory_.GetWeakPtr(),
+                 username, password));
+}
+
+void ExistingUserController::CompleteLoginInternal(
+    const std::string& username,
+    const std::string& password,
+    DeviceSettingsService::OwnershipStatus ownership_status,
+    bool is_owner) {
   // Auto-enrollment must have made a decision by now. It's too late to enroll
   // if the protocol isn't done at this point.
-  if (do_auto_enrollment_) {
+  if (do_auto_enrollment_ &&
+      ownership_status == DeviceSettingsService::OWNERSHIP_NONE) {
     VLOG(1) << "Forcing auto-enrollment before completing login";
     // The only way to get out of the enrollment screen from now on is to either
     // complete enrollment, or opt-out of it. So this controller shouldn't force
@@ -339,31 +366,21 @@ void ExistingUserController::CompleteLogin(const std::string& username,
     do_auto_enrollment_ = false;
     auto_enrollment_username_ = username;
     resume_login_callback_ = base::Bind(
-        &ExistingUserController::CompleteLoginInternal,
-        base::Unretained(this),
-        username,
-        password);
+        &ExistingUserController::PerformLogin,
+        weak_factory_.GetWeakPtr(),
+        username, password, LoginPerformer::AUTH_MODE_EXTENSION);
     ShowEnrollmentScreen(true, username);
+    // Enable UI for the enrollment screen. SetUIEnabled(true) will post a
+    // request to show the sign-in screen again when invoked at the sign-in
+    // screen; invoke SetUIEnabled() after navigating to the enrollment screen.
+    login_display_->SetUIEnabled(true);
   } else {
-    CompleteLoginInternal(username, password);
+    PerformLogin(username, password, LoginPerformer::AUTH_MODE_EXTENSION);
   }
 }
 
-void ExistingUserController::CompleteLoginInternal(std::string username,
-                                                   std::string password) {
-  // Disable UI while loading user profile.
-  login_display_->SetUIEnabled(false);
-
-  resume_login_callback_.Reset();
-
-  DeviceSettingsService::Get()->GetOwnershipStatusAsync(
-      base::Bind(&ExistingUserController::PerformLogin,
-                 weak_factory_.GetWeakPtr(), username, password,
-                 LoginPerformer::AUTH_MODE_EXTENSION));
-}
-
 string16 ExistingUserController::GetConnectedNetworkName() {
-  return GetCurrentNetworkName(CrosLibrary::Get()->GetNetworkLibrary());
+  return GetCurrentNetworkName();
 }
 
 void ExistingUserController::Login(const std::string& username,
@@ -383,21 +400,16 @@ void ExistingUserController::Login(const std::string& username,
     online_succeeded_for_.clear();
   }
   num_login_attempts_++;
-
-  DeviceSettingsService::Get()->GetOwnershipStatusAsync(
-      base::Bind(&ExistingUserController::PerformLogin,
-                 weak_factory_.GetWeakPtr(), username, password,
-                 LoginPerformer::AUTH_MODE_INTERNAL));
+  PerformLogin(username, password, LoginPerformer::AUTH_MODE_INTERNAL);
 }
 
 void ExistingUserController::PerformLogin(
-    const std::string& username,
-    const std::string& password,
-    LoginPerformer::AuthorizationMode auth_mode,
-    DeviceSettingsService::OwnershipStatus ownership_status,
-    bool is_owner) {
-  // If the device is not owned yet, successfully logged in user will be owner.
-  is_owner_login_ = ownership_status == DeviceSettingsService::OWNERSHIP_NONE;
+    std::string username,
+    std::string password,
+    LoginPerformer::AuthorizationMode auth_mode) {
+  // Disable UI while loading user profile.
+  login_display_->SetUIEnabled(false);
+  resume_login_callback_.Reset();
 
   // Use the same LoginPerformer for subsequent login as it has state
   // such as Authenticator instance.
@@ -411,7 +423,12 @@ void ExistingUserController::PerformLogin(
   }
 
   is_login_in_progress_ = true;
-  login_performer_->PerformLogin(username, password, auth_mode);
+  if (gaia::ExtractDomainName(username) ==
+          UserManager::kLocallyManagedUserDomain) {
+    login_performer_->LoginAsLocallyManagedUser(username, password);
+  } else {
+    login_performer_->PerformLogin(username, password, auth_mode);
+  }
   accessibility::MaybeSpeak(
       l10n_util::GetStringUTF8(IDS_CHROMEOS_ACC_LOGIN_SIGNING_IN));
 }
@@ -548,6 +565,11 @@ void ExistingUserController::SetDisplayEmail(const std::string& email) {
   display_email_ = email;
 }
 
+void ExistingUserController::ShowWrongHWIDScreen() {
+  host_->StartWizard(WizardController::kWrongHWIDScreenName, NULL);
+  login_display_->OnFadeOut();
+}
+
 void ExistingUserController::Signout() {
   NOTREACHED();
 }
@@ -672,10 +694,6 @@ void ExistingUserController::OnLoginSuccess(
     bool using_oauth) {
   is_login_in_progress_ = false;
   offline_failed_ = false;
-  bool known_user = UserManager::Get()->IsKnownUser(username);
-  bool skip_image_screen =
-      WizardController::default_controller()->skip_user_image_selection();
-  ready_for_browser_launch_ = known_user || skip_image_screen;
 
   bool has_cookies =
       login_performer_->auth_mode() == LoginPerformer::AUTH_MODE_EXTENSION;
@@ -712,7 +730,8 @@ void ExistingUserController::OnProfilePrepared(Profile* profile) {
   // Reenable clicking on other windows and status area.
   login_display_->SetUIEnabled(true);
 
-  if (!ready_for_browser_launch_) {
+  if (UserManager::Get()->IsCurrentUserNew() &&
+      !WizardController::default_controller()->skip_post_login_screens()) {
     // Don't specify start URLs if the administrator has configured the start
     // URLs via policy.
     if (!SessionStartupPref::TypeIsManaged(profile->GetPrefs()))
@@ -720,13 +739,12 @@ void ExistingUserController::OnProfilePrepared(Profile* profile) {
 #ifndef NDEBUG
     if (CommandLine::ForCurrentProcess()->HasSwitch(
           switches::kOobeSkipPostLogin)) {
-      ready_for_browser_launch_ = true;
       LoginUtils::Get()->DoBrowserLaunch(profile, host_);
       host_ = NULL;
     } else {
 #endif
       ActivateWizard(WizardController::IsDeviceRegistered() ?
-          WizardController::kUserImageScreenName :
+          WizardController::kTermsOfServiceScreenName :
           WizardController::kRegistrationScreenName);
 #ifndef NDEBUG
     }
@@ -805,6 +823,7 @@ void ExistingUserController::WhiteListCheckFailed(const std::string& email) {
 
   // Reenable clicking on other windows and status area.
   login_display_->SetUIEnabled(true);
+  login_display_->ShowSigninUI(email);
 
   if (login_status_consumer_) {
     login_status_consumer_->OnLoginFailure(LoginFailure(
@@ -883,7 +902,8 @@ void ExistingUserController::InitializeStartUrls() const {
           start_urls.push_back(url);
       }
     }
-  } else {
+  // Skip the default first-run behavior for public accounts.
+  } else if (!UserManager::Get()->IsLoggedInAsPublicAccount()) {
     if (prefs->GetBoolean(prefs::kSpokenFeedbackEnabled)) {
       const char* url = kChromeVoxTutorialURLPattern;
       const std::string current_locale =
@@ -999,9 +1019,7 @@ void ExistingUserController::ShowGaiaPasswordChanged(
   // changed.
   UserManager::Get()->SaveUserOAuthStatus(
       username,
-      CommandLine::ForCurrentProcess()->HasSwitch(switches::kForceOAuth1) ?
-          User::OAUTH1_TOKEN_STATUS_INVALID :
-          User::OAUTH2_TOKEN_STATUS_INVALID);
+      User::OAUTH2_TOKEN_STATUS_INVALID);
 
   login_display_->SetUIEnabled(true);
   login_display_->ShowGaiaPasswordChanged(username);

@@ -10,14 +10,15 @@
 #include "base/compiler_specific.h"
 #include "base/debug/alias.h"
 #include "base/lazy_instance.h"
-#include "base/string_number_conversions.h"
 #include "base/string_split.h"
-#include "base/string_tokenizer.h"
+#include "base/strings/string_number_conversions.h"
+#include "base/strings/string_tokenizer.h"
 #include "base/threading/thread_restrictions.h"
 #include "build/build_config.h"
 #include "chrome/browser/metrics/metrics_service.h"
 #include "chrome/common/chrome_switches.h"
 #include "chrome/common/chrome_version_info.h"
+#include "chrome/common/dump_without_crashing.h"
 #include "chrome/common/logging_chrome.h"
 
 #if defined(OS_WIN)
@@ -542,7 +543,7 @@ void ThreadWatcherList::ParseCommandLine(
         command_line.GetSwitchValueASCII(switches::kCrashOnHangThreads);
     has_command_line_overwrite = true;
   }
-  StringTokenizer tokens(crash_on_hang_thread_names, ",");
+  base::StringTokenizer tokens(crash_on_hang_thread_names, ",");
   std::vector<std::string> values;
   while (tokens.GetNext()) {
     const std::string& token = tokens.token();
@@ -811,7 +812,7 @@ class StartupWatchDogThread : public base::Watchdog {
   // Alarm is called if the time expires after an Arm() without someone calling
   // Disarm(). When Alarm goes off, in release mode we get the crash dump
   // without crashing and in debug mode we break into the debugger.
-  virtual void Alarm() {
+  virtual void Alarm() OVERRIDE {
 #ifndef NDEBUG
     DCHECK(false);
 #else
@@ -835,7 +836,7 @@ class ShutdownWatchDogThread : public base::Watchdog {
 
   // Alarm is called if the time expires after an Arm() without someone calling
   // Disarm(). We crash the browser if this method is called.
-  virtual void Alarm() {
+  virtual void Alarm() OVERRIDE {
     CHECK(false);
   }
 

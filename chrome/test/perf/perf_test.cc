@@ -7,8 +7,8 @@
 #include <stdio.h>
 
 #include "base/logging.h"
-#include "base/string_number_conversions.h"
 #include "base/stringprintf.h"
+#include "base/strings/string_number_conversions.h"
 #include "chrome/test/base/chrome_process_util.h"
 
 namespace {
@@ -38,8 +38,10 @@ void PrintResultsImpl(const std::string& measurement,
                       const std::string& suffix,
                       const std::string& units,
                       bool important) {
+  fflush(stdout);
   printf("%s", ResultsToString(measurement, modifier, trace, values,
                                prefix, suffix, units, important).c_str());
+  fflush(stdout);
 }
 
 }  // namespace

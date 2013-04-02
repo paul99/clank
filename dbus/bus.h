@@ -201,6 +201,8 @@ class CHROME_DBUS_EXPORT Bus : public base::RefCountedThreadSafe<Bus> {
   // - the requested service name.
   // - whether ownership has been obtained or not.
   typedef base::Callback<void (const std::string&, bool)> OnOwnershipCallback;
+  // TODO(satorux): Remove the service name parameter as the caller of
+  // RequestOwnership() knows the service name.
 
   // Gets the object proxy for the given service name and the object path.
   // The caller must not delete the returned object.
@@ -229,6 +231,42 @@ class CHROME_DBUS_EXPORT Bus : public base::RefCountedThreadSafe<Bus> {
       const std::string& service_name,
       const ObjectPath& object_path,
       int options);
+
+  // Removes the previously created object proxy for the given service
+  // name and the object path and releases its memory.
+  //
+  // If and object proxy for the given service name and object was
+  // created with GetObjectProxy, this function removes it from the
+  // bus object and detaches the ObjectProxy, invalidating any pointer
+  // previously acquired for it with GetObjectProxy. A subsequent call
+  // to GetObjectProxy will return a new object.
+  //
+  // All the object proxies are detached from remote objects at the
+  // shutdown time of the bus, but they can be detached early to reduce
+  // memory footprint and used match rules for the bus connection.
+  //
+  // |service_name| looks like "org.freedesktop.NetworkManager", and
+  // |object_path| looks like "/org/freedesktop/NetworkManager/Devices/0".
+  // |callback| is called when the object proxy is successfully removed and
+  // detached.
+  //
+  // The function returns true when there is an object proxy matching the
+  // |service_name| and |object_path| to remove, and calls |callback| when it
+  // is removed. Otherwise, it returns false and the |callback| function is
+  // never called. The |callback| argument must not be null.
+  //
+  // Must be called in the origin thread.
+  virtual bool RemoveObjectProxy(const std::string& service_name,
+                                 const ObjectPath& object_path,
+                                 const base::Closure& callback);
+
+  // Same as above, but also takes a bitfield of ObjectProxy::Options.
+  // See object_proxy.h for available options.
+  virtual bool RemoveObjectProxyWithOptions(
+      const std::string& service_name,
+      const ObjectPath& object_path,
+      int options,
+      const base::Closure& callback);
 
   // Gets the exported object for the given object path.
   // The caller must not delete the returned object.
@@ -261,6 +299,9 @@ class CHROME_DBUS_EXPORT Bus : public base::RefCountedThreadSafe<Bus> {
   // - Unregisters the object paths
   // - Releases the service names
   // - Closes the connection to dbus-daemon.
+  //
+  // This function can be called multiple times and it is no-op for the 2nd time
+  // calling.
   //
   // BLOCKING CALL.
   virtual void ShutdownAndBlock();
@@ -367,8 +408,8 @@ class CHROME_DBUS_EXPORT Bus : public base::RefCountedThreadSafe<Bus> {
   // Instead, you should check if an incoming message is what you are
   // interested in, in the filter functions.
   //
-  // The same match rule can be added more than once, but ignored from the
-  // second time.
+  // The same match rule can be added more than once and should be removed
+  // as many times as it was added.
   //
   // The match rule looks like:
   // "type='signal', interface='org.chromium.SomeInterface'".
@@ -381,9 +422,11 @@ class CHROME_DBUS_EXPORT Bus : public base::RefCountedThreadSafe<Bus> {
   virtual void AddMatch(const std::string& match_rule, DBusError* error);
 
   // Removes the match rule previously added by AddMatch().
+  // Returns false if the requested match rule is unknown or has already been
+  // removed. Otherwise, returns true and sets |error| accordingly.
   //
   // BLOCKING CALL.
-  virtual void RemoveMatch(const std::string& match_rule, DBusError* error);
+  virtual bool RemoveMatch(const std::string& match_rule, DBusError* error);
 
   // Tries to register the object path. Returns true on success.
   // Returns false if the object path is already registered.
@@ -449,6 +492,10 @@ class CHROME_DBUS_EXPORT Bus : public base::RefCountedThreadSafe<Bus> {
  private:
   friend class base::RefCountedThreadSafe<Bus>;
 
+  // Helper function used for RemoveObjectProxy().
+  void RemoveObjectProxyInternal(scoped_refptr<dbus::ObjectProxy> object_proxy,
+                                 const base::Closure& callback);
+
   // Helper function used for UnregisterExportedObject().
   void UnregisterExportedObjectInternal(
       scoped_refptr<dbus::ExportedObject> exported_object);
@@ -459,11 +506,6 @@ class CHROME_DBUS_EXPORT Bus : public base::RefCountedThreadSafe<Bus> {
   // Helper function used for RequestOwnership().
   void RequestOwnershipInternal(const std::string& service_name,
                                 OnOwnershipCallback on_ownership_callback);
-
-  // Called when the ownership request is completed.
-  void OnOwnership(OnOwnershipCallback on_ownership_callback,
-                   const std::string& service_name,
-                   bool success);
 
   // Processes the all incoming data to the connection, if any.
   //
@@ -495,6 +537,9 @@ class CHROME_DBUS_EXPORT Bus : public base::RefCountedThreadSafe<Bus> {
   void OnDispatchStatusChanged(DBusConnection* connection,
                                DBusDispatchStatus status);
 
+  // Called when the connection is diconnected.
+  void OnConnectionDisconnected(DBusConnection* connection);
+
   // Callback helper functions. Redirects to the corresponding member function.
   static dbus_bool_t OnAddWatchThunk(DBusWatch* raw_watch, void* data);
   static void OnRemoveWatchThunk(DBusWatch* raw_watch, void* data);
@@ -505,6 +550,13 @@ class CHROME_DBUS_EXPORT Bus : public base::RefCountedThreadSafe<Bus> {
   static void OnDispatchStatusChangedThunk(DBusConnection* connection,
                                            DBusDispatchStatus status,
                                            void* data);
+
+  // Calls OnConnectionDisconnected if the Diconnected signal is received.
+  static DBusHandlerResult OnConnectionDisconnectedFilter(
+      DBusConnection *connection,
+      DBusMessage *message,
+      void *user_data);
+
   const BusType bus_type_;
   const ConnectionType connection_type_;
   scoped_refptr<base::MessageLoopProxy> dbus_thread_message_loop_proxy_;
@@ -517,7 +569,9 @@ class CHROME_DBUS_EXPORT Bus : public base::RefCountedThreadSafe<Bus> {
   std::set<std::string> owned_service_names_;
   // The following sets are used to check if rules/object_paths/filters
   // are properly cleaned up before destruction of the bus object.
-  std::set<std::string> match_rules_added_;
+  // Since it's not an error to add the same match rule twice, the repeated
+  // match rules are counted in a map.
+  std::map<std::string, int> match_rules_added_;
   std::set<ObjectPath> registered_object_paths_;
   std::set<std::pair<DBusHandleMessageFunction, void*> >
       filter_functions_added_;

@@ -19,6 +19,7 @@ class Value;
 }
 
 namespace google_apis {
+class AppList;
 class AccountMetadataFeed;
 class ResourceList;
 }
@@ -85,12 +86,10 @@ class DriveFeedLoader {
   //
   // See comments at DriveFeedProcessor::ApplyFeeds() for
   // |is_delta_feed| and |root_feed_changestamp|.
-  // |root_resource_id| is used for Drive API.
   // |update_finished_callback| must not be null.
   void UpdateFromFeed(const ScopedVector<google_apis::ResourceList>& feed_list,
                       bool is_delta_feed,
                       int64 root_feed_changestamp,
-                      const std::string& root_resource_id,
                       const base::Closure& update_finished_callback);
 
   // Indicates whether there is a feed refreshing server request is in flight.
@@ -121,11 +120,19 @@ class DriveFeedLoader {
       google_apis::GDataErrorCode status,
       scoped_ptr<google_apis::AccountMetadataFeed> account_metadata);
 
-  // Callback for handling response from |DriveAPIService::GetApplicationInfo|.
+  // Callback for DriveResourceMetadata::GetLargestChangestamp.
+  // Compares |remote_changestamp| and |local_changestamp| and triggers
+  // LoadFromServer if necessary.
+  void CompareChangestampsAndLoadIfNeeded(
+      const FileOperationCallback& callback,
+      int64 remote_changestamp,
+      int64 local_changestamp);
+
+  // Callback for handling response from |DriveAPIService::GetAppList|.
   // If the application list is successfully parsed, passes the list to
   // Drive webapps registry.
-  void OnGetApplicationList(google_apis::GDataErrorCode status,
-                            scoped_ptr<base::Value> json);
+  void OnGetAppList(google_apis::GDataErrorCode status,
+                    scoped_ptr<google_apis::AppList> app_list);
 
   // Callback for handling feed content fetching while searching for file info.
   // This callback is invoked after async feed fetch operation that was

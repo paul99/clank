@@ -14,7 +14,7 @@
 #include "base/metrics/histogram.h"
 #include "base/metrics/histogram_samples.h"
 #include "base/stringprintf.h"
-#include "base/string_tokenizer.h"
+#include "base/strings/string_tokenizer.h"
 #include "base/threading/thread.h"
 #include "base/time.h"
 #include "googleurl/src/gurl.h"
@@ -1725,11 +1725,11 @@ TEST_F(CookieMonsterTest, MAYBE_GarbageCollectionTriggers) {
   // time and size of store to make sure we only get rid of cookies when
   // we really should.
   const struct TestCase {
-    int num_cookies;
-    int num_old_cookies;
-    int expected_initial_cookies;
+    size_t num_cookies;
+    size_t num_old_cookies;
+    size_t expected_initial_cookies;
     // Indexed by ExpiryAndKeyScheme
-    int expected_cookies_after_set;
+    size_t expected_cookies_after_set;
   } test_cases[] = {
     {
       // A whole lot of recent cookies; gc shouldn't happen.
@@ -1765,13 +1765,11 @@ TEST_F(CookieMonsterTest, MAYBE_GarbageCollectionTriggers) {
         CreateMonsterFromStoreForGC(
             test_case->num_cookies, test_case->num_old_cookies,
             CookieMonster::kSafeFromGlobalPurgeDays * 2));
-    EXPECT_EQ(test_case->expected_initial_cookies,
-              static_cast<int>(GetAllCookies(cm).size()))
+    EXPECT_EQ(test_case->expected_initial_cookies, GetAllCookies(cm).size())
         << "For test case " << ci;
     // Will trigger GC
     SetCookie(cm, GURL("http://newdomain.com"), "b=2");
-    EXPECT_EQ(test_case->expected_cookies_after_set,
-              static_cast<int>((GetAllCookies(cm).size())))
+    EXPECT_EQ(test_case->expected_cookies_after_set, GetAllCookies(cm).size())
         << "For test case " << ci;
   }
 }
@@ -1812,24 +1810,25 @@ class FlushablePersistentStore : public CookieMonster::PersistentCookieStore {
  public:
   FlushablePersistentStore() : flush_count_(0) {}
 
-  void Load(const LoadedCallback& loaded_callback) {
+  virtual void Load(const LoadedCallback& loaded_callback) OVERRIDE {
     std::vector<CanonicalCookie*> out_cookies;
     MessageLoop::current()->PostTask(FROM_HERE,
       base::Bind(&net::LoadedCallbackTask::Run,
                  new net::LoadedCallbackTask(loaded_callback, out_cookies)));
   }
 
-  void LoadCookiesForKey(const std::string& key,
-      const LoadedCallback& loaded_callback) {
+  virtual void LoadCookiesForKey(
+      const std::string& key,
+      const LoadedCallback& loaded_callback) OVERRIDE {
     Load(loaded_callback);
   }
 
-  void AddCookie(const CanonicalCookie&) {}
-  void UpdateCookieAccessTime(const CanonicalCookie&) {}
-  void DeleteCookie(const CanonicalCookie&) {}
-  void SetForceKeepSessionState() {}
+  virtual void AddCookie(const CanonicalCookie&) OVERRIDE {}
+  virtual void UpdateCookieAccessTime(const CanonicalCookie&) OVERRIDE {}
+  virtual void DeleteCookie(const CanonicalCookie&) OVERRIDE {}
+  virtual void SetForceKeepSessionState() OVERRIDE {}
 
-  void Flush(const base::Closure& callback) {
+  virtual void Flush(const base::Closure& callback) OVERRIDE {
     ++flush_count_;
     if (!callback.is_null())
       callback.Run();
@@ -1924,7 +1923,7 @@ TEST_F(CookieMonsterTest, HistogramCheck) {
   // Should match call in InitializeHistograms, but doesn't really matter
   // since the histogram should have been initialized by the CM construction
   // above.
-  base::Histogram* expired_histogram =
+  base::HistogramBase* expired_histogram =
       base::Histogram::FactoryGet(
           "Cookie.ExpirationDurationMinutes", 1, 10 * 365 * 24 * 60, 50,
           base::Histogram::kUmaTargetedHistogramFlag);

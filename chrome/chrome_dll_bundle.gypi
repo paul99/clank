@@ -56,11 +56,8 @@
 
     'app/framework-Info.plist',
     '<@(mac_all_xibs)',
-    'app/theme/balloon_wrench.pdf',
-    'app/theme/chevron.pdf',
     'app/theme/find_next_Template.pdf',
     'app/theme/find_prev_Template.pdf',
-    'app/theme/menu_hierarchy_arrow.pdf',
     'app/theme/menu_overflow_down.pdf',
     'app/theme/menu_overflow_up.pdf',
     'browser/mac/install.sh',
@@ -84,7 +81,7 @@
     # dependency here. flash_player.gyp will copy the Flash bundle
     # into PRODUCT_DIR.
     '../third_party/adobe/flash/flash_player.gyp:flapper_binaries',
-    '../third_party/widevine/cdm/widevine_cdm.gyp:widevinecdmplugin',
+    '../third_party/widevine/cdm/widevine_cdm.gyp:widevinecdmadapter',
     'chrome_resources.gyp:packed_extra_resources',
     'chrome_resources.gyp:packed_resources',
   ],

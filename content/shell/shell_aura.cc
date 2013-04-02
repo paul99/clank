@@ -29,10 +29,8 @@
 
 #if defined(OS_CHROMEOS)
 #include "chromeos/dbus/dbus_thread_manager.h"
-#include "content/shell/shell_stacking_client_ash.h"
+#include "content/shell/minimal_ash.h"
 #include "ui/aura/test/test_screen.h"
-#else
-#include "ui/views/widget/desktop_aura/desktop_stacking_client.h"
 #endif
 
 // ViewDelegate implementation for aura content shell
@@ -274,30 +272,30 @@ using views::ShellWindowDelegateView;
 
 namespace content {
 
-aura::client::StackingClient* Shell::stacking_client_ = NULL;
+#if defined(OS_CHROMEOS)
+MinimalAsh* Shell::minimal_ash_ = NULL;
+#endif
 views::ViewsDelegate* Shell::views_delegate_ = NULL;
 
 // static
-void Shell::PlatformInitialize() {
+void Shell::PlatformInitialize(const gfx::Size& default_window_size) {
 #if defined(OS_CHROMEOS)
   chromeos::DBusThreadManager::Initialize();
-#endif
-#if defined(OS_CHROMEOS)
-  stacking_client_ = new content::ShellStackingClientAsh();
   gfx::Screen::SetScreenInstance(
       gfx::SCREEN_TYPE_NATIVE, new aura::TestScreen);
+  minimal_ash_ = new content::MinimalAsh(default_window_size);
 #else
-  stacking_client_ = new views::DesktopStackingClient();
   gfx::Screen::SetScreenInstance(
       gfx::SCREEN_TYPE_NATIVE, views::CreateDesktopScreen());
 #endif
-  aura::client::SetStackingClient(stacking_client_);
   views_delegate_ = new ShellViewsDelegateAura();
 }
 
 void Shell::PlatformExit() {
-  if (stacking_client_)
-    delete stacking_client_;
+#if defined(OS_CHROMEOS)
+  if (minimal_ash_)
+    delete minimal_ash_;
+#endif
   if (views_delegate_)
     delete views_delegate_;
 #if defined(OS_CHROMEOS)
@@ -334,10 +332,22 @@ void Shell::PlatformSetIsLoading(bool loading) {
 }
 
 void Shell::PlatformCreateWindow(int width, int height) {
+#if defined(OS_CHROMEOS)
+  window_widget_ =
+      views::Widget::CreateWindowWithContextAndBounds(
+          new ShellWindowDelegateView(this),
+          minimal_ash_->GetDefaultParent(NULL, NULL, gfx::Rect()),
+          gfx::Rect(0, 0, width, height));
+#else
   window_widget_ =
       views::Widget::CreateWindowWithBounds(new ShellWindowDelegateView(this),
                gfx::Rect(0, 0, width, height));
+#endif
+
   window_ = window_widget_->GetNativeWindow();
+  // Call ShowRootWindow on RootWindow created by MinimalAsh without
+  // which XWindow owned by RootWindow doesn't get mapped.
+  window_->GetRootWindow()->ShowRootWindow();
   window_widget_->Show();
 }
 

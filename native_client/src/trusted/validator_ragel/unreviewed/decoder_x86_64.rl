@@ -23,8 +23,6 @@
 #include "native_client/src/shared/utils/types.h"
 #include "native_client/src/trusted/validator_ragel/unreviewed/decoder_internal.h"
 
-#include "native_client/src/trusted/validator_ragel/gen/decoder_x86_64_instruction_consts.h"
-
 /*
  * These prefixes are only useful in AMD64 mode, but they will “cleaned up” by
  * decoder's cleanup procedure in IA32 mode anyway.  That's why we define them
@@ -133,7 +131,6 @@ int DecodeChunkAMD64(const uint8_t *data, size_t size,
   SET_BRANCH_NOT_TAKEN(FALSE);
   SET_BRANCH_TAKEN(FALSE);
   SET_ATT_INSTRUCTION_SUFFIX(NULL);
-  instruction.prefix.data16_spurious = FALSE;
   instruction.prefix.rex_b_spurious = FALSE;
   instruction.prefix.rex_x_spurious = FALSE;
   instruction.prefix.rex_r_spurious = FALSE;

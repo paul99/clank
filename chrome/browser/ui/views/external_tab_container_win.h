@@ -34,10 +34,6 @@ class TabContentsContainer;
 class RenderViewContextMenuViews;
 struct NavigationInfo;
 
-namespace content {
-class WebIntentsDispatcher;
-}
-
 namespace ui {
 class ViewProp;
 }
@@ -145,8 +141,8 @@ class ExternalTabContainerWin : public ExternalTabContainer,
   virtual void BeforeUnloadFired(content::WebContents* tab,
                                  bool proceed,
                                  bool* proceed_to_fire_unload) OVERRIDE;
-  virtual content::JavaScriptDialogCreator*
-      GetJavaScriptDialogCreator() OVERRIDE;
+  virtual content::JavaScriptDialogManager*
+      GetJavaScriptDialogManager() OVERRIDE;
   virtual void ShowRepostFormWarningDialog(
       content::WebContents* source) OVERRIDE;
   virtual void RunFileChooser(
@@ -154,20 +150,13 @@ class ExternalTabContainerWin : public ExternalTabContainer,
       const content::FileChooserParams& params) OVERRIDE;
   virtual void EnumerateDirectory(content::WebContents* tab,
                                   int request_id,
-                                  const FilePath& path) OVERRIDE;
+                                  const base::FilePath& path) OVERRIDE;
   virtual void JSOutOfMemory(content::WebContents* tab);
   virtual void RegisterProtocolHandler(content::WebContents* tab,
                                        const std::string& protocol,
                                        const GURL& url,
                                        const string16& title,
                                        bool user_gesture) OVERRIDE;
-  virtual void RegisterIntentHandler(
-      content::WebContents* tab,
-      const webkit_glue::WebIntentServiceData& data,
-      bool user_gesture) OVERRIDE;
-  virtual void WebIntentDispatch(
-      content::WebContents* tab,
-      content::WebIntentsDispatcher* intents_dispatcher) OVERRIDE;
   virtual void FindReply(content::WebContents* tab,
                          int request_id,
                          int number_of_matches,
@@ -176,12 +165,12 @@ class ExternalTabContainerWin : public ExternalTabContainer,
                          bool final_update) OVERRIDE;
   virtual void RequestMediaAccessPermission(
       content::WebContents* web_contents,
-      const content::MediaStreamRequest* request,
+      const content::MediaStreamRequest& request,
       const content::MediaResponseCallback& callback) OVERRIDE;
   virtual bool RequestPpapiBrokerPermission(
       content::WebContents* web_contents,
       const GURL& url,
-      const FilePath& plugin_path,
+      const base::FilePath& plugin_path,
       const base::Callback<void(bool)>& callback) OVERRIDE;
 
   void RegisterRenderViewHost(content::RenderViewHost* render_view_host);

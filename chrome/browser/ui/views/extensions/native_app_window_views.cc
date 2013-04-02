@@ -8,12 +8,12 @@
 #include "chrome/browser/favicon/favicon_tab_helper.h"
 #include "chrome/browser/ui/views/extensions/extension_keybinding_registry_views.h"
 #include "chrome/browser/ui/views/extensions/shell_window_frame_view.h"
-#include "chrome/common/extensions/draggable_region.h"
 #include "chrome/common/extensions/extension.h"
 #include "content/public/browser/render_view_host.h"
 #include "content/public/browser/render_widget_host_view.h"
 #include "content/public/browser/web_contents.h"
 #include "content/public/browser/web_contents_view.h"
+#include "extensions/common/draggable_region.h"
 #include "ui/views/controls/webview/webview.h"
 #include "ui/views/widget/widget.h"
 #include "ui/views/window/non_client_view.h"
@@ -26,9 +26,12 @@
 #endif
 
 #if defined(USE_ASH)
+#include "ash/screen_ash.h"
+#include "ash/shell.h"
 #include "ash/wm/custom_frame_view_ash.h"
 #include "ash/wm/panel_frame_view.h"
 #include "chrome/browser/ui/ash/ash_util.h"
+#include "ui/aura/root_window.h"
 #endif
 
 namespace {
@@ -46,7 +49,9 @@ NativeAppWindowViews::NativeAppWindowViews(
       web_view_(NULL),
       window_(NULL),
       is_fullscreen_(false),
-      frameless_(create_params.frame == ShellWindow::FRAME_NONE) {
+      frameless_(create_params.frame == ShellWindow::FRAME_NONE),
+      transparent_background_(create_params.transparent_background) {
+  Observe(shell_window_->web_contents());
   minimum_size_ = create_params.minimum_size;
   maximum_size_ = create_params.maximum_size;
 
@@ -77,6 +82,9 @@ void NativeAppWindowViews::InitializeDefaultWindow(
   init_params.delegate = this;
   init_params.remove_standard_frame = true;
   init_params.use_system_default_icon = true;
+  // TODO(erg): Conceptually, these are toplevel windows, but we theoretically
+  // could plumb context through to here in some cases.
+  init_params.top_level = true;
   window_->Init(init_params);
   gfx::Rect window_bounds = create_params.bounds;
   window_bounds.Inset(-GetFrameInsets());
@@ -114,14 +122,30 @@ void NativeAppWindowViews::InitializePanelWindow(
     preferred_size_.set_height(kDefaultPanelHeight);
   else if (preferred_size_.height() < kMinPanelHeight)
     preferred_size_.set_height(kMinPanelHeight);
-
-  params.bounds = gfx::Rect(preferred_size_.width(), preferred_size_.height());
+#if defined(USE_ASH)
+  // Open a new panel on the active root window where
+  // a current active/focused window is on.
+  aura::RootWindow* active = ash::Shell::GetActiveRootWindow();
+  params.bounds = ash::ScreenAsh::ConvertRectToScreen(
+      active, gfx::Rect(preferred_size_));
+#else
+  params.bounds = gfx::Rect(preferred_size_);
+#endif
+  // TODO(erg): Conceptually, these are toplevel windows, but we theoretically
+  // could plumb context through to here in some cases.
+  params.top_level = true;
   window_->Init(params);
 
+#if !defined(USE_ASH)
+  // TODO(oshima|stevenjb): Ideally, we should be able to just pre-determine
+  // the exact location and size, but this doesn't work well
+  // on non-ash environment where we don't have full control over
+  // window management.
   gfx::Rect window_bounds =
       window_->non_client_view()->GetWindowBoundsForClientBounds(
           create_params.bounds);
   window_->SetBounds(window_bounds);
+#endif
 }
 
 // BaseWindow implementation.
@@ -391,6 +415,23 @@ void NativeAppWindowViews::OnWidgetActivationChanged(views::Widget* widget,
   shell_window_->OnNativeWindowChanged();
 }
 
+// WebContentsObserver implementation.
+
+void NativeAppWindowViews::RenderViewCreated(
+    content::RenderViewHost* render_view_host) {
+  if (transparent_background_) {
+    // Use a background with transparency to trigger transparency in Webkit.
+    SkBitmap background;
+    background.setConfig(SkBitmap::kARGB_8888_Config, 1, 1);
+    background.allocPixels();
+    background.eraseARGB(0x00, 0x00, 0x00, 0x00);
+
+    content::RenderWidgetHostView* view = render_view_host->GetView();
+    DCHECK(view);
+    view->SetBackground(background);
+  }
+}
+
 // views::View implementation.
 
 void NativeAppWindowViews::Layout() {
@@ -399,8 +440,9 @@ void NativeAppWindowViews::Layout() {
   OnViewWasResized();
 }
 
-void NativeAppWindowViews::ViewHierarchyChanged(
-    bool is_add, views::View *parent, views::View *child) {
+void NativeAppWindowViews::ViewHierarchyChanged(bool is_add,
+                                                views::View* parent,
+                                                views::View* child) {
   if (is_add && child == this) {
     web_view_ = new views::WebView(NULL);
     AddChildView(web_view_);

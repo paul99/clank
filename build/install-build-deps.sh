@@ -31,23 +31,31 @@ do
   --no-prompt)              do_default=1
                             do_quietly="-qq --assume-yes"
     ;;
+  --unsupported)            do_unsupported=1;;
   *) usage;;
   esac
   shift
 done
 
-ubuntu_versions="10\.04|10\.10|11\.04|11\.10|12\.04"
-ubuntu_codenames="lucid|maverick|natty|oneiric|precise"
+ubuntu_versions="10\.04|10\.10|11\.04|11\.10|12\.04|12\.10"
+ubuntu_codenames="lucid|maverick|natty|oneiric|precise|quantal"
+ubuntu_issue="Ubuntu ($ubuntu_versions|$ubuntu_codenames)"
+# GCEL is an Ubuntu-derived VM image used on Google Compute Engine; /etc/issue
+# doesn't contain a version number so just trust that the user knows what
+# they're doing.
+gcel_issue="^GCEL"
 
-if ! egrep -q "Ubuntu ($ubuntu_versions|$ubuntu_codenames)" /etc/issue; then
-  echo "ERROR: Only Ubuntu 10.04 (lucid) through 12.04 (precise) are currently"\
-      "supported" >&2
-  exit 1
-fi
+if [ 0 -eq "${do_unsupported-0}" ] ; then
+  if ! egrep -q "($ubuntu_issue|$gcel_issue)" /etc/issue; then
+    echo "ERROR: Only Ubuntu 10.04 (lucid) through 12.10 (quantal) are"\
+        "currently supported" >&2
+    exit 1
+  fi
 
-if ! uname -m | egrep -q "i686|x86_64"; then
-  echo "Only x86 architectures are currently supported" >&2
-  exit
+  if ! uname -m | egrep -q "i686|x86_64"; then
+    echo "Only x86 architectures are currently supported" >&2
+    exit
+  fi
 fi
 
 if [ "x$(id -u)" != x0 ]; then
@@ -67,9 +75,9 @@ dev_list="apache2.2-bin bison curl elfutils fakeroot flex g++ gperf
           libgnome-keyring-dev libgtk2.0-dev libkrb5-dev libnspr4-dev
           libnss3-dev libpam0g-dev libpci-dev libsctp-dev libspeechd-dev
           libsqlite3-dev libssl-dev libudev-dev libwww-perl libxslt1-dev
-          libxss-dev libxt-dev libxtst-dev mesa-common-dev patch perl php5-cgi
-          pkg-config python python-cherrypy3 python-dev python-psutil rpm ruby
-          subversion ttf-dejavu-core ttf-indic-fonts ttf-kochi-gothic
+          libxss-dev libxt-dev libxtst-dev mesa-common-dev metacity patch perl
+          php5-cgi pkg-config python python-cherrypy3 python-dev python-psutil
+          rpm ruby subversion ttf-dejavu-core ttf-indic-fonts ttf-kochi-gothic
           ttf-kochi-mincho ttf-thai-tlwg wdiff git-core
           $chromeos_dev_list"
 

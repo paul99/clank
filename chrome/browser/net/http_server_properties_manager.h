@@ -20,6 +20,7 @@
 #include "net/http/http_server_properties_impl.h"
 
 class PrefService;
+class PrefRegistrySyncable;
 
 namespace chrome_browser_net {
 
@@ -63,7 +64,7 @@ class HttpServerPropertiesManager
   void ShutdownOnUIThread();
 
   // Register |prefs| for properties managed here.
-  static void RegisterPrefs(PrefService* prefs);
+  static void RegisterUserPrefs(PrefRegistrySyncable* registry);
 
   // Deletes all data. Works asynchronously, but if a |completion| callback is
   // provided, it will be fired on the UI thread when everything is done.

@@ -40,6 +40,7 @@ namespace gles2 {
 GLES2DecoderTestBase::GLES2DecoderTestBase()
     : surface_(NULL),
       context_(NULL),
+      memory_tracker_(NULL),
       client_buffer_id_(100),
       client_framebuffer_id_(101),
       client_program_id_(102),
@@ -90,7 +91,7 @@ void GLES2DecoderTestBase::InitDecoder(
   ::gfx::GLInterface::SetGLInterface(gl_.get());
   group_ = ContextGroup::Ref(new ContextGroup(NULL,
                                               NULL,
-                                              NULL,
+                                              memory_tracker_,
                                               bind_generates_resource));
 
   InSequence sequence;
@@ -243,11 +244,6 @@ void GLES2DecoderTestBase::InitDecoder(
   context_ = new gfx::GLContextStub;
 
   context_->MakeCurrent(surface_);
-
-  // From <EGL/egl.h>.
-  const int32 EGL_ALPHA_SIZE = 0x3021;
-  const int32 EGL_DEPTH_SIZE = 0x3025;
-  const int32 EGL_STENCIL_SIZE = 0x3026;
 
   int32 attributes[] = {
     EGL_ALPHA_SIZE, request_alpha ? 8 : 0,

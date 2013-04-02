@@ -9,11 +9,14 @@
 #include "base/string_util.h"
 #include "base/stringprintf.h"
 #include "base/utf_string_conversions.h"
+#include "chrome/common/autofill/web_element_descriptor.h"
 #include "chrome/common/form_data.h"
 #include "chrome/renderer/autofill/form_autofill_util.h"
 #include "chrome/renderer/autofill/form_cache.h"
 #include "chrome/test/base/chrome_render_view_test.h"
 #include "testing/gtest/include/gtest/gtest.h"
+#include "third_party/WebKit/Source/Platform/chromium/public/WebString.h"
+#include "third_party/WebKit/Source/Platform/chromium/public/WebVector.h"
 #include "third_party/WebKit/Source/WebKit/chromium/public/WebDocument.h"
 #include "third_party/WebKit/Source/WebKit/chromium/public/WebElement.h"
 #include "third_party/WebKit/Source/WebKit/chromium/public/WebFormControlElement.h"
@@ -21,8 +24,6 @@
 #include "third_party/WebKit/Source/WebKit/chromium/public/WebInputElement.h"
 #include "third_party/WebKit/Source/WebKit/chromium/public/WebNode.h"
 #include "third_party/WebKit/Source/WebKit/chromium/public/WebSelectElement.h"
-#include "third_party/WebKit/Source/WebKit/chromium/public/platform/WebString.h"
-#include "third_party/WebKit/Source/WebKit/chromium/public/platform/WebVector.h"
 #include "webkit/glue/web_io_operators.h"
 
 using WebKit::WebDocument;
@@ -37,6 +38,7 @@ using WebKit::WebString;
 using WebKit::WebVector;
 
 using autofill::ClearPreviewedFormWithElement;
+using autofill::ClickElement;
 using autofill::FillForm;
 using autofill::FindFormAndFieldForInputElement;
 using autofill::FormWithElementIsAutofilled;
@@ -212,6 +214,43 @@ TEST_F(FormAutofillTest, WebFormControlElementToFormFieldAutofilled) {
   EXPECT_FORM_FIELD_DATA_EQUALS(expected, result);
 }
 
+// We should be able to extract a radio or a checkbox field that has been
+// autofilled.
+// TODO(ramankk): Enable this test once IsCheckable is enabled in
+// IsAutofillableInputElement function in form_autofill_util.
+TEST_F(FormAutofillTest, DISABLED_WebFormControlElementToClickableFormField) {
+  LoadHTML("<INPUT type=\"checkbox\" id=\"checkbox\" value=\"mail\"/>"
+           "<INPUT type=\"radio\" id=\"radio\" value=\"male\"/>");
+
+  WebFrame* frame = GetMainFrame();
+  ASSERT_NE(static_cast<WebFrame*>(NULL), frame);
+
+  WebElement web_element = frame->document().getElementById("checkbox");
+  WebInputElement element = web_element.to<WebInputElement>();
+  element.setAutofilled(true);
+  FormFieldData result;
+  WebFormControlElementToFormField(element, autofill::EXTRACT_VALUE, &result);
+
+  FormFieldData expected;
+  expected.name = ASCIIToUTF16("checkbox");
+  expected.value = ASCIIToUTF16("mail");
+  expected.form_control_type = "checkbox";
+  expected.is_autofilled = true;
+  expected.is_checkable = true;
+  EXPECT_FORM_FIELD_DATA_EQUALS(expected, result);
+
+  web_element = frame->document().getElementById("radio");
+  element = web_element.to<WebInputElement>();
+  element.setAutofilled(true);
+  WebFormControlElementToFormField(element, autofill::EXTRACT_VALUE, &result);
+  expected.name = ASCIIToUTF16("radio");
+  expected.value = ASCIIToUTF16("male");
+  expected.form_control_type = "radio";
+  expected.is_autofilled = true;
+  expected.is_checkable = true;
+  EXPECT_FORM_FIELD_DATA_EQUALS(expected, result);
+}
+
 // We should be able to extract a <select> field.
 TEST_F(FormAutofillTest, WebFormControlElementToFormFieldSelect) {
   LoadHTML("<SELECT id=\"element\"/>"
@@ -263,8 +302,6 @@ TEST_F(FormAutofillTest, WebFormControlElementToFormFieldInvalidType) {
   LoadHTML("<FORM name=\"TestForm\" action=\"http://cnn.com\" method=\"post\">"
            "  <INPUT type=\"hidden\" id=\"hidden\" value=\"apple\"/>"
            "  <INPUT type=\"password\" id=\"password\" value=\"secret\"/>"
-           "  <INPUT type=\"checkbox\" id=\"checkbox\" value=\"mail\"/>"
-           "  <INPUT type=\"radio\" id=\"radio\" value=\"male\"/>"
            "  <INPUT type=\"submit\" id=\"submit\" value=\"Send\"/>"
            "</FORM>");
 
@@ -289,21 +326,6 @@ TEST_F(FormAutofillTest, WebFormControlElementToFormFieldInvalidType) {
   expected.name = ASCIIToUTF16("password");
   expected.form_control_type = "password";
   EXPECT_FORM_FIELD_DATA_EQUALS(expected, result);
-
-  web_element = frame->document().getElementById("checkbox");
-  element = web_element.to<WebFormControlElement>();
-  WebFormControlElementToFormField(element, autofill::EXTRACT_VALUE, &result);
-  expected.name = ASCIIToUTF16("checkbox");
-  expected.form_control_type = "checkbox";
-  EXPECT_FORM_FIELD_DATA_EQUALS(expected, result);
-
-  web_element = frame->document().getElementById("radio");
-  element = web_element.to<WebFormControlElement>();
-  WebFormControlElementToFormField(element, autofill::EXTRACT_VALUE, &result);
-  expected.name = ASCIIToUTF16("radio");
-  expected.form_control_type = "radio";
-  EXPECT_FORM_FIELD_DATA_EQUALS(expected, result);
-
 
   web_element = frame->document().getElementById("submit");
   element = web_element.to<WebFormControlElement>();
@@ -2809,6 +2831,32 @@ TEST_F(FormAutofillTest, MultipleLabelsPerElement) {
       "  <INPUT type=\"submit\" name=\"reply-send\" value=\"Send\"/>"
       "</FORM>",
       labels, names, values);
+}
+
+TEST_F(FormAutofillTest, ClickElement) {
+  LoadHTML("<BUTTON id=\"link\">Button</BUTTON>"
+           "<BUTTON name=\"button\">Button</BUTTON>");
+  WebFrame* frame = GetMainFrame();
+  ASSERT_NE(static_cast<WebFrame*>(NULL), frame);
+
+  // Successful retrieval by id.
+  autofill::WebElementDescriptor clicker;
+  clicker.retrieval_method = autofill::WebElementDescriptor::ID;
+  clicker.descriptor = "link";
+  EXPECT_TRUE(ClickElement(frame->document(), clicker));
+
+  // Successful retrieval by css selector.
+  clicker.retrieval_method = autofill::WebElementDescriptor::CSS_SELECTOR;
+  clicker.descriptor = "button[name=\"button\"]";
+  EXPECT_TRUE(ClickElement(frame->document(), clicker));
+
+  // Unsuccessful retrieval due to invalid CSS selector.
+  clicker.descriptor = "^*&";
+  EXPECT_FALSE(ClickElement(frame->document(), clicker));
+
+  // Unsuccessful retrieval because element does not exist.
+  clicker.descriptor = "#junk";
+  EXPECT_FALSE(ClickElement(frame->document(), clicker));
 }
 
 TEST_F(FormAutofillTest, SelectOneAsText) {

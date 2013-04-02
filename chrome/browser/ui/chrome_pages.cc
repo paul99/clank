@@ -5,26 +5,27 @@
 #include "chrome/browser/ui/chrome_pages.h"
 
 #include "base/logging.h"
-#include "base/string_number_conversions.h"
 #include "base/stringprintf.h"
+#include "base/strings/string_number_conversions.h"
 #include "chrome/browser/download/download_shelf.h"
 #include "chrome/browser/profiles/profile.h"
-#include "chrome/browser/sync/profile_sync_service.h"
-#include "chrome/browser/sync/profile_sync_service_factory.h"
+#include "chrome/browser/signin/signin_manager.h"
+#include "chrome/browser/signin/signin_manager_factory.h"
 #include "chrome/browser/ui/browser.h"
 #include "chrome/browser/ui/browser_finder.h"
 #include "chrome/browser/ui/browser_navigator.h"
 #include "chrome/browser/ui/browser_window.h"
 #include "chrome/browser/ui/singleton_tabs.h"
+#include "chrome/browser/ui/tabs/tab_strip_model.h"
 #include "chrome/browser/ui/webui/options/content_settings_handler.h"
 #include "chrome/browser/ui/webui/signin/login_ui_service.h"
 #include "chrome/browser/ui/webui/signin/login_ui_service_factory.h"
 #include "chrome/browser/ui/webui/sync_promo/sync_promo_ui.h"
-#include "chrome/common/net/url_util.h"
 #include "chrome/common/url_constants.h"
 #include "content/public/browser/user_metrics.h"
 #include "google_apis/gaia/gaia_urls.h"
 #include "googleurl/src/gurl.h"
+#include "net/base/url_util.h"
 
 using content::UserMetricsAction;
 
@@ -180,12 +181,12 @@ void ShowSearchEngineSettings(Browser* browser) {
   ShowSettingsSubPage(browser, kSearchEnginesSubPage);
 }
 
-void ShowSyncSetup(Browser* browser, SyncPromoUI::Source source) {
+void ShowBrowserSignin(Browser* browser, SyncPromoUI::Source source) {
   Profile* original_profile = browser->profile()->GetOriginalProfile();
-  ProfileSyncService* service =
-      ProfileSyncServiceFactory::GetInstance()->GetForProfile(
-          original_profile);
-  if (service->HasSyncSetupCompleted()) {
+  SigninManager* manager =
+      SigninManagerFactory::GetForProfile(original_profile);
+  // If we're signed in, just show settings.
+  if (!manager->GetAuthenticatedUsername().empty()) {
     ShowSettings(browser);
   } else {
     // If the browser's profile is an incognito profile, make sure to use
@@ -193,8 +194,8 @@ void ShowSyncSetup(Browser* browser, SyncPromoUI::Source source) {
     // from an incognito window.
     if (browser->profile()->IsOffTheRecord()) {
       browser =
-          browser::FindOrCreateTabbedBrowser(original_profile,
-                                             chrome::HOST_DESKTOP_TYPE_NATIVE);
+          chrome::FindOrCreateTabbedBrowser(original_profile,
+                                            chrome::HOST_DESKTOP_TYPE_NATIVE);
     }
 
     const bool use_web_flow = SyncPromoUI::UseWebBasedSigninFlow();
@@ -212,12 +213,14 @@ void ShowSyncSetup(Browser* browser, SyncPromoUI::Source source) {
       if (login->current_login_ui()) {
         login->current_login_ui()->FocusUI();
       } else {
-        // Need to navigate to the settings page and display the UI.
+        // Need to navigate to the settings page and display the sync setup UI.
+        // This always displays the signin UI since the user is not yet signed
+        // in.
         chrome::ShowSettingsSubPage(browser, chrome::kSyncSetupSubPage);
       }
     }
 
-    DCHECK_GT(browser->tab_count(), 0);
+    DCHECK_GT(browser->tab_strip_model()->count(), 0);
   }
 }
 
@@ -225,11 +228,9 @@ void ShowGaiaSignin(Browser* browser,
                     const std::string& service,
                     const GURL& continue_url) {
   GURL url(GaiaUrls::GetInstance()->service_login_url());
-  url = chrome_common_net::AppendQueryParameter(url, "service", service);
+  url = net::AppendQueryParameter(url, "service", service);
   if (continue_url.is_valid())
-    url = chrome_common_net::AppendQueryParameter(url,
-                                                  "continue",
-                                                  continue_url.spec());
+    url = net::AppendQueryParameter(url, "continue", continue_url.spec());
   NavigateToSingletonTab(browser, url);
 }
 

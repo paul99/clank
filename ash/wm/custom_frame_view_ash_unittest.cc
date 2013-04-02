@@ -18,6 +18,7 @@
 #include "ui/aura/test/event_generator.h"
 #include "ui/aura/root_window.h"
 #include "ui/aura/window.h"
+#include "ui/base/events/event_utils.h"
 #include "ui/base/gestures/gesture_configuration.h"
 #include "ui/views/controls/button/image_button.h"
 #include "ui/views/test/test_views_delegate.h"
@@ -39,7 +40,7 @@ class ShellViewsDelegate : public views::TestViewsDelegate {
       views::Widget* widget) OVERRIDE {
     return ash::Shell::GetInstance()->CreateDefaultNonClientFrameView(widget);
   }
-  bool UseTransparentWindows() const OVERRIDE {
+  virtual bool UseTransparentWindows() const OVERRIDE {
     // Ash uses transparent window frames.
     return true;
   }
@@ -78,6 +79,7 @@ class CustomFrameViewAshTest : public ash::test::AshTestBase {
   views::Widget* CreateWidget() {
     views::Widget::InitParams params(views::Widget::InitParams::TYPE_WINDOW);
     views::Widget* widget = new views::Widget;
+    params.context = CurrentContext();
     params.delegate = new TestWidgetDelegate;
     widget->Init(params);
     widget->Show();
@@ -474,13 +476,17 @@ TEST_F(CustomFrameViewAshTest, MaximizeTap) {
   ui::GestureConfiguration::set_default_radius(0);
 
   const int kTouchId = 2;
-  ui::TouchEvent press(ui::ET_TOUCH_PRESSED, button_pos, kTouchId,
-      base::Time::NowFromSystemTime() - base::Time());
+  ui::TouchEvent press(ui::ET_TOUCH_PRESSED,
+                       button_pos,
+                       kTouchId,
+                       ui::EventTimeForNow());
   root_window->AsRootWindowHostDelegate()->OnHostTouchEvent(&press);
 
   button_pos.Offset(9, 8);
   ui::TouchEvent release(
-      ui::ET_TOUCH_RELEASED, button_pos, kTouchId,
+      ui::ET_TOUCH_RELEASED,
+      button_pos,
+      kTouchId,
       press.time_stamp() + base::TimeDelta::FromMilliseconds(50));
   root_window->AsRootWindowHostDelegate()->OnHostTouchEvent(&release);
 
@@ -693,6 +699,39 @@ TEST_F(CustomFrameViewAshTest, MinimizePerKeyClosesBubble) {
   wm::MinimizeWindow(window);
 
   EXPECT_TRUE(ash::wm::IsWindowMinimized(window));
+  EXPECT_FALSE(maximize_button->maximizer());
+}
+
+// Tests that dragging down on the maximize button minimizes the window.
+TEST_F(CustomFrameViewAshTest, MaximizeButtonDragDownMinimizes) {
+  views::Widget* widget = CreateWidget();
+  aura::Window* window = widget->GetNativeWindow();
+  widget->SetBounds(gfx::Rect(10, 10, 100, 100));
+  CustomFrameViewAsh* frame = custom_frame_view_ash(widget);
+  CustomFrameViewAsh::TestApi test(frame);
+  FrameMaximizeButton* maximize_button = test.maximize_button();
+
+  // Drag down on a maximized window.
+  wm::MaximizeWindow(window);
+  EXPECT_TRUE(wm::IsWindowMaximized(window));
+  gfx::Point button_pos = maximize_button->GetBoundsInScreen().CenterPoint();
+  gfx::Point off_pos(button_pos.x(), button_pos.y() + 100);
+
+  aura::test::EventGenerator generator(window->GetRootWindow());
+  generator.GestureScrollSequence(button_pos, off_pos,
+      base::TimeDelta::FromMilliseconds(0), 1);
+
+  EXPECT_TRUE(wm::IsWindowMinimized(window));
+  EXPECT_FALSE(maximize_button->maximizer());
+
+  // Drag down on a restored window.
+  wm::RestoreWindow(window);
+
+  button_pos = maximize_button->GetBoundsInScreen().CenterPoint();
+  off_pos = gfx::Point(button_pos.x(), button_pos.y() + 200);
+  generator.GestureScrollSequence(button_pos, off_pos,
+      base::TimeDelta::FromMilliseconds(10), 1);
+  EXPECT_TRUE(wm::IsWindowMinimized(window));
   EXPECT_FALSE(maximize_button->maximizer());
 }
 

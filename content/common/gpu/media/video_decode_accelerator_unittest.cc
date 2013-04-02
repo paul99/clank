@@ -33,25 +33,29 @@
 #include "base/stl_util.h"
 #include "base/string_number_conversions.h"
 #include "base/string_split.h"
-#include "base/stringize_macros.h"
+#include "base/strings/stringize_macros.h"
 #include "base/synchronization/condition_variable.h"
 #include "base/synchronization/lock.h"
 #include "base/synchronization/waitable_event.h"
 #include "base/threading/thread.h"
 #include "base/utf_string_conversions.h"
 #include "content/common/gpu/media/rendering_helper.h"
+#include "content/public/common/content_switches.h"
 
 #if defined(OS_WIN)
 #include "content/common/gpu/media/dxva_video_decode_accelerator.h"
 #elif defined(OS_MACOSX)
 #include "content/common/gpu/media/mac_video_decode_accelerator.h"
+#elif defined(OS_CHROMEOS)
+#if defined(ARCH_CPU_ARMEL)
+#include "content/common/gpu/media/exynos_video_decode_accelerator.h"
+#include "content/common/gpu/media/omx_video_decode_accelerator.h"
 #elif defined(ARCH_CPU_X86_FAMILY)
 #include "content/common/gpu/media/vaapi_video_decode_accelerator.h"
-#elif defined(ARCH_CPU_ARMEL)
-#include "content/common/gpu/media/omx_video_decode_accelerator.h"
+#endif  // ARCH_CPU_ARMEL
 #else
 #error The VideoAccelerator tests are not supported on this platform.
-#endif  // defined(OS_WIN)
+#endif  // OS_WIN
 
 using media::VideoDecodeAccelerator;
 
@@ -72,13 +76,13 @@ namespace {
 // - |profile| is the media::VideoCodecProfile set during Initialization.
 // An empty value for a numeric field means "ignore".
 #if defined(OS_MACOSX)
-const FilePath::CharType* test_video_data =
+const base::FilePath::CharType* test_video_data =
     FILE_PATH_LITERAL("test-25fps_high.h264:1280:720:250:252:50:100:4");
 #else
 // TODO(fischman): figure out how to support multiple test videos per run (needs
 // to refactor where ParseTestVideoData is called).  For now just make it easy
 // to replace which file is used by commenting/uncommenting these lines:
-const FilePath::CharType* test_video_data =
+const base::FilePath::CharType* test_video_data =
     // FILE_PATH_LITERAL("test-25fps.vp8:320:240:250:250:50:175:11");
     FILE_PATH_LITERAL("test-25fps.h264:320:240:250:258:50:175:1");
 #endif
@@ -86,15 +90,15 @@ const FilePath::CharType* test_video_data =
 // Parse |data| into its constituent parts and set the various output fields
 // accordingly.  CHECK-fails on unexpected or missing required data.
 // Unspecified optional fields are set to -1.
-void ParseTestVideoData(FilePath::StringType data,
-                        FilePath::StringType* file_name,
+void ParseTestVideoData(base::FilePath::StringType data,
+                        base::FilePath::StringType* file_name,
                         int* width, int* height,
                         int* num_frames,
                         int* num_fragments,
                         int* min_fps_render,
                         int* min_fps_no_render,
                         int* profile) {
-  std::vector<FilePath::StringType> elements;
+  std::vector<base::FilePath::StringType> elements;
   base::SplitString(data, ':', &elements);
   CHECK_GE(elements.size(), 1U) << data;
   CHECK_LE(elements.size(), 8U) << data;
@@ -214,15 +218,15 @@ class GLRenderingVDAClient : public VideoDecodeAccelerator::Client {
   // The heart of the Client.
   virtual void ProvidePictureBuffers(uint32 requested_num_of_buffers,
                                      const gfx::Size& dimensions,
-                                     uint32 texture_target);
-  virtual void DismissPictureBuffer(int32 picture_buffer_id);
-  virtual void PictureReady(const media::Picture& picture);
+                                     uint32 texture_target) OVERRIDE;
+  virtual void DismissPictureBuffer(int32 picture_buffer_id) OVERRIDE;
+  virtual void PictureReady(const media::Picture& picture) OVERRIDE;
   // Simple state changes.
-  virtual void NotifyInitializeDone();
-  virtual void NotifyEndOfBitstreamBuffer(int32 bitstream_buffer_id);
-  virtual void NotifyFlushDone();
-  virtual void NotifyResetDone();
-  virtual void NotifyError(VideoDecodeAccelerator::Error error);
+  virtual void NotifyInitializeDone() OVERRIDE;
+  virtual void NotifyEndOfBitstreamBuffer(int32 bitstream_buffer_id) OVERRIDE;
+  virtual void NotifyFlushDone() OVERRIDE;
+  virtual void NotifyResetDone() OVERRIDE;
+  virtual void NotifyError(VideoDecodeAccelerator::Error error) OVERRIDE;
 
   // Simple getters for inspecting the state of the Client.
   int num_done_bitstream_buffers() { return num_done_bitstream_buffers_; }
@@ -332,18 +336,27 @@ void GLRenderingVDAClient::CreateDecoder() {
 #elif defined(OS_MACOSX)
   decoder_.reset(new MacVideoDecodeAccelerator(
       static_cast<CGLContextObj>(rendering_helper_->GetGLContext()), this));
-#elif defined(ARCH_CPU_ARMEL)
-  decoder_.reset(
-      new OmxVideoDecodeAccelerator(
-          static_cast<EGLDisplay>(rendering_helper_->GetGLDisplay()),
-          static_cast<EGLContext>(rendering_helper_->GetGLContext()),
-          this,
-          base::Bind(&DoNothingReturnTrue)));
+#elif defined(OS_CHROMEOS)
+#if defined(ARCH_CPU_ARMEL)
+  if (CommandLine::ForCurrentProcess()->HasSwitch(switches::kUseExynosVda)) {
+    decoder_.reset(
+        new ExynosVideoDecodeAccelerator(
+            static_cast<EGLDisplay>(rendering_helper_->GetGLDisplay()),
+            static_cast<EGLContext>(rendering_helper_->GetGLContext()),
+            this, base::Bind(&DoNothingReturnTrue)));
+  } else {
+    decoder_.reset(
+        new OmxVideoDecodeAccelerator(
+            static_cast<EGLDisplay>(rendering_helper_->GetGLDisplay()),
+            static_cast<EGLContext>(rendering_helper_->GetGLContext()),
+            this, base::Bind(&DoNothingReturnTrue)));
+  }
 #elif defined(ARCH_CPU_X86_FAMILY)
   decoder_.reset(new VaapiVideoDecodeAccelerator(
       static_cast<Display*>(rendering_helper_->GetGLDisplay()),
       static_cast<GLXContext>(rendering_helper_->GetGLContext()),
       this, base::Bind(&DoNothingReturnTrue)));
+#endif  // ARCH_CPU_ARMEL
 #endif  // OS_WIN
   CHECK(decoder_.get());
   SetState(CS_DECODER_SET);
@@ -681,7 +694,7 @@ TEST_P(VideoDecodeAcceleratorTest, TestSimpleDecode) {
   const int reset_after_frame_num = GetParam().e;
   const int delete_decoder_state = GetParam().f;
 
-  FilePath::StringType test_video_file;
+  base::FilePath::StringType test_video_file;
   int frame_width, frame_height;
   int num_frames, num_fragments, min_fps_render, min_fps_no_render, profile;
   ParseTestVideoData(test_video_data, &test_video_file, &frame_width,
@@ -704,8 +717,9 @@ TEST_P(VideoDecodeAcceleratorTest, TestSimpleDecode) {
 
   // Read in the video data.
   std::string data_str;
-  CHECK(file_util::ReadFileToString(FilePath(test_video_file), &data_str))
-      << "test_video_file: " << FilePath(test_video_file).MaybeAsASCII();
+  CHECK(file_util::ReadFileToString(base::FilePath(test_video_file),
+                                    &data_str))
+      << "test_video_file: " << base::FilePath(test_video_file).MaybeAsASCII();
 
   // Initialize the rendering helper.
   base::Thread rendering_thread("GLRenderingVDAClientThread");
@@ -924,6 +938,10 @@ int main(int argc, char **argv) {
     }
     if (it->first == "v" || it->first == "vmodule")
       continue;
+#if defined(OS_CHROMEOS) && defined(ARCH_CPU_ARMEL)
+    if (it->first == switches::kUseExynosVda)
+      continue;
+#endif
     LOG(FATAL) << "Unexpected switch: " << it->first << ":" << it->second;
   }
 
@@ -931,16 +949,17 @@ int main(int argc, char **argv) {
   content::RenderingHelper::InitializePlatform();
 
 #if defined(OS_WIN)
-  base::WaitableEvent event(true, false);
-  content::DXVAVideoDecodeAccelerator::PreSandboxInitialization(
-      base::Bind(&base::WaitableEvent::Signal,
-                 base::Unretained(&event)));
-  event.Wait();
-#elif defined(OS_CHROMEOS) && defined(ARCH_CPU_ARMEL)
-  content::OmxVideoDecodeAccelerator::PreSandboxInitialization();
-#elif defined(OS_CHROMEOS) && defined(ARCH_CPU_X86_FAMILY)
+  content::DXVAVideoDecodeAccelerator::PreSandboxInitialization();
+#elif defined(OS_CHROMEOS)
+#if defined(ARCH_CPU_ARMEL)
+  if (CommandLine::ForCurrentProcess()->HasSwitch(switches::kUseExynosVda))
+    content::ExynosVideoDecodeAccelerator::PreSandboxInitialization();
+  else
+    content::OmxVideoDecodeAccelerator::PreSandboxInitialization();
+#elif defined(ARCH_CPU_X86_FAMILY)
   content::VaapiVideoDecodeAccelerator::PreSandboxInitialization();
-#endif
+#endif  // ARCH_CPU_ARMEL
+#endif  // OS_CHROMEOS
 
   return RUN_ALL_TESTS();
 }

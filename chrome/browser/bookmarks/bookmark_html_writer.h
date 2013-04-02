@@ -9,15 +9,19 @@
 #include <map>
 #include <string>
 
+#include "base/file_path.h"
 #include "base/memory/ref_counted.h"
-#include "chrome/browser/history/history.h"
+#include "base/memory/ref_counted_memory.h"
 #include "chrome/common/cancelable_task_tracker.h"
+#include "content/public/browser/notification_observer.h"
 #include "content/public/browser/notification_registrar.h"
-#include "net/base/file_stream.h"
 
 class BookmarkNode;
-class FilePath;
 class Profile;
+
+namespace history {
+struct FaviconBitmapResult;
+}
 
 // Observer for bookmark html output. Used only in tests.
 class BookmarksExportObserver {
@@ -39,7 +43,7 @@ class BookmarkFaviconFetcher: public content::NotificationObserver {
       URLFaviconMap;
 
   BookmarkFaviconFetcher(Profile* profile,
-                         const FilePath& path,
+                         const base::FilePath& path,
                          BookmarksExportObserver* observer);
   virtual ~BookmarkFaviconFetcher();
 
@@ -82,7 +86,7 @@ class BookmarkFaviconFetcher: public content::NotificationObserver {
   scoped_ptr<URLFaviconMap> favicons_map_;
 
   // Path where html output is stored.
-  FilePath path_;
+  base::FilePath path_;
 
   BookmarksExportObserver* observer_;
 
@@ -99,7 +103,7 @@ namespace bookmark_html_writer {
 // Before writing to the file favicons are fetched on the main thread.
 // TODO(sky): need a callback on failure.
 void WriteBookmarks(Profile* profile,
-                    const FilePath& path,
+                    const base::FilePath& path,
                     BookmarksExportObserver* observer);
 
 }  // namespace bookmark_html_writer

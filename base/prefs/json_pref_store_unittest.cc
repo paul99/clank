@@ -9,8 +9,9 @@
 #include "base/memory/ref_counted.h"
 #include "base/memory/scoped_ptr.h"
 #include "base/path_service.h"
-#include "base/string_number_conversions.h"
+#include "base/run_loop.h"
 #include "base/string_util.h"
+#include "base/strings/string_number_conversions.h"
 #include "base/threading/sequenced_worker_pool.h"
 #include "base/threading/thread.h"
 #include "base/utf_string_conversions.h"
@@ -152,7 +153,7 @@ void RunBasicJsonPrefStoreTest(JsonPrefStore* pref_store,
   // Serialize and compare to expected output.
   ASSERT_TRUE(file_util::PathExists(golden_output_file));
   pref_store->CommitPendingWrite();
-  MessageLoop::current()->RunUntilIdle();
+  RunLoop().RunUntilIdle();
   EXPECT_TRUE(file_util::TextContentsEqual(golden_output_file, output_file));
   ASSERT_TRUE(file_util::Delete(output_file, false));
 }
@@ -206,7 +207,7 @@ TEST_F(JsonPrefStoreTest, BasicAsync) {
     EXPECT_CALL(mock_observer, OnInitializationCompleted(true)).Times(1);
     EXPECT_CALL(*mock_error_delegate,
                 OnError(PersistentPrefStore::PREF_READ_ERROR_NONE)).Times(0);
-    message_loop_.RunUntilIdle();
+    RunLoop().RunUntilIdle();
     pref_store->RemoveObserver(&mock_observer);
 
     ASSERT_FALSE(pref_store->ReadOnly());
@@ -243,7 +244,7 @@ TEST_F(JsonPrefStoreTest, AsyncNonExistingFile) {
   EXPECT_CALL(mock_observer, OnInitializationCompleted(true)).Times(1);
   EXPECT_CALL(*mock_error_delegate,
               OnError(PersistentPrefStore::PREF_READ_ERROR_NO_FILE)).Times(1);
-  message_loop_.RunUntilIdle();
+  RunLoop().RunUntilIdle();
   pref_store->RemoveObserver(&mock_observer);
 
   EXPECT_FALSE(pref_store->ReadOnly());
@@ -288,7 +289,7 @@ TEST_F(JsonPrefStoreTest, NeedsEmptyValue) {
 
   // Write to file.
   pref_store->CommitPendingWrite();
-  MessageLoop::current()->RunUntilIdle();
+  RunLoop().RunUntilIdle();
 
   // Compare to expected output.
   FilePath golden_output_file =

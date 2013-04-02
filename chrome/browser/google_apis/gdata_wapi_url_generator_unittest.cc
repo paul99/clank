@@ -19,14 +19,15 @@ class GDataWapiUrlGeneratorTest : public testing::Test {
   GDataWapiUrlGenerator url_generator_;
 };
 
-TEST_F(GDataWapiUrlGeneratorTest, GetBaseUrlForTesting) {
-  EXPECT_EQ("http://127.0.0.1:12345/",
-            GDataWapiUrlGenerator::GetBaseUrlForTesting(12345).spec());
-}
-
 TEST_F(GDataWapiUrlGeneratorTest, AddStandardUrlParams) {
   EXPECT_EQ("http://www.example.com/?v=3&alt=json",
             GDataWapiUrlGenerator::AddStandardUrlParams(
+                GURL("http://www.example.com")).spec());
+}
+
+TEST_F(GDataWapiUrlGeneratorTest, AddInitiateUploadUrlParams) {
+  EXPECT_EQ("http://www.example.com/?convert=false&v=3&alt=json",
+            GDataWapiUrlGenerator::AddInitiateUploadUrlParams(
                 GURL("http://www.example.com")).spec());
 }
 
@@ -165,10 +166,31 @@ TEST_F(GDataWapiUrlGeneratorTest, GenerateResourceListUrl) {
           ).spec());
 }
 
-TEST_F(GDataWapiUrlGeneratorTest, GenerateResourceEntryUrl) {
+TEST_F(GDataWapiUrlGeneratorTest, GenerateEditUrl) {
   EXPECT_EQ(
       "https://docs.google.com/feeds/default/private/full/XXX?v=3&alt=json",
-      url_generator_.GenerateResourceEntryUrl("XXX").spec());
+      url_generator_.GenerateEditUrl("XXX").spec());
+}
+
+TEST_F(GDataWapiUrlGeneratorTest, GenerateEditUrlWithoutParams) {
+  EXPECT_EQ(
+      "https://docs.google.com/feeds/default/private/full/XXX",
+      url_generator_.GenerateEditUrlWithoutParams("XXX").spec());
+}
+
+TEST_F(GDataWapiUrlGeneratorTest, GenerateContentUrl) {
+  EXPECT_EQ(
+      "https://docs.google.com/feeds/default/private/full/"
+      "folder%3Aroot/contents?v=3&alt=json",
+      url_generator_.GenerateContentUrl("folder:root").spec());
+}
+
+TEST_F(GDataWapiUrlGeneratorTest, GenerateResourceUrlForRemoval) {
+  EXPECT_EQ(
+      "https://docs.google.com/feeds/default/private/full/"
+      "folder%3Aroot/contents/file%3AABCDE?v=3&alt=json",
+      url_generator_.GenerateResourceUrlForRemoval(
+          "folder:root", "file:ABCDE").spec());
 }
 
 TEST_F(GDataWapiUrlGeneratorTest, GenerateResourceListRootUrl) {

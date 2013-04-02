@@ -106,7 +106,7 @@
 
 - (NSNumber*)activeTabIndex {
   // Note: applescript is 1-based, that is lists begin with index 1.
-  int activeTabIndex = browser_->active_index() + 1;
+  int activeTabIndex = browser_->tab_strip_model()->active_index() + 1;
   if (!activeTabIndex) {
     return nil;
   }
@@ -146,13 +146,12 @@
 }
 
 - (NSArray*)tabs {
-  NSMutableArray* tabs = [NSMutableArray
-      arrayWithCapacity:browser_->tab_count()];
+  TabStripModel* tabStrip = browser_->tab_strip_model();
+  NSMutableArray* tabs = [NSMutableArray arrayWithCapacity:tabStrip->count()];
 
-  for (int i = 0; i < browser_->tab_count(); ++i) {
+  for (int i = 0; i < tabStrip->count(); ++i) {
     // Check to see if tab is closing.
-    content::WebContents* webContents =
-        browser_->tab_strip_model()->GetWebContentsAt(i);
+    content::WebContents* webContents = tabStrip->GetWebContentsAt(i);
     if (webContents->IsBeingDestroyed()) {
       continue;
     }
@@ -201,8 +200,10 @@
 }
 
 - (void)removeFromTabsAtIndex:(int)index {
-  chrome::CloseWebContents(
-      browser_, browser_->tab_strip_model()->GetWebContentsAt(index));
+  if (index < 0 || index >= browser_->tab_strip_model()->count())
+    return;
+  browser_->tab_strip_model()->CloseWebContentsAt(
+      index, TabStripModel::CLOSE_CREATE_HISTORICAL_TAB);
 }
 
 - (NSNumber*)orderedIndex {
@@ -248,20 +249,20 @@
 - (NSNumber*)presenting {
   BOOL presentingValue = NO;
   if (browser_->window())
-    presentingValue = browser_->window()->InPresentationMode();
+    presentingValue = browser_->window()->IsFullscreenWithoutChrome();
   return [NSNumber numberWithBool:presentingValue];
 }
 
 - (void)handlesEnterPresentationMode:(NSScriptCommand*)command {
   if (browser_->window()) {
-    browser_->window()->EnterPresentationMode(
+    browser_->window()->EnterFullscreen(
         GURL(), FEB_TYPE_FULLSCREEN_EXIT_INSTRUCTION);
   }
 }
 
 - (void)handlesExitPresentationMode:(NSScriptCommand*)command {
   if (browser_->window())
-    browser_->window()->ExitPresentationMode();
+    browser_->window()->ExitFullscreen();
 }
 
 @end

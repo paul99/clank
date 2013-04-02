@@ -20,7 +20,6 @@ class BrowserListObserver;
 class BrowserList {
  public:
   typedef std::vector<Browser*> BrowserVector;
-  typedef BrowserVector::iterator iterator;
   typedef BrowserVector::const_iterator const_iterator;
   typedef BrowserVector::const_reverse_iterator const_reverse_iterator;
 
@@ -37,7 +36,7 @@ class BrowserList {
   // allows us to determine what the last active Browser was.
   static void SetLastActive(Browser* browser);
 
-  // Closes all browsers for |profile|.
+  // Closes all browsers for |profile| across all desktops.
   static void CloseAllBrowsersWithProfile(Profile* profile);
 
   // Browsers are added to the list before they have constructed windows,

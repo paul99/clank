@@ -6,7 +6,7 @@
 
 #include <string>
 
-#include "chrome/browser/ui/constrained_window.h"
+#include "chrome/browser/ui/web_contents_modal_dialog.h"
 #include "chrome/browser/ui/webui/chrome_web_contents_handler.h"
 #include "content/public/browser/web_contents.h"
 #include "ipc/ipc_message.h"
@@ -63,16 +63,12 @@ WebDialogDelegate*
 
 void ConstrainedWebDialogDelegateBase::OnDialogCloseFromWebUI() {
   closed_via_webui_ = true;
-  window_->CloseConstrainedWindow();
+  window_->CloseWebContentsModalDialog();
 }
 
-void ConstrainedWebDialogDelegateBase::set_window(ConstrainedWindow* window) {
+void ConstrainedWebDialogDelegateBase::set_window(
+    WebContentsModalDialog* window) {
   window_ = window;
-}
-
-void ConstrainedWebDialogDelegateBase::set_override_tab_delegate(
-    WebDialogWebContentsDelegate* override_tab_delegate) {
-  override_tab_delegate_.reset(override_tab_delegate);
 }
 
 bool ConstrainedWebDialogDelegateBase::closed_via_webui() const {
@@ -83,7 +79,7 @@ void ConstrainedWebDialogDelegateBase::ReleaseWebContentsOnDialogClose() {
   release_contents_on_close_ = true;
 }
 
-ConstrainedWindow* ConstrainedWebDialogDelegateBase::GetWindow() {
+WebContentsModalDialog* ConstrainedWebDialogDelegateBase::GetWindow() {
   return window_;
 }
 

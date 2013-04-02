@@ -3,21 +3,22 @@
 // found in the LICENSE file.
 
 #include "base/file_path.h"
-#include "chrome/browser/ui/webui/web_ui_browsertest.h"
 #include "chrome/common/url_constants.h"
 #include "chrome/test/base/ui_test_utils.h"
+#include "chrome/test/base/web_ui_browsertest.h"
 #include "googleurl/src/gurl.h"
 
 class MostVisitedWebUITest : public WebUIBrowserTest {
  public:
   virtual ~MostVisitedWebUITest() {}
 
-  virtual void SetUpInProcessBrowserTestFixture() {
+  virtual void SetUpInProcessBrowserTestFixture() OVERRIDE {
     WebUIBrowserTest::SetUpInProcessBrowserTestFixture();
-    AddLibrary(FilePath(FILE_PATH_LITERAL("most_visited_page_test.js")));
+    AddLibrary(base::FilePath(FILE_PATH_LITERAL("most_visited_page_test.js")));
   }
 
-  virtual void SetUpOnMainThread() {
+  virtual void SetUpOnMainThread() OVERRIDE {
+    WebUIBrowserTest::SetUpOnMainThread();
     ui_test_utils::NavigateToURL(browser(), GURL(chrome::kChromeUINewTabURL));
   }
 };

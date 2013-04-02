@@ -8,12 +8,13 @@
 
 #include "base/bind.h"
 #include "base/bind_helpers.h"
+#include "base/prefs/pref_service.h"
 #include "base/utf_string_conversions.h"
 #include "base/win/windows_version.h"
+#include "chrome/browser/extensions/image_loader.h"
 #include "chrome/browser/extensions/tab_helper.h"
 #include "chrome/browser/favicon/favicon_util.h"
 #include "chrome/browser/history/select_favicon_frames.h"
-#include "chrome/browser/prefs/pref_service.h"
 #include "chrome/browser/profiles/profile.h"
 #include "chrome/browser/ui/browser.h"
 #include "chrome/browser/ui/browser_commands.h"
@@ -67,7 +68,7 @@ class AppInfoView : public views::View {
   void UpdateIcon(const gfx::Image& image);
 
   // Overridden from views::View:
-  virtual void OnPaint(gfx::Canvas* canvas);
+  virtual void OnPaint(gfx::Canvas* canvas) OVERRIDE;
 
  private:
   // Initializes the controls
@@ -98,7 +99,7 @@ void AppInfoView::Init(const string16& title_text,
                        const string16& description_text,
                        const SkBitmap& icon) {
   icon_ = new views::ImageView();
-  icon_->SetImage(gfx::ImageSkia(icon));
+  icon_->SetImage(gfx::ImageSkia::CreateFrom1xBitmap(icon));
   icon_->SetImageSize(gfx::Size(kAppIconSize, kAppIconSize));
 
   title_ = new views::Label(title_text);
@@ -372,11 +373,6 @@ bool CreateApplicationShortcutView::Accept() {
   return true;
 }
 
-
-views::View* CreateApplicationShortcutView::GetContentsView() {
-  return this;
-}
-
 views::Checkbox* CreateApplicationShortcutView::AddCheckbox(
     const string16& text, bool checked) {
   views::Checkbox* checkbox = new views::Checkbox(text);
@@ -457,7 +453,6 @@ void CreateUrlApplicationShortcutView::FetchIcon() {
 void CreateUrlApplicationShortcutView::DidDownloadFavicon(
     int id,
     const GURL& image_url,
-    bool errored,
     int requested_size,
     const std::vector<SkBitmap>& bitmaps) {
   if (id != pending_download_id_)
@@ -478,8 +473,8 @@ void CreateUrlApplicationShortcutView::DidDownloadFavicon(
     image = bitmaps[closest_index];
   }
 
-  if (!errored && !image.isNull()) {
-    shortcut_info_.favicon = gfx::Image(image);
+  if (!image.isNull()) {
+    shortcut_info_.favicon = gfx::Image::CreateFrom1xBitmap(image);
     static_cast<AppInfoView*>(app_info_)->UpdateIcon(shortcut_info_.favicon);
   } else {
     FetchIcon();
@@ -491,7 +486,7 @@ CreateChromeApplicationShortcutView::CreateChromeApplicationShortcutView(
     const extensions::Extension* app) :
       CreateApplicationShortcutView(profile),
       app_(app),
-      ALLOW_THIS_IN_INITIALIZER_LIST(tracker_(this)) {
+      ALLOW_THIS_IN_INITIALIZER_LIST(weak_ptr_factory_(this)) {
   web_app::UpdateShortcutInfoForApp(*app, profile, &shortcut_info_);
   // The icon will be resized to |max_size|.
   const gfx::Size max_size(kAppIconSize, kAppIconSize);
@@ -514,23 +509,17 @@ CreateChromeApplicationShortcutView::CreateChromeApplicationShortcutView(
 
   InitControls();
 
-  // tracker_.LoadImage() can call OnImageLoaded() before it returns if the
-  // image is cached.  This is very rare.  app_info_ must be initialized
-  // when OnImageLoaded() is called, so we check it here.
-  CHECK(app_info_);
-  tracker_.LoadImage(app_,
-                     icon_resource,
-                     max_size,
-                     ImageLoadingTracker::DONT_CACHE);
+  extensions::ImageLoader* loader = extensions::ImageLoader::Get(profile);
+  loader->LoadImageAsync(app_, icon_resource, max_size,
+      base::Bind(&CreateChromeApplicationShortcutView::OnImageLoaded,
+                 weak_ptr_factory_.GetWeakPtr()));
 }
 
 CreateChromeApplicationShortcutView::~CreateChromeApplicationShortcutView() {}
 
-// Called by tracker_ when the app's icon is loaded.
+// Called by ImageLoader when the app's icon is loaded.
 void CreateChromeApplicationShortcutView::OnImageLoaded(
-    const gfx::Image& image,
-    const std::string& extension_id,
-    int index) {
+    const gfx::Image& image) {
   if (image.IsEmpty()) {
     shortcut_info_.favicon = ui::ResourceBundle::GetSharedInstance().
         GetImageNamed(IDR_APP_DEFAULT_ICON);

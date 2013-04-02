@@ -85,12 +85,18 @@ class DriveFileSyncClient
   // sync.  Upon completion, invokes |callback|.
   // If the directory does not exist on the server this also creates
   // the directory.
+  //
+  // Returns HTTP_SUCCESS if the directory already exists.
+  // Returns HTTP_CREATED if the directory was not found and created.
   void GetDriveDirectoryForSyncRoot(const ResourceIdCallback& callback);
 
   // Fetches Resource ID of the directory for the |origin|.
   // Upon completion, invokes |callback|.
   // If the directory does not exist on the server this also creates
   // the directory.
+  //
+  // Returns HTTP_SUCCESS if the directory already exists.
+  // Returns HTTP_CREATED if the directory was not found and created.
   void GetDriveDirectoryForOrigin(const std::string& sync_root_resource_id,
                                   const GURL& origin,
                                   const ResourceIdCallback& callback);
@@ -134,14 +140,15 @@ class DriveFileSyncClient
   // empty.
   void DownloadFile(const std::string& resource_id,
                     const std::string& local_file_md5,
-                    const FilePath& local_file_path,
+                    const base::FilePath& local_file_path,
                     const DownloadFileCallback& callback);
 
   // Uploads the new file |local_file_path| with specified |title| into the
   // directory identified by |directory_resource_id|.
-  // Upon completion, invokes |callback|.
+  // Upon completion, invokes |callback| and returns HTTP_CREATED if the file
+  // is created.
   void UploadNewFile(const std::string& directory_resource_id,
-                     const FilePath& local_file_path,
+                     const base::FilePath& local_file_path,
                      const std::string& title,
                      const UploadFileCallback& callback);
 
@@ -150,9 +157,10 @@ class DriveFileSyncClient
   // updated on Drive. If |remote_file_md5| is different from the actual value,
   // cancels the upload and invokes |callback| with
   // GDataErrorCode::HTTP_CONFLICT immediately.
+  // Returns HTTP_SUCCESS if the file uploaded successfully.
   void UploadExistingFile(const std::string& resource_id,
                           const std::string& remote_file_md5,
-                          const FilePath& local_file_path,
+                          const base::FilePath& local_file_path,
                           const UploadFileCallback& callback);
 
   // Returns true if the user is authenticated.
@@ -199,15 +207,15 @@ class DriveFileSyncClient
                        google_apis::GDataErrorCode error,
                        scoped_ptr<google_apis::ResourceList> feed);
 
-  void DidGetParentDirectoryForCreateDirectory(
-      const FilePath::StringType& directory_name,
+  void DidCreateDirectory(const std::string& parent_resource_id,
+                          const std::string& title,
+                          const ResourceIdCallback& callback,
+                          google_apis::GDataErrorCode error,
+                          scoped_ptr<google_apis::ResourceEntry> entry);
+  void DidEnsureUniquenessForCreateDirectory(
       const ResourceIdCallback& callback,
       google_apis::GDataErrorCode error,
       scoped_ptr<google_apis::ResourceEntry> entry);
-
-  void DidCreateDirectory(const ResourceIdCallback& callback,
-                          google_apis::GDataErrorCode error,
-                          scoped_ptr<google_apis::ResourceEntry> entry);
 
   void SearchFilesInDirectory(const std::string& directory_resource_id,
                               const std::string& search_query,
@@ -228,7 +236,7 @@ class DriveFileSyncClient
                            scoped_ptr<google_apis::ResourceEntry> entry);
 
   void DownloadFileInternal(const std::string& local_file_md5,
-                            const FilePath& local_file_path,
+                            const base::FilePath& local_file_path,
                             const DownloadFileCallback& callback,
                             google_apis::GDataErrorCode error,
                             scoped_ptr<google_apis::ResourceEntry> entry);
@@ -236,27 +244,35 @@ class DriveFileSyncClient
   void DidDownloadFile(const std::string& downloaded_file_md5,
                        const DownloadFileCallback& callback,
                        google_apis::GDataErrorCode error,
-                       const FilePath& downloaded_file_path);
+                       const base::FilePath& downloaded_file_path);
 
   void UploadNewFileInternal(
-      const FilePath& local_file_path,
+      const base::FilePath& local_file_path,
       const std::string& title,
       const UploadFileCallback& callback,
       google_apis::GDataErrorCode error,
       scoped_ptr<google_apis::ResourceEntry> parent_directory_entry);
-
-  void UploadExistingFileInternal(
-      const std::string& remote_file_md5,
-      const FilePath& local_file_path,
+  void DidUploadNewFile(const std::string& parent_resource_id,
+                        const std::string& title,
+                        const UploadFileCallback& callback,
+                        google_apis::GDataErrorCode error,
+                        scoped_ptr<google_apis::ResourceEntry> entry);
+  void DidEnsureUniquenessForCreateFile(
+      const std::string& expected_resource_id,
       const UploadFileCallback& callback,
       google_apis::GDataErrorCode error,
       scoped_ptr<google_apis::ResourceEntry> entry);
 
-  void DidUploadFile(const UploadFileCallback& callback,
-                     google_apis::DriveUploadError error,
-                     const FilePath& drive_path,
-                     const FilePath& file_path,
-                     scoped_ptr<google_apis::ResourceEntry> entry);
+  void UploadExistingFileInternal(
+      const std::string& remote_file_md5,
+      const base::FilePath& local_file_path,
+      const UploadFileCallback& callback,
+      google_apis::GDataErrorCode error,
+      scoped_ptr<google_apis::ResourceEntry> entry);
+
+  void DidUploadExistingFile(const UploadFileCallback& callback,
+                             google_apis::GDataErrorCode error,
+                             scoped_ptr<google_apis::ResourceEntry> entry);
 
   void DeleteFileInternal(const std::string& remote_file_md5,
                           const GDataErrorCallback& callback,
@@ -265,6 +281,21 @@ class DriveFileSyncClient
 
   void DidDeleteFile(const GDataErrorCallback& callback,
                      google_apis::GDataErrorCode error);
+
+  void EnsureTitleUniqueness(const std::string& parent_resource_id,
+                             const std::string& expected_title,
+                             const ResourceEntryCallback& callback);
+  void DidListEntriesToEnsureUniqueness(
+      const std::string& parent_resource_id,
+      const std::string& expected_title,
+      const ResourceEntryCallback& callback,
+      google_apis::GDataErrorCode error,
+      scoped_ptr<google_apis::ResourceList> feed);
+  void DeleteEntries(ScopedVector<google_apis::ResourceEntry> entries,
+                     const GDataErrorCallback& callback);
+  void DidDeleteEntry(ScopedVector<google_apis::ResourceEntry> entries,
+                      const GDataErrorCallback& callback,
+                      google_apis::GDataErrorCode error);
 
   static std::string FormatTitleQuery(const std::string& title);
 

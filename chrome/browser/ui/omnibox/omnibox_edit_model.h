@@ -15,8 +15,8 @@
 #include "chrome/common/metrics/proto/omnibox_event.pb.h"
 #include "content/public/common/page_transition_types.h"
 #include "googleurl/src/gurl.h"
+#include "ui/base/window_open_disposition.h"
 #include "ui/gfx/native_widget_types.h"
-#include "webkit/glue/window_open_disposition.h"
 
 class AutocompleteController;
 class AutocompleteResult;
@@ -280,7 +280,7 @@ class OmniboxEditModel : public AutocompleteControllerDelegate {
 
   // Called when the user presses up or down.  |count| is a repeat count,
   // negative for moving up, positive for moving down.
-  void OnUpOrDownKeyPressed(int count);
+  virtual void OnUpOrDownKeyPressed(int count);
 
   // Called when any relevant data changes.  This rolls together several
   // separate pieces of data into one call so we can update all the UI

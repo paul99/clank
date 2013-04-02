@@ -12,6 +12,7 @@
 #include "base/memory/ref_counted.h"
 #include "base/memory/scoped_ptr.h"
 #include "base/observer_list.h"
+#include "base/strings/string_number_conversions.h"
 #include "base/threading/non_thread_safe.h"
 #include "cc/output_surface.h"
 #include "cc/output_surface_client.h"
@@ -26,12 +27,14 @@
 #include "content/common/gpu/gpu_process_launch_causes.h"
 #include "content/common/webkitplatformsupport_impl.h"
 #include "content/public/common/content_switches.h"
+#include "gpu/GLES2/gl2extchromium.h"
 #include "gpu/ipc/command_buffer_proxy.h"
-#include "third_party/WebKit/Source/WebKit/chromium/public/platform/WebGraphicsContext3D.h"
+#include "third_party/WebKit/Source/Platform/chromium/public/WebGraphicsContext3D.h"
 #include "third_party/khronos/GLES2/gl2.h"
 #include "third_party/khronos/GLES2/gl2ext.h"
 #include "ui/compositor/compositor.h"
 #include "ui/compositor/compositor_setup.h"
+#include "ui/compositor/compositor_switches.h"
 #include "ui/compositor/test_web_graphics_context_3d.h"
 #include "ui/gfx/native_widget_types.h"
 #include "ui/gfx/size.h"
@@ -66,9 +69,7 @@ class DefaultTransportFactory
   }
 
   virtual scoped_refptr<ui::Texture> CreateTransportClient(
-      const gfx::Size& size,
-      float device_scale_factor,
-      const std::string& mailbox_name) OVERRIDE {
+      float device_scale_factor) OVERRIDE {
     return NULL;
   }
 
@@ -153,39 +154,40 @@ class ImageTransportClientTexture : public OwnedTexture {
  public:
   ImageTransportClientTexture(
       WebKit::WebGraphicsContext3D* host_context,
-      const gfx::Size& size,
-      float device_scale_factor,
-      const std::string& mailbox_name)
+      float device_scale_factor)
       : OwnedTexture(host_context,
-                     size,
+                     gfx::Size(0, 0),
                      device_scale_factor,
-                     host_context->createTexture()),
-        mailbox_name_(mailbox_name) {
-    DCHECK(mailbox_name.size() == GL_MAILBOX_SIZE_CHROMIUM);
+                     host_context->createTexture()) {
   }
 
-  virtual void Consume(const gfx::Size& new_size) OVERRIDE {
-    if (!mailbox_name_.length())
+  virtual void Consume(const std::string& mailbox_name,
+                       const gfx::Size& new_size) OVERRIDE {
+    DCHECK(mailbox_name.size() == GL_MAILBOX_SIZE_CHROMIUM);
+    mailbox_name_ = mailbox_name;
+    if (mailbox_name.empty())
       return;
 
     DCHECK(host_context_ && texture_id_);
     host_context_->bindTexture(GL_TEXTURE_2D, texture_id_);
     host_context_->consumeTextureCHROMIUM(
         GL_TEXTURE_2D,
-        reinterpret_cast<const signed char*>(mailbox_name_.c_str()));
+        reinterpret_cast<const signed char*>(mailbox_name.c_str()));
     size_ = new_size;
-    host_context_->flush();
+    host_context_->shallowFlushCHROMIUM();
   }
 
-  virtual void Produce() OVERRIDE {
-    if (!mailbox_name_.length())
-      return;
-
-    DCHECK(host_context_ && texture_id_);
-    host_context_->bindTexture(GL_TEXTURE_2D, texture_id_);
-    host_context_->produceTextureCHROMIUM(
-        GL_TEXTURE_2D,
-        reinterpret_cast<const signed char*>(mailbox_name_.c_str()));
+  virtual std::string Produce() OVERRIDE {
+    std::string name;
+    if (!mailbox_name_.empty()) {
+      DCHECK(host_context_ && texture_id_);
+      host_context_->bindTexture(GL_TEXTURE_2D, texture_id_);
+      host_context_->produceTextureCHROMIUM(
+          GL_TEXTURE_2D,
+          reinterpret_cast<const signed char*>(mailbox_name_.c_str()));
+      mailbox_name_.swap(name);
+    }
+    return name;
   }
 
  protected:
@@ -208,7 +210,7 @@ class CompositorSwapClient
         factory_(factory) {
   }
 
-  ~CompositorSwapClient() {
+  virtual ~CompositorSwapClient() {
   }
 
   virtual void OnViewContextSwapBuffersPosted() OVERRIDE {
@@ -238,8 +240,8 @@ class CompositorSwapClient
 class BrowserCompositorOutputSurface;
 
 // Directs vsync updates to the appropriate BrowserCompositorOutputSurface.
-class BrowserCompositorOutputSurfaceProxy :
-    public base::RefCountedThreadSafe<BrowserCompositorOutputSurfaceProxy> {
+class BrowserCompositorOutputSurfaceProxy
+    : public base::RefCountedThreadSafe<BrowserCompositorOutputSurfaceProxy> {
  public:
   BrowserCompositorOutputSurfaceProxy()
     : message_handler_set_(false) {
@@ -288,9 +290,9 @@ class BrowserCompositorOutputSurfaceProxy :
 // Adapts a WebGraphicsContext3DCommandBufferImpl into a
 // cc::OutputSurface that also handles vsync parameter updates
 // arriving from the GPU process.
-class BrowserCompositorOutputSurface :
-    public cc::OutputSurface,
-    public base::NonThreadSafe {
+class BrowserCompositorOutputSurface
+    : public cc::OutputSurface,
+      public base::NonThreadSafe {
  public:
   explicit BrowserCompositorOutputSurface(
       WebGraphicsContext3DCommandBufferImpl* context,
@@ -300,6 +302,16 @@ class BrowserCompositorOutputSurface :
         surface_id_(surface_id),
         client_(NULL),
         output_surface_proxy_(output_surface_proxy) {
+    CommandLine* command_line = CommandLine::ForCurrentProcess();
+    if (command_line->HasSwitch(switches::kUIMaxFramesPending)) {
+      std::string string_value = command_line->GetSwitchValueASCII(
+        switches::kUIMaxFramesPending);
+      int int_value;
+      if (base::StringToInt(string_value, &int_value))
+        capabilities_.max_frames_pending = int_value;
+      else
+        LOG(ERROR) << "Trouble parsing --" << switches::kUIMaxFramesPending;
+    }
     DetachFromThread();
   }
 
@@ -341,7 +353,7 @@ class BrowserCompositorOutputSurface :
   }
 
   virtual void SendFrameToParentCompositor(
-      const cc::CompositorFrame&) OVERRIDE {
+      cc::CompositorFrame*) OVERRIDE {
   }
 
   void OnUpdateVSyncParameters(
@@ -366,10 +378,10 @@ void BrowserCompositorOutputSurfaceProxy::OnUpdateVSyncParameters(
     surface->OnUpdateVSyncParameters(timebase, interval);
 }
 
-class GpuProcessTransportFactory :
-    public ui::ContextFactory,
-    public ImageTransportFactory,
-    public WebKit::WebGraphicsContext3D::WebGraphicsContextLostCallback {
+class GpuProcessTransportFactory
+    : public ui::ContextFactory,
+      public ImageTransportFactory,
+      public WebKit::WebGraphicsContext3D::WebGraphicsContextLostCallback {
  public:
   GpuProcessTransportFactory()
       : ALLOW_THIS_IN_INITIALIZER_LIST(callback_factory_(this)) {
@@ -434,15 +446,12 @@ class GpuProcessTransportFactory :
   }
 
   virtual scoped_refptr<ui::Texture> CreateTransportClient(
-      const gfx::Size& size,
-      float device_scale_factor,
-      const std::string& mailbox_name) {
+      float device_scale_factor) OVERRIDE {
     if (!shared_context_.get())
         return NULL;
     scoped_refptr<ImageTransportClientTexture> image(
         new ImageTransportClientTexture(shared_context_.get(),
-                                        size, device_scale_factor,
-                                        mailbox_name));
+                                        device_scale_factor));
     return image;
   }
 
@@ -458,7 +467,7 @@ class GpuProcessTransportFactory :
     return image;
   }
 
-  virtual GLHelper* GetGLHelper() {
+  virtual GLHelper* GetGLHelper() OVERRIDE {
     if (!gl_helper_.get()) {
       CreateSharedContextLazy();
       WebKit::WebGraphicsContext3D* context_for_thread =
@@ -477,11 +486,12 @@ class GpuProcessTransportFactory :
     return shared_context_->insertSyncPoint();
   }
 
-  virtual void AddObserver(ImageTransportFactoryObserver* observer) {
+  virtual void AddObserver(ImageTransportFactoryObserver* observer) OVERRIDE {
     observer_list_.AddObserver(observer);
   }
 
-  virtual void RemoveObserver(ImageTransportFactoryObserver* observer) {
+  virtual void RemoveObserver(
+      ImageTransportFactoryObserver* observer) OVERRIDE {
     observer_list_.RemoveObserver(observer);
   }
 

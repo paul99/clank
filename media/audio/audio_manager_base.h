@@ -20,6 +20,10 @@
 #include "base/win/scoped_com_initializer.h"
 #endif
 
+#if defined(OS_ANDROID)
+#include "base/android/jni_android.h"
+#endif
+
 namespace base {
 class Thread;
 }
@@ -28,6 +32,7 @@ namespace media {
 
 class AudioOutputDispatcher;
 class VirtualAudioInputStream;
+class VirtualAudioOutputStream;
 
 // AudioManagerBase provides AudioManager functions common for all platforms.
 class MEDIA_EXPORT AudioManagerBase : public AudioManager {
@@ -63,6 +68,12 @@ class MEDIA_EXPORT AudioManagerBase : public AudioManager {
   // Called internally by the audio stream when it has been closed.
   virtual void ReleaseOutputStream(AudioOutputStream* stream);
   virtual void ReleaseInputStream(AudioInputStream* stream);
+
+  // Called internally by the browser-wide VirtualAudioInputStream after it has
+  // been closed.  Notifies all AudioDeviceListeners to re-create output
+  // streams and then deletes |stream|.
+  virtual void ReleaseVirtualInputStream(VirtualAudioInputStream* stream);
+  virtual void ReleaseVirtualOutputStream(VirtualAudioOutputStream* stream);
 
   void IncreaseActiveInputStreamCount();
   void DecreaseActiveInputStreamCount();
@@ -100,6 +111,10 @@ class MEDIA_EXPORT AudioManagerBase : public AudioManager {
   virtual void RemoveOutputDeviceChangeListener(
       AudioDeviceListener* listener) OVERRIDE;
 
+#if defined(OS_ANDROID)
+  static bool RegisterAudioManager(JNIEnv* env);
+#endif
+
  protected:
   AudioManagerBase();
 
@@ -130,6 +145,12 @@ class MEDIA_EXPORT AudioManagerBase : public AudioManager {
  private:
   // Called by Shutdown().
   void ShutdownOnAudioThread();
+
+#if defined(OS_ANDROID)
+  void SetAudioMode(int mode);
+  void RegisterHeadsetReceiver();
+  void UnregisterHeadsetReceiver();
+#endif
 
   // Counts the number of active input streams to find out if something else
   // is currently recording in Chrome.
@@ -164,6 +185,11 @@ class MEDIA_EXPORT AudioManagerBase : public AudioManager {
   // create all audio output streams as virtual streams so as to redirect audio
   // data to this virtual input stream.
   VirtualAudioInputStream* virtual_audio_input_stream_;
+
+#if defined(OS_ANDROID)
+  // Java AudioManager instance.
+  base::android::ScopedJavaGlobalRef<jobject> j_audio_manager_;
+#endif
 
   DISALLOW_COPY_AND_ASSIGN(AudioManagerBase);
 };

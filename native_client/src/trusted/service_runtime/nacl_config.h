@@ -215,12 +215,6 @@
 
 # define NACL_BLOCK_SHIFT         (4)
 
-# if defined(NACL_TARGET_ARM_THUMB2_MODE)
-#  define NACL_HALT         bkpt
-# else
-#  define NACL_HALT         mov pc, #0
-# endif  /* defined(NACL_TARGET_ARM_THUMB2_MODE) */
-
 /* 16-byte bundles, 1G address space */
 # define NACL_CONTROL_FLOW_MASK      0xC000000F
 
@@ -279,7 +273,6 @@
 # define NACL_STACK_GETS_ARG        (0)
 # define NACL_STACK_PAD_BELOW_ALIGN (0)
 # define NACL_STACK_RED_ZONE        (0)
-# define NACL_HALT                  break
 /* 16 byte bundles */
 
 #else /* NACL_ARCH(NACL_BUILD_ARCH) */
@@ -288,14 +281,14 @@
 
 #endif /* NACL_ARCH(NACL_BUILD_ARCH) */
 
-/*
- * Android linker doesn't support __thread variables - for development purposes
- * one could enable using unsafe pthread API for TLS, before real fix based on
- * trusted R9-based TLS pool appears.
- * TODO(olonho): remove when issue
- * http://code.google.com/p/nativeclient/issues/detail?id=2933
- * gets fixed.
- */
-#define NACL_DANGEROUS_USE_PTHREAD_GETSPECIFIC_ON_ANDROID NACL_ANDROID
+#ifdef __ASSEMBLER__
+# if NACL_WINDOWS
+#  define NACL_RODATA           .section .rdata, "dr"
+# elif NACL_OSX
+#  define NACL_RODATA           .section __TEXT, __const
+# else
+#  define NACL_RODATA           .section .rodata, "a"
+# endif
+#endif
 
 #endif  /* NATIVE_CLIENT_SRC_TRUSTED_SERVICE_RUNTIME_NACL_CONFIG_H_ */

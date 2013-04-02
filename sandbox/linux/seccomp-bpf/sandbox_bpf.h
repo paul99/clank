@@ -8,7 +8,7 @@
 #include <endian.h>
 #include <errno.h>
 #include <fcntl.h>
-#include <linux/audit.h>
+// #include <linux/audit.h>
 #include <linux/filter.h>
 // #include <linux/seccomp.h>
 #include <linux/unistd.h>
@@ -26,7 +26,6 @@
 #include <sys/ipc.h>
 #include <sys/mman.h>
 #include <sys/prctl.h>
-#include <sys/shm.h>
 #include <sys/stat.h>
 #include <sys/types.h>
 #include <sys/uio.h>
@@ -47,17 +46,43 @@
 #include "base/posix/eintr_wrapper.h"
 #endif
 
-#if defined(SECCOMP_BPF_VALGRIND_HACKS)
-#if !defined(SECCOMP_BPF_STANDALONE)
-#include "base/third_party/valgrind/valgrind.h"
-#endif
-#endif
-
 
 // The Seccomp2 kernel ABI is not part of older versions of glibc.
 // As we can't break compilation with these versions of the library,
 // we explicitly define all missing symbols.
 
+// For audit.h
+#ifndef EM_ARM
+#define EM_ARM    40
+#endif
+#ifndef EM_386
+#define EM_386    3
+#endif
+#ifndef EM_X86_64
+#define EM_X86_64 62
+#endif
+
+#ifndef __AUDIT_ARCH_64BIT
+#define __AUDIT_ARCH_64BIT 0x80000000
+#endif
+#ifndef __AUDIT_ARCH_LE
+#define __AUDIT_ARCH_LE    0x40000000
+#endif
+#ifndef AUDIT_ARCH_ARM
+#define AUDIT_ARCH_ARM    (EM_ARM|__AUDIT_ARCH_LE)
+#endif
+#ifndef AUDIT_ARCH_I386
+#define AUDIT_ARCH_I386   (EM_386|__AUDIT_ARCH_LE)
+#endif
+#ifndef AUDIT_ARCH_X86_64
+#define AUDIT_ARCH_X86_64 (EM_X86_64|__AUDIT_ARCH_64BIT|__AUDIT_ARCH_LE)
+#endif
+
+// For prctl.h
+#ifndef PR_SET_SECCOMP
+#define PR_SET_SECCOMP               22
+#define PR_GET_SECCOMP               21
+#endif
 #ifndef PR_SET_NO_NEW_PRIVS
 #define PR_SET_NO_NEW_PRIVS          38
 #define PR_GET_NO_NEW_PRIVS          39
@@ -165,11 +190,7 @@
 #define MAX_PRIVATE_SYSCALL (MIN_PRIVATE_SYSCALL + 16u)
 #define MIN_GHOST_SYSCALL   ((unsigned int)__ARM_NR_BASE + 0xfff0u)
 #define MAX_SYSCALL         (MIN_GHOST_SYSCALL + 4u)
-// <linux/audit.h> includes <linux/elf-em.h>, which does not define EM_ARM.
-// <linux/elf.h> only includes <asm/elf.h> if we're in the kernel.
-# if !defined(EM_ARM)
-# define EM_ARM 40
-# endif
+
 #define SECCOMP_ARCH AUDIT_ARCH_ARM
 
 // ARM sigcontext_t is different from i386/x86_64.
@@ -248,21 +269,6 @@ class Sandbox {
     STATUS_ENABLED       // The sandbox is now active
   };
 
-  // TrapFnc is a pointer to a function that handles Seccomp traps in
-  // user-space. The seccomp policy can request that a trap handler gets
-  // installed; it does so by returning a suitable ErrorCode() from the
-  // syscallEvaluator. See the ErrorCode() constructor for how to pass in
-  // the function pointer.
-  // Please note that TrapFnc is executed from signal context and must be
-  // async-signal safe:
-  // http://pubs.opengroup.org/onlinepubs/009695399/functions/xsh_chap02_04.html
-  // Also note that it follows the calling convention of native system calls.
-  // In other words, it reports an error by returning an exit code in the
-  // range -1..-4096. It should not set errno when reporting errors; on the
-  // other hand, accidentally modifying errno is harmless and the changes will
-  // be undone afterwards.
-  typedef intptr_t (*TrapFnc)(const struct arch_seccomp_data& args, void *aux);
-
   // When calling setSandboxPolicy(), the caller can provide an arbitrary
   // pointer. This pointer will then be forwarded to the sandbox policy
   // each time a call is made through an EvaluateSyscall function pointer.
@@ -270,6 +276,10 @@ class Sandbox {
   // to Trap() functions.
   typedef ErrorCode (*EvaluateSyscall)(int sysnum, void *aux);
   typedef std::vector<std::pair<EvaluateSyscall, void *> >Evaluators;
+
+  // A vector of BPF instructions that need to be installed as a filter
+  // program in the kernel.
+  typedef std::vector<struct sock_filter> Program;
 
   // Checks whether a particular system call number is valid on the current
   // architecture. E.g. on ARM there's a non-contiguous range of private
@@ -309,16 +319,19 @@ class Sandbox {
   // The "aux" field can carry a pointer to arbitrary data. See EvaluateSyscall
   // for a description of how to pass data from setSandboxPolicy() to a Trap()
   // handler.
-  static ErrorCode Trap(ErrorCode::TrapFnc fnc, const void *aux);
+  static ErrorCode Trap(Trap::TrapFnc fnc, const void *aux);
 
   // Calls a user-space trap handler and disables all sandboxing for system
   // calls made from this trap handler.
+  // This feature is available only if explicitly enabled by the user having
+  // set the CHROME_SANDBOX_DEBUGGING environment variable.
+  // Returns an ET_INVALID ErrorCode, if called when not enabled.
   // NOTE: This feature, by definition, disables all security features of
   //   the sandbox. It should never be used in production, but it can be
   //   very useful to diagnose code that is incompatible with the sandbox.
   //   If even a single system call returns "UnsafeTrap", the security of
   //   entire sandbox should be considered compromised.
-  static ErrorCode UnsafeTrap(ErrorCode::TrapFnc fnc, const void *aux);
+  static ErrorCode UnsafeTrap(Trap::TrapFnc fnc, const void *aux);
 
   // From within an UnsafeTrap() it is often useful to be able to execute
   // the system call that triggered the trap. The ForwardSyscall() method
@@ -353,14 +366,18 @@ class Sandbox {
   // enters Seccomp mode.
   static void StartSandbox() { StartSandboxInternal(false); }
 
+  // Assembles a BPF filter program from the current policy. After calling this
+  // function, you must not call any other sandboxing function.
+  // Typically, AssembleFilter() is only used by unit tests and by sandbox
+  // internals. It should not be used by production code.
+  static Program *AssembleFilter();
+
  private:
   friend class CodeGen;
   friend class SandboxUnittestHelper;
   friend class ErrorCode;
   friend class Util;
   friend class Verifier;
-
-  typedef std::vector<struct sock_filter> Program;
 
   struct Range {
     Range(uint32_t f, uint32_t t, const ErrorCode& e)
@@ -371,21 +388,8 @@ class Sandbox {
     uint32_t  from, to;
     ErrorCode err;
   };
-  struct TrapKey {
-    TrapKey(TrapFnc f, const void *a, bool s)
-        : fnc(f),
-          aux(a),
-          safe(s) {
-    }
-    TrapFnc    fnc;
-    const void *aux;
-    bool       safe;
-    bool operator<(const TrapKey&) const;
-  };
   typedef std::vector<Range> Ranges;
   typedef std::map<uint32_t, ErrorCode> ErrMap;
-  typedef std::vector<ErrorCode> Traps;
-  typedef std::map<TrapKey, uint16_t> TrapIds;
   typedef std::set<ErrorCode, struct ErrorCode::LessThan> Conds;
 
   // Get a file descriptor pointing to "/proc", if currently available.
@@ -424,20 +428,43 @@ class Sandbox {
   // evaluator.
   static ErrorCode RedirectToUserspaceEvalWrapper(int sysnum, void *aux);
 
+  // Assembles and installs a filter based on the policy that has previously
+  // been configured with SetSandboxPolicy().
   static void      InstallFilter(bool quiet);
+
+  // Verify the correctness of a compiled program by comparing it against the
+  // current policy. This function should only ever be called by unit tests and
+  // by the sandbox internals. It should not be used by production code.
+  static void VerifyProgram(const Program& program, bool has_unsafe_traps);
+
+  // Finds all the ranges of system calls that need to be handled. Ranges are
+  // sorted in ascending order of system call numbers. There are no gaps in the
+  // ranges. System calls with identical ErrorCodes are coalesced into a single
+  // range.
   static void      FindRanges(Ranges *ranges);
+
+  // Returns a BPF program snippet that implements a jump table for the
+  // given range of system call numbers. This function runs recursively.
   static Instruction *AssembleJumpTable(CodeGen *gen,
                                         Ranges::const_iterator start,
                                         Ranges::const_iterator stop);
-  static Instruction *RetExpression(CodeGen *gen, const ErrorCode& cond);
+
+  // Returns a BPF program snippet that makes the BPF filter program exit
+  // with the given ErrorCode "err". N.B. the ErrorCode may very well be a
+  // conditional expression; if so, this function will recursively call
+  // CondExpression() and possibly RetExpression() to build a complex set of
+  // instructions.
+  static Instruction *RetExpression(CodeGen *gen, const ErrorCode& err);
+
+  // Returns a BPF program that evaluates the conditional expression in
+  // "cond" and returns the appropriate value from the BPF filter program.
+  // This function recursively calls RetExpression(); it should only ever be
+  // called from RetExpression().
   static Instruction *CondExpression(CodeGen *gen, const ErrorCode& cond);
 
   // Returns the fatal ErrorCode that is used to indicate that somebody
   // attempted to pass a 64bit value in a 32bit system call argument.
   static ErrorCode Unexpected64bitArgument();
-
-  static void      SigSys(int nr, siginfo_t *info, void *void_context);
-  static ErrorCode MakeTrap(ErrorCode::TrapFnc fn, const void *aux, bool safe);
 
   // A Trap() handler that returns an "errno" value. The value is encoded
   // in the "aux" parameter.
@@ -448,11 +475,6 @@ class Sandbox {
   static SandboxStatus status_;
   static int           proc_fd_;
   static Evaluators    evaluators_;
-  static Traps         *traps_;
-  static TrapIds       trap_ids_;
-  static ErrorCode     *trap_array_;
-  static size_t        trap_array_size_;
-  static bool          has_unsafe_traps_;
   static Conds         conds_;
 
   DISALLOW_IMPLICIT_CONSTRUCTORS(Sandbox);

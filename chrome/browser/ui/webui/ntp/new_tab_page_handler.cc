@@ -8,8 +8,9 @@
 #include "base/bind_helpers.h"
 #include "base/memory/scoped_ptr.h"
 #include "base/metrics/histogram.h"
-#include "chrome/browser/browser_process.h"
-#include "chrome/browser/prefs/pref_service.h"
+#include "base/prefs/pref_service.h"
+#include "chrome/browser/extensions/app_launcher.h"
+#include "chrome/browser/prefs/pref_registry_syncable.h"
 #include "chrome/browser/profiles/profile.h"
 #include "chrome/browser/sync/profile_sync_service.h"
 #include "chrome/browser/ui/webui/ntp/new_tab_ui.h"
@@ -74,20 +75,22 @@ void NewTabPageHandler::RegisterMessages() {
   web_ui()->RegisterMessageCallback("logTimeToClick",
       base::Bind(&NewTabPageHandler::HandleLogTimeToClick,
                  base::Unretained(this)));
+  web_ui()->RegisterMessageCallback("getShouldShowApps",
+      base::Bind(&NewTabPageHandler::HandleGetShouldShowApps,
+                 base::Unretained(this)));
 }
 
 void NewTabPageHandler::HandleNotificationPromoClosed(const ListValue* args) {
   UMA_HISTOGRAM_ENUMERATION("NewTabPage.Promo.Notification",
                             PROMO_CLOSED, PROMO_ACTION_MAX);
-  NotificationPromo::HandleClosed(Profile::FromWebUI(web_ui()),
-                                  NotificationPromo::NTP_NOTIFICATION_PROMO);
+  NotificationPromo::HandleClosed(NotificationPromo::NTP_NOTIFICATION_PROMO);
   Notify(chrome::NOTIFICATION_PROMO_RESOURCE_STATE_CHANGED);
 }
 
 void NewTabPageHandler::HandleNotificationPromoViewed(const ListValue* args) {
   UMA_HISTOGRAM_ENUMERATION("NewTabPage.Promo.Notification",
                             PROMO_VIEWED, PROMO_ACTION_MAX);
-  if (NotificationPromo::HandleViewed(Profile::FromWebUI(web_ui()),
+  if (NotificationPromo::HandleViewed(
           NotificationPromo::NTP_NOTIFICATION_PROMO)) {
     Notify(chrome::NOTIFICATION_PROMO_RESOURCE_STATE_CHANGED);
   }
@@ -103,18 +106,15 @@ void NewTabPageHandler::HandleNotificationPromoLinkClicked(
 void NewTabPageHandler::HandleBubblePromoClosed(const ListValue* args) {
   UMA_HISTOGRAM_ENUMERATION("NewTabPage.Promo.Bubble",
                             PROMO_CLOSED, PROMO_ACTION_MAX);
-  NotificationPromo::HandleClosed(Profile::FromWebUI(web_ui()),
-                                  NotificationPromo::NTP_BUBBLE_PROMO);
+  NotificationPromo::HandleClosed(NotificationPromo::NTP_BUBBLE_PROMO);
   Notify(chrome::NOTIFICATION_PROMO_RESOURCE_STATE_CHANGED);
 }
 
 void NewTabPageHandler::HandleBubblePromoViewed(const ListValue* args) {
   UMA_HISTOGRAM_ENUMERATION("NewTabPage.Promo.Bubble",
                             PROMO_VIEWED, PROMO_ACTION_MAX);
-  if (NotificationPromo::HandleViewed(Profile::FromWebUI(web_ui()),
-                                      NotificationPromo::NTP_BUBBLE_PROMO)) {
+  if (NotificationPromo::HandleViewed(NotificationPromo::NTP_BUBBLE_PROMO))
     Notify(chrome::NOTIFICATION_PROMO_RESOURCE_STATE_CHANGED);
-  }
 }
 
 void NewTabPageHandler::HandleBubblePromoLinkClicked(const ListValue* args) {
@@ -172,11 +172,22 @@ void NewTabPageHandler::HandleLogTimeToClick(const ListValue* args) {
   }
 }
 
+void NewTabPageHandler::HandleGetShouldShowApps(const ListValue* args) {
+  extensions::UpdateIsAppLauncherEnabled(
+      base::Bind(&NewTabPageHandler::GotIsAppLauncherEnabled,
+                 AsWeakPtr()));
+}
+
+void NewTabPageHandler::GotIsAppLauncherEnabled(bool is_enabled) {
+  base::FundamentalValue should_show_apps(!is_enabled);
+  web_ui()->CallJavascriptFunction("ntp.gotShouldShowApps", should_show_apps);
+}
+
 // static
-void NewTabPageHandler::RegisterUserPrefs(PrefService* prefs) {
+void NewTabPageHandler::RegisterUserPrefs(PrefRegistrySyncable* registry) {
   // TODO(estade): should be syncable.
-  prefs->RegisterIntegerPref(prefs::kNtpShownPage, APPS_PAGE_ID,
-                             PrefService::UNSYNCABLE_PREF);
+  registry->RegisterIntegerPref(prefs::kNtpShownPage, APPS_PAGE_ID,
+                                PrefRegistrySyncable::UNSYNCABLE_PREF);
 }
 
 // static

@@ -18,22 +18,23 @@
 #include "base/win/win_util.h"
 #include "chrome/app/chrome_command_ids.h"
 #include "chrome/app/chrome_dll_resource.h"
+#include "chrome/browser/api/infobars/infobar_service.h"
 #include "chrome/browser/automation/automation_provider.h"
-#include "chrome/browser/debugger/devtools_toggle_action.h"
-#include "chrome/browser/debugger/devtools_window.h"
+#include "chrome/browser/devtools/devtools_toggle_action.h"
+#include "chrome/browser/devtools/devtools_window.h"
 #include "chrome/browser/file_select_helper.h"
 #include "chrome/browser/history/history_tab_helper.h"
 #include "chrome/browser/history/history_types.h"
-#include "chrome/browser/infobars/infobar_tab_helper.h"
 #include "chrome/browser/pepper_broker_infobar_delegate.h"
 #include "chrome/browser/profiles/profile.h"
 #include "chrome/browser/repost_form_warning_controller.h"
 #include "chrome/browser/themes/theme_service.h"
-#include "chrome/browser/ui/app_modal_dialogs/javascript_dialog_creator.h"
+#include "chrome/browser/ui/app_modal_dialogs/javascript_dialog_manager.h"
 #include "chrome/browser/ui/blocked_content/blocked_content_tab_helper.h"
 #include "chrome/browser/ui/browser.h"
 #include "chrome/browser/ui/browser_tab_contents.h"
 #include "chrome/browser/ui/browser_window.h"
+#include "chrome/browser/ui/media_stream_infobar_delegate.h"
 #include "chrome/browser/ui/tab_modal_confirm_dialog.h"
 #include "chrome/browser/ui/views/infobars/infobar_container_view.h"
 #include "chrome/browser/ui/views/tab_contents/render_view_context_menu_win.h"
@@ -50,7 +51,6 @@
 #include "content/public/browser/render_process_host.h"
 #include "content/public/browser/render_view_host.h"
 #include "content/public/browser/web_contents.h"
-#include "content/public/browser/web_intents_dispatcher.h"
 #include "content/public/common/bindings_policy.h"
 #include "content/public/common/frame_navigate_params.h"
 #include "content/public/common/page_transition_types.h"
@@ -59,9 +59,9 @@
 #include "content/public/common/ssl_status.h"
 #include "grit/generated_resources.h"
 #include "grit/locale_settings.h"
+#include "third_party/WebKit/Source/Platform/chromium/public/WebCString.h"
 #include "third_party/WebKit/Source/Platform/chromium/public/WebReferrerPolicy.h"
-#include "third_party/WebKit/Source/WebKit/chromium/public/platform/WebCString.h"
-#include "third_party/WebKit/Source/WebKit/chromium/public/platform/WebString.h"
+#include "third_party/WebKit/Source/Platform/chromium/public/WebString.h"
 #include "third_party/WebKit/Source/WebKit/chromium/public/WebSecurityPolicy.h"
 #include "ui/base/events/event_utils.h"
 #include "ui/base/l10n/l10n_util.h"
@@ -94,20 +94,18 @@ namespace {
 ContextMenuModel* ConvertMenuModel(const ui::MenuModel* ui_model) {
   ContextMenuModel* new_model = new ContextMenuModel;
 
-  const int index_base = ui_model->GetFirstItemIndex(NULL);
   const int item_count = ui_model->GetItemCount();
   new_model->items.reserve(item_count);
   for (int i = 0; i < item_count; ++i) {
-    const int index = index_base + i;
-    if (ui_model->IsVisibleAt(index)) {
+    if (ui_model->IsVisibleAt(i)) {
       ContextMenuModel::Item item;
-      item.type = ui_model->GetTypeAt(index);
-      item.item_id = ui_model->GetCommandIdAt(index);
-      item.label = ui_model->GetLabelAt(index);
-      item.checked = ui_model->IsItemCheckedAt(index);
-      item.enabled = ui_model->IsEnabledAt(index);
+      item.type = ui_model->GetTypeAt(i);
+      item.item_id = ui_model->GetCommandIdAt(i);
+      item.label = ui_model->GetLabelAt(i);
+      item.checked = ui_model->IsItemCheckedAt(i);
+      item.enabled = ui_model->IsEnabledAt(i);
       if (item.type == ui::MenuModel::TYPE_SUBMENU)
-        item.submenu = ConvertMenuModel(ui_model->GetSubmenuModelAt(index));
+        item.submenu = ConvertMenuModel(ui_model->GetSubmenuModelAt(i));
 
       new_model->items.push_back(item);
     }
@@ -223,9 +221,9 @@ bool ExternalTabContainerWin::Init(Profile* profile,
   web_contents_.reset(existing_contents);
 
   if (!infobars_enabled) {
-    InfoBarTabHelper* infobar_tab_helper =
-        InfoBarTabHelper::FromWebContents(existing_contents);
-    infobar_tab_helper->set_infobars_enabled(false);
+    InfoBarService* infobar_service =
+        InfoBarService::FromWebContents(existing_contents);
+    infobar_service->SetInfoBarsEnabled(false);
   }
 
   // Start loading initial URL
@@ -265,6 +263,25 @@ void ExternalTabContainerWin::Uninitialize() {
   registrar_.RemoveAll();
   if (web_contents_.get()) {
     UnregisterRenderViewHost(web_contents_->GetRenderViewHost());
+
+    // Explicitly tell the RPH to shutdown, as doing so is the only thing that
+    // cleans up certain resources like infobars (crbug.com/148398).
+    // Tell the RPH to shutdown iff it has a page count of 1, meaning that
+    // there is only a single remaining render widget host (the one owned by
+    // web_contents_) using this RPH.
+    //
+    // Note that it is not possible to simply call FastShutdownIfPossible on the
+    // RPH here as that unfortunately ignores RPH's internal ref count, which
+    // leaves any other render widget hosts using the same RPH dangling.
+    //
+    // Note that in an ideal world, this would not be needed. The WebContents
+    // could just destroy itself, resulting in RPH::Release() eventually getting
+    // called and all would be neat and tidy. Sadly, the RPH only fires
+    // NOTIFICATION_RENDERER_PROCESS_CLOSED if one of the FastShutdownXXX
+    // methods is called and other components rely on that notification to avoid
+    // crashing on shutdown. Sad panda. Or maybe clinically depressed panda is
+    // more fitting.
+    web_contents_->GetRenderProcessHost()->FastShutdownForPageCount(1);
 
     if (GetWidget()->GetRootView())
       GetWidget()->GetRootView()->RemoveAllChildViews(true);
@@ -675,9 +692,9 @@ void ExternalTabContainerWin::UnregisterRenderViewHost(
   }
 }
 
-content::JavaScriptDialogCreator*
-ExternalTabContainerWin::GetJavaScriptDialogCreator() {
-  return GetJavaScriptDialogCreatorInstance();
+content::JavaScriptDialogManager*
+ExternalTabContainerWin::GetJavaScriptDialogManager() {
+  return GetJavaScriptDialogManagerInstance();
 }
 
 bool ExternalTabContainerWin::HandleContextMenu(
@@ -774,7 +791,7 @@ void ExternalTabContainerWin::RunFileChooser(
 
 void ExternalTabContainerWin::EnumerateDirectory(WebContents* tab,
                                                  int request_id,
-                                                 const FilePath& path) {
+                                                 const base::FilePath& path) {
   FileSelectHelper::EnumerateDirectory(tab, request_id, path);
 }
 
@@ -792,21 +809,6 @@ void ExternalTabContainerWin::RegisterProtocolHandler(
                                          user_gesture, NULL);
 }
 
-void ExternalTabContainerWin::RegisterIntentHandler(
-    WebContents* tab,
-    const webkit_glue::WebIntentServiceData& data,
-    bool user_gesture) {
-  Browser::RegisterIntentHandlerHelper(tab, data, user_gesture);
-}
-
-void ExternalTabContainerWin::WebIntentDispatch(
-    WebContents* tab,
-    content::WebIntentsDispatcher* intents_dispatcher) {
-  // TODO(binji) How do we want to display the WebIntentPicker bubble if there
-  // is no BrowserWindow?
-  delete intents_dispatcher;
-}
-
 void ExternalTabContainerWin::FindReply(WebContents* tab,
                                         int request_id,
                                         int number_of_matches,
@@ -819,17 +821,17 @@ void ExternalTabContainerWin::FindReply(WebContents* tab,
 
 void ExternalTabContainerWin::RequestMediaAccessPermission(
     content::WebContents* web_contents,
-    const content::MediaStreamRequest* request,
+    const content::MediaStreamRequest& request,
     const content::MediaResponseCallback& callback) {
-  Browser::RequestMediaAccessPermissionHelper(web_contents, request, callback);
+  MediaStreamInfoBarDelegate::Create(web_contents, request, callback);
 }
 
 bool ExternalTabContainerWin::RequestPpapiBrokerPermission(
     WebContents* web_contents,
     const GURL& url,
-    const FilePath& plugin_path,
+    const base::FilePath& plugin_path,
     const base::Callback<void(bool)>& callback) {
-  PepperBrokerInfoBarDelegate::Show(web_contents, url, plugin_path, callback);
+  PepperBrokerInfoBarDelegate::Create(web_contents, url, plugin_path, callback);
   return true;
 }
 
@@ -1198,9 +1200,9 @@ void ExternalTabContainerWin::SetupExternalTabView() {
 
   InfoBarContainerView* info_bar_container =
       new InfoBarContainerView(this, NULL);
-  InfoBarTabHelper* infobar_tab_helper =
-      InfoBarTabHelper::FromWebContents(web_contents_.get());
-  info_bar_container->ChangeTabContents(infobar_tab_helper);
+  InfoBarService* infobar_service =
+      InfoBarService::FromWebContents(web_contents_.get());
+  info_bar_container->ChangeInfoBarService(infobar_service);
 
   views::GridLayout* layout = new views::GridLayout(external_tab_view_);
   // Give this column an identifier of 0.

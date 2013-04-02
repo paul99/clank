@@ -25,9 +25,11 @@
 #include "ui/aura/test/event_generator.h"
 #include "ui/aura/test/test_windows.h"
 #include "ui/base/events/event.h"
+#include "ui/base/events/event_utils.h"
 #include "ui/base/hit_test.h"
 #include "ui/base/ui_base_switches.h"
 #include "ui/gfx/screen.h"
+#include "ui/gfx/size.h"
 #include "ui/views/widget/widget_delegate.h"
 
 namespace ash {
@@ -122,9 +124,60 @@ class ResizableWidgetDelegate : public views::WidgetDelegateView {
 
  private:
   virtual bool CanResize() const OVERRIDE { return true; }
+  virtual bool CanMaximize() const OVERRIDE { return true; }
   virtual void DeleteDelegate() OVERRIDE { delete this; }
 
   DISALLOW_COPY_AND_ASSIGN(ResizableWidgetDelegate);
+};
+
+// Support class for testing windows with a maximum size.
+class MaxSizeNCFV : public views::NonClientFrameView {
+ public:
+  MaxSizeNCFV() {}
+ private:
+  virtual gfx::Size GetMaximumSize() OVERRIDE {
+    return gfx::Size(200, 200);
+  }
+  virtual gfx::Rect GetBoundsForClientView() const OVERRIDE {
+    return gfx::Rect();
+  };
+
+  virtual gfx::Rect GetWindowBoundsForClientBounds(
+      const gfx::Rect& client_bounds) const OVERRIDE {
+    return gfx::Rect();
+  };
+
+  // This function must ask the ClientView to do a hittest.  We don't do this in
+  // the parent NonClientView because that makes it more difficult to calculate
+  // hittests for regions that are partially obscured by the ClientView, e.g.
+  // HTSYSMENU.
+  virtual int NonClientHitTest(const gfx::Point& point) OVERRIDE {
+    return HTNOWHERE;
+  }
+  virtual void GetWindowMask(const gfx::Size& size,
+                             gfx::Path* window_mask) OVERRIDE {}
+  virtual void ResetWindowControls() OVERRIDE {}
+  virtual void UpdateWindowIcon() OVERRIDE {}
+  virtual void UpdateWindowTitle() OVERRIDE {}
+
+  DISALLOW_COPY_AND_ASSIGN(MaxSizeNCFV);
+};
+
+class MaxSizeWidgetDelegate : public views::WidgetDelegateView {
+ public:
+  MaxSizeWidgetDelegate() {}
+  virtual ~MaxSizeWidgetDelegate() {}
+
+ private:
+  virtual bool CanResize() const OVERRIDE { return true; }
+  virtual bool CanMaximize() const OVERRIDE { return false; }
+  virtual void DeleteDelegate() OVERRIDE { delete this; }
+  virtual views::NonClientFrameView* CreateNonClientFrameView(
+      views::Widget* widget) OVERRIDE {
+    return new MaxSizeNCFV;
+  }
+
+  DISALLOW_COPY_AND_ASSIGN(MaxSizeWidgetDelegate);
 };
 
 } // namespace
@@ -191,8 +244,10 @@ TEST_F(SystemGestureEventFilterTest, TapOutsideRootWindow) {
   const int kTouchId = 5;
 
   // A touch outside the root window will be associated with the root window
-  ui::TouchEvent press(ui::ET_TOUCH_PRESSED, gfx::Point(-10, -10), kTouchId,
-      base::Time::NowFromSystemTime() - base::Time());
+  ui::TouchEvent press(ui::ET_TOUCH_PRESSED,
+                       gfx::Point(-10, -10),
+                       kTouchId,
+                       ui::EventTimeForNow());
   root_window->AsRootWindowHostDelegate()->OnHostTouchEvent(&press);
 
   scoped_ptr<ui::GestureEvent> event(CreateGesture(
@@ -226,7 +281,7 @@ void MoveToDeviceControlBezelStartPosition(
   ui::TouchEvent press1(ui::ET_TOUCH_PRESSED,
                         gfx::Point(-10, ypos + ypos_half),
                         touch_id,
-                        base::Time::NowFromSystemTime() - base::Time());
+                        ui::EventTimeForNow());
   root_window->AsRootWindowHostDelegate()->OnHostTouchEvent(&press1);
 
   // There is a noise filter which will require several calls before it
@@ -349,9 +404,10 @@ TEST_F(SystemGestureEventFilterTest, DeviceControl) {
     EXPECT_TRUE(consumed);
     EXPECT_EQ(2, delegate->handle_percent_count());
 
-    ui::TouchEvent release(
-        ui::ET_TOUCH_RELEASED, gfx::Point(2 * xpos, ypos + ypos_half), kTouchId,
-        base::Time::NowFromSystemTime() - base::Time());
+    ui::TouchEvent release(ui::ET_TOUCH_RELEASED,
+                           gfx::Point(2 * xpos, ypos + ypos_half),
+                           kTouchId,
+                           ui::EventTimeForNow());
     root_window->AsRootWindowHostDelegate()->OnHostTouchEvent(&release);
 
     // Check that huge changes will be interpreted as noise as well.
@@ -412,9 +468,9 @@ TEST_F(SystemGestureEventFilterTest, ApplicationControl) {
 
     // Get a target for kTouchId
     ui::TouchEvent press(ui::ET_TOUCH_PRESSED,
-                             gfx::Point(-10, ypos + ypos_half),
-                             kTouchId,
-                             base::Time::NowFromSystemTime() - base::Time());
+                         gfx::Point(-10, ypos + ypos_half),
+                         kTouchId,
+                         ui::EventTimeForNow());
     root_window->AsRootWindowHostDelegate()->OnHostTouchEvent(&press);
 
     scoped_ptr<ui::GestureEvent> event1(CreateGesture(
@@ -462,9 +518,10 @@ TEST_F(SystemGestureEventFilterTest, ApplicationControl) {
     EXPECT_TRUE(consumed);
     EXPECT_EQ(ash::wm::GetActiveWindow(), active_window);
 
-    ui::TouchEvent release(
-        ui::ET_TOUCH_RELEASED, gfx::Point(2 * xpos, ypos + ypos_half), kTouchId,
-        base::Time::NowFromSystemTime() - base::Time());
+    ui::TouchEvent release(ui::ET_TOUCH_RELEASED,
+                           gfx::Point(2 * xpos, ypos + ypos_half),
+                           kTouchId,
+                           ui::EventTimeForNow());
     root_window->AsRootWindowHostDelegate()->OnHostTouchEvent(&release);
 
     // Remove the launcher items again.
@@ -494,8 +551,10 @@ TEST_F(SystemGestureEventFilterTest, LongPressAffordanceStateOnCaptureLoss) {
   EXPECT_TRUE(window1->HasCapture());
 
   // Send touch event to first window.
-  ui::TouchEvent press(ui::ET_TOUCH_PRESSED, gfx::Point(10, 10), kTouchId,
-      base::Time::NowFromSystemTime() - base::Time());
+  ui::TouchEvent press(ui::ET_TOUCH_PRESSED,
+                       gfx::Point(10, 10),
+                       kTouchId,
+                       ui::EventTimeForNow());
   root_window->AsRootWindowHostDelegate()->OnHostTouchEvent(&press);
   EXPECT_TRUE(window1->HasCapture());
 
@@ -532,8 +591,8 @@ TEST_F(SystemGestureEventFilterTest, LongPressAffordanceStateOnCaptureLoss) {
 
 TEST_F(SystemGestureEventFilterTest, MultiFingerSwipeGestures) {
   aura::RootWindow* root_window = Shell::GetPrimaryRootWindow();
-  views::Widget* toplevel = views::Widget::CreateWindowWithBounds(
-      new ResizableWidgetDelegate, gfx::Rect(0, 0, 100, 100));
+  views::Widget* toplevel = views::Widget::CreateWindowWithContextAndBounds(
+      new ResizableWidgetDelegate, root_window, gfx::Rect(0, 0, 100, 100));
   toplevel->Show();
 
   const int kSteps = 15;
@@ -588,8 +647,8 @@ TEST_F(SystemGestureEventFilterTest, MultiFingerSwipeGestures) {
 TEST_F(SystemGestureEventFilterTest, TwoFingerDrag) {
   gfx::Rect bounds(0, 0, 100, 100);
   aura::RootWindow* root_window = Shell::GetPrimaryRootWindow();
-  views::Widget* toplevel = views::Widget::CreateWindowWithBounds(
-      new ResizableWidgetDelegate, bounds);
+  views::Widget* toplevel = views::Widget::CreateWindowWithContextAndBounds(
+      new ResizableWidgetDelegate, root_window, bounds);
   toplevel->Show();
 
   const int kSteps = 15;
@@ -641,11 +700,68 @@ TEST_F(SystemGestureEventFilterTest, TwoFingerDrag) {
   EXPECT_EQ(current_bounds.ToString(), right_tile_bounds.ToString());
 }
 
+TEST_F(SystemGestureEventFilterTest, WindowsWithMaxSizeDontSnap) {
+  gfx::Rect bounds(150, 150, 100, 100);
+  aura::RootWindow* root_window = Shell::GetPrimaryRootWindow();
+  views::Widget* toplevel = views::Widget::CreateWindowWithContextAndBounds(
+      new MaxSizeWidgetDelegate, root_window, bounds);
+  toplevel->Show();
+
+  const int kSteps = 15;
+  const int kTouchPoints = 2;
+  gfx::Point points[kTouchPoints] = {
+    gfx::Point(150+10, 150+30),
+    gfx::Point(150+30, 150+20),
+  };
+
+  aura::test::EventGenerator generator(root_window,
+                                       toplevel->GetNativeWindow());
+
+  // Swipe down to minimize.
+  generator.GestureMultiFingerScroll(kTouchPoints, points, 15, kSteps, 0, 150);
+  EXPECT_TRUE(wm::IsWindowMinimized(toplevel->GetNativeWindow()));
+
+  toplevel->Restore();
+  toplevel->GetNativeWindow()->SetBounds(bounds);
+
+  // Check that swiping up doesn't maximize.
+  generator.GestureMultiFingerScroll(kTouchPoints, points, 15, kSteps, 0, -150);
+  EXPECT_FALSE(wm::IsWindowMaximized(toplevel->GetNativeWindow()));
+
+  toplevel->Restore();
+  toplevel->GetNativeWindow()->SetBounds(bounds);
+
+  // Check that swiping right doesn't snap.
+  gfx::Rect normal_bounds = toplevel->GetWindowBoundsInScreen();
+  generator.GestureMultiFingerScroll(kTouchPoints, points, 15, kSteps, 150, 0);
+  normal_bounds.set_x(normal_bounds.x() + 150);
+  EXPECT_EQ(normal_bounds.ToString(),
+      toplevel->GetWindowBoundsInScreen().ToString());
+
+  toplevel->GetNativeWindow()->SetBounds(bounds);
+
+  // Check that swiping left doesn't snap.
+  normal_bounds = toplevel->GetWindowBoundsInScreen();
+  generator.GestureMultiFingerScroll(kTouchPoints, points, 15, kSteps, -150, 0);
+  normal_bounds.set_x(normal_bounds.x() - 150);
+  EXPECT_EQ(normal_bounds.ToString(),
+      toplevel->GetWindowBoundsInScreen().ToString());
+
+  toplevel->GetNativeWindow()->SetBounds(bounds);
+
+  // Swipe right again, make sure the window still doesn't snap.
+  normal_bounds = toplevel->GetWindowBoundsInScreen();
+  normal_bounds.set_x(normal_bounds.x() + 150);
+  generator.GestureMultiFingerScroll(kTouchPoints, points, 15, kSteps, 150, 0);
+  EXPECT_EQ(normal_bounds.ToString(),
+      toplevel->GetWindowBoundsInScreen().ToString());
+}
+
 TEST_F(SystemGestureEventFilterTest, TwoFingerDragEdge) {
   gfx::Rect bounds(0, 0, 100, 100);
   aura::RootWindow* root_window = Shell::GetPrimaryRootWindow();
-  views::Widget* toplevel = views::Widget::CreateWindowWithBounds(
-      new ResizableWidgetDelegate, bounds);
+  views::Widget* toplevel = views::Widget::CreateWindowWithContextAndBounds(
+      new ResizableWidgetDelegate, root_window, bounds);
   toplevel->Show();
 
   const int kSteps = 15;

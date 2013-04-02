@@ -14,7 +14,8 @@
 // backwards compatibility for legacy applications using the library.
 #define VPX_CODEC_DISABLE_COMPAT 1
 extern "C" {
-#include "third_party/libvpx/libvpx.h"
+#include "third_party/libvpx/source/libvpx/vpx/vpx_decoder.h"
+#include "third_party/libvpx/source/libvpx/vpx/vp8dx.h"
 }
 
 #include "webkit/media/crypto/ppapi/cdm/content_decryption_module.h"
@@ -25,8 +26,9 @@ extern "C" {
 
 namespace webkit_media {
 
-static const int kDecodeThreads = 1;
+static const int kDecodeThreads = 2;
 
+#if defined(USE_COPYPLANE_WITH_LIBVPX)
 static void CopyPlane(const uint8_t* source,
                       int32_t source_stride,
                       int32_t target_stride,
@@ -46,10 +48,11 @@ static void CopyPlane(const uint8_t* source,
            copy_bytes_per_row);
   }
 }
+#endif  // USE_COPYPLANE_WITH_LIBVPX
 
-LibvpxCdmVideoDecoder::LibvpxCdmVideoDecoder(cdm::Allocator* allocator)
+LibvpxCdmVideoDecoder::LibvpxCdmVideoDecoder(cdm::Host* host)
     : is_initialized_(false),
-      allocator_(allocator),
+      host_(host),
       vpx_codec_(NULL),
       vpx_image_(NULL) {
 }
@@ -172,9 +175,9 @@ bool LibvpxCdmVideoDecoder::CopyVpxImageTo(cdm::VideoFrame* cdm_video_frame) {
   const int space_required = y_size + (uv_size * 2);
 
   DCHECK(!cdm_video_frame->FrameBuffer());
-  cdm_video_frame->SetFrameBuffer(allocator_->Allocate(space_required));
+  cdm_video_frame->SetFrameBuffer(host_->Allocate(space_required));
   if (!cdm_video_frame->FrameBuffer()) {
-    LOG(ERROR) << "CopyVpxImageTo() cdm::Allocator::Allocate failed.";
+    LOG(ERROR) << "CopyVpxImageTo() cdm::Host::Allocate failed.";
     return false;
   }
   cdm_video_frame->FrameBuffer()->SetSize(space_required);
@@ -225,9 +228,9 @@ bool LibvpxCdmVideoDecoder::CopyVpxImageTo(cdm::VideoFrame* cdm_video_frame) {
   const int space_required = y_size + u_size + v_size;
 
   DCHECK(!cdm_video_frame->FrameBuffer());
-  cdm_video_frame->SetFrameBuffer(allocator_->Allocate(space_required));
+  cdm_video_frame->SetFrameBuffer(host_->Allocate(space_required));
   if (!cdm_video_frame->FrameBuffer()) {
-    LOG(ERROR) << "CopyVpxImageTo() cdm::Allocator::Allocate failed.";
+    LOG(ERROR) << "CopyVpxImageTo() cdm::Host::Allocate failed.";
     return false;
   }
   cdm_video_frame->FrameBuffer()->SetSize(space_required);

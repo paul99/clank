@@ -5,21 +5,17 @@
 #ifndef CHROME_BROWSER_CHROMEOS_DRIVE_DRIVE_SCHEDULER_H_
 #define CHROME_BROWSER_CHROMEOS_DRIVE_DRIVE_SCHEDULER_H_
 
-#include "base/memory/linked_ptr.h"
+#include <list>
+
 #include "base/memory/scoped_ptr.h"
 #include "chrome/browser/chromeos/drive/drive_file_system_interface.h"
 #include "chrome/browser/google_apis/drive_service_interface.h"
+#include "chrome/browser/google_apis/drive_uploader.h"
 #include "net/base/network_change_notifier.h"
-
-#include <deque>
 
 class Profile;
 
 namespace drive {
-
-namespace file_system {
-class DriveOperations;
-}
 
 // The DriveScheduler is responsible for queuing and scheduling drive
 // operations.  It is responsible for handling retry logic, rate limiting, as
@@ -30,18 +26,20 @@ class DriveOperations;
 class DriveScheduler
     : public net::NetworkChangeNotifier::ConnectionTypeObserver {
  public:
-
   // Enum representing the type of job.
   enum JobType {
     TYPE_GET_ACCOUNT_METADATA,
-    TYPE_GET_APPLICATION_INFO,
-    TYPE_COPY,
+    TYPE_GET_APP_LIST,
     TYPE_GET_RESOURCE_LIST,
-    TYPE_MOVE,
-    TYPE_REMOVE,
-    TYPE_TRANSFER_LOCAL_TO_REMOTE,
-    TYPE_TRANSFER_REGULAR_FILE,
-    TYPE_TRANSFER_REMOTE_TO_LOCAL,
+    TYPE_GET_RESOURCE_ENTRY,
+    TYPE_DELETE_RESOURCE,
+    TYPE_COPY_HOSTED_DOCUMENT,
+    TYPE_RENAME_RESOURCE,
+    TYPE_ADD_RESOURCE_TO_DIRECTORY,
+    TYPE_REMOVE_RESOURCE_FROM_DIRECTORY,
+    TYPE_ADD_NEW_DIRECTORY,
+    TYPE_DOWNLOAD_FILE,
+    TYPE_UPLOAD_EXISTING_FILE,
   };
 
   // Current state of the job.
@@ -58,7 +56,7 @@ class DriveScheduler
 
   // Information about a specific job that is visible to other systems.
   struct JobInfo {
-    JobInfo(JobType in_job_type, FilePath in_file_path);
+    explicit JobInfo(JobType in_job_type);
 
     // Type of the job.
     JobType job_type;
@@ -73,7 +71,7 @@ class DriveScheduler
     int total_bytes;
 
     // Drive path of the file that this job acts on.
-    FilePath file_path;
+    base::FilePath file_path;
 
     // Current state of the operation.
     JobState state;
@@ -81,7 +79,7 @@ class DriveScheduler
 
   DriveScheduler(Profile* profile,
                  google_apis::DriveServiceInterface* drive_service,
-                 file_system::DriveOperations* drive_operations);
+                 google_apis::DriveUploaderInterface* uploader);
   virtual ~DriveScheduler();
 
   // Initializes the object. This function should be called before any
@@ -93,15 +91,9 @@ class DriveScheduler
   void GetAccountMetadata(
       const google_apis::GetAccountMetadataCallback& callback);
 
-  // Adds a GetApplicationInfo operation to the queue.
+  // Adds a GetAppList operation to the queue.
   // |callback| must not be null.
-  void GetApplicationInfo(const google_apis::GetDataCallback& callback);
-
-  // Adds a copy operation to the queue.
-  // |callback| must not be null.
-  void Copy(const FilePath& src_file_path,
-            const FilePath& dest_file_path,
-            const FileOperationCallback& callback);
+  void GetAppList(const google_apis::GetAppListCallback& callback);
 
   // Adds a GetResourceList operation to the queue.
   // |callback| must not be null.
@@ -112,70 +104,102 @@ class DriveScheduler
                        const std::string& directory_resource_id,
                        const google_apis::GetResourceListCallback& callback);
 
-  // Adds a transfer operation to the queue.
-  // |callback| must not be null.
-  void TransferFileFromRemoteToLocal(const FilePath& remote_src_file_path,
-                                     const FilePath& local_dest_file_path,
-                                     const FileOperationCallback& callback);
+  // Adds a GetResourceEntry operation to the queue.
+  void GetResourceEntry(const std::string& resource_id,
+                        const DriveClientContext& context,
+                        const google_apis::GetResourceEntryCallback& callback);
 
-  // Adds a transfer operation to the queue.
-  // |callback| must not be null.
-  void TransferFileFromLocalToRemote(const FilePath& local_src_file_path,
-                                     const FilePath& remote_dest_file_path,
-                                     const FileOperationCallback& callback);
 
-  // Adds a transfer operation to the queue.
-  // |callback| must not be null.
-  void TransferRegularFile(const FilePath& local_src_file_path,
-                           const FilePath& remote_dest_file_path,
-                           const FileOperationCallback& callback);
+  // Adds a DeleteResource operation to the queue.
+  void DeleteResource(const std::string& resource_id,
+                      const google_apis::EntryActionCallback& callback);
 
-  // Adds a move operation to the queue.
-  // |callback| must not be null.
-  void Move(const FilePath& src_file_path,
-            const FilePath& dest_file_path,
-            const FileOperationCallback& callback);
 
-  // Adds a remove operation to the queue.
-  // |callback| must not be null.
-  void Remove(const FilePath& file_path,
-              bool is_recursive,
-              const FileOperationCallback& callback);
+  // Adds a CopyHostedDocument operation to the queue.
+  void CopyHostedDocument(
+      const std::string& resource_id,
+      const std::string& new_name,
+      const google_apis::GetResourceEntryCallback& callback);
+
+  // Adds a RenameResource operation to the queue.
+  void RenameResource(const std::string& resource_id,
+                      const std::string& new_name,
+                      const google_apis::EntryActionCallback& callback);
+
+  // Adds a AddResourceToDirectory operation to the queue.
+  void AddResourceToDirectory(const std::string& parent_resource_id,
+                              const std::string& resource_id,
+                              const google_apis::EntryActionCallback& callback);
+
+  // Adds a RemoveResourceFromDirectory operation to the queue.
+  void RemoveResourceFromDirectory(
+      const std::string& parent_resource_id,
+      const std::string& resource_id,
+      const google_apis::EntryActionCallback& callback);
+
+  // Adds a AddNewDirectory operation to the queue.
+  void AddNewDirectory(const std::string& parent_resource_id,
+                       const std::string& directory_name,
+                       const google_apis::GetResourceEntryCallback& callback);
+
+  // Adds a DownloadFile operation to the queue.
+  void DownloadFile(
+      const base::FilePath& virtual_path,
+      const base::FilePath& local_cache_path,
+      const GURL& download_url,
+      const DriveClientContext& context,
+      const google_apis::DownloadActionCallback& download_action_callback,
+      const google_apis::GetContentCallback& get_content_callback);
+
+  // Adds an UploadExistingFile operation to the queue.
+  void UploadExistingFile(
+      const GURL& upload_location,
+      const base::FilePath& drive_file_path,
+      const base::FilePath& local_file_path,
+      const std::string& content_type,
+      const std::string& etag,
+      const DriveClientContext& context,
+      const google_apis::UploadCompletionCallback& upload_completion_callback);
 
  private:
   friend class DriveSchedulerTest;
 
+  enum QueueType {
+    METADATA_QUEUE,
+    FILE_QUEUE,
+    NUM_QUEUES
+  };
+
   // Represents a single entry in the job queue.
   struct QueueEntry {
-    QueueEntry(JobType in_job_type,
-               FilePath in_file_path);
+    explicit QueueEntry(JobType in_job_type);
     ~QueueEntry();
+
+    static bool Compare(const QueueEntry* left, const QueueEntry* right);
 
     JobInfo job_info;
 
-    // Callback for operations that take a FileOperationCallback.
-    // Used by:
-    //   TYPE_COPY,
-    //   TYPE_MOVE,
-    //   TYPE_REMOVE,
-    //   TYPE_TRANSFER_LOCAL_TO_REMOTE,
-    //   TYPE_TRANSFER_REGULAR_FILE,
-    //   TYPE_TRANSFER_REMOTE_TO_LOCAL
-    FileOperationCallback file_operation_callback;
+    // Context of the job.
+    DriveClientContext context;
 
-    // Destination of the operation.
+    // Resource ID to use for the operation.
     // Used by:
-    //   TYPE_COPY,
-    //   TYPE_MOVE,
-    //   TYPE_TRANSFER_LOCAL_TO_REMOTE,
-    //   TYPE_TRANSFER_REGULAR_FILE,
-    //   TYPE_TRANSFER_REMOTE_TO_LOCAL
-    FilePath dest_file_path;
+    //   TYPE_GET_RESOURCE_ENTRY
+    //   TYPE_DELETE_RESOURCE
+    //   TYPE_RENAME_RESOURCE
+    //   TYPE_ADD_RESOURCE_TO_DIRECTORY
+    std::string resource_id;
 
-    // Whether the operation is recursive.
+    // URL to access the contents of the operation's target.
     // Used by:
-    //   TYPE_REMOVE
-    bool is_recursive;
+    //   TYPE_DOWNLOAD_FILE
+    GURL download_url;
+
+    // Online and cache path of the operation's target.
+    // Used by:
+    //   TYPE_DOWNLOAD_FILE
+    base::FilePath virtual_path;
+    base::FilePath local_cache_path;
 
     // Parameters for GetResourceList().
     // Used by:
@@ -186,78 +210,153 @@ class DriveScheduler
     bool shared_with_me;
     std::string directory_resource_id;
 
-    // Callback for operations that take a GetDataCallback.
+    // Parameter for copy or rename.
     // Used by:
-    //   TYPE_GET_APPLICATION_INFO,
-    google_apis::GetDataCallback get_data_callback;
+    //   TYPE_COPY_HOSTED_DOCUMENT
+    //   TYPE_RENAME_RESOURCE
+    std::string new_name;
+
+    // Parameters for AddNewDirectory
+    // Used by:
+    //   TYPE_ADD_NEW_DIRECTORY
+    //   TYPE_ADD_RESOURCE_TO_DIRECTORY
+    //   TYPE_REMOVE_RESOURCE_FROM_DIRECTORY
+    std::string parent_resource_id;
+    std::string directory_name;
 
     // Callback for operations that take a GetResourceListCallback.
     // Used by:
     //   TYPE_GET_RESOURCE_LIST
     google_apis::GetResourceListCallback get_resource_list_callback;
 
+    // Callback for operations that take a GetResourceEntryCallback.
+    // Used by:
+    //   TYPE_GET_RESOURCE_ENTRY,
+    //   TYPE_COPY_HOSTED_DOCUMENT,
+    //   TYPE_ADD_NEW_DIRECTORY,
+    google_apis::GetResourceEntryCallback get_resource_entry_callback;
+
     // Callback for operations that take a GetAccountMetadataCallback.
     // Used by:
     //   TYPE_GET_ACCOUNT_METADATA,
     google_apis::GetAccountMetadataCallback get_account_metadata_callback;
+
+    // Callback for operations that take a GetAppListCallback.
+    // Used by:
+    //   TYPE_GET_APP_LIST,
+    google_apis::GetAppListCallback get_app_list_callback;
+
+    // Callback for operations that take a EntryActionCallback.
+    // Used by:
+    //   TYPE_DELETE_RESOURCE,
+    //   TYPE_RENAME_RESOURCE,
+    //   TYPE_ADD_RESOURCE_TO_DIRECTORY,
+    //   TYPE_REMOVE_RESOURCE_FROM_DIRECTORY,
+    google_apis::EntryActionCallback entry_action_callback;
+
+    // Callback for operations that take a DownloadActionCallback
+    // Used by:
+    //   TYPE_DOWNLOAD_FILE
+    google_apis::DownloadActionCallback download_action_callback;
+
+    // Callback for result of GetContent.
+    // Used by:
+    //   TYPE_DOWNLOAD_FILE
+    google_apis::GetContentCallback get_content_callback;
+
+    // Parameters for UploadExistingFile
+    // Used by:
+    //   TYPE_UPLOAD_EXISTING_FILE
+    GURL upload_location;
+    base::FilePath drive_file_path;
+    base::FilePath local_file_path;
+    std::string content_type;
+    std::string etag;
+    google_apis::UploadCompletionCallback upload_completion_callback;
   };
 
   // Adds the specified job to the queue.  Takes ownership of |job|
-  int QueueJob(scoped_ptr<QueueEntry> job);
+  void QueueJob(scoped_ptr<QueueEntry> job);
 
   // Starts the job loop, if it is not already running.
-  void StartJobLoop();
+  void StartJobLoop(QueueType queue_type);
 
   // Determines the next job that should run, and starts it.
-  void DoJobLoop();
+  void DoJobLoop(QueueType queue_type);
 
   // Checks if operations should be suspended, such as if the network is
   // disconnected.
   //
   // Returns true when it should stop, and false if it should continue.
-  bool ShouldStopJobLoop();
+  bool ShouldStopJobLoop(QueueType queue_type,
+                         const  DriveClientContext& context);
 
   // Increases the throttle delay if it's below the maximum value, and posts a
   // task to continue the loop after the delay.
-  void ThrottleAndContinueJobLoop();
+  void ThrottleAndContinueJobLoop(QueueType queue_type);
 
   // Resets the throttle delay to the initial value, and continues the job loop.
-  void ResetThrottleAndContinueJobLoop();
+  void ResetThrottleAndContinueJobLoop(QueueType queue_type);
 
   // Retries the job if needed, otherwise cleans up the job, invokes the
   // callback, and continues the job loop.
-  scoped_ptr<QueueEntry> OnJobDone(int job_id, DriveFileError error);
-
-  // Callback for job finishing with a FileOperationCallback.
-  void OnFileOperationJobDone(int job_id, DriveFileError error);
+  scoped_ptr<QueueEntry> OnJobDone(scoped_ptr<QueueEntry> queue_entry,
+                                   DriveFileError error);
 
   // Callback for job finishing with a GetResourceListCallback.
   void OnGetResourceListJobDone(
-      int job_id,
+      scoped_ptr<QueueEntry> queue_entry,
       google_apis::GDataErrorCode error,
       scoped_ptr<google_apis::ResourceList> resource_list);
 
+  // Callback for job finishing with a GetResourceEntryCallback.
+  void OnGetResourceEntryJobDone(
+      scoped_ptr<QueueEntry> queue_entry,
+      google_apis::GDataErrorCode error,
+      scoped_ptr<google_apis::ResourceEntry> entry);
+
   // Callback for job finishing with a GetAccountMetadataCallback.
   void OnGetAccountMetadataJobDone(
-      int job_id,
+      scoped_ptr<QueueEntry> queue_entry,
       google_apis::GDataErrorCode error,
       scoped_ptr<google_apis::AccountMetadataFeed> account_metadata);
 
-  // Callback for job finishing with a GetDataCallback.
-  void OnGetDataJobDone(int job_id,
-                        google_apis::GDataErrorCode error,
-                        scoped_ptr<base::Value> feed_data);
+  // Callback for job finishing with a GetAppListCallback.
+  void OnGetAppListJobDone(
+      scoped_ptr<QueueEntry> queue_entry,
+      google_apis::GDataErrorCode error,
+      scoped_ptr<google_apis::AppList> app_list);
+
+  // Callback for job finishing with a EntryActionCallback.
+  void OnEntryActionJobDone(scoped_ptr<QueueEntry> queue_entry,
+                            google_apis::GDataErrorCode error);
+
+  // Callback for job finishing with a DownloadActionCallback.
+  void OnDownloadActionJobDone(scoped_ptr<QueueEntry> queue_entry,
+                               google_apis::GDataErrorCode error,
+                               const base::FilePath& temp_file);
+
+  // Callback for job finishing with a UploadCompletionCallback.
+  void OnUploadCompletionJobDone(
+      scoped_ptr<QueueEntry> queue_entry,
+      google_apis::DriveUploadError error,
+      const base::FilePath& drive_path,
+      const base::FilePath& file_path,
+      scoped_ptr<google_apis::ResourceEntry> resource_entry);
 
   // net::NetworkChangeNotifier::ConnectionTypeObserver override.
   virtual void OnConnectionTypeChanged(
       net::NetworkChangeNotifier::ConnectionType type) OVERRIDE;
+
+  // Get the type of queue the specified job should be put in.
+  QueueType GetJobQueueType(JobType type);
 
   // For testing only.  Disables throttling so that testing is faster.
   void SetDisableThrottling(bool disable) { disable_throttling_ = disable; }
 
   // True when there is a job running.  Indicates that new jobs should wait to
   // be executed.
-  bool job_loop_is_running_;
+  bool job_loop_is_running_[NUM_QUEUES];
 
   // Next value that should be assigned as a job id.
   int next_job_id_;
@@ -270,17 +369,11 @@ class DriveScheduler
   // Disables throttling for testing.
   bool disable_throttling_;
 
-  // Mapping of id to QueueEntry.
-  typedef std::map<int, linked_ptr<QueueEntry> > JobMap;
-  JobMap job_info_map_;
-
-  // The queue of jobs id.  Sorted by priority.
-  std::deque<int> queue_;
-
-  // Drive operations.
-  file_system::DriveOperations* drive_operations_;
+  // The queues of jobs.
+  std::list<QueueEntry*> queue_[NUM_QUEUES];
 
   google_apis::DriveServiceInterface* drive_service_;
+  google_apis::DriveUploaderInterface* uploader_;
 
   Profile* profile_;
 

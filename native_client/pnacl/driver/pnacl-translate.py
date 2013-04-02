@@ -131,39 +131,28 @@ EXTRA_ENV = {
   # Additional non-default flags go here.
   'LLC_FLAGS_EXTRA' : '',
 
+  # Opt level from command line (if any)
+  'OPT_LEVEL' : '',
+
   # slower translation == faster code
   'LLC_FLAGS_SLOW':
-  # TODO(robertm): consider activating '-O3'
   # Due to a quadratic algorithm used for tail merging
   # capping it at 50 helps speed up translation
                      '-tail-merge-threshold=50',
 
   # faster translation == slower code
-  # TODO(robertm): these need to be evaluated for how effective they
-  #                are and how much they hurt performance
   'LLC_FLAGS_FAST' : '${LLC_FLAGS_FAST_%ARCH%}',
 
   'LLC_FLAGS_FAST_X8632':
-  # -O0 causes us to run out of space when translating llc.pexe
-  # -O1 reduces translation time by approx 10% but breaks the nexe
-  # -O2 is the default
-  #                        '-O1 ' +
-                          '-fast-isel ' +
-  # This does not result in working nexes,
-  #                   '-pre-RA-sched=fast
-  # This does not result in working nexes,',
-  #                   '-regalloc=fast ' +
+                          '-O0 ' +
   # This, surprisingly, makes a measurable difference
                           '-tail-merge-threshold=20',
   'LLC_FLAGS_FAST_X8664':
-                           '-O1 ' +
-  # broken
-  #                        '-fast-isel ' +
+                          '-O0 ' +
                           '-tail-merge-threshold=20',
   'LLC_FLAGS_FAST_ARM':
   # due to slow turn around times ARM settings have not been explored in depth
-  #                       '-O2 ' +
-                          '-fast-isel ' +
+                          '-O0 ' +
                           '-tail-merge-threshold=20',
   'LLC_FLAGS_FAST_MIPS32': '-fast-isel -tail-merge-threshold=20',
 
@@ -171,7 +160,9 @@ EXTRA_ENV = {
                '${LLC_FLAGS_COMMON} ' +
                '${LLC_FLAGS_%ARCH%} ' +
                '${FAST_TRANSLATION ? ${LLC_FLAGS_FAST} : ${LLC_FLAGS_SLOW}} ' +
-               '${LLC_FLAGS_EXTRA} ',
+               '${LLC_FLAGS_EXTRA} ' +
+               '${#OPT_LEVEL ? -O${OPT_LEVEL}} ' +
+               '${OPT_LEVEL == 0 ? -disable-fp-elim}',
 
   # CPU that is representative of baseline feature requirements for NaCl
   # and/or chrome.  We may want to make this more like "-mtune"
@@ -212,7 +203,7 @@ TranslatorPatterns = [
   ( '(-mattr=.*)', "env.append('LLC_FLAGS_EXTRA', $0)"),
   ( '-mcpu=(.*)', "env.set('LLC_MCPU', $0)"),
   # Allow overriding the -O level.
-  ( '(-O[0-3])', "env.append('LLC_FLAGS_EXTRA', $0)"),
+  ( '-O([0-3])', "env.set('OPT_LEVEL', $0)"),
 
   # This adds arch specific flags to the llc invocation aimed at
   # improving translation speed at the expense of code quality.

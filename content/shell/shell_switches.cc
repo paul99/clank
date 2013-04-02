@@ -18,8 +18,15 @@ const char kContentBrowserTest[] = "browser-test";
 // Makes Content Shell use the given path for its data directory.
 const char kContentShellDataPath[] = "data-path";
 
+// Show the content_shell window, even when running in layout test mode.
+const char kDisableHeadlessForLayoutTests[] =
+    "disable-headless-for-layout-tests";
+
 // Request pages to be dumped as text once they finished loading.
 const char kDumpRenderTree[] = "dump-render-tree";
+
+// Alias for kEnableSoftwareCompositingGLAdapter.
+const char kEnableSoftwareCompositing[] = "enable-software-compositing";
 
 // Disables the timeout for layout tests.
 const char kNoTimeout[] = "no-timeout";

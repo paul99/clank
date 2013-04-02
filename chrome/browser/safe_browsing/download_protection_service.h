@@ -42,8 +42,8 @@ class DownloadProtectionService {
   // TODO(noelutz): we're missing some fields here: server IPs,
   // tab URL redirect chain, ...
   struct DownloadInfo {
-    FilePath local_file;  // Where the download is currently stored.
-    FilePath target_file;  // Where the download will eventually be stored.
+    base::FilePath local_file;  // Where the download is currently stored.
+    base::FilePath target_file;  // Where it will eventually be stored.
     std::vector<GURL> download_url_chain;
     GURL referrer_url;
     std::string sha256_hash;
@@ -62,6 +62,7 @@ class DownloadProtectionService {
     SAFE,
     DANGEROUS,
     UNCOMMON,
+    DANGEROUS_HOST,
   };
 
   // Callback type which is invoked once the download request is done.
@@ -141,6 +142,7 @@ class DownloadProtectionService {
     REASON_DOWNLOAD_NOT_SUPPORTED,
     REASON_INVALID_RESPONSE_VERDICT,
     REASON_ARCHIVE_WITHOUT_BINARIES,
+    REASON_DOWNLOAD_DANGEROUS_HOST,
     REASON_MAX  // Always add new values before this one.
   };
 

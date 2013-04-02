@@ -216,7 +216,7 @@
    bug_148477_b
    Heapcheck:Leak
    ...
-   fun:gfx::RealGLApi::glCompileShaderFn
+   fun:gfx::GLApiBase::glCompileShaderFn
    fun:webkit::gpu::WebGraphicsContext3DInProcessImpl::compileShader
    fun:cc::ProgramBindingBase::loadShader
    fun:cc::ProgramBindingBase::init
@@ -229,7 +229,7 @@
    bug_148477_c
    Heapcheck:Leak
    ...
-   fun:gfx::RealGLApi::glLinkProgramFn
+   fun:gfx::GLApiBase::glLinkProgramFn
    fun:webkit::gpu::WebGraphicsContext3DInProcessImpl::linkProgram
    fun:cc::ProgramBindingBase::link
    fun:cc::ProgramBinding::initialize
@@ -238,6 +238,7 @@
    fun:cc::DirectRenderer::drawRenderPass
    fun:cc::DirectRenderer::drawFrame
 }
+
 # There is not CloseTestNSSDB due to NSS bug 588269.
 # When NSS 3.14 is the minimum version required, this should be removed.
 # http://crbug.com/156433 .
@@ -509,48 +510,6 @@
    fun:ProfileManagerTest_CreateAndUseTwoProfiles_Test::TestBody
 }
 {
-   bug_47188_a
-   Heapcheck:Leak
-   fun:net::SingleThreadedProxyResolver::GetProxyForURL
-   fun:net::::IOThread::Init
-   fun:base::Thread::ThreadMain
-   fun:ThreadFunc
-   fun:start_thread
-}
-{
-   bug_47188_b
-   Heapcheck:Leak
-   fun:__gnu_cxx::new_allocator::allocate
-   fun:std::string::_Rep::_S_create
-   fun:std::string::_Rep::_M_clone
-   fun:std::string::reserve
-   fun:*InitCanonical
-   fun:GURL
-   fun:net::::IOThread::Init
-   fun:base::Thread::ThreadMain
-   fun:ThreadFunc
-   fun:start_thread
-}
-{
-   bug_47188_c
-   Heapcheck:Leak
-   ...
-   fun:net::SingleThreadedProxyResolver::Job::DoQuery
-   fun:*DispatchToMethod
-   fun:RunnableMethod::Run
-   fun:MessageLoop::RunTask
-   fun:MessageLoop::DeferOrRunPendingTask
-   fun:MessageLoop::DoWork
-   fun:base::MessagePumpDefault::Run
-   fun:MessageLoop::RunInternal
-   fun:MessageLoop::RunHandler
-   fun:MessageLoop::Run
-   fun:base::Thread::Run
-   fun:base::Thread::ThreadMain
-   fun:ThreadFunc
-   fun:start_thread
-}
-{
    bug_49300_a
    Heapcheck:Leak
    fun:disk_cache::StorageBlock::AllocateData
@@ -666,10 +625,30 @@
    fun:IPC::ChannelProxy::Context::OnAddFilter
 }
 {
-   bug_67524
+   bug_67378_a
    Heapcheck:Leak
    ...
    fun:net::::ProxyResolverV8WithMockBindings::SetPacScriptFromDisk
+}
+{
+   bug_67378_b
+   Heapcheck:Leak
+   ...
+   fun:net::::LoadScriptData
+}
+{
+   bug_67378_c
+   Heapcheck:Leak
+   fun:net::::ASCIILiteralToV8String
+   fun:net::ProxyResolverV8::Context::InitV8
+   fun:net::ProxyResolverV8::SetPacScript
+}
+{
+   bug_67378_d
+   Heapcheck:Leak
+   fun:net::::ScriptDataToV8String
+   fun:net::ProxyResolverV8::Context::InitV8
+   fun:net::ProxyResolverV8::SetPacScript
 }
 {
    bug_68304
@@ -870,14 +849,6 @@
    fun:MakeRequest
 }
 {
-   bug_90271
-   Heapcheck:Leak
-   ...
-   fun:::CreateLocaleDefaultValue
-   fun:PrefService::RegisterLocalizedStringPref
-   fun:TabContentsWrapper::RegisterUserPrefs
-}
-{
    bug_90369_a
    Heapcheck:Leak
    fun:std::string::_Rep::_S_create
@@ -1029,19 +1000,13 @@
    bug_99304
    Heapcheck:Leak
    fun:v8::internal::SkipList::Update
-   ...
-   fun:v8::internal::Deserializer::Allocate
-   fun:v8::internal::Deserializer::ReadObject
-   fun:v8::internal::Deserializer::ReadChunk
-   fun:v8::internal::Deserializer::ReadObject
-   fun:v8::internal::Deserializer::ReadChunk
-   fun:v8::internal::Deserializer::VisitPointers
-   fun:v8::internal::Heap::IterateStrongRoots
+   fun:v8::internal::PagedSpace::AllocateRaw
+   fun:v8::internal::Heap::ReserveSpace
    fun:v8::internal::Deserializer::Deserialize
    fun:v8::internal::Isolate::Init
    fun:v8::internal::V8::Initialize
-   fun:v8::internal::Snapshot::Deserialize
    fun:v8::internal::Snapshot::Initialize
+   fun:*InitializeHelper
 }
 {
    bug_100146
@@ -1178,16 +1143,8 @@
    fun:PlatformFontPango
    fun:gfx::PlatformFont::CreateDefault
    fun:Font
-   fun:Label
-   fun:ash::internal::TrayItemView::CreateLabel
-   fun:ash::internal::TrayIME::CreateTrayView
-   fun:ash::SystemTray::AddTrayItem
-   fun:ash::SystemTray::CreateItems
-   fun:ash::SystemTray::Initialize
-   fun:ash::internal::StatusAreaWidget::CreateTrayViews
-   fun:ash::Shell::Init
-   fun:ash::Shell::CreateInstance
-   fun:ash::test::AshTestBase::SetUp
+   ...
+   fun:*Test*
 }
 {
    bug_114758
@@ -1428,14 +1385,6 @@
    fun:base::PlatformThread::SetName
 }
 {
-   bug_143431
-   Heapcheck:Leak
-   ...
-   fun:ManagedMode::ManagedMode
-   fun:*FakeManagedMode
-   fun:ManagedModeTest::ManagedModeTest
-}
-{
    bug_143565
    Heapcheck:Leak
    ...
@@ -1478,6 +1427,31 @@
    fun:testing::internal::TestFactoryImpl::CreateTest
 }
 {
+   bug_145703
+   Heapcheck:Leak
+   ...
+   fun:content::SiteInstanceImpl::GetProcess
+   fun:RenderViewHostImpl
+   fun:content::RenderViewHostFactory::Create
+   fun:content::RenderViewHostManager::Init
+   fun:content::WebContentsImpl::Init
+   fun:content::TestWebContents::Create
+   fun:content::WebContentsTester::CreateTestWebContents
+   fun:extensions::::TestExtensionEnvironment::MakeTab
+   fun:extensions::::DeclarativeContentActionTest_ShowPageAction_Test::TestBody
+}
+{
+   bug_145705
+   Heapcheck:Leak
+   ...
+   fun:extensions::SettingsFrontend::Create
+   fun:ExtensionService::ExtensionService
+   fun:extensions::TestExtensionSystem::CreateExtensionService
+   fun:extensions::::TestExtensionEnvironment::GetExtensionService
+   fun:extensions::::TestExtensionEnvironment::MakeExtension
+   fun:extensions::::DeclarativeContentActionTest_ShowPageAction_Test::TestBody
+}
+{
    bug_147755_a
    Heapcheck:Leak
    ...
@@ -1503,18 +1477,6 @@
    fun:::TestWebFrameClient::didClearWindowObject
    fun:WebKit::FrameLoaderClientImpl::dispatchDidClearWindowObjectInWorld
    fun:WebCore::FrameLoader::dispatchDidClearWindowObjectInWorld
-}
-{
-   bug_151907
-   Heapcheck:Leak
-   fun:v8::internal::SkipList::Update
-   fun:v8::internal::PagedSpace::AllocateRaw
-   fun:v8::internal::Heap::ReserveSpace
-   fun:v8::internal::Deserializer::Deserialize
-   fun:v8::internal::Isolate::Init
-   fun:v8::internal::V8::Initialize
-   fun:v8::internal::Snapshot::Initialize
-   fun:v8::InitializeHelper
 }
 {
    bug_153791
@@ -1599,17 +1561,11 @@
    fun:net::FileStream::~FileStream
 }
 {
-   bug_161274
-   Heapcheck:Leak
-   ...
-   fun:net::FtpNetworkTransactionTest::ExecuteTransaction
-}
-{
    bug_163111_a
    Heapcheck:Leak
    ...
    fun:dbus::Response::FromMethodCall
-   fun:chromeos::ibus::IBusPanelServiceImpl::*Properties
+   fun:chromeos::IBusPanelServiceImpl::*Properties
 }
 {
    bug_163111_b
@@ -1626,16 +1582,16 @@
    ...
    fun:dbus::MessageWriter::AppendBasic
    fun:dbus::MessageWriter::AppendString
-   fun:chromeos::ibus::IBusObjectWriter::AddAttachment
-   fun:chromeos::ibus::AppendIBusLookupTable
-   fun:chromeos::ibus::IBusPanelServiceTest_UpdateLookupTableTest_Test::TestBody
+   fun:chromeos::IBusObjectWriter::AddAttachment
+   fun:chromeos::AppendIBusLookupTable
+   fun:chromeos::IBusPanelServiceTest_UpdateLookupTableTest_Test::TestBody
 }
 {
    bug_163111_d
    Heapcheck:Leak
    ...
    fun:dbus::Response::FromMethodCall
-   fun:chromeos::ibus::IBusPanelServiceImpl::UpdateProperty
+   fun:chromeos::IBusPanelServiceImpl::UpdateProperty
 }
 {
    bug_164185
@@ -1649,4 +1605,182 @@
    fun:BookmarkModel::AddURL
    fun:BookmarkBarGtkUnittest_HidesHelpMessageWithBookmark_Test::TestBody
 }
-
+{
+   bug_166989
+   Heapcheck:Leak
+   ...
+   fun:ui::CreateInvisibleCursor
+   ...
+   fun:ui::CursorLoader::Create
+   fun:ash::ImageCursors::SetDeviceScaleFactor
+   fun:ash::CursorManager::SetDeviceScaleFactor
+   fun:ash::Shell::Init
+}
+{
+   bug_169185_a
+   Heapcheck:Leak
+   fun:v8::internal::SlotsBufferAllocator::AllocateBuffer
+   fun:v8::internal::SlotsBuffer::AddTo
+   fun:v8::internal::MarkCompactCollector::RecordSlot
+   ...
+   fun:v8::internal::StaticMarkingVisitor::IterateBody
+   fun:v8::internal::IncrementalMarking::VisitObject
+   fun:v8::internal::IncrementalMarking::ProcessMarkingDeque
+   fun:v8::internal::IncrementalMarking::Step
+   ...
+   fun:v8::internal::*Space::AllocateRaw
+}
+{
+   bug_169185_b
+   Heapcheck:Leak
+   fun:v8::internal::SkipList::Update
+   fun:v8::internal::PagedSpace::AllocateRaw
+   fun:v8::internal::Heap::CreateCode
+   fun:v8::internal::Factory::NewCode
+   fun:v8::internal::CodeGenerator::MakeCodeEpilogue
+   fun:v8::internal::FullCodeGenerator::MakeCode
+   fun:v8::internal::GenerateCode
+   fun:v8::internal::MakeCode
+   fun:v8::internal::Compiler::CompileLazy
+   fun:v8::internal::CompileLazyHelper
+   fun:v8::internal::JSFunction::CompileLazy
+   fun:v8::internal::CallIC_Miss
+   ...
+   fun:v8::internal::Invoke
+}
+{
+   bug_169185_c
+   Heapcheck:Leak
+   fun:v8::internal::SkipList::Update
+   fun:v8::internal::PagedSpace::AllocateRaw
+   fun:v8::internal::Heap::CreateCode
+   fun:v8::internal::Factory::NewCode
+   fun:v8::internal::StubCompiler::GetCodeWithFlags
+   fun:v8::internal::StubCompiler::GetCodeWithFlags
+   fun:v8::internal::CallStubCompiler::GetCode
+   fun:v8::internal::CallStubCompiler::CompileCallGlobal
+   fun:v8::internal::StubCache::ComputeCallGlobal
+   fun:v8::internal::CallICBase::ComputeMonomorphicStub
+   fun:v8::internal::CallICBase::UpdateCaches
+   fun:v8::internal::CallICBase::LoadFunction
+   fun:v8::internal::CallIC_Miss
+   ...
+   fun:v8::internal::Invoke
+   fun:v8::internal::Execution::New
+}
+{
+   bug_169678
+   Heapcheck:Leak
+   fun:v8::internal::SlotsBufferAllocator::AllocateBuffer
+   fun:v8::internal::SlotsBuffer::AddTo
+   fun:v8::internal::MarkCompactCollector::RecordRelocSlot
+   fun:v8::internal::StaticMarkingVisitor::VisitEmbeddedPointer
+   fun:v8::internal::RelocInfo::Visit
+   fun:v8::internal::Code::CodeIterateBody
+   fun:v8::internal::StaticMarkingVisitor::VisitCode
+   fun:v8::internal::StaticMarkingVisitor::IterateBody
+   fun:v8::internal::IncrementalMarking::VisitObject
+   fun:v8::internal::IncrementalMarking::ProcessMarkingDeque
+   fun:v8::internal::IncrementalMarking::Step
+   fun:v8::internal::IncrementalMarking::OldSpaceStep
+   fun:v8::internal::FreeList::Allocate
+   fun:v8::internal::PagedSpace::SlowAllocateRaw
+   fun:v8::internal::PagedSpace::AllocateRaw
+   fun:v8::internal::Heap::ReserveSpace
+   fun:v8::internal::Deserializer::DeserializePartial
+   fun:v8::internal::Snapshot::NewContextFromSnapshot
+   fun:Genesis
+   fun:v8::internal::Bootstrapper::CreateEnvironment
+   fun:v8::Context::New
+   fun:ModuleSystemTest::ModuleSystemTest
+   fun:EventUnittest
+   fun:EventUnittest_NamedEventDispatch_Test
+   fun:testing::internal::TestFactoryImpl::CreateTest
+}
+{
+   bug_170602
+   Heapcheck:Leak
+   fun:v8::internal::SlotsBufferAllocator::AllocateBuffer
+   fun:v8::internal::SlotsBuffer::AddTo
+   fun:v8::internal::MarkCompactCollector::RecordRelocSlot
+   fun:v8::internal::StaticMarkingVisitor::VisitEmbeddedPointer
+   fun:v8::internal::RelocInfo::Visit
+   ...
+   fun:EventUnittest
+   fun:EventUnittest_AddingFilterWithUrlFieldNotAListThrowsException_Test
+}
+{
+   bug_171547_b
+   Heapcheck:Leak
+   ...
+   fun:FilterBuilder
+   fun:::LoadWhitelistsOnBlockingPoolThread
+}
+{
+   bug_171547_c
+   Heapcheck:Leak
+   ...
+   fun:FilterBuilder::Build
+   fun:::LoadWhitelistsOnBlockingPoolThread
+}
+{
+   bug_172077
+   Heapcheck:Leak
+   ...
+   fun:extensions::RegexSetMatcher::RebuildMatcher
+   fun:extensions::RegexSetMatcher::ClearPatterns
+   ...
+   fun:extensions::URLMatcher::UpdateRegexSetMatcher
+   fun:extensions::URLMatcher::UpdateInternalDatastructures
+   fun:extensions::URLMatcher::AddConditionSets
+   fun:::FilterBuilder::Build
+   fun:::LoadWhitelistsOnBlockingPoolThread
+}
+{
+   bug_171567_a
+   Heapcheck:Leak
+   ...
+   fun:AutofillPopupControllerUnitTest_GrowPopupInSpace_Test::TestBody
+}
+{
+   bug_171567_b
+   Heapcheck:Leak
+   ...
+   fun:AutofillPopupControllerUnitTest::AutofillPopupControllerUnitTest
+   fun:AutofillPopupControllerUnitTest_GrowPopupInSpace_Test::AutofillPopupControllerUnitTest_GrowPopupInSpace_Test
+   fun:testing::internal::TestFactoryImpl::CreateTest
+}
+{
+   bug_171983
+   Heapcheck:Leak
+   ...
+   fun:chromeos::MagnificationManagerTest_MagnificationObserver_Test::TestBody
+}
+{
+   bug_173597
+   Heapcheck:Leak
+   fun:FcConfigEvaluate
+   fun:gfx::RenderTextLinux::EnsureLayout
+   fun:gfx::RenderTextTest_PangoAttributes_Test::TestBody
+}
+{
+   bug_174177
+   Heapcheck:Leak
+   fun:drive::SearchMetadataTest::SetUp
+}
+{
+   bug_175100
+   Heapcheck:Leak
+   ...
+   fun:::StartSync
+   fun:OneClickSigninHelper::DidStopLoading
+   fun:OneClickSigninHelperTest_SigninFromWebstoreWithConfigSyncfirst_Test::TestBody
+}
+{
+   bug_175435:
+   Heapcheck:Leak
+   ...
+   fun:::StartSync
+   fun:::StartExplicitSync
+   fun:OneClickSigninHelper::DidStopLoading
+}

@@ -10,9 +10,10 @@
 #include "base/logging.h"
 #include "base/metrics/histogram.h"
 #include "base/path_service.h"
+#include "base/prefs/pref_service.h"
 #include "base/prefs/public/pref_member.h"
-#include "base/string_number_conversions.h"
 #include "base/string_split.h"
+#include "base/strings/string_number_conversions.h"
 #include "chrome/browser/browser_process.h"
 #include "chrome/browser/content_settings/cookie_settings.h"
 #include "chrome/browser/content_settings/tab_specific_content_settings.h"
@@ -24,9 +25,9 @@
 #include "chrome/browser/extensions/extension_process_manager.h"
 #include "chrome/browser/extensions/extension_system.h"
 #include "chrome/browser/google/google_util.h"
+#include "chrome/browser/net/connect_interceptor.h"
 #include "chrome/browser/net/load_time_stats.h"
 #include "chrome/browser/performance_monitor/performance_monitor.h"
-#include "chrome/browser/prefs/pref_service.h"
 #include "chrome/browser/profiles/profile_manager.h"
 #include "chrome/browser/task_manager/task_manager.h"
 #include "chrome/common/pref_names.h"
@@ -292,6 +293,12 @@ void ChromeNetworkDelegate::set_cookie_settings(
   cookie_settings_ = cookie_settings;
 }
 
+void ChromeNetworkDelegate::set_predictor(
+    chrome_browser_net::Predictor* predictor) {
+  connect_interceptor_.reset(
+      new chrome_browser_net::ConnectInterceptor(predictor));
+}
+
 // static
 void ChromeNetworkDelegate::NeverThrottleRequests() {
   g_never_throttle_requests_ = true;
@@ -359,7 +366,7 @@ int ChromeNetworkDelegate::OnBeforeURLRequest(
   // blocked. However, an extension might redirect the request to another URL,
   // which is not blocked.
   if (url_blacklist_manager_ &&
-      url_blacklist_manager_->IsURLBlocked(request->url())) {
+      url_blacklist_manager_->IsRequestBlocked(*request)) {
     // URL access blocked by policy.
     request->net_log().AddEvent(
         net::NetLog::TYPE_CHROME_POLICY_ABORTED_REQUEST,
@@ -393,6 +400,9 @@ int ChromeNetworkDelegate::OnBeforeURLRequest(
 
   if (force_safe_search && rv == net::OK && new_url->is_empty())
     ForceGoogleSafeSearch(request, new_url);
+
+  if (connect_interceptor_)
+    connect_interceptor_->WitnessURLRequest(request);
 
   return rv;
 }
@@ -572,7 +582,7 @@ bool ChromeNetworkDelegate::OnCanSetCookie(const net::URLRequest& request,
 }
 
 bool ChromeNetworkDelegate::OnCanAccessFile(const net::URLRequest& request,
-                                            const FilePath& path) const {
+                                            const base::FilePath& path) const {
   if (g_allow_file_access_)
     return true;
 
@@ -600,7 +610,7 @@ bool ChromeNetworkDelegate::OnCanAccessFile(const net::URLRequest& request,
   };
 #elif defined(OS_ANDROID)
   // Access to files in external storage is allowed.
-  FilePath external_storage_path;
+  base::FilePath external_storage_path;
   PathService::Get(base::DIR_ANDROID_EXTERNAL_STORAGE, &external_storage_path);
   if (external_storage_path.IsParent(path))
     return true;
@@ -613,8 +623,8 @@ bool ChromeNetworkDelegate::OnCanAccessFile(const net::URLRequest& request,
 #endif
 
   for (size_t i = 0; i < arraysize(kLocalAccessWhiteList); ++i) {
-    const FilePath white_listed_path(kLocalAccessWhiteList[i]);
-    // FilePath::operator== should probably handle trailing separators.
+    const base::FilePath white_listed_path(kLocalAccessWhiteList[i]);
+    // base::FilePath::operator== should probably handle trailing separators.
     if (white_listed_path == path.StripTrailingSeparators() ||
         white_listed_path.IsParent(path)) {
       return true;

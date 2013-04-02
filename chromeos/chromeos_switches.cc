@@ -13,8 +13,16 @@ const char kChromeOSReleaseBoard[] = "chromeos-release-board";
 // Forces the stub implementation of dbus clients.
 const char kDbusStub[] = "dbus-stub";
 
-// Enables the new NetworkStateHandler class.
-const char kEnableNewNetworkHandlers[] = "enable-new-network-handlers";
+// Enables experiments in locally managed user creation ui.
+const char kEnableLocallyManagedUserUIExperiments[] =
+    "enable-locally-managed-users-ui-experiments";
+
+// Enables the new NetworkChangeNotifier using the NetworkStateHandler class.
+const char kEnableNewNetworkChangeNotifier[] =
+    "enable-new-network-change-notifier";
+
+// Enables screensaver extensions.
+const char kEnableScreensaverExtensions[] = "enable-screensaver-extensions";
 
 // Sends test messages on first call to RequestUpdate (stub only).
 const char kSmsTestMessages[] = "sms-test-messages";

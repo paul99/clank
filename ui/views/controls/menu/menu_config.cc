@@ -46,7 +46,8 @@ MenuConfig::MenuConfig(const ui::NativeTheme* theme)
       align_arrow_and_shortcut(false),
       offset_context_menus(false),
       native_theme(theme),
-      show_delay(400) {
+      show_delay(400),
+      corner_radius(0) {
   // Use 40px tall menu items when running in touch optimized mode.
   // For Windows use 40px tall menu items when running in touch optimized mode.
   if (ui::GetDisplayLayout() == ui::LAYOUT_TOUCH) {
@@ -60,8 +61,10 @@ MenuConfig::~MenuConfig() {}
 
 void MenuConfig::AdjustForCommonTheme() {
   render_gutter = false;
-  item_top_margin = 6;
+  item_top_margin = 7;
   item_bottom_margin = 6;
+  item_no_icon_top_margin = 7;
+  item_no_icon_bottom_margin = 7;
   separator_height = 15;
   menu_horizontal_border_size = 2;
   menu_vertical_border_size = 8;

@@ -10,23 +10,23 @@
  * {
  *   filesystem: size, modificationTime
  *   internal: presence
- *   gdata: pinned, present, hosted, editUrl, contentUrl, availableOffline
+ *   drive: pinned, present, hosted, editUrl, contentUrl, availableOffline
  *   streaming: url
  *
- *   Following are not fetched for non-present gdata files.
+ *   Following are not fetched for non-present drive files.
  *   media: artist, album, title, width, height, imageTransform, etc.
  *   thumbnail: url, transform
  *
  *   Following are always fetched from content, and so force the downloading
- *   of remote gdata files. One should use this for required content metadata,
+ *   of remote drive files. One should use this for required content metadata,
  *   i.e. image orientation.
  *   fetchedMedia: width, height, etc.
  * }
  *
  * Typical usages:
  * {
- *   cache.get([entry1, entry2], 'gdata|filesystem', function(metadata) {
- *     if (metadata[0].gdata.pinned && metadata[1].filesystem.size == 0)
+ *   cache.get([entry1, entry2], 'drive|filesystem', function(metadata) {
+ *     if (metadata[0].drive.pinned && metadata[1].filesystem.size == 0)
  *       alert("Pinned and empty!");
  *   });
  *
@@ -116,7 +116,7 @@ MetadataCache.EVICTION_NUMBER = 1000;
 MetadataCache.createFull = function() {
   var cache = new MetadataCache();
   cache.providers_.push(new FilesystemProvider());
-  cache.providers_.push(new GDataProvider());
+  cache.providers_.push(new DriveProvider());
   cache.providers_.push(new ContentProvider());
   return cache;
 };
@@ -154,14 +154,14 @@ MetadataCache.prototype.get = function(items, type, callback) {
   var remaining = items.length;
   this.startBatchUpdates();
 
-  function onOneItem(index, value) {
+  var onOneItem = function(index, value) {
     result[index] = value;
     remaining--;
     if (remaining == 0) {
       this.endBatchUpdates();
       if (callback) setTimeout(callback, 0, result);
     }
-  }
+  };
 
   for (var index = 0; index < items.length; index++) {
     result.push(null);
@@ -181,11 +181,11 @@ MetadataCache.prototype.getOne = function(item, type, callback) {
     var result = {};
     var typesLeft = types.length;
 
-    function onOneType(requestedType, metadata) {
+    var onOneType = function(requestedType, metadata) {
       result[requestedType] = metadata;
       typesLeft--;
       if (typesLeft == 0) callback(result);
-    }
+    };
 
     for (var index = 0; index < types.length; index++) {
       this.getOne(item, types[index], onOneType.bind(null, types[index]));
@@ -216,7 +216,7 @@ MetadataCache.prototype.getOne = function(item, type, callback) {
   var currentProvider;
   var self = this;
 
-  function onFetched() {
+  var onFetched = function() {
     if (type in entry.properties) {
       self.endBatchUpdates();
       // Got properties from provider.
@@ -224,9 +224,9 @@ MetadataCache.prototype.getOne = function(item, type, callback) {
     } else {
       tryNextProvider();
     }
-  }
+  };
 
-  function onProviderProperties(properties) {
+  var onProviderProperties = function(properties) {
     var id = currentProvider.getId();
     var fetchedCallbacks = entry[id].callbacks;
     delete entry[id].callbacks;
@@ -236,9 +236,9 @@ MetadataCache.prototype.getOne = function(item, type, callback) {
     for (var index = 0; index < fetchedCallbacks.length; index++) {
       fetchedCallbacks[index]();
     }
-  }
+  };
 
-  function queryProvider() {
+  var queryProvider = function() {
     var id = currentProvider.getId();
     if ('callbacks' in entry[id]) {
       // We are querying this provider now.
@@ -247,9 +247,9 @@ MetadataCache.prototype.getOne = function(item, type, callback) {
       entry[id].callbacks = [onFetched];
       currentProvider.fetch(url, type, onProviderProperties, fsEntry);
     }
-  }
+  };
 
-  function tryNextProvider() {
+  var tryNextProvider = function() {
     if (providers.length == 0) {
       self.endBatchUpdates();
       callback(entry.properties[type] || null);
@@ -263,7 +263,7 @@ MetadataCache.prototype.getOne = function(item, type, callback) {
     } else {
       tryNextProvider();
     }
-  }
+  };
 
   tryNextProvider();
 };
@@ -513,12 +513,12 @@ MetadataCache.prototype.mergeProperties_ = function(url, data) {
 };
 
 /**
- * Ask the GData service to re-fetch the metadata. Ignores sequential requests.
+ * Ask the Drive service to re-fetch the metadata. Ignores sequential requests.
  * @param {string} url Directory URL.
  */
 MetadataCache.prototype.refreshDirectory = function(url) {
   // Skip if the current directory is now being refreshed.
-  if (this.directoriesWithStaleMetadata_[url] || !FileType.isOnGDrive(url))
+  if (this.directoriesWithStaleMetadata_[url] || !FileType.isOnDrive(url))
     return;
 
   this.directoriesWithStaleMetadata_[url] = true;
@@ -526,13 +526,13 @@ MetadataCache.prototype.refreshDirectory = function(url) {
 };
 
 /**
- * Ask the GData service to re-fetch the metadata.
+ * Ask the Drive service to re-fetch the metadata.
  * @param {string} fileURL File URL.
  */
 MetadataCache.prototype.refreshFileMetadata = function(fileURL) {
-  if (!FileType.isOnGDrive(fileURL))
+  if (!FileType.isOnDrive(fileURL))
     return;
-  // TODO(kaznacheev) This does not really work with GData search.
+  // TODO(kaznacheev) This does not really work with Drive search.
   var url = fileURL.substr(0, fileURL.lastIndexOf('/'));
   this.refreshDirectory(url);
 };
@@ -652,18 +652,18 @@ FilesystemProvider.prototype.fetch = function(url, type, callback, opt_entry) {
   if (opt_entry)
     onEntry(opt_entry);
   else
-    webkitResolveLocalFileSystemURL(url, onEntry, onError);
+    window.webkitResolveLocalFileSystemURL(url, onEntry, onError);
 };
 
 /**
- * Provider of gdata metadata.
+ * Provider of drive metadata.
  * This provider returns the following objects:
- *     gdata: { pinned, hosted, present, dirty, editUrl, contentUrl, driveApps }
+ *     drive: { pinned, hosted, present, dirty, editUrl, contentUrl, driveApps }
  *     thumbnail: { url, transform }
  *     streaming: { url }
  * @constructor
  */
-function GDataProvider() {
+function DriveProvider() {
   MetadataProvider.call(this);
 
   // We batch metadata fetches into single API call.
@@ -674,7 +674,7 @@ function GDataProvider() {
   this.callApiBound_ = this.callApi_.bind(this);
 }
 
-GDataProvider.prototype = {
+DriveProvider.prototype = {
   __proto__: MetadataProvider.prototype
 };
 
@@ -682,23 +682,23 @@ GDataProvider.prototype = {
  * @param {string} url The url.
  * @return {boolean} Whether this provider supports the url.
  */
-GDataProvider.prototype.supportsUrl = function(url) {
-  return FileType.isOnGDrive(url);
+DriveProvider.prototype.supportsUrl = function(url) {
+  return FileType.isOnDrive(url);
 };
 
 /**
  * @param {string} type The metadata type.
  * @return {boolean} Whether this provider provides this metadata.
  */
-GDataProvider.prototype.providesType = function(type) {
-  return type == 'gdata' || type == 'thumbnail' ||
+DriveProvider.prototype.providesType = function(type) {
+  return type == 'drive' || type == 'thumbnail' ||
       type == 'streaming' || type == 'media';
 };
 
 /**
  * @return {string} Unique provider id.
  */
-GDataProvider.prototype.getId = function() { return 'gdata'; };
+DriveProvider.prototype.getId = function() { return 'drive'; };
 
 /**
  * Fetches the metadata.
@@ -708,7 +708,7 @@ GDataProvider.prototype.getId = function() { return 'gdata'; };
  *     to metadata value.
  * @param {Entry=} opt_entry The file entry if present.
  */
-GDataProvider.prototype.fetch = function(url, type, callback, opt_entry) {
+DriveProvider.prototype.fetch = function(url, type, callback, opt_entry) {
   this.urls_.push(url);
   this.callbacks_.push(callback);
   if (!this.scheduled_) {
@@ -721,7 +721,7 @@ GDataProvider.prototype.fetch = function(url, type, callback, opt_entry) {
  * Schedules the API call.
  * @private
  */
-GDataProvider.prototype.callApi_ = function() {
+DriveProvider.prototype.callApi_ = function() {
   this.scheduled_ = false;
 
   var urls = this.urls_;
@@ -742,7 +742,7 @@ GDataProvider.prototype.callApi_ = function() {
  * @param {string} url File url.
  * @return {boolean} True if the file is available offline.
  */
-GDataProvider.isAvailableOffline = function(data, url) {
+DriveProvider.isAvailableOffline = function(data, url) {
   if (data.isPresent)
     return true;
 
@@ -758,7 +758,7 @@ GDataProvider.isAvailableOffline = function(data, url) {
  * @return {boolean} True if opening the file does not require downloading it
  *    via a metered connection.
  */
-GDataProvider.isAvailableWhenMetered = function(data) {
+DriveProvider.isAvailableWhenMetered = function(data) {
   return data.isPresent || data.isHosted;
 };
 
@@ -769,15 +769,15 @@ GDataProvider.isAvailableWhenMetered = function(data) {
  * @return {Object} Metadata in internal format.
  * @private
  */
-GDataProvider.prototype.convert_ = function(data, url) {
+DriveProvider.prototype.convert_ = function(data, url) {
   var result = {};
-  result.gdata = {
+  result.drive = {
     present: data.isPresent,
     pinned: data.isPinned,
     hosted: data.isHosted,
     dirty: data.isDirty,
-    availableOffline: GDataProvider.isAvailableOffline(data, url),
-    availableWhenMetered: GDataProvider.isAvailableWhenMetered(data),
+    availableOffline: DriveProvider.isAvailableOffline(data, url),
+    availableWhenMetered: DriveProvider.isAvailableWhenMetered(data),
     contentUrl: (data.contentUrl || '').replace(/\?.*$/gi, ''),
     editUrl: data.editUrl || '',
     driveApps: data.driveApps || [],
@@ -785,7 +785,7 @@ GDataProvider.prototype.convert_ = function(data, url) {
   };
 
   if (!data.isPresent) {
-    // Block the local fetch for gdata files, which require downloading.
+    // Block the local fetch for drive files, which require downloading.
     result.thumbnail = { url: '', transform: null };
     result.media = {};
   }

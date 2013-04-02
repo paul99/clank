@@ -39,11 +39,25 @@
 // Unit tests don't need time-consuming asynchronous animations.
 @interface BookmarkBarControllerTestable : BookmarkBarController {
 }
+
 @end
+
 @implementation BookmarkBarControllerTestable
-- (BOOL)animationEnabled {
-  return NO;
+
+- (id)initWithBrowser:(Browser*)browser
+         initialWidth:(CGFloat)initialWidth
+             delegate:(id<BookmarkBarControllerDelegate>)delegate
+       resizeDelegate:(id<ViewResizer>)resizeDelegate {
+  if ((self = [super initWithBrowser:browser
+                        initialWidth:initialWidth
+                            delegate:delegate
+                      resizeDelegate:resizeDelegate])) {
+    [self setStateAnimationsEnabled:NO];
+    [self setInnerContentAnimationsEnabled:NO];
+  }
+  return self;
 }
+
 @end
 
 // Just like a BookmarkBarController but openURL: is stubbed out.
@@ -278,7 +292,7 @@ class BookmarkBarControllerTestBase : public CocoaProfileTest {
     CocoaProfileTest::SetUp();
     ASSERT_TRUE(profile());
 
-    FilePath extension_dir;
+    base::FilePath extension_dir;
     static_cast<extensions::TestExtensionSystem*>(
         extensions::ExtensionSystem::Get(profile()))->
         CreateExtensionService(
@@ -444,25 +458,25 @@ TEST_F(BookmarkBarControllerTest, ShowOnNewTabPage) {
   }
 }
 
-// Test whether |-updateState:...| sets states as we expect. Make
+// Test whether |-updateState:...| sets currentState as expected. Make
 // sure things don't crash.
 TEST_F(BookmarkBarControllerTest, StateChanges) {
   // First, go in one-at-a-time cycle.
   [bar_ updateState:BookmarkBar::HIDDEN
          changeType:BookmarkBar::DONT_ANIMATE_STATE_CHANGE];
-  EXPECT_EQ(BookmarkBar::HIDDEN, [bar_ state]);
+  EXPECT_EQ(BookmarkBar::HIDDEN, [bar_ currentState]);
   EXPECT_FALSE([bar_ isVisible]);
   EXPECT_FALSE([bar_ isAnimationRunning]);
 
   [bar_ updateState:BookmarkBar::SHOW
          changeType:BookmarkBar::DONT_ANIMATE_STATE_CHANGE];
-  EXPECT_EQ(BookmarkBar::SHOW, [bar_ state]);
+  EXPECT_EQ(BookmarkBar::SHOW, [bar_ currentState]);
   EXPECT_TRUE([bar_ isVisible]);
   EXPECT_FALSE([bar_ isAnimationRunning]);
 
   [bar_ updateState:BookmarkBar::DETACHED
          changeType:BookmarkBar::DONT_ANIMATE_STATE_CHANGE];
-  EXPECT_EQ(BookmarkBar::DETACHED, [bar_ state]);
+  EXPECT_EQ(BookmarkBar::DETACHED, [bar_ currentState]);
   EXPECT_TRUE([bar_ isVisible]);
   EXPECT_FALSE([bar_ isAnimationRunning]);
 
@@ -470,13 +484,13 @@ TEST_F(BookmarkBarControllerTest, StateChanges) {
   for (int i = 0; i < 2; i++) {
   [bar_ updateState:BookmarkBar::HIDDEN
          changeType:BookmarkBar::DONT_ANIMATE_STATE_CHANGE];
-    EXPECT_EQ(BookmarkBar::HIDDEN, [bar_ state]);
+    EXPECT_EQ(BookmarkBar::HIDDEN, [bar_ currentState]);
     EXPECT_FALSE([bar_ isVisible]);
     EXPECT_FALSE([bar_ isAnimationRunning]);
 
     [bar_ updateState:BookmarkBar::SHOW
            changeType:BookmarkBar::DONT_ANIMATE_STATE_CHANGE];
-    EXPECT_EQ(BookmarkBar::SHOW, [bar_ state]);
+    EXPECT_EQ(BookmarkBar::SHOW, [bar_ currentState]);
     EXPECT_TRUE([bar_ isVisible]);
     EXPECT_FALSE([bar_ isAnimationRunning]);
   }
@@ -485,13 +499,13 @@ TEST_F(BookmarkBarControllerTest, StateChanges) {
   for (int i = 0; i < 2; i++) {
     [bar_ updateState:BookmarkBar::SHOW
            changeType:BookmarkBar::DONT_ANIMATE_STATE_CHANGE];
-    EXPECT_EQ(BookmarkBar::SHOW, [bar_ state]);
+    EXPECT_EQ(BookmarkBar::SHOW, [bar_ currentState]);
     EXPECT_TRUE([bar_ isVisible]);
     EXPECT_FALSE([bar_ isAnimationRunning]);
 
     [bar_ updateState:BookmarkBar::DETACHED
            changeType:BookmarkBar::DONT_ANIMATE_STATE_CHANGE];
-    EXPECT_EQ(BookmarkBar::DETACHED, [bar_ state]);
+    EXPECT_EQ(BookmarkBar::DETACHED, [bar_ currentState]);
     EXPECT_TRUE([bar_ isVisible]);
     EXPECT_FALSE([bar_ isAnimationRunning]);
   }
@@ -553,7 +567,6 @@ TEST_F(BookmarkBarControllerTest, NoItemContainerGoesAway) {
 // Confirm off the side button only enabled when reasonable.
 TEST_F(BookmarkBarControllerTest, OffTheSideButtonHidden) {
   BookmarkModel* model = BookmarkModelFactory::GetForProfile(profile());
-  [bar_ setIgnoreAnimations:YES];
 
   [bar_ loaded:model];
   EXPECT_TRUE([bar_ offTheSideButtonIsHidden]);
@@ -603,7 +616,6 @@ TEST_F(BookmarkBarControllerTest, OffTheSideButtonHidden) {
 // in this area to reproduce the crash.
 TEST_F(BookmarkBarControllerTest, DeleteFromOffTheSideWhileItIsOpen) {
   BookmarkModel* model = BookmarkModelFactory::GetForProfile(profile());
-  [bar_ setIgnoreAnimations:YES];
   [bar_ loaded:model];
 
   // Add a lot of bookmarks (per the bug).
@@ -1566,6 +1578,7 @@ TEST_F(BookmarkBarControllerTest, NodeDeletedWhileContextMenuIsOpen) {
 
 TEST_F(BookmarkBarControllerTest, CloseFolderOnAnimate) {
   BookmarkModel* model = BookmarkModelFactory::GetForProfile(profile());
+  [bar_ setStateAnimationsEnabled:YES];
   const BookmarkNode* parent = model->bookmark_bar_node();
   const BookmarkNode* folder = model->AddFolder(parent,
                                                 parent->child_count(),

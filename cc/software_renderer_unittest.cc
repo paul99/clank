@@ -71,17 +71,17 @@ TEST_F(SoftwareRendererTest, solidColorQuad)
     gfx::Size outerSize(100, 100);
     int outerPixels = outerSize.width() * outerSize.height();
     gfx::Size innerSize(98, 98);
-    gfx::Rect outerRect(gfx::Point(), outerSize);
+    gfx::Rect outerRect(outerSize);
     gfx::Rect innerRect(gfx::Point(1, 1), innerSize);
     setViewportSize(outerSize);
 
     initializeRenderer();
 
     scoped_ptr<SharedQuadState> sharedQuadState = SharedQuadState::Create();
-    sharedQuadState->SetAll(gfx::Transform(), outerRect, outerRect, outerRect, false, 1.0);
+    sharedQuadState->SetAll(gfx::Transform(), outerRect, outerRect, false, 1.0);
     RenderPass::Id rootRenderPassId = RenderPass::Id(1, 1);
     scoped_ptr<TestRenderPass> rootRenderPass = TestRenderPass::Create();
-    rootRenderPass->SetNew(rootRenderPassId, outerRect, gfx::Rect(), gfx::Transform());
+    rootRenderPass->SetNew(rootRenderPassId, outerRect, outerRect, gfx::Transform());
     scoped_ptr<SolidColorDrawQuad> outerQuad = SolidColorDrawQuad::Create();
     outerQuad->SetNew(sharedQuadState.get(), outerRect, SK_ColorYELLOW);
     scoped_ptr<SolidColorDrawQuad> innerQuad = SolidColorDrawQuad::Create();
@@ -90,10 +90,8 @@ TEST_F(SoftwareRendererTest, solidColorQuad)
     rootRenderPass->AppendQuad(outerQuad.PassAs<DrawQuad>());
 
     RenderPassList list;
-    RenderPassIdHashMap hashmap;
-    list.push_back(rootRenderPass.get());
-    hashmap.add(rootRenderPassId, rootRenderPass.PassAs<RenderPass>());
-    renderer()->drawFrame(list, hashmap);
+    list.push_back(rootRenderPass.PassAs<RenderPass>());
+    renderer()->drawFrame(list);
 
     scoped_array<SkColor> pixels(new SkColor[deviceViewportSize().width() * deviceViewportSize().height()]);
     renderer()->getFramebufferPixels(pixels.get(), outerRect);
@@ -116,7 +114,7 @@ TEST_F(SoftwareRendererTest, tileQuad)
     int outerPixels = outerSize.width() * outerSize.height();
     gfx::Size innerSize(98, 98);
     int innerPixels = innerSize.width() * innerSize.height();
-    gfx::Rect outerRect(gfx::Point(), outerSize);
+    gfx::Rect outerRect(outerSize);
     gfx::Rect innerRect(gfx::Point(1, 1), innerSize);
     setViewportSize(outerSize);
     initializeRenderer();
@@ -133,28 +131,26 @@ TEST_F(SoftwareRendererTest, tileQuad)
     for (int i = 0; i < innerPixels; i++)
       cyanPixels[i] = cyan;
 
-    resourceProvider()->setPixels(resourceYellow, reinterpret_cast<uint8_t*>(yellowPixels.get()), gfx::Rect(gfx::Point(), outerSize), gfx::Rect(gfx::Point(), outerSize), gfx::Vector2d());
-    resourceProvider()->setPixels(resourceCyan, reinterpret_cast<uint8_t*>(cyanPixels.get()), gfx::Rect(gfx::Point(), innerSize), gfx::Rect(gfx::Point(), innerSize), gfx::Vector2d());
+    resourceProvider()->setPixels(resourceYellow, reinterpret_cast<uint8_t*>(yellowPixels.get()), gfx::Rect(outerSize), gfx::Rect(outerSize), gfx::Vector2d());
+    resourceProvider()->setPixels(resourceCyan, reinterpret_cast<uint8_t*>(cyanPixels.get()), gfx::Rect(innerSize), gfx::Rect(innerSize), gfx::Vector2d());
 
-    gfx::Rect rect = gfx::Rect(gfx::Point(), deviceViewportSize());
+    gfx::Rect rootRect = gfx::Rect(deviceViewportSize());
 
     scoped_ptr<SharedQuadState> sharedQuadState = SharedQuadState::Create();
-    sharedQuadState->SetAll(gfx::Transform(), outerRect, outerRect, outerRect, false, 1.0);
+    sharedQuadState->SetAll(gfx::Transform(), outerRect, outerRect, false, 1.0);
     RenderPass::Id rootRenderPassId = RenderPass::Id(1, 1);
     scoped_ptr<TestRenderPass> rootRenderPass = TestRenderPass::Create();
-    rootRenderPass->SetNew(rootRenderPassId, gfx::Rect(gfx::Point(), deviceViewportSize()), gfx::Rect(), gfx::Transform());
+    rootRenderPass->SetNew(rootRenderPassId, rootRect, rootRect, gfx::Transform());
     scoped_ptr<TileDrawQuad> outerQuad = TileDrawQuad::Create();
-    outerQuad->SetNew(sharedQuadState.get(), outerRect, outerRect, resourceYellow, gfx::RectF(gfx::PointF(), outerSize), outerSize, false, false, false, false, false);
+    outerQuad->SetNew(sharedQuadState.get(), outerRect, outerRect, resourceYellow, gfx::RectF(outerSize), outerSize, false, false, false, false, false);
     scoped_ptr<TileDrawQuad> innerQuad = TileDrawQuad::Create();
-    innerQuad->SetNew(sharedQuadState.get(), innerRect, innerRect, resourceCyan, gfx::RectF(gfx::PointF(), innerSize), innerSize, false, false, false, false, false);
+    innerQuad->SetNew(sharedQuadState.get(), innerRect, innerRect, resourceCyan, gfx::RectF(innerSize), innerSize, false, false, false, false, false);
     rootRenderPass->AppendQuad(innerQuad.PassAs<DrawQuad>());
     rootRenderPass->AppendQuad(outerQuad.PassAs<DrawQuad>());
 
     RenderPassList list;
-    RenderPassIdHashMap hashmap;
-    list.push_back(rootRenderPass.get());
-    hashmap.add(rootRenderPassId, rootRenderPass.PassAs<RenderPass>());
-    renderer()->drawFrame(list, hashmap);
+    list.push_back(rootRenderPass.PassAs<RenderPass>());
+    renderer()->drawFrame(list);
 
     scoped_array<SkColor> pixels(new SkColor[deviceViewportSize().width() * deviceViewportSize().height()]);
     renderer()->getFramebufferPixels(pixels.get(), outerRect);
@@ -174,41 +170,31 @@ TEST_F(SoftwareRendererTest, shouldClearRootRenderPass)
     initializeRenderer();
 
     RenderPassList list;
-    RenderPassIdHashMap hashmap;
-    ScopedPtrVector<RenderPass> renderPasses;
     scoped_array<SkColor> pixels(new SkColor[viewportPixels]);
 
     // Draw a fullscreen green quad in a first frame.
     RenderPass::Id rootClearPassId(1, 0);
-    TestRenderPass* rootClearPass = addRenderPass(renderPasses, rootClearPassId, viewportRect, gfx::Transform());
+    TestRenderPass* rootClearPass = addRenderPass(list, rootClearPassId, viewportRect, gfx::Transform());
     addQuad(rootClearPass, viewportRect, SK_ColorGREEN);
 
-    list.push_back(rootClearPass);
-    hashmap.set(rootClearPassId, renderPasses.take(0));
-
     renderer()->decideRenderPassAllocationsForFrame(list);
-    renderer()->drawFrame(list, hashmap);
+    renderer()->drawFrame(list);
     renderer()->getFramebufferPixels(pixels.get(), viewportRect);
 
     EXPECT_EQ(SK_ColorGREEN, pixels[0]);
     EXPECT_EQ(SK_ColorGREEN, pixels[viewportPixels - 1]);
 
-    renderPasses.clear();
-    hashmap.clear();
     list.clear();
 
     // Draw a smaller magenta rect without filling the viewport in a separate frame.
     gfx::Rect smallerRect(20, 20, 60, 60);
 
     RenderPass::Id rootSmallerPassId(2, 0);
-    TestRenderPass* rootSmallerPass = addRenderPass(renderPasses, rootSmallerPassId, viewportRect, gfx::Transform());
+    TestRenderPass* rootSmallerPass = addRenderPass(list, rootSmallerPassId, viewportRect, gfx::Transform());
     addQuad(rootSmallerPass, smallerRect, SK_ColorMAGENTA);
 
-    list.push_back(rootSmallerPass);
-    hashmap.set(rootSmallerPassId, renderPasses.take(0));
-
     renderer()->decideRenderPassAllocationsForFrame(list);
-    renderer()->drawFrame(list, hashmap);
+    renderer()->drawFrame(list);
     renderer()->getFramebufferPixels(pixels.get(), viewportRect);
 
     // If we didn't clear, the borders should still be green.

@@ -5,6 +5,7 @@
 #ifndef CONTENT_PUBLIC_BROWSER_WEB_CONTENTS_OBSERVER_H_
 #define CONTENT_PUBLIC_BROWSER_WEB_CONTENTS_OBSERVER_H_
 
+#include "base/process.h"
 #include "base/process_util.h"
 #include "content/common/content_export.h"
 #include "content/public/browser/navigation_controller.h"
@@ -12,7 +13,7 @@
 #include "content/public/common/three_d_api_types.h"
 #include "ipc/ipc_listener.h"
 #include "ipc/ipc_sender.h"
-#include "webkit/glue/window_open_disposition.h"
+#include "ui/base/window_open_disposition.h"
 
 namespace content {
 
@@ -26,6 +27,17 @@ struct Referrer;
 
 // An observer API implemented by classes which are interested in various page
 // load events from WebContents.  They also get a chance to filter IPC messages.
+//
+// Since a WebContents can be a delegate to almost arbitrarly many
+// RenderViewHosts, it is important to check in those WebContentsObserver
+// methods which take a RenderViewHost that the event came from the
+// RenderViewHost the observer cares about.
+//
+// Usually, observers should only care about the current RenderViewHost as
+// returned by GetRenderViewHost().
+//
+// TODO(creis, jochen): Hide the fact that there are several RenderViewHosts
+// from the WebContentsObserver API. http://crbug.com/173325
 class CONTENT_EXPORT WebContentsObserver : public IPC::Listener,
                                            public IPC::Sender {
  public:
@@ -34,67 +46,131 @@ class CONTENT_EXPORT WebContentsObserver : public IPC::Listener,
   virtual void RenderViewCreated(RenderViewHost* render_view_host) {}
   virtual void RenderViewForInterstitialPageCreated(
       RenderViewHost* render_view_host) {}
-  virtual void RenderViewDeleted(RenderViewHost* render_view_host) {}
+
+  // This method is invoked when the RenderView of the current RenderViewHost
+  // is ready, e.g. because we recreated it after a crash.
   virtual void RenderViewReady() {}
+
+  // This method is invoked when a RenderViewHost of the WebContents is
+  // deleted. Note that this does not always happen when the WebContents starts
+  // to use a different RenderViewHost, as the old RenderViewHost might get
+  // just swapped out.
+  virtual void RenderViewDeleted(RenderViewHost* render_view_host) {}
+
+  // This method is invoked when the current RenderView crashes. The WebContents
+  // continues to use the RenderViewHost, e.g. when the user reloads the current
+  // page.
+  // When the RenderViewHost is deleted, the RenderViewDeleted method will be
+  // invoked.
   virtual void RenderViewGone(base::TerminationStatus status) {}
+
+  // This method is invoked after the WebContents decided which RenderViewHost
+  // to use for the next navigation, but before the navigation starts.
   virtual void AboutToNavigateRenderView(
       RenderViewHost* render_view_host) {}
+
+  // This method is invoked right after the navigation was initiated.
   virtual void NavigateToPendingEntry(
       const GURL& url,
       NavigationController::ReloadType reload_type) {}
-  virtual void DidNavigateMainFrame(
-      const LoadCommittedDetails& details,
-      const FrameNavigateParams& params) {}
-  virtual void DidNavigateAnyFrame(
-      const LoadCommittedDetails& details,
-      const FrameNavigateParams& params) {}
+
   // |render_view_host| is the RenderViewHost for which the provisional load is
   // happening. |frame_id| is a positive, non-zero integer identifying the
   // navigating frame in the given |render_view_host|. |parent_frame_id| is the
   // frame identifier of the frame containing the navigating frame, or -1 if the
   // frame is not contained in another frame.
+  //
+  // Since the URL validation will strip error URLs, or srcdoc URLs, the boolean
+  // flags |is_error_page| and |is_iframe_srcdoc| will indicate that the not
+  // validated URL was either an error page or an iframe srcdoc.
+  //
+  // Note that during a cross-process navigation, several provisional loads
+  // can be on-going in parallel.
   virtual void DidStartProvisionalLoadForFrame(
       int64 frame_id,
       int64 parent_frame_id,
       bool is_main_frame,
       const GURL& validated_url,
       bool is_error_page,
+      bool is_iframe_srcdoc,
       RenderViewHost* render_view_host) {}
+
+  // This method is invoked right after the DidStartProvisionalLoadForFrame if
+  // the provisional load affects the main frame, or if the provisional load
+  // was redirected. The latter use case is DEPRECATED. You should listen to
+  // the ResourceDispatcherHost's RESOURCE_RECEIVED_REDIRECT notification
+  // instead.
   virtual void ProvisionalChangeToMainFrameUrl(
       const GURL& url,
       RenderViewHost* render_view_host) {}
+
+  // This method is invoked when the provisional load was successfully
+  // commited. The |render_view_host| is now the current RenderViewHost of the
+  // WebContents.
+  //
+  // If the navigation only changed the reference fragment, or was triggered
+  // using the history API (e.g. window.history.replaceState), we will receive
+  // this signal without a prior DidStartProvisionalLoadForFrame signal.
   virtual void DidCommitProvisionalLoadForFrame(
       int64 frame_id,
       bool is_main_frame,
       const GURL& url,
       PageTransition transition_type,
       RenderViewHost* render_view_host) {}
+
+  // This method is invoked when the provisional load failed.
   virtual void DidFailProvisionalLoad(int64 frame_id,
                                       bool is_main_frame,
                                       const GURL& validated_url,
                                       int error_code,
                                       const string16& error_description,
                                       RenderViewHost* render_view_host) {}
+
+  // If the provisional load corresponded to the main frame, this method is
+  // invoked in addition to DidCommitProvisionalLoadForFrame.
+  virtual void DidNavigateMainFrame(
+      const LoadCommittedDetails& details,
+      const FrameNavigateParams& params) {}
+
+  // And regardless of what frame navigated, this method is invoked after
+  // DidCommitProvisionalLoadForFrame was invoked.
+  virtual void DidNavigateAnyFrame(
+      const LoadCommittedDetails& details,
+      const FrameNavigateParams& params) {}
+
+  // This method is invoked once the window.document object was created.
   virtual void DocumentAvailableInMainFrame() {}
+
+  // This method is invoked when the document in the given frame finished
+  // loading. At this point, scripts marked as defer were executed, and
+  // content scripts marked "document_end" get injected into the frame.
   virtual void DocumentLoadedInFrame(int64 frame_id,
                                      RenderViewHost* render_view_host) {}
+
+  // This method is invoked when the navigation is done, i.e. the spinner of
+  // the tab will stop spinning, and the onload event was dispatched.
+  //
+  // If the WebContents is displaying replacement content, e.g. network error
+  // pages, DidFinishLoad is invoked for frames that were not sending
+  // navigational events before. It is safe to ignore these events.
   virtual void DidFinishLoad(int64 frame_id,
                              const GURL& validated_url,
                              bool is_main_frame,
                              RenderViewHost* render_view_host) {}
+
+  // This method is like DidFinishLoad, but when the load failed or was
+  // cancelled, e.g. window.stop() is invoked.
   virtual void DidFailLoad(int64 frame_id,
                            const GURL& validated_url,
                            bool is_main_frame,
                            int error_code,
                            const string16& error_description,
                            RenderViewHost* render_view_host) {}
-  virtual void DidStartLoading(RenderViewHost* render_view_host) {}
-  virtual void DidStopLoading(RenderViewHost* render_view_host) {}
 
-  virtual void DidGetUserGesture() {}
-  virtual void DidGetIgnoredUIEvent() {}
-  virtual void StopNavigation() {}
-
+  // This method is invoked when a new WebContents was created in response to
+  // an action in the observed WebContents, e.g. a link with target=_blank was
+  // clicked. The |source_frame_id| indicates in which frame the action took
+  // place.
   virtual void DidOpenRequestedURL(WebContents* new_contents,
                                    const GURL& url,
                                    const Referrer& referrer,
@@ -102,13 +178,39 @@ class CONTENT_EXPORT WebContentsObserver : public IPC::Listener,
                                    PageTransition transition,
                                    int64 source_frame_id) {}
 
+  virtual void FrameDetached(RenderViewHost* render_view_host,
+                             int64 frame_id) {}
+
+  // These two methods correspond to the points in time when the spinner of the
+  // tab starts and stops spinning.
+  virtual void DidStartLoading(RenderViewHost* render_view_host) {}
+  virtual void DidStopLoading(RenderViewHost* render_view_host) {}
+
+  // This method is invoked when the navigation from the browser process. If
+  // there are ongoing navigations, the respective failure methods will also be
+  // invoked.
+  virtual void StopNavigation() {}
+
+  // This indicates that the next navigation was triggered by a user gesture.
+  virtual void DidGetUserGesture() {}
+
+  // This method is invoked when a RenderViewHost of this WebContents was
+  // configured to ignore UI events, and an UI event took place.
+  virtual void DidGetIgnoredUIEvent() {}
+
+  // This method is invoked every time the WebContents becomes visible.
   virtual void WasShown() {}
 
   virtual void AppCacheAccessed(const GURL& manifest_url,
                                 bool blocked_by_policy) {}
 
   // Notification that a plugin has crashed.
-  virtual void PluginCrashed(const FilePath& plugin_path) {}
+  // |plugin_pid| is the process ID identifying the plugin process. Note that
+  // this ID is supplied by the renderer, so should not be trusted. Besides, the
+  // corresponding process has probably died at this point. The ID may even have
+  // been reused by a new process.
+  virtual void PluginCrashed(const FilePath& plugin_path,
+                             base::ProcessId plugin_pid) {}
 
   // Notication that the given plugin has hung or become unhung. This
   // notification is only for Pepper plugins.
@@ -141,6 +243,11 @@ class CONTENT_EXPORT WebContentsObserver : public IPC::Listener,
   // Invoked when new FaviconURL candidates are received from the renderer.
   virtual void DidUpdateFaviconURL(int32 page_id,
                                    const std::vector<FaviconURL>& candidates) {}
+
+  // Invoked when a pepper plugin creates and shows or destroys a fullscreen
+  // render widget.
+  virtual void DidShowFullscreenWidget(int routing_id) {}
+  virtual void DidDestroyFullscreenWidget(int routing_id) {}
 
   // IPC::Listener implementation.
   virtual bool OnMessageReceived(const IPC::Message& message) OVERRIDE;

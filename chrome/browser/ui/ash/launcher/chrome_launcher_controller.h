@@ -10,11 +10,15 @@
 #include "ash/launcher/launcher_delegate.h"
 #include "ash/launcher/launcher_types.h"
 #include "ash/shelf_types.h"
+#include "base/memory/scoped_vector.h"
 #include "chrome/browser/extensions/extension_prefs.h"
+#include "chrome/browser/ui/ash/app_icon_loader.h"
 
 class BrowserLauncherItemControllerTest;
 class LauncherItemController;
 class Profile;
+class ChromeLauncherAppMenuItem;
+class ChromeLauncherControllerPerApp;
 
 namespace ash {
 class LauncherModel;
@@ -29,6 +33,9 @@ namespace content {
 class WebContents;
 }
 
+// A list of the elements which makes up a simple menu description.
+typedef ScopedVector<ChromeLauncherAppMenuItem> ChromeLauncherAppMenuItems;
+
 // ChromeLauncherController manages the launcher items needed for content
 // windows. Launcher items have a type, an optional app id, and a controller.
 // ChromeLauncherController will furthermore create the particular
@@ -40,7 +47,8 @@ class WebContents;
 //   ShellWindowLauncherController.
 // * Shortcuts have no LauncherItemController.
 class ChromeLauncherController
-    : public ash::LauncherDelegate {
+    : public ash::LauncherDelegate,
+      public ash::AppIconLoader::Delegate {
  public:
   // Indicates if a launcher item is incognito or not.
   enum IncognitoState {
@@ -70,25 +78,16 @@ class ChromeLauncherController
     virtual bool IsValidID(const std::string& id) = 0;
   };
 
-  // Interface used to load app icons. This is in it's own class so that it can
-  // be mocked.
-  class AppIconLoader {
-   public:
-    virtual ~AppIconLoader() {}
-
-    // Fetches the image for the specified id. When done (which may be
-    // synchronous), this should invoke SetAppImage() on the LauncherUpdater.
-    virtual void FetchImage(const std::string& id) = 0;
-
-    // Clears the image for the specified id.
-    virtual void ClearImage(const std::string& id) = 0;
-  };
-
   ChromeLauncherController() {}
   virtual ~ChromeLauncherController();
 
   // Initializes this ChromeLauncherController.
   virtual void Init() = 0;
+
+  // Returns the new per application interface of the given launcher. If it is
+  // a per browser (old) controller, it will return NULL;
+  // TODO(skuhne): Remove when we rip out the old launcher.
+  virtual ChromeLauncherControllerPerApp* GetPerAppInterface() = 0;
 
   // Creates an instance.
   static ChromeLauncherController* CreateInstance(Profile* profile,
@@ -167,13 +166,12 @@ class ChromeLauncherController
   // Returns the id of the app for the specified tab.
   virtual std::string GetAppID(content::WebContents* tab) = 0;
 
+  // Returns the launcherID of the first non-panel item whose app_id
+  // matches |app_id| or 0 if none match.
   virtual ash::LauncherID GetLauncherIDForAppID(const std::string& app_id) = 0;
-  virtual std::string GetAppIDForLauncherID(ash::LauncherID id) = 0;
 
-  // Sets the image for an app tab. This is intended to be invoked from the
-  // AppIconLoader.
-  virtual void SetAppImage(const std::string& app_id,
-                           const gfx::ImageSkia& image) = 0;
+  // Returns the id of the app for the specified id (which must exist).
+  virtual std::string GetAppIDForLauncherID(ash::LauncherID id) = 0;
 
   // Set the image for a specific launcher item (e.g. when set by the app).
   virtual void SetLauncherItemImage(ash::LauncherID launcher_id,
@@ -242,7 +240,8 @@ class ChromeLauncherController
                               AppState app_state) = 0;
 
   // Limits application refocusing to urls that match |url| for |id|.
-  virtual void SetRefocusURLPattern(ash::LauncherID id, const GURL& url) = 0;
+  virtual void SetRefocusURLPatternForTest(ash::LauncherID id,
+                                           const GURL& url) = 0;
 
   // Returns the extension identified by |app_id|.
   virtual const extensions::Extension* GetExtensionForAppID(
@@ -251,18 +250,27 @@ class ChromeLauncherController
   // ash::LauncherDelegate overrides:
   virtual void OnBrowserShortcutClicked(int event_flags) OVERRIDE = 0;
   virtual void ItemClicked(const ash::LauncherItem& item,
-                           int event_flags) OVERRIDE = 0;
+                           const ui::Event& event) OVERRIDE = 0;
   virtual int GetBrowserShortcutResourceId() OVERRIDE = 0;
   virtual string16 GetTitle(const ash::LauncherItem& item) OVERRIDE = 0;
   virtual ui::MenuModel* CreateContextMenu(
       const ash::LauncherItem& item, aura::RootWindow* root) OVERRIDE = 0;
+  virtual ui::MenuModel* CreateApplicationMenu(
+      const ash::LauncherItem& item) OVERRIDE = 0;
   virtual ash::LauncherID GetIDByWindow(aura::Window* window) OVERRIDE = 0;
   virtual bool IsDraggable(const ash::LauncherItem& item) OVERRIDE = 0;
+
+  // ash::AppIconLoader overrides:
+  virtual void SetAppImage(const std::string& app_id,
+                           const gfx::ImageSkia& image) OVERRIDE = 0;
 
  protected:
   friend class BrowserLauncherItemControllerTest;
   friend class LauncherPlatformAppBrowserTest;
   friend class LauncherAppBrowserTest;
+  // TODO(skuhne): Remove these when the old launcher get removed.
+  friend class LauncherPlatformPerAppAppBrowserTest;
+  friend class LauncherPerAppAppBrowserTest;
 
   // Creates a new app shortcut item and controller on the launcher at |index|.
   // Use kInsertItemAtEnd to add a shortcut as the last item.
@@ -273,7 +281,7 @@ class ChromeLauncherController
   // Sets the AppTabHelper/AppIconLoader, taking ownership of the helper class.
   // These are intended for testing.
   virtual void SetAppTabHelperForTest(AppTabHelper* helper) = 0;
-  virtual void SetAppIconLoaderForTest(AppIconLoader* loader) = 0;
+  virtual void SetAppIconLoaderForTest(ash::AppIconLoader* loader) = 0;
   virtual const std::string& GetAppIdFromLauncherIdForTest(
       ash::LauncherID id) = 0;
 

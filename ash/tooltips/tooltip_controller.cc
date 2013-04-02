@@ -111,7 +111,7 @@ class TooltipController::Tooltip : public views::WidgetObserver {
     label_.set_owned_by_client();
   }
 
-  ~Tooltip() {
+  virtual ~Tooltip() {
     if (widget_) {
       widget_->RemoveObserver(this);
       widget_->Close();
@@ -152,7 +152,7 @@ class TooltipController::Tooltip : public views::WidgetObserver {
   }
 
   // Overriden from views::WidgetObserver.
-  virtual void OnWidgetClosing(views::Widget* widget) OVERRIDE {
+  virtual void OnWidgetDestroying(views::Widget* widget) OVERRIDE {
     DCHECK_EQ(widget_, widget);
     widget_ = NULL;
   }

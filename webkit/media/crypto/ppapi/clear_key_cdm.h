@@ -12,7 +12,6 @@
 #include "base/memory/ref_counted.h"
 #include "base/memory/scoped_ptr.h"
 #include "base/synchronization/lock.h"
-#include "media/base/decryptor_client.h"
 #include "media/crypto/aes_decryptor.h"
 #include "webkit/media/crypto/ppapi/cdm/content_decryption_module.h"
 
@@ -34,7 +33,7 @@ class FFmpegCdmAudioDecoder;
 // Clear key implementation of the cdm::ContentDecryptionModule interface.
 class ClearKeyCdm : public cdm::ContentDecryptionModule {
  public:
-  ClearKeyCdm(cdm::Allocator* allocator, cdm::Host* host);
+  explicit ClearKeyCdm(cdm::Host* host);
   virtual ~ClearKeyCdm();
 
   // ContentDecryptionModule implementation.
@@ -61,9 +60,12 @@ class ClearKeyCdm : public cdm::ContentDecryptionModule {
   virtual cdm::Status DecryptAndDecodeSamples(
       const cdm::InputBuffer& encrypted_buffer,
       cdm::AudioFrames* audio_frames) OVERRIDE;
+  virtual void Destroy() OVERRIDE;
 
  private:
-  class Client : public media::DecryptorClient {
+  // TODO(xhwang): After we removed DecryptorClient. We probably can also remove
+  // this Client class as well. Investigate this possibility.
+  class Client {
    public:
     enum Status {
       kKeyAdded,
@@ -83,22 +85,19 @@ class ClearKeyCdm : public cdm::ContentDecryptionModule {
     // Resets the Client to a clean state.
     void Reset();
 
-    // media::DecryptorClient implementation.
-    virtual void KeyAdded(const std::string& key_system,
-                          const std::string& session_id) OVERRIDE;
-    virtual void KeyError(const std::string& key_system,
-                          const std::string& session_id,
-                          media::Decryptor::KeyError error_code,
-                          int system_code) OVERRIDE;
-    virtual void KeyMessage(const std::string& key_system,
-                            const std::string& session_id,
-                            const std::string& message,
-                            const std::string& default_url) OVERRIDE;
-    virtual void NeedKey(const std::string& key_system,
-                         const std::string& session_id,
-                         const std::string& type,
-                         scoped_array<uint8> init_data,
-                         int init_data_length) OVERRIDE;
+    void KeyAdded(const std::string& key_system, const std::string& session_id);
+    void KeyError(const std::string& key_system,
+                  const std::string& session_id,
+                  media::Decryptor::KeyError error_code,
+                  int system_code);
+    void KeyMessage(const std::string& key_system,
+                    const std::string& session_id,
+                    const std::string& message,
+                    const std::string& default_url);
+    void NeedKey(const std::string& key_system,
+                 const std::string& session_id,
+                 const std::string& type,
+                 scoped_array<uint8> init_data, int init_data_length);
 
    private:
     Status status_;
@@ -143,7 +142,6 @@ class ClearKeyCdm : public cdm::ContentDecryptionModule {
   // simultaneously.
   base::Lock client_lock_;
 
-  cdm::Allocator* const allocator_;
   cdm::Host* host_;
 
   std::string heartbeat_session_id_;

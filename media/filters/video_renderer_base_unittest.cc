@@ -261,14 +261,14 @@ class VideoRendererBaseTest : public ::testing::Test {
     if (!read_cb_.is_null())
       return;
 
-    DCHECK(pending_read_cb_.is_null());
+    DCHECK(wait_for_pending_read_cb_.is_null());
 
     WaitableMessageLoopEvent event;
-    pending_read_cb_ = event.GetClosure();
+    wait_for_pending_read_cb_ = event.GetClosure();
     event.RunAndWait();
 
     DCHECK(!read_cb_.is_null());
-    DCHECK(pending_read_cb_.is_null());
+    DCHECK(wait_for_pending_read_cb_.is_null());
   }
 
   void SatisfyPendingRead() {
@@ -315,8 +315,8 @@ class VideoRendererBaseTest : public ::testing::Test {
     read_cb_ = read_cb;
 
     // Wake up WaitForPendingRead() if needed.
-    if (!pending_read_cb_.is_null())
-      base::ResetAndReturn(&pending_read_cb_).Run();
+    if (!wait_for_pending_read_cb_.is_null())
+      base::ResetAndReturn(&wait_for_pending_read_cb_).Run();
 
     if (decode_results_.empty())
       return;
@@ -350,7 +350,9 @@ class VideoRendererBaseTest : public ::testing::Test {
 
   WaitableMessageLoopEvent error_event_;
   WaitableMessageLoopEvent ended_event_;
-  base::Closure pending_read_cb_;
+
+  // Run during FrameRequested() to unblock WaitForPendingRead().
+  base::Closure wait_for_pending_read_cb_;
 
   std::deque<std::pair<
       VideoDecoder::Status, scoped_refptr<VideoFrame> > > decode_results_;
@@ -527,13 +529,7 @@ TEST_F(VideoRendererBaseTest, GetCurrentFrame_Flushed) {
   Shutdown();
 }
 
-#if defined(OS_MACOSX) || defined(ADDRESS_SANITIZER)
-// http://crbug.com/109405
-#define MAYBE_GetCurrentFrame_EndOfStream DISABLED_GetCurrentFrame_EndOfStream
-#else
-#define MAYBE_GetCurrentFrame_EndOfStream GetCurrentFrame_EndOfStream
-#endif
-TEST_F(VideoRendererBaseTest, MAYBE_GetCurrentFrame_EndOfStream) {
+TEST_F(VideoRendererBaseTest, GetCurrentFrame_EndOfStream) {
   Initialize();
   Play();
   Pause();

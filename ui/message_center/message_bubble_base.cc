@@ -5,6 +5,7 @@
 #include "ui/message_center/message_bubble_base.h"
 
 #include "base/bind.h"
+#include "ui/message_center/message_center_util.h"
 #include "ui/message_center/message_view.h"
 #include "ui/views/widget/widget.h"
 #include "ui/views/widget/widget_observer.h"
@@ -13,6 +14,7 @@ namespace {
 // Delay laying out the MessageBubbleBase until all notifications have been
 // added and icons have had a chance to load.
 const int kUpdateDelayMs = 50;
+const int kMessageBubbleBaseDefaultMaxHeight = 400;
 }
 
 namespace message_center {
@@ -27,7 +29,8 @@ const SkColor MessageBubbleBase::kHeaderBackgroundColorDark =
 MessageBubbleBase::MessageBubbleBase(NotificationList::Delegate* list_delegate)
     : list_delegate_(list_delegate),
       bubble_view_(NULL),
-      ALLOW_THIS_IN_INITIALIZER_LIST(weak_ptr_factory_(this)) {
+      ALLOW_THIS_IN_INITIALIZER_LIST(weak_ptr_factory_(this)),
+      max_height_(kMessageBubbleBaseDefaultMaxHeight) {
 }
 
 MessageBubbleBase::~MessageBubbleBase() {
@@ -51,6 +54,21 @@ void MessageBubbleBase::ScheduleUpdate() {
 
 bool MessageBubbleBase::IsVisible() const {
   return bubble_view() && bubble_view()->GetWidget()->IsVisible();
+}
+
+void MessageBubbleBase::SetMaxHeight(int height) {
+  // Maximum height makes sense only for the new design.
+  if (!message_center::IsRichNotificationEnabled())
+    return;
+
+  if (height == 0)
+    height = kMessageBubbleBaseDefaultMaxHeight;
+  if (height == max_height_)
+    return;
+
+  max_height_ = height;
+  if (bubble_view_)
+    bubble_view_->SetMaxHeight(max_height_);
 }
 
 views::TrayBubbleView::InitParams MessageBubbleBase::GetDefaultInitParams(

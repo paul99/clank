@@ -256,6 +256,9 @@ class ChromeTests:
   def TestChromeOS(self):
     return self.SimpleTest("chromeos", "chromeos_unittests")
 
+  def TestComponents(self):
+    return self.SimpleTest("components", "components_unittests")
+
   def TestCompositor(self):
     return self.SimpleTest("compositor", "compositor_unittests")
 
@@ -342,14 +345,16 @@ class ChromeTests:
   UI_VALGRIND_ARGS = ["--timeout=14400", "--trace_children", "--indirect"]
   # UI test timeouts are in milliseconds.
   UI_TEST_ARGS = ["--ui-test-action-timeout=60000",
-                  "--ui-test-action-max-timeout=150000"]
+                  "--ui-test-action-max-timeout=150000",
+                  "--no-sandbox"]
 
   # TODO(thestig) fine-tune these values.
   # Valgrind timeouts are in seconds.
   BROWSER_VALGRIND_ARGS = ["--timeout=50000", "--trace_children", "--indirect"]
   # Browser test timeouts are in milliseconds.
   BROWSER_TEST_ARGS = ["--ui-test-action-timeout=200000",
-                       "--ui-test-action-max-timeout=400000"]
+                       "--ui-test-action-max-timeout=400000",
+                       "--no-sandbox"]
 
   def TestAutomatedUI(self):
     return self.SimpleTest("chrome", "automated_ui_tests",
@@ -506,6 +511,7 @@ class ChromeTests:
     "base": TestBase,            "base_unittests": TestBase,
     "browser": TestBrowser,      "browser_tests": TestBrowser,
     "chromeos": TestChromeOS,    "chromeos_unittests": TestChromeOS,
+    "components": TestComponents,"components_unittests": TestComponents,
     "compositor": TestCompositor,"compositor_unittests": TestCompositor,
     "content": TestContent,      "content_unittests": TestContent,
     "content_browsertests": TestContentBrowser,

@@ -14,7 +14,6 @@
 #include "ipc/ipc_channel.h"
 #include "ipc/ipc_channel_proxy.h"
 #include "remoting/base/auto_thread_task_runner.h"
-#include "remoting/host/event_executor.h"
 
 namespace remoting {
 
@@ -23,6 +22,7 @@ namespace remoting {
 class DesktopSessionAgentPosix : public DesktopSessionAgent {
  public:
   DesktopSessionAgentPosix(
+      scoped_refptr<AutoThreadTaskRunner> audio_capture_task_runner,
       scoped_refptr<AutoThreadTaskRunner> caller_task_runner,
       scoped_refptr<AutoThreadTaskRunner> input_task_runner,
       scoped_refptr<AutoThreadTaskRunner> io_task_runner,
@@ -34,18 +34,19 @@ class DesktopSessionAgentPosix : public DesktopSessionAgent {
   virtual bool CreateChannelForNetworkProcess(
       IPC::PlatformFileForTransit* client_out,
       scoped_ptr<IPC::ChannelProxy>* server_out) OVERRIDE;
-  virtual scoped_ptr<EventExecutor> CreateEventExecutor() OVERRIDE;
 
  private:
   DISALLOW_COPY_AND_ASSIGN(DesktopSessionAgentPosix);
 };
 
 DesktopSessionAgentPosix::DesktopSessionAgentPosix(
+    scoped_refptr<AutoThreadTaskRunner> audio_capture_task_runner,
     scoped_refptr<AutoThreadTaskRunner> caller_task_runner,
     scoped_refptr<AutoThreadTaskRunner> input_task_runner,
     scoped_refptr<AutoThreadTaskRunner> io_task_runner,
     scoped_refptr<AutoThreadTaskRunner> video_capture_task_runner)
-    : DesktopSessionAgent(caller_task_runner, input_task_runner, io_task_runner,
+    : DesktopSessionAgent(audio_capture_task_runner, caller_task_runner,
+                          input_task_runner, io_task_runner,
                           video_capture_task_runner) {
 }
 
@@ -90,21 +91,16 @@ bool DesktopSessionAgentPosix::CreateChannelForNetworkProcess(
   return true;
 }
 
-scoped_ptr<EventExecutor> DesktopSessionAgentPosix::CreateEventExecutor() {
-  DCHECK(caller_task_runner()->BelongsToCurrentThread());
-
-  return EventExecutor::Create(input_task_runner(),
-                               caller_task_runner()).Pass();
-}
-
 // static
 scoped_refptr<DesktopSessionAgent> DesktopSessionAgent::Create(
+    scoped_refptr<AutoThreadTaskRunner> audio_capture_task_runner,
     scoped_refptr<AutoThreadTaskRunner> caller_task_runner,
     scoped_refptr<AutoThreadTaskRunner> input_task_runner,
     scoped_refptr<AutoThreadTaskRunner> io_task_runner,
     scoped_refptr<AutoThreadTaskRunner> video_capture_task_runner) {
   return scoped_refptr<DesktopSessionAgent>(
-      new DesktopSessionAgentPosix(caller_task_runner, input_task_runner,
+      new DesktopSessionAgentPosix(audio_capture_task_runner,
+                                   caller_task_runner, input_task_runner,
                                    io_task_runner, video_capture_task_runner));
 }
 

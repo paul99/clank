@@ -4,8 +4,9 @@
 
 #include "chrome/browser/gpu/gl_string_manager.h"
 
+#include "base/prefs/pref_registry_simple.h"
+#include "base/prefs/pref_service.h"
 #include "chrome/browser/browser_process.h"
-#include "chrome/browser/prefs/pref_service.h"
 #include "chrome/common/pref_names.h"
 #include "content/public/browser/gpu_data_manager.h"
 
@@ -25,9 +26,12 @@ void GLStringManager::Initialize() {
   if (!local_state)
     return;
 
-  local_state->RegisterStringPref(prefs::kGLVendorString, gl_vendor_);
-  local_state->RegisterStringPref(prefs::kGLRendererString, gl_renderer_);
-  local_state->RegisterStringPref(prefs::kGLVersionString, gl_version_);
+  // TODO(joi): This should happen via browser_prefs::RegisterLocalState().
+  PrefRegistrySimple* registry = static_cast<PrefRegistrySimple*>(
+      local_state->DeprecatedGetPrefRegistry());
+  registry->RegisterStringPref(prefs::kGLVendorString, gl_vendor_);
+  registry->RegisterStringPref(prefs::kGLRendererString, gl_renderer_);
+  registry->RegisterStringPref(prefs::kGLVersionString, gl_version_);
 
   gl_vendor_ = local_state->GetString(prefs::kGLVendorString);
   gl_renderer_ = local_state->GetString(prefs::kGLRendererString);

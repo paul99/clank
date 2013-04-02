@@ -6,25 +6,53 @@
 
 #include "base/logging.h"
 #include "base/utf_string_conversions.h"
+#include "chrome/browser/api/infobars/infobar_service.h"
+#include "chrome/browser/content_settings/tab_specific_content_settings.h"
 #include "chrome/browser/google/google_util.h"
-#include "chrome/browser/infobars/infobar_tab_helper.h"
+#include "chrome/browser/profiles/profile.h"
 #include "chrome/common/url_constants.h"
+#include "content/public/browser/web_contents.h"
 #include "googleurl/src/gurl.h"
 #include "grit/generated_resources.h"
 #include "grit/theme_resources.h"
 #include "ui/base/l10n/l10n_util.h"
 #include "ui/base/resource/resource_bundle.h"
 
-MediaStreamInfoBarDelegate::MediaStreamInfoBarDelegate(
-    InfoBarTabHelper* tab_helper,
-    MediaStreamDevicesController* controller)
-    : ConfirmInfoBarDelegate(tab_helper),
-      controller_(controller) {
-  DCHECK(controller_.get());
-  DCHECK(controller_->has_audio() || controller_->has_video());
-}
-
 MediaStreamInfoBarDelegate::~MediaStreamInfoBarDelegate() {}
+
+// static
+bool MediaStreamInfoBarDelegate::Create(
+    content::WebContents* web_contents,
+    const content::MediaStreamRequest& request,
+    const content::MediaResponseCallback& callback) {
+  Profile* profile =
+      Profile::FromBrowserContext(web_contents->GetBrowserContext());
+  TabSpecificContentSettings* content_settings =
+      TabSpecificContentSettings::FromWebContents(web_contents);
+  scoped_ptr<MediaStreamDevicesController> controller(
+      new MediaStreamDevicesController(profile, content_settings,
+                                       request, callback));
+  if (controller->DismissInfoBarAndTakeActionOnSettings())
+    return false;
+
+  InfoBarService* infobar_service =
+      InfoBarService::FromWebContents(web_contents);
+  InfoBarDelegate* old_infobar = NULL;
+  for (size_t i = 0; i < infobar_service->GetInfoBarCount(); ++i) {
+    old_infobar = infobar_service->GetInfoBarDelegateAt(i)->
+        AsMediaStreamInfoBarDelegate();
+    if (old_infobar)
+      break;
+  }
+  scoped_ptr<InfoBarDelegate> infobar(
+      new MediaStreamInfoBarDelegate(infobar_service, controller.release()));
+  if (old_infobar)
+    infobar_service->ReplaceInfoBar(old_infobar, infobar.Pass());
+  else
+    infobar_service->AddInfoBar(infobar.Pass());
+
+  return true;
+}
 
 void MediaStreamInfoBarDelegate::InfoBarDismissed() {
   // Deny the request if the infobar was closed with the 'x' button, since
@@ -89,4 +117,13 @@ bool MediaStreamInfoBarDelegate::LinkClicked(
   owner()->GetWebContents()->OpenURL(params);
 
   return false;  // Do not dismiss the info bar.
+}
+
+MediaStreamInfoBarDelegate::MediaStreamInfoBarDelegate(
+    InfoBarService* infobar_service,
+    MediaStreamDevicesController* controller)
+    : ConfirmInfoBarDelegate(infobar_service),
+      controller_(controller) {
+  DCHECK(controller_.get());
+  DCHECK(controller_->has_audio() || controller_->has_video());
 }

@@ -27,14 +27,18 @@ class MockUserManager : public UserManager {
   MOCK_METHOD2(UserLoggedIn, void(const std::string&, bool));
   MOCK_METHOD0(RetailModeUserLoggedIn, void(void));
   MOCK_METHOD0(GuestUserLoggedIn, void(void));
+  MOCK_METHOD1(LocallyManagedUserLoggedIn, void(const std::string&));
   MOCK_METHOD1(PublicAccountUserLoggedIn, void(User*));
   MOCK_METHOD2(RegularUserLoggedIn, void(const std::string&, bool));
   MOCK_METHOD1(RegularUserLoggedInAsEphemeral, void(const std::string&));
   MOCK_METHOD0(SessionStarted, void(void));
+  MOCK_METHOD1(CreateLocallyManagedUserRecord,
+               const User*(const string16& display_name));
   MOCK_METHOD2(RemoveUser, void(const std::string&, RemoveUserDelegate*));
   MOCK_METHOD1(RemoveUserFromList, void(const std::string&));
   MOCK_CONST_METHOD1(IsKnownUser, bool(const std::string&));
   MOCK_CONST_METHOD1(FindUser, const User*(const std::string&));
+  MOCK_CONST_METHOD1(FindLocallyManagedUser, const User*(const string16&));
   MOCK_METHOD2(SaveUserOAuthStatus, void(const std::string&,
                                          User::OAuthTokenStatus));
   MOCK_METHOD2(SaveUserDisplayName, void(const std::string&,
@@ -52,6 +56,7 @@ class MockUserManager : public UserManager {
   MOCK_CONST_METHOD0(IsLoggedInAsDemoUser, bool(void));
   MOCK_CONST_METHOD0(IsLoggedInAsPublicAccount, bool(void));
   MOCK_CONST_METHOD0(IsLoggedInAsGuest, bool(void));
+  MOCK_CONST_METHOD0(IsLoggedInAsLocallyManagedUser, bool(void));
   MOCK_CONST_METHOD0(IsLoggedInAsStub, bool(void));
   MOCK_CONST_METHOD0(IsSessionStarted, bool(void));
   MOCK_CONST_METHOD0(HasBrowserRestarted, bool(void));
@@ -60,6 +65,7 @@ class MockUserManager : public UserManager {
   MOCK_METHOD1(AddObserver, void(UserManager::Observer*));
   MOCK_METHOD1(RemoveObserver, void(UserManager::Observer*));
   MOCK_METHOD0(NotifyLocalStateChanged, void(void));
+  MOCK_METHOD0(CreateLocallyManagedUserRecord, void(void));
   MOCK_CONST_METHOD0(GetMergeSessionState, MergeSessionState(void));
   MOCK_METHOD1(SetMergeSessionState, void(MergeSessionState));
 

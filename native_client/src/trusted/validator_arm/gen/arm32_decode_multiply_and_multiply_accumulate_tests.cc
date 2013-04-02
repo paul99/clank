@@ -1,5 +1,5 @@
 /*
- * Copyright 2012 The Native Client Authors.  All rights reserved.
+ * Copyright 2013 The Native Client Authors.  All rights reserved.
  * Use of this source code is governed by a BSD-style license that can
  * be found in the LICENSE file.
  */
@@ -13,9 +13,12 @@
 
 #include "gtest/gtest.h"
 #include "native_client/src/trusted/validator_arm/actual_vs_baseline.h"
+#include "native_client/src/trusted/validator_arm/baseline_vs_baseline.h"
 #include "native_client/src/trusted/validator_arm/actual_classes.h"
 #include "native_client/src/trusted/validator_arm/baseline_classes.h"
 #include "native_client/src/trusted/validator_arm/inst_classes_testers.h"
+#include "native_client/src/trusted/validator_arm/arm_helpers.h"
+#include "native_client/src/trusted/validator_arm/gen/arm32_decode_named_bases.h"
 
 using nacl_arm_dec::Instruction;
 using nacl_arm_dec::ClassDecoder;
@@ -31,25 +34,22 @@ namespace nacl_arm_test {
 //  due to row checks, or restrictions specified by the row restrictions.
 
 
-// Neutral case:
-// inst(23:20)=0100
-//    = {baseline: 'Binary4RegisterDualResult',
-//       constraints: ,
-//       defs: {inst(15:12),inst(19:16)},
-//       safety: ['15 == inst(15:12) || 15 == inst(19:16) || 15 == inst(3:0) || 15 == inst(11:8) => UNPREDICTABLE', 'inst(15:12) == inst(19:16) => UNPREDICTABLE']}
-//
-// Representaive case:
 // op(23:20)=0100
 //    = {Pc: 15,
 //       RdHi: RdHi(19:16),
 //       RdLo: RdLo(15:12),
 //       Rm: Rm(11:8),
 //       Rn: Rn(3:0),
+//       actual: Actual_SMLALBB_SMLALBT_SMLALTB_SMLALTT_cccc00010100hhhhllllmmmm1xx0nnnn_case_1,
 //       baseline: Binary4RegisterDualResult,
 //       constraints: ,
-//       defs: {RdLo,RdHi},
+//       defs: {RdLo, RdHi},
 //       fields: [RdHi(19:16), RdLo(15:12), Rm(11:8), Rn(3:0)],
-//       safety: [Pc in {RdLo,RdHi,Rn,Rm} => UNPREDICTABLE, RdHi == RdLo => UNPREDICTABLE]}
+//       generated_baseline: UMAAL_A1_cccc00000100hhhhllllmmmm1001nnnn_case_0,
+//       safety: [Pc in {RdLo, RdHi, Rn, Rm} => UNPREDICTABLE,
+//         RdHi  ==
+//               RdLo => UNPREDICTABLE],
+//       uses: {RdLo, RdHi, Rn, Rm}}
 class Binary4RegisterDualResultTesterCase0
     : public Binary4RegisterDualResultTester {
  public:
@@ -68,7 +68,9 @@ bool Binary4RegisterDualResultTesterCase0
      const NamedClassDecoder& decoder) {
 
   // Check that row patterns apply to pattern being checked.'
-  if ((inst.Bits() & 0x00F00000) != 0x00400000 /* op(23:20)=~0100 */) return false;
+  // op(23:20)=~0100
+  if ((inst.Bits() & 0x00F00000)  !=
+          0x00400000) return false;
 
   // Check other preconditions defined for the base decoder.
   return Binary4RegisterDualResultTester::
@@ -78,29 +80,36 @@ bool Binary4RegisterDualResultTesterCase0
 bool Binary4RegisterDualResultTesterCase0
 ::ApplySanityChecks(nacl_arm_dec::Instruction inst,
                     const NamedClassDecoder& decoder) {
-  NC_PRECOND(Binary4RegisterDualResultTester::ApplySanityChecks(inst, decoder));
+  NC_PRECOND(Binary4RegisterDualResultTester::
+               ApplySanityChecks(inst, decoder));
 
-  // safety: Pc in {RdLo,RdHi,Rn,Rm} => UNPREDICTABLE
-  EXPECT_TRUE(!((((15) == (((inst.Bits() & 0x0000F000) >> 12)))) || (((15) == (((inst.Bits() & 0x000F0000) >> 16)))) || (((15) == ((inst.Bits() & 0x0000000F)))) || (((15) == (((inst.Bits() & 0x00000F00) >> 8))))));
+  // safety: Pc in {RdLo, RdHi, Rn, Rm} => UNPREDICTABLE
+  EXPECT_TRUE(!((((15) == (((inst.Bits() & 0x0000F000) >> 12)))) ||
+       (((15) == (((inst.Bits() & 0x000F0000) >> 16)))) ||
+       (((15) == ((inst.Bits() & 0x0000000F)))) ||
+       (((15) == (((inst.Bits() & 0x00000F00) >> 8))))));
 
-  // safety: RdHi == RdLo => UNPREDICTABLE
+  // safety: RdHi  ==
+  //          RdLo => UNPREDICTABLE
   EXPECT_TRUE(((((inst.Bits() & 0x000F0000) >> 16)) != (((inst.Bits() & 0x0000F000) >> 12))));
 
-  // defs: {RdLo,RdHi};
-  EXPECT_TRUE(decoder.defs(inst).IsSame(RegisterList().Add(Register(((inst.Bits() & 0x0000F000) >> 12))).Add(Register(((inst.Bits() & 0x000F0000) >> 16)))));
+  // defs: {RdLo, RdHi};
+  EXPECT_TRUE(decoder.defs(inst).IsSame(RegisterList().
+   Add(Register(((inst.Bits() & 0x0000F000) >> 12))).
+   Add(Register(((inst.Bits() & 0x000F0000) >> 16)))));
 
   return true;
 }
 
-// Neutral case:
-// inst(23:20)=0101
-//    = {baseline: 'UndefinedCondDecoder',
-//       constraints: }
-//
-// Representaive case:
 // op(23:20)=0101
-//    = {baseline: UndefinedCondDecoder,
-//       constraints: }
+//    = {actual: Actual_Unnamed_case_1,
+//       baseline: Undefined,
+//       constraints: ,
+//       defs: {},
+//       generated_baseline: Unnamed_cccc00000101xxxxxxxxxxxx1001xxxx_case_0,
+//       safety: [true => UNDEFINED],
+//       true: true,
+//       uses: {}}
 class UnsafeCondDecoderTesterCase1
     : public UnsafeCondDecoderTester {
  public:
@@ -109,6 +118,8 @@ class UnsafeCondDecoderTesterCase1
   virtual bool PassesParsePreconditions(
       nacl_arm_dec::Instruction inst,
       const NamedClassDecoder& decoder);
+  virtual bool ApplySanityChecks(nacl_arm_dec::Instruction inst,
+                                 const NamedClassDecoder& decoder);
 };
 
 bool UnsafeCondDecoderTesterCase1
@@ -117,32 +128,44 @@ bool UnsafeCondDecoderTesterCase1
      const NamedClassDecoder& decoder) {
 
   // Check that row patterns apply to pattern being checked.'
-  if ((inst.Bits() & 0x00F00000) != 0x00500000 /* op(23:20)=~0101 */) return false;
+  // op(23:20)=~0101
+  if ((inst.Bits() & 0x00F00000)  !=
+          0x00500000) return false;
 
   // Check other preconditions defined for the base decoder.
   return UnsafeCondDecoderTester::
       PassesParsePreconditions(inst, decoder);
 }
 
-// Neutral case:
-// inst(23:20)=0110
-//    = {baseline: 'Binary4RegisterDualOp',
-//       constraints: ,
-//       defs: {inst(19:16)},
-//       safety: ['15 == inst(19:16) || 15 == inst(3:0) || 15 == inst(11:8) || 15 == inst(15:12) => UNPREDICTABLE']}
-//
-// Representaive case:
+bool UnsafeCondDecoderTesterCase1
+::ApplySanityChecks(nacl_arm_dec::Instruction inst,
+                    const NamedClassDecoder& decoder) {
+  NC_PRECOND(UnsafeCondDecoderTester::
+               ApplySanityChecks(inst, decoder));
+
+  // safety: true => UNDEFINED
+  EXPECT_TRUE(!(true));
+
+  // defs: {};
+  EXPECT_TRUE(decoder.defs(inst).IsSame(RegisterList()));
+
+  return true;
+}
+
 // op(23:20)=0110
 //    = {Pc: 15,
 //       Ra: Ra(15:12),
 //       Rd: Rd(19:16),
 //       Rm: Rm(11:8),
 //       Rn: Rn(3:0),
+//       actual: Actual_MLS_A1_cccc00000110ddddaaaammmm1001nnnn_case_1,
 //       baseline: Binary4RegisterDualOp,
 //       constraints: ,
 //       defs: {Rd},
 //       fields: [Rd(19:16), Ra(15:12), Rm(11:8), Rn(3:0)],
-//       safety: [Pc in {Rd,Rn,Rm,Ra} => UNPREDICTABLE]}
+//       generated_baseline: MLS_A1_cccc00000110ddddaaaammmm1001nnnn_case_0,
+//       safety: [Pc in {Rd, Rn, Rm, Ra} => UNPREDICTABLE],
+//       uses: {Rn, Rm, Ra}}
 class Binary4RegisterDualOpTesterCase2
     : public Binary4RegisterDualOpTester {
  public:
@@ -161,7 +184,9 @@ bool Binary4RegisterDualOpTesterCase2
      const NamedClassDecoder& decoder) {
 
   // Check that row patterns apply to pattern being checked.'
-  if ((inst.Bits() & 0x00F00000) != 0x00600000 /* op(23:20)=~0110 */) return false;
+  // op(23:20)=~0110
+  if ((inst.Bits() & 0x00F00000)  !=
+          0x00600000) return false;
 
   // Check other preconditions defined for the base decoder.
   return Binary4RegisterDualOpTester::
@@ -171,26 +196,31 @@ bool Binary4RegisterDualOpTesterCase2
 bool Binary4RegisterDualOpTesterCase2
 ::ApplySanityChecks(nacl_arm_dec::Instruction inst,
                     const NamedClassDecoder& decoder) {
-  NC_PRECOND(Binary4RegisterDualOpTester::ApplySanityChecks(inst, decoder));
+  NC_PRECOND(Binary4RegisterDualOpTester::
+               ApplySanityChecks(inst, decoder));
 
-  // safety: Pc in {Rd,Rn,Rm,Ra} => UNPREDICTABLE
-  EXPECT_TRUE(!((((15) == (((inst.Bits() & 0x000F0000) >> 16)))) || (((15) == ((inst.Bits() & 0x0000000F)))) || (((15) == (((inst.Bits() & 0x00000F00) >> 8)))) || (((15) == (((inst.Bits() & 0x0000F000) >> 12))))));
+  // safety: Pc in {Rd, Rn, Rm, Ra} => UNPREDICTABLE
+  EXPECT_TRUE(!((((15) == (((inst.Bits() & 0x000F0000) >> 16)))) ||
+       (((15) == ((inst.Bits() & 0x0000000F)))) ||
+       (((15) == (((inst.Bits() & 0x00000F00) >> 8)))) ||
+       (((15) == (((inst.Bits() & 0x0000F000) >> 12))))));
 
   // defs: {Rd};
-  EXPECT_TRUE(decoder.defs(inst).IsSame(RegisterList().Add(Register(((inst.Bits() & 0x000F0000) >> 16)))));
+  EXPECT_TRUE(decoder.defs(inst).IsSame(RegisterList().
+   Add(Register(((inst.Bits() & 0x000F0000) >> 16)))));
 
   return true;
 }
 
-// Neutral case:
-// inst(23:20)=0111
-//    = {baseline: 'UndefinedCondDecoder',
-//       constraints: }
-//
-// Representaive case:
 // op(23:20)=0111
-//    = {baseline: UndefinedCondDecoder,
-//       constraints: }
+//    = {actual: Actual_Unnamed_case_1,
+//       baseline: Undefined,
+//       constraints: ,
+//       defs: {},
+//       generated_baseline: Unnamed_cccc00000111xxxxxxxxxxxx1001xxxx_case_0,
+//       safety: [true => UNDEFINED],
+//       true: true,
+//       uses: {}}
 class UnsafeCondDecoderTesterCase3
     : public UnsafeCondDecoderTester {
  public:
@@ -199,6 +229,8 @@ class UnsafeCondDecoderTesterCase3
   virtual bool PassesParsePreconditions(
       nacl_arm_dec::Instruction inst,
       const NamedClassDecoder& decoder);
+  virtual bool ApplySanityChecks(nacl_arm_dec::Instruction inst,
+                                 const NamedClassDecoder& decoder);
 };
 
 bool UnsafeCondDecoderTesterCase3
@@ -207,21 +239,30 @@ bool UnsafeCondDecoderTesterCase3
      const NamedClassDecoder& decoder) {
 
   // Check that row patterns apply to pattern being checked.'
-  if ((inst.Bits() & 0x00F00000) != 0x00700000 /* op(23:20)=~0111 */) return false;
+  // op(23:20)=~0111
+  if ((inst.Bits() & 0x00F00000)  !=
+          0x00700000) return false;
 
   // Check other preconditions defined for the base decoder.
   return UnsafeCondDecoderTester::
       PassesParsePreconditions(inst, decoder);
 }
 
-// Neutral case:
-// inst(23:20)=000x & inst(31:0)=xxxxxxxxxxxxxxxx0000xxxxxxxxxxxx
-//    = {baseline: 'Binary3RegisterOpAltA',
-//       constraints: ,
-//       defs: {inst(19:16),16 if inst(20)=1 else 32},
-//       safety: ['15 == inst(19:16) || 15 == inst(3:0) || 15 == inst(11:8) => UNPREDICTABLE', '(ArchVersion() < 6 && inst(19:16) == inst(3:0)) => UNPREDICTABLE']}
-//
-// Representaive case:
+bool UnsafeCondDecoderTesterCase3
+::ApplySanityChecks(nacl_arm_dec::Instruction inst,
+                    const NamedClassDecoder& decoder) {
+  NC_PRECOND(UnsafeCondDecoderTester::
+               ApplySanityChecks(inst, decoder));
+
+  // safety: true => UNDEFINED
+  EXPECT_TRUE(!(true));
+
+  // defs: {};
+  EXPECT_TRUE(decoder.defs(inst).IsSame(RegisterList()));
+
+  return true;
+}
+
 // op(23:20)=000x & $pattern(31:0)=xxxxxxxxxxxxxxxx0000xxxxxxxxxxxx
 //    = {NZCV: 16,
 //       None: 32,
@@ -230,12 +271,21 @@ bool UnsafeCondDecoderTesterCase3
 //       Rm: Rm(11:8),
 //       Rn: Rn(3:0),
 //       S: S(20),
+//       actual: Actual_MUL_A1_cccc0000000sdddd0000mmmm1001nnnn_case_1,
 //       baseline: Binary3RegisterOpAltA,
 //       constraints: ,
-//       defs: {Rd,NZCV if setflags else None},
+//       defs: {Rd, NZCV
+//            if setflags
+//            else None},
 //       fields: [S(20), Rd(19:16), Rm(11:8), Rn(3:0)],
-//       safety: [Pc in {Rd,Rn,Rm} => UNPREDICTABLE, (ArchVersion() < 6 && Rd == Rn) => UNPREDICTABLE],
-//       setflags: S(20)=1}
+//       generated_baseline: MUL_A1_cccc0000000sdddd0000mmmm1001nnnn_case_0,
+//       safety: [Pc in {Rd, Rn, Rm} => UNPREDICTABLE,
+//         (ArchVersion()  <
+//               6 &&
+//            Rd  ==
+//               Rn) => UNPREDICTABLE],
+//       setflags: S(20)=1,
+//       uses: {Rm, Rn}}
 class Binary3RegisterOpAltATesterCase4
     : public Binary3RegisterOpAltATester {
  public:
@@ -254,8 +304,12 @@ bool Binary3RegisterOpAltATesterCase4
      const NamedClassDecoder& decoder) {
 
   // Check that row patterns apply to pattern being checked.'
-  if ((inst.Bits() & 0x00E00000) != 0x00000000 /* op(23:20)=~000x */) return false;
-  if ((inst.Bits() & 0x0000F000) != 0x00000000 /* $pattern(31:0)=~xxxxxxxxxxxxxxxx0000xxxxxxxxxxxx */) return false;
+  // op(23:20)=~000x
+  if ((inst.Bits() & 0x00E00000)  !=
+          0x00000000) return false;
+  // $pattern(31:0)=~xxxxxxxxxxxxxxxx0000xxxxxxxxxxxx
+  if ((inst.Bits() & 0x0000F000)  !=
+          0x00000000) return false;
 
   // Check other preconditions defined for the base decoder.
   return Binary3RegisterOpAltATester::
@@ -265,28 +319,34 @@ bool Binary3RegisterOpAltATesterCase4
 bool Binary3RegisterOpAltATesterCase4
 ::ApplySanityChecks(nacl_arm_dec::Instruction inst,
                     const NamedClassDecoder& decoder) {
-  NC_PRECOND(Binary3RegisterOpAltATester::ApplySanityChecks(inst, decoder));
+  NC_PRECOND(Binary3RegisterOpAltATester::
+               ApplySanityChecks(inst, decoder));
 
-  // safety: Pc in {Rd,Rn,Rm} => UNPREDICTABLE
-  EXPECT_TRUE(!((((15) == (((inst.Bits() & 0x000F0000) >> 16)))) || (((15) == ((inst.Bits() & 0x0000000F)))) || (((15) == (((inst.Bits() & 0x00000F00) >> 8))))));
+  // safety: Pc in {Rd, Rn, Rm} => UNPREDICTABLE
+  EXPECT_TRUE(!((((15) == (((inst.Bits() & 0x000F0000) >> 16)))) ||
+       (((15) == ((inst.Bits() & 0x0000000F)))) ||
+       (((15) == (((inst.Bits() & 0x00000F00) >> 8))))));
 
-  // safety: (ArchVersion() < 6 && Rd == Rn) => UNPREDICTABLE
-  EXPECT_TRUE((!((((nacl_arm_dec::ArchVersion()) < (6))) && (((((inst.Bits() & 0x000F0000) >> 16)) == ((inst.Bits() & 0x0000000F)))))));
+  // safety: (ArchVersion()  <
+  //          6 &&
+  //       Rd  ==
+  //          Rn) => UNPREDICTABLE
+  EXPECT_TRUE((!((((nacl_arm_dec::ArchVersion()) < (6))) &&
+       (((((inst.Bits() & 0x000F0000) >> 16)) == ((inst.Bits() & 0x0000000F)))))));
 
-  // defs: {Rd,NZCV if setflags else None};
-  EXPECT_TRUE(decoder.defs(inst).IsSame(RegisterList().Add(Register(((inst.Bits() & 0x000F0000) >> 16))).Add(Register(((inst.Bits() & 0x00100000) == 0x00100000 ? 16 : 32)))));
+  // defs: {Rd, NZCV
+  //       if setflags
+  //       else None};
+  EXPECT_TRUE(decoder.defs(inst).IsSame(RegisterList().
+   Add(Register(((inst.Bits() & 0x000F0000) >> 16))).
+   Add(Register(((inst.Bits() & 0x00100000)  ==
+          0x00100000
+       ? 16
+       : 32)))));
 
   return true;
 }
 
-// Neutral case:
-// inst(23:20)=001x
-//    = {baseline: 'Binary4RegisterDualOpLtV6RdNotRn',
-//       constraints: ,
-//       defs: {inst(19:16),16 if inst(20)=1 else 32},
-//       safety: ['15 == inst(19:16) || 15 == inst(3:0) || 15 == inst(11:8) || 15 == inst(15:12) => UNPREDICTABLE', '(ArchVersion() < 6 && inst(19:16) == inst(3:0)) => UNPREDICTABLE']}
-//
-// Representaive case:
 // op(23:20)=001x
 //    = {NZCV: 16,
 //       None: 32,
@@ -296,12 +356,21 @@ bool Binary3RegisterOpAltATesterCase4
 //       Rm: Rm(11:8),
 //       Rn: Rn(3:0),
 //       S: S(20),
+//       actual: Actual_MLA_A1_cccc0000001sddddaaaammmm1001nnnn_case_1,
 //       baseline: Binary4RegisterDualOpLtV6RdNotRn,
 //       constraints: ,
-//       defs: {Rd,NZCV if setflags else None},
+//       defs: {Rd, NZCV
+//            if setflags
+//            else None},
 //       fields: [S(20), Rd(19:16), Ra(15:12), Rm(11:8), Rn(3:0)],
-//       safety: [Pc in {Rd,Rn,Rm,Ra} => UNPREDICTABLE, (ArchVersion() < 6 && Rd == Rn) => UNPREDICTABLE],
-//       setflags: S(20)=1}
+//       generated_baseline: MLA_A1_cccc0000001sddddaaaammmm1001nnnn_case_0,
+//       safety: [Pc in {Rd, Rn, Rm, Ra} => UNPREDICTABLE,
+//         (ArchVersion()  <
+//               6 &&
+//            Rd  ==
+//               Rn) => UNPREDICTABLE],
+//       setflags: S(20)=1,
+//       uses: {Rn, Rm, Ra}}
 class Binary4RegisterDualOpTesterCase5
     : public Binary4RegisterDualOpTester {
  public:
@@ -320,7 +389,9 @@ bool Binary4RegisterDualOpTesterCase5
      const NamedClassDecoder& decoder) {
 
   // Check that row patterns apply to pattern being checked.'
-  if ((inst.Bits() & 0x00E00000) != 0x00200000 /* op(23:20)=~001x */) return false;
+  // op(23:20)=~001x
+  if ((inst.Bits() & 0x00E00000)  !=
+          0x00200000) return false;
 
   // Check other preconditions defined for the base decoder.
   return Binary4RegisterDualOpTester::
@@ -330,28 +401,35 @@ bool Binary4RegisterDualOpTesterCase5
 bool Binary4RegisterDualOpTesterCase5
 ::ApplySanityChecks(nacl_arm_dec::Instruction inst,
                     const NamedClassDecoder& decoder) {
-  NC_PRECOND(Binary4RegisterDualOpTester::ApplySanityChecks(inst, decoder));
+  NC_PRECOND(Binary4RegisterDualOpTester::
+               ApplySanityChecks(inst, decoder));
 
-  // safety: Pc in {Rd,Rn,Rm,Ra} => UNPREDICTABLE
-  EXPECT_TRUE(!((((15) == (((inst.Bits() & 0x000F0000) >> 16)))) || (((15) == ((inst.Bits() & 0x0000000F)))) || (((15) == (((inst.Bits() & 0x00000F00) >> 8)))) || (((15) == (((inst.Bits() & 0x0000F000) >> 12))))));
+  // safety: Pc in {Rd, Rn, Rm, Ra} => UNPREDICTABLE
+  EXPECT_TRUE(!((((15) == (((inst.Bits() & 0x000F0000) >> 16)))) ||
+       (((15) == ((inst.Bits() & 0x0000000F)))) ||
+       (((15) == (((inst.Bits() & 0x00000F00) >> 8)))) ||
+       (((15) == (((inst.Bits() & 0x0000F000) >> 12))))));
 
-  // safety: (ArchVersion() < 6 && Rd == Rn) => UNPREDICTABLE
-  EXPECT_TRUE((!((((nacl_arm_dec::ArchVersion()) < (6))) && (((((inst.Bits() & 0x000F0000) >> 16)) == ((inst.Bits() & 0x0000000F)))))));
+  // safety: (ArchVersion()  <
+  //          6 &&
+  //       Rd  ==
+  //          Rn) => UNPREDICTABLE
+  EXPECT_TRUE((!((((nacl_arm_dec::ArchVersion()) < (6))) &&
+       (((((inst.Bits() & 0x000F0000) >> 16)) == ((inst.Bits() & 0x0000000F)))))));
 
-  // defs: {Rd,NZCV if setflags else None};
-  EXPECT_TRUE(decoder.defs(inst).IsSame(RegisterList().Add(Register(((inst.Bits() & 0x000F0000) >> 16))).Add(Register(((inst.Bits() & 0x00100000) == 0x00100000 ? 16 : 32)))));
+  // defs: {Rd, NZCV
+  //       if setflags
+  //       else None};
+  EXPECT_TRUE(decoder.defs(inst).IsSame(RegisterList().
+   Add(Register(((inst.Bits() & 0x000F0000) >> 16))).
+   Add(Register(((inst.Bits() & 0x00100000)  ==
+          0x00100000
+       ? 16
+       : 32)))));
 
   return true;
 }
 
-// Neutral case:
-// inst(23:20)=100x
-//    = {baseline: 'Binary4RegisterDualResultUsesRnRm',
-//       constraints: ,
-//       defs: {inst(15:12),inst(19:16),16 if inst(20)=1 else 32},
-//       safety: ['15 == inst(15:12) || 15 == inst(19:16) || 15 == inst(3:0) || 15 == inst(11:8) => UNPREDICTABLE', 'inst(15:12) == inst(19:16) => UNPREDICTABLE', '(ArchVersion() < 6 && (inst(19:16) == inst(3:0) || inst(15:12) == inst(3:0))) => UNPREDICTABLE']}
-//
-// Representaive case:
 // op(23:20)=100x
 //    = {NZCV: 16,
 //       None: 32,
@@ -361,12 +439,25 @@ bool Binary4RegisterDualOpTesterCase5
 //       Rm: Rm(11:8),
 //       Rn: Rn(3:0),
 //       S: S(20),
+//       actual: Actual_SMULL_A1_cccc0000110shhhhllllmmmm1001nnnn_case_1,
 //       baseline: Binary4RegisterDualResultUsesRnRm,
 //       constraints: ,
-//       defs: {RdLo,RdHi,NZCV if setflags else None},
+//       defs: {RdLo, RdHi, NZCV
+//            if setflags
+//            else None},
 //       fields: [S(20), RdHi(19:16), RdLo(15:12), Rm(11:8), Rn(3:0)],
-//       safety: [Pc in {RdLo,RdHi,Rn,Rm} => UNPREDICTABLE, RdHi == RdLo => UNPREDICTABLE, (ArchVersion() < 6 && (RdHi == Rn || RdLo == Rn)) => UNPREDICTABLE],
-//       setflags: S(20)=1}
+//       generated_baseline: UMULL_A1_cccc0000100shhhhllllmmmm1001nnnn_case_0,
+//       safety: [Pc in {RdLo, RdHi, Rn, Rm} => UNPREDICTABLE,
+//         RdHi  ==
+//               RdLo => UNPREDICTABLE,
+//         (ArchVersion()  <
+//               6 &&
+//            (RdHi  ==
+//               Rn ||
+//            RdLo  ==
+//               Rn)) => UNPREDICTABLE],
+//       setflags: S(20)=1,
+//       uses: {Rn, Rm}}
 class Binary4RegisterDualResultTesterCase6
     : public Binary4RegisterDualResultTester {
  public:
@@ -385,7 +476,9 @@ bool Binary4RegisterDualResultTesterCase6
      const NamedClassDecoder& decoder) {
 
   // Check that row patterns apply to pattern being checked.'
-  if ((inst.Bits() & 0x00E00000) != 0x00800000 /* op(23:20)=~100x */) return false;
+  // op(23:20)=~100x
+  if ((inst.Bits() & 0x00E00000)  !=
+          0x00800000) return false;
 
   // Check other preconditions defined for the base decoder.
   return Binary4RegisterDualResultTester::
@@ -395,31 +488,43 @@ bool Binary4RegisterDualResultTesterCase6
 bool Binary4RegisterDualResultTesterCase6
 ::ApplySanityChecks(nacl_arm_dec::Instruction inst,
                     const NamedClassDecoder& decoder) {
-  NC_PRECOND(Binary4RegisterDualResultTester::ApplySanityChecks(inst, decoder));
+  NC_PRECOND(Binary4RegisterDualResultTester::
+               ApplySanityChecks(inst, decoder));
 
-  // safety: Pc in {RdLo,RdHi,Rn,Rm} => UNPREDICTABLE
-  EXPECT_TRUE(!((((15) == (((inst.Bits() & 0x0000F000) >> 12)))) || (((15) == (((inst.Bits() & 0x000F0000) >> 16)))) || (((15) == ((inst.Bits() & 0x0000000F)))) || (((15) == (((inst.Bits() & 0x00000F00) >> 8))))));
+  // safety: Pc in {RdLo, RdHi, Rn, Rm} => UNPREDICTABLE
+  EXPECT_TRUE(!((((15) == (((inst.Bits() & 0x0000F000) >> 12)))) ||
+       (((15) == (((inst.Bits() & 0x000F0000) >> 16)))) ||
+       (((15) == ((inst.Bits() & 0x0000000F)))) ||
+       (((15) == (((inst.Bits() & 0x00000F00) >> 8))))));
 
-  // safety: RdHi == RdLo => UNPREDICTABLE
+  // safety: RdHi  ==
+  //          RdLo => UNPREDICTABLE
   EXPECT_TRUE(((((inst.Bits() & 0x000F0000) >> 16)) != (((inst.Bits() & 0x0000F000) >> 12))));
 
-  // safety: (ArchVersion() < 6 && (RdHi == Rn || RdLo == Rn)) => UNPREDICTABLE
-  EXPECT_TRUE((!((((nacl_arm_dec::ArchVersion()) < (6))) && (((((((inst.Bits() & 0x000F0000) >> 16)) == ((inst.Bits() & 0x0000000F)))) || (((((inst.Bits() & 0x0000F000) >> 12)) == ((inst.Bits() & 0x0000000F)))))))));
+  // safety: (ArchVersion()  <
+  //          6 &&
+  //       (RdHi  ==
+  //          Rn ||
+  //       RdLo  ==
+  //          Rn)) => UNPREDICTABLE
+  EXPECT_TRUE((!((((nacl_arm_dec::ArchVersion()) < (6))) &&
+       (((((((inst.Bits() & 0x000F0000) >> 16)) == ((inst.Bits() & 0x0000000F)))) ||
+       (((((inst.Bits() & 0x0000F000) >> 12)) == ((inst.Bits() & 0x0000000F)))))))));
 
-  // defs: {RdLo,RdHi,NZCV if setflags else None};
-  EXPECT_TRUE(decoder.defs(inst).IsSame(RegisterList().Add(Register(((inst.Bits() & 0x0000F000) >> 12))).Add(Register(((inst.Bits() & 0x000F0000) >> 16))).Add(Register(((inst.Bits() & 0x00100000) == 0x00100000 ? 16 : 32)))));
+  // defs: {RdLo, RdHi, NZCV
+  //       if setflags
+  //       else None};
+  EXPECT_TRUE(decoder.defs(inst).IsSame(RegisterList().
+   Add(Register(((inst.Bits() & 0x0000F000) >> 12))).
+   Add(Register(((inst.Bits() & 0x000F0000) >> 16))).
+   Add(Register(((inst.Bits() & 0x00100000)  ==
+          0x00100000
+       ? 16
+       : 32)))));
 
   return true;
 }
 
-// Neutral case:
-// inst(23:20)=101x
-//    = {baseline: 'Binary4RegisterDualResultLtV6RdHiLoNotRn',
-//       constraints: ,
-//       defs: {inst(15:12),inst(19:16),16 if inst(20)=1 else 32},
-//       safety: ['15 == inst(15:12) || 15 == inst(19:16) || 15 == inst(3:0) || 15 == inst(11:8) => UNPREDICTABLE', 'inst(15:12) == inst(19:16) => UNPREDICTABLE', '(ArchVersion() < 6 && (inst(19:16) == inst(3:0) || inst(15:12) == inst(3:0))) => UNPREDICTABLE']}
-//
-// Representaive case:
 // op(23:20)=101x
 //    = {NZCV: 16,
 //       None: 32,
@@ -429,12 +534,25 @@ bool Binary4RegisterDualResultTesterCase6
 //       Rm: Rm(11:8),
 //       Rn: Rn(3:0),
 //       S: S(20),
+//       actual: Actual_SMLAL_A1_cccc0000111shhhhllllmmmm1001nnnn_case_1,
 //       baseline: Binary4RegisterDualResultLtV6RdHiLoNotRn,
 //       constraints: ,
-//       defs: {RdLo,RdHi,NZCV if setflags else None},
+//       defs: {RdLo, RdHi, NZCV
+//            if setflags
+//            else None},
 //       fields: [S(20), RdHi(19:16), RdLo(15:12), Rm(11:8), Rn(3:0)],
-//       safety: [Pc in {RdLo,RdHi,Rn,Rm} => UNPREDICTABLE, RdHi == RdLo => UNPREDICTABLE, (ArchVersion() < 6 && (RdHi == Rn || RdLo == Rn)) => UNPREDICTABLE],
-//       setflags: S(20)=1}
+//       generated_baseline: UMLAL_A1_cccc0000101shhhhllllmmmm1001nnnn_case_0,
+//       safety: [Pc in {RdLo, RdHi, Rn, Rm} => UNPREDICTABLE,
+//         RdHi  ==
+//               RdLo => UNPREDICTABLE,
+//         (ArchVersion()  <
+//               6 &&
+//            (RdHi  ==
+//               Rn ||
+//            RdLo  ==
+//               Rn)) => UNPREDICTABLE],
+//       setflags: S(20)=1,
+//       uses: {RdLo, RdHi, Rn, Rm}}
 class Binary4RegisterDualResultTesterCase7
     : public Binary4RegisterDualResultTester {
  public:
@@ -453,7 +571,9 @@ bool Binary4RegisterDualResultTesterCase7
      const NamedClassDecoder& decoder) {
 
   // Check that row patterns apply to pattern being checked.'
-  if ((inst.Bits() & 0x00E00000) != 0x00A00000 /* op(23:20)=~101x */) return false;
+  // op(23:20)=~101x
+  if ((inst.Bits() & 0x00E00000)  !=
+          0x00A00000) return false;
 
   // Check other preconditions defined for the base decoder.
   return Binary4RegisterDualResultTester::
@@ -463,31 +583,43 @@ bool Binary4RegisterDualResultTesterCase7
 bool Binary4RegisterDualResultTesterCase7
 ::ApplySanityChecks(nacl_arm_dec::Instruction inst,
                     const NamedClassDecoder& decoder) {
-  NC_PRECOND(Binary4RegisterDualResultTester::ApplySanityChecks(inst, decoder));
+  NC_PRECOND(Binary4RegisterDualResultTester::
+               ApplySanityChecks(inst, decoder));
 
-  // safety: Pc in {RdLo,RdHi,Rn,Rm} => UNPREDICTABLE
-  EXPECT_TRUE(!((((15) == (((inst.Bits() & 0x0000F000) >> 12)))) || (((15) == (((inst.Bits() & 0x000F0000) >> 16)))) || (((15) == ((inst.Bits() & 0x0000000F)))) || (((15) == (((inst.Bits() & 0x00000F00) >> 8))))));
+  // safety: Pc in {RdLo, RdHi, Rn, Rm} => UNPREDICTABLE
+  EXPECT_TRUE(!((((15) == (((inst.Bits() & 0x0000F000) >> 12)))) ||
+       (((15) == (((inst.Bits() & 0x000F0000) >> 16)))) ||
+       (((15) == ((inst.Bits() & 0x0000000F)))) ||
+       (((15) == (((inst.Bits() & 0x00000F00) >> 8))))));
 
-  // safety: RdHi == RdLo => UNPREDICTABLE
+  // safety: RdHi  ==
+  //          RdLo => UNPREDICTABLE
   EXPECT_TRUE(((((inst.Bits() & 0x000F0000) >> 16)) != (((inst.Bits() & 0x0000F000) >> 12))));
 
-  // safety: (ArchVersion() < 6 && (RdHi == Rn || RdLo == Rn)) => UNPREDICTABLE
-  EXPECT_TRUE((!((((nacl_arm_dec::ArchVersion()) < (6))) && (((((((inst.Bits() & 0x000F0000) >> 16)) == ((inst.Bits() & 0x0000000F)))) || (((((inst.Bits() & 0x0000F000) >> 12)) == ((inst.Bits() & 0x0000000F)))))))));
+  // safety: (ArchVersion()  <
+  //          6 &&
+  //       (RdHi  ==
+  //          Rn ||
+  //       RdLo  ==
+  //          Rn)) => UNPREDICTABLE
+  EXPECT_TRUE((!((((nacl_arm_dec::ArchVersion()) < (6))) &&
+       (((((((inst.Bits() & 0x000F0000) >> 16)) == ((inst.Bits() & 0x0000000F)))) ||
+       (((((inst.Bits() & 0x0000F000) >> 12)) == ((inst.Bits() & 0x0000000F)))))))));
 
-  // defs: {RdLo,RdHi,NZCV if setflags else None};
-  EXPECT_TRUE(decoder.defs(inst).IsSame(RegisterList().Add(Register(((inst.Bits() & 0x0000F000) >> 12))).Add(Register(((inst.Bits() & 0x000F0000) >> 16))).Add(Register(((inst.Bits() & 0x00100000) == 0x00100000 ? 16 : 32)))));
+  // defs: {RdLo, RdHi, NZCV
+  //       if setflags
+  //       else None};
+  EXPECT_TRUE(decoder.defs(inst).IsSame(RegisterList().
+   Add(Register(((inst.Bits() & 0x0000F000) >> 12))).
+   Add(Register(((inst.Bits() & 0x000F0000) >> 16))).
+   Add(Register(((inst.Bits() & 0x00100000)  ==
+          0x00100000
+       ? 16
+       : 32)))));
 
   return true;
 }
 
-// Neutral case:
-// inst(23:20)=110x
-//    = {baseline: 'Binary4RegisterDualResultUsesRnRm',
-//       constraints: ,
-//       defs: {inst(15:12),inst(19:16),16 if inst(20)=1 else 32},
-//       safety: ['15 == inst(15:12) || 15 == inst(19:16) || 15 == inst(3:0) || 15 == inst(11:8) => UNPREDICTABLE', 'inst(15:12) == inst(19:16) => UNPREDICTABLE', '(ArchVersion() < 6 && (inst(19:16) == inst(3:0) || inst(15:12) == inst(3:0))) => UNPREDICTABLE']}
-//
-// Representaive case:
 // op(23:20)=110x
 //    = {NZCV: 16,
 //       None: 32,
@@ -497,12 +629,25 @@ bool Binary4RegisterDualResultTesterCase7
 //       Rm: Rm(11:8),
 //       Rn: Rn(3:0),
 //       S: S(20),
+//       actual: Actual_SMULL_A1_cccc0000110shhhhllllmmmm1001nnnn_case_1,
 //       baseline: Binary4RegisterDualResultUsesRnRm,
 //       constraints: ,
-//       defs: {RdLo,RdHi,NZCV if setflags else None},
+//       defs: {RdLo, RdHi, NZCV
+//            if setflags
+//            else None},
 //       fields: [S(20), RdHi(19:16), RdLo(15:12), Rm(11:8), Rn(3:0)],
-//       safety: [Pc in {RdLo,RdHi,Rn,Rm} => UNPREDICTABLE, RdHi == RdLo => UNPREDICTABLE, (ArchVersion() < 6 && (RdHi == Rn || RdLo == Rn)) => UNPREDICTABLE],
-//       setflags: S(20)=1}
+//       generated_baseline: SMULL_A1_cccc0000110shhhhllllmmmm1001nnnn_case_0,
+//       safety: [Pc in {RdLo, RdHi, Rn, Rm} => UNPREDICTABLE,
+//         RdHi  ==
+//               RdLo => UNPREDICTABLE,
+//         (ArchVersion()  <
+//               6 &&
+//            (RdHi  ==
+//               Rn ||
+//            RdLo  ==
+//               Rn)) => UNPREDICTABLE],
+//       setflags: S(20)=1,
+//       uses: {Rn, Rm}}
 class Binary4RegisterDualResultTesterCase8
     : public Binary4RegisterDualResultTester {
  public:
@@ -521,7 +666,9 @@ bool Binary4RegisterDualResultTesterCase8
      const NamedClassDecoder& decoder) {
 
   // Check that row patterns apply to pattern being checked.'
-  if ((inst.Bits() & 0x00E00000) != 0x00C00000 /* op(23:20)=~110x */) return false;
+  // op(23:20)=~110x
+  if ((inst.Bits() & 0x00E00000)  !=
+          0x00C00000) return false;
 
   // Check other preconditions defined for the base decoder.
   return Binary4RegisterDualResultTester::
@@ -531,31 +678,43 @@ bool Binary4RegisterDualResultTesterCase8
 bool Binary4RegisterDualResultTesterCase8
 ::ApplySanityChecks(nacl_arm_dec::Instruction inst,
                     const NamedClassDecoder& decoder) {
-  NC_PRECOND(Binary4RegisterDualResultTester::ApplySanityChecks(inst, decoder));
+  NC_PRECOND(Binary4RegisterDualResultTester::
+               ApplySanityChecks(inst, decoder));
 
-  // safety: Pc in {RdLo,RdHi,Rn,Rm} => UNPREDICTABLE
-  EXPECT_TRUE(!((((15) == (((inst.Bits() & 0x0000F000) >> 12)))) || (((15) == (((inst.Bits() & 0x000F0000) >> 16)))) || (((15) == ((inst.Bits() & 0x0000000F)))) || (((15) == (((inst.Bits() & 0x00000F00) >> 8))))));
+  // safety: Pc in {RdLo, RdHi, Rn, Rm} => UNPREDICTABLE
+  EXPECT_TRUE(!((((15) == (((inst.Bits() & 0x0000F000) >> 12)))) ||
+       (((15) == (((inst.Bits() & 0x000F0000) >> 16)))) ||
+       (((15) == ((inst.Bits() & 0x0000000F)))) ||
+       (((15) == (((inst.Bits() & 0x00000F00) >> 8))))));
 
-  // safety: RdHi == RdLo => UNPREDICTABLE
+  // safety: RdHi  ==
+  //          RdLo => UNPREDICTABLE
   EXPECT_TRUE(((((inst.Bits() & 0x000F0000) >> 16)) != (((inst.Bits() & 0x0000F000) >> 12))));
 
-  // safety: (ArchVersion() < 6 && (RdHi == Rn || RdLo == Rn)) => UNPREDICTABLE
-  EXPECT_TRUE((!((((nacl_arm_dec::ArchVersion()) < (6))) && (((((((inst.Bits() & 0x000F0000) >> 16)) == ((inst.Bits() & 0x0000000F)))) || (((((inst.Bits() & 0x0000F000) >> 12)) == ((inst.Bits() & 0x0000000F)))))))));
+  // safety: (ArchVersion()  <
+  //          6 &&
+  //       (RdHi  ==
+  //          Rn ||
+  //       RdLo  ==
+  //          Rn)) => UNPREDICTABLE
+  EXPECT_TRUE((!((((nacl_arm_dec::ArchVersion()) < (6))) &&
+       (((((((inst.Bits() & 0x000F0000) >> 16)) == ((inst.Bits() & 0x0000000F)))) ||
+       (((((inst.Bits() & 0x0000F000) >> 12)) == ((inst.Bits() & 0x0000000F)))))))));
 
-  // defs: {RdLo,RdHi,NZCV if setflags else None};
-  EXPECT_TRUE(decoder.defs(inst).IsSame(RegisterList().Add(Register(((inst.Bits() & 0x0000F000) >> 12))).Add(Register(((inst.Bits() & 0x000F0000) >> 16))).Add(Register(((inst.Bits() & 0x00100000) == 0x00100000 ? 16 : 32)))));
+  // defs: {RdLo, RdHi, NZCV
+  //       if setflags
+  //       else None};
+  EXPECT_TRUE(decoder.defs(inst).IsSame(RegisterList().
+   Add(Register(((inst.Bits() & 0x0000F000) >> 12))).
+   Add(Register(((inst.Bits() & 0x000F0000) >> 16))).
+   Add(Register(((inst.Bits() & 0x00100000)  ==
+          0x00100000
+       ? 16
+       : 32)))));
 
   return true;
 }
 
-// Neutral case:
-// inst(23:20)=111x
-//    = {baseline: 'Binary4RegisterDualResultLtV6RdHiLoNotRn',
-//       constraints: ,
-//       defs: {inst(15:12),inst(19:16),16 if inst(20)=1 else 32},
-//       safety: ['15 == inst(15:12) || 15 == inst(19:16) || 15 == inst(3:0) || 15 == inst(11:8) => UNPREDICTABLE', 'inst(15:12) == inst(19:16) => UNPREDICTABLE', '(ArchVersion() < 6 && (inst(19:16) == inst(3:0) || inst(15:12) == inst(3:0))) => UNPREDICTABLE']}
-//
-// Representaive case:
 // op(23:20)=111x
 //    = {NZCV: 16,
 //       None: 32,
@@ -565,12 +724,25 @@ bool Binary4RegisterDualResultTesterCase8
 //       Rm: Rm(11:8),
 //       Rn: Rn(3:0),
 //       S: S(20),
+//       actual: Actual_SMLAL_A1_cccc0000111shhhhllllmmmm1001nnnn_case_1,
 //       baseline: Binary4RegisterDualResultLtV6RdHiLoNotRn,
 //       constraints: ,
-//       defs: {RdLo,RdHi,NZCV if setflags else None},
+//       defs: {RdLo, RdHi, NZCV
+//            if setflags
+//            else None},
 //       fields: [S(20), RdHi(19:16), RdLo(15:12), Rm(11:8), Rn(3:0)],
-//       safety: [Pc in {RdLo,RdHi,Rn,Rm} => UNPREDICTABLE, RdHi == RdLo => UNPREDICTABLE, (ArchVersion() < 6 && (RdHi == Rn || RdLo == Rn)) => UNPREDICTABLE],
-//       setflags: S(20)=1}
+//       generated_baseline: SMLAL_A1_cccc0000111shhhhllllmmmm1001nnnn_case_0,
+//       safety: [Pc in {RdLo, RdHi, Rn, Rm} => UNPREDICTABLE,
+//         RdHi  ==
+//               RdLo => UNPREDICTABLE,
+//         (ArchVersion()  <
+//               6 &&
+//            (RdHi  ==
+//               Rn ||
+//            RdLo  ==
+//               Rn)) => UNPREDICTABLE],
+//       setflags: S(20)=1,
+//       uses: {RdLo, RdHi, Rn, Rm}}
 class Binary4RegisterDualResultTesterCase9
     : public Binary4RegisterDualResultTester {
  public:
@@ -589,7 +761,9 @@ bool Binary4RegisterDualResultTesterCase9
      const NamedClassDecoder& decoder) {
 
   // Check that row patterns apply to pattern being checked.'
-  if ((inst.Bits() & 0x00E00000) != 0x00E00000 /* op(23:20)=~111x */) return false;
+  // op(23:20)=~111x
+  if ((inst.Bits() & 0x00E00000)  !=
+          0x00E00000) return false;
 
   // Check other preconditions defined for the base decoder.
   return Binary4RegisterDualResultTester::
@@ -599,19 +773,39 @@ bool Binary4RegisterDualResultTesterCase9
 bool Binary4RegisterDualResultTesterCase9
 ::ApplySanityChecks(nacl_arm_dec::Instruction inst,
                     const NamedClassDecoder& decoder) {
-  NC_PRECOND(Binary4RegisterDualResultTester::ApplySanityChecks(inst, decoder));
+  NC_PRECOND(Binary4RegisterDualResultTester::
+               ApplySanityChecks(inst, decoder));
 
-  // safety: Pc in {RdLo,RdHi,Rn,Rm} => UNPREDICTABLE
-  EXPECT_TRUE(!((((15) == (((inst.Bits() & 0x0000F000) >> 12)))) || (((15) == (((inst.Bits() & 0x000F0000) >> 16)))) || (((15) == ((inst.Bits() & 0x0000000F)))) || (((15) == (((inst.Bits() & 0x00000F00) >> 8))))));
+  // safety: Pc in {RdLo, RdHi, Rn, Rm} => UNPREDICTABLE
+  EXPECT_TRUE(!((((15) == (((inst.Bits() & 0x0000F000) >> 12)))) ||
+       (((15) == (((inst.Bits() & 0x000F0000) >> 16)))) ||
+       (((15) == ((inst.Bits() & 0x0000000F)))) ||
+       (((15) == (((inst.Bits() & 0x00000F00) >> 8))))));
 
-  // safety: RdHi == RdLo => UNPREDICTABLE
+  // safety: RdHi  ==
+  //          RdLo => UNPREDICTABLE
   EXPECT_TRUE(((((inst.Bits() & 0x000F0000) >> 16)) != (((inst.Bits() & 0x0000F000) >> 12))));
 
-  // safety: (ArchVersion() < 6 && (RdHi == Rn || RdLo == Rn)) => UNPREDICTABLE
-  EXPECT_TRUE((!((((nacl_arm_dec::ArchVersion()) < (6))) && (((((((inst.Bits() & 0x000F0000) >> 16)) == ((inst.Bits() & 0x0000000F)))) || (((((inst.Bits() & 0x0000F000) >> 12)) == ((inst.Bits() & 0x0000000F)))))))));
+  // safety: (ArchVersion()  <
+  //          6 &&
+  //       (RdHi  ==
+  //          Rn ||
+  //       RdLo  ==
+  //          Rn)) => UNPREDICTABLE
+  EXPECT_TRUE((!((((nacl_arm_dec::ArchVersion()) < (6))) &&
+       (((((((inst.Bits() & 0x000F0000) >> 16)) == ((inst.Bits() & 0x0000000F)))) ||
+       (((((inst.Bits() & 0x0000F000) >> 12)) == ((inst.Bits() & 0x0000000F)))))))));
 
-  // defs: {RdLo,RdHi,NZCV if setflags else None};
-  EXPECT_TRUE(decoder.defs(inst).IsSame(RegisterList().Add(Register(((inst.Bits() & 0x0000F000) >> 12))).Add(Register(((inst.Bits() & 0x000F0000) >> 16))).Add(Register(((inst.Bits() & 0x00100000) == 0x00100000 ? 16 : 32)))));
+  // defs: {RdLo, RdHi, NZCV
+  //       if setflags
+  //       else None};
+  EXPECT_TRUE(decoder.defs(inst).IsSame(RegisterList().
+   Add(Register(((inst.Bits() & 0x0000F000) >> 12))).
+   Add(Register(((inst.Bits() & 0x000F0000) >> 16))).
+   Add(Register(((inst.Bits() & 0x00100000)  ==
+          0x00100000
+       ? 16
+       : 32)))));
 
   return true;
 }
@@ -621,27 +815,23 @@ bool Binary4RegisterDualResultTesterCase9
 // a default constructor that automatically initializes the expected decoder
 // to the corresponding instance in the generated DecoderState.
 
-// Neutral case:
-// inst(23:20)=0100
-//    = {baseline: 'Binary4RegisterDualResult',
-//       constraints: ,
-//       defs: {inst(15:12),inst(19:16)},
-//       rule: 'UMAAL_A1',
-//       safety: ['15 == inst(15:12) || 15 == inst(19:16) || 15 == inst(3:0) || 15 == inst(11:8) => UNPREDICTABLE', 'inst(15:12) == inst(19:16) => UNPREDICTABLE']}
-//
-// Representative case:
 // op(23:20)=0100
 //    = {Pc: 15,
 //       RdHi: RdHi(19:16),
 //       RdLo: RdLo(15:12),
 //       Rm: Rm(11:8),
 //       Rn: Rn(3:0),
+//       actual: Actual_SMLALBB_SMLALBT_SMLALTB_SMLALTT_cccc00010100hhhhllllmmmm1xx0nnnn_case_1,
 //       baseline: Binary4RegisterDualResult,
 //       constraints: ,
-//       defs: {RdLo,RdHi},
+//       defs: {RdLo, RdHi},
 //       fields: [RdHi(19:16), RdLo(15:12), Rm(11:8), Rn(3:0)],
+//       generated_baseline: UMAAL_A1_cccc00000100hhhhllllmmmm1001nnnn_case_0,
 //       rule: UMAAL_A1,
-//       safety: [Pc in {RdLo,RdHi,Rn,Rm} => UNPREDICTABLE, RdHi == RdLo => UNPREDICTABLE]}
+//       safety: [Pc in {RdLo, RdHi, Rn, Rm} => UNPREDICTABLE,
+//         RdHi  ==
+//               RdLo => UNPREDICTABLE],
+//       uses: {RdLo, RdHi, Rn, Rm}}
 class Binary4RegisterDualResultTester_Case0
     : public Binary4RegisterDualResultTesterCase0 {
  public:
@@ -651,45 +841,39 @@ class Binary4RegisterDualResultTester_Case0
   {}
 };
 
-// Neutral case:
-// inst(23:20)=0101
-//    = {baseline: 'UndefinedCondDecoder',
-//       constraints: }
-//
-// Representative case:
 // op(23:20)=0101
-//    = {baseline: UndefinedCondDecoder,
-//       constraints: }
-class UndefinedCondDecoderTester_Case1
+//    = {actual: Actual_Unnamed_case_1,
+//       baseline: Undefined,
+//       constraints: ,
+//       defs: {},
+//       generated_baseline: Unnamed_cccc00000101xxxxxxxxxxxx1001xxxx_case_0,
+//       safety: [true => UNDEFINED],
+//       true: true,
+//       uses: {}}
+class UndefinedTester_Case1
     : public UnsafeCondDecoderTesterCase1 {
  public:
-  UndefinedCondDecoderTester_Case1()
+  UndefinedTester_Case1()
     : UnsafeCondDecoderTesterCase1(
-      state_.UndefinedCondDecoder_None_instance_)
+      state_.Undefined_None_instance_)
   {}
 };
 
-// Neutral case:
-// inst(23:20)=0110
-//    = {baseline: 'Binary4RegisterDualOp',
-//       constraints: ,
-//       defs: {inst(19:16)},
-//       rule: 'MLS_A1',
-//       safety: ['15 == inst(19:16) || 15 == inst(3:0) || 15 == inst(11:8) || 15 == inst(15:12) => UNPREDICTABLE']}
-//
-// Representative case:
 // op(23:20)=0110
 //    = {Pc: 15,
 //       Ra: Ra(15:12),
 //       Rd: Rd(19:16),
 //       Rm: Rm(11:8),
 //       Rn: Rn(3:0),
+//       actual: Actual_MLS_A1_cccc00000110ddddaaaammmm1001nnnn_case_1,
 //       baseline: Binary4RegisterDualOp,
 //       constraints: ,
 //       defs: {Rd},
 //       fields: [Rd(19:16), Ra(15:12), Rm(11:8), Rn(3:0)],
+//       generated_baseline: MLS_A1_cccc00000110ddddaaaammmm1001nnnn_case_0,
 //       rule: MLS_A1,
-//       safety: [Pc in {Rd,Rn,Rm,Ra} => UNPREDICTABLE]}
+//       safety: [Pc in {Rd, Rn, Rm, Ra} => UNPREDICTABLE],
+//       uses: {Rn, Rm, Ra}}
 class Binary4RegisterDualOpTester_Case2
     : public Binary4RegisterDualOpTesterCase2 {
  public:
@@ -699,33 +883,24 @@ class Binary4RegisterDualOpTester_Case2
   {}
 };
 
-// Neutral case:
-// inst(23:20)=0111
-//    = {baseline: 'UndefinedCondDecoder',
-//       constraints: }
-//
-// Representative case:
 // op(23:20)=0111
-//    = {baseline: UndefinedCondDecoder,
-//       constraints: }
-class UndefinedCondDecoderTester_Case3
+//    = {actual: Actual_Unnamed_case_1,
+//       baseline: Undefined,
+//       constraints: ,
+//       defs: {},
+//       generated_baseline: Unnamed_cccc00000111xxxxxxxxxxxx1001xxxx_case_0,
+//       safety: [true => UNDEFINED],
+//       true: true,
+//       uses: {}}
+class UndefinedTester_Case3
     : public UnsafeCondDecoderTesterCase3 {
  public:
-  UndefinedCondDecoderTester_Case3()
+  UndefinedTester_Case3()
     : UnsafeCondDecoderTesterCase3(
-      state_.UndefinedCondDecoder_None_instance_)
+      state_.Undefined_None_instance_)
   {}
 };
 
-// Neutral case:
-// inst(23:20)=000x & inst(31:0)=xxxxxxxxxxxxxxxx0000xxxxxxxxxxxx
-//    = {baseline: 'Binary3RegisterOpAltA',
-//       constraints: ,
-//       defs: {inst(19:16),16 if inst(20)=1 else 32},
-//       rule: 'MUL_A1',
-//       safety: ['15 == inst(19:16) || 15 == inst(3:0) || 15 == inst(11:8) => UNPREDICTABLE', '(ArchVersion() < 6 && inst(19:16) == inst(3:0)) => UNPREDICTABLE']}
-//
-// Representative case:
 // op(23:20)=000x & $pattern(31:0)=xxxxxxxxxxxxxxxx0000xxxxxxxxxxxx
 //    = {NZCV: 16,
 //       None: 32,
@@ -734,13 +909,22 @@ class UndefinedCondDecoderTester_Case3
 //       Rm: Rm(11:8),
 //       Rn: Rn(3:0),
 //       S: S(20),
+//       actual: Actual_MUL_A1_cccc0000000sdddd0000mmmm1001nnnn_case_1,
 //       baseline: Binary3RegisterOpAltA,
 //       constraints: ,
-//       defs: {Rd,NZCV if setflags else None},
+//       defs: {Rd, NZCV
+//            if setflags
+//            else None},
 //       fields: [S(20), Rd(19:16), Rm(11:8), Rn(3:0)],
+//       generated_baseline: MUL_A1_cccc0000000sdddd0000mmmm1001nnnn_case_0,
 //       rule: MUL_A1,
-//       safety: [Pc in {Rd,Rn,Rm} => UNPREDICTABLE, (ArchVersion() < 6 && Rd == Rn) => UNPREDICTABLE],
-//       setflags: S(20)=1}
+//       safety: [Pc in {Rd, Rn, Rm} => UNPREDICTABLE,
+//         (ArchVersion()  <
+//               6 &&
+//            Rd  ==
+//               Rn) => UNPREDICTABLE],
+//       setflags: S(20)=1,
+//       uses: {Rm, Rn}}
 class Binary3RegisterOpAltATester_Case4
     : public Binary3RegisterOpAltATesterCase4 {
  public:
@@ -750,15 +934,6 @@ class Binary3RegisterOpAltATester_Case4
   {}
 };
 
-// Neutral case:
-// inst(23:20)=001x
-//    = {baseline: 'Binary4RegisterDualOpLtV6RdNotRn',
-//       constraints: ,
-//       defs: {inst(19:16),16 if inst(20)=1 else 32},
-//       rule: 'MLA_A1',
-//       safety: ['15 == inst(19:16) || 15 == inst(3:0) || 15 == inst(11:8) || 15 == inst(15:12) => UNPREDICTABLE', '(ArchVersion() < 6 && inst(19:16) == inst(3:0)) => UNPREDICTABLE']}
-//
-// Representative case:
 // op(23:20)=001x
 //    = {NZCV: 16,
 //       None: 32,
@@ -768,13 +943,22 @@ class Binary3RegisterOpAltATester_Case4
 //       Rm: Rm(11:8),
 //       Rn: Rn(3:0),
 //       S: S(20),
+//       actual: Actual_MLA_A1_cccc0000001sddddaaaammmm1001nnnn_case_1,
 //       baseline: Binary4RegisterDualOpLtV6RdNotRn,
 //       constraints: ,
-//       defs: {Rd,NZCV if setflags else None},
+//       defs: {Rd, NZCV
+//            if setflags
+//            else None},
 //       fields: [S(20), Rd(19:16), Ra(15:12), Rm(11:8), Rn(3:0)],
+//       generated_baseline: MLA_A1_cccc0000001sddddaaaammmm1001nnnn_case_0,
 //       rule: MLA_A1,
-//       safety: [Pc in {Rd,Rn,Rm,Ra} => UNPREDICTABLE, (ArchVersion() < 6 && Rd == Rn) => UNPREDICTABLE],
-//       setflags: S(20)=1}
+//       safety: [Pc in {Rd, Rn, Rm, Ra} => UNPREDICTABLE,
+//         (ArchVersion()  <
+//               6 &&
+//            Rd  ==
+//               Rn) => UNPREDICTABLE],
+//       setflags: S(20)=1,
+//       uses: {Rn, Rm, Ra}}
 class Binary4RegisterDualOpLtV6RdNotRnTester_Case5
     : public Binary4RegisterDualOpTesterCase5 {
  public:
@@ -784,15 +968,6 @@ class Binary4RegisterDualOpLtV6RdNotRnTester_Case5
   {}
 };
 
-// Neutral case:
-// inst(23:20)=100x
-//    = {baseline: 'Binary4RegisterDualResultUsesRnRm',
-//       constraints: ,
-//       defs: {inst(15:12),inst(19:16),16 if inst(20)=1 else 32},
-//       rule: 'UMULL_A1',
-//       safety: ['15 == inst(15:12) || 15 == inst(19:16) || 15 == inst(3:0) || 15 == inst(11:8) => UNPREDICTABLE', 'inst(15:12) == inst(19:16) => UNPREDICTABLE', '(ArchVersion() < 6 && (inst(19:16) == inst(3:0) || inst(15:12) == inst(3:0))) => UNPREDICTABLE']}
-//
-// Representative case:
 // op(23:20)=100x
 //    = {NZCV: 16,
 //       None: 32,
@@ -802,13 +977,26 @@ class Binary4RegisterDualOpLtV6RdNotRnTester_Case5
 //       Rm: Rm(11:8),
 //       Rn: Rn(3:0),
 //       S: S(20),
+//       actual: Actual_SMULL_A1_cccc0000110shhhhllllmmmm1001nnnn_case_1,
 //       baseline: Binary4RegisterDualResultUsesRnRm,
 //       constraints: ,
-//       defs: {RdLo,RdHi,NZCV if setflags else None},
+//       defs: {RdLo, RdHi, NZCV
+//            if setflags
+//            else None},
 //       fields: [S(20), RdHi(19:16), RdLo(15:12), Rm(11:8), Rn(3:0)],
+//       generated_baseline: UMULL_A1_cccc0000100shhhhllllmmmm1001nnnn_case_0,
 //       rule: UMULL_A1,
-//       safety: [Pc in {RdLo,RdHi,Rn,Rm} => UNPREDICTABLE, RdHi == RdLo => UNPREDICTABLE, (ArchVersion() < 6 && (RdHi == Rn || RdLo == Rn)) => UNPREDICTABLE],
-//       setflags: S(20)=1}
+//       safety: [Pc in {RdLo, RdHi, Rn, Rm} => UNPREDICTABLE,
+//         RdHi  ==
+//               RdLo => UNPREDICTABLE,
+//         (ArchVersion()  <
+//               6 &&
+//            (RdHi  ==
+//               Rn ||
+//            RdLo  ==
+//               Rn)) => UNPREDICTABLE],
+//       setflags: S(20)=1,
+//       uses: {Rn, Rm}}
 class Binary4RegisterDualResultUsesRnRmTester_Case6
     : public Binary4RegisterDualResultTesterCase6 {
  public:
@@ -818,15 +1006,6 @@ class Binary4RegisterDualResultUsesRnRmTester_Case6
   {}
 };
 
-// Neutral case:
-// inst(23:20)=101x
-//    = {baseline: 'Binary4RegisterDualResultLtV6RdHiLoNotRn',
-//       constraints: ,
-//       defs: {inst(15:12),inst(19:16),16 if inst(20)=1 else 32},
-//       rule: 'UMLAL_A1',
-//       safety: ['15 == inst(15:12) || 15 == inst(19:16) || 15 == inst(3:0) || 15 == inst(11:8) => UNPREDICTABLE', 'inst(15:12) == inst(19:16) => UNPREDICTABLE', '(ArchVersion() < 6 && (inst(19:16) == inst(3:0) || inst(15:12) == inst(3:0))) => UNPREDICTABLE']}
-//
-// Representative case:
 // op(23:20)=101x
 //    = {NZCV: 16,
 //       None: 32,
@@ -836,13 +1015,26 @@ class Binary4RegisterDualResultUsesRnRmTester_Case6
 //       Rm: Rm(11:8),
 //       Rn: Rn(3:0),
 //       S: S(20),
+//       actual: Actual_SMLAL_A1_cccc0000111shhhhllllmmmm1001nnnn_case_1,
 //       baseline: Binary4RegisterDualResultLtV6RdHiLoNotRn,
 //       constraints: ,
-//       defs: {RdLo,RdHi,NZCV if setflags else None},
+//       defs: {RdLo, RdHi, NZCV
+//            if setflags
+//            else None},
 //       fields: [S(20), RdHi(19:16), RdLo(15:12), Rm(11:8), Rn(3:0)],
+//       generated_baseline: UMLAL_A1_cccc0000101shhhhllllmmmm1001nnnn_case_0,
 //       rule: UMLAL_A1,
-//       safety: [Pc in {RdLo,RdHi,Rn,Rm} => UNPREDICTABLE, RdHi == RdLo => UNPREDICTABLE, (ArchVersion() < 6 && (RdHi == Rn || RdLo == Rn)) => UNPREDICTABLE],
-//       setflags: S(20)=1}
+//       safety: [Pc in {RdLo, RdHi, Rn, Rm} => UNPREDICTABLE,
+//         RdHi  ==
+//               RdLo => UNPREDICTABLE,
+//         (ArchVersion()  <
+//               6 &&
+//            (RdHi  ==
+//               Rn ||
+//            RdLo  ==
+//               Rn)) => UNPREDICTABLE],
+//       setflags: S(20)=1,
+//       uses: {RdLo, RdHi, Rn, Rm}}
 class Binary4RegisterDualResultLtV6RdHiLoNotRnTester_Case7
     : public Binary4RegisterDualResultTesterCase7 {
  public:
@@ -852,15 +1044,6 @@ class Binary4RegisterDualResultLtV6RdHiLoNotRnTester_Case7
   {}
 };
 
-// Neutral case:
-// inst(23:20)=110x
-//    = {baseline: 'Binary4RegisterDualResultUsesRnRm',
-//       constraints: ,
-//       defs: {inst(15:12),inst(19:16),16 if inst(20)=1 else 32},
-//       rule: 'SMULL_A1',
-//       safety: ['15 == inst(15:12) || 15 == inst(19:16) || 15 == inst(3:0) || 15 == inst(11:8) => UNPREDICTABLE', 'inst(15:12) == inst(19:16) => UNPREDICTABLE', '(ArchVersion() < 6 && (inst(19:16) == inst(3:0) || inst(15:12) == inst(3:0))) => UNPREDICTABLE']}
-//
-// Representative case:
 // op(23:20)=110x
 //    = {NZCV: 16,
 //       None: 32,
@@ -870,13 +1053,26 @@ class Binary4RegisterDualResultLtV6RdHiLoNotRnTester_Case7
 //       Rm: Rm(11:8),
 //       Rn: Rn(3:0),
 //       S: S(20),
+//       actual: Actual_SMULL_A1_cccc0000110shhhhllllmmmm1001nnnn_case_1,
 //       baseline: Binary4RegisterDualResultUsesRnRm,
 //       constraints: ,
-//       defs: {RdLo,RdHi,NZCV if setflags else None},
+//       defs: {RdLo, RdHi, NZCV
+//            if setflags
+//            else None},
 //       fields: [S(20), RdHi(19:16), RdLo(15:12), Rm(11:8), Rn(3:0)],
+//       generated_baseline: SMULL_A1_cccc0000110shhhhllllmmmm1001nnnn_case_0,
 //       rule: SMULL_A1,
-//       safety: [Pc in {RdLo,RdHi,Rn,Rm} => UNPREDICTABLE, RdHi == RdLo => UNPREDICTABLE, (ArchVersion() < 6 && (RdHi == Rn || RdLo == Rn)) => UNPREDICTABLE],
-//       setflags: S(20)=1}
+//       safety: [Pc in {RdLo, RdHi, Rn, Rm} => UNPREDICTABLE,
+//         RdHi  ==
+//               RdLo => UNPREDICTABLE,
+//         (ArchVersion()  <
+//               6 &&
+//            (RdHi  ==
+//               Rn ||
+//            RdLo  ==
+//               Rn)) => UNPREDICTABLE],
+//       setflags: S(20)=1,
+//       uses: {Rn, Rm}}
 class Binary4RegisterDualResultUsesRnRmTester_Case8
     : public Binary4RegisterDualResultTesterCase8 {
  public:
@@ -886,15 +1082,6 @@ class Binary4RegisterDualResultUsesRnRmTester_Case8
   {}
 };
 
-// Neutral case:
-// inst(23:20)=111x
-//    = {baseline: 'Binary4RegisterDualResultLtV6RdHiLoNotRn',
-//       constraints: ,
-//       defs: {inst(15:12),inst(19:16),16 if inst(20)=1 else 32},
-//       rule: 'SMLAL_A1',
-//       safety: ['15 == inst(15:12) || 15 == inst(19:16) || 15 == inst(3:0) || 15 == inst(11:8) => UNPREDICTABLE', 'inst(15:12) == inst(19:16) => UNPREDICTABLE', '(ArchVersion() < 6 && (inst(19:16) == inst(3:0) || inst(15:12) == inst(3:0))) => UNPREDICTABLE']}
-//
-// Representative case:
 // op(23:20)=111x
 //    = {NZCV: 16,
 //       None: 32,
@@ -904,13 +1091,26 @@ class Binary4RegisterDualResultUsesRnRmTester_Case8
 //       Rm: Rm(11:8),
 //       Rn: Rn(3:0),
 //       S: S(20),
+//       actual: Actual_SMLAL_A1_cccc0000111shhhhllllmmmm1001nnnn_case_1,
 //       baseline: Binary4RegisterDualResultLtV6RdHiLoNotRn,
 //       constraints: ,
-//       defs: {RdLo,RdHi,NZCV if setflags else None},
+//       defs: {RdLo, RdHi, NZCV
+//            if setflags
+//            else None},
 //       fields: [S(20), RdHi(19:16), RdLo(15:12), Rm(11:8), Rn(3:0)],
+//       generated_baseline: SMLAL_A1_cccc0000111shhhhllllmmmm1001nnnn_case_0,
 //       rule: SMLAL_A1,
-//       safety: [Pc in {RdLo,RdHi,Rn,Rm} => UNPREDICTABLE, RdHi == RdLo => UNPREDICTABLE, (ArchVersion() < 6 && (RdHi == Rn || RdLo == Rn)) => UNPREDICTABLE],
-//       setflags: S(20)=1}
+//       safety: [Pc in {RdLo, RdHi, Rn, Rm} => UNPREDICTABLE,
+//         RdHi  ==
+//               RdLo => UNPREDICTABLE,
+//         (ArchVersion()  <
+//               6 &&
+//            (RdHi  ==
+//               Rn ||
+//            RdLo  ==
+//               Rn)) => UNPREDICTABLE],
+//       setflags: S(20)=1,
+//       uses: {RdLo, RdHi, Rn, Rm}}
 class Binary4RegisterDualResultLtV6RdHiLoNotRnTester_Case9
     : public Binary4RegisterDualResultTesterCase9 {
  public:
@@ -929,121 +1129,92 @@ class Arm32DecoderStateTests : public ::testing::Test {
 // The following functions test each pattern specified in parse
 // decoder tables.
 
-// Neutral case:
-// inst(23:20)=0100
-//    = {actual: 'Binary4RegisterDualResult',
-//       baseline: 'Binary4RegisterDualResult',
-//       constraints: ,
-//       defs: {inst(15:12),inst(19:16)},
-//       pattern: 'cccc00000100hhhhllllmmmm1001nnnn',
-//       rule: 'UMAAL_A1',
-//       safety: ['15 == inst(15:12) || 15 == inst(19:16) || 15 == inst(3:0) || 15 == inst(11:8) => UNPREDICTABLE', 'inst(15:12) == inst(19:16) => UNPREDICTABLE']}
-//
-// Representaive case:
 // op(23:20)=0100
 //    = {Pc: 15,
 //       RdHi: RdHi(19:16),
 //       RdLo: RdLo(15:12),
 //       Rm: Rm(11:8),
 //       Rn: Rn(3:0),
-//       actual: Binary4RegisterDualResult,
+//       actual: Actual_SMLALBB_SMLALBT_SMLALTB_SMLALTT_cccc00010100hhhhllllmmmm1xx0nnnn_case_1,
 //       baseline: Binary4RegisterDualResult,
 //       constraints: ,
-//       defs: {RdLo,RdHi},
+//       defs: {RdLo, RdHi},
 //       fields: [RdHi(19:16), RdLo(15:12), Rm(11:8), Rn(3:0)],
+//       generated_baseline: UMAAL_A1_cccc00000100hhhhllllmmmm1001nnnn_case_0,
 //       pattern: cccc00000100hhhhllllmmmm1001nnnn,
 //       rule: UMAAL_A1,
-//       safety: [Pc in {RdLo,RdHi,Rn,Rm} => UNPREDICTABLE, RdHi == RdLo => UNPREDICTABLE]}
+//       safety: [Pc in {RdLo, RdHi, Rn, Rm} => UNPREDICTABLE,
+//         RdHi  ==
+//               RdLo => UNPREDICTABLE],
+//       uses: {RdLo, RdHi, Rn, Rm}}
 TEST_F(Arm32DecoderStateTests,
        Binary4RegisterDualResultTester_Case0_TestCase0) {
-  Binary4RegisterDualResultTester_Case0 tester;
-  tester.Test("cccc00000100hhhhllllmmmm1001nnnn");
+  Binary4RegisterDualResultTester_Case0 baseline_tester;
+  NamedActual_SMLALBB_SMLALBT_SMLALTB_SMLALTT_cccc00010100hhhhllllmmmm1xx0nnnn_case_1_UMAAL_A1 actual;
+  ActualVsBaselineTester a_vs_b_tester(actual, baseline_tester);
+  a_vs_b_tester.Test("cccc00000100hhhhllllmmmm1001nnnn");
 }
 
-// Neutral case:
-// inst(23:20)=0101
-//    = {actual: 'Undefined',
-//       baseline: 'UndefinedCondDecoder',
-//       constraints: ,
-//       pattern: 'cccc00000101xxxxxxxxxxxx1001xxxx'}
-//
-// Representative case:
 // op(23:20)=0101
-//    = {actual: Undefined,
-//       baseline: UndefinedCondDecoder,
+//    = {actual: Actual_Unnamed_case_1,
+//       baseline: Undefined,
 //       constraints: ,
-//       pattern: cccc00000101xxxxxxxxxxxx1001xxxx}
+//       defs: {},
+//       generated_baseline: Unnamed_cccc00000101xxxxxxxxxxxx1001xxxx_case_0,
+//       pattern: cccc00000101xxxxxxxxxxxx1001xxxx,
+//       safety: [true => UNDEFINED],
+//       true: true,
+//       uses: {}}
 TEST_F(Arm32DecoderStateTests,
-       UndefinedCondDecoderTester_Case1_TestCase1) {
-  UndefinedCondDecoderTester_Case1 baseline_tester;
-  NamedUndefined_None actual;
+       UndefinedTester_Case1_TestCase1) {
+  UndefinedTester_Case1 baseline_tester;
+  NamedActual_Unnamed_case_1_None actual;
   ActualVsBaselineTester a_vs_b_tester(actual, baseline_tester);
   a_vs_b_tester.Test("cccc00000101xxxxxxxxxxxx1001xxxx");
 }
 
-// Neutral case:
-// inst(23:20)=0110
-//    = {actual: 'Binary4RegisterDualOp',
-//       baseline: 'Binary4RegisterDualOp',
-//       constraints: ,
-//       defs: {inst(19:16)},
-//       pattern: 'cccc00000110ddddaaaammmm1001nnnn',
-//       rule: 'MLS_A1',
-//       safety: ['15 == inst(19:16) || 15 == inst(3:0) || 15 == inst(11:8) || 15 == inst(15:12) => UNPREDICTABLE']}
-//
-// Representaive case:
 // op(23:20)=0110
 //    = {Pc: 15,
 //       Ra: Ra(15:12),
 //       Rd: Rd(19:16),
 //       Rm: Rm(11:8),
 //       Rn: Rn(3:0),
-//       actual: Binary4RegisterDualOp,
+//       actual: Actual_MLS_A1_cccc00000110ddddaaaammmm1001nnnn_case_1,
 //       baseline: Binary4RegisterDualOp,
 //       constraints: ,
 //       defs: {Rd},
 //       fields: [Rd(19:16), Ra(15:12), Rm(11:8), Rn(3:0)],
+//       generated_baseline: MLS_A1_cccc00000110ddddaaaammmm1001nnnn_case_0,
 //       pattern: cccc00000110ddddaaaammmm1001nnnn,
 //       rule: MLS_A1,
-//       safety: [Pc in {Rd,Rn,Rm,Ra} => UNPREDICTABLE]}
+//       safety: [Pc in {Rd, Rn, Rm, Ra} => UNPREDICTABLE],
+//       uses: {Rn, Rm, Ra}}
 TEST_F(Arm32DecoderStateTests,
        Binary4RegisterDualOpTester_Case2_TestCase2) {
-  Binary4RegisterDualOpTester_Case2 tester;
-  tester.Test("cccc00000110ddddaaaammmm1001nnnn");
+  Binary4RegisterDualOpTester_Case2 baseline_tester;
+  NamedActual_MLS_A1_cccc00000110ddddaaaammmm1001nnnn_case_1_MLS_A1 actual;
+  ActualVsBaselineTester a_vs_b_tester(actual, baseline_tester);
+  a_vs_b_tester.Test("cccc00000110ddddaaaammmm1001nnnn");
 }
 
-// Neutral case:
-// inst(23:20)=0111
-//    = {actual: 'Undefined',
-//       baseline: 'UndefinedCondDecoder',
-//       constraints: ,
-//       pattern: 'cccc00000111xxxxxxxxxxxx1001xxxx'}
-//
-// Representative case:
 // op(23:20)=0111
-//    = {actual: Undefined,
-//       baseline: UndefinedCondDecoder,
+//    = {actual: Actual_Unnamed_case_1,
+//       baseline: Undefined,
 //       constraints: ,
-//       pattern: cccc00000111xxxxxxxxxxxx1001xxxx}
+//       defs: {},
+//       generated_baseline: Unnamed_cccc00000111xxxxxxxxxxxx1001xxxx_case_0,
+//       pattern: cccc00000111xxxxxxxxxxxx1001xxxx,
+//       safety: [true => UNDEFINED],
+//       true: true,
+//       uses: {}}
 TEST_F(Arm32DecoderStateTests,
-       UndefinedCondDecoderTester_Case3_TestCase3) {
-  UndefinedCondDecoderTester_Case3 baseline_tester;
-  NamedUndefined_None actual;
+       UndefinedTester_Case3_TestCase3) {
+  UndefinedTester_Case3 baseline_tester;
+  NamedActual_Unnamed_case_1_None actual;
   ActualVsBaselineTester a_vs_b_tester(actual, baseline_tester);
   a_vs_b_tester.Test("cccc00000111xxxxxxxxxxxx1001xxxx");
 }
 
-// Neutral case:
-// inst(23:20)=000x & inst(31:0)=xxxxxxxxxxxxxxxx0000xxxxxxxxxxxx
-//    = {actual: 'Binary3RegisterOpAltA',
-//       baseline: 'Binary3RegisterOpAltA',
-//       constraints: ,
-//       defs: {inst(19:16),16 if inst(20)=1 else 32},
-//       pattern: 'cccc0000000sdddd0000mmmm1001nnnn',
-//       rule: 'MUL_A1',
-//       safety: ['15 == inst(19:16) || 15 == inst(3:0) || 15 == inst(11:8) => UNPREDICTABLE', '(ArchVersion() < 6 && inst(19:16) == inst(3:0)) => UNPREDICTABLE']}
-//
-// Representaive case:
 // op(23:20)=000x & $pattern(31:0)=xxxxxxxxxxxxxxxx0000xxxxxxxxxxxx
 //    = {NZCV: 16,
 //       None: 32,
@@ -1052,32 +1223,31 @@ TEST_F(Arm32DecoderStateTests,
 //       Rm: Rm(11:8),
 //       Rn: Rn(3:0),
 //       S: S(20),
-//       actual: Binary3RegisterOpAltA,
+//       actual: Actual_MUL_A1_cccc0000000sdddd0000mmmm1001nnnn_case_1,
 //       baseline: Binary3RegisterOpAltA,
 //       constraints: ,
-//       defs: {Rd,NZCV if setflags else None},
+//       defs: {Rd, NZCV
+//            if setflags
+//            else None},
 //       fields: [S(20), Rd(19:16), Rm(11:8), Rn(3:0)],
+//       generated_baseline: MUL_A1_cccc0000000sdddd0000mmmm1001nnnn_case_0,
 //       pattern: cccc0000000sdddd0000mmmm1001nnnn,
 //       rule: MUL_A1,
-//       safety: [Pc in {Rd,Rn,Rm} => UNPREDICTABLE, (ArchVersion() < 6 && Rd == Rn) => UNPREDICTABLE],
-//       setflags: S(20)=1}
+//       safety: [Pc in {Rd, Rn, Rm} => UNPREDICTABLE,
+//         (ArchVersion()  <
+//               6 &&
+//            Rd  ==
+//               Rn) => UNPREDICTABLE],
+//       setflags: S(20)=1,
+//       uses: {Rm, Rn}}
 TEST_F(Arm32DecoderStateTests,
        Binary3RegisterOpAltATester_Case4_TestCase4) {
-  Binary3RegisterOpAltATester_Case4 tester;
-  tester.Test("cccc0000000sdddd0000mmmm1001nnnn");
+  Binary3RegisterOpAltATester_Case4 baseline_tester;
+  NamedActual_MUL_A1_cccc0000000sdddd0000mmmm1001nnnn_case_1_MUL_A1 actual;
+  ActualVsBaselineTester a_vs_b_tester(actual, baseline_tester);
+  a_vs_b_tester.Test("cccc0000000sdddd0000mmmm1001nnnn");
 }
 
-// Neutral case:
-// inst(23:20)=001x
-//    = {actual: 'Binary4RegisterDualOpLtV6RdNotRn',
-//       baseline: 'Binary4RegisterDualOpLtV6RdNotRn',
-//       constraints: ,
-//       defs: {inst(19:16),16 if inst(20)=1 else 32},
-//       pattern: 'cccc0000001sddddaaaammmm1001nnnn',
-//       rule: 'MLA_A1',
-//       safety: ['15 == inst(19:16) || 15 == inst(3:0) || 15 == inst(11:8) || 15 == inst(15:12) => UNPREDICTABLE', '(ArchVersion() < 6 && inst(19:16) == inst(3:0)) => UNPREDICTABLE']}
-//
-// Representaive case:
 // op(23:20)=001x
 //    = {NZCV: 16,
 //       None: 32,
@@ -1087,32 +1257,31 @@ TEST_F(Arm32DecoderStateTests,
 //       Rm: Rm(11:8),
 //       Rn: Rn(3:0),
 //       S: S(20),
-//       actual: Binary4RegisterDualOpLtV6RdNotRn,
+//       actual: Actual_MLA_A1_cccc0000001sddddaaaammmm1001nnnn_case_1,
 //       baseline: Binary4RegisterDualOpLtV6RdNotRn,
 //       constraints: ,
-//       defs: {Rd,NZCV if setflags else None},
+//       defs: {Rd, NZCV
+//            if setflags
+//            else None},
 //       fields: [S(20), Rd(19:16), Ra(15:12), Rm(11:8), Rn(3:0)],
+//       generated_baseline: MLA_A1_cccc0000001sddddaaaammmm1001nnnn_case_0,
 //       pattern: cccc0000001sddddaaaammmm1001nnnn,
 //       rule: MLA_A1,
-//       safety: [Pc in {Rd,Rn,Rm,Ra} => UNPREDICTABLE, (ArchVersion() < 6 && Rd == Rn) => UNPREDICTABLE],
-//       setflags: S(20)=1}
+//       safety: [Pc in {Rd, Rn, Rm, Ra} => UNPREDICTABLE,
+//         (ArchVersion()  <
+//               6 &&
+//            Rd  ==
+//               Rn) => UNPREDICTABLE],
+//       setflags: S(20)=1,
+//       uses: {Rn, Rm, Ra}}
 TEST_F(Arm32DecoderStateTests,
        Binary4RegisterDualOpLtV6RdNotRnTester_Case5_TestCase5) {
-  Binary4RegisterDualOpLtV6RdNotRnTester_Case5 tester;
-  tester.Test("cccc0000001sddddaaaammmm1001nnnn");
+  Binary4RegisterDualOpLtV6RdNotRnTester_Case5 baseline_tester;
+  NamedActual_MLA_A1_cccc0000001sddddaaaammmm1001nnnn_case_1_MLA_A1 actual;
+  ActualVsBaselineTester a_vs_b_tester(actual, baseline_tester);
+  a_vs_b_tester.Test("cccc0000001sddddaaaammmm1001nnnn");
 }
 
-// Neutral case:
-// inst(23:20)=100x
-//    = {actual: 'Binary4RegisterDualResultUsesRnRm',
-//       baseline: 'Binary4RegisterDualResultUsesRnRm',
-//       constraints: ,
-//       defs: {inst(15:12),inst(19:16),16 if inst(20)=1 else 32},
-//       pattern: 'cccc0000100shhhhllllmmmm1001nnnn',
-//       rule: 'UMULL_A1',
-//       safety: ['15 == inst(15:12) || 15 == inst(19:16) || 15 == inst(3:0) || 15 == inst(11:8) => UNPREDICTABLE', 'inst(15:12) == inst(19:16) => UNPREDICTABLE', '(ArchVersion() < 6 && (inst(19:16) == inst(3:0) || inst(15:12) == inst(3:0))) => UNPREDICTABLE']}
-//
-// Representaive case:
 // op(23:20)=100x
 //    = {NZCV: 16,
 //       None: 32,
@@ -1122,32 +1291,35 @@ TEST_F(Arm32DecoderStateTests,
 //       Rm: Rm(11:8),
 //       Rn: Rn(3:0),
 //       S: S(20),
-//       actual: Binary4RegisterDualResultUsesRnRm,
+//       actual: Actual_SMULL_A1_cccc0000110shhhhllllmmmm1001nnnn_case_1,
 //       baseline: Binary4RegisterDualResultUsesRnRm,
 //       constraints: ,
-//       defs: {RdLo,RdHi,NZCV if setflags else None},
+//       defs: {RdLo, RdHi, NZCV
+//            if setflags
+//            else None},
 //       fields: [S(20), RdHi(19:16), RdLo(15:12), Rm(11:8), Rn(3:0)],
+//       generated_baseline: UMULL_A1_cccc0000100shhhhllllmmmm1001nnnn_case_0,
 //       pattern: cccc0000100shhhhllllmmmm1001nnnn,
 //       rule: UMULL_A1,
-//       safety: [Pc in {RdLo,RdHi,Rn,Rm} => UNPREDICTABLE, RdHi == RdLo => UNPREDICTABLE, (ArchVersion() < 6 && (RdHi == Rn || RdLo == Rn)) => UNPREDICTABLE],
-//       setflags: S(20)=1}
+//       safety: [Pc in {RdLo, RdHi, Rn, Rm} => UNPREDICTABLE,
+//         RdHi  ==
+//               RdLo => UNPREDICTABLE,
+//         (ArchVersion()  <
+//               6 &&
+//            (RdHi  ==
+//               Rn ||
+//            RdLo  ==
+//               Rn)) => UNPREDICTABLE],
+//       setflags: S(20)=1,
+//       uses: {Rn, Rm}}
 TEST_F(Arm32DecoderStateTests,
        Binary4RegisterDualResultUsesRnRmTester_Case6_TestCase6) {
-  Binary4RegisterDualResultUsesRnRmTester_Case6 tester;
-  tester.Test("cccc0000100shhhhllllmmmm1001nnnn");
+  Binary4RegisterDualResultUsesRnRmTester_Case6 baseline_tester;
+  NamedActual_SMULL_A1_cccc0000110shhhhllllmmmm1001nnnn_case_1_UMULL_A1 actual;
+  ActualVsBaselineTester a_vs_b_tester(actual, baseline_tester);
+  a_vs_b_tester.Test("cccc0000100shhhhllllmmmm1001nnnn");
 }
 
-// Neutral case:
-// inst(23:20)=101x
-//    = {actual: 'Binary4RegisterDualResultLtV6RdHiLoNotRn',
-//       baseline: 'Binary4RegisterDualResultLtV6RdHiLoNotRn',
-//       constraints: ,
-//       defs: {inst(15:12),inst(19:16),16 if inst(20)=1 else 32},
-//       pattern: 'cccc0000101shhhhllllmmmm1001nnnn',
-//       rule: 'UMLAL_A1',
-//       safety: ['15 == inst(15:12) || 15 == inst(19:16) || 15 == inst(3:0) || 15 == inst(11:8) => UNPREDICTABLE', 'inst(15:12) == inst(19:16) => UNPREDICTABLE', '(ArchVersion() < 6 && (inst(19:16) == inst(3:0) || inst(15:12) == inst(3:0))) => UNPREDICTABLE']}
-//
-// Representaive case:
 // op(23:20)=101x
 //    = {NZCV: 16,
 //       None: 32,
@@ -1157,32 +1329,35 @@ TEST_F(Arm32DecoderStateTests,
 //       Rm: Rm(11:8),
 //       Rn: Rn(3:0),
 //       S: S(20),
-//       actual: Binary4RegisterDualResultLtV6RdHiLoNotRn,
+//       actual: Actual_SMLAL_A1_cccc0000111shhhhllllmmmm1001nnnn_case_1,
 //       baseline: Binary4RegisterDualResultLtV6RdHiLoNotRn,
 //       constraints: ,
-//       defs: {RdLo,RdHi,NZCV if setflags else None},
+//       defs: {RdLo, RdHi, NZCV
+//            if setflags
+//            else None},
 //       fields: [S(20), RdHi(19:16), RdLo(15:12), Rm(11:8), Rn(3:0)],
+//       generated_baseline: UMLAL_A1_cccc0000101shhhhllllmmmm1001nnnn_case_0,
 //       pattern: cccc0000101shhhhllllmmmm1001nnnn,
 //       rule: UMLAL_A1,
-//       safety: [Pc in {RdLo,RdHi,Rn,Rm} => UNPREDICTABLE, RdHi == RdLo => UNPREDICTABLE, (ArchVersion() < 6 && (RdHi == Rn || RdLo == Rn)) => UNPREDICTABLE],
-//       setflags: S(20)=1}
+//       safety: [Pc in {RdLo, RdHi, Rn, Rm} => UNPREDICTABLE,
+//         RdHi  ==
+//               RdLo => UNPREDICTABLE,
+//         (ArchVersion()  <
+//               6 &&
+//            (RdHi  ==
+//               Rn ||
+//            RdLo  ==
+//               Rn)) => UNPREDICTABLE],
+//       setflags: S(20)=1,
+//       uses: {RdLo, RdHi, Rn, Rm}}
 TEST_F(Arm32DecoderStateTests,
        Binary4RegisterDualResultLtV6RdHiLoNotRnTester_Case7_TestCase7) {
-  Binary4RegisterDualResultLtV6RdHiLoNotRnTester_Case7 tester;
-  tester.Test("cccc0000101shhhhllllmmmm1001nnnn");
+  Binary4RegisterDualResultLtV6RdHiLoNotRnTester_Case7 baseline_tester;
+  NamedActual_SMLAL_A1_cccc0000111shhhhllllmmmm1001nnnn_case_1_UMLAL_A1 actual;
+  ActualVsBaselineTester a_vs_b_tester(actual, baseline_tester);
+  a_vs_b_tester.Test("cccc0000101shhhhllllmmmm1001nnnn");
 }
 
-// Neutral case:
-// inst(23:20)=110x
-//    = {actual: 'Binary4RegisterDualResultUsesRnRm',
-//       baseline: 'Binary4RegisterDualResultUsesRnRm',
-//       constraints: ,
-//       defs: {inst(15:12),inst(19:16),16 if inst(20)=1 else 32},
-//       pattern: 'cccc0000110shhhhllllmmmm1001nnnn',
-//       rule: 'SMULL_A1',
-//       safety: ['15 == inst(15:12) || 15 == inst(19:16) || 15 == inst(3:0) || 15 == inst(11:8) => UNPREDICTABLE', 'inst(15:12) == inst(19:16) => UNPREDICTABLE', '(ArchVersion() < 6 && (inst(19:16) == inst(3:0) || inst(15:12) == inst(3:0))) => UNPREDICTABLE']}
-//
-// Representaive case:
 // op(23:20)=110x
 //    = {NZCV: 16,
 //       None: 32,
@@ -1192,32 +1367,35 @@ TEST_F(Arm32DecoderStateTests,
 //       Rm: Rm(11:8),
 //       Rn: Rn(3:0),
 //       S: S(20),
-//       actual: Binary4RegisterDualResultUsesRnRm,
+//       actual: Actual_SMULL_A1_cccc0000110shhhhllllmmmm1001nnnn_case_1,
 //       baseline: Binary4RegisterDualResultUsesRnRm,
 //       constraints: ,
-//       defs: {RdLo,RdHi,NZCV if setflags else None},
+//       defs: {RdLo, RdHi, NZCV
+//            if setflags
+//            else None},
 //       fields: [S(20), RdHi(19:16), RdLo(15:12), Rm(11:8), Rn(3:0)],
+//       generated_baseline: SMULL_A1_cccc0000110shhhhllllmmmm1001nnnn_case_0,
 //       pattern: cccc0000110shhhhllllmmmm1001nnnn,
 //       rule: SMULL_A1,
-//       safety: [Pc in {RdLo,RdHi,Rn,Rm} => UNPREDICTABLE, RdHi == RdLo => UNPREDICTABLE, (ArchVersion() < 6 && (RdHi == Rn || RdLo == Rn)) => UNPREDICTABLE],
-//       setflags: S(20)=1}
+//       safety: [Pc in {RdLo, RdHi, Rn, Rm} => UNPREDICTABLE,
+//         RdHi  ==
+//               RdLo => UNPREDICTABLE,
+//         (ArchVersion()  <
+//               6 &&
+//            (RdHi  ==
+//               Rn ||
+//            RdLo  ==
+//               Rn)) => UNPREDICTABLE],
+//       setflags: S(20)=1,
+//       uses: {Rn, Rm}}
 TEST_F(Arm32DecoderStateTests,
        Binary4RegisterDualResultUsesRnRmTester_Case8_TestCase8) {
-  Binary4RegisterDualResultUsesRnRmTester_Case8 tester;
-  tester.Test("cccc0000110shhhhllllmmmm1001nnnn");
+  Binary4RegisterDualResultUsesRnRmTester_Case8 baseline_tester;
+  NamedActual_SMULL_A1_cccc0000110shhhhllllmmmm1001nnnn_case_1_SMULL_A1 actual;
+  ActualVsBaselineTester a_vs_b_tester(actual, baseline_tester);
+  a_vs_b_tester.Test("cccc0000110shhhhllllmmmm1001nnnn");
 }
 
-// Neutral case:
-// inst(23:20)=111x
-//    = {actual: 'Binary4RegisterDualResultLtV6RdHiLoNotRn',
-//       baseline: 'Binary4RegisterDualResultLtV6RdHiLoNotRn',
-//       constraints: ,
-//       defs: {inst(15:12),inst(19:16),16 if inst(20)=1 else 32},
-//       pattern: 'cccc0000111shhhhllllmmmm1001nnnn',
-//       rule: 'SMLAL_A1',
-//       safety: ['15 == inst(15:12) || 15 == inst(19:16) || 15 == inst(3:0) || 15 == inst(11:8) => UNPREDICTABLE', 'inst(15:12) == inst(19:16) => UNPREDICTABLE', '(ArchVersion() < 6 && (inst(19:16) == inst(3:0) || inst(15:12) == inst(3:0))) => UNPREDICTABLE']}
-//
-// Representaive case:
 // op(23:20)=111x
 //    = {NZCV: 16,
 //       None: 32,
@@ -1227,19 +1405,33 @@ TEST_F(Arm32DecoderStateTests,
 //       Rm: Rm(11:8),
 //       Rn: Rn(3:0),
 //       S: S(20),
-//       actual: Binary4RegisterDualResultLtV6RdHiLoNotRn,
+//       actual: Actual_SMLAL_A1_cccc0000111shhhhllllmmmm1001nnnn_case_1,
 //       baseline: Binary4RegisterDualResultLtV6RdHiLoNotRn,
 //       constraints: ,
-//       defs: {RdLo,RdHi,NZCV if setflags else None},
+//       defs: {RdLo, RdHi, NZCV
+//            if setflags
+//            else None},
 //       fields: [S(20), RdHi(19:16), RdLo(15:12), Rm(11:8), Rn(3:0)],
+//       generated_baseline: SMLAL_A1_cccc0000111shhhhllllmmmm1001nnnn_case_0,
 //       pattern: cccc0000111shhhhllllmmmm1001nnnn,
 //       rule: SMLAL_A1,
-//       safety: [Pc in {RdLo,RdHi,Rn,Rm} => UNPREDICTABLE, RdHi == RdLo => UNPREDICTABLE, (ArchVersion() < 6 && (RdHi == Rn || RdLo == Rn)) => UNPREDICTABLE],
-//       setflags: S(20)=1}
+//       safety: [Pc in {RdLo, RdHi, Rn, Rm} => UNPREDICTABLE,
+//         RdHi  ==
+//               RdLo => UNPREDICTABLE,
+//         (ArchVersion()  <
+//               6 &&
+//            (RdHi  ==
+//               Rn ||
+//            RdLo  ==
+//               Rn)) => UNPREDICTABLE],
+//       setflags: S(20)=1,
+//       uses: {RdLo, RdHi, Rn, Rm}}
 TEST_F(Arm32DecoderStateTests,
        Binary4RegisterDualResultLtV6RdHiLoNotRnTester_Case9_TestCase9) {
-  Binary4RegisterDualResultLtV6RdHiLoNotRnTester_Case9 tester;
-  tester.Test("cccc0000111shhhhllllmmmm1001nnnn");
+  Binary4RegisterDualResultLtV6RdHiLoNotRnTester_Case9 baseline_tester;
+  NamedActual_SMLAL_A1_cccc0000111shhhhllllmmmm1001nnnn_case_1_SMLAL_A1 actual;
+  ActualVsBaselineTester a_vs_b_tester(actual, baseline_tester);
+  a_vs_b_tester.Test("cccc0000111shhhhllllmmmm1001nnnn");
 }
 
 }  // namespace nacl_arm_test

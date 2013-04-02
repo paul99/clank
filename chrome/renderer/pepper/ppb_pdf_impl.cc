@@ -10,7 +10,7 @@
 #include "build/build_config.h"
 #include "chrome/common/chrome_switches.h"
 #include "chrome/common/render_messages.h"
-#include "chrome/renderer/print_web_view_helper.h"
+#include "chrome/renderer/printing/print_web_view_helper.h"
 #include "content/public/common/child_process_sandbox_support_linux.h"
 #include "content/public/common/content_client.h"
 #include "content/public/renderer/render_thread.h"
@@ -28,12 +28,12 @@
 #include "third_party/WebKit/Source/WebKit/chromium/public/WebElement.h"
 #include "third_party/WebKit/Source/WebKit/chromium/public/WebFrame.h"
 #include "third_party/WebKit/Source/WebKit/chromium/public/WebPluginContainer.h"
+#include "third_party/icu/public/i18n/unicode/usearch.h"
 #include "ui/base/l10n/l10n_util.h"
 #include "ui/base/layout.h"
 #include "ui/base/resource/resource_bundle.h"
 #include "ui/gfx/image/image_skia.h"
 #include "ui/gfx/image/image_skia_rep.h"
-#include "unicode/usearch.h"
 #include "webkit/plugins/ppapi/host_globals.h"
 #include "webkit/plugins/ppapi/plugin_delegate.h"
 #include "webkit/plugins/ppapi/ppapi_plugin_instance.h"
@@ -420,6 +420,7 @@ void PPB_PDF_Impl::InvokePrintingForInstance(PP_Instance instance_id) {
   WebKit::WebView* view = element.document().frame()->view();
   content::RenderView* render_view = content::RenderView::FromWebView(view);
 
+  using printing::PrintWebViewHelper;
   PrintWebViewHelper* print_view_helper = PrintWebViewHelper::Get(render_view);
   if (print_view_helper)
     print_view_helper->PrintNode(element);

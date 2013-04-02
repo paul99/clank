@@ -7,7 +7,9 @@
 #include <string>
 
 #include "base/metrics/field_trial.h"
-#include "base/string_number_conversions.h"
+#include "base/string_util.h"
+#include "base/stringprintf.h"
+#include "base/strings/string_number_conversions.h"
 #include "chrome/common/metrics/metrics_util.h"
 #include "chrome/common/metrics/variations/variation_ids.h"
 #include "chrome/common/metrics/variations/variations_util.h"
@@ -28,9 +30,18 @@ static const char kHUPCullRedirectsFieldTrialName[] = "OmniboxHUPCullRedirects";
 static const char kHUPCreateShorterMatchFieldTrialName[] =
     "OmniboxHUPCreateShorterMatch";
 static const char kHQPReplaceHUPScoringFieldTrialName[] =
-    "OmniboxHQPReplaceHUPRearrangeNumComponents";
+    "OmniboxHQPReplaceHUPProhibitTrumpingInlineableResult";
 static const char kHQPOnlyCountMatchesAtWordBoundariesFieldTrialName[] =
     "OmniboxHQPOnlyCountMatchesAtWordBoundaries";
+static const char kHQPUseCursorPositionFieldTrialName[] =
+    "OmniboxHQPUseCursorPosition";
+
+// The autocomplete dynamic field trial name prefix.  Each field trial is
+// configured dynamically and is retrieved automatically by Chrome during
+// the startup.
+const char kAutocompleteDynamicFieldTrialPrefix[] = "AutocompleteDynamicTrial_";
+// The maximum number of the autocomplete dynamic field trials (aka layers).
+const int kMaxAutocompleteDynamicFieldTrials = 5;
 
 // Field trial experiment probabilities.
 
@@ -85,10 +96,21 @@ const base::FieldTrial::Probability
 const base::FieldTrial::Probability
     kHQPOnlyCountMatchesAtWordBoundariesFieldTrialExperimentFraction = 0;
 
+// For the field trial that allows HistoryQuick provider to use the
+// cursor position, put 25% ( = 25/100 ) of the users in the experiment group.
+const base::FieldTrial::Probability
+    kHQPUseCursorPositionFieldTrialDivisor = 100;
+const base::FieldTrial::Probability
+    kHQPUseCursorPositionFieldTrialExperimentFraction = 25;
+
 
 // Field trial IDs.
 // Though they are not literally "const", they are set only once, in
-// Activate() below.
+// ActivateStaticTrials() below.
+
+// Whether the static field trials have been initialized by
+// ActivateStaticTrials() method.
+bool static_field_trials_initialized = false;
 
 // Field trial ID for the disallow-inline History Quick Provider
 // experiment group.
@@ -112,10 +134,22 @@ int hqp_replace_hup_scoring_experiment_group = 0;
 // word boundaries experiment group.
 int hqp_only_count_matches_at_word_boundaries_experiment_group = 0;
 
+// Field trial ID for the HistoryQuick provider use cursor position
+// experiment group.
+int hqp_use_cursor_position_experiment_group = 0;
+
+// Concatenates the autocomplete dynamic field trial prefix with a field trial
+// ID to form a complete autocomplete field trial name.
+std::string DynamicFieldTrialName(int id) {
+  return base::StringPrintf("%s%d", kAutocompleteDynamicFieldTrialPrefix, id);
 }
 
+}  // namespace
 
-void AutocompleteFieldTrial::Activate() {
+
+void AutocompleteFieldTrial::ActivateStaticTrials() {
+  DCHECK(!static_field_trials_initialized);
+
   // Create inline History Quick Provider field trial.
   // Make it expire on November 8, 2012.
   scoped_refptr<base::FieldTrial> trial(
@@ -144,10 +178,10 @@ void AutocompleteFieldTrial::Activate() {
   chrome_variations::AssociateGoogleVariationID(
       chrome_variations::GOOGLE_WEB_PROPERTIES,
       kSuggestFieldTrialStarted2013Q1Name, "0",
-      chrome_variations::kSuggestTrialStarted2013Q1IDMin);
+      chrome_variations::SUGGEST_TRIAL_STARTED_2013_Q1_ID_MIN);
   DCHECK_EQ(kSuggestFieldTrialNumberOfGroups,
-      chrome_variations::kSuggestTrialStarted2013Q1IDMax -
-      chrome_variations::kSuggestTrialStarted2013Q1IDMin + 1);
+      chrome_variations::SUGGEST_TRIAL_STARTED_2013_Q1_ID_MAX -
+      chrome_variations::SUGGEST_TRIAL_STARTED_2013_Q1_ID_MIN + 1);
 
   // We've already created one group; now just need to create
   // kSuggestFieldTrialNumGroups - 1 more. Mark these groups in
@@ -159,7 +193,7 @@ void AutocompleteFieldTrial::Activate() {
         chrome_variations::GOOGLE_WEB_PROPERTIES,
         kSuggestFieldTrialStarted2013Q1Name, group_name,
         static_cast<chrome_variations::VariationID>(
-            chrome_variations::kSuggestTrialStarted2013Q1IDMin + i));
+            chrome_variations::SUGGEST_TRIAL_STARTED_2013_Q1_ID_MIN + i));
   }
 
   // Make sure that we participate in the suggest experiment by calling group()
@@ -218,6 +252,54 @@ void AutocompleteFieldTrial::Activate() {
   hqp_only_count_matches_at_word_boundaries_experiment_group =
       trial->AppendGroup("HQPOnlyCountMatchesAtWordBoundaries",
           kHQPOnlyCountMatchesAtWordBoundariesFieldTrialExperimentFraction);
+
+  // Create the field trial that allows HistoryQuick provider to break
+  // omnibox inputs at the cursor position.  Make it expire on August 23, 2013.
+  trial = base::FieldTrialList::FactoryGetFieldTrial(
+      kHQPUseCursorPositionFieldTrialName,
+      kHQPUseCursorPositionFieldTrialDivisor,
+      "Standard", 2013, 8, 23, NULL);
+  trial->UseOneTimeRandomization();
+  hqp_use_cursor_position_experiment_group =
+      trial->AppendGroup("HQPUseCursorPosition",
+          kHQPUseCursorPositionFieldTrialExperimentFraction);
+
+  static_field_trials_initialized = true;
+}
+
+void AutocompleteFieldTrial::ActivateDynamicTrials() {
+  // Initialize all autocomplete dynamic field trials.  This method may be
+  // called multiple times.
+  for (int i = 0; i < kMaxAutocompleteDynamicFieldTrials; ++i)
+    base::FieldTrialList::FindValue(DynamicFieldTrialName(i));
+}
+
+int AutocompleteFieldTrial::GetDisabledProviderTypes() {
+  // Make sure that Autocomplete dynamic field trials are activated.  It's OK to
+  // call this method multiple times.
+  ActivateDynamicTrials();
+
+  // Look for group names in form of "DisabledProviders_<mask>" where "mask"
+  // is a bitmap of disabled provider types (AutocompleteProvider::Type).
+  int provider_types = 0;
+  for (int i = 0; i < kMaxAutocompleteDynamicFieldTrials; ++i) {
+    std::string group_name = base::FieldTrialList::FindFullName(
+        DynamicFieldTrialName(i));
+    const char kDisabledProviders[] = "DisabledProviders_";
+    if (!StartsWithASCII(group_name, kDisabledProviders, true))
+      continue;
+    int types = 0;
+    if (!base::StringToInt(base::StringPiece(
+            group_name.substr(strlen(kDisabledProviders))), &types)) {
+      LOG(WARNING) << "Malformed DisabledProviders string: " << group_name;
+      continue;
+    }
+    if (types == 0)
+      LOG(WARNING) << "Expecting a non-zero bitmap; group = " << group_name;
+    else
+      provider_types |= types;
+  }
+  return provider_types;
 }
 
 bool AutocompleteFieldTrial::InDisallowInlineHQPFieldTrial() {
@@ -315,4 +397,19 @@ bool AutocompleteFieldTrial::
   const int group = base::FieldTrialList::FindValue(
       kHQPOnlyCountMatchesAtWordBoundariesFieldTrialName);
   return group == hqp_only_count_matches_at_word_boundaries_experiment_group;
+}
+
+bool AutocompleteFieldTrial::InHQPUseCursorPositionFieldTrial() {
+  return base::FieldTrialList::TrialExists(kHQPUseCursorPositionFieldTrialName);
+}
+
+bool AutocompleteFieldTrial::
+    InHQPUseCursorPositionFieldTrialExperimentGroup() {
+  if (!InHQPUseCursorPositionFieldTrial())
+    return false;
+
+  // Return true if we're in the experiment group.
+  const int group = base::FieldTrialList::FindValue(
+      kHQPUseCursorPositionFieldTrialName);
+  return group == hqp_use_cursor_position_experiment_group;
 }

@@ -43,7 +43,7 @@ class BaseSessionService : public CancelableRequestProvider {
   // ignored and instead the path comes from the profile.
   BaseSessionService(SessionType type,
                      Profile* profile,
-                     const FilePath& path);
+                     const base::FilePath& path);
 
   Profile* profile() const { return profile_; }
 
@@ -163,6 +163,8 @@ class BaseSessionService : public CancelableRequestProvider {
   static const int max_persist_navigation_count;
 
  private:
+  friend class BetterSessionRestoreCrashTest;
+
   // The profile. This may be null during testing.
   Profile* profile_;
 

@@ -6,61 +6,47 @@
 #define CHROME_TEST_CHROMEDRIVER_CHROME_IMPL_H_
 
 #include <list>
+#include <map>
 #include <string>
 
 #include "base/compiler_specific.h"
-#include "base/files/scoped_temp_dir.h"
+#include "base/memory/linked_ptr.h"
 #include "base/memory/ref_counted.h"
-#include "base/memory/scoped_ptr.h"
-#include "base/process.h"
 #include "chrome/test/chromedriver/chrome.h"
 #include "chrome/test/chromedriver/net/sync_websocket_factory.h"
 
-namespace base {
-class ListValue;
-class Value;
-}
-
-class DevToolsClient;
 class Status;
 class URLRequestContextGetter;
+class WebView;
+class WebViewImpl;
 
 class ChromeImpl : public Chrome {
  public:
-  ChromeImpl(base::ProcessHandle process,
-             URLRequestContextGetter* context_getter,
-             base::ScopedTempDir* user_data_dir,
+  ChromeImpl(URLRequestContextGetter* context_getter,
              int port,
              const SyncWebSocketFactory& socket_factory);
   virtual ~ChromeImpl();
 
-  Status Init();
-
   // Overridden from Chrome:
-  virtual Status Load(const std::string& url) OVERRIDE;
-  virtual Status EvaluateScript(const std::string& expression,
-                                scoped_ptr<base::Value>* result) OVERRIDE;
-  virtual Status CallFunction(const std::string& function,
-                              const base::ListValue& args,
-                              scoped_ptr<base::Value>* result) OVERRIDE;
-  virtual Status Quit() OVERRIDE;
+  virtual Status GetWebViews(std::list<WebView*>* web_views) OVERRIDE;
+
+ protected:
+  Status Init();
+  int GetPort() const;
 
  private:
-  base::ProcessHandle process_;
+  typedef std::map<std::string, linked_ptr<WebViewImpl> > WebViewMap;
+
   scoped_refptr<URLRequestContextGetter> context_getter_;
-  base::ScopedTempDir user_data_dir_;
   int port_;
   SyncWebSocketFactory socket_factory_;
-  scoped_ptr<DevToolsClient> client_;
+  WebViewMap web_view_map_;
 };
 
 namespace internal {
 
 Status ParsePagesInfo(const std::string& data,
-                      std::list<std::string>* debugger_urls);
-Status EvaluateScript(DevToolsClient* client,
-                      const std::string& expression,
-                      scoped_ptr<base::Value>* result);
+                      std::list<std::string>* page_ids);
 
 }  // namespace internal
 

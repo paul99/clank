@@ -15,8 +15,8 @@
 #include "base/synchronization/waitable_event.h"
 #include "base/threading/thread.h"
 #include "base/threading/thread_restrictions.h"
-#include "third_party/WebKit/Source/WebKit/chromium/public/platform/WebCString.h"
-#include "third_party/WebKit/Source/WebKit/chromium/public/platform/WebString.h"
+#include "third_party/WebKit/Source/Platform/chromium/public/WebCString.h"
+#include "third_party/WebKit/Source/Platform/chromium/public/WebString.h"
 #include "third_party/skia/include/core/SkRegion.h"
 #include "ui/gfx/rect.h"
 #include "ui/gfx/size.h"
@@ -208,7 +208,7 @@ class ScopedTextureBinder : ScopedBinder<target> {
 
 class ScopedFlush {
  public:
-  ScopedFlush(WebGraphicsContext3D* context)
+  explicit ScopedFlush(WebGraphicsContext3D* context)
       : context_(context) {
   }
 
@@ -789,7 +789,6 @@ void GLHelper::InitCopyTextToImpl() {
     copy_texture_to_impl_.reset(new CopyTextureToImpl(context_,
                                                       context_for_thread_,
                                                       this));
-
 }
 
 void GLHelper::CopySubBufferDamage(WebKit::WebGLId texture,

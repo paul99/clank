@@ -27,7 +27,7 @@ class BookmarkModelSQLHandlerTest : public testing::Test {
  public:
   BookmarkModelSQLHandlerTest()
       : profile_manager_(
-          static_cast<TestingBrowserProcess*>(g_browser_process)),
+          TestingBrowserProcess::GetGlobal()),
         bookmark_model_(NULL),
         ui_thread_(BrowserThread::UI, &message_loop_),
         file_thread_(BrowserThread::FILE, &message_loop_) {
@@ -56,7 +56,7 @@ class BookmarkModelSQLHandlerTest : public testing::Test {
 
     // Create the directory for history database.
     ASSERT_TRUE(temp_dir_.CreateUniqueTempDir());
-    FilePath history_db_name = temp_dir_.path().AppendASCII(
+    base::FilePath history_db_name = temp_dir_.path().AppendASCII(
         chrome::kHistoryFilename);
     history_db_.Init(history_db_name, NULL);
   }

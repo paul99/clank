@@ -2,20 +2,30 @@
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
+#include "base/bind.h"
 #include "base/file_util.h"
 #include "base/path_service.h"
+#include "base/run_loop.h"
+#include "chrome/browser/extensions/event_names.h"
 #include "chrome/browser/extensions/extension_apitest.h"
+#include "chrome/browser/sync_file_system/file_status_observer.h"
 #include "chrome/browser/sync_file_system/local_change_processor.h"
 #include "chrome/browser/sync_file_system/mock_remote_file_sync_service.h"
 #include "chrome/browser/sync_file_system/sync_file_system_service.h"
 #include "chrome/common/chrome_version_info.h"
 #include "chrome/common/extensions/features/feature.h"
+#include "testing/gmock/include/gmock/gmock.h"
+#include "testing/gtest/include/gtest/gtest.h"
+#include "webkit/fileapi/file_system_url.h"
+#include "webkit/fileapi/syncable/sync_status_code.h"
+#include "webkit/fileapi/syncable/syncable_file_system_util.h"
 #include "webkit/quota/quota_manager.h"
 
+using ::testing::_;
+using ::testing::Return;
 using sync_file_system::MockRemoteFileSyncService;
 using sync_file_system::RemoteFileSyncService;
 using sync_file_system::SyncFileSystemServiceFactory;
-using ::testing::_;
 
 namespace chrome {
 
@@ -29,7 +39,7 @@ class SyncFileSystemApiTest : public ExtensionApiTest {
       : current_channel_(VersionInfo::CHANNEL_UNKNOWN) {
   }
 
-  void SetUpInProcessBrowserTestFixture() OVERRIDE {
+  virtual void SetUpInProcessBrowserTestFixture() OVERRIDE {
     mock_remote_service_ = new ::testing::NiceMock<MockRemoteFileSyncService>;
     SyncFileSystemServiceFactory::GetInstance()->set_mock_remote_file_service(
         scoped_ptr<RemoteFileSyncService>(mock_remote_service_));
@@ -41,7 +51,7 @@ class SyncFileSystemApiTest : public ExtensionApiTest {
     quota::QuotaManager::kSyncableStorageDefaultHostQuota = 123456789;
   }
 
-  void TearDownInProcessBrowserTestFixture() {
+  virtual void TearDownInProcessBrowserTestFixture() OVERRIDE {
     quota::QuotaManager::kSyncableStorageDefaultHostQuota = real_default_quota_;
   }
 
@@ -55,10 +65,38 @@ class SyncFileSystemApiTest : public ExtensionApiTest {
   int64 real_default_quota_;
 };
 
-}  // namespace
+ACTION_P(NotifyOkStateAndCallback, mock_remote_service) {
+  mock_remote_service->NotifyRemoteServiceStateUpdated(
+      sync_file_system::REMOTE_SERVICE_OK, "Test event description.");
+  base::MessageLoopProxy::current()->PostTask(
+      FROM_HERE, base::Bind(arg1, fileapi::SYNC_STATUS_OK));
+}
 
-// TODO(calvinlo): Add Chrome OS support for syncable file system
-#if !defined(OS_CHROMEOS)
+ACTION_P2(UpdateRemoteChangeQueue, origin, mock_remote_service) {
+  *origin = arg0;
+  mock_remote_service->NotifyRemoteChangeQueueUpdated(1);
+}
+
+ACTION_P5(ReturnWithFakeFileAddedStatus,
+          origin,
+          mock_remote_service,
+          sync_direction,
+          sync_file_status,
+          sync_action_taken) {
+  fileapi::FileSystemURL mock_url = fileapi::CreateSyncableFileSystemURL(
+      *origin,
+      "drive",
+      base::FilePath(FILE_PATH_LITERAL("foo.txt")));
+  mock_remote_service->NotifyRemoteChangeQueueUpdated(0);
+  base::MessageLoopProxy::current()->PostTask(
+      FROM_HERE, base::Bind(arg1,
+                            fileapi::SYNC_STATUS_OK,
+                            mock_url));
+  mock_remote_service->NotifyFileStatusChanged(
+      mock_url, sync_direction, sync_file_status, sync_action_taken);
+}
+
+}  // namespace
 
 // TODO(calvinlo): Add Chrome OS support for syncable file system
 // (http://crbug.com/160693)
@@ -69,8 +107,54 @@ IN_PROC_BROWSER_TEST_F(SyncFileSystemApiTest, DeleteFileSystem) {
       << message_;
 }
 
+IN_PROC_BROWSER_TEST_F(SyncFileSystemApiTest, GetFileStatus) {
+  EXPECT_CALL(*mock_remote_service(), IsConflicting(_)).WillOnce(Return(true));
+  ASSERT_TRUE(RunPlatformAppTest("sync_file_system/get_file_status"))
+      << message_;
+}
+
 IN_PROC_BROWSER_TEST_F(SyncFileSystemApiTest, GetUsageAndQuota) {
   ASSERT_TRUE(RunExtensionTest("sync_file_system/get_usage_and_quota"))
+      << message_;
+}
+
+IN_PROC_BROWSER_TEST_F(SyncFileSystemApiTest, OnFileStatusChanged) {
+  // Mock a pending remote change to be synced.
+  GURL origin;
+  EXPECT_CALL(*mock_remote_service(), RegisterOriginForTrackingChanges(_, _))
+      .WillOnce(UpdateRemoteChangeQueue(&origin, mock_remote_service()));
+  EXPECT_CALL(*mock_remote_service(), ProcessRemoteChange(_, _))
+      .WillOnce(ReturnWithFakeFileAddedStatus(
+          &origin,
+          mock_remote_service(),
+          sync_file_system::SYNC_DIRECTION_REMOTE_TO_LOCAL,
+          fileapi::SYNC_FILE_STATUS_SYNCED,
+          fileapi::SYNC_ACTION_ADDED));
+  ASSERT_TRUE(RunPlatformAppTest("sync_file_system/on_file_status_changed"))
+      << message_;
+}
+
+IN_PROC_BROWSER_TEST_F(SyncFileSystemApiTest, OnFileStatusChangedDeleted) {
+  // Mock a pending remote change to be synced.
+  GURL origin;
+  EXPECT_CALL(*mock_remote_service(), RegisterOriginForTrackingChanges(_, _))
+      .WillOnce(UpdateRemoteChangeQueue(&origin, mock_remote_service()));
+  EXPECT_CALL(*mock_remote_service(), ProcessRemoteChange(_, _))
+      .WillOnce(ReturnWithFakeFileAddedStatus(
+          &origin,
+          mock_remote_service(),
+          sync_file_system::SYNC_DIRECTION_REMOTE_TO_LOCAL,
+          fileapi::SYNC_FILE_STATUS_SYNCED,
+          fileapi::SYNC_ACTION_DELETED));
+  ASSERT_TRUE(RunPlatformAppTest(
+      "sync_file_system/on_file_status_changed_deleted"))
+      << message_;
+}
+
+IN_PROC_BROWSER_TEST_F(SyncFileSystemApiTest, OnServiceStatusChanged) {
+  EXPECT_CALL(*mock_remote_service(), RegisterOriginForTrackingChanges(_, _))
+      .WillOnce(NotifyOkStateAndCallback(mock_remote_service()));
+  ASSERT_TRUE(RunPlatformAppTest("sync_file_system/on_service_status_changed"))
       << message_;
 }
 
@@ -88,7 +172,4 @@ IN_PROC_BROWSER_TEST_F(SyncFileSystemApiTest, WriteFileThenGetUsage) {
 
 #endif  // !defined(OS_CHROMEOS)
 
-#endif  // !defined(OS_CHROMEOS)
-
 }  // namespace chrome
-

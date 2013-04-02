@@ -7,6 +7,7 @@
 #include <algorithm>
 
 #include "ash/ash_constants.h"
+#include "ash/ash_switches.h"
 #include "ash/launcher/app_list_button.h"
 #include "ash/launcher/launcher_button.h"
 #include "ash/launcher/launcher_delegate.h"
@@ -16,12 +17,13 @@
 #include "ash/launcher/overflow_bubble.h"
 #include "ash/launcher/overflow_button.h"
 #include "ash/launcher/tabbed_launcher_button.h"
+#include "ash/root_window_controller.h"
 #include "ash/shell_delegate.h"
 #include "ash/wm/shelf_layout_manager.h"
 #include "base/auto_reset.h"
 #include "base/memory/scoped_ptr.h"
-#include "grit/ash_strings.h"
 #include "grit/ash_resources.h"
+#include "grit/ash_strings.h"
 #include "ui/aura/window.h"
 #include "ui/base/l10n/l10n_util.h"
 #include "ui/base/models/simple_menu_model.h"
@@ -54,7 +56,97 @@ const int kMinimumDragDistance = 8;
 // Size between the buttons.
 const int kButtonSpacing = 4;
 
+// Additional spacing for the left and right side of icons.
+const int kHorizontalIconSpacing = 8;
+
+// The proportion of the launcher space reserved for non-panel icons. Panels
+// may flow into this space but will be put into the overflow bubble if there
+// is contention for the space.
+const float kReservedNonPanelIconProportion = 0.67f;
+
+// This is the command id of the menu item which contains the name of the menu.
+const int kCommandIdOfMenuName = 0;
+
+// This is the command id of the active menu item.
+const int kCommandIdOfActiveName = 1;
+
+// The background color of the active item in the list.
+const SkColor kActiveListItemBackgroundColor = SkColorSetRGB(203 , 219, 241);
+
+// The background color ot the active & hovered item in the list.
+const SkColor kFocusedActiveListItemBackgroundColor =
+    SkColorSetRGB(193, 211, 236);
+
 namespace {
+
+// An object which turns slow animations on during its lifetime.
+class ScopedAnimationSetter {
+ public:
+  explicit ScopedAnimationSetter() {
+    ui::LayerAnimator::set_slow_animation_mode(true);
+  }
+  ~ScopedAnimationSetter() {
+    ui::LayerAnimator::set_slow_animation_mode(false);
+  }
+
+ private:
+  DISALLOW_COPY_AND_ASSIGN(ScopedAnimationSetter);
+};
+
+// The MenuModelAdapter gets slightly changed to adapt the menu appearance to
+// our requirements.
+class LauncherMenuModelAdapter
+    : public views::MenuModelAdapter {
+ public:
+  explicit LauncherMenuModelAdapter(ui::MenuModel* menu_model);
+
+  // Overriding MenuModelAdapter's MenuDelegate implementation.
+  virtual const gfx::Font* GetLabelFont(int command_id) const OVERRIDE;
+  virtual void GetHorizontalIconMargins(int id,
+                                        int icon_size,
+                                        int* left_margin,
+                                        int* right_margin) const OVERRIDE;
+  virtual bool GetBackgroundColor(int command_id,
+                                  bool is_hovered,
+                                  SkColor* override_color) const OVERRIDE;
+ private:
+  DISALLOW_COPY_AND_ASSIGN(LauncherMenuModelAdapter);
+};
+
+
+LauncherMenuModelAdapter::LauncherMenuModelAdapter(ui::MenuModel* menu_model)
+    : MenuModelAdapter(menu_model) {}
+
+const gfx::Font* LauncherMenuModelAdapter::GetLabelFont(
+    int command_id) const {
+  if (command_id != kCommandIdOfMenuName)
+    return MenuModelAdapter::GetLabelFont(command_id);
+
+  ui::ResourceBundle& rb = ui::ResourceBundle::GetSharedInstance();
+  return &rb.GetFont(ui::ResourceBundle::BoldFont);
+}
+
+bool LauncherMenuModelAdapter::GetBackgroundColor(
+    int command_id,
+    bool is_hovered,
+    SkColor* override_color) const {
+  if (command_id != kCommandIdOfActiveName)
+    return false;
+
+  *override_color = is_hovered ? kFocusedActiveListItemBackgroundColor :
+                                 kActiveListItemBackgroundColor;
+  return true;
+}
+
+void LauncherMenuModelAdapter::GetHorizontalIconMargins(
+    int command_id,
+    int icon_size,
+    int* left_margin,
+    int* right_margin) const {
+  *left_margin = kHorizontalIconSpacing;
+  *right_margin = (command_id != kCommandIdOfMenuName) ?
+      kHorizontalIconSpacing : -icon_size;
+}
 
 // Custom FocusSearch used to navigate the launcher in the order items are in
 // the ViewModel.
@@ -213,7 +305,7 @@ void ReflectItemStatus(const ash::LauncherItem& item,
 
 }  // namespace
 
-// AnimationDelegate used when inserting a new item. This steadily decreased the
+// AnimationDelegate used when deleting an item. This steadily decreased the
 // opacity of the layer as the animation progress.
 class LauncherView::FadeOutAnimationDelegate
     : public views::BoundsAnimator::OwnedAnimationDelegate {
@@ -229,7 +321,7 @@ class LauncherView::FadeOutAnimationDelegate
     view_->layer()->ScheduleDraw();
   }
   virtual void AnimationEnded(const Animation* animation) OVERRIDE {
-    launcher_view_->AnimateToIdealBounds();
+    launcher_view_->OnFadeOutAnimationEnded();
   }
   virtual void AnimationCanceled(const Animation* animation) OVERRIDE {
   }
@@ -283,7 +375,8 @@ LauncherView::LauncherView(LauncherModel* model,
       start_drag_index_(-1),
       context_menu_id_(0),
       leading_inset_(kDefaultLeadingInset),
-      cancelling_drag_model_changed_(false) {
+      cancelling_drag_model_changed_(false),
+      last_hidden_index_(0) {
   DCHECK(model_);
   bounds_animator_.reset(new views::BoundsAnimator(this));
   bounds_animator_->AddObserver(this);
@@ -395,10 +488,12 @@ void LauncherView::CalculateIdealBounds(IdealBounds* bounds) {
   ShelfLayoutManager* shelf = tooltip_->shelf_layout_manager();
 
   int available_size = shelf->PrimaryAxisValue(width(), height());
-  int first_panel_index = model_->FirstPanelIndex();
   DCHECK(model_->item_count() == view_model_->view_size());
   if (!available_size)
     return;
+
+  int first_panel_index = model_->FirstPanelIndex();
+  int app_list_index = first_panel_index - 1;
 
   // Initial x,y values account both leading_inset in primary
   // coordinate and secondary coordinate based on the dynamic edge of the
@@ -407,35 +502,40 @@ void LauncherView::CalculateIdealBounds(IdealBounds* bounds) {
       leading_inset(),
       width() - kLauncherPreferredSize,
       std::max(width() - kLauncherPreferredSize,
-               ShelfLayoutManager::kAutoHideSize + 1));
-  int y = shelf->PrimaryAxisValue(0, leading_inset());
+               ShelfLayoutManager::kAutoHideSize + 1),
+      leading_inset());
+  int y = shelf->SelectValueForShelfAlignment(
+      0,
+      leading_inset(),
+      leading_inset(),
+      height() - kLauncherPreferredSize);
   int w = shelf->PrimaryAxisValue(kLauncherPreferredSize, width());
   int h = shelf->PrimaryAxisValue(height(), kLauncherPreferredSize);
-  for (int i = 0; i < first_panel_index; ++i) {
+  for (int i = 0; i < view_model_->view_size(); ++i) {
     if (i < first_visible_index_) {
       view_model_->set_ideal_bounds(i, gfx::Rect(x, y, 0, 0));
       continue;
     }
 
     view_model_->set_ideal_bounds(i, gfx::Rect(x, y, w, h));
-    x = shelf->PrimaryAxisValue(x + w + kButtonSpacing, x);
-    y = shelf->PrimaryAxisValue(y, y + h + kButtonSpacing);
+    if (i != app_list_index) {
+      x = shelf->PrimaryAxisValue(x + w + kButtonSpacing, x);
+      y = shelf->PrimaryAxisValue(y, y + h + kButtonSpacing);
+    }
   }
 
-  int app_list_index = first_panel_index - 1;
   if (is_overflow_mode()) {
-    last_visible_index_ = app_list_index - 1;
+    DCHECK_LT(last_visible_index_, view_model_->view_size());
     for (int i = 0; i < view_model_->view_size(); ++i) {
       view_model_->view_at(i)->SetVisible(
-          i >= first_visible_index_ && i <= last_visible_index_);
+          i >= first_visible_index_ &&
+          i != app_list_index &&
+          i <= last_visible_index_);
     }
     return;
   }
 
   // Right aligned icons.
-  // TODO(flackr): The right aligned icons may not fit in the launcher in which
-  // case they should be moved to an overflow bubble. See
-  // http://crbug.com/162558 for panel overflow details.
   int end_position = available_size - kButtonSpacing;
   x = shelf->PrimaryAxisValue(end_position, leading_inset());
   y = shelf->PrimaryAxisValue(0, end_position);
@@ -447,16 +547,32 @@ void LauncherView::CalculateIdealBounds(IdealBounds* bounds) {
     end_position = shelf->PrimaryAxisValue(x, y);
   }
 
+  // Icons on the left / top are guaranteed up to kLeftIconProportion of
+  // the available space.
+  int last_icon_position = shelf->PrimaryAxisValue(
+      view_model_->ideal_bounds(first_panel_index - 1).right(),
+      view_model_->ideal_bounds(first_panel_index - 1).bottom()) +
+      2 * kLauncherPreferredSize + leading_inset();
+  int reserved_icon_space = available_size * kReservedNonPanelIconProportion;
+  if (last_icon_position < reserved_icon_space)
+    end_position = last_icon_position;
+  else
+    end_position = std::max(end_position, reserved_icon_space);
+
   bounds->overflow_bounds.set_size(gfx::Size(
       shelf->PrimaryAxisValue(kLauncherPreferredSize, width()),
       shelf->PrimaryAxisValue(height(), kLauncherPreferredSize)));
   last_visible_index_ = DetermineLastVisibleIndex(
       end_position - leading_inset() - 2 * kLauncherPreferredSize);
-  bool show_overflow = (last_visible_index_ + 1 < app_list_index);
+  last_hidden_index_ = DetermineFirstVisiblePanelIndex(end_position) - 1;
+  bool show_overflow = (last_visible_index_ + 1 < app_list_index ||
+                        last_hidden_index_ >= first_panel_index);
 
   for (int i = 0; i < view_model_->view_size(); ++i) {
     view_model_->view_at(i)->SetVisible(
-        i <= last_visible_index_ || i >= app_list_index);
+        i <= last_visible_index_ ||
+        i == app_list_index ||
+        i > last_hidden_index_);
   }
 
   overflow_button_->SetVisible(show_overflow);
@@ -467,8 +583,16 @@ void LauncherView::CalculateIdealBounds(IdealBounds* bounds) {
           leading_inset(),
           width() - kLauncherPreferredSize,
           std::max(width() - kLauncherPreferredSize,
-                   ShelfLayoutManager::kAutoHideSize + 1));
-      y = shelf->PrimaryAxisValue(0, leading_inset());
+                   ShelfLayoutManager::kAutoHideSize + 1),
+          leading_inset());
+      y = shelf->SelectValueForShelfAlignment(
+          0,
+          leading_inset(),
+          leading_inset(),
+          height() - kLauncherPreferredSize);
+    } else if (last_visible_index_ == app_list_index) {
+      x = view_model_->ideal_bounds(last_visible_index_).x();
+      y = view_model_->ideal_bounds(last_visible_index_).y();
     } else {
       x = shelf->PrimaryAxisValue(
           view_model_->ideal_bounds(last_visible_index_).right(),
@@ -480,26 +604,47 @@ void LauncherView::CalculateIdealBounds(IdealBounds* bounds) {
     gfx::Rect app_list_bounds = view_model_->ideal_bounds(app_list_index);
     bounds->overflow_bounds.set_x(x);
     bounds->overflow_bounds.set_y(y);
+
+    // Set all hidden panel icon positions to be on the overflow button.
+    for (int i = first_panel_index; i <= last_hidden_index_; ++i)
+      view_model_->set_ideal_bounds(i, gfx::Rect(x, y, w, h));
+
     x = shelf->PrimaryAxisValue(x + kLauncherPreferredSize + kButtonSpacing, x);
     y = shelf->PrimaryAxisValue(y, y + kLauncherPreferredSize + kButtonSpacing);
     app_list_bounds.set_x(x);
     app_list_bounds.set_y(y);
     view_model_->set_ideal_bounds(app_list_index, app_list_bounds);
+
+    if (overflow_bubble_.get() && overflow_bubble_->IsShowing())
+      UpdateOverflowRange(overflow_bubble_->launcher_view());
   } else {
     if (overflow_bubble_.get())
       overflow_bubble_->Hide();
   }
 }
 
-int LauncherView::DetermineLastVisibleIndex(int max_value) {
+int LauncherView::DetermineLastVisibleIndex(int max_value) const {
   ShelfLayoutManager* shelf = tooltip_->shelf_layout_manager();
 
-  int index = view_model_->view_size() - 1;
+  int index = model_->FirstPanelIndex() - 1;
   while (index >= 0 &&
          shelf->PrimaryAxisValue(
              view_model_->ideal_bounds(index).right(),
              view_model_->ideal_bounds(index).bottom()) > max_value) {
     index--;
+  }
+  return index;
+}
+
+int LauncherView::DetermineFirstVisiblePanelIndex(int min_value) const {
+  ShelfLayoutManager* shelf = tooltip_->shelf_layout_manager();
+
+  int index = model_->FirstPanelIndex();
+  while (index < view_model_->view_size() &&
+         shelf->PrimaryAxisValue(
+             view_model_->ideal_bounds(index).right(),
+             view_model_->ideal_bounds(index).bottom()) < min_value) {
+    ++index;
   }
   return index;
 }
@@ -707,17 +852,22 @@ void LauncherView::ConfigureChildView(views::View* view) {
   view->layer()->SetFillsBoundsOpaquely(false);
 }
 
-void LauncherView::ShowOverflowBubble() {
-  int first_overflow_index = last_visible_index_ + 1;
-  DCHECK_LT(first_overflow_index, view_model_->view_size() - 1);
+void LauncherView::ToggleOverflowBubble() {
+  if (IsShowingOverflowBubble()) {
+    overflow_bubble_->Hide();
+    return;
+  }
 
   if (!overflow_bubble_.get())
     overflow_bubble_.reset(new OverflowBubble());
 
-  overflow_bubble_->Show(delegate_,
-                         model_,
-                         overflow_button_,
-                         first_overflow_index);
+  LauncherView* overflow_view = new LauncherView(
+      model_, delegate_, tooltip_->shelf_layout_manager());
+  overflow_view->Init();
+  overflow_view->OnShelfAlignmentChanged();
+  UpdateOverflowRange(overflow_view);
+
+  overflow_bubble_->Show(overflow_button_, overflow_view);
 
   Shell::GetInstance()->UpdateShelfVisibility();
 }
@@ -735,6 +885,31 @@ void LauncherView::UpdateFirstButtonPadding() {
         0,
         0));
   }
+}
+
+void LauncherView::OnFadeOutAnimationEnded() {
+  AnimateToIdealBounds();
+
+  // If overflow button is visible and there is a valid new last item, fading
+  // the new last item in after sliding animation is finished.
+  if (overflow_button_->visible() && last_visible_index_ >= 0) {
+    views::View* last_visible_view = view_model_->view_at(last_visible_index_);
+    last_visible_view->layer()->SetOpacity(0);
+    bounds_animator_->SetAnimationDelegate(
+        last_visible_view,
+        new LauncherView::StartFadeAnimationDelegate(this, last_visible_view),
+        true);
+  }
+}
+
+void LauncherView::UpdateOverflowRange(LauncherView* overflow_view) {
+  const int first_overflow_index = last_visible_index_ + 1;
+  const int last_overflow_index = last_hidden_index_;
+  DCHECK_LE(first_overflow_index, last_overflow_index);
+  DCHECK_LT(last_overflow_index, view_model_->view_size());
+
+  overflow_view->first_visible_index_ = first_overflow_index;
+  overflow_view->last_visible_index_ = last_overflow_index;
 }
 
 bool LauncherView::ShouldHideTooltip(const gfx::Point& cursor_location) {
@@ -873,6 +1048,18 @@ void LauncherView::LauncherItemRemoved(int model_index, LauncherID id) {
   bounds_animator_->AnimateViewTo(view, view->bounds());
   bounds_animator_->SetAnimationDelegate(
       view, new FadeOutAnimationDelegate(this, view), true);
+
+  // If overflow bubble is visible, sanitize overflow range first and when the
+  // above animation finishes, CalculateIdealBounds will be called to get
+  // correct overflow range. CalculateIdealBounds could hide overflow bubble
+  // and triggers LauncherItemChanged. And since we are still in the middle
+  // of LauncherItemRemoved, LauncherView in overflow bubble is not synced
+  // with LauncherModel and will crash.
+  if (overflow_bubble_ && overflow_bubble_->IsShowing()) {
+    last_hidden_index_ = std::min(last_hidden_index_,
+                                  view_model_->view_size() - 1);
+    UpdateOverflowRange(overflow_bubble_->launcher_view());
+  }
 }
 
 void LauncherView::LauncherItemChanged(int model_index,
@@ -904,13 +1091,20 @@ void LauncherView::LauncherItemChanged(int model_index,
       ReflectItemStatus(item, button);
       break;
     }
-
+    case TYPE_BROWSER_SHORTCUT:
+      if (!Shell::IsLauncherPerDisplayEnabled())
+        break;
+      // Fallthrough for the new Launcher since it needs to show the activation
+      // change as well.
     case TYPE_APP_SHORTCUT:
     case TYPE_PLATFORM_APP:
     case TYPE_APP_PANEL: {
       LauncherButton* button = static_cast<LauncherButton*>(view);
       ReflectItemStatus(item, button);
-      button->SetImage(item.image);
+      // The browser shortcut is currently not a "real" item and as such the
+      // the image is bogous as well. We therefore keep the image as is for it.
+      if (item.type != TYPE_BROWSER_SHORTCUT)
+        button->SetImage(item.image);
       button->SchedulePaint();
       break;
     }
@@ -1045,7 +1239,7 @@ void LauncherView::ButtonPressed(views::Button* sender,
     return;
 
   if (sender == overflow_button_) {
-    ShowOverflowBubble();
+    ToggleOverflowBubble();
     return;
   }
 
@@ -1054,38 +1248,57 @@ void LauncherView::ButtonPressed(views::Button* sender,
   if (view_index == -1)
     return;
 
-  if (event.IsShiftDown())
-    ui::LayerAnimator::set_slow_animation_mode(true);
   tooltip_->Close();
-  switch (model_->items()[view_index].type) {
-    case TYPE_TABBED:
-    case TYPE_APP_PANEL:
-      delegate_->ItemClicked(model_->items()[view_index], event.flags());
-      break;
 
+  {
+    // Slow down activation animations if shift key is pressed.
+    scoped_ptr<ScopedAnimationSetter> slowing_animations;
+    if (event.IsShiftDown())
+      slowing_animations.reset(new ScopedAnimationSetter());
+
+  // Collect usage statistics before we decide what to do with the click.
+  switch (model_->items()[view_index].type) {
     case TYPE_APP_SHORTCUT:
     case TYPE_PLATFORM_APP:
       Shell::GetInstance()->delegate()->RecordUserMetricsAction(
           UMA_LAUNCHER_CLICK_ON_APP);
-      delegate_->ItemClicked(model_->items()[view_index], event.flags());
+      // Fallthrough
+    case TYPE_TABBED:
+    case TYPE_APP_PANEL:
+      delegate_->ItemClicked(model_->items()[view_index], event);
       break;
 
-    case TYPE_APP_LIST:
-      Shell::GetInstance()->delegate()->RecordUserMetricsAction(
-          UMA_LAUNCHER_CLICK_ON_APPLIST_BUTTON);
-      Shell::GetInstance()->ToggleAppList(GetWidget()->GetNativeView());
-      break;
+      case TYPE_APP_LIST:
+        Shell::GetInstance()->delegate()->RecordUserMetricsAction(
+            UMA_LAUNCHER_CLICK_ON_APPLIST_BUTTON);
+        Shell::GetInstance()->ToggleAppList(GetWidget()->GetNativeView());
+        break;
 
-    case TYPE_BROWSER_SHORTCUT:
-      // Click on browser icon is counted in app clicks.
-      Shell::GetInstance()->delegate()->RecordUserMetricsAction(
-          UMA_LAUNCHER_CLICK_ON_APP);
-
-      delegate_->OnBrowserShortcutClicked(event.flags());
-      break;
+      case TYPE_BROWSER_SHORTCUT:
+        // Click on browser icon is counted in app clicks.
+        Shell::GetInstance()->delegate()->RecordUserMetricsAction(
+            UMA_LAUNCHER_CLICK_ON_APP);
+        delegate_->OnBrowserShortcutClicked(event.flags());
+        break;
+    }
   }
-  if (event.IsShiftDown())
-    ui::LayerAnimator::set_slow_animation_mode(false);
+
+  if (model_->items()[view_index].type != TYPE_APP_LIST)
+    ShowListMenuForView(model_->items()[view_index], sender);
+}
+
+bool LauncherView::ShowListMenuForView(const LauncherItem& item,
+                                       views::View* source) {
+  scoped_ptr<ui::MenuModel> menu_model;
+  menu_model.reset(delegate_->CreateApplicationMenu(item));
+
+  // Make sure we have a menu and it has at least two items in addition to the
+  // application title and the 2 spacing separators.
+  if (!menu_model.get() || menu_model->GetItemCount() <= 4)
+    return false;
+
+  ShowMenu(menu_model.get(), source, gfx::Point(), false);
+  return true;
 }
 
 void LauncherView::ShowContextMenuForView(views::View* source,
@@ -1095,7 +1308,7 @@ void LauncherView::ShowContextMenuForView(views::View* source,
       model_->items()[view_index].type == TYPE_APP_LIST) {
     view_index = -1;
   }
-#if !defined(OS_MACOSX)
+
   if (view_index == -1) {
     Shell::GetInstance()->ShowContextMenu(point);
     return;
@@ -1108,19 +1321,60 @@ void LauncherView::ShowContextMenuForView(views::View* source,
   base::AutoReset<LauncherID> reseter(
       &context_menu_id_,
       view_index == -1 ? 0 : model_->items()[view_index].id);
-  views::MenuModelAdapter menu_model_adapter(menu_model.get());
+
+  ShowMenu(menu_model.get(), source, point, true);
+}
+
+void LauncherView::ShowMenu(ui::MenuModel* menu_model,
+                            views::View* source,
+                            const gfx::Point& click_point,
+                            bool context_menu) {
+  launcher_menu_runner_.reset();
+  scoped_ptr<views::MenuModelAdapter> menu_model_adapter;
+  if (context_menu)
+    menu_model_adapter.reset(new views::MenuModelAdapter(menu_model));
+  else
+    menu_model_adapter.reset(new LauncherMenuModelAdapter(menu_model));
+
   launcher_menu_runner_.reset(
-      new views::MenuRunner(menu_model_adapter.CreateMenu()));
+      new views::MenuRunner(menu_model_adapter->CreateMenu()));
+
+  // Determine the menu alignment dependent on the shelf.
+  views::MenuItemView::AnchorPosition menu_alignment =
+      views::MenuItemView::TOPLEFT;
+  gfx::Rect anchor_point = gfx::Rect(click_point, gfx::Size());
+
+  if (!context_menu) {
+    // Application lists use a bubble.
+    ash::ShelfAlignment align = RootWindowController::ForLauncher(
+        GetWidget()->GetNativeView())->shelf()->GetAlignment();
+    anchor_point = source->GetBoundsInScreen();
+    switch (align) {
+      case ash::SHELF_ALIGNMENT_BOTTOM:
+        menu_alignment = views::MenuItemView::BUBBLE_ABOVE;
+        break;
+      case ash::SHELF_ALIGNMENT_LEFT:
+        menu_alignment = views::MenuItemView::BUBBLE_RIGHT;
+        break;
+      case ash::SHELF_ALIGNMENT_RIGHT:
+        menu_alignment = views::MenuItemView::BUBBLE_LEFT;
+        break;
+      case ash::SHELF_ALIGNMENT_TOP:
+        menu_alignment = views::MenuItemView::BUBBLE_BELOW;
+        break;
+    }
+  }
   // NOTE: if you convert to HAS_MNEMONICS be sure and update menu building
   // code.
   if (launcher_menu_runner_->RunMenuAt(
-          source->GetWidget(), NULL, gfx::Rect(point, gfx::Size()),
-          views::MenuItemView::TOPLEFT, views::MenuRunner::CONTEXT_MENU) ==
-      views::MenuRunner::MENU_DELETED)
+          source->GetWidget(),
+          NULL,
+          anchor_point,
+          menu_alignment,
+          views::MenuRunner::CONTEXT_MENU) == views::MenuRunner::MENU_DELETED)
     return;
 
   Shell::GetInstance()->UpdateShelfVisibility();
-#endif
 }
 
 void LauncherView::OnBoundsAnimatorProgressed(views::BoundsAnimator* animator) {

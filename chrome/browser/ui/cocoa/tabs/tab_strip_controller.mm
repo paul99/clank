@@ -14,16 +14,16 @@
 #include "base/mac/mac_util.h"
 #include "base/mac/scoped_nsautorelease_pool.h"
 #include "base/metrics/histogram.h"
+#include "base/prefs/pref_service.h"
 #include "base/sys_string_conversions.h"
 #include "chrome/app/chrome_command_ids.h"
 #include "chrome/browser/autocomplete/autocomplete_classifier.h"
 #include "chrome/browser/autocomplete/autocomplete_classifier_factory.h"
 #include "chrome/browser/autocomplete/autocomplete_match.h"
-#include "chrome/browser/debugger/devtools_window.h"
+#include "chrome/browser/devtools/devtools_window.h"
 #include "chrome/browser/extensions/tab_helper.h"
 #include "chrome/browser/favicon/favicon_tab_helper.h"
 #include "chrome/browser/net/url_fixer_upper.h"
-#include "chrome/browser/prefs/pref_service.h"
 #include "chrome/browser/profiles/profile.h"
 #include "chrome/browser/profiles/profile_manager.h"
 #include "chrome/browser/themes/theme_service.h"
@@ -38,23 +38,22 @@
 #import "chrome/browser/ui/cocoa/tab_contents/favicon_util_mac.h"
 #import "chrome/browser/ui/cocoa/tab_contents/tab_contents_controller.h"
 #import "chrome/browser/ui/cocoa/tabs/tab_controller.h"
+#import "chrome/browser/ui/cocoa/tabs/tab_projecting_image_view.h"
 #import "chrome/browser/ui/cocoa/tabs/tab_strip_drag_controller.h"
 #import "chrome/browser/ui/cocoa/tabs/tab_strip_model_observer_bridge.h"
 #import "chrome/browser/ui/cocoa/tabs/tab_strip_view.h"
 #import "chrome/browser/ui/cocoa/tabs/tab_view.h"
 #import "chrome/browser/ui/cocoa/tabs/throbber_view.h"
-#import "chrome/browser/ui/cocoa/tabs/tab_projecting_image_view.h"
 #import "chrome/browser/ui/cocoa/tabs/throbbing_image_view.h"
 #import "chrome/browser/ui/cocoa/tracking_area.h"
-#include "chrome/browser/ui/constrained_window_tab_helper.h"
 #include "chrome/browser/ui/find_bar/find_bar.h"
 #include "chrome/browser/ui/find_bar/find_bar_controller.h"
 #include "chrome/browser/ui/find_bar/find_tab_helper.h"
 #include "chrome/browser/ui/tabs/tab_menu_model.h"
 #include "chrome/browser/ui/tabs/tab_strip_model.h"
 #include "chrome/browser/ui/tabs/tab_strip_model_delegate.h"
-#include "chrome/browser/ui/tabs/tab_strip_selection_model.h"
 #include "chrome/browser/ui/tabs/tab_utils.h"
+#include "chrome/browser/ui/web_contents_modal_dialog_manager.h"
 #include "chrome/common/chrome_switches.h"
 #include "chrome/common/pref_names.h"
 #include "content/public/browser/navigation_controller.h"
@@ -67,10 +66,10 @@
 #include "skia/ext/skia_utils_mac.h"
 #import "third_party/GTM/AppKit/GTMNSAnimation+Duration.h"
 #include "ui/base/l10n/l10n_util.h"
+#include "ui/base/models/list_selection_model.h"
 #include "ui/base/resource/resource_bundle.h"
 #include "ui/base/theme_provider.h"
 #include "ui/gfx/image/image.h"
-#include "ui/gfx/mac/nsimage_cache.h"
 
 using content::OpenURLParams;
 using content::Referrer;
@@ -172,8 +171,7 @@ NSImage* CreateImageWithSize(NSSize size,
                  samplesPerPixel:4
                         hasAlpha:YES
                         isPlanar:NO
-                  colorSpaceName:NSCalibratedRGBColorSpace
-                    bitmapFormat:NSAlphaFirstBitmapFormat
+                  colorSpaceName:NSDeviceRGBColorSpace
                      bytesPerRow:0
                     bitsPerPixel:0];
     [bmpImageRep setSize:size];
@@ -720,7 +718,7 @@ NSImage* Overlay(NSImage* ground, NSImage* overlay, CGFloat alpha) {
   NSInteger i = 0;
   for (TabController* controller in tabArray_.get()) {
     if ([closingControllers_ containsObject:controller]) {
-      DCHECK([(TabView*)[controller view] isClosing]);
+      DCHECK([[controller tabView] isClosing]);
       ++index;
     }
     if (i == index)  // No need to check anything after, it has no effect.
@@ -1296,6 +1294,11 @@ NSImage* Overlay(NSImage* ground, NSImage* overlay, CGFloat alpha) {
   [self updateFaviconForContents:contents atIndex:modelIndex];
 }
 
+// Called before |contents| is deactivated.
+- (void)tabDeactivatedWithContents:(content::WebContents*)contents {
+  contents->GetView()->StoreFocus();
+}
+
 // Called when a notification is received from the model to select a particular
 // tab. Swaps in the toolbar and content area associated with |newContents|.
 - (void)activateTabWithContents:(content::WebContents*)newContents
@@ -1313,16 +1316,15 @@ NSImage* Overlay(NSImage* ground, NSImage* overlay, CGFloat alpha) {
       TabContentsController* oldController =
           [tabContentsArray_ objectAtIndex:oldIndex];
       [oldController willBecomeUnselectedTab];
-      oldContents->GetView()->StoreFocus();
       oldContents->WasHidden();
     }
   }
 
   // First get the vector of indices, which is allays sorted in ascending order.
-  TabStripSelectionModel::SelectedIndices selection(
+  ui::ListSelectionModel::SelectedIndices selection(
       tabStripModel_->selection_model().selected_indices());
   // Iterate through all of the tabs, selecting each as necessary.
-  TabStripSelectionModel::SelectedIndices::iterator iter = selection.begin();
+  ui::ListSelectionModel::SelectedIndices::iterator iter = selection.begin();
   int i = 0;
   for (TabController* current in tabArray_.get()) {
     BOOL selected = iter != selection.end() &&
@@ -1351,10 +1353,6 @@ NSImage* Overlay(NSImage* ground, NSImage* overlay, CGFloat alpha) {
   if (newContents) {
     newContents->WasShown();
     newContents->GetView()->RestoreFocus();
-
-    FindTabHelper* findTabHelper = FindTabHelper::FromWebContents(newContents);
-    if (findTabHelper->find_ui_active())
-      browser_->GetFindBarController()->find_bar()->SetFocusAndSelection();
   }
 }
 
@@ -1444,7 +1442,7 @@ NSImage* Overlay(NSImage* ground, NSImage* overlay, CGFloat alpha) {
 
   // Mark the tab as closing. This prevents it from generating any drags or
   // selections while it's animating closed.
-  [(TabView*)[closingTab view] setClosing:YES];
+  [[closingTab tabView] setClosing:YES];
 
   // Register delegate (owned by the animation system).
   NSView* tabView = [closingTab view];
@@ -1483,7 +1481,10 @@ NSImage* Overlay(NSImage* ground, NSImage* overlay, CGFloat alpha) {
     [self startClosingTabWithAnimation:tab];
     [self layoutTabs];
   } else {
-    [self removeTab:tab];
+    // Don't remove the tab, as that makes the window look jarring without any
+    // tabs. Instead, simply mark it as closing to prevent the tab from
+    // generating any drags or selections.
+    [[tab tabView] setClosing:YES];
   }
 
   [delegate_ onTabDetachedWithContents:contents];

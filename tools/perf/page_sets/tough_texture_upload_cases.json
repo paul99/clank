@@ -3,26 +3,26 @@
   "pages": [
     {
       "url": "file:///tough_texture_upload_cases/background_color_animation.html",
-      "scrolling": {
-          "action": "scrolling_interaction"
+      "smoothness": {
+          "action": "scrolling_action"
       }
     },
     {
       "url": "file:///tough_texture_upload_cases/background_color_animation_and_transform_animation.html",
-      "scrolling": {
-          "action": "scrolling_interaction"
+      "smoothness": {
+          "action": "scrolling_action"
       }
     },
     {
       "url": "file:///tough_texture_upload_cases/background_color_animation_with_gradient.html",
-      "scrolling": {
-          "action": "scrolling_interaction"
+      "smoothness": {
+          "action": "scrolling_action"
       }
     },
     {
       "url": "file:///tough_texture_upload_cases/background_color_animation_with_gradient_and_transform_animation.html",
-      "scrolling": {
-          "action": "scrolling_interaction"
+      "smoothness": {
+          "action": "scrolling_action"
       }
     }
   ]

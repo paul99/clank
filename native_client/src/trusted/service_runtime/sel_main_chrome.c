@@ -81,6 +81,7 @@ static void NaClLoadIrt(struct NaClApp *nap, int irt_fd) {
   int file_desc;
   struct GioPio gio_pio;
   struct Gio *gio_desc;
+  NaClErrorCode errcode;
 
   if (irt_fd == -1) {
     NaClLog(LOG_FATAL, "NaClLoadIrt: Integrated runtime (IRT) not present.\n");
@@ -100,10 +101,11 @@ static void NaClLoadIrt(struct NaClApp *nap, int irt_fd) {
   }
   gio_desc = (struct Gio *) &gio_pio;
 
-  if (NaClAppLoadFileDynamically(nap, gio_desc) != LOAD_OK) {
+  errcode = NaClAppLoadFileDynamically(nap, gio_desc);
+  if (errcode != LOAD_OK) {
     NaClLog(LOG_FATAL,
-            "NaClLoadIrt: Failed to load the integrated runtime (IRT).  "
-            "The user executable was probably not built to use the IRT.\n");
+            "NaClLoadIrt: Failed to load the integrated runtime (IRT): %s\n",
+            NaClErrorString(errcode));
   }
 
   (*NACL_VTBL(Gio, gio_desc)->Close)(gio_desc);
@@ -218,27 +220,11 @@ void NaClChromeMainStart(struct NaClChromeMainArgs *args) {
 #endif
   NaClSignalTestCrashOnStartup();
 
-  /*
-   * Check that Chrome did not register any signal handlers, because
-   * these are not always safe.
-   *
-   * This check is disabled for Mac OS X because it currently does not
-   * pass there in Chromium, which registers a handler for at least
-   * SIGILL (signal 4).  Luckily, OS X restores %gs when entering a
-   * signal handler, so there should not be a vulnerability.
-   * TODO(mseaborn): However, we should reinstate the check for Mac to
-   * be on the safe side.
-   */
-  if (!NACL_OSX) {
-    NACL_FI_FATAL("NaClSignalAssertNoHandlers");
-    NaClSignalAssertNoHandlers();
-  }
-
   nap->enable_exception_handling = args->enable_exception_handling;
 
   if (args->enable_exception_handling || args->enable_debug_stub) {
 #if NACL_LINUX
-    NaClSignalHandlerInit();
+    /* NaCl's signal handler is always enabled on Linux. */
 #elif NACL_OSX
     if (!NaClInterceptMachExceptions()) {
       NaClLog(LOG_FATAL, "NaClChromeMainStart: "
@@ -251,6 +237,9 @@ void NaClChromeMainStart(struct NaClChromeMainArgs *args) {
 # error Unknown host OS
 #endif
   }
+#if NACL_LINUX
+  NaClSignalHandlerInit();
+#endif
 
   /* Give debuggers a well known point at which xlate_base is known.  */
   NaClGdbHook(&state);
@@ -306,19 +295,9 @@ void NaClChromeMainStart(struct NaClChromeMainArgs *args) {
 
   /*
    * Load the integrated runtime (IRT) library.
-   * We check if there is a segment gap before trying to load the IRT.  This
-   * is to support IRT-less / segment-gap-free PNaCl translator nexes.
-   * TODO(mseaborn): Plumb through a flag from Chrome in such cases,
-   * instead of looking for the absence of a segment gap, when the nexe does
-   * not follow NaCl's stable ABI.
    */
-  if (NULL != nap->text_shm) {
+  if (args->irt_fd != -1) {
     NaClLoadIrt(nap, args->irt_fd);
-  } else {
-    NaClLog(
-        LOG_WARNING,
-        "Main executable has no segment gap; skipping loading IRT library. "
-        "This is expected for PNaCl's translator nexes.\n");
   }
 
   NACL_FI_FATAL("BeforeEnvCleanserCtor");
@@ -358,6 +337,20 @@ void NaClChromeMainStart(struct NaClChromeMainArgs *args) {
   NaClEnvCleanserDtor(&env_cleanser);
 
   ret_code = NaClWaitForMainThreadToExit(nap);
+
+  if (NACL_ABI_WIFEXITED(nap->exit_status)) {
+    /*
+     * Under Chrome, a call to _exit() often indicates that something
+     * has gone awry, so we report it here to aid debugging.
+     *
+     * This conditional does not run if the NaCl process was
+     * terminated forcibly, which is the normal case under Chrome.
+     * This forcible exit is triggered by the renderer closing the
+     * trusted SRPC channel, which we record as NACL_ABI_SIGKILL
+     * internally.
+     */
+    NaClLog(LOG_INFO, "NaCl untrusted code called _exit(0x%x)\n", ret_code);
+  }
 
   /*
    * exit_group or equiv kills any still running threads while module

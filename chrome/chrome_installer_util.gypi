@@ -134,6 +134,8 @@
             'installer/util/compat_checks.h',
             'installer/util/delete_after_reboot_helper.cc',
             'installer/util/delete_after_reboot_helper.h',
+            'installer/util/eula_util.cc',
+            'installer/util/eula_util.h',
             'installer/util/google_chrome_distribution.cc',
             'installer/util/google_chrome_distribution.h',
             'installer/util/html_dialog.h',
@@ -162,7 +164,13 @@
               'dependencies': ['<(DEPTH)/content/content.gyp:content_common'],
             }],
           ],
+          # TODO(jschuh): crbug.com/167187 fix size_t to int truncations.
+          'msvs_disabled_warnings': [ 4267, ],
         },
+      ],
+    }],
+    ['OS=="win" and target_arch=="ia32"', {
+      'targets': [
         {
           'target_name': 'installer_util_nacl_win64',
           'type': 'static_library',

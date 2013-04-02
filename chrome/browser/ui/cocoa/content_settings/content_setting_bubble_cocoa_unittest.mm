@@ -55,14 +55,13 @@ ContentSettingBubbleControllerTest::~ContentSettingBubbleControllerTest() {
 }
 
 // Check that the bubble doesn't crash or leak for any settings type
+// Disabled: started failing after CONTENT_SETTINGS_TYPE_INTENTS was removed.
 TEST_F(ContentSettingBubbleControllerTest, Init) {
   for (int i = 0; i < CONTENT_SETTINGS_NUM_TYPES; ++i) {
     if (i == CONTENT_SETTINGS_TYPE_NOTIFICATIONS ||
-        i == CONTENT_SETTINGS_TYPE_INTENTS ||
         i == CONTENT_SETTINGS_TYPE_AUTO_SELECT_CERTIFICATE ||
         i == CONTENT_SETTINGS_TYPE_FULLSCREEN ||
         i == CONTENT_SETTINGS_TYPE_MOUSELOCK ||
-        i == CONTENT_SETTINGS_TYPE_MEDIASTREAM ||
         i == CONTENT_SETTINGS_TYPE_MEDIASTREAM_MIC ||
         i == CONTENT_SETTINGS_TYPE_MEDIASTREAM_CAMERA ||
         i == CONTENT_SETTINGS_TYPE_PPAPI_BROKER) {
@@ -79,9 +78,9 @@ TEST_F(ContentSettingBubbleControllerTest, Init) {
            defer:NO]);
     [parent setReleasedWhenClosed:NO];
     if (base::debug::BeingDebugged())
-      [parent.get() orderFront:nil];
+      [parent orderFront:nil];
     else
-      [parent.get() orderBack:nil];
+      [parent orderBack:nil];
 
     ContentSettingBubbleController* controller = [ContentSettingBubbleController
         showForModel:new DummyContentSettingBubbleModel(web_contents(),
@@ -91,7 +90,7 @@ TEST_F(ContentSettingBubbleControllerTest, Init) {
           anchoredAt:NSMakePoint(50, 20)];
     EXPECT_TRUE(controller != nil);
     EXPECT_TRUE([[controller window] isVisible]);
-    [parent.get() close];
+    [parent close];
   }
 }
 

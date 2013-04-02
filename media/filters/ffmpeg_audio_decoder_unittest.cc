@@ -7,6 +7,7 @@
 #include "base/bind.h"
 #include "base/message_loop.h"
 #include "base/stringprintf.h"
+#include "media/base/data_buffer.h"
 #include "media/base/decoder_buffer.h"
 #include "media/base/mock_filters.h"
 #include "media/base/test_data_util.h"
@@ -54,7 +55,7 @@ class FFmpegAudioDecoderTest : public testing::Test {
     encoded_audio_.push_back(DecoderBuffer::CreateEOSBuffer());
 
     config_.Initialize(kCodecVorbis,
-                       16,
+                       kSampleFormatPlanarF32,
                        CHANNEL_LAYOUT_STEREO,
                        44100,
                        vorbis_extradata_->GetData(),
@@ -94,7 +95,7 @@ class FFmpegAudioDecoderTest : public testing::Test {
   }
 
   void DecodeFinished(AudioDecoder::Status status,
-                      const scoped_refptr<Buffer>& buffer) {
+                      const scoped_refptr<DataBuffer>& buffer) {
     decoded_audio_.push_back(buffer);
   }
 
@@ -107,8 +108,6 @@ class FFmpegAudioDecoderTest : public testing::Test {
 
   void ExpectEndOfStream(size_t i) {
     EXPECT_LT(i, decoded_audio_.size());
-    EXPECT_EQ(0, decoded_audio_[i]->GetTimestamp().InMicroseconds());
-    EXPECT_EQ(0, decoded_audio_[i]->GetDuration().InMicroseconds());
     EXPECT_TRUE(decoded_audio_[i]->IsEndOfStream());
   }
 
@@ -120,7 +119,7 @@ class FFmpegAudioDecoderTest : public testing::Test {
   scoped_refptr<DecoderBuffer> vorbis_extradata_;
 
   std::deque<scoped_refptr<DecoderBuffer> > encoded_audio_;
-  std::deque<scoped_refptr<Buffer> > decoded_audio_;
+  std::deque<scoped_refptr<DataBuffer> > decoded_audio_;
 
   AudioDecoderConfig config_;
 };
@@ -128,9 +127,9 @@ class FFmpegAudioDecoderTest : public testing::Test {
 TEST_F(FFmpegAudioDecoderTest, Initialize) {
   Initialize();
 
-  EXPECT_EQ(16, decoder_->bits_per_channel());
-  EXPECT_EQ(CHANNEL_LAYOUT_STEREO, decoder_->channel_layout());
-  EXPECT_EQ(44100, decoder_->samples_per_second());
+  EXPECT_EQ(config_.bits_per_channel(), decoder_->bits_per_channel());
+  EXPECT_EQ(config_.channel_layout(), decoder_->channel_layout());
+  EXPECT_EQ(config_.samples_per_second(), decoder_->samples_per_second());
 }
 
 TEST_F(FFmpegAudioDecoderTest, ProduceAudioSamples) {

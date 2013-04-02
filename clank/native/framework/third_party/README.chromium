@@ -1,8 +1,0 @@
-This directory contains third party C++ classes.
-
-Each class should be annotated to describe origin and maintain
-the original license.
-
-TODO: As this code becomes part of the Android framework, we should
-remove classes that are copies of hidden Android classes and use the
-system ones instead.

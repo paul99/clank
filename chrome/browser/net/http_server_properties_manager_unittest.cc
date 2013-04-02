@@ -6,6 +6,7 @@
 
 #include "base/basictypes.h"
 #include "base/message_loop.h"
+#include "base/prefs/pref_registry_simple.h"
 #include "base/values.h"
 #include "chrome/common/pref_names.h"
 #include "chrome/test/base/testing_pref_service.h"
@@ -84,7 +85,8 @@ class HttpServerPropertiesManagerTest : public testing::Test {
   }
 
   virtual void SetUp() OVERRIDE {
-    pref_service_.RegisterDictionaryPref(prefs::kHttpServerProperties);
+    pref_service_.registry()->RegisterDictionaryPref(
+        prefs::kHttpServerProperties);
     http_server_props_manager_.reset(
         new StrictMock<TestingHttpServerPropertiesManager>(&pref_service_));
     ExpectCacheUpdate();
@@ -117,7 +119,7 @@ class HttpServerPropertiesManagerTest : public testing::Test {
   }
 
   MessageLoop loop_;
-  TestingPrefService pref_service_;
+  TestingPrefServiceSimple pref_service_;
   scoped_ptr<TestingHttpServerPropertiesManager> http_server_props_manager_;
 
  private:

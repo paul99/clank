@@ -120,9 +120,8 @@ void DownloadShelfView::AddDownloadView(DownloadItemView* view) {
   new_item_animation_->Show();
 }
 
-void DownloadShelfView::DoAddDownload(DownloadItemModel* download_model) {
-  DownloadItemView* view = new DownloadItemView(
-      download_model->download(), this, download_model);
+void DownloadShelfView::DoAddDownload(DownloadItem* download) {
+  DownloadItemView* view = new DownloadItemView(download, this);
   AddDownloadView(view);
 }
 
@@ -430,8 +429,7 @@ void DownloadShelfView::Closed() {
     bool is_transfer_done = download->IsComplete() ||
                             download->IsCancelled() ||
                             download->IsInterrupted();
-    if (is_transfer_done &&
-        download->GetSafetyState() != DownloadItem::DANGEROUS) {
+    if (is_transfer_done && !download->IsDangerous()) {
       RemoveDownloadView(download_views_[i]);
     } else {
       // Treat the item as opened when we close. This way if we get shown again

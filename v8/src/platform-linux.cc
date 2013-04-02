@@ -38,6 +38,11 @@
 #include <sys/types.h>
 #include <stdlib.h>
 
+#if defined(__GLIBC__)
+#include <execinfo.h>
+#include <cxxabi.h>
+#endif
+
 // Ubuntu Dapper requires memory pages to be marked as
 // executable. Otherwise, OS raises an exception when executing code
 // in that page.
@@ -151,8 +156,15 @@ bool OS::ArmCpuHasFeature(CpuFeature feature) {
     case SUDIV:
       search_string = "idiva";
       break;
+    case VFP32DREGS:
+      // This case is handled specially below.
+      break;
     default:
       UNREACHABLE();
+  }
+
+  if (feature == VFP32DREGS) {
+    return ArmCpuHasFeature(VFP3) && !CPUInfoContainsString("d16");
   }
 
   if (CPUInfoContainsString(search_string)) {
@@ -415,6 +427,37 @@ void OS::DebugBreak() {
 }
 
 
+void OS::DumpBacktrace() {
+#if defined(__GLIBC__)
+  void* trace[100];
+  int size = backtrace(trace, ARRAY_SIZE(trace));
+  char** symbols = backtrace_symbols(trace, size);
+  fprintf(stderr, "\n==== C stack trace ===============================\n\n");
+  if (size == 0) {
+    fprintf(stderr, "(empty)\n");
+  } else if (symbols == NULL) {
+    fprintf(stderr, "(no symbols)\n");
+  } else {
+    for (int i = 1; i < size; ++i) {
+      fprintf(stderr, "%2d: ", i);
+      char mangled[201];
+      if (sscanf(symbols[i], "%*[^(]%*[(]%200[^)+]", mangled) == 1) {  // NOLINT
+        int status;
+        size_t length;
+        char* demangled = abi::__cxa_demangle(mangled, NULL, &length, &status);
+        fprintf(stderr, "%s\n", demangled ? demangled : mangled);
+        free(demangled);
+      } else {
+        fprintf(stderr, "??\n");
+      }
+    }
+  }
+  fflush(stderr);
+  free(symbols);
+#endif
+}
+
+
 class PosixMemoryMappedFile : public OS::MemoryMappedFile {
  public:
   PosixMemoryMappedFile(FILE* file, void* memory, int size)
@@ -499,19 +542,20 @@ void OS::LogSharedLibraryAddresses() {
       // the beginning of the filename or the end of the line.
       do {
         c = getc(fp);
-      } while ((c != EOF) && (c != '\n') && (c != '/'));
+      } while ((c != EOF) && (c != '\n') && (c != '/') && (c != '['));
       if (c == EOF) break;  // EOF: Was unexpected, just exit.
 
       // Process the filename if found.
-      if (c == '/') {
-        ungetc(c, fp);  // Push the '/' back into the stream to be read below.
+      if ((c == '/') || (c == '[')) {
+        // Push the '/' or '[' back into the stream to be read below.
+        ungetc(c, fp);
 
         // Read to the end of the line. Exit if the read fails.
         if (fgets(lib_name, kLibNameLen, fp) == NULL) break;
 
         // Drop the newline character read by fgets. We do not need to check
         // for a zero-length string because we know that we at least read the
-        // '/' character.
+        // '/' or '[' character.
         lib_name[strlen(lib_name) - 1] = '\0';
       } else {
         // No library name found, just record the raw address range.
@@ -1153,7 +1197,7 @@ class SignalSender : public Thread {
         SamplerRegistry::IterateActiveSamplers(&DoCpuProfile, this);
       } else {
         if (signal_handler_installed_) RestoreSignalHandler();
-        if (rate_limiter_.SuspendIfNecessary()) continue;
+        if (RuntimeProfiler::WaitForSomeIsolateToEnterJS()) continue;
       }
       Sleep();  // TODO(svenpanne) Figure out if OS:Sleep(interval_) is enough.
     }
@@ -1171,7 +1215,9 @@ class SignalSender : public Thread {
 #if defined(ANDROID)
     syscall(__NR_tgkill, vm_tgid_, tid, SIGPROF);
 #else
-    syscall(SYS_tgkill, vm_tgid_, tid, SIGPROF);
+    int result = syscall(SYS_tgkill, vm_tgid_, tid, SIGPROF);
+    USE(result);
+    ASSERT(result == 0);
 #endif
   }
 
@@ -1198,7 +1244,6 @@ class SignalSender : public Thread {
 
   const int vm_tgid_;
   const int interval_;
-  RuntimeProfilerRateLimiter rate_limiter_;
 
   // Protects the process wide state below.
   static Mutex* mutex_;

@@ -14,7 +14,6 @@
 #include "chrome/browser/chromeos/power/session_state_controller_delegate_chromeos.h"
 #include "chrome/common/chrome_notification_types.h"
 #include "chromeos/dbus/dbus_thread_manager.h"
-#include "chromeos/dbus/root_power_manager_client.h"
 #include "content/public/browser/notification_service.h"
 
 namespace chromeos {
@@ -37,6 +36,8 @@ ash::user::LoginStatus GetCurrentLoginStatus() {
       return ash::user::LOGGED_IN_KIOSK;
     case User::USER_TYPE_PUBLIC_ACCOUNT:
       return ash::user::LOGGED_IN_PUBLIC;
+    case User::USER_TYPE_LOCALLY_MANAGED:
+      return ash::user::LOGGED_IN_LOCALLY_MANAGED;
   }
 
   NOTREACHED();
@@ -62,7 +63,7 @@ PowerButtonObserver::PowerButtonObserver() {
       chrome::NOTIFICATION_SCREEN_LOCK_STATE_CHANGED,
       content::NotificationService::AllSources());
 
-  DBusThreadManager::Get()->GetRootPowerManagerClient()->AddObserver(this);
+  DBusThreadManager::Get()->GetPowerManagerClient()->AddObserver(this);
   DBusThreadManager::Get()->GetSessionManagerClient()->AddObserver(this);
 
   // Tell the controller about the initial state.
@@ -75,7 +76,7 @@ PowerButtonObserver::PowerButtonObserver() {
 
 PowerButtonObserver::~PowerButtonObserver() {
   DBusThreadManager::Get()->GetSessionManagerClient()->RemoveObserver(this);
-  DBusThreadManager::Get()->GetRootPowerManagerClient()->RemoveObserver(this);
+  DBusThreadManager::Get()->GetPowerManagerClient()->RemoveObserver(this);
 }
 
 void PowerButtonObserver::Observe(int type,
@@ -99,7 +100,7 @@ void PowerButtonObserver::Observe(int type,
   }
 }
 
-void PowerButtonObserver::OnPowerButtonEvent(
+void PowerButtonObserver::PowerButtonEventReceived(
     bool down, const base::TimeTicks& timestamp) {
   ash::Shell::GetInstance()->power_button_controller()->
       OnPowerButtonEvent(down, timestamp);

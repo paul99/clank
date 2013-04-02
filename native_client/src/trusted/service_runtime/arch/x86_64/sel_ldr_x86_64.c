@@ -8,12 +8,12 @@
 #include "native_client/src/include/nacl_macros.h"
 #include "native_client/src/include/nacl_platform.h"
 #include "native_client/src/shared/platform/nacl_check.h"
-#include "native_client/src/trusted/service_runtime/nacl_syscall_asm_symbols.h"
 #include "native_client/src/trusted/service_runtime/nacl_globals.h"
 #include "native_client/src/trusted/service_runtime/sel_ldr.h"
 #include "native_client/src/trusted/service_runtime/sel_memory.h"
 #include "native_client/src/trusted/service_runtime/springboard.h"
 #include "native_client/src/trusted/service_runtime/arch/x86/sel_ldr_x86.h"
+#include "native_client/src/trusted/service_runtime/arch/x86_64/sel_rt_64.h"
 #include "native_client/src/trusted/service_runtime/arch/x86_64/tramp_64.h"
 
 static uintptr_t AddDispatchThunk(uintptr_t *next_addr,
@@ -102,6 +102,9 @@ int NaClMakeDispatchThunk(struct NaClApp *nap) {
     }
   } else {
     nap->dispatch_thunk = dispatch_thunk;
+    nap->dispatch_thunk_end =
+        dispatch_thunk + ((uintptr_t) &NaClDispatchThunkEnd
+                          - (uintptr_t) &NaClDispatchThunk);
     nap->get_tls_fast_path1 = get_tls_fast_path1;
     nap->get_tls_fast_path2 = get_tls_fast_path2;
   }

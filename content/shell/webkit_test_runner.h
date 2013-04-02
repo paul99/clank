@@ -8,8 +8,9 @@
 #include "base/file_path.h"
 #include "base/memory/scoped_ptr.h"
 #include "content/public/renderer/render_view_observer.h"
-#include "content/shell/shell_webpreferences.h"
+#include "third_party/WebKit/Tools/DumpRenderTree/chromium/TestRunner/public/WebPreferences.h"
 #include "third_party/WebKit/Tools/DumpRenderTree/chromium/TestRunner/public/WebTestDelegate.h"
+#include "v8/include/v8.h"
 
 class SkCanvas;
 
@@ -49,8 +50,8 @@ class WebKitTestRunner : public RenderViewObserver,
   virtual WebKit::WebContextMenuData* lastContextMenuData() const;
   virtual void setGamepadData(const WebKit::WebGamepads& gamepads);
   virtual void printMessage(const std::string& message);
-  virtual void postTask(WebTestRunner::WebTask* task);
-  virtual void postDelayedTask(WebTestRunner::WebTask* task,
+  virtual void postTask(::WebTestRunner::WebTask* task);
+  virtual void postDelayedTask(::WebTestRunner::WebTask* task,
                                long long ms);
   virtual WebKit::WebString registerIsolatedFileSystem(
       const WebKit::WebVector<WebKit::WebString>& absolute_filenames);
@@ -59,33 +60,27 @@ class WebKitTestRunner : public RenderViewObserver,
       const std::string& utf8_path);
   virtual WebKit::WebURL localFileToDataURL(const WebKit::WebURL& file_url);
   virtual WebKit::WebURL rewriteLayoutTestsURL(const std::string& utf8_url);
-  virtual WebTestRunner::WebPreferences* preferences();
+  virtual ::WebTestRunner::WebPreferences* preferences();
   virtual void applyPreferences();
+  virtual std::string makeURLErrorDescription(const WebKit::WebURLError& error);
 
   void Reset();
-  void Display();
-  void SetXSSAuditorEnabled(bool enabled);
   void NotifyDone();
   void DumpAsText();
   void DumpChildFramesAsText();
-  void SetPrinting();
-  void SetShouldStayOnPageAfterHandlingBeforeUnload(bool should_stay_on_page);
   void WaitUntilDone();
-  void CanOpenWindows();
-  void ShowWebInspector();
-  void CloseWebInspector();
-  void EvaluateInWebInspector(int32_t call_id, const std::string& script);
-  void ExecCommand(const std::string& command, const std::string& value);
+  void OverridePreference(const std::string& key, v8::Local<v8::Value> value);
 
   void NotImplemented(const std::string& object, const std::string& method);
 
-  void set_proxy(WebTestRunner::WebTestProxyBase* proxy) { proxy_ = proxy; }
+  void set_proxy(::WebTestRunner::WebTestProxyBase* proxy) { proxy_ = proxy; }
 
  private:
   // Message handlers.
   void OnCaptureTextDump(bool as_text, bool printing, bool recursive);
   void OnCaptureImageDump(const std::string& expected_pixel_hash);
-  void OnSetCurrentWorkingDirectory(const FilePath& current_working_directory);
+  void OnSetCurrentWorkingDirectory(
+      const base::FilePath& current_working_directory);
 
   SkCanvas* GetCanvas();
   void PaintRect(const WebKit::WebRect& rect);
@@ -94,11 +89,26 @@ class WebKitTestRunner : public RenderViewObserver,
 
   scoped_ptr<SkCanvas> canvas_;
   scoped_ptr<WebKit::WebContextMenuData> last_context_menu_data_;
-  FilePath current_working_directory_;
+  base::FilePath current_working_directory_;
 
-  WebTestRunner::WebTestProxyBase* proxy_;
+  ::WebTestRunner::WebTestProxyBase* proxy_;
 
-  ShellWebPreferences prefs_;
+  ::WebTestRunner::WebPreferences prefs_;
+
+  bool dump_editing_callbacks_;
+  bool dump_frame_load_callbacks_;
+  bool dump_user_gesture_in_frame_load_callbacks_;
+  bool stop_provisional_frame_loads_;
+  bool dump_title_changes_;
+  bool dump_resource_load_callbacks_;
+  bool dump_resource_request_callbacks_;
+  bool dump_resource_response_mime_types_;
+  bool dump_create_view_;
+  bool can_open_windows_;
+
+  bool test_is_running_;
+  bool wait_until_done_;
+  bool load_finished_;
 
   DISALLOW_COPY_AND_ASSIGN(WebKitTestRunner);
 };

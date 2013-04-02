@@ -10,6 +10,7 @@ import android.os.Handler;
 import android.os.Looper;
 import android.os.Message;
 import android.test.UiThreadTest;
+import android.test.suitebuilder.annotation.LargeTest;
 import android.test.suitebuilder.annotation.SmallTest;
 import android.util.Pair;
 
@@ -30,7 +31,9 @@ import java.util.concurrent.atomic.AtomicInteger;
 import java.util.concurrent.Callable;
 import java.util.concurrent.Semaphore;
 import java.util.concurrent.TimeUnit;
+import java.util.HashMap;
 import java.util.List;
+import java.util.Map;
 
 /**
  * AwContents tests.
@@ -43,8 +46,48 @@ public class AwContentsTest extends AndroidWebViewTestBase {
     @UiThreadTest
     public void testCreateDestroy() throws Throwable {
         // NOTE this test runs on UI thread, so we cannot call any async methods.
-        createAwTestContainerView(false, mContentsClient).getAwContents().destroy();
+        createAwTestContainerView(mContentsClient).getAwContents().destroy();
     }
+
+    /*
+     * @LargeTest
+     * @Feature({"AndroidWebView"})
+     * Disabled until we switch to final rendering pipeline.
+     */
+    @DisabledTest
+    public void testCreateLoadDestroyManyTimes() throws Throwable {
+        final int CREATE_AND_DESTROY_REPEAT_COUNT = 10;
+        for (int i = 0; i < CREATE_AND_DESTROY_REPEAT_COUNT; ++i) {
+            AwTestContainerView testView = createAwTestContainerViewOnMainSync(mContentsClient);
+            AwContents awContents = testView.getAwContents();
+
+            loadUrlSync(awContents, mContentsClient.getOnPageFinishedHelper(), "about:blank");
+            destroyAwContentsOnMainSync(awContents);
+        }
+    }
+
+    /*
+     * @LargeTest
+     * @Feature({"AndroidWebView"})
+     * Disabled until we switch to final rendering pipeline.
+     */
+    @DisabledTest
+    public void testCreateLoadDestroyManyAtOnce() throws Throwable {
+        final int CREATE_AND_DESTROY_REPEAT_COUNT = 10;
+        AwTestContainerView views[] = new AwTestContainerView[CREATE_AND_DESTROY_REPEAT_COUNT];
+
+        for (int i = 0; i < views.length; ++i) {
+            views[i] = createAwTestContainerViewOnMainSync(mContentsClient);
+            loadUrlSync(views[i].getAwContents(), mContentsClient.getOnPageFinishedHelper(),
+                    "about:blank");
+        }
+
+        for (int i = 0; i < views.length; ++i) {
+            destroyAwContentsOnMainSync(views[i].getAwContents());
+            views[i] = null;
+        }
+    }
+
 
     private int callDocumentHasImagesSync(final AwContents awContents)
             throws Throwable, InterruptedException {
@@ -98,7 +141,7 @@ public class AwContentsTest extends AndroidWebViewTestBase {
     public void testClearCacheMemoryAndDisk() throws Throwable {
         final TestAwContentsClient contentClient = new TestAwContentsClient();
         final AwTestContainerView testContainer =
-                createAwTestContainerViewOnMainSync(false, contentClient);
+                createAwTestContainerViewOnMainSync(contentClient);
         final AwContents awContents = testContainer.getAwContents();
 
         TestWebServer webServer = null;
@@ -151,7 +194,7 @@ public class AwContentsTest extends AndroidWebViewTestBase {
     @Feature({"AndroidWebView"})
     public void testClearCacheInQuickSuccession() throws Throwable {
         final AwTestContainerView testContainer =
-                createAwTestContainerViewOnMainSync(false, new TestAwContentsClient());
+                createAwTestContainerViewOnMainSync(new TestAwContentsClient());
         final AwContents awContents = testContainer.getAwContents();
 
         runTestOnUiThread(new Runnable() {
@@ -167,12 +210,8 @@ public class AwContentsTest extends AndroidWebViewTestBase {
     private static final long TEST_TIMEOUT = 20000L;
     private static final int CHECK_INTERVAL = 100;
 
-    /**
-     * @SmallTest
-     * @Feature({"AndroidWebView"})
-     * BUG 6094807
-     */
-    @DisabledTest
+    @SmallTest
+    @Feature({"AndroidWebView"})
     public void testGetFavicon() throws Throwable {
         final AwTestContainerView testView = createAwTestContainerViewOnMainSync(mContentsClient);
         final AwContents awContents = testView.getAwContents();
@@ -220,17 +259,13 @@ public class AwContentsTest extends AndroidWebViewTestBase {
         AwTestContainerView testView = createAwTestContainerViewOnMainSync(mContentsClient);
         AwContents awContents = testView.getAwContents();
 
-        // TODO(boliu): This is to work around disk cache corruption bug on
-        // unclean shutdown (crbug.com/154805).
-        clearCacheOnUiThread(awContents, true);
-
         final String data = "download data";
         final String contentDisposition = "attachment;filename=\"download.txt\"";
         final String mimeType = "text/plain";
 
         List<Pair<String, String>> downloadHeaders = new ArrayList<Pair<String, String>>();
         downloadHeaders.add(Pair.create("Content-Disposition", contentDisposition));
-        downloadHeaders.add(Pair.create("Mime-Type", mimeType));
+        downloadHeaders.add(Pair.create("Content-Type", mimeType));
         downloadHeaders.add(Pair.create("Content-Length", Integer.toString(data.length())));
 
         TestWebServer webServer = null;
@@ -265,10 +300,6 @@ public class AwContentsTest extends AndroidWebViewTestBase {
         AwTestContainerView testView = createAwTestContainerViewOnMainSync(mContentsClient);
         AwContents awContents = testView.getAwContents();
 
-        // TODO(boliu): This is to work around disk cache corruption bug on
-        // unclean shutdown (crbug.com/154805).
-        clearCacheOnUiThread(awContents, true);
-
         final String path = "/testUpdateVisitedHistoryCallback.html";
         final String html = "testUpdateVisitedHistoryCallback";
 
@@ -288,5 +319,116 @@ public class AwContentsTest extends AndroidWebViewTestBase {
         } finally {
             if (webServer != null) webServer.shutdown();
         }
+    }
+
+    @Feature({"AndroidWebView"})
+    @SmallTest
+    public void testGetVisitedHistoryExerciseCodePath() throws Throwable {
+        // Due to security/privacy restrictions around the :visited css property, it is not
+        // possible test this end to end without using the flaky and brittle capturing picture of
+        // the web page. So we are doing the next best thing, exercising all the code paths.
+
+        mContentsClient.mSaveGetVisitedHistoryCallback = true;
+        AwTestContainerView testView = createAwTestContainerViewOnMainSync(mContentsClient);
+        AwContents awContents = testView.getAwContents();
+
+        final String path = "/testGetVisitedHistoryExerciseCodePath.html";
+        final String visitedLinks[] = {"http://foo.com", "http://bar.com", null};
+        final String html = "<a src=\"http://foo.com\">foo</a><a src=\"http://bar.com\">bar</a>";
+
+        TestWebServer webServer = null;
+        try {
+            webServer = new TestWebServer(false);
+            final String pageUrl = webServer.setResponse(path, html, null);
+
+            loadUrlSync(awContents, mContentsClient.getOnPageFinishedHelper(), pageUrl);
+            assertNotNull(mContentsClient.mGetVisitedHistoryCallback);
+
+            mContentsClient.mGetVisitedHistoryCallback.onReceiveValue(visitedLinks);
+            mContentsClient.mGetVisitedHistoryCallback.onReceiveValue(null);
+
+            loadUrlSync(awContents, mContentsClient.getOnPageFinishedHelper(), pageUrl);
+        } finally {
+            if (webServer != null) webServer.shutdown();
+        }
+    }
+
+    /*
+     * @Feature({"AndroidWebView"})
+     * @SmallTest
+     * Exercising code after destroy causes gpu related crashes. See crbug.com/172184.
+     */
+    @DisabledTest
+    public void testGetVisitedHistoryCallbackAfterDestroy() throws Throwable {
+        mContentsClient.mSaveGetVisitedHistoryCallback = true;
+        AwTestContainerView testView = createAwTestContainerViewOnMainSync(mContentsClient);
+        AwContents awContents = testView.getAwContents();
+
+        loadUrlSync(awContents, mContentsClient.getOnPageFinishedHelper(), "about:blank");
+        assertNotNull(mContentsClient.mGetVisitedHistoryCallback);
+
+        destroyAwContentsOnMainSync(awContents);
+        mContentsClient.mGetVisitedHistoryCallback.onReceiveValue(new String[] {"abc.def"});
+        mContentsClient.mGetVisitedHistoryCallback.onReceiveValue(null);
+    }
+
+    private void autoLoginTestHelper(final String testName, final String xAutoLoginHeader,
+            final String expectedRealm, final String expectedAccount, final String expectedArgs)
+            throws Throwable {
+        AwTestContainerView testView = createAwTestContainerViewOnMainSync(mContentsClient);
+        AwContents awContents = testView.getAwContents();
+
+        final String path = "/" + testName + ".html";
+        final String html = testName;
+        List<Pair<String, String>> headers = new ArrayList<Pair<String, String>>();
+        headers.add(Pair.create("x-auto-login", xAutoLoginHeader));
+
+        TestWebServer webServer = null;
+        try {
+            webServer = new TestWebServer(false);
+            final String pageUrl = webServer.setResponse(path, html, headers);
+
+            loadUrlSync(awContents, mContentsClient.getOnPageFinishedHelper(), pageUrl);
+
+            assertEquals(expectedRealm, mContentsClient.mLastAutoLoginRealm);
+            assertEquals(expectedAccount, mContentsClient.mLastAutoLoginAccount);
+            assertEquals(expectedArgs, mContentsClient.mLastAutoLoginArgs);
+        } finally {
+            if (webServer != null) webServer.shutdown();
+        }
+    }
+
+    @Feature({"AndroidWebView"})
+    @SmallTest
+    public void testAutoLoginOnGoogleCom() throws Throwable {
+        autoLoginTestHelper(
+                "testAutoLoginOnGoogleCom",  /* testName */
+                "realm=com.google&account=foo%40bar.com&args=random_string", /* xAutoLoginHeader */
+                "com.google",  /* expectedRealm */
+                "foo@bar.com",  /* expectedAccount */
+                "random_string"  /* expectedArgs */);
+
+    }
+
+    @Feature({"AndroidWebView"})
+    @SmallTest
+    public void testAutoLoginWithNullAccount() throws Throwable {
+        autoLoginTestHelper(
+                "testAutoLoginOnGoogleCom",  /* testName */
+                "realm=com.google&args=not.very.inventive", /* xAutoLoginHeader */
+                "com.google",  /* expectedRealm */
+                null,  /* expectedAccount */
+                "not.very.inventive"  /* expectedArgs */);
+    }
+
+    @Feature({"AndroidWebView"})
+    @SmallTest
+    public void testAutoLoginOnNonGoogle() throws Throwable {
+        autoLoginTestHelper(
+                "testAutoLoginOnGoogleCom",  /* testName */
+                "realm=com.bar&account=foo%40bar.com&args=args", /* xAutoLoginHeader */
+                "com.bar",  /* expectedRealm */
+                "foo@bar.com",  /* expectedAccount */
+                "args"  /* expectedArgs */);
     }
 }

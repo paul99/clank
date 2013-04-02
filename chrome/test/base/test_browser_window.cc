@@ -111,7 +111,11 @@ int TestBrowserWindow::GetExtraRenderViewHeight() const {
 }
 
 #if defined(OS_MACOSX)
-bool TestBrowserWindow::InPresentationMode() {
+bool TestBrowserWindow::IsFullscreenWithChrome() {
+  return false;
+}
+
+bool TestBrowserWindow::IsFullscreenWithoutChrome() {
   return false;
 }
 #endif
@@ -123,10 +127,6 @@ gfx::Rect TestBrowserWindow::GetInstantBounds() {
 WindowOpenDisposition TestBrowserWindow::GetDispositionForPopupBounds(
     const gfx::Rect& bounds) {
   return NEW_POPUP;
-}
-
-bool TestBrowserWindow::IsInstantTabShowing() {
-  return false;
 }
 
 FindBar* TestBrowserWindow::CreateFindBar() {

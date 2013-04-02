@@ -6,6 +6,7 @@
 
 #include <string>
 
+#include "base/base64.h"
 #include "base/file_path.h"
 #include "base/file_util.h"
 #include "base/memory/scoped_vector.h"
@@ -86,20 +87,20 @@ class RenderingStatsEnumerator : public cc::RenderingStats::Enumerator {
   RenderingStatsEnumerator(v8::Handle<v8::Object> stats_object)
       : stats_object(stats_object) { }
 
-  virtual void AddInt64(const char* name, int64 value) {
+  virtual void AddInt64(const char* name, int64 value) OVERRIDE {
     stats_object->Set(v8::String::New(name), v8::Number::New(value));
   }
 
-  virtual void AddDouble(const char* name, double value) {
+  virtual void AddDouble(const char* name, double value) OVERRIDE {
     stats_object->Set(v8::String::New(name), v8::Number::New(value));
   }
 
-  virtual void AddInt(const char* name, int value) {
+  virtual void AddInt(const char* name, int value) OVERRIDE {
     stats_object->Set(v8::String::New(name), v8::Integer::New(value));
   }
 
   virtual void AddTimeDeltaInSecondsF(const char* name,
-                                      const base::TimeDelta& value) {
+                                      const base::TimeDelta& value) OVERRIDE {
     stats_object->Set(v8::String::New(name),
                       v8::Number::New(value.InSecondsF()));
   }
@@ -149,10 +150,14 @@ class GpuBenchmarkingWrapper : public v8::Extension {
           "chrome.gpuBenchmarking.runRenderingBenchmarks = function(filter) {"
           "  native function RunRenderingBenchmarks();"
           "  return RunRenderingBenchmarks(filter);"
+          "};"
+          "chrome.gpuBenchmarking.beginWindowSnapshotPNG = function(callback) {"
+          "  native function BeginWindowSnapshotPNG();"
+          "  BeginWindowSnapshotPNG(callback);"
           "};") {}
 
   virtual v8::Handle<v8::FunctionTemplate> GetNativeFunction(
-      v8::Handle<v8::String> name) {
+      v8::Handle<v8::String> name) OVERRIDE {
     if (name->Equals(v8::String::New("GetRenderingStats")))
       return v8::FunctionTemplate::New(GetRenderingStats);
     if (name->Equals(v8::String::New("PrintToSkPicture")))
@@ -161,6 +166,8 @@ class GpuBenchmarkingWrapper : public v8::Extension {
       return v8::FunctionTemplate::New(BeginSmoothScroll);
     if (name->Equals(v8::String::New("RunRenderingBenchmarks")))
       return v8::FunctionTemplate::New(RunRenderingBenchmarks);
+    if (name->Equals(v8::String::New("BeginWindowSnapshotPNG")))
+      return v8::FunctionTemplate::New(BeginWindowSnapshotPNG);
 
     return v8::Handle<v8::FunctionTemplate>();
   }
@@ -361,6 +368,80 @@ class GpuBenchmarkingWrapper : public v8::Extension {
     }
 
     return results;
+  }
+
+  static void OnSnapshotCompleted(v8::Persistent<v8::Function> callback,
+                                  v8::Persistent<v8::Context> context,
+                                  const gfx::Size& size,
+                                  const std::vector<unsigned char>& png) {
+    v8::HandleScope scope;
+    v8::Context::Scope context_scope(context);
+    WebFrame* frame = WebFrame::frameForContext(context);
+    if (frame) {
+
+      v8::Handle<v8::Value> result;
+
+      if(!size.IsEmpty()) {
+        v8::Handle<v8::Object> result_object;
+        result_object = v8::Object::New();
+
+        result_object->Set(v8::String::New("width"),
+                           v8::Number::New(size.width()));
+        result_object->Set(v8::String::New("height"),
+                           v8::Number::New(size.height()));
+
+        std::string base64_png;
+        base::Base64Encode(base::StringPiece(
+            reinterpret_cast<const char*>(&*png.begin()), png.size()),
+            &base64_png);
+
+        result_object->Set(v8::String::New("data"),
+            v8::String::New(base64_png.c_str(), base64_png.size()));
+
+        result = result_object;
+      } else {
+        result = v8::Null();
+      }
+
+      v8::Handle<v8::Value> argv[] = { result };
+
+      frame->callFunctionEvenIfScriptDisabled(callback,
+                                              v8::Object::New(),
+                                              1,
+                                              argv);
+    }
+    callback.Dispose();
+    context.Dispose();
+  }
+
+  static v8::Handle<v8::Value> BeginWindowSnapshotPNG(
+      const v8::Arguments& args) {
+    WebFrame* web_frame = WebFrame::frameForCurrentContext();
+    if (!web_frame)
+      return v8::Undefined();
+
+    WebView* web_view = web_frame->view();
+    if (!web_view)
+      return v8::Undefined();
+
+    RenderViewImpl* render_view_impl = RenderViewImpl::FromWebView(web_view);
+    if (!render_view_impl)
+      return v8::Undefined();
+
+    if (!args[0]->IsFunction())
+      return v8::Undefined();
+
+    v8::Local<v8::Function> callback_local =
+        v8::Local<v8::Function>(v8::Function::Cast(*args[0]));
+    v8::Persistent<v8::Function> callback =
+        v8::Persistent<v8::Function>::New(callback_local);
+    v8::Persistent<v8::Context> context =
+        v8::Persistent<v8::Context>::New(web_frame->mainWorldScriptContext());
+
+    render_view_impl->GetWindowSnapshot(
+        base::Bind(&OnSnapshotCompleted, callback, context));
+
+    return v8::Undefined();
   }
 };
 

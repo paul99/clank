@@ -8,10 +8,10 @@
 #include "chrome/browser/extensions/component_loader.h"
 #include "chrome/browser/extensions/extension_browsertest.h"
 #include "chrome/browser/ui/browser.h"
-#include "chrome/browser/ui/browser_tabstrip.h"
 #include "chrome/browser/ui/browser_window.h"
 #include "chrome/browser/ui/omnibox/location_bar.h"
 #include "chrome/browser/ui/omnibox/omnibox_view.h"
+#include "chrome/browser/ui/tabs/tab_strip_model.h"
 #include "chrome/common/url_constants.h"
 #include "chrome/test/base/in_process_browser_test.h"
 #include "chrome/test/base/testing_profile.h"
@@ -42,14 +42,15 @@ class ExtensionURLRewriteBrowserTest : public ExtensionBrowserTest {
   }
 
   content::NavigationController* GetNavigationController() const {
-    return &chrome::GetActiveWebContents(browser())->GetController();
+    return &browser()->tab_strip_model()->GetActiveWebContents()->
+        GetController();
   }
 
   NavigationEntry* GetNavigationEntry() const {
     return GetNavigationController()->GetActiveEntry();
   }
 
-  FilePath GetTestExtensionPath(const char* extension_name) const {
+  base::FilePath GetTestExtensionPath(const char* extension_name) const {
     return test_data_dir_.AppendASCII("browsertest/url_rewrite/").
         AppendASCII(extension_name);
   }

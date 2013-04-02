@@ -22,7 +22,7 @@
 #include "chrome/browser/autofill/personal_data_manager_observer.h"
 #include "chrome/browser/browsing_data/browsing_data_helper.h"
 #include "chrome/browser/extensions/mock_extension_special_storage_policy.h"
-#include "chrome/browser/history/history.h"
+#include "chrome/browser/history/history_service.h"
 #include "chrome/browser/history/history_service_factory.h"
 #include "chrome/browser/safe_browsing/safe_browsing_service.h"
 #include "chrome/common/chrome_notification_types.h"
@@ -41,8 +41,8 @@
 #include "net/url_request/url_request_context.h"
 #include "net/url_request/url_request_context_getter.h"
 #include "testing/gtest/include/gtest/gtest.h"
-#include "third_party/WebKit/Source/WebKit/chromium/public/platform/WebCString.h"
-#include "third_party/WebKit/Source/WebKit/chromium/public/platform/WebString.h"
+#include "third_party/WebKit/Source/Platform/chromium/public/WebCString.h"
+#include "third_party/WebKit/Source/Platform/chromium/public/WebString.h"
 #include "third_party/WebKit/Source/WebKit/chromium/public/WebSecurityOrigin.h"
 #include "webkit/dom_storage/dom_storage_types.h"
 #include "webkit/glue/webkit_glue.h"
@@ -66,16 +66,16 @@ const GURL kOrigin3(kTestOrigin3);
 const GURL kOriginExt(kTestOriginExt);
 const GURL kOriginDevTools(kTestOriginDevTools);
 
-const FilePath::CharType kDomStorageOrigin1[] =
+const base::FilePath::CharType kDomStorageOrigin1[] =
     FILE_PATH_LITERAL("http_host1_1.localstorage");
 
-const FilePath::CharType kDomStorageOrigin2[] =
+const base::FilePath::CharType kDomStorageOrigin2[] =
     FILE_PATH_LITERAL("http_host2_1.localstorage");
 
-const FilePath::CharType kDomStorageOrigin3[] =
+const base::FilePath::CharType kDomStorageOrigin3[] =
     FILE_PATH_LITERAL("http_host3_1.localstorage");
 
-const FilePath::CharType kDomStorageExt[] = FILE_PATH_LITERAL(
+const base::FilePath::CharType kDomStorageExt[] = FILE_PATH_LITERAL(
     "chrome-extension_abcdefghijklmnopqrstuvwxyz_0.localstorage");
 
 const quota::StorageType kTemporary = quota::kStorageTypeTemporary;
@@ -149,7 +149,7 @@ class AwaitCompletionHelper : public BrowsingDataRemover::Observer {
 
  protected:
   // BrowsingDataRemover::Observer implementation.
-  virtual void OnBrowsingDataRemoverDone() {
+  virtual void OnBrowsingDataRemoverDone() OVERRIDE {
     Notify();
   }
 
@@ -231,8 +231,7 @@ class RemoveProfileCookieTester : public RemoveCookieTester {
 class RemoveSafeBrowsingCookieTester : public RemoveCookieTester {
  public:
   RemoveSafeBrowsingCookieTester()
-      : browser_process_(
-          static_cast<TestingBrowserProcess*>(g_browser_process)) {
+      : browser_process_(TestingBrowserProcess::GetGlobal()) {
     scoped_refptr<SafeBrowsingService> sb_service =
         SafeBrowsingService::CreateSafeBrowsingService();
     browser_process_->SetSafeBrowsingService(sb_service);
@@ -298,6 +297,11 @@ class RemoveServerBoundCertTester : public net::SSLConfigService::Observer {
                                 now + base::TimeDelta::FromDays(1));
   }
 
+  void GetCertList(net::ServerBoundCertStore::ServerBoundCertList* certs) {
+    GetCertStore()->GetAllServerBoundCerts(
+        base::Bind(&RemoveServerBoundCertTester::GetAllCertsCallback, certs));
+  }
+
   net::ServerBoundCertStore* GetCertStore() {
     return server_bound_cert_service_->GetCertStore();
   }
@@ -312,6 +316,12 @@ class RemoveServerBoundCertTester : public net::SSLConfigService::Observer {
   }
 
  private:
+  static void GetAllCertsCallback(
+      net::ServerBoundCertStore::ServerBoundCertList* dest,
+      const net::ServerBoundCertStore::ServerBoundCertList& result) {
+    *dest = result;
+  }
+
   net::ServerBoundCertService* server_bound_cert_service_;
   scoped_refptr<net::SSLConfigService> ssl_config_service_;
   int ssl_config_changed_count_;
@@ -374,7 +384,7 @@ class RemoveAutofillTester : public PersonalDataManagerObserver {
       : personal_data_manager_(
             PersonalDataManagerFactory::GetForProfile(profile)) {
     autofill_test::DisableSystemServices(profile);
-    personal_data_manager_->SetObserver(this);
+    personal_data_manager_->AddObserver(this);
   }
 
   virtual ~RemoveAutofillTester() {
@@ -441,7 +451,8 @@ class RemoveLocalStorageTester {
   void AddDOMStorageTestData() {
     // Note: This test depends on details of how the dom_storage library
     // stores data in the host file system.
-    FilePath storage_path = profile_->GetPath().AppendASCII("Local Storage");
+    base::FilePath storage_path =
+        profile_->GetPath().AppendASCII("Local Storage");
     file_util::CreateDirectory(storage_path);
 
     // Write some files.
@@ -505,7 +516,7 @@ class BrowsingDataRemoverTest : public testing::Test,
   virtual ~BrowsingDataRemoverTest() {
   }
 
-  void TearDown() {
+  virtual void TearDown() {
     // TestingProfile contains a DOMStorageContext.  BrowserContext's destructor
     // posts a message to the WEBKIT thread to delete some of its member
     // variables. We need to ensure that the profile is destroyed, and that
@@ -712,7 +723,8 @@ TEST_F(BrowsingDataRemoverTest, RemoveServerBoundCertLastHour) {
   EXPECT_EQ(1, tester.ssl_config_changed_count());
   ASSERT_EQ(1, tester.ServerBoundCertCount());
   net::ServerBoundCertStore::ServerBoundCertList certs;
-  tester.GetCertStore()->GetAllServerBoundCerts(&certs);
+  tester.GetCertList(&certs);
+  ASSERT_EQ(1U, certs.size());
   EXPECT_EQ(kTestOrigin2, certs.front().server_identifier());
 }
 

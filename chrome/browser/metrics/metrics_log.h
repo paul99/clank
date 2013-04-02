@@ -12,13 +12,20 @@
 #include <vector>
 
 #include "base/basictypes.h"
+#include "chrome/browser/metrics/metrics_network_observer.h"
 #include "chrome/common/metrics/metrics_log_base.h"
 #include "chrome/installer/util/google_update_settings.h"
 #include "content/public/common/process_type.h"
 #include "ui/gfx/size.h"
 
+#if defined(OS_CHROMEOS)
+#include "chrome/browser/metrics/perf_provider_chromeos.h"
+#endif
+
 struct AutocompleteLog;
+class MetricsNetworkObserver;
 class PrefService;
+class PrefRegistrySimple;
 
 namespace base {
 class DictionaryValue;
@@ -63,7 +70,7 @@ class MetricsLog : public MetricsLogBase {
   MetricsLog(const std::string& client_id, int session_id);
   virtual ~MetricsLog();
 
-  static void RegisterPrefs(PrefService* prefs);
+  static void RegisterPrefs(PrefRegistrySimple* registry);
 
   // Get the amount of uptime in seconds since this function was last called.
   // This updates the cumulative uptime metric for uninstall as a side effect.
@@ -140,8 +147,6 @@ class MetricsLog : public MetricsLogBase {
  private:
   FRIEND_TEST_ALL_PREFIXES(MetricsLogTest, ChromeOSStabilityData);
 
-  class NetworkObserver;
-
   // Writes application stability metrics (as part of the profile log).
   // NOTE: Has the side-effect of clearing those counts.
   void WriteStabilityElement(
@@ -185,9 +190,12 @@ class MetricsLog : public MetricsLogBase {
   // This is a no-op if called on a non-Windows platform.
   void WriteGoogleUpdateProto(const GoogleUpdateMetrics& google_update_metrics);
 
-  // Registers as observer with net::NetworkChangeNotifier and keeps track of
-  // the network environment.
-  scoped_ptr<NetworkObserver> network_observer_;
+  // Observes network state to provide values for SystemProfile::Network.
+  MetricsNetworkObserver network_observer_;
+
+#if defined(OS_CHROMEOS)
+  metrics::PerfProvider perf_provider_;
+#endif
 
   DISALLOW_COPY_AND_ASSIGN(MetricsLog);
 };

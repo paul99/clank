@@ -15,6 +15,7 @@
 #include "chrome/browser/ui/browser_list.h"
 #include "chrome/browser/ui/browser_tabstrip.h"
 #include "chrome/browser/ui/panels/panel_manager.h"
+#include "chrome/browser/ui/tabs/tab_strip_model.h"
 #include "chrome/common/chrome_switches.h"
 #include "chrome/common/extensions/extension.h"
 #include "chrome/test/base/ui_test_utils.h"
@@ -55,7 +56,7 @@ void WaitForTabsAndPopups(Browser* browser,
   base::TimeTicks end_time = base::TimeTicks::Now() + kWaitTime;
   while (base::TimeTicks::Now() < end_time) {
     if (chrome::GetBrowserCount(browser->profile()) == num_browsers &&
-        browser->tab_count() == num_tabs &&
+        browser->tab_strip_model()->count() == num_tabs &&
         PanelManager::GetInstance()->num_panels() == num_panels)
       break;
 
@@ -63,7 +64,7 @@ void WaitForTabsAndPopups(Browser* browser,
   }
 
   EXPECT_EQ(num_browsers, chrome::GetBrowserCount(browser->profile()));
-  EXPECT_EQ(num_tabs, browser->tab_count());
+  EXPECT_EQ(num_tabs, browser->tab_strip_model()->count());
   EXPECT_EQ(num_panels, PanelManager::GetInstance()->num_panels());
 
   int num_popups_seen = 0;
@@ -188,7 +189,7 @@ IN_PROC_BROWSER_TEST_F(ExtensionApiTest, WindowArgumentsOverflow) {
 }
 
 class WindowOpenPanelDisabledTest : public ExtensionApiTest {
-  virtual void SetUpCommandLine(CommandLine* command_line) {
+  virtual void SetUpCommandLine(CommandLine* command_line) OVERRIDE {
     ExtensionApiTest::SetUpCommandLine(command_line);
     // TODO(jennb): Re-enable when panels are enabled by default.
     // command_line->AppendSwitch(switches::kDisablePanels);
@@ -201,7 +202,7 @@ IN_PROC_BROWSER_TEST_F(WindowOpenPanelDisabledTest,
 }
 
 class WindowOpenPanelTest : public ExtensionApiTest {
-  virtual void SetUpCommandLine(CommandLine* command_line) {
+  virtual void SetUpCommandLine(CommandLine* command_line) OVERRIDE {
     ExtensionApiTest::SetUpCommandLine(command_line);
     command_line->AppendSwitch(switches::kEnablePanels);
   }
@@ -222,7 +223,7 @@ IN_PROC_BROWSER_TEST_F(WindowOpenPanelTest, MAYBE_WindowOpenPanel) {
 
 // TODO: this ifdef will have to be updated when we have win ash bots running
 // browser_tests.
-#if defined(USE_ASH) && !defined(OS_WIN)
+#if defined(USE_ASH)
 // On Ash, this currently fails because we're currently opening new panel
 // windows as popup windows instead.
 #define MAYBE_WindowOpenPanelDetached DISABLED_WindowOpenPanelDetached
@@ -387,12 +388,13 @@ IN_PROC_BROWSER_TEST_F(ExtensionBrowserTest, WindowOpenExtension) {
       last_loaded_extension_id_ + "/test.html");
   ui_test_utils::NavigateToURL(browser(), start_url);
   WebContents* newtab = NULL;
-  ASSERT_NO_FATAL_FAILURE(OpenWindow(chrome::GetActiveWebContents(browser()),
-                          start_url.Resolve("newtab.html"), true, &newtab));
+  ASSERT_NO_FATAL_FAILURE(
+      OpenWindow(browser()->tab_strip_model()->GetActiveWebContents(),
+      start_url.Resolve("newtab.html"), true, &newtab));
 
   bool result = false;
-  ASSERT_TRUE(content::ExecuteJavaScriptAndExtractBool(
-      newtab->GetRenderViewHost(), L"", L"testExtensionApi()", &result));
+  ASSERT_TRUE(content::ExecuteScriptAndExtractBool(newtab, "testExtensionApi()",
+                                                   &result));
   EXPECT_TRUE(result);
 }
 
@@ -405,7 +407,8 @@ IN_PROC_BROWSER_TEST_F(ExtensionBrowserTest, WindowOpenInvalidExtension) {
   GURL start_url(std::string("chrome-extension://") +
       last_loaded_extension_id_ + "/test.html");
   ui_test_utils::NavigateToURL(browser(), start_url);
-  ASSERT_NO_FATAL_FAILURE(OpenWindow(chrome::GetActiveWebContents(browser()),
+  ASSERT_NO_FATAL_FAILURE(
+      OpenWindow(browser()->tab_strip_model()->GetActiveWebContents(),
       GURL("chrome-extension://thisissurelynotavalidextensionid/newtab.html"),
       false, NULL));
 
@@ -422,13 +425,14 @@ IN_PROC_BROWSER_TEST_F(ExtensionBrowserTest, WindowOpenNoPrivileges) {
 
   ui_test_utils::NavigateToURL(browser(), GURL("about:blank"));
   WebContents* newtab = NULL;
-  ASSERT_NO_FATAL_FAILURE(OpenWindow(chrome::GetActiveWebContents(browser()),
+  ASSERT_NO_FATAL_FAILURE(
+      OpenWindow(browser()->tab_strip_model()->GetActiveWebContents(),
       GURL(std::string("chrome-extension://") + last_loaded_extension_id_ +
           "/newtab.html"), false, &newtab));
 
   // Extension API should succeed.
   bool result = false;
-  ASSERT_TRUE(content::ExecuteJavaScriptAndExtractBool(
-      newtab->GetRenderViewHost(), L"", L"testExtensionApi()", &result));
+  ASSERT_TRUE(content::ExecuteScriptAndExtractBool(newtab, "testExtensionApi()",
+                                                   &result));
   EXPECT_TRUE(result);
 }

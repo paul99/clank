@@ -15,8 +15,8 @@
 #include "ipc/ipc_channel_handle.h"
 #include "ipc/ipc_message_macros.h"
 #include "ipc/ipc_message_utils.h"
-#include "third_party/WebKit/Source/WebKit/chromium/public/WebDragStatus.h"
 #include "third_party/WebKit/Source/WebKit/chromium/public/WebDragOperation.h"
+#include "third_party/WebKit/Source/WebKit/chromium/public/WebDragStatus.h"
 #include "ui/gfx/point.h"
 #include "ui/gfx/rect.h"
 #include "ui/gfx/size.h"
@@ -48,6 +48,8 @@ IPC_STRUCT_BEGIN(BrowserPluginHostMsg_ResizeGuest_Params)
   IPC_STRUCT_MEMBER(gfx::Size, view_size)
   // Indicates the scale factor of the embedder WebView.
   IPC_STRUCT_MEMBER(float, scale_factor)
+  // Indicates a request for a full repaint of the page.
+  IPC_STRUCT_MEMBER(bool, repaint)
 IPC_STRUCT_END()
 
 IPC_STRUCT_BEGIN(BrowserPluginHostMsg_CreateGuest_Params)
@@ -55,16 +57,11 @@ IPC_STRUCT_BEGIN(BrowserPluginHostMsg_CreateGuest_Params)
   IPC_STRUCT_MEMBER(bool, persist_storage)
   IPC_STRUCT_MEMBER(bool, focused)
   IPC_STRUCT_MEMBER(bool, visible)
+  IPC_STRUCT_MEMBER(std::string, name)
+  IPC_STRUCT_MEMBER(std::string, src)
   IPC_STRUCT_MEMBER(BrowserPluginHostMsg_AutoSize_Params, auto_size_params)
   IPC_STRUCT_MEMBER(BrowserPluginHostMsg_ResizeGuest_Params,
                     resize_guest_params)
-  // Hardware Accelerated Surface Params
-  IPC_STRUCT_MEMBER(int, gpu_process_id)
-  IPC_STRUCT_MEMBER(uint32, client_id)
-  IPC_STRUCT_MEMBER(uint32, context_id)
-  IPC_STRUCT_MEMBER(uint32, texture_id_0)
-  IPC_STRUCT_MEMBER(uint32, texture_id_1)
-  IPC_STRUCT_MEMBER(uint32, sync_point)
 IPC_STRUCT_END()
 
 IPC_STRUCT_BEGIN(BrowserPluginMsg_LoadCommit_Params)
@@ -72,8 +69,10 @@ IPC_STRUCT_BEGIN(BrowserPluginMsg_LoadCommit_Params)
   IPC_STRUCT_MEMBER(GURL, url)
   // Indicates whether the navigation was on the top-level frame.
   IPC_STRUCT_MEMBER(bool, is_top_level)
-  // Chrome's process ID for the guest.
+  // The browser's process ID for the guest.
   IPC_STRUCT_MEMBER(int, process_id)
+  // The browser's routing ID for the guest's RenderView.
+  IPC_STRUCT_MEMBER(int, route_id)
   // The index of the current navigation entry after this navigation was
   // committed.
   IPC_STRUCT_MEMBER(int, current_entry_index)
@@ -116,12 +115,22 @@ IPC_STRUCT_BEGIN(BrowserPluginMsg_UpdateRect_Params)
 
   // Is this UpdateRect an ACK to a resize request?
   IPC_STRUCT_MEMBER(bool, is_resize_ack)
+
+  // Used in HW accelerated case to switch between sending an UpdateRect_ACK
+  // with the new size or just resizing.
+  IPC_STRUCT_MEMBER(bool, needs_ack)
 IPC_STRUCT_END()
 
 // Browser plugin messages
 
 // -----------------------------------------------------------------------------
 // These messages are from the embedder to the browser process.
+
+// This message is sent to the browser process to request an instance ID.
+// |request_id| is used by BrowserPluginEmbedder to route the response back
+// to its origin.
+IPC_MESSAGE_ROUTED1(BrowserPluginHostMsg_AllocateInstanceID,
+                    int /* request_id */)
 
 // This message is sent to the browser process to enable or disable autosize
 // mode.
@@ -173,9 +182,8 @@ IPC_MESSAGE_ROUTED3(BrowserPluginHostMsg_HandleInputEvent,
 // the previous frame and is ready for the next frame. If the guest sent the
 // embedder a bitmap that does not match the size of the BrowserPlugin's
 // container, the BrowserPlugin requests a new size as well.
-IPC_MESSAGE_ROUTED4(BrowserPluginHostMsg_UpdateRect_ACK,
+IPC_MESSAGE_ROUTED3(BrowserPluginHostMsg_UpdateRect_ACK,
     int /* instance_id */,
-    int /* message_id */,
     BrowserPluginHostMsg_AutoSize_Params /* auto_size_params */,
     BrowserPluginHostMsg_ResizeGuest_Params /* resize_guest_params */)
 
@@ -191,9 +199,11 @@ IPC_MESSAGE_ROUTED2(BrowserPluginHostMsg_NavigateGuest,
 // Acknowledge that we presented a HW buffer and provide a sync point
 // to specify the location in the command stream when the compositor
 // is no longer using it.
-IPC_MESSAGE_ROUTED3(BrowserPluginHostMsg_BuffersSwappedACK,
+IPC_MESSAGE_ROUTED5(BrowserPluginHostMsg_BuffersSwappedACK,
+                    int /* instance_id */,
                     int /* route_id */,
                     int /* gpu_host_id */,
+                    std::string /* mailbox_name */,
                     uint32 /* sync_point */)
 
 // When a BrowserPlugin has been removed from the embedder's DOM, it informs
@@ -221,6 +231,11 @@ IPC_MESSAGE_ROUTED3(BrowserPluginHostMsg_PluginAtPositionResponse,
                     int /* request_id */,
                     gfx::Point /* position */)
 
+// Sets the name of the guest window to the provided |name|.
+IPC_MESSAGE_ROUTED2(BrowserPluginHostMsg_SetName,
+                    int /* instance_id */,
+                    std::string /* name */)
+
 // -----------------------------------------------------------------------------
 // These messages are from the guest renderer to the browser process
 
@@ -233,6 +248,13 @@ IPC_MESSAGE_ROUTED2(BrowserPluginHostMsg_ResizeGuest,
 
 // -----------------------------------------------------------------------------
 // These messages are from the browser process to the embedder.
+
+// This message is sent from the browser process to the embedder render process
+// in response to a request to allocate an instance ID. The |request_id| is used
+// to route the response to the requestor.
+IPC_MESSAGE_ROUTED2(BrowserPluginMsg_AllocateInstanceID_ACK,
+                    int /* request_id */,
+                    int /* instance_id */)
 
 // Once the swapped out guest RenderView has been created in the embedder render
 // process, the browser process informs the embedder of its routing ID.
@@ -266,7 +288,7 @@ IPC_MESSAGE_ROUTED4(BrowserPluginMsg_LoadRedirect,
                     bool /* is_top_level */)
 
 // When the guest commits a navigation, the browser process informs
-// the embedder through the BrowserPluginMsg_DidCommit message.
+// the embedder through the BrowserPluginMsg_LoadCommit message.
 IPC_MESSAGE_ROUTED2(BrowserPluginMsg_LoadCommit,
                     int /* instance_id */,
                     BrowserPluginMsg_LoadCommit_Params)
@@ -314,9 +336,8 @@ IPC_MESSAGE_ROUTED2(BrowserPluginMsg_SetCursor,
 
 // The guest has damage it wants to convey to the embedder so that it can
 // update its backing store.
-IPC_MESSAGE_ROUTED3(BrowserPluginMsg_UpdateRect,
+IPC_MESSAGE_ROUTED2(BrowserPluginMsg_UpdateRect,
                     int /* instance_id */,
-                    int /* message_id */,
                     BrowserPluginMsg_UpdateRect_Params)
 
 // Requests the renderer to find out if a browser plugin is at position
@@ -327,24 +348,18 @@ IPC_MESSAGE_ROUTED2(BrowserPluginMsg_PluginAtPositionRequest,
                     int /* request_id */,
                     gfx::Point /* position */)
 
-// Signal to the embedder that accelerated compositing was enabled
-// in the guest renderer.
-IPC_MESSAGE_ROUTED1(BrowserPluginMsg_AcceleratedCompositingEnabled,
-                    int /* instance_id */)
+// Informs BrowserPlugin of a new name set for the top-level guest frame.
+IPC_MESSAGE_ROUTED2(BrowserPluginMsg_UpdatedName,
+                    int /* instance_id */,
+                    std::string /* name */)
 
 // Guest renders into an FBO with textures provided by the embedder.
 // When HW accelerated buffers are swapped in the guest, the message
 // is forwarded to the embedder to notify it of a new texture
 // available for compositing.
-IPC_MESSAGE_ROUTED4(BrowserPluginMsg_BuffersSwapped,
+IPC_MESSAGE_ROUTED5(BrowserPluginMsg_BuffersSwapped,
                     int /* instance_id */,
-                    uint64 /* surface_handle */,
+                    gfx::Size /* size */,
+                    std::string /* mailbox_name */,
                     int /* route_id */,
                     int /* gpu_host_id */)
-
-// HW accelerated surface was created in the guest, forward this
-// information to the embedder to update rendering parameters
-// in the compositor.
-IPC_MESSAGE_ROUTED2(BrowserPluginMsg_AcceleratedSurfaceNew,
-                    int /* instance_id */,
-                    gfx::Size /* size */)

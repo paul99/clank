@@ -7,6 +7,7 @@ import tempfile
 import shutil
 
 from telemetry import multi_page_benchmark_unittest_base
+from telemetry import options_for_unittests
 from perf_tools import skpicture_printer
 
 class SkPicturePrinterUnitTest(
@@ -15,24 +16,23 @@ class SkPicturePrinterUnitTest(
   def setUp(self):
     super(SkPicturePrinterUnitTest, self).setUp()
     self._outdir = tempfile.mkdtemp()
+    self._options = options_for_unittests.GetCopy()
+    self._options.outdir = self._outdir
 
   def tearDown(self):
     shutil.rmtree(self._outdir)
     super(SkPicturePrinterUnitTest, self).tearDown()
 
-  def CustomizeOptionsForTest(self, options):
-    options.outdir = self._outdir
-
   def testPrintToSkPicture(self):
     ps = self.CreatePageSetFromFileInUnittestDataDir('non_scrollable_page.html')
     printer = skpicture_printer.SkPicturePrinter()
-    all_results = self.RunBenchmark(printer, ps)
+    all_results = self.RunBenchmark(printer, ps, options=self._options)
 
     self.assertEqual(0, len(all_results.page_failures))
     self.assertEqual(1, len(all_results.page_results))
     results0 = all_results.page_results[0]
 
-    outdir = results0['output_path']
+    outdir = results0['output_path'].value
     self.assertTrue('non_scrollable_page_html' in outdir)
     self.assertTrue(os.path.isdir(outdir))
     self.assertEqual(['layer_0.skp'], os.listdir(outdir))

@@ -197,7 +197,7 @@ class TraySms::SmsDetailedView : public TrayDetailsView,
   }
 
   // Overridden from views::View.
-  gfx::Size GetPreferredSize() {
+  virtual gfx::Size GetPreferredSize() OVERRIDE {
     gfx::Size preferred_size = TrayDetailsView::GetPreferredSize();
     if (preferred_size.height() < kMessageListMinHeight)
       preferred_size.set_height(kMessageListMinHeight);
@@ -308,6 +308,8 @@ views::View* TraySms::CreateDetailedView(user::LoginStatus status) {
 
 views::View* TraySms::CreateNotificationView(user::LoginStatus status) {
   CHECK(notification_ == NULL);
+  if (detailed_)
+    return NULL;
   size_t index;
   std::string number, text;
   if (GetLatestMessage(&index, &number, &text))

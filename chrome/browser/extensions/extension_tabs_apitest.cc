@@ -4,8 +4,8 @@
 
 #include "chrome/browser/extensions/extension_apitest.h"
 
+#include "base/prefs/pref_service.h"
 #include "chrome/browser/prefs/incognito_mode_prefs.h"
-#include "chrome/browser/prefs/pref_service.h"
 #include "chrome/browser/profiles/profile.h"
 #include "chrome/browser/ui/browser.h"
 #include "chrome/browser/ui/browser_window.h"
@@ -41,7 +41,14 @@
 #define MAYBE_UpdateWindowShowState UpdateWindowShowState
 #endif  // defined(USE_AURA) || defined(OS_MACOSX)
 
+// TODO(linux_aura) http://crbug.com/163931
+#if defined(OS_LINUX) && !defined(OS_CHROMEOS) && defined(USE_AURA)
+#define MAYBE_FocusWindowDoesNotExitFullscreen \
+  DISABLED_FocusWindowDoesNotExitFullscreen
+#else
 #define MAYBE_FocusWindowDoesNotExitFullscreen FocusWindowDoesNotExitFullscreen
+#endif
+
 #define MAYBE_UpdateWindowSizeExitsFullscreen UpdateWindowSizeExitsFullscreen
 #define MAYBE_UpdateWindowResize UpdateWindowResize
 #endif  // defined(OS_LINUX) && !defined(USE_AURA)
@@ -80,7 +87,7 @@ IN_PROC_BROWSER_TEST_F(ExtensionApiTest, Tabs2) {
 }
 
 // crbug.com/149924
-IN_PROC_BROWSER_TEST_F(ExtensionApiTest, FLAKY_TabDuplicate) {
+IN_PROC_BROWSER_TEST_F(ExtensionApiTest, DISABLED_TabDuplicate) {
   ASSERT_TRUE(RunExtensionSubtest("tabs/basics", "duplicate.html")) << message_;
 }
 
@@ -182,6 +189,10 @@ IN_PROC_BROWSER_TEST_F(ExtensionApiTest, CaptureVisibleDisabled) {
 
 IN_PROC_BROWSER_TEST_F(ExtensionApiTest, TabsOnUpdated) {
   ASSERT_TRUE(RunExtensionTest("tabs/on_updated")) << message_;
+}
+
+IN_PROC_BROWSER_TEST_F(ExtensionApiTest, TabsNoPermissions) {
+  ASSERT_TRUE(RunExtensionTest("tabs/no_permissions")) << message_;
 }
 
 IN_PROC_BROWSER_TEST_F(ExtensionApiTest,

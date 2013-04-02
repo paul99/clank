@@ -80,6 +80,13 @@ static int ExceptionCodeToNaClSignalNumber(exception_type_t exception) {
   }
 }
 
+static void FireDebugStubEvent(int pipe_fd) {
+  char buf = 0;
+  if (write(pipe_fd, &buf, sizeof(buf)) != sizeof(buf)) {
+    NaClLog(LOG_FATAL, "FireDebugStubEvent: Can't send debug stub event\n");
+  }
+}
+
 static int HandleException(mach_port_t thread_port,
                            exception_type_t exception, int *is_untrusted) {
   mach_msg_type_number_t size;
@@ -143,7 +150,7 @@ static int HandleException(mach_port_t thread_port,
    * TODO(bradnelson): Migrate that knowledge to a single shared location.
    */
   nacl_thread_index = regs.uts.ts32.__gs >> 3;
-  natp = nacl_thread[nacl_thread_index];
+  natp = NaClAppThreadGetFromIndex(nacl_thread_index);
   nap = natp->nap;
 
   if (nap->enable_faulted_thread_queue) {
@@ -152,9 +159,8 @@ static int HandleException(mach_port_t thread_port,
      */
     if (exception == EXC_BREAKPOINT &&
         (regs.uts.ts32.__eflags & NACL_X86_TRAP_FLAG) != 0) {
-      if (regs.uts.ts32.__eip >= nap->springboard_all_regs_addr &&
-          regs.uts.ts32.__eip < (nap->springboard_all_regs_addr
-                                 + nap->bundle_size)) {
+      if (regs.uts.ts32.__eip >= nap->all_regs_springboard.start_addr &&
+          regs.uts.ts32.__eip < nap->all_regs_springboard.end_addr) {
         return 1;
       }
       /*
@@ -182,6 +188,7 @@ static int HandleException(mach_port_t thread_port,
      */
     natp->fault_signal = ExceptionCodeToNaClSignalNumber(exception);
     AtomicIncrement(&nap->faulted_thread_count, 1);
+    FireDebugStubEvent(nap->faulted_thread_fd_write);
     return 1;
   }
 

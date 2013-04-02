@@ -22,7 +22,7 @@
 #include "chrome/browser/chromeos/drive/mock_drive_cache_observer.h"
 #include "chrome/browser/chromeos/drive/stale_cache_files_remover.h"
 #include "chrome/browser/google_apis/drive_api_parser.h"
-#include "chrome/browser/google_apis/mock_drive_service.h"
+#include "chrome/browser/google_apis/fake_drive_service.h"
 #include "chrome/browser/google_apis/time_util.h"
 #include "chrome/test/base/testing_profile.h"
 #include "content/public/browser/browser_thread.h"
@@ -48,22 +48,21 @@ class StaleCacheFilesRemoverTest : public testing::Test {
  protected:
   StaleCacheFilesRemoverTest()
       : ui_thread_(content::BrowserThread::UI, &message_loop_),
-        io_thread_(content::BrowserThread::IO),
         cache_(NULL),
         file_system_(NULL),
-        mock_drive_service_(NULL),
+        fake_drive_service_(NULL),
         drive_webapps_registry_(NULL),
         root_feed_changestamp_(0) {
   }
 
   virtual void SetUp() OVERRIDE {
-    io_thread_.StartIOThread();
-
     profile_.reset(new TestingProfile);
 
-    // Allocate and keep a pointer to the mock, and inject it into the
-    // DriveFileSystem object, which will own the mock object.
-    mock_drive_service_ = new StrictMock<google_apis::MockDriveService>;
+    fake_drive_service_.reset(new google_apis::FakeDriveService);
+    fake_drive_service_->LoadResourceListForWapi(
+        "gdata/root_feed.json");
+    fake_drive_service_->LoadAccountMetadataForWapi(
+        "gdata/account_metadata.json");
 
     fake_free_disk_space_getter_.reset(new FakeFreeDiskSpaceGetter);
 
@@ -83,7 +82,7 @@ class StaleCacheFilesRemoverTest : public testing::Test {
     ASSERT_FALSE(file_system_);
     file_system_ = new DriveFileSystem(profile_.get(),
                                        cache_,
-                                       mock_drive_service_,
+                                       fake_drive_service_.get(),
                                        NULL,  // drive_uploader
                                        drive_webapps_registry_.get(),
                                        blocking_task_runner_);
@@ -106,11 +105,8 @@ class StaleCacheFilesRemoverTest : public testing::Test {
   virtual void TearDown() OVERRIDE {
     ASSERT_TRUE(file_system_);
     stale_cache_files_remover_.reset();
-    EXPECT_CALL(*mock_drive_service_, CancelAll()).Times(1);
     delete file_system_;
     file_system_ = NULL;
-    delete mock_drive_service_;
-    mock_drive_service_ = NULL;
     cache_->Destroy();
     // The cache destruction requires to post a task to the blocking pool.
     google_apis::test_util::RunBlockingPoolTask();
@@ -122,12 +118,11 @@ class StaleCacheFilesRemoverTest : public testing::Test {
   // The order of the test threads is important, do not change the order.
   // See also content/browser/browser_thread_impl.cc.
   content::TestBrowserThread ui_thread_;
-  content::TestBrowserThread io_thread_;
   scoped_refptr<base::SequencedTaskRunner> blocking_task_runner_;
   scoped_ptr<TestingProfile> profile_;
   DriveCache* cache_;
   DriveFileSystem* file_system_;
-  StrictMock<google_apis::MockDriveService>* mock_drive_service_;
+  scoped_ptr<google_apis::FakeDriveService> fake_drive_service_;
   scoped_ptr<DriveWebAppsRegistry> drive_webapps_registry_;
   scoped_ptr<FakeFreeDiskSpaceGetter> fake_free_disk_space_getter_;
   scoped_ptr<StrictMock<MockDriveCacheObserver> > mock_cache_observer_;
@@ -138,7 +133,7 @@ class StaleCacheFilesRemoverTest : public testing::Test {
 };
 
 TEST_F(StaleCacheFilesRemoverTest, RemoveStaleCacheFiles) {
-  FilePath dummy_file =
+  base::FilePath dummy_file =
       google_apis::test_util::GetTestFilePath("gdata/root_feed.json");
   std::string resource_id("pdf:1a2b3c");
   std::string md5("abcdef0123456789");
@@ -154,18 +149,13 @@ TEST_F(StaleCacheFilesRemoverTest, RemoveStaleCacheFiles) {
   EXPECT_EQ(DRIVE_FILE_OK, error);
 
   // Verify that the cache file exists.
-  FilePath path = cache_->GetCacheFilePath(resource_id,
+  base::FilePath path = cache_->GetCacheFilePath(resource_id,
                                            md5,
                                            DriveCache::CACHE_TYPE_TMP,
                                            DriveCache::CACHED_FILE_FROM_SERVER);
   EXPECT_TRUE(file_util::PathExists(path));
 
-  // Verify that the corresponding file entry doesn't exist.
-  EXPECT_CALL(*mock_drive_service_, GetAccountMetadata(_)).Times(2);
-  EXPECT_CALL(*mock_drive_service_, GetResourceList(Eq(GURL()), _, "", _, _, _))
-      .Times(2);
-
-  FilePath unused;
+  base::FilePath unused;
   scoped_ptr<DriveEntryProto> entry_proto;
   file_system_->GetEntryInfoByResourceId(
       resource_id,

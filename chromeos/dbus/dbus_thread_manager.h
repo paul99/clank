@@ -40,27 +40,22 @@ class IBusConfigClient;
 class IBusEngineFactoryService;
 class IBusEngineService;
 class IBusInputContextClient;
+class IBusPanelService;
 class ImageBurnerClient;
 class IntrospectableClient;
 class ModemMessagingClient;
 class PermissionBrokerClient;
 class PowerManagerClient;
-class RootPowerManagerClient;
+class PowerPolicyController;
 class SMSClient;
 class SessionManagerClient;
 class ShillDeviceClient;
 class ShillIPConfigClient;
 class ShillManagerClient;
-class ShillNetworkClient;
 class ShillProfileClient;
 class ShillServiceClient;
 class SpeechSynthesizerClient;
 class UpdateEngineClient;
-
-// TODO(nona): Remove ibus namespace after complete libibus removal.
-namespace ibus {
-class IBusPanelService;
-}  // namespace ibus
 
 // DBusThreadManager manages the D-Bus thread, the thread dedicated to
 // handling asynchronous D-Bus operations.
@@ -137,18 +132,17 @@ class CHROMEOS_EXPORT DBusThreadManager {
   virtual IBusEngineService* GetIBusEngineService(
       const dbus::ObjectPath& object_path) = 0;
   virtual IBusInputContextClient* GetIBusInputContextClient() = 0;
-  virtual ibus::IBusPanelService* GetIBusPanelService() = 0;
+  virtual IBusPanelService* GetIBusPanelService() = 0;
   virtual ImageBurnerClient* GetImageBurnerClient() = 0;
   virtual IntrospectableClient* GetIntrospectableClient() = 0;
   virtual ModemMessagingClient* GetModemMessagingClient() = 0;
   virtual PermissionBrokerClient* GetPermissionBrokerClient() = 0;
   virtual PowerManagerClient* GetPowerManagerClient() = 0;
-  virtual RootPowerManagerClient* GetRootPowerManagerClient() = 0;
+  virtual PowerPolicyController* GetPowerPolicyController() = 0;
   virtual SessionManagerClient* GetSessionManagerClient() = 0;
   virtual ShillDeviceClient* GetShillDeviceClient() = 0;
   virtual ShillIPConfigClient* GetShillIPConfigClient() = 0;
   virtual ShillManagerClient* GetShillManagerClient() = 0;
-  virtual ShillNetworkClient* GetShillNetworkClient() = 0;
   virtual ShillProfileClient* GetShillProfileClient() = 0;
   virtual ShillServiceClient* GetShillServiceClient() = 0;
   virtual SMSClient* GetSMSClient() = 0;

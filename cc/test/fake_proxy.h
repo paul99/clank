@@ -30,7 +30,6 @@ public:
     virtual void setNeedsCommit() OVERRIDE { }
     virtual void setNeedsRedraw() OVERRIDE { }
     virtual void setDeferCommits(bool) OVERRIDE { }
-    virtual void didAddAnimation() OVERRIDE { }
     virtual void mainThreadHasStoppedFlinging() OVERRIDE { }
     virtual bool commitRequested() const OVERRIDE;
     virtual void start() OVERRIDE { }
@@ -38,8 +37,8 @@ public:
     virtual void forceSerializeOnSwapBuffers() OVERRIDE { }
     virtual size_t maxPartialTextureUpdates() const OVERRIDE;
     virtual void acquireLayerTextures() OVERRIDE { }
-    virtual void loseOutputSurface() OVERRIDE { }
     virtual bool commitPendingForTesting() OVERRIDE;
+    virtual skia::RefPtr<SkPicture> capturePicture() OVERRIDE;
 
     virtual RendererCapabilities& rendererCapabilities();
     void setMaxPartialTextureUpdates(size_t);

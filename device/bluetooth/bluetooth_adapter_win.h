@@ -7,8 +7,11 @@
 
 #include <string>
 
+#include "base/memory/ref_counted.h"
 #include "base/memory/weak_ptr.h"
+#include "base/threading/thread_checker.h"
 #include "device/bluetooth/bluetooth_adapter.h"
+#include "device/bluetooth/bluetooth_task_manager_win.h"
 
 namespace device {
 
@@ -16,11 +19,15 @@ class BluetoothAdapterFactory;
 class BluetoothAdapterWinTest;
 class BluetoothDevice;
 
-class BluetoothAdapterWin : public BluetoothAdapter {
+class BluetoothAdapterWin : public BluetoothAdapter,
+                            public BluetoothTaskManagerWin::Observer {
  public:
+  typedef base::Callback<void()> InitCallback;
+
   // BluetoothAdapter override
   virtual void AddObserver(BluetoothAdapter::Observer* observer) OVERRIDE;
   virtual void RemoveObserver(BluetoothAdapter::Observer* observer) OVERRIDE;
+  virtual bool IsInitialized() const OVERRIDE;
   virtual bool IsPresent() const OVERRIDE;
   virtual bool IsPowered() const OVERRIDE;
   virtual void SetPowered(
@@ -28,8 +35,11 @@ class BluetoothAdapterWin : public BluetoothAdapter {
       const base::Closure& callback,
       const ErrorCallback& error_callback) OVERRIDE;
   virtual bool IsDiscovering() const OVERRIDE;
-  virtual void SetDiscovering(
-      bool discovering,
+  virtual bool IsScanning() const OVERRIDE;
+  virtual void StartDiscovering(
+      const base::Closure& callback,
+      const ErrorCallback& error_callback) OVERRIDE;
+  virtual void StopDiscovering(
       const base::Closure& callback,
       const ErrorCallback& error_callback) OVERRIDE;
   virtual ConstDeviceList GetDevices() const OVERRIDE;
@@ -40,25 +50,31 @@ class BluetoothAdapterWin : public BluetoothAdapter {
       const BluetoothOutOfBandPairingDataCallback& callback,
       const ErrorCallback& error_callback) OVERRIDE;
 
- protected:
-  BluetoothAdapterWin();
-  virtual ~BluetoothAdapterWin();
+  // BluetoothTaskManagerWin::Observer override
+  virtual void AdapterStateChanged(
+      const BluetoothTaskManagerWin::AdapterState& state) OVERRIDE;
 
-  virtual void UpdateAdapterState();
+ protected:
+  friend class BluetoothAdapterWinTest;
+
+  BluetoothAdapterWin(const InitCallback& init_callback);
+  virtual ~BluetoothAdapterWin();
 
  private:
   friend class BluetoothAdapterFactory;
-  friend class BluetoothAdapterWinTest;
 
-  // Obtains the default adapter info (the first bluetooth radio info found on
-  // the system) and tracks future changes to it.
   void TrackDefaultAdapter();
 
-  void PollAdapterState();
-
-  static const int kPollIntervalMs;
-
+  InitCallback init_callback_;
+  bool initialized_;
   bool powered_;
+
+  scoped_refptr<BluetoothTaskManagerWin> task_manager_;
+
+  base::ThreadChecker thread_checker_;
+
+  // List of observers interested in event notifications from us.
+  ObserverList<BluetoothAdapter::Observer> observers_;
 
   // NOTE: This should remain the last member so it'll be destroyed and
   // invalidate its weak pointers before any other members are destroyed.

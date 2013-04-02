@@ -43,6 +43,9 @@ class TestingBrowserProcess : public BrowserProcess {
   TestingBrowserProcess();
   virtual ~TestingBrowserProcess();
 
+  // Convenience method to get g_browser_process as a TestingBrowserProcess*.
+  static TestingBrowserProcess* GetGlobal();
+
   virtual void ResourceDispatcherHostCreated() OVERRIDE;
   virtual void EndSession() OVERRIDE;
   virtual MetricsService* metrics_service() OVERRIDE;
@@ -70,6 +73,9 @@ class TestingBrowserProcess : public BrowserProcess {
   virtual extensions::EventRouterForwarder*
       extension_event_router_forwarder() OVERRIDE;
   virtual NotificationUIManager* notification_ui_manager() OVERRIDE;
+#if defined(ENABLE_MESSAGE_CENTER)
+  virtual message_center::MessageCenter* message_center() OVERRIDE;
+#endif
   virtual IntranetRedirectDetector* intranet_redirect_detector() OVERRIDE;
   virtual AutomationProviderList* GetAutomationProviderList() OVERRIDE;
   virtual void CreateDevToolsHttpProtocolHandler(
@@ -81,8 +87,8 @@ class TestingBrowserProcess : public BrowserProcess {
   virtual unsigned int ReleaseModule() OVERRIDE;
   virtual bool IsShuttingDown() OVERRIDE;
   virtual printing::PrintJobManager* print_job_manager() OVERRIDE;
-  virtual printing::PrintPreviewTabController*
-      print_preview_tab_controller() OVERRIDE;
+  virtual printing::PrintPreviewDialogController*
+      print_preview_dialog_controller() OVERRIDE;
   virtual printing::BackgroundPrintingManager*
       background_printing_manager() OVERRIDE;
   virtual const std::string& GetApplicationLocale() OVERRIDE;
@@ -128,9 +134,12 @@ class TestingBrowserProcess : public BrowserProcess {
 #endif
   scoped_ptr<ProfileManager> profile_manager_;
   scoped_ptr<NotificationUIManager> notification_ui_manager_;
+#if defined(ENABLE_MESSAGE_CENTER) && !defined(USE_ASH)
+  scoped_ptr<message_center::MessageCenter> message_center_;
+#endif
   scoped_ptr<printing::BackgroundPrintingManager> background_printing_manager_;
-  scoped_refptr<printing::PrintPreviewTabController>
-      print_preview_tab_controller_;
+  scoped_refptr<printing::PrintPreviewDialogController>
+      print_preview_dialog_controller_;
   scoped_ptr<prerender::PrerenderTracker> prerender_tracker_;
   scoped_ptr<RenderWidgetSnapshotTaker> render_widget_snapshot_taker_;
   scoped_refptr<SafeBrowsingService> sb_service_;

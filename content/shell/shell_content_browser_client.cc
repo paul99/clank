@@ -14,6 +14,7 @@
 #include "content/shell/shell_browser_context.h"
 #include "content/shell/shell_browser_main_parts.h"
 #include "content/shell/shell_devtools_delegate.h"
+#include "content/shell/shell_message_filter.h"
 #include "content/shell/shell_messages.h"
 #include "content/shell/shell_resource_dispatcher_host_delegate.h"
 #include "content/shell/shell_switches.h"
@@ -33,8 +34,8 @@ namespace content {
 
 namespace {
 
-FilePath GetWebKitRootDirFilePath() {
-  FilePath base_path;
+base::FilePath GetWebKitRootDirFilePath() {
+  base::FilePath base_path;
   PathService::Get(base::DIR_SOURCE_ROOT, &base_path);
   if (file_util::PathExists(
           base_path.Append(FILE_PATH_LITERAL("third_party/WebKit")))) {
@@ -76,7 +77,52 @@ void ShellContentBrowserClient::RenderProcessHostCreated(
     RenderProcessHost* host) {
   if (!CommandLine::ForCurrentProcess()->HasSwitch(switches::kDumpRenderTree))
     return;
+  host->GetChannel()->AddFilter(new ShellMessageFilter(host->GetID()));
   host->Send(new ShellViewMsg_SetWebKitSourceDir(webkit_source_dir_));
+}
+
+net::URLRequestContextGetter* ShellContentBrowserClient::CreateRequestContext(
+    BrowserContext* content_browser_context,
+    scoped_ptr<net::URLRequestJobFactory::ProtocolHandler>
+        blob_protocol_handler,
+    scoped_ptr<net::URLRequestJobFactory::ProtocolHandler>
+        file_system_protocol_handler,
+    scoped_ptr<net::URLRequestJobFactory::ProtocolHandler>
+        developer_protocol_handler,
+    scoped_ptr<net::URLRequestJobFactory::ProtocolHandler>
+        chrome_protocol_handler,
+    scoped_ptr<net::URLRequestJobFactory::ProtocolHandler>
+        chrome_devtools_protocol_handler) {
+  ShellBrowserContext* shell_browser_context =
+      ShellBrowserContextForBrowserContext(content_browser_context);
+  return shell_browser_context->CreateRequestContext(
+      blob_protocol_handler.Pass(), file_system_protocol_handler.Pass(),
+      developer_protocol_handler.Pass(), chrome_protocol_handler.Pass(),
+      chrome_devtools_protocol_handler.Pass());
+}
+
+net::URLRequestContextGetter*
+ShellContentBrowserClient::CreateRequestContextForStoragePartition(
+    BrowserContext* content_browser_context,
+    const FilePath& partition_path,
+    bool in_memory,
+    scoped_ptr<net::URLRequestJobFactory::ProtocolHandler>
+        blob_protocol_handler,
+    scoped_ptr<net::URLRequestJobFactory::ProtocolHandler>
+        file_system_protocol_handler,
+    scoped_ptr<net::URLRequestJobFactory::ProtocolHandler>
+        developer_protocol_handler,
+    scoped_ptr<net::URLRequestJobFactory::ProtocolHandler>
+        chrome_protocol_handler,
+    scoped_ptr<net::URLRequestJobFactory::ProtocolHandler>
+        chrome_devtools_protocol_handler) {
+  ShellBrowserContext* shell_browser_context =
+      ShellBrowserContextForBrowserContext(content_browser_context);
+  return shell_browser_context->CreateRequestContextForStoragePartition(
+      partition_path, in_memory, blob_protocol_handler.Pass(),
+      file_system_protocol_handler.Pass(),
+      developer_protocol_handler.Pass(), chrome_protocol_handler.Pass(),
+      chrome_devtools_protocol_handler.Pass());
 }
 
 void ShellContentBrowserClient::AppendExtraCommandLineSwitches(
@@ -91,7 +137,7 @@ void ShellContentBrowserClient::OverrideWebkitPrefs(
     webkit_glue::WebPreferences* prefs) {
   if (!CommandLine::ForCurrentProcess()->HasSwitch(switches::kDumpRenderTree))
     return;
-  WebKitTestController::Get()->web_preferences().Export(prefs);
+  WebKitTestController::Get()->OverrideWebkitPrefs(prefs);
 }
 
 void ShellContentBrowserClient::ResourceDispatcherHostCreated() {
@@ -114,26 +160,13 @@ WebContentsViewDelegate* ShellContentBrowserClient::GetWebContentsViewDelegate(
   return NULL;
 }
 
-bool ShellContentBrowserClient::CanCreateWindow(
-    const GURL& opener_url,
-    const GURL& origin,
-    WindowContainerType container_type,
-    ResourceContext* context,
-    int render_process_id,
-    bool* no_javascript_access) {
-  *no_javascript_access = false;
-  if (!CommandLine::ForCurrentProcess()->HasSwitch(switches::kDumpRenderTree))
-    return true;
-  return WebKitTestController::Get()->CanOpenWindows();
-}
-
 #if defined(OS_ANDROID)
 void ShellContentBrowserClient::GetAdditionalMappedFilesForChildProcess(
     const CommandLine& command_line,
     int child_process_id,
     std::vector<content::FileDescriptorInfo>* mappings) {
   int flags = base::PLATFORM_FILE_OPEN | base::PLATFORM_FILE_READ;
-  FilePath pak_file;
+  base::FilePath pak_file;
   bool r = PathService::Get(base::DIR_ANDROID_APP_DATA, &pak_file);
   CHECK(r);
   pak_file = pak_file.Append(FILE_PATH_LITERAL("paks"));
@@ -162,6 +195,15 @@ ShellBrowserContext*
 
 AccessTokenStore* ShellContentBrowserClient::CreateAccessTokenStore() {
   return new ShellAccessTokenStore(browser_context()->GetRequestContext());
+}
+
+ShellBrowserContext*
+ShellContentBrowserClient::ShellBrowserContextForBrowserContext(
+    BrowserContext* content_browser_context) {
+  if (content_browser_context == browser_context())
+    return browser_context();
+  DCHECK_EQ(content_browser_context, off_the_record_browser_context());
+  return off_the_record_browser_context();
 }
 
 }  // namespace content

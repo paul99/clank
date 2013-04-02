@@ -8,22 +8,21 @@
 #include "base/threading/thread.h"
 #include "base/utf_string_conversions.h"
 #include "chrome/browser/api/infobars/confirm_infobar_delegate.h"
+#include "chrome/browser/api/infobars/infobar_service.h"
 #include "chrome/browser/browser_process.h"
 #include "chrome/browser/content_settings/content_settings_details.h"
 #include "chrome/browser/content_settings/content_settings_provider.h"
 #include "chrome/browser/content_settings/host_content_settings_map.h"
 #include "chrome/browser/extensions/extension_service.h"
 #include "chrome/browser/extensions/extension_system.h"
-#include "chrome/browser/infobars/infobar_tab_helper.h"
 #include "chrome/browser/notifications/desktop_notification_service_factory.h"
 #include "chrome/browser/notifications/notification.h"
 #include "chrome/browser/notifications/notification_object_proxy.h"
 #include "chrome/browser/notifications/notification_ui_manager.h"
-#include "chrome/browser/prefs/pref_service.h"
+#include "chrome/browser/prefs/pref_registry_syncable.h"
 #include "chrome/browser/prefs/scoped_user_pref_update.h"
 #include "chrome/browser/profiles/profile.h"
 #include "chrome/browser/ui/browser.h"
-#include "chrome/browser/ui/webui/web_ui_util.h"
 #include "chrome/common/chrome_notification_types.h"
 #include "chrome/common/content_settings.h"
 #include "chrome/common/content_settings_pattern.h"
@@ -43,6 +42,7 @@
 #include "third_party/WebKit/Source/WebKit/chromium/public/WebSecurityOrigin.h"
 #include "ui/base/l10n/l10n_util.h"
 #include "ui/base/resource/resource_bundle.h"
+#include "ui/webui/web_ui_util.h"
 
 using content::BrowserThread;
 using content::RenderViewHost;
@@ -59,16 +59,25 @@ const ContentSetting kDefaultSetting = CONTENT_SETTING_ASK;
 // permissions.
 class NotificationPermissionInfoBarDelegate : public ConfirmInfoBarDelegate {
  public:
+  // Creates a notification permission delegate and adds it to
+  // |infobar_service|.
+  static void Create(InfoBarService* infobar_service,
+                     DesktopNotificationService* notification_service,
+                     const GURL& origin,
+                     const string16& display_name,
+                     int process_id,
+                     int route_id,
+                     int callback_context);
+
+ private:
   NotificationPermissionInfoBarDelegate(
-      InfoBarTabHelper* infobar_helper,
+      InfoBarService* infobar_service,
       DesktopNotificationService* notification_service,
       const GURL& origin,
       const string16& display_name,
       int process_id,
       int route_id,
       int callback_context);
-
- private:
   virtual ~NotificationPermissionInfoBarDelegate();
 
   // ConfirmInfoBarDelegate:
@@ -101,15 +110,30 @@ class NotificationPermissionInfoBarDelegate : public ConfirmInfoBarDelegate {
   DISALLOW_COPY_AND_ASSIGN(NotificationPermissionInfoBarDelegate);
 };
 
+// static
+void NotificationPermissionInfoBarDelegate::Create(
+    InfoBarService* infobar_service,
+    DesktopNotificationService* notification_service,
+    const GURL& origin,
+    const string16& display_name,
+    int process_id,
+    int route_id,
+    int callback_context) {
+  infobar_service->AddInfoBar(scoped_ptr<InfoBarDelegate>(
+      new NotificationPermissionInfoBarDelegate(
+          infobar_service, notification_service, origin, display_name,
+          process_id, route_id, callback_context)));
+}
+
 NotificationPermissionInfoBarDelegate::NotificationPermissionInfoBarDelegate(
-    InfoBarTabHelper* infobar_helper,
+    InfoBarService* infobar_service,
     DesktopNotificationService* notification_service,
     const GURL& origin,
     const string16& display_name,
     int process_id,
     int route_id,
     int callback_context)
-    : ConfirmInfoBarDelegate(infobar_helper),
+    : ConfirmInfoBarDelegate(infobar_service),
       origin_(origin),
       display_name_(display_name),
       notification_service_(notification_service),
@@ -166,6 +190,15 @@ bool NotificationPermissionInfoBarDelegate::Cancel() {
 
 
 // DesktopNotificationService -------------------------------------------------
+
+// static
+void DesktopNotificationService::RegisterUserPrefs(
+    PrefRegistrySyncable* registry) {
+#if defined(OS_CHROMEOS) || defined(ENABLE_MESSAGE_CENTER)
+  registry->RegisterListPref(prefs::kMessageCenterDisabledExtensionIds,
+                             PrefRegistrySyncable::SYNCABLE_PREF);
+#endif
+}
 
 // static
 string16 DesktopNotificationService::CreateDataUrl(
@@ -264,7 +297,7 @@ std::string DesktopNotificationService::AddIconNotification(
 #else
   GURL icon_url;
   if (!icon.isNull())
-    icon_url = GURL(web_ui_util::GetBitmapDataUrl(*icon.bitmap()));
+    icon_url = GURL(webui::GetBitmapDataUrl(*icon.bitmap()));
   return AddNotification(
       origin_url, title, message, icon_url, replace_id, delegate, profile);
 #endif
@@ -295,10 +328,22 @@ void DesktopNotificationService::StartObserving() {
   }
   notification_registrar_.Add(this, chrome::NOTIFICATION_PROFILE_DESTROYED,
                               content::Source<Profile>(profile_));
+#if defined(ENABLE_MESSAGE_CENTER)
+  OnDisabledExtensionIdsChanged();
+  disabled_extension_id_pref_.Init(
+      prefs::kMessageCenterDisabledExtensionIds,
+      profile_->GetPrefs(),
+      base::Bind(
+          &DesktopNotificationService::OnDisabledExtensionIdsChanged,
+          base::Unretained(this)));
+#endif
 }
 
 void DesktopNotificationService::StopObserving() {
   notification_registrar_.RemoveAll();
+#if defined(ENABLE_MESSAGE_CENTER)
+  disabled_extension_id_pref_.Destroy();
+#endif
 }
 
 void DesktopNotificationService::GrantPermission(const GURL& origin) {
@@ -410,21 +455,21 @@ void DesktopNotificationService::RequestPermission(
   ContentSetting setting = GetContentSetting(origin);
   if (setting == CONTENT_SETTING_ASK) {
     // Show an info bar requesting permission.
-    InfoBarTabHelper* infobar_tab_helper =
-        InfoBarTabHelper::FromWebContents(contents);
-    // |infobar_tab_helper| may be NULL, e.g., if this request originated in a
+    InfoBarService* infobar_service =
+        InfoBarService::FromWebContents(contents);
+    // |infobar_service| may be NULL, e.g., if this request originated in a
     // browser action popup, extension background page, or any HTML that runs
     // outside of a tab.
-    if (infobar_tab_helper) {
-      infobar_tab_helper->AddInfoBar(new NotificationPermissionInfoBarDelegate(
-          infobar_tab_helper,
+    if (infobar_service) {
+      NotificationPermissionInfoBarDelegate::Create(
+          infobar_service,
           DesktopNotificationServiceFactory::GetForProfile(
               Profile::FromBrowserContext(contents->GetBrowserContext())),
           origin,
           DisplayNameForOrigin(origin),
           process_id,
           route_id,
-          callback_context));
+          callback_context);
       return;
     }
   }
@@ -505,6 +550,43 @@ NotificationUIManager* DesktopNotificationService::GetUIManager() {
   if (!ui_manager_)
     ui_manager_ = g_browser_process->notification_ui_manager();
   return ui_manager_;
+}
+
+bool DesktopNotificationService::IsExtensionEnabled(const std::string& id) {
+  return disabled_extension_ids_.find(id) == disabled_extension_ids_.end();
+}
+
+void DesktopNotificationService::SetExtensionEnabled(
+    const std::string& id, bool enabled) {
+  // Do not touch |disabled_extension_ids_|. It will be updated at
+  // OnDisabledExtensionIdsChanged() which will be called when the pref changes.
+  ListPrefUpdate update(profile_->GetPrefs(),
+                        prefs::kMessageCenterDisabledExtensionIds);
+  base::ListValue* disabled_extension_ids = update.Get();
+  if (enabled) {
+    base::StringValue removed_value(id);
+    disabled_extension_ids->Remove(removed_value, NULL);
+  } else {
+    // AppendIfNotPresent will delete |adding_value| when the same value
+    // already exists.
+    base::StringValue* adding_value = new base::StringValue(id);
+    disabled_extension_ids->AppendIfNotPresent(adding_value);
+  }
+}
+
+void DesktopNotificationService::OnDisabledExtensionIdsChanged() {
+  disabled_extension_ids_.clear();
+  const base::ListValue* pref_list = profile_->GetPrefs()->GetList(
+      prefs::kMessageCenterDisabledExtensionIds);
+  for (size_t i = 0; i < pref_list->GetSize(); ++i) {
+    std::string disabled_id;
+    if (!pref_list->GetString(i, &disabled_id) && disabled_id.empty()) {
+      LOG(WARNING) << i << "-th element is not a string for "
+                   << prefs::kMessageCenterDisabledExtensionIds;
+      continue;
+    }
+    disabled_extension_ids_.insert(disabled_id);
+  }
 }
 
 WebKit::WebNotificationPresenter::Permission

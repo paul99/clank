@@ -75,7 +75,7 @@
 {
   "name": "software rendering list",
   // Please update the version number whenever you change this file.
-  "version": "4.11",
+  "version": "4.19",
   "entries": [
     {
       "id": 1,
@@ -196,6 +196,7 @@
         }
       ],
       "blacklist": [
+        "accelerated_2d_canvas",
         "accelerated_video",
         "accelerated_video_decode",
         "3d_css",
@@ -471,7 +472,7 @@
     {
       "id": 32,
       "description": "Accelerated 2d canvas is disabled on Windows systems with low perf stats.",
-      "cr_bugs": [116350],
+      "cr_bugs": [116350, 151500],
       "os": {
         "type": "win"
       },
@@ -480,6 +481,12 @@
         "value": "3.5"
       },
       "exceptions": [
+        {
+          "perf_gaming": {
+            "op": ">",
+            "value": "3.5"
+          }
+        },
         {
           "cpu_info": {
             "op": "contains",
@@ -901,10 +908,14 @@
     },
     {
       "id": 60,
-      "description": "Multisampling is buggy on Mac with NVIDIA gpu.",
+      "description": "Multisampling is buggy on Mac with NVIDIA gpu prior to 10.8.3.",
       "cr_bugs": [137303],
       "os": {
-        "type": "macosx"
+        "type": "macosx",
+        "version": {
+          "op": "<",
+          "number": "10.8.3"
+        }
       },
       "vendor_id": "0x10de",
       "blacklist": [
@@ -913,10 +924,14 @@
     },
     {
       "id": 61,
-      "description": "Multisampling is buggy on Mac with Intel gpu.",
+      "description": "Multisampling is buggy on Mac with Intel gpu prior to 10.8.3.",
       "cr_bugs": [137303],
       "os": {
-        "type": "macosx"
+        "type": "macosx",
+        "version": {
+          "op": "<",
+          "number": "10.8.3"
+        }
       },
       "vendor_id": "0x8086",
       "blacklist": [
@@ -944,10 +959,14 @@
     },
     {
       "id": 63,
-      "description": "Multisampling is buggy on Mac with AMD gpu.",
+      "description": "Multisampling is buggy on Mac with AMD gpu prior to 10.8.3.",
       "cr_bugs": [162466],
       "os": {
-        "type": "macosx"
+        "type": "macosx",
+        "version": {
+          "op": "<",
+          "number": "10.8.3"
+        }
       },
       "vendor_id": "0x1002",
       "blacklist": [
@@ -982,6 +1001,56 @@
       },
       "blacklist": [
         "force_compositing_mode"
+      ]
+    },
+    {
+      "id": 66,
+      "description": "Force compositing mode is unstable in MacOSX earlier than 10.8.",
+      "cr_bugs": [174101],
+      "os": {
+        "type": "macosx",
+        "version": {
+          "op": "<",
+          "number": "10.8"
+        }
+      },
+      "blacklist": [
+        "force_compositing_mode"
+      ]
+    },
+    {
+      "id": 67,
+      "description": "Accelerated 2D Canvas is not supported on WinXP.",
+      "cr_bugs": [175149],
+      "os": {
+        "type": "win",
+        "version": {
+          "op": "=",
+          "number": "5"
+        }
+      },
+      "blacklist": [
+        "accelerated_2d_canvas"
+      ]
+    },
+    {
+      "id": 68,
+      "description": "VMware Fusion 4 has corrupt rendering with Win Vista+.",
+      "cr_bugs": [169470],
+      "os": {
+        "type": "win",
+        "version": {
+          "op": ">=",
+          "number": "6.0"
+        }
+      },
+      "vendor_id": "0x15ad",
+      "driver_version": {
+        "op": "<=",
+        "number": "7.14.1.1134"
+      },
+      "blacklist": [
+        "all"
       ]
     }
   ]

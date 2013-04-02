@@ -1,6 +1,7 @@
 # Copyright (c) 2012 The Chromium Authors. All rights reserved.
 # Use of this source code is governed by a BSD-style license that can be
 # found in the LICENSE file.
+import codecs
 import logging
 import os
 import time
@@ -9,6 +10,7 @@ import urlparse
 import random
 
 from telemetry import browser_gone_exception
+from telemetry import page_filter as page_filter_module
 from telemetry import page_test
 from telemetry import tab_crash_exception
 from telemetry import util
@@ -26,6 +28,8 @@ class _RunState(object):
     self.is_tracing = False
 
   def Close(self):
+    self.is_tracing = False
+
     if self.tab:
       self.tab.Disconnect()
       self.tab = None
@@ -34,15 +38,18 @@ class _RunState(object):
       self.browser.Close()
       self.browser = None
 
-def _ShufflePageSet(page_set, options):
-  if options.test_shuffle_order_file and not options.test_shuffle:
-    raise Exception('--test-shuffle-order-file requires --test-shuffle.')
+def _ShuffleAndFilterPageSet(page_set, options):
+  if options.pageset_shuffle_order_file and not options.pageset_shuffle:
+    raise Exception('--pageset-shuffle-order-file requires --pageset-shuffle.')
 
-  if options.test_shuffle_order_file:
-    return page_set.ReorderPageSet(options.test_shuffle_order_file)
+  if options.pageset_shuffle_order_file:
+    return page_set.ReorderPageSet(options.pageset_shuffle_order_file)
 
-  pages = page_set.pages[:]
-  if options.test_shuffle:
+  page_filter = page_filter_module.PageFilter(options)
+  pages = [page for page in page_set.pages[:]
+           if not page.disabled and page_filter.IsSelected(page)]
+
+  if options.pageset_shuffle:
     random.Random().shuffle(pages)
   return [page
       for _ in xrange(int(options.pageset_repeat))
@@ -61,27 +68,31 @@ class PageRunner(object):
     self.Close()
 
   def Run(self, options, possible_browser, test, results):
-    # Set up WPR mode.
-    archive_path = os.path.abspath(os.path.join(self.page_set.base_dir,
-                                                self.page_set.archive_path))
-    if options.wpr_mode == wpr_modes.WPR_OFF:
-      if os.path.isfile(archive_path):
-        possible_browser.options.wpr_mode = wpr_modes.WPR_REPLAY
-      else:
-        possible_browser.options.wpr_mode = wpr_modes.WPR_OFF
-        if not self.page_set.ContainsOnlyFileURLs():
+    # Check if we can run against WPR.
+    for page in self.page_set.pages:
+      parsed_url = urlparse.urlparse(page.url)
+      if parsed_url.scheme == 'file':
+        continue
+      if not page.archive_path:
+        logging.warning("""
+  No page set archive provided for the page %s. Benchmarking against live sites!
+  Results won't be repeatable or comparable.
+""", page.url)
+      elif options.wpr_mode != wpr_modes.WPR_RECORD:
+        # The page has an archive, and we're not recording.
+        if not os.path.isfile(page.archive_path):
           logging.warning("""
-The page set archive %s does not exist, benchmarking against live sites!
-Results won't be repeatable or comparable.
+  The page set archive %s for page %s does not exist, benchmarking against live
+  sites! Results won't be repeatable or comparable.
 
-To fix this, either add svn-internal to your .gclient using
-http://goto/read-src-internal, or create a new archive using record_wpr.
-""", os.path.relpath(archive_path))
+  To fix this, either add svn-internal to your .gclient using
+  http://goto/read-src-internal, or create a new archive using record_wpr.
+  """, os.path.relpath(page.archive_path), page.url)
 
     # Verify credentials path.
     credentials_path = None
     if self.page_set.credentials_path:
-      credentials_path = os.path.join(self.page_set.base_dir,
+      credentials_path = os.path.join(os.path.dirname(self.page_set.file_path),
                                       self.page_set.credentials_path)
       if not os.path.exists(credentials_path):
         credentials_path = None
@@ -95,24 +106,36 @@ http://goto/read-src-internal, or create a new archive using record_wpr.
 
     # Check tracing directory.
     if options.trace_dir:
+      if not os.path.exists(options.trace_dir):
+        os.mkdir(options.trace_dir)
       if not os.path.isdir(options.trace_dir):
-        raise Exception('Trace directory doesn\'t exist: %s' %
+        raise Exception('--trace-dir isn\'t a directory: %s' %
                         options.trace_dir)
       elif os.listdir(options.trace_dir):
         raise Exception('Trace directory isn\'t empty: %s' % options.trace_dir)
 
     # Reorder page set based on options.
-    pages = _ShufflePageSet(self.page_set, options)
+    pages = _ShuffleAndFilterPageSet(self.page_set, options)
 
     state = _RunState()
+    last_archive_path = None
     try:
       for page in pages:
+        if options.wpr_mode != wpr_modes.WPR_RECORD:
+          if page.archive_path and os.path.isfile(page.archive_path):
+            possible_browser.options.wpr_mode = wpr_modes.WPR_REPLAY
+          else:
+            possible_browser.options.wpr_mode = wpr_modes.WPR_OFF
+        if last_archive_path != page.archive_path:
+          state.Close()
+          state = _RunState()
+          last_archive_path = page.archive_path
         tries = 3
         while tries:
           try:
             if not state.browser:
               self._SetupBrowser(state, test, possible_browser,
-                                 credentials_path, archive_path)
+                                 credentials_path, page.archive_path)
             if not state.tab:
               if len(state.browser.tabs) == 0:
                 state.browser.tabs.New()
@@ -123,6 +146,7 @@ http://goto/read-src-internal, or create a new archive using record_wpr.
             try:
               self._RunPage(options, page, state.tab, test, results)
             except tab_crash_exception.TabCrashException:
+              stdout = ''
               if not options.show_stdout:
                 stdout = state.browser.GetStandardOutput()
                 stdout = (('\nStandard Output:\n') +
@@ -134,6 +158,10 @@ http://goto/read-src-internal, or create a new archive using record_wpr.
 
             if options.trace_dir:
               self._EndTracing(state, options, page)
+
+            if test.needs_browser_restart_after_each_run:
+              state.Close()
+
             break
           except browser_gone_exception.BrowserGoneException:
             logging.warning('Lost connection to browser. Retrying.')
@@ -147,6 +175,7 @@ http://goto/read-src-internal, or create a new archive using record_wpr.
 
   def _RunPage(self, options, page, tab, test, results):
     if not test.CanRunForPage(page):
+      logging.warning('Skiping test: it cannot run for %s', page.url)
       results.AddSkippedPage(page, 'Test cannot run', '')
       return
 
@@ -154,7 +183,7 @@ http://goto/read-src-internal, or create a new archive using record_wpr.
 
     page_state = PageState()
     try:
-      did_prepare = self._PreparePage(page, tab, page_state, results)
+      did_prepare = self._PreparePage(page, tab, page_state, test, results)
     except util.TimeoutException, ex:
       logging.warning('Timed out waiting for reply on %s. This is unusual.',
                       page.url)
@@ -202,14 +231,6 @@ http://goto/read-src-internal, or create a new archive using record_wpr.
   def Close(self):
     pass
 
-  @staticmethod
-  def WaitForPageToLoad(expression, tab):
-    def IsPageLoaded():
-      return tab.runtime.Evaluate(expression)
-
-    # Wait until the form is submitted and the page completes loading.
-    util.WaitFor(IsPageLoaded, 60)
-
   def _SetupBrowser(self, state, test, possible_browser, credentials_path,
                     archive_path):
     assert not state.tab
@@ -230,9 +251,10 @@ http://goto/read-src-internal, or create a new archive using record_wpr.
 
   def _EndTracing(self, state, options, page):
     if state.is_tracing:
+      assert state.browser
       state.is_tracing = False
       state.browser.StopTracing()
-      trace = state.browser.GetTrace()
+      trace_result = state.browser.GetTraceResultAndReset()
       logging.info('Processing trace...')
 
       trace_file_base = os.path.join(
@@ -248,11 +270,12 @@ http://goto/read-src-internal, or create a new archive using record_wpr.
           trace_file_index = trace_file_index + 1
       else:
         trace_file = '%s.json' % trace_file_base
-      with open(trace_file, 'w') as trace_file:
-        trace_file.write(trace)
+      with codecs.open(trace_file, 'w',
+                       encoding='utf-8') as trace_file:
+        trace_result.Serialize(trace_file)
       logging.info('Trace saved.')
 
-  def _PreparePage(self, page, tab, page_state, results):
+  def _PreparePage(self, page, tab, page_state, test, results):
     parsed_url = urlparse.urlparse(page.url)
     if parsed_url[0] == 'file':
       dirname, filename = page.url_base_dir_and_file
@@ -271,22 +294,27 @@ http://goto/read-src-internal, or create a new archive using record_wpr.
         results.AddFailure(page, msg, "")
         return False
 
-    tab.page.Navigate(target_side_url)
+    test.WillNavigateToPage(page, tab)
+    tab.Navigate(target_side_url)
+    test.DidNavigateToPage(page, tab)
 
     # Wait for unpredictable redirects.
     if page.wait_time_after_navigate:
       time.sleep(page.wait_time_after_navigate)
-    if page.wait_for_javascript_expression is not None:
-      self.WaitForPageToLoad(page.wait_for_javascript_expression, tab)
-
+    page.WaitToLoad(tab, 60)
     tab.WaitForDocumentReadyStateToBeInteractiveOrBetter()
+
     return True
 
   def _CleanUpPage(self, page, tab, page_state): # pylint: disable=R0201
     if page.credentials and page_state.did_login:
       tab.browser.credentials.LoginNoLongerNeeded(tab, page.credentials)
     try:
-      tab.runtime.Evaluate("""window.chrome && chrome.benchmarking &&
+      tab.EvaluateJavaScript("""window.chrome && chrome.benchmarking &&
                               chrome.benchmarking.closeConnections()""")
     except Exception:
       pass
+
+  @staticmethod
+  def AddCommandLineOptions(parser):
+    page_filter_module.PageFilter.AddCommandLineOptions(parser)

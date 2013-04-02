@@ -21,6 +21,7 @@ extern const char kOnTabHighlightChanged[];
 extern const char kOnTabHighlighted[];
 extern const char kOnTabMoved[];
 extern const char kOnTabRemoved[];
+extern const char kOnTabReplaced[];
 extern const char kOnTabSelectionChanged[];
 extern const char kOnTabUpdated[];
 
@@ -36,13 +37,12 @@ extern const char kOnExtensionEnabled[];
 extern const char kOnExtensionDisabled[];
 
 // FileBrowser.
-extern const char kOnFileBrowserDiskChanged[];
 extern const char kOnDirectoryChanged[];
 extern const char kOnFileBrowserMountCompleted[];
 extern const char kOnFileTransfersUpdated[];
 extern const char kOnDocumentFeedFetched[];
 extern const char kOnFileBrowserPreferencesChanged[];
-extern const char kOnFileBrowserNetworkConnectionChanged[];
+extern const char kOnFileBrowserDriveConnectionStatusChanged[];
 
 // InputMethod.
 extern const char kOnInputMethodChanged[];
@@ -53,6 +53,7 @@ extern const char kOnContextMenuClicked[];
 
 // DIAL.
 extern const char kOnDialDeviceList[];
+extern const char kOnDialError[];
 
 // Downloads.
 extern const char kOnDownloadCreated[];
@@ -82,6 +83,7 @@ extern const char kOnPushMessage[];
 
 // systemInfo event names.
 extern const char kOnCpuUpdated[];
+extern const char kOnDisplayChanged[];
 extern const char kOnStorageAvailableCapacityChanged[];
 extern const char kOnStorageAdded[];
 extern const char kOnStorageRemoved[];
@@ -90,12 +92,24 @@ extern const char kOnStorageRemoved[];
 extern const char kOnSystemIndicatorClicked[];
 
 // SyncFileSystem.
-extern const char kOnSyncStateChanged[];
-extern const char kOnFileSynced[];
+extern const char kOnServiceStatusChanged[];
+extern const char kOnFileStatusChanged[];
 
 // MediaGalleriesPrivate.
 extern const char kOnAttachEventName[];
 extern const char kOnDetachEventName[];
+extern const char kOnGalleryChangedEventName[];
+
+// Notifications.
+extern const char kOnNotificationDisplayed[];
+extern const char kOnNotificationError[];
+extern const char kOnNotificationClosed[];
+extern const char kOnNotificationClicked[];
+extern const char kOnNotificationButtonClicked[];
+
+// NetworkingPrivate
+extern const char kOnNetworksChanged[];
+extern const char kOnNetworkListChanged[];
 
 }  // namespace event_names
 

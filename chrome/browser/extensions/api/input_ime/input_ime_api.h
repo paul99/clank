@@ -5,16 +5,20 @@
 #ifndef CHROME_BROWSER_EXTENSIONS_API_INPUT_IME_INPUT_IME_API_H_
 #define CHROME_BROWSER_EXTENSIONS_API_INPUT_IME_INPUT_IME_API_H_
 
-#include "chrome/browser/extensions/extension_function.h"
+#include <map>
+#include <string>
+#include <vector>
 
 #include "base/memory/singleton.h"
 #include "base/values.h"
 #include "chrome/browser/chromeos/input_method/input_method_engine.h"
+#include "chrome/browser/extensions/api/profile_keyed_api_factory.h"
+#include "chrome/browser/extensions/extension_function.h"
+#include "chrome/browser/profiles/profile_keyed_service.h"
+#include "chrome/common/extensions/api/input_ime/input_components_handler.h"
 #include "chrome/common/extensions/extension.h"
-
-#include <map>
-#include <string>
-#include <vector>
+#include "content/public/browser/notification_observer.h"
+#include "content/public/browser/notification_registrar.h"
 
 class Profile;
 
@@ -28,11 +32,10 @@ namespace extensions {
 class InputImeEventRouter {
  public:
   static InputImeEventRouter* GetInstance();
-  void Init();
 
   bool RegisterIme(Profile* profile,
                    const std::string& extension_id,
-                   const extensions::Extension::InputComponentInfo& component);
+                   const extensions::InputComponentInfo& component);
   void UnregisterAllImes(Profile* profile, const std::string& extension_id);
   chromeos::InputMethodEngine* GetEngine(const std::string& extension_id,
                                          const std::string& engine_id);
@@ -68,7 +71,8 @@ class InputImeEventRouter {
 
 class SetCompositionFunction : public SyncExtensionFunction {
  public:
-  DECLARE_EXTENSION_FUNCTION_NAME("input.ime.setComposition");
+  DECLARE_EXTENSION_FUNCTION("input.ime.setComposition",
+                             INPUT_IME_SETCOMPOSITION)
 
  protected:
   virtual ~SetCompositionFunction() {}
@@ -79,7 +83,8 @@ class SetCompositionFunction : public SyncExtensionFunction {
 
 class ClearCompositionFunction : public SyncExtensionFunction {
  public:
-  DECLARE_EXTENSION_FUNCTION_NAME("input.ime.clearComposition");
+  DECLARE_EXTENSION_FUNCTION("input.ime.clearComposition",
+                             INPUT_IME_CLEARCOMPOSITION)
 
  protected:
   virtual ~ClearCompositionFunction() {}
@@ -90,7 +95,7 @@ class ClearCompositionFunction : public SyncExtensionFunction {
 
 class CommitTextFunction : public SyncExtensionFunction {
  public:
-  DECLARE_EXTENSION_FUNCTION_NAME("input.ime.commitText");
+  DECLARE_EXTENSION_FUNCTION("input.ime.commitText", INPUT_IME_COMMITTEXT)
 
  protected:
   virtual ~CommitTextFunction() {}
@@ -101,7 +106,8 @@ class CommitTextFunction : public SyncExtensionFunction {
 
 class SetCandidateWindowPropertiesFunction : public SyncExtensionFunction {
  public:
-  DECLARE_EXTENSION_FUNCTION_NAME("input.ime.setCandidateWindowProperties");
+  DECLARE_EXTENSION_FUNCTION("input.ime.setCandidateWindowProperties",
+                             INPUT_IME_SETCANDIDATEWINDOWPROPERTIES)
 
  protected:
   virtual ~SetCandidateWindowPropertiesFunction() {}
@@ -112,7 +118,7 @@ class SetCandidateWindowPropertiesFunction : public SyncExtensionFunction {
 
 class SetCandidatesFunction : public SyncExtensionFunction {
  public:
-  DECLARE_EXTENSION_FUNCTION_NAME("input.ime.setCandidates");
+  DECLARE_EXTENSION_FUNCTION("input.ime.setCandidates", INPUT_IME_SETCANDIDATES)
 
  protected:
   virtual ~SetCandidatesFunction() {}
@@ -128,7 +134,8 @@ class SetCandidatesFunction : public SyncExtensionFunction {
 
 class SetCursorPositionFunction : public SyncExtensionFunction {
  public:
-  DECLARE_EXTENSION_FUNCTION_NAME("input.ime.setCursorPosition");
+  DECLARE_EXTENSION_FUNCTION("input.ime.setCursorPosition",
+                             INPUT_IME_SETCURSORPOSITION)
 
  protected:
   virtual ~SetCursorPositionFunction() {}
@@ -139,7 +146,7 @@ class SetCursorPositionFunction : public SyncExtensionFunction {
 
 class SetMenuItemsFunction : public SyncExtensionFunction {
  public:
-  DECLARE_EXTENSION_FUNCTION_NAME("input.ime.setMenuItems");
+  DECLARE_EXTENSION_FUNCTION("input.ime.setMenuItems", INPUT_IME_SETMENUITEMS)
 
  protected:
   virtual ~SetMenuItemsFunction() {}
@@ -150,7 +157,8 @@ class SetMenuItemsFunction : public SyncExtensionFunction {
 
 class UpdateMenuItemsFunction : public SyncExtensionFunction {
  public:
-  DECLARE_EXTENSION_FUNCTION_NAME("input.ime.updateMenuItems");
+  DECLARE_EXTENSION_FUNCTION("input.ime.updateMenuItems",
+                             INPUT_IME_UPDATEMENUITEMS)
 
  protected:
   virtual ~UpdateMenuItemsFunction() {}
@@ -161,13 +169,42 @@ class UpdateMenuItemsFunction : public SyncExtensionFunction {
 
 class KeyEventHandled : public AsyncExtensionFunction {
  public:
-  DECLARE_EXTENSION_FUNCTION_NAME("input.ime.keyEventHandled");
+  DECLARE_EXTENSION_FUNCTION("input.ime.keyEventHandled",
+                             INPUT_IME_KEYEVENTHANDLED)
 
  protected:
   virtual ~KeyEventHandled() {}
 
   // ExtensionFunction:
   virtual bool RunImpl() OVERRIDE;
+};
+
+class InputImeAPI : public ProfileKeyedAPI,
+                    public content::NotificationObserver {
+ public:
+  explicit InputImeAPI(Profile* profile);
+  virtual ~InputImeAPI();
+
+  // ProfileKeyedAPI implementation.
+  static ProfileKeyedAPIFactory<InputImeAPI>* GetFactoryInstance();
+
+  // content::NotificationObserver implementation.
+  virtual void Observe(int type,
+                       const content::NotificationSource& source,
+                       const content::NotificationDetails& details) OVERRIDE;
+
+ private:
+  friend class ProfileKeyedAPIFactory<InputImeAPI>;
+  InputImeEventRouter* input_ime_event_router();
+
+  // ProfileKeyedAPI implementation.
+  static const char* service_name() {
+    return "InputImeAPI";
+  }
+  static const bool kServiceIsNULLWhileTesting = true;
+
+  Profile* const profile_;
+  content::NotificationRegistrar registrar_;
 };
 
 }  // namespace extensions

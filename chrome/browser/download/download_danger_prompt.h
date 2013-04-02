@@ -7,8 +7,6 @@
 
 #include "base/callback_forward.h"
 
-class ConstrainedWindow;
-
 namespace content {
 class DownloadItem;
 class WebContents;
@@ -35,9 +33,12 @@ class DownloadDangerPrompt {
   // progress, or if the tab corresponding to |web_contents| is
   // closing. The returned DownloadDangerPrompt* is only used for testing. The
   // caller does not own the object and receive no guarantees about lifetime.
+  // If |show_context|, then the prompt message will contain some information
+  // about the download and its danger; otherwise it won't.
   static DownloadDangerPrompt* Create(
       content::DownloadItem* item,
       content::WebContents* web_contents,
+      bool show_context,
       const base::Closure& accepted,
       const base::Closure& canceled);
 

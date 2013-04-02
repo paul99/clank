@@ -18,7 +18,7 @@
 #include "content/public/common/media_stream_request.h"
 #include "net/base/load_states.h"
 #include "third_party/WebKit/Source/WebKit/chromium/public/WebPopupType.h"
-#include "webkit/glue/window_open_disposition.h"
+#include "ui/base/window_open_disposition.h"
 
 class GURL;
 class SkBitmap;
@@ -413,7 +413,7 @@ class CONTENT_EXPORT RenderViewHostDelegate {
   // |request|, and the client should grant or deny that permission by
   // calling |callback|.
   virtual void RequestMediaAccessPermission(
-      const MediaStreamRequest* request,
+      const MediaStreamRequest& request,
       const MediaResponseCallback& callback) {}
 
  protected:

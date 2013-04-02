@@ -235,8 +235,8 @@ class DummyImeControlDelegate : public ImeControlDelegate {
   const ui::Accelerator& last_accelerator() const {
     return last_accelerator_;
   }
-  ui::Accelerator RemapAccelerator(
-      const ui::Accelerator& accelerator) {
+  virtual ui::Accelerator RemapAccelerator(
+      const ui::Accelerator& accelerator) OVERRIDE {
     return ui::Accelerator(accelerator);
   }
 
@@ -881,9 +881,13 @@ TEST_F(AcceleratorControllerTest, GlobalAccelerators) {
       ui::Accelerator(ui::VKEY_ESCAPE, ui::EF_SHIFT_DOWN)));
 
 #if defined(OS_CHROMEOS)
-  // Open file manager dialog
+  // Open 'open file' dialog
   EXPECT_TRUE(ProcessWithContext(
       ui::Accelerator(ui::VKEY_O, ui::EF_CONTROL_DOWN)));
+
+  // Open file manager
+  EXPECT_TRUE(ProcessWithContext(
+      ui::Accelerator(ui::VKEY_M, ui::EF_CONTROL_DOWN  | ui::EF_ALT_DOWN)));
 
   // Lock screen
   // NOTE: Accelerators that do not work on the lock screen need to be

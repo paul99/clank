@@ -4,7 +4,7 @@
 
 #include "chrome/browser/extensions/api/tabs/tabs_windows_api.h"
 
-#include "chrome/browser/extensions/api/tabs/tabs_windows_api_factory.h"
+#include "base/lazy_instance.h"
 #include "chrome/browser/extensions/api/tabs/windows_event_router.h"
 #include "chrome/browser/extensions/event_names.h"
 #include "chrome/browser/extensions/event_router.h"
@@ -27,7 +27,7 @@ TabsWindowsAPI::~TabsWindowsAPI() {
 
 // static
 TabsWindowsAPI* TabsWindowsAPI::Get(Profile* profile) {
-  return TabsWindowsAPIFactory::GetForProfile(profile);
+  return ProfileKeyedAPIFactory<TabsWindowsAPI>::GetForProfile(profile);
 }
 
 WindowsEventRouter* TabsWindowsAPI::windows_event_router() {
@@ -38,6 +38,13 @@ WindowsEventRouter* TabsWindowsAPI::windows_event_router() {
 
 void TabsWindowsAPI::Shutdown() {
   ExtensionSystem::Get(profile_)->event_router()->UnregisterObserver(this);
+}
+
+static base::LazyInstance<ProfileKeyedAPIFactory<TabsWindowsAPI> >
+g_factory = LAZY_INSTANCE_INITIALIZER;
+
+ProfileKeyedAPIFactory<TabsWindowsAPI>* TabsWindowsAPI::GetFactoryInstance() {
+  return &g_factory.Get();
 }
 
 void TabsWindowsAPI::OnListenerAdded(

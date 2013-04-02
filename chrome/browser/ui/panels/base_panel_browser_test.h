@@ -11,10 +11,12 @@
 #include "chrome/browser/ui/panels/panel.h"
 #include "chrome/browser/ui/panels/panel_manager.h"
 #include "chrome/common/extensions/extension.h"
+#include "chrome/common/extensions/manifest.h"
 #include "chrome/test/base/in_process_browser_test.h"
 #include "ui/gfx/rect.h"
 
 class NativePanelTesting;
+class StackedPanelCollection;
 
 class BasePanelBrowserTest : public InProcessBrowserTest {
  public:
@@ -77,6 +79,9 @@ class BasePanelBrowserTest : public InProcessBrowserTest {
 
   Panel* CreateDockedPanel(const std::string& name, const gfx::Rect& bounds);
   Panel* CreateDetachedPanel(const std::string& name, const gfx::Rect& bounds);
+  Panel* CreateStackedPanel(const std::string& name,
+                            const gfx::Rect& bounds,
+                            StackedPanelCollection* stack);
 
   static NativePanelTesting* CreateNativePanelTesting(Panel* panel);
 
@@ -85,8 +90,8 @@ class BasePanelBrowserTest : public InProcessBrowserTest {
   void WaitForBoundsAnimationFinished(Panel* panel);
 
   scoped_refptr<extensions::Extension> CreateExtension(
-      const FilePath::StringType& path,
-      extensions::Extension::Location location,
+      const base::FilePath::StringType& path,
+      extensions::Manifest::Location location,
       const DictionaryValue& extra_value);
 
   void MoveMouseAndWaitForExpansionStateChange(Panel* panel,
@@ -109,7 +114,7 @@ class BasePanelBrowserTest : public InProcessBrowserTest {
     mock_display_settings_enabled_ = false;
   }
 
-  static const FilePath::CharType* kTestDir;
+  static const base::FilePath::CharType* kTestDir;
 
  private:
   // Passed to and owned by PanelManager.

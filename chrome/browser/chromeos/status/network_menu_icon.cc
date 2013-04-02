@@ -547,9 +547,10 @@ void NetworkIcon::UpdateIcon(const Network* network) {
 }
 
 void NetworkIcon::GenerateImage() {
-  if (icon_.isNull())
-    return;
-
+  if (icon_.isNull()) {
+    set_icon(NetworkMenuIcon::GetDisconnectedImage(
+        NetworkMenuIcon::ARCS, resource_color_theme_));
+  }
   image_ = NetworkMenuIcon::GenerateImageFromComponents(icon_, top_left_badge_,
       top_right_badge_, bottom_left_badge_, bottom_right_badge_);
 }
@@ -614,6 +615,9 @@ NetworkMenuIcon::NetworkMenuIcon(Delegate* delegate, Mode mode)
 }
 
 NetworkMenuIcon::~NetworkMenuIcon() {
+  // Remove itself from NetworkIconAnimation's observer list just in case
+  // it has been added before and not been removed yet.
+  NetworkIconAnimation::GetInstance()->RemoveObserver(this);
 }
 
 // Public methods:
@@ -859,10 +863,12 @@ bool NetworkMenuIcon::SetActiveNetworkIconAndText(const Network* network) {
 
 void NetworkMenuIcon::SetDisconnectedIconAndText() {
   icon_->set_icon(GetDisconnectedImage(ARCS, resource_color_theme_));
-  if (mode_ == MENU_MODE)
-    text_ = l10n_util::GetStringUTF16(IDS_STATUSBAR_NETWORK_NO_NETWORK_TOOLTIP);
-  else
+  if (mode_ == MENU_MODE) {
+    text_ = l10n_util::GetStringUTF16(
+        IDS_ASH_STATUS_TRAY_NETWORK_NOT_CONNECTED);
+  } else {
     text_ = l10n_util::GetStringUTF16(IDS_NETWORK_SELECTION_NONE_SELECTED);
+  }
 }
 
 ////////////////////////////////////////////////////////////////////////////////

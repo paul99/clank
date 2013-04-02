@@ -61,6 +61,7 @@ class LCodeGen BASE_EMBEDDED {
         deferred_(8, info->zone()),
         osr_pc_offset_(-1),
         last_lazy_deopt_pc_(0),
+        frame_is_built_(false),
         safepoints_(info->zone()),
         resolver_(this),
         expected_safepoint_kind_(Safepoint::kSimple) {
@@ -75,6 +76,15 @@ class LCodeGen BASE_EMBEDDED {
   Factory* factory() const { return isolate()->factory(); }
   Heap* heap() const { return isolate()->heap(); }
   Zone* zone() const { return zone_; }
+
+  bool NeedsEagerFrame() const {
+    return GetStackSlotCount() > 0 ||
+        info()->is_non_deferred_calling() ||
+        !info()->IsStub();
+  }
+  bool NeedsDeferredFrame() const {
+    return !NeedsEagerFrame() && info()->is_deferred_calling();
+  }
 
   // Support for converting LOperands to assembler types.
   // LOperand must be a register.
@@ -123,10 +133,11 @@ class LCodeGen BASE_EMBEDDED {
   void DoDeferredStringCharCodeAt(LStringCharCodeAt* instr);
   void DoDeferredStringCharFromCode(LStringCharFromCode* instr);
   void DoDeferredAllocateObject(LAllocateObject* instr);
+  void DoDeferredAllocate(LAllocate* instr);
   void DoDeferredInstanceOfKnownGlobal(LInstanceOfKnownGlobal* instr,
                                        Label* map_check);
 
-  void DoCheckMapCommon(Register reg, Register scratch, Handle<Map> map,
+  void DoCheckMapCommon(Register map_reg, Handle<Map> map,
                         CompareMapMode mode, LEnvironment* env);
 
   // Parallel move support.
@@ -189,7 +200,7 @@ class LCodeGen BASE_EMBEDDED {
                        Register temporary2);
 
   int GetStackSlotCount() const { return chunk()->spill_slot_count(); }
-  int GetParameterCount() const { return scope()->num_parameters(); }
+  int GetParameterCount() const { return info()->num_parameters(); }
 
   void Abort(const char* reason);
   void Comment(const char* format, ...);
@@ -316,7 +327,8 @@ class LCodeGen BASE_EMBEDDED {
                         DoubleRegister result,
                         bool deoptimize_on_undefined,
                         bool deoptimize_on_minus_zero,
-                        LEnvironment* env);
+                        LEnvironment* env,
+                        NumberUntagDMode mode);
 
   void DeoptIfTaggedButNotSmi(LEnvironment* environment,
                               HValue* value,
@@ -365,14 +377,19 @@ class LCodeGen BASE_EMBEDDED {
   void EmitDeepCopy(Handle<JSObject> object,
                     Register result,
                     Register source,
-                    int* offset);
+                    int* offset,
+                    AllocationSiteMode mode);
 
   struct JumpTableEntry {
-    explicit inline JumpTableEntry(Address entry)
+    inline JumpTableEntry(Address entry, bool frame, bool is_lazy)
         : label(),
-          address(entry) { }
+          address(entry),
+          needs_frame(frame),
+          is_lazy_deopt(is_lazy) { }
     Label label;
     Address address;
+    bool needs_frame;
+    bool is_lazy_deopt;
   };
 
   void EnsureSpaceForLazyDeopt();
@@ -401,6 +418,7 @@ class LCodeGen BASE_EMBEDDED {
   ZoneList<LDeferredCode*> deferred_;
   int osr_pc_offset_;
   int last_lazy_deopt_pc_;
+  bool frame_is_built_;
 
   // Builder that keeps track of safepoints in the code. The table
   // itself is emitted at the end of the generated code.
@@ -416,6 +434,7 @@ class LCodeGen BASE_EMBEDDED {
     PushSafepointRegistersScope(LCodeGen* codegen,
                                 Safepoint::Kind kind)
         : codegen_(codegen) {
+      ASSERT(codegen_->info()->is_calling());
       ASSERT(codegen_->expected_safepoint_kind_ == Safepoint::kSimple);
       codegen_->expected_safepoint_kind_ = kind;
 

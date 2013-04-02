@@ -7,6 +7,8 @@
 #include <algorithm>
 #include <cmath>
 
+#include "base/bind.h"
+#include "base/bind_helpers.h"
 #include "base/logging.h"
 #include "base/memory/singleton.h"
 #include "chrome/browser/browser_process.h"
@@ -15,10 +17,10 @@
 #else
 #include "chrome/browser/chromeos/audio/audio_mixer_alsa.h"
 #endif
-#include "chrome/browser/prefs/pref_service.h"
+#include "base/prefs/pref_registry_simple.h"
+#include "base/prefs/pref_service.h"
 #include "chrome/common/chrome_notification_types.h"
 #include "chrome/common/pref_names.h"
-#include "content/public/browser/browser_thread.h"
 
 using std::max;
 using std::min;
@@ -78,31 +80,15 @@ AudioHandler* AudioHandler::GetInstance() {
 }
 
 // static
-void AudioHandler::RegisterPrefs(PrefService* local_state) {
-  if (!local_state->FindPreference(prefs::kAudioVolumePercent)) {
-    local_state->RegisterDoublePref(prefs::kAudioVolumePercent,
-                                    kDefaultVolumePercent,
-                                    PrefService::UNSYNCABLE_PREF);
-  }
-  if (!local_state->FindPreference(prefs::kAudioMute)) {
-    local_state->RegisterIntegerPref(prefs::kAudioMute,
-                                     kPrefMuteOff,
-                                     PrefService::UNSYNCABLE_PREF);
-  }
-
-  if (!local_state->FindPreference(prefs::kAudioOutputAllowed)) {
-    // Register the prefs backing the audio muting policies.
-    local_state->RegisterBooleanPref(prefs::kAudioOutputAllowed,
-                                     true,
-                                     PrefService::UNSYNCABLE_PREF);
-  }
+void AudioHandler::RegisterPrefs(PrefRegistrySimple* registry) {
+  registry->RegisterDoublePref(prefs::kAudioVolumePercent,
+                               kDefaultVolumePercent);
+  registry->RegisterIntegerPref(prefs::kAudioMute, kPrefMuteOff);
+  // Register the prefs backing the audio muting policies.
+  registry->RegisterBooleanPref(prefs::kAudioOutputAllowed, true);
   // This pref has moved to the media subsystem but we should verify it is there
   // before we use it.
-  if (!local_state->FindPreference(prefs::kAudioCaptureAllowed)) {
-    local_state->RegisterBooleanPref(prefs::kAudioCaptureAllowed,
-                                     true,
-                                     PrefService::UNSYNCABLE_PREF);
-  }
+  registry->RegisterBooleanPref(prefs::kAudioCaptureAllowed, true);
 }
 
 double AudioHandler::GetVolumePercent() {

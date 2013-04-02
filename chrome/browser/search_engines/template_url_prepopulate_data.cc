@@ -11,13 +11,14 @@
 #include "base/command_line.h"
 #include "base/logging.h"
 #include "base/memory/scoped_vector.h"
+#include "base/prefs/pref_service.h"
+#include "base/stl_util.h"
 #include "base/string16.h"
 #include "base/string_piece.h"
 #include "base/string_util.h"
-#include "base/stl_util.h"
 #include "base/utf_string_conversions.h"
 #include "chrome/browser/google/google_util.h"
-#include "chrome/browser/prefs/pref_service.h"
+#include "chrome/browser/prefs/pref_registry_syncable.h"
 #include "chrome/browser/profiles/profile.h"
 #include "chrome/browser/search_engines/prepopulated_engines.h"
 #include "chrome/browser/search_engines/search_engine_type.h"
@@ -1088,19 +1089,19 @@ const LogoURLs google_logos = {
 
 ////////////////////////////////////////////////////////////////////////////////
 
-void RegisterUserPrefs(PrefService* prefs) {
-  prefs->RegisterIntegerPref(prefs::kCountryIDAtInstall,
-                             kCountryIDUnknown,
-                             PrefService::UNSYNCABLE_PREF);
-  prefs->RegisterListPref(prefs::kSearchProviderOverrides,
-                          PrefService::UNSYNCABLE_PREF);
-  prefs->RegisterIntegerPref(prefs::kSearchProviderOverridesVersion,
-                             -1,
-                             PrefService::UNSYNCABLE_PREF);
+void RegisterUserPrefs(PrefRegistrySyncable* registry) {
+  registry->RegisterIntegerPref(prefs::kCountryIDAtInstall,
+                                kCountryIDUnknown,
+                                PrefRegistrySyncable::UNSYNCABLE_PREF);
+  registry->RegisterListPref(prefs::kSearchProviderOverrides,
+                             PrefRegistrySyncable::UNSYNCABLE_PREF);
+  registry->RegisterIntegerPref(prefs::kSearchProviderOverridesVersion,
+                                -1,
+                                PrefRegistrySyncable::UNSYNCABLE_PREF);
   // Obsolete pref, for migration.
-  prefs->RegisterIntegerPref(prefs::kGeoIDAtInstall,
-                             -1,
-                             PrefService::UNSYNCABLE_PREF);
+  registry->RegisterIntegerPref(prefs::kGeoIDAtInstall,
+                                -1,
+                                PrefRegistrySyncable::UNSYNCABLE_PREF);
 }
 
 int GetDataVersion(PrefService* prefs) {
@@ -1110,16 +1111,18 @@ int GetDataVersion(PrefService* prefs) {
       kCurrentDataVersion;
 }
 
-TemplateURL* MakePrepopulatedTemplateURL(Profile* profile,
-                                         const string16& name,
-                                         const string16& keyword,
-                                         const base::StringPiece& search_url,
-                                         const base::StringPiece& suggest_url,
-                                         const base::StringPiece& instant_url,
-                                         const ListValue& alternate_urls,
-                                         const base::StringPiece& favicon_url,
-                                         const base::StringPiece& encoding,
-                                         int id) {
+TemplateURL* MakePrepopulatedTemplateURL(
+    Profile* profile,
+    const string16& name,
+    const string16& keyword,
+    const base::StringPiece& search_url,
+    const base::StringPiece& suggest_url,
+    const base::StringPiece& instant_url,
+    const base::StringPiece& favicon_url,
+    const base::StringPiece& encoding,
+    const ListValue& alternate_urls,
+    const base::StringPiece& search_terms_replacement_key,
+    int id) {
 
   TemplateURLData data;
 
@@ -1128,12 +1131,6 @@ TemplateURL* MakePrepopulatedTemplateURL(Profile* profile,
   data.SetURL(search_url.as_string());
   data.suggestions_url = suggest_url.as_string();
   data.instant_url = instant_url.as_string();
-  for (size_t i = 0; i < alternate_urls.GetSize(); ++i) {
-    std::string alternate_url;
-    alternate_urls.GetString(i, &alternate_url);
-    DCHECK(!alternate_url.empty());
-    data.alternate_urls.push_back(alternate_url);
-  }
   data.favicon_url = GURL(favicon_url.as_string());
   data.show_in_default_list = true;
   data.safe_for_autoreplace = true;
@@ -1141,6 +1138,13 @@ TemplateURL* MakePrepopulatedTemplateURL(Profile* profile,
   data.date_created = base::Time();
   data.last_modified = base::Time();
   data.prepopulate_id = id;
+  for (size_t i = 0; i < alternate_urls.GetSize(); ++i) {
+    std::string alternate_url;
+    alternate_urls.GetString(i, &alternate_url);
+    DCHECK(!alternate_url.empty());
+    data.alternate_urls.push_back(alternate_url);
+  }
+  data.search_terms_replacement_key = search_terms_replacement_key.as_string();
   return new TemplateURL(profile, data);
 }
 
@@ -1177,12 +1181,15 @@ void GetPrepopulatedTemplateFromPrefs(Profile* profile,
       std::string instant_url;
       ListValue empty_list;
       const ListValue* alternate_urls = &empty_list;
+      std::string search_terms_replacement_key;
       engine->GetString("suggest_url", &suggest_url);
       engine->GetString("instant_url", &instant_url);
       engine->GetList("alternate_urls", &alternate_urls);
+      engine->GetString("search_terms_replacement_key",
+          &search_terms_replacement_key);
       t_urls->push_back(MakePrepopulatedTemplateURL(profile, name, keyword,
-          search_url, suggest_url, instant_url, *alternate_urls, favicon_url,
-          encoding, id));
+          search_url, suggest_url, instant_url, favicon_url, encoding,
+          *alternate_urls, search_terms_replacement_key, id));
     }
   }
 }
@@ -1200,8 +1207,8 @@ TemplateURL* MakePrepopulatedTemplateURLFromPrepopulateEngine(
 
   return MakePrepopulatedTemplateURL(profile, WideToUTF16(engine.name),
       WideToUTF16(engine.keyword), engine.search_url, engine.suggest_url,
-      engine.instant_url, alternate_urls,
-      engine.favicon_url, engine.encoding, engine.id);
+      engine.instant_url, engine.favicon_url, engine.encoding, alternate_urls,
+      engine.search_terms_replacement_key, engine.id);
 }
 
 void GetPrepopulatedEngines(Profile* profile,

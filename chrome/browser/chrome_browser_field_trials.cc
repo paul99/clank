@@ -8,9 +8,9 @@
 
 #include "base/command_line.h"
 #include "base/metrics/field_trial.h"
-#include "base/string_number_conversions.h"
 #include "base/string_util.h"
 #include "base/stringprintf.h"
+#include "base/strings/string_number_conversions.h"
 #include "base/sys_string_conversions.h"
 #include "base/utf_string_conversions.h"
 #include "chrome/browser/auto_launch_trial.h"
@@ -19,6 +19,7 @@
 #include "chrome/browser/gpu/chrome_gpu_util.h"
 #include "chrome/browser/metrics/variations/variations_service.h"
 #include "chrome/browser/prerender/prerender_field_trial.h"
+#include "chrome/browser/profiles/profile_manager.h"
 #include "chrome/browser/safe_browsing/safe_browsing_blocking_page.h"
 #include "chrome/browser/ui/sync/one_click_signin_helper.h"
 #include "chrome/common/chrome_switches.h"
@@ -65,6 +66,10 @@ void SetupSingleUniformityFieldTrial(
   chrome_variations::AssociateGoogleVariationID(
       chrome_variations::GOOGLE_WEB_PROPERTIES, trial_name, kDefaultGroupName,
       trial_base_id);
+  chrome_variations::AssociateGoogleVariationID(
+      chrome_variations::GOOGLE_UPDATE_SERVICE, trial_name, kDefaultGroupName,
+      trial_base_id);
+
   // Loop starts with group 1 because the field trial automatically creates a
   // default group, which would be group 0.
   for (int group_number = 1; group_number < num_trial_groups; ++group_number) {
@@ -73,6 +78,10 @@ void SetupSingleUniformityFieldTrial(
     trial->AppendGroup(group_name, kProbabilityPerGroup);
     chrome_variations::AssociateGoogleVariationID(
         chrome_variations::GOOGLE_WEB_PROPERTIES, trial_name, group_name,
+        static_cast<chrome_variations::VariationID>(trial_base_id +
+                                                    group_number));
+    chrome_variations::AssociateGoogleVariationID(
+        chrome_variations::GOOGLE_UPDATE_SERVICE, trial_name, group_name,
         static_cast<chrome_variations::VariationID>(trial_base_id +
                                                     group_number));
   }
@@ -133,10 +142,11 @@ void ChromeBrowserFieldTrials::SetupFieldTrials(
   AutoLaunchChromeFieldTrial();
   gpu_util::InitializeCompositingFieldTrial();
   SetupUniformityFieldTrials(install_time);
-  AutocompleteFieldTrial::Activate();
+  AutocompleteFieldTrial::ActivateStaticTrials();
   DisableNewTabFieldTrialIfNecesssary();
   SetUpInfiniteCacheFieldTrial();
   SetUpCacheSensitivityAnalysisFieldTrial();
+  DisableShowProfileSwitcherTrialIfNecessary();
   WindowsOverlappedTCPReadsFieldTrial();
 #if defined(ENABLE_ONE_CLICK_SIGNIN)
   OneClickSigninHelper::InitializeFieldTrial();
@@ -237,11 +247,11 @@ void ChromeBrowserFieldTrials::SetupUniformityFieldTrials(
   // and assign the IDs appropriately. So for example, the 1 percent experiments
   // should have a size of 100 (100/100 = 1).
   const chrome_variations::VariationID trial_base_ids[] = {
-      chrome_variations::kUniformity1PercentBase,
-      chrome_variations::kUniformity5PercentBase,
-      chrome_variations::kUniformity10PercentBase,
-      chrome_variations::kUniformity20PercentBase,
-      chrome_variations::kUniformity50PercentBase
+      chrome_variations::UNIFORMITY_1_PERCENT_BASE,
+      chrome_variations::UNIFORMITY_5_PERCENT_BASE,
+      chrome_variations::UNIFORMITY_10_PERCENT_BASE,
+      chrome_variations::UNIFORMITY_20_PERCENT_BASE,
+      chrome_variations::UNIFORMITY_50_PERCENT_BASE
   };
 
   const std::string kOneTimeRandomizedTrialName =
@@ -255,7 +265,7 @@ void ChromeBrowserFieldTrials::SetupUniformityFieldTrials(
   const std::string kSessionRandomizedTrialName =
       "UMA-Session-Randomized-Uniformity-Trial-%d-Percent";
   SetupSingleUniformityFieldTrial(false, kSessionRandomizedTrialName,
-      chrome_variations::kUniformitySessionRandomized5PercentBase, 20);
+      chrome_variations::UNIFORMITY_SESSION_RANDOMIZED_5_PERCENT_BASE, 20);
 
   SetupNewInstallUniformityTrial(install_date);
 }
@@ -287,6 +297,14 @@ void ChromeBrowserFieldTrials::SetUpInfiniteCacheFieldTrial() {
   trial->UseOneTimeRandomization();
   trial->AppendGroup("Yes", infinite_cache_probability);
   trial->AppendGroup("Control", infinite_cache_probability);
+}
+
+void ChromeBrowserFieldTrials::DisableShowProfileSwitcherTrialIfNecessary() {
+  // This trial is created by the VariationsService, but it needs to be disabled
+  // if multi-profiles isn't enabled.
+  base::FieldTrial* trial = base::FieldTrialList::Find("ShowProfileSwitcher");
+  if (trial && !ProfileManager::IsMultipleProfilesEnabled())
+    trial->Disable();
 }
 
 void ChromeBrowserFieldTrials::SetUpCacheSensitivityAnalysisFieldTrial() {
@@ -339,4 +357,6 @@ void ChromeBrowserFieldTrials::InstantiateDynamicTrials() {
   base::FieldTrialList::FindValue("InstantDummy");
   base::FieldTrialList::FindValue("InstantChannel");
   base::FieldTrialList::FindValue("Test0PercentDefault");
+  // Activate the autocomplete dynamic field trials.
+  AutocompleteFieldTrial::ActivateDynamicTrials();
 }

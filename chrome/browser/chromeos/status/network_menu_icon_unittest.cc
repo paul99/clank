@@ -144,19 +144,20 @@ class NetworkMenuIconTest : public testing::Test {
   void SetConnected(Network* network) {
     Network::TestApi test_network(network);
     test_network.SetConnected();
-    test_network.SetConnectionStarted(false);
+    test_network.SetUserConnectState(USER_CONNECT_CONNECTED);
   }
 
   void SetConnecting(Network* network, bool user_initiated) {
     Network::TestApi test_network(network);
     test_network.SetConnecting();
-    test_network.SetConnectionStarted(user_initiated);
+    test_network.SetUserConnectState(
+        user_initiated ? USER_CONNECT_STARTED : USER_CONNECT_NONE);
   }
 
   void SetDisconnected(Network* network) {
     Network::TestApi test_network(network);
     test_network.SetDisconnected();
-    test_network.SetConnectionStarted(false);
+    test_network.SetUserConnectState(USER_CONNECT_NONE);
   }
 
   void SetActive(Network* network, bool active) {

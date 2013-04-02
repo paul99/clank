@@ -78,7 +78,8 @@ void ConfigurationPolicyProvider::Shutdown() {
   did_shutdown_ = true;
 }
 
-bool ConfigurationPolicyProvider::IsInitializationComplete() const {
+bool ConfigurationPolicyProvider::IsInitializationComplete(
+    PolicyDomain domain) const {
   return true;
 }
 
@@ -88,8 +89,8 @@ void ConfigurationPolicyProvider::UpdatePolicy(
     policy_bundle_.Swap(bundle.get());
   else
     policy_bundle_.Clear();
-  FixDeprecatedPolicies(
-      &policy_bundle_.Get(POLICY_DOMAIN_CHROME, std::string()));
+  FixDeprecatedPolicies(&policy_bundle_.Get(
+      PolicyNamespace(POLICY_DOMAIN_CHROME, std::string())));
   FOR_EACH_OBSERVER(ConfigurationPolicyProvider::Observer,
                     observer_list_,
                     OnUpdatePolicy(this));
@@ -102,5 +103,11 @@ void ConfigurationPolicyProvider::AddObserver(Observer* observer) {
 void ConfigurationPolicyProvider::RemoveObserver(Observer* observer) {
   observer_list_.RemoveObserver(observer);
 }
+
+void ConfigurationPolicyProvider::RegisterPolicyNamespace(
+    const PolicyNamespace& ns) {}
+
+void ConfigurationPolicyProvider::UnregisterPolicyNamespace(
+    const PolicyNamespace& ns) {}
 
 }  // namespace policy

@@ -9,6 +9,7 @@
 #include "base/memory/scoped_ptr.h"
 #include "base/observer_list.h"
 #include "chrome/browser/policy/policy_bundle.h"
+#include "chrome/browser/policy/policy_service.h"
 
 namespace policy {
 
@@ -47,10 +48,10 @@ class ConfigurationPolicyProvider {
   // Returns the current PolicyBundle.
   const PolicyBundle& policies() const { return policy_bundle_; }
 
-  // Check whether this provider has completed initialization. This is used to
-  // detect whether initialization is done in case providers implementations
-  // need to do asynchronous operations for initialization.
-  virtual bool IsInitializationComplete() const;
+  // Check whether this provider has completed initialization for the given
+  // policy |domain|. This is used to detect whether initialization is done in
+  // case implementations need to do asynchronous operations for initialization.
+  virtual bool IsInitializationComplete(PolicyDomain domain) const;
 
   // Asks the provider to refresh its policies. All the updates caused by this
   // call will be visible on the next call of OnUpdatePolicy on the observers,
@@ -62,6 +63,16 @@ class ConfigurationPolicyProvider {
   // Observers must detach themselves before the provider is deleted.
   virtual void AddObserver(Observer* observer);
   virtual void RemoveObserver(Observer* observer);
+
+  // Notifies the provider that there is interest in loading policy for the
+  // given namespace. The provider can ignore this information or use it
+  // to selectively load the corresponding policy from its sources.
+  // Each namespace may be registered several times; the provider should assume
+  // that there is an interested consumer until an unregister is made for each
+  // previous register.
+  virtual void RegisterPolicyNamespace(const PolicyNamespace& ns);
+
+  virtual void UnregisterPolicyNamespace(const PolicyNamespace& ns);
 
  protected:
   // Subclasses must invoke this to update the policies currently served by

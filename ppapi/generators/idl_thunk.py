@@ -54,14 +54,11 @@ def _GetBaseFileName(filenode):
   """Returns the base name for output files, given the filenode.
 
   Examples:
-    'dev/ppb_find_dev.h' -> 'ppb_find'
+    'dev/ppb_find_dev.h' -> 'ppb_find_dev'
     'trusted/ppb_buffer_trusted.h' -> 'ppb_buffer_trusted'
   """
   path, name = os.path.split(filenode.GetProperty('NAME'))
   name = os.path.splitext(name)[0]
-  if name.endswith('_dev'):
-    # Clip off _dev suffix.
-    name = name[:-len('_dev')]
   return name
 
 
@@ -101,7 +98,11 @@ def _MakeEnterLine(filenode, interface, arg, handle_errors, callback, meta):
 
     enter_type = 'EnterResource<%s>' % api_name
     # The API header matches the file name, not the interface name.
-    meta.AddApi(_GetBaseFileName(filenode) + '_api')
+    api_basename = _GetBaseFileName(filenode)
+    if api_basename.endswith('_dev'):
+      # Clip off _dev suffix.
+      api_basename = api_basename[:-len('_dev')]
+    meta.AddApi(api_basename + '_api')
 
     if callback is None:
       return '%s enter(%s, %s);' % (enter_type, arg[1],
@@ -389,12 +390,14 @@ class TGen(GeneratorByFile):
         version_list.append((thunk_type, thunk_name))
 
         out.Write('const %s %s = {\n' % (thunk_type, thunk_name))
+        generated_functions = []
         for child in node.GetListOf('Member'):
           rtype, name, arrays, args = cgen.GetComponents(
               child, build, 'return')
-          if child.InReleases([build]):  # TEST
-            out.Write('  &%s,\n' % name)
-        out.Write('};\n\n')
+          if child.InReleases([build]):
+            generated_functions.append(name)
+        out.Write(',\n'.join(['  &%s' % f for f in generated_functions]))
+        out.Write('\n};\n\n')
 
     out.Write('}  // namespace\n')
     out.Write('\n')

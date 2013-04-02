@@ -7,6 +7,15 @@
 #include <float.h>
 #include <string.h>
 
+/*
+ * This header declares the _mm_getcsr function.
+ */
+#if NACL_WINDOWS
+#include <mmintrin.h>
+#else
+#include <xmmintrin.h>
+#endif
+
 #include "native_client/src/shared/platform/nacl_log.h"
 #include "native_client/src/trusted/service_runtime/nacl_signal.h"
 #include "native_client/src/trusted/service_runtime/nacl_app_thread.h"
@@ -14,15 +23,6 @@
 #include "native_client/src/trusted/service_runtime/sel_rt.h"
 #include "native_client/src/trusted/service_runtime/include/sys/errno.h"
 
-
-uintptr_t NaClGetThreadCtxSp(struct NaClThreadContext  *th_ctx) {
-  return (uintptr_t) th_ctx->rsp;
-}
-
-
-void NaClSetThreadCtxSp(struct NaClThreadContext  *th_ctx, uintptr_t sp) {
-  th_ctx->rsp = (nacl_reg_t) sp;
-}
 
 void NaClInitGlobals(void) {
   /* no need to save segment registers */
@@ -65,34 +65,40 @@ int NaClThreadContextCtor(struct NaClThreadContext  *ntcp,
   ntcp->tls_idx = tls_idx;
 
   ntcp->fcw = NACL_X87_FCW_DEFAULT;
+  ntcp->mxcsr = NACL_MXCSR_DEFAULT;
 
   /*
    * Save the system's state of the x87 FPU control word so we can restore
    * the same state when returning to trusted code.
    */
 #if NACL_WINDOWS
-  ntcp->sys_fcw = _control87(0, 0);
+  NaClDoFnstcw(&ntcp->sys_fcw);
 #else
   __asm__ __volatile__("fnstcw %0" : "=m" (ntcp->sys_fcw));
 #endif
+
+  /*
+   * Likewise for the SSE control word.
+   */
+  ntcp->sys_mxcsr = _mm_getcsr();
 
   return 1;
 }
 
 void NaClThreadContextToSignalContext(const struct NaClThreadContext *th_ctx,
                                       struct NaClSignalContext *sig_ctx) {
-  sig_ctx->rax       = th_ctx->rax;
+  sig_ctx->rax       = 0;
   sig_ctx->rbx       = th_ctx->rbx;
-  sig_ctx->rcx       = th_ctx->rcx;
-  sig_ctx->rdx       = th_ctx->rdx;
-  sig_ctx->rsi       = th_ctx->rsi;
-  sig_ctx->rdi       = th_ctx->rdi;
+  sig_ctx->rcx       = 0;
+  sig_ctx->rdx       = 0;
+  sig_ctx->rsi       = 0;
+  sig_ctx->rdi       = 0;
   sig_ctx->rbp       = th_ctx->rbp;
   sig_ctx->stack_ptr = th_ctx->rsp;
-  sig_ctx->r8        = th_ctx->r8;
-  sig_ctx->r9        = th_ctx->r9;
-  sig_ctx->r10       = th_ctx->r10;
-  sig_ctx->r11       = th_ctx->r11;
+  sig_ctx->r8        = 0;
+  sig_ctx->r9        = 0;
+  sig_ctx->r10       = 0;
+  sig_ctx->r11       = 0;
   sig_ctx->r12       = th_ctx->r12;
   sig_ctx->r13       = th_ctx->r13;
   sig_ctx->r14       = th_ctx->r14;
@@ -105,4 +111,22 @@ void NaClThreadContextToSignalContext(const struct NaClThreadContext *th_ctx,
   sig_ctx->es        = 0;
   sig_ctx->fs        = 0;
   sig_ctx->gs        = 0;
+}
+
+
+void NaClSignalContextUnsetClobberedRegisters(
+    struct NaClSignalContext *sig_ctx) {
+  sig_ctx->rax       = 0;
+
+  sig_ctx->rcx       = 0;
+  sig_ctx->rdx       = 0;
+  sig_ctx->rsi       = 0;
+  sig_ctx->rdi       = 0;
+
+  sig_ctx->r8        = 0;
+  sig_ctx->r9        = 0;
+  sig_ctx->r10       = 0;
+  sig_ctx->r11       = 0;
+
+  sig_ctx->flags     = 0;
 }

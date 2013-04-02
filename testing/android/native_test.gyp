@@ -32,7 +32,7 @@
                 '<(PRODUCT_DIR)/replaceme_apk/replaceme-debug.apk',
               ],
               'action': [
-                'ant',
+                'ant', '-q',
                 # TODO: All of these paths are absolute paths right now, while
                 # we really should be using relative paths for anything that is
                 # checked in to the Chromium tree (among which the SDK).
@@ -69,6 +69,7 @@
             '../../base/base.gyp:test_support_base',
             '../gtest.gyp:gtest',
             'native_test_jni_headers',
+            'native_test_util',
           ],
         },
         {
@@ -88,6 +89,17 @@
               '<(SHARED_INTERMEDIATE_DIR)',
             ],
           },
+        },
+        {
+          'target_name': 'native_test_util',
+          'type': 'static_library',
+          'sources': [
+            'native_test_util.cc',
+            'native_test_util.h',
+          ],
+          'dependencies': [
+            '../../base/base.gyp:base',
+          ],
         },
       ],
     }]

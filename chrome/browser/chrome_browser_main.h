@@ -17,7 +17,6 @@
 #include "chrome/browser/task_profiler/auto_tracking.h"
 #include "chrome/browser/ui/startup/startup_browser_creator.h"
 #include "content/public/browser/browser_main_parts.h"
-#include "content/public/browser/browser_thread.h"
 
 class BrowserProcessImpl;
 class ChromeBrowserMainExtraParts;
@@ -78,8 +77,6 @@ class ChromeBrowserMainParts : public content::BrowserMainParts {
   // in order from PreMainMessageLoopRun(). See implementation for details.
   virtual void PreProfileInit();
   virtual void PostProfileInit();
-  virtual void PreInteractiveFirstRunInit();
-  virtual void PostInteractiveFirstRunInit();
   virtual void PreBrowserStart();
   virtual void PostBrowserStart();
 
@@ -106,7 +103,6 @@ class ChromeBrowserMainParts : public content::BrowserMainParts {
   const PrefService* local_state() const { return local_state_; }
 
  private:
-
   // Methods for |SetupMetricsAndFieldTrials()| --------------------------------
 
   // Constructs metrics service and does related initialization, including
@@ -185,10 +181,9 @@ class ChromeBrowserMainParts : public content::BrowserMainParts {
 
   // Members initialized in PreMainMessageLoopRun, needed in
   // PreMainMessageLoopRunThreadsCreated.
-  bool is_first_run_;
-  bool first_run_ui_bypass_;
+  bool do_first_run_tasks_;
   PrefService* local_state_;
-  FilePath user_data_dir_;
+  base::FilePath user_data_dir_;
 
   // Members needed across shutdown methods.
   bool restart_last_session_;

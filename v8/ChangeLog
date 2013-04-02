@@ -1,3 +1,181 @@
+2013-02-06: Version 3.16.14
+
+        Performance and stability improvements on all platforms.
+
+
+2013-02-04: Version 3.16.13
+
+        Tagged stubs that rely on instance types as MEGAMORPHIC.
+        (Chromium issue 173974)
+
+        Fixed clearing of dead dependent codes and verifing of weak
+        embedded maps on full GC. (Chromium issue 172488,172489)
+
+        Made the arm port build cleanly with Clang.
+
+        Performance and stability improvements on all platforms.
+
+
+2013-01-31: Version 3.16.12
+
+        Performance and stability improvements on all platforms.
+
+
+2013-01-30: Version 3.16.11
+
+        Put making embedded maps in optimized code weak behind a flag.
+        (Chromium issue 172488,172489)
+
+        Performance and stability improvements on all platforms.
+
+
+2013-01-25: Version 3.16.10
+
+        Avoid excessive memory usage during redundant phi elimination.
+        (issue 2510)
+
+        Fixed additional spec violations wrt RegExp.lastIndex.
+        (issue 2437)
+
+        Added Isolate parameter to Persistent class.
+        (issue 2487)
+
+        Performance and stability improvements on all platforms.
+
+
+2013-01-24: Version 3.16.9
+
+        Made embedded maps in optimized code weak.
+        (issue 2073)
+
+        Fixed corner case when JSFunction is evicted from flusher.
+        (Chromium issue 168801)
+
+        Correctly set kCanBeDivByZero flag for HMathFloorOfDiv.
+        (Chromium issue 171641)
+
+        Performance and stability improvements on all platforms.
+
+
+2013-01-23: Version 3.16.8
+
+        Correctly reset lastIndex in an RegExp object.
+        (Chromium issue 170856)
+
+        Added a workaround for Windows compilation problems related to V8EXPORT.
+        (issue 2507)
+
+        tools/run-tests.py: shlex.split() the value of --command-prefix
+        (Chromium issue 171553)
+
+        Fixed pattern detection for replacing shifts by rotation.
+        (Chromium issue 2499)
+
+        Performance and stability improvements on all platforms.
+
+
+2013-01-21: Version 3.16.7
+
+        Removed <(library) usage from v8.gyp.
+        (Chromium issue 111541)
+
+        Fixed out of bounds memory access in TestJSArrayForAllocationSiteInfo.
+        (Chromium issue 169928)
+
+        Performance and stability improvements on all platforms.
+
+
+2013-01-18: Version 3.16.6
+
+        Made the Isolate parameter mandatory in Locker and Unlocker classes.
+        (issue 2487)
+
+        Avoid pointer underflow in CopyCharsUnsigned.
+        (issue 2493)
+
+        Generate shim headers when using system v8.
+        (Chromium issue 165264)
+
+        Fixed arguments materialization for inlined apply().
+        (issue 2489)
+
+        Sync'ed laziness between BuildFunctionInfo and MakeFunctionInfo.
+        (Chromium issue 147497)
+
+        Added sanity check to CodeFlusher::AddCandidate.
+        (Chromium issue 169209)
+
+        Performance and stability improvements on all platforms.
+
+
+2013-01-15: Version 3.16.5
+
+        Removed deprecated functions from V8's external API.
+
+        Prepared API for WebKit use of Latin-1.
+
+        Fixed V8 issue 2486.
+
+        Fixed Chromium issue 169723.
+
+        Performance and stability improvements on all platforms.
+
+
+2013-01-11: Version 3.16.4
+
+        Fixed Chromium issues 168545 and 169209.
+
+        Performance and stability improvements on all platforms.
+
+
+2013-01-09: Version 3.16.3
+
+        Improved GC performance when moving parts of a FixedArray (issue 2452).
+
+        Enabled readline on d8 while building a shared lib (issue 1781).
+
+        Fixed missing exception check in typed array constructor
+        (Chromium issue 168545).
+
+        Check for read-only-ness when preparing for array sort (issue 2419).
+
+        Performance and stability improvements on all platforms.
+
+
+2013-01-04: Version 3.16.2
+
+        Added Makefile options to build for the Raspberry Pi (armv7=0,
+        arm_fpu=vfp2).
+
+        Performance and stability improvements on all platforms.
+
+
+2012-12-27: Version 3.16.1
+
+        Fixed x64 MathMinMax for negative untagged int32 arguments.
+        (Chromium issue 164442)
+
+        Fixed FloatingPointHelper::CheckSSE2OperandIsInt32.
+        (issue 2458)
+
+        Performance and stability improvements on all platforms.
+
+
+2012-12-21: Version 3.16.0
+
+        V8_Fatal now prints C++ stack trace in debug mode.
+
+        Added HTML-based tick processor.
+
+        Continued implementation of Object.observe (V8 issue 2409).
+
+        Fixed V8 issues 2243, 2340, 2393, 2399, 2457.
+
+        Fixed Chromium issues 125308, 165637, 166379, 166553.
+
+        Performance and stability improvements on all platforms.
+
+
 2012-12-10: Version 3.15.11
 
         Define CAN_USE_VFP2/3_INSTRUCTIONS based on arm_neon and arm_fpu GYP

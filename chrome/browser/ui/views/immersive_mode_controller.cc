@@ -15,6 +15,13 @@
 #include "ui/views/view.h"
 #include "ui/views/window/non_client_view.h"
 
+#if defined(USE_ASH)
+#include "ash/ash_switches.h"
+#include "ash/shell.h"
+#include "ash/wm/window_properties.h"
+#include "base/command_line.h"
+#endif
+
 #if defined(USE_AURA)
 #include "ui/aura/client/aura_constants.h"
 #include "ui/aura/window.h"
@@ -25,7 +32,8 @@ using views::View;
 
 namespace {
 
-// Time after which the edge trigger fires and top-chrome is revealed.
+// Time after which the edge trigger fires and top-chrome is revealed. This is
+// after the mouse stops moving.
 const int kTopEdgeRevealDelayMs = 200;
 
 // Duration for the reveal show/hide slide animation.
@@ -236,11 +244,20 @@ class ImmersiveModeController::WindowObserver : public aura::WindowObserver {
                                        const void* key,
                                        intptr_t old) OVERRIDE {
     using aura::client::kShowStateKey;
-    if (key != kShowStateKey)
-        return;
-    // Disable immersive mode when leaving the maximized state.
-    if (window->GetProperty(kShowStateKey) != ui::SHOW_STATE_MAXIMIZED)
-      controller_->SetEnabled(false);
+    if (key == kShowStateKey) {
+      // Disable immersive mode when leaving the maximized state.
+      if (window->GetProperty(kShowStateKey) != ui::SHOW_STATE_MAXIMIZED)
+        controller_->SetEnabled(false);
+      return;
+    }
+#if defined(USE_ASH)
+    using ash::internal::kImmersiveModeKey;
+    if (key == kImmersiveModeKey) {
+      // Another component has toggled immersive mode.
+      controller_->SetEnabled(window->GetProperty(kImmersiveModeKey));
+      return;
+    }
+#endif
   }
 
  private:
@@ -256,6 +273,7 @@ ImmersiveModeController::ImmersiveModeController(BrowserView* browser_view)
     : browser_view_(browser_view),
       enabled_(false),
       revealed_(false),
+      hide_tab_indicators_(false),
       native_window_(NULL) {
 }
 
@@ -271,6 +289,13 @@ void ImmersiveModeController::Init() {
   // window pointer so |this| can stop observing during destruction.
   native_window_ = browser_view_->GetNativeWindow();
   DCHECK(native_window_);
+  EnableWindowObservers(true);
+
+#if defined(USE_ASH)
+  // Optionally allow the tab indicators to be hidden.
+  hide_tab_indicators_ = CommandLine::ForCurrentProcess()->
+      HasSwitch(ash::switches::kAshImmersiveHideTabIndicators);
+#endif
 }
 
 void ImmersiveModeController::SetEnabled(bool enabled) {
@@ -286,11 +311,23 @@ void ImmersiveModeController::SetEnabled(bool enabled) {
     top_timer_.Stop();
   }
 
+#if defined(USE_ASH)
+  // This causes a no-op call to SetEnabled() since enabled_ is already set.
+  native_window_->SetProperty(ash::internal::kImmersiveModeKey, enabled_);
+  // Ash on Windows may not have a shell.
+  if (ash::Shell::HasInstance()) {
+    // Shelf auto-hides in immersive mode.
+    ash::Shell::GetInstance()->UpdateShelfVisibility();
+  }
+#endif
+
+  // Ensure window caption buttons are shown/hidden appropriately.
+  browser_view_->frame()->non_client_view()->frame_view()->
+      ResetWindowControls();
+
   // Always ensure tab strip is in correct state.
   browser_view_->tabstrip()->SetImmersiveStyle(enabled_);
   browser_view_->Layout();
-
-  EnableWindowObservers(enabled_);
 }
 
 views::View* ImmersiveModeController::reveal_view() {
@@ -319,15 +356,15 @@ void ImmersiveModeController::CancelReveal() {
 
 // ui::EventHandler overrides:
 void ImmersiveModeController::OnMouseEvent(ui::MouseEvent* event) {
-  if (event->type() != ui::ET_MOUSE_MOVED)
+  if (!enabled_ || event->type() != ui::ET_MOUSE_MOVED)
     return;
   if (event->location().y() == 0) {
-    // Use a timer to detect if the cursor stays at the top past a delay.
-    if (!top_timer_.IsRunning()) {
-      top_timer_.Start(FROM_HERE,
-                       base::TimeDelta::FromMilliseconds(kTopEdgeRevealDelayMs),
-                       this, &ImmersiveModeController::StartReveal);
-    }
+    // Start a reveal if the mouse touches the top of the screen and then stops
+    // moving for a little while. This mirrors the Ash launcher behavior.
+    top_timer_.Stop();
+    top_timer_.Start(FROM_HERE,
+                     base::TimeDelta::FromMilliseconds(kTopEdgeRevealDelayMs),
+                     this, &ImmersiveModeController::StartReveal);
   } else {
     // Cursor left the top edge.
     top_timer_.Stop();
@@ -341,6 +378,10 @@ void ImmersiveModeController::OnImplicitAnimationsCompleted() {
 }
 
 // Testing interface:
+void ImmersiveModeController::SetHideTabIndicatorsForTest(bool hide) {
+  hide_tab_indicators_ = hide;
+}
+
 void ImmersiveModeController::StartRevealForTest() {
   StartReveal();
 }
@@ -379,6 +420,10 @@ void ImmersiveModeController::StartReveal() {
   if (revealed_)
     return;
   revealed_ = true;
+
+  // Reveal shows the window caption buttons.
+  browser_view_->frame()->non_client_view()->frame_view()->
+      ResetWindowControls();
 
   // Recompute the bounds of the views when painted normally.
   browser_view_->tabstrip()->SetImmersiveStyle(false);
@@ -440,6 +485,10 @@ void ImmersiveModeController::EndReveal(Animate animate, Layout layout) {
   }
 
   if (layout == LAYOUT_YES) {
+    // Ending reveal hides the window caption buttons.
+    browser_view_->frame()->non_client_view()->frame_view()->
+        ResetWindowControls();
+
     browser_view_->tabstrip()->SetImmersiveStyle(enabled_);
     browser_view_->Layout();
   }

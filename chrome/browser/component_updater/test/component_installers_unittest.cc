@@ -22,7 +22,7 @@ using content::BrowserThread;
 
 namespace {
 // File name of the Pepper Flash plugin on different platforms.
-const FilePath::CharType kDataPath[] =
+const base::FilePath::CharType kDataPath[] =
 #if defined(OS_MACOSX)
     FILE_PATH_LITERAL("components/flapper/mac");
 #elif defined(OS_WIN)
@@ -43,12 +43,12 @@ TEST(ComponentInstallerTest, PepperFlashCheck) {
   MessageLoop message_loop;
   content::TestBrowserThread ui_thread(BrowserThread::UI, &message_loop);
 
-  ppapi::PpapiGlobals::ForTest for_test;
-  ppapi::TestGlobals test_globals(for_test);
+  ppapi::PpapiGlobals::PerThreadForTest per_thread_for_test;
+  ppapi::TestGlobals test_globals(per_thread_for_test);
   ppapi::PpapiGlobals::SetPpapiGlobalsOnThreadForTest(&test_globals);
 
   // The test directory is chrome/test/data/components/flapper.
-  FilePath manifest;
+  base::FilePath manifest;
   PathService::Get(chrome::DIR_TEST_DATA, &manifest);
   manifest = manifest.Append(kDataPath);
   manifest = manifest.AppendASCII("manifest.json");

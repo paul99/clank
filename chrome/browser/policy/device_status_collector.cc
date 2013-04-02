@@ -11,13 +11,14 @@
 #include "base/location.h"
 #include "base/logging.h"
 #include "base/memory/scoped_ptr.h"
-#include "base/string_number_conversions.h"
+#include "base/prefs/pref_registry_simple.h"
+#include "base/prefs/pref_service.h"
+#include "base/strings/string_number_conversions.h"
 #include "base/values.h"
 #include "chrome/browser/chromeos/settings/cros_settings.h"
 #include "chrome/browser/chromeos/settings/cros_settings_names.h"
 #include "chrome/browser/chromeos/system/statistics_provider.h"
 #include "chrome/browser/policy/proto/device_management_backend.pb.h"
-#include "chrome/browser/prefs/pref_service.h"
 #include "chrome/browser/prefs/scoped_user_pref_update.h"
 #include "chrome/common/chrome_notification_types.h"
 #include "chrome/common/chrome_version_info.h"
@@ -152,11 +153,11 @@ DeviceStatusCollector::~DeviceStatusCollector() {
 }
 
 // static
-void DeviceStatusCollector::RegisterPrefs(PrefService* local_state) {
-  local_state->RegisterDictionaryPref(prefs::kDeviceActivityTimes,
-                                      new base::DictionaryValue);
-  local_state->RegisterDictionaryPref(prefs::kDeviceLocation,
-                                      new base::DictionaryValue);
+void DeviceStatusCollector::RegisterPrefs(PrefRegistrySimple* registry) {
+  registry->RegisterDictionaryPref(prefs::kDeviceActivityTimes,
+                                   new base::DictionaryValue);
+  registry->RegisterDictionaryPref(prefs::kDeviceLocation,
+                                   new base::DictionaryValue);
 }
 
 void DeviceStatusCollector::CheckIdleState() {

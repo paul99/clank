@@ -66,6 +66,8 @@ const int kSmallWallpaperMaxWidth = 1366;
 const int kSmallWallpaperMaxHeight = 800;
 const int kLargeWallpaperMaxWidth = 2560;
 const int kLargeWallpaperMaxHeight = 1700;
+const int kWallpaperThumbnailWidth = 108;
+const int kWallpaperThumbnailHeight = 68;
 
 // Stores the current wallpaper data.
 struct DesktopBackgroundController::WallpaperData {
@@ -132,7 +134,7 @@ class DesktopBackgroundController::WallpaperLoader
 
 DesktopBackgroundController::DesktopBackgroundController()
     : locked_(false),
-      desktop_background_mode_(BACKGROUND_SOLID_COLOR),
+      desktop_background_mode_(BACKGROUND_NONE),
       background_color_(kTransparentColor),
       weak_ptr_factory_(ALLOW_THIS_IN_INITIALIZER_LIST(this)) {
 }
@@ -180,6 +182,10 @@ int DesktopBackgroundController::GetWallpaperIDR() const {
 
 void DesktopBackgroundController::OnRootWindowAdded(
     aura::RootWindow* root_window) {
+  // The background hasn't been set yet.
+  if (desktop_background_mode_ == BACKGROUND_NONE)
+    return;
+
   // Handle resolution change for "built-in" images.
   if (BACKGROUND_IMAGE == desktop_background_mode_ &&
       current_wallpaper_.get()) {
@@ -347,9 +353,9 @@ void DesktopBackgroundController::InstallDesktopController(
       component = new internal::DesktopBackgroundWidgetController(layer);
       break;
     }
-    default: {
+    case BACKGROUND_NONE:
       NOTREACHED();
-    }
+      return;
   }
   // Ensure we're only observing the root window once. Don't rely on a window
   // property check as those can be cleared by tests resetting the background.

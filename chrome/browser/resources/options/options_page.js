@@ -18,6 +18,10 @@ cr.define('options', function() {
     this.title = title;
     this.pageDivName = pageDivName;
     this.pageDiv = $(this.pageDivName);
+    // |pageDiv.page| is set to the page object (this) when the page is visible
+    // to track which page is being shown when multiple pages can share the same
+    // underlying div.
+    this.pageDiv.page = null;
     this.tab = null;
     this.lastFocusedElement = null;
   }
@@ -179,7 +183,7 @@ cr.define('options', function() {
   /**
    * Sets the title of the page. This is accomplished by calling into the
    * parent page API.
-   * @param {String} title The title string.
+   * @param {string} title The title string.
    * @private
    */
   OptionsPage.setTitle_ = function(title) {
@@ -404,7 +408,7 @@ cr.define('options', function() {
 
   /**
    * Returns the currently visible bubble, or null if no bubble is visible.
-   * @return {OptionsBubble} The bubble currently being shown.
+   * @return {AutoCloseBubble} The bubble currently being shown.
    */
   OptionsPage.getVisibleBubble = function() {
     var bubble = OptionsPage.bubble_;
@@ -424,7 +428,7 @@ cr.define('options', function() {
   OptionsPage.showBubble = function(content, target, domSibling, location) {
     OptionsPage.hideBubble();
 
-    var bubble = new options.OptionsBubble;
+    var bubble = new cr.ui.AutoCloseBubble;
     bubble.anchorNode = target;
     bubble.domSibling = domSibling;
     bubble.arrowLocation = location;
@@ -523,9 +527,9 @@ cr.define('options', function() {
     }
 
     // Reverse the button strip for views. See the documentation of
-    // reverseButtonStrip_() for an explanation of why this is necessary.
+    // reverseButtonStripIfNecessary_() for an explanation of why this is done.
     if (cr.isViews)
-      this.reverseButtonStrip_(overlay);
+      this.reverseButtonStripIfNecessary_(overlay);
 
     overlay.tab = undefined;
     overlay.isOverlay = true;
@@ -533,16 +537,17 @@ cr.define('options', function() {
   };
 
   /**
-   * Reverses the child elements of a button strip. This is necessary because
-   * WebKit does not alter the tab order for elements that are visually reversed
-   * using -webkit-box-direction: reverse, and the button order is reversed for
-   * views.  See https://bugs.webkit.org/show_bug.cgi?id=62664 for more
-   * information.
+   * Reverses the child elements of a button strip if it hasn't already been
+   * reversed. This is necessary because WebKit does not alter the tab order for
+   * elements that are visually reversed using -webkit-box-direction: reverse,
+   * and the button order is reversed for views. See http://webk.it/62664 for
+   * more information.
    * @param {Object} overlay The overlay containing the button strip to reverse.
    * @private
    */
-  OptionsPage.reverseButtonStrip_ = function(overlay) {
-    var buttonStrips = overlay.pageDiv.querySelectorAll('.button-strip');
+  OptionsPage.reverseButtonStripIfNecessary_ = function(overlay) {
+    var buttonStrips =
+        overlay.pageDiv.querySelectorAll('.button-strip:not([reversed])');
 
     // Reverse all button-strips in the overlay.
     for (var j = 0; j < buttonStrips.length; j++) {
@@ -551,6 +556,8 @@ cr.define('options', function() {
       var childNodes = buttonStrip.childNodes;
       for (var i = childNodes.length - 1; i >= 0; i--)
         buttonStrip.appendChild(childNodes[i]);
+
+      buttonStrip.setAttribute('reversed', '');
     }
   };
 
@@ -711,6 +718,14 @@ cr.define('options', function() {
     }
   };
 
+  OptionsPage.setIsSettingsApp = function() {
+    document.documentElement.classList.add('settings-app');
+  };
+
+  OptionsPage.isSettingsApp = function() {
+    return document.documentElement.classList.contains('settings-app');
+  };
+
   OptionsPage.prototype = {
     __proto__: cr.EventTarget.prototype,
 
@@ -775,7 +790,9 @@ cr.define('options', function() {
           this.container.classList.contains('transparent')) {
         return false;
       }
-      return !this.pageDiv.hidden;
+      if (this.pageDiv.hidden)
+        return false;
+      return this.pageDiv.page == this;
     },
 
     /**
@@ -792,6 +809,7 @@ cr.define('options', function() {
       if (this.isOverlay) {
         this.setOverlayVisible_(visible);
       } else {
+        this.pageDiv.page = this;
         this.pageDiv.hidden = !visible;
         this.onVisibilityChanged_();
       }
@@ -833,6 +851,7 @@ cr.define('options', function() {
             pages[i].hidden = true;
           // Show the new dialog.
           pageDiv.hidden = false;
+          pageDiv.page = this;
         }
         return;
       }
@@ -840,6 +859,7 @@ cr.define('options', function() {
       if (visible) {
         container.hidden = false;
         pageDiv.hidden = false;
+        pageDiv.page = this;
         // NOTE: This is a hacky way to force the container to layout which
         // will allow us to trigger the webkit transition.
         container.scrollTop;

@@ -43,6 +43,7 @@
         '../ui/gl/gl.gyp:gl',
         '../ui/ui.gyp:ui',
         '../v8/tools/gyp/v8.gyp:v8',
+        '../webkit/support/webkit_support.gyp:webkit_resources',
         '../webkit/support/webkit_support.gyp:webkit_support',
         '<(webkit_src_dir)/Source/WebKit/chromium/WebKit.gyp:webkit',
         '<(webkit_src_dir)/Source/WebKit/chromium/WebKit.gyp:webkit_test_support',
@@ -52,8 +53,14 @@
         '..',
       ],
       'sources': [
+        'shell/android/shell_jni_registrar.cc',
+        'shell/android/shell_jni_registrar.h',
+        'shell/android/shell_manager.cc',
+        'shell/android/shell_manager.h',
         'shell/geolocation/shell_access_token_store.cc',
         'shell/geolocation/shell_access_token_store.h',
+        'shell/minimal_ash.cc',
+        'shell/minimal_ash.h',
         'shell/paths_mac.h',
         'shell/paths_mac.mm',
         'shell/shell.cc',
@@ -80,10 +87,12 @@
         'shell/shell_content_renderer_client.h',
         'shell/shell_devtools_delegate.cc',
         'shell/shell_devtools_delegate.h',
+        'shell/shell_devtools_frontend.cc',
+        'shell/shell_devtools_frontend.h',
         'shell/shell_download_manager_delegate.cc',
         'shell/shell_download_manager_delegate.h',
-        'shell/shell_javascript_dialog_creator.cc',
-        'shell/shell_javascript_dialog_creator.h',
+        'shell/shell_javascript_dialog_manager.cc',
+        'shell/shell_javascript_dialog_manager.h',
         'shell/shell_javascript_dialog_gtk.cc',
         'shell/shell_javascript_dialog_mac.mm',
         'shell/shell_javascript_dialog_win.cc',
@@ -94,24 +103,20 @@
         'shell/shell_login_dialog.h',
         'shell/shell_main_delegate.cc',
         'shell/shell_main_delegate.h',
+        'shell/shell_message_filter.cc',
+        'shell/shell_message_filter.h',
         'shell/shell_messages.cc',
         'shell/shell_messages.h',
         'shell/shell_network_delegate.cc',
         'shell/shell_network_delegate.h',
         'shell/shell_render_process_observer.cc',
         'shell/shell_render_process_observer.h',
-        'shell/shell_resource_context.cc',
-        'shell/shell_resource_context.h',
         'shell/shell_resource_dispatcher_host_delegate.cc',
         'shell/shell_resource_dispatcher_host_delegate.h',
-        'shell/shell_stacking_client_ash.cc',
-        'shell/shell_stacking_client_ash.h',
         'shell/shell_switches.cc',
         'shell/shell_switches.h',
         'shell/shell_url_request_context_getter.cc',
         'shell/shell_url_request_context_getter.h',
-        'shell/shell_webpreferences.cc',
-        'shell/shell_webpreferences.h',
         'shell/shell_web_contents_view_delegate_creator.h',
         'shell/shell_web_contents_view_delegate_gtk.cc',
         'shell/shell_web_contents_view_delegate_mac.mm',
@@ -119,6 +124,8 @@
         'shell/shell_web_contents_view_delegate.h',
         'shell/webkit_test_controller.cc',
         'shell/webkit_test_controller.h',
+        'shell/webkit_test_helpers.cc',
+        'shell/webkit_test_helpers.h',
         'shell/webkit_test_platform_support.h',
         'shell/webkit_test_platform_support_android.cc',
         'shell/webkit_test_platform_support_linux.cc',
@@ -145,7 +152,6 @@
             '<(SHARED_INTERMEDIATE_DIR)/webkit',
           ],
           'dependencies': [
-            '<(DEPTH)/webkit/support/webkit_support.gyp:webkit_resources',
             '<(DEPTH)/webkit/support/webkit_support.gyp:webkit_strings',
           ],
           'configurations': {
@@ -166,9 +172,6 @@
         ['OS=="android"', {
           'dependencies': [
             'content_shell_jni_headers',
-          ],
-          'include_dirs': [
-            '<(SHARED_INTERMEDIATE_DIR)/content/shell',
           ],
         }, {  # else: OS!="android"
           'dependencies': [
@@ -246,7 +249,7 @@
       'target_name': 'content_shell_pak',
       'type': 'none',
       'dependencies': [
-        'browser/debugger/devtools_resources.gyp:devtools_resources',
+        'browser/devtools/devtools_resources.gyp:devtools_resources',
         'content_shell_resources',
         '<(DEPTH)/ui/ui.gyp:ui_resources',
       ],
@@ -263,6 +266,7 @@
               '<(SHARED_INTERMEDIATE_DIR)/net/net_resources.pak',
               '<(SHARED_INTERMEDIATE_DIR)/ui/app_locale_settings/app_locale_settings_en-US.pak',
               '<(SHARED_INTERMEDIATE_DIR)/ui/ui_resources/ui_resources_100_percent.pak',
+              '<(SHARED_INTERMEDIATE_DIR)/ui/ui_resources/webui_resources.pak',
               '<(SHARED_INTERMEDIATE_DIR)/ui/ui_strings/ui_strings_en-US.pak',
               '<(SHARED_INTERMEDIATE_DIR)/webkit/devtools_resources.pak',
               '<(SHARED_INTERMEDIATE_DIR)/webkit/webkit_chromium_resources.pak',
@@ -557,9 +561,16 @@
           'target_name': 'content_shell_jni_headers',
           'type': 'none',
           'sources': [
+            'shell/android/browsertests_apk/src/org/chromium/content_browsertests_apk/BrowserTestSystemMessageHandler.java',
+            'shell/android/browsertests_apk/src/org/chromium/content_browsertests_apk/ContentBrowserTestsActivity.java',
             'shell/android/java/src/org/chromium/content_shell/ShellManager.java',
             'shell/android/java/src/org/chromium/content_shell/Shell.java',
           ],
+          'direct_dependent_settings': {
+            'include_dirs': [
+              '<(SHARED_INTERMEDIATE_DIR)/content/shell',
+            ],
+          },
           'variables': {
             'jni_gen_dir': 'content/shell',
           },
@@ -577,18 +588,9 @@
             '../skia/skia.gyp:skia',
             '<(DEPTH)/media/media.gyp:player_android',
           ],
-          'include_dirs': [
-            '<(SHARED_INTERMEDIATE_DIR)/content/shell',
-          ],
           'sources': [
             'shell/android/shell_library_loader.cc',
             'shell/android/shell_library_loader.h',
-            'shell/android/shell_manager.cc',
-            'shell/android/shell_manager.h',
-          ],
-          'sources!': [
-            'shell/shell_main.cc',
-            'shell/shell_main.h',
           ],
           'conditions': [
             ['android_build_type==1', {
@@ -599,11 +601,27 @@
           ],
         },
         {
+          'target_name': 'content_shell_java',
+          'type': 'none',
+          'dependencies': [
+            'content_java',
+          ],
+          'variables': {
+            'package_name': 'content_shell',
+            'java_in_dir': '../content/shell/android/java',
+            'has_java_resources': 1,
+            'R_package': 'org.chromium.content_shell',
+            'R_package_relpath': 'org/chromium/content_shell',
+          },
+          'includes': [ '../build/java.gypi' ],
+        },
+        {
           # content_shell_apk creates a .jar as a side effect. Any java targets
           # that need that .jar in their classpath should depend on this target,
-          # content_shell_java. Dependents of content_shell_apk receive its jar
-          # path in the variable 'apk_output_jar_path'.
-          'target_name': 'content_shell_java',
+          # content_shell_apk_java. Dependents of content_shell_apk receive its
+          # jar path in the variable 'apk_output_jar_path'. This target should
+          # only be used by targets which instrument content_shell_apk.
+          'target_name': 'content_shell_apk_java',
           'type': 'none',
           'dependencies': [
             'content_shell_apk',
@@ -632,21 +650,22 @@
           'type': 'none',
           'dependencies': [
             'content_java',
+            'content_shell_java',
+            'libcontent_shell_content_view',
             '../base/base.gyp:base_java',
             '../media/media.gyp:media_java',
             '../net/net.gyp:net_java',
             '../ui/ui.gyp:ui_java',
           ],
           'variables': {
-            'package_name': 'content_shell',
+            'package_name': 'content_shell_apk',
             'apk_name': 'ContentShell',
-            'manifest_package_name': 'org.chromium.content_shell',
-            'java_in_dir': 'shell/android/java',
-            # TODO(cjhopman): The resource directory of all apks should be in
-            # <java_in_dir>/res.
-            'resource_dir': '../res',
+            'manifest_package_name': 'org.chromium.content_shell_apk',
+            'java_in_dir': 'shell/android/shell_apk',
+            'resource_dir': 'res',
             'native_libs_paths': ['<(SHARED_LIB_DIR)/libcontent_shell_content_view.so'],
             'additional_input_paths': ['<(PRODUCT_DIR)/content_shell/assets/content_shell.pak'],
+            'asset_location': '<(ant_build_out)/content_shell/assets',
           },
           'includes': [ '../build/java_apk.gypi' ],
         },

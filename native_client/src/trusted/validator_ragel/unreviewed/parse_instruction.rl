@@ -274,6 +274,7 @@
   action operand0_ds_rsi     { SET_OPERAND_NAME(0, REG_DS_RSI); }
   action operand0_es_rdi     { SET_OPERAND_NAME(0, REG_ES_RDI); }
   action operand0_immediate  { SET_OPERAND_NAME(0, REG_IMM); }
+  action operand0_jmp_to     { SET_OPERAND_NAME(0, JMP_TO); }
   action operand0_port_dx    { SET_OPERAND_NAME(0, REG_PORT_DX); }
   action operand0_rax        { SET_OPERAND_NAME(0, REG_RAX); }
   action operand0_rcx        { SET_OPERAND_NAME(0, REG_RCX); }
@@ -533,7 +534,6 @@
   machine relative_fields_actions;
 
   action rel8_operand {
-    SET_OPERAND_NAME(0, JMP_TO);
     SET_MODRM_BASE(REG_RIP);
     SET_MODRM_INDEX(NO_REG);
     SET_MODRM_SCALE(0);
@@ -541,7 +541,6 @@
     SET_DISP_PTR(current_position);
   }
   action rel16_operand {
-    SET_OPERAND_NAME(0, JMP_TO);
     SET_MODRM_BASE(REG_RIP);
     SET_MODRM_INDEX(NO_REG);
     SET_MODRM_SCALE(0);
@@ -549,7 +548,6 @@
     SET_DISP_PTR(current_position - 1);
   }
   action rel32_operand {
-    SET_OPERAND_NAME(0, JMP_TO);
     SET_MODRM_BASE(REG_RIP);
     SET_MODRM_INDEX(NO_REG);
     SET_MODRM_SCALE(0);
@@ -627,7 +625,6 @@
 %%{
   machine set_spurious_prefixes;
 
-  action set_spurious_data16_prefix { SET_SPURIOUS_DATA16();               }
   action set_spurious_rex_b         { SET_SPURIOUS_REX_B();                }
   action set_spurious_rex_x         { SET_SPURIOUS_REX_X();                }
   action set_spurious_rex_r         { SET_SPURIOUS_REX_R();                }
@@ -855,28 +852,34 @@
 %%{
   machine relative_fields_parsing;
 
-  rel8  = any @rel8_operand;
-  rel16 = any{2} @rel16_operand;
-  rel32 = any{4} @rel32_operand;
+  rel8  = any @rel8_operand $any_byte;
+  rel16 = any{2} @rel16_operand $any_byte;
+  rel32 = any{4} @rel32_operand $any_byte;
 }%%
 
 %%{
   machine displacement_fields_parsing;
 
-  disp8  = any @disp8_operand;
-  disp32 = any{4} @disp32_operand;
-  disp64 = any{8} @disp64_operand;
+  # This action is used to mark transitions corresponding to immediates,
+  # displacements and relative jump targets - stuff that we don't have to
+  # enumerate in enumeration tests.
+  # TODO(shcherbina): find appropriate place for this action.
+  action any_byte {}
+
+  disp8  = any @disp8_operand $any_byte;
+  disp32 = any{4} @disp32_operand $any_byte;
+  disp64 = any{8} @disp64_operand $any_byte;
 }%%
 
 %%{
   machine immediate_fields_parsing_common;
 
-  imm8 = any @imm8_operand;
-  imm16 = any{2} @imm16_operand;
-  imm32 = any{4} @imm32_operand;
-  imm64 = any{8} @imm64_operand;
-  imm8n2 = any @imm8_second_operand;
-  imm16n2 = any{2} @imm16_second_operand;
+  imm8 = any @imm8_operand $any_byte;
+  imm16 = any{2} @imm16_operand $any_byte;
+  imm32 = any{4} @imm32_operand $any_byte;
+  imm64 = any{8} @imm64_operand $any_byte;
+  imm8n2 = any @imm8_second_operand $any_byte;
+  imm16n2 = any{2} @imm16_second_operand $any_byte;
 }%%
 
 %%{
@@ -895,77 +898,11 @@
   imm2 = b_xxxx_00xx @imm2_operand;
 }%%
 
-%%{
-  machine displacement_fields_mark;
-
-  action disp8_operand_begin { }
-  action disp8_operand_end { }
-  action disp32_operand_begin { }
-  action disp32_operand_end { }
-  action disp64_operand_begin { }
-  action disp64_operand_end { }
-
-  disp8  = any >disp8_operand_begin @disp8_operand_end;
-  disp32 = any{3} $disp32_operand_begin any @disp32_operand_end;
-  disp64 = any{7} $disp64_operand_begin any @disp64_operand_end;
-}%%
-
-%%{
-  machine immediate_fields_mark_common;
-
-  action imm8_operand_begin { }
-  action imm8_operand_end { }
-  action imm16_operand_begin { }
-  action imm16_operand_end { }
-  action imm32_operand_begin { }
-  action imm32_operand_end { }
-  action imm64_operand_begin { }
-  action imm64_operand_end { }
-
-  imm8 = any >imm8_operand_begin @imm8_operand_end;
-  imm16 = any $imm16_operand_begin any @imm16_operand_end;
-  imm32 = any{3} $imm32_operand_begin any @imm32_operand_end;
-  imm64 = any{7} $imm64_operand_begin any @imm64_operand_end;
-  imm8n2 = any >imm8_operand_begin @imm8_operand_end;
-  imm16n2 = any $imm16_operand_begin any @imm16_operand_end;
-}%%
-
-%%{
-  machine immediate_fields_mark_ia32;
-
-  include immediate_fields_mark_common
-    "native_client/src/trusted/validator_ragel/unreviewed/parse_instruction.rl";
-  imm2 = b_0xxx_00xx;
-}%%
-
-%%{
-  machine immediate_fields_mark_amd64;
-
-  include immediate_fields_mark_common
-    "native_client/src/trusted/validator_ragel/unreviewed/parse_instruction.rl";
-  imm2 = b_xxxx_00xx;
-}%%
-
-%%{
-  machine relative_fields_mark;
-
-  action rel8_operand_begin { }
-  action rel8_operand_end { }
-  action rel16_operand_begin { }
-  action rel16_operand_end { }
-  action rel32_operand_begin { }
-  action rel32_operand_end { }
-
-  rel8  = any >rel8_operand_begin @rel8_operand_end;
-  rel16 = any $rel16_operand_begin any @rel16_operand_end;
-  rel32 = any{3} $rel32_operand_begin any @rel32_operand_end;
-}%%
-
 
 %%{
   machine decoder;
 
-  action process_collected_data {
+  action end_of_instruction_cleanup {
     process_instruction(instruction_start, current_position+1, &instruction,
                         userdata);
     instruction_start = current_position + 1;
@@ -983,16 +920,18 @@
     SET_VEX_PREFIX2(VEX_R | VEX_X | VEX_B);
     SET_VEX_PREFIX3(0x00);
     SET_ATT_INSTRUCTION_SUFFIX(NULL);
-    CLEAR_SPURIOUS_DATA16();
     CLEAR_SPURIOUS_REX_B();
     CLEAR_SPURIOUS_REX_X();
     CLEAR_SPURIOUS_REX_R();
     CLEAR_SPURIOUS_REX_W();
   }
 
-  decoder = (one_instruction @process_collected_data)*
-    $!{ process_error(current_position, userdata);
-        result = FALSE;
-        goto error_detected;
-    };
+  action report_fatal_error {
+    process_error(current_position, userdata);
+    result = FALSE;
+    goto error_detected;
+  }
+
+  decoder = (one_instruction @end_of_instruction_cleanup)*
+    $!report_fatal_error;
 }%%

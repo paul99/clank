@@ -1,7 +1,7 @@
 include_rules = [
-  # Autofill is being made into a Browser Component, so we have these
-  # three basic rules followed by temporary exceptions.  Please don't
-  # add to the list of exceptions!
+  # Autofill is being made into a Browser Component, so we have these basic
+  # rules followed by temporary exceptions.  Please don't add to the list of
+  # exceptions!
   "-chrome/browser",
   "+chrome/browser/api",
   "+chrome/browser/autofill",
@@ -11,6 +11,8 @@ include_rules = [
   # Permanently-allowed DEPS beyond the standard Browser
   # Components-like DEPS above go here.
   "+third_party/libphonenumber",  # For phone number i18n.
+
+  "+chrome/browser/prefs",
 
   # TODO(joi): May be able to remove this if PKS is moved to c/b/api.
   "!chrome/browser/profiles/profile_keyed_service.h",
@@ -25,7 +27,6 @@ specific_include_rules = {
   # Do not add to the list of temporarily-allowed dependencies below,
   # and please do not introduce more #includes of these files.
   '.*_[a-z]*test\.cc': [
-    "!chrome/browser/infobars/infobar_tab_helper.h",
     "!chrome/browser/password_manager/encryptor.h",
     "!chrome/browser/password_manager/password_manager.h",
     "!chrome/browser/password_manager/password_manager_delegate_impl.h",
@@ -41,6 +42,12 @@ specific_include_rules = {
     "!chrome/browser/ui/browser.h",
     "!chrome/browser/ui/browser_tabstrip.h",
     "!chrome/browser/ui/browser_window.h",
+    "!chrome/browser/ui/tabs/tab_strip_model.h",
+  ],
+
+  # TODO(joi): Remove these dependencies once the Prefs refactoring is complete.
+  'fingerprint\.cc': [
+    "!chrome/browser/browser_process.h",
   ],
 
   # TODO(joi): May be able to get rid of the need for this by moving

@@ -7,6 +7,7 @@
 
 #include "base/basictypes.h"
 
+class PrefRegistrySyncable;
 class PrefServiceBase;
 
 // Helper class for getting, changing bookmark prompt related preferences.
@@ -30,7 +31,7 @@ class BookmarkPromptPrefs {
   bool IsBookmarkPromptEnabled() const;
 
   // Registers user preferences used by bookmark prompt feature.
-  static void RegisterUserPrefs(PrefServiceBase* prefs);
+  static void RegisterUserPrefs(PrefRegistrySyncable* registry);
 
  private:
   PrefServiceBase* prefs_;  // Weak.

@@ -1,4 +1,4 @@
-#!/usr/bin/env python
+#!/usr/bin/python
 # Copyright (c) 2012 The Chromium Authors. All rights reserved.
 # Use of this source code is governed by a BSD-style license that can be
 # found in the LICENSE file.
@@ -17,6 +17,7 @@ import json
 import logging
 import optparse
 import os
+import pipes
 import signal
 import socket
 import subprocess
@@ -24,14 +25,6 @@ import sys
 import tempfile
 import time
 import uuid
-
-# By default this script will try to determine the most appropriate X session
-# command for the system.  To use a specific session instead, set this variable
-# to the executable filename, or a list containing the executable and any
-# arguments, for example:
-# XSESSION_COMMAND = "/usr/bin/gnome-session-fallback"
-# XSESSION_COMMAND = ["/usr/bin/gnome-session", "--session=ubuntu-2d"]
-XSESSION_COMMAND = None
 
 LOG_FILE_ENV_VAR = "CHROME_REMOTE_DESKTOP_LOG_FILE"
 
@@ -61,9 +54,6 @@ HOME_DIR = os.environ["HOME"]
 X_LOCK_FILE_TEMPLATE = "/tmp/.X%d-lock"
 FIRST_X_DISPLAY_NUMBER = 20
 
-X_AUTH_FILE = os.path.expanduser("~/.Xauthority")
-os.environ["XAUTHORITY"] = X_AUTH_FILE
-
 # Minimum amount of time to wait between relaunching processes.
 BACKOFF_TIME = 60
 
@@ -83,29 +73,41 @@ class Config:
     self.changed = False
 
   def load(self):
-    try:
-      settings_file = open(self.path, 'r')
-      self.data = json.load(settings_file)
-      self.changed = False
-      settings_file.close()
-    except Exception:
-      return False
-    return True
+    """Loads the config from file.
+
+    Raises:
+      IOError: Error reading data
+      ValueError: Error parsing JSON
+    """
+    settings_file = open(self.path, 'r')
+    self.data = json.load(settings_file)
+    self.changed = False
+    settings_file.close()
 
   def save(self):
+    """Saves the config to file.
+
+    Raises:
+      IOError: Error writing data
+      TypeError: Error serialising JSON
+    """
     if not self.changed:
-      return True
+      return
     old_umask = os.umask(0066)
     try:
       settings_file = open(self.path, 'w')
       settings_file.write(json.dumps(self.data, indent=2))
       settings_file.close()
-    except Exception:
-      return False
+      self.changed = False
     finally:
       os.umask(old_umask)
-    self.changed = False
-    return True
+
+  def save_and_log_errors(self):
+    """Calls save(self), trapping and logging any errors."""
+    try:
+      save(self)
+    except (IOError, TypeError) as e:
+      logging.error("Failed to save config: " + str(e))
 
   def get(self, key):
     return self.data.get(key)
@@ -281,10 +283,15 @@ class Desktop:
     return True
 
   def _launch_x_server(self, extra_x_args):
+    x_auth_file = os.path.expanduser("~/.Xauthority")
+    self.child_env["XAUTHORITY"] = x_auth_file
     devnull = open(os.devnull, "rw")
     display = self.get_unused_display_number()
+
+    # Run "xauth add" with |child_env| so that it modifies the same XAUTHORITY
+    # file which will be used for the X session.
     ret_code = subprocess.call("xauth add :%d . `mcookie`" % display,
-                               shell=True)
+                               env=self.child_env, shell=True)
     if ret_code != 0:
       raise Exception("xauth failed with code %d" % ret_code)
 
@@ -307,7 +314,7 @@ class Desktop:
     screen_option = "%dx%dx24" % (max_width, max_height)
     self.x_proc = subprocess.Popen([xvfb, ":%d" % display,
                                     "-noreset",
-                                    "-auth", X_AUTH_FILE,
+                                    "-auth", x_auth_file,
                                     "-nolisten", "tcp",
                                     "-screen", "0", screen_option
                                     ] + extra_x_args)
@@ -348,34 +355,38 @@ class Desktop:
       label = "%dx%d" % (width, height)
       args = ["xrandr", "--newmode", label, "0", str(width), "0", "0", "0",
               str(height), "0", "0", "0"]
-      proc = subprocess.Popen(args, env=self.child_env, stdout=devnull,
-                              stderr=devnull)
-      proc.wait()
+      subprocess.call(args, env=self.child_env, stdout=devnull, stderr=devnull)
       args = ["xrandr", "--addmode", "screen", label]
-      proc = subprocess.Popen(args, env=self.child_env, stdout=devnull,
-                              stderr=devnull)
-      proc.wait()
+      subprocess.call(args, env=self.child_env, stdout=devnull, stderr=devnull)
 
     # Set the initial mode to the first size specified, otherwise the X server
     # would default to (max_width, max_height), which might not even be in the
     # list.
     label = "%dx%d" % self.sizes[0]
     args = ["xrandr", "-s", label]
-    proc = subprocess.Popen(args, env=self.child_env, stdout=devnull,
-                            stderr=devnull)
-    proc.wait()
+    subprocess.call(args, env=self.child_env, stdout=devnull, stderr=devnull)
+
+    # Set the physical size of the display so that the initial mode is running
+    # at approximately 96 DPI, since some desktops require the DPI to be set to
+    # something realistic.
+    args = ["xrandr", "--dpi", "96"]
+    subprocess.call(args, env=self.child_env, stdout=devnull, stderr=devnull)
 
     devnull.close()
 
   def _launch_x_session(self):
-    # Start desktop session
+    # Start desktop session.
     # The /dev/null input redirection is necessary to prevent the X session
     # reading from stdin.  If this code runs as a shell background job in a
     # terminal, any reading from stdin causes the job to be suspended.
     # Daemonization would solve this problem by separating the process from the
     # controlling terminal.
-    logging.info("Launching X session: %s" % XSESSION_COMMAND)
-    self.session_proc = subprocess.Popen(XSESSION_COMMAND,
+    xsession_command = choose_x_session()
+    if xsession_command is None:
+      raise Exception("Unable to choose suitable X session command.")
+
+    logging.info("Launching X session: %s" % xsession_command)
+    self.session_proc = subprocess.Popen(xsession_command,
                                          stdin=open(os.devnull, "r"),
                                          cwd=HOME_DIR,
                                          env=self.child_env)
@@ -490,18 +501,12 @@ class PidFile:
 def choose_x_session():
   """Chooses the most appropriate X session command for this system.
 
-  If XSESSION_COMMAND is already set, its value is returned directly.
-  Otherwise, a session is chosen for this system.
-
   Returns:
     A string containing the command to run, or a list of strings containing
     the executable program and its arguments, which is suitable for passing as
     the first parameter of subprocess.Popen().  If a suitable session cannot
     be found, returns None.
   """
-  if XSESSION_COMMAND is not None:
-    return XSESSION_COMMAND
-
   # If the session wrapper script (see below) is given a specific session as an
   # argument (such as ubuntu-2d on Ubuntu 12.04), the wrapper will run that
   # session instead of looking for custom .xsession files in the home directory.
@@ -517,7 +522,10 @@ def choose_x_session():
       # (see /etc/X11/Xsession.d/50x11-common_determine-startup), to determine
       # exactly how to run this file.
       if os.access(startup_file, os.X_OK):
-        return startup_file
+        # "/bin/sh -c" is smart about how to execute the session script and
+        # works in cases where plain exec() fails (for example, if the file is
+        # marked executable, but is a plain script with no shebang line).
+        return ["/bin/sh", "-c", pipes.quote(startup_file)]
       else:
         shell = os.environ.get("SHELL", "sh")
         return [shell, startup_file]
@@ -650,7 +658,10 @@ class SignalHandler:
   def __call__(self, signum, _stackframe):
     if signum == signal.SIGHUP:
       logging.info("SIGHUP caught, restarting host.")
-      self.host_config.load()
+      try:
+        self.host_config.load()
+      except (IOError, ValueError) as e:
+        logging.error("Failed to load config: " + str(e))
       for desktop in g_desktops:
         if desktop.host_proc:
           desktop.host_proc.send_signal(signal.SIGTERM)
@@ -841,15 +852,17 @@ Web Store: https://chrome.google.com/remotedesktop"""
     return 0
 
   if options.add_user:
-    sudo_command = "gksudo --message" if os.getenv("DISPLAY") else "sudo -p"
-    command = ("sudo -k && %(sudo)s "
-               "\"Please enter your password to enable Chrome Remote Desktop\" "
-               "-- sh -c "
+    if os.getenv("DISPLAY"):
+      sudo_command = "gksudo --description \"Chrome Remote Desktop\""
+    else:
+      sudo_command = "sudo"
+    command = ("sudo -k && exec %(sudo)s -- sh -c "
                "\"groupadd -f %(group)s && gpasswd --add %(user)s %(group)s\"" %
                { 'group': CHROME_REMOTING_GROUP_NAME,
                  'user': getpass.getuser(),
                  'sudo': sudo_command })
-    return os.system(command) >> 8
+    os.execv("/bin/sh", ["/bin/sh", "-c", command])
+    return 1
 
   if options.host_version:
     # TODO(sergeyu): Also check RPM package version once we add RPM package.
@@ -886,26 +899,15 @@ Web Store: https://chrome.google.com/remotedesktop"""
 
     sizes.append((width, height))
 
-  # Determine the command-line to run the user's preferred X environment.
-  global XSESSION_COMMAND
-  XSESSION_COMMAND = choose_x_session()
-  if XSESSION_COMMAND is None:
-    print >> sys.stderr, "Unable to choose suitable X session command."
-    return 1
-
-  if "--session=ubuntu-2d" in XSESSION_COMMAND:
-    print >> sys.stderr, (
-      "The Unity 2D desktop session will be used.\n"
-      "If you encounter problems with this choice of desktop, please install\n"
-      "the gnome-session-fallback package, and restart this script.\n")
-
   # Register an exit handler to clean up session process and the PID file.
   atexit.register(cleanup)
 
   # Load the initial host configuration.
   host_config = Config(options.config)
-  if (not host_config.load()):
-    print >> sys.stderr, "Failed to load " + config_filename
+  try:
+    host_config.load()
+  except (IOError, ValueError) as e:
+    print >> sys.stderr, "Failed to load config: " + str(e)
     return 1
 
   # Register handler to re-load the configuration in response to signals.
@@ -1045,30 +1047,30 @@ Web Store: https://chrome.google.com/remotedesktop"""
         logging.info("Host configuration is invalid - exiting.")
         host_config.clear_auth()
         host_config.clear_host_info()
-        host_config.save()
+        host_config.save_and_log_errors()
         return 0
       elif os.WEXITSTATUS(status) == 101:
         logging.info("Host ID has been deleted - exiting.")
         host_config.clear_host_info()
-        host_config.save()
+        host_config.save_and_log_errors()
         return 0
       elif os.WEXITSTATUS(status) == 102:
         logging.info("OAuth credentials are invalid - exiting.")
         host_config.clear_auth()
-        host_config.save()
+        host_config.save_and_log_errors()
         return 0
       elif os.WEXITSTATUS(status) == 103:
         logging.info("Host domain is blocked by policy - exiting.")
         host_config.clear_auth()
         host_config.clear_host_info()
-        host_config.save()
+        host_config.save_and_log_errors()
         return 0
       # Nothing to do for Mac-only status 104 (login screen unsupported)
       elif os.WEXITSTATUS(status) == 105:
         logging.info("Username is blocked by policy - exiting.")
         host_config.clear_auth()
         host_config.clear_host_info()
-        host_config.save()
+        host_config.save_and_log_errors()
         return 0
 
 

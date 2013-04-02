@@ -53,7 +53,7 @@ std::string CreateHttpHeaders(CFInvocation invocation,
   return ss.str();
 }
 
-std::string GetMockHttpHeaders(const FilePath& mock_http_headers_path) {
+std::string GetMockHttpHeaders(const base::FilePath& mock_http_headers_path) {
   std::string headers;
   file_util::ReadFileToString(mock_http_headers_path, &headers);
   return headers;
@@ -72,12 +72,12 @@ class ChromeFrameTestEnvironment: public testing::Environment {
 
 }  // namespace
 
-FilePath ChromeFrameTestWithWebServer::test_file_path_;
-FilePath ChromeFrameTestWithWebServer::results_dir_;
-FilePath ChromeFrameTestWithWebServer::CFInstall_path_;
-FilePath ChromeFrameTestWithWebServer::CFInstance_path_;
+base::FilePath ChromeFrameTestWithWebServer::test_file_path_;
+base::FilePath ChromeFrameTestWithWebServer::results_dir_;
+base::FilePath ChromeFrameTestWithWebServer::CFInstall_path_;
+base::FilePath ChromeFrameTestWithWebServer::CFInstance_path_;
 base::ScopedTempDir ChromeFrameTestWithWebServer::temp_dir_;
-FilePath ChromeFrameTestWithWebServer::chrome_user_data_dir_;
+base::FilePath ChromeFrameTestWithWebServer::chrome_user_data_dir_;
 chrome_frame_test::TimedMsgLoop* ChromeFrameTestWithWebServer::loop_;
 std::string ChromeFrameTestWithWebServer::local_address_;
 testing::StrictMock<MockWebServerListener>*
@@ -89,7 +89,7 @@ ChromeFrameTestWithWebServer::ChromeFrameTestWithWebServer() {
 
 // static
 void ChromeFrameTestWithWebServer::SetUpTestCase() {
-  FilePath chrome_frame_source_path;
+  base::FilePath chrome_frame_source_path;
   PathService::Get(base::DIR_SOURCE_ROOT, &chrome_frame_source_path);
   chrome_frame_source_path = chrome_frame_source_path.Append(
       FILE_PATH_LITERAL("chrome_frame"));
@@ -102,8 +102,8 @@ void ChromeFrameTestWithWebServer::SetUpTestCase() {
 
   // Copy the CFInstance.js and CFInstall.js files from src\chrome_frame to
   // src\chrome_frame\test\data.
-  FilePath CFInstance_src_path;
-  FilePath CFInstall_src_path;
+  base::FilePath CFInstance_src_path;
+  base::FilePath CFInstall_src_path;
 
   CFInstance_src_path = chrome_frame_source_path.AppendASCII("CFInstance.js");
   CFInstance_path_ = test_file_path_.AppendASCII("CFInstance.js");
@@ -141,7 +141,8 @@ void ChromeFrameTestWithWebServer::TearDownTestCase() {
 }
 
 // static
-const FilePath& ChromeFrameTestWithWebServer::GetChromeUserDataDirectory() {
+const base::FilePath&
+ChromeFrameTestWithWebServer::GetChromeUserDataDirectory() {
   if (!temp_dir_.IsValid()) {
     EXPECT_TRUE(temp_dir_.CreateUniqueTempDir());
     chrome_user_data_dir_ = temp_dir_.path().AppendASCII("User Data");
@@ -179,7 +180,7 @@ bool ChromeFrameTestWithWebServer::LaunchBrowser(BrowserKind browser,
   if (browser == IE) {
     browser_handle_.Set(chrome_frame_test::LaunchIE(url));
   } else if (browser == CHROME) {
-    const FilePath& user_data_dir = GetChromeUserDataDirectory();
+    const base::FilePath& user_data_dir = GetChromeUserDataDirectory();
     chrome_frame_test::OverrideDataDirectoryForThisTest(user_data_dir.value());
     browser_handle_.Set(chrome_frame_test::LaunchChrome(url, user_data_dir));
   } else {
@@ -287,7 +288,7 @@ void ChromeFrameTestWithWebServer::ExpectAndHandlePostedResult() {
 
 void ChromeFrameTestWithWebServer::VersionTest(BrowserKind browser,
     const wchar_t* page) {
-  FilePath plugin_path;
+  base::FilePath plugin_path;
   PathService::Get(base::DIR_MODULE, &plugin_path);
   plugin_path = plugin_path.Append(kChromeFrameDllName);
 
@@ -309,7 +310,7 @@ void ChromeFrameTestWithWebServer::VersionTest(BrowserKind browser,
     ASSERT_TRUE(ver_system.IsValid() || ver_user.IsValid());
 
     bool system_install = ver_system.IsValid();
-    FilePath cf_dll_path(installer::GetChromeInstallPath(system_install, dist));
+    base::FilePath cf_dll_path(installer::GetChromeInstallPath(system_install, dist));
     cf_dll_path = cf_dll_path.Append(UTF8ToWide(
         ver_system.IsValid() ? ver_system.GetString() : ver_user.GetString()));
     cf_dll_path = cf_dll_path.Append(kChromeFrameDllName);
@@ -390,7 +391,7 @@ void MockWebServer::SendResponseHelper(
   if (query_index != std::string::npos) {
     path = path.erase(query_index);
   }
-  FilePath file_path = root_dir_;
+  base::FilePath file_path = root_dir_;
   if (path.size())
     file_path = file_path.Append(path.substr(1));  // remove first '/'
 
@@ -398,7 +399,7 @@ void MockWebServer::SendResponseHelper(
   std::string content_type;
   if (file_util::PathExists(file_path) &&
       !file_util::DirectoryExists(file_path)) {
-    FilePath mock_http_headers(file_path.value() + L".mock-http-headers");
+    base::FilePath mock_http_headers(file_path.value() + L".mock-http-headers");
     if (file_util::PathExists(mock_http_headers)) {
       headers = GetMockHttpHeaders(mock_http_headers);
       content_type = http_utils::GetHttpHeaderFromHeaderList("Content-type",
@@ -464,7 +465,8 @@ const wchar_t kNavigateURLRelativePage[] =
     L"navigateurl_relative_host.html";
 
 // Flaky, crbug.com/160497.
-TEST_F(ChromeFrameTestWithWebServer, FLAKY_WidgetModeIE_NavigateURLRelative) {
+TEST_F(ChromeFrameTestWithWebServer,
+       DISABLED_WidgetModeIE_NavigateURLRelative) {
   SimpleBrowserTest(IE, kNavigateURLRelativePage);
 }
 
@@ -478,7 +480,7 @@ const wchar_t kiframeBasicPage[] = L"iframe_basic_host.html";
 
 
 // Flaky, crbug.com/160497.
-TEST_F(ChromeFrameTestWithWebServer, FLAKY_WidgetModeIE_iframeBasic) {
+TEST_F(ChromeFrameTestWithWebServer, DISABLED_WidgetModeIE_iframeBasic) {
   SimpleBrowserTest(IE, kiframeBasicPage);
 }
 
@@ -515,7 +517,7 @@ TEST_F(ChromeFrameTestWithWebServer, WidgetModeIE_CFInstanceFallback) {
 const wchar_t kCFINoSrcPage[] = L"CFInstance_no_src_host.html";
 
 // Flaky, crbug.com/160497.
-TEST_F(ChromeFrameTestWithWebServer, FLAKY_WidgetModeIE_CFInstanceNoSrc) {
+TEST_F(ChromeFrameTestWithWebServer, DISABLED_WidgetModeIE_CFInstanceNoSrc) {
   SimpleBrowserTest(IE, kCFINoSrcPage);
 }
 
@@ -647,7 +649,7 @@ TEST_F(ChromeFrameTestWithWebServer, FullTabModeIE_CFHttpHeaderFrameSet) {
 const wchar_t kVersionPage[] = L"version.html";
 
 // Flaky, crbug.com/160497.
-TEST_F(ChromeFrameTestWithWebServer, FLAKY_WidgetModeIE_Version) {
+TEST_F(ChromeFrameTestWithWebServer, DISABLED_WidgetModeIE_Version) {
   VersionTest(IE, kVersionPage);
 }
 
@@ -665,7 +667,7 @@ TEST_F(ChromeFrameTestWithWebServer, WidgetModeIE_PrivilegedApis) {
 
 const wchar_t kMetaTagPage[] = L"meta_tag.html";
 // Flaky, crbug.com/160497.
-TEST_F(ChromeFrameTestWithWebServer, FLAKY_FullTabModeIE_MetaTag) {
+TEST_F(ChromeFrameTestWithWebServer, DISABLED_FullTabModeIE_MetaTag) {
   SimpleBrowserTest(IE, kMetaTagPage);
 }
 
@@ -710,7 +712,7 @@ const wchar_t kXMLHttpRequestTestUrl[] =
     L"xmlhttprequest_test.html";
 
 // Flaky, crbug.com/160497.
-TEST_F(ChromeFrameTestWithWebServer, FLAKY_FullTabModeIE_XHRTest) {
+TEST_F(ChromeFrameTestWithWebServer, DISABLED_FullTabModeIE_XHRTest) {
   SimpleBrowserTest(IE, kXMLHttpRequestTestUrl);
 }
 
@@ -750,7 +752,7 @@ const wchar_t kXHRHeaderTestUrl[] =
     L"xmlhttprequest_header_test.html";
 
 // Marking as flaky since it occasionally times out. crbug.com/127395.
-TEST_F(ChromeFrameTestWithWebServer, FLAKY_FullTabModeIE_XHRHeaderTest) {
+TEST_F(ChromeFrameTestWithWebServer, DISABLED_FullTabModeIE_XHRHeaderTest) {
   SimpleBrowserTest(IE, kXHRHeaderTestUrl);
 }
 
@@ -771,7 +773,7 @@ TEST_F(ChromeFrameTestWithWebServer, FullTabModeIE_AnchorUrlNavigateTest) {
 // Test whether POST-ing a form from an mshtml page to a CF page will cause
 // the request to get reissued.  It should not.
 // https://code.google.com/p/chromium/issues/detail?id=143699
-TEST_F(ChromeFrameTestWithWebServer, FLAKY_FullTabModeIE_TestPostReissue) {
+TEST_F(ChromeFrameTestWithWebServer, DISABLED_FullTabModeIE_TestPostReissue) {
   // The order of pages in this array is assumed to be mshtml, cf, script.
   const wchar_t* kPages[] = {
     L"full_tab_post_mshtml.html",
@@ -803,7 +805,7 @@ TEST_F(ChromeFrameTestWithWebServer, FLAKY_FullTabModeIE_TestPostReissue) {
 // Test whether following a link from an mshtml page to a CF page will cause
 // multiple network requests.  It should not.
 // Flaky, crbug.com/160497.
-TEST_F(ChromeFrameTestWithWebServer, FLAKY_FullTabModeIE_TestMultipleGet) {
+TEST_F(ChromeFrameTestWithWebServer, DISABLED_FullTabModeIE_TestMultipleGet) {
   // The order of pages in this array is assumed to be mshtml, cf, script.
   const wchar_t* kPages[] = {
     L"full_tab_get_mshtml.html",
@@ -874,7 +876,8 @@ class UaTemplateFileResponse : public test_server::FileResponse {
  public:
   typedef test_server::FileResponse SuperClass;
 
-  UaTemplateFileResponse(const char* request_path, const FilePath& file_path)
+  UaTemplateFileResponse(const char* request_path,
+                         const base::FilePath& file_path)
       : test_server::FileResponse(request_path, file_path), request_id_(0) {
   }
 

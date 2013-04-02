@@ -10,7 +10,7 @@
 #include "content/public/renderer/navigation_state.h"
 #include "content/public/renderer/render_view.h"
 #include "extensions/common/constants.h"
-#include "third_party/WebKit/Source/WebKit/chromium/public/platform/WebURL.h"
+#include "third_party/WebKit/Source/Platform/chromium/public/WebURL.h"
 #include "third_party/WebKit/Source/WebKit/chromium/public/WebDataSource.h"
 #include "third_party/WebKit/Source/WebKit/chromium/public/WebDocument.h"
 #include "third_party/WebKit/Source/WebKit/chromium/public/WebFrame.h"
@@ -127,7 +127,7 @@ bool ContentSettingsObserver::OnMessageReceived(const IPC::Message& message) {
 void ContentSettingsObserver::DidCommitProvisionalLoad(
     WebFrame* frame, bool is_new_navigation) {
   if (frame->parent())
-    return; // Not a top-level navigation.
+    return;  // Not a top-level navigation.
 
   DocumentState* document_state = DocumentState::FromDataSource(
       frame->dataSource());

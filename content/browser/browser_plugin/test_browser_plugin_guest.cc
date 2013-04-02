@@ -70,9 +70,8 @@ void TestBrowserPluginGuest::SendMessageToEmbedder(IPC::Message* msg) {
   if (msg->type() == BrowserPluginMsg_UpdateRect::ID) {
     update_rect_count_++;
     int instance_id = 0;
-    int message_id = 0;
     BrowserPluginMsg_UpdateRect_Params params;
-    BrowserPluginMsg_UpdateRect::Read(msg, &instance_id, &message_id, &params);
+    BrowserPluginMsg_UpdateRect::Read(msg, &instance_id, &params);
     last_view_size_observed_ = params.view_size;
     if (!expected_auto_view_size_.IsEmpty() &&
         expected_auto_view_size_ == params.view_size) {
@@ -116,15 +115,13 @@ void TestBrowserPluginGuest::RenderViewGone(base::TerminationStatus status) {
   BrowserPluginGuest::RenderViewGone(status);
 }
 
-void TestBrowserPluginGuest::HandleInputEvent(
-    RenderViewHost* render_view_host,
+void TestBrowserPluginGuest::OnHandleInputEvent(
+    int instance_id,
     const gfx::Rect& guest_window_rect,
-    const gfx::Rect& guest_screen_rect,
-    const WebKit::WebInputEvent& event) {
-  BrowserPluginGuest::HandleInputEvent(render_view_host,
-                                       guest_window_rect,
-                                       guest_screen_rect,
-                                       event);
+    const WebKit::WebInputEvent* event) {
+  BrowserPluginGuest::OnHandleInputEvent(instance_id,
+                                         guest_window_rect,
+                                         event);
   input_observed_ = true;
   if (input_message_loop_runner_)
     input_message_loop_runner_->Quit();
@@ -232,7 +229,7 @@ void TestBrowserPluginGuest::WaitForViewSize(const gfx::Size& view_size) {
   last_view_size_observed_ = gfx::Size();
 }
 
-void TestBrowserPluginGuest::SetFocus(bool focused) {
+void TestBrowserPluginGuest::OnSetFocus(int instance_id, bool focused) {
   if (focused) {
     focus_observed_ = true;
     if (focus_message_loop_runner_)
@@ -242,28 +239,28 @@ void TestBrowserPluginGuest::SetFocus(bool focused) {
     if (blur_message_loop_runner_)
       blur_message_loop_runner_->Quit();
   }
-  BrowserPluginGuest::SetFocus(focused);
+  BrowserPluginGuest::OnSetFocus(instance_id, focused);
 }
 
-bool TestBrowserPluginGuest::ViewTakeFocus(bool reverse) {
+void TestBrowserPluginGuest::OnTakeFocus(bool reverse) {
   advance_focus_observed_ = true;
   if (advance_focus_message_loop_runner_)
     advance_focus_message_loop_runner_->Quit();
-  return BrowserPluginGuest::ViewTakeFocus(reverse);
+  BrowserPluginGuest::OnTakeFocus(reverse);
 }
 
-void TestBrowserPluginGuest::Reload() {
+void TestBrowserPluginGuest::OnReload(int instance_id) {
   reload_observed_ = true;
   if (reload_message_loop_runner_)
     reload_message_loop_runner_->Quit();
-  BrowserPluginGuest::Reload();
+  BrowserPluginGuest::OnReload(instance_id);
 }
 
-void TestBrowserPluginGuest::Stop() {
+void TestBrowserPluginGuest::OnStop(int instance_id) {
   stop_observed_ = true;
   if (stop_message_loop_runner_)
     stop_message_loop_runner_->Quit();
-  BrowserPluginGuest::Stop();
+  BrowserPluginGuest::OnStop(instance_id);
 }
 
 void TestBrowserPluginGuest::SetDamageBuffer(

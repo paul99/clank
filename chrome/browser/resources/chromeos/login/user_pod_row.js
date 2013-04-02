@@ -279,9 +279,10 @@ cr.define('login', function() {
     get needGaiaSignin() {
       // Gaia signin is performed if the user has an invalid oauth token and is
       // not currently signed in (i.e. not the lock screen).
+      // Locally managed users never require GAIA signin.
       return this.user.oauthTokenStatus != OAuthTokenStatus.VALID_OLD &&
           this.user.oauthTokenStatus != OAuthTokenStatus.VALID_NEW &&
-          !this.user.signedIn;
+          !this.user.signedIn && !this.user.locallyManagedUser;
     },
 
     /**
@@ -465,6 +466,12 @@ cr.define('login', function() {
       this.addEventListener('webkitTransitionEnd', function f(e) {
         self.removeEventListener('webkitTransitionEnd', f);
         self.classList.remove('animating');
+
+        // Accessibility focus indicator does not move with the focused
+        // element. Sends a 'focus' event on the currently focused element
+        // so that accessibility focus indicator updates its location.
+        if (document.activeElement)
+          document.activeElement.dispatchEvent(new Event('focus'));
       });
     },
 
@@ -944,6 +951,14 @@ cr.define('login', function() {
       this.disabled = false;
       if (this.activatedPod_)
         this.activatedPod_.reset(takeFocus);
+    },
+
+    /**
+     * Clears focused pod password field.
+     */
+    clearFocusedPod: function() {
+      if (!this.disabled && this.focusedPod_)
+        this.focusedPod_.reset(true);
     },
 
     /**

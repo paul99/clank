@@ -25,7 +25,6 @@
 #include "chromeos/dbus/shill_device_client.h"
 #include "chromeos/dbus/shill_ipconfig_client.h"
 #include "chromeos/dbus/shill_manager_client.h"
-#include "chromeos/dbus/shill_network_client.h"
 #include "chromeos/dbus/shill_profile_client.h"
 #include "chromeos/dbus/shill_service_client.h"
 #include "chromeos/dbus/gsm_sms_client.h"
@@ -40,7 +39,7 @@
 #include "chromeos/dbus/modem_messaging_client.h"
 #include "chromeos/dbus/permission_broker_client.h"
 #include "chromeos/dbus/power_manager_client.h"
-#include "chromeos/dbus/root_power_manager_client.h"
+#include "chromeos/dbus/power_policy_controller.h"
 #include "chromeos/dbus/session_manager_client.h"
 #include "chromeos/dbus/sms_client.h"
 #include "chromeos/dbus/speech_synthesizer_client.h"
@@ -102,8 +101,6 @@ class DBusThreadManagerImpl : public DBusThreadManager {
         ShillIPConfigClient::Create(client_type, system_bus_.get()));
     shill_manager_client_.reset(
         ShillManagerClient::Create(client_type, system_bus_.get()));
-    shill_network_client_.reset(
-        ShillNetworkClient::Create(client_type, system_bus_.get()));
     shill_profile_client_.reset(
         ShillProfileClient::Create(client_type, system_bus_.get()));
     shill_service_client_.reset(
@@ -120,8 +117,6 @@ class DBusThreadManagerImpl : public DBusThreadManager {
         PermissionBrokerClient::Create(client_type, system_bus_.get()));
     power_manager_client_.reset(
         PowerManagerClient::Create(client_type_maybe_stub, system_bus_.get()));
-    root_power_manager_client_.reset(RootPowerManagerClient::Create(
-        client_type_maybe_stub, system_bus_.get()));
     session_manager_client_.reset(
         SessionManagerClient::Create(client_type, system_bus_.get()));
     sms_client_.reset(
@@ -130,6 +125,11 @@ class DBusThreadManagerImpl : public DBusThreadManager {
         SpeechSynthesizerClient::Create(client_type, system_bus_.get()));
     update_engine_client_.reset(
         UpdateEngineClient::Create(client_type, system_bus_.get()));
+
+    // PowerPolicyController is dependent on PowerManagerClient, so
+    // initialize it after the main list of clients.
+    power_policy_controller_.reset(
+        new PowerPolicyController(this, power_manager_client_.get()));
   }
 
   virtual ~DBusThreadManagerImpl() {
@@ -191,7 +191,9 @@ class DBusThreadManagerImpl : public DBusThreadManager {
     ibus_engine_factory_service_.reset(
         IBusEngineFactoryService::Create(ibus_bus_.get(), client_type));
     ibus_panel_service_.reset(
-        ibus::IBusPanelService::Create(client_type, ibus_bus_.get()));
+        IBusPanelService::Create(client_type,
+                                 ibus_bus_.get(),
+                                 ibus_input_context_client_.get()));
 
     ibus_engine_services_.clear();
   }
@@ -253,10 +255,6 @@ class DBusThreadManagerImpl : public DBusThreadManager {
     return shill_manager_client_.get();
   }
 
-  virtual ShillNetworkClient* GetShillNetworkClient() OVERRIDE {
-    return shill_network_client_.get();
-  }
-
   virtual ShillProfileClient* GetShillProfileClient() OVERRIDE {
     return shill_profile_client_.get();
   }
@@ -289,8 +287,8 @@ class DBusThreadManagerImpl : public DBusThreadManager {
     return power_manager_client_.get();
   }
 
-  virtual RootPowerManagerClient* GetRootPowerManagerClient() OVERRIDE {
-    return root_power_manager_client_.get();
+  virtual PowerPolicyController* GetPowerPolicyController() OVERRIDE {
+    return power_policy_controller_.get();
   }
 
   virtual SessionManagerClient* GetSessionManagerClient() OVERRIDE {
@@ -350,9 +348,13 @@ class DBusThreadManagerImpl : public DBusThreadManager {
     ibus_engine_services_.erase(object_path);
   }
 
-  virtual ibus::IBusPanelService* GetIBusPanelService() OVERRIDE {
+  virtual IBusPanelService* GetIBusPanelService() OVERRIDE {
     return ibus_panel_service_.get();
   }
+
+  // Note: Keep this before other members so they can call AddObserver() in
+  // their c'tors.
+  ObserverList<DBusThreadManagerObserver> observers_;
 
   scoped_ptr<base::Thread> dbus_thread_;
   scoped_refptr<dbus::Bus> system_bus_;
@@ -369,7 +371,6 @@ class DBusThreadManagerImpl : public DBusThreadManager {
   scoped_ptr<ShillDeviceClient> shill_device_client_;
   scoped_ptr<ShillIPConfigClient> shill_ipconfig_client_;
   scoped_ptr<ShillManagerClient> shill_manager_client_;
-  scoped_ptr<ShillNetworkClient> shill_network_client_;
   scoped_ptr<ShillProfileClient> shill_profile_client_;
   scoped_ptr<ShillServiceClient> shill_service_client_;
   scoped_ptr<GsmSMSClient> gsm_sms_client_;
@@ -378,7 +379,6 @@ class DBusThreadManagerImpl : public DBusThreadManager {
   scoped_ptr<ModemMessagingClient> modem_messaging_client_;
   scoped_ptr<PermissionBrokerClient> permission_broker_client_;
   scoped_ptr<PowerManagerClient> power_manager_client_;
-  scoped_ptr<RootPowerManagerClient> root_power_manager_client_;
   scoped_ptr<SessionManagerClient> session_manager_client_;
   scoped_ptr<SMSClient> sms_client_;
   scoped_ptr<SpeechSynthesizerClient> speech_synthesizer_client_;
@@ -388,11 +388,10 @@ class DBusThreadManagerImpl : public DBusThreadManager {
   scoped_ptr<IBusInputContextClient> ibus_input_context_client_;
   scoped_ptr<IBusEngineFactoryService> ibus_engine_factory_service_;
   std::map<dbus::ObjectPath, IBusEngineService*> ibus_engine_services_;
-  scoped_ptr<ibus::IBusPanelService> ibus_panel_service_;
+  scoped_ptr<IBusPanelService> ibus_panel_service_;
+  scoped_ptr<PowerPolicyController> power_policy_controller_;
 
   std::string ibus_address_;
-
-  ObserverList<DBusThreadManagerObserver> observers_;
 };
 
 // static

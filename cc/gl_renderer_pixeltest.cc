@@ -42,7 +42,7 @@ class FakeRendererClient : public RendererClient {
   virtual void enforceManagedMemoryPolicy(
       const ManagedMemoryPolicy&) OVERRIDE {}
   virtual bool hasImplThread() const OVERRIDE { return false; }
-  virtual bool shouldClearRootRenderPass() const { return true; }
+  virtual bool shouldClearRootRenderPass() const OVERRIDE { return true; }
   virtual CompositorFrameMetadata makeCompositorFrameMetadata() const
       OVERRIDE { return CompositorFrameMetadata(); }
 };
@@ -60,7 +60,7 @@ class GLRendererPixelTest : public testing::Test {
                                    resource_provider_.get());
   }
 
-  bool PixelsMatchReference(FilePath ref_file, gfx::Rect viewport_rect) {
+  bool PixelsMatchReference(base::FilePath ref_file, gfx::Rect viewport_rect) {
     SkBitmap bitmap;
     bitmap.setConfig(SkBitmap::kARGB_8888_Config,
                      viewport_rect.width(), viewport_rect.height());
@@ -68,7 +68,7 @@ class GLRendererPixelTest : public testing::Test {
     unsigned char* pixels = static_cast<unsigned char*>(bitmap.getPixels());
     renderer_->getFramebufferPixels(pixels, viewport_rect);
 
-    FilePath test_data_dir;
+    base::FilePath test_data_dir;
     if (!PathService::Get(cc::DIR_TEST_DATA, &test_data_dir))
       return false;
 
@@ -93,14 +93,12 @@ scoped_ptr<RenderPass> CreateTestRenderPass(RenderPass::Id id, gfx::Rect rect) {
 scoped_ptr<SharedQuadState> CreateTestSharedQuadState(
     gfx::Transform content_to_target_transform, gfx::Rect rect) {
   const gfx::Rect visible_content_rect = rect;
-  const gfx::Rect clipped_rect_in_target = rect;
   const gfx::Rect clip_rect = rect;
   const bool is_clipped = false;
   const float opacity = 1.0f;
   scoped_ptr<SharedQuadState> shared_state = SharedQuadState::Create();
   shared_state->SetAll(content_to_target_transform,
                        visible_content_rect,
-                       clipped_rect_in_target,
                        clip_rect,
                        is_clipped,
                        opacity);
@@ -116,7 +114,10 @@ scoped_ptr<DrawQuad> CreateTestRenderPassDrawQuad(
                false,         // is_replica
                0,             // mask_resource_id
                rect,          // contents_changed_since_last_frame
-               gfx::RectF()); // mask_uv_rect
+               gfx::RectF(),  // mask_uv_rect
+               WebKit::WebFilterOperations(),   // foreground filters
+               skia::RefPtr<SkImageFilter>(),   // foreground filter
+               WebKit::WebFilterOperations());  // background filters
 
   return quad.PassAs<DrawQuad>();
 }
@@ -136,17 +137,16 @@ TEST_F(GLRendererPixelTest, simpleGreenRect) {
   scoped_ptr<SolidColorDrawQuad> color_quad = SolidColorDrawQuad::Create();
   color_quad->SetNew(shared_state.get(), rect, SK_ColorGREEN);
 
-  pass->quad_list.append(color_quad.PassAs<DrawQuad>());
+  pass->quad_list.push_back(color_quad.PassAs<DrawQuad>());
 
   RenderPassList pass_list;
-  pass_list.push_back(pass.get());
-  RenderPassIdHashMap pass_map;
-  pass_map.add(id, pass.PassAs<RenderPass>());
+  pass_list.push_back(pass.Pass());
 
-  renderer_->drawFrame(pass_list, pass_map);
+  renderer_->drawFrame(pass_list);
 
-  EXPECT_TRUE(PixelsMatchReference(FilePath(FILE_PATH_LITERAL("green.png")),
-                                   rect));
+  EXPECT_TRUE(PixelsMatchReference(
+      base::FilePath(FILE_PATH_LITERAL("green.png")),
+      rect));
 }
 
 TEST_F(GLRendererPixelTest, RenderPassChangesSize) {
@@ -170,30 +170,26 @@ TEST_F(GLRendererPixelTest, RenderPassChangesSize) {
   scoped_ptr<SolidColorDrawQuad> yellow = SolidColorDrawQuad::Create();
   yellow->SetNew(shared_state.get(), gfx::Rect(100, 0, 100, 200), SK_ColorYELLOW);
 
-  child_pass->quad_list.append(blue.PassAs<DrawQuad>());
-  child_pass->quad_list.append(yellow.PassAs<DrawQuad>());
+  child_pass->quad_list.push_back(blue.PassAs<DrawQuad>());
+  child_pass->quad_list.push_back(yellow.PassAs<DrawQuad>());
 
   scoped_ptr<SharedQuadState> pass_shared_state =
       CreateTestSharedQuadState(gfx::Transform(), pass_rect);
-  root_pass->quad_list.append(
+  root_pass->quad_list.push_back(
       CreateTestRenderPassDrawQuad(pass_shared_state.get(),
                                    pass_rect,
                                    child_pass_id));
 
   RenderPassList pass_list;
-  pass_list.push_back(child_pass.get());
-  pass_list.push_back(root_pass.get());
-
-  RenderPassIdHashMap pass_map;
-  pass_map.add(child_pass_id, child_pass.Pass());
-  pass_map.add(root_pass_id, root_pass.Pass());
+  pass_list.push_back(child_pass.Pass());
+  pass_list.push_back(root_pass.Pass());
 
   renderer_->setEnlargePassTextureAmountForTesting(gfx::Vector2d(50, 75));
   renderer_->decideRenderPassAllocationsForFrame(pass_list);
-  renderer_->drawFrame(pass_list, pass_map);
+  renderer_->drawFrame(pass_list);
 
   EXPECT_TRUE(PixelsMatchReference(
-      FilePath(FILE_PATH_LITERAL("blue_yellow.png")), viewport_rect));
+      base::FilePath(FILE_PATH_LITERAL("blue_yellow.png")), viewport_rect));
 }
 #endif
 

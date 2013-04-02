@@ -12,8 +12,7 @@
 #include "chrome/browser/sessions/session_id.h"
 #include "chrome/browser/ui/browser.h"
 #include "chrome/browser/ui/browser_finder.h"
-#include "chrome/browser/ui/browser_list.h"
-#include "chrome/browser/ui/browser_tabstrip.h"
+#include "chrome/browser/ui/browser_iterator.h"
 #include "chrome/browser/ui/browser_window.h"
 #include "chrome/browser/ui/tab_contents/tab_contents_iterator.h"
 #include "chrome/browser/ui/tabs/tab_strip_model.h"
@@ -27,6 +26,7 @@
 #include "googleurl/src/gurl.h"
 
 namespace keys = extensions::tabs_constants;
+namespace tabs = extensions::api::tabs;
 
 using content::NavigationEntry;
 using content::WebContents;
@@ -39,9 +39,8 @@ int ExtensionTabUtil::GetWindowId(const Browser* browser) {
 
 int ExtensionTabUtil::GetWindowIdOfTabStripModel(
     const TabStripModel* tab_strip_model) {
-  for (BrowserList::const_iterator it = BrowserList::begin();
-       it != BrowserList::end(); ++it) {
-    if ((*it)->tab_strip_model() == tab_strip_model)
+  for (chrome::BrowserIterator it; !it.done(); it.Next()) {
+    if (it->tab_strip_model() == tab_strip_model)
       return GetWindowId(*it);
   }
   return -1;
@@ -64,14 +63,9 @@ DictionaryValue* ExtensionTabUtil::CreateTabValue(
     TabStripModel* tab_strip,
     int tab_index,
     const Extension* extension) {
-  // Only add privacy-sensitive data if the requesting extension has the tabs
-  // permission.
-  bool has_permission = extension && extension->HasAPIPermissionForTab(
-      GetTabId(contents), APIPermission::kTab);
-
-  return CreateTabValue(contents, tab_strip, tab_index,
-                        has_permission ? INCLUDE_PRIVACY_SENSITIVE_FIELDS :
-                            OMIT_PRIVACY_SENSITIVE_FIELDS);
+  DictionaryValue *result = CreateTabValue(contents, tab_strip, tab_index);
+  ScrubTabValueForExtension(contents, extension, result);
+  return result;
 }
 
 ListValue* ExtensionTabUtil::CreateTabList(
@@ -92,8 +86,7 @@ ListValue* ExtensionTabUtil::CreateTabList(
 DictionaryValue* ExtensionTabUtil::CreateTabValue(
     const WebContents* contents,
     TabStripModel* tab_strip,
-    int tab_index,
-    IncludePrivacySensitiveFields include_privacy_sensitive_fields) {
+    int tab_index) {
   if (!tab_strip)
     ExtensionTabUtil::GetTabStripModel(contents, &tab_strip, &tab_index);
 
@@ -114,14 +107,14 @@ DictionaryValue* ExtensionTabUtil::CreateTabValue(
   result->SetBoolean(keys::kIncognitoKey,
                      contents->GetBrowserContext()->IsOffTheRecord());
 
-  if (include_privacy_sensitive_fields == INCLUDE_PRIVACY_SENSITIVE_FIELDS) {
-    result->SetString(keys::kUrlKey, contents->GetURL().spec());
-    result->SetString(keys::kTitleKey, contents->GetTitle());
-    if (!is_loading) {
-      NavigationEntry* entry = contents->GetController().GetActiveEntry();
-      if (entry && entry->GetFavicon().valid)
-        result->SetString(keys::kFaviconUrlKey, entry->GetFavicon().url.spec());
-    }
+  // Privacy-sensitive fields: these should be stripped off by
+  // ScrubTabValueForExtension if the extension should not see them.
+  result->SetString(keys::kUrlKey, contents->GetURL().spec());
+  result->SetString(keys::kTitleKey, contents->GetTitle());
+  if (!is_loading) {
+    NavigationEntry* entry = contents->GetController().GetActiveEntry();
+    if (entry && entry->GetFavicon().valid)
+      result->SetString(keys::kFaviconUrlKey, entry->GetFavicon().url.spec());
   }
 
   if (tab_strip) {
@@ -133,6 +126,31 @@ DictionaryValue* ExtensionTabUtil::CreateTabValue(
   return result;
 }
 
+void ExtensionTabUtil::ScrubTabValueForExtension(const WebContents* contents,
+                                                 const Extension* extension,
+                                                 DictionaryValue* tab_info) {
+  bool has_permission = extension && extension->HasAPIPermissionForTab(
+      GetTabId(contents), APIPermission::kTab);
+
+  if (!has_permission) {
+    tab_info->Remove(keys::kUrlKey, NULL);
+    tab_info->Remove(keys::kTitleKey, NULL);
+    tab_info->Remove(keys::kFaviconUrlKey, NULL);
+  }
+}
+
+void ExtensionTabUtil::ScrubTabForExtension(const Extension* extension,
+                                            tabs::Tab* tab) {
+  bool has_permission = extension && extension->HasAPIPermission(
+      APIPermission::kTab);
+
+  if (!has_permission) {
+    tab->url.reset();
+    tab->title.reset();
+    tab->fav_icon_url.reset();
+  }
+}
+
 bool ExtensionTabUtil::GetTabStripModel(const WebContents* web_contents,
                                         TabStripModel** tab_strip_model,
                                         int* tab_index) {
@@ -140,9 +158,8 @@ bool ExtensionTabUtil::GetTabStripModel(const WebContents* web_contents,
   DCHECK(tab_strip_model);
   DCHECK(tab_index);
 
-  for (BrowserList::const_iterator it = BrowserList::begin();
-      it != BrowserList::end(); ++it) {
-    TabStripModel* tab_strip = (*it)->tab_strip_model();
+  for (chrome::BrowserIterator it; !it.done(); it.Next()) {
+    TabStripModel* tab_strip = it->tab_strip_model();
     int index = tab_strip->GetIndexOfWebContents(web_contents);
     if (index != -1) {
       *tab_strip_model = tab_strip;
@@ -160,7 +177,7 @@ bool ExtensionTabUtil::GetDefaultTab(Browser* browser,
   DCHECK(browser);
   DCHECK(contents);
 
-  *contents = chrome::GetActiveWebContents(browser);
+  *contents = browser->tab_strip_model()->GetActiveWebContents();
   if (*contents) {
     if (tab_id)
       *tab_id = GetTabId(*contents);
@@ -180,9 +197,8 @@ bool ExtensionTabUtil::GetTabById(int tab_id,
   Profile* incognito_profile =
       include_incognito && profile->HasOffTheRecordProfile() ?
           profile->GetOffTheRecordProfile() : NULL;
-  for (BrowserList::const_iterator iter = BrowserList::begin();
-       iter != BrowserList::end(); ++iter) {
-    Browser* target_browser = *iter;
+  for (chrome::BrowserIterator it; !it.done(); it.Next()) {
+    Browser* target_browser = *it;
     if (target_browser->profile() == profile ||
         target_browser->profile() == incognito_profile) {
       TabStripModel* target_tab_strip = target_browser->tab_strip_model();
@@ -231,9 +247,7 @@ void ExtensionTabUtil::CreateTab(WebContents* web_contents,
   Profile* profile =
       Profile::FromBrowserContext(web_contents->GetBrowserContext());
   chrome::HostDesktopType active_desktop = chrome::GetActiveDesktop();
-  Browser* browser = browser::FindTabbedBrowser(profile,
-                                                false,
-                                                active_desktop);
+  Browser* browser = chrome::FindTabbedBrowser(profile, false, active_desktop);
   const bool browser_created = !browser;
   if (!browser)
     browser = new Browser(Browser::CreateParams(profile, active_desktop));
@@ -261,7 +275,7 @@ void ExtensionTabUtil::CreateTab(WebContents* web_contents,
 // static
 void ExtensionTabUtil::ForEachTab(
     const base::Callback<void(WebContents*)>& callback) {
-  for (TabContentsIterator iterator; !iterator.done(); ++iterator)
+  for (TabContentsIterator iterator; !iterator.done(); iterator.Next())
     callback.Run(*iterator);
 }
 

@@ -29,7 +29,7 @@ TEST(ResourceEntryConversionTest, ConvertResourceEntryToDriveEntryProto_File) {
   EXPECT_EQ("File 1.mp3",  entry_proto.title());
   EXPECT_EQ("File 1.mp3",  entry_proto.base_name());
   EXPECT_EQ("file:2_file_resource_id",  entry_proto.resource_id());
-  EXPECT_EQ("https://file_content_url/",  entry_proto.content_url());
+  EXPECT_EQ("https://file_content_url/",  entry_proto.download_url());
   EXPECT_EQ("https://file1_link_self/file:2_file_resource_id",
             entry_proto.edit_url());
   EXPECT_EQ("",  entry_proto.parent_resource_id());
@@ -37,23 +37,42 @@ TEST(ResourceEntryConversionTest, ConvertResourceEntryToDriveEntryProto_File) {
   EXPECT_FALSE(entry_proto.deleted());
   EXPECT_EQ(google_apis::ENTRY_KIND_FILE, entry_proto.kind());
 
-  // 2011-12-14T00:40:47.330Z
-  base::Time::Exploded exploded;
-  exploded.year = 2011;
-  exploded.month = 12;
-  exploded.day_of_month = 14;
-  exploded.day_of_week = 3;  // Wednesday
-  exploded.hour = 0;
-  exploded.minute = 40;
-  exploded.second = 47;
-  exploded.millisecond = 330;
+  base::Time expected_creation_time;
+  base::Time expected_modified_time;
 
-  const base::Time expected_time = base::Time::FromUTCExploded(exploded);
-  EXPECT_EQ(expected_time.ToInternalValue(),
+  {
+    // 2011-12-14T00:40:47.330Z
+    base::Time::Exploded exploded;
+    exploded.year = 2011;
+    exploded.month = 12;
+    exploded.day_of_month = 13;
+    exploded.day_of_week = 2;  // Tuesday
+    exploded.hour = 0;
+    exploded.minute = 40;
+    exploded.second = 47;
+    exploded.millisecond = 330;
+    expected_creation_time = base::Time::FromUTCExploded(exploded);
+  }
+
+  {
+    // 2011-12-13T00:40:47.330Z
+    base::Time::Exploded exploded;
+    exploded.year = 2011;
+    exploded.month = 12;
+    exploded.day_of_month = 14;
+    exploded.day_of_week = 3;  // Wednesday
+    exploded.hour = 0;
+    exploded.minute = 40;
+    exploded.second = 47;
+    exploded.millisecond = 330;
+    expected_modified_time = base::Time::FromUTCExploded(exploded);
+  }
+
+  EXPECT_EQ(expected_modified_time.ToInternalValue(),
             entry_proto.file_info().last_modified());
   // Last accessed value equal to 0 means that the file has never been viewed.
   EXPECT_EQ(0, entry_proto.file_info().last_accessed());
-  EXPECT_EQ(expected_time.ToInternalValue(),
+  EXPECT_EQ(expected_creation_time.ToInternalValue(),
             entry_proto.file_info().creation_time());
 
   EXPECT_EQ("audio/mpeg",
@@ -92,7 +111,7 @@ TEST(ResourceEntryConversionTest,
   EXPECT_EQ("Document 1.gdoc",  entry_proto.base_name());  // The suffix added.
   EXPECT_EQ(".gdoc", entry_proto.file_specific_info().document_extension());
   EXPECT_EQ("document:5_document_resource_id",  entry_proto.resource_id());
-  EXPECT_EQ("https://3_document_content/",  entry_proto.content_url());
+  EXPECT_EQ("https://3_document_content/",  entry_proto.download_url());
   EXPECT_EQ("https://3_document_self_link/document:5_document_resource_id",
             entry_proto.edit_url());
   EXPECT_EQ("",  entry_proto.parent_resource_id());
@@ -175,7 +194,7 @@ TEST(ResourceEntryConversionTest,
   EXPECT_EQ("Sub Directory Folder",  entry_proto.title());
   EXPECT_EQ("Sub Directory Folder",  entry_proto.base_name());
   EXPECT_EQ("folder:sub_dir_folder_resource_id",  entry_proto.resource_id());
-  EXPECT_EQ("https://1_folder_content_url/",  entry_proto.content_url());
+  EXPECT_EQ("https://1_folder_content_url/",  entry_proto.download_url());
   EXPECT_EQ("https://dir2_sub_self_link/folder:sub_dir_folder_resource_id",
             entry_proto.edit_url());
   // The parent resource ID should be obtained as this is a sub directory
@@ -253,7 +272,7 @@ TEST(ResourceEntryConversionTest,
   EXPECT_EQ("Deleted document",  entry_proto.title());
   EXPECT_EQ("Deleted document.gdoc",  entry_proto.base_name());
   EXPECT_EQ("document:deleted_in_root_id",  entry_proto.resource_id());
-  EXPECT_EQ("https://content_url/",  entry_proto.content_url());
+  EXPECT_EQ("https://content_url/",  entry_proto.download_url());
   EXPECT_EQ("https://edit_url/document%3Adeleted_in_root_id",
             entry_proto.edit_url());
   EXPECT_EQ("",  entry_proto.parent_resource_id());

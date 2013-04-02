@@ -18,8 +18,17 @@
 #include "content/public/test/layouttest_support.h"
 #include "content/shell/shell_messages.h"
 #include "content/shell/shell_render_process_observer.h"
+#include "content/shell/webkit_test_helpers.h"
+#include "net/base/net_errors.h"
 #include "net/base/net_util.h"
 #include "skia/ext/platform_canvas.h"
+#include "third_party/WebKit/Source/Platform/chromium/public/Platform.h"
+#include "third_party/WebKit/Source/Platform/chromium/public/WebCString.h"
+#include "third_party/WebKit/Source/Platform/chromium/public/WebRect.h"
+#include "third_party/WebKit/Source/Platform/chromium/public/WebSize.h"
+#include "third_party/WebKit/Source/Platform/chromium/public/WebString.h"
+#include "third_party/WebKit/Source/Platform/chromium/public/WebURL.h"
+#include "third_party/WebKit/Source/Platform/chromium/public/WebURLError.h"
 #include "third_party/WebKit/Source/WebKit/chromium/public/WebContextMenuData.h"
 #include "third_party/WebKit/Source/WebKit/chromium/public/WebDevToolsAgent.h"
 #include "third_party/WebKit/Source/WebKit/chromium/public/WebDocument.h"
@@ -27,18 +36,13 @@
 #include "third_party/WebKit/Source/WebKit/chromium/public/WebFrame.h"
 #include "third_party/WebKit/Source/WebKit/chromium/public/WebKit.h"
 #include "third_party/WebKit/Source/WebKit/chromium/public/WebView.h"
-#include "third_party/WebKit/Source/WebKit/chromium/public/platform/WebCString.h"
-#include "third_party/WebKit/Source/WebKit/chromium/public/platform/WebKitPlatformSupport.h"
-#include "third_party/WebKit/Source/WebKit/chromium/public/platform/WebRect.h"
-#include "third_party/WebKit/Source/WebKit/chromium/public/platform/WebSize.h"
-#include "third_party/WebKit/Source/WebKit/chromium/public/platform/WebString.h"
-#include "third_party/WebKit/Source/WebKit/chromium/public/platform/WebURL.h"
 #include "third_party/WebKit/Tools/DumpRenderTree/chromium/TestRunner/public/WebTask.h"
 #include "third_party/WebKit/Tools/DumpRenderTree/chromium/TestRunner/public/WebTestProxy.h"
 #include "webkit/base/file_path_string_conversions.h"
 #include "webkit/glue/webkit_glue.h"
 #include "webkit/glue/webpreferences.h"
 
+using WebKit::Platform;
 using WebKit::WebContextMenuData;
 using WebKit::WebDevToolsAgent;
 using WebKit::WebElement;
@@ -48,6 +52,7 @@ using WebKit::WebRect;
 using WebKit::WebSize;
 using WebKit::WebString;
 using WebKit::WebURL;
+using WebKit::WebURLError;
 using WebKit::WebVector;
 using WebKit::WebView;
 using WebTestRunner::WebPreferences;
@@ -153,6 +158,7 @@ void CopyCanvasToBitmap(SkCanvas* canvas,  SkBitmap* snapshot) {
 
 WebKitTestRunner::WebKitTestRunner(RenderView* render_view)
     : RenderViewObserver(render_view) {
+  Reset();
 }
 
 WebKitTestRunner::~WebKitTestRunner() {
@@ -197,7 +203,7 @@ void WebKitTestRunner::printMessage(const std::string& message) {
 }
 
 void WebKitTestRunner::postTask(WebTask* task) {
-  WebKit::webKitPlatformSupport()->callOnMainThread(InvokeTaskHelper, task);
+  Platform::current()->callOnMainThread(InvokeTaskHelper, task);
 }
 
 void WebKitTestRunner::postDelayedTask(WebTask* task, long long ms) {
@@ -209,7 +215,7 @@ void WebKitTestRunner::postDelayedTask(WebTask* task, long long ms) {
 
 WebString WebKitTestRunner::registerIsolatedFileSystem(
     const WebKit::WebVector<WebKit::WebString>& absolute_filenames) {
-  std::vector<FilePath> files;
+  std::vector<base::FilePath> files;
   for (size_t i = 0; i < absolute_filenames.size(); ++i)
     files.push_back(webkit_base::WebStringToFilePath(absolute_filenames[i]));
   std::string filesystem_id;
@@ -226,9 +232,9 @@ long long WebKitTestRunner::getCurrentTimeInMillisecond() {
 WebString WebKitTestRunner::getAbsoluteWebStringFromUTF8Path(
     const std::string& utf8_path) {
 #if defined(OS_WIN)
-  FilePath path(UTF8ToWide(utf8_path));
+  base::FilePath path(UTF8ToWide(utf8_path));
 #else
-  FilePath path(base::SysWideToNativeMB(base::SysUTF8ToWide(utf8_path)));
+  base::FilePath path(base::SysWideToNativeMB(base::SysUTF8ToWide(utf8_path)));
 #endif
   if (!path.IsAbsolute()) {
     GURL base_url =
@@ -240,7 +246,7 @@ WebString WebKitTestRunner::getAbsoluteWebStringFromUTF8Path(
 }
 
 WebURL WebKitTestRunner::localFileToDataURL(const WebURL& file_url) {
-  FilePath local_path;
+  base::FilePath local_path;
   if (!net::FileURLToFilePath(file_url, &local_path))
     return WebURL();
 
@@ -263,7 +269,7 @@ WebURL WebKitTestRunner::rewriteLayoutTestsURL(const std::string& utf8_url) {
   if (utf8_url.compare(0, kPrefixLen, kPrefix, kPrefixLen))
     return WebURL(GURL(utf8_url));
 
-  FilePath replace_path =
+  base::FilePath replace_path =
       ShellRenderProcessObserver::GetInstance()->webkit_source_dir().Append(
           FILE_PATH_LITERAL("LayoutTests/"));
 #if defined(OS_WIN)
@@ -283,9 +289,40 @@ WebPreferences* WebKitTestRunner::preferences() {
 
 void WebKitTestRunner::applyPreferences() {
   webkit_glue::WebPreferences prefs = render_view()->GetWebkitPreferences();
-  prefs_.Export(&prefs);
+  ExportLayoutTestSpecificPreferences(prefs_, &prefs);
   render_view()->SetWebkitPreferences(prefs);
-  Send(new ShellViewHostMsg_OverridePreferences(routing_id(), prefs_));
+  Send(new ShellViewHostMsg_OverridePreferences(routing_id(), prefs));
+}
+
+std::string WebKitTestRunner::makeURLErrorDescription(
+    const WebURLError& error) {
+  std::string domain = error.domain.utf8();
+  int code = error.reason;
+
+  if (domain == net::kErrorDomain) {
+    domain = "NSURLErrorDomain";
+    switch (error.reason) {
+    case net::ERR_ABORTED:
+      code = -999;  // NSURLErrorCancelled
+      break;
+    case net::ERR_UNSAFE_PORT:
+      // Our unsafe port checking happens at the network stack level, but we
+      // make this translation here to match the behavior of stock WebKit.
+      domain = "WebKitErrorDomain";
+      code = 103;
+      break;
+    case net::ERR_ADDRESS_INVALID:
+    case net::ERR_ADDRESS_UNREACHABLE:
+    case net::ERR_NETWORK_ACCESS_DENIED:
+      code = -1004;  // NSURLErrorCannotConnectToHost
+      break;
+    }
+  } else {
+    DLOG(WARNING) << "Unknown error domain";
+  }
+
+  return base::StringPrintf("<NSError domain %s, code %d, failing URL \"%s\">",
+      domain.c_str(), code, error.unreachableURL.spec().data());
 }
 
 // RenderViewObserver  --------------------------------------------------------
@@ -295,8 +332,12 @@ void WebKitTestRunner::DidClearWindowObject(WebFrame* frame) {
 }
 
 void WebKitTestRunner::DidFinishLoad(WebFrame* frame) {
-  if (!frame->parent())
+  if (!frame->parent()) {
+    if (!wait_until_done_)
+      test_is_running_ = false;
+    load_finished_ = true;
     Send(new ShellViewHostMsg_DidFinishLoad(routing_id()));
+  }
 }
 
 void WebKitTestRunner::DidRequestShowContextMenu(
@@ -320,23 +361,11 @@ bool WebKitTestRunner::OnMessageReceived(const IPC::Message& message) {
 
 // Public methods - -----------------------------------------------------------
 
-void WebKitTestRunner::Display() {
-  const WebSize& size = render_view()->GetWebView()->size();
-  WebRect rect(0, 0, size.width, size.height);
-  proxy_->setPaintRect(rect);
-  PaintInvalidatedRegion();
-  DisplayRepaintMask();
-}
-
-void WebKitTestRunner::SetXSSAuditorEnabled(bool enabled) {
-  prefs_.XSSAuditorEnabled = enabled;
-  webkit_glue::WebPreferences prefs = render_view()->GetWebkitPreferences();
-  prefs_.Export(&prefs);
-  render_view()->SetWebkitPreferences(prefs);
-  Send(new ShellViewHostMsg_OverridePreferences(routing_id(), prefs_));
-}
-
 void WebKitTestRunner::NotifyDone() {
+  if (load_finished_)
+    test_is_running_ = false;
+  else
+    wait_until_done_ = false;
   Send(new ShellViewHostMsg_NotifyDone(routing_id()));
 }
 
@@ -348,43 +377,63 @@ void WebKitTestRunner::DumpChildFramesAsText() {
   Send(new ShellViewHostMsg_DumpChildFramesAsText(routing_id()));
 }
 
-void WebKitTestRunner::SetPrinting() {
-  Send(new ShellViewHostMsg_SetPrinting(routing_id()));
-}
-
-void WebKitTestRunner::SetShouldStayOnPageAfterHandlingBeforeUnload(
-    bool should_stay_on_page) {
-  Send(new ShellViewHostMsg_SetShouldStayOnPageAfterHandlingBeforeUnload(
-      routing_id(), should_stay_on_page));
-}
-
 void WebKitTestRunner::WaitUntilDone() {
+  wait_until_done_ = true;
   Send(new ShellViewHostMsg_WaitUntilDone(routing_id()));
 }
 
-void WebKitTestRunner::CanOpenWindows() {
-  Send(new ShellViewHostMsg_CanOpenWindows(routing_id()));
-}
-
-void WebKitTestRunner::ShowWebInspector() {
-  Send(new ShellViewHostMsg_ShowWebInspector(routing_id()));
-}
-
-void WebKitTestRunner::CloseWebInspector() {
-  Send(new ShellViewHostMsg_CloseWebInspector(routing_id()));
-}
-
-void WebKitTestRunner::EvaluateInWebInspector(int32_t call_id,
-                                              const std::string& script) {
-  WebDevToolsAgent* agent = render_view()->GetWebView()->devToolsAgent();
-  if (agent)
-    agent->evaluateInWebInspector(call_id, WebString::fromUTF8(script));
-}
-
-void WebKitTestRunner::ExecCommand(const std::string& command,
-                                   const std::string& value) {
-  render_view()->GetWebView()->focusedFrame()->executeCommand(
-      WebString::fromUTF8(command), WebString::fromUTF8(value));
+void WebKitTestRunner::OverridePreference(const std::string& key,
+                                          v8::Local<v8::Value> value) {
+  if (key == "WebKitDefaultFontSize") {
+    prefs_.defaultFontSize = value->Int32Value();
+  } else if (key == "WebKitMinimumFontSize") {
+    prefs_.minimumFontSize = value->Int32Value();
+  } else if (key == "WebKitDefaultTextEncodingName") {
+    prefs_.defaultTextEncodingName =
+        WebString::fromUTF8(std::string(*v8::String::AsciiValue(value)));
+  } else if (key == "WebKitJavaScriptEnabled") {
+    prefs_.javaScriptEnabled = value->BooleanValue();
+  } else if (key == "WebKitSupportsMultipleWindows") {
+    prefs_.supportsMultipleWindows = value->BooleanValue();
+  } else if (key == "WebKitDisplayImagesKey") {
+    prefs_.loadsImagesAutomatically = value->BooleanValue();
+  } else if (key == "WebKitPluginsEnabled") {
+    prefs_.pluginsEnabled = value->BooleanValue();
+  } else if (key == "WebKitJavaEnabled") {
+    prefs_.javaEnabled = value->BooleanValue();
+  } else if (key == "WebKitUsesPageCachePreferenceKey") {
+    prefs_.usesPageCache = value->BooleanValue();
+  } else if (key == "WebKitPageCacheSupportsPluginsPreferenceKey") {
+    prefs_.pageCacheSupportsPlugins = value->BooleanValue();
+  } else if (key == "WebKitOfflineWebApplicationCacheEnabled") {
+    prefs_.offlineWebApplicationCacheEnabled = value->BooleanValue();
+  } else if (key == "WebKitTabToLinksPreferenceKey") {
+    prefs_.tabsToLinks = value->BooleanValue();
+  } else if (key == "WebKitWebGLEnabled") {
+    prefs_.experimentalWebGLEnabled = value->BooleanValue();
+  } else if (key == "WebKitCSSRegionsEnabled") {
+    prefs_.experimentalCSSRegionsEnabled = value->BooleanValue();
+  } else if (key == "WebKitCSSGridLayoutEnabled") {
+    prefs_.experimentalCSSGridLayoutEnabled = value->BooleanValue();
+  } else if (key == "WebKitHyperlinkAuditingEnabled") {
+    prefs_.hyperlinkAuditingEnabled = value->BooleanValue();
+  } else if (key == "WebKitEnableCaretBrowsing") {
+    prefs_.caretBrowsingEnabled = value->BooleanValue();
+  } else if (key == "WebKitAllowDisplayingInsecureContent") {
+    prefs_.allowDisplayOfInsecureContent = value->BooleanValue();
+  } else if (key == "WebKitAllowRunningInsecureContent") {
+    prefs_.allowRunningOfInsecureContent = value->BooleanValue();
+  } else if (key == "WebKitCSSCustomFilterEnabled") {
+    prefs_.cssCustomFilterEnabled = value->BooleanValue();
+  } else if (key == "WebKitShouldRespectImageOrientation") {
+    prefs_.shouldRespectImageOrientation = value->BooleanValue();
+  } else if (key == "WebKitWebAudioEnabled") {
+    DCHECK(value->BooleanValue());
+  } else {
+    std::string message("CONSOLE MESSAGE: Invalid name for preference: ");
+    printMessage(message + key + "\n");
+  }
+  applyPreferences();
 }
 
 void WebKitTestRunner::NotImplemented(const std::string& object,
@@ -395,8 +444,21 @@ void WebKitTestRunner::NotImplemented(const std::string& object,
 void WebKitTestRunner::Reset() {
   prefs_.reset();
   webkit_glue::WebPreferences prefs = render_view()->GetWebkitPreferences();
-  prefs_.Export(&prefs);
+  ExportLayoutTestSpecificPreferences(prefs_, &prefs);
   render_view()->SetWebkitPreferences(prefs);
+  dump_editing_callbacks_ = false;
+  dump_frame_load_callbacks_ = false;
+  dump_user_gesture_in_frame_load_callbacks_ = false;
+  stop_provisional_frame_loads_ = false;
+  dump_title_changes_ = false;
+  dump_resource_load_callbacks_ = false;
+  dump_resource_request_callbacks_ = false;
+  dump_resource_response_mime_types_ = false;
+  dump_create_view_ = false;
+  can_open_windows_ = false;
+  test_is_running_ = true;
+  load_finished_ = false;
+  wait_until_done_ = false;
 }
 
 // Private methods  -----------------------------------------------------------
@@ -456,8 +518,14 @@ void WebKitTestRunner::OnCaptureImageDump(
 }
 
 void WebKitTestRunner::OnSetCurrentWorkingDirectory(
-    const FilePath& current_working_directory) {
+    const base::FilePath& current_working_directory) {
   current_working_directory_ = current_working_directory;
+  std::vector<base::FilePath::StringType> components;
+  current_working_directory_.GetComponents(&components);
+  for (unsigned i = 0; i < components.size(); ++i) {
+    if (components[i] == FILE_PATH_LITERAL("loading"))
+      dump_frame_load_callbacks_ = true;
+  }
 }
 
 SkCanvas* WebKitTestRunner::GetCanvas() {

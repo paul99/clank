@@ -296,6 +296,42 @@ MINIDUMP_CONTEXT_X86 = Descriptor([
                 MD_CONTEXT_X86_EXTENDED_REGISTERS))
 ])
 
+MD_CONTEXT_ARM = 0x40000000
+MD_CONTEXT_ARM_INTEGER = (MD_CONTEXT_ARM | 0x00000002)
+MD_CONTEXT_ARM_FLOATING_POINT = (MD_CONTEXT_ARM | 0x00000004)
+MD_FLOATINGSAVEAREA_ARM_FPR_COUNT = 32
+MD_FLOATINGSAVEAREA_ARM_FPEXTRA_COUNT = 8
+
+MINIDUMP_FLOATING_SAVE_AREA_ARM = Descriptor([
+  ("fpscr", ctypes.c_uint64),
+  ("regs", ctypes.c_uint64 * MD_FLOATINGSAVEAREA_ARM_FPR_COUNT),
+  ("extra", ctypes.c_uint64 * MD_FLOATINGSAVEAREA_ARM_FPEXTRA_COUNT)
+])
+
+MINIDUMP_CONTEXT_ARM = Descriptor([
+  ("context_flags", ctypes.c_uint32),
+  # MD_CONTEXT_ARM_INTEGER.
+  ("r0", EnableOnFlag(ctypes.c_uint32, MD_CONTEXT_ARM_INTEGER)),
+  ("r1", EnableOnFlag(ctypes.c_uint32, MD_CONTEXT_ARM_INTEGER)),
+  ("r2", EnableOnFlag(ctypes.c_uint32, MD_CONTEXT_ARM_INTEGER)),
+  ("r3", EnableOnFlag(ctypes.c_uint32, MD_CONTEXT_ARM_INTEGER)),
+  ("r4", EnableOnFlag(ctypes.c_uint32, MD_CONTEXT_ARM_INTEGER)),
+  ("r5", EnableOnFlag(ctypes.c_uint32, MD_CONTEXT_ARM_INTEGER)),
+  ("r6", EnableOnFlag(ctypes.c_uint32, MD_CONTEXT_ARM_INTEGER)),
+  ("r7", EnableOnFlag(ctypes.c_uint32, MD_CONTEXT_ARM_INTEGER)),
+  ("r8", EnableOnFlag(ctypes.c_uint32, MD_CONTEXT_ARM_INTEGER)),
+  ("r9", EnableOnFlag(ctypes.c_uint32, MD_CONTEXT_ARM_INTEGER)),
+  ("r10", EnableOnFlag(ctypes.c_uint32, MD_CONTEXT_ARM_INTEGER)),
+  ("r11", EnableOnFlag(ctypes.c_uint32, MD_CONTEXT_ARM_INTEGER)),
+  ("r12", EnableOnFlag(ctypes.c_uint32, MD_CONTEXT_ARM_INTEGER)),
+  ("sp", EnableOnFlag(ctypes.c_uint32, MD_CONTEXT_ARM_INTEGER)),
+  ("lr", EnableOnFlag(ctypes.c_uint32, MD_CONTEXT_ARM_INTEGER)),
+  ("pc", EnableOnFlag(ctypes.c_uint32, MD_CONTEXT_ARM_INTEGER)),
+  ("cpsr", ctypes.c_uint32),
+  ("float_save", EnableOnFlag(MINIDUMP_FLOATING_SAVE_AREA_ARM.ctype,
+                              MD_CONTEXT_ARM_FLOATING_POINT))
+])
+
 MD_CONTEXT_AMD64 = 0x00100000
 MD_CONTEXT_AMD64_CONTROL = (MD_CONTEXT_AMD64 | 0x00000001)
 MD_CONTEXT_AMD64_INTEGER = (MD_CONTEXT_AMD64 | 0x00000002)
@@ -429,6 +465,7 @@ MINIDUMP_RAW_SYSTEM_INFO = Descriptor([
 ])
 
 MD_CPU_ARCHITECTURE_X86 = 0
+MD_CPU_ARCHITECTURE_ARM = 5
 MD_CPU_ARCHITECTURE_AMD64 = 9
 
 class FuncSymbol:
@@ -481,7 +518,9 @@ class MinidumpReader(object):
         system_info = MINIDUMP_RAW_SYSTEM_INFO.Read(
             self.minidump, d.location.rva)
         self.arch = system_info.processor_architecture
-        assert self.arch in [MD_CPU_ARCHITECTURE_AMD64, MD_CPU_ARCHITECTURE_X86]
+        assert self.arch in [MD_CPU_ARCHITECTURE_AMD64,
+                             MD_CPU_ARCHITECTURE_ARM,
+                             MD_CPU_ARCHITECTURE_X86]
     assert not self.arch is None
 
     for d in directories:
@@ -495,6 +534,9 @@ class MinidumpReader(object):
               self.minidump, self.exception.thread_context.rva)
         elif self.arch == MD_CPU_ARCHITECTURE_AMD64:
           self.exception_context = MINIDUMP_CONTEXT_AMD64.Read(
+              self.minidump, self.exception.thread_context.rva)
+        elif self.arch == MD_CPU_ARCHITECTURE_ARM:
+          self.exception_context = MINIDUMP_CONTEXT_ARM.Read(
               self.minidump, self.exception.thread_context.rva)
         DebugPrint(self.exception_context)
       elif d.stream_type == MD_THREAD_LIST_STREAM:
@@ -541,6 +583,8 @@ class MinidumpReader(object):
   def ReadUIntPtr(self, address):
     if self.arch == MD_CPU_ARCHITECTURE_AMD64:
       return self.ReadU64(address)
+    elif self.arch == MD_CPU_ARCHITECTURE_ARM:
+      return self.ReadU32(address)
     elif self.arch == MD_CPU_ARCHITECTURE_X86:
       return self.ReadU32(address)
 
@@ -551,6 +595,8 @@ class MinidumpReader(object):
   def _ReadWord(self, location):
     if self.arch == MD_CPU_ARCHITECTURE_AMD64:
       return ctypes.c_uint64.from_buffer(self.minidump, location).value
+    elif self.arch == MD_CPU_ARCHITECTURE_ARM:
+      return ctypes.c_uint32.from_buffer(self.minidump, location).value
     elif self.arch == MD_CPU_ARCHITECTURE_X86:
       return ctypes.c_uint32.from_buffer(self.minidump, location).value
 
@@ -647,18 +693,29 @@ class MinidumpReader(object):
     return None
 
   def GetDisasmLines(self, address, size):
+    def CountUndefinedInstructions(lines):
+      pattern = "<UNDEFINED>"
+      return sum([line.count(pattern) for (ignore, line) in lines])
+
     location = self.FindLocation(address)
     if location is None: return []
     arch = None
+    possible_objdump_flags = [""]
     if self.arch == MD_CPU_ARCHITECTURE_X86:
       arch = "ia32"
+    elif self.arch == MD_CPU_ARCHITECTURE_ARM:
+      arch = "arm"
+      possible_objdump_flags = ["", "--disassembler-options=force-thumb"]
     elif self.arch == MD_CPU_ARCHITECTURE_AMD64:
       arch = "x64"
-    return disasm.GetDisasmLines(self.minidump_name,
-                                 location,
-                                 size,
-                                 arch,
-                                 False)
+    results = [ disasm.GetDisasmLines(self.minidump_name,
+                                     location,
+                                     size,
+                                     arch,
+                                     False,
+                                     objdump_flags)
+                for objdump_flags in possible_objdump_flags ]
+    return min(results, key=CountUndefinedInstructions)
 
 
   def Dispose(self):
@@ -668,24 +725,32 @@ class MinidumpReader(object):
   def ExceptionIP(self):
     if self.arch == MD_CPU_ARCHITECTURE_AMD64:
       return self.exception_context.rip
+    elif self.arch == MD_CPU_ARCHITECTURE_ARM:
+      return self.exception_context.pc
     elif self.arch == MD_CPU_ARCHITECTURE_X86:
       return self.exception_context.eip
 
   def ExceptionSP(self):
     if self.arch == MD_CPU_ARCHITECTURE_AMD64:
       return self.exception_context.rsp
+    elif self.arch == MD_CPU_ARCHITECTURE_ARM:
+      return self.exception_context.sp
     elif self.arch == MD_CPU_ARCHITECTURE_X86:
       return self.exception_context.esp
 
   def FormatIntPtr(self, value):
     if self.arch == MD_CPU_ARCHITECTURE_AMD64:
       return "%016x" % value
+    elif self.arch == MD_CPU_ARCHITECTURE_ARM:
+      return "%08x" % value
     elif self.arch == MD_CPU_ARCHITECTURE_X86:
       return "%08x" % value
 
   def PointerSize(self):
     if self.arch == MD_CPU_ARCHITECTURE_AMD64:
       return 8
+    elif self.arch == MD_CPU_ARCHITECTURE_ARM:
+      return 4
     elif self.arch == MD_CPU_ARCHITECTURE_X86:
       return 4
 
@@ -813,31 +878,32 @@ INSTANCE_TYPES = {
   153: "OBJECT_TEMPLATE_INFO_TYPE",
   154: "SIGNATURE_INFO_TYPE",
   155: "TYPE_SWITCH_INFO_TYPE",
-  156: "SCRIPT_TYPE",
-  157: "CODE_CACHE_TYPE",
-  158: "POLYMORPHIC_CODE_CACHE_TYPE",
-  159: "TYPE_FEEDBACK_INFO_TYPE",
-  160: "ALIASED_ARGUMENTS_ENTRY_TYPE",
-  163: "FIXED_ARRAY_TYPE",
+  156: "ALLOCATION_SITE_INFO_TYPE",
+  157: "SCRIPT_TYPE",
+  158: "CODE_CACHE_TYPE",
+  159: "POLYMORPHIC_CODE_CACHE_TYPE",
+  160: "TYPE_FEEDBACK_INFO_TYPE",
+  161: "ALIASED_ARGUMENTS_ENTRY_TYPE",
+  164: "FIXED_ARRAY_TYPE",
   145: "FIXED_DOUBLE_ARRAY_TYPE",
-  164: "SHARED_FUNCTION_INFO_TYPE",
-  165: "JS_MESSAGE_OBJECT_TYPE",
-  168: "JS_VALUE_TYPE",
-  169: "JS_DATE_TYPE",
-  170: "JS_OBJECT_TYPE",
-  171: "JS_CONTEXT_EXTENSION_OBJECT_TYPE",
-  172: "JS_MODULE_TYPE",
-  173: "JS_GLOBAL_OBJECT_TYPE",
-  174: "JS_BUILTINS_OBJECT_TYPE",
-  175: "JS_GLOBAL_PROXY_TYPE",
-  176: "JS_ARRAY_TYPE",
-  167: "JS_PROXY_TYPE",
-  179: "JS_WEAK_MAP_TYPE",
-  180: "JS_REGEXP_TYPE",
-  181: "JS_FUNCTION_TYPE",
-  166: "JS_FUNCTION_PROXY_TYPE",
-  161: "DEBUG_INFO_TYPE",
-  162: "BREAK_POINT_INFO_TYPE",
+  165: "SHARED_FUNCTION_INFO_TYPE",
+  166: "JS_MESSAGE_OBJECT_TYPE",
+  169: "JS_VALUE_TYPE",
+  170: "JS_DATE_TYPE",
+  171: "JS_OBJECT_TYPE",
+  172: "JS_CONTEXT_EXTENSION_OBJECT_TYPE",
+  173: "JS_MODULE_TYPE",
+  174: "JS_GLOBAL_OBJECT_TYPE",
+  175: "JS_BUILTINS_OBJECT_TYPE",
+  176: "JS_GLOBAL_PROXY_TYPE",
+  177: "JS_ARRAY_TYPE",
+  168: "JS_PROXY_TYPE",
+  180: "JS_WEAK_MAP_TYPE",
+  181: "JS_REGEXP_TYPE",
+  182: "JS_FUNCTION_TYPE",
+  167: "JS_FUNCTION_PROXY_TYPE",
+  162: "DEBUG_INFO_TYPE",
+  163: "BREAK_POINT_INFO_TYPE",
 }
 
 
@@ -863,83 +929,84 @@ INSTANCE_TYPES = {
 # }
 # printf("}\n");
 KNOWN_MAPS = {
-  0x08081: (128, "MetaMap"),
-  0x080a5: (163, "FixedArrayMap"),
-  0x080c9: (130, "OddballMap"),
-  0x080ed: (163, "FixedCOWArrayMap"),
-  0x08111: (163, "ScopeInfoMap"),
-  0x08135: (132, "HeapNumberMap"),
-  0x08159: (133, "ForeignMap"),
-  0x0817d: (64, "SymbolMap"),
-  0x081a1: (68, "AsciiSymbolMap"),
-  0x081c5: (65, "ConsSymbolMap"),
-  0x081e9: (69, "ConsAsciiSymbolMap"),
-  0x0820d: (66, "ExternalSymbolMap"),
-  0x08231: (74, "ExternalSymbolWithAsciiDataMap"),
-  0x08255: (70, "ExternalAsciiSymbolMap"),
-  0x08279: (82, "ShortExternalSymbolMap"),
-  0x0829d: (90, "ShortExternalSymbolWithAsciiDataMap"),
-  0x082c1: (86, "ShortExternalAsciiSymbolMap"),
-  0x082e5: (0, "StringMap"),
-  0x08309: (4, "AsciiStringMap"),
-  0x0832d: (1, "ConsStringMap"),
-  0x08351: (5, "ConsAsciiStringMap"),
-  0x08375: (3, "SlicedStringMap"),
-  0x08399: (7, "SlicedAsciiStringMap"),
-  0x083bd: (2, "ExternalStringMap"),
-  0x083e1: (10, "ExternalStringWithAsciiDataMap"),
-  0x08405: (6, "ExternalAsciiStringMap"),
-  0x08429: (18, "ShortExternalStringMap"),
-  0x0844d: (26, "ShortExternalStringWithAsciiDataMap"),
-  0x08471: (22, "ShortExternalAsciiStringMap"),
-  0x08495: (0, "UndetectableStringMap"),
-  0x084b9: (4, "UndetectableAsciiStringMap"),
-  0x084dd: (145, "FixedDoubleArrayMap"),
-  0x08501: (134, "ByteArrayMap"),
-  0x08525: (135, "FreeSpaceMap"),
-  0x08549: (144, "ExternalPixelArrayMap"),
-  0x0856d: (136, "ExternalByteArrayMap"),
-  0x08591: (137, "ExternalUnsignedByteArrayMap"),
-  0x085b5: (138, "ExternalShortArrayMap"),
-  0x085d9: (139, "ExternalUnsignedShortArrayMap"),
-  0x085fd: (140, "ExternalIntArrayMap"),
-  0x08621: (141, "ExternalUnsignedIntArrayMap"),
-  0x08645: (142, "ExternalFloatArrayMap"),
-  0x08669: (163, "NonStrictArgumentsElementsMap"),
-  0x0868d: (143, "ExternalDoubleArrayMap"),
-  0x086b1: (129, "CodeMap"),
-  0x086d5: (131, "GlobalPropertyCellMap"),
-  0x086f9: (146, "OnePointerFillerMap"),
-  0x0871d: (146, "TwoPointerFillerMap"),
-  0x08741: (147, "AccessorInfoMap"),
-  0x08765: (148, "AccessorPairMap"),
-  0x08789: (149, "AccessCheckInfoMap"),
-  0x087ad: (150, "InterceptorInfoMap"),
-  0x087d1: (151, "CallHandlerInfoMap"),
-  0x087f5: (152, "FunctionTemplateInfoMap"),
-  0x08819: (153, "ObjectTemplateInfoMap"),
-  0x0883d: (154, "SignatureInfoMap"),
-  0x08861: (155, "TypeSwitchInfoMap"),
-  0x08885: (156, "ScriptMap"),
-  0x088a9: (157, "CodeCacheMap"),
-  0x088cd: (158, "PolymorphicCodeCacheMap"),
-  0x088f1: (159, "TypeFeedbackInfoMap"),
-  0x08915: (160, "AliasedArgumentsEntryMap"),
-  0x08939: (161, "DebugInfoMap"),
-  0x0895d: (162, "BreakPointInfoMap"),
-  0x08981: (163, "HashTableMap"),
-  0x089a5: (163, "FunctionContextMap"),
-  0x089c9: (163, "CatchContextMap"),
-  0x089ed: (163, "WithContextMap"),
-  0x08a11: (163, "BlockContextMap"),
-  0x08a35: (163, "ModuleContextMap"),
-  0x08a59: (163, "GlobalContextMap"),
-  0x08a7d: (163, "NativeContextMap"),
-  0x08aa1: (164, "SharedFunctionInfoMap"),
-  0x08ac5: (165, "JSMessageObjectMap"),
-  0x08ae9: (170, "ExternalMap"),
-  0x08b0d: (170, "NeanderMap"),
-  0x08b31: (170, ""),
+  0x08081: (134, "ByteArrayMap"),
+  0x080a9: (128, "MetaMap"),
+  0x080d1: (130, "OddballMap"),
+  0x080f9: (68, "AsciiSymbolMap"),
+  0x08121: (164, "FixedArrayMap"),
+  0x08149: (132, "HeapNumberMap"),
+  0x08171: (135, "FreeSpaceMap"),
+  0x08199: (146, "OnePointerFillerMap"),
+  0x081c1: (146, "TwoPointerFillerMap"),
+  0x081e9: (131, "GlobalPropertyCellMap"),
+  0x08211: (165, "SharedFunctionInfoMap"),
+  0x08239: (4, "AsciiStringMap"),
+  0x08261: (164, "NativeContextMap"),
+  0x08289: (129, "CodeMap"),
+  0x082b1: (164, "ScopeInfoMap"),
+  0x082d9: (164, "FixedCOWArrayMap"),
+  0x08301: (145, "FixedDoubleArrayMap"),
+  0x08329: (164, "HashTableMap"),
+  0x08351: (0, "StringMap"),
+  0x08379: (64, "SymbolMap"),
+  0x083a1: (1, "ConsStringMap"),
+  0x083c9: (5, "ConsAsciiStringMap"),
+  0x083f1: (3, "SlicedStringMap"),
+  0x08419: (7, "SlicedAsciiStringMap"),
+  0x08441: (65, "ConsSymbolMap"),
+  0x08469: (69, "ConsAsciiSymbolMap"),
+  0x08491: (66, "ExternalSymbolMap"),
+  0x084b9: (74, "ExternalSymbolWithAsciiDataMap"),
+  0x084e1: (70, "ExternalAsciiSymbolMap"),
+  0x08509: (2, "ExternalStringMap"),
+  0x08531: (10, "ExternalStringWithAsciiDataMap"),
+  0x08559: (6, "ExternalAsciiStringMap"),
+  0x08581: (82, "ShortExternalSymbolMap"),
+  0x085a9: (90, "ShortExternalSymbolWithAsciiDataMap"),
+  0x085d1: (86, "ShortExternalAsciiSymbolMap"),
+  0x085f9: (18, "ShortExternalStringMap"),
+  0x08621: (26, "ShortExternalStringWithAsciiDataMap"),
+  0x08649: (22, "ShortExternalAsciiStringMap"),
+  0x08671: (0, "UndetectableStringMap"),
+  0x08699: (4, "UndetectableAsciiStringMap"),
+  0x086c1: (144, "ExternalPixelArrayMap"),
+  0x086e9: (136, "ExternalByteArrayMap"),
+  0x08711: (137, "ExternalUnsignedByteArrayMap"),
+  0x08739: (138, "ExternalShortArrayMap"),
+  0x08761: (139, "ExternalUnsignedShortArrayMap"),
+  0x08789: (140, "ExternalIntArrayMap"),
+  0x087b1: (141, "ExternalUnsignedIntArrayMap"),
+  0x087d9: (142, "ExternalFloatArrayMap"),
+  0x08801: (143, "ExternalDoubleArrayMap"),
+  0x08829: (164, "NonStrictArgumentsElementsMap"),
+  0x08851: (164, "FunctionContextMap"),
+  0x08879: (164, "CatchContextMap"),
+  0x088a1: (164, "WithContextMap"),
+  0x088c9: (164, "BlockContextMap"),
+  0x088f1: (164, "ModuleContextMap"),
+  0x08919: (164, "GlobalContextMap"),
+  0x08941: (166, "JSMessageObjectMap"),
+  0x08969: (133, "ForeignMap"),
+  0x08991: (171, "NeanderMap"),
+  0x089b9: (156, "AllocationSiteInfoMap"),
+  0x089e1: (159, "PolymorphicCodeCacheMap"),
+  0x08a09: (157, "ScriptMap"),
+  0x08a31: (171, ""),
+  0x08a59: (171, "ExternalMap"),
+  0x08a81: (147, "AccessorInfoMap"),
+  0x08aa9: (148, "AccessorPairMap"),
+  0x08ad1: (149, "AccessCheckInfoMap"),
+  0x08af9: (150, "InterceptorInfoMap"),
+  0x08b21: (151, "CallHandlerInfoMap"),
+  0x08b49: (152, "FunctionTemplateInfoMap"),
+  0x08b71: (153, "ObjectTemplateInfoMap"),
+  0x08b99: (154, "SignatureInfoMap"),
+  0x08bc1: (155, "TypeSwitchInfoMap"),
+  0x08be9: (158, "CodeCacheMap"),
+  0x08c11: (160, "TypeFeedbackInfoMap"),
+  0x08c39: (161, "AliasedArgumentsEntryMap"),
+  0x08c61: (162, "DebugInfoMap"),
+  0x08c89: (163, "BreakPointInfoMap"),
 }
 
 
@@ -1462,6 +1529,8 @@ class V8Heap(object):
   def MapAlignmentMask(self):
     if self.reader.arch == MD_CPU_ARCHITECTURE_AMD64:
       return (1 << 4) - 1
+    elif self.reader.arch == MD_CPU_ARCHITECTURE_ARM:
+      return (1 << 4) - 1
     elif self.reader.arch == MD_CPU_ARCHITECTURE_X86:
       return (1 << 5) - 1
 
@@ -1746,6 +1815,9 @@ CONTEXT_FOR_ARCH = {
     MD_CPU_ARCHITECTURE_AMD64:
       ['rax', 'rbx', 'rcx', 'rdx', 'rdi', 'rsi', 'rbp', 'rsp', 'rip',
        'r8', 'r9', 'r10', 'r11', 'r12', 'r13', 'r14', 'r15'],
+    MD_CPU_ARCHITECTURE_ARM:
+      ['r0', 'r1', 'r2', 'r3', 'r4', 'r5', 'r6', 'r7', 'r8', 'r9',
+       'r10', 'r11', 'r12', 'sp', 'lr', 'pc'],
     MD_CPU_ARCHITECTURE_X86:
       ['eax', 'ebx', 'ecx', 'edx', 'edi', 'esi', 'ebp', 'esp', 'eip']
 }
@@ -1771,7 +1843,11 @@ def AnalyzeMinidump(options, minidump_name):
     for r in CONTEXT_FOR_ARCH[reader.arch]:
       print "    %s: %s" % (r, reader.FormatIntPtr(reader.Register(r)))
     # TODO(vitalyr): decode eflags.
-    print "    eflags: %s" % bin(reader.exception_context.eflags)[2:]
+    if reader.arch == MD_CPU_ARCHITECTURE_ARM:
+      print "    cpsr: %s" % bin(reader.exception_context.cpsr)[2:]
+    else:
+      print "    eflags: %s" % bin(reader.exception_context.eflags)[2:]
+
     print
     print "  modules:"
     for module in reader.module_list.modules:
@@ -1842,7 +1918,15 @@ if __name__ == "__main__":
                     help="dump all information contained in the minidump")
   parser.add_option("--symdir", dest="symdir", default=".",
                     help="directory containing *.pdb.sym file with symbols")
+  parser.add_option("--objdump",
+                    default="/usr/bin/objdump",
+                    help="objdump tool to use [default: %default]")
   options, args = parser.parse_args()
+  if os.path.exists(options.objdump):
+    disasm.OBJDUMP_BIN = options.objdump
+    OBJDUMP_BIN = options.objdump
+  else:
+    print "Cannot find %s, falling back to default objdump" % options.objdump
   if len(args) != 1:
     parser.print_help()
     sys.exit(1)

@@ -35,18 +35,6 @@
 namespace v8 {
 namespace internal {
 
-// Flags used for the AllocateInNewSpace functions.
-enum AllocationFlags {
-  // No special flags.
-  NO_ALLOCATION_FLAGS = 0,
-  // Return the pointer to the allocated already tagged as a heap object.
-  TAG_OBJECT = 1 << 0,
-  // The content of the result register already contains the allocation top in
-  // new space.
-  RESULT_CONTAINS_TOP = 1 << 1
-};
-
-
 // Default scratch register used by MacroAssembler (and other code that needs
 // a spare register). The register isn't callee save, and not used by the
 // function calling convention.
@@ -385,7 +373,7 @@ class MacroAssembler: public Assembler {
   void InitializeSmiConstantRegister() {
     movq(kSmiConstantRegister,
          reinterpret_cast<uint64_t>(Smi::FromInt(kSmiConstantRegisterValue)),
-         RelocInfo::NONE);
+         RelocInfo::NONE64);
   }
 
   // Conversions between tagged smi values and non-tagged integer values.
@@ -1327,6 +1315,15 @@ class MacroAssembler: public Assembler {
   void CheckEnumCache(Register null_value,
                       Label* call_runtime);
 
+  // AllocationSiteInfo support. Arrays may have an associated
+  // AllocationSiteInfo object that can be checked for in order to pretransition
+  // to another type.
+  // On entry, receiver_reg should point to the array object.
+  // scratch_reg gets clobbered.
+  // If allocation info is present, condition flags are set to equal
+  void TestJSArrayForAllocationSiteInfo(Register receiver_reg,
+                                        Register scratch_reg);
+
  private:
   // Order general registers are pushed by Pushad.
   // rax, rcx, rdx, rbx, rsi, rdi, r8, r9, r11, r14, r15.
@@ -1414,9 +1411,9 @@ class MacroAssembler: public Assembler {
     return kNumSafepointRegisters - kSafepointPushRegisterIndices[reg_code] - 1;
   }
 
-  // Needs access to SafepointRegisterStackIndex for optimized frame
+  // Needs access to SafepointRegisterStackIndex for compiled frame
   // traversal.
-  friend class OptimizedFrame;
+  friend class StandardFrame;
 };
 
 
@@ -1485,17 +1482,16 @@ extern void LogGeneratedCodeCoverage(const char* file_line);
 #define CODE_COVERAGE_STRINGIFY(x) #x
 #define CODE_COVERAGE_TOSTRING(x) CODE_COVERAGE_STRINGIFY(x)
 #define __FILE_LINE__ __FILE__ ":" CODE_COVERAGE_TOSTRING(__LINE__)
-#define ACCESS_MASM(masm) {                                               \
-    byte* x64_coverage_function =                                         \
-        reinterpret_cast<byte*>(FUNCTION_ADDR(LogGeneratedCodeCoverage)); \
-    masm->pushfd();                                                       \
-    masm->pushad();                                                       \
-    masm->push(Immediate(reinterpret_cast<int>(&__FILE_LINE__)));         \
-    masm->call(x64_coverage_function, RelocInfo::RUNTIME_ENTRY);          \
-    masm->pop(rax);                                                       \
-    masm->popad();                                                        \
-    masm->popfd();                                                        \
-  }                                                                       \
+#define ACCESS_MASM(masm) {                                                  \
+    Address x64_coverage_function = FUNCTION_ADDR(LogGeneratedCodeCoverage); \
+    masm->pushfq();                                                          \
+    masm->Pushad();                                                          \
+    masm->push(Immediate(reinterpret_cast<int>(&__FILE_LINE__)));            \
+    masm->Call(x64_coverage_function, RelocInfo::EXTERNAL_REFERENCE);        \
+    masm->pop(rax);                                                          \
+    masm->Popad();                                                           \
+    masm->popfq();                                                           \
+  }                                                                          \
   masm->
 #else
 #define ACCESS_MASM(masm) masm->

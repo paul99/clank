@@ -17,6 +17,7 @@
 #include "content/public/browser/resource_controller.h"
 #include "content/public/browser/resource_throttle.h"
 #include "net/url_request/url_request.h"
+#include "net/url_request/url_request_filter.h"
 #include "net/url_request/url_request_test_job.h"
 #include "net/url_request/url_request_test_util.h"
 #include "testing/gtest/include/gtest/gtest.h"
@@ -42,16 +43,16 @@ class ThrottleController : public base::SupportsUserData::Data,
   }
 
   // ResourceController implementation:
-  virtual void Resume() {
+  virtual void Resume() OVERRIDE {
     request_->Start();
   }
-  virtual void Cancel() {
+  virtual void Cancel() OVERRIDE {
     NOTREACHED();
   }
-  virtual void CancelAndIgnore() {
+  virtual void CancelAndIgnore() OVERRIDE {
     NOTREACHED();
   }
-  virtual void CancelWithError(int error_code) {
+  virtual void CancelWithError(int error_code) OVERRIDE {
     NOTREACHED();
   }
 
@@ -72,11 +73,12 @@ class SimpleTestJob : public net::URLRequestTestJob {
                                kTestData,
                                true) {}
  private:
-  ~SimpleTestJob() {}
+  virtual ~SimpleTestJob() {}
 };
 
 // Yoinked from extension_manifest_unittest.cc.
-DictionaryValue* LoadManifestFile(const FilePath path, std::string* error) {
+DictionaryValue* LoadManifestFile(const base::FilePath path,
+                                  std::string* error) {
   EXPECT_TRUE(file_util::PathExists(path));
   JSONFileValueSerializer serializer(path);
   return static_cast<DictionaryValue*>(serializer.Deserialize(NULL, error));
@@ -84,7 +86,7 @@ DictionaryValue* LoadManifestFile(const FilePath path, std::string* error) {
 
 scoped_refptr<Extension> LoadExtension(const std::string& filename,
                                        std::string* error) {
-  FilePath path;
+  base::FilePath path;
   PathService::Get(chrome::DIR_TEST_DATA, &path);
   path = path.
       AppendASCII("extensions").
@@ -93,25 +95,50 @@ scoped_refptr<Extension> LoadExtension(const std::string& filename,
   scoped_ptr<DictionaryValue> value(LoadManifestFile(path, error));
   if (!value.get())
     return NULL;
-  return Extension::Create(path.DirName(), Extension::LOAD, *value,
+  return Extension::Create(path.DirName(), Manifest::LOAD, *value,
                            Extension::NO_FLAGS, error);
 }
 
+class SimpleTestJobProtocolHandler
+    : public net::URLRequestJobFactory::ProtocolHandler {
+ public:
+  SimpleTestJobProtocolHandler() {}
+  virtual ~SimpleTestJobProtocolHandler() {}
+
+  // net::URLRequestJobFactory::ProtocolHandler
+  virtual net::URLRequestJob* MaybeCreateJob(
+      net::URLRequest* request,
+      net::NetworkDelegate* network_delegate) const OVERRIDE {
+    return new SimpleTestJob(request, network_delegate);
+  }
+
+ private:
+  DISALLOW_COPY_AND_ASSIGN(SimpleTestJobProtocolHandler);
+};
+
 }  // namespace
 
-class UserScriptListenerTest
-    : public ExtensionServiceTestBase,
-      public net::URLRequest::Interceptor {
+class UserScriptListenerTest : public ExtensionServiceTestBase {
  public:
   UserScriptListenerTest() {
-    net::URLRequest::Deprecated::RegisterRequestInterceptor(this);
+    net::URLRequestFilter::GetInstance()->AddHostnameProtocolHandler(
+        "http", "google.com",
+        scoped_ptr<net::URLRequestJobFactory::ProtocolHandler>(
+            new SimpleTestJobProtocolHandler()));
+    net::URLRequestFilter::GetInstance()->AddHostnameProtocolHandler(
+        "http", "example.com",
+        scoped_ptr<net::URLRequestJobFactory::ProtocolHandler>(
+            new SimpleTestJobProtocolHandler()));
   }
 
-  ~UserScriptListenerTest() {
-    net::URLRequest::Deprecated::UnregisterRequestInterceptor(this);
+  virtual ~UserScriptListenerTest() {
+    net::URLRequestFilter::GetInstance()->RemoveHostnameHandler("http",
+                                                                "google.com");
+    net::URLRequestFilter::GetInstance()->RemoveHostnameHandler("http",
+                                                                "example.com");
   }
 
-  virtual void SetUp() {
+  virtual void SetUp() OVERRIDE {
     ExtensionServiceTestBase::SetUp();
 
     InitializeEmptyExtensionService();
@@ -121,15 +148,9 @@ class UserScriptListenerTest
     listener_ = new UserScriptListener();
   }
 
-  virtual void TearDown() {
+  virtual void TearDown() OVERRIDE {
     listener_ = NULL;
     MessageLoop::current()->RunUntilIdle();
-  }
-
-  // net::URLRequest::Interceptor
-  virtual net::URLRequestJob* MaybeIntercept(
-      net::URLRequest* request, net::NetworkDelegate* network_delegate) {
-    return new SimpleTestJob(request, network_delegate);
   }
 
  protected:
@@ -157,9 +178,9 @@ class UserScriptListenerTest
   }
 
   void LoadTestExtension() {
-    FilePath test_dir;
+    base::FilePath test_dir;
     ASSERT_TRUE(PathService::Get(chrome::DIR_TEST_DATA, &test_dir));
-    FilePath extension_path = test_dir
+    base::FilePath extension_path = test_dir
         .AppendASCII("extensions")
         .AppendASCII("good")
         .AppendASCII("Extensions")

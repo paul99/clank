@@ -25,9 +25,10 @@ namespace gfx {
 class Font;
 }
 namespace ui {
+class Animation;
 class AnimationContainer;
+class LinearAnimation;
 class MultiAnimation;
-class ThrobAnimation;
 }
 namespace views {
 class ImageButton;
@@ -61,9 +62,6 @@ class Tab : public ui::AnimationDelegate,
 
   // Sets the container all animations run from.
   void set_animation_container(ui::AnimationContainer* container);
-  ui::AnimationContainer* animation_container() const {
-    return animation_container_.get();
-  }
 
   // Set the theme provider - because we get detached, we are frequently
   // outside of a hierarchy with a theme provider at the top. This should be
@@ -101,7 +99,13 @@ class Tab : public ui::AnimationDelegate,
   }
 
   // Recomputes the dominant color of the favicon, used in immersive mode.
+  // TODO(jamescook): Remove this if UX agrees that we don't want colors in the
+  // immersive mode light bar. crbug.com/166929
   void UpdateIconDominantColor();
+
+  views::GlowHoverController* hover_controller() {
+    return &hover_controller_;
+  }
 
   // Returns the minimum possible size of a single unselected Tab.
   static gfx::Size GetMinimumUnselectedSize();
@@ -197,7 +201,8 @@ class Tab : public ui::AnimationDelegate,
 
   // Paint various portions of the Tab
   void PaintTabBackground(gfx::Canvas* canvas);
-  void PaintInactiveTabBackgroundWithTitleChange(gfx::Canvas* canvas);
+  void PaintInactiveTabBackgroundWithTitleChange(gfx::Canvas* canvas,
+                                                 ui::MultiAnimation* animation);
   void PaintInactiveTabBackground(gfx::Canvas* canvas);
   void PaintInactiveTabBackgroundUsingResourceId(gfx::Canvas* canvas,
                                                  int tab_id);
@@ -233,9 +238,11 @@ class Tab : public ui::AnimationDelegate,
   void DisplayCrashedFavicon();
   void ResetCrashedFavicon();
 
-  // Starts/Stops the crash animation.
   void StartCrashAnimation();
   void StopCrashAnimation();
+
+  void StartRecordingAnimation();
+  void StopRecordingAnimation();
 
   // Returns true if the crash animation is currently running.
   bool IsPerformingCrashAnimation() const;
@@ -285,23 +292,16 @@ class Tab : public ui::AnimationDelegate,
 
   bool should_display_crashed_favicon_;
 
-  // Pulse animation. Non-null if StartPulse has been invoked.
-  scoped_ptr<ui::ThrobAnimation> pulse_animation_;
-
-  // Crash animation.
-  scoped_ptr<FaviconCrashAnimation> crash_animation_;
-
-  // Recording animation.
-  scoped_ptr<ui::ThrobAnimation> recording_animation_;
+  // The tab and the icon can both be animating. The tab 'throbs' by changing
+  // color. The icon can have one of several of animations like crashing,
+  // recording, projecting, etc. Note that the icon animation related to network
+  // state does not have an animation associated with it.
+  scoped_ptr<ui::Animation> tab_animation_;
+  scoped_ptr<ui::LinearAnimation> icon_animation_;
 
   scoped_refptr<ui::AnimationContainer> animation_container_;
 
   views::ImageButton* close_button_;
-
-  // Whether to disable throbber animations. Only true if this is an app tab
-  // renderer and a command line flag has been passed in to disable the
-  // animations.
-  bool throbber_disabled_;
 
   ui::ThemeProvider* theme_provider_;
 
@@ -314,9 +314,6 @@ class Tab : public ui::AnimationDelegate,
   // The offset used to paint the inactive background image.
   gfx::Point background_offset_;
 
-  // Animation used when the title of an inactive mini tab changes.
-  scoped_ptr<ui::MultiAnimation> mini_title_animation_;
-
   struct TabImage {
     gfx::ImageSkia* image_l;
     gfx::ImageSkia* image_c;
@@ -328,8 +325,6 @@ class Tab : public ui::AnimationDelegate,
   static TabImage tab_active_;
   static TabImage tab_inactive_;
   static TabImage tab_alpha_;
-  static TabImage tab_immersive_active_;
-  static TabImage tab_immersive_inactive_;
 
   // Whether we're showing the icon. It is cached so that we can detect when it
   // changes and layout appropriately.
@@ -344,6 +339,8 @@ class Tab : public ui::AnimationDelegate,
 
   // The dominant color of the favicon. Used in immersive mode. White until the
   // color is known so that tab has something visible to draw during page load.
+  // TODO(jamescook): Remove this if UX agrees that we don't want colors in the
+  // immersive mode light bar. crbug.com/166929
   SkColor icon_dominant_color_;
 
   static gfx::Font* font_;

@@ -9,9 +9,14 @@
 #include <vector>
 #include "base/basictypes.h"
 #include "chrome/browser/ui/panels/panel_collection.h"
+#include "chrome/browser/ui/panels/panel_constants.h"
 #include "ui/gfx/rect.h"
 
+class NativePanelStack;
 class PanelManager;
+namespace gfx {
+class Vector2d;
+}
 
 class StackedPanelCollection : public PanelCollection {
  public:
@@ -25,7 +30,7 @@ class StackedPanelCollection : public PanelCollection {
   virtual void RefreshLayout() OVERRIDE;
   virtual void AddPanel(Panel* panel,
                         PositioningMask positioning_mask) OVERRIDE;
-  virtual void RemovePanel(Panel* panel) OVERRIDE;
+  virtual void RemovePanel(Panel* panel, RemovalReason reason) OVERRIDE;
   virtual void CloseAll() OVERRIDE;
   virtual void ResizePanelWindow(
       Panel* panel,
@@ -40,36 +45,78 @@ class StackedPanelCollection : public PanelCollection {
   virtual void ActivatePanel(Panel* panel) OVERRIDE;
   virtual void MinimizePanel(Panel* panel) OVERRIDE;
   virtual void RestorePanel(Panel* panel) OVERRIDE;
-  virtual void MinimizeAll() OVERRIDE;
-  virtual void RestoreAll() OVERRIDE;
-  virtual bool CanMinimizePanel(const Panel* panel) const OVERRIDE;
+  virtual void OnMinimizeButtonClicked(Panel* panel,
+                                       panel::ClickModifier modifier) OVERRIDE;
+  virtual void OnRestoreButtonClicked(Panel* panel,
+                                      panel::ClickModifier modifier) OVERRIDE;
+  virtual bool CanShowMinimizeButton(const Panel* panel) const OVERRIDE;
+  virtual bool CanShowRestoreButton(const Panel* panel) const OVERRIDE;
   virtual bool IsPanelMinimized(const Panel* panel) const OVERRIDE;
   virtual void SavePanelPlacement(Panel* panel) OVERRIDE;
   virtual void RestorePanelToSavedPlacement() OVERRIDE;
   virtual void DiscardSavedPanelPlacement()  OVERRIDE;
-  virtual void StartDraggingPanelWithinCollection(Panel* panel) OVERRIDE;
-  virtual void DragPanelWithinCollection(
-      Panel* panel,
-      const gfx::Point& target_position) OVERRIDE;
-  virtual void EndDraggingPanelWithinCollection(Panel* panel,
-                                                bool aborted) OVERRIDE;
-  virtual void ClearDraggingStateWhenPanelClosed() OVERRIDE;
   virtual void UpdatePanelOnCollectionChange(Panel* panel) OVERRIDE;
+  virtual void OnPanelExpansionStateChanged(Panel* panel) OVERRIDE;
   virtual void OnPanelActiveStateChanged(Panel* panel) OVERRIDE;
 
   Panel* GetPanelAbove(Panel* panel) const;
   bool HasPanel(Panel* panel) const;
 
-  bool empty() const { return panels_.empty(); }
+  void MoveAllDraggingPanelsInstantly(const gfx::Vector2d& delta_origin);
+
+  // Returns the maximum available space from the bottom of the stack. The
+  // maximum available space is defined as the distance between the bottom
+  // of the stack and the bottom of the working area, assuming that all inactive
+  // panels are collapsed.
+  int GetMaximiumAvailableBottomSpace() const;
+
+  NativePanelStack* native_stack() const { return native_stack_; }
   int num_panels() const { return panels_.size(); }
   const Panels& panels() const { return panels_; }
-  Panel* top_panel() const { return panels_.front(); }
-  Panel* bottom_panel() const { return panels_.back(); }
+  Panel* top_panel() const { return panels_.empty() ? NULL : panels_.front(); }
+  Panel* bottom_panel() const {
+    return panels_.empty() ? NULL : panels_.back();
+  }
 
  private:
-  PanelManager* panel_manager_;  // Weak, owns us.
+  struct PanelPlacement {
+    Panel* panel;
+    gfx::Point position;
+    // Used to remember the top panel, if different from |panel|, for use when
+    // restoring it. When there're only 2 panels in the stack and the bottom
+    // panel is being dragged out of the stack, both panels will be moved to
+    // the detached collection. We need to track the top panel in order to
+    // put it back to the same stack of the dragging panel.
+    Panel* top_panel;
+
+    PanelPlacement() : panel(NULL), top_panel(NULL) { }
+  };
+
+  // Returns the current available space from the bottom of the stack. The
+  // current available space is defined as the distance between the bottom
+  // of the stack and the bottom of the working area.
+  int GetCurrentAvailableBottomSpace() const;
+
+  // Minimizes or restores all panels in the collection.
+  void MinimizeAll();
+  void RestoreAll();
+
+  void UpdatePanelCornerStyle(Panel* panel);
+
+  PanelManager* panel_manager_;
+
+  NativePanelStack* native_stack_;  // Weak, owns us.
 
   Panels panels_;  // The top panel is in the front of the list.
+
+  // Keeps track of the panels in their active order. The most recently active
+  // panel is in the front of the list.
+  Panels most_recently_active_panels_;
+
+  // Used to save the placement information for a panel.
+  PanelPlacement saved_panel_placement_;
+
+  bool minimizing_all_;  // True while minimizing all panels.
 
   DISALLOW_COPY_AND_ASSIGN(StackedPanelCollection);
 };

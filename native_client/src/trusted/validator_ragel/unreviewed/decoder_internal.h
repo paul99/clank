@@ -13,7 +13,6 @@
 #define NATIVE_CLIENT_SRC_TRUSTED_VALIDATOR_RAGEL_DECODER_INTERNAL_H_
 
 #include "native_client/src/trusted/validator_ragel/unreviewed/decoding.h"
-#include "native_client/src/trusted/validator_ragel/unreviewed/decoder.h"
 
 /*
  * Set of macroses used in actions defined in parse_instruction.rl to pull
@@ -48,8 +47,6 @@
   instruction.imm[1] = DecodeImmediateValue(imm2_operand, (P))
 #define SET_CPU_FEATURE(F)
 #define SET_ATT_INSTRUCTION_SUFFIX(S) instruction.att_instruction_suffix = (S)
-#define CLEAR_SPURIOUS_DATA16() instruction.prefix.data16_spurious = FALSE
-#define SET_SPURIOUS_DATA16() instruction.prefix.data16_spurious = TRUE
 
 /*
  * Immediate mode: size of the instruction's immediate operand.  Note that there

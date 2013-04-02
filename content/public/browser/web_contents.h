@@ -17,8 +17,9 @@
 #include "content/public/browser/web_ui.h"
 #include "ipc/ipc_sender.h"
 #include "third_party/skia/include/core/SkColor.h"
+#include "ui/base/window_open_disposition.h"
 #include "ui/gfx/native_widget_types.h"
-#include "webkit/glue/window_open_disposition.h"
+#include "ui/gfx/size.h"
 
 namespace base {
 class TimeTicks;
@@ -77,9 +78,8 @@ class WebContents : public PageNavigator,
     SiteInstance* site_instance;
     int routing_id;
 
-    // Used if we want to size the new WebContents's view based on the view of
-    // an existing WebContents.  This can be NULL if not needed.
-    const WebContents* base_web_contents;
+    // Initial size of the new WebContent's view. Can be (0, 0) if not needed.
+    gfx::Size initial_size;
 
     // Used to specify the location context which display the new view should
     // belong. This can be NULL if not needed.
@@ -145,6 +145,15 @@ class WebContents : public PageNavigator,
       int x,
       int y,
       const GetRenderViewHostCallback& callback) = 0;
+
+  // Returns the WebContents embedding this WebContents, if any.
+  // If this is a top-level WebContents then it returns NULL.
+  virtual WebContents* GetEmbedderWebContents() const = 0;
+
+  // Gets the instance ID of the current WebContents if it is embedded
+  // within a BrowserPlugin. The instance ID of a WebContents uniquely
+  // identifies it within its embedder WebContents.
+  virtual int GetEmbeddedInstanceID() const = 0;
 
   // Gets the current RenderViewHost's routing id. Returns
   // MSG_ROUTING_NONE when there is no RenderViewHost.
@@ -220,9 +229,11 @@ class WebContents : public PageNavigator,
 
   // Internal state ------------------------------------------------------------
 
-  // This flag indicates whether the WebContents is currently being
-  // screenshotted.
-  virtual void SetCapturingContents(bool cap) = 0;
+  // Indicates whether the WebContents is being captured (e.g., for screenshots
+  // or mirroring).  Increment calls must be balanced with an equivalent number
+  // of decrement calls.
+  virtual void IncrementCapturerCount() = 0;
+  virtual void DecrementCapturerCount() = 0;
 
   // Indicates whether this tab should be considered crashed. The setter will
   // also notify the delegate when the flag is changed.
@@ -423,7 +434,6 @@ class WebContents : public PageNavigator,
 
   typedef base::Callback<void(int, /* id */
                               const GURL&, /* image_url */
-                              bool, /* errored */
                               int,  /* requested_size */
                               const std::vector<SkBitmap>& /* bitmaps*/)>
       FaviconDownloadCallback;

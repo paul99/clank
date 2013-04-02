@@ -9,8 +9,6 @@ import tempfile
 from telemetry import browser_backend
 from telemetry import util
 
-DEFAULT_PORT = 9273
-
 class DesktopBrowserBackend(browser_backend.BrowserBackend):
   """The backend for controlling a locally-executed browser instance, on Linux,
   Mac or Windows.
@@ -27,11 +25,12 @@ class DesktopBrowserBackend(browser_backend.BrowserBackend):
     if not self._executable:
       raise Exception('Cannot create browser, no executable found!')
 
-    self._port = DEFAULT_PORT
+    self._port = util.GetAvailableLocalPort()
+
     args = [self._executable]
     args.extend(self.GetBrowserStartupArgs())
     if not options.show_stdout:
-      self._tmp_output_file = tempfile.NamedTemporaryFile()
+      self._tmp_output_file = tempfile.NamedTemporaryFile('w', 0)
       self._proc = subprocess.Popen(
           args, stdout=self._tmp_output_file, stderr=subprocess.STDOUT)
     else:
@@ -60,13 +59,18 @@ class DesktopBrowserBackend(browser_backend.BrowserBackend):
   def GetStandardOutput(self):
     assert self._tmp_output_file, "Can't get standard output with show_stdout"
     self._tmp_output_file.flush()
-    with open(self._tmp_output_file.name) as f:
-      return f.read()
+    try:
+      with open(self._tmp_output_file.name) as f:
+        return f.read()
+    except IOError:
+      return ''
 
   def __del__(self):
     self.Close()
 
   def Close(self):
+    super(DesktopBrowserBackend, self).Close()
+
     if self._proc:
 
       def IsClosed():
@@ -100,12 +104,12 @@ class DesktopBrowserBackend(browser_backend.BrowserBackend):
       self._tmp_output_file.close()
       self._tmp_output_file = None
 
-  def CreateForwarder(self, *ports):
-    return DoNothingForwarder(ports[0])
+  def CreateForwarder(self, *port_pairs):
+    return DoNothingForwarder(*port_pairs)
 
 class DoNothingForwarder(object):
   def __init__(self, *port_pairs):
-    self._host_port = port_pairs[0][0]
+    self._host_port = port_pairs[0].local_port
 
   @property
   def url(self):

@@ -25,6 +25,8 @@ class ChromeNetLog;
 class ChromeResourceDispatcherHostDelegate;
 class CommandLine;
 class RemoteDebuggingServer;
+class PrefRegistrySimple;
+class PromoResourceService;
 
 #if defined(ENABLE_PLUGIN_INSTALLATION)
 class PluginsResourceService;
@@ -83,6 +85,9 @@ class BrowserProcessImpl : public BrowserProcess,
   virtual extensions::EventRouterForwarder*
         extension_event_router_forwarder() OVERRIDE;
   virtual NotificationUIManager* notification_ui_manager() OVERRIDE;
+#if defined(ENABLE_MESSAGE_CENTER)
+  virtual message_center::MessageCenter* message_center() OVERRIDE;
+#endif
   virtual policy::BrowserPolicyConnector* browser_policy_connector() OVERRIDE;
   virtual policy::PolicyService* policy_service() OVERRIDE;
   virtual IconManager* icon_manager() OVERRIDE;
@@ -98,8 +103,8 @@ class BrowserProcessImpl : public BrowserProcess,
   virtual unsigned int ReleaseModule() OVERRIDE;
   virtual bool IsShuttingDown() OVERRIDE;
   virtual printing::PrintJobManager* print_job_manager() OVERRIDE;
-  virtual printing::PrintPreviewTabController*
-      print_preview_tab_controller() OVERRIDE;
+  virtual printing::PrintPreviewDialogController*
+      print_preview_dialog_controller() OVERRIDE;
   virtual printing::BackgroundPrintingManager*
       background_printing_manager() OVERRIDE;
   virtual IntranetRedirectDetector* intranet_redirect_detector() OVERRIDE;
@@ -127,6 +132,8 @@ class BrowserProcessImpl : public BrowserProcess,
   virtual void PlatformSpecificCommandLineProcessing(
       const CommandLine& command_line) OVERRIDE;
 
+  static void RegisterPrefs(PrefRegistrySimple* registry);
+
  private:
   void CreateMetricsService();
   void CreateWatchdogThread();
@@ -139,8 +146,11 @@ class BrowserProcessImpl : public BrowserProcess,
   void CreateIconManager();
   void CreateIntranetRedirectDetector();
   void CreateNotificationUIManager();
+#if defined(ENABLE_MESSAGE_CENTER) && !defined(USE_ASH)
+  void CreateMessageCenter();
+#endif
   void CreateStatusTrayManager();
-  void CreatePrintPreviewTabController();
+  void CreatePrintPreviewDialogController();
   void CreateBackgroundPrintingManager();
   void CreateSafeBrowsingService();
   void CreateSafeBrowsingDetectionService();
@@ -193,8 +203,8 @@ class BrowserProcessImpl : public BrowserProcess,
 
   scoped_ptr<chrome::MediaFileSystemRegistry> media_file_system_registry_;
 
-  scoped_refptr<printing::PrintPreviewTabController>
-      print_preview_tab_controller_;
+  scoped_refptr<printing::PrintPreviewDialogController>
+      print_preview_dialog_controller_;
 
   scoped_ptr<printing::BackgroundPrintingManager> background_printing_manager_;
 
@@ -203,6 +213,12 @@ class BrowserProcessImpl : public BrowserProcess,
   // Manager for desktop notification UI.
   bool created_notification_ui_manager_;
   scoped_ptr<NotificationUIManager> notification_ui_manager_;
+
+#if defined(ENABLE_MESSAGE_CENTER) && !defined(USE_ASH)
+  // MessageCenter keeps currently displayed UI notifications.
+  scoped_ptr<message_center::MessageCenter> message_center_;
+  bool created_message_center_;
+#endif
 
 #if defined(ENABLE_AUTOMATION)
   scoped_ptr<AutomationProviderList> automation_provider_list_;
@@ -255,6 +271,8 @@ class BrowserProcessImpl : public BrowserProcess,
 
   scoped_ptr<ChromeResourceDispatcherHostDelegate>
       resource_dispatcher_host_delegate_;
+
+  scoped_refptr<PromoResourceService> promo_resource_service_;
 
 #if (defined(OS_WIN) || defined(OS_LINUX)) && !defined(OS_CHROMEOS)
   base::RepeatingTimer<BrowserProcessImpl> autoupdate_timer_;

@@ -4,12 +4,12 @@
 
 #include "base/file_path.h"
 #include "base/path_service.h"
+#include "base/prefs/pref_service.h"
 #include "chrome/browser/browsing_data/browsing_data_helper.h"
 #include "chrome/browser/browsing_data/browsing_data_remover.h"
-#include "chrome/browser/prefs/pref_service.h"
 #include "chrome/browser/profiles/profile.h"
 #include "chrome/browser/ui/browser.h"
-#include "chrome/browser/ui/browser_tabstrip.h"
+#include "chrome/browser/ui/tabs/tab_strip_model.h"
 #include "chrome/common/chrome_notification_types.h"
 #include "chrome/common/pref_names.h"
 #include "chrome/test/base/in_process_browser_test.h"
@@ -27,7 +27,7 @@
 using content::BrowserThread;
 
 namespace {
-void SetUrlRequestMock(const FilePath& path) {
+void SetUrlRequestMock(const base::FilePath& path) {
   content::URLRequestMockHTTPJob::AddUrlHandler(path);
 }
 }
@@ -37,18 +37,17 @@ class BrowsingDataRemoverBrowserTest : public InProcessBrowserTest {
   BrowsingDataRemoverBrowserTest() {}
 
   virtual void SetUpOnMainThread() OVERRIDE {
-    FilePath path;
+    base::FilePath path;
     PathService::Get(content::DIR_TEST_DATA, &path);
     BrowserThread::PostTask(
         BrowserThread::IO, FROM_HERE, base::Bind(&SetUrlRequestMock, path));
   }
 
-  void RunScriptAndCheckResult(const std::wstring& script,
+  void RunScriptAndCheckResult(const std::string& script,
                                const std::string& result) {
     std::string data;
-    ASSERT_TRUE(content::ExecuteJavaScriptAndExtractString(
-        chrome::GetActiveWebContents(browser())->GetRenderViewHost(), L"",
-        script, &data));
+    ASSERT_TRUE(content::ExecuteScriptAndExtractString(
+        browser()->tab_strip_model()->GetActiveWebContents(), script, &data));
     ASSERT_EQ(data, result);
   }
 
@@ -79,8 +78,8 @@ IN_PROC_BROWSER_TEST_F(BrowsingDataRemoverBrowserTest, Download) {
           content::DownloadTestObserver::ON_DANGEROUS_DOWNLOAD_ACCEPT));
 
   GURL download_url = ui_test_utils::GetTestUrl(
-      FilePath().AppendASCII("downloads"),
-      FilePath().AppendASCII("a_zip_file.zip"));
+      base::FilePath().AppendASCII("downloads"),
+      base::FilePath().AppendASCII("a_zip_file.zip"));
   ui_test_utils::NavigateToURL(browser(), download_url);
   observer->WaitForFinished();
 
@@ -98,19 +97,19 @@ IN_PROC_BROWSER_TEST_F(BrowsingDataRemoverBrowserTest, Download) {
 // Verify can modify database after deleting it.
 IN_PROC_BROWSER_TEST_F(BrowsingDataRemoverBrowserTest, Database) {
   GURL url(content::URLRequestMockHTTPJob::GetMockUrl(
-      FilePath().AppendASCII("simple_database.html")));
+      base::FilePath().AppendASCII("simple_database.html")));
   ui_test_utils::NavigateToURL(browser(), url);
 
-  RunScriptAndCheckResult(L"createTable()", "done");
-  RunScriptAndCheckResult(L"insertRecord('text')", "done");
-  RunScriptAndCheckResult(L"getRecords()", "text");
+  RunScriptAndCheckResult("createTable()", "done");
+  RunScriptAndCheckResult("insertRecord('text')", "done");
+  RunScriptAndCheckResult("getRecords()", "text");
 
   RemoveAndWait(BrowsingDataRemover::REMOVE_SITE_DATA);
 
   ui_test_utils::NavigateToURL(browser(), url);
-  RunScriptAndCheckResult(L"createTable()", "done");
-  RunScriptAndCheckResult(L"insertRecord('text2')", "done");
-  RunScriptAndCheckResult(L"getRecords()", "text2");
+  RunScriptAndCheckResult("createTable()", "done");
+  RunScriptAndCheckResult("insertRecord('text2')", "done");
+  RunScriptAndCheckResult("getRecords()", "text2");
 }
 
 // Profile::ClearNetworkingHistorySince should be exercised here too see whether

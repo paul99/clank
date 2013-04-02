@@ -5,19 +5,20 @@
 #include "base/command_line.h"
 #include "base/logging.h"
 #include "base/path_service.h"
+#include "base/prefs/pref_service.h"
 #include "base/stringprintf.h"
 #include "chrome/browser/browser_process.h"
 #include "chrome/browser/download/download_service.h"
 #include "chrome/browser/download/download_service_factory.h"
-#include "chrome/browser/download/download_test_file_chooser_observer.h"
+#include "chrome/browser/download/download_test_file_activity_observer.h"
 #include "chrome/browser/net/url_request_mock_util.h"
-#include "chrome/browser/prefs/pref_service.h"
 #include "chrome/browser/profiles/profile.h"
 #include "chrome/browser/profiles/profile_manager.h"
 #include "chrome/browser/ui/browser.h"
 #include "chrome/browser/ui/browser_list.h"
 #include "chrome/browser/ui/browser_tabstrip.h"
 #include "chrome/browser/ui/browser_window.h"
+#include "chrome/browser/ui/tabs/tab_strip_model.h"
 #include "chrome/common/chrome_paths.h"
 #include "chrome/common/pref_names.h"
 #include "chrome/common/url_constants.h"
@@ -83,7 +84,7 @@ class BrowserCloseTest : public InProcessBrowserTest {
 
   // Create a second profile to work within multi-profile.
   Profile* CreateSecondProfile() {
-    FilePath user_data_dir;
+    base::FilePath user_data_dir;
     PathService::Get(chrome::DIR_USER_DATA, &user_data_dir);
 
     if (!second_profile_data_dir_.CreateUniqueTempDirUnderPath(user_data_dir))
@@ -176,7 +177,8 @@ class BrowserCloseTest : public InProcessBrowserTest {
     Browser* new_browser = new Browser(Browser::CreateParams(profile));
     chrome::AddSelectedTabWithURL(new_browser, GURL(chrome::kAboutBlankURL),
                                   content::PAGE_TRANSITION_AUTO_TOPLEVEL);
-    content::WaitForLoadStop(chrome::GetActiveWebContents(new_browser));
+    content::WaitForLoadStop(
+        new_browser->tab_strip_model()->GetActiveWebContents());
     new_browser->window()->Show();
     return new_browser;
   }
@@ -240,8 +242,8 @@ class BrowserCloseTest : public InProcessBrowserTest {
     EXPECT_TRUE(second_profile_);
     if (!second_profile_) return false;
 
-    DownloadTestFileChooserObserver(first_profile_) .EnableFileChooser(false);
-    DownloadTestFileChooserObserver(second_profile_).EnableFileChooser(false);
+    DownloadTestFileActivityObserver(first_profile_) .EnableFileChooser(false);
+    DownloadTestFileActivityObserver(second_profile_).EnableFileChooser(false);
     return true;
   }
 
@@ -279,9 +281,9 @@ class BrowserCloseTest : public InProcessBrowserTest {
     Profile* first_profile_incognito = first_profile_->GetOffTheRecordProfile();
     Profile* second_profile_incognito =
         second_profile_->GetOffTheRecordProfile();
-    DownloadTestFileChooserObserver(first_profile_incognito)
+    DownloadTestFileActivityObserver(first_profile_incognito)
         .EnableFileChooser(false);
-    DownloadTestFileChooserObserver(second_profile_incognito)
+    DownloadTestFileActivityObserver(second_profile_incognito)
         .EnableFileChooser(false);
 
     // For simplicty of coding, we create a window on each profile so that

@@ -16,8 +16,8 @@
 #include "chrome/browser/media_gallery/linux/mtp_read_directory_worker.h"
 #include "chrome/browser/media_gallery/linux/mtp_read_file_worker.h"
 #include "chrome/browser/media_gallery/linux/mtp_recursive_device_object_enumerator.h"
-#include "chrome/browser/media_transfer_protocol/media_transfer_protocol_manager.h"
 #include "content/public/browser/browser_thread.h"
+#include "device/media_transfer_protocol/media_transfer_protocol_manager.h"
 
 using base::Bind;
 using base::PlatformFileError;
@@ -81,7 +81,7 @@ MTPDeviceDelegateImplLinux::MTPDeviceDelegateImplLinux(
 }
 
 PlatformFileError MTPDeviceDelegateImplLinux::GetFileInfo(
-    const FilePath& file_path,
+    const base::FilePath& file_path,
     PlatformFileInfo* file_info) {
   if (!LazyInit())
     return base::PLATFORM_FILE_ERROR_FAILED;
@@ -95,7 +95,7 @@ PlatformFileError MTPDeviceDelegateImplLinux::GetFileInfo(
 
 scoped_ptr<FileSystemFileUtil::AbstractFileEnumerator>
     MTPDeviceDelegateImplLinux::CreateFileEnumerator(
-        const FilePath& root,
+        const base::FilePath& root,
         bool recursive) {
   if (root.value().empty() || !LazyInit()) {
     return make_scoped_ptr(new FileSystemFileUtil::EmptyFileEnumerator())
@@ -124,8 +124,8 @@ scoped_ptr<FileSystemFileUtil::AbstractFileEnumerator>
 }
 
 PlatformFileError MTPDeviceDelegateImplLinux::CreateSnapshotFile(
-    const FilePath& device_file_path,
-    const FilePath& local_path,
+    const base::FilePath& device_file_path,
+    const base::FilePath& local_path,
     PlatformFileInfo* file_info) {
   if (!LazyInit())
     return base::PLATFORM_FILE_ERROR_FAILED;
@@ -133,6 +133,8 @@ PlatformFileError MTPDeviceDelegateImplLinux::CreateSnapshotFile(
   PlatformFileError error = GetFileInfo(device_file_path, file_info);
   if (error != base::PLATFORM_FILE_OK)
     return error;
+  if (file_info->is_directory)
+    return base::PLATFORM_FILE_ERROR_NOT_A_FILE;
 
   if (file_info->size <= 0 || file_info->size > kuint32max)
     return base::PLATFORM_FILE_ERROR_FAILED;
@@ -150,10 +152,6 @@ PlatformFileError MTPDeviceDelegateImplLinux::CreateSnapshotFile(
   // verfication in LocalFileStreamReader.
   file_info->last_modified = base::Time();
   return base::PLATFORM_FILE_OK;
-}
-
-SequencedTaskRunner* MTPDeviceDelegateImplLinux::GetMediaTaskRunner() {
-  return media_task_runner_.get();
 }
 
 void MTPDeviceDelegateImplLinux::CancelPendingTasksAndDeleteDelegate() {

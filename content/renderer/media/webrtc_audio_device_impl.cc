@@ -8,7 +8,6 @@
 #include "base/metrics/histogram.h"
 #include "base/string_util.h"
 #include "base/win/windows_version.h"
-#include "content/renderer/media/audio_hardware.h"
 #include "content/renderer/media/webrtc_audio_capturer.h"
 #include "content/renderer/media/webrtc_audio_renderer.h"
 #include "content/renderer/render_thread_impl.h"
@@ -36,7 +35,6 @@ WebRtcAudioDeviceImpl::WebRtcAudioDeviceImpl()
       output_delay_ms_(0),
       last_error_(AudioDeviceModule::kAdmErrNone),
       last_process_time_(base::TimeTicks::Now()),
-      session_id_(0),
       initialized_(false),
       playing_(false),
       agc_is_enabled_(false) {
@@ -214,6 +212,7 @@ void WebRtcAudioDeviceImpl::CaptureData(const int16* audio_data,
 
 void WebRtcAudioDeviceImpl::SetCaptureFormat(
     const media::AudioParameters& params) {
+  DVLOG(1) << "WebRtcAudioDeviceImpl::SetCaptureFormat()";
   input_audio_parameters_ = params;
 }
 
@@ -474,11 +473,6 @@ int32_t WebRtcAudioDeviceImpl::StartRecording() {
     return -1;
   }
 
-  if (session_id_ <= 0) {
-    LOG(ERROR) << session_id_ << " is an invalid session id.";
-    return -1;
-  }
-
   if (capturer_->is_recording()) {
     // webrtc::VoiceEngine assumes that it is OK to call Start() twice and
     // that the call is ignored the second time.
@@ -487,8 +481,7 @@ int32_t WebRtcAudioDeviceImpl::StartRecording() {
 
   start_capture_time_ = base::Time::Now();
 
-  // Specify the session_id which is mapped to a certain device.
-  capturer_->SetDevice(session_id_);
+  // Start capturing using the selected device.
   capturer_->Start();
   return 0;
 }
@@ -860,10 +853,6 @@ int32_t WebRtcAudioDeviceImpl::SetLoudspeakerStatus(bool enable) {
 int32_t WebRtcAudioDeviceImpl::GetLoudspeakerStatus(bool* enabled) const {
   NOTIMPLEMENTED();
   return -1;
-}
-
-void WebRtcAudioDeviceImpl::SetSessionId(int session_id) {
-  session_id_ = session_id;
 }
 
 }  // namespace content

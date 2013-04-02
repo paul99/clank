@@ -47,10 +47,51 @@ namespace v8 {
 namespace internal {
 
 
+int Register::NumAllocatableRegisters() {
+  if (CpuFeatures::IsSupported(VFP2)) {
+    return kMaxNumAllocatableRegisters;
+  } else {
+    return kMaxNumAllocatableRegisters - kGPRsPerNonVFP2Double;
+  }
+}
+
+
+int DwVfpRegister::NumRegisters() {
+  if (CpuFeatures::IsSupported(VFP2)) {
+    return CpuFeatures::IsSupported(VFP32DREGS) ? 32 : 16;
+  } else {
+    return 1;
+  }
+}
+
+
+int DwVfpRegister::NumAllocatableRegisters() {
+  if (CpuFeatures::IsSupported(VFP2)) {
+    return NumRegisters() - kNumReservedRegisters;
+  } else {
+    return 1;
+  }
+}
+
+
 int DwVfpRegister::ToAllocationIndex(DwVfpRegister reg) {
   ASSERT(!reg.is(kDoubleRegZero));
   ASSERT(!reg.is(kScratchDoubleReg));
+  if (reg.code() > kDoubleRegZero.code()) {
+    return reg.code() - kNumReservedRegisters;
+  }
   return reg.code();
+}
+
+
+DwVfpRegister DwVfpRegister::FromAllocationIndex(int index) {
+  ASSERT(index >= 0 && index < NumAllocatableRegisters());
+  ASSERT(kScratchDoubleReg.code() - kDoubleRegZero.code() ==
+         kNumReservedRegisters - 1);
+  if (index >= kDoubleRegZero.code()) {
+    return from_code(index + kNumReservedRegisters);
+  }
+  return from_code(index);
 }
 
 
@@ -317,7 +358,7 @@ Operand::Operand(const ExternalReference& f)  {
 Operand::Operand(Smi* value) {
   rm_ = no_reg;
   imm32_ =  reinterpret_cast<intptr_t>(value);
-  rmode_ = RelocInfo::NONE;
+  rmode_ = RelocInfo::NONE32;
 }
 
 

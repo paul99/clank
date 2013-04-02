@@ -10,28 +10,34 @@
 #include "testing/gtest/include/gtest/gtest.h"
 
 namespace net {
-namespace testing {
+namespace test {
 
-const uint32 kDefaultWindowTCP = 10 * net::kMaxPacketSize;
-const size_t kNoNBytesInFlight = 0;
+const uint32 kDefaultWindowTCP = 10 * kMaxPacketSize;
+const QuicByteCount kNoNBytesInFlight = 0;
 
-class QuicTcpCubicSenderTest : public ::testing::Test {
- protected:
-  QuicTcpCubicSenderTest()
-     : rtt_(QuicTime::Delta::FromMilliseconds(60)),
-       one_ms_(QuicTime::Delta::FromMilliseconds(1)) {
+class TcpCubicSenderPeer : public TcpCubicSender {
+ public:
+  explicit TcpCubicSenderPeer(const QuicClock* clock, bool reno)
+      : TcpCubicSender(clock, reno) {
   }
-  void SetUp() {
-    bool reno = true;
-    sender_.reset(new TcpCubicSender(&clock_, reno));
-    receiver_.reset(new TcpReceiver());
-    sequence_number_ = 1;
-    acked_sequence_number_ = 0;
+  using TcpCubicSender::AvailableCongestionWindow;
+  using TcpCubicSender::CongestionWindow;
+};
+
+class TcpCubicSenderTest : public ::testing::Test {
+ protected:
+  TcpCubicSenderTest()
+     : rtt_(QuicTime::Delta::FromMilliseconds(60)),
+       one_ms_(QuicTime::Delta::FromMilliseconds(1)),
+       sender_(new TcpCubicSenderPeer(&clock_, true)),
+       receiver_(new TcpReceiver()),
+       sequence_number_(1),
+       acked_sequence_number_(0) {
   }
   void SendAvailableCongestionWindow() {
-    size_t bytes_to_send = sender_->AvailableCongestionWindow();
+    QuicByteCount bytes_to_send = sender_->AvailableCongestionWindow();
     while (bytes_to_send > 0) {
-      size_t bytes_in_packet = std::min(kMaxPacketSize, bytes_to_send);
+      QuicByteCount bytes_in_packet = std::min(kMaxPacketSize, bytes_to_send);
       sender_->SentPacket(sequence_number_++, bytes_in_packet, false);
       bytes_to_send -= bytes_in_packet;
       if (bytes_to_send > 0) {
@@ -51,13 +57,14 @@ class QuicTcpCubicSenderTest : public ::testing::Test {
   const QuicTime::Delta rtt_;
   const QuicTime::Delta one_ms_;
   MockClock clock_;
-  scoped_ptr<TcpCubicSender> sender_;
+  SendAlgorithmInterface::SentPacketsMap not_used_;
+  scoped_ptr<TcpCubicSenderPeer> sender_;
   scoped_ptr<TcpReceiver> receiver_;
   QuicPacketSequenceNumber sequence_number_;
   QuicPacketSequenceNumber acked_sequence_number_;
 };
 
-TEST_F(QuicTcpCubicSenderTest, SimpleSender) {
+TEST_F(TcpCubicSenderTest, SimpleSender) {
   QuicCongestionFeedbackFrame feedback;
   // At startup make sure we are at the default.
   EXPECT_EQ(kDefaultWindowTCP,
@@ -66,7 +73,7 @@ TEST_F(QuicTcpCubicSenderTest, SimpleSender) {
   EXPECT_TRUE(sender_->TimeUntilSend(false).IsZero());
   // Get default QuicCongestionFeedbackFrame from receiver.
   ASSERT_TRUE(receiver_->GenerateCongestionFeedback(&feedback));
-  sender_->OnIncomingQuicCongestionFeedbackFrame(feedback);
+  sender_->OnIncomingQuicCongestionFeedbackFrame(feedback, not_used_);
   // Make sure we can send.
   EXPECT_TRUE(sender_->TimeUntilSend(false).IsZero());
   // And that window is un-affected.
@@ -76,14 +83,14 @@ TEST_F(QuicTcpCubicSenderTest, SimpleSender) {
   EXPECT_TRUE(sender_->TimeUntilSend(true).IsZero());
 }
 
-TEST_F(QuicTcpCubicSenderTest, ExponentialSlowStart) {
+TEST_F(TcpCubicSenderTest, ExponentialSlowStart) {
   const int kNumberOfAck = 20;
   QuicCongestionFeedbackFrame feedback;
   // At startup make sure we can send.
   EXPECT_TRUE(sender_->TimeUntilSend(false).IsZero());
   // Get default QuicCongestionFeedbackFrame from receiver.
   ASSERT_TRUE(receiver_->GenerateCongestionFeedback(&feedback));
-  sender_->OnIncomingQuicCongestionFeedbackFrame(feedback);
+  sender_->OnIncomingQuicCongestionFeedbackFrame(feedback, not_used_);
   // Make sure we can send.
   EXPECT_TRUE(sender_->TimeUntilSend(false).IsZero());
 
@@ -92,12 +99,12 @@ TEST_F(QuicTcpCubicSenderTest, ExponentialSlowStart) {
     SendAvailableCongestionWindow();
     AckNPackets(2);
   }
-  size_t bytes_to_send = sender_->CongestionWindow();
+  QuicByteCount bytes_to_send = sender_->CongestionWindow();
   EXPECT_EQ(kDefaultWindowTCP + kMaxPacketSize * 2 * kNumberOfAck,
             bytes_to_send);
 }
 
-TEST_F(QuicTcpCubicSenderTest, SlowStartAckTrain) {
+TEST_F(TcpCubicSenderTest, SlowStartAckTrain) {
   // Make sure that we fall out of slow start when we send ACK train longer
   // than half the RTT, in this test case 30ms, which is more than 30 calls to
   // Ack2Packets in one round.
@@ -109,7 +116,7 @@ TEST_F(QuicTcpCubicSenderTest, SlowStartAckTrain) {
   EXPECT_TRUE(sender_->TimeUntilSend(false).IsZero());
   // Get default QuicCongestionFeedbackFrame from receiver.
   ASSERT_TRUE(receiver_->GenerateCongestionFeedback(&feedback));
-  sender_->OnIncomingQuicCongestionFeedbackFrame(feedback);
+  sender_->OnIncomingQuicCongestionFeedbackFrame(feedback, not_used_);
   // Make sure we can send.
   EXPECT_TRUE(sender_->TimeUntilSend(false).IsZero());
 
@@ -118,7 +125,7 @@ TEST_F(QuicTcpCubicSenderTest, SlowStartAckTrain) {
     SendAvailableCongestionWindow();
     AckNPackets(2);
   }
-  size_t expected_congestion_window = kDefaultWindowTCP +
+  QuicByteCount expected_congestion_window = kDefaultWindowTCP +
       (kMaxPacketSize * 2 * kNumberOfAck);
   EXPECT_EQ(expected_congestion_window, sender_->CongestionWindow());
   // We should now have fallen out of slow start.
@@ -141,7 +148,7 @@ TEST_F(QuicTcpCubicSenderTest, SlowStartAckTrain) {
   EXPECT_EQ(expected_congestion_window, sender_->CongestionWindow());
 }
 
-TEST_F(QuicTcpCubicSenderTest, SlowStartPacketLoss) {
+TEST_F(TcpCubicSenderTest, SlowStartPacketLoss) {
   // Make sure that we fall out of slow start when we encounter a packet loss.
   const int kNumberOfAck = 10;
   QuicCongestionFeedbackFrame feedback;
@@ -149,7 +156,7 @@ TEST_F(QuicTcpCubicSenderTest, SlowStartPacketLoss) {
   EXPECT_TRUE(sender_->TimeUntilSend(false).IsZero());
   // Get default QuicCongestionFeedbackFrame from receiver.
   ASSERT_TRUE(receiver_->GenerateCongestionFeedback(&feedback));
-  sender_->OnIncomingQuicCongestionFeedbackFrame(feedback);
+  sender_->OnIncomingQuicCongestionFeedbackFrame(feedback, not_used_);
   // Make sure we can send.
   EXPECT_TRUE(sender_->TimeUntilSend(false).IsZero());
 
@@ -159,7 +166,7 @@ TEST_F(QuicTcpCubicSenderTest, SlowStartPacketLoss) {
     AckNPackets(2);
   }
   SendAvailableCongestionWindow();
-  size_t expected_congestion_window = kDefaultWindowTCP +
+  QuicByteCount expected_congestion_window = kDefaultWindowTCP +
       (kMaxPacketSize * 2 * kNumberOfAck);
   EXPECT_EQ(expected_congestion_window, sender_->CongestionWindow());
 
@@ -198,5 +205,5 @@ TEST_F(QuicTcpCubicSenderTest, SlowStartPacketLoss) {
   EXPECT_EQ(expected_congestion_window, sender_->CongestionWindow());
 }
 
-}  // namespace testing
+}  // namespace test
 }  // namespace net

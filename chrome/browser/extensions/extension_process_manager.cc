@@ -9,24 +9,25 @@
 #include "base/message_loop.h"
 #include "base/metrics/histogram.h"
 #include "base/stl_util.h"
-#include "base/string_number_conversions.h"
+#include "base/strings/string_number_conversions.h"
 #include "base/time.h"
 #include "chrome/browser/extensions/api/runtime/runtime_api.h"
-#include "chrome/browser/extensions/extension_process_manager.h"
 #include "chrome/browser/extensions/extension_host.h"
 #include "chrome/browser/extensions/extension_info_map.h"
+#include "chrome/browser/extensions/extension_process_manager.h"
 #include "chrome/browser/extensions/extension_service.h"
 #include "chrome/browser/extensions/extension_system.h"
 #include "chrome/browser/profiles/profile.h"
 #include "chrome/browser/ui/browser.h"
 #include "chrome/browser/ui/browser_finder.h"
-#include "chrome/browser/ui/browser_tabstrip.h"
 #include "chrome/browser/ui/browser_window.h"
+#include "chrome/browser/ui/tabs/tab_strip_model.h"
 #include "chrome/browser/view_type_utils.h"
 #include "chrome/common/chrome_notification_types.h"
 #include "chrome/common/chrome_switches.h"
 #include "chrome/common/extensions/extension.h"
 #include "chrome/common/extensions/extension_messages.h"
+#include "chrome/common/extensions/manifest_url_handler.h"
 #include "chrome/common/url_constants.h"
 #include "content/public/browser/browser_thread.h"
 #include "content/public/browser/notification_service.h"
@@ -74,14 +75,14 @@ class IncognitoExtensionProcessManager : public ExtensionProcessManager {
       Browser* browser,
       chrome::ViewType view_type) OVERRIDE;
   virtual void CreateBackgroundHost(const Extension* extension,
-                                    const GURL& url);
-  virtual SiteInstance* GetSiteInstanceForURL(const GURL& url);
+                                    const GURL& url) OVERRIDE;
+  virtual SiteInstance* GetSiteInstanceForURL(const GURL& url) OVERRIDE;
 
  private:
   // content::NotificationObserver:
   virtual void Observe(int type,
                        const content::NotificationSource& source,
-                       const content::NotificationDetails& details);
+                       const content::NotificationDetails& details) OVERRIDE;
 
   // Returns true if the extension is allowed to run in incognito mode.
   bool IsIncognitoEnabled(const Extension* extension);
@@ -310,21 +311,23 @@ void ExtensionProcessManager::CreateBackgroundHost(
 
 void ExtensionProcessManager::OpenOptionsPage(const Extension* extension,
                                               Browser* browser) {
-  DCHECK(!extension->options_url().is_empty());
+  DCHECK(!extensions::ManifestURL::GetOptionsPage(extension).is_empty());
 
   // Force the options page to open in non-OTR window, because it won't be
   // able to save settings from OTR.
   if (browser->profile()->IsOffTheRecord()) {
     Profile* profile = GetProfile();
-    browser = browser::FindOrCreateTabbedBrowser(profile->GetOriginalProfile(),
-                                                 browser->host_desktop_type());
+    browser = chrome::FindOrCreateTabbedBrowser(profile->GetOriginalProfile(),
+                                                browser->host_desktop_type());
   }
 
-  OpenURLParams params(extension->options_url(), Referrer(), SINGLETON_TAB,
+  OpenURLParams params(extensions::ManifestURL::GetOptionsPage(extension),
+                       Referrer(), SINGLETON_TAB,
                        content::PAGE_TRANSITION_LINK, false);
   browser->OpenURL(params);
   browser->window()->Show();
-  WebContents* web_contents = chrome::GetActiveWebContents(browser);
+  WebContents* web_contents =
+      browser->tab_strip_model()->GetActiveWebContents();
   web_contents->GetDelegate()->ActivateContents(web_contents);
 }
 

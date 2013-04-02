@@ -1,4 +1,4 @@
-// Copyright 2012 The Chromium Authors. All rights reserved.
+// Copyright 2013 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -18,10 +18,12 @@
 #include "sync/syncable/entry_kernel.h"
 #include "sync/syncable/metahandle_set.h"
 #include "sync/syncable/scoped_kernel_lock.h"
+#include "sync/syncable/syncable_delete_journal.h"
 
 namespace syncer {
 
 class Cryptographer;
+class TestUserShare;
 class UnrecoverableErrorHandler;
 
 namespace syncable {
@@ -113,16 +115,6 @@ enum UnlinkReason {
   DATA_TYPE_PURGE    // To be used when purging a dataype.
 };
 
-class EntryKernelLessByMetaHandle {
- public:
-  inline bool operator()(const EntryKernel& a,
-                         const EntryKernel& b) const {
-    return a.ref(META_HANDLE) < b.ref(META_HANDLE);
-  }
-};
-
-typedef std::set<EntryKernel, EntryKernelLessByMetaHandle> EntryKernelSet;
-
 enum InvariantCheckLevel {
   OFF = 0,            // No checking.
   VERIFY_CHANGES = 1, // Checks only mutated entries.  Does not check hierarchy.
@@ -139,6 +131,8 @@ class SYNC_EXPORT Directory {
   friend class ScopedKernelUnlock;
   friend class WriteTransaction;
   friend class SyncableDirectoryTest;
+  friend class syncer::TestUserShare;
+  FRIEND_TEST_ALL_PREFIXES(SyncableDirectoryTest, ManageDeleteJournals);
   FRIEND_TEST_ALL_PREFIXES(SyncableDirectoryTest,
                            TakeSnapshotGetsAllDirtyHandlesTest);
   FRIEND_TEST_ALL_PREFIXES(SyncableDirectoryTest,
@@ -147,11 +141,11 @@ class SYNC_EXPORT Directory {
                            TakeSnapshotGetsMetahandlesToPurge);
 
  public:
-  static const FilePath::CharType kSyncDatabaseFilename[];
+  static const base::FilePath::CharType kSyncDatabaseFilename[];
 
   // Various data that the Directory::Kernel we are backing (persisting data
   // for) needs saved across runs of the application.
-  struct PersistedKernelInfo {
+  struct SYNC_EXPORT_PRIVATE PersistedKernelInfo {
     PersistedKernelInfo();
     ~PersistedKernelInfo();
 
@@ -174,8 +168,6 @@ class SYNC_EXPORT Directory {
     std::string store_birthday;
     // The next local ID that has not been used with this cache-GUID.
     int64 next_id;
-    // The persisted notification state.
-    std::string notification_state;
     // The serialized bag of chips we were given by the server. Contents are
     // opaque to the client. This is the serialization of a message of type
     // ChipBag defined in sync.proto. It can contains NULL characters.
@@ -203,7 +195,7 @@ class SYNC_EXPORT Directory {
   // When the Directory is told to SaveChanges, a SaveChangesSnapshot is
   // constructed and forms a consistent snapshot of what needs to be sent to
   // the backing store.
-  struct SaveChangesSnapshot {
+  struct SYNC_EXPORT_PRIVATE SaveChangesSnapshot {
     SaveChangesSnapshot();
     ~SaveChangesSnapshot();
 
@@ -211,6 +203,8 @@ class SYNC_EXPORT Directory {
     PersistedKernelInfo kernel_info;
     EntryKernelSet dirty_metas;
     MetahandleSet metahandles_to_purge;
+    EntryKernelSet delete_journals;
+    MetahandleSet delete_journals_to_purge;
   };
 
   // Does not take ownership of |encryptor|.
@@ -280,9 +274,6 @@ class SYNC_EXPORT Directory {
   std::string bag_of_chips() const;
   void set_bag_of_chips(const std::string& bag_of_chips);
 
-  std::string GetNotificationState() const;
-  void SetNotificationState(const std::string& notification_state);
-
   // Unique to each account / client pair.
   std::string cache_guid() const;
 
@@ -312,6 +303,8 @@ class SYNC_EXPORT Directory {
   void OnUnrecoverableError(const BaseTransaction* trans,
                             const tracked_objects::Location& location,
                             const std::string & message);
+
+  DeleteJournal* delete_journal();
 
  protected:  // for friends, mainly used by Entry constructors
   virtual EntryKernel* GetEntryByHandle(int64 handle);
@@ -444,14 +437,18 @@ class SYNC_EXPORT Directory {
   bool FullyCheckTreeInvariants(BaseTransaction *trans);
 
   // Purges all data associated with any entries whose ModelType or
-  // ServerModelType is found in |types|, from _both_ memory and disk.
-  // Only  valid, "real" model types are allowed in |types| (see model_type.h
-  // for definitions).  "Purge" is just meant to distinguish from "deleting"
+  // ServerModelType is found in |types|, from sync directory _both_ in memory
+  // and on disk. |types_to_journal| should be subset of |types| and data
+  // of |types_to_journal| are saved in delete journal to help prevent
+  // back-from-dead problem due to offline delete in next sync session. Only
+  // valid, "real" model types are allowed in |types| (see model_type.h for
+  // definitions).  "Purge" is just meant to distinguish from "deleting"
   // entries, which means something different in the syncable namespace.
   // WARNING! This can be real slow, as it iterates over all entries.
   // WARNING! Performs synchronous I/O.
   // Returns: true on success, false if an error was encountered.
-  virtual bool PurgeEntriesWithTypeIn(ModelTypeSet types);
+  virtual bool PurgeEntriesWithTypeIn(ModelTypeSet types,
+                                      ModelTypeSet types_to_journal);
 
  private:
   // A helper that implements the logic of checking tree invariants.
@@ -485,11 +482,6 @@ class SYNC_EXPORT Directory {
   void GetAllMetaHandles(BaseTransaction* trans, MetahandleSet* result);
   bool SafeToPurgeFromMemory(WriteTransaction* trans,
                              const EntryKernel* const entry) const;
-
-  // Internal setters that do not acquire a lock internally.  These are unsafe
-  // on their own; caller must guarantee exclusive access manually by holding
-  // a ScopedKernelLock.
-  void SetNotificationStateUnsafe(const std::string& notification_state);
 
   Directory& operator = (const Directory&);
 
@@ -634,6 +626,10 @@ class SYNC_EXPORT Directory {
   Cryptographer* const cryptographer_;
 
   InvariantCheckLevel invariant_check_level_;
+
+  // Maintain deleted entries not in |kernel_| until it's verified that they
+  // are deleted in native models as well.
+  scoped_ptr<DeleteJournal> delete_journal_;
 };
 
 }  // namespace syncable

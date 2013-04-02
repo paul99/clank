@@ -33,6 +33,9 @@ LabelButton::LabelButton(ButtonListener* listener, const string16& text)
     : CustomButton(listener),
       image_(new ImageView()),
       label_(new Label(text)),
+      button_state_images_(),
+      button_state_colors_(),
+      explicitly_set_colors_(),
       default_button_(false),
       native_theme_(false) {
   set_border(new LabelButtonBorder());
@@ -116,51 +119,24 @@ void LabelButton::SetDefaultButton(bool default_button) {
 
 void LabelButton::SetNativeTheme(bool native_theme) {
   native_theme_ = native_theme;
-  static_cast<LabelButtonBorder*>(border())->set_native_theme(native_theme);
+  LabelButtonBorder* border = new LabelButtonBorder();
+  border->set_native_theme(native_theme);
+  set_border(border);
   // Invalidate the layout to pickup the new insets from the border.
   InvalidateLayout();
-
-  ResetColorsFromNativeTheme(true);
-}
-
-void LabelButton::ResetColorsFromNativeTheme(bool reset_all) {
-  const ui::NativeTheme* theme = GetNativeTheme();
-  SkColor colors[STATE_COUNT] = {
-    theme->GetSystemColor(ui::NativeTheme::kColorId_TextButtonEnabledColor),
-    theme->GetSystemColor(ui::NativeTheme::kColorId_TextButtonHoverColor),
-    theme->GetSystemColor(ui::NativeTheme::kColorId_TextButtonHoverColor),
-    theme->GetSystemColor(ui::NativeTheme::kColorId_TextButtonDisabledColor),
-  };
-#if defined(OS_WIN)
-  if (native_theme_ && theme == ui::NativeThemeWin::instance()) {
-    colors[STATE_NORMAL] = color_utils::GetSysSkColor(COLOR_BTNTEXT);
-    colors[STATE_HOVERED] = color_utils::GetSysSkColor(COLOR_BTNTEXT);
-    colors[STATE_PRESSED] = color_utils::GetSysSkColor(COLOR_BTNTEXT);
-    colors[STATE_DISABLED] = color_utils::GetSysSkColor(COLOR_GRAYTEXT);
-  }
-#endif
-  for (size_t state = STATE_NORMAL; state < STATE_COUNT; ++state) {
-    if (reset_all || !explicitly_set_colors_[state]) {
-      SetTextColor(static_cast<ButtonState>(state), colors[state]);
-      explicitly_set_colors_[state] = false;
-    }
-  }
-}
-
-void LabelButton::StateChanged() {
-  const gfx::Size previous_image_size(image_->GetPreferredSize());
-  image_->SetImage(GetImage(state()));
-  const SkColor color = button_state_colors_[state()];
-  if (state() != STATE_DISABLED && label_->enabled_color() != color)
-    label_->SetEnabledColor(color);
-  label_->SetEnabled(state() != STATE_DISABLED);
-  if (image_->GetPreferredSize() != previous_image_size)
-    Layout();
+  ResetColorsFromNativeTheme();
 }
 
 gfx::Size LabelButton::GetPreferredSize() {
-  gfx::Size size(label_->GetPreferredSize());
+  // Resize multi-line labels paired with images to use their available width.
   const gfx::Size image_size(image_->GetPreferredSize());
+  if (GetTextMultiLine() && !image_size.IsEmpty() && !GetText().empty() &&
+      GetHorizontalAlignment() == gfx::ALIGN_CENTER) {
+    label_->SizeToFit(GetLocalBounds().width() - image_size.width() - kSpacing);
+  }
+
+  // Calculate the required size.
+  gfx::Size size(label_->GetPreferredSize());
   if (image_size.width() > 0 && size.width() > 0)
     size.Enlarge(kSpacing, 0);
   size.set_height(std::max(size.height(), image_size.height()));
@@ -179,6 +155,38 @@ gfx::Size LabelButton::GetPreferredSize() {
   return size;
 }
 
+void LabelButton::ResetColorsFromNativeTheme() {
+  const ui::NativeTheme* theme = GetNativeTheme();
+  SkColor colors[STATE_COUNT] = {
+    theme->GetSystemColor(ui::NativeTheme::kColorId_TextButtonEnabledColor),
+    theme->GetSystemColor(ui::NativeTheme::kColorId_TextButtonHoverColor),
+    theme->GetSystemColor(ui::NativeTheme::kColorId_TextButtonHoverColor),
+    theme->GetSystemColor(ui::NativeTheme::kColorId_TextButtonDisabledColor),
+  };
+#if defined(OS_WIN)
+  // Native Windows buttons do not change color on hover or when pressed.
+  if (native_theme_ && theme == ui::NativeThemeWin::instance())
+    colors[STATE_HOVERED] = colors[STATE_PRESSED] = colors[STATE_NORMAL];
+#endif
+  for (size_t state = STATE_NORMAL; state < STATE_COUNT; ++state) {
+    if (!explicitly_set_colors_[state]) {
+      SetTextColor(static_cast<ButtonState>(state), colors[state]);
+      explicitly_set_colors_[state] = false;
+    }
+  }
+}
+
+void LabelButton::StateChanged() {
+  const gfx::Size previous_image_size(image_->GetPreferredSize());
+  image_->SetImage(GetImage(state()));
+  const SkColor color = button_state_colors_[state()];
+  if (state() != STATE_DISABLED && label_->enabled_color() != color)
+    label_->SetEnabledColor(color);
+  label_->SetEnabled(state() != STATE_DISABLED);
+  if (image_->GetPreferredSize() != previous_image_size)
+    Layout();
+}
+
 void LabelButton::Layout() {
   gfx::Rect child_area(GetLocalBounds());
   child_area.Inset(GetInsets());
@@ -192,10 +200,14 @@ void LabelButton::Layout() {
   // avoids wasted space within the label that would look like awkward padding.
   gfx::Size label_size(child_area.size());
   if (!image_size.IsEmpty() && !label_size.IsEmpty()) {
-    label_size.set_width(child_area.width() - image_size.width() - kSpacing);
+    label_size.set_width(
+        std::max(child_area.width() - image_size.width() - kSpacing, 0));
     if (GetHorizontalAlignment() == gfx::ALIGN_CENTER) {
-      label_size.set_width(std::min(label_size.width(),
-                                    label_->GetPreferredSize().width()));
+      // Ensure multi-line labels paired with images use their available width.
+      if (GetTextMultiLine())
+        label_->SizeToFit(label_size.width());
+      label_size.set_width(
+          std::min(label_size.width(), label_->GetPreferredSize().width()));
     }
   }
 
@@ -226,8 +238,7 @@ void LabelButton::ChildPreferredSizeChanged(View* child) {
 }
 
 void LabelButton::OnNativeThemeChanged(const ui::NativeTheme* theme) {
-  if (native_theme_)
-    ResetColorsFromNativeTheme(false);
+  ResetColorsFromNativeTheme();
 }
 
 ui::NativeTheme::Part LabelButton::GetThemePart() const {

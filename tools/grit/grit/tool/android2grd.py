@@ -64,24 +64,28 @@ OPTIONS may be any of the following:
                              files that will be declared by the output grd file.
 
     --grd-dir    GRD_DIR     Specify where the resultant grd file
-                             (FILENAME.grd) shoud be output. By default this
+                             (FILENAME.grd) should be output. By default this
                              will be the present working directory.
 
     --header-dir HEADER_DIR  Specify the location of the directory where grit
                              generated C++ headers (whose name will be
-                             FILENAME.h) will be placed. By default no
-                             directory is specified.
+                             FILENAME.h) will be placed. Use an empty string to
+                             disable rc generation. Default: empty.
 
     --rc-dir     RC_DIR      Specify the directory where resource files will
-                             be located. By default this is empty.
+                             be located relative to grit build's output
+                             directory. Use an empty string to disable rc
+                             generation. Default: empty.
 
-    --xml-dir    XML_DIR     Specify the location of the Android app's resource
-                             directory. Internationalized strings.xml files will
-                             be placed under this directory. For each langauge
-                             xx a values-xx/strings.xml file will be generated.
+    --xml-dir    XML_DIR     Specify where to place localized strings.xml files
+                             relative to grit build's output directory. For each
+                             language xx a values-xx/strings.xml file will be
+                             generated. Use an empty string to disable
+                             strings.xml generation. Default: '.'.
 
-    --xtb-dir    XTB_DIR     Specify where the output translation files will be
-                             located.
+    --xtb-dir    XTB_DIR     Specify where the xtb files containing translations
+                             will be located relative to the grd file. Default:
+                             '.'.
 """
 
   _NAME_FLAG = 'name'
@@ -98,8 +102,8 @@ OPTIONS may be any of the following:
     self.grd_dir = '.'
     self.rc_dir = None
     self.xtb_dir = '.'
-    self.xml_res_dir = None
-    self.header_dir = ''
+    self.xml_res_dir = '.'
+    self.header_dir = None
 
   def ShortDescription(self):
     """Returns a short description of the Android2Grd tool.
@@ -211,7 +215,8 @@ OPTIONS may be any of the following:
         self.__CreateRcOutputNode(outputs, lang, self.rc_dir)
       if self.xml_res_dir:
         self.__CreateAndroidXmlOutputNode(outputs, lang, self.xml_res_dir)
-      self.__CreateFileNode(translations, lang)
+      if lang != 'en':
+        self.__CreateFileNode(translations, lang)
     # Convert all the strings.xml strings into grd messages.
     self.__CreateMessageNodes(messages, android_dom.documentElement)
 
@@ -410,7 +415,8 @@ OPTIONS may be any of the following:
     File elements provide information on the location of translation files
     (xtbs)
     """
-    xtb_file = self.name + '_' + lang + '.xtb'
+    xtb_file = os.path.normpath(os.path.join(
+        self.xtb_dir, '%s_%s.xtb' % (self.name, lang)))
     fnode = io.FileNode()
     fnode.StartParsing(u'file', translations_node)
     fnode.HandleAttribute('path', xtb_file)
@@ -463,9 +469,9 @@ OPTIONS may be any of the following:
       lang_map = {'no': 'nb', 'fil': 'tl', 'id': 'in', 'he': 'iw', 'yi': 'ji'}
       android_lang = lang_map.get(android_lang, android_lang)
       android_locale = android_lang + ('-r' + region if region else '')
-    xml_file_name = "strings.xml"
-    xml_locale_path = os.path.join(xml_res_dir, 'values-%s' % android_locale)
-    xml_path = os.path.join(xml_locale_path, "strings.xml")
+    values = 'values-' + android_locale if android_locale != 'en' else 'values'
+    xml_path = os.path.normpath(os.path.join(
+        xml_res_dir, values, 'strings.xml'))
 
     node = io.OutputNode()
     node.StartParsing(u'output', outputs_node)

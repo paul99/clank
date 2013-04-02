@@ -10,6 +10,9 @@
 #include "base/memory/scoped_ptr.h"
 #include "base/path_service.h"
 #include "base/prefs/json_pref_store.h"
+#include "base/prefs/mock_pref_change_callback.h"
+#include "base/prefs/pref_registry_simple.h"
+#include "base/prefs/pref_value_store.h"
 #include "base/prefs/public/pref_change_registrar.h"
 #include "base/prefs/testing_pref_store.h"
 #include "base/utf_string_conversions.h"
@@ -18,9 +21,8 @@
 #include "chrome/browser/policy/mock_configuration_policy_provider.h"
 #include "chrome/browser/prefs/browser_prefs.h"
 #include "chrome/browser/prefs/command_line_pref_store.h"
-#include "chrome/browser/prefs/mock_pref_change_callback.h"
+#include "chrome/browser/prefs/pref_registry_syncable.h"
 #include "chrome/browser/prefs/pref_service_mock_builder.h"
-#include "chrome/browser/prefs/pref_value_store.h"
 #include "chrome/browser/prefs/scoped_user_pref_update.h"
 #include "chrome/common/chrome_paths.h"
 #include "chrome/common/chrome_switches.h"
@@ -41,10 +43,10 @@ using testing::_;
 using testing::Mock;
 
 TEST(PrefServiceTest, NoObserverFire) {
-  TestingPrefService prefs;
+  TestingPrefServiceSimple prefs;
 
   const char pref_name[] = "homepage";
-  prefs.RegisterStringPref(pref_name, std::string());
+  prefs.registry()->RegisterStringPref(pref_name, std::string());
 
   const char new_pref_value[] = "http://www.google.com/";
   MockPrefChangeCallback obs(&prefs);
@@ -77,7 +79,7 @@ TEST(PrefServiceTest, NoObserverFire) {
 }
 
 TEST(PrefServiceTest, HasPrefPath) {
-  TestingPrefService prefs;
+  TestingPrefServiceSimple prefs;
 
   const char path[] = "fake.path";
 
@@ -86,7 +88,7 @@ TEST(PrefServiceTest, HasPrefPath) {
 
   // Register the path. This doesn't set a value, so the path still shouldn't
   // exist.
-  prefs.RegisterStringPref(path, std::string());
+  prefs.registry()->RegisterStringPref(path, std::string());
   EXPECT_FALSE(prefs.HasPrefPath(path));
 
   // Set a value and make sure we have a path.
@@ -97,9 +99,9 @@ TEST(PrefServiceTest, HasPrefPath) {
 TEST(PrefServiceTest, Observers) {
   const char pref_name[] = "homepage";
 
-  TestingPrefService prefs;
+  TestingPrefServiceSimple prefs;
   prefs.SetUserPref(pref_name, Value::CreateStringValue("http://www.cnn.com"));
-  prefs.RegisterStringPref(pref_name, std::string());
+  prefs.registry()->RegisterStringPref(pref_name, std::string());
 
   const char new_pref_value[] = "http://www.google.com/";
   const StringValue expected_new_pref_value(new_pref_value);
@@ -152,8 +154,9 @@ TEST(PrefServiceTest, Observers) {
 // the user pref file, it uses the correct fallback value instead.
 TEST(PrefServiceTest, GetValueChangedType) {
   const int kTestValue = 10;
-  TestingPrefService prefs;
-  prefs.RegisterIntegerPref(prefs::kStabilityLaunchCount, kTestValue);
+  TestingPrefServiceSimple prefs;
+  prefs.registry()->RegisterIntegerPref(
+      prefs::kStabilityLaunchCount, kTestValue);
 
   // Check falling back to a recommended value.
   prefs.SetUserPref(prefs::kStabilityLaunchCount,
@@ -170,8 +173,8 @@ TEST(PrefServiceTest, GetValueChangedType) {
 }
 
 TEST(PrefServiceTest, UpdateCommandLinePrefStore) {
-  TestingPrefService prefs;
-  prefs.RegisterBooleanPref(prefs::kCloudPrintProxyEnabled, false);
+  TestingPrefServiceSimple prefs;
+  prefs.registry()->RegisterBooleanPref(prefs::kCloudPrintProxyEnabled, false);
 
   // Check to make sure the value is as expected.
   const PrefService::Preference* pref =
@@ -189,7 +192,7 @@ TEST(PrefServiceTest, UpdateCommandLinePrefStore) {
   cmd_line.AppendSwitch(switches::kEnableCloudPrintProxy);
 
   // Call UpdateCommandLinePrefStore and check to see if the value has changed.
-  prefs.UpdateCommandLinePrefStore(&cmd_line);
+  prefs.UpdateCommandLinePrefStore(new CommandLinePrefStore(&cmd_line));
   pref = prefs.FindPreference(prefs::kCloudPrintProxyEnabled);
   ASSERT_TRUE(pref);
   value = pref->GetValue();
@@ -204,8 +207,9 @@ TEST(PrefServiceTest, GetValueAndGetRecommendedValue) {
   const int kDefaultValue = 5;
   const int kUserValue = 10;
   const int kRecommendedValue = 15;
-  TestingPrefService prefs;
-  prefs.RegisterIntegerPref(prefs::kStabilityLaunchCount, kDefaultValue);
+  TestingPrefServiceSimple prefs;
+  prefs.registry()->RegisterIntegerPref(
+      prefs::kStabilityLaunchCount, kDefaultValue);
 
   // Create pref with a default value only.
   const PrefService::Preference* pref =
@@ -303,7 +307,7 @@ class PrefServiceUserFilePrefsTest : public testing::Test {
   // The path to temporary directory used to contain the test operations.
   base::ScopedTempDir temp_dir_;
   // The path to the directory where the test data is stored.
-  FilePath data_dir_;
+  base::FilePath data_dir_;
   // A message loop that we can use as the file thread message loop.
   MessageLoop message_loop_;
 };
@@ -311,7 +315,7 @@ class PrefServiceUserFilePrefsTest : public testing::Test {
 // Verifies that ListValue and DictionaryValue pref with non emtpy default
 // preserves its empty value.
 TEST_F(PrefServiceUserFilePrefsTest, PreserveEmptyValue) {
-  FilePath pref_file = temp_dir_.path().AppendASCII("write.json");
+  base::FilePath pref_file = temp_dir_.path().AppendASCII("write.json");
 
   ASSERT_TRUE(file_util::CopyFile(
       data_dir_.AppendASCII("read.need_empty_value.json"),
@@ -319,25 +323,26 @@ TEST_F(PrefServiceUserFilePrefsTest, PreserveEmptyValue) {
 
   PrefServiceMockBuilder builder;
   builder.WithUserFilePrefs(pref_file, message_loop_.message_loop_proxy());
-  scoped_ptr<PrefService> prefs(builder.Create());
+  scoped_refptr<PrefRegistrySyncable> registry(new PrefRegistrySyncable);
+  scoped_ptr<PrefServiceSyncable> prefs(builder.CreateSyncable(registry));
 
   // Register testing prefs.
-  prefs->RegisterListPref("list",
-                          PrefService::UNSYNCABLE_PREF);
-  prefs->RegisterDictionaryPref("dict",
-                                PrefService::UNSYNCABLE_PREF);
+  registry->RegisterListPref("list",
+                             PrefRegistrySyncable::UNSYNCABLE_PREF);
+  registry->RegisterDictionaryPref("dict",
+                                   PrefRegistrySyncable::UNSYNCABLE_PREF);
 
   base::ListValue* non_empty_list = new base::ListValue;
   non_empty_list->Append(base::Value::CreateStringValue("test"));
-  prefs->RegisterListPref("list_needs_empty_value",
-                          non_empty_list,
-                          PrefService::UNSYNCABLE_PREF);
+  registry->RegisterListPref("list_needs_empty_value",
+                             non_empty_list,
+                             PrefRegistrySyncable::UNSYNCABLE_PREF);
 
   base::DictionaryValue* non_empty_dict = new base::DictionaryValue;
   non_empty_dict->SetString("dummy", "whatever");
-  prefs->RegisterDictionaryPref("dict_needs_empty_value",
-                                non_empty_dict,
-                                PrefService::UNSYNCABLE_PREF);
+  registry->RegisterDictionaryPref("dict_needs_empty_value",
+                                   non_empty_dict,
+                                   PrefRegistrySyncable::UNSYNCABLE_PREF);
 
   // Set all testing prefs to empty.
   ClearListValue(prefs.get(), "list");
@@ -350,7 +355,7 @@ TEST_F(PrefServiceUserFilePrefsTest, PreserveEmptyValue) {
   message_loop_.RunUntilIdle();
 
   // Compare to expected output.
-  FilePath golden_output_file =
+  base::FilePath golden_output_file =
       data_dir_.AppendASCII("write.golden.need_empty_value.json");
   ASSERT_TRUE(file_util::PathExists(golden_output_file));
   EXPECT_TRUE(file_util::TextContentsEqual(golden_output_file, pref_file));
@@ -363,7 +368,7 @@ class PrefServiceSetValueTest : public testing::Test {
 
   PrefServiceSetValueTest() : observer_(&prefs_) {}
 
-  TestingPrefService prefs_;
+  TestingPrefServiceSimple prefs_;
   MockPrefChangeCallback observer_;
 };
 
@@ -373,7 +378,7 @@ const char PrefServiceSetValueTest::kValue[] = "value";
 TEST_F(PrefServiceSetValueTest, SetStringValue) {
   const char default_string[] = "default";
   const StringValue default_value(default_string);
-  prefs_.RegisterStringPref(kName, default_string);
+  prefs_.registry()->RegisterStringPref(kName, default_string);
 
   PrefChangeRegistrar registrar;
   registrar.Init(&prefs_);
@@ -395,7 +400,7 @@ TEST_F(PrefServiceSetValueTest, SetStringValue) {
 }
 
 TEST_F(PrefServiceSetValueTest, SetDictionaryValue) {
-  prefs_.RegisterDictionaryPref(kName);
+  prefs_.registry()->RegisterDictionaryPref(kName);
   PrefChangeRegistrar registrar;
   registrar.Init(&prefs_);
   registrar.Add(kName, observer_.GetCallback());
@@ -421,7 +426,7 @@ TEST_F(PrefServiceSetValueTest, SetDictionaryValue) {
 }
 
 TEST_F(PrefServiceSetValueTest, SetListValue) {
-  prefs_.RegisterListPref(kName);
+  prefs_.registry()->RegisterListPref(kName);
   PrefChangeRegistrar registrar;
   registrar.Init(&prefs_);
   registrar.Add(kName, observer_.GetCallback());
@@ -458,7 +463,8 @@ class PrefServiceWebKitPrefs : public ChromeRenderViewHostTestHarness {
     // harness is not supposed to overwrite a profile if it's already created.
 
     // Set some (WebKit) user preferences.
-    TestingPrefService* pref_services = profile()->GetTestingPrefService();
+    TestingPrefServiceSyncable* pref_services =
+        profile()->GetTestingPrefService();
 #if defined(TOOLKIT_GTK)
     pref_services->SetUserPref(prefs::kUsesSystemTheme,
                                Value::CreateBooleanValue(false));

@@ -18,6 +18,7 @@
 #include "base/memory/scoped_ptr.h"
 #include "base/memory/singleton.h"
 #include "base/path_service.h"
+#include "base/prefs/pref_service.h"
 #include "base/prefs/public/pref_member.h"
 #include "base/string_util.h"
 #include "base/stringprintf.h"
@@ -48,13 +49,13 @@
 #include "chrome/browser/extensions/extension_service.h"
 #include "chrome/browser/first_run/first_run.h"
 #include "chrome/browser/google/google_util_chromeos.h"
+#include "chrome/browser/managed_mode/managed_mode.h"
 #include "chrome/browser/net/chrome_url_request_context.h"
 #include "chrome/browser/net/preconnect.h"
 #include "chrome/browser/policy/browser_policy_connector.h"
 #include "chrome/browser/policy/cloud_policy_client.h"
 #include "chrome/browser/policy/cloud_policy_service.h"
 #include "chrome/browser/policy/network_configuration_updater.h"
-#include "chrome/browser/prefs/pref_service.h"
 #include "chrome/browser/profiles/profile.h"
 #include "chrome/browser/profiles/profile_manager.h"
 #include "chrome/browser/rlz/rlz.h"
@@ -82,6 +83,7 @@
 #include "google_apis/gaia/gaia_constants.h"
 #include "google_apis/gaia/gaia_urls.h"
 #include "googleurl/src/gurl.h"
+#include "gpu/command_buffer/service/gpu_switches.h"
 #include "media/base/media_switches.h"
 #include "net/base/network_change_notifier.h"
 #include "net/url_request/url_request_context.h"
@@ -117,7 +119,7 @@ const char kGuestUserName[] = "";
 // Flag file that disables RLZ tracking, when present.
 const char kRLZDisabledFlagName[] = FILE_PATH_LITERAL(".rlz_disabled");
 
-FilePath GetRlzDisabledFlagPath() {
+base::FilePath GetRlzDisabledFlagPath() {
   return file_util::GetHomeDir().Append(kRLZDisabledFlagName);
 }
 #endif
@@ -224,7 +226,6 @@ class LoginUtilsImpl
   virtual void RestoreAuthenticationSession(Profile* profile) OVERRIDE;
   virtual void StopBackgroundFetchers() OVERRIDE;
   virtual void InitRlzDelayed(Profile* user_profile) OVERRIDE;
-  virtual void CompleteProfileCreate(Profile* user_profile) OVERRIDE;
 
   // OAuthLoginManager::Delegate overrides.
   virtual void OnCompletedMergeSession() OVERRIDE;
@@ -244,7 +245,7 @@ class LoginUtilsImpl
   virtual std::string GetOffTheRecordCommandLine(
       const GURL& start_url,
       const CommandLine& base_command_line,
-      CommandLine *command_line);
+      CommandLine *command_line) OVERRIDE;
 
  private:
   // Restarts OAuth session authentication check.
@@ -253,12 +254,23 @@ class LoginUtilsImpl
   // Check user's profile for kApplicationLocale setting.
   void RespectLocalePreference(Profile* pref);
 
-  // Initializes basic preferences for newly created profile.
+  // Callback for Profile::CREATE_STATUS_CREATED profile state.
+  // Initializes basic preferences for newly created profile. Any other
+  // early profile initialization that needs to happen before
+  // ProfileManager::DoFinalInit() gets called is done here.
   void InitProfilePreferences(Profile* user_profile);
 
   // Callback for asynchronous profile creation.
   void OnProfileCreated(Profile* profile,
                         Profile::CreateStatus status);
+
+  // Callback for Profile::CREATE_STATUS_INITIALIZED profile state.
+  // Profile is created, extensions and promo resources are initialized.
+  void UserProfileInitialized(Profile* user_profile);
+
+  // Callback to resume profile creation after transferring auth data from
+  // the authentication profile.
+  void CompleteProfileCreate(Profile* user_profile);
 
   // Finalized profile preparation.
   void FinalizePrepareProfile(Profile* user_profile);
@@ -267,7 +279,10 @@ class LoginUtilsImpl
   void RestoreAuthSession(Profile* user_profile,
                           bool restore_from_auth_cookies);
 
-  // Initializes RLZ. If |disabled| is true, financial pings are turned off.
+  // Callback when managed mode preferences have been applied.
+  void EnteredManagedMode(bool success);
+
+  // Initializes RLZ. If |disabled| is true, RLZ pings are disabled.
   void InitRlz(Profile* user_profile, bool disabled);
 
   // Starts signing related services. Initiates TokenService token retrieval.
@@ -275,7 +290,7 @@ class LoginUtilsImpl
 
   std::string password_;
   bool using_oauth_;
-  // True if the authenrication profile's cookie jar should contain
+  // True if the authentication profile's cookie jar should contain
   // authentication cookies from the authentication extension log in flow.
   bool has_web_auth_cookies_;
   // Has to be scoped_refptr, see comment for CreateAuthenticator(...).
@@ -348,7 +363,7 @@ void LoginUtilsImpl::DoBrowserLaunch(Profile* profile,
       chrome::startup::IS_FIRST_RUN : chrome::startup::IS_NOT_FIRST_RUN;
   browser_creator.LaunchBrowser(*CommandLine::ForCurrentProcess(),
                                 profile,
-                                FilePath(),
+                                base::FilePath(),
                                 chrome::startup::IS_PROCESS_STARTUP,
                                 first_run,
                                 &return_code);
@@ -447,25 +462,36 @@ void LoginUtilsImpl::DelegateDeleted(LoginUtils::Delegate* delegate) {
 void LoginUtilsImpl::InitProfilePreferences(Profile* user_profile) {
   if (UserManager::Get()->IsCurrentUserNew())
     SetFirstLoginPrefs(user_profile->GetPrefs());
-  // Make sure that the google service username is properly set (we do this
-  // on every sign in, not just the first login, to deal with existing
-  // profiles that might not have it set yet).
-  StringPrefMember google_services_username;
-  google_services_username.Init(prefs::kGoogleServicesUsername,
-                                user_profile->GetPrefs());
-  google_services_username.SetValue(
-      UserManager::Get()->GetLoggedInUser()->display_email());
+
+  if (UserManager::Get()->IsLoggedInAsLocallyManagedUser()) {
+    user_profile->GetPrefs()->SetBoolean(prefs::kProfileIsManaged, true);
+  } else {
+    // Make sure that the google service username is properly set (we do this
+    // on every sign in, not just the first login, to deal with existing
+    // profiles that might not have it set yet).
+    StringPrefMember google_services_username;
+    google_services_username.Init(prefs::kGoogleServicesUsername,
+                                  user_profile->GetPrefs());
+    google_services_username.SetValue(
+        UserManager::Get()->GetLoggedInUser()->display_email());
+  }
+
   // Make sure we flip every profile to not share proxies if the user hasn't
   // specified so explicitly.
   const PrefService::Preference* use_shared_proxies_pref =
       user_profile->GetPrefs()->FindPreference(prefs::kUseSharedProxies);
   if (use_shared_proxies_pref->IsDefaultValue())
     user_profile->GetPrefs()->SetBoolean(prefs::kUseSharedProxies, false);
-  policy::NetworkConfigurationUpdater* network_configuration_updater =
-      g_browser_process->browser_policy_connector()->
-      GetNetworkConfigurationUpdater();
-  if (network_configuration_updater)
-    network_configuration_updater->OnUserPolicyInitialized();
+
+  // Locally managed users do not have user policy initialized.
+  if (!UserManager::Get()->IsLoggedInAsLocallyManagedUser()) {
+    policy::NetworkConfigurationUpdater* network_configuration_updater =
+        g_browser_process->browser_policy_connector()->
+        GetNetworkConfigurationUpdater();
+    if (network_configuration_updater)
+      network_configuration_updater->OnUserPolicyInitialized();
+  }
+
   RespectLocalePreference(user_profile);
 }
 
@@ -474,22 +500,21 @@ void LoginUtilsImpl::OnProfileCreated(
     Profile::CreateStatus status) {
   CHECK(user_profile);
 
-  if (delegate_)
-    delegate_->OnProfileCreated(user_profile);
-
   switch (status) {
     case Profile::CREATE_STATUS_INITIALIZED:
+      UserProfileInitialized(user_profile);
       break;
-    case Profile::CREATE_STATUS_CREATED: {
+    case Profile::CREATE_STATUS_CREATED:
       InitProfilePreferences(user_profile);
-      return;
-    }
+      break;
     case Profile::CREATE_STATUS_FAIL:
     default:
       NOTREACHED();
-      return;
+      break;
   }
+}
 
+void LoginUtilsImpl::UserProfileInitialized(Profile* user_profile) {
   BootTimesLoader* btl = BootTimesLoader::Get();
   btl->AddLoginTimeMarker("UserProfileGotten", false);
 
@@ -509,7 +534,19 @@ void LoginUtilsImpl::OnProfileCreated(
     return;
   }
 
-  FinalizePrepareProfile(user_profile);
+  if (UserManager::Get()->IsLoggedInAsLocallyManagedUser()) {
+    // Apply managed mode first.
+    ManagedMode::EnterManagedMode(
+        user_profile,
+        base::Bind(&LoginUtilsImpl::EnteredManagedMode, AsWeakPtr()));
+  } else {
+    FinalizePrepareProfile(user_profile);
+  }
+}
+
+void LoginUtilsImpl::EnteredManagedMode(bool success) {
+  // TODO(nkostylev): What if entering managed mode fails?
+  FinalizePrepareProfile(ProfileManager::GetDefaultProfile());
 }
 
 void LoginUtilsImpl::CompleteProfileCreate(Profile* user_profile) {
@@ -519,7 +556,11 @@ void LoginUtilsImpl::CompleteProfileCreate(Profile* user_profile) {
 
 void LoginUtilsImpl::RestoreAuthSession(Profile* user_profile,
                                         bool restore_from_auth_cookies) {
-  DCHECK(authenticator_ || !restore_from_auth_cookies);
+  CHECK((authenticator_ && authenticator_->authentication_profile()) ||
+        !restore_from_auth_cookies);
+  if (!login_manager_.get())
+    return;
+
   UserManager::Get()->SetMergeSessionState(
       UserManager::MERGE_STATUS_IN_PROCESS);
   // Remove legacy OAuth1 token if we have one. If it's valid, we should already
@@ -527,7 +568,7 @@ void LoginUtilsImpl::RestoreAuthSession(Profile* user_profile,
   // all other tokens and credentials.
   login_manager_->RestoreSession(
       user_profile,
-      authenticator_ ?
+      authenticator_ && authenticator_->authentication_profile() ?
           authenticator_->authentication_profile()->GetRequestContext() :
           NULL,
       restore_from_auth_cookies);
@@ -578,7 +619,7 @@ void LoginUtilsImpl::InitRlzDelayed(Profile* user_profile) {
     return;
   }
   base::PostTaskAndReplyWithResult(
-      base::WorkerPool::GetTaskRunner(false /* task_is_slow */),
+      base::WorkerPool::GetTaskRunner(false),
       FROM_HERE,
       base::Bind(&file_util::PathExists, GetRlzDisabledFlagPath()),
       base::Bind(&LoginUtilsImpl::InitRlz, AsWeakPtr(), user_profile));
@@ -589,7 +630,7 @@ void LoginUtilsImpl::InitRlz(Profile* user_profile, bool disabled) {
 #if defined(ENABLE_RLZ)
   PrefService* local_state = g_browser_process->local_state();
   if (disabled) {
-    // Empty brand code turns financial pings off.
+    // Empty brand code means an organic install (no RLZ pings are sent).
     google_util::chromeos::ClearBrandForCurrentSession();
   }
   if (disabled != local_state->GetBoolean(prefs::kRLZDisabled)) {
@@ -600,8 +641,11 @@ void LoginUtilsImpl::InitRlz(Profile* user_profile, bool disabled) {
   // Init the RLZ library.
   int ping_delay = user_profile->GetPrefs()->GetInteger(
       first_run::GetPingDelayPrefName().c_str());
+  // Negative ping delay means to send ping immediately after a first search is
+  // recorded.
   RLZTracker::InitRlzFromProfileDelayed(
-      user_profile, UserManager::Get()->IsCurrentUserNew(), ping_delay);
+      user_profile, UserManager::Get()->IsCurrentUserNew(),
+      ping_delay < 0, base::TimeDelta::FromMilliseconds(abs(ping_delay)));
   if (delegate_)
     delegate_->OnRlzInitialized(user_profile);
 #endif
@@ -697,28 +741,29 @@ std::string LoginUtilsImpl::GetOffTheRecordCommandLine(
   static const char* kForwardSwitches[] = {
       ::switches::kAllowWebUICompositing,
       ::switches::kDeviceManagementUrl,
-      ::switches::kForceDeviceScaleFactor,
       ::switches::kDisableAccelerated2dCanvas,
+      ::switches::kDisableAcceleratedOverflowScroll,
       ::switches::kDisableAcceleratedPlugins,
       ::switches::kDisableAcceleratedVideoDecode,
+      ::switches::kDisableEncryptedMedia,
+      ::switches::kDisableForceCompositingMode,
       ::switches::kDisableGpuWatchdog,
       ::switches::kDisableLoginAnimations,
+      ::switches::kDisableNonuniformGpuMemPolicy,
       ::switches::kDisableOobeAnimation,
+      ::switches::kDisablePanelFitting,
+      ::switches::kDisableThreadedCompositing,
       ::switches::kDisableSeccompFilterSandbox,
       ::switches::kDisableSeccompSandbox,
       ::switches::kEnableAcceleratedOverflowScroll,
       ::switches::kEnableCompositingForFixedPosition,
-      ::switches::kEnableEncryptedMedia,
       ::switches::kEnableLogging,
-      ::switches::kEnableUIReleaseFrontSurface,
       ::switches::kEnablePinch,
       ::switches::kEnableGestureTapHighlight,
-      ::switches::kEnableSmoothScrolling,
-      ::switches::kEnableThreadedCompositing,
       ::switches::kEnableViewport,
-      ::switches::kDisableThreadedCompositing,
-      ::switches::kForceCompositingMode,
+      ::switches::kForceDeviceScaleFactor,
       ::switches::kGpuStartupDialog,
+      ::switches::kHasChromeOSDiamondKey,
       ::switches::kHasChromeOSKeyboard,
       ::switches::kLoginProfile,
       ::switches::kNaturalScrollDefault,
@@ -729,8 +774,6 @@ std::string LoginUtilsImpl::GetOffTheRecordCommandLine(
       ::switches::kPpapiFlashVersion,
       ::switches::kPpapiOutOfProcess,
       ::switches::kRendererStartupDialog,
-      ::switches::kFlingTapSuppressMaxDown,
-      ::switches::kFlingTapSuppressMaxGap,
 #if defined(USE_XI2_MT)
       ::switches::kTouchCalibration,
 #endif
@@ -740,20 +783,21 @@ std::string LoginUtilsImpl::GetOffTheRecordCommandLine(
       ::switches::kOldCheckboxStyle,
       ::switches::kUIEnablePartialSwap,
       ::switches::kUIEnableThreadedCompositing,
+      ::switches::kUIMaxFramesPending,
       ::switches::kUIPrioritizeInGpuProcess,
 #if defined(USE_CRAS)
       ::switches::kUseCras,
 #endif
       ::switches::kUseGL,
       ::switches::kUserDataDir,
+      ::switches::kUseExynosVda,
       ash::switches::kAshTouchHud,
       ash::switches::kAuraLegacyPowerButton,
       ash::switches::kAuraNoShadows,
-      ash::switches::kAshDisablePanelFitting,
+      ash::switches::kAshEnableNewNetworkStatusArea,
       cc::switches::kDisableThreadedAnimation,
       cc::switches::kEnablePartialSwap,
       chromeos::switches::kDbusStub,
-      chromeos::switches::kEnableNewNetworkHandlers,
       gfx::switches::kEnableBrowserTextSubpixelPositioning,
       gfx::switches::kEnableWebkitTextSubpixelPositioning,
       views::corewm::switches::kWindowAnimationsDisabled,
@@ -878,7 +922,7 @@ class WarmingObserver : public NetworkLibrary::NetworkManagerObserver,
   virtual ~WarmingObserver() {}
 
   // If we're now connected, prewarm the auth url.
-  virtual void OnNetworkManagerChanged(NetworkLibrary* netlib) {
+  virtual void OnNetworkManagerChanged(NetworkLibrary* netlib) OVERRIDE {
     if (netlib->Connected()) {
       const int kConnectionsNeeded = 1;
       chrome_browser_net::PreconnectOnUIThread(
@@ -894,7 +938,7 @@ class WarmingObserver : public NetworkLibrary::NetworkManagerObserver,
   // content::NotificationObserver overrides.
   virtual void Observe(int type,
                        const content::NotificationSource& source,
-                       const content::NotificationDetails& details) {
+                       const content::NotificationDetails& details) OVERRIDE {
   switch (type) {
     case chrome::NOTIFICATION_PROFILE_URL_REQUEST_CONTEXT_GETTER_INITIALIZED: {
       Profile* profile = content::Source<Profile>(source).ptr();

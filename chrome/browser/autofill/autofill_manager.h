@@ -11,6 +11,7 @@
 #include <vector>
 
 #include "base/basictypes.h"
+#include "base/callback_forward.h"
 #include "base/compiler_specific.h"
 #include "base/gtest_prod_util.h"
 #include "base/memory/ref_counted.h"
@@ -21,12 +22,18 @@
 #include "base/string16.h"
 #include "base/time.h"
 #include "chrome/browser/api/sync/profile_sync_service_observer.h"
+#include "chrome/browser/autofill/autocheckout_manager.h"
 #include "chrome/browser/autofill/autocomplete_history_manager.h"
 #include "chrome/browser/autofill/autofill_download.h"
+#include "chrome/browser/autofill/autofill_manager_delegate.h"
 #include "chrome/browser/autofill/field_types.h"
 #include "chrome/browser/autofill/form_structure.h"
+#include "chrome/browser/autofill/personal_data_manager.h"
+#include "chrome/common/autofill/autocheckout_status.h"
+#include "chrome/common/form_data.h"
 #include "content/public/browser/web_contents_observer.h"
 #include "content/public/common/ssl_status.h"
+#include "third_party/WebKit/Source/WebKit/chromium/public/WebFormElement.h"
 
 class AutofillExternalDelegate;
 class AutofillField;
@@ -35,8 +42,7 @@ class AutofillMetrics;
 class CreditCard;
 class FormGroup;
 class GURL;
-class PersonalDataManager;
-class PrefService;
+class PrefRegistrySyncable;
 class ProfileSyncService;
 
 struct FormData;
@@ -58,6 +64,7 @@ struct PasswordForm;
 
 namespace gfx {
 class Rect;
+class RectF;
 }
 
 namespace IPC {
@@ -77,7 +84,7 @@ class AutofillManager : public content::WebContentsObserver,
   static AutofillManager* FromWebContents(content::WebContents* contents);
 
   // Registers our Enable/Disable Autofill pref.
-  static void RegisterUserPrefs(PrefServiceBase* prefs);
+  static void RegisterUserPrefs(PrefRegistrySyncable* registry);
 
   // Set an external delegate.
   void SetExternalDelegate(AutofillExternalDelegate* delegate);
@@ -105,6 +112,26 @@ class AutofillManager : public content::WebContentsObserver,
   // Remove the specified Autocomplete entry.
   void RemoveAutocompleteEntry(const string16& name, const string16& value);
 
+  // Returns the present web_contents state.
+  content::WebContents* GetWebContents() const;
+
+  // Returns the present form structures seen by Autofill manager.
+  const std::vector<FormStructure*>& GetFormStructures();
+
+  // Causes the dialog for request autocomplete feature to be shown.
+  virtual void ShowRequestAutocompleteDialog(
+      const FormData& form,
+      const GURL& source_url,
+      const content::SSLStatus& ssl_status,
+      const base::Callback<void(const FormStructure*)>& callback);
+
+  // Happens when the autocomplete dialog runs its callback when being closed.
+  void RequestAutocompleteDialogClosed();
+
+  autofill::AutofillManagerDelegate* delegate() const {
+    return manager_delegate_;
+  }
+
  protected:
   // Only test code should subclass AutofillManager.
   friend class base::RefCounted<AutofillManager>;
@@ -112,11 +139,6 @@ class AutofillManager : public content::WebContentsObserver,
   AutofillManager(content::WebContents* web_contents,
                   autofill::AutofillManagerDelegate* delegate);
   virtual ~AutofillManager();
-
-  // The string/int pair is composed of the guid string and variant index
-  // respectively.  The variant index is an index into the multi-valued item
-  // (where applicable).
-  typedef std::pair<std::string, size_t> GUIDPair;
 
   // Test code should prefer to use this constructor.
   AutofillManager(content::WebContents* web_contents,
@@ -148,13 +170,16 @@ class AutofillManager : public content::WebContentsObserver,
 
   // Maps GUIDs to and from IDs that are used to identify profiles and credit
   // cards sent to and from the renderer process.
-  virtual int GUIDToID(const GUIDPair& guid) const;
-  virtual const GUIDPair IDToGUID(int id) const;
+  virtual int GUIDToID(const PersonalDataManager::GUIDPair& guid) const;
+  virtual const PersonalDataManager::GUIDPair IDToGUID(int id) const;
 
   // Methods for packing and unpacking credit card and profile IDs for sending
   // and receiving to and from the renderer process.
-  int PackGUIDs(const GUIDPair& cc_guid, const GUIDPair& profile_guid) const;
-  void UnpackGUIDs(int id, GUIDPair* cc_guid, GUIDPair* profile_guid) const;
+  int PackGUIDs(const PersonalDataManager::GUIDPair& cc_guid,
+                const PersonalDataManager::GUIDPair& profile_guid) const;
+  void UnpackGUIDs(int id,
+                   PersonalDataManager::GUIDPair* cc_guid,
+                   PersonalDataManager::GUIDPair* profile_guid) const;
 
   const AutofillMetrics* metric_logger() const { return metric_logger_.get(); }
   void set_metric_logger(const AutofillMetrics* metric_logger);
@@ -166,15 +191,21 @@ class AutofillManager : public content::WebContentsObserver,
     return external_delegate_;
   }
 
+  // Exposed for testing.
+  AutocheckoutManager* autocheckout_manager() {
+    return &autocheckout_manager_;
+  }
+
   // Processes the submitted |form|, saving any new Autofill data and uploading
   // the possible field types for the submitted fields to the crowdsouring
   // server.  Returns false if this form is not relevant for Autofill.
   bool OnFormSubmitted(const FormData& form,
                        const base::TimeTicks& timestamp);
 
-  // Tell the renderer the current interactive autocomplete failed somehow.
-  // Exposed for testing.
-  virtual void ReturnAutocompleteError();
+  // Tell the renderer the current interactive autocomplete finished.
+  virtual void ReturnAutocompleteResult(
+      WebKit::WebFormElement::AutocompleteResult result,
+      const FormData& form_data);
 
  private:
   // content::WebContentsObserver:
@@ -216,7 +247,7 @@ class AutofillManager : public content::WebContentsObserver,
   void OnQueryFormFieldAutofill(int query_id,
                                 const FormData& form,
                                 const FormFieldData& field,
-                                const gfx::Rect& bounding_box,
+                                const gfx::RectF& bounding_box,
                                 bool display_warning);
   void OnDidEndTextFieldEditing();
   void OnHideAutofillPopup();
@@ -224,7 +255,7 @@ class AutofillManager : public content::WebContentsObserver,
       const FormFieldData& form,
       const PasswordFormFillData& fill_data);
   void OnShowPasswordSuggestions(const FormFieldData& field,
-                                 const gfx::Rect& bounds,
+                                 const gfx::RectF& bounds,
                                  const std::vector<string16>& suggestions);
   void OnSetDataList(const std::vector<string16>& values,
                      const std::vector<string16>& labels,
@@ -238,6 +269,13 @@ class AutofillManager : public content::WebContentsObserver,
 
   // Passes return data for an OnRequestAutocomplete call back to the page.
   void ReturnAutocompleteData(const FormStructure* result);
+
+  // Called to signal clicking an element failed in some way during an
+  // Autocheckout flow.
+  void OnClickFailed(autofill::AutocheckoutStatus status);
+
+  // Returns the matched whitelist URL prefix for the current tab's url.
+  std::string GetAutocheckoutURLPrefix() const;
 
   // Fills |host| with the RenderViewHost for this tab.
   // Returns false if Autofill is disabled or if the host is unavailable.
@@ -285,8 +323,7 @@ class AutofillManager : public content::WebContentsObserver,
 
   // Returns a list of values from the stored credit cards that match |type| and
   // the value of |field| and returns the labels of the matching credit cards.
-  void GetCreditCardSuggestions(FormStructure* form,
-                                const FormFieldData& field,
+  void GetCreditCardSuggestions(const FormFieldData& field,
                                 AutofillFieldType type,
                                 std::vector<string16>* values,
                                 std::vector<string16>* labels,
@@ -332,6 +369,9 @@ class AutofillManager : public content::WebContentsObserver,
   // Handles single-field autocomplete form data.
   AutocompleteHistoryManager autocomplete_history_manager_;
 
+  // Handles autocheckout flows.
+  AutocheckoutManager autocheckout_manager_;
+
   // For logging UMA metrics. Overridden by metrics tests.
   scoped_ptr<const AutofillMetrics> metric_logger_;
   // Have we logged whether Autofill is enabled for this page load?
@@ -366,8 +406,8 @@ class AutofillManager : public content::WebContentsObserver,
   ScopedVector<FormStructure> form_structures_;
 
   // GUID to ID mapping.  We keep two maps to convert back and forth.
-  mutable std::map<GUIDPair, int> guid_id_map_;
-  mutable std::map<int, GUIDPair> id_guid_map_;
+  mutable std::map<PersonalDataManager::GUIDPair, int> guid_id_map_;
+  mutable std::map<int, PersonalDataManager::GUIDPair> id_guid_map_;
 
   // Delegate to perform external processing (display, selection) on
   // our behalf.  Weak.

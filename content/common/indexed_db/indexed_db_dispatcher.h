@@ -17,14 +17,12 @@
 #include "third_party/WebKit/Source/WebKit/chromium/public/WebIDBCursor.h"
 #include "third_party/WebKit/Source/WebKit/chromium/public/WebIDBDatabase.h"
 #include "third_party/WebKit/Source/WebKit/chromium/public/WebIDBDatabaseCallbacks.h"
-#include "third_party/WebKit/Source/WebKit/chromium/public/WebIDBObjectStore.h"
-#include "third_party/WebKit/Source/WebKit/chromium/public/WebIDBTransaction.h"
-#include "third_party/WebKit/Source/WebKit/chromium/public/WebIDBTransactionCallbacks.h"
 #include "webkit/glue/worker_task_runner.h"
 
 struct IndexedDBMsg_CallbacksSuccessCursorContinue_Params;
 struct IndexedDBMsg_CallbacksSuccessCursorPrefetch_Params;
 struct IndexedDBMsg_CallbacksSuccessIDBCursor_Params;
+struct IndexedDBDatabaseMetadata;
 
 namespace WebKit {
 class WebFrame;
@@ -56,6 +54,9 @@ class CONTENT_EXPORT IndexedDBDispatcher
 
   // webkit_glue::WorkerTaskRunner::Observer implementation.
   virtual void OnWorkerRunLoopStopped() OVERRIDE;
+
+  static WebKit::WebIDBMetadata ConvertMetadata(
+      const IndexedDBDatabaseMetadata& idb_metadata);
 
   void OnMessageReceived(const IPC::Message& msg);
   static bool Send(IPC::Message* msg);
@@ -117,106 +118,88 @@ class CONTENT_EXPORT IndexedDBDispatcher
   void RequestIDBDatabaseClose(
       int32 ipc_database_id);
 
-  void RequestIDBIndexOpenObjectCursor(
-      const WebKit::WebIDBKeyRange& idb_key_range,
-      unsigned short direction,
-      WebKit::WebIDBCallbacks* callbacks,
-      int32 ipc_index_id,
-      const WebKit::WebIDBTransaction& transaction,
-      WebKit::WebExceptionCode* ec);
+  void RequestIDBDatabaseCreateTransaction(
+      int32 ipc_database_id,
+      int64 transaction_id,
+      WebKit::WebIDBDatabaseCallbacks* database_callbacks_ptr,
+      WebKit::WebVector<long long> object_store_ids,
+      unsigned short mode);
 
-  void RequestIDBIndexOpenKeyCursor(
-      const WebKit::WebIDBKeyRange& idb_key_range,
-      unsigned short direction,
-      WebKit::WebIDBCallbacks* callbacks,
-      int32 ipc_index_id,
-      const WebKit::WebIDBTransaction& transaction,
-      WebKit::WebExceptionCode* ec);
-
-  void RequestIDBIndexCount(
-      const WebKit::WebIDBKeyRange& idb_key_range,
-      WebKit::WebIDBCallbacks* callbacks,
-      int32 ipc_index_id,
-      const WebKit::WebIDBTransaction& transaction,
-      WebKit::WebExceptionCode* ec);
-
-  void RequestIDBIndexGetObject(
+  void RequestIDBDatabaseGet(
+      int32 ipc_database_id,
+      int64 transaction_id,
+      int64 object_store_id,
+      int64 index_id,
       const IndexedDBKeyRange& key_range,
-      WebKit::WebIDBCallbacks* callbacks,
-      int32 ipc_index_id,
-      const WebKit::WebIDBTransaction& transaction,
-      WebKit::WebExceptionCode* ec);
+      bool key_only,
+      WebKit::WebIDBCallbacks* callbacks);
 
-  void RequestIDBIndexGetKey(
-      const IndexedDBKeyRange& key_range,
-      WebKit::WebIDBCallbacks* callbacks,
-      int32 ipc_index_id,
-      const WebKit::WebIDBTransaction& transaction,
-      WebKit::WebExceptionCode* ec);
-
-  void RequestIDBObjectStoreGet(
-      const IndexedDBKeyRange& key_range,
-      WebKit::WebIDBCallbacks* callbacks,
-      int32 ipc_object_store_id,
-      const WebKit::WebIDBTransaction& transaction,
-      WebKit::WebExceptionCode* ec);
-
-  void RequestIDBObjectStorePut(
-      const SerializedScriptValue& value,
+  void RequestIDBDatabasePut(
+      int32 ipc_database_id,
+      int64 transaction_id,
+      int64 object_store_id,
+      WebKit::WebVector<unsigned char>* value,
       const IndexedDBKey& key,
-      WebKit::WebIDBObjectStore::PutMode putMode,
+      WebKit::WebIDBDatabase::PutMode put_mode,
       WebKit::WebIDBCallbacks* callbacks,
-      int32 ipc_object_store_id,
-      const WebKit::WebIDBTransaction& transaction,
-      const WebKit::WebVector<long long>& indexIds,
+      const WebKit::WebVector<long long>& index_ids,
       const WebKit::WebVector<WebKit::WebVector<
-          WebKit::WebIDBKey> >& indexKeys);
+          WebKit::WebIDBKey> >& index_keys);
 
-  void RequestIDBObjectStoreDelete(
+  void RequestIDBDatabaseOpenCursor(
+      int32 ipc_database_id,
+      int64 transaction_id,
+      int64 object_store_id,
+      int64 index_id,
       const IndexedDBKeyRange& key_range,
-      WebKit::WebIDBCallbacks* callbacks,
-      int32 ipc_object_store_id,
-      const WebKit::WebIDBTransaction& transaction,
-      WebKit::WebExceptionCode* ec);
+      unsigned short direction,
+      bool key_only,
+      WebKit::WebIDBDatabase::TaskType task_type,
+      WebKit::WebIDBCallbacks* callbacks);
 
-  void RequestIDBObjectStoreClear(
-      WebKit::WebIDBCallbacks* callbacks,
-      int32 ipc_object_store_id,
-      const WebKit::WebIDBTransaction& transaction,
-      WebKit::WebExceptionCode* ec);
+  void RequestIDBDatabaseCount(
+      int32 ipc_database_id,
+      int64 transaction_id,
+      int64 object_store_id,
+      int64 index_id,
+      const IndexedDBKeyRange& key_range,
+      WebKit::WebIDBCallbacks* callbacks);
 
-  void RequestIDBObjectStoreOpenCursor(
-      const WebKit::WebIDBKeyRange& idb_key_range,
-      WebKit::WebIDBCursor::Direction direction,
-      WebKit::WebIDBCallbacks* callbacks,
-      int32 ipc_object_store_id,
-      WebKit::WebIDBTransaction::TaskType task_type,
-      const WebKit::WebIDBTransaction& transaction,
-      WebKit::WebExceptionCode* ec);
+  void RequestIDBDatabaseDeleteRange(
+      int32 ipc_database_id,
+      int64 transaction_id,
+      int64 object_store_id,
+      const IndexedDBKeyRange& key_range,
+      WebKit::WebIDBCallbacks* callbacks);
 
-  void RequestIDBObjectStoreCount(
-      const WebKit::WebIDBKeyRange& idb_key_range,
-      WebKit::WebIDBCallbacks* callbacks,
-      int32 ipc_object_store_id,
-      const WebKit::WebIDBTransaction& transaction,
-      WebKit::WebExceptionCode* ec);
-
-  void RegisterWebIDBTransactionCallbacks(
-      WebKit::WebIDBTransactionCallbacks* callbacks,
-      int32 id);
+  void RequestIDBDatabaseClear(
+      int32 ipc_database_id,
+      int64 transaction_id,
+      int64 object_store_id,
+      WebKit::WebIDBCallbacks* callbacks);
 
   void CursorDestroyed(int32 ipc_cursor_id);
   void DatabaseDestroyed(int32 ipc_database_id);
 
-  static int32 TransactionId(const WebKit::WebIDBTransaction& transaction);
-
  private:
   FRIEND_TEST_ALL_PREFIXES(IndexedDBDispatcherTest, ValueSizeTest);
+
+  static int32 CurrentWorkerId() {
+    return webkit_glue::WorkerTaskRunner::Instance()->CurrentWorkerId();
+  }
+
+  template<typename T>
+  void init_params(T& params, WebKit::WebIDBCallbacks* callbacks_ptr) {
+    scoped_ptr<WebKit::WebIDBCallbacks> callbacks(callbacks_ptr);
+    params.ipc_thread_id = CurrentWorkerId();
+    params.ipc_response_id = pending_callbacks_.Add(callbacks.release());
+  }
 
   // IDBCallback message handlers.
   void OnSuccessIDBDatabase(int32 ipc_thread_id,
                             int32 ipc_response_id,
-                            int32 ipc_object_id);
+                            int32 ipc_object_id,
+                            const IndexedDBDatabaseMetadata& idb_metadata);
   void OnSuccessIndexedDBKey(int32 ipc_thread_id,
                              int32 ipc_response_id,
                              const IndexedDBKey& key);
@@ -250,19 +233,26 @@ class CONTENT_EXPORT IndexedDBDispatcher
                int32 ipc_response_id,
                int code,
                const string16& message);
-  void OnBlocked(int32 ipc_thread_id, int32 ipc_response_id);
   void OnIntBlocked(int32 ipc_thread_id, int32 ipc_response_id,
                     int64 existing_version);
   void OnUpgradeNeeded(int32 ipc_thread_id,
                        int32 ipc_response_id,
-                       int32 ipc_transaction_id,
                        int32 ipc_database_id,
-                       int64 old_version);
+                       int64 old_version,
+                       const IndexedDBDatabaseMetadata& metdata);
+  void OnAbortOld(int32 ipc_thread_id,
+                  int32 ipc_transaction_id,
+                  int code,
+                  const string16& message);
   void OnAbort(int32 ipc_thread_id,
-               int32 ipc_transaction_id,
+               int32 ipc_database_id,
+               int64 transaction_id,
                int code,
                const string16& message);
-  void OnComplete(int32 ipc_thread_id, int32 ipc_transaction_id);
+  void OnCompleteOld(int32 ipc_thread_id, int32 ipc_transaction_id);
+  void OnComplete(int32 ipc_thread_id,
+                  int32 ipc_database_id,
+                  int64 transaction_id);
   void OnForcedClose(int32 ipc_thread_id, int32 ipc_database_id);
   void OnVersionChange(int32 ipc_thread_id,
                        int32 ipc_database_id,
@@ -278,8 +268,6 @@ class CONTENT_EXPORT IndexedDBDispatcher
   // Careful! WebIDBCallbacks wraps non-threadsafe data types. It must be
   // destroyed and used on the same thread it was created on.
   IDMap<WebKit::WebIDBCallbacks, IDMapOwnPointer> pending_callbacks_;
-  IDMap<WebKit::WebIDBTransactionCallbacks, IDMapOwnPointer>
-      pending_transaction_callbacks_;
   IDMap<WebKit::WebIDBDatabaseCallbacks, IDMapOwnPointer>
       pending_database_callbacks_;
 

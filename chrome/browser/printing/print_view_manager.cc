@@ -11,14 +11,14 @@
 #include "base/lazy_instance.h"
 #include "base/memory/scoped_ptr.h"
 #include "base/metrics/histogram.h"
+#include "base/prefs/pref_service.h"
 #include "base/timer.h"
 #include "base/utf_string_conversions.h"
 #include "chrome/browser/browser_process.h"
-#include "chrome/browser/prefs/pref_service.h"
 #include "chrome/browser/printing/print_error_dialog.h"
 #include "chrome/browser/printing/print_job.h"
 #include "chrome/browser/printing/print_job_manager.h"
-#include "chrome/browser/printing/print_preview_tab_controller.h"
+#include "chrome/browser/printing/print_preview_dialog_controller.h"
 #include "chrome/browser/printing/print_view_manager_observer.h"
 #include "chrome/browser/printing/printer_query.h"
 #include "chrome/browser/profiles/profile.h"
@@ -45,7 +45,7 @@ using base::TimeDelta;
 using content::BrowserThread;
 using content::WebContents;
 
-DEFINE_WEB_CONTENTS_USER_DATA_KEY(printing::PrintViewManager)
+DEFINE_WEB_CONTENTS_USER_DATA_KEY(printing::PrintViewManager);
 
 namespace {
 
@@ -102,18 +102,17 @@ bool PrintViewManager::PrintForSystemDialogNow() {
 }
 
 bool PrintViewManager::AdvancedPrintNow() {
-  PrintPreviewTabController* tab_controller =
-      PrintPreviewTabController::GetInstance();
-  if (!tab_controller)
+  PrintPreviewDialogController* dialog_controller =
+      PrintPreviewDialogController::GetInstance();
+  if (!dialog_controller)
     return false;
-  WebContents* print_preview_tab =
-      tab_controller->GetPrintPreviewForTab(web_contents());
-  if (print_preview_tab) {
-    // Preview tab exist for current tab or current tab is preview tab.
-    if (!print_preview_tab->GetWebUI())
+  WebContents* print_preview_dialog =
+      dialog_controller->GetPrintPreviewForContents(web_contents());
+  if (print_preview_dialog) {
+    if (!print_preview_dialog->GetWebUI())
       return false;
     PrintPreviewUI* print_preview_ui = static_cast<PrintPreviewUI*>(
-        print_preview_tab->GetWebUI()->GetController());
+        print_preview_dialog->GetWebUI()->GetController());
     print_preview_ui->OnShowSystemDialog();
     return true;
   } else {
@@ -131,15 +130,17 @@ bool PrintViewManager::PrintToDestination() {
   return PrintNowInternal(new PrintMsg_PrintPages(routing_id()));
 }
 
-bool PrintViewManager::PrintPreviewNow() {
+bool PrintViewManager::PrintPreviewNow(bool selection_only) {
   // Users can send print commands all they want and it is beyond
   // PrintViewManager's control. Just ignore the extra commands.
   // See http://crbug.com/136842 for example.
   if (print_preview_state_ != NOT_PREVIEWING)
     return false;
 
-  if (!PrintNowInternal(new PrintMsg_InitiatePrintPreview(routing_id())))
+  if (!PrintNowInternal(new PrintMsg_InitiatePrintPreview(routing_id(),
+                                                          selection_only))) {
     return false;
+  }
 
   print_preview_state_ = USER_INITIATED_PREVIEW;
   return true;
@@ -327,9 +328,9 @@ void PrintViewManager::OnScriptedPrintPreview(bool source_is_modifiable,
     return;
   }
 
-  PrintPreviewTabController* tab_controller =
-      PrintPreviewTabController::GetInstance();
-  if (!tab_controller) {
+  PrintPreviewDialogController* dialog_controller =
+      PrintPreviewDialogController::GetInstance();
+  if (!dialog_controller) {
     Send(reply_msg);
     return;
   }
@@ -342,10 +343,11 @@ void PrintViewManager::OnScriptedPrintPreview(bool source_is_modifiable,
   map[rph] = callback;
   scripted_print_preview_rph_ = rph;
 
-  tab_controller->PrintPreview(web_contents());
-  PrintPreviewUI::SetSourceIsModifiable(
-      tab_controller->GetPrintPreviewForTab(web_contents()),
-      source_is_modifiable);
+  dialog_controller->PrintPreview(web_contents());
+  PrintHostMsg_RequestPrintPreview_Params params;
+  params.is_modifiable = source_is_modifiable;
+  PrintPreviewUI::SetInitialParams(
+      dialog_controller->GetPrintPreviewForContents(web_contents()), params);
 }
 
 void PrintViewManager::OnScriptedPrintPreviewReply(IPC::Message* reply_msg) {

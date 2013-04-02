@@ -4,7 +4,7 @@
 
 {
   "activeTab": {
-    "channel": "dev",
+    "channel": "stable",
     "extension_types": ["extension", "packaged_app"],
     "min_manifest_version": 2
   },
@@ -21,11 +21,17 @@
     "channel": "stable",
     "extension_types": ["platform_app"]
   },
+  "developerPrivate": {
+    "channel": "dev",
+    "extension_types": ["packaged_app"],
+    "location": "component",
+    "whitelist": "lphgohfeebnhcpiohjndkgbhhkoapkjc" // Apps Debugger
+  },
   "appNotifications": {
     "channel": "stable",
     "extension_types": ["packaged_app", "hosted_app"]
   },
-    "autotestPrivate": {
+  "autotestPrivate": {
     "channel": "stable",
     "extension_types": ["extension", "packaged_app"],
     "location": "component"
@@ -113,10 +119,22 @@
     "channel": "stable",
     "extension_types": ["extension", "packaged_app"]
   },
-  "declarativeWebRequest": {
-    "channel": "beta",
-    "extension_types": ["extension", "packaged_app"]
+  "declarativeContent": {
+    "channel": "trunk",
+    "extension_types": ["extension"]
   },
+  "declarativeWebRequest": [
+    {
+      "channel": "beta",
+      "extension_types": ["extension", "packaged_app"]
+    },
+    {
+      "channel": "stable",
+      "extension_types": ["extension", "packaged_app"],
+      // Legacy Browser Support (remove once this API hits stable).
+      "whitelist": ["heildphpnddilhkemkielfhnkaagiabh"]
+    }
+  ],
   "downloads": {
     "channel": "dev",
     "extension_types": [
@@ -158,6 +176,10 @@
   "fontSettings": {
     "channel": "stable",
     "extension_types": ["extension", "packaged_app"]
+  },
+  "fullscreen": {
+    "channel": "stable",
+    "extension_types": ["platform_app"]
   },
   "geolocation": {
     "channel": "stable",
@@ -238,6 +260,11 @@
       "ionpfmkccalenbmnddpbmocokhaknphg"   // Quickoffice dev
     ]
   },
+  "networkingPrivate": {
+    "channel": "dev",
+    "extension_types": ["extension", "packaged_app"],
+    "location": "component"
+  },
   "notifications": {
     "channel": "stable",
     "extension_types": [
@@ -290,16 +317,24 @@
     "extension_types": ["extension", "packaged_app", "platform_app"],
     "min_manifest_version": 2
   },
+  "screensaver": {
+    "channel": "stable",
+    "extension_types": ["packaged_app", "hosted_app", "platform_app"]
+  },
   "serial": {
     "channel": "stable",
     "extension_types": ["platform_app"]
+  },
+  "sessionRestore": {
+    "channel": "dev",
+    "extension_types": ["extension", "packaged_app"]
   },
   "socket": {
     "channel": "stable",
     "extension_types": ["platform_app"]
   },
   "syncFileSystem": {
-    "channel": "trunk",
+    "channel": "dev",
     "extension_types": ["platform_app"]
   },
   "systemIndicator": {
@@ -310,6 +345,10 @@
     "channel": "stable",
     "extension_types": ["extension", "packaged_app", "platform_app"],
     "min_manifest_version": 2
+  },
+  "systemInfo.display": {
+    "channel": "stable",
+    "extension_types": ["extension", "packaged_app", "platform_app"]
   },
   "systemPrivate": {
     "channel": "stable",
@@ -359,11 +398,11 @@
     ]
   },
   "usb": {
-    "channel": "dev",
+    "channel": "stable",
     "extension_types": ["platform_app"]
   },
   "usbDevices": {
-    "channel": "dev",
+    "channel": "stable",
     "extension_types": ["platform_app"]
   },
   "videoCapture": {

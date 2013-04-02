@@ -8,7 +8,6 @@
 #include "ppapi/c/pp_errors.h"
 #include "ppapi/host/host_factory.h"
 #include "ppapi/host/host_message_context.h"
-#include "ppapi/host/instance_message_filter.h"
 #include "ppapi/host/resource_host.h"
 #include "ppapi/proxy/ppapi_messages.h"
 #include "ppapi/proxy/resource_message_params.h"
@@ -34,11 +33,8 @@ PpapiHost::PpapiHost(IPC::Sender* sender,
 
 PpapiHost::~PpapiHost() {
   // Delete these explicitly before destruction since then the host is still
-  // technically alive in case one of the filters accesses us from the
+  // technically alive in case one of the hosts accesses us from the
   // destructor.
-  instance_message_filters_.clear();
-
-  // The resources may also want to use us in their destructors.
   resources_.clear();
   pending_resource_hosts_.clear();
 }
@@ -62,15 +58,6 @@ bool PpapiHost::OnMessageReceived(const IPC::Message& msg) {
                         OnHostMsgResourceDestroyed)
     IPC_MESSAGE_UNHANDLED(handled = false)
   IPC_END_MESSAGE_MAP()
-
-  if (!handled) {
-    for (size_t i = 0; i < instance_message_filters_.size(); i++) {
-      if (instance_message_filters_[i]->OnInstanceMessageReceived(msg)) {
-        handled = true;
-        break;
-      }
-    }
-  }
 
   return handled;
 }
@@ -107,11 +94,6 @@ void PpapiHost::AddHostFactoryFilter(scoped_ptr<HostFactory> filter) {
   host_factory_filters_.push_back(filter.release());
 }
 
-void PpapiHost::AddInstanceMessageFilter(
-    scoped_ptr<InstanceMessageFilter> filter) {
-  instance_message_filters_.push_back(filter.release());
-}
-
 void PpapiHost::OnHostMsgResourceCall(
     const proxy::ResourceMessageCallParams& params,
     const IPC::Message& nested_msg) {
@@ -138,6 +120,7 @@ void PpapiHost::HandleResourceCall(
     HostMessageContext* context) {
   ResourceHost* resource_host = GetResourceHost(params.pp_resource());
   if (resource_host) {
+    // CAUTION: Handling the message may cause the destruction of this object.
     resource_host->HandleMessage(nested_msg, context);
   } else {
     if (context->params.has_callback()) {

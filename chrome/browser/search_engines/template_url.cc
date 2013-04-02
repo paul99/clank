@@ -11,9 +11,9 @@
 #include "base/i18n/rtl.h"
 #include "base/logging.h"
 #include "base/metrics/field_trial.h"
-#include "base/string_number_conversions.h"
 #include "base/string_util.h"
 #include "base/stringprintf.h"
+#include "base/strings/string_number_conversions.h"
 #include "base/utf_string_conversions.h"
 #include "chrome/browser/google/google_util.h"
 #include "chrome/browser/search_engines/search_terms_data.h"
@@ -58,6 +58,10 @@ const char kGoogleCursorPositionParameter[] = "google:cursorPosition";
 const char kGoogleInstantEnabledParameter[] = "google:instantEnabledParameter";
 const char kGoogleInstantExtendedEnabledParameter[] =
     "google:instantExtendedEnabledParameter";
+const char kGoogleInstantExtendedEnabledKey[] =
+    "google:instantExtendedEnabledKey";
+const char kGoogleInstantExtendedEnabledKeyFull[] =
+    "{google:instantExtendedEnabledKey}";
 const char kGoogleOriginalQueryForSuggestionParameter[] =
     "google:originalQueryForSuggestion";
 const char kGoogleRLZParameter[] = "google:RLZ";
@@ -412,6 +416,11 @@ std::string TemplateURLRef::DisplayURLToURLRef(
   return UTF16ToUTF8(result);
 }
 
+const std::string& TemplateURLRef::GetScheme() const {
+  ParseIfNecessary();
+  return scheme_;
+}
+
 const std::string& TemplateURLRef::GetHost() const {
   ParseIfNecessary();
   return host_;
@@ -515,6 +524,7 @@ bool TemplateURLRef::ExtractSearchTermsFromURL(const GURL& url,
 
 void TemplateURLRef::InvalidateCachedValues() const {
   supports_replacements_ = valid_ = parsed_ = false;
+  scheme_.clear();
   host_.clear();
   path_.clear();
   search_term_key_.clear();
@@ -571,6 +581,8 @@ bool TemplateURLRef::ParseParameter(size_t start,
   } else if (parameter == kGoogleInstantExtendedEnabledParameter) {
     replacements->push_back(Replacement(GOOGLE_INSTANT_EXTENDED_ENABLED,
                                         start));
+  } else if (parameter == kGoogleInstantExtendedEnabledKey) {
+    url->insert(start, google_util::kInstantExtendedAPIParam);
   } else if (parameter == kGoogleOriginalQueryForSuggestionParameter) {
     replacements->push_back(Replacement(GOOGLE_ORIGINAL_QUERY_FOR_SUGGESTION,
                                         start));
@@ -679,6 +691,7 @@ void TemplateURLRef::ParseHostAndSearchTermKey(
                                search_terms_data.GoogleBaseSuggestURLValue());
 
   search_term_key_.clear();
+  scheme_.clear();
   host_.clear();
   path_.clear();
   search_term_key_location_ = url_parse::Parsed::REF;
@@ -694,6 +707,7 @@ void TemplateURLRef::ParseHostAndSearchTermKey(
   search_term_key_ = query_key.empty() ? ref_key : query_key;
   search_term_key_location_ = query_key.empty() ?
       url_parse::Parsed::REF : url_parse::Parsed::QUERY;
+  scheme_ = url.scheme();
   host_ = url.host();
   path_ = url.path();
 }
@@ -743,6 +757,11 @@ TemplateURL::TemplateURL(Profile* profile, const TemplateURLData& data)
       instant_url_ref_(ALLOW_THIS_IN_INITIALIZER_LIST(this),
                        TemplateURLRef::INSTANT) {
   SetPrepopulateId(data_.prepopulate_id);
+
+  if (data_.search_terms_replacement_key ==
+      kGoogleInstantExtendedEnabledKeyFull) {
+    data_.search_terms_replacement_key = google_util::kInstantExtendedAPIParam;
+  }
 }
 
 TemplateURL::~TemplateURL() {
@@ -817,8 +836,8 @@ const std::string& TemplateURL::GetURL(size_t index) const {
       data_.alternate_urls[index] : url();
 }
 
-bool TemplateURL::ExtractSearchTermsFromURL(
-    const GURL& url, string16* search_terms) {
+bool TemplateURL::ExtractSearchTermsFromURL(const GURL& url,
+                                            string16* search_terms) {
   DCHECK(search_terms);
   search_terms->clear();
 
@@ -837,6 +856,53 @@ bool TemplateURL::ExtractSearchTermsFromURL(
       return !search_terms->empty();
     }
   }
+  return false;
+}
+
+bool TemplateURL::HasSearchTermsReplacementKey(const GURL& url) const {
+  // Look for the key both in the query and the ref.
+  std::string params[] = {url.query(), url.ref()};
+
+  for (int i = 0; i < 2; ++i) {
+    url_parse::Component query, key, value;
+    query.len = static_cast<int>(params[i].size());
+    while (url_parse::ExtractQueryKeyValue(params[i].c_str(), &query, &key,
+                                           &value)) {
+      if (key.is_nonempty() &&
+          params[i].substr(key.begin, key.len) ==
+              search_terms_replacement_key()) {
+        return true;
+      }
+    }
+  }
+  return false;
+}
+
+bool TemplateURL::IsInstantURL(const GURL& url) {
+  // If the url matches the Instant ref, there's no need to
+  // check the replacement-key parameter, since we know this
+  // is instant.
+  // TODO(dhollowa): http://crbug.com/170390.  Consolidate Instant URL checks.
+  TemplateURLRef ref(this, TemplateURLRef::INSTANT);
+  GURL instant_url(ref.ReplaceSearchTerms(
+      TemplateURLRef::SearchTermsArgs(string16())));
+  if (instant_url.scheme() == url.scheme() &&
+      instant_url.host() == url.host() &&
+      instant_url.path() == url.path())
+    return true;
+
+  // Anything else requires the existence of the replacement-key.
+  if (!HasSearchTermsReplacementKey(url))
+    return false;
+
+  for (size_t i = 0; i < URLCount(); ++i) {
+    TemplateURLRef ref(this, i);
+    if (ref.GetScheme() == url.scheme() &&
+        ref.GetHost() == url.host() &&
+        ref.GetPath() == url.path())
+      return true;
+  }
+
   return false;
 }
 

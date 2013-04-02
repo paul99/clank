@@ -10,17 +10,16 @@
 #include "base/basictypes.h"
 #include "base/memory/ref_counted.h"
 #include "base/memory/scoped_ptr.h"
+#include "base/memory/weak_ptr.h"
+#include "base/process.h"
 #include "ipc/ipc_listener.h"
 #include "ipc/ipc_platform_file.h"
-#include "remoting/base/shared_buffer.h"
-#include "remoting/host/video_frame_capturer.h"
+#include "media/video/capture/screen/screen_capturer.h"
+#include "media/video/capture/screen/shared_buffer.h"
+#include "remoting/host/desktop_environment.h"
 #include "remoting/proto/event.pb.h"
 #include "remoting/protocol/clipboard_stub.h"
 #include "third_party/skia/include/core/SkRegion.h"
-
-#if defined(OS_WIN)
-#include "base/win/scoped_handle.h"
-#endif
 
 namespace base {
 class SingleThreadTaskRunner;
@@ -35,6 +34,9 @@ struct SerializedCapturedData;
 
 namespace remoting {
 
+class AudioPacket;
+class ClientSession;
+class IpcAudioCapturer;
 class IpcVideoFrameCapturer;
 
 // This class routes calls to the DesktopEnvironment's stubs though the IPC
@@ -46,22 +48,45 @@ class DesktopSessionProxy
  public:
   DesktopSessionProxy(
       scoped_refptr<base::SingleThreadTaskRunner> caller_task_runner,
-      scoped_refptr<base::SingleThreadTaskRunner> video_capture_task_runner);
+      scoped_refptr<base::SingleThreadTaskRunner> io_task_runner,
+      const std::string& client_jid,
+      const base::Closure& disconnect_callback);
+
+  // Mirrors DesktopEnvironment.
+  scoped_ptr<AudioCapturer> CreateAudioCapturer(
+      scoped_refptr<base::SingleThreadTaskRunner> audio_task_runner);
+  scoped_ptr<EventExecutor> CreateEventExecutor(
+      scoped_refptr<base::SingleThreadTaskRunner> input_task_runner,
+      scoped_refptr<base::SingleThreadTaskRunner> ui_task_runner);
+  scoped_ptr<media::ScreenCapturer> CreateVideoCapturer(
+      scoped_refptr<base::SingleThreadTaskRunner> capture_task_runner,
+      scoped_refptr<base::SingleThreadTaskRunner> encode_task_runner);
 
   // IPC::Listener implementation.
   virtual bool OnMessageReceived(const IPC::Message& message) OVERRIDE;
   virtual void OnChannelConnected(int32 peer_pid) OVERRIDE;
   virtual void OnChannelError() OVERRIDE;
 
-  // Connects to the desktop process.
-  bool Connect(IPC::PlatformFileForTransit desktop_process,
-               IPC::PlatformFileForTransit desktop_pipe);
+  // Connects to the desktop session agent.
+  bool AttachToDesktop(base::ProcessHandle desktop_process,
+                       IPC::PlatformFileForTransit desktop_pipe);
 
   // Closes the connection to the desktop session agent and cleans up
   // the associated resources.
-  void Disconnect();
+  void DetachFromDesktop();
 
-  // APIs used to implement the VideoFrameCapturer interface. These must be
+  // Disconnects the client session that owns |this|.
+  void DisconnectSession();
+
+  // Stores |audio_capturer| to be used to post captured audio packets.
+  // |audio_capturer| must be valid until StopAudioCapturer() is called.
+  void StartAudioCapturer(IpcAudioCapturer* audio_capturer);
+
+  // Clears the cached pointer to the audio capturer. Any packets captured after
+  // StopAudioCapturer() has been called will be silently dropped.
+  void StopAudioCapturer();
+
+  // APIs used to implement the media::ScreenCapturer interface. These must be
   // called on |video_capture_task_runner_|.
   void InvalidateRegion(const SkRegion& invalid_region);
   void CaptureFrame();
@@ -85,7 +110,10 @@ class DesktopSessionProxy
   virtual ~DesktopSessionProxy();
 
   // Returns a shared buffer from the list of known buffers.
-  scoped_refptr<SharedBuffer> GetSharedBuffer(int id);
+  scoped_refptr<media::SharedBuffer> GetSharedBuffer(int id);
+
+  // Handles AudioPacket notification from the desktop session agent.
+  void OnAudioPacket(const std::string& serialized_packet);
 
   // Registers a new shared buffer created by the desktop process.
   void OnCreateSharedBuffer(int id,
@@ -99,44 +127,62 @@ class DesktopSessionProxy
   void OnCaptureCompleted(const SerializedCapturedData& serialized_data);
 
   // Handles CursorShapeChanged notification from the desktop session agent.
-  void OnCursorShapeChanged(const std::string& serialized_cursor_shape);
-
-  // Posted to |video_capture_task_runner_| to pass a captured video frame back
-  // to |video_capturer_|.
-  void PostCaptureCompleted(scoped_refptr<CaptureData> capture_data);
-
-  // Posted to |video_capture_task_runner_| to pass |cursor_shape| back to
-  // |video_capturer_|.
-  void PostCursorShape(scoped_ptr<protocol::CursorShapeInfo> cursor_shape);
+  void OnCursorShapeChanged(const media::MouseCursorShape& cursor_shape);
 
   // Handles InjectClipboardEvent request from the desktop integration process.
   void OnInjectClipboardEvent(const std::string& serialized_event);
+
+  // Posted to |audio_capture_task_runner_| to pass a captured audio packet back
+  // to |audio_capturer_|.
+  void PostAudioPacket(scoped_ptr<AudioPacket> packet);
+
+  // Posted to |video_capture_task_runner_| to pass a captured video frame back
+  // to |video_capturer_|.
+  void PostCaptureCompleted(
+      scoped_refptr<media::ScreenCaptureData> capture_data);
+
+  // Posted to |video_capture_task_runner_| to pass |cursor_shape| back to
+  // |video_capturer_|.
+  void PostCursorShape(scoped_ptr<media::MouseCursorShape> cursor_shape);
 
   // Sends a message to the desktop session agent. The message is silently
   // deleted if the channel is broken.
   void SendToDesktop(IPC::Message* message);
 
+  // Task runner on which methods of |audio_capturer_| will be invoked.
+  scoped_refptr<base::SingleThreadTaskRunner> audio_capture_task_runner_;
+
   // Task runner on which public methods of this class should be called (unless
   // it is documented otherwise).
   scoped_refptr<base::SingleThreadTaskRunner> caller_task_runner_;
 
-  // Task runner on which |video_capturer_delegate_| will be invoked.
+  // Task runner used for running background I/O.
+  scoped_refptr<base::SingleThreadTaskRunner> io_task_runner_;
+
+  // Task runner on which methods of |video_capturer_| will be invoked.
   scoped_refptr<base::SingleThreadTaskRunner> video_capture_task_runner_;
+
+  // Points to the audio capturer receiving captured audio packets.
+  IpcAudioCapturer* audio_capturer_;
 
   // Points to the client stub passed to StartEventExecutor().
   scoped_ptr<protocol::ClipboardStub> client_clipboard_;
 
+  // JID of the client session.
+  std::string client_jid_;
+
   // IPC channel to the desktop session agent.
   scoped_ptr<IPC::ChannelProxy> desktop_channel_;
 
-#if defined(OS_WIN)
+  // Disconnects the client session when invoked.
+  base::Closure disconnect_callback_;
+
   // Handle of the desktop process.
-  base::win::ScopedHandle desktop_process_;
-#endif  // defined(OS_WIN)
+  base::ProcessHandle desktop_process_;
 
   int pending_capture_frame_requests_;
 
-  typedef std::map<int, scoped_refptr<SharedBuffer> > SharedBuffers;
+  typedef std::map<int, scoped_refptr<media::SharedBuffer> > SharedBuffers;
   SharedBuffers shared_buffers_;
 
   // Points to the video capturer receiving captured video frames.

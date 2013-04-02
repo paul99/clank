@@ -4,10 +4,11 @@
 
 #include "chrome/browser/renderer_preferences_util.h"
 
-#include "chrome/browser/prefs/pref_service.h"
+#include "base/prefs/pref_service.h"
 #include "chrome/browser/profiles/profile.h"
 #include "chrome/common/pref_names.h"
 #include "content/public/common/renderer_preferences.h"
+#include "third_party/skia/include/core/SkColor.h"
 
 #if defined(OS_LINUX) || defined(OS_ANDROID)
 #include "ui/gfx/font_render_params_linux.h"
@@ -97,26 +98,39 @@ void UpdateFromSystemSettings(
       theme_service->get_inactive_selection_bg_color();
   prefs->inactive_selection_fg_color =
       theme_service->get_inactive_selection_fg_color();
-#elif defined(USE_DEFAULT_RENDER_THEME)
-  // This color is 0x544d90fe modulated with 0xffffff.
-  prefs->active_selection_bg_color = SkColorSetRGB(0xCB, 0xE4, 0xFA);
-  prefs->active_selection_fg_color = SK_ColorBLACK;
-  prefs->inactive_selection_bg_color = SkColorSetRGB(0xEA, 0xEA, 0xEA);
-  prefs->inactive_selection_fg_color = SK_ColorBLACK;
-#endif
 
-#if defined(TOOLKIT_GTK)
   const base::TimeDelta cursor_blink_time = gfx::GetCursorBlinkCycle();
   prefs->caret_blink_interval =
       cursor_blink_time.InMilliseconds() ?
       cursor_blink_time.InMilliseconds() / kGtkCursorBlinkCycleFactor :
       0;
-#elif defined(USE_AURA)
+#elif defined(USE_DEFAULT_RENDER_THEME)
+  prefs->focus_ring_color = SkColorSetRGB(0x4D, 0x90, 0xFE);
+
+  // This color is 0x544d90fe modulated with 0xffffff.
+  prefs->active_selection_bg_color = SkColorSetRGB(0xCB, 0xE4, 0xFA);
+  prefs->active_selection_fg_color = SK_ColorBLACK;
+  prefs->inactive_selection_bg_color = SkColorSetRGB(0xEA, 0xEA, 0xEA);
+  prefs->inactive_selection_fg_color = SK_ColorBLACK;
+
   // WebKit accepts a single parameter to control the interval over which the
   // cursor is shown or hidden, so divide Views's time for the full cycle by two
   // and then convert to seconds.
   prefs->caret_blink_interval =
       views::NativeTextfieldViews::kCursorBlinkCycleMs / 2.0 / 1000;
+
+  prefs->touchpad_fling_profile[0] =
+      pref_service->GetDouble(prefs::kFlingCurveTouchpadAlpha);
+  prefs->touchpad_fling_profile[1] =
+      pref_service->GetDouble(prefs::kFlingCurveTouchpadBeta);
+  prefs->touchpad_fling_profile[2] =
+      pref_service->GetDouble(prefs::kFlingCurveTouchpadGamma);
+  prefs->touchscreen_fling_profile[0] =
+      pref_service->GetDouble(prefs::kFlingCurveTouchscreenAlpha);
+  prefs->touchscreen_fling_profile[1] =
+      pref_service->GetDouble(prefs::kFlingCurveTouchscreenBeta);
+  prefs->touchscreen_fling_profile[2] =
+      pref_service->GetDouble(prefs::kFlingCurveTouchscreenGamma);
 #endif
 
 #if defined(OS_LINUX) || defined(OS_ANDROID)

@@ -44,15 +44,19 @@ class PersonalDataManager
       public ProfileKeyedService,
       public content::NotificationObserver {
  public:
+  // A pair of GUID and variant index. Represents a single FormGroup and a
+  // specific data variant.
+  typedef std::pair<std::string, size_t> GUIDPair;
+
   // WebDataServiceConsumer:
   virtual void OnWebDataServiceRequestDone(
       WebDataServiceBase::Handle h,
       const WDTypedResult* result) OVERRIDE;
 
-  // Sets the listener to be notified of PersonalDataManager events.
-  virtual void SetObserver(PersonalDataManagerObserver* observer);
+  // Adds a listener to be notified of PersonalDataManager events.
+  virtual void AddObserver(PersonalDataManagerObserver* observer);
 
-  // Removes |observer| as the observer of this PersonalDataManager.
+  // Removes |observer| as an observer of this PersonalDataManager.
   virtual void RemoveObserver(PersonalDataManagerObserver* observer);
 
   // ProfileSyncServiceObserver:
@@ -125,6 +129,31 @@ class PersonalDataManager
   virtual const std::vector<AutofillProfile*>& web_profiles() const;
   virtual const std::vector<CreditCard*>& credit_cards() const;
 
+  // Loads profiles that can suggest data for |type|. |field_contents| is the
+  // part the user has already typed. |field_is_autofilled| is true if the field
+  // has already been autofilled. |other_field_types| represents the rest of
+  // form. Identifying info is loaded into the last four outparams.
+  void GetProfileSuggestions(
+      AutofillFieldType type,
+      const string16& field_contents,
+      bool field_is_autofilled,
+      std::vector<AutofillFieldType> other_field_types,
+      std::vector<string16>* values,
+      std::vector<string16>* labels,
+      std::vector<string16>* icons,
+      std::vector<GUIDPair>* guid_pairs);
+
+  // Gets credit cards that can suggest data for |type|. See
+  // GetProfileSuggestions for argument descriptions. The variant in each
+  // GUID pair should be ignored.
+  void GetCreditCardSuggestions(
+      AutofillFieldType type,
+      const string16& field_contents,
+      std::vector<string16>* values,
+      std::vector<string16>* labels,
+      std::vector<string16>* icons,
+      std::vector<GUIDPair>* guid_pairs);
+
   // Re-loads profiles and credit cards from the WebDatabase asynchronously.
   // In the general case, this is a no-op and will re-create the same
   // in-memory model as existed prior to the call.  If any change occurred to
@@ -156,10 +185,10 @@ class PersonalDataManager
   friend class AutofillTest;
   friend class PersonalDataManagerFactory;
   friend class PersonalDataManagerTest;
-  friend class scoped_ptr<PersonalDataManager>;
   friend class ProfileSyncServiceAutofillTest;
   friend class RemoveAutofillTester;
   friend class TestingAutomationProvider;
+  friend struct base::DefaultDeleter<PersonalDataManager>;
   friend void autofill_helper::SetProfiles(int, std::vector<AutofillProfile>*);
   friend void autofill_helper::SetCreditCards(int, std::vector<CreditCard>*);
 

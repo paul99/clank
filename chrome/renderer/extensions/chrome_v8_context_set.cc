@@ -15,8 +15,8 @@
 #include "content/public/renderer/render_view.h"
 #include "content/public/renderer/v8_value_converter.h"
 #include "extensions/common/constants.h"
-#include "third_party/WebKit/Source/WebKit/chromium/public/platform/WebURL.h"
-#include "third_party/WebKit/Source/WebKit/chromium/public/platform/WebURLRequest.h"
+#include "third_party/WebKit/Source/Platform/chromium/public/WebURL.h"
+#include "third_party/WebKit/Source/Platform/chromium/public/WebURLRequest.h"
 #include "third_party/WebKit/Source/WebKit/chromium/public/WebDocument.h"
 #include "third_party/WebKit/Source/WebKit/chromium/public/WebFrame.h"
 #include "third_party/WebKit/Source/WebKit/chromium/public/WebView.h"
@@ -48,7 +48,7 @@ namespace {
        document.securityOrigin().canRequest(event_url);
 }
 
-}
+}  // namespace
 
 ChromeV8ContextSet::ChromeV8ContextSet() {
 }
@@ -80,8 +80,7 @@ void ChromeV8ContextSet::Remove(ChromeV8Context* context) {
   }
 }
 
-ChromeV8ContextSet::ContextSet ChromeV8ContextSet::GetAll()
-    const {
+ChromeV8ContextSet::ContextSet ChromeV8ContextSet::GetAll() const {
   return contexts_;
 }
 
@@ -148,6 +147,21 @@ void ChromeV8ContextSet::DispatchChromeHiddenMethod(
     v8::Handle<v8::Value> retval;
     (*it)->CallChromeHiddenMethod(
         method_name, v8_arguments.size(), &v8_arguments[0], &retval);
+  }
+}
+
+void ChromeV8ContextSet::OnExtensionUnloaded(const std::string& extension_id) {
+  ContextSet contexts = GetAll();
+
+  // Clean up contexts belonging to the unloaded extension. This is done so
+  // that content scripts (which remain injected into the page) don't continue
+  // receiving events and sending messages.
+  for (ContextSet::iterator it = contexts.begin(); it != contexts.end();
+       ++it) {
+    if ((*it)->extension() && (*it)->extension()->id() == extension_id) {
+      (*it)->DispatchOnUnloadEvent();
+      Remove(*it);
+    }
   }
 }
 

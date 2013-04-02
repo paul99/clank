@@ -13,7 +13,7 @@
 #include "base/callback.h"
 #include "base/command_line.h"
 #include "base/file_path.h"
-#include "base/file_util_proxy.h"
+#include "base/files/file_util_proxy.h"
 #include "base/logging.h"
 #include "base/string_split.h"
 #include "base/sync_socket.h"
@@ -35,7 +35,6 @@
 #include "content/public/renderer/content_renderer_client.h"
 #include "content/public/renderer/renderer_restrict_dispatch_group.h"
 #include "content/renderer/gamepad_shared_memory_reader.h"
-#include "content/renderer/media/audio_hardware.h"
 #include "content/renderer/media/media_stream_dispatcher.h"
 #include "content/renderer/media/pepper_platform_video_decoder_impl.h"
 #include "content/renderer/p2p/socket_dispatcher.h"
@@ -57,6 +56,7 @@
 #include "content/renderer/webplugin_delegate_proxy.h"
 #include "googleurl/src/gurl.h"
 #include "ipc/ipc_channel_handle.h"
+#include "media/base/audio_hardware_config.h"
 #include "media/video/capture/video_capture_proxy.h"
 #include "ppapi/c/dev/pp_video_dev.h"
 #include "ppapi/c/pp_errors.h"
@@ -85,11 +85,8 @@
 #include "webkit/plugins/ppapi/plugin_module.h"
 #include "webkit/plugins/ppapi/ppapi_plugin_instance.h"
 #include "webkit/plugins/ppapi/ppapi_webplugin_impl.h"
-#include "webkit/plugins/ppapi/ppb_file_io_impl.h"
-#include "webkit/plugins/ppapi/ppb_flash_impl.h"
 #include "webkit/plugins/ppapi/ppb_tcp_server_socket_private_impl.h"
 #include "webkit/plugins/ppapi/ppb_tcp_socket_private_impl.h"
-#include "webkit/plugins/ppapi/ppb_udp_socket_private_impl.h"
 #include "webkit/plugins/ppapi/resource_helper.h"
 #include "webkit/plugins/webplugininfo.h"
 
@@ -151,10 +148,10 @@ class HostDispatcherWrapper
   }
 
   // OutOfProcessProxy implementation.
-  virtual const void* GetProxiedInterface(const char* name) {
+  virtual const void* GetProxiedInterface(const char* name) OVERRIDE {
     return dispatcher_->GetProxiedInterface(name);
   }
-  virtual void AddInstance(PP_Instance instance) {
+  virtual void AddInstance(PP_Instance instance) OVERRIDE {
     ppapi::proxy::HostDispatcher::SetForInstance(instance, dispatcher_.get());
 
     RendererPpapiHostImpl* host =
@@ -178,7 +175,7 @@ class HostDispatcherWrapper
           is_external_));
     }
   }
-  virtual void RemoveInstance(PP_Instance instance) {
+  virtual void RemoveInstance(PP_Instance instance) OVERRIDE {
     ppapi::proxy::HostDispatcher::RemoveForInstance(instance);
 
     RendererPpapiHostImpl* host =
@@ -191,6 +188,9 @@ class HostDispatcherWrapper
           instance,
           is_external_));
     }
+  }
+  virtual base::ProcessId GetPeerProcessId() OVERRIDE {
+    return peer_pid_;
   }
 
   ppapi::proxy::HostDispatcher* dispatcher() { return dispatcher_.get(); }
@@ -266,36 +266,36 @@ class AsyncOpenFileSystemURLCallbackTranslator
 
   virtual ~AsyncOpenFileSystemURLCallbackTranslator() {}
 
-  virtual void DidSucceed() {
+  virtual void DidSucceed() OVERRIDE {
     NOTREACHED();
   }
   virtual void DidReadMetadata(
       const base::PlatformFileInfo& file_info,
-      const FilePath& platform_path) {
+      const FilePath& platform_path) OVERRIDE {
     NOTREACHED();
   }
   virtual void DidReadDirectory(
       const std::vector<base::FileUtilProxy::Entry>& entries,
-      bool has_more) {
+      bool has_more) OVERRIDE {
     NOTREACHED();
   }
   virtual void DidOpenFileSystem(const std::string& name,
-                                 const GURL& root) {
+                                 const GURL& root) OVERRIDE {
     NOTREACHED();
   }
 
-  virtual void DidFail(base::PlatformFileError error_code) {
+  virtual void DidFail(base::PlatformFileError error_code) OVERRIDE {
     base::PlatformFile invalid_file = base::kInvalidPlatformFileValue;
     callback_.Run(error_code,
                   base::PassPlatformFile(&invalid_file),
                   webkit::ppapi::PluginDelegate::NotifyCloseFileCallback());
   }
 
-  virtual void DidWrite(int64 bytes, bool complete) {
+  virtual void DidWrite(int64 bytes, bool complete) OVERRIDE {
     NOTREACHED();
   }
 
-  virtual void DidOpenFile(base::PlatformFile file) {
+  virtual void DidOpenFile(base::PlatformFile file) OVERRIDE {
     callback_.Run(base::PLATFORM_FILE_OK,
                   base::PassPlatformFile(&file),
                   close_file_callback_);
@@ -761,7 +761,8 @@ bool PepperPluginDelegateImpl::CanComposeInline() const {
 
 void PepperPluginDelegateImpl::PluginCrashed(
     webkit::ppapi::PluginInstance* instance) {
-  render_view_->PluginCrashed(instance->module()->path());
+  render_view_->PluginCrashed(instance->module()->path(),
+                              instance->module()->GetPeerProcessId());
   UnSetAndDeleteLockTargetAdapter(instance);
 }
 
@@ -863,11 +864,13 @@ void PepperPluginDelegateImpl::SelectedFindResultChanged(int identifier,
 }
 
 uint32_t PepperPluginDelegateImpl::GetAudioHardwareOutputSampleRate() {
-  return static_cast<uint32_t>(GetAudioOutputSampleRate());
+  RenderThreadImpl* thread = RenderThreadImpl::current();
+  return thread->GetAudioHardwareConfig()->GetOutputSampleRate();
 }
 
 uint32_t PepperPluginDelegateImpl::GetAudioHardwareOutputBufferSize() {
-  return static_cast<uint32_t>(GetAudioOutputBufferSize());
+  RenderThreadImpl* thread = RenderThreadImpl::current();
+  return thread->GetAudioHardwareConfig()->GetOutputBufferSize();
 }
 
 webkit::ppapi::PluginDelegate::PlatformAudioOutput*
@@ -1186,58 +1189,6 @@ void PepperPluginDelegateImpl::RegisterTCPSocket(
   tcp_sockets_.AddWithID(socket, socket_id);
 }
 
-uint32 PepperPluginDelegateImpl::UDPSocketCreate() {
-  uint32 socket_id = 0;
-  render_view_->Send(new PpapiHostMsg_PPBUDPSocket_Create(
-      render_view_->routing_id(), 0, &socket_id));
-  return socket_id;
-}
-
-void PepperPluginDelegateImpl::UDPSocketSetBoolSocketFeature(
-    webkit::ppapi::PPB_UDPSocket_Private_Impl* socket,
-    uint32 socket_id,
-    int32_t name,
-    bool value) {
-  render_view_->Send(
-      new PpapiHostMsg_PPBUDPSocket_SetBoolSocketFeature(
-          render_view_->routing_id(), socket_id, name, value));
-}
-
-void PepperPluginDelegateImpl::UDPSocketBind(
-    webkit::ppapi::PPB_UDPSocket_Private_Impl* socket,
-    uint32 socket_id,
-    const PP_NetAddress_Private& addr) {
-  if (!udp_sockets_.Lookup(socket_id))
-    udp_sockets_.AddWithID(socket, socket_id);
-  render_view_->Send(new PpapiHostMsg_PPBUDPSocket_Bind(
-      render_view_->routing_id(), socket_id, addr));
-}
-
-void PepperPluginDelegateImpl::UDPSocketRecvFrom(uint32 socket_id,
-                                                 int32_t num_bytes) {
-  DCHECK(udp_sockets_.Lookup(socket_id));
-  render_view_->Send(
-      new PpapiHostMsg_PPBUDPSocket_RecvFrom(socket_id, num_bytes));
-}
-
-void PepperPluginDelegateImpl::UDPSocketSendTo(
-    uint32 socket_id,
-    const std::string& buffer,
-    const PP_NetAddress_Private& net_addr) {
-  DCHECK(udp_sockets_.Lookup(socket_id));
-  render_view_->Send(
-      new PpapiHostMsg_PPBUDPSocket_SendTo(render_view_->routing_id(),
-                                           socket_id, buffer, net_addr));
-}
-
-void PepperPluginDelegateImpl::UDPSocketClose(uint32 socket_id) {
-  // There are no DCHECK(udp_sockets_.Lookup(socket_id)) because it
-  // can be called before UDPSocketBind is called.
-  render_view_->Send(new PpapiHostMsg_PPBUDPSocket_Close(socket_id));
-  if (udp_sockets_.Lookup(socket_id))
-    udp_sockets_.Remove(socket_id);
-}
-
 void PepperPluginDelegateImpl::TCPServerSocketListen(
     PP_Resource socket_resource,
     const PP_NetAddress_Private& addr,
@@ -1376,16 +1327,6 @@ void PepperPluginDelegateImpl::SaveURLAs(const GURL& url) {
       render_view_->routing_id(), url, referrer));
 }
 
-PP_FlashLSORestrictions PepperPluginDelegateImpl::GetLocalDataRestrictions(
-    const GURL& document_url,
-    const GURL& plugin_url) {
-  PP_FlashLSORestrictions restrictions = PP_FLASHLSORESTRICTIONS_NONE;
-  render_view_->Send(
-      new PepperMsg_GetLocalDataRestrictions(document_url, plugin_url,
-                                             &restrictions));
-  return restrictions;
-}
-
 base::SharedMemory* PepperPluginDelegateImpl::CreateAnonymousSharedMemory(
     size_t size) {
   return RenderThread::Get()->HostAllocateSharedMemoryBuffer(size).release();
@@ -1492,10 +1433,6 @@ bool PepperPluginDelegateImpl::OnMessageReceived(const IPC::Message& message) {
                         OnTCPSocketSSLHandshakeACK)
     IPC_MESSAGE_HANDLER(PpapiMsg_PPBTCPSocket_ReadACK, OnTCPSocketReadACK)
     IPC_MESSAGE_HANDLER(PpapiMsg_PPBTCPSocket_WriteACK, OnTCPSocketWriteACK)
-    IPC_MESSAGE_HANDLER(PpapiMsg_PPBUDPSocket_BindACK, OnUDPSocketBindACK)
-    IPC_MESSAGE_HANDLER(PpapiMsg_PPBUDPSocket_RecvFromACK,
-                        OnUDPSocketRecvFromACK)
-    IPC_MESSAGE_HANDLER(PpapiMsg_PPBUDPSocket_SendToACK, OnUDPSocketSendToACK)
     IPC_MESSAGE_HANDLER(PpapiMsg_PPBTCPServerSocket_ListenACK,
                         OnTCPServerSocketListenACK)
     IPC_MESSAGE_HANDLER(PpapiMsg_PPBTCPServerSocket_AcceptACK,
@@ -1556,41 +1493,6 @@ void PepperPluginDelegateImpl::OnTCPSocketWriteACK(uint32 plugin_dispatcher_id,
       tcp_sockets_.Lookup(socket_id);
   if (socket)
     socket->OnWriteCompleted(succeeded, bytes_written);
-}
-
-void PepperPluginDelegateImpl::OnUDPSocketBindACK(
-    uint32 plugin_dispatcher_id,
-    uint32 socket_id,
-    bool succeeded,
-    const PP_NetAddress_Private& addr) {
-  webkit::ppapi::PPB_UDPSocket_Private_Impl* socket =
-      udp_sockets_.Lookup(socket_id);
-  if (socket)
-    socket->OnBindCompleted(succeeded, addr);
-  if (!succeeded)
-    udp_sockets_.Remove(socket_id);
-}
-
-void PepperPluginDelegateImpl::OnUDPSocketRecvFromACK(
-    uint32 plugin_dispatcher_id,
-    uint32 socket_id,
-    bool succeeded,
-    const std::string& data,
-    const PP_NetAddress_Private& remote_addr) {
-  webkit::ppapi::PPB_UDPSocket_Private_Impl* socket =
-      udp_sockets_.Lookup(socket_id);
-  if (socket)
-    socket->OnRecvFromCompleted(succeeded, data, remote_addr);
-}
-
-void PepperPluginDelegateImpl::OnUDPSocketSendToACK(uint32 plugin_dispatcher_id,
-                                                    uint32 socket_id,
-                                                    bool succeeded,
-                                                    int32_t bytes_written) {
-  webkit::ppapi::PPB_UDPSocket_Private_Impl* socket =
-      udp_sockets_.Lookup(socket_id);
-  if (socket)
-    socket->OnSendToCompleted(succeeded, bytes_written);
 }
 
 void PepperPluginDelegateImpl::OnTCPServerSocketListenACK(

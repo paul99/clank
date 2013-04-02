@@ -45,8 +45,6 @@ static void EosOnReadDone(bool* got_eos_buffer,
   EXPECT_EQ(status, DemuxerStream::kOk);
   if (buffer->IsEndOfStream()) {
     *got_eos_buffer = true;
-    EXPECT_TRUE(!buffer->GetData());
-    EXPECT_EQ(buffer->GetDataSize(), 0);
     return;
   }
 
@@ -163,7 +161,7 @@ class FFmpegDemuxerTest : public testing::Test {
   void CreateDataSource(const std::string& name) {
     CHECK(!data_source_);
 
-    FilePath file_path;
+    base::FilePath file_path;
     EXPECT_TRUE(PathService::Get(base::DIR_SOURCE_ROOT, &file_path));
 
     file_path = file_path.Append(FILE_PATH_LITERAL("media"))
@@ -243,9 +241,10 @@ TEST_F(FFmpegDemuxerTest, Initialize_Successful) {
 
   const AudioDecoderConfig& audio_config = stream->audio_decoder_config();
   EXPECT_EQ(kCodecVorbis, audio_config.codec());
-  EXPECT_EQ(16, audio_config.bits_per_channel());
+  EXPECT_EQ(32, audio_config.bits_per_channel());
   EXPECT_EQ(CHANNEL_LAYOUT_STEREO, audio_config.channel_layout());
   EXPECT_EQ(44100, audio_config.samples_per_second());
+  EXPECT_EQ(kSampleFormatPlanarF32, audio_config.sample_format());
   EXPECT_TRUE(audio_config.extra_data());
   EXPECT_GT(audio_config.extra_data_size(), 0u);
 

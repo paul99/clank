@@ -3,7 +3,6 @@
 # found in the LICENSE file.
 import logging
 import os
-import socket
 import subprocess
 
 from telemetry import browser_backend
@@ -48,15 +47,13 @@ class CrOSBrowserBackend(browser_backend.BrowserBackend):
     cri.GetCmdOutput(args)
 
     # Find a free local port.
-    tmp = socket.socket()
-    tmp.bind(('', 0))
-    self._port = tmp.getsockname()[1]
-    tmp.close()
+    self._port = util.GetAvailableLocalPort()
 
     # Forward the remote debugging port.
     logging.info('Forwarding remote debugging port')
     self._forwarder = SSHForwarder(
-      cri, 'L', (self._port, self._remote_debugging_port))
+      cri, 'L',
+      util.PortPair(self._port, self._remote_debugging_port))
 
     # Wait for the browser to come up.
     logging.info('Waiting for browser to be ready')
@@ -69,13 +66,13 @@ class CrOSBrowserBackend(browser_backend.BrowserBackend):
       self.Close()
       raise
 
-    # Make sure there's a tab open.
-    if len(self.tabs) == 0:
-      self.tabs.New()
 
     logging.info('Browser is up!')
 
   def GetBrowserStartupArgs(self):
+    self.webpagereplay_remote_http_port = self._cri.GetRemotePort()
+    self.webpagereplay_remote_https_port = self._cri.GetRemotePort()
+
     args = super(CrOSBrowserBackend, self).GetBrowserStartupArgs()
 
     args.extend([
@@ -92,10 +89,67 @@ class CrOSBrowserBackend(browser_backend.BrowserBackend):
 
     return args
 
+  def GetRemotePort(self, _):
+    return self._cri.GetRemotePort()
+
+  def SetBrowser(self, browser):
+    super(CrOSBrowserBackend, self).SetBrowser(browser)
+
+    # TODO(hartmanng): crbug.com/166886 (Remove these temporary hacks when
+    # _ListTabs is fixed)
+
+    # Wait for the oobe login screen to disappear. Unfortunately, once it does,
+    # our TabList needs to be refreshed to point at the new non-login tab.
+    tab_url = None
+
+    # When tab_url is None, we have to create or refresh the TabList
+    # and wait for the oobe login screen to disappear.
+    while tab_url is None:
+      self._tab_list_backend.Reset()
+
+      # Wait for the login screen to disappear. This can cause tab_url to be
+      # None or to not be 'chrome://oobe/login'.
+      def IsTabNoneOrOobeLogin():
+        tab = self._tab_list_backend.Get(0, None)
+        if tab is not None:
+          tab_url = tab.url
+        else:
+          return False
+        return tab_url is None or tab_url != 'chrome://oobe/login'
+
+      # TODO(hartmanng): find a better way to detect the getting started window
+      # (crbug.com/171520)
+      try:
+        util.WaitFor(lambda: IsTabNoneOrOobeLogin(), 20) # pylint: disable=W0108
+      except util.TimeoutException:
+        break
+
+      # Refresh our tab_url variable with the current tab[0].url. If it is None
+      # at this point, we need to continue the loop to refresh TabController.
+      tab = self._tab_list_backend.Get(0, None)
+      if tab is not None:
+        tab_url = tab.url
+      else:
+        tab_url = None
+
+    # Once we're sure that the login screen is gone, we can close all open tabs
+    # to make sure the first-start window doesn't interfere.
+    while len(self._tab_list_backend) > 1:
+      tab = self._tab_list_backend.Get(0, None)
+      if tab is not None:
+        tab.Close()
+
+    # Finally open one regular tab. Normally page_runner takes care of this,
+    # but page_runner isn't necesarily always used (for example, in some unit
+    # tests).
+    self._tab_list_backend.New(20)
+
   def __del__(self):
     self.Close()
 
   def Close(self):
+    super(CrOSBrowserBackend, self).Close()
+
     self._RestartUI() # Logs out.
 
     if self._forwarder:
@@ -118,9 +172,9 @@ class CrOSBrowserBackend(browser_backend.BrowserBackend):
   def GetStandardOutput(self):
     return 'Cannot get standard output on CrOS'
 
-  def CreateForwarder(self, *ports):
+  def CreateForwarder(self, *port_pairs):
     assert self._cri
-    return SSHForwarder(self._cri, 'R', *ports)
+    return SSHForwarder(self._cri, 'R', *port_pairs)
 
   def _RestartUI(self):
     if self._cri:
@@ -132,28 +186,26 @@ class CrOSBrowserBackend(browser_backend.BrowserBackend):
 
 
 class SSHForwarder(object):
-  def __init__(self, cri, forwarding_flag, *ports):
+  def __init__(self, cri, forwarding_flag, *port_pairs):
     self._proc = None
-    self._host_port = ports[0][0]
-
-    port_pairs = []
-
-    for port in ports:
-      if port[1] is None:
-        port_pairs.append((port[0], cri.GetRemotePort()))
-      else:
-        port_pairs.append(port)
 
     if forwarding_flag == 'R':
-      self._device_port = port_pairs[0][0]
+      self._host_port = port_pairs[0].remote_port
+      command_line = ['-%s%i:localhost:%i' % (forwarding_flag,
+                                              port_pair.remote_port,
+                                              port_pair.local_port)
+                      for port_pair in port_pairs]
     else:
-      self._device_port = port_pairs[0][1]
+      self._host_port = port_pairs[0].local_port
+      command_line = ['-%s%i:localhost:%i' % (forwarding_flag,
+                                              port_pair.local_port,
+                                              port_pair.remote_port)
+                      for port_pair in port_pairs]
+
+    self._device_port = port_pairs[0].remote_port
 
     self._proc = subprocess.Popen(
-      cri.FormSSHCommandLine(
-        ['sleep', '999999999'],
-        ['-%s%i:localhost:%i' % (forwarding_flag, from_port, to_port)
-        for from_port, to_port in port_pairs]),
+      cri.FormSSHCommandLine(['sleep', '999999999'], command_line),
       stdout=subprocess.PIPE,
       stderr=subprocess.PIPE,
       stdin=subprocess.PIPE,

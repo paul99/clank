@@ -49,10 +49,12 @@ class ShellUtil {
   enum ShortcutOperation {
     // Create a new shortcut (overwriting if necessary).
     SHELL_SHORTCUT_CREATE_ALWAYS,
-    // Create the per-user shortcut only if its system-level equivalent is not
-    // present.
+    // Create the per-user shortcut only if its system-level equivalent (with
+    // the same name) is not present.
     SHELL_SHORTCUT_CREATE_IF_NO_SYSTEM_LEVEL,
     // Overwrite an existing shortcut (fail if the shortcut doesn't exist).
+    // If the arguments are not specified on the new shortcut, keep the old
+    // shortcut's arguments.
     SHELL_SHORTCUT_REPLACE_EXISTING,
     // Update specified properties only on an existing shortcut.
     SHELL_SHORTCUT_UPDATE_EXISTING,
@@ -81,7 +83,7 @@ class ShellUtil {
 
     // Sets the target executable to launch from this shortcut.
     // This is mandatory when creating a shortcut.
-    void set_target(const FilePath& target_in) {
+    void set_target(const base::FilePath& target_in) {
       target = target_in;
       options |= PROPERTIES_TARGET;
     }
@@ -109,7 +111,7 @@ class ShellUtil {
 
     // Sets the path to the icon (icon_index set to 0).
     // icon index unless otherwise specified in master_preferences).
-    void set_icon(const FilePath& icon_in, int icon_index_in) {
+    void set_icon(const base::FilePath& icon_in, int icon_index_in) {
       icon = icon_in;
       icon_index = icon_index_in;
       options |= PROPERTIES_ICON;
@@ -177,10 +179,10 @@ class ShellUtil {
     // shortcut and SYSTEM_LEVEL for an all-users shortcut).
     ShellChange level;
 
-    FilePath target;
+    base::FilePath target;
     string16 arguments;
     string16 description;
-    FilePath icon;
+    base::FilePath icon;
     int icon_index;
     string16 app_id;
     string16 shortcut_name;
@@ -299,7 +301,7 @@ class ShellUtil {
   static bool GetShortcutPath(ShellUtil::ShortcutLocation location,
                               BrowserDistribution* dist,
                               ShellChange level,
-                              FilePath* path);
+                              base::FilePath* path);
 
   // Updates shortcut in |location| (or creates it if |options| specify
   // SHELL_SHORTCUT_CREATE_ALWAYS).
@@ -495,21 +497,21 @@ class ShellUtil {
                                         const string16& protocol,
                                         bool elevate_if_not_admin);
 
-  // Removes installed shortcut at |location|.
-  // |chrome_exe|: The path to the chrome.exe being uninstalled; the shortcut
-  // will only be deleted if its target is also |chrome_exe|.
+  // Removes installed shortcut(s) at |location|.
+  // |target_exe|: Shortcut target exe; shortcuts will only be deleted when
+  // their target is |target_exe|.
   // |level|: CURRENT_USER to remove the per-user shortcut and SYSTEM_LEVEL to
   // remove the all-users shortcut.
   // |shortcut_name|: If non-null, remove the shortcut named |shortcut_name| at
-  // location; otherwise remove the default shortcut at |location|.
-  // If |location| is SHORTCUT_LOCATION_START_MENU the shortcut folder specific
+  // location; otherwise remove all shortcuts to |target_exe| at |location|.
+  // If |location| is SHORTCUT_LOCATION_START_MENU, the shortcut folder specific
   // to |dist| is deleted.
-  // Also attempts to unpin the removed shortcut from the taskbar.
-  // Returns true if the shortcut was successfully deleted (or there is no
-  // shortcut at |location| pointing to |chrome_exe|).
+  // Also attempts to unpin the removed shortcut(s) from the taskbar.
+  // Returns true if the shortcut(s) were successfully deleted (or there were
+  // none at |location| pointing to |target_exe|).
   static bool RemoveShortcut(ShellUtil::ShortcutLocation location,
                              BrowserDistribution* dist,
-                             const string16& target_exe,
+                             const base::FilePath& target_exe,
                              ShellChange level,
                              const string16* shortcut_name);
 

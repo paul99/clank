@@ -6,6 +6,7 @@
 #define CHROME_BROWSER_UI_APP_LIST_APPS_MODEL_BUILDER_H_
 
 #include <string>
+#include <vector>
 
 #include "base/gtest_prod_util.h"
 #include "base/prefs/public/pref_change_registrar.h"
@@ -16,7 +17,12 @@
 
 class AppListControllerDelegate;
 class ExtensionAppItem;
+class ExtensionSet;
 class Profile;
+
+namespace gfx {
+class ImageSkia;
+}
 
 class AppsModelBuilder : public content::NotificationObserver,
                          public ui::ListModelObserver {
@@ -29,7 +35,24 @@ class AppsModelBuilder : public content::NotificationObserver,
   // Populates the model.
   void Build();
 
+  // Called when an extension starts installing.
+  void OnBeginExtensionInstall(const std::string& extension_id,
+                               const std::string& extension_name,
+                               const gfx::ImageSkia& installing_icon);
+
+  // Called when progress is made on an extension's download.
+  void OnDownloadProgress(const std::string& extension_id,
+                          int percent_downloaded);
+
+  // Called when an extension fails to install.
+  void OnInstallFailure(const std::string& extension_id);
+
  private:
+  typedef std::vector<ExtensionAppItem*> Apps;
+
+  // Adds apps in |extensions| to |apps|.
+  void AddApps(const ExtensionSet* extensions, Apps* apps);
+
   // Populates the model with apps.
   void PopulateApps();
 

@@ -8,8 +8,8 @@
 #include "base/utf_string_conversions.h"
 #include "content/common/speech_recognition_messages.h"
 #include "content/renderer/render_view_impl.h"
-#include "third_party/WebKit/Source/WebKit/chromium/public/platform/WebString.h"
-#include "third_party/WebKit/Source/WebKit/chromium/public/platform/WebVector.h"
+#include "third_party/WebKit/Source/Platform/chromium/public/WebString.h"
+#include "third_party/WebKit/Source/Platform/chromium/public/WebVector.h"
 #include "third_party/WebKit/Source/WebKit/chromium/public/WebSpeechGrammar.h"
 #include "third_party/WebKit/Source/WebKit/chromium/public/WebSpeechRecognitionParams.h"
 #include "third_party/WebKit/Source/WebKit/chromium/public/WebSpeechRecognitionResult.h"
@@ -149,9 +149,10 @@ void SpeechRecognitionDispatcher::OnErrorOccurred(
     recognizer_client_->didReceiveNoMatch(GetHandleFromID(request_id),
                                           WebSpeechRecognitionResult());
   } else {
-    recognizer_client_->didReceiveError(GetHandleFromID(request_id),
-                                        WebString(), // TODO(primiano): message?
-                                        WebKitErrorCode(error.code));
+    recognizer_client_->didReceiveError(
+        GetHandleFromID(request_id),
+        WebString(),  // TODO(primiano): message?
+        WebKitErrorCode(error.code));
   }
 }
 

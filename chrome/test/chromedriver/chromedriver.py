@@ -5,11 +5,21 @@
 import ctypes
 import json
 
+from webelement import WebElement
+
 class ChromeDriverException(Exception):
+  pass
+class NoSuchElement(ChromeDriverException):
   pass
 class UnknownCommand(ChromeDriverException):
   pass
+class StaleElementReference(ChromeDriverException):
+  pass
 class UnknownError(ChromeDriverException):
+  pass
+class XPathLookupError(ChromeDriverException):
+  pass
+class InvalidSelector(ChromeDriverException):
   pass
 class SessionNotCreatedException(ChromeDriverException):
   pass
@@ -18,8 +28,12 @@ class NoSuchSession(ChromeDriverException):
 
 def _ExceptionForResponse(response):
   exception_class_map = {
+    7: NoSuchElement,
     9: UnknownCommand,
+    10: StaleElementReference,
     13: UnknownError,
+    19: XPathLookupError,
+    32: InvalidSelector,
     33: SessionNotCreatedException,
     100: NoSuchSession
   }
@@ -30,19 +44,58 @@ def _ExceptionForResponse(response):
 class ChromeDriver(object):
   """Starts and controls a single Chrome instance on this machine."""
 
-  def __init__(self, lib_path, chrome_binary=None):
+  def __init__(self, lib_path, chrome_binary=None, android_package=None):
     self._lib = ctypes.CDLL(lib_path)
-    if chrome_binary is None:
-      params = {}
-    else:
+    if android_package:
       params = {
         'desiredCapabilities': {
-          'chrome': {
-            'binary': chrome_binary
+          'chromeOptions': {
+            'android_package': android_package,
           }
         }
       }
+    elif chrome_binary:
+      params = {
+        'desiredCapabilities': {
+          'chromeOptions': {
+            'binary': chrome_binary,
+          }
+        }
+      }
+    else:
+      params = {}
+
     self._session_id = self._ExecuteCommand('newSession', params)['sessionId']
+
+  def _WrapValue(self, value):
+    """Wrap value from client side for chromedriver side."""
+    if isinstance(value, dict):
+      converted = {}
+      for key, val in value.items():
+        converted[key] = self._WrapValue(val)
+      return converted
+    elif isinstance(value, WebElement):
+      return {'ELEMENT': value._id}
+    elif isinstance(value, list):
+      return list(self._WrapValue(item) for item in value)
+    else:
+      return value
+
+  def _UnwrapValue(self, value):
+    """Unwrap value from chromedriver side for client side."""
+    if isinstance(value, dict):
+      if (len(value) == 1 and 'ELEMENT' in value
+          and isinstance(value['ELEMENT'], basestring)):
+        return WebElement(self, value['ELEMENT'])
+      else:
+        unwraped = {}
+        for key, val in value.items():
+          unwraped[key] = self._UnwrapValue(val)
+        return unwraped
+    elif isinstance(value, list):
+      return list(self._UnwrapValue(item) for item in value)
+    else:
+      return value
 
   def _ExecuteCommand(self, name, params={}, session_id=''):
     cmd = {
@@ -65,16 +118,83 @@ class ChromeDriver(object):
       raise _ExceptionForResponse(response)
     return response
 
-  def _ExecuteSessionCommand(self, name, params={}):
-    return self._ExecuteCommand(name, params, self._session_id)['value']
+  def ExecuteSessionCommand(self, name, params={}):
+    params = self._WrapValue(params)
+    return self._UnwrapValue(
+        self._ExecuteCommand(name, params, self._session_id)['value'])
+
+  def GetWindowHandles(self):
+    return self.ExecuteSessionCommand('getWindowHandles')
+
+  def GetCurrentWindowHandle(self):
+    return self.ExecuteSessionCommand('getCurrentWindowHandle')
 
   def Load(self, url):
-    self._ExecuteSessionCommand('get', {'url': url})
+    self.ExecuteSessionCommand('get', {'url': url})
 
   def ExecuteScript(self, script, *args):
-    return self._ExecuteSessionCommand(
-         'executeScript', {'script': script, 'args': args})
+    converted_args = list(args)
+    return self.ExecuteSessionCommand(
+        'executeScript', {'script': script, 'args': converted_args})
+
+  def SwitchToFrame(self, id_or_name):
+    self.ExecuteSessionCommand('switchToFrame', {'id': id_or_name})
+
+  def SwitchToFrameByIndex(self, index):
+    self.SwitchToFrame(index)
+
+  def SwitchToMainFrame(self):
+    self.SwitchToFrame(None)
+
+  def GetTitle(self):
+    return self.ExecuteSessionCommand('getTitle')
+
+  def FindElement(self, strategy, target):
+    return self.ExecuteSessionCommand(
+        'findElement', {'using': strategy, 'value': target})
+
+  def FindElements(self, strategy, target):
+    return self.ExecuteSessionCommand(
+        'findElements', {'using': strategy, 'value': target})
+
+  def SetTimeout(self, type, timeout):
+    return self.ExecuteSessionCommand(
+        'setTimeout', {'type' : type, 'ms': timeout})
+
+  def GetCurrentUrl(self):
+    return self.ExecuteSessionCommand('getCurrentUrl')
+
+  def GoBack(self):
+    return self.ExecuteSessionCommand('goBack')
+
+  def GoForward(self):
+    return self.ExecuteSessionCommand('goForward')
+
+  def Refresh(self):
+    return self.ExecuteSessionCommand('refresh')
+
+  def MouseMoveTo(self, element=None, x_offset=None, y_offset=None):
+    params = {}
+    if element is not None:
+      params['element'] = element._id
+    if x_offset is not None:
+      params['xoffset'] = x_offset
+    if y_offset is not None:
+      params['yoffset'] = y_offset
+    self.ExecuteSessionCommand('mouseMoveTo', params)
+
+  def MouseClick(self, button=0):
+    self.ExecuteSessionCommand('mouseClick', {'button': button})
+
+  def MouseButtonDown(self, button=0):
+    self.ExecuteSessionCommand('mouseButtonDown', {'button': button})
+
+  def MouseButtonUp(self, button=0):
+    self.ExecuteSessionCommand('mouseButtonUp', {'button': button})
+
+  def MouseDoubleClick(self, button=0):
+    self.ExecuteSessionCommand('mouseDoubleClick', {'button': button})
 
   def Quit(self):
     """Quits the browser and ends the session."""
-    self._ExecuteSessionCommand('quit')
+    self.ExecuteSessionCommand('quit')

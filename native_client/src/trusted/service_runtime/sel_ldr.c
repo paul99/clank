@@ -95,10 +95,12 @@ int NaClAppWithSyscallTableCtor(struct NaClApp               *nap,
 #if (NACL_ARCH(NACL_BUILD_ARCH) == NACL_x86 \
      && NACL_BUILD_SUBARCH == 32)
   nap->pcrel_thunk = 0;
+  nap->pcrel_thunk_end = 0;
 #endif
 #if (NACL_ARCH(NACL_BUILD_ARCH) == NACL_x86 \
      && NACL_BUILD_SUBARCH == 64)
   nap->dispatch_thunk = 0;
+  nap->dispatch_thunk_end = 0;
   nap->get_tls_fast_path1 = 0;
   nap->get_tls_fast_path2 = 0;
 #endif
@@ -249,6 +251,12 @@ int NaClAppWithSyscallTableCtor(struct NaClApp               *nap,
 #endif
   nap->enable_faulted_thread_queue = 0;
   nap->faulted_thread_count = 0;
+#if NACL_WINDOWS
+  nap->faulted_thread_event = INVALID_HANDLE_VALUE;
+#else
+  nap->faulted_thread_fd_read = -1;
+  nap->faulted_thread_fd_write = -1;
+#endif
 
   return 1;
 
@@ -1148,7 +1156,7 @@ static void NaClLoadIrtRpc(struct NaClSrpcRpc      *rpc,
   /*
    * We cannot take the nap->mu lock, since NaClAppLoadFileDynamically
    * invokes NaClElfImageLoadDynamically which in turn invokes
-   * NaClCommonSysMmapIntern resulting in a deadlock. This is not really
+   * NaClSysMmapIntern resulting in a deadlock. This is not really
    * a problem since there is only one secure command channel, unless
    * embedders invokes load_irt repeatedly, which is against the protocol.
    * TODO(phosek): record load_module/load_irt state and return error

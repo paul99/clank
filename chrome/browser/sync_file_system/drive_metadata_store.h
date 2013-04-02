@@ -7,6 +7,7 @@
 
 #include <map>
 #include <string>
+#include <vector>
 
 #include "base/callback_forward.h"
 #include "base/file_path.h"
@@ -36,14 +37,14 @@ class DriveMetadataStore
       public base::SupportsWeakPtr<DriveMetadataStore> {
  public:
   typedef std::map<GURL, std::string> ResourceIDMap;
-  typedef std::map<FilePath, DriveMetadata> PathToMetadata;
+  typedef std::map<base::FilePath, DriveMetadata> PathToMetadata;
   typedef std::map<GURL, PathToMetadata> MetadataMap;
   typedef std::vector<std::pair<fileapi::FileSystemURL, std::string> >
       URLAndResourceIdList;
   typedef base::Callback<void(fileapi::SyncStatusCode status, bool created)>
       InitializationCallback;
 
-  DriveMetadataStore(const FilePath& base_dir,
+  DriveMetadataStore(const base::FilePath& base_dir,
                      base::SequencedTaskRunner* file_task_runner);
   ~DriveMetadataStore();
 
@@ -119,6 +120,10 @@ class DriveMetadataStore
     DCHECK(CalledOnValidThread());
     return incremental_sync_origins_;
   }
+
+  // Returns all origins that are tracked. i.e. Union of batch_sync_origins_ and
+  // incremental_sync_origins_.
+  void GetAllOrigins(std::vector<GURL>* origins);
 
  private:
   friend class DriveMetadataStoreTest;

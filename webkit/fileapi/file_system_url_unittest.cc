@@ -7,6 +7,7 @@
 #include "base/file_path.h"
 #include "googleurl/src/gurl.h"
 #include "testing/gtest/include/gtest/gtest.h"
+#include "webkit/fileapi/external_mount_points.h"
 #include "webkit/fileapi/file_system_types.h"
 #include "webkit/fileapi/file_system_util.h"
 #include "webkit/fileapi/isolated_context.h"
@@ -14,15 +15,38 @@
 
 #define FPL FILE_PATH_LITERAL
 
+#if defined(FILE_PATH_USES_DRIVE_LETTERS)
+#define DRIVE FPL("C:")
+#else
+#define DRIVE FPL("/a/")
+#endif
+
 namespace fileapi {
 
 namespace {
 
 FileSystemURL CreateFileSystemURL(const std::string& url_string) {
-  return FileSystemURL(GURL(url_string));
+  FileSystemURL url = FileSystemURL::CreateForTest(GURL(url_string));
+  switch (url.type()) {
+    case kFileSystemTypeExternal:
+      return ExternalMountPoints::GetSystemInstance()->
+          CreateCrackedFileSystemURL(url.origin(), url.type(), url.path());
+    case kFileSystemTypeIsolated:
+      return IsolatedContext::GetInstance()->CreateCrackedFileSystemURL(
+          url.origin(), url.type(), url.path());
+    default:
+      return url;
+  }
 }
 
-std::string NormalizedUTF8Path(const FilePath& path) {
+FileSystemURL CreateExternalFileSystemURL(const GURL& origin,
+                                          FileSystemType type,
+                                          const base::FilePath& path) {
+  return ExternalMountPoints::GetSystemInstance()->CreateCrackedFileSystemURL(
+      origin, type, path);
+}
+
+std::string NormalizedUTF8Path(const base::FilePath& path) {
   return path.NormalizePathSeparators().AsUTF8Unsafe();
 }
 
@@ -101,7 +125,8 @@ TEST(FileSystemURLTest, CompareURLs) {
     for (size_t j = 0; j < arraysize(urls); ++j) {
       SCOPED_TRACE(testing::Message() << i << " < " << j);
       EXPECT_EQ(urls[i] < urls[j],
-                compare(FileSystemURL(urls[i]), FileSystemURL(urls[j])));
+                compare(FileSystemURL::CreateForTest(urls[i]),
+                        FileSystemURL::CreateForTest(urls[j])));
     }
   }
 
@@ -115,16 +140,16 @@ TEST(FileSystemURLTest, CompareURLs) {
 
 TEST(FileSystemURLTest, WithPath) {
   const GURL kURL("filesystem:http://chromium.org/temporary/dir");
-  const FilePath::StringType paths[] = {
+  const base::FilePath::StringType paths[] = {
       FPL("dir a"),
       FPL("dir a/file 1"),
       FPL("dir a/dir b"),
       FPL("dir a/dir b/file 2"),
   };
 
-  const FileSystemURL base = FileSystemURL(kURL);
+  const FileSystemURL base = FileSystemURL::CreateForTest(kURL);
   for (size_t i = 0; i < arraysize(paths); ++i) {
-    const FileSystemURL url = base.WithPath(FilePath(paths[i]));
+    const FileSystemURL url = base.WithPath(base::FilePath(paths[i]));
     EXPECT_EQ(paths[i], url.path().value());
     EXPECT_EQ(base.origin().spec(), url.origin().spec());
     EXPECT_EQ(base.type(), url.type());
@@ -135,24 +160,24 @@ TEST(FileSystemURLTest, WithPath) {
 
 TEST(FileSystemURLTest, WithPathForExternal) {
   const std::string kId = "foo";
-  ScopedExternalFileSystem scoped_fs(kId, kFileSystemTypeSyncable, FilePath());
-  const FilePath kVirtualRoot = scoped_fs.GetVirtualRootPath();
+  ScopedExternalFileSystem scoped_fs(kId, kFileSystemTypeSyncable, base::FilePath());
+  const base::FilePath kVirtualRoot = scoped_fs.GetVirtualRootPath();
 
-  const FilePath::CharType kBasePath[] = FPL("dir");
-  const FilePath::StringType paths[] = {
+  const base::FilePath::CharType kBasePath[] = FPL("dir");
+  const base::FilePath::StringType paths[] = {
       FPL("dir a"),
       FPL("dir a/file 1"),
       FPL("dir a/dir b"),
       FPL("dir a/dir b/file 2"),
   };
 
-  const FileSystemURL base = FileSystemURL(
+  const FileSystemURL base = FileSystemURL::CreateForTest(
       GURL("http://example.com/"),
       kFileSystemTypeExternal,
       kVirtualRoot.Append(kBasePath));
 
   for (size_t i = 0; i < arraysize(paths); ++i) {
-    const FileSystemURL url = base.WithPath(FilePath(paths[i]));
+    const FileSystemURL url = base.WithPath(base::FilePath(paths[i]));
     EXPECT_EQ(paths[i], url.path().value());
     EXPECT_EQ(base.origin().spec(), url.origin().spec());
     EXPECT_EQ(base.type(), url.type());
@@ -162,8 +187,8 @@ TEST(FileSystemURLTest, WithPathForExternal) {
 }
 
 TEST(FileSystemURLTest, IsParent) {
-  ScopedExternalFileSystem scoped1("foo", kFileSystemTypeSyncable, FilePath());
-  ScopedExternalFileSystem scoped2("bar", kFileSystemTypeSyncable, FilePath());
+  ScopedExternalFileSystem scoped1("foo", kFileSystemTypeSyncable, base::FilePath());
+  ScopedExternalFileSystem scoped2("bar", kFileSystemTypeSyncable, base::FilePath());
 
   const std::string root1 = GetFileSystemRootURI(
       GURL("http://example.com"), kFileSystemTypeTemporary).spec();
@@ -207,17 +232,22 @@ TEST(FileSystemURLTest, IsParent) {
 
 TEST(FileSystemURLTest, DebugString) {
   const GURL kOrigin("http://example.com");
-  const FilePath kPath(FPL("dir/file"));
+  const base::FilePath kPath(FPL("dir/file"));
 
-  const FileSystemURL kURL1(kOrigin, kFileSystemTypeTemporary, kPath);
+  const FileSystemURL kURL1 = FileSystemURL::CreateForTest(
+      kOrigin, kFileSystemTypeTemporary, kPath);
   EXPECT_EQ("filesystem:http://example.com/temporary/" +
             NormalizedUTF8Path(kPath),
             kURL1.DebugString());
 
-  const FilePath kRoot(FPL("root"));
-  ScopedExternalFileSystem scoped_fs("foo", kFileSystemTypeNativeLocal, kRoot);
-  const FileSystemURL kURL2(kOrigin, kFileSystemTypeExternal,
-                            scoped_fs.GetVirtualRootPath().Append(kPath));
+  const base::FilePath kRoot(DRIVE FPL("/root"));
+  ScopedExternalFileSystem scoped_fs("foo",
+                                     kFileSystemTypeNativeLocal,
+                                     kRoot.NormalizePathSeparators());
+  const FileSystemURL kURL2(CreateExternalFileSystemURL(
+      kOrigin,
+      kFileSystemTypeExternal,
+      scoped_fs.GetVirtualRootPath().Append(kPath)));
   EXPECT_EQ("filesystem:http://example.com/external/" +
             NormalizedUTF8Path(scoped_fs.GetVirtualRootPath().Append(kPath)) +
             " (NativeLocal@foo:" +

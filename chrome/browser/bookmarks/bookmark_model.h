@@ -17,10 +17,9 @@
 #include "base/synchronization/lock.h"
 #include "base/synchronization/waitable_event.h"
 #include "chrome/browser/api/bookmarks/bookmark_service.h"
-#include "chrome/browser/favicon/favicon_service.h"
-#include "chrome/browser/history/history.h"
 #include "chrome/browser/profiles/profile_keyed_service.h"
 #include "chrome/common/cancelable_task_tracker.h"
+#include "content/public/browser/notification_observer.h"
 #include "content/public/browser/notification_registrar.h"
 #include "googleurl/src/gurl.h"
 #include "ui/base/models/tree_node_model.h"
@@ -36,6 +35,10 @@ class Profile;
 
 namespace bookmark_utils {
 struct TitleMatch;
+}
+
+namespace history {
+struct FaviconImageResult;
 }
 
 // BookmarkNode ---------------------------------------------------------------
@@ -433,13 +436,11 @@ class BookmarkModel : public content::NotificationObserver,
   // type specifies how the node should be removed.
   void RemoveAndDeleteNode(BookmarkNode* delete_me);
 
-  // Adds the node at the specified position and sends notification. If
-  // was_bookmarked is true, it indicates a bookmark already existed for the
-  // URL.
+  // Adds the |node| at |parent| in the specified |index| and notifies its
+  // observers.
   BookmarkNode* AddNode(BookmarkNode* parent,
                         int index,
-                        BookmarkNode* node,
-                        bool was_bookmarked);
+                        BookmarkNode* node);
 
   // Implementation of GetNodeByID.
   const BookmarkNode* GetNodeByID(const BookmarkNode* node, int64 id) const;

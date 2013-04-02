@@ -9,11 +9,11 @@
 #include "base/stl_util.h"
 #include "base/utf_string_conversions.h"
 #include "chrome/browser/browser_process.h"
-#include "chrome/browser/debugger/devtools_window.h"
+#include "chrome/browser/devtools/devtools_window.h"
 #include "chrome/browser/profiles/profile_manager.h"
 #include "content/public/browser/browser_thread.h"
 #include "content/public/browser/child_process_data.h"
-#include "content/public/browser/devtools_agent_host_registry.h"
+#include "content/public/browser/devtools_agent_host.h"
 #include "content/public/browser/notification_service.h"
 #include "content/public/browser/notification_types.h"
 #include "content/public/browser/worker_service.h"
@@ -25,7 +25,6 @@
 
 using content::BrowserThread;
 using content::DevToolsAgentHost;
-using content::DevToolsAgentHostRegistry;
 using content::WorkerService;
 
 // Objects of this class are created on the IO thread and then passed to the UI
@@ -138,9 +137,8 @@ void TaskManagerSharedWorkerResource::Inspect() const {
   Profile* profile = ProfileManager::GetLastUsedProfile();
   if (!profile)
     return;
-  DevToolsAgentHost* agent_host =
-      DevToolsAgentHostRegistry::GetDevToolsAgentHostForWorker(
-          process_id_, routing_id_);
+  scoped_refptr<DevToolsAgentHost> agent_host(
+      DevToolsAgentHost::GetForWorker(process_id_, routing_id_));
   DevToolsWindow::OpenDevToolsWindowForWorker(profile, agent_host);
 }
 

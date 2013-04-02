@@ -15,7 +15,7 @@
 #include "native_client/src/shared/platform/nacl_check.h"
 #include "native_client/src/shared/utils/types.h"
 #include "native_client/src/trusted/validator_ragel/unreviewed/decoding.h"
-#include "native_client/src/trusted/validator_ragel/unreviewed/validator.h"
+#include "native_client/src/trusted/validator_ragel/validator.h"
 
 /* Maximum set of R-DFA allowable CPUID features.  */
 extern const NaClCPUFeaturesX86 kValidatorCPUIDFeatures;
@@ -247,60 +247,6 @@ enum OperandKind {
     (instruction_info_collected += SECOND_IMMEDIATE_8BIT)
 #define SET_IMM2_TYPE_IMM16 \
     (instruction_info_collected += SECOND_IMMEDIATE_16BIT)
-
-#define BITMAP_WORD_NAME BITMAP_WORD_NAME1(NACL_HOST_WORDSIZE)
-#define BITMAP_WORD_NAME1(size) BITMAP_WORD_NAME2(size)
-#define BITMAP_WORD_NAME2(size) uint##size##_t
-
-typedef BITMAP_WORD_NAME bitmap_word;
-
-static INLINE bitmap_word *BitmapAllocate(size_t indexes) {
-  bitmap_word *bitmap;
-  size_t byte_count = ((indexes + NACL_HOST_WORDSIZE - 1) / NACL_HOST_WORDSIZE)*
-                      sizeof *bitmap;
-  bitmap = malloc(byte_count);
-  if (bitmap != NULL) {
-    memset(bitmap, 0, byte_count);
-  }
-  return bitmap;
-}
-
-static FORCEINLINE int BitmapIsBitSet(bitmap_word *bitmap, size_t index) {
-  return (bitmap[index / NACL_HOST_WORDSIZE] &
-                       (((bitmap_word)1) << (index % NACL_HOST_WORDSIZE))) != 0;
-}
-
-static FORCEINLINE void BitmapSetBit(bitmap_word *bitmap, size_t index) {
-  bitmap[index / NACL_HOST_WORDSIZE] |=
-                               ((bitmap_word)1) << (index % NACL_HOST_WORDSIZE);
-}
-
-static FORCEINLINE void BitmapClearBit(bitmap_word *bitmap, size_t index) {
-  bitmap[index / NACL_HOST_WORDSIZE] &=
-                            ~(((bitmap_word)1) << (index % NACL_HOST_WORDSIZE));
-}
-
-/* All the bits must be in a single 32-bit bundle.  */
-static FORCEINLINE int BitmapIsAnyBitSet(bitmap_word *bitmap,
-                                         size_t index, size_t bits) {
-  return (bitmap[index / NACL_HOST_WORDSIZE] &
-       (((((bitmap_word)1) << bits) - 1) << (index % NACL_HOST_WORDSIZE))) != 0;
-}
-
-/* All the bits must be in a single 32-bit bundle. */
-static FORCEINLINE void BitmapSetBits(bitmap_word *bitmap,
-                                      size_t index,
-                                      size_t bits) {
-  bitmap[index / NACL_HOST_WORDSIZE] |=
-               ((((bitmap_word)1) << bits) - 1) << (index % NACL_HOST_WORDSIZE);
-}
-
-/* All the bits must be in a single 32-bit bundle. */
-static FORCEINLINE void BitmapClearBits(bitmap_word *bitmap,
-                                        size_t index, size_t bits) {
-  bitmap[index / NACL_HOST_WORDSIZE] &=
-            ~(((((bitmap_word)1) << bits) - 1) << (index % NACL_HOST_WORDSIZE));
-}
 
 /* Mark the destination of a jump instruction and make an early validity check:
  * to jump outside given code region, the target address must be aligned.

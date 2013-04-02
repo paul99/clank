@@ -5,6 +5,7 @@
 #include "chrome/browser/sync_file_system/drive_metadata_store.h"
 
 #include <utility>
+#include <vector>
 
 #include "base/bind.h"
 #include "base/callback.h"
@@ -13,8 +14,8 @@
 #include "base/message_loop_proxy.h"
 #include "base/sequenced_task_runner.h"
 #include "base/stl_util.h"
-#include "base/string_number_conversions.h"
 #include "base/string_util.h"
+#include "base/strings/string_number_conversions.h"
 #include "base/task_runner_util.h"
 #include "chrome/browser/sync_file_system/drive_file_sync_service.h"
 #include "chrome/browser/sync_file_system/sync_file_system.pb.h"
@@ -32,7 +33,8 @@ namespace sync_file_system {
 
 namespace {
 const char* const kServiceName = DriveFileSyncService::kServiceName;
-const FilePath::CharType kDatabaseName[] = FILE_PATH_LITERAL("DriveMetadata");
+const base::FilePath::CharType kDatabaseName[] =
+    FILE_PATH_LITERAL("DriveMetadata");
 const char kChangeStampKey[] = "CHANGE_STAMP";
 const char kSyncRootDirectoryKey[] = "SYNC_ROOT_DIR";
 const char kDriveMetadataKeyPrefix[] = "METADATA: ";
@@ -46,7 +48,7 @@ class DriveMetadataDB {
   typedef DriveMetadataStore::MetadataMap MetadataMap;
   typedef DriveMetadataStore::ResourceIDMap ResourceIDMap;
 
-  DriveMetadataDB(const FilePath& base_dir,
+  DriveMetadataDB(const base::FilePath& base_dir,
                   base::SequencedTaskRunner* task_runner);
   ~DriveMetadataDB();
 
@@ -124,10 +126,20 @@ std::string CreateKeyForIncrementalSyncOrigin(const GURL& origin) {
   return kDriveIncrementalSyncOriginKeyPrefix + origin.spec();
 }
 
+void AddOriginsToVector(std::vector<GURL>* all_origins,
+                        const DriveMetadataStore::ResourceIDMap& resource_map) {
+  typedef DriveMetadataStore::ResourceIDMap::const_iterator itr;
+  for (std::map<GURL, std::string>::const_iterator itr = resource_map.begin();
+       itr != resource_map.end();
+       ++itr) {
+    all_origins->push_back(itr->first);
+  }
+}
+
 }  // namespace
 
 DriveMetadataStore::DriveMetadataStore(
-    const FilePath& base_dir,
+    const base::FilePath& base_dir,
     base::SequencedTaskRunner* file_task_runner)
     : file_task_runner_(file_task_runner),
       db_(new DriveMetadataDB(base_dir, file_task_runner)),
@@ -267,6 +279,8 @@ void DriveMetadataStore::UpdateEntry(
     const fileapi::SyncStatusCallback& callback) {
   DCHECK(CalledOnValidThread());
   DCHECK_EQ(fileapi::SYNC_STATUS_OK, db_status_);
+  DCHECK(!metadata.resource_id().empty());
+  DCHECK(!metadata.conflicted() || !metadata.to_be_fetched());
 
   std::pair<PathToMetadata::iterator, bool> result =
       metadata_map_[url.origin()].insert(std::make_pair(url.path(), metadata));
@@ -488,9 +502,16 @@ std::string DriveMetadataStore::GetResourceIdForOrigin(
   return std::string();
 }
 
+void DriveMetadataStore::GetAllOrigins(std::vector<GURL>* origins) {
+  origins->reserve(batch_sync_origins_.size() +
+                   incremental_sync_origins_.size());
+  AddOriginsToVector(origins, batch_sync_origins_);
+  AddOriginsToVector(origins, incremental_sync_origins_);
+}
+
 ////////////////////////////////////////////////////////////////////////////////
 
-DriveMetadataDB::DriveMetadataDB(const FilePath& base_dir,
+DriveMetadataDB::DriveMetadataDB(const base::FilePath& base_dir,
                                  base::SequencedTaskRunner* task_runner)
     : task_runner_(task_runner),
       db_path_(fileapi::FilePathToString(base_dir.Append(kDatabaseName))) {
@@ -664,8 +685,8 @@ SyncStatusCode DriveMetadataDB::RemoveOrigin(const GURL& origin) {
   scoped_ptr<leveldb::Iterator> itr(db_->NewIterator(leveldb::ReadOptions()));
   std::string serialized_origin;
   bool success = fileapi::SerializeSyncableFileSystemURL(
-      fileapi::CreateSyncableFileSystemURL(origin, kServiceName, FilePath()),
-      &serialized_origin);
+      fileapi::CreateSyncableFileSystemURL(
+          origin, kServiceName, base::FilePath()), &serialized_origin);
   DCHECK(success);
   for (itr->Seek(kDriveMetadataKeyPrefix + serialized_origin);
        itr->Valid(); itr->Next()) {

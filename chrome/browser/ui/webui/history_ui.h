@@ -10,9 +10,8 @@
 #include "base/string16.h"
 #include "base/timer.h"
 #include "chrome/browser/common/cancelable_request.h"
-#include "chrome/browser/history/history.h"
+#include "chrome/browser/history/history_service.h"
 #include "chrome/browser/history/web_history_service.h"
-#include "chrome/browser/ui/webui/chrome_url_data_manager.h"
 #include "chrome/common/cancelable_task_tracker.h"
 #include "content/public/browser/notification_registrar.h"
 #include "content/public/browser/web_ui_controller.h"
@@ -47,6 +46,16 @@ class BrowsingHistoryHandler : public content::WebUIMessageHandler,
                        const content::NotificationDetails& details) OVERRIDE;
 
  private:
+  // The range for which to return results:
+  // - ALLTIME: allows access to all the results in a paginated way.
+  // - WEEK: the last 7 days.
+  // - MONTH: the last calendar month.
+  enum Range {
+    ALL_TIME = 0,
+    WEEK = 1,
+    MONTH = 2
+  };
+
   // Core implementation of history querying.
   void QueryHistory(string16 search_text, const history::QueryOptions& options);
 
@@ -77,14 +86,18 @@ class BrowsingHistoryHandler : public content::WebUIMessageHandler,
   // Callback from the history system when visits were deleted.
   void RemoveComplete();
 
+  // Callback from history server when visits were deleted.
+  void RemoveWebHistoryComplete(history::WebHistoryService::Request* request,
+                                bool success);
+
   bool ExtractIntegerValueAtIndex(
       const base::ListValue* value, int index, int* out_int);
 
-  // Set the query options for a month-wide query, |depth| months ago.
-  void SetQueryDepthInMonths(history::QueryOptions& options, int depth);
+  // Set the query options for a week-wide query, |offset| weeks ago.
+  void SetQueryTimeInWeeks(int offset, history::QueryOptions* options);
 
-  // Set the query options for a day-wide query, |depth| days ago.
-  void SetQueryDepthInDays(history::QueryOptions& options, int depth);
+  // Sets the query options for a monthly query, |offset| months ago.
+  void SetQueryTimeInMonths(int offset, history::QueryOptions* options);
 
   content::NotificationRegistrar registrar_;
 
@@ -94,6 +107,10 @@ class BrowsingHistoryHandler : public content::WebUIMessageHandler,
   // The currently-executing request for synced history results.
   // Deleting the request will cancel it.
   scoped_ptr<history::WebHistoryService::Request> web_history_request_;
+
+  // The currently-executing delete request for synced history.
+  // Deleting the request will cancel it.
+  scoped_ptr<history::WebHistoryService::Request> web_history_delete_request_;
 
   // Tracker for delete requests to the history service.
   CancelableTaskTracker delete_task_tracker_;

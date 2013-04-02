@@ -10,8 +10,8 @@
 #include "base/memory/scoped_ptr.h"
 #include "base/rand_util.h"
 #include "base/string16.h"
-#include "base/string_number_conversions.h"
 #include "base/string_split.h"
+#include "base/strings/string_number_conversions.h"
 #include "base/time.h"
 #include "base/utf_string_conversions.h"
 #include "chrome/browser/api/infobars/confirm_infobar_delegate.h"
@@ -22,12 +22,13 @@
 #include "chrome/browser/autofill/personal_data_manager.h"
 #include "chrome/browser/autofill/personal_data_manager_factory.h"
 #include "chrome/browser/autofill/personal_data_manager_observer.h"
+#include "chrome/browser/autofill/validation.h"
 #include "chrome/browser/profiles/profile.h"
 #include "chrome/browser/translate/translate_infobar_delegate.h"
 #include "chrome/browser/translate/translate_manager.h"
 #include "chrome/browser/ui/browser.h"
-#include "chrome/browser/ui/browser_tabstrip.h"
 #include "chrome/browser/ui/browser_window.h"
+#include "chrome/browser/ui/tabs/tab_strip_model.h"
 #include "chrome/common/chrome_notification_types.h"
 #include "chrome/common/render_messages.h"
 #include "chrome/test/base/in_process_browser_test.h"
@@ -90,12 +91,12 @@ class WindowedPersonalDataManagerObserver
       browser_(browser),
       infobar_service_(NULL) {
     PersonalDataManagerFactory::GetForProfile(browser_->profile())->
-        SetObserver(this);
+        AddObserver(this);
     registrar_.Add(this, chrome::NOTIFICATION_TAB_CONTENTS_INFOBAR_ADDED,
                    content::NotificationService::AllSources());
   }
 
-  ~WindowedPersonalDataManagerObserver() {
+  virtual ~WindowedPersonalDataManagerObserver() {
     if (!infobar_service_)
       return;
 
@@ -133,8 +134,8 @@ class WindowedPersonalDataManagerObserver
                        const content::NotificationSource& source,
                        const content::NotificationDetails& details) OVERRIDE {
     // Accept in the infobar.
-    infobar_service_ =
-        InfoBarService::FromWebContents(chrome::GetActiveWebContents(browser_));
+    infobar_service_ = InfoBarService::FromWebContents(
+        browser_->tab_strip_model()->GetActiveWebContents());
     InfoBarDelegate* infobar = infobar_service_->GetInfoBarDelegateAt(0);
 
     ConfirmInfoBarDelegate* confirm_infobar =
@@ -217,8 +218,7 @@ class AutofillTest : public InProcessBrowserTest {
     js += "document.getElementById('testform').submit();";
 
     WindowedPersonalDataManagerObserver observer(browser());
-    ASSERT_TRUE(
-        content::ExecuteJavaScript(render_view_host(), L"", ASCIIToWide(js)));
+    ASSERT_TRUE(content::ExecuteScript(render_view_host(), js));
     observer.Wait();
   }
 
@@ -239,8 +239,7 @@ class AutofillTest : public InProcessBrowserTest {
   // sends keypress events to the tab to cause the form to be populated.
   void PopulateForm(const std::string& field_id) {
     std::string js("document.getElementById('" + field_id + "').focus();");
-    ASSERT_TRUE(
-        content::ExecuteJavaScript(render_view_host(), L"", ASCIIToWide(js)));
+    ASSERT_TRUE(content::ExecuteScript(render_view_host(), js));
 
     SendKeyAndWait(ui::VKEY_DOWN,
                    chrome::NOTIFICATION_AUTOFILL_DID_SHOW_SUGGESTIONS);
@@ -256,8 +255,9 @@ class AutofillTest : public InProcessBrowserTest {
     CHECK(test_server()->Start());
 
     std::string data;
-    FilePath data_file = ui_test_utils::GetTestFilePath(
-        FilePath().AppendASCII("autofill"), FilePath().AppendASCII(filename));
+    base::FilePath data_file =
+        ui_test_utils::GetTestFilePath(base::FilePath().AppendASCII("autofill"),
+                                       base::FilePath().AppendASCII(filename));
     CHECK(file_util::ReadFileToString(data_file, &data));
     std::vector<std::string> lines;
     base::SplitString(data, '\n', &lines);
@@ -289,18 +289,20 @@ class AutofillTest : public InProcessBrowserTest {
     return lines.size();
   }
 
-  void ExpectFieldValue(const std::wstring& field_name,
+  void ExpectFieldValue(const std::string& field_name,
                         const std::string& expected_value) {
     std::string value;
-    ASSERT_TRUE(content::ExecuteJavaScriptAndExtractString(
-        chrome::GetActiveWebContents(browser())->GetRenderViewHost(), L"",
-        L"window.domAutomationController.send("
-        L"document.getElementById('" + field_name + L"').value);", &value));
+    ASSERT_TRUE(content::ExecuteScriptAndExtractString(
+        browser()->tab_strip_model()->GetActiveWebContents(),
+        "window.domAutomationController.send("
+        "    document.getElementById('" + field_name + "').value);",
+        &value));
     EXPECT_EQ(expected_value, value);
   }
 
   RenderViewHost* render_view_host() {
-    return chrome::GetActiveWebContents(browser())->GetRenderViewHost();
+    return browser()->tab_strip_model()->GetActiveWebContents()->
+        GetRenderViewHost();
   }
 
   void SimulateURLFetch(bool success) {
@@ -345,38 +347,41 @@ class AutofillTest : public InProcessBrowserTest {
 
   void FocusFirstNameField() {
     LOG(WARNING) << "Clicking on the tab.";
-    content::SimulateMouseClick(chrome::GetActiveWebContents(browser()), 0,
+    content::SimulateMouseClick(
+        browser()->tab_strip_model()->GetActiveWebContents(),
+        0,
         WebKit::WebMouseEvent::ButtonLeft);
 
     LOG(WARNING) << "Focusing the first name field.";
     bool result = false;
-    ASSERT_TRUE(content::ExecuteJavaScriptAndExtractBool(
-        render_view_host(), L"",
-        L"if (document.readyState === 'complete')"
-        L"  document.getElementById('firstname').focus();"
-        L"else"
-        L"  domAutomationController.send(false);",
+    ASSERT_TRUE(content::ExecuteScriptAndExtractBool(
+        render_view_host(),
+        "if (document.readyState === 'complete')"
+        "  document.getElementById('firstname').focus();"
+        "else"
+        "  domAutomationController.send(false);",
         &result));
     ASSERT_TRUE(result);
   }
 
   void ExpectFilledTestForm() {
-    ExpectFieldValue(L"firstname", "Milton");
-    ExpectFieldValue(L"lastname", "Waddams");
-    ExpectFieldValue(L"address1", "4120 Freidrich Lane");
-    ExpectFieldValue(L"address2", "Basement");
-    ExpectFieldValue(L"city", "Austin");
-    ExpectFieldValue(L"state", "TX");
-    ExpectFieldValue(L"zip", "78744");
-    ExpectFieldValue(L"country", "US");
-    ExpectFieldValue(L"phone", "5125551234");
+    ExpectFieldValue("firstname", "Milton");
+    ExpectFieldValue("lastname", "Waddams");
+    ExpectFieldValue("address1", "4120 Freidrich Lane");
+    ExpectFieldValue("address2", "Basement");
+    ExpectFieldValue("city", "Austin");
+    ExpectFieldValue("state", "TX");
+    ExpectFieldValue("zip", "78744");
+    ExpectFieldValue("country", "US");
+    ExpectFieldValue("phone", "5125551234");
   }
 
   void SendKeyAndWait(ui::KeyboardCode key, int notification_type) {
     content::WindowedNotificationObserver observer(
         notification_type, content::Source<RenderViewHost>(render_view_host()));
-    content::SimulateKeyPress(chrome::GetActiveWebContents(browser()),
-                              key, false, false, false, false);
+    content::SimulateKeyPress(
+        browser()->tab_strip_model()->GetActiveWebContents(),
+        key, false, false, false, false);
     observer.Wait();
   }
 
@@ -396,15 +401,15 @@ class AutofillTest : public InProcessBrowserTest {
         ui::VKEY_DOWN, chrome::NOTIFICATION_AUTOFILL_DID_FILL_FORM_DATA);
 
     // The previewed values should not be accessible to JavaScript.
-    ExpectFieldValue(L"firstname", "M");
-    ExpectFieldValue(L"lastname", "");
-    ExpectFieldValue(L"address1", "");
-    ExpectFieldValue(L"address2", "");
-    ExpectFieldValue(L"city", "");
-    ExpectFieldValue(L"state", "");
-    ExpectFieldValue(L"zip", "");
-    ExpectFieldValue(L"country", "");
-    ExpectFieldValue(L"phone", "");
+    ExpectFieldValue("firstname", "M");
+    ExpectFieldValue("lastname", "");
+    ExpectFieldValue("address1", "");
+    ExpectFieldValue("address2", "");
+    ExpectFieldValue("city", "");
+    ExpectFieldValue("state", "");
+    ExpectFieldValue("zip", "");
+    ExpectFieldValue("country", "");
+    ExpectFieldValue("phone", "");
     // TODO(isherman): It would be nice to test that the previewed values are
     // displayed: http://crbug.com/57220
 
@@ -536,19 +541,21 @@ IN_PROC_BROWSER_TEST_F(AutofillTest, MAYBE_OnChangeAfterAutofill) {
   bool unfocused_fired = false;
   bool changed_select_fired = false;
   bool unchanged_select_fired = false;
-  ASSERT_TRUE(content::ExecuteJavaScriptAndExtractBool(
-      render_view_host(), L"",
-      L"domAutomationController.send(focused_fired);", &focused_fired));
-  ASSERT_TRUE(content::ExecuteJavaScriptAndExtractBool(
-      render_view_host(), L"",
-      L"domAutomationController.send(unfocused_fired);", &unfocused_fired));
-  ASSERT_TRUE(content::ExecuteJavaScriptAndExtractBool(
-      render_view_host(), L"",
-      L"domAutomationController.send(changed_select_fired);",
+  ASSERT_TRUE(content::ExecuteScriptAndExtractBool(
+      render_view_host(),
+      "domAutomationController.send(focused_fired);",
+      &focused_fired));
+  ASSERT_TRUE(content::ExecuteScriptAndExtractBool(
+      render_view_host(),
+      "domAutomationController.send(unfocused_fired);",
+      &unfocused_fired));
+  ASSERT_TRUE(content::ExecuteScriptAndExtractBool(
+      render_view_host(),
+      "domAutomationController.send(changed_select_fired);",
       &changed_select_fired));
-  ASSERT_TRUE(content::ExecuteJavaScriptAndExtractBool(
-      render_view_host(), L"",
-      L"domAutomationController.send(unchanged_select_fired);",
+  ASSERT_TRUE(content::ExecuteScriptAndExtractBool(
+      render_view_host(),
+      "domAutomationController.send(unchanged_select_fired);",
       &unchanged_select_fired));
   EXPECT_FALSE(focused_fired);
   EXPECT_TRUE(unfocused_fired);
@@ -556,10 +563,10 @@ IN_PROC_BROWSER_TEST_F(AutofillTest, MAYBE_OnChangeAfterAutofill) {
   EXPECT_FALSE(unchanged_select_fired);
 
   // Unfocus the first name field. Its change event should fire.
-  ASSERT_TRUE(content::ExecuteJavaScriptAndExtractBool(
-      render_view_host(), L"",
-      L"document.getElementById('firstname').blur();"
-      L"domAutomationController.send(focused_fired);", &focused_fired));
+  ASSERT_TRUE(content::ExecuteScriptAndExtractBool(
+      render_view_host(),
+      "document.getElementById('firstname').blur();"
+      "domAutomationController.send(focused_fired);", &focused_fired));
   EXPECT_TRUE(focused_fired);
 }
 
@@ -632,7 +639,7 @@ IN_PROC_BROWSER_TEST_F(AutofillTest, DISABLED_AutofillFormWithRepeatedField) {
 
   // Invoke Autofill.
   TryBasicFormFill();
-  ExpectFieldValue(L"state_freeform", "");
+  ExpectFieldValue("state_freeform", "");
 }
 
 // http://crbug.com/150084
@@ -770,8 +777,7 @@ IN_PROC_BROWSER_TEST_F(AutofillTest, DISABLED_DynamicFormFill) {
            "</script>")));
 
   // Dynamically construct the form.
-  ASSERT_TRUE(content::ExecuteJavaScript(render_view_host(), L"",
-                                         L"BuildForm();"));
+  ASSERT_TRUE(content::ExecuteScript(render_view_host(), "BuildForm();"));
 
   // Invoke Autofill.
   TryBasicFormFill();
@@ -798,7 +804,7 @@ IN_PROC_BROWSER_TEST_F(AutofillTest, MAYBE_AutofillAfterReload) {
 
   // Reload the page.
   LOG(WARNING) << "Reloading the page.";
-  WebContents* tab = chrome::GetActiveWebContents(browser());
+  WebContents* tab = browser()->tab_strip_model()->GetActiveWebContents();
   tab->GetController().Reload(false);
   content::WaitForLoadStop(tab);
 
@@ -848,12 +854,13 @@ IN_PROC_BROWSER_TEST_F(AutofillTest, DISABLED_AutofillAfterTranslate) {
   RenderViewHostTester::TestOnMessageReceived(
       render_view_host(),
       ChromeViewHostMsg_TranslateLanguageDetermined(0, "ja", true));
-  TranslateInfoBarDelegate* infobar =
-      InfoBarService::FromWebContents(chrome::GetActiveWebContents(browser()))->
+  TranslateInfoBarDelegate* infobar = InfoBarService::FromWebContents(
+      browser()->tab_strip_model()->GetActiveWebContents())->
           GetInfoBarDelegateAt(0)->AsTranslateInfoBarDelegate();
 
   ASSERT_TRUE(infobar != NULL);
-  EXPECT_EQ(TranslateInfoBarDelegate::BEFORE_TRANSLATE, infobar->type());
+  EXPECT_EQ(TranslateInfoBarDelegate::BEFORE_TRANSLATE,
+            infobar->infobar_type());
 
   // Simulate translation button press.
   infobar->Translate();
@@ -869,9 +876,8 @@ IN_PROC_BROWSER_TEST_F(AutofillTest, DISABLED_AutofillAfterTranslate) {
   // Simulate translation to kick onTranslateElementLoad.
   // But right now, the call stucks here.
   // Once click the text field, it starts again.
-  ASSERT_TRUE(content::ExecuteJavaScript(
-      render_view_host(), L"",
-      L"cr.googleTranslate.onTranslateElementLoad();"));
+  ASSERT_TRUE(content::ExecuteScript(
+      render_view_host(), "cr.googleTranslate.onTranslateElementLoad();"));
 
   // Simulate the render notifying the translation has been done.
   translation_observer.Wait();
@@ -908,7 +914,7 @@ IN_PROC_BROWSER_TEST_F(AutofillTest, FillProfileCrazyCharacters) {
                                   L"\u898f\u7ba1\u5c0e\u904a"));
   profile1.SetRawInfo(ADDRESS_HOME_ZIP, WideToUTF16(L"YOHO_54676"));
   profile1.SetRawInfo(PHONE_HOME_WHOLE_NUMBER, WideToUTF16(L"861088828000"));
-  profile1.SetRawInfo(ADDRESS_HOME_COUNTRY, WideToUTF16(L"India"));
+  profile1.SetInfo(ADDRESS_HOME_COUNTRY, WideToUTF16(L"India"), "en-US");
   profiles.push_back(profile1);
 
   AutofillProfile profile2;
@@ -975,7 +981,8 @@ IN_PROC_BROWSER_TEST_F(AutofillTest, FillProfileCrazyCharacters) {
   profile7.SetRawInfo(ADDRESS_HOME_STATE, WideToUTF16(L"CA"));
   profile7.SetRawInfo(ADDRESS_HOME_ZIP, WideToUTF16(L"94086"));
   profile7.SetRawInfo(PHONE_HOME_WHOLE_NUMBER, WideToUTF16(L"15466784565"));
-  profile7.SetRawInfo(ADDRESS_HOME_COUNTRY, WideToUTF16(L"United States"));
+  profile7.SetInfo(ADDRESS_HOME_COUNTRY, WideToUTF16(L"United States"),
+                   "en-US");
   profiles.push_back(profile7);
 
   SetProfiles(&profiles);
@@ -1046,8 +1053,8 @@ IN_PROC_BROWSER_TEST_F(AutofillTest, Invalid) {
   without_invalid.SetRawInfo(ADDRESS_HOME_CITY, ASCIIToUTF16("Sunnyvale"));
   without_invalid.SetRawInfo(ADDRESS_HOME_STATE, ASCIIToUTF16("CA"));
   without_invalid.SetRawInfo(ADDRESS_HOME_ZIP, ASCIIToUTF16("my_zip"));
-  without_invalid.SetRawInfo(ADDRESS_HOME_COUNTRY,
-                             ASCIIToUTF16("United States"));
+  without_invalid.SetInfo(ADDRESS_HOME_COUNTRY, ASCIIToUTF16("United States"),
+                          "en-US");
 
   AutofillProfile with_invalid = without_invalid;
   with_invalid.SetRawInfo(PHONE_HOME_WHOLE_NUMBER,
@@ -1078,11 +1085,12 @@ IN_PROC_BROWSER_TEST_F(AutofillTest, PrefsStringSavedAsIs) {
 IN_PROC_BROWSER_TEST_F(AutofillTest, InvalidCreditCardNumberIsNotAggregated) {
   ASSERT_TRUE(test_server()->Start());
   std::string card("4408 0412 3456 7890");
-  ASSERT_FALSE(CreditCard::IsValidCreditCardNumber(ASCIIToUTF16(card)));
+  ASSERT_FALSE(autofill::IsValidCreditCardNumber(ASCIIToUTF16(card)));
   SubmitCreditCard("Bob Smith", card.c_str(), "12", "2014");
   ASSERT_EQ(0u,
             InfoBarService::FromWebContents(
-                chrome::GetActiveWebContents(browser()))->GetInfoBarCount());
+                browser()->tab_strip_model()->GetActiveWebContents())->
+                    GetInfoBarCount());
 }
 
 // Test whitespaces and separator chars are stripped for valid CC numbers.
@@ -1097,10 +1105,10 @@ IN_PROC_BROWSER_TEST_F(AutofillTest,
   ASSERT_EQ(2u, personal_data_manager()->credit_cards().size());
   string16 cc1 = personal_data_manager()->credit_cards()[0]->GetRawInfo(
       CREDIT_CARD_NUMBER);
-  ASSERT_TRUE(CreditCard::IsValidCreditCardNumber(cc1));
+  ASSERT_TRUE(autofill::IsValidCreditCardNumber(cc1));
   string16 cc2 = personal_data_manager()->credit_cards()[1]->GetRawInfo(
       CREDIT_CARD_NUMBER);
-  ASSERT_TRUE(CreditCard::IsValidCreditCardNumber(cc2));
+  ASSERT_TRUE(autofill::IsValidCreditCardNumber(cc2));
 }
 
 // Test that Autofill aggregates a minimum valid profile.
@@ -1182,23 +1190,23 @@ IN_PROC_BROWSER_TEST_F(AutofillTest, MAYBE_ComparePhoneNumbers) {
   ui_test_utils::NavigateToURL(browser(), url);
   PopulateForm("NAME_FIRST");
 
-  ExpectFieldValue(L"NAME_FIRST", "Bob");
-  ExpectFieldValue(L"NAME_LAST", "Smith");
-  ExpectFieldValue(L"ADDRESS_HOME_LINE1", "1234 H St.");
-  ExpectFieldValue(L"ADDRESS_HOME_CITY", "San Jose");
-  ExpectFieldValue(L"ADDRESS_HOME_STATE", "CA");
-  ExpectFieldValue(L"ADDRESS_HOME_ZIP", "95110");
-  ExpectFieldValue(L"PHONE_HOME_WHOLE_NUMBER", "14085554567");
-  ExpectFieldValue(L"PHONE_HOME_CITY_CODE-1", "408");
-  ExpectFieldValue(L"PHONE_HOME_CITY_CODE-2", "408");
-  ExpectFieldValue(L"PHONE_HOME_NUMBER", "5554567");
-  ExpectFieldValue(L"PHONE_HOME_NUMBER_3-1", "555");
-  ExpectFieldValue(L"PHONE_HOME_NUMBER_3-2", "555");
-  ExpectFieldValue(L"PHONE_HOME_NUMBER_4-1", "4567");
-  ExpectFieldValue(L"PHONE_HOME_NUMBER_4-2", "4567");
-  ExpectFieldValue(L"PHONE_HOME_EXT-1", "");
-  ExpectFieldValue(L"PHONE_HOME_EXT-2", "");
-  ExpectFieldValue(L"PHONE_HOME_COUNTRY_CODE-1", "1");
+  ExpectFieldValue("NAME_FIRST", "Bob");
+  ExpectFieldValue("NAME_LAST", "Smith");
+  ExpectFieldValue("ADDRESS_HOME_LINE1", "1234 H St.");
+  ExpectFieldValue("ADDRESS_HOME_CITY", "San Jose");
+  ExpectFieldValue("ADDRESS_HOME_STATE", "CA");
+  ExpectFieldValue("ADDRESS_HOME_ZIP", "95110");
+  ExpectFieldValue("PHONE_HOME_WHOLE_NUMBER", "14085554567");
+  ExpectFieldValue("PHONE_HOME_CITY_CODE-1", "408");
+  ExpectFieldValue("PHONE_HOME_CITY_CODE-2", "408");
+  ExpectFieldValue("PHONE_HOME_NUMBER", "5554567");
+  ExpectFieldValue("PHONE_HOME_NUMBER_3-1", "555");
+  ExpectFieldValue("PHONE_HOME_NUMBER_3-2", "555");
+  ExpectFieldValue("PHONE_HOME_NUMBER_4-1", "4567");
+  ExpectFieldValue("PHONE_HOME_NUMBER_4-2", "4567");
+  ExpectFieldValue("PHONE_HOME_EXT-1", "");
+  ExpectFieldValue("PHONE_HOME_EXT-2", "");
+  ExpectFieldValue("PHONE_HOME_COUNTRY_CODE-1", "1");
 }
 
 // Test profile is saved if phone number is valid in selected country.
@@ -1304,7 +1312,8 @@ IN_PROC_BROWSER_TEST_F(AutofillTest, CCInfoNotStoredWhenAutocompleteOff) {
 
   ASSERT_EQ(0u,
             InfoBarService::FromWebContents(
-                chrome::GetActiveWebContents(browser()))->GetInfoBarCount());
+                browser()->tab_strip_model()->GetActiveWebContents())->
+                    GetInfoBarCount());
 }
 
 // http://crbug.com/150084
@@ -1335,8 +1344,8 @@ IN_PROC_BROWSER_TEST_F(AutofillTest, MAYBE_NoAutofillForReadOnlyFields) {
   ui_test_utils::NavigateToURL(browser(), url);
   PopulateForm("firstname");
 
-  ExpectFieldValue(L"email", "");
-  ExpectFieldValue(L"address", addr_line1);
+  ExpectFieldValue("email", "");
+  ExpectFieldValue("address", addr_line1);
 }
 
 // http://crbug.com/150084
@@ -1359,21 +1368,21 @@ IN_PROC_BROWSER_TEST_F(AutofillTest, MAYBE_FormFillableOnReset) {
   ui_test_utils::NavigateToURL(browser(), url);
   PopulateForm("NAME_FIRST");
 
-  ASSERT_TRUE(content::ExecuteJavaScript(
-      chrome::GetActiveWebContents(browser())->GetRenderViewHost(), L"",
-      L"document.getElementById('testform').reset()"));
+  ASSERT_TRUE(content::ExecuteScript(
+      browser()->tab_strip_model()->GetActiveWebContents(),
+      "document.getElementById('testform').reset()"));
 
   PopulateForm("NAME_FIRST");
 
-  ExpectFieldValue(L"NAME_FIRST", "Milton");
-  ExpectFieldValue(L"NAME_LAST", "Waddams");
-  ExpectFieldValue(L"EMAIL_ADDRESS", "red.swingline@initech.com");
-  ExpectFieldValue(L"ADDRESS_HOME_LINE1", "4120 Freidrich Lane");
-  ExpectFieldValue(L"ADDRESS_HOME_CITY", "Austin");
-  ExpectFieldValue(L"ADDRESS_HOME_STATE", "Texas");
-  ExpectFieldValue(L"ADDRESS_HOME_ZIP", "78744");
-  ExpectFieldValue(L"ADDRESS_HOME_COUNTRY", "United States");
-  ExpectFieldValue(L"PHONE_HOME_WHOLE_NUMBER", "5125551234");
+  ExpectFieldValue("NAME_FIRST", "Milton");
+  ExpectFieldValue("NAME_LAST", "Waddams");
+  ExpectFieldValue("EMAIL_ADDRESS", "red.swingline@initech.com");
+  ExpectFieldValue("ADDRESS_HOME_LINE1", "4120 Freidrich Lane");
+  ExpectFieldValue("ADDRESS_HOME_CITY", "Austin");
+  ExpectFieldValue("ADDRESS_HOME_STATE", "Texas");
+  ExpectFieldValue("ADDRESS_HOME_ZIP", "78744");
+  ExpectFieldValue("ADDRESS_HOME_COUNTRY", "United States");
+  ExpectFieldValue("PHONE_HOME_WHOLE_NUMBER", "5125551234");
 }
 
 // http://crbug.com/150084
@@ -1395,7 +1404,7 @@ IN_PROC_BROWSER_TEST_F(AutofillTest, MAYBE_DistinguishMiddleInitialWithinName) {
   ui_test_utils::NavigateToURL(browser(), url);
   PopulateForm("NAME_FIRST");
 
-  ExpectFieldValue(L"NAME_MIDDLE", "C");
+  ExpectFieldValue("NAME_MIDDLE", "C");
 }
 
 // http://crbug.com/150084
@@ -1426,7 +1435,7 @@ IN_PROC_BROWSER_TEST_F(AutofillTest,
   ui_test_utils::NavigateToURL(browser(), url);
   PopulateForm("NAME_FIRST");
 
-  ExpectFieldValue(L"EMAIL_CONFIRM", email);
+  ExpectFieldValue("EMAIL_CONFIRM", email);
   // TODO(isherman): verify entire form.
 }
 
@@ -1491,7 +1500,7 @@ IN_PROC_BROWSER_TEST_F(AutofillTest, MAYBE_FormFillLatencyAfterSubmit) {
     profile.SetRawInfo(ADDRESS_HOME_CITY, city);
     profile.SetRawInfo(ADDRESS_HOME_STATE, WideToUTF16(L"CA"));
     profile.SetRawInfo(ADDRESS_HOME_ZIP, zip);
-    profile.SetRawInfo(ADDRESS_HOME_COUNTRY, WideToUTF16(L"United States"));
+    profile.SetRawInfo(ADDRESS_HOME_COUNTRY, WideToUTF16(L"US"));
     profiles.push_back(profile);
   }
   SetProfiles(&profiles);
@@ -1508,11 +1517,12 @@ IN_PROC_BROWSER_TEST_F(AutofillTest, MAYBE_FormFillLatencyAfterSubmit) {
   content::WindowedNotificationObserver load_stop_observer(
       content::NOTIFICATION_LOAD_STOP,
       content::Source<content::NavigationController>(
-          &chrome::GetActiveWebContents(browser())->GetController()));
+          &browser()->tab_strip_model()->GetActiveWebContents()->
+              GetController()));
 
-  ASSERT_TRUE(content::ExecuteJavaScript(
-      render_view_host(), L"",
-      ASCIIToWide("document.getElementById('testform').submit();")));
+  ASSERT_TRUE(content::ExecuteScript(
+      render_view_host(),
+      "document.getElementById('testform').submit();"));
   // This will ensure the test didn't hang.
   load_stop_observer.Wait();
 }
@@ -1542,23 +1552,24 @@ IN_PROC_BROWSER_TEST_F(AutofillTest, MAYBE_DisableAutocompleteWhileFilling) {
 
   // Now that the popup with suggestions is showing, disable autocomplete for
   // the active field.
-  ASSERT_TRUE(content::ExecuteJavaScript(
-      render_view_host(), L"",
-      L"document.querySelector('input').autocomplete = 'off';"));
+  ASSERT_TRUE(content::ExecuteScript(
+      render_view_host(),
+      "document.querySelector('input').autocomplete = 'off';"));
 
   // Press the down arrow to select the suggestion and attempt to preview the
   // autofilled form.
-  content::SimulateKeyPress(chrome::GetActiveWebContents(browser()),
-                            ui::VKEY_DOWN, false, false, false, false);
+  content::SimulateKeyPress(
+      browser()->tab_strip_model()->GetActiveWebContents(),
+      ui::VKEY_DOWN, false, false, false, false);
 
   // Wait for any IPCs to complete by performing an action that generates an
   // IPC that's easy to wait for.  Chrome shouldn't crash.
   bool result = false;
-  ASSERT_TRUE(content::ExecuteJavaScriptAndExtractBool(
-      render_view_host(), L"",
-      L"var city = document.getElementById('city');"
-      L"city.onfocus = function() { domAutomationController.send(true); };"
-      L"city.focus()",
+  ASSERT_TRUE(content::ExecuteScriptAndExtractBool(
+      render_view_host(),
+      "var city = document.getElementById('city');"
+      "city.onfocus = function() { domAutomationController.send(true); };"
+      "city.focus()",
       &result));
   ASSERT_TRUE(result);
   SendKeyAndWait(

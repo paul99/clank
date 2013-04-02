@@ -14,10 +14,13 @@
 #include "base/memory/scoped_vector.h"
 #include "base/memory/weak_ptr.h"
 #include "base/message_loop.h"
+#include "base/run_loop.h"
 #include "base/stringprintf.h"
 #include "base/string_number_conversions.h"
 #include "base/threading/platform_thread.h"
 #include "base/values.h"
+#include "net/base/load_timing_info.h"
+#include "net/base/load_timing_info_test_util.h"
 #include "net/base/net_errors.h"
 #include "net/base/net_log.h"
 #include "net/base/net_log_unittest.h"
@@ -43,6 +46,57 @@ const int kDefaultMaxSockets = 4;
 const int kDefaultMaxSocketsPerGroup = 2;
 const net::RequestPriority kDefaultPriority = MEDIUM;
 
+// Make sure |handle| sets load times correctly when it has been assigned a
+// reused socket.
+void TestLoadTimingInfoConnectedReused(const ClientSocketHandle& handle) {
+  LoadTimingInfo load_timing_info;
+  // Only pass true in as |is_reused|, as in general, HttpStream types should
+  // have stricter concepts of reuse than socket pools.
+  EXPECT_TRUE(handle.GetLoadTimingInfo(true, &load_timing_info));
+
+  EXPECT_EQ(true, load_timing_info.socket_reused);
+  EXPECT_NE(NetLog::Source::kInvalidId, load_timing_info.socket_log_id);
+
+  ExpectConnectTimingHasNoTimes(load_timing_info.connect_timing);
+  ExpectLoadTimingHasOnlyConnectionTimes(load_timing_info);
+}
+
+// Make sure |handle| sets load times correctly when it has been assigned a
+// fresh socket.  Also runs TestLoadTimingInfoConnectedReused, since the owner
+// of a connection where |is_reused| is false may consider the connection
+// reused.
+void TestLoadTimingInfoConnectedNotReused(const ClientSocketHandle& handle) {
+  EXPECT_FALSE(handle.is_reused());
+
+  LoadTimingInfo load_timing_info;
+  EXPECT_TRUE(handle.GetLoadTimingInfo(false, &load_timing_info));
+
+  EXPECT_FALSE(load_timing_info.socket_reused);
+  EXPECT_NE(NetLog::Source::kInvalidId, load_timing_info.socket_log_id);
+
+  ExpectConnectTimingHasTimes(load_timing_info.connect_timing,
+                              CONNECT_TIMING_HAS_CONNECT_TIMES_ONLY);
+  ExpectLoadTimingHasOnlyConnectionTimes(load_timing_info);
+
+  TestLoadTimingInfoConnectedReused(handle);
+}
+
+// Make sure |handle| sets load times correctly, in the case that it does not
+// currently have a socket.
+void TestLoadTimingInfoNotConnected(const ClientSocketHandle& handle) {
+  // Should only be set to true once a socket is assigned, if at all.
+  EXPECT_FALSE(handle.is_reused());
+
+  LoadTimingInfo load_timing_info;
+  EXPECT_FALSE(handle.GetLoadTimingInfo(false, &load_timing_info));
+
+  EXPECT_FALSE(load_timing_info.socket_reused);
+  EXPECT_EQ(NetLog::Source::kInvalidId, load_timing_info.socket_log_id);
+
+  ExpectConnectTimingHasNoTimes(load_timing_info.connect_timing);
+  ExpectLoadTimingHasOnlyConnectionTimes(load_timing_info);
+}
+
 class TestSocketParams : public base::RefCounted<TestSocketParams> {
  public:
   TestSocketParams() : ignore_limits_(false) {}
@@ -62,8 +116,12 @@ typedef ClientSocketPoolBase<TestSocketParams> TestClientSocketPoolBase;
 
 class MockClientSocket : public StreamSocket {
  public:
-  MockClientSocket() : connected_(false), was_used_to_convey_data_(false),
-                       num_bytes_read_(0) {}
+  explicit MockClientSocket(net::NetLog* net_log)
+      : connected_(false),
+        net_log_(BoundNetLog::Make(net_log, net::NetLog::SOURCE_SOCKET)),
+        was_used_to_convey_data_(false),
+        num_bytes_read_(0) {
+  }
 
   // Socket implementation.
   virtual int Read(
@@ -79,8 +137,8 @@ class MockClientSocket : public StreamSocket {
     was_used_to_convey_data_ = true;
     return len;
   }
-  virtual bool SetReceiveBufferSize(int32 size) { return true; }
-  virtual bool SetSendBufferSize(int32 size) { return true; }
+  virtual bool SetReceiveBufferSize(int32 size) OVERRIDE { return true; }
+  virtual bool SetSendBufferSize(int32 size) OVERRIDE { return true; }
 
   // StreamSocket implementation.
   virtual int Connect(const CompletionCallback& callback) OVERRIDE {
@@ -88,41 +146,41 @@ class MockClientSocket : public StreamSocket {
     return OK;
   }
 
-  virtual void Disconnect() { connected_ = false; }
-  virtual bool IsConnected() const { return connected_; }
-  virtual bool IsConnectedAndIdle() const { return connected_; }
+  virtual void Disconnect() OVERRIDE { connected_ = false; }
+  virtual bool IsConnected() const OVERRIDE { return connected_; }
+  virtual bool IsConnectedAndIdle() const OVERRIDE { return connected_; }
 
-  virtual int GetPeerAddress(IPEndPoint* /* address */) const {
+  virtual int GetPeerAddress(IPEndPoint* /* address */) const OVERRIDE {
     return ERR_UNEXPECTED;
   }
 
-  virtual int GetLocalAddress(IPEndPoint* /* address */) const {
+  virtual int GetLocalAddress(IPEndPoint* /* address */) const OVERRIDE {
     return ERR_UNEXPECTED;
   }
 
-  virtual const BoundNetLog& NetLog() const {
+  virtual const BoundNetLog& NetLog() const OVERRIDE {
     return net_log_;
   }
 
-  virtual void SetSubresourceSpeculation() {}
-  virtual void SetOmniboxSpeculation() {}
-  virtual bool WasEverUsed() const {
+  virtual void SetSubresourceSpeculation() OVERRIDE {}
+  virtual void SetOmniboxSpeculation() OVERRIDE {}
+  virtual bool WasEverUsed() const OVERRIDE {
     return was_used_to_convey_data_ || num_bytes_read_ > 0;
   }
-  virtual bool UsingTCPFastOpen() const { return false; }
-  virtual int64 NumBytesRead() const { return num_bytes_read_; }
-  virtual base::TimeDelta GetConnectTimeMicros() const {
+  virtual bool UsingTCPFastOpen() const OVERRIDE { return false; }
+  virtual int64 NumBytesRead() const OVERRIDE { return num_bytes_read_; }
+  virtual base::TimeDelta GetConnectTimeMicros() const OVERRIDE {
     static const base::TimeDelta kDummyConnectTimeMicros =
         base::TimeDelta::FromMicroseconds(10);
     return kDummyConnectTimeMicros;  // Dummy value.
   }
-  virtual bool WasNpnNegotiated() const {
+  virtual bool WasNpnNegotiated() const OVERRIDE {
     return false;
   }
-  virtual NextProto GetNegotiatedProtocol() const {
+  virtual NextProto GetNegotiatedProtocol() const OVERRIDE {
     return kProtoUnknown;
   }
-  virtual bool GetSSLInfo(SSLInfo* ssl_info) {
+  virtual bool GetSSLInfo(SSLInfo* ssl_info) OVERRIDE {
     return false;
   }
 
@@ -145,7 +203,7 @@ class MockClientSocketFactory : public ClientSocketFactory {
       DatagramSocket::BindType bind_type,
       const RandIntCallback& rand_int_cb,
       NetLog* net_log,
-      const NetLog::Source& source) {
+      const NetLog::Source& source) OVERRIDE {
     NOTREACHED();
     return NULL;
   }
@@ -153,7 +211,7 @@ class MockClientSocketFactory : public ClientSocketFactory {
   virtual StreamSocket* CreateTransportClientSocket(
       const AddressList& addresses,
       NetLog* /* net_log */,
-      const NetLog::Source& /*source*/) {
+      const NetLog::Source& /*source*/) OVERRIDE {
     allocation_count_++;
     return NULL;
   }
@@ -162,12 +220,12 @@ class MockClientSocketFactory : public ClientSocketFactory {
       ClientSocketHandle* transport_socket,
       const HostPortPair& host_and_port,
       const SSLConfig& ssl_config,
-      const SSLClientSocketContext& context) {
+      const SSLClientSocketContext& context) OVERRIDE {
     NOTIMPLEMENTED();
     return NULL;
   }
 
-  virtual void ClearSSLSessionCache() {
+  virtual void ClearSSLSessionCache() OVERRIDE {
     NOTIMPLEMENTED();
   }
 
@@ -219,9 +277,9 @@ class TestConnectJob : public ConnectJob {
     DoConnect(waiting_success_, true /* async */, false /* recoverable */);
   }
 
-  virtual LoadState GetLoadState() const { return load_state_; }
+  virtual LoadState GetLoadState() const OVERRIDE { return load_state_; }
 
-  virtual void GetAdditionalErrorState(ClientSocketHandle* handle) {
+  virtual void GetAdditionalErrorState(ClientSocketHandle* handle) OVERRIDE {
     if (store_additional_error_state_) {
       // Set all of the additional error state fields in some way.
       handle->set_is_ssl_error(true);
@@ -234,11 +292,11 @@ class TestConnectJob : public ConnectJob {
  private:
   // ConnectJob implementation.
 
-  virtual int ConnectInternal() {
+  virtual int ConnectInternal() OVERRIDE {
     AddressList ignored;
     client_socket_factory_->CreateTransportClientSocket(
         ignored, NULL, net::NetLog::Source());
-    set_socket(new MockClientSocket());
+    set_socket(new MockClientSocket(net_log().net_log()));
     switch (job_type_) {
       case kMockJob:
         return DoConnect(true /* successful */, false /* sync */,
@@ -373,10 +431,13 @@ class TestConnectJob : public ConnectJob {
 class TestConnectJobFactory
     : public TestClientSocketPoolBase::ConnectJobFactory {
  public:
-  explicit TestConnectJobFactory(MockClientSocketFactory* client_socket_factory)
+  TestConnectJobFactory(MockClientSocketFactory* client_socket_factory,
+                        NetLog* net_log)
       : job_type_(TestConnectJob::kMockJob),
         job_types_(NULL),
-        client_socket_factory_(client_socket_factory) {}
+        client_socket_factory_(client_socket_factory),
+        net_log_(net_log) {
+}
 
   virtual ~TestConnectJobFactory() {}
 
@@ -396,7 +457,7 @@ class TestConnectJobFactory
   virtual ConnectJob* NewConnectJob(
       const std::string& group_name,
       const TestClientSocketPoolBase::Request& request,
-      ConnectJob::Delegate* delegate) const {
+      ConnectJob::Delegate* delegate) const OVERRIDE {
     EXPECT_TRUE(!job_types_ || !job_types_->empty());
     TestConnectJob::JobType job_type = job_type_;
     if (job_types_ && !job_types_->empty()) {
@@ -409,10 +470,10 @@ class TestConnectJobFactory
                               timeout_duration_,
                               delegate,
                               client_socket_factory_,
-                              NULL);
+                              net_log_);
   }
 
-  virtual base::TimeDelta ConnectionTimeout() const {
+  virtual base::TimeDelta ConnectionTimeout() const OVERRIDE {
     return timeout_duration_;
   }
 
@@ -421,6 +482,7 @@ class TestConnectJobFactory
   std::list<TestConnectJob::JobType>* job_types_;
   base::TimeDelta timeout_duration_;
   MockClientSocketFactory* const client_socket_factory_;
+  NetLog* net_log_;
 
   DISALLOW_COPY_AND_ASSIGN(TestConnectJobFactory);
 };
@@ -578,7 +640,7 @@ class TestConnectJobDelegate : public ConnectJob::Delegate {
       : have_result_(false), waiting_for_result_(false), result_(OK) {}
   virtual ~TestConnectJobDelegate() {}
 
-  virtual void OnConnectJobComplete(int result, ConnectJob* job) {
+  virtual void OnConnectJobComplete(int result, ConnectJob* job) OVERRIDE {
     result_ = result;
     scoped_ptr<StreamSocket> socket(job->ReleaseSocket());
     // socket.get() should be NULL iff result != OK
@@ -638,7 +700,8 @@ class ClientSocketPoolBaseTest : public testing::Test {
       base::TimeDelta unused_idle_socket_timeout,
       base::TimeDelta used_idle_socket_timeout) {
     DCHECK(!pool_.get());
-    connect_job_factory_ = new TestConnectJobFactory(&client_socket_factory_);
+    connect_job_factory_ = new TestConnectJobFactory(&client_socket_factory_,
+                                                     &net_log_);
     pool_.reset(new TestClientSocketPool(max_sockets,
                                          max_sockets_per_group,
                                          &histograms_,
@@ -671,6 +734,7 @@ class ClientSocketPoolBaseTest : public testing::Test {
   ScopedVector<TestSocketRequest>* requests() { return test_base_.requests(); }
   size_t completion_count() const { return test_base_.completion_count(); }
 
+  CapturingNetLog net_log_;
   bool connect_backup_jobs_enabled_;
   bool cleanup_timer_enabled_;
   MockClientSocketFactory client_socket_factory_;
@@ -814,6 +878,7 @@ TEST_F(ClientSocketPoolBaseTest, BasicSynchronous) {
   TestCompletionCallback callback;
   ClientSocketHandle handle;
   CapturingBoundNetLog log;
+  TestLoadTimingInfoNotConnected(handle);
 
   EXPECT_EQ(OK,
             handle.Init("a",
@@ -824,7 +889,10 @@ TEST_F(ClientSocketPoolBaseTest, BasicSynchronous) {
                         log.bound()));
   EXPECT_TRUE(handle.is_initialized());
   EXPECT_TRUE(handle.socket());
+  TestLoadTimingInfoConnectedNotReused(handle);
+
   handle.Reset();
+  TestLoadTimingInfoNotConnected(handle);
 
   CapturingNetLog::CapturedEntryList entries;
   log.GetEntries(&entries);
@@ -865,6 +933,7 @@ TEST_F(ClientSocketPoolBaseTest, InitConnectionFailure) {
   EXPECT_FALSE(handle.socket());
   EXPECT_FALSE(handle.is_ssl_error());
   EXPECT_TRUE(handle.ssl_error_response_info().headers.get() == NULL);
+  TestLoadTimingInfoNotConnected(handle);
 
   CapturingNetLog::CapturedEntryList entries;
   log.GetEntries(&entries);
@@ -1634,6 +1703,7 @@ TEST_F(ClientSocketPoolBaseTest, CancelActiveRequestThenRequestSocket) {
   EXPECT_EQ(OK, callback.WaitForResult());
 
   EXPECT_FALSE(handle.is_reused());
+  TestLoadTimingInfoConnectedNotReused(handle);
   EXPECT_EQ(2, client_socket_factory_.allocation_count());
 }
 
@@ -1688,10 +1758,15 @@ TEST_F(ClientSocketPoolBaseTest, BasicAsynchronous) {
                        log.bound());
   EXPECT_EQ(ERR_IO_PENDING, rv);
   EXPECT_EQ(LOAD_STATE_CONNECTING, pool_->GetLoadState("a", &handle));
+  TestLoadTimingInfoNotConnected(handle);
+
   EXPECT_EQ(OK, callback.WaitForResult());
   EXPECT_TRUE(handle.is_initialized());
   EXPECT_TRUE(handle.socket());
+  TestLoadTimingInfoConnectedNotReused(handle);
+
   handle.Reset();
+  TestLoadTimingInfoNotConnected(handle);
 
   CapturingNetLog::CapturedEntryList entries;
   log.GetEntries(&entries);
@@ -2044,6 +2119,7 @@ TEST_F(ClientSocketPoolBaseTest, DisableCleanupTimerReuse) {
 
   // Use and release the socket.
   EXPECT_EQ(1, handle.socket()->Write(NULL, 1, CompletionCallback()));
+  TestLoadTimingInfoConnectedNotReused(handle);
   handle.Reset();
 
   // Should now have one idle socket.
@@ -2060,6 +2136,7 @@ TEST_F(ClientSocketPoolBaseTest, DisableCleanupTimerReuse) {
                    log.bound());
   ASSERT_EQ(OK, rv);
   EXPECT_TRUE(handle.is_reused());
+  TestLoadTimingInfoConnectedReused(handle);
 
   ASSERT_TRUE(pool_->HasGroup("a"));
   EXPECT_EQ(0, pool_->IdleSocketCountInGroup("a"));
@@ -3383,9 +3460,41 @@ TEST_F(ClientSocketPoolBaseTest, PreconnectJobsTakenByNormalRequests) {
 
   ASSERT_EQ(OK, callback1.WaitForResult());
 
+  // Make sure if a preconneced socket is not fully connected when a request
+  // starts, it has a connect start time.
+  TestLoadTimingInfoConnectedNotReused(handle1);
   handle1.Reset();
 
   EXPECT_EQ(1, pool_->IdleSocketCountInGroup("a"));
+}
+
+// Checks that fully connected preconnect jobs have no connect times, and are
+// marked as reused.
+TEST_F(ClientSocketPoolBaseTest, ConnectedPreconnectJobsHaveNoConnectTimes) {
+  CreatePool(kDefaultMaxSockets, kDefaultMaxSocketsPerGroup);
+  connect_job_factory_->set_job_type(TestConnectJob::kMockJob);
+  pool_->RequestSockets("a", &params_, 1, BoundNetLog());
+
+  ASSERT_TRUE(pool_->HasGroup("a"));
+  EXPECT_EQ(0, pool_->NumConnectJobsInGroup("a"));
+  EXPECT_EQ(0, pool_->NumUnassignedConnectJobsInGroup("a"));
+  EXPECT_EQ(1, pool_->IdleSocketCountInGroup("a"));
+
+  ClientSocketHandle handle;
+  TestCompletionCallback callback;
+  EXPECT_EQ(OK, handle.Init("a",
+                            params_,
+                            kDefaultPriority,
+                            callback.callback(),
+                            pool_.get(),
+                            BoundNetLog()));
+
+  // Make sure the idle socket was used.
+  EXPECT_EQ(0, pool_->IdleSocketCountInGroup("a"));
+
+  TestLoadTimingInfoConnectedReused(handle);
+  handle.Reset();
+  TestLoadTimingInfoNotConnected(handle);
 }
 
 // http://crbug.com/64940 regression test.

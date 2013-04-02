@@ -13,9 +13,6 @@ namespace {
 
 const char kDiskImageModelName[] = "Disk Image";
 
-static RemovableDeviceNotificationsMac*
-    g_removable_device_notifications_mac = NULL;
-
 void GetDiskInfoAndUpdateOnFileThread(
     const scoped_refptr<RemovableDeviceNotificationsMac>& notifications,
     base::mac::ScopedCFTypeRef<CFDictionaryRef> dict,
@@ -51,8 +48,6 @@ void GetDiskInfoAndUpdate(
 
 RemovableDeviceNotificationsMac::RemovableDeviceNotificationsMac() {
   session_.reset(DASessionCreate(NULL));
-  DCHECK(!g_removable_device_notifications_mac);
-  g_removable_device_notifications_mac = this;
 
   DASessionScheduleWithRunLoop(
       session_, CFRunLoopGetCurrent(), kCFRunLoopCommonModes);
@@ -78,9 +73,6 @@ RemovableDeviceNotificationsMac::RemovableDeviceNotificationsMac() {
 }
 
 RemovableDeviceNotificationsMac::~RemovableDeviceNotificationsMac() {
-  DCHECK_EQ(this, g_removable_device_notifications_mac);
-  g_removable_device_notifications_mac = NULL;
-
   DASessionUnscheduleFromRunLoop(
       session_, CFRunLoopGetCurrent(), kCFRunLoopCommonModes);
 }
@@ -98,8 +90,7 @@ void RemovableDeviceNotificationsMac::UpdateDisk(
     // notification now. This is used for devices that are being removed or
     // devices that have changed.
     if (ShouldPostNotificationForDisk(it->second)) {
-      base::SystemMonitor::Get()->ProcessRemovableStorageDetached(
-          it->second.device_id());
+      receiver()->ProcessDetach(it->second.device_id());
     }
   }
 
@@ -113,20 +104,20 @@ void RemovableDeviceNotificationsMac::UpdateDisk(
     if (ShouldPostNotificationForDisk(info)) {
       string16 display_name = GetDisplayNameForDevice(
           info.total_size_in_bytes(), info.device_name());
-      base::SystemMonitor::Get()->ProcessRemovableStorageAttached(
+      receiver()->ProcessAttach(
           info.device_id(), display_name, info.mount_point().value());
     }
   }
 }
 
 bool RemovableDeviceNotificationsMac::GetDeviceInfoForPath(
-    const FilePath& path,
-    base::SystemMonitor::RemovableStorageInfo* device_info) const {
+    const base::FilePath& path,
+    StorageInfo* device_info) const {
   if (!path.IsAbsolute())
     return false;
 
-  FilePath current = path;
-  const FilePath root(FilePath::kSeparators);
+  base::FilePath current = path;
+  const base::FilePath root(base::FilePath::kSeparators);
   while (current != root) {
     DiskInfoMac info;
     if (FindDiskWithMountPoint(current, &info)) {
@@ -144,7 +135,7 @@ bool RemovableDeviceNotificationsMac::GetDeviceInfoForPath(
 uint64 RemovableDeviceNotificationsMac::GetStorageSize(
     const std::string& location) const {
   DiskInfoMac info;
-  if (!FindDiskWithMountPoint(FilePath(location), &info))
+  if (!FindDiskWithMountPoint(base::FilePath(location), &info))
     return 0;
   return info.total_size_in_bytes();
 }
@@ -197,7 +188,7 @@ bool RemovableDeviceNotificationsMac::ShouldPostNotificationForDisk(
 }
 
 bool RemovableDeviceNotificationsMac::FindDiskWithMountPoint(
-    const FilePath& mount_point,
+    const base::FilePath& mount_point,
     DiskInfoMac* info) const {
   for (std::map<std::string, DiskInfoMac>::const_iterator
       it = disk_info_map_.begin(); it != disk_info_map_.end(); ++it) {
@@ -207,12 +198,6 @@ bool RemovableDeviceNotificationsMac::FindDiskWithMountPoint(
     }
   }
   return false;
-}
-
-// static
-RemovableStorageNotifications* RemovableStorageNotifications::GetInstance() {
-  DCHECK(g_removable_device_notifications_mac != NULL);
-  return g_removable_device_notifications_mac;
 }
 
 }  // namespace chrome

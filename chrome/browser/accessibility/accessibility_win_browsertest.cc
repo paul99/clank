@@ -10,10 +10,11 @@
 #include "base/utf_string_conversions.h"
 #include "base/win/scoped_comptr.h"
 #include "chrome/browser/ui/browser.h"
-#include "chrome/browser/ui/browser_tabstrip.h"
 #include "chrome/browser/ui/browser_window.h"
+#include "chrome/browser/ui/tabs/tab_strip_model.h"
 #include "chrome/common/url_constants.h"
 #include "chrome/test/base/in_process_browser_test.h"
+#include "chrome/test/base/ui_controls.h"
 #include "chrome/test/base/ui_test_utils.h"
 #include "content/public/browser/notification_service.h"
 #include "content/public/browser/notification_types.h"
@@ -23,7 +24,6 @@
 #include "content/public/test/accessibility_test_utils_win.h"
 #include "third_party/iaccessible2/ia2_api_all.h"
 #include "third_party/isimpledom/ISimpleDOMNode.h"
-#include "ui/ui_controls/ui_controls.h"
 
 using content::OpenURLParams;
 using content::Referrer;
@@ -231,9 +231,8 @@ void AccessibilityWinBrowserTest::LoadInitialAccessibilityTreeFromHtml(
 // of the selected tab.
 IAccessible*
 AccessibilityWinBrowserTest::GetRendererAccessible() {
-  HWND hwnd_render_widget_host_view =
-      chrome::GetActiveWebContents(browser())->GetRenderWidgetHostView()->
-          GetNativeView();
+  HWND hwnd_render_widget_host_view = browser()->tab_strip_model()->
+      GetActiveWebContents()->GetRenderWidgetHostView()->GetNativeView();
 
   // Invoke windows screen reader detection by sending the WM_GETOBJECT message
   // with kIdCustom as the LPARAM.
@@ -252,7 +251,7 @@ AccessibilityWinBrowserTest::GetRendererAccessible() {
 }
 
 void AccessibilityWinBrowserTest::ExecuteScript(wstring script) {
-  chrome::GetActiveWebContents(browser())->GetRenderViewHost()->
+  browser()->tab_strip_model()->GetActiveWebContents()->GetRenderViewHost()->
       ExecuteJavascriptInWebFrame(L"", script);
 }
 
@@ -429,8 +428,9 @@ IN_PROC_BROWSER_TEST_F(AccessibilityWinBrowserTest,
   document1_checker.CheckAccessible(GetRendererAccessible());
 }
 
+// Flaky, http://crbug.com/167320 .
 IN_PROC_BROWSER_TEST_F(AccessibilityWinBrowserTest,
-                       TestRendererAccessibilityTree) {
+                       DISABLED_TestRendererAccessibilityTree) {
   LoadInitialAccessibilityTreeFromHtml(
       "<html><head><title>Accessibility Win Test</title></head>"
       "<body><input type='button' value='push' /><input type='checkbox' />"

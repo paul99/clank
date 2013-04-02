@@ -12,6 +12,7 @@
 
 #include "base/callback.h"
 #include "base/memory/weak_ptr.h"
+#include "chrome/browser/google_apis/drive_upload_mode.h"
 #include "chrome/browser/google_apis/gdata_errorcode.h"
 #include "chrome/browser/google_apis/operation_registry.h"
 #include "google_apis/gaia/oauth2_access_token_consumer.h"
@@ -105,7 +106,7 @@ class UrlFetchOperationBase : public AuthenticatedOperationInterface,
       OperationRegistry* registry,
       net::URLRequestContextGetter* url_request_context_getter,
       OperationType type,
-      const FilePath& drive_file_path);
+      const base::FilePath& drive_file_path);
   virtual ~UrlFetchOperationBase();
 
   // Gets URL for the request.
@@ -156,7 +157,7 @@ class UrlFetchOperationBase : public AuthenticatedOperationInterface,
   // By default, no file will be saved. Derived classes can set an output
   // file path in their constructors, if they want to save the downloaded
   // content to a file at a specific path.
-  void set_output_file_path(const FilePath& output_file_path) {
+  void set_output_file_path(const base::FilePath& output_file_path) {
     output_file_path_ = output_file_path;
   }
 
@@ -177,7 +178,7 @@ class UrlFetchOperationBase : public AuthenticatedOperationInterface,
   bool started_;
 
   bool save_temp_file_;
-  FilePath output_file_path_;
+  base::FilePath output_file_path_;
 
   // WeakPtrFactory bound to the UI thread.
   // Note: This should remain the last member so it'll be destroyed and
@@ -256,6 +257,152 @@ class GetDataOperation : public UrlFetchOperationBase {
   // invalidate its weak pointers before any other members are destroyed.
   base::WeakPtrFactory<GetDataOperation> weak_ptr_factory_;
   DISALLOW_COPY_AND_ASSIGN(GetDataOperation);
+};
+
+
+//=========================== InitiateUploadOperation ==========================
+
+// Struct for passing params needed for DriveServiceInterface::InitiateUpload()
+// calls.
+//
+// When uploading a new file (UPLOAD_NEW_FILE):
+// - |title| should be set.
+// - |upload_location| should be the upload_url() of the parent directory.
+//   (resumable-create-media URL)
+// - |etag| is ignored.
+//
+// When updating an existing file (UPLOAD_EXISTING_FILE):
+// - |title| should be empty
+// - |upload_location| should be the upload_url() of the existing file.
+//   (resumable-edit-media URL)
+// - If |etag| should be empty or should match the etag() of the destination
+//   file.
+// TODO(hidehiko): Get rid of this struct by splitting the method
+// InitiateUpload into two methods, InitiateUploadNewFile and
+// InitiateUploadExistingFile.
+struct InitiateUploadParams {
+  InitiateUploadParams(UploadMode upload_mode,
+                       const std::string& title,
+                       const std::string& content_type,
+                       int64 content_length,
+                       const GURL& upload_location,
+                       const base::FilePath& drive_file_path,
+                       const std::string& etag);
+  ~InitiateUploadParams();
+
+  const UploadMode upload_mode;
+  const std::string title;
+  const std::string content_type;
+  const int64 content_length;
+  const GURL upload_location;
+  const base::FilePath drive_file_path;
+  const std::string etag;
+};
+
+// Callback type for DocumentServiceInterface::InitiateUpload.
+typedef base::Callback<void(GDataErrorCode error,
+                            const GURL& upload_url)> InitiateUploadCallback;
+
+// This class provides base implementation for performing the operation for
+// initiating the upload of a file.
+// |callback| will be called with the obtained upload URL. The URL will be
+// used with operations for resuming the file uploading.
+//
+// Here's the flow of uploading:
+// 1) Get the upload URL with a class inheriting InitiateUploadOperationBase.
+// 2) Upload the first 512KB (see kUploadChunkSize in drive_uploader.cc)
+//    of the target file to the upload URL
+// 3) If there is more data to upload, go to 2).
+//
+class InitiateUploadOperationBase : public UrlFetchOperationBase {
+ protected:
+  // |callback| will be called with the upload URL, where upload data is
+  // uploaded to with ResumeUploadOperation.
+  // |callback| must not be null.
+  // |content_type| and |content_length| should be the attributes of the
+  // uploading file.
+  InitiateUploadOperationBase(
+      OperationRegistry* registry,
+      net::URLRequestContextGetter* url_request_context_getter,
+      const InitiateUploadCallback& callback,
+      const base::FilePath& drive_file_path,
+      const std::string& content_type,
+      int64 content_length);
+  virtual ~InitiateUploadOperationBase();
+
+  // UrlFetchOperationBase overrides.
+  virtual void ProcessURLFetchResults(const net::URLFetcher* source) OVERRIDE;
+  virtual void NotifySuccessToOperationRegistry() OVERRIDE;
+  virtual void RunCallbackOnPrematureFailure(GDataErrorCode code) OVERRIDE;
+  virtual std::vector<std::string> GetExtraRequestHeaders() const OVERRIDE;
+
+ private:
+  const InitiateUploadCallback callback_;
+  const base::FilePath drive_file_path_;
+  const std::string content_type_;
+  const int64 content_length_;
+
+  DISALLOW_COPY_AND_ASSIGN(InitiateUploadOperationBase);
+};
+
+//============================ DownloadFileOperation ===========================
+
+// Callback type for DownloadHostedDocument/DownloadFile
+// DocumentServiceInterface calls.
+typedef base::Callback<void(GDataErrorCode error,
+                            const base::FilePath& temp_file)>
+    DownloadActionCallback;
+
+// This class performs the operation for downloading of a given document/file.
+class DownloadFileOperation : public UrlFetchOperationBase {
+ public:
+  // download_action_callback:
+  //   This callback is called when the download is complete. Must not be null.
+  //
+  // get_content_callback:
+  //   This callback is called when some part of the content is
+  //   read. Used to read the download content progressively. May be null.
+  //
+  // download_url:
+  //   Specifies the target file to download.
+  //
+  // drive_file_path:
+  //   Specifies the drive path of the target file. Shown in UI.
+  //   TODO(satorux): Remove the drive file path hack. crbug.com/163296
+  //
+  // output_file_path:
+  //   Specifies the file path to save the downloaded file.
+  //
+  DownloadFileOperation(
+      OperationRegistry* registry,
+      net::URLRequestContextGetter* url_request_context_getter,
+      const DownloadActionCallback& download_action_callback,
+      const GetContentCallback& get_content_callback,
+      const GURL& download_url,
+      const base::FilePath& drive_file_path,
+      const base::FilePath& output_file_path);
+  virtual ~DownloadFileOperation();
+
+ protected:
+  // UrlFetchOperationBase overrides.
+  virtual GURL GetURL() const OVERRIDE;
+  virtual void ProcessURLFetchResults(const net::URLFetcher* source) OVERRIDE;
+  virtual void RunCallbackOnPrematureFailure(GDataErrorCode code) OVERRIDE;
+
+  // net::URLFetcherDelegate overrides.
+  virtual void OnURLFetchDownloadProgress(const net::URLFetcher* source,
+                                          int64 current, int64 total) OVERRIDE;
+  virtual bool ShouldSendDownloadData() OVERRIDE;
+  virtual void OnURLFetchDownloadData(
+      const net::URLFetcher* source,
+      scoped_ptr<std::string> download_data) OVERRIDE;
+
+ private:
+  const DownloadActionCallback download_action_callback_;
+  const GetContentCallback get_content_callback_;
+  const GURL download_url_;
+
+  DISALLOW_COPY_AND_ASSIGN(DownloadFileOperation);
 };
 
 }  // namespace google_apis

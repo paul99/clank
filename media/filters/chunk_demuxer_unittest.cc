@@ -30,6 +30,14 @@ static const uint8 kTracksHeader[] = {
   0x01, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,  // tracks(size = 0)
 };
 
+// WebM Block bytes that represent a VP8 keyframe.
+static const uint8 kVP8Keyframe[] = {
+  0x010, 0x00, 0x00, 0x9d, 0x01, 0x2a, 0x00, 0x10, 0x00, 0x10, 0x00
+};
+
+// WebM Block bytes that represent a VP8 interframe.
+static const uint8 kVP8Interframe[] = { 0x11, 0x00, 0x00 };
+
 static const int kTracksHeaderSize = sizeof(kTracksHeader);
 static const int kTracksSizeOffset = 4;
 
@@ -484,6 +492,15 @@ class ChunkDemuxerTest : public testing::Test {
     return GenerateCluster(timecode, timecode, block_count);
   }
 
+  void AddVideoBlockGroup(ClusterBuilder* cb, int track_num, int64 timecode,
+                          int duration, int flags) {
+    const uint8* data =
+        (flags & kWebMFlagKeyframe) != 0 ? kVP8Keyframe : kVP8Interframe;
+    int size = (flags & kWebMFlagKeyframe) != 0 ? sizeof(kVP8Keyframe) :
+        sizeof(kVP8Interframe);
+    cb->AddBlockGroup(track_num, timecode, duration, flags, data, size);
+  }
+
   scoped_ptr<Cluster> GenerateCluster(int first_audio_timecode,
                                       int first_video_timecode,
                                       int block_count) {
@@ -527,11 +544,11 @@ class ChunkDemuxerTest : public testing::Test {
     if (audio_timecode <= video_timecode) {
       cb.AddBlockGroup(kAudioTrackNum, audio_timecode, kAudioBlockDuration,
                        kWebMFlagKeyframe, data.get(), size);
-      cb.AddBlockGroup(kVideoTrackNum, video_timecode, kVideoBlockDuration,
-                       video_flag, data.get(), size);
+      AddVideoBlockGroup(&cb, kVideoTrackNum, video_timecode,
+                         kVideoBlockDuration, video_flag);
     } else {
-      cb.AddBlockGroup(kVideoTrackNum, video_timecode, kVideoBlockDuration,
-                       video_flag, data.get(), size);
+      AddVideoBlockGroup(&cb, kVideoTrackNum, video_timecode,
+                         kVideoBlockDuration, video_flag);
       cb.AddBlockGroup(kAudioTrackNum, audio_timecode, kAudioBlockDuration,
                        kWebMFlagKeyframe, data.get(), size);
     }
@@ -560,8 +577,13 @@ class ChunkDemuxerTest : public testing::Test {
 
     // Make the last block a BlockGroup so that it doesn't get delayed by the
     // block duration calculation logic.
-    cb.AddBlockGroup(track_number, timecode, block_duration,
-                      kWebMFlagKeyframe, data.get(), size);
+    if (track_number == kVideoTrackNum) {
+      AddVideoBlockGroup(&cb, track_number, timecode, block_duration,
+                         kWebMFlagKeyframe);
+    } else {
+      cb.AddBlockGroup(track_number, timecode, block_duration,
+                       kWebMFlagKeyframe, data.get(), size);
+    }
     return cb.Finish();
   }
 
@@ -783,11 +805,12 @@ TEST_F(ChunkDemuxerTest, TestInit) {
 
       const AudioDecoderConfig& config = audio_stream->audio_decoder_config();
       EXPECT_EQ(kCodecVorbis, config.codec());
-      EXPECT_EQ(16, config.bits_per_channel());
+      EXPECT_EQ(32, config.bits_per_channel());
       EXPECT_EQ(CHANNEL_LAYOUT_STEREO, config.channel_layout());
       EXPECT_EQ(44100, config.samples_per_second());
       EXPECT_TRUE(config.extra_data());
       EXPECT_GT(config.extra_data_size(), 0u);
+      EXPECT_EQ(kSampleFormatPlanarF32, config.sample_format());
       EXPECT_EQ(is_audio_encrypted,
                 audio_stream->audio_decoder_config().is_encrypted());
     } else {
@@ -2491,6 +2514,16 @@ TEST_F(ChunkDemuxerTest, TestAppendAfterEndOfStream) {
   scoped_ptr<Cluster> cluster_b(kDefaultSecondCluster());
   ASSERT_TRUE(AppendData(cluster_b->data(), cluster_b->size()));
   demuxer_->EndOfStream(PIPELINE_OK);
+}
+
+// Test receiving a Shutdown() call before we get an Initialize()
+// call. This can happen if video element gets destroyed before
+// the pipeline has a chance to initialize the demuxer.
+TEST_F(ChunkDemuxerTest, TestShutdownBeforeInitialize) {
+  demuxer_->Shutdown();
+  demuxer_->Initialize(
+      &host_, CreateInitDoneCB(DEMUXER_ERROR_COULD_NOT_OPEN));
+  message_loop_.RunUntilIdle();
 }
 
 }  // namespace media

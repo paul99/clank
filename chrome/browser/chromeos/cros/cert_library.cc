@@ -10,8 +10,8 @@
 #include "base/command_line.h"
 #include "base/memory/weak_ptr.h"
 #include "base/observer_list_threadsafe.h"
-#include "base/string_number_conversions.h"
 #include "base/string_util.h"
+#include "base/strings/string_number_conversions.h"
 #include "base/utf_string_conversions.h"
 #include "chrome/browser/browser_process.h"  // g_browser_process
 #include "chrome/browser/chromeos/cros/cros_library.h"
@@ -29,9 +29,9 @@
 #include "grit/generated_resources.h"
 #include "net/base/cert_database.h"
 #include "net/base/nss_cert_database.h"
+#include "third_party/icu/public/i18n/unicode/coll.h"  // icu::Collator
 #include "ui/base/l10n/l10n_util.h"
 #include "ui/base/l10n/l10n_util_collator.h"
-#include "unicode/coll.h"  // icu::Collator
 
 using content::BrowserThread;
 
@@ -132,7 +132,7 @@ class CertLibraryImpl
     net::CertDatabase::GetInstance()->AddObserver(this);
   }
 
-  ~CertLibraryImpl() {
+  virtual ~CertLibraryImpl() {
     DCHECK(request_task_.is_null());
     net::CertDatabase::GetInstance()->RemoveObserver(this);
   }

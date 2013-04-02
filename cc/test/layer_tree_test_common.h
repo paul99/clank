@@ -5,32 +5,30 @@
 #ifndef CC_TEST_LAYER_TREE_TEST_COMMON_H_
 #define CC_TEST_LAYER_TREE_TEST_COMMON_H_
 
-#include "base/hash_tables.h"
 #include "base/memory/ref_counted.h"
 #include "base/threading/thread.h"
 #include "cc/layer_tree_host.h"
 #include "cc/layer_tree_host_impl.h"
-#include "cc/scoped_thread_proxy.h"
-#include "cc/test/compositor_fake_web_graphics_context_3d.h"
+#include "cc/thread.h"
 #include "testing/gtest/include/gtest/gtest.h"
-#include <public/WebAnimationDelegate.h>
+#include "third_party/WebKit/Source/Platform/chromium/public/WebAnimationDelegate.h"
 
 namespace cc {
 class LayerImpl;
 class LayerTreeHost;
 class LayerTreeHostClient;
 class LayerTreeHostImpl;
-class Thread;
-
 
 // Used by test stubs to notify the test when something interesting happens.
 class TestHooks : public WebKit::WebAnimationDelegate {
 public:
     virtual void beginCommitOnThread(LayerTreeHostImpl*) { }
     virtual void commitCompleteOnThread(LayerTreeHostImpl*) { }
-    virtual bool prepareToDrawOnThread(LayerTreeHostImpl*);
+    virtual bool prepareToDrawOnThread(
+        LayerTreeHostImpl*, LayerTreeHostImpl::FrameData&, bool result);
     virtual void drawLayersOnThread(LayerTreeHostImpl*) { }
     virtual void animateLayers(LayerTreeHostImpl*, base::TimeTicks monotonicTime) { }
+    virtual void updateAnimationState(LayerTreeHostImpl*, bool hasUnfinishedAnimation) { }
     virtual void willAnimateLayers(LayerTreeHostImpl*, base::TimeTicks monotonicTime) { }
     virtual void applyScrollAndScale(gfx::Vector2d, float) { }
     virtual void animate(base::TimeTicks monotonicTime) { }
@@ -41,6 +39,7 @@ public:
     virtual void didCommitAndDrawFrame() { }
     virtual void scheduleComposite() { }
     virtual void didDeferCommit() { }
+    virtual bool canActivatePendingTree();
 
     // Implementation of WebAnimationDelegate
     virtual void notifyAnimationStarted(double time) OVERRIDE { }
@@ -71,18 +70,17 @@ public:
 
     virtual void afterTest() = 0;
     virtual void beginTest() = 0;
+    virtual void setupTree();
 
     void endTest();
     void endTestAfterDelay(int delayMilliseconds);
 
-    void postSetNeedsAnimateToMainThread();
     void postAddAnimationToMainThread(Layer*);
     void postAddInstantAnimationToMainThread();
     void postSetNeedsCommitToMainThread();
     void postAcquireLayerTextures();
     void postSetNeedsRedrawToMainThread();
     void postSetVisibleToMainThread(bool visible);
-    void postDidAddAnimationToMainThread();
 
     void doBeginTest();
     void timeout();
@@ -98,7 +96,6 @@ protected:
 
     void realEndTest();
 
-    void dispatchSetNeedsAnimate();
     void dispatchAddInstantAnimation();
     void dispatchAddAnimation(Layer*);
     void dispatchSetNeedsCommit();
@@ -117,9 +114,6 @@ protected:
     scoped_ptr<MockLayerImplTreeHostClient> m_client;
     scoped_ptr<LayerTreeHost> m_layerTreeHost;
 
-protected:
-    scoped_refptr<ScopedThreadProxy> m_mainThreadProxy;
-
 private:
     bool m_beginning;
     bool m_endWhenBeginReturns;
@@ -130,6 +124,8 @@ private:
     scoped_ptr<Thread> m_mainCCThread;
     scoped_ptr<base::Thread> m_implThread;
     base::CancelableClosure m_timeout;
+    base::WeakPtr<ThreadedTest> m_mainThreadWeakPtr;
+    base::WeakPtrFactory<ThreadedTest> m_weakFactory;
 };
 
 class ThreadedTestThreadOnly : public ThreadedTest {
@@ -149,13 +145,14 @@ public:
     virtual void commitComplete() OVERRIDE;
     virtual bool prepareToDraw(FrameData&) OVERRIDE;
     virtual void drawLayers(FrameData&) OVERRIDE;
+    virtual void activatePendingTreeIfNeeded() OVERRIDE;
 
     // Make these public.
     typedef std::vector<LayerImpl*> LayerList;
-    using LayerTreeHostImpl::calculateRenderSurfaceLayerList;
 
 protected:
     virtual void animateLayers(base::TimeTicks monotonicTime, base::Time wallClockTime) OVERRIDE;
+    virtual void updateAnimationState() OVERRIDE;
     virtual base::TimeDelta lowFrequencyAnimationInterval() const OVERRIDE;
 
 private:
@@ -164,42 +161,22 @@ private:
     TestHooks* m_testHooks;
 };
 
-class CompositorFakeWebGraphicsContext3DWithTextureTracking : public CompositorFakeWebGraphicsContext3D {
-public:
-    static scoped_ptr<CompositorFakeWebGraphicsContext3DWithTextureTracking> create(Attributes);
-    virtual ~CompositorFakeWebGraphicsContext3DWithTextureTracking();
-
-    virtual WebKit::WebGLId createTexture();
-
-    virtual void deleteTexture(WebKit::WebGLId texture);
-
-    virtual void bindTexture(WebKit::WGC3Denum target, WebKit::WebGLId texture);
-
-    int numTextures() const;
-    int texture(int texture) const;
-    void resetTextures();
-
-    int numUsedTextures() const;
-    bool usedTexture(int texture) const;
-    void resetUsedTextures();
-
-private:
-    explicit CompositorFakeWebGraphicsContext3DWithTextureTracking(Attributes attrs);
-
-    std::vector<WebKit::WebGLId> m_textures;
-    base::hash_set<WebKit::WebGLId> m_usedTextures;
-};
-
 } // namespace cc
 
-#define SINGLE_AND_MULTI_THREAD_TEST_F(TEST_FIXTURE_NAME) \
-    TEST_F(TEST_FIXTURE_NAME, runSingleThread)            \
-    {                                                     \
-        runTest(false);                                   \
-    }                                                     \
-    TEST_F(TEST_FIXTURE_NAME, runMultiThread)             \
-    {                                                     \
-        runTest(true);                                    \
+#define SINGLE_THREAD_TEST_F(TEST_FIXTURE_NAME) \
+    TEST_F(TEST_FIXTURE_NAME, runSingleThread) \
+    { \
+        runTest(false); \
     }
+
+#define MULTI_THREAD_TEST_F(TEST_FIXTURE_NAME) \
+    TEST_F(TEST_FIXTURE_NAME, runMultiThread) \
+    { \
+        runTest(true); \
+    }
+
+#define SINGLE_AND_MULTI_THREAD_TEST_F(TEST_FIXTURE_NAME) \
+    SINGLE_THREAD_TEST_F(TEST_FIXTURE_NAME) \
+    MULTI_THREAD_TEST_F(TEST_FIXTURE_NAME)
 
 #endif  // CC_TEST_LAYER_TREE_TEST_COMMON_H_

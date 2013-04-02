@@ -16,16 +16,13 @@
 #include "ui/base/keycodes/keyboard_codes.h"
 #include "ui/gfx/font.h"
 #include "ui/gfx/native_widget_types.h"
+#include "ui/gfx/text_constants.h"
 #include "ui/views/controls/textfield/native_textfield_wrapper.h"
 #include "ui/views/view.h"
 
 #if !defined(OS_LINUX)
 #include "base/logging.h"
 #endif
-
-namespace gfx {
-struct StyleRange;
-}  // namespace gfx
 
 namespace ui {
 class Range;
@@ -145,6 +142,13 @@ class VIEWS_EXPORT Textfield : public View {
   bool draw_border() const { return draw_border_; }
   void RemoveBorder();
 
+  // Sets the border color (if one is in use).
+  void SetBorderColor(SkColor color);
+  // Reverts the textfield to the system default border color.
+  void UseDefaultBorderColor();
+  SkColor border_color() const { return border_color_; }
+  bool use_default_border_color() const { return use_default_border_color_; }
+
   // Sets the text to display when empty.
   void set_placeholder_text(const string16& text) {
     placeholder_text_ = text;
@@ -202,14 +206,18 @@ class VIEWS_EXPORT Textfield : public View {
   // only and has to be called after the wrapper is created.
   size_t GetCursorPosition() const;
 
-  // Applies |style| to the text specified by its range. The style will be
-  // ignored if range is empty or invalid. This is views-implementation only and
+  // Set the text color over the entire text or a logical character range.
+  // Empty and invalid ranges are ignored. This is views-implementation only and
   // has to be called after the wrapper is created.
-  void ApplyStyleRange(const gfx::StyleRange& style);
+  void SetColor(SkColor value);
+  void ApplyColor(SkColor value, const ui::Range& range);
 
-  // Applies the default style to the textfield. This is views-implementation
-  // only and has to be called after the wrapper is created.
-  void ApplyDefaultStyle();
+  // Set various text styles over the entire text or a logical character range.
+  // The respective |style| is applied if |value| is true, or removed if false.
+  // Empty and invalid ranges are ignored. This is views-implementation only and
+  // has to be called after the wrapper is created.
+  void SetStyle(gfx::TextStyle style, bool value);
+  void ApplyStyle(gfx::TextStyle style, bool value, const ui::Range& range);
 
   // Clears Edit history.
   void ClearEditHistory();
@@ -286,6 +294,12 @@ class VIEWS_EXPORT Textfield : public View {
 
   // Should we use the system background color instead of |background_color_|?
   bool use_default_background_color_;
+
+  // Border color.  Only used if |use_default_border_color_| is false.
+  SkColor border_color_;
+
+  // Should we use the system border color instead of |border_color_|?
+  bool use_default_border_color_;
 
   // TODO(beng): remove this once NativeTextfieldWin subclasses
   //             NativeControlWin.

@@ -12,6 +12,7 @@
 #include <openssl/opensslv.h>
 
 #include "base/bind.h"
+#include "base/callback_helpers.h"
 #include "base/memory/singleton.h"
 #include "base/metrics/histogram.h"
 #include "base/synchronization/lock.h"
@@ -39,7 +40,6 @@ namespace {
 #define GotoState(s) next_handshake_state_ = s
 #endif
 
-const size_t kMaxRecvBufferSize = 4096;
 const int kSessionCacheTimeoutSeconds = 60 * 60;
 const size_t kSessionCacheMaxEntires = 1024;
 
@@ -566,7 +566,20 @@ int SSLClientSocketOpenSSL::ClientCertRequestCallback(SSL* ssl,
   DCHECK(*pkey == NULL);
 
   if (!ssl_config_.send_client_cert) {
+    // First pass: we know that a client certificate is needed, but we do not
+    // have one at hand.
     client_auth_cert_needed_ = true;
+    STACK_OF(X509_NAME) *authorities = SSL_get_client_CA_list(ssl);
+    for (int i = 0; i < sk_X509_NAME_num(authorities); i++) {
+      X509_NAME *ca_name = (X509_NAME *)sk_X509_NAME_value(authorities, i);
+      unsigned char* str = NULL;
+      int length = i2d_X509_NAME(ca_name, &str);
+      cert_authorities_.push_back(std::string(
+          reinterpret_cast<const char*>(str),
+          static_cast<size_t>(length)));
+      OPENSSL_free(str);
+    }
+
     return -1;  // Suspends handshake.
   }
 
@@ -626,6 +639,9 @@ bool SSLClientSocketOpenSSL::GetSSLInfo(SSLInfo* ssl_info) {
   if (ssl_config_.version_fallback)
     ssl_info->connection_status |= SSL_CONNECTION_VERSION_FALLBACK;
 
+  ssl_info->handshake_type = SSL_session_reused(ssl_) ?
+      SSLInfo::HANDSHAKE_RESUME : SSLInfo::HANDSHAKE_FULL;
+
   DVLOG(3) << "Encoded connection status: cipher suite = "
       << SSLConnectionStatusToCipherSuite(ssl_info->connection_status)
       << " compression = "
@@ -638,7 +654,7 @@ bool SSLClientSocketOpenSSL::GetSSLInfo(SSLInfo* ssl_info) {
 void SSLClientSocketOpenSSL::GetSSLCertRequestInfo(
     SSLCertRequestInfo* cert_request_info) {
   cert_request_info->host_and_port = host_and_port_.ToString();
-  cert_request_info->client_certs = client_certs_;
+  cert_request_info->cert_authorities = cert_authorities_;
 }
 
 int SSLClientSocketOpenSSL::ExportKeyingMaterial(
@@ -683,21 +699,17 @@ SSLClientSocketOpenSSL::GetServerBoundCertService() const {
 void SSLClientSocketOpenSSL::DoReadCallback(int rv) {
   // Since Run may result in Read being called, clear |user_read_callback_|
   // up front.
-  CompletionCallback c = user_read_callback_;
-  user_read_callback_.Reset();
   user_read_buf_ = NULL;
   user_read_buf_len_ = 0;
-  c.Run(rv);
+  base::ResetAndReturn(&user_read_callback_).Run(rv);
 }
 
 void SSLClientSocketOpenSSL::DoWriteCallback(int rv) {
   // Since Run may result in Write being called, clear |user_write_callback_|
   // up front.
-  CompletionCallback c = user_write_callback_;
-  user_write_callback_.Reset();
   user_write_buf_ = NULL;
   user_write_buf_len_ = 0;
-  c.Run(rv);
+  base::ResetAndReturn(&user_write_callback_).Run(rv);
 }
 
 // StreamSocket implementation.
@@ -760,7 +772,7 @@ void SSLClientSocketOpenSSL::Disconnect() {
   server_cert_verify_result_.Reset();
   completed_handshake_ = false;
 
-  client_certs_.clear();
+  cert_authorities_.clear();
   client_auth_cert_needed_ = false;
 }
 
@@ -1044,10 +1056,25 @@ int SSLClientSocketOpenSSL::BufferRecv(void) {
   if (transport_recv_busy_)
     return ERR_IO_PENDING;
 
-  size_t max_write = BIO_ctrl_get_write_guarantee(transport_bio_);
-  if (max_write > kMaxRecvBufferSize)
-    max_write = kMaxRecvBufferSize;
+  // Determine how much was requested from |transport_bio_| that was not
+  // actually available.
+  size_t requested = BIO_ctrl_get_read_request(transport_bio_);
+  if (requested == 0) {
+    // This is not a perfect match of error codes, as no operation is
+    // actually pending. However, returning 0 would be interpreted as
+    // a possible sign of EOF, which is also an inappropriate match.
+    return ERR_IO_PENDING;
+  }
 
+  // Known Issue: While only reading |requested| data is the more correct
+  // implementation, it has the downside of resulting in frequent reads:
+  // One read for the SSL record header (~5 bytes) and one read for the SSL
+  // record body. Rather than issuing these reads to the underlying socket
+  // (and constantly allocating new IOBuffers), a single Read() request to
+  // fill |transport_bio_| is issued. As long as an SSL client socket cannot
+  // be gracefully shutdown (via SSL close alerts) and re-used for non-SSL
+  // traffic, this over-subscribed Read()ing will not cause issues.
+  size_t max_write = BIO_ctrl_get_write_guarantee(transport_bio_);
   if (!max_write)
     return ERR_IO_PENDING;
 
@@ -1153,13 +1180,31 @@ void SSLClientSocketOpenSSL::OnRecvComplete(int result) {
 }
 
 bool SSLClientSocketOpenSSL::IsConnected() const {
-  bool ret = completed_handshake_ && transport_->socket()->IsConnected();
-  return ret;
+  // If the handshake has not yet completed.
+  if (!completed_handshake_)
+    return false;
+  // If an asynchronous operation is still pending.
+  if (user_read_buf_ || user_write_buf_)
+    return true;
+
+  return transport_->socket()->IsConnected();
 }
 
 bool SSLClientSocketOpenSSL::IsConnectedAndIdle() const {
-  bool ret = completed_handshake_ && transport_->socket()->IsConnectedAndIdle();
-  return ret;
+  // If the handshake has not yet completed.
+  if (!completed_handshake_)
+    return false;
+  // If an asynchronous operation is still pending.
+  if (user_read_buf_ || user_write_buf_)
+    return false;
+  // If there is data waiting to be sent, or data read from the network that
+  // has not yet been consumed.
+  if (BIO_ctrl_pending(transport_bio_) > 0 ||
+      BIO_ctrl_wpending(transport_bio_) > 0) {
+    return false;
+  }
+
+  return transport_->socket()->IsConnectedAndIdle();
 }
 
 int SSLClientSocketOpenSSL::GetPeerAddress(IPEndPoint* addressList) const {

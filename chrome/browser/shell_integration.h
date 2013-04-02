@@ -59,6 +59,10 @@ class ShellIntegration {
   // client application for specific protocols.
   static DefaultWebClientSetPermission CanSetAsDefaultProtocolClient();
 
+  // Returns the path of the application to be launched given the protocol
+  // of the requested url. Returns an empty string on failure.
+  static std::string GetApplicationForProtocol(const GURL& url);
+
   // On Linux, it may not be possible to determine or set the default browser
   // on some desktop environments or configurations. So, we use this enum and
   // not a plain bool.
@@ -96,9 +100,9 @@ class ShellIntegration {
     bool is_platform_app;
     string16 title;
     string16 description;
-    FilePath extension_path;
+    base::FilePath extension_path;
     gfx::Image favicon;
-    FilePath profile_path;
+    base::FilePath profile_path;
 
     bool create_on_desktop;
     bool create_in_applications_menu;
@@ -127,7 +131,7 @@ class ShellIntegration {
   static CommandLine CommandLineArgsForLauncher(
       const GURL& url,
       const std::string& extension_app_id,
-      const FilePath& profile_path);
+      const base::FilePath& profile_path);
 
 #if defined(OS_WIN)
   // Generates an application user model ID (AppUserModelId) for a given app
@@ -138,14 +142,16 @@ class ShellIntegration {
   // Chrome installs), |app_name| should already be suffixed, this method will
   // then further suffix it with the profile id as described above.
   static string16 GetAppModelIdForProfile(const string16& app_name,
-                                          const FilePath& profile_path);
+                                          const base::FilePath& profile_path);
 
   // Generates an application user model ID (AppUserModelId) for Chromium by
   // calling GetAppModelIdForProfile() with ShellUtil::GetAppId() as app_name.
-  static string16 GetChromiumModelIdForProfile(const FilePath& profile_path);
+  static string16 GetChromiumModelIdForProfile(
+      const base::FilePath& profile_path);
 
   // Get the AppUserModelId for the App List, for the profile in |profile_path|.
-  static string16 GetAppListAppModelIdForProfile(const FilePath& profile_path);
+  static string16 GetAppListAppModelIdForProfile(
+      const base::FilePath& profile_path);
 
   // Returns the location (path and index) of the Chromium icon, (e.g.,
   // "C:\path\to\chrome.exe,0"). This is used to specify the icon to use
@@ -156,8 +162,19 @@ class ShellIntegration {
   // see http://crbug.com/28104
   static void MigrateChromiumShortcuts();
 
+  // Migrates all shortcuts in |path| which point to |chrome_exe| such that they
+  // have the appropriate AppUserModelId. Also makes sure those shortcuts have
+  // the dual_mode property set if such is requested by |check_dual_mode|.
+  // Returns the number of shortcuts migrated.
+  // This method should not be called prior to Windows 7.
+  // This method is only public for the sake of tests and shouldn't be called
+  // externally otherwise.
+  static int MigrateShortcutsInPathInternal(const base::FilePath& chrome_exe,
+                                            const base::FilePath& path,
+                                            bool check_dual_mode);
+
   // Returns the path to the Start Menu shortcut for the given Chrome.
-  static FilePath GetStartMenuShortcut(const FilePath& chrome_exe);
+  static base::FilePath GetStartMenuShortcut(const base::FilePath& chrome_exe);
 #endif  // defined(OS_WIN)
 
   // The current default web client application UI state. This is used when

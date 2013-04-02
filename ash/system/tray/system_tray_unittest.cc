@@ -16,6 +16,10 @@
 #include "ui/views/view.h"
 #include "ui/views/widget/widget.h"
 
+#if defined(OS_WIN)
+#include "base/win/windows_version.h"
+#endif
+
 namespace ash {
 namespace test {
 
@@ -31,7 +35,7 @@ class TestItem : public SystemTrayItem {
  public:
   TestItem() : SystemTrayItem(GetSystemTray()), tray_view_(NULL) {}
 
-  virtual views::View* CreateTrayView(user::LoginStatus status) {
+  virtual views::View* CreateTrayView(user::LoginStatus status) OVERRIDE {
     tray_view_ = new views::View;
     // Add a label so it has non-zero width.
     tray_view_->SetLayoutManager(new views::FillLayout);
@@ -39,42 +43,44 @@ class TestItem : public SystemTrayItem {
     return tray_view_;
   }
 
-  virtual views::View* CreateDefaultView(user::LoginStatus status) {
+  virtual views::View* CreateDefaultView(user::LoginStatus status) OVERRIDE {
     default_view_ = new views::View;
     default_view_->SetLayoutManager(new views::FillLayout);
     default_view_->AddChildView(new views::Label(UTF8ToUTF16("Default")));
     return default_view_;
   }
 
-  virtual views::View* CreateDetailedView(user::LoginStatus status) {
+  virtual views::View* CreateDetailedView(user::LoginStatus status) OVERRIDE {
     detailed_view_ = new views::View;
     detailed_view_->SetLayoutManager(new views::FillLayout);
     detailed_view_->AddChildView(new views::Label(UTF8ToUTF16("Detailed")));
     return detailed_view_;
   }
 
-  virtual views::View* CreateNotificationView(user::LoginStatus status) {
+  virtual views::View* CreateNotificationView(
+      user::LoginStatus status) OVERRIDE {
     notification_view_ = new views::View;
     return notification_view_;
   }
 
-  virtual void DestroyTrayView() {
+  virtual void DestroyTrayView() OVERRIDE {
     tray_view_ = NULL;
   }
 
-  virtual void DestroyDefaultView() {
+  virtual void DestroyDefaultView() OVERRIDE {
     default_view_ = NULL;
   }
 
-  virtual void DestroyDetailedView() {
+  virtual void DestroyDetailedView() OVERRIDE {
     detailed_view_ = NULL;
   }
 
-  virtual void DestroyNotificationView() {
+  virtual void DestroyNotificationView() OVERRIDE {
     notification_view_ = NULL;
   }
 
-  virtual void UpdateAfterLoginStatusChange(user::LoginStatus status) {
+  virtual void UpdateAfterLoginStatusChange(
+      user::LoginStatus status) OVERRIDE {
   }
 
   views::View* tray_view() const { return tray_view_; }
@@ -89,8 +95,8 @@ class TestItem : public SystemTrayItem {
   views::View* notification_view_;
 };
 
-// Trivial item implementation that returns NULL from tray/default/detailed view
-// creation methods.
+// Trivial item implementation that returns NULL from tray/default/detailed
+// view creation methods.
 class TestNoViewItem : public SystemTrayItem {
  public:
   TestNoViewItem() : SystemTrayItem(GetSystemTray()) {}
@@ -116,7 +122,8 @@ class TestNoViewItem : public SystemTrayItem {
   virtual void DestroyDefaultView() OVERRIDE {}
   virtual void DestroyDetailedView() OVERRIDE {}
   virtual void DestroyNotificationView() OVERRIDE {}
-  virtual void UpdateAfterLoginStatusChange(user::LoginStatus status) OVERRIDE {
+  virtual void UpdateAfterLoginStatusChange(
+      user::LoginStatus status) OVERRIDE {
   }
 };
 
@@ -225,12 +232,12 @@ TEST_F(SystemTrayTest, SystemTrayNotifications) {
   tray->ShowNotificationView(test_item);
   ASSERT_TRUE(test_item->notification_view() != NULL);
 
-  // Show the default view, ensure the notification view is destroyed.
+  // Show the default view, notification view should remain.
   tray->ShowDefaultView(BUBBLE_CREATE_NEW);
   RunAllPendingInMessageLoop();
-  ASSERT_TRUE(test_item->notification_view() == NULL);
+  ASSERT_TRUE(test_item->notification_view() != NULL);
 
-  // Show the detailed view, ensure the notificaiton view is created again.
+  // Show the detailed view, ensure the notificaiton view remains.
   tray->ShowDetailedView(detailed_item, 0, false, BUBBLE_CREATE_NEW);
   RunAllPendingInMessageLoop();
   ASSERT_TRUE(detailed_item->detailed_view() != NULL);

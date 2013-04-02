@@ -10,9 +10,9 @@
 #include "base/memory/scoped_ptr.h"
 #include "base/message_loop.h"
 #include "base/message_loop_proxy.h"
-#include "base/string_number_conversions.h"
 #include "base/string_split.h"
-#include "base/string_tokenizer.h"
+#include "base/strings/string_number_conversions.h"
+#include "base/strings/string_tokenizer.h"
 #include "base/synchronization/condition_variable.h"
 #include "base/synchronization/lock.h"
 #include "base/threading/platform_thread.h"
@@ -117,32 +117,32 @@ class CustomThreadWatcher : public ThreadWatcher {
     return old_state;
   }
 
-  void ActivateThreadWatching() {
+  virtual void ActivateThreadWatching() OVERRIDE {
     State old_state = UpdateState(ACTIVATED);
     EXPECT_EQ(old_state, INITIALIZED);
     ThreadWatcher::ActivateThreadWatching();
   }
 
-  void DeActivateThreadWatching() {
+  virtual void DeActivateThreadWatching() OVERRIDE {
     State old_state = UpdateState(DEACTIVATED);
     EXPECT_TRUE(old_state == ACTIVATED || old_state == SENT_PING ||
                 old_state == RECEIVED_PONG);
     ThreadWatcher::DeActivateThreadWatching();
   }
 
-  void PostPingMessage() {
+  virtual void PostPingMessage() OVERRIDE {
     State old_state = UpdateState(SENT_PING);
     EXPECT_TRUE(old_state == ACTIVATED || old_state == RECEIVED_PONG);
     ThreadWatcher::PostPingMessage();
   }
 
-  void OnPongMessage(uint64 ping_sequence_number) {
+  virtual void OnPongMessage(uint64 ping_sequence_number) OVERRIDE {
     State old_state = UpdateState(RECEIVED_PONG);
     EXPECT_TRUE(old_state == SENT_PING || old_state == DEACTIVATED);
     ThreadWatcher::OnPongMessage(ping_sequence_number);
   }
 
-  void OnCheckResponsiveness(uint64 ping_sequence_number) {
+  virtual void OnCheckResponsiveness(uint64 ping_sequence_number) OVERRIDE {
     ThreadWatcher::OnCheckResponsiveness(ping_sequence_number);
     {
       base::AutoLock auto_lock(custom_lock_);
@@ -297,7 +297,7 @@ class ThreadWatcherTest : public ::testing::Test {
     }
   }
 
-  ~ThreadWatcherTest() {
+  virtual ~ThreadWatcherTest() {
     ThreadWatcherList::DeleteAll();
     io_watcher_ = NULL;
     webkit_watcher_ = NULL;
@@ -351,7 +351,7 @@ TEST_F(ThreadWatcherTest, CommandLineArgs) {
             atoi(crash_on_hang_seconds.c_str()));
 
   // Check ThreadWatcherTestList has the right crash_on_hang_thread_names.
-  StringTokenizer tokens(crash_on_hang_thread_names, ",");
+  base::StringTokenizer tokens(crash_on_hang_thread_names, ",");
   std::vector<std::string> values;
   while (tokens.GetNext()) {
     const std::string& token = tokens.token();

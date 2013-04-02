@@ -5,6 +5,7 @@
 #include "chrome/browser/media_gallery/media_galleries_preferences_factory.h"
 
 #include "chrome/browser/media_gallery/media_galleries_preferences.h"
+#include "chrome/browser/prefs/pref_registry_syncable.h"
 #include "chrome/browser/profiles/profile_dependency_manager.h"
 
 // static
@@ -31,8 +32,9 @@ ProfileKeyedService* MediaGalleriesPreferencesFactory::BuildServiceInstanceFor(
   return new chrome::MediaGalleriesPreferences(profile);
 }
 
-void MediaGalleriesPreferencesFactory::RegisterUserPrefs(PrefService* prefs) {
-    chrome::MediaGalleriesPreferences::RegisterUserPrefs(prefs);
+void MediaGalleriesPreferencesFactory::RegisterUserPrefs(
+    PrefRegistrySyncable* prefs) {
+  chrome::MediaGalleriesPreferences::RegisterUserPrefs(prefs);
 }
 
 bool MediaGalleriesPreferencesFactory::ServiceRedirectedInIncognito() const {

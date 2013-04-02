@@ -5,8 +5,8 @@
 #include "chrome/browser/profiles/gaia_info_update_service.h"
 
 #include "base/command_line.h"
+#include "base/prefs/pref_service.h"
 #include "chrome/browser/browser_process.h"
-#include "chrome/browser/prefs/pref_service.h"
 #include "chrome/browser/profiles/profile.h"
 #include "chrome/browser/profiles/profile_info_cache.h"
 #include "chrome/browser/profiles/profile_manager.h"
@@ -77,14 +77,6 @@ bool GAIAInfoUpdateService::ShouldUseGAIAProfileInfo(Profile* profile) {
   return false;
 }
 
-// static
-void GAIAInfoUpdateService::RegisterUserPrefs(PrefServiceBase* prefs) {
-  prefs->RegisterInt64Pref(
-      prefs::kProfileGAIAInfoUpdateTime, 0, PrefServiceBase::UNSYNCABLE_PREF);
-  prefs->RegisterStringPref(
-      prefs::kProfileGAIAInfoPictureURL, "", PrefServiceBase::UNSYNCABLE_PREF);
-}
-
 bool GAIAInfoUpdateService::NeedsProfilePicture() const {
   return true;
 }
@@ -133,7 +125,7 @@ void GAIAInfoUpdateService::OnProfileDownloadSuccess(
   if (picture_status == ProfileDownloader::PICTURE_SUCCESS) {
     profile_->GetPrefs()->SetString(prefs::kProfileGAIAInfoPictureURL,
                                     picture_url);
-    gfx::Image gfx_image(bitmap);
+    gfx::Image gfx_image = gfx::Image::CreateFrom1xBitmap(bitmap);
     cache.SetGAIAPictureOfProfileAtIndex(profile_index, &gfx_image);
   } else if (picture_status == ProfileDownloader::PICTURE_DEFAULT) {
     cache.SetGAIAPictureOfProfileAtIndex(profile_index, NULL);

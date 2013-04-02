@@ -152,24 +152,24 @@ class SitePerProcessBrowserTest : public ContentBrowserTest {
         NOTIFICATION_LOAD_STOP,
         Source<NavigationController>(
             &shell()->web_contents()->GetController()));
-    bool result = content::ExecuteJavaScript(
-        window->web_contents()->GetRenderViewHost(),
-        L"", ASCIIToWide(script));
+    bool result = ExecuteScript(window->web_contents(), script);
     load_observer.Wait();
     return result;
   }
 
-  void SetUpCommandLine(CommandLine* command_line) {
+  virtual void SetUpCommandLine(CommandLine* command_line) OVERRIDE {
     command_line->AppendSwitch(switches::kSitePerProcess);
   }
 };
 
-IN_PROC_BROWSER_TEST_F(SitePerProcessBrowserTest, CrossSiteIframe) {
+// TODO(nasko): Disable this test until out-of-process iframes is ready and the
+// security checks are back in place.
+IN_PROC_BROWSER_TEST_F(SitePerProcessBrowserTest, DISABLED_CrossSiteIframe) {
   ASSERT_TRUE(test_server()->Start());
   net::TestServer https_server(
       net::TestServer::TYPE_HTTPS,
       net::TestServer::kLocalhost,
-      FilePath(FILE_PATH_LITERAL("content/test/data")));
+      base::FilePath(FILE_PATH_LITERAL("content/test/data")));
   ASSERT_TRUE(https_server.Start());
   GURL main_url(test_server()->GetURL("files/site_per_process_main.html"));
 
@@ -193,12 +193,15 @@ IN_PROC_BROWSER_TEST_F(SitePerProcessBrowserTest, CrossSiteIframe) {
   }
 }
 
-IN_PROC_BROWSER_TEST_F(SitePerProcessBrowserTest, CrossSiteIframeRedirectOnce) {
+// TODO(nasko): Disable this test until out-of-process iframes is ready and the
+// security checks are back in place.
+IN_PROC_BROWSER_TEST_F(SitePerProcessBrowserTest,
+                       DISABLED_CrossSiteIframeRedirectOnce) {
   ASSERT_TRUE(test_server()->Start());
   net::TestServer https_server(
       net::TestServer::TYPE_HTTPS,
       net::TestServer::kLocalhost,
-      FilePath(FILE_PATH_LITERAL("content/test/data")));
+      base::FilePath(FILE_PATH_LITERAL("content/test/data")));
   ASSERT_TRUE(https_server.Start());
 
   GURL main_url(test_server()->GetURL("files/site_per_process_main.html"));
@@ -314,13 +317,15 @@ IN_PROC_BROWSER_TEST_F(SitePerProcessBrowserTest, CrossSiteIframeRedirectOnce) {
   }
 }
 
+// TODO(nasko): Disable this test until out-of-process iframes is ready and the
+// security checks are back in place.
 IN_PROC_BROWSER_TEST_F(SitePerProcessBrowserTest,
-                       CrossSiteIframeRedirectTwice) {
+                       DISABLED_CrossSiteIframeRedirectTwice) {
   ASSERT_TRUE(test_server()->Start());
   net::TestServer https_server(
       net::TestServer::TYPE_HTTPS,
       net::TestServer::kLocalhost,
-      FilePath(FILE_PATH_LITERAL("content/test/data")));
+      base::FilePath(FILE_PATH_LITERAL("content/test/data")));
   ASSERT_TRUE(https_server.Start());
 
   GURL main_url(test_server()->GetURL("files/site_per_process_main.html"));

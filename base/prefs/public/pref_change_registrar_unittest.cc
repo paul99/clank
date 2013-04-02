@@ -5,6 +5,7 @@
 #include "base/bind.h"
 #include "base/bind_helpers.h"
 #include "base/prefs/pref_observer.h"
+#include "base/prefs/pref_registry_simple.h"
 #include "base/prefs/public/pref_change_registrar.h"
 #include "chrome/test/base/testing_pref_service.h"
 #include "testing/gmock/include/gmock/gmock.h"
@@ -21,7 +22,7 @@ const char kHomePageIsNewTabPage[] = "homepage_is_newtabpage";
 const char kApplicationLocale[] = "intl.app_locale";
 
 // A mock provider that allows us to capture pref observer changes.
-class MockPrefService : public TestingPrefService {
+class MockPrefService : public TestingPrefServiceSimple {
  public:
   MockPrefService() {}
   virtual ~MockPrefService() {}
@@ -127,16 +128,11 @@ TEST_F(PrefChangeRegistrarTest, RemoveAll) {
 class ObserveSetOfPreferencesTest : public testing::Test {
  public:
   virtual void SetUp() {
-    pref_service_.reset(new TestingPrefService);
-    pref_service_->RegisterStringPref(kHomePage,
-                                      "http://google.com",
-                                      PrefService::UNSYNCABLE_PREF);
-    pref_service_->RegisterBooleanPref(kHomePageIsNewTabPage,
-                                       false,
-                                       PrefService::UNSYNCABLE_PREF);
-    pref_service_->RegisterStringPref(kApplicationLocale,
-                                      "",
-                                      PrefService::UNSYNCABLE_PREF);
+    pref_service_.reset(new TestingPrefServiceSimple);
+    PrefRegistrySimple* registry = pref_service_->registry();
+    registry->RegisterStringPref(kHomePage, "http://google.com");
+    registry->RegisterBooleanPref(kHomePageIsNewTabPage, false);
+    registry->RegisterStringPref(kApplicationLocale, "");
   }
 
   PrefChangeRegistrar* CreatePrefChangeRegistrar() {
@@ -150,7 +146,7 @@ class ObserveSetOfPreferencesTest : public testing::Test {
 
   MOCK_METHOD1(OnPreferenceChanged, void(const std::string&));
 
-  scoped_ptr<TestingPrefService> pref_service_;
+  scoped_ptr<TestingPrefServiceSimple> pref_service_;
 };
 
 TEST_F(ObserveSetOfPreferencesTest, IsObserved) {

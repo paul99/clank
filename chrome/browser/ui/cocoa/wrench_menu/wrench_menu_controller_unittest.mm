@@ -4,6 +4,7 @@
 
 #include "base/memory/scoped_nsobject.h"
 #include "base/sys_string_conversions.h"
+#include "base/utf_string_conversions.h"
 #include "chrome/app/chrome_command_ids.h"
 #include "chrome/browser/sync/glue/session_model_associator.h"
 #include "chrome/browser/sync/profile_sync_service_factory.h"
@@ -43,12 +44,18 @@ class MockWrenchMenuModel : public WrenchMenuModel {
 
 class WrenchMenuControllerTest : public CocoaProfileTest {
  public:
-  virtual void SetUp() {
+  virtual void SetUp() OVERRIDE {
     CocoaProfileTest::SetUp();
     ASSERT_TRUE(browser());
 
     controller_.reset([[WrenchMenuController alloc] initWithBrowser:browser()]);
     fake_model_.reset(new MockWrenchMenuModel);
+  }
+
+  virtual void TearDown() OVERRIDE {
+    fake_model_.reset();
+    controller_.reset();
+    CocoaProfileTest::TearDown();
   }
 
   WrenchMenuController* controller() {

@@ -12,21 +12,21 @@
 #include "base/logging.h"
 #include "base/metrics/field_trial.h"
 #include "base/metrics/histogram.h"
-#include "base/string_number_conversions.h"
+#include "base/prefs/pref_service.h"
 #include "base/string_util.h"
+#include "base/strings/string_number_conversions.h"
 #include "base/time.h"
 #include "base/utf_string_conversions.h"
 #include "chrome/browser/autocomplete/autocomplete_field_trial.h"
 #include "chrome/browser/autocomplete/autocomplete_result.h"
 #include "chrome/browser/autocomplete/history_url_provider.h"
-#include "chrome/browser/history/history.h"
 #include "chrome/browser/history/history_database.h"
+#include "chrome/browser/history/history_service.h"
 #include "chrome/browser/history/history_service_factory.h"
 #include "chrome/browser/history/in_memory_url_index.h"
 #include "chrome/browser/history/in_memory_url_index_types.h"
 #include "chrome/browser/history/scored_history_match.h"
 #include "chrome/browser/net/url_fixer_upper.h"
-#include "chrome/browser/prefs/pref_service.h"
 #include "chrome/browser/profiles/profile.h"
 #include "chrome/common/chrome_switches.h"
 #include "chrome/common/pref_names.h"
@@ -143,7 +143,7 @@ void HistoryQuickProvider::Start(const AutocompleteInput& input,
       base::TimeTicks end_time = base::TimeTicks::Now();
       std::string name = "HistoryQuickProvider.QueryIndexTime." +
           base::IntToString(input.text().length());
-      base::Histogram* counter = base::Histogram::FactoryGet(
+      base::HistogramBase* counter = base::Histogram::FactoryGet(
           name, 1, 1000, 50, base::Histogram::kUmaTargetedHistogramFlag);
       counter->Add(static_cast<int>((end_time - start_time).InMilliseconds()));
     }
@@ -163,16 +163,23 @@ HistoryQuickProvider::~HistoryQuickProvider() {}
 
 void HistoryQuickProvider::DoAutocomplete() {
   // Get the matching URLs from the DB.
-  string16 term_string = autocomplete_input_.text();
-  ScoredHistoryMatches matches = GetIndex()->HistoryItemsForTerms(term_string);
+  ScoredHistoryMatches matches = GetIndex()->HistoryItemsForTerms(
+      autocomplete_input_.text(),
+      autocomplete_input_.cursor_position());
   if (matches.empty())
     return;
 
-  if (reorder_for_inlining_) {
-    // If we're allowed to reorder results in order to get an
-    // inlineable result to appear first (and hence have a
-    // HistoryQuickProvider suggestion possibly appear first), find
-    // the first inlineable result and then swap it to the front.
+  // If we're allowed to reorder results in order to get an inlineable
+  // result to appear first (and hence have a HistoryQuickProvider
+  // suggestion possibly appear first), find the first inlineable
+  // result and then swap it to the front.  Obviously, don't do this
+  // if we're told to prevent inline autocompletion.  (If we're told
+  // we're going to prevent inline autocompletion, we're going to
+  // later demote the score of all results so none will be inlined.
+  // Hence there's no need to reorder the results so an inlineable one
+  // appears first.)
+  if (reorder_for_inlining_ &&
+      !PreventInlineAutocomplete(autocomplete_input_)) {
     for (ScoredHistoryMatches::iterator i(matches.begin());
          (i != matches.end()) &&
              (i->raw_score >= AutocompleteResult::kLowestDefaultScore);

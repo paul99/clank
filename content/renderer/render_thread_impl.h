@@ -45,6 +45,10 @@ namespace IPC {
 class ForwardingMessageFilter;
 }
 
+namespace media {
+class AudioHardwareConfig;
+}
+
 namespace v8 {
 class Extension;
 }
@@ -64,6 +68,7 @@ class IndexedDBDispatcher;
 class MediaStreamCenter;
 class MediaStreamDependencyFactory;
 class P2PSocketDispatcher;
+class PeerConnectionTracker;
 class RendererWebKitPlatformSupportImpl;
 class RenderProcessObserver;
 class VideoCaptureImplManager;
@@ -127,6 +132,7 @@ class CONTENT_EXPORT RenderThreadImpl : public RenderThread,
       int64 idle_notification_delay_in_ms) OVERRIDE;
   virtual void ToggleWebKitSharedTimer(bool suspend) OVERRIDE;
   virtual void UpdateHistograms(int sequence_number) OVERRIDE;
+  virtual bool ResolveProxy(const GURL& url, std::string* proxy_list) OVERRIDE;
 #if defined(OS_WIN)
   virtual void PreCacheFont(const LOGFONT& log_font) OVERRIDE;
   virtual void ReleaseCachedFonts() OVERRIDE;
@@ -202,6 +208,10 @@ class CONTENT_EXPORT RenderThreadImpl : public RenderThread,
   // Returns a factory used for creating RTC PeerConnection objects.
   MediaStreamDependencyFactory* GetMediaStreamDependencyFactory();
 
+  PeerConnectionTracker* peer_connection_tracker() {
+    return peer_connection_tracker_.get();
+  }
+
   // Current P2PSocketDispatcher. Set to NULL if P2P API is disabled.
   P2PSocketDispatcher* p2p_socket_dispatcher() {
     return p2p_socket_dispatcher_.get();
@@ -239,6 +249,11 @@ class CONTENT_EXPORT RenderThreadImpl : public RenderThread,
   // instances shared based on configured audio parameters.  Lazily created on
   // first call.
   AudioRendererMixerManager* GetAudioRendererMixerManager();
+
+  // AudioHardwareConfig contains audio hardware configuration for
+  // renderer side clients.  Creation requires a synchronous IPC call so it is
+  // lazily created on the first call.
+  media::AudioHardwareConfig* GetAudioHardwareConfig();
 
 #if defined(OS_WIN)
   void PreCacheFontCharacters(const LOGFONT& log_font, const string16& str);
@@ -290,6 +305,9 @@ class CONTENT_EXPORT RenderThreadImpl : public RenderThread,
     return &histogram_customizer_;
   }
 
+  void SetFlingCurveParameters(const std::vector<float>& new_touchpad,
+                               const std::vector<float>& new_touchscreen);
+
  private:
   virtual bool OnControlMessageReceived(const IPC::Message& msg) OVERRIDE;
 
@@ -321,6 +339,10 @@ class CONTENT_EXPORT RenderThreadImpl : public RenderThread,
   scoped_refptr<DevToolsAgentFilter> devtools_agent_message_filter_;
 
   scoped_ptr<MediaStreamDependencyFactory> media_stream_factory_;
+
+  // This is used to communicate to the browser process the status
+  // of all the peer connections created in the renderer.
+  scoped_ptr<PeerConnectionTracker> peer_connection_tracker_;
 
   // Dispatches all P2P sockets.
   scoped_refptr<P2PSocketDispatcher> p2p_socket_dispatcher_;
@@ -371,6 +393,7 @@ class CONTENT_EXPORT RenderThreadImpl : public RenderThread,
   scoped_ptr<WebGraphicsContext3DCommandBufferImpl> gpu_vda_context3d_;
 
   scoped_ptr<AudioRendererMixerManager> audio_renderer_mixer_manager_;
+  scoped_ptr<media::AudioHardwareConfig> audio_hardware_config_;
 
   HistogramCustomizer histogram_customizer_;
 

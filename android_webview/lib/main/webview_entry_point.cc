@@ -5,10 +5,19 @@
 #include "android_webview/lib/main/aw_main_delegate.h"
 #include "android_webview/native/android_webview_jni_registrar.h"
 #include "base/android/jni_android.h"
-#include "base/command_line.h"
+#include "base/android/jni_registrar.h"
+#include "components/navigation_interception/component_jni_registrar.h"
+#include "components/web_contents_delegate_android/component_jni_registrar.h"
 #include "content/public/app/android_library_loader_hooks.h"
 #include "content/public/app/content_main.h"
-#include "content/public/common/content_switches.h"
+
+static base::android::RegistrationMethod
+    kWebViewDependencyRegisteredMethods[] = {
+    { "NavigationInterception",
+        components::RegisterNavigationInterceptionJni },
+    { "WebContentsDelegateAndroid",
+        components::RegisterWebContentsDelegateAndroidJni },
+};
 
 // This is called by the VM when the shared library is first loaded.
 // Most of the initialization is done in LibraryLoadedOnMainThread(), not here.
@@ -18,13 +27,15 @@ JNI_EXPORT jint JNI_OnLoad(JavaVM* vm, void* reserved) {
   if (!content::RegisterLibraryLoaderEntryHook(env))
     return -1;
 
-  if (!android_webview::RegisterJni(env))
+  // Register JNI for components we depend on.
+  if (!RegisterNativeMethods(
+      env,
+      kWebViewDependencyRegisteredMethods,
+      arraysize(kWebViewDependencyRegisteredMethods)))
     return -1;
 
-  // Set the command line to enable synchronous API compatibility.
-  CommandLine::Init(0, NULL);
-  CommandLine::ForCurrentProcess()->AppendSwitch(
-      switches::kEnableWebViewSynchronousAPIs);
+  if (!android_webview::RegisterJni(env))
+    return -1;
 
   content::SetContentMainDelegate(new android_webview::AwMainDelegate());
 

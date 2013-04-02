@@ -36,7 +36,7 @@ const int kNewProfileLinkLeftPadding = 40;
 
 AvatarMenuBubbleGtk::AvatarMenuBubbleGtk(Browser* browser,
                                          GtkWidget* anchor,
-                                         BubbleGtk::ArrowLocationGtk arrow,
+                                         BubbleGtk::FrameStyle arrow,
                                          const gfx::Rect* rect)
     : contents_(NULL),
       theme_service_(GtkThemeService::GetFrom(browser->profile())),
@@ -117,7 +117,7 @@ void AvatarMenuBubbleGtk::OnSizeRequest(GtkWidget* widget,
 void AvatarMenuBubbleGtk::OnNewProfileLinkClicked(GtkWidget* link) {
   if (!bubble_)
     return;
-  avatar_menu_model_->AddNewProfile();
+  avatar_menu_model_->AddNewProfile(ProfileMetrics::ADD_NEW_USER_ICON);
   CloseBubble();
 }
 

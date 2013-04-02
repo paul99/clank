@@ -45,10 +45,10 @@ class VisitDatabaseTest : public PlatformTest,
 
  private:
   // Test setup.
-  void SetUp() {
+  virtual void SetUp() {
     PlatformTest::SetUp();
     ASSERT_TRUE(temp_dir_.CreateUniqueTempDir());
-    FilePath db_file = temp_dir_.path().AppendASCII("VisitTest.db");
+    base::FilePath db_file = temp_dir_.path().AppendASCII("VisitTest.db");
 
     EXPECT_TRUE(db_.Open(db_file));
 
@@ -57,13 +57,13 @@ class VisitDatabaseTest : public PlatformTest,
     CreateMainURLIndex();
     InitVisitTable();
   }
-  void TearDown() {
+  virtual void TearDown() {
     db_.Close();
     PlatformTest::TearDown();
   }
 
   // Provided for URL/VisitDatabase.
-  virtual sql::Connection& GetDB() {
+  virtual sql::Connection& GetDB() OVERRIDE {
     return db_;
   }
 

@@ -18,7 +18,6 @@
 #include "content/browser/renderer_host/media/media_stream_provider.h"
 #include "content/common/content_export.h"
 #include "content/common/media/media_stream_options.h"
-#include "content/public/browser/browser_thread.h"
 #include "media/video/capture/video_capture_device.h"
 #include "media/video/capture/video_capture_types.h"
 
@@ -43,7 +42,7 @@ class CONTENT_EXPORT VideoCaptureManager : public MediaStreamProvider {
 
   virtual void Unregister() OVERRIDE;
 
-  virtual void EnumerateDevices() OVERRIDE;
+  virtual void EnumerateDevices(MediaStreamType stream_type) OVERRIDE;
 
   virtual int Open(const StreamDeviceInfo& device) OVERRIDE;
 
@@ -87,7 +86,7 @@ class CONTENT_EXPORT VideoCaptureManager : public MediaStreamProvider {
   struct Controller;
 
   // Called by the public functions, executed on device thread.
-  void OnEnumerateDevices();
+  void OnEnumerateDevices(MediaStreamType stream_type);
   void OnOpen(int capture_session_id, const StreamDeviceInfo& device);
   void OnClose(int capture_session_id);
   void OnStart(const media::VideoCaptureParams capture_params,
@@ -105,7 +104,8 @@ class CONTENT_EXPORT VideoCaptureManager : public MediaStreamProvider {
   // Executed on Browser::IO thread to call Listener.
   void OnOpened(MediaStreamType type, int capture_session_id);
   void OnClosed(MediaStreamType type, int capture_session_id);
-  void OnDevicesEnumerated(const StreamDeviceInfoArray& devices);
+  void OnDevicesEnumerated(MediaStreamType stream_type,
+                           scoped_ptr<StreamDeviceInfoArray> devices);
   void OnError(MediaStreamType type, int capture_session_id,
                MediaStreamProviderError error);
 
@@ -113,11 +113,13 @@ class CONTENT_EXPORT VideoCaptureManager : public MediaStreamProvider {
   // Browser::IO thread.
   void PostOnOpened(MediaStreamType type, int capture_session_id);
   void PostOnClosed(MediaStreamType type, int capture_session_id);
-  void PostOnDevicesEnumerated(const StreamDeviceInfoArray& devices);
+  void PostOnDevicesEnumerated(MediaStreamType stream_type,
+                               scoped_ptr<StreamDeviceInfoArray> devices);
   void PostOnError(int capture_session_id, MediaStreamProviderError error);
 
   // Helpers
-  void GetAvailableDevices(media::VideoCaptureDevice::Names* device_names);
+  void GetAvailableDevices(MediaStreamType stream_type,
+                           media::VideoCaptureDevice::Names* device_names);
   bool DeviceOpened(const media::VideoCaptureDevice::Name& device_name);
   bool DeviceInUse(const media::VideoCaptureDevice* video_capture_device);
   media::VideoCaptureDevice* GetOpenedDevice(

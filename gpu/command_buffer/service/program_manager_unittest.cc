@@ -37,7 +37,7 @@ namespace gles2 {
 class ProgramManagerTest : public testing::Test {
  public:
   ProgramManagerTest() : manager_(NULL) { }
-  ~ProgramManagerTest() {
+  virtual ~ProgramManagerTest() {
     manager_.Destroy(false);
   }
 
@@ -138,7 +138,7 @@ class ProgramManagerWithShaderTest : public testing::Test {
       :  manager_(NULL), program_info_(NULL) {
   }
 
-  ~ProgramManagerWithShaderTest() {
+  virtual ~ProgramManagerWithShaderTest() {
     manager_.Destroy(false);
     shader_manager_.Destroy(false);
   }
@@ -688,6 +688,9 @@ TEST_F(ProgramManagerWithShaderTest, GLDriverReturnsWrongTypeInfo) {
       .WillRepeatedly(ReturnRef(attrib_map));
   EXPECT_CALL(shader_translator, uniform_map())
       .WillRepeatedly(ReturnRef(uniform_map));
+  ShaderTranslator::NameMap name_map;
+  EXPECT_CALL(shader_translator, name_map())
+      .WillRepeatedly(ReturnRef(name_map));
   const GLuint kVShaderClientId = 2001;
   const GLuint kFShaderClientId = 2002;
   const GLuint kVShaderServiceId = 3001;
@@ -946,6 +949,9 @@ TEST_F(ProgramManagerWithShaderTest, BindAttribLocationConflicts) {
       .WillRepeatedly(ReturnRef(attrib_map));
   EXPECT_CALL(shader_translator, uniform_map())
       .WillRepeatedly(ReturnRef(uniform_map));
+  ShaderTranslator::NameMap name_map;
+  EXPECT_CALL(shader_translator, name_map())
+      .WillRepeatedly(ReturnRef(name_map));
   // Check we can create shader.
   ShaderManager::ShaderInfo* vshader = shader_manager_.CreateShaderInfo(
       kVShaderClientId, kVShaderServiceId, GL_VERTEX_SHADER);
@@ -1159,7 +1165,7 @@ class ProgramManagerWithCacheTest : public testing::Test {
         fragment_shader_(NULL),
         program_info_(NULL) {
   }
-  ~ProgramManagerWithCacheTest() {
+  virtual ~ProgramManagerWithCacheTest() {
     manager_.Destroy(false);
     shader_manager_.Destroy(false);
   }

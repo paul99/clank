@@ -106,7 +106,7 @@ void ProceedMediaAccessPermission(const MediaStreamRequestForUI& request,
     return;
   }
 
-  host->GetDelegate()->RequestMediaAccessPermission(&request, callback);
+  host->GetDelegate()->RequestMediaAccessPermission(request, callback);
 }
 
 }  // namespace
@@ -202,8 +202,9 @@ void MediaStreamUIController::PostResponse(
     // though DevicesAccepted seems to do so.
     for (MediaStreamDevices::const_iterator dev = devices.begin();
          dev != devices.end(); ++dev) {
-      device_list.push_back(StreamDeviceInfo(
-          dev->type, dev->name, dev->id, false));
+        device_list.push_back(StreamDeviceInfo(
+            dev->type, dev->name, dev->id,
+            dev->sample_rate, dev->channel_layout, false));
     }
 
     requester_->DevicesAccepted(label, device_list);

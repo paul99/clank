@@ -20,8 +20,8 @@
 #include "ui/base/ime/win/tsf_event_router.h"
 #include "ui/base/models/simple_menu_model.h"
 #include "ui/base/win/extra_sdk_defines.h"
+#include "ui/base/window_open_disposition.h"
 #include "ui/gfx/font.h"
-#include "webkit/glue/window_open_disposition.h"
 
 class LocationBarView;
 class OmniboxPopupView;
@@ -395,7 +395,9 @@ class OmniboxViewWin
   bool ShouldEnableCopyURL() const;
   void CopyURL();
 
-  // Handle of RichEdit dll.
+  // The handle to the RichEdit DLL.  In the rare case where the user's system
+  // is missing this DLL (due to some kind of system corruption), we show an
+  // error dialog; see missing_system_file_dialog_win.h.
   static HMODULE loaded_library_module_;
 
   scoped_ptr<OmniboxPopupView> popup_view_;

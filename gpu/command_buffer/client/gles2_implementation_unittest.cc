@@ -7,6 +7,7 @@
 #include "gpu/command_buffer/client/gles2_implementation.h"
 
 #include <GLES2/gl2ext.h>
+#include <GLES2/gl2extchromium.h>
 #include "gpu/command_buffer/client/client_test_helper.h"
 #include "gpu/command_buffer/client/program_info_manager.h"
 #include "gpu/command_buffer/client/transfer_buffer.h"
@@ -104,16 +105,16 @@ class MockTransferBuffer : public TransferBufferInterface {
     // we need to know their address before GLES2Implementation::Initialize
     // is called.
     for (int ii = 0; ii < kNumBuffers; ++ii) {
-      buffer_ids_[ii] = command_buffer_->CreateTransferBuffer(
-          size_ + ii * alignment_, -1);
+      buffers_[ii] = command_buffer_->CreateTransferBuffer(
+          size_ + ii * alignment_,
+          &buffer_ids_[ii]);
       EXPECT_NE(-1, buffer_ids_[ii]);
-      buffers_[ii] = command_buffer_->GetTransferBuffer(buffer_ids_[ii]);
     }
   }
 
   virtual ~MockTransferBuffer() { }
 
-  bool Initialize(
+  virtual bool Initialize(
       unsigned int starting_buffer_size,
       unsigned int result_size,
       unsigned int /* min_buffer_size */,

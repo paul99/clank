@@ -27,6 +27,7 @@ class RemovableDeviceNotificationsCros;
 class ResumeObserver;
 class ScreenDimmingObserver;
 class ScreenLockObserver;
+class ScreensaverController;
 class SessionManagerObserver;
 class SuspendObserver;
 class UserActivityNotifier;
@@ -65,6 +66,7 @@ class ChromeBrowserMainPartsChromeos : public ChromeBrowserMainPartsLinux {
  private:
   // Set up field trial for low memory headroom settings.
   void SetupLowMemoryHeadroomFieldTrial();
+  void SetupZramFieldTrial();
 
   scoped_ptr<contacts::ContactManager> contact_manager_;
   scoped_ptr<BrightnessObserver> brightness_observer_;
@@ -73,6 +75,7 @@ class ChromeBrowserMainPartsChromeos : public ChromeBrowserMainPartsLinux {
   scoped_ptr<SuspendObserver> suspend_observer_;
   scoped_ptr<ResumeObserver> resume_observer_;
   scoped_ptr<ScreenLockObserver> screen_lock_observer_;
+  scoped_ptr<ScreensaverController> screensaver_controller_;
   scoped_ptr<PowerButtonObserver> power_button_observer_;
   scoped_refptr<PowerStateOverride> power_state_override_;
   scoped_ptr<PrimaryDisplaySwitchObserver> primary_display_switch_observer_;
@@ -86,6 +89,7 @@ class ChromeBrowserMainPartsChromeos : public ChromeBrowserMainPartsLinux {
 
   VersionLoader cros_version_loader_;
   CancelableTaskTracker tracker_;
+  bool use_new_network_change_notifier_;
 
   DISALLOW_COPY_AND_ASSIGN(ChromeBrowserMainPartsChromeos);
 };

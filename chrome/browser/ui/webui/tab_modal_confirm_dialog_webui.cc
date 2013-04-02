@@ -14,19 +14,18 @@
 #include "base/utf_string_conversions.h"
 #include "base/values.h"
 #include "chrome/browser/profiles/profile.h"
-#include "chrome/browser/ui/constrained_window.h"
 #include "chrome/browser/ui/tab_modal_confirm_dialog_delegate.h"
-#include "chrome/browser/ui/webui/chrome_url_data_manager.h"
-#include "chrome/browser/ui/webui/chrome_web_ui_data_source.h"
+#include "chrome/browser/ui/web_contents_modal_dialog.h"
 #include "chrome/browser/ui/webui/constrained_web_dialog_ui.h"
-#include "chrome/common/jstemplate_builder.h"
 #include "chrome/common/url_constants.h"
 #include "content/public/browser/web_contents.h"
+#include "content/public/browser/web_ui_data_source.h"
 #include "grit/browser_resources.h"
 #include "grit/generated_resources.h"
 #include "ui/base/l10n/l10n_util.h"
 #include "ui/base/resource/resource_bundle.h"
 #include "ui/gfx/size.h"
+#include "ui/webui/web_ui_util.h"
 
 using content::WebContents;
 using content::WebUIMessageHandler;
@@ -47,10 +46,11 @@ TabModalConfirmDialogWebUI::TabModalConfirmDialogWebUI(
     : delegate_(delegate) {
   Profile* profile =
       Profile::FromBrowserContext(web_contents->GetBrowserContext());
-  ChromeWebUIDataSource* data_source =
-      new ChromeWebUIDataSource(chrome::kChromeUITabModalConfirmDialogHost);
-  data_source->set_default_resource(IDR_TAB_MODAL_CONFIRM_DIALOG_HTML);
-  ChromeURLDataManager::AddDataSource(profile, data_source);
+  content::WebUIDataSource* data_source = content::WebUIDataSource::Create(
+      chrome::kChromeUITabModalConfirmDialogHost);
+  data_source->SetDefaultResource(IDR_TAB_MODAL_CONFIRM_DIALOG_HTML);
+  data_source->DisableContentSecurityPolicy();
+  content::WebUIDataSource::Add(profile, data_source);
 
   constrained_web_dialog_delegate_ =
       CreateConstrainedWebDialog(profile, this, NULL, web_contents);
@@ -81,7 +81,7 @@ std::string TabModalConfirmDialogWebUI::GetDialogArgs() const {
   dict.SetString("message", delegate_->GetMessage());
   dict.SetString("accept", delegate_->GetAcceptButtonTitle());
   dict.SetString("cancel", delegate_->GetCancelButtonTitle());
-  ChromeWebUIDataSource::SetFontAndTextDirection(&dict);
+  webui::SetFontAndTextDirection(&dict);
   std::string json;
   base::JSONWriter::Write(&dict, &json);
   return json;

@@ -4,6 +4,7 @@
 
 #include "chrome/browser/shell_integration.h"
 
+#include <cstdlib>
 #include <map>
 
 #include "base/file_path.h"
@@ -15,14 +16,11 @@
 #include "base/utf_string_conversions.h"
 #include "chrome/browser/web_applications/web_app.h"
 #include "chrome/common/chrome_constants.h"
-#include "chrome/common/chrome_paths_internal.h"
 #include "content/public/test/test_browser_thread.h"
 #include "googleurl/src/gurl.h"
 #include "testing/gtest/include/gtest/gtest.h"
 
-#if defined(OS_WIN)
-#include "chrome/installer/util/browser_distribution.h"
-#elif defined(OS_POSIX) && !defined(OS_MACOSX)
+#if defined(OS_POSIX) && !defined(OS_MACOSX)
 #include "base/environment.h"
 #include "chrome/browser/shell_integration_linux.h"
 #endif
@@ -43,7 +41,7 @@ class MockEnvironment : public base::Environment {
     variables_[name] = value;
   }
 
-  virtual bool GetVar(const char* variable_name, std::string* result) {
+  virtual bool GetVar(const char* variable_name, std::string* result) OVERRIDE {
     if (ContainsKey(variables_, variable_name)) {
       *result = variables_[variable_name];
       return true;
@@ -52,12 +50,13 @@ class MockEnvironment : public base::Environment {
     return false;
   }
 
-  virtual bool SetVar(const char* variable_name, const std::string& new_value) {
+  virtual bool SetVar(const char* variable_name,
+                      const std::string& new_value) OVERRIDE {
     ADD_FAILURE();
     return false;
   }
 
-  virtual bool UnSetVar(const char* variable_name) {
+  virtual bool UnSetVar(const char* variable_name) OVERRIDE {
     ADD_FAILURE();
     return false;
   }
@@ -66,6 +65,43 @@ class MockEnvironment : public base::Environment {
   std::map<std::string, std::string> variables_;
 
   DISALLOW_COPY_AND_ASSIGN(MockEnvironment);
+};
+
+// Allows you to change the real environment, but reverts changes upon
+// destruction.
+class ScopedEnvironment {
+ public:
+  ScopedEnvironment() {}
+
+  ~ScopedEnvironment() {
+    for (std::map<std::string, std::string>::const_iterator
+         it = old_variables_.begin(); it != old_variables_.end(); ++it) {
+      if (it->second.empty()) {
+        unsetenv(it->first.c_str());
+      } else {
+        setenv(it->first.c_str(), it->second.c_str(), 1);
+      }
+    }
+  }
+
+  void Set(const std::string& name, const std::string& value) {
+    if (!ContainsKey(old_variables_, name)) {
+      const char* value = getenv(name.c_str());
+      if (value != NULL) {
+        old_variables_[name] = value;
+      } else {
+        old_variables_[name] = std::string();
+      }
+    }
+    setenv(name.c_str(), value.c_str(), 1);
+  }
+
+ private:
+  // Map from name to original value, or the empty string if there was no
+  // previous value.
+  std::map<std::string, std::string> old_variables_;
+
+  DISALLOW_COPY_AND_ASSIGN(ScopedEnvironment);
 };
 
 }  // namespace
@@ -141,7 +177,7 @@ TEST(ShellIntegrationTest, GetDesktopShortcutTemplate) {
 
 TEST(ShellIntegrationTest, GetWebShortcutFilename) {
   const struct {
-    const FilePath::CharType* path;
+    const base::FilePath::CharType* path;
     const char* url;
   } test_cases[] = {
     { FPL("http___foo_.desktop"), "http://foo" },
@@ -182,6 +218,7 @@ TEST(ShellIntegrationTest, GetDesktopFileContents) {
       "Version=1.0\n"
       "Encoding=UTF-8\n"
       "Name=Google Chrome\n"
+      "GenericName=Web Browser\n"
       "Comment=The web browser from Google\n"
       "Exec=/opt/google/chrome/google-chrome %U\n"
       "Terminal=false\n"
@@ -207,8 +244,8 @@ TEST(ShellIntegrationTest, GetDesktopFileContents) {
       "Type=Application\n"
       "Categories=Application;Network;WebBrowser;\n"
 #if !defined(USE_AURA)
-      // Aura Chrome creates browser window in a single X11 window, so
-      // WMClass does not matter.
+      // Aura Chrome does not (yet) set WMClass, so we only expect
+      // StartupWMClass on non-Aura builds.
       "StartupWMClass=gmail.com\n"
 #endif
     },
@@ -229,20 +266,26 @@ TEST(ShellIntegrationTest, GetDesktopFileContents) {
       "Exec=/opt/google/chrome/google-chrome --app=http://gmail.com/\n"
       "Icon=chrome-http__gmail.com\n"
 #if !defined(USE_AURA)
-      // Aura Chrome creates browser window in a single X11 window, so
-      // WMClass does not matter.
+      // Aura Chrome does not (yet) set WMClass, so we only expect
+      // StartupWMClass on non-Aura builds.
       "StartupWMClass=gmail.com\n"
 #endif
     },
 
-    // Make sure i18n-ed comments are removed.
+    // Make sure i18n-ed names and other fields are removed.
     { "http://gmail.com",
       "GMail",
       "chrome-http__gmail.com",
 
       "[Desktop Entry]\n"
       "Name=Google Chrome\n"
+      "Name[en_AU]=Google Chrome\n"
+      "Name[pl]=Google Chrome\n"
+      "GenericName=Web Browser\n"
+      "GenericName[en_AU]=Web Browser\n"
+      "GenericName[pl]=Navegador Web\n"
       "Exec=/opt/google/chrome/google-chrome %U\n"
+      "Comment[en_AU]=Some comment.\n"
       "Comment[pl]=Jakis komentarz.\n",
 
       "#!/usr/bin/env xdg-open\n"
@@ -251,8 +294,8 @@ TEST(ShellIntegrationTest, GetDesktopFileContents) {
       "Exec=/opt/google/chrome/google-chrome --app=http://gmail.com/\n"
       "Icon=chrome-http__gmail.com\n"
 #if !defined(USE_AURA)
-      // Aura Chrome creates browser window in a single X11 window, so
-      // WMClass does not matter.
+      // Aura Chrome does not (yet) set WMClass, so we only expect
+      // StartupWMClass on non-Aura builds.
       "StartupWMClass=gmail.com\n"
 #endif
     },
@@ -274,8 +317,8 @@ TEST(ShellIntegrationTest, GetDesktopFileContents) {
       "Exec=/opt/google/chrome/google-chrome --app=http://gmail.com/\n"
       "Icon=/opt/google/chrome/product_logo_48.png\n"
 #if !defined(USE_AURA)
-      // Aura Chrome creates browser window in a single X11 window, so
-      // WMClass does not matter.
+      // Aura Chrome does not (yet) set WMClass, so we only expect
+      // StartupWMClass on non-Aura builds.
       "StartupWMClass=gmail.com\n"
 #endif
     },
@@ -296,8 +339,8 @@ TEST(ShellIntegrationTest, GetDesktopFileContents) {
       "--app=http://evil.com/evil%20--join-the-b0tnet\n"
       "Icon=chrome-http__evil.com_evil\n"
 #if !defined(USE_AURA)
-      // Aura Chrome creates browser window in a single X11 window, so
-      // WMClass does not matter.
+      // Aura Chrome does not (yet) set WMClass, so we only expect
+      // StartupWMClass on non-Aura builds.
       "StartupWMClass=evil.com__evil%20--join-the-b0tnet\n"
 #endif
     },
@@ -320,8 +363,8 @@ TEST(ShellIntegrationTest, GetDesktopFileContents) {
       "-rf%20\\\\$HOME%20%3Eownz0red\"\n"
       "Icon=chrome-http__evil.com_evil\n"
 #if !defined(USE_AURA)
-      // Aura Chrome creates browser window in a single X11 window, so
-      // WMClass does not matter.
+      // Aura Chrome does not (yet) set WMClass, so we only expect
+      // StartupWMClass on non-Aura builds.
       "StartupWMClass=evil.com__evil;%20rm%20-rf%20_;%20%22;%20"
       "rm%20-rf%20$HOME%20%3Eownz0red\n"
 #endif
@@ -342,13 +385,20 @@ TEST(ShellIntegrationTest, GetDesktopFileContents) {
       "%60%20%3E/dev/null\n"
       "Icon=chrome-http__evil.com_evil\n"
 #if !defined(USE_AURA)
-      // Aura Chrome creates browser window in a single X11 window, so
-      // WMClass does not matter.
+      // Aura Chrome does not (yet) set WMClass, so we only expect
+      // StartupWMClass on non-Aura builds.
       "StartupWMClass=evil.com__evil%20%7C%20cat%20%60echo%20ownz0red"
       "%60%20%3E_dev_null\n"
 #endif
     },
   };
+
+  // Set the language to en_AU. This causes glib to copy the en_AU localized
+  // strings into the shortcut file. (We want to test that they are removed.)
+  ScopedEnvironment env;
+  env.Set("LC_ALL", "en_AU.UTF-8");
+  env.Set("LANGUAGE", "en_AU.UTF-8");
+
   for (size_t i = 0; i < ARRAYSIZE_UNSAFE(test_cases); i++) {
     SCOPED_TRACE(i);
     EXPECT_EQ(
@@ -358,38 +408,10 @@ TEST(ShellIntegrationTest, GetDesktopFileContents) {
             web_app::GenerateApplicationNameFromURL(GURL(test_cases[i].url)),
             GURL(test_cases[i].url),
             "",
-            FilePath(),
+            base::FilePath(),
             ASCIIToUTF16(test_cases[i].title),
             test_cases[i].icon_name,
-            FilePath()));
+            base::FilePath()));
   }
-}
-#elif defined(OS_WIN)
-TEST(ShellIntegrationTest, GetAppModelIdForProfileTest) {
-  const string16 base_app_id(
-      BrowserDistribution::GetDistribution()->GetBaseAppId());
-
-  // Empty profile path should get chrome::kBrowserAppID
-  FilePath empty_path;
-  EXPECT_EQ(base_app_id,
-            ShellIntegration::GetAppModelIdForProfile(base_app_id, empty_path));
-
-  // Default profile path should get chrome::kBrowserAppID
-  FilePath default_user_data_dir;
-  chrome::GetDefaultUserDataDirectory(&default_user_data_dir);
-  FilePath default_profile_path =
-      default_user_data_dir.AppendASCII(chrome::kInitialProfile);
-  EXPECT_EQ(base_app_id,
-            ShellIntegration::GetAppModelIdForProfile(base_app_id,
-                                                      default_profile_path));
-
-  // Non-default profile path should get chrome::kBrowserAppID joined with
-  // profile info.
-  FilePath profile_path(FILE_PATH_LITERAL("root"));
-  profile_path = profile_path.Append(FILE_PATH_LITERAL("udd"));
-  profile_path = profile_path.Append(FILE_PATH_LITERAL("User Data - Test"));
-  EXPECT_EQ(base_app_id + L".udd.UserDataTest",
-            ShellIntegration::GetAppModelIdForProfile(base_app_id,
-                                                      profile_path));
 }
 #endif

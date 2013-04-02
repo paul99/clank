@@ -70,7 +70,7 @@ MediaControls.prototype.createControl = function(className, opt_parent) {
  * @param {string} className Class name.
  * @param {function(Event)} handler Click handler.
  * @param {HTMLElement=} opt_parent Parent element or container if undefined.
- * @param {Boolean} opt_toggle True if the button has toggle state.
+ * @param {boolean} opt_toggle True if the button has toggle state.
  * @return {HTMLElement} The new button element.
  */
 MediaControls.prototype.createButton = function(
@@ -499,6 +499,23 @@ MediaControls.prototype.decodeState = function() {
     }
   }
   return false;
+};
+
+/**
+ * Remove current state from the page URL or the app state.
+ */
+MediaControls.prototype.clearState = function() {
+  if (window.appState) {
+    if ('time' in window.appState)
+      delete window.appState.time;
+    util.saveAppState();
+    return;
+  }
+
+  var newLocation = document.location.origin + document.location.pathname +
+      document.location.search + '#';
+
+  document.location.href = newLocation;
 };
 
 /**

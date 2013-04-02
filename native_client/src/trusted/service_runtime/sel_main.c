@@ -469,7 +469,7 @@ int NaClSelLdrMain(int argc, char **argv) {
     state.attach_debug_exception_handler_func =
         NaClDebugExceptionHandlerStandaloneAttach;
 #elif NACL_LINUX
-    handle_signals = 1;
+    /* NaCl's signal handler is always enabled on Linux. */
 #elif NACL_OSX
     if (!NaClInterceptMachExceptions()) {
       fprintf(stderr, "ERROR setting up Mach exception interception.\n");
@@ -479,7 +479,9 @@ int NaClSelLdrMain(int argc, char **argv) {
 # error Unknown host OS
 #endif
   }
-
+  if (NACL_LINUX) {
+    handle_signals = 1;
+  }
 
   errcode = LOAD_OK;
 
@@ -516,9 +518,6 @@ int NaClSelLdrMain(int argc, char **argv) {
               NaClErrorString(errcode));
     }
   }
-
-  /* Sanity check. */
-  NaClSignalAssertNoHandlers();
 
   if (handle_signals) {
     NaClSignalHandlerInit();
@@ -725,26 +724,15 @@ int NaClSelLdrMain(int argc, char **argv) {
 
   if (NULL != blob_library_file) {
     if (LOAD_OK == errcode) {
-      if (NULL != nap->text_shm) {
-        NaClLog(2, "Loading blob file %s\n", blob_library_file);
-        errcode = NaClAppLoadFileDynamically(nap, (struct Gio *) &blob_file);
-        if (LOAD_OK != errcode) {
-          fprintf(stderr, "Error while loading \"%s\": %s\n",
-                  blob_library_file,
-                  NaClErrorString(errcode));
-        }
-        NaClPerfCounterMark(&time_all_main, "BlobLoaded");
-        NaClPerfCounterIntervalLast(&time_all_main);
-      } else {
-        /*
-         * TODO(mseaborn): Omit -B when the IRT is not wanted (e.g., from
-         * sel_ldr_launcher_standalone), instead of looking for the absence
-         * of a segment gap, when the nexe does not follow NaCl's stable ABI.
-         */
-        NaClLog(LOG_WARNING,
-                "Main executable has no segment gap; not loading IRT library. "
-                "This is expected for PNaCl's translator nexes.\n");
+      NaClLog(2, "Loading blob file %s\n", blob_library_file);
+      errcode = NaClAppLoadFileDynamically(nap, (struct Gio *) &blob_file);
+      if (LOAD_OK != errcode) {
+        fprintf(stderr, "Error while loading \"%s\": %s\n",
+                blob_library_file,
+                NaClErrorString(errcode));
       }
+      NaClPerfCounterMark(&time_all_main, "BlobLoaded");
+      NaClPerfCounterIntervalLast(&time_all_main);
     }
 
     if (-1 == (*((struct Gio *) &blob_file)->vtbl->Close)((struct Gio *)

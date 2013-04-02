@@ -17,7 +17,7 @@ class WebContents;
 
 // Collection of functions to find Browsers based on various criteria.
 
-namespace browser {
+namespace chrome {
 
 // Retrieve the last active tabbed browser with a profile matching |profile|.
 // If |match_original_profiles| is true, matching is done based on the
@@ -28,20 +28,12 @@ namespace browser {
 // |type| refers to the host desktop the returned browser should belong to.
 Browser* FindTabbedBrowser(Profile* profile,
                            bool match_original_profiles,
-                           chrome::HostDesktopType type);
-
-// Deprecated. Call FindOrCreateTabbedBrowser and pass a desktop type instead.
-Browser* FindOrCreateTabbedBrowserDeprecated(Profile* profile);
+                           HostDesktopType type);
 
 // Returns the first tabbed browser matching |profile|. If there is no tabbed
 // browser a new one is created and returned for the desktop specified by
 // |type|. If a new browser is created it is not made visible.
-Browser* FindOrCreateTabbedBrowser(Profile* profile,
-                                   chrome::HostDesktopType type);
-
-}  // namespace browser
-
-namespace chrome {
+Browser* FindOrCreateTabbedBrowser(Profile* profile, HostDesktopType type);
 
 // Finds an existing browser window of any kind.
 // |type| refers to the host desktop the returned browser should belong to.
@@ -65,10 +57,6 @@ Browser* FindBrowserWithWindow(gfx::NativeWindow window);
 // Find the browser containing |web_contents| or NULL if none is found.
 // |web_contents| must not be NULL.
 Browser* FindBrowserWithWebContents(const content::WebContents* web_contents);
-
-// Finds the host desktop type for the web_contents passed in.
-HostDesktopType FindHostDesktopTypeForWebContents(
-    const content::WebContents* web_contents);
 
 // Returns the Browser object owned by |profile| on the given desktop type
 // whose window was most recently active. If no such Browsers exist, returns

@@ -76,9 +76,9 @@ bool AudioManagerLinux::CanShowAudioInputSettings() {
     case base::nix::DESKTOP_ENVIRONMENT_GNOME:
     case base::nix::DESKTOP_ENVIRONMENT_KDE3:
     case base::nix::DESKTOP_ENVIRONMENT_KDE4:
+    case base::nix::DESKTOP_ENVIRONMENT_UNITY:
       return true;
     case base::nix::DESKTOP_ENVIRONMENT_OTHER:
-    case base::nix::DESKTOP_ENVIRONMENT_UNITY:
     case base::nix::DESKTOP_ENVIRONMENT_XFCE:
       return false;
   }
@@ -89,12 +89,26 @@ bool AudioManagerLinux::CanShowAudioInputSettings() {
 
 void AudioManagerLinux::ShowAudioInputSettings() {
   scoped_ptr<base::Environment> env(base::Environment::Create());
-  base::nix::DesktopEnvironment desktop = base::nix::GetDesktopEnvironment(
-      env.get());
-  std::string command((desktop == base::nix::DESKTOP_ENVIRONMENT_GNOME) ?
-                      "gnome-volume-control" : "kmix");
-  base::LaunchProcess(CommandLine(FilePath(command)), base::LaunchOptions(),
-                      NULL);
+  CommandLine command_line(CommandLine::NO_PROGRAM);
+  switch (base::nix::GetDesktopEnvironment(env.get())) {
+    case base::nix::DESKTOP_ENVIRONMENT_GNOME:
+      command_line.SetProgram(base::FilePath("gnome-volume-control"));
+      break;
+    case base::nix::DESKTOP_ENVIRONMENT_KDE3:
+    case base::nix::DESKTOP_ENVIRONMENT_KDE4:
+      command_line.SetProgram(base::FilePath("kmix"));
+      break;
+    case base::nix::DESKTOP_ENVIRONMENT_UNITY:
+      command_line.SetProgram(base::FilePath("gnome-control-center"));
+      command_line.AppendArg("sound");
+      command_line.AppendArg("input");
+      break;
+    default:
+      LOG(ERROR) << "Failed to show audio input settings: we don't know "
+                 << "what command to use for your desktop environment.";
+      return;
+  }
+  base::LaunchProcess(command_line, base::LaunchOptions(), NULL);
 }
 
 void AudioManagerLinux::GetAudioInputDeviceNames(
@@ -337,16 +351,11 @@ AudioParameters AudioManagerLinux::GetPreferredLowLatencyOutputStreamParameters(
   if (input_params.frames_per_buffer() < buffer_size)
     buffer_size = input_params.frames_per_buffer();
 
-  int sample_rate = GetAudioHardwareSampleRate();
-  // CRAS will sample rate convert if needed, so pass through input sample rate.
-  if (UseCras())
-    sample_rate = input_params.sample_rate();
-
   // TODO(dalecurtis): This should include bits per channel and channel layout
   // eventually.
   return AudioParameters(
       AudioParameters::AUDIO_PCM_LOW_LATENCY, input_params.channel_layout(),
-      sample_rate, 16, buffer_size);
+      input_params.sample_rate(), 16, buffer_size);
 }
 
 }  // namespace media

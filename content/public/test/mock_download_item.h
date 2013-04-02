@@ -23,7 +23,9 @@ class MockDownloadItem : public DownloadItem {
   MOCK_METHOD1(RemoveObserver, void(DownloadItem::Observer*));
   MOCK_METHOD0(UpdateObservers, void());
   MOCK_METHOD0(DangerousDownloadValidated, void());
-  MOCK_METHOD0(TogglePause, void());
+  MOCK_METHOD0(Pause, void());
+  MOCK_METHOD0(Resume, void());
+  MOCK_METHOD0(ResumeInterruptedDownload, void());
   MOCK_METHOD1(Cancel, void(bool));
   MOCK_METHOD1(Delete, void(DeleteReason));
   MOCK_METHOD0(Remove, void());
@@ -64,7 +66,6 @@ class MockDownloadItem : public DownloadItem {
   MOCK_CONST_METHOD0(GetHash, const std::string&());
   MOCK_CONST_METHOD0(GetHashState, const std::string&());
   MOCK_CONST_METHOD0(GetFileExternallyRemoved, bool());
-  MOCK_CONST_METHOD0(GetSafetyState, SafetyState());
   MOCK_CONST_METHOD0(IsDangerous, bool());
   MOCK_CONST_METHOD0(GetDangerType, DownloadDangerType());
   MOCK_CONST_METHOD1(TimeRemaining, bool(base::TimeDelta*));
@@ -89,7 +90,6 @@ class MockDownloadItem : public DownloadItem {
   MOCK_METHOD1(SetOpened, void(bool));
   MOCK_METHOD1(SetDisplayName, void(const FilePath&));
   MOCK_CONST_METHOD1(DebugString, std::string(bool));
-  MOCK_METHOD0(MockDownloadOpenForTesting, void());
 };
 
 }  // namespace content

@@ -4,11 +4,12 @@
 
 #include "chrome/browser/extensions/api/tab_capture/tab_capture_registry.h"
 
+#include <utility>
+
 #include "content/public/browser/browser_thread.h"
 #include "chrome/browser/extensions/event_names.h"
 #include "chrome/browser/extensions/event_router.h"
 #include "chrome/browser/extensions/extension_system.h"
-#include "chrome/browser/media/media_internals.h"
 #include "chrome/browser/profiles/profile.h"
 #include "chrome/browser/profiles/profile_dependency_manager.h"
 #include "chrome/common/chrome_notification_types.h"
@@ -21,75 +22,23 @@ using content::BrowserThread;
 
 namespace extensions {
 
+TabCaptureRegistry::TabCaptureRequest::TabCaptureRequest(
+    std::string extension_id, int tab_id, tab_capture::TabCaptureState status)
+    : extension_id(extension_id), tab_id(tab_id), status(status) {
+}
+
+TabCaptureRegistry::TabCaptureRequest::~TabCaptureRequest() {
+}
+
 TabCaptureRegistry::TabCaptureRegistry(Profile* profile)
-    : proxy_(new MediaObserverProxy()), profile_(profile) {
-  proxy_->Attach(this);
+    : profile_(profile) {
+  MediaCaptureDevicesDispatcher::GetInstance()->AddObserver(this);
   registrar_.Add(this, chrome::NOTIFICATION_EXTENSION_UNLOADED,
                  content::Source<Profile>(profile_));
 }
 
 TabCaptureRegistry::~TabCaptureRegistry() {
-  proxy_->Detach();
-}
-
-void TabCaptureRegistry::HandleRequestUpdateOnUIThread(
-    int render_process_id,
-    int render_view_id,
-    const content::MediaStreamDevice& device,
-    const content::MediaRequestState new_state) {
-  EventRouter* router = profile_ ?
-      extensions::ExtensionSystem::Get(profile_)->event_router() : NULL;
-  if (!router)
-    return;
-
-  std::pair<int, int> key = std::make_pair(render_process_id, render_view_id);
-
-  if (requests_.find(key) == requests_.end()) {
-    LOG(ERROR) << "Receiving updates for invalid tab capture request.";
-    return;
-  }
-
-  tab_capture::TabCaptureState state =
-      tab_capture::TAB_CAPTURE_TAB_CAPTURE_STATE_NONE;
-  switch (new_state) {
-    case content::MEDIA_REQUEST_STATE_REQUESTED:
-      state = tab_capture::TAB_CAPTURE_TAB_CAPTURE_STATE_REQUESTED;
-      break;
-    case content::MEDIA_REQUEST_STATE_PENDING_APPROVAL:
-      state = tab_capture::TAB_CAPTURE_TAB_CAPTURE_STATE_PENDING;
-      break;
-    case content::MEDIA_REQUEST_STATE_DONE:
-      state = tab_capture::TAB_CAPTURE_TAB_CAPTURE_STATE_ACTIVE;
-      break;
-    case content::MEDIA_REQUEST_STATE_CLOSING:
-      state = tab_capture::TAB_CAPTURE_TAB_CAPTURE_STATE_STOPPED;
-      break;
-    case content::MEDIA_REQUEST_STATE_ERROR:
-      state = tab_capture::TAB_CAPTURE_TAB_CAPTURE_STATE_ERROR;
-      break;
-    default:
-      // TODO(justinlin): Implement muted state notification.
-      break;
-  }
-
-  if (state == tab_capture::TAB_CAPTURE_TAB_CAPTURE_STATE_NONE) {
-    // This is a state we don't handle.
-    return;
-  }
-
-  TabCaptureRegistry::TabCaptureRequest& request_info = requests_[key];
-  request_info.status = state;
-
-  scoped_ptr<tab_capture::CaptureInfo> info(new tab_capture::CaptureInfo());
-  info->tab_id = request_info.tab_id;
-  info->status = request_info.status;
-
-  scoped_ptr<base::ListValue> args(new ListValue());
-  args->Append(info->ToValue().release());
-  scoped_ptr<Event> event(new Event(
-      events::kOnTabCaptureStatusChanged, args.Pass()));
-  event->restrict_to_profile = profile_;
-  router->DispatchEventToExtension(request_info.extension_id, event.Pass());
+  MediaCaptureDevicesDispatcher::GetInstance()->RemoveObserver(this);
 }
 
 const TabCaptureRegistry::CaptureRequestList
@@ -130,13 +79,14 @@ void TabCaptureRegistry::Observe(int type,
 bool TabCaptureRegistry::AddRequest(const std::pair<int, int> key,
                                     const TabCaptureRequest& request) {
   // Currently, we do not allow multiple active captures for same tab.
-  if (requests_.find(key) != requests_.end())
-    if (requests_[key].status !=
-        tab_capture::TAB_CAPTURE_TAB_CAPTURE_STATE_STOPPED &&
-        requests_[key].status !=
-        tab_capture::TAB_CAPTURE_TAB_CAPTURE_STATE_ERROR)
+  DeviceCaptureRequestMap::iterator it = requests_.find(key);
+  if (it != requests_.end()) {
+    const tab_capture::TabCaptureState state = it->second.status;
+    if (state != tab_capture::TAB_CAPTURE_STATE_STOPPED &&
+        state != tab_capture::TAB_CAPTURE_STATE_ERROR)
       return false;
-  requests_[key] = request;
+  }
+  requests_.insert(std::make_pair(key, request));
   return true;
 }
 
@@ -146,38 +96,12 @@ bool TabCaptureRegistry::VerifyRequest(int render_process_id,
       render_process_id, render_view_id)) != requests_.end();
 }
 
-void TabCaptureRegistry::MediaObserverProxy::Attach(
-    TabCaptureRegistry* request_handler) {
-  handler_ = request_handler;
-  BrowserThread::PostTask(BrowserThread::IO, FROM_HERE,
-      base::Bind(&TabCaptureRegistry::MediaObserverProxy::
-                 RegisterAsMediaObserverOnIOThread, this, false));
-}
-
-void TabCaptureRegistry::MediaObserverProxy::Detach() {
-  handler_ = NULL;
-  BrowserThread::PostTask(BrowserThread::IO, FROM_HERE,
-      base::Bind(&TabCaptureRegistry::MediaObserverProxy::
-                 RegisterAsMediaObserverOnIOThread, this, true));
-}
-
-void TabCaptureRegistry::MediaObserverProxy::RegisterAsMediaObserverOnIOThread(
-      bool unregister) {
-  DCHECK(BrowserThread::CurrentlyOn(BrowserThread::IO));
-  if (MediaInternals::GetInstance()) {
-    if (!unregister)
-      MediaInternals::GetInstance()->AddObserver(this);
-    else
-      MediaInternals::GetInstance()->RemoveObserver(this);
-  }
-}
-
-void TabCaptureRegistry::MediaObserverProxy::OnRequestUpdate(
+void TabCaptureRegistry::OnRequestUpdate(
     int render_process_id,
     int render_view_id,
     const content::MediaStreamDevice& device,
     const content::MediaRequestState new_state) {
-  DCHECK(BrowserThread::CurrentlyOn(BrowserThread::IO));
+  DCHECK(BrowserThread::CurrentlyOn(BrowserThread::UI));
 
   // TODO(justinlin): We drop audio device events since they will occur in
   // parallel with the video device events (we would get duplicate events). When
@@ -186,21 +110,59 @@ void TabCaptureRegistry::MediaObserverProxy::OnRequestUpdate(
   if (device.type != content::MEDIA_TAB_VIDEO_CAPTURE)
     return;
 
-  BrowserThread::PostTask(BrowserThread::UI, FROM_HERE,
-      base::Bind(&TabCaptureRegistry::MediaObserverProxy::UpdateOnUIThread,
-          this, render_process_id, render_view_id, device, new_state));
-}
+  EventRouter* router = profile_ ?
+      extensions::ExtensionSystem::Get(profile_)->event_router() : NULL;
+  if (!router)
+    return;
 
-void TabCaptureRegistry::MediaObserverProxy::UpdateOnUIThread(
-    int render_process_id,
-    int render_view_id,
-    const content::MediaStreamDevice& device,
-    const content::MediaRequestState new_state) {
-  if (handler_)
-    handler_->HandleRequestUpdateOnUIThread(render_process_id,
-                                            render_view_id,
-                                            device,
-                                            new_state);
+  std::pair<int, int> key = std::make_pair(render_process_id, render_view_id);
+
+  DeviceCaptureRequestMap::iterator request_it = requests_.find(key);
+  if (request_it == requests_.end()) {
+    LOG(ERROR) << "Receiving updates for invalid tab capture request.";
+    return;
+  }
+
+  tab_capture::TabCaptureState state = tab_capture::TAB_CAPTURE_STATE_NONE;
+  switch (new_state) {
+    case content::MEDIA_REQUEST_STATE_REQUESTED:
+      state = tab_capture::TAB_CAPTURE_STATE_REQUESTED;
+      break;
+    case content::MEDIA_REQUEST_STATE_PENDING_APPROVAL:
+      state = tab_capture::TAB_CAPTURE_STATE_PENDING;
+      break;
+    case content::MEDIA_REQUEST_STATE_DONE:
+      state = tab_capture::TAB_CAPTURE_STATE_ACTIVE;
+      break;
+    case content::MEDIA_REQUEST_STATE_CLOSING:
+      state = tab_capture::TAB_CAPTURE_STATE_STOPPED;
+      break;
+    case content::MEDIA_REQUEST_STATE_ERROR:
+      state = tab_capture::TAB_CAPTURE_STATE_ERROR;
+      break;
+    default:
+      // TODO(justinlin): Implement muted state notification.
+      break;
+  }
+
+  if (state == tab_capture::TAB_CAPTURE_STATE_NONE) {
+    // This is a state we don't handle.
+    return;
+  }
+
+  TabCaptureRegistry::TabCaptureRequest* request_info = &request_it->second;
+  request_info->status = state;
+
+  scoped_ptr<tab_capture::CaptureInfo> info(new tab_capture::CaptureInfo());
+  info->tab_id = request_info->tab_id;
+  info->status = request_info->status;
+
+  scoped_ptr<base::ListValue> args(new ListValue());
+  args->Append(info->ToValue().release());
+  scoped_ptr<Event> event(new Event(
+      events::kOnTabCaptureStatusChanged, args.Pass()));
+  event->restrict_to_profile = profile_;
+  router->DispatchEventToExtension(request_info->extension_id, event.Pass());
 }
 
 }  // namespace extensions

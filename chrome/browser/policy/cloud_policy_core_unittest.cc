@@ -6,6 +6,7 @@
 
 #include "base/basictypes.h"
 #include "base/message_loop.h"
+#include "chrome/browser/policy/cloud_policy_constants.h"
 #include "chrome/browser/policy/cloud_policy_refresh_scheduler.h"
 #include "chrome/browser/policy/mock_cloud_policy_client.h"
 #include "chrome/browser/policy/mock_cloud_policy_store.h"
@@ -19,13 +20,15 @@ namespace policy {
 class CloudPolicyCoreTest : public testing::Test {
  protected:
   CloudPolicyCoreTest()
-      : core_(&store_) {
-    chrome::RegisterLocalState(&prefs_);
+      : core_(PolicyNamespaceKey(dm_protocol::kChromeUserPolicyType,
+                                 std::string()),
+              &store_) {
+    chrome::RegisterLocalState(&prefs_, prefs_.registry());
   }
 
   MessageLoop loop_;
 
-  TestingPrefService prefs_;
+  TestingPrefServiceSimple prefs_;
   MockCloudPolicyStore store_;
   CloudPolicyCore core_;
 

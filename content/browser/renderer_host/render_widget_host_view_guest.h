@@ -11,8 +11,8 @@
 #include "content/browser/renderer_host/render_widget_host_view_base.h"
 #include "content/common/content_export.h"
 #include "ui/gfx/native_widget_types.h"
-#include "ui/gfx/point.h"
 #include "ui/gfx/rect.h"
+#include "ui/gfx/vector2d_f.h"
 #include "webkit/glue/webcursor.h"
 
 #if defined(TOOLKIT_GTK)
@@ -37,7 +37,9 @@ class CONTENT_EXPORT RenderWidgetHostViewGuest
     : public RenderWidgetHostViewBase {
  public:
   RenderWidgetHostViewGuest(RenderWidgetHost* widget,
-                            BrowserPluginGuest* guest);
+                            BrowserPluginGuest* guest,
+                            bool enable_compositing,
+                            RenderWidgetHostView* platform_view);
   virtual ~RenderWidgetHostViewGuest();
 
   // RenderWidgetHostView implementation.
@@ -83,16 +85,17 @@ class CONTENT_EXPORT RenderWidgetHostViewGuest
   virtual void WillDestroyRenderWidget(RenderWidgetHost* rwh) {}
   virtual void SetTooltipText(const string16& tooltip_text) OVERRIDE;
   virtual void SelectionBoundsChanged(
-      const gfx::Rect& start_rect,
-      WebKit::WebTextDirection start_direction,
-      const gfx::Rect& end_rect,
-      WebKit::WebTextDirection end_direction) OVERRIDE;
+      const ViewHostMsg_SelectionBounds_Params& params) OVERRIDE;
   virtual BackingStore* AllocBackingStore(const gfx::Size& size) OVERRIDE;
   virtual void CopyFromCompositingSurface(
       const gfx::Rect& src_subrect,
       const gfx::Size& dst_size,
-      const base::Callback<void(bool)>& callback,
-      skia::PlatformBitmap* output) OVERRIDE;
+      const base::Callback<void(bool, const SkBitmap&)>& callback) OVERRIDE;
+  virtual void CopyFromCompositingSurfaceToVideoFrame(
+      const gfx::Rect& src_subrect,
+      const scoped_refptr<media::VideoFrame>& target,
+      const base::Callback<void(bool)>& callback) OVERRIDE;
+  virtual bool CanCopyToVideoFrame() const OVERRIDE;
   virtual void OnAcceleratedCompositingStateChange() OVERRIDE;
   virtual void AcceleratedSurfaceBuffersSwapped(
       const GpuHostMsg_AcceleratedSurfaceBuffersSwapped_Params& params,
@@ -102,8 +105,6 @@ class CONTENT_EXPORT RenderWidgetHostViewGuest
       int gpu_host_id) OVERRIDE;
   virtual void AcceleratedSurfaceSuspend() OVERRIDE;
   virtual bool HasAcceleratedSurface(const gfx::Size& desired_size) OVERRIDE;
-  virtual void AcceleratedSurfaceNew(uint64 surface_id,
-                                     const std::string& mailbox_name) OVERRIDE;
   virtual void SetHasHorizontalScrollbar(
       bool has_horizontal_scrollbar) OVERRIDE;
   virtual void SetScrollOffsetPinning(
@@ -161,7 +162,9 @@ class CONTENT_EXPORT RenderWidgetHostViewGuest
                                float page_scale_factor,
                                float min_page_scale_factor,
                                float max_page_scale_factor,
-                               const gfx::Size& content_size) OVERRIDE;
+                               const gfx::Size& content_size,
+                               const gfx::Vector2dF& controls_offset,
+                               const gfx::Vector2dF& content_offset) OVERRIDE;
   virtual void HasTouchEventHandlers(bool need_touch_events) OVERRIDE;
 #endif  // defined(OS_ANDROID)
 
@@ -176,9 +179,7 @@ class CONTENT_EXPORT RenderWidgetHostViewGuest
   virtual void WillWmDestroy() OVERRIDE;
 #endif  // defined(OS_WIN) && !defined(USE_AURA)
 
-#if defined(OS_POSIX) || defined(USE_AURA)
   virtual void GetScreenInfo(WebKit::WebScreenInfo* results) OVERRIDE;
-#endif  // defined(OS_POSIX) || defined(USE_AURA)
  protected:
   friend class RenderWidgetHostView;
 
@@ -186,11 +187,13 @@ class CONTENT_EXPORT RenderWidgetHostViewGuest
   // The model object.
   RenderWidgetHostImpl* host_;
 
-  // Whether or not this widget is hidden.
-  bool is_hidden_;
-
   BrowserPluginGuest *guest_;
-  gfx::Size size_;
+  bool enable_compositing_;
+  bool is_hidden_;
+  // The platform view for this RenderWidgetHostView.
+  // RenderWidgetHostViewGuest mostly only cares about stuff related to
+  // compositing, the rest are directly forwared to this |platform_view_|.
+  RenderWidgetHostViewPort* platform_view_;
 
   DISALLOW_COPY_AND_ASSIGN(RenderWidgetHostViewGuest);
 };

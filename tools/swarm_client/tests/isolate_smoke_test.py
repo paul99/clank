@@ -34,6 +34,7 @@ EXPECTED_MODES = (
   'merge',
   'read',
   'remap',
+  'rewrite',
   'run',
   'trace',
 )
@@ -48,6 +49,7 @@ RELATIVE_CWD = {
   'split': '.',
   'symlink_full': '.',
   'symlink_partial': '.',
+  'symlink_outside_build_root': '.',
   'touch_only': '.',
   'touch_root': os.path.join('tests', 'isolate'),
   'with_flag': '.',
@@ -82,6 +84,10 @@ DEPENDENCIES = {
     # files2 is a symlink to files1.
     'files2',
     'symlink_partial.py',
+  ],
+  'symlink_outside_build_root': [
+    os.path.join('link_outside_build_root', 'test_file3.txt'),
+    'symlink_outside_build_root.py',
   ],
   'touch_only': [
     'touch_only.py',
@@ -160,10 +166,12 @@ class IsolateBase(unittest.TestCase):
 
     Returns the equivalent string.
     """
+    flavor = isolate.get_flavor()
+    chromeos_value = int(flavor == 'linux')
     return cls._isolate_dict_to_string(
         {
           'conditions': [
-            ['OS=="%s"' % isolate.get_flavor(), {
+            ['OS=="%s" and chromeos==%d' % (flavor, chromeos_value), {
               'variables': variables
             }],
           ],
@@ -252,16 +260,17 @@ class IsolateModeBase(IsolateBase):
 
   def _expected_saved_state(self, args, read_only, empty_file, extra_vars):
     flavor = isolate.get_flavor()
+    chromeos_value = int(flavor == 'linux')
     expected = {
       u'command': [],
       u'files': self._gen_files(read_only, empty_file, True),
       u'isolate_file': unicode(self.filename()),
       u'isolated_files': [self.isolated],
-      u'os': unicode(isolate.get_flavor()),
       u'relative_cwd': unicode(RELATIVE_CWD[self.case()]),
       u'variables': {
         u'EXECUTABLE_SUFFIX': u'.exe' if flavor == 'win' else u'',
         u'OS': unicode(flavor),
+        u'chromeos': chromeos_value,
       },
     }
     if args:
@@ -284,12 +293,14 @@ class IsolateModeBase(IsolateBase):
         case,
         self.case() + '.isolate',
         'Rename the test case to test_%s()' % case)
+    chromeos_value = int(isolate.get_flavor() == 'linux')
     cmd = [
       sys.executable, os.path.join(ROOT_DIR, 'isolate.py'),
       mode,
       '--isolated', self.isolated,
       '--outdir', self.outdir,
       '--isolate', self.filename(),
+      '-V', 'chromeos', str(chromeos_value),
     ]
     cmd.extend(args)
 
@@ -339,7 +350,7 @@ class IsolateModeBase(IsolateBase):
 
   def _test_missing_trailing_slash(self, mode):
     try:
-      self._execute(mode, 'missing_trailing_slash.isolate', [], False)
+      self._execute(mode, 'missing_trailing_slash.isolate', [], True)
       self.fail()
     except subprocess.CalledProcessError as e:
       self.assertEquals('', e.output)
@@ -355,7 +366,7 @@ class IsolateModeBase(IsolateBase):
 
   def _test_non_existent(self, mode):
     try:
-      self._execute(mode, 'non_existent.isolate', [], False)
+      self._execute(mode, 'non_existent.isolate', [], True)
       self.fail()
     except subprocess.CalledProcessError as e:
       self.assertEquals('', e.output)
@@ -371,7 +382,7 @@ class IsolateModeBase(IsolateBase):
 
   def _test_all_items_invalid(self, mode):
     out = self._execute(mode, 'all_items_invalid.isolate',
-                        ['--ignore_broken_item'], False)
+                        ['--ignore_broken_item'], True)
     self._expect_results(['empty.py'], None, None, None)
 
     return out or ''
@@ -414,9 +425,15 @@ class Isolate(unittest.TestCase):
 
     # modes read and trace are tested together.
     modes_to_check = list(EXPECTED_MODES)
+    # Tested with test_help_modes.
     modes_to_check.remove('help')
+    # Tested with trace_read_merge.
     modes_to_check.remove('merge')
+    # Tested with trace_read_merge.
     modes_to_check.remove('read')
+    # Tested in isolate_test.py.
+    modes_to_check.remove('rewrite')
+    # Tested with trace_read_merge.
     modes_to_check.remove('trace')
     modes_to_check.append('trace_read_merge')
     for mode in modes_to_check:
@@ -479,6 +496,11 @@ class Isolate_check(IsolateModeBase):
       self._execute('check', 'symlink_partial.isolate', [], False)
       self._expect_no_tree()
       self._expect_results(['symlink_partial.py'], None, None, None)
+
+    def test_symlink_outside_build_root(self):
+      self._execute('check', 'symlink_outside_build_root.isolate', [], False)
+      self._expect_no_tree()
+      self._expect_results(['symlink_outside_build_root.py'], None, None, None)
 
 
 class Isolate_hashtable(IsolateModeBase):
@@ -605,6 +627,18 @@ class Isolate_hashtable(IsolateModeBase):
       self.assertEquals(sorted(expected), self._result_tree())
       self._expect_results(['symlink_partial.py'], None, None, None)
 
+    def test_symlink_outside_build_root(self):
+      self._execute(
+          'hashtable', 'symlink_outside_build_root.isolate', [], False)
+      # Construct our own tree.
+      expected = [
+        str(v['h'])
+        for v in self._gen_files(False, None, False).itervalues() if 'h' in v
+      ]
+      expected.append(calc_sha1(self.isolated))
+      self.assertEquals(sorted(expected), self._result_tree())
+      self._expect_results(['symlink_outside_build_root.py'], None, None, None)
+
 
 class Isolate_remap(IsolateModeBase):
   def test_fail(self):
@@ -657,6 +691,11 @@ class Isolate_remap(IsolateModeBase):
       self._execute('remap', 'symlink_partial.isolate', [], False)
       self._expected_tree()
       self._expect_results(['symlink_partial.py'], None, None, None)
+
+    def test_symlink_outside_build_root(self):
+      self._execute('remap', 'symlink_outside_build_root.isolate', [], False)
+      self._expected_tree()
+      self._expect_results(['symlink_outside_build_root.py'], None, None, None)
 
 
 class Isolate_run(IsolateModeBase):
@@ -722,6 +761,11 @@ class Isolate_run(IsolateModeBase):
       self._execute('run', 'symlink_partial.isolate', [], False)
       self._expect_empty_tree()
       self._expect_results(['symlink_partial.py'], None, None, None)
+
+    def test_symlink_outside_build_root(self):
+      self._execute('run', 'symlink_outside_build_root.isolate', [], False)
+      self._expect_empty_tree()
+      self._expect_results(['symlink_outside_build_root.py'], None, None, None)
 
 
 class Isolate_trace_read_merge(IsolateModeBase):
@@ -883,6 +927,25 @@ class Isolate_trace_read_merge(IsolateModeBase):
       self.assertEquals(self._wrap_in_condition(expected), out)
       self._check_merge('symlink_partial.isolate')
 
+    def test_symlink_outside_build_root(self):
+      out = self._execute(
+          'trace', 'symlink_outside_build_root.isolate', [], True)
+      self.assertEquals('', out)
+      self._expect_no_tree()
+      self._expect_results(['symlink_outside_build_root.py'], None, None, None)
+      expected = {
+        isolate.KEY_TRACKED: [
+          'symlink_outside_build_root.py',
+        ],
+        isolate.KEY_UNTRACKED: [
+          'link_outside_build_root/',
+        ],
+      }
+      out = self._execute(
+          'read', 'symlink_outside_build_root.isolate', [], True)
+      self.assertEquals(self._wrap_in_condition(expected), out)
+      self._check_merge('symlink_outside_build_root.isolate')
+
 
 class IsolateNoOutdir(IsolateBase):
   # Test without the --outdir flag.
@@ -902,10 +965,12 @@ class IsolateNoOutdir(IsolateBase):
 
   def _execute(self, mode, args, need_output):
     """Executes isolate.py."""
+    chromeos_value = int(isolate.get_flavor() == 'linux')
     cmd = [
       sys.executable, os.path.join(ROOT_DIR, 'isolate.py'),
       mode,
       '--isolated', self.isolated,
+      '-V', 'chromeos', str(chromeos_value),
     ]
     cmd.extend(args)
 

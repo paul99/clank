@@ -89,6 +89,12 @@ Mosaic.prototype.__proto__ = HTMLDivElement.prototype;
 Mosaic.LAYOUT_DELAY = 200;
 
 /**
+ * Smooth scroll animation duration when scrolling using keyboard or
+ * clicking on a partly visible tile. In ms.
+ */
+Mosaic.ANIMATED_SCROLL_DURATION = 500;
+
+/**
  * Decorate a Mosaic instance.
  *
  * @param {Mosaic} self Self pointer.
@@ -167,6 +173,66 @@ Mosaic.prototype.initListeners_ = function() {
 
   this.dataModel_.addEventListener('splice', this.onSplice_.bind(this));
   this.dataModel_.addEventListener('content', this.onContentChange_.bind(this));
+};
+
+/**
+ * Smoothly scrolls the container to the specified position using
+ * f(x) = sqrt(x) speed function normalized to animation duration.
+ * @param {number} targetPosition Horizontal scroll position in pixels.
+ */
+Mosaic.prototype.animatedScrollTo = function(targetPosition) {
+  if (this.scrollAnimation_) {
+    webkitCancelAnimationFrame(this.scrollAnimation_);
+    this.scrollAnimation_ = null;
+  }
+
+  // Mouse move events are fired without touching the mouse because of scrolling
+  // the container. Therefore, these events have to be suppressed.
+  this.suppressHovering_ = true;
+
+  // Calculates integral area from t1 to t2 of f(x) = sqrt(x) dx.
+  var integral = function(t1, t2) {
+    return 2.0 / 3.0 * Math.pow(t2, 3.0 / 2.0) -
+           2.0 / 3.0 * Math.pow(t1, 3.0 / 2.0);
+  };
+
+  var delta = targetPosition - this.scrollLeft;
+  var factor = delta / integral(0, Mosaic.ANIMATED_SCROLL_DURATION);
+  var startTime = Date.now();
+  var lastPosition = 0;
+  var scrollOffset = this.scrollLeft;
+
+  var animationFrame = function() {
+    var position = Date.now() - startTime;
+    var step = factor *
+        integral(Math.max(0, Mosaic.ANIMATED_SCROLL_DURATION - position),
+                 Math.max(0, Mosaic.ANIMATED_SCROLL_DURATION - lastPosition));
+    scrollOffset += step;
+
+    var oldScrollLeft = this.scrollLeft;
+    var newScrollLeft = Math.round(scrollOffset);
+
+    if (oldScrollLeft != newScrollLeft)
+      this.scrollLeft = newScrollLeft;
+
+    if (step == 0 || this.scrollLeft != newScrollLeft) {
+      this.scrollAnimation_ = null;
+      // Release the hovering lock after a safe delay to avoid hovering
+      // a tile because of altering |this.scrollLeft|.
+      setTimeout(function() {
+        if (!this.scrollAnimation_)
+          this.suppressHovering_ = false;
+      }.bind(this), 100);
+    } else {
+      // Continue the animation.
+      this.scrollAnimation_ = requestAnimationFrame(animationFrame);
+    }
+
+    lastPosition = position;
+  }.bind(this);
+
+  // Start the animation.
+  this.scrollAnimation_ = requestAnimationFrame(animationFrame);
 };
 
 /**
@@ -312,7 +378,8 @@ Mosaic.prototype.onResize_ = function() {
  */
 Mosaic.prototype.onMouseEvent_ = function(event) {
   // Navigating with mouse, enable hover state.
-  this.classList.add('hover-visible');
+  if (!this.suppressHovering_)
+    this.classList.add('hover-visible');
 
   if (event.type == 'mousemove')
     return;
@@ -518,12 +585,22 @@ Mosaic.SelectionController.prototype.getLastIndex = function() {
 
 /** @override */
 Mosaic.SelectionController.prototype.getIndexBefore = function(index) {
-  return this.layoutModel_.getAdjacentIndex(index, -1);
+  return this.layoutModel_.getHorizontalAdjacentIndex(index, -1);
 };
 
 /** @override */
 Mosaic.SelectionController.prototype.getIndexAfter = function(index) {
-  return this.layoutModel_.getAdjacentIndex(index, 1);
+  return this.layoutModel_.getHorizontalAdjacentIndex(index, 1);
+};
+
+/** @override */
+Mosaic.SelectionController.prototype.getIndexAbove = function(index) {
+  return this.layoutModel_.getVerticalAdjacentIndex(index, -1);
+};
+
+/** @override */
+Mosaic.SelectionController.prototype.getIndexBelow = function(index) {
+  return this.layoutModel_.getVerticalAdjacentIndex(index, 1);
 };
 
 ////////////////////////////////////////////////////////////////////////////////
@@ -542,22 +619,27 @@ Mosaic.Layout = function(opt_mode, opt_maxDensity) {
 };
 
 /**
- * Blank space at the top of the mosaic element. We do not do that is CSS
- * because we want the mosaic to occupy the entire parent div which makes
- * animated transitions easier.
+ * Blank space at the top of the mosaic element. We do not do that in CSS
+ * to make transition effects easier.
  */
 Mosaic.Layout.PADDING_TOP = 50;
 
 /**
  * Blank space at the bottom of the mosaic element.
  */
-Mosaic.Layout.PADDING_BOTTOM = 70;
+Mosaic.Layout.PADDING_BOTTOM = 50;
 
 /**
  * Horizontal and vertical spacing between images. Should be kept in sync
  * with the style of .mosaic-item in gallery.css (= 2 * ( 4 + 1))
  */
 Mosaic.Layout.SPACING = 10;
+
+/**
+ * Margin for scrolling using keyboard. Distance between a selected tile
+ * and window border.
+ */
+Mosaic.Layout.SCROLL_MARGIN = 30;
 
 /**
  * Layout mode: commit to DOM immediately.
@@ -819,7 +901,8 @@ Mosaic.Layout.prototype.invalidateFromTile_ = function(index) {
  * @param {number} direction -1 for left, 1 for right.
  * @return {number} Adjacent tile index.
  */
-Mosaic.Layout.prototype.getAdjacentIndex = function(index, direction) {
+Mosaic.Layout.prototype.getHorizontalAdjacentIndex = function(
+    index, direction) {
   var column = this.getColumnIndexByTile_(index);
   if (column < 0) {
     console.error('Cannot find column for tile #' + index);
@@ -842,6 +925,61 @@ Mosaic.Layout.prototype.getAdjacentIndex = function(index, direction) {
 
   return this.columns_[adjacentColumn].
       getEdgeTileIndex_(row.getCenterY(), -direction);
+};
+
+/**
+ * Get the index of the tile to the top or to the bottom from the given tile.
+ *
+ * @param {number} index Tile index.
+ * @param {number} direction -1 for above, 1 for below.
+ * @return {number} Adjacent tile index.
+ */
+Mosaic.Layout.prototype.getVerticalAdjacentIndex = function(
+    index, direction) {
+  var column = this.getColumnIndexByTile_(index);
+  if (column < 0) {
+    console.error('Cannot find column for tile #' + index);
+    return -1;
+  }
+
+  var row = this.columns_[column].getRowByTileIndex(index);
+  if (!row) {
+    console.error('Cannot find row for tile #' + index);
+    return -1;
+  }
+
+  // Find the first item in the next row, or the last item in the previous row.
+  var adjacentRowNeighbourIndex =
+      row.getEdgeTileIndex_(direction) + direction;
+
+  if (adjacentRowNeighbourIndex < 0 ||
+      adjacentRowNeighbourIndex > this.getTileCount() - 1)
+    return -1;
+
+  if (!this.columns_[column].hasTile(adjacentRowNeighbourIndex)) {
+    // It is not in the current column, so return it.
+    return adjacentRowNeighbourIndex;
+  } else {
+    // It is in the current column, so we have to find optically the closest
+    // tile in the adjacent row.
+    var adjacentRow = this.columns_[column].getRowByTileIndex(
+        adjacentRowNeighbourIndex);
+    var previousTileCenterX = row.getTileByIndex(index).getCenterX();
+
+    // Find the closest one.
+    var closestIndex = -1;
+    var closestDistance;
+    var adjacentRowTiles = adjacentRow.getTiles();
+    for (var t = 0; t != adjacentRowTiles.length; t++) {
+      var distance =
+          Math.abs(adjacentRowTiles[t].getCenterX() - previousTileCenterX);
+      if (closestIndex == -1 || distance < closestDistance) {
+        closestIndex = adjacentRow.getEdgeTileIndex_(-1) + t;
+        closestDistance = distance;
+      }
+    }
+    return closestIndex;
+  }
 };
 
 /**
@@ -1241,6 +1379,22 @@ Mosaic.Row.prototype.add = function(tile) {
 };
 
 /**
+ * @return {Array.<Mosaic.Tile>} Array of tiles in the row.
+ */
+Mosaic.Row.prototype.getTiles = function() { return this.tiles_ };
+
+/**
+ * Get a tile by index.
+ * @param {number} index Tile index.
+ * @return {Mosaic.Tile} Requested tile or null if not found.
+ */
+Mosaic.Row.prototype.getTileByIndex = function(index) {
+  if (!this.hasTile(index))
+    return null;
+  return this.tiles_[index - this.firstTileIndex_];
+};
+
+/**
  *
  * @return {number} Number of tiles in the row.
  */
@@ -1455,8 +1609,9 @@ Mosaic.Tile.prototype.load = function(metadata, callback) {
   this.markUnloaded();
   this.left_ = null;  // Mark as not laid out.
 
-  this.thumbnailLoader_ =
-      new ThumbnailLoader(this.getItem().getUrl(), metadata);
+  this.thumbnailLoader_ = new ThumbnailLoader(this.getItem().getUrl(),
+                                              ThumbnailLoader.LoaderType.CANVAS,
+                                              metadata);
 
   this.thumbnailLoader_.loadDetachedImage(function(success) {
     if (this.thumbnailLoader_.hasValidImage()) {
@@ -1521,25 +1676,37 @@ Mosaic.Tile.prototype.layout = function(left, top, width, height) {
     this.wrapper_ = util.createChild(border, 'img-wrapper');
   }
   if (this.hasAttribute('selected'))
-    this.scrollIntoView();
+    this.scrollIntoView(false);
 
-  this.thumbnailLoader_.attachImage(this.wrapper_, true /* fill */);
+  this.thumbnailLoader_.attachImage(this.wrapper_,
+                                    ThumbnailLoader.FillMode.FILL);
 };
 
 /**
  * If the tile is not fully visible scroll the parent to make it fully visible.
+ * @param {boolean} opt_animated True, if scroll should be animated,
+ *     default: true.
  */
-Mosaic.Tile.prototype.scrollIntoView = function() {
+Mosaic.Tile.prototype.scrollIntoView = function(opt_animated) {
   if (this.left_ == null)  // Not laid out.
     return;
 
-  if (this.left_ < this.container_.scrollLeft) {
-    this.container_.scrollLeft = this.left_;
+  var targetPosition;
+  var tileLeft = this.left_ - Mosaic.Layout.SCROLL_MARGIN;
+  if (tileLeft < this.container_.scrollLeft) {
+    targetPosition = tileLeft;
   } else {
-    var tileRight = this.left_ + this.width_;
+    var tileRight = this.left_ + this.width_ + Mosaic.Layout.SCROLL_MARGIN;
     var scrollRight = this.container_.scrollLeft + this.container_.clientWidth;
     if (tileRight > scrollRight)
-      this.container_.scrollLeft = tileRight - this.container_.clientWidth;
+      targetPosition = tileRight - this.container_.clientWidth;
+  }
+
+  if (targetPosition) {
+    if (opt_animated === false)
+      this.container_.scrollLeft = targetPosition;
+    else
+      this.container_.animatedScrollTo(targetPosition);
   }
 };
 
@@ -1554,4 +1721,11 @@ Mosaic.Tile.prototype.getImageRect = function() {
   var margin = Mosaic.Layout.SPACING / 2;
   return new Rect(this.left_ - this.container_.scrollLeft, this.top_,
       this.width_, this.height_).inflate(-margin, -margin);
+};
+
+/**
+ * @return {number} X coordinate of the tile center.
+ */
+Mosaic.Tile.prototype.getCenterX = function() {
+  return this.left_ + Math.round(this.width_ / 2);
 };

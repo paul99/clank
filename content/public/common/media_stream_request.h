@@ -27,6 +27,9 @@ enum MediaStreamType {
   MEDIA_TAB_AUDIO_CAPTURE,
   MEDIA_TAB_VIDEO_CAPTURE,
 
+  // Capture content of the screen.
+  MEDIA_SCREEN_VIDEO_CAPTURE,
+
   NUM_MEDIA_TYPES
 };
 
@@ -53,6 +56,13 @@ struct CONTENT_EXPORT MediaStreamDevice {
       const std::string& id,
       const std::string& name);
 
+  MediaStreamDevice(
+      MediaStreamType type,
+      const std::string& id,
+      const std::string& name,
+      int sample_rate,
+      int channel_layout);
+
   ~MediaStreamDevice();
 
   // The device's type.
@@ -63,6 +73,18 @@ struct CONTENT_EXPORT MediaStreamDevice {
 
   // The device's "friendly" name. Not guaranteed to be unique.
   std::string name;
+
+  // Preferred sample rate in samples per second for the device.
+  // Only utilized for audio devices. Will be set to 0 if the constructor
+  // with three parameters (intended for video) is used.
+  int sample_rate;
+
+  // Preferred channel configuration for the device.
+  // Only utilized for audio devices. Will be set to 0 if the constructor
+  // with three parameters (intended for video) is used.
+  // TODO(henrika): ideally, we would like to use media::ChannelLayout here
+  // but including media/base/channel_layout.h violates checkdeps rules.
+  int channel_layout;
 };
 
 typedef std::vector<MediaStreamDevice> MediaStreamDevices;

@@ -351,7 +351,7 @@ bool MenuManager::AddContextItem(
 
   // If this is the first item for this extension, start loading its icon.
   if (first_item)
-    icon_manager_.LoadIcon(extension);
+    icon_manager_.LoadIcon(profile_, extension);
 
   return true;
 }
@@ -644,8 +644,7 @@ void MenuManager::ExecuteCommand(Profile* profile,
   if (!extension || !extension->is_platform_app()) {
     // Note: web_contents are NULL in unit tests :(
     if (web_contents) {
-      args->Append(ExtensionTabUtil::CreateTabValue(
-          web_contents, ExtensionTabUtil::INCLUDE_PRIVACY_SENSITIVE_FIELDS));
+      args->Append(ExtensionTabUtil::CreateTabValue(web_contents));
     } else {
       args->Append(new DictionaryValue());
     }

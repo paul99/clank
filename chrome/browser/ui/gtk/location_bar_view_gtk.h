@@ -34,7 +34,7 @@
 #include "ui/base/animation/slide_animation.h"
 #include "ui/base/gtk/gtk_signal.h"
 #include "ui/base/gtk/owned_widget_gtk.h"
-#include "webkit/glue/window_open_disposition.h"
+#include "ui/base/window_open_disposition.h"
 
 class ActionBoxButtonGtk;
 class Browser;
@@ -102,12 +102,12 @@ class LocationBarViewGtk : public OmniboxEditController,
   // Shows the Chrome To Mobile bubble.
   void ShowChromeToMobileBubble();
 
-  // Shows the bookmark bubble.
-  void ShowZoomBubble();
-
   // Happens when the zoom changes for the active tab. |can_show_bubble| will be
   // true if it was a user action and a bubble could be shown.
   void ZoomChangedForActiveTab(bool can_show_bubble);
+
+  // Returns the zoom widget. Used by the zoom bubble for an anchor.
+  GtkWidget* zoom_widget() { return zoom_.get(); }
 
   // Set the starred state of the bookmark star.
   void SetStarred(bool starred);
@@ -140,7 +140,6 @@ class LocationBarViewGtk : public OmniboxEditController,
   virtual void UpdateContentSettingsIcons() OVERRIDE;
   virtual void UpdatePageActions() OVERRIDE;
   virtual void InvalidatePageActions() OVERRIDE;
-  virtual void UpdateWebIntentsButton() OVERRIDE;
   virtual void UpdateOpenPDFInReaderPrompt() OVERRIDE;
   virtual void SaveStateToContents(content::WebContents* contents) OVERRIDE;
   virtual void Revert() OVERRIDE;
@@ -395,6 +394,9 @@ class LocationBarViewGtk : public OmniboxEditController,
 
   void ShowFirstRunBubbleInternal();
 
+  // Shows the zoom bubble.
+  void ShowZoomBubble();
+
   // Show or hide |tab_to_search_box_| and |tab_to_search_hint_| according to
   // the value of |show_selected_keyword_|, |show_keyword_hint_|, and the
   // available horizontal space in the location bar.
@@ -463,10 +465,6 @@ class LocationBarViewGtk : public OmniboxEditController,
   // Extension page action icons.
   ui::OwnedWidgetGtk page_action_hbox_;
   ScopedVector<PageActionViewGtk> page_action_views_;
-
-  // Control for web intents window disposition picker control.
-  ui::OwnedWidgetGtk web_intents_hbox_;
-  scoped_ptr<PageToolViewGtk> web_intents_button_view_;
 
   // The widget that contains our tab hints and the location bar.
   GtkWidget* entry_box_;

@@ -325,7 +325,7 @@
    bug_21326 (Third Party)
    Memcheck:Leak
    ...
-   fun:_ZN56webkit5npapi9PluginLib17ReadWebPluginInfoERK8FilePathP13WebPluginInfo
+   fun:_ZN56webkit5npapi9PluginLib17ReadWebPluginInfoE*
 }
 {
    # NSS bug https://bugzilla.mozilla.org/show_bug.cgi?id=518443
@@ -743,6 +743,16 @@
    fun:_ZN6webkit3gpu33WebGraphicsContext3DInProcessImpl13compileShaderEj
    fun:_ZN2cc18ProgramBindingBase10loadShaderEPN6WebKit20WebGraphicsContext3DEjRKSs
    fun:_ZN2cc18ProgramBindingBase4initEPN6WebKit20WebGraphicsContext3DERKSsS5_
+}
+{
+   bug_148477_link
+   Memcheck:Leak
+   fun:malloc
+   ...
+   fun:_ZN3gfx9GLApiBase15glLinkProgramFnEj
+   fun:_ZN6webkit3gpu33WebGraphicsContext3DInProcessImpl11linkProgramEj
+   fun:_ZN2cc18ProgramBindingBase4linkEPN6WebKit20WebGraphicsContext3DE
+   fun:_ZN2cc14ProgramBindingINS_*
 }
 # bug_todo_getdelim, bug_todo_getdelim2 and bug_todo_grep used to happen on
 # Google Lucid workstations only.
@@ -1181,13 +1191,6 @@
    fun:_ZN19TestWebViewDelegate24UpdateSelectionClipboardEb
 }
 {
-   # See http://crbug.com/11139
-   bug_11139
-   Memcheck:Leak
-   fun:_Znw*
-   fun:_ZN4base23EnsureProcessTerminatedEi
-}
-{
    # very common in ui tests
    bug_16091
    Memcheck:Leak
@@ -1223,30 +1226,19 @@
    fun:_ZN4base6Thread10ThreadMainEv
 }
 {
-   # very common in ui tests
+   # very common in ui tests, also seen in Linux Reliability
    bug_16093
    Memcheck:Leak
    ...
    fun:getaddrinfo
 }
 {
-   # very common in ui tests
+   # very common in ui tests, also seen in Linux Reliability
    bug_16095
    Memcheck:Leak
    ...
    fun:_ZN11MessageLoop21AddToDelayedWorkQueueERKN*PendingTaskE
    fun:_ZN11MessageLoop6DoWorkEv
-}
-{
-   # Somewhat common in ui tests.  See also bug 9245.
-   bug_16102
-   Memcheck:Leak
-   ...
-   fun:realloc
-   fun:FcPatternObjectInsertElt
-   fun:FcConfigPatternAdd
-   fun:FcConfigSubstituteWithPat
-   fun:FcFontRenderPrepare
 }
 {
    bug_16128
@@ -1258,14 +1250,6 @@
    fun:_ZN7content11ChildThread4InitEv
 }
 {
-   bug_16156
-   Memcheck:Leak
-   ...
-   fun:gtk_im_context_set_cursor_location
-   ...
-   fun:gtk_widget_size_allocate
-}
-{
    bug_16326
    Memcheck:Leak
    fun:_Znw*
@@ -1273,21 +1257,6 @@
    fun:_ZN11webkit_glue16WebURLLoaderImplC1Ev
    fun:_ZN11webkit_glue16WebKitClientImpl15createURLLoaderEv
    fun:_ZN7WebCore22ResourceHandleInternal5startEv
-}
-{
-   # Webkit leak in WebCore::HTMLNames::init() ?
-   bug_16579
-   Memcheck:Leak
-   ...
-   fun:_ZN7WebCore9HTMLNames4initEv
-}
-{
-   bug_16583
-   Memcheck:Leak
-   fun:malloc
-   fun:g_malloc
-   fun:g_slice_alloc
-   fun:g_hash_table_new_full
 }
 {
    bug_17291
@@ -1329,12 +1298,6 @@
    fun:_ZN11ChildThread12CreateBridgeERKN11webkit_glue20ResourceLoaderBridge11RequestInfoEii
    ...
    fun:_ZN7WebCore14ResourceHandle5startEPNS_5FrameE
-}
-{
-   bug_19191
-   Memcheck:Leak
-   ...
-   fun:_ZN7WebCore10XLinkNames4initEv
 }
 {
    bug_19196
@@ -1433,17 +1396,6 @@
    ...
    fun:yy_reduce
 }
-{
-   bug_20581
-   Memcheck:Leak
-   ...
-   fun:btreeCreateTable
-   fun:sqlite3BtreeCreateTable
-   fun:sqlite3VdbeExec
-   fun:sqlite3Step
-   fun:sqlite3_step
-   fun:sqlite3_exec
-}
 # IPCing uninitialized data
 {
    bug_20997_a
@@ -1511,14 +1463,6 @@
    fun:_ZN19WebSharedWorkerStub9OnConnectEii
 }
 {
-   bug_27936
-   Memcheck:Leak
-   ...
-   fun:_ZN7history20ExpireHistoryBackend28BroadcastDeleteNotificationsEPNS0_18DeleteDependenciesE
-   fun:_ZN7history20ExpireHistoryBackend21ArchiveSomeOldHistoryEN4base4TimeEPKNS_20ExpiringVisitsReaderEi
-   fun:_ZN7history20ExpireHistoryBackend18DoArchiveIterationEv
-}
-{
    bug_28200
    Memcheck:Leak
    fun:malloc
@@ -1542,13 +1486,6 @@
    fun:tooltip_popup_timeout
    fun:gdk_threads_dispatch
    fun:g_timeout_dispatch
-}
-{
-   bug_28633
-   Memcheck:Leak
-   fun:calloc
-   fun:__new_exitfn
-   fun:__cxa_atexit
 }
 {
    bug_29675
@@ -1619,7 +1556,7 @@
    Memcheck:Param
    write(buf)
    ...
-   fun:_ZNK16BrowserThemePack11WriteToDiskE8FilePath
+   fun:_ZNK16BrowserThemePack11WriteToDiskE*
 }
 {
    bug_30704d
@@ -1891,8 +1828,8 @@
    Memcheck:Leak
    fun:_Znw*
    ...
-   fun:_ZN29ChromeURLRequestContextGetter28CreateRequestContextForMediaEP7ProfileRK8FilePathib
-   fun:_ZN29ChromeURLRequestContextGetter22CreateOriginalForMediaEP7ProfileRK8FilePathi
+   fun:_ZN29ChromeURLRequestContextGetter28CreateRequestContextForMediaE*
+   fun:_ZN29ChromeURLRequestContextGetter22CreateOriginalForMediaE*
    fun:_ZN11ProfileImpl25GetRequestContextForMediaEv
 }
 {
@@ -2013,8 +1950,8 @@
    Memcheck:Leak
    fun:_Znw*
    ...
-   fun:_ZNSt3mapISs8FilePathSt4lessISsESaISt4pairIKSsS0_EEE6insertESt17_Rb_tree_iteratorIS5_ERKS5_
-   fun:_ZNSt3mapISs8FilePathSt4lessISsESaISt4pairIKSsS0_EEEixERS4_
+   fun:_ZNSt3map*FilePath*insert*
+   fun:_ZNSt3map*FilePath*ix*
    fun:_ZN16ExtensionService15UnloadExtensionERKSs
    fun:_ZN16ExtensionService18UninstallExtensionERKSsb
    fun:_ZN18AutomationProvider18UninstallExtensionEiPb
@@ -2086,11 +2023,11 @@
    fun:_Znw*
    fun:_ZN27SSLConfigServiceManagerPrefC1EP7Profile
    fun:_ZN23SSLConfigServiceManager20CreateDefaultManagerEP7Profile
-   fun:_ZN11ProfileImplC1ERK8FilePath
-   fun:_ZN7Profile13CreateProfileERK8FilePath
-   fun:_ZN14ProfileManager13CreateProfileERK8FilePath
-   fun:_ZN14ProfileManager10GetProfileERK8FilePathb
-   fun:_ZN14ProfileManager17GetDefaultProfileERK8FilePath
+   fun:_ZN11ProfileImplC1E*
+   fun:_ZN7Profile13CreateProfileE*
+   fun:_ZN14ProfileManager13CreateProfileE*
+   fun:_ZN14ProfileManager10GetProfileE*
+   fun:_ZN14ProfileManager17GetDefaultProfileE*
    fun:_ZN14ProfileManager17GetDefaultProfileEv
 }
 {
@@ -2188,18 +2125,6 @@
    fun:_ZN3sql9Statement4StepEv
    fun:_ZN7history11URLDatabase12GetRowForURLERK4GURLPNS_6URLRowE
    fun:_ZN7history14HistoryBackend12AddPageVisitERK4GURLN4base4TimeExjNS_11VisitSourceE
-}
-{
-   bug_60612
-   Memcheck:Leak
-   fun:_Znw*
-   fun:_ZN3net55_*ProxyResolverFactoryForV819CreateProxyResolverEv
-   fun:_ZN3net26MultiThreadedProxyResolver14AddNewExecutorEv
-   fun:_ZN3net26MultiThreadedProxyResolver12SetPacScriptERK13scoped_refptrINS_23ProxyResolverScriptDataEEP14CallbackRunnerI6Tuple1IiEE
-   fun:_ZN3net17InitProxyResolver14DoSetPacScriptEv
-   fun:_ZN3net17InitProxyResolver6DoLoopEi
-   ...
-   fun:_ZN3net10URLRequest15ResponseStartedEv
 }
 {
    bug_60654
@@ -2389,7 +2314,7 @@
    Memcheck:Param
    write(buf)
    ...
-   fun:_ZN9file_util9WriteFileERK8FilePathPKci
+   fun:_ZN9file_util9WriteFileE*
    fun:_Z24ConvertWebAppToExtensionRK18WebApplicationInfoRKN4base4TimeE
    fun:_ZN30ExtensionFromWebApp_Basic_Test8TestBodyEv
 }
@@ -2398,9 +2323,9 @@
    Memcheck:Param
    write(buf)
    ...
-   fun:_ZN9file_util9WriteFileERK8FilePathPKci
-   fun:_ZN12_GLOBAL__N_110SaveBitmapEPSt6vectorIhSaIhEE*8FilePathPb
-   fun:_ZN4base8internal15RunnableAdapterIPFvPSt6vectorIhSaIhEE*8FilePathPbEE3Run*
+   fun:_ZN9file_util9WriteFileE*
+   fun:_ZN12_GLOBAL__N_110SaveBitmapEPSt6vectorIhSaIhEE*
+   fun:_ZN4base8internal15RunnableAdapterIPFvPSt6vectorIhSaIhEE*
 }
 {
    bug_64804
@@ -2833,8 +2758,8 @@
    fun:sqlite3_exec
    fun:_ZN3sql10Connection7ExecuteEPKc
    fun:_ZN7history11URLDatabase31CreateKeywordSearchTermsIndicesEv
-   fun:_ZN7history16InMemoryDatabase12InitFromDiskERK8FilePath
-   fun:_ZN7history22InMemoryHistoryBackend4InitERK8FilePathS3_PNS_11URLDatabaseERKSs
+   fun:_ZN7history16InMemoryDatabase12InitFromDiskE*
+   fun:_ZN7history22InMemoryHistoryBackend4InitE*
 }
 {
    bug_77766
@@ -2958,7 +2883,6 @@
    Memcheck:Leak
    fun:_Znw*
    fun:_ZN4base22PosixDynamicThreadPool8PostTask*
-   ...
 }
 {
    bug_80462_a
@@ -3112,13 +3036,13 @@
    bug_86481
    Memcheck:Leak
    fun:_Znw*
-   fun:_ZN9__gnu_cxx13new_allocatorIP8FilePathE8allocateEjPKv
-   fun:_ZNSt11_Deque_baseI8FilePathSaIS0_EE15_M_allocate_mapEj
-   fun:_ZNSt11_Deque_baseI8FilePathSaIS0_EE17_M_initialize_mapEj
-   fun:_ZNSt11_Deque_baseI8FilePathSaIS0_EEC2ERKS1_j
-   fun:_ZNSt5dequeI8FilePathSaIS0_EEC1ERKS2_
-   fun:_ZNSt5stackI8FilePathSt5dequeIS0_SaIS0_EEEC1ERKS3_
-   fun:_ZN9file_util14FileEnumeratorC1ERK8FilePathbNS0_9FILE_TYPEERKSs
+   fun:_ZN9__gnu_cxx13new_allocator*FilePath*allocate*
+   fun:_ZNSt11_Deque_base*FilePath*_M_allocate_map*
+   fun:_ZNSt11_Deque_base*FilePath*_M_initialize_map*
+   fun:_ZNSt11_Deque_baseI*FilePath*
+   fun:_ZNSt5dequeI*FilePath*
+   fun:_ZNSt5stackI*FilePath*deque*
+   fun:_ZN9file_util14FileEnumeratorC1E*
    fun:_ZN7history20ExpireHistoryBackend25DoExpireHistoryIndexFilesEv
 }
 {
@@ -3145,14 +3069,14 @@
    ...
    fun:_ZN11ProfileImpl13OnPrefsLoadedEb
    ...
-   fun:_ZN11ProfileImplC*ERK8FilePathPN7Profile8DelegateE*
+   fun:_ZN11ProfileImplC*E*
 }
 {
    bug_88640_c
    Memcheck:Leak
    fun:_Znw*
    fun:_ZN29ChromeURLRequestContextGetter14CreateOriginalEP7ProfilePK13ProfileIOData
-   fun:_ZN17ProfileImplIOData6Handle4InitERK8FilePathS3_S3_iS3_iS3_S3_PN18chrome_browser_net9PredictorEP11PrefServiceP8IOThread
+   fun:_ZN17ProfileImplIOData6Handle4InitE*
    fun:_ZN11ProfileImpl11DoFinalInitEv
    fun:_ZN11ProfileImpl13OnPrefsLoadedEb
 }
@@ -3249,8 +3173,8 @@
    bug_90215_e
    Memcheck:Leak
    fun:_Znw*
-   fun:_ZN8appcache15AppCacheService10InitializeERK8FilePathPN4base16MessageLoopProxyE
-   fun:_ZN21ChromeAppCacheService20InitializeOnIOThreadERK8FilePathPKN7content15ResourceContextE13scoped_refptrIN5quota20SpecialStoragePolicyEE
+   fun:_ZN8appcache15AppCacheService10InitializeE*
+   fun:_ZN21ChromeAppCacheService20InitializeOnIOThreadE*
 }
 {
    bug_90240
@@ -3375,9 +3299,9 @@
    bug_92571
    Memcheck:Leak
    fun:_Znw*
-   fun:_ZN7history16TopSitesDatabase8CreateDBERK8FilePath
-   fun:_ZN7history16TopSitesDatabase4InitERK8FilePath
-   fun:_ZN7history15TopSitesBackend16InitDBOnDBThreadERK8FilePath
+   fun:_ZN7history16TopSitesDatabase8CreateDBE*
+   fun:_ZN7history16TopSitesDatabase4InitE*
+   fun:_ZN7history15TopSitesBackend16InitDBOnDBThreadE*
 }
 {
    bug_92741a
@@ -3542,12 +3466,12 @@
    ...
    fun:xdg_mime_init
    fun:xdg_mime_get_mime_type_from_file_name
-   fun:*GetFileMimeTypeERK8FilePath
+   fun:*GetFileMimeTypeE*
    fun:_ZNK3net16PlatformMimeUtil32GetPlatformMimeTypeFromExtensionERKSsPSs
    fun:_ZNK3net8MimeUtil30GetMimeTypeFromExtensionHelperERKSsbPSs
    fun:_ZNK3net8MimeUtil24GetMimeTypeFromExtensionERKSsPSs
-   fun:_ZNK3net8MimeUtil19GetMimeTypeFromFileERK8FilePathPSs
-   fun:_ZN3net19GetMimeTypeFromFileERK8FilePathPSs
+   fun:_ZNK3net8MimeUtil19GetMimeTypeFromFileE*
+   fun:_ZN3net19GetMimeTypeFromFileE*
 }
 {
    bug_96069
@@ -3557,19 +3481,6 @@
    fun:_ZN3net9HttpCache17CreateTransactionEP10scoped_ptrINS_15HttpTransactionEE
    ...
    fun:_ZN3net13CookieMonster17CookieMonsterTask14InvokeCallbackEN4base8CallbackIFvvEEE
-}
-{
-   bug_96103
-   Memcheck:Leak
-   fun:_Znw*
-   fun:_ZN9__gnu_cxx13new_allocatorIN3net11ProxyServerEE8allocateEjPKv
-   fun:_ZNSt12_Vector_baseIN3net11ProxyServerESaIS1_EE11_M_allocateEj
-   fun:_ZNSt12_Vector_baseIN3net11ProxyServerESaIS1_EEC2EjRKS2_
-   fun:_ZNSt6vectorIN3net11ProxyServerESaIS1_EEC1ERKS3_
-   fun:_ZN3net9ProxyListC1ERKS0_
-   fun:_ZN3net9ProxyInfoC1ERKS0_
-   fun:_ZN3net21HttpStreamFactoryImpl7Request18OnSpdySessionReadyEPNS0_3JobE13scoped_refptrINS_11SpdySessionEEb
-   fun:_ZN3net21HttpStreamFactoryImpl3Job26OnSpdySessionReadyCallbackEv
 }
 {
    bug_96365
@@ -3631,7 +3542,7 @@
    fun:_gdk_window_impl_new
    fun:gdk_window_ensure_native
    fun:gdk_x11_drawable_get_xid
-   fun:_ZN19TestWebViewDelegate20CreatePluginDelegateERK8FilePathRKSs
+   fun:_ZN19TestWebViewDelegate20CreatePluginDelegateE*
 }
 {
    bug_96568a
@@ -3672,7 +3583,7 @@
    bug_99166
    Memcheck:Leak
    ...
-   fun:_ZN22AppNotificationStorage6CreateERK8FilePath
+   fun:_ZN22AppNotificationStorage6CreateE*
 }
 {
    bug_99304
@@ -3720,13 +3631,6 @@
    fun:_ZN4base19MessagePumpLibevent3RunEPNS_11MessagePump8DelegateE
    fun:_ZN11MessageLoop11RunInternalEv
    fun:_ZN11MessageLoop10RunHandlerEv
-}
-{
-   bug_99436
-   Memcheck:Leak
-   fun:_Znw*
-   ...
-   fun:_ZN8chromeos*OncNetworkParserTest_TestCreateNetworkWifi*_Test8TestBodyEv
 }
 {
    bug_100043
@@ -3854,7 +3758,7 @@
    Memcheck:Leak
    fun:_Znw*
    fun:_ZN7WebCore23v8StringToWebCoreStringIN3WTF6StringEEET_N2v86HandleINS4_6StringEEENS_12ExternalModeE
-   fun:_ZN7WebCore15toWebCoreStringEN2v86HandleINS0_5ValueEEE
+   fun:_ZN7WebCore16V8StringResourceILNS_20V8StringResourceMode*
 }
 {
    bug_101145c
@@ -3863,7 +3767,6 @@
    fun:_ZN7WebCoreL18makeExternalStringERKN3WTF6StringE
    fun:_ZN7WebCore11StringCache20v8ExternalStringSlow*
    fun:_ZN7WebCore11StringCache16v8ExternalStringEPN*
-   fun:_ZN7WebCore16v8ExternalStringERKN3WTF6String*
 }
 {
    bug_101146a
@@ -3957,8 +3860,8 @@
    ...
    fun:f*
    ...
-   fun:_ZNK13safe_browsing9PrefixSet9WriteFileERK8FilePath
-   fun:_ZN12_GLOBAL__N_113PrefixSetTest16GetPrefixSetFileEP8FilePath
+   fun:_ZNK13safe_browsing9PrefixSet9WriteFileE*
+   fun:_ZN12_GLOBAL__N_113PrefixSetTest16GetPrefixSetFileE*
    fun:_ZN12_GLOBAL__N_1*PrefixSetTest_*_Test8TestBodyEv
 }
 {
@@ -4081,7 +3984,7 @@
    bug_104578
    Memcheck:Leak
    fun:_Znw*
-   fun:_ZN16ProcessSingletonC1ERK8FilePath
+   fun:_ZN16ProcessSingletonC1E*
    fun:_ZN22ChromeBrowserMainParts20PreCreateThreadsImplEv
 }
 {
@@ -4147,10 +4050,8 @@
    Memcheck:Uninitialized
    ...
    fun:_ZN4skia14BGRAConvolve2DEPKhibRKNS_19ConvolutionFilter1DES4_iPhb
-   fun:_ZN4skia15ImageOperations11ResizeBasicERK8SkBitmapNS0_12ResizeMethodEiiRK7SkIRect
-   fun:_ZN4skia15ImageOperations6ResizeERK8SkBitmapNS0_12ResizeMethodEiiRK7SkIRect
-   ...
-   fun:_ZN7WebCore15GraphicsContext*
+   fun:_ZN4skia15ImageOperations11ResizeBasicE*
+   fun:_ZN4skia15ImageOperations6ResizeE*
 }
 {
    bug_106183a
@@ -4411,11 +4312,10 @@
    bug_108628
    Memcheck:Leak
    fun:_Znw*
-   fun:_ZN7WebCore23v8StringToWebCoreStringIN3WTF6StringEEET_N2v86HandleINS4_6StringEEENS_12ExternalModeE
-   fun:_ZN7WebCore23v8StringToWebCoreStringEN2v86HandleINS0_6StringEEE
-   fun:_ZN7WebCore22v8ValueToWebCoreStringEN2v86HandleINS0_5ValueEEE
-   fun:_ZN7WebCore28toWebCoreStringWithNullCheckEN2v86HandleINS0_5ValueEEE
-   fun:_ZN7WebCore16V8XMLHttpRequest12sendCallbackERKN2v89ArgumentsE
+   fun:_ZN7WebCore23v8StringToWebCoreStringIN3WTF12AtomicStringEEET_N2v86HandleINS4_6StringEEENS_12ExternalModeE
+   fun:_ZN7WebCore16V8StringResourceILNS_20V8StringResourceModeE0EE8toStringIN3WTF12AtomicStringEEET_v
+   fun:_ZN7WebCore16V8StringResourceILNS_20V8StringResourceModeE0EEcvN3WTF12AtomicStringEEv
+   fun:_ZN7WebCore24XMLHttpRequestV8InternalL2*HeaderCallbackERKN2v89ArgumentsE
    fun:_ZN2v88internalL19HandleApiCallHelperILb0EEEPNS0_11MaybeObjectENS0_12_GLOBAL__N_116BuiltinArgumentsILNS0_21BuiltinExtraArgumentsE1EEEPNS0_7IsolateE
    fun:_ZN2v88internalL21Builtin_HandleApiCallENS0_12_GLOBAL__N_116BuiltinArgumentsILNS0_21BuiltinExtraArgumentsE1EEEPNS0_7IsolateE
 }
@@ -4766,18 +4666,6 @@
    fun:_ZN13sync_notifier12_GLOBAL__N_124InvalidationNotifierTest5SetUpEv
 }
 {
-   bug_120146
-   Memcheck:Leak
-   fun:_Znw*
-   fun:_ZN4base8internal20PostTaskAndReplyImpl16PostTaskAndReplyERKN15tracked_objects8LocationERKNS_8CallbackIFvvEEESA_
-   fun:_ZN4base10TaskRunner16PostTaskAndReplyERKN15tracked_objects8LocationERKNS_8CallbackIFvvEEES9_
-   fun:_ZN5media21AudioOutputController5CloseERKN4base8CallbackIFvvEEE
-   fun:_ZN17AudioRendererHost20CloseAndDeleteStreamEPNS_10AudioEntryE
-   fun:_ZN17AudioRendererHost13DeleteEntriesEv
-   fun:_ZN17AudioRendererHost16OnChannelClosingEv
-   fun:_ZN3IPC12ChannelProxy7Context15OnChannelClosedEv
-}
-{
    bug_121729
    Memcheck:Leak
    fun:malloc
@@ -4871,25 +4759,6 @@
    fun:_ZN7WebCore32CanvasRenderingContext2DInternalL18strokeTextCallbackERKN2v89ArgumentsE
    fun:_ZN2v88internalL19HandleApiCallHelperILb0EEEPNS0_11MaybeObjectENS0_12_GLOBAL__N_116BuiltinArgumentsILNS0_21BuiltinExtraArgumentsE1EEEPNS0_7IsolateE
    fun:_ZN2v88internalL21Builtin_HandleApiCallENS0_12_GLOBAL__N_116BuiltinArgumentsILNS0_21BuiltinExtraArgumentsE1EEEPNS0_7IsolateE
-}
-{
-   bug_122249c
-   Memcheck:Leak
-   fun:_Znw*
-   fun:_ZN25TestWebKitPlatformSupport10idbFactoryEv
-   fun:_ZN6WebKit22IDBFactoryBackendProxyC1Ev
-   fun:_ZN6WebKit22IDBFactoryBackendProxy6createEv
-   fun:_ZN7WebCore15PlatformSupport10idbFactoryEv
-   fun:_ZN7WebCore26IDBFactoryBackendInterface6createEv
-}
-{
-   bug_122249d
-   Memcheck:Leak
-   fun:_Znw*
-   fun:_ZN6WebKit17IDBCallbacksProxy9onSuccessEN3WTF10PassRefPtrIN7WebCore27IDBDatabaseBackendInterfaceEEE
-   fun:_ZN7WebCore22IDBDatabaseBackendImpl19processPendingCallsEv
-   fun:_ZN7WebCore22IDBDatabaseBackendImpl35transactionFinishedAndCompleteFiredEN3WTF10PassRefPtrINS_25IDBTransactionBackendImplEEE
-   fun:_ZN7WebCore25IDBTransactionBackendImpl6commitEv
 }
 {
    bug_122429
@@ -5043,7 +4912,7 @@
    fun:_ZN7content13BrowserThread16PostTaskAndReplyENS0_2IDERKN15tracked_objects8LocationERKN4base8CallbackIFvvEEESB_
    fun:_ZN5gdata15GDataFileSystem37PostBlockingPoolSequencedTaskAndReplyERKSsRKN15tracked_objects8LocationERKN4base8CallbackIFvvEEESC_
    fun:_ZN5gdata15GDataFileSystem29PostBlockingPoolSequencedTaskERKSsRKN15tracked_objects8LocationERKN4base8CallbackIFvvEEE
-   fun:_ZN5gdata15GDataFileSystem8SaveFeedE10scoped_ptrIN4base5ValueEERK8FilePath
+   fun:_ZN5gdata15GDataFileSystem8SaveFeedE10scoped_ptrIN4base5ValueEE*
    fun:_ZN5gdata15GDataFileSystem14OnGetDocumentsEPNS0_18GetDocumentsParamsENS_14GDataErrorCodeE10scoped_ptrIN4base5ValueEE
 }
 {
@@ -5146,17 +5015,17 @@
    fun:_ZNSt6vectorIN6webkit17WebPluginMimeTypeESaIS1_EE13_M_insert_auxEN9__gnu_cxx17__normal_iteratorIPS1_S3_EERKS1_
    fun:_ZNSt6vectorIN6webkit17WebPluginMimeTypeESaIS1_EE9push_backERKS1_
    fun:_ZN6webkit5npapi9PluginLib20ParseMIMEDescriptionERKSsPSt6vectorINS_17WebPluginMimeTypeESaIS5_EE
-   fun:_ZN6webkit5npapi9PluginLib17ReadWebPluginInfoERK8FilePathPNS_13WebPluginInfoE
-   fun:_ZN6webkit5npapi10PluginList14ReadPluginInfoERK8FilePathPNS_13WebPluginInfoEPPKNS0_17PluginEntryPointsE
-   fun:_ZN6webkit5npapi10PluginList10LoadPluginERK8FilePathP12ScopedVectorINS0_11PluginGroupEEPNS_13WebPluginInfoE
-   fun:_ZN17UtilityThreadImpl13OnLoadPluginsERKSt6vectorI8FilePathSaIS1_EE
+   fun:_ZN6webkit5npapi9PluginLib17ReadWebPluginInfoE*
+   fun:_ZN6webkit5npapi10PluginList14ReadPluginInfoE*
+   fun:_ZN6webkit5npapi10PluginList10LoadPluginE*
+   fun:_ZN17UtilityThreadImpl13OnLoadPluginsE*
 }
 {
    bug_127716
    Memcheck:Leak
    fun:_Znw*
    fun:_ZN3gfx5ImageC1ERK8SkBitmap
-   fun:_ZN16BrowserThemePack16LoadRawBitmapsToERKSt3mapIi8FilePathSt4lessIiESaISt4pairIKiS1_EEEPS0_IiPKN3gfx5ImageES3_SaIS4_IS5_SE_EEE
+   fun:_ZN16BrowserThemePack16LoadRawBitmapsToE*
    fun:_ZN16BrowserThemePack18BuildFromExtensionEPK9Extension
    fun:_ZN45BrowserThemePackTest_CanBuildAndReadPack_Test8TestBodyEv
 }
@@ -5359,7 +5228,6 @@
    fun:_Znw*
    fun:_ZN4base22PosixDynamicThreadPool7AddTaskEPNS_11PendingTaskE
    fun:_ZN4base22PosixDynamicThreadPool8PostTask*
-   ...
 }
 {
    bug_139467
@@ -5461,15 +5329,6 @@
    fun:_ZN12SkGlyphCache10VisitCacheEPK12SkDescriptorPFbPKS_PvES5_
    ...
    fun:_ZNK7SkPaint14descriptorProcEPK8SkMatrixPFvPK12SkDescriptorPvES6_b
-}
-{
-   bug_143431
-   Memcheck:Leak
-   fun:_Znw*
-   fun:_ZN11ManagedModeC2Ev
-   fun:_ZN12_GLOBAL__N_115FakeManagedModeC1Ev
-   fun:_ZN15ManagedModeTestC2Ev
-   fun:_ZN*ManagedModeTest_*
 }
 {
    bug_143545
@@ -5649,13 +5508,16 @@
    bug_145703
    Memcheck:Leak
    fun:_Znw*
-   fun:_ZN16SiteInstanceImpl10GetProcessEv
+   ...
+   fun:_ZN7content16SiteInstanceImpl10GetProcessEv
    fun:_ZN7content18RenderViewHostImplC1EPNS_12SiteInstanceEPNS_22RenderViewHostDelegateEPNS_24RenderWidgetHostDelegateEibPNS_23SessionStorageNamespaceE
-   fun:_ZN21RenderViewHostFactory6CreateEPN7content12SiteInstanceEPNS0_22RenderViewHostDelegateEPNS0_24RenderWidgetHostDelegateEibPNS0_23SessionStorageNamespaceE
-   fun:_ZN21RenderViewHostManager4InitEPN7content14BrowserContextEPNS0_12SiteInstanceEi
-   fun:_ZN15WebContentsImpl4InitEPN7content14BrowserContextEPNS0_12SiteInstanceEiPKNS0_11WebContentsE
-   fun:_ZN15WebContentsImpl16CreateWithOpenerEPN7content14BrowserContextEPNS0_12SiteInstanceEiPKS_PS_
-   fun:_ZN15WebContentsImpl6CreateEPN7content14BrowserContextEPNS0_12SiteInstanceEiPKS_
+   fun:_ZN7content21RenderViewHostFactory6CreateEPNS_12SiteInstanceEPNS_22RenderViewHostDelegateEPNS_24RenderWidgetHostDelegateEibPNS_23SessionStorageNamespaceE
+   fun:_ZN7content21RenderViewHostManager4InitEPNS_14BrowserContextEPNS_12SiteInstanceEi
+   fun:_ZN7content15WebContentsImpl4InitERKNS_11WebContents12CreateParamsE
+   fun:_ZN7content15TestWebContents6CreateEPNS_14BrowserContextEPNS_12SiteInstanceE
+   fun:_ZN7content17WebContentsTester21CreateTestWebContentsEPNS_14BrowserContextEPNS_12SiteInstanceE
+   fun:_ZN10extensions12_GLOBAL__N_124TestExtensionEnvironment7MakeTabEv
+   fun:_ZN10extensions12_GLOBAL__N_148DeclarativeContentActionTest_ShowPageAction_Test8TestBodyEv
 }
 {
    bug_145704
@@ -5671,8 +5533,7 @@
    fun:_Znw*
    fun:_ZN10extensions16SettingsFrontendC1ERK13scoped_refptrINS_22SettingsStorageFactoryEEP7Profile
    fun:_ZN10extensions16SettingsFrontend6CreateEP7Profile
-   fun:_ZN16ExtensionServiceC1EP7ProfilePK11CommandLineRK8FilePathPN10extensions14ExtensionPrefsEbb
-   fun:_ZN10extensions*
+   fun:_ZN16ExtensionServiceC1E*
 }
 {
    bug_145708
@@ -5735,7 +5596,7 @@
    bug_145747a
    Memcheck:Leak
    fun:_Znw*
-   fun:_ZN24TranslateInfoBarDelegate19CreateErrorDelegateEN15TranslateErrors4TypeEP16InfoBarTabHelperP11PrefServiceRKSsS7_
+   fun:_ZN24TranslateInfoBarDelegate19CreateErrorDelegateEN15TranslateErrors4TypeEP14InfoBarServiceP11PrefServiceRKSsS7_
    fun:_ZN16TranslateManager14PageTranslatedEPN7content11WebContentsEP21PageTranslatedDetails
    fun:_ZN16TranslateManager7ObserveEiRKN7content18NotificationSourceERKNS0_19NotificationDetailsE
    fun:_ZN23NotificationServiceImpl6NotifyEiRKN7content18NotificationSourceERKNS0_19NotificationDetailsE
@@ -5745,7 +5606,7 @@
    bug_145747b
    Memcheck:Leak
    fun:_Znw*
-   fun:_ZN24TranslateInfoBarDelegate19CreateErrorDelegateEN15TranslateErrors4TypeEP16InfoBarTabHelperP11PrefServiceRKSsS7_
+   fun:_ZN24TranslateInfoBarDelegate19CreateErrorDelegateEN15TranslateErrors4TypeEP14InfoBarServiceP11PrefServiceRKSsS7_
    fun:_ZN16TranslateManager18OnURLFetchCompleteEPKN3net10URLFetcherE
    fun:_ZN20TranslateManagerTest31SimulateTranslateScriptURLFetchEb
 }
@@ -5784,15 +5645,15 @@
    Memcheck:Leak
    fun:_Znw*
    fun:_ZN12PluginFinder18GetPluginInstallerERKN6webkit13WebPluginInfoE
-   fun:_ZN11PluginPrefs30EnablePluginIfPossibleCallbackEbRK8FilePathRKN4base8CallbackIFvbEEEP12PluginFinder
+   fun:_ZN11PluginPrefs30EnablePluginIfPossibleCallbackE*
 }
 {
    bug_147755_b
    Memcheck:Leak
    fun:_Znw*
    fun:_ZN12PluginFinder17GetPluginMetadataERKN6webkit13WebPluginInfoE
-   fun:_ZN11PluginPrefs12EnablePluginEbRK8FilePathRKN4base8CallbackIFvbEEE
-   fun:_ZN15PluginPrefsTest25EnablePluginSynchronouslyEbRK8FilePathb
+   fun:_ZN11PluginPrefs12EnablePluginE*
+   fun:_ZN15PluginPrefsTest25EnablePluginSynchronouslyE*
    fun:_ZN44PluginPrefsTest_UnifiedPepperFlashState_Test8TestBodyEv
 }
 {
@@ -5903,15 +5764,6 @@
    fun:_ZN13DRTTestRunner18locationChangeDoneEv
    fun:_ZN11WebViewHost18locationChangeDoneEPN6WebKit8WebFrameE
    fun:_ZN11WebViewHost13didFinishLoadEPN6WebKit8WebFrameE
-   fun:_ZN6WebKit21FrameLoaderClientImpl21dispatchDidFinishLoadEv
-   fun:_ZN7WebCore11FrameLoader29checkLoadCompleteForThisFrameEv
-   fun:_ZN7WebCore11FrameLoader17checkLoadCompleteEv
-   fun:_ZN7WebCore14DocumentLoader15finishedLoadingEv
-   fun:_ZN7WebCore18MainResourceLoader16didFinishLoadingEd
-   fun:_ZN7WebCore14ResourceLoader16didFinishLoadingEPNS_14ResourceHandleEd
-   fun:_ZN7WebCore22ResourceHandleInternal16didFinishLoadingEPN6WebKit12WebURLLoaderEd
-   fun:_ZN11webkit_glue16WebURLLoaderImpl7Context18OnCompletedRequestEibRKSsRKN4base9TimeTicksE
-   fun:_ZN12_GLOBAL__N_112RequestProxy22NotifyCompletedRequestEiRKSsRKN4base9TimeTicksE
 }
 {
    bug_150995_d
@@ -6026,17 +5878,17 @@
    fun:_ZN77GeolocationInfoBarQueueControllerTests_OneObservationPerInfoBarCancelled_Test8TestBodyEv
 }
 {
-  bug_156705
-  Memcheck:Leak
-  fun:_Znw*
-  fun:_ZN33GeolocationInfoBarQueueController21CreateInfoBarDelegateEP16InfoBarTabHelperPS_iiiRK4GURLRKSs
-  fun:_ZN33GeolocationInfoBarQueueController17ShowQueuedInfoBarEiiP16InfoBarTabHelper
+   bug_156705
+   Memcheck:Leak
+   fun:_Znw*
+   fun:_ZN33GeolocationInfoBarQueueController21CreateInfoBarDelegateEP14InfoBarServicePS_iiiRK4GURLRKSs
+   fun:_ZN33GeolocationInfoBarQueueController17ShowQueuedInfoBarEiiP14InfoBarService
 }
 {
-  bug_156829
-  Memcheck:Leak
-  fun:_Znw*
-  fun:_ZN7content23AudioInputDeviceManager23EnumerateOnDeviceThreadEv
+   bug_156829
+   Memcheck:Leak
+   fun:_Znw*
+   fun:_ZN7content23AudioInputDeviceManager23EnumerateOnDeviceThread*
 }
 {
    bug_158510
@@ -6124,28 +5976,6 @@
    fun:_ZN7content23DevToolsHttpHandlerImpl4InitEv
 }
 {
-   bug_161274
-   Memcheck:Leak
-   ...
-   fun:_ZN3net25FtpNetworkTransactionTest18ExecuteTransactionEPNS_21FtpSocketDataProviderEPKcii
-}
-{
-   bug_162732
-   Memcheck:Leak
-   fun:malloc
-   ...
-   fun:_ZN3gfx9RealGLApi15glLinkProgramFnEj
-   fun:_ZN6webkit3gpu33WebGraphicsContext3DInProcessImpl11linkProgramEj
-   fun:_ZN2cc18ProgramBindingBase4linkEPN6WebKit20WebGraphicsContext3DE
-   fun:_ZN2cc14ProgramBindingINS_*
-   fun:_ZN2cc10GLRenderer*
-   fun:_ZN2cc10GLRenderer*
-   fun:_ZN2cc10GLRenderer8drawQuadERNS_14DirectRenderer12DrawingFrameEPKNS_8DrawQuadE
-   fun:_ZN2cc14DirectRenderer14drawRenderPassERNS0_12DrawingFrameEPKNS_10RenderPassE
-   fun:_ZN2cc14DirectRenderer9drawFrameERKSt6vectorIPNS_10RenderPassESaIS3_EERKNS_16ScopedPtrHashMapINS2_2IdES2_EE
-   fun:_ZN2cc17LayerTreeHostImpl10drawLayersERKNS0_9FrameDataE
-}
-{
    bug_162825
    Memcheck:Uninitialized
    fun:bcmp
@@ -6167,17 +5997,6 @@
    fun:_ZN20SkBlurMaskFilterImpl17filterRectsToNineEPK6SkRectiRK8SkMatrixRK7SkIRectPN12SkMaskFilter9NinePatchE
    fun:_ZN12SkMaskFilter10filterPathERK6SkPathRK8SkMatrixRK12SkRasterClipP9SkBounderP9SkBlitterN7SkPaint5StyleE
    fun:_ZNK6SkDraw8drawPathERK6SkPathRK7SkPaintPK8SkMatrixb
-}
-{
-   bug_162829_a
-   Memcheck:Leak
-   fun:_Znw*
-   fun:_ZN7WebCore23v8StringToWebCoreStringIN3WTF6StringEEET_N2v86HandleINS4_6StringEEENS_12ExternalModeE
-   fun:_ZN7WebCore11V8ParameterILNS_15V8ParameterModeE0EE8toStringIN3WTF6StringEEET_v
-   fun:_ZN7WebCore11V8ParameterILNS_15V8ParameterModeE0EEcvN3WTF6StringEEv
-   fun:_ZN7WebCore*DB*Callback*
-   ...
-   fun:_ZN2v88internalL19HandleApiCallHelperILb0EEEPNS0_11MaybeObjectENS0_12_GLOBAL__N_116BuiltinArgumentsILNS0_21BuiltinExtraArgumentsE1EEEPNS0_7IsolateE
 }
 {
    bug_162829_b
@@ -6202,13 +6021,53 @@
    fun:_ZN2v88internalL19HandleApiCallHelperILb0EEEPNS0_11MaybeObjectENS0_12_GLOBAL__N_116BuiltinArgumentsILNS0_21BuiltinExtraArgumentsE1EEEPNS0_7IsolateE
 }
 {
-   bug_162829_d
+   # storage/indexeddb/basics-workers.html
+   # storage/indexeddb/open-twice-workers.html
+   # storage/indexeddb/pending-activity-workers.html
+   # storage/indexeddb/deletedatabase-delayed-by-open-and-versionchange-workers.html
+   bug_162829_e
    Memcheck:Leak
    fun:_Znw*
-   fun:_ZN7WebCore23v8StringToWebCoreStringIN3WTF6StringEEET_N2v86HandleINS4_6StringEEENS_12ExternalModeE
-   fun:_ZN7WebCore16V8StringResourceILNS_20V8StringResourceModeE0EE8toStringIN3WTF6StringEEET_v
-   fun:_ZN7WebCore16V8StringResourceILNS_20V8StringResourceModeE0EEcvN3WTF6StringEEv
-   fun:_ZN7WebCore23WorkerContextV8InternalL*webkitResolveLocalFileSystem*URLCallback*
+   fun:_ZN25TestWebKitPlatformSupport10idbFactoryEv
+   fun:_ZN6WebKit22IDBFactoryBackendProxyC1Ev
+   fun:_ZN6WebKit22IDBFactoryBackendProxy6createEv
+   fun:_ZN7WebCore26IDBFactoryBackendInterface6createEv
+   fun:_ZN7WebCore28WorkerContextIndexedDatabase9indexedDBEv
+   fun:_ZN7WebCore28WorkerContextIndexedDatabase9indexedDBEPNS_22ScriptExecutionContextE
+   fun:_ZN7WebCore23WorkerContextV8InternalL19indexedDBAttrGetterEN2v85LocalINS1_6StringEEERKNS1_12AccessorInfoE
+}
+{
+   # storage/indexeddb/pending-activity-workers.html
+   # storage/indexeddb/index-basics-workers.html
+   bug_162829_f
+   Memcheck:Leak
+   fun:_Znw*
+   fun:_ZN7WebCore11ScriptState10forContextEN2v85LocalINS1_7ContextEEE
+   fun:_ZN7WebCore11ScriptState7currentEv
+   fun:_ZN7WebCore24IDBObjectStoreV8InternalL11*Callback*
+   fun:_ZN2v88internalL19HandleApiCallHelperILb0EEEPNS0_11MaybeObjectENS0_12_GLOBAL__N_116BuiltinArgumentsILNS0_21BuiltinExtraArgumentsE1EEEPNS0_7IsolateE
+}
+{
+   # storage/indexeddb/objectstore-basics-workers.html
+   bug_162829_i
+   Memcheck:Leak
+   fun:_Znw*
+   fun:_ZN7WebCore23v8StringToWebCoreStringIN3WTF12AtomicStringEEET_N2v86HandleINS4_6StringEEENS_12ExternalModeE
+   fun:_ZN7WebCore16V8StringResourceILNS_20V8StringResourceModeE1EE8toStringIN3WTF12AtomicStringEEET_v
+   fun:_ZN7WebCore16V8StringResourceILNS_20V8StringResourceModeE1EEcvN3WTF12AtomicStringEEv
+   fun:_ZN7WebCore23WorkerContextV8InternalL24addEventListenerCallbackERKN2v89ArgumentsE
+   fun:_ZN2v88internalL19HandleApiCallHelperILb0EEEPNS0_11MaybeObjectENS0_12_GLOBAL__N_116BuiltinArgumentsILNS0_21BuiltinExtraArgumentsE1EEEPNS0_7IsolateE
+   fun:_ZN2v88internalL21Builtin_HandleApiCallENS0_12_GLOBAL__N_116BuiltinArgumentsILNS0_21BuiltinExtraArgumentsE1EEEPNS0_7IsolateE
+}
+{
+   # storage/indexeddb/objectstore-basics-workers.html
+   bug_162829_j
+   Memcheck:Leak
+   fun:malloc
+   fun:_ZN3WTF10fastMallocEm
+   fun:_ZN3WTF10RefCountedIN7WebCore30IDBTransactionBackendInterfaceEEnwEm
+   fun:_ZN7WebCore25IDBTransactionBackendImpl6createElRKN3WTF6VectorIlLm0EEENS_14IDBTransaction4ModeEPNS_22IDBDatabaseBackendImplE
+   fun:_ZN7WebCore22IDBDatabaseBackendImpl17createTransactionElRKN3WTF6VectorIlLm0EEENS_14IDBTransaction4ModeE
    ...
    fun:_ZN2v88internalL19HandleApiCallHelperILb0EEEPNS0_11MaybeObjectENS0_12_GLOBAL__N_116BuiltinArgumentsILNS0_21BuiltinExtraArgumentsE1EEEPNS0_7IsolateE
 }
@@ -6217,7 +6076,7 @@
    Memcheck:Leak
    fun:_Znw*
    fun:_ZN4dbus8Response14FromMethodCallEPNS_10MethodCallE
-   fun:_ZN8chromeos4ibus20IBusPanelServiceImpl*
+   fun:_ZN8chromeos20IBusPanelServiceImpl*
 }
 {
    bug_163922
@@ -6225,13 +6084,13 @@
    fun:_Znw*
    fun:_ZN10extensions16SettingsFrontendC1ERK13scoped_refptrINS_22SettingsStorageFactoryEEP7Profile
    fun:_ZN10extensions16SettingsFrontend6CreateEP7Profile
-   fun:_ZN16ExtensionServiceC1EP7ProfilePK11CommandLineRK8FilePathPN10extensions14ExtensionPrefsEPNS8_9BlacklistEbb
+   fun:_ZN16ExtensionServiceC1E*
    fun:_ZN10extensions19ExtensionSystemImpl6Shared4InitEb
    fun:_ZN10extensions19ExtensionSystemImpl21InitForRegularProfileEb
    fun:_ZN14ProfileManager22DoFinalInitForServicesEP7Profileb
    fun:_ZN14ProfileManager11DoFinalInitEP7Profileb
    fun:_ZN14ProfileManager10AddProfileEP7Profile
-   fun:_ZN14ProfileManager10GetProfileERK8FilePath
+   fun:_ZN14ProfileManager10GetProfileE*
 }
 {
    bug_163924
@@ -6291,130 +6150,6 @@
    fun:_ZN7WebCore11RenderLayer10paintLayerEPNS_15GraphicsContextERKNS0_17LayerPaintingInfoEj
 }
 {
-   bug_164676_a
-   Memcheck:Leak
-   fun:_Znw*
-   fun:_ZN3ash4test12_GLOBAL__N_112DragTestView13WriteDragDataERKN3gfx5PointEPN2ui14OSExchangeDataE
-   fun:_ZN5views4View6DoDragERKN2ui12LocatedEventERKN3gfx5PointENS1_13DragDropTypes15DragEventSourceE
-}
-{
-   bug_164676_h
-   Memcheck:Leak
-   fun:_Znw*
-   fun:_ZN2cc24LayerAnimationController6createEPNS_30LayerAnimationControllerClientE
-   fun:_ZN2cc5LayerC2Ev
-   fun:_ZN2cc20ContentsScalingLayerC2Ev
-   fun:_ZN2cc10TiledLayerC2Ev
-   fun:_ZN2cc12ContentLayerC1EPNS_18ContentLayerClientE
-   fun:_ZN2cc12ContentLayer6createEPNS_18ContentLayerClientE
-   fun:_ZN2ui5Layer14CreateWebLayerEv
-   fun:_ZN2ui5LayerC1Ev
-   fun:_ZN5views4View11CreateLayerEv
-   fun:_ZN5views4View15SetPaintToLayerEb
-   fun:_ZN5views14TrayBubbleViewC1EPN4aura6WindowEPNS_4ViewEPNS0_8DelegateERKNS0_10InitParamsE
-   fun:_ZN5views14TrayBubbleView6CreateEPN4aura6WindowEPNS_4ViewEPNS0_8DelegateEPNS0_10InitParamsE
-   fun:_ZN3ash8internal16SystemTrayBubble8InitViewEPN5views4ViewENS_4user11LoginStatusEPNS2_14TrayBubbleView10InitParamsE
-   fun:_ZN3ash8internal19SystemBubbleWrapper8InitViewEPNS0_18TrayBackgroundViewEPN5views4ViewEPNS4_14TrayBubbleView10InitParamsE
-   fun:_ZN3ash10SystemTray9ShowItemsERKSt6vectorIPNS_14SystemTrayItemESaIS3_EEbbNS_18BubbleCreationTypeEi
-   fun:_ZN3ash10SystemTray25ShowDefaultViewWithOffsetENS_18BubbleCreationTypeEi
-   fun:_ZN3ash10SystemTray15ShowDefaultViewENS_18BubbleCreationTypeE
-   fun:_ZN3ash4test41SystemTrayTest_SystemTrayNoViewItems_Test8TestBodyEv
-}
-{
-   bug_164676_m
-   Memcheck:Uninitialized
-   fun:_ZN4skia12_GLOBAL__N_18ClampTo8Ei
-   fun:_ZN4skia12_GLOBAL__N_*Convolve*
-   fun:_ZN4skia14BGRAConvolve2DEPKhibRKNS_19ConvolutionFilter1DES4_iPhb
-   fun:_ZN4skia15ImageOperations11ResizeBasicERK8SkBitmapNS0_12ResizeMethodEiiRK7SkIRect
-   fun:_ZN4skia15ImageOperations6ResizeERK8SkBitmapNS0_12ResizeMethodEiiRK7SkIRect
-   fun:_ZN4skia15ImageOperations6ResizeERK8SkBitmapNS0_12ResizeMethodEii
-   fun:_ZN3ash8internal13DragImageView7OnPaintEPN3gfx6CanvasE
-}
-{
-   bug_164676_q
-   Memcheck:Uninitialized
-   fun:_ZN4skia12_GLOBAL__N_118ConvolveVerticallyILb1EEEvPKsiPKPhiS4_
-   fun:_ZN4skia14BGRAConvolve2DEPKhibRKNS_19ConvolutionFilter1DES4_iPhb
-   fun:_ZN4skia15ImageOperations11ResizeBasicERK8SkBitmapNS0_12ResizeMethodEiiRK7SkIRect
-   fun:_ZN4skia15ImageOperations6ResizeERK8SkBitmapNS0_12ResizeMethodEiiRK7SkIRect
-   fun:_ZN4skia15ImageOperations6ResizeERK8SkBitmapNS0_12ResizeMethodEii
-   fun:_ZN3ash8internal13DragImageView7OnPaintEPN3gfx6CanvasE
-}
-{
-   bug_164676_r
-   Memcheck:Leak
-   fun:_Znw*
-   fun:_ZN3ash21PartialScreenshotView22StartPartialScreenshotEPNS_18ScreenshotDelegateE
-   fun:_ZN3ash21AcceleratorController13PerformActionEiRKN2ui11AcceleratorE
-   fun:_ZN3ash21AcceleratorController18AcceleratorPressedERKN2ui11AcceleratorE
-   fun:_ZN2ui18AcceleratorManager7ProcessERKNS_11AcceleratorE
-   fun:_ZN3ash21AcceleratorController7ProcessERKN2ui11AcceleratorE
-   fun:_ZN3ash25AcceleratorControllerTest18ProcessWithContextERKN2ui11AcceleratorE
-}
-{
-   bug_164676_s
-   Memcheck:Leak
-   fun:_Znw*
-   fun:_ZN2ui13LayerAnimator21CreateDefaultAnimatorEv
-   fun:_ZN2ui5Layer11GetAnimatorEv
-   fun:_ZN2ui5Layer9SetBoundsERKN3gfx4RectE
-   fun:_ZN5views4View13ReparentLayerERKN3gfx8Vector2dEPN2ui5LayerE
-   fun:_ZN5views4View17UpdateParentLayerEv
-   fun:_ZN5views4View18UpdateParentLayersEv
-   fun:_ZN5views4View11CreateLayerEv
-   fun:_ZN5views4View15SetPaintToLayerEb
-   fun:_ZN5views14TrayBubbleViewC1EPN4aura6WindowEPNS_4ViewEPNS0_8DelegateERKNS0_10InitParamsE
-   fun:_ZN5views14TrayBubbleView6CreateEPN4aura6WindowEPNS_4ViewEPNS0_8DelegateEPNS0_10InitParamsE
-   fun:_ZN3ash8internal16SystemTrayBubble8InitViewEPN5views4ViewENS_4user11LoginStatusEPNS2_14TrayBubbleView10InitParamsE
-   fun:_ZN3ash8internal19SystemBubbleWrapper8InitViewEPNS0_18TrayBackgroundViewEPN5views4ViewEPNS4_14TrayBubbleView10InitParamsE
-   fun:_ZN3ash10SystemTray9ShowItemsERKSt6vectorIPNS_14SystemTrayItemESaIS3_EEbbNS_18BubbleCreationTypeEi
-   fun:_ZN3ash10SystemTray*ShowDefault*
-}
-{
-   bug_164676_t
-   Memcheck:Leak
-   fun:_Znw*
-   fun:_ZN5views4View11CreateLayerEv
-   fun:_ZN5views4View15SetPaintToLayerEb
-   fun:_ZN5views14TrayBubbleViewC1EPN4aura6WindowEPNS_4ViewEPNS0_8DelegateERKNS0_10InitParamsE
-   fun:_ZN5views14TrayBubbleView6CreateEPN4aura6WindowEPNS_4ViewEPNS0_8DelegateEPNS0_10InitParamsE
-   fun:_ZN3ash8internal16SystemTrayBubble8InitViewEPN5views4ViewENS_4user11LoginStatusEPNS2_14TrayBubbleView10InitParamsE
-   fun:_ZN3ash8internal19SystemBubbleWrapper8InitViewEPNS0_18TrayBackgroundViewEPN5views4ViewEPNS4_14TrayBubbleView10InitParamsE
-   fun:_ZN3ash10SystemTray9ShowItemsERKSt6vectorIPNS_14SystemTrayItemESaIS3_EEbbNS_18BubbleCreationTypeEi
-   fun:_ZN3ash10SystemTray25ShowDefaultViewWithOffsetENS_18BubbleCreationTypeEi
-   fun:_ZN3ash10SystemTray15ShowDefaultViewENS_18BubbleCreationTypeE
-   fun:_ZN3ash4test41SystemTrayTest_SystemTrayNoViewItems_Test8TestBodyEv
-}
-{
-   bug_164676_u
-   Memcheck:Leak
-   fun:_Znw*
-   fun:_ZN2cc12ContentLayer6createEPNS_18ContentLayerClientE
-   fun:_ZN2ui5Layer14CreateWebLayerEv
-   fun:_ZN2ui5LayerC1Ev
-   ...
-   fun:_ZN3ash8internal16SystemTrayBubble8InitViewEPN5views4ViewENS_4user11LoginStatusEPNS2_14TrayBubbleView10InitParamsE
-}
-{
-   bug_164676_v
-   Memcheck:Uninitialized
-   fun:_ZSt3maxIhERKT_S2_S2_
-   fun:_ZN4skia12_GLOBAL__N_*Convolve*
-   fun:_ZN4skia14BGRAConvolve2DEPKhibRKNS_19ConvolutionFilter1DES4_iPhb
-   fun:_ZN4skia15ImageOperations11ResizeBasicERK8SkBitmapNS0_12ResizeMethodEiiRK7SkIRect
-   fun:_ZN4skia15ImageOperations6ResizeERK8SkBitmapNS0_12ResizeMethodEiiRK7SkIRect
-   fun:_ZN4skia15ImageOperations6ResizeERK8SkBitmapNS0_12ResizeMethodEii
-   fun:_ZN3ash8internal13DragImageView7OnPaintEPN3gfx6CanvasE
-}
-{
-   bug_166161
-   Memcheck:Leak
-   fun:_Znw*
-   fun:_ZN17AutofillPopupView6CreateEP23AutofillPopupController
-   fun:_ZN27AutofillPopupControllerImpl4ShowERKSt6vectorISbItN4base20string16_char_traitsESaItEESaIS4_EES8_S8_RKS0_IiSaIiEE
-}
-{
    bug_166470
    Memcheck:Leak
    fun:_Znw*
@@ -6425,14 +6160,366 @@
    fun:_ZN16ExtensionService18UninstallExtensionESsbPSbItN4base20string16_char_traitsESaItEE
 }
 {
-   bug_166485
+   bug_166470b
    Memcheck:Leak
    fun:_Znw*
-   fun:_ZN9__gnu_cxx13new_allocatorI8FilePathE8allocateEmPKv
-   fun:_ZNSt12_Vector_baseI8FilePathSaIS0_EE11_M_allocateEm
-   fun:_ZNSt6vectorI8FilePathSaIS0_EE13_M_insert_auxEN9__gnu_cxx17__normal_iteratorIPS0_S2_EERKS0_
-   fun:_ZNSt6vectorI8FilePathSaIS0_EE9push_backERKS0_
-   fun:_ZN9file_util15CreateDirectoryERK8FilePath
+   fun:_ZN9__gnu_cxx13new_allocator*FilePath*allocate*
+   fun:_ZNSt12_Vector_base*FilePath*_M_allocate*
+   fun:_ZNSt6vector*FilePath*_M_insert_aux*
+   fun:_ZNSt6vector*FilePath*push_back*
+   fun:_ZN9file_util15CreateDirectoryE*
    fun:_ZN11dom_storage17DomStorageContext19GetStorageNamespaceEl
    fun:_ZN11dom_storage17DomStorageContext18DeleteLocalStorageERK4GURL
+}
+{
+   bug_166470c
+   Memcheck:Leak
+   fun:_Znw*
+   fun:_ZN11dom_storage19DomStorageNamespace24DeleteLocalStorageOriginERK4GURL
+   fun:_ZN11dom_storage17DomStorageContext18DeleteLocalStorageERK4GURL
+}
+{
+   bug_166470d
+   Memcheck:Leak
+   ...
+   fun:_ZN7fileapi26GetOriginIdentifierFromURLERK4GURL
+   fun:_ZN11dom_storage14DomStorageArea26DatabaseFileNameFromOriginERK4GURL
+   fun:_ZN11dom_storage14DomStorageAreaC1E*
+   fun:_ZN11dom_storage19DomStorageNamespace24DeleteLocalStorageOriginERK4GURL
+   fun:_ZN11dom_storage17DomStorageContext18DeleteLocalStorageERK4GURL
+}
+{
+   bug_166709
+   Memcheck:Leak
+   fun:_Znw*
+   fun:_ZN4base4BindIMNS_12_GLOBAL__N_121PostTaskAndReplyRelayEFvvENS_8internal17UnretainedWrapper*
+   fun:_ZN4base8internal20PostTaskAndReplyImpl16PostTaskAndReplyERKN15tracked_objects8Location*
+   ...
+   fun:_ZN16ExtensionService12AddExtensionEPKN10extensions9ExtensionE
+   fun:_ZN52BackgroundApplicationListModelTest_ExplicitTest_Test8TestBodyEv
+}
+{
+   bug_166709b
+   Memcheck:Leak
+   fun:_Znw*
+   fun:_ZN4base12_GLOBAL__N_112CreateThreadEmbPNS_14PlatformThread8DelegateEPmNS_14ThreadPriorityE
+   fun:_ZN4base14PlatformThread6CreateEmPNS0_8DelegateEPm
+   fun:_ZN4base12SimpleThread5StartEv
+   fun:_ZN4base19SequencedWorkerPool6WorkerC1ERK13scoped_refptrIS0_EiRKSs
+   fun:_ZN4base19SequencedWorkerPool5Inner30FinishStartingAdditionalThreadEi
+   fun:_ZN4base19SequencedWorkerPool5Inner10ThreadLoopEPNS0_6WorkerE
+   fun:_ZN4base19SequencedWorkerPool6Worker3RunEv
+   fun:_ZN4base12SimpleThread10ThreadMainEv
+   fun:_ZN4base12_GLOBAL__N_110ThreadFuncEPv
+}
+{
+   bug_166709c
+   Memcheck:Leak
+   fun:_Znw*
+   fun:_ZN4base8internal20PostTaskAndReplyImpl16PostTaskAndReplyERKN15tracked_objects8LocationERKNS_8CallbackIFvvEEESA_
+   fun:_ZN4base10TaskRunner16PostTaskAndReplyERKN15tracked_objects8LocationERKNS_8CallbackIFvvEEES9_
+   fun:_ZN7content13BrowserThread28PostBlockingPoolTaskAndReplyERKN15tracked_objects8LocationERKN4base8CallbackIFvvEEESA_
+   fun:_ZN10extensions11ImageLoader15LoadImagesAsyncEPKNS_9ExtensionERKSt6vectorINS0_19ImageRepresentationESaIS5_EERKN4base8CallbackIFvRKN3gfx5ImageEEEE
+   fun:_ZN10extensions11ImageLoader14LoadImageAsyncEPKNS_9ExtensionERK17ExtensionResourceRKN3gfx4SizeERKN4base8CallbackIFvRKNS7_5ImageEEEE
+   fun:_ZN30BackgroundApplicationListModel11Application11RequestIconEN14extension_misc14ExtensionIconsE
+   ...
+   fun:_ZN64BackgroundApplicationListModelTest_AddRemovePermissionsTest_Test8TestBodyEv
+}
+{
+   bug_166818
+   Memcheck:Leak
+   fun:malloc
+   fun:g_malloc
+   ...
+   fun:gdk_pixbuf_loader_load_module
+   fun:gdk_pixbuf_loader_close
+   fun:_ZN2ui12_GLOBAL__N_110LoadPixbufEPN4base22RefCountedStaticMemoryEb
+   fun:_ZN2ui14ResourceBundle19GetNativeImageNamedEiNS0_8ImageRTLE
+   fun:_ZN2ui14ResourceBundle19GetNativeImageNamedEi
+}
+{
+   bug_166819
+   Memcheck:Leak
+   fun:_Znw*
+   fun:_ZNK3sql10Connection21GetUntrackedStatementEPKc
+   fun:_ZNK3sql10Connection21DoesTableOrIndexExistEPKcS2_
+   fun:_ZNK3sql10Connection14DoesTableExistEPKc
+   fun:_ZN3sql9MetaTable14DoesTableExistEPNS_10ConnectionE
+   ...
+   fun:_ZN7history16TopSitesDatabase4InitE*
+   fun:_ZN7history15TopSitesBackend16InitDBOnDBThreadE*
+}
+{
+   bug_166819b
+   Memcheck:Leak
+   fun:_Znw*
+   fun:_ZNK3sql10Connection21GetUntrackedStatementEPKc
+   fun:_ZNK3sql10Connection21DoesTableOrIndexExistEPKcS2_
+   fun:_ZNK3sql10Connection14DoesTableExistEPKc
+   fun:_ZN7history17ShortcutsDatabase11EnsureTableEv
+   fun:_ZN7history17ShortcutsDatabase4InitEv
+   fun:_ZN7history16ShortcutsBackend12InitInternalEv
+}
+{
+   bug_166976a
+   Memcheck:Leak
+   fun:_Znw*
+   fun:_ZN4base19SequencedWorkerPool5Inner30FinishStartingAdditionalThreadEi
+   fun:_ZN4base19SequencedWorkerPool5Inner10ThreadLoopEPNS0_6WorkerE
+   fun:_ZN4base19SequencedWorkerPool6Worker3RunEv
+   fun:_ZN4base12SimpleThread10ThreadMainEv
+   fun:_ZN4base12_GLOBAL__N_110ThreadFuncEPv
+}
+{
+   bug_166976b
+   Memcheck:Leak
+   fun:_Znw*
+   fun:_ZN9__gnu_cxx13new_allocatorISt10_List_nodeIPN4base13WaitableEvent6WaiterEEE8allocateEmPKv
+   fun:_ZNSt10_List_baseIPN4base13WaitableEvent6WaiterESaIS3_EE11_M_get_nodeEv
+   fun:_ZNSt4listIPN4base13WaitableEvent6WaiterESaIS3_EE14_M_create_nodeERKS3_
+   fun:_ZNSt4listIPN4base13WaitableEvent6WaiterESaIS3_EE9_M_insertESt14_List_iteratorIS3_ERKS3_
+   fun:_ZNSt4listIPN4base13WaitableEvent6WaiterESaIS3_EE9push_backERKS3_
+   fun:_ZN4base13WaitableEvent7EnqueueEPNS0_6WaiterE
+   fun:_ZN4base13WaitableEvent9TimedWaitERKNS_9TimeDeltaE
+   fun:_ZN4base13WaitableEvent4WaitEv
+   fun:_ZN4base12SimpleThread5StartEv
+   fun:_ZN4base19SequencedWorkerPool6WorkerC1ERK13scoped_refptrIS0_EiRKSs
+   fun:_ZN4base19SequencedWorkerPool5Inner30FinishStartingAdditionalThreadEi
+   fun:_ZN4base19SequencedWorkerPool5Inner10ThreadLoopEPNS0_6WorkerE
+   fun:_ZN4base19SequencedWorkerPool6Worker3RunEv
+   fun:_ZN4base12SimpleThread10ThreadMainEv
+   fun:_ZN4base12_GLOBAL__N_110ThreadFuncEPv
+}
+{
+   bug_167175a
+   Memcheck:Leak
+   ...
+   fun:g_*
+   ...
+   fun:_ZN16BrowserWindowGtk11InitWidgetsEv
+   fun:_ZN16BrowserWindowGtk4InitEv
+   fun:_ZN13BrowserWindow19CreateBrowserWindowEP7Browser
+}
+{
+   bug_167175b
+   Memcheck:Leak
+   fun:malloc
+   obj:/lib/libpng12.so.0.42.0
+   fun:png_create_read_struct_2
+   ...
+   fun:_ZN15ReloadButtonGtkC1EP18LocationBarViewGtkP7Browser
+   fun:_ZN17BrowserToolbarGtk4InitEP10_GtkWindow
+   fun:_ZN16BrowserWindowGtk11InitWidgetsEv
+   fun:_ZN16BrowserWindowGtk4InitEv
+   fun:_ZN13BrowserWindow19CreateBrowserWindowEP7Browser
+}
+{
+   bug_167175d
+   Memcheck:Leak
+   fun:_Znw*
+   fun:_ZN9__gnu_cxx13new_allocatorISbItN4base20string16_char_traitsESaItEEE8allocateEmPKv
+   fun:_ZNSt12_Vector_baseISbItN4base20string16_char_traitsESaItEESaIS3_EE11_M_allocateEm
+   ...
+   fun:_ZN15WrenchMenuModel5BuildEbb
+   fun:_ZN15WrenchMenuModelC1EPN2ui19AcceleratorProviderEP7Browserbb
+   fun:_ZN17BrowserToolbarGtkC1EP7BrowserP16BrowserWindowGtk
+   fun:_ZN16BrowserWindowGtk11InitWidgetsEv
+   fun:_ZN16BrowserWindowGtk4InitEv
+   fun:_ZN13BrowserWindow19CreateBrowserWindowEP7Browser
+}
+{
+   bug_164781a
+   Memcheck:Uninitialized
+   ...
+   fun:vp8cx_encode_*_macroblock
+   fun:thread_encoding_proc
+}
+{
+   bug_167481b
+   Memcheck:Uninitialized
+   ...
+   fun:encode_frame_to_data_rate
+   fun:vp8_get_compressed_data
+   fun:vp8e_encode
+   fun:vpx_codec_encode
+}
+{
+   bug_169311
+   Memcheck:Leak
+   fun:malloc
+   fun:_ZN3WTF10fastMallocEm
+   fun:_ZN3WTF10RefCountedIN7WebCore18StyleSheetContentsEEnwEm
+   fun:_ZN7WebCore18StyleSheetContents6createERKNS_16CSSParserContextE
+   fun:_ZN7WebCoreL12parseUASheetERKN3WTF6StringE
+   fun:_ZN7WebCoreL12parseUASheetEPKcj
+   fun:_ZN7WebCoreL15viewSourceStyleEv
+   fun:_ZN7WebCore13StyleResolver12matchUARulesERNS0_11MatchResultE
+   fun:_ZN7WebCore13StyleResolver15styleForElementEPNS_7ElementEPNS_11RenderStyleENS_20StyleSharingBehaviorENS_20RuleMatchingBehaviorEPNS_12RenderRegionE
+   fun:_ZN7WebCore13StyleResolverC1EPNS_8DocumentEb
+   fun:_ZN7WebCore8Document19createStyleResolverEv
+   fun:_ZN7WebCore8Document13styleResolverEv
+   fun:_ZN7WebCore7Element16styleForRendererEv
+}
+{
+   bug_170340
+   Memcheck:Uninitialized
+   fun:_ZN3WTF12AtomicString3addEPKt
+   fun:_ZN3WTF12AtomicStringC1EPKt
+   fun:_ZN7WebCore18HTMLPreloadScanner12processTokenEv
+   fun:_ZN7WebCore18HTMLPreloadScanner4scanEv
+   fun:_ZN7WebCore18HTMLDocumentParser13pumpTokenizerENS0_15SynchronousModeE
+   fun:_ZN7WebCore18HTMLDocumentParser23pumpTokenizerIfPossibleENS0_15SynchronousModeE
+   fun:_ZN7WebCore18HTMLDocumentParser6appendERKNS_15SegmentedStringE
+   fun:_ZN7WebCore25DecodedDataDocumentParser5flushEPNS_14DocumentWriterE
+   fun:_ZN7WebCore14DocumentWriter3endEv
+   fun:_ZN7WebCore14DocumentLoader15finishedLoadingEv
+}
+{
+   bug_170623
+   Memcheck:Unaddressable
+   fun:_ZN12_GLOBAL__N_114chromiumDeleteEP11sqlite3_vfsPKci
+   fun:sqlite3OsDelete
+   fun:pager_end_transaction
+   fun:sqlite3PagerCommitPhaseTwo
+   fun:sqlite3BtreeCommitPhaseTwo
+   fun:vdbeCommit
+   fun:sqlite3VdbeHalt
+   fun:sqlite3VdbeExec
+   fun:sqlite3Step
+   fun:sqlite3_step
+   fun:_ZN7WebCore15SQLiteStatement4stepEv
+   fun:_ZN7WebCore15SQLiteStatement14executeCommandEv
+   fun:_ZN7WebCore14SQLiteDatabase14executeCommandERKN3WTF6StringE
+   fun:_ZN7WebCore17SQLiteTransaction6commitEv
+   fun:_ZN7WebCore14SQLTransaction19postflightAndCommitEv
+   fun:_ZN7WebCore14SQLTransaction13runStatementsEv
+}
+{
+   bug_171567
+   Memcheck:Leak
+   fun:_Znw*
+   fun:_ZN17AutofillPopupView6CreateEP23AutofillPopupController
+   fun:_ZN27AutofillPopupControllerImpl4ShowERKSt6vectorISbItN4base20string16_char_traitsESaItEESaIS4_EES8_S8_RKS0_IiSaIiEE
+   fun:_ZN53AutofillPopupControllerUnitTest_GrowPopupInSpace_Test8TestBodyEv
+}
+{
+   bug_171722
+   Memcheck:Leak
+   fun:_Znw*
+   fun:_ZN3net12_GLOBAL__N_120URLRequestFtpJobTest9AddSocketEPNS_13MockReadWriteILNS_17MockReadWriteTypeE0EEEmPNS2_ILS3_1EEEm
+}
+{
+   bug_171983
+   Memcheck:Leak
+   fun:_Znw*
+   fun:_ZN8chromeos51MagnificationManagerTest_MagnificationObserver_Test8TestBodyEv
+}
+{
+   bug_172005
+   Memcheck:Leak
+   fun:_Znw*
+   fun:_ZN7leveldb10VersionSet11LogAndApplyEPNS_11VersionEditEPNS_4port5MutexE
+   fun:_ZN7leveldb2DB4OpenERKNS_7OptionsERKSsPPS0_
+   fun:_ZN11dom_storage22SessionStorageDatabase9TryToOpenEPPN7leveldb2DBE
+   fun:_ZN11dom_storage22SessionStorageDatabase8LazyOpenEb
+   fun:_ZN11dom_storage22SessionStorageDatabase24ReadNamespacesAndOriginsEPSt3mapISsSt6vectorI4GURLSaIS3_EESt4lessISsESaISt4pairIKSsS5_EEE
+   fun:_ZN11dom_storage17DomStorageContext36FindUnusedNamespacesInCommitSequenceERKSt3setISsSt4lessISsESaISsEES7_
+}
+{
+   bug_172005b
+   Memcheck:Leak
+   fun:_Znw*
+   fun:_ZN7leveldb6DBImplC1ERKNS_7OptionsERKSs
+   fun:_ZN7leveldb2DB4OpenERKNS_7OptionsERKSsPPS0_
+   fun:_ZN11dom_storage22SessionStorageDatabase9TryToOpenEPPN7leveldb2DBE
+   fun:_ZN11dom_storage22SessionStorageDatabase8LazyOpenEb
+   fun:_ZN11dom_storage22SessionStorageDatabase24ReadNamespacesAndOriginsEPSt3mapISsSt6vectorI4GURLSaIS3_EESt4lessISsESaISt4pairIKSsS5_EEE
+   fun:_ZN11dom_storage17DomStorageContext36FindUnusedNamespacesInCommitSequenceERKSt3setISsSt4lessISsESaISsEES7_
+}
+{
+   bug_172025
+   Memcheck:Uninitialized
+   fun:_ZN11WebViewHost19didCreateDataSourceEPN6WebKit8WebFrameEPNS0_13WebDataSourceE
+   fun:_ZN6WebKit21FrameLoaderClientImpl20createDocumentLoaderERKN7WebCore15ResourceRequestERKNS1_14SubstituteDataE
+   fun:_ZN7WebCore11FrameLoader4initEv
+   fun:_ZN7WebCore5Frame4initEv
+   fun:_ZN6WebKit12WebFrameImpl21initializeAsMainFrameEPN7WebCore4PageE
+   fun:_ZN6WebKit11WebViewImpl19initializeMainFrameEPNS_14WebFrameClientE
+   fun:_ZN9TestShell15createNewWindowERKN6WebKit6WebURLEP16DRTDevToolsAgentPN13WebTestRunner17WebTestInterfacesE
+   fun:_ZN9TestShell16createMainWindowEv
+   fun:_ZN9TestShell10initializeEv
+}
+{
+   bug_172695
+   Memcheck:Leak
+   fun:_Znw*
+   ...
+   fun:_ZN10extensions20RulesRegistryService30RegisterDefaultRulesRegistriesEv
+   fun:_ZN10extensions19ExtensionSystemImpl21InitForRegularProfileEb
+   fun:_ZN14ProfileManager22DoFinalInitForServicesEP7Profileb
+   fun:_ZN14ProfileManager11DoFinalInitEP7Profileb
+   fun:_ZN14ProfileManager10AddProfileEP7Profile
+   fun:_ZN14ProfileManager10GetProfileE*
+   ...
+   fun:_ZN12_GLOBAL__N_113CreateProfileERKN7content18MainFunctionParamsE*
+   fun:_ZN22ChromeBrowserMainParts25PreMainMessageLoopRunImplEv
+   fun:_ZN22ChromeBrowserMainParts21PreMainMessageLoopRunEv
+   fun:_ZN7content15BrowserMainLoop13CreateThreadsEv
+   fun:_ZN7content21BrowserMainRunnerImpl10InitializeERKNS_18MainFunctionParamsE
+   fun:_ZN7content11BrowserMainERKNS_18MainFunctionParamsE
+   fun:_ZN7content23RunNamedProcessTypeMainERKSsRKNS_18MainFunctionParamsEPNS_19ContentMainDelegateE
+   fun:_ZN7content21ContentMainRunnerImpl3RunEv
+   fun:_ZN7content11ContentMainEiPPKcPNS_19ContentMainDelegateE
+   fun:ChromeMain
+}
+{
+   bug_172884
+   Memcheck:Leak
+   fun:_Znw*
+   fun:_ZN9__gnu_cxx13new_allocatorISt13_Rb_tree_nodeISt4pairIKiSt3setIPN10extensions15DeclarativeRuleINS5_16ContentConditionENS5_13ContentActionEEESt4lessISA_ESaISA_EEEEE8allocateEmPKv
+   ...
+   fun:_ZNSt3mapIiSt3setIPN10extensions15DeclarativeRuleINS1_16ContentConditionENS1_13ContentActionEEESt4lessIS6_ESaIS6_EES7_IiESaISt4pairIKiSA_EEE6insertESt17_Rb_tree_iteratorISE_ERKSE_
+   fun:_ZNSt3mapIiSt3setIPN10extensions15DeclarativeRuleINS1_16ContentConditionENS1_13ContentActionEEESt4lessIS6_ESaIS6_EES7_IiESaISt4pairIKiSA_EEEixERSD_
+   fun:_ZN10extensions20ContentRulesRegistry5ApplyEPN7content11WebContentsERKSt6vectorISsSaISsEE
+   fun:_ZN10extensions20ContentRulesRegistry20DidNavigateMainFrameEPN7content11WebContentsERKNS1_20LoadCommittedDetailsERKNS1_19FrameNavigateParamsE
+   fun:_ZN10extensions9TabHelper20DidNavigateMainFrameERKN7content20LoadCommittedDetailsERKNS1_19FrameNavigateParamsE
+   fun:_ZN7content15WebContentsImpl30DidNavigateMainFramePostCommitERKNS_20LoadCommittedDetailsERK32ViewHostMsg_FrameNavigate_Params
+   fun:_ZN7content15WebContentsImpl11DidNavigateEPNS_14RenderViewHostERK32ViewHostMsg_FrameNavigate_Params
+   fun:_ZN7content18RenderViewHostImpl10OnNavigateERKN3IPC7MessageE
+   fun:_ZN7content18RenderViewHostImpl17OnMessageReceivedERKN3IPC7MessageE
+   fun:_ZN7content21RenderProcessHostImpl17OnMessageReceivedERKN3IPC7MessageE
+   fun:_ZN3IPC12ChannelProxy7Context17OnDispatchMessageERKNS_7MessageE
+}
+{
+   bug_173096
+   Memcheck:Uninitialized
+   fun:bcmp
+   fun:_ZN2cc19LayerTreeDebugState5equalERKS0_S2_
+   fun:_ZN2cc13LayerTreeHost13setDebugStateERKNS_19LayerTreeDebugStateE
+   fun:_ZN6WebKit20WebLayerTreeViewImpl*set*
+   fun:_ZN6WebKit11WebViewImpl33setIsAcceleratedCompositingActiveEb
+   fun:_ZN6WebKit11WebViewImpl20setRootGraphicsLayerEPN7WebCore13GraphicsLayerE
+   fun:_ZN6WebKit16ChromeClientImpl23attachRootGraphicsLayerEPN7WebCore5FrameEPNS1_13GraphicsLayerE
+   fun:_ZN7WebCore21RenderLayerCompositor15attachRootLayerENS0_19RootLayerAttachmentE
+   fun:_ZN7WebCore21RenderLayerCompositor15ensureRootLayerEv
+   fun:_ZN7WebCore21RenderLayerCompositor21enableCompositingModeEb
+   fun:_ZN7WebCore21RenderLayerCompositor13updateBackingEPNS_11RenderLayerENS0_24CompositingChangeRepaintE
+   fun:_ZN7WebCore21RenderLayerCompositor27updateLayerCompositingStateEPNS_11RenderLayerENS0_24CompositingChangeRepaintE
+   fun:_ZN7WebCore11RenderLayer12styleChangedENS_15StyleDifferenceEPKNS_11RenderStyleE
+   fun:_ZN7WebCore22RenderLayerModelObject14styleDidChangeENS_15StyleDifferenceEPKNS_11RenderStyleE
+   fun:_ZN7WebCore9RenderBox14styleDidChangeENS_15StyleDifferenceEPKNS_11RenderStyleE
+}
+{
+   bug_173356
+   Memcheck:Overlap
+   fun:memcpy
+   fun:_ZN3gpu5gles2*Immediate4InitE*
+   fun:_ZN3gpu5gles2*GLES2ImplementationTest_*_Test8TestBodyEv
+}
+{
+   bug_175100
+   Memcheck:Leak
+   ...
+   fun:_ZN20OneClickSigninHelper14DidStopLoadingEPN7content14RenderViewHostE
+   fun:_ZN67OneClickSigninHelperTest_SigninFromWebstoreWithConfigSyncfirst_Test8TestBodyEv
 }

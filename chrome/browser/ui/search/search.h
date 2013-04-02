@@ -10,11 +10,32 @@
 #include <vector>
 
 #include "base/basictypes.h"
+#include "base/string16.h"
 
+class GURL;
 class Profile;
+
+namespace content {
+class NavigationEntry;
+}
 
 namespace chrome {
 namespace search {
+
+// The key used to store search terms data in the NavigationEntry to be later
+// displayed in the Omnibox. With the context of the user's exact query,
+// InstantController sets the correct search terms to be displayed.
+extern const char kInstantExtendedSearchTermsKey[];
+
+enum InstantExtendedDefault {
+  INSTANT_FORCE_ON,      // Force the setting on if no other setting exists.
+  INSTANT_USE_EXISTING,  // Use same the value of the old instant.enabled pref.
+  INSTANT_FORCE_OFF,     // Force the setting off if no other setting exists.
+};
+
+// Returns an enum value indicating which mode to set the new
+// instant_extended.enabled pref to by default.
+InstantExtendedDefault GetInstantExtendedDefaultSetting();
 
 // Returns whether the Instant extended API is enabled for the given |profile|.
 // |profile| may not be NULL.
@@ -28,19 +49,34 @@ uint64 EmbeddedSearchPageVersion(Profile* profile);
 // Force the instant extended API to be enabled for tests.
 void EnableInstantExtendedAPIForTesting();
 
-// Returns whether query extraction is enabled.
+// Returns whether query extraction is enabled.  If
+// |IsInstantExtendedAPIEnabled()| and the profile is not off the record, then
+// this method will also return true.
 bool IsQueryExtractionEnabled(Profile* profile);
 
 // Force query extraction to be enabled for tests.
 void EnableQueryExtractionForTesting();
 
+// Return the search terms attached to a specific NavigationEntry, or empty
+// string otherwise.
+string16 GetSearchTermsFromNavigationEntry(
+    const content::NavigationEntry* entry);
+
+// Returns true if |url| has the same scheme, host, port and path as the
+// Instant URL set via --instant-url.
+bool IsForcedInstantURL(const GURL& url);
+
 // Type for a collection of experiment configuration parameters.
 typedef std::vector<std::pair<std::string, std::string> > FieldTrialFlags;
 
 // Given a field trial group name, parses out the group number and configuration
-// flags.
+// flags. On success, |flags| will be filled with the field trial flags. |flags|
+// must not be NULL. If not NULL, |group_number| will receive the experiment
+// group number.
+// Returns true iff field trial info was successfully parsed out of
+// |group_name|.
 // Exposed for testing only.
-void GetFieldTrialInfo(const std::string& group_name,
+bool GetFieldTrialInfo(const std::string& group_name,
                        FieldTrialFlags* flags,
                        uint64* group_number);
 

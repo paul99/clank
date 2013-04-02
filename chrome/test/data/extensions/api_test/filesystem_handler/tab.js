@@ -46,7 +46,7 @@ function errorCallback(error) {
     };
   }
 
-  chrome.extension.sendMessage(fileBrowserExtensionId,
+  chrome.runtime.sendMessage(fileBrowserExtensionId,
                                {fileContent: null,
                                 error: {message: "File handler error: " + msg}},
                                function(response) {});
@@ -57,14 +57,14 @@ function onGotEntryByUrl(entry) {
   var reader = new FileReader();
   reader.onloadend = function(e) {
     if (reader.result != expectedContent) {
-      chrome.extension.sendMessage(
+      chrome.runtime.sendMessage(
           fileBrowserExtensionId,
           {fileContent: null,
            error: {message: "File content does not match."}},
           function(response) {});
     } else {
       // Send data back to the file browser extension
-      chrome.extension.sendMessage(
+      chrome.runtime.sendMessage(
           fileBrowserExtensionId,
           {fileContent: reader.result, error: null},
           function(response) {});
@@ -73,10 +73,7 @@ function onGotEntryByUrl(entry) {
   reader.onerror = function(e) {
     errorCallback(reader.error);
   };
-  entry.file(function(file) {
-    reader.readAsText(file);
-  },
-  errorCallback);
+  entry.file(reader.readAsText.bind(reader), errorCallback);
 };
 
 function readEntryByUrl(entryUrl) {
@@ -104,20 +101,17 @@ function tryReadingReceivedFile(entry, evt) {
   var reader = new FileReader();
   reader.onloadend = function(e) {
     expectedContent = reader.result;
-    console.log(expectedContent);
     readEntryByUrl(entry.toURL());
   };
   reader.onerror = function(e) {
     errorCallback(reader.error);
   };
-  entry.file(function(file) {
-    reader.readAsText(file);
-  });
+  entry.file(reader.readAsText.bind(reader), errorCallback);
 };
 
 function runFileSystemHandlerTest(entries) {
   if (!entries || entries.length != 1 || !entries[0]) {
-    chrome.extension.sendMessage(
+    chrome.runtime.sendMessage(
         fileBrowserExtensionId,
         {fileContent: null, error: "Invalid file entries."},
         function(response) {});
@@ -151,14 +145,3 @@ function executeListener(id, details) {
 }
 
 chrome.fileBrowserHandler.onExecute.addListener(executeListener);
-
-// This extension just initializes its chrome.fileBrowserHandler.onExecute
-// event listener, the real testing is done when this extension's handler is
-// invoked from filebrowser_component tests. This event will be raised from that
-// component extension test and it simulates user action in the file browser.
-// tab.html part of this extension can run only after the component raises this
-// event, since that operation sets the propery security context and creates
-// event's payload with proper file Entry instances. tab.html will return
-// results of its execution to filebrowser_component test through a
-// cross-component message.
-chrome.test.succeed();

@@ -22,6 +22,15 @@
           '../webkit/support/setup_third_party.gyp:third_party_headers',
         ],
       }],
+      # TODO(jschuh): Remove this after crbug.com/173851 gets fixed.
+      ['OS=="win" and target_arch=="x64"', {
+        'msvs_settings': {
+          'VCCLCompilerTool': {
+            'AdditionalOptions': ['/bigobj'],
+          },
+        },
+      }],
+      
     ],
   },
   'conditions': [
@@ -33,8 +42,6 @@
     ['OS != "ios"', {
       'includes': [
         '../build/win_precompile.gypi',
-        'content_components_navigation_interception.gypi',
-        'content_components_web_contents_delegate_android.gypi',
         'content_shell.gypi',
       ],
     }],
@@ -89,7 +96,16 @@
             'content_browser.gypi',
           ],
           'dependencies': [
-            'content_common', 'content_resources.gyp:content_resources',
+            'content_common',
+            'content_resources.gyp:content_resources',
+          ],
+          'conditions': [
+            ['OS != "ios"', {
+              'dependencies': [
+                'content_gpu',
+                'content_renderer',
+              ],
+            }],
           ],
         },
         {
@@ -283,11 +299,13 @@
           'type': 'none',
           'dependencies': [
             '../base/base.gyp:base',
+            '../media/media.gyp:media_java',
             '../net/net.gyp:net',
             '../ui/ui.gyp:ui_java',
             'common_aidl',
             'content_common',
             'page_transition_types_java',
+            'result_codes_java',
           ],
           'variables': {
             'package_name': 'content',
@@ -295,11 +313,13 @@
             'has_java_resources': 1,
             'R_package': 'org.chromium.content',
             'R_package_relpath': 'org/chromium/content',
+            'java_strings_grd': 'android_content_strings.grd',
           },
           'conditions': [
             ['android_build_type == 0', {
               'dependencies': [
                 '../third_party/eyesfree/eyesfree.gyp:eyesfree_java',
+                '../third_party/guava/guava.gyp:guava_javalib',
               ],
             }],
           ],
@@ -314,6 +334,18 @@
           'variables': {
             'package_name': 'org.chromium.content.browser',
             'template_deps': ['public/common/page_transition_types_list.h'],
+          },
+          'includes': [ '../build/android/java_cpp_template.gypi' ],
+        },
+        {
+          'target_name': 'result_codes_java',
+          'type': 'none',
+          'sources': [
+            'public/android/java/src/org/chromium/content/common/ResultCodes.template',
+          ],
+          'variables': {
+            'package_name': 'org/chromium/content/common',
+            'template_deps': ['public/common/result_codes_list.h'],
           },
           'includes': [ '../build/android/java_cpp_template.gypi' ],
         },
@@ -338,12 +370,29 @@
           'includes': [ '../build/jar_file_jni_generator.gypi' ],
         },
         {
+          'target_name': 'java_set_jni_headers',
+          'type': 'none',
+          'variables': {
+            'jni_gen_dir': 'content',
+            'input_java_class': 'java/util/HashSet.class',
+            'input_jar_file': '<(android_sdk)/android.jar',
+          },
+          'includes': [ '../build/jar_file_jni_generator.gypi' ],
+        },
+
+        {
           'target_name': 'content_jni_headers',
           'type': 'none',
           'dependencies': [
+            'java_set_jni_headers',
             'surface_texture_jni_headers',
             'surface_jni_headers',
           ],
+          'direct_dependent_settings': {
+            'include_dirs': [
+              '<(SHARED_INTERMEDIATE_DIR)/content',
+            ],
+          },
           'includes': [ 'content_jni.gypi' ],
         },
       ],

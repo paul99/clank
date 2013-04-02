@@ -21,6 +21,15 @@ cr.define('options', function() {
     'pinyin-dv': 'languagePinyin',
   };
 
+  /**
+   * Spell check dictionary download status.
+   * @type {Enum}
+   */
+  /** @const*/ var DOWNLOAD_STATUS = {
+    IN_PROGRESS: 1,
+    FAILED: 2
+  };
+
   /////////////////////////////////////////////////////////////////////////////
   // LanguageOptions class:
 
@@ -45,6 +54,21 @@ cr.define('options', function() {
      * @private
      */
     prospectiveUiLanguageCode_: null,
+
+    /*
+     * Map from language code to spell check dictionary download status for that
+     * language.
+     * @type {Array}
+     * @private
+     */
+    spellcheckDictionaryDownloadStatus_: [],
+
+    /**
+     * Number of times a spell check dictionary download failed.
+     * @type {int}
+     * @private
+     */
+    spellcheckDictionaryDownloadFailures_: 0,
 
     /**
      * Initializes LanguageOptions page.
@@ -92,8 +116,11 @@ cr.define('options', function() {
 
       if (!cr.isMac) {
         // Set up the button for editing custom spelling dictionary.
-        $('edit-dictionary-button') .onclick = function(e) {
+        $('edit-dictionary-button').onclick = function(e) {
           OptionsPage.navigateToPage('editDictionary');
+        };
+        $('dictionary-download-retry-button').onclick = function(e) {
+          chrome.send('retryDictionaryDownload');
         };
       }
 
@@ -106,6 +133,20 @@ cr.define('options', function() {
         $('language-options-extension-ime-button').addEventListener(
             'click',
             this.handleExtensionImeButtonClick_.bind(this));
+
+        // Check if there is an Extension IME.
+        var hasExtensionIme = false;
+        var inputMethods = ($('language-options-input-method-list')
+            .querySelectorAll('.input-method'));
+        for (var i = 0, inputMethod; inputMethod = inputMethods[i]; ++i) {
+          if (inputMethod.querySelector('input')
+              .inputMethodId.match(/^_ext_ime_/)) {
+            hasExtensionIme = true;
+            break;
+          }
+        }
+        // Show the Extension IME button only if available.
+        $('language-options-extension-ime-button').hidden = !hasExtensionIme;
       } else {
         // Listen to add language dialog ok button.
         var addLanguageOkButton = $('add-language-overlay-ok-button');
@@ -181,9 +222,9 @@ cr.define('options', function() {
         var element = inputMethodPrototype.cloneNode(true);
         element.id = '';
         element.languageCodeSet = inputMethod.languageCodeSet;
-        var input = element.querySelectorAll('input')[0];
+        var input = element.querySelector('input');
         input.inputMethodId = inputMethod.id;
-        var span = element.querySelectorAll('span')[0];
+        var span = element.querySelector('span');
         span.textContent = inputMethod.displayName;
 
         // Listen to user clicks.
@@ -207,9 +248,9 @@ cr.define('options', function() {
         var element = inputMethodPrototype.cloneNode(true);
         element.id = '';
         element.languageCodeSet = {};
-        var input = element.querySelectorAll('input')[0];
+        var input = element.querySelector('input');
         input.inputMethodId = inputMethod.id;
-        var span = element.querySelectorAll('span')[0];
+        var span = element.querySelector('span');
         span.textContent = inputMethod.displayName;
 
         input.addEventListener('click',
@@ -459,16 +500,40 @@ cr.define('options', function() {
      * @private
      */
     updateSpellCheckLanguageButton_: function(languageCode) {
+      var spellCheckLanguageSection = $('language-options-spellcheck');
       var spellCheckLanguageButton =
           $('language-options-spell-check-language-button');
       var spellCheckLanguageMessage =
           $('language-options-spell-check-language-message');
+      var dictionaryDownloadInProgress =
+          $('language-options-dictionary-downloading-message');
+      var dictionaryDownloadFailed =
+          $('language-options-dictionary-download-failed-message');
+      var dictionaryDownloadFailHelp =
+          $('language-options-dictionary-download-fail-help-message');
+      spellCheckLanguageSection.hidden = false;
+      spellCheckLanguageMessage.hidden = true;
+      spellCheckLanguageButton.hidden = true;
+      dictionaryDownloadInProgress.hidden = true;
+      dictionaryDownloadFailed.hidden = true;
+      dictionaryDownloadFailHelp.hidden = true;
 
       if (languageCode == this.spellCheckDictionary_) {
-        spellCheckLanguageMessage.textContent =
-            loadTimeData.getString('is_used_for_spell_checking');
-        showMutuallyExclusiveNodes(
-            [spellCheckLanguageButton, spellCheckLanguageMessage], 1);
+        if (!(languageCode in this.spellcheckDictionaryDownloadStatus_)) {
+          spellCheckLanguageMessage.textContent =
+              loadTimeData.getString('is_used_for_spell_checking');
+          showMutuallyExclusiveNodes(
+              [spellCheckLanguageButton, spellCheckLanguageMessage], 1);
+        } else if (this.spellcheckDictionaryDownloadStatus_[languageCode] ==
+                       DOWNLOAD_STATUS.IN_PROGRESS) {
+          dictionaryDownloadInProgress.hidden = false;
+        } else if (this.spellcheckDictionaryDownloadStatus_[languageCode] ==
+                       DOWNLOAD_STATUS.FAILED) {
+          spellCheckLanguageSection.hidden = true;
+          dictionaryDownloadFailed.hidden = false;
+          if (this.spellcheckDictionaryDownloadFailures_ > 1)
+            dictionaryDownloadFailHelp.hidden = false;
+        }
       } else if (languageCode in
           loadTimeData.getValue('spellCheckLanguageCodeSet')) {
         spellCheckLanguageButton.textContent =
@@ -508,7 +573,7 @@ cr.define('options', function() {
         var method = methods[i];
         if (languageCode in method.languageCodeSet) {
           method.hidden = false;
-          var input = method.querySelectorAll('input')[0];
+          var input = method.querySelector('input');
           // Give it focus if the ID matches.
           if (input.inputMethodId == focusInputMethodId) {
             input.focus();
@@ -662,7 +727,7 @@ cr.define('options', function() {
       var methods = inputMethodList.querySelectorAll('.input-method');
       for (var i = 0; i < methods.length; i++) {
         var method = methods[i];
-        var input = method.querySelectorAll('input')[0];
+        var input = method.querySelector('input');
         // Give it focus if the ID matches.
         if (input.inputMethodId.match(/^_ext_ime_/))
           method.hidden = false;
@@ -670,7 +735,6 @@ cr.define('options', function() {
           method.hidden = true;
       }
     },
-
 
     handleAddLanguageOkButtonClick_: function() {
       var languagesSelect = $('add-language-overlay-language-list');
@@ -684,7 +748,7 @@ cr.define('options', function() {
 
     /**
      * Checks if languageCode is deletable or not.
-     * @param {String} languageCode the languageCode to check for deletability.
+     * @param {string} languageCode the languageCode to check for deletability.
      */
     languageIsDeletable: function(languageCode) {
       // Don't allow removing the language if it's a UI language.
@@ -959,6 +1023,37 @@ cr.define('options', function() {
 
       show();
       delayedHide();
+    },
+
+    onDictionaryDownloadBegin_: function(languageCode) {
+      this.spellcheckDictionaryDownloadStatus_[languageCode] =
+          DOWNLOAD_STATUS.IN_PROGRESS;
+      if (!cr.isMac &&
+          languageCode ==
+              $('language-options-list').getSelectedLanguageCode()) {
+        this.updateSpellCheckLanguageButton_(languageCode);
+      }
+    },
+
+    onDictionaryDownloadSuccess_: function(languageCode) {
+      delete this.spellcheckDictionaryDownloadStatus_[languageCode];
+      this.spellcheckDictionaryDownloadFailures_ = 0;
+      if (!cr.isMac &&
+          languageCode ==
+              $('language-options-list').getSelectedLanguageCode()) {
+        this.updateSpellCheckLanguageButton_(languageCode);
+      }
+    },
+
+    onDictionaryDownloadFailure_: function(languageCode) {
+      this.spellcheckDictionaryDownloadStatus_[languageCode] =
+          DOWNLOAD_STATUS.FAILED;
+      this.spellcheckDictionaryDownloadFailures_++;
+      if (!cr.isMac &&
+          languageCode ==
+              $('language-options-list').getSelectedLanguageCode()) {
+        this.updateSpellCheckLanguageButton_(languageCode);
+      }
     }
   };
 
@@ -998,6 +1093,18 @@ cr.define('options', function() {
     // only take effect after restart.
     showMutuallyExclusiveNodes([$('language-options-ui-language-button'),
                                 $('language-options-ui-notification-bar')], 1);
+  };
+
+  LanguageOptions.onDictionaryDownloadBegin = function(languageCode) {
+    LanguageOptions.getInstance().onDictionaryDownloadBegin_(languageCode);
+  };
+
+  LanguageOptions.onDictionaryDownloadSuccess = function(languageCode) {
+    LanguageOptions.getInstance().onDictionaryDownloadSuccess_(languageCode);
+  };
+
+  LanguageOptions.onDictionaryDownloadFailure = function(languageCode) {
+    LanguageOptions.getInstance().onDictionaryDownloadFailure_(languageCode);
   };
 
   // Export

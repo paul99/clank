@@ -72,8 +72,7 @@ class TemplateURLRef {
     int accepted_suggestion;
 
     // The 0-based position of the cursor within the query string at the time
-    // the request was issued.  Set to string16::npos if not used or after the
-    // last character.
+    // the request was issued.  Set to string16::npos if not used.
     size_t cursor_position;
   };
 
@@ -122,7 +121,8 @@ class TemplateURLRef {
   static std::string DisplayURLToURLRef(const string16& display_url);
 
   // If this TemplateURLRef is valid and contains one search term, this returns
-  // the host/path of the URL, otherwise this returns an empty string.
+  // the scheme/host/path of the URL, otherwise this returns an empty string.
+  const std::string& GetScheme() const;
   const std::string& GetHost() const;
   const std::string& GetPath() const;
 
@@ -252,8 +252,9 @@ class TemplateURLRef {
   // into the string, and may be empty.
   mutable Replacements replacements_;
 
-  // Host, path, key and location of the search term. These are only set if the
-  // url contains one search term.
+  // Scheme, host, path, key and location of the search term. These are only set
+  // if the url contains one search term.
+  mutable std::string scheme_;
   mutable std::string host_;
   mutable std::string path_;
   mutable std::string search_term_key_;
@@ -353,6 +354,10 @@ struct TemplateURLData {
   // search terms from a URL.
   std::vector<std::string> alternate_urls;
 
+  // A parameter that, if present in the query or ref parameters of a search_url
+  // or instant_url, causes Chrome to replace the URL with the search term.
+  std::string search_terms_replacement_key;
+
  private:
   // Private so we can enforce using the setters and thus enforce that these
   // fields are never empty.
@@ -428,6 +433,11 @@ class TemplateURL {
 
   const std::string& sync_guid() const { return data_.sync_guid; }
 
+  // TODO(beaudoin): Rename this when renaming HasSearchTermsReplacementKey().
+  const std::string& search_terms_replacement_key() const {
+    return data_.search_terms_replacement_key;
+  }
+
   const TemplateURLRef& url_ref() const { return url_ref_; }
   const TemplateURLRef& suggestions_url_ref() const {
     return suggestions_url_ref_;
@@ -466,14 +476,29 @@ class TemplateURL {
   // Use the alternate URLs and the search URL to match the provided |url|
   // and extract |search_terms| from it. Returns false and an empty
   // |search_terms| if no search terms can be matched. The order in which the
-  // alternate URLs are listed dictates their priority, the URL at index 0
-  // is treated as the highest priority and the primary search URL is treated
-  // as the lowest priority (see GetURL()).  For example, if a TemplateURL has
+  // alternate URLs are listed dictates their priority, the URL at index 0 is
+  // treated as the highest priority and the primary search URL is treated as
+  // the lowest priority (see GetURL()).  For example, if a TemplateURL has
   // alternate URL "http://foo/#q={searchTerms}" and search URL
   // "http://foo/?q={searchTerms}", and the URL to be decoded is
   // "http://foo/?q=a#q=b", the alternate URL will match first and the decoded
   // search term will be "b".
   bool ExtractSearchTermsFromURL(const GURL& url, string16* search_terms);
+
+  // Returns true if the specified |url| contains the search terms replacement
+  // key in either the query or the ref. This method does not verify anything
+  // else about the URL. In particular, it does not check that the domain
+  // matches that of this TemplateURL.
+  // TODO(beaudoin): Rename this to reflect that it really checks for an
+  // InstantExtended capable URL.
+  bool HasSearchTermsReplacementKey(const GURL& url) const;
+
+  // Returns true if the specified |url| matches the search, alternates, or
+  // instant url in scheme, domain, and path.  In addition, the search term
+  // replacement key must be present in the |url|.
+  // This predicate is used for site isolation purposes, so has security
+  // implications.  Seek security review if changing it.
+  bool IsInstantURL(const GURL& url);
 
  private:
   friend class TemplateURLService;

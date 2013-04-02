@@ -71,7 +71,13 @@ class CHROMEOS_EXPORT OutputConfigurator : public MessageLoop::Dispatcher {
 
   // Initialization, must be called right after constructor.
   // |is_panel_fitting_enabled| indicates hardware panel fitting support.
-  void Init(bool is_panel_fitting_enabled);
+  // If |background_color_argb| is non zero and there are multiple displays,
+  // OutputConfigurator sets the background color of X's RootWindow to this
+  // color.
+  void Init(bool is_panel_fitting_enabled, uint32 background_color_argb);
+
+  // Stop handling display configuration events/requests.
+  void Stop();
 
   // Called when the user hits ctrl-F4 to request a display mode change.
   // This method should only return false if it was called in a single-head or
@@ -107,6 +113,9 @@ class CHROMEOS_EXPORT OutputConfigurator : public MessageLoop::Dispatcher {
   void SuspendDisplays();
 
  private:
+  // Configure outputs.
+  void ConfigureOutputs();
+
   // Fires OnDisplayModeChanged() event to the observers.
   void NotifyOnDisplayChanged();
 
@@ -174,7 +183,7 @@ class CHROMEOS_EXPORT OutputConfigurator : public MessageLoop::Dispatcher {
   // Xrandr X11 extension is supported.
   // If this flag is set to false, any attempts to change the output
   // configuration to immediately fail without changing the state.
-  bool is_running_on_chrome_os_;
+  bool configure_display_;
 
   // This is set externally in Init,
   // and is used to enable modes which rely on panel fitting.
@@ -193,9 +202,9 @@ class CHROMEOS_EXPORT OutputConfigurator : public MessageLoop::Dispatcher {
 
   ObserverList<Observer> observers_;
 
-  // The timer to delay sending the notification of OnDisplayChanged(). See also
-  // the comments in Dispatch().
-  scoped_ptr<base::OneShotTimer<OutputConfigurator> > notification_timer_;
+  // The timer to delay configuring outputs. See also the comments in
+  // |Dispatch()|.
+  scoped_ptr<base::OneShotTimer<OutputConfigurator> > configure_timer_;
 
   // Next 3 members are used for UMA of time spent in various states.
   // Indicates that current OutputSnapshot has aspect preserving mirror mode.

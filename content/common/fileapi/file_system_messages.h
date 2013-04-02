@@ -5,7 +5,7 @@
 // IPC messages for the file system.
 // Multiply-included message file, hence no include guard.
 
-#include "base/file_util_proxy.h"
+#include "base/files/file_util_proxy.h"
 #include "googleurl/src/gurl.h"
 #include "ipc/ipc_message_macros.h"
 #include "ipc/ipc_platform_file.h"
@@ -34,7 +34,7 @@ IPC_MESSAGE_CONTROL1(FileSystemMsg_DidSucceed,
 IPC_MESSAGE_CONTROL3(FileSystemMsg_DidReadMetadata,
                      int /* request_id */,
                      base::PlatformFileInfo,
-                     FilePath /* true platform path, where possible */)
+                     base::FilePath /* true platform path, where possible */)
 IPC_MESSAGE_CONTROL3(FileSystemMsg_DidReadDirectory,
                      int /* request_id */,
                      std::vector<base::FileUtilProxy::Entry> /* entries */,
@@ -152,7 +152,7 @@ IPC_MESSAGE_CONTROL3(FileSystemHostMsg_CreateSnapshotFile,
 // For Pepper's URL loader.
 IPC_SYNC_MESSAGE_CONTROL1_1(FileSystemHostMsg_SyncGetPlatformPath,
                             GURL /* file path */,
-                            FilePath /* platform_path */)
+                            base::FilePath /* platform_path */)
 
 // Pre- and post-update notifications for ppapi implementation.
 IPC_MESSAGE_CONTROL1(FileSystemHostMsg_WillUpdate,

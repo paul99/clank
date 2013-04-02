@@ -183,7 +183,7 @@ UI_EXPORT bool SetIntArrayProperty(XID window,
 Atom GetAtom(const char* atom_name);
 
 // Get |window|'s parent window, or None if |window| is the root window.
-XID GetParentWindow(XID window);
+UI_EXPORT XID GetParentWindow(XID window);
 
 // Walk up |window|'s hierarchy until we find a direct child of |root|.
 XID GetHighestAncestorWindow(XID window, XID root);
@@ -275,6 +275,29 @@ UI_EXPORT bool GetOutputDeviceData(XID output,
                                    uint16* manufacturer_id,
                                    uint16* product_code,
                                    std::string* human_readable_name);
+
+// Gets the overscan flag from |output| and stores to |flag|. Returns true if
+// the flag is found. Otherwise returns false and doesn't touch |flag|. The
+// output will produce overscan if |flag| is set to true, but the output may
+// still produce overscan even though it returns true and |flag| is set to
+// false.
+UI_EXPORT bool GetOutputOverscanFlag(XID output, bool* flag);
+
+// Parses |prop| as EDID data and stores extracted data into |manufacturer_id|,
+// |product_code|, and |human_readable_name| and returns true. NULL can be
+// passed for unwanted output parameters. This is exported for
+// x11_util_unittest.cc.
+UI_EXPORT bool ParseOutputDeviceData(const unsigned char* prop,
+                                     unsigned long nitems,
+                                     uint16* manufacturer_id,
+                                     uint16* product_code,
+                                     std::string* human_readable_name);
+
+// Parses |prop| as EDID data and stores the overscan flag to |flag|. Returns
+// true if the flag is found. This is exported for x11_util_unittest.cc.
+UI_EXPORT bool ParseOutputOverscanFlag(const unsigned char* prop,
+                                       unsigned long nitems,
+                                       bool* flag);
 
 // Gets the names of the all displays physically connected to the system.
 UI_EXPORT std::vector<std::string> GetDisplayNames(

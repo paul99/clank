@@ -12,9 +12,9 @@
 #include "base/compiler_specific.h"
 #include "base/memory/scoped_ptr.h"
 #include "base/memory/weak_ptr.h"
+#include "chromeos/dbus/ibus/ibus_input_context_client.h"
 #include "ui/base/ime/character_composer.h"
 #include "ui/base/ime/composition_text.h"
-#include "ui/base/ime/ibus_client.h"
 #include "ui/base/ime/input_method_base.h"
 
 namespace dbus {
@@ -29,7 +29,9 @@ class IBusText;
 namespace ui {
 
 // A ui::InputMethod implementation based on IBus.
-class UI_EXPORT InputMethodIBus : public InputMethodBase {
+class UI_EXPORT InputMethodIBus
+    : public InputMethodBase,
+      public chromeos::IBusInputContextHandlerInterface {
  public:
   explicit InputMethodIBus(internal::InputMethodDelegate* delegate);
   virtual ~InputMethodIBus();
@@ -54,16 +56,9 @@ class UI_EXPORT InputMethodIBus : public InputMethodBase {
   // Called when the connection with ibus-daemon is shutdowned.
   virtual void OnDisconnected();
 
-  // Sets |new_client| as a new IBusClient. InputMethodIBus owns the object.
-  // A client has to be set before InputMethodIBus::Init() is called.
-  void set_ibus_client(scoped_ptr<internal::IBusClient> new_client);
-
-  // The caller is not allowed to delete the object.
-  internal::IBusClient* ibus_client() const;
-
  protected:
   // Converts |text| into CompositionText.
-  void ExtractCompositionText(const chromeos::ibus::IBusText& text,
+  void ExtractCompositionText(const chromeos::IBusText& text,
                               uint32 cursor_position,
                               CompositionText* out_composition) const;
 
@@ -163,21 +158,21 @@ class UI_EXPORT InputMethodIBus : public InputMethodBase {
   // Returns true if the input context is ready to use.
   bool IsContextReady();
 
-  // Event handlers for IBusInputContext:
-  void OnCommitText(const chromeos::ibus::IBusText& text);
-  void OnForwardKeyEvent(uint32 keyval, uint32 keycode, uint32 status);
-  void OnShowPreeditText();
-  void OnUpdatePreeditText(const chromeos::ibus::IBusText& text,
-                           uint32 cursor_pos,
-                           bool visible);
-  void OnHidePreeditText();
+  // chromeos::IBusInputContextHandlerInterface overrides:
+  virtual void CommitText(const chromeos::IBusText& text) OVERRIDE;
+  virtual void ForwardKeyEvent(uint32 keyval,
+                               uint32 keycode,
+                               uint32 status) OVERRIDE;
+  virtual void ShowPreeditText() OVERRIDE;
+  virtual void HidePreeditText() OVERRIDE;
+  virtual void UpdatePreeditText(const chromeos::IBusText& text,
+                                 uint32 cursor_pos,
+                                 bool visible) OVERRIDE;
 
   void CreateInputContextDone(const dbus::ObjectPath& object_path);
   void CreateInputContextFail();
   void ProcessKeyEventDone(uint32 id, XEvent* xevent, uint32 keyval,
                            bool is_handled);
-
-  scoped_ptr<internal::IBusClient> ibus_client_;
 
   // All pending key events. Note: we do not own these object, we just save
   // pointers to these object so that we can abandon them when necessary.

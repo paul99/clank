@@ -8,6 +8,7 @@
 #include "base/logging.h"
 #include "base/memory/scoped_ptr.h"
 #include "base/message_loop.h"
+#include "base/prefs/pref_service.h"
 #include "base/threading/sequenced_worker_pool.h"
 #include "chrome/browser/chromeos/settings/cros_settings.h"
 #include "chrome/browser/chromeos/settings/cros_settings_names.h"
@@ -16,7 +17,6 @@
 #include "chrome/browser/chromeos/system/mock_statistics_provider.h"
 #include "chrome/browser/chromeos/system/statistics_provider.h"
 #include "chrome/browser/policy/proto/device_management_backend.pb.h"
-#include "chrome/browser/prefs/pref_service.h"
 #include "chrome/common/pref_names.h"
 #include "chrome/test/base/testing_pref_service.h"
 #include "content/public/browser/browser_thread.h"
@@ -143,7 +143,7 @@ class DeviceStatusCollectorTest : public testing::Test {
     scoped_ptr<base::Environment> env(base::Environment::Create());
     env->SetVar("TZ", "UTC");
 
-    TestingDeviceStatusCollector::RegisterPrefs(&prefs_);
+    TestingDeviceStatusCollector::RegisterPrefs(prefs_.registry());
 
     EXPECT_CALL(statistics_provider_, GetMachineStatistic(_, NotNull()))
         .WillRepeatedly(Return(false));
@@ -160,7 +160,7 @@ class DeviceStatusCollectorTest : public testing::Test {
     RestartStatusCollector();
   }
 
-  ~DeviceStatusCollectorTest() {
+  virtual ~DeviceStatusCollectorTest() {
     // Finish pending tasks.
     content::BrowserThread::GetBlockingPool()->FlushForTesting();
     message_loop_.RunUntilIdle();
@@ -231,7 +231,7 @@ class DeviceStatusCollectorTest : public testing::Test {
   content::TestBrowserThread file_thread_;
   content::TestBrowserThread io_thread_;
 
-  TestingPrefService prefs_;
+  TestingPrefServiceSimple prefs_;
   chromeos::system::MockStatisticsProvider statistics_provider_;
   scoped_ptr<TestingDeviceStatusCollector> status_collector_;
   em::DeviceStatusReportRequest status_;

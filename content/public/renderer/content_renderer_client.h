@@ -17,12 +17,14 @@
 #include "third_party/WebKit/Source/WebKit/chromium/public/WebPageVisibilityState.h"
 #include "v8/include/v8.h"
 
-class FilePath;
 class GURL;
 class SkBitmap;
 
+namespace base {
+class FilePath;
+}
+
 namespace WebKit {
-class WebAudioSourceProvider;
 class WebFrame;
 class WebMediaPlayerClient;
 class WebPlugin;
@@ -38,17 +40,10 @@ class PpapiInterfaceFactoryManager;
 struct WebPluginInfo;
 }
 
-namespace media {
-class AudioRendererSink;
-class FilterCollection;
-class MediaLog;
-class MessageLoopFactory;
-}
-
 namespace webkit_media {
-class MediaStreamClient;
 class WebMediaPlayerDelegate;
 class WebMediaPlayerImpl;
+class WebMediaPlayerParams;
 }
 
 namespace content {
@@ -92,7 +87,7 @@ class CONTENT_EXPORT ContentRendererClient {
   // couldn't be loaded. This allows the embedder to show a custom placeholder.
   virtual WebKit::WebPlugin* CreatePluginReplacement(
       RenderView* render_view,
-      const FilePath& plugin_path);
+      const base::FilePath& plugin_path);
 
   // Returns true if the embedder has an error page to show for the given http
   // status code. If so |error_domain| should be set to according to WebURLError
@@ -122,12 +117,7 @@ class CONTENT_EXPORT ContentRendererClient {
       WebKit::WebFrame* frame,
       WebKit::WebMediaPlayerClient* client,
       base::WeakPtr<webkit_media::WebMediaPlayerDelegate> delegate,
-      media::FilterCollection* collection,
-      WebKit::WebAudioSourceProvider* audio_source_provider,
-      media::AudioRendererSink* audio_renderer_sink,
-      media::MessageLoopFactory* message_loop_factory,
-      webkit_media::MediaStreamClient* media_stream_client,
-      media::MediaLog* media_log);
+      const webkit_media::WebMediaPlayerParams& params);
 
   // Returns true if the renderer process should schedule the idle handler when
   // all widgets are hidden.
@@ -147,6 +137,7 @@ class CONTENT_EXPORT ContentRendererClient {
   // Returns true if we should fork a new process for the given navigation.
   virtual bool ShouldFork(WebKit::WebFrame* frame,
                           const GURL& url,
+                          const std::string& http_method,
                           bool is_initial_navigation,
                           bool* send_referrer);
 

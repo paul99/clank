@@ -22,6 +22,7 @@
 
 using content::BrowserThread;
 using extensions::Extension;
+using extensions::Manifest;
 
 namespace {
 
@@ -32,12 +33,12 @@ scoped_refptr<Extension> CreateTestExtension(const std::string& name,
   manifest.SetString("version", "1");
   manifest.SetString("incognito", incognito_split_mode ? "split" : "spanning");
 
-  FilePath path;
+  base::FilePath path;
   EXPECT_TRUE(file_util::GetCurrentDirectory(&path));
 
   std::string error;
   scoped_refptr<Extension> extension(
-      Extension::Create(path, Extension::INTERNAL, manifest,
+      Extension::Create(path, Manifest::INTERNAL, manifest,
                         Extension::NO_FLAGS, &error));
   EXPECT_TRUE(extension.get()) << error;
   return extension;
@@ -49,13 +50,13 @@ scoped_refptr<Extension> CreateWebStoreExtension() {
   manifest.SetString("version", "1");
   manifest.SetString("icons.16", "webstore_icon_16.png");
 
-  FilePath path;
+  base::FilePath path;
   EXPECT_TRUE(PathService::Get(chrome::DIR_RESOURCES, &path));
   path = path.AppendASCII("web_store");
 
   std::string error;
   scoped_refptr<Extension> extension(
-      Extension::Create(path, Extension::COMPONENT, manifest,
+      Extension::Create(path, Manifest::COMPONENT, manifest,
                         Extension::NO_FLAGS, &error));
   EXPECT_TRUE(extension.get()) << error;
   return extension;

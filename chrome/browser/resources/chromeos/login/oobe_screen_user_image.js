@@ -74,11 +74,15 @@ cr.define('oobe', function() {
                                  this.handleSelect_.bind(this));
       imageGrid.addEventListener('activate',
                                  this.handleImageActivated_.bind(this));
+      imageGrid.addEventListener('phototaken',
+                                 this.handlePhotoTaken_.bind(this));
+      imageGrid.addEventListener('photoupdated',
+                                 this.handlePhotoUpdated_.bind(this));
 
       // Set the title for camera item in the grid.
       imageGrid.setCameraTitles(
           localStrings.getString('takePhoto'),
-          localStrings.getString('capturedPhoto'));
+          localStrings.getString('photoFromCamera'));
 
       // Profile image data (if present).
       this.profileImage_ = imageGrid.addItem(
@@ -101,7 +105,7 @@ cr.define('oobe', function() {
       $('take-photo').addEventListener(
           'click', this.handleTakePhoto_.bind(this));
       $('discard-photo').addEventListener(
-          'click', imageGrid.discardPhoto.bind(imageGrid));
+          'click', this.handleDiscardPhoto_.bind(this));
 
       // Toggle 'animation' class for the duration of WebKit transition.
       $('flip-photo').addEventListener(
@@ -110,6 +114,10 @@ cr.define('oobe', function() {
             imageGrid.flipPhoto = !imageGrid.flipPhoto;
           });
       $('user-image-stream-crop').addEventListener(
+          'webkitTransitionEnd', function(e) {
+            previewElement.classList.remove('animation');
+          });
+      $('user-image-preview-img').addEventListener(
           'webkitTransitionEnd', function(e) {
             previewElement.classList.remove('animation');
           });
@@ -192,7 +200,8 @@ cr.define('oobe', function() {
         $('ok-button').disabled = true;
       } else {
         $('ok-button').disabled = false;
-        chrome.send('selectImage', [imageGrid.selectedItemUrl]);
+        chrome.send('selectImage',
+                    [imageGrid.selectedItemUrl, imageGrid.selectionType]);
       }
       // Start/stop camera on (de)selection.
       if (!imageGrid.inProgramSelection &&
@@ -223,9 +232,53 @@ cr.define('oobe', function() {
      * Handle photo capture from the live camera stream.
      */
     handleTakePhoto_: function(e) {
-      $('user-image-grid').takePhoto(function(photoURL) {
-        chrome.send('photoTaken', [photoURL]);
-      });
+      $('user-image-grid').takePhoto();
+    },
+
+    /**
+     * Handle photo captured event.
+     * @param {cr.Event} e Event with 'dataURL' property containing a data URL.
+     */
+    handlePhotoTaken_: function(e) {
+      chrome.send('photoTaken', [e.dataURL]);
+      this.announceAccessibleMessage_(
+          localStrings.getString('photoCaptureAccessibleText'));
+    },
+
+    /**
+     * Handle photo updated event.
+     * @param {cr.Event} e Event with 'dataURL' property containing a data URL.
+     */
+    handlePhotoUpdated_: function(e) {
+      chrome.send('photoTaken', [e.dataURL]);
+    },
+
+    /**
+     * Handle discarding the captured photo.
+     */
+    handleDiscardPhoto_: function(e) {
+      var imageGrid = $('user-image-grid');
+      imageGrid.discardPhoto();
+      this.announceAccessibleMessage_(
+          localStrings.getString('photoDiscardAccessibleText'));
+    },
+
+    /**
+     * Add an accessible message to the page that will be announced to
+     * users who have spoken feedback on, but will be invisible to all
+     * other users. It's removed right away so it doesn't clutter the DOM.
+     */
+    announceAccessibleMessage_: function(msg) {
+      var element = document.createElement('div');
+      element.setAttribute('aria-live', 'polite');
+      element.style.position = 'relative';
+      element.style.left = '-9999px';
+      element.style.height = '0px';
+      element.innerText = msg;
+      document.body.appendChild(element);
+      window.setTimeout(function() {
+        document.body.removeChild(element);
+      }, 0);
     },
 
     /**

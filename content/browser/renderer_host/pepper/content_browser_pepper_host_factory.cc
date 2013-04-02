@@ -5,16 +5,21 @@
 #include "content/browser/renderer_host/pepper/content_browser_pepper_host_factory.h"
 
 #include "content/browser/renderer_host/pepper/browser_ppapi_host_impl.h"
-#include "content/browser/renderer_host/pepper/pepper_flash_browser_host.h"
-#include "content/browser/renderer_host/pepper/pepper_flash_file_host.h"
+#include "content/browser/renderer_host/pepper/pepper_browser_font_singleton_host.h"
+#include "content/browser/renderer_host/pepper/pepper_flash_file_message_filter.h"
 #include "content/browser/renderer_host/pepper/pepper_gamepad_host.h"
 #include "content/browser/renderer_host/pepper/pepper_print_settings_manager.h"
 #include "content/browser/renderer_host/pepper/pepper_printing_host.h"
+#include "content/browser/renderer_host/pepper/pepper_udp_socket_private_host.h"
+#include "ppapi/host/message_filter_host.h"
+#include "ppapi/host/ppapi_host.h"
 #include "ppapi/host/resource_host.h"
 #include "ppapi/proxy/ppapi_messages.h"
 #include "ppapi/shared_impl/ppapi_permissions.h"
 
+using ppapi::host::MessageFilterHost;
 using ppapi::host::ResourceHost;
+using ppapi::host::ResourceMessageFilter;
 
 namespace content {
 
@@ -57,15 +62,38 @@ scoped_ptr<ResourceHost> ContentBrowserPepperHostFactory::CreateResourceHost(
     }
   }
 
+  // Private interfaces.
+  if (GetPermissions().HasPermission(ppapi::PERMISSION_PRIVATE)) {
+    switch (message.type()) {
+      case PpapiHostMsg_BrowserFontSingleton_Create::ID:
+        return scoped_ptr<ResourceHost>(new PepperBrowserFontSingletonHost(
+            host_, instance, params.pp_resource()));
+    }
+  }
+
+  // UDPSocketPrivate interface.
+  //
+  // Permissions for UDPSocketPrivate interface will be checked at the
+  // time of the instance's methods calls (because permission check
+  // for UDPSocketPrivate can be performed only on the UI
+  // thread). Currently this interface is available only for
+  // whitelisted apps which may not have access to the other private
+  // interfaces.
+  if (message.type() == PpapiHostMsg_UDPSocketPrivate_Create::ID) {
+    return scoped_ptr<ResourceHost>(new PepperUDPSocketPrivateHost(
+        host_, instance, params.pp_resource()));
+  }
+
   // Flash interfaces.
   if (GetPermissions().HasPermission(ppapi::PERMISSION_FLASH)) {
     switch (message.type()) {
-      case PpapiHostMsg_Flash_Create::ID:
-        return scoped_ptr<ResourceHost>(new PepperFlashBrowserHost(
-            host_, instance, params.pp_resource()));
-      case PpapiHostMsg_FlashFile_Create::ID:
-        return scoped_ptr<ResourceHost>(new PepperFlashFileHost(
-            host_, instance, params.pp_resource()));
+      case PpapiHostMsg_FlashFile_Create::ID: {
+        scoped_refptr<ResourceMessageFilter> file_filter(
+            new PepperFlashFileMessageFilter(instance, host_));
+        return scoped_ptr<ResourceHost>(new MessageFilterHost(
+            host_->GetPpapiHost(), instance, params.pp_resource(),
+            file_filter));
+      }
     }
   }
 

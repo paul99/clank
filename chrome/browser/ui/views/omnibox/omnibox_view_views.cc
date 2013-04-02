@@ -81,19 +81,6 @@ struct AutocompleteEditState : public base::SupportsUserData::Data {
   const ViewState view_state;
 };
 
-// A convenience method for applying URL styles.
-void ApplyURLStyle(views::Textfield* textfield,
-                   size_t start,
-                   size_t end,
-                   SkColor color,
-                   bool diagonal_strike) {
-  gfx::StyleRange style;
-  style.foreground = color;
-  style.range = ui::Range(start, end);
-  style.diagonal_strike = diagonal_strike;
-  textfield->ApplyStyleRange(style);
-}
-
 // The following const value is the same as in browser_defaults.
 const int kAutocompleteEditFontPixelSize = 15;
 // Font size 10px (as defined in browser_defaults) is too small for many
@@ -115,21 +102,18 @@ int GetEditFontPixelSize(bool popup_window_mode) {
                              kAutocompleteEditFontPixelSize;
 }
 
-// Copies |selected_text| as text to the primary clipboard. If |write_url| is
-// true, this will also write |url| and |text| to the clipboard as a well-formed
-// URL.
-void DoCopy(const string16& selected_text,
-            bool write_url,
-            const GURL& url,
-            const string16& text) {
-  ui::Clipboard* cb = ui::Clipboard::GetForCurrentThread();
-  ui::ScopedClipboardWriter scw(cb, ui::Clipboard::BUFFER_STANDARD);
+// Copies |selected_text| as text to the primary clipboard.
+void DoCopyText(const string16& selected_text) {
+  ui::ScopedClipboardWriter scw(ui::Clipboard::GetForCurrentThread(),
+                                ui::Clipboard::BUFFER_STANDARD);
   scw.WriteText(selected_text);
-  if (write_url) {
-    BookmarkNodeData data;
-    data.ReadFromTuple(url, text);
-    data.WriteToClipboard(NULL);
-  }
+}
+
+// This will write |url| and |text| to the clipboard as a well-formed URL.
+void DoCopyURL(const GURL& url, const string16& text) {
+  BookmarkNodeData data;
+  data.ReadFromTuple(url, text);
+  data.WriteToClipboard(NULL);
 }
 
 }  // namespace
@@ -195,6 +179,11 @@ class OmniboxViewViews::AutocompleteTextfield : public views::Textfield {
     omnibox_view_->HandleMouseReleaseEvent(event);
   }
 
+  virtual void OnGestureEvent(ui::GestureEvent* event) OVERRIDE {
+    views::Textfield::OnGestureEvent(event);
+    omnibox_view_->HandleGestureEvent(*event);
+  }
+
  private:
   OmniboxViewViews* omnibox_view_;
   LocationBarView* location_bar_view_;
@@ -219,7 +208,8 @@ OmniboxViewViews::OmniboxViewViews(OmniboxEditController* controller,
       delete_at_end_pressed_(false),
       location_bar_view_(location_bar),
       ime_candidate_window_open_(false),
-      select_all_on_mouse_release_(false) {
+      select_all_on_mouse_release_(false),
+      select_all_on_gesture_tap_(false) {
 }
 
 OmniboxViewViews::~OmniboxViewViews() {
@@ -384,6 +374,16 @@ void OmniboxViewViews::HandleMouseReleaseEvent(const ui::MouseEvent& event) {
     SelectAll(true);
   }
   select_all_on_mouse_release_ = false;
+}
+
+void OmniboxViewViews::HandleGestureEvent(const ui::GestureEvent& event) {
+  if (!textfield_->HasFocus() && event.type() == ui::ET_GESTURE_TAP_DOWN) {
+    select_all_on_gesture_tap_ = true;
+    return;
+  }
+  if (select_all_on_gesture_tap_ && event.type() == ui::ET_GESTURE_TAP)
+    SelectAll(false);
+  select_all_on_gesture_tap_ = false;
 }
 
 void OmniboxViewViews::HandleFocusIn() {
@@ -770,7 +770,10 @@ void OmniboxViewViews::OnAfterCutOrCopy() {
   bool write_url;
   model()->AdjustTextForCopy(selection_range.GetMin(), selected_text == text,
       &selected_text, &url, &write_url);
-  DoCopy(selected_text, write_url, url, text);
+  if (write_url)
+    DoCopyURL(url, selected_text);
+  else
+    DoCopyText(selected_text);
 }
 
 void OmniboxViewViews::OnWriteDragData(ui::OSExchangeData* data) {
@@ -815,8 +818,7 @@ void OmniboxViewViews::UpdateContextMenu(ui::SimpleMenuModel* menu_contents) {
   menu_contents->AddItemWithStringId(IDC_EDIT_SEARCH_ENGINES,
       IDS_EDIT_SEARCH_ENGINES);
 
-  if (chrome::search::IsInstantExtendedAPIEnabled(
-          location_bar_view_->profile())) {
+  if (chrome::search::IsQueryExtractionEnabled(location_bar_view_->profile())) {
     int copy_position = menu_contents->GetIndexOfCommandId(IDS_APP_COPY);
     DCHECK(copy_position >= 0);
     menu_contents->InsertItemWithStringIdAt(
@@ -913,16 +915,12 @@ void OmniboxViewViews::EmphasizeURLComponents() {
   AutocompleteInput::ParseForEmphasizeComponents(text, model()->GetDesiredTLD(),
                                                  &scheme, &host);
   const bool emphasize = model()->CurrentTextIsURL() && (host.len > 0);
-
-  SkColor base_color = location_bar_view_->GetColor(
-      security_level_,
-      emphasize ? LocationBarView::DEEMPHASIZED_TEXT : LocationBarView::TEXT);
-  ApplyURLStyle(textfield_, 0, text.length(), base_color, false);
-
+  textfield_->SetColor(location_bar_view_->GetColor(security_level_,
+      emphasize ? LocationBarView::DEEMPHASIZED_TEXT : LocationBarView::TEXT));
   if (emphasize) {
-    SkColor normal_color = location_bar_view_->GetColor(
-        security_level_, LocationBarView::TEXT);
-    ApplyURLStyle(textfield_, host.begin, host.end(), normal_color, false);
+    textfield_->ApplyColor(
+        location_bar_view_->GetColor(security_level_, LocationBarView::TEXT),
+        ui::Range(host.begin, host.end()));
   }
 
   // Emphasize the scheme for security UI display purposes (if necessary).
@@ -930,13 +928,15 @@ void OmniboxViewViews::EmphasizeURLComponents() {
   // URLs with search terms, we may have a non-URL even when the user is not
   // editing; and in some cases, e.g. for "site:foo.com" searches, the parser
   // may have incorrectly identified a qualifier as a scheme.
+  textfield_->SetStyle(gfx::DIAGONAL_STRIKE, false); 
   if (!model()->user_input_in_progress() && model()->CurrentTextIsURL() &&
       scheme.is_nonempty() && (security_level_ != ToolbarModel::NONE)) {
     SkColor security_color = location_bar_view_->GetColor(
         security_level_, LocationBarView::SECURITY_TEXT);
-    bool use_strikethrough = (security_level_ == ToolbarModel::SECURITY_ERROR);
-    ApplyURLStyle(textfield_, scheme.begin, scheme.end(),
-                  security_color, use_strikethrough);
+    const bool strike = (security_level_ == ToolbarModel::SECURITY_ERROR);
+    const ui::Range scheme_range(scheme.begin, scheme.end());
+    textfield_->ApplyColor(security_color, scheme_range);
+    textfield_->ApplyStyle(gfx::DIAGONAL_STRIKE, strike, scheme_range);
   }
 }
 
@@ -953,8 +953,7 @@ string16 OmniboxViewViews::GetSelectedText() const {
 }
 
 void OmniboxViewViews::CopyURL() {
-  const string16& text = toolbar_model()->GetText(false);
-  DoCopy(text, true, toolbar_model()->GetURL(), text);
+  DoCopyURL(toolbar_model()->GetURL(), toolbar_model()->GetText(false));
 }
 
 void OmniboxViewViews::OnPaste() {

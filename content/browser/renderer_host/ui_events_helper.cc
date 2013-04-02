@@ -189,8 +189,6 @@ WebKit::WebGestureEvent MakeWebGestureEventFromUIEvent(
       gesture_event.type = WebKit::WebInputEvent::GestureFlingStart;
       gesture_event.data.flingStart.velocityX = event.details().velocity_x();
       gesture_event.data.flingStart.velocityY = event.details().velocity_y();
-      gesture_event.data.flingStart.sourceDevice =
-          WebKit::WebGestureEvent::Touchscreen;
       break;
     case ui::ET_SCROLL_FLING_CANCEL:
       gesture_event.type = WebKit::WebInputEvent::GestureFlingCancel;
@@ -225,6 +223,7 @@ WebKit::WebGestureEvent MakeWebGestureEventFromUIEvent(
       NOTREACHED() << "Unknown gesture type: " << event.type();
   }
 
+  gesture_event.sourceDevice = WebKit::WebGestureEvent::Touchscreen;
   gesture_event.modifiers = EventFlagsToWebEventModifiers(event.flags());
   gesture_event.timeStampSeconds = event.time_stamp().InSecondsF();
 

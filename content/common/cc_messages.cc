@@ -22,6 +22,7 @@ void ParamTraits<WebKit::WebFilterOperation>::Write(
     case WebKit::WebFilterOperation::FilterTypeHueRotate:
     case WebKit::WebFilterOperation::FilterTypeInvert:
     case WebKit::WebFilterOperation::FilterTypeBrightness:
+    case WebKit::WebFilterOperation::FilterTypeSaturatingBrightness:
     case WebKit::WebFilterOperation::FilterTypeContrast:
     case WebKit::WebFilterOperation::FilterTypeOpacity:
     case WebKit::WebFilterOperation::FilterTypeBlur:
@@ -64,6 +65,7 @@ bool ParamTraits<WebKit::WebFilterOperation>::Read(
     case WebKit::WebFilterOperation::FilterTypeHueRotate:
     case WebKit::WebFilterOperation::FilterTypeInvert:
     case WebKit::WebFilterOperation::FilterTypeBrightness:
+    case WebKit::WebFilterOperation::FilterTypeSaturatingBrightness:
     case WebKit::WebFilterOperation::FilterTypeContrast:
     case WebKit::WebFilterOperation::FilterTypeOpacity:
     case WebKit::WebFilterOperation::FilterTypeBlur:
@@ -119,6 +121,7 @@ void ParamTraits<WebKit::WebFilterOperation>::Log(
     case WebKit::WebFilterOperation::FilterTypeHueRotate:
     case WebKit::WebFilterOperation::FilterTypeInvert:
     case WebKit::WebFilterOperation::FilterTypeBrightness:
+    case WebKit::WebFilterOperation::FilterTypeSaturatingBrightness:
     case WebKit::WebFilterOperation::FilterTypeContrast:
     case WebKit::WebFilterOperation::FilterTypeOpacity:
     case WebKit::WebFilterOperation::FilterTypeBlur:
@@ -295,9 +298,6 @@ void ParamTraits<cc::RenderPass>::Write(
   WriteParam(m, p.transform_to_root_target);
   WriteParam(m, p.has_transparent_background);
   WriteParam(m, p.has_occlusion_from_outside_target_surface);
-  WriteParam(m, p.filters);
-  // TODO(danakj): filter isn't being serialized.
-  WriteParam(m, p.background_filters);
   WriteParam(m, p.shared_quad_state_list.size());
   WriteParam(m, p.quad_list.size());
 
@@ -387,9 +387,6 @@ bool ParamTraits<cc::RenderPass>::Read(
   gfx::Transform transform_to_root_target;
   bool has_transparent_background;
   bool has_occlusion_from_outside_target_surface;
-  WebKit::WebFilterOperations filters;
-  skia::RefPtr<SkImageFilter> filter;
-  WebKit::WebFilterOperations background_filters;
   size_t shared_quad_state_list_size;
   size_t quad_list_size;
 
@@ -399,8 +396,6 @@ bool ParamTraits<cc::RenderPass>::Read(
       !ReadParam(m, iter, &transform_to_root_target) ||
       !ReadParam(m, iter, &has_transparent_background) ||
       !ReadParam(m, iter, &has_occlusion_from_outside_target_surface) ||
-      !ReadParam(m, iter, &filters) ||
-      !ReadParam(m, iter, &background_filters) ||
       !ReadParam(m, iter, &shared_quad_state_list_size) ||
       !ReadParam(m, iter, &quad_list_size))
     return false;
@@ -410,16 +405,13 @@ bool ParamTraits<cc::RenderPass>::Read(
             damage_rect,
             transform_to_root_target,
             has_transparent_background,
-            has_occlusion_from_outside_target_surface,
-            filters,
-            filter, // TODO(danakj): filter isn't being serialized.
-            background_filters);
+            has_occlusion_from_outside_target_surface);
 
   for (size_t i = 0; i < shared_quad_state_list_size; ++i) {
     scoped_ptr<cc::SharedQuadState> state(cc::SharedQuadState::Create());
     if (!ReadParam(m, iter, state.get()))
       return false;
-    p->shared_quad_state_list.append(state.Pass());
+    p->shared_quad_state_list.push_back(state.Pass());
   }
 
   size_t last_shared_quad_state_index = 0;
@@ -476,7 +468,7 @@ bool ParamTraits<cc::RenderPass>::Read(
     draw_quad->shared_quad_state =
         p->shared_quad_state_list[shared_quad_state_index];
 
-    p->quad_list.append(draw_quad.Pass());
+    p->quad_list.push_back(draw_quad.Pass());
   }
 
   return true;
@@ -496,11 +488,6 @@ void ParamTraits<cc::RenderPass>::Log(
   LogParam(p.has_transparent_background, l);
   l->append(", ");
   LogParam(p.has_occlusion_from_outside_target_surface, l);
-  l->append(", ");
-  LogParam(p.filters, l);
-  l->append(", ");
-  // TODO(danakj): filter isn't being serialized.
-  LogParam(p.background_filters, l);
   l->append(", ");
 
   l->append("[");
@@ -653,7 +640,7 @@ bool ParamTraits<cc::DelegatedFrameData>::Read(const Message* m,
     scoped_ptr<cc::RenderPass> render_pass = cc::RenderPass::Create();
     if (!ReadParam(m, iter, render_pass.get()))
       return false;
-    p->render_pass_list.append(render_pass.Pass());
+    p->render_pass_list.push_back(render_pass.Pass());
   }
   return true;
 }

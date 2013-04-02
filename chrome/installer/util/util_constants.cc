@@ -122,6 +122,10 @@ const char kNewSetupExe[] = "new-setup-exe";
 // Notify the installer that the OS has been upgraded.
 const char kOnOsUpgrade[] = "on-os-upgrade";
 
+// Determines whether or not EULA has been accepted at some point. Returns via
+// exit code: 0 if EULA not accepted, 1 if EULA accepted, and E_FAIL on error.
+const char kQueryEULAAcceptance[] = "query-eula-acceptance";
+
 // Register Chrome as a valid browser on the current sytem. This option
 // requires that setup.exe is running as admin. If this option is specified,
 // options kInstallArchive and kUninstall are ignored.
@@ -153,6 +157,10 @@ const char kRemoveChromeRegistration[] = "remove-chrome-registration";
 // When we try to relaunch setup.exe as admin on Vista, we append this command
 // line flag so that we try the launch only once.
 const char kRunAsAdmin[] = "run-as-admin";
+
+// Combined with --uninstall, signals to setup.exe that this uninstall was
+// triggered by a self-destructing Chrome.
+const char kSelfDestruct[] = "self-destruct";
 
 // Install Chrome to system wise location. The default is per user install.
 const char kSystemLevel[] = "system-level";
@@ -211,6 +219,7 @@ const wchar_t kChromeNewExe[] = L"new_chrome.exe";
 const wchar_t kChromeOldExe[] = L"old_chrome.exe";
 const wchar_t kCmdInstallApp[] = L"install-application";
 const wchar_t kCmdOnOsUpgrade[] = L"on-os-upgrade";
+const wchar_t kCmdQueryEULAAcceptance[] = L"query-eula-acceptance";
 const wchar_t kCmdQuickEnableApplicationHost[] =
     L"quick-enable-application-host";
 const wchar_t kCmdQuickEnableCf[] = L"quick-enable-cf";
@@ -237,11 +246,6 @@ const wchar_t kInstallerResult[] = L"InstallerResult";
 const wchar_t kInstallerResultUIString[] = L"InstallerResultUIString";
 const wchar_t kInstallerSuccessLaunchCmdLine[] =
     L"InstallerSuccessLaunchCmdLine";
-
-// The presence of this environment variable with a value of 1 implies that
-// we should run as a system installation regardless of what is on the
-// command line.
-const char kGoogleUpdateIsMachineEnvVar[] = "GoogleUpdateIsMachine";
 
 const wchar_t kOptionAppHostIsLauncher[] = L"app-host-is-launcher";
 const wchar_t kOptionMultiInstall[] = L"multi-install";

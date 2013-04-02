@@ -12,7 +12,6 @@
 #include "base/file_util.h"
 #include "base/logging.h"
 #include "base/metrics/histogram.h"
-#include "base/system_monitor/system_monitor.h"
 #include "base/utf_string_conversions.h"
 #include "chrome/browser/system_monitor/media_device_notifications_utils.h"
 #include "chrome/browser/system_monitor/removable_storage_notifications.h"
@@ -22,7 +21,6 @@
 #include "chrome/browser/system_monitor/media_transfer_protocol_device_observer_linux.h"
 #endif
 
-using base::SystemMonitor;
 using content::BrowserThread;
 
 const char kRootPath[] = "/";
@@ -52,41 +50,41 @@ const char kMtpPtpPrefix[] = "mtp:";
 const char kMacImageCapture[] = "ic:";
 
 static bool (*g_test_get_device_info_from_path_function)(  // NOLINT
-    const FilePath& path, std::string* device_id, string16* device_name,
-    FilePath* relative_path) = NULL;
+    const base::FilePath& path, std::string* device_id, string16* device_name,
+    base::FilePath* relative_path) = NULL;
 
 void ValidatePathOnFileThread(
-    const FilePath& path, const MediaStorageUtil::BoolCallback& callback) {
+    const base::FilePath& path,
+    const MediaStorageUtil::BoolCallback& callback) {
   DCHECK(BrowserThread::CurrentlyOn(BrowserThread::FILE));
   BrowserThread::PostTask(BrowserThread::UI, FROM_HERE,
                           base::Bind(callback, file_util::PathExists(path)));
 }
 
+typedef std::vector<RemovableStorageNotifications::StorageInfo>
+    StorageInfoList;
+
 bool IsRemovableStorageAttached(const std::string& id) {
-  std::vector<SystemMonitor::RemovableStorageInfo> media_devices =
-      SystemMonitor::Get()->GetAttachedRemovableStorage();
-  for (std::vector<SystemMonitor::RemovableStorageInfo>::const_iterator it =
-           media_devices.begin();
-       it != media_devices.end();
-       ++it) {
+  StorageInfoList devices =
+      RemovableStorageNotifications::GetInstance()->GetAttachedStorage();
+  for (StorageInfoList::const_iterator it = devices.begin();
+       it != devices.end(); ++it) {
     if (it->device_id == id)
       return true;
   }
   return false;
 }
 
-FilePath::StringType FindRemovableStorageLocationById(
+base::FilePath::StringType FindRemovableStorageLocationById(
     const std::string& device_id) {
-  std::vector<SystemMonitor::RemovableStorageInfo> media_devices =
-      SystemMonitor::Get()->GetAttachedRemovableStorage();
-  for (std::vector<SystemMonitor::RemovableStorageInfo>::const_iterator it =
-           media_devices.begin();
-       it != media_devices.end();
-       ++it) {
+  StorageInfoList devices =
+      RemovableStorageNotifications::GetInstance()->GetAttachedStorage();
+  for (StorageInfoList::const_iterator it = devices.begin();
+       it != devices.end(); ++it) {
     if (it->device_id == device_id)
       return it->location;
   }
-  return FilePath::StringType();
+  return base::FilePath::StringType();
 }
 
 void FilterAttachedDevicesOnFileThread(MediaStorageUtil::DeviceIdSet* devices) {
@@ -104,7 +102,7 @@ void FilterAttachedDevicesOnFileThread(MediaStorageUtil::DeviceIdSet* devices) {
     }
 
     if (type == MediaStorageUtil::FIXED_MASS_STORAGE) {
-      if (!file_util::PathExists(FilePath::FromUTF8Unsafe(unique_id)))
+      if (!file_util::PathExists(base::FilePath::FromUTF8Unsafe(unique_id)))
         missing_devices.insert(*it);
       continue;
     }
@@ -120,6 +118,19 @@ void FilterAttachedDevicesOnFileThread(MediaStorageUtil::DeviceIdSet* devices) {
     devices->erase(*it);
   }
 }
+
+#if defined(OS_MACOSX) || defined(OS_LINUX)  // Implies OS_CHROMEOS
+// For a device with |device_name| and a relative path |sub_folder|, construct
+// a display name. If |sub_folder| is empty, then just return |device_name|.
+string16 GetDisplayNameForSubFolder(const string16& device_name,
+                                    const base::FilePath& sub_folder) {
+  if (sub_folder.empty())
+    return device_name;
+  return (sub_folder.BaseName().LossyDisplayName() +
+          ASCIIToUTF16(" - ") +
+          device_name);
+}
+#endif
 
 }  // namespace
 
@@ -198,7 +209,7 @@ bool MediaStorageUtil::IsMassStorageDevice(const std::string& device_id) {
 
 // static
 bool MediaStorageUtil::CanCreateFileSystem(const std::string& device_id,
-                                           const FilePath& path) {
+                                           const base::FilePath& path) {
   Type type;
   if (!CrackDeviceId(device_id, &type, NULL))
     return false;
@@ -221,15 +232,16 @@ void MediaStorageUtil::IsDeviceAttached(const std::string& device_id,
 
   if (type == FIXED_MASS_STORAGE) {
     // For this type, the unique_id is the path.
-    BrowserThread::PostTask(BrowserThread::FILE, FROM_HERE,
-                            base::Bind(&ValidatePathOnFileThread,
-                                       FilePath::FromUTF8Unsafe(unique_id),
-                                       callback));
+    BrowserThread::PostTask(
+        BrowserThread::FILE, FROM_HERE,
+        base::Bind(&ValidatePathOnFileThread,
+                   base::FilePath::FromUTF8Unsafe(unique_id),
+                   callback));
   } else {
     DCHECK(type == MTP_OR_PTP ||
            type == REMOVABLE_MASS_STORAGE_WITH_DCIM ||
            type == REMOVABLE_MASS_STORAGE_NO_DCIM);
-    // We should be able to find removable storage in SystemMonitor.
+    // We should be able to find removable storage.
     callback.Run(IsRemovableStorageAttached(device_id));
   }
 }
@@ -249,21 +261,28 @@ void MediaStorageUtil::FilterAttachedDevices(DeviceIdSet* devices,
                                   done);
 }
 
-bool MediaStorageUtil::GetDeviceInfoFromPath(const FilePath& path,
+// TODO(kmadhusu) Write unit tests for GetDeviceInfoFromPath().
+bool MediaStorageUtil::GetDeviceInfoFromPath(const base::FilePath& path,
                                              std::string* device_id,
                                              string16* device_name,
-                                             FilePath* relative_path) {
+                                             base::FilePath* relative_path) {
   if (!path.IsAbsolute())
     return false;
 
+  // TODO(gbillock): Eliminate this in favor of a mock storage notifications.
   if (g_test_get_device_info_from_path_function) {
     return g_test_get_device_info_from_path_function(path, device_id,
                                                      device_name,
                                                      relative_path);
   }
 
+  // TODO(gbillock): rationalize this sequence into call(s) to
+  // RemovableStorageNotifications and uniform use/loading of
+  // the display name into StorageInfo, or else delegate name
+  // construction as well.
+
   bool found_device = false;
-  base::SystemMonitor::RemovableStorageInfo device_info;
+  RemovableStorageNotifications::StorageInfo device_info;
 #if defined(OS_LINUX) || defined(OS_MACOSX) || defined(OS_WIN)
   RemovableStorageNotifications* notifier =
       RemovableStorageNotifications::GetInstance();
@@ -282,10 +301,11 @@ bool MediaStorageUtil::GetDeviceInfoFromPath(const FilePath& path,
     if (device_id)
       *device_id = device_info.device_id;
 
-    FilePath sub_folder_path;
-    if (device_name || relative_path) {
-      bool success = FilePath(device_info.location)
-          .AppendRelativePath(path, &sub_folder_path);
+    base::FilePath sub_folder_path;
+    if ((device_name || relative_path) &&
+        (path.value() != device_info.location)) {
+      base::FilePath device_path(device_info.location);
+      bool success = device_path.AppendRelativePath(path, &sub_folder_path);
       DCHECK(success);
     }
 
@@ -293,10 +313,7 @@ bool MediaStorageUtil::GetDeviceInfoFromPath(const FilePath& path,
 #if defined(OS_MACOSX) || defined(OS_LINUX)  // Implies OS_CHROMEOS
       *device_name = GetDisplayNameForDevice(
           notifier->GetStorageSize(device_info.location),
-          sub_folder_path.value().empty() ?
-              device_info.name :
-              sub_folder_path.BaseName().LossyDisplayName() +
-                  ASCIIToUTF16(" - ") + device_info.name);
+          GetDisplayNameForSubFolder(device_info.name, sub_folder_path));
 #else
       *device_name = device_info.name;
 #endif
@@ -318,34 +335,35 @@ bool MediaStorageUtil::GetDeviceInfoFromPath(const FilePath& path,
   if (device_name)
     *device_name = path.BaseName().LossyDisplayName();
   if (relative_path)
-    *relative_path = FilePath();
+    *relative_path = base::FilePath();
   return true;
 }
 
 // static
-FilePath MediaStorageUtil::FindDevicePathById(const std::string& device_id) {
+base::FilePath MediaStorageUtil::FindDevicePathById(
+    const std::string& device_id) {
   Type type;
   std::string unique_id;
   if (!CrackDeviceId(device_id, &type, &unique_id))
-    return FilePath();
+    return base::FilePath();
 
   if (type == FIXED_MASS_STORAGE) {
     // For this type, the unique_id is the path.
-    return FilePath::FromUTF8Unsafe(unique_id);
+    return base::FilePath::FromUTF8Unsafe(unique_id);
   }
 
   // For ImageCapture, the synthetic filesystem will be rooted at a fake
   // top-level directory which is the device_id.
   if (type == MAC_IMAGE_CAPTURE) {
 #if !defined(OS_WIN)
-    return FilePath(kRootPath + device_id);
+    return base::FilePath(kRootPath + device_id);
 #endif
   }
 
   DCHECK(type == MTP_OR_PTP ||
          type == REMOVABLE_MASS_STORAGE_WITH_DCIM ||
          type == REMOVABLE_MASS_STORAGE_NO_DCIM);
-  return FilePath(FindRemovableStorageLocationById(device_id));
+  return base::FilePath(FindRemovableStorageLocationById(device_id));
 }
 
 // static
@@ -376,7 +394,5 @@ void MediaStorageUtil::SetGetDeviceInfoFromPathFunctionForTesting(
     GetDeviceInfoFromPathFunction function) {
   g_test_get_device_info_from_path_function = function;
 }
-
-MediaStorageUtil::MediaStorageUtil() {}
 
 }  // namespace chrome

@@ -18,17 +18,16 @@ class ExtensionSet;
 class RendererNetPredictor;
 class SpellCheck;
 class SpellCheckProvider;
-class VisitedLinkSlave;
 
 struct ChromeViewHostMsg_GetPluginInfo_Output;
+
+namespace components {
+class VisitedLinkSlave;
+}
 
 namespace extensions {
 class Dispatcher;
 class Extension;
-}
-
-namespace media {
-class AudioRendererSink;
 }
 
 namespace prerender {
@@ -67,7 +66,7 @@ class ChromeContentRendererClient : public content::ContentRendererClient {
       WebKit::WebPlugin** plugin) OVERRIDE;
   virtual WebKit::WebPlugin* CreatePluginReplacement(
       content::RenderView* render_view,
-      const FilePath& plugin_path) OVERRIDE;
+      const base::FilePath& plugin_path) OVERRIDE;
   virtual bool HasErrorPage(int http_status_code,
                             std::string* error_domain) OVERRIDE;
   virtual void GetNavigationErrorStrings(
@@ -80,16 +79,12 @@ class ChromeContentRendererClient : public content::ContentRendererClient {
       WebKit::WebFrame* frame,
       WebKit::WebMediaPlayerClient* client,
       base::WeakPtr<webkit_media::WebMediaPlayerDelegate> delegate,
-      media::FilterCollection* collection,
-      WebKit::WebAudioSourceProvider* audio_source_provider,
-      media::AudioRendererSink* audio_renderer_sink,
-      media::MessageLoopFactory* message_loop_factory,
-      webkit_media::MediaStreamClient* media_stream_client,
-      media::MediaLog* media_log) OVERRIDE;
+      const webkit_media::WebMediaPlayerParams& params) OVERRIDE;
   virtual bool RunIdleHandlerWhenWidgetsHidden() OVERRIDE;
   virtual bool AllowPopup() OVERRIDE;
   virtual bool ShouldFork(WebKit::WebFrame* frame,
                           const GURL& url,
+                          const std::string& http_method,
                           bool is_initial_navigation,
                           bool* send_referrer) OVERRIDE;
   virtual bool WillSendRequest(WebKit::WebFrame* frame,
@@ -176,7 +171,7 @@ class ChromeContentRendererClient : public content::ContentRendererClient {
   scoped_ptr<extensions::Dispatcher> extension_dispatcher_;
   scoped_ptr<RendererNetPredictor> net_predictor_;
   scoped_ptr<SpellCheck> spellcheck_;
-  scoped_ptr<VisitedLinkSlave> visited_link_slave_;
+  scoped_ptr<components::VisitedLinkSlave> visited_link_slave_;
   scoped_ptr<safe_browsing::PhishingClassifierFilter> phishing_classifier_;
   scoped_ptr<prerender::PrerenderDispatcher> prerender_dispatcher_;
 };

@@ -9,8 +9,12 @@
 #include "base/utf_string_conversions.h"
 #include "base/values.h"
 #include "chrome/common/chrome_paths.h"
+#include "chrome/common/extensions/api/i18n/default_locale_handler.h"
+#include "chrome/common/extensions/api/themes/theme_handler.h"
+#include "chrome/common/extensions/extension.h"
 #include "chrome/common/extensions/extension_constants.h"
 #include "chrome/common/extensions/extension_manifest_constants.h"
+#include "chrome/common/extensions/manifest_handler.h"
 #include "chrome/common/extensions/unpacker.h"
 #include "testing/gtest/include/gtest/gtest.h"
 #include "third_party/skia/include/core/SkBitmap.h"
@@ -23,14 +27,24 @@ namespace extensions {
 
 class UnpackerTest : public testing::Test {
 public:
-  ~UnpackerTest() {
+  virtual ~UnpackerTest() {
     LOG(WARNING) << "Deleting temp dir: "
                  << temp_dir_.path().LossyDisplayName();
     LOG(WARNING) << temp_dir_.Delete();
   }
 
+  virtual void SetUp() OVERRIDE {
+    testing::Test::SetUp();
+    extensions::ManifestHandler::Register(
+        keys::kDefaultLocale,
+        make_linked_ptr(new extensions::DefaultLocaleHandler));
+    extensions::ManifestHandler::Register(
+        keys::kTheme,
+        make_linked_ptr(new extensions::ThemeHandler));
+  }
+
   void SetupUnpacker(const std::string& crx_name) {
-    FilePath original_path;
+    base::FilePath original_path;
     ASSERT_TRUE(PathService::Get(chrome::DIR_TEST_DATA, &original_path));
     original_path = original_path.AppendASCII("extensions")
         .AppendASCII("unpacker")
@@ -41,14 +55,14 @@ public:
     // a temp folder to play in.
     ASSERT_TRUE(temp_dir_.CreateUniqueTempDir());
 
-    FilePath crx_path = temp_dir_.path().AppendASCII(crx_name);
+    base::FilePath crx_path = temp_dir_.path().AppendASCII(crx_name);
     ASSERT_TRUE(file_util::CopyFile(original_path, crx_path)) <<
         "Original path " << original_path.value() <<
         ", Crx path " << crx_path.value();
 
     unpacker_.reset(new Unpacker(crx_path,
                                  std::string(),
-                                 Extension::INTERNAL,
+                                 Manifest::INTERNAL,
                                  Extension::NO_FLAGS));
   }
 
@@ -204,7 +218,8 @@ TEST_F(UnpackerTest, MAYBE_NoL10n) {
 TEST_F(UnpackerTest, MAYBE_UnzipDirectoryError) {
   const char* kExpected = "Could not create directory for unzipping: ";
   SetupUnpacker("good_package.crx");
-  FilePath path = temp_dir_.path().AppendASCII(filenames::kTempExtensionName);
+  base::FilePath path =
+      temp_dir_.path().AppendASCII(filenames::kTempExtensionName);
   ASSERT_TRUE(file_util::WriteFile(path, "foo", 3));
   EXPECT_FALSE(unpacker_->Run());
   EXPECT_TRUE(StartsWith(unpacker_->error_message(),

@@ -6,10 +6,10 @@
 
 #include "base/bind.h"
 #include "base/bind_helpers.h"
+#include "base/prefs/pref_service.h"
 #include "base/values.h"
 #include "chrome/browser/browser_process.h"
 #include "chrome/browser/policy/mock_device_management_service.h"
-#include "chrome/browser/prefs/pref_service.h"
 #include "chrome/common/pref_names.h"
 #include "chrome/test/base/testing_browser_process.h"
 #include "chrome/test/base/testing_pref_service.h"
@@ -36,7 +36,7 @@ class AutoEnrollmentClientTest : public testing::Test {
  protected:
   AutoEnrollmentClientTest()
       : scoped_testing_local_state_(
-            static_cast<TestingBrowserProcess*>(g_browser_process)),
+            TestingBrowserProcess::GetGlobal()),
         local_state_(scoped_testing_local_state_.Get()),
         service_(NULL),
         completion_callback_count_(0) {}
@@ -114,7 +114,7 @@ class AutoEnrollmentClientTest : public testing::Test {
   }
 
   ScopedTestingLocalState scoped_testing_local_state_;
-  TestingPrefService* local_state_;
+  TestingPrefServiceSimple* local_state_;
   MockDeviceManagementService* service_;
   scoped_ptr<AutoEnrollmentClient> client_;
   em::DeviceManagementRequest last_request_;

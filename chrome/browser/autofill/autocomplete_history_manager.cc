@@ -8,10 +8,10 @@
 
 #include "base/prefs/public/pref_service_base.h"
 #include "base/string16.h"
-#include "base/string_number_conversions.h"
+#include "base/strings/string_number_conversions.h"
 #include "base/utf_string_conversions.h"
 #include "chrome/browser/autofill/autofill_external_delegate.h"
-#include "chrome/browser/autofill/credit_card.h"
+#include "chrome/browser/autofill/validation.h"
 #include "chrome/common/autofill_messages.h"
 #include "chrome/common/form_data.h"
 #include "chrome/common/pref_names.h"
@@ -211,7 +211,7 @@ void AutocompleteHistoryManager::OnFormSubmitted(const FormData& form) {
     if (!iter->value.empty() &&
         !iter->name.empty() &&
         IsTextField(*iter) &&
-        !CreditCard::IsValidCreditCardNumber(iter->value) &&
+        !autofill::IsValidCreditCardNumber(iter->value) &&
         !IsSSN(iter->value)) {
       values.push_back(*iter);
     }
@@ -248,8 +248,7 @@ AutocompleteHistoryManager::AutocompleteHistoryManager(
 
 void AutocompleteHistoryManager::CancelPendingQuery() {
   if (pending_query_handle_) {
-    SendSuggestions(NULL);
-    if (autofill_data_.get())
+    if (autofill_data_)
       autofill_data_->CancelRequest(pending_query_handle_);
     pending_query_handle_ = 0;
   }

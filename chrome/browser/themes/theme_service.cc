@@ -6,18 +6,21 @@
 
 #include "base/bind.h"
 #include "base/memory/ref_counted_memory.h"
+#include "base/prefs/pref_service.h"
 #include "base/sequenced_task_runner.h"
 #include "base/string_split.h"
 #include "base/string_util.h"
 #include "base/utf_string_conversions.h"
 #include "chrome/browser/extensions/extension_service.h"
 #include "chrome/browser/extensions/extension_system.h"
-#include "chrome/browser/prefs/pref_service.h"
 #include "chrome/browser/profiles/profile.h"
 #include "chrome/browser/themes/browser_theme_pack.h"
 #include "chrome/browser/themes/theme_syncable_service.h"
 #include "chrome/common/chrome_constants.h"
 #include "chrome/common/chrome_notification_types.h"
+#include "chrome/common/extensions/api/themes/theme_handler.h"
+#include "chrome/common/extensions/extension_manifest_constants.h"
+#include "chrome/common/extensions/manifest_handler.h"
 #include "chrome/common/pref_names.h"
 #include "content/public/browser/notification_service.h"
 #include "content/public/browser/user_metrics.h"
@@ -78,8 +81,7 @@ SkColor IncreaseLightness(SkColor color, double percent) {
 
 // Default colors.
 #if defined(USE_AURA)
-// TODO(jamescook): Revert this when Aura is using its own window frame
-// implementation by default, specifically BrowserNonClientFrameViewAsh.
+// Used for theme fallback colors.
 const SkColor kDefaultColorFrame = SkColorSetRGB(109, 109, 109);
 const SkColor kDefaultColorFrameInactive = SkColorSetRGB(176, 176, 176);
 #else
@@ -197,7 +199,7 @@ const int kToolbarButtonIDs[] = {
 
 // Writes the theme pack to disk on a separate thread.
 void WritePackToDiskCallback(BrowserThemePack* pack,
-                             const FilePath& path) {
+                             const base::FilePath& path) {
   if (!pack->WriteToDisk(path))
     NOTREACHED() << "Could not write theme pack to disk";
 }
@@ -214,6 +216,11 @@ ThemeService::ThemeService()
       number_of_infobars_(0) {
   // Initialize the themeable image map so we can use it on other threads.
   HasThemeableImage(0);
+
+  // Register the ManifestHandler for parsing 'theme' manifest key.
+  extensions::ManifestHandler::Register(
+      extension_manifest_keys::kTheme,
+      make_linked_ptr(new extensions::ThemeHandler));
 }
 
 ThemeService::~ThemeService() {
@@ -600,8 +607,8 @@ void ThemeService::LoadThemePrefs() {
     bool loaded_pack = false;
 
     // If we don't have a file pack, we're updating from an old version.
-    FilePath path = prefs->GetFilePath(prefs::kCurrentThemePackFilename);
-    if (path != FilePath()) {
+    base::FilePath path = prefs->GetFilePath(prefs::kCurrentThemePackFilename);
+    if (path != base::FilePath()) {
       theme_pack_ = BrowserThemePack::BuildFromDataPack(path, current_id);
       loaded_pack = theme_pack_.get() != NULL;
     }
@@ -654,7 +661,7 @@ void ThemeService::FreePlatformCaches() {
 }
 #endif
 
-void ThemeService::SavePackName(const FilePath& pack_path) {
+void ThemeService::SavePackName(const base::FilePath& pack_path) {
   profile_->GetPrefs()->SetFilePath(
       prefs::kCurrentThemePackFilename, pack_path);
 }
@@ -679,7 +686,8 @@ void ThemeService::BuildFromExtension(const Extension* extension) {
     return;
 
   // Write the packed file to disk.
-  FilePath pack_path = extension->path().Append(chrome::kThemePackFilename);
+  base::FilePath pack_path =
+      extension->path().Append(chrome::kThemePackFilename);
   service->GetFileTaskRunner()->PostTask(
       FROM_HERE,
       base::Bind(&WritePackToDiskCallback, pack, pack_path));

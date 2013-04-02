@@ -26,10 +26,6 @@ WebContentsViewDelegate* ContentBrowserClient::GetWebContentsViewDelegate(
   return NULL;
 }
 
-WebUIControllerFactory* ContentBrowserClient::GetWebUIControllerFactory() {
-  return NULL;
-}
-
 GURL ContentBrowserClient::GetEffectiveURL(BrowserContext* browser_context,
                                            const GURL& url) {
   return url;
@@ -38,6 +34,39 @@ GURL ContentBrowserClient::GetEffectiveURL(BrowserContext* browser_context,
 bool ContentBrowserClient::ShouldUseProcessPerSite(
     BrowserContext* browser_context, const GURL& effective_url) {
   return false;
+}
+
+net::URLRequestContextGetter* ContentBrowserClient::CreateRequestContext(
+    BrowserContext* browser_context,
+    scoped_ptr<net::URLRequestJobFactory::ProtocolHandler>
+        blob_protocol_handler,
+    scoped_ptr<net::URLRequestJobFactory::ProtocolHandler>
+        file_system_protocol_handler,
+    scoped_ptr<net::URLRequestJobFactory::ProtocolHandler>
+        developer_protocol_handler,
+    scoped_ptr<net::URLRequestJobFactory::ProtocolHandler>
+        chrome_protocol_handler,
+    scoped_ptr<net::URLRequestJobFactory::ProtocolHandler>
+        chrome_devtools_protocol_handler) {
+  return NULL;
+}
+
+net::URLRequestContextGetter*
+ContentBrowserClient::CreateRequestContextForStoragePartition(
+    BrowserContext* browser_context,
+    const FilePath& partition_path,
+    bool in_memory,
+    scoped_ptr<net::URLRequestJobFactory::ProtocolHandler>
+        blob_protocol_handler,
+    scoped_ptr<net::URLRequestJobFactory::ProtocolHandler>
+        file_system_protocol_handler,
+    scoped_ptr<net::URLRequestJobFactory::ProtocolHandler>
+        developer_protocol_handler,
+    scoped_ptr<net::URLRequestJobFactory::ProtocolHandler>
+        chrome_protocol_handler,
+    scoped_ptr<net::URLRequestJobFactory::ProtocolHandler>
+        chrome_devtools_protocol_handler) {
+  return NULL;
 }
 
 bool ContentBrowserClient::IsHandledURL(const GURL& url) {
@@ -55,6 +84,7 @@ bool ContentBrowserClient::ShouldTryToUseExistingProcessHost(
 }
 
 bool ContentBrowserClient::ShouldSwapProcessesForNavigation(
+    SiteInstance* site_instance,
     const GURL& current_url,
     const GURL& new_url) {
   return false;
@@ -107,19 +137,6 @@ bool ContentBrowserClient::AllowSetCookie(const GURL& url,
                                           int render_view_id,
                                           net::CookieOptions* options) {
   return true;
-}
-
-bool ContentBrowserClient::AllowPluginLocalDataAccess(
-    const GURL& document_url,
-    const GURL& plugin_url,
-    content::ResourceContext* context) {
-  return true;
-}
-
-bool ContentBrowserClient::AllowPluginLocalDataSessionOnly(
-    const GURL& url,
-    content::ResourceContext* context) {
-  return false;
 }
 
 bool ContentBrowserClient::AllowSaveLocalState(ResourceContext* context) {
@@ -252,6 +269,11 @@ bool ContentBrowserClient::AllowPepperSocketAPI(
 
 FilePath ContentBrowserClient::GetHyphenDictionaryDirectory() {
   return FilePath();
+}
+
+ui::SelectFilePolicy* ContentBrowserClient::CreateSelectFilePolicy(
+    WebContents* web_contents) {
+  return NULL;
 }
 
 #if defined(OS_WIN)

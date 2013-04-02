@@ -16,6 +16,7 @@ import org.chromium.android_webview.AwContents;
 import org.chromium.android_webview.AwSettings;
 import org.chromium.android_webview.test.util.CommonResources;
 import org.chromium.android_webview.test.util.ImagePageGenerator;
+import org.chromium.base.test.util.DisabledTest;
 import org.chromium.base.test.util.Feature;
 import org.chromium.base.test.util.TestFileUtil;
 import org.chromium.base.test.util.UrlUtils;
@@ -27,6 +28,7 @@ import org.chromium.content.browser.test.util.Criteria;
 import org.chromium.content.browser.test.util.CriteriaHelper;
 import org.chromium.content.browser.test.util.HistoryUtils;
 import org.chromium.net.test.util.TestWebServer;
+import org.chromium.ui.gfx.DeviceDisplayInfo;
 
 import java.util.regex.Matcher;
 import java.util.regex.Pattern;
@@ -848,6 +850,8 @@ public class AwSettingsTest extends AndroidWebViewTestBase {
                 AwContents awContents,
                 TestAwContentsClient contentViewClient) throws Throwable {
             super(awContents, contentViewClient);
+            // Font autosizing doesn't step in for narrow layout widths.
+            mContentSettings.setUseWideViewPort(true);
         }
 
         @Override
@@ -1008,7 +1012,6 @@ public class AwSettingsTest extends AndroidWebViewTestBase {
             super(awContents, contentViewClient, true);
             mIndex = index;
             mWebServer = webServer;
-            AwSettingsTest.this.clearCacheOnUiThread(mAwContents, true);
         }
 
         @Override
@@ -1051,6 +1054,59 @@ public class AwSettingsTest extends AndroidWebViewTestBase {
         private TestWebServer mWebServer;
     }
 
+    // To verify whether UseWideViewport works, we check, if the page width specified
+    // in the "meta viewport" tag is applied. When UseWideViewport is turned off, the
+    // "viewport" tag is ignored, and the layout width is set to device width in DIP pixels.
+    // We specify a very high width value to make sure that it doesn't intersect with
+    // device screen widths (in DIP pixels).
+    class AwSettingsUseWideViewportTestHelper extends AwSettingsTestHelper<Boolean> {
+        static private final String VIEWPORT_TAG_LAYOUT_WIDTH = "3000";
+
+        AwSettingsUseWideViewportTestHelper(
+                AwContents awContents,
+                TestAwContentsClient contentViewClient) throws Throwable {
+            super(awContents, contentViewClient, true);
+        }
+
+        @Override
+        protected Boolean getAlteredValue() {
+            return ENABLED;
+        }
+
+        @Override
+        protected Boolean getInitialValue() {
+            return DISABLED;
+        }
+
+        @Override
+        protected Boolean getCurrentValue() {
+            return mContentSettings.getUseWideViewPort();
+        }
+
+        @Override
+        protected void setCurrentValue(Boolean value) {
+            mContentSettings.setUseWideViewPort(value);
+        }
+
+        @Override
+        protected void doEnsureSettingHasValue(Boolean value) throws Throwable {
+            loadDataSync(getData());
+            final String bodyWidth = getTitleOnUiThread();
+            if (value) {
+                assertTrue(bodyWidth, VIEWPORT_TAG_LAYOUT_WIDTH.equals(bodyWidth));
+            } else {
+                assertFalse(bodyWidth, VIEWPORT_TAG_LAYOUT_WIDTH.equals(bodyWidth));
+            }
+        }
+
+        private String getData() {
+            return "<html><head>" +
+                    "<meta name='viewport' content='width=" + VIEWPORT_TAG_LAYOUT_WIDTH + "' />" +
+                    "</head>" +
+                    "<body onload='document.title=document.body.clientWidth'></body></html>";
+        }
+    }
+
     // The test verifies that JavaScript is disabled upon WebView
     // creation without accessing ContentSettings. If the test passes,
     // it means that WebView-specific web preferences configuration
@@ -1081,8 +1137,8 @@ public class AwSettingsTest extends AndroidWebViewTestBase {
 
     @SmallTest
     @Feature({"AndroidWebView", "Preferences"})
-    public void testJavaScriptEnabledNormal() throws Throwable {
-        ViewPair views = createViews(NORMAL_VIEW, NORMAL_VIEW);
+    public void testJavaScriptEnabledWithTwoViews() throws Throwable {
+        ViewPair views = createViews();
         runPerViewSettingsTest(
             new AwSettingsJavaScriptTestHelper(views.getContents0(), views.getClient0()),
             new AwSettingsJavaScriptTestHelper(views.getContents1(), views.getClient1()));
@@ -1090,26 +1146,8 @@ public class AwSettingsTest extends AndroidWebViewTestBase {
 
     @SmallTest
     @Feature({"AndroidWebView", "Preferences"})
-    public void testJavaScriptEnabledIncognito() throws Throwable {
-        ViewPair views = createViews(INCOGNITO_VIEW, INCOGNITO_VIEW);
-        runPerViewSettingsTest(
-            new AwSettingsJavaScriptTestHelper(views.getContents0(), views.getClient0()),
-            new AwSettingsJavaScriptTestHelper(views.getContents1(), views.getClient1()));
-    }
-
-    @SmallTest
-    @Feature({"AndroidWebView", "Preferences"})
-    public void testJavaScriptEnabledBoth() throws Throwable {
-        ViewPair views = createViews(NORMAL_VIEW, INCOGNITO_VIEW);
-        runPerViewSettingsTest(
-            new AwSettingsJavaScriptTestHelper(views.getContents0(), views.getClient0()),
-            new AwSettingsJavaScriptTestHelper(views.getContents1(), views.getClient1()));
-    }
-
-    @SmallTest
-    @Feature({"AndroidWebView", "Preferences"})
-    public void testJavaScriptEnabledDynamicNormal() throws Throwable {
-        ViewPair views = createViews(NORMAL_VIEW, NORMAL_VIEW);
+    public void testJavaScriptEnabledDynamicWithTwoViews() throws Throwable {
+        ViewPair views = createViews();
         runPerViewSettingsTest(
             new AwSettingsJavaScriptDynamicTestHelper(views.getContents0(), views.getClient0()),
             new AwSettingsJavaScriptDynamicTestHelper(views.getContents1(), views.getClient1()));
@@ -1117,26 +1155,8 @@ public class AwSettingsTest extends AndroidWebViewTestBase {
 
     @SmallTest
     @Feature({"AndroidWebView", "Preferences"})
-    public void testJavaScriptEnabledDynamicIncognito() throws Throwable {
-        ViewPair views = createViews(INCOGNITO_VIEW, INCOGNITO_VIEW);
-        runPerViewSettingsTest(
-            new AwSettingsJavaScriptDynamicTestHelper(views.getContents0(), views.getClient0()),
-            new AwSettingsJavaScriptDynamicTestHelper(views.getContents1(), views.getClient1()));
-    }
-
-    @SmallTest
-    @Feature({"AndroidWebView", "Preferences"})
-    public void testJavaScriptEnabledDynamicBoth() throws Throwable {
-        ViewPair views = createViews(NORMAL_VIEW, INCOGNITO_VIEW);
-        runPerViewSettingsTest(
-            new AwSettingsJavaScriptDynamicTestHelper(views.getContents0(), views.getClient0()),
-            new AwSettingsJavaScriptDynamicTestHelper(views.getContents1(), views.getClient1()));
-    }
-
-    @SmallTest
-    @Feature({"AndroidWebView", "Preferences"})
-    public void testPluginsEnabledNormal() throws Throwable {
-        ViewPair views = createViews(NORMAL_VIEW, NORMAL_VIEW);
+    public void testPluginsEnabledWithTwoViews() throws Throwable {
+        ViewPair views = createViews();
         runPerViewSettingsTest(
             new AwSettingsPluginsTestHelper(views.getContents0(), views.getClient0()),
             new AwSettingsPluginsTestHelper(views.getContents1(), views.getClient1()));
@@ -1144,26 +1164,8 @@ public class AwSettingsTest extends AndroidWebViewTestBase {
 
     @SmallTest
     @Feature({"AndroidWebView", "Preferences"})
-    public void testPluginsEnabledIncognito() throws Throwable {
-        ViewPair views = createViews(INCOGNITO_VIEW, INCOGNITO_VIEW);
-        runPerViewSettingsTest(
-            new AwSettingsPluginsTestHelper(views.getContents0(), views.getClient0()),
-            new AwSettingsPluginsTestHelper(views.getContents1(), views.getClient1()));
-    }
-
-    @SmallTest
-    @Feature({"AndroidWebView", "Preferences"})
-    public void testPluginsEnabledBoth() throws Throwable {
-        ViewPair views = createViews(NORMAL_VIEW, INCOGNITO_VIEW);
-        runPerViewSettingsTest(
-            new AwSettingsPluginsTestHelper(views.getContents0(), views.getClient0()),
-            new AwSettingsPluginsTestHelper(views.getContents1(), views.getClient1()));
-    }
-
-    @SmallTest
-    @Feature({"AndroidWebView", "Preferences"})
-    public void testStandardFontFamilyNormal() throws Throwable {
-        ViewPair views = createViews(NORMAL_VIEW, NORMAL_VIEW);
+    public void testStandardFontFamilyWithTwoViews() throws Throwable {
+        ViewPair views = createViews();
         runPerViewSettingsTest(
             new AwSettingsStandardFontFamilyTestHelper(views.getContents0(), views.getClient0()),
             new AwSettingsStandardFontFamilyTestHelper(views.getContents1(), views.getClient1()));
@@ -1171,44 +1173,8 @@ public class AwSettingsTest extends AndroidWebViewTestBase {
 
     @SmallTest
     @Feature({"AndroidWebView", "Preferences"})
-    public void testStandardFontFamilyIncognito() throws Throwable {
-        ViewPair views = createViews(INCOGNITO_VIEW, INCOGNITO_VIEW);
-        runPerViewSettingsTest(
-            new AwSettingsStandardFontFamilyTestHelper(views.getContents0(), views.getClient0()),
-            new AwSettingsStandardFontFamilyTestHelper(views.getContents1(), views.getClient1()));
-    }
-
-    @SmallTest
-    @Feature({"AndroidWebView", "Preferences"})
-    public void testStandardFontFamilyBoth() throws Throwable {
-        ViewPair views = createViews(NORMAL_VIEW, INCOGNITO_VIEW);
-        runPerViewSettingsTest(
-            new AwSettingsStandardFontFamilyTestHelper(views.getContents0(), views.getClient0()),
-            new AwSettingsStandardFontFamilyTestHelper(views.getContents1(), views.getClient1()));
-    }
-
-    @SmallTest
-    @Feature({"AndroidWebView", "Preferences"})
-    public void testDefaultFontSizeNormal() throws Throwable {
-        ViewPair views = createViews(NORMAL_VIEW, NORMAL_VIEW);
-        runPerViewSettingsTest(
-            new AwSettingsDefaultFontSizeTestHelper(views.getContents0(), views.getClient0()),
-            new AwSettingsDefaultFontSizeTestHelper(views.getContents1(), views.getClient1()));
-    }
-
-    @SmallTest
-    @Feature({"AndroidWebView", "Preferences"})
-    public void testDefaultFontSizeIncognito() throws Throwable {
-        ViewPair views = createViews(INCOGNITO_VIEW, INCOGNITO_VIEW);
-        runPerViewSettingsTest(
-            new AwSettingsDefaultFontSizeTestHelper(views.getContents0(), views.getClient0()),
-            new AwSettingsDefaultFontSizeTestHelper(views.getContents1(), views.getClient1()));
-    }
-
-    @SmallTest
-    @Feature({"AndroidWebView", "Preferences"})
-    public void testDefaultFontSizeBoth() throws Throwable {
-        ViewPair views = createViews(NORMAL_VIEW, INCOGNITO_VIEW);
+    public void testDefaultFontSizeWithTwoViews() throws Throwable {
+        ViewPair views = createViews();
         runPerViewSettingsTest(
             new AwSettingsDefaultFontSizeTestHelper(views.getContents0(), views.getClient0()),
             new AwSettingsDefaultFontSizeTestHelper(views.getContents1(), views.getClient1()));
@@ -1221,7 +1187,7 @@ public class AwSettingsTest extends AndroidWebViewTestBase {
     @Feature({"AndroidWebView", "Preferences"})
     @SmallTest
     public void testLoadsImagesAutomaticallyWithCachedImage() throws Throwable {
-        ViewPair views = createViews(NORMAL_VIEW, NORMAL_VIEW);
+        ViewPair views = createViews();
         ContentSettings settings0 = getContentSettingsOnUiThread(views.getContents0());
         settings0.setJavaScriptEnabled(true);
         ContentSettings settings1 = getContentSettingsOnUiThread(views.getContents1());
@@ -1324,8 +1290,8 @@ public class AwSettingsTest extends AndroidWebViewTestBase {
 
     @SmallTest
     @Feature({"AndroidWebView", "Preferences"})
-    public void testLoadsImagesAutomaticallyNormal() throws Throwable {
-        ViewPair views = createViews(NORMAL_VIEW, NORMAL_VIEW);
+    public void testLoadsImagesAutomaticallyWithTwoViews() throws Throwable {
+        ViewPair views = createViews();
         runPerViewSettingsTest(
             new AwSettingsLoadImagesAutomaticallyTestHelper(
                 views.getContents0(), views.getClient0(), new ImagePageGenerator(0, true)),
@@ -1335,48 +1301,8 @@ public class AwSettingsTest extends AndroidWebViewTestBase {
 
     @SmallTest
     @Feature({"AndroidWebView", "Preferences"})
-    public void testLoadsImagesAutomaticallyIncognito() throws Throwable {
-        ViewPair views = createViews(INCOGNITO_VIEW, INCOGNITO_VIEW);
-        runPerViewSettingsTest(
-            new AwSettingsLoadImagesAutomaticallyTestHelper(
-                views.getContents0(), views.getClient0(), new ImagePageGenerator(0, true)),
-            new AwSettingsLoadImagesAutomaticallyTestHelper(
-                views.getContents1(), views.getClient1(), new ImagePageGenerator(1, true)));
-    }
-
-    @SmallTest
-    @Feature({"AndroidWebView", "Preferences"})
-    public void testLoadsImagesAutomaticallyBoth() throws Throwable {
-        ViewPair views = createViews(NORMAL_VIEW, INCOGNITO_VIEW);
-        runPerViewSettingsTest(
-            new AwSettingsLoadImagesAutomaticallyTestHelper(
-                views.getContents0(), views.getClient0(), new ImagePageGenerator(0, true)),
-            new AwSettingsLoadImagesAutomaticallyTestHelper(
-                views.getContents1(), views.getClient1(), new ImagePageGenerator(1, true)));
-    }
-
-    @SmallTest
-    @Feature({"AndroidWebView", "Preferences"})
-    public void testDefaultTextEncodingNormal() throws Throwable {
-        ViewPair views = createViews(NORMAL_VIEW, NORMAL_VIEW);
-        runPerViewSettingsTest(
-            new AwSettingsDefaultTextEncodingTestHelper(views.getContents0(), views.getClient0()),
-            new AwSettingsDefaultTextEncodingTestHelper(views.getContents1(), views.getClient1()));
-    }
-
-    @SmallTest
-    @Feature({"AndroidWebView", "Preferences"})
-    public void testDefaultTextEncodingIncognito() throws Throwable {
-        ViewPair views = createViews(INCOGNITO_VIEW, INCOGNITO_VIEW);
-        runPerViewSettingsTest(
-            new AwSettingsDefaultTextEncodingTestHelper(views.getContents0(), views.getClient0()),
-            new AwSettingsDefaultTextEncodingTestHelper(views.getContents1(), views.getClient1()));
-    }
-
-    @SmallTest
-    @Feature({"AndroidWebView", "Preferences"})
-    public void testDefaultTextEncodingBoth() throws Throwable {
-        ViewPair views = createViews(NORMAL_VIEW, INCOGNITO_VIEW);
+    public void testDefaultTextEncodingWithTwoViews() throws Throwable {
+        ViewPair views = createViews();
         runPerViewSettingsTest(
             new AwSettingsDefaultTextEncodingTestHelper(views.getContents0(), views.getClient0()),
             new AwSettingsDefaultTextEncodingTestHelper(views.getContents1(), views.getClient1()));
@@ -1489,26 +1415,8 @@ public class AwSettingsTest extends AndroidWebViewTestBase {
 
     @SmallTest
     @Feature({"AndroidWebView", "Preferences"})
-    public void testUserAgentStringNormal() throws Throwable {
-        ViewPair views = createViews(NORMAL_VIEW, NORMAL_VIEW);
-        runPerViewSettingsTest(
-            new AwSettingsUserAgentStringTestHelper(views.getContents0(), views.getClient0()),
-            new AwSettingsUserAgentStringTestHelper(views.getContents1(), views.getClient1()));
-    }
-
-    @SmallTest
-    @Feature({"AndroidWebView", "Preferences"})
-    public void testUserAgentStringIncognito() throws Throwable {
-        ViewPair views = createViews(INCOGNITO_VIEW, INCOGNITO_VIEW);
-        runPerViewSettingsTest(
-            new AwSettingsUserAgentStringTestHelper(views.getContents0(), views.getClient0()),
-            new AwSettingsUserAgentStringTestHelper(views.getContents1(), views.getClient1()));
-    }
-
-    @SmallTest
-    @Feature({"AndroidWebView", "Preferences"})
-    public void testUserAgentStringBoth() throws Throwable {
-        ViewPair views = createViews(NORMAL_VIEW, INCOGNITO_VIEW);
+    public void testUserAgentStringWithTwoViews() throws Throwable {
+        ViewPair views = createViews();
         runPerViewSettingsTest(
             new AwSettingsUserAgentStringTestHelper(views.getContents0(), views.getClient0()),
             new AwSettingsUserAgentStringTestHelper(views.getContents1(), views.getClient1()));
@@ -1551,8 +1459,8 @@ public class AwSettingsTest extends AndroidWebViewTestBase {
 
     @SmallTest
     @Feature({"AndroidWebView", "Preferences"})
-    public void testDomStorageEnabledNormal() throws Throwable {
-        ViewPair views = createViews(NORMAL_VIEW, NORMAL_VIEW);
+    public void testDomStorageEnabledWithTwoViews() throws Throwable {
+        ViewPair views = createViews();
         runPerViewSettingsTest(
             new AwSettingsDomStorageEnabledTestHelper(views.getContents0(), views.getClient0()),
             new AwSettingsDomStorageEnabledTestHelper(views.getContents1(), views.getClient1()));
@@ -1560,48 +1468,8 @@ public class AwSettingsTest extends AndroidWebViewTestBase {
 
     @SmallTest
     @Feature({"AndroidWebView", "Preferences"})
-    public void testDomStorageEnabledIncognito() throws Throwable {
-        ViewPair views = createViews(INCOGNITO_VIEW, INCOGNITO_VIEW);
-        runPerViewSettingsTest(
-            new AwSettingsDomStorageEnabledTestHelper(views.getContents0(), views.getClient0()),
-            new AwSettingsDomStorageEnabledTestHelper(views.getContents1(), views.getClient1()));
-    }
-
-    @SmallTest
-    @Feature({"AndroidWebView", "Preferences"})
-    public void testDomStorageEnabledBoth() throws Throwable {
-        ViewPair views = createViews(NORMAL_VIEW, INCOGNITO_VIEW);
-        runPerViewSettingsTest(
-            new AwSettingsDomStorageEnabledTestHelper(views.getContents0(), views.getClient0()),
-            new AwSettingsDomStorageEnabledTestHelper(views.getContents1(), views.getClient1()));
-    }
-
-    @SmallTest
-    @Feature({"AndroidWebView", "Preferences"})
-    public void testUniversalAccessFromFilesNormal() throws Throwable {
-        ViewPair views = createViews(NORMAL_VIEW, NORMAL_VIEW);
-        runPerViewSettingsTest(
-            new AwSettingsUniversalAccessFromFilesTestHelper(views.getContents0(),
-                views.getClient0()),
-            new AwSettingsUniversalAccessFromFilesTestHelper(views.getContents1(),
-                views.getClient1()));
-    }
-
-    @SmallTest
-    @Feature({"AndroidWebView", "Preferences"})
-    public void testUniversalAccessFromFilesIncognito() throws Throwable {
-        ViewPair views = createViews(INCOGNITO_VIEW, INCOGNITO_VIEW);
-        runPerViewSettingsTest(
-            new AwSettingsUniversalAccessFromFilesTestHelper(views.getContents0(),
-                views.getClient0()),
-            new AwSettingsUniversalAccessFromFilesTestHelper(views.getContents1(),
-                views.getClient1()));
-    }
-
-    @SmallTest
-    @Feature({"AndroidWebView", "Preferences"})
-    public void testUniversalAccessFromFilesBoth() throws Throwable {
-        ViewPair views = createViews(NORMAL_VIEW, INCOGNITO_VIEW);
+    public void testUniversalAccessFromFilesWithTwoViews() throws Throwable {
+        ViewPair views = createViews();
         runPerViewSettingsTest(
             new AwSettingsUniversalAccessFromFilesTestHelper(views.getContents0(),
                 views.getClient0()),
@@ -1630,8 +1498,8 @@ public class AwSettingsTest extends AndroidWebViewTestBase {
 
     @SmallTest
     @Feature({"AndroidWebView", "Preferences"})
-    public void testFileAccessFromFilesIframeNormal() throws Throwable {
-        ViewPair views = createViews(NORMAL_VIEW, NORMAL_VIEW);
+    public void testFileAccessFromFilesIframeWithTwoViews() throws Throwable {
+        ViewPair views = createViews();
         runPerViewSettingsTest(
             new AwSettingsFileAccessFromFilesIframeTestHelper(
                 views.getContents0(), views.getClient0()),
@@ -1641,30 +1509,8 @@ public class AwSettingsTest extends AndroidWebViewTestBase {
 
     @SmallTest
     @Feature({"AndroidWebView", "Preferences"})
-    public void testFileAccessFromFilesIframeIncognito() throws Throwable {
-        ViewPair views = createViews(INCOGNITO_VIEW, INCOGNITO_VIEW);
-        runPerViewSettingsTest(
-            new AwSettingsFileAccessFromFilesIframeTestHelper(
-                views.getContents0(), views.getClient0()),
-            new AwSettingsFileAccessFromFilesIframeTestHelper(
-                views.getContents1(), views.getClient1()));
-    }
-
-    @SmallTest
-    @Feature({"AndroidWebView", "Preferences"})
-    public void testFileAccessFromFilesIframeBoth() throws Throwable {
-        ViewPair views = createViews(NORMAL_VIEW, INCOGNITO_VIEW);
-        runPerViewSettingsTest(
-            new AwSettingsFileAccessFromFilesIframeTestHelper(
-                views.getContents0(), views.getClient0()),
-            new AwSettingsFileAccessFromFilesIframeTestHelper(
-                views.getContents1(), views.getClient1()));
-    }
-
-    @SmallTest
-    @Feature({"AndroidWebView", "Preferences"})
-    public void testFileAccessFromFilesXhrNormal() throws Throwable {
-        ViewPair views = createViews(NORMAL_VIEW, NORMAL_VIEW);
+    public void testFileAccessFromFilesXhrWithTwoViews() throws Throwable {
+        ViewPair views = createViews();
         runPerViewSettingsTest(
             new AwSettingsFileAccessFromFilesXhrTestHelper(views.getContents0(),
                 views.getClient0()),
@@ -1674,30 +1520,8 @@ public class AwSettingsTest extends AndroidWebViewTestBase {
 
     @SmallTest
     @Feature({"AndroidWebView", "Preferences"})
-    public void testFileAccessFromFilesXhrIncognito() throws Throwable {
-        ViewPair views = createViews(INCOGNITO_VIEW, INCOGNITO_VIEW);
-        runPerViewSettingsTest(
-            new AwSettingsFileAccessFromFilesXhrTestHelper(views.getContents0(),
-                views.getClient0()),
-            new AwSettingsFileAccessFromFilesXhrTestHelper(views.getContents1(),
-                views.getClient1()));
-    }
-
-    @SmallTest
-    @Feature({"AndroidWebView", "Preferences"})
-    public void testFileAccessFromFilesXhrBoth() throws Throwable {
-        ViewPair views = createViews(NORMAL_VIEW, INCOGNITO_VIEW);
-        runPerViewSettingsTest(
-            new AwSettingsFileAccessFromFilesXhrTestHelper(views.getContents0(),
-                views.getClient0()),
-            new AwSettingsFileAccessFromFilesXhrTestHelper(views.getContents1(),
-                views.getClient1()));
-    }
-
-    @SmallTest
-    @Feature({"AndroidWebView", "Preferences"})
-    public void testFileUrlAccessNormal() throws Throwable {
-        ViewPair views = createViews(NORMAL_VIEW, NORMAL_VIEW);
+    public void testFileUrlAccessWithTwoViews() throws Throwable {
+        ViewPair views = createViews();
         runPerViewSettingsTest(
             new AwSettingsFileUrlAccessTestHelper(views.getContents0(), views.getClient0(), 0),
             new AwSettingsFileUrlAccessTestHelper(views.getContents1(), views.getClient1(), 1));
@@ -1705,44 +1529,8 @@ public class AwSettingsTest extends AndroidWebViewTestBase {
 
     @SmallTest
     @Feature({"AndroidWebView", "Preferences"})
-    public void testFileUrlAccessIncognito() throws Throwable {
-        ViewPair views = createViews(INCOGNITO_VIEW, INCOGNITO_VIEW);
-        runPerViewSettingsTest(
-            new AwSettingsFileUrlAccessTestHelper(views.getContents0(), views.getClient0(), 0),
-            new AwSettingsFileUrlAccessTestHelper(views.getContents1(), views.getClient1(), 1));
-    }
-
-    @SmallTest
-    @Feature({"AndroidWebView", "Preferences"})
-    public void testFileUrlAccessBoth() throws Throwable {
-        ViewPair views = createViews(NORMAL_VIEW, INCOGNITO_VIEW);
-        runPerViewSettingsTest(
-            new AwSettingsFileUrlAccessTestHelper(views.getContents0(), views.getClient0(), 0),
-            new AwSettingsFileUrlAccessTestHelper(views.getContents1(), views.getClient1(), 1));
-    }
-
-    @SmallTest
-    @Feature({"AndroidWebView", "Preferences"})
-    public void testContentUrlAccessNormal() throws Throwable {
-        ViewPair views = createViews(NORMAL_VIEW, NORMAL_VIEW);
-        runPerViewSettingsTest(
-            new AwSettingsContentUrlAccessTestHelper(views.getContents0(), views.getClient0(), 0),
-            new AwSettingsContentUrlAccessTestHelper(views.getContents1(), views.getClient1(), 1));
-    }
-
-    @SmallTest
-    @Feature({"AndroidWebView", "Preferences"})
-    public void testContentUrlAccessIncognito() throws Throwable {
-        ViewPair views = createViews(INCOGNITO_VIEW, INCOGNITO_VIEW);
-        runPerViewSettingsTest(
-            new AwSettingsContentUrlAccessTestHelper(views.getContents0(), views.getClient0(), 0),
-            new AwSettingsContentUrlAccessTestHelper(views.getContents1(), views.getClient1(), 1));
-    }
-
-    @SmallTest
-    @Feature({"AndroidWebView", "Preferences"})
-    public void testContentUrlAccessBoth() throws Throwable {
-        ViewPair views = createViews(NORMAL_VIEW, INCOGNITO_VIEW);
+    public void testContentUrlAccessWithTwoViews() throws Throwable {
+        ViewPair views = createViews();
         runPerViewSettingsTest(
             new AwSettingsContentUrlAccessTestHelper(views.getContents0(), views.getClient0(), 0),
             new AwSettingsContentUrlAccessTestHelper(views.getContents1(), views.getClient1(), 1));
@@ -1772,30 +1560,8 @@ public class AwSettingsTest extends AndroidWebViewTestBase {
 
     @SmallTest
     @Feature({"AndroidWebView", "Preferences", "Navigation"})
-    public void testContentUrlFromFileNormal() throws Throwable {
-        ViewPair views = createViews(NORMAL_VIEW, NORMAL_VIEW);
-        runPerViewSettingsTest(
-            new AwSettingsContentUrlAccessFromFileTestHelper(
-                    views.getContents0(), views.getClient0(), 0),
-            new AwSettingsContentUrlAccessFromFileTestHelper(
-                    views.getContents1(), views.getClient1(), 1));
-    }
-
-    @SmallTest
-    @Feature({"AndroidWebView", "Preferences", "Navigation"})
-    public void testContentUrlFromFileIncognito() throws Throwable {
-        ViewPair views = createViews(INCOGNITO_VIEW, INCOGNITO_VIEW);
-        runPerViewSettingsTest(
-            new AwSettingsContentUrlAccessFromFileTestHelper(
-                    views.getContents0(), views.getClient0(), 0),
-            new AwSettingsContentUrlAccessFromFileTestHelper(
-                    views.getContents1(), views.getClient1(), 1));
-    }
-
-    @SmallTest
-    @Feature({"AndroidWebView", "Preferences", "Navigation"})
-    public void testContentUrlFromFileBoth() throws Throwable {
-        ViewPair views = createViews(NORMAL_VIEW, INCOGNITO_VIEW);
+    public void testContentUrlFromFileWithTwoViews() throws Throwable {
+        ViewPair views = createViews();
         runPerViewSettingsTest(
             new AwSettingsContentUrlAccessFromFileTestHelper(
                     views.getContents0(), views.getClient0(), 0),
@@ -1874,7 +1640,7 @@ public class AwSettingsTest extends AndroidWebViewTestBase {
     public void testBlockNetworkLoadsWithHttpResources() throws Throwable {
         final TestAwContentsClient contentClient = new TestAwContentsClient();
         final AwTestContainerView testContainer =
-                createAwTestContainerViewOnMainSync(false, contentClient);
+                createAwTestContainerViewOnMainSync(contentClient);
         final AwContents awContents = testContainer.getAwContents();
         final ContentSettings contentSettings = getContentSettingsOnUiThread(awContents);
         final AwSettings awSettings = getAwSettingsOnUiThread(testContainer.getAwContents());
@@ -2015,10 +1781,14 @@ public class AwSettingsTest extends AndroidWebViewTestBase {
         }
     }
 
+    /*
     @SmallTest
     @Feature({"AndroidWebView", "Preferences"})
-    public void testLayoutAlgorithmNormal() throws Throwable {
-        ViewPair views = createViews(NORMAL_VIEW, NORMAL_VIEW);
+    http://crbug.com/171492
+    */
+    @DisabledTest
+    public void testLayoutAlgorithmWithTwoViews() throws Throwable {
+        ViewPair views = createViews();
         runPerViewSettingsTest(
             new AwSettingsLayoutAlgorithmTestHelper(views.getContents0(), views.getClient0()),
             new AwSettingsLayoutAlgorithmTestHelper(views.getContents1(), views.getClient1()));
@@ -2026,26 +1796,8 @@ public class AwSettingsTest extends AndroidWebViewTestBase {
 
     @SmallTest
     @Feature({"AndroidWebView", "Preferences"})
-    public void testLayoutAlgorithmIncognito() throws Throwable {
-        ViewPair views = createViews(INCOGNITO_VIEW, INCOGNITO_VIEW);
-        runPerViewSettingsTest(
-            new AwSettingsLayoutAlgorithmTestHelper(views.getContents0(), views.getClient0()),
-            new AwSettingsLayoutAlgorithmTestHelper(views.getContents1(), views.getClient1()));
-    }
-
-    @SmallTest
-    @Feature({"AndroidWebView", "Preferences"})
-    public void testLayoutAlgorithmBoth() throws Throwable {
-        ViewPair views = createViews(NORMAL_VIEW, INCOGNITO_VIEW);
-        runPerViewSettingsTest(
-            new AwSettingsLayoutAlgorithmTestHelper(views.getContents0(), views.getClient0()),
-            new AwSettingsLayoutAlgorithmTestHelper(views.getContents1(), views.getClient1()));
-    }
-
-    @SmallTest
-    @Feature({"AndroidWebView", "Preferences"})
-    public void testTextZoomNormal() throws Throwable {
-        ViewPair views = createViews(NORMAL_VIEW, NORMAL_VIEW);
+    public void testTextZoomWithTwoViews() throws Throwable {
+        ViewPair views = createViews();
         runPerViewSettingsTest(
             new AwSettingsTextZoomTestHelper(views.getContents0(), views.getClient0()),
             new AwSettingsTextZoomTestHelper(views.getContents1(), views.getClient1()));
@@ -2053,44 +1805,8 @@ public class AwSettingsTest extends AndroidWebViewTestBase {
 
     @SmallTest
     @Feature({"AndroidWebView", "Preferences"})
-    public void testTextZoomIncognito() throws Throwable {
-        ViewPair views = createViews(INCOGNITO_VIEW, INCOGNITO_VIEW);
-        runPerViewSettingsTest(
-            new AwSettingsTextZoomTestHelper(views.getContents0(), views.getClient0()),
-            new AwSettingsTextZoomTestHelper(views.getContents1(), views.getClient1()));
-    }
-
-    @SmallTest
-    @Feature({"AndroidWebView", "Preferences"})
-    public void testTextZoomBoth() throws Throwable {
-        ViewPair views = createViews(NORMAL_VIEW, INCOGNITO_VIEW);
-        runPerViewSettingsTest(
-            new AwSettingsTextZoomTestHelper(views.getContents0(), views.getClient0()),
-            new AwSettingsTextZoomTestHelper(views.getContents1(), views.getClient1()));
-    }
-
-    @SmallTest
-    @Feature({"AndroidWebView", "Preferences"})
-    public void testJavaScriptPopupsNormal() throws Throwable {
-        ViewPair views = createViews(NORMAL_VIEW, NORMAL_VIEW);
-        runPerViewSettingsTest(
-            new AwSettingsJavaScriptPopupsTestHelper(views.getContents0(), views.getClient0()),
-            new AwSettingsJavaScriptPopupsTestHelper(views.getContents1(), views.getClient1()));
-    }
-
-    @SmallTest
-    @Feature({"AndroidWebView", "Preferences"})
-    public void testJavaScriptPopupsIncognito() throws Throwable {
-        ViewPair views = createViews(INCOGNITO_VIEW, INCOGNITO_VIEW);
-        runPerViewSettingsTest(
-            new AwSettingsJavaScriptPopupsTestHelper(views.getContents0(), views.getClient0()),
-            new AwSettingsJavaScriptPopupsTestHelper(views.getContents1(), views.getClient1()));
-    }
-
-    @SmallTest
-    @Feature({"AndroidWebView", "Preferences"})
-    public void testJavaScriptPopupsBoth() throws Throwable {
-        ViewPair views = createViews(NORMAL_VIEW, INCOGNITO_VIEW);
+    public void testJavaScriptPopupsWithTwoViews() throws Throwable {
+        ViewPair views = createViews();
         runPerViewSettingsTest(
             new AwSettingsJavaScriptPopupsTestHelper(views.getContents0(), views.getClient0()),
             new AwSettingsJavaScriptPopupsTestHelper(views.getContents1(), views.getClient1()));
@@ -2101,7 +1817,7 @@ public class AwSettingsTest extends AndroidWebViewTestBase {
     public void testCacheMode() throws Throwable {
         final TestAwContentsClient contentClient = new TestAwContentsClient();
         final AwTestContainerView testContainer =
-                createAwTestContainerViewOnMainSync(false, contentClient);
+                createAwTestContainerViewOnMainSync(contentClient);
         final AwContents awContents = testContainer.getAwContents();
         final AwSettings awSettings = getAwSettingsOnUiThread(testContainer.getAwContents());
         clearCacheOnUiThread(awContents, true);
@@ -2150,7 +1866,7 @@ public class AwSettingsTest extends AndroidWebViewTestBase {
     public void testCacheModeWithBlockedNetworkLoads() throws Throwable {
         final TestAwContentsClient contentClient = new TestAwContentsClient();
         final AwTestContainerView testContainer =
-                createAwTestContainerViewOnMainSync(false, contentClient);
+                createAwTestContainerViewOnMainSync(contentClient);
         final AwContents awContents = testContainer.getAwContents();
         final AwSettings awSettings = getAwSettingsOnUiThread(testContainer.getAwContents());
         clearCacheOnUiThread(awContents, true);
@@ -2195,42 +1911,8 @@ public class AwSettingsTest extends AndroidWebViewTestBase {
 
     @SmallTest
     @Feature({"AndroidWebView", "Preferences"})
-    public void testCacheModeNormal() throws Throwable {
-        ViewPair views = createViews(NORMAL_VIEW, NORMAL_VIEW);
-        TestWebServer webServer = null;
-        try {
-            webServer = new TestWebServer(false);
-            runPerViewSettingsTest(
-                    new AwSettingsCacheModeTestHelper(
-                            views.getContents0(), views.getClient0(), 0, webServer),
-                    new AwSettingsCacheModeTestHelper(
-                            views.getContents1(), views.getClient1(), 1, webServer));
-        } finally {
-            if (webServer != null) webServer.shutdown();
-        }
-    }
-
-    @SmallTest
-    @Feature({"AndroidWebView", "Preferences"})
-    public void testCacheModeIncognito() throws Throwable {
-        ViewPair views = createViews(INCOGNITO_VIEW, INCOGNITO_VIEW);
-        TestWebServer webServer = null;
-        try {
-            webServer = new TestWebServer(false);
-            runPerViewSettingsTest(
-                    new AwSettingsCacheModeTestHelper(
-                            views.getContents0(), views.getClient0(), 0, webServer),
-                    new AwSettingsCacheModeTestHelper(
-                            views.getContents1(), views.getClient1(), 1, webServer));
-        } finally {
-            if (webServer != null) webServer.shutdown();
-        }
-    }
-
-    @SmallTest
-    @Feature({"AndroidWebView", "Preferences"})
-    public void testCacheModeBoth() throws Throwable {
-        ViewPair views = createViews(NORMAL_VIEW, INCOGNITO_VIEW);
+    public void testCacheModeWithTwoViews() throws Throwable {
+        ViewPair views = createViews();
         TestWebServer webServer = null;
         try {
             webServer = new TestWebServer(false);
@@ -2301,7 +1983,7 @@ public class AwSettingsTest extends AndroidWebViewTestBase {
     public void testAppCache() throws Throwable {
         final TestAwContentsClient contentClient = new TestAwContentsClient();
         final AwTestContainerView testContainer =
-                createAwTestContainerViewOnMainSync(false, contentClient);
+                createAwTestContainerViewOnMainSync(contentClient);
         final AwContents awContents = testContainer.getAwContents();
         final ContentSettings settings = getContentSettingsOnUiThread(awContents);
         settings.setJavaScriptEnabled(true);
@@ -2333,13 +2015,18 @@ public class AwSettingsTest extends AndroidWebViewTestBase {
         }
     }
 
-    @SmallTest
-    @Feature({"AndroidWebView", "Preferences", "AppCache"})
-    public void testAppCacheNormal() throws Throwable {
+    /*
+     * @SmallTest
+     * @Feature({"AndroidWebView", "Preferences", "AppCache"})
+     * This test is flaky but the root cause is not found yet. See crbug.com/171765.
+     */
+    @DisabledTest
+    public void testAppCacheWithTwoViews() throws Throwable {
         // We don't use the test helper here, because making sure that AppCache
         // is disabled takes a lot of time, so running through the usual drill
         // will take about 20 seconds.
-        ViewPair views = createViews(NORMAL_VIEW, NORMAL_VIEW);
+        ViewPair views = createViews();
+
         ContentSettings settings0 = getContentSettingsOnUiThread(views.getContents0());
         settings0.setJavaScriptEnabled(true);
         settings0.setAppCachePath("whatever");
@@ -2388,6 +2075,76 @@ public class AwSettingsTest extends AndroidWebViewTestBase {
         } finally {
             if (webServer != null) webServer.shutdown();
         }
+    }
+
+    @SmallTest
+    @Feature({"AndroidWebView", "Preferences"})
+    public void testUseWideViewportWithTwoViews() throws Throwable {
+        ViewPair views = createViews();
+        runPerViewSettingsTest(
+            new AwSettingsUseWideViewportTestHelper(views.getContents0(), views.getClient0()),
+            new AwSettingsUseWideViewportTestHelper(views.getContents1(), views.getClient1()));
+    }
+
+    @SmallTest
+    @Feature({"AndroidWebView", "Preferences"})
+    public void testUseWideViewportLayoutWidth() throws Throwable {
+        final TestAwContentsClient contentClient = new TestAwContentsClient();
+        final AwTestContainerView testContainerView =
+                createAwTestContainerViewOnMainSync(contentClient);
+        final AwContents awContents = testContainerView.getAwContents();
+        ContentSettings settings = getContentSettingsOnUiThread(awContents);
+        CallbackHelper onPageFinishedHelper = contentClient.getOnPageFinishedHelper();
+
+        final String pageTemplate = "<html><head>%s</head>" +
+                "<body onload='document.title=document.body.clientWidth'></body></html>";
+        final String pageNoViewport = String.format(pageTemplate, "");
+        final String pageViewportDeviceWidth = String.format(
+                pageTemplate,
+                "<meta name='viewport' content='width=device-width' />");
+        final String viewportTagSpecifiedWidth = "3000";
+        final String pageViewportSpecifiedWidth = String.format(
+                pageTemplate,
+                "<meta name='viewport' content='width=" + viewportTagSpecifiedWidth + "' />");
+
+        DeviceDisplayInfo deviceInfo =
+                DeviceDisplayInfo.create(getInstrumentation().getTargetContext());
+        int displayWidth = (int) (deviceInfo.getDisplayWidth() / deviceInfo.getDIPScale());
+
+        settings.setJavaScriptEnabled(true);
+        assertFalse(settings.getUseWideViewPort());
+        // When UseWideViewPort is off, "meta viewport" tags are ignored,
+        // and the layout width is set to device width in CSS pixels.
+        // Thus, all 3 pages will have the same body width.
+        loadDataSync(awContents, onPageFinishedHelper, pageNoViewport, "text/html", false);
+        int actualWidth = Integer.parseInt(getTitleOnUiThread(awContents));
+        // Avoid rounding errors.
+        assertTrue("Expected: " + displayWidth + ", Actual: " + actualWidth,
+                Math.abs(displayWidth - actualWidth) <= 1);
+        loadDataSync(awContents, onPageFinishedHelper, pageViewportDeviceWidth, "text/html", false);
+        actualWidth = Integer.parseInt(getTitleOnUiThread(awContents));
+        assertTrue("Expected: " + displayWidth + ", Actual: " + actualWidth,
+                Math.abs(displayWidth - actualWidth) <= 1);
+        loadDataSync(
+                awContents, onPageFinishedHelper, pageViewportSpecifiedWidth, "text/html", false);
+        actualWidth = Integer.parseInt(getTitleOnUiThread(awContents));
+        assertTrue("Expected: " + displayWidth + ", Actual: " + actualWidth,
+                Math.abs(displayWidth - actualWidth) <= 1);
+
+        settings.setUseWideViewPort(true);
+        // When UseWideViewPort is on, "meta viewport" tag is used.
+        // If there is no viewport tag, or width isn't specified,
+        // then layout width is set to max(980, <device-width-in-DIP-pixels>)
+        loadDataSync(awContents, onPageFinishedHelper, pageNoViewport, "text/html", false);
+        actualWidth = Integer.parseInt(getTitleOnUiThread(awContents));
+        assertTrue("Expected: >= 980 , Actual: " + actualWidth, actualWidth >= 980);
+        loadDataSync(awContents, onPageFinishedHelper, pageViewportDeviceWidth, "text/html", false);
+        actualWidth = Integer.parseInt(getTitleOnUiThread(awContents));
+        assertTrue("Expected: " + displayWidth + ", Actual: " + actualWidth,
+                Math.abs(displayWidth - actualWidth) <= 1);
+        loadDataSync(
+                awContents, onPageFinishedHelper, pageViewportSpecifiedWidth, "text/html", false);
+        assertEquals(viewportTagSpecifiedWidth, getTitleOnUiThread(awContents));
     }
 
     static class ViewPair {
@@ -2470,17 +2227,13 @@ public class AwSettingsTest extends AndroidWebViewTestBase {
         helper1.ensureSettingHasInitialValue();
     }
 
-    private ViewPair createViews(
-            boolean firstIsIncognito,
-            boolean secondIsIncognito) throws Throwable {
+    private ViewPair createViews() throws Throwable {
         TestAwContentsClient client0 = new TestAwContentsClient();
         TestAwContentsClient client1 = new TestAwContentsClient();
         return new ViewPair(
-            createAwTestContainerViewOnMainSync(
-                firstIsIncognito, client0).getAwContents(),
+            createAwTestContainerViewOnMainSync(client0).getAwContents(),
             client0,
-            createAwTestContainerViewOnMainSync(
-                secondIsIncognito, client1).getAwContents(),
+            createAwTestContainerViewOnMainSync(client1).getAwContents(),
             client1);
     }
 

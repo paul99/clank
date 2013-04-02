@@ -11,6 +11,7 @@
 #include "base/memory/scoped_ptr.h"
 #include "base/time.h"
 #include "chrome/browser/net/dns_probe_job.h"
+#include "chrome/common/net/net_error_info.h"
 #include "net/base/network_change_notifier.h"
 
 namespace net {
@@ -21,14 +22,8 @@ namespace chrome_browser_net {
 
 class DnsProbeService : public net::NetworkChangeNotifier::IPAddressObserver {
  public:
-  enum Result {
-    PROBE_UNKNOWN,
-    PROBE_NO_INTERNET,
-    PROBE_BAD_CONFIG,
-    PROBE_NXDOMAIN,
-    MAX_RESULT
-  };
-  typedef base::Callback<void(Result result)> CallbackType;
+  typedef base::Callback<void(chrome_common_net::DnsProbeResult result)>
+      CallbackType;
 
   DnsProbeService();
   virtual ~DnsProbeService();
@@ -54,7 +49,7 @@ class DnsProbeService : public net::NetworkChangeNotifier::IPAddressObserver {
   void CallCallbacks();
 
   void OnProbeJobComplete(DnsProbeJob* job, DnsProbeJob::Result result);
-  Result EvaluateResults() const;
+  chrome_common_net::DnsProbeResult EvaluateResults() const;
   void HistogramProbes() const;
 
   // These are expected to be overridden by tests to return mock jobs.
@@ -76,8 +71,15 @@ class DnsProbeService : public net::NetworkChangeNotifier::IPAddressObserver {
   DnsProbeJob::Result public_result_;
   std::vector<CallbackType> callbacks_;
   State state_;
-  Result result_;
+  chrome_common_net::DnsProbeResult result_;
   base::Time probe_start_time_;
+  // How many DNS request attempts the probe jobs will make before giving up
+  // (Overrides the attempts field in the system DnsConfig.)
+  const int dns_attempts_;
+  // How many nameservers the system config has.
+  int system_nameserver_count_;
+  // Whether the only system nameserver is 127.0.0.1.
+  bool system_is_localhost_;
 
   DISALLOW_COPY_AND_ASSIGN(DnsProbeService);
 };

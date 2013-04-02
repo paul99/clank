@@ -10,10 +10,10 @@
 #include "base/string_number_conversions.h"
 #include "base/stringprintf.h"
 #include "base/utf_string_conversions.h"
-#include "content/renderer/media/media_stream_extra_data.h"
-#include "content/renderer/media/media_stream_source_extra_data.h"
 #include "content/renderer/media/media_stream_dependency_factory.h"
 #include "content/renderer/media/media_stream_dispatcher.h"
+#include "content/renderer/media/media_stream_extra_data.h"
+#include "content/renderer/media/media_stream_source_extra_data.h"
 #include "content/renderer/media/rtc_video_decoder.h"
 #include "content/renderer/media/rtc_video_renderer.h"
 #include "content/renderer/media/video_capture_impl_manager.h"
@@ -22,13 +22,13 @@
 #include "content/renderer/media/webrtc_local_audio_renderer.h"
 #include "content/renderer/media/webrtc_uma_histograms.h"
 #include "third_party/WebKit/Source/Platform/chromium/public/WebMediaConstraints.h"
+#include "third_party/WebKit/Source/Platform/chromium/public/WebMediaStreamSource.h"
+#include "third_party/WebKit/Source/Platform/chromium/public/WebMediaStreamTrack.h"
+#include "third_party/WebKit/Source/Platform/chromium/public/WebVector.h"
 #include "third_party/WebKit/Source/WebKit/chromium/public/WebDocument.h"
 #include "third_party/WebKit/Source/WebKit/chromium/public/WebFrame.h"
 #include "third_party/WebKit/Source/WebKit/chromium/public/WebMediaStreamRegistry.h"
 #include "third_party/WebKit/Source/WebKit/chromium/public/WebSecurityOrigin.h"
-#include "third_party/WebKit/Source/WebKit/chromium/public/platform/WebMediaStreamComponent.h"
-#include "third_party/WebKit/Source/WebKit/chromium/public/platform/WebMediaStreamSource.h"
-#include "third_party/WebKit/Source/WebKit/chromium/public/platform/WebVector.h"
 #include "webkit/media/media_stream_audio_renderer.h"
 
 namespace content {
@@ -44,58 +44,32 @@ std::string GetMandatoryStreamConstraint(
   return UTF16ToUTF8(value);
 }
 
-void UpdateOptionsIfTabMediaRequest(
+void UpdateRequestOptions(
     const WebKit::WebUserMediaRequest& user_media_request,
     StreamOptions* options) {
-  if (options->audio_type != content::MEDIA_NO_SERVICE &&
-      GetMandatoryStreamConstraint(user_media_request.audioConstraints(),
-                                   kMediaStreamSource) ==
-          kMediaStreamSourceTab) {
-    options->audio_type = content::MEDIA_TAB_AUDIO_CAPTURE;
-    options->audio_device_id = GetMandatoryStreamConstraint(
-        user_media_request.audioConstraints(),
-        kMediaStreamSourceId);
+  if (options->audio_type != content::MEDIA_NO_SERVICE) {
+    std::string audio_stream_source = GetMandatoryStreamConstraint(
+        user_media_request.audioConstraints(), kMediaStreamSource);
+    if (audio_stream_source == kMediaStreamSourceTab) {
+      options->audio_type = content::MEDIA_TAB_AUDIO_CAPTURE;
+      options->audio_device_id = GetMandatoryStreamConstraint(
+          user_media_request.audioConstraints(),
+          kMediaStreamSourceId);
+    }
   }
 
-  if (options->video_type != content::MEDIA_NO_SERVICE &&
-      GetMandatoryStreamConstraint(user_media_request.videoConstraints(),
-                                   kMediaStreamSource) ==
-          kMediaStreamSourceTab) {
-    options->video_type = content::MEDIA_TAB_VIDEO_CAPTURE;
-    options->video_device_id = GetMandatoryStreamConstraint(
-        user_media_request.videoConstraints(),
-        kMediaStreamSourceId);
+  if (options->video_type != content::MEDIA_NO_SERVICE) {
+    std::string video_stream_source = GetMandatoryStreamConstraint(
+        user_media_request.videoConstraints(), kMediaStreamSource);
+    if (video_stream_source == kMediaStreamSourceTab) {
+      options->video_type = content::MEDIA_TAB_VIDEO_CAPTURE;
+      options->video_device_id = GetMandatoryStreamConstraint(
+          user_media_request.videoConstraints(),
+          kMediaStreamSourceId);
+    } else if (video_stream_source == kMediaStreamSourceScreen) {
+      options->video_type = content::MEDIA_SCREEN_VIDEO_CAPTURE;
+    }
   }
-}
-
-// Get session ID for the selected microphone to ensure that we start
-// capturing audio using the correct input device.
-static int GetSessionId(const WebKit::WebMediaStreamDescriptor& descriptor) {
-  WebKit::WebVector<WebKit::WebMediaStreamComponent> audio_components;
-  descriptor.audioSources(audio_components);
-  if (audio_components.size() != 1) {
-    // TODO(henrika): add support for more than one audio track.
-    NOTIMPLEMENTED();
-    return -1;
-  }
-
-  if (!audio_components[0].isEnabled()) {
-    DVLOG(1) << "audio track is disabled";
-    return -1;
-  }
-
-  const WebKit::WebMediaStreamSource& source = audio_components[0].source();
-  MediaStreamSourceExtraData* source_data =
-      static_cast<MediaStreamSourceExtraData*>(source.extraData());
-  if (!source_data) {
-    // TODO(henrika): Implement support for sources from remote MediaStreams.
-    NOTIMPLEMENTED();
-    return -1;
-  }
-  DVLOG(1) << "local audio track source name: "
-           << source_data->device_info().device.name;
-
-  return source_data->device_info().session_id;
 }
 
 static int g_next_request_id  = 0;
@@ -124,7 +98,7 @@ void CreateWebKitSourceVector(
 }
 
 webrtc::MediaStreamInterface* GetNativeMediaStream(
-    const WebKit::WebMediaStreamDescriptor& descriptor) {
+    const WebKit::WebMediaStream& descriptor) {
   content::MediaStreamExtraData* extra_data =
       static_cast<content::MediaStreamExtraData*>(descriptor.extraData());
   if (!extra_data)
@@ -200,7 +174,7 @@ void MediaStreamImpl::requestUserMedia(
     frame = user_media_request.ownerDocument().frame();
     DCHECK(frame);
 
-    UpdateOptionsIfTabMediaRequest(user_media_request, &options);
+    UpdateRequestOptions(user_media_request, &options);
   }
 
   DVLOG(1) << "MediaStreamImpl::requestUserMedia(" << request_id << ", [ "
@@ -230,7 +204,7 @@ void MediaStreamImpl::cancelUserMediaRequest(
   }
 }
 
-WebKit::WebMediaStreamDescriptor MediaStreamImpl::GetMediaStream(
+WebKit::WebMediaStream MediaStreamImpl::GetMediaStream(
     const GURL& url) {
   return WebKit::WebMediaStreamRegistry::lookupMediaStreamDescriptor(url);
 }
@@ -241,7 +215,7 @@ bool MediaStreamImpl::IsMediaStream(const GURL& url) {
 
 // static
 bool MediaStreamImpl::CheckMediaStream(const GURL& url) {
-  WebKit::WebMediaStreamDescriptor descriptor(
+  WebKit::WebMediaStream descriptor(
       WebKit::WebMediaStreamRegistry::lookupMediaStreamDescriptor(url));
 
   if (descriptor.isNull() || !descriptor.extraData())
@@ -259,7 +233,7 @@ MediaStreamImpl::GetVideoFrameProvider(
     const base::Closure& error_cb,
     const webkit_media::VideoFrameProvider::RepaintCB& repaint_cb) {
   DCHECK(CalledOnValidThread());
-  WebKit::WebMediaStreamDescriptor descriptor(GetMediaStream(url));
+  WebKit::WebMediaStream descriptor(GetMediaStream(url));
 
   if (descriptor.isNull() || !descriptor.extraData())
     return NULL;  // This is not a valid stream.
@@ -278,7 +252,7 @@ scoped_refptr<media::VideoDecoder> MediaStreamImpl::GetVideoDecoder(
     const GURL& url,
     const scoped_refptr<base::MessageLoopProxy>& message_loop) {
   DCHECK(CalledOnValidThread());
-  WebKit::WebMediaStreamDescriptor descriptor(GetMediaStream(url));
+  WebKit::WebMediaStream descriptor(GetMediaStream(url));
 
   if (descriptor.isNull() || !descriptor.extraData())
     return NULL;  // This is not a valid stream.
@@ -296,7 +270,7 @@ scoped_refptr<media::VideoDecoder> MediaStreamImpl::GetVideoDecoder(
 scoped_refptr<webkit_media::MediaStreamAudioRenderer>
 MediaStreamImpl::GetAudioRenderer(const GURL& url) {
   DCHECK(CalledOnValidThread());
-  WebKit::WebMediaStreamDescriptor descriptor(GetMediaStream(url));
+  WebKit::WebMediaStream descriptor(GetMediaStream(url));
 
   if (descriptor.isNull() || !descriptor.extraData())
     return NULL;  // This is not a valid stream.
@@ -308,6 +282,10 @@ MediaStreamImpl::GetAudioRenderer(const GURL& url) {
       static_cast<MediaStreamExtraData*>(descriptor.extraData());
 
   if (extra_data->remote_stream()) {
+    if (!extra_data->remote_stream()->audio_tracks() ||
+        extra_data->remote_stream()->audio_tracks()->count() == 0)
+      return NULL;
+
     WebRtcAudioDeviceImpl* audio_device =
         dependency_factory_->GetWebRtcAudioDevice();
 
@@ -322,18 +300,8 @@ MediaStreamImpl::GetAudioRenderer(const GURL& url) {
 
     return renderer;
   } else if (extra_data->local_stream()) {
-    DVLOG(1) << "creating local audio renderer for stream:"
-             << extra_data->local_stream()->label();
-
-    // Get session ID for the local media stream.
-    int session_id = GetSessionId(descriptor);
-    if (session_id == -1)
-      return NULL;
-
-    // Create the local audio renderer using the specified session ID.
-    scoped_refptr<WebRtcLocalAudioRenderer> local_renderer =
-        CreateLocalAudioRenderer(session_id);
-    return local_renderer;
+    // Create the local audio renderer if the stream contains audio tracks.
+    return CreateLocalAudioRenderer(extra_data->local_stream());
   }
 
   NOTREACHED();
@@ -348,6 +316,7 @@ void MediaStreamImpl::OnStreamGenerated(
     const StreamDeviceInfoArray& audio_array,
     const StreamDeviceInfoArray& video_array) {
   DCHECK(CalledOnValidThread());
+  DVLOG(1) << "MediaStreamImpl::OnStreamGenerated stream:" << label;
 
   UserMediaRequestInfo* request_info = FindUserMediaRequestInfo(request_id);
   if (!request_info) {
@@ -373,7 +342,7 @@ void MediaStreamImpl::OnStreamGenerated(
 
   WebKit::WebUserMediaRequest* request = &(request_info->request);
   WebKit::WebString webkit_label = UTF8ToUTF16(label);
-  WebKit::WebMediaStreamDescriptor* description = &(request_info->descriptor);
+  WebKit::WebMediaStream* description = &(request_info->descriptor);
 
   description->initialize(webkit_label, audio_source_vector,
                           video_source_vector);
@@ -412,8 +381,10 @@ void MediaStreamImpl::OnStreamGenerationFailed(int request_id) {
 // Callback from MediaStreamDependencyFactory when the sources in |description|
 // have been generated.
 void MediaStreamImpl::OnCreateNativeSourcesComplete(
-    WebKit::WebMediaStreamDescriptor* description,
+    WebKit::WebMediaStream* description,
     bool request_succeeded) {
+  DVLOG(1) << "MediaStreamImpl::OnCreateNativeSourcesComplete stream:"
+           << UTF16ToUTF8(description->label());
   UserMediaRequestInfo* request_info = FindUserMediaRequestInfo(description);
   if (!request_info) {
     // This can happen if the request is canceled or the frame reloads while
@@ -465,7 +436,7 @@ void MediaStreamImpl::OnDeviceOpenFailed(int request_id) {
 }
 
 void MediaStreamImpl::CompleteGetUserMediaRequest(
-    const WebKit::WebMediaStreamDescriptor& stream,
+    const WebKit::WebMediaStream& stream,
     WebKit::WebUserMediaRequest* request_info,
     bool request_succeeded) {
   if (request_succeeded) {
@@ -508,7 +479,7 @@ MediaStreamImpl::FindUserMediaRequestInfo(const std::string& label) {
 
 MediaStreamImpl::UserMediaRequestInfo*
 MediaStreamImpl::FindUserMediaRequestInfo(
-    WebKit::WebMediaStreamDescriptor* descriptor) {
+    WebKit::WebMediaStream* descriptor) {
   UserMediaRequests::iterator it = user_media_requests_.begin();
   for (; it != user_media_requests_.end(); ++it) {
     if (&((*it)->descriptor) == descriptor)
@@ -600,18 +571,19 @@ scoped_refptr<WebRtcAudioRenderer> MediaStreamImpl::CreateRemoteAudioRenderer(
 }
 
 scoped_refptr<WebRtcLocalAudioRenderer>
-MediaStreamImpl::CreateLocalAudioRenderer(int session_id) {
-  DCHECK_NE(session_id, -1);
-  // Ensure that the existing capturer reads data from the selected microphone.
+MediaStreamImpl::CreateLocalAudioRenderer(
+    webrtc::MediaStreamInterface* stream) {
+  if (!stream->audio_tracks() || stream->audio_tracks()->count() == 0)
+    return NULL;
+
+  DVLOG(1) << "MediaStreamImpl::CreateLocalAudioRenderer label:"
+           << stream->label();
+
   scoped_refptr<WebRtcAudioCapturer> source =
       dependency_factory_->GetWebRtcAudioDevice()->capturer();
   if (!source) {
-    // The WebRtcAudioCapturer instance can be NULL e.g. if an unsupported
-    // sample rate is used.
-    // TODO(henrika): extend support of capture sample rates.
     return NULL;
   }
-  source->SetDevice(session_id);
 
   // Create a new WebRtcLocalAudioRenderer instance and connect it to the
   // existing WebRtcAudioCapturer so that the renderer can use it as source.
@@ -621,6 +593,11 @@ MediaStreamImpl::CreateLocalAudioRenderer(int session_id) {
 MediaStreamSourceExtraData::MediaStreamSourceExtraData(
     const StreamDeviceInfo& device_info)
     : device_info_(device_info) {
+}
+
+MediaStreamSourceExtraData::MediaStreamSourceExtraData(
+    media::AudioCapturerSource* source)
+    : audio_source_(source)  {
 }
 
 MediaStreamSourceExtraData::~MediaStreamSourceExtraData() {}

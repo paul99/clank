@@ -19,7 +19,7 @@
 #include "content/browser/browser_plugin/browser_plugin_embedder.h"
 #include "content/browser/browser_plugin/browser_plugin_guest.h"
 #include "content/browser/child_process_security_policy_impl.h"
-#include "content/browser/debugger/devtools_manager_impl.h"
+#include "content/browser/devtools/devtools_manager_impl.h"
 #include "content/browser/dom_storage/dom_storage_context_impl.h"
 #include "content/browser/dom_storage/session_storage_namespace_impl.h"
 #include "content/browser/download/download_stats.h"
@@ -28,7 +28,6 @@
 #include "content/browser/gpu/gpu_data_manager_impl.h"
 #include "content/browser/gpu/gpu_process_host.h"
 #include "content/browser/host_zoom_map_impl.h"
-#include "content/browser/intents/web_intents_dispatcher_impl.h"
 #include "content/browser/loader/resource_dispatcher_host_impl.h"
 #include "content/browser/renderer_host/render_process_host_impl.h"
 #include "content/browser/renderer_host/render_view_host_impl.h"
@@ -37,22 +36,24 @@
 #include "content/browser/web_contents/interstitial_page_impl.h"
 #include "content/browser/web_contents/navigation_entry_impl.h"
 #include "content/browser/web_contents/web_contents_view_guest.h"
+#include "content/browser/webui/generic_handler.h"
+#include "content/browser/webui/web_ui_controller_factory_registry.h"
 #include "content/browser/webui/web_ui_impl.h"
 #include "content/common/browser_plugin_messages.h"
 #include "content/common/icon_messages.h"
-#include "content/common/intents_messages.h"
 #include "content/common/ssl_status_serialization.h"
 #include "content/common/view_messages.h"
 #include "content/port/browser/render_view_host_delegate_view.h"
 #include "content/port/browser/render_widget_host_view_port.h"
 #include "content/public/browser/browser_context.h"
 #include "content/public/browser/color_chooser.h"
+#include "content/public/browser/compositor_util.h"
 #include "content/public/browser/content_browser_client.h"
-#include "content/public/browser/devtools_agent_host_registry.h"
+#include "content/public/browser/devtools_agent_host.h"
 #include "content/public/browser/download_manager.h"
 #include "content/public/browser/download_url_parameters.h"
 #include "content/public/browser/invalidate_type.h"
-#include "content/public/browser/javascript_dialogs.h"
+#include "content/public/browser/javascript_dialog_manager.h"
 #include "content/public/browser/load_from_memory_cache_details.h"
 #include "content/public/browser/load_notification_details.h"
 #include "content/public/browser/navigation_details.h"
@@ -64,7 +65,6 @@
 #include "content/public/browser/web_contents_delegate.h"
 #include "content/public/browser/web_contents_observer.h"
 #include "content/public/browser/web_contents_view.h"
-#include "content/public/browser/web_ui_controller_factory.h"
 #include "content/public/common/bindings_policy.h"
 #include "content/public/common/content_constants.h"
 #include "content/public/common/content_restriction.h"
@@ -76,24 +76,25 @@
 #include "net/url_request/url_request_context_getter.h"
 #include "third_party/WebKit/Source/WebKit/chromium/public/WebView.h"
 #include "ui/base/layout.h"
-#include "ui/base/touch/touch_device_win.h"
+#include "ui/base/touch/touch_device.h"
 #include "ui/base/ui_base_switches.h"
 #include "ui/gfx/display.h"
 #include "ui/gfx/screen.h"
 #include "ui/gl/gl_switches.h"
-#include "webkit/glue/web_intent_data.h"
-#include "webkit/glue/web_intent_service_data.h"
 #include "webkit/glue/webpreferences.h"
+
+#if defined(OS_ANDROID)
+#include "content/browser/android/date_time_chooser_android.h"
+#endif
 
 #if defined(OS_MACOSX)
 #include "base/mac/foundation_util.h"
 #include "ui/surface/io_surface_support_mac.h"
 #endif
 
-#if defined(USE_AURA) && defined(USE_X11)
-#include "ui/aura/window.h"
-#include "ui/base/touch/touch_factory.h"
-#endif // defined (USE_AURA) && defined(USE_X11)
+#if defined(ENABLE_JAVA_BRIDGE)
+#include "content/browser/renderer_host/java/java_bridge_dispatcher_host_manager.h"
+#endif
 
 // Cross-Site Navigations
 //
@@ -160,16 +161,6 @@ static int StartDownload(content::RenderViewHost* rvh,
                                         image_size));
   return g_next_favicon_download_id;
 }
-
-#if defined(OS_WIN)
-
-BOOL CALLBACK InvalidateWindow(HWND hwnd, LPARAM lparam) {
-  // Note: erase is required to properly paint some widgets borders. This can
-  // be seen with textfields.
-  InvalidateRect(hwnd, NULL, TRUE);
-  return TRUE;
-}
-#endif
 
 ViewMsg_Navigate_Type::Value GetNavigationType(
     BrowserContext* browser_context, const NavigationEntryImpl& entry,
@@ -245,6 +236,7 @@ void MakeNavigateParams(const NavigationEntryImpl& entry,
   }
 
   params->can_load_local_resources = entry.GetCanLoadLocalResources();
+  params->frame_to_navigate = entry.GetFrameToNavigate();
 
   if (delegate)
     delegate->AddNavigationHeaders(params->url, &params->extra_headers);
@@ -308,13 +300,11 @@ WebContentsImpl::WebContentsImpl(
       upload_size_(0),
       upload_position_(0),
       displayed_insecure_content_(false),
-      capturing_contents_(false),
+      capturer_count_(0),
+      should_normally_be_visible_(true),
       is_being_destroyed_(false),
       notify_disconnection_(false),
-      dialog_creator_(NULL),
-#if defined(OS_WIN)
-      message_box_active_(CreateEvent(NULL, TRUE, FALSE, NULL)),
-#endif
+      dialog_manager_(NULL),
       is_showing_before_unload_dialog_(false),
       opener_web_ui_type_(WebUI::kNoWebUI),
       closed_by_user_gesture_(false),
@@ -322,7 +312,8 @@ WebContentsImpl::WebContentsImpl(
       maximum_zoom_percent_(static_cast<int>(kMaximumZoomFactor * 100)),
       temporary_zoom_settings_(false),
       content_restrictions_(0),
-      color_chooser_(NULL) {
+      color_chooser_(NULL),
+      fullscreen_widget_routing_id_(MSG_ROUTING_NONE) {
 }
 
 WebContentsImpl::~WebContentsImpl() {
@@ -335,8 +326,8 @@ WebContentsImpl::~WebContentsImpl() {
   created_widgets_.clear();
 
   // Clear out any JavaScript state.
-  if (dialog_creator_)
-    dialog_creator_->ResetJavaScriptState(this);
+  if (dialog_manager_)
+    dialog_manager_->ResetJavaScriptState(this);
 
   if (color_chooser_)
     color_chooser_->End();
@@ -390,10 +381,13 @@ WebContentsImpl* WebContentsImpl::CreateWithOpener(
 WebContentsImpl* WebContentsImpl::CreateGuest(
     BrowserContext* browser_context,
     SiteInstance* site_instance,
+    int routing_id,
+    WebContentsImpl* opener_web_contents,
     int guest_instance_id,
     const BrowserPluginHostMsg_CreateGuest_Params& params) {
 
-  WebContentsImpl* new_contents = new WebContentsImpl(browser_context, NULL);
+  WebContentsImpl* new_contents = new WebContentsImpl(browser_context,
+                                                      opener_web_contents);
 
   // This makes |new_contents| act as a guest.
   // For more info, see comment above class BrowserPluginGuest.
@@ -403,9 +397,14 @@ WebContentsImpl* WebContentsImpl::CreateGuest(
         new_contents,
         params));
 
-  new_contents->Init(WebContents::CreateParams(browser_context, site_instance));
-  new_contents->browser_plugin_guest_->InstallHelper(
-      new_contents->GetRenderViewHost());
+  WebContents::CreateParams create_params(browser_context, site_instance);
+  create_params.routing_id = routing_id;
+  new_contents->Init(create_params);
+
+  // We are instantiating a WebContents for browser plugin. Set its subframe bit
+  // to true.
+  static_cast<RenderViewHostImpl*>(
+      new_contents->GetRenderViewHost())->set_is_subframe(true);
 
   return new_contents;
 }
@@ -462,6 +461,9 @@ WebPreferences WebContentsImpl::GetWebkitPrefs(RenderViewHost* rvh,
   prefs.flash_stage3d_enabled =
       GpuProcessHost::gpu_enabled() &&
       !command_line.HasSwitch(switches::kDisableFlashStage3d);
+  prefs.flash_stage3d_baseline_enabled =
+      GpuProcessHost::gpu_enabled() &&
+      !command_line.HasSwitch(switches::kDisableFlashStage3d);
 
   prefs.gl_multisampling_enabled =
       !command_line.HasSwitch(switches::kDisableGLMultisampling);
@@ -477,8 +479,13 @@ WebPreferences WebContentsImpl::GetWebkitPrefs(RenderViewHost* rvh,
       command_line.HasSwitch(switches::kShowCompositedLayerTree);
   prefs.show_fps_counter =
       command_line.HasSwitch(switches::kShowFPSCounter);
-  prefs.accelerated_compositing_for_overflow_scroll_enabled =
-      command_line.HasSwitch(switches::kEnableAcceleratedOverflowScroll);
+
+  prefs.accelerated_compositing_for_overflow_scroll_enabled = false;
+  if (command_line.HasSwitch(switches::kEnableAcceleratedOverflowScroll))
+    prefs.accelerated_compositing_for_overflow_scroll_enabled = true;
+  if (command_line.HasSwitch(switches::kDisableAcceleratedOverflowScroll))
+    prefs.accelerated_compositing_for_overflow_scroll_enabled = false;
+
   prefs.accelerated_compositing_for_scrollable_frames_enabled =
       command_line.HasSwitch(switches::kEnableAcceleratedScrollableFrames);
   prefs.composited_scrolling_for_frames_enabled =
@@ -490,11 +497,13 @@ WebPreferences WebContentsImpl::GetWebkitPrefs(RenderViewHost* rvh,
   prefs.accelerated_compositing_enabled =
       GpuProcessHost::gpu_enabled() &&
       !command_line.HasSwitch(switches::kDisableAcceleratedCompositing);
+#if defined(OS_WIN) && defined(ENABLE_HIDPI)
+  prefs.force_compositing_mode = true;
+#else
   prefs.force_compositing_mode =
-      command_line.HasSwitch(switches::kForceCompositingMode) &&
+      content::IsForceCompositingModeEnabled() &&
       !command_line.HasSwitch(switches::kDisableForceCompositingMode);
-  prefs.fixed_position_compositing_enabled =
-      command_line.HasSwitch(switches::kEnableCompositingForFixedPosition);
+#endif
   prefs.accelerated_2d_canvas_enabled =
       GpuProcessHost::gpu_enabled() &&
       !command_line.HasSwitch(switches::kDisableAccelerated2dCanvas);
@@ -525,18 +534,11 @@ WebPreferences WebContentsImpl::GetWebkitPrefs(RenderViewHost* rvh,
       command_line.HasSwitch(switches::kEnableExperimentalWebKitFeatures);
   prefs.css_grid_layout_enabled =
       command_line.HasSwitch(switches::kEnableExperimentalWebKitFeatures);
+  prefs.record_rendering_stats =
+      command_line.HasSwitch(switches::kEnableGpuBenchmarking);
 
   bool touch_device_present = false;
-#if defined(USE_AURA) && defined(USE_X11)
-  touch_device_present =
-      ui::TouchFactory::GetInstance()->IsTouchDevicePresent();
-#endif
-#if defined(OS_WIN)
   touch_device_present = ui::IsTouchDevicePresent();
-#endif
-#if defined(OS_ANDROID)
-  touch_device_present = true;
-#endif
   const std::string touch_enabled_switch =
       command_line.HasSwitch(switches::kTouchEvents) ?
       command_line.GetSwitchValueASCII(switches::kTouchEvents) :
@@ -559,10 +561,9 @@ WebPreferences WebContentsImpl::GetWebkitPrefs(RenderViewHost* rvh,
    prefs.touch_adjustment_enabled =
        !command_line.HasSwitch(switches::kDisableTouchAdjustment);
 
-#if defined(OS_MACOSX)
+#if defined(OS_MACOSX) || defined(OS_CHROMEOS)
   bool default_enable_scroll_animator = true;
 #else
-  // On CrOS, the launcher always passes in the --enable flag.
   bool default_enable_scroll_animator = false;
 #endif
   prefs.enable_scroll_animator = default_enable_scroll_animator;
@@ -584,8 +585,12 @@ WebPreferences WebContentsImpl::GetWebkitPrefs(RenderViewHost* rvh,
       prefs.experimental_webgl_enabled = false;
     if (blacklist_type & GPU_FEATURE_TYPE_FLASH3D)
       prefs.flash_3d_enabled = false;
-    if (blacklist_type & GPU_FEATURE_TYPE_FLASH_STAGE3D)
+    if (blacklist_type & GPU_FEATURE_TYPE_FLASH_STAGE3D) {
       prefs.flash_stage3d_enabled = false;
+      prefs.flash_stage3d_baseline_enabled = false;
+    }
+    if (blacklist_type & GPU_FEATURE_TYPE_FLASH_STAGE3D_BASELINE)
+      prefs.flash_stage3d_baseline_enabled = false;
     if (blacklist_type & GPU_FEATURE_TYPE_ACCELERATED_2D_CANVAS)
       prefs.accelerated_2d_canvas_enabled = false;
     if (blacklist_type & GPU_FEATURE_TYPE_MULTISAMPLING)
@@ -615,16 +620,23 @@ WebPreferences WebContentsImpl::GetWebkitPrefs(RenderViewHost* rvh,
 
   prefs.is_online = !net::NetworkChangeNotifier::IsOffline();
 
-  // Force accelerated compositing and 2d canvas off for chrome:, about: and
-  // chrome-devtools: pages (unless it's specifically allowed).
-  if ((url.SchemeIs(chrome::kChromeDevToolsScheme) ||
-      url.SchemeIs(chrome::kChromeUIScheme) ||
+#if defined(OS_WIN) && defined(ENABLE_HIDPI)
+  prefs.accelerated_compositing_enabled = true;
+  prefs.accelerated_2d_canvas_enabled = true;
+#else
+  // Force accelerated compositing and 2d canvas off for chrome: and about:
+  // pages (unless it's specifically allowed).
+  if ((url.SchemeIs(chrome::kChromeUIScheme) ||
       (url.SchemeIs(chrome::kAboutScheme) &&
        url.spec() != chrome::kAboutBlankURL)) &&
       !command_line.HasSwitch(switches::kAllowWebUICompositing)) {
     prefs.accelerated_compositing_enabled = false;
     prefs.accelerated_2d_canvas_enabled = false;
   }
+#endif
+
+  if (url.SchemeIs(chrome::kChromeDevToolsScheme))
+    prefs.show_fps_counter = false;
 
   if (command_line.HasSwitch(switches::kDefaultTileWidth))
     prefs.default_tile_width =
@@ -639,16 +651,9 @@ WebPreferences WebContentsImpl::GetWebkitPrefs(RenderViewHost* rvh,
     prefs.max_untiled_layer_height =
         GetSwitchValueAsInt(command_line, switches::kMaxUntiledLayerHeight, 1);
 
-  // TODO(scottmg): Probably Native is wrong: http://crbug.com/133312
-  if (gfx::Screen::GetNativeScreen()->IsDIPEnabled()) {
-    // Only apply when using DIP coordinate system as this setting interferes
-    // with fixed layout mode.
-    // TODO(danakj): Fixed layout mode is going away, so turn this on always.
-    prefs.apply_default_device_scale_factor_in_compositor = true;
-  }
+  prefs.apply_default_device_scale_factor_in_compositor = true;
+  prefs.apply_page_scale_factor_in_compositor = true;
 
-  prefs.apply_page_scale_factor_in_compositor =
-      command_line.HasSwitch(switches::kEnablePinch);
   prefs.per_tile_painting_enabled =
       command_line.HasSwitch(cc::switches::kEnablePerTilePainting);
   prefs.accelerated_animation_enabled =
@@ -662,17 +667,31 @@ WebPreferences WebContentsImpl::GetWebkitPrefs(RenderViewHost* rvh,
 
   prefs.number_of_cpu_cores = base::SysInfo::NumberOfProcessors();
 
+  prefs.viewport_enabled = command_line.HasSwitch(switches::kEnableViewport);
+
   prefs.deferred_image_decoding_enabled =
-      command_line.HasSwitch(switches::kEnableDeferredImageDecoding);
+      command_line.HasSwitch(switches::kEnableDeferredImageDecoding) ||
+      cc::switches::IsImplSidePaintingEnabled();
 
   GetContentClient()->browser()->OverrideWebkitPrefs(rvh, url, &prefs);
 
   // Disable compositing in guests until we have compositing path implemented
   // for guests.
-  if (rvh->GetProcess()->IsGuest()) {
+  bool guest_compositing_enabled = command_line.HasSwitch(
+      switches::kEnableBrowserPluginCompositing);
+  if (rvh->GetProcess()->IsGuest() && !guest_compositing_enabled) {
     prefs.force_compositing_mode = false;
     prefs.accelerated_compositing_enabled = false;
   }
+
+#if defined(OS_LINUX) && !defined(USE_AURA)
+  // Temporary fix for Linux non-Aura capturing. http://crbug.com/174957
+  WebContentsImpl* web_contents =
+      static_cast<WebContentsImpl*>(WebContents::FromRenderViewHost(rvh));
+  if (web_contents && web_contents->capturer_count_ > 0) {
+    prefs.accelerated_compositing_enabled = false;
+  }
+#endif
 
   return prefs;
 }
@@ -700,10 +719,6 @@ bool WebContentsImpl::OnMessageReceived(RenderViewHost* render_view_host,
   bool handled = true;
   bool message_is_ok = true;
   IPC_BEGIN_MESSAGE_MAP_EX(WebContentsImpl, message, message_is_ok)
-    IPC_MESSAGE_HANDLER(IntentsHostMsg_RegisterIntentService,
-                        OnRegisterIntentService)
-    IPC_MESSAGE_HANDLER(IntentsHostMsg_WebIntentDispatch,
-                        OnWebIntentDispatch)
     IPC_MESSAGE_HANDLER(ViewHostMsg_DidLoadResourceFromMemoryCache,
                         OnDidLoadResourceFromMemoryCache)
     IPC_MESSAGE_HANDLER(ViewHostMsg_DidDisplayInsecureContent,
@@ -725,10 +740,6 @@ bool WebContentsImpl::OnMessageReceived(RenderViewHost* render_view_host,
     IPC_MESSAGE_HANDLER(ViewHostMsg_RegisterProtocolHandler,
                         OnRegisterProtocolHandler)
     IPC_MESSAGE_HANDLER(ViewHostMsg_Find_Reply, OnFindReply)
-#if defined(OS_ANDROID)
-    IPC_MESSAGE_HANDLER(ViewHostMsg_FindMatchRects_Reply,
-                        OnFindMatchRectsReply)
-#endif
     IPC_MESSAGE_HANDLER(ViewHostMsg_CrashedPlugin, OnCrashedPlugin)
     IPC_MESSAGE_HANDLER(ViewHostMsg_AppCacheAccessed, OnAppCacheAccessed)
     IPC_MESSAGE_HANDLER(ViewHostMsg_OpenColorChooser, OnOpenColorChooser)
@@ -739,10 +750,17 @@ bool WebContentsImpl::OnMessageReceived(RenderViewHost* render_view_host,
     IPC_MESSAGE_HANDLER(ViewHostMsg_WebUISend, OnWebUISend)
     IPC_MESSAGE_HANDLER(ViewHostMsg_RequestPpapiBrokerPermission,
                         OnRequestPpapiBrokerPermission)
-    IPC_MESSAGE_HANDLER(BrowserPluginHostMsg_CreateGuest,
-                        OnBrowserPluginCreateGuest)
+    IPC_MESSAGE_HANDLER(BrowserPluginHostMsg_AllocateInstanceID,
+                        OnBrowserPluginAllocateInstanceID)
     IPC_MESSAGE_HANDLER(IconHostMsg_DidDownloadFavicon, OnDidDownloadFavicon)
     IPC_MESSAGE_HANDLER(IconHostMsg_UpdateFaviconURL, OnUpdateFaviconURL)
+#if defined(OS_ANDROID)
+    IPC_MESSAGE_HANDLER(ViewHostMsg_FindMatchRects_Reply,
+                        OnFindMatchRectsReply)
+    IPC_MESSAGE_HANDLER(ViewHostMsg_OpenDateTimeDialog,
+                        OnOpenDateTimeDialog)
+#endif
+    IPC_MESSAGE_HANDLER(ViewHostMsg_FrameDetached, OnFrameDetached)
     IPC_MESSAGE_UNHANDLED(handled = false)
   IPC_END_MESSAGE_MAP_EX()
   message_source_ = NULL;
@@ -791,8 +809,13 @@ void WebContentsImpl::SetDelegate(WebContentsDelegate* delegate) {
   if (delegate_)
     delegate_->Detach(this);
   delegate_ = delegate;
-  if (delegate_)
+  if (delegate_) {
     delegate_->Attach(this);
+    // Ensure the visible RVH reflects the new delegate's preferences.
+    RenderViewHostImpl* host = render_manager_.current_host();
+    if (host)
+      host->SetOverscrollControllerEnabled(delegate->CanOverscrollContent());
+  }
 }
 
 RenderProcessHost* WebContentsImpl::GetRenderProcessHost() const {
@@ -815,6 +838,20 @@ void WebContentsImpl::GetRenderViewHostAtPosition(
     callback.Run(GetRenderViewHost(), x, y);
 }
 
+WebContents* WebContentsImpl::GetEmbedderWebContents() const {
+  BrowserPluginGuest* guest = GetBrowserPluginGuest();
+  if (guest)
+    return guest->embedder_web_contents();
+  return NULL;
+}
+
+int WebContentsImpl::GetEmbeddedInstanceID() const {
+  BrowserPluginGuest* guest = GetBrowserPluginGuest();
+  if (guest)
+    return guest->instance_id();
+  return 0;
+}
+
 int WebContentsImpl::GetRoutingID() const {
   if (!GetRenderViewHost())
     return MSG_ROUTING_NONE;
@@ -822,8 +859,20 @@ int WebContentsImpl::GetRoutingID() const {
   return GetRenderViewHost()->GetRoutingID();
 }
 
+int WebContentsImpl::GetFullscreenWidgetRoutingID() const {
+  return fullscreen_widget_routing_id_;
+}
+
 RenderWidgetHostView* WebContentsImpl::GetRenderWidgetHostView() const {
   return render_manager_.GetRenderWidgetHostView();
+}
+
+RenderWidgetHostViewPort* WebContentsImpl::GetRenderWidgetHostViewPort() const {
+  BrowserPluginGuest* guest = GetBrowserPluginGuest();
+  if (guest && guest->embedder_web_contents()) {
+    return guest->embedder_web_contents()->GetRenderWidgetHostViewPort();
+  }
+  return RenderWidgetHostViewPort::FromRWHV(GetRenderWidgetHostView());
 }
 
 WebContentsView* WebContentsImpl::GetView() const {
@@ -831,14 +880,11 @@ WebContentsView* WebContentsImpl::GetView() const {
 }
 
 WebUI* WebContentsImpl::CreateWebUI(const GURL& url) {
-  WebUIControllerFactory* factory =
-      GetContentClient()->browser()->GetWebUIControllerFactory();
-  if (!factory)
-    return NULL;
   WebUIImpl* web_ui = new WebUIImpl(this);
-  WebUIController* controller =
-      factory->CreateWebUIControllerForURL(web_ui, url);
+  WebUIController* controller = WebUIControllerFactoryRegistry::GetInstance()->
+      CreateWebUIControllerForURL(web_ui, url);
   if (controller) {
+    web_ui->AddMessageHandler(new GenericHandler());
     web_ui->SetController(controller);
     return web_ui;
   }
@@ -987,8 +1033,48 @@ bool WebContentsImpl::DisplayedInsecureContent() const {
   return displayed_insecure_content_;
 }
 
-void WebContentsImpl::SetCapturingContents(bool cap) {
-  capturing_contents_ = cap;
+void WebContentsImpl::IncrementCapturerCount() {
+  DCHECK(!is_being_destroyed_);
+  ++capturer_count_;
+  DVLOG(1) << "There are now " << capturer_count_
+           << " capturing(s) of WebContentsImpl@" << this;
+
+#if defined(OS_LINUX) && !defined(USE_AURA)
+  // Temporary fix for Linux non-Aura capturing. http://crbug.com/174957
+  if (capturer_count_ == 1) {
+    // Force a WebkitPreferences reload to disable compositing for snapshots.
+    RenderViewHost* rvh = GetRenderViewHost();
+    if (rvh)
+      rvh->UpdateWebkitPreferences(rvh->GetWebkitPreferences());
+  }
+#endif
+}
+
+void WebContentsImpl::DecrementCapturerCount() {
+  --capturer_count_;
+  DVLOG(1) << "There are now " << capturer_count_
+           << " capturing(s) of WebContentsImpl@" << this;
+  DCHECK_LE(0, capturer_count_);
+
+  if (is_being_destroyed_)
+    return;
+
+#if defined(OS_LINUX) && !defined(USE_AURA)
+  // Temporary fix for Linux non-Aura capturing. http://crbug.com/174957
+  if (capturer_count_ == 0) {
+    // Force a WebkitPreferences reload to re-enable compositing.
+    RenderViewHost* rvh = GetRenderViewHost();
+    if (rvh)
+      rvh->UpdateWebkitPreferences(rvh->GetWebkitPreferences());
+  }
+#endif
+
+  // While capturer_count_ was greater than zero, the WasHidden() calls to RWHV
+  // were being prevented.  If there are no more capturers, make the call now.
+  if (capturer_count_ == 0 && !should_normally_be_visible_) {
+    DVLOG(1) << "Executing delayed WasHidden().";
+    WasHidden();
+  }
 }
 
 bool WebContentsImpl::IsCrashed() const {
@@ -1047,17 +1133,19 @@ void WebContentsImpl::WasShown() {
     rvh->ResizeRectChanged(GetRootWindowResizerRect());
   }
 
-  bool is_visible = true;
+  should_normally_be_visible_ = true;
   NotificationService::current()->Notify(
       NOTIFICATION_WEB_CONTENTS_VISIBILITY_CHANGED,
       Source<WebContents>(this),
-      Details<bool>(&is_visible));
+      Details<const bool>(&should_normally_be_visible_));
 }
 
 void WebContentsImpl::WasHidden() {
-  if (!capturing_contents_) {
+  // If there are entities capturing screenshots or video (e.g., mirroring),
+  // don't activate the "disable rendering" optimization.
+  if (capturer_count_ == 0) {
     // |GetRenderViewHost()| can be NULL if the user middle clicks a link to
-    // open a tab in then background, then closes the tab before selecting it.
+    // open a tab in the background, then closes the tab before selecting it.
     // This is because closing the tab calls WebContentsImpl::Destroy(), which
     // removes the |GetRenderViewHost()|; then when we actually destroy the
     // window, OnWindowPosChanged() notices and calls WasHidden() (which
@@ -1068,11 +1156,11 @@ void WebContentsImpl::WasHidden() {
       rwhv->WasHidden();
   }
 
-  bool is_visible = false;
+  should_normally_be_visible_ = false;
   NotificationService::current()->Notify(
       NOTIFICATION_WEB_CONTENTS_VISIBILITY_CHANGED,
       Source<WebContents>(this),
-      Details<bool>(&is_visible));
+      Details<const bool>(&should_normally_be_visible_));
 }
 
 bool WebContentsImpl::NeedToFireBeforeUnload() {
@@ -1090,10 +1178,10 @@ void WebContentsImpl::Stop() {
 
 WebContents* WebContentsImpl::Clone() {
   // We use our current SiteInstance since the cloned entry will use it anyway.
-  // We pass |this| for the |base_web_contents| to size the view correctly, and
-  // our own opener so that the cloned page can access it if it was before.
+  // We pass our own opener so that the cloned page can access it if it was
+  // before.
   CreateParams create_params(GetBrowserContext(), GetSiteInstance());
-  create_params.base_web_contents = this;
+  create_params.initial_size = view_->GetContainerSize();
   WebContentsImpl* tc = CreateWithOpener(create_params, opener_);
   tc->GetController().CopyStateFrom(controller_);
   FOR_EACH_OBSERVER(WebContentsObserver,
@@ -1150,17 +1238,33 @@ void WebContentsImpl::Init(const WebContents::CreateParams& params) {
   if (view_.get()) {
     CHECK(render_view_host_delegate_view_);
   } else {
-    if (browser_plugin_guest_.get() &&
-        CommandLine::ForCurrentProcess()->HasSwitch(
-            switches::kEnableBrowserPluginCompositing)) {
+    WebContentsViewDelegate* delegate =
+        GetContentClient()->browser()->GetWebContentsViewDelegate(this);
+
+    bool enable_browser_plugin_compositing = false;
+    bool enable_browser_plugin_guest_views = false;
+    if (browser_plugin_guest_.get()) {
+      enable_browser_plugin_compositing =
+          CommandLine::ForCurrentProcess()->HasSwitch(
+              switches::kEnableBrowserPluginCompositing);
+      enable_browser_plugin_guest_views = enable_browser_plugin_compositing ||
+          CommandLine::ForCurrentProcess()->HasSwitch(
+              switches::kEnableBrowserPluginGuestViews);
+    }
+
+    if (enable_browser_plugin_guest_views) {
+      WebContentsView* platform_view = CreateWebContentsView(
+          this, delegate, &render_view_host_delegate_view_);
+
       WebContentsViewGuest* rv = new WebContentsViewGuest(
           this,
-          browser_plugin_guest_.get());
+          browser_plugin_guest_.get(),
+          enable_browser_plugin_compositing,
+          platform_view);
       render_view_host_delegate_view_ = rv;
       view_.reset(rv);
     } else {
-      WebContentsViewDelegate* delegate =
-          GetContentClient()->browser()->GetWebContentsViewDelegate(this);
+      // Regular WebContentsView.
       view_.reset(CreateWebContentsView(
           this, delegate, &render_view_host_delegate_view_));
     }
@@ -1168,10 +1272,7 @@ void WebContentsImpl::Init(const WebContents::CreateParams& params) {
   }
   CHECK(view_.get());
 
-  // We have the initial size of the view be based on the size of the view of
-  // the passed in WebContents.
-  gfx::Size initial_size = params.base_web_contents ?
-      params.base_web_contents->GetView()->GetContainerSize() : gfx::Size();
+  gfx::Size initial_size = params.initial_size;
   view_->CreateView(initial_size, params.context);
 
   // Listen for whether our opener gets destroyed.
@@ -1186,6 +1287,10 @@ void WebContentsImpl::Init(const WebContents::CreateParams& params) {
 #if defined(ENABLE_JAVA_BRIDGE)
   java_bridge_dispatcher_host_manager_.reset(
       new JavaBridgeDispatcherHostManager(this));
+#endif
+
+#if defined(OS_ANDROID)
+  date_time_chooser_.reset(new DateTimeChooserAndroid());
 #endif
 }
 
@@ -1232,6 +1337,15 @@ void WebContentsImpl::RenderWidgetDeleted(
       created_widgets_.find(render_widget_host);
   if (iter != created_widgets_.end())
     created_widgets_.erase(iter);
+
+  if (render_widget_host &&
+      render_widget_host->GetRoutingID() == fullscreen_widget_routing_id_) {
+    FOR_EACH_OBSERVER(WebContentsObserver,
+                      observers_,
+                      DidDestroyFullscreenWidget(
+                          fullscreen_widget_routing_id_));
+    fullscreen_widget_routing_id_ = MSG_ROUTING_NONE;
+  }
 }
 
 bool WebContentsImpl::PreHandleKeyboardEvent(
@@ -1340,7 +1454,8 @@ void WebContentsImpl::CreateNewWindow(
       session_storage_namespace);
   CreateParams create_params(GetBrowserContext(), site_instance);
   create_params.routing_id = route_id;
-  create_params.base_web_contents = this;
+  create_params.initial_size = view_->GetContainerSize();
+  create_params.context = view_->GetNativeView();
   new_contents->Init(create_params);
 
   new_contents->set_opener_web_ui_type(GetWebUITypeForCurrentState());
@@ -1401,8 +1516,10 @@ void WebContentsImpl::CreateNewWidget(int route_id,
       new RenderWidgetHostImpl(this, process, route_id);
   created_widgets_.insert(widget_host);
 
-  RenderWidgetHostViewPort* widget_view =
-      RenderWidgetHostViewPort::CreateViewForWidget(widget_host);
+  RenderWidgetHostViewPort* widget_view = RenderWidgetHostViewPort::FromRWHV(
+      view_->CreateViewForPopupWidget(widget_host));
+  if (!widget_view)
+    return;
   if (!is_fullscreen) {
     // Popups should not get activated.
     widget_view->SetPopupType(popup_type);
@@ -1438,6 +1555,12 @@ void WebContentsImpl::ShowCreatedWidget(int route_id,
 
 void WebContentsImpl::ShowCreatedFullscreenWidget(int route_id) {
   ShowCreatedWidget(route_id, true, gfx::Rect());
+
+  DCHECK_EQ(MSG_ROUTING_NONE, fullscreen_widget_routing_id_);
+  fullscreen_widget_routing_id_ = route_id;
+  FOR_EACH_OBSERVER(WebContentsObserver,
+                    observers_,
+                    DidShowFullscreenWidget(route_id));
 }
 
 void WebContentsImpl::ShowCreatedWidget(int route_id,
@@ -1450,11 +1573,10 @@ void WebContentsImpl::ShowCreatedWidget(int route_id,
       RenderWidgetHostViewPort::FromRWHV(GetCreatedWidget(route_id));
   if (!widget_host_view)
     return;
-  if (is_fullscreen) {
-    widget_host_view->InitAsFullscreen(GetRenderWidgetHostView());
-  } else {
-    widget_host_view->InitAsPopup(GetRenderWidgetHostView(), initial_pos);
-  }
+  if (is_fullscreen)
+    widget_host_view->InitAsFullscreen(GetRenderWidgetHostViewPort());
+  else
+    widget_host_view->InitAsPopup(GetRenderWidgetHostViewPort(), initial_pos);
 
   RenderWidgetHostImpl* render_widget_host_impl =
       RenderWidgetHostImpl::From(widget_host_view->GetRenderWidgetHost());
@@ -1522,7 +1644,7 @@ void WebContentsImpl::ShowContextMenu(
 }
 
 void WebContentsImpl::RequestMediaAccessPermission(
-    const MediaStreamRequest* request,
+    const MediaStreamRequest& request,
     const MediaResponseCallback& callback) {
   if (delegate_)
     delegate_->RequestMediaAccessPermission(this, request, callback);
@@ -1587,25 +1709,16 @@ bool WebContentsImpl::NavigateToEntry(
   // For security, we should never send non-Web-UI URLs to a Web UI renderer.
   // Double check that here.
   int enabled_bindings = dest_render_view_host->GetEnabledBindings();
-  WebUIControllerFactory* factory =
-      GetContentClient()->browser()->GetWebUIControllerFactory();
   bool data_urls_allowed = delegate_ && delegate_->CanLoadDataURLsInWebUI();
   bool is_allowed_in_web_ui_renderer =
-      factory &&
-      factory->IsURLAcceptableForWebUI(GetBrowserContext(), entry.GetURL(),
-                                       data_urls_allowed);
+      WebUIControllerFactoryRegistry::GetInstance()->IsURLAcceptableForWebUI(
+          GetBrowserContext(), entry.GetURL(), data_urls_allowed);
   if ((enabled_bindings & BINDINGS_POLICY_WEB_UI) &&
       !is_allowed_in_web_ui_renderer) {
     // Log the URL to help us diagnose any future failures of this CHECK.
     GetContentClient()->SetActiveURL(entry.GetURL());
     CHECK(0);
   }
-
-  // Tell DevTools agent that it is attached prior to the navigation.
-  DevToolsManagerImpl::GetInstance()->OnNavigatingToPendingEntry(
-      GetRenderViewHost(),
-      dest_render_view_host,
-      entry.GetURL());
 
   // Notify observers that we will navigate in this RV.
   FOR_EACH_OBSERVER(WebContentsObserver,
@@ -1713,8 +1826,8 @@ void WebContentsImpl::OnSavePage() {
 // Used in automated testing to bypass prompting the user for file names.
 // Instead, the names and paths are hard coded rather than running them through
 // file name sanitation and extension / mime checking.
-bool WebContentsImpl::SavePage(const FilePath& main_file,
-                               const FilePath& dir_path,
+bool WebContentsImpl::SavePage(const base::FilePath& main_file,
+                               const base::FilePath& dir_path,
                                SavePageType save_type) {
   // Stop the page from navigating.
   Stop();
@@ -1724,8 +1837,8 @@ bool WebContentsImpl::SavePage(const FilePath& main_file,
 }
 
 void WebContentsImpl::GenerateMHTML(
-    const FilePath& file,
-    const base::Callback<void(const FilePath&, int64)>& callback) {
+    const base::FilePath& file,
+    const base::Callback<void(const base::FilePath&, int64)>& callback) {
   MHTMLGenerationManager::GetInstance()->GenerateMHTML(this, file, callback);
 }
 
@@ -1876,11 +1989,8 @@ int WebContentsImpl::GetContentRestrictions() const {
 }
 
 WebUI::TypeID WebContentsImpl::GetWebUITypeForCurrentState() {
-  WebUIControllerFactory* factory =
-      GetContentClient()->browser()->GetWebUIControllerFactory();
-  if (!factory)
-    return WebUI::kNoWebUI;
-  return factory->GetWebUIType(GetBrowserContext(), GetURL());
+  return WebUIControllerFactoryRegistry::GetInstance()->GetWebUIType(
+      GetBrowserContext(), GetURL());
 }
 
 WebUI* WebContentsImpl::GetWebUIForCurrentState() {
@@ -1958,30 +2068,14 @@ bool WebContentsImpl::FocusLocationBarByDefault() {
   if (web_ui)
     return web_ui->ShouldFocusLocationBarByDefault();
   NavigationEntry* entry = controller_.GetActiveEntry();
-  return (entry && entry->GetURL() == GURL(chrome::kAboutBlankURL));
+  if (entry && entry->GetURL() == GURL(chrome::kAboutBlankURL))
+    return true;
+  return delegate_ && delegate_->ShouldFocusLocationBarByDefault(this);
 }
 
 void WebContentsImpl::SetFocusToLocationBar(bool select_all) {
   if (delegate_)
     delegate_->SetFocusToLocationBar(select_all);
-}
-
-void WebContentsImpl::OnRegisterIntentService(
-    const webkit_glue::WebIntentServiceData& data,
-    bool user_gesture) {
-  if (delegate_)
-    delegate_->RegisterIntentHandler(this, data, user_gesture);
-}
-
-void WebContentsImpl::OnWebIntentDispatch(
-    const webkit_glue::WebIntentData& intent,
-    int intent_id) {
-  if (!delegate_)
-    return;
-
-  WebIntentsDispatcherImpl* intents_dispatcher =
-      new WebIntentsDispatcherImpl(this, intent, intent_id);
-  delegate_->WebIntentDispatch(this, intents_dispatcher);
 }
 
 void WebContentsImpl::DidStartProvisionalLoadForFrame(
@@ -1991,6 +2085,7 @@ void WebContentsImpl::DidStartProvisionalLoadForFrame(
     bool is_main_frame,
     const GURL& url) {
   bool is_error_page = (url.spec() == kUnreachableWebDataURL);
+  bool is_iframe_srcdoc = (url.spec() == chrome::kAboutSrcDocURL);
   GURL validated_url(url);
   RenderProcessHost* render_process_host =
       render_view_host->GetProcess();
@@ -2003,7 +2098,7 @@ void WebContentsImpl::DidStartProvisionalLoadForFrame(
   FOR_EACH_OBSERVER(WebContentsObserver, observers_,
                     DidStartProvisionalLoadForFrame(frame_id, parent_frame_id,
                     is_main_frame, validated_url, is_error_page,
-                    render_view_host));
+                    is_iframe_srcdoc, render_view_host));
 
   if (is_main_frame) {
     // Notify observers about the provisional change in the main frame URL.
@@ -2151,8 +2246,11 @@ void WebContentsImpl::OnDocumentLoadedInFrame(int64 frame_id) {
 
 void WebContentsImpl::OnDidFinishLoad(
     int64 frame_id,
-    const GURL& validated_url,
+    const GURL& url,
     bool is_main_frame) {
+  GURL validated_url(url);
+  RenderProcessHost* render_process_host = message_source_->GetProcess();
+  RenderViewHost::FilterURL(render_process_host, false, &validated_url);
   FOR_EACH_OBSERVER(WebContentsObserver, observers_,
                     DidFinishLoad(frame_id, validated_url, is_main_frame,
                                   message_source_));
@@ -2160,10 +2258,13 @@ void WebContentsImpl::OnDidFinishLoad(
 
 void WebContentsImpl::OnDidFailLoadWithError(
     int64 frame_id,
-    const GURL& validated_url,
+    const GURL& url,
     bool is_main_frame,
     int error_code,
     const string16& error_description) {
+  GURL validated_url(url);
+  RenderProcessHost* render_process_host = message_source_->GetProcess();
+  RenderViewHost::FilterURL(render_process_host, false, &validated_url);
   FOR_EACH_OBSERVER(WebContentsObserver, observers_,
                     DidFailLoad(frame_id, validated_url, is_main_frame,
                                 error_code, error_description,
@@ -2223,7 +2324,7 @@ void WebContentsImpl::OnSaveURL(const GURL& url,
 }
 
 void WebContentsImpl::OnEnumerateDirectory(int request_id,
-                                           const FilePath& path) {
+                                           const base::FilePath& path) {
   if (!delegate_)
     return;
 
@@ -2271,11 +2372,21 @@ void WebContentsImpl::OnFindMatchRectsReply(
   if (delegate_)
     delegate_->FindMatchRectsReply(this, version, rects, active_rect);
 }
+
+void WebContentsImpl::OnOpenDateTimeDialog(
+    const ViewHostMsg_DateTimeDialogValue_Params& value) {
+  date_time_chooser_->ShowDialog(
+      GetContentNativeView(), GetRenderViewHost(), value.dialog_type,
+      value.year, value.month, value.day, value.hour,
+      value.minute, value.second);
+}
+
 #endif
 
-void WebContentsImpl::OnCrashedPlugin(const FilePath& plugin_path) {
+void WebContentsImpl::OnCrashedPlugin(const base::FilePath& plugin_path,
+                                      base::ProcessId plugin_pid) {
   FOR_EACH_OBSERVER(WebContentsObserver, observers_,
-                    PluginCrashed(plugin_path));
+                    PluginCrashed(plugin_path, plugin_pid));
 }
 
 void WebContentsImpl::OnAppCacheAccessed(const GURL& manifest_url,
@@ -2305,7 +2416,7 @@ void WebContentsImpl::OnSetSelectedColorInColorChooser(int color_chooser_id,
 }
 
 void WebContentsImpl::OnPepperPluginHung(int plugin_child_id,
-                                         const FilePath& path,
+                                         const base::FilePath& path,
                                          bool is_hung) {
   UMA_HISTOGRAM_COUNTS("Pepper.PluginHung", 1);
 
@@ -2325,7 +2436,7 @@ void WebContentsImpl::OnWebUISend(const GURL& source_url,
 void WebContentsImpl::OnRequestPpapiBrokerPermission(
     int request_id,
     const GURL& url,
-    const FilePath& plugin_path) {
+    const base::FilePath& plugin_path) {
   if (!delegate_) {
     OnPpapiBrokerPermissionResult(request_id, false);
     return;
@@ -2348,33 +2459,27 @@ void WebContentsImpl::OnPpapiBrokerPermissionResult(int request_id,
                                                     result));
 }
 
-void WebContentsImpl::OnBrowserPluginCreateGuest(
-    int instance_id,
-    const BrowserPluginHostMsg_CreateGuest_Params& params) {
+void WebContentsImpl::OnBrowserPluginAllocateInstanceID(
+    const IPC::Message& message, int request_id) {
   // This creates a BrowserPluginEmbedder, which handles all the BrowserPlugin
-  // specific messages for this WebContents (through its
-  // BrowserPluginEmbedderHelper). This means that any message from browser
-  // plugin renderer prior to CreateGuest will be ignored.
+  // specific messages for this WebContents. This means that any message from
+  // a BrowserPlugin prior to AllocateInstanceID will be ignored.
   // For more info, see comment above classes BrowserPluginEmbedder and
   // BrowserPluginGuest.
-  // The first BrowserPluginHostMsg_CreateGuest message from this WebContents'
-  // embedder render process is handled here. Once BrowserPluginEmbedder is
-  // created, all subsequent BrowserPluginHostMsg_CreateGuest messages are
-  // intercepted by the BrowserPluginEmbedderHelper and handled by the
-  // BrowserPluginEmbedder. Thus, this code will not be executed if a
-  // BrowserPluginEmbedder exists for this WebContents.
+  // The first BrowserPluginHostMsg_AllocateInstanceID message from this
+  // WebContents' embedder render process is handled here. Once
+  // BrowserPluginEmbedder is created, all subsequent BrowserPluginHostMsg_*
+  // messages are handled in BrowserPluginEmbedder. Thus, this code will not be
+  // executed if a BrowserPluginEmbedder exists for this WebContents.
   CHECK(!browser_plugin_embedder_.get());
   browser_plugin_embedder_.reset(
       BrowserPluginEmbedder::Create(this, GetRenderViewHost()));
-  browser_plugin_embedder_->CreateGuest(GetRenderViewHost(),
-                                        instance_id,
-                                        params);
+  browser_plugin_embedder_->OnMessageReceived(message);
 }
 
 void WebContentsImpl::OnDidDownloadFavicon(
     int id,
     const GURL& image_url,
-    bool errored,
     int requested_size,
     const std::vector<SkBitmap>& bitmaps) {
   FaviconDownloadMap::iterator iter = favicon_download_map_.find(id);
@@ -2384,7 +2489,7 @@ void WebContentsImpl::OnDidDownloadFavicon(
     return;
   }
   if (!iter->second.is_null()) {
-    iter->second.Run(id, image_url, errored, requested_size, bitmaps);
+    iter->second.Run(id, image_url, requested_size, bitmaps);
   }
   favicon_download_map_.erase(id);
 }
@@ -2394,6 +2499,11 @@ void WebContentsImpl::OnUpdateFaviconURL(
     const std::vector<FaviconURL>& candidates) {
   FOR_EACH_OBSERVER(WebContentsObserver, observers_,
                     DidUpdateFaviconURL(page_id, candidates));
+}
+
+void WebContentsImpl::OnFrameDetached(int64 frame_id) {
+  FOR_EACH_OBSERVER(WebContentsObserver, observers_,
+                    FrameDetached(message_source_, frame_id));
 }
 
 void WebContentsImpl::DidBlock3DAPIs(const GURL& url,
@@ -2479,9 +2589,9 @@ void WebContentsImpl::DidNavigateAnyFramePostCommit(
   // If we navigate off the page, reset JavaScript state. This does nothing
   // to prevent a malicious script from spamming messages, since the script
   // could just reload the page to stop blocking.
-  if (dialog_creator_ && !details.is_in_page) {
-    dialog_creator_->ResetJavaScriptState(this);
-    dialog_creator_ = NULL;
+  if (dialog_manager_ && !details.is_in_page) {
+    dialog_manager_->ResetJavaScriptState(this);
+    dialog_manager_ = NULL;
   }
 
   // Notify observers about navigation.
@@ -2618,6 +2728,11 @@ void WebContentsImpl::RenderViewCreated(RenderViewHost* render_view_host) {
   if (static_cast<RenderViewHostImpl*>(render_view_host)->is_swapped_out())
     return;
 
+  if (delegate_) {
+    static_cast<RenderViewHostImpl*>(render_view_host)->
+        SetOverscrollControllerEnabled(delegate_->CanOverscrollContent());
+  }
+
   NotificationService::current()->Notify(
       NOTIFICATION_WEB_CONTENTS_RENDER_VIEW_HOST_CREATED,
       Source<WebContents>(this),
@@ -2690,8 +2805,18 @@ void WebContentsImpl::RenderViewDeleted(RenderViewHost* rvh) {
 void WebContentsImpl::DidNavigate(
     RenderViewHost* rvh,
     const ViewHostMsg_FrameNavigate_Params& params) {
-  if (PageTransitionIsMainFrame(params.transition))
+  if (PageTransitionIsMainFrame(params.transition)) {
+    // When overscroll navigation gesture is enabled, a screenshot of the page
+    // in its current state is taken so that it can be used during the
+    // nav-gesture. It is necessary to take the screenshot here, before calling
+    // RenderViewHostManager::DidNavigateMainFrame, because that can change
+    // WebContents::GetRenderViewHost to return the new host, instead of the one
+    // that may have just been swapped out.
+    if (delegate_ && delegate_->CanOverscrollContent())
+      controller_.TakeScreenshot();
+
     render_manager_.DidNavigateMainFrame(rvh);
+  }
 
   // Update the site of the SiteInstance if it doesn't have one yet, unless
   // this is for about:blank.  In that case, the SiteInstance can still be
@@ -3073,13 +3198,13 @@ void WebContentsImpl::RunJavaScriptMessage(
       ShowingInterstitialPage() ||
       !delegate_ ||
       delegate_->ShouldSuppressDialogs() ||
-      !delegate_->GetJavaScriptDialogCreator();
+      !delegate_->GetJavaScriptDialogManager();
 
   if (!suppress_this_message) {
     std::string accept_lang = GetContentClient()->browser()->
       GetAcceptLangs(GetBrowserContext());
-    dialog_creator_ = delegate_->GetJavaScriptDialogCreator();
-    dialog_creator_->RunJavaScriptDialog(
+    dialog_manager_ = delegate_->GetJavaScriptDialogManager();
+    dialog_manager_->RunJavaScriptDialog(
         this,
         frame_url.GetOrigin(),
         accept_lang,
@@ -3114,7 +3239,7 @@ void WebContentsImpl::RunBeforeUnloadConfirm(RenderViewHost* rvh,
       rvhi->is_swapped_out() ||
       !delegate_ ||
       delegate_->ShouldSuppressDialogs() ||
-      !delegate_->GetJavaScriptDialogCreator();
+      !delegate_->GetJavaScriptDialogManager();
   if (suppress_this_message) {
     // The reply must be sent to the RVH that sent the request.
     rvhi->JavaScriptDialogClosed(reply_msg, true, string16());
@@ -3122,8 +3247,8 @@ void WebContentsImpl::RunBeforeUnloadConfirm(RenderViewHost* rvh,
   }
 
   is_showing_before_unload_dialog_ = true;
-  dialog_creator_ = delegate_->GetJavaScriptDialogCreator();
-  dialog_creator_->RunBeforeUnloadDialog(
+  dialog_manager_ = delegate_->GetJavaScriptDialogManager();
+  dialog_manager_->RunBeforeUnloadDialog(
       this, message, is_reload,
       base::Bind(&WebContentsImpl::OnDialogClosed, base::Unretained(this), rvh,
                  reply_msg));
@@ -3177,10 +3302,7 @@ void WebContentsImpl::RendererUnresponsive(RenderViewHost* rvh,
   // Ignore renderer unresponsive event if debugger is attached to the tab
   // since the event may be a result of the renderer sitting on a breakpoint.
   // See http://crbug.com/65458
-  DevToolsAgentHost* agent =
-      DevToolsAgentHostRegistry::GetDevToolsAgentHost(rvh);
-  if (agent &&
-      DevToolsManagerImpl::GetInstance()->GetDevToolsClientHostFor(agent))
+  if (DevToolsAgentHost::IsDebuggerAttached(this))
     return;
 
   if (is_during_unload) {
@@ -3261,6 +3383,13 @@ void WebContentsImpl::UpdateRenderViewSizeForRenderManager() {
 
 void WebContentsImpl::NotifySwappedFromRenderManager(RenderViewHost* rvh) {
   NotifySwapped(rvh);
+
+  // Make sure the visible RVH reflects the new delegate's preferences.
+  if (delegate_) {
+    RenderViewHostImpl* host = render_manager_.current_host();
+    if (host)
+      host->SetOverscrollControllerEnabled(delegate_->CanOverscrollContent());
+  }
 }
 
 int WebContentsImpl::CreateOpenerRenderViewsForRenderManager(
@@ -3403,11 +3532,11 @@ RenderViewHostImpl* WebContentsImpl::GetRenderViewHostImpl() {
   return static_cast<RenderViewHostImpl*>(GetRenderViewHost());
 }
 
-BrowserPluginGuest* WebContentsImpl::GetBrowserPluginGuest() {
+BrowserPluginGuest* WebContentsImpl::GetBrowserPluginGuest() const {
   return browser_plugin_guest_.get();
 }
 
-BrowserPluginEmbedder* WebContentsImpl::GetBrowserPluginEmbedder() {
+BrowserPluginEmbedder* WebContentsImpl::GetBrowserPluginEmbedder() const {
   return browser_plugin_embedder_.get();
 }
 

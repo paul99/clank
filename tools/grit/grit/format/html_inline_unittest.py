@@ -64,5 +64,25 @@ class HtmlInlineUnittest(unittest.TestCase):
     self.failUnlessEqual(resources, source_resources)
     tmp_dir.CleanUp()
 
+  def testCompressedJavaScript(self):
+    '''Tests that ".src=" doesn't treat as a tag.'''
+
+    files = {
+      'index.js': '''
+      if(i<j)a.src="hoge.png";
+      ''',
+    }
+
+    source_resources = set()
+    tmp_dir = util.TempDir(files)
+    for filename in files:
+      source_resources.add(tmp_dir.GetPath(filename))
+
+    resources = html_inline.GetResourceFilenames(tmp_dir.GetPath('index.js'))
+    resources.add(tmp_dir.GetPath('index.js'))
+    self.failUnlessEqual(resources, source_resources)
+    tmp_dir.CleanUp()
+
+
 if __name__ == '__main__':
   unittest.main()

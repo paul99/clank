@@ -4,12 +4,20 @@
 
 #include "chrome/browser/ui/gtk/zoom_bubble_gtk.h"
 
+#include "base/i18n/rtl.h"
+#include "base/prefs/pref_service.h"
 #include "base/utf_string_conversions.h"
-#include "chrome/browser/prefs/pref_service.h"
 #include "chrome/browser/profiles/profile.h"
+#include "chrome/browser/ui/browser.h"
+#include "chrome/browser/ui/browser_finder.h"
+#include "chrome/browser/ui/browser_window.h"
 #include "chrome/browser/ui/gtk/gtk_theme_service.h"
+#include "chrome/browser/ui/gtk/location_bar_view_gtk.h"
 #include "chrome/browser/ui/zoom/zoom_controller.h"
+#include "chrome/common/chrome_notification_types.h"
 #include "chrome/common/pref_names.h"
+#include "content/public/browser/notification_details.h"
+#include "content/public/browser/notification_source.h"
 #include "content/public/browser/render_view_host.h"
 #include "content/public/browser/web_contents.h"
 #include "grit/generated_resources.h"
@@ -33,9 +41,16 @@ const int kBubbleAnchorHeight = 25;
 }  // namespace
 
 // static
-void ZoomBubbleGtk::Show(GtkWidget* anchor,
-                         content::WebContents* web_contents,
-                         bool auto_close) {
+void ZoomBubbleGtk::ShowBubble(content::WebContents* web_contents,
+                               bool auto_close) {
+  Browser* browser = chrome::FindBrowserWithWebContents(web_contents);
+  DCHECK(browser && browser->window() && browser->fullscreen_controller());
+
+  LocationBar* location_bar = browser->window()->GetLocationBar();
+  GtkWidget* anchor = browser->window()->IsFullscreen() ?
+      GTK_WIDGET(browser->window()->GetNativeWindow()) :
+      static_cast<LocationBarViewGtk*>(location_bar)->zoom_widget();
+
   // If the bubble is already showing and its |auto_close_| value is equal to
   // |auto_close|, the bubble can be reused and only the label text needs to
   // be updated.
@@ -47,22 +62,31 @@ void ZoomBubbleGtk::Show(GtkWidget* anchor,
     // If the bubble is already showing but its |auto_close_| value is not equal
     // to |auto_close|, the bubble's focus properties must change, so the
     // current bubble must be closed and a new one created.
-    Close();
+    CloseBubble();
     DCHECK(!g_bubble);
 
-    g_bubble = new ZoomBubbleGtk(anchor, web_contents, auto_close);
+    g_bubble = new ZoomBubbleGtk(anchor,
+                                 web_contents,
+                                 auto_close,
+                                 browser->fullscreen_controller());
   }
 }
 
 // static
-void ZoomBubbleGtk::Close() {
+void ZoomBubbleGtk::CloseBubble() {
   if (g_bubble)
-    g_bubble->CloseBubble();
+    g_bubble->Close();
+}
+
+// static
+bool ZoomBubbleGtk::IsShowing() {
+  return g_bubble != NULL;
 }
 
 ZoomBubbleGtk::ZoomBubbleGtk(GtkWidget* anchor,
                              content::WebContents* web_contents,
-                             bool auto_close)
+                             bool auto_close,
+                             FullscreenController* fullscreen_controller)
     : auto_close_(auto_close),
       mouse_inside_(false),
       web_contents_(web_contents) {
@@ -104,11 +128,11 @@ ZoomBubbleGtk::ZoomBubbleGtk(GtkWidget* anchor,
 
   gtk_container_set_focus_child(GTK_CONTAINER(container), NULL);
 
-  gfx::Rect rect(kBubbleAnchorWidth, kBubbleAnchorHeight);
-  BubbleGtk::ArrowLocationGtk arrow_location =
-      BubbleGtk::ARROW_LOCATION_TOP_MIDDLE;
+  gfx::Rect rect = gfx::Rect(kBubbleAnchorWidth, kBubbleAnchorHeight);
+  BubbleGtk::FrameStyle frame_style = gtk_widget_is_toplevel(anchor) ?
+      BubbleGtk::FIXED_TOP_RIGHT : BubbleGtk::ANCHOR_TOP_MIDDLE;
   int bubble_options = BubbleGtk::MATCH_SYSTEM_THEME | BubbleGtk::POPUP_WINDOW;
-  bubble_ = BubbleGtk::Show(anchor, &rect, event_box_, arrow_location,
+  bubble_ = BubbleGtk::Show(anchor, &rect, event_box_, frame_style,
       auto_close ? bubble_options : bubble_options | BubbleGtk::GRAB_INPUT,
       theme_service, NULL);
 
@@ -136,6 +160,10 @@ ZoomBubbleGtk::ZoomBubbleGtk(GtkWidget* anchor,
     g_signal_connect(set_default_button, "leave-notify-event",
                      G_CALLBACK(&OnMouseLeaveThunk), this);
   }
+
+  registrar_.Add(this,
+                 chrome::NOTIFICATION_FULLSCREEN_CHANGED,
+                 content::Source<FullscreenController>(fullscreen_controller));
 
   StartTimerIfNecessary();
 }
@@ -167,7 +195,7 @@ void ZoomBubbleGtk::StartTimerIfNecessary() {
         FROM_HERE,
         base::TimeDelta::FromMilliseconds(kBubbleCloseDelay),
         this,
-        &ZoomBubbleGtk::CloseBubble);
+        &ZoomBubbleGtk::Close);
   }
 }
 
@@ -176,7 +204,7 @@ void ZoomBubbleGtk::StopTimerIfNecessary() {
     timer_.Stop();
 }
 
-void ZoomBubbleGtk::CloseBubble() {
+void ZoomBubbleGtk::Close() {
   DCHECK(bubble_);
   bubble_->Close();
 }
@@ -205,4 +233,11 @@ gboolean ZoomBubbleGtk::OnMouseLeave(GtkWidget* widget,
   mouse_inside_ = false;
   StartTimerIfNecessary();
   return FALSE;
+}
+
+void ZoomBubbleGtk::Observe(int type,
+                            const content::NotificationSource& source,
+                            const content::NotificationDetails& details) {
+  DCHECK_EQ(type, chrome::NOTIFICATION_FULLSCREEN_CHANGED);
+  CloseBubble();
 }

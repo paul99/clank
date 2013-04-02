@@ -37,7 +37,7 @@ void Request::ParseHeaders(const std::string& headers) {
   if (pos != std::string::npos) {
     headers_ = headers.substr(pos + 2);
 
-    StringTokenizer tokenizer(headers.begin(), headers.begin() + pos, " ");
+    base::StringTokenizer tokenizer(headers.begin(), headers.begin() + pos, " ");
     std::string* parse[] = { &method_, &path_, &version_ };
     int field = 0;
     while (tokenizer.GetNext() && field < arraysize(parse)) {
@@ -251,7 +251,7 @@ void SimpleWebServer::DidClose(net::StreamListenSocket* sock) {
 }
 
 HTTPTestServer::HTTPTestServer(int port, const std::wstring& address,
-                               FilePath root_dir)
+                               base::FilePath root_dir)
     : port_(port), address_(address), root_dir_(root_dir) {
   net::EnsureWinsockInit();
   server_ =

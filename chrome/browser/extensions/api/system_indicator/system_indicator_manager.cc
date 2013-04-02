@@ -4,6 +4,7 @@
 
 #include "chrome/browser/extensions/api/system_indicator/system_indicator_manager.h"
 
+#include "base/memory/linked_ptr.h"
 #include "chrome/browser/extensions/event_names.h"
 #include "chrome/browser/extensions/event_router.h"
 #include "chrome/browser/extensions/extension_action.h"
@@ -56,7 +57,8 @@ ExtensionIndicatorIcon::ExtensionIndicatorIcon(const Extension* extension,
       status_tray_(status_tray),
       icon_(status_icon),
       profile_(profile),
-      ALLOW_THIS_IN_INITIALIZER_LIST(icon_factory_(extension, action, this)) {
+      ALLOW_THIS_IN_INITIALIZER_LIST(
+          icon_factory_(profile, extension, action, this)) {
   icon_->AddObserver(this);
   OnIconUpdated();
 }
@@ -171,7 +173,7 @@ void SystemIndicatorManager::CreateOrUpdateIndicator(
         profile_,
         status_tray_,
         indicator_icon);
-    system_indicators_.insert(std::make_pair(extension->id(), status_icon));
+    system_indicators_[extension->id()] = make_linked_ptr(status_icon);
   }
 }
 

@@ -4,18 +4,25 @@
 
 #include "android_webview/browser/renderer_host/aw_render_view_host_ext.h"
 
+#include "android_webview/browser/aw_browser_context.h"
+#include "android_webview/browser/scoped_allow_wait_for_legacy_web_view_api.h"
 #include "android_webview/common/render_view_messages.h"
 #include "base/android/scoped_java_ref.h"
 #include "base/callback.h"
 #include "base/logging.h"
+#include "content/public/browser/render_process_host.h"
+#include "content/public/browser/render_view_host.h"
 #include "content/public/browser/user_metrics.h"
 #include "content/public/browser/web_contents.h"
+#include "content/public/common/frame_navigate_params.h"
 
 namespace android_webview {
 
-AwRenderViewHostExt::AwRenderViewHostExt(content::WebContents* contents)
+AwRenderViewHostExt::AwRenderViewHostExt(content::WebContents* contents,
+                                         Client* client)
     : content::WebContentsObserver(contents),
-      has_new_hit_test_data_(false) {
+      has_new_hit_test_data_(false),
+      client_(client) {
 }
 
 AwRenderViewHostExt::~AwRenderViewHostExt() {}
@@ -58,6 +65,11 @@ const AwHitTestData& AwRenderViewHostExt::GetLastHitTestData() const {
   return last_hit_test_data_;
 }
 
+void AwRenderViewHostExt::EnableCapturePictureCallback(bool enabled) {
+  Send(new AwViewMsg_EnableCapturePictureCallback(
+      web_contents()->GetRoutingID(), enabled));
+}
+
 void AwRenderViewHostExt::RenderViewGone(base::TerminationStatus status) {
   DCHECK(CalledOnValidThread());
   for (std::map<int, DocumentHasImagesResult>::iterator pending_req =
@@ -68,6 +80,15 @@ void AwRenderViewHostExt::RenderViewGone(base::TerminationStatus status) {
   }
 }
 
+void AwRenderViewHostExt::DidNavigateAnyFrame(
+    const content::LoadCommittedDetails& details,
+    const content::FrameNavigateParams& params) {
+  DCHECK(CalledOnValidThread());
+
+  AwBrowserContext::FromWebContents(web_contents())
+      ->AddVisitedURLs(params.redirects);
+}
+
 bool AwRenderViewHostExt::OnMessageReceived(const IPC::Message& message) {
   bool handled = true;
   IPC_BEGIN_MESSAGE_MAP(AwRenderViewHostExt, message)
@@ -75,6 +96,8 @@ bool AwRenderViewHostExt::OnMessageReceived(const IPC::Message& message) {
                         OnDocumentHasImagesResponse)
     IPC_MESSAGE_HANDLER(AwViewHostMsg_UpdateHitTestData,
                         OnUpdateHitTestData)
+    IPC_MESSAGE_HANDLER(AwViewHostMsg_PictureUpdated,
+                        OnPictureUpdated)
     IPC_MESSAGE_UNHANDLED(handled = false)
   IPC_END_MESSAGE_MAP()
 
@@ -99,6 +122,26 @@ void AwRenderViewHostExt::OnUpdateHitTestData(
   DCHECK(CalledOnValidThread());
   last_hit_test_data_ = hit_test_data;
   has_new_hit_test_data_ = true;
+}
+
+void AwRenderViewHostExt::OnPictureUpdated() {
+  if (client_)
+    client_->OnPictureUpdated(web_contents()->GetRenderProcessHost()->GetID(),
+                              routing_id());
+}
+
+bool AwRenderViewHostExt::IsRenderViewReady() const {
+  return web_contents()->GetRenderProcessHost()->HasConnection() &&
+      web_contents()->GetRenderViewHost() &&
+      web_contents()->GetRenderViewHost()->IsRenderViewLive();
+}
+
+void AwRenderViewHostExt::CapturePictureSync() {
+  if (!IsRenderViewReady())
+    return;
+
+  ScopedAllowWaitForLegacyWebViewApi wait;
+  Send(new AwViewMsg_CapturePictureSync(web_contents()->GetRoutingID()));
 }
 
 }  // namespace android_webview

@@ -10,10 +10,10 @@
 #include "content/common/icon_messages.h"
 #include "content/public/renderer/render_view.h"
 #include "net/base/data_url.h"
+#include "third_party/WebKit/Source/Platform/chromium/public/WebURLRequest.h"
+#include "third_party/WebKit/Source/Platform/chromium/public/WebVector.h"
 #include "third_party/WebKit/Source/WebKit/chromium/public/WebFrame.h"
 #include "third_party/WebKit/Source/WebKit/chromium/public/WebView.h"
-#include "third_party/WebKit/Source/WebKit/chromium/public/platform/WebURLRequest.h"
-#include "third_party/WebKit/Source/WebKit/chromium/public/platform/WebVector.h"
 #include "ui/base/ui_base_switches.h"
 #include "ui/gfx/favicon_size.h"
 #include "ui/gfx/size.h"
@@ -32,6 +32,7 @@ using webkit_glue::MultiResolutionImageResourceFetcher;
 namespace content {
 
 namespace {
+
 bool TouchEnabled() {
 // Based on the definition of chrome::kEnableTouchIcon.
 #if defined(OS_ANDROID)
@@ -41,7 +42,7 @@ bool TouchEnabled() {
 #endif
 }
 
-} // namespace
+}  // namespace
 
 
 static FaviconURL::IconType ToFaviconType(WebIconURL::Type type) {
@@ -100,7 +101,6 @@ void FaviconHelper::OnDownloadFavicon(int id,
   Send(new IconHostMsg_DidDownloadFavicon(routing_id(),
                                           id,
                                           image_url,
-                                          result_images.empty(),
                                           image_size,
                                           result_images));
 }
@@ -128,7 +128,6 @@ void FaviconHelper::DidDownloadFavicon(
   Send(new IconHostMsg_DidDownloadFavicon(routing_id(),
                                           fetcher->id(),
                                           fetcher->image_url(),
-                                          images.empty(),
                                           requested_size,
                                           images));
 
@@ -189,4 +188,4 @@ void FaviconHelper::DidStopLoading() {
   SendUpdateFaviconURL(routing_id(), render_view()->GetPageId(), urls);
 }
 
-} // namespace content
+}  // namespace content

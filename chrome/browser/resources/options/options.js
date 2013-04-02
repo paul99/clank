@@ -14,8 +14,10 @@ var ContentSettingsExceptionsArea =
     options.contentSettings.ContentSettingsExceptionsArea;
 var ContentSettings = options.ContentSettings;
 var CookiesView = options.CookiesView;
+var CreateProfileOverlay = options.CreateProfileOverlay;
 var EditDictionaryOverlay = cr.IsMac ? null : options.EditDictionaryOverlay;
 var FactoryResetOverlay = options.FactoryResetOverlay;
+var ManagedUserSetPassphraseOverlay = options.ManagedUserSetPassphraseOverlay;
 var ManagedUserSettings = options.ManagedUserSettings;
 var FontSettings = options.FontSettings;
 var HandlerOptions = options.HandlerOptions;
@@ -117,6 +119,8 @@ function load() {
                               ContentSettings.getInstance(),
                               [$('privacyContentSettingsButton'),
                                $('show-cookies-button')]);
+  OptionsPage.registerOverlay(CreateProfileOverlay.getInstance(),
+                              BrowserOptions.getInstance());
   if (!cr.isMac) {
     OptionsPage.registerOverlay(EditDictionaryOverlay.getInstance(),
                                 LanguageOptions.getInstance(),
@@ -141,9 +145,12 @@ function load() {
   OptionsPage.registerOverlay(ManageProfileOverlay.getInstance(),
                               BrowserOptions.getInstance());
   if (loadTimeData.getBoolean('managedUsersEnabled')) {
+    OptionsPage.registerOverlay(ManagedUserSetPassphraseOverlay.getInstance(),
+                                ManagedUserSettings.getInstance(),
+                                [$('set-passphrase')]);
     OptionsPage.registerOverlay(ManagedUserSettings.getInstance(),
                                 BrowserOptions.getInstance(),
-                                []);
+                                [$('managed-user-settings-button')]);
   }
   OptionsPage.registerOverlay(MediaGalleriesManager.getInstance(),
                               ContentSettings.getInstance(),
@@ -178,6 +185,8 @@ function load() {
     OptionsPage.registerOverlay(DisplayOptions.getInstance(),
                                 BrowserOptions.getInstance(),
                                 [$('display-options')]);
+    OptionsPage.registerOverlay(DisplayOverscan.getInstance(),
+                                DisplayOptions.getInstance());
     OptionsPage.registerOverlay(KeyboardOverlay.getInstance(),
                                 BrowserOptions.getInstance(),
                                 [$('keyboard-settings-button')]);

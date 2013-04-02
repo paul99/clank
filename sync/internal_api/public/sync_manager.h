@@ -131,7 +131,7 @@ class SYNC_EXPORT SyncManager {
   // Like ChangeDelegate, except called only on the sync thread and
   // not while a transaction is held.  For objects that want to know
   // when changes happen, but don't need to process them.
-  class ChangeObserver {
+  class SYNC_EXPORT_PRIVATE ChangeObserver {
    public:
     // Ids referred to in |changes| may or may not be in the write
     // transaction specified by |write_transaction_id|.  If they're
@@ -301,7 +301,7 @@ class SYNC_EXPORT SyncManager {
   // TODO(akalin): Replace the |post_factory| parameter with a
   // URLFetcher parameter.
   virtual void Init(
-      const FilePath& database_location,
+      const base::FilePath& database_location,
       const WeakHandle<JsEventHandler>& event_handler,
       const std::string& sync_server_and_path,
       int sync_server_port,
@@ -362,6 +362,9 @@ class SYNC_EXPORT SyncManager {
   // any configuration tasks needed as determined by the params. Once complete,
   // syncer will remain in CONFIGURATION_MODE until StartSyncingNormally is
   // called.
+  // Data whose types are not in |new_routing_info| are purged from sync
+  // directory. The purged data is backed up in delete journal for recovery in
+  // next session if its type is in |failed_types|.
   // |ready_task| is invoked when the configuration completes.
   // |retry_task| is invoked if the configuration job could not immediately
   //              execute. |ready_task| will still be called when it eventually
@@ -369,6 +372,7 @@ class SYNC_EXPORT SyncManager {
   virtual void ConfigureSyncer(
       ConfigureReason reason,
       ModelTypeSet types_to_config,
+      ModelTypeSet failed_types,
       const ModelSafeRoutingInfo& new_routing_info,
       const base::Closure& ready_task,
       const base::Closure& retry_task) = 0;
@@ -422,6 +426,9 @@ class SYNC_EXPORT SyncManager {
 
   // Returns the SyncManager's encryption handler.
   virtual SyncEncryptionHandler* GetEncryptionHandler() = 0;
+
+  // Ask the SyncManager to fetch updates for the given types.
+  virtual void RefreshTypes(ModelTypeSet types) = 0;
 };
 
 }  // namespace syncer

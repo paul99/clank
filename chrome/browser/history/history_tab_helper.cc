@@ -6,9 +6,9 @@
 
 #include <utility>
 
-#include "chrome/browser/history/history.h"
+#include "chrome/browser/history/history_service.h"
 #include "chrome/browser/history/history_service_factory.h"
-#include "chrome/browser/instant/instant_loader.h"
+#include "chrome/browser/instant/instant_overlay.h"
 #include "chrome/browser/prerender/prerender_contents.h"
 #include "chrome/browser/prerender/prerender_manager.h"
 #include "chrome/browser/prerender/prerender_manager_factory.h"
@@ -31,7 +31,7 @@
 using content::NavigationEntry;
 using content::WebContents;
 
-DEFINE_WEB_CONTENTS_USER_DATA_KEY(HistoryTabHelper)
+DEFINE_WEB_CONTENTS_USER_DATA_KEY(HistoryTabHelper);
 
 HistoryTabHelper::HistoryTabHelper(WebContents* web_contents)
     : content::WebContentsObserver(web_contents),
@@ -127,10 +127,10 @@ void HistoryTabHelper::DidNavigateAnyFrame(
     }
   }
 
-  InstantLoader* instant_loader =
-      InstantLoader::FromWebContents(web_contents());
-  if (instant_loader) {
-    instant_loader->DidNavigate(add_page_args);
+  InstantOverlay* instant_overlay =
+      InstantOverlay::FromWebContents(web_contents());
+  if (instant_overlay) {
+    instant_overlay->DidNavigate(add_page_args);
     return;
   }
 

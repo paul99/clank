@@ -28,7 +28,7 @@ namespace views {
 
 void FocusNativeView(gfx::NativeView view) {
 #if defined(USE_AURA)
-  aura::client::GetFocusClient(view)->FocusWindow(view, NULL);
+  aura::client::GetFocusClient(view)->FocusWindow(view);
 #elif defined(OS_WIN)
   SetFocus(view);
 #else
@@ -59,11 +59,11 @@ class SimpleTestView : public View {
     set_id(view_id);
   }
 
-  virtual void OnFocus() {
+  virtual void OnFocus() OVERRIDE {
     event_list_->push_back(FocusTestEvent(ON_FOCUS, id()));
   }
 
-  virtual void OnBlur() {
+  virtual void OnBlur() OVERRIDE {
     event_list_->push_back(FocusTestEvent(ON_BLUR, id()));
   }
 
@@ -576,7 +576,7 @@ class FocusManagerDtorTest : public FocusManagerTest {
         : dtor_tracker_(dtor_tracker) {
     }
 
-    FocusManager* CreateFocusManager(Widget* widget) OVERRIDE {
+    virtual FocusManager* CreateFocusManager(Widget* widget) OVERRIDE {
       return new FocusManagerDtorTracked(widget, dtor_tracker_);
     }
 

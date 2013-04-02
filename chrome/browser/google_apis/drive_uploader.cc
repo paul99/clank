@@ -9,11 +9,12 @@
 #include "base/bind.h"
 #include "base/callback.h"
 #include "base/message_loop.h"
-#include "base/string_number_conversions.h"
+#include "base/strings/string_number_conversions.h"
 #include "chrome/browser/google_apis/drive_service_interface.h"
 #include "chrome/browser/google_apis/drive_upload_mode.h"
 #include "chrome/browser/google_apis/gdata_wapi_parser.h"
 #include "content/public/browser/browser_thread.h"
+#include "content/public/browser/power_save_blocker.h"
 #include "net/base/file_stream.h"
 #include "net/base/net_errors.h"
 
@@ -27,7 +28,7 @@ const int64 kUploadChunkSize = 512 * 1024;
 // Opens |path| with |file_stream| and returns the file size.
 // If failed, returns an error code in a negative value.
 int64 OpenFileStreamAndGetSizeOnBlockingPool(net::FileStream* file_stream,
-                                             const FilePath& path) {
+                                             const base::FilePath& path) {
   int result = file_stream->OpenSync(
       path, base::PLATFORM_FILE_OPEN | base::PLATFORM_FILE_READ);
   if (result != net::OK)
@@ -45,10 +46,11 @@ struct DriveUploader::UploadFileInfo {
   UploadFileInfo(scoped_refptr<base::SequencedTaskRunner> task_runner,
                  UploadMode upload_mode,
                  const GURL& initial_upload_location,
-                 const FilePath& drive_path,
-                 const FilePath& local_path,
+                 const base::FilePath& drive_path,
+                 const base::FilePath& local_path,
                  const std::string& title,
                  const std::string& content_type,
+                 const std::string& etag,
                  const UploadCompletionCallback& callback)
       : upload_mode(upload_mode),
         initial_upload_location(initial_upload_location),
@@ -56,12 +58,16 @@ struct DriveUploader::UploadFileInfo {
         file_path(local_path),
         title(title),
         content_type(content_type),
+        etag(etag),
         completion_callback(callback),
         content_length(0),
         next_send_position(0),
         file_stream(new net::FileStream(NULL)),
         buf(new net::IOBuffer(kUploadChunkSize)),
-        blocking_task_runner(task_runner) {
+        blocking_task_runner(task_runner),
+        power_save_blocker(content::PowerSaveBlocker::Create(
+            content::PowerSaveBlocker::kPowerSaveBlockPreventAppSuspension,
+            "Upload in progress")) {
   }
 
   ~UploadFileInfo() {
@@ -91,16 +97,18 @@ struct DriveUploader::UploadFileInfo {
   const GURL initial_upload_location;
 
   // Final path in gdata. Looks like /special/drive/MyFolder/MyFile.
-  const FilePath drive_path;
+  const base::FilePath drive_path;
 
   // The local file path of the file to be uploaded.
-  const FilePath file_path;
+  const base::FilePath file_path;
 
   // Title to be used for file to be uploaded.
   const std::string title;
 
   // Content-Type of file.
   const std::string content_type;
+
+  const std::string etag;
 
   // Callback to be invoked once the upload has finished.
   const UploadCompletionCallback completion_callback;
@@ -129,6 +137,9 @@ struct DriveUploader::UploadFileInfo {
 
   // Runner for net::FileStream tasks.
   const scoped_refptr<base::SequencedTaskRunner> blocking_task_runner;
+
+  // Blocks system suspend while upload is in progress.
+  scoped_ptr<content::PowerSaveBlocker> power_save_blocker;
 };
 
 DriveUploader::DriveUploader(DriveServiceInterface* drive_service)
@@ -142,8 +153,8 @@ DriveUploader::DriveUploader(DriveServiceInterface* drive_service)
 DriveUploader::~DriveUploader() {}
 
 void DriveUploader::UploadNewFile(const GURL& upload_location,
-                                  const FilePath& drive_file_path,
-                                  const FilePath& local_file_path,
+                                  const base::FilePath& drive_file_path,
+                                  const base::FilePath& local_file_path,
                                   const std::string& title,
                                   const std::string& content_type,
                                   const UploadCompletionCallback& callback) {
@@ -163,15 +174,17 @@ void DriveUploader::UploadNewFile(const GURL& upload_location,
       local_file_path,
       title,
       content_type,
+      "",  // etag
       callback
   )));
 }
 
 void DriveUploader::UploadExistingFile(
     const GURL& upload_location,
-    const FilePath& drive_file_path,
-    const FilePath& local_file_path,
+    const base::FilePath& drive_file_path,
+    const base::FilePath& local_file_path,
     const std::string& content_type,
+    const std::string& etag,
     const UploadCompletionCallback& callback) {
   DCHECK(BrowserThread::CurrentlyOn(BrowserThread::UI));
   DCHECK(!upload_location.is_empty());
@@ -188,6 +201,7 @@ void DriveUploader::UploadExistingFile(
       local_file_path,
       "",  // title : not necessary for update of an existing file.
       content_type,
+      etag,
       callback
   )));
 }
@@ -230,7 +244,8 @@ void DriveUploader::OpenCompletionCallback(
                            info_ptr->content_type,
                            info_ptr->content_length,
                            info_ptr->initial_upload_location,
-                           info_ptr->drive_path),
+                           info_ptr->drive_path,
+                           info_ptr->etag),
       base::Bind(&DriveUploader::OnUploadLocationReceived,
                  weak_ptr_factory_.GetWeakPtr(),
                  base::Passed(&upload_file_info)));
@@ -247,6 +262,11 @@ void DriveUploader::OnUploadLocationReceived(
 
   if (code != HTTP_SUCCESS) {
     // TODO(achuith): Handle error codes from Google Docs server.
+    if (code == HTTP_PRECONDITION) {
+      // ETag mismatch.
+      UploadFailed(upload_file_info.Pass(), DRIVE_UPLOAD_ERROR_CONFLICT);
+      return;
+    }
     UploadFailed(upload_file_info.Pass(), DRIVE_UPLOAD_ERROR_ABORT);
     return;
   }
@@ -323,14 +343,14 @@ void DriveUploader::ReadCompletionCallback(
                          info_ptr->buf,
                          info_ptr->upload_location,
                          info_ptr->drive_path),
-      base::Bind(&DriveUploader::OnResumeUploadResponseReceived,
+      base::Bind(&DriveUploader::OnUploadRangeResponseReceived,
                  weak_ptr_factory_.GetWeakPtr(),
                  base::Passed(&upload_file_info)));
 }
 
-void DriveUploader::OnResumeUploadResponseReceived(
+void DriveUploader::OnUploadRangeResponseReceived(
     scoped_ptr<UploadFileInfo> upload_file_info,
-    const ResumeUploadResponse& response,
+    const UploadRangeResponse& response,
     scoped_ptr<ResourceEntry> entry) {
   DCHECK(BrowserThread::CurrentlyOn(BrowserThread::UI));
 
@@ -345,6 +365,12 @@ void DriveUploader::OnResumeUploadResponseReceived(
                                               upload_file_info->drive_path,
                                               upload_file_info->file_path,
                                               entry.Pass());
+    return;
+  }
+
+  // ETag mismatch.
+  if (response.code == HTTP_PRECONDITION) {
+    UploadFailed(upload_file_info.Pass(), DRIVE_UPLOAD_ERROR_CONFLICT);
     return;
   }
 

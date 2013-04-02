@@ -6,6 +6,7 @@
 
 #include "base/command_line.h"
 #include "base/metrics/histogram.h"
+#include "base/prefs/pref_service.h"
 #include "base/utf_string_conversions.h"
 #include "chrome/browser/bookmarks/bookmark_model.h"
 #include "chrome/browser/bookmarks/bookmark_model_factory.h"
@@ -14,17 +15,18 @@
 #include "chrome/browser/browsing_data/browsing_data_helper.h"
 #include "chrome/browser/browsing_data/browsing_data_remover.h"
 #include "chrome/browser/chrome_page_zoom.h"
-#include "chrome/browser/debugger/devtools_window.h"
+#include "chrome/browser/devtools/devtools_window.h"
 #include "chrome/browser/download/download_util.h"
 #include "chrome/browser/extensions/extension_service.h"
 #include "chrome/browser/extensions/tab_helper.h"
 #include "chrome/browser/favicon/favicon_tab_helper.h"
 #include "chrome/browser/google/google_util.h"
 #include "chrome/browser/lifetime/application_lifetime.h"
+#include "chrome/browser/managed_mode/managed_user_service.h"
+#include "chrome/browser/managed_mode/managed_user_service_factory.h"
 #include "chrome/browser/platform_util.h"
 #include "chrome/browser/prefs/incognito_mode_prefs.h"
-#include "chrome/browser/prefs/pref_service.h"
-#include "chrome/browser/printing/print_preview_tab_controller.h"
+#include "chrome/browser/printing/print_preview_dialog_controller.h"
 #include "chrome/browser/printing/print_view_manager.h"
 #include "chrome/browser/profiles/profile.h"
 #include "chrome/browser/rlz/rlz.h"
@@ -42,7 +44,6 @@
 #include "chrome/browser/ui/browser_tabstrip.h"
 #include "chrome/browser/ui/browser_window.h"
 #include "chrome/browser/ui/chrome_pages.h"
-#include "chrome/browser/ui/constrained_window_tab_helper.h"
 #include "chrome/browser/ui/find_bar/find_bar_controller.h"
 #include "chrome/browser/ui/find_bar/find_tab_helper.h"
 #include "chrome/browser/ui/fullscreen/fullscreen_controller.h"
@@ -51,11 +52,12 @@
 #include "chrome/browser/ui/search/search_model.h"
 #include "chrome/browser/ui/status_bubble.h"
 #include "chrome/browser/ui/tabs/tab_strip_model.h"
+#include "chrome/browser/ui/web_contents_modal_dialog_manager.h"
 #include "chrome/browser/ui/webui/ntp/app_launcher_handler.h"
 #include "chrome/browser/web_applications/web_app.h"
 #include "chrome/common/chrome_switches.h"
 #include "chrome/common/pref_names.h"
-#include "content/public/browser/devtools_agent_host_registry.h"
+#include "content/public/browser/devtools_agent_host.h"
 #include "content/public/browser/navigation_controller.h"
 #include "content/public/browser/navigation_entry.h"
 #include "content/public/browser/page_navigator.h"
@@ -63,14 +65,12 @@
 #include "content/public/browser/user_metrics.h"
 #include "content/public/browser/web_contents.h"
 #include "content/public/browser/web_contents_view.h"
-#include "content/public/browser/web_intents_dispatcher.h"
 #include "content/public/common/content_client.h"
 #include "content/public/common/content_restriction.h"
 #include "content/public/common/renderer_preferences.h"
 #include "content/public/common/url_constants.h"
 #include "net/base/escape.h"
 #include "webkit/glue/glue_serialize.h"
-#include "webkit/glue/web_intent_data.h"
 #include "webkit/user_agent/user_agent_util.h"
 
 #if defined(OS_MACOSX)
@@ -107,7 +107,8 @@ void BookmarkCurrentPageInternal(Browser* browser, bool from_star) {
 
   GURL url;
   string16 title;
-  WebContents* web_contents = GetActiveWebContents(browser);
+  WebContents* web_contents =
+      browser->tab_strip_model()->GetActiveWebContents();
   GetURLAndTitleToBookmark(web_contents, &url, &title);
   bool was_bookmarked = model->IsBookmarked(url);
   if (!was_bookmarked && web_contents->GetBrowserContext()->IsOffTheRecord()) {
@@ -173,22 +174,23 @@ void ReloadInternal(Browser* browser,
     web_contents->GetController().Reload(true);
 }
 
-bool HasConstrainedWindow(const Browser* browser) {
-  WebContents* web_contents = GetActiveWebContents(browser);
+bool IsShowingWebContentsModalDialog(const Browser* browser) {
+  WebContents* web_contents =
+      browser->tab_strip_model()->GetActiveWebContents();
   if (!web_contents)
     return false;
 
-  ConstrainedWindowTabHelper* constrained_window_tab_helper =
-      ConstrainedWindowTabHelper::FromWebContents(web_contents);
-  return constrained_window_tab_helper->constrained_window_count() > 0;
+  WebContentsModalDialogManager* web_contents_modal_dialog_manager =
+      WebContentsModalDialogManager::FromWebContents(web_contents);
+  return web_contents_modal_dialog_manager->IsShowingDialog();
 }
 
 bool PrintPreviewShowing(const Browser* browser) {
   WebContents* contents = browser->tab_strip_model()->GetActiveWebContents();
-  printing::PrintPreviewTabController* controller =
-      printing::PrintPreviewTabController::GetInstance();
-  return controller && (controller->GetPrintPreviewForTab(contents) ||
-                        controller->is_creating_print_preview_tab());
+  printing::PrintPreviewDialogController* controller =
+      printing::PrintPreviewDialogController::GetInstance();
+  return controller && (controller->GetPrintPreviewForContents(contents) ||
+                        controller->is_creating_print_preview_dialog());
 }
 
 bool IsNTPModeForInstantExtendedAPI(const Browser* browser) {
@@ -242,7 +244,7 @@ void RemoveCommandObserver(Browser* browser,
 
 int GetContentRestrictions(const Browser* browser) {
   int content_restrictions = 0;
-  WebContents* current_tab = GetActiveWebContents(browser);
+  WebContents* current_tab = browser->tab_strip_model()->GetActiveWebContents();
   if (current_tab) {
     content_restrictions = current_tab->GetContentRestrictions();
     NavigationEntry* active_entry =
@@ -272,6 +274,13 @@ void NewEmptyWindow(Profile* profile, HostDesktopType desktop_type) {
             *CommandLine::ForCurrentProcess(), prefs)) {
       incognito = true;
     }
+  }
+
+  ManagedUserService* service =
+      ManagedUserServiceFactory::GetForProfile(profile);
+  if (service->ProfileIsManaged()) {
+    content::RecordAction(
+        UserMetricsAction("ManagedMode_NewManagedUserWindow"));
   }
 
   if (incognito) {
@@ -308,23 +317,25 @@ Browser* OpenEmptyWindow(Profile* profile) {
   return OpenEmptyWindow(profile, HOST_DESKTOP_TYPE_NATIVE);
 }
 
-void OpenWindowWithRestoredTabs(Profile* profile) {
+void OpenWindowWithRestoredTabs(Profile* profile,
+                                HostDesktopType host_desktop_type) {
   TabRestoreService* service = TabRestoreServiceFactory::GetForProfile(profile);
   if (service)
-    service->RestoreMostRecentEntry(NULL);
+    service->RestoreMostRecentEntry(NULL, host_desktop_type);
 }
 
 void OpenURLOffTheRecord(Profile* profile,
                          const GURL& url,
                          chrome::HostDesktopType desktop_type) {
-  Browser* browser = browser::FindOrCreateTabbedBrowser(
+  Browser* browser = chrome::FindOrCreateTabbedBrowser(
       profile->GetOffTheRecordProfile(), desktop_type);
   AddSelectedTabWithURL(browser, url, content::PAGE_TRANSITION_LINK);
   browser->window()->Show();
 }
 
 bool CanGoBack(const Browser* browser) {
-  return GetActiveWebContents(browser)->GetController().CanGoBack();
+  return browser->tab_strip_model()->GetActiveWebContents()->
+      GetController().CanGoBack();
 }
 
 void GoBack(Browser* browser, WindowOpenDisposition disposition) {
@@ -342,7 +353,8 @@ void GoBack(Browser* browser, WindowOpenDisposition disposition) {
 }
 
 bool CanGoForward(const Browser* browser) {
-  return GetActiveWebContents(browser)->GetController().CanGoForward();
+  return browser->tab_strip_model()->GetActiveWebContents()->
+      GetController().CanGoForward();
 }
 
 void GoForward(Browser* browser, WindowOpenDisposition disposition) {
@@ -437,7 +449,7 @@ void OpenCurrentURL(Browser* browser) {
 
 void Stop(Browser* browser) {
   content::RecordAction(UserMetricsAction("Stop"));
-  GetActiveWebContents(browser)->Stop();
+  browser->tab_strip_model()->GetActiveWebContents()->Stop();
 }
 
 #if !defined(OS_WIN)
@@ -465,17 +477,18 @@ void NewTab(Browser* browser) {
 
   if (browser->is_type_tabbed()) {
     AddBlankTabAt(browser, -1, true);
-    GetActiveWebContents(browser)->GetView()->RestoreFocus();
+    browser->tab_strip_model()->GetActiveWebContents()->GetView()->
+        RestoreFocus();
   } else {
     Browser* b =
-        browser::FindOrCreateTabbedBrowser(browser->profile(),
-                                           browser->host_desktop_type());
+        chrome::FindOrCreateTabbedBrowser(browser->profile(),
+                                          browser->host_desktop_type());
     AddBlankTabAt(b, -1, true);
     b->window()->Show();
     // The call to AddBlankTabAt above did not set the focus to the tab as its
     // window was not active, so we have to do it explicitly.
     // See http://crbug.com/6380.
-    GetActiveWebContents(b)->GetView()->RestoreFocus();
+    b->tab_strip_model()->GetActiveWebContents()->GetView()->RestoreFocus();
   }
 }
 
@@ -489,7 +502,8 @@ void RestoreTab(Browser* browser) {
   TabRestoreService* service =
       TabRestoreServiceFactory::GetForProfile(browser->profile());
   if (service)
-    service->RestoreMostRecentEntry(browser->tab_restore_service_delegate());
+    service->RestoreMostRecentEntry(browser->tab_restore_service_delegate(),
+                                    browser->host_desktop_type());
 }
 
 bool CanRestoreTab(const Browser* browser) {
@@ -533,7 +547,7 @@ void MoveTabPrevious(Browser* browser) {
 }
 
 void SelectNumberedTab(Browser* browser, int index) {
-  if (index < browser->tab_count()) {
+  if (index < browser->tab_strip_model()->count()) {
     content::RecordAction(UserMetricsAction("SelectNumberedTab"));
     browser->tab_strip_model()->ActivateTabAt(index, true);
   }
@@ -546,11 +560,11 @@ void SelectLastTab(Browser* browser) {
 
 void DuplicateTab(Browser* browser) {
   content::RecordAction(UserMetricsAction("Duplicate"));
-  DuplicateTabAt(browser, browser->active_index());
+  DuplicateTabAt(browser, browser->tab_strip_model()->active_index());
 }
 
 bool CanDuplicateTab(const Browser* browser) {
-  WebContents* contents = GetActiveWebContents(browser);
+  WebContents* contents = browser->tab_strip_model()->GetActiveWebContents();
   return contents && contents->GetController().GetLastCommittedEntry();
 }
 
@@ -611,14 +625,15 @@ WebContents* DuplicateTabAt(Browser* browser, int index) {
 
 bool CanDuplicateTabAt(Browser* browser, int index) {
   content::NavigationController& nc =
-      GetWebContentsAt(browser, index)->GetController();
+      browser->tab_strip_model()->GetWebContentsAt(index)->GetController();
   return nc.GetWebContents() && nc.GetLastCommittedEntry();
 }
 
 void ConvertPopupToTabbedBrowser(Browser* browser) {
   content::RecordAction(UserMetricsAction("ShowAsTab"));
+  TabStripModel* tab_strip = browser->tab_strip_model();
   WebContents* contents =
-      browser->tab_strip_model()->DetachWebContentsAt(browser->active_index());
+      tab_strip->DetachWebContentsAt(tab_strip->active_index());
   Browser* b = new Browser(Browser::CreateParams(browser->profile(),
                                                  browser->host_desktop_type()));
   b->tab_strip_model()->AppendWebContents(contents, true);
@@ -652,19 +667,21 @@ void BookmarkAllTabs(Browser* browser) {
 }
 
 bool CanBookmarkAllTabs(const Browser* browser) {
-  return browser->tab_count() > 1 && CanBookmarkCurrentPage(browser);
+  return browser->tab_strip_model()->count() > 1 &&
+             CanBookmarkCurrentPage(browser);
 }
 
 void TogglePagePinnedToStartScreen(Browser* browser) {
 #if defined(OS_WIN)
-  MetroPinTabHelper::FromWebContents(GetActiveWebContents(browser))->
-      TogglePinnedToStartScreen();
+  MetroPinTabHelper::FromWebContents(
+      browser->tab_strip_model()->GetActiveWebContents())->
+          TogglePinnedToStartScreen();
 #endif
 }
 
 void SavePage(Browser* browser) {
   content::RecordAction(UserMetricsAction("SavePage"));
-  WebContents* current_tab = GetActiveWebContents(browser);
+  WebContents* current_tab = browser->tab_strip_model()->GetActiveWebContents();
   if (current_tab && current_tab->GetContentsMimeType() == "application/pdf")
     content::RecordAction(UserMetricsAction("PDF.SavePage"));
   current_tab->OnSavePage();
@@ -685,20 +702,16 @@ void ShowFindBar(Browser* browser) {
   browser->GetFindBarController()->Show();
 }
 
-void ShowPageInfo(Browser* browser,
-                  content::WebContents* web_contents,
-                  const GURL& url,
-                  const SSLStatus& ssl,
-                  bool show_history) {
+void ShowWebsiteSettings(Browser* browser,
+                         content::WebContents* web_contents,
+                         const GURL& url,
+                         const SSLStatus& ssl,
+                         bool show_history) {
   Profile* profile = Profile::FromBrowserContext(
       web_contents->GetBrowserContext());
-  if (CommandLine::ForCurrentProcess()->HasSwitch(
-      switches::kDisableWebsiteSettings)) {
-    browser->window()->ShowPageInfo(web_contents, url, ssl, show_history);
-  } else {
-    browser->window()->ShowWebsiteSettings(
-        profile, web_contents, url, ssl, show_history);
-  }
+
+  browser->window()->ShowWebsiteSettings(
+      profile, web_contents, url, ssl, show_history);
 }
 
 void ShowChromeToMobileBubble(Browser* browser) {
@@ -711,12 +724,12 @@ void ShowChromeToMobileBubble(Browser* browser) {
 void Print(Browser* browser) {
   printing::PrintViewManager* print_view_manager =
       printing::PrintViewManager::FromWebContents(
-          GetActiveWebContents(browser));
+          browser->tab_strip_model()->GetActiveWebContents());
   if (browser->profile()->GetPrefs()->GetBoolean(
       prefs::kPrintPreviewDisabled))
     print_view_manager->PrintNow();
   else
-    print_view_manager->PrintPreviewNow();
+    print_view_manager->PrintPreviewNow(false);
 }
 
 bool CanPrint(const Browser* browser) {
@@ -724,7 +737,7 @@ bool CanPrint(const Browser* browser) {
   // Do not print when a constrained window is showing. It's confusing.
   // Do not print if instant extended API is enabled and mode is NTP.
   return browser->profile()->GetPrefs()->GetBoolean(prefs::kPrintingEnabled) &&
-      !(HasConstrainedWindow(browser) ||
+      !(IsShowingWebContentsModalDialog(browser) ||
       GetContentRestrictions(browser) & content::CONTENT_RESTRICTION_PRINT ||
       IsNTPModeForInstantExtendedAPI(browser));
 }
@@ -732,7 +745,7 @@ bool CanPrint(const Browser* browser) {
 void AdvancedPrint(Browser* browser) {
   printing::PrintViewManager* print_view_manager =
       printing::PrintViewManager::FromWebContents(
-          GetActiveWebContents(browser));
+          browser->tab_strip_model()->GetActiveWebContents());
   print_view_manager->AdvancedPrintNow();
 }
 
@@ -746,13 +759,13 @@ bool CanAdvancedPrint(const Browser* browser) {
 void PrintToDestination(Browser* browser) {
   printing::PrintViewManager* print_view_manager =
       printing::PrintViewManager::FromWebContents(
-          GetActiveWebContents(browser));
+          browser->tab_strip_model()->GetActiveWebContents());
   print_view_manager->PrintToDestination();
 }
 
 void EmailPageLocation(Browser* browser) {
   content::RecordAction(UserMetricsAction("EmailPageLocation"));
-  WebContents* wc = GetActiveWebContents(browser);
+  WebContents* wc = browser->tab_strip_model()->GetActiveWebContents();
   DCHECK(wc);
 
   std::string title = net::EscapeQueryParamValue(
@@ -765,7 +778,7 @@ void EmailPageLocation(Browser* browser) {
 
 bool CanEmailPageLocation(const Browser* browser) {
   return browser->toolbar_model()->ShouldDisplayURL() &&
-      GetActiveWebContents(browser)->GetURL().is_valid();
+      browser->tab_strip_model()->GetActiveWebContents()->GetURL().is_valid();
 }
 
 void Cut(Browser* browser) {
@@ -806,10 +819,11 @@ void FindInPage(Browser* browser, bool find_next, bool forward_direction) {
     // We always want to search for the contents of the find pasteboard on OS X.
     find_text = GetFindPboardText();
 #endif
-    FindTabHelper::FromWebContents(GetActiveWebContents(browser))->
-        StartFinding(find_text,
-                     forward_direction,
-                     false);  // Not case sensitive.
+    FindTabHelper::FromWebContents(
+        browser->tab_strip_model()->GetActiveWebContents())->
+            StartFinding(find_text,
+                         forward_direction,
+                         false);  // Not case sensitive.
   }
 }
 
@@ -817,7 +831,8 @@ void Zoom(Browser* browser, content::PageZoom zoom) {
   if (browser->is_devtools())
     return;
 
-  chrome_page_zoom::Zoom(GetActiveWebContents(browser), zoom);
+  chrome_page_zoom::Zoom(browser->tab_strip_model()->GetActiveWebContents(),
+                         zoom);
 }
 
 void FocusToolbar(Browser* browser) {
@@ -906,7 +921,8 @@ void OpenUpdateChromeDialog(Browser* browser) {
 }
 
 void ToggleSpeechInput(Browser* browser) {
-  GetActiveWebContents(browser)->GetRenderViewHost()->ToggleSpeechInput();
+  browser->tab_strip_model()->GetActiveWebContents()->
+      GetRenderViewHost()->ToggleSpeechInput();
 }
 
 bool CanRequestTabletSite(WebContents* current_tab) {
@@ -916,7 +932,7 @@ bool CanRequestTabletSite(WebContents* current_tab) {
 }
 
 bool IsRequestingTabletSite(Browser* browser) {
-  WebContents* current_tab = chrome::GetActiveWebContents(browser);
+  WebContents* current_tab = browser->tab_strip_model()->GetActiveWebContents();
   if (!current_tab)
     return false;
   content::NavigationEntry* entry =
@@ -927,7 +943,7 @@ bool IsRequestingTabletSite(Browser* browser) {
 }
 
 void ToggleRequestTabletSite(Browser* browser) {
-  WebContents* current_tab = GetActiveWebContents(browser);
+  WebContents* current_tab = browser->tab_strip_model()->GetActiveWebContents();
   if (!current_tab)
     return;
   NavigationController& controller = current_tab->GetController();
@@ -959,9 +975,9 @@ void ClearCache(Browser* browser) {
 }
 
 bool IsDebuggerAttachedToCurrentTab(Browser* browser) {
-  WebContents* contents = chrome::GetActiveWebContents(browser);
+  WebContents* contents = browser->tab_strip_model()->GetActiveWebContents();
   return contents ?
-      content::DevToolsAgentHostRegistry::IsDebuggerAttached(contents) : false;
+      content::DevToolsAgentHost::IsDebuggerAttached(contents) : false;
 }
 
 void ViewSource(Browser* browser, WebContents* contents) {
@@ -1052,13 +1068,15 @@ bool CanViewSource(const Browser* browser) {
 
 void CreateApplicationShortcuts(Browser* browser) {
   content::RecordAction(UserMetricsAction("CreateShortcut"));
-  extensions::TabHelper::FromWebContents(GetActiveWebContents(browser))->
-      CreateApplicationShortcuts();
+  extensions::TabHelper::FromWebContents(
+      browser->tab_strip_model()->GetActiveWebContents())->
+          CreateApplicationShortcuts();
 }
 
 bool CanCreateApplicationShortcuts(const Browser* browser) {
-  return extensions::TabHelper::FromWebContents(GetActiveWebContents(browser))->
-      CanCreateApplicationShortcuts();
+  return extensions::TabHelper::FromWebContents(
+      browser->tab_strip_model()->GetActiveWebContents())->
+          CanCreateApplicationShortcuts();
 }
 
 void ConvertTabToAppWindow(Browser* browser,

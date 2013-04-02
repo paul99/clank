@@ -2,9 +2,10 @@
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
+#include <iomanip>
 #include <windows.h>
-#include <setupapi.h>  // Must be included after windows.h
 #include <winspool.h>
+#include <setupapi.h>  // Must be included after windows.h
 
 #include "base/at_exit.h"
 #include "base/command_line.h"
@@ -40,7 +41,13 @@ const wchar_t kUninstallRegistry[] =
 const wchar_t kInstallerName[] = L"virtual_driver_setup.exe";
 const wchar_t kGcpUrl[] = L"http://www.google.com/cloudprint";
 
-void SetOmahaKeys() {
+const char kDoUninstallSwitch[] = "douninstall";
+const char kInstallSwitch[] = "install";
+const char kRegisterSwitch[] = "register";
+const char kUninstallSwitch[] = "uninstall";
+const char kUnregisterSwitch[] = "unregister";
+
+void SetGoogleUpdateKeys() {
   base::win::RegKey key;
   if (key.Create(HKEY_LOCAL_MACHINE, cloud_print::kKeyLocation,
                  KEY_SET_VALUE) != ERROR_SUCCESS) {
@@ -58,7 +65,7 @@ void SetOmahaKeys() {
     version_string = version_info_win->product_version();
   } else {
     LOG(ERROR) << "Unable to get version string";
-    // Use a random version string so that Omaha has something to go by.
+    // Use a random version string so that Google Update has something to go by.
     version_string = L"0.0.0.99";
   }
 
@@ -68,7 +75,7 @@ void SetOmahaKeys() {
   }
 }
 
-void DeleteOmahaKeys() {
+void DeleteGoogleUpdateKeys() {
   base::win::RegKey key;
   if (key.Open(HKEY_LOCAL_MACHINE, cloud_print::kKeyLocation,
                DELETE) != ERROR_SUCCESS) {
@@ -80,64 +87,69 @@ void DeleteOmahaKeys() {
   }
 }
 
-HRESULT GetNativeSystemPath(FilePath* path) {
-  if (cloud_print::IsSystem64Bit()) {
-    if (!PathService::Get(base::DIR_WINDOWS, path)) {
-      return ERROR_PATH_NOT_FOUND;
-    }
-    // Sysnative will bypass filesystem redirection and give us
-    // the location of the 64bit system32 from a 32 bit process.
-    *path = path->Append(L"sysnative");
-  } else {
-    if (!PathService::Get(base::DIR_SYSTEM, path)) {
-      LOG(ERROR) << "Unable to get system path.";
-      return ERROR_PATH_NOT_FOUND;
-    }
+FilePath GetSystemPath(const string16& binary) {
+  FilePath path;
+  if (!PathService::Get(base::DIR_SYSTEM, &path)) {
+    LOG(ERROR) << "Unable to get system path.";
+    return path;
   }
-  return S_OK;
+  return path.Append(binary);
 }
 
-HRESULT GetPortMonitorTargetPath(FilePath* path) {
-  HRESULT result = GetNativeSystemPath(path);
-  if (SUCCEEDED(result))
-    *path = path->Append(cloud_print::GetPortMonitorDllName());
-  return result;
+FilePath GetNativeSystemPath(const string16& binary) {
+  if (!cloud_print::IsSystem64Bit())
+    return GetSystemPath(binary);
+  FilePath path;
+  // Sysnative will bypass filesystem redirection and give us
+  // the location of the 64bit system32 from a 32 bit process.
+  if (!PathService::Get(base::DIR_WINDOWS, &path)) {
+    LOG(ERROR) << "Unable to get windows path.";
+    return path;
+  }
+  return path.Append(L"sysnative").Append(binary);
 }
 
-HRESULT GetRegsvr32Path(FilePath* path) {
-  HRESULT result = GetNativeSystemPath(path);
-  if (SUCCEEDED(result))
-    *path = path->Append(FilePath(L"regsvr32.exe"));
-  return result;
+void SpoolerServiceCommand(const char* command) {
+  FilePath net_path = GetNativeSystemPath(L"net");
+  if (net_path.empty())
+    return;
+  CommandLine command_line(net_path);
+  command_line.AppendArg(command);
+  command_line.AppendArg("spooler");
+  command_line.AppendArg("/y");
+
+  base::LaunchOptions options;
+  options.wait = true;
+  options.start_hidden = true;
+  LOG(INFO) << command_line.GetCommandLineString();
+  base::LaunchProcess(command_line, options, NULL);
 }
 
 HRESULT RegisterPortMonitor(bool install, const FilePath& install_path) {
-  FilePath target_path;
-  HRESULT result = S_OK;
-  result = GetPortMonitorTargetPath(&target_path);
-  if (!SUCCEEDED(result)) {
+  DCHECK(install || install_path.empty());
+  FilePath target_path =
+      GetNativeSystemPath(cloud_print::GetPortMonitorDllName());
+  if (target_path.empty()) {
     LOG(ERROR) << "Unable to get port monitor target path.";
-    return result;
+    return HRESULT_FROM_WIN32(ERROR_PATH_NOT_FOUND);
   }
-  string16 source;
-  source = cloud_print::GetPortMonitorDllName();
-  FilePath source_path = install_path.Append(source);
   if (install) {
-    if (!file_util::CopyFileW(source_path, target_path)) {
+    FilePath source_path =
+        install_path.Append(cloud_print::GetPortMonitorDllName());
+    if (!file_util::CopyFile(source_path, target_path)) {
       LOG(ERROR) << "Unable copy port monitor dll from " <<
           source_path.value() << " to " << target_path.value();
-      return ERROR_ACCESS_DENIED;
+      return cloud_print::GetLastHResult();
     }
-  } else if (!file_util::PathExists(source_path)) {
+  } else if (!file_util::PathExists(target_path)) {
     // Already removed.  Just "succeed" silently.
     return S_OK;
   }
 
-  FilePath regsvr32_path;
-  result = GetRegsvr32Path(&regsvr32_path);
-  if (!SUCCEEDED(result)) {
+  FilePath regsvr32_path = GetNativeSystemPath(L"regsvr32.exe");
+  if (regsvr32_path.empty()) {
     LOG(ERROR) << "Can't find regsvr32.exe.";
-    return result;
+    return HRESULT_FROM_WIN32(ERROR_PATH_NOT_FOUND);
   }
 
   CommandLine command_line(regsvr32_path);
@@ -146,29 +158,24 @@ HRESULT RegisterPortMonitor(bool install, const FilePath& install_path) {
     command_line.AppendArg("/u");
   }
 
-  FilePath final_path;
-  if (!PathService::Get(base::DIR_SYSTEM, &final_path)) {
-    LOG(ERROR) << "Unable to get system path.";
-    return ERROR_PATH_NOT_FOUND;
-  }
-  final_path = final_path.Append(cloud_print::GetPortMonitorDllName());
-  command_line.AppendArgPath(final_path);
+  // Use system32 path here because otherwise ::AddMonitor would fail.
+  command_line.AppendArgPath(GetSystemPath(
+      cloud_print::GetPortMonitorDllName()));
 
   base::LaunchOptions options;
-  HANDLE process_handle;
   options.wait = true;
-  if (!base::LaunchProcess(command_line, options, &process_handle)) {
+
+  base::win::ScopedHandle regsvr32_handle;
+  if (!base::LaunchProcess(command_line, options, regsvr32_handle.Receive())) {
     LOG(ERROR) << "Unable to launch regsvr32.exe.";
-    return ERROR_NOT_SUPPORTED;
+    return HRESULT_FROM_WIN32(ERROR_NOT_SUPPORTED);
   }
-  base::win::ScopedHandle scoped_process_handle(process_handle);
 
   DWORD exit_code = S_OK;
   if (install) {
-    if (!GetExitCodeProcess(scoped_process_handle, &exit_code)) {
-      HRESULT result = cloud_print::GetLastHResult();
+    if (!GetExitCodeProcess(regsvr32_handle, &exit_code)) {
       LOG(ERROR) << "Unable to get regsvr32.exe exit code.";
-      return result;
+      return cloud_print::GetLastHResult();;
     }
     if (exit_code != 0) {
       LOG(ERROR) << "Regsvr32.exe failed with " << exit_code;
@@ -176,8 +183,14 @@ HRESULT RegisterPortMonitor(bool install, const FilePath& install_path) {
     }
   } else {
     if (!file_util::Delete(target_path, false)) {
-      LOG(ERROR) << "Unable to delete " << target_path.value();
-      return ERROR_ACCESS_DENIED;
+      SpoolerServiceCommand("stop");
+      bool deleted = file_util::Delete(target_path, false);
+      SpoolerServiceCommand("start");
+
+      if(!deleted) {
+        LOG(ERROR) << "Unable to delete " << target_path.value();
+        return HRESULT_FROM_WIN32(ERROR_ACCESS_DENIED);
+      }
     }
   }
   return S_OK;
@@ -306,7 +319,7 @@ HRESULT InstallPpd(const FilePath& install_path) {
 }
 
 HRESULT UninstallPpd() {
-  int tries = 10;
+  int tries = 3;
   string16 driver_name = cloud_print::LoadLocalString(IDS_DRIVER_NAME);
   while (!DeletePrinterDriverEx(NULL,
                                 NULL,
@@ -425,35 +438,33 @@ bool IsOSSupported() {
        (base::win::OSInfo::GetInstance()->service_pack().major >= 3));
 }
 
-HRESULT InstallVirtualDriver(const FilePath& install_path) {
+HRESULT RegisterVirtualDriver(const FilePath& install_path) {
   HRESULT result = S_OK;
 
+  DCHECK(file_util::DirectoryExists(install_path));
   if (!IsOSSupported()) {
     LOG(ERROR) << "Requires XP SP3 or later.";
-    return ERROR_OLD_WIN_VERSION;
+    return HRESULT_FROM_WIN32(ERROR_OLD_WIN_VERSION);
   }
 
-  if (!file_util::CreateDirectory(install_path)) {
-    LOG(ERROR) << "Can't create install directory.";
-    return ERROR_ACCESS_DENIED;
-  }
-  SetupUninstall(install_path);
   result = RegisterPortMonitor(true, install_path);
-  if (!SUCCEEDED(result)) {
+  if (FAILED(result)) {
     LOG(ERROR) << "Unable to register port monitor.";
     return result;
   }
+
   result = InstallPpd(install_path);
-  if (!SUCCEEDED(result)) {
+  if (FAILED(result)) {
     LOG(ERROR) << "Unable to install Ppd.";
     return result;
   }
+
   result = InstallPrinter();
-  if (!SUCCEEDED(result)) {
+  if (FAILED(result) &&
+      result != HRESULT_FROM_WIN32(ERROR_PRINTER_ALREADY_EXISTS)) {
     LOG(ERROR) << "Unable to install printer.";
     return result;
   }
-  SetOmahaKeys();
   return S_OK;
 }
 
@@ -470,37 +481,39 @@ void GetCurrentInstallPath(FilePath* install_path) {
   *install_path = FilePath(install_path_value);
 }
 
-HRESULT UninstallVirtualDriver() {
-  FilePath install_path;
-  GetCurrentInstallPath(&install_path);
-  if (install_path.value().empty()) {
-    return S_OK;
-  }
+HRESULT TryUnregisterVirtualDriver() {
   HRESULT result = S_OK;
   result = UninstallPrinter();
-  if (!SUCCEEDED(result)) {
-    LOG(ERROR) << "Unable to uninstall Ppd.";
+  if (FAILED(result)) {
+    LOG(ERROR) << "Unable to delete printer.";
     return result;
   }
   result = UninstallPpd();
-  if (!SUCCEEDED(result)) {
-    LOG(ERROR) << "Unable to remove Ppd.";
-    // Put the printer back since we're not able to
-    // complete the uninstallation.
-    // TODO(abodenha@chromium.org) Figure out a better way to recover.
-    // See http://code.google.com/p/chromium/issues/detail?id=123039
-    InstallPrinter();
+  if (FAILED(result)) {
+    LOG(ERROR) << "Unable to remove PPD.";
     return result;
   }
-  result = RegisterPortMonitor(false, install_path);
-  if (!SUCCEEDED(result)) {
+  // The second argument is ignored if the first is false.
+  result = RegisterPortMonitor(false, FilePath());
+  if (FAILED(result)) {
     LOG(ERROR) << "Unable to remove port monitor.";
     return result;
   }
-  DeleteOmahaKeys();
-  file_util::Delete(install_path, true);
-  CleanupUninstall();
   return S_OK;
+}
+
+HRESULT UnregisterVirtualDriver() {
+  HRESULT hr = S_FALSE;
+  for (int i = 0; i < 2; ++i) {
+    hr = TryUnregisterVirtualDriver();
+    if (SUCCEEDED(hr)) {
+      break;
+    }
+    // Restart spooler and try again.
+    SpoolerServiceCommand("stop");
+    SpoolerServiceCommand("start");
+  }
+  return hr;
 }
 
 HRESULT DoLaunchUninstall(const FilePath& installer_source, bool wait) {
@@ -509,13 +522,13 @@ HRESULT DoLaunchUninstall(const FilePath& installer_source, bool wait) {
     file_util::CopyFile(installer_source, temp_path);
     file_util::DeleteAfterReboot(temp_path);
     CommandLine command_line(temp_path);
-    command_line.AppendArg("--douninstall");
+    command_line.AppendArg(kDoUninstallSwitch);
     base::LaunchOptions options;
     options.wait = wait;
     base::ProcessHandle process_handle;
     if (!base::LaunchProcess(command_line, options, &process_handle)) {
       LOG(ERROR) << "Unable to launch child uninstall.";
-      return ERROR_NOT_SUPPORTED;
+      return HRESULT_FROM_WIN32(ERROR_NOT_SUPPORTED);
     }
     if (wait) {
       int exit_code = -1;
@@ -540,21 +553,76 @@ HRESULT LaunchChildForUninstall() {
   return S_OK;
 }
 
-HRESULT UninstallPreviousVersion() {
-  base::win::RegKey key;
-  if (key.Open(HKEY_LOCAL_MACHINE, kUninstallRegistry,
-               KEY_QUERY_VALUE) != ERROR_SUCCESS) {
-    // Not installed.
-    return S_OK;
+HRESULT DoUnregister() {
+  return UnregisterVirtualDriver();
+}
+
+HRESULT DoRegister(const FilePath& install_path) {
+  HRESULT result = UnregisterVirtualDriver();
+  if (FAILED(result))
+    return result;
+  return RegisterVirtualDriver(install_path);
+}
+
+HRESULT DoUninstall() {
+  FilePath install_path;
+  GetCurrentInstallPath(&install_path);
+  if (install_path.value().empty()) {
+    return S_FALSE;
   }
-  string16 install_path;
-  key.ReadValue(L"InstallLocation", &install_path);
-  FilePath installer_source(install_path);
-  installer_source = installer_source.Append(kInstallerName);
-  if (file_util::PathExists(installer_source)) {
-    return DoLaunchUninstall(installer_source, true);
+  HRESULT result = UnregisterVirtualDriver();
+  if (FAILED(result))
+    return result;
+  DeleteGoogleUpdateKeys();
+  if (file_util::DirectoryExists(install_path))
+    file_util::Delete(install_path, true);
+  CleanupUninstall();
+  return result;
+}
+
+HRESULT DoInstall(const FilePath& install_path) {
+  HRESULT result = UnregisterVirtualDriver();
+  if (FAILED(result)) {
+    LOG(ERROR) << "Unable to unregister.";
+    return result;
   }
-  return S_OK;
+  FilePath old_install_path;
+  GetCurrentInstallPath(&old_install_path);
+  if (!old_install_path.value().empty() &&
+      install_path != old_install_path) {
+    if (file_util::DirectoryExists(old_install_path))
+      file_util::Delete(old_install_path, true);
+  }
+  SetupUninstall(install_path);
+  result = RegisterVirtualDriver(install_path);
+  if (FAILED(result))
+    return result;
+  SetGoogleUpdateKeys();
+  return result;
+}
+
+HRESULT ExecuteCommands() {
+  const CommandLine& command_line = *CommandLine::ForCurrentProcess();
+
+  FilePath exe_path;
+  if (FAILED(PathService::Get(base::DIR_EXE, &exe_path)) ||
+      !file_util::DirectoryExists(exe_path)) {
+    return HRESULT_FROM_WIN32(ERROR_PATH_NOT_FOUND);
+  }
+
+  if (command_line.HasSwitch(kDoUninstallSwitch)) {
+    return DoUninstall();
+  } else if (command_line.HasSwitch(kUninstallSwitch)) {
+    return LaunchChildForUninstall();
+  } else if (command_line.HasSwitch(kInstallSwitch)) {
+    return DoInstall(exe_path);
+  } else if (command_line.HasSwitch(kUnregisterSwitch)) {
+    return DoUnregister();
+  } else if (command_line.HasSwitch(kRegisterSwitch)) {
+    return DoRegister(exe_path);
+  }
+
+  return E_INVALIDARG;
 }
 
 }  // namespace
@@ -565,22 +633,11 @@ int WINAPI WinMain(__in  HINSTANCE hInstance,
             __in  int nCmdShow) {
   base::AtExitManager at_exit_manager;
   CommandLine::Init(0, NULL);
-  HRESULT retval = S_OK;
-  if (CommandLine::ForCurrentProcess()->HasSwitch("douninstall")) {
-    retval = UninstallVirtualDriver();
-  } else if (CommandLine::ForCurrentProcess()->HasSwitch("uninstall")) {
-    retval = LaunchChildForUninstall();
-  } else {
-    retval = UninstallPreviousVersion();
-    if (SUCCEEDED(retval)) {
-      FilePath install_path;
-      retval = PathService::Get(base::DIR_EXE, &install_path);
-      if (SUCCEEDED(retval)) {
-        retval = InstallVirtualDriver(install_path);
-      }
-    }
-  }
-  // Installer is silent by default as required by Omaha.
+  HRESULT retval = ExecuteCommands();
+
+  LOG(INFO) << "HRESULT=0x" << std::setbase(16) << retval;
+
+  // Installer is silent by default as required by Google Update.
   if (CommandLine::ForCurrentProcess()->HasSwitch("verbose")) {
     cloud_print::DisplayWindowsMessage(NULL, retval,
         cloud_print::LoadLocalString(IDS_DRIVER_NAME));

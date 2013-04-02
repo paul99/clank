@@ -208,7 +208,8 @@ TEST_F(ActivationControllerTest, ClickOnMenu) {
   EXPECT_EQ(NULL, wm::GetActiveWindow());
 
   // Clicking on an activatable window activates the window.
-  aura::test::EventGenerator generator(Shell::GetPrimaryRootWindow(), w1.get());
+  aura::test::EventGenerator& generator(GetEventGenerator());
+  generator.MoveMouseToCenterOf(w1.get());
   generator.ClickLeftButton();
   EXPECT_TRUE(wm::IsActiveWindow(w1.get()));
 
@@ -530,6 +531,50 @@ TEST_F(ActivationControllerTest, ActivateLockScreen) {
   lock_container->layer()->SetVisible(false);
   w1->Focus();
   EXPECT_TRUE(w1->HasFocus());
+}
+
+#if defined(OS_WIN)
+// Multiple displays are not supported on Windows Ash. http://crbug.com/165962
+#define MAYBE_NextActiveWindowOnMultipleDisplays \
+        DISABLED_NextActiveWindowOnMultipleDisplays
+#else
+#define MAYBE_NextActiveWindowOnMultipleDisplays \
+        NextActiveWindowOnMultipleDisplays
+#endif
+
+// Verifies that a next active window is chosen from current
+// active display.
+TEST_F(ActivationControllerTest, MAYBE_NextActiveWindowOnMultipleDisplays) {
+  UpdateDisplay("300x300,300x300");
+  Shell::RootWindowList root_windows = Shell::GetAllRootWindows();
+
+  scoped_ptr<aura::Window> w1_d1(CreateTestWindowInShellWithBounds(
+      gfx::Rect(10, 10, 100, 100)));
+  scoped_ptr<aura::Window> w2_d1(CreateTestWindowInShellWithBounds(
+      gfx::Rect(20, 20, 100, 100)));
+
+  EXPECT_EQ(root_windows[0], w1_d1->GetRootWindow());
+  EXPECT_EQ(root_windows[0], w2_d1->GetRootWindow());
+
+  scoped_ptr<aura::Window> w3_d2(CreateTestWindowInShellWithBounds(
+      gfx::Rect(310, 10, 100, 100)));
+  scoped_ptr<aura::Window> w4_d2(CreateTestWindowInShellWithBounds(
+      gfx::Rect(320, 20, 100, 100)));
+  EXPECT_EQ(root_windows[1], w3_d2->GetRootWindow());
+  EXPECT_EQ(root_windows[1], w4_d2->GetRootWindow());
+
+  aura::client::ActivationClient* client =
+      aura::client::GetActivationClient(root_windows[0]);
+  client->ActivateWindow(w1_d1.get());
+  EXPECT_EQ(w1_d1.get(), client->GetActiveWindow());
+
+  w1_d1.reset();
+  EXPECT_EQ(w2_d1.get(), client->GetActiveWindow());
+
+  client->ActivateWindow(w3_d2.get());
+  EXPECT_EQ(w3_d2.get(), client->GetActiveWindow());
+  w3_d2.reset();
+  EXPECT_EQ(w4_d2.get(), client->GetActiveWindow());
 }
 
 }  // namespace test

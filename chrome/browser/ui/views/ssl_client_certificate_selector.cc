@@ -141,7 +141,7 @@ void SSLClientCertificateSelector::Init() {
 
   StartObserving();
 
-  window_ = new ConstrainedWindowViews(web_contents_, this);
+  window_ = ConstrainedWindowViews::Create(web_contents_, this);
 
   // Select the first row automatically.  This must be done after the dialog has
   // been created.
@@ -163,7 +163,7 @@ net::X509Certificate* SSLClientCertificateSelector::GetSelectedCert() const {
 void SSLClientCertificateSelector::OnCertSelectedByNotification() {
   DVLOG(1) << __FUNCTION__;
   DCHECK(window_);
-  window_->CloseConstrainedWindow();
+  window_->CloseWebContentsModalDialog();
 }
 
 ///////////////////////////////////////////////////////////////////////////////
@@ -213,10 +213,6 @@ views::View* SSLClientCertificateSelector::GetInitiallyFocusedView() {
   return table_;
 }
 
-views::View* SSLClientCertificateSelector::GetContentsView() {
-  return this;
-}
-
 views::View* SSLClientCertificateSelector::GetExtraView() {
   return view_cert_button_container_;
 }
@@ -251,7 +247,7 @@ void SSLClientCertificateSelector::OnSelectionChanged() {
 
 void SSLClientCertificateSelector::OnDoubleClick() {
   if (Accept())
-    window_->CloseConstrainedWindow();
+    window_->CloseWebContentsModalDialog();
 }
 
 ///////////////////////////////////////////////////////////////////////////////

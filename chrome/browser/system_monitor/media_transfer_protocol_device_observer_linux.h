@@ -9,10 +9,12 @@
 #include <string>
 
 #include "base/string16.h"
-#include "base/system_monitor/system_monitor.h"
-#include "chrome/browser/media_transfer_protocol/media_transfer_protocol_manager.h"
+#include "chrome/browser/system_monitor/removable_storage_notifications.h"
+#include "device/media_transfer_protocol/media_transfer_protocol_manager.h"
 
+namespace base {
 class FilePath;
+}
 
 namespace chrome {
 
@@ -24,9 +26,9 @@ typedef void (*GetStorageInfoFunc)(const std::string& storage_name,
                                    std::string* location);
 
 // Helper class to send MTP storage attachment and detachment events to
-// SystemMonitor.
+// RemovableStorageNotifications.
 class MediaTransferProtocolDeviceObserverLinux
-    : public MediaTransferProtocolManager::Observer {
+    : public device::MediaTransferProtocolManager::Observer {
  public:
   // Should only be called by browser start up code. Use GetInstance() instead.
   MediaTransferProtocolDeviceObserverLinux();
@@ -37,22 +39,26 @@ class MediaTransferProtocolDeviceObserverLinux
   // Finds the storage that contains |path| and populates |storage_info|.
   // Returns false if unable to find the storage.
   bool GetStorageInfoForPath(
-      const FilePath& path,
-      base::SystemMonitor::RemovableStorageInfo* storage_info) const;
+      const base::FilePath& path,
+      RemovableStorageNotifications::StorageInfo* storage_info) const;
+
+  // Set the volume notifications object to be used when new
+  // MTP devices are found.
+  void SetNotifications(RemovableStorageNotifications::Receiver* notifications);
 
  protected:
   // Only used in unit tests.
   explicit MediaTransferProtocolDeviceObserverLinux(
       GetStorageInfoFunc get_storage_info_func);
 
-  // MediaTransferProtocolManager::Observer implementation.
+  // device::MediaTransferProtocolManager::Observer implementation.
   // Exposed for unit tests.
   virtual void StorageChanged(bool is_attached,
                               const std::string& storage_name) OVERRIDE;
 
  private:
   // Mapping of storage location and mtp storage info object.
-  typedef std::map<std::string, base::SystemMonitor::RemovableStorageInfo>
+  typedef std::map<std::string, RemovableStorageNotifications::StorageInfo>
       StorageLocationToInfoMap;
 
   // Enumerate existing mtp storage devices.
@@ -64,6 +70,12 @@ class MediaTransferProtocolDeviceObserverLinux
   // Function handler to get storage information. This is useful to set a mock
   // handler for unit testing.
   GetStorageInfoFunc get_storage_info_func_;
+
+  // The notifications object to use to signal newly attached devices.
+  // Guaranteed to outlive this class.
+  // TODO(gbillock): Edit this when this class is owned by a
+  // RemovableStorageNotifications subclass.
+  RemovableStorageNotifications::Receiver* notifications_;
 
   DISALLOW_COPY_AND_ASSIGN(MediaTransferProtocolDeviceObserverLinux);
 };

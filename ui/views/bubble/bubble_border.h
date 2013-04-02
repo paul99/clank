@@ -65,7 +65,7 @@ class VIEWS_EXPORT BubbleBorder : public Border {
     ALIGN_EDGE_TO_ANCHOR_EDGE
   };
 
-  BubbleBorder(ArrowLocation arrow_location, Shadow shadow);
+  BubbleBorder(ArrowLocation arrow, Shadow shadow, SkColor color);
 
   // Returns the radius of the corner of the border.
   // TODO(xiyuan): Get rid of this since it's part of BorderImages now?
@@ -130,7 +130,8 @@ class VIEWS_EXPORT BubbleBorder : public Border {
   // location to make that happen.
   void set_arrow_offset(int offset) { override_arrow_offset_ = offset; }
 
-  // Sets whether the arrow is actually painted. Default is true.
+  // Sets whether the arrow is actually painted. If false, an arrow may still be
+  // used for the geometry computations, but it is not shown. Default is true.
   void set_paint_arrow(bool value) { paint_arrow_ = value; }
 
   // For borders with an arrow, gives the desired bounds (in screen coordinates)

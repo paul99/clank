@@ -33,7 +33,8 @@ class TooltipTestView : public views::View {
   void set_tooltip_text(string16 tooltip_text) { tooltip_text_ = tooltip_text; }
 
   // Overridden from views::View
-  bool GetTooltipText(const gfx::Point& p, string16* tooltip) const {
+  virtual bool GetTooltipText(const gfx::Point& p,
+                              string16* tooltip) const OVERRIDE {
     *tooltip = tooltip_text_;
     return true;
   }
@@ -479,7 +480,16 @@ TEST_F(TooltipControllerTest, TooltipHidesOnTimeoutAndStaysHiddenUntilChange) {
   EXPECT_EQ(window, GetTooltipWindow());
 }
 
-TEST_F(TooltipControllerTest, TooltipsOnMultiDisplayShouldNotCrash) {
+#if defined(OS_WIN)
+// Multiple displays are not supported on Windows Ash. http://crbug.com/165962
+#define MAYBE_TooltipsOnMultiDisplayShouldNotCrash \
+        DISABLED_TooltipsOnMultiDisplayShouldNotCrash
+#else
+#define MAYBE_TooltipsOnMultiDisplayShouldNotCrash \
+        TooltipsOnMultiDisplayShouldNotCrash
+#endif
+
+TEST_F(TooltipControllerTest, MAYBE_TooltipsOnMultiDisplayShouldNotCrash) {
   UpdateDisplay("1000x600,600x400");
   Shell::RootWindowList root_windows = Shell::GetAllRootWindows();
   scoped_ptr<views::Widget> widget1(CreateNewWidgetWithBoundsOn(

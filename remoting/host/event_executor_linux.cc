@@ -58,24 +58,22 @@ class EventExecutorLinux : public EventExecutor {
       scoped_ptr<protocol::ClipboardStub> client_clipboard) OVERRIDE;
 
  private:
-  // The actual implementation resides in EventExecutorWin::Core class.
-  class Core : public base::RefCountedThreadSafe<Core>, public EventExecutor {
+  // The actual implementation resides in EventExecutorLinux::Core class.
+  class Core : public base::RefCountedThreadSafe<Core> {
    public:
     explicit Core(scoped_refptr<base::SingleThreadTaskRunner> task_runner);
 
     bool Init();
 
-    // Clipboard stub interface.
-    virtual void InjectClipboardEvent(const ClipboardEvent& event)
-        OVERRIDE;
+    // Mirrors the ClipboardStub interface.
+    void InjectClipboardEvent(const ClipboardEvent& event);
 
-    // InputStub interface.
-    virtual void InjectKeyEvent(const KeyEvent& event) OVERRIDE;
-    virtual void InjectMouseEvent(const MouseEvent& event) OVERRIDE;
+    // Mirrors the InputStub interface.
+    void InjectKeyEvent(const KeyEvent& event);
+    void InjectMouseEvent(const MouseEvent& event);
 
-    // EventExecutor interface.
-    virtual void Start(
-        scoped_ptr<protocol::ClipboardStub> client_clipboard) OVERRIDE;
+    // Mirrors the EventExecutor interface.
+    void Start(scoped_ptr<protocol::ClipboardStub> client_clipboard);
 
     void Stop();
 
@@ -85,10 +83,15 @@ class EventExecutorLinux : public EventExecutor {
 
     void InitClipboard();
 
-    // |mode| is one of the AutoRepeatModeOn, AutoRepeatModeOff,
-    // AutoRepeatModeDefault constants defined by the XChangeKeyboardControl()
-    // API.
-    void SetAutoRepeatForKey(int keycode, int mode);
+    // Queries whether keyboard auto-repeat is globally enabled. This is used
+    // to decide whether to temporarily disable then restore this setting. If
+    // auto-repeat has already been disabled, this class should leave it
+    // untouched.
+    bool IsAutoRepeatEnabled();
+
+    // Enables or disables keyboard auto-repeat globally.
+    void SetAutoRepeatEnabled(bool enabled);
+
     void InjectScrollWheelClicks(int button, int count);
     // Compensates for global button mappings and resets the XTest device
     // mapping.
@@ -118,6 +121,8 @@ class EventExecutorLinux : public EventExecutor {
     int pointer_button_map_[kNumPointerButtons];
 
     scoped_ptr<Clipboard> clipboard_;
+
+    bool saved_auto_repeat_enabled_;
 
     DISALLOW_COPY_AND_ASSIGN(Core);
   };
@@ -163,16 +168,15 @@ EventExecutorLinux::Core::Core(
       wheel_ticks_x_(0.0f),
       wheel_ticks_y_(0.0f),
       display_(XOpenDisplay(NULL)),
-      root_window_(BadValue) {
+      root_window_(BadValue),
+      saved_auto_repeat_enabled_(false) {
 }
 
 bool EventExecutorLinux::Core::Init() {
   CHECK(display_);
 
-#if defined(REMOTING_HOST_LINUX_CLIPBOARD)
   if (!task_runner_->BelongsToCurrentThread())
     task_runner_->PostTask(FROM_HERE, base::Bind(&Core::InitClipboard, this));
-#endif  // REMOTING_HOST_LINUX_CLIPBOARD
 
   root_window_ = RootWindow(display_, DefaultScreen(display_));
   if (root_window_ == BadValue) {
@@ -194,7 +198,6 @@ bool EventExecutorLinux::Core::Init() {
 
 void EventExecutorLinux::Core::InjectClipboardEvent(
     const ClipboardEvent& event) {
-#if defined(REMOTING_HOST_LINUX_CLIPBOARD)
   if (!task_runner_->BelongsToCurrentThread()) {
     task_runner_->PostTask(
         FROM_HERE, base::Bind(&Core::InjectClipboardEvent, this, event));
@@ -202,7 +205,6 @@ void EventExecutorLinux::Core::InjectClipboardEvent(
   }
 
   clipboard_->InjectClipboardEvent(event);
-#endif  // REMOTING_HOST_LINUX_CLIPBOARD
 }
 
 void EventExecutorLinux::Core::InjectKeyEvent(const KeyEvent& event) {
@@ -229,21 +231,23 @@ void EventExecutorLinux::Core::InjectKeyEvent(const KeyEvent& event) {
       // Key is already held down, so lift the key up to ensure this repeated
       // press takes effect.
       XTestFakeKeyEvent(display_, keycode, False, CurrentTime);
-    } else {
-      // Key is not currently held down, so disable auto-repeat for this
-      // key to avoid repeated presses in case network congestion delays the
-      // key-released event from the client.
-      SetAutoRepeatForKey(keycode, AutoRepeatModeOff);
+    }
+
+    if (pressed_keys_.empty()) {
+      // Disable auto-repeat, if necessary, to avoid triggering auto-repeat
+      // if network congestion delays the key-up event from the client.
+      saved_auto_repeat_enabled_ = IsAutoRepeatEnabled();
+      if (saved_auto_repeat_enabled_)
+        SetAutoRepeatEnabled(false);
     }
     pressed_keys_.insert(keycode);
   } else {
     pressed_keys_.erase(keycode);
-
-    // Reset the AutoRepeatMode for the key that has been lifted.  In the IT2Me
-    // case, this ensures that key-repeating will continue to work normally
-    // for the local user of the host machine.  "ModeDefault" is used instead
-    // of "ModeOn", since some keys (such as Shift) should not auto-repeat.
-    SetAutoRepeatForKey(keycode, AutoRepeatModeDefault);
+    if (pressed_keys_.empty()) {
+      // Re-enable auto-repeat, if necessary, when all keys are released.
+      if (saved_auto_repeat_enabled_)
+        SetAutoRepeatEnabled(true);
+    }
   }
 
   XTestFakeKeyEvent(display_, keycode, event.pressed(), CurrentTime);
@@ -259,11 +263,19 @@ void EventExecutorLinux::Core::InitClipboard() {
   clipboard_ = Clipboard::Create();
 }
 
-void EventExecutorLinux::Core::SetAutoRepeatForKey(int keycode, int mode) {
+bool EventExecutorLinux::Core::IsAutoRepeatEnabled() {
+  XKeyboardState state;
+  if (!XGetKeyboardControl(display_, &state)) {
+    LOG(ERROR) << "Failed to get keyboard auto-repeat status, assuming ON.";
+    return true;
+  }
+  return state.global_auto_repeat == AutoRepeatModeOn;
+}
+
+void EventExecutorLinux::Core::SetAutoRepeatEnabled(bool mode) {
   XKeyboardControl control;
-  control.key = keycode;
-  control.auto_repeat_mode = mode;
-  XChangeKeyboardControl(display_, KBKey | KBAutoRepeatMode, &control);
+  control.auto_repeat_mode = mode ? AutoRepeatModeOn : AutoRepeatModeOff;
+  XChangeKeyboardControl(display_, KBAutoRepeatMode, &control);
 }
 
 void EventExecutorLinux::Core::InjectScrollWheelClicks(int button, int count) {
@@ -328,8 +340,6 @@ void EventExecutorLinux::Core::InjectMouseEvent(const MouseEvent& event) {
     wheel_ticks_y_ += event.wheel_delta_y() * kWheelTicksPerPixel;
     ticks_y = static_cast<int>(wheel_ticks_y_);
     wheel_ticks_y_ -= ticks_y;
-  } else if (event.has_wheel_offset_y()) {
-    ticks_y = event.wheel_offset_y();
   }
   if (ticks_y != 0) {
     InjectScrollWheelClicks(VerticalScrollWheelToX11ButtonNumber(ticks_y),
@@ -341,8 +351,6 @@ void EventExecutorLinux::Core::InjectMouseEvent(const MouseEvent& event) {
     wheel_ticks_x_ += event.wheel_delta_x() * kWheelTicksPerPixel;
     ticks_x = static_cast<int>(wheel_ticks_x_);
     wheel_ticks_x_ -= ticks_x;
-  } else if (event.has_wheel_offset_x()) {
-    ticks_x = event.wheel_offset_x();
   }
   if (ticks_x != 0) {
     InjectScrollWheelClicks(HorizontalScrollWheelToX11ButtonNumber(ticks_x),
@@ -451,7 +459,6 @@ int EventExecutorLinux::Core::HorizontalScrollWheelToX11ButtonNumber(int dx) {
   return (dx > 0 ? pointer_button_map_[5] : pointer_button_map_[6]);
 }
 
-
 int EventExecutorLinux::Core::VerticalScrollWheelToX11ButtonNumber(int dy) {
   // Positive y-values are wheel scroll-up events (button 4), negative y-values
   // are wheel scroll-down events (button 5).
@@ -468,20 +475,17 @@ void EventExecutorLinux::Core::Start(
   }
 
   InitMouseButtonMap();
-#if defined(REMOTING_HOST_LINUX_CLIPBOARD)
+
   clipboard_->Start(client_clipboard.Pass());
-#endif  // REMOTING_HOST_LINUX_CLIPBOARD
 }
 
 void EventExecutorLinux::Core::Stop() {
-#if defined(REMOTING_HOST_LINUX_CLIPBOARD)
   if (!task_runner_->BelongsToCurrentThread()) {
     task_runner_->PostTask(FROM_HERE, base::Bind(&Core::Stop, this));
     return;
   }
 
   clipboard_->Stop();
-#endif  // REMOTING_HOST_LINUX_CLIPBOARD
 }
 
 }  // namespace

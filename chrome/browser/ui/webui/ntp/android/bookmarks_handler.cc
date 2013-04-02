@@ -6,17 +6,17 @@
 
 #include "base/logging.h"
 #include "base/memory/ref_counted_memory.h"
-#include "base/string_number_conversions.h"
 #include "base/string_util.h"
+#include "base/strings/string_number_conversions.h"
 #include "chrome/browser/android/tab_android.h"
 #include "chrome/browser/bookmarks/bookmark_model.h"
 #include "chrome/browser/bookmarks/bookmark_model_factory.h"
 #include "chrome/browser/favicon/favicon_service_factory.h"
 #include "chrome/browser/profiles/profile.h"
 #include "chrome/browser/profiles/profile_manager.h"
-#include "chrome/browser/ui/webui/chrome_url_data_manager.h"
 #include "chrome/browser/ui/webui/favicon_source.h"
 #include "content/public/browser/browser_thread.h"
+#include "content/public/browser/url_data_source.h"
 #include "content/public/browser/web_contents.h"
 #include "third_party/skia/include/core/SkBitmap.h"
 #include "ui/gfx/codec/png_codec.h"
@@ -105,8 +105,8 @@ void BookmarksHandler::RegisterMessages() {
   Profile* profile = Profile::FromBrowserContext(
       web_ui()->GetWebContents()->GetBrowserContext());
 
-  ChromeURLDataManager::AddDataSource(profile,
-      new FaviconSource(profile, FaviconSource::ANY));
+  content::URLDataSource::Add(
+      profile, new FaviconSource(profile, FaviconSource::ANY));
 
   bookmark_model_ = BookmarkModelFactory::GetForProfile(profile);
   if (bookmark_model_) {
@@ -391,7 +391,7 @@ void BookmarksHandler::HandleCreateHomeScreenBookmarkShortcut(
           node->url(),
           history::FAVICON | history::TOUCH_ICON,
           gfx::kFaviconSize),
-      ui::SCALE_FACTOR_100P,
+      ui::GetMaxScaleFactor(),
       base::Bind(&BookmarksHandler::OnShortcutFaviconDataAvailable,
                  base::Unretained(this),
                  node),

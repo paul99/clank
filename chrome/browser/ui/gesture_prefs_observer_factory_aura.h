@@ -9,6 +9,7 @@
 #include "base/memory/singleton.h"
 #include "chrome/browser/profiles/profile_keyed_service_factory.h"
 
+class PrefRegistrySyncable;
 class PrefService;
 class Profile;
 
@@ -23,12 +24,15 @@ class GesturePrefsObserverFactoryAura : public ProfileKeyedServiceFactory {
   GesturePrefsObserverFactoryAura();
   virtual ~GesturePrefsObserverFactoryAura();
 
-  void RegisterOverscrollPrefs(PrefService* prefs);
+  void RegisterOverscrollPrefs(PrefRegistrySyncable* prefs);
+  void RegisterFlingCurveParameters(PrefRegistrySyncable* prefs);
 
   // ProfileKeyedServiceFactory:
   virtual ProfileKeyedService* BuildServiceInstanceFor(
       Profile* profile) const OVERRIDE;
-  virtual void RegisterUserPrefs(PrefService* prefs) OVERRIDE;
+  virtual void DeprecatedRegisterUserPrefs(
+      PrefService* prefs,
+      PrefRegistrySyncable* registry) OVERRIDE;
   virtual bool ServiceIsCreatedWithProfile() const OVERRIDE;
   virtual bool ServiceRedirectedInIncognito() const OVERRIDE;
   virtual bool ServiceIsNULLWhileTesting() const OVERRIDE;

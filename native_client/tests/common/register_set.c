@@ -100,10 +100,10 @@ static const uint32_t kX86KnownFlagsMask =
     (1<<0) | (1<<2) | (1<<6) | (1<<7) | (1<<11) |
     (1<<8); /* Trap flag */
 
-void RegsFillTestValues(struct NaClSignalContext *regs) {
+void RegsFillTestValues(struct NaClSignalContext *regs, int seed) {
   unsigned int index;
   for (index = 0; index < sizeof(*regs); index++) {
-    ((char *) regs)[index] = index + 1;
+    ((char *) regs)[index] = index + seed + 1;
   }
 #if NACL_ARCH(NACL_BUILD_ARCH) == NACL_x86
   /* Set x86 flags to a value that we know will work. */
@@ -223,3 +223,27 @@ void RegsUnsetNonCalleeSavedRegisters(struct NaClSignalContext *regs) {
 # error Unsupported architecture
 #endif
 }
+
+#if defined(__native_client__)
+#if NACL_ARCH(NACL_BUILD_ARCH) == NACL_x86 && NACL_BUILD_SUBARCH == 32
+
+uintptr_t RegsGetArg1(const struct NaClSignalContext *regs) {
+  return ((uint32_t *) regs->stack_ptr)[1];
+}
+
+#elif NACL_ARCH(NACL_BUILD_ARCH) == NACL_x86 && NACL_BUILD_SUBARCH == 64
+
+uintptr_t RegsGetArg1(const struct NaClSignalContext *regs) {
+  return regs->rdi;
+}
+
+#elif NACL_ARCH(NACL_BUILD_ARCH) == NACL_arm
+
+uintptr_t RegsGetArg1(const struct NaClSignalContext *regs) {
+  return regs->r0;
+}
+
+#else
+# error Unsupported architecture
+#endif
+#endif

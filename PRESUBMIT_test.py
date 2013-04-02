@@ -60,6 +60,14 @@ class MockFile(object):
     return self._local_path
 
 
+class MockChange(object):
+  def __init__(self, changed_files):
+    self._changed_files = changed_files
+
+  def LocalPaths(self):
+    return self._changed_files
+
+
 class IncludeOrderTest(unittest.TestCase):
   def testSystemHeaderOrder(self):
     scope = [(1, '#include <csystem.h>'),
@@ -252,6 +260,40 @@ class IncludeOrderTest(unittest.TestCase):
     self.assertEqual(1, len(warnings[0].items))
     self.assertEqual('notify', warnings[0].type)
 
+  def testUncheckableIncludes(self):
+    mock_input_api = MockInputApi()
+    contents = ['#include <windows.h>',
+                '#include "b.h"'
+                '#include "a.h"']
+    mock_file = MockFile('', contents)
+    warnings = PRESUBMIT._CheckIncludeOrderInFile(
+        mock_input_api, mock_file, range(1, len(contents) + 1))
+    self.assertEqual(0, len(warnings))
+
+    contents = ['#include "gpu/command_buffer/gles_autogen.h"',
+                '#include "b.h"'
+                '#include "a.h"']
+    mock_file = MockFile('', contents)
+    warnings = PRESUBMIT._CheckIncludeOrderInFile(
+        mock_input_api, mock_file, range(1, len(contents) + 1))
+    self.assertEqual(0, len(warnings))
+
+    contents = ['#include "gl_mock_autogen.h"',
+                '#include "b.h"'
+                '#include "a.h"']
+    mock_file = MockFile('', contents)
+    warnings = PRESUBMIT._CheckIncludeOrderInFile(
+        mock_input_api, mock_file, range(1, len(contents) + 1))
+    self.assertEqual(0, len(warnings))
+
+    contents = ['#include "ipc/some_macros.h"',
+                '#include "b.h"'
+                '#include "a.h"']
+    mock_file = MockFile('', contents)
+    warnings = PRESUBMIT._CheckIncludeOrderInFile(
+        mock_input_api, mock_file, range(1, len(contents) + 1))
+    self.assertEqual(0, len(warnings))
+
 
 class VersionControlerConflictsTest(unittest.TestCase):
   def testTypicalConflict(self):
@@ -303,6 +345,14 @@ class BadExtensionsTest(unittest.TestCase):
       MockFile('other/path/qux.cc', ''),
     ]
     results = PRESUBMIT._CheckPatchFiles(mock_input_api, MockOutputApi())
+    self.assertEqual(0, len(results))
+
+  def testOnlyOwnersFiles(self):
+    mock_change = MockChange([
+      'some/path/OWNERS',
+      'A\Windows\Path\OWNERS',
+    ])
+    results = PRESUBMIT.GetPreferredTrySlaves(None, mock_change)
     self.assertEqual(0, len(results))
 
 

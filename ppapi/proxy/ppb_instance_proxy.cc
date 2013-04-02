@@ -15,6 +15,7 @@
 #include "ppapi/c/ppb_mouse_lock.h"
 #include "ppapi/c/private/pp_content_decryptor.h"
 #include "ppapi/proxy/broker_resource.h"
+#include "ppapi/proxy/browser_font_singleton_resource.h"
 #include "ppapi/proxy/content_decryptor_private_serializer.h"
 #include "ppapi/proxy/enter_proxy.h"
 #include "ppapi/proxy/flash_clipboard_resource.h"
@@ -25,7 +26,6 @@
 #include "ppapi/proxy/host_dispatcher.h"
 #include "ppapi/proxy/plugin_dispatcher.h"
 #include "ppapi/proxy/ppapi_messages.h"
-#include "ppapi/proxy/ppb_flash_proxy.h"
 #include "ppapi/proxy/serialized_var.h"
 #include "ppapi/shared_impl/ppapi_globals.h"
 #include "ppapi/shared_impl/ppb_url_util_shared.h"
@@ -140,8 +140,6 @@ bool PPB_Instance_Proxy::OnMessageReceived(const IPC::Message& msg) {
                         OnHostMsgRequestInputEvents)
     IPC_MESSAGE_HANDLER(PpapiHostMsg_PPBInstance_ClearInputEvents,
                         OnHostMsgClearInputEvents)
-    IPC_MESSAGE_HANDLER(PpapiMsg_PPPInputEvent_HandleInputEvent_ACK,
-                        OnMsgHandleInputEventAck)
     IPC_MESSAGE_HANDLER(PpapiHostMsg_PPBInstance_LockMouse,
                         OnHostMsgLockMouse)
     IPC_MESSAGE_HANDLER(PpapiHostMsg_PPBInstance_UnlockMouse,
@@ -323,21 +321,6 @@ void PPB_Instance_Proxy::SelectedFindResultChanged(PP_Instance instance,
   NOTIMPLEMENTED();  // Not proxied yet.
 }
 
-PP_Var PPB_Instance_Proxy::GetFontFamilies(PP_Instance instance) {
-  PluginDispatcher* dispatcher = PluginDispatcher::GetForInstance(instance);
-  if (!dispatcher)
-    return PP_MakeUndefined();
-
-  // Assume the font families don't change, so we can cache the result globally.
-  CR_DEFINE_STATIC_LOCAL(std::string, families, ());
-  if (families.empty()) {
-    PluginGlobals::Get()->GetBrowserSender()->Send(
-        new PpapiHostMsg_PPBInstance_GetFontFamilies(&families));
-  }
-
-  return StringVar::StringToPPVar(families);
-}
-
 PP_Bool PPB_Instance_Proxy::SetFullscreen(PP_Instance instance,
                                           PP_Bool fullscreen) {
   PP_Bool result = PP_FALSE;
@@ -352,11 +335,6 @@ PP_Bool PPB_Instance_Proxy::GetScreenSize(PP_Instance instance,
   dispatcher()->Send(new PpapiHostMsg_PPBInstance_GetScreenSize(
       API_ID_PPB_INSTANCE, instance, &result, size));
   return result;
-}
-
-thunk::PPB_Flash_API* PPB_Instance_Proxy::GetFlashAPI() {
-  InterfaceProxy* ip = dispatcher()->GetInterfaceProxy(API_ID_PPB_FLASH);
-  return static_cast<PPB_Flash_Proxy*>(ip);
 }
 
 Resource* PPB_Instance_Proxy::GetSingletonResource(PP_Instance instance,
@@ -379,8 +357,11 @@ Resource* PPB_Instance_Proxy::GetSingletonResource(PP_Instance instance,
     case GAMEPAD_SINGLETON_ID:
       new_singleton = new GamepadResource(connection, instance);
       break;
-// Flash resources aren't needed for NaCl.
+// Flash/trusted resources aren't needed for NaCl.
 #if !defined(OS_NACL) && !defined(NACL_WIN64)
+    case BROWSER_FONT_SINGLETON_ID:
+      new_singleton = new BrowserFontSingletonResource(connection, instance);
+      break;
     case FLASH_CLIPBOARD_SINGLETON_ID:
       new_singleton = new FlashClipboardResource(connection, instance);
       break;
@@ -391,9 +372,11 @@ Resource* PPB_Instance_Proxy::GetSingletonResource(PP_Instance instance,
       new_singleton = new FlashFullscreenResource(connection, instance);
       break;
     case FLASH_SINGLETON_ID:
-      new_singleton = new FlashResource(connection, instance);
+      new_singleton = new FlashResource(connection, instance,
+          static_cast<PluginDispatcher*>(dispatcher()));
       break;
 #else
+    case BROWSER_FONT_SINGLETON_ID:
     case FLASH_CLIPBOARD_SINGLETON_ID:
     case FLASH_FILE_SINGLETON_ID:
     case FLASH_FULLSCREEN_SINGLETON_ID:
@@ -440,12 +423,6 @@ void PPB_Instance_Proxy::ClearInputEventRequest(PP_Instance instance,
                                                 uint32_t event_classes) {
   dispatcher()->Send(new PpapiHostMsg_PPBInstance_ClearInputEvents(
       API_ID_PPB_INSTANCE, instance, event_classes));
-}
-
-void PPB_Instance_Proxy::ClosePendingUserGesture(PP_Instance instance,
-                                                 PP_TimeTicks timestamp) {
-  // Not called on the plugin side.
-  NOTREACHED();
 }
 
 void PPB_Instance_Proxy::ZoomChanged(PP_Instance instance,
@@ -924,13 +901,6 @@ void PPB_Instance_Proxy::OnHostMsgClearInputEvents(PP_Instance instance,
   EnterInstanceNoLock enter(instance);
   if (enter.succeeded())
     enter.functions()->ClearInputEventRequest(instance, event_classes);
-}
-
-void PPB_Instance_Proxy::OnMsgHandleInputEventAck(PP_Instance instance,
-                                                  PP_TimeTicks timestamp) {
-  EnterInstanceNoLock enter(instance);
-  if (enter.succeeded())
-    enter.functions()->ClosePendingUserGesture(instance, timestamp);
 }
 
 void PPB_Instance_Proxy::OnHostMsgPostMessage(

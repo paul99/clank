@@ -145,7 +145,15 @@ class JellyBeanAccessibilityInjector extends AccessibilityInjector {
 
     private static class CallbackHandler {
         private static final String JAVASCRIPT_ACTION_TEMPLATE =
-                "(function() { %s.onResult(%d, %s); })()";
+                "(function() {" +
+                "  retVal = false;" +
+                "  try {" +
+                "    retVal = %s;" +
+                "  } catch (e) {" +
+                "    retVal = false;" +
+                "  }" +
+                "  %s.onResult(%d, retVal);" +
+                "})()";
 
         // Time in milliseconds to wait for a result before failing.
         private static final long RESULT_TIMEOUT = 5000;
@@ -170,9 +178,9 @@ class JellyBeanAccessibilityInjector extends AccessibilityInjector {
          */
         private boolean performAction(ContentViewCore contentView, String code) {
             final int resultId = mResultIdCounter.getAndIncrement();
-            final String js = String.format(JAVASCRIPT_ACTION_TEMPLATE, mInterfaceName, resultId,
-                    code);
-            contentView.evaluateJavaScript(js);
+            final String js = String.format(JAVASCRIPT_ACTION_TEMPLATE, code, mInterfaceName,
+                    resultId);
+            contentView.evaluateJavaScript(js, null);
 
             return getResultAndClear(resultId);
         }
@@ -228,7 +236,7 @@ class JellyBeanAccessibilityInjector extends AccessibilityInjector {
          * request to a waiting (or potentially timed out) thread.
          *
          * @param id The result id of the request as a {@link String}.
-         * @param result The result o fa request as a {@link String}.
+         * @param result The result of a request as a {@link String}.
          */
         @JavascriptInterface
         @SuppressWarnings("unused")

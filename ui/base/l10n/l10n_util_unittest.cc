@@ -20,10 +20,10 @@
 #include "base/utf_string_conversions.h"
 #include "testing/gtest/include/gtest/gtest.h"
 #include "testing/platform_test.h"
+#include "third_party/icu/public/common/unicode/locid.h"
 #include "ui/base/l10n/l10n_util.h"
 #include "ui/base/l10n/l10n_util_collator.h"
 #include "ui/base/ui_base_paths.h"
-#include "unicode/locid.h"
 
 #if defined(OS_WIN)
 #include "base/win/windows_version.h"
@@ -90,7 +90,7 @@ TEST_F(L10nUtilTest, GetAppLocale) {
   // Use a temporary locale dir so we don't have to actually build the locale
   // pak files for this test.
   base::ScopedPathOverride locale_dir_override(ui::DIR_LOCALES);
-  FilePath new_locale_dir;
+  base::FilePath new_locale_dir;
   ASSERT_TRUE(PathService::Get(ui::DIR_LOCALES, &new_locale_dir));
   // Make fake locale files.
   std::string filenames[] = {
@@ -110,7 +110,7 @@ TEST_F(L10nUtilTest, GetAppLocale) {
   };
 
   for (size_t i = 0; i < arraysize(filenames); ++i) {
-    FilePath filename = new_locale_dir.AppendASCII(
+    base::FilePath filename = new_locale_dir.AppendASCII(
         filenames[i] + ".pak");
     file_util::WriteFile(filename, "", 0);
   }

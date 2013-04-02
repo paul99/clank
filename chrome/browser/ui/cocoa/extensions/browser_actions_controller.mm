@@ -7,32 +7,33 @@
 #include <cmath>
 #include <string>
 
+#include "base/prefs/pref_service.h"
 #include "base/sys_string_conversions.h"
 #include "chrome/browser/extensions/extension_action.h"
 #include "chrome/browser/extensions/extension_action_manager.h"
 #include "chrome/browser/extensions/extension_service.h"
 #include "chrome/browser/extensions/extension_system.h"
 #include "chrome/browser/extensions/extension_toolbar_model.h"
-#include "chrome/browser/prefs/pref_service.h"
+#include "chrome/browser/prefs/pref_registry_syncable.h"
 #include "chrome/browser/profiles/profile.h"
 #include "chrome/browser/sessions/session_tab_helper.h"
 #include "chrome/browser/ui/browser.h"
-#include "chrome/browser/ui/browser_tabstrip.h"
 #include "chrome/browser/ui/browser_window.h"
 #import "chrome/browser/ui/cocoa/extensions/browser_action_button.h"
 #import "chrome/browser/ui/cocoa/extensions/browser_actions_container_view.h"
 #import "chrome/browser/ui/cocoa/extensions/extension_popup_controller.h"
 #import "chrome/browser/ui/cocoa/image_button_cell.h"
 #import "chrome/browser/ui/cocoa/menu_button.h"
+#include "chrome/browser/ui/tabs/tab_strip_model.h"
 #include "chrome/common/chrome_notification_types.h"
+#include "chrome/common/extensions/api/extension_action/action_info.h"
 #include "chrome/common/pref_names.h"
+#include "content/public/browser/notification_details.h"
 #include "content/public/browser/notification_observer.h"
 #include "content/public/browser/notification_registrar.h"
-#include "content/public/browser/notification_details.h"
 #include "content/public/browser/notification_source.h"
 #include "grit/theme_resources.h"
 #import "third_party/GTM/AppKit/GTMNSAnimation+Duration.h"
-#include "ui/gfx/mac/nsimage_cache.h"
 
 using extensions::Extension;
 using extensions::ExtensionList;
@@ -263,9 +264,12 @@ class ExtensionServiceObserverBridge : public content::NotificationObserver,
     browser_ = browser;
     profile_ = browser->profile();
 
+    // TODO(joi): Do all registrations up front.
     if (!profile_->GetPrefs()->FindPreference(
         prefs::kBrowserActionContainerWidth))
-      [BrowserActionsController registerUserPrefs:profile_->GetPrefs()];
+      [BrowserActionsController registerUserPrefs:(
+          (PrefRegistrySyncable*)
+          profile_->GetPrefs()->DeprecatedGetPrefRegistry())];
 
     observer_.reset(new ExtensionServiceObserverBridge(self, browser_));
     ExtensionService* extensionService =
@@ -440,10 +444,10 @@ class ExtensionServiceObserverBridge : public content::NotificationObserver,
   return YES;
 }
 
-+ (void)registerUserPrefs:(PrefService*)prefs {
-  prefs->RegisterDoublePref(prefs::kBrowserActionContainerWidth,
-                            0,
-                            PrefService::UNSYNCABLE_PREF);
++ (void)registerUserPrefs:(PrefRegistrySyncable*)registry {
+  registry->RegisterDoublePref(prefs::kBrowserActionContainerWidth,
+                               0,
+                               PrefRegistrySyncable::UNSYNCABLE_PREF);
 }
 
 #pragma mark -
@@ -536,7 +540,7 @@ class ExtensionServiceObserverBridge : public content::NotificationObserver,
 }
 
 - (void)removeActionButtonForExtension:(const Extension*)extension {
-  if (!extension->browser_action_info())
+  if (!extensions::ActionInfo::GetBrowserActionInfo(extension))
     return;
 
   NSString* buttonKey = base::SysUTF8ToNSString(extension->id());
@@ -853,7 +857,8 @@ class ExtensionServiceObserverBridge : public content::NotificationObserver,
 }
 
 - (int)currentTabId {
-  content::WebContents* active_tab = chrome::GetActiveWebContents(browser_);
+  content::WebContents* active_tab =
+      browser_->tab_strip_model()->GetActiveWebContents();
   if (!active_tab)
     return -1;
 

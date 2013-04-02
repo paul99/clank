@@ -4,6 +4,8 @@
 
 #include "chrome/browser/ui/views/collected_cookies_views.h"
 
+#include "base/prefs/pref_service.h"
+#include "chrome/browser/api/infobars/infobar_service.h"
 #include "chrome/browser/browsing_data/browsing_data_appcache_helper.h"
 #include "chrome/browser/browsing_data/browsing_data_cookie_helper.h"
 #include "chrome/browser/browsing_data/browsing_data_database_helper.h"
@@ -15,13 +17,11 @@
 #include "chrome/browser/content_settings/cookie_settings.h"
 #include "chrome/browser/content_settings/local_shared_objects_container.h"
 #include "chrome/browser/content_settings/tab_specific_content_settings.h"
-#include "chrome/browser/infobars/infobar_tab_helper.h"
-#include "chrome/browser/prefs/pref_service.h"
 #include "chrome/browser/profiles/profile.h"
 #include "chrome/browser/ui/collected_cookies_infobar_delegate.h"
-#include "chrome/browser/ui/constrained_window.h"
 #include "chrome/browser/ui/views/constrained_window_views.h"
 #include "chrome/browser/ui/views/cookie_info_view.h"
+#include "chrome/browser/ui/web_contents_modal_dialog.h"
 #include "chrome/common/chrome_notification_types.h"
 #include "chrome/common/pref_names.h"
 #include "content/public/browser/notification_details.h"
@@ -43,12 +43,6 @@
 #include "ui/views/layout/grid_layout.h"
 #include "ui/views/layout/layout_constants.h"
 #include "ui/views/widget/widget.h"
-
-// TODO(markusheintz): This should be removed once the native Windows tabbed
-// pane is not used anymore (http://crbug.com/138059)
-#if defined(OS_WIN) && !defined(USE_AURA)
-#include "ui/views/controls/tabbed_pane/native_tabbed_pane_win.h"
-#endif
 
 namespace chrome {
 
@@ -146,7 +140,7 @@ class InfobarView : public views::View {
   }
 
   // views::View overrides.
-  virtual gfx::Size GetPreferredSize() {
+  virtual gfx::Size GetPreferredSize() OVERRIDE {
     if (!visible())
       return gfx::Size();
 
@@ -156,7 +150,7 @@ class InfobarView : public views::View {
     return size;
   }
 
-  virtual void Layout() {
+  virtual void Layout() OVERRIDE {
     content_->SetBounds(
         0, views::kRelatedControlVerticalSpacing,
         width(), height() - views::kRelatedControlVerticalSpacing);
@@ -164,7 +158,7 @@ class InfobarView : public views::View {
 
   virtual void ViewHierarchyChanged(bool is_add,
                                     views::View* parent,
-                                    views::View* child) {
+                                    views::View* child) OVERRIDE {
     if (is_add && child == this)
       Init();
   }
@@ -198,7 +192,7 @@ CollectedCookiesViews::CollectedCookiesViews(content::WebContents* web_contents)
       TabSpecificContentSettings::FromWebContents(web_contents);
   registrar_.Add(this, chrome::NOTIFICATION_COLLECTED_COOKIES_SHOWN,
                  content::Source<TabSpecificContentSettings>(content_settings));
-  window_ = new ConstrainedWindowViews(web_contents, this);
+  window_ = ConstrainedWindowViews::Create(web_contents, this);
 }
 
 ///////////////////////////////////////////////////////////////////////////////
@@ -223,17 +217,11 @@ void CollectedCookiesViews::DeleteDelegate() {
 
 bool CollectedCookiesViews::Cancel() {
   if (status_changed_) {
-    InfoBarTabHelper* infobar_helper =
-        InfoBarTabHelper::FromWebContents(web_contents_);
-    infobar_helper->AddInfoBar(
-        new CollectedCookiesInfoBarDelegate(infobar_helper));
+    CollectedCookiesInfoBarDelegate::Create(
+        InfoBarService::FromWebContents(web_contents_));
   }
 
   return true;
-}
-
-views::View* CollectedCookiesViews::GetContentsView() {
-  return this;
 }
 
 ui::ModalType CollectedCookiesViews::GetModalType() const {
@@ -303,22 +291,15 @@ void CollectedCookiesViews::Init() {
   column_set->AddColumn(GridLayout::FILL, GridLayout::FILL, 1,
                         GridLayout::USE_PREF, 0, 0);
 
-  const int single_column_with_padding_layout_id = 1;
-  views::ColumnSet* column_set_with_padding = layout->AddColumnSet(
-      single_column_with_padding_layout_id);
-  column_set_with_padding->AddColumn(GridLayout::FILL, GridLayout::FILL, 1,
-                                     GridLayout::USE_PREF, 0, 0);
-  column_set_with_padding->AddPaddingColumn(0, 2);
-
   layout->StartRow(0, single_column_layout_id);
   views::TabbedPane* tabbed_pane = new views::TabbedPane();
-#if defined(OS_WIN) && !defined(USE_AURA)
-  // "set_use_native_win_control" must be called before the first tab is added.
-  tabbed_pane->set_use_native_win_control(true);
-#endif
+  // This color matches native_tabbed_pane_views.cc's kTabBorderColor.
+  const SkColor border_color = SkColorSetRGB(0xCC, 0xCC, 0xCC);
+  // TODO(msw): Remove border and expand bounds in new dialog style.
+  tabbed_pane->set_border(views::Border::CreateSolidBorder(1, border_color));
+
   layout->AddView(tabbed_pane);
-  // NOTE: the panes need to be added after the tabbed_pane has been added to
-  // its parent.
+  // NOTE: Panes must be added after |tabbed_pane| has been added to its parent.
   string16 label_allowed = l10n_util::GetStringUTF16(
       IDS_COLLECTED_COOKIES_ALLOWED_COOKIES_TAB_LABEL);
   string16 label_blocked = l10n_util::GetStringUTF16(
@@ -329,12 +310,12 @@ void CollectedCookiesViews::Init() {
   tabbed_pane->set_listener(this);
   layout->AddPaddingRow(0, views::kRelatedControlVerticalSpacing);
 
-  layout->StartRow(0, single_column_with_padding_layout_id);
+  layout->StartRow(0, single_column_layout_id);
   cookie_info_view_ = new CookieInfoView(false);
   layout->AddView(cookie_info_view_);
   layout->AddPaddingRow(0, views::kRelatedControlVerticalSpacing);
 
-  layout->StartRow(0, single_column_with_padding_layout_id);
+  layout->StartRow(0, single_column_layout_id);
   infobar_ = new InfobarView();
   layout->AddView(infobar_);
 
@@ -532,5 +513,5 @@ void CollectedCookiesViews::Observe(
     const content::NotificationSource& source,
     const content::NotificationDetails& details) {
   DCHECK_EQ(chrome::NOTIFICATION_COLLECTED_COOKIES_SHOWN, type);
-  window_->CloseConstrainedWindow();
+  window_->CloseWebContentsModalDialog();
 }

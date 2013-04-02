@@ -23,18 +23,6 @@ function showInlineBlock(node, isShow) {
 }
 
 /**
- * Creates an element of a specified type with a specified class name.
- * @param {string} type The node type.
- * @param {string} className The class name to use.
- * @return {Element} The created element.
- */
-function createElementWithClassName(type, className) {
-  var elm = document.createElement(type);
-  elm.className = className;
-  return elm;
-}
-
-/**
  * Creates a link with a specified onclick handler and content.
  * @param {function()} onclick The onclick handler.
  * @param {string} value The link text.
@@ -322,11 +310,11 @@ function Download(download) {
   this.nodeControls_.appendChild(this.controlRetry_);
 
   // Pause/Resume are a toggle.
-  this.controlPause_ = createLink(this.togglePause_.bind(this),
+  this.controlPause_ = createLink(this.pause_.bind(this),
       loadTimeData.getString('control_pause'));
   this.nodeControls_.appendChild(this.controlPause_);
 
-  this.controlResume_ = createLink(this.togglePause_.bind(this),
+  this.controlResume_ = createLink(this.resume_.bind(this),
       loadTimeData.getString('control_resume'));
   this.nodeControls_.appendChild(this.controlResume_);
 
@@ -378,7 +366,8 @@ Download.DangerType = {
   DANGEROUS_FILE: 'DANGEROUS_FILE',
   DANGEROUS_URL: 'DANGEROUS_URL',
   DANGEROUS_CONTENT: 'DANGEROUS_CONTENT',
-  UNCOMMON_CONTENT: 'UNCOMMON_CONTENT'
+  UNCOMMON_CONTENT: 'UNCOMMON_CONTENT',
+  DANGEROUS_HOST: 'DANGEROUS_HOST'
 };
 
 /**
@@ -427,7 +416,8 @@ Download.prototype.update = function(download) {
                                                              this.fileName_);
     } else if (this.dangerType_ == Download.DangerType.DANGEROUS_URL) {
       this.dangerDesc_.textContent = loadTimeData.getString('danger_url_desc');
-    } else if (this.dangerType_ == Download.DangerType.DANGEROUS_CONTENT) {
+    } else if (this.dangerType_ == Download.DangerType.DANGEROUS_CONTENT ||
+               this.dangerType_ == Download.DangerType.DANGEROUS_HOST) {
       this.dangerDesc_.textContent = loadTimeData.getStringF(
           'danger_content_desc', this.fileName_);
     } else if (this.dangerType_ == Download.DangerType.UNCOMMON_CONTENT) {
@@ -623,8 +613,18 @@ Download.prototype.show_ = function() {
  * @return {boolean} Returns false to prevent the default action.
  * @private
  */
-Download.prototype.togglePause_ = function() {
-  chrome.send('togglepause', [this.id_.toString()]);
+Download.prototype.pause_ = function() {
+  chrome.send('pause', [this.id_.toString()]);
+  return false;
+};
+
+/**
+ * Tells the backend to resume this download.
+ * @return {boolean} Returns false to prevent the default action.
+ * @private
+ */
+Download.prototype.resume_ = function() {
+  chrome.send('resume', [this.id_.toString()]);
   return false;
 };
 

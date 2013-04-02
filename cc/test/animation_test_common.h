@@ -5,9 +5,10 @@
 #ifndef CC_TEST_ANIMATION_TEST_COMMON_H_
 #define CC_TEST_ANIMATION_TEST_COMMON_H_
 
-#include "cc/active_animation.h"
+#include "cc/animation.h"
 #include "cc/animation_curve.h"
 #include "cc/layer_animation_controller.h"
+#include "cc/layer_animation_value_observer.h"
 
 namespace cc {
 class LayerImpl;
@@ -36,7 +37,7 @@ public:
     virtual ~FakeTransformTransition();
 
     virtual double duration() const OVERRIDE;
-    virtual WebKit::WebTransformationMatrix getValue(double time) const OVERRIDE;
+    virtual gfx::Transform getValue(double time) const OVERRIDE;
 
     virtual scoped_ptr<cc::AnimationCurve> clone() const OVERRIDE;
 
@@ -60,17 +61,18 @@ private:
     float m_to;
 };
 
-class FakeLayerAnimationControllerClient : public cc::LayerAnimationControllerClient {
+class FakeLayerAnimationValueObserver : public cc::LayerAnimationValueObserver {
 public:
-    FakeLayerAnimationControllerClient();
-    virtual ~FakeLayerAnimationControllerClient();
+    FakeLayerAnimationValueObserver();
+    virtual ~FakeLayerAnimationValueObserver();
 
-    // LayerAnimationControllerClient implementation
-    virtual int id() const OVERRIDE;
-    virtual void setOpacityFromAnimation(float) OVERRIDE;
-    virtual float opacity() const OVERRIDE;
-    virtual void setTransformFromAnimation(const gfx::Transform&) OVERRIDE;
-    virtual const gfx::Transform& transform() const OVERRIDE;
+    // LayerAnimationValueObserver implementation
+    virtual void OnOpacityAnimated(float) OVERRIDE;
+    virtual void OnTransformAnimated(const gfx::Transform&) OVERRIDE;
+    virtual bool IsActive() const OVERRIDE;
+
+    float opacity() const  { return m_opacity; }
+    const gfx::Transform& transform() const { return m_transform; }
 
 private:
     float m_opacity;

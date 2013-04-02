@@ -9,13 +9,17 @@
 #include "base/values.h"
 #include "content/public/browser/web_ui_message_handler.h"
 
+namespace content {
+class WebUIDataSource;
+}
+
 // Handles installing an extension when its file is dragged onto the page.
 class InstallExtensionHandler : public content::WebUIMessageHandler {
  public:
   InstallExtensionHandler();
   virtual ~InstallExtensionHandler();
 
-  void GetLocalizedValues(DictionaryValue* localized_strings);
+  void GetLocalizedValues(content::WebUIDataSource* source);
 
   // WebUIMessageHandler implementation.
   virtual void RegisterMessages() OVERRIDE;
@@ -39,7 +43,7 @@ class InstallExtensionHandler : public content::WebUIMessageHandler {
   void HandleInstallMessage(const ListValue* args);
 
   // The extension that will be installed when HandleInstallMessage() is called.
-  FilePath file_to_install_;
+  base::FilePath file_to_install_;
 
   DISALLOW_COPY_AND_ASSIGN(InstallExtensionHandler);
 };

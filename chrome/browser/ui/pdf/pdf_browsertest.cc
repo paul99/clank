@@ -5,13 +5,13 @@
 #include "base/file_util.h"
 #include "base/hash.h"
 #include "base/path_service.h"
-#include "base/string_number_conversions.h"
 #include "base/string_util.h"
+#include "base/strings/string_number_conversions.h"
 #include "base/utf_string_conversions.h"
 #include "chrome/browser/ui/browser.h"
-#include "chrome/browser/ui/browser_tabstrip.h"
 #include "chrome/browser/ui/browser_window.h"
 #include "chrome/browser/ui/snapshot_tab_helper.h"
+#include "chrome/browser/ui/tabs/tab_strip_model.h"
 #include "chrome/common/chrome_notification_types.h"
 #include "chrome/common/chrome_paths.h"
 #include "chrome/test/base/in_process_browser_test.h"
@@ -48,7 +48,7 @@ class PDFBrowserTest : public InProcessBrowserTest,
     pdf_test_server_.reset(new net::TestServer(
         net::TestServer::TYPE_HTTP,
         net::TestServer::kLocalhost,
-        FilePath(FILE_PATH_LITERAL("pdf/test"))));
+        base::FilePath(FILE_PATH_LITERAL("pdf/test"))));
   }
 
  protected:
@@ -59,8 +59,8 @@ class PDFBrowserTest : public InProcessBrowserTest,
     return load_stop_notification_count_;
   }
 
-  FilePath GetPDFTestDir() {
-    return FilePath(FilePath::kCurrentDirectory).AppendASCII("..").
+  base::FilePath GetPDFTestDir() {
+    return base::FilePath(base::FilePath::kCurrentDirectory).AppendASCII("..").
         AppendASCII("..").AppendASCII("..").AppendASCII("pdf").
         AppendASCII("test");
   }
@@ -78,14 +78,15 @@ class PDFBrowserTest : public InProcessBrowserTest,
 
     GURL url(ui_test_utils::GetTestUrl(
         GetPDFTestDir(),
-        FilePath(FILE_PATH_LITERAL("pdf_browsertest.pdf"))));
+        base::FilePath(FILE_PATH_LITERAL("pdf_browsertest.pdf"))));
     ui_test_utils::NavigateToURL(browser(), url);
   }
 
   bool VerifySnapshot(const std::string& expected_filename) {
     snapshot_different_ = true;
     expected_filename_ = expected_filename;
-    WebContents* web_contents =  chrome::GetActiveWebContents(browser());
+    WebContents* web_contents =
+        browser()->tab_strip_model()->GetActiveWebContents();
     SnapshotTabHelper::FromWebContents(web_contents)->CaptureSnapshot();
     ui_test_utils::RegisterAndWait(
         this,
@@ -112,8 +113,8 @@ class PDFBrowserTest : public InProcessBrowserTest,
     string16 query = UTF8ToUTF16(
         std::string("xyzxyz" + base::IntToString(next_dummy_search_value_++)));
     ASSERT_EQ(0, ui_test_utils::FindInPage(
-        chrome::GetActiveWebContents(browser()), query, true, false, NULL,
-                                     NULL));
+        browser()->tab_strip_model()->GetActiveWebContents(),
+        query, true, false, NULL, NULL));
   }
 
  private:
@@ -123,9 +124,9 @@ class PDFBrowserTest : public InProcessBrowserTest,
                        const content::NotificationDetails& details) {
     if (type == chrome::NOTIFICATION_TAB_SNAPSHOT_TAKEN) {
       MessageLoopForUI::current()->Quit();
-      FilePath reference = ui_test_utils::GetTestFilePath(
+      base::FilePath reference = ui_test_utils::GetTestFilePath(
           GetPDFTestDir(),
-          FilePath().AppendASCII(expected_filename_));
+          base::FilePath().AppendASCII(expected_filename_));
       base::PlatformFileInfo info;
       ASSERT_TRUE(file_util::GetFileInfo(reference, &info));
       int size = static_cast<size_t>(info.size);
@@ -196,7 +197,7 @@ class PDFBrowserTest : public InProcessBrowserTest,
   // The filename of the bitmap to compare the snapshot to.
   std::string expected_filename_;
   // If the snapshot is different, holds the location where it's saved.
-  FilePath snapshot_filename_;
+  base::FilePath snapshot_filename_;
   // How many times we've seen chrome::LOAD_STOP.
   int load_stop_notification_count_;
 
@@ -244,15 +245,15 @@ IN_PROC_BROWSER_TEST_F(PDFBrowserTest, MAYBE_Scroll) {
   wheel_event.type = WebKit::WebInputEvent::MouseWheel;
   wheel_event.deltaY = -200;
   wheel_event.wheelTicksY = -2;
-  WebContents* web_contents = chrome::GetActiveWebContents(browser());
+  WebContents* web_contents =
+      browser()->tab_strip_model()->GetActiveWebContents();
   web_contents->GetRenderViewHost()->ForwardWheelEvent(wheel_event);
   ASSERT_NO_FATAL_FAILURE(WaitForResponse());
 
   int y_offset = 0;
-  ASSERT_TRUE(content::ExecuteJavaScriptAndExtractInt(
-      chrome::GetActiveWebContents(browser())->GetRenderViewHost(),
-      std::wstring(),
-      L"window.domAutomationController.send(plugin.pageYOffset())",
+  ASSERT_TRUE(content::ExecuteScriptAndExtractInt(
+      browser()->tab_strip_model()->GetActiveWebContents(),
+      "window.domAutomationController.send(plugin.pageYOffset())",
       &y_offset));
   ASSERT_GT(y_offset, 0);
 }
@@ -267,7 +268,8 @@ IN_PROC_BROWSER_TEST_F(PDFBrowserTest, MAYBE_FindAndCopy) {
   ASSERT_NO_FATAL_FAILURE(Load());
   // Verifies that find in page works.
   ASSERT_EQ(3, ui_test_utils::FindInPage(
-      chrome::GetActiveWebContents(browser()), UTF8ToUTF16("adipiscing"),
+      browser()->tab_strip_model()->GetActiveWebContents(),
+      UTF8ToUTF16("adipiscing"),
       true, false, NULL, NULL));
 
   // Verify that copying selected text works.
@@ -279,7 +281,8 @@ IN_PROC_BROWSER_TEST_F(PDFBrowserTest, MAYBE_FindAndCopy) {
   objects[ui::Clipboard::CBF_TEXT] = params;
   clipboard->WriteObjects(ui::Clipboard::BUFFER_STANDARD, objects);
 
-  chrome::GetActiveWebContents(browser())->GetRenderViewHost()->Copy();
+  browser()->tab_strip_model()->GetActiveWebContents()->
+      GetRenderViewHost()->Copy();
   ASSERT_NO_FATAL_FAILURE(WaitForResponse());
 
   std::string text;
@@ -297,7 +300,7 @@ IN_PROC_BROWSER_TEST_P(PDFBrowserTest, Loading) {
   ASSERT_TRUE(pdf_test_server()->Start());
 
   NavigationController* controller =
-      &(chrome::GetActiveWebContents(browser())->GetController());
+      &(browser()->tab_strip_model()->GetActiveWebContents()->GetController());
   content::NotificationRegistrar registrar;
   registrar.Add(this,
                 content::NOTIFICATION_LOAD_STOP,
@@ -305,11 +308,11 @@ IN_PROC_BROWSER_TEST_P(PDFBrowserTest, Loading) {
   std::string base_url = std::string("files/");
 
   file_util::FileEnumerator file_enumerator(
-      ui_test_utils::GetTestFilePath(GetPDFTestDir(), FilePath()),
+      ui_test_utils::GetTestFilePath(GetPDFTestDir(), base::FilePath()),
       false,
       file_util::FileEnumerator::FILES,
       FILE_PATH_LITERAL("*.pdf"));
-  for (FilePath file_path = file_enumerator.Next();
+  for (base::FilePath file_path = file_enumerator.Next();
        !file_path.empty();
        file_path = file_enumerator.Next()) {
     std::string filename = file_path.BaseName().MaybeAsASCII();
@@ -338,10 +341,9 @@ IN_PROC_BROWSER_TEST_P(PDFBrowserTest, Loading) {
       // doing async loading.  This happens when the first loader is cancelled
       // and before creating a byte-range request loader.
       bool complete = false;
-      ASSERT_TRUE(content::ExecuteJavaScriptAndExtractBool(
-          chrome::GetActiveWebContents(browser())->GetRenderViewHost(),
-          std::wstring(),
-          L"window.domAutomationController.send(plugin.documentLoadComplete())",
+      ASSERT_TRUE(content::ExecuteScriptAndExtractBool(
+          browser()->tab_strip_model()->GetActiveWebContents(),
+          "window.domAutomationController.send(plugin.documentLoadComplete())",
           &complete));
       if (complete)
         break;
@@ -350,7 +352,8 @@ IN_PROC_BROWSER_TEST_P(PDFBrowserTest, Loading) {
       // nested message loop for the JS call.
       if (last_count != load_stop_notification_count())
         continue;
-      content::WaitForLoadStop(chrome::GetActiveWebContents(browser()));
+      content::WaitForLoadStop(
+          browser()->tab_strip_model()->GetActiveWebContents());
     }
   }
 }
@@ -362,29 +365,25 @@ INSTANTIATE_TEST_CASE_P(PDFTestFiles,
 IN_PROC_BROWSER_TEST_F(PDFBrowserTest, Action) {
   ASSERT_NO_FATAL_FAILURE(Load());
 
-  ASSERT_TRUE(content::ExecuteJavaScript(
-      chrome::GetActiveWebContents(browser())->GetRenderViewHost(),
-      std::wstring(),
-      L"document.getElementsByName('plugin')[0].fitToHeight();"));
+  ASSERT_TRUE(content::ExecuteScript(
+      browser()->tab_strip_model()->GetActiveWebContents(),
+      "document.getElementsByName('plugin')[0].fitToHeight();"));
 
   std::string zoom1, zoom2;
-  ASSERT_TRUE(content::ExecuteJavaScriptAndExtractString(
-      chrome::GetActiveWebContents(browser())->GetRenderViewHost(),
-      std::wstring(),
-      L"window.domAutomationController.send("
-      L"document.getElementsByName('plugin')[0].getZoomLevel().toString())",
+  ASSERT_TRUE(content::ExecuteScriptAndExtractString(
+      browser()->tab_strip_model()->GetActiveWebContents(),
+      "window.domAutomationController.send("
+      "    document.getElementsByName('plugin')[0].getZoomLevel().toString())",
       &zoom1));
 
-  ASSERT_TRUE(content::ExecuteJavaScript(
-      chrome::GetActiveWebContents(browser())->GetRenderViewHost(),
-      std::wstring(),
-      L"document.getElementsByName('plugin')[0].fitToWidth();"));
+  ASSERT_TRUE(content::ExecuteScript(
+      browser()->tab_strip_model()->GetActiveWebContents(),
+      "document.getElementsByName('plugin')[0].fitToWidth();"));
 
-  ASSERT_TRUE(content::ExecuteJavaScriptAndExtractString(
-      chrome::GetActiveWebContents(browser())->GetRenderViewHost(),
-      std::wstring(),
-      L"window.domAutomationController.send("
-      L"document.getElementsByName('plugin')[0].getZoomLevel().toString())",
+  ASSERT_TRUE(content::ExecuteScriptAndExtractString(
+      browser()->tab_strip_model()->GetActiveWebContents(),
+      "window.domAutomationController.send("
+      "    document.getElementsByName('plugin')[0].getZoomLevel().toString())",
       &zoom2));
   ASSERT_NE(zoom1, zoom2);
 }
@@ -399,15 +398,16 @@ IN_PROC_BROWSER_TEST_F(PDFBrowserTest, DISABLED_OnLoadAndReload) {
   content::WindowedNotificationObserver observer(
       content::NOTIFICATION_LOAD_STOP,
       content::Source<NavigationController>(
-          &chrome::GetActiveWebContents(browser())->GetController()));
-  ASSERT_TRUE(content::ExecuteJavaScript(
-      chrome::GetActiveWebContents(browser())->GetRenderViewHost(),
-      std::wstring(),
-      L"reloadPDF();"));
+          &browser()->tab_strip_model()->GetActiveWebContents()->
+              GetController()));
+  ASSERT_TRUE(content::ExecuteScript(
+      browser()->tab_strip_model()->GetActiveWebContents(),
+      "reloadPDF();"));
   observer.Wait();
 
   ASSERT_EQ("success",
-            chrome::GetActiveWebContents(browser())->GetURL().query());
+            browser()->tab_strip_model()->GetActiveWebContents()->
+                GetURL().query());
 }
 
 }  // namespace

@@ -44,7 +44,7 @@ uint32 GetAccessibilityState() {
     state |= A11Y_SPOKEN_FEEDBACK;
   if (shell_delegate->IsHighContrastEnabled())
     state |= A11Y_HIGH_CONTRAST;
-  if (shell_delegate->GetMagnifierType() != ash::MAGNIFIER_OFF)
+  if (shell_delegate->IsMagnifierEnabled())
     state |= A11Y_SCREEN_MAGNIFIER;
   return state;
 }
@@ -138,8 +138,7 @@ void AccessibilityDetailedView::AppendAccessibilityList() {
           IDS_ASH_STATUS_TRAY_ACCESSIBILITY_HIGH_CONTRAST_MODE),
       high_contrast_enabled_ ? gfx::Font::BOLD : gfx::Font::NORMAL,
       high_contrast_enabled_);
-  screen_magnifier_enabled_ =
-      shell_delegate->GetMagnifierType() == ash::MAGNIFIER_FULL;
+  screen_magnifier_enabled_ = shell_delegate->IsMagnifierEnabled();
   screen_magnifier_view_ = AddScrollListItem(
       bundle.GetLocalizedString(
           IDS_ASH_STATUS_TRAY_ACCESSIBILITY_SCREEN_MAGNIFIER),
@@ -197,10 +196,7 @@ void AccessibilityDetailedView::ClickedOn(views::View* sender) {
   } else if (sender == high_contrast_view_) {
     shell_delegate->ToggleHighContrast();
   } else if (sender == screen_magnifier_view_) {
-    bool screen_magnifier_enabled =
-        shell_delegate->GetMagnifierType() == ash::MAGNIFIER_FULL;
-    shell_delegate->SetMagnifier(
-        screen_magnifier_enabled ? ash::MAGNIFIER_OFF : ash::MAGNIFIER_FULL);
+    shell_delegate->SetMagnifierEnabled(!shell_delegate->IsMagnifierEnabled());
   }
 }
 
@@ -225,7 +221,8 @@ TrayAccessibility::TrayAccessibility(SystemTray* system_tray)
       request_popup_view_(false),
       tray_icon_visible_(false),
       login_(GetCurrentLoginStatus()),
-      previous_accessibility_state_(GetAccessibilityState()) {
+      previous_accessibility_state_(GetAccessibilityState()),
+      show_a11y_menu_on_lock_screen_(true) {
   DCHECK(Shell::GetInstance()->delegate());
   DCHECK(system_tray);
   Shell::GetInstance()->system_tray_notifier()->AddAccessibilityObserver(this);
@@ -265,6 +262,8 @@ views::View* TrayAccessibility::CreateDefaultView(user::LoginStatus status) {
   ShellDelegate* delegate = Shell::GetInstance()->delegate();
   if (login_ != user::LOGGED_IN_NONE &&
       !delegate->ShouldAlwaysShowAccessibilityMenu() &&
+      // On login screen, keeps the initial visivility of the menu.
+      (status != user::LOGGED_IN_LOCKED || !show_a11y_menu_on_lock_screen_) &&
       GetAccessibilityState() == A11Y_NONE)
     return NULL;
 
@@ -300,6 +299,10 @@ void TrayAccessibility::DestroyDetailedView() {
 }
 
 void TrayAccessibility::UpdateAfterLoginStatusChange(user::LoginStatus status) {
+  // Stores the a11y feature status on just entering the lock screen.
+  if (login_ != user::LOGGED_IN_LOCKED && status == user::LOGGED_IN_LOCKED)
+    show_a11y_menu_on_lock_screen_ = (GetAccessibilityState() != A11Y_NONE);
+
   login_ = status;
   SetTrayIconVisible(GetInitialVisibility());
 }

@@ -3,7 +3,7 @@
 // found in the LICENSE file.
 
 // RemovableDeviceNotificationsLinux listens for mount point changes, notifies
-// the SystemMonitor about the addition and deletion of media devices, and
+// listeners about the addition and deletion of media devices, and
 // answers queries about mounted devices.
 
 #ifndef CHROME_BROWSER_SYSTEM_MONITOR_REMOVABLE_DEVICE_NOTIFICATIONS_LINUX_H_
@@ -22,15 +22,16 @@
 #include "base/compiler_specific.h"
 #include "base/files/file_path_watcher.h"
 #include "base/memory/ref_counted.h"
-#include "base/system_monitor/system_monitor.h"
 #include "chrome/browser/system_monitor/removable_storage_notifications.h"
 #include "content/public/browser/browser_thread.h"
 
+namespace base {
 class FilePath;
+}
 
 // Gets device information given a |device_path|. On success, fills in
 // |unique_id|, |name|, |removable| and |partition_size_in_bytes|.
-typedef void (*GetDeviceInfoFunc)(const FilePath& device_path,
+typedef void (*GetDeviceInfoFunc)(const base::FilePath& device_path,
                                   std::string* unique_id,
                                   string16* name,
                                   bool* removable,
@@ -44,7 +45,7 @@ class RemovableDeviceNotificationsLinux
           content::BrowserThread::DeleteOnFileThread> {
  public:
   // Should only be called by browser start up code.  Use GetInstance() instead.
-  explicit RemovableDeviceNotificationsLinux(const FilePath& path);
+  explicit RemovableDeviceNotificationsLinux(const base::FilePath& path);
 
   // Must be called for RemovableDeviceNotificationsLinux to work.
   void Init();
@@ -52,8 +53,8 @@ class RemovableDeviceNotificationsLinux
   // Finds the device that contains |path| and populates |device_info|.
   // Returns false if unable to find the device.
   virtual bool GetDeviceInfoForPath(
-      const FilePath& path,
-      base::SystemMonitor::RemovableStorageInfo* device_info) const OVERRIDE;
+      const base::FilePath& path,
+      StorageInfo* device_info) const OVERRIDE;
 
   // Returns the storage partition size of the device present at |location|.
   // If the requested information is unavailable, returns 0.
@@ -61,7 +62,7 @@ class RemovableDeviceNotificationsLinux
 
  protected:
   // Only for use in unit tests.
-  RemovableDeviceNotificationsLinux(const FilePath& path,
+  RemovableDeviceNotificationsLinux(const base::FilePath& path,
                                     GetDeviceInfoFunc getDeviceInfo);
 
   // Avoids code deleting the object while there are references to it.
@@ -70,7 +71,7 @@ class RemovableDeviceNotificationsLinux
   // error.
   virtual ~RemovableDeviceNotificationsLinux();
 
-  virtual void OnFilePathChanged(const FilePath& path, bool error);
+  virtual void OnFilePathChanged(const base::FilePath& path, bool error);
 
  private:
   friend class base::RefCountedThreadSafe<RemovableDeviceNotificationsLinux>;
@@ -83,24 +84,24 @@ class RemovableDeviceNotificationsLinux
   struct MountPointInfo {
     MountPointInfo();
 
-    FilePath mount_device;
+    base::FilePath mount_device;
     std::string device_id;
     string16 device_name;
     uint64 partition_size_in_bytes;
   };
 
   // Mapping of mount points to MountPointInfo.
-  typedef std::map<FilePath, MountPointInfo> MountMap;
+  typedef std::map<base::FilePath, MountPointInfo> MountMap;
 
   // (mount point, priority)
   // For devices that are mounted to multiple mount points, this helps us track
   // which one we've notified system monitor about.
-  typedef std::map<FilePath, bool> ReferencedMountPoint;
+  typedef std::map<base::FilePath, bool> ReferencedMountPoint;
 
   // (mount device, map of known mount points)
   // For each mount device, track the places it is mounted and which one (if
   // any) we have notified system monitor about.
-  typedef std::map<FilePath, ReferencedMountPoint> MountPriorityMap;
+  typedef std::map<base::FilePath, ReferencedMountPoint> MountPriorityMap;
 
   // Do initialization on the File Thread.
   void InitOnFileThread();
@@ -109,17 +110,17 @@ class RemovableDeviceNotificationsLinux
   void UpdateMtab();
 
   // Adds |mount_device| as mounted on |mount_point|.  If the device is a new
-  // device SystemMonitor is notified.
-  void AddNewMount(const FilePath& mount_device, const FilePath& mount_point);
+  // device any listeners are notified.
+  void AddNewMount(const base::FilePath& mount_device, const base::FilePath& mount_point);
 
   // Whether Init() has been called or not.
   bool initialized_;
 
   // Mtab file that lists the mount points.
-  const FilePath mtab_path_;
+  const base::FilePath mtab_path_;
 
   // Watcher for |mtab_path_|.
-  base::files::FilePathWatcher file_watcher_;
+  base::FilePathWatcher file_watcher_;
 
   // Set of known file systems that we care about.
   std::set<std::string> known_file_systems_;

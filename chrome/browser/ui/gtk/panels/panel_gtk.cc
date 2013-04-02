@@ -218,7 +218,8 @@ PanelGtk::PanelGtk(Panel* panel, const gfx::Rect& bounds)
       window_vbox_(NULL),
       render_area_event_box_(NULL),
       contents_expanded_(NULL),
-      accel_group_(NULL) {
+      accel_group_(NULL),
+      corner_style_(panel::ALL_ROUNDED) {
 }
 
 PanelGtk::~PanelGtk() {
@@ -312,15 +313,40 @@ void PanelGtk::Init() {
   ConnectAccelerators();
 }
 
-void PanelGtk::UpdateWindowShape(int width, int height) {
-  // For panels, only top corners are rounded. The bottom corners are not
-  // rounded because panels are aligned to the bottom edge of the screen.
-  GdkRectangle top_top_rect = { 3, 0, width - 6, 1 };
-  GdkRectangle top_mid_rect = { 1, 1, width - 2, 2 };
-  GdkRectangle mid_rect = { 0, 3, width, height - 3 };
-  GdkRegion* mask = gdk_region_rectangle(&top_top_rect);
-  gdk_region_union_with_rect(mask, &top_mid_rect);
-  gdk_region_union_with_rect(mask, &mid_rect);
+void PanelGtk::SetWindowCornerStyle(panel::CornerStyle corner_style) {
+  corner_style_ = corner_style;
+  UpdateWindowShape();
+}
+
+void PanelGtk::UpdateWindowShape() {
+  int width = configure_size_.width();
+  int height = configure_size_.height();
+  if (!width || !height)
+    return;
+
+  GdkRegion* mask;
+  if (corner_style_ & panel::TOP_ROUNDED) {
+    GdkRectangle top_top_rect = { 3, 0, width - 6, 1 };
+    GdkRectangle top_mid_rect = { 1, 1, width - 2, 2 };
+    mask = gdk_region_rectangle(&top_top_rect);
+    gdk_region_union_with_rect(mask, &top_mid_rect);
+  } else {
+    GdkRectangle top_rect = { 0, 0, width, 3 };
+    mask = gdk_region_rectangle(&top_rect);
+  }
+
+  if (corner_style_ & panel::BOTTOM_ROUNDED) {
+    GdkRectangle mid_rect = { 0, 3, width, height - 6 };
+    GdkRectangle bottom_mid_rect = { 1, height - 3, width - 2, 2 };
+    GdkRectangle bottom_bottom_rect = { 3, height - 1, width - 6, 1 };
+    gdk_region_union_with_rect(mask, &mid_rect);
+    gdk_region_union_with_rect(mask, &bottom_mid_rect);
+    gdk_region_union_with_rect(mask, &bottom_bottom_rect);
+  } else {
+    GdkRectangle mid_rect = { 0, 3, width, height - 3 };
+    gdk_region_union_with_rect(mask, &mid_rect);
+  }
+
   gdk_window_shape_combine_region(
       gtk_widget_get_window(GTK_WIDGET(window_)), mask, 0, 0);
   if (mask)
@@ -335,9 +361,9 @@ gboolean PanelGtk::OnConfigure(GtkWidget* widget,
   gfx::Size new_size(event->width, event->height);
   if (new_size == configure_size_)
     return FALSE;
-
-  UpdateWindowShape(event->width, event->height);
   configure_size_ = new_size;
+
+  UpdateWindowShape();
 
   if (!GetFrameSize().IsEmpty())
     return FALSE;
@@ -797,6 +823,14 @@ void PanelGtk::ClosePanel() {
 
 void PanelGtk::ActivatePanel() {
   gtk_window_present(window_);
+
+  // When the user clicks to expand the minimized panel, the panel has already
+  // become an active window before gtk_window_present is called. Thus the
+  // active window change event, fired by ActiveWindowWatcherXObserver, is not
+  // triggered. We need to call ActiveWindowChanged manually to update panel's
+  // active status. It is OK to call ActiveWindowChanged with the same active
+  // window twice since the 2nd call is just a no-op.
+  ActiveWindowChanged(gtk_widget_get_window(GTK_WIDGET(window_)));
 }
 
 void PanelGtk::DeactivatePanel() {
@@ -820,7 +854,7 @@ void PanelGtk::PreventActivationByOS(bool prevent_activation) {
   gtk_window_set_accept_focus(window_, !prevent_activation);
 }
 
-gfx::NativeWindow PanelGtk::GetNativePanelHandle() {
+gfx::NativeWindow PanelGtk::GetNativePanelWindow() {
   return window_;
 }
 
@@ -1022,10 +1056,12 @@ class GtkNativePanelTesting : public NativePanelTesting {
   virtual bool VerifyDrawingAttention() const OVERRIDE;
   virtual bool VerifyActiveState(bool is_active) OVERRIDE;
   virtual bool VerifyAppIcon() const OVERRIDE;
+  virtual bool VerifySystemMinimizeState() const OVERRIDE;
   virtual bool IsWindowSizeKnown() const OVERRIDE;
   virtual bool IsAnimatingBounds() const OVERRIDE;
   virtual bool IsButtonVisible(
       panel::TitlebarButtonType button_type) const OVERRIDE;
+  virtual panel::CornerStyle GetWindowCornerStyle() const OVERRIDE;
 
   PanelGtk* panel_gtk_;
 };
@@ -1105,10 +1141,15 @@ bool GtkNativePanelTesting::VerifyActiveState(bool is_active) {
 }
 
 bool GtkNativePanelTesting::VerifyAppIcon() const {
-  GdkPixbuf* icon = gtk_window_get_icon(panel_gtk_->GetNativePanelHandle());
+  GdkPixbuf* icon = gtk_window_get_icon(panel_gtk_->GetNativePanelWindow());
   return icon &&
          gdk_pixbuf_get_width(icon) == panel::kPanelAppIconSize &&
          gdk_pixbuf_get_height(icon) == panel::kPanelAppIconSize;
+}
+
+bool GtkNativePanelTesting::VerifySystemMinimizeState() const {
+  // TODO(jianli): to be implemented.
+  return true;
 }
 
 bool GtkNativePanelTesting::IsWindowSizeKnown() const {
@@ -1138,4 +1179,8 @@ bool GtkNativePanelTesting::IsButtonVisible(
       return false;
   }
   return gtk_widget_get_visible(button->widget());
+}
+
+panel::CornerStyle GtkNativePanelTesting::GetWindowCornerStyle() const {
+  return panel_gtk_->corner_style_;
 }

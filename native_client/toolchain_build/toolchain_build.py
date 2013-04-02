@@ -15,8 +15,8 @@ import command
 import toolchain_main
 
 GIT_REVISIONS = {
-    'binutils': '9738dec752712199e6f15e5654a2cdcd565c6ad2',
-    'gcc': '7f9c2344511c5cc59180604be1e54cae4f8323ac',
+    'binutils': 'e631314c5acfd5073888a6c7192e83a7034e9598',
+    'gcc': '00c1e21ffc391a4f1ae7296cf3121907d1becdb2',
     'newlib': '5feee65e182c08a7e89fbffc3223c57e4335420f',
     }
 
@@ -84,6 +84,17 @@ CONFIGURE_HOST_TOOL = CONFIGURE_HOST_COMMON + [
     '--with-bugurl=' + BUG_URL,
     '--without-zlib',
 ]
+
+
+def InstallDocFiles(subdir, files):
+  doc_dir = os.path.join('%(output)s', 'share', 'doc', subdir)
+  dirs = sorted(set([os.path.dirname(os.path.join(doc_dir, file))
+                     for file in files]))
+  commands = ([command.Mkdir(dir, parents=True) for dir in dirs] +
+              [command.Copy(os.path.join('%(src)s', file),
+                            os.path.join(doc_dir, file))
+               for file in files])
+  return commands
 
 
 def NewlibLibcScript(arch):
@@ -284,7 +295,10 @@ def HostTools(target):
               command.Command(MAKE_CHECK_CMD),
               command.Command(MAKE_DESTDIR_CMD + ['install-strip']),
               REMOVE_INFO_DIR,
-              ] +
+              ] + InstallDocFiles('binutils',
+                                  ['COPYING3'] +
+                                  [os.path.join(subdir, 'NEWS') for subdir in
+                                   ['binutils', 'gas', 'ld', 'gold']]) +
               # The top-level lib* directories contain host libraries
               # that we don't want to include in the distribution.
               [command.RemoveDirectory(os.path.join('%(output)s', name))
@@ -331,7 +345,8 @@ def HostTools(target):
                             True),
               GccCommand(target, MAKE_DESTDIR_CMD + ['install-strip-gcc']),
               REMOVE_INFO_DIR,
-              ],
+              # Note we include COPYING.RUNTIME here and not with gcc_libs.
+              ] + InstallDocFiles('gcc', ['COPYING3', 'COPYING.RUNTIME']),
           },
       }
   return tools
@@ -423,7 +438,7 @@ def TargetLibs(target):
                                  NewlibFile('lib', 'libcrt_common.a')),
                   command.WriteData(NewlibLibcScript(target),
                                     NewlibFile('lib', 'libc.a')),
-                  ],
+                  ] + InstallDocFiles('newlib', ['COPYING.NEWLIB']),
           },
 
       'gcc_libs_' + target: {

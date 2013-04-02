@@ -72,6 +72,14 @@ int64 GetDisplayIdForOutput(XID output, int output_index) {
 }
 #endif
 
+gfx::Insets GetDefaultDisplayOverscan(const gfx::Display& display) {
+  // Currently we assume 5% overscan and hope for the best if TV claims it
+  // overscan, but doesn't expose how much.
+  int width = display.bounds().width() / 40;
+  int height = display.bounds().height() / 40;
+  return gfx::Insets(height, width, height, width);
+}
+
 }  // namespace
 
 using aura::RootWindow;
@@ -146,6 +154,7 @@ const gfx::Display& DisplayManager::FindDisplayContainingPoint(
 void DisplayManager::SetOverscanInsets(int64 display_id,
                                        const gfx::Insets& insets_in_dip) {
   display_info_[display_id].overscan_insets_in_dip = insets_in_dip;
+  display_info_[display_id].has_custom_overscan_insets = true;
 
   // Copies the |displays_| because UpdateDisplays() compares the passed
   // displays and its internal |displays_|.
@@ -201,12 +210,16 @@ void DisplayManager::OnNativeDisplaysChanged(
     new_displays = updated_displays;
   }
 
+  RefreshDisplayInfo();
+
   for (DisplayList::const_iterator iter = new_displays.begin();
        iter != new_displays.end(); ++iter) {
     std::map<int64, DisplayInfo>::iterator info =
         display_info_.find(iter->id());
     if (info != display_info_.end()) {
       info->second.original_bounds_in_pixel = iter->bounds_in_pixel();
+      if (info->second.has_overscan && !info->second.has_custom_overscan_insets)
+        info->second.overscan_insets_in_dip = GetDefaultDisplayOverscan(*iter);
     } else {
       display_info_[iter->id()].original_bounds_in_pixel =
           iter->bounds_in_pixel();
@@ -214,7 +227,6 @@ void DisplayManager::OnNativeDisplaysChanged(
   }
 
   UpdateDisplays(new_displays);
-  RefreshDisplayNames();
 }
 
 void DisplayManager::UpdateDisplays(
@@ -332,10 +344,14 @@ void DisplayManager::UpdateDisplays(
 
 RootWindow* DisplayManager::CreateRootWindowForDisplay(
     const gfx::Display& display) {
+  static int root_window_count = 0;
+
   RootWindow::CreateParams params(display.bounds_in_pixel());
   params.host = Shell::GetInstance()->root_window_host_factory()->
       CreateRootWindowHost(display.bounds_in_pixel());
   aura::RootWindow* root_window = new aura::RootWindow(params);
+  root_window->SetName(StringPrintf("RootWindow-%d", root_window_count++));
+
   // No need to remove RootWindowObserver because
   // the DisplayManager object outlives RootWindow objects.
   root_window->AddRootWindowObserver(this);
@@ -432,7 +448,7 @@ void DisplayManager::Init() {
   }
 #endif
 
-  RefreshDisplayNames();
+  RefreshDisplayInfo();
 
 #if defined(OS_WIN)
   if (base::win::GetVersion() >= base::win::VERSION_WIN8)
@@ -558,7 +574,12 @@ void DisplayManager::EnsurePointerInDisplays() {
   root_window->MoveCursorTo(target_location);
 }
 
-void DisplayManager::RefreshDisplayNames() {
+DisplayManager::DisplayInfo::DisplayInfo()
+  : has_overscan(false),
+    has_custom_overscan_insets(false) {
+}
+
+void DisplayManager::RefreshDisplayInfo() {
 #if defined(OS_CHROMEOS)
   if (!base::chromeos::IsRunningOnChromeOS())
     return;
@@ -582,6 +603,9 @@ void DisplayManager::RefreshDisplayNames() {
     } else if (!name.empty()) {
       display_info_[id].name = name;
     }
+
+    ui::GetOutputOverscanFlag(
+        outputs[output_index], &display_info_[id].has_overscan);
   }
 #endif
 }
@@ -593,6 +617,10 @@ void DisplayManager::SetDisplayIdsForTest(DisplayList* to_update) const {
        ++iter, ++iter_to_update) {
     (*iter_to_update).set_id((*iter).id());
   }
+}
+
+void DisplayManager::SetHasOverscanFlagForTest(int64 id, bool has_overscan) {
+  display_info_[id].has_overscan = has_overscan;
 }
 
 }  // namespace internal

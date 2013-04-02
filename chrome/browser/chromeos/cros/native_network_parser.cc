@@ -109,6 +109,7 @@ EnumMapper<PropertyIndex>::Pair property_index_table[] = {
   { flimflam::kOfflineModeProperty, PROPERTY_INDEX_OFFLINE_MODE },
   { flimflam::kOperatorCodeProperty, PROPERTY_INDEX_OPERATOR_CODE },
   { flimflam::kOperatorNameProperty, PROPERTY_INDEX_OPERATOR_NAME },
+  { shill::kOutOfCreditsProperty, PROPERTY_INDEX_OUT_OF_CREDITS },
   { flimflam::kPRLVersionProperty, PROPERTY_INDEX_PRL_VERSION },
   { flimflam::kPassphraseProperty, PROPERTY_INDEX_PASSPHRASE },
   { flimflam::kPassphraseRequiredProperty, PROPERTY_INDEX_PASSPHRASE_REQUIRED },
@@ -142,7 +143,7 @@ EnumMapper<PropertyIndex>::Pair property_index_table[] = {
   { flimflam::kTechnologyFamilyProperty, PROPERTY_INDEX_TECHNOLOGY_FAMILY },
   { flimflam::kTypeProperty, PROPERTY_INDEX_TYPE },
   { flimflam::kUIDataProperty, PROPERTY_INDEX_UI_DATA },
-  { "UninitializedTechnologies",
+  { shill::kUninitializedTechnologiesProperty,
     PROPERTY_INDEX_UNINITIALIZED_TECHNOLOGIES },
   { flimflam::kUsageURLProperty, PROPERTY_INDEX_USAGE_URL },
   { flimflam::kOpenVPNClientCertIdProperty,
@@ -844,6 +845,9 @@ ConnectionError NativeNetworkParser::ParseError(const std::string& error) {
     { flimflam::kErrorIpsecPskAuthFailed, ERROR_IPSEC_PSK_AUTH_FAILED },
     { flimflam::kErrorIpsecCertAuthFailed, ERROR_IPSEC_CERT_AUTH_FAILED },
     { flimflam::kErrorPppAuthFailed, ERROR_PPP_AUTH_FAILED },
+    { shill::kErrorEapAuthenticationFailed, ERROR_EAP_AUTHENTICATION_FAILED },
+    { shill::kErrorEapLocalTlsFailed, ERROR_EAP_LOCAL_TLS_FAILED },
+    { shill::kErrorEapRemoteTlsFailed, ERROR_EAP_REMOTE_TLS_FAILED },
   };
   CR_DEFINE_STATIC_LOCAL(EnumMapper<ConnectionError>, parser,
       (table, arraysize(table), ERROR_NO_ERROR));
@@ -958,6 +962,14 @@ bool NativeCellularNetworkParser::ParseValue(PropertyIndex index,
         break;
       cellular_network->set_operator_code(value_str);
       return true;
+    }
+    case PROPERTY_INDEX_OUT_OF_CREDITS: {
+      bool out_of_credits;
+      if (value.GetAsBoolean(&out_of_credits)) {
+        cellular_network->set_out_of_credits(out_of_credits);
+        return true;
+      }
+      break;
     }
     case PROPERTY_INDEX_SERVING_OPERATOR: {
       if (value.IsType(base::Value::TYPE_DICTIONARY)) {

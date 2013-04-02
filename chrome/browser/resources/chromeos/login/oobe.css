@@ -71,7 +71,8 @@ button:not(.custom-appearance) {
 
 #back-button,
 #reset-button,
-#password-changed-back-button {
+#password-changed-back-button,
+#tos-back-button {
   -webkit-margin-end: 8px;
 }
 
@@ -119,12 +120,16 @@ html[oobe=new] #oobe.connect #inner-container,
 html[oobe=new] #oobe.enrollment #inner-container,
 html[oobe=new] #oobe.eula #inner-container,
 html[oobe=new] #oobe.gaia-signin #inner-container,
+html[oobe=new] #oobe.error-message #inner-container,
 html[oobe=new] #oobe.oauth-enrollment #inner-container,
 html[oobe=new] #oobe.reset #inner-container,
 html[oobe=new] #oobe.update #inner-container,
 html[oobe=new] #oobe.user-image #inner-container,
+html[oobe=new] #oobe.managed-user-creation #inner-container,
 html[oobe=new] #oobe.tpm-error-message #inner-container,
-html[oobe=new] #oobe.password-changed #inner-container {
+html[oobe=new] #oobe.password-changed #inner-container,
+html[oobe=new] #oobe.terms-of-service #inner-container,
+html[oobe=new] #oobe.wrong-hwid #inner-container {
   background: -webkit-linear-gradient(rgba(255,255,255,0.99),
                                       rgba(255,255,255,0.95));
   box-shadow: 0 0 0 1px rgba(0, 0, 0, 0.3),
@@ -624,6 +629,7 @@ html[oobe=old] #user-image {
   float: right;
   margin: 4px;
   max-width: 220px;
+  position: relative;
 }
 
 html[dir=rtl] #user-image-preview {
@@ -631,6 +637,7 @@ html[dir=rtl] #user-image-preview {
 }
 
 #user-image-preview-img {
+  -webkit-transition: -webkit-transform 200ms linear;
   display: block;
   max-height: 220px;
   max-width: 220px;
@@ -638,6 +645,10 @@ html[dir=rtl] #user-image-preview {
 
 .camera.live #user-image-preview-img {
   display: none;
+}
+
+.camera.flip-x #user-image-preview-img {
+  -webkit-transform: rotateY(180deg);
 }
 
 .default-image #user-image-preview-img {
@@ -712,7 +723,7 @@ html[dir=rtl] #user-image-preview {
   -webkit-transition: opacity 75ms linear;
   background: url('chrome://theme/IDR_MIRROR_FLIP') no-repeat;
   border: none;
-  bottom: 8px;
+  bottom: 44px;  /* 8px + image bottom. */
   display: block;
   height: 32px;
   opacity: 0;
@@ -727,7 +738,7 @@ html[dir=rtl] #flip-photo {
 }
 
 /* "Flip photo" button is hidden during flip animation. */
-.online:not(.animation) .user-image-stream-area:hover #flip-photo {
+.camera.online:not(.animation) #flip-photo {
   opacity: 0.75;
 }
 
@@ -863,8 +874,12 @@ html[oobe=old] .step-controls {
 #enrollment-dot,
 #oauth-enrollment-dot,
 #reset-dot,
+#error-message-dot,
 #tpm-error-message-dot,
-#password-changed-dot {
+#password-changed-dot,
+#managed-user-creation-dot,
+#terms-of-service-dot,
+#wrong-hwid-dot {
   display: none;
 }
 
@@ -969,7 +984,6 @@ html[oobe=old] #update div {
   display: -webkit-box;
 }
 
-
 html[oobe=old] #update #update-screen-curtain {
   margin: 9em auto;
 }
@@ -1055,14 +1069,16 @@ html[oobe=old] #update progress {
 }
 
 #cros-eula,
-#oem-eula {
+#oem-eula,
+#tos-container {
   border: 1px solid #d9d9d9;
   height: 200px;
 }
 
 html[oobe=new] .eula-frame,
 html[oobe=new] #cros-eula,
-html[oobe=new] #oem-eula {
+html[oobe=new] #oem-eula,
+html[oobe=new] #tos-container {
   height: 222px;
 }
 
@@ -1070,11 +1086,9 @@ html[oobe=new] #oem-eula {
   border-left: none;
 }
 
-#eulas.one-column #cros-eula {
-  width: 100%;
-}
-
-#eulas.one-column #cros-eula-frame {
+#eulas.one-column #cros-eula,
+#eulas.one-column #cros-eula-frame,
+#tos-container {
   width: 100%;
 }
 
@@ -1314,7 +1328,7 @@ html[oobe=new] .oauth-enroll-step-center {
 }
 
 .close-button {
-  background: url('chrome://theme/IDR_WEB_UI_CLOSE') center no-repeat;
+  background: url('chrome://theme/IDR_CLOSE_DIALOG') center no-repeat;
   height: 14px;
   position: absolute;
   right: 7px;
@@ -1323,11 +1337,11 @@ html[oobe=new] .oauth-enroll-step-center {
 }
 
 .close-button:hover {
-  background-image: url('chrome://theme/IDR_WEB_UI_CLOSE_HOVER');
+  background-image: url('chrome://theme/IDR_CLOSE_DIALOG_H');
 }
 
 .close-button:active {
-  background-image: url('chrome://theme/IDR_WEB_UI_CLOSE_PRESSED');
+  background-image: url('chrome://theme/IDR_CLOSE_DIALOG_P');
 }
 
 html[dir=rtl] .close-button {
@@ -1391,20 +1405,6 @@ span.bold {
   font-weight: bold;
 }
 
-.error-message {
-  -webkit-padding-start: 30px;
-  background: url('chrome://theme/IDR_WARNING') left top no-repeat;
-  background-size: 24px;
-}
-
-.error-message-padding {
-  margin-bottom: 10px;
-}
-
-html[dir=rtl] .error-message {
-  background-position: right top;
-}
-
 #version-labels {
   -webkit-transition: all 500ms linear;
   color: #fff;
@@ -1455,3 +1455,4 @@ html[dir=rtl] .error-message {
 .background-final {
   opacity: 1;
 }
+

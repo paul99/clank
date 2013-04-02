@@ -9,7 +9,7 @@
 #include "chrome/common/spellcheck_messages.h"
 #include "chrome/renderer/spellchecker/spellcheck_provider_test.h"
 #include "testing/gtest/include/gtest/gtest.h"
-#include "third_party/WebKit/Source/WebKit/chromium/public/platform/WebString.h"
+#include "third_party/WebKit/Source/Platform/chromium/public/WebString.h"
 
 // Tests for Hunspell functionality in SpellcheckingProvider
 
@@ -85,7 +85,7 @@ TEST_F(SpellCheckProviderTest, MultiLineText) {
 
 // Tests that the SpellCheckProvider class cancels incoming spellcheck requests
 // when it does not need to handle them.
-TEST_F(SpellCheckProviderTest,CancelUnnecessaryRequests) {
+TEST_F(SpellCheckProviderTest, CancelUnnecessaryRequests) {
   FakeTextCheckingCompletion completion;
   provider_.RequestTextChecking(WebKit::WebString("hello."),
                                 &completion);

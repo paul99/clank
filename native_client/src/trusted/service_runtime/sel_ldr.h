@@ -99,6 +99,12 @@ typedef int (*NaClAttachDebugExceptionHandlerFunc)(const void *info,
                                                    size_t size);
 #endif
 
+struct NaClSpringboardInfo {
+  /* These are addresses in untrusted address space (relative to mem_start). */
+  uint32_t start_addr;
+  uint32_t end_addr;
+};
+
 struct NaClApp {
   /*
    * public, user settable prior to app start.
@@ -129,9 +135,11 @@ struct NaClApp {
 
 #if NACL_ARCH(NACL_BUILD_ARCH) == NACL_x86 && NACL_BUILD_SUBARCH == 32
   uintptr_t                 pcrel_thunk;
+  uintptr_t                 pcrel_thunk_end;
 #endif
 #if NACL_ARCH(NACL_BUILD_ARCH) == NACL_x86 && NACL_BUILD_SUBARCH == 64
   uintptr_t                 dispatch_thunk;
+  uintptr_t                 dispatch_thunk_end;
   uintptr_t                 get_tls_fast_path1;
   uintptr_t                 get_tls_fast_path2;
 #endif
@@ -188,12 +196,9 @@ struct NaClApp {
   /* common to both ELF executables and relocatable load images */
 
 #if NACL_ARCH(NACL_BUILD_ARCH) == NACL_x86 && NACL_BUILD_SUBARCH == 32
-  uintptr_t                 springboard_addr;
-  uintptr_t                 springboard_all_regs_addr;
-  /*
-   * springboard code addr for context switching into app sandbox, relative
-   * to mem_start
-   */
+  /* Addresses of trusted springboard code for switching to untrusted code. */
+  struct NaClSpringboardInfo syscall_return_springboard;
+  struct NaClSpringboardInfo all_regs_springboard;
 #endif
 
   /*
@@ -374,6 +379,20 @@ struct NaClApp {
    * fault_signal is non-zero.
    */
   Atomic32                  faulted_thread_count;
+#if NACL_WINDOWS
+  /*
+   * An event that is signaled by debug exception handler process when it fills
+   * fault_signal field with non-zero value for some NaClAppThread.
+   */
+  HANDLE                    faulted_thread_event;
+#else
+  /*
+   * A file descriptor of a pipe which becomes available for reading in
+   * the event that fault_signal for some NaClAppThread becomes non-zero.
+   */
+  int                       faulted_thread_fd_read;
+  int                       faulted_thread_fd_write;
+#endif
 
   const struct NaClValidatorInterface *validator;
 };
@@ -513,6 +532,11 @@ int NaClAppLaunchServiceThreads(struct NaClApp *nap);
  * channel, and false (0) otherwise.
  */
 int NaClReportExitStatus(struct NaClApp *nap, int exit_status);
+
+/*
+ * Get the top of the initial thread's stack.  Returns a user address.
+ */
+uintptr_t NaClGetInitialStackTop(struct NaClApp *nap);
 
 /*
  * Used to launch the main thread.  NB: calling thread may in the

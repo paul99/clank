@@ -28,15 +28,10 @@
 
 namespace {
 
-const float EPSILON = 1e-3f;
-
-bool IsApproximateMultipleOf(float value, float base) {
-  float remainder = fmod(fabs(value), base);
-  return remainder < EPSILON || base - remainder < EPSILON;
-}
-
 const ui::Layer* GetRoot(const ui::Layer* layer) {
-  return layer->parent() ? GetRoot(layer->parent()) : layer;
+  while (layer->parent())
+    layer = layer->parent();
+  return layer;
 }
 
 }  // namespace
@@ -48,6 +43,7 @@ Layer::Layer()
       compositor_(NULL),
       parent_(NULL),
       visible_(true),
+      is_drawn_(true),
       force_render_surface_(false),
       fills_bounds_opaquely_(true),
       layer_updated_externally_(false),
@@ -75,6 +71,7 @@ Layer::Layer(LayerType type)
       compositor_(NULL),
       parent_(NULL),
       visible_(true),
+      is_drawn_(true),
       force_render_surface_(false),
       fills_bounds_opaquely_(true),
       layer_updated_externally_(false),
@@ -139,6 +136,7 @@ void Layer::Add(Layer* child) {
   children_.push_back(child);
   cc_layer_->addChild(child->cc_layer_);
   child->OnDeviceScaleFactorChanged(device_scale_factor_);
+  child->UpdateIsDrawn();
 }
 
 void Layer::Remove(Layer* child) {
@@ -328,7 +326,7 @@ void Layer::SetLayerFilters() {
   // cause further color matrix filters to be applied separately. In this order,
   // they all can be combined in a single pass.
   if (layer_brightness_) {
-    filters.append(WebKit::WebFilterOperation::createBrightnessFilter(
+    filters.append(WebKit::WebFilterOperation::createSaturatingBrightnessFilter(
         layer_brightness_));
   }
 
@@ -372,10 +370,21 @@ bool Layer::GetTargetVisibility() const {
 }
 
 bool Layer::IsDrawn() const {
-  const Layer* layer = this;
-  while (layer && layer->visible_)
-    layer = layer->parent_;
-  return layer == NULL;
+  return is_drawn_;
+}
+
+void Layer::UpdateIsDrawn() {
+  bool updated_is_drawn = visible_ && (!parent_ || parent_->IsDrawn());
+
+  if (updated_is_drawn == is_drawn_)
+    return;
+
+  is_drawn_ = updated_is_drawn;
+  cc_layer_->setIsDrawable(is_drawn_ && type_ != LAYER_NOT_DRAWN);
+
+  for (size_t i = 0; i < children_.size(); ++i) {
+    children_[i]->UpdateIsDrawn();
+  }
 }
 
 bool Layer::ShouldDraw() const {
@@ -443,9 +452,9 @@ void Layer::SetExternalTexture(Texture* texture) {
     }
     cc_layer_->setAnchorPoint(gfx::PointF());
     cc_layer_->setContentsOpaque(fills_bounds_opaquely_);
-    cc_layer_->setOpacity(visible_ ? opacity_ : 0.f);
+    cc_layer_->setOpacity(opacity_);
     cc_layer_->setForceRenderSurface(force_render_surface_);
-    cc_layer_->setIsDrawable(true);
+    cc_layer_->setIsDrawable(IsDrawn());
     RecomputeTransform();
   }
   RecomputeDrawsContentAndUVRect();
@@ -647,13 +656,10 @@ void Layer::SetTransformImmediately(const gfx::Transform& transform) {
 }
 
 void Layer::SetOpacityImmediately(float opacity) {
-  bool schedule_draw = (opacity != opacity_ && IsDrawn());
   opacity_ = opacity;
 
-  if (visible_)
-    cc_layer_->setOpacity(opacity);
-  if (schedule_draw)
-    ScheduleDraw();
+  cc_layer_->setOpacity(opacity);
+  ScheduleDraw();
 }
 
 void Layer::SetVisibilityImmediately(bool visible) {
@@ -661,8 +667,7 @@ void Layer::SetVisibilityImmediately(bool visible) {
     return;
 
   visible_ = visible;
-  // TODO(piman): Expose a visibility flag on WebLayer.
-  cc_layer_->setOpacity(visible_ ? opacity_ : 0.f);
+  UpdateIsDrawn();
 }
 
 void Layer::SetBrightnessImmediately(float brightness) {
@@ -791,12 +796,11 @@ void Layer::RecomputeDrawsContentAndUVRect() {
 
     gfx::Size size(std::min(bounds().width(), texture_size.width()),
                    std::min(bounds().height(), texture_size.height()));
-    gfx::RectF rect(
-        0,
-        0,
+    gfx::PointF uv_top_left(0.f, 0.f);
+    gfx::PointF uv_bottom_right(
         static_cast<float>(size.width())/texture_size.width(),
         static_cast<float>(size.height())/texture_size.height());
-    texture_layer_->setUVRect(rect);
+    texture_layer_->setUV(uv_top_left, uv_bottom_right);
 
     cc_layer_->setBounds(ConvertSizeToPixel(this, size));
   }

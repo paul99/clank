@@ -14,7 +14,6 @@
 namespace views {
 
 class DialogClientView;
-class View;
 
 ///////////////////////////////////////////////////////////////////////////////
 //
@@ -28,9 +27,10 @@ class View;
 ///////////////////////////////////////////////////////////////////////////////
 class VIEWS_EXPORT DialogDelegate : public WidgetDelegate {
  public:
-  virtual DialogDelegate* AsDialogDelegate() OVERRIDE;
-
   virtual ~DialogDelegate();
+
+  // Returns whether to use the new dialog style.
+  static bool UseNewStyle();
 
   // Returns a mask specifying which of the available DialogButtons are visible
   // for the dialog. Note: If an OK button is provided, you should provide a
@@ -58,10 +58,6 @@ class VIEWS_EXPORT DialogDelegate : public WidgetDelegate {
   // Returns whether the specified dialog button is visible.
   virtual bool IsDialogButtonVisible(ui::DialogButton button) const;
 
-  // Returns whether to use chrome style for the button strip (like WebUI). If
-  // false, native style padding is used.
-  virtual bool UseChromeStyle() const;
-
   // Returns whether accelerators are enabled on the button. This is invoked
   // when an accelerator is pressed, not at construction time. This
   // returns true.
@@ -77,6 +73,11 @@ class VIEWS_EXPORT DialogDelegate : public WidgetDelegate {
   // height. By returning true the height becomes
   // max(extra_view preferred height, buttons preferred height).
   virtual bool GetSizeExtraViewHeightToButtons();
+
+  // Like GetExtraView, this function can be overridden to display an auxiliary
+  // view in the dialog. This view will be placed beneath the dialog buttons and
+  // will extend all the way from the left to the right of the dialog.
+  virtual View* GetFootnoteView();
 
   // For Dialog boxes, if there is a "Cancel" button or no dialog button at all,
   // this is called when the user presses the "Cancel" button or the Close
@@ -95,9 +96,14 @@ class VIEWS_EXPORT DialogDelegate : public WidgetDelegate {
   virtual bool Accept(bool window_closing);
   virtual bool Accept();
 
-  // Overridden from WindowDelegate:
+  // Overridden from WidgetDelegate:
   virtual View* GetInitiallyFocusedView() OVERRIDE;
+  virtual DialogDelegate* AsDialogDelegate() OVERRIDE;
   virtual ClientView* CreateClientView(Widget* widget) OVERRIDE;
+  virtual NonClientFrameView* CreateNonClientFrameView(Widget* widget) OVERRIDE;
+
+  // Create a frame view using the new dialog style.
+  static NonClientFrameView* CreateNewStyleFrameView(Widget* widget);
 
   // Called when the window has been closed.
   virtual void OnClose() {}
@@ -114,16 +120,24 @@ class VIEWS_EXPORT DialogDelegate : public WidgetDelegate {
 
 // A DialogDelegate implementation that is-a View. Used to override GetWidget()
 // to call View's GetWidget() for the common case where a DialogDelegate
-// implementation is-a View.
+// implementation is-a View. Note that DialogDelegateView is not owned by
+// view's hierarchy and is expected to be deleted on DeleteDelegate call.
 class VIEWS_EXPORT DialogDelegateView : public DialogDelegate,
                                         public View {
  public:
   DialogDelegateView();
   virtual ~DialogDelegateView();
 
+  // Create a |dialog| window Widget with the specified |context| or |parent|.
+  static Widget* CreateDialogWidget(DialogDelegateView* dialog,
+                                    gfx::NativeWindow context,
+                                    gfx::NativeWindow parent);
+
   // Overridden from DialogDelegate:
+  virtual void DeleteDelegate() OVERRIDE;
   virtual Widget* GetWidget() OVERRIDE;
   virtual const Widget* GetWidget() const OVERRIDE;
+  virtual View* GetContentsView() OVERRIDE;
 
  private:
   DISALLOW_COPY_AND_ASSIGN(DialogDelegateView);

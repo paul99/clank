@@ -17,9 +17,7 @@
 #include "content/browser/renderer_host/compositor_impl_android.h"
 #include "content/browser/renderer_host/image_transport_factory_android.h"
 #include "content/browser/renderer_host/render_widget_host_impl.h"
-#include "content/browser/renderer_host/smooth_scroll_gesture_android.h"
 #include "content/browser/renderer_host/surface_texture_transport_client_android.h"
-#include "content/common/android/device_info.h"
 #include "content/common/gpu/client/gl_helper.h"
 #include "content/common/gpu/gpu_messages.h"
 #include "content/common/view_messages.h"
@@ -28,27 +26,14 @@
 #include "third_party/WebKit/Source/Platform/chromium/public/Platform.h"
 #include "third_party/WebKit/Source/Platform/chromium/public/WebExternalTextureLayer.h"
 #include "third_party/WebKit/Source/Platform/chromium/public/WebSize.h"
+#include "ui/gfx/android/device_display_info.h"
 #include "ui/gfx/android/java_bitmap.h"
+#include "ui/gfx/display.h"
+#include "ui/gfx/screen.h"
 #include "ui/gfx/size_conversions.h"
 #include "webkit/compositor_bindings/web_compositor_support_impl.h"
 
 namespace content {
-
-namespace {
-
-// TODO(pliard): http://crbug.com/142585. Remove this helper function and update
-// the clients to deal directly with WebKit::WebTextDirection.
-base::i18n::TextDirection ConvertTextDirection(WebKit::WebTextDirection dir) {
-  switch (dir) {
-    case WebKit::WebTextDirectionDefault: return base::i18n::UNKNOWN_DIRECTION;
-    case WebKit::WebTextDirectionLeftToRight: return base::i18n::LEFT_TO_RIGHT;
-    case WebKit::WebTextDirectionRightToLeft: return base::i18n::RIGHT_TO_LEFT;
-  }
-  NOTREACHED() << "Unsupported text direction " << dir;
-  return base::i18n::UNKNOWN_DIRECTION;
-}
-
-}  // namespace
 
 RenderWidgetHostViewAndroid::RenderWidgetHostViewAndroid(
     RenderWidgetHostImpl* widget_host,
@@ -58,8 +43,7 @@ RenderWidgetHostViewAndroid::RenderWidgetHostViewAndroid(
       content_view_core_(NULL),
       ime_adapter_android_(ALLOW_THIS_IN_INITIALIZER_LIST(this)),
       cached_background_color_(SK_ColorWHITE),
-      texture_id_in_layer_(0),
-      current_buffer_id_(0) {
+      texture_id_in_layer_(0) {
   if (CompositorImpl::UsesDirectGL()) {
     surface_texture_transport_.reset(new SurfaceTextureTransportClient());
     layer_ = surface_texture_transport_->Initialize();
@@ -81,6 +65,18 @@ RenderWidgetHostViewAndroid::~RenderWidgetHostViewAndroid() {
     ImageTransportFactoryAndroid::GetInstance()->DeleteTexture(
         texture_id_in_layer_);
   }
+}
+
+
+bool RenderWidgetHostViewAndroid::OnMessageReceived(
+    const IPC::Message& message) {
+  bool handled = true;
+  IPC_BEGIN_MESSAGE_MAP(RenderWidgetHostViewAndroid, message)
+    IPC_MESSAGE_HANDLER(ViewHostMsg_ImeBatchStateChanged_ACK,
+                        ProcessImeBatchStateAck)
+    IPC_MESSAGE_UNHANDLED(handled = false)
+  IPC_END_MESSAGE_MAP()
+  return handled;
 }
 
 void RenderWidgetHostViewAndroid::InitAsChild(gfx::NativeView parent_view) {
@@ -119,8 +115,11 @@ void RenderWidgetHostViewAndroid::WasHidden() {
 }
 
 void RenderWidgetHostViewAndroid::SetSize(const gfx::Size& size) {
-  if (surface_texture_transport_.get())
-    surface_texture_transport_->SetSize(size);
+  if (surface_texture_transport_.get()) {
+    // Temporary workaround: crbug.com/174405.
+    surface_texture_transport_->SetSize(
+        content_view_core_ ? content_view_core_->GetPhysicalSize() : size);
+  }
 
   host_->WasResized();
 }
@@ -192,8 +191,7 @@ bool RenderWidgetHostViewAndroid::PopulateBitmapWithContents(jobject jbitmap) {
 bool RenderWidgetHostViewAndroid::HasValidFrame() const {
   return texture_id_in_layer_ != 0 &&
       content_view_core_ &&
-      !texture_size_in_layer_.IsEmpty() &&
-      texture_size_in_layer_ == content_view_core_->GetBounds().size();
+      !texture_size_in_layer_.IsEmpty();
 }
 
 gfx::NativeView RenderWidgetHostViewAndroid::GetNativeView() const {
@@ -215,7 +213,7 @@ void RenderWidgetHostViewAndroid::MovePluginWindows(
     const gfx::Vector2d& scroll_offset,
     const std::vector<webkit::npapi::WebPluginGeometry>& moves) {
   // We don't have plugin windows on Android. Do nothing. Note: this is called
-  // from RenderWidgetHost::OnMsgUpdateRect which is itself invoked while
+  // from RenderWidgetHost::OnUpdateRect which is itself invoked while
   // processing the corresponding message from Renderer.
 }
 
@@ -272,7 +270,7 @@ gfx::Rect RenderWidgetHostViewAndroid::GetViewBounds() const {
   if (!content_view_core_)
     return gfx::Rect();
 
-  return content_view_core_->GetBounds();
+  return gfx::Rect(content_view_core_->GetDIPSize());
 }
 
 void RenderWidgetHostViewAndroid::UpdateCursor(const WebCursor& cursor) {
@@ -289,8 +287,6 @@ void RenderWidgetHostViewAndroid::TextInputStateChanged(
   if (!IsShowing())
     return;
 
-  // TODO(miguelg): this currently dispatches messages for text inputs
-  // and date/time value inputs. Split it into two adapters.
   content_view_core_->ImeUpdateAdapter(
       GetNativeImeAdapter(),
       static_cast<int>(params.type),
@@ -301,6 +297,11 @@ void RenderWidgetHostViewAndroid::TextInputStateChanged(
 
 int RenderWidgetHostViewAndroid::GetNativeImeAdapter() {
   return reinterpret_cast<int>(&ime_adapter_android_);
+}
+
+void RenderWidgetHostViewAndroid::ProcessImeBatchStateAck(bool is_begin) {
+  if (content_view_core_)
+    content_view_core_->ProcessImeBatchStateAck(is_begin);
 }
 
 void RenderWidgetHostViewAndroid::ImeCancelComposition() {
@@ -358,16 +359,9 @@ void RenderWidgetHostViewAndroid::SelectionChanged(const string16& text,
 }
 
 void RenderWidgetHostViewAndroid::SelectionBoundsChanged(
-    const gfx::Rect& start_rect,
-    WebKit::WebTextDirection start_direction,
-    const gfx::Rect& end_rect,
-    WebKit::WebTextDirection end_direction) {
+    const ViewHostMsg_SelectionBounds_Params& params) {
   if (content_view_core_) {
-    content_view_core_->OnSelectionBoundsChanged(
-        start_rect,
-        ConvertTextDirection(start_direction),
-        end_rect,
-        ConvertTextDirection(end_direction));
+    content_view_core_->OnSelectionBoundsChanged(params);
   }
 }
 
@@ -385,10 +379,21 @@ void RenderWidgetHostViewAndroid::SetBackground(const SkBitmap& background) {
 void RenderWidgetHostViewAndroid::CopyFromCompositingSurface(
     const gfx::Rect& src_subrect,
     const gfx::Size& dst_size,
-    const base::Callback<void(bool)>& callback,
-    skia::PlatformBitmap* output) {
+    const base::Callback<void(bool, const SkBitmap&)>& callback) {
+  NOTIMPLEMENTED();
+  callback.Run(false, SkBitmap());
+}
+
+void RenderWidgetHostViewAndroid::CopyFromCompositingSurfaceToVideoFrame(
+      const gfx::Rect& src_subrect,
+      const scoped_refptr<media::VideoFrame>& target,
+      const base::Callback<void(bool)>& callback) {
   NOTIMPLEMENTED();
   callback.Run(false);
+}
+
+bool RenderWidgetHostViewAndroid::CanCopyToVideoFrame() const {
+  return false;
 }
 
 void RenderWidgetHostViewAndroid::ShowDisambiguationPopup(
@@ -397,16 +402,6 @@ void RenderWidgetHostViewAndroid::ShowDisambiguationPopup(
     return;
 
   content_view_core_->ShowDisambiguationPopup(target_rect, zoomed_bitmap);
-}
-
-SmoothScrollGesture* RenderWidgetHostViewAndroid::CreateSmoothScrollGesture(
-    bool scroll_down, int pixels_to_scroll, int mouse_event_x,
-    int mouse_event_y) {
-  return new SmoothScrollGestureAndroid(
-      pixels_to_scroll,
-      GetRenderWidgetHost(),
-      content_view_core_->CreateSmoothScroller(
-          scroll_down, mouse_event_x, mouse_event_y));
 }
 
 void RenderWidgetHostViewAndroid::OnAcceleratedCompositingStateChange() {
@@ -418,31 +413,29 @@ void RenderWidgetHostViewAndroid::AcceleratedSurfaceBuffersSwapped(
   ImageTransportFactoryAndroid* factory =
       ImageTransportFactoryAndroid::GetInstance();
 
+  if (params.mailbox_name.empty())
+    return;
+
   // TODO(sievers): When running the impl thread in the browser we
   // need to delay the ACK until after commit and use more than a single
   // texture.
   DCHECK(!CompositorImpl::IsThreadingEnabled());
 
-  uint64 previous_buffer = current_buffer_id_;
-  if (previous_buffer && texture_id_in_layer_) {
-    DCHECK(id_to_mailbox_.find(previous_buffer) != id_to_mailbox_.end());
+  if (texture_id_in_layer_) {
+    DCHECK(!current_mailbox_name_.empty());
     ImageTransportFactoryAndroid::GetInstance()->ReleaseTexture(
         texture_id_in_layer_,
         reinterpret_cast<const signed char*>(
-            id_to_mailbox_[previous_buffer].c_str()));
-  }
-
-  current_buffer_id_ = params.surface_handle;
-  if (!texture_id_in_layer_) {
+            current_mailbox_name_.data()));
+  } else {
     texture_id_in_layer_ = factory->CreateTexture();
     texture_layer_->setTextureId(texture_id_in_layer_);
   }
 
-  DCHECK(id_to_mailbox_.find(current_buffer_id_) != id_to_mailbox_.end());
   ImageTransportFactoryAndroid::GetInstance()->AcquireTexture(
       texture_id_in_layer_,
       reinterpret_cast<const signed char*>(
-          id_to_mailbox_[current_buffer_id_].c_str()));
+          params.mailbox_name.data()));
 
   // We need to tell ContentViewCore about the new frame before calling
   // setNeedsDisplay() below so that it has the needed information schedule the
@@ -458,10 +451,11 @@ void RenderWidgetHostViewAndroid::AcceleratedSurfaceBuffersSwapped(
       ImageTransportFactoryAndroid::GetInstance()->InsertSyncPoint();
 
   AcceleratedSurfaceMsg_BufferPresented_Params ack_params;
-  ack_params.surface_handle = previous_buffer;
+  ack_params.mailbox_name = current_mailbox_name_;
   ack_params.sync_point = sync_point;
    RenderWidgetHostImpl::AcknowledgeBufferPresent(
       params.route_id, gpu_host_id, ack_params);
+  current_mailbox_name_ = params.mailbox_name;
 }
 
 void RenderWidgetHostViewAndroid::AcceleratedSurfacePostSubBuffer(
@@ -474,13 +468,6 @@ void RenderWidgetHostViewAndroid::AcceleratedSurfaceSuspend() {
   NOTREACHED();
 }
 
-void RenderWidgetHostViewAndroid::AcceleratedSurfaceNew(
-    uint64 surface_id,
-    const std::string& mailbox_name) {
-  DCHECK(surface_id == 1 || surface_id == 2);
-  id_to_mailbox_[surface_id] = mailbox_name;
-}
-
 void RenderWidgetHostViewAndroid::AcceleratedSurfaceRelease() {
   // This tells us we should free the frontbuffer.
   if (texture_id_in_layer_) {
@@ -488,6 +475,7 @@ void RenderWidgetHostViewAndroid::AcceleratedSurfaceRelease() {
     ImageTransportFactoryAndroid::GetInstance()->DeleteTexture(
         texture_id_in_layer_);
     texture_id_in_layer_ = 0;
+    current_mailbox_name_.clear();
   }
 }
 
@@ -599,7 +587,12 @@ void RenderWidgetHostViewAndroid::MoveCaret(const gfx::Point& point) {
 
 
 void RenderWidgetHostViewAndroid::SetCachedBackgroundColor(SkColor color) {
+  if (cached_background_color_ == color)
+    return;
+
   cached_background_color_ = color;
+  if (content_view_core_)
+    content_view_core_->OnBackgroundColorChanged(color);
 }
 
 SkColor RenderWidgetHostViewAndroid::GetCachedBackgroundColor() const {
@@ -618,7 +611,9 @@ void RenderWidgetHostViewAndroid::UpdateFrameInfo(
     float page_scale_factor,
     float min_page_scale_factor,
     float max_page_scale_factor,
-    const gfx::Size& content_size) {
+    const gfx::Size& content_size,
+    const gfx::Vector2dF& controls_offset,
+    const gfx::Vector2dF& content_offset) {
   if (content_view_core_) {
     content_view_core_->UpdateContentSize(content_size.width(),
                                           content_size.height());
@@ -627,6 +622,8 @@ void RenderWidgetHostViewAndroid::UpdateFrameInfo(
     content_view_core_->UpdateScrollOffsetAndPageScaleFactor(scroll_offset.x(),
                                                              scroll_offset.y(),
                                                              page_scale_factor);
+    content_view_core_->UpdateOffsetsForFullscreen(controls_offset.y(),
+                                                   content_offset.y());
   }
 }
 
@@ -649,16 +646,17 @@ void RenderWidgetHostViewAndroid::HasTouchEventHandlers(
 // static
 void RenderWidgetHostViewPort::GetDefaultScreenInfo(
     WebKit::WebScreenInfo* results) {
-  DeviceInfo info;
-  const int width = info.GetWidth();
-  const int height = info.GetHeight();
-  results->deviceScaleFactor = info.GetDPIScale();
-  results->depth = info.GetBitsPerPixel();
+  const gfx::Display& display =
+      gfx::Screen::GetNativeScreen()->GetPrimaryDisplay();
+  results->rect = display.bounds();
+  // TODO(husky): Remove any system controls from availableRect.
+  results->availableRect = display.work_area();
+  results->deviceScaleFactor = display.device_scale_factor();
+
+  gfx::DeviceDisplayInfo info;
+  results->depth = info.GetBitsPerPixel();;
   results->depthPerComponent = info.GetBitsPerComponent();
   results->isMonochrome = (results->depthPerComponent == 0);
-  results->rect = WebKit::WebRect(0, 0, width, height);
-  // TODO(husky): Remove any system controls from availableRect.
-  results->availableRect = WebKit::WebRect(0, 0, width, height);
 }
 
 ////////////////////////////////////////////////////////////////////////////////

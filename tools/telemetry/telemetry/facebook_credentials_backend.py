@@ -6,6 +6,11 @@ from telemetry import form_based_credentials_backend
 
 class FacebookCredentialsBackend(
     form_based_credentials_backend.FormBasedCredentialsBackend):
+  def IsAlreadyLoggedIn(self, tab):
+    return tab.EvaluateJavaScript(
+        'document.getElementById("fbNotificationsList")!== null || '
+        'document.getElementById("m_home_notice")!== null')
+
   @property
   def credentials_type(self):
     return 'facebook'
@@ -15,7 +20,7 @@ class FacebookCredentialsBackend(
     return 'http://www.facebook.com/'
 
   @property
-  def form_id(self):
+  def login_form_id(self):
     return 'login_form'
 
   @property

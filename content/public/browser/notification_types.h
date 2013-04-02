@@ -22,19 +22,6 @@ enum NotificationType {
   // Not valid when posting a notification.
   NOTIFICATION_ALL = NOTIFICATION_CONTENT_START,
 
-  // The app is done processing user actions, now is a good time to do
-  // some background work.
-  NOTIFICATION_IDLE,
-
-  // Means that the app has just started doing something in response to a
-  // user action, and that background processes shouldn't run if avoidable.
-  NOTIFICATION_BUSY,
-
-  // This is sent when the user does a gesture resulting in a noteworthy
-  // action taking place. This is typically used for logging. The source is
-  // the browser context, and the details is a string identifying the action.
-  NOTIFICATION_USER_ACTION,
-
   // NavigationController ----------------------------------------------------
 
   // A new pending navigation has been created. Pending entries are created
@@ -292,14 +279,6 @@ enum NotificationType {
   // or not an editable node was focused.
   NOTIFICATION_FOCUS_CHANGED_IN_PAGE,
 
-  // Notification posted from ExecuteJavascriptInWebFrameNotifyResult. The
-  // source is the RenderViewHost ExecuteJavascriptInWebFrameNotifyResult was
-  // invoked on. The details are a std::pair<int, Value*> with the int giving
-  // the id returned from ExecuteJavascriptInWebFrameNotifyResult and the
-  // Value the results of the javascript expression. The Value is owned by
-  // RenderViewHost and may be a Null Value.
-  NOTIFICATION_EXECUTE_JAVASCRIPT_RESULT,
-
   // Notification from WebContents that we have received a response from the
   // renderer in response to a dom automation controller action. The source is
   // the RenderViewHost, and the details is a DomOperationNotificationDetails.
@@ -351,21 +330,11 @@ enum NotificationType {
   // in a Details<ChildProcessData>.
   NOTIFICATION_CHILD_INSTANCE_CREATED,
 
-  // Saved Pages -------------------------------------------------------------
-
-  // Sent when a SavePackage finishes successfully. The source is the
-  // SavePackage, and Details are a GURL containing address of downloaded
-  // page.
-  NOTIFICATION_SAVE_PACKAGE_SUCCESSFULLY_FINISHED,
+  // Miscellaneous -------------------------------------------------------------
 
   // Sent before the repost form warning is brought up.
   // The source is a NavigationController.
   NOTIFICATION_REPOST_WARNING_SHOWN,
-
-  // Sent when the zoom level changes. The source is the HostZoomMap.  The
-  // details is a string of the hostname for which the zoom changed.  In case
-  // of a temporary zoom level change, the details is an empty string.
-  NOTIFICATION_ZOOM_LEVEL_CHANGED,
 
   // Custom notifications used by the embedder should start from here.
   NOTIFICATION_CONTENT_END,

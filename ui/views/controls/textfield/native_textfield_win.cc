@@ -124,6 +124,11 @@ NativeTextfieldWin::NativeTextfieldWin(Textfield* textfield)
     SetEditStyle(SES_LOWERCASE, SES_LOWERCASE);
   }
 
+  // Disable auto font changing. Otherwise, characters can be rendered with
+  // multiple fonts. See http://crbug.com/168480 for details.
+  const LRESULT lang_option = SendMessage(m_hWnd, EM_GETLANGOPTIONS, 0, 0);
+  SendMessage(EM_SETLANGOPTIONS, 0, lang_option & ~IMF_AUTOFONT);
+
   // Set up the text_object_model_.
   base::win::ScopedComPtr<IRichEditOle, &IID_IRichEditOle> ole_interface;
   ole_interface.Attach(GetOleInterface());
@@ -244,6 +249,10 @@ void NativeTextfieldWin::UpdateBorder() {
   SetWindowPos(NULL, 0, 0, 0, 0,
                SWP_NOMOVE | SWP_FRAMECHANGED | SWP_NOACTIVATE |
                SWP_NOOWNERZORDER | SWP_NOSIZE);
+}
+
+void NativeTextfieldWin::UpdateBorderColor() {
+  // TODO(estade): implement.
 }
 
 void NativeTextfieldWin::UpdateTextColor() {
@@ -404,11 +413,21 @@ ui::TextInputClient* NativeTextfieldWin::GetTextInputClient() {
   return NULL;
 }
 
-void NativeTextfieldWin::ApplyStyleRange(const gfx::StyleRange& style) {
+void NativeTextfieldWin::SetColor(SkColor value) {
   NOTREACHED();
 }
 
-void NativeTextfieldWin::ApplyDefaultStyle() {
+void NativeTextfieldWin::ApplyColor(SkColor value, const ui::Range& range) {
+  NOTREACHED();
+}
+
+void NativeTextfieldWin::SetStyle(gfx::TextStyle style, bool value) {
+  NOTREACHED();
+}
+
+void NativeTextfieldWin::ApplyStyle(gfx::TextStyle style,
+                                    bool value,
+                                    const ui::Range& range) {
   NOTREACHED();
 }
 
@@ -824,6 +843,9 @@ void NativeTextfieldWin::OnLButtonDblClk(UINT keys, const CPoint& point) {
   double_click_point_ = point;
   double_click_time_ = GetCurrentMessage()->time;
 
+  if (!ShouldProcessMouseEvent())
+    return;
+
   ScopedFreeze freeze(this, GetTextObjectModel());
   OnBeforePossibleChange();
   DefWindowProc(WM_LBUTTONDBLCLK, keys,
@@ -839,6 +861,9 @@ void NativeTextfieldWin::OnLButtonDown(UINT keys, const CPoint& point) {
       IsDoubleClick(double_click_point_, point,
                     GetCurrentMessage()->time - double_click_time_);
   tracking_double_click_ = false;
+
+  if (!ShouldProcessMouseEvent())
+    return;
 
   ScopedFreeze freeze(this, GetTextObjectModel());
   OnBeforePossibleChange();
@@ -1012,6 +1037,10 @@ void NativeTextfieldWin::OnNonLButtonDown(UINT keys, const CPoint& point) {
   // x-buttons (which usually means "thumb buttons") are pressed, so we only
   // call this for M and R down.
   tracking_double_click_ = false;
+
+  if (!ShouldProcessMouseEvent())
+    return;
+
   SetMsgHandled(false);
 }
 
@@ -1078,6 +1107,10 @@ void NativeTextfieldWin::OnSysChar(TCHAR ch, UINT repeat_count, UINT flags) {
   //     it through.
   if (ch == VK_SPACE)
     SetMsgHandled(false);
+}
+
+void NativeTextfieldWin::OnFinalMessage(HWND hwnd) {
+  delete this;
 }
 
 void NativeTextfieldWin::HandleKeystroke() {
@@ -1275,6 +1308,18 @@ void NativeTextfieldWin::BuildContextMenu() {
   context_menu_contents_->AddSeparator(ui::NORMAL_SEPARATOR);
   context_menu_contents_->AddItemWithStringId(IDS_APP_SELECT_ALL,
                                               IDS_APP_SELECT_ALL);
+}
+
+bool NativeTextfieldWin::ShouldProcessMouseEvent() {
+  TextfieldController* controller = textfield_->GetController();
+  if (!controller)
+    return true;
+  MSG msg(*GetCurrentMessage());
+  // ATL doesn't set the |time| field.
+  if (!msg.time)
+    msg.time = GetMessageTime();
+  ui::MouseEvent mouse_event(msg);
+  return !controller->HandleMouseEvent(textfield_, mouse_event);
 }
 
 }  // namespace views

@@ -5,14 +5,14 @@
 #include "ui/message_center/message_center.h"
 
 #include "base/logging.h"
+#include "base/memory/singleton.h"
+#include "base/observer_list.h"
 
 namespace message_center {
 
 //------------------------------------------------------------------------------
-
-MessageCenter::MessageCenter(Host* host)
-    : host_(host),
-      delegate_(NULL) {
+MessageCenter::MessageCenter()
+    : delegate_(NULL) {
   notification_list_.reset(new NotificationList(this));
 }
 
@@ -20,8 +20,15 @@ MessageCenter::~MessageCenter() {
   notification_list_.reset();
 }
 
+void MessageCenter::AddObserver(Observer* observer) {
+  observer_list_.AddObserver(observer);
+}
+
+void MessageCenter::RemoveObserver(Observer* observer) {
+  observer_list_.RemoveObserver(observer);
+}
+
 void MessageCenter::SetDelegate(Delegate* delegate) {
-  DCHECK(!delegate_);
   delegate_ = delegate;
 }
 
@@ -54,8 +61,7 @@ void MessageCenter::AddNotification(
     const base::DictionaryValue* optional_fields) {
   notification_list_->AddNotification(type, id, title, message, display_source,
                                       extension_id, optional_fields);
-  if (host_)
-    host_->MessageCenterChanged(true);
+  NotifyMessageCenterChanged(true);
 }
 
 void MessageCenter::UpdateNotification(
@@ -66,23 +72,33 @@ void MessageCenter::UpdateNotification(
     const base::DictionaryValue* optional_fields) {
   notification_list_->UpdateNotificationMessage(
       old_id, new_id, title, message, optional_fields);
-  if (host_)
-    host_->MessageCenterChanged(true);
+  NotifyMessageCenterChanged(true);
 }
 
 void MessageCenter::RemoveNotification(const std::string& id) {
   if (!notification_list_->RemoveNotification(id))
     return;
-  if (host_)
-    host_->MessageCenterChanged(false);
+  NotifyMessageCenterChanged(false);
 }
 
-void MessageCenter::SetNotificationImage(const std::string& id,
+void MessageCenter::SetNotificationIcon(const std::string& notification_id,
+                                        const gfx::ImageSkia& image) {
+  if (notification_list_->SetNotificationIcon(notification_id, image))
+    NotifyMessageCenterChanged(true);
+}
+
+void MessageCenter::SetNotificationImage(const std::string& notification_id,
                                          const gfx::ImageSkia& image) {
-  if (!notification_list_->SetNotificationImage(id, image))
-    return;
-  if (host_)
-    host_->MessageCenterChanged(true);
+  if (notification_list_->SetNotificationImage(notification_id, image))
+    NotifyMessageCenterChanged(true);
+}
+
+void MessageCenter::SetNotificationButtonIcon(
+    const std::string& notification_id, int button_index,
+    const gfx::ImageSkia& image) {
+  if (notification_list_->SetNotificationButtonIcon(notification_id,
+                                                    button_index, image))
+    NotifyMessageCenterChanged(true);
 }
 
 //------------------------------------------------------------------------------
@@ -128,18 +144,31 @@ void MessageCenter::ShowNotificationSettings(const std::string& id) {
     delegate_->ShowSettings(id);
 }
 
+void MessageCenter::ShowNotificationSettingsDialog(gfx::NativeView context) {
+  if (delegate_)
+    delegate_->ShowSettingsDialog(context);
+}
+
 void MessageCenter::OnNotificationClicked(const std::string& id) {
   if (delegate_)
     delegate_->OnClicked(id);
+  if (HasPopupNotifications()) {
+    notification_list_->MarkSinglePopupAsShown(id, true);
+    NotifyMessageCenterChanged(false);
+  }
 }
 
 void MessageCenter::OnQuietModeChanged(bool quiet_mode) {
-  host_->MessageCenterChanged(true);
+  NotifyMessageCenterChanged(true);
 }
 
 void MessageCenter::OnButtonClicked(const std::string& id, int button_index) {
   if (delegate_)
     delegate_->OnButtonClicked(id, button_index);
+  if (HasPopupNotifications()) {
+    notification_list_->MarkSinglePopupAsShown(id, true);
+    NotifyMessageCenterChanged(false);
+  }
 }
 
 NotificationList* MessageCenter::GetNotificationList() {
@@ -149,5 +178,15 @@ NotificationList* MessageCenter::GetNotificationList() {
 void MessageCenter::Delegate::OnButtonClicked(const std::string& id,
                                               int button_index) {
 }
+
+//------------------------------------------------------------------------------
+// Private.
+
+void MessageCenter::NotifyMessageCenterChanged(bool new_notification) {
+  FOR_EACH_OBSERVER(Observer,
+                    observer_list_,
+                    OnMessageCenterChanged(new_notification));
+}
+
 
 }  // namespace message_center

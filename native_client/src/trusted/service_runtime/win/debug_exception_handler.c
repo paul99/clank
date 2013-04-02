@@ -24,17 +24,18 @@
 /*
  * This struct is passed in a message from the main sel_ldr process to
  * the debug exception handler process to communicate the address of
- * service_runtime's global arrays, nacl_thread and nacl_thread_ids.
+ * service_runtime's global arrays, nacl_user and nacl_thread_ids.
  */
 struct StartupInfo {
-  struct NaClAppThread **nacl_thread;
+  struct NaClThreadContext **nacl_user;
   uint32_t *nacl_thread_ids;
 };
 
 
 static int HandleException(const struct StartupInfo *startup_info,
                            HANDLE process_handle, DWORD windows_thread_id,
-                           HANDLE thread_handle, DWORD exception_code);
+                           HANDLE thread_handle, DWORD exception_code,
+                           HANDLE *exception_event);
 
 
 static BOOL GetAddrProtection(HANDLE process_handle, uintptr_t addr,
@@ -131,6 +132,7 @@ void NaClDebugExceptionHandlerRun(HANDLE process_handle,
   ThreadHandleMap *map;
   HANDLE thread_handle;
   DWORD exception_code;
+  HANDLE exception_event = INVALID_HANDLE_VALUE;
 
   if (info_size != sizeof(struct StartupInfo)) {
     return;
@@ -179,7 +181,7 @@ void NaClDebugExceptionHandlerRun(HANDLE process_handle,
               debug_event.u.Exception.ExceptionRecord.ExceptionCode;
           if (HandleException(startup_info, process_handle,
                               debug_event.dwThreadId, thread_handle,
-                              exception_code)) {
+                              exception_code, &exception_event)) {
             continue_status = DBG_CONTINUE;
           } else if (exception_code == EXCEPTION_BREAKPOINT) {
             /*
@@ -214,6 +216,9 @@ void NaClDebugExceptionHandlerRun(HANDLE process_handle,
     }
   }
   DestroyThreadHandleMap(map);
+  if (exception_event != INVALID_HANDLE_VALUE) {
+    CloseHandle(exception_event);
+  }
   if (error) {
     TerminateProcess(process_handle, -1);
   }
@@ -303,7 +308,8 @@ static BOOL QueueFaultedThread(HANDLE process_handle, HANDLE thread_handle,
                                struct NaClApp *nap_remote,
                                struct NaClApp *app_copy,
                                struct NaClAppThread *natp_remote,
-                               int exception_code) {
+                               int exception_code,
+                               HANDLE *exception_event) {
   /*
    * Increment faulted_thread_count.  This needs to be atomic.  It
    * will be atomic because the target process is suspended.
@@ -314,6 +320,21 @@ static BOOL QueueFaultedThread(HANDLE process_handle, HANDLE thread_handle,
     return FALSE;
   }
   if (!WRITE_MEM(process_handle, &natp_remote->fault_signal, &exception_code)) {
+    return FALSE;
+  }
+  if (app_copy->faulted_thread_event == INVALID_HANDLE_VALUE) {
+    return FALSE;
+  }
+  if (*exception_event == INVALID_HANDLE_VALUE) {
+    if (!DuplicateHandle(process_handle, app_copy->faulted_thread_event,
+                         GetCurrentProcess(), exception_event,
+                         /* dwDesiredAccess, ignored */ 0,
+                         /* bInheritHandle= */ FALSE,
+                         DUPLICATE_SAME_ACCESS)) {
+      return FALSE;
+    }
+  }
+  if (!SetEvent(*exception_event)) {
     return FALSE;
   }
   /*
@@ -329,7 +350,8 @@ static BOOL QueueFaultedThread(HANDLE process_handle, HANDLE thread_handle,
 
 static BOOL HandleException(const struct StartupInfo *startup_info,
                             HANDLE process_handle, DWORD windows_thread_id,
-                            HANDLE thread_handle, DWORD exception_code) {
+                            HANDLE thread_handle, DWORD exception_code,
+                            HANDLE *exception_event) {
   CONTEXT context;
   uint32_t nacl_thread_index;
   uintptr_t addr_space_size;
@@ -342,6 +364,7 @@ static BOOL HandleException(const struct StartupInfo *startup_info,
    * cannot be dereferenced directly.  We use a pointer type for the
    * convenience of calculating field offsets and sizes.
    */
+  struct NaClThreadContext *ntcp_remote;
   struct NaClAppThread *natp_remote;
   struct NaClAppThread appthread_copy;
   struct NaClApp app_copy;
@@ -361,18 +384,19 @@ static BOOL HandleException(const struct StartupInfo *startup_info,
     return FALSE;
   }
 
-  if (!READ_MEM(process_handle, startup_info->nacl_thread + nacl_thread_index,
-                &natp_remote)) {
+  if (!READ_MEM(process_handle, startup_info->nacl_user + nacl_thread_index,
+                &ntcp_remote)) {
     return FALSE;
   }
-  if (natp_remote == NULL) {
+  if (ntcp_remote == NULL) {
     /*
-     * This means the nacl_thread and nacl_thread_ids arrays do not
+     * This means the nacl_user and nacl_thread_ids arrays do not
      * match up.  TODO(mseaborn): Complain more noisily about such
      * unexpected cases and terminate the NaCl process.
      */
     return FALSE;
   }
+  natp_remote = NaClAppThreadFromThreadContext(ntcp_remote);
   /*
    * We make copies of the debuggee process's NaClApp and
    * NaClAppThread structs.  We avoid passing these copies to
@@ -405,7 +429,7 @@ static BOOL HandleException(const struct StartupInfo *startup_info,
   if (app_copy.enable_faulted_thread_queue) {
     return QueueFaultedThread(process_handle, thread_handle,
                               appthread_copy.nap, &app_copy, natp_remote,
-                              exception_code);
+                              exception_code, exception_event);
   }
 
   exception_stack = appthread_copy.exception_stack;
@@ -514,7 +538,7 @@ int NaClDebugExceptionHandlerEnsureAttached(struct NaClApp *nap) {
   if (nap->debug_exception_handler_state
       == NACL_DEBUG_EXCEPTION_HANDLER_NOT_STARTED) {
     struct StartupInfo info;
-    info.nacl_thread = nacl_thread;
+    info.nacl_user = nacl_user;
     info.nacl_thread_ids = nacl_thread_ids;
     if (nap->attach_debug_exception_handler_func(&info, sizeof(info))) {
       nap->debug_exception_handler_state = NACL_DEBUG_EXCEPTION_HANDLER_STARTED;

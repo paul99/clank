@@ -10,10 +10,11 @@
 #include "base/location.h"
 #include "base/logging.h"
 #include "base/metrics/histogram.h"
-#include "base/string_number_conversions.h"
+#include "base/prefs/pref_service.h"
+#include "base/strings/string_number_conversions.h"
 #include "base/task_runner.h"
 #include "base/values.h"
-#include "chrome/browser/prefs/pref_service.h"
+#include "chrome/browser/prefs/pref_registry_syncable.h"
 #include "chrome/common/pref_names.h"
 #include "sync/internal_api/public/base/model_type.h"
 
@@ -93,19 +94,24 @@ DictionaryValue* ObjectIdAndStateToValue(
 
 }  // namespace
 
-InvalidatorStorage::InvalidatorStorage(PrefService* pref_service)
+InvalidatorStorage::InvalidatorStorage(PrefService* pref_service,
+                                       PrefRegistrySyncable* registry)
     : pref_service_(pref_service) {
   // TODO(tim): Create a Mock instead of maintaining the if(!pref_service_) case
   // throughout this file.  This is a problem now due to lack of injection at
   // ProfileSyncService. Bug 130176.
-  if (pref_service_) {
-    pref_service_->RegisterListPref(prefs::kInvalidatorMaxInvalidationVersions,
-                                    PrefService::UNSYNCABLE_PREF);
-    pref_service_->RegisterStringPref(prefs::kInvalidatorInvalidationState,
-                                      std::string(),
-                                      PrefService::UNSYNCABLE_PREF);
+  if (registry) {
+    // TODO(joi): Move to registration function.
+    registry->RegisterListPref(prefs::kInvalidatorMaxInvalidationVersions,
+                               PrefRegistrySyncable::UNSYNCABLE_PREF);
+    registry->RegisterStringPref(prefs::kInvalidatorInvalidationState,
+                                 std::string(),
+                                 PrefRegistrySyncable::UNSYNCABLE_PREF);
+    registry->RegisterStringPref(prefs::kInvalidatorClientId,
+                                 std::string(),
+                                 PrefRegistrySyncable::UNSYNCABLE_PREF);
 
-    MigrateMaxInvalidationVersionsPref();
+    MigrateMaxInvalidationVersionsPref(registry);
   }
 }
 
@@ -193,9 +199,10 @@ void InvalidatorStorage::SerializeToList(
 }
 
 // Legacy migration code.
-void InvalidatorStorage::MigrateMaxInvalidationVersionsPref() {
-  pref_service_->RegisterDictionaryPref(prefs::kSyncMaxInvalidationVersions,
-                                        PrefService::UNSYNCABLE_PREF);
+void InvalidatorStorage::MigrateMaxInvalidationVersionsPref(
+    PrefRegistrySyncable* registry) {
+  registry->RegisterDictionaryPref(prefs::kSyncMaxInvalidationVersions,
+                                   PrefRegistrySyncable::UNSYNCABLE_PREF);
   const base::DictionaryValue* max_versions_dict =
       pref_service_->GetDictionary(prefs::kSyncMaxInvalidationVersions);
   CHECK(max_versions_dict);
@@ -256,6 +263,17 @@ void InvalidatorStorage::DeserializeMap(
   }
 }
 
+void InvalidatorStorage::SetInvalidatorClientId(const std::string& client_id) {
+  DCHECK(thread_checker_.CalledOnValidThread());
+  pref_service_->SetString(prefs::kInvalidatorClientId, client_id);
+}
+
+std::string InvalidatorStorage::GetInvalidatorClientId() const {
+  return pref_service_ ?
+      pref_service_->GetString(prefs::kInvalidatorClientId) :
+          std::string();
+}
+
 void InvalidatorStorage::SetBootstrapData(const std::string& data) {
   DCHECK(thread_checker_.CalledOnValidThread());
   std::string base64_data;
@@ -275,6 +293,7 @@ std::string InvalidatorStorage::GetBootstrapData() const {
 void InvalidatorStorage::Clear() {
   DCHECK(thread_checker_.CalledOnValidThread());
   pref_service_->ClearPref(prefs::kInvalidatorMaxInvalidationVersions);
+  pref_service_->ClearPref(prefs::kInvalidatorClientId);
   pref_service_->ClearPref(prefs::kInvalidatorInvalidationState);
 }
 

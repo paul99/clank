@@ -477,6 +477,7 @@ class RequestHandler(object):
     policy_data.machine_name = token_info['machine_name']
     policy_data.valid_serial_number_missing = (
         token_info['machine_id'] in BAD_MACHINE_IDS)
+    policy_data.settings_entity_id = msg.settings_entity_id
 
     if signing_key:
       policy_data.public_key_version = key_version
@@ -629,8 +630,8 @@ class TestServer(object):
       dmtoken_chars.append(random.choice('0123456789abcdef'))
     dmtoken = ''.join(dmtoken_chars)
     allowed_policy_types = {
-      dm.DeviceRegisterRequest.USER: ['google/chromeos/user',
-                                      'google/chrome/user'],
+      dm.DeviceRegisterRequest.BROWSER: ['google/chrome/user'],
+      dm.DeviceRegisterRequest.USER: ['google/chromeos/user'],
       dm.DeviceRegisterRequest.DEVICE: [
           'google/chromeos/device',
           'google/chromeos/publicaccount'

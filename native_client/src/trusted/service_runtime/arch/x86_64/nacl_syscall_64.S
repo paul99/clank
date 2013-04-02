@@ -139,8 +139,7 @@ DEFINE_GLOBAL_HIDDEN_IDENTIFIER(NaClSyscallSeg):
         get_tls
 
         leaq    IDENTIFIER(nacl_user)(%rip), %rdx
-        leaq    (%rdx,%rax,8), %rdx
-        movq    0x0(%rdx), %rdx
+        movq    (%rdx,%rax,8), %rdx
         /*
          * Code below will segfault if %rdx is the NULL pointer, since
          * the zero page is unmapped.
@@ -154,8 +153,8 @@ DEFINE_GLOBAL_HIDDEN_IDENTIFIER(NaClSyscallThreadCaptureFault):
          * Record the value of %rsp that we will restore when
          * returning to untrusted code from the syscall.
          */
-        leaq    0x10(%rsp), %rbx
-        movq    %rbx, NACL_THREAD_CONTEXT_OFFSET_RSP(%rdx)
+        leaq    0x10(%rsp), %rcx
+        movq    %rcx, NACL_THREAD_CONTEXT_OFFSET_RSP(%rdx)
         movq    %r12, NACL_THREAD_CONTEXT_OFFSET_R12(%rdx)
         movq    %r13, NACL_THREAD_CONTEXT_OFFSET_R13(%rdx)
         movq    %r14, NACL_THREAD_CONTEXT_OFFSET_R14(%rdx)
@@ -169,11 +168,19 @@ DEFINE_GLOBAL_HIDDEN_IDENTIFIER(NaClSyscallThreadCaptureFault):
         fnstcw  NACL_THREAD_CONTEXT_OFFSET_FCW(%rdx)
         fldcw   NACL_THREAD_CONTEXT_OFFSET_SYS_FCW(%rdx)
 
+        /*
+         * Save the SSE control word.  Then reload the system default
+         * state to use while running trusted code.
+         */
+        stmxcsr NACL_THREAD_CONTEXT_OFFSET_MXCSR(%rdx)
+        ldmxcsr NACL_THREAD_CONTEXT_OFFSET_SYS_MXCSR(%rdx)
+DEFINE_GLOBAL_HIDDEN_IDENTIFIER(NaClSyscallSegRegsSaved):
+
         movq    NACL_THREAD_CONTEXT_OFFSET_TRUSTED_STACK_PTR(%rdx), %rsp
 #if NACL_LINUX || NACL_OSX
-        movq    %rax, %rdi
+        movq    %rdx, %rdi
 #elif NACL_WINDOWS
-        movq    %rax, %rcx
+        movq    %rdx, %rcx
 #else
 # error "What OS/compiler is the service runtime being compiled with?"
 #endif

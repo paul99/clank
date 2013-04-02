@@ -50,17 +50,17 @@ class SSLClientCertificateSelector : public SSLClientAuthObserver,
       const net::HttpNetworkSession* network_session,
       net::SSLCertRequestInfo* cert_request_info,
       const base::Callback<void(net::X509Certificate*)>& callback);
-  ~SSLClientCertificateSelector();
+  virtual ~SSLClientCertificateSelector();
 
   void Show();
 
   // SSLClientAuthObserver implementation:
-  virtual void OnCertSelectedByNotification();
+  virtual void OnCertSelectedByNotification() OVERRIDE;
 
   // ConstrainedWindowGtkDelegate implementation:
-  virtual GtkWidget* GetWidgetRoot() { return root_widget_.get(); }
-  virtual GtkWidget* GetFocusWidget();
-  virtual void DeleteDelegate();
+  virtual GtkWidget* GetWidgetRoot() OVERRIDE { return root_widget_.get(); }
+  virtual GtkWidget* GetFocusWidget() OVERRIDE;
+  virtual void DeleteDelegate() OVERRIDE;
 
  private:
   void PopulateCerts();
@@ -93,7 +93,7 @@ class SSLClientCertificateSelector : public SSLClientAuthObserver,
   GtkWidget* select_button_;
 
   WebContents* web_contents_;
-  ConstrainedWindow* window_;
+  WebContentsModalDialog* window_;
 
   DISALLOW_COPY_AND_ASSIGN(SSLClientCertificateSelector);
 };
@@ -202,7 +202,7 @@ void SSLClientCertificateSelector::Show() {
 
 void SSLClientCertificateSelector::OnCertSelectedByNotification() {
   DCHECK(window_);
-  window_->CloseConstrainedWindow();
+  window_->CloseWebContentsModalDialog();
 }
 
 GtkWidget* SSLClientCertificateSelector::GetFocusWidget() {
@@ -328,7 +328,7 @@ void SSLClientCertificateSelector::Unlocked() {
   net::X509Certificate* cert = GetSelectedCert();
   CertificateSelected(cert);
   DCHECK(window_);
-  window_->CloseConstrainedWindow();
+  window_->CloseWebContentsModalDialog();
 }
 
 void SSLClientCertificateSelector::OnComboBoxChanged(GtkWidget* combo_box) {
@@ -352,7 +352,7 @@ void SSLClientCertificateSelector::OnViewClicked(GtkWidget* button) {
 void SSLClientCertificateSelector::OnCancelClicked(GtkWidget* button) {
   CertificateSelected(NULL);
   DCHECK(window_);
-  window_->CloseConstrainedWindow();
+  window_->CloseWebContentsModalDialog();
 }
 
 void SSLClientCertificateSelector::OnOkClicked(GtkWidget* button) {

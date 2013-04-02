@@ -103,6 +103,33 @@ bool OverscrollController::DispatchEventCompletesAction (
   if (bounds.IsEmpty())
     return false;
 
+  if (event.type == WebKit::WebInputEvent::GestureFlingStart) {
+    // Check to see if the fling is in the same direction of the overscroll.
+    const WebKit::WebGestureEvent gesture =
+        static_cast<const WebKit::WebGestureEvent&>(event);
+    switch (overscroll_mode_) {
+      case OVERSCROLL_EAST:
+        if (gesture.data.flingStart.velocityX < 0)
+          return false;
+        break;
+      case OVERSCROLL_WEST:
+        if (gesture.data.flingStart.velocityX > 0)
+          return false;
+        break;
+      case OVERSCROLL_NORTH:
+        if (gesture.data.flingStart.velocityY > 0)
+          return false;
+        break;
+      case OVERSCROLL_SOUTH:
+        if (gesture.data.flingStart.velocityY < 0)
+          return false;
+        break;
+      case OVERSCROLL_NONE:
+      case OVERSCROLL_COUNT:
+        NOTREACHED();
+    }
+  }
+
   float ratio, threshold;
   if (overscroll_mode_ == OVERSCROLL_WEST ||
       overscroll_mode_ == OVERSCROLL_EAST) {
@@ -112,13 +139,21 @@ bool OverscrollController::DispatchEventCompletesAction (
     ratio = fabs(overscroll_delta_y_) / bounds.height();
     threshold = GetOverscrollConfig(OVERSCROLL_CONFIG_VERT_THRESHOLD_COMPLETE);
   }
+
   return ratio >= threshold;
 }
 
 bool OverscrollController::DispatchEventResetsState(
     const WebKit::WebInputEvent& event) const {
   switch (event.type) {
-    case WebKit::WebInputEvent::MouseWheel:
+    case WebKit::WebInputEvent::MouseWheel: {
+      // Only wheel events with precise deltas (i.e. from trackpad) contribute
+      // to the overscroll gesture.
+      const WebKit::WebMouseWheelEvent& wheel =
+          static_cast<const WebKit::WebMouseWheelEvent&>(event);
+      return !wheel.hasPreciseScrollingDeltas;
+    }
+
     case WebKit::WebInputEvent::GestureScrollUpdate:
     case WebKit::WebInputEvent::GestureFlingCancel:
       return false;
@@ -136,7 +171,8 @@ void OverscrollController::ProcessEventForOverscroll(
     case WebKit::WebInputEvent::MouseWheel: {
       const WebKit::WebMouseWheelEvent& wheel =
           static_cast<const WebKit::WebMouseWheelEvent&>(event);
-      ProcessOverscroll(wheel.deltaX, wheel.deltaY);
+      if (wheel.hasPreciseScrollingDeltas)
+        ProcessOverscroll(wheel.deltaX, wheel.deltaY);
       break;
     }
     case WebKit::WebInputEvent::GestureScrollUpdate: {

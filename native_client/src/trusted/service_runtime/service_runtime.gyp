@@ -69,6 +69,7 @@
           'sel_qualify.c',
           'sel_validate_image.c',
           'thread_suspension_common.c',
+          'thread_suspension_unwind.c',
         ],
         'include_dirs': [
           # For generated header files from the x86-64 validator,
@@ -314,7 +315,7 @@
     },
   ],
   'conditions': [
-    ['OS=="win"', {
+    ['OS=="win" and target_arch=="ia32"', {
       'targets': [
         {
           'target_name': 'sel64',

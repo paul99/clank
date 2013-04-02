@@ -8,13 +8,14 @@
 #include "base/message_loop.h"
 #include "base/utf_string_conversions.h"
 #include "chrome/app/chrome_command_ids.h"
-#include "chrome/browser/debugger/devtools_window.h"
+#include "chrome/browser/devtools/devtools_window.h"
 #include "chrome/browser/extensions/api/tabs/tabs_constants.h"
 #include "chrome/browser/extensions/api/tabs/tabs_windows_api.h"
 #include "chrome/browser/extensions/api/tabs/windows_event_router.h"
 #include "chrome/browser/extensions/extension_service.h"
 #include "chrome/browser/extensions/extension_system.h"
 #include "chrome/browser/extensions/extension_tab_util.h"
+#include "chrome/browser/extensions/image_loader.h"
 #include "chrome/browser/extensions/window_controller.h"
 #include "chrome/browser/extensions/window_controller_list.h"
 #include "chrome/browser/lifetime/application_lifetime.h"
@@ -25,6 +26,7 @@
 #include "chrome/browser/ui/panels/panel_collection.h"
 #include "chrome/browser/ui/panels/panel_host.h"
 #include "chrome/browser/ui/panels/panel_manager.h"
+#include "chrome/browser/ui/panels/stacked_panel_collection.h"
 #include "chrome/browser/web_applications/web_app.h"
 #include "chrome/common/chrome_notification_types.h"
 #include "chrome/common/extensions/extension.h"
@@ -148,13 +150,14 @@ Panel::Panel(const std::string& app_name,
       native_panel_(NULL),
       attention_mode_(USE_PANEL_ATTENTION),
       expansion_state_(EXPANDED),
-      command_updater_(this) {
+      command_updater_(this),
+      ALLOW_THIS_IN_INITIALIZER_LIST(image_loader_ptr_factory_(this)) {
 }
 
 Panel::~Panel() {
   DCHECK(!collection_);
   // Invoked by native panel destructor. Do not access native_panel_ here.
-  browser::EndKeepAlive();  // Remove shutdown prevention.
+  chrome::EndKeepAlive();  // Remove shutdown prevention.
 }
 
 void Panel::Initialize(Profile* profile, const GURL& url,
@@ -188,7 +191,7 @@ void Panel::Initialize(Profile* profile, const GURL& url,
                     ThemeServiceFactory::GetForProfile(profile)));
 
   // Prevent the browser process from shutting down while this window is open.
-  browser::StartKeepAlive();
+  chrome::StartKeepAlive();
 
   UpdateAppIcon();
 }
@@ -223,7 +226,8 @@ void Panel::InitCommandState() {
 }
 
 void Panel::OnNativePanelClosed() {
-  app_icon_loader_.reset();
+  // Ensure previously enqueued OnImageLoaded callbacks are ignored.
+  image_loader_ptr_factory_.InvalidateWeakPtrs();
   registrar_.RemoveAll();
   manager()->OnPanelClosed(this);
   DCHECK(!collection_);
@@ -245,16 +249,21 @@ const std::string Panel::extension_id() const {
   return web_app::GetExtensionIdFromApplicationName(app_name_);
 }
 
+StackedPanelCollection* Panel::stack() const {
+  return collection_ && collection_->type() == PanelCollection::STACKED ?
+      static_cast<StackedPanelCollection*>(collection_) : NULL;
+}
+
 content::WebContents* Panel::GetWebContents() const {
   return panel_host_.get() ? panel_host_->web_contents() : NULL;
 }
 
-bool Panel::CanMinimize() const {
-  return collection_ && collection_->CanMinimizePanel(this) && !IsMinimized();
+bool Panel::CanShowMinimizeButton() const {
+  return collection_ && collection_->CanShowMinimizeButton(this);
 }
 
-bool Panel::CanRestore() const {
-  return collection_ && collection_->CanMinimizePanel(this) && IsMinimized();
+bool Panel::CanShowRestoreButton() const {
+  return collection_ && collection_->CanShowRestoreButton(this);
 }
 
 panel::Resizability Panel::CanResizeByMouse() const {
@@ -474,7 +483,7 @@ bool Panel::IsAlwaysOnTop() const {
 }
 
 gfx::NativeWindow Panel::GetNativeWindow() {
-  return native_panel_->GetNativePanelHandle();
+  return native_panel_->GetNativePanelWindow();
 }
 
 gfx::Rect Panel::GetRestoredBounds() const {
@@ -730,18 +739,13 @@ void Panel::OnTitlebarClicked(panel::ClickModifier modifier) {
 }
 
 void Panel::OnMinimizeButtonClicked(panel::ClickModifier modifier) {
-  if (!collection_)
-    return;
-
-  if (modifier == panel::APPLY_TO_ALL)
-    collection_->MinimizeAll();
-  else
-    Minimize();
+  if (collection_)
+    collection_->OnMinimizeButtonClicked(this, modifier);
 }
 
 void Panel::OnRestoreButtonClicked(panel::ClickModifier modifier) {
-  // Clicking the restore button has the same behavior as clicking the titlebar.
-  OnTitlebarClicked(modifier);
+  if (collection_)
+    collection_->OnRestoreButtonClicked(this, modifier);
 }
 
 void Panel::OnPanelStartUserResizing() {
@@ -809,6 +813,16 @@ void Panel::WebContentsFocused(content::WebContents* contents) {
   native_panel_->PanelWebContentsFocused(contents);
 }
 
+void Panel::MoveByInstantly(const gfx::Vector2d& delta_origin) {
+  gfx::Rect bounds = GetBounds();
+  bounds.Offset(delta_origin);
+  SetPanelBoundsInstantly(bounds);
+}
+
+void Panel::SetWindowCornerStyle(panel::CornerStyle corner_style) {
+  native_panel_->SetWindowCornerStyle(corner_style);
+}
+
 const extensions::Extension* Panel::GetExtension() const {
   ExtensionService* extension_service =
       extensions::ExtensionSystem::Get(profile())->extension_service();
@@ -822,24 +836,22 @@ void Panel::UpdateAppIcon() {
   if (!extension)
     return;
 
-  app_icon_loader_.reset(new ImageLoadingTracker(this));
-  app_icon_loader_->LoadImage(
+  extensions::ImageLoader* loader = extensions::ImageLoader::Get(profile());
+  loader->LoadImageAsync(
       extension,
       extension->GetIconResource(extension_misc::EXTENSION_ICON_SMALL,
                                  ExtensionIconSet::MATCH_BIGGER),
       gfx::Size(extension_misc::EXTENSION_ICON_SMALL,
                 extension_misc::EXTENSION_ICON_SMALL),
-      ImageLoadingTracker::CACHE);
+      base::Bind(&Panel::OnImageLoaded,
+                 image_loader_ptr_factory_.GetWeakPtr()));
 }
 
-void Panel::OnImageLoaded(const gfx::Image& image,
-                          const std::string& extension_id,
-                          int index) {
+void Panel::OnImageLoaded(const gfx::Image& image) {
   if (!image.IsEmpty()) {
     app_icon_ = image;
     native_panel_->UpdatePanelTitleBar();
   }
-  app_icon_loader_.reset();
 
   content::NotificationService::current()->Notify(
       chrome::NOTIFICATION_PANEL_APP_ICON_LOADED,

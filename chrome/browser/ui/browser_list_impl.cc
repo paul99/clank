@@ -12,13 +12,12 @@
 #include "chrome/browser/profiles/profile.h"
 #include "chrome/browser/ui/browser.h"
 #include "chrome/browser/ui/browser_list_observer.h"
-#include "chrome/browser/ui/browser_window.h"
 #include "chrome/common/chrome_notification_types.h"
 #include "chrome/common/chrome_switches.h"
 #include "content/public/browser/notification_service.h"
 
 // #include "build/build_config.h"
-// #include "chrome/browser/prefs/pref_service.h"
+// #include "base/prefs/pref_service.h"
 
 
 #if defined(OS_CHROMEOS)
@@ -91,8 +90,8 @@ void BrowserListImpl::RemoveBrowser(Browser* browser) {
     // to call ProfileManager::ShutdownSessionServices() as part of the
     // shutdown, because Browser::WindowClosing() already makes sure that the
     // SessionService is created and notified.
-    browser::NotifyAppTerminating();
-    browser::OnAppExiting();
+    chrome::NotifyAppTerminating();
+    chrome::OnAppExiting();
   }
 }
 
@@ -116,20 +115,6 @@ Browser* BrowserListImpl::GetLastActive() {
   if (!last_active_browsers_.empty())
     return *(last_active_browsers_.rbegin());
   return NULL;
-}
-
-void BrowserListImpl::CloseAllBrowsersWithProfile(Profile* profile) {
-  BrowserVector browsers_to_close;
-  for (BrowserListImpl::const_iterator i = BrowserListImpl::begin();
-       i != BrowserListImpl::end(); ++i) {
-    if ((*i)->profile()->GetOriginalProfile() == profile->GetOriginalProfile())
-      browsers_to_close.push_back(*i);
-  }
-
-  for (BrowserVector::const_iterator i = browsers_to_close.begin();
-       i != browsers_to_close.end(); ++i) {
-    (*i)->window()->Close();
-  }
 }
 
 bool BrowserListImpl::IsIncognitoWindowOpen() {

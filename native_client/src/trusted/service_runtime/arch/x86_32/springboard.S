@@ -17,6 +17,14 @@
  * region.
  */
 
+        /*
+         * This is code, but it is not code that is actually part of the
+         * program/library being linked.  Marking it as read-only data
+         * instead ensures that nothing like linker code-rewriting will
+         * be applied to this code.
+         */
+        NACL_RODATA
+
 /*
  * NaCl_springboard is used for syscall return and any time we want
  * to do an upcall into NaCl application.
@@ -29,7 +37,7 @@ DEFINE_GLOBAL_HIDDEN_IDENTIFIER(NaCl_springboard):
         mov     NACL_THREAD_CONTEXT_OFFSET_SYSRET(%ecx), %eax
         lss     NACL_THREAD_CONTEXT_OFFSET_STACK_PTR(%ecx), %esp
         movw    NACL_THREAD_CONTEXT_OFFSET_DS(%ecx), %ds
-        /* Set %ecx to zero to avoid leaking the NaClThreadContext address */
+        /* Set %ecx to zero to avoid leaking the NaClThreadContext address. */
         xorl    %ecx, %ecx
         jmp     *%edx
 DEFINE_GLOBAL_HIDDEN_IDENTIFIER(NaCl_springboard_end):

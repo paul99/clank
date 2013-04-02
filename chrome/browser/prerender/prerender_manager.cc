@@ -14,6 +14,7 @@
 #include "base/logging.h"
 #include "base/memory/weak_ptr.h"
 #include "base/metrics/histogram.h"
+#include "base/prefs/pref_service.h"
 #include "base/stl_util.h"
 #include "base/time.h"
 #include "base/utf_string_conversions.h"
@@ -21,7 +22,6 @@
 #include "chrome/browser/browser_process.h"
 #include "chrome/browser/common/cancelable_request.h"
 #include "chrome/browser/favicon/favicon_tab_helper.h"
-#include "chrome/browser/prefs/pref_service.h"
 #include "chrome/browser/prerender/prerender_condition.h"
 #include "chrome/browser/prerender/prerender_contents.h"
 #include "chrome/browser/prerender/prerender_field_trial.h"
@@ -42,7 +42,7 @@
 #include "chrome/common/pref_names.h"
 #include "chrome/common/prerender_messages.h"
 #include "content/public/browser/browser_thread.h"
-#include "content/public/browser/devtools_agent_host_registry.h"
+#include "content/public/browser/devtools_agent_host.h"
 #include "content/public/browser/navigation_controller.h"
 #include "content/public/browser/notification_observer.h"
 #include "content/public/browser/notification_registrar.h"
@@ -376,7 +376,7 @@ bool PrerenderManager::MaybeUsePrerenderedPage(WebContents* web_contents,
 
   // Don't use prerendered pages if debugger is attached to the tab.
   // See http://crbug.com/98541
-  if (content::DevToolsAgentHostRegistry::IsDebuggerAttached(web_contents)) {
+  if (content::DevToolsAgentHost::IsDebuggerAttached(web_contents)) {
     DestroyAndMarkMatchCompleteAsUsed(prerender_data->contents(),
                                       FINAL_STATUS_DEVTOOLS_ATTACHED);
     return false;
@@ -1036,8 +1036,11 @@ PrerenderHandle* PrerenderManager::AddPrerender(
   active_prerenders_.push_back(
       new PrerenderData(this, prerender_contents,
                         GetExpiryTimeForNewPrerender()));
-  if (!prerender_contents->Init())
+  if (!prerender_contents->Init()) {
+    DCHECK(active_prerenders_.end() ==
+           FindIteratorForPrerenderContents(prerender_contents));
     return NULL;
+  }
 
   histograms_->RecordPrerenderStarted(origin);
   DCHECK(!prerender_contents->prerendering_has_started());
@@ -1204,7 +1207,7 @@ bool PrerenderManager::DoesRateLimitAllowPrerender(Origin origin) const {
   histograms_->RecordTimeBetweenPrerenderRequests(origin, elapsed_time);
   if (!config_.rate_limit_enabled)
     return true;
-  return elapsed_time >
+  return elapsed_time >=
       base::TimeDelta::FromMilliseconds(kMinTimeBetweenPrerendersMs);
 }
 

@@ -19,6 +19,7 @@ class ProfileIOData;
 
 namespace content {
 class WebContents;
+struct PasswordForm;
 }
 
 namespace net {
@@ -33,13 +34,29 @@ class URLRequest;
 class OneClickSigninHelper
     : public content::WebContentsObserver,
       public content::WebContentsUserData<OneClickSigninHelper>,
-      public SigninTracker::Observer {
+      public SigninTracker::Observer,
+      public ProfileSyncServiceObserver {
  public:
+  // Represents user's decision about sign in process.
   enum AutoAccept {
-    AUTO_ACCEPT,
-    NO_AUTO_ACCEPT,
+    // User decision not yet known.  Assume cancel.
+    AUTO_ACCEPT_NONE,
+
+    // User has explicitly accepted to sign in.  A bubble is shown with the
+    // option to start sync, configure it first, or abort.
+    AUTO_ACCEPT_ACCEPTED,
+
+    // User has explicitly accepted to sign in, but wants to configure sync
+    // settings before turing it on.
     AUTO_ACCEPT_CONFIGURE,
-    REJECTED_FOR_PROFILE,
+
+    // User has explicitly rejected to sign in.  Furthermore, the user does
+    // not want to be prompted to see the interstitial again in this profile.
+    AUTO_ACCEPT_REJECTED_FOR_PROFILE,
+
+    // This is an explicit sign in from either first run, NTP, wrench menu,
+    // or settings page.  The user will be signed in automatically with sync
+    // enabled using default settings.
     AUTO_ACCEPT_EXPLICIT
   };
 
@@ -53,14 +70,10 @@ class OneClickSigninHelper
   // Argument to CanOffer().
   enum CanOfferFor {
     CAN_OFFER_FOR_ALL,
-    CAN_OFFER_FOR_INTERSTITAL_ONLY,
+    CAN_OFFER_FOR_INTERSTITAL_ONLY
   };
 
   virtual ~OneClickSigninHelper();
-
-  // Called only by tests to associate information with a given request.
-  static void AssociateWithRequestForTesting(base::SupportsUserData* request,
-                                             const std::string& email);
 
   // Returns true if the one-click signin feature can be offered at this time.
   // If |email| is not empty, then the profile is checked to see if it's
@@ -79,7 +92,7 @@ class OneClickSigninHelper
   static bool CanOffer(content::WebContents* web_contents,
                        CanOfferFor can_offer_for,
                        const std::string& email,
-                       int* error_message_id);
+                       std::string* error_message);
 
   // Returns true if the one-click signin feature can be offered at this time.
   // It can be offered if the io_data is not in an incognito window and if the
@@ -95,14 +108,20 @@ class OneClickSigninHelper
   // tries to display an infobar in the tab contents identified by the
   // child/route id.
   static void ShowInfoBarIfPossible(net::URLRequest* request,
+                                    ProfileIOData* io_data,
                                     int child_id,
                                     int route_id);
 
  private:
   explicit OneClickSigninHelper(content::WebContents* web_contents);
   friend class content::WebContentsUserData<OneClickSigninHelper>;
+  friend class OneClickSigninHelperTest;
   FRIEND_TEST_ALL_PREFIXES(OneClickSigninHelperTest,
                            ShowInfoBarUIThreadIncognito);
+  FRIEND_TEST_ALL_PREFIXES(OneClickSigninHelperTest,
+                           SigninFromWebstoreWithConfigSyncfirst);
+  FRIEND_TEST_ALL_PREFIXES(OneClickSigninHelperTest,
+                           ShowSigninBubbleAfterSigninComplete);
   FRIEND_TEST_ALL_PREFIXES(OneClickSigninHelperIOTest, CanOfferOnIOThread);
   FRIEND_TEST_ALL_PREFIXES(OneClickSigninHelperIOTest,
                            CanOfferOnIOThreadIncognito);
@@ -126,6 +145,8 @@ class OneClickSigninHelper
                            CanOfferOnIOThreadWithRejectedEmail);
   FRIEND_TEST_ALL_PREFIXES(OneClickSigninHelperIOTest,
                            CanOfferOnIOThreadNoSigninCookies);
+  FRIEND_TEST_ALL_PREFIXES(OneClickSigninHelperIOTest,
+                           CanOfferOnIOThreadDisabledByPolicy);
 
   // Returns true if the one-click signin feature can be offered at this time.
   // It can be offered if the io_data is not in an incognito window and if the
@@ -137,22 +158,35 @@ class OneClickSigninHelper
                                       ProfileIOData* io_data);
 
   // The portion of ShowInfoBarIfPossible() that needs to run on the UI thread.
+  // |session_index| and |email| are extracted from the Google-Accounts-SignIn
+  // header.  |auto_accept| is extracted from the Google-Chrome-SignIn header.
+  // |source| is used to determine which of the explicit sign in mechanism is
+  // being used.
+  //
+  // |continue_url| is where Gaia will continue to when the sign in process is
+  // done.  For explicit sign ins, this is a URL chrome controls. For one-click
+  // sign in, this could be any google property.  This URL is used to know
+  // when the sign process is over and to collect infomation from the user
+  // entered on the Gaia sign in page (for explicit sign ins).
   static void ShowInfoBarUIThread(const std::string& session_index,
                                   const std::string& email,
                                   AutoAccept auto_accept,
                                   SyncPromoUI::Source source,
+                                  const GURL& continue_url,
                                   int child_id,
                                   int route_id);
 
-  void RedirectToNTP();
+  void RedirectToNTP(bool show_bubble);
+  void RedirectToSignin();
 
   // Clear all data member of the helper, except for the error.
   void CleanTransientState();
 
+  // Grab Gaia password if available.
+  bool OnFormSubmitted(const content::PasswordForm& form);
+
   // content::WebContentsObserver overrides.
-  virtual void DidNavigateAnyFrame(
-      const content::LoadCommittedDetails& details,
-      const content::FrameNavigateParams& params) OVERRIDE;
+  virtual bool OnMessageReceived(const IPC::Message& message) OVERRIDE;
   virtual void DidStopLoading(
       content::RenderViewHost* render_view_host) OVERRIDE;
 
@@ -161,14 +195,27 @@ class OneClickSigninHelper
   virtual void SigninFailed(const GoogleServiceAuthError& error) OVERRIDE;
   virtual void SigninSuccess() OVERRIDE;
 
+  // ProfileSyncServiceObserver.
+  virtual void OnStateChanged() OVERRIDE;
+
+  // Tracks if we are in the process of showing the signin or one click
+  // interstitial page. It's set to true the first time we load one of those
+  // pages and set to false when transient state is cleaned.
+  bool showing_signin_;
+
   // Information about the account that has just logged in.
   std::string session_index_;
   std::string email_;
   std::string password_;
   AutoAccept auto_accept_;
   SyncPromoUI::Source source_;
+  bool switched_to_advanced_;
+  // When switching to advanced settings, we want to track the original source.
+  SyncPromoUI::Source original_source_;
+  GURL continue_url_;
+  // Redirect URL after sync setup is complete.
+  GURL redirect_url_;
   std::string error_message_;
-
   scoped_ptr<SigninTracker> signin_tracker_;
 
   DISALLOW_COPY_AND_ASSIGN(OneClickSigninHelper);

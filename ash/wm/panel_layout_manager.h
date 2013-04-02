@@ -52,6 +52,9 @@ class ASH_EXPORT PanelLayoutManager
   explicit PanelLayoutManager(aura::Window* panel_container);
   virtual ~PanelLayoutManager();
 
+  // Call Shutdown() before deleting children of panel_container.
+  void Shutdown();
+
   void StartDragging(aura::Window* panel);
   void FinishDragging();
 
@@ -76,6 +79,8 @@ class ASH_EXPORT PanelLayoutManager
   virtual void OnWindowPropertyChanged(aura::Window* window,
                                        const void* key,
                                        intptr_t old) OVERRIDE;
+  virtual void OnWindowVisibilityChanged(aura::Window* window,
+                                         bool visible) OVERRIDE;
 
   // Overridden from aura::client::ActivationChangeObserver
   virtual void OnWindowActivated(aura::Window* gained_active,

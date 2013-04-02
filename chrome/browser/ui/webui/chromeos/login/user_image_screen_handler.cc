@@ -1,4 +1,4 @@
-// Copyright (c) 2012 The Chromium Authors. All rights reserved.
+// Copyright (c) 2013 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -15,14 +15,17 @@
 #include "chrome/browser/chromeos/login/user.h"
 #include "chrome/browser/chromeos/login/webui_login_display.h"
 #include "chrome/browser/ui/webui/chromeos/login/oobe_ui.h"
-#include "chrome/browser/ui/webui/web_ui_util.h"
 #include "chrome/common/chrome_switches.h"
 #include "chrome/common/url_constants.h"
+#include "content/public/browser/browser_thread.h"
 #include "googleurl/src/gurl.h"
 #include "grit/generated_resources.h"
 #include "net/base/data_url.h"
 #include "ui/base/l10n/l10n_util.h"
 #include "ui/views/widget/widget.h"
+#include "ui/webui/web_ui_util.h"
+
+using content::BrowserThread;
 
 namespace chromeos {
 
@@ -66,8 +69,12 @@ void UserImageScreenHandler::GetLocalizedStrings(
       l10n_util::GetStringUTF16(IDS_OK));
   localized_strings->SetString("authorCredit",
       l10n_util::GetStringUTF16(IDS_OPTIONS_SET_WALLPAPER_AUTHOR_TEXT));
-  localized_strings->SetString("capturedPhoto",
-      l10n_util::GetStringUTF16(IDS_OPTIONS_CHANGE_PICTURE_CAPTURED_PHOTO));
+  localized_strings->SetString("photoFromCamera",
+      l10n_util::GetStringUTF16(IDS_OPTIONS_CHANGE_PICTURE_PHOTO_FROM_CAMERA));
+  localized_strings->SetString("photoCaptureAccessibleText",
+      l10n_util::GetStringUTF16(IDS_OPTIONS_PHOTO_CAPTURE_ACCESSIBLE_TEXT));
+  localized_strings->SetString("photoDiscardAccessibleText",
+      l10n_util::GetStringUTF16(IDS_OPTIONS_PHOTO_DISCARD_ACCESSIBLE_TEXT));
 }
 
 void UserImageScreenHandler::Initialize() {
@@ -138,7 +145,7 @@ void UserImageScreenHandler::RegisterMessages() {
 }
 
 void UserImageScreenHandler::AddProfileImage(const gfx::ImageSkia& image) {
-  profile_picture_data_url_ = web_ui_util::GetBitmapDataUrl(*image.bitmap());
+  profile_picture_data_url_ = webui::GetBitmapDataUrl(*image.bitmap());
   SendProfileImage(profile_picture_data_url_);
 }
 
@@ -186,6 +193,7 @@ void UserImageScreenHandler::HandleGetImages(const base::ListValue* args) {
 }
 
 void UserImageScreenHandler::HandlePhotoTaken(const base::ListValue* args) {
+  DCHECK(BrowserThread::CurrentlyOn(BrowserThread::UI));
   std::string image_url;
   if (!args || args->GetSize() != 1 || !args->GetString(0, &image_url))
     NOTREACHED();
@@ -203,7 +211,9 @@ void UserImageScreenHandler::HandlePhotoTaken(const base::ListValue* args) {
     image_decoder_->set_delegate(NULL);
   image_decoder_ = new ImageDecoder(this, raw_data,
                                     ImageDecoder::DEFAULT_CODEC);
-  image_decoder_->Start();
+  scoped_refptr<base::MessageLoopProxy> task_runner =
+      BrowserThread::GetMessageLoopProxyForThread(BrowserThread::UI);
+  image_decoder_->Start(task_runner);
 }
 
 void UserImageScreenHandler::HandleCheckCameraPresence(
@@ -214,18 +224,27 @@ void UserImageScreenHandler::HandleCheckCameraPresence(
 
 void UserImageScreenHandler::HandleSelectImage(const base::ListValue* args) {
   std::string image_url;
-  if (!args || args->GetSize() != 1 || !args->GetString(0, &image_url))
+  std::string image_type;
+  if (!args ||
+      args->GetSize() != 2 ||
+      !args->GetString(0, &image_url) ||
+      !args->GetString(1, &image_type)) {
     NOTREACHED();
+    return;
+  }
   if (image_url.empty())
     return;
 
   int user_image_index = User::kInvalidImageIndex;
-  if (IsDefaultImageUrl(image_url, &user_image_index)) {
+  if (image_type == "default" &&
+      IsDefaultImageUrl(image_url, &user_image_index)) {
     selected_image_ = user_image_index;
-  } else if (image_url == user_photo_data_url_) {
+  } else if (image_type == "camera") {
     selected_image_ = User::kExternalImageIndex;
-  } else {
+  } else if (image_type == "profile") {
     selected_image_ = User::kProfileImageIndex;
+  } else {
+    NOTREACHED() << "Unexpected image type: " << image_type;
   }
 }
 
@@ -271,7 +290,7 @@ void UserImageScreenHandler::OnCameraPresenceCheckDone() {
 void UserImageScreenHandler::OnImageDecoded(const ImageDecoder* decoder,
                                             const SkBitmap& decoded_image) {
   DCHECK_EQ(image_decoder_.get(), decoder);
-  user_photo_ = gfx::ImageSkia(decoded_image);
+  user_photo_ = gfx::ImageSkia::CreateFrom1xBitmap(decoded_image);
   if (screen_ && accept_photo_after_decoding_)
     screen_->OnPhotoTaken(user_photo_);
 }

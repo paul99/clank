@@ -28,7 +28,7 @@ bool ContentRendererClient::OverrideCreatePlugin(
 
 WebKit::WebPlugin* ContentRendererClient::CreatePluginReplacement(
     RenderView* render_view,
-    const FilePath& plugin_path) {
+    const base::FilePath& plugin_path) {
   return NULL;
 }
 
@@ -38,17 +38,12 @@ bool ContentRendererClient::HasErrorPage(int http_status_code,
 }
 
 webkit_media::WebMediaPlayerImpl*
-    ContentRendererClient::OverrideCreateWebMediaPlayer(
-        RenderView* render_view,
-        WebKit::WebFrame* frame,
-        WebKit::WebMediaPlayerClient* client,
-        base::WeakPtr<webkit_media::WebMediaPlayerDelegate> delegate,
-        media::FilterCollection* collection,
-        WebKit::WebAudioSourceProvider* audio_source_provider,
-        media::AudioRendererSink* audio_renderer_sink,
-        media::MessageLoopFactory* message_loop_factory,
-        webkit_media::MediaStreamClient* media_stream_client,
-        media::MediaLog* media_log) {
+ContentRendererClient::OverrideCreateWebMediaPlayer(
+    RenderView* render_view,
+    WebKit::WebFrame* frame,
+    WebKit::WebMediaPlayerClient* client,
+    base::WeakPtr<webkit_media::WebMediaPlayerDelegate> delegate,
+    const webkit_media::WebMediaPlayerParams& params) {
   return NULL;
 }
 
@@ -71,6 +66,7 @@ bool ContentRendererClient::HandleNavigation(
 
 bool ContentRendererClient::ShouldFork(WebKit::WebFrame* frame,
                                        const GURL& url,
+                                       const std::string& http_method,
                                        bool is_initial_navigation,
                                        bool* send_referrer) {
   return false;

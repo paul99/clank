@@ -6,17 +6,17 @@
 
 #include "android_webview/browser/aw_content_browser_client.h"
 #include "android_webview/lib/aw_browser_dependency_factory_impl.h"
+#include "android_webview/native/aw_geolocation_permission_context.h"
 #include "android_webview/native/aw_web_contents_view_delegate.h"
 #include "android_webview/renderer/aw_content_renderer_client.h"
-#include "base/lazy_instance.h"
+#include "base/command_line.h"
 #include "base/logging.h"
 #include "base/memory/scoped_ptr.h"
+#include "cc/switches.h"
 #include "content/public/browser/browser_main_runner.h"
+#include "content/public/common/content_switches.h"
 
 namespace android_webview {
-
-base::LazyInstance<AwContentRendererClient>
-    g_webview_content_renderer_client = LAZY_INSTANCE_INITIALIZER;
 
 AwMainDelegate::AwMainDelegate() {
 }
@@ -26,6 +26,19 @@ AwMainDelegate::~AwMainDelegate() {
 
 bool AwMainDelegate::BasicStartupComplete(int* exit_code) {
   content::SetContentClient(&content_client_);
+
+  CommandLine* command_line = CommandLine::ForCurrentProcess();
+  // Set the command line to enable synchronous API compatibility.
+  command_line->AppendSwitch(switches::kEnableWebViewSynchronousAPIs);
+
+  // TODO(leandrogracia): enable with the CapturePicture API support.
+  if (false) {
+    // Enable impl-side painting in the compositor.
+    command_line->AppendSwitch(switches::kForceCompositingMode);
+    command_line->AppendSwitch(switches::kEnableThreadedCompositing);
+    command_line->AppendSwitch(switches::kEnableDeferredImageDecoding);
+    command_line->AppendSwitch(cc::switches::kEnableImplSidePainting);
+  }
 
   return false;
 }
@@ -66,7 +79,9 @@ void AwMainDelegate::ProcessExiting(const std::string& process_type) {
 content::ContentBrowserClient*
     AwMainDelegate::CreateContentBrowserClient() {
   content_browser_client_.reset(
-      new AwContentBrowserClient(&AwWebContentsViewDelegate::Create));
+      new AwContentBrowserClient(
+          &AwWebContentsViewDelegate::Create,
+          &AwGeolocationPermissionContext::Create));
 
   return content_browser_client_.get();
 }

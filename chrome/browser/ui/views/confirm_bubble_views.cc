@@ -6,7 +6,7 @@
 
 #include "chrome/browser/ui/confirm_bubble.h"
 #include "chrome/browser/ui/confirm_bubble_model.h"
-#include "grit/theme_resources.h"
+#include "grit/ui_resources.h"
 #include "ui/base/resource/resource_bundle.h"
 #include "ui/gfx/image/image.h"
 #include "ui/views/controls/button/image_button.h"
@@ -26,12 +26,14 @@ const int kMaxMessageWidth = 400;
 
 }  // namespace
 
-ConfirmBubbleViews::ConfirmBubbleViews(const gfx::Point& anchor_point,
+ConfirmBubbleViews::ConfirmBubbleViews(gfx::NativeView parent,
+                                       const gfx::Point& anchor_point,
                                        ConfirmBubbleModel* model)
     : BubbleDelegateView(NULL, views::BubbleBorder::NONE),
-      anchor_point_(anchor_point),
       model_(model) {
   DCHECK(model);
+  set_anchor_point(anchor_point);
+  set_parent_window(parent);
 }
 
 ConfirmBubbleViews::~ConfirmBubbleViews() {
@@ -51,11 +53,10 @@ void ConfirmBubbleViews::LinkClicked(views::Link* source, int event_flags) {
 }
 
 gfx::Rect ConfirmBubbleViews::GetAnchorRect() {
-  return gfx::Rect(anchor_point_, gfx::Size());
+  return gfx::Rect(anchor_point(), gfx::Size());
 }
 
 void ConfirmBubbleViews::Init() {
-  ui::ResourceBundle& bundle = ui::ResourceBundle::GetSharedInstance();
   views::GridLayout* layout = new views::GridLayout(this);
   SetLayoutManager(layout);
 
@@ -80,13 +81,17 @@ void ConfirmBubbleViews::Init() {
   const string16 title_text = model_->GetTitle();
   DCHECK(!title_text.empty());
   views::Label* title_label = new views::Label(title_text);
-  title_label->SetFont(bundle.GetFont(ui::ResourceBundle::MediumFont));
+  ui::ResourceBundle& rb = ui::ResourceBundle::GetSharedInstance();
+  title_label->SetFont(rb.GetFont(ui::ResourceBundle::MediumFont));
   layout->AddView(title_label);
 
   views::ImageButton* close_button = new views::ImageButton(this);
-  const gfx::ImageSkia* close_image =
-      bundle.GetImageNamed(IDR_INFO_BUBBLE_CLOSE).ToImageSkia();
-  close_button->SetImage(views::CustomButton::STATE_NORMAL, close_image);
+  close_button->SetImage(views::CustomButton::STATE_NORMAL,
+                         rb.GetImageSkiaNamed(IDR_CLOSE_DIALOG));
+  close_button->SetImage(views::CustomButton::STATE_HOVERED,
+                         rb.GetImageSkiaNamed(IDR_CLOSE_DIALOG_H));
+  close_button->SetImage(views::CustomButton::STATE_PRESSED,
+                         rb.GetImageSkiaNamed(IDR_CLOSE_DIALOG_P));
   close_button->set_tag(ConfirmBubbleModel::BUTTON_NONE);
   layout->AddView(close_button);
   layout->AddPaddingRow(0, views::kRelatedControlVerticalSpacing);
@@ -156,7 +161,7 @@ namespace chrome {
 void ShowConfirmBubble(gfx::NativeView view,
                        const gfx::Point& origin,
                        ConfirmBubbleModel* model) {
-  ConfirmBubbleViews* bubble = new ConfirmBubbleViews(origin, model);
+  ConfirmBubbleViews* bubble = new ConfirmBubbleViews(view, origin, model);
   views::BubbleDelegateView::CreateBubble(bubble);
   bubble->Show();
 }

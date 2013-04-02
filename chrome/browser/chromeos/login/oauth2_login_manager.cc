@@ -5,11 +5,12 @@
 #include "chrome/browser/chromeos/login/oauth2_login_manager.h"
 
 #include "base/metrics/histogram.h"
+#include "base/prefs/pref_service.h"
 #include "base/string_util.h"
 #include "chrome/browser/browser_process.h"
 #include "chrome/browser/chromeos/login/user_manager.h"
 #include "chrome/browser/policy/browser_policy_connector.h"
-#include "chrome/browser/prefs/pref_service.h"
+#include "chrome/browser/prefs/pref_registry_syncable.h"
 #include "chrome/browser/profiles/profile.h"
 #include "chrome/browser/signin/token_service.h"
 #include "chrome/browser/signin/token_service_factory.h"
@@ -92,16 +93,19 @@ TokenService* OAuth2LoginManager::SetupTokenService() {
 
 void OAuth2LoginManager::RemoveLegacyTokens() {
   PrefService* prefs = user_profile_->GetPrefs();
-  prefs->RegisterStringPref(prefs::kOAuth1Token,
-                            "",
-                            PrefService::UNSYNCABLE_PREF);
-  prefs->RegisterStringPref(prefs::kOAuth1Secret,
-                            "",
-                            PrefService::UNSYNCABLE_PREF);
+  // TODO(joi): Registration should only be done up front.
+  scoped_refptr<PrefRegistrySyncable> registry(
+      static_cast<PrefRegistrySyncable*>(prefs->DeprecatedGetPrefRegistry()));
+  registry->RegisterStringPref(prefs::kOAuth1Token,
+                               "",
+                               PrefRegistrySyncable::UNSYNCABLE_PREF);
+  registry->RegisterStringPref(prefs::kOAuth1Secret,
+                               "",
+                               PrefRegistrySyncable::UNSYNCABLE_PREF);
   prefs->ClearPref(prefs::kOAuth1Token);
   prefs->ClearPref(prefs::kOAuth1Secret);
-  prefs->UnregisterPreference(prefs::kOAuth1Token);
-  prefs->UnregisterPreference(prefs::kOAuth1Secret);
+  registry->DeprecatedUnregisterPreference(prefs::kOAuth1Token);
+  registry->DeprecatedUnregisterPreference(prefs::kOAuth1Secret);
 }
 
 void OAuth2LoginManager::StoreOAuth2Tokens(
@@ -227,6 +231,7 @@ void OAuth2LoginManager::OnOAuthLoginFailure() {
   UMA_HISTOGRAM_ENUMERATION("OAuth2Login.SessionRestore",
                             SESSION_RESTORE_OAUTHLOGIN_FAILED,
                             SESSION_RESTORE_COUNT);
+  delegate_->OnCompletedMergeSession();
 }
 
 void OAuth2LoginManager::OnSessionMergeSuccess() {

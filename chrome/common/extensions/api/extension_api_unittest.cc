@@ -17,6 +17,7 @@
 #include "chrome/common/chrome_paths.h"
 #include "chrome/common/extensions/extension.h"
 #include "chrome/common/extensions/features/simple_feature.h"
+#include "chrome/common/extensions/manifest.h"
 #include "testing/gtest/include/gtest/gtest.h"
 
 namespace extensions {
@@ -31,7 +32,7 @@ class TestFeatureProvider : public FeatureProvider {
   virtual Feature* GetFeature(const std::string& name) OVERRIDE {
     SimpleFeature* result = new SimpleFeature();
     result->set_name(name);
-    result->extension_types()->insert(Extension::TYPE_EXTENSION);
+    result->extension_types()->insert(Manifest::TYPE_EXTENSION);
     result->GetContexts()->insert(context_);
     to_destroy_.push_back(make_linked_ptr(result));
     return result;
@@ -97,11 +98,11 @@ TEST(ExtensionAPI, IsPrivileged) {
   scoped_ptr<ExtensionAPI> extension_api(
       ExtensionAPI::CreateWithDefaultConfiguration());
 
-  EXPECT_FALSE(extension_api->IsPrivileged("extension.connect"));
-  EXPECT_FALSE(extension_api->IsPrivileged("extension.onConnect"));
+  EXPECT_FALSE(extension_api->IsPrivileged("runtime.connect"));
+  EXPECT_FALSE(extension_api->IsPrivileged("runtime.onConnect"));
 
   // Properties are not supported yet.
-  EXPECT_TRUE(extension_api->IsPrivileged("extension.lastError"));
+  EXPECT_TRUE(extension_api->IsPrivileged("runtime.lastError"));
 
   // Default unknown names to privileged for paranoia's sake.
   EXPECT_TRUE(extension_api->IsPrivileged(""));
@@ -144,7 +145,7 @@ TEST(ExtensionAPI, IsPrivilegedFeatures) {
   };
 
   for (size_t i = 0; i < ARRAYSIZE_UNSAFE(test_data); ++i) {
-    FilePath manifest_path;
+    base::FilePath manifest_path;
     PathService::Get(chrome::DIR_TEST_DATA, &manifest_path);
     manifest_path = manifest_path.AppendASCII("extensions")
         .AppendASCII("extension_api_unittest")
@@ -207,7 +208,7 @@ scoped_refptr<Extension> CreateExtensionWithPermissions(
 
   std::string error;
   scoped_refptr<Extension> extension(Extension::Create(
-      FilePath(), Extension::LOAD, manifest, Extension::NO_FLAGS, &error));
+      base::FilePath(), Manifest::LOAD, manifest, Extension::NO_FLAGS, &error));
   CHECK(extension.get());
   CHECK(error.empty());
 
@@ -428,7 +429,7 @@ static void GetDictionaryFromList(const DictionaryValue* schema,
 }
 
 TEST(ExtensionAPI, TypesHaveNamespace) {
-  FilePath manifest_path;
+  base::FilePath manifest_path;
   PathService::Get(chrome::DIR_TEST_DATA, &manifest_path);
   manifest_path = manifest_path.AppendASCII("extensions")
       .AppendASCII("extension_api_unittest")

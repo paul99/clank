@@ -48,7 +48,7 @@ class ChromeShellDelegate : public ash::ShellDelegate,
   virtual void NewTab() OVERRIDE;
   virtual void NewWindow(bool is_incognito) OVERRIDE;
   virtual void ToggleMaximized() OVERRIDE;
-  virtual void OpenFileManager() OVERRIDE;
+  virtual void OpenFileManager(bool as_dialog) OVERRIDE;
   virtual void OpenCrosh() OVERRIDE;
   virtual void OpenMobileSetup(const std::string& service_path) OVERRIDE;
   virtual void RestoreTab() OVERRIDE;
@@ -61,7 +61,9 @@ class ChromeShellDelegate : public ash::ShellDelegate,
   virtual void ToggleSpokenFeedback(
       ash::AccessibilityNotificationVisibility notify) OVERRIDE;
   virtual bool IsHighContrastEnabled() const OVERRIDE;
-  virtual void SetMagnifier(ash::MagnifierType type) OVERRIDE;
+  virtual void SetMagnifierEnabled(bool enabled) OVERRIDE;
+  virtual void SetMagnifierType(ash::MagnifierType type) OVERRIDE;
+  virtual bool IsMagnifierEnabled() const OVERRIDE;
   virtual ash::MagnifierType GetMagnifierType() const OVERRIDE;
   virtual bool ShouldAlwaysShowAccessibilityMenu() const OVERRIDE;
   virtual app_list::AppListViewDelegate* CreateAppListViewDelegate() OVERRIDE;
@@ -81,7 +83,6 @@ class ChromeShellDelegate : public ash::ShellDelegate,
   virtual void SaveScreenMagnifierScale(double scale) OVERRIDE;
   virtual double GetSavedScreenMagnifierScale() OVERRIDE;
   virtual ui::MenuModel* CreateContextMenu(aura::RootWindow* root) OVERRIDE;
-  virtual aura::client::StackingClient* CreateStackingClient() OVERRIDE;
   virtual ash::RootWindowHostFactory* CreateRootWindowHostFactory() OVERRIDE;
   virtual string16 GetProductName() const OVERRIDE;
 

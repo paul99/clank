@@ -1,6 +1,7 @@
 {
-  'TOOLS': ['win', 'linux'],
-  'SEARCH' : [
+  'TOOLS': ['newlib', 'glibc', 'pnacl', 'win', 'linux'],
+  'SEARCH': [
+      '.',
       '../../../../ppapi/cpp',
       '../../../../ppapi/utility',
       '../../../../ppapi/utility/graphics',
@@ -29,6 +30,7 @@
           'instance.cc',
           'instance_handle.cc',
           'lock.cc',
+          'message_loop.cc',
           'module.cc',
           'mouse_cursor.cc',
           'mouse_lock.cc',
@@ -50,6 +52,9 @@
           'websocket_api.cc',
       ],
     }
+  ],
+  'DATA': [
+    'Makefile',
   ],
   'DEST': 'src',
   'NAME': 'ppapi_cpp',

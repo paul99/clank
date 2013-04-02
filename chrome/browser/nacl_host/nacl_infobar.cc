@@ -62,7 +62,8 @@ int NaClInfoBarDelegate::GetButtons() const { return BUTTON_NONE; }
 
 // static
 void NaClInfoBarDelegate::Create(InfoBarService* ibs, WebContents *wc) {
-  ibs->AddInfoBar(new NaClInfoBarDelegate(wc, ibs));
+  ibs->AddInfoBar(scoped_ptr<InfoBarDelegate>(
+      new NaClInfoBarDelegate(wc, ibs)));
 }
 
 void ShowInfobar(int render_process_id, int render_view_id,

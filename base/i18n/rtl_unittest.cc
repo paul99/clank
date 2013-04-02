@@ -8,11 +8,11 @@
 
 #include "base/file_path.h"
 #include "base/string_util.h"
+#include "base/strings/sys_string_conversions.h"
 #include "base/utf_string_conversions.h"
-#include "base/sys_string_conversions.h"
 #include "testing/gtest/include/gtest/gtest.h"
 #include "testing/platform_test.h"
-#include "unicode/usearch.h"
+#include "third_party/icu/public/i18n/unicode/usearch.h"
 
 #if defined(TOOLKIT_GTK)
 #include <gtk/gtk.h>

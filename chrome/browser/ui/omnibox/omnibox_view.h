@@ -20,12 +20,13 @@
 #include "chrome/browser/ui/omnibox/omnibox_edit_model.h"
 #include "chrome/browser/ui/toolbar/toolbar_model.h"
 #include "content/public/common/url_constants.h"
+#include "ui/base/window_open_disposition.h"
 #include "ui/gfx/native_widget_types.h"
-#include "webkit/glue/window_open_disposition.h"
 
 class CommandUpdater;
 class GURL;
 class OmniboxEditController;
+class OmniboxViewMacTest;
 class Profile;
 class ToolbarModel;
 
@@ -251,6 +252,8 @@ class OmniboxView {
   OmniboxEditController* controller() { return controller_; }
 
  private:
+  friend class OmniboxViewMacTest;
+
   // |model_| can be NULL in tests.
   scoped_ptr<OmniboxEditModel> model_;
   OmniboxEditController* controller_;

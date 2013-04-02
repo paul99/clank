@@ -21,6 +21,7 @@
 #include "chrome/browser/api/sync/profile_sync_service_base.h"
 #include "chrome/browser/api/sync/profile_sync_service_observer.h"
 #include "chrome/browser/profiles/profile_keyed_service.h"
+#include "chrome/browser/signin/signin_global_error.h"
 #include "chrome/browser/sync/backend_unrecoverable_error_handler.h"
 #include "chrome/browser/sync/failed_datatypes_handler.h"
 #include "chrome/browser/sync/glue/data_type_controller.h"
@@ -155,6 +156,7 @@ class ProfileSyncService : public ProfileSyncServiceBase,
                            public browser_sync::SyncFrontend,
                            public browser_sync::SyncPrefObserver,
                            public browser_sync::DataTypeManagerObserver,
+                           public SigninGlobalError::AuthStatusProvider,
                            public syncer::UnrecoverableErrorHandler,
                            public content::NotificationObserver,
                            public ProfileKeyedService,
@@ -276,8 +278,7 @@ class ProfileSyncService : public ProfileSyncServiceBase,
   virtual void OnInvalidatorStateChange(
       syncer::InvalidatorState state) OVERRIDE;
   virtual void OnIncomingInvalidation(
-      const syncer::ObjectIdInvalidationMap& invalidation_map,
-      syncer::IncomingInvalidationSource source) OVERRIDE;
+      const syncer::ObjectIdInvalidationMap& invalidation_map) OVERRIDE;
 
   // SyncFrontend implementation.
   virtual void OnBackendInitialized(
@@ -381,6 +382,10 @@ class ProfileSyncService : public ProfileSyncServiceBase,
   // Returns a user-friendly string form of last synced time (in minutes).
   virtual string16 GetLastSyncedTimeString() const;
 
+  // Returns true if startup is suppressed (i.e. user has stopped syncing via
+  // the google dashboard).
+  virtual bool IsStartSuppressed() const;
+
   ProfileSyncComponentsFactory* factory() { return factory_.get(); }
 
   // The profile we are syncing for.
@@ -396,11 +401,17 @@ class ProfileSyncService : public ProfileSyncServiceBase,
   // Returns whether sync is enabled.  Sync can be enabled/disabled both
   // at compile time (e.g., on a per-OS basis) or at run time (e.g.,
   // command-line switches).
+  // Profile::IsSyncAccessible() is probably a better signal than this function.
+  // This function can be called from any thread, and the implementation doesn't
+  // assume it's running on the UI thread.
   static bool IsSyncEnabled();
 
   // Returns whether sync is managed, i.e. controlled by configuration
   // management. If so, the user is not allowed to configure sync.
-  bool IsManaged() const;
+  virtual bool IsManaged() const;
+
+  // SigninGlobalError::AuthStatusProvider implementation.
+  virtual GoogleServiceAuthError GetAuthStatus() const OVERRIDE;
 
   // syncer::UnrecoverableErrorHandler implementation.
   virtual void OnUnrecoverableError(
@@ -534,6 +545,13 @@ class ProfileSyncService : public ProfileSyncServiceBase,
   // Fills |encrypted_types| with the set of currently encrypted types. Does
   // not account for types pending encryption.
   virtual syncer::ModelTypeSet GetEncryptedDataTypes() const;
+
+#if defined(OS_ANDROID)
+  // Android does not display password prompts, passwords are only allowed to be
+  // synced if Cryptographer has already been initialized and does not have
+  // pending keys.
+  bool ShouldEnablePasswordSyncForAndroid() const;
+#endif
 
   // Returns true if the syncer is waiting for new datatypes to be encrypted.
   virtual bool encryption_pending() const;

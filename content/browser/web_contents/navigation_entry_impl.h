@@ -73,6 +73,13 @@ class CONTENT_EXPORT NavigationEntryImpl
   virtual base::Time GetTimestamp() const OVERRIDE;
   virtual void SetCanLoadLocalResources(bool allow) OVERRIDE;
   virtual bool GetCanLoadLocalResources() const OVERRIDE;
+  virtual void SetFrameToNavigate(const std::string& frame_name) OVERRIDE;
+  virtual const std::string& GetFrameToNavigate() const OVERRIDE;
+  virtual void SetExtraData(const std::string& key,
+                            const string16& data) OVERRIDE;
+  virtual bool GetExtraData(const std::string& key,
+                            string16* data) const OVERRIDE;
+  virtual void ClearExtraData(const std::string& key) OVERRIDE;
 
   void set_unique_id(int unique_id) {
     unique_id_ = unique_id;
@@ -167,6 +174,11 @@ class CONTENT_EXPORT NavigationEntryImpl
     should_replace_entry_ = should_replace_entry;
   }
 
+  void SetScreenshotPNGData(const std::vector<unsigned char>& png_data);
+  const scoped_refptr<base::RefCountedBytes> screenshot() const {
+    return screenshot_;
+  }
+
  private:
   // WARNING WARNING WARNING WARNING WARNING WARNING WARNING WARNING WARNING
   // Session/Tab restore save portions of this class so that it can be recreated
@@ -202,6 +214,15 @@ class CONTENT_EXPORT NavigationEntryImpl
   // information is stored in |content_state_| above. It is also only shallow
   // copied with compiler provided copy constructor.
   scoped_refptr<const base::RefCountedMemory> browser_initiated_post_data_;
+
+  // This is also a transient member (i.e. is not persisted with session
+  // restore). The screenshot of a page is taken when navigating away from the
+  // page. This screenshot is displayed during an overscroll-navigation
+  // gesture. |screenshot_| will be NULL when the screenshot is not available
+  // (e.g. after a session restore, or if taking the screenshot of a page
+  // failed). The UI is responsible for dealing with missing screenshots
+  // appropriately (e.g. display a placeholder image instead).
+  scoped_refptr<base::RefCountedBytes> screenshot_;
 
   // This member is not persisted with session restore.
   std::string extra_headers_;
@@ -244,6 +265,15 @@ class CONTENT_EXPORT NavigationEntryImpl
   // Set when this entry should be able to access local file:// resources. This
   // value is not needed after the entry commits and is not persisted.
   bool can_load_local_resources_;
+
+  // If not empty, the name of the frame to navigate. This field is not
+  // persisted, because it is currently only used in tests.
+  std::string frame_to_navigate_;
+
+  // Used to store extra data to support browser features. This member is not
+  // persisted, unless specific data is taken out/put back in at save/restore
+  // time (see TabNavigation for an example of this).
+  std::map<std::string, string16> extra_data_;
 
   // Copy and assignment is explicitly allowed for this class.
 };

@@ -51,22 +51,15 @@ bool TestViewsDelegate::UseTransparentWindows() const {
   return use_transparent_windows_;
 }
 
-int TestViewsDelegate::GetDispositionForEvent(int event_flags) {
-  return 0;
-}
-
 content::WebContents* TestViewsDelegate::CreateWebContents(
     content::BrowserContext* browser_context,
     content::SiteInstance* site_instance) {
   return NULL;
 }
 
-NativeWidget* TestViewsDelegate::CreateNativeWidget(
-    Widget::InitParams::Type type,
-    internal::NativeWidgetDelegate* delegate,
-    gfx::NativeView parent,
-    gfx::NativeView context) {
-  return NULL;
+void TestViewsDelegate::OnBeforeWidgetInit(
+    Widget::InitParams* params,
+    internal::NativeWidgetDelegate* delegate) {
 }
 
 }  // namespace views

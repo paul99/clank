@@ -11,15 +11,14 @@
 #include "base/message_loop.h"
 #include "base/memory/scoped_ptr.h"
 #include "base/time.h"
+#include "third_party/WebKit/Source/Platform/chromium/public/WebSize.h"
+#include "third_party/WebKit/Source/Platform/chromium/public/WebURL.h"
+#include "third_party/WebKit/Source/Platform/chromium/public/WebVideoFrame.h"
 #include "third_party/WebKit/Source/WebKit/chromium/public/WebMediaPlayer.h"
-#include "third_party/WebKit/Source/WebKit/chromium/public/WebVideoFrame.h"
-#include "third_party/WebKit/Source/WebKit/chromium/public/platform/WebSize.h"
-#include "third_party/WebKit/Source/WebKit/chromium/public/platform/WebURL.h"
+#include "webkit/media/android/stream_texture_factory_android.h"
 
 namespace webkit_media {
 
-class StreamTextureFactory;
-class StreamTextureProxy;
 class WebMediaPlayerManagerAndroid;
 
 // An abstract class that serves as the common base class for implementing
@@ -120,6 +119,9 @@ class WebMediaPlayerAndroid
 
   // Method inherited from DestructionObserver.
   virtual void WillDestroyCurrentMessageLoop() OVERRIDE;
+
+  // Detach the player from its manager.
+  void Detach();
 
  protected:
   // Construct a WebMediaPlayerAndroid object with reference to the
@@ -233,7 +235,7 @@ class WebMediaPlayerAndroid
 
   // Object for calling back the compositor thread to repaint the video when a
   // frame available. It should be initialized on the compositor thread.
-  scoped_ptr<StreamTextureProxy> stream_texture_proxy_;
+  ScopedStreamTextureProxy stream_texture_proxy_;
 
   DISALLOW_COPY_AND_ASSIGN(WebMediaPlayerAndroid);
 };

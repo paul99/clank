@@ -1,3 +1,0 @@
-#pointer-overlay > .content-area > :not([hidden]) + :nth-child(2) {
-  margin-top: 20px;
-}

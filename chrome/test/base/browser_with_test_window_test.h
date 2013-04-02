@@ -8,6 +8,7 @@
 #include "base/at_exit.h"
 #include "base/message_loop.h"
 #include "chrome/browser/ui/browser.h"
+#include "chrome/browser/ui/host_desktop.h"
 #include "chrome/test/base/test_browser_window.h"
 #include "chrome/test/base/testing_profile.h"
 #include "content/public/test/test_browser_thread.h"
@@ -57,7 +58,14 @@ class WebContents;
 // for creating the various objects of this class.
 class BrowserWithTestWindowTest : public testing::Test {
  public:
+  // Creates a BrowserWithTestWindowTest for which the initial window will be
+  // created on the native desktop.
   BrowserWithTestWindowTest();
+
+  // Creates a BrowserWithTestWindowTest for which the initial window will be
+  // created on the desktop of type |host_desktop_type|.
+  explicit BrowserWithTestWindowTest(chrome::HostDesktopType host_desktop_type);
+
   virtual ~BrowserWithTestWindowTest();
 
   virtual void SetUp() OVERRIDE;
@@ -97,6 +105,12 @@ class BrowserWithTestWindowTest : public testing::Test {
   // Navigates the current tab. This is a wrapper around NavigateAndCommit.
   void NavigateAndCommitActiveTab(const GURL& url);
 
+  // Set the |title| of the current tab.
+  void NavigateAndCommitActiveTabWithTitle(
+      Browser* browser,
+      const GURL& url,
+      const string16& title);
+
  protected:
   // Destroys the browser, window, and profile created by this class. This is
   // invoked from the destructor.
@@ -129,6 +143,9 @@ class BrowserWithTestWindowTest : public testing::Test {
 #if defined(OS_WIN)
   ui::ScopedOleInitializer ole_initializer_;
 #endif
+
+  // The desktop to create the initial window on.
+  chrome::HostDesktopType host_desktop_type_;
 
   DISALLOW_COPY_AND_ASSIGN(BrowserWithTestWindowTest);
 };

@@ -9,7 +9,6 @@
 
 #include "base/file_path.h"
 #include "base/logging.h"
-#include "sql/diagnostic_error_delegate.h"
 #include "sql/statement.h"
 #include "sql/transaction.h"
 
@@ -28,15 +27,8 @@ namespace {
 
 const int kCurrentVersionNumber = 1;
 const int kCompatibleVersionNumber = 1;
-const FilePath::CharType kMediaGalleryDatabaseName[] =
+const base::FilePath::CharType kMediaGalleryDatabaseName[] =
     FILE_PATH_LITERAL(".media_gallery.db");
-
-class HistogramName {
- public:
-  static const char* name() {
-    return "Sqlite.MediaGallery.Error";
-  }
-};
 
 }  // namespace
 
@@ -44,9 +36,8 @@ MediaGalleryDatabase::MediaGalleryDatabase() { }
 
 MediaGalleryDatabase::~MediaGalleryDatabase() { }
 
-sql::InitStatus MediaGalleryDatabase::Init(const FilePath& database_dir) {
-  // Set the exceptional sqlite error handler.
-  db_.set_error_delegate(new sql::DiagnosticErrorDelegate<HistogramName>());
+sql::InitStatus MediaGalleryDatabase::Init(const base::FilePath& database_dir) {
+  db_.set_error_histogram_name("Sqlite.MediaGallery.Error");
 
   // Set the database page size to something a little larger to give us
   // better performance (we're typically seek rather than bandwidth limited).
@@ -59,7 +50,7 @@ sql::InitStatus MediaGalleryDatabase::Init(const FilePath& database_dir) {
   // 6000 * 4KB = 24MB
   db_.set_cache_size(6000);
 
-  if (!db_.Open(database_dir.Append(FilePath(kMediaGalleryDatabaseName))))
+  if (!db_.Open(database_dir.Append(base::FilePath(kMediaGalleryDatabaseName))))
     return sql::INIT_FAILURE;
 
   return InitInternal(&db_);
@@ -170,9 +161,9 @@ void MediaGalleryDatabase::FillCollectionRow(const sql::Statement& statement,
                                              CollectionRow* row) {
   row->id = statement.ColumnInt64(0);
 #if defined(OS_WIN)
-  row->path = FilePath(base::SysUTF8ToWide(statement.ColumnString(1)));
+  row->path = base::FilePath(base::SysUTF8ToWide(statement.ColumnString(1)));
 #elif defined(OS_POSIX)
-  row->path = FilePath(statement.ColumnString(1));
+  row->path = base::FilePath(statement.ColumnString(1));
 #endif  // OS_WIN
   row->last_modified_time = base::Time::FromInternalValue(
       statement.ColumnInt64(2));

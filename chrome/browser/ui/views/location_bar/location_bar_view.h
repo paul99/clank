@@ -38,6 +38,7 @@ class ExtensionAction;
 class GURL;
 class InstantController;
 class KeywordHintView;
+class LocationBarSeparatorView;
 class LocationIconView;
 class OpenPDFInReaderView;
 class PageActionWithBadgeView;
@@ -47,7 +48,6 @@ class ScriptBubbleIconView;
 class SelectedKeywordView;
 class StarView;
 class TemplateURLService;
-class WebIntentsButtonView;
 class ZoomView;
 
 namespace views {
@@ -104,11 +104,11 @@ class LocationBarView : public LocationBar,
     virtual ContentSettingBubbleModelDelegate*
         GetContentSettingBubbleModelDelegate() = 0;
 
-    // Shows page information in the given web contents.
-    virtual void ShowPageInfo(content::WebContents* web_contents,
-                              const GURL& url,
-                              const content::SSLStatus& ssl,
-                              bool show_history) = 0;
+    // Shows permissions and settings for the given web contents.
+    virtual void ShowWebsiteSettings(content::WebContents* web_contents,
+                                     const GURL& url,
+                                     const content::SSLStatus& ssl,
+                                     bool show_history) = 0;
 
     // Called by the location bar view when the user starts typing in the edit.
     // This forces our security style to be UNKNOWN for the duration of the
@@ -173,6 +173,9 @@ class LocationBarView : public LocationBar,
 
   // See comment in browser_window.h for more info.
   void ZoomChangedForActiveTab(bool can_show_bubble);
+
+  // The zoom icon view. It may not be visible.
+  ZoomView* zoom_view() { return zoom_view_; }
 
   // Sets |preview_enabled| for the PageAction View associated with this
   // |page_action|. If |preview_enabled| is true, the view will display the
@@ -296,7 +299,6 @@ class LocationBarView : public LocationBar,
   virtual void UpdateContentSettingsIcons() OVERRIDE;
   virtual void UpdatePageActions() OVERRIDE;
   virtual void InvalidatePageActions() OVERRIDE;
-  virtual void UpdateWebIntentsButton() OVERRIDE;
   virtual void UpdateOpenPDFInReaderPrompt() OVERRIDE;
   virtual void SaveStateToContents(content::WebContents* contents) OVERRIDE;
   virtual void Revert() OVERRIDE;
@@ -351,22 +353,6 @@ class LocationBarView : public LocationBar,
   friend class PageActionImageView;
   friend class PageActionWithBadgeView;
   typedef std::vector<PageActionWithBadgeView*> PageActionViews;
-
-  // Returns the amount of horizontal space (in pixels) out of
-  // |location_bar_width| that is not taken up by the actual text in
-  // location_entry_.
-  int AvailableWidth(int location_bar_width);
-
-  // If |view| fits in |available_width|, it is made visible and positioned at
-  // the leading or trailing end of |bounds|, which are then shrunk
-  // appropriately.  Otherwise |view| is made invisible.
-  // Note: |view| is expected to have already been positioned and sized
-  // vertically.
-  void LayoutView(views::View* view,
-                  int padding,
-                  int available_width,
-                  bool leading,
-                  gfx::Rect* bounds);
 
   // Update the visibility state of the Content Blocked icons to reflect what is
   // actually blocked on the current page.
@@ -468,6 +454,12 @@ class LocationBarView : public LocationBar,
   // Shown if the selected url has a corresponding keyword.
   KeywordHintView* keyword_hint_view_;
 
+  // View responsible for showing text "<Search provider> Search", which appears
+  // when omnibox replaces the URL with its query terms and there's enough space
+  // in omnibox.
+  views::Label* search_token_view_;
+  LocationBarSeparatorView* search_token_separator_view_;
+
   // The content setting views.
   ContentSettingViews content_setting_views_;
 
@@ -488,9 +480,6 @@ class LocationBarView : public LocationBar,
 
   // The star.
   StarView* star_view_;
-
-  // The web intents choose-another-service button
-  WebIntentsButtonView* web_intents_button_view_;
 
   // The action box button (plus).
   ActionBoxButtonView* action_box_button_view_;

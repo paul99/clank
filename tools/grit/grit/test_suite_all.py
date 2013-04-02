@@ -60,6 +60,7 @@ class TestSuiteAll(unittest.TestSuite):
     import grit.gather.txt_unittest
     import grit.node.base_unittest
     import grit.node.io_unittest
+    import grit.node.include_unittest
     import grit.node.message_unittest
     import grit.node.misc_unittest
     import grit.node.structure_unittest #
@@ -122,6 +123,7 @@ class TestSuiteAll(unittest.TestSuite):
         grit.gather.txt_unittest.TxtUnittest,
         grit.node.base_unittest.NodeUnittest,
         grit.node.io_unittest.FileNodeUnittest,
+        grit.node.include_unittest.IncludeNodeUnittest,
         grit.node.message_unittest.MessageUnittest,
         grit.node.misc_unittest.GritNodeUnittest,
         grit.node.misc_unittest.IfNodeUnittest,

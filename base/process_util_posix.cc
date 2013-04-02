@@ -106,10 +106,10 @@ int WaitpidWithTimeout(ProcessHandle handle, int64 wait_milliseconds,
   int64 double_sleep_time = 0;
 
   // If the process hasn't exited yet, then sleep and try again.
-  Time wakeup_time = Time::Now() +
+  TimeTicks wakeup_time = TimeTicks::Now() +
       TimeDelta::FromMilliseconds(wait_milliseconds);
   while (ret_pid == 0) {
-    Time now = Time::Now();
+    TimeTicks now = TimeTicks::Now();
     if (now > wakeup_time)
       break;
     // Guaranteed to be non-negative!
@@ -135,6 +135,8 @@ int WaitpidWithTimeout(ProcessHandle handle, int64 wait_milliseconds,
   return status;
 }
 
+#if !defined(OS_LINUX) || \
+    (!defined(__i386__) && !defined(__x86_64__) && !defined(__arm__))
 void ResetChildSignalHandlersToDefaults() {
   // The previous signal handlers are likely to be meaningless in the child's
   // context so we reset them to the defaults for now. http://crbug.com/44953
@@ -151,6 +153,73 @@ void ResetChildSignalHandlersToDefaults() {
   signal(SIGSYS, SIG_DFL);
   signal(SIGTERM, SIG_DFL);
 }
+
+#else
+
+// TODO(jln): remove the Linux special case once kernels are fixed.
+
+// Internally the kernel makes sigset_t an array of long large enough to have
+// one bit per signal.
+typedef uint64_t kernel_sigset_t;
+
+// This is what struct sigaction looks like to the kernel at least on X86 and
+// ARM. MIPS, for instance, is very different.
+struct kernel_sigaction {
+  void* k_sa_handler;  // For this usage it only needs to be a generic pointer.
+  unsigned long k_sa_flags;
+  void* k_sa_restorer;  // For this usage it only needs to be a generic pointer.
+  kernel_sigset_t k_sa_mask;
+};
+
+// glibc's sigaction() will prevent access to sa_restorer, so we need to roll
+// our own.
+int sys_rt_sigaction(int sig, const struct kernel_sigaction* act,
+                     struct kernel_sigaction* oact) {
+  return syscall(SYS_rt_sigaction, sig, act, oact, sizeof(kernel_sigset_t));
+}
+
+// This function is intended to be used in between fork() and execve() and will
+// reset all signal handlers to the default.
+// The motivation for going through all of them is that sa_restorer can leak
+// from parents and help defeat ASLR on buggy kernels.  We reset it to NULL.
+// See crbug.com/177956.
+void ResetChildSignalHandlersToDefaults(void) {
+  for (int signum = 1; ; ++signum) {
+    struct kernel_sigaction act = {0};
+    int sigaction_get_ret = sys_rt_sigaction(signum, NULL, &act);
+    if (sigaction_get_ret && errno == EINVAL) {
+#if !defined(NDEBUG)
+      // Linux supports 32 real-time signals from 33 to 64.
+      // If the number of signals in the Linux kernel changes, someone should
+      // look at this code.
+      const int kNumberOfSignals = 64;
+      RAW_CHECK(signum == kNumberOfSignals + 1);
+#endif  // !defined(NDEBUG)
+      break;
+    }
+    // All other failures are fatal.
+    if (sigaction_get_ret) {
+      RAW_LOG(FATAL, "sigaction (get) failed.");
+    }
+
+    // The kernel won't allow to re-set SIGKILL or SIGSTOP.
+    if (signum != SIGSTOP && signum != SIGKILL) {
+      act.k_sa_handler = reinterpret_cast<void*>(SIG_DFL);
+      act.k_sa_restorer = NULL;
+      if (sys_rt_sigaction(signum, &act, NULL)) {
+        RAW_LOG(FATAL, "sigaction (set) failed.");
+      }
+    }
+#if !defined(NDEBUG)
+    // Now ask the kernel again and check that no restorer will leak.
+    if (sys_rt_sigaction(signum, NULL, &act) || act.k_sa_restorer) {
+      RAW_LOG(FATAL, "Cound not fix sa_restorer.");
+    }
+#endif  // !defined(NDEBUG)
+  }
+}
+#endif  // !defined(OS_LINUX) ||
+        // (!defined(__i386__) && !defined(__x86_64__) && !defined(__arm__))
 
 TerminationStatus GetTerminationStatusImpl(ProcessHandle handle,
                                            bool can_block,
@@ -549,8 +618,8 @@ bool LaunchProcess(const std::vector<std::string>& argv,
   fd_shuffle1.reserve(fd_shuffle_size);
   fd_shuffle2.reserve(fd_shuffle_size);
 
-  scoped_array<char*> argv_cstr(new char*[argv.size() + 1]);
-  scoped_array<char*> new_environ;
+  scoped_ptr<char*[]> argv_cstr(new char*[argv.size() + 1]);
+  scoped_ptr<char*[]> new_environ;
   if (options.environ)
     new_environ.reset(AlterEnvironment(*options.environ, GetEnvironment()));
 
@@ -876,10 +945,10 @@ static bool WaitForSingleNonChildProcess(ProcessHandle handle,
   // interrupted.
   bool wait_forever = wait.InMilliseconds() == base::kNoTimeout;
   base::TimeDelta remaining_delta;
-  base::Time deadline;
+  base::TimeTicks deadline;
   if (!wait_forever) {
     remaining_delta = wait;
-    deadline = base::Time::Now() + remaining_delta;
+    deadline = base::TimeTicks::Now() + remaining_delta;
   }
 
   result = -1;
@@ -899,7 +968,7 @@ static bool WaitForSingleNonChildProcess(ProcessHandle handle,
 
     if (result == -1 && errno == EINTR) {
       if (!wait_forever) {
-        remaining_delta = deadline - base::Time::Now();
+        remaining_delta = deadline - base::TimeTicks::Now();
       }
       result = 0;
     } else {
@@ -1012,7 +1081,7 @@ static GetAppOutputInternalResult GetAppOutputInternal(
   int pipe_fd[2];
   pid_t pid;
   InjectiveMultimap fd_shuffle1, fd_shuffle2;
-  scoped_array<char*> argv_cstr(new char*[argv.size() + 1]);
+  scoped_ptr<char*[]> argv_cstr(new char*[argv.size() + 1]);
 
   fd_shuffle1.reserve(3);
   fd_shuffle2.reserve(3);
@@ -1156,7 +1225,7 @@ bool WaitForProcessesToExit(const FilePath::StringType& executable_name,
   // TODO(port): This is inefficient, but works if there are multiple procs.
   // TODO(port): use waitpid to avoid leaving zombies around
 
-  base::Time end_time = base::Time::Now() + wait;
+  base::TimeTicks end_time = base::TimeTicks::Now() + wait;
   do {
     NamedProcessIterator iter(executable_name, filter);
     if (!iter.NextProcessEntry()) {
@@ -1164,7 +1233,7 @@ bool WaitForProcessesToExit(const FilePath::StringType& executable_name,
       break;
     }
     base::PlatformThread::Sleep(base::TimeDelta::FromMilliseconds(100));
-  } while ((end_time - base::Time::Now()) > base::TimeDelta());
+  } while ((end_time - base::TimeTicks::Now()) > base::TimeDelta());
 
   return result;
 }

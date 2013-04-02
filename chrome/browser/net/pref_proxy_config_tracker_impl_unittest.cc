@@ -7,6 +7,7 @@
 #include "base/command_line.h"
 #include "base/file_path.h"
 #include "base/message_loop.h"
+#include "base/prefs/pref_registry_simple.h"
 #include "chrome/browser/net/chrome_url_request_context.h"
 #include "chrome/browser/prefs/pref_service_mock_builder.h"
 #include "chrome/browser/prefs/proxy_config_dictionary.h"
@@ -43,16 +44,18 @@ class TestProxyConfigService : public net::ProxyConfigService {
   }
 
  private:
-  virtual void AddObserver(net::ProxyConfigService::Observer* observer) {
+  virtual void AddObserver(
+      net::ProxyConfigService::Observer* observer) OVERRIDE {
     observers_.AddObserver(observer);
   }
 
-  virtual void RemoveObserver(net::ProxyConfigService::Observer* observer) {
+  virtual void RemoveObserver(
+      net::ProxyConfigService::Observer* observer) OVERRIDE {
     observers_.RemoveObserver(observer);
   }
 
   virtual net::ProxyConfigService::ConfigAvailability GetLatestProxyConfig(
-      net::ProxyConfig* config) {
+      net::ProxyConfig* config) OVERRIDE {
     *config = config_;
     return availability_;
   }
@@ -77,15 +80,15 @@ class PrefProxyConfigTrackerImplTestBase : public TESTBASE {
       : ui_thread_(BrowserThread::UI, &loop_),
         io_thread_(BrowserThread::IO, &loop_) {}
 
-  virtual void Init(PrefService* pref_service) {
+  virtual void Init(PrefService* pref_service, PrefRegistrySimple* registry) {
     ASSERT_TRUE(pref_service);
-    PrefProxyConfigTrackerImpl::RegisterPrefs(pref_service);
+    PrefProxyConfigTrackerImpl::RegisterPrefs(registry);
     fixed_config_.set_pac_url(GURL(kFixedPacUrl));
     delegate_service_ =
         new TestProxyConfigService(fixed_config_,
                                    net::ProxyConfigService::CONFIG_VALID);
     proxy_config_service_.reset(
-        new ChromeProxyConfigService(delegate_service_, true));
+        new ChromeProxyConfigService(delegate_service_));
     proxy_config_tracker_.reset(new PrefProxyConfigTrackerImpl(pref_service));
     proxy_config_tracker_->SetChromeProxyConfigService(
         proxy_config_service_.get());
@@ -117,11 +120,11 @@ class PrefProxyConfigTrackerImplTest
     : public PrefProxyConfigTrackerImplTestBase<testing::Test> {
  protected:
   virtual void SetUp() {
-    pref_service_.reset(new TestingPrefService());
-    Init(pref_service_.get());
+    pref_service_.reset(new TestingPrefServiceSimple());
+    Init(pref_service_.get(), pref_service_->registry());
   }
 
-  scoped_ptr<TestingPrefService> pref_service_;
+  scoped_ptr<TestingPrefServiceSimple> pref_service_;
 };
 
 TEST_F(PrefProxyConfigTrackerImplTest, BaseConfiguration) {
@@ -338,9 +341,11 @@ class PrefProxyConfigTrackerImplCommandLineTest
       else if (name)
         command_line_.AppendSwitch(name);
     }
+    scoped_refptr<PrefRegistrySimple> registry = new PrefRegistrySimple;
     pref_service_.reset(
-        PrefServiceMockBuilder().WithCommandLine(&command_line_).Create());
-    Init(pref_service_.get());
+        PrefServiceMockBuilder().WithCommandLine(
+            &command_line_).Create(registry));
+    Init(pref_service_.get(), registry);
   }
 
  private:

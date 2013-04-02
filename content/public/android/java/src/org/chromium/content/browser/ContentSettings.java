@@ -90,12 +90,16 @@ public class ContentSettings {
     private PluginState mPluginState = PluginState.OFF;
     private boolean mAppCacheEnabled = false;
     private boolean mDomStorageEnabled = false;
+    private boolean mUseWideViewport = false;
 
     // Not accessed by the native side.
-    private final String mDefaultUserAgent;
     private boolean mSupportZoom = true;
     private boolean mBuiltInZoomControls = false;
     private boolean mDisplayZoomControls = true;
+    static class LazyDefaultUserAgent {
+        // Lazy Holder pattern
+        private static final String sInstance = nativeGetDefaultUserAgent();
+    }
 
     // Protects access to settings global fields.
     private static final Object sGlobalContentSettingsLock = new Object();
@@ -220,14 +224,12 @@ public class ContentSettings {
         mEventHandler = new EventHandler();
         if (mCanModifySettings) {
             // PERSONALITY_VIEW
-            mDefaultUserAgent = nativeGetDefaultUserAgent();
-            mUserAgent = mDefaultUserAgent;
+            mUserAgent = LazyDefaultUserAgent.sInstance;
             syncToNativeOnUiThread();
         } else {
             // PERSONALITY_CHROME
             // Chrome has zooming enabled by default. These settings are not
             // set by the native code.
-            mDefaultUserAgent = ""; // Unused by PERSONALITY_CHROME but must be initialized.
             mBuiltInZoomControls = true;
             mDisplayZoomControls = false;
             syncFromNativeOnUiThread();
@@ -249,7 +251,7 @@ public class ContentSettings {
      * overridden by {@link #setUserAgentString()}
      */
     public static String getDefaultUserAgent() {
-        return nativeGetDefaultUserAgent();
+        return LazyDefaultUserAgent.sInstance;
     }
 
     /**
@@ -261,7 +263,7 @@ public class ContentSettings {
         synchronized (mContentSettingsLock) {
             final String oldUserAgent = mUserAgent;
             if (ua == null || ua.length() == 0) {
-                mUserAgent = mDefaultUserAgent;
+                mUserAgent = LazyDefaultUserAgent.sInstance;
             } else {
                 mUserAgent = ua;
             }
@@ -990,6 +992,40 @@ public class ContentSettings {
     public boolean supportMultipleWindows() {
         synchronized (mContentSettingsLock) {
             return mSupportMultipleWindows;
+        }
+    }
+
+    /**
+     * Sets whether the WebView should enable support for the &quot;viewport&quot;
+     * HTML meta tag or should use a wide viewport.
+     * When the value of the setting is false, the layout width is always set to the
+     * width of the WebView control in device-independent (CSS) pixels.
+     * When the value is true and the page contains the viewport meta tag, the value
+     * of the width specified in the tag is used. If the page does not contain the tag or
+     * does not provide a width, then a wide viewport will be used.
+     *
+     * @param use whether to enable support for the viewport meta tag
+     */
+    public void setUseWideViewPort(boolean use) {
+        assert mCanModifySettings;
+        synchronized (mContentSettingsLock) {
+            if (mUseWideViewport != use) {
+                mUseWideViewport = use;
+                mEventHandler.syncSettingsLocked();
+            }
+        }
+    }
+
+    /**
+     * Gets whether the WebView supports the &quot;viewport&quot;
+     * HTML meta tag or will use a wide viewport.
+     *
+     * @return true if the WebView supports the viewport meta tag
+     * @see #setUseWideViewPort
+     */
+    public boolean getUseWideViewPort() {
+        synchronized (mContentSettingsLock) {
+            return mUseWideViewport;
         }
     }
 

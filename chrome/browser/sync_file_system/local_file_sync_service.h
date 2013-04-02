@@ -55,7 +55,8 @@ class LocalFileSyncService
     DISALLOW_COPY_AND_ASSIGN(Observer);
   };
 
-  typedef base::Callback<void(bool has_pending_changes)>
+  typedef base::Callback<void(fileapi::SyncStatusCode status,
+                              bool has_pending_changes)>
       HasPendingLocalChangeCallback;
 
   explicit LocalFileSyncService(Profile* profile);
@@ -108,7 +109,7 @@ class LocalFileSyncService
       const PrepareChangeCallback& callback) OVERRIDE;
   virtual void ApplyRemoteChange(
       const fileapi::FileChange& change,
-      const FilePath& local_path,
+      const base::FilePath& local_path,
       const fileapi::FileSystemURL& url,
       const fileapi::SyncStatusCallback& callback) OVERRIDE;
   virtual void ClearLocalChanges(
@@ -123,7 +124,14 @@ class LocalFileSyncService
   virtual void OnChangesAvailableInOrigins(
       const std::set<GURL>& origins) OVERRIDE;
 
+  // Called when a particular origin (app) is disabled/enabled while
+  // the service is running. This may be called for origins/apps that
+  // are not initialized for the service.
+  void SetOriginEnabled(const GURL& origin, bool enabled);
+
  private:
+  friend class OriginChangeMapTest;
+
   class OriginChangeMap {
    public:
     typedef std::map<GURL, int64> Map;
@@ -141,10 +149,15 @@ class LocalFileSyncService
     // Update change_count_map_ for |origin|.
     void SetOriginChangeCount(const GURL& origin, int64 changes);
 
+    void SetOriginEnabled(const GURL& origin, bool enabled);
+
    private:
     // Per-origin changes (cached info, could be stale).
     Map change_count_map_;
     Map::iterator next_;
+
+    // Holds a set of disabled (but initialized) origins.
+    std::set<GURL> disabled_origins_;
   };
 
   void DidInitializeFileSystemContext(

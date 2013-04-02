@@ -113,23 +113,13 @@ template <> const char DialogButton<TextButton>::kViewClassName[] =
 ///////////////////////////////////////////////////////////////////////////////
 // DialogClientView, public:
 
-DialogClientView::StyleParams::StyleParams()
-    : button_vedge_margin(kButtonVEdgeMargin),
-      button_hedge_margin(kButtonHEdgeMargin),
-      button_shadow_margin(0),
-      button_content_spacing(kDialogButtonContentSpacing),
-      related_button_hspacing(kRelatedButtonHSpacing) {
-}
-
-DialogClientView::DialogClientView(Widget* owner,
-                                   View* contents_view,
-                                   const StyleParams &params)
+DialogClientView::DialogClientView(Widget* owner, View* contents_view)
     : ClientView(owner, contents_view),
-      style_params_(params),
       ok_button_(NULL),
       cancel_button_(NULL),
       default_button_(NULL),
       extra_view_(NULL),
+      footnote_view_(NULL),
       size_extra_view_height_to_buttons_(false),
       notified_delegate_(false),
       listening_to_focus_(false),
@@ -194,7 +184,7 @@ void DialogClientView::OnWillChangeFocus(View* focused_before,
   // change once we move completely to Chrome style.  See
   // http://codereview.chromium.org/10230 for a rough idea of changes to be
   // undone.
-  if (GetDialogDelegate()->UseChromeStyle())
+  if (DialogDelegate::UseNewStyle())
     return;
 
   TextButton* new_default_button = NULL;
@@ -233,9 +223,8 @@ void DialogClientView::UpdateDialogButtons() {
   if (buttons & ui::DIALOG_BUTTON_OK)
     UpdateButtonHelper(ok_button_, dd, ui::DIALOG_BUTTON_OK);
 
-  if (buttons & ui::DIALOG_BUTTON_CANCEL) {
+  if (buttons & ui::DIALOG_BUTTON_CANCEL)
     UpdateButtonHelper(cancel_button_, dd, ui::DIALOG_BUTTON_CANCEL);
-  }
 
   LayoutDialogButtons();
   SchedulePaint();
@@ -258,17 +247,6 @@ void DialogClientView::CancelWindow() {
   // proceeding. This checking _isn't_ done here, but in the WM_CLOSE handler,
   // so that the close box on the window also shares this code path.
   Close();
-}
-
-// static
-DialogClientView::StyleParams DialogClientView::GetChromeStyleParams() {
-  StyleParams params;
-  params.button_vedge_margin = 0;
-  params.button_hedge_margin = 0;
-  params.button_shadow_margin = views::GetChromeStyleButtonShadowMargin();
-  params.button_content_spacing = 0;
-  params.related_button_hspacing = 10;
-  return params;
 }
 
 int DialogClientView::GetBottomMargin() {
@@ -340,6 +318,10 @@ void DialogClientView::PaintChildren(gfx::Canvas* canvas) {
 void DialogClientView::Layout() {
   if (has_dialog_buttons())
     LayoutDialogButtons();
+
+  if (footnote_view_)
+    LayoutFootnoteView();
+
   LayoutContentsView();
 }
 
@@ -357,6 +339,7 @@ void DialogClientView::ViewHierarchyChanged(bool is_add, View* parent,
     // The "extra view" must be created and installed after the contents view
     // has been inserted into the view hierarchy.
     CreateExtraView();
+    CreateFootnoteView();
     UpdateDialogButtons();
     Layout();
   }
@@ -387,6 +370,13 @@ gfx::Size DialogClientView::GetPreferredSize() {
     }
   }
   prefsize.Enlarge(0, button_height);
+
+  if (footnote_view_) {
+    gfx::Size footnote_size = footnote_view_->GetPreferredSize();
+    prefsize.Enlarge(0, footnote_size.height());
+    prefsize.set_width(std::max(prefsize.width(), footnote_size.width()));
+  }
+
   return prefsize;
 }
 
@@ -418,15 +408,30 @@ void DialogClientView::ButtonPressed(Button* sender, const ui::Event& event) {
 ////////////////////////////////////////////////////////////////////////////////
 // DialogClientView, private:
 
+DialogClientView::StyleParams::StyleParams()
+    : button_vedge_margin(kButtonVEdgeMargin),
+      button_hedge_margin(kButtonHEdgeMargin),
+      button_shadow_margin(0),
+      button_content_spacing(kDialogButtonContentSpacing),
+      related_button_hspacing(kRelatedButtonHSpacing) {
+  if (DialogDelegate::UseNewStyle()) {
+    button_vedge_margin = 0;
+    button_hedge_margin = 0;
+    button_shadow_margin = GetChromeStyleButtonShadowMargin();
+    button_content_spacing = 0;
+    related_button_hspacing = 10;
+  }
+}
+
 TextButton* DialogClientView::CreateDialogButton(ui::DialogButton type,
                                                  const string16& title) {
   TextButton* button = NULL;
-  if (GetDialogDelegate()->UseChromeStyle())
+  if (DialogDelegate::UseNewStyle())
     button = new DialogButton<TextButton>(this, GetWidget(), type, title);
   else
     button = new DialogButton<NativeTextButton>(this, GetWidget(), type, title);
 
-  if (!GetDialogDelegate()->UseChromeStyle())
+  if (!DialogDelegate::UseNewStyle())
     button->set_min_width(kDialogMinButtonWidth);
 
   button->SetGroup(kButtonGroup);
@@ -436,7 +441,7 @@ TextButton* DialogClientView::CreateDialogButton(ui::DialogButton type,
     button->SetIsDefault(true);
   }
 
-  if (GetDialogDelegate()->UseChromeStyle())
+  if (DialogDelegate::UseNewStyle())
     ApplyChromeStyle(button);
 
   return button;
@@ -488,10 +493,17 @@ int DialogClientView::GetDialogButtonsAreaHeight() const {
       style_params_.button_vedge_margin;
 }
 
+int DialogClientView::GetFootnoteViewHeight() const {
+  return footnote_view_ ? footnote_view_->GetPreferredSize().height() : 0;
+}
+
 void DialogClientView::LayoutDialogButtons() {
   gfx::Rect lb = GetContentsBounds();
   gfx::Rect extra_bounds;
   int bottom_y = lb.bottom() - style_params_.button_vedge_margin;
+  if (footnote_view_)
+    bottom_y -= footnote_view_->GetPreferredSize().height();
+
   int button_height = GetButtonsHeight();
   if (cancel_button_) {
     gfx::Size ps = cancel_button_->GetPreferredSize();
@@ -528,9 +540,19 @@ void DialogClientView::LayoutDialogButtons() {
 
 void DialogClientView::LayoutContentsView() {
   gfx::Rect lb = GetContentsBounds();
-  lb.set_height(std::max(0, lb.height() - GetDialogButtonsAreaHeight()));
+  lb.set_height(std::max(0, lb.height() - GetDialogButtonsAreaHeight() -
+                            GetFootnoteViewHeight()));
   contents_view()->SetBoundsRect(lb);
   contents_view()->Layout();
+}
+
+void DialogClientView::LayoutFootnoteView() {
+  int height = GetFootnoteViewHeight();
+  gfx::Rect bounds = GetContentsBounds();
+  bounds.set_y(bounds.height() - height);
+  bounds.set_height(height);
+  footnote_view_->SetBoundsRect(bounds);
+  footnote_view_->Layout();
 }
 
 void DialogClientView::CreateExtraView() {
@@ -542,6 +564,15 @@ void DialogClientView::CreateExtraView() {
     size_extra_view_height_to_buttons_ =
         GetDialogDelegate()->GetSizeExtraViewHeightToButtons();
   }
+}
+
+void DialogClientView::CreateFootnoteView() {
+  if (footnote_view_)
+    return;
+
+  footnote_view_ = GetDialogDelegate()->GetFootnoteView();
+  if (footnote_view_)
+    AddChildView(footnote_view_);
 }
 
 DialogDelegate* DialogClientView::GetDialogDelegate() const {

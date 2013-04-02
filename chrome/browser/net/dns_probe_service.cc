@@ -4,14 +4,20 @@
 
 #include "chrome/browser/net/dns_probe_service.h"
 
+#include "base/metrics/field_trial.h"
 #include "base/metrics/histogram.h"
+#include "base/strings/string_number_conversions.h"
 #include "chrome/browser/net/dns_probe_job.h"
+#include "chrome/common/net/net_error_info.h"
 #include "net/base/ip_endpoint.h"
 #include "net/base/net_util.h"
 #include "net/dns/dns_client.h"
 #include "net/dns/dns_config_service.h"
 #include "net/dns/dns_protocol.h"
 
+using base::FieldTrialList;
+using base::StringToInt;
+using chrome_common_net::DnsProbeResult;
 using net::DnsClient;
 using net::DnsConfig;
 using net::IPAddressNumber;
@@ -23,6 +29,13 @@ namespace chrome_browser_net {
 
 namespace {
 
+// How long the DnsProbeService will cache the probe result for.
+// If it's older than this and we get a probe request, the service expires it
+// and starts a new probe.
+const int kMaxResultAgeMs = 5000;
+
+// The public DNS servers used by the DnsProbeService to verify internet
+// connectivity.
 const char kPublicDnsPrimary[]   = "8.8.8.8";
 const char kPublicDnsSecondary[] = "8.8.4.4";
 
@@ -33,7 +46,29 @@ IPEndPoint MakeDnsEndPoint(const std::string& dns_ip_literal) {
   return IPEndPoint(dns_ip_number, net::dns_protocol::kDefaultPort);
 }
 
-const int kMaxResultAgeMs = 5000;
+const int kAttemptsUseDefault = -1;
+
+const char kAttemptsFieldTrialName[] = "DnsProbe-Attempts";
+
+int GetAttemptsFromFieldTrial() {
+  std::string group = FieldTrialList::FindFullName(kAttemptsFieldTrialName);
+  if (group == "" || group == "default")
+    return kAttemptsUseDefault;
+
+  int attempts;
+  if (!StringToInt(group, &attempts))
+   return kAttemptsUseDefault;
+
+  return attempts;
+}
+
+bool IsLocalhost(const IPAddressNumber& ip) {
+  return (ip.size() == net::kIPv4AddressSize)
+         && (ip[0] == 127) && (ip[1] == 0) && (ip[2] == 0) && (ip[3] == 1);
+}
+
+// The maximum number of nameservers counted in histograms.
+const int kNameserverCountMax = 10;
 
 }  // namespace
 
@@ -41,7 +76,8 @@ DnsProbeService::DnsProbeService()
     : system_result_(DnsProbeJob::SERVERS_UNKNOWN),
       public_result_(DnsProbeJob::SERVERS_UNKNOWN),
       state_(STATE_NO_RESULTS),
-      result_(PROBE_UNKNOWN) {
+      result_(chrome_common_net::DNS_PROBE_UNKNOWN),
+      dns_attempts_(GetAttemptsFromFieldTrial()) {
   NetworkChangeNotifier::AddIPAddressObserver(this);
 }
 
@@ -91,7 +127,7 @@ void DnsProbeService::ExpireResults() {
   DCHECK_EQ(STATE_RESULTS_CACHED, state_);
 
   state_ = STATE_NO_RESULTS;
-  result_ = PROBE_UNKNOWN;
+  result_ = chrome_common_net::DNS_PROBE_UNKNOWN;
 }
 
 void DnsProbeService::StartProbes() {
@@ -116,7 +152,9 @@ void DnsProbeService::StartProbes() {
     system_job_.reset();
     public_job_.reset();
     state_ = STATE_RESULTS_CACHED;
-    result_ = PROBE_UNKNOWN;
+    // TODO(ttuttle): Should this be BAD_CONFIG?  Currently I think it only
+    // happens when the system DnsConfig has no servers.
+    result_ = chrome_common_net::DNS_PROBE_UNKNOWN;
     CallCallbacks();
     return;
   }
@@ -137,72 +175,87 @@ void DnsProbeService::OnProbesComplete() {
 }
 
 void DnsProbeService::HistogramProbes() const {
+  const DnsProbeResult kMaxResult = chrome_common_net::DNS_PROBE_MAX;
+
   DCHECK_EQ(STATE_RESULTS_CACHED, state_);
-  DCHECK_NE(MAX_RESULT, result_);
+  DCHECK_NE(kMaxResult, result_);
 
   base::TimeDelta elapsed = base::Time::Now() - probe_start_time_;
 
-  UMA_HISTOGRAM_ENUMERATION("DnsProbe.Probe.Result", result_, MAX_RESULT);
+  UMA_HISTOGRAM_ENUMERATION("DnsProbe.Probe.Result", result_, kMaxResult);
   UMA_HISTOGRAM_MEDIUM_TIMES("DnsProbe.Probe.Elapsed", elapsed);
 
   if (NetworkChangeNotifier::IsOffline()) {
     UMA_HISTOGRAM_ENUMERATION("DnsProbe.Probe.NcnOffline.Result",
-                              result_, MAX_RESULT);
+                              result_, kMaxResult);
     UMA_HISTOGRAM_MEDIUM_TIMES("DnsProbe.Probe.NcnOffline.Elapsed", elapsed);
   } else {
     UMA_HISTOGRAM_ENUMERATION("DnsProbe.Probe.NcnOnline.Result",
-                              result_, MAX_RESULT);
+                              result_, kMaxResult);
     UMA_HISTOGRAM_MEDIUM_TIMES("DnsProbe.Probe.NcnOnline.Elapsed", elapsed);
   }
 
   switch (result_) {
-  case PROBE_UNKNOWN:
+  case chrome_common_net::DNS_PROBE_UNKNOWN:
     UMA_HISTOGRAM_MEDIUM_TIMES("DnsProbe.Probe.ResultUnknown.Elapsed",
                                elapsed);
     break;
-  case PROBE_NO_INTERNET:
+  case chrome_common_net::DNS_PROBE_NO_INTERNET:
     UMA_HISTOGRAM_MEDIUM_TIMES("DnsProbe.Probe.ResultNoInternet.Elapsed",
                                elapsed);
     break;
-  case PROBE_BAD_CONFIG:
+  case chrome_common_net::DNS_PROBE_BAD_CONFIG:
     UMA_HISTOGRAM_MEDIUM_TIMES("DnsProbe.Probe.ResultBadConfig.Elapsed",
                                elapsed);
+
+    // Histogram some extra data to see why BAD_CONFIG is happening.
+    UMA_HISTOGRAM_ENUMERATION(
+        "DnsProbe.Probe.ResultBadConfig.SystemJobResult",
+        system_result_,
+        DnsProbeJob::MAX_RESULT);
+    UMA_HISTOGRAM_CUSTOM_COUNTS(
+        "DnsProbe.Probe.ResultBadConfig.SystemNameserverCount",
+        system_nameserver_count_,
+        0, kNameserverCountMax, kNameserverCountMax + 1);
+    UMA_HISTOGRAM_BOOLEAN(
+        "DnsProbe.Probe.ResultBadConfig.SystemIsLocalhost",
+        system_is_localhost_);
     break;
-  case PROBE_NXDOMAIN:
+  case chrome_common_net::DNS_PROBE_NXDOMAIN:
     UMA_HISTOGRAM_MEDIUM_TIMES("DnsProbe.Probe.ResultNxdomain.Elapsed",
                                elapsed);
     break;
-  case MAX_RESULT:
+  case chrome_common_net::DNS_PROBE_MAX:
     NOTREACHED();
     break;
   }
 }
 
-DnsProbeService::Result DnsProbeService::EvaluateResults() const {
+DnsProbeResult DnsProbeService::EvaluateResults() const {
   DCHECK_NE(DnsProbeJob::SERVERS_UNKNOWN, system_result_);
   DCHECK_NE(DnsProbeJob::SERVERS_UNKNOWN, public_result_);
 
   // If the system DNS is working, assume the domain doesn't exist.
   if (system_result_ == DnsProbeJob::SERVERS_CORRECT)
-    return PROBE_NXDOMAIN;
+    return chrome_common_net::DNS_PROBE_NXDOMAIN;
 
   // If the system DNS is not working but another public server is, assume the
   // DNS config is bad (or perhaps the DNS servers are down or broken).
   if (public_result_ == DnsProbeJob::SERVERS_CORRECT)
-    return PROBE_BAD_CONFIG;
+    return chrome_common_net::DNS_PROBE_BAD_CONFIG;
 
   // If the system DNS is not working and another public server is unreachable,
   // assume the internet connection is down (note that system DNS may be a
   // router on the LAN, so it may be reachable but returning errors.)
   if (public_result_ == DnsProbeJob::SERVERS_UNREACHABLE)
-    return PROBE_NO_INTERNET;
+    return chrome_common_net::DNS_PROBE_NO_INTERNET;
 
   // Otherwise: the system DNS is not working and another public server is
   // responding but with errors or incorrect results.  This is an awkward case;
   // an invasive captive portal or a restrictive firewall may be intercepting
   // or rewriting DNS traffic, or the public server may itself be failing or
   // down.
-  return PROBE_UNKNOWN;
+  return chrome_common_net::DNS_PROBE_UNKNOWN;
 }
 
 void DnsProbeService::CallCallbacks() {
@@ -252,14 +305,34 @@ void DnsProbeService::OnProbeJobComplete(DnsProbeJob* job,
 
 void DnsProbeService::GetSystemDnsConfig(DnsConfig* config) {
   NetworkChangeNotifier::GetDnsConfig(config);
+
   // DNS probes don't need or want the suffix search list populated
   config->search.clear();
+
+  if (dns_attempts_ != kAttemptsUseDefault)
+    config->attempts = dns_attempts_;
+
+  // Take notes in case the config turns out to be bad, so we can histogram
+  // some useful data.
+  system_nameserver_count_ = config->nameservers.size();
+  system_is_localhost_ = (system_nameserver_count_ == 1)
+                         && IsLocalhost(config->nameservers[0].address());
+
+  // Disable port randomization.
+  config->randomize_ports = false;
 }
 
 void DnsProbeService::GetPublicDnsConfig(DnsConfig* config) {
   *config = DnsConfig();
+
   config->nameservers.push_back(MakeDnsEndPoint(kPublicDnsPrimary));
   config->nameservers.push_back(MakeDnsEndPoint(kPublicDnsSecondary));
+
+  if (dns_attempts_ != kAttemptsUseDefault)
+    config->attempts = dns_attempts_;
+
+  // Disable port randomization.
+  config->randomize_ports = false;
 }
 
 bool DnsProbeService::ResultsExpired() {

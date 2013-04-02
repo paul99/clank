@@ -88,8 +88,10 @@ ImportingDialog.prototype.previewEntry_ = function(index) {
   var entry = this.entries_[index];
   this.metadataCache_.get(entry, 'thumbnail|filesystem',
       function(metadata) {
-        new ThumbnailLoader(entry.toURL(), metadata).
-            load(box, true /* fill, not fit */);
+        new ThumbnailLoader(entry.toURL(),
+                            ThumbnailLoader.LoaderType.IMAGE,
+                            metadata).
+            load(box, ThumbnailLoader.FillMode.FILL);
       });
 };
 

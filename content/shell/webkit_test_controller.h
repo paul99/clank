@@ -10,18 +10,19 @@
 
 #include "base/cancelable_callback.h"
 #include "base/file_path.h"
-#include "base/memory/scoped_ptr.h"
 #include "base/synchronization/lock.h"
 #include "base/threading/non_thread_safe.h"
+#include "content/public/browser/notification_observer.h"
+#include "content/public/browser/notification_registrar.h"
 #include "content/public/browser/render_view_host_observer.h"
 #include "content/public/browser/web_contents_observer.h"
+#include "webkit/glue/webpreferences.h"
 
 class SkBitmap;
 
 namespace content {
 
 class Shell;
-struct ShellWebPreferences;
 
 class WebKitTestResultPrinter {
  public:
@@ -66,7 +67,8 @@ class WebKitTestResultPrinter {
 };
 
 class WebKitTestController : public base::NonThreadSafe,
-                             public WebContentsObserver {
+                             public WebContentsObserver,
+                             public NotificationObserver {
  public:
   static WebKitTestController* Get();
 
@@ -75,32 +77,32 @@ class WebKitTestController : public base::NonThreadSafe,
 
   // True if the controller is ready for testing.
   bool PrepareForLayoutTest(const GURL& test_url,
-                            const FilePath& current_working_directory,
+                            const base::FilePath& current_working_directory,
                             bool enable_pixel_dumping,
                             const std::string& expected_pixel_hash);
   // True if the controller was reset successfully.
   bool ResetAfterLayoutTest();
 
   void RendererUnresponsive();
+  void OverrideWebkitPrefs(webkit_glue::WebPreferences* prefs);
 
   WebKitTestResultPrinter* printer() { return printer_.get(); }
   void set_printer(WebKitTestResultPrinter* printer) {
     printer_.reset(printer);
   }
-  const ShellWebPreferences& web_preferences() const { return *prefs_.get(); }
-  bool should_stay_on_page_after_handling_before_unload() const {
-    return should_stay_on_page_after_handling_before_unload_;
-  }
-
-  // This method can be invoked on any thread.
-  bool CanOpenWindows() const;
 
   // WebContentsObserver implementation.
   virtual bool OnMessageReceived(const IPC::Message& message) OVERRIDE;
-  virtual void PluginCrashed(const FilePath& plugin_path) OVERRIDE;
+  virtual void PluginCrashed(const base::FilePath& plugin_path,
+                             base::ProcessId plugin_pid) OVERRIDE;
   virtual void RenderViewCreated(RenderViewHost* render_view_host) OVERRIDE;
   virtual void RenderViewGone(base::TerminationStatus status) OVERRIDE;
   virtual void WebContentsDestroyed(WebContents* web_contents) OVERRIDE;
+
+  // NotificationObserver implementation.
+  virtual void Observe(int type,
+                       const NotificationSource& source,
+                       const NotificationDetails& details) OVERRIDE;
 
  private:
   static WebKitTestController* instance_;
@@ -113,29 +115,24 @@ class WebKitTestController : public base::NonThreadSafe,
   void OnImageDump(const std::string& actual_pixel_hash, const SkBitmap& image);
   void OnTextDump(const std::string& dump);
   void OnPrintMessage(const std::string& message);
-  void OnReadFileToString(const FilePath& file_path, std::string* contents);
-  void OnOverridePreferences(const ShellWebPreferences& prefs);
+  void OnOverridePreferences(const webkit_glue::WebPreferences& prefs);
   void OnNotifyDone();
   void OnDumpAsText();
   void OnDumpChildFramesAsText();
-  void OnSetPrinting();
-  void OnSetShouldStayOnPageAfterHandlingBeforeUnload(bool should_stay_on_page);
   void OnWaitUntilDone();
-  void OnCanOpenWindows();
-  void OnShowWebInspector();
-  void OnCloseWebInspector();
-  void OnRegisterIsolatedFileSystem(
-      const std::vector<FilePath>& absolute_filenames,
-      std::string* filesystem_id);
 
   void OnNotImplemented(const std::string& object_name,
                         const std::string& method_name);
 
   scoped_ptr<WebKitTestResultPrinter> printer_;
 
-  FilePath current_working_directory_;
+  base::FilePath current_working_directory_;
 
   Shell* main_window_;
+
+  int current_pid_;
+
+  bool is_compositing_test_;
 
   bool enable_pixel_dumping_;
   std::string expected_pixel_hash_;
@@ -143,21 +140,16 @@ class WebKitTestController : public base::NonThreadSafe,
   bool captured_dump_;
 
   bool dump_as_text_;
-  bool dump_child_frames_;
-  bool is_printing_;
-  bool should_stay_on_page_after_handling_before_unload_;
+  bool dump_child_frames_as_text_;
   bool wait_until_done_;
   bool did_finish_load_;
 
-  // TODO(jochen): Once we remove layout tests from content_browsertests, make
-  // this a member instead of a scoped_ptr.
-  scoped_ptr<ShellWebPreferences> prefs_;
+  webkit_glue::WebPreferences prefs_;
+  bool should_override_prefs_;
 
   base::CancelableClosure watchdog_;
 
-  // Access to the following variables needs to be guarded by |lock_|.
-  mutable base::Lock lock_;
-  bool can_open_windows_;
+  NotificationRegistrar registrar_;
 
   DISALLOW_COPY_AND_ASSIGN(WebKitTestController);
 };

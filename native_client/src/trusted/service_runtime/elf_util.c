@@ -350,14 +350,6 @@ NaClErrorCode NaClElfImageValidateProgramHeaders(
     }
   }
 
-  /*
-   * Memory allocation will use NaClRoundPage(nap->break_addr), but
-   * the system notion of break is always an exact address.  Even
-   * though we must allocate and make accessible multiples of pages,
-   * the linux-style brk system call (which returns current break on
-   * failure) permits an arbitrarily aligned address as argument.
-   */
-
   return LOAD_OK;
 }
 
@@ -377,9 +369,7 @@ struct NaClElfImage *NaClElfImageNew(struct Gio     *gp,
   memset(image.loadable, 0, sizeof image.loadable);
   if (-1 == (*gp->vtbl->Seek)(gp, 0, 0)) {
     NaClLog(2, "could not seek to beginning of Gio object containing nexe\n");
-    if (NULL != err_code) {
-      *err_code = LOAD_READ_ERROR;
-    }
+    *err_code = LOAD_READ_ERROR;
     return 0;
   }
 
@@ -392,9 +382,7 @@ struct NaClElfImage *NaClElfImageNew(struct Gio     *gp,
                         &ehdr,
                         sizeof ehdr)
       != sizeof ehdr) {
-    if (NULL != err_code) {
-      *err_code = LOAD_READ_ERROR;
-    }
+    *err_code = LOAD_READ_ERROR;
     NaClLog(2, "could not load elf headers\n");
     return 0;
   }
@@ -413,9 +401,7 @@ struct NaClElfImage *NaClElfImageNew(struct Gio     *gp,
     if (ehdr.ehdr64.e_entry > 0xffffffffU ||
         ehdr.ehdr64.e_phoff > 0xffffffffU ||
         ehdr.ehdr64.e_shoff > 0xffffffffU) {
-      if (NULL != err_code) {
-        *err_code = LOAD_EHDR_OVERFLOW;
-      }
+      *err_code = LOAD_EHDR_OVERFLOW;
       NaClLog(2, "ELFCLASS64 file header fields overflow 32 bits\n");
       return 0;
     }
@@ -424,9 +410,7 @@ struct NaClElfImage *NaClElfImageNew(struct Gio     *gp,
     image.ehdr.e_shoff = (Elf32_Off) ehdr.ehdr64.e_shoff;
     image.ehdr.e_flags = ehdr.ehdr64.e_flags;
     if (ehdr.ehdr64.e_ehsize != sizeof(ehdr.ehdr64)) {
-      if (NULL != err_code) {
-        *err_code = LOAD_BAD_EHSIZE;
-      }
+      *err_code = LOAD_BAD_EHSIZE;
       NaClLog(2, "ELFCLASS64 file e_ehsize != %d\n", (int) sizeof(ehdr.ehdr64));
       return 0;
     }
@@ -444,10 +428,14 @@ struct NaClElfImage *NaClElfImageNew(struct Gio     *gp,
 
   NaClDumpElfHeader(2, &image.ehdr);
 
+  *err_code = NaClElfImageValidateElfHeader(&image);
+  if (LOAD_OK != *err_code) {
+    return 0;
+  }
+
   /* read program headers */
   if (image.ehdr.e_phnum > NACL_MAX_PROGRAM_HEADERS) {
-    if (NULL != err_code)
-      *err_code = LOAD_TOO_MANY_PROG_HDRS;
+    *err_code = LOAD_TOO_MANY_PROG_HDRS;
     NaClLog(2, "too many prog headers\n");
     return 0;
   }
@@ -455,9 +443,7 @@ struct NaClElfImage *NaClElfImageNew(struct Gio     *gp,
   if ((*gp->vtbl->Seek)(gp,
                         (off_t) image.ehdr.e_phoff,
                         SEEK_SET) == (off_t) -1) {
-    if (NULL != err_code) {
-      *err_code = LOAD_READ_ERROR;
-    }
+    *err_code = LOAD_READ_ERROR;
     NaClLog(2, "cannot seek tp prog headers\n");
     return 0;
   }
@@ -470,9 +456,7 @@ struct NaClElfImage *NaClElfImageNew(struct Gio     *gp,
     Elf64_Phdr phdr64[NACL_MAX_PROGRAM_HEADERS];
 
     if (ehdr.ehdr64.e_phentsize != sizeof(Elf64_Phdr)) {
-      if (NULL != err_code) {
-        *err_code = LOAD_BAD_PHENTSIZE;
-      }
+      *err_code = LOAD_BAD_PHENTSIZE;
       NaClLog(2, "bad prog headers size\n");
       NaClLog(2, " ehdr64.e_phentsize = 0x%"NACL_PRIxElf_Half"\n",
               ehdr.ehdr64.e_phentsize);
@@ -489,9 +473,7 @@ struct NaClElfImage *NaClElfImageNew(struct Gio     *gp,
                                    &phdr64[0],
                                    image.ehdr.e_phnum * sizeof phdr64[0])
         != (image.ehdr.e_phnum * sizeof phdr64[0])) {
-      if (NULL != err_code) {
-        *err_code = LOAD_READ_ERROR;
-      }
+      *err_code = LOAD_READ_ERROR;
       NaClLog(2, "cannot load tp prog headers\n");
       return 0;
     }
@@ -503,9 +485,7 @@ struct NaClElfImage *NaClElfImageNew(struct Gio     *gp,
           phdr64[cur_ph].p_filesz > 0xffffffffU ||
           phdr64[cur_ph].p_memsz > 0xffffffffU ||
           phdr64[cur_ph].p_align > 0xffffffffU) {
-        if (NULL != err_code) {
-          *err_code = LOAD_PHDR_OVERFLOW;
-        }
+        *err_code = LOAD_PHDR_OVERFLOW;
         NaClLog(2, "ELFCLASS64 program header fields overflow 32 bits\n");
         return 0;
       }
@@ -522,9 +502,7 @@ struct NaClElfImage *NaClElfImageNew(struct Gio     *gp,
 #endif
   {
     if (image.ehdr.e_phentsize != sizeof image.phdrs[0]) {
-      if (NULL != err_code) {
-        *err_code = LOAD_BAD_PHENTSIZE;
-      }
+      *err_code = LOAD_BAD_PHENTSIZE;
       NaClLog(2, "bad prog headers size\n");
       NaClLog(2, " image.ehdr.e_phentsize = 0x%"NACL_PRIxElf_Half"\n",
               image.ehdr.e_phentsize);
@@ -537,9 +515,7 @@ struct NaClElfImage *NaClElfImageNew(struct Gio     *gp,
                                    &image.phdrs[0],
                                    image.ehdr.e_phnum * sizeof image.phdrs[0])
         != (image.ehdr.e_phnum * sizeof image.phdrs[0])) {
-      if (NULL != err_code) {
-        *err_code = LOAD_READ_ERROR;
-      }
+      *err_code = LOAD_READ_ERROR;
       NaClLog(2, "cannot load tp prog headers\n");
       return 0;
     }
@@ -555,13 +531,12 @@ struct NaClElfImage *NaClElfImageNew(struct Gio     *gp,
   /* we delay allocating till the end to avoid cleanup code */
   result = malloc(sizeof image);
   if (result == 0) {
-    if (NULL != err_code) {
-      *err_code = LOAD_NO_MEMORY;
-    }
+    *err_code = LOAD_NO_MEMORY;
     NaClLog(LOG_FATAL, "no enough memory for image meta data\n");
     return 0;
   }
   memcpy(result, &image, sizeof image);
+  *err_code = LOAD_OK;
   return result;
 }
 
@@ -666,7 +641,7 @@ NaClErrorCode NaClElfImageLoadDynamically(struct NaClElfImage *image,
      * to fill out the "loadable" array for this ELF object.  This ELF
      * object does not have to fit such strict constraints (such as
      * having code at 0x20000), and safety checks are applied by
-     * NaClTextDyncodeCreate() and NaClCommonSysMmapIntern().
+     * NaClTextDyncodeCreate() and NaClSysMmapIntern().
      */
     if (PT_LOAD != php->p_type) {
       continue;
@@ -680,7 +655,7 @@ NaClErrorCode NaClElfImageLoadDynamically(struct NaClElfImage *image,
      * is local and not shared between processes.
      */
     if ((*gfile->vtbl->Seek)(gfile, (off_t) offset, SEEK_SET) == (off_t) -1) {
-      NaClLog(1, "NaClElfImageLoadDynamically: seek failed\n");
+      NaClLog(LOG_ERROR, "NaClElfImageLoadDynamically: seek failed\n");
       return LOAD_READ_ERROR;
     }
 
@@ -694,12 +669,12 @@ NaClErrorCode NaClElfImageLoadDynamically(struct NaClElfImage *image,
        */
       char *code_copy = malloc(filesz);
       if (NULL == code_copy) {
-        NaClLog(1, "NaClElfImageLoadDynamically: malloc failed\n");
+        NaClLog(LOG_ERROR, "NaClElfImageLoadDynamically: malloc failed\n");
         return LOAD_NO_MEMORY;
       }
       if ((Elf_Word) (*gfile->vtbl->Read)(gfile, code_copy, filesz) != filesz) {
         free(code_copy);
-        NaClLog(1, "NaClElfImageLoadDynamically: "
+        NaClLog(LOG_ERROR, "NaClElfImageLoadDynamically: "
                 "failed to read code segment\n");
         return LOAD_READ_ERROR;
       }
@@ -707,7 +682,7 @@ NaClErrorCode NaClElfImageLoadDynamically(struct NaClElfImage *image,
                                      code_copy, (uint32_t) filesz);
       free(code_copy);
       if (0 != result) {
-        NaClLog(1, "NaClElfImageLoadDynamically: "
+        NaClLog(LOG_ERROR, "NaClElfImageLoadDynamically: "
                 "failed to load code segment\n");
         return LOAD_UNLOADABLE;
       }
@@ -723,17 +698,18 @@ NaClErrorCode NaClElfImageLoadDynamically(struct NaClElfImage *image,
        * (Ideally mmap would provide a MAP_EXCL option for this
        * instead.)
        */
-      result = NaClCommonSysMmapIntern(
+      result = NaClSysMmapIntern(
           nap, (void *) (uintptr_t) vaddr, mapping_size,
           NACL_ABI_PROT_READ | NACL_ABI_PROT_WRITE,
           NACL_ABI_MAP_ANONYMOUS | NACL_ABI_MAP_PRIVATE,
           -1, 0);
       if ((int32_t) vaddr != result) {
-        NaClLog(1, "NaClElfImageLoadDynamically: failed to map data segment\n");
+        NaClLog(LOG_ERROR, "NaClElfImageLoadDynamically: "
+                "failed to map data segment\n");
         return LOAD_UNLOADABLE;
       }
       if ((Elf_Word) (*gfile->vtbl->Read)(gfile, paddr, filesz) != filesz) {
-        NaClLog(1, "NaClElfImageLoadDynamically: "
+        NaClLog(LOG_ERROR, "NaClElfImageLoadDynamically: "
                 "failed to read data segment\n");
         return LOAD_READ_ERROR;
       }
@@ -748,7 +724,7 @@ NaClErrorCode NaClElfImageLoadDynamically(struct NaClElfImage *image,
         /* Handle read-only data segment. */
         int rc = NaCl_mprotect(paddr, mapping_size, NACL_ABI_PROT_READ);
         if (0 != rc) {
-          NaClLog(1, "NaClElfImageLoadDynamically: "
+          NaClLog(LOG_ERROR, "NaClElfImageLoadDynamically: "
                   "failed to mprotect read-only data segment\n");
           return LOAD_MPROTECT_FAIL;
         }

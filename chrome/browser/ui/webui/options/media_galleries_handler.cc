@@ -5,11 +5,11 @@
 #include "chrome/browser/ui/webui/options/media_galleries_handler.h"
 
 #include "base/bind.h"
-#include "base/string_number_conversions.h"
+#include "base/prefs/pref_service.h"
+#include "base/strings/string_number_conversions.h"
 #include "chrome/browser/browser_process.h"
 #include "chrome/browser/media_gallery/media_file_system_registry.h"
 #include "chrome/browser/media_gallery/media_galleries_preferences.h"
-#include "chrome/browser/prefs/pref_service.h"
 #include "chrome/browser/profiles/profile.h"
 #include "chrome/browser/ui/chrome_select_file_policy.h"
 #include "chrome/common/chrome_notification_types.h"
@@ -106,9 +106,9 @@ void MediaGalleriesHandler::HandleAddNewGallery(const base::ListValue* args) {
   select_file_dialog_->SelectFile(
       ui::SelectFileDialog::SELECT_FOLDER,
       string16(),  // TODO(estade): a name for the dialog?
-      FilePath(),
+      base::FilePath(),
       NULL, 0,
-      FilePath::StringType(),
+      base::FilePath::StringType(),
       web_ui()->GetWebContents()->GetView()->
           GetTopLevelNativeWindow(),
       NULL);
@@ -129,7 +129,7 @@ void MediaGalleriesHandler::HandleForgetGallery(const base::ListValue* args) {
   prefs->ForgetGalleryById(id);
 }
 
-void MediaGalleriesHandler::FileSelected(const FilePath& path,
+void MediaGalleriesHandler::FileSelected(const base::FilePath& path,
                                          int index,
                                          void* params) {
   chrome::MediaGalleriesPreferences* prefs =

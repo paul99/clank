@@ -902,7 +902,7 @@ class ChromeEndureGmailTest(ChromeEndureBaseTest):
       self._ClickElementAndRecordLatency(
           compose_button, test_description, 'Compose')
 
-      to_xpath = '//input[@tabindex="1" and @spellcheck="false"]'
+      to_xpath = '//textarea[@name="to"]'
       self.WaitForDomNode(to_xpath, frame_xpath=self._FRAME_XPATH)
       to_field = self._GetElement(self._driver.find_element_by_xpath, to_xpath)
       to_field.send_keys('nobody@nowhere.com')
@@ -1109,6 +1109,7 @@ class ChromeEndureDocsTest(ChromeEndureBaseTest):
                                      sort_xpath)
       sort_button.click()
       sort_button.click()
+      sort_button.click()
 
     def scenario():
       # Click the "Shared with me" button, wait for 1 second, click the
@@ -1116,7 +1117,7 @@ class ChromeEndureDocsTest(ChromeEndureBaseTest):
 
       # Click the "Shared with me" button and wait for a div to appear.
       if not self._ClickElementByXpath(
-          self._driver, '//span[starts-with(text(), "Shared with me")]'):
+          self._driver, '//div[text()="Shared with me"]'):
         self._num_errors += 1
         logging.warning('Logging an automation error: click "shared with me".')
       try:
@@ -1287,7 +1288,15 @@ class ChromeEndureReplay(object):
       'scripts':
       'src/chrome/test/data/chrome_endure/webpagereplay/wpr_deterministic.js',
       }
-  CHROME_FLAGS = webpagereplay.CHROME_FLAGS
+
+  WEBPAGEREPLAY_HOST = '127.0.0.1'
+  WEBPAGEREPLAY_HTTP_PORT = 8080
+  WEBPAGEREPLAY_HTTPS_PORT = 8413
+
+  CHROME_FLAGS = webpagereplay.GetChromeFlags(
+      WEBPAGEREPLAY_HOST,
+      WEBPAGEREPLAY_HTTP_PORT,
+      WEBPAGEREPLAY_HTTPS_PORT)
 
   @classmethod
   def Path(cls, key, **kwargs):
@@ -1304,7 +1313,11 @@ class ChromeEndureReplay(object):
     replay_options = ['--inject_scripts', scripts]
     if 'WPR_RECORD' in os.environ:
       replay_options.append('--append')
-    return webpagereplay.ReplayServer(archive_path, replay_options)
+    return webpagereplay.ReplayServer(archive_path,
+                                      cls.WEBPAGEREPLAY_HOST,
+                                      cls.WEBPAGEREPLAY_HTTP_PORT,
+                                      cls.WEBPAGEREPLAY_HTTPS_PORT,
+                                      replay_options)
 
 
 if __name__ == '__main__':

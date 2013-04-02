@@ -3,7 +3,7 @@
 # Use of this source code is governed by a BSD-style license that can be
 # found in the LICENSE file.
 
-"""Nacl SDK tool SCons."""
+"""NaCl SDK tool SCons."""
 
 import __builtin__
 import re
@@ -54,6 +54,20 @@ NACL_TOOL_MAP = {
         },
     }
 
+def _StubOutEnvToolsForBuiltElsewhere(env):
+  """Stub out all tools so that they point to 'true'.
+
+  Some machines have their code built by another machine, they'll therefore
+  run 'true' instead of running the usual build tools.
+
+  Args:
+    env: The SCons environment in question.
+  """
+  assert(env.Bit('built_elsewhere'))
+  env.Replace(CC='true', CXX='true', LINK='true', AR='true',
+              RANLIB='true', AS='true', ASPP='true', LD='true',
+              STRIP='true')
+
 def _PlatformSubdirs(env):
   if env.Bit('bitcode'):
     os = NACL_CANONICAL_PLATFORM_MAP[env['PLATFORM']]
@@ -68,7 +82,7 @@ def _PlatformSubdirs(env):
   return name
 
 
-def _GetNaclSdkRoot(env, sdk_mode, psdk_mode):
+def _GetNaClSdkRoot(env, sdk_mode, psdk_mode):
   """Return the path to the sdk.
 
   Args:
@@ -362,9 +376,8 @@ def _SetEnvForPnacl(env, root):
   if env.Bit('built_elsewhere'):
     def FakeInstall(dest, source, env):
       print 'Not installing', dest
-    env.Replace(CC='true', CXX='true', LINK='true', AR='true',
-                RANLIB='true', AS='true', LD='true',
-                STRIP='true', INSTALL=FakeInstall)
+    _StubOutEnvToolsForBuiltElsewhere(env)
+    env.Replace(INSTALL=FakeInstall)
     if env.Bit('translate_in_build_step'):
       env.Replace(TRANSLATE='true')
 
@@ -403,7 +416,7 @@ def PNaClForceNative(env):
   env['LD'] = '${NATIVELD}' + arch_flag
   env['SHLINK'] = '${LINK}'
   if env.Bit('built_elsewhere'):
-    env.Replace(CC='true', CXX='true', ASPP='true', LINK='true', LD='true')
+    _StubOutEnvToolsForBuiltElsewhere(env)
 
 # Get an environment for nacl-gcc when in PNaCl mode.
 def PNaClGetNNaClEnv(env):
@@ -416,8 +429,7 @@ def PNaClGetNNaClEnv(env):
   native_env.ClearBits('bitcode')
   native_env.SetBits('native_code')
   if env.Bit('built_elsewhere'):
-    native_env.Replace(CC='true', CXX='true', LINK='true', LD='true',
-                       AR='true', RANLIB='true')
+    _StubOutEnvToolsForBuiltElsewhere(env)
   else:
     native_env = native_env.Clone(tools=['naclsdk'])
     if native_env.Bit('pnacl_generate_pexe'):
@@ -759,7 +771,7 @@ def generate(env):
       env[com] = "${TEMPFILE('%s')}" % env[com]
 
   # Get root of the SDK.
-  root = _GetNaclSdkRoot(env, sdk_mode, psdk_mode)
+  root = _GetNaClSdkRoot(env, sdk_mode, psdk_mode)
 
   # Determine where to get the SDK from.
   if sdk_mode == 'manual':
@@ -777,7 +789,7 @@ def generate(env):
       if env.Bit('target_x86'):
         temp_env = env.Clone()
         temp_env.ClearBits('bitcode')
-        temp_root = _GetNaclSdkRoot(temp_env, sdk_mode, psdk_mode)
+        temp_root = _GetNaClSdkRoot(temp_env, sdk_mode, psdk_mode)
         _SetEnvForNativeSdk(temp_env, temp_root)
         env.Replace(GDB=temp_env['GDB'])
     else:

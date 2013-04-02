@@ -4,9 +4,9 @@
 
 #include "chrome/browser/ui/views/tabs/tab.h"
 
-#include "chrome/browser/ui/tabs/tab_strip_selection_model.h"
 #include "chrome/browser/ui/views/tabs/tab_controller.h"
 #include "testing/gtest/include/gtest/gtest.h"
+#include "ui/base/models/list_selection_model.h"
 #include "ui/views/test/views_test_base.h"
 #include "ui/views/widget/widget.h"
 
@@ -20,7 +20,7 @@ class FakeTabController : public TabController {
 
   void set_immersive_style(bool value) { immersive_style_ = value; }
 
-  virtual const TabStripSelectionModel& GetSelectionModel() OVERRIDE {
+  virtual const ui::ListSelectionModel& GetSelectionModel() OVERRIDE {
     return selection_model_;
   }
   virtual bool SupportsMultipleSelection() OVERRIDE { return false; }
@@ -39,7 +39,7 @@ class FakeTabController : public TabController {
   virtual void MaybeStartDrag(
       Tab* tab,
       const ui::LocatedEvent& event,
-      const TabStripSelectionModel& original_selection) OVERRIDE {}
+      const ui::ListSelectionModel& original_selection) OVERRIDE {}
   virtual void ContinueDrag(views::View* view,
                             const gfx::Point& location) OVERRIDE {}
   virtual bool EndDrag(EndDragReason reason) OVERRIDE { return false; }
@@ -55,7 +55,7 @@ class FakeTabController : public TabController {
   virtual bool IsImmersiveStyle() const OVERRIDE { return immersive_style_; }
 
  private:
-  TabStripSelectionModel selection_model_;
+  ui::ListSelectionModel selection_model_;
   bool immersive_style_;
 
   DISALLOW_COPY_AND_ASSIGN(FakeTabController);
@@ -73,7 +73,7 @@ class TabTest : public views::ViewsTestBase {
 
 TEST_F(TabTest, HitTestTopPixel) {
   Widget widget;
-  Widget::InitParams params;
+  Widget::InitParams params(CreateParams(Widget::InitParams::TYPE_WINDOW));
   params.ownership = Widget::InitParams::WIDGET_OWNS_NATIVE_WIDGET;
   params.bounds.SetRect(10, 20, 300, 400);
   widget.Init(params);
@@ -116,7 +116,7 @@ TEST_F(TabTest, IconDominantColor) {
 
   // Update the tab's renderer data with the red icon.
   TabRendererData red_data;
-  red_data.favicon = gfx::ImageSkia(red_bitmap);
+  red_data.favicon = gfx::ImageSkia::CreateFrom1xBitmap(red_bitmap);
   tab.SetData(red_data);
 
   // Since we're not using immersive style yet, the color is not updated.
@@ -140,7 +140,7 @@ TEST_F(TabTest, IconDominantColor) {
   green_bitmap.allocPixels();
   green_bitmap.eraseColor(SK_ColorGREEN);
   TabRendererData green_data;
-  green_data.favicon = gfx::ImageSkia(green_bitmap);
+  green_data.favicon = gfx::ImageSkia::CreateFrom1xBitmap(green_bitmap);
   tab.SetData(green_data);
 
   // Icon updates automatically since we're in immersive mode and the image

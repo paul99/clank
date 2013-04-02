@@ -6,14 +6,20 @@
 
 #include "base/file_util.h"
 #include "base/json/json_file_value_serializer.h"
+#include "base/json/json_reader.h"
 #include "base/message_loop.h"
 #include "base/path_service.h"
+#include "base/pending_task.h"
 #include "base/string_util.h"
+#include "base/stringprintf.h"
 #include "base/threading/sequenced_worker_pool.h"
+#include "chrome/browser/google_apis/drive_api_parser.h"
+#include "chrome/browser/google_apis/gdata_wapi_operations.h"
 #include "chrome/browser/google_apis/gdata_wapi_parser.h"
-#include "chrome/browser/google_apis/test_server/http_server.h"
-#include "chrome/common/chrome_paths.h"
+#include "chrome/browser/google_apis/test_server/http_request.h"
+#include "chrome/browser/google_apis/test_server/http_response.h"
 #include "content/public/browser/browser_thread.h"
+#include "googleurl/src/gurl.h"
 
 namespace google_apis {
 namespace test_util {
@@ -25,8 +31,9 @@ class TaskObserver : public MessageLoop::TaskObserver {
   virtual ~TaskObserver() {}
 
   // MessageLoop::TaskObserver overrides.
-  virtual void WillProcessTask(base::TimeTicks time_posted) {}
-  virtual void DidProcessTask(base::TimeTicks time_posted) {
+  virtual void WillProcessTask(const base::PendingTask& pending_task) OVERRIDE {
+  }
+  virtual void DidProcessTask(const base::PendingTask& pending_task) OVERRIDE {
     posted_ = true;
   }
 
@@ -38,13 +45,30 @@ class TaskObserver : public MessageLoop::TaskObserver {
   DISALLOW_COPY_AND_ASSIGN(TaskObserver);
 };
 
-FilePath GetTestFilePath(const std::string& relative_path) {
-  FilePath path;
-  std::string error;
-  PathService::Get(chrome::DIR_TEST_DATA, &path);
-  path = path.AppendASCII("chromeos")
-      .Append(FilePath::FromUTF8Unsafe(relative_path));
+bool RemovePrefix(const std::string& input,
+                  const std::string& prefix,
+                  std::string* output) {
+  if (!StartsWithASCII(input, prefix, true /* case sensitive */))
+    return false;
+
+  *output = input.substr(prefix.size());
+  return true;
+}
+
+base::FilePath GetTestFilePath(const std::string& relative_path) {
+  base::FilePath path;
+  if (!PathService::Get(base::DIR_SOURCE_ROOT, &path))
+    return base::FilePath();
+  path = path.AppendASCII("chrome")
+             .AppendASCII("test")
+             .AppendASCII("data")
+             .AppendASCII("chromeos")
+             .Append(base::FilePath::FromUTF8Unsafe(relative_path));
   return path;
+}
+
+GURL GetBaseUrlForTesting(int port) {
+  return GURL(base::StringPrintf("http://127.0.0.1:%d/", port));
 }
 
 void RunBlockingPoolTask() {
@@ -61,7 +85,7 @@ void RunBlockingPoolTask() {
 }
 
 scoped_ptr<base::Value> LoadJSONFile(const std::string& relative_path) {
-  FilePath path = GetTestFilePath(relative_path);
+  base::FilePath path = GetTestFilePath(relative_path);
 
   std::string error;
   JSONFileValueSerializer serializer(path);
@@ -71,11 +95,40 @@ scoped_ptr<base::Value> LoadJSONFile(const std::string& relative_path) {
   return value.Pass();
 }
 
+void CopyResultsFromEntryActionCallback(GDataErrorCode* error_out,
+                                        GDataErrorCode error_in) {
+  *error_out = error_in;
+}
+
+void CopyResultFromEntryActionCallbackAndQuit(GDataErrorCode* error_out,
+                                              GDataErrorCode error_in) {
+  *error_out = error_in;
+  MessageLoop::current()->Quit();
+}
+
 void CopyResultsFromGetDataCallback(GDataErrorCode* error_out,
                                     scoped_ptr<base::Value>* value_out,
                                     GDataErrorCode error_in,
                                     scoped_ptr<base::Value> value_in) {
   value_out->swap(value_in);
+  *error_out = error_in;
+}
+
+void CopyResultsFromGetDataCallbackAndQuit(GDataErrorCode* error_out,
+                                           scoped_ptr<base::Value>* value_out,
+                                           GDataErrorCode error_in,
+                                           scoped_ptr<base::Value> value_in) {
+  *error_out = error_in;
+  *value_out = value_in.Pass();
+  MessageLoop::current()->Quit();
+}
+
+void CopyResultsFromGetResourceEntryCallback(
+    GDataErrorCode* error_out,
+    scoped_ptr<ResourceEntry>* resource_entry_out,
+    GDataErrorCode error_in,
+    scoped_ptr<ResourceEntry> resource_entry_in) {
+  resource_entry_out->swap(resource_entry_in);
   *error_out = error_in;
 }
 
@@ -97,9 +150,45 @@ void CopyResultsFromGetAccountMetadataCallback(
   *error_out = error_in;
 }
 
+void CopyResultsFromGetAppListCallback(
+    GDataErrorCode* error_out,
+    scoped_ptr<AppList>* app_list_out,
+    GDataErrorCode error_in,
+    scoped_ptr<AppList> app_list_in) {
+  *app_list_out = app_list_in.Pass();
+  *error_out = error_in;
+}
+
+void CopyResultsFromDownloadActionCallback(
+    GDataErrorCode* error_out,
+    base::FilePath* temp_file_out,
+    GDataErrorCode error_in,
+    const base::FilePath& temp_file_in) {
+  *error_out = error_in;
+  *temp_file_out = temp_file_in;
+}
+
+void CopyResultsFromInitiateUploadCallback(
+    GDataErrorCode* error_out,
+    GURL* url_out,
+    GDataErrorCode error_in,
+    const GURL& url_in) {
+  *error_out = error_in;
+  *url_out = url_in;
+}
+
+void CopyResultsFromUploadRangeCallback(
+    UploadRangeResponse* response_out,
+    scoped_ptr<ResourceEntry>* entry_out,
+    const UploadRangeResponse& response_in,
+    scoped_ptr<ResourceEntry> entry_in) {
+  *response_out = response_in;
+  *entry_out = entry_in.Pass();
+}
+
 // Returns a HttpResponse created from the given file path.
 scoped_ptr<test_server::HttpResponse> CreateHttpResponseFromFile(
-    const FilePath& file_path) {
+    const base::FilePath& file_path) {
   std::string content;
   if (!file_util::ReadFileToString(file_path, &content))
     return scoped_ptr<test_server::HttpResponse>();
@@ -117,6 +206,49 @@ scoped_ptr<test_server::HttpResponse> CreateHttpResponseFromFile(
   http_response->set_content(content);
   http_response->set_content_type(content_type);
   return http_response.Pass();
+}
+
+void DoNothingForReAuthenticateCallback(
+    AuthenticatedOperationInterface* /* operation */) {
+  NOTREACHED();
+}
+
+scoped_ptr<test_server::HttpResponse> HandleDownloadRequest(
+    const GURL& base_url,
+    test_server::HttpRequest* out_request,
+    const test_server::HttpRequest& request) {
+  *out_request = request;
+
+  GURL absolute_url = base_url.Resolve(request.relative_url);
+  std::string remaining_path;
+  if (!RemovePrefix(absolute_url.path(), "/files/", &remaining_path))
+    return scoped_ptr<test_server::HttpResponse>();
+  return CreateHttpResponseFromFile(GetTestFilePath(remaining_path));
+}
+
+bool VerifyJsonData(const base::FilePath& expected_json_file_path,
+                    const base::Value* json_data) {
+  if (!json_data) {
+    LOG(ERROR) << "json_data is NULL";
+    return false;
+  }
+
+  std::string expected_content;
+  if (!file_util::ReadFileToString(
+          expected_json_file_path, &expected_content)) {
+    LOG(ERROR) << "Failed to read file: " << expected_json_file_path.value();
+    return false;
+  }
+
+  scoped_ptr<base::Value> expected_json_data(
+      base::JSONReader::Read(expected_content));
+  if (!base::Value::Equals(expected_json_data.get(), json_data)) {
+    LOG(ERROR)
+        << "The value of json_data is different from the file's content.";
+    return false;
+  }
+
+  return true;
 }
 
 }  // namespace test_util

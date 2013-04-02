@@ -14,7 +14,7 @@
       'common',
       'browser',
       '../content/content.gyp:content_app',
-      '../sync/sync.gyp:sync_core',
+      '../sync/sync.gyp:sync',
     ],
     'allocator_target': '../base/allocator/allocator.gyp:allocator',
     'grit_out_dir': '<(SHARED_INTERMEDIATE_DIR)/chrome',
@@ -155,6 +155,7 @@
         'chrome_renderer.gypi',
         'chrome_tests.gypi',
         'nacl.gypi',
+        '../apps/apps.gypi',
       ],
       'targets': [
         {
@@ -174,9 +175,9 @@
             ['OS=="linux" and chromeos==1 and branding=="Chrome"', {
               'copies': [
                 {
-                  'destination': '<(PRODUCT_DIR)/extensions',
+                  'destination': '<(PRODUCT_DIR)',
                   'files': [
-                    '>!@(ls browser/extensions/default_extensions/chromeos/cache/*)'
+                    'browser/extensions/default_extensions/chromeos/extensions/'
                   ]
                 }
               ],
@@ -206,15 +207,15 @@
             '..',
           ],
           'sources': [
-            'browser/debugger/browser_list_tabcontents_provider.cc',
-            'browser/debugger/browser_list_tabcontents_provider.h',
-            'browser/debugger/devtools_file_helper.cc',
-            'browser/debugger/devtools_file_helper.h',
-            'browser/debugger/devtools_toggle_action.h',
-            'browser/debugger/devtools_window.cc',
-            'browser/debugger/devtools_window.h',
-            'browser/debugger/remote_debugging_server.cc',
-            'browser/debugger/remote_debugging_server.h',
+            'browser/devtools/browser_list_tabcontents_provider.cc',
+            'browser/devtools/browser_list_tabcontents_provider.h',
+            'browser/devtools/devtools_file_helper.cc',
+            'browser/devtools/devtools_file_helper.h',
+            'browser/devtools/devtools_toggle_action.h',
+            'browser/devtools/devtools_window.cc',
+            'browser/devtools/devtools_window.h',
+            'browser/devtools/remote_debugging_server.cc',
+            'browser/devtools/remote_debugging_server.h',
           ],
           'conditions': [
             ['toolkit_uses_gtk == 1', {
@@ -224,9 +225,9 @@
             }],
             ['OS=="android"', {
               'sources!': [
-                'browser/debugger/browser_list_tabcontents_provider.cc',
-                'browser/debugger/devtools_window.cc',
-                'browser/debugger/remote_debugging_server.cc',
+                'browser/devtools/browser_list_tabcontents_provider.cc',
+                'browser/devtools/devtools_window.cc',
+                'browser/devtools/remote_debugging_server.cc',
               ],
             }],
             ['debug_devtools==1', {
@@ -235,6 +236,8 @@
                ],
             }],
           ],
+          # TODO(jschuh): crbug.com/167187 fix size_t to int truncations.
+          'msvs_disabled_warnings': [ 4267, ],
         },
         {
           'target_name': 'plugin',
@@ -284,6 +287,8 @@
               ],
             }],
           ],
+          # TODO(jschuh): crbug.com/167187 fix size_t to int truncations.
+          'msvs_disabled_warnings': [ 4267, ],
         },
         {
           'target_name': 'service',
@@ -384,7 +389,7 @@
           'dependencies': [
             'test_support_common',
             '../skia/skia.gyp:skia',
-            '../sync/sync.gyp:sync_core',
+            '../sync/sync.gyp:sync',
           ],
           'include_dirs': [
              '..',
@@ -527,6 +532,7 @@
           'product_name': 'app_mode_app_support',
           'dependencies': [
             '../base/base.gyp:base',
+            'common_constants.gyp:common_constants',
           ],
           'sources': [
             'common/mac/app_mode_chrome_locator.h',
@@ -1010,6 +1016,23 @@
           },
         },
         {
+          'target_name': 'sb_sigutil',
+          'type': 'executable',
+          'dependencies': [
+            '../base/base.gyp:base',
+            'safe_browsing_proto',
+          ],
+          'sources': [
+            'browser/safe_browsing/signature_util.h',
+            'browser/safe_browsing/signature_util_win.cc',
+            'tools/safe_browsing/sb_sigutil.cc',
+          ],
+        },
+      ]},  # 'targets'
+    ],  # OS=="win"
+    ['OS=="win" and target_arch=="ia32"',
+      { 'targets': [
+        {
           'target_name': 'crash_service_win64',
           'type': 'executable',
           'product_name': 'crash_service64',
@@ -1043,21 +1066,8 @@
             },
           },
         },
-        {
-          'target_name': 'sb_sigutil',
-          'type': 'executable',
-          'dependencies': [
-            '../base/base.gyp:base',
-            'safe_browsing_proto',
-          ],
-          'sources': [
-            'browser/safe_browsing/signature_util.h',
-            'browser/safe_browsing/signature_util_win.cc',
-            'tools/safe_browsing/sb_sigutil.cc',
-          ],
-        },
       ]},  # 'targets'
-    ],  # OS=="win"
+    ],  # OS=="win" and target_arch=="ia32"
     ['chromeos==1', {
       'includes': [ 'chrome_browser_chromeos.gypi' ],
     }],  # chromeos==1
@@ -1069,9 +1079,10 @@
           'type': 'none',
           'dependencies': [
             '../base/base.gyp:base',
+            '../components/components.gyp:navigation_interception_java',
+            '../components/components.gyp:web_contents_delegate_android_java',
             '../content/content.gyp:content_java',
-            '../content/content.gyp:navigation_interception_java',
-            '../content/content.gyp:web_contents_delegate_android_java',
+            '../sync/sync.gyp:sync_java',
             '../third_party/guava/guava.gyp:guava_javalib',
             '../ui/ui.gyp:ui_java',
           ],
@@ -1081,6 +1092,7 @@
             'has_java_resources': 1,
             'R_package': 'org.chromium.chrome',
             'R_package_relpath': 'org/chromium/chrome',
+            'java_strings_grd': 'android_chrome_strings.grd',
           },
           'includes': [
             '../build/java.gypi',

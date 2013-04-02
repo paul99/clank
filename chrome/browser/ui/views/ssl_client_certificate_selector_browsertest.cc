@@ -39,7 +39,7 @@ class SSLClientCertificateSelectorTest : public InProcessBrowserTest {
   }
 
   virtual void SetUpInProcessBrowserTestFixture() {
-    FilePath certs_dir = net::GetTestCertsDirectory();
+    base::FilePath certs_dir = net::GetTestCertsDirectory();
 
     mit_davidben_cert_ = net::ImportCertFromFile(certs_dir, "mit.davidben.der");
     ASSERT_NE(static_cast<net::X509Certificate*>(NULL), mit_davidben_cert_);
@@ -171,7 +171,7 @@ class SSLClientCertificateSelectorMultiTabTest
                    auth_requestor_2_));
     selector_2_->Init();
 
-    EXPECT_EQ(2, browser()->active_index());
+    EXPECT_EQ(2, browser()->tab_strip_model()->active_index());
     EXPECT_EQ(mit_davidben_cert_.get(), selector_1_->GetSelectedCert());
     EXPECT_EQ(mit_davidben_cert_.get(), selector_2_->GetSelectedCert());
   }
@@ -288,7 +288,9 @@ IN_PROC_BROWSER_TEST_F(SSLClientCertificateSelectorTest, DISABLED_Escape) {
   Mock::VerifyAndClear(auth_requestor_.get());
 }
 
-IN_PROC_BROWSER_TEST_F(SSLClientCertificateSelectorTest, SelectDefault) {
+// Flaky, http://crbug.com/103534 .
+IN_PROC_BROWSER_TEST_F(SSLClientCertificateSelectorTest,
+                       DISABLED_SelectDefault) {
   EXPECT_CALL(*auth_requestor_, CertificateSelected(mit_davidben_cert_.get()));
 
   EXPECT_TRUE(ui_test_utils::SendKeyPressSync(

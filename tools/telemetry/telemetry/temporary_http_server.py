@@ -16,11 +16,7 @@ class TemporaryHTTPServer(object):
     self._path = path
     self._forwarder = None
 
-    tmp = socket.socket()
-    tmp.bind(('', 0))
-    port = tmp.getsockname()[1]
-    tmp.close()
-    self._host_port = port
+    self._host_port = util.GetAvailableLocalPort()
 
     assert os.path.exists(path), path
     assert os.path.isdir(path), path
@@ -31,7 +27,9 @@ class TemporaryHTTPServer(object):
         cwd=self._path,
         stdout=self._devnull, stderr=self._devnull)
 
-    self._forwarder = browser_backend.CreateForwarder((self._host_port, None))
+    self._forwarder = browser_backend.CreateForwarder(
+        util.PortPair(self._host_port,
+                      browser_backend.GetRemotePort(self._host_port)))
 
     def IsServerUp():
       return not socket.socket().connect_ex(('localhost', self._host_port))

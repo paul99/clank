@@ -7,7 +7,7 @@
 namespace cc {
 
 FakePictureLayerTilingClient::FakePictureLayerTilingClient()
-    : tile_manager_(&tile_manager_client_, NULL, 1),
+    : tile_manager_(&tile_manager_client_, NULL, 1, false),
       pile_(PicturePileImpl::Create()) {
 }
 
@@ -22,11 +22,18 @@ scoped_refptr<Tile> FakePictureLayerTilingClient::CreateTile(
                                      tile_size_,
                                      GL_RGBA,
                                      rect,
+                                     gfx::Rect(),
                                      1));
 }
 
 void FakePictureLayerTilingClient::SetTileSize(gfx::Size tile_size) {
-    tile_size_ = tile_size;
+  tile_size_ = tile_size;
+}
+
+gfx::Size FakePictureLayerTilingClient::CalculateTileSize(
+    gfx::Size /* current_tile_size */,
+    gfx::Size /* content_bounds */) {
+  return tile_size_;
 }
 
 }  // namespace cc

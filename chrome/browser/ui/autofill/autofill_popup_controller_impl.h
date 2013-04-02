@@ -6,14 +6,20 @@
 #define CHROME_BROWSER_UI_AUTOFILL_AUTOFILL_POPUP_CONTROLLER_IMPL_H_
 
 #include "base/gtest_prod_util.h"
+#include "base/memory/weak_ptr.h"
 #include "base/string16.h"
-#include "chrome/browser/autofill/autofill_popup_delegate.h"
 #include "chrome/browser/ui/autofill/autofill_popup_controller.h"
 #include "content/public/browser/keyboard_listener.h"
 #include "ui/gfx/font.h"
 #include "ui/gfx/rect.h"
+#include "ui/gfx/rect_f.h"
 
+class AutofillPopupDelegate;
 class AutofillPopupView;
+
+namespace gfx {
+class Display;
+}
 
 namespace ui {
 class KeyEvent;
@@ -25,62 +31,62 @@ class KeyEvent;
 class AutofillPopupControllerImpl : public AutofillPopupController,
                                     public content::KeyboardListener {
  public:
-  AutofillPopupControllerImpl(AutofillPopupDelegate* delegate,
-                              gfx::NativeView container_view,
-                              const gfx::Rect& element_bounds);
+  // Creates a new |AutofillPopupControllerImpl|, or reuses |previous| if
+  // the construction arguments are the same. |previous| may be invalidated by
+  // this call.
+  static base::WeakPtr<AutofillPopupControllerImpl> GetOrCreate(
+      base::WeakPtr<AutofillPopupControllerImpl> previous,
+      AutofillPopupDelegate* delegate,
+      gfx::NativeView container_view,
+      const gfx::RectF& element_bounds);
 
   // Shows the popup, or updates the existing popup with the given values.
-  void Show(const std::vector<string16>& autofill_values,
-            const std::vector<string16>& autofill_labels,
-            const std::vector<string16>& autofill_icons,
-            const std::vector<int>& autofill_unique_ids);
+  void Show(const std::vector<string16>& names,
+            const std::vector<string16>& subtexts,
+            const std::vector<string16>& icons,
+            const std::vector<int>& identifiers);
 
-  // Hides the popup and destroys the controller.
-  void Hide();
-
-  // Called when |delegate_| is no longer valid.
-  void DelegateDestroyed();
-
- protected:
-  FRIEND_TEST_ALL_PREFIXES(AutofillExternalDelegateBrowserTest,
-                           CloseWidgetAndNoLeaking);
-  virtual ~AutofillPopupControllerImpl();
-
-  // AutofillPopupController implementation.
-  virtual void ViewDestroyed() OVERRIDE;
-  virtual void UpdateBoundsAndRedrawPopup() OVERRIDE;
-  virtual void SetSelectedPosition(int x, int y) OVERRIDE;
-  virtual bool AcceptAutofillSuggestion(const string16& value,
-                                        int unique_id,
-                                        unsigned index) OVERRIDE;
-  virtual void AcceptSelectedPosition(int x, int y) OVERRIDE;
-  virtual void ClearSelectedLine() OVERRIDE;
-  virtual int GetIconResourceID(const string16& resource_name) OVERRIDE;
-  virtual bool CanDelete(int id) OVERRIDE;
-#if !defined(OS_ANDROID)
-  virtual int GetPopupRequiredWidth() OVERRIDE;
-  virtual int GetPopupRequiredHeight() OVERRIDE;
-#endif
-  virtual int GetRowHeightFromId(int unique_id) OVERRIDE;
-  virtual gfx::Rect GetRectForRow(size_t row, int width) OVERRIDE;
-  virtual void SetPopupBounds(const gfx::Rect& bounds) OVERRIDE;
-  virtual const gfx::Rect& popup_bounds() const OVERRIDE;
-  virtual gfx::NativeView container_view() const OVERRIDE;
-  virtual const gfx::Rect& element_bounds() const OVERRIDE;
-  virtual const std::vector<string16>& autofill_values() const OVERRIDE;
-  virtual const std::vector<string16>& autofill_labels() const OVERRIDE;
-  virtual const std::vector<string16>& autofill_icons() const OVERRIDE;
-  virtual const std::vector<int>& autofill_unique_ids() const OVERRIDE;
-#if !defined(OS_ANDROID)
-  virtual const gfx::Font& label_font() const OVERRIDE;
-  virtual const gfx::Font& value_font() const OVERRIDE;
-#endif
-  virtual int selected_line() const OVERRIDE;
-  virtual bool delete_icon_hovered() const OVERRIDE;
+  // Hides the popup and destroys the controller. This also invalidates
+  // |delegate_|.
+  virtual void Hide() OVERRIDE;
 
   // KeyboardListener implementation.
   virtual bool HandleKeyPressEvent(
       const content::NativeWebKeyboardEvent& event) OVERRIDE;
+
+ protected:
+  FRIEND_TEST_ALL_PREFIXES(AutofillExternalDelegateBrowserTest,
+                           CloseWidgetAndNoLeaking);
+
+  AutofillPopupControllerImpl(AutofillPopupDelegate* delegate,
+                              gfx::NativeView container_view,
+                              const gfx::RectF& element_bounds);
+  virtual ~AutofillPopupControllerImpl();
+
+  // AutofillPopupController implementation.
+  virtual void UpdateBoundsAndRedrawPopup() OVERRIDE;
+  virtual void MouseHovered(int x, int y) OVERRIDE;
+  virtual void MouseClicked(int x, int y) OVERRIDE;
+  virtual void MouseExitedPopup() OVERRIDE;
+  virtual void AcceptSuggestion(size_t index) OVERRIDE;
+  virtual int GetIconResourceID(const string16& resource_name) OVERRIDE;
+  virtual bool CanDelete(size_t index) const OVERRIDE;
+  virtual gfx::Rect GetRowBounds(size_t index) OVERRIDE;
+  virtual void SetPopupBounds(const gfx::Rect& bounds) OVERRIDE;
+  virtual const gfx::Rect& popup_bounds() const OVERRIDE;
+  virtual gfx::NativeView container_view() const OVERRIDE;
+  virtual const gfx::RectF& element_bounds() const OVERRIDE;
+
+  virtual const std::vector<string16>& names() const OVERRIDE;
+  virtual const std::vector<string16>& subtexts() const OVERRIDE;
+  virtual const std::vector<string16>& icons() const OVERRIDE;
+  virtual const std::vector<int>& identifiers() const OVERRIDE;
+#if !defined(OS_ANDROID)
+  virtual const gfx::Font& GetNameFontForRow(size_t index) const OVERRIDE;
+  virtual const gfx::Font& subtext_font() const OVERRIDE;
+#endif
+  virtual int selected_line() const OVERRIDE;
+  virtual bool delete_icon_hovered() const OVERRIDE;
 
   // Change which line is currently selected by the user.
   void SetSelectedLine(int selected_line);
@@ -100,6 +106,9 @@ class AutofillPopupControllerImpl : public AutofillPopupController,
   // Convert a y-coordinate to the closest line.
   int LineFromY(int y);
 
+  // Returns the height of a row depending on its type.
+  int GetRowHeightFromId(int identifier) const;
+
   // Returns true if the given |x| and |y| coordinates refer to a point that
   // hits the delete icon in the current selected line.
   bool DeleteIconIsUnder(int x, int y);
@@ -108,7 +117,7 @@ class AutofillPopupControllerImpl : public AutofillPopupController,
   bool CanAccept(int id);
 
   // Returns true if the popup still has non-options entries to show the user.
-  bool HasAutofillEntries();
+  bool HasSuggestions();
 
   AutofillPopupView* view() { return view_; }
 
@@ -116,27 +125,74 @@ class AutofillPopupControllerImpl : public AutofillPopupController,
   virtual void ShowView();
   virtual void InvalidateRow(size_t row);
 
+  // Protected so tests can access.
+#if !defined(OS_ANDROID)
+  // Calculates the desired width of the popup based on its contents.
+  int GetDesiredPopupWidth() const;
+
+  // Calculates the desired height of the popup based on its contents.
+  int GetDesiredPopupHeight() const;
+#endif
+
+  base::WeakPtr<AutofillPopupControllerImpl> GetWeakPtr();
+
  private:
+  const gfx::Rect RoundedElementBounds() const;
+#if !defined(OS_ANDROID)
+  // Calculate the width of the row, excluding all the text. This provides
+  // the size of the row that won't be reducible (since all the text can be
+  // elided if there isn't enough space).
+  int RowWidthWithoutText(int row) const;
+
+  // Calculates and sets the bounds of the popup, including placing it properly
+  // to prevent it from going off the screen.
+  void UpdatePopupBounds();
+#endif
+
+  // A helper function to get the display closest to the given point (virtual
+  // for testing).
+  virtual gfx::Display GetDisplayNearestPoint(const gfx::Point& point) const;
+
+  // Calculates the width of the popup and the x position of it. These values
+  // will stay on the screen.
+  std::pair<int, int> CalculatePopupXAndWidth(
+      const gfx::Display& left_display,
+      const gfx::Display& right_display,
+      int popup_required_width) const;
+
+  // Calculates the height of the popup and the y position of it. These values
+  // will stay on the screen.
+  std::pair<int, int> CalculatePopupYAndHeight(
+      const gfx::Display& top_display,
+      const gfx::Display& bottom_display,
+      int popup_required_height) const;
+
   AutofillPopupView* view_;  // Weak reference.
   AutofillPopupDelegate* delegate_;  // Weak reference.
   gfx::NativeView container_view_;  // Weak reference.
 
   // The bounds of the text element that is the focus of the Autofill.
-  const gfx::Rect element_bounds_;
+  // These coordinates are in screen space.
+  const gfx::RectF element_bounds_;
 
   // The bounds of the Autofill popup.
   gfx::Rect popup_bounds_;
 
   // The current Autofill query values.
-  std::vector<string16> autofill_values_;
-  std::vector<string16> autofill_labels_;
-  std::vector<string16> autofill_icons_;
-  std::vector<int> autofill_unique_ids_;
+  std::vector<string16> names_;
+  std::vector<string16> subtexts_;
+  std::vector<string16> icons_;
+  std::vector<int> identifiers_;
+
+  // Since names_ can be elided to ensure that it fits on the screen, we need to
+  // keep an unelided copy of the names to be able to pass to the delegate.
+  std::vector<string16> full_names_;
 
 #if !defined(OS_ANDROID)
   // The fonts for the popup text.
-  gfx::Font value_font_;
-  gfx::Font label_font_;
+  gfx::Font name_font_;
+  gfx::Font subtext_font_;
+  gfx::Font warning_font_;
 #endif
 
   // The line that is currently selected by the user.
@@ -145,6 +201,8 @@ class AutofillPopupControllerImpl : public AutofillPopupController,
 
   // Used to indicate if the delete icon within a row is currently selected.
   bool delete_icon_hovered_;
+
+  base::WeakPtrFactory<AutofillPopupControllerImpl> weak_ptr_factory_;
 };
 
 #endif  // CHROME_BROWSER_UI_AUTOFILL_AUTOFILL_POPUP_CONTROLLER_IMPL_H_

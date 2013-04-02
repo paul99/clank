@@ -11,6 +11,7 @@
 #include <vector>
 
 #include "base/process_util.h"
+#include "base/threading/thread_checker.h"
 #include "chrome/browser/chromeos/input_method/ibus_controller_base.h"
 #include "chrome/browser/chromeos/input_method/input_method_whitelist.h"
 #include "chromeos/dbus/ibus/ibus_panel_service.h"
@@ -28,7 +29,7 @@ typedef std::vector<InputMethodProperty> InputMethodPropertyList;
 
 // The IBusController implementation.
 class IBusControllerImpl : public IBusControllerBase,
-                           public ibus::IBusPanelPropertyHandlerInterface {
+                           public IBusPanelPropertyHandlerInterface {
  public:
   IBusControllerImpl();
   virtual ~IBusControllerImpl();
@@ -46,8 +47,7 @@ class IBusControllerImpl : public IBusControllerBase,
       const InputMethodProperty& new_prop,
       InputMethodPropertyList* prop_list);
 
-  static void IBusDaemonInitializationDone(IBusControllerImpl* controller,
-                                           const std::string& ibus_address);
+  void IBusDaemonInitializationDone(const std::string& ibus_address);
 
  private:
   enum IBusDaemonStatus{
@@ -62,10 +62,10 @@ class IBusControllerImpl : public IBusControllerBase,
       const ConfigKeyType& key,
       const InputMethodConfigValue& value) OVERRIDE;
 
-  // ibus::IBusPanelPropertyHandlerInterface overrides:
+  // IBusPanelPropertyHandlerInterface overrides:
   virtual void RegisterProperties(
-      const ibus::IBusPropertyList& properties) OVERRIDE;
-  virtual void UpdateProperty(const ibus::IBusProperty& property) OVERRIDE;
+      const IBusPropertyList& properties) OVERRIDE;
+  virtual void UpdateProperty(const IBusProperty& property) OVERRIDE;
 
   // Checks if |ibus_| and |ibus_config_| connections are alive.
   bool IBusConnectionsAreAlive();
@@ -126,6 +126,9 @@ class IBusControllerImpl : public IBusControllerBase,
 
   // The pointer to global input method. We can inject this value for testing.
   ui::InputMethodIBus* input_method_;
+
+  // IBusControllerImpl should be used only on UI thread.
+  base::ThreadChecker thread_checker_;
 
   // Used for making callbacks for PostTask.
   base::WeakPtrFactory<IBusControllerImpl> weak_ptr_factory_;

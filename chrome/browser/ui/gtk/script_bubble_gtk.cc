@@ -8,7 +8,7 @@
 #include <vector>
 
 #include "base/i18n/rtl.h"
-#include "base/string_number_conversions.h"
+#include "base/strings/string_number_conversions.h"
 #include "chrome/browser/extensions/extension_service.h"
 #include "chrome/browser/extensions/extension_system.h"
 #include "chrome/browser/extensions/image_loader.h"
@@ -130,14 +130,10 @@ void ScriptBubbleGtk::BuildBubble() {
                      G_CALLBACK(&OnItemLinkClickedThunk), this);
   }
 
-  BubbleGtk::ArrowLocationGtk arrow_location =
-      !base::i18n::IsRTL() ?
-      BubbleGtk::ARROW_LOCATION_TOP_RIGHT :
-      BubbleGtk::ARROW_LOCATION_TOP_LEFT;
   bubble_ = BubbleGtk::Show(anchor_,
                             NULL,
                             bubble_content,
-                            arrow_location,
+                            BubbleGtk::ANCHOR_TOP_RIGHT,
                             BubbleGtk::MATCH_SYSTEM_THEME |
                                 BubbleGtk::POPUP_WINDOW |
                                 BubbleGtk::GRAB_INPUT,

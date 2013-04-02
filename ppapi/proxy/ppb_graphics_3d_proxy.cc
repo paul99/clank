@@ -130,6 +130,9 @@ class Graphics3D::LockingCommandBuffer : public gpu::CommandBuffer {
     // MaybeLock lock(need_to_lock_);
     return gpu_command_buffer_->GetLastState();
   }
+  virtual int32 GetLastToken() OVERRIDE {
+    return GetLastState().token;
+  }
   virtual void Flush(int32 put_offset) OVERRIDE {
     MaybeLock lock(need_to_lock_);
     gpu_command_buffer_->Flush(put_offset);
@@ -146,24 +149,18 @@ class Graphics3D::LockingCommandBuffer : public gpu::CommandBuffer {
     MaybeLock lock(need_to_lock_);
     gpu_command_buffer_->SetGetOffset(get_offset);
   }
-  virtual int32 CreateTransferBuffer(size_t size, int32 id_request) OVERRIDE {
+  virtual gpu::Buffer CreateTransferBuffer(size_t size,
+                                           int32* id) OVERRIDE {
     MaybeLock lock(need_to_lock_);
-    return gpu_command_buffer_->CreateTransferBuffer(size, id_request);
-  }
-  virtual int32 RegisterTransferBuffer(base::SharedMemory* shared_memory,
-                                       size_t size,
-                                       int32 id_request) OVERRIDE {
-    MaybeLock lock(need_to_lock_);
-    return gpu_command_buffer_->RegisterTransferBuffer(shared_memory, size,
-        id_request);
+    return gpu_command_buffer_->CreateTransferBuffer(size, id);
   }
   virtual void DestroyTransferBuffer(int32 id) OVERRIDE {
     MaybeLock lock(need_to_lock_);
     gpu_command_buffer_->DestroyTransferBuffer(id);
   }
-  virtual gpu::Buffer GetTransferBuffer(int32 handle) OVERRIDE {
+  virtual gpu::Buffer GetTransferBuffer(int32 id) OVERRIDE {
     MaybeLock lock(need_to_lock_);
-    return gpu_command_buffer_->GetTransferBuffer(handle);
+    return gpu_command_buffer_->GetTransferBuffer(id);
   }
   virtual void SetToken(int32 token) OVERRIDE {
     MaybeLock lock(need_to_lock_);
@@ -457,7 +454,7 @@ void PPB_Graphics3D_Proxy::OnMsgCreateTransferBuffer(
   if (enter.succeeded())
     *id = enter.object()->CreateTransferBuffer(size);
   else
-    *id = 0;
+    *id = -1;
 }
 
 void PPB_Graphics3D_Proxy::OnMsgDestroyTransferBuffer(

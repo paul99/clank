@@ -129,20 +129,21 @@ bool HasDeprecatedArguments(const std::wstring& command_line) {
 // variables in the string.
 bool LoadUserDataDirPolicyFromRegistry(HKEY hive,
                                        const std::wstring& key_name,
-                                       FilePath* user_data_dir) {
+                                       base::FilePath* user_data_dir) {
   std::wstring value;
 
   base::win::RegKey policy_key(hive,
                                policy::kRegistryMandatorySubKey,
                                KEY_READ);
   if (policy_key.ReadValue(key_name.c_str(), &value) == ERROR_SUCCESS) {
-    *user_data_dir = FilePath(policy::path_parser::ExpandPathVariables(value));
+    *user_data_dir =
+        base::FilePath(policy::path_parser::ExpandPathVariables(value));
     return true;
   }
   return false;
 }
 
-void CheckUserDataDirPolicy(FilePath* user_data_dir) {
+void CheckUserDataDirPolicy(base::FilePath* user_data_dir) {
   DCHECK(user_data_dir);
   // We are running as Chrome Frame if we were invoked with user-data-dir,
   // chrome-frame, and automation-channel switches.
@@ -155,7 +156,7 @@ void CheckUserDataDirPolicy(FilePath* user_data_dir) {
   // In the case of Chrome Frame, the last path component of the user-data-dir
   // provided on the command line must be preserved since it is specific to
   // CF's host.
-  FilePath cf_host_dir;
+  base::FilePath cf_host_dir;
   if (is_chrome_frame)
     cf_host_dir = user_data_dir->BaseName();
 
@@ -335,7 +336,7 @@ bool HandleVersionSwitches(const CommandLine& command_line) {
 void HandleHelpSwitches(const CommandLine& command_line) {
   if (command_line.HasSwitch(switches::kHelp) ||
       command_line.HasSwitch(switches::kHelpShort)) {
-    FilePath binary(command_line.argv()[0]);
+    base::FilePath binary(command_line.argv()[0]);
     execlp("man", "man", binary.BaseName().value().c_str(), NULL);
     PLOG(FATAL) << "execlp failed";
   }
@@ -488,7 +489,7 @@ void ChromeMainDelegate::InitMacCrashReporter(const CommandLine& command_line,
         << "Helper application requires --type.";
 
     // In addition, some helper flavors only work with certain process types.
-    FilePath executable;
+    base::FilePath executable;
     if (PathService::Get(base::FILE_EXE, &executable) &&
         executable.value().size() >= 3) {
       std::string last_three =
@@ -541,7 +542,7 @@ void ChromeMainDelegate::PreSandboxStartup() {
 #endif
 
   // Notice a user data directory override if any
-  FilePath user_data_dir =
+  base::FilePath user_data_dir =
       command_line.GetSwitchValuePath(switches::kUserDataDir);
 #if defined(OS_MACOSX) || defined(OS_WIN)
   CheckUserDataDirPolicy(&user_data_dir);
@@ -608,6 +609,7 @@ void ChromeMainDelegate::PreSandboxStartup() {
 
     int extra_pak_keys[] = {
       kAndroidChromePakDescriptor,
+      kAndroidChrome100PercentPakDescriptor,
       kAndroidUIResourcesPakDescriptor,
     };
     for (size_t i = 0; i < arraysize(extra_pak_keys); ++i) {
@@ -622,6 +624,11 @@ void ChromeMainDelegate::PreSandboxStartup() {
 #else
     const std::string loaded_locale =
         ResourceBundle::InitSharedInstanceWithLocale(locale, NULL);
+
+    base::FilePath resources_pack_path;
+    PathService::Get(chrome::FILE_RESOURCES_PACK, &resources_pack_path);
+    ResourceBundle::GetSharedInstance().AddDataPackFromPath(
+        resources_pack_path, ui::SCALE_FACTOR_NONE);
 #endif
     CHECK(!loaded_locale.empty()) << "Locale could not be found for " <<
         locale;
@@ -639,16 +646,7 @@ void ChromeMainDelegate::PreSandboxStartup() {
   // need to call InitCrashReporter() in RunZygote().
   if (!process_type.empty() && process_type != switches::kZygoteProcess) {
 #if defined(OS_ANDROID)
-    // On Android we need to provide a FD to the file where the minidump is
-    // generated as the renderer and browser run with different UIDs
-    // (preventing the browser from inspecting the renderer process).
-    int minidump_fd = base::GlobalDescriptors::GetInstance()->
-        MaybeGet(kAndroidMinidumpDescriptor);
-    if (minidump_fd == base::kInvalidPlatformFileValue) {
-      NOTREACHED() << "Could not find minidump FD, crash reporting disabled.";
-    } else {
-      InitNonBrowserCrashReporterForAndroid(minidump_fd);
-    }
+    InitNonBrowserCrashReporterForAndroid();
 #else
     InitCrashReporter();
 #endif

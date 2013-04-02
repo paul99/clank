@@ -18,7 +18,6 @@
 #include "chrome/installer/util/browser_distribution.h"
 #include "content/public/browser/page_navigator.h"
 #include "content/public/browser/web_contents.h"
-#include "content/public/browser/web_contents_view.h"
 #include "grit/chromium_strings.h"
 #include "grit/generated_resources.h"
 #include "grit/google_chrome_strings.h"
@@ -29,7 +28,6 @@
 #include "ui/base/resource/resource_bundle.h"
 #include "ui/gfx/transform.h"
 #include "ui/views/border.h"
-#include "ui/views/controls/button/checkbox.h"
 #include "ui/views/controls/image_view.h"
 #include "ui/views/controls/label.h"
 #include "ui/views/controls/link.h"
@@ -41,11 +39,6 @@
 #include "ui/views/view.h"
 #include "ui/views/widget/widget.h"
 #include "ui/views/window/dialog_delegate.h"
-
-#if defined(OS_WIN)
-#include "chrome/browser/extensions/app_host_installer_win.h"
-#include "chrome/installer/launcher_support/chrome_launcher_support.h"
-#endif
 
 using content::OpenURLParams;
 using content::Referrer;
@@ -72,11 +65,6 @@ const int kBundleLeftColumnWidth = 300;
 // this case, so make it wider than normal.
 const int kExternalInstallLeftColumnWidth = 350;
 
-// Heading font size correction.
-const int kHeadingFontSizeDelta = 1;
-
-const int kRatingFontSizeDelta = -1;
-
 void AddResourceIcon(const gfx::ImageSkia* skia_image, void* data) {
   views::View* parent = static_cast<views::View*>(data);
   views::ImageView* image_view = new views::ImageView();
@@ -98,8 +86,7 @@ class ExtensionInstallDialogView : public views::DialogDelegateView,
  public:
   ExtensionInstallDialogView(content::PageNavigator* navigator,
                              ExtensionInstallPrompt::Delegate* delegate,
-                             const ExtensionInstallPrompt::Prompt& prompt,
-                             bool show_launcher_opt_in);
+                             const ExtensionInstallPrompt::Prompt& prompt);
   virtual ~ExtensionInstallDialogView();
 
   // Changes the size of the containing widget to match the preferred size
@@ -108,6 +95,7 @@ class ExtensionInstallDialogView : public views::DialogDelegateView,
 
  private:
   // views::DialogDelegateView:
+  virtual int GetDialogButtons() const OVERRIDE;
   virtual string16 GetDialogButtonLabel(ui::DialogButton button) const OVERRIDE;
   virtual int GetDefaultDialogButton() const OVERRIDE;
   virtual bool Cancel() OVERRIDE;
@@ -116,7 +104,6 @@ class ExtensionInstallDialogView : public views::DialogDelegateView,
   // views::WidgetDelegate:
   virtual ui::ModalType GetModalType() const OVERRIDE;
   virtual string16 GetWindowTitle() const OVERRIDE;
-  virtual views::View* GetContentsView() OVERRIDE;
 
   // views::LinkListener:
   virtual void LinkClicked(views::Link* source, int event_flags) OVERRIDE;
@@ -136,11 +123,6 @@ class ExtensionInstallDialogView : public views::DialogDelegateView,
   content::PageNavigator* navigator_;
   ExtensionInstallPrompt::Delegate* delegate_;
   ExtensionInstallPrompt::Prompt prompt_;
-  bool show_launcher_opt_in_;
-
-  // The lifetime of |app_launcher_opt_in_checkbox_| is managed by the views
-  // system.
-  views::Checkbox* app_launcher_opt_in_checkbox_;
 
   DISALLOW_COPY_AND_ASSIGN(ExtensionInstallDialogView);
 };
@@ -198,58 +180,14 @@ class IssueAdviceView : public views::View,
   DISALLOW_COPY_AND_ASSIGN(IssueAdviceView);
 };
 
-void DoShowDialog(content::WebContents* parent_web_contents,
-                  ExtensionInstallPrompt::Delegate* delegate,
-                  const ExtensionInstallPrompt::Prompt& prompt,
-                  bool show_launcher_opt_in) {
-  DCHECK(content::BrowserThread::CurrentlyOn(content::BrowserThread::UI));
-  gfx::NativeWindow parent = NULL;
-  if (parent_web_contents)
-    parent = parent_web_contents->GetView()->GetTopLevelNativeWindow();
-  views::Widget::CreateWindowWithParent(
-      new ExtensionInstallDialogView(parent_web_contents, delegate, prompt,
-                                     show_launcher_opt_in),
-      parent)->Show();
-}
-
-// Runs on the FILE thread. Check if the launcher is present and then show
-// the install dialog with an appropriate |show_launcher_opt_in|.
-void CheckLauncherAndShowDialog(content::WebContents* parent_web_contents,
-                                ExtensionInstallPrompt::Delegate* delegate,
-                                const ExtensionInstallPrompt::Prompt& prompt) {
-  DCHECK(content::BrowserThread::CurrentlyOn(content::BrowserThread::FILE));
-#if defined(OS_WIN)
-  bool present = chrome_launcher_support::IsAppLauncherPresent();
-#else
-  NOTREACHED();
-  bool present = false;
-#endif
-  content::BrowserThread::PostTask(
-      content::BrowserThread::UI,
-      FROM_HERE,
-      base::Bind(&DoShowDialog, parent_web_contents, delegate, prompt,
-                 !present));
-}
-
 void ShowExtensionInstallDialogImpl(
-    content::WebContents* parent_web_contents,
+    const ExtensionInstallPrompt::ShowParams& show_params,
     ExtensionInstallPrompt::Delegate* delegate,
     const ExtensionInstallPrompt::Prompt& prompt) {
   DCHECK(content::BrowserThread::CurrentlyOn(content::BrowserThread::UI));
-#if defined(OS_WIN)
-  CommandLine* command_line = CommandLine::ForCurrentProcess();
-  if (command_line->HasSwitch(switches::kEnableAppListOptIn) &&
-      BrowserDistribution::GetDistribution()->AppHostIsSupported() &&
-      prompt.extension()->is_platform_app()) {
-    content::BrowserThread::PostTask(
-        content::BrowserThread::FILE,
-        FROM_HERE,
-        base::Bind(&CheckLauncherAndShowDialog, parent_web_contents, delegate,
-                   prompt));
-    return;
-  }
-#endif
-  DoShowDialog(parent_web_contents, delegate, prompt, false);
+  views::Widget::CreateWindowWithParent(
+      new ExtensionInstallDialogView(show_params.navigator, delegate, prompt),
+      show_params.parent_window)->Show();
 }
 
 }  // namespace
@@ -257,13 +195,10 @@ void ShowExtensionInstallDialogImpl(
 ExtensionInstallDialogView::ExtensionInstallDialogView(
     content::PageNavigator* navigator,
     ExtensionInstallPrompt::Delegate* delegate,
-    const ExtensionInstallPrompt::Prompt& prompt,
-    bool show_launcher_opt_in)
+    const ExtensionInstallPrompt::Prompt& prompt)
     : navigator_(navigator),
       delegate_(delegate),
-      prompt_(prompt),
-      show_launcher_opt_in_(show_launcher_opt_in),
-      app_launcher_opt_in_checkbox_(NULL) {
+      prompt_(prompt) {
   // Possible grid layouts:
   // Inline install
   //      w/ permissions                 no permissions
@@ -313,18 +248,6 @@ ExtensionInstallDialogView::ExtensionInstallDialogView(
   // +---------------------------+
   // | oauth issue 2             |
   // +---------------------------+
-  //
-  // w/ launcher opt in
-  // +--------------------+------+
-  // | heading            | icon |
-  // +--------------------|      |
-  // | permissions_header |      |
-  // |                           |
-  // | ......................... |
-  // |                           |
-  // +--------------------+------+
-  // | launcher opt in           |
-  // +---------------------------+
 
   views::GridLayout* layout = views::GridLayout::CreatePanel(this);
   SetLayoutManager(layout);
@@ -357,9 +280,10 @@ ExtensionInstallDialogView::ExtensionInstallDialogView(
 
   layout->StartRow(0, column_set_id);
 
+  ui::ResourceBundle& rb = ui::ResourceBundle::GetSharedInstance();
+
   views::Label* heading = new views::Label(prompt.GetHeading());
-  heading->SetFont(heading->font().DeriveFont(kHeadingFontSizeDelta,
-                                              gfx::Font::BOLD));
+  heading->SetFont(rb.GetFont(ui::ResourceBundle::MediumFont));
   heading->SetMultiLine(true);
   heading->SetHorizontalAlignment(gfx::ALIGN_LEFT);
   heading->SizeToFit(left_column_width);
@@ -401,8 +325,7 @@ ExtensionInstallDialogView::ExtensionInstallDialogView(
     prompt.AppendRatingStars(AddResourceIcon, rating);
 
     views::Label* rating_count = new views::Label(prompt.GetRatingCount());
-    rating_count->SetFont(
-        rating_count->font().DeriveFont(kRatingFontSizeDelta));
+    rating_count->SetFont(rb.GetFont(ui::ResourceBundle::SmallFont));
     // Add some space between the stars and the rating count.
     rating_count->set_border(views::Border::CreateEmptyBorder(0, 2, 0, 0));
     rating->AddChildView(rating_count);
@@ -411,13 +334,13 @@ ExtensionInstallDialogView::ExtensionInstallDialogView(
     views::Label* user_count = new views::Label(prompt.GetUserCount());
     user_count->SetAutoColorReadabilityEnabled(false);
     user_count->SetEnabledColor(SK_ColorGRAY);
-    user_count->SetFont(user_count->font().DeriveFont(kRatingFontSizeDelta));
+    user_count->SetFont(rb.GetFont(ui::ResourceBundle::SmallFont));
     layout->AddView(user_count);
 
     layout->StartRow(0, column_set_id);
     views::Link* store_link = new views::Link(
         l10n_util::GetStringUTF16(IDS_EXTENSION_PROMPT_STORE_LINK));
-    store_link->SetFont(store_link->font().DeriveFont(kRatingFontSizeDelta));
+    store_link->SetFont(rb.GetFont(ui::ResourceBundle::SmallFont));
     store_link->set_listener(this);
     layout->AddView(store_link);
   }
@@ -452,13 +375,12 @@ ExtensionInstallDialogView::ExtensionInstallDialogView(
     layout->StartRow(0, column_set_id);
     views::Label* permissions_header = NULL;
     if (is_bundle_install()) {
-      // We need to make the font bold like this, rather than using SetFont,
-      // because otherwise SizeToFit mis-judges the width of the line.
-      gfx::Font bold_font = ui::ResourceBundle::GetSharedInstance().GetFont(
-          ui::ResourceBundle::BaseFont).DeriveFont(
-              kHeadingFontSizeDelta, gfx::Font::BOLD);
+      // We need to pass the Font in the constructor, rather than calling
+      // SetFont later, because otherwise SizeToFit mis-judges the width
+      // of the line.
       permissions_header = new views::Label(
-          prompt.GetPermissionsHeading(), bold_font);
+          prompt.GetPermissionsHeading(),
+          rb.GetFont(ui::ResourceBundle::MediumFont));
     } else {
       permissions_header = new views::Label(prompt.GetPermissionsHeading());
     }
@@ -514,31 +436,20 @@ ExtensionInstallDialogView::ExtensionInstallDialogView(
       layout->AddView(issue_advice_view);
     }
   }
-
-  if (show_launcher_opt_in) {
-    // Put the launcher opt-in prompt at the bottom. It should always stretch
-    // to take up the whole width of the dialog.
-    column_set = layout->AddColumnSet(++column_set_id);
-    column_set->AddColumn(views::GridLayout::FILL,
-                          views::GridLayout::FILL,
-                          1,
-                          views::GridLayout::USE_PREF,
-                          0,  // no fixed width
-                          left_column_width + kIconSize);
-    layout->StartRowWithPadding(0, column_set_id,
-                                0, views::kRelatedControlVerticalSpacing);
-    app_launcher_opt_in_checkbox_ = new views::Checkbox(
-        l10n_util::GetStringUTF16(IDS_APP_LIST_OPT_IN_TEXT));
-    app_launcher_opt_in_checkbox_->SetFont(
-        app_launcher_opt_in_checkbox_->font().DeriveFont(0, gfx::Font::BOLD));
-    layout->AddView(app_launcher_opt_in_checkbox_);
-  }
 }
 
 ExtensionInstallDialogView::~ExtensionInstallDialogView() {}
 
 void ExtensionInstallDialogView::SizeToContents() {
   GetWidget()->SetSize(GetWidget()->non_client_view()->GetPreferredSize());
+}
+
+int ExtensionInstallDialogView::GetDialogButtons() const {
+  int buttons = prompt_.GetDialogButtons();
+  // Simply having just an OK button is *not* supported. See comment on function
+  // GetDialogButtons in dialog_delegate.h for reasons.
+  DCHECK_GT(buttons & ui::DIALOG_BUTTON_CANCEL, 0);
+  return buttons;
 }
 
 string16 ExtensionInstallDialogView::GetDialogButtonLabel(
@@ -566,11 +477,6 @@ bool ExtensionInstallDialogView::Cancel() {
 }
 
 bool ExtensionInstallDialogView::Accept() {
-#if defined(OS_WIN)
-  extensions::AppHostInstaller::SetInstallWithLauncher(
-      app_launcher_opt_in_checkbox_ &&
-      app_launcher_opt_in_checkbox_->checked());
-#endif
   delegate_->InstallUIProceed();
   return true;
 }
@@ -581,10 +487,6 @@ ui::ModalType ExtensionInstallDialogView::GetModalType() const {
 
 string16 ExtensionInstallDialogView::GetWindowTitle() const {
   return prompt_.GetDialogTitle();
-}
-
-views::View* ExtensionInstallDialogView::GetContentsView() {
-  return this;
 }
 
 void ExtensionInstallDialogView::LinkClicked(views::Link* source,

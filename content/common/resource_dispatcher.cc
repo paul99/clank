@@ -9,6 +9,7 @@
 #include "base/basictypes.h"
 #include "base/bind.h"
 #include "base/compiler_specific.h"
+#include "base/debug/alias.h"
 #include "base/file_path.h"
 #include "base/message_loop.h"
 #include "base/metrics/histogram.h"
@@ -31,6 +32,14 @@ using webkit_glue::ResourceResponseInfo;
 
 namespace content {
 
+static void CrashOnMapFailure() {
+#if defined(OS_WIN)
+  DWORD last_err = GetLastError();
+  base::debug::Alias(&last_err);
+#endif
+  CHECK(false);
+}
+
 // Each resource request is assigned an ID scoped to this process.
 static int MakeRequestID() {
   // NOTE: The resource_dispatcher_host also needs probably unique
@@ -49,11 +58,11 @@ class IPCResourceLoaderBridge : public ResourceLoaderBridge {
   virtual ~IPCResourceLoaderBridge();
 
   // ResourceLoaderBridge
-  virtual void SetRequestBody(ResourceRequestBody* request_body);
-  virtual bool Start(Peer* peer);
-  virtual void Cancel();
-  virtual void SetDefersLoading(bool value);
-  virtual void SyncLoad(SyncLoadResponse* response);
+  virtual void SetRequestBody(ResourceRequestBody* request_body) OVERRIDE;
+  virtual bool Start(Peer* peer) OVERRIDE;
+  virtual void Cancel() OVERRIDE;
+  virtual void SetDefersLoading(bool value) OVERRIDE;
+  virtual void SyncLoad(SyncLoadResponse* response) OVERRIDE;
 
  private:
   ResourceLoaderBridge::Peer* peer_;
@@ -93,6 +102,7 @@ IPCResourceLoaderBridge::IPCResourceLoaderBridge(
   request_.load_flags = request_info.load_flags;
   request_.origin_pid = request_info.requestor_pid;
   request_.resource_type = request_info.request_type;
+  request_.priority = request_info.priority;
   request_.request_context = request_info.request_context;
   request_.appcache_host_id = request_info.appcache_host_id;
   request_.download_to_file = request_info.download_to_file;
@@ -328,7 +338,8 @@ void ResourceDispatcher::OnReceivedCachedMetadata(
 void ResourceDispatcher::OnSetDataBuffer(const IPC::Message& message,
                                          int request_id,
                                          base::SharedMemoryHandle shm_handle,
-                                         int shm_size) {
+                                         int shm_size,
+                                         base::ProcessId renderer_pid) {
   PendingRequestInfo* request_info = GetPendingRequestInfo(request_id);
   if (!request_info)
     return;
@@ -340,7 +351,17 @@ void ResourceDispatcher::OnSetDataBuffer(const IPC::Message& message,
       new base::SharedMemory(shm_handle, true));  // read only
 
   bool ok = request_info->buffer->Map(shm_size);
-  CHECK(ok);
+  if (!ok) {
+    // Added to help debug crbug/160401.
+    base::ProcessId renderer_pid_copy = renderer_pid;
+    base::debug::Alias(&renderer_pid_copy);
+
+    base::SharedMemoryHandle shm_handle_copy = shm_handle;
+    base::debug::Alias(&shm_handle_copy);
+
+    CrashOnMapFailure();
+    return;
+  }
 
   request_info->buffer_size = shm_size;
 }

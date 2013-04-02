@@ -4,187 +4,53 @@
 
 #include "chrome/browser/content_settings/host_content_settings_map.h"
 #include "chrome/browser/history/history_service_factory.h"
-#include "chrome/browser/instant/instant_loader.h"
-#include "chrome/browser/instant/instant_model_observer.h"
-#include "chrome/browser/prefs/pref_service.h"
+#include "chrome/browser/instant/instant_overlay.h"
+#include "chrome/browser/instant/instant_service.h"
+#include "chrome/browser/instant/instant_service_factory.h"
+#include "chrome/browser/instant/instant_test_utils.h"
+#include "chrome/browser/profiles/profile.h"
 #include "chrome/browser/search_engines/template_url_service.h"
 #include "chrome/browser/search_engines/template_url_service_factory.h"
 #include "chrome/browser/task_manager/task_manager.h"
 #include "chrome/browser/task_manager/task_manager_browsertest_util.h"
+#include "chrome/browser/ui/browser.h"
 #include "chrome/browser/ui/browser_commands.h"
-#include "chrome/browser/ui/browser_instant_controller.h"
-#include "chrome/browser/ui/browser_tabstrip.h"
-#include "chrome/browser/ui/browser_window.h"
-#include "chrome/browser/ui/omnibox/location_bar.h"
-#include "chrome/browser/ui/omnibox/omnibox_view.h"
 #include "chrome/browser/ui/tabs/tab_strip_model.h"
 #include "chrome/common/chrome_notification_types.h"
-#include "chrome/common/pref_names.h"
+#include "chrome/common/url_constants.h"
 #include "chrome/test/base/interactive_test_utils.h"
-#include "chrome/test/base/in_process_browser_test.h"
 #include "chrome/test/base/ui_test_utils.h"
 #include "content/public/browser/notification_service.h"
 #include "content/public/browser/render_process_host.h"
 #include "content/public/browser/web_contents.h"
-#include "content/public/common/result_codes.h"
-#include "content/public/test/browser_test_utils.h"
 #include "grit/generated_resources.h"
 #include "ui/base/l10n/l10n_util.h"
 
-class InstantTestModelObserver : public InstantModelObserver {
- public:
-  InstantTestModelObserver(const InstantModel* model,
-                           chrome::search::Mode::Type desired_mode_type)
-      : model_(model),
-        desired_mode_type_(desired_mode_type) {
-    model_->AddObserver(this);
-  }
-
-  ~InstantTestModelObserver() {
-    model_->RemoveObserver(this);
-  }
-
-  void WaitUntilDesiredPreviewState() {
-    run_loop_.Run();
-  }
-
-  // Overridden from InstantModelObserver:
-  virtual void PreviewStateChanged(const InstantModel& model) OVERRIDE {
-    if (model.mode().mode == desired_mode_type_)
-      run_loop_.Quit();
-  }
-
- private:
-  const InstantModel* const model_;
-  const chrome::search::Mode::Type desired_mode_type_;
-  base::RunLoop run_loop_;
-
-  DISALLOW_COPY_AND_ASSIGN(InstantTestModelObserver);
-};
-
-class InstantTest : public InProcessBrowserTest {
+class InstantTest : public InstantTestBase {
  protected:
   virtual void SetUpInProcessBrowserTestFixture() OVERRIDE {
     ASSERT_TRUE(test_server()->Start());
-    instant_url_ = test_server()->GetURL("files/instant.html");
-  }
-
-  void SetupInstant() {
-    TemplateURLService* service =
-        TemplateURLServiceFactory::GetForProfile(browser()->profile());
-    ui_test_utils::WaitForTemplateURLServiceToLoad(service);
-
-    TemplateURLData data;
-    data.SetURL("http://does/not/exist?q={searchTerms}");
-    data.instant_url = instant_url_.spec();
-
-    TemplateURL* template_url = new TemplateURL(browser()->profile(), data);
-    service->Add(template_url);  // Takes ownership of |template_url|.
-    service->SetDefaultSearchProvider(template_url);
-
-    browser()->profile()->GetPrefs()->SetBoolean(prefs::kInstantEnabled, true);
-  }
-
-  InstantController* instant() {
-    return browser()->instant_controller()->instant();
-  }
-
-  OmniboxView* omnibox() {
-    return browser()->window()->GetLocationBar()->GetLocationEntry();
-  }
-
-  void KillInstantRenderView() {
-    base::KillProcess(
-        instant()->GetPreviewContents()->GetRenderProcessHost()->GetHandle(),
-        content::RESULT_CODE_KILLED,
-        false);
-  }
-
-  void FocusOmnibox() {
-    // If the omnibox already has focus, just notify Instant.
-    if (omnibox()->model()->has_focus()) {
-      instant()->OmniboxFocusChanged(OMNIBOX_FOCUS_VISIBLE,
-                                     OMNIBOX_FOCUS_CHANGE_EXPLICIT, NULL);
-    }
-    else {
-      browser()->window()->GetLocationBar()->FocusLocation(false);
-    }
+    instant_url_ = test_server()->GetURL("files/instant.html?");
   }
 
   void FocusOmniboxAndWaitForInstantSupport() {
     content::WindowedNotificationObserver observer(
-        chrome::NOTIFICATION_INSTANT_SUPPORT_DETERMINED,
+        chrome::NOTIFICATION_INSTANT_OVERLAY_SUPPORT_DETERMINED,
         content::NotificationService::AllSources());
     FocusOmnibox();
     observer.Wait();
   }
 
-  void SetOmniboxText(const std::string& text) {
-    FocusOmnibox();
-    omnibox()->SetUserText(UTF8ToUTF16(text));
-  }
-
-  void SetOmniboxTextAndWaitForInstantToShow(const std::string& text) {
-    InstantTestModelObserver observer(
-        instant()->model(), chrome::search::Mode::MODE_SEARCH_SUGGESTIONS);
-    SetOmniboxText(text);
-    observer.WaitUntilDesiredPreviewState();
-  }
-
-  std::wstring WrapScript(const std::string& script) const {
-    return UTF8ToWide("domAutomationController.send(" + script + ")");
-  }
-
-  bool GetBoolFromJS(content::RenderViewHost* rvh,
-                     const std::string& script,
-                     bool* result) WARN_UNUSED_RESULT {
-    return content::ExecuteJavaScriptAndExtractBool(rvh, std::wstring(),
-                                                    WrapScript(script), result);
-  }
-
-  bool GetIntFromJS(content::RenderViewHost* rvh,
-                    const std::string& script,
-                    int* result) WARN_UNUSED_RESULT {
-    return content::ExecuteJavaScriptAndExtractInt(rvh, std::wstring(),
-                                                   WrapScript(script), result);
-  }
-
-  bool GetStringFromJS(content::RenderViewHost* rvh,
-                       const std::string& script,
-                       std::string* result) WARN_UNUSED_RESULT {
-    return content::ExecuteJavaScriptAndExtractString(
-        rvh, std::wstring(), WrapScript(script), result);
-  }
-
   bool UpdateSearchState(content::WebContents* contents) WARN_UNUSED_RESULT {
-    content::RenderViewHost* rvh = contents->GetRenderViewHost();
-    return GetIntFromJS(rvh, "onvisibilitycalls", &onvisibilitycalls_) &&
-           GetIntFromJS(rvh, "onchangecalls", &onchangecalls_) &&
-           GetIntFromJS(rvh, "onsubmitcalls", &onsubmitcalls_) &&
-           GetIntFromJS(rvh, "oncancelcalls", &oncancelcalls_) &&
-           GetIntFromJS(rvh, "onresizecalls", &onresizecalls_) &&
-           GetStringFromJS(rvh, "value", &value_) &&
-           GetBoolFromJS(rvh, "verbatim", &verbatim_) &&
-           GetIntFromJS(rvh, "height", &height_);
+    return GetIntFromJS(contents, "onvisibilitycalls", &onvisibilitycalls_) &&
+           GetIntFromJS(contents, "onchangecalls", &onchangecalls_) &&
+           GetIntFromJS(contents, "onsubmitcalls", &onsubmitcalls_) &&
+           GetIntFromJS(contents, "oncancelcalls", &oncancelcalls_) &&
+           GetIntFromJS(contents, "onresizecalls", &onresizecalls_) &&
+           GetStringFromJS(contents, "value", &value_) &&
+           GetBoolFromJS(contents, "verbatim", &verbatim_) &&
+           GetIntFromJS(contents, "height", &height_);
   }
-
-  bool ExecuteScript(const std::string& script) WARN_UNUSED_RESULT {
-    return content::ExecuteJavaScript(
-        instant()->GetPreviewContents()->GetRenderViewHost(), std::wstring(),
-        UTF8ToWide(script));
-  }
-
-  bool CheckVisibilityIs(content::WebContents* contents,
-                         bool expected) WARN_UNUSED_RESULT {
-    bool actual = !expected;  // Purposely start with a mis-match.
-    // We can only use ASSERT_*() in a method that returns void, hence this
-    // convoluted check.
-    return GetBoolFromJS(contents->GetRenderViewHost(),
-                         "!document.webkitHidden", &actual) &&
-           actual == expected;
-  }
-
-  GURL instant_url_;
 
   int onvisibilitycalls_;
   int onchangecalls_;
@@ -209,7 +75,7 @@ IN_PROC_BROWSER_TEST_F(InstantTest, OmniboxFocusLoadsInstant) {
   EXPECT_FALSE(omnibox()->model()->has_focus());
 
   // Delete any existing preview.
-  instant()->loader_.reset();
+  instant()->overlay_.reset();
   EXPECT_FALSE(instant()->GetPreviewContents());
 
   // Refocus the omnibox. The InstantController should've preloaded Instant.
@@ -222,7 +88,7 @@ IN_PROC_BROWSER_TEST_F(InstantTest, OmniboxFocusLoadsInstant) {
   EXPECT_TRUE(preview_tab);
 
   // Check that the page supports Instant, but it isn't showing.
-  EXPECT_TRUE(instant()->loader_->supports_instant());
+  EXPECT_TRUE(instant()->overlay_->supports_instant());
   EXPECT_FALSE(instant()->IsPreviewingSearchResults());
   EXPECT_TRUE(instant()->model()->mode().is_default());
 
@@ -246,19 +112,56 @@ IN_PROC_BROWSER_TEST_F(InstantTest, OmniboxFocusLoadsInstant) {
   EXPECT_EQ(preview_tab, instant()->GetPreviewContents());
 }
 
+// Test that Instant works when the URL is set via a TemplateURL (as opposed to
+// --instant-url).
+IN_PROC_BROWSER_TEST_F(InstantTest, SetWithTemplateURL) {
+  ASSERT_NO_FATAL_FAILURE(SetupInstantUsingTemplateURL());
+
+  // Explicitly unfocus the omnibox.
+  EXPECT_TRUE(ui_test_utils::BringBrowserWindowToFront(browser()));
+  ui_test_utils::ClickOnView(browser(), VIEW_ID_TAB_CONTAINER);
+
+  EXPECT_TRUE(ui_test_utils::IsViewFocused(browser(), VIEW_ID_TAB_CONTAINER));
+  EXPECT_FALSE(omnibox()->model()->has_focus());
+
+  // Delete any existing preview.
+  instant()->overlay_.reset();
+  EXPECT_FALSE(instant()->GetPreviewContents());
+
+  // Refocus the omnibox. The InstantController should've preloaded Instant.
+  FocusOmniboxAndWaitForInstantSupport();
+
+  EXPECT_FALSE(ui_test_utils::IsViewFocused(browser(), VIEW_ID_TAB_CONTAINER));
+  EXPECT_TRUE(omnibox()->model()->has_focus());
+
+  content::WebContents* preview_tab = instant()->GetPreviewContents();
+  EXPECT_TRUE(preview_tab);
+
+  // Check that the page supports Instant, but it isn't showing.
+  EXPECT_TRUE(instant()->overlay_->supports_instant());
+  EXPECT_FALSE(instant()->IsPreviewingSearchResults());
+  EXPECT_TRUE(instant()->model()->mode().is_default());
+}
+
+// Flakes on Windows and Mac: http://crbug.com/170677
+#if defined(OS_WIN) || defined(OS_MACOSX)
+#define MAYBE_OnChangeEvent DISABLED_OnChangeEvent
+#else
+#define MAYBE_OnChangeEvent OnChangeEvent
+#endif
 // Test that the onchange event is dispatched upon typing in the omnibox.
-IN_PROC_BROWSER_TEST_F(InstantTest, OnChangeEvent) {
+IN_PROC_BROWSER_TEST_F(InstantTest, MAYBE_OnChangeEvent) {
   ASSERT_NO_FATAL_FAILURE(SetupInstant());
   FocusOmniboxAndWaitForInstantSupport();
 
   // Use the Instant page as the active tab, so we can exploit its visibility
   // handler to check visibility transitions.
   ui_test_utils::NavigateToURL(browser(), instant_url_);
-  content::RenderViewHost* active_rvh =
-      chrome::GetActiveWebContents(browser())->GetRenderViewHost();
+  content::WebContents* active_tab =
+      browser()->tab_strip_model()->GetActiveWebContents();
 
   int active_tab_onvisibilitycalls = -1;
-  EXPECT_TRUE(GetIntFromJS(active_rvh, "onvisibilitycalls",
+  EXPECT_TRUE(GetIntFromJS(active_tab, "onvisibilitycalls",
                            &active_tab_onvisibilitycalls));
   EXPECT_EQ(0, active_tab_onvisibilitycalls);
 
@@ -283,7 +186,7 @@ IN_PROC_BROWSER_TEST_F(InstantTest, OnChangeEvent) {
   // The preview was shown once, and the active tab was never hidden.
   EXPECT_EQ(1, onvisibilitycalls_);
   active_tab_onvisibilitycalls = -1;
-  EXPECT_TRUE(GetIntFromJS(active_rvh, "onvisibilitycalls",
+  EXPECT_TRUE(GetIntFromJS(active_tab, "onvisibilitycalls",
                            &active_tab_onvisibilitycalls));
   EXPECT_EQ(0, active_tab_onvisibilitycalls);
 }
@@ -320,7 +223,7 @@ IN_PROC_BROWSER_TEST_F(InstantTest, OnSubmitEvent) {
   EXPECT_FALSE(instant()->IsPreviewingSearchResults());
   EXPECT_TRUE(instant()->model()->mode().is_default());
 
-  // The old loader is deleted and a new one is created.
+  // The old overlay is deleted and a new one is created.
   EXPECT_TRUE(instant()->GetPreviewContents());
   EXPECT_NE(instant()->GetPreviewContents(), preview_tab);
 
@@ -336,8 +239,7 @@ IN_PROC_BROWSER_TEST_F(InstantTest, OnSubmitEvent) {
 
   // Check that the searchbox API values have been reset.
   std::string value;
-  EXPECT_TRUE(GetStringFromJS(preview_tab->GetRenderViewHost(),
-                              "chrome.searchBox.value", &value));
+  EXPECT_TRUE(GetStringFromJS(preview_tab, "chrome.searchBox.value", &value));
   EXPECT_EQ("", value);
 
   // However, the page should've correctly received the committed query.
@@ -381,7 +283,7 @@ IN_PROC_BROWSER_TEST_F(InstantTest, OnCancelEvent) {
   EXPECT_FALSE(instant()->IsPreviewingSearchResults());
   EXPECT_TRUE(instant()->model()->mode().is_default());
 
-  // The old loader is deleted and a new one is created.
+  // The old overlay is deleted and a new one is created.
   EXPECT_TRUE(instant()->GetPreviewContents());
   EXPECT_NE(instant()->GetPreviewContents(), preview_tab);
 
@@ -397,8 +299,7 @@ IN_PROC_BROWSER_TEST_F(InstantTest, OnCancelEvent) {
 
   // Check that the searchbox API values have been reset.
   std::string value;
-  EXPECT_TRUE(GetStringFromJS(preview_tab->GetRenderViewHost(),
-                              "chrome.searchBox.value", &value));
+  EXPECT_TRUE(GetStringFromJS(preview_tab, "chrome.searchBox.value", &value));
   EXPECT_EQ("", value);
 
   // However, the page should've correctly received the committed query.
@@ -886,37 +787,37 @@ IN_PROC_BROWSER_TEST_F(InstantTest, MAYBE_NewWindowDismissesInstant) {
   EXPECT_TRUE(instant()->model()->mode().is_default());
 }
 
-// Test that the Instant loader is recreated when all these conditions are met:
-// - The stale loader timer has fired.
+// Test that the Instant overlay is recreated when all these conditions are met:
+// - The stale overlay timer has fired.
 // - The preview is not showing.
 // - The omnibox doesn't have focus.
-IN_PROC_BROWSER_TEST_F(InstantTest, InstantLoaderRefresh) {
+IN_PROC_BROWSER_TEST_F(InstantTest, InstantOverlayRefresh) {
   ASSERT_NO_FATAL_FAILURE(SetupInstant());
   FocusOmniboxAndWaitForInstantSupport();
 
   // The preview is refreshed only after all three conditions above are met.
   SetOmniboxTextAndWaitForInstantToShow("query");
-  instant()->stale_loader_timer_.Stop();
-  instant()->OnStaleLoader();
-  EXPECT_TRUE(instant()->loader_->supports_instant());
-  instant()->HideLoader();
-  EXPECT_TRUE(instant()->loader_->supports_instant());
+  instant()->overlay_->is_stale_ = true;
+  instant()->ReloadOverlayIfStale();
+  EXPECT_TRUE(instant()->overlay_->supports_instant());
+  instant()->HideOverlay();
+  EXPECT_TRUE(instant()->overlay_->supports_instant());
   instant()->OmniboxFocusChanged(OMNIBOX_FOCUS_NONE,
                                  OMNIBOX_FOCUS_CHANGE_EXPLICIT, NULL);
-  EXPECT_FALSE(instant()->loader_->supports_instant());
+  EXPECT_FALSE(instant()->overlay_->supports_instant());
 
   // Try with a different ordering.
   SetOmniboxTextAndWaitForInstantToShow("query");
-  instant()->stale_loader_timer_.Stop();
-  instant()->OnStaleLoader();
-  EXPECT_TRUE(instant()->loader_->supports_instant());
+  instant()->overlay_->is_stale_ = true;
+  instant()->ReloadOverlayIfStale();
+  EXPECT_TRUE(instant()->overlay_->supports_instant());
   instant()->OmniboxFocusChanged(OMNIBOX_FOCUS_NONE,
                                  OMNIBOX_FOCUS_CHANGE_EXPLICIT, NULL);
-  // TODO(sreeram): Currently, OmniboxLostFocus() calls HideLoader(). When it
+  // TODO(sreeram): Currently, OmniboxLostFocus() calls HideOverlay(). When it
   // stops hiding the preview eventually, uncomment these two lines:
-  //     EXPECT_TRUE(instant()->loader_->supports_instant());
-  //     instant()->HideLoader();
-  EXPECT_FALSE(instant()->loader_->supports_instant());
+  //     EXPECT_TRUE(instant()->overlay_->supports_instant());
+  //     instant()->HideOverlay();
+  EXPECT_FALSE(instant()->overlay_->supports_instant());
 }
 
 // Test that suggestions are case insensitive. http://crbug.com/150728
@@ -975,8 +876,14 @@ IN_PROC_BROWSER_TEST_F(InstantTest, SuggestionsAreCaseInsensitive) {
   EXPECT_EQ(WideToUTF16(L"\u1e0b\u0323oh"), omnibox()->GetText());
 }
 
+// Flakes on Windows and Mac: http://crbug.com/170677
+#if defined(OS_WIN) || defined(OS_MACOSX)
+#define MAYBE_CommitInNewTab DISABLED_CommitInNewTab
+#else
+#define MAYBE_CommitInNewTab CommitInNewTab
+#endif
 // Test that the preview can be committed onto a new tab.
-IN_PROC_BROWSER_TEST_F(InstantTest, CommitInNewTab) {
+IN_PROC_BROWSER_TEST_F(InstantTest, MAYBE_CommitInNewTab) {
   ASSERT_NO_FATAL_FAILURE(SetupInstant());
   FocusOmniboxAndWaitForInstantSupport();
 
@@ -987,7 +894,7 @@ IN_PROC_BROWSER_TEST_F(InstantTest, CommitInNewTab) {
       browser()->tab_strip_model()->GetActiveWebContents();
 
   int active_tab_onvisibilitycalls = -1;
-  EXPECT_TRUE(GetIntFromJS(active_tab->GetRenderViewHost(), "onvisibilitycalls",
+  EXPECT_TRUE(GetIntFromJS(active_tab, "onvisibilitycalls",
                            &active_tab_onvisibilitycalls));
   EXPECT_EQ(0, active_tab_onvisibilitycalls);
 
@@ -1009,7 +916,7 @@ IN_PROC_BROWSER_TEST_F(InstantTest, CommitInNewTab) {
   EXPECT_EQ(2, active_tab->GetController().GetEntryCount());
   EXPECT_EQ(instant_url_, omnibox()->model()->PermanentURL());
   active_tab_onvisibilitycalls = -1;
-  EXPECT_TRUE(GetIntFromJS(active_tab->GetRenderViewHost(), "onvisibilitycalls",
+  EXPECT_TRUE(GetIntFromJS(active_tab, "onvisibilitycalls",
                            &active_tab_onvisibilitycalls));
   EXPECT_EQ(0, active_tab_onvisibilitycalls);
 
@@ -1020,7 +927,7 @@ IN_PROC_BROWSER_TEST_F(InstantTest, CommitInNewTab) {
   EXPECT_FALSE(instant()->IsPreviewingSearchResults());
   EXPECT_TRUE(instant()->model()->mode().is_default());
 
-  // The old loader is deleted and a new one is created.
+  // The old overlay is deleted and a new one is created.
   EXPECT_TRUE(instant()->GetPreviewContents());
   EXPECT_NE(instant()->GetPreviewContents(), preview_tab);
 
@@ -1036,8 +943,7 @@ IN_PROC_BROWSER_TEST_F(InstantTest, CommitInNewTab) {
 
   // Check that the searchbox API values have been reset.
   std::string value;
-  EXPECT_TRUE(GetStringFromJS(preview_tab->GetRenderViewHost(),
-                              "chrome.searchBox.value", &value));
+  EXPECT_TRUE(GetStringFromJS(preview_tab, "chrome.searchBox.value", &value));
   EXPECT_EQ("", value);
 
   // However, the page should've correctly received the committed query.
@@ -1049,7 +955,7 @@ IN_PROC_BROWSER_TEST_F(InstantTest, CommitInNewTab) {
 
   // The ex-active tab should've gotten a visibility change marking it hidden.
   EXPECT_NE(active_tab, preview_tab);
-  EXPECT_TRUE(GetIntFromJS(active_tab->GetRenderViewHost(), "onvisibilitycalls",
+  EXPECT_TRUE(GetIntFromJS(active_tab, "onvisibilitycalls",
                            &active_tab_onvisibilitycalls));
   EXPECT_EQ(1, active_tab_onvisibilitycalls);
 }
@@ -1075,7 +981,7 @@ IN_PROC_BROWSER_TEST_F(InstantTest, SuggestionsAreReusable) {
   EXPECT_EQ(ASCIIToUTF16(""), omnibox()->GetInstantSuggestion());
 }
 
-// Test that instant loader is recreated if it gets destroyed.
+// Test that instant overlay is recreated if it gets destroyed.
 IN_PROC_BROWSER_TEST_F(InstantTest, InstantRenderViewGone) {
   ASSERT_NO_FATAL_FAILURE(SetupInstant());
   FocusOmniboxAndWaitForInstantSupport();
@@ -1090,4 +996,40 @@ IN_PROC_BROWSER_TEST_F(InstantTest, InstantRenderViewGone) {
 
   SetOmniboxTextAndWaitForInstantToShow("qu");
   EXPECT_EQ(ASCIIToUTF16("query suggestion"), omnibox()->GetText());
+}
+
+IN_PROC_BROWSER_TEST_F(InstantTest, ProcessIsolation) {
+  // Prior to setup no render process is dedicated to Instant.
+  InstantService* instant_service =
+        InstantServiceFactory::GetForProfile(browser()->profile());
+  ASSERT_NE(static_cast<InstantService*>(NULL), instant_service);
+  EXPECT_EQ(0, instant_service->GetInstantProcessCount());
+
+  // Setup Instant.
+  ASSERT_NO_FATAL_FAILURE(SetupInstant());
+  FocusOmniboxAndWaitForInstantSupport();
+
+  // Now there should be a registered Instant render process.
+  EXPECT_LT(0, instant_service->GetInstantProcessCount());
+
+  // And the Instant preview should live inside it.
+  content::WebContents* preview = instant()->GetPreviewContents();
+  EXPECT_TRUE(instant_service->IsInstantProcess(
+      preview->GetRenderProcessHost()->GetID()));
+
+  // Search and commit the search by pressing Alt-Enter.
+  SetOmniboxTextAndWaitForInstantToShow("tractor");
+  omnibox()->model()->AcceptInput(NEW_FOREGROUND_TAB, false);
+
+  // The committed search results page should also live inside the
+  // Instant process.
+  content::WebContents* active_tab =
+      browser()->tab_strip_model()->GetActiveWebContents();
+  EXPECT_TRUE(instant_service->IsInstantProcess(
+      active_tab->GetRenderProcessHost()->GetID()));
+
+  // Navigating away should change the process.
+  ui_test_utils::NavigateToURL(browser(), GURL(chrome::kChromeUINewTabURL));
+  EXPECT_FALSE(instant_service->IsInstantProcess(
+      active_tab->GetRenderProcessHost()->GetID()));
 }

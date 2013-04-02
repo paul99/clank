@@ -6,6 +6,7 @@
 
 #include "base/bind.h"
 #include "base/message_loop.h"
+#include "base/prefs/pref_registry_simple.h"
 #include "base/synchronization/waitable_event.h"
 #include "base/threading/thread.h"
 #include "chrome/test/base/testing_pref_service.h"
@@ -19,16 +20,12 @@ const char kDoublePref[] = "double";
 const char kStringPref[] = "string";
 const char kStringListPref[] = "string_list";
 
-void RegisterTestPrefs(PrefService* prefs) {
-  prefs->RegisterBooleanPref(kBoolPref, false, PrefService::UNSYNCABLE_PREF);
-  prefs->RegisterIntegerPref(kIntPref, 0, PrefService::UNSYNCABLE_PREF);
-  prefs->RegisterDoublePref(kDoublePref, 0.0, PrefService::UNSYNCABLE_PREF);
-  prefs->RegisterStringPref(kStringPref,
-                            "default",
-                            PrefService::UNSYNCABLE_PREF);
-  prefs->RegisterListPref(kStringListPref,
-                          new ListValue(),
-                          PrefService::UNSYNCABLE_PREF);
+void RegisterTestPrefs(PrefRegistrySimple* registry) {
+  registry->RegisterBooleanPref(kBoolPref, false);
+  registry->RegisterIntegerPref(kIntPref, 0);
+  registry->RegisterDoublePref(kDoublePref, 0.0);
+  registry->RegisterStringPref(kStringPref, "default");
+  registry->RegisterListPref(kStringListPref, new ListValue());
 }
 
 class GetPrefValueHelper
@@ -54,6 +51,12 @@ class GetPrefValueHelper
             FROM_HERE,
             base::Bind(&GetPrefValueHelper::GetPrefValue, this, &event)));
     event.Wait();
+  }
+
+  // The thread must be stopped on the main thread. GetPrefValueHelper being
+  // ref-counted, the destructor can be called from any thread.
+  void StopThread() {
+    pref_thread_.Stop();
   }
 
   bool value() { return value_; }
@@ -98,8 +101,8 @@ class PrefMemberTestClass {
 }  // anonymous namespace
 
 TEST(PrefMemberTest, BasicGetAndSet) {
-  TestingPrefService prefs;
-  RegisterTestPrefs(&prefs);
+  TestingPrefServiceSimple prefs;
+  RegisterTestPrefs(prefs.registry());
 
   // Test bool
   BooleanPrefMember boolean;
@@ -244,8 +247,8 @@ TEST(PrefMemberTest, InvalidList) {
 
 TEST(PrefMemberTest, TwoPrefs) {
   // Make sure two DoublePrefMembers stay in sync.
-  TestingPrefService prefs;
-  RegisterTestPrefs(&prefs);
+  TestingPrefServiceSimple prefs;
+  RegisterTestPrefs(prefs.registry());
 
   DoublePrefMember pref1;
   pref1.Init(kDoublePref, &prefs);
@@ -264,8 +267,8 @@ TEST(PrefMemberTest, TwoPrefs) {
 }
 
 TEST(PrefMemberTest, Observer) {
-  TestingPrefService prefs;
-  RegisterTestPrefs(&prefs);
+  TestingPrefServiceSimple prefs;
+  RegisterTestPrefs(prefs.registry());
 
   PrefMemberTestClass test_obj(&prefs);
   EXPECT_EQ("default", *test_obj.str_);
@@ -296,9 +299,9 @@ TEST(PrefMemberTest, NoInit) {
 }
 
 TEST(PrefMemberTest, MoveToThread) {
-  TestingPrefService prefs;
+  TestingPrefServiceSimple prefs;
   scoped_refptr<GetPrefValueHelper> helper(new GetPrefValueHelper());
-  RegisterTestPrefs(&prefs);
+  RegisterTestPrefs(prefs.registry());
   helper->Init(kBoolPref, &prefs);
 
   helper->FetchValue();
@@ -313,4 +316,6 @@ TEST(PrefMemberTest, MoveToThread) {
 
   helper->FetchValue();
   EXPECT_TRUE(helper->value());
+
+  helper->StopThread();
 }

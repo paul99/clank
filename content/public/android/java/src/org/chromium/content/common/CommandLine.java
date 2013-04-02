@@ -54,13 +54,9 @@ public abstract class CommandLine {
     // Sets the ISO country code that will be used for phone number detection.
     public static final String NETWORK_COUNTRY_ISO = "network-country-iso";
 
-    // Sets the default tile width/height. We use this for very high-res
-    // displays until Chrome can detect and do this correctly for all platforms.
-    public static final String DEFAULT_TILE_WIDTH = "default-tile-width";
-    public static final String DEFAULT_TILE_HEIGHT = "default-tile-height";
-
-    // Whether fullscreen should be disabled.
-    public static final String DISABLE_FULLSCREEN = "disable-fullscreen";
+    // Whether to enable the auto-hiding top controls.
+    public static final String ENABLE_TOP_CONTROLS_POSITION_CALCULATION
+            = "enable-top-controls-position-calculation";
 
     // The height of the movable top controls.
     public static final String TOP_CONTROLS_HEIGHT = "top-controls-height";
@@ -187,18 +183,23 @@ public abstract class CommandLine {
      * @return the tokenized arguments, suitable for passing to init().
      */
     public static String[] tokenizeQuotedAruments(char[] buffer) {
-        boolean inQuotes = false;
         ArrayList<String> args = new ArrayList<String>();
         StringBuilder arg = null;
+        final char noQuote = '\0';
+        final char singleQuote = '\'';
+        final char doubleQuote = '"';
+        char currentQuote = noQuote;
         for (char c : buffer) {
-            if (c == '\"') {
+            // Detect start or end of quote block.
+            if ((currentQuote == noQuote && (c == singleQuote || c == doubleQuote)) ||
+                c == currentQuote) {
                 if (arg != null && arg.length() > 0 && arg.charAt(arg.length() - 1) == '\\') {
-                    // Last char was a backslash; pop it, and treat this " as a literal.
+                    // Last char was a backslash; pop it, and treat c as a literal.
                     arg.setCharAt(arg.length() - 1, c);
                 } else {
-                    inQuotes = !inQuotes;
+                    currentQuote = currentQuote == noQuote ? c : noQuote;
                 }
-            } else if (!inQuotes && Character.isWhitespace(c)) {
+            } else if (currentQuote == noQuote && Character.isWhitespace(c)) {
                 if (arg != null) {
                     args.add(arg.toString());
                     arg = null;
@@ -209,7 +210,7 @@ public abstract class CommandLine {
             }
         }
         if (arg != null) {
-            if (inQuotes) {
+            if (currentQuote != noQuote) {
                 Log.w(TAG, "Unterminated quoted string: " + arg);
             }
             args.add(arg.toString());
