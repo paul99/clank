@@ -2793,6 +2793,7 @@
                 ],
                 'ldflags': [
                   '-EL',
+                  '-Wl,--no-keep-memory'
                 ],
                 'cflags_cc': [
                   '-Wno-uninitialized',
